@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630">
+  <defs>
+    <radialGradient id="warm" cx="18%" cy="14%" r="55%">
+      <stop stop-color="#d95a3a" stop-opacity=".34"/>
+      <stop offset=".62" stop-color="#d95a3a" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="gold" cx="78%" cy="18%" r="48%">
+      <stop stop-color="#d9ad68" stop-opacity=".34"/>
+      <stop offset=".66" stop-color="#d9ad68" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="mark" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#fff8ec"/>
+      <stop offset=".45" stop-color="#d9ad68"/>
+      <stop offset="1" stop-color="#d95a3a"/>
+    </linearGradient>
+    <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="18"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="630" fill="#17120f"/>
+  <rect width="1200" height="630" fill="url(#warm)"/>
+  <rect width="1200" height="630" fill="url(#gold)"/>
+  <path d="M140 190 C290 70 430 370 600 260 C770 150 900 238 1060 116" fill="none" stroke="#d9ad68" stroke-opacity=".28" stroke-width="2"/>
+  <path d="M126 438 C310 318 430 506 594 388 C760 266 916 356 1074 256" fill="none" stroke="#fff8ec" stroke-opacity=".14" stroke-width="2"/>
+  <circle cx="600" cy="238" r="96" fill="#d9ad68" opacity=".18" filter="url(#soft)"/>
+  <circle cx="600" cy="238" r="42" fill="url(#mark)"/>
+  <text x="96" y="110" fill="#d9ad68" font-family="Inter, Arial, sans-serif" font-size="24" font-weight="800" letter-spacing="3">HATCH</text>
+  <text x="96" y="294" fill="#fff8ec" font-family="Georgia, 'Times New Roman', serif" font-size="92" font-weight="400">Creator Revenue</text>
+  <text x="96" y="392" fill="#fff8ec" font-family="Georgia, 'Times New Roman', serif" font-size="92" font-weight="400">from Skill Apps</text>
+  <text x="100" y="476" fill="#d2c1ad" font-family="Inter, Arial, sans-serif" font-size="30" font-weight="600">Protected creator Skills. User-owned local context.</text>
+  <text x="100" y="520" fill="#d2c1ad" font-family="Inter, Arial, sans-serif" font-size="30" font-weight="600">A real revenue source.</text>
+</svg>

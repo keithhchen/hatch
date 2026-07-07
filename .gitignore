@@ -1,0 +1,52 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Local Hatch state
+.hatch-local/
+.hatch-models/
+*.dev.db
+*.dev.db-*
+audit.jsonl
+
+# Downloaded/reference checkouts
+references/openai-codex/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Node / frontend
+node_modules/
+dist/
+build/
+.vite/
+coverage/
+*.tsbuildinfo
+
+# Rust / Tauri
+target/
+Cargo.lock
+src-tauri/target/
+local-runner/target/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+.coverage
+htmlcov/
+*.egg-info/
+
+# Logs
+*.log
+logs/

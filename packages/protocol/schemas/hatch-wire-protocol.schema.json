@@ -1,0 +1,470 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hatch.dev/protocol/hatch-wire-protocol-0.3.schema.json",
+  "title": "Hatch Wire Protocol",
+  "type": "object",
+  "oneOf": [
+    { "$ref": "#/$defs/inboundMessage" },
+    { "$ref": "#/$defs/outboundMessage" }
+  ],
+  "$defs": {
+    "protocolVersion": {
+      "const": "0.3"
+    },
+    "clientToolName": {
+      "type": "string",
+      "enum": [
+        "fs.list",
+        "fs.search",
+        "fs.read",
+        "fs.write",
+        "fs.patch",
+        "shell.exec",
+        "git.diff"
+      ]
+    },
+    "toolApproval": {
+      "type": "string",
+      "enum": ["none", "auto", "ask"]
+    },
+    "runStatus": {
+      "type": "string",
+      "enum": [
+        "queued",
+        "running",
+        "waiting_for_tool",
+        "compacting",
+        "completed",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "jsonObject": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string" },
+        "message": { "type": "string" }
+      }
+    },
+    "conversationMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "content"],
+      "properties": {
+        "role": {
+          "type": "string",
+          "enum": ["user", "assistant", "tool"]
+        },
+        "content": {
+          "type": ["string", "null"]
+        },
+        "tool_call_id": {
+          "type": "string"
+        },
+        "tool_calls": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/chatToolCall" }
+        }
+      }
+    },
+    "chatToolCall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "function"],
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "const": "function" },
+        "function": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "arguments"],
+          "properties": {
+            "name": { "type": "string" },
+            "arguments": { "type": "string" }
+          }
+        }
+      }
+    },
+    "clientHello": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "protocol_version",
+        "installation_id",
+        "license_token",
+        "local_tools"
+      ],
+      "properties": {
+        "type": { "const": "client.hello" },
+        "protocol_version": { "$ref": "#/$defs/protocolVersion" },
+        "installation_id": { "type": "string", "minLength": 1 },
+        "license_token": { "type": "string", "minLength": 1 },
+        "client_version": { "type": "string" },
+        "workspace_root": { "type": "string", "minLength": 1 },
+        "local_tools": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/clientToolName" }
+        }
+      }
+    },
+    "clientMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "run_id", "conversation_id", "message"],
+      "properties": {
+        "type": { "const": "client.message" },
+        "run_id": { "type": "string", "minLength": 1 },
+        "conversation_id": { "type": "string", "minLength": 1 },
+        "message": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["role", "content"],
+          "properties": {
+            "role": { "const": "user" },
+            "content": { "type": "string" }
+          }
+        }
+      }
+    },
+    "toolCallResultOk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "run_id", "tool_call_id", "status", "result"],
+      "properties": {
+        "type": { "const": "tool_call.result" },
+        "run_id": { "type": "string", "minLength": 1 },
+        "tool_call_id": { "type": "string", "minLength": 1 },
+        "status": { "const": "ok" },
+        "result": { "$ref": "#/$defs/jsonObject" }
+      }
+    },
+    "toolCallResultError": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "run_id", "tool_call_id", "status", "error"],
+      "properties": {
+        "type": { "const": "tool_call.result" },
+        "run_id": { "type": "string", "minLength": 1 },
+        "tool_call_id": { "type": "string", "minLength": 1 },
+        "status": { "const": "error" },
+        "error": { "$ref": "#/$defs/error" }
+      }
+    },
+    "turnCancel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "run_id"],
+      "properties": {
+        "type": { "const": "turn.cancel" },
+        "run_id": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string" }
+      }
+    },
+    "inboundMessage": {
+      "oneOf": [
+        { "$ref": "#/$defs/clientHello" },
+        { "$ref": "#/$defs/clientMessage" },
+        { "$ref": "#/$defs/toolCallResultOk" },
+        { "$ref": "#/$defs/toolCallResultError" },
+        { "$ref": "#/$defs/turnCancel" }
+      ]
+    },
+    "sessionReady": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "accepted_protocol_version"],
+      "properties": {
+        "type": { "const": "session.ready" },
+        "accepted_protocol_version": { "$ref": "#/$defs/protocolVersion" }
+      }
+    },
+    "assistantDelta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "run_id", "delta"],
+      "properties": {
+        "type": { "const": "assistant.delta" },
+        "run_id": { "type": "string" },
+        "delta": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "content"],
+          "properties": {
+            "kind": { "type": "string", "enum": ["text", "status"] },
+            "content": { "type": "string" }
+          }
+        }
+      }
+    },
+    "toolCallRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "run_id", "tool_call_id", "name", "arguments", "approval"],
+      "properties": {
+        "type": { "const": "tool_call.request" },
+        "run_id": { "type": "string" },
+        "tool_call_id": { "type": "string" },
+        "name": { "$ref": "#/$defs/clientToolName" },
+        "arguments": { "$ref": "#/$defs/jsonObject" },
+        "approval": { "$ref": "#/$defs/toolApproval" }
+      }
+    },
+    "approvalRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "run_id", "tool_call_id", "name", "arguments"],
+      "properties": {
+        "type": { "const": "approval.request" },
+        "run_id": { "type": "string" },
+        "tool_call_id": { "type": "string" },
+        "name": { "type": "string" },
+        "arguments": { "$ref": "#/$defs/jsonObject" },
+        "reason": { "type": "string" }
+      }
+    },
+    "approvalResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "run_id", "tool_call_id", "name", "status"],
+      "properties": {
+        "type": { "const": "approval.result" },
+        "run_id": { "type": "string" },
+        "tool_call_id": { "type": "string" },
+        "name": { "type": "string" },
+        "status": { "type": "string", "enum": ["approved", "denied"] },
+        "reason": { "type": "string" }
+      }
+    },
+    "toolCallDelta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "run_id",
+        "tool_call_id",
+        "name",
+        "locality",
+        "approval",
+        "status"
+      ],
+      "properties": {
+        "type": { "const": "tool_call.delta" },
+        "run_id": { "type": "string" },
+        "tool_call_id": { "type": "string" },
+        "name": { "type": "string" },
+        "locality": { "type": "string", "enum": ["server", "client"] },
+        "approval": { "$ref": "#/$defs/toolApproval" },
+        "status": {
+          "type": "string",
+          "enum": ["requested", "completed", "failed", "cancelled"]
+        },
+        "arguments": { "$ref": "#/$defs/jsonObject" },
+        "result": { "$ref": "#/$defs/jsonObject" },
+        "error": { "$ref": "#/$defs/error" }
+      }
+    },
+    "workspaceDiff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "run_id", "source_tool_call_id", "path", "diff"],
+      "properties": {
+        "type": { "const": "workspace.diff" },
+        "run_id": { "type": "string" },
+        "source_tool_call_id": { "type": "string" },
+        "path": { "type": "string" },
+        "diff": { "type": "string" },
+        "truncated": { "type": "boolean" }
+      }
+    },
+    "skillActivated": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "run_id",
+        "name",
+        "path",
+        "scope",
+        "status",
+        "invocation_type",
+        "reason",
+        "resource_paths",
+        "resource_manifest_truncated"
+      ],
+      "properties": {
+        "type": { "const": "skill.activated" },
+        "run_id": { "type": "string" },
+        "name": { "type": "string" },
+        "path": { "type": "string" },
+        "scope": { "type": "string" },
+        "status": { "const": "activated" },
+        "invocation_type": { "const": "explicit" },
+        "reason": { "const": "explicit_mention" },
+        "resource_paths": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "resource_manifest_truncated": { "type": "boolean" }
+      }
+    },
+    "skillInvoked": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "run_id",
+        "name",
+        "path",
+        "scope",
+        "status",
+        "invocation_type",
+        "source_tool_call_id",
+        "reason",
+        "trigger"
+      ],
+      "properties": {
+        "type": { "const": "skill.invoked" },
+        "run_id": { "type": "string" },
+        "name": { "type": "string" },
+        "path": { "type": "string" },
+        "scope": { "type": "string" },
+        "status": { "const": "invoked" },
+        "invocation_type": { "const": "implicit" },
+        "source_tool_call_id": { "type": "string" },
+        "reason": {
+          "type": "string",
+          "enum": ["script_run", "skill_doc_read"]
+        },
+        "trigger": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["tool"],
+          "properties": {
+            "tool": {
+              "type": "string",
+              "enum": ["shell_exec", "file_read"]
+            },
+            "command": { "type": "string" },
+            "path": { "type": "string" }
+          }
+        }
+      }
+    },
+    "turnState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "run_id", "status"],
+      "properties": {
+        "type": { "const": "turn.state" },
+        "run_id": { "type": "string" },
+        "status": { "$ref": "#/$defs/runStatus" },
+        "reason": { "type": "string" }
+      }
+    },
+    "sessionCompacted": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "run_id",
+        "trigger",
+        "phase",
+        "reason",
+        "message",
+        "replacement_history",
+        "window_number",
+        "first_window_id",
+        "window_id"
+      ],
+      "properties": {
+        "type": { "const": "session.compacted" },
+        "run_id": { "type": "string" },
+        "trigger": {
+          "type": "string",
+          "enum": ["auto", "manual"]
+        },
+        "phase": {
+          "type": "string",
+          "enum": ["pre_turn", "mid_turn", "standalone_turn"]
+        },
+        "reason": {
+          "type": "string",
+          "enum": ["context_limit", "user_requested"]
+        },
+        "message": { "type": "string" },
+        "replacement_history": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/conversationMessage" }
+        },
+        "window_number": { "type": "integer", "minimum": 0 },
+        "first_window_id": { "type": "string" },
+        "previous_window_id": { "type": "string" },
+        "window_id": { "type": "string" }
+      }
+    },
+    "turnCompleted": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "run_id", "output", "usage"],
+      "properties": {
+        "type": { "const": "turn.completed" },
+        "run_id": { "type": "string" },
+        "output": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "content"],
+            "properties": {
+              "type": { "const": "message" },
+              "content": { "type": "string" }
+            }
+          }
+        },
+        "usage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["input_tokens", "output_tokens"],
+          "properties": {
+            "input_tokens": { "type": "integer", "minimum": 0 },
+            "output_tokens": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "turnFailed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "error"],
+      "properties": {
+        "type": { "const": "turn.failed" },
+        "run_id": { "type": "string" },
+        "error": { "$ref": "#/$defs/error" }
+      }
+    },
+    "outboundMessage": {
+      "oneOf": [
+        { "$ref": "#/$defs/sessionReady" },
+        { "$ref": "#/$defs/assistantDelta" },
+        { "$ref": "#/$defs/toolCallRequest" },
+        { "$ref": "#/$defs/approvalRequest" },
+        { "$ref": "#/$defs/approvalResult" },
+        { "$ref": "#/$defs/toolCallDelta" },
+        { "$ref": "#/$defs/workspaceDiff" },
+        { "$ref": "#/$defs/skillActivated" },
+        { "$ref": "#/$defs/skillInvoked" },
+        { "$ref": "#/$defs/turnState" },
+        { "$ref": "#/$defs/sessionCompacted" },
+        { "$ref": "#/$defs/turnCompleted" },
+        { "$ref": "#/$defs/turnFailed" }
+      ]
+    }
+  }
+}

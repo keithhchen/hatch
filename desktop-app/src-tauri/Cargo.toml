@@ -1,0 +1,21 @@
+[package]
+name = "hatch-desktop-app"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "hatch_desktop_app"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.5", features = [] }
+
+[dependencies]
+hatch-local-runner = { path = "../../local-runner" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2.9", features = [] }
+tokio = { version = "1", features = ["fs", "macros", "rt-multi-thread"] }
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,0 +1,31 @@
+[project]
+name = "hatch-creator-server"
+version = "0.1.0"
+description = "Minimal Hatch Creator Skill Server MVP"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115.0",
+  "openai>=1.0.0",
+  "openai-agents>=0.17.0",
+  "pydantic>=2.8.0",
+  "pyyaml>=6.0.0",
+  "uvicorn[standard]>=0.30.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.0",
+  "pytest-asyncio>=0.24.0",
+  "websockets>=13.0",
+]
+[project.scripts]
+hatch-creator-server = "hatch_creator_server.app:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

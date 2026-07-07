@@ -1,0 +1,9 @@
+{
+  "name": "@hatch/protocol",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./hatch-wire-protocol.schema.json": "./schemas/hatch-wire-protocol.schema.json"
+  }
+}
