@@ -1,7 +1,9 @@
-use crate::LocalRunner;
+use crate::{LocalRunner, LocalRunnerError};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::PathBuf;
+
+pub const MAX_TOOL_RESULT_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Debug, Deserialize)]
 pub struct ToolCallRequest {
@@ -66,7 +68,7 @@ impl LocalRunner {
             _ => Err(ProtocolToolError::UnsupportedTool(request.name)),
         };
 
-        match result {
+        let response = match result {
             Ok(result) => ToolCallResult::Ok {
                 message_type: "tool_call.result",
                 run_id,
@@ -74,7 +76,24 @@ impl LocalRunner {
                 result,
             },
             Err(error) => tool_call_error(run_id, tool_call_id, error.code(), error.to_string()),
+        };
+
+        if serde_json::to_vec(&response)
+            .map(|payload| payload.len() > MAX_TOOL_RESULT_BYTES)
+            .unwrap_or(true)
+        {
+            return tool_call_error(
+                response_run_id(&response),
+                response_tool_call_id(&response),
+                "tool_result_too_large",
+                format!(
+                    "tool result exceeds the {}-byte transport envelope; narrow the request",
+                    MAX_TOOL_RESULT_BYTES
+                ),
+            );
         }
+
+        response
     }
 
     fn protocol_fs_list(&self, arguments: &Value) -> ProtocolResult {
@@ -162,7 +181,23 @@ impl ProtocolToolError {
             | Self::InvalidStringArgument(_)
             | Self::InvalidIntegerArgument(_)
             | Self::UnsupportedTool(_) => "invalid_tool_call",
+            Self::Runner(LocalRunnerError::FileTooLarge { .. })
+            | Self::Runner(LocalRunnerError::RenderedFileTooLarge { .. }) => "file_too_large",
             Self::Runner(_) => "tool_failed",
+        }
+    }
+}
+
+fn response_run_id(response: &ToolCallResult) -> String {
+    match response {
+        ToolCallResult::Ok { run_id, .. } | ToolCallResult::Error { run_id, .. } => run_id.clone(),
+    }
+}
+
+fn response_tool_call_id(response: &ToolCallResult) -> String {
+    match response {
+        ToolCallResult::Ok { tool_call_id, .. } | ToolCallResult::Error { tool_call_id, .. } => {
+            tool_call_id.clone()
         }
     }
 }

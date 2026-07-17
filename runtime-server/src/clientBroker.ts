@@ -1,4 +1,4 @@
-import type { OutboundMessage, ToolRequest, ToolResult } from "./protocol.js";
+import { MAX_TOOL_RESULT_BYTES, type OutboundMessage, type ToolRequest, type ToolResult } from "./protocol.js";
 import type { RunStateMachine } from "./runState.js";
 import type { RuntimeStore } from "./store.js";
 import { requireTool } from "./tools.js";
@@ -129,6 +129,34 @@ export class ClientToolBroker {
     const pending = this.pending.get(key);
     if (!pending) {
       return false;
+    }
+
+    const serializedBytes = Buffer.byteLength(JSON.stringify(message), "utf8");
+    if (serializedBytes > MAX_TOOL_RESULT_BYTES) {
+      this.pending.delete(key);
+      clearTimeout(pending.timeout);
+      const error = {
+        code: "tool_result_too_large",
+        message: `Tool result exceeds the ${MAX_TOOL_RESULT_BYTES}-byte transport envelope; narrow the request.`
+      };
+      await this.emitApprovalDecision(pending, "approved", error.message);
+      await this.store.append({
+        type: "tool.call",
+        conversation_id: pending.conversationId,
+        run_id: message.run_id,
+        tool_call_id: message.tool_call_id,
+        name: pending.name,
+        arguments: pending.arguments,
+        status: "failed",
+        locality: "client",
+        approval: pending.approval,
+        ...(pending.scope ? { scope: pending.scope } : {}),
+        ...(pending.skillRunId ? { skill_run_id: pending.skillRunId } : {}),
+        error
+      });
+      await pending.state?.resumeFromTool().catch(() => undefined);
+      pending.reject(new Error(error.message));
+      return true;
     }
 
     this.pending.delete(key);

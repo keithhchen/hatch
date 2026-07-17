@@ -26,6 +26,16 @@ pub enum LocalRunnerError {
     SymlinkWriteTarget(String),
     #[error("file is not valid utf-8: {0}")]
     InvalidUtf8(String),
+    #[error("file is too large to read: {path} is {size} bytes; maximum is {max_bytes} bytes")]
+    FileTooLarge {
+        path: String,
+        size: u64,
+        max_bytes: u64,
+    },
+    #[error(
+        "rendered spreadsheet output is too large: {path} exceeds the {max_bytes}-byte limit; narrow the spreadsheet or read a smaller export"
+    )]
+    RenderedFileTooLarge { path: String, max_bytes: u64 },
     #[error("patch parse error: {0}")]
     PatchParse(String),
     #[error("patch replacement text was not found")]

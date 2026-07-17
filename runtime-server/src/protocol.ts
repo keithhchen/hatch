@@ -1,6 +1,9 @@
 import { z } from "zod";
 
 export const PROTOCOL_VERSION = "0.3";
+// Keep this above the local 1 MiB file/shell content limits so valid results
+// are not rejected by a 256 KiB transport assumption.
+export const MAX_TOOL_RESULT_BYTES = 4 * 1024 * 1024;
 export const ClientToolNameSchema = z.enum([
   "fs.list",
   "fs.search",

@@ -1,5 +1,6 @@
 use hatch_local_runner::{
     EntryKind, LocalRunner, LocalRunnerError, ToolCallRequest, ToolCallResult,
+    MAX_TOOL_RESULT_BYTES,
 };
 use serde_json::{json, Value};
 use std::fs;
@@ -325,6 +326,86 @@ fn canonical_fs_read_extracts_xlsx_text_without_shelling_out() {
 }
 
 #[test]
+fn fs_read_enforces_one_mib_boundary_for_utf8_files() {
+    const MAX_READ_BYTES: usize = 1024 * 1024;
+    let temp = tempdir().unwrap();
+    let runner = LocalRunner::new(temp.path()).unwrap();
+    let suffix = "中文";
+    let exact_prefix = "a".repeat(MAX_READ_BYTES - suffix.len());
+    fs::write(
+        temp.path().join("exact-utf8.txt"),
+        format!("{exact_prefix}{suffix}"),
+    )
+    .unwrap();
+    fs::write(
+        temp.path().join("over-utf8.txt"),
+        format!("{exact_prefix}{suffix}x"),
+    )
+    .unwrap();
+
+    let exact = runner.execute_tool_call_request(tool_request(
+        "call_exact_utf8",
+        "fs.read",
+        json!({ "path": "exact-utf8.txt" }),
+    ));
+    assert_ok_result(exact, |result| {
+        let content = result["content"].as_str().unwrap();
+        assert_eq!(content.len(), MAX_READ_BYTES);
+        assert!(content.ends_with(suffix));
+    });
+
+    let over = runner.execute_tool_call_request(tool_request(
+        "call_over_utf8",
+        "fs.read",
+        json!({ "path": "over-utf8.txt" }),
+    ));
+    assert_error_result(over, |error| {
+        assert_eq!(error["code"], "file_too_large");
+        assert!(error["message"].as_str().unwrap().contains("1048577"));
+    });
+}
+
+#[test]
+fn xlsx_rendered_output_rejects_over_limit_without_truncating() {
+    const CELL_BYTES: usize = 30_000;
+    let temp = tempdir().unwrap();
+    let runner = LocalRunner::new(temp.path()).unwrap();
+    let cell = "x".repeat(CELL_BYTES);
+
+    for (name, rows) in [("xlsx-under-limit.xlsx", 34), ("xlsx-over-limit.xlsx", 36)] {
+        let path = temp.path().join(name);
+        let mut workbook = rust_xlsxwriter::Workbook::new();
+        let worksheet = workbook.add_worksheet();
+        for row in 0..rows {
+            worksheet.write_string(row, 0, &cell).unwrap();
+        }
+        workbook.save(path).unwrap();
+    }
+
+    let under = runner.execute_tool_call_request(tool_request(
+        "call_xlsx_under",
+        "fs.read",
+        json!({ "path": "xlsx-under-limit.xlsx" }),
+    ));
+    assert_ok_result(under, |result| {
+        assert!(result["content"].as_str().unwrap().len() <= 1024 * 1024);
+    });
+
+    let over = runner.execute_tool_call_request(tool_request(
+        "call_xlsx_over",
+        "fs.read",
+        json!({ "path": "xlsx-over-limit.xlsx" }),
+    ));
+    assert_error_result(over, |error| {
+        assert_eq!(error["code"], "file_too_large");
+        assert!(error["message"]
+            .as_str()
+            .unwrap()
+            .contains("rendered spreadsheet output"));
+    });
+}
+
+#[test]
 fn canonical_tool_call_result_reports_sandbox_errors() {
     let temp = tempdir().unwrap();
     let runner = LocalRunner::new(temp.path()).unwrap();
@@ -397,6 +478,99 @@ fn canonical_shell_exec_runs_in_sandbox_and_reports_timeouts() {
     assert_ok_result(timeout, |result| {
         assert_eq!(result["timed_out"], true);
         assert_eq!(result["exit_code"], -1);
+    });
+}
+
+#[cfg(unix)]
+#[test]
+fn canonical_shell_exec_caps_combined_stdout_and_stderr() {
+    let temp = tempdir().unwrap();
+    let runner = LocalRunner::new(temp.path()).unwrap();
+    let result = runner.execute_tool_call_request(tool_request(
+        "call_large_shell",
+        "shell.exec",
+        json!({
+            "command": "python3 -c 'import sys; print(\"o\" * 700000); sys.stderr.write(\"e\" * 700000)'",
+            "timeout_ms": 30000
+        }),
+    ));
+
+    assert_ok_result(result, |result| {
+        let stdout = result["stdout"].as_str().unwrap();
+        let stderr = result["stderr"].as_str().unwrap();
+        assert!(stdout.len() + stderr.len() <= 1024 * 1024);
+        assert_eq!(result["timed_out"], false);
+        assert_eq!(result["stdout_truncated"], false);
+        assert_eq!(result["stderr_truncated"], true);
+    });
+
+    let follow_up = runner.execute_tool_call_request(tool_request(
+        "call_follow_up_shell",
+        "shell.exec",
+        json!({
+            "command": "printf follow-up-ok",
+            "timeout_ms": 30000
+        }),
+    ));
+    assert_ok_result(follow_up, |result| {
+        assert_eq!(result["stdout"], "follow-up-ok");
+        assert_eq!(result["stderr"], "");
+        assert_eq!(result["timed_out"], false);
+    });
+}
+
+#[cfg(unix)]
+#[test]
+fn shell_timeout_terminates_background_children_holding_pipes() {
+    let temp = tempdir().unwrap();
+    let runner = LocalRunner::new(temp.path()).unwrap();
+    let started = std::time::Instant::now();
+    let timeout = runner.execute_tool_call_request(tool_request(
+        "call_background_timeout",
+        "shell.exec",
+        json!({
+            "command": "sleep 60 & wait",
+            "timeout_ms": 100
+        }),
+    ));
+    assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    assert_ok_result(timeout, |result| {
+        assert_eq!(result["timed_out"], true);
+    });
+
+    let follow_up = runner.execute_tool_call_request(tool_request(
+        "call_background_follow_up",
+        "shell.exec",
+        json!({
+            "command": "printf background-follow-up-ok",
+            "timeout_ms": 30000
+        }),
+    ));
+    assert_ok_result(follow_up, |result| {
+        assert_eq!(result["stdout"], "background-follow-up-ok");
+        assert_eq!(result["timed_out"], false);
+    });
+}
+
+#[test]
+fn oversized_tool_result_is_rejected_before_serialization() {
+    let temp = tempdir().unwrap();
+    let runner = LocalRunner::new(temp.path()).unwrap();
+    for index in 0..60_000 {
+        fs::write(temp.path().join(format!("entry-{index:05}.txt")), "content").unwrap();
+    }
+
+    let result = runner.execute_tool_call_request(tool_request(
+        "call_large_list",
+        "fs.list",
+        json!({ "path": "." }),
+    ));
+    assert_error_result(result, |error| {
+        assert_eq!(error["code"], "tool_result_too_large");
+        assert!(error["message"]
+            .as_str()
+            .unwrap()
+            .contains(&MAX_TOOL_RESULT_BYTES.to_string()));
     });
 }
 

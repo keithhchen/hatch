@@ -87,9 +87,14 @@ Supported canonical local tools today:
 
 `shell.exec` runs `sh -lc` inside the sandbox root, kills the process after
 `timeout_ms`, and returns `stdout`, `stderr`, `exit_code`, `timed_out`, and
-truncation flags. Returned stdout/stderr are capped at 1 MiB each. `git.diff`
-runs `git diff -- <path>` inside the sandbox after validating the path stays in
-the sandbox.
+truncation flags. Both pipes are continuously drained, each retains at most
+1 MiB, and the returned stdout/stderr combined are capped at 1 MiB. `fs.read`
+rejects ordinary files larger than 1 MiB and rejects XLSX files whose rendered
+text exceeds 1 MiB with `file_too_large`; it never silently truncates file
+content. The serialized local `tool_call.result` envelope is capped at 4 MiB.
+The Cloud WSS transport can remain at its separately negotiated 8 MiB limit,
+leaving room for JSON and protocol overhead. `git.diff` runs `git diff -- <path>`
+inside the sandbox after validating the path stays in the sandbox.
 
 For a long-lived Tauri or CLI sidecar, run `serve`. It reads newline-delimited
 JSON `tool_call.request` messages from stdin and writes one newline-delimited

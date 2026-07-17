@@ -6,17 +6,21 @@ use calamine::{open_workbook_auto, Data, Reader};
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 use walkdir::WalkDir;
 
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+
 const MAX_COMMAND_OUTPUT_BYTES: usize = 1024 * 1024;
 const MAX_WORKSPACE_DIFF_BYTES: usize = 64 * 1024;
 const MAX_SEARCH_FILES_SCANNED: usize = 2_000;
 const MAX_SEARCH_FILE_BYTES: u64 = 1024 * 1024;
+const MAX_READ_FILE_BYTES: u64 = MAX_SEARCH_FILE_BYTES;
 const MAX_SEARCH_ELAPSED: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone)]
@@ -314,7 +318,9 @@ impl LocalRunner {
                 .filter_entry(|entry| {
                     entry.depth() == 0
                         || !self.sandbox.is_reserved_path(entry.path())
-                            && !is_search_ignored_entry(entry.file_name().to_string_lossy().as_ref())
+                            && !is_search_ignored_entry(
+                                entry.file_name().to_string_lossy().as_ref(),
+                            )
                 });
             for entry in walker {
                 if matches.len() >= max_results
@@ -400,7 +406,15 @@ impl LocalRunner {
         }
 
         if is_xlsx_path(&resolved.absolute) {
-            return read_xlsx_as_text(&resolved.absolute);
+            return read_xlsx_as_text(&resolved.absolute, MAX_READ_FILE_BYTES as usize);
+        }
+
+        if metadata.len() > MAX_READ_FILE_BYTES {
+            return Err(LocalRunnerError::FileTooLarge {
+                path: resolved.relative.display().to_string(),
+                size: metadata.len(),
+                max_bytes: MAX_READ_FILE_BYTES,
+            });
         }
 
         let bytes = fs::read(&resolved.absolute)
@@ -503,7 +517,17 @@ impl LocalRunner {
     }
 
     fn shell_exec_inner(&self, command: &str, timeout_ms: u64) -> Result<ShellExecOutput> {
-        let mut child = Command::new("sh")
+        let mut shell = Command::new("sh");
+        #[cfg(unix)]
+        unsafe {
+            shell.pre_exec(|| {
+                if libc::setpgid(0, 0) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+        let mut child = shell
             .arg("-lc")
             .arg(command)
             .current_dir(self.sandbox.root())
@@ -512,6 +536,19 @@ impl LocalRunner {
             .stderr(Stdio::piped())
             .spawn()
             .map_err(|source| LocalRunnerError::io(self.sandbox.root(), source))?;
+
+        let mut stdout_pipe = child
+            .stdout
+            .take()
+            .ok_or_else(|| LocalRunnerError::InvalidPath("shell stdout pipe".into()))?;
+        let mut stderr_pipe = child
+            .stderr
+            .take()
+            .ok_or_else(|| LocalRunnerError::InvalidPath("shell stderr pipe".into()))?;
+        let stdout_reader =
+            thread::spawn(move || drain_command_output(&mut stdout_pipe, MAX_COMMAND_OUTPUT_BYTES));
+        let stderr_reader =
+            thread::spawn(move || drain_command_output(&mut stderr_pipe, MAX_COMMAND_OUTPUT_BYTES));
 
         let deadline = Instant::now() + Duration::from_millis(timeout_ms);
         let mut timed_out = false;
@@ -525,26 +562,33 @@ impl LocalRunner {
             }
             if Instant::now() >= deadline {
                 timed_out = true;
-                child
-                    .kill()
+                terminate_shell_process(&mut child)
                     .map_err(|source| LocalRunnerError::io(self.sandbox.root(), source))?;
                 break;
             }
             thread::sleep(Duration::from_millis(10));
         }
 
-        let output = child
-            .wait_with_output()
+        let status = child
+            .wait()
             .map_err(|source| LocalRunnerError::io(self.sandbox.root(), source))?;
-        let (stdout, stdout_truncated) = truncate_command_output(&output.stdout);
-        let (stderr, stderr_truncated) = truncate_command_output(&output.stderr);
+        let stdout_output = stdout_reader
+            .join()
+            .map_err(|_| LocalRunnerError::InvalidPath("shell stdout reader".into()))?
+            .map_err(|source| LocalRunnerError::io(self.sandbox.root(), source))?;
+        let stderr_output = stderr_reader
+            .join()
+            .map_err(|_| LocalRunnerError::InvalidPath("shell stderr reader".into()))?
+            .map_err(|source| LocalRunnerError::io(self.sandbox.root(), source))?;
+        let (stdout, stderr, stdout_combined_truncated, stderr_combined_truncated) =
+            cap_combined_command_output(&stdout_output.bytes, &stderr_output.bytes);
         Ok(ShellExecOutput {
             stdout,
             stderr,
-            exit_code: output.status.code().unwrap_or(-1),
+            exit_code: status.code().unwrap_or(-1),
             timed_out,
-            stdout_truncated,
-            stderr_truncated,
+            stdout_truncated: stdout_output.truncated || stdout_combined_truncated,
+            stderr_truncated: stderr_output.truncated || stderr_combined_truncated,
         })
     }
 
@@ -570,7 +614,7 @@ impl LocalRunner {
             });
         }
 
-        let (diff, _) = truncate_command_output(&output.stdout);
+        let (diff, _) = truncate_command_output(&output.stdout, MAX_WORKSPACE_DIFF_BYTES);
         Ok(diff)
     }
 
@@ -586,6 +630,24 @@ impl LocalRunner {
             Err(error) => self.audit.record_failure(tool, paths, detail, error),
         }
     }
+}
+
+#[cfg(unix)]
+fn terminate_shell_process(child: &mut std::process::Child) -> std::io::Result<()> {
+    let process_group = child.id() as libc::pid_t;
+    let result = unsafe { libc::kill(-process_group, libc::SIGKILL) };
+    if result == -1 {
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() != Some(libc::ESRCH) {
+            return Err(error);
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn terminate_shell_process(child: &mut std::process::Child) -> std::io::Result<()> {
+    child.kill()
 }
 
 fn display_input_path(path: &Path) -> String {
@@ -642,9 +704,9 @@ fn walkdir_error(root: &Path, source: walkdir::Error) -> LocalRunnerError {
     }
 }
 
-fn truncate_command_output(bytes: &[u8]) -> (String, bool) {
+fn truncate_command_output(bytes: &[u8], max_bytes: usize) -> (String, bool) {
     let text = String::from_utf8_lossy(bytes);
-    if text.len() <= MAX_COMMAND_OUTPUT_BYTES {
+    if text.len() <= max_bytes {
         return (text.into_owned(), false);
     }
 
@@ -652,13 +714,50 @@ fn truncate_command_output(bytes: &[u8]) -> (String, bool) {
     let mut output = String::new();
     for ch in text.chars() {
         let width = ch.len_utf8();
-        if used + width > MAX_COMMAND_OUTPUT_BYTES {
+        if used + width > max_bytes {
             break;
         }
         output.push(ch);
         used += width;
     }
     (output, true)
+}
+
+#[derive(Debug)]
+struct BoundedCommandOutput {
+    bytes: Vec<u8>,
+    truncated: bool,
+}
+
+fn drain_command_output<R: Read>(
+    reader: &mut R,
+    max_bytes: usize,
+) -> std::io::Result<BoundedCommandOutput> {
+    let mut bytes = Vec::with_capacity(max_bytes);
+    let mut chunk = [0u8; 8192];
+    let mut truncated = false;
+    loop {
+        let read = reader.read(&mut chunk)?;
+        if read == 0 {
+            break;
+        }
+        let remaining = max_bytes.saturating_sub(bytes.len());
+        if remaining > 0 {
+            bytes.extend_from_slice(&chunk[..read.min(remaining)]);
+        }
+        if read > remaining {
+            truncated = true;
+        }
+    }
+    Ok(BoundedCommandOutput { bytes, truncated })
+}
+
+fn cap_combined_command_output(stdout: &[u8], stderr: &[u8]) -> (String, String, bool, bool) {
+    let stdout_budget = stdout.len().min(MAX_COMMAND_OUTPUT_BYTES);
+    let stderr_budget = MAX_COMMAND_OUTPUT_BYTES.saturating_sub(stdout_budget);
+    let (stdout, stdout_truncated) = truncate_command_output(stdout, stdout_budget);
+    let (stderr, stderr_truncated) = truncate_command_output(stderr, stderr_budget);
+    (stdout, stderr, stdout_truncated, stderr_truncated)
 }
 
 fn is_xlsx_path(path: &Path) -> bool {
@@ -686,35 +785,69 @@ fn is_search_ignored_entry(name: &str) -> bool {
     )
 }
 
-fn read_xlsx_as_text(path: &Path) -> Result<String> {
+fn read_xlsx_as_text(path: &Path, max_bytes: usize) -> Result<String> {
     let mut workbook =
         open_workbook_auto(path).map_err(|source| LocalRunnerError::SpreadsheetRead {
             path: path.display().to_string(),
             message: source.to_string(),
         })?;
-    let mut output = Vec::new();
+    let mut output = String::new();
+    let mut first_line = true;
 
     for sheet_name in workbook.sheet_names().to_owned() {
-        let range =
-            workbook
-                .worksheet_range(&sheet_name)
-                .map_err(|source| LocalRunnerError::SpreadsheetRead {
-                    path: path.display().to_string(),
-                    message: source.to_string(),
-                })?;
+        let range = workbook.worksheet_range(&sheet_name).map_err(|source| {
+            LocalRunnerError::SpreadsheetRead {
+                path: path.display().to_string(),
+                message: source.to_string(),
+            }
+        })?;
 
-        output.push(format!("# Sheet: {sheet_name}"));
+        append_xlsx_line(
+            &mut output,
+            &mut first_line,
+            &format!("# Sheet: {sheet_name}"),
+            path,
+            max_bytes,
+        )?;
         for row in range.rows() {
             let cells = row.iter().map(format_spreadsheet_cell).collect::<Vec<_>>();
             if cells.iter().all(|cell| cell.is_empty()) {
                 continue;
             }
-            output.push(cells.join("\t"));
+            append_xlsx_line(
+                &mut output,
+                &mut first_line,
+                &cells.join("\t"),
+                path,
+                max_bytes,
+            )?;
         }
-        output.push(String::new());
+        append_xlsx_line(&mut output, &mut first_line, "", path, max_bytes)?;
     }
 
-    Ok(output.join("\n"))
+    Ok(output)
+}
+
+fn append_xlsx_line(
+    output: &mut String,
+    first_line: &mut bool,
+    line: &str,
+    path: &Path,
+    max_bytes: usize,
+) -> Result<()> {
+    let separator_bytes = if *first_line { 0 } else { 1 };
+    if output.len() + separator_bytes + line.len() > max_bytes {
+        return Err(LocalRunnerError::RenderedFileTooLarge {
+            path: path.display().to_string(),
+            max_bytes: max_bytes as u64,
+        });
+    }
+    if separator_bytes > 0 {
+        output.push('\n');
+    }
+    output.push_str(line);
+    *first_line = false;
+    Ok(())
 }
 
 fn format_spreadsheet_cell(cell: &Data) -> String {
