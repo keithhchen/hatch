@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "tauri dev",
     "dev:web": "vite --host 127.0.0.1",
-    "test:renderer": "node --test test/toolBridge.test.mjs",
+    "test:renderer": "node --test test/*.test.mjs",
     "build": "tauri build",
     "build:web": "vite build"
   },
