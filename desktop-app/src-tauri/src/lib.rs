@@ -29,16 +29,26 @@ fn ensure_workspace(workspace_root: String) -> Result<String, String> {
 
 #[tauri::command]
 async fn execute_tool_call(workspace_root: String, request: Value) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || execute_tool_call_blocking(workspace_root, request))
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    std::thread::spawn(move || {
+        let _ = sender.send(execute_tool_call_blocking(workspace_root, request));
+    });
+    receiver
         .await
-        .map_err(to_string)?
+        .map_err(|_| "local tool worker stopped unexpectedly".to_string())?
 }
 
 fn execute_tool_call_blocking(workspace_root: String, request: Value) -> Result<Value, String> {
-    let workspace = ensure_workspace(workspace_root)?;
-    let runner = LocalRunner::new(workspace).map_err(to_string)?;
-    let request: ToolCallRequest = serde_json::from_value(request).map_err(to_string)?;
-    serde_json::to_value(runner.execute_tool_call_request(request)).map_err(to_string)
+    let workspace = ensure_workspace(workspace_root.clone()).map_err(|error| {
+        format!("workspace initialization failed for {workspace_root:?}: {error}")
+    })?;
+    let runner = LocalRunner::new(&workspace).map_err(|error| {
+        format!("local runner initialization failed for {workspace:?}: {error}")
+    })?;
+    let request: ToolCallRequest = serde_json::from_value(request)
+        .map_err(|error| format!("tool request decoding failed: {error}"))?;
+    serde_json::to_value(runner.execute_tool_call_request(request))
+        .map_err(|error| format!("tool result encoding failed: {error}"))
 }
 
 pub fn run() {

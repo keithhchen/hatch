@@ -31,6 +31,7 @@ const ApprovalContext = createContext(null);
 
 function App() {
   const socketRef = useRef(null);
+  const workspaceRef = useRef("");
   const activeRunRef = useRef(null);
   const eventSeqRef = useRef(1);
   const imeRef = useRef({ composing: false, guardUntil: 0 });
@@ -163,6 +164,7 @@ function App() {
       if (cancelled) return;
       const savedWorkspace = localStorage.getItem("hatch.workspaceRoot") || defaultWorkspace;
       const savedConversationId = localStorage.getItem("hatch.conversationId") || "desktop-chat";
+      workspaceRef.current = savedWorkspace;
       setWorkspace(savedWorkspace);
       setConversationId(savedConversationId);
       void connectRuntime({
@@ -198,6 +200,7 @@ function App() {
       normalizedWorkspace = await invokeTauri("ensure_workspace", {
         workspaceRoot: targetWorkspace.trim()
       });
+      workspaceRef.current = normalizedWorkspace;
       setWorkspace(normalizedWorkspace);
       setStatus("Loading history...");
       const activeConversationId = targetConversationId.trim() || "desktop-chat";
@@ -382,7 +385,7 @@ function App() {
     try {
       const result = await withTimeout(
         invokeTauri("execute_tool_call", {
-          workspaceRoot: workspace,
+          workspaceRoot: workspaceRef.current || workspace,
           request: message
         }),
         LOCAL_TOOL_TIMEOUT_MS,
