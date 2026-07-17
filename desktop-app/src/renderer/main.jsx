@@ -26,6 +26,7 @@ const LOCAL_TOOLS = [
 const SKILL_ACTIVITY_PART = "hatch.skill_activity";
 const SKILL_RUN_ACTIVITY_PART = "hatch.skill_run_activity";
 const LOCAL_TOOL_TIMEOUT_MS = 45_000;
+const DEFAULT_RUNTIME_URL = import.meta.env.VITE_HATCH_RUNTIME_URL || "ws://127.0.0.1:8400/runtime";
 const ApprovalContext = createContext(null);
 
 function App() {
@@ -34,7 +35,7 @@ function App() {
   const eventSeqRef = useRef(1);
   const imeRef = useRef({ composing: false, guardUntil: 0 });
   const approvalResolversRef = useRef(new Map());
-  const [serverUrl, setServerUrl] = useState("ws://127.0.0.1:8400/runtime");
+  const [serverUrl] = useState(DEFAULT_RUNTIME_URL);
   const [workspace, setWorkspace] = useState("");
   const [conversationId, setConversationId] = useState("desktop-chat");
   const [status, setStatus] = useState("Disconnected");
@@ -85,7 +86,7 @@ function App() {
   const sendUserMessage = useCallback(async (appendMessage) => {
     const socket = socketRef.current;
     if (!connected || !socket || socket.readyState !== WebSocket.OPEN) {
-      setStatus("Connect to the runtime first.");
+      setStatus("Runtime unavailable.");
       return;
     }
     if (activeRunRef.current) {
@@ -160,9 +161,15 @@ function App() {
     void (async () => {
       const defaultWorkspace = await invokeTauri("default_workspace");
       if (cancelled) return;
-      setServerUrl(localStorage.getItem("hatch.serverUrl") || "ws://127.0.0.1:8400/runtime");
-      setWorkspace(localStorage.getItem("hatch.workspaceRoot") || defaultWorkspace);
-      setConversationId(localStorage.getItem("hatch.conversationId") || "desktop-chat");
+      const savedWorkspace = localStorage.getItem("hatch.workspaceRoot") || defaultWorkspace;
+      const savedConversationId = localStorage.getItem("hatch.conversationId") || "desktop-chat";
+      setWorkspace(savedWorkspace);
+      setConversationId(savedConversationId);
+      void connectRuntime({
+        serverUrl: DEFAULT_RUNTIME_URL,
+        workspace: savedWorkspace,
+        conversationId: savedConversationId
+      });
     })();
     return () => {
       cancelled = true;
@@ -173,26 +180,28 @@ function App() {
     socketRef.current?.close();
   }, []);
 
-  async function connectRuntime() {
+  async function connectRuntime(connection = {}) {
     if (connected || socketRef.current) return;
-    if (!serverUrl.trim() || !workspace.trim()) {
-      setStatus("Server URL and workspace are required.");
+    const targetServerUrl = connection.serverUrl || serverUrl;
+    const targetWorkspace = connection.workspace || workspace;
+    const targetConversationId = connection.conversationId || conversationId;
+    if (!targetServerUrl.trim() || !targetWorkspace.trim()) {
+      setStatus("Runtime unavailable.");
       return;
     }
 
-    localStorage.setItem("hatch.serverUrl", serverUrl.trim());
-    localStorage.setItem("hatch.workspaceRoot", workspace.trim());
-    localStorage.setItem("hatch.conversationId", conversationId.trim() || "desktop-chat");
+    localStorage.setItem("hatch.workspaceRoot", targetWorkspace.trim());
+    localStorage.setItem("hatch.conversationId", targetConversationId.trim() || "desktop-chat");
 
     let normalizedWorkspace;
     try {
       normalizedWorkspace = await invokeTauri("ensure_workspace", {
-        workspaceRoot: workspace.trim()
+        workspaceRoot: targetWorkspace.trim()
       });
       setWorkspace(normalizedWorkspace);
       setStatus("Loading history...");
-      const activeConversationId = conversationId.trim() || "desktop-chat";
-      const history = await loadConversationHistory(serverUrl.trim(), activeConversationId);
+      const activeConversationId = targetConversationId.trim() || "desktop-chat";
+      const history = await loadConversationHistory(targetServerUrl.trim(), activeConversationId);
       setMessages(history.map(historyMessageToThreadMessage));
       setEvents([]);
       setStatus("Connecting...");
@@ -201,7 +210,7 @@ function App() {
       return;
     }
 
-    const socket = new WebSocket(serverUrl.trim());
+    const socket = new WebSocket(targetServerUrl.trim());
     socketRef.current = socket;
     socket.addEventListener("open", () => {
       send({
@@ -623,30 +632,10 @@ function App() {
             <span className={`status-light ${connected ? "online" : "offline"}`} />
             <div>
               <span>Runtime</span>
-              <strong>{status}</strong>
+              <strong>{connected ? "Ready" : status}</strong>
             </div>
           </div>
-          <div className="actions">
-            <button onClick={connectRuntime} disabled={connected}>Connect</button>
-            <button onClick={disconnectRuntime} disabled={!connected} className="secondary">Disconnect</button>
-          </div>
         </section>
-
-        <details className="settings-panel">
-          <summary>Connection settings</summary>
-          <label className="field">
-            <span>Server</span>
-            <input value={serverUrl} onChange={(event) => setServerUrl(event.target.value)} autoComplete="off" />
-          </label>
-          <label className="field">
-            <span>Workspace</span>
-            <input value={workspace} onChange={(event) => setWorkspace(event.target.value)} autoComplete="off" />
-          </label>
-          <label className="field">
-            <span>Conversation</span>
-            <input value={conversationId} onChange={(event) => setConversationId(event.target.value)} autoComplete="off" />
-          </label>
-        </details>
 
         <section className="side-section">
           <h2>Local Tools</h2>
@@ -694,7 +683,7 @@ function App() {
                     onCompositionStart={startImeComposition}
                     onKeyDownCapture={stopImeEnterSubmit}
                     onKeyUpCapture={stopImeEnterSubmit}
-                    placeholder={connected ? "Ask Hatch to inspect, edit, or explain this workspace" : "Connect to the runtime to start chatting"}
+                    placeholder={connected ? "Ask Hatch to inspect, edit, or explain this workspace" : "Preparing the runtime..."}
                     submitMode="enter"
                     rows={1}
                   />
@@ -1043,12 +1032,12 @@ function toolEventFromApproval(message) {
 function EmptyThread({ connected }) {
   return (
     <div className="empty-thread">
-      <span className="empty-kicker">{connected ? "Ready" : "Disconnected"}</span>
-      <h2>{connected ? "Ask Hatch about this workspace." : "Connect to the runtime server."}</h2>
+      <span className="empty-kicker">{connected ? "Ready" : "Starting"}</span>
+      <h2>{connected ? "Ask Hatch about this workspace." : "Preparing your workspace."}</h2>
       <p>
         {connected
           ? "The server keeps session history. This client sends only your next message and executes approved local tools."
-          : "Use the left panel to connect. Existing server history will hydrate into this chat."}
+          : "Hatch is connecting to the runtime and loading your existing conversation history."}
       </p>
     </div>
   );
