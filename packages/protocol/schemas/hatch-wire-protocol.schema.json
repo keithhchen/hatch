@@ -213,7 +213,9 @@
         "tool_call_id": { "type": "string" },
         "name": { "$ref": "#/$defs/clientToolName" },
         "arguments": { "$ref": "#/$defs/jsonObject" },
-        "approval": { "$ref": "#/$defs/toolApproval" }
+        "approval": { "$ref": "#/$defs/toolApproval" },
+        "scope": { "type": "string", "enum": ["main", "skill_run"] },
+        "skill_run_id": { "type": "string" }
       }
     },
     "approvalRequest": {
@@ -267,6 +269,22 @@
         },
         "arguments": { "$ref": "#/$defs/jsonObject" },
         "result": { "$ref": "#/$defs/jsonObject" },
+        "error": { "$ref": "#/$defs/error" },
+        "scope": { "type": "string", "enum": ["main", "skill_run"] },
+        "skill_run_id": { "type": "string" }
+      }
+    },
+    "skillRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "run_id", "skill_run_id", "skill_id", "name", "status"],
+      "properties": {
+        "type": { "const": "skill.run" },
+        "run_id": { "type": "string" },
+        "skill_run_id": { "type": "string" },
+        "skill_id": { "type": "string" },
+        "name": { "type": "string" },
+        "status": { "type": "string", "enum": ["requested", "running", "completed", "failed", "cancelled"] },
         "error": { "$ref": "#/$defs/error" }
       }
     },
@@ -457,6 +475,7 @@
         { "$ref": "#/$defs/approvalRequest" },
         { "$ref": "#/$defs/approvalResult" },
         { "$ref": "#/$defs/toolCallDelta" },
+        { "$ref": "#/$defs/skillRun" },
         { "$ref": "#/$defs/workspaceDiff" },
         { "$ref": "#/$defs/skillActivated" },
         { "$ref": "#/$defs/skillInvoked" },

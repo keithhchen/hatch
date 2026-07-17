@@ -120,6 +120,28 @@ export const toolRegistry = new Map<string, ToolDefinition>([
       availability: "mcp_configured"
     }
   }],
+  ["skill.run", {
+    name: "skill.run",
+    locality: "server",
+    approval: "none",
+    description: "Run a server-owned protected skill in an isolated headless agent session.",
+    schema: z.object({
+      skill_id: z.string().min(1),
+      task: z.string().min(1),
+      context_refs: z.array(z.string()).default([])
+    }).strict(),
+    model: {
+      name: "skill_run",
+      locality: "server",
+      description: "Run a matching protected server skill in an isolated headless worker. Pass the task and exact local/API context references needed by the skill.",
+      properties: {
+        skill_id: stringSchema("The public skill id from the server skill catalog."),
+        task: stringSchema("The task for the protected skill worker."),
+        context_refs: { type: "array", items: { type: "string" }, description: "References to user-provided local files or server context." }
+      },
+      required: ["skill_id", "task"]
+    }
+  }],
   ["fs.list", {
     name: "fs.list",
     locality: "client",

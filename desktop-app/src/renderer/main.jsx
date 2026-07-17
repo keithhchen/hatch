@@ -24,6 +24,7 @@ const LOCAL_TOOLS = [
   "git.diff"
 ];
 const SKILL_ACTIVITY_PART = "hatch.skill_activity";
+const SKILL_RUN_ACTIVITY_PART = "hatch.skill_run_activity";
 const LOCAL_TOOL_TIMEOUT_MS = 45_000;
 const ApprovalContext = createContext(null);
 
@@ -300,6 +301,12 @@ function App() {
       return;
     }
 
+    if (message.type === "skill.run") {
+      upsertSkillRun(message);
+      setStatus(skillRunStatusLabel(message));
+      return;
+    }
+
     if (message.type === "session.compacted") {
       setStatus("Session compacted");
       return;
@@ -537,6 +544,38 @@ function App() {
     });
   }
 
+  function upsertSkillRun(event) {
+    const activeRun = activeRunRef.current;
+    if (!activeRun || event.run_id !== activeRun.runId) return;
+    updateAssistantMessage(activeRun.assistantId, (message) => {
+      const parts = assistantParts(message);
+      const nextPart = skillRunActivityPartFromEvent(event);
+      const withoutExisting = parts.filter((part) => !isSameSkillRunActivityPart(part, nextPart));
+      const firstTextIndex = withoutExisting.findIndex((part) => part.type === "text");
+      if (firstTextIndex >= 0) {
+        withoutExisting.splice(firstTextIndex, 0, nextPart);
+      } else {
+        withoutExisting.push(nextPart);
+      }
+      return {
+        ...message,
+        content: withoutExisting,
+        status: message.status ?? { type: "running" },
+        metadata: {
+          ...(message.metadata ?? {}),
+          custom: {
+            ...(message.metadata?.custom ?? {}),
+            latestSkillRun: {
+              name: event.name,
+              status: event.status,
+              skillRunId: event.skill_run_id
+            }
+          }
+        }
+      };
+    });
+  }
+
   function updateAssistantMessage(id, updater) {
     setMessages((current) => current.map((message) => (
       message.id === id ? updater(message) : message
@@ -745,6 +784,13 @@ function historyActivityParts(message) {
           event
         }))
       : []),
+    ...(Array.isArray(message.skill_runs)
+      ? message.skill_runs.map((event) => ({
+          type: "skill-run",
+          timestamp: event.timestamp ?? message.timestamp,
+          event
+        }))
+      : []),
     ...(Array.isArray(message.tool_calls)
       ? message.tool_calls.map((event) => ({
           type: "tool",
@@ -757,7 +803,9 @@ function historyActivityParts(message) {
     .sort((left, right) => String(left.timestamp ?? "").localeCompare(String(right.timestamp ?? "")))
     .map((entry) => entry.type === "skill"
       ? skillActivityPartFromEvent(entry.event)
-      : historyToolCallToPart(entry.event));
+      : entry.type === "skill-run"
+        ? skillRunActivityPartFromEvent(entry.event)
+        : historyToolCallToPart(entry.event));
 }
 
 function makeUserMessage(id, text, createdAt = Date.now()) {
@@ -893,6 +941,27 @@ function skillActivityPartFromEvent(event) {
   };
 }
 
+function skillRunActivityPartFromEvent(event) {
+  return {
+    type: "data",
+    name: SKILL_RUN_ACTIVITY_PART,
+    data: {
+      id: skillRunActivityIdForEvent(event),
+      run_id: event.run_id,
+      skill_run_id: event.skill_run_id,
+      skill_id: event.skill_id,
+      name: event.name,
+      status: event.status,
+      error: event.error,
+      timestamp: event.timestamp ?? new Date().toISOString()
+    }
+  };
+}
+
+function skillRunActivityIdForEvent(event) {
+  return [event.run_id, event.skill_run_id].join(":");
+}
+
 function skillActivityIdForEvent(event) {
   if (event.status === "invoked") {
     return [
@@ -913,6 +982,16 @@ function skillActivityIdForEvent(event) {
 
 function isSkillActivityPart(part) {
   return part?.type === "data" && part.name === SKILL_ACTIVITY_PART;
+}
+
+function isSkillRunActivityPart(part) {
+  return part?.type === "data" && part.name === SKILL_RUN_ACTIVITY_PART;
+}
+
+function isSameSkillRunActivityPart(part, nextPart) {
+  return isSkillRunActivityPart(part)
+    && isSkillRunActivityPart(nextPart)
+    && part.data?.id === nextPart.data?.id;
 }
 
 function isSameSkillActivityPart(part, nextPart) {
@@ -988,7 +1067,8 @@ function HatchMessage() {
             Empty: AssistantEmptyText,
             data: {
               by_name: {
-                [SKILL_ACTIVITY_PART]: SkillActivityPart
+                [SKILL_ACTIVITY_PART]: SkillActivityPart,
+                [SKILL_RUN_ACTIVITY_PART]: SkillRunActivityPart
               }
             },
             tools: {
@@ -1182,6 +1262,34 @@ function SkillActivityPart({ data }) {
   );
 }
 
+function SkillRunActivityPart({ data }) {
+  const status = data.status;
+  const label = status === "completed"
+    ? `已完成 skill ${data.name}`
+    : status === "failed"
+      ? `skill ${data.name} 失败`
+      : status === "cancelled"
+        ? `已取消 skill ${data.name}`
+        : status === "requested"
+          ? `准备运行 skill ${data.name}`
+          : `正在运行 skill ${data.name}`;
+  const icon = status === "completed" ? "◆" : status === "failed" || status === "cancelled" ? "!" : "◇";
+  return (
+    <details className={`skill-activity skill-run-${status}`} open={status === "failed"}>
+      <summary>
+        <span className="skill-icon">{icon}</span>
+        <span className="skill-label">{label}</span>
+        <span className="skill-meta">{data.skill_run_id}</span>
+      </summary>
+      <div className="skill-detail">
+        <SkillDetailRow label="Skill" value={data.skill_id ?? data.name} />
+        <SkillDetailRow label="Run" value={data.skill_run_id} />
+        {data.error?.message ? <SkillDetailRow label="Error" value={data.error.message} /> : null}
+      </div>
+    </details>
+  );
+}
+
 function SkillDetailRow({ label, value }) {
   if (!value) return null;
   return (
@@ -1256,6 +1364,14 @@ function skillActivityDisplay(data) {
     label,
     meta: skillReasonLabel(data.reason)
   };
+}
+
+function skillRunStatusLabel(event) {
+  if (event.status === "completed") return `Completed skill: ${event.name}`;
+  if (event.status === "failed") return `Skill failed: ${event.name}`;
+  if (event.status === "cancelled") return `Cancelled skill: ${event.name}`;
+  if (event.status === "requested") return `Starting skill: ${event.name}`;
+  return `Running skill: ${event.name}`;
 }
 
 function skillReasonLabel(reason) {

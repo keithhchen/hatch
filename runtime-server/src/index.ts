@@ -1,7 +1,6 @@
 import "dotenv/config";
 
 import http from "node:http";
-import path from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
 import { ZodError } from "zod";
 import { ClientToolBroker } from "./clientBroker.js";
@@ -16,17 +15,13 @@ import { parseInboundMessage, PROTOCOL_VERSION, type ClientHello, type OutboundM
 import { loadProjectInstructions } from "./projectDocs.js";
 import { RunStateMachine } from "./runState.js";
 import { ServerToolExecutor } from "./serverTools.js";
-import { RuntimeStore, type ActivatedSkill, type RunStatus } from "./store.js";
+import { SkillRuntime } from "./skillRuntime.js";
+import { RuntimeStore, type RunStatus } from "./store.js";
+import { ToolBridge } from "./toolBridge.js";
 import {
   discoverSkills,
-  explicitSkillReferences,
-  explicitSkillReferenceMatches,
   includeSkillInstructions,
-  listSkillBundleResourcePaths,
-  parseSkillMarkdown,
-  readSkillResourceByPath,
   renderSkillsSection,
-  skillResourceRoots,
   visibleSkillsForSession
 } from "./skills.js";
 
@@ -151,6 +146,7 @@ async function handleRuntimeSocket(
     });
   };
   const broker = new ClientToolBroker(send, store);
+  const toolBridge = new ToolBridge(broker, serverTools);
 
   socket.on("message", (data) => {
     void (async () => {
@@ -274,7 +270,7 @@ async function handleRuntimeSocket(
           });
           activeRunStates.set(message.run_id, state);
           await state.queued();
-          const task = runOneTurn(message, hello, sessionSkills, broker, serverTools, runtime, store, state, send);
+          const task = runOneTurn(message, hello, sessionSkills, broker, serverTools, toolBridge, runtime, createRuntime, store, state, send);
           activeRuns.add(task);
           task.finally(() => {
             activeRuns.delete(task);
@@ -317,11 +313,14 @@ async function runOneTurn(
   sessionSkills: RuntimeSessionSkills,
   broker: ClientToolBroker,
   serverTools: ServerToolExecutor,
+  toolBridge: ToolBridge,
   runtime: AgentRuntime,
+  createRuntime: () => AgentRuntime,
   store: RuntimeStore,
   state: RunStateMachine,
   send: (message: OutboundMessage) => Promise<void>
 ): Promise<void> {
+  let skillRuntime: SkillRuntime | undefined;
   try {
     await state.start();
     let priorMessages = await store.readConversation(input.conversation_id);
@@ -352,24 +351,19 @@ async function runOneTurn(
       priorMessages = preTurnCompaction.replacement_history;
     }
 
-    const activatedSkills = await activateExplicitlyMentionedSkills(input, sessionSkills.records);
-    for (const activation of activatedSkills) {
-      await store.append({
-        type: "skill.activated",
-        conversation_id: input.conversation_id,
-        run_id: input.run_id,
-        name: activation.name,
-        path: activation.path,
-        scope: activation.scope,
-        directory: activation.directory,
-        content: activation.content,
-        allowed_tools: activation.allowed_tools,
-        resource_paths: activation.resource_paths,
-        resource_manifest_truncated: activation.resource_manifest_truncated,
-        timestamp: activation.activated_at
-      });
-      await send(skillActivatedEvent(input.run_id, activation));
-    }
+    skillRuntime = new SkillRuntime({
+      parentInput: input,
+      parentState: state,
+      sessionSkills,
+      clientBroker: broker,
+      serverTools,
+      toolBridge,
+      clientTools: hello.local_tools,
+      workspaceRoot: hello.workspace_root,
+      store,
+      emit: send,
+      createWorkerRuntime: () => createRuntime()
+    });
     await store.append({
       type: "message.created",
       conversation_id: input.conversation_id,
@@ -385,7 +379,7 @@ async function runOneTurn(
       state,
       messages,
       sessionSkills,
-      activatedSkills,
+      activatedSkills: [],
       clientTools: hello.local_tools,
       workspaceRoot: hello.workspace_root,
       persistModelMessage: async (message) => {
@@ -399,22 +393,16 @@ async function runOneTurn(
       compactMessagesIfNeeded: async (runtimeMessages: RuntimeCompactionMessage[], phase) => {
         const compacted = await compactIfNeeded(input, store, state, send, runtimeMessages, phase);
         return compacted?.replacement_history;
-      }
+      },
+      toolBridge,
+      skillRuntime,
+      toolScope: "main"
     })) {
       if (state.status === "cancelled") {
         break;
       }
       await persistServerToolCallEvent(event, input, store);
       await persistSkillEvent(event, input, store);
-      const activation = await skillActivationFromToolEvent(event);
-      if (activation) {
-        await store.append({
-          type: "skill.activated",
-          conversation_id: input.conversation_id,
-          run_id: input.run_id,
-          ...activation
-        });
-      }
       if (event.type === "turn.completed") {
         await store.append({
           type: "message.created",
@@ -442,6 +430,8 @@ async function runOneTurn(
         message: errorMessage(error)
       }
     });
+  } finally {
+    await skillRuntime?.cancelParentRun(input.run_id);
   }
 }
 
@@ -449,7 +439,7 @@ async function buildSessionSkills(workspaceRoot?: string): Promise<RuntimeSessio
   const records = await discoverSkills({ workspaceRoot });
   const visibleRecords = visibleSkillsForSession(records);
   const rendered = await includeSkillInstructions()
-    ? renderSkillsSection(visibleRecords)
+    ? renderSkillsSection(visibleRecords, { executionMode: "protected" })
     : emptyRenderedSkills();
   const projectInstructions = await loadProjectInstructions(workspaceRoot);
   return {
@@ -567,105 +557,6 @@ async function compactAndEmit(
   });
   await state.start();
   return checkpoint;
-}
-
-async function activateExplicitlyMentionedSkills(
-  input: RunStart,
-  discovered: Awaited<ReturnType<typeof discoverSkills>>
-): Promise<ActivatedSkill[]> {
-  const references = explicitSkillReferences(input.message.content, discovered.map((skill) => skill.name));
-  if (references.names.size === 0 && references.paths.size === 0) return [];
-
-  const resourceRoots = skillResourceRoots(discovered);
-  const activePaths = new Set<string>();
-  const activatedAt = new Date().toISOString();
-  const activations: ActivatedSkill[] = [];
-
-  for (const skill of discovered) {
-    if (!explicitSkillReferenceMatches(skill, references) || activePaths.has(skill.path)) {
-      continue;
-    }
-    const resourceManifest = await listSkillBundleResourcePaths(skill.directory);
-    activations.push({
-      name: skill.name,
-      path: skill.path,
-      scope: skill.scope,
-      directory: skill.directory,
-      content: await readSkillResourceByPath(skill.path, resourceRoots),
-      allowed_tools: skill.manifest.allowedTools,
-      resource_paths: resourceManifest.paths,
-      resource_manifest_truncated: resourceManifest.truncated,
-      activated_at: activatedAt
-    });
-    activePaths.add(skill.path);
-  }
-
-  return activations;
-}
-
-function skillActivatedEvent(runId: string, activation: ActivatedSkill): OutboundMessage {
-  return {
-    type: "skill.activated",
-    run_id: runId,
-    name: activation.name,
-    path: activation.path,
-    scope: activation.scope ?? "custom",
-    status: "activated",
-    invocation_type: "explicit",
-    reason: "explicit_mention",
-    resource_paths: activation.resource_paths,
-    resource_manifest_truncated: activation.resource_manifest_truncated
-  };
-}
-
-async function skillActivationFromToolEvent(event: OutboundMessage): Promise<{
-  name: string;
-  path: string;
-  scope?: string;
-  directory: string;
-  content: string;
-  allowed_tools?: string;
-  resource_paths: string[];
-  resource_manifest_truncated: boolean;
-} | undefined> {
-  if (
-    event.type !== "tool_call.delta"
-    || event.status !== "completed"
-    || event.name !== "file_read"
-    || event.locality !== "server"
-  ) {
-    return undefined;
-  }
-
-  const result = event.result ?? {};
-  const skillPath = typeof result.path === "string" ? result.path : "";
-  const content = typeof result.content === "string" ? result.content : "";
-  if (!skillPath.endsWith("/SKILL.md") && !skillPath.endsWith("\\SKILL.md")) {
-    return undefined;
-  }
-  if (!content) return undefined;
-
-  const normalized = path.resolve(skillPath);
-  const parsed = tryParseSkillMarkdown(content);
-  if (!parsed) return undefined;
-  const resourceManifest = await listSkillBundleResourcePaths(path.dirname(normalized));
-  return {
-    name: parsed.manifest.name,
-    path: normalized,
-    directory: path.dirname(normalized),
-    content,
-    allowed_tools: parsed.manifest.allowedTools,
-    resource_paths: resourceManifest.paths,
-    resource_manifest_truncated: resourceManifest.truncated
-  };
-}
-
-function tryParseSkillMarkdown(source: string): ReturnType<typeof parseSkillMarkdown> | undefined {
-  try {
-    return parseSkillMarkdown(source);
-  } catch {
-    return undefined;
-  }
 }
 
 function errorMessage(error: unknown): string {

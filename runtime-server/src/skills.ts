@@ -457,6 +457,7 @@ export function renderSkillsSection(
     contextWindowChars?: number;
     prompt?: string;
     filterByPrompt?: boolean;
+    executionMode?: "direct" | "protected";
   } = {}
 ): SkillsRenderResult {
   const filtered = options.filterByPrompt
@@ -488,7 +489,7 @@ export function renderSkillsSection(
       ...lines,
       ...(report.warning_message ? [`Warning: ${report.warning_message}`] : []),
       "### How to use skills",
-      skillsHowToUse(usesAliases)
+      skillsHowToUse(usesAliases, options.executionMode === "protected")
     ].join("\n"),
     aliases,
     report
@@ -1459,19 +1460,23 @@ function skillToolDependencySummary(skill: SkillRecord): string[] {
   return [`tools: ${[...visible, suffix].filter(Boolean).join(", ")}`];
 }
 
-function skillsHowToUse(usesAliases: boolean): string {
+function skillsHowToUse(usesAliases: boolean, protectedMode = false): string {
   const discovery = usesAliases
     ? "- Discovery: The list above is the skills available in this session (name + description + short path). Skill bodies live on disk at the listed paths after expanding the matching alias from `### Skill roots`."
     : "- Discovery: The list above is the skills available in this session (name + description + source locator). `file` entries live on the host filesystem, `environment resource` entries are owned by their execution environment, `orchestrator resource` entries must be accessed through `skills.list` and `skills.read`, and `custom resource` entries use their provider's access mechanism.";
   const missing = usesAliases
     ? "- Missing/blocked: If a named skill isn't in the list or the expanded path can't be read, say so briefly and continue with the best fallback."
     : "- Missing/blocked: If a named skill isn't in the list or its source can't be read, say so briefly and continue with the best fallback.";
-  const firstStep = usesAliases
-    ? "  1. After deciding to use a skill, the main agent must expand the listed short `path` with the matching alias from `### Skill roots`, then call `file_read` with the expanded `SKILL.md` path before taking task actions. If a read is truncated or paginated, continue until EOF."
-    : "  1. After deciding to use a skill, the main agent must read its `SKILL.md` completely before taking task actions. For a `file` entry, call `file_read` with the listed path. If a read is truncated or paginated, continue until EOF.";
-  const secondStep = usesAliases
-    ? "  2. When `SKILL.md` references relative paths (e.g., `scripts/foo.py`), resolve them relative to the directory containing that expanded `SKILL.md` first, and only consider other paths if needed."
-    : "  2. When `SKILL.md` references another resource, use the same access mechanism. Resolve relative paths against a filesystem-backed skill directory.";
+  const firstStep = protectedMode
+    ? "  1. The main agent must not read a protected skill's `SKILL.md`. Call the `skill_run` function tool with the public skill id, the user's task, and exact context references."
+    : usesAliases
+      ? "  1. After deciding to use a skill, the main agent must expand the listed short `path` with the matching alias from `### Skill roots`, then call `file_read` with the expanded `SKILL.md` path before taking task actions. If a read is truncated or paginated, continue until EOF."
+      : "  1. After deciding to use a skill, the main agent must read its `SKILL.md` completely before taking task actions. For a `file` entry, call `file_read` with the listed path. If a read is truncated or paginated, continue until EOF.";
+  const secondStep = protectedMode
+    ? "  2. The server creates a headless SkillRuntime session. That worker reads the private `SKILL.md` and follows its instructions."
+    : usesAliases
+      ? "  2. When `SKILL.md` references relative paths (e.g., `scripts/foo.py`), resolve them relative to the directory containing that expanded `SKILL.md` first, and only consider other paths if needed."
+      : "  2. When `SKILL.md` references another resource, use the same access mechanism. Resolve relative paths against a filesystem-backed skill directory.";
 
   return [
     discovery,
@@ -1480,9 +1485,15 @@ function skillsHowToUse(usesAliases: boolean): string {
     "- How to use a skill (progressive disclosure):",
     firstStep,
     secondStep,
-    "  3. If `SKILL.md` points to extra folders such as `references/`, use its routing instructions to identify the resources required for the task. The main agent must read each required instruction or reference file itself before acting on it. Do not delegate reading, summarizing, or interpreting skill instructions to a subagent. Subagents may still perform task work when the selected skill allows it.",
-    "  4. For filesystem-backed skills, prefer running or patching provided scripts instead of retyping large code blocks.",
-    "  5. Reuse provided assets or templates through the same source access mechanism instead of recreating them.",
+    protectedMode
+      ? "  3. The worker may request the same app tools through the runtime ToolBridge; it must not execute tools directly or open a client connection."
+      : "  3. If `SKILL.md` points to extra folders such as `references/`, use its routing instructions to identify the resources required for the task. The main agent must read each required instruction or reference file itself before acting on it. Do not delegate reading, summarizing, or interpreting skill instructions to a subagent. Subagents may still perform task work when the selected skill allows it.",
+    protectedMode
+      ? "  4. Skill resources are loaded by the worker only when the private instructions require them."
+      : "  4. For filesystem-backed skills, prefer running or patching provided scripts instead of retyping large code blocks.",
+    protectedMode
+      ? "  5. The main agent receives the worker result and writes the user-facing response."
+      : "  5. Reuse provided assets or templates through the same access mechanism instead of recreating them.",
     "- Coordination and sequencing:",
     "  - If multiple skills apply, choose the minimal set that covers the request and state the order you'll use them.",
     "  - Announce which skill(s) you're using and why (one short line). If you skip an obvious skill, say why.",

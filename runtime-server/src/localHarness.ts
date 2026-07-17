@@ -548,12 +548,21 @@ async function fsSearch(
 
   for (const file of files) {
     if (matches.length >= maxResults) break;
+    const relativePath = path.relative(workspace, file);
+    if (relativePath.includes(query)) {
+      matches.push({
+        path: relativePath,
+        line_number: 0,
+        text: "path match"
+      });
+      if (matches.length >= maxResults) break;
+    }
     const content = await readFile(file, "utf8").catch(() => "");
     const lines = content.split(/\r?\n/);
     for (let index = 0; index < lines.length; index += 1) {
       if (lines[index]?.includes(query)) {
         matches.push({
-          path: path.relative(workspace, file),
+          path: relativePath,
           line_number: index + 1,
           text: lines[index]
         });

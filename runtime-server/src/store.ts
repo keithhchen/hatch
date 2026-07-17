@@ -24,6 +24,17 @@ export type VisibleConversationMessage = {
   timestamp: string;
   tool_calls?: VisibleConversationToolCall[];
   skill_events?: VisibleConversationSkillEvent[];
+  skill_runs?: VisibleConversationSkillRun[];
+};
+
+export type VisibleConversationSkillRun = {
+  run_id: string;
+  skill_run_id: string;
+  skill_id: string;
+  name: string;
+  status: "requested" | "running" | "completed" | "failed" | "cancelled";
+  error?: { code: string; message: string };
+  timestamp: string;
 };
 
 export type VisibleConversationToolCall = {
@@ -34,6 +45,8 @@ export type VisibleConversationToolCall = {
   status: "requested" | "completed" | "failed" | "cancelled";
   locality?: "server" | "client";
   approval?: "none" | "auto" | "ask";
+  scope?: "main" | "skill_run";
+  skill_run_id?: string;
   result?: unknown;
   error?: unknown;
   first_timestamp: string;
@@ -109,8 +122,41 @@ export type StoreEvent =
       status: "requested" | "completed" | "failed" | "cancelled";
       locality?: "server" | "client";
       approval?: "none" | "auto" | "ask";
+      scope?: "main" | "skill_run";
+      skill_run_id?: string;
       result?: unknown;
       error?: unknown;
+      timestamp: string;
+    }
+  | {
+      type: "skill.session";
+      conversation_id: string;
+      parent_run_id: string;
+      skill_run_id: string;
+      skill_id: string;
+      name: string;
+      status: "created" | "running" | "waiting_for_tool" | "completed" | "failed" | "cancelled";
+      error?: { code: string; message: string };
+      timestamp: string;
+    }
+  | {
+      type: "skill.session.message";
+      conversation_id: string;
+      parent_run_id: string;
+      skill_run_id: string;
+      message: ConversationMessage;
+      timestamp: string;
+    }
+  | {
+      type: "skill.session.compacted";
+      conversation_id: string;
+      parent_run_id: string;
+      skill_run_id: string;
+      replacement_history: ConversationMessage[];
+      window_number: number;
+      first_window_id: string;
+      previous_window_id?: string;
+      window_id: string;
       timestamp: string;
     }
   | {
@@ -142,6 +188,17 @@ export type StoreEvent =
         command?: string;
         path?: string;
       };
+      timestamp: string;
+    }
+  | {
+      type: "skill.run";
+      conversation_id: string;
+      run_id: string;
+      skill_run_id: string;
+      skill_id: string;
+      name: string;
+      status: "requested" | "running" | "completed" | "failed" | "cancelled";
+      error?: { code: string; message: string };
       timestamp: string;
     }
   | {
@@ -222,6 +279,7 @@ export class RuntimeStore {
     const events = await this.readEvents();
     const toolCallsByRun = new Map<string, Map<string, VisibleConversationToolCall>>();
     const skillEventsByRun = new Map<string, VisibleConversationSkillEvent[]>();
+    const skillRunsByRun = new Map<string, Map<string, VisibleConversationSkillRun>>();
     const skillEventKeysByRun = new Map<string, Set<string>>();
     const appendVisibleSkillEvent = (event: VisibleConversationSkillEvent): void => {
       const runSkillEvents = skillEventsByRun.get(event.run_id) ?? [];
@@ -247,6 +305,8 @@ export class RuntimeStore {
           status: event.status,
           locality: event.locality ?? existing?.locality,
           approval: event.approval ?? existing?.approval,
+          scope: event.scope ?? existing?.scope,
+          skill_run_id: event.skill_run_id ?? existing?.skill_run_id,
           result: event.result ?? existing?.result,
           error: event.error ?? existing?.error,
           first_timestamp: existing?.first_timestamp ?? event.timestamp,
@@ -282,6 +342,19 @@ export class RuntimeStore {
           timestamp: event.timestamp
         });
       }
+      if (event.type === "skill.run" && event.conversation_id === conversationId) {
+        const runs = skillRunsByRun.get(event.run_id) ?? new Map<string, VisibleConversationSkillRun>();
+        runs.set(event.skill_run_id, {
+          run_id: event.run_id,
+          skill_run_id: event.skill_run_id,
+          skill_id: event.skill_id,
+          name: event.name,
+          status: event.status,
+          error: event.error,
+          timestamp: event.timestamp
+        });
+        skillRunsByRun.set(event.run_id, runs);
+      }
     }
 
     return events
@@ -305,6 +378,11 @@ export class RuntimeStore {
             .sort((left, right) => left.timestamp.localeCompare(right.timestamp));
           if (skillEvents.length > 0) {
             message.skill_events = skillEvents;
+          }
+          const skillRuns = [...(skillRunsByRun.get(event.run_id)?.values() ?? [])]
+            .sort((left, right) => left.timestamp.localeCompare(right.timestamp));
+          if (skillRuns.length > 0) {
+            message.skill_runs = skillRuns;
           }
         }
         return message;
@@ -331,6 +409,43 @@ export class RuntimeStore {
       };
     }
     return state;
+  }
+
+  async readSkillSession(skillRunId: string): Promise<{
+    skill_run_id: string;
+    skill_id: string;
+    name: string;
+    status: Extract<StoreEvent, { type: "skill.session" }>["status"];
+    messages: ConversationMessage[];
+  } | undefined> {
+    const events = await this.readEvents();
+    let session: {
+      skill_run_id: string;
+      skill_id: string;
+      name: string;
+      status: Extract<StoreEvent, { type: "skill.session" }>["status"];
+      messages: ConversationMessage[];
+    } | undefined;
+    for (const event of events) {
+      if (event.type === "skill.session" && event.skill_run_id === skillRunId) {
+        if (!session) {
+          session = {
+            skill_run_id: event.skill_run_id,
+            skill_id: event.skill_id,
+            name: event.name,
+            status: event.status,
+            messages: []
+          };
+        } else {
+          session.status = event.status;
+        }
+      } else if (event.type === "skill.session.message" && event.skill_run_id === skillRunId && session) {
+        session.messages.push(event.message);
+      } else if (event.type === "skill.session.compacted" && event.skill_run_id === skillRunId && session) {
+        session.messages = [...event.replacement_history];
+      }
+    }
+    return session;
   }
 
 }

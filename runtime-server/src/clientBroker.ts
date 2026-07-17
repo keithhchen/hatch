@@ -5,6 +5,8 @@ import { requireTool } from "./tools.js";
 
 type ClientToolBrokerExecuteOptions = {
   approvalOverride?: ToolRequest["approval"];
+  scope?: ToolRequest["scope"];
+  skillRunId?: string;
 };
 
 type PendingCall = {
@@ -17,6 +19,8 @@ type PendingCall = {
   name: string;
   arguments: Record<string, unknown>;
   approval: "none" | "auto" | "ask";
+  scope?: ToolRequest["scope"];
+  skillRunId?: string;
   state?: RunStateMachine;
 };
 
@@ -51,7 +55,9 @@ export class ClientToolBroker {
       tool_call_id: toolCallId,
       name,
       arguments: parsedArgs,
-      approval
+      approval,
+      ...(options.scope ? { scope: options.scope } : {}),
+      ...(options.skillRunId ? { skill_run_id: options.skillRunId } : {})
     };
 
     const result = new Promise<Record<string, unknown>>((resolve, reject) => {
@@ -67,6 +73,8 @@ export class ClientToolBroker {
           status: "failed",
           locality: "client",
           approval,
+          ...(options.scope ? { scope: options.scope } : {}),
+          ...(options.skillRunId ? { skill_run_id: options.skillRunId } : {}),
           error: { message: `Timed out waiting for client tool result: ${name}` }
         });
         reject(new Error(`Timed out waiting for client tool result: ${name}`));
@@ -82,6 +90,8 @@ export class ClientToolBroker {
         name,
         arguments: parsedArgs,
         approval,
+        scope: options.scope,
+        skillRunId: options.skillRunId,
         state
       });
     });
@@ -96,7 +106,9 @@ export class ClientToolBroker {
       arguments: parsedArgs,
       status: "requested",
       locality: "client",
-      approval
+      approval,
+      ...(options.scope ? { scope: options.scope } : {}),
+      ...(options.skillRunId ? { skill_run_id: options.skillRunId } : {})
     });
     if (approval === "ask") {
       await this.emit({
@@ -134,6 +146,8 @@ export class ClientToolBroker {
         status: "failed",
         locality: "client",
         approval: pending.approval,
+        ...(pending.scope ? { scope: pending.scope } : {}),
+        ...(pending.skillRunId ? { skill_run_id: pending.skillRunId } : {}),
         error: message.error
       });
       await pending.state?.resumeFromTool().catch(() => undefined);
@@ -152,6 +166,8 @@ export class ClientToolBroker {
       status: "completed",
       locality: "client",
       approval: pending.approval,
+      ...(pending.scope ? { scope: pending.scope } : {}),
+      ...(pending.skillRunId ? { skill_run_id: pending.skillRunId } : {}),
       result: message.result ?? {}
     });
     await pending.state?.resumeFromTool().catch(() => undefined);
@@ -187,6 +203,8 @@ export class ClientToolBroker {
       status: "cancelled",
       locality: "client",
       approval: pending.approval,
+      ...(pending.scope ? { scope: pending.scope } : {}),
+      ...(pending.skillRunId ? { skill_run_id: pending.skillRunId } : {}),
       error: { message: reason }
     });
     await this.emit({
@@ -201,7 +219,9 @@ export class ClientToolBroker {
       error: {
         code: "tool_cancelled",
         message: reason
-      }
+      },
+      ...(pending.scope ? { scope: pending.scope } : {}),
+      ...(pending.skillRunId ? { skill_run_id: pending.skillRunId } : {})
     });
     pending.reject(new Error(reason));
     this.pending.delete(key);

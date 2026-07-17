@@ -113,6 +113,8 @@ export type ToolRequest = {
   name: string;
   arguments: Record<string, unknown>;
   approval: "none" | "auto" | "ask";
+  scope?: "main" | "skill_run";
+  skill_run_id?: string;
 };
 
 export type ApprovalRequest = {
@@ -143,6 +145,21 @@ export type ToolEvent = {
   status: "requested" | "completed" | "failed" | "cancelled";
   arguments?: Record<string, unknown>;
   result?: Record<string, unknown>;
+  error?: {
+    code: string;
+    message: string;
+  };
+  scope?: "main" | "skill_run";
+  skill_run_id?: string;
+};
+
+export type SkillRunEvent = {
+  type: "skill.run";
+  run_id: string;
+  skill_run_id: string;
+  skill_id: string;
+  name: string;
+  status: "requested" | "running" | "completed" | "failed" | "cancelled";
   error?: {
     code: string;
     message: string;
@@ -231,7 +248,7 @@ export type RunError = {
   };
 };
 
-export type OutboundMessage = RuntimeReady | AgentDelta | ToolRequest | ApprovalRequest | ApprovalResult | ToolEvent | WorkspaceDiffEvent | SkillEvent | SkillActivatedEvent | RunStateEvent | CompactionEvent | RunFinal | RunError;
+export type OutboundMessage = RuntimeReady | AgentDelta | ToolRequest | ApprovalRequest | ApprovalResult | ToolEvent | SkillRunEvent | WorkspaceDiffEvent | SkillEvent | SkillActivatedEvent | RunStateEvent | CompactionEvent | RunFinal | RunError;
 
 export function parseInboundMessage(raw: unknown): InboundMessage {
   return InboundMessageSchema.parse(raw);
