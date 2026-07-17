@@ -10,6 +10,7 @@ import {
   useMessage
 } from "@assistant-ui/react";
 import { StreamdownTextPrimitive } from "@assistant-ui/react-streamdown";
+import { handleLocalToolRequest, toolCorrelationId } from "./toolBridge.js";
 import "streamdown/styles.css";
 import "./styles.css";
 
@@ -298,12 +299,22 @@ function App() {
     }
 
     if (message.type === "tool_call.request") {
+      recordRendererTrace("tool_request.received", "requested", toolCorrelationId(message));
       upsertToolEvent({
         ...message,
         locality: "client",
         status: "requested"
       });
-      await handleToolRequest(message);
+      await handleLocalToolRequest(message, {
+        workspaceRoot: workspaceRef.current || workspace,
+        invokeTauri,
+        withTimeout,
+        timeoutMs: LOCAL_TOOL_TIMEOUT_MS,
+        send,
+        upsertToolEvent,
+        recordTrace: recordRendererTrace,
+        errorMessage
+      });
       return;
     }
 
@@ -352,64 +363,6 @@ function App() {
       activeRunRef.current = null;
       setRunning(false);
       setStatus("Failed");
-    }
-  }
-
-  async function handleToolRequest(message) {
-    if (message.approval === "ask") {
-      const approved = await requestToolApproval(message);
-      if (!approved) {
-        upsertToolEvent({
-          ...message,
-          locality: "client",
-          status: "failed",
-          error: {
-            code: "approval_denied",
-            message: `Tool call rejected by user: ${message.name}`
-          }
-        });
-        send({
-          type: "tool_call.result",
-          run_id: message.run_id,
-          tool_call_id: message.tool_call_id,
-          status: "error",
-          error: {
-            code: "approval_denied",
-            message: `Tool call rejected by user: ${message.name}`
-          }
-        });
-        return;
-      }
-    }
-
-    try {
-      const result = await withTimeout(
-        invokeTauri("execute_tool_call", {
-          workspaceRoot: workspaceRef.current || workspace,
-          request: message
-        }),
-        LOCAL_TOOL_TIMEOUT_MS,
-        `Local tool timed out after ${Math.round(LOCAL_TOOL_TIMEOUT_MS / 1000)}s: ${message.name}`
-      );
-      send(result);
-    } catch (error) {
-      const localError = {
-        code: error?.code === "local_tool_timeout" ? "local_tool_timeout" : "local_runner_error",
-        message: errorMessage(error)
-      };
-      upsertToolEvent({
-        ...message,
-        locality: "client",
-        status: "failed",
-        error: localError
-      });
-      send({
-        type: "tool_call.result",
-        run_id: message.run_id,
-        tool_call_id: message.tool_call_id,
-        status: "error",
-        error: localError
-      });
     }
   }
 
@@ -1501,6 +1454,22 @@ async function invokeTauri(command, args) {
     }
     throw error;
   }
+}
+
+function recordRendererTrace(phase, status, correlationId) {
+  const event = {
+    phase,
+    status,
+    correlation_id: correlationId
+  };
+  if (typeof window !== "undefined") {
+    const trace = Array.isArray(window.__HATCH_RENDERER_TRACE__)
+      ? window.__HATCH_RENDERER_TRACE__
+      : [];
+    trace.push(event);
+    window.__HATCH_RENDERER_TRACE__ = trace.slice(-200);
+  }
+  console.info("hatch.renderer", JSON.stringify(event));
 }
 
 function withTimeout(promise, timeoutMs, message) {
