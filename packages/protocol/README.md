@@ -10,7 +10,7 @@ Current boundaries:
 server owns: sessions, history, LLM calls, skills, server tools
 local runner owns: filesystem, shell, git, workspace containment
 client sends: current user message and declared local workspace capability
-server streams: assistant deltas, tool requests/results, approvals, turn state, final answer
+server streams: assistant deltas, tool requests/results, turn state, final answer
 ```
 
 Schema:

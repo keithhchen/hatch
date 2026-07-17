@@ -28,7 +28,13 @@ fn ensure_workspace(workspace_root: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn execute_tool_call(workspace_root: String, request: Value) -> Result<Value, String> {
+async fn execute_tool_call(workspace_root: String, request: Value) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || execute_tool_call_blocking(workspace_root, request))
+        .await
+        .map_err(to_string)?
+}
+
+fn execute_tool_call_blocking(workspace_root: String, request: Value) -> Result<Value, String> {
     let workspace = ensure_workspace(workspace_root)?;
     let runner = LocalRunner::new(workspace).map_err(to_string)?;
     let request: ToolCallRequest = serde_json::from_value(request).map_err(to_string)?;
@@ -68,7 +74,7 @@ fn to_string(error: impl std::fmt::Display) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{ensure_workspace, execute_tool_call};
+    use super::{ensure_workspace, execute_tool_call_blocking};
     use serde_json::json;
     use tempfile::tempdir;
 
@@ -78,7 +84,7 @@ mod tests {
         let workspace = ensure_workspace(temp.path().to_string_lossy().to_string()).unwrap();
         std::fs::write(temp.path().join("note.txt"), "Hatch desktop local harness").unwrap();
 
-        let output = execute_tool_call(
+        let output = execute_tool_call_blocking(
             workspace,
             json!({
                 "type": "tool_call.request",

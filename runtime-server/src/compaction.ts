@@ -149,17 +149,17 @@ function isCheckpointSummary(content: string): boolean {
 }
 
 async function summarizeForCompaction(messages: RuntimeCompactionMessage[]): Promise<string> {
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = process.env.OPENAI_API_KEY ?? process.env.MOONSHOT_API_KEY;
   if (!apiKey) {
-    throw new Error("Missing OPENAI_API_KEY for context compaction");
+    throw new Error("Missing OPENAI_API_KEY or MOONSHOT_API_KEY for context compaction");
   }
 
   const OpenAI = (await import("openai")).default;
   const openai = new OpenAI({
     apiKey,
-    baseURL: process.env.OPENAI_BASE_URL
+    baseURL: process.env.OPENAI_BASE_URL ?? "https://api.moonshot.cn/v1"
   });
-  const model = process.env.HATCH_COMPACTION_MODEL ?? process.env.HATCH_CREATOR_MODEL ?? "deepseek-v4-pro";
+  const model = process.env.HATCH_COMPACTION_MODEL ?? process.env.HATCH_CREATOR_MODEL ?? "kimi-k2.6";
   const completion = await openai.chat.completions.create({
     model,
     stream: false,

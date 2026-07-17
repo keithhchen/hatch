@@ -1,5 +1,4 @@
 import { access, lstat, readFile, readdir, realpath, stat } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
@@ -285,8 +284,13 @@ export function isSkillResourcePath(candidate: string, resourceRoots: string[]):
 }
 
 export function visibleSkillsForPrompt(skills: SkillRecord[], prompt = ""): SkillRecord[] {
+  if (!prompt) return visibleSkillsForSession(skills);
   const explicit = explicitSkillReferences(prompt, skills.map((skill) => skill.name));
   return skills.filter((skill) => skill.openai.policy.allowImplicitInvocation || explicitSkillReferenceMatches(skill, explicit));
+}
+
+export function visibleSkillsForSession(skills: SkillRecord[]): SkillRecord[] {
+  return skills.filter((skill) => skill.openai.policy.allowImplicitInvocation);
 }
 
 function skillMatchesCurrentProduct(skill: SkillRecord): boolean {
@@ -297,7 +301,7 @@ function skillMatchesCurrentProduct(skill: SkillRecord): boolean {
 }
 
 function currentRestrictionProduct(): string | undefined {
-  return normalizeProduct(process.env.HATCH_SKILL_PRODUCT ?? "codex");
+  return normalizeProduct(process.env.HATCH_SKILL_PRODUCT ?? "");
 }
 
 function normalizeProduct(value: string): "codex" | "chatgpt" | "atlas" | undefined {
@@ -452,9 +456,12 @@ export function renderSkillsSection(
     budgetChars?: number;
     contextWindowChars?: number;
     prompt?: string;
+    filterByPrompt?: boolean;
   } = {}
 ): SkillsRenderResult {
-  const filtered = visibleSkillsForPrompt(skills, options.prompt);
+  const filtered = options.filterByPrompt
+    ? visibleSkillsForPrompt(skills, options.prompt)
+    : skills;
   if (filtered.length === 0) {
     return {
       section: "",
@@ -526,46 +533,12 @@ async function skillSearchRoots(options: SkillDiscoveryOptions): Promise<SkillRo
     scope: root.scope ?? "custom",
     followSymlinks: root.followSymlinks ?? true
   })));
-  if (options.workspaceRoot) {
-    roots.push(...await projectCodexSkillRoots(options.workspaceRoot));
-  }
   if (process.env.HATCH_SKILL_ROOTS) {
     roots.push(...process.env.HATCH_SKILL_ROOTS.split(path.delimiter)
       .filter(Boolean)
       .map((root) => ({ path: path.resolve(root), scope: "user" as const, followSymlinks: true })));
   }
 
-  const codexHome = codexHomeDir();
-  const home = process.env.HOME || os.homedir();
-  if (codexHome) {
-    roots.push({
-      path: path.join(codexHome, "skills"),
-      scope: "user",
-      followSymlinks: true
-    });
-  }
-  if (home) {
-    roots.push({
-      path: path.join(home, ".agents", "skills"),
-      scope: "user",
-      followSymlinks: true
-    });
-  }
-  if (codexHome && bundledSkillsEnabled) {
-    roots.push({
-      path: path.join(codexHome, "skills", ".system"),
-      scope: "system",
-      followSymlinks: true
-    });
-  }
-  roots.push({
-    path: "/etc/codex/skills",
-    scope: "admin",
-    followSymlinks: true
-  });
-  if (codexHome) {
-    roots.push(...await codexPluginSkillRoots(codexHome));
-  }
   if (bundledSkillsEnabled) {
     roots.push({
       path: defaultSkillsRoot,
@@ -573,58 +546,7 @@ async function skillSearchRoots(options: SkillDiscoveryOptions): Promise<SkillRo
       followSymlinks: true
     });
   }
-  if (options.workspaceRoot) {
-    roots.push(...await repoSkillRoots(options.workspaceRoot));
-  }
   return roots;
-}
-
-function codexHomeDir(): string | undefined {
-  const configured = process.env.CODEX_HOME?.trim();
-  if (configured) return path.resolve(configured);
-  const home = process.env.HOME || os.homedir();
-  return home ? path.join(home, ".codex") : undefined;
-}
-
-async function codexPluginSkillRoots(codexHome: string): Promise<SkillRoot[]> {
-  const cacheRoot = path.join(codexHome, "plugins", "cache");
-  const marketplaceEntries = await readdir(cacheRoot, { withFileTypes: true }).catch(() => []);
-  const roots: SkillRoot[] = [];
-
-  for (const marketplace of marketplaceEntries) {
-    if (!marketplace.isDirectory()) continue;
-    const marketplaceRoot = path.join(cacheRoot, marketplace.name);
-    const pluginEntries = await readdir(marketplaceRoot, { withFileTypes: true }).catch(() => []);
-    for (const plugin of pluginEntries) {
-      if (!plugin.isDirectory()) continue;
-      const pluginFamilyRoot = path.join(marketplaceRoot, plugin.name);
-      const versionEntries = await readdir(pluginFamilyRoot, { withFileTypes: true }).catch(() => []);
-      for (const version of versionEntries) {
-        if (!version.isDirectory()) continue;
-        roots.push(...await pluginSkillRootsForPluginRoot(path.join(pluginFamilyRoot, version.name)));
-      }
-    }
-  }
-
-  return dedupeRoots(roots.sort((left, right) => left.path.localeCompare(right.path)));
-}
-
-async function pluginSkillRootsForPluginRoot(pluginRoot: string): Promise<SkillRoot[]> {
-  const manifest = await readPluginManifest(pluginRoot);
-  if (!manifest) return [];
-  const pluginNamespace = pluginNamespaceFromManifest(pluginRoot, manifest);
-  const declared = manifest ? pluginManifestSkillPaths(pluginRoot, manifest) : [];
-  const paths = declared.length > 0
-    ? declared
-    : await exists(path.join(pluginRoot, "skills"))
-      ? [path.join(pluginRoot, "skills")]
-      : [];
-  return paths.map((root) => ({
-    path: root,
-    scope: "user" as const,
-    followSymlinks: true,
-    pluginNamespace
-  }));
 }
 
 async function readPluginManifest(pluginRoot: string): Promise<Record<string, unknown> | undefined> {
@@ -644,20 +566,6 @@ async function readPluginManifest(pluginRoot: string): Promise<Record<string, un
   return undefined;
 }
 
-function pluginManifestSkillPaths(pluginRoot: string, manifest: Record<string, unknown>): string[] {
-  const skills = manifest.skills;
-  const values = typeof skills === "string"
-    ? [skills]
-    : Array.isArray(skills)
-      ? skills.filter((value): value is string => typeof value === "string")
-      : [];
-  const resolved = values
-    .map((value) => resolvePluginManifestRelativePath(pluginRoot, value))
-    .filter((value): value is string => Boolean(value))
-    .sort((left, right) => left.localeCompare(right));
-  return [...new Set(resolved)];
-}
-
 function pluginNamespaceFromManifest(pluginRoot: string, manifest: Record<string, unknown>): string {
   const name = typeof manifest.name === "string" ? manifest.name.trim() : "";
   return name || path.basename(pluginRoot);
@@ -672,14 +580,6 @@ async function pluginNamespaceForSkillPath(skillPath: string): Promise<string | 
     if (parent === current) return undefined;
     current = parent;
   }
-}
-
-function resolvePluginManifestRelativePath(pluginRoot: string, value: string): string | undefined {
-  if (!value || !value.startsWith("./")) return undefined;
-  const relative = value.slice(2);
-  if (!relative || relative.split(/[\\/]/).includes("..")) return undefined;
-  const resolved = path.resolve(pluginRoot, relative);
-  return isPathInsideRoot(resolved, pluginRoot) ? resolved : undefined;
 }
 
 function tokenizeCommand(command: string): string[] {
@@ -760,60 +660,6 @@ async function skillForDocumentPath(skills: SkillRecord[], documentPath: string)
 
 async function canonicalPath(target: string): Promise<string> {
   return realpath(target).catch(() => path.resolve(target));
-}
-
-async function repoSkillRoots(workspaceRoot: string): Promise<SkillRoot[]> {
-  const start = path.resolve(workspaceRoot);
-  const projectRoot = await findProjectRoot(start);
-  const dirs = dirsBetween(projectRoot, start);
-  return dirs.map((dir) => ({
-    path: path.join(dir, ".agents", "skills"),
-    scope: "repo" as const,
-    followSymlinks: true
-  }));
-}
-
-async function projectCodexSkillRoots(workspaceRoot: string): Promise<SkillRoot[]> {
-  const start = path.resolve(workspaceRoot);
-  const projectRoot = await findProjectRoot(start);
-  const dirs = dirsBetween(projectRoot, start);
-  return dirs.map((dir) => ({
-    path: path.join(dir, ".codex", "skills"),
-    scope: "repo" as const,
-    followSymlinks: true
-  }));
-}
-
-async function findProjectRoot(start: string): Promise<string> {
-  const markers = (await loadRuntimeSkillsConfig()).projectRootMarkers;
-  if (markers.length === 0) {
-    return start;
-  }
-  let current = start;
-  while (true) {
-    for (const marker of markers) {
-      if (await exists(path.join(current, marker))) {
-        return current;
-      }
-    }
-    const parent = path.dirname(current);
-    if (parent === current) return start;
-    current = parent;
-  }
-}
-
-function dirsBetween(projectRoot: string, cwd: string): string[] {
-  const dirs: string[] = [];
-  let current = path.resolve(cwd);
-  const root = path.resolve(projectRoot);
-  while (true) {
-    dirs.push(current);
-    if (current === root) break;
-    const parent = path.dirname(current);
-    if (parent === current) break;
-    current = parent;
-  }
-  return dirs;
 }
 
 async function loadSkillRoot(root: SkillRoot): Promise<SkillRecord[]> {
@@ -1094,9 +940,7 @@ async function loadBundledSkillsEnabled(): Promise<boolean> {
 }
 
 async function loadRuntimeSkillsConfig(): Promise<RuntimeSkillsConfig> {
-  const codexHome = codexHomeDir();
-  const configPath = process.env.HATCH_CODEX_CONFIG
-    ?? (codexHome ? path.join(codexHome, "config.toml") : "");
+  const configPath = process.env.HATCH_SKILLS_CONFIG ?? "";
   if (!configPath) return defaultRuntimeSkillsConfig();
   const raw = await readFile(configPath, "utf8").catch(() => "");
   if (!raw) return defaultRuntimeSkillsConfig();
@@ -1348,7 +1192,7 @@ function renderSkillLines(skillLines: RenderableSkillLine[], budgetChars: number
         truncated_description_chars: truncatedChars,
         truncated_description_count: truncatedCount,
         ...(averageTruncatedDescriptionChars(ordered.length, truncatedChars) > skillDescriptionTruncationWarningThresholdChars
-          ? { warning_message: "Skill descriptions were shortened to fit the skills context budget. Codex can still see every skill, but some descriptions are shorter. Disable unused skills or plugins to leave more room for the rest." }
+          ? { warning_message: "Skill descriptions were shortened to fit the skills context budget. The model can still see every skill, but some descriptions are shorter. Disable unused skills to leave more room for the rest." }
           : {})
       }
     };

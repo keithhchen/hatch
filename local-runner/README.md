@@ -95,7 +95,7 @@ For a long-lived Tauri or CLI sidecar, run `serve`. It reads newline-delimited
 JSON `tool_call.request` messages from stdin and writes one newline-delimited
 JSON response to stdout for each request. This process is intentionally
 stateless beyond the sandbox and audit log; session history, skill loading,
-approval decisions, and LLM calls stay on the TypeScript server.
+policy decisions, and LLM calls stay on the TypeScript server.
 
 ## Patch Format
 
@@ -135,7 +135,7 @@ cargo run -- --sandbox /tmp/hatch-app read notes/lorem.txt
 cargo run -- --sandbox /tmp/hatch-app tool-call \
   --request '{"type":"tool_call.request","run_id":"run_1","tool_call_id":"call_1","name":"fs.read","arguments":{"path":"notes/lorem.txt"},"approval":"auto"}'
 cargo run -- --sandbox /tmp/hatch-app tool-call \
-  --request '{"type":"tool_call.request","run_id":"run_1","tool_call_id":"call_2","name":"shell.exec","arguments":{"command":"pwd","timeout_ms":30000},"approval":"ask"}'
+  --request '{"type":"tool_call.request","run_id":"run_1","tool_call_id":"call_2","name":"shell.exec","arguments":{"command":"pwd","timeout_ms":30000},"approval":"auto"}'
 cargo run -- --sandbox /tmp/hatch-app serve
 ```
 

@@ -65,6 +65,8 @@ export class ClientToolBroker {
           name,
           arguments: parsedArgs,
           status: "failed",
+          locality: "client",
+          approval,
           error: { message: `Timed out waiting for client tool result: ${name}` }
         });
         reject(new Error(`Timed out waiting for client tool result: ${name}`));
@@ -92,7 +94,9 @@ export class ClientToolBroker {
       tool_call_id: toolCallId,
       name,
       arguments: parsedArgs,
-      status: "requested"
+      status: "requested",
+      locality: "client",
+      approval
     });
     if (approval === "ask") {
       await this.emit({
@@ -128,6 +132,8 @@ export class ClientToolBroker {
         name: pending.name,
         arguments: pending.arguments,
         status: "failed",
+        locality: "client",
+        approval: pending.approval,
         error: message.error
       });
       await pending.state?.resumeFromTool().catch(() => undefined);
@@ -144,6 +150,8 @@ export class ClientToolBroker {
       name: pending.name,
       arguments: pending.arguments,
       status: "completed",
+      locality: "client",
+      approval: pending.approval,
       result: message.result ?? {}
     });
     await pending.state?.resumeFromTool().catch(() => undefined);
@@ -177,6 +185,8 @@ export class ClientToolBroker {
       name: pending.name,
       arguments: pending.arguments,
       status: "cancelled",
+      locality: "client",
+      approval: pending.approval,
       error: { message: reason }
     });
     await this.emit({

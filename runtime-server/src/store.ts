@@ -22,6 +22,41 @@ export type VisibleConversationMessage = {
   role: "user" | "assistant";
   content: string;
   timestamp: string;
+  tool_calls?: VisibleConversationToolCall[];
+  skill_events?: VisibleConversationSkillEvent[];
+};
+
+export type VisibleConversationToolCall = {
+  run_id: string;
+  tool_call_id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+  status: "requested" | "completed" | "failed" | "cancelled";
+  locality?: "server" | "client";
+  approval?: "none" | "auto" | "ask";
+  result?: unknown;
+  error?: unknown;
+  first_timestamp: string;
+  timestamp: string;
+};
+
+export type VisibleConversationSkillEvent = {
+  run_id: string;
+  name: string;
+  path: string;
+  scope?: string;
+  status: "activated" | "invoked";
+  invocation_type: "explicit" | "implicit";
+  reason: "explicit_mention" | "script_run" | "skill_doc_read";
+  source_tool_call_id?: string;
+  trigger?: {
+    tool: "shell_exec" | "file_read";
+    command?: string;
+    path?: string;
+  };
+  resource_paths?: string[];
+  resource_manifest_truncated?: boolean;
+  timestamp: string;
 };
 
 export type StoreEvent =
@@ -72,6 +107,8 @@ export type StoreEvent =
       name: string;
       arguments: Record<string, unknown>;
       status: "requested" | "completed" | "failed" | "cancelled";
+      locality?: "server" | "client";
+      approval?: "none" | "auto" | "ask";
       result?: unknown;
       error?: unknown;
       timestamp: string;
@@ -183,16 +220,95 @@ export class RuntimeStore {
 
   async readVisibleConversation(conversationId: string): Promise<VisibleConversationMessage[]> {
     const events = await this.readEvents();
+    const toolCallsByRun = new Map<string, Map<string, VisibleConversationToolCall>>();
+    const skillEventsByRun = new Map<string, VisibleConversationSkillEvent[]>();
+    const skillEventKeysByRun = new Map<string, Set<string>>();
+    const appendVisibleSkillEvent = (event: VisibleConversationSkillEvent): void => {
+      const runSkillEvents = skillEventsByRun.get(event.run_id) ?? [];
+      const runSkillKeys = skillEventKeysByRun.get(event.run_id) ?? new Set<string>();
+      const key = visibleSkillEventKey(event);
+      if (runSkillKeys.has(key)) {
+        return;
+      }
+      runSkillEvents.push(event);
+      runSkillKeys.add(key);
+      skillEventsByRun.set(event.run_id, runSkillEvents);
+      skillEventKeysByRun.set(event.run_id, runSkillKeys);
+    };
+    for (const event of events) {
+      if (event.type === "tool.call" && event.conversation_id === conversationId) {
+        const runTools = toolCallsByRun.get(event.run_id) ?? new Map<string, VisibleConversationToolCall>();
+        const existing = runTools.get(event.tool_call_id);
+        runTools.set(event.tool_call_id, {
+          run_id: event.run_id,
+          tool_call_id: event.tool_call_id,
+          name: event.name,
+          arguments: event.arguments,
+          status: event.status,
+          locality: event.locality ?? existing?.locality,
+          approval: event.approval ?? existing?.approval,
+          result: event.result ?? existing?.result,
+          error: event.error ?? existing?.error,
+          first_timestamp: existing?.first_timestamp ?? event.timestamp,
+          timestamp: event.timestamp
+        });
+        toolCallsByRun.set(event.run_id, runTools);
+      }
+      if (event.type === "skill.activated" && event.conversation_id === conversationId) {
+        appendVisibleSkillEvent({
+          run_id: event.run_id,
+          name: event.name,
+          path: event.path,
+          scope: event.scope,
+          status: "activated",
+          invocation_type: "explicit",
+          reason: "explicit_mention",
+          resource_paths: event.resource_paths,
+          resource_manifest_truncated: event.resource_manifest_truncated,
+          timestamp: event.timestamp
+        });
+      }
+      if (event.type === "skill.invoked" && event.conversation_id === conversationId) {
+        appendVisibleSkillEvent({
+          run_id: event.run_id,
+          name: event.name,
+          path: event.path,
+          scope: event.scope,
+          status: "invoked",
+          invocation_type: event.invocation_type,
+          reason: event.reason,
+          source_tool_call_id: event.source_tool_call_id,
+          trigger: event.trigger,
+          timestamp: event.timestamp
+        });
+      }
+    }
+
     return events
       .filter((event): event is Extract<StoreEvent, { type: "message.created" }> => (
         event.type === "message.created" && event.conversation_id === conversationId
       ))
-      .map((event) => ({
-        run_id: event.run_id,
-        role: event.role,
-        content: event.content,
-        timestamp: event.timestamp
-      }));
+      .map((event) => {
+        const message: VisibleConversationMessage = {
+          run_id: event.run_id,
+          role: event.role,
+          content: event.content,
+          timestamp: event.timestamp
+        };
+        if (event.role === "assistant") {
+          const toolCalls = [...(toolCallsByRun.get(event.run_id)?.values() ?? [])]
+            .sort((left, right) => left.first_timestamp.localeCompare(right.first_timestamp));
+          if (toolCalls.length > 0) {
+            message.tool_calls = toolCalls;
+          }
+          const skillEvents = [...(skillEventsByRun.get(event.run_id) ?? [])]
+            .sort((left, right) => left.timestamp.localeCompare(right.timestamp));
+          if (skillEvents.length > 0) {
+            message.skill_events = skillEvents;
+          }
+        }
+        return message;
+      });
   }
 
   async readCompactionState(conversationId: string): Promise<{
@@ -217,4 +333,14 @@ export class RuntimeStore {
     return state;
   }
 
+}
+
+function visibleSkillEventKey(event: VisibleConversationSkillEvent): string {
+  return [
+    event.run_id,
+    event.status,
+    event.path,
+    event.reason,
+    event.source_tool_call_id ?? ""
+  ].join("\u0000");
 }

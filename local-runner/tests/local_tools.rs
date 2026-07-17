@@ -114,6 +114,30 @@ fn searches_utf8_files_with_synthetic_placeholders() {
 }
 
 #[test]
+fn search_matches_workspace_relative_file_paths() {
+    let temp = tempdir().unwrap();
+    let runner = LocalRunner::new(temp.path()).unwrap();
+
+    runner
+        .write_file(
+            "legal-samples/acme-analytics-saas-agreement.md",
+            "# SaaS Agreement\nNo filename appears in this content.",
+        )
+        .unwrap();
+
+    let matches = runner
+        .search(".", "acme-analytics-saas-agreement", 10)
+        .unwrap();
+    assert_eq!(matches.len(), 1);
+    assert_eq!(
+        matches[0].path,
+        "legal-samples/acme-analytics-saas-agreement.md"
+    );
+    assert_eq!(matches[0].line_number, 0);
+    assert_eq!(matches[0].line, "path match");
+}
+
+#[test]
 fn applies_append_and_replace_patches() {
     let temp = tempdir().unwrap();
     let runner = LocalRunner::new(temp.path()).unwrap();

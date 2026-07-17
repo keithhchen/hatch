@@ -383,7 +383,7 @@ export class LocalHarnessSession {
     if (!enabled.has(request.name as ClientToolName)) {
       return toolCallError(request, "tool_disabled", `Local tool is not enabled for this harness: ${request.name}`);
     }
-    if (request.name === "shell.exec" && !this.options.allowShell) {
+    if (request.name === "shell.exec" && !this.shellEnabled()) {
       return toolCallError(request, "tool_disabled", "shell.exec is disabled for this harness run");
     }
 
@@ -396,11 +396,15 @@ export class LocalHarnessSession {
       }
     }
 
-    return executeLocalTool(request, this.workspace, Boolean(this.options.allowShell));
+    return executeLocalTool(request, this.workspace, this.shellEnabled());
   }
 
   private declaredLocalTools(): ClientToolName[] {
-    return this.options.localTools ?? enabledTools(Boolean(this.options.allowShell));
+    return this.options.localTools ?? enabledTools(this.shellEnabled());
+  }
+
+  private shellEnabled(): boolean {
+    return this.options.allowShell !== false;
   }
 }
 
@@ -758,7 +762,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     serverUrl,
     workspace,
     conversationId,
-    allowShell: args.has("--allow-shell"),
+    allowShell: !args.has("--no-shell"),
     rustRunnerBin
   };
 

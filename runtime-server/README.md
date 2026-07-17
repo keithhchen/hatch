@@ -27,7 +27,7 @@ pnpm run build
 pnpm run test
 ```
 
-The default runtime is deterministic so protocol and local tool execution can be tested without an API key.
+Tests inject a deterministic fake runtime where needed. The server entrypoint itself always uses the Chat Completions runtime.
 
 ## Skills And Tools
 
@@ -46,34 +46,28 @@ Skills use the Agent Skills file format:
 At session startup the server discovers skills from:
 
 ```text
-workspace/.codex/skills
-workspace/.agents/skills
-workspace ancestors up to the project root
-$CODEX_HOME/skills
-$HOME/.agents/skills
-$CODEX_HOME/skills/.system
-/etc/codex/skills
-plugin manifests under $CODEX_HOME/plugins/cache/*/*/*/
 runtime-server/skills
+HATCH_SKILL_ROOTS
+explicit roots passed by the creator/runtime package
 ```
 
-`CODEX_HOME` defaults to `$HOME/.codex` when unset. Plugin roots follow Codex's plugin manifest rules: `.codex-plugin/plugin.json` is read first, `.claude-plugin/plugin.json` is the fallback, `skills` must be a `"./..."` path or array relative to the plugin root, and missing `skills` falls back to `plugin_root/skills` when that directory exists. Symlinked skill folders are followed in each discovery location.
+It does not scan workspace `.codex/skills`, workspace ancestor `.codex/skills`, `$CODEX_HOME/skills`, `$CODEX_HOME/skills/.system`, `$CODEX_HOME/plugins/cache`, `/etc/codex/skills`, or `~/.codex` by default. Symlinked skill folders are followed inside configured server-side skill roots.
 
-Repo-scoped skill discovery honors Codex's `project_root_markers` setting from config. The default marker is `.git`; an empty array disables ancestor root detection and keeps discovery anchored at the current workspace root.
+`HATCH_SKILL_ROOTS` is a path-delimited list of creator/server-owned skill roots. Use it for local development or packaged creator app skills; do not rely on user workspace folders as implicit skill sources.
 
-Codex-style project instructions are loaded from `AGENTS.md` files along the path from the detected project root to the current workspace root. In each directory, `AGENTS.override.md` wins over `AGENTS.md`; additional fallback filenames can be configured with `project_doc_fallback_filenames`. `project_doc_max_bytes` caps the total injected project-doc bytes, and `0` disables project-doc injection.
+Project instructions are loaded from `AGENTS.md` files along the path from the detected project root to the current workspace root. In each directory, `AGENTS.override.md` wins over `AGENTS.md`; additional fallback filenames can be configured with `project_doc_fallback_filenames`. `project_root_markers` controls project-doc root detection only, not skill discovery. `project_doc_max_bytes` caps the total injected project-doc bytes, and `0` disables project-doc injection.
 
-`agents/openai.yaml` is parsed for Codex metadata. `policy.allow_implicit_invocation: false` hides the skill from implicit model selection; explicit `$skill-name` mentions or linked `[$skill-name](/path/to/SKILL.md)` mentions make it visible for that turn. `policy.products` is enforced with Codex's product restriction semantics; Hatch defaults to `codex`, and `HATCH_SKILL_PRODUCT` can be set to `chatgpt` or `atlas` for tests or alternate surfaces.
+`agents/openai.yaml` is parsed for OpenAI Agent Skills metadata. `policy.allow_implicit_invocation: false` hides the skill from implicit model selection; explicit `$skill-name` mentions or linked `[$skill-name](/path/to/SKILL.md)` mentions still activate it for that turn. `policy.products` is enforced only when `HATCH_SKILL_PRODUCT` is set to `codex`, `chatgpt`, or `atlas`; by default product-restricted skills are not model-visible.
 
-The runtime also mirrors Codex's skill invocation tracking on the event stream. Explicit `$skill-name` or linked skill mentions emit `skill.activated` when the server injects that skill for the turn. Implicit use detected from a skill script run or `SKILL.md` read emits `skill.invoked` and persists `skill.invoked`. This records invocation without auto-injecting additional skill instructions; full instructions still arrive through progressive disclosure by reading `SKILL.md`.
+The runtime tracks skill invocation on the event stream. Explicit `$skill-name` or linked skill mentions emit `skill.activated` when the server injects that skill for the turn. Implicit use detected from a skill script run or `SKILL.md` read emits `skill.invoked` and persists `skill.invoked`. This records invocation without auto-injecting additional skill instructions; full instructions still arrive through progressive disclosure by reading `SKILL.md`.
 
-The model-visible skills list follows Codex progressive-disclosure budgeting: it uses at most 2% of a known model context window, or 8,000 characters when the context window is unknown. Set `HATCH_MODEL_CONTEXT_WINDOW_CHARS` when a provider exposes a known window. `HATCH_SKILL_METADATA_BUDGET_CHARS` can override the computed value for deterministic tests or constrained deployments.
+The model-visible skills list follows Agent Skills progressive-disclosure budgeting: it uses at most 2% of a known model context window, or 8,000 characters when the context window is unknown. Set `HATCH_MODEL_CONTEXT_WINDOW_CHARS` when a provider exposes a known window. `HATCH_SKILL_METADATA_BUDGET_CHARS` can override the computed value for deterministic tests or constrained deployments.
 
-`~/.codex/config.toml` can configure skills and project docs using Codex-compatible tables. `project_root_markers` controls repo root detection for `.codex/skills`, `.agents/skills`, and `AGENTS.md` project docs. `include_instructions = false` suppresses the automatic model-visible skills catalog for each turn. `[skills.bundled].enabled = false` excludes system/bundled skill roots. `[[skills.config]]` entries configure individual skills by path or by skill name. Rules are applied in file order, so a later name selector can override an earlier path selector and vice versa:
+`HATCH_SKILLS_CONFIG=/path/to/config.toml` can configure skills and project docs. `project_root_markers` controls `AGENTS.md` project-doc root detection. `include_instructions = false` suppresses the session skills catalog. `[skills.bundled].enabled = false` excludes bundled `runtime-server/skills`. `[[skills.config]]` entries configure individual skills by path or by skill name. Rules are applied in file order, so a later name selector can override an earlier path selector and vice versa:
 
 ```toml
 project_root_markers = [".git"]
-project_doc_fallback_filenames = ["CODEX.md"]
+project_doc_fallback_filenames = ["PROJECT.md"]
 project_doc_max_bytes = 32768
 
 [skills]
@@ -112,36 +106,38 @@ The server builds base instructions for each model call from:
 
 ```text
 system: runtime identity, security rules, and tool execution boundaries
-user context: Codex-style AGENTS.md project instructions
-user context: server-rendered per-turn Agent Skills catalog
+user context: AGENTS.md project instructions loaded for the session
+user context: server-rendered per-session Agent Skills catalog
 user context: current-turn activated skill instructions
 conversation: server-hydrated prior user/assistant messages
 conversation: current user message
 ```
 
-AGENTS.md project instructions use Codex's `# AGENTS.md instructions ... <INSTRUCTIONS>` user-context shape. Skill catalog and current-turn activated skill instructions are injected as server-authored `user` context messages prefixed with `HATCH RUNTIME CONTEXT`. They are deliberately not system instructions: the system prompt keeps only runtime/security/tool boundaries, while project docs and skill content remain task context with ordinary user-message priority. Context compaction excludes these server context messages because the server rebuilds them on every model call.
+`client.hello` initializes the session skill context once: the server discovers skills, renders the catalog, loads project instructions, and stores that context on the WebSocket session. Later `client.message` turns reuse the same rendered catalog so the model-call prefix stays stable for prompt caching. New sessions discover again.
+
+AGENTS.md project instructions use a `# AGENTS.md instructions ... <INSTRUCTIONS>` user-context shape. Skill catalog and current-turn activated skill instructions are injected as server-authored `user` context messages prefixed with `HATCH RUNTIME CONTEXT`. They are deliberately not system instructions: the system prompt keeps only runtime/security/tool boundaries, while project docs and skill content remain task context with ordinary user-message priority. Context compaction excludes these server context messages because the server rebuilds them on every model call from the fixed session context.
 
 Model-visible function tools are generated from the canonical runtime tool spec registry in `tools.ts`. Server tools are always owned by the runtime server. Client tools are exposed only when the `client.hello.local_tools` session capability says the local harness can execute them.
 `file_read` and `file_list` are hybrid specs: server-hosted Skill resource paths execute on the server; workspace paths require the matching local client capability.
-`shell_exec` accepts a Codex-style `justification` field for user-facing approval context. Hatch forwards that reason through the approval event stream but does not expose unsandboxed execution; the local Rust harness still enforces workspace containment and deterministic execution policy.
-When a server-hosted `SKILL.md` is read successfully, the `file_read` result includes the skill directory plus a resource manifest for files under `references/`, `scripts/`, and `assets/` without reading those files eagerly. Resource manifests are capped at 200 files and include a truncation flag when more files exist. The runtime records a `skill.activated` audit event, and the full instructions are available only for the current turn unless the skill is re-mentioned or read again. Explicitly mentioned skills are injected in the Codex-style `<skill><name>...</name><path>...</path>...</skill>` block with the full `SKILL.md` instructions and the same `<skill_resources>` manifest. A model-driven `file_read` of `SKILL.md` also returns the complete resource. Relative paths under `references/`, `scripts/`, and `assets/` resolve against the current-turn activated skill directory; if multiple activated skills match the same relative path, the model must use the full skill resource path. This preserves Agent Skills progressive disclosure across multi-turn Chat Completions sessions without carrying skill bodies across turns.
+`shell_exec` accepts an optional `justification` field as model-visible reasoning context for the command. Local tools currently run with `auto` permission when the client declares the capability; the local Rust harness still enforces workspace containment and deterministic execution policy.
+When a server-hosted `SKILL.md` is read successfully, the `file_read` result includes the skill directory plus a resource manifest for files under `references/`, `scripts/`, and `assets/` without reading those files eagerly. Resource manifests are capped at 200 files and include a truncation flag when more files exist. The runtime records a `skill.activated` audit event, and the full instructions are available only for the current turn unless the skill is re-mentioned or read again. Explicitly mentioned skills are injected in a `<skill><name>...</name><path>...</path>...</skill>` block with the full `SKILL.md` instructions and the same `<skill_resources>` manifest. A model-driven `file_read` of `SKILL.md` also returns the complete resource. Relative paths under `references/`, `scripts/`, and `assets/` resolve against the current-turn activated skill directory; if multiple activated skills match the same relative path, the model must use the full skill resource path. This preserves Agent Skills progressive disclosure across multi-turn Chat Completions sessions without carrying skill bodies across turns.
 
-Activated Skill `allowed-tools` frontmatter is treated as protocol-level preapproval for matching client-local tools that would otherwise require `ask`. It applies as soon as the skill is activated, including later tool calls in the same run after the model reads `SKILL.md`. It never exposes a tool missing from `client.hello.local_tools`, never grants access to server tools, and never bypasses workspace containment. Current mappings are intentionally small: `Read`/`List`/`Search` map to read-only `fs.*` tools, `Write` maps to `fs.write`, `Edit` maps to `fs.patch`, and `Bash(git:*)` preapproves only `shell.exec` commands whose first command token is `git`.
+Activated Skill `allowed-tools` frontmatter is parsed and preserved for protocol fidelity and future policy tightening. In the current max-permission runtime, local tools already run as `auto`, so `allowed-tools` does not add permission beyond `client.hello.local_tools`, does not grant server tools, and never bypasses workspace containment. Current mappings remain intentionally small for when approval policies are reintroduced: `Read`/`List`/`Search` map to read-only `fs.*` tools, `Write` maps to `fs.write`, `Edit` maps to `fs.patch`, and `Bash(git:*)` matches only `shell.exec` commands whose first command token is `git`.
 
 The tool call loop is:
 
 ```text
 model tool_call
 -> tool_call.delta requested
--> approval.request with tool arguments and optional reason when a client-local tool needs approval
 -> server tool execution or tool_call.request to local harness
 -> tool_call.result from local harness when client-local
--> approval.result approved/denied when applicable
 -> tool_call.delta completed/failed/cancelled
 -> workspace.diff when a completed local write/patch returns file changes
 -> tool result message appended back into Chat Completions
 -> next model call or turn.completed
 ```
+
+The current default runtime is max-permission: all declared client-local tools run as `auto`, so the normal user path emits no approval gate. `approval.request` and `approval.result` remain protocol event types only for a future restricted policy mode.
 
 Run lifecycle state is streamed separately as `turn.state`: an accepted run first emits `queued`, then `running`, `waiting_for_tool`, `compacting`, `completed`, `failed`, or `cancelled` as the server-owned state machine transitions. Successful runs stream `turn.completed` before the terminal `turn.state: completed`, so clients can render the answer and then close the turn when the state machine completes.
 `turn.cancel` is scoped to the target `run_id`: unknown runs return `unknown_run`, and cancellation never cancels pending tools for a different run on the same socket.
@@ -195,7 +191,7 @@ Auto compaction is enabled when a context limit is configured:
 ```text
 HATCH_MODEL_CONTEXT_WINDOW_TOKENS=128000   # auto compact at 90%
 HATCH_AUTO_COMPACT_LIMIT_TOKENS=115200     # direct override
-HATCH_COMPACTION_MODEL=deepseek-v4-pro     # optional summary model
+HATCH_COMPACTION_MODEL=kimi-k2.6           # optional summary model
 ```
 
 ## Run Locally
@@ -224,6 +220,8 @@ assistant> ...
 tools> shell.exec
 ```
 
+The dev harness declares the full local tool set by default, including `shell.exec`. Pass `--no-shell` only when you need to simulate a restricted local client.
+
 Use `/exit` or `/quit` to close the chat.
 
 By default this package's dev harness executes local tools with Node.js so tests can run without the desktop app. To run the production-shaped local path, point the harness at the Rust sidecar:
@@ -247,20 +245,22 @@ pnpm run client -- --trace \
   --prompt "Find Hatch. Save a summary."
 ```
 
-## Use Chat Completions Runtime
+## Configure The Runtime
 
-Set the runtime selector and model in `.env`:
+Set the model and credentials in `.env`:
 
 ```text
-HATCH_AGENT_RUNTIME=chat-completions
-HATCH_CREATOR_MODEL=deepseek-v4-pro
+HATCH_CREATOR_MODEL=kimi-k2.6
 PORT=8400
-OPENAI_API_KEY=...
-OPENAI_BASE_URL=...
+MOONSHOT_API_KEY=...
+OPENAI_BASE_URL=https://api.moonshot.cn/v1
+HATCH_MODEL_CONTEXT_WINDOW_TOKENS=256000
 HATCH_MCP_SERVERS='{"docs":{"url":"https://example.com/mcp"}}'
 ```
 
-`OPENAI_BASE_URL` is only needed when using an OpenAI-compatible provider endpoint.
+Kimi K2.6 is the default because it is OpenAI-compatible and supports multimodal input.
+Use Kimi's official `MOONSHOT_API_KEY` variable for Kimi credentials. The runtime also accepts `OPENAI_API_KEY` as a compatibility fallback for other OpenAI-compatible providers.
+`OPENAI_BASE_URL` falls back to `https://api.moonshot.cn/v1`, but keep it explicit in `.env` so provider changes are obvious. Use the `.ai` endpoint only with a matching international Kimi key.
 `HATCH_MCP_SERVERS` is optional. When set, the model can call `mcp_call`; the server sends MCP `tools/call` JSON-RPC requests and the client never sees MCP credentials.
 
 Then run:
@@ -284,15 +284,13 @@ tool_call.result
 turn.cancel
 ```
 
-Outbound:
+Default outbound:
 
 ```text
 session.ready
 turn.state
 assistant.delta
 session.compacted
-approval.request
-approval.result
 skill.activated
 skill.invoked
 tool_call.delta
@@ -300,6 +298,13 @@ workspace.diff
 tool_call.request
 turn.completed
 turn.failed
+```
+
+Future restricted-mode outbound schema entries:
+
+```text
+approval.request
+approval.result
 ```
 
 Execution surface:

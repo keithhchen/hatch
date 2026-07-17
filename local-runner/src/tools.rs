@@ -15,6 +15,9 @@ use walkdir::WalkDir;
 
 const MAX_COMMAND_OUTPUT_BYTES: usize = 1024 * 1024;
 const MAX_WORKSPACE_DIFF_BYTES: usize = 64 * 1024;
+const MAX_SEARCH_FILES_SCANNED: usize = 2_000;
+const MAX_SEARCH_FILE_BYTES: u64 = 1024 * 1024;
+const MAX_SEARCH_ELAPSED: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone)]
 pub struct LocalRunner {
@@ -290,60 +293,100 @@ impl LocalRunner {
         query: &str,
         max_results: usize,
     ) -> Result<Vec<SearchMatch>> {
+        let query = query.trim();
+        if query.is_empty() || max_results == 0 {
+            return Ok(Vec::new());
+        }
+
         let resolved = self.sandbox.resolve_existing(path)?;
         let metadata = fs::metadata(&resolved.absolute)
             .map_err(|source| LocalRunnerError::io(&resolved.absolute, source))?;
 
-        let mut files = Vec::new();
+        let started_at = Instant::now();
+        let mut scanned_files = 0usize;
+        let mut matches = Vec::new();
         if metadata.is_file() {
-            files.push(resolved.absolute.clone());
+            self.search_file(&resolved.absolute, query, max_results, &mut matches)?;
         } else if metadata.is_dir() {
-            for entry in WalkDir::new(&resolved.absolute).follow_links(false) {
+            let walker = WalkDir::new(&resolved.absolute)
+                .follow_links(false)
+                .into_iter()
+                .filter_entry(|entry| {
+                    entry.depth() == 0
+                        || !self.sandbox.is_reserved_path(entry.path())
+                            && !is_search_ignored_entry(entry.file_name().to_string_lossy().as_ref())
+                });
+            for entry in walker {
+                if matches.len() >= max_results
+                    || scanned_files >= MAX_SEARCH_FILES_SCANNED
+                    || started_at.elapsed() >= MAX_SEARCH_ELAPSED
+                {
+                    break;
+                }
                 let entry = entry.map_err(|source| walkdir_error(&resolved.absolute, source))?;
                 if self.sandbox.is_reserved_path(entry.path()) {
                     continue;
                 }
                 if entry.file_type().is_file() {
-                    files.push(entry.path().to_path_buf());
+                    scanned_files += 1;
+                    self.search_file(entry.path(), query, max_results, &mut matches)?;
                 }
             }
-            files.sort();
         } else {
             return Err(LocalRunnerError::ExpectedFile(
                 resolved.relative.display().to_string(),
             ));
         }
 
-        let mut matches = Vec::new();
-        for file in files {
+        Ok(matches)
+    }
+
+    fn search_file(
+        &self,
+        file: &Path,
+        query: &str,
+        max_results: usize,
+        matches: &mut Vec<SearchMatch>,
+    ) -> Result<()> {
+        let relative_path = self.sandbox.to_relative_string(file);
+        if relative_path.contains(query) {
+            matches.push(SearchMatch {
+                path: relative_path.clone(),
+                line_number: 0,
+                line: "path match".to_string(),
+            });
             if matches.len() >= max_results {
-                break;
+                return Ok(());
             }
+        }
 
-            let bytes = match fs::read(&file) {
-                Ok(bytes) => bytes,
-                Err(source) => return Err(LocalRunnerError::io(&file, source)),
-            };
-            let Ok(content) = String::from_utf8(bytes) else {
-                continue;
-            };
+        let metadata = fs::metadata(file).map_err(|source| LocalRunnerError::io(file, source))?;
+        if metadata.len() > MAX_SEARCH_FILE_BYTES {
+            return Ok(());
+        }
+        let bytes = match fs::read(file) {
+            Ok(bytes) => bytes,
+            Err(source) => return Err(LocalRunnerError::io(file, source)),
+        };
+        let Ok(content) = String::from_utf8(bytes) else {
+            return Ok(());
+        };
 
-            for (line_index, line) in content.lines().enumerate() {
-                if line.contains(query) {
-                    matches.push(SearchMatch {
-                        path: self.sandbox.to_relative_string(&file),
-                        line_number: line_index + 1,
-                        line: line.to_string(),
-                    });
+        for (line_index, line) in content.lines().enumerate() {
+            if line.contains(query) {
+                matches.push(SearchMatch {
+                    path: relative_path.clone(),
+                    line_number: line_index + 1,
+                    line: line.to_string(),
+                });
 
-                    if matches.len() >= max_results {
-                        break;
-                    }
+                if matches.len() >= max_results {
+                    break;
                 }
             }
         }
 
-        Ok(matches)
+        Ok(())
     }
 
     fn read_file_inner(&self, path: &Path) -> Result<String> {
@@ -622,6 +665,25 @@ fn is_xlsx_path(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| extension.eq_ignore_ascii_case("xlsx"))
+}
+
+fn is_search_ignored_entry(name: &str) -> bool {
+    if name.starts_with('.') {
+        return true;
+    }
+
+    matches!(
+        name,
+        "node_modules"
+            | "target"
+            | "dist"
+            | "build"
+            | ".git"
+            | "__pycache__"
+            | "Library"
+            | "Caches"
+            | "Cache"
+    )
 }
 
 fn read_xlsx_as_text(path: &Path) -> Result<String> {

@@ -228,6 +228,7 @@ p {
 .chat-shell {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
+  min-width: 0;
   min-height: 100vh;
 }
 
@@ -251,22 +252,27 @@ p {
 }
 
 .thread-root {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  height: calc(100vh - 68px);
+  min-width: 0;
   min-height: 0;
 }
 
 .thread-viewport {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  height: calc(100vh - 68px);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
   overflow: auto;
-  padding: 22px 24px 0;
+  padding: 22px 24px;
   scroll-behavior: smooth;
 }
 
 .empty-thread {
   align-self: center;
   color: #5e6862;
-  justify-self: center;
+  margin: auto;
   max-width: 560px;
   padding: 12vh 24px;
   text-align: center;
@@ -294,38 +300,59 @@ p {
 }
 
 .chat-message {
-  display: flex;
-  flex-direction: column;
+  align-content: start;
+  display: grid;
+  flex: 0 0 auto;
   gap: 8px;
-  margin: 0 auto 18px;
+  height: auto !important;
+  isolation: isolate;
+  margin: 0 auto 22px;
   max-width: 900px;
+  min-height: max-content;
+  min-width: 0;
+  overflow: visible;
+  position: relative;
   width: min(900px, 100%);
 }
 
 .chat-message.user {
-  align-items: flex-end;
+  justify-items: end;
+  z-index: 1;
+}
+
+.chat-message.user + .chat-message.assistant {
+  margin-top: 10px;
 }
 
 .chat-message.assistant {
-  align-items: flex-start;
+  justify-items: start;
+  z-index: 2;
 }
 
 .message-surface {
   line-height: 1.55;
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 
 .message-surface.user {
+  align-self: start;
   background: #202522;
   border-radius: 8px;
   color: #fff;
   max-width: min(640px, 76%);
+  min-width: 0;
+  overflow-wrap: anywhere;
   padding: 10px 13px;
+  width: fit-content;
+  word-break: break-word;
 }
 
 .message-surface.assistant {
   color: #202522;
+  min-width: 0;
   max-width: min(840px, 100%);
+  width: 100%;
 }
 
 .run-summary {
@@ -351,12 +378,18 @@ p {
 .markdown-container {
   display: grid;
   gap: 10px;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .markdown-body {
   color: #202522;
   font-size: 15px;
   line-height: 1.64;
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .markdown-body p,
@@ -381,18 +414,81 @@ p {
   padding-left: 22px;
 }
 
+.markdown-body li {
+  margin: 0 0 8px;
+  min-width: 0;
+  padding-left: 2px;
+}
+
+.markdown-body li:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-body li > p {
+  display: inline;
+  margin: 0;
+}
+
+.markdown-body li > p + p,
+.markdown-body li > ul,
+.markdown-body li > ol,
+.markdown-body li > pre,
+.markdown-body li > blockquote {
+  display: block;
+  margin-top: 8px;
+}
+
+.markdown-body ul:has(> .markdown-task-item) {
+  list-style: none;
+  padding-left: 0;
+}
+
+.markdown-body .markdown-task-item {
+  align-items: flex-start;
+  display: flex;
+  gap: 9px;
+  list-style: none;
+  padding-left: 0;
+}
+
+.markdown-body .markdown-task-checkbox {
+  display: inline-flex;
+  flex: 0 0 16px;
+  margin: 5px 0 0;
+}
+
+.markdown-body .markdown-checkbox {
+  height: 16px;
+  margin: 0;
+  width: 16px;
+}
+
+.markdown-body .markdown-task-content {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.markdown-body .markdown-task-content > p {
+  display: inline;
+  margin: 0;
+}
+
 .markdown-body code {
   background: #ecefed;
   border-radius: 5px;
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 0.92em;
   padding: 2px 5px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .markdown-body pre {
   background: #171b19;
   border-radius: 8px;
   color: #f3f5f1;
+  max-width: 100%;
+  min-width: 0;
   overflow: auto;
   padding: 13px 14px;
 }
@@ -400,13 +496,18 @@ p {
 .markdown-body pre code {
   background: transparent;
   color: inherit;
+  display: block;
+  overflow-wrap: anywhere;
   padding: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .markdown-body table {
   border-collapse: collapse;
   display: block;
   max-width: 100%;
+  min-width: 0;
   overflow: auto;
 }
 
@@ -420,13 +521,98 @@ p {
   display: grid;
   gap: 7px;
   margin: 0 0 12px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.skill-activity {
+  background: transparent;
+  border: 0;
+  margin: 0 0 8px;
+  max-width: min(820px, 100%);
+  min-width: 0;
+  width: 100%;
+}
+
+.skill-activity summary {
+  align-items: center;
+  color: #8a938e;
+  cursor: pointer;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 24px minmax(0, auto) minmax(0, 1fr);
+  list-style: none;
+  min-height: 30px;
+  min-width: 0;
+}
+
+.skill-activity summary::-webkit-details-marker {
+  display: none;
+}
+
+.skill-icon {
+  color: #7e8782;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+}
+
+.skill-label {
+  color: #828b86;
+  font-size: 13px;
+  font-weight: 760;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-meta {
+  color: #9aa29e;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skill-detail {
+  border-left: 1px solid #dce1dc;
+  display: grid;
+  gap: 6px;
+  margin: 2px 0 10px 11px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 4px 0 4px 15px;
+}
+
+.skill-detail-row {
+  align-items: baseline;
+  display: grid;
+  gap: 9px;
+  grid-template-columns: 78px minmax(0, 1fr);
+  min-width: 0;
+}
+
+.skill-detail-row span {
+  color: #8f9793;
+  font-size: 11px;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
+.skill-detail-row code {
+  color: #5e6862;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .tool-call {
   border: 1px solid #d9ddd6;
   border-radius: 8px;
   background: #fff;
-  max-width: 820px;
+  min-width: 0;
+  max-width: min(820px, 100%);
+  width: 100%;
 }
 
 .tool-call summary {
@@ -434,9 +620,10 @@ p {
   cursor: pointer;
   display: grid;
   gap: 8px;
-  grid-template-columns: 24px minmax(0, auto) minmax(0, 1fr);
+  grid-template-columns: 24px minmax(0, 1fr) minmax(0, auto);
   list-style: none;
   min-height: 38px;
+  min-width: 0;
   padding: 8px 11px;
 }
 
@@ -462,6 +649,8 @@ p {
 .tool-meta {
   color: #8a938e;
   font-size: 12px;
+  max-width: min(360px, 34vw);
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -485,6 +674,7 @@ p {
   border-top: 1px solid #e4e7e1;
   display: grid;
   gap: 10px;
+  min-width: 0;
   padding: 10px 12px 12px;
 }
 
@@ -542,6 +732,7 @@ p {
 .tool-detail-block {
   display: grid;
   gap: 5px;
+  min-width: 0;
 }
 
 .tool-detail-block span {
@@ -561,17 +752,21 @@ p {
   line-height: 1.45;
   margin: 0;
   max-height: 280px;
+  max-width: 100%;
+  min-width: 0;
   overflow: auto;
   padding: 9px;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .composer-footer {
-  background: linear-gradient(180deg, rgba(247, 247, 244, 0), #f7f7f4 22%);
-  bottom: 0;
-  margin: 0 -24px;
+  background: #f7f7f4;
+  border-top: 1px solid rgba(217, 221, 214, 0.72);
+  flex: 0 0 auto;
+  min-width: 0;
   padding: 18px 24px 22px;
-  position: sticky;
+  z-index: 5;
 }
 
 .composer {
@@ -685,6 +880,8 @@ p {
   font-size: 11px;
   line-height: 1.4;
   margin: 6px 0 0;
+  max-width: 100%;
+  min-width: 0;
   overflow: auto;
   padding: 8px;
 }
@@ -704,7 +901,7 @@ p {
     grid-template-columns: 1fr;
   }
 
-  .thread-viewport {
+  .thread-root {
     height: calc(100vh - 150px);
   }
 

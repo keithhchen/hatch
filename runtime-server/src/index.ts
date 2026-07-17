@@ -11,12 +11,24 @@ import {
   type CompactionCheckpoint,
   type RuntimeCompactionMessage
 } from "./compaction.js";
-import { createAgentRuntime } from "./agentRuntime.js";
+import { createAgentRuntime, type AgentRuntime, type RuntimeSessionSkills } from "./agentRuntime.js";
 import { parseInboundMessage, PROTOCOL_VERSION, type ClientHello, type OutboundMessage, type RunStart } from "./protocol.js";
+import { loadProjectInstructions } from "./projectDocs.js";
 import { RunStateMachine } from "./runState.js";
 import { ServerToolExecutor } from "./serverTools.js";
-import { RuntimeStore, type ActivatedSkill } from "./store.js";
-import { discoverSkills, explicitSkillReferences, explicitSkillReferenceMatches, listSkillBundleResourcePaths, parseSkillMarkdown, readSkillResourceByPath, skillResourceRoots } from "./skills.js";
+import { RuntimeStore, type ActivatedSkill, type RunStatus } from "./store.js";
+import {
+  discoverSkills,
+  explicitSkillReferences,
+  explicitSkillReferenceMatches,
+  includeSkillInstructions,
+  listSkillBundleResourcePaths,
+  parseSkillMarkdown,
+  readSkillResourceByPath,
+  renderSkillsSection,
+  skillResourceRoots,
+  visibleSkillsForSession
+} from "./skills.js";
 
 export type RuntimeServer = {
   server: http.Server;
@@ -24,16 +36,21 @@ export type RuntimeServer = {
   close: () => Promise<void>;
 };
 
-export function createRuntimeServer(): RuntimeServer {
+export type RuntimeServerOptions = {
+  createRuntime?: () => AgentRuntime;
+};
+
+export function createRuntimeServer(options: RuntimeServerOptions = {}): RuntimeServer {
   const activeConversationRuns = new Map<string, string>();
   const connectionTasks = new Set<Promise<void>>();
+  const createRuntime = options.createRuntime ?? createAgentRuntime;
   const server = http.createServer((req, res) => {
     void handleHttpRequest(req, res);
   });
 
   const wss = new WebSocketServer({ server, path: "/runtime" });
   wss.on("connection", (socket) => {
-    const task = handleRuntimeSocket(socket, activeConversationRuns);
+    const task = handleRuntimeSocket(socket, activeConversationRuns, createRuntime);
     connectionTasks.add(task);
     task.finally(() => connectionTasks.delete(task));
   });
@@ -92,11 +109,30 @@ function writeJson(res: http.ServerResponse, status: number, body: unknown): voi
   res.end(JSON.stringify(body));
 }
 
-async function handleRuntimeSocket(socket: WebSocket, activeConversationRuns: Map<string, string>): Promise<void> {
+function isTerminalRunStatus(status: RunStatus): boolean {
+  return status === "completed" || status === "failed" || status === "cancelled";
+}
+
+function releaseConversationRun(
+  activeConversationRuns: Map<string, string>,
+  conversationId: string,
+  runId: string
+): void {
+  if (activeConversationRuns.get(conversationId) === runId) {
+    activeConversationRuns.delete(conversationId);
+  }
+}
+
+async function handleRuntimeSocket(
+  socket: WebSocket,
+  activeConversationRuns: Map<string, string>,
+  createRuntime: () => AgentRuntime
+): Promise<void> {
   let hello: ClientHello | undefined;
+  let sessionSkills: RuntimeSessionSkills | undefined;
   const store = new RuntimeStore();
   const serverTools = new ServerToolExecutor();
-  const runtime = createAgentRuntime();
+  const runtime = createRuntime();
   const activeRuns = new Set<Promise<void>>();
   const activeRunStates = new Map<string, RunStateMachine>();
 
@@ -133,6 +169,7 @@ async function handleRuntimeSocket(socket: WebSocket, activeConversationRuns: Ma
             return;
           }
           hello = message;
+          sessionSkills = await buildSessionSkills(message.workspace_root);
           await store.append({
             type: "session.started",
             installation_id: message.installation_id,
@@ -199,6 +236,17 @@ async function handleRuntimeSocket(socket: WebSocket, activeConversationRuns: Ma
         }
 
         if (message.type === "client.message") {
+          if (!sessionSkills) {
+            await send({
+              type: "turn.failed",
+              run_id: message.run_id,
+              error: {
+                code: "session_not_ready",
+                message: "session skills were not initialized"
+              }
+            });
+            return;
+          }
           const activeRunId = activeConversationRuns.get(message.conversation_id);
           if (activeRunId) {
             await send({
@@ -214,8 +262,8 @@ async function handleRuntimeSocket(socket: WebSocket, activeConversationRuns: Ma
 
           activeConversationRuns.set(message.conversation_id, message.run_id);
           const state = new RunStateMachine(message.run_id, message.conversation_id, store, async (status, reason) => {
-            if (status === "completed" && activeConversationRuns.get(message.conversation_id) === message.run_id) {
-              activeConversationRuns.delete(message.conversation_id);
+            if (isTerminalRunStatus(status)) {
+              releaseConversationRun(activeConversationRuns, message.conversation_id, message.run_id);
             }
             await send({
               type: "turn.state",
@@ -226,14 +274,12 @@ async function handleRuntimeSocket(socket: WebSocket, activeConversationRuns: Ma
           });
           activeRunStates.set(message.run_id, state);
           await state.queued();
-          const task = runOneTurn(message, hello, broker, serverTools, runtime, store, state, send);
+          const task = runOneTurn(message, hello, sessionSkills, broker, serverTools, runtime, store, state, send);
           activeRuns.add(task);
           task.finally(() => {
             activeRuns.delete(task);
             activeRunStates.delete(message.run_id);
-            if (activeConversationRuns.get(message.conversation_id) === message.run_id) {
-              activeConversationRuns.delete(message.conversation_id);
-            }
+            releaseConversationRun(activeConversationRuns, message.conversation_id, message.run_id);
           });
         }
       } catch (error) {
@@ -251,7 +297,13 @@ async function handleRuntimeSocket(socket: WebSocket, activeConversationRuns: Ma
   return new Promise<void>((resolve) => {
     socket.once("close", () => {
       void (async () => {
-        await broker.cancelAll("Client disconnected");
+        const reason = "Client disconnected";
+        const states = [...activeRunStates.values()];
+        for (const state of states) {
+          releaseConversationRun(activeConversationRuns, state.conversationId, state.runId);
+        }
+        await Promise.all(states.map((state) => state.cancel(reason).catch(() => undefined)));
+        await broker.cancelAll(reason);
         await Promise.allSettled([...activeRuns]);
         resolve();
       })();
@@ -262,9 +314,10 @@ async function handleRuntimeSocket(socket: WebSocket, activeConversationRuns: Ma
 async function runOneTurn(
   input: RunStart,
   hello: ClientHello,
+  sessionSkills: RuntimeSessionSkills,
   broker: ClientToolBroker,
   serverTools: ServerToolExecutor,
-  runtime: ReturnType<typeof createAgentRuntime>,
+  runtime: AgentRuntime,
   store: RuntimeStore,
   state: RunStateMachine,
   send: (message: OutboundMessage) => Promise<void>
@@ -299,8 +352,7 @@ async function runOneTurn(
       priorMessages = preTurnCompaction.replacement_history;
     }
 
-    const currentSkills = await discoverSkills({ workspaceRoot: hello.workspace_root });
-    const activatedSkills = await activateExplicitlyMentionedSkills(input, currentSkills);
+    const activatedSkills = await activateExplicitlyMentionedSkills(input, sessionSkills.records);
     for (const activation of activatedSkills) {
       await store.append({
         type: "skill.activated",
@@ -332,6 +384,7 @@ async function runOneTurn(
       serverTools,
       state,
       messages,
+      sessionSkills,
       activatedSkills,
       clientTools: hello.local_tools,
       workspaceRoot: hello.workspace_root,
@@ -348,6 +401,9 @@ async function runOneTurn(
         return compacted?.replacement_history;
       }
     })) {
+      if (state.status === "cancelled") {
+        break;
+      }
       await persistServerToolCallEvent(event, input, store);
       await persistSkillEvent(event, input, store);
       const activation = await skillActivationFromToolEvent(event);
@@ -389,6 +445,35 @@ async function runOneTurn(
   }
 }
 
+async function buildSessionSkills(workspaceRoot?: string): Promise<RuntimeSessionSkills> {
+  const records = await discoverSkills({ workspaceRoot });
+  const visibleRecords = visibleSkillsForSession(records);
+  const rendered = await includeSkillInstructions()
+    ? renderSkillsSection(visibleRecords)
+    : emptyRenderedSkills();
+  const projectInstructions = await loadProjectInstructions(workspaceRoot);
+  return {
+    records,
+    visibleRecords,
+    rendered,
+    ...(projectInstructions ? { projectInstructions } : {})
+  };
+}
+
+function emptyRenderedSkills(): ReturnType<typeof renderSkillsSection> {
+  return {
+    section: "",
+    aliases: {},
+    report: {
+      total_count: 0,
+      included_count: 0,
+      omitted_count: 0,
+      truncated_description_chars: 0,
+      truncated_description_count: 0
+    }
+  };
+}
+
 async function persistSkillEvent(
   event: OutboundMessage,
   input: RunStart,
@@ -427,6 +512,8 @@ async function persistServerToolCallEvent(
     name: event.name,
     arguments: event.arguments ?? {},
     status: event.status,
+    locality: event.locality,
+    approval: event.approval,
     ...(event.result ? { result: event.result } : {}),
     ...(event.error ? { error: event.error } : {})
   });

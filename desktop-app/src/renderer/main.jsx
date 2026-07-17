@@ -23,12 +23,15 @@ const LOCAL_TOOLS = [
   "shell.exec",
   "git.diff"
 ];
+const SKILL_ACTIVITY_PART = "hatch.skill_activity";
+const LOCAL_TOOL_TIMEOUT_MS = 45_000;
 const ApprovalContext = createContext(null);
 
 function App() {
   const socketRef = useRef(null);
   const activeRunRef = useRef(null);
   const eventSeqRef = useRef(1);
+  const imeRef = useRef({ composing: false, guardUntil: 0 });
   const approvalResolversRef = useRef(new Map());
   const [serverUrl, setServerUrl] = useState("ws://127.0.0.1:8400/runtime");
   const [workspace, setWorkspace] = useState("");
@@ -126,6 +129,30 @@ function App() {
       copy: true
     }
   });
+
+  const startImeComposition = useCallback(() => {
+    imeRef.current.composing = true;
+    imeRef.current.guardUntil = Number.POSITIVE_INFINITY;
+  }, []);
+
+  const endImeComposition = useCallback(() => {
+    imeRef.current.composing = false;
+    imeRef.current.guardUntil = performance.now() + 180;
+  }, []);
+
+  const resetImeComposition = useCallback(() => {
+    imeRef.current.composing = false;
+    imeRef.current.guardUntil = 0;
+  }, []);
+
+  const stopImeEnterSubmit = useCallback((event) => {
+    if (event.key !== "Enter") return;
+    const nativeEvent = event.nativeEvent ?? event;
+    const guardActive = performance.now() < imeRef.current.guardUntil;
+    if (imeRef.current.composing || nativeEvent.isComposing || nativeEvent.keyCode === 229 || guardActive) {
+      event.stopPropagation();
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -267,6 +294,12 @@ function App() {
       return;
     }
 
+    if (message.type === "skill.activated" || message.type === "skill.invoked") {
+      upsertSkillEvent(message);
+      setStatus(`${message.status === "activated" ? "Loaded" : "Invoked"} skill: ${message.name}`);
+      return;
+    }
+
     if (message.type === "session.compacted") {
       setStatus("Session compacted");
       return;
@@ -331,14 +364,18 @@ function App() {
     }
 
     try {
-      const result = await invokeTauri("execute_tool_call", {
-        workspaceRoot: workspace,
-        request: message
-      });
+      const result = await withTimeout(
+        invokeTauri("execute_tool_call", {
+          workspaceRoot: workspace,
+          request: message
+        }),
+        LOCAL_TOOL_TIMEOUT_MS,
+        `Local tool timed out after ${Math.round(LOCAL_TOOL_TIMEOUT_MS / 1000)}s: ${message.name}`
+      );
       send(result);
     } catch (error) {
       const localError = {
-        code: "local_runner_error",
+        code: error?.code === "local_tool_timeout" ? "local_tool_timeout" : "local_runner_error",
         message: errorMessage(error)
       };
       upsertToolEvent({
@@ -468,6 +505,38 @@ function App() {
     });
   }
 
+  function upsertSkillEvent(event) {
+    const activeRun = activeRunRef.current;
+    if (!activeRun || event.run_id !== activeRun.runId) return;
+    updateAssistantMessage(activeRun.assistantId, (message) => {
+      const parts = assistantParts(message);
+      const nextPart = skillActivityPartFromEvent(event);
+      const withoutExisting = parts.filter((part) => !isSameSkillActivityPart(part, nextPart));
+      const firstTextIndex = withoutExisting.findIndex((part) => part.type === "text");
+      if (firstTextIndex >= 0) {
+        withoutExisting.splice(firstTextIndex, 0, nextPart);
+      } else {
+        withoutExisting.push(nextPart);
+      }
+      return {
+        ...message,
+        content: withoutExisting,
+        status: message.status ?? { type: "running" },
+        metadata: {
+          ...(message.metadata ?? {}),
+          custom: {
+            ...(message.metadata?.custom ?? {}),
+            latestSkill: {
+              name: event.name,
+              status: event.status,
+              reason: event.reason
+            }
+          }
+        }
+      };
+    });
+  }
+
   function updateAssistantMessage(id, updater) {
     setMessages((current) => current.map((message) => (
       message.id === id ? updater(message) : message
@@ -576,18 +645,23 @@ function App() {
                   <EmptyThread connected={connected} />
                 </ThreadPrimitive.Empty>
                 <ThreadPrimitive.Messages components={{ Message: HatchMessage }} />
-                <ThreadPrimitive.ViewportFooter className="composer-footer">
-                  <ComposerPrimitive.Root className="composer">
-                    <ComposerPrimitive.Input
-                      className="composer-input"
-                      placeholder={connected ? "Ask Hatch to inspect, edit, or explain this workspace" : "Connect to the runtime to start chatting"}
-                      submitMode="enter"
-                      rows={1}
-                    />
-                    <ComposerPrimitive.Send className="send-button">Send</ComposerPrimitive.Send>
-                  </ComposerPrimitive.Root>
-                </ThreadPrimitive.ViewportFooter>
               </ThreadPrimitive.Viewport>
+              <ThreadPrimitive.ViewportFooter className="composer-footer">
+                <ComposerPrimitive.Root className="composer">
+                  <ComposerPrimitive.Input
+                    className="composer-input"
+                    onBlur={resetImeComposition}
+                    onCompositionEnd={endImeComposition}
+                    onCompositionStart={startImeComposition}
+                    onKeyDownCapture={stopImeEnterSubmit}
+                    onKeyUpCapture={stopImeEnterSubmit}
+                    placeholder={connected ? "Ask Hatch to inspect, edit, or explain this workspace" : "Connect to the runtime to start chatting"}
+                    submitMode="enter"
+                    rows={1}
+                  />
+                  <ComposerPrimitive.Send className="send-button">Send</ComposerPrimitive.Send>
+                </ComposerPrimitive.Root>
+              </ThreadPrimitive.ViewportFooter>
             </ThreadPrimitive.Root>
           </AssistantRuntimeProvider>
         </ApprovalContext.Provider>
@@ -617,12 +691,73 @@ function historyUrlForRuntime(serverUrl, conversationId) {
 
 function historyMessageToThreadMessage(message, index) {
   const id = `history_${message.run_id ?? "message"}_${index}`;
+  const createdAt = messageCreatedAt(message.timestamp);
   if (message.role === "user") {
-    return makeUserMessage(id, message.content ?? "", Date.now());
+    return makeUserMessage(id, message.content ?? "", createdAt);
   }
+  const activityParts = historyActivityParts(message);
+  const text = message.content ?? "";
+  const lastTool = [...activityParts].reverse().find((part) => part.type === "tool-call");
+  const lastSkill = [...activityParts].reverse().find(isSkillActivityPart);
   return makeAssistantMessage(id, message.content ?? "", {
-    status: "completed"
+    status: "completed",
+    createdAt,
+    content: [
+      ...activityParts,
+      ...(text ? [{ type: "text", text }] : [])
+    ],
+    custom: {
+      runId: message.run_id,
+      hydrated: true,
+      ...(lastSkill
+        ? {
+            latestSkill: {
+              name: lastSkill.data.name,
+              status: lastSkill.data.status,
+              reason: lastSkill.data.reason
+            }
+          }
+        : {}),
+      ...(lastTool
+        ? {
+            latestTool: {
+              name: lastTool.toolName,
+              status: lastTool.artifact?.status,
+              toolCallId: lastTool.toolCallId
+            }
+          }
+        : {})
+    }
   });
+}
+
+function messageCreatedAt(timestamp) {
+  const parsed = Date.parse(timestamp ?? "");
+  return Number.isFinite(parsed) ? parsed : Date.now();
+}
+
+function historyActivityParts(message) {
+  const timeline = [
+    ...(Array.isArray(message.skill_events)
+      ? message.skill_events.map((event) => ({
+          type: "skill",
+          timestamp: event.timestamp ?? message.timestamp,
+          event
+        }))
+      : []),
+    ...(Array.isArray(message.tool_calls)
+      ? message.tool_calls.map((event) => ({
+          type: "tool",
+          timestamp: event.first_timestamp ?? event.timestamp ?? message.timestamp,
+          event
+        }))
+      : [])
+  ];
+  return timeline
+    .sort((left, right) => String(left.timestamp ?? "").localeCompare(String(right.timestamp ?? "")))
+    .map((entry) => entry.type === "skill"
+      ? skillActivityPartFromEvent(entry.event)
+      : historyToolCallToPart(entry.event));
 }
 
 function makeUserMessage(id, text, createdAt = Date.now()) {
@@ -643,7 +778,7 @@ function makeAssistantMessage(id, text, options = {}) {
   return {
     id,
     role: "assistant",
-    content: text ? [{ type: "text", text }] : [],
+    content: options.content ?? (text ? [{ type: "text", text }] : []),
     createdAt: new Date(options.createdAt ?? Date.now()),
     status: options.status === "failed"
       ? { type: "incomplete", reason: "error", error: { message: text } }
@@ -721,6 +856,71 @@ function toolPartFromEvent(event, existing) {
   };
 }
 
+function historyToolCallToPart(toolCall) {
+  return toolPartFromEvent({
+    type: "tool_call.delta",
+    run_id: toolCall.run_id,
+    tool_call_id: toolCall.tool_call_id,
+    name: toolCall.name,
+    locality: toolCall.locality,
+    approval: toolCall.approval ?? "none",
+    status: toolCall.status,
+    arguments: toolCall.arguments,
+    result: toolCall.result,
+    error: toolCall.error
+  });
+}
+
+function skillActivityPartFromEvent(event) {
+  return {
+    type: "data",
+    name: SKILL_ACTIVITY_PART,
+    data: {
+      id: skillActivityIdForEvent(event),
+      run_id: event.run_id,
+      name: event.name,
+      path: event.path,
+      scope: event.scope,
+      status: event.status,
+      invocation_type: event.invocation_type,
+      reason: event.reason,
+      source_tool_call_id: event.source_tool_call_id,
+      trigger: event.trigger,
+      resource_paths: event.resource_paths,
+      resource_manifest_truncated: event.resource_manifest_truncated,
+      timestamp: event.timestamp ?? new Date().toISOString()
+    }
+  };
+}
+
+function skillActivityIdForEvent(event) {
+  if (event.status === "invoked") {
+    return [
+      event.run_id,
+      "invoked",
+      event.source_tool_call_id ?? "",
+      event.path,
+      event.reason
+    ].join(":");
+  }
+  return [
+    event.run_id,
+    "activated",
+    event.path,
+    event.reason
+  ].join(":");
+}
+
+function isSkillActivityPart(part) {
+  return part?.type === "data" && part.name === SKILL_ACTIVITY_PART;
+}
+
+function isSameSkillActivityPart(part, nextPart) {
+  return isSkillActivityPart(part)
+    && isSkillActivityPart(nextPart)
+    && part.data?.id === nextPart.data?.id;
+}
+
 function approvalForToolEvent(event, existing) {
   const approval = event.approval ?? existing?.artifact?.approval;
   if (approval !== "ask") return existing?.approval;
@@ -786,6 +986,11 @@ function HatchMessage() {
           components={{
             Text: role === "assistant" ? MarkdownText : PlainText,
             Empty: AssistantEmptyText,
+            data: {
+              by_name: {
+                [SKILL_ACTIVITY_PART]: SkillActivityPart
+              }
+            },
             tools: {
               Fallback: HatchToolCall
             },
@@ -845,6 +1050,9 @@ function MarkdownText() {
   return (
     <StreamdownTextPrimitive
       className="markdown-body"
+      components={{
+        li: MarkdownListItem
+      }}
       containerClassName="markdown-container"
       controls={false}
       security={{
@@ -854,6 +1062,43 @@ function MarkdownText() {
       }}
     />
   );
+}
+
+function MarkdownListItem({ children, className, node, ...props }) {
+  const childArray = React.Children.toArray(children);
+  const checkboxIndex = childArray.findIndex(isTaskCheckbox);
+
+  if (checkboxIndex === -1) {
+    return (
+      <li className={className} data-streamdown="list-item" {...props}>
+        {children}
+      </li>
+    );
+  }
+
+  const checkbox = childArray[checkboxIndex];
+  const content = childArray
+    .filter((_, index) => index !== checkboxIndex)
+    .filter((child) => typeof child !== "string" || child.trim() !== "");
+
+  return (
+    <li className={joinClassNames("markdown-task-item", className)} data-streamdown="list-item" {...props}>
+      <span className="markdown-task-checkbox">
+        {React.cloneElement(checkbox, {
+          className: joinClassNames(checkbox.props?.className, "markdown-checkbox")
+        })}
+      </span>
+      <span className="markdown-task-content">{content}</span>
+    </li>
+  );
+}
+
+function isTaskCheckbox(child) {
+  return React.isValidElement(child) && child.type === "input" && child.props?.type === "checkbox";
+}
+
+function joinClassNames(...classNames) {
+  return classNames.filter(Boolean).join(" ") || undefined;
 }
 
 function AssistantEmptyText() {
@@ -916,6 +1161,37 @@ function HatchToolCall(props) {
   );
 }
 
+function SkillActivityPart({ data }) {
+  const status = data.status === "invoked" ? "invoked" : "activated";
+  const display = skillActivityDisplay(data);
+  return (
+    <details className={`skill-activity ${status}`}>
+      <summary>
+        <span className="skill-icon">{display.icon}</span>
+        <span className="skill-label">{display.label}</span>
+        <span className="skill-meta">{display.meta}</span>
+      </summary>
+      <div className="skill-detail">
+        <SkillDetailRow label="Skill" value={data.name} />
+        <SkillDetailRow label="Reason" value={skillReasonLabel(data.reason)} />
+        <SkillDetailRow label="Source" value={data.path} />
+        {data.source_tool_call_id ? <SkillDetailRow label="Source Tool" value={data.source_tool_call_id} /> : null}
+        {data.trigger ? <SkillDetailRow label="Trigger" value={skillTriggerLabel(data.trigger)} /> : null}
+      </div>
+    </details>
+  );
+}
+
+function SkillDetailRow({ label, value }) {
+  if (!value) return null;
+  return (
+    <div className="skill-detail-row">
+      <span>{label}</span>
+      <code>{value}</code>
+    </div>
+  );
+}
+
 function ToolDetailBlock({ title, value }) {
   return (
     <div className="tool-detail-block">
@@ -968,6 +1244,33 @@ function toolState(part, approvalRequest) {
   if (part.result !== undefined || part.status?.type === "complete") return "completed";
   if (part.status?.type === "requires-action" || part.approval?.approved === undefined && part.approval) return "approval";
   return "running";
+}
+
+function skillActivityDisplay(data) {
+  const status = data.status === "invoked" ? "invoked" : "activated";
+  const label = status === "invoked"
+    ? `已调用 skill ${data.name}`
+    : `已加载 skill ${data.name}`;
+  return {
+    icon: status === "invoked" ? "◆" : "◇",
+    label,
+    meta: skillReasonLabel(data.reason)
+  };
+}
+
+function skillReasonLabel(reason) {
+  if (reason === "explicit_mention") return "显式触发";
+  if (reason === "skill_doc_read") return "读取 SKILL.md";
+  if (reason === "script_run") return "运行 skill 脚本";
+  if (reason === "skipped") return "已跳过";
+  if (reason === "unavailable") return "不可用";
+  return reason || "skill activity";
+}
+
+function skillTriggerLabel(trigger) {
+  if (!trigger) return "";
+  const target = trigger.path ?? trigger.command ?? "";
+  return [trigger.tool, target].filter(Boolean).join(" · ");
 }
 
 function toolDisplay(name) {
@@ -1090,6 +1393,20 @@ async function invokeTauri(command, args) {
     }
     throw error;
   }
+}
+
+function withTimeout(promise, timeoutMs, message) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = window.setTimeout(() => {
+      const error = new Error(message);
+      error.code = "local_tool_timeout";
+      reject(error);
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    window.clearTimeout(timeoutId);
+  });
 }
 
 createRoot(document.getElementById("root")).render(<App />);

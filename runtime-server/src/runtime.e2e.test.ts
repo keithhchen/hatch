@@ -7,6 +7,7 @@ import path from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { promisify } from "node:util";
 import { WebSocket } from "ws";
+import { DeterministicAgentRuntime } from "./agentRuntime.js";
 import { buildCompactedHistory, RUNTIME_CONTEXT_PREFIX, runtimeMessagesTranscript, SUMMARY_PREFIX } from "./compaction.js";
 import { createRuntimeServer, type RuntimeServer } from "./index.js";
 import { executeLocalTool, LocalHarnessSession, runLocalHarness } from "./localHarness.js";
@@ -36,6 +37,12 @@ let runtimeServer: RuntimeServer | undefined;
 let tempDirs: string[] = [];
 const initialCodexHome = process.env.CODEX_HOME;
 const execFileAsync = promisify(execFile);
+
+function createDeterministicRuntimeServer(): RuntimeServer {
+  return createRuntimeServer({
+    createRuntime: () => new DeterministicAgentRuntime()
+  });
+}
 
 test("runtime protocol mirrors the canonical wire schema", async () => {
   const schemaPath = path.resolve("..", "packages", "protocol", "schemas", "hatch-wire-protocol.schema.json");
@@ -72,6 +79,56 @@ test("runtime server exposes visible conversation history for client hydration",
     }
   });
   await store.append({
+    type: "tool.call",
+    conversation_id: "desktop-chat",
+    run_id: "run_old_1",
+    tool_call_id: "call_file_read",
+    name: "fs.read",
+    arguments: { path: "2024 Birthday Dinner.xlsx" },
+    status: "requested",
+    locality: "client",
+    approval: "auto"
+  });
+  await store.append({
+    type: "tool.call",
+    conversation_id: "desktop-chat",
+    run_id: "run_old_1",
+    tool_call_id: "call_file_read",
+    name: "fs.read",
+    arguments: { path: "2024 Birthday Dinner.xlsx" },
+    status: "completed",
+    locality: "client",
+    approval: "auto",
+    result: { content: "birthday dinner rows" }
+  });
+  await store.append({
+    type: "skill.activated",
+    conversation_id: "desktop-chat",
+    run_id: "run_old_1",
+    name: "contract-review",
+    path: "/server/skills/contract-review/SKILL.md",
+    scope: "server",
+    directory: "/server/skills/contract-review",
+    content: "# Contract Review",
+    resource_paths: ["references/playbook.md"],
+    resource_manifest_truncated: false
+  });
+  await store.append({
+    type: "skill.invoked",
+    conversation_id: "desktop-chat",
+    run_id: "run_old_1",
+    name: "contract-review",
+    path: "/server/skills/contract-review/SKILL.md",
+    scope: "server",
+    invocation_type: "implicit",
+    reason: "skill_doc_read",
+    source_tool_call_id: "call_file_read",
+    trigger: {
+      tool: "file_read",
+      path: "/server/skills/contract-review/SKILL.md"
+    }
+  });
+  await store.append({
     type: "message.created",
     conversation_id: "desktop-chat",
     run_id: "run_old_1",
@@ -79,7 +136,7 @@ test("runtime server exposes visible conversation history for client hydration",
     content: "I still need to read the spreadsheet."
   });
 
-  runtimeServer = createRuntimeServer();
+  runtimeServer = createDeterministicRuntimeServer();
   const serverUrl = await listen(runtimeServer);
   const historyUrl = new URL(serverUrl);
   historyUrl.protocol = "http:";
@@ -88,17 +145,65 @@ test("runtime server exposes visible conversation history for client hydration",
   assert.equal(response.status, 200);
   const payload = await response.json() as {
     conversation_id: string;
-    messages: Array<{ role: string; content: string; run_id: string }>;
+    messages: Array<{
+      role: string;
+      content: string;
+      run_id: string;
+      tool_calls?: Array<{
+        tool_call_id: string;
+        name: string;
+        status: string;
+        locality?: string;
+        approval?: string;
+        result?: Record<string, unknown>;
+      }>;
+      skill_events?: Array<{
+        name: string;
+        path: string;
+        status: string;
+        invocation_type: string;
+        reason: string;
+        source_tool_call_id?: string;
+        trigger?: { tool: string; path?: string; command?: string };
+      }>;
+    }>;
   };
   assert.equal(payload.conversation_id, "desktop-chat");
   assert.deepEqual(payload.messages.map((message) => [message.role, message.content]), [
     ["user", "Read the birthday dinner sheet."],
     ["assistant", "I still need to read the spreadsheet."]
   ]);
+  assert.equal(payload.messages[0]?.tool_calls, undefined);
+  assert.equal(payload.messages[0]?.skill_events, undefined);
+  assert.deepEqual(payload.messages[1]?.tool_calls?.map((toolCall) => [
+    toolCall.tool_call_id,
+    toolCall.name,
+    toolCall.status,
+    toolCall.locality,
+    toolCall.approval,
+    toolCall.result?.content
+  ]), [[
+    "call_file_read",
+    "fs.read",
+    "completed",
+    "client",
+    "auto",
+    "birthday dinner rows"
+  ]]);
+  assert.deepEqual(payload.messages[1]?.skill_events?.map((skillEvent) => [
+    skillEvent.name,
+    skillEvent.status,
+    skillEvent.invocation_type,
+    skillEvent.reason,
+    skillEvent.source_tool_call_id,
+    skillEvent.trigger?.tool
+  ]), [
+    ["contract-review", "activated", "explicit", "explicit_mention", undefined, undefined],
+    ["contract-review", "invoked", "implicit", "skill_doc_read", "call_file_read", "file_read"]
+  ]);
 });
 
 beforeEach(() => {
-  process.env.HATCH_AGENT_RUNTIME = "deterministic";
   process.env.HATCH_TS_SKILLS_ROOT = path.resolve("skills");
   process.env.CODEX_HOME = path.join(os.tmpdir(), "hatch-runtime-empty-codex-home");
 });
@@ -121,7 +226,7 @@ afterEach(async () => {
   delete process.env.HATCH_MODEL_CONTEXT_WINDOW_CHARS;
   delete process.env.HATCH_MODEL_CONTEXT_WINDOW_TOKENS;
   delete process.env.HATCH_AUTO_COMPACT_LIMIT_TOKENS;
-  delete process.env.HATCH_CODEX_CONFIG;
+  delete process.env.HATCH_SKILLS_CONFIG;
   if (initialCodexHome === undefined) {
     delete process.env.CODEX_HOME;
   } else {
@@ -129,6 +234,7 @@ afterEach(async () => {
   }
   delete process.env.OPENAI_BASE_URL;
   delete process.env.OPENAI_API_KEY;
+  delete process.env.MOONSHOT_API_KEY;
   delete process.env.HATCH_CREATOR_MODEL;
   delete process.env.HATCH_COMPACTION_MODEL;
   delete process.env.HATCH_MCP_SERVERS;
@@ -151,7 +257,7 @@ test("runs a full server-agent session with local client tool execution", async 
     "utf8"
   );
 
-  runtimeServer = createRuntimeServer();
+  runtimeServer = createDeterministicRuntimeServer();
   const serverUrl = await listen(runtimeServer);
 
   const result = await runLocalHarness({
@@ -177,7 +283,7 @@ test("runs a full server-agent session with local client tool execution", async 
     "fs.write:requested",
     "fs.write:completed"
   ]);
-  assert.ok(result.events.some((event) => event.type === "tool_call.delta" && event.name === "fs.write" && event.approval === "ask"));
+  assert.ok(result.events.some((event) => event.type === "tool_call.delta" && event.name === "fs.write" && event.approval === "auto"));
   const completedWrite = result.events.find((event) => (
     event.type === "tool_call.delta"
     && event.name === "fs.write"
@@ -193,15 +299,7 @@ test("runs a full server-agent session with local client tool execution", async 
   assert.equal(writeDiff.path, "hatch-session.md");
   assert.match(writeDiff.diff, /--- \/dev\/null/);
   assert.match(writeDiff.diff, /\+First local file: README\.md/);
-  assert.deepEqual(result.events.filter((event) => event.type === "approval.request" || event.type === "approval.result").map((event) => (
-    event.type === "approval.request" ? `${event.name}:requested` : `${event.name}:${event.status}`
-  )), [
-    "fs.write:requested",
-    "fs.write:approved"
-  ]);
-  const approvalRequest = result.events.find((event) => event.type === "approval.request" && event.name === "fs.write");
-  assert.ok(approvalRequest && approvalRequest.type === "approval.request");
-  assert.equal(approvalRequest.arguments.path, "hatch-session.md");
+  assert.deepEqual(result.events.filter((event) => event.type === "approval.request" || event.type === "approval.result"), []);
   assert.ok(result.events.some((event) => event.type === "assistant.delta" && event.delta.kind === "text"));
   assert.deepEqual(result.events.filter((event) => event.type === "turn.state").map((event) => event.status), [
     "queued",
@@ -246,12 +344,11 @@ test("runs a full server-agent session with local client tool execution", async 
     && (event.event as Record<string, unknown>).type === "tool_call.request"
     && (event.event as Record<string, unknown>).name === "fs.write"
   )));
-  assert.ok(events.some((event) => (
+  assert.ok(!events.some((event) => (
     event.type === "runtime.event"
     && typeof event.event === "object"
     && event.event !== null
-    && (event.event as Record<string, unknown>).type === "approval.result"
-    && (event.event as Record<string, unknown>).status === "approved"
+    && String((event.event as Record<string, unknown>).type).startsWith("approval.")
   )));
   assert.ok(events.some((event) => event.type === "turn.state" && event.to === "queued" && event.from === undefined));
   assert.ok(events.some((event) => event.type === "turn.state" && event.to === "completed"));
@@ -281,7 +378,7 @@ test("deterministic runtime renders visible skills without auto-loading one", as
 
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   delete process.env.HATCH_TS_SKILLS_ROOT;
-  runtimeServer = createRuntimeServer();
+  runtimeServer = createDeterministicRuntimeServer();
   const serverUrl = await listen(runtimeServer);
 
   const result = await runLocalHarness({
@@ -320,7 +417,7 @@ test("local harness can broker local tools through the Rust sidecar", async () =
     "utf8"
   );
 
-  runtimeServer = createRuntimeServer();
+  runtimeServer = createDeterministicRuntimeServer();
   const serverUrl = await listen(runtimeServer);
 
   const result = await runLocalHarness({
@@ -344,7 +441,7 @@ test("local harness can broker local tools through the Rust sidecar", async () =
   assert.match(audit, /"tool":"write_file"/);
 });
 
-test("local harness rejects filesystem paths outside the approved workspace", async () => {
+test("local harness rejects filesystem paths outside the declared workspace", async () => {
   const workspace = await tempWorkspace();
   const request: ToolRequest = {
     type: "tool_call.request",
@@ -362,37 +459,56 @@ test("local harness rejects filesystem paths outside the approved workspace", as
   assert.match(JSON.stringify(result), /Path escapes workspace/);
 });
 
-test("ask-approval local tool calls can be rejected by the client", async () => {
+test("local harness fs.write creates missing parent directories", async () => {
+  const workspace = await tempWorkspace();
+  const request: ToolRequest = {
+    type: "tool_call.request",
+    run_id: "run_write_parent",
+    tool_call_id: "tool_write_parent",
+    name: "fs.write",
+    arguments: {
+      path: "documents/hello.txt",
+      content: "hello from Hatch\n"
+    },
+    approval: "auto"
+  };
+
+  const result = await executeLocalTool(request, workspace, false);
+  assert.equal(result.type, "tool_call.result");
+  assert.equal(result.status, "ok");
+  assert.match(await readFile(path.join(workspace, "documents", "hello.txt"), "utf8"), /hello from Hatch/);
+});
+
+test("auto-permission local tool calls bypass client approval and execute", async () => {
   const workspace = await tempWorkspace();
   const dataDir = await tempWorkspace();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   await writeFile(path.join(workspace, "README.md"), "Hatch approval test.\n", "utf8");
 
-  runtimeServer = createRuntimeServer();
+  runtimeServer = createDeterministicRuntimeServer();
   const serverUrl = await listen(runtimeServer);
   const session = new LocalHarnessSession({
     serverUrl,
     workspace,
-    approveTool: (request) => request.approval !== "ask"
+    approveTool: () => false
   });
 
   await session.connect();
   try {
-    await assert.rejects(session.run("Find Hatch. Save a summary."), /Tool call rejected by user: fs\.write/);
+    const result = await session.run("Find Hatch. Save a summary.");
+    assert.match(result.finalText, /Completed server-side agent session/);
+    assert.deepEqual(result.events.filter((event) => event.type === "approval.request" || event.type === "approval.result"), []);
   } finally {
     session.close();
   }
 
-  await assert.rejects(() => readFile(path.join(workspace, "hatch-session.md"), "utf8"), /ENOENT/);
+  assert.match(await readFile(path.join(workspace, "hatch-session.md"), "utf8"), /Hatch approval test/);
   const events = await new RuntimeStore(dataDir).readEvents();
-  assert.ok(events.some((event) => event.type === "tool.call" && event.name === "fs.write" && event.status === "failed"));
-  assert.ok(events.some((event) => (
+  assert.ok(!events.some((event) => (
     event.type === "runtime.event"
     && typeof event.event === "object"
     && event.event !== null
-    && (event.event as Record<string, unknown>).type === "approval.result"
-    && (event.event as Record<string, unknown>).name === "fs.write"
-    && (event.event as Record<string, unknown>).status === "denied"
+    && String((event.event as Record<string, unknown>).type).startsWith("approval.")
   )));
   assert.ok(events.some((event) => (
     event.type === "runtime.event"
@@ -400,8 +516,36 @@ test("ask-approval local tool calls can be rejected by the client", async () => 
     && event.event !== null
     && (event.event as Record<string, unknown>).type === "tool_call.delta"
     && (event.event as Record<string, unknown>).name === "fs.write"
-    && (event.event as Record<string, unknown>).status === "failed"
+    && (event.event as Record<string, unknown>).status === "completed"
   )));
+});
+
+test("local harness defaults to max local tool capability", async () => {
+  const workspace = await tempWorkspace();
+  const dataDir = await tempWorkspace();
+  process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
+  runtimeServer = createRuntimeServer();
+  const serverUrl = await listen(runtimeServer);
+  const session = new LocalHarnessSession({
+    serverUrl,
+    workspace
+  });
+
+  await session.connect();
+  session.close();
+
+  const events = await new RuntimeStore(dataDir).readEvents();
+  const started = events.find((event) => event.type === "session.started");
+  assert.ok(started && started.type === "session.started");
+  assert.deepEqual(started.local_tools, [
+    "fs.list",
+    "fs.search",
+    "fs.read",
+    "fs.write",
+    "fs.patch",
+    "git.diff",
+    "shell.exec"
+  ]);
 });
 
 test("client hello does not accept explicit skill selection", () => {
@@ -662,7 +806,7 @@ test("skills follow official SKILL.md frontmatter naming semantics", async () =>
   );
 });
 
-test("skill allowed-tools map official tool names to preapproved local calls", () => {
+test("skill allowed-tools map official tool names to local tool grants", () => {
   const grants = parseAllowedTools("Read, Write Bash(git:*) Bash(jq:*)");
   assert.deepEqual(grants, [
     { tool: "fs.read" },
@@ -687,7 +831,7 @@ test("skill allowed-tools map official tool names to preapproved local calls", (
   assert.equal(toolPreapprovedBySkills(skills, "fs.patch", { path: "out.md", patch: "" }), false);
 });
 
-test("workspace .agents skills, symlinked skill folders, and implicit policy are discovered", async () => {
+test("configured server-side skill roots, symlinked skill folders, and implicit policy are discovered", async () => {
   const workspace = await tempWorkspace();
   const nested = path.join(workspace, "packages", "app");
   const rootSkills = path.join(workspace, ".agents", "skills");
@@ -729,6 +873,7 @@ test("workspace .agents skills, symlinked skill folders, and implicit policy are
   ].join("\n"), "utf8");
   await symlink(symlinkTarget, path.join(rootSkills, "shared-skill"));
   delete process.env.HATCH_TS_SKILLS_ROOT;
+  process.env.HATCH_SKILL_ROOTS = [rootSkills, nestedSkills].join(path.delimiter);
 
   const discovered = await discoverSkills({ workspaceRoot: nested });
   assert.ok(discovered.some((skill) => skill.name === "implicit-skill"));
@@ -790,7 +935,7 @@ test("skill discovery deduplicates canonical SKILL.md paths and keeps the first 
   assert.equal(matches[0]?.scope, "system");
 });
 
-test("project .codex skills are discovered as repo-scoped skills", async () => {
+test("project .codex skills are ignored by default and only load from explicit roots", async () => {
   const workspace = await tempWorkspace();
   const nested = path.join(workspace, "services", "api");
   const rootSkillDir = path.join(workspace, ".codex", "skills", "project-skill");
@@ -819,14 +964,23 @@ test("project .codex skills are discovered as repo-scoped skills", async () => {
 
   const discovered = await discoverSkills({ workspaceRoot: nested });
   const names = discovered.map((skill) => skill.name);
-  assert.ok(names.includes("project-skill"));
-  assert.ok(names.includes("nested-project-skill"));
-  assert.ok(discovered
+  assert.ok(!names.includes("project-skill"));
+  assert.ok(!names.includes("nested-project-skill"));
+
+  process.env.HATCH_SKILL_ROOTS = [
+    path.join(workspace, ".codex", "skills"),
+    path.join(nested, ".codex", "skills")
+  ].join(path.delimiter);
+  const configured = await discoverSkills({ workspaceRoot: nested });
+  const configuredNames = configured.map((skill) => skill.name);
+  assert.ok(configuredNames.includes("project-skill"));
+  assert.ok(configuredNames.includes("nested-project-skill"));
+  assert.ok(configured
     .filter((skill) => skill.name === "project-skill" || skill.name === "nested-project-skill")
-    .every((skill) => skill.scope === "repo"));
+    .every((skill) => skill.scope === "user"));
 });
 
-test("codex project_root_markers config controls repo skill discovery root", async () => {
+test("project root marker config does not trigger workspace skill discovery", async () => {
   const workspace = await tempWorkspace();
   const configDir = await tempWorkspace();
   const nested = path.join(workspace, "services", "api");
@@ -854,19 +1008,23 @@ test("codex project_root_markers config controls repo skill discovery root", asy
   ].join("\n"), "utf8");
   const configPath = path.join(configDir, "config.toml");
   await writeFile(configPath, 'project_root_markers = ["hatch-root.marker"]', "utf8");
-  process.env.HATCH_CODEX_CONFIG = configPath;
+  process.env.HATCH_SKILLS_CONFIG = configPath;
   delete process.env.HATCH_TS_SKILLS_ROOT;
 
   const discovered = await discoverSkills({ workspaceRoot: nested });
   const names = discovered.map((skill) => skill.name);
-  assert.ok(names.includes("marker-agent-skill"));
-  assert.ok(names.includes("marker-codex-skill"));
-  assert.ok(discovered
-    .filter((skill) => skill.name === "marker-agent-skill" || skill.name === "marker-codex-skill")
-    .every((skill) => skill.scope === "repo"));
+  assert.ok(!names.includes("marker-agent-skill"));
+  assert.ok(!names.includes("marker-codex-skill"));
+
+  process.env.HATCH_SKILL_ROOTS = path.join(workspace, ".agents", "skills");
+  const configured = await discoverSkills({ workspaceRoot: nested });
+  const configuredNames = configured.map((skill) => skill.name);
+  assert.ok(configuredNames.includes("marker-agent-skill"));
+  assert.ok(!configuredNames.includes("marker-codex-skill"));
+  assert.equal(configured.find((skill) => skill.name === "marker-agent-skill")?.scope, "user");
 });
 
-test("empty codex project_root_markers disables ancestor repo skill discovery", async () => {
+test("workspace ancestor .agents skills are ignored unless configured as server roots", async () => {
   const workspace = await tempWorkspace();
   const configDir = await tempWorkspace();
   const nested = path.join(workspace, "services", "api");
@@ -893,16 +1051,22 @@ test("empty codex project_root_markers disables ancestor repo skill discovery", 
   ].join("\n"), "utf8");
   const configPath = path.join(configDir, "config.toml");
   await writeFile(configPath, "project_root_markers = []", "utf8");
-  process.env.HATCH_CODEX_CONFIG = configPath;
+  process.env.HATCH_SKILLS_CONFIG = configPath;
   delete process.env.HATCH_TS_SKILLS_ROOT;
 
   const discovered = await discoverSkills({ workspaceRoot: nested });
   const names = discovered.map((skill) => skill.name);
   assert.ok(!names.includes("root-marker-disabled-skill"));
-  assert.ok(names.includes("nested-marker-enabled-skill"));
+  assert.ok(!names.includes("nested-marker-enabled-skill"));
+
+  process.env.HATCH_SKILL_ROOTS = path.join(nested, ".agents", "skills");
+  const configured = await discoverSkills({ workspaceRoot: nested });
+  const configuredNames = configured.map((skill) => skill.name);
+  assert.ok(!configuredNames.includes("root-marker-disabled-skill"));
+  assert.ok(configuredNames.includes("nested-marker-enabled-skill"));
 });
 
-test("codex home user, system cache, and plugin skill roots are discovered", async () => {
+test("CODEX_HOME user, system cache, and plugin skill roots are ignored by default", async () => {
   const codexHome = await tempWorkspace();
   const userSkillDir = path.join(codexHome, "skills", "codex-home-skill");
   const systemSkillDir = path.join(codexHome, "skills", ".system", "system-cache-skill");
@@ -972,13 +1136,10 @@ test("codex home user, system cache, and plugin skill roots are discovered", asy
 
   const discovered = await discoverSkills();
   const byName = new Map(discovered.map((skill) => [skill.name, skill]));
-  assert.equal(byName.get("codex-home-skill")?.scope, "user");
-  assert.equal(byName.get("system-cache-skill")?.scope, "system");
-  assert.equal(byName.get("plugin:plugin-skill")?.scope, "user");
-  assert.equal(byName.get("fallback:fallback-plugin-skill")?.scope, "user");
-  assert.equal(path.basename(byName.get("plugin:plugin-skill")?.root ?? ""), "custom-skills");
-  assert.match(byName.get("plugin:plugin-skill")?.root ?? "", /plugins[/\\]cache[/\\]market[/\\]plugin[/\\]1\.0\.0[/\\]custom-skills$/);
-  assert.equal(byName.has("default-plugin-skill"), false);
+  assert.equal(byName.has("codex-home-skill"), false);
+  assert.equal(byName.has("system-cache-skill"), false);
+  assert.equal(byName.has("plugin:plugin-skill"), false);
+  assert.equal(byName.has("fallback:fallback-plugin-skill"), false);
 });
 
 test("system skill roots follow symlinked skill folders", async () => {
@@ -1056,6 +1217,10 @@ test("skill policy products restrict model-visible discovery to the current prod
     ].join("\n"), "utf8");
   }
 
+  const defaultSkills = await discoverSkills(root);
+  assert.deepEqual(defaultSkills.map((skill) => skill.name), ["unrestricted-skill"]);
+
+  process.env.HATCH_SKILL_PRODUCT = "codex";
   const codexSkills = await discoverSkills(root);
   assert.deepEqual(codexSkills.map((skill) => skill.name).sort(), ["codex-only-skill", "unrestricted-skill"]);
 
@@ -1278,7 +1443,7 @@ test("skill bundle resource manifests report truncation when capped", async () =
   assert.ok(manifest.paths.every((item) => item.startsWith("references/")));
 });
 
-test("codex skills config can disable a skill by SKILL.md path", async () => {
+test("skills config can disable a skill by SKILL.md path", async () => {
   const root = await tempWorkspace();
   const configDir = await tempWorkspace();
   const skillDir = path.join(root, "disabled-skill");
@@ -1298,13 +1463,13 @@ test("codex skills config can disable a skill by SKILL.md path", async () => {
     `path = "${skillPath}"`,
     "enabled = false"
   ].join("\n"), "utf8");
-  process.env.HATCH_CODEX_CONFIG = configPath;
+  process.env.HATCH_SKILLS_CONFIG = configPath;
 
   const discovered = await discoverSkills(root);
   assert.ok(!discovered.some((skill) => skill.name === "disabled-skill"));
 });
 
-test("codex skills config supports name selectors and ordered overrides", async () => {
+test("skills config supports name selectors and ordered overrides", async () => {
   const root = await tempWorkspace();
   const configDir = await tempWorkspace();
   const first = path.join(root, "first", "shared-skill");
@@ -1352,7 +1517,7 @@ test("codex skills config supports name selectors and ordered overrides", async 
     `path = "${second}"`,
     "enabled = false"
   ].join("\n"), "utf8");
-  process.env.HATCH_CODEX_CONFIG = configPath;
+  process.env.HATCH_SKILLS_CONFIG = configPath;
 
   const discovered = await discoverSkills(root);
   const shared = discovered.filter((skill) => skill.name === "shared-skill").map((skill) => skill.path);
@@ -1361,7 +1526,7 @@ test("codex skills config supports name selectors and ordered overrides", async 
   assert.ok(discovered.some((skill) => skill.name === "restored-skill"));
 });
 
-test("codex skills config can disable bundled system skill roots", async () => {
+test("skills config can disable bundled system skill roots", async () => {
   const codexHome = await tempWorkspace();
   const userSkill = path.join(codexHome, "skills", "user-skill");
   const systemSkill = path.join(codexHome, "skills", ".system", "bundled-skill");
@@ -1383,11 +1548,13 @@ test("codex skills config can disable bundled system skill roots", async () => {
     "",
     "# Bundled"
   ].join("\n"), "utf8");
-  await writeFile(path.join(codexHome, "config.toml"), [
+  const configPath = path.join(codexHome, "config.toml");
+  await writeFile(configPath, [
     "[skills.bundled]",
     "enabled = false"
   ].join("\n"), "utf8");
-  process.env.CODEX_HOME = codexHome;
+  process.env.HATCH_SKILLS_CONFIG = configPath;
+  process.env.HATCH_SKILL_ROOTS = path.join(codexHome, "skills");
   delete process.env.HATCH_TS_SKILLS_ROOT;
 
   const discovered = await discoverSkills();
@@ -1397,7 +1564,7 @@ test("codex skills config can disable bundled system skill roots", async () => {
   assert.ok(discovered.every((skill) => skill.scope !== "system"));
 });
 
-test("codex skills config can suppress automatic skills instructions", async () => {
+test("skills config can suppress automatic skills instructions", async () => {
   const workspace = await tempWorkspace();
   const dataDir = await tempWorkspace();
   const configDir = await tempWorkspace();
@@ -1416,11 +1583,10 @@ test("codex skills config can suppress automatic skills instructions", async () 
     "[skills]",
     "include_instructions = false"
   ].join("\n"), "utf8");
-  process.env.HATCH_CODEX_CONFIG = configPath;
+  process.env.HATCH_SKILLS_CONFIG = configPath;
   assert.equal(await includeSkillInstructions(), false);
 
   const mock = await createFinalOnlyChatCompletionsServer();
-  process.env.HATCH_AGENT_RUNTIME = "chat-completions";
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   process.env.OPENAI_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
@@ -1453,9 +1619,11 @@ test("skills section renders Codex-style progressive disclosure without SKILL.md
 
   assert.match(section, /## Skills/);
   assert.match(section, /- repo-assistant: .* \(file: .*SKILL\.md\)/);
+  assert.match(section, /- review-contract: .* \(file: .*SKILL\.md\)/);
   assert.match(section, /must read its `SKILL\.md` completely/);
   assert.doesNotMatch(section, /# Repo Assistant/);
-  assert.equal(report.included_count, 1);
+  assert.doesNotMatch(section, /# \/review-contract/);
+  assert.ok(report.included_count >= 2);
 });
 
 test("chat completions runtime uses generic file_read for skill path loading", async () => {
@@ -1522,7 +1690,6 @@ test("chat completions runtime progressively reads SKILL.md through file_read be
   const workspace = await tempWorkspace();
   const dataDir = await tempWorkspace();
   const mock = await createMockChatCompletionsServer();
-  process.env.HATCH_AGENT_RUNTIME = "chat-completions";
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   process.env.OPENAI_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
@@ -1579,12 +1746,12 @@ test("chat completions runtime resolves aliased skills catalog paths for server-
   }
 
   const mock = await createAliasedSkillPathChatCompletionsServer();
-  process.env.HATCH_AGENT_RUNTIME = "chat-completions";
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   process.env.OPENAI_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "mock-model";
   process.env.HATCH_SKILL_METADATA_BUDGET_CHARS = "5000";
+  process.env.HATCH_SKILL_ROOTS = skillsRoot;
   delete process.env.HATCH_TS_SKILLS_ROOT;
 
   runtimeServer = createRuntimeServer();
@@ -1631,11 +1798,11 @@ test("model-driven SKILL.md file_read returns bundled resource manifest without 
   await writeFile(path.join(skillDir, "scripts", "check.sh"), "echo implicit\n", "utf8");
 
   const mock = await createModelDrivenResourceManifestChatCompletionsServer();
-  process.env.HATCH_AGENT_RUNTIME = "chat-completions";
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   process.env.OPENAI_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_SKILL_ROOTS = path.join(workspace, ".agents", "skills");
   delete process.env.HATCH_TS_SKILLS_ROOT;
 
   runtimeServer = createRuntimeServer();
@@ -1665,7 +1832,7 @@ test("model-driven SKILL.md file_read returns bundled resource manifest without 
   }
 });
 
-test("model-driven skill allowed-tools preapprove ask tool calls in the same run", async () => {
+test("model-driven skill allowed-tools are preserved while local tools run with auto permission", async () => {
   const workspace = await tempWorkspace();
   const dataDir = await tempWorkspace();
   const skillDir = path.join(workspace, ".agents", "skills", "implicit-write-skill");
@@ -1684,11 +1851,11 @@ test("model-driven skill allowed-tools preapprove ask tool calls in the same run
   ].join("\n"), "utf8");
 
   const mock = await createModelDrivenAllowedToolsChatCompletionsServer();
-  process.env.HATCH_AGENT_RUNTIME = "chat-completions";
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   process.env.OPENAI_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_SKILL_ROOTS = path.join(workspace, ".agents", "skills");
   delete process.env.HATCH_TS_SKILLS_ROOT;
 
   runtimeServer = createRuntimeServer();
@@ -1723,7 +1890,6 @@ test("chat completions runtime does not carry activated skill instructions acros
   const workspace = await tempWorkspace();
   const dataDir = await tempWorkspace();
   const mock = await createSkillRetentionChatCompletionsServer();
-  process.env.HATCH_AGENT_RUNTIME = "chat-completions";
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   process.env.OPENAI_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
@@ -1788,11 +1954,11 @@ test("explicit-only skill resources are server-readable on later turns when re-m
   await writeFile(path.join(skillDir, "assets", "template.txt"), "template payload\n", "utf8");
 
   const mock = await createActivatedSkillResourceChatCompletionsServer();
-  process.env.HATCH_AGENT_RUNTIME = "chat-completions";
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   process.env.OPENAI_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_SKILL_ROOTS = path.join(workspace, ".agents", "skills");
   delete process.env.HATCH_TS_SKILLS_ROOT;
 
   runtimeServer = createRuntimeServer();
@@ -1835,7 +2001,7 @@ test("explicit-only skill resources are server-readable on later turns when re-m
   const events = await new RuntimeStore(dataDir).readEvents();
   const activation = events.find((event) => event.type === "skill.activated" && event.name === "manual-resource-skill");
   assert.ok(activation && activation.type === "skill.activated");
-  assert.equal(activation.scope, "repo");
+  assert.equal(activation.scope, "user");
   assert.ok(events.some((event) => (
     event.type === "tool.call"
     && event.conversation_id === "conv_activated_resource"
@@ -1881,11 +2047,11 @@ test("explicitly activated skill instructions are injected fully and still reada
   ].join("\n"), "utf8");
 
   const mock = await createFullExplicitSkillChatCompletionsServer(trailer);
-  process.env.HATCH_AGENT_RUNTIME = "chat-completions";
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   process.env.OPENAI_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_SKILL_ROOTS = path.join(workspace, ".agents", "skills");
   delete process.env.HATCH_TS_SKILLS_ROOT;
 
   runtimeServer = createRuntimeServer();
@@ -1932,11 +2098,11 @@ test("relative activated skill resource paths fail when multiple active skills m
   }
 
   const mock = await createAmbiguousRelativeSkillResourceChatCompletionsServer();
-  process.env.HATCH_AGENT_RUNTIME = "chat-completions";
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   process.env.OPENAI_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_SKILL_ROOTS = path.join(workspace, ".agents", "skills");
   delete process.env.HATCH_TS_SKILLS_ROOT;
 
   runtimeServer = createRuntimeServer();
@@ -1967,10 +2133,9 @@ test("relative activated skill resource paths fail when multiple active skills m
   )));
 });
 
-test("re-mentioned skills refresh from current files and respect disabled config", async () => {
+test("re-mentioned skills refresh from current files within a fixed session catalog", async () => {
   const workspace = await tempWorkspace();
   const dataDir = await tempWorkspace();
-  const configDir = await tempWorkspace();
   const skillDir = path.join(workspace, ".agents", "skills", "refresh-skill");
   const skillPath = path.join(skillDir, "SKILL.md");
   await mkdir(skillDir, { recursive: true });
@@ -1985,11 +2150,11 @@ test("re-mentioned skills refresh from current files and respect disabled config
   ].join("\n"), "utf8");
 
   const mock = await createActivatedSkillRefreshChatCompletionsServer();
-  process.env.HATCH_AGENT_RUNTIME = "chat-completions";
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   process.env.OPENAI_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_SKILL_ROOTS = path.join(workspace, ".agents", "skills");
   delete process.env.HATCH_TS_SKILLS_ROOT;
 
   runtimeServer = createRuntimeServer();
@@ -2013,19 +2178,9 @@ test("re-mentioned skills refresh from current files and respect disabled config
     ].join("\n"), "utf8");
     const second = await session.run("Use $refresh-skill again.");
 
-    const configPath = path.join(configDir, "config.toml");
-    await writeFile(configPath, [
-      "[[skills.config]]",
-      `path = "${skillPath}"`,
-      "enabled = false"
-    ].join("\n"), "utf8");
-    process.env.HATCH_CODEX_CONFIG = configPath;
-    const third = await session.run("Continue after disabling the skill.");
-
     assert.match(first.finalText, /refresh one/);
     assert.match(second.finalText, /refresh two/);
-    assert.match(third.finalText, /refresh disabled/);
-    assert.equal(mock.requests.length, 3);
+    assert.equal(mock.requests.length, 2);
   } finally {
     session.close();
     await mock.close();
@@ -2205,7 +2360,6 @@ test("pre-turn auto compaction appends a checkpoint and sends compacted history 
   });
 
   const mock = await createPreTurnCompactionChatCompletionsServer();
-  process.env.HATCH_AGENT_RUNTIME = "chat-completions";
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   process.env.OPENAI_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
@@ -2265,7 +2419,6 @@ test("manual /compact runs a standalone compaction turn without a normal agent r
   });
 
   const mock = await createManualCompactionChatCompletionsServer();
-  process.env.HATCH_AGENT_RUNTIME = "chat-completions";
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   process.env.OPENAI_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
@@ -2303,7 +2456,6 @@ test("mid-turn auto compaction checkpoints tool context before continuing the to
   const workspace = await tempWorkspace();
   const dataDir = await tempWorkspace();
   const mock = await createMidTurnCompactionChatCompletionsServer();
-  process.env.HATCH_AGENT_RUNTIME = "chat-completions";
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   process.env.OPENAI_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
@@ -2339,7 +2491,6 @@ test("mid-turn compaction waits for a complete assistant tool-call batch", async
   const workspace = await tempWorkspace();
   const dataDir = await tempWorkspace();
   const mock = await createMultiToolBatchCompactionChatCompletionsServer();
-  process.env.HATCH_AGENT_RUNTIME = "chat-completions";
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   process.env.OPENAI_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
@@ -2369,7 +2520,7 @@ test("mid-turn compaction waits for a complete assistant tool-call batch", async
   assert.equal(events.filter((event) => event.type === "conversation.compacted" && event.phase === "mid_turn").length, 1);
 });
 
-test("chat completions runtime renders the skills catalog on every turn", async () => {
+test("chat completions runtime fixes the skills catalog for the WebSocket session", async () => {
   const workspace = await tempWorkspace();
   const dataDir = await tempWorkspace();
   const skillsRoot = path.join(workspace, ".agents", "skills");
@@ -2385,11 +2536,11 @@ test("chat completions runtime renders the skills catalog on every turn", async 
   ].join("\n"), "utf8");
 
   const mock = await createFinalOnlyChatCompletionsServer();
-  process.env.HATCH_AGENT_RUNTIME = "chat-completions";
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   process.env.OPENAI_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_SKILL_ROOTS = skillsRoot;
   delete process.env.HATCH_TS_SKILLS_ROOT;
 
   runtimeServer = createRuntimeServer();
@@ -2412,19 +2563,21 @@ test("chat completions runtime renders the skills catalog on every turn", async 
       "",
       "# Second"
     ].join("\n"), "utf8");
-    const second = await session.run("Inspect the refreshed available skills catalog.");
+    const second = await session.run("Inspect the same session skills catalog.");
 
     assert.match(first.finalText, /final turn 1/);
     assert.match(second.finalText, /final turn 2/);
     assert.equal(mock.requests.length, 2);
     const firstSkillCatalog = runtimeContextContent(mock.requests[0] ?? {}, /AVAILABLE SKILLS/);
     const secondSkillCatalog = runtimeContextContent(mock.requests[1] ?? {}, /AVAILABLE SKILLS/);
+    assert.deepEqual(stableModelPrefix(mock.requests[0] ?? {}), stableModelPrefix(mock.requests[1] ?? {}));
     assert.match(firstSkillCatalog, /<skills_instructions>/);
     assert.match(firstSkillCatalog, /<\/skills_instructions>/);
     assert.match(firstSkillCatalog, /first-skill/);
     assert.doesNotMatch(firstSkillCatalog, /second-skill/);
     assert.match(secondSkillCatalog, /first-skill/);
-    assert.match(secondSkillCatalog, /second-skill/);
+    assert.doesNotMatch(secondSkillCatalog, /second-skill/);
+    assert.equal(firstSkillCatalog, secondSkillCatalog);
     assert.ok(Array.isArray(mock.requests[1]?.messages));
     assert.deepEqual(mock.requests[1]?.messages
       .filter((message: Record<string, unknown>) => message.role !== "system")
@@ -2452,14 +2605,14 @@ test("chat completions runtime injects codex AGENTS.md project instructions", as
     'project_root_markers = ["hatch-root.marker"]',
     'project_doc_fallback_filenames = ["CODEX.md"]'
   ].join("\n"), "utf8");
-  process.env.HATCH_CODEX_CONFIG = configPath;
+  process.env.HATCH_SKILLS_CONFIG = configPath;
 
   const mock = await createFinalOnlyChatCompletionsServer();
-  process.env.HATCH_AGENT_RUNTIME = "chat-completions";
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   process.env.OPENAI_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_SKILL_ROOTS = path.join(workspace, ".agents", "skills");
   delete process.env.HATCH_TS_SKILLS_ROOT;
 
   runtimeServer = createRuntimeServer();
@@ -2497,11 +2650,95 @@ test("chat completions runtime injects codex AGENTS.md project instructions", as
   }
 });
 
+test("chat completions runtime injects stable local workspace context without current-turn paths", async () => {
+  const workspace = await tempWorkspace();
+  const dataDir = await tempWorkspace();
+  const mock = await createFinalOnlyChatCompletionsServer();
+  process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
+  process.env.OPENAI_API_KEY = "test-key";
+  process.env.OPENAI_BASE_URL = mock.baseUrl;
+  process.env.HATCH_CREATOR_MODEL = "mock-model";
+
+  runtimeServer = createRuntimeServer();
+  const serverUrl = await listen(runtimeServer);
+  try {
+    const result = await runLocalHarness({
+      serverUrl,
+      workspace,
+      prompt: "请先读取合同文件 legal-samples/acme-analytics-saas-agreement.md，再总结风险。交易金额约 25 万美元/年。"
+    });
+
+    assert.match(result.finalText, /final turn 1/);
+    assert.equal(mock.requests.length, 1);
+    const workspaceContext = runtimeContextContent(mock.requests[0] ?? {}, /LOCAL WORKSPACE/);
+    const stablePrefix = stableModelPrefix(mock.requests[0] ?? {})
+      .map((message) => message.content)
+      .join("\n");
+    const toolDescriptions = (mock.requests[0]?.tools ?? [])
+      .map((tool: Record<string, any>) => String(tool.function?.description ?? ""))
+      .join("\n");
+    assert.match(workspaceContext, new RegExp(escapeRegExp(workspace)));
+    assert.match(workspaceContext, /All relative local file paths resolve under this exact workspace root/);
+    assert.doesNotMatch(workspaceContext, /legal-samples\/acme-analytics-saas-agreement\.md/);
+    assert.doesNotMatch(stablePrefix, /legal-samples\/acme-analytics-saas-agreement\.md/);
+    assert.doesNotMatch(stablePrefix, /file_read .*before.*file_search/i);
+    assert.doesNotMatch(toolDescriptions, /file_read .*before.*file_search/i);
+    assert.doesNotMatch(workspaceContext, /万美元\/年/);
+  } finally {
+    await mock.close();
+  }
+});
+
+test("chat completions runtime enforces exact path file_read before file_search outside the prompt", async () => {
+  const workspace = await tempWorkspace();
+  const dataDir = await tempWorkspace();
+  const contractPath = path.join(workspace, "legal-samples", "acme-analytics-saas-agreement.md");
+  await mkdir(path.dirname(contractPath), { recursive: true });
+  await writeFile(contractPath, "Contract body for runtime path policy.\n", "utf8");
+  const mock = await createDirectReadGuardChatCompletionsServer();
+  process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
+  process.env.OPENAI_API_KEY = "test-key";
+  process.env.OPENAI_BASE_URL = mock.baseUrl;
+  process.env.HATCH_CREATOR_MODEL = "mock-model";
+
+  runtimeServer = createRuntimeServer();
+  const serverUrl = await listen(runtimeServer);
+  try {
+    const result = await runLocalHarness({
+      serverUrl,
+      workspace,
+      prompt: "请先读取合同文件 legal-samples/acme-analytics-saas-agreement.md，再总结风险。"
+    });
+
+    assert.match(result.finalText, /Exact file read observed/);
+    assert.equal(mock.requests.length, 3);
+    assert.ok(mock.requests[1]?.messages?.some((message: Record<string, unknown>) => (
+      message.role === "tool"
+      && message.tool_call_id === "call_bad_search"
+      && String(message.content ?? "").includes("direct_read_required")
+      && String(message.content ?? "").includes("legal-samples/acme-analytics-saas-agreement.md")
+    )));
+    assert.ok(mock.requests[2]?.messages?.some((message: Record<string, unknown>) => (
+      message.role === "tool"
+      && message.tool_call_id === "call_exact_read"
+      && String(message.content ?? "").includes("Contract body for runtime path policy")
+    )));
+    assert.ok(result.events.some((event) => event.type === "tool_call.delta"
+      && event.name === "fs.search"
+      && event.status === "completed"
+      && event.result?.code === "direct_read_required"));
+    assert.ok(result.events.some((event) => event.type === "tool_call.delta"
+      && event.name === "fs.read"
+      && event.status === "completed"));
+  } finally {
+    await mock.close();
+  }
+});
+
 test("chat completions runtime filters client-local function tools from hello capability", async () => {
   const workspace = await tempWorkspace();
   const dataDir = await tempWorkspace();
   const mock = await createFinalOnlyChatCompletionsServer();
-  process.env.HATCH_AGENT_RUNTIME = "chat-completions";
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   process.env.OPENAI_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
@@ -2533,11 +2770,10 @@ test("chat completions runtime filters client-local function tools from hello ca
   }
 });
 
-test("shell_exec approval requests include model justification and tool arguments", async () => {
+test("shell_exec auto-permission calls include model justification and tool arguments", async () => {
   const workspace = await tempWorkspace();
   const dataDir = await tempWorkspace();
   const mock = await createShellJustificationChatCompletionsServer();
-  process.env.HATCH_AGENT_RUNTIME = "chat-completions";
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   process.env.OPENAI_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
@@ -2554,16 +2790,14 @@ test("shell_exec approval requests include model justification and tool argument
       approveTool: (request) => request.name !== "shell.exec"
     });
 
-    assert.match(result.finalText, /shell denial observed/i);
+    assert.match(result.finalText, /shell output observed/i);
     assert.equal(mock.requests.length, 2);
-    const approvalRequest = result.events.find((event) => event.type === "approval.request" && event.name === "shell.exec");
-    assert.ok(approvalRequest && approvalRequest.type === "approval.request");
-    assert.equal(approvalRequest.arguments.command, "printf hatch");
-    assert.equal(approvalRequest.reason, "Need to inspect shell output.");
-    const approvalResult = result.events.find((event) => event.type === "approval.result" && event.name === "shell.exec");
-    assert.ok(approvalResult && approvalResult.type === "approval.result");
-    assert.equal(approvalResult.status, "denied");
-    assert.ok(result.events.some((event) => event.type === "tool_call.delta" && event.name === "shell.exec" && event.status === "failed"));
+    assert.deepEqual(result.events.filter((event) => event.type === "approval.request" || event.type === "approval.result"), []);
+    const shellRequest = result.events.find((event) => event.type === "tool_call.request" && event.name === "shell.exec");
+    assert.ok(shellRequest && shellRequest.type === "tool_call.request");
+    assert.equal(shellRequest.arguments.command, "printf hatch");
+    assert.equal(shellRequest.approval, "auto");
+    assert.ok(result.events.some((event) => event.type === "tool_call.delta" && event.name === "shell.exec" && event.status === "completed"));
   } finally {
     await mock.close();
   }
@@ -2575,7 +2809,6 @@ test("chat completions runtime brokers local filesystem function tools to the cl
   await writeFile(path.join(workspace, "notes.txt"), "Hatch local broker test.\n", "utf8");
 
   const mock = await createMockLocalToolChatCompletionsServer();
-  process.env.HATCH_AGENT_RUNTIME = "chat-completions";
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   process.env.OPENAI_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
@@ -2611,7 +2844,6 @@ test("chat completions runtime replays prior tool call chain on later turns", as
   const workspace = await tempWorkspace();
   const dataDir = await tempWorkspace();
   const mock = await createToolHistoryReplayChatCompletionsServer();
-  process.env.HATCH_AGENT_RUNTIME = "chat-completions";
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   process.env.OPENAI_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
@@ -2643,7 +2875,7 @@ test("chat completions runtime replays prior tool call chain on later turns", as
   assert.ok(visible.some((message) => message.role === "tool" && message.tool_call_id === "call_history_web"));
 });
 
-test("activated skill allowed-tools preapprove matching ask local tool calls", async () => {
+test("activated skill allowed-tools are preserved while local tools run with auto permission", async () => {
   const workspace = await tempWorkspace();
   const dataDir = await tempWorkspace();
   const skillDir = path.join(workspace, ".agents", "skills", "allowed-tools-skill");
@@ -2662,11 +2894,11 @@ test("activated skill allowed-tools preapprove matching ask local tool calls", a
   ].join("\n"), "utf8");
 
   const mock = await createAllowedToolsChatCompletionsServer();
-  process.env.HATCH_AGENT_RUNTIME = "chat-completions";
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   process.env.OPENAI_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_SKILL_ROOTS = path.join(workspace, ".agents", "skills");
   delete process.env.HATCH_TS_SKILLS_ROOT;
 
   runtimeServer = createRuntimeServer();
@@ -2717,11 +2949,11 @@ test("chat completions runtime emits implicit skill invocation events for skill 
 
   const command = "bash .agents/skills/script-invocation-skill/scripts/check.sh";
   const mock = await createImplicitSkillInvocationChatCompletionsServer(command);
-  process.env.HATCH_AGENT_RUNTIME = "chat-completions";
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   process.env.OPENAI_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_SKILL_ROOTS = path.join(workspace, ".agents", "skills");
   delete process.env.HATCH_TS_SKILLS_ROOT;
 
   runtimeServer = createRuntimeServer();
@@ -2769,11 +3001,11 @@ test("chat completions runtime emits implicit skill invocation events for skill 
 
   const skillPath = ".agents/skills/doc-invocation-skill/SKILL.md";
   const mock = await createImplicitSkillDocReadChatCompletionsServer(skillPath);
-  process.env.HATCH_AGENT_RUNTIME = "chat-completions";
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   process.env.OPENAI_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_SKILL_ROOTS = path.join(workspace, ".agents", "skills");
   delete process.env.HATCH_TS_SKILLS_ROOT;
 
   runtimeServer = createRuntimeServer();
@@ -2806,7 +3038,6 @@ test("chat completions runtime emits failed tool_call.delta for unknown model to
   const workspace = await tempWorkspace();
   const dataDir = await tempWorkspace();
   const mock = await createMockUnknownToolChatCompletionsServer();
-  process.env.HATCH_AGENT_RUNTIME = "chat-completions";
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   process.env.OPENAI_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
@@ -2873,7 +3104,6 @@ test("chat completions runtime executes configured MCP tools on the server event
   assert.ok(mcpAddress && typeof mcpAddress !== "string");
 
   const mock = await createMockMcpChatCompletionsServer();
-  process.env.HATCH_AGENT_RUNTIME = "chat-completions";
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   process.env.OPENAI_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
@@ -2936,7 +3166,6 @@ test("chat completions runtime returns recoverable tool failures to the model", 
   assert.ok(mcpAddress && typeof mcpAddress !== "string");
 
   const mock = await createRecoverableToolFailureChatCompletionsServer();
-  process.env.HATCH_AGENT_RUNTIME = "chat-completions";
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   process.env.OPENAI_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
@@ -2994,7 +3223,7 @@ test("local harness supports multi-turn chat over one connection", async () => {
     "utf8"
   );
 
-  runtimeServer = createRuntimeServer();
+  runtimeServer = createDeterministicRuntimeServer();
   const serverUrl = await listen(runtimeServer);
   const session = new LocalHarnessSession({
     serverUrl,
@@ -3155,7 +3384,7 @@ test("server rejects concurrent runs for the same conversation across WebSocket 
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   await writeFile(path.join(workspace, "notes.txt"), "Hatch concurrent run guard test.\n", "utf8");
 
-  runtimeServer = createRuntimeServer();
+  runtimeServer = createDeterministicRuntimeServer();
   const serverUrl = await listen(runtimeServer);
   const firstSocket = new WebSocket(serverUrl);
   const firstMessages: OutboundMessage[] = [];
@@ -3230,13 +3459,112 @@ test("server rejects concurrent runs for the same conversation across WebSocket 
   )));
 });
 
+test("server releases a conversation lock when the client disconnects mid-run", async () => {
+  const workspace = await tempWorkspace();
+  const dataDir = await tempWorkspace();
+  process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
+  await writeFile(path.join(workspace, "notes.txt"), "Hatch reconnect lock release test.\n", "utf8");
+
+  runtimeServer = createDeterministicRuntimeServer();
+  const serverUrl = await listen(runtimeServer);
+  const firstSocket = new WebSocket(serverUrl);
+  const firstMessages: OutboundMessage[] = [];
+  firstSocket.on("message", (data) => {
+    firstMessages.push(JSON.parse(String(data)) as OutboundMessage);
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    firstSocket.once("open", resolve);
+    firstSocket.once("error", reject);
+  });
+
+  firstSocket.send(JSON.stringify({
+    type: "client.hello",
+    protocol_version: PROTOCOL_VERSION,
+    installation_id: "install_disconnect_lock_1",
+    license_token: "license_disconnect_lock",
+    workspace_root: workspace,
+    local_tools: ["fs.list", "fs.search", "fs.read", "fs.write", "fs.patch", "git.diff"]
+  }));
+  await waitForSocketMessage(firstMessages, (message) => message.type === "session.ready");
+
+  firstSocket.send(JSON.stringify({
+    type: "client.message",
+    run_id: "run_disconnect_lock_1",
+    conversation_id: "conv_disconnect_lock",
+    message: { role: "user", content: "Find Hatch." }
+  }));
+  const firstToolRequest = await waitForSocketMessage(firstMessages, (message) => (
+    message.type === "tool_call.request" && message.run_id === "run_disconnect_lock_1"
+  ));
+  assert.equal(firstToolRequest.type, "tool_call.request");
+
+  firstSocket.close();
+  await waitUntil(async () => {
+    const events = await new RuntimeStore(dataDir).readEvents();
+    return events.some((event) => (
+      event.type === "turn.state"
+      && event.run_id === "run_disconnect_lock_1"
+      && event.to === "cancelled"
+    ));
+  });
+
+  const secondSocket = new WebSocket(serverUrl);
+  const secondMessages: OutboundMessage[] = [];
+  secondSocket.on("message", (data) => {
+    secondMessages.push(JSON.parse(String(data)) as OutboundMessage);
+  });
+  await new Promise<void>((resolve, reject) => {
+    secondSocket.once("open", resolve);
+    secondSocket.once("error", reject);
+  });
+  secondSocket.send(JSON.stringify({
+    type: "client.hello",
+    protocol_version: PROTOCOL_VERSION,
+    installation_id: "install_disconnect_lock_2",
+    license_token: "license_disconnect_lock",
+    workspace_root: workspace,
+    local_tools: ["fs.list", "fs.search", "fs.read", "fs.write", "fs.patch", "git.diff"]
+  }));
+  await waitForSocketMessage(secondMessages, (message) => message.type === "session.ready");
+
+  secondSocket.send(JSON.stringify({
+    type: "client.message",
+    run_id: "run_disconnect_lock_2",
+    conversation_id: "conv_disconnect_lock",
+    message: { role: "user", content: "Find Hatch after reconnect." }
+  }));
+  const accepted = await waitForSocketMessage(secondMessages, (message) => (
+    (message.type === "tool_call.request" && message.run_id === "run_disconnect_lock_2")
+    || (message.type === "turn.failed" && message.run_id === "run_disconnect_lock_2")
+  ));
+  assert.equal(accepted.type, "tool_call.request");
+  secondSocket.close();
+
+  const events = await new RuntimeStore(dataDir).readEvents();
+  assert.ok(events.some((event) => (
+    event.type === "tool.call"
+    && event.run_id === "run_disconnect_lock_1"
+    && event.tool_call_id === firstToolRequest.tool_call_id
+    && event.status === "cancelled"
+  )));
+  assert.ok(!events.some((event) => (
+    event.type === "runtime.event"
+    && event.run_id === "run_disconnect_lock_2"
+    && typeof event.event === "object"
+    && event.event !== null
+    && (event.event as Record<string, unknown>).type === "turn.failed"
+    && ((event.event as Record<string, unknown>).error as Record<string, unknown> | undefined)?.code === "conversation_busy"
+  )));
+});
+
 test("run cancel for an unknown run does not cancel the active run", async () => {
   const workspace = await tempWorkspace();
   const dataDir = await tempWorkspace();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   await writeFile(path.join(workspace, "notes.txt"), "Hatch targeted cancellation test.\n", "utf8");
 
-  runtimeServer = createRuntimeServer();
+  runtimeServer = createDeterministicRuntimeServer();
   const serverUrl = await listen(runtimeServer);
   const socket = new WebSocket(serverUrl);
   const messages: OutboundMessage[] = [];
@@ -3327,7 +3655,7 @@ test("run cancellation transitions active run to cancelled and persists it", asy
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   await writeFile(path.join(workspace, "notes.txt"), "Hatch cancellation test.\n", "utf8");
 
-  runtimeServer = createRuntimeServer();
+  runtimeServer = createDeterministicRuntimeServer();
   const serverUrl = await listen(runtimeServer);
   const session = new LocalHarnessSession({
     serverUrl,
@@ -4588,6 +4916,127 @@ async function createFinalOnlyChatCompletionsServer(): Promise<{
   };
 }
 
+async function createDirectReadGuardChatCompletionsServer(): Promise<{
+  baseUrl: string;
+  requests: Array<Record<string, any>>;
+  close: () => Promise<void>;
+}> {
+  const requests: Array<Record<string, any>> = [];
+  const server = http.createServer((req, res) => {
+    void (async () => {
+      if (req.method !== "POST" || req.url !== "/v1/chat/completions") {
+        res.writeHead(404);
+        res.end("not found");
+        return;
+      }
+
+      const body = await readRequestBody(req);
+      const request = JSON.parse(body) as Record<string, any>;
+      requests.push(request);
+
+      if (requests.length === 1) {
+        const prefix = stableModelPrefix(request).map((message) => message.content).join("\n");
+        assert.doesNotMatch(prefix, /legal-samples\/acme-analytics-saas-agreement\.md/);
+        writeSse(res, [
+          {
+            choices: [{
+              index: 0,
+              delta: {
+                role: "assistant",
+                tool_calls: [{
+                  index: 0,
+                  id: "call_bad_search",
+                  type: "function",
+                  function: {
+                    name: "file_search",
+                    arguments: JSON.stringify({
+                      query: "acme analytics saas agreement",
+                      path: ".",
+                      max_results: 5
+                    })
+                  }
+                }]
+              },
+              finish_reason: null
+            }]
+          },
+          {
+            choices: [{
+              index: 0,
+              delta: {},
+              finish_reason: "tool_calls"
+            }]
+          }
+        ]);
+        return;
+      }
+
+      if (requests.length === 2) {
+        assert.ok(request.messages.some((message: Record<string, unknown>) => (
+          message.role === "tool"
+          && message.tool_call_id === "call_bad_search"
+          && String(message.content ?? "").includes("direct_read_required")
+        )));
+        writeSse(res, [
+          {
+            choices: [{
+              index: 0,
+              delta: {
+                role: "assistant",
+                tool_calls: [{
+                  index: 0,
+                  id: "call_exact_read",
+                  type: "function",
+                  function: {
+                    name: "file_read",
+                    arguments: JSON.stringify({
+                      path: "legal-samples/acme-analytics-saas-agreement.md"
+                    })
+                  }
+                }]
+              },
+              finish_reason: null
+            }]
+          },
+          {
+            choices: [{
+              index: 0,
+              delta: {},
+              finish_reason: "tool_calls"
+            }]
+          }
+        ]);
+        return;
+      }
+
+      assert.ok(request.messages.some((message: Record<string, unknown>) => (
+        message.role === "tool"
+        && message.tool_call_id === "call_exact_read"
+        && String(message.content ?? "").includes("Contract body for runtime path policy")
+      )));
+      writeFinal(res, "Exact file read observed.");
+    })().catch((error) => {
+      res.writeHead(500);
+      res.end(error instanceof Error ? error.message : String(error));
+    });
+  });
+
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Expected mock server to listen on a TCP port");
+  }
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}/v1`,
+    requests,
+    close: async () => {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  };
+}
+
 async function createShellJustificationChatCompletionsServer(): Promise<{
   baseUrl: string;
   requests: Array<Record<string, any>>;
@@ -4646,9 +5095,9 @@ async function createShellJustificationChatCompletionsServer(): Promise<{
       assert.ok(request.messages.some((message: Record<string, unknown>) => (
         message.role === "tool"
         && message.tool_call_id === "call_shell_approval"
-        && String(message.content ?? "").includes("Tool call rejected by user: shell.exec")
+        && String(message.content ?? "").includes("\"stdout\":\"hatch\"")
       )));
-      writeFinal(res, "Shell denial observed.");
+      writeFinal(res, "Shell output observed.");
     })().catch((error) => {
       res.writeHead(500);
       res.end(error instanceof Error ? error.message : String(error));
@@ -5442,6 +5891,28 @@ function runtimeContexts(request: Record<string, any>): string[] {
     .filter((content: string) => content.startsWith(RUNTIME_CONTEXT_PREFIX));
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function stableModelPrefix(request: Record<string, any>): Array<{ role: string; content: string }> {
+  const prefix: Array<{ role: string; content: string }> = [];
+  for (const message of request.messages ?? []) {
+    const role = String(message.role ?? "");
+    const content = String(message.content ?? "");
+    if (
+      role === "system"
+      || content.startsWith(RUNTIME_CONTEXT_PREFIX)
+      || content.startsWith("# AGENTS.md instructions")
+    ) {
+      prefix.push({ role, content });
+      continue;
+    }
+    break;
+  }
+  return prefix;
+}
+
 function projectInstructionsContent(request: Record<string, any>): string {
   const message = (request.messages ?? [])
     .filter((item: Record<string, unknown>) => item.role === "user")
@@ -5449,10 +5920,6 @@ function projectInstructionsContent(request: Record<string, any>): string {
     .find((content: string) => content.startsWith("# AGENTS.md instructions"));
   assert.ok(message, "Expected AGENTS.md project instructions context");
   return message;
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 async function waitForSocketMessage(

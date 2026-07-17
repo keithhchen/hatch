@@ -124,12 +124,12 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     name: "fs.list",
     locality: "client",
     approval: "auto",
-    description: "List files inside the user's approved local workspace.",
+    description: "List files inside the client-declared local workspace.",
     schema: z.object({ path: z.string().default(".") }).strict(),
     model: {
       name: "file_list",
       locality: "hybrid",
-      description: "List a server-hosted skill resource directory by full path, or list files inside the user's approved local workspace when fs.list is enabled.",
+      description: "List a server-hosted skill resource directory by full path, or list files inside the client-declared local workspace when fs.list is enabled.",
       properties: {
         path: stringSchema("Full skill resource directory path or workspace-relative path to list.")
       },
@@ -141,7 +141,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     name: "fs.search",
     locality: "client",
     approval: "auto",
-    description: "Search files inside the user's approved local workspace.",
+    description: "Search files inside the client-declared local workspace.",
     schema: z.object({
       query: z.string(),
       path: z.string().default("."),
@@ -150,7 +150,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     model: {
       name: "file_search",
       locality: "client",
-      description: "Search file contents inside the user's approved local workspace.",
+      description: "Search file paths and UTF-8 file contents inside the client-declared local workspace.",
       properties: {
         query: stringSchema("Literal search text."),
         path: stringSchema("Workspace-relative path to search."),
@@ -164,7 +164,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     name: "fs.read",
     locality: "client",
     approval: "auto",
-    description: "Read a UTF-8 file inside the user's approved local workspace.",
+    description: "Read a UTF-8 file inside the client-declared local workspace.",
     schema: z.object({ path: z.string() }).strict(),
     model: {
       name: "file_read",
@@ -180,13 +180,13 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ["fs.write", {
     name: "fs.write",
     locality: "client",
-    approval: "ask",
-    description: "Write a UTF-8 file inside the user's approved local workspace.",
+    approval: "auto",
+    description: "Write a UTF-8 file inside the client-declared local workspace.",
     schema: z.object({ path: z.string(), content: z.string() }).strict(),
     model: {
       name: "file_write",
       locality: "client",
-      description: "Write a UTF-8 file inside the user's approved local workspace.",
+      description: "Write a UTF-8 file inside the client-declared local workspace.",
       properties: {
         path: stringSchema("Workspace-relative file path."),
         content: stringSchema("File content.")
@@ -198,13 +198,13 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ["fs.patch", {
     name: "fs.patch",
     locality: "client",
-    approval: "ask",
-    description: "Patch a UTF-8 file inside the user's approved local workspace.",
+    approval: "auto",
+    description: "Patch a UTF-8 file inside the client-declared local workspace.",
     schema: z.object({ path: z.string(), patch: z.string() }).strict(),
     model: {
       name: "file_patch",
       locality: "client",
-      description: "Patch a UTF-8 file inside the user's approved local workspace using Hatch patch format.",
+      description: "Patch a UTF-8 file inside the client-declared local workspace using Hatch patch format.",
       properties: {
         path: stringSchema("Workspace-relative file path."),
         patch: stringSchema("Patch text.")
@@ -216,8 +216,8 @@ export const toolRegistry = new Map<string, ToolDefinition>([
   ["shell.exec", {
     name: "shell.exec",
     locality: "client",
-    approval: "ask",
-    description: "Run an approved shell command on the user's machine.",
+    approval: "auto",
+    description: "Run a shell command on the user's machine inside the local workspace policy.",
     schema: z.object({
       command: z.string(),
       timeout_ms: z.number().int().min(100).max(120000).default(30000),
@@ -226,11 +226,11 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     model: {
       name: "shell_exec",
       locality: "client",
-      description: "Run an approved shell command in the user's local workspace.",
+      description: "Run a shell command in the user's local workspace.",
       properties: {
         command: stringSchema("Shell command."),
         timeout_ms: numberSchema("Timeout in milliseconds."),
-        justification: stringSchema("User-facing approval question or reason for this command; omit when not needed.")
+        justification: stringSchema("Operational reason for this command; omit when not needed.")
       },
       required: ["command"],
       availability: "client_capability"
@@ -240,12 +240,12 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     name: "git.diff",
     locality: "client",
     approval: "auto",
-    description: "Read git diff output from the user's approved workspace.",
+    description: "Read git diff output from the client-declared workspace.",
     schema: z.object({ path: z.string().default(".") }).strict(),
     model: {
       name: "git_diff",
       locality: "client",
-      description: "Read git diff output from the user's approved local workspace.",
+      description: "Read git diff output from the client-declared local workspace.",
       properties: {
         path: stringSchema("Workspace-relative path.")
       },
