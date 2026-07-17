@@ -93,7 +93,12 @@ async fn execute_tool_call_with_trace(
         .name("hatch-local-tool".into())
         .spawn(move || {
             worker_trace.record("blocking.start", None, &worker_correlation_id);
-            let result = execute_tool_call_blocking(workspace_root, request);
+            let result = execute_tool_call_blocking_observed(
+                workspace_root,
+                request,
+                Some(&worker_trace),
+                &worker_correlation_id,
+            );
             worker_trace.record(
                 "blocking.end",
                 Some(command_result_status(&result)),
@@ -134,17 +139,80 @@ fn command_result_status(result: &Result<Value, String>) -> &'static str {
     }
 }
 
+#[cfg(test)]
 fn execute_tool_call_blocking(workspace_root: String, request: Value) -> Result<Value, String> {
-    let workspace = ensure_workspace(workspace_root.clone()).map_err(|error| {
-        format!("workspace initialization failed for {workspace_root:?}: {error}")
-    })?;
-    let runner = LocalRunner::new(&workspace).map_err(|error| {
-        format!("local runner initialization failed for {workspace:?}: {error}")
-    })?;
-    let request: ToolCallRequest = serde_json::from_value(request)
-        .map_err(|error| format!("tool request decoding failed: {error}"))?;
-    serde_json::to_value(runner.execute_tool_call_request(request))
-        .map_err(|error| format!("tool result encoding failed: {error}"))
+    execute_tool_call_blocking_observed(workspace_root, request, None, "unknown")
+}
+
+fn execute_tool_call_blocking_observed(
+    workspace_root: String,
+    request: Value,
+    trace: Option<&CommandTrace>,
+    correlation_id: &str,
+) -> Result<Value, String> {
+    trace_phase(trace, "workspace.start", None, correlation_id);
+    let workspace = match ensure_workspace(workspace_root.clone()) {
+        Ok(workspace) => {
+            trace_phase(trace, "workspace.end", Some("ok"), correlation_id);
+            workspace
+        }
+        Err(error) => {
+            trace_phase(trace, "workspace.end", Some("error"), correlation_id);
+            return Err(format!(
+                "workspace initialization failed for {workspace_root:?}: {error}"
+            ));
+        }
+    };
+
+    trace_phase(trace, "runner.start", None, correlation_id);
+    let runner = match LocalRunner::new(&workspace) {
+        Ok(runner) => {
+            trace_phase(trace, "runner.end", Some("ok"), correlation_id);
+            runner
+        }
+        Err(error) => {
+            trace_phase(trace, "runner.end", Some("error"), correlation_id);
+            return Err(format!(
+                "local runner initialization failed for {workspace:?}: {error}"
+            ));
+        }
+    };
+
+    trace_phase(trace, "decode.start", None, correlation_id);
+    let request: ToolCallRequest = match serde_json::from_value(request) {
+        Ok(request) => {
+            trace_phase(trace, "decode.end", Some("ok"), correlation_id);
+            request
+        }
+        Err(error) => {
+            trace_phase(trace, "decode.end", Some("error"), correlation_id);
+            return Err(format!("tool request decoding failed: {error}"));
+        }
+    };
+
+    trace_phase(trace, "execute.start", None, correlation_id);
+    let result = runner.execute_tool_call_request(request);
+    trace_phase(trace, "execute.end", Some("returned"), correlation_id);
+
+    let encoded = serde_json::to_value(result);
+    trace_phase(
+        trace,
+        "encode.end",
+        Some(if encoded.is_ok() { "ok" } else { "error" }),
+        correlation_id,
+    );
+    encoded.map_err(|error| format!("tool result encoding failed: {error}"))
+}
+
+fn trace_phase(
+    trace: Option<&CommandTrace>,
+    phase: &str,
+    status: Option<&str>,
+    correlation_id: &str,
+) {
+    if let Some(trace) = trace {
+        trace.record(phase, status, correlation_id);
+    }
 }
 
 pub fn run() {
@@ -279,5 +347,49 @@ mod tests {
         assert!(trace.contains("\"phase\":\"command.error\",\"status\":\"tool_error\""));
         assert!(trace.contains("\"correlation_id\":\"call_missing\""));
         assert!(!trace.contains("missing-private-file.txt"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn empty_workspace_with_existing_audit_file_lists_without_blocking() {
+        let temp = tempdir().unwrap();
+        let trace_dir = tempdir().unwrap();
+        fs::write(temp.path().join("audit.jsonl"), "old audit event\n").unwrap();
+        let trace_path = trace_dir.path().join("empty-workspace-trace.jsonl");
+        let output = execute_tool_call_with_trace(
+            temp.path().to_string_lossy().to_string(),
+            json!({
+                "type": "tool_call.request",
+                "run_id": "run_empty_workspace",
+                "tool_call_id": "call_empty_list",
+                "name": "fs.list",
+                "arguments": { "path": "." },
+                "approval": "auto"
+            }),
+            CommandTrace::new(trace_path.clone()),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(output["status"], "ok");
+        assert_eq!(output["result"]["entries"].as_array().unwrap().len(), 0);
+        let trace = fs::read_to_string(trace_path).unwrap();
+        for phase in [
+            "workspace.start",
+            "workspace.end",
+            "runner.start",
+            "runner.end",
+            "decode.start",
+            "decode.end",
+            "execute.start",
+            "execute.end",
+            "encode.end",
+        ] {
+            assert!(
+                trace.contains(&format!("\"phase\":\"{phase}\"")),
+                "missing {phase}"
+            );
+        }
+        assert!(!trace.contains("audit.jsonl"));
+        assert!(!trace.contains("old audit event"));
     }
 }
