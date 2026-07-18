@@ -3,12 +3,15 @@ use serde_json::{json, Value};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 
 #[derive(Clone, Debug)]
 struct CommandTrace {
     path: Option<PathBuf>,
 }
+
+static WORKSPACE_PICK_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 impl CommandTrace {
     fn from_env() -> Self {
@@ -62,12 +65,34 @@ fn default_workspace() -> String {
 
 #[tauri::command]
 fn pick_workspace() -> Option<String> {
+    let trace = CommandTrace::from_env();
+    let correlation_id = format!(
+        "workspace-picker-{}-{}",
+        std::process::id(),
+        WORKSPACE_PICK_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    );
+    trace.record("workspace.pick.entry", Some("requested"), &correlation_id);
     let initial = default_workspace();
-    rfd::FileDialog::new()
-        .set_directory(initial)
-        .pick_folder()
-        .and_then(|path| path.canonicalize().ok())
-        .map(|path| path.to_string_lossy().to_string())
+    let picked = rfd::FileDialog::new().set_directory(initial).pick_folder();
+    let Some(path) = picked else {
+        trace.record("workspace.pick.cancel", Some("cancelled"), &correlation_id);
+        return None;
+    };
+
+    match path.canonicalize() {
+        Ok(path) => {
+            trace.record("workspace.pick.result", Some("selected"), &correlation_id);
+            Some(path.to_string_lossy().to_string())
+        }
+        Err(_) => {
+            trace.record(
+                "workspace.pick.error",
+                Some("canonicalize_error"),
+                &correlation_id,
+            );
+            None
+        }
+    }
 }
 
 #[tauri::command]

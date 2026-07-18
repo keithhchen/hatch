@@ -11,7 +11,14 @@ import {
 } from "@assistant-ui/react";
 import { StreamdownTextPrimitive } from "@assistant-ui/react-streamdown";
 import { handleLocalToolRequest, toolCorrelationId } from "./toolBridge.js";
-import { selectWorkspace } from "./workspaceState.js";
+import {
+  createSocketLifecycleState,
+  handleCurrentSocketClose,
+  invalidateSocket,
+  isCurrentSocket,
+  registerSocket
+} from "./socketLifecycle.js";
+import { restoreWorkspace, selectWorkspace } from "./workspaceState.js";
 import "streamdown/styles.css";
 import "./styles.css";
 
@@ -33,7 +40,9 @@ const ApprovalContext = createContext(null);
 
 function App() {
   const socketRef = useRef(null);
+  const socketLifecycleRef = useRef(createSocketLifecycleState());
   const workspaceRef = useRef("");
+  const conversationIdRef = useRef("desktop-chat");
   const activeRunRef = useRef(null);
   const eventSeqRef = useRef(1);
   const imeRef = useRef({ composing: false, guardUntil: 0 });
@@ -164,10 +173,16 @@ function App() {
     void (async () => {
       const defaultWorkspace = await invokeTauri("default_workspace");
       if (cancelled) return;
-      const savedWorkspace = localStorage.getItem("hatch.workspaceRoot") || defaultWorkspace;
+      const savedWorkspace = restoreWorkspace({
+        storage: localStorage,
+        defaultWorkspace,
+        setWorkspaceRef: (value) => {
+          workspaceRef.current = value;
+        },
+        setWorkspace
+      });
       const savedConversationId = localStorage.getItem("hatch.conversationId") || "desktop-chat";
-      workspaceRef.current = savedWorkspace;
-      setWorkspace(savedWorkspace);
+      conversationIdRef.current = savedConversationId;
       setConversationId(savedConversationId);
       void connectRuntime({
         serverUrl: DEFAULT_RUNTIME_URL,
@@ -181,7 +196,10 @@ function App() {
   }, []);
 
   useEffect(() => () => {
-    socketRef.current?.close();
+    const socket = socketRef.current;
+    invalidateSocket(socketLifecycleRef.current, socket);
+    socketRef.current = null;
+    socket?.close();
   }, []);
 
   async function chooseWorkspace() {
@@ -189,11 +207,13 @@ function App() {
       await selectWorkspace({
         invokeTauri,
         storage: localStorage,
+        previousWorkspace: workspaceRef.current || workspace,
         setWorkspaceRef: (normalized) => {
           workspaceRef.current = normalized;
         },
         setWorkspace,
-        disconnectRuntime: socketRef.current ? disconnectRuntime : undefined
+        disconnectRuntime: socketRef.current ? disconnectRuntime : undefined,
+        recordTrace: recordRendererTrace
       });
     } catch (error) {
       setStatus(errorMessage(error));
@@ -203,15 +223,12 @@ function App() {
   async function connectRuntime(connection = {}) {
     if (connected || socketRef.current) return;
     const targetServerUrl = connection.serverUrl || serverUrl;
-    const targetWorkspace = connection.workspace || workspace;
-    const targetConversationId = connection.conversationId || conversationId;
+    const targetWorkspace = connection.workspace || workspaceRef.current || workspace;
+    const targetConversationId = connection.conversationId || conversationIdRef.current || conversationId;
     if (!targetServerUrl.trim() || !targetWorkspace.trim()) {
       setStatus("Runtime unavailable.");
       return;
     }
-
-    localStorage.setItem("hatch.workspaceRoot", targetWorkspace.trim());
-    localStorage.setItem("hatch.conversationId", targetConversationId.trim() || "desktop-chat");
 
     let normalizedWorkspace;
     try {
@@ -219,6 +236,9 @@ function App() {
         workspaceRoot: targetWorkspace.trim()
       });
       workspaceRef.current = normalizedWorkspace;
+      conversationIdRef.current = targetConversationId.trim() || "desktop-chat";
+      localStorage.setItem("hatch.workspaceRoot", normalizedWorkspace);
+      localStorage.setItem("hatch.conversationId", conversationIdRef.current);
       setWorkspace(normalizedWorkspace);
       setStatus("Loading history...");
       const activeConversationId = targetConversationId.trim() || "desktop-chat";
@@ -232,8 +252,10 @@ function App() {
     }
 
     const socket = new WebSocket(targetServerUrl.trim());
+    const generation = registerSocket(socketLifecycleRef.current, socket);
     socketRef.current = socket;
     socket.addEventListener("open", () => {
+      if (!isCurrentSocket(socketLifecycleRef.current, socket, generation)) return;
       send({
         type: "client.hello",
         protocol_version: PROTOCOL_VERSION,
@@ -245,24 +267,30 @@ function App() {
       });
     });
     socket.addEventListener("message", (event) => {
+      if (!isCurrentSocket(socketLifecycleRef.current, socket, generation)) return;
       void handleRuntimeMessage(JSON.parse(event.data));
     });
     socket.addEventListener("error", () => {
+      if (!isCurrentSocket(socketLifecycleRef.current, socket, generation)) return;
       setStatus("Runtime socket error.");
     });
     socket.addEventListener("close", () => {
-      rejectPendingApprovals();
-      socketRef.current = null;
-      activeRunRef.current = null;
-      setConnected(false);
-      setRunning(false);
-      setStatus("Disconnected");
+      handleCurrentSocketClose(socketLifecycleRef.current, socket, generation, () => {
+        rejectPendingApprovals();
+        socketRef.current = null;
+        activeRunRef.current = null;
+        setConnected(false);
+        setRunning(false);
+        setStatus("Disconnected");
+      });
     });
   }
 
   function disconnectRuntime() {
+    const socket = socketRef.current;
+    invalidateSocket(socketLifecycleRef.current, socket);
     rejectPendingApprovals();
-    socketRef.current?.close();
+    socket?.close();
     socketRef.current = null;
     activeRunRef.current = null;
     setConnected(false);
@@ -1483,11 +1511,12 @@ async function invokeTauri(command, args) {
   }
 }
 
-function recordRendererTrace(phase, status, correlationId) {
+function recordRendererTrace(phase, status, correlationId, fields = {}) {
   const event = {
     phase,
     status,
-    correlation_id: correlationId
+    correlation_id: correlationId,
+    ...fields
   };
   if (typeof window !== "undefined") {
     const trace = Array.isArray(window.__HATCH_RENDERER_TRACE__)
