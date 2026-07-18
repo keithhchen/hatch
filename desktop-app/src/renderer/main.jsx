@@ -35,6 +35,7 @@ const LOCAL_TOOLS = [
 const SKILL_ACTIVITY_PART = "hatch.skill_activity";
 const SKILL_RUN_ACTIVITY_PART = "hatch.skill_run_activity";
 const LOCAL_TOOL_TIMEOUT_MS = 45_000;
+const WORKSPACE_COMMAND_TIMEOUT_MS = 30_000;
 const DEFAULT_RUNTIME_URL = import.meta.env.VITE_HATCH_RUNTIME_URL || "ws://127.0.0.1:8400/runtime";
 const ApprovalContext = createContext(null);
 
@@ -213,7 +214,8 @@ function App() {
         },
         setWorkspace,
         disconnectRuntime: socketRef.current ? disconnectRuntime : undefined,
-        recordTrace: recordRendererTrace
+        recordTrace: recordRendererTrace,
+        commandTimeoutMs: WORKSPACE_COMMAND_TIMEOUT_MS
       });
     } catch (error) {
       setStatus(errorMessage(error));
@@ -1525,6 +1527,11 @@ function recordRendererTrace(phase, status, correlationId, fields = {}) {
     trace.push(event);
     window.__HATCH_RENDERER_TRACE__ = trace.slice(-200);
   }
+  void invoke("record_workspace_trace", {
+    phase,
+    status,
+    correlationId
+  }).catch(() => {});
   console.info("hatch.renderer", JSON.stringify(event));
 }
 

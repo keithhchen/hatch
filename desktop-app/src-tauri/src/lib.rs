@@ -1,6 +1,7 @@
 use hatch_local_runner::{LocalRunner, ToolCallRequest};
 use serde_json::{json, Value};
 use std::fs::{self, OpenOptions};
+use std::future::Future;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -64,7 +65,7 @@ fn default_workspace() -> String {
 }
 
 #[tauri::command]
-fn pick_workspace() -> Option<String> {
+async fn pick_workspace() -> Option<String> {
     let trace = CommandTrace::from_env();
     let correlation_id = format!(
         "workspace-picker-{}-{}",
@@ -73,8 +74,25 @@ fn pick_workspace() -> Option<String> {
     );
     trace.record("workspace.pick.entry", Some("requested"), &correlation_id);
     let initial = default_workspace();
-    let picked = rfd::FileDialog::new().set_directory(initial).pick_folder();
-    let Some(path) = picked else {
+    let picked = async move {
+        rfd::AsyncFileDialog::new()
+            .set_directory(initial)
+            .pick_folder()
+            .await
+            .map(|handle| handle.path().to_path_buf())
+    };
+    resolve_workspace_pick(picked, &trace, &correlation_id).await
+}
+
+async fn resolve_workspace_pick<F>(
+    picked: F,
+    trace: &CommandTrace,
+    correlation_id: &str,
+) -> Option<String>
+where
+    F: Future<Output = Option<PathBuf>>,
+{
+    let Some(path) = picked.await else {
         trace.record("workspace.pick.cancel", Some("cancelled"), &correlation_id);
         return None;
     };
@@ -93,6 +111,30 @@ fn pick_workspace() -> Option<String> {
             None
         }
     }
+}
+
+#[tauri::command]
+fn record_workspace_trace(
+    phase: String,
+    status: String,
+    correlation_id: String,
+) -> Result<(), String> {
+    if !valid_trace_field(&phase, 64)
+        || !valid_trace_field(&status, 32)
+        || !valid_trace_field(&correlation_id, 128)
+    {
+        return Err("invalid workspace trace field".to_string());
+    }
+    CommandTrace::from_env().record(&phase, Some(&status), &correlation_id);
+    Ok(())
+}
+
+fn valid_trace_field(value: &str, max_len: usize) -> bool {
+    !value.is_empty()
+        && value.len() <= max_len
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
 }
 
 #[tauri::command]
@@ -255,6 +297,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             default_workspace,
             pick_workspace,
+            record_workspace_trace,
             ensure_workspace,
             execute_tool_call
         ])
@@ -285,11 +328,50 @@ fn to_string(error: impl std::fmt::Display) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        ensure_workspace, execute_tool_call_blocking, execute_tool_call_with_trace, CommandTrace,
+        ensure_workspace, execute_tool_call_blocking, execute_tool_call_with_trace,
+        resolve_workspace_pick, CommandTrace,
     };
     use serde_json::json;
     use std::fs;
     use tempfile::tempdir;
+
+    #[tokio::test]
+    async fn async_workspace_picker_seam_records_resolve_cancel_and_error() {
+        let temp = tempdir().unwrap();
+        let trace_path = temp.path().join("picker-trace.jsonl");
+        let trace = CommandTrace::new(trace_path.clone());
+        let selected_path = temp.path().to_path_buf();
+
+        let selected = resolve_workspace_pick(
+            async move { Some(selected_path) },
+            &trace,
+            "picker-selected",
+        )
+        .await;
+        assert_eq!(
+            selected,
+            Some(
+                temp.path()
+                    .canonicalize()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_string()
+            )
+        );
+
+        let cancelled = resolve_workspace_pick(async { None }, &trace, "picker-cancelled").await;
+        assert_eq!(cancelled, None);
+
+        let missing_path = temp.path().join("does-not-exist");
+        let errored =
+            resolve_workspace_pick(async move { Some(missing_path) }, &trace, "picker-error").await;
+        assert_eq!(errored, None);
+
+        let trace_contents = fs::read_to_string(trace_path).unwrap();
+        assert!(trace_contents.contains("workspace.pick.result"));
+        assert!(trace_contents.contains("workspace.pick.cancel"));
+        assert!(trace_contents.contains("workspace.pick.error"));
+    }
 
     #[test]
     fn canonical_tool_request_executes_inside_workspace() {

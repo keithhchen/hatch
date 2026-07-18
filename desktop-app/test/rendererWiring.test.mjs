@@ -6,7 +6,11 @@ import {
   handleCurrentSocketClose,
   registerSocket
 } from "../src/renderer/socketLifecycle.js";
-import { restoreWorkspace, selectWorkspace } from "../src/renderer/workspaceState.js";
+import {
+  invokeWorkspaceCommand,
+  restoreWorkspace,
+  selectWorkspace
+} from "../src/renderer/workspaceState.js";
 
 const source = await readFile(new URL("../src/renderer/main.jsx", import.meta.url), "utf8");
 
@@ -83,16 +87,20 @@ test("picker transition executes normalized workspace state updates in order", a
   assert.deepEqual(traces.map(([phase]) => phase), [
     "workspace.select.start",
     "workspace.pick.start",
+    "workspace.pick.invoke.start",
+    "workspace.pick.invoke.result",
     "workspace.pick.result",
     "workspace.ensure.start",
+    "workspace.ensure.invoke.start",
+    "workspace.ensure.invoke.result",
     "workspace.ensure.result",
     "workspace.ref.updated",
     "workspace.storage.write",
     "workspace.state.updated",
     "workspace.disconnect"
   ]);
-  assert.deepEqual(traces[2][3], { root_changed: true, equals_previous: false });
-  assert.deepEqual(traces[6][3], { root_changed: true, equals_previous: false });
+  assert.deepEqual(traces[4][3], { root_changed: true, equals_previous: false });
+  assert.deepEqual(traces[10][3], { root_changed: true, equals_previous: false });
 });
 
 test("picker cancellation leaves workspace state untouched", async () => {
@@ -113,6 +121,8 @@ test("picker cancellation leaves workspace state untouched", async () => {
   assert.deepEqual(traces.map(([phase, status]) => [phase, status]), [
     ["workspace.select.start", "requested"],
     ["workspace.pick.start", "requested"],
+    ["workspace.pick.invoke.start", "requested"],
+    ["workspace.pick.invoke.result", "resolved"],
     ["workspace.pick.result", "cancelled"]
   ]);
 });
@@ -140,8 +150,12 @@ test("ensure failure is observable and does not persist a workspace", async () =
   assert.deepEqual(traces.map(([phase]) => phase), [
     "workspace.select.start",
     "workspace.pick.start",
+    "workspace.pick.invoke.start",
+    "workspace.pick.invoke.result",
     "workspace.pick.result",
     "workspace.ensure.start",
+    "workspace.ensure.invoke.start",
+    "workspace.ensure.invoke.error",
     "workspace.select.exception"
   ]);
   assert.deepEqual(traces.at(-1), [
@@ -177,6 +191,22 @@ test("initialization restores the persisted picker root instead of the default",
   assert.equal(restored, normalized);
   assert.equal(restoredRef, normalized);
   assert.equal(restoredState, normalized);
+});
+
+test("workspace command timeout is controlled and observable", async () => {
+  const traces = [];
+  await assert.rejects(
+    invokeWorkspaceCommand({
+      invokeTauri: () => new Promise(() => {}),
+      command: "pick_workspace",
+      timeoutMs: 5,
+      onStart: () => traces.push("start"),
+      onResolve: () => traces.push("resolve"),
+      onReject: (error) => traces.push(error.code)
+    }),
+    (error) => error.code === "workspace_command_timeout"
+  );
+  assert.deepEqual(traces, ["start", "workspace_command_timeout"]);
 });
 
 test("chooseWorkspace wiring keeps ref assignment before persistence and disconnect", () => {
@@ -229,4 +259,5 @@ test("socket wiring guards stale lifecycle events and persists only after ensure
   const connectBody = source.slice(connectStart, socketStart);
   assert.ok(connectBody.indexOf('await invokeTauri("ensure_workspace"') < connectBody.indexOf('localStorage.setItem("hatch.workspaceRoot", normalizedWorkspace)'));
   assert.ok(connectBody.indexOf('localStorage.setItem("hatch.workspaceRoot", normalizedWorkspace)') < connectBody.indexOf("setWorkspace(normalizedWorkspace)"));
+  assert.match(source, /invoke\("record_workspace_trace"/);
 });
