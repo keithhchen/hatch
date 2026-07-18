@@ -227,42 +227,39 @@ export class ClientToolBroker {
     if (this.pending.get(key) !== pending) return;
     clearTimeout(pending.timeout);
     this.pending.delete(key);
-    try {
-      await this.store.append({
-        type: "tool.call",
-        conversation_id: pending.conversationId,
-        run_id: pending.runId,
-        tool_call_id: pending.toolCallId,
-        name: pending.name,
-        arguments: pending.arguments,
-        status: "cancelled",
-        locality: "client",
-        approval: pending.approval,
-        ...(pending.scope ? { scope: pending.scope } : {}),
-        ...(pending.skillRunId ? { skill_run_id: pending.skillRunId } : {}),
-        error: { message: reason }
-      });
-      await this.emit({
-        type: "tool_call.delta",
-        run_id: pending.runId,
-        tool_call_id: pending.toolCallId,
-        name: pending.name,
-        locality: "client",
-        approval: pending.approval,
-        status: "cancelled",
-        arguments: pending.arguments,
-        error: {
-          code: "tool_cancelled",
-          message: reason
-        },
-        ...(pending.scope ? { scope: pending.scope } : {}),
-        ...(pending.skillRunId ? { skill_run_id: pending.skillRunId } : {})
-      });
-    } finally {
-      // Reject the original promise after ownership has been installed and
-      // cleanup has become terminal, even if observability delivery fails.
-      pending.reject(new Error(reason));
-    }
+    // Settle the worker-facing promise before any awaited observability fan-out.
+    // Protected workers must unwind even when the client event sink is slow.
+    pending.reject(new Error(reason));
+    await this.store.append({
+      type: "tool.call",
+      conversation_id: pending.conversationId,
+      run_id: pending.runId,
+      tool_call_id: pending.toolCallId,
+      name: pending.name,
+      arguments: pending.arguments,
+      status: "cancelled",
+      locality: "client",
+      approval: pending.approval,
+      ...(pending.scope ? { scope: pending.scope } : {}),
+      ...(pending.skillRunId ? { skill_run_id: pending.skillRunId } : {}),
+      error: { message: reason }
+    });
+    await this.emit({
+      type: "tool_call.delta",
+      run_id: pending.runId,
+      tool_call_id: pending.toolCallId,
+      name: pending.name,
+      locality: "client",
+      approval: pending.approval,
+      status: "cancelled",
+      arguments: pending.arguments,
+      error: {
+        code: "tool_cancelled",
+        message: reason
+      },
+      ...(pending.scope ? { scope: pending.scope } : {}),
+      ...(pending.skillRunId ? { skill_run_id: pending.skillRunId } : {})
+    });
   }
 
   private emitApprovalDecision(

@@ -12,9 +12,9 @@ test("cancel owns an unreturned tool promise and ignores late results", async ()
   const requestSeen = new Promise<void>((resolve) => {
     requestEmitted = resolve;
   });
-  let releaseRequest!: () => void;
-  const requestGate = new Promise<void>((resolve) => {
-    releaseRequest = resolve;
+  let releaseCancellation!: () => void;
+  const cancellationGate = new Promise<void>((resolve) => {
+    releaseCancellation = resolve;
   });
   const store = {
     append: async (event: StoreEventInput) => {
@@ -24,9 +24,12 @@ test("cancel owns an unreturned tool promise and ignores late results", async ()
   const broker = new ClientToolBroker(
     async (message) => {
       outbound.push(message as unknown as Record<string, unknown>);
-      if (message.type !== "tool_call.request") return;
-      requestEmitted();
-      await requestGate;
+      if (message.type === "tool_call.request") {
+        requestEmitted();
+      }
+      if (message.type === "tool_call.delta" && message.status === "cancelled") {
+        await cancellationGate;
+      }
     },
     store,
     10_000
@@ -49,7 +52,13 @@ test("cancel owns an unreturned tool promise and ignores late results", async ()
     );
     await requestSeen;
 
-    assert.equal(await broker.cancelRun("parent-run", "user cancelled protected task"), 1);
+    let cancelSettled = false;
+    const cancelPromise = broker.cancelRun("parent-run", "user cancelled protected task").then((count) => {
+      cancelSettled = true;
+      return count;
+    });
+    await assert.rejects(executePromise, (error: Error) => error.message === "user cancelled protected task");
+    assert.equal(cancelSettled, false);
     assert.equal(await broker.cancelRun("parent-run", "duplicate cancellation"), 0);
     assert.equal(stored.filter((event) => event.type === "tool.call" && event.status === "cancelled").length, 1);
     const cancelledEvent = stored.find((event) => event.type === "tool.call" && event.status === "cancelled");
@@ -58,8 +67,8 @@ test("cancel owns an unreturned tool promise and ignores late results", async ()
     assert.equal(cancelledEvent.skill_run_id, "skill-run");
     assert.equal(outbound.filter((message) => message.type === "tool_call.delta" && message.status === "cancelled").length, 1);
 
-    releaseRequest();
-    await assert.rejects(executePromise, (error: Error) => error.message === "user cancelled protected task");
+    releaseCancellation();
+    assert.equal(await cancelPromise, 1);
     assert.equal(await broker.handleResult({
       type: "tool_call.result",
       run_id: "parent-run",
@@ -71,7 +80,7 @@ test("cancel owns an unreturned tool promise and ignores late results", async ()
     await new Promise<void>((resolve) => setImmediate(resolve));
     assert.equal(unhandledRejections, 0);
   } finally {
-    releaseRequest();
+    releaseCancellation();
     process.off("unhandledRejection", onUnhandledRejection);
   }
 });
