@@ -130,6 +130,7 @@ async function handleRuntimeSocket(
   const runtime = createRuntime();
   const activeRuns = new Set<Promise<void>>();
   const activeRunStates = new Map<string, RunStateMachine>();
+  const activeSkillRuntimes = new Map<string, SkillRuntime>();
 
   const send = async (message: OutboundMessage): Promise<void> => {
     if (socket.readyState === WebSocket.OPEN) {
@@ -218,16 +219,20 @@ async function handleRuntimeSocket(
             });
             return;
           }
-          await state.cancel(message.reason ?? "Run canceled").catch(() => undefined);
-          await broker.cancelRun(message.run_id, message.reason ?? "Run canceled");
-          await send({
-            type: "turn.failed",
-            run_id: message.run_id,
-            error: {
-              code: "run_cancelled",
-              message: message.reason ?? "Run canceled"
-            }
-          });
+          const reason = message.reason ?? "Run canceled";
+          await state.cancel(reason).catch(() => undefined);
+          await store.append({
+            type: "message.created",
+            conversation_id: state.conversationId,
+            run_id: state.runId,
+            role: "assistant",
+            content: "Run cancelled."
+          }).catch(() => undefined);
+          const cleanup = await Promise.allSettled([
+            broker.cancelRun(message.run_id, reason),
+            activeSkillRuntimes.get(message.run_id)?.cancelParentRun(message.run_id) ?? Promise.resolve()
+          ]);
+          await persistCancellationCleanupErrors(store, message.run_id, cleanup);
           return;
         }
 
@@ -270,7 +275,7 @@ async function handleRuntimeSocket(
           });
           activeRunStates.set(message.run_id, state);
           await state.queued();
-          const task = runOneTurn(message, hello, sessionSkills, broker, serverTools, toolBridge, runtime, createRuntime, store, state, send);
+          const task = runOneTurn(message, hello, sessionSkills, broker, serverTools, toolBridge, runtime, createRuntime, store, state, send, activeSkillRuntimes);
           activeRuns.add(task);
           task.finally(() => {
             activeRuns.delete(task);
@@ -318,7 +323,8 @@ async function runOneTurn(
   createRuntime: () => AgentRuntime,
   store: RuntimeStore,
   state: RunStateMachine,
-  send: (message: OutboundMessage) => Promise<void>
+  send: (message: OutboundMessage) => Promise<void>,
+  activeSkillRuntimes: Map<string, SkillRuntime>
 ): Promise<void> {
   let skillRuntime: SkillRuntime | undefined;
   try {
@@ -364,6 +370,7 @@ async function runOneTurn(
       emit: send,
       createWorkerRuntime: () => createRuntime()
     });
+    activeSkillRuntimes.set(input.run_id, skillRuntime);
     await store.append({
       type: "message.created",
       conversation_id: input.conversation_id,
@@ -431,8 +438,25 @@ async function runOneTurn(
       }
     });
   } finally {
+    activeSkillRuntimes.delete(input.run_id);
     await skillRuntime?.cancelParentRun(input.run_id);
   }
+}
+
+async function persistCancellationCleanupErrors(
+  store: RuntimeStore,
+  runId: string,
+  results: PromiseSettledResult<unknown>[]
+): Promise<void> {
+  if (!results.some((result) => result.status === "rejected")) return;
+  await store.append({
+    type: "runtime.event",
+    run_id: runId,
+    event: {
+      type: "turn.cleanup",
+      status: "error"
+    }
+  }).catch(() => undefined);
 }
 
 async function buildSessionSkills(workspaceRoot?: string): Promise<RuntimeSessionSkills> {

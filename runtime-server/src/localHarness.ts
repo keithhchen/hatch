@@ -338,6 +338,11 @@ export class LocalHarnessSession {
       return;
     }
 
+    if (message.type === "turn.state" && message.status === "cancelled") {
+      this.rejectPending(new Error(message.reason || "Run cancelled"));
+      return;
+    }
+
     if (message.type === "turn.state" && message.status === "completed") {
       if (!this.pendingRun) return;
       this.pendingRun.completed = true;

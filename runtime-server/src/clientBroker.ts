@@ -34,7 +34,7 @@ export class ClientToolBroker {
     private readonly timeoutMs = 120000
   ) {}
 
-  async execute(
+  execute(
     runId: string,
     name: string,
     args: Record<string, unknown>,
@@ -42,12 +42,17 @@ export class ClientToolBroker {
     toolCallId = `tool_${this.nextId++}`,
     options: ClientToolBrokerExecuteOptions = {}
   ): Promise<Record<string, unknown>> {
-    const tool = requireTool(name);
-    if (tool.locality !== "client") {
-      throw new Error(`Tool is not client-local: ${name}`);
+    let tool: ReturnType<typeof requireTool>;
+    let parsedArgs: Record<string, unknown>;
+    try {
+      tool = requireTool(name);
+      if (tool.locality !== "client") {
+        throw new Error(`Tool is not client-local: ${name}`);
+      }
+      parsedArgs = tool.schema.parse(args) as Record<string, unknown>;
+    } catch (error) {
+      return Promise.reject(error);
     }
-
-    const parsedArgs = tool.schema.parse(args) as Record<string, unknown>;
     const approval = options.approvalOverride ?? tool.approval;
     const request: ToolRequest = {
       type: "tool_call.request",
@@ -100,13 +105,34 @@ export class ClientToolBroker {
     // without changing the promise returned to the caller below.
     void result.catch(() => undefined);
 
+    const key = pendingKey(runId, toolCallId);
+    const pending = this.pending.get(key);
+    if (!pending) {
+      return Promise.reject(new Error(`Client tool pending state was not created: ${toolCallId}`));
+    }
+    void this.dispatch(request, pending, state, parsedArgs, approval, options).catch((error) => {
+      this.failPending(key, pending, error);
+    });
+    return result;
+  }
+
+  private async dispatch(
+    request: ToolRequest,
+    pending: PendingCall,
+    state: RunStateMachine | undefined,
+    parsedArgs: Record<string, unknown>,
+    approval: PendingCall["approval"],
+    options: ClientToolBrokerExecuteOptions
+  ): Promise<void> {
+    const key = pendingKey(pending.runId, pending.toolCallId);
     await state?.waitForTool();
+    if (!this.isPending(key, pending)) return;
     await this.store.append({
       type: "tool.call",
       conversation_id: state?.conversationId,
-      run_id: runId,
-      tool_call_id: toolCallId,
-      name,
+      run_id: pending.runId,
+      tool_call_id: pending.toolCallId,
+      name: pending.name,
       arguments: parsedArgs,
       status: "requested",
       locality: "client",
@@ -114,18 +140,30 @@ export class ClientToolBroker {
       ...(options.scope ? { scope: options.scope } : {}),
       ...(options.skillRunId ? { skill_run_id: options.skillRunId } : {})
     });
+    if (!this.isPending(key, pending)) return;
     if (approval === "ask") {
       await this.emit({
         type: "approval.request",
-        run_id: runId,
-        tool_call_id: toolCallId,
-        name,
+        run_id: pending.runId,
+        tool_call_id: pending.toolCallId,
+        name: pending.name,
         arguments: parsedArgs,
         ...approvalReason(parsedArgs)
       });
+      if (!this.isPending(key, pending)) return;
     }
     await this.emit(request);
-    return result;
+  }
+
+  private isPending(key: string, pending: PendingCall): boolean {
+    return this.pending.get(key) === pending;
+  }
+
+  private failPending(key: string, pending: PendingCall, error: unknown): void {
+    if (!this.isPending(key, pending)) return;
+    this.pending.delete(key);
+    clearTimeout(pending.timeout);
+    pending.reject(error instanceof Error ? error : new Error(String(error)));
   }
 
   async handleResult(message: ToolResult): Promise<boolean> {

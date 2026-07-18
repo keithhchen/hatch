@@ -4032,14 +4032,24 @@ test("run cancel for an unknown run does not cancel the active run", async () =>
   ));
   assert.equal(cancelledTool.type, "tool_call.delta");
   assert.equal(cancelledTool.error?.code, "tool_cancelled");
-  const cancelled = await waitForSocketMessage(messages, (message) => message.type === "turn.failed" && message.run_id === "run_cancel_active");
-  assert.equal(cancelled.type, "turn.failed");
-  assert.equal(cancelled.error.code, "run_cancelled");
+  const cancelled = await waitForSocketMessage(messages, (message) => (
+    message.type === "turn.state"
+    && message.run_id === "run_cancel_active"
+    && message.status === "cancelled"
+  ));
+  assert.equal(cancelled.type, "turn.state");
   socket.close();
 
   const events = await new RuntimeStore(dataDir).readEvents();
   assert.ok(events.some((event) => event.type === "turn.state" && event.run_id === "run_cancel_active" && event.to === "cancelled"));
   assert.ok(events.some((event) => event.type === "tool.call" && event.run_id === "run_cancel_active" && event.status === "cancelled"));
+  const visible = await new RuntimeStore(dataDir).readConversation("conv_cancel_targeted");
+  assert.ok(visible.some((message) => message.role === "assistant" && message.content === "Run cancelled."));
+  assert.ok(!messages.some((message) => (
+    "run_id" in message
+    && message.run_id === "run_cancel_active"
+    && (message.type === "turn.failed" || message.type === "turn.completed")
+  )));
   assert.ok(events.some((event) => (
     event.type === "runtime.event"
     && event.run_id === "run_cancel_active"
@@ -4087,10 +4097,28 @@ test("run cancellation transitions active run to cancelled and persists it", asy
 
   session.cancelActiveRun("test cancellation");
   await assert.rejects(runPromise, /test cancellation|Run canceled|Client broker canceled/);
+  await waitUntil(async () => {
+    const cancellationEvents = await new RuntimeStore(dataDir).readEvents();
+    return cancellationEvents.some((event) => (
+      event.type === "message.created"
+      && event.run_id === requestedTool.run_id
+      && event.role === "assistant"
+      && event.content === "Run cancelled."
+    ));
+  });
   session.close();
 
   const events = await new RuntimeStore(dataDir).readEvents();
-  assert.ok(events.some((event) => event.type === "turn.state" && event.to === "cancelled"));
+  const cancelledState = events.find((event) => event.type === "turn.state" && event.run_id === requestedTool.run_id && event.to === "cancelled");
+  assert.ok(cancelledState);
+  const persistedCancellation = events.find((event) => (
+    event.type === "message.created"
+    && event.run_id === requestedTool.run_id
+    && event.role === "assistant"
+    && event.content === "Run cancelled."
+  ));
+  assert.ok(persistedCancellation);
+  assert.ok(events.findIndex((event) => event === cancelledState) < events.findIndex((event) => event === persistedCancellation));
   assert.ok(events.some((event) => (
     event.type === "tool.call"
     && event.status === "cancelled"
@@ -4114,6 +4142,16 @@ test("run cancellation transitions active run to cancelled and persists it", asy
     && (event.event as Record<string, unknown>).type === "turn.failed"
     && ((event.event as Record<string, unknown>).error as Record<string, unknown> | undefined)?.code === "run_failed"
   )));
+  assert.ok(!events.some((event) => (
+    event.type === "runtime.event"
+    && event.run_id === requestedTool.run_id
+    && typeof event.event === "object"
+    && event.event !== null
+    && ((event.event as Record<string, unknown>).type === "turn.failed"
+      || (event.event as Record<string, unknown>).type === "turn.completed")
+  )));
+  const reloaded = await new RuntimeStore(dataDir).readConversation("local-dev-conversation");
+  assert.ok(reloaded.some((message) => message.role === "assistant" && message.content === "Run cancelled."));
 });
 
 async function buildRustLocalRunnerBin(): Promise<string> {
