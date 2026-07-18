@@ -61,6 +61,16 @@ fn default_workspace() -> String {
 }
 
 #[tauri::command]
+fn pick_workspace() -> Option<String> {
+    let initial = default_workspace();
+    rfd::FileDialog::new()
+        .set_directory(initial)
+        .pick_folder()
+        .and_then(|path| path.canonicalize().ok())
+        .map(|path| path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
 fn ensure_workspace(workspace_root: String) -> Result<String, String> {
     let path = expand_home(workspace_root);
     fs::create_dir_all(&path).map_err(to_string)?;
@@ -219,6 +229,7 @@ pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             default_workspace,
+            pick_workspace,
             ensure_workspace,
             execute_tool_call
         ])

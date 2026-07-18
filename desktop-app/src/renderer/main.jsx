@@ -11,6 +11,7 @@ import {
 } from "@assistant-ui/react";
 import { StreamdownTextPrimitive } from "@assistant-ui/react-streamdown";
 import { handleLocalToolRequest, toolCorrelationId } from "./toolBridge.js";
+import { selectWorkspace } from "./workspaceState.js";
 import "streamdown/styles.css";
 import "./styles.css";
 
@@ -182,6 +183,22 @@ function App() {
   useEffect(() => () => {
     socketRef.current?.close();
   }, []);
+
+  async function chooseWorkspace() {
+    try {
+      await selectWorkspace({
+        invokeTauri,
+        storage: localStorage,
+        setWorkspaceRef: (normalized) => {
+          workspaceRef.current = normalized;
+        },
+        setWorkspace,
+        disconnectRuntime: socketRef.current ? disconnectRuntime : undefined
+      });
+    } catch (error) {
+      setStatus(errorMessage(error));
+    }
+  }
 
   async function connectRuntime(connection = {}) {
     if (connected || socketRef.current) return;
@@ -590,6 +607,16 @@ function App() {
               <span>Runtime</span>
               <strong>{connected ? "Ready" : status}</strong>
             </div>
+          </div>
+        </section>
+
+        <section className="side-section">
+          <div className="workspace-picker">
+            <span className="label">Workspace</span>
+            <strong>{workspace || "No workspace selected"}</strong>
+            <button type="button" className="secondary" onClick={() => void chooseWorkspace()}>
+              {workspace ? "Change folder" : "Choose folder"}
+            </button>
           </div>
         </section>
 
