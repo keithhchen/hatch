@@ -127,6 +127,43 @@ test("picker cancellation leaves workspace state untouched", async () => {
   ]);
 });
 
+test("interactive picker is not bounded by the workspace command timeout", async () => {
+  const calls = [];
+  const normalized = "/Users/keithchen/Documents/Hatch HTTP UI Acceptance 20260718";
+  const result = await selectWorkspace({
+    invokeTauri: async (command) => {
+      calls.push(command);
+      if (command === "pick_workspace") {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        return "/selected/by/picker";
+      }
+      return normalized;
+    },
+    storage: { setItem: () => {} },
+    setWorkspaceRef: () => {},
+    setWorkspace: () => {},
+    commandTimeoutMs: 5
+  });
+
+  assert.equal(result, normalized);
+  assert.deepEqual(calls, ["pick_workspace", "ensure_workspace"]);
+});
+
+test("ensure_workspace still has a bounded timeout", async () => {
+  await assert.rejects(
+    selectWorkspace({
+      invokeTauri: async (command) => command === "pick_workspace"
+        ? "/selected/by/picker"
+        : new Promise(() => {}),
+      storage: { setItem: () => {} },
+      setWorkspaceRef: () => {},
+      setWorkspace: () => {},
+      commandTimeoutMs: 5
+    }),
+    (error) => error.code === "workspace_command_timeout"
+  );
+});
+
 test("ensure failure is observable and does not persist a workspace", async () => {
   const traces = [];
   let mutations = 0;

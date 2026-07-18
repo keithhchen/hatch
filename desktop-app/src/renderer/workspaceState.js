@@ -23,7 +23,6 @@ export async function selectWorkspace({
     const selected = await invokeWorkspaceCommand({
       invokeTauri,
       command: "pick_workspace",
-      timeoutMs: commandTimeoutMs,
       onStart: () => trace("workspace.pick.invoke.start", "requested"),
       onResolve: () => trace("workspace.pick.invoke.result", "resolved"),
       onReject: (error) => trace("workspace.pick.invoke.error", workspaceErrorStatus(error))
@@ -68,12 +67,23 @@ export async function invokeWorkspaceCommand({
   invokeTauri,
   command,
   args,
-  timeoutMs = 30_000,
+  timeoutMs,
   onStart,
   onResolve,
   onReject
 }) {
   onStart?.();
+  if (timeoutMs === undefined || timeoutMs === null) {
+    try {
+      const result = await invokeTauri(command, args);
+      onResolve?.(result);
+      return result;
+    } catch (error) {
+      onReject?.(error);
+      throw error;
+    }
+  }
+
   let timeoutId;
   const timeout = new Promise((_, reject) => {
     timeoutId = setTimeout(() => {

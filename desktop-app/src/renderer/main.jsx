@@ -1518,6 +1518,7 @@ function recordRendererTrace(phase, status, correlationId, fields = {}) {
     phase,
     status,
     correlation_id: correlationId,
+    timestamp_ms: Date.now(),
     ...fields
   };
   if (typeof window !== "undefined") {

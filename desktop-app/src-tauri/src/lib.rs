@@ -6,6 +6,7 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Debug)]
 struct CommandTrace {
@@ -30,6 +31,10 @@ impl CommandTrace {
         let mut event = json!({
             "phase": phase,
             "correlation_id": correlation_id,
+            "timestamp_ms": SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis(),
         });
         if let Some(status) = status {
             event["status"] = Value::String(status.to_string());
