@@ -95,6 +95,10 @@ export class ClientToolBroker {
         state
       });
     });
+    // The caller does not receive `result` until after requested/emit completes.
+    // Cancellation can reject it during that window, so attach ownership now
+    // without changing the promise returned to the caller below.
+    void result.catch(() => undefined);
 
     await state?.waitForTool();
     await this.store.append({
@@ -220,39 +224,45 @@ export class ClientToolBroker {
   }
 
   private async cancelPendingCall(key: string, pending: PendingCall, reason: string): Promise<void> {
+    if (this.pending.get(key) !== pending) return;
     clearTimeout(pending.timeout);
-    await this.store.append({
-      type: "tool.call",
-      conversation_id: pending.conversationId,
-      run_id: pending.runId,
-      tool_call_id: pending.toolCallId,
-      name: pending.name,
-      arguments: pending.arguments,
-      status: "cancelled",
-      locality: "client",
-      approval: pending.approval,
-      ...(pending.scope ? { scope: pending.scope } : {}),
-      ...(pending.skillRunId ? { skill_run_id: pending.skillRunId } : {}),
-      error: { message: reason }
-    });
-    await this.emit({
-      type: "tool_call.delta",
-      run_id: pending.runId,
-      tool_call_id: pending.toolCallId,
-      name: pending.name,
-      locality: "client",
-      approval: pending.approval,
-      status: "cancelled",
-      arguments: pending.arguments,
-      error: {
-        code: "tool_cancelled",
-        message: reason
-      },
-      ...(pending.scope ? { scope: pending.scope } : {}),
-      ...(pending.skillRunId ? { skill_run_id: pending.skillRunId } : {})
-    });
-    pending.reject(new Error(reason));
     this.pending.delete(key);
+    try {
+      await this.store.append({
+        type: "tool.call",
+        conversation_id: pending.conversationId,
+        run_id: pending.runId,
+        tool_call_id: pending.toolCallId,
+        name: pending.name,
+        arguments: pending.arguments,
+        status: "cancelled",
+        locality: "client",
+        approval: pending.approval,
+        ...(pending.scope ? { scope: pending.scope } : {}),
+        ...(pending.skillRunId ? { skill_run_id: pending.skillRunId } : {}),
+        error: { message: reason }
+      });
+      await this.emit({
+        type: "tool_call.delta",
+        run_id: pending.runId,
+        tool_call_id: pending.toolCallId,
+        name: pending.name,
+        locality: "client",
+        approval: pending.approval,
+        status: "cancelled",
+        arguments: pending.arguments,
+        error: {
+          code: "tool_cancelled",
+          message: reason
+        },
+        ...(pending.scope ? { scope: pending.scope } : {}),
+        ...(pending.skillRunId ? { skill_run_id: pending.skillRunId } : {})
+      });
+    } finally {
+      // Reject the original promise after ownership has been installed and
+      // cleanup has become terminal, even if observability delivery fails.
+      pending.reject(new Error(reason));
+    }
   }
 
   private emitApprovalDecision(
