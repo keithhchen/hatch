@@ -296,7 +296,13 @@ class BailianSdkKnowledgeApi:
             raise RuntimeError("Bailian AddFile returned no file id")
         deadline = time.monotonic() + self._configuration.timeout_seconds
         while time.monotonic() < deadline:
-            described = self._client.describe_file_with_options(self._configuration.workspace_id, file_id, {}, self._runtime_options())
+            described = self._client.describe_file_with_options(
+                self._configuration.workspace_id,
+                file_id,
+                self._models.DescribeFileRequest(),
+                {},
+                self._runtime_options(),
+            )
             status = _attribute(described.body.data, "status")
             if status == "PARSE_SUCCESS":
                 return file_id
