@@ -1,0 +1,7 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hatch.dev/agent/creator-agent-v1.schema.json",
+  "title": "Hatch Creator Agent v1",
+  "description": "Public canonical alias for the runtime-free Hatch Agent Corpus contract.",
+  "$ref": "./agent-corpus.schema.json"
+}

@@ -1,221 +1,280 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hatch.dev/protocol/agent-corpus.schema.json",
-  "title": "Hatch Agent Corpus",
-  "description": "The complete publishable, provider-neutral corpus for one Creator Agent. It intentionally contains no runtime, deployment, provider, credential, approval, or release/version configuration.",
+  "$id": "https://hatch.dev/agent/agent-corpus.schema.json",
+  "title": "Hatch Agent Corpus v1",
+  "description": "A runtime-free, publishable definition of one current Creator Agent. It contains global instructions, optional local Skills, retrieval-only knowledge, declared tools, and non-runtime evaluation assets.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["agent", "creator", "product", "instructions", "skills", "knowledge", "tools", "evals"],
+  "required": [
+    "contract_version",
+    "tenant_id",
+    "agent_id",
+    "creator",
+    "product",
+    "instructions",
+    "tools",
+    "evaluations"
+  ],
   "properties": {
-    "agent": { "$ref": "#/$defs/agentIdentity" },
-    "creator": { "$ref": "#/$defs/creator" },
-    "product": { "$ref": "#/$defs/product" },
-    "instructions": { "$ref": "#/$defs/instructions" },
-    "skills": { "$ref": "#/$defs/skills" },
-    "knowledge": { "$ref": "#/$defs/knowledge" },
+    "contract_version": { "const": "1" },
+    "tenant_id": { "$ref": "#/$defs/identifier" },
+    "agent_id": { "$ref": "#/$defs/identifier" },
+    "creator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "name": { "type": "string", "minLength": 1 }
+      }
+    },
+    "product": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "promise", "inputs", "outputs", "boundaries", "offer"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "promise": { "type": "string", "minLength": 1 },
+        "inputs": { "$ref": "#/$defs/nonEmptyStrings" },
+        "outputs": { "$ref": "#/$defs/nonEmptyStrings" },
+        "boundaries": { "$ref": "#/$defs/nonEmptyStrings" },
+        "offer": { "$ref": "#/$defs/offer" }
+      }
+    },
+    "instructions": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Always-loaded global worldview, voice, values, product boundaries, and global canonical examples. This is not retrievable knowledge.",
+      "required": ["system"],
+      "properties": {
+        "system": { "$ref": "#/$defs/systemInstruction" }
+      }
+    },
+    "skills": {
+      "type": "array",
+      "description": "Optional local execution units. Omit or use [] when the Agent needs no independently reusable local execution unit.",
+      "items": { "$ref": "#/$defs/skill" }
+    },
+    "knowledge": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Retrieval-only long-tail material. It must not contain global instructions, Skill instructions, references, canonical few-shots, or held-out evaluations.",
+      "required": ["documents"],
+      "properties": {
+        "documents": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/knowledgeDocument" }
+        }
+      }
+    },
     "tools": {
       "type": "array",
       "minItems": 1,
-      "items": { "$ref": "#/$defs/tool" },
       "contains": {
         "type": "object",
         "properties": { "id": { "const": "hatch.web_search" } },
         "required": ["id"]
-      }
+      },
+      "items": { "$ref": "#/$defs/tool" },
+      "description": "Declarative capabilities only. No endpoint, provider credential, or secret belongs in a Corpus. hatch.web_search is always required."
     },
-    "evals": { "$ref": "#/$defs/evals" }
+    "evaluations": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Generated evaluation assets. They validate the Agent and never become automatic Runtime context.",
+      "required": ["synthetic_qa", "held_out"],
+      "properties": {
+        "synthetic_qa": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/evaluationAsset" }
+        },
+        "held_out": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/evaluationAsset" }
+        }
+      }
+    }
   },
   "$defs": {
-    "nonEmptyString": { "type": "string", "minLength": 1 },
-    "identifier": { "type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
-    "agentIdentity": {
-      "type": "object", "additionalProperties": false,
-      "required": ["id", "tenant_id"],
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "relativePath": {
+      "type": "string",
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9][A-Za-z0-9._/-]*$"
+    },
+    "asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path", "sha256"],
       "properties": {
         "id": { "$ref": "#/$defs/identifier" },
-        "tenant_id": { "$ref": "#/$defs/identifier" }
+        "path": { "$ref": "#/$defs/relativePath" },
+        "sha256": { "$ref": "#/$defs/digest" },
+        "description": { "type": "string", "minLength": 1 }
       }
     },
-    "creator": {
-      "type": "object", "additionalProperties": false,
-      "required": ["id", "name"],
+    "systemInstruction": {
+      "allOf": [
+        { "$ref": "#/$defs/asset" },
+        { "type": "object", "properties": { "path": { "type": "string", "const": "instructions/system.md" } } }
+      ]
+    },
+    "nonEmptyStrings": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "offer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model", "unit"],
       "properties": {
-        "id": { "$ref": "#/$defs/identifier" },
-        "name": { "$ref": "#/$defs/nonEmptyString" },
-        "slug": { "$ref": "#/$defs/identifier" }
-      }
-    },
-    "product": {
-      "type": "object", "additionalProperties": false,
-      "required": ["id", "name", "description", "promise", "boundaries", "offer", "input_contract", "output_contract"],
-      "properties": {
-        "id": { "$ref": "#/$defs/identifier" },
-        "name": { "$ref": "#/$defs/nonEmptyString" },
-        "description": { "$ref": "#/$defs/nonEmptyString" },
-        "promise": { "$ref": "#/$defs/nonEmptyString" },
-        "boundaries": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/nonEmptyString" } },
-        "offer": {
-          "type": "object", "additionalProperties": false,
-          "required": ["model", "amount_minor", "currency"],
-          "properties": {
-            "model": { "enum": ["per_delivery", "subscription"] },
-            "amount_minor": { "type": "integer", "minimum": 0 },
-            "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
-            "unit": { "$ref": "#/$defs/nonEmptyString" }
-          }
-        },
-        "input_contract": { "$ref": "#/$defs/ioContract" },
-        "output_contract": { "$ref": "#/$defs/ioContract" }
-      }
-    },
-    "ioContract": {
-      "type": "object", "additionalProperties": false,
-      "required": ["summary", "fields"],
-      "properties": {
-        "summary": { "$ref": "#/$defs/nonEmptyString" },
-        "fields": {
-          "type": "array",
-          "items": {
-            "type": "object", "additionalProperties": false,
-            "required": ["name", "description", "required"],
-            "properties": {
-              "name": { "$ref": "#/$defs/identifier" },
-              "description": { "$ref": "#/$defs/nonEmptyString" },
-              "required": { "type": "boolean" }
-            }
-          }
-        }
-      }
-    },
-    "instructions": {
-      "type": "object", "additionalProperties": false,
-      "required": ["format", "entrypoint"],
-      "properties": {
-        "format": { "const": "markdown" },
-        "entrypoint": { "type": "string", "pattern": "^instructions/[A-Za-z0-9._-]+\\.md$" }
-      }
-    },
-    "skills": {
-      "type": "object", "additionalProperties": false,
-      "required": ["root", "items"],
-      "properties": {
-        "root": { "const": "skills" },
-        "items": {
-          "type": "array", "minItems": 1,
-          "items": {
-            "type": "object", "additionalProperties": false,
-            "required": ["id", "name", "description", "entrypoint", "allowed_tool_ids"],
-            "properties": {
-              "id": { "$ref": "#/$defs/identifier" },
-              "name": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
-              "description": { "$ref": "#/$defs/nonEmptyString" },
-              "entrypoint": { "type": "string", "pattern": "^skills/[a-z0-9]+(?:-[a-z0-9]+)*/SKILL\\.md$" },
-              "allowed_tool_ids": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/identifier" } }
-            }
-          }
-        }
-      }
-    },
-    "knowledge": {
-      "type": "object", "additionalProperties": false,
-      "required": ["documents"],
-      "properties": {
-        "documents": {
-          "type": "array", "minItems": 1,
-          "items": {
-            "type": "object", "additionalProperties": false,
-            "required": ["id", "artifact_path", "name", "media_type", "provenance"],
-            "properties": {
-              "id": { "$ref": "#/$defs/identifier" },
-              "artifact_path": { "type": "string", "pattern": "^knowledge/[A-Za-z0-9._/-]+\\.(md|txt|json)$" },
-              "name": { "$ref": "#/$defs/nonEmptyString" },
-              "media_type": { "$ref": "#/$defs/nonEmptyString" },
-              "provenance": {
-                "type": "object", "additionalProperties": false,
-                "required": ["source_kind", "source_sha256", "locations"],
-                "properties": {
-                  "source_kind": { "enum": ["course", "pdf", "video_transcript", "text", "historical_delivery", "creator_database"] },
-                  "source_sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
-                  "locations": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/nonEmptyString" } }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "functionDefinition": {
-      "type": "object", "additionalProperties": false,
-      "required": ["type", "name", "description", "strict", "parameters"],
-      "properties": {
-        "type": { "const": "function" },
-        "name": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
-        "description": { "$ref": "#/$defs/nonEmptyString" },
-        "strict": { "const": true },
-        "parameters": {
-          "type": "object", "additionalProperties": true,
-          "required": ["type", "properties", "required", "additionalProperties"],
-          "properties": {
-            "type": { "const": "object" },
-            "properties": { "type": "object" },
-            "required": { "type": "array", "items": { "type": "string" } },
-            "additionalProperties": { "const": false }
-          }
-        }
-      }
-    },
-    "tool": {
-      "oneOf": [
+        "model": { "type": "string", "enum": ["per_delivery", "subscription"] },
+        "unit": { "type": "string", "minLength": 1 },
+        "amount_minor": { "type": "integer", "minimum": 0 },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" }
+      },
+      "allOf": [
         {
-          "type": "object", "additionalProperties": false,
-          "required": ["id", "source", "kind"],
-          "properties": {
-            "id": { "const": "hatch.web_search" },
-            "source": { "const": "hatch" },
-            "kind": { "const": "web_search" }
-          }
+          "if": { "required": ["amount_minor"] },
+          "then": { "required": ["currency"] }
         },
         {
-          "type": "object", "additionalProperties": false,
-          "required": ["id", "source", "kind", "capability"],
-          "properties": {
-            "id": { "type": "string", "pattern": "^hatch\\.local\\.[a-z0-9._-]+$" },
-            "source": { "const": "hatch" },
-            "kind": { "const": "local_harness" },
-            "capability": { "enum": ["filesystem", "shell", "git"] }
-          }
-        },
-        {
-          "type": "object", "additionalProperties": false,
-          "required": ["id", "source", "kind", "connection_ref", "function"],
-          "properties": {
-            "id": { "type": "string", "pattern": "^creator\\.[a-z0-9._-]+$" },
-            "source": { "const": "creator" },
-            "kind": { "const": "http" },
-            "connection_ref": { "$ref": "#/$defs/identifier" },
-            "function": { "$ref": "#/$defs/functionDefinition" }
-          }
-        },
-        {
-          "type": "object", "additionalProperties": false,
-          "required": ["id", "source", "kind", "connection_ref", "allowed_tools"],
-          "properties": {
-            "id": { "type": "string", "pattern": "^creator\\.[a-z0-9._-]+$" },
-            "source": { "const": "creator" },
-            "kind": { "const": "mcp" },
-            "connection_ref": { "$ref": "#/$defs/identifier" },
-            "allowed_tools": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/identifier" } }
-          }
+          "if": { "required": ["currency"] },
+          "then": { "required": ["amount_minor"] }
         }
       ]
     },
-    "evals": {
-      "type": "object", "additionalProperties": false,
-      "required": ["dataset_path", "minimum_cases"],
+    "skill": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "when_to_use", "instruction"],
       "properties": {
-        "dataset_path": { "type": "string", "pattern": "^evals/[A-Za-z0-9._/-]+\\.json$" },
-        "minimum_cases": { "type": "integer", "minimum": 4 }
+        "id": { "$ref": "#/$defs/identifier" },
+        "name": { "type": "string", "minLength": 1 },
+        "when_to_use": { "type": "string", "minLength": 1 },
+        "instruction": {
+          "allOf": [
+            { "$ref": "#/$defs/asset" },
+            { "type": "object", "properties": { "path": { "type": "string", "pattern": "^skills/[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*/SKILL\\.md$" } } }
+          ]
+        },
+        "references": {
+          "type": "array",
+          "description": "Optional local method, style, or example files. They are loaded only with this Skill and are never RAG documents.",
+          "items": { "$ref": "#/$defs/skillReference" }
+        },
+        "allowed_tool_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/toolIdentifier" }
+        }
       }
+    },
+    "skillReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["asset", "kind"],
+      "properties": {
+        "asset": {
+          "allOf": [
+            { "$ref": "#/$defs/asset" },
+            { "type": "object", "properties": { "path": { "type": "string", "pattern": "^skills/[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*/references/[A-Za-z0-9][A-Za-z0-9._-]*\\.md$" } } }
+          ]
+        },
+        "kind": { "type": "string", "enum": ["method", "style", "example", "few_shots"] }
+      }
+    },
+    "knowledgeDocument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path", "sha256", "retrieval_only", "source_summary"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "path": { "type": "string", "pattern": "^knowledge/[A-Za-z0-9][A-Za-z0-9._/-]*\\.md$" },
+        "sha256": { "$ref": "#/$defs/digest" },
+        "description": { "type": "string", "minLength": 1 },
+        "retrieval_only": { "const": true },
+        "source_summary": { "type": "string", "minLength": 1 }
+      }
+    },
+    "toolIdentifier": {
+      "type": "string",
+      "pattern": "^(?:hatch|creator)\\.[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+    },
+    "tool": {
+      "oneOf": [
+        { "$ref": "#/$defs/hatchWebSearch" },
+        { "$ref": "#/$defs/hatchLocalTool" },
+        { "$ref": "#/$defs/creatorHttpTool" },
+        { "$ref": "#/$defs/creatorMcpTool" }
+      ]
+    },
+    "hatchWebSearch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "capability"],
+      "properties": {
+        "id": { "const": "hatch.web_search" },
+        "kind": { "const": "hatch_builtin" },
+        "capability": { "const": "web_search" },
+        "description": { "type": "string", "minLength": 1 }
+      }
+    },
+    "hatchLocalTool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "capability"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^hatch\\.local\\.[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$" },
+        "kind": { "const": "local_harness" },
+        "capability": { "type": "string", "enum": ["filesystem", "shell", "git"] },
+        "description": { "type": "string", "minLength": 1 }
+      }
+    },
+    "creatorHttpTool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "connection_ref", "operation"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^creator\\.[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$" },
+        "kind": { "const": "http_function" },
+        "connection_ref": { "$ref": "#/$defs/identifier" },
+        "operation": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "input_schema": { "type": "object" }
+      }
+    },
+    "creatorMcpTool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "connection_ref", "tool_name"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^creator\\.[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$" },
+        "kind": { "const": "mcp_tool" },
+        "connection_ref": { "$ref": "#/$defs/identifier" },
+        "tool_name": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "input_schema": { "type": "object" }
+      }
+    },
+    "evaluationAsset": {
+      "allOf": [
+        { "$ref": "#/$defs/asset" },
+        { "type": "object", "properties": { "path": { "type": "string", "pattern": "^evals/[A-Za-z0-9][A-Za-z0-9._/-]*\\.json$" } } }
+      ]
     }
   }
 }

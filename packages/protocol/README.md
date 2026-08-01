@@ -1,7 +1,7 @@
 # Hatch Protocol
 
-Canonical provider-agnostic protocol 0.3, the **Agent Corpus** contract, and
-the legacy Creator Release contract v1.
+Canonical provider-agnostic protocol 0.3, Agent Corpus v1, and legacy Creator
+Release contract v1.
 
 This package owns the JSON Schema for the server/local-harness boundary. The TypeScript runtime server and Rust local runner currently mirror this schema directly; generated TS and Rust types should be introduced from this package before the protocol is expanded further.
 
@@ -19,31 +19,64 @@ Schema:
 ```text
 schemas/hatch-wire-protocol.schema.json
 schemas/agent-corpus.schema.json
+schemas/creator-agent.schema.json
 schemas/creator-release-public.schema.json
 schemas/creator-release-private.schema.json
 ```
 
-`agent-corpus.schema.json` defines the **Agent Corpus**: the complete,
-publishable, provider-neutral body of one Creator Agent. It contains the
-product contract, instructions, SKILL.md entrypoints, an agent-isolated
-knowledge corpus, the declared Hatch/Creator tool requirements, and synthetic
-QA/eval cases. It contains **no runtime configuration**: no model/provider,
-deployment, stream setting, tool approval policy, server URL, credential, or
-release/version field.
+## Agent Corpus v1
 
-The Corpus declares `hatch.web_search` as a required Hatch capability. At
-execution, Hatch supplies its implementation. Creator HTTP/MCP tools only name
-a control-plane `connection_ref`; URLs, auth, approval policy, and the actual
-connection live outside the Corpus.
+`creator-agent.schema.json` is the public canonical alias for
+`agent-corpus.schema.json`. It describes one current, publishable Creator
+Agent. The Corpus is deliberately runtime-free: it contains the Agent's
+product promise, global instructions, optional local Skills, retrieval-only
+knowledge, declarative tools, and non-runtime evaluation assets. It contains
+no model/provider choice, vector-store ID, endpoint, credential, raw Creator
+material, Factory trace, or version history.
 
-At execution time the Runtime binds the Corpus to its own deployment: it maps
-`hatch.web_search` to Hatch's search implementation, mounts the Corpus's
-agent-scoped RAG namespace, resolves Creator connection refs through the
-control plane, and chooses a model/runtime. Kimi 2.6 is currently that runtime
-choice, but it is deliberately absent from the Corpus.
+The files referenced by a Corpus have four different jobs. They are not
+interchangeable:
 
-See [`AGENT_CORPUS.md`](./AGENT_CORPUS.md) for the fixed published-directory
-layout and an exact separation between the Corpus and Runtime responsibilities.
+```text
+instructions/system.md             Global worldview, voice, values, product boundaries,
+                                   and global canonical few-shots. Always loaded.
+
+skills/<skill-id>/SKILL.md         One optional, independently reusable local execution
+                                   unit. Loaded only when that unit is needed.
+
+skills/<skill-id>/references/*.md  Local method, style, or example material for that
+                                   Skill only. Never a RAG document.
+
+knowledge/*.md                     Long-tail material to retrieve only when needed.
+                                   Never global instruction, Skill instruction/reference,
+                                   canonical few-shot, or evaluation.
+
+evals/*.json                       Synthetic QA and held-out validation only. Never
+                                   automatic Runtime context.
+```
+
+An Agent may legitimately have no Skills: omit `skills` or use `[]`. A Skill
+is not the entire delivery workflow. It exists only when a local execution
+unit is independently reusable and needs its own instruction, method,
+reference, or scoped tool permission. Global rules belong in `system.md`;
+rules that matter only while performing one local unit belong in that Skill or
+its references; long-tail evidence belongs in `knowledge/`.
+
+Synthetic QA is a Factory input to this placement decision. A high-frequency
+example which changes global behavior is distilled into `system.md`; a local
+example belongs with the relevant Skill reference; broad fallback material may
+become retrieval knowledge. The retained `evals/` assets are for validation,
+not an instruction channel.
+
+`tools` is declarative. `hatch.web_search` is mandatory for every Agent.
+`hatch.local.*` declares a Desktop local-harness capability. `creator.*` HTTP
+and MCP tools carry only a `connection_ref` plus the allowed operation or tool;
+their endpoints and credentials live in Hatch Control Plane, outside the
+Corpus.
+
+At publish time Registry binds one `tenant_id + agent_id` to its own isolated
+knowledge space. A Runtime turns that binding into `hatch.file_search`; neither
+the Corpus nor the Desktop carries a knowledge-base/vector-store identifier.
 
 The public Release schema is client-safe Registry/Desktop metadata. The private
 schema is Runtime-only and contains the system prompt, protected Skill and RAG
