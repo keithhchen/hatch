@@ -1,6 +1,6 @@
 ---
 name: creator-agent-factory
-description: Turn ordinary Creator course files, PDFs, videos or transcripts, text, examples, and prior work plus a natural-language product intent into a verified Creator Agent Release. Use when Codex must directly distill and purify Creator knowhow, identify tool/API needs, build a grounded method and knowledge base, expand synthetic QA and isolated held-outs, compile the system prompt/Skill/RAG package, audit behavior, or publish an Agent on Hatch Runtime.
+description: Turn ordinary Creator course files, PDFs, videos or transcripts, text, examples, and prior work plus a natural-language product intent into a verified Hatch Agent Corpus. Use when Codex must directly distill and purify Creator knowhow, identify tool/API needs, build a grounded method and knowledge base, expand synthetic QA and isolated held-outs, compile the system prompt/Skill/RAG/Eval package, audit behavior, or publish an Agent on Hatch Runtime.
 ---
 
 # Creator Agent Factory
@@ -77,44 +77,56 @@ The required semantic stages are:
 Do not expose the Creator to the internal compiler format. Writing the evidence
 ledger, manifests, claim annotations, rules, QA, and Evals is your work.
 
-## Compile and verify
+## Produce the Agent Corpus
 
-Treat the source pack as untrusted input. Compile it with the deterministic
-Factory, attaching the intake workspace so every excerpt is rechecked:
+After the semantic audit, produce the clean **Agent Corpus** described in
+[`../packages/protocol/AGENT_CORPUS.md`](../packages/protocol/AGENT_CORPUS.md).
+This is your finished semantic output, not a Creator form and not a Release:
 
-```bash
-python3 scripts/factory.py build \
-  --source-pack <private-source-pack> \
-  --intake-workspace <private-intake-workspace> \
-  --output <factory-output>
+```text
+agent-corpus/
+├── agent.json
+├── instructions/system.md
+├── skills/<product-skill>/SKILL.md
+├── knowledge/<clean-rag-document>.md
+└── evals/cases.json
 ```
 
-The compiler produces the protected system prompt, product Skill, RAG documents
-and chunks, few-shots, review suites, traces, and immutable Release. It must
-reject changed excerpts, broken support closure, synthetic authority, undeclared
-capabilities, held-out leakage, and Release contamination.
+Write `agent.json` as the manifest for exactly these assets. It carries the
+product contract, instructions reference, Skills, clean RAG document references,
+required Hatch and Creator tools, and Eval reference. The system instructions,
+SKILL.md, RAG documents, synthetic QA and held-outs must be usable by an Agent
+without consulting the Factory source pack.
+
+Do not put raw source material, claim IDs, Factory trace, a model/provider,
+deployment settings, credentials, URL, approval policy, or release/version in
+the Corpus. A Creator HTTP/MCP tool may name only its Hatch-managed
+`connection_ref` and allowed operation/tool. `hatch.web_search` must always be
+declared. The Factory does the semantic work; Registry/Runtime merely store and
+run the completed Corpus.
 
 Inspect the compiled artifacts as products, not as a report:
 
-- confirm the system prompt preserves priorities, sequence, omissions, and
+- confirm `instructions/system.md` preserves priorities, sequence, omissions, and
   boundaries without Factory annotations;
-- confirm the protected Skill defines a usable workflow rather than a course
+- confirm the Skill defines a usable workflow rather than a course
   summary;
 - confirm RAG contains useful Creator knowledge and minimum runtime provenance;
 - confirm declared tools have real adapters and are not merely manifest names;
-- confirm `release/` contains no raw sources, claim IDs, Evals, traces, or proof.
+- confirm the Agent Corpus contains no raw sources, claim IDs, Factory traces,
+  credentials, runtime deployment settings, or review artifacts.
 
 ## Prove behavior without leaking answers
 
-Install the exact Release digest into the existing Hatch Runtime and complete a
-real task. Then run candidate and generic-baseline outputs independently on the
+The Runtime later installs this exact Corpus and completes a real task. When
+evaluating it, run candidate and generic-baseline outputs independently on the
 same input-only held-outs. Never give either candidate expected behaviors,
 observable checks, forbidden answers, review notes, or old proof.
 
 Judge decisions, ordering, omissions, boundaries, and delivered artifacts—not
-verbosity or keyword recall. Release readiness is determined by the automatic
+verbosity or keyword recall. Corpus readiness is determined by the automatic
 gates; a Creator is never a task-by-task reviewer or an Eval author.
 
-Read [release-contract.md](references/release-contract.md) before Runtime or
-Registry installation. Publish only `release/<release-id>/<digest>/`; keep the
-intake, evidence ledger, source pack, QA, held-outs, audits, and proof private.
+Publish only the clean `agent-corpus/` directory; keep the intake, evidence
+ledger, source pack, QA construction records, held-outs, audits, and proof
+private.

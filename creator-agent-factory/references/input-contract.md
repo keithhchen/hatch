@@ -13,20 +13,27 @@ material; the Creator never fills it in.
 
 - `creator`: stable `id`, display `name`, and optional factual `bio` supported by
   the supplied material or intent;
-- `product`: stable `id`, `name`, semantic `version`, `description`, bounded
-  `promise`, public `boundaries`, `price_minor`, `currency`, `pricing_model`,
-  `pricing_unit`, `supported_local_capabilities`, and optional
-  `external_tools`/`presentation`;
+- `product`: stable `id`, `name`, `description`, bounded `promise`, public
+  `boundaries`, `price_minor`, `currency`, `pricing_model`, `pricing_unit`, a
+  concrete `input_contract` and `output_contract`, `supported_local_capabilities`,
+  and optional deployable Creator `tools`;
 - `documents`: stable `source_id`, relative `path`, `kind`, title, authority,
   and intake provenance fields described below.
 
 Never infer a price. Use zero with an explicit unset status in private notes
 when the intent does not state one; obtain a real price before publication.
+The Factory Agent—not the Creator—writes `input_contract` and `output_contract`:
+each has a short `summary` and a list of `{name, description, required}` fields.
+They state the minimum real material needed to do the promised work and the
+usable artifact the consumer receives.
 Supported local capabilities are limited to the Runtime contract: `fs.list`,
 `fs.read`, and `fs.write` inside the Consumer-selected workspace. They are
 Hatch platform context, not Creator configuration. An extraction utility is not
 a product capability; declare only the capabilities needed to inspect or
-deliver the bounded product.
+deliver the bounded product. Creator external tools are only declared when the
+promised product genuinely needs one. Each is a deployable `creator.*` HTTP or
+MCP descriptor with a Hatch-owned `connection_ref`; never include a URL,
+credential, OAuth token, or approval policy in this private source pack.
 
 When a raw intake workspace is attached, every document also identifies its
 `origin_source_id`/`origin_path` (or the equivalent intake source ID/path). The

@@ -104,6 +104,7 @@ async function main(): Promise<void> {
   const skill = await readFile(path.join(factoryRoot, "SKILL.md"), "utf8");
   const workflow = await readFile(path.join(factoryRoot, "references", "agent-distillation-workflow.md"), "utf8");
   const contract = await readFile(path.join(factoryRoot, "references", "input-contract.md"), "utf8");
+  const corpusContract = await readFile(path.join(repoRoot, "packages", "protocol", "AGENT_CORPUS.md"), "utf8");
 
   if (args.preflight) {
     const provider = requireKimiProviderConfig();
@@ -136,7 +137,7 @@ async function main(): Promise<void> {
   const provider = requireKimiProviderConfig();
   const openai = new OpenAI({ apiKey: provider.apiKey, baseURL: provider.baseURL });
   const runId = `factory_${randomUUID()}`;
-  const agentSystem = factorySystemPrompt({ skill, workflow, contract });
+  const agentSystem = factorySystemPrompt({ skill, workflow, contract, corpusContract });
   let envelope = resumed
     ? await readEnvelopeFromPack(packDir)
     : await askFactoryAgent(openai, provider.model, agentSystem, initialUserPrompt({ intake, sourceBundle }));
@@ -249,7 +250,7 @@ function parseArgs(argv: string[]): Arguments {
   return { input, intent, output, preflight: false };
 }
 
-function factorySystemPrompt(input: { skill: string; workflow: string; contract: string }): string {
+function factorySystemPrompt(input: { skill: string; workflow: string; contract: string; corpusContract: string }): string {
   return [
     "You are the single semantic executing Agent for Hatch Creator Factory.",
     "You are not a generic assistant and must not ask the Creator for JSON, prompts, Skills, RAG chunks, Eval schemas, or tool manifests.",
@@ -261,7 +262,8 @@ function factorySystemPrompt(input: { skill: string; workflow: string; contract:
     "Perform both a completeness pass and an adversarial pass before responding. Do not invent authority merely because it would be sensible domain advice.",
     "\n<creator_factory_skill>\n" + input.skill + "\n</creator_factory_skill>",
     "\n<agent_distillation_workflow>\n" + input.workflow + "\n</agent_distillation_workflow>",
-    "\n<private_compiler_contract>\n" + input.contract + "\n</private_compiler_contract>"
+    "\n<private_compiler_contract>\n" + input.contract + "\n</private_compiler_contract>",
+    "\n<agent_corpus_contract>\n" + input.corpusContract + "\n</agent_corpus_contract>"
   ].join("\n\n");
 }
 
