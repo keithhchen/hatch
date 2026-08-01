@@ -12,6 +12,7 @@
     "creator",
     "product",
     "instructions",
+    "knowledge",
     "tools",
     "evaluations"
   ],
@@ -60,7 +61,7 @@
     "knowledge": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Retrieval-only long-tail material. It must not contain global instructions, Skill instructions, references, canonical few-shots, or held-out evaluations.",
+      "description": "The Agent-scoped retrieval namespace. Documents are retrieval-only long-tail material and may be empty; they must not contain global instructions, Skill instructions, references, canonical few-shots, or held-out evaluations.",
       "required": ["documents"],
       "properties": {
         "documents": {

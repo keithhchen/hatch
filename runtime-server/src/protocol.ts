@@ -23,9 +23,8 @@ export const ClientHelloSchema = z.object({
   entitlement_id: z.string().min(1).optional(),
   tenant_id: z.string().min(1).optional(),
   user_id: z.string().min(1).optional(),
+  agent_id: z.string().min(1).optional(),
   product_id: z.string().min(1).optional(),
-  release_id: z.string().min(1).optional(),
-  release_digest: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(),
   client_version: z.string().optional(),
   workspace_root: z.string().min(1).optional(),
   local_tools: z.array(ClientToolNameSchema)
@@ -37,14 +36,11 @@ export const ClientHelloSchema = z.object({
       message: "workspace_root is required when local_tools are declared"
     });
   }
-  if ((message.release_id === undefined) !== (message.release_digest === undefined)) {
-    ctx.addIssue({ code: "custom", path: ["release_id"], message: "release_id and release_digest must be supplied together" });
-  }
-  if (message.entitlement_id && (message.release_id || message.release_digest || message.product_id)) {
+  if (message.entitlement_id && (message.product_id || message.agent_id)) {
     ctx.addIssue({
       code: "custom",
       path: ["entitlement_id"],
-      message: "entitlement_id cannot be combined with client-selected product or Release fields"
+      message: "entitlement_id cannot be combined with client-selected product or Agent fields"
     });
   }
 });
@@ -117,8 +113,7 @@ export type RuntimeReady = {
   tenant_id: string;
   user_id: string;
   product_id: string;
-  release_id: string;
-  release_digest: string;
+  agent_id: string;
   entitlement_id?: string;
   creator_agent?: {
     creator: { id: string; name: string };

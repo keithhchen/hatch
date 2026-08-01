@@ -2,9 +2,15 @@
 name = "hatch-platform-registry"
 version = "0.1.0"
 description = "Minimal Hatch Registry MVP service."
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
+  "alibabacloud-bailian20231229>=2.14.2",
+  "alibabacloud-credentials>=1.0.10",
+  "alibabacloud-tea-openapi>=0.3.13",
+  "alibabacloud-tea-util>=0.3.13",
   "fastapi>=0.115.0",
+  "jsonschema>=4.23.0",
+  "referencing>=0.35.0",
   "pydantic>=2.8.0",
   "uvicorn[standard]>=0.30.0",
 ]

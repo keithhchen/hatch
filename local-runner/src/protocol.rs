@@ -63,7 +63,7 @@ impl LocalRunner {
             "fs.read" => self.protocol_fs_read(&request.arguments),
             "fs.write" => self.protocol_fs_write(&request.arguments),
             "fs.patch" => self.protocol_fs_patch(&request.arguments),
-            "shell.exec" => Err(ProtocolToolError::ShellDisabled),
+            "shell.exec" => self.protocol_shell_exec(&request.arguments),
             "git.diff" => self.protocol_git_diff(&request.arguments),
             _ => Err(ProtocolToolError::UnsupportedTool(request.name)),
         };
@@ -147,6 +147,23 @@ impl LocalRunner {
         let diff = self.git_diff(path)?;
         Ok(json!({ "diff": diff }))
     }
+
+    fn protocol_shell_exec(&self, arguments: &Value) -> ProtocolResult {
+        let command = string_argument(arguments, "command", None)?;
+        let timeout_ms = usize_argument(arguments, "timeout_ms", Some(30_000))?;
+        if !(100..=120_000).contains(&timeout_ms) {
+            return Err(ProtocolToolError::InvalidTimeout);
+        }
+        let output = self.shell_exec(&command, timeout_ms as u64)?;
+        Ok(json!({
+            "stdout": output.stdout,
+            "stderr": output.stderr,
+            "exit_code": output.exit_code,
+            "timed_out": output.timed_out,
+            "stdout_truncated": output.stdout_truncated,
+            "stderr_truncated": output.stderr_truncated,
+        }))
+    }
 }
 
 type ProtocolResult = std::result::Result<Value, ProtocolToolError>;
@@ -161,8 +178,8 @@ enum ProtocolToolError {
     InvalidIntegerArgument(&'static str),
     #[error("unsupported local tool: {0}")]
     UnsupportedTool(String),
-    #[error("shell execution is disabled: this build cannot provide a complete OS sandbox")]
-    ShellDisabled,
+    #[error("timeout_ms must be between 100 and 120000")]
+    InvalidTimeout,
     #[error("{0}")]
     Runner(#[from] crate::LocalRunnerError),
 }
@@ -176,7 +193,7 @@ impl ProtocolToolError {
             | Self::UnsupportedTool(_) => "invalid_tool_call",
             Self::Runner(LocalRunnerError::FileTooLarge { .. })
             | Self::Runner(LocalRunnerError::RenderedFileTooLarge { .. }) => "file_too_large",
-            Self::ShellDisabled => "shell_disabled",
+            Self::InvalidTimeout => "invalid_tool_call",
             Self::Runner(_) => "tool_failed",
         }
     }

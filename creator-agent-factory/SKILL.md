@@ -1,33 +1,27 @@
 ---
 name: creator-agent-factory
-description: Turn ordinary Creator course files, PDFs, videos or transcripts, text, examples, and prior work plus a natural-language product intent into a verified Hatch Agent Corpus. Use when Codex must directly distill and purify Creator knowhow, identify tool/API needs, build a grounded method and knowledge base, expand synthetic QA and isolated held-outs, compile the system prompt/Skill/RAG/Eval package, audit behavior, or publish an Agent on Hatch Runtime.
+description: Distill ordinary Creator course files, PDFs, videos or transcripts, text, examples, and prior work plus a natural-language product intent into a clean Hatch Agent Corpus. Use when an agent must purify Creator knowhow into a system prompt, optional local Skills and references, retrieval-only knowledge, tool declarations, synthetic QA, and isolated Evals that can run on Hatch Runtime.
 ---
 
 # Creator Agent Factory
 
-Act as the semantic distiller. Do not delegate judgment to a distillation script
-or ask the Creator for JSON, schemas, prompts, Skills, RAG chunks, Evals, or tool
-manifests. The Creator supplies only ordinary source material and a
-natural-language product intent; generate every technical artifact internally.
+Act as the semantic distiller. The Creator provides ordinary material and a
+natural-language product intent—not JSON, prompts, schemas, Skills, RAG chunks,
+Evals, or tool manifests. Produce the real Corpus files through the Factory
+workspace. Do not return one large JSON response or substitute a script for
+semantic judgment.
 
-The Hatch Desktop harness separately supplies the available local workspace
-capabilities: `fs.list`, `fs.read`, and `fs.write`. They are platform context,
-not Creator configuration. Declare only those a product genuinely needs to
-inspect the Consumer's real files or save a usable artifact there. A product
-that reads an unconstrained Consumer-selected workspace needs both `fs.list`
-and `fs.read`: it must discover files safely before it can inspect them. The
-compiler closes this safe dependency as a final capability check.
+Read [agent-distillation-workflow.md](references/agent-distillation-workflow.md)
+before writing a Corpus.
 
-## Work from clean inputs
+## Work from ordinary inputs
 
-1. Start in a new private Factory workspace. Read only:
-   - the Creator material directory;
-   - the natural-language product intent;
-   - this Skill and its referenced contracts;
-   - deterministic extraction, compiler, and verifier scripts.
-2. Do not inspect an older Release, proof directory, evaluation output, expected
-   answer, or previous Factory plan. Treat these as answer leakage.
-3. Normalize and hash the raw material without semantic decisions:
+1. Start in a new private Factory workspace. Read only the Creator material,
+   natural-language intent, this Skill, its workflow reference, and the Corpus
+   contract.
+2. Do not inspect an old Release, proof, expected answer, or prior Factory
+   output. They leak answers.
+3. Normalize and hash raw material without semantic decisions:
 
    ```bash
    python3 scripts/intake.py \
@@ -36,97 +30,126 @@ compiler closes this safe dependency as a final capability check.
      --output <private-intake-workspace>
    ```
 
-4. Read `creator-intent.txt`, `intake.json`, and every extracted document in the
-   intake workspace. For video/audio, read the timestamped transcript; for PDF,
-   preserve page locations and inspect rendered pages when layout changes meaning.
-   Do not silently sample or stop after the first files.
+4. Read the complete extracted intake. For video/audio, read the timestamped
+   transcript. For PDF, preserve page locations and inspect rendered pages when
+   layout changes meaning. Do not silently sample.
 
-## Distill as an Agent
+`intake.py` is only an extractor and has no authority to infer Creator method.
+The executing agent performs all evidence, distillation, classification, QA, and
+tool decisions.
 
-Follow [agent-distillation-workflow.md](references/agent-distillation-workflow.md)
-in order. Produce a private source pack that satisfies
-[input-contract.md](references/input-contract.md).
+## The Corpus has four distinct layers
 
-The required semantic stages are:
+Put every usable piece of Creator ability in the narrowest layer that makes it
+reliably available at runtime. Do not use RAG as a general dumping ground.
+Do not demote behavior to retrieval merely to save prompt space: if it must
+directly affect behavior, it belongs in the system prompt or the relevant local
+Skill/reference.
 
-1. Build an evidence ledger from exact Creator-authored excerpts with file,
-   page, or timestamp provenance. Separate source facts from interpretation.
-2. Distill the method: priorities, sequence, quality bar, deliberate omissions,
-   boundaries, output contract, and the details that change decisions.
-   Keep Creator method, Consumer-supplied task context, and generic domain
-   knowledge separate. A label alone (for example a role title, industry, or
-   goal) never supports a detailed framework of customary requirements. When
-   that context would change what the Creator emphasizes, require the smallest
-   concrete material that can ground it (for example a posting, brief, or
-   comparable example) and return the nearest useful partial deliverable.
-3. Derive rules only from cited source facts. Record the derivation; do not
-   convert plausible domain knowledge into Creator authority.
-4. Identify Runtime tool/API/data needs. Keep extraction tools separate from
-   tools the published Agent actually needs. Do not call conversation or prose
-   generation an external tool.
-5. Generate grounded synthetic QA across direct, composed, boundary, and
-   out-of-scope behavior. Label it synthetic; never present it as a Creator quote.
-6. Generate held-outs after QA is frozen. Keep them distinct from QA and later
-   candidate context.
-7. Run a normal self-audit, then re-read the same artifacts in an adversarial
-   pass looking for unsupported or leaked assumptions. This is still one Agent
-   workflow, not a multi-Agent product architecture. Repair the private source
-   pack, never the source evidence. Fail closed when a claim, rule, capability,
-   or expected behavior cannot be supported.
+| Layer | Put here | Do not put here |
+|---|---|---|
+| `instructions/system.md` | Product promise and boundary, persona/voice, global values and judgment, always-on behavior, global few-shots | Long source material; a local procedure that only matters for one task |
+| `skills/<id>/SKILL.md` | An optional, bounded execution unit: when to use it, inputs, outputs, steps, checks, and permitted tools | The entire product journey; generic identity or worldview |
+| `skills/<id>/references/` | A framework, method, aesthetic, or local examples needed only while that Skill runs | Material that must influence all turns; large retrieval archives |
+| `knowledge/` | Long-tail, queryable facts, cases, texts, or reference material that may be needed for a particular request | Behavior rules, system instructions, Skill instructions/references, canonical few-shots, raw course dumps |
 
-Do not expose the Creator to the internal compiler format. Writing the evidence
-ledger, manifests, claim annotations, rules, QA, and Evals is your work.
+Skills are optional. Omit `skills/` when the product needs no distinct reusable
+execution unit. Never create a Skill merely to make the package look complete.
+A Skill is not the whole delivery workflow: split only genuinely independent
+local units, and keep global product behavior in `system.md`.
 
-## Produce the Agent Corpus
+Synthetic QA follows the same routing rule:
 
-After the semantic audit, produce the clean **Agent Corpus** described in
-[`../packages/protocol/AGENT_CORPUS.md`](../packages/protocol/AGENT_CORPUS.md).
-This is your finished semantic output, not a Creator form and not a Release:
+- a result that should change behavior on every turn becomes a concise rule or
+  few-shot in `system.md`;
+- a result relevant only to one execution unit becomes a local rule or example
+  in that Skill or its `references/`;
+- rare supporting material belongs in `knowledge/` only when it must be found
+  on demand;
+- held-outs remain in `evals/` and are never Runtime context.
+
+Do not automatically inject the Eval dataset into the runtime prompt. The
+Corpus may retain synthetic QA for evaluation, but only the deliberately routed
+canonical guidance affects a live Agent.
+
+## Distill as one executing Agent
+
+Follow the referenced workflow. Keep private evidence and audit notes while
+thinking, but never publish them. In particular:
+
+- establish one bounded product value before extracting ability; do not start by
+  copying a whole person;
+- derive Creator rules only from Creator evidence; distinguish their method,
+  Consumer-supplied task context, and generic domain knowledge;
+- preserve priorities, omissions, and the details a general model would make
+  too complete or generic;
+- generate synthetic direct, composed, boundary, and out-of-scope cases only
+  after the method is frozen; generate held-outs afterwards;
+- self-audit, then adversarially re-read for unsupported claims and leakage.
+
+Repair the Corpus, never the source. If a claim, capability, or expected
+behavior is unsupported, omit it or make the boundary explicit. Do not ask the
+Creator to review intermediate prompts, Skills, or Evals.
+
+## Tools and real working context
+
+Separate Factory-only ingestion from published Agent capabilities. Do not
+publish extraction, ordinary conversation, prose generation, or hypothetical
+integrations as tools.
+
+`hatch.web_search` is always a Hatch-built-in tool. Declare local filesystem
+capability only when the bounded product needs the Consumer's actual workspace
+files or must save a usable artifact. For that case declare
+`hatch.local.files` with `kind: "local_harness"` and
+`capability: "filesystem"`; list it in the relevant Skill's
+`allowed_tool_ids` when a Skill invokes it. A no-Skill Agent still declares the
+tool in its manifest. A document-centred product normally reads the selected
+workspace file rather than asking the Consumer to paste it into chat.
+
+Creator HTTP/MCP tools declare only the Hatch-managed `connection_ref`, the
+one permitted `operation` / `tool_name`, and an optional input schema. Never
+place URLs, credentials, provider settings, or a secret in the Corpus. Do not
+invent a Creator tool when a Hatch built-in or no tool is sufficient.
+
+## Produce only the clean Agent Corpus
+
+Write actual assets described by
+[`../packages/protocol/AGENT_CORPUS.md`](../packages/protocol/AGENT_CORPUS.md):
 
 ```text
 agent-corpus/
 ├── agent.json
 ├── instructions/system.md
-├── skills/<product-skill>/SKILL.md
-├── knowledge/<clean-rag-document>.md
-└── evals/cases.json
+├── skills/                         # optional
+│   └── <skill-id>/
+│       ├── SKILL.md
+│       └── references/             # optional, local to this Skill
+├── knowledge/                      # retrieval-only; may be empty
+└── evals/
+    ├── synthetic-qa.json
+    └── held-out.json
 ```
 
-Write `agent.json` as the manifest for exactly these assets. It carries the
-product contract, instructions reference, Skills, clean RAG document references,
-required Hatch and Creator tools, and Eval reference. The system instructions,
-SKILL.md, RAG documents, synthetic QA and held-outs must be usable by an Agent
-without consulting the Factory source pack.
+`agent.json` is the manifest. It names the product contract, system entrypoint,
+any Skills and their allowed tool ids, retrieval documents, tool declarations,
+and separate synthetic-QA and held-out assets. It always declares
+`knowledge: { documents: [] }` when no long-tail material survives purification,
+so Registry can establish the Agent's isolated retrieval namespace. It does not contain the text of
+the assets, a model/provider, deployment settings, a release/version,
+credentials, URLs, approval policy, or RAG index IDs. Every referenced asset
+has an exact sha256 returned by the Factory workspace after it is written.
 
-Do not put raw source material, claim IDs, Factory trace, a model/provider,
-deployment settings, credentials, URL, approval policy, or release/version in
-the Corpus. A Creator HTTP/MCP tool may name only its Hatch-managed
-`connection_ref` and allowed operation/tool. `hatch.web_search` must always be
-declared. The Factory does the semantic work; Registry/Runtime merely store and
-run the completed Corpus.
+Before finishing, inspect the assets as a runnable product:
 
-Inspect the compiled artifacts as products, not as a report:
+- `system.md` alone gives the Agent its global behavior and product boundary;
+- each Skill is a truly local execution unit and only its references are needed
+  while it runs;
+- `knowledge/` is clean, searchable evidence rather than rules or raw source;
+- the Eval dataset stays outside live context, with held-outs isolated;
+- every tool has a concrete runtime need and a real Hatch adapter/binding;
+- no raw course/PDF/video/transcript, Factory trace, private evidence, user
+  data, credentials, provider settings, review workflow, release, or version is
+  present.
 
-- confirm `instructions/system.md` preserves priorities, sequence, omissions, and
-  boundaries without Factory annotations;
-- confirm the Skill defines a usable workflow rather than a course
-  summary;
-- confirm RAG contains useful Creator knowledge and minimum runtime provenance;
-- confirm declared tools have real adapters and are not merely manifest names;
-- confirm the Agent Corpus contains no raw sources, claim IDs, Factory traces,
-  credentials, runtime deployment settings, or review artifacts.
-
-## Prove behavior without leaking answers
-
-The Runtime later installs this exact Corpus and completes a real task. When
-evaluating it, run candidate and generic-baseline outputs independently on the
-same input-only held-outs. Never give either candidate expected behaviors,
-observable checks, forbidden answers, review notes, or old proof.
-
-Judge decisions, ordering, omissions, boundaries, and delivered artifacts—not
-verbosity or keyword recall. Corpus readiness is determined by the automatic
-gates; a Creator is never a task-by-task reviewer or an Eval author.
-
-Publish only the clean `agent-corpus/` directory; keep the intake, evidence
-ledger, source pack, QA construction records, held-outs, audits, and proof
-private.
+Publish only `agent-corpus/`. Keep the intake, private evidence, audit, QA
+construction, and proof outside the Corpus.

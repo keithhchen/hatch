@@ -8,7 +8,7 @@ This repository contains two connected flows:
 ```text
 Creator sources
   -> internal Creator Factory
-  -> immutable Creator Release
+  -> current Agent Corpus
   -> Registry + cloud Runtime
 
 Buyer Desktop
@@ -18,8 +18,8 @@ Buyer Desktop
   -> usable artifact + Delivery
 ```
 
-The authoritative v1 acceptance contract is
-[docs/spec-v1-execution-contract.md](docs/spec-v1-execution-contract.md).
+The authoritative agent contract is
+[packages/protocol/AGENT_CORPUS.md](packages/protocol/AGENT_CORPUS.md).
 
 The connected demonstration follows two concrete people rather than anonymous
 test fixtures:
@@ -59,30 +59,30 @@ events.
 
 ### Creator production and publishing
 
-`creator-agent-factory/` is an internal Codex Skill/workflow. It converts source
-material into a traceable, tested, digest-addressed Creator Release. It is not a
-Creator-facing task-review product.
+`creator-agent-factory/` is an internal Codex Skill/workflow. It converts raw
+source material into a clean, runnable Agent Corpus. It is not a Creator-facing
+task-review product.
 
-`platform-registry/` verifies immutable Release packages and stores the public
-publication records used by Dashboard and Runtime. It never returns the private
-Release payload to a client.
+`platform-registry/` verifies and stores one current Agent Corpus per
+`tenant_id + agent_id`, builds its isolated knowledge index, and serves the
+runtime-facing tool bindings. It never returns private instructions or secrets
+to a client.
 
 `packages/commerce/` provides the append-only Ledger and projections shared by
 buyer entitlement and Creator revenue reporting.
 
-`creator-dashboard/` is the Creator-facing SaaS surface for publishing a
-release-ready product and viewing orders, deliveries, and the 90/10 revenue
-projection from that same Ledger.
+`creator-dashboard/` is the Creator-facing SaaS surface for viewing orders,
+deliveries, and the 90/10 revenue projection from that same Ledger.
 
 ## Repository map
 
 ```text
-creator-agent-factory/   internal distillation and release workflow
+creator-agent-factory/   internal distillation Skill and Agent Corpus workflow
 desktop-app/             Tauri/React Consumer application
 local-runner/            Rust local tool boundary
 runtime-server/          TypeScript cloud agent Runtime
-platform-registry/       public Release registry
-packages/protocol/       canonical wire and Release schemas
+platform-registry/       Agent Corpus registry and tool control plane
+packages/protocol/       canonical wire and Agent Corpus schemas
 packages/commerce/       entitlement, Delivery, and revenue Ledger
 landing/                 public website
 docs/                    product contracts and proof artifacts
@@ -98,11 +98,9 @@ Copy `.env.example` to `.env`, supply a Moonshot credential, then run:
 ./scripts/dev.sh
 ```
 
-Hatch v1 deliberately uses `kimi-k2.6` for Creator-Agent generation,
-delivery auditing, blind evaluation, Runtime turns, and context compaction.
-These roles do not silently fall back to another model. Provider credentials
-remain process environment only and must never enter a Creator Release or proof
-bundle.
+Hatch uses `kimi-k2.6` for Creator-Agent generation, Runtime turns, and
+context compaction. There is no silent model fallback. Provider credentials
+remain process environment only and must never enter an Agent Corpus.
 
 The Desktop connects to the TypeScript Runtime at
 `ws://127.0.0.1:8400/runtime` by default.
@@ -122,7 +120,6 @@ The DMG command creates the installable macOS bundle without relying on Finder
 automation. Developer builds are intentionally unsigned; public distribution
 still requires Apple Developer signing and notarization credentials.
 
-Passing component tests is not sufficient proof of v1. Completion requires one
-Release to be distilled and published, consumed from the installed Desktop,
-delivered through local tools, and reflected in the same Commerce Ledger and
-Creator Dashboard.
+Passing component tests is not sufficient proof. Completion requires raw
+Creator material to be distilled and published as an Agent Corpus, consumed
+from the installed Desktop, and delivered through local tools.

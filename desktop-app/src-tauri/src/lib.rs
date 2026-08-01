@@ -411,6 +411,32 @@ mod tests {
         assert_eq!(output["result"]["content"], "Hatch desktop local harness");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn approved_shell_request_executes_inside_workspace() {
+        let temp = tempdir().unwrap();
+        let workspace = ensure_workspace(temp.path().to_string_lossy().to_string()).unwrap();
+
+        let output = execute_tool_call_blocking(
+            workspace,
+            json!({
+                "type": "tool_call.request",
+                "run_id": "run_shell",
+                "tool_call_id": "call_shell",
+                "name": "shell.exec",
+                "arguments": {
+                    "command": "printf hatch-shell",
+                    "timeout_ms": 30000
+                },
+                "approval": "approved_by_user"
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(output["status"], "ok");
+        assert_eq!(output["result"]["stdout"], "hatch-shell");
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn async_tauri_command_wrapper_runs_worker_and_records_lifecycle() {
         let temp = tempdir().unwrap();

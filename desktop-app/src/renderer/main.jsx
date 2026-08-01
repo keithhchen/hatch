@@ -435,10 +435,6 @@ function App() {
   }
 
   async function handleToolRequest(message) {
-    if (message.name === "shell.exec") {
-      sendToolDenied(message, "Command execution is disabled because this build does not provide a complete OS sandbox.", "shell_disabled");
-      return;
-    }
     let approvedByUser = false;
     if (message.approval === "ask" || requiresUserApproval(message.name)) {
       const approved = await requestToolApproval(message);

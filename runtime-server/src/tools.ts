@@ -60,6 +60,26 @@ export type ToolDefinition = {
 };
 
 export const toolRegistry = new Map<string, ToolDefinition>([
+  ["knowledge.search", {
+    name: "knowledge.search",
+    locality: "server",
+    approval: "none",
+    description: "Search this Creator Agent's private, retrieval-only knowledge base.",
+    schema: z.object({ query: z.string().min(1), max_num_results: z.number().int().min(1).max(20).default(6) }).strict(),
+    model: {
+      // `file_search` is intentionally reserved for the Agent-scoped RAG tool,
+      // matching the industry-standard function name. Local desktop search is
+      // exposed separately as `workspace_search` below.
+      name: "file_search",
+      locality: "server",
+      description: "Search this Creator Agent's retrieval-only knowledge base for relevant long-tail material. Do not use it for local files or for instructions already present in context.",
+      properties: {
+        query: stringSchema("Specific knowledge query."),
+        max_num_results: numberSchema("Maximum passages to retrieve, from 1 to 20.")
+      },
+      required: ["query"]
+    }
+  }],
   ["web.search", {
     name: "web.search",
     locality: "server",
@@ -170,7 +190,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
       max_results: z.number().int().min(1).max(100).default(20)
     }).strict(),
     model: {
-      name: "file_search",
+      name: "workspace_search",
       locality: "client",
       description: "Search file paths and UTF-8 file contents inside the client-declared local workspace.",
       properties: {

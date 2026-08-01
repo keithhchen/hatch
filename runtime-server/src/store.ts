@@ -80,8 +80,7 @@ export type StoreEvent =
       tenant_id?: string;
       user_id?: string;
       product_id?: string;
-      release_id?: string;
-      release_digest?: string;
+      agent_id?: string;
       client_version?: string;
       workspace_root?: string;
       local_tools?: string[];

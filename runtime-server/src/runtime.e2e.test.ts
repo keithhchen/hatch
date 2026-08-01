@@ -73,8 +73,7 @@ test("runtime server exposes visible conversation history for client hydration",
     tenantId: "tenant-history",
     userId: "user-history",
     productId: "product-history",
-    releaseId: "release-history",
-    releaseDigest: `sha256:${"1".repeat(64)}`
+    agentId: "agent-history"
   };
   const storedConversationId = scopedConversationId(historyBinding, "desktop-chat");
   await store.append({
@@ -152,7 +151,12 @@ test("runtime server exposes visible conversation history for client hydration",
     content: "I still need to read the spreadsheet."
   });
 
-  runtimeServer = createDeterministicRuntimeServer();
+  runtimeServer = createRuntimeServer({
+    createRuntime: () => new DeterministicAgentRuntime(),
+    corpusResolver: {
+      resolve: async () => ({ corpus: { product: { id: historyBinding.productId } } })
+    } as never
+  });
   const serverUrl = await listen(runtimeServer);
   const historyUrl = new URL(serverUrl);
   historyUrl.protocol = "http:";
@@ -160,9 +164,7 @@ test("runtime server exposes visible conversation history for client hydration",
   historyUrl.search = new URLSearchParams({
     tenant_id: historyBinding.tenantId,
     user_id: historyBinding.userId,
-    product_id: historyBinding.productId,
-    release_id: historyBinding.releaseId,
-    release_digest: historyBinding.releaseDigest
+    agent_id: historyBinding.agentId
   }).toString();
   const response = await fetch(historyUrl);
   assert.equal(response.status, 200);
@@ -1733,7 +1735,7 @@ test("tool registry owns model tool dispatch locality and event-name mapping", (
   assert.equal(web.eventName, "web.search");
   assert.equal(web.approval, "none");
 
-  const fileSearch = requireModelToolDispatch("file_search");
+  const fileSearch = requireModelToolDispatch("workspace_search");
   assert.equal(fileSearch.target, "client");
   assert.equal(fileSearch.clientTool, "fs.search");
   assert.equal(fileSearch.eventName, "fs.search");
@@ -2764,15 +2766,15 @@ test("chat completions runtime injects stable local workspace context without cu
     assert.match(workspaceContext, /All relative local file paths resolve under this exact workspace root/);
     assert.doesNotMatch(workspaceContext, /legal-samples\/acme-analytics-saas-agreement\.md/);
     assert.doesNotMatch(stablePrefix, /legal-samples\/acme-analytics-saas-agreement\.md/);
-    assert.doesNotMatch(stablePrefix, /file_read .*before.*file_search/i);
-    assert.doesNotMatch(toolDescriptions, /file_read .*before.*file_search/i);
+    assert.doesNotMatch(stablePrefix, /file_read .*before.*workspace_search/i);
+    assert.doesNotMatch(toolDescriptions, /file_read .*before.*workspace_search/i);
     assert.doesNotMatch(workspaceContext, /万美元\/年/);
   } finally {
     await mock.close();
   }
 });
 
-test("chat completions runtime enforces exact path file_read before file_search outside the prompt", async () => {
+test("chat completions runtime enforces exact path file_read before workspace_search outside the prompt", async () => {
   const workspace = await tempWorkspace();
   const dataDir = await tempWorkspace();
   const contractPath = path.join(workspace, "legal-samples", "acme-analytics-saas-agreement.md");
@@ -2844,7 +2846,7 @@ test("chat completions runtime filters client-local function tools from hello ca
     assert.ok(toolNames.includes("web_search"));
     assert.ok(toolNames.includes("file_read"));
     assert.ok(toolNames.includes("file_list"));
-    assert.ok(!toolNames.includes("file_search"));
+    assert.ok(!toolNames.includes("workspace_search"));
     assert.ok(!toolNames.includes("file_write"));
     assert.ok(!toolNames.includes("git_diff"));
     assert.ok(!toolNames.includes("shell_exec"));
@@ -2913,7 +2915,7 @@ test("chat completions runtime brokers local filesystem function tools to the cl
     assert.ok(result.events.some((event) => event.type === "tool_call.delta" && event.name === "fs.search" && event.locality === "client" && event.status === "requested"));
     assert.ok(result.events.some((event) => event.type === "tool_call.delta" && event.name === "fs.search" && event.locality === "client" && event.status === "completed"));
     assert.equal(mock.requests.length, 2);
-    assert.ok(mock.requests[0]?.tools?.some((tool: Record<string, any>) => tool.function?.name === "file_search"));
+    assert.ok(mock.requests[0]?.tools?.some((tool: Record<string, any>) => tool.function?.name === "workspace_search"));
     assert.ok(mock.requests[1]?.messages?.some((message: Record<string, unknown>) => (
       message.role === "tool"
       && String(message.content ?? "").includes("notes.txt")
@@ -5441,7 +5443,7 @@ async function createDirectReadGuardChatCompletionsServer(): Promise<{
                   id: "call_bad_search",
                   type: "function",
                   function: {
-                    name: "file_search",
+                    name: "workspace_search",
                     arguments: JSON.stringify({
                       query: "acme analytics saas agreement",
                       path: ".",
@@ -5634,7 +5636,7 @@ async function createMockLocalToolChatCompletionsServer(): Promise<{
         && request.messages.some((message: Record<string, unknown>) => message.role === "tool");
 
       if (!hasToolMessage) {
-        assert.ok(request.tools?.some((tool: Record<string, any>) => tool.function?.name === "file_search"));
+        assert.ok(request.tools?.some((tool: Record<string, any>) => tool.function?.name === "workspace_search"));
         writeSse(res, [
           {
             choices: [{
@@ -5646,7 +5648,7 @@ async function createMockLocalToolChatCompletionsServer(): Promise<{
                   id: "call_local_search",
                   type: "function",
                   function: {
-                    name: "file_search",
+                    name: "workspace_search",
                     arguments: JSON.stringify({
                       query: "Hatch",
                       path: ".",

@@ -2,6 +2,7 @@ import "dotenv/config";
 
 import http from "node:http";
 import { createHash } from "node:crypto";
+import path from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
 import { ZodError } from "zod";
 import { ClientToolBroker } from "./clientBroker.js";
@@ -12,17 +13,18 @@ import {
   type RuntimeCompactionMessage
 } from "./compaction.js";
 import { createAgentRuntime, type AgentRuntime, type RuntimeSessionSkills } from "./agentRuntime.js";
-import { parseInboundMessage, PROTOCOL_VERSION, type ClientHello, type OutboundMessage, type RunStart } from "./protocol.js";
+import { parseInboundMessage, PROTOCOL_VERSION, type ClientHello, type ClientToolName, type OutboundMessage, type RunStart } from "./protocol.js";
 import { loadProjectInstructions } from "./projectDocs.js";
 import { RunStateMachine } from "./runState.js";
 import { ServerToolExecutor } from "./serverTools.js";
 import { SkillRuntime } from "./skillRuntime.js";
 import { RuntimeStore, type RunStatus } from "./store.js";
 import { ToolBridge } from "./toolBridge.js";
-import { CreatorReleaseResolver, type ResolvedCreatorRelease } from "./release.js";
+import { AgentCorpusResolver, corpusHasWebSearch, corpusRuntimeToolNames, permittedCorpusLocalTools, type ResolvedAgentCorpus } from "./agentCorpus.js";
+import { RegistryCreatorToolControlPlane, resolveCreatorTools, type CreatorToolControlPlane, type RuntimeCreatorTool } from "./creatorTools.js";
+import { registryAgentKnowledgeSearchFromEnvironment, type AgentKnowledgeSearchResolver } from "./agentKnowledge.js";
 import { EntitlementError, FileEntitlementResolver, type EntitlementResolver } from "./entitlements.js";
 import { findCompletedDelivery, recordCompletedDelivery, type CommerceEventSink, type DeliveryArtifact, type DeliveryBinding } from "./delivery.js";
-import { materializeCreatorRelease, permittedLocalTools } from "./releaseMaterialization.js";
 import {
   discoverSkills,
   includeSkillInstructions,
@@ -38,7 +40,10 @@ export type RuntimeServer = {
 
 export type RuntimeServerOptions = {
   createRuntime?: () => AgentRuntime;
-  releaseResolver?: CreatorReleaseResolver;
+  corpusResolver?: AgentCorpusResolver;
+  creatorToolControlPlane?: CreatorToolControlPlane;
+  /** Registry-owned lookup that binds the current Agent to its isolated RAG namespace. */
+  agentKnowledgeSearch?: AgentKnowledgeSearchResolver;
   entitlementResolver?: EntitlementResolver;
   commerceEventSink?: CommerceEventSink;
   /**
@@ -99,13 +104,23 @@ export function clientToolTimeoutMs(raw = process.env.HATCH_CLIENT_TOOL_TIMEOUT_
   return parsed;
 }
 
+function controlPlaneFromEnvironment(): CreatorToolControlPlane | undefined {
+  const registryUrl = process.env.HATCH_REGISTRY_URL?.trim();
+  const serviceToken = process.env.HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN?.trim();
+  if (!registryUrl && !serviceToken) return undefined;
+  if (!registryUrl || !serviceToken) {
+    throw new Error("HATCH_REGISTRY_URL and HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN must be configured together for Creator tools");
+  }
+  return new RegistryCreatorToolControlPlane({ registryUrl, serviceToken });
+}
+
 type SessionBinding = {
   tenantId: string;
   userId: string;
   productId: string;
-  releaseId: string;
-  releaseDigest: string;
-  release?: ResolvedCreatorRelease;
+  agentId: string;
+  corpus?: ResolvedAgentCorpus;
+  creatorTools?: RuntimeCreatorTool[];
   entitlementId?: string;
   orderId?: string;
   creatorId?: string;
@@ -116,12 +131,16 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   const activeConversationRuns = new Map<string, string>();
   const connectionTasks = new Set<Promise<void>>();
   const createRuntime = options.createRuntime ?? createAgentRuntime;
-  const releaseResolver = options.releaseResolver
-    ?? (process.env.HATCH_RELEASES_DIR ? new CreatorReleaseResolver(process.env.HATCH_RELEASES_DIR) : undefined);
+  const corpusResolver = options.corpusResolver
+    ?? (process.env.HATCH_AGENT_CORPUS_ROOT ? new AgentCorpusResolver(process.env.HATCH_AGENT_CORPUS_ROOT) : undefined);
   const entitlementResolver = options.entitlementResolver
     ?? (process.env.HATCH_ENTITLEMENTS_FILE ? new FileEntitlementResolver(process.env.HATCH_ENTITLEMENTS_FILE) : undefined);
+  const creatorToolControlPlane = options.creatorToolControlPlane
+    ?? controlPlaneFromEnvironment();
+  const agentKnowledgeSearch = options.agentKnowledgeSearch
+    ?? registryAgentKnowledgeSearchFromEnvironment();
   const server = http.createServer((req, res) => {
-    void handleHttpRequest(req, res, releaseResolver, entitlementResolver);
+    void handleHttpRequest(req, res, entitlementResolver, corpusResolver);
   });
 
   const wss = new WebSocketServer({ server, path: "/runtime" });
@@ -130,8 +149,10 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       socket,
       activeConversationRuns,
       createRuntime,
-      releaseResolver,
+      corpusResolver,
       entitlementResolver,
+      creatorToolControlPlane,
+      agentKnowledgeSearch,
       options.commerceEventSink,
       options.clientToolTimeoutMs ?? clientToolTimeoutMs()
     );
@@ -156,8 +177,8 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
 async function handleHttpRequest(
   req: http.IncomingMessage,
   res: http.ServerResponse,
-  releaseResolver?: CreatorReleaseResolver,
-  entitlementResolver?: EntitlementResolver
+  entitlementResolver?: EntitlementResolver,
+  corpusResolver?: AgentCorpusResolver
 ): Promise<void> {
   setCorsHeaders(res);
   if (req.method === "OPTIONS") {
@@ -178,29 +199,31 @@ async function handleHttpRequest(
       writeJson(res, 401, { error: { code: "authentication_required", message: "Sign in to view purchased Creator Agents." } });
       return;
     }
-    if (!entitlementResolver || !releaseResolver) {
+    if (!entitlementResolver) {
       writeJson(res, 503, { error: { code: "entitlements_unavailable", message: "Creator Agent purchases are temporarily unavailable." } });
       return;
     }
     try {
       const entitlements = await entitlementResolver.list({ licenseToken });
       const creatorAgents = await Promise.all(entitlements.map(async (entitlement) => {
-        const release = await releaseResolver.resolve(entitlement.release_id, entitlement.release_digest);
-        if (release.public.product_id !== entitlement.product_id || release.public.creator_id !== entitlement.creator_id) {
-          throw new Error(`Entitlement ${entitlement.entitlement_id} does not match its pinned Creator Release`);
+        if (!corpusResolver) throw new Error("Agent Corpus resolver is not configured");
+        const corpus = await corpusResolver.resolve(entitlement.tenant_id, entitlement.agent_id);
+        if (corpus.corpus.product.id !== entitlement.product_id || corpus.corpus.creator.id !== entitlement.creator_id) {
+          throw new Error(`Entitlement ${entitlement.entitlement_id} does not match its Agent Corpus`);
         }
         return {
           entitlement_id: entitlement.entitlement_id,
-          creator: release.public.creator,
+          agent_id: corpus.corpus.agent_id,
+          creator: { id: corpus.corpus.creator.id, name: corpus.corpus.creator.name },
           product: {
-            id: release.public.product_id,
-            name: release.public.product.name,
-            description: release.public.product.description,
-            promise: release.public.product.promise,
-            boundaries: release.public.product.boundaries,
-            offer: release.public.product.price
+            id: corpus.corpus.product.id,
+            name: corpus.corpus.product.name,
+            description: corpus.corpus.product.description,
+            promise: corpus.corpus.product.promise,
+            boundaries: corpus.corpus.product.boundaries,
+            offer: corpus.corpus.product.offer
           },
-          presentation: release.public.presentation
+          presentation: {}
         };
       }));
       writeJson(res, 200, { creator_agents: creatorAgents });
@@ -215,7 +238,7 @@ async function handleHttpRequest(
     const conversationId = decodeURIComponent(match[1] ?? "");
     let binding: SessionBinding | undefined;
     try {
-      binding = await bindingFromHistoryRequest(req, url, releaseResolver, entitlementResolver);
+      binding = await bindingFromHistoryRequest(req, url, entitlementResolver, corpusResolver);
     } catch (error) {
       writeJson(res, 403, { error: { code: "entitlement_required", message: errorMessage(error) } });
       return;
@@ -229,11 +252,10 @@ async function handleHttpRequest(
       conversation_id: conversationId,
       tenant_id: binding.tenantId,
       product_id: binding.productId,
-      release_id: binding.releaseId,
-      release_digest: binding.releaseDigest,
+      agent_id: binding.agentId,
       messages: sanitizeBoundHistory(
         await store.readVisibleConversation(scopedConversationId(binding, conversationId)),
-        binding.releaseId
+        binding.agentId
       )
     });
     return;
@@ -272,8 +294,10 @@ async function handleRuntimeSocket(
   socket: WebSocket,
   activeConversationRuns: Map<string, string>,
   createRuntime: () => AgentRuntime,
-  releaseResolver?: CreatorReleaseResolver,
+  corpusResolver?: AgentCorpusResolver,
   entitlementResolver?: EntitlementResolver,
+  creatorToolControlPlane?: CreatorToolControlPlane,
+  agentKnowledgeSearch?: AgentKnowledgeSearchResolver,
   commerceEventSink?: CommerceEventSink,
   toolResultTimeoutMs = clientToolTimeoutMs()
 ): Promise<void> {
@@ -288,7 +312,7 @@ async function handleRuntimeSocket(
   const activeSkillRuntimes = new Map<string, SkillRuntime>();
 
   const send = async (message: OutboundMessage): Promise<void> => {
-    const outbound = protectPrivateReleaseBoundary(message, binding?.release);
+    const outbound = message;
     if (socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify(outbound));
     }
@@ -321,19 +345,18 @@ async function handleRuntimeSocket(
             });
             return;
           }
-          binding = await resolveSessionBinding(message, releaseResolver, entitlementResolver);
-          hello = binding.release
-            ? { ...message, local_tools: permittedLocalTools(binding.release, message.local_tools) }
+          binding = await resolveSessionBinding(message, entitlementResolver, corpusResolver, creatorToolControlPlane);
+          hello = binding.corpus
+            ? { ...message, local_tools: permittedCorpusLocalTools(binding.corpus.corpus, message.local_tools) }
             : message;
-          sessionSkills = await buildSessionSkills(hello.workspace_root, binding.release);
+          sessionSkills = await buildSessionSkills(hello.workspace_root, binding.corpus);
           await store.append({
             type: "session.started",
             installation_id: message.installation_id,
             tenant_id: binding.tenantId,
             user_id: binding.userId,
             product_id: binding.productId,
-            release_id: binding.releaseId,
-            release_digest: binding.releaseDigest,
+            agent_id: binding.agentId,
             ...(binding.entitlementId ? { entitlement_id: binding.entitlementId } : {}),
             client_version: message.client_version,
             workspace_root: hello.workspace_root,
@@ -345,23 +368,20 @@ async function handleRuntimeSocket(
             tenant_id: binding.tenantId,
             user_id: binding.userId,
             product_id: binding.productId,
-            release_id: binding.releaseId,
-            release_digest: binding.releaseDigest,
+            agent_id: binding.agentId,
             ...(binding.entitlementId ? { entitlement_id: binding.entitlementId } : {}),
-            ...(binding.release ? {
-              creator_agent: {
-                creator: binding.release.public.creator,
-                product: {
-                  id: binding.release.public.product_id,
-                  name: binding.release.public.product.name,
-                  description: binding.release.public.product.description,
-                  promise: binding.release.public.product.promise,
-                  boundaries: binding.release.public.product.boundaries,
-                  offer: binding.release.public.product.price
-                },
-                presentation: binding.release.public.presentation
-              }
-            } : {})
+            ...(binding.corpus ? { creator_agent: {
+              creator: { id: binding.corpus.corpus.creator.id, name: binding.corpus.corpus.creator.name },
+              product: {
+                id: binding.corpus.corpus.product.id,
+                name: binding.corpus.corpus.product.name,
+                description: binding.corpus.corpus.product.description ?? binding.corpus.corpus.product.promise,
+                promise: binding.corpus.corpus.product.promise,
+                boundaries: binding.corpus.corpus.product.boundaries,
+                offer: runtimeOffer(binding.corpus.corpus.product.offer)
+              },
+              presentation: {}
+            } } : {})
           });
           return;
         }
@@ -462,7 +482,7 @@ async function handleRuntimeSocket(
           });
           activeRunStates.set(message.run_id, state);
           await state.queued();
-          const task = runOneTurn(boundMessage, hello, sessionSkills, binding, broker, serverTools, toolBridge, runtime, createRuntime, store, state, send, activeSkillRuntimes, commerceEventSink);
+          const task = runOneTurn(boundMessage, hello, sessionSkills, binding, broker, serverTools, toolBridge, runtime, createRuntime, store, state, send, activeSkillRuntimes, commerceEventSink, agentKnowledgeSearch);
           activeRuns.add(task);
           task.finally(() => {
             activeRuns.delete(task);
@@ -499,25 +519,6 @@ async function handleRuntimeSocket(
   });
 }
 
-export function protectPrivateReleaseBoundary(message: OutboundMessage, release?: ResolvedCreatorRelease): OutboundMessage {
-  if (!release) return message;
-  if (message.type === "skill.activated" || message.type === "skill.invoked") {
-    return {
-      ...message,
-      path: `release://${release.public.release_id}/protected-skill/${encodeURIComponent(message.name)}`,
-      ...(message.type === "skill.activated" ? { resource_paths: [], resource_manifest_truncated: false } : {}),
-      ...(message.type === "skill.invoked" ? { trigger: { ...message.trigger, path: message.trigger.path ? "release://private" : undefined } } : {})
-    } as OutboundMessage;
-  }
-  if (message.type === "tool_call.delta" && message.locality === "server") {
-    const serializedArguments = JSON.stringify(message.arguments ?? {});
-    if ([release.releaseDirectory, release.protectedSkillsRoot, release.ragRoot].some((root) => serializedArguments.includes(root))) {
-      return { ...message, arguments: {}, result: message.result ? { private_result_redacted: true } : undefined };
-    }
-  }
-  return message;
-}
-
 async function runOneTurn(
   input: RunStart,
   hello: ClientHello,
@@ -532,7 +533,8 @@ async function runOneTurn(
   state: RunStateMachine,
   send: (message: OutboundMessage) => Promise<void>,
   activeSkillRuntimes: Map<string, SkillRuntime>,
-  commerceEventSink?: CommerceEventSink
+  commerceEventSink?: CommerceEventSink,
+  agentKnowledgeSearchResolver?: AgentKnowledgeSearchResolver
 ): Promise<void> {
   let skillRuntime: SkillRuntime | undefined;
   let deliveredArtifact: DeliveryArtifact | undefined;
@@ -586,9 +588,15 @@ async function runOneTurn(
       priorMessages = preTurnCompaction.replacement_history;
     }
 
-    const materializedRelease = binding.release
-      ? await materializeCreatorRelease(binding.release, input.message.content, hello.local_tools)
+    const materializedAgent = binding.corpus
+      ? materializeAgentCorpusForRun(binding.corpus, hello.local_tools)
       : undefined;
+    const agentKnowledgeSearch = materializedAgent?.externalTools.includes("knowledge.search")
+      ? agentKnowledgeSearchResolver?.forAgent(binding.tenantId, binding.agentId)
+      : undefined;
+    if (materializedAgent?.externalTools.includes("knowledge.search") && !agentKnowledgeSearch) {
+      throw new Error("Agent knowledge search is unavailable: configure the Hatch Registry service binding before loading this Creator Agent.");
+    }
     skillRuntime = new SkillRuntime({
       parentInput: input,
       parentState: state,
@@ -596,11 +604,10 @@ async function runOneTurn(
       clientBroker: broker,
       serverTools,
       toolBridge,
-      clientTools: materializedRelease?.localTools ?? hello.local_tools,
-      allowedExternalTools: materializedRelease?.externalTools,
-      releaseSystemPrompt: materializedRelease?.systemPrompt,
-      releaseDeliveryWorkflow: materializedRelease?.deliveryWorkflow,
-      releaseDeliveryAuditContext: materializedRelease?.deliveryAuditContext,
+      clientTools: materializedAgent?.localTools ?? hello.local_tools,
+      allowedExternalTools: materializedAgent?.externalTools,
+      agentKnowledgeSearch,
+      agentSystemPrompt: materializedAgent?.systemPrompt,
       workspaceRoot: hello.workspace_root,
       store,
       emit: send,
@@ -623,12 +630,13 @@ async function runOneTurn(
       messages,
       sessionSkills,
       activatedSkills: [],
-      clientTools: materializedRelease?.localTools ?? hello.local_tools,
-      allowedExternalTools: materializedRelease?.externalTools,
-      // A Creator Release has already materialized its one protected Skill
-      // into the server-private system prompt. Product execution is a single
-      // Agent session, not a generic parent Agent delegating to a second one.
-      allowSkillRun: !binding.release,
+      clientTools: materializedAgent?.localTools ?? hello.local_tools,
+      allowedExternalTools: materializedAgent?.externalTools,
+      creatorTools: binding.creatorTools,
+      agentKnowledgeSearch,
+      // A Creator Corpus exposes only a small catalog. Its SKILL.md and
+      // references are loaded in an isolated worker only when selected.
+      allowSkillRun: true,
       workspaceRoot: hello.workspace_root,
       persistModelMessage: async (message) => {
         await store.append({
@@ -645,9 +653,7 @@ async function runOneTurn(
       toolBridge,
       skillRuntime,
       toolScope: "main",
-      releaseSystemPrompt: materializedRelease?.systemPrompt,
-      releaseDeliveryWorkflow: materializedRelease?.deliveryWorkflow,
-      releaseDeliveryAuditContext: materializedRelease?.deliveryAuditContext
+      agentSystemPrompt: materializedAgent?.systemPrompt
     })) {
       if (state.status === "cancelled") {
         break;
@@ -727,14 +733,22 @@ async function persistCancellationCleanupErrors(
   }).catch(() => undefined);
 }
 
-async function buildSessionSkills(workspaceRoot?: string, release?: ResolvedCreatorRelease): Promise<RuntimeSessionSkills> {
-  // The Release materializer loads the exact protected SKILL.md into the
-  // direct server Agent. Do not also expose it as a model-selectable catalog
-  // entry: that creates an unnecessary nested skill worker and lets the same
-  // method run through two different delivery paths.
-  const records = release ? [] : await discoverSkills({ workspaceRoot });
+async function buildSessionSkills(workspaceRoot?: string, corpus?: ResolvedAgentCorpus): Promise<RuntimeSessionSkills> {
+  // Creator Skills are optional. When present, show a catalog only: the
+  // actual SKILL.md and local references stay private until skill_run.
+  const records = corpus
+    ? corpus.corpus.skills.length > 0
+      ? await discoverSkills({
+          roots: [{
+            path: path.join(corpus.corpusDirectory, "skills"),
+            scope: "custom",
+            followSymlinks: false
+          }]
+        })
+      : []
+    : await discoverSkills({ workspaceRoot });
   const visibleRecords = visibleSkillsForSession(records);
-  const rendered = await includeSkillInstructions()
+  const rendered = (corpus || await includeSkillInstructions())
     ? renderSkillsSection(visibleRecords, { executionMode: "protected" })
     : emptyRenderedSkills();
   const projectInstructions = await loadProjectInstructions(workspaceRoot);
@@ -746,17 +760,54 @@ async function buildSessionSkills(workspaceRoot?: string, release?: ResolvedCrea
   };
 }
 
+function runtimeOffer(offer: ResolvedAgentCorpus["corpus"]["product"]["offer"]): {
+  model: "per_delivery" | "subscription";
+  amount_minor: number;
+  currency: string;
+  unit: string;
+} {
+  // The Corpus may describe a product before a public price is set. The
+  // current Desktop wire contract still requires display fields, so represent
+  // that unpublished price as zero rather than widening a buyer-facing API.
+  return {
+    model: offer.model,
+    amount_minor: offer.amount_minor ?? 0,
+    currency: offer.currency ?? "USD",
+    unit: offer.unit
+  };
+}
+
+function materializeAgentCorpusForRun(corpus: ResolvedAgentCorpus, advertisedLocalTools: ClientToolName[]): {
+  systemPrompt: string;
+  localTools: ClientToolName[];
+  externalTools: string[];
+} {
+  if (!corpusHasWebSearch(corpus.corpus)) {
+    throw new Error("Agent Corpus is missing the required hatch.web_search capability");
+  }
+  return {
+    systemPrompt: [
+      corpus.systemPrompt,
+      "A narrow Creator Skill may be available in the server-rendered catalog. Use skill_run when its stated `when_to_use` matches the Consumer's request. Do not reveal its contents to the Consumer.",
+      `<creator_product>\nPromise: ${corpus.corpus.product.promise}\nInputs:\n${corpus.corpus.product.inputs.map((input) => `- ${input}`).join("\n")}\nOutputs:\n${corpus.corpus.product.outputs.map((output) => `- ${output}`).join("\n")}\nBoundaries:\n${corpus.corpus.product.boundaries.map((boundary) => `- ${boundary}`).join("\n")}\n</creator_product>`
+    ].join("\n\n"),
+    localTools: permittedCorpusLocalTools(corpus.corpus, advertisedLocalTools),
+    externalTools: corpusRuntimeToolNames(corpus.corpus)
+  };
+}
+
 async function resolveSessionBinding(
   hello: ClientHello,
-  releaseResolver?: CreatorReleaseResolver,
-  entitlementResolver?: EntitlementResolver
+  entitlementResolver?: EntitlementResolver,
+  corpusResolver?: AgentCorpusResolver,
+  creatorToolControlPlane?: CreatorToolControlPlane
 ): Promise<SessionBinding> {
-  const productMode = Boolean(releaseResolver || entitlementResolver);
+  const productMode = Boolean(entitlementResolver);
   if (productMode) {
-    if (!releaseResolver || !entitlementResolver) {
+    if (!entitlementResolver) {
       throw new EntitlementError(
         "entitlement_configuration_incomplete",
-        "Creator Agent access is unavailable because entitlement verification is not fully configured."
+        "Creator Agent access is unavailable because entitlement verification is not configured."
       );
     }
     if (!hello.entitlement_id) {
@@ -767,20 +818,23 @@ async function resolveSessionBinding(
       entitlementId: hello.entitlement_id,
       installationId: hello.installation_id
     });
-    const release = await releaseResolver.resolve(entitlement.release_id, entitlement.release_digest);
-    if (release.public.product_id !== entitlement.product_id || release.public.creator_id !== entitlement.creator_id) {
-      throw new Error("Entitlement does not match its pinned Creator Release");
+    if (!corpusResolver) {
+      throw new EntitlementError("agent_corpus_unavailable", "This Creator Agent is temporarily unavailable.");
+    }
+    const corpus = await corpusResolver.resolve(entitlement.tenant_id, entitlement.agent_id);
+    if (corpus.corpus.product.id !== entitlement.product_id || corpus.corpus.creator.id !== entitlement.creator_id) {
+      throw new Error("Entitlement does not match its Agent Corpus");
     }
     return {
       tenantId: entitlement.tenant_id,
       userId: entitlement.user_id,
       productId: entitlement.product_id,
-      releaseId: entitlement.release_id,
-      releaseDigest: entitlement.release_digest,
+      agentId: corpus.corpus.agent_id,
+      corpus,
+      creatorTools: await resolveCreatorTools(creatorToolControlPlane, entitlement.tenant_id, corpus.corpus.agent_id, corpus.corpus),
       entitlementId: entitlement.entitlement_id,
       orderId: entitlement.order_id,
       creatorId: entitlement.creator_id,
-      release,
       explicit: true
     };
   }
@@ -789,20 +843,34 @@ async function resolveSessionBinding(
   // In product mode all scope is derived from a server-verified entitlement above.
   const tenantId = hello.tenant_id ?? `local-${shortHash(hello.license_token)}`;
   const userId = hello.user_id ?? hello.installation_id;
-  const releaseId = hello.release_id ?? "local-uat-release";
-  const releaseDigest = hello.release_digest ?? `sha256:${"0".repeat(64)}`;
-  const release = hello.release_id && releaseResolver ? await releaseResolver.resolve(releaseId, releaseDigest) : undefined;
-  if (hello.release_id && !releaseResolver) throw new Error("HATCH_RELEASES_DIR is required for an explicit Creator Release");
-  const productId = hello.product_id ?? release?.public.product_id ?? "local-uat-product";
-  if (release && release.public.product_id !== productId) throw new Error("Creator Release product binding mismatch");
+  if (!hello.agent_id) {
+    // No Registry/entitlement resolver exists in generic local-runtime tests.
+    // This mode has no Creator product identity and cannot be reached by a
+    // deployed runtime, where entitlement verification is always configured.
+    return {
+      tenantId,
+      userId,
+      productId: hello.product_id ?? "local-development",
+      agentId: "local-development",
+      explicit: Boolean(hello.tenant_id || hello.user_id || hello.product_id)
+    };
+  }
+  if (!corpusResolver) throw new Error("HATCH_AGENT_CORPUS_ROOT is required for an explicit Agent Corpus");
+  const corpus = await corpusResolver.resolve(tenantId, hello.agent_id);
   return {
-    tenantId, userId, productId, releaseId, releaseDigest, release,
-    explicit: Boolean(hello.tenant_id || hello.user_id || hello.product_id || hello.release_id || hello.release_digest)
+    tenantId,
+    userId,
+    productId: corpus.corpus.product.id,
+    agentId: corpus.corpus.agent_id,
+    corpus,
+    creatorTools: await resolveCreatorTools(creatorToolControlPlane, tenantId, corpus.corpus.agent_id, corpus.corpus),
+    creatorId: corpus.corpus.creator.id,
+    explicit: true
   };
 }
 
-export function scopedConversationId(binding: Pick<SessionBinding, "tenantId" | "userId" | "productId" | "releaseId" | "releaseDigest">, conversationId: string): string {
-  return `scope:${shortHash([binding.tenantId, binding.userId, binding.productId, binding.releaseId, binding.releaseDigest].join("\u0000"))}:${conversationId}`;
+export function scopedConversationId(binding: Pick<SessionBinding, "tenantId" | "userId" | "productId" | "agentId">, conversationId: string): string {
+  return `scope:${shortHash([binding.tenantId, binding.userId, binding.productId, binding.agentId].join("\u0000"))}:${conversationId}`;
 }
 
 function shortHash(value: string): string {
@@ -812,37 +880,37 @@ function shortHash(value: string): string {
 async function bindingFromHistoryRequest(
   req: http.IncomingMessage,
   url: URL,
-  releaseResolver?: CreatorReleaseResolver,
-  entitlementResolver?: EntitlementResolver
+  entitlementResolver?: EntitlementResolver,
+  corpusResolver?: AgentCorpusResolver
 ): Promise<SessionBinding | undefined> {
   const entitlementId = url.searchParams.get("entitlement_id") ?? undefined;
   const licenseToken = bearerToken(req);
-  const productMode = Boolean(releaseResolver || entitlementResolver);
+  const productMode = Boolean(entitlementResolver);
   if (productMode) {
-    if (!releaseResolver || !entitlementResolver) {
+    if (!entitlementResolver) {
       throw new EntitlementError(
         "entitlement_configuration_incomplete",
-        "Creator Agent access is unavailable because entitlement verification is not fully configured."
+        "Creator Agent access is unavailable because entitlement verification is not configured."
       );
     }
     if (!entitlementId || !licenseToken) {
       throw new EntitlementError("entitlement_required", "A Bearer token and Creator Agent entitlement are required.");
     }
     const entitlement = await entitlementResolver.resolve({ licenseToken, entitlementId });
-    const release = await releaseResolver.resolve(entitlement.release_id, entitlement.release_digest);
-    if (release.public.product_id !== entitlement.product_id || release.public.creator_id !== entitlement.creator_id) {
-      throw new Error("Entitlement does not match its pinned Creator Release");
+    if (!corpusResolver) throw new EntitlementError("agent_corpus_unavailable", "This Creator Agent is temporarily unavailable.");
+    const corpus = await corpusResolver.resolve(entitlement.tenant_id, entitlement.agent_id);
+    if (corpus.corpus.product.id !== entitlement.product_id || corpus.corpus.creator.id !== entitlement.creator_id) {
+      throw new Error("Entitlement does not match its Agent Corpus");
     }
     return {
       tenantId: entitlement.tenant_id,
       userId: entitlement.user_id,
       productId: entitlement.product_id,
-      releaseId: entitlement.release_id,
-      releaseDigest: entitlement.release_digest,
+      agentId: corpus.corpus.agent_id,
+      corpus,
       entitlementId: entitlement.entitlement_id,
       orderId: entitlement.order_id,
       creatorId: entitlement.creator_id,
-      release,
       explicit: true
     };
   }
@@ -851,9 +919,14 @@ async function bindingFromHistoryRequest(
   // This keeps the existing resolver-free local harness usable without creating a
   // production authorization bypass.
   const value = (name: string): string | undefined => url.searchParams.get(name) ?? (typeof req.headers[`x-hatch-${name.replaceAll("_", "-")}`] === "string" ? String(req.headers[`x-hatch-${name.replaceAll("_", "-")}`]) : undefined);
-  const [tenantId, userId, productId, releaseId, releaseDigest] = [value("tenant_id"), value("user_id"), value("product_id"), value("release_id"), value("release_digest")];
-  if (!tenantId || !userId || !productId || !releaseId || !releaseDigest || !/^sha256:[a-f0-9]{64}$/.test(releaseDigest)) return undefined;
-  return { tenantId, userId, productId, releaseId, releaseDigest, explicit: true };
+  const agentId = value("agent_id");
+  const [tenantId, userId] = [value("tenant_id"), value("user_id")];
+  if (tenantId && userId && agentId) {
+    if (!corpusResolver) throw new Error("HATCH_AGENT_CORPUS_ROOT is required for an Agent Corpus history binding");
+    const corpus = await corpusResolver.resolve(tenantId, agentId);
+    return { tenantId, userId, productId: corpus.corpus.product.id, agentId, corpus, explicit: true };
+  }
+  return undefined;
 }
 
 function bearerToken(req: http.IncomingMessage): string | undefined {
@@ -871,21 +944,20 @@ function deliveryBindingFromSession(binding: SessionBinding): DeliveryBinding | 
     userId: binding.userId,
     creatorId: binding.creatorId,
     productId: binding.productId,
-    releaseId: binding.releaseId,
-    releaseDigest: binding.releaseDigest
+    agentId: binding.agentId
   };
 }
 
-function sanitizeBoundHistory(messages: Awaited<ReturnType<RuntimeStore["readVisibleConversation"]>>, releaseId: string): Awaited<ReturnType<RuntimeStore["readVisibleConversation"]>> {
+function sanitizeBoundHistory(messages: Awaited<ReturnType<RuntimeStore["readVisibleConversation"]>>, agentId: string): Awaited<ReturnType<RuntimeStore["readVisibleConversation"]>> {
   return messages.map((message) => ({
     ...message,
     ...(message.skill_events ? {
       skill_events: message.skill_events.map((event) => ({
         ...event,
-        path: `release://${releaseId}/protected-skill/${encodeURIComponent(event.name)}`,
+        path: `agent://${agentId}/protected-skill/${encodeURIComponent(event.name)}`,
         resource_paths: event.resource_paths ? [] : undefined,
         resource_manifest_truncated: event.resource_manifest_truncated === undefined ? undefined : false,
-        trigger: event.trigger ? { ...event.trigger, path: event.trigger.path ? "release://private" : undefined } : undefined
+        trigger: event.trigger ? { ...event.trigger, path: event.trigger.path ? "agent://private" : undefined } : undefined
       }))
     } : {}),
     ...(message.tool_calls ? {

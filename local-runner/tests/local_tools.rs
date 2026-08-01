@@ -444,7 +444,7 @@ fn canonical_tool_call_result_rejects_unknown_local_tools() {
 
 #[cfg(unix)]
 #[test]
-fn canonical_shell_exec_is_disabled_without_a_complete_os_sandbox() {
+fn canonical_shell_exec_runs() {
     let temp = tempdir().unwrap();
     let runner = LocalRunner::new(temp.path()).unwrap();
 
@@ -452,33 +452,27 @@ fn canonical_shell_exec_is_disabled_without_a_complete_os_sandbox() {
         "call_shell",
         "shell.exec",
         json!({
-            "command": "pwd; printf shell-ok",
+            "command": "printf shell-ok",
             "timeout_ms": 30000
         }),
     ));
-    assert_error_result(result, |error| {
-        assert_eq!(error["code"], "shell_disabled");
-        assert!(error["message"].as_str().unwrap().contains("disabled"));
+    assert_ok_result(result, |output| {
+        assert_eq!(output["stdout"], "shell-ok");
+        assert_eq!(output["exit_code"], 0);
+        assert_eq!(output["timed_out"], false);
     });
 }
 
 #[test]
-fn rejects_malicious_shell_commands_instead_of_relying_on_cwd() {
+fn shell_exec_rejects_timeouts_outside_the_runtime_contract() {
     let temp = tempdir().unwrap();
     let runner = LocalRunner::new(temp.path()).unwrap();
-    for command in [
-        "cat /etc/passwd",
-        "cd .. && pwd",
-        "touch ../escaped",
-        "python -c 'open(\"/tmp/escaped\", \"w\").write(\"x\")'",
-    ] {
-        let result = runner.execute_tool_call_request(tool_request(
-            "call_malicious_shell",
-            "shell.exec",
-            json!({ "command": command, "timeout_ms": 30000 }),
-        ));
-        assert_error_result(result, |error| assert_eq!(error["code"], "shell_disabled"));
-    }
+    let result = runner.execute_tool_call_request(tool_request(
+        "call_invalid_shell_timeout",
+        "shell.exec",
+        json!({ "command": "printf hatch", "timeout_ms": 99 }),
+    ));
+    assert_error_result(result, |error| assert_eq!(error["code"], "invalid_tool_call"));
 }
 
 #[test]

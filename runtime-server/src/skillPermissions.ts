@@ -16,7 +16,7 @@ const toolAliases = new Map<string, ClientToolName[]>([
   ["fs.list", ["fs.list"]],
   ["search", ["fs.search"]],
   ["grep", ["fs.search"]],
-  ["file_search", ["fs.search"]],
+  ["workspace_search", ["fs.search"]],
   ["fs.search", ["fs.search"]],
   ["write", ["fs.write"]],
   ["file_write", ["fs.write"]],

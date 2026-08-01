@@ -8,133 +8,133 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Mapping
 
-from hatch_registry.models import CreatorReleasePublishRequest, PublishedCreatorRelease
-from hatch_registry.release_resolver import ReleaseResolver
+from hatch_registry.corpus_resolver import AgentCorpusResolver
+from hatch_registry.knowledge_binding import AgentKnowledgeBindingStore, KnowledgePublicationProvider
+from hatch_registry.models import AgentCorpusPublishRequest, AgentRagBinding, PublishedAgentCorpus
 
 
 class RegistryStore:
+    """The Registry owns one current, runnable Agent Corpus per tenant+agent."""
+
     def __init__(
         self,
-        release_resolver: ReleaseResolver | None = None,
+        corpus_resolver: AgentCorpusResolver | None = None,
+        knowledge_binding_store: AgentKnowledgeBindingStore | None = None,
+        knowledge_provider: KnowledgePublicationProvider | None = None,
         state_path: Path | None = None,
     ) -> None:
-        self._release_resolver = release_resolver
+        self._corpus_resolver = corpus_resolver
+        self._knowledge_binding_store = knowledge_binding_store
+        self._knowledge_provider = knowledge_provider
         self._state_path = state_path
-        self._creator_release_lock = threading.RLock()
-        self._creator_releases = self._load_creator_releases()
+        self._lock = threading.RLock()
+        self._agent_corpora = self._load_agent_corpora()
 
-    def publish_creator_release(
+    def publish_agent_corpus(
         self,
-        request: CreatorReleasePublishRequest,
+        request: AgentCorpusPublishRequest,
         *,
-        creator_id: str,
-    ) -> PublishedCreatorRelease:
-        with self._creator_release_lock:
-            existing = self._creator_releases.get(request.release_id)
-            if existing is not None:
-                if existing.creator_id != creator_id:
-                    raise PermissionError(
-                        f"release_id={request.release_id} belongs to another Creator",
-                    )
-                if existing.release_digest != request.release_digest:
-                    raise ValueError(
-                        f"release_id={request.release_id} is already pinned to a different digest",
-                    )
-                return existing
-            if self._release_resolver is None:
-                raise ValueError("Creator Release resolver is not configured")
-            verified = self._release_resolver.resolve(request.release_id, request.release_digest)
-            public = verified.public
-            if public.get("creator_id") != creator_id:
-                raise PermissionError(
-                    f"release_id={request.release_id} does not belong to Creator {creator_id}",
-                )
-            product = public.get("product")
-            if not isinstance(product, dict):
-                raise ValueError("verified Creator Release is missing public product metadata")
-            price = product.get("price")
-            if not isinstance(price, dict):
-                raise ValueError("verified Creator Release is missing public price")
-
-            published = PublishedCreatorRelease(
-                creator_id=str(public["creator_id"]),
-                product_id=str(public["product_id"]),
-                release_id=request.release_id,
-                release_digest=request.release_digest,
-                name=str(product["name"]),
-                description=str(product["description"]),
-                promise=str(product["promise"]),
-                price_minor=int(price["amount_minor"]),
-                currency=str(price["currency"]),
-                pricing_model=price.get("model"),
-                supported_local_capabilities=[
-                    str(item) for item in product.get("supported_local_capabilities", [])
-                ],
-                version=str(public["version"]),
-                status="published",
-                published_at=datetime.now(UTC),
-            )
-            next_releases = {**self._creator_releases, request.release_id: published}
-            self._persist_creator_releases(next_releases)
-            self._creator_releases = next_releases
-            return published
-
-    def get_creator_release(self, release_id: str) -> PublishedCreatorRelease | None:
-        return self._creator_releases.get(release_id)
-
-    def list_creator_releases(self, creator_id: str) -> list[PublishedCreatorRelease]:
-        return sorted(
-            (
-                release
-                for release in self._creator_releases.values()
-                if release.creator_id == creator_id
+        tenant_id: str,
+    ) -> PublishedAgentCorpus:
+        if self._corpus_resolver is None:
+            raise ValueError("Agent Corpus resolver is not configured")
+        if self._knowledge_binding_store is None:
+            raise ValueError("Agent knowledge binding store is not configured")
+        # Verify and index the clean source before switching the one current
+        # Registry pointer. A failed upload therefore never replaces a working
+        # Agent with a Corpus whose RAG space is missing or stale.
+        source = self._corpus_resolver.verify(Path(request.corpus_path), tenant_id)
+        rag_binding = self._knowledge_binding_store.bind(source)
+        if self._knowledge_provider is None:
+            raise ValueError("Agent knowledge provider is not configured")
+        self._knowledge_provider.publish(binding=rag_binding, corpus=source)
+        verified = self._corpus_resolver.publish(Path(request.corpus_path), tenant_id)
+        key = f"{verified.tenant_id}:{verified.agent_id}"
+        published = PublishedAgentCorpus(
+            tenant_id=verified.tenant_id,
+            agent_id=verified.agent_id,
+            creator_id=verified.creator_id,
+            product_id=verified.product_id,
+            corpus_digest=verified.corpus_digest,
+            rag=AgentRagBinding(
+                backend=rag_binding.backend,
+                namespace=rag_binding.namespace,
             ),
-            key=lambda release: release.published_at,
+            status="published",
+            published_at=datetime.now(UTC),
+        )
+        with self._lock:
+            next_corpora = {**self._agent_corpora, key: published}
+            self._persist_agent_corpora(next_corpora)
+            self._agent_corpora = next_corpora
+        return published
+
+    def get_agent_corpus(self, tenant_id: str, agent_id: str) -> PublishedAgentCorpus | None:
+        return self._agent_corpora.get(f"{tenant_id}:{agent_id}")
+
+    def list_agent_corpora(self, tenant_id: str) -> list[PublishedAgentCorpus]:
+        return sorted(
+            (corpus for corpus in self._agent_corpora.values() if corpus.tenant_id == tenant_id),
+            key=lambda corpus: corpus.published_at,
             reverse=True,
         )
 
-    def _load_creator_releases(self) -> dict[str, PublishedCreatorRelease]:
+    def validate_agent_tool_binding(
+        self,
+        *,
+        tenant_id: str,
+        agent_id: str,
+        tool_id: str,
+        connection_ref: str,
+        kind: str,
+    ) -> None:
+        if self._corpus_resolver is None:
+            raise ValueError("Agent Corpus resolver is not configured")
+        corpus = self._corpus_resolver.resolve(tenant_id, agent_id)
+        tools = corpus.agent.get("tools")
+        if not isinstance(tools, list):
+            raise ValueError("Agent Corpus has invalid tool declarations")
+        declared = next((tool for tool in tools if isinstance(tool, dict) and tool.get("id") == tool_id), None)
+        if declared is None:
+            raise ValueError(f"Agent Corpus does not declare tool_id={tool_id}")
+        expected_connection_kind = {
+            "http_function": "http",
+            "mcp_tool": "mcp",
+        }.get(declared.get("kind"))
+        if expected_connection_kind is None or expected_connection_kind != kind:
+            raise ValueError(f"Agent Corpus tool {tool_id} does not match Control Plane kind={kind}")
+        if declared.get("connection_ref") != connection_ref:
+            raise ValueError(f"Agent Corpus tool {tool_id} does not match connection_ref={connection_ref}")
+
+    def _load_agent_corpora(self) -> dict[str, PublishedAgentCorpus]:
         if self._state_path is None or not self._state_path.exists():
             return {}
         try:
             payload = json.loads(self._state_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise ValueError(f"cannot load Registry state from {self._state_path}: {exc}") from exc
-        if not isinstance(payload, dict) or payload.get("schema_version") != 1:
-            raise ValueError(f"unsupported Registry state in {self._state_path}")
-        serialized_releases = payload.get("creator_releases")
-        if not isinstance(serialized_releases, list):
-            raise ValueError(f"Registry state has invalid creator_releases in {self._state_path}")
+        if not isinstance(payload, dict) or payload.get("schema_version") != 2:
+            raise ValueError(f"unsupported Agent Corpus state in {self._state_path}")
+        serialized = payload.get("agent_corpora")
+        if not isinstance(serialized, list):
+            raise ValueError(f"Agent Corpus state has invalid agent_corpora in {self._state_path}")
+        records: dict[str, PublishedAgentCorpus] = {}
+        for item in serialized:
+            corpus = PublishedAgentCorpus.model_validate(item)
+            key = f"{corpus.tenant_id}:{corpus.agent_id}"
+            if key in records:
+                raise ValueError(f"Agent Corpus state repeats {key} in {self._state_path}")
+            records[key] = corpus
+        return records
 
-        releases: dict[str, PublishedCreatorRelease] = {}
-        for item in serialized_releases:
-            try:
-                release = PublishedCreatorRelease.model_validate(item)
-            except (TypeError, ValueError) as exc:
-                raise ValueError(
-                    f"Registry state has an invalid Creator Release in {self._state_path}",
-                ) from exc
-            if release.release_id in releases:
-                raise ValueError(
-                    f"Registry state repeats release_id={release.release_id} in {self._state_path}",
-                )
-            releases[release.release_id] = release
-        return releases
-
-    def _persist_creator_releases(
-        self,
-        releases: Mapping[str, PublishedCreatorRelease],
-    ) -> None:
+    def _persist_agent_corpora(self, corpora: Mapping[str, PublishedAgentCorpus]) -> None:
         if self._state_path is None:
             return
         state_path = self._state_path
         state_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
-            "schema_version": 1,
-            "creator_releases": [
-                release.model_dump(mode="json")
-                for _, release in sorted(releases.items())
-            ],
+            "schema_version": 2,
+            "agent_corpora": [corpus.model_dump(mode="json") for _, corpus in sorted(corpora.items())],
         }
         temporary_path = state_path.with_name(f".{state_path.name}.{uuid.uuid4().hex}.tmp")
         try:

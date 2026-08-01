@@ -4,10 +4,10 @@ import { CommerceLedger, LedgerCommerceSink, projectCreatorDashboard } from "./i
 
 const identity = {
   buyer_id: "buyer_fixture",
+  tenant_id: "tenant_fixture",
   creator_id: "creator_fixture",
   product_id: "product_fixture",
-  release_id: "product-fixture@1.0.0",
-  release_digest: `sha256:${"a".repeat(64)}`
+  agent_id: "agent_fixture"
 };
 
 async function ledgerThroughArtifact() {
@@ -42,7 +42,7 @@ async function ledgerThroughArtifact() {
   return { ledger, sink };
 }
 
-test("actual delivery completion recognizes 90/10 revenue from the prior order", async () => {
+test("actual delivery completion recognizes 90/10 revenue for the same Agent", async () => {
   const { ledger, sink } = await ledgerThroughArtifact();
   const result = await sink.ingest("delivery.completed", {
     ...identity,
@@ -56,8 +56,8 @@ test("actual delivery completion recognizes 90/10 revenue from the prior order",
   assert.equal(result.revenue.hatch_share_minor, 399);
   assert.equal(result.revenue.creator_share_minor, 3600);
   assert.equal(result.revenue.recognition_id, "recognition_delivery_fixture");
-  assert.equal(result.revenue.release_id, identity.release_id);
-  assert.equal(result.revenue.release_digest, identity.release_digest);
+  assert.equal(result.revenue.tenant_id, identity.tenant_id);
+  assert.equal(result.revenue.agent_id, identity.agent_id);
   assert.equal(projectCreatorDashboard(ledger.listEvents(), "creator_fixture").metrics.creator_share_minor, 3600);
 
   await sink.ingest("delivery.completed", {
@@ -87,7 +87,7 @@ test("identity mismatch cannot cross from entitlement into a task", async () => 
   await assert.rejects(
     sink.ingest("task.started", {
       ...identity,
-      release_digest: `sha256:${"f".repeat(64)}`,
+      agent_id: "agent_other",
       order_id: "order_fixture",
       entitlement_id: "entitlement_fixture",
       task_id: "task_fixture"

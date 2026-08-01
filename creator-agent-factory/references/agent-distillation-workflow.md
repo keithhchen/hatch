@@ -1,150 +1,118 @@
 # Agent distillation workflow
 
-Use this workflow while reading the complete normalized intake. It governs
-semantic judgment; no Python script may replace these stages.
+Perform this semantic work as the executing Factory Agent after reading the
+complete normalized intake. It is neither a script nor a Creator form. The only
+publishable result is a clean Agent Corpus.
 
 ## 1. Establish the product boundary
 
-Read the natural-language intent before interpreting the course. Write down:
+Read the natural-language intent before interpreting the material. Decide:
 
-- who pays and what usable work they receive;
-- what input or context the Agent needs;
-- what is explicitly out of scope;
-- which external outcomes must not be guaranteed;
-- whether pricing is stated or remains unset.
+- who pays and what usable work or experience they receive;
+- the minimum Consumer input or local context required;
+- what is out of scope and which real-world results must not be guaranteed;
+- what the Agent delivers and whether the offer is per delivery or subscription
+  when the Creator states it.
 
-Do not begin with a digital twin. Begin with one bounded value proposition, then
-extract only the Creator knowledge needed to deliver it.
+Do not begin with a digital twin. Begin with one bounded value proposition and
+extract only the Creator ability needed to fulfil it.
 
-## 2. Build the evidence ledger
+## 2. Build private evidence
 
-Read every extracted source. Retain exact passages that change a decision,
-priority, sequence, quality threshold, omission, boundary, output, or example.
-For each retained item record:
+Read every extracted source. Privately retain exact material that changes a
+decision, priority, sequence, quality bar, omission, boundary, output, or
+example. Keep Creator fact and your interpretation distinct.
 
-- stable source-fact ID;
-- neutral label and method role;
-- exact excerpt copied from the extracted source;
-- intake source ID and original file;
-- exact page, timestamp, heading, or file location;
-- priority from 1–10;
-- deliberate omission text only when the source actually defines one.
+Do not turn a thin label (role, goal, industry) into a detailed customary
+framework. Creator method, Consumer task material, and generic domain knowledge
+are different things. When outside context would change the Creator's judgment,
+ask only for the smallest concrete missing material and offer the nearest useful
+partial delivery.
 
-Never paraphrase inside the evidence field. Keep adjacent context when a sentence
-would otherwise be misleading. Do not treat repeated phrasing as independent
-evidence. Record rejected candidate evidence and the rejection reason privately.
+The evidence ledger is a reasoning aid. Do not publish quotations, claim IDs,
+source paths, or the ledger itself.
 
-Write retained excerpts into `sources/*.md` with `<!-- claim:S-... -->` markers,
-and record the same IDs in `factory-plan.json.claim_annotations`. Maintain a
-human-readable `work/evidence-ledger.md` beside the compiler inputs.
+## 3. Distill, purify, and route the ability
 
-## 3. Distill and purify the method
+Identify the Creator's phases, ordering, priorities, tie-breakers, quality bar,
+rare but decision-changing details, deliberate omissions, and boundaries. Then
+classify each usable result by runtime need:
 
-Using only the evidence ledger:
+1. **Global** — Would this change how the Agent should behave on any relevant
+   turn? Put it in `instructions/system.md`: worldview, voice, product promise,
+   universal communication principles, global behavior, and concise global
+   few-shots.
+2. **Local** — Is this a distinct, repeatable execution unit needed only for a
+   certain kind of request? Create a Skill only if yes. Give it a narrow trigger,
+   inputs, outputs, steps, checks, and only the allowed tools. Do not create one
+   Skill for the entire delivery.
+3. **Local reference** — Is this a framework, aesthetic, method, or example that
+   must direct a particular Skill but should not shape every turn? Put it in
+   `skills/<id>/references/`. For example, a PPT structure Skill can load the
+   Pyramid Principle reference; the global belief that a deck is a communication
+   and alignment instrument belongs in `system.md`.
+4. **Retrieval evidence** — Is this long-tail material that is useful only when a
+   specific question needs it? Put a clean, queryable version in `knowledge/`.
+   It must not contain global rules, Skill procedure, or raw course archive.
 
-1. Order the Creator's actual phases.
-2. Identify priorities and tie-breakers.
-3. Identify quality bars and what “done” means.
-4. Preserve details the Creator notices that a generic answer may overlook.
-5. Preserve deliberate blank space: what the Creator deletes, defers, or avoids.
-6. Separate hard boundaries from stylistic preferences.
-7. Define when the Agent must refuse, narrow scope, or request missing context.
+Omit a layer when it has no real job. A simple Agent may need only a system
+prompt and tools. Do not create Skills, references, or knowledge merely for
+symmetry. Never move a behavioral rule to retrieval simply to make the prompt
+shorter.
 
-Treat the Creator's method, the Consumer's supplied task material, and generic
-domain knowledge as separate evidence classes. Do not turn a thin task label
-into a detailed customary framework. If a role, brief, market, audience, or
-other external context would change the Creator's priorities, define the
-smallest grounding input the Consumer must supply and the partial work that can
-still proceed without it. A fluent generic explanation is neither Creator
-authority nor Consumer evidence.
+Derive an operational rule only when Creator evidence supports it. Do not claim
+generic good practice is this Creator's method.
 
-The compiled Agent must retain a usable missing-input path. If a Consumer has
-not supplied a required material, workspace permission, tool result, or target
-clarification, it should not invent a deliverable or collapse into a generic
-error. It should state the bounded limit, identify the missing input, and offer
-the nearest promised work that can begin once the input is present. This is a
-Hatch delivery invariant, not a new claim attributed to the Creator.
+## 4. Determine data and tool needs
 
-Create a derived rule only when at least two distinct source facts jointly imply
-an operational decision. Cite both facts and explain the inference. If the
-inference is merely reasonable domain practice, omit it or label it unresolved.
+Separate Factory ingestion, Hatch built-ins, Consumer-local capabilities,
+Creator integrations, and Creator knowledge.
 
-Write the distilled method into `factory-plan.json.method`. Citation arrays must
-contain exact source-fact or derived-rule IDs, never prose or phase IDs.
+- `hatch.web_search` is always declared as a Hatch built-in.
+- Use `hatch.local.files` only if the product needs actual Consumer workspace
+  files or must save an artifact. Put that tool in the active local Skill's
+  `allowed_tool_ids` when a Skill invokes it; a no-Skill Agent declares it only
+  in its manifest. Do not make the Consumer paste a document by default.
+- Creator HTTP/MCP integrations need a real product need. Declare only the
+  Hatch-managed `connection_ref`, one permitted `operation` / `tool_name`, and
+  an optional input schema; never credentials or URLs.
+- Keep content that is too long to stay in context, but may be useful as
+  evidence for a specific request, in clean agent-scoped `knowledge/`.
 
-## 4. Determine tools, APIs, and data
+Do not turn a model action, extraction utility, or ordinary chat into a tool.
 
-Separate four things:
+## 5. Expand synthetic QA without confusing it for context
 
-- intake/extraction utilities used only by the Factory;
-- local Runtime capabilities available to the Consumer Agent;
-- external APIs explicitly required by the product intent;
-- proprietary datasets or unresolved integrations.
+Freeze the distilled method first. Expand beyond the course into likely direct,
+composed, boundary, and out-of-scope requests; cover each category with at
+least two synthetic QA cases. The expansion may cover plausible boundaries and
+extensions, but cannot invent Creator biography, results, users, integrations,
+or personal experience.
 
-Do not turn PDF extraction, transcription, ordinary conversation, asking a
-question, formatting, or writing prose into published Agent tools. Every
-external tool need must match an external tool declared by the product and
-supported by the intent. Mark a genuine missing integration unresolved instead
-of inventing an adapter.
+Route the *learning* from each case rather than dumping all cases into a prompt:
 
-For Hatch Desktop, `fs.list`, `fs.read`, and `fs.write` are available inside
-the Consumer-selected workspace. This is runtime context, not Creator input.
-Declare `fs.read` when the product must inspect real local files and `fs.write`
-when it must leave a usable artifact; add `fs.list` only when it needs to
-discover files. Do not declare a capability merely because it exists.
+- global behavioral lesson → concise rule or few-shot in `system.md`;
+- local execution lesson → Skill or that Skill's reference;
+- long-tail edge/example → `knowledge/` when retrieval is genuinely appropriate.
 
-Record private implementation needs in `factory-plan.json.tool_needs`; put only
-actual deployable capabilities in `source-manifest.json.product`.
+Store synthetic QA and held-outs as separate JSON assets under `evals/`; neither
+is automatically runtime context. After QA is frozen, make separate held-outs
+for all four categories. Held-outs are input-only tests and never become
+few-shots, references, or knowledge.
 
-## 5. Expand synthetic QA
+## 6. Audit the finished Corpus
 
-Freeze the method before expansion. Generate at least two distinct QA rows for
-each category:
+Perform a normal self-audit, then an adversarial pass. Confirm:
 
-- `direct`: applies one explicit rule;
-- `composed`: combines multiple supported rules;
-- `boundary`: narrows or refuses while offering the nearest safe action;
-- `out_of_scope`: recognizes work the product does not promise.
+- system guidance contains all and only global behavior;
+- every Skill is local, executable, and optional by necessity rather than
+  ceremony; references are only loaded with their Skill;
+- knowledge is clean retrieval evidence rather than policy, prompt, or raw
+  source;
+- synthetic QA has been correctly routed and held-outs are isolated;
+- product claims, tool needs, and expected behavior stay within evidence and
+  the product boundary;
+- no raw source, Factory trace, credentials, URL, provider setting, deployment
+  setting, review workflow, release, or version entered the Corpus.
 
-Each answer must cite source-fact or derived-rule IDs. Synthetic answers may
-apply the method to a new situation, but cannot invent Creator biography,
-results, users, tools, or personal experience. Do not quote synthetic prose as
-Creator-authored material.
-
-## 6. Create isolated held-outs
-
-After QA is complete, generate new prompts that do not repeat or paraphrase QA.
-Cover all four categories. For every held-out record:
-
-- input-only prompt;
-- expected behavior;
-- observable decisions, actions, and omissions;
-- generic-baseline failure risk;
-- forbidden behavior;
-- supporting source-fact or derived-rule IDs.
-
-Keep expected behavior and checks in Factory review data. Later candidate and
-baseline generation may receive only the input prompt and immutable Release.
-
-## 7. Audit before compilation
-
-The same executing Agent performs two passes: first a completeness self-audit,
-then an adversarial pass that actively tries to disprove the draft. Do not add a
-sub-Agent or multi-Agent orchestrator to the product workflow. Neither pass may
-inspect old proof or a previous Release.
-
-Check:
-
-- every source fact is an exact substring at the declared provenance;
-- every derived rule has two or more direct source supports and a real derivation;
-- method citations resolve and cover sequence, quality, omissions, and boundaries;
-- product claims and capabilities do not exceed intent or evidence;
-- tool needs distinguish Factory ingestion from live Runtime execution;
-- QA is useful, synthetic, grounded, and non-duplicative;
-- held-outs are novel and isolated from QA/few-shots;
-- no guarantee exceeds the product boundary;
-- no unsupported Creator authority is introduced;
-- no expected answer or old proof influenced the build.
-
-Write `work/semantic-audit.md` with findings and repairs. Stop rather than fill a
-gap with plausible content.
+Repair the Corpus, not the source. Omit unsupported content or state its limit.

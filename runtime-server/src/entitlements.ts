@@ -1,21 +1,25 @@
 import { readFile } from "node:fs/promises";
 import { z } from "zod";
 
-const DigestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
-
-export const EntitlementBindingSchema = z.object({
+const EntitlementIdentitySchema = z.object({
   entitlement_id: z.string().min(1),
   order_id: z.string().min(1),
   tenant_id: z.string().min(1),
   user_id: z.string().min(1),
   creator_id: z.string().min(1),
   product_id: z.string().min(1),
-  release_id: z.string().min(1),
-  release_digest: DigestSchema,
   status: z.literal("active")
+});
+
+/** The production entitlement: it authorizes one current Agent Corpus. */
+export const AgentEntitlementBindingSchema = EntitlementIdentitySchema.extend({
+  agent_id: z.string().min(1)
 }).strict();
 
-export type EntitlementBinding = z.infer<typeof EntitlementBindingSchema>;
+export const EntitlementBindingSchema = AgentEntitlementBindingSchema;
+
+export type AgentEntitlementBinding = z.infer<typeof AgentEntitlementBindingSchema>;
+export type EntitlementBinding = AgentEntitlementBinding;
 
 export type EntitlementLookup = {
   licenseToken: string;
@@ -31,7 +35,7 @@ export interface EntitlementResolver {
 /**
  * Development adapter for an exported commerce entitlement projection.
  * The file is server-side and maps opaque license tokens to active bindings;
- * neither the Desktop nor the Creator Release can choose a digest.
+ * neither the Desktop nor an Agent Corpus can choose a different identity.
  */
 export class FileEntitlementResolver implements EntitlementResolver {
   constructor(private readonly filePath: string) {}
@@ -51,7 +55,12 @@ export class FileEntitlementResolver implements EntitlementResolver {
 
   private async readRegistry(): Promise<Array<EntitlementBinding & { license_token: string }>> {
     const payload = JSON.parse(await readFile(this.filePath, "utf8"));
-    return z.array(EntitlementBindingSchema.extend({ license_token: z.string().min(1) }).strict()).parse(payload);
+    return z.array(z.object({
+      license_token: z.string().min(1)
+    }).passthrough().transform((entry) => {
+      const { license_token, ...binding } = entry;
+      return { license_token, ...EntitlementBindingSchema.parse(binding) };
+    })).parse(payload);
   }
 }
 

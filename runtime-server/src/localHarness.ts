@@ -31,11 +31,16 @@ export type HarnessOptions = {
   installationId?: string;
   licenseToken?: string;
   entitlementId?: string;
+  /** Direct Agent Corpus selection for local/Desktop development. Production
+   * selection is still derived from a server-verified purchase entitlement. */
+  tenantId?: string;
+  userId?: string;
+  agentId?: string;
   runIdFactory?: () => string;
   /**
    * A Consumer turn can include several locally-authorized tool calls followed
-   * by a Creator product's delivery audit. Keep the interactive default
-   * bounded, but allow release UATs to supply a longer, explicit deadline.
+   * by an interactive request. Keep the default bounded while allowing
+   * explicit integration tests to supply a longer deadline.
    */
   runTimeoutMs?: number;
 };
@@ -206,6 +211,9 @@ export class LocalHarnessSession {
   }
 
   async connect(): Promise<void> {
+    if (this.options.agentId && !this.options.tenantId) {
+      throw new Error("tenantId is required when selecting an Agent Corpus");
+    }
     await mkdir(this.workspace, { recursive: true });
     const socket = new WebSocket(this.options.serverUrl);
     this.socket = socket;
@@ -255,6 +263,11 @@ export class LocalHarnessSession {
       installation_id: this.options.installationId ?? "local-dev-install",
       license_token: this.options.licenseToken ?? "local-dev-license",
       ...(this.options.entitlementId ? { entitlement_id: this.options.entitlementId } : {}),
+      ...(this.options.agentId ? {
+        tenant_id: this.options.tenantId,
+        user_id: this.options.userId ?? this.options.installationId ?? "local-dev-user",
+        agent_id: this.options.agentId
+      } : {}),
       client_version: "0.1.0",
       workspace_root: this.workspace,
       local_tools: this.declaredLocalTools()
@@ -792,12 +805,15 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const conversationId = args.get("--conversation") ?? "local-dev-conversation";
   const prompt = args.get("--prompt");
   const rustRunnerBin = args.get("--rust-runner") ?? process.env.HATCH_LOCAL_RUNNER_BIN;
+  const agentId = args.get("--agent-id");
+  const tenantId = args.get("--tenant-id");
   const baseOptions = {
     serverUrl,
     workspace,
     conversationId,
     allowShell: !args.has("--no-shell"),
-    rustRunnerBin
+    rustRunnerBin,
+    ...(agentId ? { agentId, tenantId, userId: args.get("--user-id") } : {})
   };
 
   const task = prompt

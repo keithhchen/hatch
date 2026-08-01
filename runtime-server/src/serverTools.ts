@@ -34,28 +34,58 @@ export class ServerToolExecutor {
   private async webSearch(args: Record<string, unknown>): Promise<Record<string, unknown>> {
     const query = String(args.query);
     const limit = Number(args.limit ?? 5);
-    return {
-      query,
-      results: [
-        {
-          title: "Hatch runtime architecture",
-          url: "https://example.invalid/hatch/runtime",
-          snippet: "Server-side tools run on the runtime server; filesystem, shell, and git tools are brokered to the local client."
+    const endpoint = process.env.HATCH_WEB_SEARCH_URL?.trim();
+    if (!endpoint) {
+      // The Hatch capability remains present for every Agent. Returning an
+      // explicit empty result is safer than inventing fixture links or making
+      // a whole Creator run fail merely because a deployment has not attached
+      // its provider yet.
+      return {
+        query,
+        results: [],
+        availability: "unconfigured",
+        message: "Hatch web search has no provider configured for this Runtime deployment."
+      };
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), Math.max(1, this.timeoutMs));
+    try {
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json",
+          ...(webSearchAuthorization() ? { authorization: webSearchAuthorization()! } : {})
         },
-        {
-          title: "Brokered local tool execution",
-          url: "https://example.invalid/hatch/local-tools",
-          snippet: "The agent can request local tools, but the client validates permissions and executes them locally."
-        }
-      ].slice(0, Math.max(1, Math.min(limit, 10)))
-    };
+        body: JSON.stringify({ query, limit: Math.max(1, Math.min(limit, 10)) }),
+        signal: controller.signal,
+      });
+      const body = await response.text();
+      if (!response.ok) throw new Error(`Hatch web search failed with HTTP ${response.status}: ${body.slice(0, 500)}`);
+      const value = parseJsonIfPossible(body);
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw new Error("Hatch web search returned a non-object response");
+      }
+      return value as Record<string, unknown>;
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new Error(`Hatch web search timed out after ${Math.max(1, this.timeoutMs)}ms`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   private async apiRequest(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    // Kept only as an explicit non-delivery result while older generic-runtime
+    // flows are removed. Corpus-backed Creator HTTP tools never reach this
+    // method: they resolve their connection_ref through the Control Plane.
     return {
+      availability: "unconfigured",
       endpoint: args.endpoint,
       payload: args.payload ?? {},
-      status: "ok"
+      message: "Generic api.request cannot access a Creator integration. Use a Corpus-bound creator.* HTTP tool."
     };
   }
 
@@ -108,6 +138,11 @@ export class ServerToolExecutor {
       clearTimeout(timer);
     }
   }
+}
+
+function webSearchAuthorization(): string | undefined {
+  const value = process.env.HATCH_WEB_SEARCH_AUTHORIZATION?.trim();
+  return value || undefined;
 }
 
 export function hasConfiguredMcpServers(): boolean {
