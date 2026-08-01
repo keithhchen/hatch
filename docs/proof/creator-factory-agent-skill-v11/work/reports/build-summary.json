@@ -1,0 +1,15 @@
+{
+  "derived_rules": 8,
+  "development_evals": 8,
+  "documents": 9,
+  "few_shots": 4,
+  "gates_passed": 11,
+  "held_out_evals": 4,
+  "rag_chunks": 30,
+  "raw_intake_attached": false,
+  "release_digest": "sha256:1590101c6fb7dbcb09e84973c3d98f0607cf70b691a3dec23ab511c61fb3fb39",
+  "release_evals": 4,
+  "release_id": "maya-chen-resume-review@1.0.0",
+  "source_facts": 30,
+  "synthetic_qa": 8
+}

@@ -14,7 +14,7 @@ trap cleanup EXIT
 
 (cd "$ROOT/platform-registry" && uv run hatch-registry) &
 (cd "$ROOT/privacyd" && uv run privacyd) &
-(cd "$ROOT/creator-server" && uv run hatch-creator-server) &
+(cd "$ROOT/runtime-server" && PORT=8400 npm run serve) &
 
 sleep 2
 

@@ -1,0 +1,74 @@
+{
+  "boundaries": [
+    "S-COURSE-003",
+    "S-RUBRIC-005",
+    "S-FEEDBACK-004",
+    "D-RULE-006"
+  ],
+  "epistemic_class": "derived_rule",
+  "name": "Signal evidence review",
+  "omissions": [
+    "S-FEEDBACK-003"
+  ],
+  "phases": [
+    {
+      "id": "target",
+      "instruction": "Extract the target role's capabilities and constraints.",
+      "supports": [
+        "D-RULE-001"
+      ]
+    },
+    {
+      "id": "evidence",
+      "instruction": "Inventory supplied evidence and assess action, context, result, substantiation, and ownership.",
+      "supports": [
+        "D-RULE-002"
+      ]
+    },
+    {
+      "id": "prioritize",
+      "instruction": "Rank trust and fit findings ahead of evidence gaps and polish.",
+      "supports": [
+        "D-RULE-004"
+      ]
+    },
+    {
+      "id": "deliver",
+      "instruction": "Create the evidence table, focused questions, and grounded rewrites.",
+      "supports": [
+        "D-RULE-003",
+        "D-RULE-005"
+      ]
+    }
+  ],
+  "quality_bar": [
+    "S-COURSE-002",
+    "S-RUBRIC-001",
+    "S-RUBRIC-002",
+    "S-RUBRIC-003",
+    "S-FEEDBACK-002"
+  ],
+  "trace_closure": [
+    "D-RULE-001",
+    "D-RULE-002",
+    "D-RULE-003",
+    "D-RULE-004",
+    "D-RULE-005",
+    "D-RULE-006",
+    "S-COURSE-001",
+    "S-COURSE-002",
+    "S-COURSE-003",
+    "S-COURSE-004",
+    "S-COURSE-005",
+    "S-EXAMPLE-003",
+    "S-FEEDBACK-001",
+    "S-FEEDBACK-002",
+    "S-FEEDBACK-003",
+    "S-FEEDBACK-004",
+    "S-RUBRIC-001",
+    "S-RUBRIC-002",
+    "S-RUBRIC-003",
+    "S-RUBRIC-004",
+    "S-RUBRIC-005"
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "documents": [
+    {
+      "authority": "Synthetic resumes with Maya-authored annotations",
+      "bytes": 711,
+      "claim_count": 3,
+      "kind": "annotated_examples",
+      "path": "sources/annotated-examples.md",
+      "sha256": "a9aadfe1b37aea67ff6bf704242443b640bd4f8f703fd2db4b323ba7926455b5",
+      "source_id": "annotated-examples",
+      "title": "Annotated resume examples"
+    },
+    {
+      "authority": "Maya-authored teaching material",
+      "bytes": 927,
+      "claim_count": 5,
+      "kind": "course_notes",
+      "path": "sources/course-notes.md",
+      "sha256": "75bc2bd682ee10224051b91723a10dd089723d235a1ca1fb77adc541ce2cd052",
+      "source_id": "course-notes",
+      "title": "Signal Method course notes"
+    },
+    {
+      "authority": "De-identified synthetic feedback written in Maya's method",
+      "bytes": 796,
+      "claim_count": 4,
+      "kind": "prior_feedback",
+      "path": "sources/prior-feedback.md",
+      "sha256": "70771b9e89a321cc708da6d01310d7a33a7989857942677cca7802a357e28eb5",
+      "source_id": "prior-feedback",
+      "title": "Prior client feedback excerpts"
+    },
+    {
+      "authority": "Maya-authored scoring rubric",
+      "bytes": 935,
+      "claim_count": 5,
+      "kind": "rubric",
+      "path": "sources/rubric.md",
+      "sha256": "eb76e09155aa9ee8d3e9ac52f38feb9d27090aa3668dd7b2ffc6eb4b754c89a4",
+      "source_id": "rubric",
+      "title": "Signal Resume Review rubric"
+    }
+  ],
+  "totals": {
+    "documents": 4,
+    "source_claims": 17
+  }
+}

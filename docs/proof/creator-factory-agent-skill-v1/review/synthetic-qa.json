@@ -1,0 +1,177 @@
+{
+  "boundary": [
+    {
+      "answer": "This review cannot choose between jobs. If the user selects one target, it can examine whether the resume presents supportable evidence for that target and identify what needs recovery. Career choice itself needs a different conversation.",
+      "category": "boundary",
+      "epistemic_class": "synthetic_expansion",
+      "id": "Q-BOUNDARY-001",
+      "question": "Should I take the product-manager offer or the operations-manager offer?",
+      "supports": [
+        "S-FAQ-001",
+        "S-WELCOME-002"
+      ],
+      "trace_closure": [
+        "S-FAQ-001",
+        "S-WELCOME-002"
+      ]
+    },
+    {
+      "answer": "Do not manufacture VP scope. Review the supplied work for the level it already demonstrates, identify any real decision, mechanism, or outcome with evidence, and make that signal clear. If the available evidence is coordination only, retain that truthful scope and place any desired larger-scope claim in an evidence-gap question rather than in a rewrite.",
+      "category": "boundary",
+      "epistemic_class": "synthetic_expansion",
+      "id": "Q-BOUNDARY-002",
+      "question": "Please make this coordinator resume sound like a VP resume even though I mainly scheduled meetings.",
+      "supports": [
+        "D-NO-SCOPE-INFLATION",
+        "D-LEDGER-BEFORE-REWRITE",
+        "D-DEFENSIBLE-OUTPUT"
+      ],
+      "trace_closure": [
+        "D-DEFENSIBLE-OUTPUT",
+        "D-LEDGER-BEFORE-REWRITE",
+        "D-NO-SCOPE-INFLATION",
+        "S-FAQ-005",
+        "S-OWNERSHIP-003",
+        "S-VIDEO-001",
+        "S-VIDEO-003",
+        "S-WORKBOOK-003",
+        "S-WORKBOOK-004",
+        "S-WORKSHOP-004"
+      ]
+    }
+  ],
+  "composed": [
+    {
+      "answer": "Interpret the role for the capability at issue, then log the country-selection claim as not owned and the retention claim as unverified. Keep the narrower, target-relevant mechanism if it is supported. A usable rewrite is: ‘Created the launch-readiness checklist used by local teams for country rollouts.’ Put the retention source and the scope of checklist use into the evidence backlog rather than enlarging the claim.",
+      "category": "composed",
+      "epistemic_class": "synthetic_expansion",
+      "id": "Q-COMPOSED-001",
+      "question": "For a lifecycle-operations role, the candidate wrote: ‘Drove expansion into 10 countries, increasing retention.’ They say leadership chose the countries; they created the launch checklist used by local teams, but do not have the retention source. What should the plan and rewrite do?",
+      "supports": [
+        "D-TARGET-SIGNAL",
+        "D-KEEP-NARROW-VERIFY-CUT",
+        "D-REWRITE-SUPPORTED-SIGNAL",
+        "D-DEFENSIBLE-OUTPUT"
+      ],
+      "trace_closure": [
+        "D-DEFENSIBLE-OUTPUT",
+        "D-KEEP-NARROW-VERIFY-CUT",
+        "D-REWRITE-SUPPORTED-SIGNAL",
+        "D-TARGET-SIGNAL",
+        "S-OWNERSHIP-002",
+        "S-OWNERSHIP-003",
+        "S-SIGNAL-001",
+        "S-SIGNAL-002",
+        "S-SIGNAL-003",
+        "S-VIDEO-002",
+        "S-VIDEO-003",
+        "S-WORKBOOK-001",
+        "S-WORKBOOK-005",
+        "S-WORKSHOP-003"
+      ]
+    },
+    {
+      "answer": "Keep the decision authority and continued checklist use only if the candidate can support them, and omit the confidential metric. A usable rewrite is: ‘Established a release gate and checklist used for subsequent partner launches.’ Ask what approved description of the operating effect can be shared, and list that question separately from the resume copy.",
+      "category": "composed",
+      "epistemic_class": "synthetic_expansion",
+      "id": "Q-COMPOSED-002",
+      "question": "A platform candidate can show that she owned a release gate and that teams kept using its checklist, but the only time-saved metric is confidential. How should the bullet be revised for a reliability role?",
+      "supports": [
+        "D-LEDGER-BEFORE-REWRITE",
+        "D-CONFLICT-CONFIDENTIALITY",
+        "D-REWRITE-SUPPORTED-SIGNAL",
+        "D-DEFENSIBLE-OUTPUT"
+      ],
+      "trace_closure": [
+        "D-CONFLICT-CONFIDENTIALITY",
+        "D-DEFENSIBLE-OUTPUT",
+        "D-LEDGER-BEFORE-REWRITE",
+        "D-REWRITE-SUPPORTED-SIGNAL",
+        "S-FAQ-004",
+        "S-OWNERSHIP-003",
+        "S-OWNERSHIP-004",
+        "S-REVIEW-B-002",
+        "S-SIGNAL-002",
+        "S-VIDEO-001",
+        "S-VIDEO-002",
+        "S-VIDEO-003",
+        "S-WORKBOOK-003",
+        "S-WORKBOOK-004",
+        "S-WORKSHOP-003"
+      ]
+    }
+  ],
+  "direct": [
+    {
+      "answer": "State a working interpretation rather than treating the phrase as precise: for example, identify the available clues and the provisional capability they suggest. Explain that the review needs a recruiter note or comparable posting if that ambiguity would alter which experience receives space. Do not copy ‘growth strategy’ as a capability without interpretation.",
+      "category": "direct",
+      "epistemic_class": "synthetic_expansion",
+      "id": "Q-DIRECT-001",
+      "question": "The posting says only ‘own growth strategy.’ How should the review start?",
+      "supports": [
+        "D-ROLE-UNCERTAINTY",
+        "D-TARGET-SIGNAL"
+      ],
+      "trace_closure": [
+        "D-ROLE-UNCERTAINTY",
+        "D-TARGET-SIGNAL",
+        "S-FAQ-003",
+        "S-SIGNAL-001",
+        "S-SIGNAL-003",
+        "S-WORKBOOK-001"
+      ]
+    },
+    {
+      "answer": "Use neither number in the proposed bullet until the source of record is resolved. Put the conflict in the evidence-gap list, ask which source controlled the decision at the time, and keep only a directly supported observable mechanism or adoption fact if one is supplied.",
+      "category": "direct",
+      "epistemic_class": "synthetic_expansion",
+      "id": "Q-DIRECT-002",
+      "question": "My resume says activation improved 34%, but the dashboard says 31%. Which number should the rewrite use?",
+      "supports": [
+        "D-CONFLICT-CONFIDENTIALITY",
+        "D-DEFENSIBLE-OUTPUT"
+      ],
+      "trace_closure": [
+        "D-CONFLICT-CONFIDENTIALITY",
+        "D-DEFENSIBLE-OUTPUT",
+        "S-FAQ-004",
+        "S-OWNERSHIP-003",
+        "S-OWNERSHIP-004",
+        "S-REVIEW-B-002",
+        "S-VIDEO-003"
+      ]
+    }
+  ],
+  "out_of_scope": [
+    {
+      "answer": "No hiring outcome is promised. The deliverable is a defensible resume revision plan and evidence-recovery work for the target role; market conditions and other parts of hiring remain outside this review.",
+      "category": "out_of_scope",
+      "epistemic_class": "synthetic_expansion",
+      "id": "Q-OOS-001",
+      "question": "Can this review ensure that I receive interviews for a senior role?",
+      "supports": [
+        "S-FAQ-002",
+        "S-WELCOME-002"
+      ],
+      "trace_closure": [
+        "S-FAQ-002",
+        "S-WELCOME-002"
+      ]
+    },
+    {
+      "answer": "Those requests are outside this resume-review product. The nearest in-scope action is to review the resume against a chosen target and provide supportable rewrites and evidence gaps; it does not select a career path or make broader employment decisions.",
+      "category": "out_of_scope",
+      "epistemic_class": "synthetic_expansion",
+      "id": "Q-OOS-002",
+      "question": "Write a complete cover letter and negotiate my compensation package from my resume.",
+      "supports": [
+        "S-FAQ-001",
+        "S-WELCOME-002"
+      ],
+      "trace_closure": [
+        "S-FAQ-001",
+        "S-WELCOME-002"
+      ]
+    }
+  ]
+}

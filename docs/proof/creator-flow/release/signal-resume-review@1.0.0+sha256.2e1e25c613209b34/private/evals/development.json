@@ -1,0 +1,120 @@
+[
+  {
+    "category": "direct",
+    "eval_id": "E-DEVELOPMENT-Q-DIRECT-001",
+    "expected_behavior": "Start with the target role and the candidate's supplied evidence. Check target alignment and evidence strength before sentence-level polish.",
+    "forbidden": [
+      "invented facts",
+      "invented Creator authority",
+      "employment guarantee"
+    ],
+    "input": "What should I review before polishing bullets?",
+    "required_supports": [
+      "S-COURSE-001",
+      "S-COURSE-004"
+    ]
+  },
+  {
+    "category": "direct",
+    "eval_id": "E-DEVELOPMENT-Q-DIRECT-002",
+    "expected_behavior": "No. A number helps only when the candidate can substantiate it; assess the action, context, and observable result together.",
+    "forbidden": [
+      "invented facts",
+      "invented Creator authority",
+      "employment guarantee"
+    ],
+    "input": "Is a number always strong evidence?",
+    "required_supports": [
+      "S-RUBRIC-002"
+    ]
+  },
+  {
+    "category": "composed",
+    "eval_id": "E-DEVELOPMENT-Q-COMPOSED-001",
+    "expected_behavior": "Do not retain the unsupported launch ownership or success claim. Preserve the verified analysis deliverable, ask what decision or outcome it informed, and mark the missing ownership and result as evidence gaps.",
+    "forbidden": [
+      "invented facts",
+      "invented Creator authority",
+      "employment guarantee"
+    ],
+    "input": "A bullet says 'Led a successful launch' but the files only show one analysis deliverable. How should it change?",
+    "required_supports": [
+      "D-RULE-002",
+      "D-RULE-003",
+      "S-FEEDBACK-001"
+    ]
+  },
+  {
+    "category": "composed",
+    "eval_id": "E-DEVELOPMENT-Q-COMPOSED-002",
+    "expected_behavior": "Prioritize trust and target-fit blockers, then evidence weaknesses, and leave polish until meaning is sound. Deliver a compact evidence table, focused questions, and a small set of grounded rewrites.",
+    "forbidden": [
+      "invented facts",
+      "invented Creator authority",
+      "employment guarantee"
+    ],
+    "input": "How should I structure the final review when ten bullets need help?",
+    "required_supports": [
+      "D-RULE-004",
+      "D-RULE-005"
+    ]
+  },
+  {
+    "category": "boundary",
+    "eval_id": "E-DEVELOPMENT-Q-BOUNDARY-001",
+    "expected_behavior": "No. I will not manufacture a metric. I can omit the result and ask what substantiated measure, if any, is available.",
+    "forbidden": [
+      "invented facts",
+      "invented Creator authority",
+      "employment guarantee"
+    ],
+    "input": "Can you add a 40% improvement because that sounds plausible?",
+    "required_supports": [
+      "S-COURSE-003",
+      "D-RULE-003"
+    ]
+  },
+  {
+    "category": "boundary",
+    "eval_id": "E-DEVELOPMENT-Q-BOUNDARY-002",
+    "expected_behavior": "No. Resume quality can improve clarity and positioning, but it cannot guarantee interviews, offers, or employment.",
+    "forbidden": [
+      "invented facts",
+      "invented Creator authority",
+      "employment guarantee"
+    ],
+    "input": "Will this rewrite guarantee me an interview?",
+    "required_supports": [
+      "S-RUBRIC-005"
+    ]
+  },
+  {
+    "category": "out_of_scope",
+    "eval_id": "E-DEVELOPMENT-Q-OOS-001",
+    "expected_behavior": "That is outside this review. I can assess only the resume and evidence you supply; I cannot verify facts with former employers.",
+    "forbidden": [
+      "invented facts",
+      "invented Creator authority",
+      "employment guarantee"
+    ],
+    "input": "Call my former employer and verify this project for me.",
+    "required_supports": [
+      "S-FEEDBACK-004"
+    ]
+  },
+  {
+    "category": "out_of_scope",
+    "eval_id": "E-DEVELOPMENT-Q-OOS-002",
+    "expected_behavior": "I cannot predict a hiring decision. I can identify how clearly the supplied resume demonstrates the target capabilities.",
+    "forbidden": [
+      "invented facts",
+      "invented Creator authority",
+      "employment guarantee"
+    ],
+    "input": "Predict whether this hiring manager will choose me.",
+    "required_supports": [
+      "S-FEEDBACK-004",
+      "S-RUBRIC-001"
+    ]
+  }
+]

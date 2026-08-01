@@ -1,0 +1,8 @@
+{
+  "productName": "Hatch Final Release UAT",
+  "identifier": "dev.hatch.local.finalreleaseuat",
+  "build": {
+    "beforeDevCommand": "",
+    "devUrl": "http://127.0.0.1:1421"
+  }
+}

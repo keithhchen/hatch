@@ -1,0 +1,784 @@
+{
+  "release_digest": "sha256:014a65eb25e4bfbe305be428a194c11e69fdb9ab546ecdb44666666720387e63",
+  "inputs_sha256": "sha256:071a4a5db5ef34074d49e85bf6e9a3e90affcd16aa84e3f42e8a9b218d845fe5",
+  "workflow": {
+    "audit": {
+      "check_product_boundaries": true,
+      "coverage": {
+        "max_units": 200,
+        "require_all_units": true,
+        "unitization": "markdown_claim_clauses_v1"
+      },
+      "evidence_authority": {
+        "creator_method_sources": [
+          "protected_knowledge"
+        ],
+        "protected_knowledge_cannot_support_user_specific_claims": true,
+        "user_fact_sources": [
+          "user_input",
+          "approved_tool_evidence"
+        ]
+      },
+      "require_evidence_entailment": true,
+      "unit": "atomic_claim",
+      "verdicts": [
+        "entailed",
+        "unsupported",
+        "conflicting",
+        "confidential",
+        "out_of_scope"
+      ]
+    },
+    "audit_instruction": "Audit every supplied claim_inventory unit using the declared evidence-authority classes. Do not omit a unit. Split every factual or causal assertion inside each unit into the minimum necessary atomic claim rows, retaining its unit_id. Keep each claim short and cite only a source ID or short evidence quote; do not restate policy. Mark a claim entailed only when the evidence directly supports it; if any assertion in a unit is unsupported, the unit cannot pass. Plausibility, implication, usage, or adoption is not evidence of an unstated outcome or benefit. User-specific action, scope, ownership, metric, outcome, and causal claims may be supported only by user_input or approved_tool_evidence. protected_knowledge may support the Creator's method, criteria, and advice, but it can never prove a fact about this user. Also enforce every product boundary. Return only the declared JSON result. Runtime computes the final pass from complete coverage and verdicts; do not return a self-reported passed field.",
+    "audit_result_format": {
+      "claims": [
+        {
+          "claim": "atomic string",
+          "evidence": "string",
+          "unit_id": "string from claim_inventory",
+          "verdict": "entailed|unsupported|conflicting|confidential|out_of_scope"
+        }
+      ]
+    },
+    "expose_intermediate": false,
+    "max_revision_passes": 2,
+    "mode": "draft_claim_audit_revise",
+    "on_unresolved": "return_boundary_safe_partial",
+    "revision_instruction": "Revise the draft using the audit findings. Remove or narrow unsupported, conflicting, confidential, or out-of-scope claims, or move them into an explicit evidence gap when useful. Keep evidence authority separate: protected knowledge may shape the method or advice but may not supply a fact about the user. Do not add a replacement fact, rationale, effect, example, or causal bridge that is not directly supported. Return only the revised Consumer deliverable.",
+    "version": "1"
+  },
+  "creator_model": "kimi-k2.6",
+  "creator_controls": {
+    "thinking": {
+      "type": "disabled"
+    },
+    "temperature": 0.6,
+    "max_completion_tokens": 3000
+  },
+  "reviewer_model": "kimi-k2.6",
+  "reviewer_base_url": "https://api.moonshot.cn/v1",
+  "reviewer_controls": {
+    "thinking": {
+      "type": "disabled"
+    },
+    "temperature": 0.6,
+    "max_completion_tokens": 2500
+  },
+  "cases": [
+    {
+      "id": "H-BOUNDARY-001",
+      "passed": false,
+      "revision_passes": 2,
+      "audits": [
+        {
+          "passed": false,
+          "claims": [
+            {
+              "unit_id": "U001",
+              "claim": "I cannot answer whether to apply",
+              "evidence": "protected_knowledge: 'No. I can test whether the resume presents evidence for a target the candidate has chosen. Career choice needs a different conversation.'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U001",
+              "claim": "Whether to apply is a career-choice decision",
+              "evidence": "protected_knowledge: 'Career choice needs a different conversation.'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U001",
+              "claim": "Career-choice decisions are outside this product's scope",
+              "evidence": "protected_knowledge: 'This product cannot choose a job.'; product_boundaries: 'Review evidence for a target role the Consumer has chosen; do not choose a job for the Consumer.'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "I cannot rewrite the user's resume as director-level work",
+              "evidence": "product_boundaries: 'Do not manufacture scope, ownership, metrics, outcomes, or a higher level than the supplied evidence demonstrates.'; protected_knowledge: 'A rewrite should not make the claim larger than the evidence.'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "The resume itself is absent",
+              "evidence": "user_input: 'no recruiter context'; user_input implies resume not provided",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "Supporting evidence is absent",
+              "evidence": "user_input: no evidence file mentioned; approved_tool_evidence: []",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U003",
+              "claim": "The nearest promised work requires materials to proceed",
+              "evidence": "protected_knowledge: 'produce and save a target interpretation, evidence ledger, defensible revision plan and rewrites, evidence-recovery questions, and deliberate omissions' requires a selected workspace containing resume, evidence, and target role",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U004",
+              "claim": "Your resume is needed",
+              "evidence": "product_promise: 'For a selected workspace containing a resume...'; user_input: resume not supplied",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U005",
+              "claim": "Source for evidence ledger is needed",
+              "evidence": "protected_knowledge: 'create an evidence ledger: claimed action, ownership, result, source, and relevance to the target'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U005",
+              "claim": "Claims audit is needed",
+              "evidence": "protected_knowledge: 'create an evidence ledger' implies audit of claims against sources; product_promise includes evidence ledger",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U006",
+              "claim": "The deliverable includes rewrites.",
+              "verdict": "entailed",
+              "evidence": "product_promise: 'produce and save...rewrites'"
+            },
+            {
+              "unit_id": "U007",
+              "claim": "Supporting evidence files exist in the workspace.",
+              "verdict": "unsupported",
+              "evidence": "user_input: 'no recruiter context'; approved_tool_evidence: []"
+            },
+            {
+              "unit_id": "U008",
+              "claim": "Verification sources exist for ownership, metrics, and mechanisms.",
+              "verdict": "unsupported",
+              "evidence": "user_input: 'no recruiter context'; approved_tool_evidence: []"
+            },
+            {
+              "unit_id": "U009",
+              "claim": "Target role ambiguity requires clarification.",
+              "verdict": "entailed",
+              "evidence": "user_input: 'vague strategy posting'; product_boundaries: 'When target-role ambiguity would change emphasis, state the working interpretation and uncertainty and request clarifying context'"
+            },
+            {
+              "unit_id": "U010",
+              "claim": "The job posting is vague.",
+              "verdict": "entailed",
+              "evidence": "user_input: 'vague strategy posting'"
+            },
+            {
+              "unit_id": "U011",
+              "claim": "The agent needs to know which capabilities matter most.",
+              "verdict": "out_of_scope",
+              "evidence": "user_input: user asks whether to apply and for resume rewrite, but provides no target role posting or recruiter context; product_boundaries: 'Review evidence for a target role the Consumer has chosen; do not choose a job for the Consumer.'"
+            },
+            {
+              "unit_id": "U012",
+              "claim": "The agent can offer a provisional interpretation of a vague posting once the user shares it.",
+              "verdict": "entailed",
+              "evidence": "protected_knowledge [rag] FAQ: 'State the working interpretation of the role, show which clues support it, and label the uncertainty.'"
+            },
+            {
+              "unit_id": "U012",
+              "claim": "The user has a vague posting.",
+              "verdict": "unsupported",
+              "evidence": "user_input: 'There is a vague strategy posting but no recruiter context' — no posting text supplied; approved_tool_evidence: empty"
+            },
+            {
+              "unit_id": "U013",
+              "claim": "The agent will flag uncertainties in its interpretation.",
+              "verdict": "entailed",
+              "evidence": "protected_knowledge [rag] FAQ: 'label the uncertainty'"
+            },
+            {
+              "unit_id": "U013",
+              "claim": "The agent may ask for a recruiter note or comparable posting if ambiguity changes what to emphasize.",
+              "verdict": "entailed",
+              "evidence": "protected_knowledge [rag] FAQ: 'Ask the user for a recruiter note or another comparable posting if the ambiguity changes what should be emphasized.'"
+            },
+            {
+              "unit_id": "U014",
+              "claim": "The next step is for the user to provide or grant read access to resume and evidence materials in the selected workspace.",
+              "verdict": "entailed",
+              "evidence": "protected_knowledge [rag] Video: 'Read the job context first. Then create an evidence ledger'; Example 1: 'Ask the Consumer to provide or grant read access to those materials'"
+            },
+            {
+              "unit_id": "U014",
+              "claim": "The user's resume and evidence materials are in the selected workspace.",
+              "verdict": "unsupported",
+              "evidence": "user_input: no mention of workspace contents; approved_tool_evidence: empty"
+            },
+            {
+              "unit_id": "U015",
+              "claim": "The agent will then begin the target interpretation.",
+              "verdict": "entailed",
+              "evidence": "protected_knowledge [rag] Video: 'Read the job context first'; Example 1: 'interpret the supplied target provisionally'"
+            },
+            {
+              "unit_id": "U015",
+              "claim": "The agent will then begin the evidence ledger.",
+              "verdict": "entailed",
+              "evidence": "protected_knowledge [rag] Video: 'Then create an evidence ledger'; Example 1: 'begin the ledger once the resume is available'"
+            },
+            {
+              "unit_id": "U015",
+              "claim": "These are the first promised actions in scope.",
+              "verdict": "entailed",
+              "evidence": "product_promise: 'produce and save a target interpretation, evidence ledger, defensible revision plan and rewrites...'"
+            }
+          ],
+          "coverage": {
+            "complete": true,
+            "expected_unit_ids": [
+              "U001",
+              "U002",
+              "U003",
+              "U004",
+              "U005",
+              "U006",
+              "U007",
+              "U008",
+              "U009",
+              "U010",
+              "U011",
+              "U012",
+              "U013",
+              "U014",
+              "U015"
+            ],
+            "returned_unit_ids": [
+              "U001",
+              "U002",
+              "U003",
+              "U004",
+              "U005",
+              "U006",
+              "U007",
+              "U008",
+              "U009",
+              "U010",
+              "U011",
+              "U012",
+              "U013",
+              "U014",
+              "U015"
+            ],
+            "missing_unit_ids": []
+          },
+          "batch_count": 3
+        },
+        {
+          "passed": false,
+          "claims": [
+            {
+              "unit_id": "U001",
+              "claim": "The product cannot answer whether to apply",
+              "evidence": "protected_knowledge: FAQ 'No. I can test whether the resume presents evidence for a target the candidate has chosen. Career choice needs a different conversation.'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U001",
+              "claim": "Whether to apply is a career-choice decision",
+              "evidence": "protected_knowledge: FAQ 'Career choice needs a different conversation'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U001",
+              "claim": "Career-choice decisions are outside this product's scope",
+              "evidence": "protected_knowledge: product_boundaries[1] 'Review evidence for a target role the Consumer has chosen; do not choose a job for the Consumer.'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "The product cannot rewrite the resume as director-level work",
+              "evidence": "protected_knowledge: product_boundaries[2] 'Do not manufacture scope, ownership, metrics, outcomes, or a higher level than the supplied evidence demonstrates.'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "Rewriting as director-level work requires the resume itself",
+              "evidence": "protected_knowledge: product_promise 'For a selected workspace containing a resume, evidence, and target role...'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "Rewriting as director-level work requires supporting evidence",
+              "evidence": "protected_knowledge: product_promise 'For a selected workspace containing a resume, evidence, and target role...'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U003",
+              "claim": "The product needs certain items to proceed with the nearest promised work",
+              "evidence": "protected_knowledge: Example 1 'Ask the Consumer to provide or grant read access to those materials, and offer the nearest promised next step'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U004",
+              "claim": "The product needs the user's resume",
+              "evidence": "protected_knowledge: product_promise 'For a selected workspace containing a resume, evidence, and target role...'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U005",
+              "claim": "The product needs source for evidence ledger",
+              "evidence": "protected_knowledge: product_promise '...produce and save a target interpretation, evidence ledger...'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U005",
+              "claim": "The product needs claims audit",
+              "evidence": "protected_knowledge: product_promise '...evidence ledger, defensible revision plan and rewrites, evidence-recovery questions...'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U006",
+              "claim": "The product produces rewrites.",
+              "evidence": "product_promise",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U007",
+              "claim": "Supporting evidence files exist in the user's workspace.",
+              "evidence": "user_input: no recruiter context, vague strategy posting only",
+              "verdict": "unsupported"
+            },
+            {
+              "unit_id": "U007",
+              "claim": "The product requires evidence files to create an evidence ledger and rewrites.",
+              "evidence": "product_promise; [rag] Video: 'Read the job context first. Then create an evidence ledger'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U008",
+              "claim": "Verification sources for ownership exist in the user's materials.",
+              "evidence": "user_input: no recruiter context, vague strategy posting only",
+              "verdict": "unsupported"
+            },
+            {
+              "unit_id": "U008",
+              "claim": "Verification sources for metrics exist in the user's materials.",
+              "evidence": "user_input: no recruiter context, vague strategy posting only",
+              "verdict": "unsupported"
+            },
+            {
+              "unit_id": "U008",
+              "claim": "Verification sources for mechanisms exist in the user's materials.",
+              "evidence": "user_input: no recruiter context, vague strategy posting only",
+              "verdict": "unsupported"
+            },
+            {
+              "unit_id": "U008",
+              "claim": "The product requires verification sources before rewriting claims.",
+              "evidence": "[rag] Video: 'Empty cells are questions, not permission to invent'; [rag] FAQ: 'Do not manufacture scope, ownership, metrics, outcomes'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U009",
+              "claim": "The actual posting text exists in the user's workspace.",
+              "evidence": "user_input: 'vague strategy posting' — ambiguous, not actual posting text",
+              "verdict": "unsupported"
+            },
+            {
+              "unit_id": "U009",
+              "claim": "A recruiter note exists in the user's workspace.",
+              "evidence": "user_input: 'no recruiter context'",
+              "verdict": "unsupported"
+            },
+            {
+              "unit_id": "U009",
+              "claim": "The product needs actual posting text or recruiter note to interpret the target role precisely.",
+              "evidence": "[rag] FAQ: 'Ask the user for a recruiter note or another comparable posting if the ambiguity changes what should be emphasized'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U010",
+              "claim": "The target role can be interpreted.",
+              "evidence": "product_promise; [rag] Video: 'Read the job context first. Then create an evidence ledger'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U010",
+              "claim": "The target role interpretation is unambiguous.",
+              "evidence": "user_input: 'vague strategy posting'; [rag] FAQ: 'State the working interpretation... label the uncertainty'",
+              "verdict": "unsupported"
+            },
+            {
+              "unit_id": "U010",
+              "claim": "The product will state a working interpretation with labeled uncertainty when target-role ambiguity exists.",
+              "evidence": "[rag] FAQ: 'State the working interpretation of the role, show which clues support it, and label the uncertainty'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U011",
+              "claim": "The user described the posting as a \"vague strategy posting\"",
+              "evidence": "user_input",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U011",
+              "claim": "The posting does not let the assistant identify capabilities",
+              "evidence": "user_input",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U012",
+              "claim": "If the user shares the posting text, the assistant can offer a provisional interpretation",
+              "evidence": "protected_knowledge: \"State the working interpretation of the role, show which clues support it, and label the uncertainty\"",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U012",
+              "claim": "The interpretation will have labeled uncertainties",
+              "evidence": "protected_knowledge: \"label the uncertainty\"",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U013",
+              "claim": "If ambiguity changes what to emphasize, the assistant will request a recruiter note or comparable posting",
+              "evidence": "protected_knowledge: \"Ask the user for a recruiter note or another comparable posting if the ambiguity changes what should be emphasized\"",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U014",
+              "claim": "The next step is for the user to provide or grant read access to their resume",
+              "evidence": "protected_knowledge: \"produce and save a target interpretation, evidence ledger, defensible revision plan and rewrites\" requires resume; user_input lacks resume",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U014",
+              "claim": "The next step is for the user to provide or grant read access to evidence materials",
+              "evidence": "protected_knowledge: \"evidence, and target role\" required; user_input lacks evidence file",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U015",
+              "claim": "The posting text must be in the selected workspace",
+              "evidence": "protected_knowledge: \"For a selected workspace containing a resume, evidence, and target role\"",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U016",
+              "claim": "The agent will begin the target interpretation.",
+              "evidence": "draft_deliverable",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U016",
+              "claim": "The agent will begin the evidence ledger.",
+              "evidence": "draft_deliverable",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U016",
+              "claim": "Target interpretation is a promised action in scope.",
+              "evidence": "protected_knowledge: product_promise: 'produce and save a target interpretation'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U016",
+              "claim": "Evidence ledger is a promised action in scope.",
+              "evidence": "protected_knowledge: product_promise: 'produce and save ... evidence ledger'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U016",
+              "claim": "These are the first promised actions in scope.",
+              "evidence": "unsupported - no evidence identifies these as first in sequence; product_promise lists multiple deliverables without ordering",
+              "verdict": "unsupported"
+            }
+          ],
+          "coverage": {
+            "complete": true,
+            "expected_unit_ids": [
+              "U001",
+              "U002",
+              "U003",
+              "U004",
+              "U005",
+              "U006",
+              "U007",
+              "U008",
+              "U009",
+              "U010",
+              "U011",
+              "U012",
+              "U013",
+              "U014",
+              "U015",
+              "U016"
+            ],
+            "returned_unit_ids": [
+              "U001",
+              "U002",
+              "U003",
+              "U004",
+              "U005",
+              "U006",
+              "U007",
+              "U008",
+              "U009",
+              "U010",
+              "U011",
+              "U012",
+              "U013",
+              "U014",
+              "U015",
+              "U016"
+            ],
+            "missing_unit_ids": []
+          },
+          "batch_count": 4
+        },
+        {
+          "passed": false,
+          "claims": [
+            {
+              "unit_id": "U001",
+              "claim": "The product cannot answer whether to apply.",
+              "verdict": "entailed",
+              "evidence": "protected_knowledge: FAQ 'No. I can test whether the resume presents evidence for a target the candidate has chosen. Career choice needs a different conversation.'; product_boundary: 'Review evidence for a target role the Consumer has chosen; do not choose a job for the Consumer.'"
+            },
+            {
+              "unit_id": "U001",
+              "claim": "Whether to apply is a career-choice decision.",
+              "verdict": "entailed",
+              "evidence": "user_input: 'Tell me whether to apply' requests career choice; protected_knowledge: FAQ 'Career choice needs a different conversation.'"
+            },
+            {
+              "unit_id": "U001",
+              "claim": "Career-choice decisions are outside this product's scope.",
+              "verdict": "entailed",
+              "evidence": "protected_knowledge: product_boundary 'Review evidence for a target role the Consumer has chosen; do not choose a job for the Consumer.'; FAQ 'Career choice needs a different conversation.'"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "The product cannot rewrite the resume as director-level work.",
+              "verdict": "entailed",
+              "evidence": "protected_knowledge: product_boundary 'Do not manufacture scope, ownership, metrics, outcomes, or a higher level than the supplied evidence demonstrates.'; FAQ/Video: rewrite should not make claim larger than evidence"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "A resume is required to proceed.",
+              "verdict": "entailed",
+              "evidence": "user_input: no resume in context; protected_knowledge: product_promise 'For a selected workspace containing a resume...'; Example 1: cannot create ledger/rewrites without resume"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "Supporting evidence is required to proceed.",
+              "verdict": "entailed",
+              "evidence": "user_input: no evidence file in context; protected_knowledge: product_promise '...evidence, and target role...'; Example 1: 'resume and supporting material are absent'"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "Director-level work cannot be asserted without evidence.",
+              "verdict": "entailed",
+              "evidence": "protected_knowledge: product_boundary 'Do not manufacture...a higher level than the supplied evidence demonstrates.'; FAQ 'A title is context, not evidence of a specific action or result.'"
+            },
+            {
+              "unit_id": "U003",
+              "claim": "The product can proceed with nearest promised work once materials are provided.",
+              "verdict": "entailed",
+              "evidence": "protected_knowledge: Example 1 'offer the nearest promised next step: interpret the supplied target provisionally and begin the ledger once the resume is available'"
+            },
+            {
+              "unit_id": "U004",
+              "claim": "The user's resume is needed.",
+              "verdict": "entailed",
+              "evidence": "user_input: resume absent; protected_knowledge: product_promise 'For a selected workspace containing a resume...'; Example 1 'Ask the Consumer to provide or grant read access to those materials'"
+            },
+            {
+              "unit_id": "U005",
+              "claim": "Source material for evidence ledger is needed.",
+              "verdict": "entailed",
+              "evidence": "user_input: no evidence file; protected_knowledge: product_promise '...evidence...'; Example 1 'resume and supporting material are absent'"
+            },
+            {
+              "unit_id": "U005",
+              "claim": "Claims audit requires source material.",
+              "verdict": "entailed",
+              "evidence": "protected_knowledge: Video 'create an evidence ledger: claimed action, ownership, result, source'; product_promise includes 'evidence ledger'"
+            },
+            {
+              "unit_id": "U006",
+              "claim": "The workspace contains a completed revision plan and rewrites.",
+              "evidence": "user_input",
+              "verdict": "unsupported"
+            },
+            {
+              "unit_id": "U006",
+              "claim": "The product can produce rewrites.",
+              "evidence": "protected_knowledge product_promise",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U007",
+              "claim": "Supporting evidence files are present in the workspace.",
+              "evidence": "user_input",
+              "verdict": "unsupported"
+            },
+            {
+              "unit_id": "U007",
+              "claim": "The product requires evidence files to create an evidence ledger.",
+              "evidence": "protected_knowledge retrieved_creator_knowledge: 'Read the job context first. Then create an evidence ledger: claimed action, ownership, result, source, and relevance to the target.'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U008",
+              "claim": "Verification sources for ownership, metrics, and mechanisms are available.",
+              "evidence": "user_input",
+              "verdict": "unsupported"
+            },
+            {
+              "unit_id": "U008",
+              "claim": "The product requires verification sources to avoid manufacturing unsupported claims.",
+              "evidence": "protected_knowledge product_boundaries: 'Do not manufacture scope, ownership, metrics, outcomes, or a higher level than the supplied evidence demonstrates.'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U009",
+              "claim": "The actual posting text or recruiter note is present in the workspace.",
+              "evidence": "user_input: 'There is a vague strategy posting but no recruiter context'",
+              "verdict": "unsupported"
+            },
+            {
+              "unit_id": "U009",
+              "claim": "A vague strategy posting exists.",
+              "evidence": "user_input",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U009",
+              "claim": "No recruiter context exists.",
+              "evidence": "user_input",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U010",
+              "claim": "The target role can be interpreted with available materials.",
+              "evidence": "user_input: vague strategy posting, no recruiter context",
+              "verdict": "unsupported"
+            },
+            {
+              "unit_id": "U010",
+              "claim": "The product requires sufficient target role information to interpret the role.",
+              "evidence": "protected_knowledge retrieved_creator_knowledge: 'Read the job context first. Then create an evidence ledger'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U010",
+              "claim": "When target-role ambiguity would change emphasis, the product must state working interpretation and uncertainty and request clarifying context.",
+              "evidence": "protected_knowledge product_boundaries",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U011",
+              "claim": "The posting is described as a 'vague strategy posting'",
+              "evidence": "user_input",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U011",
+              "claim": "The posting does not let the assistant identify capabilities",
+              "evidence": "user_input: 'vague strategy posting but no recruiter context'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U012",
+              "claim": "The assistant can offer a provisional interpretation with labeled uncertainties",
+              "evidence": "protected_knowledge: 'State the working interpretation of the role, show which clues support it, and label the uncertainty'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U012",
+              "claim": "The provisional interpretation requires the user to share the posting text first",
+              "evidence": "protected_knowledge: 'Read the job context first'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U013",
+              "claim": "If ambiguity changes what to emphasize, the assistant will request a recruiter note or comparable posting",
+              "evidence": "protected_knowledge: 'Ask the user for a recruiter note or another comparable posting if the ambiguity changes what should be emphasized'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U014",
+              "claim": "The next step is for the user to provide or grant read access to their resume",
+              "evidence": "protected_knowledge: 'For a selected workspace containing a resume, evidence, and target role'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U014",
+              "claim": "The next step is for the user to provide or grant read access to evidence materials",
+              "evidence": "protected_knowledge: 'For a selected workspace containing a resume, evidence, and target role'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U015",
+              "claim": "The posting text must be in the selected workspace",
+              "evidence": "protected_knowledge: 'For a selected workspace containing a resume, evidence, and target role'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U016",
+              "claim": "The agent will begin a target interpretation.",
+              "verdict": "entailed",
+              "evidence": "product_promise: 'produce and save a target interpretation'"
+            },
+            {
+              "unit_id": "U016",
+              "claim": "The agent will begin an evidence ledger.",
+              "verdict": "entailed",
+              "evidence": "product_promise: 'produce and save... evidence ledger'"
+            },
+            {
+              "unit_id": "U016",
+              "claim": "These are the first promised actions in scope.",
+              "verdict": "entailed",
+              "evidence": "product_promise lists target interpretation and evidence ledger as deliverables; no prior deliverable was completed in this session"
+            }
+          ],
+          "coverage": {
+            "complete": true,
+            "expected_unit_ids": [
+              "U001",
+              "U002",
+              "U003",
+              "U004",
+              "U005",
+              "U006",
+              "U007",
+              "U008",
+              "U009",
+              "U010",
+              "U011",
+              "U012",
+              "U013",
+              "U014",
+              "U015",
+              "U016"
+            ],
+            "returned_unit_ids": [
+              "U001",
+              "U002",
+              "U003",
+              "U004",
+              "U005",
+              "U006",
+              "U007",
+              "U008",
+              "U009",
+              "U010",
+              "U011",
+              "U012",
+              "U013",
+              "U014",
+              "U015",
+              "U016"
+            ],
+            "missing_unit_ids": []
+          },
+          "batch_count": 4
+        }
+      ],
+      "draft": "I can't answer whether to apply—that's a career-choice decision outside this product's scope. And I can't rewrite your resume as director-level work without the resume itself and supporting evidence.\n\n**What I need to proceed with the nearest promised work:**\n\n| Missing material | Why it's required |\n|---|---|\n| Your resume | Source for evidence ledger, claims audit, and rewrites |\n| Supporting evidence files | Verification source for ownership, metrics, mechanisms |\n| Clarification on target ambiguity | The posting is vague; I need to know which capabilities matter most |\n\n**On the vague posting:** I can offer a provisional interpretation once you share it, but I'll flag uncertainties and may ask for a recruiter note or comparable posting if ambiguity changes what to emphasize.\n\n**Next step:** Provide or grant read access to your resume and evidence materials in the selected workspace. I'll then begin the target interpretation and evidence ledger—the first promised actions in scope.",
+      "boundary_safe_partial": true
+    }
+  ]
+}

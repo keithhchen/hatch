@@ -1,0 +1,24 @@
+{
+  "kind": "distillation_provider_success_cache_v1",
+  "request": {
+    "controls": {
+      "max_completion_tokens": 8000,
+      "temperature": 0.6,
+      "thinking": {
+        "type": "disabled"
+      }
+    },
+    "endpoint": "https://api.moonshot.cn/v1/chat/completions",
+    "model": "kimi-k2.6",
+    "phase": "distill_source_facts",
+    "request_bytes": 4318,
+    "request_label": "src-course-evidence-workbook-a868fdd6/attempt-1",
+    "request_sha256": "sha256:b54bd3417821f311650c584791f37f1ebc5d43ee03d119e11715afbe6d76c3c7"
+  },
+  "response": "{\"facts\":[{\"unit_id\":\"EU-49A182D01F81\",\"label\":\"Do not fill every field\",\"priority\":1,\"role\":\"boundary\",\"omission\":null},{\"unit_id\":\"EU-2681AE680DE6\",\"label\":\"Capability in plain language not keywords\",\"priority\":1,\"role\":\"quality_bar\",\"omission\":null},{\"unit_id\":\"EU-448131B578B7\",\"label\":\"Name narrower contribution if shared ownership\",\"priority\":1,\"role\":\"quality_bar\",\"omission\":null},{\"unit_id\":\"EU-7DC085DD100B\",\"label\":\"Titles and fluent wording are not evidence\",\"priority\":1,\"role\":\"boundary\",\"omission\":null},{\"unit_id\":\"EU-D06B2419F27C\",\"label\":\"Strong evidence for wrong capability is poor use of space\",\"priority\":1,\"role\":\"priority\",\"omission\":null},{\"unit_id\":\"EU-C75D1DC893B2\",\"label\":\"Four disposition categories for evidence\",\"priority\":1,\"role\":\"sequence\",\"omission\":null},{\"unit_id\":\"EU-0BFE9F00BB8D\",\"label\":\"Five-part final output structure\",\"priority\":1,\"role\":\"output\",\"omission\":null},{\"unit_id\":\"EU-8BABB91EFF50\",\"label\":\"Not a scoring calculator; emphasis changes by target\",\"priority\":1,\"role\":\"boundary\",\"omission\":null}]}",
+  "response_sha256": "sha256:ce67d411d2c5a86d6bd338910ad7f82a6ef4632e1d04ed64d3d06c2ad81eba45",
+  "terminal": {
+    "choice_count": 1,
+    "finish_reason": "stop"
+  }
+}

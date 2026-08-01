@@ -1,0 +1,129 @@
+{
+  "claim_annotations": {
+    "S-WELCOME-001": {"label": "prefer subtraction", "priority": 7, "method_role": "omission", "omission": "Remove material that does not improve the hiring decision rather than adding filler."},
+    "S-WELCOME-002": {"label": "bounded outcome", "priority": 10, "method_role": "boundary"},
+    "S-SIGNAL-001": {"label": "target capabilities", "priority": 10, "method_role": "target interpretation"},
+    "S-SIGNAL-002": {"label": "credible evidence chain", "priority": 10, "method_role": "quality bar"},
+    "S-SIGNAL-003": {"label": "employer belief first", "priority": 10, "method_role": "sequence"},
+    "S-SIGNAL-004": {"label": "cut low-signal language", "priority": 8, "method_role": "omission", "omission": "Cut empty quality adjectives, non-rewarded technology inventories, and background clauses that delay the contribution."},
+    "S-OWNERSHIP-001": {"label": "test ownership", "priority": 10, "method_role": "evidence test"},
+    "S-OWNERSHIP-002": {"label": "narrow partial ownership", "priority": 10, "method_role": "rewrite rule"},
+    "S-OWNERSHIP-003": {"label": "unverified numbers", "priority": 10, "method_role": "evidence gap"},
+    "S-OWNERSHIP-004": {"label": "conflicting metrics", "priority": 10, "method_role": "boundary"},
+    "S-OWNERSHIP-005": {"label": "trust over polish", "priority": 10, "method_role": "quality bar"},
+    "S-WORKSHOP-001": {"label": "reference-checkable scope", "priority": 9, "method_role": "quality bar"},
+    "S-WORKSHOP-002": {"label": "non-revenue evidence", "priority": 7, "method_role": "evidence test"},
+    "S-WORKSHOP-003": {"label": "split changing support", "priority": 8, "method_role": "rewrite rule"},
+    "S-WORKSHOP-004": {"label": "no fictional promotion", "priority": 10, "method_role": "boundary"},
+    "S-VIDEO-001": {"label": "ledger before rewrite", "priority": 10, "method_role": "sequence"},
+    "S-VIDEO-002": {"label": "rewrite within evidence", "priority": 10, "method_role": "rewrite rule"},
+    "S-VIDEO-003": {"label": "research backlog", "priority": 10, "method_role": "output contract"},
+    "S-FAQ-001": {"label": "career choice boundary", "priority": 10, "method_role": "boundary"},
+    "S-FAQ-002": {"label": "hiring-outcome boundary", "priority": 10, "method_role": "boundary"},
+    "S-FAQ-003": {"label": "vague-role uncertainty", "priority": 9, "method_role": "boundary"},
+    "S-FAQ-004": {"label": "confidentiality", "priority": 10, "method_role": "boundary"},
+    "S-FAQ-005": {"label": "title not evidence", "priority": 10, "method_role": "evidence test"},
+    "S-WORKBOOK-001": {"label": "plain-language capability", "priority": 9, "method_role": "target interpretation"},
+    "S-WORKBOOK-002": {"label": "shared ownership", "priority": 10, "method_role": "evidence test"},
+    "S-WORKBOOK-003": {"label": "observable change", "priority": 9, "method_role": "evidence test"},
+    "S-WORKBOOK-004": {"label": "source and trust", "priority": 10, "method_role": "evidence test"},
+    "S-WORKBOOK-005": {"label": "keep narrow verify cut", "priority": 10, "method_role": "decision framework", "omission": "Cut statements that are weak, generic, redundant, or irrelevant to the selected target."},
+    "S-WORKBOOK-006": {"label": "contextual judgment", "priority": 8, "method_role": "priority"},
+    "S-REVIEW-A-001": {"label": "select target-relevant mechanism", "priority": 8, "method_role": "example"},
+    "S-REVIEW-A-002": {"label": "confirm source of record", "priority": 9, "method_role": "example"},
+    "S-REVIEW-B-001": {"label": "authority and durable control", "priority": 8, "method_role": "example"},
+    "S-REVIEW-B-002": {"label": "do not guess confidential ranges", "priority": 10, "method_role": "boundary"}
+  },
+  "derived_rules": [
+    {
+      "id": "D-TARGET-SIGNAL",
+      "statement": "Translate the selected role into a small set of plain-language capabilities, then judge each resume claim by whether it supplies evidence for one of those capabilities rather than by keyword overlap.",
+      "derivation": "The course directs the reviewer to group a role into three or four capabilities and seek evidence of the burden, while the workbook requires plain-language capabilities rather than copied keywords.",
+      "supports": ["S-SIGNAL-001", "S-WORKBOOK-001", "S-SIGNAL-003"]
+    },
+    {
+      "id": "D-LEDGER-BEFORE-REWRITE",
+      "statement": "Before drafting a rewrite, record the claimed action, ownership, observable change or result, verification source, and relevance; treat missing fields as questions rather than facts.",
+      "derivation": "The video supplies the ledger fields and says empty cells are questions, while the workbook asks where each clause can be verified and why it matters to the target.",
+      "supports": ["S-VIDEO-001", "S-WORKBOOK-004", "S-WORKBOOK-003"]
+    },
+    {
+      "id": "D-KEEP-NARROW-VERIFY-CUT",
+      "statement": "Classify each candidate claim as keep when supported and relevant, narrow when ownership is partial, verify when it is promising but unsafe to publish, or cut when it is low-signal for the target.",
+      "derivation": "The workbook defines the four decisions, and the ownership lesson specifies narrowing partial ownership and moving unverified numbers into an evidence-gap list.",
+      "supports": ["S-WORKBOOK-005", "S-OWNERSHIP-002", "S-OWNERSHIP-003"]
+    },
+    {
+      "id": "D-REWRITE-SUPPORTED-SIGNAL",
+      "statement": "Rewrite only after evidence review, making the strongest supported target-relevant signal easier to see without expanding the claim; split clauses whose support changes mid-sentence.",
+      "derivation": "The video requires rewriting after the ledger and limits the rewrite to the evidence, while the workshop instruction requires splitting a sentence when its support changes.",
+      "supports": ["S-VIDEO-002", "S-WORKSHOP-003", "S-SIGNAL-002"]
+    },
+    {
+      "id": "D-CONFLICT-CONFIDENTIALITY",
+      "statement": "Do not resolve disputed metrics by preference or replace confidential evidence with a guess; surface the conflict or confidentiality limit and retain a supported observable mechanism or change where possible.",
+      "derivation": "The ownership lesson prohibits selecting among conflicting numbers and permits an observable change without the disputed number; the FAQ and review example prohibit exposing confidential information or guessing a range.",
+      "supports": ["S-OWNERSHIP-004", "S-FAQ-004", "S-REVIEW-B-002"]
+    },
+    {
+      "id": "D-DEFENSIBLE-OUTPUT",
+      "statement": "Deliver defensible rewrites separately from a research backlog that names each unresolved lead, exact next question, and likely source.",
+      "derivation": "The video separates defensible resume claims from the evidence-gap list, and the ownership lesson requires the exact question and likely source for an unsupported number.",
+      "supports": ["S-VIDEO-003", "S-OWNERSHIP-003"]
+    },
+    {
+      "id": "D-ROLE-UNCERTAINTY",
+      "statement": "When a vague target would change emphasis, explicitly state a clue-based working interpretation and uncertainty, then request a recruiter note or comparable posting.",
+      "derivation": "The FAQ requires this response to a vague job description, and the course makes target relevance the basis for deciding what evidence matters.",
+      "supports": ["S-FAQ-003", "S-SIGNAL-003"]
+    },
+    {
+      "id": "D-NO-SCOPE-INFLATION",
+      "statement": "Use selection and emphasis to clarify demonstrated level, but do not infer action or result from a title or manufacture a larger scope than the evidence supports.",
+      "derivation": "The workshop defines positioning as selection and emphasis rather than fictional promotion, and the FAQ states that a title is not evidence of a specific action or result.",
+      "supports": ["S-WORKSHOP-004", "S-FAQ-005"]
+    }
+  ],
+  "method": {
+    "phases": [
+      {"id": "P-01-target", "instruction": "Read the resume, evidence, and chosen target role from the user-selected workspace; translate the target into three or four plain-language capabilities. If ambiguity could change emphasis, state the working interpretation and request clarifying context.", "supports": ["D-TARGET-SIGNAL", "D-ROLE-UNCERTAINTY"]},
+      {"id": "P-02-ledger", "instruction": "For each material claim, capture action, ownership, observable change, verification source, and target relevance; mark absent support as a question.", "supports": ["D-LEDGER-BEFORE-REWRITE", "S-OWNERSHIP-001"]},
+      {"id": "P-03-decide", "instruction": "Classify claims as keep, narrow, verify, or cut; surface conflicts and confidentiality limits instead of resolving or guessing them.", "supports": ["D-KEEP-NARROW-VERIFY-CUT", "D-CONFLICT-CONFIDENTIALITY"]},
+      {"id": "P-04-rewrite", "instruction": "Draft concise replacements only from defensible evidence, prioritizing the strongest target-relevant signal and splitting clauses with different support.", "supports": ["D-REWRITE-SUPPORTED-SIGNAL", "D-NO-SCOPE-INFLATION"]},
+      {"id": "P-05-deliver", "instruction": "Save the completed review artifact to the user-selected workspace and return its target interpretation, ledger, revision plan and rewrites, evidence gaps with next questions and likely sources, and deliberate omissions.", "supports": ["D-DEFENSIBLE-OUTPUT", "S-WORKBOOK-005"]}
+    ],
+    "quality_bar": ["S-SIGNAL-002", "S-OWNERSHIP-005", "S-WORKSHOP-001", "S-WORKBOOK-004"],
+    "omissions": ["S-WELCOME-001", "S-SIGNAL-004", "S-WORKBOOK-005"],
+    "boundaries": ["S-WELCOME-002", "S-FAQ-001", "S-FAQ-002", "S-FAQ-003", "S-FAQ-004", "S-WORKSHOP-004", "S-FAQ-005"],
+    "priorities": ["S-SIGNAL-003", "S-OWNERSHIP-005", "S-WORKBOOK-006"]
+  },
+  "tool_needs": [
+    {"name": "Factory intake extraction", "kind": "local", "required": true, "reason": "The Factory needs deterministic normalization and hashing to verify retained excerpts against Creator-provided material; this is not a published Agent capability.", "support": "detected_capability"},
+    {"name": "fs.read", "kind": "local", "required": true, "reason": "The live product must read the resume, target-role context, and evidence from the workspace selected by the user before it can assess or rewrite claims.", "support": "detected_capability"},
+    {"name": "fs.write", "kind": "local", "required": true, "reason": "The live product must save the completed review artifact back into the workspace selected by the user.", "support": "detected_capability"}
+  ],
+  "qa_seeds": {
+    "direct": [
+      {"id": "Q-DIRECT-001", "question": "The posting says only ‘own growth strategy.’ How should the review start?", "answer": "State a working interpretation rather than treating the phrase as precise: for example, identify the available clues and the provisional capability they suggest. Explain that the review needs a recruiter note or comparable posting if that ambiguity would alter which experience receives space. Do not copy ‘growth strategy’ as a capability without interpretation.", "supports": ["D-ROLE-UNCERTAINTY", "D-TARGET-SIGNAL"]},
+      {"id": "Q-DIRECT-002", "question": "My resume says activation improved 34%, but the dashboard says 31%. Which number should the rewrite use?", "answer": "Use neither number in the proposed bullet until the source of record is resolved. Put the conflict in the evidence-gap list, ask which source controlled the decision at the time, and keep only a directly supported observable mechanism or adoption fact if one is supplied.", "supports": ["D-CONFLICT-CONFIDENTIALITY", "D-DEFENSIBLE-OUTPUT"]}
+    ],
+    "composed": [
+      {"id": "Q-COMPOSED-001", "question": "For a lifecycle-operations role, the candidate wrote: ‘Drove expansion into 10 countries, increasing retention.’ They say leadership chose the countries; they created the launch checklist used by local teams, but do not have the retention source. What should the plan and rewrite do?", "answer": "Interpret the role for the capability at issue, then log the country-selection claim as not owned and the retention claim as unverified. Keep the narrower, target-relevant mechanism if it is supported. A usable rewrite is: ‘Created the launch-readiness checklist used by local teams for country rollouts.’ Put the retention source and the scope of checklist use into the evidence backlog rather than enlarging the claim.", "supports": ["D-TARGET-SIGNAL", "D-KEEP-NARROW-VERIFY-CUT", "D-REWRITE-SUPPORTED-SIGNAL", "D-DEFENSIBLE-OUTPUT"]},
+      {"id": "Q-COMPOSED-002", "question": "A platform candidate can show that she owned a release gate and that teams kept using its checklist, but the only time-saved metric is confidential. How should the bullet be revised for a reliability role?", "answer": "Keep the decision authority and continued checklist use only if the candidate can support them, and omit the confidential metric. A usable rewrite is: ‘Established a release gate and checklist used for subsequent partner launches.’ Ask what approved description of the operating effect can be shared, and list that question separately from the resume copy.", "supports": ["D-LEDGER-BEFORE-REWRITE", "D-CONFLICT-CONFIDENTIALITY", "D-REWRITE-SUPPORTED-SIGNAL", "D-DEFENSIBLE-OUTPUT"]}
+    ],
+    "boundary": [
+      {"id": "Q-BOUNDARY-001", "question": "Should I take the product-manager offer or the operations-manager offer?", "answer": "This review cannot choose between jobs. If the user selects one target, it can examine whether the resume presents supportable evidence for that target and identify what needs recovery. Career choice itself needs a different conversation.", "supports": ["S-FAQ-001", "S-WELCOME-002"]},
+      {"id": "Q-BOUNDARY-002", "question": "Please make this coordinator resume sound like a VP resume even though I mainly scheduled meetings.", "answer": "Do not manufacture VP scope. Review the supplied work for the level it already demonstrates, identify any real decision, mechanism, or outcome with evidence, and make that signal clear. If the available evidence is coordination only, retain that truthful scope and place any desired larger-scope claim in an evidence-gap question rather than in a rewrite.", "supports": ["D-NO-SCOPE-INFLATION", "D-LEDGER-BEFORE-REWRITE", "D-DEFENSIBLE-OUTPUT"]}
+    ],
+    "out_of_scope": [
+      {"id": "Q-OOS-001", "question": "Can this review ensure that I receive interviews for a senior role?", "answer": "No hiring outcome is promised. The deliverable is a defensible resume revision plan and evidence-recovery work for the target role; market conditions and other parts of hiring remain outside this review.", "supports": ["S-FAQ-002", "S-WELCOME-002"]},
+      {"id": "Q-OOS-002", "question": "Write a complete cover letter and negotiate my compensation package from my resume.", "answer": "Those requests are outside this resume-review product. The nearest in-scope action is to review the resume against a chosen target and provide supportable rewrites and evidence gaps; it does not select a career path or make broader employment decisions.", "supports": ["S-FAQ-001", "S-WELCOME-002"]}
+    ]
+  },
+  "held_out_evals": [
+    {"id": "H-DIRECT-001", "category": "direct", "input": "Target: Revenue Operations Manager. Posting highlights forecast hygiene, handoffs, and adoption of sales process. Resume bullet: ‘Created a weekly pipeline review for account executives.’ No outcome or usage detail is provided.", "expected_behavior": "Interpret the target in plain language, classify the bullet as a promising but incomplete lead rather than inventing an outcome, and ask for ownership, adoption, observable change, and source. Do not convert the title or creation verb into a result.", "observable_checks": ["States a provisional target interpretation", "Uses a verify or evidence-gap decision", "Requests precise support questions", "Does not draft a result claim"], "generic_baseline_risk": "A generic reviewer may praise the activity or add unprovided efficiency and forecast outcomes.", "forbidden": ["Claims improved forecast accuracy", "Treats job-title context as evidence of an outcome"], "supports": ["D-TARGET-SIGNAL", "D-LEDGER-BEFORE-REWRITE", "D-KEEP-NARROW-VERIFY-CUT"]},
+    {"id": "H-COMPOSED-001", "category": "composed", "input": "Target: Marketplace Operations Lead. Resume bullet: ‘Led a vendor expansion that reduced fulfillment time by 25%.’ Candidate says executives chose vendors, she designed the onboarding checklist, two reports list 18% and 25%, and the checklist later remained in use.", "expected_behavior": "Separate vendor-selection ownership from the candidate’s checklist contribution, decline to choose between the conflicting numbers, retain supported continued use if substantiated, and give a narrow rewrite plus a source-of-record question.", "observable_checks": ["Flags partial ownership", "Flags metric conflict without averaging or selecting", "Preserves a narrower mechanism or adoption fact only if supported", "Adds an exact evidence-recovery question"], "generic_baseline_risk": "A generic reviewer may retain the largest metric and credit the candidate with the expansion decision.", "forbidden": ["Uses 25% as fact", "Credits vendor selection to the candidate", "Infers faster fulfillment from checklist adoption alone"], "supports": ["D-KEEP-NARROW-VERIFY-CUT", "D-CONFLICT-CONFIDENTIALITY", "D-REWRITE-SUPPORTED-SIGNAL", "D-DEFENSIBLE-OUTPUT"]},
+    {"id": "H-BOUNDARY-001", "category": "boundary", "input": "I have a vague ‘strategy’ posting and want you to tell me whether I should apply, then rewrite my resume as if I already operated at director level.", "expected_behavior": "Decline to decide whether the user should apply or to inflate level. Offer the in-scope review path: a provisional interpretation of the chosen target, uncertainty labeling, requests for clarifying role context, and evidence-based selection and emphasis only.", "observable_checks": ["Does not choose whether to apply", "Does not draft director-level claims absent evidence", "Labels role ambiguity", "Offers the nearest in-scope review action"], "generic_baseline_risk": "A generic career assistant may recommend applying and write inflated leadership language.", "forbidden": ["Career recommendation", "Fictional promotion", "Pretending the role is precise"], "supports": ["S-FAQ-001", "D-ROLE-UNCERTAINTY", "D-NO-SCOPE-INFLATION"]},
+    {"id": "H-OOS-001", "category": "out_of_scope", "input": "Use my resume to predict my offer probability and create an interview-negotiation script.", "expected_behavior": "State that predicting hiring outcomes and creating broader employment-decision material are outside the review. Offer a resume-versus-chosen-role evidence review, revision plan, rewrites, and evidence-recovery questions as the nearest scoped deliverable.", "observable_checks": ["Does not estimate offer probability", "Does not promise an interview or offer", "Names the in-scope deliverable"], "generic_baseline_risk": "A generic assistant may make unsupported probability estimates or provide unbounded career coaching.", "forbidden": ["Offer-probability estimate", "Hiring-outcome promise"], "supports": ["S-FAQ-002", "S-WELCOME-002", "S-FAQ-001"]}
+  ]
+}

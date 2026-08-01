@@ -1,0 +1,24 @@
+{
+  "kind": "distillation_provider_success_cache_v1",
+  "request": {
+    "controls": {
+      "max_completion_tokens": 8000,
+      "temperature": 0.6,
+      "thinking": {
+        "type": "disabled"
+      }
+    },
+    "endpoint": "https://api.moonshot.cn/v1/chat/completions",
+    "model": "kimi-k2.6",
+    "phase": "distill_source_facts",
+    "request_bytes": 3914,
+    "request_label": "src-course-01-lesson-signal-before-language-5bde528b/attempt-1",
+    "request_sha256": "sha256:22f7ffdc4864a4ba0d47d37db394d6c0ab564686d880c9f33fed8315b409ba85"
+  },
+  "response": "{\"facts\":[{\"unit_id\":\"EU-8BE6845804CC\",\"label\":\"Start with target role capabilities, not sentence polish\",\"priority\":1,\"role\":\"sequence\",\"omission\":null},{\"unit_id\":\"EU-7807FEF5A597\",\"label\":\"Evidence chain over metric presence\",\"priority\":1,\"role\":\"quality_bar\",\"omission\":null},{\"unit_id\":\"EU-51BC372075FE\",\"label\":\"Relevance from target, not static checklist\",\"priority\":1,\"role\":\"priority\",\"omission\":null},{\"unit_id\":\"EU-B0AEC7176359\",\"label\":\"Reject formula-first bullet writing\",\"priority\":1,\"role\":\"omission\",\"omission\":\"Does not use or endorse 'verb + task + metric' as a starting framework; deliberately avoids applying it before ownership, source, and relevance are verified\"},{\"unit_id\":\"EU-E84DC456A830\",\"label\":\"Cut quality-announcement adjectives and waiting clauses\",\"priority\":1,\"role\":\"boundary\",\"omission\":null}]}",
+  "response_sha256": "sha256:65ecf9fae6b9f9a6b63b429b30af4aa0173d0005ff66701fd8478112461d5e4c",
+  "terminal": {
+    "choice_count": 1,
+    "finish_reason": "stop"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "kind": "distillation_provider_success_cache_v1",
+  "request": {
+    "controls": {
+      "max_completion_tokens": 8000,
+      "temperature": 0.6,
+      "thinking": {
+        "type": "disabled"
+      }
+    },
+    "endpoint": "https://api.moonshot.cn/v1/chat/completions",
+    "model": "kimi-k2.6",
+    "phase": "distill_source_facts",
+    "request_bytes": 3828,
+    "request_label": "src-course-02-lesson-ownership-and-evidence-c66ac1e2/attempt-1",
+    "request_sha256": "sha256:b64ea03b1b078a1059170f1f3435204142b828ac4587944c48db4330eb2093e9"
+  },
+  "response": "{\"facts\":[{\"unit_id\":\"EU-B671DC606B19\",\"label\":\"Separate company outcomes from personal achievements\",\"priority\":1,\"role\":\"priority\",\"omission\":null},{\"unit_id\":\"EU-F4D91DA22441\",\"label\":\"Strong evidence requires decision, mechanism, period, source\",\"priority\":1,\"role\":\"quality_bar\",\"omission\":null},{\"unit_id\":\"EU-D3FF0B0C1A70\",\"label\":\"Partial ownership: narrow verb, name contribution\",\"priority\":1,\"role\":\"output\",\"omission\":null},{\"unit_id\":\"EU-A2B37F18CD76\",\"label\":\"Unverifiable numbers omitted from resume, preserved in evidence-gap list\",\"priority\":1,\"role\":\"omission\",\"omission\":\"Does not publish unverifiable numbers as fact; does not erase them from research process\"},{\"unit_id\":\"EU-D50B77EC22CA\",\"label\":\"Conflicting numbers: show conflict, ask source, or rewrite without disputed number\",\"priority\":1,\"role\":\"sequence\",\"omission\":null},{\"unit_id\":\"EU-625FB52BC2B8\",\"label\":\"Trust outranks formatting polish\",\"priority\":1,\"role\":\"priority\",\"omission\":null}]}",
+  "response_sha256": "sha256:f60a753e6536203d8fb23b6cca497fc9095e246bd2b20fd9626c09387d8e447d",
+  "terminal": {
+    "choice_count": 1,
+    "finish_reason": "stop"
+  }
+}

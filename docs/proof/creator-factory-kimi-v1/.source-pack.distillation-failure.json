@@ -1,0 +1,293 @@
+{
+  "calls": [
+    {
+      "cache_hit": true,
+      "controls": {
+        "max_completion_tokens": 8000,
+        "temperature": 0.6,
+        "thinking": {
+          "type": "disabled"
+        }
+      },
+      "endpoint": "https://api.moonshot.cn/v1",
+      "model": "kimi-k2.6",
+      "phase": "distill_source_facts",
+      "request_label": "src-course-00-course-welcome-a38d9a48/attempt-1",
+      "request_sha256": "sha256:3063e967f7f07706bdc1376510f25dbc0f170182d70c492ee3c662a41b13126f",
+      "response_characters": 518,
+      "response_sha256": "sha256:ebc24e843a06886501de63303f0bc0d76f5eb1bfc6e48bd0740136c58d57c813",
+      "status": "complete_text"
+    },
+    {
+      "cache_hit": true,
+      "controls": {
+        "max_completion_tokens": 8000,
+        "temperature": 0.6,
+        "thinking": {
+          "type": "disabled"
+        }
+      },
+      "endpoint": "https://api.moonshot.cn/v1",
+      "model": "kimi-k2.6",
+      "phase": "distill_source_facts",
+      "request_label": "src-course-01-lesson-signal-before-language-5bde528b/attempt-1",
+      "request_sha256": "sha256:22f7ffdc4864a4ba0d47d37db394d6c0ab564686d880c9f33fed8315b409ba85",
+      "response_characters": 832,
+      "response_sha256": "sha256:65ecf9fae6b9f9a6b63b429b30af4aa0173d0005ff66701fd8478112461d5e4c",
+      "status": "complete_text"
+    },
+    {
+      "cache_hit": true,
+      "controls": {
+        "max_completion_tokens": 8000,
+        "temperature": 0.6,
+        "thinking": {
+          "type": "disabled"
+        }
+      },
+      "endpoint": "https://api.moonshot.cn/v1",
+      "model": "kimi-k2.6",
+      "phase": "distill_source_facts",
+      "request_label": "src-course-02-lesson-ownership-and-evidence-c66ac1e2/attempt-1",
+      "request_sha256": "sha256:b64ea03b1b078a1059170f1f3435204142b828ac4587944c48db4330eb2093e9",
+      "response_characters": 973,
+      "response_sha256": "sha256:f60a753e6536203d8fb23b6cca497fc9095e246bd2b20fd9626c09387d8e447d",
+      "status": "complete_text"
+    },
+    {
+      "cache_hit": true,
+      "controls": {
+        "max_completion_tokens": 8000,
+        "temperature": 0.6,
+        "thinking": {
+          "type": "disabled"
+        }
+      },
+      "endpoint": "https://api.moonshot.cn/v1",
+      "model": "kimi-k2.6",
+      "phase": "distill_source_facts",
+      "request_label": "src-course-03-workshop-notes-ffc6803b/attempt-1",
+      "request_sha256": "sha256:ef21ce27afda08c72f06b645280cd7690b87fbe33c4983b372fa5d9da1ec1a3d",
+      "response_characters": 637,
+      "response_sha256": "sha256:a53885378798c727ba10b26a407a631247b597fa2206e3960373199dd99c4ea5",
+      "status": "complete_text"
+    },
+    {
+      "cache_hit": true,
+      "controls": {
+        "max_completion_tokens": 8000,
+        "temperature": 0.6,
+        "thinking": {
+          "type": "disabled"
+        }
+      },
+      "endpoint": "https://api.moonshot.cn/v1",
+      "model": "kimi-k2.6",
+      "phase": "distill_source_facts",
+      "request_label": "src-course-04-video-lesson-ff71f644/attempt-1",
+      "request_sha256": "sha256:993198d49ac80e4a0d3390730ece474d55849bfa4c6a917a823b8f897b34c61b",
+      "response_characters": 493,
+      "response_sha256": "sha256:1b6eef92846bf8aa215e0427e23b8ff4d9a5d53c4abfd2d267917c1e52d8849b",
+      "status": "complete_text"
+    },
+    {
+      "cache_hit": true,
+      "controls": {
+        "max_completion_tokens": 8000,
+        "temperature": 0.6,
+        "thinking": {
+          "type": "disabled"
+        }
+      },
+      "endpoint": "https://api.moonshot.cn/v1",
+      "model": "kimi-k2.6",
+      "phase": "distill_source_facts",
+      "request_label": "src-course-05-office-hours-faq-c7ce5f52/attempt-1",
+      "request_sha256": "sha256:fc963ec198c3f7206043a9ddacd3323397fa47db60496872f9990fc864a4579c",
+      "response_characters": 703,
+      "response_sha256": "sha256:3415ac34e833aedfdd2303b88eb29acc83c6e7f4ae7db424b575446a1247d446",
+      "status": "complete_text"
+    },
+    {
+      "cache_hit": true,
+      "controls": {
+        "max_completion_tokens": 8000,
+        "temperature": 0.6,
+        "thinking": {
+          "type": "disabled"
+        }
+      },
+      "endpoint": "https://api.moonshot.cn/v1",
+      "model": "kimi-k2.6",
+      "phase": "distill_source_facts",
+      "request_label": "src-course-evidence-workbook-a868fdd6/attempt-1",
+      "request_sha256": "sha256:b54bd3417821f311650c584791f37f1ebc5d43ee03d119e11715afbe6d76c3c7",
+      "response_characters": 1052,
+      "response_sha256": "sha256:ce67d411d2c5a86d6bd338910ad7f82a6ef4632e1d04ed64d3d06c2ad81eba45",
+      "status": "complete_text"
+    },
+    {
+      "cache_hit": true,
+      "controls": {
+        "max_completion_tokens": 8000,
+        "temperature": 0.6,
+        "thinking": {
+          "type": "disabled"
+        }
+      },
+      "endpoint": "https://api.moonshot.cn/v1",
+      "model": "kimi-k2.6",
+      "phase": "distill_source_facts",
+      "request_label": "src-prior-work-review-a-98463ca9/attempt-1",
+      "request_sha256": "sha256:1f8cbd6223fa68dd7079d4e83ad29a4c913c4fc4db501ca62a04b7f994e126b1",
+      "response_characters": 797,
+      "response_sha256": "sha256:e166dcccf77c53ca94a8f6bd1b2c4c4c8d19a406311e49f886dc88c7d14d0c62",
+      "status": "complete_text"
+    },
+    {
+      "cache_hit": true,
+      "controls": {
+        "max_completion_tokens": 8000,
+        "temperature": 0.6,
+        "thinking": {
+          "type": "disabled"
+        }
+      },
+      "endpoint": "https://api.moonshot.cn/v1",
+      "model": "kimi-k2.6",
+      "phase": "distill_source_facts",
+      "request_label": "src-prior-work-review-b-89ae54f0/attempt-1",
+      "request_sha256": "sha256:ecc23c66b7e10ba2bfbefdbdf7906de8264206a2bff1c6ac822c14a88521905a",
+      "response_characters": 1006,
+      "response_sha256": "sha256:2f166100f9d9bc7d70c9107c053607d44ddf60c666be83642b34e33e18bd7dce",
+      "status": "complete_text"
+    },
+    {
+      "cache_hit": false,
+      "controls": {
+        "max_completion_tokens": 8000,
+        "temperature": 0.6,
+        "thinking": {
+          "type": "disabled"
+        }
+      },
+      "endpoint": "https://api.moonshot.cn/v1",
+      "model": "kimi-k2.6",
+      "phase": "synthesize_agent_product_core",
+      "request_label": "validated-product-core/attempt-1",
+      "request_sha256": "sha256:a54d820de347504def0dae373954ebd285fc070f85fa8ef239496f6d5cab80e3",
+      "response_characters": 9048,
+      "response_sha256": "sha256:38cb5c49573bdad9542203ef4b10b87ea2fb597c483054c543cf7959a0dc11c4",
+      "status": "complete_text"
+    },
+    {
+      "cache_hit": false,
+      "controls": {
+        "max_completion_tokens": 8000,
+        "temperature": 0.6,
+        "thinking": {
+          "type": "disabled"
+        }
+      },
+      "endpoint": "https://api.moonshot.cn/v1",
+      "model": "kimi-k2.6",
+      "phase": "synthesize_agent_method",
+      "request_label": "validated-method/attempt-1",
+      "request_sha256": "sha256:8c9e3b40a8b18a079ad3b403cdf9464c00552c4c2be23017d832652d16c2dc4b",
+      "response_characters": 4730,
+      "response_sha256": "sha256:5f39476f3fabed73728bce4cfbcb68ceb152c9d00fe42ca1a6bea9992fea34d6",
+      "status": "complete_text"
+    },
+    {
+      "cache_hit": false,
+      "controls": {
+        "max_completion_tokens": 8000,
+        "temperature": 0.6,
+        "thinking": {
+          "type": "disabled"
+        }
+      },
+      "endpoint": "https://api.moonshot.cn/v1",
+      "model": "kimi-k2.6",
+      "phase": "expand_agent_synthetic_qa",
+      "request_label": "synthetic-qa/attempt-1",
+      "request_sha256": "sha256:f3f5045a4b5b38b7f0895c3c6bd0bc38356d74a52e31810e3c9aa83350b10e3c",
+      "response_characters": 3277,
+      "response_sha256": "sha256:e8d39488207e5805efa2b81a266bb8926f1d0eb008d71c983b9e4607c1c7c31f",
+      "status": "rejected_by_local_validation",
+      "validation_errors": [
+        "all four synthetic QA categories are required"
+      ]
+    },
+    {
+      "cache_hit": false,
+      "controls": {
+        "max_completion_tokens": 8000,
+        "temperature": 0.6,
+        "thinking": {
+          "type": "disabled"
+        }
+      },
+      "endpoint": "https://api.moonshot.cn/v1",
+      "model": "kimi-k2.6",
+      "phase": "expand_agent_synthetic_qa",
+      "request_label": "synthetic-qa/attempt-2",
+      "request_sha256": "sha256:f43f0282886f46f0963035cf86f0dfd3f2c05cb99a4260820631d3a85ffa16f2",
+      "response_characters": 4718,
+      "response_sha256": "sha256:70f0cd2834500f92592c75efdeaeebc33eae948e11a325e83aefe99206289441",
+      "status": "rejected_by_local_validation",
+      "validation_errors": [
+        "all four synthetic QA categories are required"
+      ]
+    },
+    {
+      "cache_hit": false,
+      "controls": {
+        "max_completion_tokens": 8000,
+        "temperature": 0.6,
+        "thinking": {
+          "type": "disabled"
+        }
+      },
+      "endpoint": "https://api.moonshot.cn/v1",
+      "model": "kimi-k2.6",
+      "phase": "expand_agent_synthetic_qa",
+      "request_label": "synthetic-qa/attempt-3",
+      "request_sha256": "sha256:9acbbbc693b3361ee21c4c28a73736bc3a64a94a615d9dda497147db311ca81d",
+      "response_characters": 4717,
+      "response_sha256": "sha256:292d0cba714c791bdcbf36513031ac6473dea09bdedab659b9032ffcf614b7c9",
+      "status": "rejected_by_local_validation",
+      "validation_errors": [
+        "all four synthetic QA categories are required"
+      ]
+    }
+  ],
+  "controls": {
+    "max_completion_tokens": 8000,
+    "temperature": 0.6,
+    "thinking": {
+      "type": "disabled"
+    }
+  },
+  "endpoint": "https://api.moonshot.cn/v1",
+  "error": "expand_agent_synthetic_qa/synthetic-qa: invalid after 3 bounded attempts: ['all four synthetic QA categories are required']",
+  "input_hashes": {
+    "capabilities_sha256": "sha256:0228a14ede48535a2cf2d04e47542a51e37bf16ed78f3a7b76f1258387312b6c",
+    "extracted_documents": {
+      "src-course-00-course-welcome-a38d9a48": "sha256:e81ebd680710b45e131146272158cf8c4bb045126aa92e60c4694cd9ee50dfca",
+      "src-course-01-lesson-signal-before-language-5bde528b": "sha256:8fe503bc914da588ffbf6a6cd0090f193cdcdcd0ffc0f6ccaaf29e5f7c09cd38",
+      "src-course-02-lesson-ownership-and-evidence-c66ac1e2": "sha256:58edb6bdfbc73741b014288b7a0af3c9f3b24c7b511893f12ab15ac746f58f2c",
+      "src-course-03-workshop-notes-ffc6803b": "sha256:8e387cc02ab4a36308a4950b349ee3a0639a310d475ae01a6305fbf861e6091f",
+      "src-course-04-video-lesson-ff71f644": "sha256:8e1f79884b576acd2f07c28df9b7f575868158816018dd8e5fd0263b8babe481",
+      "src-course-05-office-hours-faq-c7ce5f52": "sha256:82bbc88af738c90c0834312586afeacf5b77639164ba21f9a34ddda9fd030abd",
+      "src-course-evidence-workbook-a868fdd6": "sha256:d066a929e496ecbef49451a8f4f2b0cb1f020d6e85d481f1d4998dc5b1636127",
+      "src-prior-work-review-a-98463ca9": "sha256:dc779b82a86f7a2d1e25b7d48a0b36480740b8f565aa5919fe7a99af340b29c7",
+      "src-prior-work-review-b-89ae54f0": "sha256:fb6440f25b74bcc9ef55995cf1dde52d032a62b86e9d59a58da4f3905630d9f0"
+    },
+    "intake_manifest_sha256": "sha256:d79b73f8541148965958fa6846e42f5f7b399f0fea5ed5f1b0e52b46433156bc",
+    "intent_sha256": "sha256:a24feb812ef73e20bea7708f1258af71bc48c5a915826bb2a8fb38f2339f8ef3"
+  },
+  "kind": "kimi_creator_distillation_failure_v1",
+  "model": "kimi-k2.6",
+  "partial_source_pack_written": false
+}

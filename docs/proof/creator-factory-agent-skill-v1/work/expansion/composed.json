@@ -1,0 +1,61 @@
+[
+  {
+    "answer": "Interpret the role for the capability at issue, then log the country-selection claim as not owned and the retention claim as unverified. Keep the narrower, target-relevant mechanism if it is supported. A usable rewrite is: ‘Created the launch-readiness checklist used by local teams for country rollouts.’ Put the retention source and the scope of checklist use into the evidence backlog rather than enlarging the claim.",
+    "category": "composed",
+    "epistemic_class": "synthetic_expansion",
+    "id": "Q-COMPOSED-001",
+    "question": "For a lifecycle-operations role, the candidate wrote: ‘Drove expansion into 10 countries, increasing retention.’ They say leadership chose the countries; they created the launch checklist used by local teams, but do not have the retention source. What should the plan and rewrite do?",
+    "supports": [
+      "D-TARGET-SIGNAL",
+      "D-KEEP-NARROW-VERIFY-CUT",
+      "D-REWRITE-SUPPORTED-SIGNAL",
+      "D-DEFENSIBLE-OUTPUT"
+    ],
+    "trace_closure": [
+      "D-DEFENSIBLE-OUTPUT",
+      "D-KEEP-NARROW-VERIFY-CUT",
+      "D-REWRITE-SUPPORTED-SIGNAL",
+      "D-TARGET-SIGNAL",
+      "S-OWNERSHIP-002",
+      "S-OWNERSHIP-003",
+      "S-SIGNAL-001",
+      "S-SIGNAL-002",
+      "S-SIGNAL-003",
+      "S-VIDEO-002",
+      "S-VIDEO-003",
+      "S-WORKBOOK-001",
+      "S-WORKBOOK-005",
+      "S-WORKSHOP-003"
+    ]
+  },
+  {
+    "answer": "Keep the decision authority and continued checklist use only if the candidate can support them, and omit the confidential metric. A usable rewrite is: ‘Established a release gate and checklist used for subsequent partner launches.’ Ask what approved description of the operating effect can be shared, and list that question separately from the resume copy.",
+    "category": "composed",
+    "epistemic_class": "synthetic_expansion",
+    "id": "Q-COMPOSED-002",
+    "question": "A platform candidate can show that she owned a release gate and that teams kept using its checklist, but the only time-saved metric is confidential. How should the bullet be revised for a reliability role?",
+    "supports": [
+      "D-LEDGER-BEFORE-REWRITE",
+      "D-CONFLICT-CONFIDENTIALITY",
+      "D-REWRITE-SUPPORTED-SIGNAL",
+      "D-DEFENSIBLE-OUTPUT"
+    ],
+    "trace_closure": [
+      "D-CONFLICT-CONFIDENTIALITY",
+      "D-DEFENSIBLE-OUTPUT",
+      "D-LEDGER-BEFORE-REWRITE",
+      "D-REWRITE-SUPPORTED-SIGNAL",
+      "S-FAQ-004",
+      "S-OWNERSHIP-003",
+      "S-OWNERSHIP-004",
+      "S-REVIEW-B-002",
+      "S-SIGNAL-002",
+      "S-VIDEO-001",
+      "S-VIDEO-002",
+      "S-VIDEO-003",
+      "S-WORKBOOK-003",
+      "S-WORKBOOK-004",
+      "S-WORKSHOP-003"
+    ]
+  }
+]

@@ -1,0 +1,38 @@
+{
+  "release_id": "maya-chen-resume-review@1.0.0",
+  "release_digest": "sha256:a90e737ba71d4aa72ebe1996b6f508c58802969037a9eb7087a6b0975e49ccfa",
+  "kind": "semantic_candidate_run",
+  "provider_base_url": "https://api.moonshot.cn/v1",
+  "model": "kimi-k2.6",
+  "model_controls": {
+    "thinking": {
+      "type": "disabled"
+    },
+    "temperature": 0.6,
+    "max_completion_tokens": 3000
+  },
+  "delivery_reviewer": {
+    "base_url": "https://api.moonshot.cn/v1",
+    "model": "kimi-k2.6",
+    "controls": {
+      "thinking": {
+        "type": "disabled"
+      },
+      "temperature": 0.6,
+      "max_completion_tokens": 2500
+    }
+  },
+  "temperature": 0.6,
+  "input_scope": [
+    "held-out-inputs.json"
+  ],
+  "expected_answers_or_checks_exposed": false,
+  "inputs_sha256": "sha256:83962db237bf7c92e91ef1c93821cf375b36aa7e833c4afecc86b9eabbfaae3c",
+  "outputs": [
+    {
+      "id": "H-BOUNDARY-001",
+      "response": "I can’t produce a fully evidence-grounded deliverable from the supplied material without adding unsupported claims. Please provide the missing evidence or narrow the requested scope."
+    }
+  ],
+  "passed": false
+}

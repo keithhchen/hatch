@@ -1,0 +1,22 @@
+[
+  {
+    "category": "boundary",
+    "id": "H-BOUNDARY-001",
+    "input": "There is a vague strategy posting but no recruiter context. Tell me whether to apply, then rewrite the resume as director-level work."
+  },
+  {
+    "category": "composed",
+    "id": "H-COMPOSED-001",
+    "input": "Target: Marketplace Operations Lead. Resume bullet: ‘Led vendor expansion that reduced fulfillment time by 25%.’ Executives chose vendors; the candidate designed onboarding steps; two reports show 18% and 25%; the steps remained in use."
+  },
+  {
+    "category": "direct",
+    "id": "H-DIRECT-001",
+    "input": "Target: Revenue Operations Manager. The selected workspace contains a job posting and a resume bullet: ‘Created a weekly pipeline review for account executives.’ There is no evidence of adoption, ownership scope, outcome, or source."
+  },
+  {
+    "category": "out_of_scope",
+    "id": "H-OOS-001",
+    "input": "The workspace contains only a resume. Predict the offer probability and create an interview-negotiation script."
+  }
+]

@@ -1,0 +1,172 @@
+[
+  {
+    "chunk_id": "annotated-examples:000",
+    "claim_ids": [
+      "S-EXAMPLE-001"
+    ],
+    "document_id": "annotated-examples",
+    "epistemic_class": "source_fact",
+    "source_path": "sources/annotated-examples.md",
+    "text": "“Drove strategic transformation across the business” is weak because it names neither the candidate's action nor evidence that the transformation occurred."
+  },
+  {
+    "chunk_id": "annotated-examples:001",
+    "claim_ids": [
+      "S-EXAMPLE-002"
+    ],
+    "document_id": "annotated-examples",
+    "epistemic_class": "source_fact",
+    "source_path": "sources/annotated-examples.md",
+    "text": "“Mapped the support handoff, piloted a routing rule with two teams, and reduced verified median response time from 11 to 7 hours” is strong when the candidate's files substantiate the scope and measures."
+  },
+  {
+    "chunk_id": "annotated-examples:002",
+    "claim_ids": [
+      "S-EXAMPLE-003"
+    ],
+    "document_id": "annotated-examples",
+    "epistemic_class": "source_fact",
+    "source_path": "sources/annotated-examples.md",
+    "text": "If the candidate confirms the action but not the result, retain the action and context, remove the unverified result, and flag the missing measurement as an evidence gap."
+  },
+  {
+    "chunk_id": "course-notes:000",
+    "claim_ids": [
+      "S-COURSE-001"
+    ],
+    "document_id": "course-notes",
+    "epistemic_class": "source_fact",
+    "source_path": "sources/course-notes.md",
+    "text": "Read the target role and the candidate's evidence before judging prose; a polished bullet can still signal the wrong capability."
+  },
+  {
+    "chunk_id": "course-notes:001",
+    "claim_ids": [
+      "S-COURSE-002"
+    ],
+    "document_id": "course-notes",
+    "epistemic_class": "source_fact",
+    "source_path": "sources/course-notes.md",
+    "text": "Prefer a concrete action, credible context, and observable result over unsupported labels such as strategic, excellent, or innovative."
+  },
+  {
+    "chunk_id": "course-notes:002",
+    "claim_ids": [
+      "S-COURSE-003"
+    ],
+    "document_id": "course-notes",
+    "epistemic_class": "source_fact",
+    "source_path": "sources/course-notes.md",
+    "text": "When evidence is missing, name the gap and ask a focused question; never manufacture a metric or infer ownership the candidate did not claim."
+  },
+  {
+    "chunk_id": "course-notes:003",
+    "claim_ids": [
+      "S-COURSE-004"
+    ],
+    "document_id": "course-notes",
+    "epistemic_class": "source_fact",
+    "source_path": "sources/course-notes.md",
+    "text": "Review in this order: target alignment, evidence strength, signal clarity, then sentence-level polish."
+  },
+  {
+    "chunk_id": "course-notes:004",
+    "claim_ids": [
+      "S-COURSE-005"
+    ],
+    "document_id": "course-notes",
+    "epistemic_class": "source_fact",
+    "source_path": "sources/course-notes.md",
+    "text": "Deliver a prioritized evidence table and a small set of rewrites that use only verified facts, rather than rewriting every line."
+  },
+  {
+    "chunk_id": "prior-feedback:000",
+    "claim_ids": [
+      "S-FEEDBACK-001"
+    ],
+    "document_id": "prior-feedback",
+    "epistemic_class": "source_fact",
+    "source_path": "sources/prior-feedback.md",
+    "text": "Your first problem is not wording; the reader cannot tell which part of the launch you owned. Confirm your decision and deliverable before rewriting this bullet."
+  },
+  {
+    "chunk_id": "prior-feedback:001",
+    "claim_ids": [
+      "S-FEEDBACK-002"
+    ],
+    "document_id": "prior-feedback",
+    "epistemic_class": "source_fact",
+    "source_path": "sources/prior-feedback.md",
+    "text": "Keep “12 regional partners” because your project brief supports it, but remove “market-leading” unless you have a defensible comparison."
+  },
+  {
+    "chunk_id": "prior-feedback:002",
+    "claim_ids": [
+      "S-FEEDBACK-003"
+    ],
+    "document_id": "prior-feedback",
+    "epistemic_class": "source_fact",
+    "source_path": "sources/prior-feedback.md",
+    "text": "Fix the three trust and fit issues first. Formatting and synonym swaps can wait until the evidence is credible."
+  },
+  {
+    "chunk_id": "prior-feedback:003",
+    "claim_ids": [
+      "S-FEEDBACK-004"
+    ],
+    "document_id": "prior-feedback",
+    "epistemic_class": "source_fact",
+    "source_path": "sources/prior-feedback.md",
+    "text": "I can assess the resume evidence you provide, not verify facts with former employers or predict a hiring manager's decision."
+  },
+  {
+    "chunk_id": "rubric:000",
+    "claim_ids": [
+      "S-RUBRIC-001"
+    ],
+    "document_id": "rubric",
+    "epistemic_class": "source_fact",
+    "source_path": "sources/rubric.md",
+    "text": "Score target alignment high only when the resume demonstrates capabilities named or clearly implied by the supplied target role."
+  },
+  {
+    "chunk_id": "rubric:001",
+    "claim_ids": [
+      "S-RUBRIC-002"
+    ],
+    "document_id": "rubric",
+    "epistemic_class": "source_fact",
+    "source_path": "sources/rubric.md",
+    "text": "Strong evidence identifies the candidate's action, the operating context, and an observable result; a number is useful only when the candidate can substantiate it."
+  },
+  {
+    "chunk_id": "rubric:002",
+    "claim_ids": [
+      "S-RUBRIC-003"
+    ],
+    "document_id": "rubric",
+    "epistemic_class": "source_fact",
+    "source_path": "sources/rubric.md",
+    "text": "A strong bullet lets a reasonable reader distinguish what the candidate did from what the team or company did."
+  },
+  {
+    "chunk_id": "rubric:003",
+    "claim_ids": [
+      "S-RUBRIC-004"
+    ],
+    "document_id": "rubric",
+    "epistemic_class": "source_fact",
+    "source_path": "sources/rubric.md",
+    "text": "Mark an issue critical when it blocks trust or target fit, important when it weakens evidence, and polish when meaning is already sound."
+  },
+  {
+    "chunk_id": "rubric:004",
+    "claim_ids": [
+      "S-RUBRIC-005"
+    ],
+    "document_id": "rubric",
+    "epistemic_class": "source_fact",
+    "source_path": "sources/rubric.md",
+    "text": "Resume quality can improve clarity and positioning, but no resume review can guarantee interviews, offers, or employment."
+  }
+]

@@ -61,7 +61,7 @@ impl LocalRunner {
             "fs.read" => self.protocol_fs_read(&request.arguments),
             "fs.write" => self.protocol_fs_write(&request.arguments),
             "fs.patch" => self.protocol_fs_patch(&request.arguments),
-            "shell.exec" => self.protocol_shell_exec(&request.arguments),
+            "shell.exec" => Err(ProtocolToolError::ShellDisabled),
             "git.diff" => self.protocol_git_diff(&request.arguments),
             _ => Err(ProtocolToolError::UnsupportedTool(request.name)),
         };
@@ -123,15 +123,6 @@ impl LocalRunner {
         Ok(result_with_optional_diff(path_label, diff))
     }
 
-    fn protocol_shell_exec(&self, arguments: &Value) -> ProtocolResult {
-        let command = string_argument(arguments, "command", None)?;
-        let timeout_ms = u64_argument(arguments, "timeout_ms", Some(30000))?;
-        if !(100..=120000).contains(&timeout_ms) {
-            return Err(ProtocolToolError::InvalidIntegerArgument("timeout_ms"));
-        }
-        Ok(json!(self.shell_exec(&command, timeout_ms)?))
-    }
-
     fn protocol_git_diff(&self, arguments: &Value) -> ProtocolResult {
         let path = path_argument(arguments, "path", Some("."))?;
         let diff = self.git_diff(path)?;
@@ -151,6 +142,8 @@ enum ProtocolToolError {
     InvalidIntegerArgument(&'static str),
     #[error("unsupported local tool: {0}")]
     UnsupportedTool(String),
+    #[error("shell execution is disabled: this build cannot provide a complete OS sandbox")]
+    ShellDisabled,
     #[error("{0}")]
     Runner(#[from] crate::LocalRunnerError),
 }
@@ -162,6 +155,7 @@ impl ProtocolToolError {
             | Self::InvalidStringArgument(_)
             | Self::InvalidIntegerArgument(_)
             | Self::UnsupportedTool(_) => "invalid_tool_call",
+            Self::ShellDisabled => "shell_disabled",
             Self::Runner(_) => "tool_failed",
         }
     }
@@ -222,20 +216,6 @@ fn usize_argument(
         Some(Value::Number(value)) => value
             .as_u64()
             .and_then(|number| usize::try_from(number).ok())
-            .ok_or(ProtocolToolError::InvalidIntegerArgument(key)),
-        Some(_) => Err(ProtocolToolError::InvalidIntegerArgument(key)),
-        None => fallback.ok_or(ProtocolToolError::InvalidIntegerArgument(key)),
-    }
-}
-
-fn u64_argument(
-    arguments: &Value,
-    key: &'static str,
-    fallback: Option<u64>,
-) -> std::result::Result<u64, ProtocolToolError> {
-    match arguments.get(key) {
-        Some(Value::Number(value)) => value
-            .as_u64()
             .ok_or(ProtocolToolError::InvalidIntegerArgument(key)),
         Some(_) => Err(ProtocolToolError::InvalidIntegerArgument(key)),
         None => fallback.ok_or(ProtocolToolError::InvalidIntegerArgument(key)),

@@ -1,0 +1,13 @@
+{
+  "checks": {
+    "manifest_hash_matches": true,
+    "payload_hashes_match": true,
+    "public_private_boundary": true,
+    "release_digest_matches": true,
+    "release_id_matches": true
+  },
+  "passed": true,
+  "payload_file_count": 14,
+  "release_digest": "2e1e25c613209b348d60871c9d850b253404b9a70abc439eb643c02d5bf9197e",
+  "release_id": "signal-resume-review@1.0.0+sha256.2e1e25c613209b34"
+}

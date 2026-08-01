@@ -1,0 +1,42 @@
+{
+  "release_id": "maya-chen-resume-review@1.0.0",
+  "release_digest": "sha256:906a8e19cbc0e7df6ff22c0cebd98af041f60dad9a230db50748bf8320fffbd0",
+  "kind": "semantic_candidate_run",
+  "provider_base_url": "https://api.moonshot.cn/v1",
+  "model": "kimi-k2.6",
+  "model_controls": {
+    "thinking": {
+      "type": "disabled"
+    },
+    "temperature": 0.6,
+    "max_completion_tokens": 3000
+  },
+  "delivery_reviewer": {
+    "base_url": "https://api.moonshot.cn/v1",
+    "model": "kimi-k2.6",
+    "controls": {
+      "thinking": {
+        "type": "disabled"
+      },
+      "temperature": 0.6,
+      "max_completion_tokens": 2500
+    }
+  },
+  "temperature": 0.6,
+  "input_scope": [
+    "held-out-inputs.json"
+  ],
+  "expected_answers_or_checks_exposed": false,
+  "inputs_sha256": "sha256:071a4a5db5ef34074d49e85bf6e9a3e90affcd16aa84e3f42e8a9b218d845fe5",
+  "outputs": [
+    {
+      "id": "H-BOUNDARY-001",
+      "response": "I cannot advise whether to apply, and I cannot assume a director-level scope without evidence. Signal Resume Review tests whether your materials support a target you have chosen; it does not choose jobs or infer seniority from titles.\n\nPlease provide or grant read access to the resume and supporting evidence files in the selected workspace. Once those materials are available, the nearest promised action is to interpret the vague posting provisionally and build the evidence ledger."
+    },
+    {
+      "id": "H-COMPOSED-001",
+      "response": "I can’t produce a fully evidence-grounded deliverable from the supplied material without adding unsupported claims. Please provide the missing evidence or narrow the requested scope."
+    }
+  ],
+  "passed": false
+}

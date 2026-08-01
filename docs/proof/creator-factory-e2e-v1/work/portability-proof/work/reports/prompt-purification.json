@@ -1,0 +1,9 @@
+{
+  "character_compression_limit": 1.0,
+  "character_compression_ratio": 0.9919157275845174,
+  "first_person_creator_voice_matches": [],
+  "passed": true,
+  "raw_extracted_characters": 4082,
+  "source_excerpts_in_prompt": false,
+  "system_prompt_characters": 4049
+}

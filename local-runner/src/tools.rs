@@ -314,7 +314,9 @@ impl LocalRunner {
                 .filter_entry(|entry| {
                     entry.depth() == 0
                         || !self.sandbox.is_reserved_path(entry.path())
-                            && !is_search_ignored_entry(entry.file_name().to_string_lossy().as_ref())
+                            && !is_search_ignored_entry(
+                                entry.file_name().to_string_lossy().as_ref(),
+                            )
                 });
             for entry in walker {
                 if matches.len() >= max_results
@@ -695,13 +697,12 @@ fn read_xlsx_as_text(path: &Path) -> Result<String> {
     let mut output = Vec::new();
 
     for sheet_name in workbook.sheet_names().to_owned() {
-        let range =
-            workbook
-                .worksheet_range(&sheet_name)
-                .map_err(|source| LocalRunnerError::SpreadsheetRead {
-                    path: path.display().to_string(),
-                    message: source.to_string(),
-                })?;
+        let range = workbook.worksheet_range(&sheet_name).map_err(|source| {
+            LocalRunnerError::SpreadsheetRead {
+                path: path.display().to_string(),
+                message: source.to_string(),
+            }
+        })?;
 
         output.push(format!("# Sheet: {sheet_name}"));
         for row in range.rows() {

@@ -1,0 +1,170 @@
+[
+  {
+    "derivation": "Combines the target-first lesson, the video framing, and the workbook's plain-language capability prompt.",
+    "epistemic_class": "derived_rule",
+    "id": "D-RULE-001",
+    "source_fact_closure": [
+      "S-SIGNAL-001",
+      "S-VIDEO-001",
+      "S-WB-002"
+    ],
+    "statement": "Begin every review by stating the target role interpretation in plain language and naming the two or three beliefs the reader needs evidence for.",
+    "supports": [
+      "S-SIGNAL-001",
+      "S-VIDEO-001",
+      "S-WB-002"
+    ]
+  },
+  {
+    "derivation": "Operationalizes the evidence ledger fields with the ownership, observable-change, and trust requirements.",
+    "epistemic_class": "derived_rule",
+    "id": "D-RULE-002",
+    "source_fact_closure": [
+      "S-OWN-005",
+      "S-VIDEO-002",
+      "S-WB-003",
+      "S-WB-004",
+      "S-WB-005"
+    ],
+    "statement": "For each important resume claim, build an evidence ledger with target relevance, claimed action, ownership, observable change, source, and trust status; any empty or conflicting field becomes an explicit verification question.",
+    "supports": [
+      "S-VIDEO-002",
+      "S-WB-003",
+      "S-WB-004",
+      "S-WB-005",
+      "S-OWN-005"
+    ]
+  },
+  {
+    "derivation": "Combines the workshop's smaller-claim test, the welcome note's subtractive editing, and the trust-over-formatting rule.",
+    "epistemic_class": "derived_rule",
+    "id": "D-RULE-003",
+    "source_fact_closure": [
+      "S-OWN-006",
+      "S-WELCOME-003",
+      "S-WORK-001"
+    ],
+    "statement": "Prefer the smallest defensible claim that preserves useful signal; remove or narrow unsupported scope before improving prose.",
+    "supports": [
+      "S-WELCOME-003",
+      "S-WORK-001",
+      "S-OWN-006"
+    ]
+  },
+  {
+    "derivation": "Combines the anti-formula lesson with the video's rewrite boundary and the welcome note's reader test.",
+    "epistemic_class": "derived_rule",
+    "id": "D-RULE-004",
+    "source_fact_closure": [
+      "S-SIGNAL-004",
+      "S-VIDEO-003",
+      "S-WELCOME-001"
+    ],
+    "statement": "Do not rewrite until target fit and evidence are clear, and never let sentence polish make a claim larger than the support behind it.",
+    "supports": [
+      "S-WELCOME-001",
+      "S-SIGNAL-004",
+      "S-VIDEO-003"
+    ]
+  },
+  {
+    "derivation": "Combines partial-ownership handling, evidence-gap handling, confidentiality limits, and both prior-review examples.",
+    "epistemic_class": "derived_rule",
+    "id": "D-RULE-005",
+    "source_fact_closure": [
+      "S-FAQ-005",
+      "S-OWN-003",
+      "S-OWN-004",
+      "S-RA-004",
+      "S-RB-003"
+    ],
+    "statement": "When ownership is shared or a result is unresolved, confidential, or disputed, keep the supportable mechanism or adoption evidence, narrow the verb, and move the unresolved number into the evidence-gap backlog.",
+    "supports": [
+      "S-OWN-003",
+      "S-OWN-004",
+      "S-FAQ-005",
+      "S-RA-004",
+      "S-RB-003"
+    ]
+  },
+  {
+    "derivation": "Combines the signal lesson's cuts, the FAQ's spacing rule, and the workbook's warning against filling every field.",
+    "epistemic_class": "derived_rule",
+    "id": "D-RULE-006",
+    "source_fact_closure": [
+      "S-FAQ-004",
+      "S-SIGNAL-005",
+      "S-WB-001"
+    ],
+    "statement": "Omit generic adjectives, long inventories, symmetry-driven padding, and other true but irrelevant details when they do not help this specific hiring decision.",
+    "supports": [
+      "S-SIGNAL-005",
+      "S-FAQ-004",
+      "S-WB-001"
+    ]
+  },
+  {
+    "derivation": "Turns the workbook's final output, the video's backlog split, the FAQ's uncertainty guidance, and the welcome note's promised deliverable into an operational contract.",
+    "epistemic_class": "derived_rule",
+    "id": "D-RULE-007",
+    "source_fact_closure": [
+      "S-FAQ-003",
+      "S-VIDEO-004",
+      "S-WB-006",
+      "S-WELCOME-004"
+    ],
+    "statement": "Deliver five separable outputs: target interpretation with uncertainty, an evidence ledger, grounded rewrites, an evidence-gap list with exact next questions, and items deliberately omitted with reasons.",
+    "supports": [
+      "S-WELCOME-004",
+      "S-FAQ-003",
+      "S-VIDEO-004",
+      "S-WB-006"
+    ]
+  },
+  {
+    "derivation": "Unifies the explicit scope boundaries from FAQ, workshop, welcome, and title-evidence rules.",
+    "epistemic_class": "derived_rule",
+    "id": "D-RULE-008",
+    "source_fact_closure": [
+      "S-FAQ-001",
+      "S-FAQ-002",
+      "S-FAQ-003",
+      "S-FAQ-005",
+      "S-FAQ-006",
+      "S-WELCOME-004",
+      "S-WORK-004"
+    ],
+    "statement": "Refuse to choose the user's career path, guarantee hiring outcomes, infer unsupported claims from titles, manufacture seniority, or expose confidential information; when role context is ambiguous, label the uncertainty and ask for clarifying evidence.",
+    "supports": [
+      "S-FAQ-001",
+      "S-FAQ-002",
+      "S-FAQ-003",
+      "S-FAQ-005",
+      "S-FAQ-006",
+      "S-WORK-004",
+      "S-WELCOME-004"
+    ]
+  },
+  {
+    "derivation": "Synthesizes the annotated examples into a repeatable interpretation pattern for revisions.",
+    "epistemic_class": "derived_rule",
+    "id": "D-RULE-009",
+    "source_fact_closure": [
+      "S-RA-001",
+      "S-RA-003",
+      "S-RB-001",
+      "S-RB-002",
+      "S-WORK-002",
+      "S-WORK-003"
+    ],
+    "statement": "In rewrites, prefer concrete systems, decision rights, adoption, and repeatable operating mechanisms over inflated scale language, vague success words, or copied company-level outcomes.",
+    "supports": [
+      "S-RA-001",
+      "S-RA-003",
+      "S-RB-001",
+      "S-RB-002",
+      "S-WORK-002",
+      "S-WORK-003"
+    ]
+  }
+]

@@ -1,0 +1,27 @@
+{
+  "engine": "codex exec",
+  "engine_version": "0.142.5",
+  "model": "gpt-5.4",
+  "session_id": "019fb7e5-77c5-78d3-a180-deddb2293895",
+  "mode": "ephemeral isolated semantic distillation",
+  "creator_inputs": {
+    "directory": "fixtures/creator-factory/maya-signal-resume-raw/raw",
+    "intent_sha256": "a24feb812ef73e20bea7708f1258af71bc48c5a915826bb2a8fb38f2339f8ef3",
+    "intake_manifest_sha256": "e6e4f59f4984a3e6ffc5d9545ae0954aad9ba60294afd897350f8def239a633e",
+    "extracted_tree_sha256": "934d9ec54806c1277f6290b2cd5b0ea8ff72ce38a3bd6cfc4181d2e43294cd09"
+  },
+  "command_shape": "codex exec --ephemeral --dangerously-bypass-approvals-and-sandbox -m gpt-5.4 -C <repo> -o <last-message> <distill raw intake with creator-agent-factory skill into isolated source-pack>",
+  "creator_supplied_technical_configuration": false,
+  "result": {
+    "source_facts": 42,
+    "derived_rules": 9,
+    "synthetic_qa": 8,
+    "held_out_evals": 4,
+    "status": "source_pack_written"
+  },
+  "environment_notes": [
+    "The CLI emitted a stale model-cache warning and an unrelated MCP OAuth invalid_grant warning.",
+    "The core model run still wrote the isolated source pack and its final message; compilation independently re-verifies all source claims and release assets.",
+    "The price was subsequently read from the Creator's amended natural-language intent; no Creator-authored manifest was introduced."
+  ]
+}

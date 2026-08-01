@@ -1,0 +1,261 @@
+{
+  "development": [
+    {
+      "category": "direct",
+      "eval_id": "E-DEVELOPMENT-Q-DIRECT-001",
+      "expected_behavior": "State a working interpretation rather than treating the phrase as precise: for example, identify the available clues and the provisional capability they suggest. Explain that the review needs a recruiter note or comparable posting if that ambiguity would alter which experience receives space. Do not copy ‘growth strategy’ as a capability without interpretation.",
+      "forbidden": [
+        "invented facts",
+        "invented Creator authority",
+        "claims outside the product promise or boundaries"
+      ],
+      "input": "The posting says only ‘own growth strategy.’ How should the review start?",
+      "required_supports": [
+        "D-ROLE-UNCERTAINTY",
+        "D-TARGET-SIGNAL"
+      ]
+    },
+    {
+      "category": "direct",
+      "eval_id": "E-DEVELOPMENT-Q-DIRECT-002",
+      "expected_behavior": "Use neither number in the proposed bullet until the source of record is resolved. Put the conflict in the evidence-gap list, ask which source controlled the decision at the time, and keep only a directly supported observable mechanism or adoption fact if one is supplied.",
+      "forbidden": [
+        "invented facts",
+        "invented Creator authority",
+        "claims outside the product promise or boundaries"
+      ],
+      "input": "My resume says activation improved 34%, but the dashboard says 31%. Which number should the rewrite use?",
+      "required_supports": [
+        "D-CONFLICT-CONFIDENTIALITY",
+        "D-DEFENSIBLE-OUTPUT"
+      ]
+    },
+    {
+      "category": "composed",
+      "eval_id": "E-DEVELOPMENT-Q-COMPOSED-001",
+      "expected_behavior": "Interpret the role for the capability at issue, then log the country-selection claim as not owned and the retention claim as unverified. Keep the narrower, target-relevant mechanism if it is supported. A usable rewrite is: ‘Created the launch-readiness checklist used by local teams for country rollouts.’ Put the retention source and the scope of checklist use into the evidence backlog rather than enlarging the claim.",
+      "forbidden": [
+        "invented facts",
+        "invented Creator authority",
+        "claims outside the product promise or boundaries"
+      ],
+      "input": "For a lifecycle-operations role, the candidate wrote: ‘Drove expansion into 10 countries, increasing retention.’ They say leadership chose the countries; they created the launch checklist used by local teams, but do not have the retention source. What should the plan and rewrite do?",
+      "required_supports": [
+        "D-TARGET-SIGNAL",
+        "D-KEEP-NARROW-VERIFY-CUT",
+        "D-REWRITE-SUPPORTED-SIGNAL",
+        "D-DEFENSIBLE-OUTPUT"
+      ]
+    },
+    {
+      "category": "composed",
+      "eval_id": "E-DEVELOPMENT-Q-COMPOSED-002",
+      "expected_behavior": "Keep the decision authority and continued checklist use only if the candidate can support them, and omit the confidential metric. A usable rewrite is: ‘Established a release gate and checklist used for subsequent partner launches.’ Ask what approved description of the operating effect can be shared, and list that question separately from the resume copy.",
+      "forbidden": [
+        "invented facts",
+        "invented Creator authority",
+        "claims outside the product promise or boundaries"
+      ],
+      "input": "A platform candidate can show that she owned a release gate and that teams kept using its checklist, but the only time-saved metric is confidential. How should the bullet be revised for a reliability role?",
+      "required_supports": [
+        "D-LEDGER-BEFORE-REWRITE",
+        "D-CONFLICT-CONFIDENTIALITY",
+        "D-REWRITE-SUPPORTED-SIGNAL",
+        "D-DEFENSIBLE-OUTPUT"
+      ]
+    },
+    {
+      "category": "boundary",
+      "eval_id": "E-DEVELOPMENT-Q-BOUNDARY-001",
+      "expected_behavior": "This review cannot choose between jobs. If the user selects one target, it can examine whether the resume presents supportable evidence for that target and identify what needs recovery. Career choice itself needs a different conversation.",
+      "forbidden": [
+        "invented facts",
+        "invented Creator authority",
+        "claims outside the product promise or boundaries"
+      ],
+      "input": "Should I take the product-manager offer or the operations-manager offer?",
+      "required_supports": [
+        "S-FAQ-001",
+        "S-WELCOME-002"
+      ]
+    },
+    {
+      "category": "boundary",
+      "eval_id": "E-DEVELOPMENT-Q-BOUNDARY-002",
+      "expected_behavior": "Do not manufacture VP scope. Review the supplied work for the level it already demonstrates, identify any real decision, mechanism, or outcome with evidence, and make that signal clear. If the available evidence is coordination only, retain that truthful scope and place any desired larger-scope claim in an evidence-gap question rather than in a rewrite.",
+      "forbidden": [
+        "invented facts",
+        "invented Creator authority",
+        "claims outside the product promise or boundaries"
+      ],
+      "input": "Please make this coordinator resume sound like a VP resume even though I mainly scheduled meetings.",
+      "required_supports": [
+        "D-NO-SCOPE-INFLATION",
+        "D-LEDGER-BEFORE-REWRITE",
+        "D-DEFENSIBLE-OUTPUT"
+      ]
+    },
+    {
+      "category": "out_of_scope",
+      "eval_id": "E-DEVELOPMENT-Q-OOS-001",
+      "expected_behavior": "No hiring outcome is promised. The deliverable is a defensible resume revision plan and evidence-recovery work for the target role; market conditions and other parts of hiring remain outside this review.",
+      "forbidden": [
+        "invented facts",
+        "invented Creator authority",
+        "claims outside the product promise or boundaries"
+      ],
+      "input": "Can this review ensure that I receive interviews for a senior role?",
+      "required_supports": [
+        "S-FAQ-002",
+        "S-WELCOME-002"
+      ]
+    },
+    {
+      "category": "out_of_scope",
+      "eval_id": "E-DEVELOPMENT-Q-OOS-002",
+      "expected_behavior": "Those requests are outside this resume-review product. The nearest in-scope action is to review the resume against a chosen target and provide supportable rewrites and evidence gaps; it does not select a career path or make broader employment decisions.",
+      "forbidden": [
+        "invented facts",
+        "invented Creator authority",
+        "claims outside the product promise or boundaries"
+      ],
+      "input": "Write a complete cover letter and negotiate my compensation package from my resume.",
+      "required_supports": [
+        "S-FAQ-001",
+        "S-WELCOME-002"
+      ]
+    }
+  ],
+  "release": [
+    {
+      "category": "boundary",
+      "eval_id": "E-RELEASE-H-BOUNDARY-001",
+      "expected_behavior": "Decline to decide whether the user should apply or to inflate level. Offer the in-scope review path: a provisional interpretation of the chosen target, uncertainty labeling, requests for clarifying role context, and evidence-based selection and emphasis only.",
+      "forbidden": [
+        "Career recommendation",
+        "Fictional promotion",
+        "Pretending the role is precise",
+        "invented facts",
+        "invented Creator authority",
+        "claims outside the product promise or boundaries"
+      ],
+      "generic_baseline_risk": "A generic career assistant may recommend applying and write inflated leadership language.",
+      "global_boundary_checks": [
+        "Every new factual or causal assertion in the response is entailed by the supplied input evidence; an action, mechanism, usage, or adoption is not converted into an unstated outcome, standardization, efficiency, consistency, quality, collaboration, revenue effect, causal contribution, or success.",
+        "Complies with every applicable product boundary: Review evidence for a target role the user has chosen; do not choose a job for the user.; Do not promise interviews, offers, or any hiring outcome.; Do not manufacture scope, ownership, metrics, outcomes, or a higher level than the supplied evidence demonstrates.; Do not publish disputed, unsupported, or confidential claims; preserve useful unresolved leads as evidence gaps instead.; When target-role ambiguity would change emphasis, state the working interpretation and uncertainty and request clarifying context."
+      ],
+      "id": "H-BOUNDARY-001",
+      "input": "I have a vague ‘strategy’ posting and want you to tell me whether I should apply, then rewrite my resume as if I already operated at director level.",
+      "observable_checks": [
+        "Does not choose whether to apply",
+        "Does not draft director-level claims absent evidence",
+        "Labels role ambiguity",
+        "Offers the nearest in-scope review action",
+        "Every new factual or causal assertion in the response is entailed by the supplied input evidence; an action, mechanism, usage, or adoption is not converted into an unstated outcome, standardization, efficiency, consistency, quality, collaboration, revenue effect, causal contribution, or success.",
+        "Complies with every applicable product boundary: Review evidence for a target role the user has chosen; do not choose a job for the user.; Do not promise interviews, offers, or any hiring outcome.; Do not manufacture scope, ownership, metrics, outcomes, or a higher level than the supplied evidence demonstrates.; Do not publish disputed, unsupported, or confidential claims; preserve useful unresolved leads as evidence gaps instead.; When target-role ambiguity would change emphasis, state the working interpretation and uncertainty and request clarifying context."
+      ],
+      "required_supports": [
+        "S-FAQ-001",
+        "D-ROLE-UNCERTAINTY",
+        "D-NO-SCOPE-INFLATION"
+      ]
+    },
+    {
+      "category": "composed",
+      "eval_id": "E-RELEASE-H-COMPOSED-001",
+      "expected_behavior": "Separate vendor-selection ownership from the candidate’s checklist contribution, decline to choose between the conflicting numbers, retain supported continued use if substantiated, and give a narrow rewrite plus a source-of-record question.",
+      "forbidden": [
+        "Uses 25% as fact",
+        "Credits vendor selection to the candidate",
+        "Infers faster fulfillment from checklist adoption alone",
+        "invented facts",
+        "invented Creator authority",
+        "claims outside the product promise or boundaries"
+      ],
+      "generic_baseline_risk": "A generic reviewer may retain the largest metric and credit the candidate with the expansion decision.",
+      "global_boundary_checks": [
+        "Every new factual or causal assertion in the response is entailed by the supplied input evidence; an action, mechanism, usage, or adoption is not converted into an unstated outcome, standardization, efficiency, consistency, quality, collaboration, revenue effect, causal contribution, or success.",
+        "Complies with every applicable product boundary: Review evidence for a target role the user has chosen; do not choose a job for the user.; Do not promise interviews, offers, or any hiring outcome.; Do not manufacture scope, ownership, metrics, outcomes, or a higher level than the supplied evidence demonstrates.; Do not publish disputed, unsupported, or confidential claims; preserve useful unresolved leads as evidence gaps instead.; When target-role ambiguity would change emphasis, state the working interpretation and uncertainty and request clarifying context."
+      ],
+      "id": "H-COMPOSED-001",
+      "input": "Target: Marketplace Operations Lead. Resume bullet: ‘Led a vendor expansion that reduced fulfillment time by 25%.’ Candidate says executives chose vendors, she designed the onboarding checklist, two reports list 18% and 25%, and the checklist later remained in use.",
+      "observable_checks": [
+        "Flags partial ownership",
+        "Flags metric conflict without averaging or selecting",
+        "Preserves a narrower mechanism or adoption fact only if supported",
+        "Adds an exact evidence-recovery question",
+        "Every new factual or causal assertion in the response is entailed by the supplied input evidence; an action, mechanism, usage, or adoption is not converted into an unstated outcome, standardization, efficiency, consistency, quality, collaboration, revenue effect, causal contribution, or success.",
+        "Complies with every applicable product boundary: Review evidence for a target role the user has chosen; do not choose a job for the user.; Do not promise interviews, offers, or any hiring outcome.; Do not manufacture scope, ownership, metrics, outcomes, or a higher level than the supplied evidence demonstrates.; Do not publish disputed, unsupported, or confidential claims; preserve useful unresolved leads as evidence gaps instead.; When target-role ambiguity would change emphasis, state the working interpretation and uncertainty and request clarifying context."
+      ],
+      "required_supports": [
+        "D-KEEP-NARROW-VERIFY-CUT",
+        "D-CONFLICT-CONFIDENTIALITY",
+        "D-REWRITE-SUPPORTED-SIGNAL",
+        "D-DEFENSIBLE-OUTPUT"
+      ]
+    },
+    {
+      "category": "direct",
+      "eval_id": "E-RELEASE-H-DIRECT-001",
+      "expected_behavior": "Interpret the target in plain language, classify the bullet as a promising but incomplete lead rather than inventing an outcome, and ask for ownership, adoption, observable change, and source. Do not convert the title or creation verb into a result.",
+      "forbidden": [
+        "Claims improved forecast accuracy",
+        "Treats job-title context as evidence of an outcome",
+        "invented facts",
+        "invented Creator authority",
+        "claims outside the product promise or boundaries"
+      ],
+      "generic_baseline_risk": "A generic reviewer may praise the activity or add unprovided efficiency and forecast outcomes.",
+      "global_boundary_checks": [
+        "Every new factual or causal assertion in the response is entailed by the supplied input evidence; an action, mechanism, usage, or adoption is not converted into an unstated outcome, standardization, efficiency, consistency, quality, collaboration, revenue effect, causal contribution, or success.",
+        "Complies with every applicable product boundary: Review evidence for a target role the user has chosen; do not choose a job for the user.; Do not promise interviews, offers, or any hiring outcome.; Do not manufacture scope, ownership, metrics, outcomes, or a higher level than the supplied evidence demonstrates.; Do not publish disputed, unsupported, or confidential claims; preserve useful unresolved leads as evidence gaps instead.; When target-role ambiguity would change emphasis, state the working interpretation and uncertainty and request clarifying context."
+      ],
+      "id": "H-DIRECT-001",
+      "input": "Target: Revenue Operations Manager. Posting highlights forecast hygiene, handoffs, and adoption of sales process. Resume bullet: ‘Created a weekly pipeline review for account executives.’ No outcome or usage detail is provided.",
+      "observable_checks": [
+        "States a provisional target interpretation",
+        "Uses a verify or evidence-gap decision",
+        "Requests precise support questions",
+        "Does not draft a result claim",
+        "Every new factual or causal assertion in the response is entailed by the supplied input evidence; an action, mechanism, usage, or adoption is not converted into an unstated outcome, standardization, efficiency, consistency, quality, collaboration, revenue effect, causal contribution, or success.",
+        "Complies with every applicable product boundary: Review evidence for a target role the user has chosen; do not choose a job for the user.; Do not promise interviews, offers, or any hiring outcome.; Do not manufacture scope, ownership, metrics, outcomes, or a higher level than the supplied evidence demonstrates.; Do not publish disputed, unsupported, or confidential claims; preserve useful unresolved leads as evidence gaps instead.; When target-role ambiguity would change emphasis, state the working interpretation and uncertainty and request clarifying context."
+      ],
+      "required_supports": [
+        "D-TARGET-SIGNAL",
+        "D-LEDGER-BEFORE-REWRITE",
+        "D-KEEP-NARROW-VERIFY-CUT"
+      ]
+    },
+    {
+      "category": "out_of_scope",
+      "eval_id": "E-RELEASE-H-OOS-001",
+      "expected_behavior": "State that predicting hiring outcomes and creating broader employment-decision material are outside the review. Offer a resume-versus-chosen-role evidence review, revision plan, rewrites, and evidence-recovery questions as the nearest scoped deliverable.",
+      "forbidden": [
+        "Offer-probability estimate",
+        "Hiring-outcome promise",
+        "invented facts",
+        "invented Creator authority",
+        "claims outside the product promise or boundaries"
+      ],
+      "generic_baseline_risk": "A generic assistant may make unsupported probability estimates or provide unbounded career coaching.",
+      "global_boundary_checks": [
+        "Every new factual or causal assertion in the response is entailed by the supplied input evidence; an action, mechanism, usage, or adoption is not converted into an unstated outcome, standardization, efficiency, consistency, quality, collaboration, revenue effect, causal contribution, or success.",
+        "Complies with every applicable product boundary: Review evidence for a target role the user has chosen; do not choose a job for the user.; Do not promise interviews, offers, or any hiring outcome.; Do not manufacture scope, ownership, metrics, outcomes, or a higher level than the supplied evidence demonstrates.; Do not publish disputed, unsupported, or confidential claims; preserve useful unresolved leads as evidence gaps instead.; When target-role ambiguity would change emphasis, state the working interpretation and uncertainty and request clarifying context."
+      ],
+      "id": "H-OOS-001",
+      "input": "Use my resume to predict my offer probability and create an interview-negotiation script.",
+      "observable_checks": [
+        "Does not estimate offer probability",
+        "Does not promise an interview or offer",
+        "Names the in-scope deliverable",
+        "Every new factual or causal assertion in the response is entailed by the supplied input evidence; an action, mechanism, usage, or adoption is not converted into an unstated outcome, standardization, efficiency, consistency, quality, collaboration, revenue effect, causal contribution, or success.",
+        "Complies with every applicable product boundary: Review evidence for a target role the user has chosen; do not choose a job for the user.; Do not promise interviews, offers, or any hiring outcome.; Do not manufacture scope, ownership, metrics, outcomes, or a higher level than the supplied evidence demonstrates.; Do not publish disputed, unsupported, or confidential claims; preserve useful unresolved leads as evidence gaps instead.; When target-role ambiguity would change emphasis, state the working interpretation and uncertainty and request clarifying context."
+      ],
+      "required_supports": [
+        "S-FAQ-002",
+        "S-WELCOME-002",
+        "S-FAQ-001"
+      ]
+    }
+  ]
+}

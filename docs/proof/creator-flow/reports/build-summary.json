@@ -1,0 +1,13 @@
+{
+  "derived_rules": 6,
+  "development_evals": 8,
+  "documents": 4,
+  "few_shots": 4,
+  "gates_passed": 9,
+  "rag_chunks": 17,
+  "release_digest": "2e1e25c613209b348d60871c9d850b253404b9a70abc439eb643c02d5bf9197e",
+  "release_evals": 4,
+  "release_id": "signal-resume-review@1.0.0+sha256.2e1e25c613209b34",
+  "source_facts": 17,
+  "synthetic_qa": 8
+}

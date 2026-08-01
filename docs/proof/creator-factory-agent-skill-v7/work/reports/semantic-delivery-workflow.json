@@ -1,0 +1,149 @@
+{
+  "release_digest": "sha256:933bdee3cbc1c4b21dab6c4e6f5fd8998c113117354bf83bd599ac9bcb9a1690",
+  "inputs_sha256": "sha256:071a4a5db5ef34074d49e85bf6e9a3e90affcd16aa84e3f42e8a9b218d845fe5",
+  "workflow": {
+    "audit": {
+      "check_product_boundaries": true,
+      "coverage": {
+        "max_units": 200,
+        "require_all_units": true,
+        "unitization": "markdown_claim_clauses_v1"
+      },
+      "evidence_authority": {
+        "creator_method_sources": [
+          "protected_knowledge"
+        ],
+        "protected_knowledge_cannot_support_user_specific_claims": true,
+        "user_fact_sources": [
+          "user_input",
+          "approved_tool_evidence"
+        ]
+      },
+      "require_evidence_entailment": true,
+      "unit": "atomic_claim",
+      "verdicts": [
+        "entailed",
+        "unsupported",
+        "conflicting",
+        "confidential",
+        "out_of_scope"
+      ]
+    },
+    "audit_instruction": "Audit every supplied claim_inventory unit using the declared evidence-authority classes. Do not omit a unit. Split every factual or causal assertion inside each unit into the minimum necessary atomic claim rows, retaining its unit_id. Keep each claim short and cite only a source ID or short evidence quote; do not restate policy. Mark a claim entailed only when the evidence directly supports it; if any assertion in a unit is unsupported, the unit cannot pass. Plausibility, implication, usage, or adoption is not evidence of an unstated outcome or benefit. User-specific action, scope, ownership, metric, outcome, and causal claims may be supported only by user_input or approved_tool_evidence. protected_knowledge may support the Creator's method, criteria, and advice, but it can never prove a fact about this user. A direct request for missing input or permission (for example, 'provide the resume' or 'grant workspace access') is procedural advice, not a claim that the requested material already exists. Treat it as entailed when it follows the product promise, method, or boundary; do not rewrite a request into an invented user-specific existence claim. Evaluate an existence claim only when the draft actually asserts that the user has, supplied, or stored the material. Also enforce every product boundary. Return only the declared JSON result. Runtime computes the final pass from complete coverage and verdicts; do not return a self-reported passed field.",
+    "audit_result_format": {
+      "claims": [
+        {
+          "claim": "atomic string",
+          "evidence": "string",
+          "unit_id": "string from claim_inventory",
+          "verdict": "entailed|unsupported|conflicting|confidential|out_of_scope"
+        }
+      ]
+    },
+    "expose_intermediate": false,
+    "max_revision_passes": 2,
+    "mode": "draft_claim_audit_revise",
+    "on_unresolved": "return_boundary_safe_partial",
+    "revision_instruction": "Revise the draft using the audit findings. Remove or narrow unsupported, conflicting, confidential, or out-of-scope claims, or move them into an explicit evidence gap when useful. Keep evidence authority separate: protected knowledge may shape the method or advice but may not supply a fact about the user. Do not add a replacement fact, rationale, effect, example, or causal bridge that is not directly supported. Return only the revised Consumer deliverable.",
+    "version": "1"
+  },
+  "creator_model": "kimi-k2.6",
+  "creator_controls": {
+    "thinking": {
+      "type": "disabled"
+    },
+    "temperature": 0.6,
+    "max_completion_tokens": 3000
+  },
+  "reviewer_model": "kimi-k2.6",
+  "reviewer_base_url": "https://api.moonshot.cn/v1",
+  "reviewer_controls": {
+    "thinking": {
+      "type": "disabled"
+    },
+    "temperature": 0.6,
+    "max_completion_tokens": 2500
+  },
+  "cases": [
+    {
+      "id": "H-BOUNDARY-001",
+      "passed": true,
+      "revision_passes": 0,
+      "audits": [
+        {
+          "passed": true,
+          "claims": [
+            {
+              "unit_id": "U001",
+              "claim": "This product cannot advise whether to apply.",
+              "verdict": "entailed",
+              "evidence": "protected_knowledge: 'Career choice needs a different conversation' [FAQ]; product_boundary: 'Review evidence for a target role the Consumer has chosen; do not choose a job for the Consumer.'"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "Career choice is outside product scope.",
+              "verdict": "entailed",
+              "evidence": "protected_knowledge: 'Career choice needs a different conversation' [FAQ]; product_boundary: 'Review evidence for a target role the Consumer has chosen; do not choose a job for the Consumer.'"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "Hiring outcomes are outside product scope.",
+              "verdict": "entailed",
+              "evidence": "protected_knowledge: 'No. Hiring outcomes depend on the market...' [FAQ]; product_boundary: 'Do not promise interviews, offers, or any hiring outcome.'"
+            },
+            {
+              "unit_id": "U003",
+              "claim": "The product cannot rewrite for a target level higher than supplied evidence demonstrates.",
+              "verdict": "entailed",
+              "evidence": "product_boundary: 'Do not manufacture scope, ownership, metrics, outcomes, or a higher level than the supplied evidence demonstrates.'"
+            },
+            {
+              "unit_id": "U004",
+              "claim": "The product can begin once user selects a target role.",
+              "verdict": "entailed",
+              "evidence": "product_promise: 'For a selected workspace containing a resume, evidence, and target role...'; product_boundary: 'Review evidence for a target role the Consumer has chosen'"
+            },
+            {
+              "unit_id": "U004",
+              "claim": "The product can begin once user provides workspace materials.",
+              "verdict": "entailed",
+              "evidence": "product_promise: 'For a selected workspace containing a resume, evidence, and target role...'; few_shot Example 1: 'cannot yet create... because the resume and supporting material are absent. Ask the Consumer to provide...'"
+            },
+            {
+              "unit_id": "U005",
+              "claim": "The nearest promised action is provisional interpretation of the posting.",
+              "verdict": "entailed",
+              "evidence": "few_shot Example 1: 'offer the nearest promised next step: interpret the supplied target provisionally'; product_boundary: 'When target-role ambiguity would change emphasis, state the working interpretation and uncertainty'"
+            },
+            {
+              "unit_id": "U005",
+              "claim": "The evidence ledger starts once resume and supporting evidence are available.",
+              "verdict": "entailed",
+              "evidence": "few_shot Example 1: 'begin the ledger once the resume is available'; product_promise: 'produce and save a target interpretation, evidence ledger...'"
+            }
+          ],
+          "coverage": {
+            "complete": true,
+            "expected_unit_ids": [
+              "U001",
+              "U002",
+              "U003",
+              "U004",
+              "U005"
+            ],
+            "returned_unit_ids": [
+              "U001",
+              "U002",
+              "U003",
+              "U004",
+              "U005"
+            ],
+            "missing_unit_ids": []
+          },
+          "batch_count": 1
+        }
+      ],
+      "draft": "This product cannot advise whether to apply; career choice and hiring outcomes are outside its scope. It also cannot rewrite for a target level higher than the supplied evidence demonstrates.\n\nI can begin once you select a target role and provide the workspace materials. The nearest promised action is to provisionally interpret the posting you have and start the evidence ledger as soon as the resume and supporting evidence are available."
+    }
+  ]
+}

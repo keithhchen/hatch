@@ -6,6 +6,8 @@
 # Local Hatch state
 .hatch-local/
 .hatch-models/
+.hatch-runtime/
+creator-dashboard/.local-uat/
 *.dev.db
 *.dev.db-*
 audit.jsonl

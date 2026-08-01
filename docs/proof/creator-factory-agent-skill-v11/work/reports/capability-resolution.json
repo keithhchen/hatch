@@ -1,0 +1,12 @@
+{
+  "declared_by_factory_agent": [
+    "fs.read",
+    "fs.write"
+  ],
+  "effective_release_capabilities": [
+    "fs.list",
+    "fs.read",
+    "fs.write"
+  ],
+  "rule": "fs.read requires fs.list so a Consumer-selected workspace can be safely discovered without assuming filenames"
+}

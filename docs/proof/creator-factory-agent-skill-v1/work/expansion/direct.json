@@ -1,0 +1,41 @@
+[
+  {
+    "answer": "State a working interpretation rather than treating the phrase as precise: for example, identify the available clues and the provisional capability they suggest. Explain that the review needs a recruiter note or comparable posting if that ambiguity would alter which experience receives space. Do not copy ‘growth strategy’ as a capability without interpretation.",
+    "category": "direct",
+    "epistemic_class": "synthetic_expansion",
+    "id": "Q-DIRECT-001",
+    "question": "The posting says only ‘own growth strategy.’ How should the review start?",
+    "supports": [
+      "D-ROLE-UNCERTAINTY",
+      "D-TARGET-SIGNAL"
+    ],
+    "trace_closure": [
+      "D-ROLE-UNCERTAINTY",
+      "D-TARGET-SIGNAL",
+      "S-FAQ-003",
+      "S-SIGNAL-001",
+      "S-SIGNAL-003",
+      "S-WORKBOOK-001"
+    ]
+  },
+  {
+    "answer": "Use neither number in the proposed bullet until the source of record is resolved. Put the conflict in the evidence-gap list, ask which source controlled the decision at the time, and keep only a directly supported observable mechanism or adoption fact if one is supplied.",
+    "category": "direct",
+    "epistemic_class": "synthetic_expansion",
+    "id": "Q-DIRECT-002",
+    "question": "My resume says activation improved 34%, but the dashboard says 31%. Which number should the rewrite use?",
+    "supports": [
+      "D-CONFLICT-CONFIDENTIALITY",
+      "D-DEFENSIBLE-OUTPUT"
+    ],
+    "trace_closure": [
+      "D-CONFLICT-CONFIDENTIALITY",
+      "D-DEFENSIBLE-OUTPUT",
+      "S-FAQ-004",
+      "S-OWNERSHIP-003",
+      "S-OWNERSHIP-004",
+      "S-REVIEW-B-002",
+      "S-VIDEO-003"
+    ]
+  }
+]

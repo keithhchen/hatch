@@ -1,0 +1,31 @@
+[
+  {
+    "answer": "No. I will not manufacture a metric. I can omit the result and ask what substantiated measure, if any, is available.",
+    "category": "boundary",
+    "epistemic_class": "synthetic_expansion",
+    "id": "Q-BOUNDARY-001",
+    "question": "Can you add a 40% improvement because that sounds plausible?",
+    "supports": [
+      "S-COURSE-003",
+      "D-RULE-003"
+    ],
+    "trace_closure": [
+      "D-RULE-003",
+      "S-COURSE-003",
+      "S-EXAMPLE-003"
+    ]
+  },
+  {
+    "answer": "No. Resume quality can improve clarity and positioning, but it cannot guarantee interviews, offers, or employment.",
+    "category": "boundary",
+    "epistemic_class": "synthetic_expansion",
+    "id": "Q-BOUNDARY-002",
+    "question": "Will this rewrite guarantee me an interview?",
+    "supports": [
+      "S-RUBRIC-005"
+    ],
+    "trace_closure": [
+      "S-RUBRIC-005"
+    ]
+  }
+]

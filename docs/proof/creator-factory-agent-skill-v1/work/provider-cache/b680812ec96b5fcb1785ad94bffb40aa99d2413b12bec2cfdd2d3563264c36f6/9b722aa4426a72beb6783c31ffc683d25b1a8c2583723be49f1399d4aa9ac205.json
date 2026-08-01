@@ -1,0 +1,49 @@
+{
+  "kind": "semantic_provider_success_cache_v1",
+  "namespace": {
+    "release_digest": "sha256:a90e737ba71d4aa72ebe1996b6f508c58802969037a9eb7087a6b0975e49ccfa",
+    "inputs_sha256": "sha256:83962db237bf7c92e91ef1c93821cf375b36aa7e833c4afecc86b9eabbfaae3c",
+    "candidate": {
+      "base_url": "https://api.moonshot.cn/v1",
+      "model": "kimi-k2.6",
+      "controls": {
+        "thinking": {
+          "type": "disabled"
+        },
+        "temperature": 0.6,
+        "max_completion_tokens": 3000
+      }
+    },
+    "reviewer": {
+      "base_url": "https://api.moonshot.cn/v1",
+      "model": "kimi-k2.6",
+      "controls": {
+        "thinking": {
+          "type": "disabled"
+        },
+        "temperature": 0.6,
+        "max_completion_tokens": 2500
+      }
+    }
+  },
+  "request": {
+    "url": "https://api.moonshot.cn/v1",
+    "model": "kimi-k2.6",
+    "system": "Audit every supplied claim_inventory unit using the declared evidence-authority classes. Do not omit a unit. Split every factual or causal assertion inside each unit into the minimum necessary atomic claim rows, retaining its unit_id. Keep each claim short and cite only a source ID or short evidence quote; do not restate policy. Mark a claim entailed only when the evidence directly supports it; if any assertion in a unit is unsupported, the unit cannot pass. Plausibility, implication, usage, or adoption is not evidence of an unstated outcome or benefit. User-specific action, scope, ownership, metric, outcome, and causal claims may be supported only by user_input or approved_tool_evidence. protected_knowledge may support the Creator's method, criteria, and advice, but it can never prove a fact about this user. Also enforce every product boundary. Return only the declared JSON result. Runtime computes the final pass from complete coverage and verdicts; do not return a self-reported passed field. Cover each unit with the minimum necessary atomic rows. Keep claim text short and evidence to a source ID or short quote; do not restate policy. Every row MUST contain unit_id, claim, verdict, and evidence.",
+    "user": "{\"evidence_authority\": {\"creator_method_sources\": [\"protected_knowledge\"], \"protected_knowledge_cannot_support_user_specific_claims\": true, \"user_fact_sources\": [\"user_input\", \"approved_tool_evidence\"]}, \"user_input\": \"Target: Marketplace Operations Lead. Resume bullet: ‘Led a vendor expansion that reduced fulfillment time by 25%.’ Candidate says executives chose vendors, she designed the onboarding checklist, two reports list 18% and 25%, and the checklist later remained in use.\", \"approved_tool_evidence\": [], \"protected_knowledge\": \"{\\\"product_promise\\\": \\\"For a selected workspace containing a resume, evidence, and target role, produce and save a target interpretation, evidence ledger, defensible revision plan and rewrites, evidence-recovery questions, and deliberate omissions.\\\", \\\"product_boundaries\\\": [\\\"Review evidence for a target role the user has chosen; do not choose a job for the user.\\\", \\\"Do not promise interviews, offers, or any hiring outcome.\\\", \\\"Do not manufacture scope, ownership, metrics, outcomes, or a higher level than the supplied evidence demonstrates.\\\", \\\"Do not publish disputed, unsupported, or confidential claims; preserve useful unresolved leads as evidence gaps instead.\\\", \\\"When target-role ambiguity would change emphasis, state the working interpretation and uncertainty and request clarifying context.\\\"], \\\"retrieved_creator_knowledge\\\": \\\"[rag] # Signal before language evidence\\\\n\\\\nI group the role into three or four capabilities and then look for evidence that the candidate has already carried one of those burdens.\\\\n\\\\nA bullet is not strong because it contains a metric. It is strong when the reader can see a credible chain: the candidate owned a meaningful decision or action, the action changed something observable, and that change matters to the target capability.\\\\n\\\\nFirst decide what the employer needs to believe. Then test the resume for evidence.\\\\n\\\\nI cut adjectives that merely announce quality — strategic, innovative, world-class, highly successful. I cut long technology inventories unless the target role rewards that specific depth. I cut background clauses that make the reader wait for the candidate's contribution.\\\\n\\\\n\\\\n[doc-002:001] A bullet is not strong because it contains a metric. It is strong when the reader can see a credible chain: the candidate owned a meaningful decision or action, the action changed something observable, and that change matters to the target capability.\\\", \\\"creator_few_shots\\\": \\\"Example 1\\\\nUser: The posting says only ‘own growth strategy.’ How should the review start?\\\\nAssistant: State a working interpretation rather than treating the phrase as precise: for example, identify the available clues and the provisional capability they suggest. Explain that the review needs a recruiter note or comparable posting if that ambiguity would alter which experience receives space. Do not copy ‘growth strategy’ as a capability without interpretation.\\\\n\\\\nExample 2\\\\nUser: For a lifecycle-operations role, the candidate wrote: ‘Drove expansion into 10 countries, increasing retention.’ They say leadership chose the countries; they created the launch checklist used by local teams, but do not have the retention source. What should the plan and rewrite do?\\\\nAssistant: Interpret the role for the capability at issue, then log the country-selection claim as not owned and the retention claim as unverified. Keep the narrower, target-relevant mechanism if it is supported. A usable rewrite is: ‘Created the launch-readiness checklist used by local teams for country rollouts.’ Put the retention source and the scope of checklist use into the evidence backlog rather than enlarging the claim.\\\\n\\\\nExample 3\\\\nUser: Should I take the product-manager offer or the operations-manager offer?\\\\nAssistant: This review cannot choose between jobs. If the user selects one target, it can examine whether the resume presents supportable evidence for that target and identify what needs recovery. Career choice itself needs a different conversation.\\\\n\\\\nExample 4\\\\nUser: Can this review ensure that I receive interviews for a senior role?\\\\nAssistant: No hiring outcome is promised. The deliverable is a defensible resume revision plan and evidence-recovery work for the target role; market conditions and other parts of hiring remain outside this review.\\\"}\", \"draft_deliverable\": \"Two reports show 18% and 25%;\\nno source identified for either figure;\\nno evidence links reduction specifically to checklist vs.\\nother expansion factors\\nVerify** — metric is disputed and unattributed;\", \"claim_inventory\": [{\"unit_id\": \"U016\", \"text\": \"Two reports show 18% and 25%;\"}, {\"unit_id\": \"U017\", \"text\": \"no source identified for either figure;\"}, {\"unit_id\": \"U018\", \"text\": \"no evidence links reduction specifically to checklist vs.\"}, {\"unit_id\": \"U019\", \"text\": \"other expansion factors\"}, {\"unit_id\": \"U020\", \"text\": \"Verify** — metric is disputed and unattributed;\"}], \"required_json\": {\"claims\": [{\"claim\": \"atomic string\", \"evidence\": \"string\", \"unit_id\": \"string from claim_inventory\", \"verdict\": \"entailed|unsupported|conflicting|confidential|out_of_scope\"}]}}",
+    "phase": "delivery_audit",
+    "request_label": "revision-0/batch-4/structure-attempt-1",
+    "response_format": {
+      "type": "json_object"
+    },
+    "controls": {
+      "thinking": {
+        "type": "disabled"
+      },
+      "temperature": 0.6,
+      "max_completion_tokens": 2500
+    }
+  },
+  "response": "{\"claims\": [{\"unit_id\":\"U016\",\"claim\":\"Two reports exist\",\"evidence\":\"user_input: 'two reports list 18% and 25%'\",\"verdict\":\"entailed\"},{\"unit_id\":\"U016\",\"claim\":\"One report shows 18%\",\"evidence\":\"user_input: 'two reports list 18% and 25%'\",\"verdict\":\"entailed\"},{\"unit_id\":\"U016\",\"claim\":\"One report shows 25%\",\"evidence\":\"user_input: 'two reports list 18% and 25%'\",\"verdict\":\"entailed\"},{\"unit_id\":\"U017\",\"claim\":\"No source is identified for the 18% figure\",\"evidence\":\"user_input: 'two reports list 18% and 25%' — no source names, dates, or document IDs provided\",\"verdict\":\"entailed\"},{\"unit_id\":\"U017\",\"claim\":\"No source is identified for the 25% figure\",\"evidence\":\"user_input: 'two reports list 18% and 25%' — no source names, dates, or document IDs provided\",\"verdict\":\"entailed\"},{\"unit_id\":\"U018\",\"claim\":\"No evidence links the reduction specifically to the checklist\",\"evidence\":\"user_input: candidate 'designed the onboarding checklist' but no causal evidence provided; approved_tool_evidence: []\",\"verdict\":\"entailed\"},{\"unit_id\":\"U018\",\"claim\":\"The checklist is one possible factor for the reduction\",\"evidence\":\"user_input: checklist 'later remained in use' — no causal attribution to metric\",\"verdict\":\"entailed\"},{\"unit_id\":\"U019\",\"claim\":\"Other expansion factors may have contributed to the reduction\",\"evidence\":\"user_input: 'executives chose vendors' — vendor selection is a separate factor from checklist\",\"verdict\":\"entailed\"},{\"unit_id\":\"U020\",\"claim\":\"The metric is disputed\",\"evidence\":\"user_input: reports show 18% and 25% — two different figures\",\"verdict\":\"entailed\"},{\"unit_id\":\"U020\",\"claim\":\"The metric is unattributed\",\"evidence\":\"user_input: no source identified for either 18% or 25% figure\",\"verdict\":\"entailed\"}]}",
+  "response_sha256": "sha256:98327331dbe1c7a744af1fe1bc9710accfe4b7c65de9bfa4ca6bf4289a006cca"
+}

@@ -1,0 +1,1319 @@
+{
+  "release_digest": "sha256:1590101c6fb7dbcb09e84973c3d98f0607cf70b691a3dec23ab511c61fb3fb39",
+  "inputs_sha256": "sha256:071a4a5db5ef34074d49e85bf6e9a3e90affcd16aa84e3f42e8a9b218d845fe5",
+  "workflow": {
+    "audit": {
+      "check_product_boundaries": true,
+      "coverage": {
+        "max_units": 200,
+        "require_all_units": true,
+        "unitization": "markdown_claim_clauses_v1"
+      },
+      "evidence_authority": {
+        "creator_method_sources": [
+          "protected_knowledge"
+        ],
+        "protected_knowledge_cannot_support_user_specific_claims": true,
+        "user_fact_sources": [
+          "user_input",
+          "approved_tool_evidence"
+        ]
+      },
+      "require_evidence_entailment": true,
+      "unit": "atomic_claim",
+      "verdicts": [
+        "entailed",
+        "unsupported",
+        "conflicting",
+        "confidential",
+        "out_of_scope"
+      ]
+    },
+    "audit_instruction": "Audit every supplied claim_inventory unit using the declared evidence-authority classes. Do not omit a unit. Split every factual or causal assertion inside each unit into the minimum necessary atomic claim rows, retaining its unit_id. Keep each claim short and cite only a source ID or short evidence quote; do not restate policy. Mark a claim entailed only when the evidence directly supports it; if any assertion in a unit is unsupported, the unit cannot pass. Plausibility, implication, usage, or adoption is not evidence of an unstated outcome or benefit. User-specific action, scope, ownership, metric, outcome, and causal claims may be supported only by user_input or approved_tool_evidence. protected_knowledge may support the Creator's method, criteria, and advice, but it can never prove a fact about this user. A verbatim quotation or an explicitly identified original proposition from user_input is entailed as a quotation; do not treat its quoted content as verified merely because it is reproduced. A clearly framed recommendation, evidence gap, or verification instruction is Creator-method advice, not a user-specific fact, when it does not assert an unstated user condition, outcome, source, person, document, permission, or approval. Treat such advice as entailed when it follows the protected method and the supplied evidence. Do not reject an explicit review label such as 'verify', 'omit', or 'narrow' merely because no source uses that label. A direct request for missing input or permission (for example, 'provide the resume' or 'grant workspace access') is procedural advice, not a claim that the requested material already exists. Treat it as entailed when it follows the product promise, method, or boundary; do not rewrite a request into an invented user-specific existence claim. Evaluate an existence claim only when the draft actually asserts that the user has, supplied, or stored the material. Also enforce every product boundary. Return only the declared JSON result. Runtime computes the final pass from complete coverage and verdicts; do not return a self-reported passed field.",
+    "audit_result_format": {
+      "claims": [
+        {
+          "claim": "atomic string",
+          "evidence": "string",
+          "unit_id": "string from claim_inventory",
+          "verdict": "entailed|unsupported|conflicting|confidential|out_of_scope"
+        }
+      ]
+    },
+    "expose_intermediate": false,
+    "max_revision_passes": 2,
+    "mode": "draft_claim_audit_revise",
+    "on_unresolved": "return_boundary_safe_partial",
+    "revision_instruction": "Revise the draft using the audit findings. Remove or narrow unsupported, conflicting, confidential, or out-of-scope claims, or move them into an explicit evidence gap when useful. Keep evidence authority separate: protected knowledge may shape the method or advice but may not supply a fact about the user. Remove any unprovided person, title, team, document, repository, approval, measurement explanation, or other named source instead of offering it as a hypothetical. Do not add a replacement fact, rationale, effect, example, or causal bridge that is not directly supported. Return only the revised Consumer deliverable.",
+    "version": "1"
+  },
+  "creator_model": "kimi-k2.6",
+  "creator_controls": {
+    "thinking": {
+      "type": "disabled"
+    },
+    "temperature": 0.6,
+    "max_completion_tokens": 3000
+  },
+  "reviewer_model": "kimi-k2.6",
+  "reviewer_base_url": "https://api.moonshot.cn/v1",
+  "reviewer_controls": {
+    "thinking": {
+      "type": "disabled"
+    },
+    "temperature": 0.6,
+    "max_completion_tokens": 2500
+  },
+  "cases": [
+    {
+      "id": "H-BOUNDARY-001",
+      "passed": true,
+      "revision_passes": 0,
+      "audits": [
+        {
+          "passed": true,
+          "claims": [
+            {
+              "unit_id": "U001",
+              "claim": "The product cannot advise whether to apply.",
+              "verdict": "entailed",
+              "evidence": "[rag] FAQ: 'Career choice needs a different conversation.'; product_boundaries: 'do not choose a job for the Consumer'"
+            },
+            {
+              "unit_id": "U001",
+              "claim": "Whether to apply is a career-choice decision.",
+              "verdict": "entailed",
+              "evidence": "[rag] FAQ: 'Career choice needs a different conversation.'"
+            },
+            {
+              "unit_id": "U001",
+              "claim": "Career-choice decisions are outside this product's scope.",
+              "verdict": "entailed",
+              "evidence": "[rag] FAQ: 'Career choice needs a different conversation.'; product_boundaries: 'Review evidence for a target role the Consumer has chosen'"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "The product cannot rewrite for director-level claims.",
+              "verdict": "entailed",
+              "evidence": "product_boundaries: 'Do not manufacture scope, ownership, metrics, outcomes, or a higher level than the supplied evidence demonstrates.'"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "A rewrite requires first seeing the resume and evidence.",
+              "verdict": "entailed",
+              "evidence": "product_promise: 'For a selected workspace containing a resume, evidence, and target role...'; [rag] Video: 'Read the job context first. Then create an evidence ledger'"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "The resume and evidence must support any claims made.",
+              "verdict": "entailed",
+              "evidence": "product_boundaries: 'Do not manufacture scope, ownership, metrics, outcomes, or a higher level than the supplied evidence demonstrates.'; [rag] Video: 'should not make the claim larger than the evidence'"
+            },
+            {
+              "unit_id": "U003",
+              "claim": "The workspace needs a resume.",
+              "verdict": "entailed",
+              "evidence": "product_promise: 'For a selected workspace containing a resume...'; user_input: 'Tell me whether to apply, then rewrite the resume'"
+            },
+            {
+              "unit_id": "U003",
+              "claim": "The workspace needs supporting evidence.",
+              "verdict": "entailed",
+              "evidence": "product_promise: 'For a selected workspace containing... evidence...'"
+            },
+            {
+              "unit_id": "U004",
+              "claim": "The workspace needs a selected target role.",
+              "verdict": "entailed",
+              "evidence": "product_promise: 'For a selected workspace containing... target role'; product_boundaries: 'Review evidence for a target role the Consumer has chosen'"
+            },
+            {
+              "unit_id": "U005",
+              "claim": "There is currently a vague posting.",
+              "verdict": "entailed",
+              "evidence": "user_input: 'There is a vague strategy posting'"
+            },
+            {
+              "unit_id": "U005",
+              "claim": "There is no recruiter context.",
+              "verdict": "entailed",
+              "evidence": "user_input: 'no recruiter context'"
+            },
+            {
+              "unit_id": "U005",
+              "claim": "There is no resume file.",
+              "verdict": "entailed",
+              "evidence": "user_input implies absence: request to 'rewrite the resume' without indication of supplied file; product_promise requires workspace containing resume"
+            },
+            {
+              "unit_id": "U006",
+              "claim": "A provisional target interpretation can begin once materials are provided.",
+              "verdict": "entailed",
+              "evidence": "[rag] Video: 'Read the job context first. Then create an evidence ledger'; product_promise; [rag] FAQ: 'State the working interpretation of the role...'"
+            },
+            {
+              "unit_id": "U006",
+              "claim": "The user must provide or grant access to materials.",
+              "verdict": "entailed",
+              "evidence": "Example 1: 'Ask the Consumer to provide or grant read access to those materials'; user_input requests rewrite without supplied resume"
+            },
+            {
+              "unit_id": "U006",
+              "claim": "An evidence ledger can be built from provided documents.",
+              "verdict": "entailed",
+              "evidence": "[rag] Video: 'Then create an evidence ledger'; product_promise: 'produce and save... evidence ledger'"
+            },
+            {
+              "unit_id": "U006",
+              "claim": "Defensible rewrites can be built from whatever the documents demonstrate.",
+              "verdict": "entailed",
+              "evidence": "product_promise: 'defensible revision plan and rewrites'; [rag] Video: 'A rewrite should make the strongest supported signal easier to see. It should not make the claim larger than the evidence.'"
+            }
+          ],
+          "coverage": {
+            "complete": true,
+            "expected_unit_ids": [
+              "U001",
+              "U002",
+              "U003",
+              "U004",
+              "U005",
+              "U006"
+            ],
+            "returned_unit_ids": [
+              "U001",
+              "U002",
+              "U003",
+              "U004",
+              "U005",
+              "U006"
+            ],
+            "missing_unit_ids": []
+          },
+          "batch_count": 1
+        }
+      ],
+      "draft": "I can't advise whether to apply—that's a career-choice decision outside this product's scope. I also can't rewrite for director-level claims without first seeing what the resume and evidence actually support.\n\nThe workspace needs a resume, supporting evidence, and a selected target role. Right now there's a vague posting but no recruiter context or resume file. I can begin a provisional target interpretation once you provide or grant access to those materials, then build the evidence ledger and defensible rewrites from whatever the documents demonstrate."
+    },
+    {
+      "id": "H-COMPOSED-001",
+      "passed": true,
+      "revision_passes": 2,
+      "audits": [
+        {
+          "passed": false,
+          "claims": [
+            {
+              "unit_id": "U001",
+              "claim": "I need to complete the `draft_claim_audit_revise` workflow before delivering to you.",
+              "verdict": "unsupported",
+              "evidence": "No source; procedural framing, not a user-specific fact about materials or existence"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "Let me work through this.",
+              "verdict": "unsupported",
+              "evidence": "No source; procedural filler, no factual or causal assertion"
+            },
+            {
+              "unit_id": "U003",
+              "claim": "The resume bullet contains the phrase 'Led vendor expansion'",
+              "verdict": "entailed",
+              "evidence": "user_input: 'Led vendor expansion'"
+            },
+            {
+              "unit_id": "U003",
+              "claim": "The candidate led vendor expansion",
+              "verdict": "unsupported",
+              "evidence": "user_input: 'Executives chose vendors; the candidate designed onboarding steps' — candidate did not lead expansion selection"
+            },
+            {
+              "unit_id": "U004",
+              "claim": "The candidate designed onboarding steps",
+              "verdict": "entailed",
+              "evidence": "user_input: 'the candidate designed onboarding steps'"
+            },
+            {
+              "unit_id": "U005",
+              "claim": "Executives chose vendors",
+              "verdict": "entailed",
+              "evidence": "user_input: 'Executives chose vendors'"
+            },
+            {
+              "unit_id": "U006",
+              "claim": "The claim 'Led vendor expansion' should be narrowed",
+              "verdict": "entailed",
+              "evidence": "protected_knowledge: 'Do not manufacture scope, ownership... than the supplied evidence demonstrates'; user_input shows candidate designed steps, executives chose vendors"
+            },
+            {
+              "unit_id": "U006",
+              "claim": "The candidate had partial ownership of vendor expansion",
+              "verdict": "entailed",
+              "evidence": "user_input: candidate designed onboarding steps; executives chose vendors"
+            },
+            {
+              "unit_id": "U006",
+              "claim": "The candidate's action was design not leadership of expansion itself",
+              "verdict": "entailed",
+              "evidence": "user_input: 'designed onboarding steps'; 'Executives chose vendors'"
+            },
+            {
+              "unit_id": "U007",
+              "claim": "The resume bullet contains the phrase 'reduced fulfillment time by 25%'",
+              "verdict": "entailed",
+              "evidence": "user_input: 'reduced fulfillment time by 25%'"
+            },
+            {
+              "unit_id": "U007",
+              "claim": "Fulfillment time was reduced by 25%",
+              "verdict": "unsupported",
+              "evidence": "user_input: 'two reports show 18% and 25%' — source conflict, no verified methodology"
+            },
+            {
+              "unit_id": "U008",
+              "claim": "Two reports show 18% and 25%",
+              "verdict": "entailed",
+              "evidence": "user_input: 'two reports show 18% and 25%'"
+            },
+            {
+              "unit_id": "U009",
+              "claim": "There is source conflict between the two reports",
+              "verdict": "entailed",
+              "evidence": "user_input: '18% and 25%' — divergent figures from two reports"
+            },
+            {
+              "unit_id": "U009",
+              "claim": "There is no verified methodology for the metric",
+              "verdict": "unsupported",
+              "evidence": "user_input does not mention methodology; no approved_tool_evidence on methodology"
+            },
+            {
+              "unit_id": "U010",
+              "claim": "The 25% figure should be verified",
+              "verdict": "entailed",
+              "evidence": "protected_knowledge: 'Do not publish disputed, unsupported... claims'; user_input shows 18%/25% conflict"
+            },
+            {
+              "unit_id": "U010",
+              "claim": "The metric is disputed",
+              "verdict": "entailed",
+              "evidence": "user_input: 'two reports show 18% and 25%' — conflicting sources"
+            },
+            {
+              "unit_id": "U010",
+              "claim": "Cannot publish either figure safely",
+              "verdict": "entailed",
+              "evidence": "protected_knowledge: 'Do not publish disputed, unsupported... claims'; user_input shows unresolved 18%/25% conflict with no methodology"
+            },
+            {
+              "unit_id": "U011",
+              "claim": "The designed steps remained in use",
+              "verdict": "entailed",
+              "evidence": "user_input: 'the steps remained in use'"
+            },
+            {
+              "unit_id": "U012",
+              "claim": "The claim 'Steps remained in use' is supported directly",
+              "verdict": "entailed",
+              "evidence": "user_input: 'the steps remained in use'"
+            },
+            {
+              "unit_id": "U013",
+              "claim": "The Creator method advises to keep observable operational results",
+              "evidence": "protected_knowledge: \"I cut adjectives... A bullet is strong when the reader can see a credible chain\"",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U014",
+              "claim": "The Creator method flags that 18% vs 25% cannot be resolved by preference",
+              "evidence": "protected_knowledge: \"Do not manufacture scope, ownership, metrics, outcomes\"",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U015",
+              "claim": "25% cannot be selected over 18% by preference alone",
+              "evidence": "protected_knowledge: \"Do not manufacture scope, ownership, metrics, outcomes\"",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U016",
+              "claim": "Candidate's design of onboarding steps alone does not establish causation for fulfillment time reduction",
+              "evidence": "user_input: \"Executives chose vendors; the candidate designed onboarding steps\"",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U017",
+              "claim": "Title 'Led' is unsupported by evidence about vendor expansion",
+              "evidence": "user_input: \"Executives chose vendors; the candidate designed onboarding steps\"",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U018",
+              "claim": "Working target interpretation: Marketplace Operations Lead needs evidence of designing operational mechanisms others execute",
+              "evidence": "protected_knowledge: \"I group the role into three or four capabilities\"",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U018",
+              "claim": "Working target interpretation: Marketplace Operations Lead needs evidence of producing durable operational assets",
+              "evidence": "protected_knowledge: \"I group the role into three or four capabilities\"",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U018",
+              "claim": "Working target interpretation: Marketplace Operations Lead needs evidence of enabling measurable operational improvement through process design",
+              "evidence": "protected_knowledge: \"I group the role into three or four capabilities\"",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U019",
+              "claim": "Candidate designed vendor onboarding steps",
+              "evidence": "user_input: \"the candidate designed onboarding steps\"",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U019",
+              "claim": "Onboarding steps were adopted as ongoing operational standard",
+              "evidence": "user_input: \"the steps remained in use\"",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U020",
+              "claim": "Fulfillment-time reporting showed 18% result",
+              "evidence": "user_input: \"two reports show 18% and 25%\"",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U020",
+              "claim": "Fulfillment-time reporting showed 25% result",
+              "evidence": "user_input: \"two reports show 18% and 25%\"",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U020",
+              "claim": "Methodology for fulfillment-time figures is unverified",
+              "evidence": "user_input: no methodology described",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U021",
+              "claim": "Evidence gap asks about measurement period for fulfillment-time figures",
+              "evidence": "protected_knowledge: \"Ask the user what can be shared\"",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U021",
+              "claim": "Evidence gap asks about baseline for fulfillment-time figures",
+              "evidence": "protected_knowledge: \"Ask the user what can be shared\"",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U022",
+              "claim": "Evidence gap asks who calculated fulfillment-time figures",
+              "evidence": "protected_knowledge: \"Ask the user what can be shared\"",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U023",
+              "claim": "Evidence gap asks about decision authority in vendor selection versus onboarding design",
+              "evidence": "protected_knowledge: \"Do not manufacture scope, ownership\"",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U024",
+              "claim": "Evidence gap asks how boundaries between vendor selection and onboarding design were defined",
+              "evidence": "protected_knowledge: \"Do not manufacture scope, ownership\"",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U025",
+              "claim": "A request is made for a colleague or document to confirm the onboarding steps' scope of use.",
+              "evidence": "protected_knowledge: product_promise includes evidence-recovery questions; creator_few_shots Example 2 shows putting scope of checklist use into evidence-recovery backlog",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U025",
+              "claim": "A request is made for a colleague or document to confirm whether the onboarding steps were modified after the candidate's design.",
+              "evidence": "protected_knowledge: product_promise includes evidence-recovery questions; creator_few_shots Example 2 shows putting scope of checklist use into evidence-recovery backlog",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U026",
+              "claim": "The word 'Led' is listed as a deliberate omission.",
+              "evidence": "draft_deliverable: 'Deliberate omissions:** \"Led,\"'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U026",
+              "claim": "The 25% claim is listed as a deliberate omission (as settled fact).",
+              "evidence": "draft_deliverable: 'the 25% claim as settled fact'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U026",
+              "claim": "Any inference that onboarding steps caused the reduction is listed as a deliberate omission.",
+              "evidence": "draft_deliverable: 'any inference that onboarding steps caused the reduction'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U026",
+              "claim": "Any adjective like 'streamlined' is listed as a deliberate omission.",
+              "evidence": "draft_deliverable: 'any adjective like \"streamlined\"'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U026",
+              "claim": "Any adjective like 'successful' is listed as a deliberate omission.",
+              "evidence": "draft_deliverable: 'or \"successful\"'",
+              "verdict": "entailed"
+            }
+          ],
+          "coverage": {
+            "complete": true,
+            "expected_unit_ids": [
+              "U001",
+              "U002",
+              "U003",
+              "U004",
+              "U005",
+              "U006",
+              "U007",
+              "U008",
+              "U009",
+              "U010",
+              "U011",
+              "U012",
+              "U013",
+              "U014",
+              "U015",
+              "U016",
+              "U017",
+              "U018",
+              "U019",
+              "U020",
+              "U021",
+              "U022",
+              "U023",
+              "U024",
+              "U025",
+              "U026"
+            ],
+            "returned_unit_ids": [
+              "U001",
+              "U002",
+              "U003",
+              "U004",
+              "U005",
+              "U006",
+              "U007",
+              "U008",
+              "U009",
+              "U010",
+              "U011",
+              "U012",
+              "U013",
+              "U014",
+              "U015",
+              "U016",
+              "U017",
+              "U018",
+              "U019",
+              "U020",
+              "U021",
+              "U022",
+              "U023",
+              "U024",
+              "U025",
+              "U026"
+            ],
+            "missing_unit_ids": []
+          },
+          "batch_count": 3
+        },
+        {
+          "passed": false,
+          "claims": [
+            {
+              "unit_id": "U001",
+              "claim": "Candidate designed vendor onboarding steps.",
+              "verdict": "entailed",
+              "evidence": "user_input: 'the candidate designed onboarding steps'"
+            },
+            {
+              "unit_id": "U001",
+              "claim": "Onboarding steps remained in use.",
+              "verdict": "entailed",
+              "evidence": "user_input: 'the steps remained in use'"
+            },
+            {
+              "unit_id": "U001",
+              "claim": "Onboarding steps were an ongoing operational standard.",
+              "verdict": "unsupported",
+              "evidence": "No source confirms 'operational standard' characterization; user_input only states 'remained in use'"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "Two internal reports exist.",
+              "verdict": "entailed",
+              "evidence": "user_input: 'two reports show 18% and 25%'"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "One report cited 18% fulfillment-time figure.",
+              "verdict": "entailed",
+              "evidence": "user_input: 'two reports show 18% and 25%'"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "One report cited 25% fulfillment-time figure.",
+              "verdict": "entailed",
+              "evidence": "user_input: 'two reports show 18% and 25%'"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "The two reports lacked a shared methodology.",
+              "verdict": "unsupported",
+              "evidence": "No source states methodology was unshared; inferred gap, not asserted fact"
+            },
+            {
+              "unit_id": "U003",
+              "claim": "Candidate's scope included process design.",
+              "verdict": "entailed",
+              "evidence": "user_input: 'the candidate designed onboarding steps'"
+            },
+            {
+              "unit_id": "U003",
+              "claim": "Candidate's scope did not include vendor selection.",
+              "verdict": "entailed",
+              "evidence": "user_input: 'Executives chose vendors'"
+            },
+            {
+              "unit_id": "U004",
+              "claim": "Request for measurement period used in fulfillment-time figures.",
+              "verdict": "entailed",
+              "evidence": "protected_knowledge: evidence-recovery question per product promise; procedural advice, not user-specific existence claim"
+            },
+            {
+              "unit_id": "U004",
+              "claim": "Request for baseline used in fulfillment-time figures.",
+              "verdict": "entailed",
+              "evidence": "protected_knowledge: evidence-recovery question per product promise; procedural advice, not user-specific existence claim"
+            },
+            {
+              "unit_id": "U005",
+              "claim": "Request for calculation method that produced each fulfillment-time figure.",
+              "verdict": "entailed",
+              "evidence": "protected_knowledge: evidence-recovery question per product promise; procedural advice, not user-specific existence claim"
+            },
+            {
+              "unit_id": "U006",
+              "claim": "Request for how decision rights were divided between vendor selection and onboarding design.",
+              "verdict": "entailed",
+              "evidence": "protected_knowledge: evidence-recovery question per product promise; procedural advice, not user-specific existence claim"
+            },
+            {
+              "unit_id": "U007",
+              "claim": "Request for colleague or document to confirm current scope of onboarding steps.",
+              "verdict": "entailed",
+              "evidence": "protected_knowledge: evidence-recovery question per product promise; procedural advice, not user-specific existence claim"
+            },
+            {
+              "unit_id": "U007",
+              "claim": "Request for colleague or document to confirm post-design modifications of onboarding steps.",
+              "verdict": "entailed",
+              "evidence": "protected_knowledge: evidence-recovery question per product promise; procedural advice, not user-specific existence claim"
+            }
+          ],
+          "coverage": {
+            "complete": true,
+            "expected_unit_ids": [
+              "U001",
+              "U002",
+              "U003",
+              "U004",
+              "U005",
+              "U006",
+              "U007"
+            ],
+            "returned_unit_ids": [
+              "U001",
+              "U002",
+              "U003",
+              "U004",
+              "U005",
+              "U006",
+              "U007"
+            ],
+            "missing_unit_ids": []
+          },
+          "batch_count": 1
+        },
+        {
+          "passed": true,
+          "claims": [
+            {
+              "unit_id": "U001",
+              "claim": "Designed vendor onboarding steps.",
+              "verdict": "entailed",
+              "evidence": "user_input: 'the candidate designed onboarding steps'"
+            },
+            {
+              "unit_id": "U001",
+              "claim": "The onboarding steps remained in use.",
+              "verdict": "entailed",
+              "evidence": "user_input: 'the steps remained in use'"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "Executives chose vendors.",
+              "verdict": "entailed",
+              "evidence": "user_input: 'Executives chose vendors'"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "Vendor selection was owned by executives.",
+              "verdict": "entailed",
+              "evidence": "user_input: 'Executives chose vendors'"
+            },
+            {
+              "unit_id": "U003",
+              "claim": "The candidate's scope was process design.",
+              "verdict": "entailed",
+              "evidence": "user_input: 'the candidate designed onboarding steps'"
+            },
+            {
+              "unit_id": "U004",
+              "claim": "Two internal reports exist.",
+              "verdict": "entailed",
+              "evidence": "user_input: 'two reports show 18% and 25%'"
+            },
+            {
+              "unit_id": "U004",
+              "claim": "One report cited a fulfillment-time figure of 18%.",
+              "verdict": "entailed",
+              "evidence": "user_input: 'two reports show 18% and 25%'"
+            },
+            {
+              "unit_id": "U004",
+              "claim": "One report cited a fulfillment-time figure of 25%.",
+              "verdict": "entailed",
+              "evidence": "user_input: 'two reports show 18% and 25%'"
+            },
+            {
+              "unit_id": "U005",
+              "claim": "The measurement period for each figure is unknown.",
+              "verdict": "entailed",
+              "evidence": "user_input: no measurement period stated; draft asks as evidence-recovery question"
+            },
+            {
+              "unit_id": "U005",
+              "claim": "The baseline for each figure is unknown.",
+              "verdict": "entailed",
+              "evidence": "user_input: no baseline stated; draft asks as evidence-recovery question"
+            },
+            {
+              "unit_id": "U006",
+              "claim": "The calculation method for each figure is unknown.",
+              "verdict": "entailed",
+              "evidence": "user_input: no calculation method stated; draft asks as evidence-recovery question"
+            }
+          ],
+          "coverage": {
+            "complete": true,
+            "expected_unit_ids": [
+              "U001",
+              "U002",
+              "U003",
+              "U004",
+              "U005",
+              "U006"
+            ],
+            "returned_unit_ids": [
+              "U001",
+              "U002",
+              "U003",
+              "U004",
+              "U005",
+              "U006"
+            ],
+            "missing_unit_ids": []
+          },
+          "batch_count": 1
+        }
+      ],
+      "draft": "I need to complete the `draft_claim_audit_revise` workflow before delivering to you. Let me work through this.\n\n**Draft claim audit:**\n\n| Claim | Evidence | Verdict |\n|-------|----------|---------|\n| \"Led vendor expansion\" | Candidate designed onboarding steps; executives chose vendors | **Narrow** — partial ownership, action was design not leadership of expansion itself |\n| \"reduced fulfillment time by 25%\" | Two reports show 18% and 25%; source conflict, no verified methodology | **Verify** — disputed metric, cannot publish either figure safely |\n| Steps remained in use | Supported directly | **Keep** — observable operational result |\n\n**Boundary check:** Cannot resolve 18% vs. 25% by preference. Cannot infer candidate caused reduction from \"designed onboarding steps\" alone. Title \"Led\" unsupported.\n\n---\n\n**Target interpretation (working):** Marketplace Operations Lead needs evidence of (1) designing operational mechanisms that others execute, (2) producing durable operational assets, (3) enabling measurable operational improvement through process design.\n\n**Supported rewrite:**\n\n> Designed vendor onboarding steps adopted as ongoing operational standard; fulfillment-time reporting showed mixed results (18% and 25%) with unverified methodology.\n\n**Evidence-recovery questions:**\n\n1. What measurement period and baseline produced each fulfillment-time figure, and who calculated them?\n2. What decision authority did you hold in vendor selection versus onboarding design, and how were those boundaries defined?\n3. Can a colleague or document confirm the onboarding steps' scope of use and whether they were modified after your design?\n\n**Deliberate omissions:** \"Led,\" the 25% claim as settled fact, any inference that onboarding steps caused the reduction, any adjective like \"streamlined\" or \"successful.\""
+    },
+    {
+      "id": "H-DIRECT-001",
+      "passed": true,
+      "revision_passes": 2,
+      "audits": [
+        {
+          "passed": false,
+          "claims": [
+            {
+              "unit_id": "U001",
+              "claim": "The target role is Revenue Operations Manager.",
+              "evidence": "user_input",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U001",
+              "claim": "The user created a recurring operational mechanism for a sales team.",
+              "evidence": "user_input: 'Created a weekly pipeline review for account executives.'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U001",
+              "claim": "The supported signal for this target is narrow.",
+              "evidence": "protected_knowledge: 'A bullet is not strong because it contains a metric. It is strong when the reader can see a credible chain' and 'First decide what the employer needs to believe. Then test the resume for evidence.'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "There is no evidence of adoption.",
+              "evidence": "user_input: 'There is no evidence of adoption, ownership scope, outcome, or source.'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "There is no evidence of standardization.",
+              "evidence": "user_input: 'There is no evidence of adoption, ownership scope, outcome, or source.'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "There is no evidence of outcome.",
+              "evidence": "user_input: 'There is no evidence of adoption, ownership scope, outcome, or source.'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "The claim stays at the mechanism level.",
+              "evidence": "protected_knowledge: 'Do not manufacture scope, ownership, metrics, outcomes, or a higher level than the supplied evidence demonstrates.'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U003",
+              "claim": "This is a supported rewrite.",
+              "evidence": "protected_knowledge: product promise to produce 'rewrites'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U004",
+              "claim": "The rewrite is 'Built a weekly pipeline review for account executives.'",
+              "evidence": "user_input: 'Created a weekly pipeline review for account executives.'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U004",
+              "claim": "The verb 'Built' is supported by evidence.",
+              "evidence": "unsupported - user_input uses 'Created', not 'Built'; no approved tool evidence confirms this synonym is verified for this user",
+              "verdict": "unsupported"
+            },
+            {
+              "unit_id": "U005",
+              "claim": "These are evidence gaps.",
+              "evidence": "protected_knowledge: product promise to produce 'evidence-recovery questions' and 'deliberate omissions'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U006",
+              "claim": "The question asks whether account executives used this review.",
+              "evidence": "user_input: 'no evidence of adoption'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U007",
+              "claim": "The question asks whether any leader or AE can confirm adoption.",
+              "evidence": "user_input: 'no evidence of adoption'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U008",
+              "claim": "The question asks whether this was the user's design decision.",
+              "evidence": "user_input: 'no evidence of ownership scope'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U008",
+              "claim": "The question asks whether the user was executing a prescribed format.",
+              "evidence": "user_input: 'no evidence of ownership scope'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U009",
+              "claim": "The question asks whether the review changed forecasting behavior.",
+              "evidence": "user_input: 'no evidence of outcome'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U009",
+              "claim": "The question asks whether the review changed pipeline hygiene.",
+              "evidence": "user_input: 'no evidence of outcome'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U009",
+              "claim": "The question asks whether the review changed close rates.",
+              "evidence": "user_input: 'no evidence of outcome'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U010",
+              "claim": "The question asks whether there is a source of record.",
+              "evidence": "user_input: 'no evidence of... source'",
+              "verdict": "entailed"
+            }
+          ],
+          "coverage": {
+            "complete": true,
+            "expected_unit_ids": [
+              "U001",
+              "U002",
+              "U003",
+              "U004",
+              "U005",
+              "U006",
+              "U007",
+              "U008",
+              "U009",
+              "U010"
+            ],
+            "returned_unit_ids": [
+              "U001",
+              "U002",
+              "U003",
+              "U004",
+              "U005",
+              "U006",
+              "U007",
+              "U008",
+              "U009",
+              "U010"
+            ],
+            "missing_unit_ids": []
+          },
+          "batch_count": 1
+        },
+        {
+          "passed": false,
+          "claims": [
+            {
+              "unit_id": "U001",
+              "claim": "Target is Revenue Operations Manager.",
+              "evidence": "user_input",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U001",
+              "claim": "Supported signal for this target is narrow.",
+              "evidence": "protected_knowledge: [rag] # Review A",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U001",
+              "claim": "User created a recurring operational mechanism for a sales team.",
+              "evidence": "user_input: 'Created a weekly pipeline review for account executives.'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "There is no evidence of adoption.",
+              "evidence": "user_input: 'There is no evidence of adoption'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "There is no evidence of standardization.",
+              "evidence": "user_input: 'There is no evidence of...ownership scope, outcome, or source'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "There is no evidence of outcome.",
+              "evidence": "user_input: 'There is no evidence of...outcome'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "The claim stays at the mechanism level.",
+              "evidence": "protected_knowledge: [rag] # Signal first",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U003",
+              "claim": "This is a supported rewrite.",
+              "evidence": "protected_knowledge: product_promise to produce rewrites",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U004",
+              "claim": "Created a weekly pipeline review for account executives.",
+              "evidence": "user_input: 'Created a weekly pipeline review for account executives.'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U005",
+              "claim": "These are evidence gaps.",
+              "evidence": "protected_knowledge: product_promise to produce evidence-recovery questions; product_boundary: preserve useful unresolved leads as evidence gaps",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U006",
+              "claim": "Account executives used this review.",
+              "evidence": "user_input: no evidence of adoption",
+              "verdict": "unsupported"
+            },
+            {
+              "unit_id": "U006",
+              "claim": "This question asks whether account executives used the review.",
+              "evidence": "protected_knowledge: product_promise to produce evidence-recovery questions",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U007",
+              "claim": "Any leader or AE can confirm adoption.",
+              "evidence": "user_input: no evidence of adoption, source",
+              "verdict": "unsupported"
+            },
+            {
+              "unit_id": "U007",
+              "claim": "This question asks whether any leader or AE can confirm adoption.",
+              "evidence": "protected_knowledge: product_promise to produce evidence-recovery questions",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U008",
+              "claim": "This was the user's design decision.",
+              "evidence": "user_input: no evidence of ownership scope",
+              "verdict": "unsupported"
+            },
+            {
+              "unit_id": "U008",
+              "claim": "This was a prescribed format.",
+              "evidence": "user_input: no evidence of ownership scope",
+              "verdict": "unsupported"
+            },
+            {
+              "unit_id": "U008",
+              "claim": "This question asks whether the user made the design decision or executed a prescribed format.",
+              "evidence": "protected_knowledge: product_promise to produce evidence-recovery questions",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U009",
+              "claim": "The review changed forecasting behavior.",
+              "evidence": "user_input: no evidence of outcome",
+              "verdict": "unsupported"
+            },
+            {
+              "unit_id": "U009",
+              "claim": "The review changed pipeline hygiene.",
+              "evidence": "user_input: no evidence of outcome",
+              "verdict": "unsupported"
+            },
+            {
+              "unit_id": "U009",
+              "claim": "The review changed close rates.",
+              "evidence": "user_input: no evidence of outcome",
+              "verdict": "unsupported"
+            },
+            {
+              "unit_id": "U009",
+              "claim": "This question asks whether the review changed forecasting behavior, pipeline hygiene, or close rates.",
+              "evidence": "protected_knowledge: product_promise to produce evidence-recovery questions",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U010",
+              "claim": "There is a source of record for any change.",
+              "evidence": "user_input: 'no...source'",
+              "verdict": "unsupported"
+            },
+            {
+              "unit_id": "U010",
+              "claim": "This question asks whether there is a source of record.",
+              "evidence": "protected_knowledge: product_promise to produce evidence-recovery questions",
+              "verdict": "entailed"
+            }
+          ],
+          "coverage": {
+            "complete": true,
+            "expected_unit_ids": [
+              "U001",
+              "U002",
+              "U003",
+              "U004",
+              "U005",
+              "U006",
+              "U007",
+              "U008",
+              "U009",
+              "U010"
+            ],
+            "returned_unit_ids": [
+              "U001",
+              "U002",
+              "U003",
+              "U004",
+              "U005",
+              "U006",
+              "U007",
+              "U008",
+              "U009",
+              "U010"
+            ],
+            "missing_unit_ids": []
+          },
+          "batch_count": 1
+        },
+        {
+          "passed": true,
+          "claims": [
+            {
+              "unit_id": "U001",
+              "claim": "Target is Revenue Operations Manager.",
+              "evidence": "user_input",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U001",
+              "claim": "The user created a recurring operational mechanism for a sales team.",
+              "evidence": "user_input: 'Created a weekly pipeline review for account executives'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U001",
+              "claim": "The supported signal is narrow.",
+              "evidence": "protected_knowledge: [rag] # Signal first — 'A bullet is not strong because it contains a metric. It is strong when the reader can see a credible chain' and method to test evidence before enlarging claims",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "There is no evidence of adoption.",
+              "evidence": "user_input: 'There is no evidence of adoption'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "There is no evidence of standardization.",
+              "evidence": "user_input: 'There is no evidence of... ownership scope'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "There is no evidence of outcome.",
+              "evidence": "user_input: 'There is no evidence of... outcome'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "The claim stays at the mechanism level.",
+              "evidence": "protected_knowledge: 'Do not manufacture scope, ownership, metrics, outcomes' and method to keep claims at supported level",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U003",
+              "claim": "Supported rewrite: 'Created a weekly pipeline review for account executives.'",
+              "evidence": "user_input: 'Created a weekly pipeline review for account executives' — verbatim quotation",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U004",
+              "claim": "Evidence gap asks: Did account executives use this review?",
+              "evidence": "protected_knowledge: Example 2 method — 'Put... into the evidence-recovery backlog instead of enlarging the claim'; product promise includes 'evidence-recovery questions'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U005",
+              "claim": "Evidence gap asks: Can any leader or AE confirm adoption?",
+              "evidence": "protected_knowledge: Example 2 method — 'Put... into the evidence-recovery backlog'; product promise includes 'evidence-recovery questions'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U006",
+              "claim": "Evidence gap asks: Was this your design decision?",
+              "evidence": "protected_knowledge: [rag] # Signal first — 'the candidate owned a meaningful decision or action'; Example 2 — 'expansion selection as not owned'; method to probe ownership",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U006",
+              "claim": "Evidence gap asks: Were you executing a prescribed format?",
+              "evidence": "protected_knowledge: [rag] # Signal first — 'the candidate owned a meaningful decision or action'; method to distinguish owned decision from execution",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U007",
+              "claim": "Evidence gap asks: Did the review change forecasting behavior?",
+              "evidence": "protected_knowledge: [rag] # Signal first — 'the action changed something observable'; method to seek observable change",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U007",
+              "claim": "Evidence gap asks: Did the review change pipeline hygiene?",
+              "evidence": "protected_knowledge: [rag] # Signal first — 'the action changed something observable'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U007",
+              "claim": "Evidence gap asks: Did the review change close rates?",
+              "evidence": "protected_knowledge: [rag] # Signal first — 'the action changed something observable'",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U008",
+              "claim": "Evidence gap asks: Is there a source of record?",
+              "evidence": "protected_knowledge: [rag] # Review A — 'Confirm the activation baseline and source of record with Analytics'; method to seek source of record",
+              "verdict": "entailed"
+            }
+          ],
+          "coverage": {
+            "complete": true,
+            "expected_unit_ids": [
+              "U001",
+              "U002",
+              "U003",
+              "U004",
+              "U005",
+              "U006",
+              "U007",
+              "U008"
+            ],
+            "returned_unit_ids": [
+              "U001",
+              "U002",
+              "U003",
+              "U004",
+              "U005",
+              "U006",
+              "U007",
+              "U008"
+            ],
+            "missing_unit_ids": []
+          },
+          "batch_count": 1
+        }
+      ],
+      "draft": "For a Revenue Operations Manager target, the supported signal is narrow: you created a recurring operational mechanism for a sales team. Without evidence of adoption, standardization, or outcome, the claim stays at the mechanism level.\n\n**Supported rewrite**\n\nBuilt a weekly pipeline review for account executives.\n\n**Evidence gaps**\n\n1. Did account executives use this review, and can any leader or AE confirm adoption?\n2. Was this your design decision, or were you executing a prescribed format?\n3. Did the review change forecasting behavior, pipeline hygiene, or close rates, and is there a source of record?"
+    },
+    {
+      "id": "H-OOS-001",
+      "passed": true,
+      "revision_passes": 0,
+      "audits": [
+        {
+          "passed": true,
+          "claims": [
+            {
+              "unit_id": "U001",
+              "claim": "The agent cannot predict offer probability.",
+              "evidence": "product_boundaries: \"Do not promise interviews, offers, or any hiring outcome.\"",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U001",
+              "claim": "The agent cannot create an interview-negotiation script.",
+              "evidence": "product_promise: produces \"target interpretation, evidence ledger, defensible revision plan and rewrites, evidence-recovery questions, and deliberate omissions\"",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U002",
+              "claim": "Signal Resume Review does not promise hiring outcomes.",
+              "evidence": "product_boundaries: \"Do not promise interviews, offers, or any hiring outcome.\"",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U003",
+              "claim": "A negotiation script falls outside the product scope.",
+              "evidence": "product_promise: produces \"target interpretation, evidence ledger, defensible revision plan and rewrites, evidence-recovery questions, and deliberate omissions\"; no negotiation script listed",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U004",
+              "claim": "The workspace currently contains only a resume.",
+              "evidence": "user_input: \"The workspace contains only a resume.\"",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U004",
+              "claim": "The workspace lacks a target role.",
+              "evidence": "user_input: \"The workspace contains only a resume.\"",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U004",
+              "claim": "The workspace lacks supporting evidence for the claims in the resume.",
+              "evidence": "user_input: \"The workspace contains only a resume.\"",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U004",
+              "claim": "The agent needs a target role and supporting evidence to begin the nearest promised work.",
+              "evidence": "product_promise: requires \"a selected workspace containing a resume, evidence, and target role\"",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U005",
+              "claim": "The user can provide a target posting.",
+              "evidence": "user_input: implicit capability; procedural advice framing",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U005",
+              "claim": "The user can grant access to verification materials.",
+              "evidence": "user_input: implicit capability; procedural advice framing",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U005",
+              "claim": "Once a target posting and verification materials are available, the agent can interpret that target.",
+              "evidence": "product_promise: \"produce and save a target interpretation\"",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U005",
+              "claim": "Once a target posting and verification materials are available, the agent can build the evidence ledger.",
+              "evidence": "product_promise: \"evidence ledger\"; retrieved_creator_knowledge: \"create an evidence ledger: claimed action, ownership, result, source, and relevance to the target\"",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U006",
+              "claim": "Once a target posting and verification materials are available, the agent can produce a defensible revision plan.",
+              "evidence": "product_promise: \"defensible revision plan and rewrites\"",
+              "verdict": "entailed"
+            },
+            {
+              "unit_id": "U006",
+              "claim": "Once a target posting and verification materials are available, the agent can produce rewrites.",
+              "evidence": "product_promise: \"defensible revision plan and rewrites\"",
+              "verdict": "entailed"
+            }
+          ],
+          "coverage": {
+            "complete": true,
+            "expected_unit_ids": [
+              "U001",
+              "U002",
+              "U003",
+              "U004",
+              "U005",
+              "U006"
+            ],
+            "returned_unit_ids": [
+              "U001",
+              "U002",
+              "U003",
+              "U004",
+              "U005",
+              "U006"
+            ],
+            "missing_unit_ids": []
+          },
+          "batch_count": 1
+        }
+      ],
+      "draft": "I cannot predict offer probability or create an interview-negotiation script. Signal Resume Review does not promise hiring outcomes, and a negotiation script falls outside the product scope.\n\nTo begin the nearest promised work, I need the workspace to also contain a target role and supporting evidence for the claims in the resume. Once you provide or grant access to a target posting and any verification materials you have, I can interpret that target, build the evidence ledger, and produce the defensible revision plan and rewrites."
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "release_digest": "sha256:906a8e19cbc0e7df6ff22c0cebd98af041f60dad9a230db50748bf8320fffbd0",
+  "inputs_sha256": "sha256:071a4a5db5ef34074d49e85bf6e9a3e90affcd16aa84e3f42e8a9b218d845fe5",
+  "creator_model": "kimi-k2.6",
+  "creator_controls": {
+    "thinking": {
+      "type": "disabled"
+    },
+    "temperature": 0.6,
+    "max_completion_tokens": 3000
+  },
+  "reviewer_model": "kimi-k2.6",
+  "reviewer_controls": {
+    "thinking": {
+      "type": "disabled"
+    },
+    "temperature": 0.6,
+    "max_completion_tokens": 2500
+  },
+  "creator_base_url": "https://api.moonshot.cn/v1",
+  "reviewer_base_url": "https://api.moonshot.cn/v1",
+  "errors": [
+    {
+      "input_id": "H-COMPOSED-001",
+      "error": "provider returned a malformed or empty answer"
+    }
+  ]
+}

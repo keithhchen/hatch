@@ -192,6 +192,10 @@ export class ClientToolBroker {
   }
 
   private async cancelPendingCall(key: string, pending: PendingCall, reason: string): Promise<void> {
+    // Claim the call before any I/O. A client result racing cancellation must
+    // never be able to complete the same protected-worker request afterward.
+    if (this.pending.get(key) !== pending) return;
+    this.pending.delete(key);
     clearTimeout(pending.timeout);
     await this.store.append({
       type: "tool.call",
@@ -224,7 +228,6 @@ export class ClientToolBroker {
       ...(pending.skillRunId ? { skill_run_id: pending.skillRunId } : {})
     });
     pending.reject(new Error(reason));
-    this.pending.delete(key);
   }
 
   private emitApprovalDecision(

@@ -1,0 +1,35 @@
+{
+  "creator": {"id": "maya-chen", "name": "Maya Chen"},
+  "product": {
+    "id": "maya-chen-resume-review",
+    "name": "Signal Resume Review",
+    "version": "1.0.0",
+    "description": "Reads a resume and supporting evidence in a Consumer-selected workspace, reviews them against a target role, and saves an evidence-grounded revision plan with usable rewrites.",
+    "promise": "For a selected workspace containing a resume, evidence, and target role, produce and save a target interpretation, evidence ledger, defensible revision plan and rewrites, evidence-recovery questions, and deliberate omissions.",
+    "boundaries": [
+      "Review evidence for a target role the Consumer has chosen; do not choose a job for the Consumer.",
+      "Do not promise interviews, offers, or any hiring outcome.",
+      "Do not manufacture scope, ownership, metrics, outcomes, or a higher level than the supplied evidence demonstrates.",
+      "Do not publish disputed, unsupported, or confidential claims; preserve useful unresolved leads as evidence gaps instead.",
+      "When target-role ambiguity would change emphasis, state the working interpretation and uncertainty and request clarifying context."
+    ],
+    "price_minor": 3900,
+    "currency": "USD",
+    "pricing_model": "per_delivery",
+    "pricing_unit": "review",
+    "supported_local_capabilities": ["fs.read", "fs.write"],
+    "external_tools": [],
+    "presentation": {"format": "saved structured revision plan with rewrite-ready bullets"}
+  },
+  "documents": [
+    {"source_id":"src-course-00-course-welcome-a38d9a48","path":"sources/welcome.md","kind":"text","title":"Signal Resume Lab — welcome note","authority":"creator-authored course welcome","origin_source_id":"src-course-00-course-welcome-a38d9a48","origin_path":"course/00-course-welcome.txt","source_location":"course/00-course-welcome.txt","raw_sha256":"5671d740b8e2ac93a6a3544499995bdcce4b0d8c04d25f21762ad4a27ce177c0"},
+    {"source_id":"src-course-01-lesson-signal-before-language-5bde528b","path":"sources/signal.md","kind":"text","title":"Signal before language","authority":"creator-authored course lesson","origin_source_id":"src-course-01-lesson-signal-before-language-5bde528b","origin_path":"course/01-lesson-signal-before-language.md","source_location":"course/01-lesson-signal-before-language.md","raw_sha256":"0f9535030ec36b272cd7b94fa74e27a6349880a720795f9a170844cd6349b475"},
+    {"source_id":"src-course-02-lesson-ownership-and-evidence-c66ac1e2","path":"sources/ownership.md","kind":"text","title":"Ownership and evidence","authority":"creator-authored course lesson","origin_source_id":"src-course-02-lesson-ownership-and-evidence-c66ac1e2","origin_path":"course/02-lesson-ownership-and-evidence.md","source_location":"course/02-lesson-ownership-and-evidence.md","raw_sha256":"0a2585983afd99378f957dfb55ebd2902ef1ccf3f0e2974bcfd01d0e725073f8"},
+    {"source_id":"src-course-03-workshop-notes-ffc6803b","path":"sources/workshop.md","kind":"text","title":"Workshop notes","authority":"creator-authored workshop notes","origin_source_id":"src-course-03-workshop-notes-ffc6803b","origin_path":"course/03-workshop-notes.md","source_location":"course/03-workshop-notes.md","raw_sha256":"11e6e5934f1114454972a536057b735cab1430ebd214a6abe513488a2c764c8c"},
+    {"source_id":"src-course-04-video-lesson-ff71f644","path":"sources/video.md","kind":"video","title":"Evidence ledger before rewrite","authority":"creator-authored video transcript","origin_source_id":"src-course-04-video-lesson-ff71f644","origin_path":"course/04-video-lesson.mp4","source_location":"course/04-video-lesson.mp4#t=11.5,51.5","raw_sha256":"6159264643dbf0deaba650f7d3577b6726be40071447cc6660533c2a4a5c8082"},
+    {"source_id":"src-course-05-office-hours-faq-c7ce5f52","path":"sources/faq.md","kind":"text","title":"Office hours FAQ","authority":"creator-authored FAQ","origin_source_id":"src-course-05-office-hours-faq-c7ce5f52","origin_path":"course/05-office-hours-faq.txt","source_location":"course/05-office-hours-faq.txt","raw_sha256":"52d484d9c684c15e47507e54835422a9877db1c5fcc3e4743dd275171ed7e5fc"},
+    {"source_id":"src-course-evidence-workbook-a868fdd6","path":"sources/workbook.md","kind":"pdf","title":"Evidence Workbook","authority":"creator-authored workbook","origin_source_id":"src-course-evidence-workbook-a868fdd6","origin_path":"course/evidence-workbook.pdf","source_location":"course/evidence-workbook.pdf#page=1","raw_sha256":"28d0f22c6ade82d7dca03d1b237a928f72f860b4537c17ebc298b9ab3cd3dd2e"},
+    {"source_id":"src-prior-work-review-a-98463ca9","path":"sources/review-a.md","kind":"text","title":"Growth operations review","authority":"creator-authored review example","origin_source_id":"src-prior-work-review-a-98463ca9","origin_path":"prior-work/review-a.md","source_location":"prior-work/review-a.md","raw_sha256":"de702a3c529badbeb435bd0e22e366a0abc9e91316e83090ef1d4237acdd7b15"},
+    {"source_id":"src-prior-work-review-b-89ae54f0","path":"sources/review-b.md","kind":"text","title":"Platform operations review","authority":"creator-authored review example","origin_source_id":"src-prior-work-review-b-89ae54f0","origin_path":"prior-work/review-b.md","source_location":"prior-work/review-b.md","raw_sha256":"7a4a55dcf8141cad6db66935f41182322cbd77a8f4b8aef2a87641e4aaa44ddf"}
+  ]
+}

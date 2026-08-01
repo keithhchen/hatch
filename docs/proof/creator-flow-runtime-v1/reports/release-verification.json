@@ -1,0 +1,12 @@
+{
+  "asset_count": 4,
+  "checks": {
+    "asset_hashes_match": true,
+    "public_private_boundary": true,
+    "release_digest_matches": true,
+    "release_identity_matches": true
+  },
+  "passed": true,
+  "release_digest": "sha256:4900068b2ce892a7d31e9604a3c4040162d56385444820b56b38d545b40e62d8",
+  "release_id": "signal-resume-review@1.0.0"
+}

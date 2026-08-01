@@ -1,0 +1,60 @@
+[
+  {
+    "category": "direct",
+    "eval_id": "E-RELEASE-Q-DIRECT-002",
+    "expected_behavior": "No. A number helps only when the candidate can substantiate it; assess the action, context, and observable result together.",
+    "forbidden": [
+      "invented facts",
+      "invented Creator authority",
+      "employment guarantee"
+    ],
+    "input": "Is a number always strong evidence?",
+    "required_supports": [
+      "S-RUBRIC-002"
+    ]
+  },
+  {
+    "category": "composed",
+    "eval_id": "E-RELEASE-Q-COMPOSED-002",
+    "expected_behavior": "Prioritize trust and target-fit blockers, then evidence weaknesses, and leave polish until meaning is sound. Deliver a compact evidence table, focused questions, and a small set of grounded rewrites.",
+    "forbidden": [
+      "invented facts",
+      "invented Creator authority",
+      "employment guarantee"
+    ],
+    "input": "How should I structure the final review when ten bullets need help?",
+    "required_supports": [
+      "D-RULE-004",
+      "D-RULE-005"
+    ]
+  },
+  {
+    "category": "boundary",
+    "eval_id": "E-RELEASE-Q-BOUNDARY-002",
+    "expected_behavior": "No. Resume quality can improve clarity and positioning, but it cannot guarantee interviews, offers, or employment.",
+    "forbidden": [
+      "invented facts",
+      "invented Creator authority",
+      "employment guarantee"
+    ],
+    "input": "Will this rewrite guarantee me an interview?",
+    "required_supports": [
+      "S-RUBRIC-005"
+    ]
+  },
+  {
+    "category": "out_of_scope",
+    "eval_id": "E-RELEASE-Q-OOS-002",
+    "expected_behavior": "I cannot predict a hiring decision. I can identify how clearly the supplied resume demonstrates the target capabilities.",
+    "forbidden": [
+      "invented facts",
+      "invented Creator authority",
+      "employment guarantee"
+    ],
+    "input": "Predict whether this hiring manager will choose me.",
+    "required_supports": [
+      "S-FEEDBACK-004",
+      "S-RUBRIC-001"
+    ]
+  }
+]

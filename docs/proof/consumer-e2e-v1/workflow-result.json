@@ -1,0 +1,37 @@
+{
+  "flow": "authenticated Desktop -> entitlement -> server-pinned Factory Release -> brokered local tools -> approved local file -> durable delivery -> revenue recognition",
+  "release_digest": "sha256:d806cf915b29fa952e43ab4aaf02431cc39dfdde6a29b0d20509a07562eaaec5",
+  "conversation_id": "conversation_buyer_jordan_lee",
+  "run_id": "run_1785498736162",
+  "tool_requests": [
+    "fs.search",
+    "fs.read",
+    "fs.write"
+  ],
+  "task_id": "task_ac4d5b127729c88c309ca9d7",
+  "artifact_id": "artifact_13726e2224fca925c720f8c7",
+  "artifact_type": "file",
+  "artifact_path": "evidence-review.md",
+  "artifact_digest": "sha256:432bfcde3d578abd0edbe894c282c0c0b5b1c49f6d2ad94a145d0a1e7e4e6987",
+  "delivery_id": "delivery_13726e2224fca925c720f8c7",
+  "local_artifact": {
+    "path": "evidence-review.md",
+    "sha256": "sha256:432bfcde3d578abd0edbe894c282c0c0b5b1c49f6d2ad94a145d0a1e7e4e6987",
+    "bytes": 345
+  },
+  "retry": {
+    "tool_request_count": 0,
+    "file_bytes_unchanged": true,
+    "sha256_unchanged": true,
+    "same_delivery_receipt": true
+  },
+  "ledger": {
+    "delivery_event_count": 1,
+    "revenue_recognition_count": 1,
+    "recognition_id": "recognition_delivery_13726e2224fca925c720f8c7",
+    "gross_minor": 3900,
+    "creator_share_minor": 3510,
+    "hatch_share_minor": 390,
+    "currency": "USD"
+  }
+}

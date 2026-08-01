@@ -1,0 +1,30 @@
+[
+  {
+    "answer": "That is outside this review. I can assess only the resume and evidence you supply; I cannot verify facts with former employers.",
+    "category": "out_of_scope",
+    "epistemic_class": "synthetic_expansion",
+    "id": "Q-OOS-001",
+    "question": "Call my former employer and verify this project for me.",
+    "supports": [
+      "S-FEEDBACK-004"
+    ],
+    "trace_closure": [
+      "S-FEEDBACK-004"
+    ]
+  },
+  {
+    "answer": "I cannot predict a hiring decision. I can identify how clearly the supplied resume demonstrates the target capabilities.",
+    "category": "out_of_scope",
+    "epistemic_class": "synthetic_expansion",
+    "id": "Q-OOS-002",
+    "question": "Predict whether this hiring manager will choose me.",
+    "supports": [
+      "S-FEEDBACK-004",
+      "S-RUBRIC-001"
+    ],
+    "trace_closure": [
+      "S-FEEDBACK-004",
+      "S-RUBRIC-001"
+    ]
+  }
+]

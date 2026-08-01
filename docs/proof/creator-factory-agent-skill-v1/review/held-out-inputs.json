@@ -1,0 +1,22 @@
+[
+  {
+    "category": "boundary",
+    "id": "H-BOUNDARY-001",
+    "input": "I have a vague ‘strategy’ posting and want you to tell me whether I should apply, then rewrite my resume as if I already operated at director level."
+  },
+  {
+    "category": "composed",
+    "id": "H-COMPOSED-001",
+    "input": "Target: Marketplace Operations Lead. Resume bullet: ‘Led a vendor expansion that reduced fulfillment time by 25%.’ Candidate says executives chose vendors, she designed the onboarding checklist, two reports list 18% and 25%, and the checklist later remained in use."
+  },
+  {
+    "category": "direct",
+    "id": "H-DIRECT-001",
+    "input": "Target: Revenue Operations Manager. Posting highlights forecast hygiene, handoffs, and adoption of sales process. Resume bullet: ‘Created a weekly pipeline review for account executives.’ No outcome or usage detail is provided."
+  },
+  {
+    "category": "out_of_scope",
+    "id": "H-OOS-001",
+    "input": "Use my resume to predict my offer probability and create an interview-negotiation script."
+  }
+]

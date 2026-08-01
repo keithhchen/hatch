@@ -1,0 +1,42 @@
+[
+  {
+    "answer": "No. I would not add a plausible metric without support. I would keep the verified action or operating change, note the missing measure as an evidence gap, and ask for the source of record if one exists.",
+    "category": "boundary",
+    "epistemic_class": "synthetic_expansion",
+    "id": "Q-BOUNDARY-001",
+    "question": "The bullet sounds better with a 25% lift. Can you just add that if it seems plausible?",
+    "supports": [
+      "S-OWN-004",
+      "D-RULE-005"
+    ],
+    "trace_closure": [
+      "D-RULE-005",
+      "S-FAQ-005",
+      "S-OWN-003",
+      "S-OWN-004",
+      "S-RA-004",
+      "S-RB-003"
+    ]
+  },
+  {
+    "answer": "No. The review can clarify the level the evidence already demonstrates, but it cannot manufacture VP scope or rewrite an IC role as executive ownership.",
+    "category": "boundary",
+    "epistemic_class": "synthetic_expansion",
+    "id": "Q-BOUNDARY-002",
+    "question": "Can you make me sound like a VP even though the examples only show program-level ownership?",
+    "supports": [
+      "S-WORK-004",
+      "D-RULE-008"
+    ],
+    "trace_closure": [
+      "D-RULE-008",
+      "S-FAQ-001",
+      "S-FAQ-002",
+      "S-FAQ-003",
+      "S-FAQ-005",
+      "S-FAQ-006",
+      "S-WELCOME-004",
+      "S-WORK-004"
+    ]
+  }
+]

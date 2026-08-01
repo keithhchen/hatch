@@ -1,0 +1,24 @@
+{
+  "kind": "distillation_provider_success_cache_v1",
+  "request": {
+    "controls": {
+      "max_completion_tokens": 8000,
+      "temperature": 0.6,
+      "thinking": {
+        "type": "disabled"
+      }
+    },
+    "endpoint": "https://api.moonshot.cn/v1/chat/completions",
+    "model": "kimi-k2.6",
+    "phase": "distill_source_facts",
+    "request_bytes": 3632,
+    "request_label": "src-prior-work-review-b-89ae54f0/attempt-1",
+    "request_sha256": "sha256:ecc23c66b7e10ba2bfbefdbdf7906de8264206a2bff1c6ac822c14a88521905a"
+  },
+  "response": "{\"facts\":[{\"unit_id\":\"EU-5755C1501E42\",\"label\":\"Reject uncheckable padding words\",\"priority\":1,\"role\":\"quality_bar\",\"omission\":null},{\"unit_id\":\"EU-5755C1501E42\",\"label\":\"Elevate decision authority and institutionalized controls\",\"priority\":1,\"role\":\"priority\",\"omission\":null},{\"unit_id\":\"EU-5755C1501E42\",\"label\":\"Explicitly omit revenue metric apology\",\"priority\":1,\"role\":\"omission\",\"omission\":\"The method does not apologize for or invent revenue metrics when none are available\"},{\"unit_id\":\"EU-62363F8FB039\",\"label\":\"Rewrite must cite specific mechanism and adoption scope\",\"priority\":1,\"role\":\"output\",\"omission\":null},{\"unit_id\":\"EU-6F29E1013715\",\"label\":\"Remove quantified claim when count is unverifiable\",\"priority\":1,\"role\":\"boundary\",\"omission\":null},{\"unit_id\":\"EU-6F29E1013715\",\"label\":\"Prohibit guessed ranges as replacement for confidential evidence\",\"priority\":1,\"role\":\"omission\",\"omission\":\"The method does not replace confidential evidence with invented or guessed numerical ranges\"}]}",
+  "response_sha256": "sha256:2f166100f9d9bc7d70c9107c053607d44ddf60c666be83642b34e33e18bd7dce",
+  "terminal": {
+    "choice_count": 1,
+    "finish_reason": "stop"
+  }
+}

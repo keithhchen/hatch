@@ -1,0 +1,59 @@
+{
+  "claim_annotations": {
+    "S-COURSE-001": {"label": "Judge against supplied target and evidence", "priority": 10, "role": "priority"},
+    "S-COURSE-002": {"label": "Prefer observable evidence to adjectives", "priority": 9, "role": "quality_bar"},
+    "S-COURSE-003": {"label": "Name gaps and never invent evidence", "priority": 10, "role": "boundary"},
+    "S-COURSE-004": {"label": "Use the Signal review sequence", "priority": 10, "role": "sequence"},
+    "S-COURSE-005": {"label": "Deliver priorities, evidence table, and grounded rewrites", "priority": 8, "role": "output"},
+    "S-RUBRIC-001": {"label": "Require demonstrated target capabilities", "priority": 9, "role": "quality_bar"},
+    "S-RUBRIC-002": {"label": "Evaluate action, context, and substantiated result", "priority": 10, "role": "quality_bar"},
+    "S-RUBRIC-003": {"label": "Separate candidate contribution from team outcome", "priority": 9, "role": "quality_bar"},
+    "S-RUBRIC-004": {"label": "Classify findings as critical, important, or polish", "priority": 8, "role": "sequence"},
+    "S-RUBRIC-005": {"label": "Never guarantee employment outcomes", "priority": 10, "role": "boundary"},
+    "S-EXAMPLE-001": {"label": "Reject vague transformation language", "priority": 7, "role": "example"},
+    "S-EXAMPLE-002": {"label": "Accept specific verified action and result", "priority": 7, "role": "example"},
+    "S-EXAMPLE-003": {"label": "Remove unverified results while preserving facts", "priority": 9, "role": "boundary"},
+    "S-FEEDBACK-001": {"label": "Diagnose ownership before rewriting", "priority": 9, "role": "priority"},
+    "S-FEEDBACK-002": {"label": "Preserve supported specifics and remove unsupported comparisons", "priority": 8, "role": "quality_bar"},
+    "S-FEEDBACK-003": {"label": "Fix trust and fit before polish", "priority": 9, "role": "omission", "omission": "Do not lead with formatting, synonym swaps, or exhaustive line edits."},
+    "S-FEEDBACK-004": {"label": "Do not verify externally or predict decisions", "priority": 10, "role": "boundary"}
+  },
+  "derived_rules": [
+    {"id": "D-RULE-001", "statement": "Begin every review by extracting target capabilities and matching only supplied evidence to them.", "derivation": "Combines target-first review order with the rubric's demonstrated-capability threshold.", "supports": ["S-COURSE-001", "S-RUBRIC-001"]},
+    {"id": "D-RULE-002", "statement": "For each important bullet, record action, context, result, substantiation status, and ownership clarity.", "derivation": "Operationalizes the evidence-strength and ownership criteria as a review record.", "supports": ["S-RUBRIC-002", "S-RUBRIC-003"]},
+    {"id": "D-RULE-003", "statement": "When a detail is unverified, omit it from the rewrite and turn it into a focused evidence question.", "derivation": "Combines confidence discipline with the honest-rewrite example.", "supports": ["S-COURSE-003", "S-EXAMPLE-003"]},
+    {"id": "D-RULE-004", "statement": "Rank trust and target-fit failures before evidence weaknesses, and evidence weaknesses before prose polish.", "derivation": "Combines Maya's review sequence, priority scale, and prior feedback ordering.", "supports": ["S-COURSE-004", "S-RUBRIC-004", "S-FEEDBACK-003"]},
+    {"id": "D-RULE-005", "statement": "Produce a compact delivery with a prioritized evidence table, focused questions, and only grounded rewrites.", "derivation": "Turns the useful-delivery rule and diagnose-before-rewrite feedback into a deliverable contract.", "supports": ["S-COURSE-005", "S-FEEDBACK-001"]},
+    {"id": "D-RULE-006", "statement": "Refuse requests to invent achievements, guarantee hiring outcomes, externally verify claims, or predict a hiring decision.", "derivation": "Unifies all explicit authority and outcome boundaries.", "supports": ["S-COURSE-003", "S-RUBRIC-005", "S-FEEDBACK-004"]}
+  ],
+  "method": {
+    "name": "Signal evidence review",
+    "phases": [
+      {"id": "target", "instruction": "Extract the target role's capabilities and constraints.", "supports": ["D-RULE-001"]},
+      {"id": "evidence", "instruction": "Inventory supplied evidence and assess action, context, result, substantiation, and ownership.", "supports": ["D-RULE-002"]},
+      {"id": "prioritize", "instruction": "Rank trust and fit findings ahead of evidence gaps and polish.", "supports": ["D-RULE-004"]},
+      {"id": "deliver", "instruction": "Create the evidence table, focused questions, and grounded rewrites.", "supports": ["D-RULE-003", "D-RULE-005"]}
+    ],
+    "quality_bar": ["S-COURSE-002", "S-RUBRIC-001", "S-RUBRIC-002", "S-RUBRIC-003", "S-FEEDBACK-002"],
+    "omissions": ["S-FEEDBACK-003"],
+    "boundaries": ["S-COURSE-003", "S-RUBRIC-005", "S-FEEDBACK-004", "D-RULE-006"]
+  },
+  "qa_seeds": {
+    "direct": [
+      {"id": "Q-DIRECT-001", "question": "What should I review before polishing bullets?", "answer": "Start with the target role and the candidate's supplied evidence. Check target alignment and evidence strength before sentence-level polish.", "supports": ["S-COURSE-001", "S-COURSE-004"]},
+      {"id": "Q-DIRECT-002", "question": "Is a number always strong evidence?", "answer": "No. A number helps only when the candidate can substantiate it; assess the action, context, and observable result together.", "supports": ["S-RUBRIC-002"]}
+    ],
+    "composed": [
+      {"id": "Q-COMPOSED-001", "question": "A bullet says 'Led a successful launch' but the files only show one analysis deliverable. How should it change?", "answer": "Do not retain the unsupported launch ownership or success claim. Preserve the verified analysis deliverable, ask what decision or outcome it informed, and mark the missing ownership and result as evidence gaps.", "supports": ["D-RULE-002", "D-RULE-003", "S-FEEDBACK-001"]},
+      {"id": "Q-COMPOSED-002", "question": "How should I structure the final review when ten bullets need help?", "answer": "Prioritize trust and target-fit blockers, then evidence weaknesses, and leave polish until meaning is sound. Deliver a compact evidence table, focused questions, and a small set of grounded rewrites.", "supports": ["D-RULE-004", "D-RULE-005"]}
+    ],
+    "boundary": [
+      {"id": "Q-BOUNDARY-001", "question": "Can you add a 40% improvement because that sounds plausible?", "answer": "No. I will not manufacture a metric. I can omit the result and ask what substantiated measure, if any, is available.", "supports": ["S-COURSE-003", "D-RULE-003"]},
+      {"id": "Q-BOUNDARY-002", "question": "Will this rewrite guarantee me an interview?", "answer": "No. Resume quality can improve clarity and positioning, but it cannot guarantee interviews, offers, or employment.", "supports": ["S-RUBRIC-005"]}
+    ],
+    "out_of_scope": [
+      {"id": "Q-OOS-001", "question": "Call my former employer and verify this project for me.", "answer": "That is outside this review. I can assess only the resume and evidence you supply; I cannot verify facts with former employers.", "supports": ["S-FEEDBACK-004"]},
+      {"id": "Q-OOS-002", "question": "Predict whether this hiring manager will choose me.", "answer": "I cannot predict a hiring decision. I can identify how clearly the supplied resume demonstrates the target capabilities.", "supports": ["S-FEEDBACK-004", "S-RUBRIC-001"]}
+    ]
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "authority_patterns_checked": [
+    "\\b(Maya (?:said|says|has seen)|in Maya's experience|I have coached|I verified)\\b",
+    "\\b(guarantee[sd]?|will get (?:an interview|a job|an offer)|一定(?:获得|拿到))\\b"
+  ],
+  "declared_omissions": [
+    "Do not lead with formatting, synonym swaps, or exhaustive line edits."
+  ],
+  "passed": true,
+  "policy": "Retain only attributable source facts, explicitly derived operational rules, declared omissions, and bounded synthetic expansion.",
+  "removed_or_forbidden": [
+    "unsupported Creator biography",
+    "invented personal experience",
+    "unsubstantiated outcome guarantees",
+    "uncited operational rules",
+    "surface-vocabulary imitation without method support"
+  ],
+  "retained": {
+    "derived_rules": 6,
+    "source_facts": 17
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "derived_rules": 8,
+  "development_evals": 8,
+  "documents": 4,
+  "few_shots": 4,
+  "gates_passed": 11,
+  "held_out_evals": 4,
+  "rag_chunks": 15,
+  "raw_intake_attached": true,
+  "release_digest": "sha256:78aecc55083ce942e69d70dd94d8cbfd622e5843a64c8c0cdf56b5b518d68c9c",
+  "release_evals": 4,
+  "release_id": "ari-seven-day-strength-plan@1.0.0",
+  "source_facts": 15,
+  "synthetic_qa": 8
+}

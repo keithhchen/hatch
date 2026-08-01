@@ -1,0 +1,136 @@
+{
+  "boundary": [
+    {
+      "answer": "No. I will not manufacture a metric. I can omit the result and ask what substantiated measure, if any, is available.",
+      "category": "boundary",
+      "epistemic_class": "synthetic_expansion",
+      "id": "Q-BOUNDARY-001",
+      "question": "Can you add a 40% improvement because that sounds plausible?",
+      "supports": [
+        "S-COURSE-003",
+        "D-RULE-003"
+      ],
+      "trace_closure": [
+        "D-RULE-003",
+        "S-COURSE-003",
+        "S-EXAMPLE-003"
+      ]
+    },
+    {
+      "answer": "No. Resume quality can improve clarity and positioning, but it cannot guarantee interviews, offers, or employment.",
+      "category": "boundary",
+      "epistemic_class": "synthetic_expansion",
+      "id": "Q-BOUNDARY-002",
+      "question": "Will this rewrite guarantee me an interview?",
+      "supports": [
+        "S-RUBRIC-005"
+      ],
+      "trace_closure": [
+        "S-RUBRIC-005"
+      ]
+    }
+  ],
+  "composed": [
+    {
+      "answer": "Do not retain the unsupported launch ownership or success claim. Preserve the verified analysis deliverable, ask what decision or outcome it informed, and mark the missing ownership and result as evidence gaps.",
+      "category": "composed",
+      "epistemic_class": "synthetic_expansion",
+      "id": "Q-COMPOSED-001",
+      "question": "A bullet says 'Led a successful launch' but the files only show one analysis deliverable. How should it change?",
+      "supports": [
+        "D-RULE-002",
+        "D-RULE-003",
+        "S-FEEDBACK-001"
+      ],
+      "trace_closure": [
+        "D-RULE-002",
+        "D-RULE-003",
+        "S-COURSE-003",
+        "S-EXAMPLE-003",
+        "S-FEEDBACK-001",
+        "S-RUBRIC-002",
+        "S-RUBRIC-003"
+      ]
+    },
+    {
+      "answer": "Prioritize trust and target-fit blockers, then evidence weaknesses, and leave polish until meaning is sound. Deliver a compact evidence table, focused questions, and a small set of grounded rewrites.",
+      "category": "composed",
+      "epistemic_class": "synthetic_expansion",
+      "id": "Q-COMPOSED-002",
+      "question": "How should I structure the final review when ten bullets need help?",
+      "supports": [
+        "D-RULE-004",
+        "D-RULE-005"
+      ],
+      "trace_closure": [
+        "D-RULE-004",
+        "D-RULE-005",
+        "S-COURSE-004",
+        "S-COURSE-005",
+        "S-FEEDBACK-001",
+        "S-FEEDBACK-003",
+        "S-RUBRIC-004"
+      ]
+    }
+  ],
+  "direct": [
+    {
+      "answer": "Start with the target role and the candidate's supplied evidence. Check target alignment and evidence strength before sentence-level polish.",
+      "category": "direct",
+      "epistemic_class": "synthetic_expansion",
+      "id": "Q-DIRECT-001",
+      "question": "What should I review before polishing bullets?",
+      "supports": [
+        "S-COURSE-001",
+        "S-COURSE-004"
+      ],
+      "trace_closure": [
+        "S-COURSE-001",
+        "S-COURSE-004"
+      ]
+    },
+    {
+      "answer": "No. A number helps only when the candidate can substantiate it; assess the action, context, and observable result together.",
+      "category": "direct",
+      "epistemic_class": "synthetic_expansion",
+      "id": "Q-DIRECT-002",
+      "question": "Is a number always strong evidence?",
+      "supports": [
+        "S-RUBRIC-002"
+      ],
+      "trace_closure": [
+        "S-RUBRIC-002"
+      ]
+    }
+  ],
+  "out_of_scope": [
+    {
+      "answer": "That is outside this review. I can assess only the resume and evidence you supply; I cannot verify facts with former employers.",
+      "category": "out_of_scope",
+      "epistemic_class": "synthetic_expansion",
+      "id": "Q-OOS-001",
+      "question": "Call my former employer and verify this project for me.",
+      "supports": [
+        "S-FEEDBACK-004"
+      ],
+      "trace_closure": [
+        "S-FEEDBACK-004"
+      ]
+    },
+    {
+      "answer": "I cannot predict a hiring decision. I can identify how clearly the supplied resume demonstrates the target capabilities.",
+      "category": "out_of_scope",
+      "epistemic_class": "synthetic_expansion",
+      "id": "Q-OOS-002",
+      "question": "Predict whether this hiring manager will choose me.",
+      "supports": [
+        "S-FEEDBACK-004",
+        "S-RUBRIC-001"
+      ],
+      "trace_closure": [
+        "S-FEEDBACK-004",
+        "S-RUBRIC-001"
+      ]
+    }
+  ]
+}

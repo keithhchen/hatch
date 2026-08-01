@@ -1,0 +1,107 @@
+{
+  "boundaries": [
+    "S-WELCOME-002",
+    "S-FAQ-001",
+    "S-FAQ-002",
+    "S-FAQ-003",
+    "S-FAQ-004",
+    "S-WORKSHOP-004",
+    "S-FAQ-005"
+  ],
+  "epistemic_class": "derived_rule",
+  "omissions": [
+    "S-WELCOME-001",
+    "S-SIGNAL-004",
+    "S-WORKBOOK-005"
+  ],
+  "phases": [
+    {
+      "id": "P-01-target",
+      "instruction": "Read the resume, evidence, and chosen target role from the user-selected workspace; translate the target into three or four plain-language capabilities. If ambiguity could change emphasis, state the working interpretation and request clarifying context.",
+      "supports": [
+        "D-TARGET-SIGNAL",
+        "D-ROLE-UNCERTAINTY"
+      ]
+    },
+    {
+      "id": "P-02-ledger",
+      "instruction": "For each material claim, capture action, ownership, observable change, verification source, and target relevance; mark absent support as a question.",
+      "supports": [
+        "D-LEDGER-BEFORE-REWRITE",
+        "S-OWNERSHIP-001"
+      ]
+    },
+    {
+      "id": "P-03-decide",
+      "instruction": "Classify claims as keep, narrow, verify, or cut; surface conflicts and confidentiality limits instead of resolving or guessing them.",
+      "supports": [
+        "D-KEEP-NARROW-VERIFY-CUT",
+        "D-CONFLICT-CONFIDENTIALITY"
+      ]
+    },
+    {
+      "id": "P-04-rewrite",
+      "instruction": "Draft concise replacements only from defensible evidence, prioritizing the strongest target-relevant signal and splitting clauses with different support.",
+      "supports": [
+        "D-REWRITE-SUPPORTED-SIGNAL",
+        "D-NO-SCOPE-INFLATION"
+      ]
+    },
+    {
+      "id": "P-05-deliver",
+      "instruction": "Save the completed review artifact to the user-selected workspace and return its target interpretation, ledger, revision plan and rewrites, evidence gaps with next questions and likely sources, and deliberate omissions.",
+      "supports": [
+        "D-DEFENSIBLE-OUTPUT",
+        "S-WORKBOOK-005"
+      ]
+    }
+  ],
+  "priorities": [
+    "S-SIGNAL-003",
+    "S-OWNERSHIP-005",
+    "S-WORKBOOK-006"
+  ],
+  "quality_bar": [
+    "S-SIGNAL-002",
+    "S-OWNERSHIP-005",
+    "S-WORKSHOP-001",
+    "S-WORKBOOK-004"
+  ],
+  "trace_closure": [
+    "D-CONFLICT-CONFIDENTIALITY",
+    "D-DEFENSIBLE-OUTPUT",
+    "D-KEEP-NARROW-VERIFY-CUT",
+    "D-LEDGER-BEFORE-REWRITE",
+    "D-NO-SCOPE-INFLATION",
+    "D-REWRITE-SUPPORTED-SIGNAL",
+    "D-ROLE-UNCERTAINTY",
+    "D-TARGET-SIGNAL",
+    "S-FAQ-001",
+    "S-FAQ-002",
+    "S-FAQ-003",
+    "S-FAQ-004",
+    "S-FAQ-005",
+    "S-OWNERSHIP-001",
+    "S-OWNERSHIP-002",
+    "S-OWNERSHIP-003",
+    "S-OWNERSHIP-004",
+    "S-OWNERSHIP-005",
+    "S-REVIEW-B-002",
+    "S-SIGNAL-001",
+    "S-SIGNAL-002",
+    "S-SIGNAL-003",
+    "S-SIGNAL-004",
+    "S-VIDEO-001",
+    "S-VIDEO-002",
+    "S-VIDEO-003",
+    "S-WELCOME-001",
+    "S-WELCOME-002",
+    "S-WORKBOOK-001",
+    "S-WORKBOOK-003",
+    "S-WORKBOOK-004",
+    "S-WORKBOOK-005",
+    "S-WORKSHOP-001",
+    "S-WORKSHOP-003",
+    "S-WORKSHOP-004"
+  ]
+}

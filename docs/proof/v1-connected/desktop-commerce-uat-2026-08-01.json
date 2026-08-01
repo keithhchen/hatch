@@ -1,0 +1,81 @@
+{
+  "kind": "hatch-v1-installed-desktop-commerce-uat",
+  "passed": true,
+  "release": {
+    "release_id": "signal-resume-review@1.0.0",
+    "release_digest": "sha256:9e0774372375f0caf1b132de259f0a2087e544d968cab3e8958945d68e7ee7a5",
+    "product_id": "signal-resume-review",
+    "creator_id": "maya-chen"
+  },
+  "buyer": {
+    "user_id": "buyer_jordan_desktop_864de1f29b024f18",
+    "order_id": "order_desktop_864de1f29b024f18",
+    "entitlement_id": "entitlement_desktop_864de1f29b024f18"
+  },
+  "desktop": {
+    "packaged_app": "Hatch Desktop Commerce UAT.app",
+    "local_artifact": {
+      "filename": "desktop-commerce-final.md",
+      "bytes": 6919,
+      "digest": "sha256:56cd410ee1ddb6747e2a561f7468046a9fa9271d1cba11b6107e9758170818e9"
+    },
+    "policy": "Workspace reads were limited to Jordan's granted folder; writing the delivery required Jordan's explicit approval."
+  },
+  "commerce": {
+    "task_id": "task_9ce8658aac52149762767d46",
+    "artifact_id": "artifact_8a2b26b4a4880fc90152b966",
+    "delivery_id": "delivery_8a2b26b4a4880fc90152b966",
+    "recognition_id": "recognition_delivery_8a2b26b4a4880fc90152b966",
+    "event_sequence": [
+      "order.placed",
+      "entitlement.granted",
+      "task.started",
+      "artifact.created",
+      "delivery.completed",
+      "revenue.recognized"
+    ],
+    "gross_minor": 3900,
+    "creator_share_minor": 3510,
+    "hatch_share_minor": 390,
+    "currency": "USD"
+  },
+  "dashboard": {
+    "metrics": {
+      "orders": 1,
+      "successful_deliveries": 1,
+      "gross_minor": 3900,
+      "creator_share_minor": 3510,
+      "hatch_share_minor": 390
+    },
+    "order": {
+      "order_id": "order_desktop_864de1f29b024f18",
+      "product_id": "signal-resume-review",
+      "buyer_display_name": "Jordan Lee",
+      "product_name": "Signal Resume Review",
+      "gross_minor": 3900,
+      "currency": "USD",
+      "status": "delivered",
+      "creator_share_minor": 3510,
+      "hatch_share_minor": 390,
+      "occurred_at": "2026-08-01T00:23:35.580Z",
+      "release_id": "signal-resume-review@1.0.0",
+      "release_digest": "sha256:9e0774372375f0caf1b132de259f0a2087e544d968cab3e8958945d68e7ee7a5",
+      "entitlement_id": "entitlement_desktop_864de1f29b024f18",
+      "task_id": "task_9ce8658aac52149762767d46",
+      "artifact_id": "artifact_8a2b26b4a4880fc90152b966",
+      "artifact_digest": "sha256:56cd410ee1ddb6747e2a561f7468046a9fa9271d1cba11b6107e9758170818e9",
+      "delivery_id": "delivery_8a2b26b4a4880fc90152b966",
+      "recognition_id": "recognition_delivery_8a2b26b4a4880fc90152b966"
+    }
+  },
+  "checks": {
+    "one_entitlement": true,
+    "event_sequence": true,
+    "exact_release_binding": true,
+    "artifact_digest_matches_local_bytes": true,
+    "delivery_links_artifact": true,
+    "revenue_links_delivery": true,
+    "split_is_90_10": true,
+    "dashboard_projects_same_delivery": true
+  }
+}

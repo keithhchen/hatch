@@ -1,0 +1,128 @@
+[
+  {
+    "content_sha256": "6823babc8ddb1d73659a4467a5a12de410dd7ef4e6941d048489b8929a5861e4",
+    "document_id": "doc-001",
+    "kind": "text",
+    "provenance": {
+      "locations": [
+        "course/00-course-welcome.txt"
+      ],
+      "source_kind": "text",
+      "source_sha256": "5671d740b8e2ac93a6a3544499995bdcce4b0d8c04d25f21762ad4a27ce177c0"
+    },
+    "text": "# Welcome evidence\n\nI often remove more than I add.\n\nI do not promise interviews or offers. The work ends with a stronger, supportable resume and a short list of evidence the candidate still needs to recover.\n",
+    "title": "Signal Resume Lab — welcome note"
+  },
+  {
+    "content_sha256": "a373dd716e4d67f3b175af787f323f9335e20eb3a19d388d5d5bd4eccd96e379",
+    "document_id": "doc-002",
+    "kind": "text",
+    "provenance": {
+      "locations": [
+        "course/01-lesson-signal-before-language.md"
+      ],
+      "source_kind": "text",
+      "source_sha256": "0f9535030ec36b272cd7b94fa74e27a6349880a720795f9a170844cd6349b475"
+    },
+    "text": "# Signal before language evidence\n\nI group the role into three or four capabilities and then look for evidence that the candidate has already carried one of those burdens.\n\nA bullet is not strong because it contains a metric. It is strong when the reader can see a credible chain: the candidate owned a meaningful decision or action, the action changed something observable, and that change matters to the target capability.\n\nFirst decide what the employer needs to believe. Then test the resume for evidence.\n\nI cut adjectives that merely announce quality — strategic, innovative, world-class, highly successful. I cut long technology inventories unless the target role rewards that specific depth. I cut background clauses that make the reader wait for the candidate's contribution.\n",
+    "title": "Lesson: find the signal before touching the sentence"
+  },
+  {
+    "content_sha256": "5af38e29f407a2f9bf63669d2b373edbef4162c6a0a11f355cce462423b3c181",
+    "document_id": "doc-003",
+    "kind": "text",
+    "provenance": {
+      "locations": [
+        "course/02-lesson-ownership-and-evidence.md"
+      ],
+      "source_kind": "text",
+      "source_sha256": "0a2585983afd99378f957dfb55ebd2902ef1ccf3f0e2974bcfd01d0e725073f8"
+    },
+    "text": "# Ownership and evidence\n\nBefore using it as the candidate's result, ask what decision they made, which workstream they directly owned, who else was involved, and what would have happened without their work.\n\nSecond, the result is real but ownership is partial. Keep the team outcome, narrow the verb, and name the candidate's contribution.\n\nDo not publish the number as fact. Remove it from the proposed bullet for now, but preserve it in an evidence-gap list with the exact question and likely source.\n\nConflicting numbers are a separate warning. Do not average them, choose the larger one, or quietly pick the newest deck. Show the conflict and ask which source controlled the business decision at the time. If no answer is available, rewrite around the observable change without the disputed number.\n\nFormatting should never outrank trust. A page with twelve polished bullets and three ownership problems is worse than a page with six plain, defensible ones.\n",
+    "title": "Lesson: ownership is a sentence-level claim"
+  },
+  {
+    "content_sha256": "b896d4faf9c6f9510c192724d2e39c3b1e184efd4614ae452ae4975a321de546",
+    "document_id": "doc-004",
+    "kind": "text",
+    "provenance": {
+      "locations": [
+        "course/03-workshop-notes.md"
+      ],
+      "source_kind": "text",
+      "source_sha256": "11e6e5934f1114454972a536057b735cab1430ebd214a6abe513488a2c764c8c"
+    },
+    "text": "# Workshop evidence\n\nShe asked for a smaller claim that could survive a reference check.\n\nThose observable facts showed adoption and operating effect; the open revenue question stayed in the evidence list.\n\nIf the answer changes halfway through the sentence, split the sentence.\n\nPositioning is selection and emphasis, not fictional promotion.\n",
+    "title": "Cohort workshop notes — what changed after live reviews"
+  },
+  {
+    "content_sha256": "2e26011c8c00981ae854c9250fb14cadc2a8cf5d9f0a0d8bb83096c60d4c8f7c",
+    "document_id": "doc-005",
+    "kind": "video",
+    "provenance": {
+      "locations": [
+        "course/04-video-lesson.mp4#t=11.5,51.5"
+      ],
+      "source_kind": "video",
+      "source_sha256": "6159264643dbf0deaba650f7d3577b6726be40071447cc6660533c2a4a5c8082"
+    },
+    "text": "# Video lesson evidence\n\nRead the job context first. Then create an evidence ledger: claimed action, ownership, result, source, and relevance to the target. Empty cells are questions, not permission to invent.\n\nOnly after that do we rewrite. A rewrite should make the strongest supported signal easier to see. It should not make the claim larger than the evidence.\n\nAt the end, separate the document from the research backlog. The resume gets only defensible claims. The evidence-gap list keeps promising but unresolved leads and the next verification question.\n",
+    "title": "Video lesson: evidence ledger before rewrite"
+  },
+  {
+    "content_sha256": "5929afdc238e0c6319957575f8e1459f5ec837da765bc189045bade1c5476879",
+    "document_id": "doc-006",
+    "kind": "text",
+    "provenance": {
+      "locations": [
+        "course/05-office-hours-faq.txt"
+      ],
+      "source_kind": "text",
+      "source_sha256": "52d484d9c684c15e47507e54835422a9877db1c5fcc3e4743dd275171ed7e5fc"
+    },
+    "text": "# Office-hours evidence\n\nNo. I can test whether the resume presents evidence for a target the candidate has chosen. Career choice needs a different conversation.\n\nNo. Hiring outcomes depend on the market, role, timing, network, screening process, and many things outside the document. The deliverable is a defensible resume and an evidence-recovery plan.\n\nState the working interpretation of the role, show which clues support it, and label the uncertainty. Do not pretend the target is precise. Ask the user for a recruiter note or another comparable posting if the ambiguity changes what should be emphasized.\n\nDo not expose confidential information. Use an approved range, an observable operational result, or a description of the decision and mechanism. Ask the user what can be shared.\n\nNever. A title is context, not evidence of a specific action or result.\n",
+    "title": "Office hours fragments"
+  },
+  {
+    "content_sha256": "adf7d0d465092da9dfbdaca11f2beff94f42f5d52fa5f5e2009169d0b41b3ca9",
+    "document_id": "doc-007",
+    "kind": "pdf",
+    "provenance": {
+      "locations": [
+        "course/evidence-workbook.pdf#page=1"
+      ],
+      "source_kind": "pdf",
+      "source_sha256": "28d0f22c6ade82d7dca03d1b237a928f72f860b4537c17ebc298b9ab3cd3dd2e"
+    },
+    "text": "# Evidence workbook\n\nWhat must the person in this role make true? Write the capability in plain language, not copied keywords.\n\nWhat decision, mechanism, or workstream did the candidate directly own? If ownership was shared, name the candidate's narrower contribution.\n\nWhat changed? A supported number is useful but not required. Adoption, a passed gate, a stopped launch, a changed operating decision, or a durable process can be evidence.\n\nWhere could a skeptical reader verify each clause? Note conflicting sources instead of resolving them by preference. Titles and fluent wording are not evidence.\n\nKEEP — supported and relevant. NARROW — real outcome, partial ownership. VERIFY — promising lead, not safe to publish yet. CUT — true perhaps, but weak, generic, redundant, or irrelevant for this target.\n\nThe workbook is not a scoring calculator. Maya changes emphasis based on the target and evidence available.\n",
+    "title": "Signal Resume Lab — Evidence Workbook"
+  },
+  {
+    "content_sha256": "23350a38a280c79be1173187fcc6471fe971a5fd0d7902e2eca2582bec11d3f7",
+    "document_id": "doc-008",
+    "kind": "text",
+    "provenance": {
+      "locations": [
+        "prior-work/review-a.md"
+      ],
+      "source_kind": "text",
+      "source_sha256": "de702a3c529badbeb435bd0e22e366a0abc9e91316e83090ef1d4237acdd7b15"
+    },
+    "text": "# Review example A\n\nThe useful signal for this target is not “global.” It is that Jordan created a measurement system and a repeatable experiment other teams could operate.\n\nConfirm the activation baseline and source of record with Analytics. If confirmed, add the supported change; otherwise keep the adoption and measurement outcome.\n",
+    "title": "Review excerpt: Jordan Lee, growth operations"
+  },
+  {
+    "content_sha256": "2abe9b26eb21a64e11aac3583ed2787e7a2ad246c1f84c815ce9b3ef4391e215",
+    "document_id": "doc-009",
+    "kind": "text",
+    "provenance": {
+      "locations": [
+        "prior-work/review-b.md"
+      ],
+      "source_kind": "text",
+      "source_sha256": "7a4a55dcf8141cad6db66935f41182322cbd77a8f4b8aef2a87641e4aaa44ddf"
+    },
+    "text": "# Review example B\n\nThe important detail is that Priya had decision authority at the readiness gate and built a control that the organization kept using. Do not apologize for the absence of a revenue metric.\n\nIf Priya cannot share the count, remove “two” and keep the observable decision. Do not replace confidential evidence with a guessed range.\n",
+    "title": "Review excerpt: Priya Rao, platform operations"
+  }
+]

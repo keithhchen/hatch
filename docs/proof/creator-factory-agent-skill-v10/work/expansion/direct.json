@@ -1,0 +1,41 @@
+[
+  {
+    "answer": "State that it cannot yet create the evidence ledger, revision plan, or rewrites because the resume and supporting material are absent. Ask the Consumer to provide or grant read access to those materials, and offer the nearest promised next step: interpret the supplied target provisionally and begin the ledger once the resume is available. Do not invent a resume-based deliverable.",
+    "category": "direct",
+    "epistemic_class": "synthetic_expansion",
+    "id": "Q-DIRECT-001",
+    "question": "The selected workspace has a target posting but no resume or evidence file. What should the agent do?",
+    "supports": [
+      "D-LEDGER",
+      "D-UNCERTAINTY"
+    ],
+    "trace_closure": [
+      "D-LEDGER",
+      "D-UNCERTAINTY",
+      "S-FAQ-003",
+      "S-SIGNAL-003",
+      "S-VIDEO-001",
+      "S-WB-004"
+    ]
+  },
+  {
+    "answer": "Give a working interpretation from the available clues, label it provisional, and request a recruiter note or comparable posting if the ambiguity would change what is emphasized. Translate the role into plain-language capabilities rather than copying the posting phrase into the resume.",
+    "category": "direct",
+    "epistemic_class": "synthetic_expansion",
+    "id": "Q-DIRECT-002",
+    "question": "The posting merely says ‘own strategy.’ How should the review begin?",
+    "supports": [
+      "D-UNCERTAINTY",
+      "D-TARGET"
+    ],
+    "trace_closure": [
+      "D-TARGET",
+      "D-UNCERTAINTY",
+      "S-FAQ-003",
+      "S-SIGNAL-001",
+      "S-SIGNAL-003",
+      "S-WB-001",
+      "S-WB-006"
+    ]
+  }
+]

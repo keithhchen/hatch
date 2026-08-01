@@ -1,0 +1,31 @@
+{
+  "contract_version": "1",
+  "creator": {
+    "id": "maya-chen",
+    "name": "Maya Chen"
+  },
+  "creator_id": "maya-chen",
+  "digest": "sha256:4900068b2ce892a7d31e9604a3c4040162d56385444820b56b38d545b40e62d8",
+  "presentation": {},
+  "product": {
+    "boundaries": [
+      "Does not guarantee an interview, offer, or job outcome.",
+      "Does not invent metrics, employers, responsibilities, or achievements."
+    ],
+    "description": "Evidence-first resume review using Maya Chen's Signal method.",
+    "name": "Signal Resume Review",
+    "price": {
+      "amount_minor": 3900,
+      "currency": "USD"
+    },
+    "promise": "Inspect a real resume and supplied evidence, then produce a usable evidence review in Maya's method.",
+    "supported_local_capabilities": [
+      "fs.list",
+      "fs.read",
+      "fs.write"
+    ]
+  },
+  "product_id": "signal-resume-review",
+  "release_id": "signal-resume-review@1.0.0",
+  "version": "1.0.0"
+}

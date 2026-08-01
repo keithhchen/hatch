@@ -1,0 +1,8 @@
+{
+  "productName": "Hatch Dev 25a6",
+  "identifier": "dev.hatch.local.uat25a6",
+  "build": {
+    "beforeDevCommand": "",
+    "devUrl": "http://127.0.0.1:1420"
+  }
+}

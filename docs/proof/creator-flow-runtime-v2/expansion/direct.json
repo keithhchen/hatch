@@ -1,0 +1,30 @@
+[
+  {
+    "answer": "Start with the target role and the candidate's supplied evidence. Check target alignment and evidence strength before sentence-level polish.",
+    "category": "direct",
+    "epistemic_class": "synthetic_expansion",
+    "id": "Q-DIRECT-001",
+    "question": "What should I review before polishing bullets?",
+    "supports": [
+      "S-COURSE-001",
+      "S-COURSE-004"
+    ],
+    "trace_closure": [
+      "S-COURSE-001",
+      "S-COURSE-004"
+    ]
+  },
+  {
+    "answer": "No. A number helps only when the candidate can substantiate it; assess the action, context, and observable result together.",
+    "category": "direct",
+    "epistemic_class": "synthetic_expansion",
+    "id": "Q-DIRECT-002",
+    "question": "Is a number always strong evidence?",
+    "supports": [
+      "S-RUBRIC-002"
+    ],
+    "trace_closure": [
+      "S-RUBRIC-002"
+    ]
+  }
+]

@@ -1,0 +1,34 @@
+{
+  "contract_version": "1",
+  "creator": {
+    "id": "ari-cole",
+    "name": "Ari Cole"
+  },
+  "creator_id": "ari-cole",
+  "digest": "sha256:78aecc55083ce942e69d70dd94d8cbfd622e5843a64c8c0cdf56b5b518d68c9c",
+  "presentation": {},
+  "product": {
+    "boundaries": [
+      "Does not diagnose pain or injuries.",
+      "Does not prescribe rehabilitation or claim a substitution is medically safe.",
+      "Does not provide medical care, nutrition prescription, contest preparation, or a guarantee of strength gain."
+    ],
+    "description": "Weekly strength-plan generation from user goals, equipment, recent training logs, and recovery notes using Ari Cole's planning method.",
+    "name": "Ari Seven-Day Strength Plan",
+    "price": {
+      "amount_minor": 2500,
+      "currency": "USD",
+      "model": "per_delivery",
+      "unit": "plan"
+    },
+    "promise": "Read the user's goal, equipment, recent training log, and recovery notes, then produce a usable seven-day strength plan within the method's boundaries.",
+    "supported_local_capabilities": [
+      "fs.list",
+      "fs.read",
+      "fs.write"
+    ]
+  },
+  "product_id": "ari-seven-day-strength-plan",
+  "release_id": "ari-seven-day-strength-plan@1.0.0",
+  "version": "1.0.0"
+}

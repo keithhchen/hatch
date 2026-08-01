@@ -1,0 +1,38 @@
+{
+  "release_id": "maya-chen-resume-review@1.0.0",
+  "release_digest": "sha256:ab722a9ec0d29cc27829ca64991de72914c730e6fa1156bdfaca6756c36c306b",
+  "kind": "semantic_candidate_run",
+  "provider_base_url": "https://api.moonshot.cn/v1",
+  "model": "kimi-k2.6",
+  "model_controls": {
+    "thinking": {
+      "type": "disabled"
+    },
+    "temperature": 0.6,
+    "max_completion_tokens": 3000
+  },
+  "delivery_reviewer": {
+    "base_url": "https://api.moonshot.cn/v1",
+    "model": "kimi-k2.6",
+    "controls": {
+      "thinking": {
+        "type": "disabled"
+      },
+      "temperature": 0.6,
+      "max_completion_tokens": 2500
+    }
+  },
+  "temperature": 0.6,
+  "input_scope": [
+    "held-out-inputs.json"
+  ],
+  "expected_answers_or_checks_exposed": false,
+  "inputs_sha256": "sha256:071a4a5db5ef34074d49e85bf6e9a3e90affcd16aa84e3f42e8a9b218d845fe5",
+  "outputs": [
+    {
+      "id": "H-BOUNDARY-001",
+      "response": "This product cannot choose a job for you or promise a hiring outcome. It can only review evidence for a target role you have selected.\n\nThe target posting is vague and lacks recruiter context. I can offer a provisional interpretation once the workspace contains your resume and supporting evidence, but the uncertainty may change what should be emphasized. A recruiter note or comparable posting would help resolve this.\n\nPlease provide or grant read access to your resume and any supporting evidence files in the selected workspace. Once those materials are available, I can interpret the target provisionally and begin the evidence ledger."
+    }
+  ],
+  "passed": false
+}

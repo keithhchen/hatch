@@ -94,6 +94,22 @@
     "clientHello": {
       "type": "object",
       "additionalProperties": false,
+      "allOf": [
+        { "if": { "required": ["release_id"] }, "then": { "required": ["release_digest"] } },
+        { "if": { "required": ["release_digest"] }, "then": { "required": ["release_id"] } },
+        {
+          "if": { "required": ["entitlement_id"] },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["product_id"] },
+                { "required": ["release_id"] },
+                { "required": ["release_digest"] }
+              ]
+            }
+          }
+        }
+      ],
       "required": [
         "type",
         "protocol_version",
@@ -106,6 +122,12 @@
         "protocol_version": { "$ref": "#/$defs/protocolVersion" },
         "installation_id": { "type": "string", "minLength": 1 },
         "license_token": { "type": "string", "minLength": 1 },
+        "entitlement_id": { "type": "string", "minLength": 1 },
+        "tenant_id": { "type": "string", "minLength": 1 },
+        "user_id": { "type": "string", "minLength": 1 },
+        "product_id": { "type": "string", "minLength": 1 },
+        "release_id": { "type": "string", "minLength": 1 },
+        "release_digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
         "client_version": { "type": "string" },
         "workspace_root": { "type": "string", "minLength": 1 },
         "local_tools": {
@@ -179,10 +201,54 @@
     "sessionReady": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "accepted_protocol_version"],
+      "required": ["type", "accepted_protocol_version", "tenant_id", "user_id", "product_id", "release_id", "release_digest"],
       "properties": {
         "type": { "const": "session.ready" },
-        "accepted_protocol_version": { "$ref": "#/$defs/protocolVersion" }
+        "accepted_protocol_version": { "$ref": "#/$defs/protocolVersion" },
+        "tenant_id": { "type": "string", "minLength": 1 },
+        "user_id": { "type": "string", "minLength": 1 },
+        "product_id": { "type": "string", "minLength": 1 },
+        "release_id": { "type": "string", "minLength": 1 },
+        "release_digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "entitlement_id": { "type": "string", "minLength": 1 },
+        "creator_agent": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["creator", "product", "presentation"],
+          "properties": {
+            "creator": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "name"],
+              "properties": {
+                "id": { "type": "string", "minLength": 1 },
+                "name": { "type": "string", "minLength": 1 }
+              }
+            },
+            "product": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "name", "description", "promise", "boundaries", "offer"],
+              "properties": {
+                "id": { "type": "string", "minLength": 1 },
+                "name": { "type": "string", "minLength": 1 },
+                "description": { "type": "string", "minLength": 1 },
+                "promise": { "type": "string", "minLength": 1 },
+                "boundaries": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+                "offer": {
+                  "type": "object", "additionalProperties": false, "required": ["amount_minor", "currency"],
+                  "properties": {
+                    "model": { "type": "string", "enum": ["per_delivery", "subscription"] },
+                    "amount_minor": { "type": "integer", "minimum": 0 },
+                    "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+                    "unit": { "type": "string", "minLength": 1 }
+                  }
+                }
+              }
+            },
+            "presentation": { "type": "object" }
+          }
+        }
       }
     },
     "assistantDelta": {
@@ -457,6 +523,21 @@
         }
       }
     },
+    "deliveryReady": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "run_id", "task_id", "artifact_id", "artifact_digest", "delivery_id"],
+      "properties": {
+        "type": { "const": "delivery.ready" },
+        "run_id": { "type": "string", "minLength": 1 },
+        "task_id": { "type": "string", "minLength": 1 },
+        "artifact_id": { "type": "string", "minLength": 1 },
+        "artifact_digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "delivery_id": { "type": "string", "minLength": 1 },
+        "artifact_type": { "enum": ["file", "message"] },
+        "artifact_path": { "type": "string", "minLength": 1 }
+      }
+    },
     "turnFailed": {
       "type": "object",
       "additionalProperties": false,
@@ -481,6 +562,7 @@
         { "$ref": "#/$defs/skillInvoked" },
         { "$ref": "#/$defs/turnState" },
         { "$ref": "#/$defs/sessionCompacted" },
+        { "$ref": "#/$defs/deliveryReady" },
         { "$ref": "#/$defs/turnCompleted" },
         { "$ref": "#/$defs/turnFailed" }
       ]

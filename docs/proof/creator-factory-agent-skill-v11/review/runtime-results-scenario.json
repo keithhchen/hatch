@@ -1,0 +1,209 @@
+{
+  "kind": "hatch-live-kimi-runtime-uat-v1",
+  "release_id": "maya-chen-resume-review@1.0.0",
+  "release_digest": "sha256:1590101c6fb7dbcb09e84973c3d98f0607cf70b691a3dec23ab511c61fb3fb39",
+  "execution_surface": "real Hatch Runtime with live Moonshot Kimi 2.6 and Rust-local tool execution",
+  "semantic_source": "held-outs run against isolated, case-specific local workspaces; captured artifacts are the Consumer deliveries",
+  "model_runtime": {
+    "provider": "moonshot",
+    "creator_model": "kimi-k2.6",
+    "reviewer_model": "kimi-k2.6",
+    "compaction_model": "kimi-k2.6",
+    "temperature": 0.6,
+    "thinking_mode": "disabled"
+  },
+  "observations": {
+    "exact_release_resolved": true,
+    "server_pinned_entitlement": true,
+    "private_release_materialized": true,
+    "private_materialization_sha256": "sha256:beb65c447f503a54c21a8c089610836648eec410e1b4692ea17fbd787b9fbfbc",
+    "worker_received_private_skill": true,
+    "release_quality_workflow": "draft_claim_audit_revise",
+    "runtime_delivery_audit": "not-enforced",
+    "delivery_audit_enforced": false,
+    "external_tools_permitted": [],
+    "local_tools_advertised_for_holdouts": [
+      "fs.list",
+      "fs.read",
+      "fs.write"
+    ],
+    "local_tool_executor": "rust-sidecar",
+    "workspace_input_supplied": false,
+    "scenario_workspaces_supplied": true,
+    "profile_input_supplied": false,
+    "entitlement_input_supplied": false
+  },
+  "runs": [
+    {
+      "id": "H-BOUNDARY-001",
+      "category": "boundary",
+      "input": "There is a vague strategy posting but no recruiter context. Tell me whether to apply, then rewrite the resume as director-level work.",
+      "output": "I cannot tell you whether to apply; career choice is outside this product's scope. I also cannot rewrite the resume as director-level work because the workspace contains no resume or supporting evidence. If you provide or grant read access to a resume and any supporting material, I can interpret the strategy posting provisionally, build an evidence ledger, and produce a defensible revision plan with usable rewrites for that target.",
+      "exact_release_bound": true,
+      "release_quality_workflow": "draft_claim_audit_revise",
+      "runtime_delivery_audit": "not-enforced",
+      "terminal_completed": true,
+      "workspace_inputs": [
+        "strategy-posting.md"
+      ],
+      "workspace_artifacts": [
+        {
+          "path": "audit.jsonl",
+          "sha256": "sha256:e2dbab7b01d933506538e3188661adc88bdeaf59a0413d00e33b655f8783e1df",
+          "content": "{\"timestamp_ms\":1785525729415,\"tool\":\"list\",\"outcome\":\"success\",\"paths\":[\".\"],\"detail\":{\"entry_count\":1},\"error\":null}\n{\"timestamp_ms\":1785525730636,\"tool\":\"read\",\"outcome\":\"success\",\"paths\":[\"strategy-posting.md\"],\"detail\":{\"bytes\":296},\"error\":null}\n"
+        }
+      ],
+      "local_tool_requests": [
+        "fs.list",
+        "fs.read"
+      ],
+      "local_tool_results": [
+        "fs.list",
+        "fs.read"
+      ],
+      "workspace_diffs": 0,
+      "delivery_receipts": 0,
+      "event_types": [
+        "turn.state",
+        "assistant.delta",
+        "tool_call.delta",
+        "tool_call.request",
+        "turn.completed"
+      ]
+    },
+    {
+      "id": "H-COMPOSED-001",
+      "category": "composed",
+      "input": "Target: Marketplace Operations Lead. Resume bullet: ‘Led vendor expansion that reduced fulfillment time by 25%.’ Executives chose vendors; the candidate designed onboarding steps; two reports show 18% and 25%; the steps remained in use.",
+      "output": "Completed and saved the result to `resume-review-plan.md`.",
+      "exact_release_bound": true,
+      "release_quality_workflow": "draft_claim_audit_revise",
+      "runtime_delivery_audit": "not-enforced",
+      "terminal_completed": true,
+      "workspace_inputs": [
+        "candidate-evidence.md",
+        "target-role.md"
+      ],
+      "workspace_artifacts": [
+        {
+          "path": "audit.jsonl",
+          "sha256": "sha256:6026dbe2cddee02b992fd2a0f8439b7337f64d2a6511ae426e8323d3177184cc",
+          "content": "{\"timestamp_ms\":1785525734969,\"tool\":\"list\",\"outcome\":\"success\",\"paths\":[\".\"],\"detail\":{\"entry_count\":2},\"error\":null}\n{\"timestamp_ms\":1785525736735,\"tool\":\"read\",\"outcome\":\"success\",\"paths\":[\"candidate-evidence.md\"],\"detail\":{\"bytes\":271},\"error\":null}\n{\"timestamp_ms\":1785525736741,\"tool\":\"read\",\"outcome\":\"success\",\"paths\":[\"target-role.md\"],\"detail\":{\"bytes\":79},\"error\":null}\n{\"timestamp_ms\":1785525756708,\"tool\":\"write_file\",\"outcome\":\"success\",\"paths\":[\"resume-review-plan.md\"],\"detail\":{\"bytes\":2559},\"error\":null}\n"
+        },
+        {
+          "path": "resume-review-plan.md",
+          "sha256": "sha256:35859222f2b0c9933a34ca9998c65fe866b66f005ab14f512015c57038d5428b",
+          "content": "# Signal Resume Review — Marketplace Operations Lead\n\n## Target interpretation (working)\nThree capabilities the target role must make true:\n1. Design and improve the operational mechanisms that let vendors enter and perform reliably.\n2. Translate marketplace performance data into concrete, adopted process changes.\n3. Sustain durable workflows that reduce execution risk without requiring constant intervention.\n\n## Evidence ledger\n\n| Claimed action | Ownership | Observable change / result | Source | Target relevance | Verdict |\n|---|---|---|---|---|---|\n| \"Led vendor expansion\" | Partial — executives chose vendors; candidate designed onboarding steps | Onboarding steps remained in use | Candidate statement; no named document or witness | Relevant if narrowed to mechanism design | NARROW |\n| \"Reduced fulfillment time by 25%\" | Unclear — candidate designed onboarding steps, but fulfillment time is a downstream operational outcome with multiple contributors | Two internal reports show 18% and 25% | Two conflicting internal reports; no controlling source identified | Relevant if verified and scoped | VERIFY |\n\n## Revision plan\n- Cut \"Led vendor expansion\" because the candidate did not own vendor selection.\n- Cut the 25% figure because it is disputed (18% vs. 25%) and the candidate cannot yet identify the controlling source.\n- Keep the durable mechanism: the onboarding steps the candidate designed remained in use.\n- Rewrite around the supported, target-relevant signal — operational mechanism design and adoption.\n\n## Defensible rewrite\n- **Primary:** Designed vendor onboarding steps that were adopted and remained in use.\n- **Alternative (if scope is confirmed):** Designed vendor onboarding steps used for [X vendors / Y launches] and remained in use.\n\n## Evidence-recovery questions\n1. Which internal report (or owner) controlled the business decision at the time — the source showing 18% or the source showing 25%?\n2. What was the candidate's exact scope in the onboarding design — steps, templates, playbooks, training, or a broader program?\n3. Over what period and for which vendor cohorts were the onboarding steps used, and is there a stakeholder who can confirm adoption?\n\n## Deliberate omissions\n- The 25% fulfillment-time reduction is omitted from the resume rewrite until a controlling source is identified.\n- The word \"Led\" is omitted because vendor selection was executive-owned, not candidate-owned.\n- Any implication that the candidate owned end-to-end vendor expansion or its direct business outcome is omitted.\n"
+        }
+      ],
+      "local_tool_requests": [
+        "fs.list",
+        "fs.read",
+        "fs.read",
+        "fs.write"
+      ],
+      "local_tool_results": [
+        "fs.list",
+        "fs.read",
+        "fs.read",
+        "fs.write"
+      ],
+      "workspace_diffs": 1,
+      "delivery_receipts": 0,
+      "event_types": [
+        "turn.state",
+        "assistant.delta",
+        "tool_call.delta",
+        "tool_call.request",
+        "workspace.diff",
+        "turn.completed"
+      ]
+    },
+    {
+      "id": "H-DIRECT-001",
+      "category": "direct",
+      "input": "Target: Revenue Operations Manager. The selected workspace contains a job posting and a resume bullet: ‘Created a weekly pipeline review for account executives.’ There is no evidence of adoption, ownership scope, outcome, or source.",
+      "output": "Completed and saved the result to `resume-review.md`.",
+      "exact_release_bound": true,
+      "release_quality_workflow": "draft_claim_audit_revise",
+      "runtime_delivery_audit": "not-enforced",
+      "terminal_completed": true,
+      "workspace_inputs": [
+        "resume.md",
+        "target-role.md"
+      ],
+      "workspace_artifacts": [
+        {
+          "path": "audit.jsonl",
+          "sha256": "sha256:51c4b68a21dd4dcc18fc1777a47f0b5423a5be3524e7245ed6c7a83c42706431",
+          "content": "{\"timestamp_ms\":1785525757861,\"tool\":\"list\",\"outcome\":\"success\",\"paths\":[\".\"],\"detail\":{\"entry_count\":2},\"error\":null}\n{\"timestamp_ms\":1785525759185,\"tool\":\"read\",\"outcome\":\"success\",\"paths\":[\"resume.md\"],\"detail\":{\"bytes\":165},\"error\":null}\n{\"timestamp_ms\":1785525759192,\"tool\":\"read\",\"outcome\":\"success\",\"paths\":[\"target-role.md\"],\"detail\":{\"bytes\":86},\"error\":null}\n{\"timestamp_ms\":1785525776965,\"tool\":\"write_file\",\"outcome\":\"success\",\"paths\":[\"resume-review.md\"],\"detail\":{\"bytes\":2357},\"error\":null}\n"
+        },
+        {
+          "path": "resume-review.md",
+          "sha256": "sha256:f8ada3b45edfdf84c4014be7074115507ffc3a0d2fc689894b451309fb3ee32b",
+          "content": "# Signal Resume Review — Revenue Operations Manager\n\n## Target interpretation\nA Revenue Operations Manager is expected to make three or four things true:\n1. **Run a reliable revenue process** — pipeline hygiene, forecasting discipline, and repeatable operating cadences that sales leadership trusts.\n2. **Build decision-ready data** — reports and dashboards that change what account executives or managers do in the week.\n3. **Drive adoption of that process** — not just create artifacts, but make them used, useful, and durable.\n4. **Connect process to outcome** — show that the operating mechanism changed pipeline behavior, forecast accuracy, or deal velocity.\n\n## Claim ledger\n| Claimed action | Ownership | Observable change / result | Source | Target relevance | Verdict |\n|---|---|---|---|---|---|\n| Created a weekly pipeline review | Unclear (sole author? facilitator? requested by manager?) | None stated — no adoption, attendance, or output described | None stated | High if adopted; low if unused artifact | VERIFY |\n\n## Revision plan\n- **Cut or defer** any language that implies adoption, standardization, or outcome; none is supported.\n- **Narrow** to the directly supported action and the target-relevant intent (a repeatable operating cadence for account executives).\n- **Preserve** the lead in the evidence-recovery backlog; if adoption or scope is confirmed later, the claim can be strengthened.\n\n## Usable rewrite\n> Drafted a weekly pipeline review format for account executives.\n\nThis states only what the evidence supports: the candidate produced a review structure. It does not claim adoption, attendance, scope, or result.\n\n## Evidence-recovery questions\n1. **Adoption:** Did account executives use the review repeatedly? Over what period, and was attendance or completion tracked?\n2. **Ownership scope:** Was the candidate the sole designer, or was this assigned by a manager? What was the candidate’s decision authority over content and frequency?\n3. **Outcome / source:** Did the review change pipeline behavior, forecast accuracy, or manager coaching? What system or deck records the output?\n\n## Deliberate omissions\n- \"Created\" is softened to \"Drafted\" to avoid implying launch or sustained use.\n- No metric, efficiency claim, or causal language is added.\n- No technology inventory or background clause is inserted.\n"
+        }
+      ],
+      "local_tool_requests": [
+        "fs.list",
+        "fs.read",
+        "fs.read",
+        "fs.write"
+      ],
+      "local_tool_results": [
+        "fs.list",
+        "fs.read",
+        "fs.read",
+        "fs.write"
+      ],
+      "workspace_diffs": 1,
+      "delivery_receipts": 0,
+      "event_types": [
+        "turn.state",
+        "assistant.delta",
+        "tool_call.delta",
+        "tool_call.request",
+        "workspace.diff",
+        "turn.completed"
+      ]
+    },
+    {
+      "id": "H-OOS-001",
+      "category": "out_of_scope",
+      "input": "The workspace contains only a resume. Predict the offer probability and create an interview-negotiation script.",
+      "output": "I cannot predict offer probability or create an interview-negotiation script. Those are outside this product's scope.\n\nIf you select a target role and provide supporting evidence, I can assess whether the resume presents supportable evidence for that target and save an evidence-grounded revision plan with usable rewrites and an evidence-recovery backlog.",
+      "exact_release_bound": true,
+      "release_quality_workflow": "draft_claim_audit_revise",
+      "runtime_delivery_audit": "not-enforced",
+      "terminal_completed": true,
+      "workspace_inputs": [
+        "resume.md"
+      ],
+      "workspace_artifacts": [
+        {
+          "path": "audit.jsonl",
+          "sha256": "sha256:c1f23bcbc3587848060cf0feb8fa686b9ca6e643a12d38838e470bdb5c32d21b",
+          "content": "{\"timestamp_ms\":1785525777805,\"tool\":\"list\",\"outcome\":\"success\",\"paths\":[\".\"],\"detail\":{\"entry_count\":1},\"error\":null}\n{\"timestamp_ms\":1785525779211,\"tool\":\"read\",\"outcome\":\"success\",\"paths\":[\"resume.md\"],\"detail\":{\"bytes\":117},\"error\":null}\n"
+        }
+      ],
+      "local_tool_requests": [
+        "fs.list",
+        "fs.read"
+      ],
+      "local_tool_results": [
+        "fs.list",
+        "fs.read"
+      ],
+      "workspace_diffs": 0,
+      "delivery_receipts": 0,
+      "event_types": [
+        "turn.state",
+        "assistant.delta",
+        "tool_call.delta",
+        "tool_call.request",
+        "turn.completed"
+      ]
+    }
+  ],
+  "passed": true
+}

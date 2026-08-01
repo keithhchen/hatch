@@ -1,0 +1,102 @@
+{
+  "boundaries": [
+    "S-WELCOME-001",
+    "S-FAQ-001",
+    "S-FAQ-002",
+    "S-FAQ-003",
+    "S-FAQ-004",
+    "S-WORKSHOP-003",
+    "S-FAQ-005"
+  ],
+  "epistemic_class": "derived_rule",
+  "omissions": [
+    "S-SIGNAL-004",
+    "S-WB-005"
+  ],
+  "phases": [
+    {
+      "id": "P-01-read-and-target",
+      "instruction": "Read the resume, supporting evidence, and chosen target-role context from the Consumer-selected workspace; translate the target into three or four plain-language capabilities. If an ambiguity would change emphasis, state it and request clarification.",
+      "supports": [
+        "D-TARGET",
+        "D-UNCERTAINTY"
+      ]
+    },
+    {
+      "id": "P-02-ledger",
+      "instruction": "Build a claim ledger covering action, ownership, observable change, source, and target relevance; mark absent support as a question.",
+      "supports": [
+        "D-LEDGER",
+        "S-OWN-001"
+      ]
+    },
+    {
+      "id": "P-03-decide",
+      "instruction": "Mark claims keep, narrow, verify, or cut; surface conflicts and confidentiality constraints rather than selecting or guessing facts.",
+      "supports": [
+        "D-DECIDE",
+        "D-CONFLICTS"
+      ]
+    },
+    {
+      "id": "P-04-rewrite",
+      "instruction": "Draft concise replacements from defensible evidence only, prioritizing target-relevant signal and splitting clauses with different support.",
+      "supports": [
+        "D-REWRITE",
+        "D-NO-INFLATION"
+      ]
+    },
+    {
+      "id": "P-05-save-delivery",
+      "instruction": "Save the review artifact to the Consumer-selected workspace with the target interpretation, ledger, revision plan and rewrites, evidence gaps with exact next questions and likely sources, and deliberate omissions.",
+      "supports": [
+        "D-DELIVER",
+        "S-WB-005"
+      ]
+    }
+  ],
+  "priorities": [
+    "S-SIGNAL-003",
+    "S-WB-006"
+  ],
+  "quality_bar": [
+    "S-SIGNAL-002",
+    "S-WORKSHOP-001",
+    "S-WB-004"
+  ],
+  "trace_closure": [
+    "D-CONFLICTS",
+    "D-DECIDE",
+    "D-DELIVER",
+    "D-LEDGER",
+    "D-NO-INFLATION",
+    "D-REWRITE",
+    "D-TARGET",
+    "D-UNCERTAINTY",
+    "S-FAQ-001",
+    "S-FAQ-002",
+    "S-FAQ-003",
+    "S-FAQ-004",
+    "S-FAQ-005",
+    "S-OWN-001",
+    "S-OWN-002",
+    "S-OWN-003",
+    "S-OWN-004",
+    "S-REVIEW-B-002",
+    "S-SIGNAL-001",
+    "S-SIGNAL-002",
+    "S-SIGNAL-003",
+    "S-SIGNAL-004",
+    "S-VIDEO-001",
+    "S-VIDEO-002",
+    "S-VIDEO-003",
+    "S-WB-001",
+    "S-WB-004",
+    "S-WB-005",
+    "S-WB-006",
+    "S-WELCOME-001",
+    "S-WORKSHOP-001",
+    "S-WORKSHOP-002",
+    "S-WORKSHOP-003"
+  ]
+}

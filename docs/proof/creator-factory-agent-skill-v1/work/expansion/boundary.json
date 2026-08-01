@@ -1,0 +1,41 @@
+[
+  {
+    "answer": "This review cannot choose between jobs. If the user selects one target, it can examine whether the resume presents supportable evidence for that target and identify what needs recovery. Career choice itself needs a different conversation.",
+    "category": "boundary",
+    "epistemic_class": "synthetic_expansion",
+    "id": "Q-BOUNDARY-001",
+    "question": "Should I take the product-manager offer or the operations-manager offer?",
+    "supports": [
+      "S-FAQ-001",
+      "S-WELCOME-002"
+    ],
+    "trace_closure": [
+      "S-FAQ-001",
+      "S-WELCOME-002"
+    ]
+  },
+  {
+    "answer": "Do not manufacture VP scope. Review the supplied work for the level it already demonstrates, identify any real decision, mechanism, or outcome with evidence, and make that signal clear. If the available evidence is coordination only, retain that truthful scope and place any desired larger-scope claim in an evidence-gap question rather than in a rewrite.",
+    "category": "boundary",
+    "epistemic_class": "synthetic_expansion",
+    "id": "Q-BOUNDARY-002",
+    "question": "Please make this coordinator resume sound like a VP resume even though I mainly scheduled meetings.",
+    "supports": [
+      "D-NO-SCOPE-INFLATION",
+      "D-LEDGER-BEFORE-REWRITE",
+      "D-DEFENSIBLE-OUTPUT"
+    ],
+    "trace_closure": [
+      "D-DEFENSIBLE-OUTPUT",
+      "D-LEDGER-BEFORE-REWRITE",
+      "D-NO-SCOPE-INFLATION",
+      "S-FAQ-005",
+      "S-OWNERSHIP-003",
+      "S-VIDEO-001",
+      "S-VIDEO-003",
+      "S-WORKBOOK-003",
+      "S-WORKBOOK-004",
+      "S-WORKSHOP-004"
+    ]
+  }
+]

@@ -1,0 +1,122 @@
+[
+  {
+    "derivation": "The ownership lesson forbids choosing among conflicts and allows an observable change without a disputed number; the FAQ and review example prohibit exposure and guessed confidential ranges.",
+    "epistemic_class": "derived_rule",
+    "id": "D-CONFLICTS",
+    "source_fact_closure": [
+      "S-FAQ-004",
+      "S-OWN-004",
+      "S-REVIEW-B-002"
+    ],
+    "statement": "Never resolve disputed metrics by preference or replace confidential facts with a guessed range; show the limit and retain only directly supported observable evidence.",
+    "supports": [
+      "S-OWN-004",
+      "S-FAQ-004",
+      "S-REVIEW-B-002"
+    ]
+  },
+  {
+    "derivation": "The workbook defines the four decisions; the ownership lesson directs narrowing partial ownership and withholding an unverified number while preserving a research lead.",
+    "epistemic_class": "derived_rule",
+    "id": "D-DECIDE",
+    "source_fact_closure": [
+      "S-OWN-002",
+      "S-OWN-003",
+      "S-WB-005"
+    ],
+    "statement": "Classify each claim as keep when supported and relevant, narrow when ownership is partial, verify when promising but unsafe to publish, or cut when it is low-signal for the target.",
+    "supports": [
+      "S-WB-005",
+      "S-OWN-002",
+      "S-OWN-003"
+    ]
+  },
+  {
+    "derivation": "The video separates the document from the research backlog; the ownership lesson requires exact question and likely source for an unverified result.",
+    "epistemic_class": "derived_rule",
+    "id": "D-DELIVER",
+    "source_fact_closure": [
+      "S-OWN-003",
+      "S-VIDEO-003"
+    ],
+    "statement": "Return defensible resume rewrites separately from an evidence-recovery backlog that gives an exact next question and likely source for unresolved leads.",
+    "supports": [
+      "S-VIDEO-003",
+      "S-OWN-003"
+    ]
+  },
+  {
+    "derivation": "The video names the ledger fields and states that empty cells are questions, while the workbook requires a verification path for each clause.",
+    "epistemic_class": "derived_rule",
+    "id": "D-LEDGER",
+    "source_fact_closure": [
+      "S-VIDEO-001",
+      "S-WB-004"
+    ],
+    "statement": "Before rewriting, record each material claim's action, ownership, observable change or result, verification source, and relevance; an empty field is a question, not a fact.",
+    "supports": [
+      "S-VIDEO-001",
+      "S-WB-004"
+    ]
+  },
+  {
+    "derivation": "Workshop notes prohibit fictional promotion, while the FAQ states titles are not evidence of a specific action or result.",
+    "epistemic_class": "derived_rule",
+    "id": "D-NO-INFLATION",
+    "source_fact_closure": [
+      "S-FAQ-005",
+      "S-WORKSHOP-003"
+    ],
+    "statement": "Clarify the level actually demonstrated through selection and emphasis, but do not infer scope or results from a title or create a fictional promotion.",
+    "supports": [
+      "S-WORKSHOP-003",
+      "S-FAQ-005"
+    ]
+  },
+  {
+    "derivation": "The video orders rewrite after review and caps it at the evidence, while workshop notes require splitting when the answer to verification changes mid-sentence.",
+    "epistemic_class": "derived_rule",
+    "id": "D-REWRITE",
+    "source_fact_closure": [
+      "S-SIGNAL-002",
+      "S-VIDEO-002",
+      "S-WORKSHOP-002"
+    ],
+    "statement": "Only after the ledger, rewrite the strongest supported target-relevant signal; do not enlarge the claim and split any sentence whose support changes across clauses.",
+    "supports": [
+      "S-VIDEO-002",
+      "S-WORKSHOP-002",
+      "S-SIGNAL-002"
+    ]
+  },
+  {
+    "derivation": "One lesson directs grouping the role into three or four capabilities and looking for carried burdens; the workbook requires capabilities in plain language and says emphasis changes with target and evidence.",
+    "epistemic_class": "derived_rule",
+    "id": "D-TARGET",
+    "source_fact_closure": [
+      "S-SIGNAL-001",
+      "S-WB-001",
+      "S-WB-006"
+    ],
+    "statement": "Translate the chosen role into three or four plain-language capabilities, then use those capabilities rather than copied keywords to decide which evidence merits space.",
+    "supports": [
+      "S-SIGNAL-001",
+      "S-WB-001",
+      "S-WB-006"
+    ]
+  },
+  {
+    "derivation": "The FAQ defines this response to vague job descriptions, and target relevance determines what the reviewer tests for evidence.",
+    "epistemic_class": "derived_rule",
+    "id": "D-UNCERTAINTY",
+    "source_fact_closure": [
+      "S-FAQ-003",
+      "S-SIGNAL-003"
+    ],
+    "statement": "When role ambiguity changes emphasis, state a clue-based working interpretation, label its uncertainty, and request a recruiter note or comparable posting.",
+    "supports": [
+      "S-FAQ-003",
+      "S-SIGNAL-003"
+    ]
+  }
+]

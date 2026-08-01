@@ -1,0 +1,10 @@
+{
+  "allowed": [
+    "fs.list",
+    "fs.read",
+    "fs.write"
+  ],
+  "consequential_writes_require_approval": true,
+  "network": false,
+  "workspace_scoped": true
+}

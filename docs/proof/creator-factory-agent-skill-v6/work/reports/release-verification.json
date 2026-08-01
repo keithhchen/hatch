@@ -1,0 +1,27 @@
+{
+  "asset_count": 3,
+  "checks": {
+    "asset_hashes_match": true,
+    "public_private_boundary": true,
+    "release_digest_matches": true,
+    "release_identity_matches": true,
+    "runtime_rag_preserves_minimum_provenance": true,
+    "runtime_rag_text_excludes_factory_annotations": true,
+    "runtime_release_excludes_factory_review": true,
+    "runtime_release_excludes_factory_trace": true,
+    "runtime_release_is_exactly_declared": true
+  },
+  "declared_files": [
+    "private.json",
+    "public.json",
+    "rag/chunks.json",
+    "rag/documents.json",
+    "skills/maya-chen-resume-review/SKILL.md"
+  ],
+  "factory_trace_keys_found": [],
+  "missing_files": [],
+  "passed": true,
+  "release_digest": "sha256:856b8dc73de08c8ba2e0b024287c7694a5f81e580f22105d82a3f3c00869be22",
+  "release_id": "maya-chen-resume-review@1.0.0",
+  "unexpected_files": []
+}

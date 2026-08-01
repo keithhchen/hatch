@@ -36,6 +36,16 @@ type SkillRuntimeOptions = {
   serverTools: ServerToolExecutor;
   toolBridge: ToolBridge;
   clientTools: RunContext["clientTools"];
+  allowedExternalTools?: string[];
+  /**
+   * A protected Creator Skill is not a separate product or a weaker execution
+   * path.  It is the same entitled Creator Release running in a headless
+   * session, so it must inherit the Release's private instructions and final
+   * delivery guardrail.
+   */
+  releaseSystemPrompt?: RunContext["releaseSystemPrompt"];
+  releaseDeliveryWorkflow?: RunContext["releaseDeliveryWorkflow"];
+  releaseDeliveryAuditContext?: RunContext["releaseDeliveryAuditContext"];
   workspaceRoot?: string;
   store: RuntimeStore;
   emit: (event: OutboundMessage) => Promise<void>;
@@ -129,6 +139,10 @@ export class SkillRuntime {
       sessionSkills: workerSkills,
       activatedSkills: [activatedSkill],
       clientTools: this.options.clientTools,
+      allowedExternalTools: this.options.allowedExternalTools,
+      releaseSystemPrompt: this.options.releaseSystemPrompt,
+      releaseDeliveryWorkflow: this.options.releaseDeliveryWorkflow,
+      releaseDeliveryAuditContext: this.options.releaseDeliveryAuditContext,
       workspaceRoot: this.options.workspaceRoot,
       toolScope: "skill_run",
       skillRunId,

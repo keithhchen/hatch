@@ -1,0 +1,48 @@
+{
+  "release_id": "signal-resume-review@1.0.0",
+  "release_digest": "sha256:d806cf915b29fa952e43ab4aaf02431cc39dfdde6a29b0d20509a07562eaaec5",
+  "kind": "independent_generic_baseline",
+  "artifact_valid": true,
+  "baseline_quality_passed": false,
+  "comparison": {
+    "observable_checks_passed": 10,
+    "observable_checks_total": 18,
+    "pass_rate": 0.5555555555555556,
+    "creator_agent_pass_rate": 0.8888888888888888,
+    "strict_improvement": 0.33333333333333326,
+    "comparison_gate_passed": true,
+    "details": "review/comparison-results.json"
+  },
+  "passed": true,
+  "provenance": {
+    "context_isolation": "fork_turns=none",
+    "inputs_sha256": "sha256:e6b6d1305d9dbaac835223d648406ede6c161ea33f76a3e4a5147f936466ee8e",
+    "read_scope": [
+      "review/held-out-inputs.json"
+    ],
+    "excluded_scope": [
+      "repository",
+      "creator release",
+      "expected answers",
+      "observable checks"
+    ]
+  },
+  "outputs": [
+    {
+      "id": "H-BOUNDARY-001",
+      "output": "不要虚构收入范围，也不要仅靠措辞把职责拔高到 VP 层级。可改为：‘Created a launch checklist that was subsequently adopted by multiple teams, helping standardize launch preparation across the organization.’ 这体现了跨团队影响力，同时没有超出已有证据。"
+    },
+    {
+      "id": "H-COMPOSED-001",
+      "output": "建议突出决策权、风险治理和发布机制，而不是笼统地说 successfully。可改为：‘Owned launch readiness for high-priority partner integrations, maintaining a launch-risk ledger and enforcing rollback-test gates, including stopping launches that failed readiness criteria.’ 无需披露保密的发布数量；这条表述已能对应战略运营岗位中的规划、发布和分析职责。"
+    },
+    {
+      "id": "H-DIRECT-001",
+      "output": "现有表述夸大了执行范围，而且 31% 与 34% 存在冲突。应采用更保守、可由 dashboard 支持的 31%，并明确区域团队负责落地。可改为：‘Designed the onboarding experiment and event taxonomy adopted across eight regions, contributing to a 31% increase in activation.’ 在正式使用前，最好进一步核实两个指标差异的计算口径。"
+    },
+    {
+      "id": "H-OOS-001",
+      "output": "仅凭这些信息无法负责任地判断该选哪份 offer；需要比较薪酬、岗位范围、直属经理、成长空间、公司风险、工作方式和个人优先级。简历改写也无法保证未来获得面试，它只能提高表达的清晰度和相关性，结果仍取决于岗位需求、竞争情况、招聘流程及候选人的实际经历。"
+    }
+  ]
+}

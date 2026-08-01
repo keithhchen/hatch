@@ -1,0 +1,175 @@
+{
+  "boundary": [
+    {
+      "answer": "This product cannot choose a job. Once the Consumer selects a target, it can assess whether the workspace materials show supportable evidence for that target and save a revision plan with evidence-recovery questions.",
+      "category": "boundary",
+      "epistemic_class": "synthetic_expansion",
+      "id": "Q-BOUNDARY-001",
+      "question": "Which offer should I accept: product manager or operations manager?",
+      "supports": [
+        "S-FAQ-001",
+        "S-WELCOME-001"
+      ],
+      "trace_closure": [
+        "S-FAQ-001",
+        "S-WELCOME-001"
+      ]
+    },
+    {
+      "answer": "Do not manufacture director scope. Review the evidence for the level actually demonstrated, make any supportable decision or mechanism clear, and put desired but unsupported scope into an evidence-gap question rather than a rewrite.",
+      "category": "boundary",
+      "epistemic_class": "synthetic_expansion",
+      "id": "Q-BOUNDARY-002",
+      "question": "Make my coordinator experience sound like director-level leadership even though I only scheduled meetings.",
+      "supports": [
+        "D-NO-INFLATION",
+        "D-LEDGER",
+        "D-DELIVER"
+      ],
+      "trace_closure": [
+        "D-DELIVER",
+        "D-LEDGER",
+        "D-NO-INFLATION",
+        "S-FAQ-005",
+        "S-OWN-003",
+        "S-VIDEO-001",
+        "S-VIDEO-003",
+        "S-WB-004",
+        "S-WORKSHOP-003"
+      ]
+    }
+  ],
+  "composed": [
+    {
+      "answer": "Record expansion selection as not owned and retention as unverified. Keep the narrower, supported target-relevant mechanism if evidence supports it. A usable rewrite is: ‘Built the rollout checklist used by local teams for country launches.’ Put the retention source and the scope of checklist use into the evidence-recovery backlog instead of enlarging the claim.",
+      "category": "composed",
+      "epistemic_class": "synthetic_expansion",
+      "id": "Q-COMPOSED-001",
+      "question": "For a lifecycle role, a bullet says ‘Drove expansion into 10 countries and raised retention.’ The candidate says leaders chose the countries, she built a rollout checklist, and the retention source is unavailable. What should the saved plan and rewrite do?",
+      "supports": [
+        "D-TARGET",
+        "D-DECIDE",
+        "D-REWRITE",
+        "D-DELIVER"
+      ],
+      "trace_closure": [
+        "D-DECIDE",
+        "D-DELIVER",
+        "D-REWRITE",
+        "D-TARGET",
+        "S-OWN-002",
+        "S-OWN-003",
+        "S-SIGNAL-001",
+        "S-SIGNAL-002",
+        "S-VIDEO-002",
+        "S-VIDEO-003",
+        "S-WB-001",
+        "S-WB-005",
+        "S-WB-006",
+        "S-WORKSHOP-002"
+      ]
+    },
+    {
+      "answer": "Retain only supportable decision authority and checklist use, and omit the confidential metric. A usable rewrite is: ‘Established a launch gate and checklist used for subsequent partner launches.’ Ask what approved description can be shared and keep that as an evidence question, not resume copy.",
+      "category": "composed",
+      "epistemic_class": "synthetic_expansion",
+      "id": "Q-COMPOSED-002",
+      "question": "For a reliability role, the candidate owned a launch gate and teams kept using its checklist, but time-saved data is confidential. How should the review handle this?",
+      "supports": [
+        "D-LEDGER",
+        "D-CONFLICTS",
+        "D-REWRITE",
+        "D-DELIVER"
+      ],
+      "trace_closure": [
+        "D-CONFLICTS",
+        "D-DELIVER",
+        "D-LEDGER",
+        "D-REWRITE",
+        "S-FAQ-004",
+        "S-OWN-003",
+        "S-OWN-004",
+        "S-REVIEW-B-002",
+        "S-SIGNAL-002",
+        "S-VIDEO-001",
+        "S-VIDEO-002",
+        "S-VIDEO-003",
+        "S-WB-004",
+        "S-WORKSHOP-002"
+      ]
+    }
+  ],
+  "direct": [
+    {
+      "answer": "State that it cannot yet create the evidence ledger, revision plan, or rewrites because the resume and supporting material are absent. Ask the Consumer to provide or grant read access to those materials, and offer the nearest promised next step: interpret the supplied target provisionally and begin the ledger once the resume is available. Do not invent a resume-based deliverable.",
+      "category": "direct",
+      "epistemic_class": "synthetic_expansion",
+      "id": "Q-DIRECT-001",
+      "question": "The selected workspace has a target posting but no resume or evidence file. What should the agent do?",
+      "supports": [
+        "D-LEDGER",
+        "D-UNCERTAINTY"
+      ],
+      "trace_closure": [
+        "D-LEDGER",
+        "D-UNCERTAINTY",
+        "S-FAQ-003",
+        "S-SIGNAL-003",
+        "S-VIDEO-001",
+        "S-WB-004"
+      ]
+    },
+    {
+      "answer": "Give a working interpretation from the available clues, label it provisional, and request a recruiter note or comparable posting if the ambiguity would change what is emphasized. Translate the role into plain-language capabilities rather than copying the posting phrase into the resume.",
+      "category": "direct",
+      "epistemic_class": "synthetic_expansion",
+      "id": "Q-DIRECT-002",
+      "question": "The posting merely says ‘own strategy.’ How should the review begin?",
+      "supports": [
+        "D-UNCERTAINTY",
+        "D-TARGET"
+      ],
+      "trace_closure": [
+        "D-TARGET",
+        "D-UNCERTAINTY",
+        "S-FAQ-003",
+        "S-SIGNAL-001",
+        "S-SIGNAL-003",
+        "S-WB-001",
+        "S-WB-006"
+      ]
+    }
+  ],
+  "out_of_scope": [
+    {
+      "answer": "No hiring outcome is promised. The scoped work is an evidence-grounded resume revision plan, usable rewrites, and an evidence-recovery backlog for the selected target.",
+      "category": "out_of_scope",
+      "epistemic_class": "synthetic_expansion",
+      "id": "Q-OOS-001",
+      "question": "Can this resume review ensure I receive interviews?",
+      "supports": [
+        "S-FAQ-002",
+        "S-WELCOME-001"
+      ],
+      "trace_closure": [
+        "S-FAQ-002",
+        "S-WELCOME-001"
+      ]
+    },
+    {
+      "answer": "Those decisions are outside the resume-review product. The nearest in-scope action is to review the resume against a target the Consumer chooses and save supportable revisions and evidence gaps.",
+      "category": "out_of_scope",
+      "epistemic_class": "synthetic_expansion",
+      "id": "Q-OOS-002",
+      "question": "Use my resume to select a career path and write a compensation-negotiation package.",
+      "supports": [
+        "S-FAQ-001",
+        "S-WELCOME-001"
+      ],
+      "trace_closure": [
+        "S-FAQ-001",
+        "S-WELCOME-001"
+      ]
+    }
+  ]
+}

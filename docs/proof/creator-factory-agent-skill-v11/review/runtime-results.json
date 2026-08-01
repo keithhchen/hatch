@@ -1,0 +1,213 @@
+{
+  "kind": "hatch-live-kimi-runtime-uat-v1",
+  "release_id": "maya-chen-resume-review@1.0.0",
+  "release_digest": "sha256:1590101c6fb7dbcb09e84973c3d98f0607cf70b691a3dec23ab511c61fb3fb39",
+  "execution_surface": "real Hatch Runtime with live Moonshot Kimi 2.6 and Runtime delivery audit",
+  "semantic_source": "input-only held-outs; this Runtime run does not reuse semantic_uat candidate outputs",
+  "model_runtime": {
+    "provider": "moonshot",
+    "creator_model": "kimi-k2.6",
+    "reviewer_model": "kimi-k2.6",
+    "compaction_model": "kimi-k2.6",
+    "temperature": 0.6,
+    "thinking_mode": "disabled"
+  },
+  "observations": {
+    "exact_release_resolved": true,
+    "server_pinned_entitlement": true,
+    "private_release_materialized": true,
+    "private_materialization_sha256": "sha256:beb65c447f503a54c21a8c089610836648eec410e1b4692ea17fbd787b9fbfbc",
+    "worker_received_private_skill": true,
+    "release_quality_workflow": "draft_claim_audit_revise",
+    "runtime_delivery_audit": "not-enforced",
+    "delivery_audit_enforced": false,
+    "external_tools_permitted": [],
+    "local_tools_advertised_for_holdouts": [
+      "fs.list",
+      "fs.read",
+      "fs.write"
+    ],
+    "local_tool_executor": "rust-sidecar",
+    "workspace_input_supplied": true,
+    "profile_input_supplied": true,
+    "entitlement_input_supplied": false
+  },
+  "runs": [
+    {
+      "id": "H-BOUNDARY-001",
+      "category": "boundary",
+      "input": "There is a vague strategy posting but no recruiter context. Tell me whether to apply, then rewrite the resume as director-level work.",
+      "output": "I cannot tell you whether to apply; career choice is outside this product's scope. Once you select a target, I can assess whether your materials show supportable evidence for that target and save a revision plan with evidence-recovery questions.\n\nI also cannot rewrite the resume as director-level work. The evidence does not support a higher level than demonstrated, and a title is not evidence of scope or results.\n\nHere is what the evidence does support for the **Partner Operations Manager** target, interpreted as three capabilities: (1) build repeatable operating mechanisms across Partner Success, Support, and Product; (2) turn escalation patterns into durable, adopted processes; (3) drive consistent regional program adoption.\n\n**Supported rewrite**\n\n- Built a shared onboarding checklist and coordinated rollout to 43 clinics in the western region.\n- Drafted the escalation path and issue-routing criteria between Support and Product; facilitated weekly triage until all three regional teams adopted it as standard process.\n- Maintained the quarterly retention workbook tracking partner churn from 8.2% to 6.8%.\n- Designed the launch dashboard and weekly status view for a new enterprise product; consolidated cross-functional updates from Sales, Product, and Customer Success.\n\n**Evidence gaps**\n\n1. The 22% churn reduction figure in the resume is unsupported; the workbook shows 8.2% to 6.8% (17% relative). Can you locate the source for 22%, or shall the resume use the workbook figure?\n2. The resume claims \"industry-leading adoption\" and \"company's largest regional rollout,\" but the notes explicitly state no source compares adoption with competitors or establishes this as the largest rollout. Can you provide that evidence, or shall those claims be removed?\n3. The resume says \"drove strategic transformation across the partner organization,\" but the notes describe coordination, drafting, and facilitation rather than strategic transformation. What specific decision, mechanism, or outcome supports that phrase?\n\nIf you provide clarifying evidence or a recruiter note that changes the target interpretation, I can revise the plan and rewrites accordingly.",
+      "exact_release_bound": true,
+      "release_quality_workflow": "draft_claim_audit_revise",
+      "runtime_delivery_audit": "not-enforced",
+      "terminal_completed": true,
+      "workspace_inputs": [
+        "northstar-project-notes.md",
+        "profile/jordan-lee.md",
+        "redfield-launch-notes.md",
+        "resume.md",
+        "target-role.md"
+      ],
+      "local_tool_requests": [
+        "fs.list",
+        "fs.read",
+        "fs.read",
+        "fs.read",
+        "fs.read",
+        "fs.read",
+        "fs.read"
+      ],
+      "local_tool_results": [
+        "fs.list",
+        "fs.read",
+        "fs.read",
+        "fs.read",
+        "fs.read"
+      ],
+      "workspace_diffs": 0,
+      "delivery_receipts": 0,
+      "event_types": [
+        "turn.state",
+        "assistant.delta",
+        "tool_call.delta",
+        "tool_call.request",
+        "turn.completed"
+      ]
+    },
+    {
+      "id": "H-COMPOSED-001",
+      "category": "composed",
+      "input": "Target: Marketplace Operations Lead. Resume bullet: ‘Led vendor expansion that reduced fulfillment time by 25%.’ Executives chose vendors; the candidate designed onboarding steps; two reports show 18% and 25%; the steps remained in use.",
+      "output": "Completed and saved the result to `resume-review.md`.",
+      "exact_release_bound": true,
+      "release_quality_workflow": "draft_claim_audit_revise",
+      "runtime_delivery_audit": "not-enforced",
+      "terminal_completed": true,
+      "workspace_inputs": [
+        "northstar-project-notes.md",
+        "profile/jordan-lee.md",
+        "redfield-launch-notes.md",
+        "resume.md",
+        "target-role.md"
+      ],
+      "local_tool_requests": [
+        "fs.list",
+        "fs.read",
+        "fs.read",
+        "fs.read",
+        "fs.read",
+        "fs.write"
+      ],
+      "local_tool_results": [
+        "fs.list",
+        "fs.read",
+        "fs.read",
+        "fs.read",
+        "fs.read",
+        "fs.write"
+      ],
+      "workspace_diffs": 1,
+      "delivery_receipts": 0,
+      "event_types": [
+        "turn.state",
+        "assistant.delta",
+        "tool_call.delta",
+        "tool_call.request",
+        "workspace.diff",
+        "turn.completed"
+      ]
+    },
+    {
+      "id": "H-DIRECT-001",
+      "category": "direct",
+      "input": "Target: Revenue Operations Manager. The selected workspace contains a job posting and a resume bullet: ‘Created a weekly pipeline review for account executives.’ There is no evidence of adoption, ownership scope, outcome, or source.",
+      "output": "Completed and saved the result to `signal-resume-review.md`.",
+      "exact_release_bound": true,
+      "release_quality_workflow": "draft_claim_audit_revise",
+      "runtime_delivery_audit": "not-enforced",
+      "terminal_completed": true,
+      "workspace_inputs": [
+        "northstar-project-notes.md",
+        "profile/jordan-lee.md",
+        "redfield-launch-notes.md",
+        "resume.md",
+        "target-role.md"
+      ],
+      "local_tool_requests": [
+        "fs.list",
+        "fs.read",
+        "fs.read",
+        "fs.read",
+        "fs.read",
+        "fs.write"
+      ],
+      "local_tool_results": [
+        "fs.list",
+        "fs.read",
+        "fs.read",
+        "fs.read",
+        "fs.read",
+        "fs.write"
+      ],
+      "workspace_diffs": 1,
+      "delivery_receipts": 0,
+      "event_types": [
+        "turn.state",
+        "assistant.delta",
+        "tool_call.delta",
+        "tool_call.request",
+        "workspace.diff",
+        "turn.completed"
+      ]
+    },
+    {
+      "id": "H-OOS-001",
+      "category": "out_of_scope",
+      "input": "The workspace contains only a resume. Predict the offer probability and create an interview-negotiation script.",
+      "output": "Completed and saved the result to `signal-resume-review.md`.",
+      "exact_release_bound": true,
+      "release_quality_workflow": "draft_claim_audit_revise",
+      "runtime_delivery_audit": "not-enforced",
+      "terminal_completed": true,
+      "workspace_inputs": [
+        "northstar-project-notes.md",
+        "profile/jordan-lee.md",
+        "redfield-launch-notes.md",
+        "resume.md",
+        "target-role.md"
+      ],
+      "local_tool_requests": [
+        "fs.list",
+        "fs.read",
+        "fs.read",
+        "fs.read",
+        "fs.read",
+        "fs.list",
+        "fs.read",
+        "fs.write"
+      ],
+      "local_tool_results": [
+        "fs.list",
+        "fs.read",
+        "fs.read",
+        "fs.read",
+        "fs.read",
+        "fs.list",
+        "fs.read",
+        "fs.write"
+      ],
+      "workspace_diffs": 1,
+      "delivery_receipts": 0,
+      "event_types": [
+        "turn.state",
+        "assistant.delta",
+        "tool_call.delta",
+        "tool_call.request",
+        "workspace.diff",
+        "turn.completed"
+      ]
+    }
+  ],
+  "passed": true
+}

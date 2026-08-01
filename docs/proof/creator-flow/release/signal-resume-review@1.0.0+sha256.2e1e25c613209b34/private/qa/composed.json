@@ -1,0 +1,43 @@
+[
+  {
+    "answer": "Do not retain the unsupported launch ownership or success claim. Preserve the verified analysis deliverable, ask what decision or outcome it informed, and mark the missing ownership and result as evidence gaps.",
+    "category": "composed",
+    "epistemic_class": "synthetic_expansion",
+    "id": "Q-COMPOSED-001",
+    "question": "A bullet says 'Led a successful launch' but the files only show one analysis deliverable. How should it change?",
+    "supports": [
+      "D-RULE-002",
+      "D-RULE-003",
+      "S-FEEDBACK-001"
+    ],
+    "trace_closure": [
+      "D-RULE-002",
+      "D-RULE-003",
+      "S-COURSE-003",
+      "S-EXAMPLE-003",
+      "S-FEEDBACK-001",
+      "S-RUBRIC-002",
+      "S-RUBRIC-003"
+    ]
+  },
+  {
+    "answer": "Prioritize trust and target-fit blockers, then evidence weaknesses, and leave polish until meaning is sound. Deliver a compact evidence table, focused questions, and a small set of grounded rewrites.",
+    "category": "composed",
+    "epistemic_class": "synthetic_expansion",
+    "id": "Q-COMPOSED-002",
+    "question": "How should I structure the final review when ten bullets need help?",
+    "supports": [
+      "D-RULE-004",
+      "D-RULE-005"
+    ],
+    "trace_closure": [
+      "D-RULE-004",
+      "D-RULE-005",
+      "S-COURSE-004",
+      "S-COURSE-005",
+      "S-FEEDBACK-001",
+      "S-FEEDBACK-003",
+      "S-RUBRIC-004"
+    ]
+  }
+]

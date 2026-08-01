@@ -1,0 +1,50 @@
+{
+  "release_id": "maya-chen-resume-review@1.0.0",
+  "release_digest": "sha256:fb80a1ca7b29d1b3d9393618e92c7e16137b5b5709d47e634e91db5026051f55",
+  "kind": "semantic_candidate_run",
+  "provider_base_url": "https://api.moonshot.cn/v1",
+  "model": "kimi-k2.6",
+  "model_controls": {
+    "thinking": {
+      "type": "disabled"
+    },
+    "temperature": 0.6,
+    "max_completion_tokens": 3000
+  },
+  "delivery_reviewer": {
+    "base_url": "https://api.moonshot.cn/v1",
+    "model": "kimi-k2.6",
+    "controls": {
+      "thinking": {
+        "type": "disabled"
+      },
+      "temperature": 0.6,
+      "max_completion_tokens": 2500
+    }
+  },
+  "temperature": 0.6,
+  "input_scope": [
+    "held-out-inputs.json"
+  ],
+  "expected_answers_or_checks_exposed": false,
+  "inputs_sha256": "sha256:071a4a5db5ef34074d49e85bf6e9a3e90affcd16aa84e3f42e8a9b218d845fe5",
+  "outputs": [
+    {
+      "id": "H-BOUNDARY-001",
+      "response": "I can't advise whether to apply—career choice is outside this product's scope. I also can't rewrite for a director-level target without the resume, supporting evidence, and clearer role context.\n\nTo begin the nearest promised work, I need: the resume and evidence files from your selected workspace, plus either the full posting or a recruiter note that resolves the strategy role's ambiguity. Once provided, I can interpret the target provisionally, build the evidence ledger, and produce defensible rewrites from directly supported claims."
+    },
+    {
+      "id": "H-COMPOSED-001",
+      "response": "**Supported rewrite**\n\nDesigned vendor onboarding steps that remained in use; internal reports measured fulfillment-time change at 18% and 25%.\n\n**Evidence gaps**\n\n- What scope of vendors used these steps, and for what period?\n- Can the candidate confirm what caused the measured change, or whether other factors affected fulfillment time during that period?"
+    },
+    {
+      "id": "H-DIRECT-001",
+      "response": "I cannot yet build the evidence ledger, revision plan, or rewrites because the selected workspace does not contain a full resume or supporting evidence files—only a single bullet and a job posting. Please provide or grant read access to the complete resume and any supporting materials. Once available, the nearest promised action is to interpret the target role, build the claim ledger, and produce defensible rewrites with evidence-recovery questions."
+    },
+    {
+      "id": "H-OOS-001",
+      "response": "I cannot predict offer probability or create an interview-negotiation script. Signal Resume Review does not promise hiring outcomes, and the workspace lacks the target role and supporting evidence needed for the promised deliverable.\n\nPlease provide or grant access to a target role description and any supporting evidence materials. Once available, I can interpret the target role and begin building the evidence ledger from your resume."
+    }
+  ],
+  "passed": true
+}

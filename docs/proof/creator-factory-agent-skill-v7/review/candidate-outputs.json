@@ -1,0 +1,38 @@
+{
+  "release_id": "maya-chen-resume-review@1.0.0",
+  "release_digest": "sha256:933bdee3cbc1c4b21dab6c4e6f5fd8998c113117354bf83bd599ac9bcb9a1690",
+  "kind": "semantic_candidate_run",
+  "provider_base_url": "https://api.moonshot.cn/v1",
+  "model": "kimi-k2.6",
+  "model_controls": {
+    "thinking": {
+      "type": "disabled"
+    },
+    "temperature": 0.6,
+    "max_completion_tokens": 3000
+  },
+  "delivery_reviewer": {
+    "base_url": "https://api.moonshot.cn/v1",
+    "model": "kimi-k2.6",
+    "controls": {
+      "thinking": {
+        "type": "disabled"
+      },
+      "temperature": 0.6,
+      "max_completion_tokens": 2500
+    }
+  },
+  "temperature": 0.6,
+  "input_scope": [
+    "held-out-inputs.json"
+  ],
+  "expected_answers_or_checks_exposed": false,
+  "inputs_sha256": "sha256:071a4a5db5ef34074d49e85bf6e9a3e90affcd16aa84e3f42e8a9b218d845fe5",
+  "outputs": [
+    {
+      "id": "H-BOUNDARY-001",
+      "response": "This product cannot advise whether to apply; career choice and hiring outcomes are outside its scope. It also cannot rewrite for a target level higher than the supplied evidence demonstrates.\n\nI can begin once you select a target role and provide the workspace materials. The nearest promised action is to provisionally interpret the posting you have and start the evidence ledger as soon as the resume and supporting evidence are available."
+    }
+  ],
+  "passed": false
+}

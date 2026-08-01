@@ -363,7 +363,7 @@ fn canonical_tool_call_result_rejects_unknown_local_tools() {
 
 #[cfg(unix)]
 #[test]
-fn canonical_shell_exec_runs_in_sandbox_and_reports_timeouts() {
+fn canonical_shell_exec_is_disabled_without_a_complete_os_sandbox() {
     let temp = tempdir().unwrap();
     let runner = LocalRunner::new(temp.path()).unwrap();
 
@@ -375,29 +375,49 @@ fn canonical_shell_exec_runs_in_sandbox_and_reports_timeouts() {
             "timeout_ms": 30000
         }),
     ));
-    assert_ok_result(result, |result| {
-        assert!(result["stdout"].as_str().unwrap().contains("shell-ok"));
-        assert!(result["stdout"]
-            .as_str()
-            .unwrap()
-            .contains(&runner.sandbox_root().to_string_lossy().to_string()));
-        assert_eq!(result["stderr"], "");
-        assert_eq!(result["exit_code"], 0);
-        assert_eq!(result["timed_out"], false);
+    assert_error_result(result, |error| {
+        assert_eq!(error["code"], "shell_disabled");
+        assert!(error["message"].as_str().unwrap().contains("disabled"));
     });
+}
 
-    let timeout = runner.execute_tool_call_request(tool_request(
-        "call_timeout",
-        "shell.exec",
-        json!({
-            "command": "sleep 1",
-            "timeout_ms": 100
-        }),
-    ));
-    assert_ok_result(timeout, |result| {
-        assert_eq!(result["timed_out"], true);
-        assert_eq!(result["exit_code"], -1);
-    });
+#[test]
+fn rejects_malicious_shell_commands_instead_of_relying_on_cwd() {
+    let temp = tempdir().unwrap();
+    let runner = LocalRunner::new(temp.path()).unwrap();
+    for command in [
+        "cat /etc/passwd",
+        "cd .. && pwd",
+        "touch ../escaped",
+        "python -c 'open(\"/tmp/escaped\", \"w\").write(\"x\")'",
+    ] {
+        let result = runner.execute_tool_call_request(tool_request(
+            "call_malicious_shell",
+            "shell.exec",
+            json!({ "command": command, "timeout_ms": 30000 }),
+        ));
+        assert_error_result(result, |error| assert_eq!(error["code"], "shell_disabled"));
+    }
+}
+
+#[test]
+fn rejects_absolute_and_parent_paths_for_all_file_mutations() {
+    let temp = tempdir().unwrap();
+    let runner = LocalRunner::new(temp.path()).unwrap();
+    for path in ["/tmp/escaped", "../escaped", "nested/../../escaped"] {
+        let write = runner.execute_tool_call_request(tool_request(
+            "call_bad_write",
+            "fs.write",
+            json!({ "path": path, "content": "no" }),
+        ));
+        assert_error_result(write, |error| assert_eq!(error["code"], "tool_failed"));
+        let patch = runner.execute_tool_call_request(tool_request(
+            "call_bad_patch",
+            "fs.patch",
+            json!({ "path": path, "patch": "HATCH-PATCH v1\nappend\n---\nno" }),
+        ));
+        assert_error_result(patch, |error| assert_eq!(error["code"], "tool_failed"));
+    }
 }
 
 #[test]

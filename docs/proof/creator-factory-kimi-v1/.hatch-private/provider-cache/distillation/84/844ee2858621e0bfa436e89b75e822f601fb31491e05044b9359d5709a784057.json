@@ -1,0 +1,24 @@
+{
+  "kind": "distillation_provider_success_cache_v1",
+  "request": {
+    "controls": {
+      "max_completion_tokens": 8000,
+      "temperature": 0.6,
+      "thinking": {
+        "type": "disabled"
+      }
+    },
+    "endpoint": "https://api.moonshot.cn/v1/chat/completions",
+    "model": "kimi-k2.6",
+    "phase": "distill_source_facts",
+    "request_bytes": 3423,
+    "request_label": "src-prior-work-review-a-98463ca9/attempt-1",
+    "request_sha256": "sha256:1f8cbd6223fa68dd7079d4e83ad29a4c913c4fc4db501ca62a04b7f994e126b1"
+  },
+  "response": "{\"facts\":[{\"unit_id\":\"EU-E0C14FD41CA5\",\"label\":\"Accuracy and attribution standards for claims\",\"priority\":1,\"role\":\"quality_bar\",\"omission\":null},{\"unit_id\":\"EU-E0C14FD41CA5\",\"label\":\"Signal targeting over generic prestige\",\"priority\":1,\"role\":\"priority\",\"omission\":null},{\"unit_id\":\"EU-E0C14FD41CA5\",\"label\":\"Conflict resolution when sources disagree\",\"priority\":1,\"role\":\"boundary\",\"omission\":null},{\"unit_id\":\"EU-D9D0C049D1C2\",\"label\":\"Revised bullet structure example\",\"priority\":1,\"role\":\"example\",\"omission\":null},{\"unit_id\":\"EU-B89702120E74\",\"label\":\"Evidence verification before adding metrics\",\"priority\":1,\"role\":\"sequence\",\"omission\":null},{\"unit_id\":\"EU-B89702120E74\",\"label\":\"Fallback to non-metric outcomes when evidence unconfirmed\",\"priority\":1,\"role\":\"boundary\",\"omission\":null}]}",
+  "response_sha256": "sha256:e166dcccf77c53ca94a8f6bd1b2c4c4c8d19a406311e49f886dc88c7d14d0c62",
+  "terminal": {
+    "choice_count": 1,
+    "finish_reason": "stop"
+  }
+}

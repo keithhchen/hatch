@@ -1,0 +1,56 @@
+{
+  "kind": "isolated_creator_release_portability",
+  "contract": "generic container, Creator-specific payload",
+  "factory_output_roots": [
+    "/tmp/hatch-factory-kimi-v5.Wwkpxn/compiled",
+    "/tmp/hatch-factory-kimi-ari-v1.2ww9V4/compiled"
+  ],
+  "isolated_release_root": "/var/folders/k0/hbmw41gn5plckh87xp1kb53m0000gn/T/hatch-release-portability-ROHh9R",
+  "releases": [
+    {
+      "release_id": "signal-resume-review@1.0.0",
+      "release_digest": "sha256:9e0774372375f0caf1b132de259f0a2087e544d968cab3e8958945d68e7ee7a5",
+      "creator_id": "maya-chen",
+      "product_id": "signal-resume-review",
+      "protected_skill_assets": 1,
+      "rag_assets": 2,
+      "few_shots": 4,
+      "materialized_local_tools": [
+        "fs.list",
+        "fs.read",
+        "fs.write"
+      ],
+      "materialized": {
+        "system_prompt_chars": 17275,
+        "includes_skill": true,
+        "includes_rag": true,
+        "includes_few_shots": true
+      },
+      "forbidden_factory_dependencies": [],
+      "self_contained": true
+    },
+    {
+      "release_id": "strength-week-planner@1.0.0",
+      "release_digest": "sha256:474df69731ad3aa95cc836f5f4f934cf349bbff8615ad35daff26dfc916a4a51",
+      "creator_id": "ari-cole-strength",
+      "product_id": "strength-week-planner",
+      "protected_skill_assets": 1,
+      "rag_assets": 2,
+      "few_shots": 4,
+      "materialized_local_tools": [
+        "fs.list",
+        "fs.read",
+        "fs.write"
+      ],
+      "materialized": {
+        "system_prompt_chars": 15230,
+        "includes_skill": true,
+        "includes_rag": true,
+        "includes_few_shots": true
+      },
+      "forbidden_factory_dependencies": [],
+      "self_contained": true
+    }
+  ],
+  "passed": true
+}

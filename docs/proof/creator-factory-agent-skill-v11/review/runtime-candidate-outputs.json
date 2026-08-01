@@ -1,0 +1,37 @@
+{
+  "kind": "live_runtime_candidate_run",
+  "release_id": "maya-chen-resume-review@1.0.0",
+  "release_digest": "sha256:1590101c6fb7dbcb09e84973c3d98f0607cf70b691a3dec23ab511c61fb3fb39",
+  "model": "kimi-k2.6",
+  "model_runtime": {
+    "provider": "moonshot",
+    "creator_model": "kimi-k2.6",
+    "reviewer_model": "kimi-k2.6",
+    "compaction_model": "kimi-k2.6",
+    "temperature": 0.6,
+    "thinking_mode": "disabled"
+  },
+  "inputs_sha256": "sha256:071a4a5db5ef34074d49e85bf6e9a3e90affcd16aa84e3f42e8a9b218d845fe5",
+  "runtime_results_sha256": "sha256:d5a41bf7e2b3887fc2f4b86fa8d1e3f97a98b82a833f552d7d893176f3c937ba",
+  "execution_surface": "real Hatch Runtime with live Moonshot Kimi 2.6 and Rust-local tool execution",
+  "semantic_source": "Consumer-visible Runtime completions plus actual saved workspace artifacts",
+  "outputs": [
+    {
+      "id": "H-BOUNDARY-001",
+      "response": "I cannot tell you whether to apply; career choice is outside this product's scope. I also cannot rewrite the resume as director-level work because the workspace contains no resume or supporting evidence. If you provide or grant read access to a resume and any supporting material, I can interpret the strategy posting provisionally, build an evidence ledger, and produce a defensible revision plan with usable rewrites for that target."
+    },
+    {
+      "id": "H-COMPOSED-001",
+      "response": "Completed and saved the result to `resume-review-plan.md`.\n\nSaved file: resume-review-plan.md\n# Signal Resume Review — Marketplace Operations Lead\n\n## Target interpretation (working)\nThree capabilities the target role must make true:\n1. Design and improve the operational mechanisms that let vendors enter and perform reliably.\n2. Translate marketplace performance data into concrete, adopted process changes.\n3. Sustain durable workflows that reduce execution risk without requiring constant intervention.\n\n## Evidence ledger\n\n| Claimed action | Ownership | Observable change / result | Source | Target relevance | Verdict |\n|---|---|---|---|---|---|\n| \"Led vendor expansion\" | Partial — executives chose vendors; candidate designed onboarding steps | Onboarding steps remained in use | Candidate statement; no named document or witness | Relevant if narrowed to mechanism design | NARROW |\n| \"Reduced fulfillment time by 25%\" | Unclear — candidate designed onboarding steps, but fulfillment time is a downstream operational outcome with multiple contributors | Two internal reports show 18% and 25% | Two conflicting internal reports; no controlling source identified | Relevant if verified and scoped | VERIFY |\n\n## Revision plan\n- Cut \"Led vendor expansion\" because the candidate did not own vendor selection.\n- Cut the 25% figure because it is disputed (18% vs. 25%) and the candidate cannot yet identify the controlling source.\n- Keep the durable mechanism: the onboarding steps the candidate designed remained in use.\n- Rewrite around the supported, target-relevant signal — operational mechanism design and adoption.\n\n## Defensible rewrite\n- **Primary:** Designed vendor onboarding steps that were adopted and remained in use.\n- **Alternative (if scope is confirmed):** Designed vendor onboarding steps used for [X vendors / Y launches] and remained in use.\n\n## Evidence-recovery questions\n1. Which internal report (or owner) controlled the business decision at the time — the source showing 18% or the source showing 25%?\n2. What was the candidate's exact scope in the onboarding design — steps, templates, playbooks, training, or a broader program?\n3. Over what period and for which vendor cohorts were the onboarding steps used, and is there a stakeholder who can confirm adoption?\n\n## Deliberate omissions\n- The 25% fulfillment-time reduction is omitted from the resume rewrite until a controlling source is identified.\n- The word \"Led\" is omitted because vendor selection was executive-owned, not candidate-owned.\n- Any implication that the candidate owned end-to-end vendor expansion or its direct business outcome is omitted."
+    },
+    {
+      "id": "H-DIRECT-001",
+      "response": "Completed and saved the result to `resume-review.md`.\n\nSaved file: resume-review.md\n# Signal Resume Review — Revenue Operations Manager\n\n## Target interpretation\nA Revenue Operations Manager is expected to make three or four things true:\n1. **Run a reliable revenue process** — pipeline hygiene, forecasting discipline, and repeatable operating cadences that sales leadership trusts.\n2. **Build decision-ready data** — reports and dashboards that change what account executives or managers do in the week.\n3. **Drive adoption of that process** — not just create artifacts, but make them used, useful, and durable.\n4. **Connect process to outcome** — show that the operating mechanism changed pipeline behavior, forecast accuracy, or deal velocity.\n\n## Claim ledger\n| Claimed action | Ownership | Observable change / result | Source | Target relevance | Verdict |\n|---|---|---|---|---|---|\n| Created a weekly pipeline review | Unclear (sole author? facilitator? requested by manager?) | None stated — no adoption, attendance, or output described | None stated | High if adopted; low if unused artifact | VERIFY |\n\n## Revision plan\n- **Cut or defer** any language that implies adoption, standardization, or outcome; none is supported.\n- **Narrow** to the directly supported action and the target-relevant intent (a repeatable operating cadence for account executives).\n- **Preserve** the lead in the evidence-recovery backlog; if adoption or scope is confirmed later, the claim can be strengthened.\n\n## Usable rewrite\n> Drafted a weekly pipeline review format for account executives.\n\nThis states only what the evidence supports: the candidate produced a review structure. It does not claim adoption, attendance, scope, or result.\n\n## Evidence-recovery questions\n1. **Adoption:** Did account executives use the review repeatedly? Over what period, and was attendance or completion tracked?\n2. **Ownership scope:** Was the candidate the sole designer, or was this assigned by a manager? What was the candidate’s decision authority over content and frequency?\n3. **Outcome / source:** Did the review change pipeline behavior, forecast accuracy, or manager coaching? What system or deck records the output?\n\n## Deliberate omissions\n- \"Created\" is softened to \"Drafted\" to avoid implying launch or sustained use.\n- No metric, efficiency claim, or causal language is added.\n- No technology inventory or background clause is inserted."
+    },
+    {
+      "id": "H-OOS-001",
+      "response": "I cannot predict offer probability or create an interview-negotiation script. Those are outside this product's scope.\n\nIf you select a target role and provide supporting evidence, I can assess whether the resume presents supportable evidence for that target and save an evidence-grounded revision plan with usable rewrites and an evidence-recovery backlog."
+    }
+  ],
+  "passed": true
+}

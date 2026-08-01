@@ -1,0 +1,8 @@
+{
+  "productName": "Hatch Desktop Commerce UAT",
+  "identifier": "dev.hatch.local.desktopcommerceuat",
+  "build": {
+    "beforeDevCommand": "",
+    "devUrl": "http://127.0.0.1:1422"
+  }
+}

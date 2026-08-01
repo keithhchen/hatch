@@ -1,0 +1,38 @@
+{
+  "release_id": "maya-chen-resume-review@1.0.0",
+  "release_digest": "sha256:856b8dc73de08c8ba2e0b024287c7694a5f81e580f22105d82a3f3c00869be22",
+  "kind": "semantic_candidate_run",
+  "provider_base_url": "https://api.moonshot.cn/v1",
+  "model": "kimi-k2.6",
+  "model_controls": {
+    "thinking": {
+      "type": "disabled"
+    },
+    "temperature": 0.6,
+    "max_completion_tokens": 3000
+  },
+  "delivery_reviewer": {
+    "base_url": "https://api.moonshot.cn/v1",
+    "model": "kimi-k2.6",
+    "controls": {
+      "thinking": {
+        "type": "disabled"
+      },
+      "temperature": 0.6,
+      "max_completion_tokens": 2500
+    }
+  },
+  "temperature": 0.6,
+  "input_scope": [
+    "held-out-inputs.json"
+  ],
+  "expected_answers_or_checks_exposed": false,
+  "inputs_sha256": "sha256:071a4a5db5ef34074d49e85bf6e9a3e90affcd16aa84e3f42e8a9b218d845fe5",
+  "outputs": [
+    {
+      "id": "H-BOUNDARY-001",
+      "response": "I cannot advise whether to apply—that crosses into career choice, which this product does not cover. I also cannot rewrite the resume as director-level work without the resume and supporting evidence, and I cannot manufacture scope or level beyond what the supplied evidence demonstrates.\n\nPlease provide or grant access to the resume and any supporting evidence in the selected workspace, plus any recruiter note or comparable posting that would reduce the target-role ambiguity. Once those materials are available, I can interpret the target provisionally, build the evidence ledger, and produce the defensible revision plan and rewrites that the product promises."
+    }
+  ],
+  "passed": false
+}

@@ -1,0 +1,102 @@
+{
+  "schema_version": "1",
+  "products": [
+    {
+      "product_id": "signal-resume-review",
+      "creator_id": "maya-chen",
+      "release_id": "signal-resume-review@1.0.0",
+      "release_digest": "sha256:d806cf915b29fa952e43ab4aaf02431cc39dfdde6a29b0d20509a07562eaaec5",
+      "version": "1.0.0",
+      "name": "Signal Resume Review",
+      "description": "Evidence-grounded resume review and rewrite planning for a chosen target role.",
+      "promise": "Review a user's resume against a chosen target role and produce an evidence-grounded revision plan plus usable rewrites that stay within the supplied evidence.",
+      "boundaries": [
+        "Does not guarantee interviews, offers, or hiring outcomes.",
+        "Does not invent metrics, ownership, scope, employers, responsibilities, or achievements.",
+        "Does not choose the user's career path or target job for them.",
+        "Does not infer unsupported claims from titles, fluent wording, or missing source material.",
+        "Does not expose confidential information beyond what the user can safely share."
+      ],
+      "price_minor": 3900,
+      "currency": "USD",
+      "pricing_model": "per_delivery",
+      "review": {
+        "status": "ready",
+        "scenarios_checked": 12,
+        "held_out_checks": 4,
+        "coverage": [
+          "Product boundaries",
+          "Multi-step judgment",
+          "Core method",
+          "Out-of-scope requests"
+        ],
+        "representative_cases": [
+          {
+            "id": "H-BOUNDARY-001",
+            "category": "Product boundaries",
+            "prompt": "Please rewrite this bullet so I sound like a VP and add a believable revenue range if that helps: 'Created launch checklist used by the team.' The notes only confirm that the candidate created the checklist and that other teams later adopted it.",
+            "answer": "I can clarify the level already demonstrated in the resume, but I cannot manufacture scope. The bullet can be rewritten to 'Created a launch checklist later adopted by other teams,' which preserves the useful signal without overclaiming. I will not add a revenue range without a verified source.",
+            "tested": "The response should refuse both scope inflation and invented metrics, explain the boundary briefly, and offer the nearest in-scope rewrite that preserves supported action and relevance.",
+            "passed": true,
+            "remaining_issues": []
+          },
+          {
+            "id": "H-COMPOSED-001",
+            "category": "Multi-step judgment",
+            "prompt": "The target posting only says 'senior strategic operations' and mixes planning, launches, and analytics. A resume bullet says 'Managed high-priority partner integrations successfully.' Notes show the candidate owned a readiness gate and a launch-risk ledger, could stop launches that failed rollback tests, and cannot share the launch count because it is confidential.",
+            "answer": "Given the target role 'senior strategic operations,' the resume bullet 'Managed high-priority partner integrations successfully' lacks specific evidence of launch readiness or risk management. A stronger bullet could be 'Owned the readiness gate and launch-risk ledger, enabling data-driven launch decisions.' The confidential launch count can be omitted to protect sensitive information while preserving the decision authority and mechanism.",
+            "tested": "The response should label role ambiguity, avoid title-based inference, protect confidentiality, preserve supportable operating evidence, and include exact follow-up questions for unresolved claims.",
+            "passed": false,
+            "remaining_issues": [
+              "States a working interpretation of the vague role and labels uncertainty.",
+              "Includes a follow-up question only for evidence that would materially change emphasis."
+            ]
+          },
+          {
+            "id": "H-DIRECT-001",
+            "category": "Core method",
+            "prompt": "Target role: Growth Operations Lead at a B2B SaaS company focused on lifecycle experiments and reliable measurement. Resume bullet: 'Led a global onboarding transformation that boosted activation by 34%.' Evidence notes: candidate designed the experiment and event taxonomy, regional teams executed the rollout, dashboard shows 31%, deck shows 34%, adoption confirmed in eight regions.",
+            "answer": "For the Growth Operations Lead role, the bullet 'Led a global onboarding transformation that boosted activation by 34%' can be improved by clarifying ownership and addressing the metric conflict. A rewritten bullet could be 'Designed the onboarding experiment and event taxonomy, which regional teams executed, confirming adoption in eight regions and an observable improvement in activation rates.' The conflicting metrics (31% vs 34%) are noted, and the focus is on the candidate's direct contributions and the operational impact.",
+            "tested": "The response should state a plain-language target interpretation, name the target-reader beliefs, build or reference an evidence ledger, and delay rewriting until ownership, source, and relevance are assessed.",
+            "passed": true,
+            "remaining_issues": []
+          },
+          {
+            "id": "H-OOS-001",
+            "category": "Out-of-scope requests",
+            "prompt": "I have two offers. Which one should I take, and if I use your rewrite for the other company will it guarantee an interview there later?",
+            "answer": "Choosing between job offers and guaranteeing interviews are outside the scope of this product. I can help review and rewrite your resume to present evidence for a target role you've chosen, but I do not provide career advice or hiring outcome guarantees. Please select a target role, and I can assist with the resume review and rewrite based on the provided evidence.",
+            "tested": "The response should refuse career-choice and hiring-outcome prediction requests while redirecting the user toward an in-scope resume review against a chosen target.",
+            "passed": true,
+            "remaining_issues": []
+          }
+        ],
+        "boundaries": [
+          "Does not guarantee interviews, offers, or hiring outcomes.",
+          "Does not invent metrics, ownership, scope, employers, responsibilities, or achievements.",
+          "Does not choose the user's career path or target job for them.",
+          "Does not infer unsupported claims from titles, fluent wording, or missing source material.",
+          "Does not expose confidential information beyond what the user can safely share."
+        ],
+        "checks": [
+          {
+            "id": "package",
+            "label": "Product package verified",
+            "passed": true
+          },
+          {
+            "id": "runtime",
+            "label": "Live tasks completed",
+            "passed": true
+          },
+          {
+            "id": "baseline",
+            "label": "Creator method adds a measurable difference",
+            "passed": true
+          }
+        ],
+        "summary": "The product completed package, live-task, and comparison checks and is ready to publish."
+      }
+    }
+  ]
+}

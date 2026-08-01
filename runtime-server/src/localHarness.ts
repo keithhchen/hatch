@@ -11,6 +11,7 @@ import {
   PROTOCOL_VERSION,
   type ClientToolName,
   type OutboundMessage,
+  type RuntimeReady,
   type ToolRequest,
   type ToolResult
 } from "./protocol.js";
@@ -27,6 +28,16 @@ export type HarnessOptions = {
   rustRunnerBin?: string;
   holdToolRequests?: boolean;
   approveTool?: (request: ToolRequest) => boolean | Promise<boolean>;
+  installationId?: string;
+  licenseToken?: string;
+  entitlementId?: string;
+  runIdFactory?: () => string;
+  /**
+   * A Consumer turn can include several locally-authorized tool calls followed
+   * by a Creator product's delivery audit. Keep the interactive default
+   * bounded, but allow release UATs to supply a longer, explicit deadline.
+   */
+  runTimeoutMs?: number;
 };
 
 export type OneShotHarnessOptions = HarnessOptions & {
@@ -187,6 +198,7 @@ export class LocalHarnessSession {
   private pendingRun?: PendingRun;
   private heldToolRequests: ToolRequest[] = [];
   private ready = false;
+  private sessionReady?: RuntimeReady;
 
   constructor(private readonly options: HarnessOptions) {
     this.workspace = path.resolve(options.workspace);
@@ -211,6 +223,7 @@ export class LocalHarnessSession {
 
     socket.once("close", () => {
       this.ready = false;
+      this.sessionReady = undefined;
       this.rejectPending(new Error("Runtime socket closed"));
     });
 
@@ -225,6 +238,7 @@ export class LocalHarnessSession {
           clearTimeout(timeout);
           socket.off("message", checkReady);
           this.ready = true;
+          this.sessionReady = message;
           resolve();
         } else if (message.type === "turn.failed") {
           clearTimeout(timeout);
@@ -238,8 +252,9 @@ export class LocalHarnessSession {
     socket.send(JSON.stringify({
       type: "client.hello",
       protocol_version: PROTOCOL_VERSION,
-      installation_id: "local-dev-install",
-      license_token: "local-dev-license",
+      installation_id: this.options.installationId ?? "local-dev-install",
+      license_token: this.options.licenseToken ?? "local-dev-license",
+      ...(this.options.entitlementId ? { entitlement_id: this.options.entitlementId } : {}),
       client_version: "0.1.0",
       workspace_root: this.workspace,
       local_tools: this.declaredLocalTools()
@@ -256,13 +271,13 @@ export class LocalHarnessSession {
       throw new Error("A run is already active");
     }
 
-    const runId = `run_${Date.now()}`;
+    const runId = this.options.runIdFactory?.() ?? `run_${Date.now()}`;
 
     const result = await new Promise<HarnessResult>((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pendingRun = undefined;
         reject(new Error("Timed out waiting for runtime final output"));
-      }, 180000);
+      }, this.options.runTimeoutMs ?? 180000);
 
       this.pendingRun = { runId, resolve, reject, events: [], timeout, streamedText: "", completed: false };
       this.socket?.send(JSON.stringify({
@@ -274,6 +289,10 @@ export class LocalHarnessSession {
     });
 
     return result;
+  }
+
+  getSessionReady(): RuntimeReady | undefined {
+    return this.sessionReady;
   }
 
   close(): void {
@@ -295,6 +314,7 @@ export class LocalHarnessSession {
     const message = JSON.parse(String(data)) as OutboundMessage;
 
     if (message.type === "session.ready") {
+      this.sessionReady = message;
       return;
     }
 

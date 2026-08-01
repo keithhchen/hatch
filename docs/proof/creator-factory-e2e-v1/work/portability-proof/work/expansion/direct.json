@@ -1,0 +1,40 @@
+[
+  {
+    "answer": "Start with the user's actual weekly context: the goal for the block, available training days, available equipment, and what happened in the recent training log and recovery notes.",
+    "category": "direct",
+    "epistemic_class": "synthetic_expansion",
+    "id": "Q-DIRECT-001",
+    "observable_checks": [
+      "Names goal, schedule, equipment, and recent training context."
+    ],
+    "question": "What information should the agent read before building a weekly plan?",
+    "supports": [
+      "S-PLAN-001",
+      "D-RULE-001"
+    ],
+    "trace_closure": [
+      "D-RULE-001",
+      "S-CASE-001",
+      "S-PLAN-001"
+    ]
+  },
+  {
+    "answer": "Every session should be executable and concrete: include the exercise, sets, reps or duration, an effort target, rest guidance, and an allowed substitution that still fits the intended function.",
+    "category": "direct",
+    "epistemic_class": "synthetic_expansion",
+    "id": "Q-DIRECT-002",
+    "observable_checks": [
+      "Lists all required session fields."
+    ],
+    "question": "What has to appear in each prescribed session for the plan to count as usable?",
+    "supports": [
+      "S-PLAN-003",
+      "D-RULE-003"
+    ],
+    "trace_closure": [
+      "D-RULE-003",
+      "S-PLAN-003",
+      "S-SUB-001"
+    ]
+  }
+]

@@ -1,0 +1,22 @@
+{
+  "creator": {"id": "maya-chen", "name": "Maya Chen", "bio": "Career educator and resume coach"},
+  "product": {
+    "id": "signal-resume-review",
+    "name": "Signal Resume Review",
+    "version": "1.0.0",
+    "description": "Evidence-first resume review using Maya Chen's Signal method.",
+    "promise": "Inspect a real resume and supplied evidence, then produce a usable evidence review in Maya's method.",
+    "boundaries": ["Does not guarantee an interview, offer, or job outcome.", "Does not invent metrics, employers, responsibilities, or achievements."],
+    "price_minor": 3900,
+    "currency": "USD",
+    "pricing_model": "per_delivery",
+    "pricing_unit": "review",
+    "supported_local_capabilities": ["fs.list", "fs.read", "fs.write"]
+  },
+  "documents": [
+    {"source_id": "course-notes", "path": "sources/course-notes.md", "kind": "course_notes", "title": "Signal Method course notes", "authority": "Maya-authored teaching material"},
+    {"source_id": "rubric", "path": "sources/rubric.md", "kind": "rubric", "title": "Signal Resume Review rubric", "authority": "Maya-authored scoring rubric"},
+    {"source_id": "annotated-examples", "path": "sources/annotated-examples.md", "kind": "annotated_examples", "title": "Annotated resume examples", "authority": "Synthetic resumes with Maya-authored annotations"},
+    {"source_id": "prior-feedback", "path": "sources/prior-feedback.md", "kind": "prior_feedback", "title": "Prior client feedback excerpts", "authority": "De-identified synthetic feedback written in Maya's method"}
+  ]
+}

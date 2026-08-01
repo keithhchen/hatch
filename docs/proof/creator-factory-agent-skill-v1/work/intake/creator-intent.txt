@@ -1,0 +1,1 @@
+Turn Maya Chen's existing resume course and review examples into a $39-per-review agent that reviews a user's resume against a target role and produces an evidence-grounded revision plan and usable rewrites.

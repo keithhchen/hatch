@@ -1,0 +1,124 @@
+{
+  "kind": "hatch-v1-connected-run",
+  "identities": {
+    "creator_id": "maya-chen",
+    "product_id": "signal-resume-review",
+    "release_id": "signal-resume-review@1.0.0",
+    "release_digest": "sha256:9e0774372375f0caf1b132de259f0a2087e544d968cab3e8958945d68e7ee7a5",
+    "order_id": "order_connected_5c894980e9aa9c7c",
+    "entitlement_id": "entitlement_connected_5c894980e9aa9c7c",
+    "task_id": "task_8d5ea9fc8cbfbf34016ad0f1",
+    "artifact_id": "artifact_8edafa77af41bd6c66661bf7",
+    "artifact_digest": "sha256:a0041da45867819827a1b9d250e87298e1ba6ab1a39b773d060ecacedce1c019",
+    "delivery_id": "delivery_8edafa77af41bd6c66661bf7",
+    "recognition_id": "recognition_delivery_8edafa77af41bd6c66661bf7"
+  },
+  "factory": {
+    "semantic_candidate_pass_rate": 1,
+    "generic_baseline_pass_rate": 0.25,
+    "strict_delta": 0.75,
+    "runtime_mechanics_passed": true
+  },
+  "consumer": {
+    "artifact_path": "signal-resume-review.md",
+    "artifact_bytes": 6153,
+    "local_tool_requests": [
+      "fs.list",
+      "fs.read",
+      "fs.read",
+      "fs.read",
+      "fs.read",
+      "fs.read",
+      "fs.read",
+      "fs.read",
+      "fs.read",
+      "fs.read",
+      "fs.read",
+      "fs.read",
+      "fs.read",
+      "fs.read",
+      "fs.write"
+    ],
+    "retry_invariants": {
+      "local_tool_requests": [],
+      "restart_short_circuits_tools": true,
+      "restart_preserves_file": true,
+      "restart_returns_same_receipt": true
+    }
+  },
+  "commerce": {
+    "event_order": [
+      "order.placed",
+      "entitlement.granted",
+      "task.started",
+      "artifact.created",
+      "delivery.completed",
+      "revenue.recognized"
+    ],
+    "gross_minor": 3900,
+    "creator_share_minor": 3510,
+    "hatch_share_minor": 390,
+    "currency": "USD"
+  },
+  "creator_dashboard": {
+    "published_at": "2026-08-01T00:01:57.980214Z",
+    "metrics": {
+      "orders": 1,
+      "successful_deliveries": 1,
+      "gross_minor": 3900,
+      "creator_share_minor": 3510,
+      "hatch_share_minor": 390
+    },
+    "orders": [
+      {
+        "order_id": "order_connected_5c894980e9aa9c7c",
+        "product_id": "signal-resume-review",
+        "buyer_display_name": "Jordan Lee",
+        "product_name": "Signal Resume Review",
+        "gross_minor": 3900,
+        "currency": "USD",
+        "status": "delivered",
+        "creator_share_minor": 3510,
+        "hatch_share_minor": 390,
+        "occurred_at": "2026-08-01T00:04:15.003Z",
+        "release_id": "signal-resume-review@1.0.0",
+        "release_digest": "sha256:9e0774372375f0caf1b132de259f0a2087e544d968cab3e8958945d68e7ee7a5",
+        "entitlement_id": "entitlement_connected_5c894980e9aa9c7c",
+        "task_id": "task_8d5ea9fc8cbfbf34016ad0f1",
+        "artifact_id": "artifact_8edafa77af41bd6c66661bf7",
+        "artifact_digest": "sha256:a0041da45867819827a1b9d250e87298e1ba6ab1a39b773d060ecacedce1c019",
+        "delivery_id": "delivery_8edafa77af41bd6c66661bf7",
+        "recognition_id": "recognition_delivery_8edafa77af41bd6c66661bf7"
+      }
+    ]
+  },
+  "registry": {
+    "status": "published",
+    "published_at": "2026-08-01T00:01:57.980214Z",
+    "release_id": "signal-resume-review@1.0.0",
+    "release_digest": "sha256:9e0774372375f0caf1b132de259f0a2087e544d968cab3e8958945d68e7ee7a5"
+  },
+  "identity_checks": {
+    "release_matches_factory_verification": true,
+    "runtime_matches_release": true,
+    "comparison_matches_release": true,
+    "workflow_passed": true,
+    "workflow_matches_release": true,
+    "workflow_matches_identity_chain": true,
+    "entitlement_links_order": true,
+    "task_links_entitlement_and_order": true,
+    "artifact_links_task": true,
+    "delivery_links_artifact_and_task": true,
+    "revenue_links_delivery_and_order": true,
+    "local_artifact_matches_ledger": true,
+    "local_execution_is_real": true,
+    "retry_is_idempotent": true,
+    "split_is_90_10": true,
+    "dashboard_publish_matches_release": true,
+    "registry_publish_matches_release": true,
+    "dashboard_publish_matches_registry": true,
+    "workflow_registry_matches_publish": true,
+    "registry_publish_precedes_purchase": true
+  },
+  "passed": true
+}

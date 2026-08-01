@@ -1,0 +1,362 @@
+[
+  {
+    "chunk_id": "doc-001:000",
+    "document_id": "doc-001",
+    "provenance": {
+      "locations": [
+        "course/00-course-welcome.txt"
+      ],
+      "source_kind": "text",
+      "source_sha256": "5671d740b8e2ac93a6a3544499995bdcce4b0d8c04d25f21762ad4a27ce177c0"
+    },
+    "text": "The examples use altered names and company details. They are teaching material, not claims about my clients or placement outcomes. I do not promise interviews or offers. The work ends with a stronger, supportable resume and a short list of evidence the candidate still needs to recover."
+  },
+  {
+    "chunk_id": "doc-002:000",
+    "document_id": "doc-002",
+    "provenance": {
+      "locations": [
+        "course/01-lesson-signal-before-language.md"
+      ],
+      "source_kind": "text",
+      "source_sha256": "0f9535030ec36b272cd7b94fa74e27a6349880a720795f9a170844cd6349b475"
+    },
+    "text": "I group the role into three or four capabilities and then look for evidence that the candidate has already carried one of those burdens."
+  },
+  {
+    "chunk_id": "doc-002:001",
+    "document_id": "doc-002",
+    "provenance": {
+      "locations": [
+        "course/01-lesson-signal-before-language.md"
+      ],
+      "source_kind": "text",
+      "source_sha256": "0f9535030ec36b272cd7b94fa74e27a6349880a720795f9a170844cd6349b475"
+    },
+    "text": "A bullet is not strong because it contains a metric. It is strong when the reader can see a credible chain: the candidate owned a meaningful decision or action, the action changed something observable, and that change matters to the target capability."
+  },
+  {
+    "chunk_id": "doc-002:002",
+    "document_id": "doc-002",
+    "provenance": {
+      "locations": [
+        "course/01-lesson-signal-before-language.md"
+      ],
+      "source_kind": "text",
+      "source_sha256": "0f9535030ec36b272cd7b94fa74e27a6349880a720795f9a170844cd6349b475"
+    },
+    "text": "First decide what the employer needs to believe. Then test the resume for evidence."
+  },
+  {
+    "chunk_id": "doc-002:003",
+    "document_id": "doc-002",
+    "provenance": {
+      "locations": [
+        "course/01-lesson-signal-before-language.md"
+      ],
+      "source_kind": "text",
+      "source_sha256": "0f9535030ec36b272cd7b94fa74e27a6349880a720795f9a170844cd6349b475"
+    },
+    "text": "I cut adjectives that merely announce quality — strategic, innovative, world-class, highly successful. I cut long technology inventories unless the target role rewards that specific depth. I cut background clauses that make the reader wait for the candidate's contribution."
+  },
+  {
+    "chunk_id": "doc-003:000",
+    "document_id": "doc-003",
+    "provenance": {
+      "locations": [
+        "course/02-lesson-ownership-and-evidence.md"
+      ],
+      "source_kind": "text",
+      "source_sha256": "0a2585983afd99378f957dfb55ebd2902ef1ccf3f0e2974bcfd01d0e725073f8"
+    },
+    "text": "Before using it as the candidate's result, ask what decision they made, which workstream they directly owned, who else was involved, and what would have happened without their work."
+  },
+  {
+    "chunk_id": "doc-003:001",
+    "document_id": "doc-003",
+    "provenance": {
+      "locations": [
+        "course/02-lesson-ownership-and-evidence.md"
+      ],
+      "source_kind": "text",
+      "source_sha256": "0a2585983afd99378f957dfb55ebd2902ef1ccf3f0e2974bcfd01d0e725073f8"
+    },
+    "text": "Second, the result is real but ownership is partial. Keep the team outcome, narrow the verb, and name the candidate's contribution."
+  },
+  {
+    "chunk_id": "doc-003:002",
+    "document_id": "doc-003",
+    "provenance": {
+      "locations": [
+        "course/02-lesson-ownership-and-evidence.md"
+      ],
+      "source_kind": "text",
+      "source_sha256": "0a2585983afd99378f957dfb55ebd2902ef1ccf3f0e2974bcfd01d0e725073f8"
+    },
+    "text": "Third, the candidate remembers a result but cannot verify it. Do not publish the number as fact. Remove it from the proposed bullet for now, but preserve it in an evidence-gap list with the exact question and likely source."
+  },
+  {
+    "chunk_id": "doc-003:003",
+    "document_id": "doc-003",
+    "provenance": {
+      "locations": [
+        "course/02-lesson-ownership-and-evidence.md"
+      ],
+      "source_kind": "text",
+      "source_sha256": "0a2585983afd99378f957dfb55ebd2902ef1ccf3f0e2974bcfd01d0e725073f8"
+    },
+    "text": "Conflicting numbers are a separate warning. Do not average them, choose the larger one, or quietly pick the newest deck. Show the conflict and ask which source controlled the business decision at the time. If no answer is available, rewrite around the observable change without the disputed number."
+  },
+  {
+    "chunk_id": "doc-004:000",
+    "document_id": "doc-004",
+    "provenance": {
+      "locations": [
+        "course/03-workshop-notes.md"
+      ],
+      "source_kind": "text",
+      "source_sha256": "11e6e5934f1114454972a536057b735cab1430ebd214a6abe513488a2c764c8c"
+    },
+    "text": "She asked for a smaller claim that could survive a reference check."
+  },
+  {
+    "chunk_id": "doc-004:001",
+    "document_id": "doc-004",
+    "provenance": {
+      "locations": [
+        "course/03-workshop-notes.md"
+      ],
+      "source_kind": "text",
+      "source_sha256": "11e6e5934f1114454972a536057b735cab1430ebd214a6abe513488a2c764c8c"
+    },
+    "text": "If the answer changes halfway through the sentence, split the sentence."
+  },
+  {
+    "chunk_id": "doc-004:002",
+    "document_id": "doc-004",
+    "provenance": {
+      "locations": [
+        "course/03-workshop-notes.md"
+      ],
+      "source_kind": "text",
+      "source_sha256": "11e6e5934f1114454972a536057b735cab1430ebd214a6abe513488a2c764c8c"
+    },
+    "text": "Positioning is selection and emphasis, not fictional promotion."
+  },
+  {
+    "chunk_id": "doc-005:000",
+    "document_id": "doc-005",
+    "provenance": {
+      "locations": [
+        "course/04-video-lesson.mp4#t=11.5,51.5"
+      ],
+      "source_kind": "video",
+      "source_sha256": "6159264643dbf0deaba650f7d3577b6726be40071447cc6660533c2a4a5c8082"
+    },
+    "text": "Read the job context first. Then create an evidence ledger: claimed action, ownership, result, source, and relevance to the target. Empty cells are questions, not permission to invent."
+  },
+  {
+    "chunk_id": "doc-005:001",
+    "document_id": "doc-005",
+    "provenance": {
+      "locations": [
+        "course/04-video-lesson.mp4#t=11.5,51.5"
+      ],
+      "source_kind": "video",
+      "source_sha256": "6159264643dbf0deaba650f7d3577b6726be40071447cc6660533c2a4a5c8082"
+    },
+    "text": "Only after that do we rewrite. A rewrite should make the strongest supported signal easier to see. It should not make the claim larger than the evidence."
+  },
+  {
+    "chunk_id": "doc-005:002",
+    "document_id": "doc-005",
+    "provenance": {
+      "locations": [
+        "course/04-video-lesson.mp4#t=11.5,51.5"
+      ],
+      "source_kind": "video",
+      "source_sha256": "6159264643dbf0deaba650f7d3577b6726be40071447cc6660533c2a4a5c8082"
+    },
+    "text": "At the end, separate the document from the research backlog. The resume gets only defensible claims. The evidence-gap list keeps promising but unresolved leads and the next verification question."
+  },
+  {
+    "chunk_id": "doc-006:000",
+    "document_id": "doc-006",
+    "provenance": {
+      "locations": [
+        "course/05-office-hours-faq.txt"
+      ],
+      "source_kind": "text",
+      "source_sha256": "52d484d9c684c15e47507e54835422a9877db1c5fcc3e4743dd275171ed7e5fc"
+    },
+    "text": "No. I can test whether the resume presents evidence for a target the candidate has chosen. Career choice needs a different conversation."
+  },
+  {
+    "chunk_id": "doc-006:001",
+    "document_id": "doc-006",
+    "provenance": {
+      "locations": [
+        "course/05-office-hours-faq.txt"
+      ],
+      "source_kind": "text",
+      "source_sha256": "52d484d9c684c15e47507e54835422a9877db1c5fcc3e4743dd275171ed7e5fc"
+    },
+    "text": "No. Hiring outcomes depend on the market, role, timing, network, screening process, and many things outside the document. The deliverable is a defensible resume and an evidence-recovery plan."
+  },
+  {
+    "chunk_id": "doc-006:002",
+    "document_id": "doc-006",
+    "provenance": {
+      "locations": [
+        "course/05-office-hours-faq.txt"
+      ],
+      "source_kind": "text",
+      "source_sha256": "52d484d9c684c15e47507e54835422a9877db1c5fcc3e4743dd275171ed7e5fc"
+    },
+    "text": "State the working interpretation of the role, show which clues support it, and label the uncertainty. Do not pretend the target is precise. Ask the user for a recruiter note or another comparable posting if the ambiguity changes what should be emphasized."
+  },
+  {
+    "chunk_id": "doc-006:003",
+    "document_id": "doc-006",
+    "provenance": {
+      "locations": [
+        "course/05-office-hours-faq.txt"
+      ],
+      "source_kind": "text",
+      "source_sha256": "52d484d9c684c15e47507e54835422a9877db1c5fcc3e4743dd275171ed7e5fc"
+    },
+    "text": "Do not expose confidential information. Use an approved range, an observable operational result, or a description of the decision and mechanism. Ask the user what can be shared."
+  },
+  {
+    "chunk_id": "doc-006:004",
+    "document_id": "doc-006",
+    "provenance": {
+      "locations": [
+        "course/05-office-hours-faq.txt"
+      ],
+      "source_kind": "text",
+      "source_sha256": "52d484d9c684c15e47507e54835422a9877db1c5fcc3e4743dd275171ed7e5fc"
+    },
+    "text": "Never. A title is context, not evidence of a specific action or result."
+  },
+  {
+    "chunk_id": "doc-007:000",
+    "document_id": "doc-007",
+    "provenance": {
+      "locations": [
+        "course/evidence-workbook.pdf#page=1"
+      ],
+      "source_kind": "pdf",
+      "source_sha256": "28d0f22c6ade82d7dca03d1b237a928f72f860b4537c17ebc298b9ab3cd3dd2e"
+    },
+    "text": "What must the person in this role make true? Write the capability in plain language, not copied keywords."
+  },
+  {
+    "chunk_id": "doc-007:001",
+    "document_id": "doc-007",
+    "provenance": {
+      "locations": [
+        "course/evidence-workbook.pdf#page=1"
+      ],
+      "source_kind": "pdf",
+      "source_sha256": "28d0f22c6ade82d7dca03d1b237a928f72f860b4537c17ebc298b9ab3cd3dd2e"
+    },
+    "text": "What decision, mechanism, or workstream did the candidate directly own? If ownership was shared, name the candidate's narrower contribution."
+  },
+  {
+    "chunk_id": "doc-007:002",
+    "document_id": "doc-007",
+    "provenance": {
+      "locations": [
+        "course/evidence-workbook.pdf#page=1"
+      ],
+      "source_kind": "pdf",
+      "source_sha256": "28d0f22c6ade82d7dca03d1b237a928f72f860b4537c17ebc298b9ab3cd3dd2e"
+    },
+    "text": "What changed? A supported number is useful but not required. Adoption, a passed gate, a stopped launch, a changed operating decision, or a durable process can be evidence."
+  },
+  {
+    "chunk_id": "doc-007:003",
+    "document_id": "doc-007",
+    "provenance": {
+      "locations": [
+        "course/evidence-workbook.pdf#page=1"
+      ],
+      "source_kind": "pdf",
+      "source_sha256": "28d0f22c6ade82d7dca03d1b237a928f72f860b4537c17ebc298b9ab3cd3dd2e"
+    },
+    "text": "Where could a skeptical reader verify each clause? Note conflicting sources instead of resolving them by preference. Titles and fluent wording are not evidence."
+  },
+  {
+    "chunk_id": "doc-007:004",
+    "document_id": "doc-007",
+    "provenance": {
+      "locations": [
+        "course/evidence-workbook.pdf#page=1"
+      ],
+      "source_kind": "pdf",
+      "source_sha256": "28d0f22c6ade82d7dca03d1b237a928f72f860b4537c17ebc298b9ab3cd3dd2e"
+    },
+    "text": "KEEP — supported and relevant. NARROW — real outcome, partial ownership. VERIFY — promising lead, not safe to publish yet. CUT — true perhaps, but weak, generic, redundant, or irrelevant for this target."
+  },
+  {
+    "chunk_id": "doc-007:005",
+    "document_id": "doc-007",
+    "provenance": {
+      "locations": [
+        "course/evidence-workbook.pdf#page=1"
+      ],
+      "source_kind": "pdf",
+      "source_sha256": "28d0f22c6ade82d7dca03d1b237a928f72f860b4537c17ebc298b9ab3cd3dd2e"
+    },
+    "text": "The workbook is not a scoring calculator. Maya changes emphasis based on the target and evidence available."
+  },
+  {
+    "chunk_id": "doc-008:000",
+    "document_id": "doc-008",
+    "provenance": {
+      "locations": [
+        "prior-work/review-a.md"
+      ],
+      "source_kind": "text",
+      "source_sha256": "de702a3c529badbeb435bd0e22e366a0abc9e91316e83090ef1d4237acdd7b15"
+    },
+    "text": "The useful signal for this target is not “global.” It is that Jordan created a measurement system and a repeatable experiment other teams could operate."
+  },
+  {
+    "chunk_id": "doc-008:001",
+    "document_id": "doc-008",
+    "provenance": {
+      "locations": [
+        "prior-work/review-a.md"
+      ],
+      "source_kind": "text",
+      "source_sha256": "de702a3c529badbeb435bd0e22e366a0abc9e91316e83090ef1d4237acdd7b15"
+    },
+    "text": "Confirm the activation baseline and source of record with Analytics. If confirmed, add the supported change; otherwise keep the adoption and measurement outcome."
+  },
+  {
+    "chunk_id": "doc-009:000",
+    "document_id": "doc-009",
+    "provenance": {
+      "locations": [
+        "prior-work/review-b.md"
+      ],
+      "source_kind": "text",
+      "source_sha256": "7a4a55dcf8141cad6db66935f41182322cbd77a8f4b8aef2a87641e4aaa44ddf"
+    },
+    "text": "The important detail is that Priya had decision authority at the readiness gate and built a control that the organization kept using. Do not apologize for the absence of a revenue metric."
+  },
+  {
+    "chunk_id": "doc-009:001",
+    "document_id": "doc-009",
+    "provenance": {
+      "locations": [
+        "prior-work/review-b.md"
+      ],
+      "source_kind": "text",
+      "source_sha256": "7a4a55dcf8141cad6db66935f41182322cbd77a8f4b8aef2a87641e4aaa44ddf"
+    },
+    "text": "If Priya cannot share the count, remove “two” and keep the observable decision. Do not replace confidential evidence with a guessed range."
+  }
+]

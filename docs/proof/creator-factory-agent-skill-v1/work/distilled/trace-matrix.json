@@ -1,0 +1,894 @@
+[
+  {
+    "artifact_id": "S-WELCOME-001",
+    "direct_supports": [
+      "S-WELCOME-001"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-WELCOME-001"
+    ],
+    "source_locations": [
+      "course/00-course-welcome.txt"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-WELCOME-002",
+    "direct_supports": [
+      "S-WELCOME-002"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-WELCOME-002"
+    ],
+    "source_locations": [
+      "course/00-course-welcome.txt"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-SIGNAL-001",
+    "direct_supports": [
+      "S-SIGNAL-001"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-SIGNAL-001"
+    ],
+    "source_locations": [
+      "course/01-lesson-signal-before-language.md"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-SIGNAL-002",
+    "direct_supports": [
+      "S-SIGNAL-002"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-SIGNAL-002"
+    ],
+    "source_locations": [
+      "course/01-lesson-signal-before-language.md"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-SIGNAL-003",
+    "direct_supports": [
+      "S-SIGNAL-003"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-SIGNAL-003"
+    ],
+    "source_locations": [
+      "course/01-lesson-signal-before-language.md"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-SIGNAL-004",
+    "direct_supports": [
+      "S-SIGNAL-004"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-SIGNAL-004"
+    ],
+    "source_locations": [
+      "course/01-lesson-signal-before-language.md"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-OWNERSHIP-001",
+    "direct_supports": [
+      "S-OWNERSHIP-001"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-OWNERSHIP-001"
+    ],
+    "source_locations": [
+      "course/02-lesson-ownership-and-evidence.md"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-OWNERSHIP-002",
+    "direct_supports": [
+      "S-OWNERSHIP-002"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-OWNERSHIP-002"
+    ],
+    "source_locations": [
+      "course/02-lesson-ownership-and-evidence.md"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-OWNERSHIP-003",
+    "direct_supports": [
+      "S-OWNERSHIP-003"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-OWNERSHIP-003"
+    ],
+    "source_locations": [
+      "course/02-lesson-ownership-and-evidence.md"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-OWNERSHIP-004",
+    "direct_supports": [
+      "S-OWNERSHIP-004"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-OWNERSHIP-004"
+    ],
+    "source_locations": [
+      "course/02-lesson-ownership-and-evidence.md"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-OWNERSHIP-005",
+    "direct_supports": [
+      "S-OWNERSHIP-005"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-OWNERSHIP-005"
+    ],
+    "source_locations": [
+      "course/02-lesson-ownership-and-evidence.md"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-WORKSHOP-001",
+    "direct_supports": [
+      "S-WORKSHOP-001"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-WORKSHOP-001"
+    ],
+    "source_locations": [
+      "course/03-workshop-notes.md"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-WORKSHOP-002",
+    "direct_supports": [
+      "S-WORKSHOP-002"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-WORKSHOP-002"
+    ],
+    "source_locations": [
+      "course/03-workshop-notes.md"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-WORKSHOP-003",
+    "direct_supports": [
+      "S-WORKSHOP-003"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-WORKSHOP-003"
+    ],
+    "source_locations": [
+      "course/03-workshop-notes.md"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-WORKSHOP-004",
+    "direct_supports": [
+      "S-WORKSHOP-004"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-WORKSHOP-004"
+    ],
+    "source_locations": [
+      "course/03-workshop-notes.md"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-VIDEO-001",
+    "direct_supports": [
+      "S-VIDEO-001"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-VIDEO-001"
+    ],
+    "source_locations": [
+      "course/04-video-lesson.mp4#t=11.5,51.5"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-VIDEO-002",
+    "direct_supports": [
+      "S-VIDEO-002"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-VIDEO-002"
+    ],
+    "source_locations": [
+      "course/04-video-lesson.mp4#t=11.5,51.5"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-VIDEO-003",
+    "direct_supports": [
+      "S-VIDEO-003"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-VIDEO-003"
+    ],
+    "source_locations": [
+      "course/04-video-lesson.mp4#t=11.5,51.5"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-FAQ-001",
+    "direct_supports": [
+      "S-FAQ-001"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-FAQ-001"
+    ],
+    "source_locations": [
+      "course/05-office-hours-faq.txt"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-FAQ-002",
+    "direct_supports": [
+      "S-FAQ-002"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-FAQ-002"
+    ],
+    "source_locations": [
+      "course/05-office-hours-faq.txt"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-FAQ-003",
+    "direct_supports": [
+      "S-FAQ-003"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-FAQ-003"
+    ],
+    "source_locations": [
+      "course/05-office-hours-faq.txt"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-FAQ-004",
+    "direct_supports": [
+      "S-FAQ-004"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-FAQ-004"
+    ],
+    "source_locations": [
+      "course/05-office-hours-faq.txt"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-FAQ-005",
+    "direct_supports": [
+      "S-FAQ-005"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-FAQ-005"
+    ],
+    "source_locations": [
+      "course/05-office-hours-faq.txt"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-WORKBOOK-001",
+    "direct_supports": [
+      "S-WORKBOOK-001"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-WORKBOOK-001"
+    ],
+    "source_locations": [
+      "course/evidence-workbook.pdf#page=1"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-WORKBOOK-002",
+    "direct_supports": [
+      "S-WORKBOOK-002"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-WORKBOOK-002"
+    ],
+    "source_locations": [
+      "course/evidence-workbook.pdf#page=1"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-WORKBOOK-003",
+    "direct_supports": [
+      "S-WORKBOOK-003"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-WORKBOOK-003"
+    ],
+    "source_locations": [
+      "course/evidence-workbook.pdf#page=1"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-WORKBOOK-004",
+    "direct_supports": [
+      "S-WORKBOOK-004"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-WORKBOOK-004"
+    ],
+    "source_locations": [
+      "course/evidence-workbook.pdf#page=1"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-WORKBOOK-005",
+    "direct_supports": [
+      "S-WORKBOOK-005"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-WORKBOOK-005"
+    ],
+    "source_locations": [
+      "course/evidence-workbook.pdf#page=1"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-WORKBOOK-006",
+    "direct_supports": [
+      "S-WORKBOOK-006"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-WORKBOOK-006"
+    ],
+    "source_locations": [
+      "course/evidence-workbook.pdf#page=1"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-REVIEW-A-001",
+    "direct_supports": [
+      "S-REVIEW-A-001"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-REVIEW-A-001"
+    ],
+    "source_locations": [
+      "prior-work/review-a.md"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-REVIEW-A-002",
+    "direct_supports": [
+      "S-REVIEW-A-002"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-REVIEW-A-002"
+    ],
+    "source_locations": [
+      "prior-work/review-a.md"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-REVIEW-B-001",
+    "direct_supports": [
+      "S-REVIEW-B-001"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-REVIEW-B-001"
+    ],
+    "source_locations": [
+      "prior-work/review-b.md"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-REVIEW-B-002",
+    "direct_supports": [
+      "S-REVIEW-B-002"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-REVIEW-B-002"
+    ],
+    "source_locations": [
+      "prior-work/review-b.md"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "D-CONFLICT-CONFIDENTIALITY",
+    "direct_supports": [
+      "S-OWNERSHIP-004",
+      "S-FAQ-004",
+      "S-REVIEW-B-002"
+    ],
+    "epistemic_class": "derived_rule",
+    "source_fact_closure": [
+      "S-FAQ-004",
+      "S-OWNERSHIP-004",
+      "S-REVIEW-B-002"
+    ],
+    "source_locations": [
+      "course/02-lesson-ownership-and-evidence.md",
+      "course/05-office-hours-faq.txt",
+      "prior-work/review-b.md"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "D-DEFENSIBLE-OUTPUT",
+    "direct_supports": [
+      "S-VIDEO-003",
+      "S-OWNERSHIP-003"
+    ],
+    "epistemic_class": "derived_rule",
+    "source_fact_closure": [
+      "S-OWNERSHIP-003",
+      "S-VIDEO-003"
+    ],
+    "source_locations": [
+      "course/02-lesson-ownership-and-evidence.md",
+      "course/04-video-lesson.mp4#t=11.5,51.5"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "D-KEEP-NARROW-VERIFY-CUT",
+    "direct_supports": [
+      "S-WORKBOOK-005",
+      "S-OWNERSHIP-002",
+      "S-OWNERSHIP-003"
+    ],
+    "epistemic_class": "derived_rule",
+    "source_fact_closure": [
+      "S-OWNERSHIP-002",
+      "S-OWNERSHIP-003",
+      "S-WORKBOOK-005"
+    ],
+    "source_locations": [
+      "course/02-lesson-ownership-and-evidence.md",
+      "course/evidence-workbook.pdf#page=1"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "D-LEDGER-BEFORE-REWRITE",
+    "direct_supports": [
+      "S-VIDEO-001",
+      "S-WORKBOOK-004",
+      "S-WORKBOOK-003"
+    ],
+    "epistemic_class": "derived_rule",
+    "source_fact_closure": [
+      "S-VIDEO-001",
+      "S-WORKBOOK-003",
+      "S-WORKBOOK-004"
+    ],
+    "source_locations": [
+      "course/04-video-lesson.mp4#t=11.5,51.5",
+      "course/evidence-workbook.pdf#page=1"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "D-NO-SCOPE-INFLATION",
+    "direct_supports": [
+      "S-WORKSHOP-004",
+      "S-FAQ-005"
+    ],
+    "epistemic_class": "derived_rule",
+    "source_fact_closure": [
+      "S-FAQ-005",
+      "S-WORKSHOP-004"
+    ],
+    "source_locations": [
+      "course/03-workshop-notes.md",
+      "course/05-office-hours-faq.txt"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "D-REWRITE-SUPPORTED-SIGNAL",
+    "direct_supports": [
+      "S-VIDEO-002",
+      "S-WORKSHOP-003",
+      "S-SIGNAL-002"
+    ],
+    "epistemic_class": "derived_rule",
+    "source_fact_closure": [
+      "S-SIGNAL-002",
+      "S-VIDEO-002",
+      "S-WORKSHOP-003"
+    ],
+    "source_locations": [
+      "course/01-lesson-signal-before-language.md",
+      "course/03-workshop-notes.md",
+      "course/04-video-lesson.mp4#t=11.5,51.5"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "D-ROLE-UNCERTAINTY",
+    "direct_supports": [
+      "S-FAQ-003",
+      "S-SIGNAL-003"
+    ],
+    "epistemic_class": "derived_rule",
+    "source_fact_closure": [
+      "S-FAQ-003",
+      "S-SIGNAL-003"
+    ],
+    "source_locations": [
+      "course/01-lesson-signal-before-language.md",
+      "course/05-office-hours-faq.txt"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "D-TARGET-SIGNAL",
+    "direct_supports": [
+      "S-SIGNAL-001",
+      "S-WORKBOOK-001",
+      "S-SIGNAL-003"
+    ],
+    "epistemic_class": "derived_rule",
+    "source_fact_closure": [
+      "S-SIGNAL-001",
+      "S-SIGNAL-003",
+      "S-WORKBOOK-001"
+    ],
+    "source_locations": [
+      "course/01-lesson-signal-before-language.md",
+      "course/evidence-workbook.pdf#page=1"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "Q-DIRECT-001",
+    "direct_supports": [
+      "D-ROLE-UNCERTAINTY",
+      "D-TARGET-SIGNAL"
+    ],
+    "epistemic_class": "synthetic_expansion",
+    "source_fact_closure": [
+      "S-FAQ-003",
+      "S-SIGNAL-001",
+      "S-SIGNAL-003",
+      "S-WORKBOOK-001"
+    ],
+    "source_locations": [
+      "course/01-lesson-signal-before-language.md",
+      "course/05-office-hours-faq.txt",
+      "course/evidence-workbook.pdf#page=1"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "Q-DIRECT-002",
+    "direct_supports": [
+      "D-CONFLICT-CONFIDENTIALITY",
+      "D-DEFENSIBLE-OUTPUT"
+    ],
+    "epistemic_class": "synthetic_expansion",
+    "source_fact_closure": [
+      "S-FAQ-004",
+      "S-OWNERSHIP-003",
+      "S-OWNERSHIP-004",
+      "S-REVIEW-B-002",
+      "S-VIDEO-003"
+    ],
+    "source_locations": [
+      "course/02-lesson-ownership-and-evidence.md",
+      "course/04-video-lesson.mp4#t=11.5,51.5",
+      "course/05-office-hours-faq.txt",
+      "prior-work/review-b.md"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "Q-COMPOSED-001",
+    "direct_supports": [
+      "D-TARGET-SIGNAL",
+      "D-KEEP-NARROW-VERIFY-CUT",
+      "D-REWRITE-SUPPORTED-SIGNAL",
+      "D-DEFENSIBLE-OUTPUT"
+    ],
+    "epistemic_class": "synthetic_expansion",
+    "source_fact_closure": [
+      "S-OWNERSHIP-002",
+      "S-OWNERSHIP-003",
+      "S-SIGNAL-001",
+      "S-SIGNAL-002",
+      "S-SIGNAL-003",
+      "S-VIDEO-002",
+      "S-VIDEO-003",
+      "S-WORKBOOK-001",
+      "S-WORKBOOK-005",
+      "S-WORKSHOP-003"
+    ],
+    "source_locations": [
+      "course/01-lesson-signal-before-language.md",
+      "course/02-lesson-ownership-and-evidence.md",
+      "course/03-workshop-notes.md",
+      "course/04-video-lesson.mp4#t=11.5,51.5",
+      "course/evidence-workbook.pdf#page=1"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "Q-COMPOSED-002",
+    "direct_supports": [
+      "D-LEDGER-BEFORE-REWRITE",
+      "D-CONFLICT-CONFIDENTIALITY",
+      "D-REWRITE-SUPPORTED-SIGNAL",
+      "D-DEFENSIBLE-OUTPUT"
+    ],
+    "epistemic_class": "synthetic_expansion",
+    "source_fact_closure": [
+      "S-FAQ-004",
+      "S-OWNERSHIP-003",
+      "S-OWNERSHIP-004",
+      "S-REVIEW-B-002",
+      "S-SIGNAL-002",
+      "S-VIDEO-001",
+      "S-VIDEO-002",
+      "S-VIDEO-003",
+      "S-WORKBOOK-003",
+      "S-WORKBOOK-004",
+      "S-WORKSHOP-003"
+    ],
+    "source_locations": [
+      "course/01-lesson-signal-before-language.md",
+      "course/02-lesson-ownership-and-evidence.md",
+      "course/03-workshop-notes.md",
+      "course/04-video-lesson.mp4#t=11.5,51.5",
+      "course/05-office-hours-faq.txt",
+      "course/evidence-workbook.pdf#page=1",
+      "prior-work/review-b.md"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "Q-BOUNDARY-001",
+    "direct_supports": [
+      "S-FAQ-001",
+      "S-WELCOME-002"
+    ],
+    "epistemic_class": "synthetic_expansion",
+    "source_fact_closure": [
+      "S-FAQ-001",
+      "S-WELCOME-002"
+    ],
+    "source_locations": [
+      "course/00-course-welcome.txt",
+      "course/05-office-hours-faq.txt"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "Q-BOUNDARY-002",
+    "direct_supports": [
+      "D-NO-SCOPE-INFLATION",
+      "D-LEDGER-BEFORE-REWRITE",
+      "D-DEFENSIBLE-OUTPUT"
+    ],
+    "epistemic_class": "synthetic_expansion",
+    "source_fact_closure": [
+      "S-FAQ-005",
+      "S-OWNERSHIP-003",
+      "S-VIDEO-001",
+      "S-VIDEO-003",
+      "S-WORKBOOK-003",
+      "S-WORKBOOK-004",
+      "S-WORKSHOP-004"
+    ],
+    "source_locations": [
+      "course/02-lesson-ownership-and-evidence.md",
+      "course/03-workshop-notes.md",
+      "course/04-video-lesson.mp4#t=11.5,51.5",
+      "course/05-office-hours-faq.txt",
+      "course/evidence-workbook.pdf#page=1"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "Q-OOS-001",
+    "direct_supports": [
+      "S-FAQ-002",
+      "S-WELCOME-002"
+    ],
+    "epistemic_class": "synthetic_expansion",
+    "source_fact_closure": [
+      "S-FAQ-002",
+      "S-WELCOME-002"
+    ],
+    "source_locations": [
+      "course/00-course-welcome.txt",
+      "course/05-office-hours-faq.txt"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "Q-OOS-002",
+    "direct_supports": [
+      "S-FAQ-001",
+      "S-WELCOME-002"
+    ],
+    "epistemic_class": "synthetic_expansion",
+    "source_fact_closure": [
+      "S-FAQ-001",
+      "S-WELCOME-002"
+    ],
+    "source_locations": [
+      "course/00-course-welcome.txt",
+      "course/05-office-hours-faq.txt"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "H-BOUNDARY-001",
+    "direct_supports": [
+      "S-FAQ-001",
+      "D-ROLE-UNCERTAINTY",
+      "D-NO-SCOPE-INFLATION"
+    ],
+    "epistemic_class": "synthetic_expansion",
+    "source_fact_closure": [
+      "S-FAQ-001",
+      "S-FAQ-003",
+      "S-FAQ-005",
+      "S-SIGNAL-003",
+      "S-WORKSHOP-004"
+    ],
+    "source_locations": [
+      "course/01-lesson-signal-before-language.md",
+      "course/03-workshop-notes.md",
+      "course/05-office-hours-faq.txt"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "H-COMPOSED-001",
+    "direct_supports": [
+      "D-KEEP-NARROW-VERIFY-CUT",
+      "D-CONFLICT-CONFIDENTIALITY",
+      "D-REWRITE-SUPPORTED-SIGNAL",
+      "D-DEFENSIBLE-OUTPUT"
+    ],
+    "epistemic_class": "synthetic_expansion",
+    "source_fact_closure": [
+      "S-FAQ-004",
+      "S-OWNERSHIP-002",
+      "S-OWNERSHIP-003",
+      "S-OWNERSHIP-004",
+      "S-REVIEW-B-002",
+      "S-SIGNAL-002",
+      "S-VIDEO-002",
+      "S-VIDEO-003",
+      "S-WORKBOOK-005",
+      "S-WORKSHOP-003"
+    ],
+    "source_locations": [
+      "course/01-lesson-signal-before-language.md",
+      "course/02-lesson-ownership-and-evidence.md",
+      "course/03-workshop-notes.md",
+      "course/04-video-lesson.mp4#t=11.5,51.5",
+      "course/05-office-hours-faq.txt",
+      "course/evidence-workbook.pdf#page=1",
+      "prior-work/review-b.md"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "H-DIRECT-001",
+    "direct_supports": [
+      "D-TARGET-SIGNAL",
+      "D-LEDGER-BEFORE-REWRITE",
+      "D-KEEP-NARROW-VERIFY-CUT"
+    ],
+    "epistemic_class": "synthetic_expansion",
+    "source_fact_closure": [
+      "S-OWNERSHIP-002",
+      "S-OWNERSHIP-003",
+      "S-SIGNAL-001",
+      "S-SIGNAL-003",
+      "S-VIDEO-001",
+      "S-WORKBOOK-001",
+      "S-WORKBOOK-003",
+      "S-WORKBOOK-004",
+      "S-WORKBOOK-005"
+    ],
+    "source_locations": [
+      "course/01-lesson-signal-before-language.md",
+      "course/02-lesson-ownership-and-evidence.md",
+      "course/04-video-lesson.mp4#t=11.5,51.5",
+      "course/evidence-workbook.pdf#page=1"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "H-OOS-001",
+    "direct_supports": [
+      "S-FAQ-002",
+      "S-WELCOME-002",
+      "S-FAQ-001"
+    ],
+    "epistemic_class": "synthetic_expansion",
+    "source_fact_closure": [
+      "S-FAQ-001",
+      "S-FAQ-002",
+      "S-WELCOME-002"
+    ],
+    "source_locations": [
+      "course/00-course-welcome.txt",
+      "course/05-office-hours-faq.txt"
+    ],
+    "verified": true
+  }
+]

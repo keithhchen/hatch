@@ -1,0 +1,32 @@
+[
+  {
+    "answer": "No hiring outcome is promised. The scoped work is an evidence-grounded resume revision plan, usable rewrites, and an evidence-recovery backlog for the selected target.",
+    "category": "out_of_scope",
+    "epistemic_class": "synthetic_expansion",
+    "id": "Q-OOS-001",
+    "question": "Can this resume review ensure I receive interviews?",
+    "supports": [
+      "S-FAQ-002",
+      "S-WELCOME-001"
+    ],
+    "trace_closure": [
+      "S-FAQ-002",
+      "S-WELCOME-001"
+    ]
+  },
+  {
+    "answer": "Those decisions are outside the resume-review product. The nearest in-scope action is to review the resume against a target the Consumer chooses and save supportable revisions and evidence gaps.",
+    "category": "out_of_scope",
+    "epistemic_class": "synthetic_expansion",
+    "id": "Q-OOS-002",
+    "question": "Use my resume to select a career path and write a compensation-negotiation package.",
+    "supports": [
+      "S-FAQ-001",
+      "S-WELCOME-001"
+    ],
+    "trace_closure": [
+      "S-FAQ-001",
+      "S-WELCOME-001"
+    ]
+  }
+]

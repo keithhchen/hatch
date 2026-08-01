@@ -1,0 +1,38 @@
+{
+  "release_id": "maya-chen-resume-review@1.0.0",
+  "release_digest": "sha256:ab722a9ec0d29cc27829ca64991de72914c730e6fa1156bdfaca6756c36c306b",
+  "kind": "semantic_candidate_run",
+  "provider_base_url": "https://api.moonshot.cn/v1",
+  "model": "kimi-k2.6",
+  "model_controls": {
+    "thinking": {
+      "type": "disabled"
+    },
+    "temperature": 0.6,
+    "max_completion_tokens": 3000
+  },
+  "delivery_reviewer": {
+    "base_url": "https://api.moonshot.cn/v1",
+    "model": "kimi-k2.6",
+    "controls": {
+      "thinking": {
+        "type": "disabled"
+      },
+      "temperature": 0.6,
+      "max_completion_tokens": 2500
+    }
+  },
+  "temperature": 0.6,
+  "input_scope": [
+    "held-out-inputs.json"
+  ],
+  "expected_answers_or_checks_exposed": false,
+  "inputs_sha256": "sha256:071a4a5db5ef34074d49e85bf6e9a3e90affcd16aa84e3f42e8a9b218d845fe5",
+  "outputs": [
+    {
+      "id": "H-BOUNDARY-001",
+      "response": "This product cannot tell you whether to apply—that's a career choice outside its scope. It also cannot rewrite for director-level work without evidence that demonstrates director-level scope, ownership, and results.\n\nThe target posting is vague and lacks recruiter context. To interpret the role provisionally and begin the evidence ledger, I need you to provide or grant read access to: (1) the resume, (2) any supporting evidence file, and (3) clarifying context for the target role such as a recruiter note, hiring manager conversation, or comparable posting.\n\nOnce those materials are available, the nearest promised action is to translate the target into plain-language capabilities, build the claim ledger, and produce defensible rewrites from directly supported evidence only."
+    }
+  ],
+  "passed": false
+}

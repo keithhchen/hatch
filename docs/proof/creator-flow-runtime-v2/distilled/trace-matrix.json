@@ -1,0 +1,376 @@
+[
+  {
+    "artifact_id": "S-EXAMPLE-001",
+    "direct_supports": [
+      "S-EXAMPLE-001"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-EXAMPLE-001"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-EXAMPLE-002",
+    "direct_supports": [
+      "S-EXAMPLE-002"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-EXAMPLE-002"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-EXAMPLE-003",
+    "direct_supports": [
+      "S-EXAMPLE-003"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-EXAMPLE-003"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-COURSE-001",
+    "direct_supports": [
+      "S-COURSE-001"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-COURSE-001"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-COURSE-002",
+    "direct_supports": [
+      "S-COURSE-002"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-COURSE-002"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-COURSE-003",
+    "direct_supports": [
+      "S-COURSE-003"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-COURSE-003"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-COURSE-004",
+    "direct_supports": [
+      "S-COURSE-004"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-COURSE-004"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-COURSE-005",
+    "direct_supports": [
+      "S-COURSE-005"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-COURSE-005"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-FEEDBACK-001",
+    "direct_supports": [
+      "S-FEEDBACK-001"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-FEEDBACK-001"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-FEEDBACK-002",
+    "direct_supports": [
+      "S-FEEDBACK-002"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-FEEDBACK-002"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-FEEDBACK-003",
+    "direct_supports": [
+      "S-FEEDBACK-003"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-FEEDBACK-003"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-FEEDBACK-004",
+    "direct_supports": [
+      "S-FEEDBACK-004"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-FEEDBACK-004"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-RUBRIC-001",
+    "direct_supports": [
+      "S-RUBRIC-001"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-RUBRIC-001"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-RUBRIC-002",
+    "direct_supports": [
+      "S-RUBRIC-002"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-RUBRIC-002"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-RUBRIC-003",
+    "direct_supports": [
+      "S-RUBRIC-003"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-RUBRIC-003"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-RUBRIC-004",
+    "direct_supports": [
+      "S-RUBRIC-004"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-RUBRIC-004"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "S-RUBRIC-005",
+    "direct_supports": [
+      "S-RUBRIC-005"
+    ],
+    "epistemic_class": "source_fact",
+    "source_fact_closure": [
+      "S-RUBRIC-005"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "D-RULE-001",
+    "direct_supports": [
+      "S-COURSE-001",
+      "S-RUBRIC-001"
+    ],
+    "epistemic_class": "derived_rule",
+    "source_fact_closure": [
+      "S-COURSE-001",
+      "S-RUBRIC-001"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "D-RULE-002",
+    "direct_supports": [
+      "S-RUBRIC-002",
+      "S-RUBRIC-003"
+    ],
+    "epistemic_class": "derived_rule",
+    "source_fact_closure": [
+      "S-RUBRIC-002",
+      "S-RUBRIC-003"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "D-RULE-003",
+    "direct_supports": [
+      "S-COURSE-003",
+      "S-EXAMPLE-003"
+    ],
+    "epistemic_class": "derived_rule",
+    "source_fact_closure": [
+      "S-COURSE-003",
+      "S-EXAMPLE-003"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "D-RULE-004",
+    "direct_supports": [
+      "S-COURSE-004",
+      "S-RUBRIC-004",
+      "S-FEEDBACK-003"
+    ],
+    "epistemic_class": "derived_rule",
+    "source_fact_closure": [
+      "S-COURSE-004",
+      "S-FEEDBACK-003",
+      "S-RUBRIC-004"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "D-RULE-005",
+    "direct_supports": [
+      "S-COURSE-005",
+      "S-FEEDBACK-001"
+    ],
+    "epistemic_class": "derived_rule",
+    "source_fact_closure": [
+      "S-COURSE-005",
+      "S-FEEDBACK-001"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "D-RULE-006",
+    "direct_supports": [
+      "S-COURSE-003",
+      "S-RUBRIC-005",
+      "S-FEEDBACK-004"
+    ],
+    "epistemic_class": "derived_rule",
+    "source_fact_closure": [
+      "S-COURSE-003",
+      "S-FEEDBACK-004",
+      "S-RUBRIC-005"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "Q-DIRECT-001",
+    "direct_supports": [
+      "S-COURSE-001",
+      "S-COURSE-004"
+    ],
+    "epistemic_class": "synthetic_expansion",
+    "source_fact_closure": [
+      "S-COURSE-001",
+      "S-COURSE-004"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "Q-DIRECT-002",
+    "direct_supports": [
+      "S-RUBRIC-002"
+    ],
+    "epistemic_class": "synthetic_expansion",
+    "source_fact_closure": [
+      "S-RUBRIC-002"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "Q-COMPOSED-001",
+    "direct_supports": [
+      "D-RULE-002",
+      "D-RULE-003",
+      "S-FEEDBACK-001"
+    ],
+    "epistemic_class": "synthetic_expansion",
+    "source_fact_closure": [
+      "S-COURSE-003",
+      "S-EXAMPLE-003",
+      "S-FEEDBACK-001",
+      "S-RUBRIC-002",
+      "S-RUBRIC-003"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "Q-COMPOSED-002",
+    "direct_supports": [
+      "D-RULE-004",
+      "D-RULE-005"
+    ],
+    "epistemic_class": "synthetic_expansion",
+    "source_fact_closure": [
+      "S-COURSE-004",
+      "S-COURSE-005",
+      "S-FEEDBACK-001",
+      "S-FEEDBACK-003",
+      "S-RUBRIC-004"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "Q-BOUNDARY-001",
+    "direct_supports": [
+      "S-COURSE-003",
+      "D-RULE-003"
+    ],
+    "epistemic_class": "synthetic_expansion",
+    "source_fact_closure": [
+      "S-COURSE-003",
+      "S-EXAMPLE-003"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "Q-BOUNDARY-002",
+    "direct_supports": [
+      "S-RUBRIC-005"
+    ],
+    "epistemic_class": "synthetic_expansion",
+    "source_fact_closure": [
+      "S-RUBRIC-005"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "Q-OOS-001",
+    "direct_supports": [
+      "S-FEEDBACK-004"
+    ],
+    "epistemic_class": "synthetic_expansion",
+    "source_fact_closure": [
+      "S-FEEDBACK-004"
+    ],
+    "verified": true
+  },
+  {
+    "artifact_id": "Q-OOS-002",
+    "direct_supports": [
+      "S-FEEDBACK-004",
+      "S-RUBRIC-001"
+    ],
+    "epistemic_class": "synthetic_expansion",
+    "source_fact_closure": [
+      "S-FEEDBACK-004",
+      "S-RUBRIC-001"
+    ],
+    "verified": true
+  }
+]

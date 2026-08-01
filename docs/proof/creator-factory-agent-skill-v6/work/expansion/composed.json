@@ -1,0 +1,60 @@
+[
+  {
+    "answer": "Record expansion selection as not owned and retention as unverified. Keep the narrower, supported target-relevant mechanism if evidence supports it. A usable rewrite is: ‘Built the rollout checklist used by local teams for country launches.’ Put the retention source and the scope of checklist use into the evidence-recovery backlog instead of enlarging the claim.",
+    "category": "composed",
+    "epistemic_class": "synthetic_expansion",
+    "id": "Q-COMPOSED-001",
+    "question": "For a lifecycle role, a bullet says ‘Drove expansion into 10 countries and raised retention.’ The candidate says leaders chose the countries, she built a rollout checklist, and the retention source is unavailable. What should the saved plan and rewrite do?",
+    "supports": [
+      "D-TARGET",
+      "D-DECIDE",
+      "D-REWRITE",
+      "D-DELIVER"
+    ],
+    "trace_closure": [
+      "D-DECIDE",
+      "D-DELIVER",
+      "D-REWRITE",
+      "D-TARGET",
+      "S-OWN-002",
+      "S-OWN-003",
+      "S-SIGNAL-001",
+      "S-SIGNAL-002",
+      "S-VIDEO-002",
+      "S-VIDEO-003",
+      "S-WB-001",
+      "S-WB-005",
+      "S-WB-006",
+      "S-WORKSHOP-002"
+    ]
+  },
+  {
+    "answer": "Retain only supportable decision authority and checklist use, and omit the confidential metric. A usable rewrite is: ‘Established a launch gate and checklist used for subsequent partner launches.’ Ask what approved description can be shared and keep that as an evidence question, not resume copy.",
+    "category": "composed",
+    "epistemic_class": "synthetic_expansion",
+    "id": "Q-COMPOSED-002",
+    "question": "For a reliability role, the candidate owned a launch gate and teams kept using its checklist, but time-saved data is confidential. How should the review handle this?",
+    "supports": [
+      "D-LEDGER",
+      "D-CONFLICTS",
+      "D-REWRITE",
+      "D-DELIVER"
+    ],
+    "trace_closure": [
+      "D-CONFLICTS",
+      "D-DELIVER",
+      "D-LEDGER",
+      "D-REWRITE",
+      "S-FAQ-004",
+      "S-OWN-003",
+      "S-OWN-004",
+      "S-REVIEW-B-002",
+      "S-SIGNAL-002",
+      "S-VIDEO-001",
+      "S-VIDEO-002",
+      "S-VIDEO-003",
+      "S-WB-004",
+      "S-WORKSHOP-002"
+    ]
+  }
+]

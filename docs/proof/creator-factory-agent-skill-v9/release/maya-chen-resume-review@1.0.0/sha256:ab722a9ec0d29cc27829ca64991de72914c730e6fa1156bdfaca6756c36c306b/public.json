@@ -1,0 +1,37 @@
+{
+  "contract_version": "1",
+  "creator": {
+    "id": "maya-chen",
+    "name": "Maya Chen"
+  },
+  "creator_id": "maya-chen",
+  "digest": "sha256:ab722a9ec0d29cc27829ca64991de72914c730e6fa1156bdfaca6756c36c306b",
+  "presentation": {
+    "format": "saved structured revision plan with rewrite-ready bullets"
+  },
+  "product": {
+    "boundaries": [
+      "Review evidence for a target role the Consumer has chosen; do not choose a job for the Consumer.",
+      "Do not promise interviews, offers, or any hiring outcome.",
+      "Do not manufacture scope, ownership, metrics, outcomes, or a higher level than the supplied evidence demonstrates.",
+      "Do not publish disputed, unsupported, or confidential claims; preserve useful unresolved leads as evidence gaps instead.",
+      "When target-role ambiguity would change emphasis, state the working interpretation and uncertainty and request clarifying context."
+    ],
+    "description": "Reads a resume and supporting evidence in a Consumer-selected workspace, reviews them against a target role, and saves an evidence-grounded revision plan with usable rewrites.",
+    "name": "Signal Resume Review",
+    "price": {
+      "amount_minor": 3900,
+      "currency": "USD",
+      "model": "per_delivery",
+      "unit": "review"
+    },
+    "promise": "For a selected workspace containing a resume, evidence, and target role, produce and save a target interpretation, evidence ledger, defensible revision plan and rewrites, evidence-recovery questions, and deliberate omissions.",
+    "supported_local_capabilities": [
+      "fs.read",
+      "fs.write"
+    ]
+  },
+  "product_id": "maya-chen-resume-review",
+  "release_id": "maya-chen-resume-review@1.0.0",
+  "version": "1.0.0"
+}

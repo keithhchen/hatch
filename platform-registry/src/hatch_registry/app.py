@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from html import escape
+import os
+from pathlib import Path
+import secrets
+from typing import Annotated
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, Header, HTTPException, status
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
@@ -16,12 +20,31 @@ from hatch_registry.models import (
     LicenseVerifyRequest,
     ManifestSummary,
     SignedManifest,
+    CreatorReleasePublishRequest,
+    PublishedCreatorRelease,
 )
 from hatch_registry.store import RegistryStore
+from hatch_registry.release_resolver import ReleaseResolver, ReleaseVerificationError
 
 
-def create_app(store: RegistryStore | None = None) -> FastAPI:
-    registry_store = store or RegistryStore.seeded()
+def create_app(
+    store: RegistryStore | None = None,
+    publish_service_token: str | None = None,
+) -> FastAPI:
+    default_root = Path(__file__).resolve().parents[3] / "runtime-releases"
+    release_root = Path(os.environ.get("HATCH_CREATOR_RELEASE_ROOT", default_root))
+    configured_state_path = os.environ.get("HATCH_REGISTRY_STATE_PATH", "").strip()
+    state_path = Path(configured_state_path).expanduser() if configured_state_path else None
+    registry_store = store or RegistryStore.seeded(
+        release_resolver=ReleaseResolver(release_root),
+        state_path=state_path,
+    )
+    token_source = (
+        os.environ.get("HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN", "")
+        if publish_service_token is None
+        else publish_service_token
+    )
+    configured_publish_service_token = token_source.strip()
 
     api = FastAPI(
         title="Hatch Registry",
@@ -81,12 +104,12 @@ def create_app(store: RegistryStore | None = None) -> FastAPI:
             <section class="hero">
               <div>
                 <p class="eyebrow">Manifest distribution layer</p>
-                <h1>AI apps with creator-hosted runtime and user-owned local context.</h1>
-                <p class="lead">Hatch signs public manifests, manages installs and licenses, and keeps private skill logic out of the platform.</p>
+                <h1>Creator Agents with cloud execution and user-owned local context.</h1>
+                <p class="lead">Hatch signs public manifests, manages installs and licenses, and keeps private Creator logic inside the protected Runtime.</p>
               </div>
               <aside class="stats">
                 <div><strong>{len(items)}</strong><span>listed apps</span></div>
-                <div><strong>0.1</strong><span>protocol</span></div>
+                <div><strong>0.3</strong><span>protocol</span></div>
                 <div><strong>local</strong><span>filesystem owner</span></div>
               </aside>
             </section>
@@ -114,7 +137,7 @@ def create_app(store: RegistryStore | None = None) -> FastAPI:
             <div>
               <p class="eyebrow">Platform developer console</p>
               <h1>Submit a public app manifest</h1>
-              <p class="lead">The platform reviews and signs metadata only. Private skill instructions remain inside the creator runtime.</p>
+              <p class="lead">The platform reviews and signs metadata only. Private skill instructions remain inside the protected Runtime.</p>
             </div>
             <a class="ghost" href="/">Back to Store</a>
           </header>
@@ -136,7 +159,7 @@ def create_app(store: RegistryStore | None = None) -> FastAPI:
                 <span class="badge">platform-owned</span>
               </div>
               <ul class="checklist">
-                <li>Runtime endpoint is declared, not hosted by Platform.</li>
+                <li>The published Release resolves to the Hatch Runtime.</li>
                 <li>Permissions and local tools are visible before install.</li>
                 <li>License policy is signed with the manifest.</li>
                 <li>Skill source and hidden instructions are not submitted.</li>
@@ -158,8 +181,8 @@ def create_app(store: RegistryStore | None = None) -> FastAPI:
                 },
                 runtime: {
                   runtime_type: "remote_agent",
-                  websocket_url: "ws://127.0.0.1:8200/runtime",
-                  protocol_version: "0.1"
+                  websocket_url: "ws://127.0.0.1:8400/runtime",
+                  protocol_version: "0.3"
                 },
                 permissions: [
                   { key: "workspace.read", description: "Read synthetic files inside this app's local sandbox." },
@@ -242,7 +265,91 @@ def create_app(store: RegistryStore | None = None) -> FastAPI:
             )
         return registry_store.verify_license(request)
 
+    @api.post(
+        "/v1/creator/releases",
+        response_model=PublishedCreatorRelease,
+        status_code=status.HTTP_201_CREATED,
+    )
+    def publish_creator_release(
+        request: CreatorReleasePublishRequest,
+        authorization: Annotated[str | None, Header()] = None,
+        creator_id: Annotated[str | None, Header(alias="X-Hatch-Creator-Id")] = None,
+    ) -> PublishedCreatorRelease:
+        authenticated_creator_id = require_creator_publish_auth(
+            authorization,
+            creator_id,
+            configured_publish_service_token,
+        )
+        try:
+            return registry_store.publish_creator_release(
+                request,
+                creator_id=authenticated_creator_id,
+            )
+        except PermissionError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=str(exc),
+            ) from exc
+        except ReleaseVerificationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=str(exc),
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=str(exc),
+            ) from exc
+
+    @api.get(
+        "/v1/creator/{creator_id}/releases",
+        response_model=list[PublishedCreatorRelease],
+    )
+    def list_creator_releases(creator_id: str) -> list[PublishedCreatorRelease]:
+        return registry_store.list_creator_releases(creator_id)
+
+    @api.get(
+        "/v1/creator-releases/{release_id:path}",
+        response_model=PublishedCreatorRelease,
+    )
+    def get_creator_release(release_id: str) -> PublishedCreatorRelease:
+        release = registry_store.get_creator_release(release_id)
+        if release is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"creator release not found for release_id={release_id}",
+            )
+        return release
+
     return api
+
+
+def require_creator_publish_auth(
+    authorization: str | None,
+    creator_id: str | None,
+    configured_service_token: str,
+) -> str:
+    if not configured_service_token:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Creator Release publishing is not configured.",
+        )
+    scheme, _, supplied_token = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not supplied_token or not secrets.compare_digest(
+        supplied_token,
+        configured_service_token,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="A valid Registry publish service token is required.",
+        )
+    normalized_creator_id = (creator_id or "").strip()
+    if not normalized_creator_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="X-Hatch-Creator-Id is required.",
+        )
+    return normalized_creator_id
 
 
 app = create_app()

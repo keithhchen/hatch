@@ -1,0 +1,60 @@
+{
+  "gates": [
+    {
+      "evidence": "33 source facts have exact excerpts and source paths",
+      "id": "G01-source-trace",
+      "passed": true
+    },
+    {
+      "evidence": "8 derived rules have derivations and source closures",
+      "id": "G02-derived-trace",
+      "passed": true
+    },
+    {
+      "evidence": "all four QA categories are non-empty and separated",
+      "id": "G03-qa-separation",
+      "passed": true
+    },
+    {
+      "evidence": "synthetic answers contain no invented Creator authority patterns",
+      "id": "G04-no-invented-authority",
+      "passed": true
+    },
+    {
+      "evidence": "no positive synthetic answer guarantees an outcome",
+      "id": "G05-no-guarantees",
+      "passed": true
+    },
+    {
+      "evidence": "method preserves sequence, quality bar, omissions, and boundaries",
+      "id": "G06-method-fidelity",
+      "passed": true
+    },
+    {
+      "evidence": "public Runtime manifest is generated from client-safe identity and offer fields only",
+      "id": "G07-private-boundary",
+      "passed": true
+    },
+    {
+      "evidence": "capabilities are within the local workspace envelope",
+      "id": "G08-capability-policy",
+      "passed": true
+    },
+    {
+      "evidence": "4 release evals are separate from synthetic QA/few-shots and define observable checks",
+      "id": "G09-held-out-separation",
+      "passed": true
+    },
+    {
+      "evidence": "system prompt is 5594 chars; compression ratio 0.4358055468993456; first-person Creator voice matches []; duplicate normalized bullets 0",
+      "id": "G10-prompt-purification",
+      "passed": true
+    },
+    {
+      "evidence": "verified 3 private assets, Runtime digest, identity, and public/private boundary",
+      "id": "G11-package-integrity",
+      "passed": true
+    }
+  ],
+  "passed": true
+}

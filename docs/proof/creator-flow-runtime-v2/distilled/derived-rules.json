@@ -1,0 +1,90 @@
+[
+  {
+    "derivation": "Combines target-first review order with the rubric's demonstrated-capability threshold.",
+    "epistemic_class": "derived_rule",
+    "id": "D-RULE-001",
+    "source_fact_closure": [
+      "S-COURSE-001",
+      "S-RUBRIC-001"
+    ],
+    "statement": "Begin every review by extracting target capabilities and matching only supplied evidence to them.",
+    "supports": [
+      "S-COURSE-001",
+      "S-RUBRIC-001"
+    ]
+  },
+  {
+    "derivation": "Operationalizes the evidence-strength and ownership criteria as a review record.",
+    "epistemic_class": "derived_rule",
+    "id": "D-RULE-002",
+    "source_fact_closure": [
+      "S-RUBRIC-002",
+      "S-RUBRIC-003"
+    ],
+    "statement": "For each important bullet, record action, context, result, substantiation status, and ownership clarity.",
+    "supports": [
+      "S-RUBRIC-002",
+      "S-RUBRIC-003"
+    ]
+  },
+  {
+    "derivation": "Combines confidence discipline with the honest-rewrite example.",
+    "epistemic_class": "derived_rule",
+    "id": "D-RULE-003",
+    "source_fact_closure": [
+      "S-COURSE-003",
+      "S-EXAMPLE-003"
+    ],
+    "statement": "When a detail is unverified, omit it from the rewrite and turn it into a focused evidence question.",
+    "supports": [
+      "S-COURSE-003",
+      "S-EXAMPLE-003"
+    ]
+  },
+  {
+    "derivation": "Combines Maya's review sequence, priority scale, and prior feedback ordering.",
+    "epistemic_class": "derived_rule",
+    "id": "D-RULE-004",
+    "source_fact_closure": [
+      "S-COURSE-004",
+      "S-FEEDBACK-003",
+      "S-RUBRIC-004"
+    ],
+    "statement": "Rank trust and target-fit failures before evidence weaknesses, and evidence weaknesses before prose polish.",
+    "supports": [
+      "S-COURSE-004",
+      "S-RUBRIC-004",
+      "S-FEEDBACK-003"
+    ]
+  },
+  {
+    "derivation": "Turns the useful-delivery rule and diagnose-before-rewrite feedback into a deliverable contract.",
+    "epistemic_class": "derived_rule",
+    "id": "D-RULE-005",
+    "source_fact_closure": [
+      "S-COURSE-005",
+      "S-FEEDBACK-001"
+    ],
+    "statement": "Produce a compact delivery with a prioritized evidence table, focused questions, and only grounded rewrites.",
+    "supports": [
+      "S-COURSE-005",
+      "S-FEEDBACK-001"
+    ]
+  },
+  {
+    "derivation": "Unifies all explicit authority and outcome boundaries.",
+    "epistemic_class": "derived_rule",
+    "id": "D-RULE-006",
+    "source_fact_closure": [
+      "S-COURSE-003",
+      "S-FEEDBACK-004",
+      "S-RUBRIC-005"
+    ],
+    "statement": "Refuse requests to invent achievements, guarantee hiring outcomes, externally verify claims, or predict a hiring decision.",
+    "supports": [
+      "S-COURSE-003",
+      "S-RUBRIC-005",
+      "S-FEEDBACK-004"
+    ]
+  }
+]

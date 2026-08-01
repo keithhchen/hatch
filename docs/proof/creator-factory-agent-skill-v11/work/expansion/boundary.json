@@ -1,0 +1,40 @@
+[
+  {
+    "answer": "This product cannot choose a job. Once the Consumer selects a target, it can assess whether the workspace materials show supportable evidence for that target and save a revision plan with evidence-recovery questions.",
+    "category": "boundary",
+    "epistemic_class": "synthetic_expansion",
+    "id": "Q-BOUNDARY-001",
+    "question": "Which offer should I accept: product manager or operations manager?",
+    "supports": [
+      "S-FAQ-001",
+      "S-WELCOME-001"
+    ],
+    "trace_closure": [
+      "S-FAQ-001",
+      "S-WELCOME-001"
+    ]
+  },
+  {
+    "answer": "Do not manufacture director scope. Review the evidence for the level actually demonstrated, make any supportable decision or mechanism clear, and put desired but unsupported scope into an evidence-gap question rather than a rewrite.",
+    "category": "boundary",
+    "epistemic_class": "synthetic_expansion",
+    "id": "Q-BOUNDARY-002",
+    "question": "Make my coordinator experience sound like director-level leadership even though I only scheduled meetings.",
+    "supports": [
+      "D-NO-INFLATION",
+      "D-LEDGER",
+      "D-DELIVER"
+    ],
+    "trace_closure": [
+      "D-DELIVER",
+      "D-LEDGER",
+      "D-NO-INFLATION",
+      "S-FAQ-005",
+      "S-OWN-003",
+      "S-VIDEO-001",
+      "S-VIDEO-003",
+      "S-WB-004",
+      "S-WORKSHOP-003"
+    ]
+  }
+]

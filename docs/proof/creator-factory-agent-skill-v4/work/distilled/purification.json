@@ -1,0 +1,24 @@
+{
+  "authority_patterns_checked": [
+    "dynamic Creator-name authority patterns",
+    "\\bI (?:have|personally|verified|coached|seen)\\b",
+    "\\b(guarantee[sd]?|will definitely|certain to)\\b|一定(?:获得|达到|实现|拿到)"
+  ],
+  "declared_omissions": [
+    "Cut empty quality adjectives, non-rewarded technology inventories, and background clauses that delay the candidate contribution.",
+    "Cut claims that are weak, generic, redundant, or irrelevant for the selected target."
+  ],
+  "passed": true,
+  "policy": "Retain only attributable source facts, explicitly derived operational rules, declared omissions, and bounded synthetic expansion.",
+  "removed_or_forbidden": [
+    "unsupported Creator biography",
+    "invented personal experience",
+    "unsubstantiated outcome guarantees",
+    "uncited operational rules",
+    "surface-vocabulary imitation without method support"
+  ],
+  "retained": {
+    "derived_rules": 8,
+    "source_facts": 30
+  }
+}

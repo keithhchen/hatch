@@ -1,0 +1,21 @@
+{
+  "digest_algorithm": "sha256(canonical payload hashes; public identity excludes self-referential digest fields)",
+  "payload_files": {
+    "private/evals/development.json": "b3edad017be65e1c094acf3cfc8736774b91a7c1faa0d449e58706ce7725aab7",
+    "private/evals/release.json": "696dc5f1db12c10b38e446d37e0eeccc4d3458692f78263a6338edcf6ad6c9e0",
+    "private/few-shots.json": "cd6aed4be5b977869f62cbb2dba239de40b4624d7eb4b0b8c8b676cd2e87252d",
+    "private/qa/boundary.json": "dc13ba7b8bb58b95feeece57f2f29369571a1facd03f496d861a1b3a268e0163",
+    "private/qa/composed.json": "bf52402ea8e4f29eb7f92e0302a0a2e9e2ce7a65a8b507ff5a1b3c2b897c83a2",
+    "private/qa/direct.json": "c4c82877220f0fe29a99270c340ce0e73c7fde10c80f84075ea9693dc6d415f7",
+    "private/qa/out_of_scope.json": "090187dbc9914ad8c340944922f2b4e7c96b890a506c4512418ffab959d01d93",
+    "private/rag/chunks.json": "574da8051dbd51d61a7baaa75a00feb364a180bb0be10745d109ba9f10807963",
+    "private/rag/documents.json": "a806c09bf66e21514c92314db0a3f3d31812f195e0c24dad31eceb14f577ee2e",
+    "private/runtime-tool-policy.json": "4d372653253e4e8e27a9746f98b6a8a9c63ac32b7636e6ab86eecd6f27ea326f",
+    "private/skill/SKILL.md": "79a15d228412e26989a52920fea128f6e53101e4dfe69bb68c300f2ec6979040",
+    "private/skill/references/method-model.json": "9e03e5df84b59a48bead6b3d6a128668ec1f64f97def7cb7ff34779fa118aa45",
+    "private/system-prompt.md": "91e58123a26bf1a427681c0a1a4a304899199c4b1dbcb040593d4574fe7134b5",
+    "public/manifest.json": "c280412d9fd748cc4c2c6e8918311af1bdb3d3e2733b47234e9130f572b61a3b"
+  },
+  "release_digest": "2e1e25c613209b348d60871c9d850b253404b9a70abc439eb643c02d5bf9197e",
+  "release_id": "signal-resume-review@1.0.0+sha256.2e1e25c613209b34"
+}

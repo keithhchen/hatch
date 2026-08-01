@@ -1,0 +1,190 @@
+[
+  {
+    "epistemic_class": "source_fact",
+    "excerpt": "“Drove strategic transformation across the business” is weak because it names neither the candidate's action nor evidence that the transformation occurred.",
+    "id": "S-EXAMPLE-001",
+    "label": "Reject vague transformation language",
+    "priority": 7,
+    "role": "example",
+    "source_id": "annotated-examples",
+    "source_kind": "annotated_examples",
+    "source_path": "sources/annotated-examples.md"
+  },
+  {
+    "epistemic_class": "source_fact",
+    "excerpt": "“Mapped the support handoff, piloted a routing rule with two teams, and reduced verified median response time from 11 to 7 hours” is strong when the candidate's files substantiate the scope and measures.",
+    "id": "S-EXAMPLE-002",
+    "label": "Accept specific verified action and result",
+    "priority": 7,
+    "role": "example",
+    "source_id": "annotated-examples",
+    "source_kind": "annotated_examples",
+    "source_path": "sources/annotated-examples.md"
+  },
+  {
+    "epistemic_class": "source_fact",
+    "excerpt": "If the candidate confirms the action but not the result, retain the action and context, remove the unverified result, and flag the missing measurement as an evidence gap.",
+    "id": "S-EXAMPLE-003",
+    "label": "Remove unverified results while preserving facts",
+    "priority": 9,
+    "role": "boundary",
+    "source_id": "annotated-examples",
+    "source_kind": "annotated_examples",
+    "source_path": "sources/annotated-examples.md"
+  },
+  {
+    "epistemic_class": "source_fact",
+    "excerpt": "Read the target role and the candidate's evidence before judging prose; a polished bullet can still signal the wrong capability.",
+    "id": "S-COURSE-001",
+    "label": "Judge against supplied target and evidence",
+    "priority": 10,
+    "role": "priority",
+    "source_id": "course-notes",
+    "source_kind": "course_notes",
+    "source_path": "sources/course-notes.md"
+  },
+  {
+    "epistemic_class": "source_fact",
+    "excerpt": "Prefer a concrete action, credible context, and observable result over unsupported labels such as strategic, excellent, or innovative.",
+    "id": "S-COURSE-002",
+    "label": "Prefer observable evidence to adjectives",
+    "priority": 9,
+    "role": "quality_bar",
+    "source_id": "course-notes",
+    "source_kind": "course_notes",
+    "source_path": "sources/course-notes.md"
+  },
+  {
+    "epistemic_class": "source_fact",
+    "excerpt": "When evidence is missing, name the gap and ask a focused question; never manufacture a metric or infer ownership the candidate did not claim.",
+    "id": "S-COURSE-003",
+    "label": "Name gaps and never invent evidence",
+    "priority": 10,
+    "role": "boundary",
+    "source_id": "course-notes",
+    "source_kind": "course_notes",
+    "source_path": "sources/course-notes.md"
+  },
+  {
+    "epistemic_class": "source_fact",
+    "excerpt": "Review in this order: target alignment, evidence strength, signal clarity, then sentence-level polish.",
+    "id": "S-COURSE-004",
+    "label": "Use the Signal review sequence",
+    "priority": 10,
+    "role": "sequence",
+    "source_id": "course-notes",
+    "source_kind": "course_notes",
+    "source_path": "sources/course-notes.md"
+  },
+  {
+    "epistemic_class": "source_fact",
+    "excerpt": "Deliver a prioritized evidence table and a small set of rewrites that use only verified facts, rather than rewriting every line.",
+    "id": "S-COURSE-005",
+    "label": "Deliver priorities, evidence table, and grounded rewrites",
+    "priority": 8,
+    "role": "output",
+    "source_id": "course-notes",
+    "source_kind": "course_notes",
+    "source_path": "sources/course-notes.md"
+  },
+  {
+    "epistemic_class": "source_fact",
+    "excerpt": "Your first problem is not wording; the reader cannot tell which part of the launch you owned. Confirm your decision and deliverable before rewriting this bullet.",
+    "id": "S-FEEDBACK-001",
+    "label": "Diagnose ownership before rewriting",
+    "priority": 9,
+    "role": "priority",
+    "source_id": "prior-feedback",
+    "source_kind": "prior_feedback",
+    "source_path": "sources/prior-feedback.md"
+  },
+  {
+    "epistemic_class": "source_fact",
+    "excerpt": "Keep “12 regional partners” because your project brief supports it, but remove “market-leading” unless you have a defensible comparison.",
+    "id": "S-FEEDBACK-002",
+    "label": "Preserve supported specifics and remove unsupported comparisons",
+    "priority": 8,
+    "role": "quality_bar",
+    "source_id": "prior-feedback",
+    "source_kind": "prior_feedback",
+    "source_path": "sources/prior-feedback.md"
+  },
+  {
+    "epistemic_class": "source_fact",
+    "excerpt": "Fix the three trust and fit issues first. Formatting and synonym swaps can wait until the evidence is credible.",
+    "id": "S-FEEDBACK-003",
+    "label": "Fix trust and fit before polish",
+    "omission": "Do not lead with formatting, synonym swaps, or exhaustive line edits.",
+    "priority": 9,
+    "role": "omission",
+    "source_id": "prior-feedback",
+    "source_kind": "prior_feedback",
+    "source_path": "sources/prior-feedback.md"
+  },
+  {
+    "epistemic_class": "source_fact",
+    "excerpt": "I can assess the resume evidence you provide, not verify facts with former employers or predict a hiring manager's decision.",
+    "id": "S-FEEDBACK-004",
+    "label": "Do not verify externally or predict decisions",
+    "priority": 10,
+    "role": "boundary",
+    "source_id": "prior-feedback",
+    "source_kind": "prior_feedback",
+    "source_path": "sources/prior-feedback.md"
+  },
+  {
+    "epistemic_class": "source_fact",
+    "excerpt": "Score target alignment high only when the resume demonstrates capabilities named or clearly implied by the supplied target role.",
+    "id": "S-RUBRIC-001",
+    "label": "Require demonstrated target capabilities",
+    "priority": 9,
+    "role": "quality_bar",
+    "source_id": "rubric",
+    "source_kind": "rubric",
+    "source_path": "sources/rubric.md"
+  },
+  {
+    "epistemic_class": "source_fact",
+    "excerpt": "Strong evidence identifies the candidate's action, the operating context, and an observable result; a number is useful only when the candidate can substantiate it.",
+    "id": "S-RUBRIC-002",
+    "label": "Evaluate action, context, and substantiated result",
+    "priority": 10,
+    "role": "quality_bar",
+    "source_id": "rubric",
+    "source_kind": "rubric",
+    "source_path": "sources/rubric.md"
+  },
+  {
+    "epistemic_class": "source_fact",
+    "excerpt": "A strong bullet lets a reasonable reader distinguish what the candidate did from what the team or company did.",
+    "id": "S-RUBRIC-003",
+    "label": "Separate candidate contribution from team outcome",
+    "priority": 9,
+    "role": "quality_bar",
+    "source_id": "rubric",
+    "source_kind": "rubric",
+    "source_path": "sources/rubric.md"
+  },
+  {
+    "epistemic_class": "source_fact",
+    "excerpt": "Mark an issue critical when it blocks trust or target fit, important when it weakens evidence, and polish when meaning is already sound.",
+    "id": "S-RUBRIC-004",
+    "label": "Classify findings as critical, important, or polish",
+    "priority": 8,
+    "role": "sequence",
+    "source_id": "rubric",
+    "source_kind": "rubric",
+    "source_path": "sources/rubric.md"
+  },
+  {
+    "epistemic_class": "source_fact",
+    "excerpt": "Resume quality can improve clarity and positioning, but no resume review can guarantee interviews, offers, or employment.",
+    "id": "S-RUBRIC-005",
+    "label": "Never guarantee employment outcomes",
+    "priority": 10,
+    "role": "boundary",
+    "source_id": "rubric",
+    "source_kind": "rubric",
+    "source_path": "sources/rubric.md"
+  }
+]
