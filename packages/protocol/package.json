@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./hatch-wire-protocol.schema.json": "./schemas/hatch-wire-protocol.schema.json",
+    "./creator-agent.schema.json": "./schemas/creator-agent.schema.json",
     "./creator-release-public.schema.json": "./schemas/creator-release-public.schema.json",
     "./creator-release-private.schema.json": "./schemas/creator-release-private.schema.json"
   }
