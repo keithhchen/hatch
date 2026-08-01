@@ -1,7 +1,7 @@
 # Hatch Protocol
 
-Canonical provider-agnostic protocol 0.3, the current Creator Agent contract,
-and the legacy Creator Release contract v1.
+Canonical provider-agnostic protocol 0.3, the **Agent Corpus** contract, and
+the legacy Creator Release contract v1.
 
 This package owns the JSON Schema for the server/local-harness boundary. The TypeScript runtime server and Rust local runner currently mirror this schema directly; generated TS and Rust types should be introduced from this package before the protocol is expanded further.
 
@@ -18,26 +18,32 @@ Schema:
 
 ```text
 schemas/hatch-wire-protocol.schema.json
-schemas/creator-agent.schema.json
+schemas/agent-corpus.schema.json
 schemas/creator-release-public.schema.json
 schemas/creator-release-private.schema.json
 ```
 
-`creator-agent.schema.json` is the target server-private definition of a full
-Creator Agent: product contract, instructions, SKILL.md entrypoints, one
-tenant-and-agent-isolated RAG vector store, the merged Hatch/Creator tool list,
-synthetic QA and eval cases, and a Kimi runtime profile. It deliberately has no
-agent release/version field. `hatch.web_search` is required and is configured by
-Hatch at runtime; credentials for Creator HTTP/MCP connections are referenced
-through the control plane, never embedded in the Agent document.
+`agent-corpus.schema.json` defines the **Agent Corpus**: the complete,
+publishable, provider-neutral body of one Creator Agent. It contains the
+product contract, instructions, SKILL.md entrypoints, an agent-isolated
+knowledge corpus, the declared Hatch/Creator tool requirements, and synthetic
+QA/eval cases. It contains **no runtime configuration**: no model/provider,
+deployment, stream setting, tool approval policy, server URL, credential, or
+release/version field.
 
-At execution time the Runtime projects this provider-neutral document onto the
-OpenAI Responses tool model: `hatch.web_search` becomes `web_search`, the
-single agent-scoped vector store becomes `file_search` with one
-`vector_store_id`, a Creator HTTP operation becomes a strict `function`, and a
-Creator MCP entry becomes a native `mcp` tool with `server_label`, `server_url`,
-and an allowlist. The model profile is currently fixed to Kimi 2.6; the document
-does not carry a provider credential.
+The Corpus declares `hatch.web_search` as a required Hatch capability. At
+execution, Hatch supplies its implementation. Creator HTTP/MCP tools only name
+a control-plane `connection_ref`; URLs, auth, approval policy, and the actual
+connection live outside the Corpus.
+
+At execution time the Runtime binds the Corpus to its own deployment: it maps
+`hatch.web_search` to Hatch's search implementation, mounts the Corpus's
+agent-scoped RAG namespace, resolves Creator connection refs through the
+control plane, and chooses a model/runtime. Kimi 2.6 is currently that runtime
+choice, but it is deliberately absent from the Corpus.
+
+See [`AGENT_CORPUS.md`](./AGENT_CORPUS.md) for the fixed published-directory
+layout and an exact separation between the Corpus and Runtime responsibilities.
 
 The public Release schema is client-safe Registry/Desktop metadata. The private
 schema is Runtime-only and contains the system prompt, protected Skill and RAG
