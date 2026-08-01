@@ -9,17 +9,17 @@ export const DEFAULT_CREATOR_AGENT = Object.freeze({
 });
 
 export function creatorAgentFromSession(message) {
-  const release = message?.creator_agent;
-  if (!release?.creator?.name || !release?.product?.name) return DEFAULT_CREATOR_AGENT;
+  const creatorAgent = message?.creator_agent;
+  if (!creatorAgent?.creator?.name || !creatorAgent?.product?.name) return DEFAULT_CREATOR_AGENT;
   return Object.freeze({
-    id: release.product.id,
-    creator: release.creator.name,
-    creatorInitials: initials(release.creator.name),
-    name: release.product.name,
-    description: release.product.description || release.product.promise,
-    boundary: release.product.boundaries?.[0] || "",
-    offer: release.product.offer,
-    presentation: release.presentation || {}
+    id: creatorAgent.product.id,
+    creator: creatorAgent.creator.name,
+    creatorInitials: initials(creatorAgent.creator.name),
+    name: creatorAgent.product.name,
+    description: creatorAgent.product.description || creatorAgent.product.promise,
+    boundary: creatorAgent.product.boundaries?.[0] || "",
+    offer: creatorAgent.product.offer,
+    presentation: creatorAgent.presentation || {}
   });
 }
 
