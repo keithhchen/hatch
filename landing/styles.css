@@ -79,14 +79,10 @@ input {
 }
 
 .brand-mark {
-  background:
-    linear-gradient(135deg, #fff8ec, var(--gold) 42%, var(--red)),
-    var(--ink);
-  border-radius: 50%;
+  background: url("./assets/favicon.svg") center / contain no-repeat;
   display: inline-block;
   height: 20px;
   width: 20px;
-  box-shadow: 0 0 28px rgba(217, 173, 104, 0.4);
 }
 
 .site-nav nav {
@@ -243,14 +239,10 @@ input {
 }
 
 .core-symbol {
-  background:
-    linear-gradient(135deg, #fff8ec, var(--gold) 42%, var(--red)),
-    var(--ink);
+  background: url("./assets/favicon.svg") center / contain no-repeat;
   border: 0;
-  border-radius: 50%;
-  box-shadow:
-    0 0 34px rgba(217, 173, 104, 0.38),
-    inset 0 1px 0 rgba(255, 255, 255, 0.44);
+  border-radius: 0;
+  box-shadow: 0 0 34px rgba(217, 173, 104, 0.38);
   height: 36px;
   position: relative;
   width: 36px;
