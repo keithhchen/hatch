@@ -229,6 +229,7 @@ class BailianSdkKnowledgeApi:
             {},
             self._runtime_options(),
         )
+        _raise_on_provider_error(response.body, "Bailian retrieve")
         nodes = _attribute(response.body.data, "nodes")
         if not isinstance(nodes, list):
             return []
@@ -335,6 +336,16 @@ def _attribute(value: object, name: str) -> Any:
     if isinstance(value, dict):
         return value.get(name) or value.get("".join(piece.title() for piece in name.split("_")))
     return getattr(value, name, None)
+
+
+def _raise_on_provider_error(body: object, operation: str) -> None:
+    """Do not turn a provider-level failure into a successful empty search."""
+    success = _attribute(body, "success")
+    code = _attribute(body, "code")
+    message = _attribute(body, "message")
+    if success is False or (isinstance(code, str) and code.startswith("Index.")):
+        detail = ": ".join(str(value) for value in (code, message) if value)
+        raise KnowledgeSearchUnavailable(f"{operation} unavailable{f': {detail}' if detail else ''}")
 
 
 def _safe_metadata(value: object) -> dict[str, object]:
