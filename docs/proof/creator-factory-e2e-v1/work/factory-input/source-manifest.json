@@ -1,0 +1,133 @@
+{
+  "creator": {
+    "id": "maya-chen",
+    "name": "Maya Chen"
+  },
+  "product": {
+    "id": "signal-resume-review",
+    "name": "Signal Resume Review",
+    "version": "1.0.0",
+    "description": "Evidence-grounded resume review and rewrite planning for a chosen target role.",
+    "promise": "Review a user's resume against a chosen target role and produce an evidence-grounded revision plan plus usable rewrites that stay within the supplied evidence.",
+    "boundaries": [
+      "Does not guarantee interviews, offers, or hiring outcomes.",
+      "Does not invent metrics, ownership, scope, employers, responsibilities, or achievements.",
+      "Does not choose the user's career path or target job for them.",
+      "Does not infer unsupported claims from titles, fluent wording, or missing source material.",
+      "Does not expose confidential information beyond what the user can safely share."
+    ],
+    "price_minor": 3900,
+    "currency": "USD",
+    "pricing_model": "per_delivery",
+    "pricing_unit": "review",
+    "pricing_status": "creator_intent_39_usd_per_review",
+    "supported_local_capabilities": [
+      "fs.list",
+      "fs.read",
+      "fs.write"
+    ]
+  },
+  "documents": [
+    {
+      "source_id": "src-course-00-course-welcome-a38d9a48",
+      "path": "sources/src-course-00-course-welcome-a38d9a48.md",
+      "kind": "welcome_note",
+      "title": "Signal Resume Lab welcome note",
+      "authority": "Normalized from the Creator intake extracted text for 00-course-welcome.txt.",
+      "original_path": "course/00-course-welcome.txt",
+      "extracted_path": "extracted/src-course-00-course-welcome-a38d9a48.md",
+      "raw_sha256": "5671d740b8e2ac93a6a3544499995bdcce4b0d8c04d25f21762ad4a27ce177c0",
+      "extracted_sha256": "e81ebd680710b45e131146272158cf8c4bb045126aa92e60c4694cd9ee50dfca"
+    },
+    {
+      "source_id": "src-course-01-lesson-signal-before-language-5bde528b",
+      "path": "sources/src-course-01-lesson-signal-before-language-5bde528b.md",
+      "kind": "lesson",
+      "title": "Lesson: find the signal before touching the sentence",
+      "authority": "Normalized from the Creator intake extracted text for 01-lesson-signal-before-language.md.",
+      "original_path": "course/01-lesson-signal-before-language.md",
+      "extracted_path": "extracted/src-course-01-lesson-signal-before-language-5bde528b.md",
+      "raw_sha256": "0f9535030ec36b272cd7b94fa74e27a6349880a720795f9a170844cd6349b475",
+      "extracted_sha256": "8fe503bc914da588ffbf6a6cd0090f193cdcdcd0ffc0f6ccaaf29e5f7c09cd38"
+    },
+    {
+      "source_id": "src-course-02-lesson-ownership-and-evidence-c66ac1e2",
+      "path": "sources/src-course-02-lesson-ownership-and-evidence-c66ac1e2.md",
+      "kind": "lesson",
+      "title": "Lesson: ownership and evidence",
+      "authority": "Normalized from the Creator intake extracted text for 02-lesson-ownership-and-evidence.md.",
+      "original_path": "course/02-lesson-ownership-and-evidence.md",
+      "extracted_path": "extracted/src-course-02-lesson-ownership-and-evidence-c66ac1e2.md",
+      "raw_sha256": "0a2585983afd99378f957dfb55ebd2902ef1ccf3f0e2974bcfd01d0e725073f8",
+      "extracted_sha256": "58edb6bdfbc73741b014288b7a0af3c9f3b24c7b511893f12ab15ac746f58f2c"
+    },
+    {
+      "source_id": "src-course-03-workshop-notes-ffc6803b",
+      "path": "sources/src-course-03-workshop-notes-ffc6803b.md",
+      "kind": "workshop_notes",
+      "title": "Cohort workshop notes",
+      "authority": "Normalized from the Creator intake extracted text for 03-workshop-notes.md.",
+      "original_path": "course/03-workshop-notes.md",
+      "extracted_path": "extracted/src-course-03-workshop-notes-ffc6803b.md",
+      "raw_sha256": "11e6e5934f1114454972a536057b735cab1430ebd214a6abe513488a2c764c8c",
+      "extracted_sha256": "8e387cc02ab4a36308a4950b349ee3a0639a310d475ae01a6305fbf861e6091f"
+    },
+    {
+      "source_id": "src-course-04-video-lesson-ff71f644",
+      "path": "sources/src-course-04-video-lesson-ff71f644.md",
+      "kind": "video_transcript",
+      "title": "Video lesson transcript",
+      "authority": "Normalized from the Creator intake VTT-backed transcript for 04-video-lesson.mp4.",
+      "original_path": "course/04-video-lesson.mp4",
+      "transcript_sidecar": "course/04-video-lesson.vtt",
+      "extracted_path": "extracted/src-course-04-video-lesson-ff71f644.md",
+      "raw_sha256": "6159264643dbf0deaba650f7d3577b6726be40071447cc6660533c2a4a5c8082",
+      "extracted_sha256": "8e1f79884b576acd2f07c28df9b7f575868158816018dd8e5fd0263b8babe481",
+      "transcript_sha256": "894b888d404752972595812830bcff7e752bc03ecbfdfd4a2e8755e34c66b3ff"
+    },
+    {
+      "source_id": "src-course-05-office-hours-faq-c7ce5f52",
+      "path": "sources/src-course-05-office-hours-faq-c7ce5f52.md",
+      "kind": "faq",
+      "title": "Office hours fragments",
+      "authority": "Normalized from the Creator intake extracted text for 05-office-hours-faq.txt.",
+      "original_path": "course/05-office-hours-faq.txt",
+      "extracted_path": "extracted/src-course-05-office-hours-faq-c7ce5f52.md",
+      "raw_sha256": "52d484d9c684c15e47507e54835422a9877db1c5fcc3e4743dd275171ed7e5fc",
+      "extracted_sha256": "82bbc88af738c90c0834312586afeacf5b77639164ba21f9a34ddda9fd030abd"
+    },
+    {
+      "source_id": "src-course-evidence-workbook-a868fdd6",
+      "path": "sources/src-course-evidence-workbook-a868fdd6.md",
+      "kind": "workbook",
+      "title": "Evidence workbook",
+      "authority": "Normalized from the Creator intake extracted text for evidence-workbook.pdf.",
+      "original_path": "course/evidence-workbook.pdf",
+      "extracted_path": "extracted/src-course-evidence-workbook-a868fdd6.md",
+      "raw_sha256": "8c3a804ac609fd88f6dfc4c75aceb91848971d7804e721616e5832af328d3e1c",
+      "extracted_sha256": "2e0ddcf3f5dced70c40b275ff891f8de31d44fb8f6be1cc142a259d6029a4d12"
+    },
+    {
+      "source_id": "src-prior-work-review-a-98463ca9",
+      "path": "sources/src-prior-work-review-a-98463ca9.md",
+      "kind": "annotated_review",
+      "title": "Prior work review A",
+      "authority": "Normalized from the Creator intake extracted text for prior-work/review-a.md.",
+      "original_path": "prior-work/review-a.md",
+      "extracted_path": "extracted/src-prior-work-review-a-98463ca9.md",
+      "raw_sha256": "de702a3c529badbeb435bd0e22e366a0abc9e91316e83090ef1d4237acdd7b15",
+      "extracted_sha256": "dc779b82a86f7a2d1e25b7d48a0b36480740b8f565aa5919fe7a99af340b29c7"
+    },
+    {
+      "source_id": "src-prior-work-review-b-89ae54f0",
+      "path": "sources/src-prior-work-review-b-89ae54f0.md",
+      "kind": "annotated_review",
+      "title": "Prior work review B",
+      "authority": "Normalized from the Creator intake extracted text for prior-work/review-b.md.",
+      "original_path": "prior-work/review-b.md",
+      "extracted_path": "extracted/src-prior-work-review-b-89ae54f0.md",
+      "raw_sha256": "7a4a55dcf8141cad6db66935f41182322cbd77a8f4b8aef2a87641e4aaa44ddf",
+      "extracted_sha256": "fb6440f25b74bcc9ef55995cf1dde52d032a62b86e9d59a58da4f3905630d9f0"
+    }
+  ]
+}

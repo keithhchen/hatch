@@ -9,7 +9,7 @@ import { promisify } from "node:util";
 import { WebSocket } from "ws";
 import { DeterministicAgentRuntime } from "./agentRuntime.js";
 import { buildCompactedHistory, RUNTIME_CONTEXT_PREFIX, runtimeMessagesTranscript, SUMMARY_PREFIX } from "./compaction.js";
-import { createRuntimeServer, type RuntimeServer } from "./index.js";
+import { clientToolTimeoutMs, createRuntimeServer, scopedConversationId, type RuntimeServer } from "./index.js";
 import { executeLocalTool, LocalHarnessSession, runLocalHarness } from "./localHarness.js";
 import type { OutboundMessage, ToolRequest } from "./protocol.js";
 import { ClientToolNameSchema, parseInboundMessage, PROTOCOL_VERSION } from "./protocol.js";
@@ -58,20 +58,35 @@ test("runtime protocol mirrors the canonical wire schema", async () => {
   assert.deepEqual(schema.$defs.clientToolName.enum, [...ClientToolNameSchema.options]);
 });
 
+test("Desktop write approval window is long enough for a deliberate user decision", () => {
+  assert.equal(clientToolTimeoutMs(undefined), 300_000);
+  assert.equal(clientToolTimeoutMs("900000"), 900_000);
+  assert.throws(() => clientToolTimeoutMs("29999"), /HATCH_CLIENT_TOOL_TIMEOUT_MS/);
+  assert.throws(() => clientToolTimeoutMs("forever"), /HATCH_CLIENT_TOOL_TIMEOUT_MS/);
+});
+
 test("runtime server exposes visible conversation history for client hydration", async () => {
   const dataDir = await tempWorkspace();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   const store = new RuntimeStore(dataDir);
+  const historyBinding = {
+    tenantId: "tenant-history",
+    userId: "user-history",
+    productId: "product-history",
+    releaseId: "release-history",
+    releaseDigest: `sha256:${"1".repeat(64)}`
+  };
+  const storedConversationId = scopedConversationId(historyBinding, "desktop-chat");
   await store.append({
     type: "message.created",
-    conversation_id: "desktop-chat",
+    conversation_id: storedConversationId,
     run_id: "run_old_1",
     role: "user",
     content: "Read the birthday dinner sheet."
   });
   await store.append({
     type: "conversation.model_message",
-    conversation_id: "desktop-chat",
+    conversation_id: storedConversationId,
     run_id: "run_old_1",
     message: {
       role: "tool",
@@ -81,7 +96,7 @@ test("runtime server exposes visible conversation history for client hydration",
   });
   await store.append({
     type: "tool.call",
-    conversation_id: "desktop-chat",
+    conversation_id: storedConversationId,
     run_id: "run_old_1",
     tool_call_id: "call_file_read",
     name: "fs.read",
@@ -92,7 +107,7 @@ test("runtime server exposes visible conversation history for client hydration",
   });
   await store.append({
     type: "tool.call",
-    conversation_id: "desktop-chat",
+    conversation_id: storedConversationId,
     run_id: "run_old_1",
     tool_call_id: "call_file_read",
     name: "fs.read",
@@ -104,7 +119,7 @@ test("runtime server exposes visible conversation history for client hydration",
   });
   await store.append({
     type: "skill.activated",
-    conversation_id: "desktop-chat",
+    conversation_id: storedConversationId,
     run_id: "run_old_1",
     name: "contract-review",
     path: "/server/skills/contract-review/SKILL.md",
@@ -116,7 +131,7 @@ test("runtime server exposes visible conversation history for client hydration",
   });
   await store.append({
     type: "skill.invoked",
-    conversation_id: "desktop-chat",
+    conversation_id: storedConversationId,
     run_id: "run_old_1",
     name: "contract-review",
     path: "/server/skills/contract-review/SKILL.md",
@@ -131,7 +146,7 @@ test("runtime server exposes visible conversation history for client hydration",
   });
   await store.append({
     type: "message.created",
-    conversation_id: "desktop-chat",
+    conversation_id: storedConversationId,
     run_id: "run_old_1",
     role: "assistant",
     content: "I still need to read the spreadsheet."
@@ -142,6 +157,13 @@ test("runtime server exposes visible conversation history for client hydration",
   const historyUrl = new URL(serverUrl);
   historyUrl.protocol = "http:";
   historyUrl.pathname = "/conversations/desktop-chat/messages";
+  historyUrl.search = new URLSearchParams({
+    tenant_id: historyBinding.tenantId,
+    user_id: historyBinding.userId,
+    product_id: historyBinding.productId,
+    release_id: historyBinding.releaseId,
+    release_digest: historyBinding.releaseDigest
+  }).toString();
   const response = await fetch(historyUrl);
   assert.equal(response.status, 200);
   const payload = await response.json() as {
@@ -264,11 +286,10 @@ test("runs a full server-agent session with local client tool execution", async 
   const result = await runLocalHarness({
     serverUrl,
     workspace,
-    prompt: "Find Hatch. Save a summary."
+    prompt: "Find Hatch. Save the summary to \"agent-output.md\"."
   });
 
-  assert.match(result.finalText, /Completed server-side agent session/);
-  assert.match(result.finalText, /Server tools: web\.search/);
+  assert.match(result.finalText, /Your work is ready/);
   assert.deepEqual(result.events.filter((event) => event.type === "tool_call.request").map((event) => event.name), [
     "fs.search",
     "fs.read",
@@ -297,7 +318,7 @@ test("runs a full server-agent session with local client tool execution", async 
   assert.ok(writeDiffIndex > writeCompletedIndex);
   const writeDiff = result.events[writeDiffIndex];
   assert.equal(writeDiff.type, "workspace.diff");
-  assert.equal(writeDiff.path, "hatch-session.md");
+  assert.equal(writeDiff.path, "agent-output.md");
   assert.match(writeDiff.diff, /--- \/dev\/null/);
   assert.match(writeDiff.diff, /\+First local file: README\.md/);
   assert.deepEqual(result.events.filter((event) => event.type === "approval.request" || event.type === "approval.result"), []);
@@ -318,7 +339,7 @@ test("runs a full server-agent session with local client tool execution", async 
   assert.ok(finalIndex >= 0);
   assert.ok(completedIndex > finalIndex);
 
-  const written = await readFile(path.join(workspace, "hatch-session.md"), "utf8");
+  const written = await readFile(path.join(workspace, "agent-output.md"), "utf8");
   assert.match(written, /First local file: README\.md/);
   assert.match(written, /Hatch routes all LLM calls through the server/);
 
@@ -388,12 +409,12 @@ test("deterministic runtime renders visible skills without auto-loading one", as
     prompt: "Find Hatch."
   });
 
-  assert.match(result.finalText, /Completed server-side agent session\./);
+  assert.match(result.finalText, /(?:Your work is ready|I finished reviewing)/);
   assert.doesNotMatch(result.finalText, /using auto-skill/);
   assert.ok(result.events.some((event) => (
     event.type === "assistant.delta"
     && event.delta.kind === "status"
-    && /Rendered \d+ visible skill\(s\) for model selection/.test(event.delta.content)
+    && event.delta.content === "Using the guidance included with this Agent."
   )));
   assert.ok(!result.events.some((event) => (
     event.type === "assistant.delta"
@@ -424,17 +445,17 @@ test("local harness can broker local tools through the Rust sidecar", async () =
   const result = await runLocalHarness({
     serverUrl,
     workspace,
-    prompt: "Find Hatch. Save a summary.",
+    prompt: "Find Hatch. Save the summary to \"agent-output.md\".",
     rustRunnerBin
   });
 
-  assert.match(result.finalText, /Completed server-side agent session/);
+  assert.match(result.finalText, /Your work is ready/);
   assert.deepEqual(result.events.filter((event) => event.type === "tool_call.request").map((event) => event.name), [
     "fs.search",
     "fs.read",
     "fs.write"
   ]);
-  assert.match(await readFile(path.join(workspace, "hatch-session.md"), "utf8"), /Rust runner/);
+  assert.match(await readFile(path.join(workspace, "agent-output.md"), "utf8"), /Rust runner/);
 
   const audit = await readFile(path.join(workspace, "audit.jsonl"), "utf8");
   assert.match(audit, /"tool":"search"/);
@@ -522,14 +543,14 @@ test("auto-permission local tool calls bypass client approval and execute", asyn
 
   await session.connect();
   try {
-    const result = await session.run("Find Hatch. Save a summary.");
-    assert.match(result.finalText, /Completed server-side agent session/);
+    const result = await session.run("Find Hatch. Save the summary to \"agent-output.md\".");
+    assert.match(result.finalText, /(?:Your work is ready|I finished reviewing)/);
     assert.deepEqual(result.events.filter((event) => event.type === "approval.request" || event.type === "approval.result"), []);
   } finally {
     session.close();
   }
 
-  assert.match(await readFile(path.join(workspace, "hatch-session.md"), "utf8"), /Hatch approval test/);
+  assert.match(await readFile(path.join(workspace, "agent-output.md"), "utf8"), /Hatch approval test/);
   const events = await new RuntimeStore(dataDir).readEvents();
   assert.ok(!events.some((event) => (
     event.type === "runtime.event"
@@ -1644,9 +1665,9 @@ test("skills config can suppress automatic skills instructions", async () => {
 
   const mock = await createFinalOnlyChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.OPENAI_API_KEY = "test-key";
+  process.env.MOONSHOT_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
-  process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   delete process.env.HATCH_TS_SKILLS_ROOT;
 
   runtimeServer = createRuntimeServer();
@@ -1747,9 +1768,9 @@ test.skip("chat completions runtime progressively reads SKILL.md through file_re
   const dataDir = await tempWorkspace();
   const mock = await createMockChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.OPENAI_API_KEY = "test-key";
+  process.env.MOONSHOT_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
-  process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
 
   runtimeServer = createRuntimeServer();
   const serverUrl = await listen(runtimeServer);
@@ -1803,9 +1824,9 @@ test.skip("chat completions runtime resolves aliased skills catalog paths for se
 
   const mock = await createAliasedSkillPathChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.OPENAI_API_KEY = "test-key";
+  process.env.MOONSHOT_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
-  process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_SKILL_METADATA_BUDGET_CHARS = "5000";
   process.env.HATCH_SKILL_ROOTS = skillsRoot;
   delete process.env.HATCH_TS_SKILLS_ROOT;
@@ -1855,9 +1876,9 @@ test.skip("model-driven SKILL.md file_read returns bundled resource manifest wit
 
   const mock = await createModelDrivenResourceManifestChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.OPENAI_API_KEY = "test-key";
+  process.env.MOONSHOT_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
-  process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_SKILL_ROOTS = path.join(workspace, ".agents", "skills");
   delete process.env.HATCH_TS_SKILLS_ROOT;
 
@@ -1908,9 +1929,9 @@ test.skip("model-driven skill allowed-tools are preserved while local tools run 
 
   const mock = await createModelDrivenAllowedToolsChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.OPENAI_API_KEY = "test-key";
+  process.env.MOONSHOT_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
-  process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_SKILL_ROOTS = path.join(workspace, ".agents", "skills");
   delete process.env.HATCH_TS_SKILLS_ROOT;
 
@@ -1947,9 +1968,9 @@ test.skip("chat completions runtime does not carry activated skill instructions 
   const dataDir = await tempWorkspace();
   const mock = await createSkillRetentionChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.OPENAI_API_KEY = "test-key";
+  process.env.MOONSHOT_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
-  process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
 
   runtimeServer = createRuntimeServer();
   const serverUrl = await listen(runtimeServer);
@@ -2011,9 +2032,9 @@ test.skip("explicit-only skill resources are server-readable on later turns when
 
   const mock = await createActivatedSkillResourceChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.OPENAI_API_KEY = "test-key";
+  process.env.MOONSHOT_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
-  process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_SKILL_ROOTS = path.join(workspace, ".agents", "skills");
   delete process.env.HATCH_TS_SKILLS_ROOT;
 
@@ -2104,9 +2125,9 @@ test.skip("explicitly activated skill instructions are injected fully and still 
 
   const mock = await createFullExplicitSkillChatCompletionsServer(trailer);
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.OPENAI_API_KEY = "test-key";
+  process.env.MOONSHOT_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
-  process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_SKILL_ROOTS = path.join(workspace, ".agents", "skills");
   delete process.env.HATCH_TS_SKILLS_ROOT;
 
@@ -2155,9 +2176,9 @@ test.skip("relative activated skill resource paths fail when multiple active ski
 
   const mock = await createAmbiguousRelativeSkillResourceChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.OPENAI_API_KEY = "test-key";
+  process.env.MOONSHOT_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
-  process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_SKILL_ROOTS = path.join(workspace, ".agents", "skills");
   delete process.env.HATCH_TS_SKILLS_ROOT;
 
@@ -2207,9 +2228,9 @@ test.skip("re-mentioned skills refresh from current files within a fixed session
 
   const mock = await createActivatedSkillRefreshChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.OPENAI_API_KEY = "test-key";
+  process.env.MOONSHOT_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
-  process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_SKILL_ROOTS = path.join(workspace, ".agents", "skills");
   delete process.env.HATCH_TS_SKILLS_ROOT;
 
@@ -2417,9 +2438,9 @@ test("pre-turn auto compaction appends a checkpoint and sends compacted history 
 
   const mock = await createPreTurnCompactionChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.OPENAI_API_KEY = "test-key";
+  process.env.MOONSHOT_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
-  process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_AUTO_COMPACT_LIMIT_TOKENS = "10";
 
   runtimeServer = createRuntimeServer();
@@ -2438,6 +2459,9 @@ test("pre-turn auto compaction appends a checkpoint and sends compacted history 
     assert.ok(result.events.some((event) => event.type === "turn.state" && event.status === "compacting"));
     assert.ok(result.events.some((event) => event.type === "session.compacted" && event.phase === "pre_turn"));
     assert.equal(mock.requests.length, 2);
+    assert.ok(mock.requests.every((request) => request.model === "kimi-k2.6"));
+    assert.ok(mock.requests.every((request) => request.temperature === 0.6));
+    assert.ok(mock.requests.every((request) => request.thinking?.type === "disabled"));
     const normalMessages = mock.requests[1]?.messages ?? [];
     assert.ok(normalMessages.some((message: Record<string, unknown>) => String(message.content ?? "").includes(SUMMARY_PREFIX)));
     assert.ok(normalMessages.some((message: Record<string, unknown>) => String(message.content ?? "").includes("current user after pre-turn compact")));
@@ -2476,9 +2500,9 @@ test("manual /compact runs a standalone compaction turn without a normal agent r
 
   const mock = await createManualCompactionChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.OPENAI_API_KEY = "test-key";
+  process.env.MOONSHOT_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
-  process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
 
   runtimeServer = createRuntimeServer();
   const serverUrl = await listen(runtimeServer);
@@ -2494,6 +2518,9 @@ test("manual /compact runs a standalone compaction turn without a normal agent r
 
     assert.equal(result.finalText, "Compaction complete.");
     assert.equal(mock.requests.length, 1);
+    assert.equal(mock.requests[0]?.model, "kimi-k2.6");
+    assert.equal(mock.requests[0]?.temperature, 0.6);
+    assert.equal(mock.requests[0]?.thinking?.type, "disabled");
     assert.ok(result.events.some((event) => event.type === "session.compacted" && event.trigger === "manual" && event.phase === "standalone_turn"));
     assert.ok(result.events.some((event) => event.type === "turn.state" && event.status === "compacting"));
   } finally {
@@ -2513,9 +2540,9 @@ test("mid-turn auto compaction checkpoints tool context before continuing the to
   const dataDir = await tempWorkspace();
   const mock = await createMidTurnCompactionChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.OPENAI_API_KEY = "test-key";
+  process.env.MOONSHOT_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
-  process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_AUTO_COMPACT_LIMIT_TOKENS = "20";
 
   runtimeServer = createRuntimeServer();
@@ -2548,9 +2575,9 @@ test("mid-turn compaction waits for a complete assistant tool-call batch", async
   const dataDir = await tempWorkspace();
   const mock = await createMultiToolBatchCompactionChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.OPENAI_API_KEY = "test-key";
+  process.env.MOONSHOT_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
-  process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_AUTO_COMPACT_LIMIT_TOKENS = "1";
 
   runtimeServer = createRuntimeServer();
@@ -2593,9 +2620,9 @@ test("chat completions runtime fixes the skills catalog for the WebSocket sessio
 
   const mock = await createFinalOnlyChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.OPENAI_API_KEY = "test-key";
+  process.env.MOONSHOT_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
-  process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_SKILL_ROOTS = skillsRoot;
   delete process.env.HATCH_TS_SKILLS_ROOT;
 
@@ -2665,9 +2692,9 @@ test("chat completions runtime injects codex AGENTS.md project instructions", as
 
   const mock = await createFinalOnlyChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.OPENAI_API_KEY = "test-key";
+  process.env.MOONSHOT_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
-  process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_SKILL_ROOTS = path.join(workspace, ".agents", "skills");
   delete process.env.HATCH_TS_SKILLS_ROOT;
 
@@ -2711,9 +2738,9 @@ test("chat completions runtime injects stable local workspace context without cu
   const dataDir = await tempWorkspace();
   const mock = await createFinalOnlyChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.OPENAI_API_KEY = "test-key";
+  process.env.MOONSHOT_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
-  process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
 
   runtimeServer = createRuntimeServer();
   const serverUrl = await listen(runtimeServer);
@@ -2753,9 +2780,9 @@ test("chat completions runtime enforces exact path file_read before file_search 
   await writeFile(contractPath, "Contract body for runtime path policy.\n", "utf8");
   const mock = await createDirectReadGuardChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.OPENAI_API_KEY = "test-key";
+  process.env.MOONSHOT_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
-  process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
 
   runtimeServer = createRuntimeServer();
   const serverUrl = await listen(runtimeServer);
@@ -2796,9 +2823,9 @@ test("chat completions runtime filters client-local function tools from hello ca
   const dataDir = await tempWorkspace();
   const mock = await createFinalOnlyChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.OPENAI_API_KEY = "test-key";
+  process.env.MOONSHOT_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
-  process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
 
   runtimeServer = createRuntimeServer();
   const serverUrl = await listen(runtimeServer);
@@ -2831,9 +2858,9 @@ test("shell_exec auto-permission calls include model justification and tool argu
   const dataDir = await tempWorkspace();
   const mock = await createShellJustificationChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.OPENAI_API_KEY = "test-key";
+  process.env.MOONSHOT_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
-  process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
 
   runtimeServer = createRuntimeServer();
   const serverUrl = await listen(runtimeServer);
@@ -2866,9 +2893,9 @@ test("chat completions runtime brokers local filesystem function tools to the cl
 
   const mock = await createMockLocalToolChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.OPENAI_API_KEY = "test-key";
+  process.env.MOONSHOT_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
-  process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
 
   runtimeServer = createRuntimeServer();
   const serverUrl = await listen(runtimeServer);
@@ -2928,9 +2955,9 @@ test("chat completions runtime completes when finish_reason arrives before SSE c
   if (!address || typeof address === "string") throw new Error("Expected mock server to listen on a TCP port");
 
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.OPENAI_API_KEY = "test-key";
+  process.env.MOONSHOT_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = `http://127.0.0.1:${address.port}/v1`;
-  process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   runtimeServer = createRuntimeServer();
   const serverUrl = await listen(runtimeServer);
   try {
@@ -2950,9 +2977,9 @@ test("chat completions runtime replays prior tool call chain on later turns", as
   const dataDir = await tempWorkspace();
   const mock = await createToolHistoryReplayChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.OPENAI_API_KEY = "test-key";
+  process.env.MOONSHOT_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
-  process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
 
   runtimeServer = createRuntimeServer();
   const serverUrl = await listen(runtimeServer);
@@ -3000,9 +3027,9 @@ test.skip("activated skill allowed-tools are preserved while local tools run wit
 
   const mock = await createAllowedToolsChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.OPENAI_API_KEY = "test-key";
+  process.env.MOONSHOT_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
-  process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_SKILL_ROOTS = path.join(workspace, ".agents", "skills");
   delete process.env.HATCH_TS_SKILLS_ROOT;
 
@@ -3055,9 +3082,9 @@ test("chat completions runtime emits implicit skill invocation events for skill 
   const command = "bash .agents/skills/script-invocation-skill/scripts/check.sh";
   const mock = await createImplicitSkillInvocationChatCompletionsServer(command);
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.OPENAI_API_KEY = "test-key";
+  process.env.MOONSHOT_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
-  process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_SKILL_ROOTS = path.join(workspace, ".agents", "skills");
   delete process.env.HATCH_TS_SKILLS_ROOT;
 
@@ -3107,9 +3134,9 @@ test("chat completions runtime emits implicit skill invocation events for skill 
   const skillPath = ".agents/skills/doc-invocation-skill/SKILL.md";
   const mock = await createImplicitSkillDocReadChatCompletionsServer(skillPath);
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.OPENAI_API_KEY = "test-key";
+  process.env.MOONSHOT_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
-  process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_SKILL_ROOTS = path.join(workspace, ".agents", "skills");
   delete process.env.HATCH_TS_SKILLS_ROOT;
 
@@ -3144,9 +3171,9 @@ test("chat completions runtime emits failed tool_call.delta for unknown model to
   const dataDir = await tempWorkspace();
   const mock = await createMockUnknownToolChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.OPENAI_API_KEY = "test-key";
+  process.env.MOONSHOT_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
-  process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
 
   runtimeServer = createRuntimeServer();
   const serverUrl = await listen(runtimeServer);
@@ -3210,9 +3237,9 @@ test("chat completions runtime executes configured MCP tools on the server event
 
   const mock = await createMockMcpChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.OPENAI_API_KEY = "test-key";
+  process.env.MOONSHOT_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
-  process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_MCP_SERVERS = JSON.stringify({
     testdocs: {
       url: `http://127.0.0.1:${mcpAddress.port}/mcp`
@@ -3272,9 +3299,9 @@ test("chat completions runtime returns recoverable tool failures to the model", 
 
   const mock = await createRecoverableToolFailureChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.OPENAI_API_KEY = "test-key";
+  process.env.MOONSHOT_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
-  process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_MCP_SERVERS = JSON.stringify({
     failingdocs: {
       url: `http://127.0.0.1:${mcpAddress.port}/mcp`
@@ -3468,9 +3495,9 @@ test("protected skill runs in a headless session and brokers local context throu
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   process.env.HATCH_SKILL_ROOTS = skillsRoot;
   delete process.env.HATCH_TS_SKILLS_ROOT;
-  process.env.OPENAI_API_KEY = "test-key";
+  process.env.MOONSHOT_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = `http://127.0.0.1:${address.port}/v1`;
-  process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   runtimeServer = createRuntimeServer();
   const serverUrl = await listen(runtimeServer);
   try {
@@ -3600,9 +3627,9 @@ test("cancelling the parent run terminates and destroys the protected worker", a
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   process.env.HATCH_SKILL_ROOTS = skillsRoot;
   delete process.env.HATCH_TS_SKILLS_ROOT;
-  process.env.OPENAI_API_KEY = "test-key";
+  process.env.MOONSHOT_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = `http://127.0.0.1:${address.port}/v1`;
-  process.env.HATCH_CREATOR_MODEL = "mock-model";
+  process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   runtimeServer = createRuntimeServer();
   const serverUrl = await listen(runtimeServer);
   const session = new LocalHarnessSession({
@@ -3664,8 +3691,8 @@ test("local harness supports multi-turn chat over one connection", async () => {
     const first = await session.run("Find Hatch.");
     const second = await session.run("Find Hatch again.");
 
-    assert.match(first.finalText, /Completed server-side agent session/);
-    assert.match(second.finalText, /Completed server-side agent session/);
+    assert.match(first.finalText, /(?:Your work is ready|I finished reviewing)/);
+    assert.match(second.finalText, /(?:Your work is ready|I finished reviewing)/);
     assert.deepEqual(first.events.filter((event) => event.type === "tool_call.request").map((event) => event.name), [
       "fs.search",
       "fs.read"
@@ -3677,7 +3704,7 @@ test("local harness supports multi-turn chat over one connection", async () => {
     assert.ok(second.events.some((event) => (
       event.type === "assistant.delta"
       && event.delta.kind === "status"
-      && event.delta.content.includes("Hydrated 3 message(s)")
+      && event.delta.content === "Picking up your conversation."
     )));
   } finally {
     session.close();
@@ -3694,7 +3721,7 @@ test("local harness supports multi-turn chat over one connection", async () => {
     assert.ok(third.events.some((event) => (
       event.type === "assistant.delta"
       && event.delta.kind === "status"
-      && event.delta.content.includes("Hydrated 5 message(s)")
+      && event.delta.content === "Picking up your conversation."
     )));
   } finally {
     reconnected.close();

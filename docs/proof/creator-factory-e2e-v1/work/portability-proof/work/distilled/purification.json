@@ -1,0 +1,26 @@
+{
+  "authority_patterns_checked": [
+    "dynamic Creator-name authority patterns",
+    "\\bI (?:have|personally|verified|coached|seen)\\b",
+    "\\b(guarantee[sd]?|will definitely|certain to)\\b|一定(?:获得|达到|实现|拿到)"
+  ],
+  "declared_omissions": [
+    "Do not squeeze two hard days together to make the schedule look complete.",
+    "Do not prescribe all seven days when rest, walking, or easy mobility is the better intervention.",
+    "Do not silently change heavy strength work into generic fatigue work that misses the original stimulus.",
+    "Do not make the whole week easy before removing optional volume tied to the problem."
+  ],
+  "passed": true,
+  "policy": "Retain only attributable source facts, explicitly derived operational rules, declared omissions, and bounded synthetic expansion.",
+  "removed_or_forbidden": [
+    "unsupported Creator biography",
+    "invented personal experience",
+    "unsubstantiated outcome guarantees",
+    "uncited operational rules",
+    "surface-vocabulary imitation without method support"
+  ],
+  "retained": {
+    "derived_rules": 8,
+    "source_facts": 15
+  }
+}

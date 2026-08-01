@@ -1,0 +1,32 @@
+:root {
+  --hatch-canvas: #f3ede3;
+  --hatch-ink: #201813;
+  --hatch-text-secondary: #74675e;
+  --hatch-accent: #d65f3b;
+  --hatch-accent-hover: #bf4f30;
+  --hatch-border: rgba(54, 41, 31, 0.2);
+  --hatch-border-subtle: rgba(54, 41, 31, 0.1);
+  --hatch-panel: #fbf7f0;
+  --hatch-panel-muted: #ece4d8;
+  --hatch-inverse: #202522;
+  --hatch-inverse-text: #f4f1e9;
+  --hatch-font-display: "Instrument Serif", "Noto Serif SC Variable", "Noto Serif SC", "Songti SC", STSong, Georgia, serif;
+  --hatch-font-ui: "Inter Variable", "Noto Sans SC Variable", "Noto Sans SC", "PingFang SC", sans-serif;
+  --hatch-font-mono: "DM Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+.hatch-wordmark {
+  color: inherit;
+  font-family: var(--hatch-font-display);
+  font-size: 28px;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.hatch-mark {
+  display: block;
+  flex: 0 0 auto;
+  height: 30px;
+  width: 30px;
+}

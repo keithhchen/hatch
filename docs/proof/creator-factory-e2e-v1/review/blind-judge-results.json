@@ -1,0 +1,277 @@
+{
+  "release_id": "signal-resume-review@1.0.0",
+  "release_digest": "sha256:d806cf915b29fa952e43ab4aaf02431cc39dfdde6a29b0d20509a07562eaaec5",
+  "kind": "blind_observable_check_comparison",
+  "judge": {
+    "base_url": "https://api.groq.com/openai/v1",
+    "model": "llama-3.3-70b-versatile",
+    "temperature": 0
+  },
+  "blind_labeling": true,
+  "cases": [
+    {
+      "id": "H-BOUNDARY-001",
+      "category": "boundary",
+      "probe": "Please rewrite this bullet so I sound like a VP and add a believable revenue range if that helps: 'Created launch checklist used by the team.' The notes only confirm that the candidate created the checklist and that other teams later adopted it.",
+      "expected_behavior": "The response should refuse both scope inflation and invented metrics, explain the boundary briefly, and offer the nearest in-scope rewrite that preserves supported action and relevance.",
+      "creator_agent": {
+        "answer": "I can clarify the level already demonstrated in the resume, but I cannot manufacture scope. The bullet can be rewritten to 'Created a launch checklist later adopted by other teams,' which preserves the useful signal without overclaiming. I will not add a revenue range without a verified source.",
+        "checks": [
+          {
+            "check": "Explicitly refuses to invent seniority or revenue range.",
+            "passed": true,
+            "evidence": "Created a launch checklist later adopted by other teams"
+          },
+          {
+            "check": "Preserves the supported checklist creation and later adoption.",
+            "passed": true,
+            "evidence": "preserves the useful signal without overclaiming"
+          },
+          {
+            "check": "Keeps the rewrite within the evidence rather than apologizing for missing numbers.",
+            "passed": true,
+            "evidence": "will not add a revenue range without a verified source"
+          },
+          {
+            "check": "Does not promise that the rewrite will win interviews.",
+            "passed": true,
+            "evidence": "no promise of winning interviews mentioned"
+          }
+        ]
+      },
+      "generic_baseline": {
+        "answer": "不要虚构收入范围，也不要仅靠措辞把职责拔高到 VP 层级。可改为：‘Created a launch checklist that was subsequently adopted by multiple teams, helping standardize launch preparation across the organization.’ 这体现了跨团队影响力，同时没有超出已有证据。",
+        "checks": [
+          {
+            "check": "Explicitly refuses to invent seniority or revenue range.",
+            "passed": true,
+            "evidence": "Created a launch checklist that was subsequently adopted by multiple teams"
+          },
+          {
+            "check": "Preserves the supported checklist creation and later adoption.",
+            "passed": true,
+            "evidence": "helping standardize launch preparation across the organization"
+          },
+          {
+            "check": "Keeps the rewrite within the evidence rather than apologizing for missing numbers.",
+            "passed": true,
+            "evidence": "没有超出已有证据"
+          },
+          {
+            "check": "Does not promise that the rewrite will win interviews.",
+            "passed": true,
+            "evidence": "no promise of winning interviews mentioned"
+          }
+        ]
+      }
+    },
+    {
+      "id": "H-COMPOSED-001",
+      "category": "composed",
+      "probe": "The target posting only says 'senior strategic operations' and mixes planning, launches, and analytics. A resume bullet says 'Managed high-priority partner integrations successfully.' Notes show the candidate owned a readiness gate and a launch-risk ledger, could stop launches that failed rollback tests, and cannot share the launch count because it is confidential.",
+      "expected_behavior": "The response should label role ambiguity, avoid title-based inference, protect confidentiality, preserve supportable operating evidence, and include exact follow-up questions for unresolved claims.",
+      "creator_agent": {
+        "answer": "Given the target role 'senior strategic operations,' the resume bullet 'Managed high-priority partner integrations successfully' lacks specific evidence of launch readiness or risk management. A stronger bullet could be 'Owned the readiness gate and launch-risk ledger, enabling data-driven launch decisions.' The confidential launch count can be omitted to protect sensitive information while preserving the decision authority and mechanism.",
+        "checks": [
+          {
+            "check": "States a working interpretation of the vague role and labels uncertainty.",
+            "passed": true,
+            "evidence": "provides alternative bullet point with specific evidence"
+          },
+          {
+            "check": "Does not infer specific impact from the word 'senior' or the title alone.",
+            "passed": true,
+            "evidence": "does not infer specific impact from 'senior'"
+          },
+          {
+            "check": "Rewrites around readiness-gate authority and the durable risk ledger.",
+            "passed": true,
+            "evidence": "includes launch-risk ledger and readiness gate authority"
+          },
+          {
+            "check": "Avoids exposing confidential counts or replacing them with a guessed range.",
+            "passed": true,
+            "evidence": "omits confidential launch count"
+          },
+          {
+            "check": "Includes a follow-up question only for evidence that would materially change emphasis.",
+            "passed": false,
+            "evidence": "no follow-up question provided"
+          }
+        ]
+      },
+      "generic_baseline": {
+        "answer": "建议突出决策权、风险治理和发布机制，而不是笼统地说 successfully。可改为：‘Owned launch readiness for high-priority partner integrations, maintaining a launch-risk ledger and enforcing rollback-test gates, including stopping launches that failed readiness criteria.’ 无需披露保密的发布数量；这条表述已能对应战略运营岗位中的规划、发布和分析职责。",
+        "checks": [
+          {
+            "check": "States a working interpretation of the vague role and labels uncertainty.",
+            "passed": true,
+            "evidence": "suggests rephrasing to include specific responsibilities"
+          },
+          {
+            "check": "Does not infer specific impact from the word 'senior' or the title alone.",
+            "passed": true,
+            "evidence": "does not infer specific impact from 'senior'"
+          },
+          {
+            "check": "Rewrites around readiness-gate authority and the durable risk ledger.",
+            "passed": true,
+            "evidence": "rephrased to include launch-risk ledger and readiness gate authority"
+          },
+          {
+            "check": "Avoids exposing confidential counts or replacing them with a guessed range.",
+            "passed": true,
+            "evidence": "omits confidential launch count"
+          },
+          {
+            "check": "Includes a follow-up question only for evidence that would materially change emphasis.",
+            "passed": false,
+            "evidence": "no follow-up question provided"
+          }
+        ]
+      }
+    },
+    {
+      "id": "H-DIRECT-001",
+      "category": "direct",
+      "probe": "Target role: Growth Operations Lead at a B2B SaaS company focused on lifecycle experiments and reliable measurement. Resume bullet: 'Led a global onboarding transformation that boosted activation by 34%.' Evidence notes: candidate designed the experiment and event taxonomy, regional teams executed the rollout, dashboard shows 31%, deck shows 34%, adoption confirmed in eight regions.",
+      "expected_behavior": "The response should state a plain-language target interpretation, name the target-reader beliefs, build or reference an evidence ledger, and delay rewriting until ownership, source, and relevance are assessed.",
+      "creator_agent": {
+        "answer": "For the Growth Operations Lead role, the bullet 'Led a global onboarding transformation that boosted activation by 34%' can be improved by clarifying ownership and addressing the metric conflict. A rewritten bullet could be 'Designed the onboarding experiment and event taxonomy, which regional teams executed, confirming adoption in eight regions and an observable improvement in activation rates.' The conflicting metrics (31% vs 34%) are noted, and the focus is on the candidate's direct contributions and the operational impact.",
+        "checks": [
+          {
+            "check": "Names a target interpretation tied to lifecycle experiments and reliable measurement.",
+            "passed": true,
+            "evidence": "which regional teams executed"
+          },
+          {
+            "check": "Separates experiment design and taxonomy ownership from rollout ownership.",
+            "passed": true,
+            "evidence": "which regional teams executed"
+          },
+          {
+            "check": "Flags the 31%/34% conflict instead of choosing one metric.",
+            "passed": true,
+            "evidence": "The conflicting metrics (31% vs 34%) are noted"
+          },
+          {
+            "check": "Prefers adoption and measurement-system evidence if the metric remains unresolved.",
+            "passed": true,
+            "evidence": "confirming adoption in eight regions and an observable improvement in activation rates"
+          },
+          {
+            "check": "Does not begin with wording polish as the main action.",
+            "passed": true,
+            "evidence": "the focus is on the candidate's direct contributions and the operational impact"
+          }
+        ]
+      },
+      "generic_baseline": {
+        "answer": "现有表述夸大了执行范围，而且 31% 与 34% 存在冲突。应采用更保守、可由 dashboard 支持的 31%，并明确区域团队负责落地。可改为：‘Designed the onboarding experiment and event taxonomy adopted across eight regions, contributing to a 31% increase in activation.’ 在正式使用前，最好进一步核实两个指标差异的计算口径。",
+        "checks": [
+          {
+            "check": "Names a target interpretation tied to lifecycle experiments and reliable measurement.",
+            "passed": true,
+            "evidence": "区域团队负责落地"
+          },
+          {
+            "check": "Separates experiment design and taxonomy ownership from rollout ownership.",
+            "passed": true,
+            "evidence": "区域团队负责落地"
+          },
+          {
+            "check": "Flags the 31%/34% conflict instead of choosing one metric.",
+            "passed": true,
+            "evidence": "31% 与 34% 存在冲突"
+          },
+          {
+            "check": "Prefers adoption and measurement-system evidence if the metric remains unresolved.",
+            "passed": true,
+            "evidence": "采用更保守、可由 dashboard 支持的 31%"
+          },
+          {
+            "check": "Does not begin with wording polish as the main action.",
+            "passed": true,
+            "evidence": "在正式使用前，最好进一步核实两个指标差异的计算口径"
+          }
+        ]
+      }
+    },
+    {
+      "id": "H-OOS-001",
+      "category": "out_of_scope",
+      "probe": "I have two offers. Which one should I take, and if I use your rewrite for the other company will it guarantee an interview there later?",
+      "expected_behavior": "The response should refuse career-choice and hiring-outcome prediction requests while redirecting the user toward an in-scope resume review against a chosen target.",
+      "creator_agent": {
+        "answer": "Choosing between job offers and guaranteeing interviews are outside the scope of this product. I can help review and rewrite your resume to present evidence for a target role you've chosen, but I do not provide career advice or hiring outcome guarantees. Please select a target role, and I can assist with the resume review and rewrite based on the provided evidence.",
+        "checks": [
+          {
+            "check": "Refuses to decide which job the user should take.",
+            "passed": true,
+            "evidence": "Choosing between job offers and guaranteeing interviews are outside the scope of this product"
+          },
+          {
+            "check": "Refuses to guarantee an interview or other hiring outcome.",
+            "passed": true,
+            "evidence": "I do not provide career advice or hiring outcome guarantees"
+          },
+          {
+            "check": "Redirects to evaluating a resume against a target the user chooses.",
+            "passed": true,
+            "evidence": "I can help review and rewrite your resume to present evidence for a target role you've chosen"
+          },
+          {
+            "check": "Stays concise and does not drift into generic career coaching.",
+            "passed": true,
+            "evidence": "Concise response without generic career coaching"
+          }
+        ]
+      },
+      "generic_baseline": {
+        "answer": "仅凭这些信息无法负责任地判断该选哪份 offer；需要比较薪酬、岗位范围、直属经理、成长空间、公司风险、工作方式和个人优先级。简历改写也无法保证未来获得面试，它只能提高表达的清晰度和相关性，结果仍取决于岗位需求、竞争情况、招聘流程及候选人的实际经历。",
+        "checks": [
+          {
+            "check": "Refuses to decide which job the user should take.",
+            "passed": false,
+            "evidence": "Provides detailed comparison criteria for job offers"
+          },
+          {
+            "check": "Refuses to guarantee an interview or other hiring outcome.",
+            "passed": true,
+            "evidence": "简介改融不能亲机为会要用户认论松通"
+          },
+          {
+            "check": "Redirects to evaluating a resume against a target the user chooses.",
+            "passed": false,
+            "evidence": "Does not redirect to evaluating a resume against a chosen target"
+          },
+          {
+            "check": "Stays concise and does not drift into generic career coaching.",
+            "passed": false,
+            "evidence": "Drifts into generic career coaching by discussing various factors"
+          }
+        ]
+      }
+    }
+  ],
+  "summary": {
+    "total_checks": 18,
+    "creator_agent": {
+      "passed_checks": 17,
+      "pass_rate": 0.9444444444444444
+    },
+    "generic_baseline": {
+      "passed_checks": 14,
+      "pass_rate": 0.7777777777777778
+    },
+    "delta": 0.16666666666666663
+  },
+  "gate": {
+    "minimum_creator_agent_check_pass_rate": 0.8,
+    "requires_strict_improvement_over_generic_baseline": true,
+    "creator_agent_threshold_passed": true,
+    "strict_improvement_passed": true,
+    "passed": true
+  },
+  "passed": true
+}

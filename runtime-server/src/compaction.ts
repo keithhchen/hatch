@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ConversationMessage } from "./protocol.js";
 import { PROJECT_DOCS_CONTEXT_PREFIX } from "./projectDocs.js";
+import { requireKimiProviderConfig } from "./kimiProvider.js";
 
 export const SUMMARY_PREFIX = "CONTEXT CHECKPOINT COMPACTION";
 export const RUNTIME_CONTEXT_PREFIX = "HATCH RUNTIME CONTEXT";
@@ -149,25 +150,23 @@ function isCheckpointSummary(content: string): boolean {
 }
 
 async function summarizeForCompaction(messages: RuntimeCompactionMessage[]): Promise<string> {
-  const apiKey = process.env.OPENAI_API_KEY ?? process.env.MOONSHOT_API_KEY;
-  if (!apiKey) {
-    throw new Error("Missing OPENAI_API_KEY or MOONSHOT_API_KEY for context compaction");
-  }
+  const provider = requireKimiProviderConfig();
 
   const OpenAI = (await import("openai")).default;
   const openai = new OpenAI({
-    apiKey,
-    baseURL: process.env.OPENAI_BASE_URL ?? "https://api.moonshot.cn/v1"
+    apiKey: provider.apiKey,
+    baseURL: provider.baseURL
   });
-  const model = process.env.HATCH_COMPACTION_MODEL ?? process.env.HATCH_CREATOR_MODEL ?? "kimi-k2.6";
   const completion = await openai.chat.completions.create({
-    model,
+    model: provider.model,
+    temperature: provider.temperature,
+    thinking: provider.thinking,
     stream: false,
     messages: [
       { role: "system", content: SUMMARIZATION_PROMPT },
       { role: "user", content: `Conversation transcript:\n\n${runtimeMessagesTranscript(messages)}` }
     ]
-  });
+  } as any);
   return String(completion.choices?.[0]?.message?.content ?? "").trim();
 }
 

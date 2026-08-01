@@ -1,5 +1,10 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import "@fontsource-variable/inter";
+import "@fontsource-variable/noto-sans-sc";
+import "@fontsource-variable/noto-serif-sc";
+import "@fontsource/instrument-serif/400.css";
+import "@fontsource/dm-mono/400.css";
 import { invoke } from "@tauri-apps/api/core";
 import {
   AssistantRuntimeProvider,
@@ -10,7 +15,6 @@ import {
   useMessage
 } from "@assistant-ui/react";
 import { StreamdownTextPrimitive } from "@assistant-ui/react-streamdown";
-import { handleLocalToolRequest, toolCorrelationId } from "./toolBridge.js";
 import {
   createSocketLifecycleState,
   handleCurrentSocketClose,
@@ -18,50 +22,72 @@ import {
   isCurrentSocket,
   registerSocket
 } from "./socketLifecycle.js";
-import { restoreWorkspace, selectWorkspace } from "./workspaceState.js";
 import "streamdown/styles.css";
+import "../../../packages/brand/tokens.css";
+import hatchMarkUrl from "../../../packages/brand/hatch-mark.svg";
 import "./styles.css";
+import {
+  ADVERTISED_LOCAL_TOOLS,
+  DEFAULT_CREATOR_AGENT,
+  PRODUCT_COPY,
+  canStartConversation,
+  creatorAgentFromSession,
+  creatorAgentFromEntitlement,
+  profileStorageKey,
+  requiresUserApproval,
+  workspaceGrantLabel
+} from "./product-policy.js";
+import { fetchPurchasedCreatorAgents, runtimeHttpUrl } from "./entitlement-client.js";
+import {
+  accessCodeAuthSession,
+  clearAuthSession,
+  configuredAuthSession,
+  loadSavedAuthSession,
+  validateAndSaveAuthSession
+} from "./auth-session.js";
 
 const PROTOCOL_VERSION = "0.3";
-const LOCAL_TOOLS = [
-  "fs.list",
-  "fs.search",
-  "fs.read",
-  "fs.write",
-  "fs.patch",
-  "shell.exec",
-  "git.diff"
-];
+const LOCAL_TOOLS = ADVERTISED_LOCAL_TOOLS;
 const SKILL_ACTIVITY_PART = "hatch.skill_activity";
 const SKILL_RUN_ACTIVITY_PART = "hatch.skill_run_activity";
 const LOCAL_TOOL_TIMEOUT_MS = 45_000;
-const WORKSPACE_COMMAND_TIMEOUT_MS = 30_000;
 const DEFAULT_RUNTIME_URL = import.meta.env.VITE_HATCH_RUNTIME_URL || "ws://127.0.0.1:8400/runtime";
+const CONFIGURED_AUTH_SESSION = configuredAuthSession();
+const EMPTY_PROFILE = Object.freeze({ id: "anonymous", name: "User", initials: "U" });
 const ApprovalContext = createContext(null);
 
 function App() {
   const socketRef = useRef(null);
   const socketLifecycleRef = useRef(createSocketLifecycleState());
+  // Runtime messages arrive on a WebSocket listener created before React has
+  // necessarily re-rendered after a folder grant. Local tool execution must
+  // therefore use the latest explicit grant, not a stale render closure.
   const workspaceRef = useRef("");
-  const conversationIdRef = useRef("desktop-chat");
   const activeRunRef = useRef(null);
-  const eventSeqRef = useRef(1);
   const imeRef = useRef({ composing: false, guardUntil: 0 });
   const approvalResolversRef = useRef(new Map());
   const [serverUrl] = useState(DEFAULT_RUNTIME_URL);
   const [workspace, setWorkspace] = useState("");
+  const [signedIn, setSignedIn] = useState(false);
+  const [buyerSession, setBuyerSession] = useState(() => CONFIGURED_AUTH_SESSION ?? loadSavedAuthSession());
+  const [creatorAgentEntitlements, setCreatorAgentEntitlements] = useState([]);
+  const [selectedEntitlementId, setSelectedEntitlementId] = useState("");
+  const [signInStatus, setSignInStatus] = useState("idle");
+  const [signInError, setSignInError] = useState("");
+  const [workspaceGranted, setWorkspaceGranted] = useState(false);
+  const [interruptedRun, setInterruptedRun] = useState(null);
   const [conversationId, setConversationId] = useState("desktop-chat");
-  const [status, setStatus] = useState("Disconnected");
+  const [status, setStatus] = useState("Offline");
   const [connected, setConnected] = useState(false);
   const [running, setRunning] = useState(false);
   const [messages, setMessages] = useState([]);
-  const [events, setEvents] = useState([]);
   const [approvalRequests, setApprovalRequests] = useState({});
+  const [creatorAgent, setCreatorAgent] = useState(DEFAULT_CREATOR_AGENT);
+  const buyerProfile = buyerSession?.profile ?? EMPTY_PROFILE;
 
   const send = useCallback((message) => {
     const socket = socketRef.current;
     if (!socket || socket.readyState !== WebSocket.OPEN) return false;
-    recordEvent("out", message);
     socket.send(JSON.stringify(message));
     return true;
   }, []);
@@ -99,7 +125,7 @@ function App() {
   const sendUserMessage = useCallback(async (appendMessage) => {
     const socket = socketRef.current;
     if (!connected || !socket || socket.readyState !== WebSocket.OPEN) {
-      setStatus("Runtime unavailable.");
+      setStatus("Service unavailable. Try reconnecting.");
       return;
     }
     if (activeRunRef.current) {
@@ -114,6 +140,9 @@ function App() {
     const assistantId = `${runId}_assistant`;
     const startedAt = Date.now();
     activeRunRef.current = { runId, assistantId, text: "", startedAt };
+    localStorage.setItem(profileStorageKey(buyerProfile.id, "activeRun"), JSON.stringify({
+      runId, assistantId, startedAt, conversationId
+    }));
     setMessages((current) => [
       ...current,
       makeUserMessage(`${runId}_user`, content, startedAt),
@@ -131,7 +160,7 @@ function App() {
         content
       }
     });
-  }, [connected, conversationId, send]);
+  }, [buyerProfile.id, connected, conversationId, send]);
 
   const runtime = useExternalStoreRuntime({
     messages,
@@ -170,31 +199,25 @@ function App() {
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const defaultWorkspace = await invokeTauri("default_workspace");
-      if (cancelled) return;
-      const savedWorkspace = restoreWorkspace({
-        storage: localStorage,
-        defaultWorkspace,
-        setWorkspaceRef: (value) => {
-          workspaceRef.current = value;
-        },
-        setWorkspace
-      });
-      const savedConversationId = localStorage.getItem("hatch.conversationId") || "desktop-chat";
-      conversationIdRef.current = savedConversationId;
-      setConversationId(savedConversationId);
-      void connectRuntime({
-        serverUrl: DEFAULT_RUNTIME_URL,
-        workspace: savedWorkspace,
-        conversationId: savedConversationId
-      });
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    const workspaceKey = profileStorageKey(buyerProfile.id, "workspaceRoot");
+    const conversationKey = profileStorageKey(buyerProfile.id, "conversationId");
+    const activeRunKey = profileStorageKey(buyerProfile.id, "activeRun");
+    const savedWorkspace = localStorage.getItem(workspaceKey) || "";
+    const savedConversationId = localStorage.getItem(conversationKey) || `conversation_${buyerProfile.id}`;
+    const savedRun = parseStoredJson(localStorage.getItem(activeRunKey));
+    setWorkspace(savedWorkspace);
+    workspaceRef.current = savedWorkspace;
+    setWorkspaceGranted(Boolean(savedWorkspace));
+    setConversationId(savedConversationId);
+    if (savedRun) {
+      activeRunRef.current = savedRun;
+      setInterruptedRun(savedRun);
+      setStatus("Task paused — reconnect to recover it");
+    } else {
+      activeRunRef.current = null;
+      setInterruptedRun(null);
+    }
+  }, [buyerProfile.id]);
 
   useEffect(() => () => {
     const socket = socketRef.current;
@@ -203,50 +226,36 @@ function App() {
     socket?.close();
   }, []);
 
-  async function chooseWorkspace() {
-    try {
-      await selectWorkspace({
-        invokeTauri,
-        storage: localStorage,
-        previousWorkspace: workspaceRef.current || workspace,
-        setWorkspaceRef: (normalized) => {
-          workspaceRef.current = normalized;
-        },
-        setWorkspace,
-        disconnectRuntime: socketRef.current ? disconnectRuntime : undefined,
-        recordTrace: recordRendererTrace,
-        commandTimeoutMs: WORKSPACE_COMMAND_TIMEOUT_MS
-      });
-    } catch (error) {
-      setStatus(errorMessage(error));
-    }
-  }
-
   async function connectRuntime(connection = {}) {
     if (connected || socketRef.current) return;
     const targetServerUrl = connection.serverUrl || serverUrl;
     const targetWorkspace = connection.workspace || workspaceRef.current || workspace;
-    const targetConversationId = connection.conversationId || conversationIdRef.current || conversationId;
-    if (!targetServerUrl.trim() || !targetWorkspace.trim()) {
-      setStatus("Runtime unavailable.");
+    const targetConversationId = connection.conversationId || conversationId;
+    const targetEntitlementId = connection.entitlementId || selectedEntitlementId;
+    if (!targetServerUrl.trim() || !targetWorkspace.trim() || !buyerSession?.accessToken || !targetEntitlementId) {
+      setStatus("Choose a folder before connecting.");
       return;
     }
+
+    localStorage.setItem(profileStorageKey(buyerProfile.id, "workspaceRoot"), targetWorkspace.trim());
+    localStorage.setItem(profileStorageKey(buyerProfile.id, "conversationId"), targetConversationId.trim() || `conversation_${buyerProfile.id}`);
 
     let normalizedWorkspace;
     try {
       normalizedWorkspace = await invokeTauri("ensure_workspace", {
         workspaceRoot: targetWorkspace.trim()
       });
-      workspaceRef.current = normalizedWorkspace;
-      conversationIdRef.current = targetConversationId.trim() || "desktop-chat";
-      localStorage.setItem("hatch.workspaceRoot", normalizedWorkspace);
-      localStorage.setItem("hatch.conversationId", conversationIdRef.current);
       setWorkspace(normalizedWorkspace);
+      workspaceRef.current = normalizedWorkspace;
       setStatus("Loading history...");
       const activeConversationId = targetConversationId.trim() || "desktop-chat";
-      const history = await loadConversationHistory(targetServerUrl.trim(), activeConversationId);
+      const history = await loadConversationHistory(
+        targetServerUrl.trim(),
+        activeConversationId,
+        targetEntitlementId,
+        buyerSession.accessToken
+      );
       setMessages(history.map(historyMessageToThreadMessage));
-      setEvents([]);
       setStatus("Connecting...");
     } catch (error) {
       setStatus(errorMessage(error));
@@ -262,10 +271,11 @@ function App() {
         type: "client.hello",
         protocol_version: PROTOCOL_VERSION,
         installation_id: "desktop-local-install",
-        license_token: "desktop-local-license",
+        license_token: buyerSession.accessToken,
+        entitlement_id: targetEntitlementId,
         client_version: "0.1.0",
         workspace_root: normalizedWorkspace,
-        local_tools: LOCAL_TOOLS
+        local_tools: LOCAL_TOOLS,
       });
     });
     socket.addEventListener("message", (event) => {
@@ -274,16 +284,20 @@ function App() {
     });
     socket.addEventListener("error", () => {
       if (!isCurrentSocket(socketLifecycleRef.current, socket, generation)) return;
-      setStatus("Runtime socket error.");
+      setStatus("Connection problem. Your work has been kept.");
     });
     socket.addEventListener("close", () => {
       handleCurrentSocketClose(socketLifecycleRef.current, socket, generation, () => {
         rejectPendingApprovals();
         socketRef.current = null;
-        activeRunRef.current = null;
         setConnected(false);
         setRunning(false);
-        setStatus("Disconnected");
+        if (activeRunRef.current) {
+          setInterruptedRun(activeRunRef.current);
+          setStatus("Task paused — your work has been kept");
+        } else {
+          setStatus("Offline — reconnect when you're ready");
+        }
       });
     });
   }
@@ -294,18 +308,16 @@ function App() {
     rejectPendingApprovals();
     socket?.close();
     socketRef.current = null;
-    activeRunRef.current = null;
     setConnected(false);
     setRunning(false);
-    setStatus("Disconnected");
+    setStatus(activeRunRef.current ? "Task paused — your work has been kept" : "Offline");
   }
 
   async function handleRuntimeMessage(message) {
-    recordEvent("in", message);
-
     if (message.type === "session.ready") {
+      setCreatorAgent(creatorAgentFromSession(message));
       setConnected(true);
-      setStatus(`Connected: protocol ${message.accepted_protocol_version}`);
+      setStatus("Ready");
       return;
     }
 
@@ -346,28 +358,18 @@ function App() {
     }
 
     if (message.type === "tool_call.request") {
-      recordRendererTrace("tool_request.received", "requested", toolCorrelationId(message));
       upsertToolEvent({
         ...message,
         locality: "client",
         status: "requested"
       });
-      await handleLocalToolRequest(message, {
-        workspaceRoot: workspaceRef.current || workspace,
-        invokeTauri,
-        withTimeout,
-        timeoutMs: LOCAL_TOOL_TIMEOUT_MS,
-        send,
-        upsertToolEvent,
-        recordTrace: recordRendererTrace,
-        errorMessage
-      });
+      await handleToolRequest(message);
       return;
     }
 
     if (message.type === "skill.activated" || message.type === "skill.invoked") {
       upsertSkillEvent(message);
-      setStatus(`${message.status === "activated" ? "Loaded" : "Invoked"} skill: ${message.name}`);
+      setStatus(`${message.status === "activated" ? "Creator method ready" : "Creator method applied"}: ${message.name}`);
       return;
     }
 
@@ -378,7 +380,22 @@ function App() {
     }
 
     if (message.type === "session.compacted") {
-      setStatus("Session compacted");
+      setStatus("Conversation optimized");
+      return;
+    }
+
+    if (message.type === "delivery.ready") {
+      updateAssistantMetadataForRun(message.run_id, {
+        delivery: {
+          taskId: message.task_id,
+          artifactId: message.artifact_id,
+          artifactDigest: message.artifact_digest,
+          deliveryId: message.delivery_id,
+          artifactType: message.artifact_type,
+          artifactPath: message.artifact_path
+        }
+      });
+      setStatus("Delivery ready");
       return;
     }
 
@@ -389,6 +406,8 @@ function App() {
         finishAssistant(activeRun.assistantId, finalText || activeRun.text || "Done.", "completed");
       }
       activeRunRef.current = null;
+      localStorage.removeItem(profileStorageKey(buyerProfile.id, "activeRun"));
+      setInterruptedRun(null);
       setRunning(false);
       setStatus("Completed");
       return;
@@ -408,9 +427,172 @@ function App() {
         ]);
       }
       activeRunRef.current = null;
+      localStorage.removeItem(profileStorageKey(buyerProfile.id, "activeRun"));
+      setInterruptedRun(null);
       setRunning(false);
       setStatus("Failed");
     }
+  }
+
+  async function handleToolRequest(message) {
+    if (message.name === "shell.exec") {
+      sendToolDenied(message, "Command execution is disabled because this build does not provide a complete OS sandbox.", "shell_disabled");
+      return;
+    }
+    let approvedByUser = false;
+    if (message.approval === "ask" || requiresUserApproval(message.name)) {
+      const approved = await requestToolApproval(message);
+      if (!approved) {
+        upsertToolEvent({
+          ...message,
+          locality: "client",
+          status: "failed",
+          error: {
+            code: "approval_denied",
+            message: `Tool call rejected by user: ${message.name}`
+          }
+        });
+        send({
+          type: "tool_call.result",
+          run_id: message.run_id,
+          tool_call_id: message.tool_call_id,
+          status: "error",
+          error: {
+            code: "approval_denied",
+            message: `Tool call rejected by user: ${message.name}`
+          }
+        });
+        return;
+      }
+      approvedByUser = true;
+    }
+
+    try {
+      const result = await withTimeout(
+        invokeTauri("execute_tool_call", {
+          workspaceRoot: workspaceRef.current,
+          request: approvedByUser ? { ...message, approval: "approved_by_user" } : message
+        }),
+        LOCAL_TOOL_TIMEOUT_MS,
+        `Local tool timed out after ${Math.round(LOCAL_TOOL_TIMEOUT_MS / 1000)}s: ${message.name}`
+      );
+      send(result);
+    } catch (error) {
+      const localError = {
+        code: error?.code === "local_tool_timeout" ? "local_tool_timeout" : "local_runner_error",
+        message: errorMessage(error)
+      };
+      upsertToolEvent({
+        ...message,
+        locality: "client",
+        status: "failed",
+        error: localError
+      });
+      send({
+        type: "tool_call.result",
+        run_id: message.run_id,
+        tool_call_id: message.tool_call_id,
+        status: "error",
+        error: localError
+      });
+    }
+  }
+
+  function sendToolDenied(message, reason, code = "approval_denied") {
+    upsertToolEvent({ ...message, locality: "client", status: "failed", error: { code, message: reason } });
+    send({
+      type: "tool_call.result",
+      run_id: message.run_id,
+      tool_call_id: message.tool_call_id,
+      status: "error",
+      error: { code, message: reason }
+    });
+  }
+
+  async function grantWorkspace() {
+    try {
+      const selected = await invokeTauri("pick_workspace");
+      if (!selected) {
+        setStatus("Folder selection cancelled");
+        return;
+      }
+      const normalized = await invokeTauri("ensure_workspace", { workspaceRoot: selected });
+      setWorkspace(normalized);
+      workspaceRef.current = normalized;
+      setWorkspaceGranted(true);
+      localStorage.setItem(profileStorageKey(buyerProfile.id, "workspaceRoot"), normalized);
+      setStatus("Folder access granted");
+      await connectRuntime({ workspace: normalized, conversationId });
+    } catch (error) {
+      setStatus(errorMessage(error));
+    }
+  }
+
+  function startNewConversation() {
+    const guard = canStartConversation({ activeRun: activeRunRef.current, connected });
+    if (!guard.allowed) {
+      setStatus(guard.reason);
+      return;
+    }
+    const nextId = `conversation_${buyerProfile.id}_${Date.now()}`;
+    setConversationId(nextId);
+    setMessages([]);
+    localStorage.setItem(profileStorageKey(buyerProfile.id, "conversationId"), nextId);
+    setStatus("New conversation ready");
+  }
+
+  function clearInterruptedRun() {
+    activeRunRef.current = null;
+    setInterruptedRun(null);
+    localStorage.removeItem(profileStorageKey(buyerProfile.id, "activeRun"));
+    setStatus("Paused task closed by you");
+  }
+
+  async function signIn(credentials) {
+    setSignInStatus("loading");
+    setSignInError("");
+    try {
+      const nextSession = credentials ? accessCodeAuthSession(credentials) : buyerSession;
+      if (!nextSession) throw new Error("Enter your name and access code.");
+      const entitlements = await validateAndSaveAuthSession(
+        nextSession,
+        (accessToken) => fetchPurchasedCreatorAgents(serverUrl, accessToken)
+      );
+      const selected = entitlements[0];
+      setBuyerSession(nextSession);
+      setCreatorAgentEntitlements(entitlements);
+      setSelectedEntitlementId(selected?.entitlement_id || "");
+      setCreatorAgent(selected ? creatorAgentFromEntitlement(selected) : DEFAULT_CREATOR_AGENT);
+      setSignedIn(true);
+      setSignInStatus("ready");
+    } catch (error) {
+      setSignInStatus("error");
+      setSignInError(errorMessage(error));
+    }
+  }
+
+  function signOut() {
+    disconnectRuntime();
+    clearAuthSession(buyerSession);
+    activeRunRef.current = null;
+    setInterruptedRun(null);
+    setBuyerSession(null);
+    setSignedIn(false);
+    setCreatorAgentEntitlements([]);
+    setSelectedEntitlementId("");
+    setCreatorAgent(DEFAULT_CREATOR_AGENT);
+    setMessages([]);
+    setSignInStatus("idle");
+    setSignInError("");
+  }
+
+  function selectCreatorAgent(entitlement) {
+    if (entitlement.entitlement_id === selectedEntitlementId) return;
+    disconnectRuntime();
+    setSelectedEntitlementId(entitlement.entitlement_id);
+    setCreatorAgent(creatorAgentFromEntitlement(entitlement));
+    setMessages([]);
+    setConversationId(`conversation_${buyerProfile.id}_${entitlement.product.id}`);
   }
 
   function requestToolApproval(message) {
@@ -609,81 +791,77 @@ function App() {
     }));
   }
 
-  function recordEvent(direction, event) {
-    const id = `${Date.now()}_${eventSeqRef.current++}`;
-    setEvents((current) => [...current.slice(-299), {
-      id,
-      direction,
-      event,
-      at: new Date().toLocaleTimeString()
-    }]);
+  if (!signedIn) {
+    return <SignInScreen profile={buyerSession?.profile} onSignIn={(credentials) => void signIn(credentials)} status={signInStatus} error={signInError} />;
   }
 
   return (
     <main className="app-shell">
       <aside className="control-panel">
         <div className="brand">
-          <span className="brand-mark">H</span>
+          <img className="hatch-mark" src={hatchMarkUrl} alt="" />
           <div>
-            <h1>Hatch</h1>
-            <p>Server-owned agent chat</p>
+            <h1 className="hatch-wordmark">Hatch.</h1>
+            <p>Creator agents, on your terms</p>
           </div>
         </div>
 
-        <section className="connection-card">
-          <div className="connection-status">
-            <span className={`status-light ${connected ? "online" : "offline"}`} />
-            <div>
-              <span>Runtime</span>
-              <strong>{connected ? "Ready" : status}</strong>
-            </div>
-          </div>
+        <section className="profile-card">
+          <span className="avatar">{buyerProfile.initials}</span>
+          <div><strong>{buyerProfile.name}</strong><span>Signed in</span></div>
+          <button className="profile-sign-out" type="button" onClick={signOut}>Sign out</button>
         </section>
 
-        <section className="side-section">
-          <div className="workspace-picker">
-            <span className="label">Workspace</span>
-            <strong>{workspace || "No workspace selected"}</strong>
-            <button type="button" className="secondary" onClick={() => void chooseWorkspace()}>
-              {workspace ? "Change folder" : "Choose folder"}
-            </button>
-          </div>
+        <section className="side-section agent-nav">
+          <h2>{PRODUCT_COPY.home}</h2>
+          {creatorAgentEntitlements.map((entitlement) => {
+            const agent = creatorAgentFromEntitlement(entitlement);
+            return (
+              <button
+                className={`agent-nav-item ${entitlement.entitlement_id === selectedEntitlementId ? "active" : ""}`}
+                key={entitlement.entitlement_id}
+                type="button"
+                onClick={() => selectCreatorAgent(entitlement)}
+              >
+                <span className="creator-avatar">{agent.creatorInitials}</span>
+                <span><strong>{agent.name}</strong><small>by {agent.creator}</small></span>
+              </button>
+            );
+          })}
+          {creatorAgentEntitlements.length === 0 ? <p className="empty-library">No purchased agents yet.</p> : null}
         </section>
-
-        <section className="side-section">
-          <h2>Local Tools</h2>
-          <div className="tool-list">
-            {LOCAL_TOOLS.map((tool) => <span key={tool}>{tool}</span>)}
-          </div>
-        </section>
-
-        <details className="debug-panel">
-          <summary>Debug Event Stream</summary>
-          <EventTimeline events={events} />
-        </details>
+        <button className="secondary new-conversation" type="button" onClick={startNewConversation}>+ New conversation</button>
       </aside>
 
       <section className="chat-shell">
         <header className="chat-header">
           <div>
-            <span className="label">Session</span>
-            <strong>{conversationId.trim() || "desktop-chat"}</strong>
+            <span className="label">Agent</span>
+            <strong>{creatorAgent.name} · {creatorAgent.creator}</strong>
           </div>
           <div>
-            <span className="label">Workspace</span>
-            <strong>{workspace || "No workspace selected"}</strong>
+            <span className="label">Folder access</span>
+            <strong>{workspaceGranted ? `${workspaceGrantLabel(workspace)} · read allowed · changes ask first` : "No folder granted"}</strong>
           </div>
           {running ? (
             <button className="secondary compact" onClick={() => void cancelRun()}>Stop</button>
+          ) : !connected && workspaceGranted ? (
+            <button className="secondary compact" onClick={() => void connectRuntime()}>Reconnect</button>
           ) : null}
         </header>
 
+        {!workspaceGranted ? (
+          <WorkspaceGrant
+            onGrant={() => void grantWorkspace()}
+            status={status}
+          />
+        ) : (
         <ApprovalContext.Provider value={{ requests: approvalRequests, resolveToolApproval }}>
           <AssistantRuntimeProvider runtime={runtime}>
             <ThreadPrimitive.Root className="thread-root">
               <ThreadPrimitive.Viewport className="thread-viewport">
                 <ThreadPrimitive.Empty>
-                  <EmptyThread connected={connected} />
+                  <EmptyThread connected={connected} creatorAgent={creatorAgent} />
                 </ThreadPrimitive.Empty>
                 <ThreadPrimitive.Messages components={{ Message: HatchMessage }} />
               </ThreadPrimitive.Viewport>
@@ -696,7 +874,7 @@ function App() {
                     onCompositionStart={startImeComposition}
                     onKeyDownCapture={stopImeEnterSubmit}
                     onKeyUpCapture={stopImeEnterSubmit}
-                    placeholder={connected ? "Ask Hatch to inspect, edit, or explain this workspace" : "Preparing the runtime..."}
+                    placeholder={connected ? `Message ${creatorAgent.name}` : "Reconnect to continue this conversation"}
                     submitMode="enter"
                     rows={1}
                   />
@@ -706,27 +884,34 @@ function App() {
             </ThreadPrimitive.Root>
           </AssistantRuntimeProvider>
         </ApprovalContext.Provider>
+        )}
+        {interruptedRun ? (
+          <div className="recovery-banner" role="alert">
+            <div><strong>Your task is safe.</strong><span>It paused before completion. Reconnect to recover it, or close it explicitly.</span></div>
+            <button className="secondary compact" type="button" onClick={() => void connectRuntime()}>Reconnect</button>
+            <button className="secondary compact" type="button" onClick={clearInterruptedRun}>Close task</button>
+          </div>
+        ) : null}
       </section>
     </main>
   );
 }
 
-async function loadConversationHistory(serverUrl, conversationId) {
-  const response = await fetch(historyUrlForRuntime(serverUrl, conversationId));
+async function loadConversationHistory(serverUrl, conversationId, entitlementId, accessToken) {
+  const response = await fetch(historyUrlForRuntime(serverUrl, conversationId, entitlementId), {
+    headers: { authorization: `Bearer ${accessToken}` }
+  });
   if (!response.ok) {
-    throw new Error(`Could not load conversation history: HTTP ${response.status}`);
+    throw new Error("We couldn't reload this conversation. Try reconnecting.");
   }
   const payload = await response.json();
   const messages = Array.isArray(payload.messages) ? payload.messages : [];
   return messages.filter((message) => message.role === "user" || message.role === "assistant");
 }
 
-function historyUrlForRuntime(serverUrl, conversationId) {
-  const url = new URL(serverUrl);
-  url.protocol = url.protocol === "wss:" ? "https:" : "http:";
-  url.pathname = `/conversations/${encodeURIComponent(conversationId)}/messages`;
-  url.search = "";
-  url.hash = "";
+function historyUrlForRuntime(serverUrl, conversationId, entitlementId) {
+  const url = new URL(runtimeHttpUrl(serverUrl, `/conversations/${encodeURIComponent(conversationId)}/messages`));
+  url.searchParams.set("entitlement_id", entitlementId);
   return url.toString();
 }
 
@@ -1042,22 +1227,96 @@ function toolEventFromApproval(message) {
   };
 }
 
-function EmptyThread({ connected }) {
+function EmptyThread({ connected, creatorAgent }) {
   return (
     <div className="empty-thread">
-      <span className="empty-kicker">{connected ? "Ready" : "Starting"}</span>
-      <h2>{connected ? "Ask Hatch about this workspace." : "Preparing your workspace."}</h2>
+      <span className="creator-avatar large">{creatorAgent.creatorInitials}</span>
+      <span className="empty-kicker">{creatorAgent.creator}</span>
+      <h2>{connected ? `What would you like to work on?` : "Your conversation is offline."}</h2>
       <p>
         {connected
-          ? "The server keeps session history. This client sends only your next message and executes approved local tools."
-          : "Hatch is connecting to the runtime and loading your existing conversation history."}
+          ? creatorAgent.description
+          : "Reconnect when you're ready. Your conversation and unfinished task stay here."}
       </p>
+      {creatorAgent.boundary ? <small className="boundary-copy">{creatorAgent.boundary}</small> : null}
+    </div>
+  );
+}
+
+function SignInScreen({ profile, onSignIn, status, error }) {
+  const [manual, setManual] = useState(!profile);
+  const [name, setName] = useState("");
+  const [accessCode, setAccessCode] = useState("");
+  const loading = status === "loading";
+
+  function submit(event) {
+    event.preventDefault();
+    onSignIn(manual ? { name, accessCode } : undefined);
+  }
+
+  return (
+    <main className="welcome-screen">
+      <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch.</strong></div>
+      <section className="sign-in-card">
+        <span className="eyebrow">Welcome</span>
+        <h1>Your trusted creator agents, in one place.</h1>
+        <p>Use the access code from your purchase to open your agents on this computer.</p>
+        <form className="sign-in-form" onSubmit={submit}>
+          {manual ? (
+            <>
+              <label className="field">
+                <span>Your name</span>
+                <input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Your name" disabled={loading} />
+              </label>
+              <label className="field">
+                <span>Access code</span>
+                <input autoCapitalize="none" autoComplete="off" spellCheck="false" type="password" value={accessCode} onChange={(event) => setAccessCode(event.target.value)} placeholder="Paste your access code" disabled={loading} />
+              </label>
+            </>
+          ) : (
+            <div className="returning-profile">
+              <span className="avatar">{profile.initials}</span>
+              <span><strong>{profile.name}</strong><small>Your agents are ready on this computer.</small></span>
+            </div>
+          )}
+          <button type="submit" disabled={loading || (manual && (!name.trim() || !accessCode.trim()))}>
+            {loading ? "Opening your agents…" : manual ? "Open my agents" : `Continue as ${profile.name}`}
+          </button>
+        </form>
+        {error ? <small className="sign-in-error" role="alert">{error}</small> : null}
+        {profile ? (
+          <button className="sign-in-switch" type="button" onClick={() => { setManual((value) => !value); setName(""); setAccessCode(""); }} disabled={loading}>
+            {manual ? `Continue as ${profile.name}` : "Use a different access code"}
+          </button>
+        ) : null}
+        <small>Your access stays on this computer until you sign out.</small>
+      </section>
+    </main>
+  );
+}
+
+function WorkspaceGrant({ onGrant, status }) {
+  return (
+    <div className="workspace-gate">
+      <section className="workspace-card">
+        <span className="permission-icon">⌂</span>
+        <span className="eyebrow">One-time setup</span>
+        <h2>{PRODUCT_COPY.workspaceRequired}</h2>
+        <p>{PRODUCT_COPY.readPolicy}</p>
+        <button type="button" onClick={onGrant}>Choose a folder</button>
+        <div className="permission-policy">
+          <strong>You're in control</strong>
+          <span>{PRODUCT_COPY.changePolicy}</span>
+        </div>
+        {status && status !== "Offline" ? <small className="gate-status">{status}</small> : null}
+      </section>
     </div>
   );
 }
 
 function HatchMessage() {
   const role = useMessage((message) => message.role);
+  const delivery = useMessage((message) => message.metadata?.custom?.delivery);
   return (
     <MessagePrimitive.Root className={`chat-message ${role}`}>
       {role === "assistant" ? <AssistantRunHeader /> : null}
@@ -1079,8 +1338,21 @@ function HatchMessage() {
             ToolGroup: ToolGroup
           }}
         />
+        {role === "assistant" && delivery ? <DeliveryReceipt delivery={delivery} /> : null}
       </div>
     </MessagePrimitive.Root>
+  );
+}
+
+function DeliveryReceipt({ delivery }) {
+  const label = delivery.artifactType === "file" && delivery.artifactPath
+    ? delivery.artifactPath
+    : "Message delivered";
+  return (
+    <div className="delivery-receipt">
+      <span className="delivery-check">✓</span>
+      <span><strong>{label}</strong><small>Delivered</small></span>
+    </div>
   );
 }
 
@@ -1107,14 +1379,14 @@ function AssistantRunHeader() {
   const latestTool = [...toolParts].reverse()[0];
   const failed = status?.type === "incomplete" || custom.status === "failed";
   const summary = failed
-    ? `运行失败 ${elapsed}`
+    ? `Couldn't finish · ${elapsed}`
     : isRunning && activeTool
       ? `${toolDisplay(activeTool.toolName).running} ${elapsed}`
       : isRunning
-        ? `思考中 ${elapsed}`
+        ? `Working · ${elapsed}`
         : latestTool
-          ? `已思考 ${elapsed}`
-          : `已回答 ${elapsed}`;
+          ? `Finished · ${elapsed}`
+          : `Answered · ${elapsed}`;
 
   return (
     <div className="run-summary">
@@ -1202,22 +1474,21 @@ function HatchToolCall(props) {
   const state = toolState(props, approvalRequest);
   const target = toolTarget(props.args);
   const label = toolActionLabel(display.action, state, target);
-  const locality = props.artifact?.locality === "server" ? "server" : "local";
   const summary = toolResultSummary(props);
   const pendingApproval = approvalRequest?.status === "pending";
 
   return (
-    <details className={`tool-call ${state}`} open={pendingApproval ? true : undefined}>
-      <summary>
+    <div className={`tool-call ${state}`}>
+      <div className="tool-summary">
         <span className="tool-icon">{display.icon}</span>
         <span className="tool-label">{label}</span>
-        <span className="tool-meta">{locality}{summary ? ` · ${summary}` : ""}</span>
-      </summary>
-      <div className="tool-detail">
+        {summary ? <span className="tool-meta">{summary}</span> : null}
+      </div>
+      {pendingApproval || approvalRequest?.status ? <div className="tool-detail">
         {pendingApproval ? (
           <div className="approval-gate">
             <div>
-              <strong>Approve local tool?</strong>
+              <strong>Allow this action?</strong>
               <p>{approvalRequest.message.reason || approvalReasonText(approvalRequest.message)}</p>
             </div>
             <div className="approval-actions">
@@ -1231,15 +1502,11 @@ function HatchToolCall(props) {
           </div>
         ) : approvalRequest?.status ? (
           <div className={`approval-resolution ${approvalRequest.status}`}>
-            {approvalRequest.status === "approved" ? "Approved by user" : "Denied by user"}
+            {approvalRequest.status === "approved" ? "Allowed" : "Not allowed"}
           </div>
         ) : null}
-        <ToolDetailBlock title="Arguments" value={props.args} />
-        {props.result !== undefined ? (
-          <ToolDetailBlock title={props.isError ? "Error" : "Result"} value={props.result} />
-        ) : null}
-      </div>
-    </details>
+      </div> : null}
+    </div>
   );
 }
 
@@ -1254,11 +1521,8 @@ function SkillActivityPart({ data }) {
         <span className="skill-meta">{display.meta}</span>
       </summary>
       <div className="skill-detail">
-        <SkillDetailRow label="Skill" value={data.name} />
-        <SkillDetailRow label="Reason" value={skillReasonLabel(data.reason)} />
-        <SkillDetailRow label="Source" value={data.path} />
-        {data.source_tool_call_id ? <SkillDetailRow label="Source Tool" value={data.source_tool_call_id} /> : null}
-        {data.trigger ? <SkillDetailRow label="Trigger" value={skillTriggerLabel(data.trigger)} /> : null}
+        <SkillDetailRow label="Method" value={methodDisplayName(data.name)} />
+        <p className="skill-explanation">This method is provided and maintained by the Creator.</p>
       </div>
     </details>
   );
@@ -1266,26 +1530,26 @@ function SkillActivityPart({ data }) {
 
 function SkillRunActivityPart({ data }) {
   const status = data.status;
+  const methodName = methodDisplayName(data.name);
   const label = status === "completed"
-    ? `已完成 skill ${data.name}`
+    ? `Applied ${methodName}`
     : status === "failed"
-      ? `skill ${data.name} 失败`
+      ? `Could not apply ${methodName}`
       : status === "cancelled"
-        ? `已取消 skill ${data.name}`
+        ? `Stopped ${methodName}`
         : status === "requested"
-          ? `准备运行 skill ${data.name}`
-          : `正在运行 skill ${data.name}`;
+          ? `Preparing ${methodName}`
+          : `Applying ${methodName}`;
   const icon = status === "completed" ? "◆" : status === "failed" || status === "cancelled" ? "!" : "◇";
   return (
     <details className={`skill-activity skill-run-${status}`} open={status === "failed"}>
       <summary>
         <span className="skill-icon">{icon}</span>
         <span className="skill-label">{label}</span>
-        <span className="skill-meta">{data.skill_run_id}</span>
+        <span className="skill-meta">Creator method</span>
       </summary>
       <div className="skill-detail">
-        <SkillDetailRow label="Skill" value={data.skill_id ?? data.name} />
-        <SkillDetailRow label="Run" value={data.skill_run_id} />
+        <SkillDetailRow label="Method" value={methodName} />
         {data.error?.message ? <SkillDetailRow label="Error" value={data.error.message} /> : null}
       </div>
     </details>
@@ -1302,48 +1566,26 @@ function SkillDetailRow({ label, value }) {
   );
 }
 
-function ToolDetailBlock({ title, value }) {
-  return (
-    <div className="tool-detail-block">
-      <span>{title}</span>
-      <pre>{formatToolValue(value)}</pre>
-    </div>
-  );
-}
-
-function EventTimeline({ events }) {
-  if (events.length === 0) {
-    return <div className="event-empty">No events yet.</div>;
-  }
-
-  return (
-    <ol className="event-list">
-      {events.map((entry) => (
-        <li key={entry.id} className="event-row">
-          <div className="event-summary">
-            <span className={`event-direction ${entry.direction}`}>{entry.direction === "in" ? "recv" : "send"}</span>
-            <span className={`event-status status-${eventTone(entry.event)}`}>{debugEventStatus(entry.event)}</span>
-            <span className="event-title">{debugEventTitle(entry.event)}</span>
-            <span className="event-time">{entry.at}</span>
-          </div>
-          <details>
-            <summary>raw</summary>
-            <pre>{JSON.stringify(entry.event, null, 2)}</pre>
-          </details>
-        </li>
-      ))}
-    </ol>
-  );
-}
-
 function approvalReasonText(message) {
   if (message.name === "fs.write") {
     return `Write ${toolTarget(message.arguments) || "a file"} in the selected workspace.`;
+  }
+  if (message.name === "fs.patch") {
+    return `Update ${toolTarget(message.arguments) || "a file"} in the selected workspace.`;
   }
   if (message.name === "shell.exec") {
     return `Run command: ${toolTarget(message.arguments) || "shell command"}`;
   }
   return `Run ${message.name} locally in the selected workspace.`;
+}
+
+function parseStoredJson(value) {
+  if (!value) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
 }
 
 function toolState(part, approvalRequest) {
@@ -1358,60 +1600,58 @@ function toolState(part, approvalRequest) {
 
 function skillActivityDisplay(data) {
   const status = data.status === "invoked" ? "invoked" : "activated";
+  const methodName = methodDisplayName(data.name);
   const label = status === "invoked"
-    ? `已调用 skill ${data.name}`
-    : `已加载 skill ${data.name}`;
+    ? `Applied ${methodName}`
+    : `Using ${methodName}`;
   return {
     icon: status === "invoked" ? "◆" : "◇",
     label,
-    meta: skillReasonLabel(data.reason)
+    meta: "Creator method"
   };
 }
 
 function skillRunStatusLabel(event) {
-  if (event.status === "completed") return `Completed skill: ${event.name}`;
-  if (event.status === "failed") return `Skill failed: ${event.name}`;
-  if (event.status === "cancelled") return `Cancelled skill: ${event.name}`;
-  if (event.status === "requested") return `Starting skill: ${event.name}`;
-  return `Running skill: ${event.name}`;
+  const methodName = methodDisplayName(event.name);
+  if (event.status === "completed") return `Creator method applied: ${methodName}`;
+  if (event.status === "failed") return `Couldn't apply Creator method: ${methodName}`;
+  if (event.status === "cancelled") return `Stopped applying Creator method: ${methodName}`;
+  if (event.status === "requested") return `Preparing Creator method: ${methodName}`;
+  return `Applying Creator method: ${methodName}`;
 }
 
-function skillReasonLabel(reason) {
-  if (reason === "explicit_mention") return "显式触发";
-  if (reason === "skill_doc_read") return "读取 SKILL.md";
-  if (reason === "script_run") return "运行 skill 脚本";
-  if (reason === "skipped") return "已跳过";
-  if (reason === "unavailable") return "不可用";
-  return reason || "skill activity";
-}
-
-function skillTriggerLabel(trigger) {
-  if (!trigger) return "";
-  const target = trigger.path ?? trigger.command ?? "";
-  return [trigger.tool, target].filter(Boolean).join(" · ");
+function methodDisplayName(name) {
+  const value = String(name ?? "").trim();
+  if (!value) return "Creator method";
+  if (!/^[a-z0-9_-]+$/.test(value)) return value;
+  return value
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((part) => `${part[0].toUpperCase()}${part.slice(1)}`)
+    .join(" ");
 }
 
 function toolDisplay(name) {
   const normalized = String(name).replaceAll("_", ".");
-  if (normalized.includes("web.search")) return { action: "搜索网页", running: "正在搜索网页", icon: "◎" };
-  if (normalized.includes("file.search") || normalized.includes("fs.search")) return { action: "搜索代码", running: "正在搜索代码", icon: "⌕" };
-  if (normalized.includes("file.read") || normalized.includes("fs.read")) return { action: "读取文件", running: "正在读取文件", icon: "▣" };
-  if (normalized.includes("file.list") || normalized.includes("fs.list")) return { action: "列出文件", running: "正在列出文件", icon: "☷" };
-  if (normalized.includes("file.write") || normalized.includes("fs.write")) return { action: "写入文件", running: "正在写入文件", icon: "✎" };
-  if (normalized.includes("file.patch") || normalized.includes("fs.patch")) return { action: "修改文件", running: "正在修改文件", icon: "✎" };
-  if (normalized.includes("shell.exec")) return { action: "运行命令", running: "正在运行命令", icon: ">_" };
-  if (normalized.includes("git.diff")) return { action: "查看 diff", running: "正在查看 diff", icon: "Δ" };
-  if (normalized.includes("api.request")) return { action: "调用 API", running: "正在调用 API", icon: "↗" };
-  if (normalized.includes("mcp.call")) return { action: "调用 MCP", running: "正在调用 MCP", icon: "◇" };
-  return { action: `调用 ${name}`, running: `正在调用 ${name}`, icon: "·" };
+  if (normalized.includes("web.search")) return { action: "Search the web", running: "Searching the web", icon: "◎" };
+  if (normalized.includes("file.search") || normalized.includes("fs.search")) return { action: "Search files", running: "Searching files", icon: "⌕" };
+  if (normalized.includes("file.read") || normalized.includes("fs.read")) return { action: "Read file", running: "Reading file", icon: "▣" };
+  if (normalized.includes("file.list") || normalized.includes("fs.list")) return { action: "List files", running: "Listing files", icon: "☷" };
+  if (normalized.includes("file.write") || normalized.includes("fs.write")) return { action: "Write file", running: "Writing file", icon: "✎" };
+  if (normalized.includes("file.patch") || normalized.includes("fs.patch")) return { action: "Edit file", running: "Editing file", icon: "✎" };
+  if (normalized.includes("shell.exec")) return { action: "Run command", running: "Running command", icon: ">_" };
+  if (normalized.includes("git.diff")) return { action: "Review changes", running: "Reviewing changes", icon: "Δ" };
+  if (normalized.includes("api.request")) return { action: "Contact service", running: "Contacting service", icon: "↗" };
+  if (normalized.includes("mcp.call")) return { action: "Use connected service", running: "Using connected service", icon: "◇" };
+  return { action: "Run a step", running: "Running a step", icon: "·" };
 }
 
 function toolActionLabel(action, state, target) {
   const suffix = target ? ` ${target}` : "";
-  if (state === "completed") return `已${action}${suffix}`;
-  if (state === "failed") return `${action}失败${suffix}`;
-  if (state === "approval") return `${action}需要批准${suffix}`;
-  return `正在${action}${suffix}`;
+  if (state === "completed") return `${action} complete${suffix}`;
+  if (state === "failed") return `${action} failed${suffix}`;
+  if (state === "approval") return `${action} needs approval${suffix}`;
+  return `${action}${suffix}`;
 }
 
 function toolTarget(args) {
@@ -1442,49 +1682,6 @@ function summarizeText(text) {
   return compact.length > 80 ? `${compact.slice(0, 77)}...` : compact;
 }
 
-function formatToolValue(value) {
-  if (typeof value === "string") return value;
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
-function debugEventTitle(event) {
-  if (event.type === "assistant.delta") return event.delta.kind === "text" ? "assistant text" : event.delta.content;
-  if (event.type === "tool_call.request") return `${event.name} · ${shortId(event.tool_call_id)}`;
-  if (event.type === "tool_call.result") return `${event.status} · ${shortId(event.tool_call_id)}`;
-  if (event.type === "tool_call.delta") return `${event.name} · ${event.status}`;
-  if (event.type === "turn.state") return event.status;
-  if (event.type === "turn.completed") return "turn completed";
-  if (event.type === "turn.failed") return event.error?.message || "turn failed";
-  return event.type;
-}
-
-function debugEventStatus(event) {
-  if (event.type === "tool_call.delta") return event.status;
-  if (event.type === "tool_call.result") return event.status;
-  if (event.type === "turn.state") return event.status;
-  if (event.type === "turn.failed") return "failed";
-  if (event.type === "turn.completed") return "completed";
-  return "event";
-}
-
-function eventTone(event) {
-  const status = debugEventStatus(event);
-  if (status === "failed" || status === "error") return "failed";
-  if (status === "completed" || status === "ok") return "completed";
-  if (status === "running" || status === "requested" || status === "queued") return "running";
-  return "neutral";
-}
-
-function shortId(id) {
-  const value = String(id);
-  if (value.length <= 14) return value;
-  return `${value.slice(0, 8)}...${value.slice(-4)}`;
-}
-
 function formatDuration(ms) {
   const seconds = Math.floor(ms / 1000);
   if (seconds < 60) return `${seconds}s`;
@@ -1511,29 +1708,6 @@ async function invokeTauri(command, args) {
     }
     throw error;
   }
-}
-
-function recordRendererTrace(phase, status, correlationId, fields = {}) {
-  const event = {
-    phase,
-    status,
-    correlation_id: correlationId,
-    timestamp_ms: Date.now(),
-    ...fields
-  };
-  if (typeof window !== "undefined") {
-    const trace = Array.isArray(window.__HATCH_RENDERER_TRACE__)
-      ? window.__HATCH_RENDERER_TRACE__
-      : [];
-    trace.push(event);
-    window.__HATCH_RENDERER_TRACE__ = trace.slice(-200);
-  }
-  void invoke("record_workspace_trace", {
-    phase,
-    status,
-    correlationId
-  }).catch(() => {});
-  console.info("hatch.renderer", JSON.stringify(event));
 }
 
 function withTimeout(promise, timeoutMs, message) {

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Creator Agent Factory"
+  short_description: "Distill raw creator knowhow into a verified Agent"
+  default_prompt: "Use $creator-agent-factory to turn these raw creator materials and product intent into a verified functional Agent."

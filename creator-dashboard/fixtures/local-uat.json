@@ -1,0 +1,20 @@
+{
+  "profiles": [
+    {
+      "email": "maya@example.com",
+      "password": "hatch-local-uat-creator",
+      "id": "maya-chen",
+      "role": "creator",
+      "display_name": "Maya Chen",
+      "handle": "@mayabuilds",
+      "initials": "MC"
+    },
+    {
+      "email": "jordan@example.com",
+      "password": "hatch-local-uat",
+      "id": "buyer_jordan_lee",
+      "role": "buyer",
+      "display_name": "Jordan Lee"
+    }
+  ]
+}

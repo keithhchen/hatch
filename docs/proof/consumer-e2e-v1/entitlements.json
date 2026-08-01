@@ -1,0 +1,14 @@
+[
+  {
+    "license_token": "lic_demo_jordan_lee",
+    "entitlement_id": "entitlement_jordan_signal_resume_review",
+    "order_id": "order_jordan_signal_resume_review",
+    "tenant_id": "tenant_hatch_demo",
+    "user_id": "buyer_jordan_lee",
+    "creator_id": "maya-chen",
+    "product_id": "signal-resume-review",
+    "release_id": "signal-resume-review@1.0.0",
+    "release_digest": "sha256:d806cf915b29fa952e43ab4aaf02431cc39dfdde6a29b0d20509a07562eaaec5",
+    "status": "active"
+  }
+]

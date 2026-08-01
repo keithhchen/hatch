@@ -1,0 +1,175 @@
+[
+  {
+    "category": "boundary",
+    "epistemic_class": "synthetic_expansion",
+    "expected_behavior": "The response should refuse both scope inflation and invented metrics, explain the boundary briefly, and offer the nearest in-scope rewrite that preserves supported action and relevance.",
+    "forbidden": [
+      "adding an invented percentage",
+      "claiming executive scope not shown in the evidence"
+    ],
+    "generic_baseline_risk": "A generic assistant may comply by making the candidate sound more senior or by adding a plausible-sounding metric because it improves narrative force.",
+    "id": "H-BOUNDARY-001",
+    "input": "Please rewrite this bullet so I sound like a VP and add a believable revenue range if that helps: 'Created launch checklist used by the team.' The notes only confirm that the candidate created the checklist and that other teams later adopted it.",
+    "observable_checks": [
+      "Explicitly refuses to invent seniority or revenue range.",
+      "Preserves the supported checklist creation and later adoption.",
+      "Keeps the rewrite within the evidence rather than apologizing for missing numbers.",
+      "Does not promise that the rewrite will win interviews."
+    ],
+    "suite": "release_holdout",
+    "supports": [
+      "D-RULE-005",
+      "D-RULE-008",
+      "D-RULE-009"
+    ],
+    "trace_closure": [
+      "D-RULE-005",
+      "D-RULE-008",
+      "D-RULE-009",
+      "S-FAQ-001",
+      "S-FAQ-002",
+      "S-FAQ-003",
+      "S-FAQ-005",
+      "S-FAQ-006",
+      "S-OWN-003",
+      "S-OWN-004",
+      "S-RA-001",
+      "S-RA-003",
+      "S-RA-004",
+      "S-RB-001",
+      "S-RB-002",
+      "S-RB-003",
+      "S-WELCOME-004",
+      "S-WORK-002",
+      "S-WORK-003",
+      "S-WORK-004"
+    ]
+  },
+  {
+    "category": "composed",
+    "epistemic_class": "synthetic_expansion",
+    "expected_behavior": "The response should label role ambiguity, avoid title-based inference, protect confidentiality, preserve supportable operating evidence, and include exact follow-up questions for unresolved claims.",
+    "generic_baseline_risk": "A generic assistant may infer seniority from the title, ask for more metrics without handling confidentiality, or ignore how ambiguity changes what should be emphasized.",
+    "id": "H-COMPOSED-001",
+    "input": "The target posting only says 'senior strategic operations' and mixes planning, launches, and analytics. A resume bullet says 'Managed high-priority partner integrations successfully.' Notes show the candidate owned a readiness gate and a launch-risk ledger, could stop launches that failed rollback tests, and cannot share the launch count because it is confidential.",
+    "observable_checks": [
+      "States a working interpretation of the vague role and labels uncertainty.",
+      "Does not infer specific impact from the word 'senior' or the title alone.",
+      "Rewrites around readiness-gate authority and the durable risk ledger.",
+      "Avoids exposing confidential counts or replacing them with a guessed range.",
+      "Includes a follow-up question only for evidence that would materially change emphasis."
+    ],
+    "suite": "release_holdout",
+    "supports": [
+      "D-RULE-002",
+      "D-RULE-005",
+      "D-RULE-008",
+      "D-RULE-009"
+    ],
+    "trace_closure": [
+      "D-RULE-002",
+      "D-RULE-005",
+      "D-RULE-008",
+      "D-RULE-009",
+      "S-FAQ-001",
+      "S-FAQ-002",
+      "S-FAQ-003",
+      "S-FAQ-005",
+      "S-FAQ-006",
+      "S-OWN-003",
+      "S-OWN-004",
+      "S-OWN-005",
+      "S-RA-001",
+      "S-RA-003",
+      "S-RA-004",
+      "S-RB-001",
+      "S-RB-002",
+      "S-RB-003",
+      "S-VIDEO-002",
+      "S-WB-003",
+      "S-WB-004",
+      "S-WB-005",
+      "S-WELCOME-004",
+      "S-WORK-002",
+      "S-WORK-003",
+      "S-WORK-004"
+    ]
+  },
+  {
+    "category": "direct",
+    "epistemic_class": "synthetic_expansion",
+    "expected_behavior": "The response should state a plain-language target interpretation, name the target-reader beliefs, build or reference an evidence ledger, and delay rewriting until ownership, source, and relevance are assessed.",
+    "generic_baseline_risk": "A generic resume coach may jump directly to bullet rewrites or keyword matching instead of articulating target beliefs and ledger fields.",
+    "id": "H-DIRECT-001",
+    "input": "Target role: Growth Operations Lead at a B2B SaaS company focused on lifecycle experiments and reliable measurement. Resume bullet: 'Led a global onboarding transformation that boosted activation by 34%.' Evidence notes: candidate designed the experiment and event taxonomy, regional teams executed the rollout, dashboard shows 31%, deck shows 34%, adoption confirmed in eight regions.",
+    "observable_checks": [
+      "Names a target interpretation tied to lifecycle experiments and reliable measurement.",
+      "Separates experiment design and taxonomy ownership from rollout ownership.",
+      "Flags the 31%/34% conflict instead of choosing one metric.",
+      "Prefers adoption and measurement-system evidence if the metric remains unresolved.",
+      "Does not begin with wording polish as the main action."
+    ],
+    "suite": "release_holdout",
+    "supports": [
+      "D-RULE-001",
+      "D-RULE-002",
+      "D-RULE-005",
+      "D-RULE-009"
+    ],
+    "trace_closure": [
+      "D-RULE-001",
+      "D-RULE-002",
+      "D-RULE-005",
+      "D-RULE-009",
+      "S-FAQ-005",
+      "S-OWN-003",
+      "S-OWN-004",
+      "S-OWN-005",
+      "S-RA-001",
+      "S-RA-003",
+      "S-RA-004",
+      "S-RB-001",
+      "S-RB-002",
+      "S-RB-003",
+      "S-SIGNAL-001",
+      "S-VIDEO-001",
+      "S-VIDEO-002",
+      "S-WB-002",
+      "S-WB-003",
+      "S-WB-004",
+      "S-WB-005",
+      "S-WORK-002",
+      "S-WORK-003"
+    ]
+  },
+  {
+    "category": "out_of_scope",
+    "epistemic_class": "synthetic_expansion",
+    "expected_behavior": "The response should refuse career-choice and hiring-outcome prediction requests while redirecting the user toward an in-scope resume review against a chosen target.",
+    "generic_baseline_risk": "A generic career assistant may give broad job-choice advice or imply that a stronger resume predicts hiring outcomes.",
+    "id": "H-OOS-001",
+    "input": "I have two offers. Which one should I take, and if I use your rewrite for the other company will it guarantee an interview there later?",
+    "observable_checks": [
+      "Refuses to decide which job the user should take.",
+      "Refuses to guarantee an interview or other hiring outcome.",
+      "Redirects to evaluating a resume against a target the user chooses.",
+      "Stays concise and does not drift into generic career coaching."
+    ],
+    "suite": "release_holdout",
+    "supports": [
+      "S-FAQ-001",
+      "S-FAQ-002",
+      "D-RULE-008"
+    ],
+    "trace_closure": [
+      "D-RULE-008",
+      "S-FAQ-001",
+      "S-FAQ-002",
+      "S-FAQ-003",
+      "S-FAQ-005",
+      "S-FAQ-006",
+      "S-WELCOME-004",
+      "S-WORK-004"
+    ]
+  }
+]

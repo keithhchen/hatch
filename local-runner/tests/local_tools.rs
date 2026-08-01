@@ -444,7 +444,7 @@ fn canonical_tool_call_result_rejects_unknown_local_tools() {
 
 #[cfg(unix)]
 #[test]
-fn canonical_shell_exec_runs_in_sandbox_and_reports_timeouts() {
+fn canonical_shell_exec_is_disabled_without_a_complete_os_sandbox() {
     let temp = tempdir().unwrap();
     let runner = LocalRunner::new(temp.path()).unwrap();
 
@@ -456,100 +456,49 @@ fn canonical_shell_exec_runs_in_sandbox_and_reports_timeouts() {
             "timeout_ms": 30000
         }),
     ));
-    assert_ok_result(result, |result| {
-        assert!(result["stdout"].as_str().unwrap().contains("shell-ok"));
-        assert!(result["stdout"]
-            .as_str()
-            .unwrap()
-            .contains(&runner.sandbox_root().to_string_lossy().to_string()));
-        assert_eq!(result["stderr"], "");
-        assert_eq!(result["exit_code"], 0);
-        assert_eq!(result["timed_out"], false);
-    });
-
-    let timeout = runner.execute_tool_call_request(tool_request(
-        "call_timeout",
-        "shell.exec",
-        json!({
-            "command": "sleep 1",
-            "timeout_ms": 100
-        }),
-    ));
-    assert_ok_result(timeout, |result| {
-        assert_eq!(result["timed_out"], true);
-        assert_eq!(result["exit_code"], -1);
+    assert_error_result(result, |error| {
+        assert_eq!(error["code"], "shell_disabled");
+        assert!(error["message"].as_str().unwrap().contains("disabled"));
     });
 }
 
-#[cfg(unix)]
 #[test]
-fn canonical_shell_exec_caps_combined_stdout_and_stderr() {
+fn rejects_malicious_shell_commands_instead_of_relying_on_cwd() {
     let temp = tempdir().unwrap();
     let runner = LocalRunner::new(temp.path()).unwrap();
-    let result = runner.execute_tool_call_request(tool_request(
-        "call_large_shell",
-        "shell.exec",
-        json!({
-            "command": "python3 -c 'import sys; print(\"o\" * 700000); sys.stderr.write(\"e\" * 700000)'",
-            "timeout_ms": 30000
-        }),
-    ));
-
-    assert_ok_result(result, |result| {
-        let stdout = result["stdout"].as_str().unwrap();
-        let stderr = result["stderr"].as_str().unwrap();
-        assert!(stdout.len() + stderr.len() <= 1024 * 1024);
-        assert_eq!(result["timed_out"], false);
-        assert_eq!(result["stdout_truncated"], false);
-        assert_eq!(result["stderr_truncated"], true);
-    });
-
-    let follow_up = runner.execute_tool_call_request(tool_request(
-        "call_follow_up_shell",
-        "shell.exec",
-        json!({
-            "command": "printf follow-up-ok",
-            "timeout_ms": 30000
-        }),
-    ));
-    assert_ok_result(follow_up, |result| {
-        assert_eq!(result["stdout"], "follow-up-ok");
-        assert_eq!(result["stderr"], "");
-        assert_eq!(result["timed_out"], false);
-    });
+    for command in [
+        "cat /etc/passwd",
+        "cd .. && pwd",
+        "touch ../escaped",
+        "python -c 'open(\"/tmp/escaped\", \"w\").write(\"x\")'",
+    ] {
+        let result = runner.execute_tool_call_request(tool_request(
+            "call_malicious_shell",
+            "shell.exec",
+            json!({ "command": command, "timeout_ms": 30000 }),
+        ));
+        assert_error_result(result, |error| assert_eq!(error["code"], "shell_disabled"));
+    }
 }
 
-#[cfg(unix)]
 #[test]
-fn shell_timeout_terminates_background_children_holding_pipes() {
+fn rejects_absolute_and_parent_paths_for_all_file_mutations() {
     let temp = tempdir().unwrap();
     let runner = LocalRunner::new(temp.path()).unwrap();
-    let started = std::time::Instant::now();
-    let timeout = runner.execute_tool_call_request(tool_request(
-        "call_background_timeout",
-        "shell.exec",
-        json!({
-            "command": "sleep 60 & wait",
-            "timeout_ms": 100
-        }),
-    ));
-    assert!(started.elapsed() < std::time::Duration::from_secs(5));
-    assert_ok_result(timeout, |result| {
-        assert_eq!(result["timed_out"], true);
-    });
-
-    let follow_up = runner.execute_tool_call_request(tool_request(
-        "call_background_follow_up",
-        "shell.exec",
-        json!({
-            "command": "printf background-follow-up-ok",
-            "timeout_ms": 30000
-        }),
-    ));
-    assert_ok_result(follow_up, |result| {
-        assert_eq!(result["stdout"], "background-follow-up-ok");
-        assert_eq!(result["timed_out"], false);
-    });
+    for path in ["/tmp/escaped", "../escaped", "nested/../../escaped"] {
+        let write = runner.execute_tool_call_request(tool_request(
+            "call_bad_write",
+            "fs.write",
+            json!({ "path": path, "content": "no" }),
+        ));
+        assert_error_result(write, |error| assert_eq!(error["code"], "tool_failed"));
+        let patch = runner.execute_tool_call_request(tool_request(
+            "call_bad_patch",
+            "fs.patch",
+            json!({ "path": path, "patch": "HATCH-PATCH v1\nappend\n---\nno" }),
+        ));
+        assert_error_result(patch, |error| assert_eq!(error["code"], "tool_failed"));
+    }
 }
 
 #[test]

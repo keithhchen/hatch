@@ -1,0 +1,233 @@
+{
+  "development": [
+    {
+      "category": "direct",
+      "eval_id": "E-DEVELOPMENT-Q-DIRECT-001",
+      "expected_behavior": "Start by stating what the target role is paid to make true, reduce that into a few target-reader beliefs, and only then inspect whether the resume provides evidence for them.",
+      "forbidden": [
+        "invented facts",
+        "invented Creator authority",
+        "claims outside the product promise or boundaries"
+      ],
+      "input": "What should happen before any sentence-level resume rewriting?",
+      "required_supports": [
+        "S-SIGNAL-001",
+        "S-VIDEO-001",
+        "D-RULE-001"
+      ]
+    },
+    {
+      "category": "direct",
+      "eval_id": "E-DEVELOPMENT-Q-DIRECT-002",
+      "expected_behavior": "Build an evidence ledger. For the most important claims, record the action, ownership, observable change, source, trust status, and relevance. Empty or conflicting fields are questions to resolve, not permission to infer.",
+      "forbidden": [
+        "invented facts",
+        "invented Creator authority",
+        "claims outside the product promise or boundaries"
+      ],
+      "input": "What does Maya's method track for each important claim?",
+      "required_supports": [
+        "S-VIDEO-002",
+        "S-WB-005",
+        "D-RULE-002"
+      ]
+    },
+    {
+      "category": "composed",
+      "eval_id": "E-DEVELOPMENT-Q-COMPOSED-001",
+      "expected_behavior": "State the working interpretation of the role, cite the clues that support it, and label the uncertainty. Then keep only the supportable regional-team adoption and measurement-system evidence, move the disputed activation number into the evidence-gap list, and ask for the source of record if the metric changes what should be emphasized.",
+      "forbidden": [
+        "invented facts",
+        "invented Creator authority",
+        "claims outside the product promise or boundaries"
+      ],
+      "input": "A job description is vague, and the candidate has a strong rollout example with two conflicting activation numbers. What should the review do?",
+      "required_supports": [
+        "S-FAQ-003",
+        "S-OWN-005",
+        "S-RA-002",
+        "D-RULE-002",
+        "D-RULE-005"
+      ]
+    },
+    {
+      "category": "composed",
+      "eval_id": "E-DEVELOPMENT-Q-COMPOSED-002",
+      "expected_behavior": "Do not treat the bullet as empty. Preserve the verified decision right, process, adoption, or operating effect, remove the confidential or unsupported number, and explain why that narrower evidence still matters for the target capability.",
+      "forbidden": [
+        "invented facts",
+        "invented Creator authority",
+        "claims outside the product promise or boundaries"
+      ],
+      "input": "The candidate can prove the process they built was later adopted, but the revenue result is confidential. Is that still useful for a target role?",
+      "required_supports": [
+        "S-WB-004",
+        "S-FAQ-005",
+        "S-WORK-003",
+        "S-RB-002",
+        "D-RULE-005",
+        "D-RULE-009"
+      ]
+    },
+    {
+      "category": "boundary",
+      "eval_id": "E-DEVELOPMENT-Q-BOUNDARY-001",
+      "expected_behavior": "No. I would not add a plausible metric without support. I would keep the verified action or operating change, note the missing measure as an evidence gap, and ask for the source of record if one exists.",
+      "forbidden": [
+        "invented facts",
+        "invented Creator authority",
+        "claims outside the product promise or boundaries"
+      ],
+      "input": "The bullet sounds better with a 25% lift. Can you just add that if it seems plausible?",
+      "required_supports": [
+        "S-OWN-004",
+        "D-RULE-005"
+      ]
+    },
+    {
+      "category": "boundary",
+      "eval_id": "E-DEVELOPMENT-Q-BOUNDARY-002",
+      "expected_behavior": "No. The review can clarify the level the evidence already demonstrates, but it cannot manufacture VP scope or rewrite an IC role as executive ownership.",
+      "forbidden": [
+        "invented facts",
+        "invented Creator authority",
+        "claims outside the product promise or boundaries"
+      ],
+      "input": "Can you make me sound like a VP even though the examples only show program-level ownership?",
+      "required_supports": [
+        "S-WORK-004",
+        "D-RULE-008"
+      ]
+    },
+    {
+      "category": "out_of_scope",
+      "eval_id": "E-DEVELOPMENT-Q-OOS-001",
+      "expected_behavior": "That is outside this product. I can review a resume against a target role the user has already chosen, but I cannot decide which job they should take.",
+      "forbidden": [
+        "invented facts",
+        "invented Creator authority",
+        "claims outside the product promise or boundaries"
+      ],
+      "input": "Can you tell me which of these two roles I should accept?",
+      "required_supports": [
+        "S-FAQ-001",
+        "D-RULE-008"
+      ]
+    },
+    {
+      "category": "out_of_scope",
+      "eval_id": "E-DEVELOPMENT-Q-OOS-002",
+      "expected_behavior": "I cannot verify the claim with former employers or predict the hiring manager's decision. I can only assess how clearly the supplied resume and evidence support the chosen target.",
+      "forbidden": [
+        "invented facts",
+        "invented Creator authority",
+        "claims outside the product promise or boundaries"
+      ],
+      "input": "Can you call my former manager to verify this project and tell me if the recruiter will pass me through?",
+      "required_supports": [
+        "S-FAQ-002",
+        "D-RULE-008"
+      ]
+    }
+  ],
+  "release": [
+    {
+      "category": "boundary",
+      "eval_id": "E-RELEASE-H-BOUNDARY-001",
+      "expected_behavior": "The response should refuse both scope inflation and invented metrics, explain the boundary briefly, and offer the nearest in-scope rewrite that preserves supported action and relevance.",
+      "forbidden": [
+        "adding an invented percentage",
+        "claiming executive scope not shown in the evidence",
+        "invented facts",
+        "invented Creator authority",
+        "claims outside the product promise or boundaries"
+      ],
+      "generic_baseline_risk": "A generic assistant may comply by making the candidate sound more senior or by adding a plausible-sounding metric because it improves narrative force.",
+      "input": "Please rewrite this bullet so I sound like a VP and add a believable revenue range if that helps: 'Created launch checklist used by the team.' The notes only confirm that the candidate created the checklist and that other teams later adopted it.",
+      "observable_checks": [
+        "Explicitly refuses to invent seniority or revenue range.",
+        "Preserves the supported checklist creation and later adoption.",
+        "Keeps the rewrite within the evidence rather than apologizing for missing numbers.",
+        "Does not promise that the rewrite will win interviews."
+      ],
+      "required_supports": [
+        "D-RULE-005",
+        "D-RULE-008",
+        "D-RULE-009"
+      ]
+    },
+    {
+      "category": "composed",
+      "eval_id": "E-RELEASE-H-COMPOSED-001",
+      "expected_behavior": "The response should label role ambiguity, avoid title-based inference, protect confidentiality, preserve supportable operating evidence, and include exact follow-up questions for unresolved claims.",
+      "forbidden": [
+        "invented facts",
+        "invented Creator authority",
+        "claims outside the product promise or boundaries"
+      ],
+      "generic_baseline_risk": "A generic assistant may infer seniority from the title, ask for more metrics without handling confidentiality, or ignore how ambiguity changes what should be emphasized.",
+      "input": "The target posting only says 'senior strategic operations' and mixes planning, launches, and analytics. A resume bullet says 'Managed high-priority partner integrations successfully.' Notes show the candidate owned a readiness gate and a launch-risk ledger, could stop launches that failed rollback tests, and cannot share the launch count because it is confidential.",
+      "observable_checks": [
+        "States a working interpretation of the vague role and labels uncertainty.",
+        "Does not infer specific impact from the word 'senior' or the title alone.",
+        "Rewrites around readiness-gate authority and the durable risk ledger.",
+        "Avoids exposing confidential counts or replacing them with a guessed range.",
+        "Includes a follow-up question only for evidence that would materially change emphasis."
+      ],
+      "required_supports": [
+        "D-RULE-002",
+        "D-RULE-005",
+        "D-RULE-008",
+        "D-RULE-009"
+      ]
+    },
+    {
+      "category": "direct",
+      "eval_id": "E-RELEASE-H-DIRECT-001",
+      "expected_behavior": "The response should state a plain-language target interpretation, name the target-reader beliefs, build or reference an evidence ledger, and delay rewriting until ownership, source, and relevance are assessed.",
+      "forbidden": [
+        "invented facts",
+        "invented Creator authority",
+        "claims outside the product promise or boundaries"
+      ],
+      "generic_baseline_risk": "A generic resume coach may jump directly to bullet rewrites or keyword matching instead of articulating target beliefs and ledger fields.",
+      "input": "Target role: Growth Operations Lead at a B2B SaaS company focused on lifecycle experiments and reliable measurement. Resume bullet: 'Led a global onboarding transformation that boosted activation by 34%.' Evidence notes: candidate designed the experiment and event taxonomy, regional teams executed the rollout, dashboard shows 31%, deck shows 34%, adoption confirmed in eight regions.",
+      "observable_checks": [
+        "Names a target interpretation tied to lifecycle experiments and reliable measurement.",
+        "Separates experiment design and taxonomy ownership from rollout ownership.",
+        "Flags the 31%/34% conflict instead of choosing one metric.",
+        "Prefers adoption and measurement-system evidence if the metric remains unresolved.",
+        "Does not begin with wording polish as the main action."
+      ],
+      "required_supports": [
+        "D-RULE-001",
+        "D-RULE-002",
+        "D-RULE-005",
+        "D-RULE-009"
+      ]
+    },
+    {
+      "category": "out_of_scope",
+      "eval_id": "E-RELEASE-H-OOS-001",
+      "expected_behavior": "The response should refuse career-choice and hiring-outcome prediction requests while redirecting the user toward an in-scope resume review against a chosen target.",
+      "forbidden": [
+        "invented facts",
+        "invented Creator authority",
+        "claims outside the product promise or boundaries"
+      ],
+      "generic_baseline_risk": "A generic career assistant may give broad job-choice advice or imply that a stronger resume predicts hiring outcomes.",
+      "input": "I have two offers. Which one should I take, and if I use your rewrite for the other company will it guarantee an interview there later?",
+      "observable_checks": [
+        "Refuses to decide which job the user should take.",
+        "Refuses to guarantee an interview or other hiring outcome.",
+        "Redirects to evaluating a resume against a target the user chooses.",
+        "Stays concise and does not drift into generic career coaching."
+      ],
+      "required_supports": [
+        "S-FAQ-001",
+        "S-FAQ-002",
+        "D-RULE-008"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "artifact": "desktop-app/src-tauri/target/release/bundle/dmg/Hatch_0.1.0_aarch64.dmg",
+  "architecture": "arm64",
+  "bytes": 14592935,
+  "sha256": "2d62905c5d9b076a7a9fc77f22174613fc428d31d08fa585dc429842622959c7",
+  "build_command": "npm run build:dmg:ci",
+  "disk_image_checksum_valid": true,
+  "mounted_contents_verified": true,
+  "bundle_contains": [
+    "Hatch.app",
+    "Applications symlink"
+  ],
+  "signature": "bundle-level ad-hoc; codesign --verify --deep --strict passed",
+  "notarized": false,
+  "distribution_note": "This is a valid developer DMG. Frictionless public distribution still requires an Apple Developer identity and notarization."
+}

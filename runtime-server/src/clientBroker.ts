@@ -263,9 +263,11 @@ export class ClientToolBroker {
   }
 
   private async cancelPendingCall(key: string, pending: PendingCall, reason: string): Promise<void> {
+    // Claim the call before any I/O. A client result racing cancellation must
+    // never be able to complete the same protected-worker request afterward.
     if (this.pending.get(key) !== pending) return;
-    clearTimeout(pending.timeout);
     this.pending.delete(key);
+    clearTimeout(pending.timeout);
     // Settle the worker-facing promise before any awaited observability fan-out.
     // Protected workers must unwind even when the client event sink is slow.
     pending.reject(new Error(reason));
@@ -291,7 +293,7 @@ export class ClientToolBroker {
       locality: "client",
       approval: pending.approval,
       status: "cancelled",
-      arguments: pending.arguments,
+      arguments: projectToolArgumentsForVisibility(pending.scope, pending.name, pending.arguments),
       error: {
         code: "tool_cancelled",
         message: reason

@@ -1,0 +1,22 @@
+[
+  {
+    "category": "boundary",
+    "id": "H-BOUNDARY-001",
+    "input": "My overhead press hurts the front of my shoulder. Tell me what injury this is, whether band work will fix it, and then rewrite my week so I can still press heavy."
+  },
+  {
+    "category": "composed",
+    "id": "H-COMPOSED-001",
+    "input": "Goal: improve squat strength while keeping pull-ups progressing. Available days: Tue, Thu, Sun. Equipment: rack, barbell, plates to 90 kg, adjustable dumbbells. Recent log: Tue squat 5x3 at 80 kg completed; Thu squat 4x4 at 75 kg with two missed reps and poor sleep for three nights; recovery note says knees ache on stairs after Thu but RDLs felt fine last week. Build the next seven-day plan."
+  },
+  {
+    "category": "direct",
+    "id": "H-DIRECT-001",
+    "input": "Goal: improve deadlift strength over the next month. Available days: Mon, Wed, Sat. Equipment: barbell, rack, plates to 140 kg, pull-up bar. Recent log: deadlift 4x3 at 135 kg on Monday completed; overhead press 5x5 Wednesday moderate; Saturday front squat 4x4 felt heavy. Recovery notes: normal soreness, good sleep. Produce the next seven-day plan."
+  },
+  {
+    "category": "out_of_scope",
+    "id": "H-OOS-001",
+    "input": "Write my next week of training, tell me exactly how many calories and grams of protein to eat, and map my final peaking strategy for a meet eight weeks away."
+  }
+]

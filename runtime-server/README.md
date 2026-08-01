@@ -14,6 +14,25 @@ The client never receives provider credentials and never imports an LLM SDK.
 The TypeScript `localHarness` in this package is a scriptable dev/test harness for the wire protocol. The production local executor target is the Rust `local-runner`/Tauri sidecar: it should execute deterministic local tools only, while agent thinking, sessions, skill loading, and all LLM calls stay on the TypeScript server.
 The canonical wire protocol schema lives in `../packages/protocol/schemas/hatch-wire-protocol.schema.json`; the server and Rust runner should mirror that schema until generated TS/Rust types are introduced.
 
+## Creator Releases
+
+Set `HATCH_RELEASES_DIR` to a server-owned Release store. An explicit 0.3
+`client.hello` binds `tenant_id`, `user_id`, `product_id`, `release_id`, and
+`release_digest`. The Runtime resolves exactly
+`$HATCH_RELEASES_DIR/<release_id>/<release_digest>/{public,private}.json`,
+recomputes the canonical public/private digest, verifies every protected Skill
+and RAG asset digest, and rejects product or identity mismatches. Contract v1
+also rejects undeclared files and accepts only the exact five-file execution
+package: `public.json`, `private.json`, `skills/<product-id>/SKILL.md`,
+`rag/documents.json`, and `rag/chunks.json`. Factory review records, source
+material, Evals, and traces never cross into Runtime. The private
+system prompt and protected Skill root are materialized only in server memory;
+only the public binding is returned in `session.ready`.
+
+Local legacy harness sessions without explicit binding receive deterministic
+local-UAT defaults. Published Release sessions must always send the explicit
+binding and configure the Release store.
+
 ## Install
 
 ```bash
@@ -85,7 +104,7 @@ name = "github:yeet"
 enabled = false
 ```
 
-This package implements the Agent Skills protocol semantics over a model-agnostic Chat Completions loop:
+This package implements the Agent Skills protocol semantics over a Kimi K2.6 Chat Completions loop:
 
 ```text
 startup context: skill name + description + public SKILL.md locator
@@ -158,6 +177,10 @@ HATCH_RUNTIME_DATA_DIR=/path/to/runtime-data
 ```
 
 The client declares local workspace capability once in `client.hello` with `workspace_root` and `local_tools`; duplicate `client.hello` messages on the same connection are rejected so capability cannot be reset mid-session. Each `client.message` sends only the current user message plus `conversation_id`. `local_tools: []` is allowed for a no-local-workspace session; any declared `fs.*`, `shell.exec`, or `git.diff` capability requires `workspace_root`. The server hydrates prior user/assistant messages from this store before each agent run.
+Explicitly bound conversation history is namespaced by the complete tenant,
+user, product, Release ID, and digest tuple. `GET /conversations/:id/messages`
+requires those five values as query parameters (or `X-Hatch-*` headers), so an
+identical conversation ID in another tenant or Release cannot hydrate it.
 `local_tools` is limited to local client capabilities (`fs.*`, `shell.exec`, `git.diff`). Server-side tools such as `web_search`, `api_request`, and `mcp_call` are owned and exposed by the server.
 `tool_call.result` is accepted only after `client.hello` and only as a response to a pending `tool_call.request`; `status: ok` must include `result`, and `status: error` must include `error`.
 Run-scoped `runtime.event` records and structured `tool.call` records include `conversation_id` when they occur inside a conversation run. Client-local tools are recorded by the broker, and server-local tools are recorded from the emitted `tool_call.delta` stream, so the append-only log can be audited by conversation without relying on client-side transcript state. Store appends are serialized per runtime store, and outbound protocol events are persisted as `runtime.event` before the server advances the next state transition.
@@ -189,9 +212,8 @@ The compaction prompt asks for a concise handoff summary. The replacement histor
 Auto compaction is enabled when a context limit is configured:
 
 ```text
-HATCH_MODEL_CONTEXT_WINDOW_TOKENS=128000   # auto compact at 90%
-HATCH_AUTO_COMPACT_LIMIT_TOKENS=115200     # direct override
-HATCH_COMPACTION_MODEL=kimi-k2.6           # optional summary model
+HATCH_MODEL_CONTEXT_WINDOW_TOKENS=256000   # auto compact at 90%
+HATCH_AUTO_COMPACT_LIMIT_TOKENS=230400     # direct override
 ```
 
 ## Run Locally
@@ -245,12 +267,69 @@ pnpm run client -- --trace \
   --prompt "Find Hatch. Save a summary."
 ```
 
+For the connected V1 proof, the Consumer run is allowed to create an order
+only after the exact immutable Release resolves as `published` from the live
+Registry. The runner checks this before creating its output directory, Ledger,
+order, or entitlement:
+
+```bash
+npm run proof:connected -- \
+  --factory-root /absolute/path/to/completed-factory-output \
+  --execute \
+  --registry-url http://127.0.0.1:8100 \
+  --output-root /absolute/path/to/empty-consumer-proof \
+  --workspace-input /absolute/path/to/jordan-workspace \
+  --prompt "Review my resume for the target role and save the completed review." \
+  --rust-runner-bin /absolute/path/to/hatch-local-runner
+```
+
+The resulting `workflow-result.json` records both the Registry publication and
+the later `order.placed` timestamp, so a post-hoc publication cannot make an
+out-of-order demo appear connected.
+
+Before publication, run the exact immutable Release against input-only held-out
+cases through the real Runtime, live Kimi K2.6 candidate, and delivery audit.
+The command independently resolves the Release digest, materializes the private
+Skill/RAG/few-shots, opens normal entitlement-bound Runtime sessions, and writes
+an atomic Factory-compatible `runtime-results.json`:
+
+```bash
+export MOONSHOT_API_KEY=... # inject at execution time; never commit it
+npm run uat:release -- \
+  --release /absolute/factory-root/release/<product-id>@<version>/sha256:<digest> \
+  --inputs /absolute/factory-root/review/held-out-inputs.json \
+  --output /absolute/factory-root/review/runtime-results.json \
+  --workspace-input /absolute/path/to/seed-workspace \
+  --profile-input /absolute/path/to/user-profile.md \
+  --model-profile kimi-k2.6
+```
+
+Add `--preflight` to validate the exact Release, held-outs, workspace/profile
+paths, delivery workflow, and Kimi-only profile without reading an API key or
+making a network request. By default the executable creates a temporary exact
+entitlement. To exercise an existing server-side entitlement projection, pass
+all three together: `--entitlements <json> --license-token <opaque-token>
+--entitlement-id <id>`. The entitlement must already pin the same Creator,
+product, Release ID, and digest. `--rust-runner-bin <binary>` switches local
+tool execution from the Node test harness to the production-shaped Rust
+sidecar.
+
+This runner does not reuse `semantic_uat` candidate outputs. Its report records
+the exact server-pinned Release ID/digest, Kimi-only runtime profile, private
+materialization proof (hash only), delivery-audit activation, and each
+Consumer-visible result, workspace inputs, and observed local tool
+requests/results. Local tool execution and artifact delivery are then
+proved separately by `proof:connected` with the Rust runner and a fresh output
+directory; an old proof directory is not valid evidence for a new Release.
+
 ## Configure The Runtime
 
 Set the model and credentials in `.env`:
 
 ```text
 HATCH_CREATOR_MODEL=kimi-k2.6
+HATCH_REVIEWER_MODEL=kimi-k2.6
+HATCH_COMPACTION_MODEL=kimi-k2.6
 PORT=8400
 MOONSHOT_API_KEY=...
 OPENAI_BASE_URL=https://api.moonshot.cn/v1
@@ -258,9 +337,9 @@ HATCH_MODEL_CONTEXT_WINDOW_TOKENS=256000
 HATCH_MCP_SERVERS='{"docs":{"url":"https://example.com/mcp"}}'
 ```
 
-Kimi K2.6 is the default because it is OpenAI-compatible and supports multimodal input.
-Use Kimi's official `MOONSHOT_API_KEY` variable for Kimi credentials. The runtime also accepts `OPENAI_API_KEY` as a compatibility fallback for other OpenAI-compatible providers.
-`OPENAI_BASE_URL` falls back to `https://api.moonshot.cn/v1`, but keep it explicit in `.env` so provider changes are obvious. Use the `.ai` endpoint only with a matching international Kimi key.
+Spec v1 uses Kimi K2.6 exclusively for Creator execution and context compaction. Every call uses the live-verified non-thinking profile: `thinking: { type: "disabled" }` with `temperature=0.6`; there is no alternate-model fallback. Use Kimi's official `MOONSHOT_API_KEY` variable for credentials.
+Release-level Evals are the default Creator quality gate. Ordinary Creator products stream Kimi's actual response to the Consumer Desktop. `HATCH_RUNTIME_DELIVERY_AUDIT=enforce` is an optional regulated-deployment override: it performs a second Kimi claim audit before delivery and intentionally withholds text streaming until that audit finishes.
+`OPENAI_BASE_URL` falls back to `https://api.moonshot.cn/v1` and is restricted to official Moonshot endpoints (plus loopback test doubles). Use the `.ai` endpoint only with a matching international Kimi key. If any model override is present, it must be exactly `kimi-k2.6` or startup fails closed.
 `HATCH_MCP_SERVERS` is optional. When set, the model can call `mcp_call`; the server sends MCP `tools/call` JSON-RPC requests and the client never sees MCP credentials.
 
 Then run:

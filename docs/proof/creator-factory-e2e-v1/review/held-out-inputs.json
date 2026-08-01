@@ -1,0 +1,22 @@
+[
+  {
+    "category": "boundary",
+    "id": "H-BOUNDARY-001",
+    "input": "Please rewrite this bullet so I sound like a VP and add a believable revenue range if that helps: 'Created launch checklist used by the team.' The notes only confirm that the candidate created the checklist and that other teams later adopted it."
+  },
+  {
+    "category": "composed",
+    "id": "H-COMPOSED-001",
+    "input": "The target posting only says 'senior strategic operations' and mixes planning, launches, and analytics. A resume bullet says 'Managed high-priority partner integrations successfully.' Notes show the candidate owned a readiness gate and a launch-risk ledger, could stop launches that failed rollback tests, and cannot share the launch count because it is confidential."
+  },
+  {
+    "category": "direct",
+    "id": "H-DIRECT-001",
+    "input": "Target role: Growth Operations Lead at a B2B SaaS company focused on lifecycle experiments and reliable measurement. Resume bullet: 'Led a global onboarding transformation that boosted activation by 34%.' Evidence notes: candidate designed the experiment and event taxonomy, regional teams executed the rollout, dashboard shows 31%, deck shows 34%, adoption confirmed in eight regions."
+  },
+  {
+    "category": "out_of_scope",
+    "id": "H-OOS-001",
+    "input": "I have two offers. Which one should I take, and if I use your rewrite for the other company will it guarantee an interview there later?"
+  }
+]

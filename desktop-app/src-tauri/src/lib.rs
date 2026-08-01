@@ -1,6 +1,6 @@
 use hatch_local_runner::{LocalRunner, ToolCallRequest};
 use serde_json::{json, Value};
-use std::fs::{self, OpenOptions};
+use std::fs::OpenOptions;
 use std::future::Future;
 use std::io::Write;
 use std::path::PathBuf;
@@ -56,17 +56,8 @@ impl CommandTrace {
 
 #[tauri::command]
 fn default_workspace() -> String {
-    if let Some(home) = std::env::var_os("HOME") {
-        let documents = PathBuf::from(home).join("Documents");
-        if documents.is_dir() {
-            return documents.to_string_lossy().to_string();
-        }
-    }
-
-    std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .to_string_lossy()
-        .to_string()
+    // A workspace is a user grant. Never infer Documents, $HOME, or cwd as consent.
+    String::new()
 }
 
 #[tauri::command]
@@ -144,8 +135,13 @@ fn valid_trace_field(value: &str, max_len: usize) -> bool {
 
 #[tauri::command]
 fn ensure_workspace(workspace_root: String) -> Result<String, String> {
+    if workspace_root.trim().is_empty() {
+        return Err("Choose a workspace folder before granting access".into());
+    }
     let path = expand_home(workspace_root);
-    fs::create_dir_all(&path).map_err(to_string)?;
+    if !path.is_dir() {
+        return Err("The selected workspace must be an existing folder".into());
+    }
     path.canonicalize()
         .map(|path| path.to_string_lossy().to_string())
         .map_err(to_string)
@@ -272,6 +268,17 @@ fn execute_tool_call_blocking_observed(
         }
     };
 
+    if matches!(
+        request.name.as_str(),
+        "fs.write" | "fs.patch" | "shell.exec"
+    ) && request.approval.as_deref() != Some("approved_by_user")
+    {
+        return Err(format!(
+            "{} requires explicit approval in the Hatch window",
+            request.name
+        ));
+    }
+
     trace_phase(trace, "execute.start", None, correlation_id);
     let result = runner.execute_tool_call_request(request);
     trace_phase(trace, "execute.end", Some("returned"), correlation_id);
@@ -333,8 +340,8 @@ fn to_string(error: impl std::fmt::Display) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        ensure_workspace, execute_tool_call_blocking, execute_tool_call_with_trace,
-        resolve_workspace_pick, CommandTrace,
+        default_workspace, ensure_workspace, execute_tool_call_blocking,
+        execute_tool_call_with_trace, resolve_workspace_pick, CommandTrace,
     };
     use serde_json::json;
     use std::fs;
@@ -514,5 +521,29 @@ mod tests {
         }
         assert!(!trace.contains("audit.jsonl"));
         assert!(!trace.contains("old audit event"));
+    }
+
+    #[test]
+    fn startup_never_silently_grants_a_default_folder() {
+        assert!(default_workspace().is_empty());
+    }
+
+    #[test]
+    fn rejects_file_changes_without_desktop_user_approval() {
+        let temp = tempdir().unwrap();
+        let error = execute_tool_call_blocking(
+            temp.path().to_string_lossy().to_string(),
+            json!({
+                "type": "tool_call.request",
+                "run_id": "run_test",
+                "tool_call_id": "call_write",
+                "name": "fs.write",
+                "arguments": { "path": "output.txt", "content": "no" },
+                "approval": "auto"
+            }),
+        )
+        .unwrap_err();
+        assert!(error.contains("requires explicit approval"));
+        assert!(!temp.path().join("output.txt").exists());
     }
 }

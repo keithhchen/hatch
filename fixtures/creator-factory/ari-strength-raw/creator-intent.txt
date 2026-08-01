@@ -1,0 +1,1 @@
+Turn Ari Cole's strength-planning course into a $25-per-plan agent that reads a user's goal, equipment, recent training log, and recovery notes and produces a usable seven-day plan without diagnosing injuries.
