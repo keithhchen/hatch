@@ -6,6 +6,8 @@ type McpServerConfig = {
 };
 
 export class ServerToolExecutor {
+  constructor(private readonly timeoutMs = 30_000) {}
+
   async execute(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
     const tool = requireTool(name);
     if (tool.locality !== "server") {
@@ -65,34 +67,46 @@ export class ServerToolExecutor {
       throw new Error(`MCP server is not configured: ${serverName}`);
     }
 
-    const response = await fetch(config.url, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        accept: "application/json, text/event-stream",
-        ...(config.headers ?? {})
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: `hatch_${Date.now()}`,
-        method: "tools/call",
-        params: {
-          name: toolName,
-          arguments: args.arguments ?? {}
-        }
-      })
-    });
-    const text = await response.text();
-    if (!response.ok) {
-      throw new Error(`MCP call failed with HTTP ${response.status}: ${text.slice(0, 500)}`);
-    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), Math.max(1, this.timeoutMs));
+    try {
+      const response = await fetch(config.url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+          ...(config.headers ?? {})
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: `hatch_${Date.now()}`,
+          method: "tools/call",
+          params: {
+            name: toolName,
+            arguments: args.arguments ?? {}
+          }
+        }),
+        signal: controller.signal
+      });
+      const text = await response.text();
+      if (!response.ok) {
+        throw new Error(`MCP call failed with HTTP ${response.status}: ${text.slice(0, 500)}`);
+      }
 
-    return {
-      server: serverName,
-      tool: toolName,
-      status: response.status,
-      response: parseJsonIfPossible(text)
-    };
+      return {
+        server: serverName,
+        tool: toolName,
+        status: response.status,
+        response: parseJsonIfPossible(text)
+      };
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new Error(`MCP call timed out after ${Math.max(1, this.timeoutMs)}ms`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 }
 

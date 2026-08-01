@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { realpath } from "node:fs/promises";
+import path from "node:path";
 import {
   compactRuntimeMessages,
   shouldAutoCompactMessages,
@@ -21,6 +23,7 @@ import {
 } from "./skills.js";
 import type { ActivatedSkill, RuntimeStore } from "./store.js";
 import type { ToolBridge } from "./toolBridge.js";
+import { projectToolArgumentsForVisibility, projectToolResultForVisibility } from "./toolVisibility.js";
 
 export type SkillRunArgs = {
   skill_id: string;
@@ -62,50 +65,53 @@ export class SkillRuntime {
     const publicSkillId = skill.name;
     const controller = new AbortController();
     this.active.set(skillRunId, { parentRunId: this.options.parentInput.run_id, controller });
-    const privateSkill = await loadSkillByPath(skill.path, [skill.directory]);
-    const resources = await listSkillBundleResourcePaths(privateSkill.directory);
-    const activatedSkill: ActivatedSkill = {
-      name: privateSkill.name,
-      path: privateSkill.path,
-      scope: privateSkill.scope,
-      directory: privateSkill.directory,
-      content: privateSkill.instructions,
-      allowed_tools: privateSkill.manifest.allowedTools,
-      resource_paths: resources.paths,
-      resource_manifest_truncated: resources.truncated,
-      activated_at: new Date().toISOString()
-    };
+    try {
+      await this.persistState(skill, skillRunId, "created");
+      await this.emitSkillRun({
+        type: "skill.run",
+        run_id: this.options.parentInput.run_id,
+        skill_run_id: skillRunId,
+        skill_id: publicSkillId,
+        name: skill.name,
+        status: "requested"
+      });
 
-    await this.persistState(skill, skillRunId, "created");
-    await this.emitSkillRun({
-      type: "skill.run",
-      run_id: this.options.parentInput.run_id,
-      skill_run_id: skillRunId,
-      skill_id: publicSkillId,
-      name: skill.name,
-      status: "requested"
-    });
+      const skillRoot = await realpath(skill.root || skill.directory).catch(() => skill.root || skill.directory);
+      const skillPath = await realpath(skill.path).catch(() => path.join(skillRoot, path.relative(skill.directory, skill.path)));
+      const privateSkill = await loadSkillByPath(skillPath, [skillRoot]);
+      const resources = await listSkillBundleResourcePaths(privateSkill.directory);
+      const activatedSkill: ActivatedSkill = {
+        name: privateSkill.name,
+        path: privateSkill.path,
+        scope: privateSkill.scope,
+        directory: privateSkill.directory,
+        content: privateSkill.instructions,
+        allowed_tools: privateSkill.manifest.allowedTools,
+        resource_paths: resources.paths,
+        resource_manifest_truncated: resources.truncated,
+        activated_at: new Date().toISOString()
+      };
 
-    const task = renderWorkerTask(args);
-    const workerInput: RunStart = {
-      type: "client.message",
-      run_id: this.options.parentInput.run_id,
-      conversation_id: this.options.parentInput.conversation_id,
-      message: { role: "user", content: task }
-    };
-    const workerMessages: RuntimeCompactionMessage[] = [workerInput.message];
-    await this.persistMessage(skillRunId, workerInput.message);
-    await this.persistState(skill, skillRunId, "running");
-    await this.emitSkillRun({
-      type: "skill.run",
-      run_id: this.options.parentInput.run_id,
-      skill_run_id: skillRunId,
-      skill_id: publicSkillId,
-      name: skill.name,
-      status: "running"
-    });
+      const task = renderWorkerTask(args);
+      const workerInput: RunStart = {
+        type: "client.message",
+        run_id: this.options.parentInput.run_id,
+        conversation_id: this.options.parentInput.conversation_id,
+        message: { role: "user", content: task }
+      };
+      const workerMessages: RuntimeCompactionMessage[] = [workerInput.message];
+      await this.persistMessage(skillRunId, workerInput.message);
+      await this.persistState(skill, skillRunId, "running");
+      await this.emitSkillRun({
+        type: "skill.run",
+        run_id: this.options.parentInput.run_id,
+        skill_run_id: skillRunId,
+        skill_id: publicSkillId,
+        name: skill.name,
+        status: "running"
+      });
 
-    const workerSkills: RuntimeSessionSkills = {
+      const workerSkills: RuntimeSessionSkills = {
       records: [],
       visibleRecords: [],
       rendered: {
@@ -120,7 +126,7 @@ export class SkillRuntime {
         }
       }
     };
-    const workerContext: RunContext = {
+      const workerContext: RunContext = {
       clientBroker: this.options.clientBroker,
       serverTools: this.options.serverTools,
       toolBridge: this.options.toolBridge,
@@ -161,8 +167,7 @@ export class SkillRuntime {
       }
     };
 
-    const runtime = this.options.createWorkerRuntime?.() ?? new ChatCompletionsAgentRuntime();
-    try {
+      const runtime = this.options.createWorkerRuntime?.() ?? new ChatCompletionsAgentRuntime();
       let output = "";
       for await (const event of runtime.run(workerInput, workerContext)) {
         if (event.type === "turn.completed") {
@@ -175,8 +180,12 @@ export class SkillRuntime {
           } else if (event.status === "completed" || event.status === "failed" || event.status === "cancelled") {
             await this.persistState(skill, skillRunId, "running");
           }
-          await this.persistWorkerToolEvent(event, skillRunId);
-          await this.emit(event);
+          const visibleEvent = event.result
+            ? { ...event, result: projectToolResultForVisibility(event.scope, event.name, event.result) }
+            : event;
+          visibleEvent.arguments = projectToolArgumentsForVisibility("skill_run", event.name, event.arguments ?? {});
+          await this.persistWorkerToolEvent(visibleEvent, skillRunId);
+          await this.emit(visibleEvent);
         }
       }
 
@@ -217,7 +226,7 @@ export class SkillRuntime {
       return {
         skill_id: publicSkillId,
         skill_run_id: skillRunId,
-        status: "failed",
+        status: failure.code === "skill_cancelled" ? "cancelled" : "failed",
         error: failure
       };
     } finally {

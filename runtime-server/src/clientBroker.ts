@@ -2,6 +2,7 @@ import { MAX_TOOL_RESULT_BYTES, type OutboundMessage, type ToolRequest, type Too
 import type { RunStateMachine } from "./runState.js";
 import type { RuntimeStore } from "./store.js";
 import { requireTool } from "./tools.js";
+import { projectToolArgumentsForVisibility, projectToolResultForVisibility } from "./toolVisibility.js";
 
 type ClientToolBrokerExecuteOptions = {
   approvalOverride?: ToolRequest["approval"];
@@ -74,7 +75,7 @@ export class ClientToolBroker {
           run_id: runId,
           tool_call_id: toolCallId,
           name,
-          arguments: parsedArgs,
+          arguments: projectToolArgumentsForVisibility(options.scope, name, parsedArgs),
           status: "failed",
           locality: "client",
           approval,
@@ -133,7 +134,7 @@ export class ClientToolBroker {
       run_id: pending.runId,
       tool_call_id: pending.toolCallId,
       name: pending.name,
-      arguments: parsedArgs,
+      arguments: projectToolArgumentsForVisibility(options.scope, pending.name, parsedArgs),
       status: "requested",
       locality: "client",
       approval,
@@ -188,7 +189,7 @@ export class ClientToolBroker {
         run_id: message.run_id,
         tool_call_id: message.tool_call_id,
         name: pending.name,
-        arguments: pending.arguments,
+        arguments: projectToolArgumentsForVisibility(pending.scope, pending.name, pending.arguments),
         status: "failed",
         locality: "client",
         approval: pending.approval,
@@ -212,7 +213,7 @@ export class ClientToolBroker {
         run_id: message.run_id,
         tool_call_id: message.tool_call_id,
         name: pending.name,
-        arguments: pending.arguments,
+        arguments: projectToolArgumentsForVisibility(pending.scope, pending.name, pending.arguments),
         status: "failed",
         locality: "client",
         approval: pending.approval,
@@ -232,13 +233,13 @@ export class ClientToolBroker {
       run_id: message.run_id,
       tool_call_id: message.tool_call_id,
       name: pending.name,
-      arguments: pending.arguments,
+      arguments: projectToolArgumentsForVisibility(pending.scope, pending.name, pending.arguments),
       status: "completed",
       locality: "client",
       approval: pending.approval,
       ...(pending.scope ? { scope: pending.scope } : {}),
       ...(pending.skillRunId ? { skill_run_id: pending.skillRunId } : {}),
-      result: message.result ?? {}
+      result: projectToolResultForVisibility(pending.scope, pending.name, message.result ?? {})
     });
     await pending.state?.resumeFromTool().catch(() => undefined);
     pending.resolve(message.result ?? {});
@@ -274,7 +275,7 @@ export class ClientToolBroker {
       run_id: pending.runId,
       tool_call_id: pending.toolCallId,
       name: pending.name,
-      arguments: pending.arguments,
+      arguments: projectToolArgumentsForVisibility(pending.scope, pending.name, pending.arguments),
       status: "cancelled",
       locality: "client",
       approval: pending.approval,

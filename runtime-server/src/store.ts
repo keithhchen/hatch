@@ -2,6 +2,7 @@ import { appendFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { ConversationMessage } from "./protocol.js";
 import type { CompactionPhase, CompactionReason, CompactionTrigger } from "./compaction.js";
+import { projectToolArgumentsForVisibility, projectToolResultForVisibility } from "./toolVisibility.js";
 
 export type RunStatus = "queued" | "running" | "waiting_for_tool" | "compacting" | "completed" | "failed" | "cancelled";
 
@@ -301,13 +302,15 @@ export class RuntimeStore {
           run_id: event.run_id,
           tool_call_id: event.tool_call_id,
           name: event.name,
-          arguments: event.arguments,
+          arguments: projectToolArgumentsForVisibility(event.scope, event.name, event.arguments),
           status: event.status,
           locality: event.locality ?? existing?.locality,
           approval: event.approval ?? existing?.approval,
           scope: event.scope ?? existing?.scope,
           skill_run_id: event.skill_run_id ?? existing?.skill_run_id,
-          result: event.result ?? existing?.result,
+          result: event.result
+            ? projectToolResultForVisibility(event.scope, event.name, event.result as Record<string, unknown>)
+            : existing?.result,
           error: event.error ?? existing?.error,
           first_timestamp: existing?.first_timestamp ?? event.timestamp,
           timestamp: event.timestamp
