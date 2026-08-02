@@ -17,19 +17,15 @@ jobs:
         working-directory: runtime-server
     steps:
       - uses: actions/checkout@v4
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10.4.1
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
-          cache-dependency-path: runtime-server/pnpm-lock.yaml
+          cache: npm
+          cache-dependency-path: runtime-server/package-lock.json
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: npm ci
       - name: Build and test
-        run: pnpm test
+        run: npm test
 
   dashboard:
     name: Creator Dashboard tests

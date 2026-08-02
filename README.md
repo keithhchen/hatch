@@ -120,7 +120,7 @@ The Desktop connects to the TypeScript Runtime at
 Component verification:
 
 ```bash
-cd runtime-server && corepack pnpm install --frozen-lockfile && corepack pnpm test
+cd runtime-server && npm ci && npm test
 cd ../local-runner && cargo test
 cd ../desktop-app && npm ci && npm run build:web
 cd ../desktop-app && npm run build:dmg:ci

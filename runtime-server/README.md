@@ -57,14 +57,14 @@ remains reserved for explicit contract tests.
 ## Install
 
 ```bash
-pnpm install
+npm install
 ```
 
 ## Build And Test
 
 ```bash
-pnpm run build
-pnpm run test
+npm run build
+npm run test
 ```
 
 Tests inject a deterministic fake runtime where needed. The server entrypoint itself always uses the Chat Completions runtime.
@@ -242,14 +242,14 @@ HATCH_AUTO_COMPACT_LIMIT_TOKENS=230400     # direct override
 Terminal 1:
 
 ```bash
-pnpm run build
-pnpm run serve
+npm run build
+npm run serve
 ```
 
 Terminal 2:
 
 ```bash
-pnpm run client -- \
+npm run client -- \
   --server ws://127.0.0.1:8400/runtime \
   --workspace /path/to/workspace \
   --conversation my-session
@@ -272,7 +272,7 @@ By default this package's dev harness executes local tools with Node.js so tests
 ```bash
 cargo build --manifest-path ../local-runner/Cargo.toml
 export HATCH_LOCAL_RUNNER_BIN=../local-runner/target/debug/hatch-local-runner
-pnpm run client -- \
+npm run client -- \
   --server ws://127.0.0.1:8400/runtime \
   --workspace /path/to/workspace
 ```
@@ -282,7 +282,7 @@ The same setting can be passed for a single run with `--rust-runner /path/to/hat
 For one-shot scripted runs, pass `--prompt`:
 
 ```bash
-pnpm run client -- --trace \
+npm run client -- --trace \
   --server ws://127.0.0.1:8400/runtime \
   --workspace /path/to/workspace \
   --prompt "Find Hatch. Save a summary."
@@ -377,7 +377,7 @@ Release-level Evals are the default Creator quality gate. Ordinary Creator produ
 Then run:
 
 ```bash
-pnpm run serve
+npm run serve
 ```
 
 ## Protocol
