@@ -29,6 +29,7 @@ export async function fetchPurchasedCreatorAgents(registryUrl, authToken, fetchI
         name: entry.product_name,
         description: entry.product_description || "Work with this Creator Agent in your own files and context."
       },
+      ...(entry.voice ? { voice: entry.voice } : {}),
       presentation: {}
     };
   }).filter(isCreatorAgentEntitlement);
@@ -38,6 +39,13 @@ export function runtimeHttpUrl(runtimeUrl, pathname) {
   const url = new URL(runtimeUrl);
   url.protocol = url.protocol === "wss:" ? "https:" : "http:";
   url.pathname = pathname;
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+}
+
+export function voiceTtsUrl(runtimeUrl) {
+  const url = new URL("/v1/tts", runtimeUrl);
   url.search = "";
   url.hash = "";
   return url.toString();

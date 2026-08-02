@@ -1185,3 +1185,35 @@ h2 {
     grid-template-columns: 1fr;
   }
 }
+
+.voice-controls {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: end;
+}
+
+.voice-controls .label {
+  display: block;
+  font-size: 10px;
+  letter-spacing: .08em;
+  margin-right: 2px;
+  text-transform: uppercase;
+}
+
+.sound-toggle {
+  background: #ece6dc;
+  border: 0;
+  border-radius: 10px;
+  color: #35312b;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  min-height: 34px;
+  padding: 0 12px;
+  transition: background .18s ease;
+}
+
+.sound-toggle:hover { background: #e4ddd2; }
+.sound-toggle.on { background: var(--hatch-accent); color: var(--hatch-inverse-text); }
+.sound-toggle.on:hover { background: var(--hatch-accent-hover); }

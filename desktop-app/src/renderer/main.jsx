@@ -31,6 +31,7 @@ import {
   workspaceGrantLabel
 } from "./product-policy.js";
 import { fetchPurchasedCreatorAgents, runtimeHttpUrl } from "./entitlement-client.js";
+import { loadVoicePreference, saveVoicePreference, splitTextForSpeech, synthesizeSpeech } from "./voice-client.js";
 import {
   signInAuthSession,
   clearAuthSession,
@@ -77,6 +78,12 @@ function App() {
   const [messages, setMessages] = useState([]);
   const [approvalRequests, setApprovalRequests] = useState({});
   const [creatorAgent, setCreatorAgent] = useState(DEFAULT_CREATOR_AGENT);
+  const [soundOn, setSoundOn] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
+  const [replayText, setReplayText] = useState("");
+  const audioRef = useRef(null);
+  const speechGenerationRef = useRef(0);
+  const soundOnRef = useRef(false);
   const buyerProfile = buyerSession?.profile ?? EMPTY_PROFILE;
 
   const send = useCallback((message) => {
@@ -96,6 +103,64 @@ function App() {
     });
     setStatus("Cancelling");
   }, [send]);
+
+  const stopSpeaking = useCallback(() => {
+    speechGenerationRef.current += 1;
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    setSpeaking(false);
+  }, []);
+
+  const speakText = useCallback(async (text) => {
+    const entitlement = creatorAgentEntitlements.find((item) => item.entitlement_id === selectedEntitlementId);
+    const creatorId = entitlement?.creator_id || entitlement?.creator?.id;
+    const agentId = entitlement?.agent_id || entitlement?.product?.id;
+    if (!entitlement?.voice?.enabled || !soundOnRef.current || !creatorId || !agentId || !buyerSession?.accessToken) return;
+    const generation = speechGenerationRef.current + 1;
+    speechGenerationRef.current = generation;
+    const requestIds = [];
+    for (const chunk of splitTextForSpeech(text)) {
+      if (speechGenerationRef.current !== generation) return;
+      let audio;
+      try {
+        const result = await synthesizeSpeech(DEFAULT_AUTH_URL, buyerSession.accessToken, {
+          entitlementId: entitlement.entitlement_id,
+          creatorId,
+          agentId,
+          text: chunk,
+          previousRequestIds: requestIds
+        });
+        if (result.requestId) requestIds.push(result.requestId);
+        audio = result.blob;
+      } catch {
+        // Voice is presentational; a synthesis failure must not break chat.
+        stopSpeaking();
+        return;
+      }
+      if (speechGenerationRef.current !== generation) return;
+      setSpeaking(true);
+      await new Promise((resolve) => {
+        const player = new Audio(URL.createObjectURL(audio));
+        audioRef.current = player;
+        player.onended = () => { audioRef.current = null; URL.revokeObjectURL(player.src); resolve(); };
+        player.onerror = () => { audioRef.current = null; URL.revokeObjectURL(player.src); resolve(); };
+        player.play().catch(() => { audioRef.current = null; URL.revokeObjectURL(player.src); resolve(); });
+      });
+    }
+    if (speechGenerationRef.current === generation) setSpeaking(false);
+  }, [buyerSession.accessToken, creatorAgentEntitlements, selectedEntitlementId, stopSpeaking]);
+
+  const toggleSound = useCallback(() => {
+    const entitlement = creatorAgentEntitlements.find((item) => item.entitlement_id === selectedEntitlementId);
+    if (!entitlement?.voice?.enabled) return;
+    const next = !soundOn;
+    stopSpeaking();
+    setSoundOn(next);
+    soundOnRef.current = next;
+    saveVoicePreference(buyerProfile.id, entitlement.entitlement_id, next);
+  }, [buyerProfile.id, creatorAgentEntitlements, selectedEntitlementId, soundOn, stopSpeaking]);
 
   const resolveToolApproval = useCallback((toolCallId, approved) => {
     const resolver = approvalResolversRef.current.get(toolCallId);
@@ -126,6 +191,7 @@ function App() {
       setStatus("A turn is already running.");
       return;
     }
+    stopSpeaking();
 
     const content = textFromAppendMessage(appendMessage).trim();
     if (!content) return;
@@ -385,6 +451,9 @@ function App() {
       setInterruptedRun(null);
       setRunning(false);
       setStatus("Completed");
+      const textToSpeak = finalText || activeRun?.text || "";
+      if (textToSpeak) setReplayText(textToSpeak);
+      if (textToSpeak && soundOnRef.current) void speakText(textToSpeak);
       return;
     }
 
@@ -514,6 +583,7 @@ function App() {
       setStatus(guard.reason);
       return;
     }
+    stopSpeaking();
     const nextId = `conversation_${buyerProfile.id}_${Date.now()}`;
     setConversationId(nextId);
     setMessages([]);
@@ -542,6 +612,9 @@ function App() {
       setBuyerSession(nextSession);
       setCreatorAgentEntitlements(entitlements);
       setSelectedEntitlementId(selected?.entitlement_id || "");
+      const preference = loadVoicePreference(nextSession.profile?.id ?? "anonymous", selected?.entitlement_id ?? "");
+      soundOnRef.current = preference;
+      setSoundOn(preference);
       setCreatorAgent(selected ? creatorAgentFromEntitlement(selected) : DEFAULT_CREATOR_AGENT);
       setSignedIn(true);
       setSignInStatus("ready");
@@ -552,6 +625,7 @@ function App() {
   }
 
   function signOut() {
+    stopSpeaking();
     disconnectRuntime();
     clearAuthSession(buyerSession);
     activeRunRef.current = null;
@@ -568,11 +642,15 @@ function App() {
 
   function selectCreatorAgent(entitlement) {
     if (entitlement.entitlement_id === selectedEntitlementId) return;
+    stopSpeaking();
     disconnectRuntime();
     setSelectedEntitlementId(entitlement.entitlement_id);
     setCreatorAgent(creatorAgentFromEntitlement(entitlement));
     setMessages([]);
     setConversationId(`conversation_${buyerProfile.id}_${entitlement.creator_id || "creator"}_${entitlement.agent_id || entitlement.product.id}`);
+    const preference = loadVoicePreference(buyerProfile.id, entitlement.entitlement_id);
+    soundOnRef.current = preference;
+    setSoundOn(preference);
   }
 
   function requestToolApproval(message) {
@@ -775,6 +853,9 @@ function App() {
     return <SignInScreen profile={buyerSession?.profile} onSignIn={(credentials) => void signIn(credentials)} status={signInStatus} error={signInError} />;
   }
 
+  const selectedEntitlement = creatorAgentEntitlements.find((item) => item.entitlement_id === selectedEntitlementId);
+  const selectedVoiceEnabled = selectedEntitlement?.voice?.enabled === true;
+
   return (
     <main className="app-shell">
       <aside className="control-panel">
@@ -823,6 +904,24 @@ function App() {
             <span className="label">Folder access</span>
             <strong>{workspaceGranted ? `${workspaceGrantLabel(workspace)} · read allowed · changes ask first` : "No folder granted"}</strong>
           </div>
+          {selectedVoiceEnabled ? (
+            <div className="voice-controls">
+              <span className="label">Voice · {soundOn ? "AI 合成音色" : "muted"}</span>
+              <button
+                className={`sound-toggle ${soundOn ? "on" : ""}`}
+                type="button"
+                onClick={toggleSound}
+                aria-pressed={soundOn}
+              >
+                {speaking ? "Playing…" : soundOn ? "Voice on" : "Voice off"}
+              </button>
+              {speaking ? (
+                <button className="secondary compact" type="button" onClick={stopSpeaking}>Stop</button>
+              ) : soundOn && replayText ? (
+                <button className="secondary compact" type="button" onClick={() => void speakText(replayText)}>Replay</button>
+              ) : null}
+            </div>
+          ) : null}
           {running ? (
             <button className="secondary compact" onClick={() => void cancelRun()}>Stop</button>
           ) : !connected && workspaceGranted ? (

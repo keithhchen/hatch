@@ -15,6 +15,13 @@
         reverse_proxy runtime:8400
     }
 
+    # Desktop voice playback: entitlement check happens on the Runtime, which
+    # relays synthesis to the Registry service token.
+    @runtime_tts path /v1/tts
+    handle @runtime_tts {
+        reverse_proxy runtime:8400
+    }
+
     @runtime_history path /conversations/*
     handle @runtime_history {
         reverse_proxy runtime:8400
