@@ -136,10 +136,11 @@ jobs:
             "$runtime_image" node scripts/create-agent-zip.mjs /input /output/hatch-demo-agent.zip
           domain="$(grep '^HATCH_DOMAIN=' /opt/hatch/.env | cut -d= -f2-)"
           registry_token="$(grep '^HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN=' /opt/hatch/.env | cut -d= -f2-)"
-          if curl --fail --silent --show-error "https://$domain/v1/agent-corpora/maya-chen/signal-resume-review" >/dev/null; then
+          if curl -4 --noproxy '*' --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 3 \
+            "https://$domain/v1/agent-corpora/maya-chen/signal-resume-review" >/dev/null; then
             echo "Signal Resume Review Agent Corpus already published"
           else
-            curl --fail --silent --show-error --retry 5 --retry-delay 3 \
+            curl -4 --noproxy '*' --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 3 \
               -H "Authorization: Bearer $registry_token" \
               -H "Content-Type: application/zip" \
               --data-binary @/tmp/hatch-demo-agent.zip \
@@ -152,8 +153,8 @@ jobs:
           set -euo pipefail
           domain="${HATCH_DOMAIN:-$(grep '^HATCH_DOMAIN=' /opt/hatch/.env | cut -d= -f2-)}"
           test -n "$domain"
-          curl --fail --retry 12 --retry-delay 3 --silent "https://$domain/healthz" >/dev/null
-          curl --fail --retry 12 --retry-delay 3 --silent "https://$domain/api/health" >/dev/null
+          curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/healthz" >/dev/null
+          curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/api/health" >/dev/null
       - name: Roll back application release when health fails
         if: failure()
         run: |
