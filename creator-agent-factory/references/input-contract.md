@@ -11,29 +11,24 @@ material; the Creator never fills it in.
 
 `source-manifest.json` declares:
 
+- no root `tenant_id`: the stable Creator id is the only identity used for
+  Agent Corpus isolation (`creator.id` + `agent_id`);
 - `creator`: stable `id`, display `name`, and optional factual `bio` supported by
   the supplied material or intent;
-- `product`: stable `id`, `name`, `description`, bounded `promise`, public
-  `boundaries`, `price_minor`, `currency`, `pricing_model`, `pricing_unit`, a
-  concrete `input_contract` and `output_contract`, `supported_local_capabilities`,
-  and optional deployable Creator `tools`;
+- `product`: stable `id`, `name`, semantic `version`, `description`, bounded
+  method intent, and the source material needed to create the Agent Corpus.
+  Commerce and access are published separately and are not part of the
+  runtime-free Corpus;
 - `documents`: stable `source_id`, relative `path`, `kind`, title, authority,
   and intake provenance fields described below.
 
 Never infer a price. Use zero with an explicit unset status in private notes
 when the intent does not state one; obtain a real price before publication.
-The Factory Agent—not the Creator—writes `input_contract` and `output_contract`:
-each has a short `summary` and a list of `{name, description, required}` fields.
-They state the minimum real material needed to do the promised work and the
-usable artifact the consumer receives.
 Supported local capabilities are limited to the Runtime contract: `fs.list`,
 `fs.read`, and `fs.write` inside the Consumer-selected workspace. They are
 Hatch platform context, not Creator configuration. An extraction utility is not
 a product capability; declare only the capabilities needed to inspect or
-deliver the bounded product. Creator external tools are only declared when the
-promised product genuinely needs one. Each is a deployable `creator.*` HTTP or
-MCP descriptor with a Hatch-owned `connection_ref`; never include a URL,
-credential, OAuth token, or approval policy in this private source pack.
+deliver the bounded product.
 
 When a raw intake workspace is attached, every document also identifies its
 `origin_source_id`/`origin_path` (or the equivalent intake source ID/path). The
@@ -55,12 +50,27 @@ The heading is context; the first non-empty paragraph after it is the exact clai
 - `claim_annotations`: label, priority, method role, and optional omission for every extracted source claim.
 - `derived_rules`: ID, statement, derivation, and two or more supporting claim IDs.
 - `method`: ordered phases, quality bar claim IDs, omission claim IDs, and boundary claim IDs.
+- optional `skill_units`: independently reusable local execution units. Each
+  item has `id`, `name`, `when_to_use`, `instruction`, and optional
+  `references` (`id`, `kind`, `content`) plus `allowed_tool_ids`. Use `[]` when
+  no Skill is needed. Do not make one Skill whose instruction is the entire
+  product workflow; the Factory Agent decides whether a unit is independently
+  reusable before emitting it.
+- required `runtime_knowledge_source_ids`: source IDs selected by the Factory
+  Agent as retrieval-only long-tail material. Use `[]` when no retrieval-only
+  material is needed. Only these documents enter the published `knowledge/`
+  space; behavior that must always affect the Agent belongs in `system.md` or a
+  Skill instead. Legacy compiler tests may omit this field, but the production
+  Factory Skill executor fails closed rather than guessing.
 - `tool_needs`: private implementation records with exactly `name`, `kind`
   (`local`, `external`, `dataset`, or `unresolved`), boolean `required`,
   non-empty `reason`, and `support` (`intent`, `detected_capability`,
   `source_fact`, or `unresolved`). An `external` need must exactly match a
   product `external_tools` item.
 - `qa_seeds`: one or more items in each of `direct`, `composed`, `boundary`, and `out_of_scope`; each has stable ID, question, answer, and supporting claim/rule IDs.
+- optional `few_shot_ids`: QA ids selected as positive runtime demonstrations;
+  only `direct` and `composed` examples are eligible. Boundary, out-of-scope,
+  and held-out cases remain evaluation material.
 - `held_out_evals`: release-only prompts that never appear in synthetic QA or
   few-shots. Each declares observable checks and the failure risk of a generic
   baseline.

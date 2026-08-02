@@ -1553,7 +1553,11 @@ function normalizeExplicitSkillPath(value: string): string {
 }
 
 async function assertSkillResourcePath(resourcePath: string, resourceRoots?: string[]): Promise<string> {
-  const roots = resourceRoots ?? skillResourceRoots(await discoverSkills());
+  const configuredRoots = resourceRoots ?? skillResourceRoots(await discoverSkills());
+  const roots = [
+    ...configuredRoots.map((root) => path.resolve(root)),
+    ...(await Promise.all(configuredRoots.map(async (root) => realpath(root).catch(() => path.resolve(root))))),
+  ];
   const absolute = path.resolve(resourcePath);
   if (!roots.some((root) => isPathInsideRoot(absolute, root))) {
     throw new Error(`Skill resource path escapes skills root: ${resourcePath}`);

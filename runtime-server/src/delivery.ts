@@ -17,8 +17,9 @@ export type DeliveryBinding = {
   orderId: string;
   userId: string;
   creatorId: string;
-  agentId: string;
   productId: string;
+  releaseId: string;
+  releaseDigest: string;
 };
 
 export type DeliveryReceipt = {
@@ -85,7 +86,8 @@ export async function recordCompletedDelivery(
     buyer_id: binding.userId,
     creator_id: binding.creatorId,
     product_id: binding.productId,
-    agent_id: binding.agentId
+    release_id: binding.releaseId,
+    release_digest: binding.releaseDigest
   };
 
   await sink.append("task.started", {

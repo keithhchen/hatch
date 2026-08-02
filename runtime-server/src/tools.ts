@@ -4,7 +4,7 @@ import type { ClientToolName } from "./protocol.js";
 export type ToolLocality = "server" | "client";
 export type ToolApproval = "none" | "auto" | "ask";
 export type ModelToolLocality = "server" | "client" | "hybrid";
-export type ModelToolAvailability = "always" | "client_capability" | "mcp_configured";
+export type ModelToolAvailability = "always" | "client_capability" | "mcp_configured" | "knowledge_configured";
 
 export type ModelToolSpec = {
   name: string;
@@ -60,24 +60,40 @@ export type ToolDefinition = {
 };
 
 export const toolRegistry = new Map<string, ToolDefinition>([
-  ["knowledge.search", {
-    name: "knowledge.search",
+  ["hatch.web_search", {
+    name: "hatch.web_search",
     locality: "server",
     approval: "none",
-    description: "Search this Creator Agent's private, retrieval-only knowledge base.",
-    schema: z.object({ query: z.string().min(1), max_num_results: z.number().int().min(1).max(20).default(6) }).strict(),
+    description: "Hatch-provided public web search.",
+    schema: z.object({ query: z.string(), limit: z.number().int().min(1).max(10).default(5) }).strict(),
     model: {
-      // `file_search` is intentionally reserved for the Agent-scoped RAG tool,
-      // matching the industry-standard function name. Local desktop search is
-      // exposed separately as `workspace_search` below.
-      name: "file_search",
+      name: "hatch_web_search",
       locality: "server",
-      description: "Search this Creator Agent's retrieval-only knowledge base for relevant long-tail material. Do not use it for local files or for instructions already present in context.",
+      description: "Search the public web using Hatch's configured web-search provider.",
       properties: {
-        query: stringSchema("Specific knowledge query."),
-        max_num_results: numberSchema("Maximum passages to retrieve, from 1 to 20.")
+        query: stringSchema("Search query."),
+        limit: numberSchema("Maximum number of results, from 1 to 10.")
       },
-      required: ["query"]
+      required: ["query"],
+      availability: "always"
+    }
+  }],
+  ["hatch.file_search", {
+    name: "hatch.file_search",
+    locality: "server",
+    approval: "none",
+    description: "Search the current Creator Agent's retrieval-only knowledge space.",
+    schema: z.object({ query: z.string(), limit: z.number().int().min(1).max(6).default(6) }).strict(),
+    model: {
+      name: "hatch_file_search",
+      locality: "server",
+      description: "Search the current Creator Agent knowledge space when the answer requires long-tail reference material.",
+      properties: {
+        query: stringSchema("Search query."),
+        limit: numberSchema("Maximum number of knowledge hits, from 1 to 6.")
+      },
+      required: ["query"],
+      availability: "knowledge_configured"
     }
   }],
   ["web.search", {
@@ -190,7 +206,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
       max_results: z.number().int().min(1).max(100).default(20)
     }).strict(),
     model: {
-      name: "workspace_search",
+      name: "file_search",
       locality: "client",
       description: "Search file paths and UTF-8 file contents inside the client-declared local workspace.",
       properties: {
@@ -307,7 +323,7 @@ export function requireTool(name: string): ToolDefinition {
 
 export function modelToolSpecsForRun(
   clientTools: ClientToolName[],
-  options: { hasMcpServers: boolean }
+  options: { hasMcpServers: boolean; hasKnowledge?: boolean }
 ): ModelToolSpec[] {
   return [...toolRegistry.values()]
     .flatMap((tool) => tool.model ? [toModelToolSpec(tool)] : [])
@@ -387,9 +403,10 @@ function toModelToolSpec(tool: ToolDefinition): ModelToolSpec {
 function modelToolAvailable(
   spec: ModelToolSpec,
   clientTools: ClientToolName[],
-  options: { hasMcpServers: boolean }
+  options: { hasMcpServers: boolean; hasKnowledge?: boolean }
 ): boolean {
   if (spec.availability === "mcp_configured") return options.hasMcpServers;
+  if (spec.availability === "knowledge_configured") return Boolean(options.hasKnowledge);
   if (spec.availability === "client_capability") {
     return Boolean(spec.clientTool && clientTools.includes(spec.clientTool));
   }

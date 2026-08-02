@@ -22,7 +22,8 @@ test("normal Runtime startup attaches a durable commerce ledger when configured"
     buyer_id: "buyer_jordan_lee",
     creator_id: "creator_maya_chen",
     product_id: "signal-resume-review",
-    agent_id: "signal-resume-reviewer"
+    release_id: "signal-resume-review@1.0.0",
+    release_digest: "sha256:release"
   };
   await ledger.append("order.placed", { ...common, gross_minor: 3900, currency: "USD" }, {
     idempotencyKey: "order:order_desktop_jordan"

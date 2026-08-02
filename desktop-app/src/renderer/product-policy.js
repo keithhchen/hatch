@@ -9,17 +9,16 @@ export const DEFAULT_CREATOR_AGENT = Object.freeze({
 });
 
 export function creatorAgentFromSession(message) {
-  const creatorAgent = message?.creator_agent;
-  if (!creatorAgent?.creator?.name || !creatorAgent?.product?.name) return DEFAULT_CREATOR_AGENT;
+  const agent = message?.creator_agent;
+  if (!agent?.creator?.name || !agent?.product?.name) return DEFAULT_CREATOR_AGENT;
   return Object.freeze({
-    id: creatorAgent.product.id,
-    creator: creatorAgent.creator.name,
-    creatorInitials: initials(creatorAgent.creator.name),
-    name: creatorAgent.product.name,
-    // Buyer chat only needs display copy. Promise, offer and operating
-    // boundaries guide Runtime/commerce and are not a UI dependency.
-    description: creatorAgent.product.description || DEFAULT_CREATOR_AGENT.description,
-    presentation: creatorAgent.presentation || {}
+    id: agent.product.id,
+    creator: agent.creator.name,
+    creatorInitials: initials(agent.creator.name),
+    name: agent.product.name,
+    description: agent.product.description || "Work with this Creator Agent in your own files and context.",
+    boundary: "",
+    presentation: agent.presentation || {}
   });
 }
 

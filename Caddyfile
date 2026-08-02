@@ -1,0 +1,54 @@
+{$HATCH_DOMAIN} {
+    encode gzip
+
+    # Desktop WebSocket endpoint. The public /v1 prefix is removed before the
+    # request reaches the Runtime's native /runtime WebSocket path.
+    @runtime_socket path /v1/runtime*
+    handle @runtime_socket {
+        uri strip_prefix /v1
+        reverse_proxy runtime:8400
+    }
+
+    # Desktop HTTP discovery and conversation history endpoints.
+    @runtime_agents path /v1/me/creator-agents
+    handle @runtime_agents {
+        reverse_proxy runtime:8400
+    }
+
+    @runtime_history path /conversations/*
+    handle @runtime_history {
+        reverse_proxy runtime:8400
+    }
+
+    # TypeScript Registry APIs. Keep the public paths stable so Factory and
+    # Desktop can use HATCH_REGISTRY_URL without knowing the private service
+    # name. Dashboard-specific /v1/creator/products routes remain below.
+    @registry_api path /v1/agent-corpora* /v1/catalog/agents* /v1/auth/signup /v1/auth/signin /v1/auth/me /v1/user/agent-access /v1/user/agents/* /v1/creator/agents /v1/creator/agent-corpora /v1/runtime/tenants/*
+    handle @registry_api {
+        reverse_proxy registry:8100
+    }
+
+    # Backwards-compatible private prefix for operational checks and local
+    # tooling. The Dashboard talks to Registry over the private Compose network.
+    handle_path /api/* {
+        reverse_proxy registry:8100
+    }
+
+    # Creator and buyer Portal API.
+    handle /v1/* {
+        reverse_proxy dashboard:8500
+    }
+
+    # Vite's production base path is /portal/; the Dashboard container serves
+    # the built static files and its API from the same origin.
+    handle /portal* {
+        reverse_proxy dashboard:8500
+    }
+
+    @root path /
+    redir @root /portal/ 308
+
+    handle {
+        reverse_proxy dashboard:8500
+    }
+}

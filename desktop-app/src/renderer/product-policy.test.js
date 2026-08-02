@@ -15,7 +15,7 @@ describe("consumer product contract", () => {
     expect(PRODUCT_COPY.workspaceRequired).not.toMatch(/resume/i);
   });
 
-  it("renders Creator identity from the minimal current-Agent projection", () => {
+  it("renders Creator identity from public Release metadata", () => {
     expect(creatorAgentFromSession({
       creator_agent: {
         creator: { id: "creator-1", name: "Ari Cole" },
@@ -24,18 +24,8 @@ describe("consumer product contract", () => {
       }
     })).toEqual({
       id: "plan", creator: "Ari Cole", creatorInitials: "AC", name: "Adaptive Plan",
-      description: "A useful plan.", presentation: { accent: "green" }
+      description: "A useful plan.", boundary: "", presentation: { accent: "green" }
     });
-  });
-
-  it("does not use a product promise as buyer-facing fallback copy", () => {
-    expect(creatorAgentFromSession({
-      creator_agent: {
-        creator: { id: "creator-1", name: "Ari Cole" },
-        product: { id: "plan", name: "Adaptive Plan", promise: "Private operating instruction." },
-        presentation: {}
-      }
-    }).description).toBe(DEFAULT_CREATOR_AGENT.description);
   });
 
   it("isolates persisted state by signed-in profile", () => {

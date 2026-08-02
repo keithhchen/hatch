@@ -81,6 +81,14 @@ h1, h2 { font-family: var(--hatch-font-display); font-weight: 400; }
 
 .home-grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(280px, .72fr); gap: 18px; }
 .product-list { display: grid; max-width: 780px; gap: 18px; }
+.agent-list { margin-top: 36px; }
+.agent-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-top: 16px; }
+.agent-tile { min-height: 180px; padding: 22px; border: 1px solid var(--hatch-border-subtle); border-radius: 18px; background: color-mix(in srgb, var(--hatch-panel) 84%, transparent); }
+.agent-tile h2, .agent-tile h3 { margin: 18px 0 8px; font-family: var(--hatch-font-display); font-size: 26px; font-weight: 400; }
+.agent-tile p { min-height: 42px; color: #6d675f; font-size: 13px; line-height: 1.55; }
+.agent-tile small { color: #8a8378; font-family: var(--hatch-font-mono); font-size: 10px; }
+.agent-offer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 18px; color: #8a8378; font-size: 12px; }
+.agent-offer .secondary { min-height: 36px; padding-inline: 14px; font-size: 12px; }
 .product-card, .earnings-card, .orders-card, .payout-card, .empty-state {
   border: 1px solid var(--hatch-border-subtle);
   border-radius: 22px;
@@ -125,6 +133,7 @@ h1, h2 { font-family: var(--hatch-font-display); font-weight: 400; }
 .earnings-split b { color: #fff; font-weight: 500; }
 
 .orders-card { max-width: 780px; margin-top: 18px; padding: 27px; }
+.buyer-orders { max-width: none; margin-top: 36px; }
 .home-grid + .orders-card { max-width: none; }
 .section-title { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .section-title h2 { margin: 6px 0 0; font-size: 27px; }
@@ -211,7 +220,7 @@ h1, h2 { font-family: var(--hatch-font-display); font-weight: 400; }
 .login-panel form { width: min(390px,100%); }
 .login-panel h2 { margin: 10px 0 34px; font-size: 36px; }
 .login-panel label { display: grid; gap: 8px; margin-bottom: 18px; color: #615b53; font-size: 13px; }
-.login-panel input { width: 100%; padding: 13px 14px; border: 1px solid rgba(55,49,40,.15); border-radius: 10px; background: rgba(255,255,255,.72); outline: none; }
+.login-panel input, .login-panel select { width: 100%; padding: 13px 14px; border: 1px solid rgba(55,49,40,.15); border-radius: 10px; background: rgba(255,255,255,.72); outline: none; }
 .login-panel input:focus { border-color: var(--hatch-accent); box-shadow: 0 0 0 3px rgba(214,95,59,.12); }
 .login-panel .primary { width: 100%; }
 .form-error { color: #b04b33; font-size: 13px; }

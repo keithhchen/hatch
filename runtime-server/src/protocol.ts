@@ -1,8 +1,6 @@
 import { z } from "zod";
 
 export const PROTOCOL_VERSION = "0.3";
-// Keep this above the local 1 MiB file/shell content limits so valid results
-// are not rejected by a 256 KiB transport assumption.
 export const MAX_TOOL_RESULT_BYTES = 4 * 1024 * 1024;
 export const ClientToolNameSchema = z.enum([
   "fs.list",
@@ -19,16 +17,25 @@ export const ClientHelloSchema = z.object({
   type: z.literal("client.hello"),
   protocol_version: z.literal(PROTOCOL_VERSION),
   installation_id: z.string().min(1),
-  license_token: z.string().min(1),
+  auth_token: z.string().min(1).optional(),
+  // Kept only for old local fixtures during the migration. Production clients
+  // send auth_token issued by Registry.
+  license_token: z.string().min(1).optional(),
   entitlement_id: z.string().min(1).optional(),
+  creator_id: z.string().min(1).optional(),
   tenant_id: z.string().min(1).optional(),
-  user_id: z.string().min(1).optional(),
   agent_id: z.string().min(1).optional(),
+  user_id: z.string().min(1).optional(),
   product_id: z.string().min(1).optional(),
+  release_id: z.string().min(1).optional(),
+  release_digest: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(),
   client_version: z.string().optional(),
   workspace_root: z.string().min(1).optional(),
   local_tools: z.array(ClientToolNameSchema)
 }).strict().superRefine((message, ctx) => {
+  if (!message.auth_token && !message.license_token) {
+    ctx.addIssue({ code: "custom", path: ["auth_token"], message: "auth_token is required" });
+  }
   if (message.local_tools.length > 0 && !message.workspace_root) {
     ctx.addIssue({
       code: "custom",
@@ -36,13 +43,19 @@ export const ClientHelloSchema = z.object({
       message: "workspace_root is required when local_tools are declared"
     });
   }
-  if (message.entitlement_id && (message.product_id || message.agent_id)) {
+  if ((message.release_id === undefined) !== (message.release_digest === undefined)) {
+    ctx.addIssue({ code: "custom", path: ["release_id"], message: "release_id and release_digest must be supplied together" });
+  }
+  if (message.entitlement_id && (message.release_id || message.release_digest)) {
     ctx.addIssue({
       code: "custom",
       path: ["entitlement_id"],
-      message: "entitlement_id cannot be combined with client-selected product or Agent fields"
+      message: "entitlement_id cannot be combined with client-selected Creator Release fields"
     });
   }
+  // An entitlement may point at either a legacy Release or the Registry's
+  // current Agent Corpus. In the latter case agent_id is a selector that is
+  // checked against the server-side entitlement, never trusted by itself.
 });
 
 export const ClientMessageSchema = z.object({
@@ -110,22 +123,23 @@ export type ConversationMessage = {
 export type RuntimeReady = {
   type: "session.ready";
   accepted_protocol_version: typeof PROTOCOL_VERSION;
-  tenant_id: string;
+  creator_id?: string;
+  tenant_id?: string;
   user_id: string;
   product_id: string;
-  agent_id: string;
+  release_id?: string;
+  release_digest?: string;
+  agent_id?: string;
   entitlement_id?: string;
   creator_agent?: {
     creator: { id: string; name: string };
     product: {
       id: string;
       name: string;
-      /** Display-only copy. Product promise, offer and boundaries stay in Runtime/commerce. */
-      description?: string;
-      /** Legacy Release projection fields. A new Corpus session never requires them. */
+      description: string;
       promise?: string;
       boundaries?: string[];
-      offer?: { model?: "per_delivery" | "subscription"; amount_minor: number; currency: string; unit?: string };
+      offer?: { model?: "per_delivery" | "subscription"; amount_minor?: number; currency?: string; unit?: string };
     };
     presentation: Record<string, unknown>;
   };

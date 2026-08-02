@@ -1,0 +1,43 @@
+name: hatch-infra
+
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-hatch}
+      POSTGRES_USER: ${POSTGRES_USER:-hatch}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in /opt/hatch/.env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - hatch_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  qdrant:
+    image: ${QDRANT_IMAGE:-qdrant/qdrant:v1.14.1}
+    restart: unless-stopped
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - hatch_internal
+    healthcheck:
+      test: ["CMD", "sh", "-c", "wget -qO- http://127.0.0.1:6333/healthz >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  postgres_data:
+    name: hatch_postgres_data
+  qdrant_data:
+    name: hatch_qdrant_data
+
+networks:
+  hatch_internal:
+    name: hatch_internal

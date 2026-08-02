@@ -1,157 +1,199 @@
 ---
 name: creator-agent-factory
-description: Distill ordinary Creator course files, PDFs, videos or transcripts, text, examples, and prior work plus a natural-language product intent into a clean Hatch Agent Corpus. Use when an agent must purify Creator knowhow into a system prompt, optional local Skills and references, retrieval-only knowledge, tool declarations, synthetic QA, and isolated Evals that can run on Hatch Runtime.
+description: Turn a Creator's ordinary course material, PDFs, videos, transcripts, notes, examples, and natural-language product intent into a clean file-based Agent Corpus. Use when an operator wants an agent to distill Creator know-how into system instructions, optional executable Skills, Skill references, retrieval-only knowledge, few-shots, and held-out evaluations. The operator supplies source material; the executing agent writes and audits the Corpus directly.
 ---
 
 # Creator Agent Factory
 
-Act as the semantic distiller. The Creator provides ordinary material and a
-natural-language product intent—not JSON, prompts, schemas, Skills, RAG chunks,
-Evals, or tool manifests. Produce the real Corpus files through the Factory
-workspace. Do not return one large JSON response or substitute a script for
-semantic judgment.
+You are the semantic Factory. Read ordinary Creator material and write a
+usable Agent Corpus as files. Do not ask the Creator or operator to prepare
+JSON, schemas, RAG chunks, prompts, Skills, or Eval records. Do not return a
+large JSON answer. Your work is the files you create and revise.
 
-Read [agent-distillation-workflow.md](references/agent-distillation-workflow.md)
-before writing a Corpus.
+This Skill is deliberately independent of the host model, CLI, Runtime,
+Registry, database, vector store, and deployment environment. Do not configure
+or start any of them. Do not write code to replace the judgment below.
 
-## Work from ordinary inputs
+## Inputs
 
-1. Start in a new private Factory workspace. Read only the Creator material,
-   natural-language intent, this Skill, its workflow reference, and the Corpus
-   contract.
-2. Do not inspect an old Release, proof, expected answer, or prior Factory
-   output. They leak answers.
-3. Normalize and hash raw material without semantic decisions:
+Use only:
 
-   ```bash
-   python3 scripts/intake.py \
-     --input <creator-material-directory> \
-     --intent-file <intent.txt> \
-     --output <private-intake-workspace>
-   ```
+- the supplied Creator materials: courses, PDFs, videos or transcripts, text,
+  examples, and previous deliverables;
+- the Creator's natural-language description of the product they want to sell;
+- this Skill and its references.
 
-4. Read the complete extracted intake. For video/audio, read the timestamped
-   transcript. For PDF, preserve page locations and inspect rendered pages when
-   layout changes meaning. Do not silently sample.
+Read the complete supplied material. Preserve page, timestamp, heading, or
+file provenance while reading. If the material is incomplete, do not fill the
+gap with generic domain advice; record the limit and make the nearest useful
+partial product.
 
-`intake.py` is only an extractor and has no authority to infer Creator method.
-The executing agent performs all evidence, distillation, classification, QA, and
-tool decisions.
+## Output
 
-## The Corpus has four distinct layers
-
-Put every usable piece of Creator ability in the narrowest layer that makes it
-reliably available at runtime. Do not use RAG as a general dumping ground.
-Do not demote behavior to retrieval merely to save prompt space: if it must
-directly affect behavior, it belongs in the system prompt or the relevant local
-Skill/reference.
-
-| Layer | Put here | Do not put here |
-|---|---|---|
-| `instructions/system.md` | Product promise and boundary, persona/voice, global values and judgment, always-on behavior, global few-shots | Long source material; a local procedure that only matters for one task |
-| `skills/<id>/SKILL.md` | An optional, bounded execution unit: when to use it, inputs, outputs, steps, checks, and permitted tools | The entire product journey; generic identity or worldview |
-| `skills/<id>/references/` | A framework, method, aesthetic, or local examples needed only while that Skill runs | Material that must influence all turns; large retrieval archives |
-| `knowledge/` | Long-tail, queryable facts, cases, texts, or reference material that may be needed for a particular request | Behavior rules, system instructions, Skill instructions/references, canonical few-shots, raw course dumps |
-
-Skills are optional. Omit `skills/` when the product needs no distinct reusable
-execution unit. Never create a Skill merely to make the package look complete.
-A Skill is not the whole delivery workflow: split only genuinely independent
-local units, and keep global product behavior in `system.md`.
-
-Synthetic QA follows the same routing rule:
-
-- a result that should change behavior on every turn becomes a concise rule or
-  few-shot in `system.md`;
-- a result relevant only to one execution unit becomes a local rule or example
-  in that Skill or its `references/`;
-- rare supporting material belongs in `knowledge/` only when it must be found
-  on demand;
-- held-outs remain in `evals/` and are never Runtime context.
-
-Do not automatically inject the Eval dataset into the runtime prompt. The
-Corpus may retain synthetic QA for evaluation, but only the deliberately routed
-canonical guidance affects a live Agent.
-
-## Distill as one executing Agent
-
-Follow the referenced workflow. Keep private evidence and audit notes while
-thinking, but never publish them. In particular:
-
-- establish one bounded product value before extracting ability; do not start by
-  copying a whole person;
-- derive Creator rules only from Creator evidence; distinguish their method,
-  Consumer-supplied task context, and generic domain knowledge;
-- preserve priorities, omissions, and the details a general model would make
-  too complete or generic;
-- generate synthetic direct, composed, boundary, and out-of-scope cases only
-  after the method is frozen; generate held-outs afterwards;
-- self-audit, then adversarially re-read for unsupported claims and leakage.
-
-Repair the Corpus, never the source. If a claim, capability, or expected
-behavior is unsupported, omit it or make the boundary explicit. Do not ask the
-Creator to review intermediate prompts, Skills, or Evals.
-
-## Tools and real working context
-
-Separate Factory-only ingestion from published Agent capabilities. Do not
-publish extraction, ordinary conversation, prose generation, or hypothetical
-integrations as tools.
-
-`hatch.web_search` and `hatch.file_search` are always Hatch-built-in tools.
-They do not need a Creator credential: Registry owns the isolated retrieval
-namespace behind file search. Declare local filesystem
-capability only when the bounded product needs the Consumer's actual workspace
-files or must save a usable artifact. For that case declare
-`hatch.local.files` with `kind: "local_harness"` and
-`capability: "filesystem"`; list it in the relevant Skill's
-`allowed_tool_ids` when a Skill invokes it. A no-Skill Agent still declares the
-tool in its manifest. A document-centred product normally reads the selected
-workspace file rather than asking the Consumer to paste it into chat.
-
-Creator HTTP/MCP tools declare only the Hatch-managed `connection_ref`, the
-one permitted `operation` / `tool_name`, and an optional input schema. Never
-place URLs, credentials, provider settings, or a secret in the Corpus. Do not
-invent a Creator tool when a Hatch built-in or no tool is sufficient.
-
-## Produce only the clean Agent Corpus
-
-Write actual assets described by
-[`../packages/protocol/AGENT_CORPUS.md`](../packages/protocol/AGENT_CORPUS.md):
+Create a new directory named `agent-corpus/` (or a clearly named equivalent)
+and write the following clean files. Create optional directories only when
+the Agent needs them.
 
 ```text
 agent-corpus/
-├── agent.json
-├── instructions/system.md
-├── skills/                         # optional
-│   └── <skill-id>/
-│       ├── SKILL.md
-│       └── references/             # optional, local to this Skill
-├── knowledge/                      # retrieval-only; may be empty
-└── evals/
-    ├── synthetic-qa.json
-    └── held-out.json
+  agent.json
+  instructions/
+    system.md
+  skills/                         # optional; zero or more independent units
+    <skill-id>/
+      SKILL.md
+      references/                 # optional, local to this Skill
+        <reference>.md
+  knowledge/                      # optional; retrieval-only long material
+    <document>.md
+  evals/
+    synthetic-qa.json
+    held-out.json
 ```
 
-`agent.json` is the manifest. It names the product contract, system entrypoint,
-any Skills and their allowed tool ids, retrieval documents, tool declarations,
-and separate synthetic-QA and held-out assets. It always declares
-`knowledge: { documents: [] }` when no long-tail material survives purification,
-so Registry can establish the Agent's isolated retrieval namespace. It does not contain the text of
-the assets, a model/provider, deployment settings, a release/version,
-credentials, URLs, approval policy, or RAG index IDs. Every referenced asset
-has an exact sha256 returned by the Factory workspace after it is written.
+`agent.json` is the small manifest that makes the written files loadable by a
+compatible Agent Runtime. Write it yourself; the operator never fills it in.
+It contains only `contract_version: "1"`, Creator id/name, Agent id, product
+id/name/description, pointers for every written asset, and the declarative tool
+list. Every pointer names a relative file and its real `sha256`. Keep the
+manifest free of system-prompt text, Skill bodies, raw source material,
+Factory notes, credentials, endpoints, provider choices, and vector-store
+identifiers. Always include Hatch's `hatch.web_search`; include
+`hatch.file_search` only when `knowledge/` is non-empty. Do not invent pricing
+or a separate tenant identity. Do not ask the operator to inspect or edit this
+manifest.
 
-Before finishing, inspect the assets as a runnable product:
+The executable content is Markdown. `system.md`, each `SKILL.md`, and each
+reference must be complete enough for another agent to use without seeing the
+Factory's private reasoning. `knowledge/` must contain the actual long-form
+documents, not a list of claims pretending to be a knowledge base. Evaluation
+files are review assets and are not runtime instructions. Keep evaluation
+records readable and grounded; they are not a schema the operator must fill.
 
-- `system.md` alone gives the Agent its global behavior and product boundary;
-- each Skill is a truly local execution unit and only its references are needed
-  while it runs;
-- `knowledge/` is clean, searchable evidence rather than rules or raw source;
-- the Eval dataset stays outside live context, with held-outs isolated;
-- every tool has a concrete runtime need and a real Hatch adapter/binding;
-- no raw course/PDF/video/transcript, Factory trace, private evidence, user
-  data, credentials, provider settings, review workflow, release, or version is
-  present.
+## The placement decision
 
-Publish only `agent-corpus/`. Keep the intake, private evidence, audit, QA
-construction, and proof outside the Corpus.
+For every important piece of Creator know-how, decide where it belongs before
+writing it:
+
+```text
+Global judgment and behavior  → instructions/system.md
+Local reusable execution      → skills/<id>/SKILL.md
+Local method/framework detail  → that Skill's references/
+Long, occasional source       → knowledge/
+```
+
+### System instructions
+
+Put here what should shape the Agent in almost every interaction:
+
+- worldview, tone, persona, values, and relationship to the user;
+- global priorities and trade-offs;
+- recurring quality bars, omissions, and boundaries;
+- behavior that must apply even when no Skill is selected;
+- a small number of high-signal global few-shots.
+
+Do not turn the whole course into a summary. Keep only rules that directly
+change behavior.
+
+### Skills
+
+A Skill is an optional, independently reusable execution unit. It is not the
+whole Agent, the whole product, or a giant end-to-end workflow. Create a Skill
+only when a bounded action recurs and deserves its own instructions.
+
+A Skill should say what it does, when it applies, how it proceeds, what quality
+looks like, and when it should stop or hand back. It may use tools, but only
+when the product genuinely needs them. An Agent may have no Skills at all.
+
+### Skill references
+
+Put a local method, framework, discipline, or aesthetic here when it matters
+only while that Skill runs. For example, the pyramid principle belongs under a
+deck-structure Skill. A general principle about communicating with a client or
+manager belongs in `system.md`, not in a presentation reference.
+
+References are instructions for the local execution unit, not a second global
+prompt and not a miscellaneous dump of course pages.
+
+### Knowledge
+
+Put only long or broad material that the Agent may need to look up occasionally:
+large case libraries, terminology, historical examples, detailed regulations,
+or other tail material. Knowledge is retrieval material, not a behavior policy.
+
+If a rule must directly affect behavior, place it in `system.md` or the
+relevant Skill/reference. Do not hide a mandatory rule in Knowledge merely to
+make the Corpus look complete.
+
+## Distill, purify, and expand
+
+Work as one careful agentic process:
+
+1. **Find evidence.** Read all source files and keep exact excerpts with
+   provenance. Separate Creator-authored guidance from your interpretation and
+   from generic domain knowledge.
+2. **Find the product value.** Identify what a user would actually pay this
+   Creator to receive. Do not begin by copying a complete personality or by
+   turning a course chapter into a Skill.
+3. **Extract the global layer.** Capture the Creator's worldview, voice,
+   values, priorities, recurring omissions, and hard boundaries in `system.md`.
+4. **Extract local execution units.** Split only genuinely reusable actions
+   into Skills. Give each Skill the smallest method that can stand on its own;
+   put its local frameworks in `references/`.
+5. **Choose the tail.** Keep long, occasional material in `knowledge/`. Keep
+   behavior-changing material out of it.
+6. **Expand synthetic examples.** Create grounded examples that extend the
+   supplied material without pretending to be Creator quotes. Route them by
+   scope: global examples to `system.md`, local examples to Skill references,
+   and broad or rare examples to Knowledge/evaluation material.
+7. **Create held-outs.** Write novel input-only cases and the expected behavior
+   separately in `evals/held-out.json`. Do not place held-outs or boundary tests
+   in live instructions or few-shots.
+8. **Audit and revise.** Read the written Corpus as a fresh agent would. Remove
+   unsupported claims, duplicate rules, invented tools, giant Skills, and
+   knowledge that should have been instructions. If the source does not support
+   a confident rule, leave the gap visible instead of guessing.
+
+## Synthetic QA and few-shots
+
+Synthetic QA is not automatically one thing. Classify each example by the
+layer it teaches:
+
+- global behavior → a concise few-shot in `instructions/system.md`;
+- one Skill's method → a few-shot or example in that Skill's `references/`;
+- broad, rare, or factual material → `knowledge/` or the evaluation files;
+- boundary and out-of-scope cases → `evals/`, never live few-shots;
+- held-out cases → `evals/held-out.json`, never copied into the Agent context.
+
+Label synthetic material internally as synthetic. Never present it as a quote,
+case, customer result, or personal experience of the Creator.
+
+## Tools and integrations
+
+Declare a tool only when the product value requires it. Keep tool definitions
+and credentials separate: the Corpus may name a built-in Hatch tool or a
+Creator-defined HTTP/MCP operation, but it must never contain API keys,
+cookies, or secrets. Do not invent a tool to make the Corpus appear complete.
+
+`hatch.web_search` remains a Hatch-provided capability when the product needs
+current public information. A Creator HTTP/MCP tool is a declared dependency,
+not a secret embedded in the Agent. A file-search or retrieval layer is only
+for the documents placed in `knowledge/`; it must not carry system rules or
+Skill instructions.
+
+## Final quality bar
+
+Before reporting completion, inspect the actual files and ask:
+
+- Can a fresh agent understand the Creator's behavior from `system.md` alone?
+- Are Skills optional, small, and executable rather than course summaries?
+- Are references local to the Skill that needs them?
+- Is Knowledge genuinely long-tail and retrieval-only?
+- Are synthetic few-shots routed by scope and held-outs isolated?
+- Are tools minimal and secret-free?
+- Is every important rule grounded in the supplied material?
+- Would this Corpus be cleanly portable to any compatible Agent Runtime?
+
+Then report only a short manifest, the placement decisions, and any unresolved
+source gaps. Do not report environment setup, model choice, or a hidden schema
+as if those were part of the Creator's product.

@@ -23,7 +23,7 @@ test("an entitlement resolves a layered Corpus without loading evals or knowledg
   temporaryDirectories.push(root);
   const corpusRoot = path.join(root, "corpora");
   const workspace = path.join(root, "workspace");
-  const agentDirectory = path.join(corpusRoot, "tenant-maya", "signal-resume-reviewer");
+  const agentDirectory = path.join(corpusRoot, "maya-chen", "signal-resume-reviewer");
   await mkdir(path.join(agentDirectory, "instructions"), { recursive: true });
   await mkdir(path.join(agentDirectory, "skills", "signal-review"), { recursive: true });
   await mkdir(path.join(agentDirectory, "knowledge"), { recursive: true });
@@ -54,10 +54,7 @@ test("an entitlement resolves a layered Corpus without loading evals or knowledg
     agent_id: "signal-resume-reviewer",
     creator: { id: "maya-chen", name: "Maya Chen" },
     product: {
-      id: "signal-resume-review", name: "Signal Resume Review", description: "Evidence-led resume review.",
-      promise: "Review a resume using Maya's evidence standard.",
-      inputs: ["A resume and optional role context."], outputs: ["Actionable evidence-led feedback."], boundaries: ["Does not guarantee a job offer."],
-      offer: { model: "per_delivery", unit: "resume review", amount_minor: 3900, currency: "USD" }
+      id: "signal-resume-review", name: "Signal Resume Review", description: "Evidence-led resume review."
     },
     instructions: { system: asset("system", "instructions/system.md", system) },
     skills: [{
@@ -77,29 +74,23 @@ test("an entitlement resolves a layered Corpus without loading evals or knowledg
   }), "utf8");
   const entitlementFile = path.join(root, "entitlements.json");
   await writeFile(entitlementFile, JSON.stringify([{
-    license_token: "buyer-token", entitlement_id: "entitlement-1", order_id: "order-1", tenant_id: "tenant-maya", user_id: "buyer-1",
+    license_token: "buyer-token", entitlement_id: "entitlement-1", order_id: "order-1", user_id: "buyer-1",
     creator_id: "maya-chen", product_id: "signal-resume-review", agent_id: "signal-resume-reviewer", status: "active"
   }]), "utf8");
 
   const server = createRuntimeServer({
     createRuntime: () => new DeterministicAgentRuntime(),
-    corpusResolver: new AgentCorpusResolver(corpusRoot),
+    agentCorpusResolver: new AgentCorpusResolver(corpusRoot),
     entitlementResolver: new FileEntitlementResolver(entitlementFile),
-    agentKnowledgeSearch: {
-      forAgent: (tenantId, agentId) => ({
-        search: async () => ({
-          data: [],
-          scoped_to: `${tenantId}/${agentId}`
-        })
-      })
-    }
   });
   servers.push(server);
   await new Promise<void>((resolve) => server.server.listen(0, "127.0.0.1", resolve));
   const port = (server.server.address() as { port: number }).port;
   const session = new LocalHarnessSession({
     serverUrl: `ws://127.0.0.1:${port}/runtime`, workspace,
-    entitlementId: "entitlement-1", licenseToken: "buyer-token", localTools: ["fs.list", "fs.read"]
+    entitlementId: "entitlement-1", licenseToken: "buyer-token",
+    creatorId: "maya-chen", agentId: "signal-resume-reviewer", productId: "signal-resume-review",
+    localTools: ["fs.list", "fs.read"]
   });
   try {
     await session.connect();

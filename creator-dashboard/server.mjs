@@ -1,10 +1,12 @@
 import { createServer } from "node:http";
+import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   CommerceLedger,
   projectBuyerEntitlements,
+  projectBuyerOrders,
   projectCreatorDashboard
 } from "../packages/commerce/src/index.js";
 import { CreatorProductStore } from "./src/product-store.js";
@@ -12,10 +14,6 @@ import { CreatorProductStore } from "./src/product-store.js";
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 
 export async function createDashboardApp(options = {}) {
-  const fixturePath = options.fixturePath
-    ?? process.env.HATCH_CREATOR_DASHBOARD_FIXTURE_PATH
-    ?? path.join(currentDirectory, "fixtures/local-uat.json");
-  const fixture = options.fixture ?? JSON.parse(await readFile(fixturePath, "utf8"));
   const ledgerPath = options.ledgerPath
     ?? process.env.HATCH_COMMERCE_LEDGER_PATH
     ?? path.join(currentDirectory, ".local-uat", "ledger.jsonl");
@@ -43,9 +41,7 @@ export async function createDashboardApp(options = {}) {
       statePath: productStatePath
     })
   ]);
-
-  const sessions = new Map();
-  const profiles = new Map(fixture.profiles.map((profile) => [profile.email.toLowerCase(), profile]));
+  const fetchImpl = options.fetchImpl ?? fetch;
 
   const handler = async (request, response) => {
     try {
@@ -56,22 +52,132 @@ export async function createDashboardApp(options = {}) {
       }
       if (request.method === "POST" && url.pathname === "/v1/auth/login") {
         const body = await readJson(request);
-        const profile = profiles.get(String(body.email ?? "").toLowerCase());
-        if (!profile || profile.password !== body.password) {
-          return send(response, 401, { error: { code: "invalid_credentials", message: "Email or password is incorrect." } });
-        }
-        const token = `local_${profile.role}_${profile.id}`;
-        sessions.set(token, profile);
-        return send(response, 200, { token, profile: publicProfile(profile) });
+        const auth = await registryRequest(registryUrl, "/v1/auth/signin", {
+          method: "POST",
+          body: JSON.stringify({ email: body.email, password: body.password }),
+          fetchImpl
+        });
+        return send(response, 200, { token: auth.token, profile: publicProfile(auth.account) });
       }
       if (request.method === "POST" && url.pathname === "/v1/auth/logout") {
-        const token = bearerToken(request);
-        if (token) sessions.delete(token);
         return send(response, 204, undefined);
+      }
+      if (request.method === "GET" && url.pathname === "/v1/auth/me") {
+        const authentication = await authenticate(request, registryUrl, undefined, fetchImpl);
+        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
+        return send(response, 200, authentication.profile);
+      }
+
+      if (request.method === "GET" && url.pathname === "/v1/catalog/agents") {
+        return send(response, 200, await registryRequest(registryUrl, "/v1/catalog/agents", { fetchImpl }));
+      }
+
+      if (request.method === "GET" && url.pathname === "/v1/user/agents") {
+        const authentication = await authenticate(request, registryUrl, "user", fetchImpl);
+        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
+        const [access, catalog] = await Promise.all([
+          registryRequest(registryUrl, "/v1/user/agent-access", {
+            fetchImpl,
+            headers: { authorization: `Bearer ${bearerToken(request)}` }
+          }),
+          registryRequest(registryUrl, "/v1/catalog/agents", { fetchImpl })
+        ]);
+        return send(response, 200, { creator_agents: mergeRegistryAgents(access, catalog) });
+      }
+
+      if (request.method === "GET" && url.pathname === "/v1/user/orders") {
+        const authentication = await authenticate(request, registryUrl, "user", fetchImpl);
+        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
+        return send(response, 200, {
+          orders: projectBuyerOrders(ledger.listEvents(), authentication.profile.id)
+        });
+      }
+
+      if (request.method === "POST" && url.pathname === "/v1/user/checkout") {
+        const authentication = await authenticate(request, registryUrl, "user", fetchImpl);
+        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
+        const body = await readJson(request);
+        const creatorId = String(body.creator_id ?? "").trim();
+        const productId = String(body.product_id ?? "").trim();
+        if (!creatorId || !productId) {
+          return send(response, 400, { error: { code: "invalid_checkout", message: "creator_id and product_id are required." } });
+        }
+        const product = products.getForCreator(creatorId, productId);
+        if (!product) {
+          return send(response, 404, { error: { code: "product_unavailable", message: "This Agent is not currently available for purchase." } });
+        }
+        const catalog = await registryRequest(registryUrl, "/v1/catalog/agents", { fetchImpl });
+        const agent = catalog.find((entry) => entry.creator_id === creatorId && entry.product_id === productId);
+        if (!agent) {
+          return send(response, 404, { error: { code: "agent_unavailable", message: "The published Agent could not be found." } });
+        }
+
+        // Payment is intentionally a zero-value checkout for this stage. The
+        // order still goes through the same paid/order/entitlement path so a
+        // real provider can replace this boundary later without changing the
+        // consumer or Runtime contracts.
+        const orderKey = `order:${authentication.profile.id}:${creatorId}:${productId}`;
+        const existing = ledger.findByIdempotencyKey(orderKey);
+        if (existing) {
+          const grant = await registryRequest(
+            registryUrl,
+            `/v1/user/agents/${encodeURIComponent(creatorId)}/${encodeURIComponent(agent.agent_id)}/access`,
+            { method: "POST", fetchImpl, headers: { authorization: `Bearer ${bearerToken(request)}` } }
+          );
+          await recordEntitlementGrant(ledger, existing, grant);
+          return send(response, 200, { order: projectBuyerOrders(ledger.listEvents(), authentication.profile.id).find((order) => order.order_id === existing.order_id), payment: zeroPayment(existing.order_id, existing.currency), entitlement: grant });
+        }
+
+        const orderId = `order_${randomId()}`;
+        const order = await ledger.append("order.placed", {
+          order_id: orderId,
+          buyer_id: authentication.profile.id,
+          buyer_display_name: authentication.profile.display_name,
+          creator_id: creatorId,
+          product_id: productId,
+          product_name: product.name,
+          release_id: product.release_id,
+          release_digest: product.release_digest,
+          gross_minor: 0,
+          currency: product.currency,
+          payment_status: "paid",
+          payment_id: `pay_zero_${orderId.slice("order_".length)}`
+        }, { idempotencyKey: orderKey });
+        const grant = await registryRequest(
+          registryUrl,
+          `/v1/user/agents/${encodeURIComponent(creatorId)}/${encodeURIComponent(agent.agent_id)}/access`,
+          { method: "POST", fetchImpl, headers: { authorization: `Bearer ${bearerToken(request)}` } }
+        );
+        await recordEntitlementGrant(ledger, order, grant);
+        return send(response, 201, {
+          order: projectBuyerOrders(ledger.listEvents(), authentication.profile.id).find((entry) => entry.order_id === order.order_id),
+          payment: zeroPayment(order.order_id, product.currency),
+          entitlement: grant
+        });
+      }
+
+      const accessMatch = url.pathname.match(/^\/v1\/user\/agents\/([^/]+)\/([^/]+)\/access$/);
+      if (request.method === "POST" && accessMatch) {
+        const authentication = await authenticate(request, registryUrl, "user", fetchImpl);
+        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
+        return send(response, 201, await registryRequest(
+          registryUrl,
+          `/v1/user/agents/${encodeURIComponent(accessMatch[1])}/${encodeURIComponent(accessMatch[2])}/access`,
+          { method: "POST", fetchImpl, headers: { authorization: `Bearer ${bearerToken(request)}` } }
+        ));
+      }
+
+      if (request.method === "GET" && url.pathname === "/v1/creator/agents") {
+        const authentication = await authenticate(request, registryUrl, "creator", fetchImpl);
+        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
+        return send(response, 200, await registryRequest(registryUrl, "/v1/creator/agents", {
+          fetchImpl,
+          headers: { authorization: `Bearer ${bearerToken(request)}` }
+        }));
       }
 
       if (url.pathname.startsWith("/v1/creator/")) {
-        const authentication = authenticate(request, sessions, "creator");
+        const authentication = await authenticate(request, registryUrl, "creator", fetchImpl);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const profile = authentication.profile;
         const projection = projectCreatorDashboard(ledger.listEvents(), profile.id);
@@ -112,14 +218,32 @@ export async function createDashboardApp(options = {}) {
               }
             });
           }
-          const registryRecord = await registryRequest(registryUrl, "/v1/creator/releases", {
-            method: "POST",
-            body: JSON.stringify(publishRequest),
-            headers: {
-              authorization: `Bearer ${registryPublishServiceToken}`,
-              "x-hatch-creator-id": profile.id
-            }
+          // Agent Corpus publication is owned by the Factory's --publish flow.
+          // Dashboard only confirms that the canonical TypeScript Registry has
+          // the exact Agent available before recording its own UI state.
+          const catalog = await registryRequest(registryUrl, "/v1/catalog/agents", {
+            fetchImpl,
+            headers: { authorization: `Bearer ${registryPublishServiceToken}` }
           });
+          const agent = Array.isArray(catalog)
+            ? catalog.find((entry) => entry?.creator_id === profile.id && entry?.product_id === productId)
+            : null;
+          if (!agent) {
+            return send(response, 409, {
+              error: {
+                code: "agent_not_published",
+                message: "Publish this Agent Corpus through the Factory before marking the product published."
+              }
+            });
+          }
+          const registryRecord = {
+            ...publishRequest,
+            creator_id: profile.id,
+            product_id: productId,
+            agent_id: agent.agent_id,
+            corpus_digest: agent.corpus_digest,
+            published_at: agent.published_at ?? new Date().toISOString()
+          };
           const product = await products.markPublished(registryRecord);
           return send(response, 200, {
             product,
@@ -145,7 +269,7 @@ export async function createDashboardApp(options = {}) {
       }
 
       if (request.method === "GET" && url.pathname === "/v1/buyer/entitlements") {
-        const authentication = authenticate(request, sessions, "buyer");
+        const authentication = await authenticate(request, registryUrl, "user", fetchImpl);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         return send(response, 200, {
           buyer_id: authentication.profile.id,
@@ -175,9 +299,11 @@ export async function startDashboardServer(options = {}) {
   return { ...app, server, port, host };
 }
 
-async function registryRequest(registryUrl, pathname, options) {
-  const response = await fetch(new URL(pathname, registryUrl), {
-    ...options,
+async function registryRequest(registryUrl, pathname, options = {}) {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const { fetchImpl: _fetchImpl, ...requestOptions } = options;
+  const response = await fetchImpl(new URL(pathname, registryUrl), {
+    ...requestOptions,
     headers: { "content-type": "application/json", ...(options.headers ?? {}) }
   });
   const payload = await response.json();
@@ -190,26 +316,87 @@ async function registryRequest(registryUrl, pathname, options) {
   return payload;
 }
 
-function authenticate(request, sessions, expectedRole) {
+async function authenticate(request, registryUrl, expectedRole, fetchImpl) {
   const token = bearerToken(request);
-  const profile = token ? sessions.get(token) : undefined;
-  if (!profile) {
+  if (!token) {
     return { error: { status: 401, body: { error: { code: "unauthorized", message: "Sign in to continue." } } } };
   }
-  if (profile.role !== expectedRole) {
-    return { error: { status: 403, body: { error: { code: `${expectedRole}_only`, message: `This area is for ${expectedRole}s.` } } } };
+  try {
+    const account = await registryRequest(registryUrl, "/v1/auth/me", {
+      fetchImpl,
+      headers: { authorization: `Bearer ${token}` }
+    });
+    const profile = publicProfile(account);
+    if (expectedRole && profile.role !== expectedRole) {
+      return { error: { status: 403, body: { error: { code: `${expectedRole}_only`, message: `This area is for ${expectedRole}s.` } } } };
+    }
+    return { profile };
+  } catch {
+    return { error: { status: 401, body: { error: { code: "unauthorized", message: "Sign in to continue." } } } };
   }
-  return { profile };
 }
 
 function publicProfile(profile) {
+  const displayName = profile.display_name ?? profile.name ?? "Hatch account";
+  const initials = displayName.trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("") || "U";
   return {
     id: profile.id,
     role: profile.role,
-    display_name: profile.display_name,
-    handle: profile.handle,
-    initials: profile.initials
+    display_name: displayName,
+    handle: profile.handle ?? `@${profile.id}`,
+    initials
   };
+}
+
+function mergeRegistryAgents(access, catalog) {
+  if (!Array.isArray(access) || !Array.isArray(catalog)) return [];
+  const catalogByAgent = new Map(catalog.map((entry) => [
+    `${entry?.creator_id}:${entry?.agent_id}`,
+    entry
+  ]));
+  return access.flatMap((grant) => {
+    const entry = catalogByAgent.get(`${grant?.creator_id}:${grant?.agent_id}`);
+    if (!entry) return [];
+    return [{
+      ...grant,
+      creator: { id: entry.creator_id, name: entry.creator_name },
+      product: {
+        id: entry.product_id,
+        name: entry.product_name,
+        description: entry.product_description || "Work with this Creator Agent in your own files and context."
+      },
+      presentation: {}
+    }];
+  });
+}
+
+function randomId() {
+  return randomUUID().replaceAll("-", "");
+}
+
+function zeroPayment(orderId, currency = "USD") {
+  return {
+    payment_id: `pay_zero_${orderId.slice("order_".length)}`,
+    status: "paid",
+    amount_minor: 0,
+    currency
+  };
+}
+
+async function recordEntitlementGrant(ledger, order, grant) {
+  const existing = ledger.listEvents().find((event) => (
+    event.event_type === "entitlement.granted" && event.order_id === order.order_id
+  ));
+  if (existing) return existing;
+  return ledger.append("entitlement.granted", {
+    entitlement_id: grant.entitlement_id,
+    order_id: order.order_id,
+    buyer_id: order.buyer_id,
+    creator_id: order.creator_id,
+    product_id: order.product_id,
+    release_id: order.release_id,
+    release_digest: order.release_digest
+  }, { idempotencyKey: `entitlement:${order.order_id}` });
 }
 
 function bearerToken(request) {

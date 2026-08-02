@@ -15,13 +15,6 @@ import {
   useMessage
 } from "@assistant-ui/react";
 import { StreamdownTextPrimitive } from "@assistant-ui/react-streamdown";
-import {
-  createSocketLifecycleState,
-  handleCurrentSocketClose,
-  invalidateSocket,
-  isCurrentSocket,
-  registerSocket
-} from "./socketLifecycle.js";
 import "streamdown/styles.css";
 import "../../../packages/brand/tokens.css";
 import hatchMarkUrl from "../../../packages/brand/hatch-mark.svg";
@@ -39,7 +32,7 @@ import {
 } from "./product-policy.js";
 import { fetchPurchasedCreatorAgents, runtimeHttpUrl } from "./entitlement-client.js";
 import {
-  accessCodeAuthSession,
+  signInAuthSession,
   clearAuthSession,
   configuredAuthSession,
   loadSavedAuthSession,
@@ -51,14 +44,14 @@ const LOCAL_TOOLS = ADVERTISED_LOCAL_TOOLS;
 const SKILL_ACTIVITY_PART = "hatch.skill_activity";
 const SKILL_RUN_ACTIVITY_PART = "hatch.skill_run_activity";
 const LOCAL_TOOL_TIMEOUT_MS = 45_000;
-const DEFAULT_RUNTIME_URL = import.meta.env.VITE_HATCH_RUNTIME_URL || "ws://127.0.0.1:8400/runtime";
+const DEFAULT_RUNTIME_URL = import.meta.env.VITE_HATCH_RUNTIME_URL || "wss://hatch.tokenquadrant.cn/v1/runtime";
+const DEFAULT_AUTH_URL = import.meta.env.VITE_HATCH_AUTH_URL || "https://hatch.tokenquadrant.cn";
 const CONFIGURED_AUTH_SESSION = configuredAuthSession();
 const EMPTY_PROFILE = Object.freeze({ id: "anonymous", name: "User", initials: "U" });
 const ApprovalContext = createContext(null);
 
 function App() {
   const socketRef = useRef(null);
-  const socketLifecycleRef = useRef(createSocketLifecycleState());
   // Runtime messages arrive on a WebSocket listener created before React has
   // necessarily re-rendered after a folder grant. Local tool execution must
   // therefore use the latest explicit grant, not a stale render closure.
@@ -68,6 +61,7 @@ function App() {
   const approvalResolversRef = useRef(new Map());
   const [serverUrl] = useState(DEFAULT_RUNTIME_URL);
   const [workspace, setWorkspace] = useState("");
+  const [workspaceDraft, setWorkspaceDraft] = useState("");
   const [signedIn, setSignedIn] = useState(false);
   const [buyerSession, setBuyerSession] = useState(() => CONFIGURED_AUTH_SESSION ?? loadSavedAuthSession());
   const [creatorAgentEntitlements, setCreatorAgentEntitlements] = useState([]);
@@ -207,6 +201,7 @@ function App() {
     const savedRun = parseStoredJson(localStorage.getItem(activeRunKey));
     setWorkspace(savedWorkspace);
     workspaceRef.current = savedWorkspace;
+    setWorkspaceDraft(savedWorkspace);
     setWorkspaceGranted(Boolean(savedWorkspace));
     setConversationId(savedConversationId);
     if (savedRun) {
@@ -220,18 +215,18 @@ function App() {
   }, [buyerProfile.id]);
 
   useEffect(() => () => {
-    const socket = socketRef.current;
-    invalidateSocket(socketLifecycleRef.current, socket);
-    socketRef.current = null;
-    socket?.close();
+    socketRef.current?.close();
   }, []);
 
   async function connectRuntime(connection = {}) {
     if (connected || socketRef.current) return;
     const targetServerUrl = connection.serverUrl || serverUrl;
-    const targetWorkspace = connection.workspace || workspaceRef.current || workspace;
+    const targetWorkspace = connection.workspace || workspace;
     const targetConversationId = connection.conversationId || conversationId;
     const targetEntitlementId = connection.entitlementId || selectedEntitlementId;
+    const selectedEntitlement = creatorAgentEntitlements.find((item) => item.entitlement_id === targetEntitlementId);
+    const targetAgentId = connection.agentId || selectedEntitlement?.agent_id;
+    const targetCreatorId = connection.creatorId || selectedEntitlement?.creator_id;
     if (!targetServerUrl.trim() || !targetWorkspace.trim() || !buyerSession?.accessToken || !targetEntitlementId) {
       setStatus("Choose a folder before connecting.");
       return;
@@ -253,7 +248,8 @@ function App() {
         targetServerUrl.trim(),
         activeConversationId,
         targetEntitlementId,
-        buyerSession.accessToken
+        buyerSession.accessToken,
+        { agentId: targetAgentId, creatorId: targetCreatorId }
       );
       setMessages(history.map(historyMessageToThreadMessage));
       setStatus("Connecting...");
@@ -263,50 +259,44 @@ function App() {
     }
 
     const socket = new WebSocket(targetServerUrl.trim());
-    const generation = registerSocket(socketLifecycleRef.current, socket);
     socketRef.current = socket;
     socket.addEventListener("open", () => {
-      if (!isCurrentSocket(socketLifecycleRef.current, socket, generation)) return;
       send({
         type: "client.hello",
         protocol_version: PROTOCOL_VERSION,
         installation_id: "desktop-local-install",
-        license_token: buyerSession.accessToken,
+        auth_token: buyerSession.accessToken,
         entitlement_id: targetEntitlementId,
+        ...(targetAgentId ? { agent_id: targetAgentId } : {}),
+        ...(targetCreatorId ? { creator_id: targetCreatorId } : {}),
         client_version: "0.1.0",
         workspace_root: normalizedWorkspace,
         local_tools: LOCAL_TOOLS,
       });
     });
     socket.addEventListener("message", (event) => {
-      if (!isCurrentSocket(socketLifecycleRef.current, socket, generation)) return;
       void handleRuntimeMessage(JSON.parse(event.data));
     });
     socket.addEventListener("error", () => {
-      if (!isCurrentSocket(socketLifecycleRef.current, socket, generation)) return;
       setStatus("Connection problem. Your work has been kept.");
     });
     socket.addEventListener("close", () => {
-      handleCurrentSocketClose(socketLifecycleRef.current, socket, generation, () => {
-        rejectPendingApprovals();
-        socketRef.current = null;
-        setConnected(false);
-        setRunning(false);
-        if (activeRunRef.current) {
-          setInterruptedRun(activeRunRef.current);
-          setStatus("Task paused — your work has been kept");
-        } else {
-          setStatus("Offline — reconnect when you're ready");
-        }
-      });
+      rejectPendingApprovals();
+      socketRef.current = null;
+      setConnected(false);
+      setRunning(false);
+      if (activeRunRef.current) {
+        setInterruptedRun(activeRunRef.current);
+        setStatus("Task paused — your work has been kept");
+      } else {
+        setStatus("Offline — reconnect when you're ready");
+      }
     });
   }
 
   function disconnectRuntime() {
-    const socket = socketRef.current;
-    invalidateSocket(socketLifecycleRef.current, socket);
     rejectPendingApprovals();
-    socket?.close();
+    socketRef.current?.close();
     socketRef.current = null;
     setConnected(false);
     setRunning(false);
@@ -384,21 +374,6 @@ function App() {
       return;
     }
 
-    if (message.type === "delivery.ready") {
-      updateAssistantMetadataForRun(message.run_id, {
-        delivery: {
-          taskId: message.task_id,
-          artifactId: message.artifact_id,
-          artifactDigest: message.artifact_digest,
-          deliveryId: message.delivery_id,
-          artifactType: message.artifact_type,
-          artifactPath: message.artifact_path
-        }
-      });
-      setStatus("Delivery ready");
-      return;
-    }
-
     if (message.type === "turn.completed") {
       const activeRun = activeRunRef.current;
       const finalText = message.output.map((item) => item.content).join("\n");
@@ -435,6 +410,10 @@ function App() {
   }
 
   async function handleToolRequest(message) {
+    if (message.name === "shell.exec") {
+      sendToolDenied(message, "Command execution is disabled because this build does not provide a complete OS sandbox.", "shell_disabled");
+      return;
+    }
     let approvedByUser = false;
     if (message.approval === "ask" || requiresUserApproval(message.name)) {
       const approved = await requestToolApproval(message);
@@ -507,18 +486,23 @@ function App() {
 
   async function grantWorkspace() {
     try {
-      const selected = await invokeTauri("pick_workspace");
-      if (!selected) {
-        setStatus("Folder selection cancelled");
-        return;
-      }
-      const normalized = await invokeTauri("ensure_workspace", { workspaceRoot: selected });
+      const normalized = await invokeTauri("ensure_workspace", { workspaceRoot: workspaceDraft.trim() });
       setWorkspace(normalized);
       workspaceRef.current = normalized;
+      setWorkspaceDraft(normalized);
       setWorkspaceGranted(true);
       localStorage.setItem(profileStorageKey(buyerProfile.id, "workspaceRoot"), normalized);
       setStatus("Folder access granted");
       await connectRuntime({ workspace: normalized, conversationId });
+    } catch (error) {
+      setStatus(errorMessage(error));
+    }
+  }
+
+  async function chooseWorkspace() {
+    try {
+      const selected = await invokeTauri("pick_workspace_folder");
+      if (selected) setWorkspaceDraft(selected);
     } catch (error) {
       setStatus(errorMessage(error));
     }
@@ -548,11 +532,11 @@ function App() {
     setSignInStatus("loading");
     setSignInError("");
     try {
-      const nextSession = credentials ? accessCodeAuthSession(credentials) : buyerSession;
-      if (!nextSession) throw new Error("Enter your name and access code.");
+      const nextSession = credentials ? await signInAuthSession(credentials, DEFAULT_AUTH_URL) : buyerSession;
+      if (!nextSession) throw new Error("Sign in to continue.");
       const entitlements = await validateAndSaveAuthSession(
         nextSession,
-        (accessToken) => fetchPurchasedCreatorAgents(serverUrl, accessToken)
+        (accessToken) => fetchPurchasedCreatorAgents(DEFAULT_AUTH_URL, accessToken)
       );
       const selected = entitlements[0];
       setBuyerSession(nextSession);
@@ -588,7 +572,7 @@ function App() {
     setSelectedEntitlementId(entitlement.entitlement_id);
     setCreatorAgent(creatorAgentFromEntitlement(entitlement));
     setMessages([]);
-    setConversationId(`conversation_${buyerProfile.id}_${entitlement.product.id}`);
+    setConversationId(`conversation_${buyerProfile.id}_${entitlement.creator_id || "creator"}_${entitlement.agent_id || entitlement.product.id}`);
   }
 
   function requestToolApproval(message) {
@@ -848,6 +832,8 @@ function App() {
 
         {!workspaceGranted ? (
           <WorkspaceGrant
+            draft={workspaceDraft}
+            onChoose={() => void chooseWorkspace()}
             onGrant={() => void grantWorkspace()}
             status={status}
           />
@@ -893,8 +879,8 @@ function App() {
   );
 }
 
-async function loadConversationHistory(serverUrl, conversationId, entitlementId, accessToken) {
-  const response = await fetch(historyUrlForRuntime(serverUrl, conversationId, entitlementId), {
+async function loadConversationHistory(serverUrl, conversationId, entitlementId, accessToken, binding = {}) {
+  const response = await fetch(historyUrlForRuntime(serverUrl, conversationId, entitlementId, binding), {
     headers: { authorization: `Bearer ${accessToken}` }
   });
   if (!response.ok) {
@@ -905,9 +891,11 @@ async function loadConversationHistory(serverUrl, conversationId, entitlementId,
   return messages.filter((message) => message.role === "user" || message.role === "assistant");
 }
 
-function historyUrlForRuntime(serverUrl, conversationId, entitlementId) {
+function historyUrlForRuntime(serverUrl, conversationId, entitlementId, binding = {}) {
   const url = new URL(runtimeHttpUrl(serverUrl, `/conversations/${encodeURIComponent(conversationId)}/messages`));
   url.searchParams.set("entitlement_id", entitlementId);
+  if (binding.creatorId) url.searchParams.set("creator_id", binding.creatorId);
+  if (binding.agentId) url.searchParams.set("agent_id", binding.agentId);
   return url.toString();
 }
 
@@ -1241,13 +1229,13 @@ function EmptyThread({ connected, creatorAgent }) {
 
 function SignInScreen({ profile, onSignIn, status, error }) {
   const [manual, setManual] = useState(!profile);
-  const [name, setName] = useState("");
-  const [accessCode, setAccessCode] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const loading = status === "loading";
 
   function submit(event) {
     event.preventDefault();
-    onSignIn(manual ? { name, accessCode } : undefined);
+    onSignIn(manual ? { email, password } : undefined);
   }
 
   return (
@@ -1256,17 +1244,17 @@ function SignInScreen({ profile, onSignIn, status, error }) {
       <section className="sign-in-card">
         <span className="eyebrow">Welcome</span>
         <h1>Your trusted creator agents, in one place.</h1>
-        <p>Use the access code from your purchase to open your agents on this computer.</p>
+        <p>Sign in to use the Creator Agents available to your account.</p>
         <form className="sign-in-form" onSubmit={submit}>
           {manual ? (
             <>
               <label className="field">
-                <span>Your name</span>
-                <input autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Your name" disabled={loading} />
+                <span>Email</span>
+                <input autoCapitalize="none" autoComplete="email" spellCheck="false" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" disabled={loading} />
               </label>
               <label className="field">
-                <span>Access code</span>
-                <input autoCapitalize="none" autoComplete="off" spellCheck="false" type="password" value={accessCode} onChange={(event) => setAccessCode(event.target.value)} placeholder="Paste your access code" disabled={loading} />
+                <span>Password</span>
+                <input autoComplete="current-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Your password" disabled={loading} />
               </label>
             </>
           ) : (
@@ -1275,14 +1263,14 @@ function SignInScreen({ profile, onSignIn, status, error }) {
               <span><strong>{profile.name}</strong><small>Your agents are ready on this computer.</small></span>
             </div>
           )}
-          <button type="submit" disabled={loading || (manual && (!name.trim() || !accessCode.trim()))}>
-            {loading ? "Opening your agents…" : manual ? "Open my agents" : `Continue as ${profile.name}`}
+          <button type="submit" disabled={loading || (manual && (!email.trim() || !password.trim()))}>
+            {loading ? "Signing in…" : manual ? "Sign in" : `Continue as ${profile.name}`}
           </button>
         </form>
         {error ? <small className="sign-in-error" role="alert">{error}</small> : null}
         {profile ? (
-          <button className="sign-in-switch" type="button" onClick={() => { setManual((value) => !value); setName(""); setAccessCode(""); }} disabled={loading}>
-            {manual ? `Continue as ${profile.name}` : "Use a different access code"}
+          <button className="sign-in-switch" type="button" onClick={() => { setManual((value) => !value); setEmail(""); setPassword(""); }} disabled={loading}>
+            {manual ? `Continue as ${profile.name}` : "Use a different account"}
           </button>
         ) : null}
         <small>Your access stays on this computer until you sign out.</small>
@@ -1291,7 +1279,7 @@ function SignInScreen({ profile, onSignIn, status, error }) {
   );
 }
 
-function WorkspaceGrant({ onGrant, status }) {
+function WorkspaceGrant({ draft, onChoose, onGrant, status }) {
   return (
     <div className="workspace-gate">
       <section className="workspace-card">
@@ -1299,7 +1287,14 @@ function WorkspaceGrant({ onGrant, status }) {
         <span className="eyebrow">One-time setup</span>
         <h2>{PRODUCT_COPY.workspaceRequired}</h2>
         <p>{PRODUCT_COPY.readPolicy}</p>
-        <button type="button" onClick={onGrant}>Choose a folder</button>
+        <div className="field">
+          <span>Folder</span>
+          <button className={`workspace-picker ${draft ? "selected" : ""}`} type="button" onClick={onChoose}>
+            <span className="workspace-picker-path">{draft || "Choose a folder on this computer"}</span>
+            <span className="workspace-picker-action">Choose folder</span>
+          </button>
+        </div>
+        <button type="button" onClick={onGrant} disabled={!draft.trim()}>Grant access to this folder</button>
         <div className="permission-policy">
           <strong>You're in control</strong>
           <span>{PRODUCT_COPY.changePolicy}</span>
@@ -1312,7 +1307,6 @@ function WorkspaceGrant({ onGrant, status }) {
 
 function HatchMessage() {
   const role = useMessage((message) => message.role);
-  const delivery = useMessage((message) => message.metadata?.custom?.delivery);
   return (
     <MessagePrimitive.Root className={`chat-message ${role}`}>
       {role === "assistant" ? <AssistantRunHeader /> : null}
@@ -1334,21 +1328,8 @@ function HatchMessage() {
             ToolGroup: ToolGroup
           }}
         />
-        {role === "assistant" && delivery ? <DeliveryReceipt delivery={delivery} /> : null}
       </div>
     </MessagePrimitive.Root>
-  );
-}
-
-function DeliveryReceipt({ delivery }) {
-  const label = delivery.artifactType === "file" && delivery.artifactPath
-    ? delivery.artifactPath
-    : "Message delivered";
-  return (
-    <div className="delivery-receipt">
-      <span className="delivery-check">✓</span>
-      <span><strong>{label}</strong><small>Delivered</small></span>
-    </div>
   );
 }
 

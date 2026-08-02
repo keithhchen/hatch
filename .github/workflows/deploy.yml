@@ -1,0 +1,126 @@
+name: Hatch application CD
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  RELEASE_TAG: ${{ github.sha }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    outputs:
+      image_prefix: ${{ steps.image.outputs.prefix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Normalize image name
+        id: image
+        run: echo "prefix=ghcr.io/$(echo \"$GITHUB_REPOSITORY\" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push Runtime/Registry image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.runtime
+          push: true
+          tags: ${{ steps.image.outputs.prefix }}/runtime:${{ env.RELEASE_TAG }}
+          cache-from: type=gha,scope=runtime
+          cache-to: type=gha,mode=max,scope=runtime
+      - name: Push Dashboard image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.dashboard
+          push: true
+          tags: ${{ steps.image.outputs.prefix }}/dashboard:${{ env.RELEASE_TAG }}
+          cache-from: type=gha,scope=dashboard
+          cache-to: type=gha,mode=max,scope=dashboard
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure SSH
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_HOST"
+          test -n "$DEPLOY_SSH_KEY"
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/hatch_deploy"
+          chmod 600 "$HOME/.ssh/hatch_deploy"
+          ssh-keyscan -H "$DEPLOY_HOST" >> "$HOME/.ssh/known_hosts"
+      - name: Upload application definition
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/hatch_deploy" "$DEPLOY_USER@$DEPLOY_HOST" 'mkdir -p /opt/hatch'
+          scp -i "$HOME/.ssh/hatch_deploy" compose.app.yml Caddyfile "$DEPLOY_USER@$DEPLOY_HOST:/opt/hatch/"
+      - name: Pull and switch application containers
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE_PREFIX: ${{ needs.build-and-push.outputs.image_prefix }}
+          RELEASE_TAG: ${{ env.RELEASE_TAG }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$GHCR_TOKEN" | ssh -i "$HOME/.ssh/hatch_deploy" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "cd /opt/hatch && docker login ghcr.io -u '$GHCR_USERNAME' --password-stdin"
+          ssh -i "$HOME/.ssh/hatch_deploy" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "bash -s -- '$IMAGE_PREFIX' '$RELEASE_TAG'" <<'REMOTE'
+          set -euo pipefail
+          image_prefix="$1"
+          release_tag="$2"
+          cd /opt/hatch
+          test -f .env
+          test -f compose.app.yml
+          test -f Caddyfile
+          grep -q '^HATCH_DOMAIN=' .env
+          for key in HATCH_REGISTRY_DATABASE_URL HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN HATCH_AUTH_SIGNING_SECRET DASHSCOPE_API_KEY POSTGRES_PASSWORD; do
+            grep -Eq "^${key}=[^[:space:]]+" .env || { echo "Missing non-empty $key in /opt/hatch/.env"; exit 1; }
+          done
+          docker network inspect hatch_internal >/dev/null
+          if test -f .release.env; then
+            cp -f .release.env .release.env.previous
+          fi
+          printf 'HATCH_IMAGE_PREFIX=%s\nHATCH_RELEASE_TAG=%s\n' "$image_prefix" "$release_tag" > .release.env
+          docker compose --env-file .env --env-file .release.env -f compose.app.yml pull registry runtime dashboard caddy
+          docker compose --env-file .env --env-file .release.env -f compose.app.yml up -d --no-deps registry runtime dashboard caddy
+          REMOTE
+      - name: Verify public health endpoints
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          domain="$(ssh -i "$HOME/.ssh/hatch_deploy" "$DEPLOY_USER@$DEPLOY_HOST" "grep '^HATCH_DOMAIN=' /opt/hatch/.env | cut -d= -f2-")"
+          test -n "$domain"
+          curl --fail --retry 12 --retry-delay 3 --silent "https://$domain/healthz" >/dev/null
+          curl --fail --retry 12 --retry-delay 3 --silent "https://$domain/api/health" >/dev/null
+      - name: Roll back application release when health fails
+        if: failure()
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          ssh -i "$HOME/.ssh/hatch_deploy" "$DEPLOY_USER@$DEPLOY_HOST" 'cd /opt/hatch && if test -f .release.env.previous; then cp .release.env.previous .release.env && docker compose --env-file .env --env-file .release.env -f compose.app.yml pull registry runtime dashboard caddy && docker compose --env-file .env --env-file .release.env -f compose.app.yml up -d --no-deps registry runtime dashboard caddy; fi'

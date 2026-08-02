@@ -1,12 +1,76 @@
 import { requireTool } from "./tools.js";
+import type { KnowledgeProvider } from "./agentCorpus.js";
 
 type McpServerConfig = {
   url: string;
   headers?: Record<string, string>;
 };
 
+type KnowledgeScope = {
+  provider: KnowledgeProvider;
+  creatorId: string;
+  agentId: string;
+};
+
+type CreatorToolDefinition = {
+  id: string;
+  kind: string;
+  connection_ref?: string;
+  operation?: string;
+  tool_name?: string;
+};
+
+type ToolConnection = {
+  kind?: "http" | "mcp";
+  url: string;
+  headers?: Record<string, string>;
+};
+
 export class ServerToolExecutor {
-  constructor(private readonly timeoutMs = 30_000) {}
+  private knowledgeScope?: KnowledgeScope;
+  private creatorTools = new Map<string, CreatorToolDefinition>();
+
+  constructor(private readonly timeoutMs = 120000) {}
+
+  setKnowledgeScope(scope: KnowledgeScope | undefined): void {
+    this.knowledgeScope = scope;
+  }
+
+  setCreatorTools(tools: CreatorToolDefinition[] = []): void {
+    this.creatorTools = new Map(tools.map((tool) => [tool.id, tool]));
+  }
+
+  async executeCreatorTool(tool: CreatorToolDefinition, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const declared = this.creatorTools.get(tool.id);
+    if (!declared) throw new Error(`Creator tool is not enabled for this Agent: ${tool.id}`);
+    if (!declared.connection_ref) throw new Error(`Creator tool has no connection_ref: ${tool.id}`);
+    const connection = configuredToolConnections()[declared.connection_ref];
+    if (!connection) throw new Error(`Creator tool connection is not configured: ${declared.connection_ref}`);
+    if (declared.kind === "http_function" && connection.kind !== "mcp") {
+      const response = await fetch(connection.url, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json", ...(connection.headers ?? {}) },
+        body: JSON.stringify(args)
+      });
+      const text = await response.text();
+      if (!response.ok) throw new Error(`Creator HTTP tool failed with HTTP ${response.status}: ${text.slice(0, 500)}`);
+      return { tool: tool.id, status: response.status, response: parseJsonIfPossible(text) };
+    }
+    const response = await fetch(connection.url, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...(connection.headers ?? {}) },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: `hatch_${Date.now()}`,
+        method: "tools/call",
+        params: { name: declared.tool_name ?? declared.operation ?? tool.id, arguments: args }
+      }),
+      signal: AbortSignal.timeout(this.timeoutMs)
+    });
+    const text = await response.text();
+    if (!response.ok) throw new Error(`Creator MCP tool failed with HTTP ${response.status}: ${text.slice(0, 500)}`);
+    return { tool: tool.id, status: response.status, response: parseJsonIfPossible(text) };
+  }
 
   async execute(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
     const tool = requireTool(name);
@@ -16,8 +80,12 @@ export class ServerToolExecutor {
 
     const parsedArgs = tool.schema.parse(args) as Record<string, unknown>;
 
-    if (name === "web.search") {
+    if (name === "web.search" || name === "hatch.web_search") {
       return this.webSearch(parsedArgs);
+    }
+
+    if (name === "hatch.file_search") {
+      return this.fileSearch(parsedArgs);
     }
 
     if (name === "api.request") {
@@ -35,57 +103,124 @@ export class ServerToolExecutor {
     const query = String(args.query);
     const limit = Number(args.limit ?? 5);
     const endpoint = process.env.HATCH_WEB_SEARCH_URL?.trim();
-    if (!endpoint) {
-      // The Hatch capability remains present for every Agent. Returning an
-      // explicit empty result is safer than inventing fixture links or making
-      // a whole Creator run fail merely because a deployment has not attached
-      // its provider yet.
-      return {
-        query,
-        results: [],
-        availability: "unconfigured",
-        message: "Hatch web search has no provider configured for this Runtime deployment."
-      };
+    const provider = process.env.HATCH_WEB_SEARCH_PROVIDER?.trim().toLowerCase();
+    if (provider === "bocha" || process.env.HATCH_WEB_SEARCH_API_KEY?.trim()) {
+      return this.bochaSearch(query, limit, endpoint);
     }
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), Math.max(1, this.timeoutMs));
-    try {
+    if (endpoint) {
       const response = await fetch(endpoint, {
         method: "POST",
-        headers: {
-          "content-type": "application/json",
-          accept: "application/json",
-          ...(webSearchAuthorization() ? { authorization: webSearchAuthorization()! } : {})
-        },
-        body: JSON.stringify({ query, limit: Math.max(1, Math.min(limit, 10)) }),
-        signal: controller.signal,
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ query, limit })
       });
-      const body = await response.text();
-      if (!response.ok) throw new Error(`Hatch web search failed with HTTP ${response.status}: ${body.slice(0, 500)}`);
-      const value = parseJsonIfPossible(body);
-      if (!value || typeof value !== "object" || Array.isArray(value)) {
-        throw new Error("Hatch web search returned a non-object response");
-      }
-      return value as Record<string, unknown>;
-    } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
-        throw new Error(`Hatch web search timed out after ${Math.max(1, this.timeoutMs)}ms`);
-      }
-      throw error;
-    } finally {
-      clearTimeout(timer);
+      if (!response.ok) throw new Error(`Hatch web search failed with HTTP ${response.status}`);
+      const payload = await response.json() as { results?: unknown };
+      return { query, results: Array.isArray(payload.results) ? payload.results.slice(0, Math.max(1, Math.min(limit, 10))) : [] };
     }
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("hatch.web_search is not configured (set HATCH_WEB_SEARCH_URL)");
+    }
+    return {
+      query,
+      results: [
+        {
+          title: "Hatch runtime architecture",
+          url: "https://example.invalid/hatch/runtime",
+          snippet: "Server-side tools run on the runtime server; filesystem, shell, and git tools are brokered to the local client."
+        },
+        {
+          title: "Brokered local tool execution",
+          url: "https://example.invalid/hatch/local-tools",
+          snippet: "The agent can request local tools, but the client validates permissions and executes them locally."
+        }
+      ].slice(0, Math.max(1, Math.min(limit, 10)))
+    };
+  }
+
+  private async bochaSearch(
+    query: string,
+    limit: number,
+    configuredEndpoint?: string
+  ): Promise<Record<string, unknown>> {
+    const apiKey = process.env.HATCH_WEB_SEARCH_API_KEY?.trim();
+    if (!apiKey) {
+      throw new Error("hatch.web_search is not configured (set HATCH_WEB_SEARCH_API_KEY)");
+    }
+    const endpoint = (configuredEndpoint || "https://api.bocha.cn/v1/web-search").trim();
+    const count = Math.max(1, Math.min(limit, 10));
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+        accept: "application/json"
+      },
+      body: JSON.stringify({
+        query,
+        freshness: "noLimit",
+        summary: true,
+        count
+      })
+    });
+    const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+    if (!response.ok) {
+      const message = String(payload.msg ?? payload.message ?? "provider request failed");
+      throw new Error(`Hatch web search failed with HTTP ${response.status}: ${message.slice(0, 300)}`);
+    }
+    const providerCode = payload.code;
+    if (providerCode !== undefined && String(providerCode) !== "200") {
+      const message = String(payload.msg ?? payload.message ?? "provider request failed");
+      throw new Error(`Hatch web search failed with code ${providerCode}: ${message.slice(0, 300)}`);
+    }
+    const data = payload.data;
+    const pages = data && typeof data === "object" && !Array.isArray(data)
+      ? (data as Record<string, unknown>).webPages
+      : undefined;
+    const values = pages && typeof pages === "object" && !Array.isArray(pages)
+      ? (pages as Record<string, unknown>).value
+      : undefined;
+    const results = Array.isArray(values)
+      ? values.slice(0, count).filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item))).map((item) => ({
+          title: item.name,
+          url: item.url,
+          snippet: item.snippet,
+          summary: item.summary,
+          site_name: item.siteName,
+          date_published: item.datePublished ?? item.dateLastCrawled
+        }))
+      : [];
+    return { query, results };
+  }
+
+  private async fileSearch(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.knowledgeScope) {
+      throw new Error("hatch.file_search is unavailable because this Agent has no knowledge provider");
+    }
+    const hits = await this.knowledgeScope.provider.search({
+      creatorId: this.knowledgeScope.creatorId,
+      agentId: this.knowledgeScope.agentId,
+      query: String(args.query),
+      limit: Number(args.limit ?? 6)
+    });
+    return {
+      query: String(args.query),
+      hits: hits.map((hit) => ({
+        id: hit.id,
+        text: hit.text,
+        score: hit.score,
+        ...(hit.document_id ? { document_id: hit.document_id } : {}),
+        ...(hit.source_path ? { source_path: hit.source_path } : {}),
+        ...(hit.heading ? { heading: hit.heading } : {}),
+        ...(hit.source ? { source: hit.source } : {})
+      }))
+    };
   }
 
   private async apiRequest(args: Record<string, unknown>): Promise<Record<string, unknown>> {
-    // Kept only as an explicit non-delivery result while older generic-runtime
-    // flows are removed. Corpus-backed Creator HTTP tools never reach this
-    // method: they resolve their connection_ref through the Control Plane.
     return {
-      availability: "unconfigured",
       endpoint: args.endpoint,
       payload: args.payload ?? {},
-      message: "Generic api.request cannot access a Creator integration. Use a Corpus-bound creator.* HTTP tool."
+      status: "ok"
     };
   }
 
@@ -97,52 +232,41 @@ export class ServerToolExecutor {
       throw new Error(`MCP server is not configured: ${serverName}`);
     }
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), Math.max(1, this.timeoutMs));
-    try {
-      const response = await fetch(config.url, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          accept: "application/json, text/event-stream",
-          ...(config.headers ?? {})
-        },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: `hatch_${Date.now()}`,
-          method: "tools/call",
-          params: {
-            name: toolName,
-            arguments: args.arguments ?? {}
-          }
-        }),
-        signal: controller.signal
-      });
-      const text = await response.text();
-      if (!response.ok) {
-        throw new Error(`MCP call failed with HTTP ${response.status}: ${text.slice(0, 500)}`);
-      }
-
-      return {
-        server: serverName,
-        tool: toolName,
-        status: response.status,
-        response: parseJsonIfPossible(text)
-      };
-    } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
-        throw new Error(`MCP call timed out after ${Math.max(1, this.timeoutMs)}ms`);
+    const response = await fetch(config.url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        ...(config.headers ?? {})
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: `hatch_${Date.now()}`,
+        method: "tools/call",
+        params: {
+          name: toolName,
+          arguments: args.arguments ?? {}
+        }
+      }),
+      signal: AbortSignal.timeout(this.timeoutMs)
+    }).catch((error: unknown) => {
+      if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError" || /timeout|aborted/i.test(error.message))) {
+        throw new Error(`MCP call timed out after ${this.timeoutMs}ms`);
       }
       throw error;
-    } finally {
-      clearTimeout(timer);
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`MCP call failed with HTTP ${response.status}: ${text.slice(0, 500)}`);
     }
-  }
-}
 
-function webSearchAuthorization(): string | undefined {
-  const value = process.env.HATCH_WEB_SEARCH_AUTHORIZATION?.trim();
-  return value || undefined;
+    return {
+      server: serverName,
+      tool: toolName,
+      status: response.status,
+      response: parseJsonIfPossible(text)
+    };
+  }
 }
 
 export function hasConfiguredMcpServers(): boolean {
@@ -167,6 +291,23 @@ function configuredMcpServers(): Record<string, McpServerConfig> {
     };
   }
   return servers;
+}
+
+function configuredToolConnections(): Record<string, ToolConnection> {
+  const raw = process.env.HATCH_TOOL_CONNECTIONS;
+  if (!raw) return {};
+  const parsed = JSON.parse(raw) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("HATCH_TOOL_CONNECTIONS must be a JSON object");
+  }
+  const result: Record<string, ToolConnection> = {};
+  for (const [ref, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    const record = value as Record<string, unknown>;
+    if (typeof record.url !== "string" || !record.url) continue;
+    result[ref] = { url: record.url, kind: record.kind === "mcp" ? "mcp" : "http", headers: stringMap(record.headers) };
+  }
+  return result;
 }
 
 function stringMap(value: unknown): Record<string, string> | undefined {

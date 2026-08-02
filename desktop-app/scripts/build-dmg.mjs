@@ -19,7 +19,10 @@ const outputDirectory = path.join(root, "src-tauri/target/release/bundle/dmg");
 const outputPath = path.join(outputDirectory, `${productName}_${version}_${architecture}.dmg`);
 const staging = await mkdtemp(path.join(os.tmpdir(), "hatch-dmg-"));
 const distributionBuild = process.env.HATCH_DISTRIBUTION_BUILD === "1";
-const runtimeUrl = String(process.env.VITE_HATCH_RUNTIME_URL ?? "").trim();
+const runtimeUrl = String(
+  process.env.VITE_HATCH_RUNTIME_URL
+    ?? (distributionBuild ? "wss://hatch.tokenquadrant.cn/v1/runtime" : "")
+).trim();
 
 if (distributionBuild) {
   let parsed;
@@ -36,7 +39,7 @@ if (distributionBuild) {
 try {
   await execFileAsync(path.join(root, "node_modules/.bin/tauri"), ["build", "--bundles", "app"], {
     cwd: root,
-    env: { ...process.env, CI: "true" },
+    env: { ...process.env, CI: "true", ...(runtimeUrl ? { VITE_HATCH_RUNTIME_URL: runtimeUrl } : {}) },
     maxBuffer: 16 * 1024 * 1024
   });
   await execFileAsync("codesign", ["--force", "--deep", "--sign", "-", appPath], {

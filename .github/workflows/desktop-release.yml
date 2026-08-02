@@ -1,0 +1,47 @@
+name: Hatch Desktop release
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  macos-dmg:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop-app/package-lock.json
+      - name: Select stable Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup show active-toolchain
+      - name: Install frontend dependencies
+        working-directory: desktop-app
+        run: npm ci
+      - name: Renderer tests
+        working-directory: desktop-app
+        run: npm run test:renderer
+      - name: Build unsigned distribution DMG
+        working-directory: desktop-app
+        env:
+          HATCH_DISTRIBUTION_BUILD: "1"
+          VITE_HATCH_RUNTIME_URL: ${{ vars.HATCH_RUNTIME_URL || 'wss://hatch.tokenquadrant.cn/v1/runtime' }}
+        run: npm run build:distribution
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hatch-desktop-macos
+          path: desktop-app/src-tauri/target/release/bundle/dmg/*.dmg
+      - name: Attach DMG to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" desktop-app/src-tauri/target/release/bundle/dmg/*.dmg --generate-notes

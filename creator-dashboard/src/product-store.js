@@ -115,9 +115,10 @@ async function readCatalog(catalogPathValue) {
     if (error?.code === "ENOENT") throw new Error(`Dashboard product catalog does not exist: ${catalogPath}`);
     throw error;
   }
-  if (catalog?.schema_version !== "1" || !Array.isArray(catalog.products) || catalog.products.length === 0) {
-    throw new Error("Dashboard product catalog is invalid or empty.");
-  }
+    if (catalog?.schema_version !== "1" || !Array.isArray(catalog.products)
+      || (catalog.products.length === 0 && process.env.HATCH_CREATOR_DASHBOARD_ALLOW_EMPTY_CATALOG !== "1")) {
+      throw new Error("Dashboard product catalog is invalid or empty.");
+    }
   return catalog;
 }
 

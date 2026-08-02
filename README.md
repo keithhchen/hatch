@@ -7,9 +7,9 @@ This repository contains two connected flows:
 
 ```text
 Creator sources
-  -> internal Creator Factory
+  -> internal Creator Factory Skill
   -> current Agent Corpus
-  -> Registry + cloud Runtime
+  -> Registry (Postgres metadata + POSIX assets) + cloud Runtime
 
 Buyer Desktop
   -> selected local workspace
@@ -18,8 +18,8 @@ Buyer Desktop
   -> usable artifact + Delivery
 ```
 
-The authoritative agent contract is
-[packages/protocol/AGENT_CORPUS.md](packages/protocol/AGENT_CORPUS.md).
+The authoritative v1 acceptance contract is
+[docs/spec-v1-execution-contract.md](docs/spec-v1-execution-contract.md).
 
 The connected demonstration follows two concrete people rather than anonymous
 test fixtures:
@@ -59,36 +59,46 @@ events.
 
 ### Creator production and publishing
 
-`creator-agent-factory/` is an internal Codex Skill/workflow. It converts raw
-source material into a clean, runnable Agent Corpus. It is not a Creator-facing
-task-review product.
+`creator-agent-factory/` is an internal, host-independent Codex Skill. It reads
+ordinary Creator materials and writes a clean Agent Corpus: system
+instructions, optional local Skills and references, optional retrieval-only
+knowledge, tools, and evaluation assets. It does not start Runtime, configure a
+database, or require the operator to fill JSON.
 
-`platform-registry/` verifies and stores one current Agent Corpus per
-`tenant_id + agent_id`, builds its isolated knowledge index, and serves the
-runtime-facing tool bindings. It never returns private instructions or secrets
-to a client.
+The TypeScript Registry in `runtime-server/src/registryServer.ts` verifies and
+installs the current Agent Corpus into the shared POSIX corpus root.
+PostgreSQL stores only the current `(creator_id, agent_id)` metadata row; it
+never stores prompts, Skills, source material, credentials, or vector contents.
+The old `platform-registry/` Python service is migration-only and is not the
+production entrypoint.
 
 `packages/commerce/` provides the append-only Ledger and projections shared by
 buyer entitlement and Creator revenue reporting.
 
-`creator-dashboard/` is the Creator-facing SaaS surface for viewing orders,
-deliveries, and the 90/10 revenue projection from that same Ledger.
+`creator-dashboard/` is the Creator-facing SaaS surface for publishing a
+release-ready product and viewing orders, deliveries, and the 90/10 revenue
+projection from that same Ledger.
 
 ## Repository map
 
 ```text
-creator-agent-factory/   internal distillation Skill and Agent Corpus workflow
+creator-agent-factory/   internal distillation and release workflow
 desktop-app/             Tauri/React Consumer application
 local-runner/            Rust local tool boundary
-runtime-server/          TypeScript cloud agent Runtime
-platform-registry/       Agent Corpus registry and tool control plane
-packages/protocol/       canonical wire and Agent Corpus schemas
+runtime-server/          TypeScript cloud Agent Runtime + Registry
+platform-registry/       legacy Registry migration source
+packages/protocol/       canonical wire and Release schemas
 packages/commerce/       entitlement, Delivery, and revenue Ledger
+privacyd/                optional local privacy transformation experiments
 landing/                 public website
 docs/                    product contracts and proof artifacts
 ```
 
-Protected Creator Skills run inside the TypeScript Runtime.
+The TypeScript Runtime loads the Registry-installed Corpus directly. It always
+loads `instructions/system.md`, activates only the relevant local Skill and its
+references, queries the Agent-scoped knowledge provider when configured, and
+merges Hatch built-ins with declared Creator tools. Evals never enter the live
+context. Protected Creator Skills run inside the TypeScript Runtime.
 
 ## Local development
 
@@ -98,12 +108,14 @@ Copy `.env.example` to `.env`, supply a Moonshot credential, then run:
 ./scripts/dev.sh
 ```
 
-Hatch uses `kimi-k2.6` for Creator-Agent generation, Runtime turns, and
-context compaction. There is no silent model fallback. Provider credentials
-remain process environment only and must never enter an Agent Corpus.
+Hatch v1 deliberately uses `kimi-k2.6` for Creator-Agent generation,
+delivery auditing, blind evaluation, Runtime turns, and context compaction.
+These roles do not silently fall back to another model. Provider credentials
+remain process environment only and must never enter a Creator Release or proof
+bundle.
 
 The Desktop connects to the TypeScript Runtime at
-`ws://127.0.0.1:8400/runtime` by default.
+`wss://hatch.tokenquadrant.cn/v1/runtime` by default; local development does not start a Runtime.
 
 Component verification:
 
@@ -120,6 +132,7 @@ The DMG command creates the installable macOS bundle without relying on Finder
 automation. Developer builds are intentionally unsigned; public distribution
 still requires Apple Developer signing and notarization credentials.
 
-Passing component tests is not sufficient proof. Completion requires raw
-Creator material to be distilled and published as an Agent Corpus, consumed
-from the installed Desktop, and delivered through local tools.
+Passing component tests is not sufficient proof of v1. Completion requires one
+Release to be distilled and published, consumed from the installed Desktop,
+delivered through local tools, and reflected in the same Commerce Ledger and
+Creator Dashboard.

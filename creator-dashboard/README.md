@@ -30,10 +30,12 @@ HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN=replace-with-a-shared-internal-secret
 npm run api
 ```
 
-When an authenticated Creator publishes, the Dashboard sends the configured
-Bearer service token and that session's Creator identity to Registry. Registry
-then verifies that the immutable Release belongs to the same Creator before it
-mutates publication state.
+The Factory owns Agent Corpus publication: run its `--publish` path with the
+configured Registry service token. When an authenticated Creator publishes in
+the Dashboard, the Dashboard verifies that the canonical TypeScript Registry
+already lists the matching `(creator_id, product_id)` Agent before it records
+the product's local published state. The Dashboard never writes a legacy
+Release record or receives private Corpus material.
 
 Publishing the same Dashboard product twice returns `409 already_published`
 with the exact Release identity and original publication time. The second call
@@ -66,16 +68,16 @@ npm run catalog:import -- \
 Keep this first terminal open so its fresh runtime-directory variable remains
 available for the Dashboard API command below.
 
-Start Registry with the matching immutable Release and an internal service
-token:
+Start the TypeScript Registry with its persistent state and Corpus root:
 
 ```bash
 export HATCH_REGISTRY_STATE_PATH="$(mktemp -d)/registry-state.json"
 export HATCH_FACTORY_OUTPUT="/absolute/path/to/completed-factory-output"
-cd platform-registry
-HATCH_CREATOR_RELEASE_ROOT="$HATCH_FACTORY_OUTPUT/release" \
+cd runtime-server
+HATCH_AGENT_CORPUS_ROOT="$HATCH_CREATOR_PROOF_DIR/corpora" \
 HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN=creator-proof-service-token \
-uv run uvicorn hatch_registry.app:app --host 127.0.0.1 --port 8100
+HATCH_AUTH_SIGNING_SECRET=creator-proof-signing-secret \
+npm run serve:registry
 ```
 
 After Registry is listening, return to the first terminal, which is still in

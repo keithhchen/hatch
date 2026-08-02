@@ -160,7 +160,7 @@ async function summarizeForCompaction(messages: RuntimeCompactionMessage[]): Pro
   const completion = await openai.chat.completions.create({
     model: provider.model,
     temperature: provider.temperature,
-    thinking: provider.thinking,
+    ...(provider.thinking.type === "disabled" ? {} : { thinking: provider.thinking }),
     stream: false,
     messages: [
       { role: "system", content: SUMMARIZATION_PROMPT },

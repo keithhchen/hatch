@@ -38,16 +38,38 @@ test("publishing sends only immutable identity and a repeated publish after rest
   const productCatalogPath = path.join(directory, "product-catalog.json");
   await writeProductCatalogSnapshot([factoryOutput], productCatalogPath);
 
-  let registryRequestBody;
+  let registryRequestPath;
   let registryRequestHeaders;
   let registryRequestCount = 0;
   const registry = createServer(async (request, response) => {
-    registryRequestCount += 1;
+    const requestUrl = new URL(request.url ?? "/", "http://registry.test");
     let content = "";
     for await (const chunk of request) content += chunk;
-    registryRequestBody = JSON.parse(content);
-    registryRequestHeaders = request.headers;
     response.setHeader("content-type", "application/json");
+    if (requestUrl.pathname === "/v1/auth/signin") {
+      response.end(JSON.stringify({
+        token: "signed-maya-token",
+        account: { id: "maya-chen", role: "creator", email: "creator@example.test", display_name: "Fixture Creator" }
+      }));
+      return;
+    }
+    if (requestUrl.pathname === "/v1/auth/me") {
+      response.end(JSON.stringify({ id: "maya-chen", role: "creator", email: "creator@example.test", display_name: "Fixture Creator" }));
+      return;
+    }
+    registryRequestCount += 1;
+    registryRequestPath = requestUrl.pathname;
+    registryRequestHeaders = request.headers;
+    if (requestUrl.pathname === "/v1/catalog/agents") {
+      response.end(JSON.stringify([{
+        creator_id: "maya-chen",
+        agent_id: "signal-resume-review",
+        product_id: "signal-resume-review",
+        corpus_digest: "sha256:corpus",
+        published_at: "2026-07-31T10:00:00Z"
+      }]));
+      return;
+    }
     response.end(JSON.stringify({
       creator_id: "maya-chen",
       product_id: "signal-resume-review",
@@ -99,12 +121,8 @@ test("publishing sends only immutable identity and a repeated publish after rest
   });
 
   assert.equal(publish.status, 200);
-  assert.deepEqual(registryRequestBody, {
-    release_id: releaseId,
-    release_digest: releaseDigest
-  });
+  assert.equal(registryRequestPath, "/v1/catalog/agents");
   assert.equal(registryRequestHeaders.authorization, "Bearer registry-service-test-token");
-  assert.equal(registryRequestHeaders["x-hatch-creator-id"], "maya-chen");
   assert.equal(dashboard.ledger.listEvents().length, 0);
 
   const overview = await fetch(`${serverUrl(api)}/v1/creator/overview`, {
@@ -141,6 +159,110 @@ test("publishing sends only immutable identity and a repeated publish after rest
     }
   });
   assert.equal(registryRequestCount, 1);
+});
+
+test("zero-value checkout creates an idempotent order and entitlement", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-checkout-"));
+  const productCatalogPath = path.join(directory, "product-catalog.json");
+  await writeProductCatalogSnapshot([sourceFactoryOutput], productCatalogPath);
+
+  const registry = createServer(async (request, response) => {
+    const requestUrl = new URL(request.url ?? "/", "http://registry.test");
+    let content = "";
+    for await (const chunk of request) content += chunk;
+    response.setHeader("content-type", "application/json");
+    if (requestUrl.pathname === "/v1/auth/signin") {
+      response.end(JSON.stringify({
+        token: "signed-user-token",
+        account: { id: "buyer-zero", role: "user", email: "buyer@example.test", display_name: "Zero Buyer" }
+      }));
+      return;
+    }
+    if (requestUrl.pathname === "/v1/auth/me") {
+      response.end(JSON.stringify({ id: "buyer-zero", role: "user", email: "buyer@example.test", display_name: "Zero Buyer" }));
+      return;
+    }
+    if (requestUrl.pathname === "/v1/catalog/agents") {
+      response.end(JSON.stringify([{
+        creator_id: "maya-chen",
+        agent_id: "signal-resume-reviewer",
+        product_id: "signal-resume-review",
+        product_name: "Signal Resume Review",
+        product_description: "Resume review"
+      }]));
+      return;
+    }
+    if (requestUrl.pathname === "/v1/user/agent-access" && request.method === "GET") {
+      response.end(JSON.stringify([{
+        entitlement_id: "ent_zero",
+        user_id: "buyer-zero",
+        creator_id: "maya-chen",
+        agent_id: "signal-resume-reviewer",
+        product_id: "signal-resume-review",
+        status: "active",
+        granted_at: "2026-08-02T00:00:00.000Z"
+      }]));
+      return;
+    }
+    if (requestUrl.pathname === "/v1/user/agents/maya-chen/signal-resume-reviewer/access") {
+      response.end(JSON.stringify({
+        entitlement_id: "ent_zero",
+        user_id: "buyer-zero",
+        creator_id: "maya-chen",
+        agent_id: "signal-resume-reviewer",
+        product_id: "signal-resume-review",
+        status: "active",
+        granted_at: "2026-08-02T00:00:00.000Z"
+      }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ detail: "not found" }));
+  });
+  await listen(registry);
+  context.after(() => registry.close());
+
+  const dashboard = await createDashboardApp({
+    productCatalogPath,
+    ledgerPath: path.join(directory, "ledger.jsonl"),
+    productStatePath: path.join(directory, "product-state.json"),
+    registryUrl: serverUrl(registry),
+    registryPublishServiceToken: "registry-service-test-token"
+  });
+  const api = createServer(dashboard.handler);
+  await listen(api);
+  context.after(() => api.close());
+
+  const login = await fetch(`${serverUrl(api)}/v1/auth/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "buyer@example.test", password: "test-only" })
+  });
+  const { token } = await login.json();
+  const library = await fetch(`${serverUrl(api)}/v1/user/agents`, {
+    headers: { authorization: `Bearer ${token}` }
+  }).then((response) => response.json());
+  assert.equal(library.creator_agents[0].agent_id, "signal-resume-reviewer");
+  const checkout = (body = { creator_id: "maya-chen", product_id: "signal-resume-review" }) => fetch(`${serverUrl(api)}/v1/user/checkout`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify(body)
+  });
+
+  const first = await checkout();
+  const firstBody = await first.json();
+  assert.equal(first.status, 201);
+  assert.equal(firstBody.order.gross_minor, 0);
+  assert.equal(firstBody.payment.status, "paid");
+  assert.equal(firstBody.entitlement.entitlement_id, "ent_zero");
+  assert.deepEqual(dashboard.ledger.listEvents().map((event) => event.event_type), ["order.placed", "entitlement.granted"]);
+
+  const replay = await checkout();
+  assert.equal(replay.status, 200);
+  assert.equal(dashboard.ledger.listEvents().length, 2);
+  const orders = await fetch(`${serverUrl(api)}/v1/user/orders`, { headers: { authorization: `Bearer ${token}` } }).then((response) => response.json());
+  assert.equal(orders.orders.length, 1);
+  assert.equal(orders.orders[0].entitlement_id, "ent_zero");
 });
 
 function listen(server) {

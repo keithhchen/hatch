@@ -11,36 +11,55 @@ import hatchMarkUrl from "../../packages/brand/hatch-mark.svg";
 import "./styles.css";
 
 const NAVIGATION = ["Home", "Products", "Orders", "Payouts"];
+const PROFILE_KEY = "hatch.account.profile";
+
+function storedProfile() {
+  try {
+    return JSON.parse(sessionStorage.getItem(PROFILE_KEY) || "null");
+  } catch {
+    return null;
+  }
+}
 
 function App() {
   const [token, setToken] = useState(() => sessionStorage.getItem("hatch.creator.session"));
-  const [profile, setProfile] = useState(null);
+  const [profile, setProfile] = useState(storedProfile);
   const [active, setActive] = useState("Home");
   const [overview, setOverview] = useState(null);
+  const [agents, setAgents] = useState([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(Boolean(token));
   const [publishing, setPublishing] = useState(false);
 
   async function loadDashboard(activeToken = token) {
-    const [nextProfile, nextOverview] = await Promise.all([
+    const [nextProfile, nextOverview, nextAgents] = await Promise.all([
       dashboardRequest("/v1/creator/me", { token: activeToken }),
-      dashboardRequest("/v1/creator/overview", { token: activeToken })
+      dashboardRequest("/v1/creator/overview", { token: activeToken }),
+      dashboardRequest("/v1/creator/agents", { token: activeToken })
     ]);
     setProfile(nextProfile);
     setOverview(nextOverview);
+    setAgents(nextAgents);
   }
 
   useEffect(() => {
     if (!token) return;
+    if (profile?.role === "user") return;
     setLoading(true);
-    loadDashboard(token).then(() => setError("")).catch((nextError) => {
+    const load = async () => {
+      const currentProfile = profile ?? await dashboardRequest("/v1/auth/me", { token });
+      setProfile(currentProfile);
+      if (currentProfile.role === "user") return;
+      await loadDashboard(token);
+    };
+    load().then(() => setError("")).catch((nextError) => {
       if (nextError.status === 401 || nextError.status === 403) {
         sessionStorage.removeItem("hatch.creator.session");
         setToken(null);
       }
       setError(nextError.message);
     }).finally(() => setLoading(false));
-  }, [token]);
+  }, [token, profile?.role]);
 
   async function login(credentials) {
     setLoading(true);
@@ -52,7 +71,9 @@ function App() {
         token: ""
       });
       sessionStorage.setItem("hatch.creator.session", result.token);
+      sessionStorage.setItem(PROFILE_KEY, JSON.stringify(result.profile));
       setToken(result.token);
+      setProfile(result.profile);
     } catch (nextError) {
       setError(nextError.message);
     } finally {
@@ -81,13 +102,16 @@ function App() {
       await dashboardRequest("/v1/auth/logout", { method: "POST", token });
     } finally {
       sessionStorage.removeItem("hatch.creator.session");
+      sessionStorage.removeItem(PROFILE_KEY);
       setToken(null);
       setProfile(null);
       setOverview(null);
+      setAgents([]);
     }
   }
 
   if (!token) return <Login onSubmit={login} loading={loading} error={error} />;
+  if (profile?.role === "user") return <UserPortal token={token} profile={profile} onLogout={logout} />;
   if (loading || !profile || !overview) return <Loading />;
 
   return (
@@ -109,8 +133,8 @@ function App() {
       </aside>
       <main className="dashboard-main">
         {error ? <div className="notice" role="alert">{error}</div> : null}
-        {active === "Home" ? <Home profile={profile} overview={overview} onPublish={publish} publishing={publishing} /> : null}
-        {active === "Products" ? <Products products={overview.products} onPublish={publish} publishing={publishing} /> : null}
+        {active === "Home" ? <Home profile={profile} overview={overview} agents={agents} onPublish={publish} publishing={publishing} /> : null}
+        {active === "Products" ? <Products products={overview.products} agents={agents} onPublish={publish} publishing={publishing} /> : null}
         {active === "Orders" ? <Orders orders={overview.recent_orders} /> : null}
         {active === "Payouts" ? <Payouts metrics={overview.metrics} /> : null}
       </main>
@@ -129,7 +153,7 @@ function Login({ onSubmit, loading, error }) {
       </section>
       <section className="login-panel">
         <form onSubmit={(event) => { event.preventDefault(); onSubmit({ email, password }); }}>
-          <span className="eyebrow">Creator sign in</span><h2>Welcome back</h2>
+          <span className="eyebrow">Account sign in</span><h2>Welcome back</h2>
           <label>Email<input value={email} onChange={(event) => setEmail(event.target.value)} type="email" autoComplete="email" /></label>
           <label>Password<input value={password} onChange={(event) => setPassword(event.target.value)} type="password" autoComplete="current-password" /></label>
           {error ? <p className="form-error">{error}</p> : null}
@@ -144,7 +168,7 @@ function Loading() {
   return <div className="loading-page"><span className="loading-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><span className="hatch-wordmark">Hatch.</span></span><p>Opening your workspace…</p></div>;
 }
 
-function Home({ profile, overview, onPublish, publishing }) {
+function Home({ profile, overview, agents, onPublish, publishing }) {
   const product = overview.products[0];
   const hasRevenue = overview.metrics.gross_minor > 0;
   return (
@@ -163,18 +187,67 @@ function Home({ profile, overview, onPublish, publishing }) {
           <div className="earnings-split"><span>Gross sales</span><b>{formatMoney(overview.metrics.gross_minor)}</b></div>
         </article>
       </section>
+      <AgentList agents={agents} />
       {hasRevenue ? <RecentOrders orders={overview.recent_orders} /> : null}
     </>
   );
 }
 
-function Products({ products, onPublish, publishing }) {
+function Products({ products, agents, onPublish, publishing }) {
   return (
     <section>
       <header className="page-heading"><span className="eyebrow">Your products</span><h1>Products your audience can use.</h1><p>Each product is published under your name and priced by you.</p></header>
       <div className="product-list">{products.map((product) => <ProductCard key={product.product_id} product={product} onPublish={onPublish} publishing={publishing} />)}</div>
+      <AgentList agents={agents} />
     </section>
   );
+}
+
+function AgentList({ agents }) {
+  return <section className="agent-list"><div className="section-title"><div><span className="eyebrow">Published agents</span><h2>Products your audience can use</h2></div></div>{agents.length ? <div className="agent-grid">{agents.map((agent) => <article className="agent-tile" key={`${agent.creator_id}:${agent.agent_id}`}><span className="status-chip published">Published</span><h3>{agent.product_name}</h3><p>{agent.product_description || "Creator Agent"}</p><small>{agent.agent_id}</small></article>)}</div> : <EmptyState title="No agents published yet" body="Publish an Agent Corpus to make it available under your name." />}</section>;
+}
+
+function UserPortal({ token, profile, onLogout }) {
+  const [catalog, setCatalog] = useState([]);
+  const [library, setLibrary] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [error, setError] = useState("");
+  const [purchasing, setPurchasing] = useState("");
+  useEffect(() => {
+    Promise.all([
+      dashboardRequest("/v1/catalog/agents", { token }),
+      dashboardRequest("/v1/user/agents", { token }),
+      dashboardRequest("/v1/user/orders", { token })
+    ]).then(([nextCatalog, nextLibrary, nextOrders]) => {
+      setCatalog(nextCatalog);
+      setLibrary(nextLibrary.creator_agents || []);
+      setOrders(nextOrders.orders || []);
+    }).catch((nextError) => setError(nextError.message));
+  }, [token]);
+  async function purchase(agent) {
+    const key = `${agent.creator_id}:${agent.agent_id}`;
+    setPurchasing(key);
+    setError("");
+    try {
+      await dashboardRequest("/v1/user/checkout", {
+        method: "POST",
+        token,
+        body: JSON.stringify({ creator_id: agent.creator_id, product_id: agent.product_id })
+      });
+      const [nextLibrary, nextOrders] = await Promise.all([
+        dashboardRequest("/v1/user/agents", { token }),
+        dashboardRequest("/v1/user/orders", { token })
+      ]);
+      setLibrary(nextLibrary.creator_agents || []);
+      setOrders(nextOrders.orders || []);
+    } catch (nextError) {
+      setError(nextError.message);
+    } finally {
+      setPurchasing("");
+    }
+  }
+  const libraryKeys = new Set(library.map((agent) => `${agent.creator_id}:${agent.agent_id}`));
+  return <div className="dashboard-shell"><aside className="sidebar"><button className="wordmark hatch-wordmark"><img className="hatch-mark" src={hatchMarkUrl} alt="" />Hatch.</button><nav><button className="active">Explore</button><button>My agents</button></nav><div className="creator-card"><div className="avatar">{profile.initials}</div><div><strong>{profile.display_name}</strong><span>{profile.handle}</span></div><button className="sign-out" onClick={onLogout}>↗</button></div></aside><main className="dashboard-main"><header className="page-heading"><span className="eyebrow">Creator Agents</span><h1>Methods you can use.</h1><p>Choose an Agent built around a Creator’s way of working.</p></header>{error ? <div className="notice">{error}</div> : null}<section className="agent-grid">{catalog.map((agent) => { const key = `${agent.creator_id}:${agent.agent_id}`; const available = libraryKeys.has(key); return <article className="agent-tile" key={key}><span className="eyebrow">{agent.creator_name}</span><h2>{agent.product_name}</h2><p>{agent.product_description || "A Creator Agent"}</p><div className="agent-offer"><span>Free for now</span><button className="secondary" disabled={available || purchasing === key} onClick={() => purchase(agent)}>{available ? "Available" : purchasing === key ? "Completing…" : "Purchase"}</button></div></article>; })}</section><section className="agent-list"><div className="section-title"><div><span className="eyebrow">Your library</span><h2>Agents you can use</h2></div></div><div className="agent-grid">{library.map((agent) => <article className="agent-tile" key={agent.entitlement_id}><span className="status-chip published">Available</span><h3>{agent.product?.name}</h3><p>{agent.product?.description}</p></article>)}</div></section>{orders.length ? <section className="orders-card buyer-orders"><div className="section-title"><div><span className="eyebrow">Order history</span><h2>Your purchases</h2></div></div><div className="order-list">{orders.map((order) => <div className="order-row" key={order.order_id}><div><strong>{order.product_name || "Agent product"}</strong><span>{new Date(order.occurred_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span></div><div><strong>Free</strong><span className={`order-status ${order.status}`}>{order.status === "refunded" ? "Refunded" : "Paid"}</span></div></div>)}</div></section> : null}</main></div>;
 }
 
 function ProductCard({ product, onPublish, publishing, featured = false }) {

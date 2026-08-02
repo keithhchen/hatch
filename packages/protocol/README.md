@@ -26,11 +26,11 @@ schemas/creator-release-private.schema.json
 
 ## Agent Corpus v1
 
-`creator-agent.schema.json` is the public canonical alias for
+`creator-agent.schema.json` is the self-contained public canonical schema for
 `agent-corpus.schema.json`. It describes one current, publishable Creator
 Agent. The Corpus is deliberately runtime-free: it contains the Agent's
-product promise, global instructions, optional local Skills, retrieval-only
-knowledge, declarative tools, and non-runtime evaluation assets. It contains
+product identity and description, global instructions, optional local Skills,
+retrieval-only knowledge, declarative tools, and non-runtime evaluation assets. It contains
 no model/provider choice, vector-store ID, endpoint, credential, raw Creator
 material, Factory trace, or version history.
 
@@ -68,13 +68,13 @@ example belongs with the relevant Skill reference; broad fallback material may
 become retrieval knowledge. The retained `evals/` assets are for validation,
 not an instruction channel.
 
-`tools` is declarative. `hatch.web_search` and `hatch.file_search` are mandatory Hatch built-ins for every Agent.
+`tools` is declarative. `hatch.web_search` is mandatory for every Agent.
 `hatch.local.*` declares a Desktop local-harness capability. `creator.*` HTTP
 and MCP tools carry only a `connection_ref` plus the allowed operation or tool;
 their endpoints and credentials live in Hatch Control Plane, outside the
 Corpus.
 
-At publish time Registry binds one `creator.id + agent_id` to its own isolated
+At publish time Registry binds one `creator_id + agent_id` to its own isolated
 knowledge space. A Runtime turns that binding into `hatch.file_search`; neither
 the Corpus nor the Desktop carries a knowledge-base/vector-store identifier.
 

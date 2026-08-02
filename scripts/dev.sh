@@ -7,15 +7,8 @@ set -a
 source "$ROOT/.env"
 set +a
 
-cleanup() {
-  jobs -p | xargs -r kill
-}
-trap cleanup EXIT
-
-(cd "$ROOT/platform-registry" && uv run hatch-registry) &
-(cd "$ROOT/runtime-server" && PORT=8400 npm run serve) &
-
-sleep 2
-
+# The product Runtime, Registry, and Corpus storage are cloud-owned. This
+# entrypoint starts only the local Consumer Desktop; it never creates a local
+# Runtime or local Registry that could silently diverge from production.
 cd "$ROOT/desktop-app"
 npm run dev

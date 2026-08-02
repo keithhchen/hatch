@@ -1,0 +1,76 @@
+name: Hatch CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  runtime:
+    name: Runtime and Registry tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: runtime-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: runtime-server/pnpm-lock.yaml
+      - name: Install pnpm
+        run: corepack enable
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Build and test
+        run: pnpm test
+
+  dashboard:
+    name: Creator Dashboard tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: creator-dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: creator-dashboard/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Test
+        run: npm test
+      - name: Build portal
+        run: npm run build
+
+  containers:
+    name: Build production containers
+    runs-on: ubuntu-latest
+    needs: [runtime, dashboard]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build Runtime/Registry image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.runtime
+          push: false
+          tags: hatch-runtime:ci
+          cache-from: type=gha,scope=runtime
+          cache-to: type=gha,mode=max,scope=runtime
+      - name: Build Dashboard image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.dashboard
+          push: false
+          tags: hatch-dashboard:ci
+          cache-from: type=gha,scope=dashboard
+          cache-to: type=gha,mode=max,scope=dashboard

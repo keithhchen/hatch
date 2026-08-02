@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { realpath } from "node:fs/promises";
 import path from "node:path";
 import {
   compactRuntimeMessages,
@@ -23,7 +22,6 @@ import {
 } from "./skills.js";
 import type { ActivatedSkill, RuntimeStore } from "./store.js";
 import type { ToolBridge } from "./toolBridge.js";
-import { projectToolArgumentsForVisibility, projectToolResultForVisibility } from "./toolVisibility.js";
 
 export type SkillRunArgs = {
   skill_id: string;
@@ -40,9 +38,15 @@ type SkillRuntimeOptions = {
   toolBridge: ToolBridge;
   clientTools: RunContext["clientTools"];
   allowedExternalTools?: string[];
-  agentKnowledgeSearch?: RunContext["agentKnowledgeSearch"];
-  /** A protected Creator Skill inherits the same server-private Agent instructions. */
-  agentSystemPrompt?: RunContext["agentSystemPrompt"];
+  /**
+   * A protected Creator Skill is not a separate product or a weaker execution
+   * path.  It is the same entitled Creator Release running in a headless
+   * session, so it must inherit the Release's private instructions and final
+   * delivery guardrail.
+   */
+  releaseSystemPrompt?: RunContext["releaseSystemPrompt"];
+  releaseDeliveryWorkflow?: RunContext["releaseDeliveryWorkflow"];
+  releaseDeliveryAuditContext?: RunContext["releaseDeliveryAuditContext"];
   workspaceRoot?: string;
   store: RuntimeStore;
   emit: (event: OutboundMessage) => Promise<void>;
@@ -56,6 +60,7 @@ type SkillRuntimeOptions = {
  */
 export class SkillRuntime {
   private readonly active = new Map<string, { parentRunId: string; controller: AbortController }>();
+  private readonly cancelledParents = new Set<string>();
 
   constructor(private readonly options: SkillRuntimeOptions) {}
 
@@ -69,53 +74,66 @@ export class SkillRuntime {
     const publicSkillId = skill.name;
     const controller = new AbortController();
     this.active.set(skillRunId, { parentRunId: this.options.parentInput.run_id, controller });
+    await this.persistState(skill, skillRunId, "created");
+    await this.emitSkillRun({
+      type: "skill.run",
+      run_id: this.options.parentInput.run_id,
+      skill_run_id: skillRunId,
+      skill_id: publicSkillId,
+      name: skill.name,
+      status: "requested"
+    });
+    let privateSkill;
     try {
-      await this.persistState(skill, skillRunId, "created");
+      privateSkill = await loadSkillByPath(skill.path, [skill.directory, path.dirname(skill.path)]);
+    } catch (error) {
+      const failure = { code: "skill_failed", message: error instanceof Error ? error.message : String(error) };
+      await this.persistState(skill, skillRunId, "failed", failure);
       await this.emitSkillRun({
         type: "skill.run",
         run_id: this.options.parentInput.run_id,
         skill_run_id: skillRunId,
         skill_id: publicSkillId,
         name: skill.name,
-        status: "requested"
+        status: "failed",
+        error: failure
       });
+      this.active.delete(skillRunId);
+      return { skill_id: publicSkillId, skill_run_id: skillRunId, status: "failed", error: failure };
+    }
+    const resources = await listSkillBundleResourcePaths(privateSkill.directory);
+    const activatedSkill: ActivatedSkill = {
+      name: privateSkill.name,
+      path: privateSkill.path,
+      scope: privateSkill.scope,
+      directory: privateSkill.directory,
+      content: privateSkill.instructions,
+      allowed_tools: privateSkill.manifest.allowedTools,
+      resource_paths: resources.paths,
+      resource_manifest_truncated: resources.truncated,
+      activated_at: new Date().toISOString()
+    };
 
-      const skillRoot = await realpath(skill.root || skill.directory).catch(() => skill.root || skill.directory);
-      const skillPath = await realpath(skill.path).catch(() => path.join(skillRoot, path.relative(skill.directory, skill.path)));
-      const privateSkill = await loadSkillByPath(skillPath, [skillRoot]);
-      const resources = await listSkillBundleResourcePaths(privateSkill.directory);
-      const activatedSkill: ActivatedSkill = {
-        name: privateSkill.name,
-        path: privateSkill.path,
-        scope: privateSkill.scope,
-        directory: privateSkill.directory,
-        content: privateSkill.instructions,
-        allowed_tools: privateSkill.manifest.allowedTools,
-        resource_paths: resources.paths,
-        resource_manifest_truncated: resources.truncated,
-        activated_at: new Date().toISOString()
-      };
+    const task = renderWorkerTask(args);
+    const workerInput: RunStart = {
+      type: "client.message",
+      run_id: this.options.parentInput.run_id,
+      conversation_id: this.options.parentInput.conversation_id,
+      message: { role: "user", content: task }
+    };
+    const workerMessages: RuntimeCompactionMessage[] = [workerInput.message];
+    await this.persistMessage(skillRunId, workerInput.message);
+    await this.persistState(skill, skillRunId, "running");
+    await this.emitSkillRun({
+      type: "skill.run",
+      run_id: this.options.parentInput.run_id,
+      skill_run_id: skillRunId,
+      skill_id: publicSkillId,
+      name: skill.name,
+      status: "running"
+    });
 
-      const task = renderWorkerTask(args);
-      const workerInput: RunStart = {
-        type: "client.message",
-        run_id: this.options.parentInput.run_id,
-        conversation_id: this.options.parentInput.conversation_id,
-        message: { role: "user", content: task }
-      };
-      const workerMessages: RuntimeCompactionMessage[] = [workerInput.message];
-      await this.persistMessage(skillRunId, workerInput.message);
-      await this.persistState(skill, skillRunId, "running");
-      await this.emitSkillRun({
-        type: "skill.run",
-        run_id: this.options.parentInput.run_id,
-        skill_run_id: skillRunId,
-        skill_id: publicSkillId,
-        name: skill.name,
-        status: "running"
-      });
-
-      const workerSkills: RuntimeSessionSkills = {
+    const workerSkills: RuntimeSessionSkills = {
       records: [],
       visibleRecords: [],
       rendered: {
@@ -130,7 +148,7 @@ export class SkillRuntime {
         }
       }
     };
-      const workerContext: RunContext = {
+    const workerContext: RunContext = {
       clientBroker: this.options.clientBroker,
       serverTools: this.options.serverTools,
       toolBridge: this.options.toolBridge,
@@ -140,8 +158,9 @@ export class SkillRuntime {
       activatedSkills: [activatedSkill],
       clientTools: this.options.clientTools,
       allowedExternalTools: this.options.allowedExternalTools,
-      agentKnowledgeSearch: this.options.agentKnowledgeSearch,
-      agentSystemPrompt: this.options.agentSystemPrompt,
+      releaseSystemPrompt: this.options.releaseSystemPrompt,
+      releaseDeliveryWorkflow: this.options.releaseDeliveryWorkflow,
+      releaseDeliveryAuditContext: this.options.releaseDeliveryAuditContext,
       workspaceRoot: this.options.workspaceRoot,
       toolScope: "skill_run",
       skillRunId,
@@ -174,7 +193,8 @@ export class SkillRuntime {
       }
     };
 
-      const runtime = this.options.createWorkerRuntime?.() ?? new ChatCompletionsAgentRuntime();
+    const runtime = this.options.createWorkerRuntime?.() ?? new ChatCompletionsAgentRuntime();
+    try {
       let output = "";
       for await (const event of runtime.run(workerInput, workerContext)) {
         if (event.type === "turn.completed") {
@@ -187,12 +207,8 @@ export class SkillRuntime {
           } else if (event.status === "completed" || event.status === "failed" || event.status === "cancelled") {
             await this.persistState(skill, skillRunId, "running");
           }
-          const visibleEvent = event.result
-            ? { ...event, result: projectToolResultForVisibility(event.scope, event.name, event.result) }
-            : event;
-          visibleEvent.arguments = projectToolArgumentsForVisibility("skill_run", event.name, event.arguments ?? {});
-          await this.persistWorkerToolEvent(visibleEvent, skillRunId);
-          await this.emit(visibleEvent);
+          await this.persistWorkerToolEvent(event, skillRunId);
+          await this.emit(event);
         }
       }
 
@@ -217,7 +233,7 @@ export class SkillRuntime {
       };
     } catch (error) {
       const failure = {
-        code: this.options.parentState.status === "cancelled" ? "skill_cancelled" : "skill_failed",
+        code: this.options.parentState.status === "cancelled" || controller.signal.aborted || this.cancelledParents.has(this.options.parentState.runId) ? "skill_cancelled" : "skill_failed",
         message: error instanceof Error ? error.message : String(error)
       };
       await this.persistState(skill, skillRunId, failure.code === "skill_cancelled" ? "cancelled" : "failed", failure);
@@ -242,6 +258,7 @@ export class SkillRuntime {
   }
 
   async cancelParentRun(parentRunId: string): Promise<void> {
+    this.cancelledParents.add(parentRunId);
     for (const active of this.active.values()) {
       if (active.parentRunId === parentRunId) {
         active.controller.abort();

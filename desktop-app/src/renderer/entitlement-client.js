@@ -1,13 +1,37 @@
-export async function fetchPurchasedCreatorAgents(runtimeUrl, accessToken, fetchImpl = fetch) {
-  const response = await fetchImpl(runtimeHttpUrl(runtimeUrl, "/v1/me/creator-agents"), {
-    headers: { authorization: `Bearer ${accessToken}` }
+export async function fetchPurchasedCreatorAgents(registryUrl, authToken, fetchImpl = fetch) {
+  const accessResponse = await fetchImpl(new URL("/v1/user/agent-access", registryUrl).toString(), {
+    headers: { authorization: `Bearer ${authToken}` }
   });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(payload?.error?.message || "We couldn't open your agents. Check your access code and try again.");
+  const accessPayload = await accessResponse.json().catch(() => ({}));
+  if (!accessResponse.ok) {
+    throw new Error(accessPayload?.detail || "We couldn't open your agents. Try signing in again.");
   }
-  if (!Array.isArray(payload.creator_agents)) throw new Error("We couldn't open your agent library. Try again.");
-  return payload.creator_agents.filter(isCreatorAgentEntitlement);
+  if (!Array.isArray(accessPayload)) throw new Error("We couldn't open your agent library. Try again.");
+  const catalogResponse = await fetchImpl(new URL("/v1/catalog/agents", registryUrl).toString(), {
+    headers: { accept: "application/json" }
+  });
+  const catalogPayload = await catalogResponse.json().catch(() => ({}));
+  if (!catalogResponse.ok || !Array.isArray(catalogPayload)) {
+    throw new Error(catalogPayload?.detail || "We couldn't load the Agent catalog. Try again.");
+  }
+  const catalog = new Map(catalogPayload.map((entry) => [
+    `${entry?.creator_id}:${entry?.agent_id}`,
+    entry
+  ]));
+  return accessPayload.map((grant) => {
+    const entry = catalog.get(`${grant?.creator_id}:${grant?.agent_id}`);
+    if (!entry) return null;
+    return {
+      ...grant,
+      creator: { id: entry.creator_id, name: entry.creator_name },
+      product: {
+        id: entry.product_id,
+        name: entry.product_name,
+        description: entry.product_description || "Work with this Creator Agent in your own files and context."
+      },
+      presentation: {}
+    };
+  }).filter(isCreatorAgentEntitlement);
 }
 
 export function runtimeHttpUrl(runtimeUrl, pathname) {

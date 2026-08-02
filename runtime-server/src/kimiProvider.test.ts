@@ -22,7 +22,7 @@ test("Kimi-only provider defaults every runtime role to the non-thinking Kimi K2
     creator_model: "kimi-k2.6",
     reviewer_model: "kimi-k2.6",
     compaction_model: "kimi-k2.6",
-    temperature: 0.6,
+    temperature: 1,
     thinking_mode: "disabled"
   });
 });

@@ -35,6 +35,8 @@ export class LedgerCommerceSink {
       order_id: delivery.order_id,
       creator_id: delivery.creator_id,
       product_id: delivery.product_id,
+      release_id: delivery.release_id,
+      release_digest: delivery.release_digest,
       agent_id: delivery.agent_id,
       gross_minor: order.gross_minor,
       creator_share_minor: creatorShareMinor,

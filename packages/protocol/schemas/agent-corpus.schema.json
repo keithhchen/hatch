@@ -11,7 +11,6 @@
     "creator",
     "product",
     "instructions",
-    "knowledge",
     "tools",
     "evaluations"
   ],
@@ -34,12 +33,7 @@
       "properties": {
         "id": { "$ref": "#/$defs/identifier" },
         "name": { "type": "string", "minLength": 1 },
-        "description": { "type": "string", "minLength": 1 },
-        "promise": { "type": "string", "minLength": 1 },
-        "inputs": { "$ref": "#/$defs/nonEmptyStrings" },
-        "outputs": { "$ref": "#/$defs/nonEmptyStrings" },
-        "boundaries": { "$ref": "#/$defs/nonEmptyStrings" },
-        "offer": { "$ref": "#/$defs/offer" }
+        "description": { "type": "string", "minLength": 1 }
       }
     },
     "instructions": {
@@ -59,7 +53,7 @@
     "knowledge": {
       "type": "object",
       "additionalProperties": false,
-      "description": "The Agent-scoped retrieval namespace. Documents are retrieval-only long-tail material and may be empty; they must not contain global instructions, Skill instructions, references, canonical few-shots, or held-out evaluations.",
+      "description": "Retrieval-only long-tail material. It must not contain global instructions, Skill instructions, references, canonical few-shots, or held-out evaluations.",
       "required": ["documents"],
       "properties": {
         "documents": {
@@ -70,25 +64,14 @@
     },
     "tools": {
       "type": "array",
-      "minItems": 2,
-      "allOf": [
-        {
-          "contains": {
-            "type": "object",
-            "properties": { "id": { "const": "hatch.web_search" } },
-            "required": ["id"]
-          }
-        },
-        {
-          "contains": {
-            "type": "object",
-            "properties": { "id": { "const": "hatch.file_search" } },
-            "required": ["id"]
-          }
-        }
-      ],
+      "minItems": 1,
+      "contains": {
+        "type": "object",
+        "properties": { "id": { "const": "hatch.web_search" } },
+        "required": ["id"]
+      },
       "items": { "$ref": "#/$defs/tool" },
-      "description": "Declarative capabilities only. No endpoint, provider credential, or secret belongs in a Corpus. Hatch-owned web and file search are always required."
+      "description": "Declarative capabilities only. No endpoint, provider credential, or secret belongs in a Corpus. hatch.web_search is always required."
     },
     "evaluations": {
       "type": "object",
@@ -145,27 +128,6 @@
       "type": "array",
       "minItems": 1,
       "items": { "type": "string", "minLength": 1 }
-    },
-    "offer": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["model", "unit"],
-      "properties": {
-        "model": { "type": "string", "enum": ["per_delivery", "subscription"] },
-        "unit": { "type": "string", "minLength": 1 },
-        "amount_minor": { "type": "integer", "minimum": 0 },
-        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" }
-      },
-      "allOf": [
-        {
-          "if": { "required": ["amount_minor"] },
-          "then": { "required": ["currency"] }
-        },
-        {
-          "if": { "required": ["currency"] },
-          "then": { "required": ["amount_minor"] }
-        }
-      ]
     },
     "skill": {
       "type": "object",
