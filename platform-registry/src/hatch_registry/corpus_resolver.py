@@ -19,10 +19,9 @@ class AgentCorpusVerificationError(ValueError):
 
 @dataclass(frozen=True)
 class VerifiedAgentCorpus:
-    tenant_id: str
     agent_id: str
     creator_id: str
-    product_id: str
+    product: dict[str, str | None]
     corpus_digest: str
     corpus_path: Path
     agent: dict[str, Any]
@@ -51,17 +50,17 @@ class AgentCorpusResolver:
         except (OSError, json.JSONDecodeError) as exc:
             raise RuntimeError(f"cannot load Agent Corpus schema: {exc}") from exc
 
-    def publish(self, source_path: Path, tenant_id: str) -> VerifiedAgentCorpus:
+    def publish(self, source_path: Path) -> VerifiedAgentCorpus:
         source = source_path.resolve()
-        verified = self.verify(source, tenant_id)
-        target = self.corpus_root / verified.tenant_id / verified.agent_id
+        verified = self.verify(source)
+        target = self.corpus_root / verified.creator_id / verified.agent_id
         self._replace_current(source, target)
-        return self.verify(target, tenant_id)
+        return self.verify(target)
 
-    def resolve(self, tenant_id: str, agent_id: str) -> VerifiedAgentCorpus:
-        return self.verify(self.corpus_root / tenant_id / agent_id, tenant_id)
+    def resolve(self, creator_id: str, agent_id: str) -> VerifiedAgentCorpus:
+        return self.verify(self.corpus_root / creator_id / agent_id)
 
-    def verify(self, corpus_path: Path, tenant_id: str) -> VerifiedAgentCorpus:
+    def verify(self, corpus_path: Path) -> VerifiedAgentCorpus:
         root = corpus_path.resolve()
         if not root.is_dir():
             raise AgentCorpusVerificationError("Agent Corpus directory does not exist")
@@ -71,9 +70,6 @@ class AgentCorpusResolver:
         if errors:
             detail = "; ".join(error.message for error in errors[:4])
             raise AgentCorpusVerificationError(f"Agent Corpus schema validation failed: {detail}")
-        if agent["tenant_id"] != tenant_id:
-            raise AgentCorpusVerificationError("Agent Corpus tenant_id does not match the Registry tenant")
-
         assets = list(_declared_assets(agent))
         _verify_assets(root, assets)
         actual = _corpus_files(root)
@@ -86,10 +82,13 @@ class AgentCorpusResolver:
         _verify_tool_references(agent)
 
         return VerifiedAgentCorpus(
-            tenant_id=agent["tenant_id"],
             agent_id=agent["agent_id"],
             creator_id=agent["creator"]["id"],
-            product_id=agent["product"]["id"],
+            product={
+                "id": agent["product"]["id"],
+                "name": agent["product"]["name"],
+                "description": agent["product"].get("description"),
+            },
             corpus_digest=_tree_digest(root),
             corpus_path=root,
             agent=agent,

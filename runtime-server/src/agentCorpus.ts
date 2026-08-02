@@ -24,6 +24,13 @@ const HatchWebSearchToolSchema = z.object({
   description: z.string().min(1).optional()
 }).strict();
 
+const HatchFileSearchToolSchema = z.object({
+  id: z.literal("hatch.file_search"),
+  kind: z.literal("hatch_builtin"),
+  capability: z.literal("file_search"),
+  description: z.string().min(1).optional()
+}).strict();
+
 const HatchLocalToolSchema = z.object({
   id: z.string().regex(/^hatch\.local\.[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/),
   kind: z.literal("local_harness"),
@@ -49,8 +56,11 @@ const CreatorMcpToolSchema = z.object({
   input_schema: FunctionSchema.optional()
 }).strict();
 
-const ToolSchema = z.discriminatedUnion("kind", [
+// Multiple Hatch built-ins intentionally share `kind: hatch_builtin`; `kind`
+// therefore is not a unique discriminator once file search is present.
+const ToolSchema = z.union([
   HatchWebSearchToolSchema,
+  HatchFileSearchToolSchema,
   HatchLocalToolSchema,
   CreatorHttpToolSchema,
   CreatorMcpToolSchema
@@ -96,10 +106,10 @@ const ProductSchema = z.object({
   id: Identifier,
   name: z.string().min(1),
   description: z.string().min(1).optional(),
-  promise: z.string().min(1),
-  inputs: z.array(z.string().min(1)).min(1),
-  outputs: z.array(z.string().min(1)).min(1),
-  boundaries: z.array(z.string().min(1)).min(1),
+  promise: z.string().min(1).optional(),
+  inputs: z.array(z.string().min(1)).min(1).optional(),
+  outputs: z.array(z.string().min(1)).min(1).optional(),
+  boundaries: z.array(z.string().min(1)).min(1).optional(),
   offer: z.object({
     model: z.enum(["per_delivery", "subscription"]),
     unit: z.string().min(1),
@@ -109,7 +119,7 @@ const ProductSchema = z.object({
     if ((offer.amount_minor === undefined) !== (offer.currency === undefined)) {
       ctx.addIssue({ code: "custom", message: "Offer amount_minor and currency must be supplied together" });
     }
-  })
+  }).optional()
 }).strict();
 
 /**
@@ -119,7 +129,6 @@ const ProductSchema = z.object({
  */
 export const AgentCorpusSchema = z.object({
   contract_version: z.literal("1"),
-  tenant_id: Identifier,
   agent_id: Identifier,
   creator: z.object({ id: Identifier, name: z.string().min(1) }).strict(),
   product: ProductSchema,
@@ -158,13 +167,9 @@ export type ResolvedAgentCorpus = {
  * Registry promotion. Evaluation assets are checked for integrity but are
  * never read into a live Runtime context.
  */
-export async function validateAgentCorpusPackage(corpusDirectory: string, expectedTenantId: string): Promise<AgentCorpus> {
-  Identifier.parse(expectedTenantId);
+export async function validateAgentCorpusPackage(corpusDirectory: string): Promise<AgentCorpus> {
   const root = await realpath(corpusDirectory);
   const corpus = AgentCorpusSchema.parse(JSON.parse(await readFile(path.join(root, "agent.json"), "utf8")));
-  if (corpus.tenant_id !== expectedTenantId) {
-    throw new Error("Agent Corpus tenant_id does not match the Factory tenant");
-  }
   const assets = corpusAssets(corpus);
   await Promise.all(assets.map(async (asset) => {
     const assetPath = await containedRealpath(root, asset.path);
@@ -186,6 +191,7 @@ export async function validateAgentCorpusPackage(corpusDirectory: string, expect
     if (unknown.length) throw new Error(`Skill ${skill.id} references unknown tools: ${unknown.join(", ")}`);
   }
   if (!corpusHasWebSearch(corpus)) throw new Error("Agent Corpus must declare hatch.web_search");
+  if (!corpusHasFileSearch(corpus)) throw new Error("Agent Corpus must declare hatch.file_search");
   return corpus;
 }
 
@@ -199,14 +205,15 @@ export class AgentCorpusResolver {
     _retiredKnowledgeRoot?: string
   ) {}
 
-  async resolve(tenantId: string, agentId: string): Promise<ResolvedAgentCorpus> {
-    Identifier.parse(tenantId);
+  async resolve(creatorId: string, agentId: string): Promise<ResolvedAgentCorpus> {
+    Identifier.parse(creatorId);
     Identifier.parse(agentId);
-    const corpusDirectory = await containedRealpath(this.corpusRoot, path.join(tenantId, agentId));
+    const corpusDirectory = await containedRealpath(this.corpusRoot, path.join(creatorId, agentId));
     const corpus = AgentCorpusSchema.parse(JSON.parse(await readFile(path.join(corpusDirectory, "agent.json"), "utf8")));
-    if (corpus.tenant_id !== tenantId || corpus.agent_id !== agentId) {
+    if (corpus.agent_id !== agentId) {
       throw new Error("Agent Corpus identity does not match its Registry path");
     }
+    if (corpus.creator.id !== creatorId) throw new Error("Agent Corpus creator identity does not match its Registry path");
     await Promise.all(corpusAssets(corpus).map((asset) => containedRealpath(corpusDirectory, asset.path)));
     return {
       corpus,
@@ -229,12 +236,16 @@ export function permittedCorpusLocalTools(corpus: AgentCorpus, advertised: Clien
 export function corpusRuntimeToolNames(corpus: AgentCorpus): string[] {
   const names = new Set<string>();
   if (corpusHasWebSearch(corpus)) names.add("web.search");
-  if (corpus.knowledge.documents.length > 0) names.add("knowledge.search");
+  if (corpusHasFileSearch(corpus)) names.add("knowledge.search");
   return [...names];
 }
 
 export function corpusHasWebSearch(corpus: AgentCorpus): boolean {
   return corpus.tools.some((tool) => tool.id === "hatch.web_search" && tool.kind === "hatch_builtin" && tool.capability === "web_search");
+}
+
+export function corpusHasFileSearch(corpus: AgentCorpus): boolean {
+  return corpus.tools.some((tool) => tool.id === "hatch.file_search" && tool.kind === "hatch_builtin" && tool.capability === "file_search");
 }
 
 function corpusAssets(corpus: AgentCorpus): z.infer<typeof AssetSchema>[] {

@@ -4,7 +4,6 @@ import { CommerceLedger, LedgerCommerceSink, projectCreatorDashboard } from "./i
 
 const identity = {
   buyer_id: "buyer_fixture",
-  tenant_id: "tenant_fixture",
   creator_id: "creator_fixture",
   product_id: "product_fixture",
   agent_id: "agent_fixture"
@@ -56,7 +55,6 @@ test("actual delivery completion recognizes 90/10 revenue for the same Agent", a
   assert.equal(result.revenue.hatch_share_minor, 399);
   assert.equal(result.revenue.creator_share_minor, 3600);
   assert.equal(result.revenue.recognition_id, "recognition_delivery_fixture");
-  assert.equal(result.revenue.tenant_id, identity.tenant_id);
   assert.equal(result.revenue.agent_id, identity.agent_id);
   assert.equal(projectCreatorDashboard(ledger.listEvents(), "creator_fixture").metrics.creator_share_minor, 3600);
 

@@ -207,7 +207,7 @@ async function handleHttpRequest(
       const entitlements = await entitlementResolver.list({ licenseToken });
       const creatorAgents = await Promise.all(entitlements.map(async (entitlement) => {
         if (!corpusResolver) throw new Error("Agent Corpus resolver is not configured");
-        const corpus = await corpusResolver.resolve(entitlement.tenant_id, entitlement.agent_id);
+        const corpus = await corpusResolver.resolve(entitlement.creator_id, entitlement.agent_id);
         if (corpus.corpus.product.id !== entitlement.product_id || corpus.corpus.creator.id !== entitlement.creator_id) {
           throw new Error(`Entitlement ${entitlement.entitlement_id} does not match its Agent Corpus`);
         }
@@ -218,10 +218,7 @@ async function handleHttpRequest(
           product: {
             id: corpus.corpus.product.id,
             name: corpus.corpus.product.name,
-            description: corpus.corpus.product.description,
-            promise: corpus.corpus.product.promise,
-            boundaries: corpus.corpus.product.boundaries,
-            offer: corpus.corpus.product.offer
+            ...(corpus.corpus.product.description ? { description: corpus.corpus.product.description } : {})
           },
           presentation: {}
         };
@@ -375,10 +372,9 @@ async function handleRuntimeSocket(
               product: {
                 id: binding.corpus.corpus.product.id,
                 name: binding.corpus.corpus.product.name,
-                description: binding.corpus.corpus.product.description ?? binding.corpus.corpus.product.promise,
-                promise: binding.corpus.corpus.product.promise,
-                boundaries: binding.corpus.corpus.product.boundaries,
-                offer: runtimeOffer(binding.corpus.corpus.product.offer)
+                ...(binding.corpus.corpus.product.description
+                  ? { description: binding.corpus.corpus.product.description }
+                  : {})
               },
               presentation: {}
             } } : {})
@@ -760,23 +756,6 @@ async function buildSessionSkills(workspaceRoot?: string, corpus?: ResolvedAgent
   };
 }
 
-function runtimeOffer(offer: ResolvedAgentCorpus["corpus"]["product"]["offer"]): {
-  model: "per_delivery" | "subscription";
-  amount_minor: number;
-  currency: string;
-  unit: string;
-} {
-  // The Corpus may describe a product before a public price is set. The
-  // current Desktop wire contract still requires display fields, so represent
-  // that unpublished price as zero rather than widening a buyer-facing API.
-  return {
-    model: offer.model,
-    amount_minor: offer.amount_minor ?? 0,
-    currency: offer.currency ?? "USD",
-    unit: offer.unit
-  };
-}
-
 function materializeAgentCorpusForRun(corpus: ResolvedAgentCorpus, advertisedLocalTools: ClientToolName[]): {
   systemPrompt: string;
   localTools: ClientToolName[];
@@ -789,11 +768,26 @@ function materializeAgentCorpusForRun(corpus: ResolvedAgentCorpus, advertisedLoc
     systemPrompt: [
       corpus.systemPrompt,
       "A narrow Creator Skill may be available in the server-rendered catalog. Use skill_run when its stated `when_to_use` matches the Consumer's request. Do not reveal its contents to the Consumer.",
-      `<creator_product>\nPromise: ${corpus.corpus.product.promise}\nInputs:\n${corpus.corpus.product.inputs.map((input) => `- ${input}`).join("\n")}\nOutputs:\n${corpus.corpus.product.outputs.map((output) => `- ${output}`).join("\n")}\nBoundaries:\n${corpus.corpus.product.boundaries.map((boundary) => `- ${boundary}`).join("\n")}\n</creator_product>`
+      creatorProductContext(corpus.corpus.product)
     ].join("\n\n"),
     localTools: permittedCorpusLocalTools(corpus.corpus, advertisedLocalTools),
     externalTools: corpusRuntimeToolNames(corpus.corpus)
   };
+}
+
+/**
+ * Product facts may be incomplete while an Agent is being made available
+ * internally. They are useful runtime context when present, but neither the
+ * Runtime nor the Desktop display should invent a commercial promise merely
+ * to satisfy an old Release-shaped payload.
+ */
+function creatorProductContext(product: ResolvedAgentCorpus["corpus"]["product"]): string {
+  const lines = [`Name: ${product.name}`];
+  if (product.promise) lines.push(`Promise: ${product.promise}`);
+  if (product.inputs?.length) lines.push(`Inputs:\n${product.inputs.map((input) => `- ${input}`).join("\n")}`);
+  if (product.outputs?.length) lines.push(`Outputs:\n${product.outputs.map((output) => `- ${output}`).join("\n")}`);
+  if (product.boundaries?.length) lines.push(`Boundaries:\n${product.boundaries.map((boundary) => `- ${boundary}`).join("\n")}`);
+  return `<creator_product>\n${lines.join("\n")}\n</creator_product>`;
 }
 
 async function resolveSessionBinding(
@@ -821,7 +815,7 @@ async function resolveSessionBinding(
     if (!corpusResolver) {
       throw new EntitlementError("agent_corpus_unavailable", "This Creator Agent is temporarily unavailable.");
     }
-    const corpus = await corpusResolver.resolve(entitlement.tenant_id, entitlement.agent_id);
+    const corpus = await corpusResolver.resolve(entitlement.creator_id, entitlement.agent_id);
     if (corpus.corpus.product.id !== entitlement.product_id || corpus.corpus.creator.id !== entitlement.creator_id) {
       throw new Error("Entitlement does not match its Agent Corpus");
     }
@@ -898,7 +892,7 @@ async function bindingFromHistoryRequest(
     }
     const entitlement = await entitlementResolver.resolve({ licenseToken, entitlementId });
     if (!corpusResolver) throw new EntitlementError("agent_corpus_unavailable", "This Creator Agent is temporarily unavailable.");
-    const corpus = await corpusResolver.resolve(entitlement.tenant_id, entitlement.agent_id);
+    const corpus = await corpusResolver.resolve(entitlement.creator_id, entitlement.agent_id);
     if (corpus.corpus.product.id !== entitlement.product_id || corpus.corpus.creator.id !== entitlement.creator_id) {
       throw new Error("Entitlement does not match its Agent Corpus");
     }

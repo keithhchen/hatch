@@ -39,8 +39,8 @@ def create_app(
     knowledge_search: KnowledgePublicationProvider | None = None,
 ) -> FastAPI:
     # The Registry is installed as a Python package in production, while the
-    # Agent Corpus schema remains a release asset next to `platform-registry/`.
-    # Resolve that release root from the service working directory instead of
+    # Agent Corpus schema remains a source asset next to `platform-registry/`.
+    # Resolve that source root from the service working directory instead of
     # from this module's site-packages location.
     repo_root = Path(os.environ.get("HATCH_REGISTRY_REPO_ROOT", Path.cwd().parent)).resolve()
     corpus_root = Path(os.environ.get("HATCH_AGENT_CORPUS_ROOT", repo_root / "agent-corpora"))
@@ -101,15 +101,10 @@ def create_app(
     def publish_agent_corpus(
         request: AgentCorpusPublishRequest,
         authorization: Annotated[str | None, Header()] = None,
-        tenant_id: Annotated[str | None, Header(alias="X-Hatch-Tenant-Id")] = None,
     ) -> PublishedAgentCorpus:
-        authenticated_tenant_id = require_internal_publish_auth(
-            authorization,
-            tenant_id,
-            configured_publish_service_token,
-        )
+        require_internal_service_auth(authorization, configured_publish_service_token)
         try:
-            return registry_store.publish_agent_corpus(request, tenant_id=authenticated_tenant_id)
+            return registry_store.publish_agent_corpus(request)
         except AgentCorpusVerificationError as exc:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -122,46 +117,43 @@ def create_app(
             ) from exc
 
     @api.get(
-        "/v1/tenants/{tenant_id}/agent-corpora",
+        "/v1/creators/{creator_id}/agent-corpora",
         response_model=list[PublishedAgentCorpus],
     )
-    def list_agent_corpora(tenant_id: str) -> list[PublishedAgentCorpus]:
-        return registry_store.list_agent_corpora(tenant_id)
+    def list_agent_corpora(creator_id: str) -> list[PublishedAgentCorpus]:
+        return registry_store.list_agent_corpora(creator_id)
 
     @api.get(
-        "/v1/tenants/{tenant_id}/agent-corpora/{agent_id}",
+        "/v1/creators/{creator_id}/agent-corpora/{agent_id}",
         response_model=PublishedAgentCorpus,
     )
-    def get_agent_corpus(tenant_id: str, agent_id: str) -> PublishedAgentCorpus:
-        corpus = registry_store.get_agent_corpus(tenant_id, agent_id)
+    def get_agent_corpus(creator_id: str, agent_id: str) -> PublishedAgentCorpus:
+        corpus = registry_store.get_agent_corpus(creator_id, agent_id)
         if corpus is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Agent Corpus not found for tenant={tenant_id} agent={agent_id}",
+                detail=f"Agent Corpus not found for creator={creator_id} agent={agent_id}",
             )
         return corpus
 
     @api.post(
-        "/v1/runtime/tenants/{tenant_id}/agents/{agent_id}/knowledge/search",
+        "/v1/runtime/creators/{creator_id}/agents/{agent_id}/knowledge/search",
         response_model=KnowledgeSearchResponse,
     )
     def search_agent_knowledge(
-        tenant_id: str,
+        creator_id: str,
         agent_id: str,
         request: KnowledgeSearchRequest,
         authorization: Annotated[str | None, Header()] = None,
-        authenticated_tenant_id: Annotated[str | None, Header(alias="X-Hatch-Tenant-Id")] = None,
     ) -> KnowledgeSearchResponse:
-        tenant = require_internal_publish_auth(authorization, authenticated_tenant_id, configured_publish_service_token)
-        if tenant != tenant_id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="tenant path does not match authenticated tenant")
-        corpus = registry_store.get_agent_corpus(tenant_id, agent_id)
+        require_internal_service_auth(authorization, configured_publish_service_token)
+        corpus = registry_store.get_agent_corpus(creator_id, agent_id)
         if corpus is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Agent Corpus is not published")
         try:
             rows = knowledge_search_provider.search(
                 binding=AgentKnowledgeBinding(
-                    tenant_id=corpus.tenant_id,
+                    creator_id=corpus.creator_id,
                     agent_id=corpus.agent_id,
                     corpus_digest=corpus.corpus_digest,
                     backend=corpus.rag.backend,
@@ -182,47 +174,54 @@ def create_app(
         connection_id: str,
         request: ToolConnectionUpsertRequest,
         authorization: Annotated[str | None, Header()] = None,
-        tenant_id: Annotated[str | None, Header(alias="X-Hatch-Tenant-Id")] = None,
+        creator_id: Annotated[str | None, Header(alias="X-Hatch-Creator-Id")] = None,
     ) -> ResolvedToolConnection:
-        authenticated_tenant_id = require_internal_publish_auth(authorization, tenant_id, configured_publish_service_token)
+        authenticated_creator_id = require_creator_scope_auth(authorization, creator_id, configured_publish_service_token)
         try:
             connection = get_control_plane_store().upsert_connection(
-                tenant_id=authenticated_tenant_id,
+                tenant_id=authenticated_creator_id,
                 connection_id=connection_id,
                 kind=request.kind,
                 secret_ref=request.secret_ref,
                 config=request.config,
                 status=request.status,
             )
-            return ResolvedToolConnection.model_validate(connection.__dict__)
+            return ResolvedToolConnection(
+                id=connection.id,
+                creator_id=authenticated_creator_id,
+                kind=connection.kind,
+                secret_ref=connection.secret_ref,
+                config=connection.config,
+                status=connection.status,
+            )
         except ControlPlaneError as exc:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
-    @api.put("/v1/tenants/{tenant_id}/agents/{agent_id}/tools/{tool_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
+    @api.put("/v1/creators/{creator_id}/agents/{agent_id}/tools/{tool_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
     def bind_agent_tool(
-        tenant_id: str,
+        creator_id: str,
         agent_id: str,
         tool_id: str,
         request: AgentToolBindingUpsertRequest,
         authorization: Annotated[str | None, Header()] = None,
-        authenticated_tenant_id: Annotated[str | None, Header(alias="X-Hatch-Tenant-Id")] = None,
+        authenticated_creator_id: Annotated[str | None, Header(alias="X-Hatch-Creator-Id")] = None,
     ) -> None:
-        tenant = require_internal_publish_auth(authorization, authenticated_tenant_id, configured_publish_service_token)
-        if tenant != tenant_id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="tenant path does not match authenticated tenant")
+        creator = require_creator_scope_auth(authorization, authenticated_creator_id, configured_publish_service_token)
+        if creator != creator_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="creator path does not match authenticated creator")
         try:
-            # This tenant-scoped lookup happens before the declared Corpus tool
+            # This creator-scoped lookup happens before the declared Corpus tool
             # is allowed to bind to a connection.
-            raw_connection = get_control_plane_store().get_connection(tenant_id=tenant, connection_id=request.connection_id)
+            raw_connection = get_control_plane_store().get_connection(tenant_id=creator, connection_id=request.connection_id)
             registry_store.validate_agent_tool_binding(
-                tenant_id=tenant,
+                creator_id=creator,
                 agent_id=agent_id,
                 tool_id=tool_id,
                 connection_ref=request.connection_id,
                 kind=raw_connection.kind,
             )
             get_control_plane_store().bind_agent_tool(
-                tenant_id=tenant,
+                tenant_id=creator,
                 agent_id=agent_id,
                 tool_id=tool_id,
                 connection_id=request.connection_id,
@@ -230,31 +229,37 @@ def create_app(
         except (ControlPlaneError, ValueError) as exc:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
-    @api.get("/v1/runtime/tenants/{tenant_id}/agents/{agent_id}/tools/{tool_id}", response_model=ResolvedToolConnection)
+    @api.get("/v1/runtime/creators/{creator_id}/agents/{agent_id}/tools/{tool_id}", response_model=ResolvedToolConnection)
     def resolve_runtime_tool_connection(
-        tenant_id: str,
+        creator_id: str,
         agent_id: str,
         tool_id: str,
         authorization: Annotated[str | None, Header()] = None,
-        authenticated_tenant_id: Annotated[str | None, Header(alias="X-Hatch-Tenant-Id")] = None,
+        authenticated_creator_id: Annotated[str | None, Header(alias="X-Hatch-Creator-Id")] = None,
     ) -> ResolvedToolConnection:
-        tenant = require_internal_publish_auth(authorization, authenticated_tenant_id, configured_publish_service_token)
-        if tenant != tenant_id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="tenant path does not match authenticated tenant")
+        creator = require_creator_scope_auth(authorization, authenticated_creator_id, configured_publish_service_token)
+        if creator != creator_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="creator path does not match authenticated creator")
         try:
-            connection = get_control_plane_store().resolve(tenant_id=tenant, agent_id=agent_id, tool_id=tool_id)
-            return ResolvedToolConnection.model_validate(connection.__dict__)
+            connection = get_control_plane_store().resolve(tenant_id=creator, agent_id=agent_id, tool_id=tool_id)
+            return ResolvedToolConnection(
+                id=connection.id,
+                creator_id=creator,
+                kind=connection.kind,
+                secret_ref=connection.secret_ref,
+                config=connection.config,
+                status=connection.status,
+            )
         except ControlPlaneError as exc:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
     return api
 
 
-def require_internal_publish_auth(
+def require_internal_service_auth(
     authorization: str | None,
-    tenant_id: str | None,
     configured_service_token: str,
-) -> str:
+) -> None:
     if not configured_service_token:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -269,13 +274,22 @@ def require_internal_publish_auth(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="A valid Registry publish service token is required.",
         )
-    normalized_tenant_id = (tenant_id or "").strip()
-    if not normalized_tenant_id:
+    return None
+
+
+def require_creator_scope_auth(
+    authorization: str | None,
+    creator_id: str | None,
+    configured_service_token: str,
+) -> str:
+    require_internal_service_auth(authorization, configured_service_token)
+    normalized_creator_id = (creator_id or "").strip()
+    if not normalized_creator_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="X-Hatch-Tenant-Id is required.",
+            detail="X-Hatch-Creator-Id is required.",
         )
-    return normalized_tenant_id
+    return normalized_creator_id
 
 
 app = create_app()

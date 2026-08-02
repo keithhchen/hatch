@@ -120,10 +120,12 @@ export type RuntimeReady = {
     product: {
       id: string;
       name: string;
-      description: string;
-      promise: string;
-      boundaries: string[];
-      offer: { model?: "per_delivery" | "subscription"; amount_minor: number; currency: string; unit?: string };
+      /** Display-only copy. Product promise, offer and boundaries stay in Runtime/commerce. */
+      description?: string;
+      /** Legacy Release projection fields. A new Corpus session never requires them. */
+      promise?: string;
+      boundaries?: string[];
+      offer?: { model?: "per_delivery" | "subscription"; amount_minor: number; currency: string; unit?: string };
     };
     presentation: Record<string, unknown>;
   };

@@ -122,7 +122,6 @@ export function projectBuyerEntitlements(events, buyerId) {
     .map((event) => ({
       entitlement_id: event.entitlement_id,
       order_id: event.order_id,
-      tenant_id: event.tenant_id,
       creator_id: event.creator_id,
       product_id: event.product_id,
       agent_id: event.agent_id,
@@ -157,7 +156,6 @@ export function projectCreatorDashboard(events, creatorId) {
     return {
       order_id: order.order_id,
       product_id: order.product_id,
-      tenant_id: order.tenant_id,
       creator_id: order.creator_id,
       agent_id: order.agent_id,
       buyer_display_name: order.buyer_display_name,
@@ -209,36 +207,36 @@ function validateEvent(event, events) {
     }
   }
   if (event.event_type === "order.placed") {
-    requireFields(event, ["order_id", "buyer_id", "tenant_id", "creator_id", "product_id", "agent_id", "currency"]);
+    requireFields(event, ["order_id", "buyer_id", "creator_id", "product_id", "agent_id", "currency"]);
     requirePositiveInteger(event.gross_minor, "gross_minor");
   }
   if (event.event_type === "entitlement.granted") {
-    requireFields(event, ["entitlement_id", "order_id", "buyer_id", "tenant_id", "creator_id", "product_id", "agent_id"]);
+    requireFields(event, ["entitlement_id", "order_id", "buyer_id", "creator_id", "product_id", "agent_id"]);
     const order = requirePrior(events, "order.placed", "order_id", event.order_id);
-    requireIdentityMatch(order, event, ["buyer_id", "tenant_id", "creator_id", "product_id", "agent_id"]);
+    requireIdentityMatch(order, event, ["buyer_id", "creator_id", "product_id", "agent_id"]);
   }
   if (event.event_type === "task.started") {
-    requireFields(event, ["task_id", "order_id", "entitlement_id", "buyer_id", "tenant_id", "creator_id", "product_id", "agent_id"]);
+    requireFields(event, ["task_id", "order_id", "entitlement_id", "buyer_id", "creator_id", "product_id", "agent_id"]);
     const entitlement = requirePrior(events, "entitlement.granted", "entitlement_id", event.entitlement_id);
-    requireIdentityMatch(entitlement, event, ["order_id", "buyer_id", "tenant_id", "creator_id", "product_id", "agent_id"]);
+    requireIdentityMatch(entitlement, event, ["order_id", "buyer_id", "creator_id", "product_id", "agent_id"]);
   }
   if (event.event_type === "artifact.created") {
-    requireFields(event, ["artifact_id", "task_id", "order_id", "buyer_id", "tenant_id", "creator_id", "product_id", "agent_id", "artifact_digest"]);
+    requireFields(event, ["artifact_id", "task_id", "order_id", "buyer_id", "creator_id", "product_id", "agent_id", "artifact_digest"]);
     const task = requirePrior(events, "task.started", "task_id", event.task_id);
-    requireIdentityMatch(task, event, ["order_id", "buyer_id", "tenant_id", "creator_id", "product_id", "agent_id"]);
+    requireIdentityMatch(task, event, ["order_id", "buyer_id", "creator_id", "product_id", "agent_id"]);
   }
   if (event.event_type === "delivery.completed") {
-    requireFields(event, ["delivery_id", "artifact_id", "task_id", "order_id", "buyer_id", "tenant_id", "creator_id", "product_id", "agent_id"]);
+    requireFields(event, ["delivery_id", "artifact_id", "task_id", "order_id", "buyer_id", "creator_id", "product_id", "agent_id"]);
     const artifact = requirePrior(events, "artifact.created", "artifact_id", event.artifact_id);
-    requireIdentityMatch(artifact, event, ["task_id", "order_id", "buyer_id", "tenant_id", "creator_id", "product_id", "agent_id"]);
+    requireIdentityMatch(artifact, event, ["task_id", "order_id", "buyer_id", "creator_id", "product_id", "agent_id"]);
     if (events.some((item) => item.event_type === "delivery.completed" && item.task_id === event.task_id)) {
       throw new CommerceInvariantError("task_already_delivered", `Task ${event.task_id} already has a Delivery`);
     }
   }
   if (event.event_type === "revenue.recognized") {
-    requireFields(event, ["recognition_id", "delivery_id", "order_id", "tenant_id", "creator_id", "product_id", "agent_id", "currency"]);
+    requireFields(event, ["recognition_id", "delivery_id", "order_id", "creator_id", "product_id", "agent_id", "currency"]);
     const delivery = requirePrior(events, "delivery.completed", "delivery_id", event.delivery_id);
-    requireIdentityMatch(delivery, event, ["order_id", "tenant_id", "creator_id", "product_id", "agent_id"]);
+    requireIdentityMatch(delivery, event, ["order_id", "creator_id", "product_id", "agent_id"]);
     requirePositiveInteger(event.gross_minor, "gross_minor");
     requireNonNegativeInteger(event.creator_share_minor, "creator_share_minor");
     requireNonNegativeInteger(event.hatch_share_minor, "hatch_share_minor");

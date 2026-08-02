@@ -12,6 +12,14 @@ class AgentCorpusPublishRequest(BaseModel):
     corpus_path: str = Field(min_length=1)
 
 
+class AgentProduct(BaseModel):
+    """Commercial presentation belongs to the product layer, not the Corpus."""
+
+    id: str
+    name: str
+    description: str | None = None
+
+
 class PublishedAgentCorpus(BaseModel):
     """The public record for the one current Corpus of an Agent.
 
@@ -20,10 +28,9 @@ class PublishedAgentCorpus(BaseModel):
     digest is the identity a Runtime can use to audit what it materialized.
     """
 
-    tenant_id: str
     agent_id: str
     creator_id: str
-    product_id: str
+    product: AgentProduct
     corpus_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     rag: "AgentRagBinding"
     status: Literal["published"]
@@ -65,7 +72,7 @@ class AgentToolBindingUpsertRequest(BaseModel):
 
 class ResolvedToolConnection(BaseModel):
     id: str
-    tenant_id: str
+    creator_id: str
     kind: Literal["http", "mcp"]
     secret_ref: str | None
     config: dict[str, Any]

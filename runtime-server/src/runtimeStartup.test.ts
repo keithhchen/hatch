@@ -20,7 +20,6 @@ test("normal Runtime startup attaches a durable commerce ledger when configured"
   const common = {
     order_id: "order_desktop_jordan",
     buyer_id: "buyer_jordan_lee",
-    tenant_id: "tenant_hatch",
     creator_id: "creator_maya_chen",
     product_id: "signal-resume-review",
     agent_id: "signal-resume-reviewer"

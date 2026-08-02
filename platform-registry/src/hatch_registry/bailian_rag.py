@@ -49,7 +49,7 @@ class BailianRagConfiguration:
 
 
 class BailianKnowledgeProvider:
-    """One current Bailian index binding per `tenant_id/agent_id` namespace."""
+    """One current Bailian index binding per `creator_id/agent_id` namespace."""
 
     def __init__(self, *, api: BailianKnowledgeApi, state_path: Path) -> None:
         self._api = api
@@ -93,7 +93,7 @@ class BailianKnowledgeProvider:
         with self._lock:
             state = self._load_state()
             state[binding.namespace] = {
-                "tenant_id": binding.tenant_id,
+                "creator_id": binding.creator_id,
                 "agent_id": binding.agent_id,
                 "corpus_digest": binding.corpus_digest,
                 "index_id": index_id,
@@ -111,7 +111,7 @@ class BailianKnowledgeProvider:
             record = self._load_state().get(binding.namespace)
         if not isinstance(record, dict):
             raise KnowledgeSearchUnavailable(f"No current Bailian RAG binding for {binding.namespace}")
-        if record.get("tenant_id") != binding.tenant_id or record.get("agent_id") != binding.agent_id:
+        if record.get("creator_id") != binding.creator_id or record.get("agent_id") != binding.agent_id:
             raise KnowledgeSearchUnavailable(f"Invalid Bailian RAG scope for {binding.namespace}")
         if record.get("corpus_digest") != binding.corpus_digest:
             raise KnowledgeSearchUnavailable(f"Stale Bailian RAG binding for {binding.namespace}")

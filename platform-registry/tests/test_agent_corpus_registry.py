@@ -43,7 +43,6 @@ def asset(root: Path, identifier: str, relative_path: str, **extra: object) -> d
 def write_corpus(
     root: Path,
     *,
-    tenant_id: str = "tenant-maya",
     with_creator_http_tool: bool = False,
     with_creator_mcp_tool: bool = False,
     include_skill: bool = True,
@@ -60,10 +59,11 @@ def write_corpus(
         "cases": [{"input": "A fresh CV", "expected": "A bounded review."}],
     }), encoding="utf-8")
 
-    tools: list[dict[str, object]] = [{
-        "id": "hatch.web_search", "kind": "hatch_builtin", "capability": "web_search",
-    }]
-    allowed_tool_ids = ["hatch.web_search"]
+    tools: list[dict[str, object]] = [
+        {"id": "hatch.web_search", "kind": "hatch_builtin", "capability": "web_search"},
+        {"id": "hatch.file_search", "kind": "hatch_builtin", "capability": "file_search"},
+    ]
+    allowed_tool_ids = ["hatch.web_search", "hatch.file_search"]
     if with_creator_http_tool:
         tools.append({
             "id": "creator.market_data", "kind": "http_function", "connection_ref": "market-api",
@@ -98,14 +98,10 @@ def write_corpus(
 
     agent = {
         "contract_version": "1",
-        "tenant_id": tenant_id,
         "agent_id": "resume-review",
         "creator": {"id": "maya", "name": "Maya"},
         "product": {
             "id": "resume-review", "name": "Resume Review", "description": "Review a resume.",
-            "promise": "Return an improved resume.", "inputs": ["A resume."],
-            "outputs": ["An improved resume."], "boundaries": ["No job guarantee."],
-            "offer": {"model": "per_delivery", "unit": "one resume", "amount_minor": 1000, "currency": "USD"},
         },
         "instructions": {"system": asset(root, "system", "instructions/system.md")},
         "skills": skills,
@@ -164,8 +160,11 @@ def configured_app(tmp_path: Path, *, knowledge_search: CapturingKnowledgeSearch
     ), resolver
 
 
-def headers(tenant_id: str = "tenant-maya") -> dict[str, str]:
-    return {"authorization": f"Bearer {TOKEN}", "x-hatch-tenant-id": tenant_id}
+def headers(creator_id: str | None = None) -> dict[str, str]:
+    values = {"authorization": f"Bearer {TOKEN}"}
+    if creator_id:
+        values["x-hatch-creator-id"] = creator_id
+    return values
 
 
 def test_registry_promotes_exact_current_corpus_and_exposes_rag_namespace(tmp_path: Path) -> None:
@@ -179,12 +178,13 @@ def test_registry_promotes_exact_current_corpus_and_exposes_rag_namespace(tmp_pa
     published = response.json()
     assert published["agent_id"] == "resume-review"
     assert "artifact_path" not in published
-    assert published["rag"] == {"backend": "bailian", "namespace": "tenant-maya/resume-review"}
-    resolved = resolver.resolve("tenant-maya", "resume-review")
+    assert published["rag"] == {"backend": "bailian", "namespace": "maya/resume-review"}
+    assert published["product"] == {"id": "resume-review", "name": "Resume Review", "description": "Review a resume."}
+    resolved = resolver.resolve("maya", "resume-review")
     assert resolved.corpus_digest == published["corpus_digest"]
-    assert not (tmp_path / "registry-corpora/tenant-maya/resume-review/knowledge/index.json").exists()
+    assert not (tmp_path / "registry-corpora/maya/resume-review/knowledge/index.json").exists()
     restarted, _ = configured_app(tmp_path)
-    listed = request(restarted, "GET", "/v1/tenants/tenant-maya/agent-corpora")
+    listed = request(restarted, "GET", "/v1/creators/maya/agent-corpora")
     assert listed.status_code == 200
     assert listed.json()[0]["corpus_digest"] == published["corpus_digest"]
 
@@ -199,7 +199,7 @@ def test_runtime_knowledge_endpoint_uses_only_current_agent_scoped_binding(tmp_p
     response = request(
         app,
         "POST",
-        "/v1/runtime/tenants/tenant-maya/agents/resume-review/knowledge/search",
+        "/v1/runtime/creators/maya/agents/resume-review/knowledge/search",
         json={"query": "Which achievement should remain?", "max_num_results": 3},
         headers=headers(),
     )
@@ -207,23 +207,23 @@ def test_runtime_knowledge_endpoint_uses_only_current_agent_scoped_binding(tmp_p
     assert response.status_code == 200
     assert response.json() == {"data": [{
         "text": "Evidence for: Which achievement should remain?",
-        "metadata": {"namespace": "tenant-maya/resume-review", "limit": 3},
+        "metadata": {"namespace": "maya/resume-review", "limit": 3},
         "score": 0.92,
     }]}
     assert len(provider.bindings) == 1
     binding = provider.bindings[0]
-    assert binding.tenant_id == "tenant-maya"
+    assert binding.creator_id == "maya"
     assert binding.agent_id == "resume-review"
     assert binding.backend == "bailian"
-    assert binding.namespace == "tenant-maya/resume-review"
-    cross_tenant = request(
+    assert binding.namespace == "maya/resume-review"
+    other_creator = request(
         app,
         "POST",
-        "/v1/runtime/tenants/tenant-other/agents/resume-review/knowledge/search",
+        "/v1/runtime/creators/other/agents/resume-review/knowledge/search",
         json={"query": "blocked"},
         headers=headers(),
     )
-    assert cross_tenant.status_code == 403
+    assert other_creator.status_code == 404
 
 
 def test_runtime_knowledge_endpoint_fails_closed_without_managed_rag(tmp_path: Path) -> None:
@@ -246,7 +246,7 @@ def test_runtime_knowledge_endpoint_fails_closed_without_managed_rag(tmp_path: P
     response = request(
         app,
         "POST",
-        "/v1/runtime/tenants/tenant-maya/agents/resume-review/knowledge/search",
+        "/v1/runtime/creators/maya/agents/resume-review/knowledge/search",
         json={"query": "a relevant fact"},
         headers=headers(),
     )
@@ -261,7 +261,7 @@ def test_bailian_provider_persists_only_private_agent_scoped_index_binding(tmp_p
         tmp_path / "registry-corpora",
         repo_root / "packages/protocol/schemas/creator-agent.schema.json",
     )
-    verified = resolver.verify(source, "tenant-maya")
+    verified = resolver.verify(source)
     binding = AgentKnowledgeBindingStore(backend="bailian").bind(verified)
 
     class FakeBailianApi:
@@ -270,7 +270,7 @@ def test_bailian_provider_persists_only_private_agent_scoped_index_binding(tmp_p
             self.queries: list[tuple[str, str, int]] = []
 
         def create_index(self, *, namespace: str, documents: list[Path]) -> str:
-            assert namespace == "tenant-maya/resume-review"
+            assert namespace == "maya/resume-review"
             self.documents = documents
             return "private-index-id"
 
@@ -291,7 +291,7 @@ def test_bailian_provider_persists_only_private_agent_scoped_index_binding(tmp_p
     assert "private-index-id" not in (source / "agent.json").read_text(encoding="utf-8")
 
 
-def test_registry_replaces_current_corpus_for_same_tenant_agent(tmp_path: Path) -> None:
+def test_registry_replaces_current_corpus_for_same_creator_agent(tmp_path: Path) -> None:
     source = tmp_path / "factory-output/agent-corpus"
     write_corpus(source)
     app, resolver = configured_app(tmp_path)
@@ -306,17 +306,13 @@ def test_registry_replaces_current_corpus_for_same_tenant_agent(tmp_path: Path) 
     second = request(app, "POST", "/v1/agent-corpora", json={"corpus_path": str(source)}, headers=headers())
     assert second.status_code == 201
     assert second.json()["corpus_digest"] != first.json()["corpus_digest"]
-    assert resolver.resolve("tenant-maya", "resume-review").corpus_digest == second.json()["corpus_digest"]
+    assert resolver.resolve("maya", "resume-review").corpus_digest == second.json()["corpus_digest"]
 
 
-def test_registry_rejects_wrong_tenant_bad_hash_and_non_corpus_files(tmp_path: Path) -> None:
+def test_registry_rejects_bad_hash_and_non_corpus_files(tmp_path: Path) -> None:
     source = tmp_path / "factory-output/agent-corpus"
-    write_corpus(source, tenant_id="tenant-other")
-    app, _ = configured_app(tmp_path)
-    wrong_tenant = request(app, "POST", "/v1/agent-corpora", json={"corpus_path": str(source)}, headers=headers())
-    assert wrong_tenant.status_code == 422
-
     write_corpus(source)
+    app, _ = configured_app(tmp_path)
     (source / "private-factory-trace.md").write_text("must never publish", encoding="utf-8")
     trace = request(app, "POST", "/v1/agent-corpora", json={"corpus_path": str(source)}, headers=headers())
     assert trace.status_code == 422
@@ -336,6 +332,24 @@ def test_registry_allows_zero_skills(tmp_path: Path) -> None:
     assert response.status_code == 201
 
 
+def test_registry_rejects_runtime_scope_and_missing_file_search_from_corpus(tmp_path: Path) -> None:
+    source = tmp_path / "factory-output/agent-corpus"
+    write_corpus(source)
+    app, _ = configured_app(tmp_path)
+    agent = json.loads((source / "agent.json").read_text(encoding="utf-8"))
+
+    agent["tenant_id"] = "must-not-live-in-corpus"
+    (source / "agent.json").write_text(json.dumps(agent), encoding="utf-8")
+    scoped = request(app, "POST", "/v1/agent-corpora", json={"corpus_path": str(source)}, headers=headers())
+    assert scoped.status_code == 422
+
+    agent.pop("tenant_id")
+    agent["tools"] = [tool for tool in agent["tools"] if tool["id"] != "hatch.file_search"]
+    (source / "agent.json").write_text(json.dumps(agent), encoding="utf-8")
+    missing_file_search = request(app, "POST", "/v1/agent-corpora", json={"corpus_path": str(source)}, headers=headers())
+    assert missing_file_search.status_code == 422
+
+
 def test_control_plane_binds_declared_http_and_mcp_tools_without_credential_in_corpus(tmp_path: Path) -> None:
     source = tmp_path / "factory-output/agent-corpus"
     write_corpus(source, with_creator_http_tool=True, with_creator_mcp_tool=True)
@@ -345,18 +359,18 @@ def test_control_plane_binds_declared_http_and_mcp_tools_without_credential_in_c
     http_connection = request(app, "PUT", "/v1/control-plane/connections/market-api", json={
         "kind": "http", "secret_ref": "env:HATCH_MARKET_API_TOKEN",
         "config": {"url": "https://market.example.test/v1/snapshot"},
-    }, headers=headers())
+    }, headers=headers("maya"))
     assert http_connection.status_code == 200
     mcp_connection = request(app, "PUT", "/v1/control-plane/connections/creator-crm", json={
         "kind": "mcp", "secret_ref": "vault:creator-crm",
         "config": {"url": "https://crm.example.test/mcp"},
-    }, headers=headers())
+    }, headers=headers("maya"))
     assert mcp_connection.status_code == 200
-    assert request(app, "PUT", "/v1/tenants/tenant-maya/agents/resume-review/tools/creator.market_data", json={"connection_id": "market-api"}, headers=headers()).status_code == 204
-    assert request(app, "PUT", "/v1/tenants/tenant-maya/agents/resume-review/tools/creator.crm_lookup", json={"connection_id": "creator-crm"}, headers=headers()).status_code == 204
-    resolved = request(app, "GET", "/v1/runtime/tenants/tenant-maya/agents/resume-review/tools/creator.crm_lookup", headers=headers())
+    assert request(app, "PUT", "/v1/creators/maya/agents/resume-review/tools/creator.market_data", json={"connection_id": "market-api"}, headers=headers("maya")).status_code == 204
+    assert request(app, "PUT", "/v1/creators/maya/agents/resume-review/tools/creator.crm_lookup", json={"connection_id": "creator-crm"}, headers=headers("maya")).status_code == 204
+    resolved = request(app, "GET", "/v1/runtime/creators/maya/agents/resume-review/tools/creator.crm_lookup", headers=headers("maya"))
     assert resolved.status_code == 200
     assert resolved.json()["kind"] == "mcp"
     assert "HATCH_MARKET_API_TOKEN" not in resolved.text
-    mismatch = request(app, "PUT", "/v1/tenants/tenant-maya/agents/resume-review/tools/creator.market_data", json={"connection_id": "creator-crm"}, headers=headers())
+    mismatch = request(app, "PUT", "/v1/creators/maya/agents/resume-review/tools/creator.market_data", json={"connection_id": "creator-crm"}, headers=headers("maya"))
     assert mismatch.status_code == 422

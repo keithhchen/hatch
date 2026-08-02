@@ -14,7 +14,7 @@ from hatch_registry.models import AgentCorpusPublishRequest, AgentRagBinding, Pu
 
 
 class RegistryStore:
-    """The Registry owns one current, runnable Agent Corpus per tenant+agent."""
+    """The Registry owns one current, runnable Agent Corpus per Creator+Agent."""
 
     def __init__(
         self,
@@ -33,8 +33,6 @@ class RegistryStore:
     def publish_agent_corpus(
         self,
         request: AgentCorpusPublishRequest,
-        *,
-        tenant_id: str,
     ) -> PublishedAgentCorpus:
         if self._corpus_resolver is None:
             raise ValueError("Agent Corpus resolver is not configured")
@@ -43,18 +41,17 @@ class RegistryStore:
         # Verify and index the clean source before switching the one current
         # Registry pointer. A failed upload therefore never replaces a working
         # Agent with a Corpus whose RAG space is missing or stale.
-        source = self._corpus_resolver.verify(Path(request.corpus_path), tenant_id)
+        source = self._corpus_resolver.verify(Path(request.corpus_path))
         rag_binding = self._knowledge_binding_store.bind(source)
         if self._knowledge_provider is None:
             raise ValueError("Agent knowledge provider is not configured")
         self._knowledge_provider.publish(binding=rag_binding, corpus=source)
-        verified = self._corpus_resolver.publish(Path(request.corpus_path), tenant_id)
-        key = f"{verified.tenant_id}:{verified.agent_id}"
+        verified = self._corpus_resolver.publish(Path(request.corpus_path))
+        key = f"{verified.creator_id}:{verified.agent_id}"
         published = PublishedAgentCorpus(
-            tenant_id=verified.tenant_id,
             agent_id=verified.agent_id,
             creator_id=verified.creator_id,
-            product_id=verified.product_id,
+            product=verified.product,
             corpus_digest=verified.corpus_digest,
             rag=AgentRagBinding(
                 backend=rag_binding.backend,
@@ -69,12 +66,12 @@ class RegistryStore:
             self._agent_corpora = next_corpora
         return published
 
-    def get_agent_corpus(self, tenant_id: str, agent_id: str) -> PublishedAgentCorpus | None:
-        return self._agent_corpora.get(f"{tenant_id}:{agent_id}")
+    def get_agent_corpus(self, creator_id: str, agent_id: str) -> PublishedAgentCorpus | None:
+        return self._agent_corpora.get(f"{creator_id}:{agent_id}")
 
-    def list_agent_corpora(self, tenant_id: str) -> list[PublishedAgentCorpus]:
+    def list_agent_corpora(self, creator_id: str) -> list[PublishedAgentCorpus]:
         return sorted(
-            (corpus for corpus in self._agent_corpora.values() if corpus.tenant_id == tenant_id),
+            (corpus for corpus in self._agent_corpora.values() if corpus.creator_id == creator_id),
             key=lambda corpus: corpus.published_at,
             reverse=True,
         )
@@ -82,7 +79,7 @@ class RegistryStore:
     def validate_agent_tool_binding(
         self,
         *,
-        tenant_id: str,
+        creator_id: str,
         agent_id: str,
         tool_id: str,
         connection_ref: str,
@@ -90,7 +87,7 @@ class RegistryStore:
     ) -> None:
         if self._corpus_resolver is None:
             raise ValueError("Agent Corpus resolver is not configured")
-        corpus = self._corpus_resolver.resolve(tenant_id, agent_id)
+        corpus = self._corpus_resolver.resolve(creator_id, agent_id)
         tools = corpus.agent.get("tools")
         if not isinstance(tools, list):
             raise ValueError("Agent Corpus has invalid tool declarations")
@@ -113,7 +110,7 @@ class RegistryStore:
             payload = json.loads(self._state_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise ValueError(f"cannot load Registry state from {self._state_path}: {exc}") from exc
-        if not isinstance(payload, dict) or payload.get("schema_version") != 2:
+        if not isinstance(payload, dict) or payload.get("schema_version") != 3:
             raise ValueError(f"unsupported Agent Corpus state in {self._state_path}")
         serialized = payload.get("agent_corpora")
         if not isinstance(serialized, list):
@@ -121,7 +118,7 @@ class RegistryStore:
         records: dict[str, PublishedAgentCorpus] = {}
         for item in serialized:
             corpus = PublishedAgentCorpus.model_validate(item)
-            key = f"{corpus.tenant_id}:{corpus.agent_id}"
+            key = f"{corpus.creator_id}:{corpus.agent_id}"
             if key in records:
                 raise ValueError(f"Agent Corpus state repeats {key} in {self._state_path}")
             records[key] = corpus
@@ -133,7 +130,7 @@ class RegistryStore:
         state_path = self._state_path
         state_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
-            "schema_version": 2,
+            "schema_version": 3,
             "agent_corpora": [corpus.model_dump(mode="json") for _, corpus in sorted(corpora.items())],
         }
         temporary_path = state_path.with_name(f".{state_path.name}.{uuid.uuid4().hex}.tmp")

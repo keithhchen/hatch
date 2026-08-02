@@ -13,11 +13,11 @@ class AgentKnowledgeBinding:
     A Corpus owns purified ``knowledge/`` documents.  It never owns an index
     id, an embedding model, a provider credential, or chunks.  Those are RAG
     infrastructure concerns.  This binding merely gives the RAG service one
-    isolated namespace per tenant + Agent, which is the only identity Runtime
+    isolated namespace per Creator + Agent, which is the only identity Runtime
     needs for ``hatch.file_search``.
     """
 
-    tenant_id: str
+    creator_id: str
     agent_id: str
     corpus_digest: str
     backend: str
@@ -40,11 +40,11 @@ class AgentKnowledgeBindingStore:
 
     def bind(self, corpus: VerifiedAgentCorpus) -> AgentKnowledgeBinding:
         return AgentKnowledgeBinding(
-            tenant_id=corpus.tenant_id,
+            creator_id=corpus.creator_id,
             agent_id=corpus.agent_id,
             corpus_digest=corpus.corpus_digest,
             backend=self.backend,
-            namespace=f"{corpus.tenant_id}/{corpus.agent_id}",
+            namespace=f"{corpus.creator_id}/{corpus.agent_id}",
         )
 
 
@@ -97,12 +97,12 @@ class UnavailableKnowledgeSearchProvider:
         max_num_results: int,
     ) -> list[KnowledgeSearchResult]:
         raise KnowledgeSearchUnavailable(
-            f"Managed RAG backend is not configured for {binding.tenant_id}/{binding.agent_id}",
+            f"Managed RAG backend is not configured for {binding.creator_id}/{binding.agent_id}",
         )
 
     def publish(self, *, binding: AgentKnowledgeBinding, corpus: VerifiedAgentCorpus) -> None:
         documents = corpus.agent["knowledge"]["documents"]
         if documents:
             raise KnowledgeSearchUnavailable(
-                f"Managed RAG backend is not configured for {binding.tenant_id}/{binding.agent_id}",
+                f"Managed RAG backend is not configured for {binding.creator_id}/{binding.agent_id}",
             )

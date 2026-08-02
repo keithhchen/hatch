@@ -16,9 +16,9 @@ export function creatorAgentFromSession(message) {
     creator: creatorAgent.creator.name,
     creatorInitials: initials(creatorAgent.creator.name),
     name: creatorAgent.product.name,
-    description: creatorAgent.product.description || creatorAgent.product.promise,
-    boundary: creatorAgent.product.boundaries?.[0] || "",
-    offer: creatorAgent.product.offer,
+    // Buyer chat only needs display copy. Promise, offer and operating
+    // boundaries guide Runtime/commerce and are not a UI dependency.
+    description: creatorAgent.product.description || DEFAULT_CREATOR_AGENT.description,
     presentation: creatorAgent.presentation || {}
   });
 }

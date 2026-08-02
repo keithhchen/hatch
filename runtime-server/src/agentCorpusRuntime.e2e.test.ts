@@ -8,7 +8,7 @@ import { AgentCorpusResolver } from "./agentCorpus.js";
 import { DeterministicAgentRuntime } from "./agentRuntime.js";
 import { FileEntitlementResolver } from "./entitlements.js";
 import { createRuntimeServer, type RuntimeServer } from "./index.js";
-import { runLocalHarness } from "./localHarness.js";
+import { LocalHarnessSession } from "./localHarness.js";
 
 const temporaryDirectories: string[] = [];
 const servers: RuntimeServer[] = [];
@@ -51,7 +51,6 @@ test("an entitlement resolves a layered Corpus without loading evals or knowledg
   await writeFile(path.join(agentDirectory, "evals", "held-out.json"), heldOut, "utf8");
   await writeFile(path.join(agentDirectory, "agent.json"), JSON.stringify({
     contract_version: "1",
-    tenant_id: "tenant-maya",
     agent_id: "signal-resume-reviewer",
     creator: { id: "maya-chen", name: "Maya Chen" },
     product: {
@@ -68,6 +67,7 @@ test("an entitlement resolves a layered Corpus without loading evals or knowledg
     knowledge: { documents: [{ id: "method", path: "knowledge/method.md", sha256: digestText(knowledge), retrieval_only: true, source_summary: "Maya's evidence-first resume method." }] },
     tools: [
       { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" },
+      { id: "hatch.file_search", kind: "hatch_builtin", capability: "file_search" },
       { id: "hatch.local.files", kind: "local_harness", capability: "filesystem" }
     ],
     evaluations: {
@@ -97,13 +97,26 @@ test("an entitlement resolves a layered Corpus without loading evals or knowledg
   servers.push(server);
   await new Promise<void>((resolve) => server.server.listen(0, "127.0.0.1", resolve));
   const port = (server.server.address() as { port: number }).port;
-  const result = await runLocalHarness({
-    serverUrl: `ws://127.0.0.1:${port}/runtime`, workspace, prompt: "List the files in my workspace before reviewing the resume.",
+  const session = new LocalHarnessSession({
+    serverUrl: `ws://127.0.0.1:${port}/runtime`, workspace,
     entitlementId: "entitlement-1", licenseToken: "buyer-token", localTools: ["fs.list", "fs.read"]
   });
+  try {
+    await session.connect();
+    // Current Corpus → Desktop exposes only display identity. The full product
+    // contract remains server-side runtime context, not a buyer UI requirement.
+    assert.deepEqual(session.getSessionReady()?.creator_agent, {
+      creator: { id: "maya-chen", name: "Maya Chen" },
+      product: { id: "signal-resume-review", name: "Signal Resume Review", description: "Evidence-led resume review." },
+      presentation: {}
+    });
 
-  assert.ok(result.events.some((event) => event.type === "tool_call.request" && event.name === "fs.list"));
-  assert.ok(result.events.some((event) => event.type === "assistant.delta"));
+    const result = await session.run("List the files in my workspace before reviewing the resume.");
+    assert.ok(result.events.some((event) => event.type === "tool_call.request" && event.name === "fs.list"));
+    assert.ok(result.events.some((event) => event.type === "assistant.delta"));
+  } finally {
+    session.close();
+  }
 });
 
 function asset(id: string, filePath: string, content: string): { id: string; path: string; sha256: string } {

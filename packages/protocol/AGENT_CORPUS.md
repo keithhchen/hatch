@@ -51,9 +51,9 @@ agent-corpus/
 
 | 区块 | 作用 |
 |---|---|
-| `contract_version`, `tenant_id`, `agent_id` | Corpus 身份；无 release/version |
+| `contract_version`, `creator.id`, `agent_id` | Corpus 身份；无 release/version。`tenant_id` 只属于 Registry 的发布与授权 scope，绝不写入 Corpus。 |
 | `creator` | Creator 的 `id` 与显示名 |
-| `product` | `promise`、inputs、outputs、boundaries、offer；不保证外部现实结果 |
+| `product` | 最小 required 是 `id`、`name`；`description`、`promise`、inputs、outputs、boundaries、offer 按产品需要声明，且不保证外部现实结果 |
 | `instructions.system` | 固定为 `instructions/system.md`，每次运行加载 |
 | `skills` | 可省略或 `[]`；每项有 local instruction、可选 references、和 scoped `allowed_tool_ids` |
 | `knowledge.documents` | 每个 Agent 都有独立 namespace；可为 `[]`，每项必须是 `knowledge/*.md` 且 `retrieval_only: true` |
@@ -64,7 +64,7 @@ agent-corpus/
 
 ## 工具与认证
 
-`hatch.web_search` 是每个 Corpus 都必须声明的 Hatch built-in。`hatch.local.*` 只声明产品确实需要的 Desktop capability，Desktop 决定当前用户是否提供。
+`hatch.web_search` 与 `hatch.file_search` 是每个 Corpus 都必须声明的 Hatch built-in。后者由 Registry 为每个 `creator.id + agent_id` 提供隔离的 retrieval namespace，即使 `knowledge.documents` 为空也保持一致。`hatch.local.*` 只声明产品确实需要的 Desktop capability，Desktop 决定当前用户是否提供。
 
 Creator HTTP/MCP 工具分别使用 `kind: "http_function"` 或 `kind: "mcp_tool"`，只声明 `creator.*` 的 id、`connection_ref`、允许的 operation/tool name 和 input schema。没有 URL、API key、OAuth token 或 MCP bearer token。
 
@@ -72,7 +72,7 @@ Tool Control Plane 保存 connection metadata、Agent-to-connection binding 与 
 
 ## RAG
 
-Registry 在发布时只把 `knowledge.documents` 上传到该 `tenant_id + agent_id` 的知识空间，并保存 binding。Runtime 将当前 binding 暴露为 Hatch-owned `hatch.file_search`。Corpus 因此不包含 `vector_store_id`、chunk 策略、embedding provider 或检索参数；不同 Agent/tenant 不共享检索空间。
+Registry 在发布时只把 `knowledge.documents` 上传到该 `creator.id + agent_id` 的知识空间，并保存 binding；tenant 仅用于 Registry 授权与 storage scope。Runtime 将当前 binding 暴露为 Hatch-owned `hatch.file_search`。Corpus 因此不包含 `vector_store_id`、chunk 策略、embedding provider 或检索参数；不同 Creator Agent 不共享检索空间。
 
 ## Runtime 的职责
 

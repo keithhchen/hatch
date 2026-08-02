@@ -68,7 +68,7 @@ generic good practice is this Creator's method.
 Separate Factory ingestion, Hatch built-ins, Consumer-local capabilities,
 Creator integrations, and Creator knowledge.
 
-- `hatch.web_search` is always declared as a Hatch built-in.
+- `hatch.web_search` and `hatch.file_search` are always declared as Hatch built-ins.
 - Use `hatch.local.files` only if the product needs actual Consumer workspace
   files or must save an artifact. Put that tool in the active local Skill's
   `allowed_tool_ids` when a Skill invokes it; a no-Skill Agent declares it only

@@ -7,7 +7,6 @@
   "additionalProperties": false,
   "required": [
     "contract_version",
-    "tenant_id",
     "agent_id",
     "creator",
     "product",
@@ -18,7 +17,6 @@
   ],
   "properties": {
     "contract_version": { "const": "1" },
-    "tenant_id": { "$ref": "#/$defs/identifier" },
     "agent_id": { "$ref": "#/$defs/identifier" },
     "creator": {
       "type": "object",
@@ -32,7 +30,7 @@
     "product": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "name", "promise", "inputs", "outputs", "boundaries", "offer"],
+      "required": ["id", "name"],
       "properties": {
         "id": { "$ref": "#/$defs/identifier" },
         "name": { "type": "string", "minLength": 1 },
@@ -72,14 +70,25 @@
     },
     "tools": {
       "type": "array",
-      "minItems": 1,
-      "contains": {
-        "type": "object",
-        "properties": { "id": { "const": "hatch.web_search" } },
-        "required": ["id"]
-      },
+      "minItems": 2,
+      "allOf": [
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "id": { "const": "hatch.web_search" } },
+            "required": ["id"]
+          }
+        },
+        {
+          "contains": {
+            "type": "object",
+            "properties": { "id": { "const": "hatch.file_search" } },
+            "required": ["id"]
+          }
+        }
+      ],
       "items": { "$ref": "#/$defs/tool" },
-      "description": "Declarative capabilities only. No endpoint, provider credential, or secret belongs in a Corpus. hatch.web_search is always required."
+      "description": "Declarative capabilities only. No endpoint, provider credential, or secret belongs in a Corpus. Hatch-owned web and file search are always required."
     },
     "evaluations": {
       "type": "object",
@@ -218,6 +227,7 @@
     "tool": {
       "oneOf": [
         { "$ref": "#/$defs/hatchWebSearch" },
+        { "$ref": "#/$defs/hatchFileSearch" },
         { "$ref": "#/$defs/hatchLocalTool" },
         { "$ref": "#/$defs/creatorHttpTool" },
         { "$ref": "#/$defs/creatorMcpTool" }
@@ -231,6 +241,17 @@
         "id": { "const": "hatch.web_search" },
         "kind": { "const": "hatch_builtin" },
         "capability": { "const": "web_search" },
+        "description": { "type": "string", "minLength": 1 }
+      }
+    },
+    "hatchFileSearch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "capability"],
+      "properties": {
+        "id": { "const": "hatch.file_search" },
+        "kind": { "const": "hatch_builtin" },
+        "capability": { "const": "file_search" },
         "description": { "type": "string", "minLength": 1 }
       }
     },

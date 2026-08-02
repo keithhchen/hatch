@@ -106,7 +106,7 @@ async function main(): Promise<void> {
   // Kimi performs all semantic distillation. This deterministic gate only
   // rejects malformed or incomplete publishable packages before Registry ever
   // sees them; it does not infer, rewrite, or score Creator knowledge.
-  await validateAgentCorpusPackage(corpusDirectory, args.tenantId!);
+  await validateAgentCorpusPackage(corpusDirectory);
   const identity = await readCorpusIdentity(corpusDirectory);
   // Publishing is intentionally mechanical. The Factory Skill has already
   // made every semantic decision and written the Corpus; Registry verifies,
@@ -179,7 +179,7 @@ async function runFactorySkill(
     "You are the single Kimi executor of Hatch's Creator Factory Skill.",
     "The Creator has supplied only ordinary source material and a natural-language product intent. Do every semantic task in the Skill yourself: distill, purify, identify necessary data/tool needs, and generate grounded synthetic QA plus held-outs. Never ask the Creator for JSON, prompts, schemas, Skills, RAG chunks, or Eval formats.",
     "Execute the Skill as an agent. Inspect the Creator material with the supplied tools, then write the finished Agent Corpus one file at a time with the supplied corpus-writing tools. Do not return a large JSON envelope or put corpus assets in chat text. Your semantic work belongs in the real Corpus files you write.",
-    "Do not write source evidence, a Factory trace, reasoning, an intermediate plan, raw course material, release/version, model/provider, deployment data, credential, URL, approval policy, or vector-store ID into the Corpus. `agent.json` must conform to the supplied JSON Schema. Files must contain every referenced system instruction, optional SKILL.md / local references, clean retrieval-only knowledge document, and eval dataset. Use the supplied tenant_id exactly. hatch.web_search is required. Creator HTTP/MCP tools can contain only connection_ref and allowed function/tool declarations; never credentials or URLs.",
+    "Do not write source evidence, a Factory trace, reasoning, an intermediate plan, raw course material, release/version, model/provider, deployment data, credential, URL, approval policy, tenant_id, or vector-store ID into the Corpus. `agent.json` must conform to the supplied JSON Schema. Files must contain every referenced system instruction, optional SKILL.md / local references, clean retrieval-only knowledge document, and eval dataset. Both hatch.web_search and hatch.file_search are required Hatch-built-ins. The supplied tenant_id is Registry publication scope only, never Corpus content. Creator HTTP/MCP tools can contain only connection_ref and allowed function/tool declarations; never credentials or URLs.",
     "Use `factory_list_source_material` before reading sources. Use `factory_read_source` for the material you need. Use `factory_write_text_asset` for Markdown/text and `factory_write_json_asset` for agent.json and JSON assets. Write `agent.json` only after every referenced asset exists. `factory_list_written_corpus_assets` returns the exact sha256 digest required for each manifest asset; call it immediately before writing agent.json. When complete, call it once more, correct any missing files, then reply with a short plain-language completion sentence.",
     "<creator_factory_skill>\n" + input.skill + "\n</creator_factory_skill>",
     "<distillation_workflow>\n" + input.workflow + "\n</distillation_workflow>",
@@ -188,7 +188,7 @@ async function runFactorySkill(
   ].join("\n\n");
   const user = [
     "Execute the Factory Skill now.",
-    `Hatch-owned tenant_id: ${input.tenantId}`,
+    `Registry publication scope (do not write into agent.json): ${input.tenantId}`,
     "<creator_intent>", input.intent, "</creator_intent>",
   ].join("\n");
   const messages: any[] = [{ role: "system", content: system }, { role: "user", content: user }];
@@ -430,10 +430,6 @@ async function readCorpusIdentity(corpusDirectory: string): Promise<Record<strin
   const creator = isRecord(corpus.creator) ? corpus.creator : undefined;
   const product = isRecord(corpus.product) ? corpus.product : undefined;
   return {
-    // Agent Corpus v1 deliberately uses root identity fields. Reading the old
-    // Release-shaped `agent.{id,tenant_id}` here made a valid Corpus fail only
-    // after Kimi had completed the expensive semantic Factory work.
-    tenant_id: requireString(corpus.tenant_id, "tenant_id"),
     agent_id: requireString(corpus.agent_id, "agent_id"),
     creator_id: requireString(creator?.id, "creator.id"),
     product_id: requireString(product?.id, "product.id"),

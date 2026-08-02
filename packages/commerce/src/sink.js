@@ -33,7 +33,6 @@ export class LedgerCommerceSink {
       recognition_id: recognitionId,
       delivery_id: delivery.delivery_id,
       order_id: delivery.order_id,
-      tenant_id: delivery.tenant_id,
       creator_id: delivery.creator_id,
       product_id: delivery.product_id,
       agent_id: delivery.agent_id,

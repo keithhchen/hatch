@@ -97,7 +97,9 @@ Separate Factory-only ingestion from published Agent capabilities. Do not
 publish extraction, ordinary conversation, prose generation, or hypothetical
 integrations as tools.
 
-`hatch.web_search` is always a Hatch-built-in tool. Declare local filesystem
+`hatch.web_search` and `hatch.file_search` are always Hatch-built-in tools.
+They do not need a Creator credential: Registry owns the isolated retrieval
+namespace behind file search. Declare local filesystem
 capability only when the bounded product needs the Consumer's actual workspace
 files or must save a usable artifact. For that case declare
 `hatch.local.files` with `kind: "local_harness"` and
