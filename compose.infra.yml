@@ -40,4 +40,5 @@ volumes:
 
 networks:
   hatch_internal:
+    external: true
     name: hatch_internal
