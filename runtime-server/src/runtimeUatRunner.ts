@@ -394,7 +394,7 @@ async function copyInput(source: string, destination: string): Promise<string[]>
   const sourceStat = await stat(source);
   if (sourceStat.isDirectory()) {
     await mkdir(destination, { recursive: true });
-    await cp(source, destination, { recursive: true, force: false, errorOnExist: true });
+    await cp(source, destination, { recursive: true, force: false });
     return listRelativeFiles(destination);
   }
   if (!sourceStat.isFile()) throw new Error(`Runtime UAT input must be a file or directory: ${source}`);

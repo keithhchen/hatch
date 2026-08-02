@@ -8,6 +8,7 @@ import type { SkillRuntime } from "./skillRuntime.js";
 import type { ToolBridge, ToolRuntimeScope } from "./toolBridge.js";
 import { RUNTIME_CONTEXT_PREFIX, type RuntimeCompactionMessage } from "./compaction.js";
 import { hasConfiguredMcpServers, ServerToolExecutor } from "./serverTools.js";
+import { creatorModelToolName } from "./creatorTools.js";
 import {
   modelToolSpecsForRun,
   requireClientToolEnabled,
@@ -1312,7 +1313,7 @@ function chatToolsForRun(
     ))
     .map((spec) => tool(spec.name, spec.description, spec.properties, spec.required));
   const creatorTools = externalToolDefinitions.map((definition) => tool(
-    definition.id,
+    creatorModelToolName(definition.id),
     definition.description ?? "Creator-provided server tool.",
     definition.input_schema && typeof definition.input_schema.properties === "object" && definition.input_schema.properties !== null
       ? definition.input_schema.properties as Record<string, unknown>
@@ -1529,7 +1530,7 @@ async function executeChatTool(
     }
     return ctx.skillRuntime.execute(args as { skill_id: string; task: string; context_refs?: string[] });
   }
-  const creatorTool = ctx.externalToolDefinitions?.find((tool) => tool.id === name);
+  const creatorTool = ctx.externalToolDefinitions?.find((tool) => creatorModelToolName(tool.id) === name);
   if (creatorTool) {
     return ctx.serverTools.executeCreatorTool(creatorTool, args);
   }
@@ -1648,13 +1649,13 @@ function toolEventBase(
   ctx?: RunContext
 ): Extract<OutboundMessage, { type: "tool_call.delta" }> {
   const targetPath = typeof args.path === "string" ? args.path : "";
-  const customTool = ctx?.externalToolDefinitions?.find((tool) => tool.id === name);
+  const customTool = ctx?.externalToolDefinitions?.find((tool) => creatorModelToolName(tool.id) === name);
   if (customTool) {
     return {
       type: "tool_call.delta",
       run_id: input.run_id,
       tool_call_id: toolCallId,
-      name,
+      name: creatorModelToolName(customTool.id),
       locality: "server",
       approval: "none",
       arguments: args,

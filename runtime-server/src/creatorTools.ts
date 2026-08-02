@@ -101,6 +101,18 @@ export class EnvironmentSecretResolver implements SecretResolver {
   }
 }
 
+export function creatorToolControlPlaneFromEnvironment(
+  environment: NodeJS.ProcessEnv = process.env
+): RegistryCreatorToolControlPlane | undefined {
+  const registryUrl = environment.HATCH_REGISTRY_URL?.trim();
+  const serviceToken = environment.HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN?.trim();
+  if (!registryUrl && !serviceToken) return undefined;
+  if (!registryUrl || !serviceToken) {
+    throw new Error("HATCH_REGISTRY_URL and HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN must be configured together for Creator tools");
+  }
+  return new RegistryCreatorToolControlPlane({ registryUrl, serviceToken });
+}
+
 /**
  * Internal Registry client. It materializes creator tools server-side only;
  * the Desktop, model prompt, and Agent Corpus never receive connection data.

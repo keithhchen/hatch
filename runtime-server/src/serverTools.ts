@@ -1,5 +1,6 @@
 import { requireTool } from "./tools.js";
 import type { KnowledgeProvider } from "./agentCorpus.js";
+import type { RuntimeCreatorTool } from "./creatorTools.js";
 
 type McpServerConfig = {
   url: string;
@@ -12,23 +13,9 @@ type KnowledgeScope = {
   agentId: string;
 };
 
-type CreatorToolDefinition = {
-  id: string;
-  kind: string;
-  connection_ref?: string;
-  operation?: string;
-  tool_name?: string;
-};
-
-type ToolConnection = {
-  kind?: "http" | "mcp";
-  url: string;
-  headers?: Record<string, string>;
-};
-
 export class ServerToolExecutor {
   private knowledgeScope?: KnowledgeScope;
-  private creatorTools = new Map<string, CreatorToolDefinition>();
+  private resolvedCreatorTools = new Map<string, RuntimeCreatorTool>();
 
   constructor(private readonly timeoutMs = 120000) {}
 
@@ -36,40 +23,14 @@ export class ServerToolExecutor {
     this.knowledgeScope = scope;
   }
 
-  setCreatorTools(tools: CreatorToolDefinition[] = []): void {
-    this.creatorTools = new Map(tools.map((tool) => [tool.id, tool]));
+  setResolvedCreatorTools(tools: RuntimeCreatorTool[] = []): void {
+    this.resolvedCreatorTools = new Map(tools.map((tool) => [tool.id, tool]));
   }
 
-  async executeCreatorTool(tool: CreatorToolDefinition, args: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const declared = this.creatorTools.get(tool.id);
-    if (!declared) throw new Error(`Creator tool is not enabled for this Agent: ${tool.id}`);
-    if (!declared.connection_ref) throw new Error(`Creator tool has no connection_ref: ${tool.id}`);
-    const connection = configuredToolConnections()[declared.connection_ref];
-    if (!connection) throw new Error(`Creator tool connection is not configured: ${declared.connection_ref}`);
-    if (declared.kind === "http_function" && connection.kind !== "mcp") {
-      const response = await fetch(connection.url, {
-        method: "POST",
-        headers: { "content-type": "application/json", accept: "application/json", ...(connection.headers ?? {}) },
-        body: JSON.stringify(args)
-      });
-      const text = await response.text();
-      if (!response.ok) throw new Error(`Creator HTTP tool failed with HTTP ${response.status}: ${text.slice(0, 500)}`);
-      return { tool: tool.id, status: response.status, response: parseJsonIfPossible(text) };
-    }
-    const response = await fetch(connection.url, {
-      method: "POST",
-      headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...(connection.headers ?? {}) },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: `hatch_${Date.now()}`,
-        method: "tools/call",
-        params: { name: declared.tool_name ?? declared.operation ?? tool.id, arguments: args }
-      }),
-      signal: AbortSignal.timeout(this.timeoutMs)
-    });
-    const text = await response.text();
-    if (!response.ok) throw new Error(`Creator MCP tool failed with HTTP ${response.status}: ${text.slice(0, 500)}`);
-    return { tool: tool.id, status: response.status, response: parseJsonIfPossible(text) };
+  async executeCreatorTool(tool: { id: string }, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const resolved = this.resolvedCreatorTools.get(tool.id);
+    if (!resolved) throw new Error(`Creator tool is not resolved by the Registry Control Plane: ${tool.id}`);
+    return resolved.execute(args);
   }
 
   async execute(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -291,23 +252,6 @@ function configuredMcpServers(): Record<string, McpServerConfig> {
     };
   }
   return servers;
-}
-
-function configuredToolConnections(): Record<string, ToolConnection> {
-  const raw = process.env.HATCH_TOOL_CONNECTIONS;
-  if (!raw) return {};
-  const parsed = JSON.parse(raw) as unknown;
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("HATCH_TOOL_CONNECTIONS must be a JSON object");
-  }
-  const result: Record<string, ToolConnection> = {};
-  for (const [ref, value] of Object.entries(parsed as Record<string, unknown>)) {
-    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
-    const record = value as Record<string, unknown>;
-    if (typeof record.url !== "string" || !record.url) continue;
-    result[ref] = { url: record.url, kind: record.kind === "mcp" ? "mcp" : "http", headers: stringMap(record.headers) };
-  }
-  return result;
 }
 
 function stringMap(value: unknown): Record<string, string> | undefined {

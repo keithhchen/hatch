@@ -365,14 +365,15 @@ HATCH_WEB_SEARCH_PROVIDER=bocha
 HATCH_WEB_SEARCH_URL=https://api.bocha.cn/v1/web-search
 HATCH_WEB_SEARCH_API_KEY=<server-side CWebSearch/Bocha key>
 HATCH_MCP_SERVERS='{"docs":{"url":"https://example.com/mcp"}}'
-HATCH_TOOL_CONNECTIONS='{"creator.crm":{"kind":"http","url":"https://creator-api.example/v1/run"}}'
+HATCH_REGISTRY_URL=http://registry:8100
+HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN=<runtime-service-token>
 ```
 
 Spec v1 uses Kimi K2.6 exclusively for Creator execution and context compaction. Every call uses the live-verified non-thinking profile: `thinking: { type: "disabled" }` with `temperature=1`; Kimi K2.6 currently rejects other temperature values. There is no alternate-model fallback. Use Kimi's official `MOONSHOT_API_KEY` variable for credentials.
 Release-level Evals are the default Creator quality gate. Ordinary Creator products stream Kimi's actual response to the Consumer Desktop. `HATCH_RUNTIME_DELIVERY_AUDIT=enforce` is an optional regulated-deployment override: it performs a second Kimi claim audit before delivery and intentionally withholds text streaming until that audit finishes.
 `OPENAI_BASE_URL` falls back to `https://api.moonshot.cn/v1` and is restricted to official Moonshot endpoints (plus loopback test doubles). Use the `.ai` endpoint only with a matching international Kimi key. If any model override is present, it must be exactly `kimi-k2.6` or startup fails closed.
 `HATCH_MCP_SERVERS` is optional. When set, the model can call `mcp_call`; the server sends MCP `tools/call` JSON-RPC requests and the client never sees MCP credentials.
-`hatch.web_search` is a Hatch built-in tool. With `HATCH_WEB_SEARCH_PROVIDER=bocha`, Runtime uses the existing CWebSearch contract (`query`, `freshness`, `summary`, `count`) and normalizes Bocha's response to Hatch's stable `{ query, results }` shape. `HATCH_WEB_SEARCH_API_KEY` stays server-side and never enters the Agent Corpus or Desktop. `HATCH_TOOL_CONNECTIONS` maps Corpus `connection_ref` values to server-side HTTP/MCP endpoints and headers.
+`hatch.web_search` is a Hatch built-in tool. With `HATCH_WEB_SEARCH_PROVIDER=bocha`, Runtime uses the existing CWebSearch contract (`query`, `freshness`, `summary`, `count`) and normalizes Bocha's response to Hatch's stable `{ query, results }` shape. `HATCH_WEB_SEARCH_API_KEY` stays server-side and never enters the Agent Corpus or Desktop. Creator-owned HTTP/MCP tools are resolved exclusively through the Registry Control Plane using `HATCH_REGISTRY_URL` and `HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN`; the Runtime never reads connection URLs or credentials from the Corpus or local environment.
 
 Then run:
 

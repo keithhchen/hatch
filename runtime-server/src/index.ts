@@ -24,6 +24,7 @@ import { EntitlementError, FileEntitlementResolver, RegistryEntitlementResolver,
 import { findCompletedDelivery, recordCompletedDelivery, type CommerceEventSink, type DeliveryArtifact, type DeliveryBinding } from "./delivery.js";
 import { materializeCreatorRelease, permittedLocalTools } from "./releaseMaterialization.js";
 import { materializeAgentCorpusRoot } from "./releaseMaterialization.js";
+import { creatorToolControlPlaneFromEnvironment, resolveCreatorTools } from "./creatorTools.js";
 import { AgentCorpusResolver, createKnowledgeProvider, knowledgeProviderConfigured, type AgentCorpus } from "./agentCorpus.js";
 import {
   discoverSkills,
@@ -384,7 +385,13 @@ async function handleRuntimeSocket(
               creatorId: binding.agentCorpus.creator.id,
               agentId: binding.agentCorpus.agent_id
             });
-            serverTools.setCreatorTools(binding.agentCorpus.tools.filter((tool) => tool.kind === "http_function" || tool.kind === "mcp_tool"));
+            const creatorToolControlPlane = creatorToolControlPlaneFromEnvironment(process.env);
+            serverTools.setResolvedCreatorTools(await resolveCreatorTools(
+              creatorToolControlPlane,
+              binding.agentCorpus.creator.id,
+              binding.agentCorpus.agent_id,
+              binding.agentCorpus
+            ));
           }
           hello = binding.release
             ? { ...message, local_tools: permittedLocalTools(binding.release, message.local_tools) }
