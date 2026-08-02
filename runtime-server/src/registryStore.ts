@@ -69,8 +69,10 @@ export class RegistryStoreTs {
         indexer: options.indexer ?? QdrantKnowledgeIndexer.fromEnvironment(environment),
       },
     );
-    await store.load();
+    // Postgres-backed stores must create their tables before loading them.
+    // The in-memory/state-file path intentionally has no schema step.
     if (store.pool) await store.ensureSchema();
+    await store.load();
     return store;
   }
 

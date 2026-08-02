@@ -21,6 +21,7 @@ COPY --from=dependencies /workspace/runtime-server/package.json ./package.json
 COPY --from=dependencies /workspace/runtime-server/node_modules ./node_modules
 COPY --from=build /workspace/runtime-server/dist ./dist
 COPY runtime-server/skills ./skills
+COPY scripts/create-agent-zip.mjs ./scripts/create-agent-zip.mjs
 
 # Runtime and Registry use the append-only commerce module without making it a
 # separate service. The package is deliberately kept outside runtime-server

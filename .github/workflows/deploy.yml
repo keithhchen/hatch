@@ -95,6 +95,10 @@ jobs:
         run: |
           set -euo pipefail
           install -m 640 compose.app.yml /opt/hatch/
+          mkdir -p /opt/hatch/dashboard
+          if test ! -f /opt/hatch/dashboard/product-catalog.json; then
+            install -m 640 docs/proof/creator-dashboard-clean-catalog-v1/product-catalog.json /opt/hatch/dashboard/product-catalog.json
+          fi
       - name: Pull and switch application containers
         env:
           GHCR_USERNAME: ${{ github.actor }}
@@ -117,6 +121,30 @@ jobs:
           fi
           printf 'HATCH_IMAGE_PREFIX=%s\nHATCH_RELEASE_TAG=%s\n' "$IMAGE_PREFIX" "$RELEASE_TAG" > .release.env
           docker compose --env-file .env --env-file .release.env -f compose.app.yml up -d --no-deps registry runtime dashboard caddy
+      - name: Seed canonical Agent Corpus and RAG index
+        env:
+          IMAGE_PREFIX: ${{ needs.build-and-push.outputs.image_prefix }}
+          RELEASE_TAG: ${{ env.RELEASE_TAG }}
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          rm -rf /tmp/hatch-demo-agent /tmp/hatch-demo-agent.zip
+          node scripts/bootstrap-demo-corpus.mjs /tmp/hatch-demo-agent
+          runtime_image="${IMAGE_PREFIX}/runtime:${RELEASE_TAG}"
+          docker run --rm -u "$(id -u):$(id -g)" \
+            -v /tmp/hatch-demo-agent:/input:ro -v /tmp:/output \
+            "$runtime_image" node scripts/create-agent-zip.mjs /input /output/hatch-demo-agent.zip
+          domain="$(grep '^HATCH_DOMAIN=' /opt/hatch/.env | cut -d= -f2-)"
+          registry_token="$(grep '^HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN=' /opt/hatch/.env | cut -d= -f2-)"
+          if curl --fail --silent --show-error "https://$domain/v1/agent-corpora/maya-chen/signal-resume-review" >/dev/null; then
+            echo "Signal Resume Review Agent Corpus already published"
+          else
+            curl --fail --silent --show-error --retry 5 --retry-delay 3 \
+              -H "Authorization: Bearer $registry_token" \
+              -H "Content-Type: application/zip" \
+              --data-binary @/tmp/hatch-demo-agent.zip \
+              "https://$domain/v1/agent-corpora?creator_id=maya-chen&agent_id=signal-resume-review"
+          fi
       - name: Verify public health endpoints
         env:
           HATCH_DOMAIN: ${{ vars.HATCH_DOMAIN }}

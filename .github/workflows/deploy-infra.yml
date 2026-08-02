@@ -10,7 +10,25 @@ jobs:
   bootstrap:
     runs-on: [self-hosted, linux, x64, hatch-prod]
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout source through GitHub API
+        env:
+          SOURCE_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          temp_dir="$(mktemp -d)"
+          archive="$temp_dir/source.tgz"
+          curl -4 --fail --silent --show-error --location --retry 5 --retry-delay 2 \
+            -H "Authorization: Bearer $SOURCE_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/tarball/$GITHUB_SHA" \
+            -o "$archive"
+          root_dir="$(tar -tzf "$archive" | sed -n '1s#/.*##p')"
+          test -n "$root_dir"
+          rm -rf "$GITHUB_WORKSPACE"
+          mkdir -p "$GITHUB_WORKSPACE"
+          tar -xzf "$archive" -C "$temp_dir"
+          cp -a "$temp_dir/$root_dir/." "$GITHUB_WORKSPACE/"
+          rm -rf "$temp_dir"
       - name: Prepare infrastructure definition
         run: |
           set -euo pipefail

@@ -37,16 +37,18 @@ Hatch uses two Compose projects on the Shanghai server:
    This creates persistent Docker volumes for Postgres and Qdrant. Normal
    application CD does not recreate or restart these services.
 
-5. Import the initial Dashboard product catalog into the persistent path:
+5. The application CD creates `/opt/hatch/dashboard` and imports the canonical
+   Dashboard product catalog on first deployment. No manual catalog copy is
+   required.
 
    ```bash
    mkdir -p /opt/hatch/dashboard
-   # copy the Dashboard-owned product-catalog.json to this path
    ```
 
 ## GitHub secrets
 
-Configure these repository secrets:
+The application secrets stay only in `/opt/hatch/.env` on the production host.
+Configure these repository secrets for the legacy SSH/bootstrap path:
 
 ```text
 DEPLOY_HOST       # Shanghai server address
@@ -54,9 +56,10 @@ DEPLOY_USER       # dedicated hatch-deploy user with Docker access
 DEPLOY_SSH_KEY    # private key for DEPLOY_USER
 ```
 
-The build job uses the ephemeral `GITHUB_TOKEN` to push images. The deploy job
-passes that same per-run token over SSH to pull the images. No long-lived GHCR
-credential is stored on the server or in repository secrets.
+The normal application CD runs on the production self-hosted runner. It uses
+the ephemeral `GITHUB_TOKEN` to build and push immutable images, then switches
+the local Compose project; no application secret or long-lived GHCR credential
+is placed in GitHub Actions.
 
 ## Release flow
 
@@ -65,10 +68,11 @@ Pushes to `master` run:
 ```text
 GitHub Actions
   → build and test TypeScript services
-  → build runtime and dashboard images
+  → build runtime, dashboard, and Caddy images on the production runner
   → push immutable SHA tags to GHCR
-  → SSH to /opt/hatch
-  → pull and replace only app containers
+  → switch only Registry, Runtime, Dashboard, and Caddy containers
+  → seed the canonical Agent Corpus
+  → embed and index its retrieval-only knowledge in Qdrant
   → verify /healthz and /api/health
   → restore the previous SHA on failed health checks
 ```

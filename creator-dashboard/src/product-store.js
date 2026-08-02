@@ -112,6 +112,9 @@ async function readCatalog(catalogPathValue) {
   try {
     catalog = JSON.parse(await readFile(catalogPath, "utf8"));
   } catch (error) {
+    if (error?.code === "ENOENT" && process.env.HATCH_CREATOR_DASHBOARD_ALLOW_EMPTY_CATALOG === "1") {
+      return { schema_version: "1", products: [] };
+    }
     if (error?.code === "ENOENT") throw new Error(`Dashboard product catalog does not exist: ${catalogPath}`);
     throw error;
   }

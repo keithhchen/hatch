@@ -58,7 +58,7 @@ services:
       HATCH_COMMERCE_LEDGER_PATH: /var/lib/hatch/commerce/ledger.jsonl
       HATCH_CREATOR_PRODUCT_STATE_PATH: /var/lib/hatch/dashboard/product-state.json
     volumes:
-      - dashboard_data:/var/lib/hatch/dashboard
+      - ./dashboard:/var/lib/hatch/dashboard
       - commerce_data:/var/lib/hatch/commerce
     networks:
       - hatch_internal
@@ -94,8 +94,6 @@ volumes:
     name: hatch_corpus_data
   commerce_data:
     name: hatch_commerce_data
-  dashboard_data:
-    name: hatch_dashboard_data
   caddy_data:
     name: hatch_caddy_data
   caddy_config:
