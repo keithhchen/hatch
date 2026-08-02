@@ -1237,10 +1237,11 @@ function errorMessage(error: unknown): string {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const port = Number(process.env.PORT ?? 8400);
+  const host = process.env.HATCH_RUNTIME_HOST?.trim() || "127.0.0.1";
   void createRuntimeServerFromEnvironment().then((runtimeServer) => {
-    runtimeServer.server.listen(port, "127.0.0.1", () => {
+    runtimeServer.server.listen(port, host, () => {
       const commerce = process.env.HATCH_COMMERCE_LEDGER_FILE ? " with commerce ledger" : "";
-      console.log(`Hatch TS runtime listening on ws://127.0.0.1:${port}/runtime${commerce}`);
+      console.log(`Hatch TS runtime listening on ws://${host}:${port}/runtime${commerce}`);
     });
   }).catch((error: unknown) => {
     console.error("Unable to start Hatch Runtime:", error);
