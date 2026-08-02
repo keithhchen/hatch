@@ -21,7 +21,7 @@ afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
   delete process.env.HATCH_RUNTIME_DATA_DIR;
   delete process.env.OPENAI_API_KEY;
-  delete process.env.MOONSHOT_API_KEY;
+  delete process.env.LLM_API_KEY;
   delete process.env.OPENAI_BASE_URL;
   delete process.env.HATCH_CREATOR_MODEL;
   delete process.env.HATCH_REVIEWER_API_KEY;
@@ -654,7 +654,7 @@ function deliveryWorkflowFixture(): Record<string, unknown> {
 }
 
 function configureMockModels(baseUrl: string): void {
-  process.env.MOONSHOT_API_KEY = "kimi-key";
+  process.env.LLM_API_KEY = "kimi-key";
   process.env.OPENAI_BASE_URL = baseUrl;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_REVIEWER_MODEL = "kimi-k2.6";

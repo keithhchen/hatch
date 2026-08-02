@@ -257,7 +257,7 @@ afterEach(async () => {
   }
   delete process.env.OPENAI_BASE_URL;
   delete process.env.OPENAI_API_KEY;
-  delete process.env.MOONSHOT_API_KEY;
+  delete process.env.LLM_API_KEY;
   delete process.env.HATCH_CREATOR_MODEL;
   delete process.env.HATCH_COMPACTION_MODEL;
   delete process.env.HATCH_MCP_SERVERS;
@@ -1665,7 +1665,7 @@ test("skills config can suppress automatic skills instructions", async () => {
 
   const mock = await createFinalOnlyChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.MOONSHOT_API_KEY = "test-key";
+  process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   delete process.env.HATCH_TS_SKILLS_ROOT;
@@ -1774,7 +1774,7 @@ test.skip("chat completions runtime progressively reads SKILL.md through file_re
   const dataDir = await tempWorkspace();
   const mock = await createMockChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.MOONSHOT_API_KEY = "test-key";
+  process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
 
@@ -1830,7 +1830,7 @@ test.skip("chat completions runtime resolves aliased skills catalog paths for se
 
   const mock = await createAliasedSkillPathChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.MOONSHOT_API_KEY = "test-key";
+  process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_SKILL_METADATA_BUDGET_CHARS = "5000";
@@ -1882,7 +1882,7 @@ test.skip("model-driven SKILL.md file_read returns bundled resource manifest wit
 
   const mock = await createModelDrivenResourceManifestChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.MOONSHOT_API_KEY = "test-key";
+  process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_SKILL_ROOTS = path.join(workspace, ".agents", "skills");
@@ -1935,7 +1935,7 @@ test.skip("model-driven skill allowed-tools are preserved while local tools run 
 
   const mock = await createModelDrivenAllowedToolsChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.MOONSHOT_API_KEY = "test-key";
+  process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_SKILL_ROOTS = path.join(workspace, ".agents", "skills");
@@ -1974,7 +1974,7 @@ test.skip("chat completions runtime does not carry activated skill instructions 
   const dataDir = await tempWorkspace();
   const mock = await createSkillRetentionChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.MOONSHOT_API_KEY = "test-key";
+  process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
 
@@ -2038,7 +2038,7 @@ test.skip("explicit-only skill resources are server-readable on later turns when
 
   const mock = await createActivatedSkillResourceChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.MOONSHOT_API_KEY = "test-key";
+  process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_SKILL_ROOTS = path.join(workspace, ".agents", "skills");
@@ -2131,7 +2131,7 @@ test.skip("explicitly activated skill instructions are injected fully and still 
 
   const mock = await createFullExplicitSkillChatCompletionsServer(trailer);
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.MOONSHOT_API_KEY = "test-key";
+  process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_SKILL_ROOTS = path.join(workspace, ".agents", "skills");
@@ -2182,7 +2182,7 @@ test.skip("relative activated skill resource paths fail when multiple active ski
 
   const mock = await createAmbiguousRelativeSkillResourceChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.MOONSHOT_API_KEY = "test-key";
+  process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_SKILL_ROOTS = path.join(workspace, ".agents", "skills");
@@ -2234,7 +2234,7 @@ test.skip("re-mentioned skills refresh from current files within a fixed session
 
   const mock = await createActivatedSkillRefreshChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.MOONSHOT_API_KEY = "test-key";
+  process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_SKILL_ROOTS = path.join(workspace, ".agents", "skills");
@@ -2444,7 +2444,7 @@ test("pre-turn auto compaction appends a checkpoint and sends compacted history 
 
   const mock = await createPreTurnCompactionChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.MOONSHOT_API_KEY = "test-key";
+  process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_AUTO_COMPACT_LIMIT_TOKENS = "10";
@@ -2506,7 +2506,7 @@ test("manual /compact runs a standalone compaction turn without a normal agent r
 
   const mock = await createManualCompactionChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.MOONSHOT_API_KEY = "test-key";
+  process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
 
@@ -2546,7 +2546,7 @@ test("mid-turn auto compaction checkpoints tool context before continuing the to
   const dataDir = await tempWorkspace();
   const mock = await createMidTurnCompactionChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.MOONSHOT_API_KEY = "test-key";
+  process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_AUTO_COMPACT_LIMIT_TOKENS = "20";
@@ -2581,7 +2581,7 @@ test("mid-turn compaction waits for a complete assistant tool-call batch", async
   const dataDir = await tempWorkspace();
   const mock = await createMultiToolBatchCompactionChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.MOONSHOT_API_KEY = "test-key";
+  process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_AUTO_COMPACT_LIMIT_TOKENS = "1";
@@ -2626,7 +2626,7 @@ test("chat completions runtime fixes the skills catalog for the WebSocket sessio
 
   const mock = await createFinalOnlyChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.MOONSHOT_API_KEY = "test-key";
+  process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_SKILL_ROOTS = skillsRoot;
@@ -2698,7 +2698,7 @@ test("chat completions runtime injects codex AGENTS.md project instructions", as
 
   const mock = await createFinalOnlyChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.MOONSHOT_API_KEY = "test-key";
+  process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_SKILL_ROOTS = path.join(workspace, ".agents", "skills");
@@ -2744,7 +2744,7 @@ test("chat completions runtime injects stable local workspace context without cu
   const dataDir = await tempWorkspace();
   const mock = await createFinalOnlyChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.MOONSHOT_API_KEY = "test-key";
+  process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
 
@@ -2786,7 +2786,7 @@ test("chat completions runtime enforces exact path file_read before file_search 
   await writeFile(contractPath, "Contract body for runtime path policy.\n", "utf8");
   const mock = await createDirectReadGuardChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.MOONSHOT_API_KEY = "test-key";
+  process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
 
@@ -2829,7 +2829,7 @@ test("chat completions runtime filters client-local function tools from hello ca
   const dataDir = await tempWorkspace();
   const mock = await createFinalOnlyChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.MOONSHOT_API_KEY = "test-key";
+  process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
 
@@ -2864,7 +2864,7 @@ test("shell_exec auto-permission calls include model justification and tool argu
   const dataDir = await tempWorkspace();
   const mock = await createShellJustificationChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.MOONSHOT_API_KEY = "test-key";
+  process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
 
@@ -2899,7 +2899,7 @@ test("chat completions runtime brokers local filesystem function tools to the cl
 
   const mock = await createMockLocalToolChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.MOONSHOT_API_KEY = "test-key";
+  process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
 
@@ -2961,7 +2961,7 @@ test("chat completions runtime completes when finish_reason arrives before SSE c
   if (!address || typeof address === "string") throw new Error("Expected mock server to listen on a TCP port");
 
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.MOONSHOT_API_KEY = "test-key";
+  process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = `http://127.0.0.1:${address.port}/v1`;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   runtimeServer = createRuntimeServer();
@@ -2983,7 +2983,7 @@ test("chat completions runtime replays prior tool call chain on later turns", as
   const dataDir = await tempWorkspace();
   const mock = await createToolHistoryReplayChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.MOONSHOT_API_KEY = "test-key";
+  process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
 
@@ -3033,7 +3033,7 @@ test.skip("activated skill allowed-tools are preserved while local tools run wit
 
   const mock = await createAllowedToolsChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.MOONSHOT_API_KEY = "test-key";
+  process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_SKILL_ROOTS = path.join(workspace, ".agents", "skills");
@@ -3088,7 +3088,7 @@ test("chat completions runtime emits implicit skill invocation events for skill 
   const command = "bash .agents/skills/script-invocation-skill/scripts/check.sh";
   const mock = await createImplicitSkillInvocationChatCompletionsServer(command);
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.MOONSHOT_API_KEY = "test-key";
+  process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_SKILL_ROOTS = path.join(workspace, ".agents", "skills");
@@ -3140,7 +3140,7 @@ test("chat completions runtime emits implicit skill invocation events for skill 
   const skillPath = ".agents/skills/doc-invocation-skill/SKILL.md";
   const mock = await createImplicitSkillDocReadChatCompletionsServer(skillPath);
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.MOONSHOT_API_KEY = "test-key";
+  process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_SKILL_ROOTS = path.join(workspace, ".agents", "skills");
@@ -3177,7 +3177,7 @@ test("chat completions runtime emits failed tool_call.delta for unknown model to
   const dataDir = await tempWorkspace();
   const mock = await createMockUnknownToolChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.MOONSHOT_API_KEY = "test-key";
+  process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
 
@@ -3243,7 +3243,7 @@ test("chat completions runtime executes configured MCP tools on the server event
 
   const mock = await createMockMcpChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.MOONSHOT_API_KEY = "test-key";
+  process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_MCP_SERVERS = JSON.stringify({
@@ -3305,7 +3305,7 @@ test("chat completions runtime returns recoverable tool failures to the model", 
 
   const mock = await createRecoverableToolFailureChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
-  process.env.MOONSHOT_API_KEY = "test-key";
+  process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   process.env.HATCH_MCP_SERVERS = JSON.stringify({
@@ -3490,7 +3490,7 @@ test("protected skill runs in a headless session and brokers local context throu
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   process.env.HATCH_SKILL_ROOTS = skillsRoot;
   delete process.env.HATCH_TS_SKILLS_ROOT;
-  process.env.MOONSHOT_API_KEY = "test-key";
+  process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = `http://127.0.0.1:${address.port}/v1`;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   runtimeServer = createRuntimeServer();
@@ -3615,7 +3615,7 @@ test("cancelling the parent run terminates and destroys the protected worker", a
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   process.env.HATCH_SKILL_ROOTS = skillsRoot;
   delete process.env.HATCH_TS_SKILLS_ROOT;
-  process.env.MOONSHOT_API_KEY = "test-key";
+  process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = `http://127.0.0.1:${address.port}/v1`;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
   runtimeServer = createRuntimeServer();

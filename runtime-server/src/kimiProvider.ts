@@ -49,8 +49,8 @@ export function kimiModelRuntimeRecord(): KimiModelRuntimeRecord {
  * overrides are validated instead of silently falling back to another model.
  */
 export function requireKimiProviderConfig(env: NodeJS.ProcessEnv = process.env): KimiProviderConfig {
-  const apiKey = env.MOONSHOT_API_KEY?.trim();
-  if (!apiKey) throw new Error("Missing MOONSHOT_API_KEY for the Kimi-only runtime");
+  const apiKey = env.LLM_API_KEY?.trim();
+  if (!apiKey) throw new Error("Missing LLM_API_KEY for the Kimi-only runtime");
 
   for (const name of ["HATCH_CREATOR_MODEL", "HATCH_REVIEWER_MODEL", "HATCH_COMPACTION_MODEL"] as const) {
     const configured = env[name]?.trim();

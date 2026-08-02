@@ -315,7 +315,7 @@ Skill/RAG/few-shots, opens normal entitlement-bound Runtime sessions, and writes
 an atomic Factory-compatible `runtime-results.json`:
 
 ```bash
-export MOONSHOT_API_KEY=... # inject at execution time; never commit it
+export LLM_API_KEY=... # inject at execution time; never commit it
 npm run uat:release -- \
   --release /absolute/factory-root/release/<product-id>@<version>/sha256:<digest> \
   --inputs /absolute/factory-root/review/held-out-inputs.json \
@@ -358,7 +358,7 @@ HATCH_CREATOR_MODEL=kimi-k2.6
 HATCH_REVIEWER_MODEL=kimi-k2.6
 HATCH_COMPACTION_MODEL=kimi-k2.6
 PORT=8400
-MOONSHOT_API_KEY=...
+LLM_API_KEY=...
 OPENAI_BASE_URL=https://api.moonshot.cn/v1
 HATCH_MODEL_CONTEXT_WINDOW_TOKENS=256000
 HATCH_WEB_SEARCH_PROVIDER=bocha
@@ -369,7 +369,7 @@ HATCH_REGISTRY_URL=http://registry:8100
 HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN=<runtime-service-token>
 ```
 
-Spec v1 uses Kimi K2.6 exclusively for Creator execution and context compaction. Every call uses the live-verified non-thinking profile: `thinking: { type: "disabled" }` with `temperature=1`; Kimi K2.6 currently rejects other temperature values. There is no alternate-model fallback. Use Kimi's official `MOONSHOT_API_KEY` variable for credentials.
+Spec v1 uses Kimi K2.6 exclusively for Creator execution and context compaction. Every call uses the live-verified non-thinking profile: `thinking: { type: "disabled" }` with `temperature=1`; Kimi K2.6 currently rejects other temperature values. There is no alternate-model fallback. Use Kimi's official `LLM_API_KEY` variable for credentials.
 Release-level Evals are the default Creator quality gate. Ordinary Creator products stream Kimi's actual response to the Consumer Desktop. `HATCH_RUNTIME_DELIVERY_AUDIT=enforce` is an optional regulated-deployment override: it performs a second Kimi claim audit before delivery and intentionally withholds text streaming until that audit finishes.
 `OPENAI_BASE_URL` falls back to `https://api.moonshot.cn/v1` and is restricted to official Moonshot endpoints (plus loopback test doubles). Use the `.ai` endpoint only with a matching international Kimi key. If any model override is present, it must be exactly `kimi-k2.6` or startup fails closed.
 `HATCH_MCP_SERVERS` is optional. When set, the model can call `mcp_call`; the server sends MCP `tools/call` JSON-RPC requests and the client never sees MCP credentials.

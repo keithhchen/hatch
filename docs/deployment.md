@@ -14,7 +14,7 @@ Hatch uses two Compose projects on the Shanghai server:
 ## One-time server setup
 
 1. Install Docker Engine and the Compose plugin on the Shanghai host.
-2. Create `/opt/hatch/.env` from the root `.env.example` and fill the Kimi,
+2. Create `/opt/hatch/.env` from the root `.env.example` and fill the LLM,
    DashScope, Postgres, Registry signing, Web Search, and publish-token values.
    Never commit this file or put these values in GitHub Actions.
    The file must also contain non-empty `HATCH_REGISTRY_DATABASE_URL`,

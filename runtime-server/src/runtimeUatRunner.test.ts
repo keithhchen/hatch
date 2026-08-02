@@ -93,7 +93,7 @@ test("Runtime UAT execution has no OPENAI_API_KEY fallback", async () => {
       "--inputs", fixture.inputsFile,
       "--output", fixture.outputFile
     ], { env }),
-    /Missing MOONSHOT_API_KEY for the Kimi-only runtime/
+    /Missing LLM_API_KEY for the Kimi-only runtime/
   );
 });
 
@@ -220,7 +220,7 @@ function digest(value: string): string {
 
 function withoutModelSecrets(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const copy = { ...env };
-  copy.MOONSHOT_API_KEY = "";
+  copy.LLM_API_KEY = "";
   delete copy.OPENAI_API_KEY;
   delete copy.OPENAI_BASE_URL;
   return copy;
