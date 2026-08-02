@@ -1,5 +1,6 @@
 import { requireTool } from "./tools.js";
 import type { KnowledgeProvider } from "./agentCorpus.js";
+import type { RuntimeCreatorTool } from "./creatorTools.js";
 
 type McpServerConfig = {
   url: string;
@@ -29,6 +30,7 @@ type ToolConnection = {
 export class ServerToolExecutor {
   private knowledgeScope?: KnowledgeScope;
   private creatorTools = new Map<string, CreatorToolDefinition>();
+  private resolvedCreatorTools = new Map<string, RuntimeCreatorTool>();
 
   constructor(private readonly timeoutMs = 120000) {}
 
@@ -40,9 +42,16 @@ export class ServerToolExecutor {
     this.creatorTools = new Map(tools.map((tool) => [tool.id, tool]));
   }
 
+  /** Registry-resolved Creator tools execute through their own connection closure; env fallback stays for local development. */
+  setResolvedCreatorTools(tools: RuntimeCreatorTool[] = []): void {
+    this.resolvedCreatorTools = new Map(tools.map((tool) => [tool.id, tool]));
+  }
+
   async executeCreatorTool(tool: CreatorToolDefinition, args: Record<string, unknown>): Promise<Record<string, unknown>> {
     const declared = this.creatorTools.get(tool.id);
     if (!declared) throw new Error(`Creator tool is not enabled for this Agent: ${tool.id}`);
+    const resolved = this.resolvedCreatorTools.get(tool.id);
+    if (resolved) return resolved.execute(args);
     if (!declared.connection_ref) throw new Error(`Creator tool has no connection_ref: ${tool.id}`);
     const connection = configuredToolConnections()[declared.connection_ref];
     if (!connection) throw new Error(`Creator tool connection is not configured: ${declared.connection_ref}`);

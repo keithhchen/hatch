@@ -13,7 +13,7 @@ export type AgentKnowledgeSearch = {
 };
 
 export type AgentKnowledgeSearchResolver = {
-  forAgent(tenantId: string, agentId: string): AgentKnowledgeSearch;
+  forAgent(creatorId: string, agentId: string): AgentKnowledgeSearch;
 };
 
 /**
@@ -28,17 +28,17 @@ export class RegistryAgentKnowledgeSearch implements AgentKnowledgeSearchResolve
     timeoutMs?: number;
   }) {}
 
-  forAgent(tenantId: string, agentId: string): AgentKnowledgeSearch {
+  forAgent(creatorId: string, agentId: string): AgentKnowledgeSearch {
     return {
       search: async ({ query, max_num_results = 6 }) => {
         const base = this.options.registryUrl.replace(/\/$/, "");
         const response = await fetch(
-          `${base}/v1/runtime/tenants/${encodeURIComponent(tenantId)}/agents/${encodeURIComponent(agentId)}/knowledge/search`,
+          `${base}/v1/runtime/creators/${encodeURIComponent(creatorId)}/agents/${encodeURIComponent(agentId)}/knowledge/search`,
           {
             method: "POST",
             headers: {
               authorization: `Bearer ${this.options.serviceToken}`,
-              "x-hatch-tenant-id": tenantId,
+              "x-hatch-creator-id": creatorId,
               "content-type": "application/json",
               accept: "application/json"
             },

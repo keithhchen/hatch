@@ -10,6 +10,31 @@ import {
   AgentCorpusVerificationError,
 } from "./registryCorpus.js";
 import { ingestAgentCorpusKnowledge, QdrantKnowledgeIndexer } from "./qdrantIndexer.js";
+import { AgentCorpusSchema, type CreatorCorpusTool } from "./agentCorpus.js";
+
+export class ControlPlaneError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ControlPlaneError";
+  }
+}
+
+/** HTTP/MCP connection binding, never credentials. Only a secret *reference* is stored. */
+export type ToolConnection = {
+  id: string;
+  creator_id: string;
+  kind: "http" | "mcp";
+  secret_ref: string | null;
+  config: Record<string, unknown>;
+  status: "active" | "disabled";
+};
+
+export type AgentToolBinding = {
+  creator_id: string;
+  agent_id: string;
+  tool_id: string;
+  connection_id: string;
+};
 
 export type PublishedAgentCorpus = {
   creator_id: string;
@@ -38,11 +63,15 @@ type RegistryState = {
   schema_version: 1;
   agent_corpora: PublishedAgentCorpus[];
   agent_access: AgentAccessGrant[];
+  tool_connections: ToolConnection[];
+  agent_tool_bindings: AgentToolBinding[];
 };
 
 export class RegistryStoreTs {
   private readonly corpora = new Map<string, PublishedAgentCorpus>();
   private readonly access = new Map<string, AgentAccessGrant>();
+  private readonly connections = new Map<string, ToolConnection>();
+  private readonly bindings = new Map<string, AgentToolBinding>();
   private readonly pool?: Pool;
   private readonly statePath?: string;
   private indexer?: QdrantKnowledgeIndexer;
@@ -144,6 +173,91 @@ export class RegistryStoreTs {
     return [...this.access.values()].filter((item) => item.user_id === userId && item.status === "active");
   }
 
+  async upsertConnection(input: {
+    creatorId: string;
+    connectionId: string;
+    kind: "http" | "mcp";
+    secretRef: string | null;
+    config: Record<string, unknown>;
+    status: "active" | "disabled";
+  }): Promise<ToolConnection> {
+    requireIdentifier(input.creatorId, "creator_id");
+    requireIdentifier(input.connectionId, "connection_id");
+    if (input.kind !== "http" && input.kind !== "mcp") throw new ControlPlaneError("connection kind must be http or mcp");
+    validateConnectionConfig(input.config);
+    if (input.secretRef !== null && !input.secretRef.trim()) throw new ControlPlaneError("secret_ref cannot be blank");
+    const connection: ToolConnection = {
+      id: input.connectionId,
+      creator_id: input.creatorId,
+      kind: input.kind,
+      secret_ref: input.secretRef,
+      config: input.config,
+      status: input.status,
+    };
+    this.connections.set(connection.id, connection);
+    await this.persistConnection(connection);
+    return connection;
+  }
+
+  getConnection(creatorId: string, connectionId: string): ToolConnection {
+    const connection = this.connections.get(connectionId);
+    if (!connection || connection.creator_id !== creatorId) {
+      throw new ControlPlaneError(`tool connection does not exist for this creator: ${connectionId}`);
+    }
+    return connection;
+  }
+
+  async bindAgentTool(input: { creatorId: string; agentId: string; toolId: string; connectionId: string }): Promise<void> {
+    requireIdentifier(input.creatorId, "creator_id");
+    requireIdentifier(input.agentId, "agent_id");
+    requireIdentifier(input.toolId, "tool_id");
+    requireIdentifier(input.connectionId, "connection_id");
+    const connection = this.connections.get(input.connectionId);
+    if (!connection) throw new ControlPlaneError(`tool connection does not exist: ${input.connectionId}`);
+    if (connection.creator_id !== input.creatorId) throw new ControlPlaneError("a tool connection cannot cross creator boundaries");
+    if (!this.getAgentCorpus(input.creatorId, input.agentId)) {
+      throw new ControlPlaneError(`Agent Corpus is not published: ${input.creatorId}/${input.agentId}`);
+    }
+    const declared = await this.declaredCorpusTool(input.creatorId, input.agentId, input.toolId);
+    if (!declared) throw new ControlPlaneError(`Agent Corpus does not declare tool_id=${input.toolId}`);
+    const expectedKind = declared.kind === "http_function" ? "http" : "mcp";
+    if (connection.kind !== expectedKind) {
+      throw new ControlPlaneError(`Agent Corpus tool ${input.toolId} does not match Control Plane kind=${connection.kind}`);
+    }
+    if (declared.connection_ref !== input.connectionId) {
+      throw new ControlPlaneError(`Agent Corpus tool ${input.toolId} does not match connection_ref=${input.connectionId}`);
+    }
+    const binding: AgentToolBinding = {
+      creator_id: input.creatorId,
+      agent_id: input.agentId,
+      tool_id: input.toolId,
+      connection_id: input.connectionId,
+    };
+    this.bindings.set(bindingKey(binding), binding);
+    await this.persistBinding(binding);
+  }
+
+  async resolveAgentToolConnection(creatorId: string, agentId: string, toolId: string): Promise<ToolConnection> {
+    const binding = this.bindings.get(bindingKey({ creator_id: creatorId, agent_id: agentId, tool_id: toolId }));
+    if (!binding) throw new ControlPlaneError(`no Control Plane binding for ${creatorId}/${agentId}/${toolId}`);
+    const connection = this.connections.get(binding.connection_id);
+    if (!connection) throw new ControlPlaneError(`tool connection does not exist: ${binding.connection_id}`);
+    if (connection.status !== "active") throw new ControlPlaneError(`tool connection is not active: ${connection.id}`);
+    return connection;
+  }
+
+  private async declaredCorpusTool(creatorId: string, agentId: string, toolId: string): Promise<{ kind: "http_function" | "mcp_tool"; connection_ref: string } | undefined> {
+    try {
+      const raw = JSON.parse(await readFile(path.join(this.corpusRoot, creatorId, agentId, "agent.json"), "utf8")) as unknown;
+      const corpus = AgentCorpusSchema.parse(raw);
+      const tool = corpus.tools.find((candidate) => candidate.id === toolId && (candidate.kind === "http_function" || candidate.kind === "mcp_tool")) as CreatorCorpusTool | undefined;
+      if (!tool) return undefined;
+      return { kind: tool.kind, connection_ref: tool.connection_ref };
+    } catch {
+      throw new ControlPlaneError(`Agent Corpus manifest is unreadable: ${creatorId}/${agentId}`);
+    }
+  }
+
   private async ensureSchema(): Promise<void> {
     await this.pool!.query(`
       CREATE TABLE IF NOT EXISTS agent_corpora (
@@ -169,6 +283,21 @@ export class RegistryStoreTs {
         granted_at TIMESTAMPTZ NOT NULL,
         UNIQUE (user_id, creator_id, agent_id)
       );
+      CREATE TABLE IF NOT EXISTS tool_connections (
+        id TEXT PRIMARY KEY,
+        creator_id TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('http', 'mcp')),
+        secret_ref TEXT,
+        config_json TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('active', 'disabled'))
+      );
+      CREATE TABLE IF NOT EXISTS agent_tool_bindings (
+        creator_id TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
+        tool_id TEXT NOT NULL,
+        connection_id TEXT NOT NULL REFERENCES tool_connections(id),
+        PRIMARY KEY (creator_id, agent_id, tool_id)
+      );
     `);
   }
 
@@ -179,6 +308,13 @@ export class RegistryStoreTs {
         for (const row of corpora.rows) this.corpora.set(key(row.creator_id, row.agent_id), rowToCorpus(row));
         const access = await this.pool.query("SELECT entitlement_id, user_id, creator_id, agent_id, product_id, status, granted_at FROM agent_access");
         for (const row of access.rows) this.access.set(row.entitlement_id, rowToAccess(row));
+        const connections = await this.pool.query("SELECT id, creator_id, kind, secret_ref, config_json, status FROM tool_connections");
+        for (const row of connections.rows) this.connections.set(String(row.id), rowToConnection(row));
+        const bindings = await this.pool.query("SELECT creator_id, agent_id, tool_id, connection_id FROM agent_tool_bindings");
+        for (const row of bindings.rows) {
+          const binding = rowToBinding(row as Record<string, unknown>);
+          this.bindings.set(bindingKey(binding), binding);
+        }
         return;
       } catch (error) {
         throw new Error(`Registry Postgres load failed: ${String(error)}`);
@@ -189,6 +325,8 @@ export class RegistryStoreTs {
       const state = JSON.parse(await readFile(this.statePath, "utf8")) as RegistryState;
       for (const corpus of state.agent_corpora ?? []) this.corpora.set(key(corpus.creator_id, corpus.agent_id), corpus);
       for (const grant of state.agent_access ?? []) this.access.set(grant.entitlement_id, grant);
+      for (const connection of state.tool_connections ?? []) this.connections.set(connection.id, connection);
+      for (const binding of state.agent_tool_bindings ?? []) this.bindings.set(bindingKey(binding), binding);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
@@ -214,11 +352,37 @@ export class RegistryStoreTs {
     await this.persistState();
   }
 
+  private async persistConnection(connection: ToolConnection): Promise<void> {
+    if (this.pool) {
+      await this.pool.query(`INSERT INTO tool_connections (id, creator_id, kind, secret_ref, config_json, status) VALUES ($1,$2,$3,$4,$5,$6)
+        ON CONFLICT (id) DO UPDATE SET creator_id=EXCLUDED.creator_id, kind=EXCLUDED.kind, secret_ref=EXCLUDED.secret_ref, config_json=EXCLUDED.config_json, status=EXCLUDED.status`,
+        [connection.id, connection.creator_id, connection.kind, connection.secret_ref, JSON.stringify(connection.config), connection.status]);
+      return;
+    }
+    await this.persistState();
+  }
+
+  private async persistBinding(binding: AgentToolBinding): Promise<void> {
+    if (this.pool) {
+      await this.pool.query(`INSERT INTO agent_tool_bindings (creator_id, agent_id, tool_id, connection_id) VALUES ($1,$2,$3,$4)
+        ON CONFLICT (creator_id, agent_id, tool_id) DO UPDATE SET connection_id=EXCLUDED.connection_id`,
+        [binding.creator_id, binding.agent_id, binding.tool_id, binding.connection_id]);
+      return;
+    }
+    await this.persistState();
+  }
+
   private async persistState(): Promise<void> {
     if (!this.statePath) return;
     await mkdir(path.dirname(this.statePath), { recursive: true });
     const temporary = `${this.statePath}.${randomUUID()}.tmp`;
-    await writeFile(temporary, JSON.stringify({ schema_version: 1, agent_corpora: [...this.corpora.values()], agent_access: [...this.access.values()] }, null, 2) + "\n", "utf8");
+    await writeFile(temporary, JSON.stringify({
+      schema_version: 1,
+      agent_corpora: [...this.corpora.values()],
+      agent_access: [...this.access.values()],
+      tool_connections: [...this.connections.values()],
+      agent_tool_bindings: [...this.bindings.values()]
+    }, null, 2) + "\n", "utf8");
     await rename(temporary, this.statePath);
   }
 }
@@ -249,6 +413,62 @@ function rowToAccess(row: Record<string, any>): AgentAccessGrant {
     status: "active",
     granted_at: new Date(row.granted_at).toISOString(),
   };
+}
+
+function rowToConnection(row: Record<string, any>): ToolConnection {
+  return {
+    id: String(row.id),
+    creator_id: String(row.creator_id),
+    kind: row.kind === "mcp" ? "mcp" : "http",
+    secret_ref: row.secret_ref === null || row.secret_ref === undefined ? null : String(row.secret_ref),
+    config: parseConfig(String(row.config_json)),
+    status: row.status === "disabled" ? "disabled" : "active",
+  };
+}
+
+function rowToBinding(row: Record<string, any>): AgentToolBinding {
+  return {
+    creator_id: String(row.creator_id),
+    agent_id: String(row.agent_id),
+    tool_id: String(row.tool_id),
+    connection_id: String(row.connection_id),
+  };
+}
+
+function parseConfig(value: string): Record<string, unknown> {
+  const parsed = JSON.parse(value) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new ControlPlaneError("stored connection config is invalid");
+  return parsed as Record<string, unknown>;
+}
+
+function bindingKey(binding: Pick<AgentToolBinding, "creator_id" | "agent_id" | "tool_id">): string {
+  return `${binding.creator_id}:${binding.agent_id}:${binding.tool_id}`;
+}
+
+function requireIdentifier(value: string, field: string): void {
+  if (!value || /\s/.test(value)) throw new ControlPlaneError(`${field} must be a non-empty identifier`);
+}
+
+function validateConnectionConfig(config: Record<string, unknown>): void {
+  if (!config || typeof config !== "object" || Array.isArray(config) || typeof config.url !== "string" || !/^https?:\/\//.test(config.url)) {
+    throw new ControlPlaneError("connection config requires an http(s) url");
+  }
+  rejectSecretFields(config);
+}
+
+const SECRET_KEYS = new Set(["authorization", "api_key", "apikey", "token", "password", "secret", "bearer"]);
+
+function rejectSecretFields(value: unknown): void {
+  if (Array.isArray(value)) {
+    for (const item of value) rejectSecretFields(item);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    const normalized = key.toLowerCase().replace(/-/g, "_");
+    if (SECRET_KEYS.has(normalized)) throw new ControlPlaneError("connection config must not contain credentials; use secret_ref");
+    rejectSecretFields(item);
+  }
 }
 
 export { AgentCorpusVerificationError };

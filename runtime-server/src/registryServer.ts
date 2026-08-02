@@ -2,7 +2,7 @@ import "dotenv/config";
 import http from "node:http";
 import { URL } from "node:url";
 import { AccountStoreTs, accountPublic, createAuthToken, verifyAuthToken, verifyPassword, type Account, type AccountRole } from "./registryAuth.js";
-import { RegistryStoreTs } from "./registryStore.js";
+import { ControlPlaneError, RegistryStoreTs, type ToolConnection } from "./registryStore.js";
 
 export type RegistryServer = { server: http.Server; close: () => Promise<void> };
 
@@ -110,7 +110,78 @@ async function route(
     } else sendJson(response, 200, await context.store.listAgentCorpora(creatorId));
     return;
   }
+
+  const connectionMatch = url.pathname.match(/^\/v1\/control-plane\/connections\/([^/]+)$/);
+  if (connectionMatch && request.method === "PUT") {
+    const creatorId = creatorScope(request, response, context.publishToken);
+    if (!creatorId) return;
+    try {
+      const body = await readJson(request);
+      const kind = body.kind;
+      if (kind !== "http" && kind !== "mcp") throw new Error("connection kind must be http or mcp");
+      const connection = await context.store.upsertConnection({
+        creatorId,
+        connectionId: decodeURIComponent(connectionMatch[1]!),
+        kind,
+        secretRef: body.secret_ref === undefined || body.secret_ref === null ? null : String(body.secret_ref),
+        config: (body.config ?? {}) as Record<string, unknown>,
+        status: body.status === "disabled" ? "disabled" : "active",
+      });
+      sendJson(response, 200, connectionPayload(connection));
+    } catch (error) { sendError(response, error); }
+    return;
+  }
+  const bindMatch = url.pathname.match(/^\/v1\/creators\/([^/]+)\/agents\/([^/]+)\/tools\/([^/]+)$/);
+  if (bindMatch && request.method === "PUT") {
+    const creatorId = creatorScope(request, response, context.publishToken);
+    if (!creatorId) return;
+    const pathCreatorId = decodeURIComponent(bindMatch[1]!);
+    if (creatorId !== pathCreatorId) { sendJson(response, 403, { detail: "creator path does not match authenticated creator" }); return; }
+    try {
+      const body = await readJson(request);
+      await context.store.bindAgentTool({
+        creatorId,
+        agentId: decodeURIComponent(bindMatch[2]!),
+        toolId: decodeURIComponent(bindMatch[3]!),
+        connectionId: String(body.connection_id ?? ""),
+      });
+      sendJson(response, 204, undefined);
+    } catch (error) { sendError(response, error); }
+    return;
+  }
+  const resolveMatch = url.pathname.match(/^\/v1\/runtime\/creators\/([^/]+)\/agents\/([^/]+)\/tools\/([^/]+)$/);
+  if (resolveMatch && request.method === "GET") {
+    const creatorId = creatorScope(request, response, context.publishToken);
+    if (!creatorId) return;
+    const pathCreatorId = decodeURIComponent(resolveMatch[1]!);
+    if (creatorId !== pathCreatorId) { sendJson(response, 403, { detail: "creator path does not match authenticated creator" }); return; }
+    try {
+      const connection = await context.store.resolveAgentToolConnection(creatorId, decodeURIComponent(resolveMatch[2]!), decodeURIComponent(resolveMatch[3]!));
+      sendJson(response, 200, connectionPayload(connection));
+    } catch (error) {
+      if (error instanceof ControlPlaneError) { sendJson(response, 404, { detail: error.message }); return; }
+      sendError(response, error);
+    }
+    return;
+  }
   sendJson(response, 404, { detail: "Route not found." });
+}
+
+function creatorScope(request: http.IncomingMessage, response: http.ServerResponse, publishToken: string): string | undefined {
+  if (!publishToken || bearer(request) !== publishToken) {
+    sendJson(response, 403, { detail: "A valid Registry publish token is required." });
+    return undefined;
+  }
+  const creatorId = request.headers["x-hatch-creator-id"];
+  if (typeof creatorId !== "string" || !creatorId.trim()) {
+    sendJson(response, 400, { detail: "X-Hatch-Creator-Id is required." });
+    return undefined;
+  }
+  return creatorId.trim();
+}
+
+function connectionPayload(connection: ToolConnection): Record<string, unknown> {
+  return { id: connection.id, creator_id: connection.creator_id, kind: connection.kind, secret_ref: connection.secret_ref, config: connection.config, status: connection.status };
 }
 
 async function authenticate(request: http.IncomingMessage, accounts: AccountStoreTs, secret: string, role?: AccountRole): Promise<Account | undefined> {
@@ -152,7 +223,7 @@ function sendError(response: http.ServerResponse, error: unknown, known: Record<
   const [status, detail] = known[message] ?? (error instanceof Error && error.name === "AgentCorpusVerificationError" ? [422, message] : [422, message]);
   sendJson(response, status, { detail });
 }
-function corsHeaders(): Record<string, string> { return { "access-control-allow-origin": "*", "access-control-allow-methods": "GET,POST,OPTIONS", "access-control-allow-headers": "authorization,content-type,x-hatch-creator-id" }; }
+function corsHeaders(): Record<string, string> { return { "access-control-allow-origin": "*", "access-control-allow-methods": "GET,POST,PUT,OPTIONS", "access-control-allow-headers": "authorization,content-type,x-hatch-creator-id" }; }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   createRegistryServerFromEnvironment().then(({ server }) => {

@@ -24,6 +24,7 @@ import { EntitlementError, FileEntitlementResolver, RegistryEntitlementResolver,
 import { findCompletedDelivery, recordCompletedDelivery, type CommerceEventSink, type DeliveryArtifact, type DeliveryBinding } from "./delivery.js";
 import { materializeCreatorRelease, permittedLocalTools } from "./releaseMaterialization.js";
 import { materializeAgentCorpusRoot } from "./releaseMaterialization.js";
+import { creatorToolControlPlaneFromEnvironment, resolveCreatorTools } from "./creatorTools.js";
 import { AgentCorpusResolver, createKnowledgeProvider, knowledgeProviderConfigured, type AgentCorpus } from "./agentCorpus.js";
 import {
   discoverSkills,
@@ -385,6 +386,18 @@ async function handleRuntimeSocket(
               agentId: binding.agentCorpus.agent_id
             });
             serverTools.setCreatorTools(binding.agentCorpus.tools.filter((tool) => tool.kind === "http_function" || tool.kind === "mcp_tool"));
+            // Creator-owned HTTP/MCP tools resolve through the Registry Control
+            // Plane only when it is configured. Without a Registry, the legacy
+            // HATCH_TOOL_CONNECTIONS environment bridge remains the fallback.
+            const creatorToolControlPlane = creatorToolControlPlaneFromEnvironment(process.env);
+            if (creatorToolControlPlane) {
+              serverTools.setResolvedCreatorTools(await resolveCreatorTools(
+                creatorToolControlPlane,
+                binding.agentCorpus.creator.id,
+                binding.agentCorpus.agent_id,
+                binding.agentCorpus
+              ));
+            }
           }
           hello = binding.release
             ? { ...message, local_tools: permittedLocalTools(binding.release, message.local_tools) }

@@ -70,6 +70,34 @@ test("Bocha web search fails closed when its API key is missing", async () => {
   );
 });
 
+test("Registry-resolved Creator tools execute through their connection closure instead of the environment bridge", async () => {
+  const executor = new ServerToolExecutor();
+  executor.setCreatorTools([{ id: "creator.market_data", kind: "http_function", connection_ref: "market-api", operation: "get_snapshot" }]);
+  const calls: Array<Record<string, unknown>> = [];
+  executor.setResolvedCreatorTools([{
+    id: "creator.market_data",
+    modelName: "creator_market_data",
+    kind: "http",
+    connectionRef: "market-api",
+    function: { name: "get_snapshot", description: "Get a snapshot.", parameters: {} },
+    execute: async (arguments_) => {
+      calls.push(arguments_);
+      return { price: 42 };
+    }
+  }]);
+  const result = await executor.executeCreatorTool({ id: "creator.market_data", kind: "http_function", connection_ref: "market-api", operation: "get_snapshot" }, { ticker: "HATCH" });
+  assert.deepEqual(result, { price: 42 });
+  assert.deepEqual(calls, [{ ticker: "HATCH" }]);
+});
+
+test("Creator tools without a Registry resolution still reject when not declared for the Agent", async () => {
+  const executor = new ServerToolExecutor();
+  await assert.rejects(
+    executor.executeCreatorTool({ id: "creator.unknown", kind: "http_function", connection_ref: "unused", operation: "x" }, {}),
+    /not enabled for this Agent/
+  );
+});
+
 function restoreEnv(name: string, value: string | undefined): void {
   if (value === undefined) delete process.env[name];
   else process.env[name] = value;

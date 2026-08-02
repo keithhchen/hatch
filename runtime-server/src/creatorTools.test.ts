@@ -22,7 +22,7 @@ test("Creator tools resolve through Control Plane without leaking connection dat
   const calls: Array<Record<string, unknown>> = [];
   const controlPlane: CreatorToolControlPlane = {
     async resolve(request) {
-      assert.equal(request.tenantId, "tenant-1");
+      assert.equal(request.creatorId, "creator-1");
       assert.equal(request.agentId, "agent-1");
       assert.equal(request.tool.kind, "http_function");
       if (request.tool.kind !== "http_function") throw new Error("unexpected MCP tool");
@@ -41,7 +41,7 @@ test("Creator tools resolve through Control Plane without leaking connection dat
     }
   };
 
-  const tools = await resolveCreatorTools(controlPlane, "tenant-1", "agent-1", corpus);
+  const tools = await resolveCreatorTools(controlPlane, "creator-1", "agent-1", corpus);
   assert.equal(tools.length, 1);
   assert.equal(tools[0]?.id, "creator.market-analysis");
   assert.equal(tools[0]?.modelName, "creator_market_analysis");
@@ -51,7 +51,7 @@ test("Creator tools resolve through Control Plane without leaking connection dat
 
 test("Creator tools fail closed when a Corpus requires a missing Control Plane", async () => {
   await assert.rejects(
-    () => resolveCreatorTools(undefined, "tenant-1", "agent-1", corpus),
+    () => resolveCreatorTools(undefined, "creator-1", "agent-1", corpus),
     /Control Plane/
   );
 });
@@ -61,9 +61,10 @@ test("Creator MCP tools use Streamable HTTP initialization, session headers, and
   const server = createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
     if (url.pathname.startsWith("/v1/runtime/")) {
+      assert.equal(request.headers["x-hatch-creator-id"], "creator-1");
       response.setHeader("content-type", "application/json");
       response.end(JSON.stringify({
-        id: "creator-mcp", tenant_id: "tenant-1", kind: "mcp", secret_ref: null,
+        id: "creator-mcp", creator_id: "creator-1", kind: "mcp", secret_ref: null,
         config: { url: `http://127.0.0.1:${(server.address() as { port: number }).port}/mcp` }, status: "active"
       }));
       return;
@@ -98,7 +99,7 @@ test("Creator MCP tools use Streamable HTTP initialization, session headers, and
       { id: "creator.market-data", kind: "mcp_tool", connection_ref: "creator-mcp", tool_name: "lookup" }
     ]
   } as unknown as AgentCorpus;
-  const tools = await resolveCreatorTools(controlPlane, "tenant-1", "agent-1", mcpCorpus);
+  const tools = await resolveCreatorTools(controlPlane, "creator-1", "agent-1", mcpCorpus);
   assert.equal(tools.length, 1);
   assert.equal(tools[0]?.id, "creator.market-data");
   assert.deepEqual(await tools[0]!.execute({ id: "AAPL" }), { content: [{ type: "text", text: "record:AAPL" }] });

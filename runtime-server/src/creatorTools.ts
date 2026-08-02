@@ -23,7 +23,7 @@ export type RuntimeCreatorTool = {
 };
 
 export type CreatorToolResolutionRequest = {
-  tenantId: string;
+  creatorId: string;
   agentId: string;
   tool: CreatorCorpusTool;
 };
@@ -39,7 +39,7 @@ export interface CreatorToolControlPlane {
 
 export async function resolveCreatorTools(
   controlPlane: CreatorToolControlPlane | undefined,
-  tenantId: string,
+  creatorId: string,
   agentId: string,
   corpus: AgentCorpus
 ): Promise<RuntimeCreatorTool[]> {
@@ -48,7 +48,7 @@ export async function resolveCreatorTools(
   if (!controlPlane) {
     throw new Error("Creator tool bindings are unavailable: configure the Hatch Control Plane before loading this Agent.");
   }
-  const resolved = (await Promise.all(declared.map((tool) => controlPlane.resolve({ tenantId, agentId, tool })))).flat();
+  const resolved = (await Promise.all(declared.map((tool) => controlPlane.resolve({ creatorId, agentId, tool })))).flat();
   const modelNames = new Set<string>();
   for (const tool of resolved) {
     if (!tool.id.startsWith("creator.")) throw new Error(`Control Plane returned an invalid Creator tool id: ${tool.id}`);
@@ -70,7 +70,7 @@ function emptyObjectSchema(): Record<string, unknown> {
 
 const ConnectionSchema = z.object({
   id: z.string().min(1),
-  tenant_id: z.string().min(1),
+  creator_id: z.string().min(1),
   kind: z.enum(["http", "mcp"]),
   secret_ref: z.string().min(1).nullable(),
   config: z.object({
@@ -105,6 +105,18 @@ export class EnvironmentSecretResolver implements SecretResolver {
  * Internal Registry client. It materializes creator tools server-side only;
  * the Desktop, model prompt, and Agent Corpus never receive connection data.
  */
+export function creatorToolControlPlaneFromEnvironment(
+  environment: NodeJS.ProcessEnv = process.env
+): RegistryCreatorToolControlPlane | undefined {
+  const registryUrl = environment.HATCH_REGISTRY_URL?.trim();
+  const serviceToken = environment.HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN?.trim();
+  if (!registryUrl && !serviceToken) return undefined;
+  if (!registryUrl || !serviceToken) {
+    throw new Error("HATCH_REGISTRY_URL and HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN must be configured together for Creator tools");
+  }
+  return new RegistryCreatorToolControlPlane({ registryUrl, serviceToken });
+}
+
 export class RegistryCreatorToolControlPlane implements CreatorToolControlPlane {
   constructor(
     private readonly options: {
@@ -158,10 +170,10 @@ export class RegistryCreatorToolControlPlane implements CreatorToolControlPlane 
 
   private async connectionFor(request: CreatorToolResolutionRequest): Promise<ResolvedConnection> {
     const base = this.options.registryUrl.replace(/\/$/, "");
-    const response = await fetch(`${base}/v1/runtime/tenants/${encodeURIComponent(request.tenantId)}/agents/${encodeURIComponent(request.agentId)}/tools/${encodeURIComponent(request.tool.id)}`, {
+    const response = await fetch(`${base}/v1/runtime/creators/${encodeURIComponent(request.creatorId)}/agents/${encodeURIComponent(request.agentId)}/tools/${encodeURIComponent(request.tool.id)}`, {
       headers: {
         authorization: `Bearer ${this.options.serviceToken}`,
-        "x-hatch-tenant-id": request.tenantId,
+        "x-hatch-creator-id": request.creatorId,
         accept: "application/json"
       },
       signal: timeoutSignal(this.options.timeoutMs)
@@ -170,7 +182,7 @@ export class RegistryCreatorToolControlPlane implements CreatorToolControlPlane 
     if (!response.ok) throw new Error(`Control Plane could not resolve ${request.tool.id}: HTTP ${response.status}`);
     const connection = ConnectionSchema.parse(JSON.parse(body));
     const expectedKind = request.tool.kind === "http_function" ? "http" : "mcp";
-    if (connection.tenant_id !== request.tenantId || connection.kind !== expectedKind || connection.id !== request.tool.connection_ref) {
+    if (connection.creator_id !== request.creatorId || connection.kind !== expectedKind || connection.id !== request.tool.connection_ref) {
       throw new Error(`Control Plane binding does not match declared Creator tool ${request.tool.id}`);
     }
     return connection;

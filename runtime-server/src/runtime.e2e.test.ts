@@ -1,5 +1,6 @@
 import { access, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import http from "node:http";
 import os from "node:os";
@@ -3284,6 +3285,113 @@ test("chat completions runtime executes configured MCP tools on the server event
   }
 });
 
+test("corpus session resolves Registry-bound Creator HTTP tools and executes them server-side", async () => {
+  const workspace = await tempWorkspace();
+  const dataDir = await tempWorkspace();
+  const corpusRoot = await tempWorkspace();
+
+  const digestText = (content: string): string => `sha256:${createHash("sha256").update(content).digest("hex")}`;
+  const asset = (id: string, filePath: string, content: string) => ({ id, path: filePath, sha256: digestText(content) });
+  const system = "Use the creator method.";
+  const synthetic = "[]";
+  const agentDirectory = path.join(corpusRoot, "maya-chen", "signal-review");
+  await mkdir(path.join(agentDirectory, "instructions"), { recursive: true });
+  await mkdir(path.join(agentDirectory, "evals"), { recursive: true });
+  await writeFile(path.join(agentDirectory, "instructions", "system.md"), system, "utf8");
+  await writeFile(path.join(agentDirectory, "evals", "synthetic.json"), synthetic, "utf8");
+  await writeFile(path.join(agentDirectory, "evals", "held-out.json"), synthetic, "utf8");
+  await writeFile(path.join(agentDirectory, "agent.json"), JSON.stringify({
+    contract_version: "1",
+    agent_id: "signal-review",
+    creator: { id: "maya-chen", name: "Maya Chen" },
+    product: { id: "signal-review", name: "Signal Review" },
+    instructions: { system: asset("system", "instructions/system.md", system) },
+    skills: [],
+    knowledge: { documents: [] },
+    tools: [
+      { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" },
+      { id: "hatch.file_search", kind: "hatch_builtin", capability: "file_search" },
+      { id: "creator.market_data", kind: "http_function", connection_ref: "market-api", operation: "get_snapshot", description: "Get a market snapshot.", input_schema: { type: "object", properties: { ticker: { type: "string" } }, required: ["ticker"], additionalProperties: false } }
+    ],
+    evaluations: {
+      synthetic_qa: [asset("synthetic", "evals/synthetic.json", synthetic)],
+      held_out: [asset("held-out", "evals/held-out.json", synthetic)]
+    }
+  }), "utf8");
+
+  const toolHits: Array<Record<string, any>> = [];
+  const toolServer = http.createServer((req, res) => {
+    void (async () => {
+      const body = JSON.parse(await readRequestBody(req)) as Record<string, any>;
+      toolHits.push(body);
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ price: 42, ticker: body.ticker }));
+    })().catch((error) => {
+      res.writeHead(500);
+      res.end(error instanceof Error ? error.message : String(error));
+    });
+  });
+  await new Promise<void>((resolve) => toolServer.listen(0, "127.0.0.1", resolve));
+  const toolAddress = toolServer.address();
+  assert.ok(toolAddress && typeof toolAddress !== "string");
+
+  const registryHits: string[] = [];
+  const registryServer = http.createServer((req, res) => {
+    const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    if (url.pathname.startsWith("/v1/runtime/creators/")) {
+      registryHits.push(url.pathname);
+      assert.equal(req.headers["x-hatch-creator-id"], "maya-chen");
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({
+        id: "market-api",
+        creator_id: "maya-chen",
+        kind: "http",
+        secret_ref: null,
+        config: { url: `http://127.0.0.1:${toolAddress.port}/snapshot` },
+        status: "active"
+      }));
+      return;
+    }
+    res.writeHead(404);
+    res.end("not found");
+  });
+  await new Promise<void>((resolve) => registryServer.listen(0, "127.0.0.1", resolve));
+  const registryAddress = registryServer.address();
+  assert.ok(registryAddress && typeof registryAddress !== "string");
+
+  const mock = await createMockCreatorToolChatCompletionsServer();
+  process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
+  process.env.HATCH_AGENT_CORPUS_ROOT = corpusRoot;
+  process.env.HATCH_REGISTRY_URL = `http://127.0.0.1:${registryAddress.port}`;
+  process.env.HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN = "internal-test";
+  process.env.MOONSHOT_API_KEY = "test-key";
+  process.env.OPENAI_BASE_URL = mock.baseUrl;
+  process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
+
+  runtimeServer = createRuntimeServer();
+  const serverUrl = await listen(runtimeServer);
+  try {
+    const result = await runLocalHarness({
+      serverUrl,
+      workspace,
+      creatorId: "maya-chen",
+      agentId: "signal-review",
+      prompt: "Get a market snapshot for HATCH."
+    });
+
+    assert.match(result.finalText, /snapshot observed/);
+    assert.deepEqual(registryHits, ["/v1/runtime/creators/maya-chen/agents/signal-review/tools/creator.market_data"]);
+    assert.equal(toolHits.length, 1);
+    assert.deepEqual(toolHits[0], { ticker: "HATCH" });
+    const chat = mock.requests[0];
+    assert.ok(chat?.tools?.some((tool: Record<string, any>) => tool.function?.name === "creator.market_data"));
+  } finally {
+    await mock.close();
+    await new Promise<void>((resolve, reject) => registryServer.close((error) => error ? reject(error) : resolve()));
+    await new Promise<void>((resolve, reject) => toolServer.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
 test("chat completions runtime returns recoverable tool failures to the model", async () => {
   const workspace = await tempWorkspace();
   const dataDir = await tempWorkspace();
@@ -6082,6 +6190,80 @@ async function createMockUnknownToolChatCompletionsServer(): Promise<{
   if (!address || typeof address === "string") {
     throw new Error("Expected mock server to listen on a TCP port");
   }
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}/v1`,
+    requests,
+    close: async () => {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  };
+}
+
+async function createMockCreatorToolChatCompletionsServer(): Promise<{
+  baseUrl: string;
+  requests: Array<Record<string, any>>;
+  close: () => Promise<void>;
+}> {
+  const requests: Array<Record<string, any>> = [];
+  const server = http.createServer((req, res) => {
+    void (async () => {
+      if (req.method !== "POST" || req.url !== "/v1/chat/completions") {
+        res.writeHead(404);
+        res.end("not found");
+        return;
+      }
+      const body = JSON.parse(await readRequestBody(req)) as Record<string, any>;
+      requests.push(body);
+      // The corpus session hands the executed tool result to the model as a
+      // single compressed user evidence message, so the second request carries
+      // no `tool` role. A real model answers from that evidence; the mock
+      // issues the tool call once and then finishes.
+      if (requests.length === 1) {
+        writeSse(res, [
+          {
+            choices: [{
+              index: 0,
+              delta: {
+                role: "assistant",
+                tool_calls: [{
+                  index: 0,
+                  id: "call_creator_tool",
+                  type: "function",
+                  function: {
+                    name: "creator.market_data",
+                    arguments: JSON.stringify({ ticker: "HATCH" })
+                  }
+                }]
+              },
+              finish_reason: null
+            }]
+          },
+          {
+            choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }]
+          }
+        ]);
+        return;
+      }
+      const evidenceMessage = body.messages.find((message: Record<string, unknown>) =>
+        message.role === "user" && String(message.content ?? "").includes("<approved_local_tool_evidence>"));
+      assert.ok(evidenceMessage && String(evidenceMessage.content ?? "").includes("42"));
+      writeSse(res, [
+        {
+          choices: [{
+            index: 0,
+            delta: { role: "assistant", content: "Market snapshot observed." },
+            finish_reason: "stop"
+          }]
+        }
+      ]);
+    })().catch((error) => {
+      res.writeHead(500);
+      res.end(error instanceof Error ? error.message : String(error));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Expected mock server to listen on a TCP port");
   return {
     baseUrl: `http://127.0.0.1:${address.port}/v1`,
     requests,
