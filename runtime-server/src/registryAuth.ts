@@ -99,7 +99,8 @@ function normalizeSignup(email: string, password: string, role: AccountRole, dis
 
 function accountId(role: AccountRole, displayName: string): string {
   const slug = displayName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  return slug || `${role}_${randomUUID().replaceAll("-", "").slice(0, 12)}`;
+  const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
+  return `${slug || role}_${suffix}`;
 }
 function derivePassword(password: string, salt: Buffer): string { return scryptSync(password, salt, 64, { N: 2 ** 14, r: 8, p: 1 }).toString("base64url"); }
 function encodeJson(value: Record<string, unknown>): string { return Buffer.from(JSON.stringify(value)).toString("base64url"); }
