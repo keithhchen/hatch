@@ -32,6 +32,7 @@ import {
   visibleSkillsForSession
 } from "./skills.js";
 import { verifyHatchAuthToken } from "./authToken.js";
+import { registryTtsFromEnvironment, RegistryTtsSynthesizer, RegistryVoiceStatusResolver, type TtsSynthesizer } from "./agentVoice.js";
 
 export type RuntimeServer = {
   server: http.Server;
@@ -52,6 +53,9 @@ export type RuntimeServerOptions = {
    * not fail just because the buyer took a moment to read the proposed diff.
    */
   clientToolTimeoutMs?: number;
+  /** Registry-backed text-to-speech relay for creator voice playback. */
+  ttsSynthesizer?: TtsSynthesizer;
+  voiceStatusResolver?: RegistryVoiceStatusResolver;
 };
 
 /**
@@ -94,6 +98,13 @@ export async function createRuntimeServerFromEnvironment(
       : undefined,
     agentCorpusResolver: environment.HATCH_AGENT_CORPUS_ROOT?.trim()
       ? new AgentCorpusResolver(environment.HATCH_AGENT_CORPUS_ROOT.trim())
+      : undefined,
+    ttsSynthesizer: registryTtsFromEnvironment(environment),
+    voiceStatusResolver: environment.HATCH_REGISTRY_URL?.trim() && environment.HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN?.trim()
+      ? new RegistryVoiceStatusResolver({
+          registryUrl: environment.HATCH_REGISTRY_URL.trim(),
+          serviceToken: environment.HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN.trim()
+        })
       : undefined
   });
 }
@@ -136,7 +147,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   const agentCorpusResolver = options.agentCorpusResolver
     ?? (process.env.HATCH_AGENT_CORPUS_ROOT ? new AgentCorpusResolver(process.env.HATCH_AGENT_CORPUS_ROOT) : undefined);
   const server = http.createServer((req, res) => {
-    void handleHttpRequest(req, res, releaseResolver, entitlementResolver, agentCorpusResolver);
+    void handleHttpRequest(req, res, releaseResolver, entitlementResolver, agentCorpusResolver, options.ttsSynthesizer, options.voiceStatusResolver);
   });
 
   const wss = new WebSocketServer({ server, path: "/runtime" });
@@ -174,7 +185,9 @@ async function handleHttpRequest(
   res: http.ServerResponse,
   releaseResolver?: CreatorReleaseResolver,
   entitlementResolver?: EntitlementResolver,
-  agentCorpusResolver?: AgentCorpusResolver
+  agentCorpusResolver?: AgentCorpusResolver,
+  ttsSynthesizer?: TtsSynthesizer,
+  voiceStatusResolver?: RegistryVoiceStatusResolver
 ): Promise<void> {
   setCorsHeaders(res);
   if (req.method === "OPTIONS") {
@@ -253,9 +266,88 @@ async function handleHttpRequest(
           presentation: release.public.presentation
         };
         }));
-      writeJson(res, 200, { creator_agents: creatorAgents });
+      let voiceByCreator = new Map<string, { enabled: boolean; label: string | null }>();
+      if (voiceStatusResolver) {
+        try {
+          voiceByCreator = await voiceStatusResolver.byCreator();
+        } catch {
+          // Voice availability is presentational; a failed catalog fetch
+          // must not block the agent library.
+        }
+      }
+      const creatorAgentsWithVoice = creatorAgents.map((agent) => {
+        const creatorId = "creator_id" in agent && typeof agent.creator_id === "string"
+          ? agent.creator_id
+          : (agent as { creator?: { id?: unknown } }).creator?.id ?? "";
+        const voice = typeof creatorId === "string" ? voiceByCreator.get(creatorId) : undefined;
+        if (!voice?.enabled) return agent;
+        return { ...agent, voice };
+      });
+      writeJson(res, 200, { creator_agents: creatorAgentsWithVoice });
     } catch (error) {
       writeJson(res, 403, { error: { code: "entitlement_lookup_failed", message: errorMessage(error) } });
+    }
+    return;
+  }
+
+  if (req.method === "POST" && url.pathname === "/v1/tts") {
+    const authToken = bearerToken(req);
+    if (!authToken) {
+      writeJson(res, 401, { error: { code: "authentication_required", message: "Sign in to use voice playback." } });
+      return;
+    }
+    if (!ttsSynthesizer) {
+      writeJson(res, 503, { error: { code: "tts_unavailable", message: "Voice playback is temporarily unavailable." } });
+      return;
+    }
+    let body: Record<string, unknown>;
+    try {
+      body = JSON.parse(await readBody(req)) as Record<string, unknown>;
+    } catch {
+      writeJson(res, 400, { error: { code: "invalid_body", message: "Request body must be valid JSON." } });
+      return;
+    }
+    const creatorId = typeof body.creator_id === "string" ? body.creator_id.trim() : "";
+    const agentId = typeof body.agent_id === "string" ? body.agent_id.trim() : "";
+    const text = typeof body.text === "string" ? body.text.trim() : "";
+    if (!creatorId || !agentId || !text) {
+      writeJson(res, 400, { error: { code: "invalid_tts_request", message: "creator_id, agent_id and text are required." } });
+      return;
+    }
+    if (text.length > 5000) {
+      writeJson(res, 400, { error: { code: "text_too_long", message: "text must be 5000 characters or fewer." } });
+      return;
+    }
+    const previousRequestIds = Array.isArray(body.previous_request_ids)
+      ? body.previous_request_ids.filter((item): item is string => typeof item === "string")
+      : [];
+    if (entitlementResolver) {
+      try {
+        const entitlement = await entitlementResolver.resolve({
+          authToken,
+          licenseToken: authToken,
+          entitlementId: typeof body.entitlement_id === "string" ? body.entitlement_id : ""
+        });
+        if (entitlement.creator_id !== creatorId || (isAgentCorpusEntitlement(entitlement) && entitlement.agent_id !== agentId)) {
+          writeJson(res, 403, { error: { code: "entitlement_mismatch", message: "This voice is not covered by your purchase." } });
+          return;
+        }
+      } catch (error) {
+        writeJson(res, 403, { error: { code: "entitlement_required", message: errorMessage(error) } });
+        return;
+      }
+    }
+    try {
+      const result = await ttsSynthesizer.synthesize({ creatorId, agentId, text, previousRequestIds });
+      setCorsHeaders(res);
+      res.writeHead(200, {
+        "content-type": "audio/mpeg",
+        "content-length": result.audio.byteLength,
+        ...(result.requestId ? { "x-request-id": result.requestId } : {})
+      });
+      res.end(Buffer.from(result.audio));
+    } catch (error) {
+      writeJson(res, 502, { error: { code: "tts_failed", message: errorMessage(error) } });
     }
     return;
   }
@@ -1074,6 +1166,18 @@ function bearerToken(req: http.IncomingMessage): string | undefined {
   if (typeof authorization !== "string") return undefined;
   const match = authorization.match(/^Bearer\s+(.+)$/i);
   return match?.[1]?.trim() || undefined;
+}
+
+async function readBody(req: http.IncomingMessage, max = 1024 * 1024): Promise<string> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += value.byteLength;
+    if (size > max) throw new Error("Request body is too large");
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 function deliveryBindingFromSession(binding: SessionBinding): DeliveryBinding | undefined {

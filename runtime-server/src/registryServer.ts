@@ -3,21 +3,25 @@ import http from "node:http";
 import { URL } from "node:url";
 import { AccountStoreTs, accountPublic, createAuthToken, verifyAuthToken, verifyPassword, type Account, type AccountRole } from "./registryAuth.js";
 import { ControlPlaneError, RegistryStoreTs, type ToolConnection } from "./registryStore.js";
-import { ElevenLabsVoiceProvider } from "./voice.js";
+import { ElevenLabsVoiceProvider, type VoiceProvider } from "./voice.js";
 
 export type RegistryServer = { server: http.Server; close: () => Promise<void> };
 
-export async function createRegistryServerFromEnvironment(environment: NodeJS.ProcessEnv = process.env): Promise<RegistryServer> {
+export async function createRegistryServerFromEnvironment(
+  environment: NodeJS.ProcessEnv = process.env,
+  voiceProvider?: VoiceProvider,
+): Promise<RegistryServer> {
   const store = await RegistryStoreTs.open({
     environment,
-    voiceProvider: ElevenLabsVoiceProvider.fromEnvironment(environment),
+    voiceProvider: voiceProvider ?? ElevenLabsVoiceProvider.fromEnvironment(environment),
   });
   const accounts = new AccountStoreTs(store.databasePool());
   await accounts.ensureSchema();
   const publishToken = environment.HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN?.trim() || "";
+  const runtimeToken = environment.HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN?.trim() || "";
   const authSecret = environment.HATCH_AUTH_SIGNING_SECRET?.trim() || "";
   const server = http.createServer((request, response) => {
-    void route(request, response, { store, accounts, publishToken, authSecret }).catch((error) => {
+    void route(request, response, { store, accounts, publishToken, runtimeToken, authSecret }).catch((error) => {
       sendJson(response, 500, { detail: error instanceof Error ? error.message : String(error) });
     });
   });
@@ -33,7 +37,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
 async function route(
   request: http.IncomingMessage,
   response: http.ServerResponse,
-  context: { store: RegistryStoreTs; accounts: AccountStoreTs; publishToken: string; authSecret: string },
+  context: { store: RegistryStoreTs; accounts: AccountStoreTs; publishToken: string; runtimeToken: string; authSecret: string },
 ): Promise<void> {
   if (request.method === "OPTIONS") { response.writeHead(204, corsHeaders()); response.end(); return; }
   const url = new URL(request.url ?? "/", "http://registry.local");
@@ -116,6 +120,8 @@ async function route(
   if (voiceMatch && request.method === "GET") {
     const account = await authenticate(request, context.accounts, context.authSecret, "creator");
     if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
+    const pathCreatorId = decodeURIComponent(voiceMatch[1]!);
+    if (account.id !== pathCreatorId) { sendJson(response, 403, { detail: "creator path does not match authenticated creator" }); return; }
     const asset = context.store.getVoice(account.id);
     if (!asset) { sendJson(response, 404, { detail: "No voice asset for this creator." }); return; }
     sendJson(response, 200, asset);
@@ -124,13 +130,18 @@ async function route(
   if (voiceMatch && request.method === "DELETE") {
     const account = await authenticate(request, context.accounts, context.authSecret, "creator");
     if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
+    const pathCreatorId = decodeURIComponent(voiceMatch[1]!);
+    if (account.id !== pathCreatorId) { sendJson(response, 403, { detail: "creator path does not match authenticated creator" }); return; }
     await context.store.revokeVoice(account.id);
     sendJson(response, 204, undefined);
     return;
   }
 
   if (url.pathname === "/v1/tts" && request.method === "POST") {
-    if (!context.publishToken || bearer(request) !== context.publishToken) { sendJson(response, 403, { detail: "A valid Registry publish token is required." }); return; }
+    const supplied = bearer(request) ?? "";
+    const authorized = Boolean(context.publishToken && supplied === context.publishToken)
+      || Boolean(context.runtimeToken && supplied === context.runtimeToken);
+    if (!authorized) { sendJson(response, 403, { detail: "A valid Registry service token is required." }); return; }
     const body = await readJson(request);
     const creatorId = String(body.creator_id ?? "").trim();
     const agentId = String(body.agent_id ?? "").trim();
