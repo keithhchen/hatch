@@ -5,12 +5,12 @@ import "@fontsource-variable/noto-sans-sc";
 import "@fontsource-variable/noto-serif-sc";
 import "@fontsource/instrument-serif/400.css";
 import "@fontsource/dm-mono/400.css";
-import { dashboardRequest, formatMoney, orderStatusLabel, productStatusLabel } from "./data.js";
+import { dashboardRequest, fetchVoice, formatMoney, orderStatusLabel, productStatusLabel, revokeVoice, uploadVoice } from "./data.js";
 import "../../packages/brand/tokens.css";
 import hatchMarkUrl from "../../packages/brand/hatch-mark.svg";
 import "./styles.css";
 
-const NAVIGATION = ["Home", "Products", "Orders", "Payouts"];
+const NAVIGATION = ["Home", "Products", "Voice", "Orders", "Payouts"];
 const PROFILE_KEY = "hatch.account.profile";
 
 function storedProfile() {
@@ -27,19 +27,22 @@ function App() {
   const [active, setActive] = useState("Home");
   const [overview, setOverview] = useState(null);
   const [agents, setAgents] = useState([]);
+  const [voice, setVoice] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(Boolean(token));
   const [publishing, setPublishing] = useState(false);
 
   async function loadDashboard(activeToken = token) {
-    const [nextProfile, nextOverview, nextAgents] = await Promise.all([
+    const [nextProfile, nextOverview, nextAgents, nextVoice] = await Promise.all([
       dashboardRequest("/v1/creator/me", { token: activeToken }),
       dashboardRequest("/v1/creator/overview", { token: activeToken }),
-      dashboardRequest("/v1/creator/agents", { token: activeToken })
+      dashboardRequest("/v1/creator/agents", { token: activeToken }),
+      fetchVoice(activeToken)
     ]);
     setProfile(nextProfile);
     setOverview(nextOverview);
     setAgents(nextAgents);
+    setVoice(nextVoice);
   }
 
   useEffect(() => {
@@ -135,6 +138,7 @@ function App() {
         {error ? <div className="notice" role="alert">{error}</div> : null}
         {active === "Home" ? <Home profile={profile} overview={overview} agents={agents} onPublish={publish} publishing={publishing} /> : null}
         {active === "Products" ? <Products products={overview.products} agents={agents} onPublish={publish} publishing={publishing} /> : null}
+        {active === "Voice" ? <VoicePage voice={voice} token={token} onVoiceChange={setVoice} onError={setError} /> : null}
         {active === "Orders" ? <Orders orders={overview.recent_orders} /> : null}
         {active === "Payouts" ? <Payouts metrics={overview.metrics} /> : null}
       </main>
@@ -248,6 +252,151 @@ function UserPortal({ token, profile, onLogout }) {
   }
   const libraryKeys = new Set(library.map((agent) => `${agent.creator_id}:${agent.agent_id}`));
   return <div className="dashboard-shell"><aside className="sidebar"><button className="wordmark hatch-wordmark"><img className="hatch-mark" src={hatchMarkUrl} alt="" />Hatch.</button><nav><button className="active">Explore</button><button>My agents</button></nav><div className="creator-card"><div className="avatar">{profile.initials}</div><div><strong>{profile.display_name}</strong><span>{profile.handle}</span></div><button className="sign-out" onClick={onLogout}>↗</button></div></aside><main className="dashboard-main"><header className="page-heading"><span className="eyebrow">Creator Agents</span><h1>Methods you can use.</h1><p>Choose an Agent built around a Creator’s way of working.</p></header>{error ? <div className="notice">{error}</div> : null}<section className="agent-grid">{catalog.map((agent) => { const key = `${agent.creator_id}:${agent.agent_id}`; const available = libraryKeys.has(key); return <article className="agent-tile" key={key}><span className="eyebrow">{agent.creator_name}</span><h2>{agent.product_name}</h2><p>{agent.product_description || "A Creator Agent"}</p><div className="agent-offer"><span>Free for now</span><button className="secondary" disabled={available || purchasing === key} onClick={() => purchase(agent)}>{available ? "Available" : purchasing === key ? "Completing…" : "Purchase"}</button></div></article>; })}</section><section className="agent-list"><div className="section-title"><div><span className="eyebrow">Your library</span><h2>Agents you can use</h2></div></div><div className="agent-grid">{library.map((agent) => <article className="agent-tile" key={agent.entitlement_id}><span className="status-chip published">Available</span><h3>{agent.product?.name}</h3><p>{agent.product?.description}</p></article>)}</div></section>{orders.length ? <section className="orders-card buyer-orders"><div className="section-title"><div><span className="eyebrow">Order history</span><h2>Your purchases</h2></div></div><div className="order-list">{orders.map((order) => <div className="order-row" key={order.order_id}><div><strong>{order.product_name || "Agent product"}</strong><span>{new Date(order.occurred_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span></div><div><strong>Free</strong><span className={`order-status ${order.status}`}>{order.status === "refunded" ? "Refunded" : "Paid"}</span></div></div>)}</div></section> : null}</main></div>;
+}
+
+function VoicePage({ voice, token, onVoiceChange, onError }) {
+  const [draft, setDraft] = useState(null);
+  const [consentChecked, setConsentChecked] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [revoking, setRevoking] = useState(false);
+
+  async function saveDraft() {
+    if (!draft || !consentChecked) return;
+    setSaving(true);
+    onError("");
+    try {
+      const asset = await uploadVoice(draft, token);
+      onVoiceChange(asset);
+      setDraft(null);
+      setConsentChecked(false);
+    } catch (nextError) {
+      onError(nextError.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function revoke() {
+    if (!window.confirm("Remove your voice? Your agents will no longer read replies aloud.")) return;
+    setRevoking(true);
+    onError("");
+    try {
+      await revokeVoice(token);
+      onVoiceChange(null);
+    } catch (nextError) {
+      onError(nextError.message);
+    } finally {
+      setRevoking(false);
+    }
+  }
+
+  if (voice?.status === "active") {
+    return (
+      <section>
+        <header className="page-heading"><span className="eyebrow">Voice</span><h1>Your voice, ready.</h1><p>Your agents can read replies aloud in your voice. Buyers hear a clearly labelled AI synthesis.</p></header>
+        <article className="voice-card ready">
+          <div className="product-topline"><span className="status-chip published">Active</span><span>{voice.sample.format.toUpperCase()} · {formatSampleSize(voice.sample.size_bytes)}</span></div>
+          <h2>Enabled on every published agent under your name.</h2>
+          <p>Record a new sample any time to replace it. Buyers always see an “AI-synthesised voice” label.</p>
+          <div className="voice-actions">
+            <button className="secondary" disabled={revoking} onClick={revoke}>{revoking ? "Removing…" : "Remove voice"}</button>
+          </div>
+        </article>
+        <RecorderPanel draft={draft} setDraft={setDraft} />
+        {draft ? <DraftPreview draft={draft} saving={saving} consentChecked={consentChecked} setConsentChecked={setConsentChecked} onSave={saveDraft} onCancel={() => setDraft(null)} /> : null}
+      </section>
+    );
+  }
+
+  return (
+    <section>
+      <header className="page-heading"><span className="eyebrow">Voice</span><h1>Let buyers hear you.</h1><p>Record or upload 1–2 minutes of your voice. Your agents will read replies aloud in it.</p></header>
+      <EmptyState title="Your agents stay text-only until you add a voice." body="1–2 minutes of clear, steady speech works best. You can remove it any time." />
+      <RecorderPanel draft={draft} setDraft={setDraft} />
+      {draft ? <DraftPreview draft={draft} saving={saving} consentChecked={consentChecked} setConsentChecked={setConsentChecked} onSave={saveDraft} onCancel={() => setDraft(null)} /> : null}
+    </section>
+  );
+}
+
+function RecorderPanel({ draft, setDraft }) {
+  const [recording, setRecording] = useState(false);
+  const [seconds, setSeconds] = useState(0);
+  const recorderRef = React.useRef(null);
+  const timerRef = React.useRef(null);
+  const inputRef = React.useRef(null);
+
+  function stopAndCapture() {
+    const recorder = recorderRef.current;
+    if (!recorder || recorder.state !== "recording") return;
+    setRecording(false);
+    window.clearInterval(timerRef.current);
+    recorder.stop();
+    recorder.onstop = () => {
+      const blob = new Blob(recorder.chunks, { type: recorder.mimeType });
+      setDraft(blob);
+      recorderRef.current = null;
+    };
+  }
+
+  async function startRecording() {
+    setSeconds(0);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mimeType = MediaRecorder.isTypeSupported("audio/mp4") ? "audio/mp4" : "";
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      recorder.chunks = [];
+      recorder.ondataavailable = (event) => { if (event.data.size) recorder.chunks.push(event.data); };
+      recorderRef.current = recorder;
+      recorder.start();
+      setRecording(true);
+      timerRef.current = window.setInterval(() => setSeconds((value) => value + 1), 1000);
+    } catch {
+      window.alert("Microphone access is required to record your voice. You can upload an audio file instead.");
+    }
+  }
+
+  return (
+    <div className="recorder-panel">
+      <div className="recorder-row">
+        <button className={recording ? "secondary recording" : "primary"} onClick={recording ? stopAndCapture : startRecording} disabled={Boolean(draft)}>
+          {recording ? `Stop · ${seconds}s` : draft ? "Record again" : "Record your voice"}
+        </button>
+        <button className="secondary" disabled={recording || Boolean(draft)} onClick={() => inputRef.current?.click()}>Upload audio</button>
+        <input ref={inputRef} type="file" accept="audio/*" hidden onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) setDraft(file);
+          event.target.value = "";
+        }} />
+      </div>
+      {draft ? null : <small>Tip: read naturally for 1–2 minutes in a quiet room.</small>}
+    </div>
+  );
+}
+
+function DraftPreview({ draft, saving, consentChecked, setConsentChecked, onSave, onCancel }) {
+  const [playing, setPlaying] = useState(false);
+  const audioRef = React.useRef(null);
+  const source = URL.createObjectURL(draft);
+  return (
+    <div className="draft-preview">
+      <span className="eyebrow">Sample ready</span>
+      <h3>{draft.type === "audio/mp4" ? "M4A" : "Audio"} · {Math.round(draft.size / 1024)}KB</h3>
+      <audio ref={audioRef} src={source} onPlay={() => setPlaying(true)} onEnded={() => setPlaying(false)} />
+      <div className="recorder-row">
+        <button className="secondary" onClick={() => { if (playing) { audioRef.current?.pause(); setPlaying(false); } else { void audioRef.current?.play(); } }}>{playing ? "Pause" : "Preview"}</button>
+        <button className="primary" disabled={!consentChecked || saving} onClick={onSave}>{saving ? "Saving…" : "Use this voice"}</button>
+        <button className="secondary" disabled={saving} onClick={onCancel}>Discard</button>
+      </div>
+      <label className="consent-line">
+        <input type="checkbox" checked={consentChecked} onChange={(event) => setConsentChecked(event.target.checked)} />
+        <span>I confirm this is my own voice, and I authorise Hatch to synthesise it for my Agents. Buyers will see an “AI-synthesised voice” label, and I can remove it at any time.</span>
+      </label>
+    </div>
+  );
+}
+
+function formatSampleSize(bytes) {
+  return bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)}MB` : `${Math.round(bytes / 1024)}KB`;
 }
 
 function ProductCard({ product, onPublish, publishing, featured = false }) {

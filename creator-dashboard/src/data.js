@@ -3,7 +3,7 @@ export async function dashboardRequest(path, options = {}) {
   const response = await fetch(path, {
     ...options,
     headers: {
-      ...(options.body ? { "content-type": "application/json" } : {}),
+      ...(typeof options.body === "string" ? { "content-type": "application/json" } : {}),
       ...(token ? { authorization: `Bearer ${token}` } : {}),
       ...(options.headers ?? {})
     }
@@ -17,6 +17,27 @@ export async function dashboardRequest(path, options = {}) {
     throw error;
   }
   return payload;
+}
+
+export async function fetchVoice(token) {
+  try {
+    return await dashboardRequest("/v1/creator/voice", { token });
+  } catch (error) {
+    if (error.status === 404) return null;
+    throw error;
+  }
+}
+
+export async function uploadVoice(blob, token) {
+  const form = new FormData();
+  form.append("files", blob, "voice-sample");
+  form.append("consent_version", "v1");
+  if (typeof blob.type === "string" && blob.type) form.append("format", blob.type);
+  return dashboardRequest("/v1/creator/voice", { method: "PUT", body: form, token });
+}
+
+export async function revokeVoice(token) {
+  return dashboardRequest("/v1/creator/voice", { method: "DELETE", token });
 }
 
 export function formatMoney(minor, currency = "USD") {

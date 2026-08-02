@@ -89,7 +89,7 @@ h1, h2 { font-family: var(--hatch-font-display); font-weight: 400; }
 .agent-tile small { color: #8a8378; font-family: var(--hatch-font-mono); font-size: 10px; }
 .agent-offer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 18px; color: #8a8378; font-size: 12px; }
 .agent-offer .secondary { min-height: 36px; padding-inline: 14px; font-size: 12px; }
-.product-card, .earnings-card, .orders-card, .payout-card, .empty-state {
+.product-card, .earnings-card, .orders-card, .payout-card, .empty-state, .voice-card, .draft-preview {
   border: 1px solid var(--hatch-border-subtle);
   border-radius: 22px;
   background: color-mix(in srgb, var(--hatch-panel) 84%, transparent);
@@ -250,3 +250,18 @@ h1, h2 { font-family: var(--hatch-font-display); font-weight: 400; }
   .payout-card { padding: 30px; }
   .payout-card > strong { font-size: 56px; }
 }
+
+.voice-card { max-width: 780px; padding: 28px; }
+.voice-card.ready { display: grid; gap: 12px; }
+.voice-card h2 { margin: 14px 0 8px; font-size: 27px; letter-spacing: -.01em; }
+.voice-card p { margin: 0 0 18px; color: #81796f; font-size: 15px; line-height: 1.65; }
+.voice-actions { display: flex; gap: 10px; margin-top: 6px; }
+.recorder-panel { margin-top: 28px; padding: 24px 0 4px; border-top: 1px solid var(--hatch-border-subtle); }
+.recorder-panel small { color: #8a8378; font-size: 12px; }
+.recorder-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.recorder-row button.recording { color: #a2492e; background: #f8d9ca; }
+.draft-preview { max-width: 780px; margin-top: 18px; padding: 27px; display: grid; gap: 12px; }
+.draft-preview h3 { margin: 2px 0; font-size: 27px; }
+.draft-preview audio { display: none; }
+.consent-line { display: grid; grid-template-columns: 18px 1fr; gap: 10px; align-items: start; margin-top: 8px; font-size: 13px; line-height: 1.5; color: #81796f; }
+.consent-line input { margin-top: 2px; }

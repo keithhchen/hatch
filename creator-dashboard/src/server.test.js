@@ -273,3 +273,97 @@ function serverUrl(server) {
   const address = server.address();
   return `http://127.0.0.1:${address.port}`;
 }
+
+test("creator voice proxy relays upload, status, and revocation to the Registry", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-voice-"));
+  const productCatalogPath = path.join(directory, "product-catalog.json");
+  await writeFile(productCatalogPath, JSON.stringify({ schema_version: "1", products: [] }, null, 2));
+  process.env.HATCH_CREATOR_DASHBOARD_ALLOW_EMPTY_CATALOG = "1";
+
+  let voiceMethod;
+  let voicePath;
+  let voiceAuthorization;
+  let voiceContentType;
+  let voiceBodyBytes = 0;
+  const registry = createServer(async (request, response) => {
+    const requestUrl = new URL(request.url ?? "/", "http://registry.test");
+    const chunks = [];
+    for await (const chunk of request) chunks.push(chunk);
+    voiceMethod = request.method;
+    voicePath = requestUrl.pathname;
+    voiceAuthorization = request.headers.authorization;
+    voiceContentType = request.headers["content-type"];
+    voiceBodyBytes = Buffer.concat(chunks).byteLength;
+    response.setHeader("content-type", "application/json");
+    if (requestUrl.pathname === "/v1/auth/signin") {
+      response.end(JSON.stringify({ token: "signed-maya-token", account: { id: "maya-chen", role: "creator", display_name: "Maya Chen" } }));
+      return;
+    }
+    if (requestUrl.pathname === "/v1/auth/me") {
+      response.end(JSON.stringify({ id: "maya-chen", role: "creator", display_name: "Maya Chen" }));
+      return;
+    }
+    if (request.method === "PUT") {
+      response.end(JSON.stringify({ voice_id: "v_test", creator_id: "maya-chen", provider: "elevenlabs", status: "active" }));
+      return;
+    }
+    if (request.method === "DELETE") {
+      response.statusCode = 204;
+      response.end();
+      return;
+    }
+    if (requestUrl.pathname.endsWith("/voice")) {
+      response.end(JSON.stringify({ voice_id: "v_test", creator_id: "maya-chen", provider: "elevenlabs", status: "active" }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ detail: "not found" }));
+  });
+  await listen(registry);
+  context.after(() => registry.close());
+
+  const dashboard = await createDashboardApp({
+    fixture: { profiles: [{ email: "creator@example.test", password: "test-only", id: "maya-chen", role: "creator", display_name: "Maya Chen" }] },
+    productCatalogPath,
+    ledgerPath: path.join(directory, "ledger.jsonl"),
+    productStatePath: path.join(directory, "product-state.json"),
+    registryUrl: serverUrl(registry),
+    registryPublishServiceToken: "registry-service-test-token"
+  });
+  const api = createServer(dashboard.handler);
+  await listen(api);
+  context.after(() => api.close());
+
+  const login = await fetch(`${serverUrl(api)}/v1/auth/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "creator@example.test", password: "test-only" })
+  });
+  const { token } = await login.json();
+  const headers = { authorization: `Bearer ${token}` };
+
+  const status = await fetch(`${serverUrl(api)}/v1/creator/voice`, { headers });
+  assert.equal(status.status, 200);
+  assert.equal((await status.json()).voice_id, "v_test");
+  assert.equal(voicePath, "/v1/creators/maya-chen/voice");
+
+  const boundary = "----voice-test-boundary";
+  const form = Buffer.from(
+    `--${boundary}\r\nContent-Disposition: form-data; name="files"; filename="v.mp3"\r\nContent-Type: audio/mpeg\r\n\r\n\xff\xfb\x90\x64\r\n--${boundary}\r\nContent-Disposition: form-data; name="consent_version"\r\n\r\nv1\r\n--${boundary}--\r\n`
+  );
+  const upload = await fetch(`${serverUrl(api)}/v1/creator/voice`, {
+    method: "PUT",
+    headers: { ...headers, "content-type": `multipart/form-data; boundary=${boundary}` },
+    body: form
+  });
+  assert.equal(upload.status, 201);
+  assert.equal((await upload.json()).provider, "elevenlabs");
+  assert.equal(voiceMethod, "PUT");
+  assert.ok(voiceContentType.includes("multipart/form-data"));
+  assert.ok(voiceBodyBytes > 50);
+
+  const removal = await fetch(`${serverUrl(api)}/v1/creator/voice`, { method: "DELETE", headers });
+  assert.equal(removal.status, 204);
+  assert.equal(voiceMethod, "DELETE");
+  assert.equal(voiceAuthorization, `Bearer ${token}`);
+});

@@ -184,6 +184,33 @@ export async function createDashboardApp(options = {}) {
         if (request.method === "GET" && url.pathname === "/v1/creator/me") {
           return send(response, 200, publicProfile(profile));
         }
+        if (request.method === "GET" && url.pathname === "/v1/creator/voice") {
+          const voice = await registryRequest(registryUrl, `/v1/creators/${encodeURIComponent(profile.id)}/voice`, {
+            fetchImpl,
+            headers: { authorization: `Bearer ${bearerToken(request)}` },
+            allow404: true
+          });
+          if (voice === null) return send(response, 404, { error: { code: "voice_not_configured", message: "Record your voice to enable voice playback." } });
+          return send(response, 200, voice);
+        }
+        if (request.method === "PUT" && url.pathname === "/v1/creator/voice") {
+          const voice = await registryRequest(registryUrl, `/v1/creators/${encodeURIComponent(profile.id)}/voice`, {
+            method: "PUT",
+            fetchImpl,
+            headers: { authorization: `Bearer ${bearerToken(request)}` },
+            rawBody: await readRaw(request),
+            rawContentType: request.headers["content-type"]
+          });
+          return send(response, 201, voice);
+        }
+        if (request.method === "DELETE" && url.pathname === "/v1/creator/voice") {
+          await registryRequest(registryUrl, `/v1/creators/${encodeURIComponent(profile.id)}/voice`, {
+            method: "DELETE",
+            fetchImpl,
+            headers: { authorization: `Bearer ${bearerToken(request)}` }
+          });
+          return send(response, 204, undefined);
+        }
         if (request.method === "GET" && url.pathname === "/v1/creator/overview") {
           return send(response, 200, {
             metrics: projection.metrics,
@@ -301,14 +328,21 @@ export async function startDashboardServer(options = {}) {
 
 async function registryRequest(registryUrl, pathname, options = {}) {
   const fetchImpl = options.fetchImpl ?? fetch;
-  const { fetchImpl: _fetchImpl, ...requestOptions } = options;
+  const { fetchImpl: _fetchImpl, allow404, rawBody, rawContentType, ...requestOptions } = options;
+  const headers = rawBody === undefined
+    ? { "content-type": "application/json", ...(options.headers ?? {}) }
+    : { ...(options.headers ?? {}) };
+  if (rawBody !== undefined && rawContentType) headers["content-type"] = rawContentType;
   const response = await fetchImpl(new URL(pathname, registryUrl), {
     ...requestOptions,
-    headers: { "content-type": "application/json", ...(options.headers ?? {}) }
+    ...(rawBody !== undefined ? { body: rawBody } : {}),
+    headers
   });
-  const payload = await response.json();
+  if (response.status === 204) return undefined;
+  const payload = await response.json().catch(() => null);
   if (!response.ok) {
-    const error = new Error(payload.detail ?? "Registry rejected the release.");
+    if (allow404 && response.status === 404) return null;
+    const error = new Error(payload?.detail ?? "Registry rejected the release.");
     error.status = response.status;
     error.code = "registry_rejected_release";
     throw error;
@@ -408,6 +442,18 @@ async function readJson(request) {
   let content = "";
   for await (const chunk of request) content += chunk;
   return content ? JSON.parse(content) : {};
+}
+
+async function readRaw(request, max = 32 * 1024 * 1024) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of request) {
+    const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += value.byteLength;
+    if (size > max) throw Object.assign(new Error("Request body is too large"), { status: 413 });
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks);
 }
 
 function send(response, status, body) {

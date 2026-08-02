@@ -110,7 +110,7 @@ async function route(
         creatorId: account.id,
         creatorName: account.display_name || account.id,
         sample,
-        sampleFormat: "mp3",
+        sampleFormat: parts.fields.format?.trim() || "mp3",
         consentVersion,
       });
       sendJson(response, 201, asset);
