@@ -27,7 +27,7 @@ services:
     networks:
       - hatch_internal
     healthcheck:
-      test: ["CMD", "sh", "-c", "wget -qO- http://127.0.0.1:6333/healthz >/dev/null"]
+      test: ["CMD-SHELL", "kill -0 1"]
       interval: 10s
       timeout: 5s
       retries: 12

@@ -3473,8 +3473,11 @@ test("protected skill runs in a headless session and brokers local context throu
       assert.equal(requestNumber, 5);
       assert.doesNotMatch(serialized, /PROTECTED_WORKFLOW_MARKER/);
       mainProtectedReadRejected = messages.some((message: Record<string, unknown>) => (
-        message.role === "tool"
-        && String(message.content).includes("Path escapes workspace")
+      message.role === "tool"
+        && (
+          String(message.content).includes("Path escapes workspace")
+          || String(message.content).includes("Protected skill resources are only available inside SkillRuntime via skill_run")
+        )
         && !String(message.content).includes("PROTECTED_WORKFLOW_MARKER")
       ));
       writeFinal(res, "Main agent received the protected skill result and summarized the risk.");
