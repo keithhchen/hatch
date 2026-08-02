@@ -50,6 +50,15 @@ jobs:
           tags: ${{ steps.image.outputs.prefix }}/dashboard:${{ env.RELEASE_TAG }}
           cache-from: type=gha,scope=dashboard
           cache-to: type=gha,mode=max,scope=dashboard
+      - name: Push Caddy image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.caddy
+          push: true
+          tags: ${{ steps.image.outputs.prefix }}/caddy:${{ env.RELEASE_TAG }}
+          cache-from: type=gha,scope=caddy
+          cache-to: type=gha,mode=max,scope=caddy
 
   deploy:
     runs-on: [self-hosted, linux, x64, hatch-prod]
@@ -59,7 +68,7 @@ jobs:
       - name: Prepare application definition
         run: |
           set -euo pipefail
-          install -m 640 compose.app.yml Caddyfile /opt/hatch/
+          install -m 640 compose.app.yml /opt/hatch/
       - name: Pull and switch application containers
         env:
           GHCR_USERNAME: ${{ github.actor }}
@@ -72,7 +81,6 @@ jobs:
           cd /opt/hatch
           test -f .env
           test -f compose.app.yml
-          test -f Caddyfile
           grep -q '^HATCH_DOMAIN=' .env
           for key in LLM_API_KEY HATCH_REGISTRY_DATABASE_URL HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN HATCH_AUTH_SIGNING_SECRET DASHSCOPE_API_KEY POSTGRES_PASSWORD; do
             grep -Eq "^${key}=[^[:space:]]+" .env || { echo "Missing non-empty $key in /opt/hatch/.env"; exit 1; }
@@ -81,7 +89,7 @@ jobs:
           if test -f .release.env; then
             cp -f .release.env .release.env.previous
           fi
-          printf 'HATCH_IMAGE_PREFIX=%s\nHATCH_RELEASE_TAG=%s\n' "$image_prefix" "$release_tag" > .release.env
+          printf 'HATCH_IMAGE_PREFIX=%s\nHATCH_RELEASE_TAG=%s\n' "$IMAGE_PREFIX" "$RELEASE_TAG" > .release.env
           docker compose --env-file .env --env-file .release.env -f compose.app.yml pull registry runtime dashboard caddy
           docker compose --env-file .env --env-file .release.env -f compose.app.yml up -d --no-deps registry runtime dashboard caddy
       - name: Verify public health endpoints

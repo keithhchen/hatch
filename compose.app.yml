@@ -69,7 +69,7 @@ services:
       retries: 12
 
   caddy:
-    image: ${CADDY_IMAGE:-caddy:2-alpine}
+    image: ${HATCH_IMAGE_PREFIX:-ghcr.io/example/hatch}/caddy:${HATCH_RELEASE_TAG:-dev}
     restart: unless-stopped
     environment:
       HATCH_DOMAIN: ${HATCH_DOMAIN:?set HATCH_DOMAIN in /opt/hatch/.env}
@@ -77,7 +77,6 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
     networks:
