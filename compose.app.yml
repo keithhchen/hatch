@@ -12,6 +12,8 @@ services:
       HATCH_REGISTRY_DATABASE_URL: ${HATCH_REGISTRY_DATABASE_URL:?set HATCH_REGISTRY_DATABASE_URL in /opt/hatch/.env}
       HATCH_AGENT_CORPUS_ROOT: /var/lib/hatch/corpora
       HATCH_QDRANT_URL: http://qdrant:6333
+      # Creator voice cloning and TTS provider key. Add to /opt/hatch/.env.
+      HATCH_ELEVENLABS_API_KEY: ${HATCH_ELEVENLABS_API_KEY:-}
     volumes:
       - corpus_data:/var/lib/hatch/corpora
     networks:
