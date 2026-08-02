@@ -8,40 +8,18 @@ permissions:
 
 jobs:
   bootstrap:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, hatch-prod]
     steps:
       - uses: actions/checkout@v4
-      - name: Configure SSH
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      - name: Prepare infrastructure definition
         run: |
           set -euo pipefail
-          test -n "$DEPLOY_HOST"
-          test -n "$DEPLOY_SSH_KEY"
-          install -m 700 -d "$HOME/.ssh"
-          printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/hatch_deploy"
-          chmod 600 "$HOME/.ssh/hatch_deploy"
-          ssh-keyscan -4 -T 10 -H "$DEPLOY_HOST" >> "$HOME/.ssh/known_hosts"
-      - name: Upload infrastructure definition
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-        run: |
-          set -euo pipefail
-          ssh -i "$HOME/.ssh/hatch_deploy" "$DEPLOY_USER@$DEPLOY_HOST" 'mkdir -p /opt/hatch'
-          scp -i "$HOME/.ssh/hatch_deploy" compose.infra.yml "$DEPLOY_USER@$DEPLOY_HOST:/opt/hatch/compose.infra.yml"
+          install -m 640 compose.infra.yml /opt/hatch/compose.infra.yml
       - name: Start infrastructure only
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
-          set -euo pipefail
-          ssh -i "$HOME/.ssh/hatch_deploy" "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' <<'REMOTE'
           set -euo pipefail
           cd /opt/hatch
           test -f .env
           docker network inspect hatch_internal >/dev/null 2>&1 || docker network create hatch_internal
           docker compose --env-file .env -f compose.infra.yml up -d postgres qdrant
           docker compose --env-file .env -f compose.infra.yml ps --status running postgres qdrant
-          REMOTE
