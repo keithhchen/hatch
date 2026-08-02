@@ -22,7 +22,7 @@ jobs:
           install -m 700 -d "$HOME/.ssh"
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/hatch_deploy"
           chmod 600 "$HOME/.ssh/hatch_deploy"
-          ssh-keyscan -H "$DEPLOY_HOST" >> "$HOME/.ssh/known_hosts"
+          ssh-keyscan -4 -T 10 -H "$DEPLOY_HOST" >> "$HOME/.ssh/known_hosts"
       - name: Upload infrastructure definition
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
