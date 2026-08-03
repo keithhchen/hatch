@@ -20,12 +20,15 @@ import "../../../packages/brand/tokens.css";
 import hatchMarkUrl from "../../../packages/brand/hatch-mark.svg";
 import "./styles.css";
 import {
-  ADVERTISED_LOCAL_TOOLS,
   DEFAULT_CREATOR_AGENT,
+  DEFAULT_PERMISSION_POLICY,
+  PERMISSION_POLICIES,
   PRODUCT_COPY,
   canStartConversation,
   creatorAgentFromSession,
   creatorAgentFromEntitlement,
+  CHANGE_TOOLS,
+  localToolsForPermissionPolicy,
   profileStorageKey,
   requiresUserApproval,
   workspaceGrantLabel
@@ -40,7 +43,6 @@ import {
 } from "./auth-session.js";
 
 const PROTOCOL_VERSION = "0.3";
-const LOCAL_TOOLS = ADVERTISED_LOCAL_TOOLS;
 const SKILL_ACTIVITY_PART = "hatch.skill_activity";
 const SKILL_RUN_ACTIVITY_PART = "hatch.skill_run_activity";
 const LOCAL_TOOL_TIMEOUT_MS = 45_000;
@@ -48,6 +50,12 @@ const DEFAULT_RUNTIME_URL = import.meta.env.VITE_HATCH_RUNTIME_URL || "wss://hat
 const DEFAULT_AUTH_URL = import.meta.env.VITE_HATCH_AUTH_URL || "https://hatch.tokenquadrant.cn";
 const CONFIGURED_AUTH_SESSION = configuredAuthSession();
 const EMPTY_PROFILE = Object.freeze({ id: "anonymous", name: "User", initials: "U" });
+const PERMISSION_MODES = Object.freeze([
+  { value: PERMISSION_POLICIES.READ_ONLY, label: "Read only", detail: "Read files only" },
+  { value: PERMISSION_POLICIES.ASK_BEFORE_CHANGES, label: "Ask before changes", detail: "Ask before file changes" },
+  { value: PERMISSION_POLICIES.ALLOW_CHANGES, label: "Allow changes", detail: "Allow file changes" }
+]);
+const DEFAULT_PERMISSION_MODE = DEFAULT_PERMISSION_POLICY;
 const ApprovalContext = createContext(null);
 
 function App() {
@@ -57,7 +65,16 @@ function App() {
   // therefore use the latest explicit grant, not a stale render closure.
   const workspaceRef = useRef("");
   const activeRunRef = useRef(null);
-  const imeRef = useRef({ composing: false, guardUntil: 0 });
+  const permissionRef = useRef(DEFAULT_PERMISSION_MODE);
+  const shellAccessRef = useRef(true);
+  const imeRef = useRef({ composing: false });
+  const connectedRef = useRef(false);
+  const connectingRef = useRef(false);
+  const connectionTokenRef = useRef(0);
+  const connectionConfigRef = useRef(null);
+  const reconnectTimerRef = useRef(null);
+  const reconnectAttemptRef = useRef(0);
+  const intentionalDisconnectRef = useRef(true);
   const approvalResolversRef = useRef(new Map());
   const [serverUrl] = useState(DEFAULT_RUNTIME_URL);
   const [workspace, setWorkspace] = useState("");
@@ -69,6 +86,8 @@ function App() {
   const [signInStatus, setSignInStatus] = useState("idle");
   const [signInError, setSignInError] = useState("");
   const [workspaceGranted, setWorkspaceGranted] = useState(false);
+  const [permissionMode, setPermissionMode] = useState(DEFAULT_PERMISSION_MODE);
+  const [shellAccess, setShellAccess] = useState(true);
   const [interruptedRun, setInterruptedRun] = useState(null);
   const [conversationId, setConversationId] = useState("desktop-chat");
   const [status, setStatus] = useState("Offline");
@@ -119,7 +138,7 @@ function App() {
   const sendUserMessage = useCallback(async (appendMessage) => {
     const socket = socketRef.current;
     if (!connected || !socket || socket.readyState !== WebSocket.OPEN) {
-      setStatus("Service unavailable. Try reconnecting.");
+      setStatus("Service unavailable. Your message will stay here.");
       return;
     }
     if (activeRunRef.current) {
@@ -170,24 +189,21 @@ function App() {
 
   const startImeComposition = useCallback(() => {
     imeRef.current.composing = true;
-    imeRef.current.guardUntil = Number.POSITIVE_INFINITY;
   }, []);
 
   const endImeComposition = useCallback(() => {
     imeRef.current.composing = false;
-    imeRef.current.guardUntil = performance.now() + 180;
   }, []);
 
   const resetImeComposition = useCallback(() => {
     imeRef.current.composing = false;
-    imeRef.current.guardUntil = 0;
   }, []);
 
   const stopImeEnterSubmit = useCallback((event) => {
     if (event.key !== "Enter") return;
     const nativeEvent = event.nativeEvent ?? event;
-    const guardActive = performance.now() < imeRef.current.guardUntil;
-    if (imeRef.current.composing || nativeEvent.isComposing || nativeEvent.keyCode === 229 || guardActive) {
+    if (imeRef.current.composing || nativeEvent.isComposing || nativeEvent.keyCode === 229) {
+      event.preventDefault();
       event.stopPropagation();
     }
   }, []);
@@ -196,18 +212,31 @@ function App() {
     const workspaceKey = profileStorageKey(buyerProfile.id, "workspaceRoot");
     const conversationKey = profileStorageKey(buyerProfile.id, "conversationId");
     const activeRunKey = profileStorageKey(buyerProfile.id, "activeRun");
+    const permissionKey = profileStorageKey(buyerProfile.id, "permissionMode");
+    const shellKey = profileStorageKey(buyerProfile.id, "shellAccess");
     const savedWorkspace = localStorage.getItem(workspaceKey) || "";
     const savedConversationId = localStorage.getItem(conversationKey) || `conversation_${buyerProfile.id}`;
     const savedRun = parseStoredJson(localStorage.getItem(activeRunKey));
+    const savedPermission = localStorage.getItem(permissionKey);
+    const nextPermission = PERMISSION_MODES.some((mode) => mode.value === savedPermission)
+      ? savedPermission
+      : DEFAULT_PERMISSION_MODE;
+    const nextShellAccess = nextPermission === PERMISSION_POLICIES.READ_ONLY
+      ? false
+      : localStorage.getItem(shellKey) !== "false";
     setWorkspace(savedWorkspace);
     workspaceRef.current = savedWorkspace;
     setWorkspaceDraft(savedWorkspace);
     setWorkspaceGranted(Boolean(savedWorkspace));
     setConversationId(savedConversationId);
+    permissionRef.current = nextPermission;
+    setPermissionMode(nextPermission);
+    shellAccessRef.current = nextShellAccess;
+    setShellAccess(nextShellAccess);
     if (savedRun) {
       activeRunRef.current = savedRun;
       setInterruptedRun(savedRun);
-      setStatus("Task paused — reconnect to recover it");
+      setStatus("Task paused — restoring connection");
     } else {
       activeRunRef.current = null;
       setInterruptedRun(null);
@@ -215,11 +244,31 @@ function App() {
   }, [buyerProfile.id]);
 
   useEffect(() => () => {
+    intentionalDisconnectRef.current = true;
+    window.clearTimeout(reconnectTimerRef.current);
+    reconnectTimerRef.current = null;
     socketRef.current?.close();
   }, []);
 
+  useEffect(() => {
+    if (!signedIn || !workspaceGranted || !workspace || !selectedEntitlementId) return;
+    if (connectedRef.current || socketRef.current || connectingRef.current) return;
+    void connectRuntime({ workspace, conversationId, preserveMessages: true });
+  }, [conversationId, selectedEntitlementId, signedIn, workspace, workspaceGranted]);
+
+  function scheduleRuntimeReconnect() {
+    if (intentionalDisconnectRef.current || reconnectTimerRef.current || !connectionConfigRef.current) return;
+    const attempt = reconnectAttemptRef.current;
+    const delay = Math.min(10_000, 800 * 2 ** Math.min(attempt, 4));
+    reconnectAttemptRef.current += 1;
+    reconnectTimerRef.current = window.setTimeout(() => {
+      reconnectTimerRef.current = null;
+      void connectRuntime({ ...connectionConfigRef.current, preserveMessages: true });
+    }, delay);
+  }
+
   async function connectRuntime(connection = {}) {
-    if (connected || socketRef.current) return;
+    if (connectedRef.current || socketRef.current || connectingRef.current) return;
     const targetServerUrl = connection.serverUrl || serverUrl;
     const targetWorkspace = connection.workspace || workspace;
     const targetConversationId = connection.conversationId || conversationId;
@@ -228,10 +277,21 @@ function App() {
     const targetAgentId = connection.agentId || selectedEntitlement?.agent_id;
     const targetCreatorId = connection.creatorId || selectedEntitlement?.creator_id;
     if (!targetServerUrl.trim() || !targetWorkspace.trim() || !buyerSession?.accessToken || !targetEntitlementId) {
-      setStatus("Choose a folder before connecting.");
+      setStatus("Choose a folder before starting the connection.");
       return;
     }
 
+    const requestToken = ++connectionTokenRef.current;
+    connectingRef.current = true;
+    intentionalDisconnectRef.current = false;
+    connectionConfigRef.current = {
+      serverUrl: targetServerUrl.trim(),
+      workspace: targetWorkspace.trim(),
+      conversationId: targetConversationId.trim() || `conversation_${buyerProfile.id}`,
+      entitlementId: targetEntitlementId,
+      ...(targetAgentId ? { agentId: targetAgentId } : {}),
+      ...(targetCreatorId ? { creatorId: targetCreatorId } : {})
+    };
     localStorage.setItem(profileStorageKey(buyerProfile.id, "workspaceRoot"), targetWorkspace.trim());
     localStorage.setItem(profileStorageKey(buyerProfile.id, "conversationId"), targetConversationId.trim() || `conversation_${buyerProfile.id}`);
 
@@ -242,6 +302,7 @@ function App() {
       });
       setWorkspace(normalizedWorkspace);
       workspaceRef.current = normalizedWorkspace;
+      connectionConfigRef.current.workspace = normalizedWorkspace;
       setStatus("Loading history...");
       const activeConversationId = targetConversationId.trim() || "desktop-chat";
       const history = await loadConversationHistory(
@@ -251,17 +312,27 @@ function App() {
         buyerSession.accessToken,
         { agentId: targetAgentId, creatorId: targetCreatorId }
       );
-      setMessages(history.map(historyMessageToThreadMessage));
+      if (!connection.preserveMessages || messages.length === 0) {
+        setMessages(history.map(historyMessageToThreadMessage));
+      }
       setStatus("Connecting...");
     } catch (error) {
-      setStatus(errorMessage(error));
+      if (requestToken === connectionTokenRef.current) {
+        setStatus(`Connection unavailable — ${errorMessage(error)}`);
+        scheduleRuntimeReconnect();
+      }
       return;
+    } finally {
+      if (requestToken === connectionTokenRef.current) connectingRef.current = false;
     }
+
+    if (requestToken !== connectionTokenRef.current || intentionalDisconnectRef.current) return;
 
     const socket = new WebSocket(targetServerUrl.trim());
     socketRef.current = socket;
     socket.addEventListener("open", () => {
-      send({
+      if (socketRef.current !== socket) return;
+      socket.send(JSON.stringify({
         type: "client.hello",
         protocol_version: PROTOCOL_VERSION,
         installation_id: "desktop-local-install",
@@ -271,33 +342,47 @@ function App() {
         ...(targetCreatorId ? { creator_id: targetCreatorId } : {}),
         client_version: "0.1.0",
         workspace_root: normalizedWorkspace,
-        local_tools: LOCAL_TOOLS,
-      });
+        local_tools: localToolsForPermissionPolicy(permissionRef.current, { enableShell: shellAccessRef.current }),
+      }));
     });
     socket.addEventListener("message", (event) => {
+      if (socketRef.current !== socket) return;
       void handleRuntimeMessage(JSON.parse(event.data));
     });
     socket.addEventListener("error", () => {
       setStatus("Connection problem. Your work has been kept.");
     });
     socket.addEventListener("close", () => {
+      if (socketRef.current !== socket) return;
       rejectPendingApprovals();
       socketRef.current = null;
+      connectedRef.current = false;
       setConnected(false);
       setRunning(false);
       if (activeRunRef.current) {
         setInterruptedRun(activeRunRef.current);
-        setStatus("Task paused — your work has been kept");
+      }
+      if (!intentionalDisconnectRef.current) {
+        setStatus("Connection lost — restoring your session…");
+        scheduleRuntimeReconnect();
       } else {
-        setStatus("Offline — reconnect when you're ready");
+        setStatus(activeRunRef.current ? "Task paused — your work has been kept" : "Offline");
       }
     });
   }
 
   function disconnectRuntime() {
+    intentionalDisconnectRef.current = true;
+    connectionTokenRef.current += 1;
+    connectingRef.current = false;
+    window.clearTimeout(reconnectTimerRef.current);
+    reconnectTimerRef.current = null;
+    reconnectAttemptRef.current = 0;
     rejectPendingApprovals();
-    socketRef.current?.close();
+    const socket = socketRef.current;
     socketRef.current = null;
+    socket?.close();
+    connectedRef.current = false;
     setConnected(false);
     setRunning(false);
     setStatus(activeRunRef.current ? "Task paused — your work has been kept" : "Offline");
@@ -306,6 +391,8 @@ function App() {
   async function handleRuntimeMessage(message) {
     if (message.type === "session.ready") {
       setCreatorAgent(creatorAgentFromSession(message));
+      connectedRef.current = true;
+      reconnectAttemptRef.current = 0;
       setConnected(true);
       setStatus("Ready");
       return;
@@ -410,12 +497,17 @@ function App() {
   }
 
   async function handleToolRequest(message) {
-    if (message.name === "shell.exec") {
-      sendToolDenied(message, "Command execution is disabled because this build does not provide a complete OS sandbox.", "shell_disabled");
+    if (message.name === "shell.exec" && !shellAccessRef.current) {
+      sendToolDenied(message, "Shell access is disabled for this session.", "shell_disabled");
       return;
     }
-    let approvedByUser = false;
-    if (message.approval === "ask" || requiresUserApproval(message.name)) {
+    const isChange = CHANGE_TOOLS.includes(message.name);
+    if (permissionRef.current === PERMISSION_POLICIES.READ_ONLY && isChange) {
+      sendToolDenied(message, "This permission mode allows reads only.", "permission_denied");
+      return;
+    }
+    let approvedByUser = permissionRef.current === PERMISSION_POLICIES.ALLOW_CHANGES && isChange;
+    if (!approvedByUser && (message.approval === "ask" || requiresUserApproval(message.name, permissionRef.current))) {
       const approved = await requestToolApproval(message);
       if (!approved) {
         upsertToolEvent({
@@ -493,25 +585,80 @@ function App() {
       setWorkspaceGranted(true);
       localStorage.setItem(profileStorageKey(buyerProfile.id, "workspaceRoot"), normalized);
       setStatus("Folder access granted");
-      await connectRuntime({ workspace: normalized, conversationId });
+      await connectRuntime({ workspace: normalized, conversationId, preserveMessages: false });
     } catch (error) {
       setStatus(errorMessage(error));
     }
   }
 
-  async function chooseWorkspace() {
+  async function chooseWorkspace({ activate = workspaceGranted } = {}) {
     try {
       const selected = await invokeTauri("pick_workspace_folder");
-      if (selected) setWorkspaceDraft(selected);
+      if (!selected) return;
+      setWorkspaceDraft(selected);
+      if (activate) await switchWorkspace(selected);
     } catch (error) {
       setStatus(errorMessage(error));
     }
+  }
+
+  async function switchWorkspace(nextWorkspace) {
+    const normalized = await invokeTauri("ensure_workspace", { workspaceRoot: nextWorkspace.trim() });
+    if (normalized === workspaceRef.current && connectedRef.current) return;
+
+    const activeRun = activeRunRef.current;
+    if (activeRun) {
+      send({ type: "turn.cancel", run_id: activeRun.runId, reason: "workspace_changed" });
+      finishAssistant(activeRun.assistantId, "Task stopped because the workspace changed.", "failed");
+      activeRunRef.current = null;
+      localStorage.removeItem(profileStorageKey(buyerProfile.id, "activeRun"));
+      setInterruptedRun(null);
+    }
+    disconnectRuntime();
+    setWorkspace(normalized);
+    workspaceRef.current = normalized;
+    setWorkspaceDraft(normalized);
+    setWorkspaceGranted(true);
+    localStorage.setItem(profileStorageKey(buyerProfile.id, "workspaceRoot"), normalized);
+    setStatus("Switching workspace…");
+    await connectRuntime({ workspace: normalized, conversationId, preserveMessages: true });
+  }
+
+  function updatePermissionMode(nextMode) {
+    if (!PERMISSION_MODES.some((mode) => mode.value === nextMode)) return;
+    const nextShellAccess = nextMode === PERMISSION_POLICIES.READ_ONLY ? false : shellAccessRef.current;
+    permissionRef.current = nextMode;
+    setPermissionMode(nextMode);
+    shellAccessRef.current = nextShellAccess;
+    setShellAccess(nextShellAccess);
+    localStorage.setItem(profileStorageKey(buyerProfile.id, "permissionMode"), nextMode);
+    localStorage.setItem(profileStorageKey(buyerProfile.id, "shellAccess"), String(nextShellAccess));
+    setStatus(`Permission updated: ${permissionModeLabel(nextMode)}`);
+    void restartRuntimeSession();
+  }
+
+  function updateShellAccess(nextValue) {
+    const nextShellAccess = Boolean(nextValue) && permissionRef.current !== PERMISSION_POLICIES.READ_ONLY;
+    shellAccessRef.current = nextShellAccess;
+    setShellAccess(nextShellAccess);
+    localStorage.setItem(profileStorageKey(buyerProfile.id, "shellAccess"), String(nextShellAccess));
+    setStatus(nextShellAccess ? "Shell access enabled — approval is still required" : "Shell access disabled");
+    void restartRuntimeSession();
+  }
+
+  async function restartRuntimeSession() {
+    const config = connectionConfigRef.current;
+    if (!config || !workspaceGranted) return;
+    disconnectRuntime();
+    await connectRuntime({ ...config, workspace: workspaceRef.current, preserveMessages: true });
   }
 
   function startNewConversation() {
     const guard = canStartConversation({ activeRun: activeRunRef.current, connected });
     if (!guard.allowed) {
-      setStatus(guard.reason);
+      setStatus(activeRunRef.current
+        ? "Stop or close the active task before starting another conversation."
+        : "Connect before starting a new conversation.");
       return;
     }
     const nextId = `conversation_${buyerProfile.id}_${Date.now()}`;
@@ -815,25 +962,50 @@ function App() {
 
       <section className="chat-shell">
         <header className="chat-header">
-          <div>
+          <div className="header-agent">
             <span className="label">Agent</span>
             <strong>{creatorAgent.name} · {creatorAgent.creator}</strong>
           </div>
-          <div>
-            <span className="label">Folder access</span>
-            <strong>{workspaceGranted ? `${workspaceGrantLabel(workspace)} · read allowed · changes ask first` : "No folder granted"}</strong>
-          </div>
+          <button
+            aria-label="Choose workspace folder"
+            className="workspace-selector secondary"
+            type="button"
+            onClick={() => void chooseWorkspace()}
+          >
+            <span className="label">Workspace folder</span>
+            <strong>{workspaceGranted ? workspaceGrantLabel(workspace) : "Choose a folder"}</strong>
+            <span className="workspace-selector-action">Change folder</span>
+          </button>
+          <label className="permission-control">
+            <span className="label">Permissions</span>
+            <select
+              aria-label="Workspace permissions"
+              value={permissionMode}
+              onChange={(event) => updatePermissionMode(event.target.value)}
+            >
+              {PERMISSION_MODES.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
+            </select>
+            <small>{permissionModeDetail(permissionMode)}</small>
+            <label className="shell-toggle">
+              <input
+                type="checkbox"
+                checked={shellAccess}
+                disabled={permissionMode === PERMISSION_POLICIES.READ_ONLY}
+                onChange={(event) => updateShellAccess(event.target.checked)}
+              />
+              <span>Shell access</span>
+              <small>{shellAccess ? "On · approval required" : "Off"}</small>
+            </label>
+          </label>
           {running ? (
-            <button className="secondary compact" onClick={() => void cancelRun()}>Stop</button>
-          ) : !connected && workspaceGranted ? (
-            <button className="secondary compact" onClick={() => void connectRuntime()}>Reconnect</button>
+            <button aria-label="Stop current task" className="secondary compact" type="button" onClick={() => void cancelRun()}>Stop</button>
           ) : null}
         </header>
 
         {!workspaceGranted ? (
           <WorkspaceGrant
             draft={workspaceDraft}
-            onChoose={() => void chooseWorkspace()}
+            onChoose={() => void chooseWorkspace({ activate: false })}
             onGrant={() => void grantWorkspace()}
             status={status}
           />
@@ -855,8 +1027,7 @@ function App() {
                     onCompositionEnd={endImeComposition}
                     onCompositionStart={startImeComposition}
                     onKeyDownCapture={stopImeEnterSubmit}
-                    onKeyUpCapture={stopImeEnterSubmit}
-                    placeholder={connected ? `Message ${creatorAgent.name}` : "Reconnect to continue this conversation"}
+                    placeholder={connected ? `Message ${creatorAgent.name}` : "Connection is restoring…"}
                     submitMode="enter"
                     rows={1}
                   />
@@ -869,8 +1040,7 @@ function App() {
         )}
         {interruptedRun ? (
           <div className="recovery-banner" role="alert">
-            <div><strong>Your task is safe.</strong><span>It paused before completion. Reconnect to recover it, or close it explicitly.</span></div>
-            <button className="secondary compact" type="button" onClick={() => void connectRuntime()}>Reconnect</button>
+            <div><strong>Your task is safe.</strong><span>It paused before completion. Hatch will restore the session automatically, or you can close it explicitly.</span></div>
             <button className="secondary compact" type="button" onClick={clearInterruptedRun}>Close task</button>
           </div>
         ) : null}
@@ -884,7 +1054,7 @@ async function loadConversationHistory(serverUrl, conversationId, entitlementId,
     headers: { authorization: `Bearer ${accessToken}` }
   });
   if (!response.ok) {
-    throw new Error("We couldn't reload this conversation. Try reconnecting.");
+    throw new Error("We couldn't reload this conversation.");
   }
   const payload = await response.json();
   const messages = Array.isArray(payload.messages) ? payload.messages : [];
@@ -1220,11 +1390,19 @@ function EmptyThread({ connected, creatorAgent }) {
       <p>
         {connected
           ? creatorAgent.description
-          : "Reconnect when you're ready. Your conversation and unfinished task stay here."}
+          : "Your conversation and unfinished task stay here while the connection is restored."}
       </p>
       {creatorAgent.boundary ? <small className="boundary-copy">{creatorAgent.boundary}</small> : null}
     </div>
   );
+}
+
+function permissionModeLabel(value) {
+  return PERMISSION_MODES.find((mode) => mode.value === value)?.label || "Ask before changes";
+}
+
+function permissionModeDetail(value) {
+  return PERMISSION_MODES.find((mode) => mode.value === value)?.detail || "Ask before file changes";
 }
 
 function SignInScreen({ profile, onSignIn, status, error }) {
