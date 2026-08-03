@@ -20,6 +20,10 @@
       "price_minor": 3900,
       "currency": "USD",
       "pricing_model": "per_delivery",
+      "publication": {
+        "status": "ready",
+        "summary": "The product completed package, live-task, and comparison checks and is ready to publish."
+      },
       "review": {
         "status": "ready",
         "scenarios_checked": 12,

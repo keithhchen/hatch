@@ -50,6 +50,9 @@ export async function createDashboardApp(options = {}) {
       if (request.method === "GET" && url.pathname === "/healthz") {
         return send(response, 200, { ok: true });
       }
+      if (request.method === "GET" && (url.pathname === "/portal" || url.pathname.startsWith("/portal/"))) {
+        return servePortalAsset(url.pathname, response);
+      }
       if (request.method === "POST" && url.pathname === "/v1/auth/login") {
         const body = await readJson(request);
         const auth = await registryRequest(registryUrl, "/v1/auth/signin", {
@@ -418,6 +421,61 @@ function send(response, status, body) {
   if (body === undefined) return response.end();
   response.setHeader("content-type", "application/json; charset=utf-8");
   response.end(JSON.stringify(body));
+}
+
+async function servePortalAsset(requestPath, response) {
+  let relativePath;
+  try {
+    relativePath = decodeURIComponent(requestPath === "/portal" || requestPath === "/portal/"
+      ? "index.html"
+      : requestPath.slice("/portal/".length));
+  } catch {
+    return send(response, 400, { error: { code: "invalid_path", message: "Invalid portal asset path." } });
+  }
+  if (!relativePath || path.isAbsolute(relativePath) || relativePath.split(/[\\/]/).includes("..")) {
+    return send(response, 400, { error: { code: "invalid_path", message: "Invalid portal asset path." } });
+  }
+  const assetRoot = path.join(currentDirectory, "dist");
+  const assetPath = path.join(assetRoot, relativePath);
+  try {
+    const body = await readFile(assetPath);
+    response.writeHead(200, {
+      "content-type": contentType(assetPath),
+      "cache-control": relativePath === "index.html" ? "no-cache" : "public, max-age=31536000, immutable"
+    });
+    response.end(body);
+    return;
+  } catch (error) {
+    if (error?.code !== "ENOENT" || path.extname(relativePath)) {
+      return send(response, error?.code === "ENOENT" ? 404 : 500, { error: { code: "portal_asset_not_found", message: "Portal asset not found." } });
+    }
+    // Client-side routes under /portal/ resolve through the SPA entrypoint.
+    try {
+      const body = await readFile(path.join(assetRoot, "index.html"));
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache" });
+      response.end(body);
+      return;
+    } catch (fallbackError) {
+      return send(response, 500, { error: { code: "portal_unavailable", message: fallbackError instanceof Error ? fallbackError.message : String(fallbackError) } });
+    }
+  }
+}
+
+function contentType(filePath) {
+  const extension = path.extname(filePath).toLowerCase();
+  return {
+    ".css": "text/css; charset=utf-8",
+    ".html": "text/html; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp"
+  }[extension] ?? "application/octet-stream";
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
