@@ -60,7 +60,7 @@ const manifest = {
     when_to_use: "Use when reviewing a resume against a chosen target role.",
     instruction: skill,
     references: [{ asset: method, kind: "reference" }],
-    allowed_tool_ids: ["hatch.web_search", "hatch.file_search"],
+    allowed_tool_ids: ["hatch.web_search", "hatch.file_search", "hatch.local.files"],
   }],
   knowledge: { documents: [
     { ...documents, retrieval_only: true, source_summary: "Normalized Creator corpus documents for evidence-grounded resume review." },
@@ -69,6 +69,7 @@ const manifest = {
   tools: [
     { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" },
     { id: "hatch.file_search", kind: "hatch_builtin", capability: "file_search" },
+    { id: "hatch.local.files", kind: "local_harness", capability: "filesystem" },
   ],
   evaluations: { synthetic_qa: [synthetic], held_out: [heldOut] },
 };
