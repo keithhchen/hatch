@@ -962,44 +962,51 @@ function App() {
 
       <section className="chat-shell">
         <header className="chat-header">
-          <div className="header-agent">
-            <span className="label">Agent</span>
-            <strong>{creatorAgent.name} · {creatorAgent.creator}</strong>
-          </div>
-          <button
-            aria-label="Choose workspace folder"
-            className="workspace-selector secondary"
-            type="button"
-            onClick={() => void chooseWorkspace()}
-          >
-            <span className="label">Workspace folder</span>
-            <strong>{workspaceGranted ? workspaceGrantLabel(workspace) : "Choose a folder"}</strong>
-            <span className="workspace-selector-action">Change folder</span>
-          </button>
-          <label className="permission-control">
-            <span className="label">Permissions</span>
-            <select
-              aria-label="Workspace permissions"
-              value={permissionMode}
-              onChange={(event) => updatePermissionMode(event.target.value)}
+          <div className="chat-context-row">
+            <div className="header-agent">
+              <span className="label">Agent</span>
+              <strong>{creatorAgent.name} · {creatorAgent.creator}</strong>
+            </div>
+            <button
+              aria-label="Choose workspace folder"
+              className="workspace-selector secondary"
+              type="button"
+              onClick={() => void chooseWorkspace()}
             >
-              {PERMISSION_MODES.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
-            </select>
-            <small>{permissionModeDetail(permissionMode)}</small>
-            <label className="shell-toggle">
-              <input
-                type="checkbox"
-                checked={shellAccess}
-                disabled={permissionMode === PERMISSION_POLICIES.READ_ONLY}
-                onChange={(event) => updateShellAccess(event.target.checked)}
-              />
-              <span>Shell access</span>
-              <small>{shellAccess ? "On · approval required" : "Off"}</small>
+              <span className="workspace-selector-icon" aria-hidden="true">⌂</span>
+              <span className="workspace-selector-copy">
+                <span className="label">Workspace</span>
+                <strong>{workspaceGranted ? workspaceGrantLabel(workspace) : "Choose a folder"}</strong>
+              </span>
+              <span className="workspace-selector-action">Change</span>
+            </button>
+          </div>
+          <div className="chat-settings-row">
+            <label className="permission-control">
+              <span className="label">Permissions</span>
+              <select
+                aria-label="Workspace permissions"
+                value={permissionMode}
+                onChange={(event) => updatePermissionMode(event.target.value)}
+              >
+                {PERMISSION_MODES.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
+              </select>
+              <small>{permissionModeDetail(permissionMode)}</small>
             </label>
-          </label>
-          {running ? (
-            <button aria-label="Stop current task" className="secondary compact" type="button" onClick={() => void cancelRun()}>Stop</button>
-          ) : null}
+            <label className="shell-toggle">
+              <span className="label">Shell access</span>
+              <span className="shell-toggle-row">
+                <input
+                  type="checkbox"
+                  checked={shellAccess}
+                  disabled={permissionMode === PERMISSION_POLICIES.READ_ONLY}
+                  onChange={(event) => updateShellAccess(event.target.checked)}
+                />
+                <strong>{shellAccess ? "On" : "Off"}</strong>
+              </span>
+              <small>Commands always ask for approval</small>
+            </label>
+          </div>
         </header>
 
         {!workspaceGranted ? (
