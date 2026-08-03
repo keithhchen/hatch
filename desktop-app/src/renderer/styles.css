@@ -1236,6 +1236,17 @@ h2 {
   min-width: 72px;
 }
 
+.stop-button {
+  background: #f4e1df;
+  border-color: #d9a19a;
+  color: #88362f;
+}
+
+.stop-button:hover {
+  background: #ecd0cc;
+  border-color: #c98279;
+}
+
 @media (max-width: 860px) {
   .app-shell {
     grid-template-columns: 1fr;

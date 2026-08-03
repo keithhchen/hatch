@@ -1031,7 +1031,18 @@ function App() {
                     submitMode="enter"
                     rows={1}
                   />
-                  <ComposerPrimitive.Send className="send-button">Send</ComposerPrimitive.Send>
+                  {running ? (
+                    <button
+                      aria-label="Stop streaming"
+                      className="send-button stop-button"
+                      type="button"
+                      onClick={() => void cancelRun()}
+                    >
+                      Stop
+                    </button>
+                  ) : (
+                    <ComposerPrimitive.Send className="send-button">Send</ComposerPrimitive.Send>
+                  )}
                 </ComposerPrimitive.Root>
               </ThreadPrimitive.ViewportFooter>
             </ThreadPrimitive.Root>
