@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ConversationMessage } from "./protocol.js";
 import { PROJECT_DOCS_CONTEXT_PREFIX } from "./projectDocs.js";
-import { requireKimiProviderConfig } from "./kimiProvider.js";
+import { kimiThinkingPayload, requireKimiProviderConfig } from "./kimiProvider.js";
 
 export const SUMMARY_PREFIX = "CONTEXT CHECKPOINT COMPACTION";
 export const RUNTIME_CONTEXT_PREFIX = "HATCH RUNTIME CONTEXT";
@@ -160,7 +160,7 @@ async function summarizeForCompaction(messages: RuntimeCompactionMessage[]): Pro
   const completion = await openai.chat.completions.create({
     model: provider.model,
     temperature: provider.temperature,
-    ...(provider.thinking.type === "disabled" ? {} : { thinking: provider.thinking }),
+    ...kimiThinkingPayload(),
     stream: false,
     messages: [
       { role: "system", content: SUMMARIZATION_PROMPT },

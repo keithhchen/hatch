@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import OpenAI from "openai";
-import { KIMI_TEMPERATURE, KIMI_THINKING, requireKimiProviderConfig } from "./kimiProvider.js";
+import { KIMI_TEMPERATURE, kimiThinkingPayload, requireKimiProviderConfig } from "./kimiProvider.js";
 import { CreatorReleasePublicSchema, CreatorReleaseResolver } from "./release.js";
 import { materializeCreatorRelease } from "./releaseMaterialization.js";
 
@@ -87,7 +87,7 @@ function parseArgs(values: string[]): { release: string; heldOut: string; output
 }
 
 async function complete(client: OpenAI, model: string, system: string, input: string): Promise<string> {
-  const request: any = { model, temperature: KIMI_TEMPERATURE, ...(KIMI_THINKING.type === "disabled" ? {} : { thinking: KIMI_THINKING }), max_completion_tokens: 1800, messages: [{ role: "system", content: system }, { role: "user", content: input }] };
+  const request: any = { model, temperature: KIMI_TEMPERATURE, ...kimiThinkingPayload(), max_completion_tokens: 1800, messages: [{ role: "system", content: system }, { role: "user", content: input }] };
   const response = await client.chat.completions.create(request);
   const content = response.choices?.[0]?.message?.content;
   if (!content?.trim()) throw new Error("Kimi comparison candidate returned no response");
@@ -100,7 +100,7 @@ function genericSystemPrompt(): string {
 
 async function judge(client: OpenAI, model: string, item: HeldOut, answerA: string, answerB: string): Promise<{ a_passed: boolean; b_passed: boolean; a_score: number; b_score: number; rationale: string }> {
   const request: any = {
-    model, temperature: KIMI_TEMPERATURE, ...(KIMI_THINKING.type === "disabled" ? {} : { thinking: KIMI_THINKING }), response_format: { type: "json_object" }, max_completion_tokens: 1200,
+    model, temperature: KIMI_TEMPERATURE, ...kimiThinkingPayload(), response_format: { type: "json_object" }, max_completion_tokens: 1200,
     messages: [{ role: "system", content: "You are an independent release evaluator. Judge two anonymous answers only against the supplied observable checks. Do not reward length, style, or hidden knowledge. Return JSON {a_passed:boolean,b_passed:boolean,a_score:number,b_score:number,rationale:string}; scores are 0 to 1." }, { role: "user", content: JSON.stringify({ probe: item.input, expected_behavior: item.expected_behavior, observable_checks: item.observable_checks, answer_a: answerA, answer_b: answerB }) }]
   };
   const response = await client.chat.completions.create(request);

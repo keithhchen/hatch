@@ -369,7 +369,7 @@ HATCH_REGISTRY_URL=http://registry:8100
 HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN=<runtime-service-token>
 ```
 
-Spec v1 uses Kimi K2.6 exclusively for Creator execution and context compaction. Every call uses the live-verified non-thinking profile: `thinking: { type: "disabled" }` with `temperature=1`; Kimi K2.6 currently rejects other temperature values. There is no alternate-model fallback. Use Kimi's official `LLM_API_KEY` variable for credentials.
+Spec v1 uses Kimi K2.6 exclusively for Creator execution and context compaction. Every call uses the live-verified non-thinking profile: `thinking: { type: "disabled" }` with `temperature=0.6`; omitting `thinking` makes Kimi enter its default reasoning mode and can consume the completion budget before returning a deliverable. There is no alternate-model fallback. Use Kimi's official `LLM_API_KEY` variable for credentials.
 Release-level Evals are the default Creator quality gate. Ordinary Creator products stream Kimi's actual response to the Consumer Desktop. `HATCH_RUNTIME_DELIVERY_AUDIT=enforce` is an optional regulated-deployment override: it performs a second Kimi claim audit before delivery and intentionally withholds text streaming until that audit finishes.
 `OPENAI_BASE_URL` falls back to `https://api.moonshot.cn/v1` and is restricted to official Moonshot endpoints (plus loopback test doubles). Use the `.ai` endpoint only with a matching international Kimi key. If any model override is present, it must be exactly `kimi-k2.6` or startup fails closed.
 `HATCH_MCP_SERVERS` is optional. When set, the model can call `mcp_call`; the server sends MCP `tools/call` JSON-RPC requests and the client never sees MCP credentials.

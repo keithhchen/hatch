@@ -16,7 +16,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { zipSync } from "fflate";
 import OpenAI from "openai";
-import { KIMI_TEMPERATURE, KIMI_THINKING, requireKimiProviderConfig } from "./kimiProvider.js";
+import { KIMI_TEMPERATURE, KIMI_THINKING, kimiThinkingPayload, requireKimiProviderConfig } from "./kimiProvider.js";
 
 const execFile = promisify(execFileCallback);
 // A repair is deliberately a small agent-authored patch, never a local
@@ -371,7 +371,7 @@ async function askFactoryAgent(openai: OpenAI, model: string, system: string, us
     messages: [{ role: "system", content: system }, { role: "user", content: user }],
     response_format: { type: "json_object" },
     max_completion_tokens: 18_000,
-    ...(KIMI_THINKING.type === "disabled" ? {} : { thinking: KIMI_THINKING }),
+    ...kimiThinkingPayload(),
     // A source pack can be large. Streaming prevents the proxy from holding
     // the whole JSON response before any bytes reach the client, while the
     // completed content is still validated as one atomic compiler input.
@@ -401,7 +401,7 @@ async function askFactoryRepairAgent(openai: OpenAI, model: string, system: stri
     // fail-closed rejection into an opaque format failure. This budget still
     // applies only to a bounded patch of the existing private pack.
     max_completion_tokens: MAX_REPAIR_COMPLETION_TOKENS,
-    ...(KIMI_THINKING.type === "disabled" ? {} : { thinking: KIMI_THINKING }),
+    ...kimiThinkingPayload(),
     // Repairs are intentionally small. Unlike first-pass distillation, they
     // should return one bounded patch; non-streaming avoids a provider-side
     // stream that can remain open after the complete JSON is available.

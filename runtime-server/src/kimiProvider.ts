@@ -1,8 +1,8 @@
 export const KIMI_MODEL = "kimi-k2.6";
-// Kimi K2.6 accepts temperature=1 for its non-thinking profile. Keep this in
+// Kimi K2.6 requires temperature=0.6 when thinking is disabled. Keep this in
 // the single provider profile so Factory, Runtime, and audits cannot drift
-// into a request the provider rejects.
-export const KIMI_TEMPERATURE = 1;
+// into the provider's default thinking mode for evidence-heavy turns.
+export const KIMI_TEMPERATURE = 0.6;
 export const KIMI_THINKING = { type: "disabled" } as const;
 export const KIMI_DEFAULT_BASE_URL = "https://api.moonshot.cn/v1";
 
@@ -24,12 +24,12 @@ export type KimiModelRuntimeRecord = {
 };
 
 /**
- * Kimi treats the presence of `thinking` as a thinking request, even when the
- * value says `disabled`. Keep the product profile explicit, but omit the
- * provider field when thinking is disabled.
+ * Moonshot defaults Kimi K2.6 to thinking when this field is omitted. Send
+ * the explicit disabled mode so evidence-grounded deliveries reserve their
+ * completion budget for the user-visible answer.
  */
-export function kimiThinkingPayload(): { thinking?: typeof KIMI_THINKING } {
-  return KIMI_THINKING.type === "disabled" ? {} : { thinking: KIMI_THINKING };
+export function kimiThinkingPayload(): { thinking: typeof KIMI_THINKING } {
+  return { thinking: KIMI_THINKING };
 }
 
 export function kimiModelRuntimeRecord(): KimiModelRuntimeRecord {
