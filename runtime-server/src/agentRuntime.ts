@@ -1437,7 +1437,7 @@ async function completeChatCompletion(
 ): Promise<ChatCompletionResult> {
   const response = await openai.chat.completions.create({
     model: request.model,
-    messages: request.messages,
+    messages: normalizeProviderMessages(request.messages),
     tools: request.tools,
     tool_choice: "auto",
     temperature: request.temperature,
@@ -1482,7 +1482,7 @@ async function* streamChatCompletion(
 ): AsyncIterable<ChatCompletionStreamEvent> {
   const stream = await openai.chat.completions.create({
     model: request.model,
-    messages: request.messages,
+    messages: normalizeProviderMessages(request.messages),
     tools: request.tools,
     tool_choice: "auto",
     temperature: request.temperature,
@@ -1905,6 +1905,28 @@ function runtimeSkillActivationFromToolResult(toolName: string, result: Record<s
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Moonshot's Chat Completions endpoint rejects historical assistant messages
+ * whose content is null/empty, even when they carry valid tool_calls. The
+ * OpenAI protocol permits that shape, and Hatch keeps it internally so the
+ * visible conversation can hide protected tool-call content. Normalize only
+ * at the provider boundary: retain the tool calls, give the provider a
+ * non-empty private handoff, and drop any orphaned empty assistant record.
+ */
+function normalizeProviderMessages(messages: ChatCompletionMessage[]): ChatCompletionMessage[] {
+  return messages.flatMap((message) => {
+    if (message.role !== "assistant") return [message];
+    if (message.tool_calls?.length && !message.content?.trim()) {
+      return [{
+        ...message,
+        content: "Calling the requested tools."
+      }];
+    }
+    if (!message.content?.trim()) return [];
+    return [message];
+  });
 }
 
 function mergeRuntimeActiveSkill(existing: ActivatedSkill[], next: ActivatedSkill): ActivatedSkill[] {

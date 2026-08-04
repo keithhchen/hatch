@@ -851,6 +851,11 @@ async function createPinnedToolHandoffMock(): Promise<{
       }
       assert.equal(requests.length, 2);
       assert.equal(request.stream, false);
+      for (const message of request.messages ?? []) {
+        if (message.role === "assistant") {
+          assert.ok(typeof message.content === "string" && message.content.trim().length > 0);
+        }
+      }
       writeJsonModelCompletion(res, "LOCAL EVIDENCE FINAL");
     })().catch((error) => {
       res.writeHead(500);
