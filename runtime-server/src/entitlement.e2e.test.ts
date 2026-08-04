@@ -370,16 +370,20 @@ test("Creator Release retries an empty buffered final before delivering an expli
       const request = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, any>;
       requests.push(request);
       if (requests.length === 1) {
+        assert.equal(request.stream, true);
+        assert.equal(request.max_completion_tokens, 3_000);
         writeSseToolCall(res, "call_empty_retry_search", "file_search", { query: "Hatch", path: ".", max_results: 5 });
         return;
       }
       if (requests.length === 2) {
         assert.equal(request.stream, true);
+        assert.equal(request.max_completion_tokens, 3_000);
         writeSseModelCompletion(res, "");
         return;
       }
       assert.equal(requests.length, 3);
       assert.equal(request.stream, true);
+      assert.equal(request.max_completion_tokens, 3_000);
       assert.match(JSON.stringify(request.messages), /previous assistant response was empty/);
       writeSseModelCompletion(res, "RECOVERED LOCAL EVIDENCE FINAL");
     })().catch((error) => {
@@ -906,6 +910,7 @@ async function createPinnedToolHandoffMock(): Promise<{
       requests.push(request);
       if (requests.length === 1) {
         assert.equal(request.stream, true);
+        assert.equal(request.max_completion_tokens, 3_000);
         writeSseToolCall(res, "call_local_search", "file_search", {
           query: "Hatch",
           path: ".",
@@ -915,6 +920,7 @@ async function createPinnedToolHandoffMock(): Promise<{
       }
       assert.equal(requests.length, 2);
       assert.equal(request.stream, request.tools === undefined);
+      assert.equal(request.max_completion_tokens, 3_000);
       for (const message of request.messages ?? []) {
         if (message.role === "assistant") {
           assert.ok(typeof message.content === "string" && message.content.trim().length > 0);

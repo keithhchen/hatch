@@ -1517,6 +1517,7 @@ async function* streamChatCompletion(
     ...modelToolPayload(request.tools),
     temperature: request.temperature,
     ...kimiThinkingPayload(),
+    max_completion_tokens: 3_000,
     stream: true
   }, request.signal ? { signal: request.signal } : undefined);
 
