@@ -213,6 +213,8 @@ function UserPortal({ token, profile, onLogout }) {
   const [orders, setOrders] = useState([]);
   const [error, setError] = useState("");
   const [purchasing, setPurchasing] = useState("");
+  const [view, setView] = useState("explore");
+  const [selectedAgent, setSelectedAgent] = useState(null);
   useEffect(() => {
     Promise.all([
       dashboardRequest("/v1/catalog/agents", { token }),
@@ -224,6 +226,20 @@ function UserPortal({ token, profile, onLogout }) {
       setOrders(nextOrders.orders || []);
     }).catch((nextError) => setError(nextError.message));
   }, [token]);
+  function openDetail(agent) {
+    setSelectedAgent(agent);
+    setView("detail");
+  }
+  function openLibraryAgent(agent) {
+    const catalogAgent = catalog.find((entry) => `${entry.creator_id}:${entry.agent_id}` === `${agent.creator_id}:${agent.agent_id}`);
+    openDetail(catalogAgent || {
+      ...agent,
+      creator_name: agent.creator?.name,
+      product_name: agent.product?.name,
+      product_description: agent.product?.description,
+      product_id: agent.product?.id
+    });
+  }
   async function purchase(agent) {
     const key = `${agent.creator_id}:${agent.agent_id}`;
     setPurchasing(key);
@@ -240,6 +256,7 @@ function UserPortal({ token, profile, onLogout }) {
       ]);
       setLibrary(nextLibrary.creator_agents || []);
       setOrders(nextOrders.orders || []);
+      setView("my-agents");
     } catch (nextError) {
       setError(nextError.message);
     } finally {
@@ -247,7 +264,96 @@ function UserPortal({ token, profile, onLogout }) {
     }
   }
   const libraryKeys = new Set(library.map((agent) => `${agent.creator_id}:${agent.agent_id}`));
-  return <div className="dashboard-shell"><aside className="sidebar"><button className="wordmark hatch-wordmark"><img className="hatch-mark" src={hatchMarkUrl} alt="" />Hatch.</button><nav><button className="active">Explore</button><button>My agents</button></nav><div className="creator-card"><div className="avatar">{profile.initials}</div><div><strong>{profile.display_name}</strong><span>{profile.handle}</span></div><button className="sign-out" onClick={onLogout}>↗</button></div></aside><main className="dashboard-main"><header className="page-heading"><span className="eyebrow">Creator Agents</span><h1>Methods you can use.</h1><p>Choose an Agent built around a Creator’s way of working.</p></header>{error ? <div className="notice">{error}</div> : null}<section className="agent-grid">{catalog.map((agent) => { const key = `${agent.creator_id}:${agent.agent_id}`; const available = libraryKeys.has(key); return <article className="agent-tile" key={key}><span className="eyebrow">{agent.creator_name}</span><h2>{agent.product_name}</h2><p>{agent.product_description || "A Creator Agent"}</p><div className="agent-offer"><span>Free for now</span><button className="secondary" disabled={available || purchasing === key} onClick={() => purchase(agent)}>{available ? "Available" : purchasing === key ? "Completing…" : "Purchase"}</button></div></article>; })}</section><section className="agent-list"><div className="section-title"><div><span className="eyebrow">Your library</span><h2>Agents you can use</h2></div></div><div className="agent-grid">{library.map((agent) => <article className="agent-tile" key={agent.entitlement_id}><span className="status-chip published">Available</span><h3>{agent.product?.name}</h3><p>{agent.product?.description}</p></article>)}</div></section>{orders.length ? <section className="orders-card buyer-orders"><div className="section-title"><div><span className="eyebrow">Order history</span><h2>Your purchases</h2></div></div><div className="order-list">{orders.map((order) => <div className="order-row" key={order.order_id}><div><strong>{order.product_name || "Agent product"}</strong><span>{new Date(order.occurred_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span></div><div><strong>Free</strong><span className={`order-status ${order.status}`}>{order.status === "refunded" ? "Refunded" : "Paid"}</span></div></div>)}</div></section> : null}</main></div>;
+  return (
+    <div className="dashboard-shell">
+      <aside className="sidebar">
+        <button className="wordmark hatch-wordmark"><img className="hatch-mark" src={hatchMarkUrl} alt="" />Hatch.</button>
+        <nav aria-label="Your Agents">
+          <button className={view === "explore" || view === "detail" ? "active" : ""} onClick={() => setView("explore")}>Explore</button>
+          <button className={view === "my-agents" ? "active" : ""} onClick={() => { setSelectedAgent(null); setView("my-agents"); }}>My agents <span className="nav-count">{library.length || ""}</span></button>
+        </nav>
+        <a className="download-link" href="https://github.com/keithhchen/hatch/releases/latest" target="_blank" rel="noreferrer">Download Desktop <span aria-hidden="true">↗</span></a>
+        <div className="creator-card">
+          <div className="avatar">{profile.initials}</div>
+          <div><strong>{profile.display_name}</strong><span>{profile.handle}</span></div>
+          <button className="sign-out" onClick={onLogout} aria-label="Sign out">↗</button>
+        </div>
+      </aside>
+      <main className="dashboard-main">
+        {error ? <div className="notice" role="alert">{error}</div> : null}
+        {view === "detail" && selectedAgent ? <AgentDetail agent={selectedAgent} available={libraryKeys.has(`${selectedAgent.creator_id}:${selectedAgent.agent_id}`)} purchasing={purchasing} onBack={() => setView("explore")} onPurchase={() => purchase(selectedAgent)} /> : null}
+        {view === "explore" ? <ExploreAgents catalog={catalog} libraryKeys={libraryKeys} onOpen={openDetail} /> : null}
+        {view === "my-agents" ? <MyAgents library={library} orders={orders} onOpen={openLibraryAgent} /> : null}
+      </main>
+    </div>
+  );
+}
+
+function ExploreAgents({ catalog, libraryKeys, onOpen }) {
+  return (
+    <>
+      <header className="page-heading">
+        <span className="eyebrow">Creator Agents</span>
+        <h1>Methods you can use.</h1>
+        <p>Browse a Creator’s way of working, understand the promise, then add it to your account.</p>
+      </header>
+      <section className="agent-grid" aria-label="Available Creator Agents">
+        {catalog.map((agent) => {
+          const key = `${agent.creator_id}:${agent.agent_id}`;
+          return (
+            <article className="agent-tile" key={key}>
+              <span className="eyebrow">{agent.creator_name}</span>
+              <h2>{agent.product_name}</h2>
+              <p>{agent.product_description || "A Creator Agent"}</p>
+              <div className="agent-offer"><span>{libraryKeys.has(key) ? "In your library" : "Free for now"}</span><button className="secondary" onClick={() => onOpen(agent)}>{libraryKeys.has(key) ? "Open details" : "View details"}</button></div>
+            </article>
+          );
+        })}
+      </section>
+      {!catalog.length ? <EmptyState title="No Agents are published yet" body="Published Creator Agents will appear here." /> : null}
+    </>
+  );
+}
+
+function AgentDetail({ agent, available, purchasing, onBack, onPurchase }) {
+  return (
+    <section className="agent-detail">
+      <button className="text-button" onClick={onBack}>← Back to Explore</button>
+      <header className="page-heading detail-heading">
+        <span className="eyebrow">{agent.creator_name} · Creator Agent</span>
+        <h1>{agent.product_name}</h1>
+        <p>{agent.product_description || "A Creator Agent built around a practical method."}</p>
+      </header>
+      <div className="detail-grid">
+        <article className="detail-card">
+          <span className="eyebrow">What you get</span>
+          <h2>A method you can use in your own Workspace.</h2>
+          <p>After purchase, this Agent is added to your account. Open Hatch Desktop, choose this Agent and a Workspace folder, then work with it on your own files.</p>
+          <div className="detail-facts"><div><span>Access</span><strong>Account entitlement</strong></div><div><span>Price</span><strong>Free for now</strong></div></div>
+        </article>
+        <article className="detail-action-card">
+          <span className="eyebrow">Your access</span>
+          <h2>{available ? "This Agent is ready." : "Add this Agent to your account."}</h2>
+          <p>{available ? "It is available from My agents and will appear in Desktop after you sign in with this account." : "This is a zero-value purchase today, but the order and entitlement are recorded the same way as a paid purchase."}</p>
+          <button className="primary" disabled={available || Boolean(purchasing)} onClick={onPurchase}>{available ? "Available in My agents" : purchasing ? "Completing purchase…" : "Purchase Agent"}<span aria-hidden="true">→</span></button>
+        </article>
+      </div>
+    </section>
+  );
+}
+
+function MyAgents({ library, orders, onOpen }) {
+  return (
+    <>
+      <header className="page-heading">
+        <span className="eyebrow">Your library</span>
+        <h1>My agents.</h1>
+        <p>Agents your account can use. Open Desktop with the same account to start a Workspace session.</p>
+      </header>
+      {library.length ? <section className="agent-grid" aria-label="My Agents">{library.map((agent) => <article className="agent-tile" key={agent.entitlement_id}><span className="status-chip published">Available</span><h2>{agent.product?.name}</h2><p>{agent.product?.description}</p><button className="secondary" onClick={() => onOpen(agent)}>Open details</button></article>)}</section> : <EmptyState title="Your library is empty" body="Explore Creator Agents to find a method you can use." />}
+      {orders.length ? <section className="orders-card buyer-orders"><div className="section-title"><div><span className="eyebrow">Order history</span><h2>Your purchases</h2></div></div><div className="order-list">{orders.map((order) => <div className="order-row" key={order.order_id}><div><strong>{order.product_name || "Agent product"}</strong><span>{new Date(order.occurred_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span></div><div><strong>Free</strong><span className={`order-status ${order.status}`}>{order.status === "refunded" ? "Refunded" : "Paid"}</span></div></div>)}</div></section> : null}
+    </>
+  );
 }
 
 function ProductCard({ product, onPublish, publishing, featured = false }) {

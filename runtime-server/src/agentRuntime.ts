@@ -365,6 +365,7 @@ export class ChatCompletionsAgentRuntime implements AgentRuntime {
     const auditMessages = [...initialMessages];
     const productToolEvidence: ProductToolEvidence[] = [];
     const completedProductArtifacts: string[] = [];
+    let hasCompletedToolTurn = false;
     const tools = chatToolsForRun(ctx.clientTools, ctx.allowSkillRun !== false, ctx.allowedExternalTools, ctx.knowledgeAvailable, ctx.externalToolDefinitions);
 
     yield {
@@ -377,10 +378,13 @@ export class ChatCompletionsAgentRuntime implements AgentRuntime {
     for (let turn = 0; turn < maxTurns; turn += 1) {
       ensureNotCancelled(ctx);
       let completion: ChatCompletionResult | undefined;
-      if (requiresBufferedDelivery) {
+      const useBufferedCompletion = requiresBufferedDelivery || (isPinnedCreatorProduct && hasCompletedToolTurn);
+      if (useBufferedCompletion) {
         // A Creator product has a concise final delivery rather than a token
         // stream. Kimi's non-streaming completion is materially more reliable
-        // after local tool turns than leaving an SSE request open.
+        // after local tool turns than leaving an SSE request open. Keep the
+        // first request streamed so an ordinary Creator chat still feels live;
+        // only the follow-up request after local evidence is buffered.
         completion = await completeChatCompletion(openai, {
           model,
           messages,
@@ -444,7 +448,7 @@ export class ChatCompletionsAgentRuntime implements AgentRuntime {
               signal: ctx.abortSignal
             })
           : content;
-        if (requiresBufferedDelivery) {
+        if (useBufferedCompletion) {
           yield {
             type: "assistant.delta",
             run_id: input.run_id,
@@ -626,6 +630,8 @@ export class ChatCompletionsAgentRuntime implements AgentRuntime {
           productToolEvidenceMessage(productToolEvidence)
         ];
       }
+
+      hasCompletedToolTurn = true;
 
       const compactedMessages = isPinnedCreatorProduct
         ? undefined

@@ -283,6 +283,41 @@ test("Creator Releases stream by default even when they carry an offline audit p
   }
 });
 
+test("Creator Release buffers the model turn after local tool evidence", async () => {
+  const releaseFixture = await createReleaseFixture();
+  const workspace = await tempDirectory("hatch-tool-handoff-workspace-");
+  process.env.HATCH_RUNTIME_DATA_DIR = await tempDirectory("hatch-tool-handoff-runtime-");
+  await writeFile(path.join(workspace, "notes.txt"), "Hatch local evidence.\n", "utf8");
+  const mock = await createPinnedToolHandoffMock();
+  configureMockModels(mock.baseUrl);
+  try {
+    const entitlement = entitlementFor(releaseFixture.releaseId, releaseFixture.digest);
+    const runtime = createRuntimeServer({
+      releaseResolver: new CreatorReleaseResolver(releaseFixture.root),
+      entitlementResolver: new MemoryEntitlementResolver("license_fixture", entitlement)
+    });
+    servers.push(runtime);
+    const result = await runLocalHarness({
+      serverUrl: await listen(runtime),
+      workspace,
+      prompt: "Find Hatch in local files.",
+      licenseToken: "license_fixture",
+      entitlementId: entitlement.entitlement_id
+    });
+
+    assert.equal(result.finalText, "LOCAL EVIDENCE FINAL");
+    assert.deepEqual(result.events.filter((event) => event.type === "tool_call.request").map((event) => event.name), ["fs.search"]);
+    assert.equal(mock.requests.length, 2);
+    assert.equal(mock.requests[0]?.stream, true);
+    assert.equal(mock.requests[1]?.stream, false);
+    assert.ok(mock.requests[1]?.messages?.some((message: Record<string, unknown>) => (
+      message.role === "user" && String(message.content ?? "").includes("approved_local_tool_evidence")
+    )));
+  } finally {
+    await mock.close();
+  }
+});
+
 test("buyer entitlement discovers and runs its server-pinned Release through real local tools", async () => {
   const releaseFixture = await createReleaseFixture();
   const workspace = await tempDirectory("hatch-buyer-workspace-");
@@ -743,6 +778,50 @@ async function createDeliveryAuditMock(mode: "revise" | "safe_partial" | "compat
       }
     })().catch((error) => {
       res.writeHead(500).end(error instanceof Error ? error.message : String(error));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Expected mock TCP address");
+  return {
+    baseUrl: `http://127.0.0.1:${address.port}/v1`,
+    requests,
+    close: () => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
+  };
+}
+
+async function createPinnedToolHandoffMock(): Promise<{
+  baseUrl: string;
+  requests: Array<Record<string, any>>;
+  close: () => Promise<void>;
+}> {
+  const requests: Array<Record<string, any>> = [];
+  const server = http.createServer((req, res) => {
+    void (async () => {
+      if (req.method !== "POST" || req.url !== "/v1/chat/completions") {
+        res.writeHead(404);
+        res.end("not found");
+        return;
+      }
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      const request = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, any>;
+      requests.push(request);
+      if (requests.length === 1) {
+        assert.equal(request.stream, true);
+        writeSseToolCall(res, "call_local_search", "file_search", {
+          query: "Hatch",
+          path: ".",
+          max_results: 5
+        });
+        return;
+      }
+      assert.equal(requests.length, 2);
+      assert.equal(request.stream, false);
+      writeJsonModelCompletion(res, "LOCAL EVIDENCE FINAL");
+    })().catch((error) => {
+      res.writeHead(500);
+      res.end(error instanceof Error ? error.message : String(error));
     });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
