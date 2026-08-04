@@ -383,7 +383,13 @@ export class ChatCompletionsAgentRuntime implements AgentRuntime {
       let completion: ChatCompletionResult | undefined;
       const useBufferedCompletion = requiresBufferedDelivery || (hasCompletedToolTurn && (isPinnedCreatorProduct || Boolean(requestedFilePath)));
       const streamRequestedArtifactFollowUp = useBufferedCompletion && Boolean(requestedFilePath) && !deliveryWorkflow;
-      const followUpTools = useBufferedCompletion && requestedFilePath && completedProductArtifacts.length === 0 ? [] : tools;
+      const modelCanWriteRequestedArtifact = Boolean(requestedFilePath && !deliveryWorkflow && !isPinnedCreatorProduct);
+      const followUpTools = useBufferedCompletion
+        && requestedFilePath
+        && completedProductArtifacts.length === 0
+        && !modelCanWriteRequestedArtifact
+        ? []
+        : tools;
       const providerMessages = ctx.releaseSystemPrompt && productToolEvidence.length > 0
         ? mergeAdjacentUserMessages(messages)
         : messages;
@@ -656,7 +662,9 @@ export class ChatCompletionsAgentRuntime implements AgentRuntime {
               yield skillInvocationEvent(input.run_id, toolCall.id, toolCall.function.name, toolArguments, implicitInvocation);
             }
           }
-          if (isPinnedCreatorProduct && eventBase.name === "fs.write" && typeof toolArguments.path === "string") {
+          if (eventBase.name === "fs.write"
+            && typeof toolArguments.path === "string"
+            && (isPinnedCreatorProduct || toolArguments.path === requestedFilePath)) {
             completedProductArtifacts.push(toolArguments.path);
           }
         }
@@ -682,7 +690,7 @@ export class ChatCompletionsAgentRuntime implements AgentRuntime {
       // successfully written its completed artifact into the Consumer's
       // selected workspace. Do not turn a generic chat loop into a second,
       // invisible self-review pass after delivery.
-      if (isPinnedCreatorProduct && !deliveryWorkflow && completedProductArtifacts.length > 0) {
+      if ((isPinnedCreatorProduct || Boolean(requestedFilePath)) && !deliveryWorkflow && completedProductArtifacts.length > 0) {
         const paths = [...new Set(completedProductArtifacts)];
         const renderedPaths = paths.map((item) => `\`${item}\``).join(", ");
         const finalContent = `Completed and saved the result to ${renderedPaths}.`;
