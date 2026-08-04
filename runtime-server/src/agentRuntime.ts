@@ -451,7 +451,12 @@ export class ChatCompletionsAgentRuntime implements AgentRuntime {
               signal: ctx.abortSignal
             })
           : content;
-        if (!deliveryWorkflow && requestedFilePath && finalContent.trim() && completedProductArtifacts.length === 0) {
+        // A requested artifact must be delivered whether or not this
+        // deployment enables the optional per-delivery reviewer. When the
+        // reviewer is active, finalContent is already the audited candidate;
+        // the Runtime owns this post-audit write so the Consumer does not
+        // depend on the model remembering a second file_write call.
+        if (requestedFilePath && finalContent.trim() && completedProductArtifacts.length === 0) {
           const writeToolCallId = `${input.run_id}_delivery_${turn + 1}`;
           const writeArgs = { path: requestedFilePath, content: finalContent };
           const eventBase = toolEventBase(input, writeToolCallId, "file_write", writeArgs, resourceRoots, activeSkillsForRun, skillContext.aliases, ctx);
