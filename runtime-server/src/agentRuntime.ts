@@ -1415,8 +1415,12 @@ type ChatCompletionStreamEvent = {
 } | ChatCompletionResult;
 
 function modelRequestTimeoutMs(): number {
-  const configured = Number(process.env.HATCH_MODEL_REQUEST_TIMEOUT_MS ?? 90_000);
-  return Number.isFinite(configured) && configured > 0 ? configured : 90_000;
+  // Kimi can take more than a minute to produce an evidence-grounded
+  // follow-up after several local file reads. Keep this bounded, but do not
+  // abort a legitimate production delivery at the old 90-second default.
+  const fallback = 180_000;
+  const configured = Number(process.env.HATCH_MODEL_REQUEST_TIMEOUT_MS ?? fallback);
+  return Number.isFinite(configured) && configured > 0 ? configured : fallback;
 }
 
 function modelRequestSignal(parent?: AbortSignal): AbortSignal {
