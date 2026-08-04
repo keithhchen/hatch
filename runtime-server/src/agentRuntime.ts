@@ -1467,8 +1467,7 @@ async function completeChatCompletion(
   const response = await openai.chat.completions.create({
     model: request.model,
     messages: normalizeProviderMessages(request.messages),
-    tools: request.tools,
-    tool_choice: "auto",
+    ...modelToolPayload(request.tools),
     temperature: request.temperature,
     ...kimiThinkingPayload(),
     max_completion_tokens: 3_000,
@@ -1512,8 +1511,7 @@ async function* streamChatCompletion(
   const stream = await openai.chat.completions.create({
     model: request.model,
     messages: normalizeProviderMessages(request.messages),
-    tools: request.tools,
-    tool_choice: "auto",
+    ...modelToolPayload(request.tools),
     temperature: request.temperature,
     ...kimiThinkingPayload(),
     stream: true
@@ -1956,6 +1954,17 @@ function normalizeProviderMessages(messages: ChatCompletionMessage[]): ChatCompl
     if (!message.content?.trim()) return [];
     return [message];
   });
+}
+
+function modelToolPayload(tools: ChatToolDefinition[]): {
+  tools?: ChatToolDefinition[];
+  tool_choice?: "auto";
+} {
+  // Moonshot can return an empty assistant message when an otherwise valid
+  // text follow-up is sent as `tools: []` with `tool_choice: auto`. Omitting
+  // the tool fields makes the follow-up an ordinary text completion while
+  // preserving automatic tool selection on turns that actually have tools.
+  return tools.length > 0 ? { tools, tool_choice: "auto" } : {};
 }
 
 function mergeRuntimeActiveSkill(existing: ActivatedSkill[], next: ActivatedSkill): ActivatedSkill[] {

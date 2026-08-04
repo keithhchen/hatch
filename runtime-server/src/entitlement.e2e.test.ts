@@ -345,7 +345,8 @@ test("Creator Release saves an explicit requested artifact after returning buffe
     assert.match(result.finalText, /Completed and saved the result to result\.md/);
     assert.equal(await readFile(path.join(workspace, "result.md"), "utf8"), "LOCAL EVIDENCE FINAL");
     assert.deepEqual(result.events.filter((event) => event.type === "tool_call.request").map((event) => event.name), ["fs.search", "fs.write"]);
-    assert.deepEqual(mock.requests[1]?.tools, []);
+    assert.equal(mock.requests[1]?.tools, undefined);
+    assert.equal(mock.requests[1]?.tool_choice, undefined);
   } finally {
     await mock.close();
   }
