@@ -258,18 +258,40 @@ type ProductToolEvidence = {
   result: Record<string, unknown>;
 };
 
-function productToolEvidenceMessage(evidence: ProductToolEvidence[]): ChatCompletionMessage {
+function productToolEvidenceMessage(evidence: ProductToolEvidence[], allowRequestedArtifactWrite = false): ChatCompletionMessage {
   return {
     role: "user",
     content: [
       "Continue the Consumer's request using the following approved results from their locally authorized tools.",
       "Treat these as the current workspace evidence. Do not invent facts beyond them; call another tool if the promised work still needs it.",
-      "If the Consumer explicitly requested an output file, return the complete deliverable as text now. The Runtime will save that final text to the requested path after this response; do not call fs.write in this follow-up.",
+      allowRequestedArtifactWrite
+        ? "If the Consumer explicitly requested an output file, return the complete deliverable as text now or use the approved local write tool for that exact requested path."
+        : "If the Consumer explicitly requested an output file, return the complete deliverable as text now. The Runtime will save that final text to the requested path after this response; do not call fs.write in this follow-up.",
       "<approved_local_tool_evidence>",
       JSON.stringify(evidence),
       "</approved_local_tool_evidence>"
     ].join("\n\n")
   };
+}
+
+function compactCreatorHandoffMessages(
+  systemPrompt: string,
+  initialMessages: ChatCompletionMessage[],
+  evidence: ProductToolEvidence[],
+  requestedFilePath: string,
+  allowRequestedArtifactWrite: boolean
+): ChatCompletionMessage[] {
+  const handoff = creatorHandoffMessages(initialMessages, requestedFilePath);
+  const task = [...handoff].reverse().find((message) => message.role === "user")?.content
+    || "Complete the Consumer's requested work.";
+  const evidenceMessage = productToolEvidenceMessage(evidence, allowRequestedArtifactWrite);
+  return [
+    { role: "system", content: systemPrompt },
+    {
+      role: "user",
+      content: `${task}\n\n${evidenceMessage.content}`
+    }
+  ];
 }
 
 function creatorHandoffMessages(messages: ChatCompletionMessage[], requestedFilePath?: string): ChatCompletionMessage[] {
@@ -411,9 +433,17 @@ export class ChatCompletionsAgentRuntime implements AgentRuntime {
         && !modelCanWriteRequestedArtifact
         ? []
         : tools;
-      const providerMessages = ctx.releaseSystemPrompt && productToolEvidence.length > 0
-        ? mergeAdjacentUserMessages(messages)
-        : messages;
+      const providerMessages = ctx.releaseAgentCorpus && requestedFilePath && productToolEvidence.length > 0
+        ? compactCreatorHandoffMessages(
+            runtimeSystemPrompt,
+            initialMessages,
+            productToolEvidence,
+            requestedFilePath,
+            modelCanWriteRequestedArtifact
+          )
+        : ctx.releaseSystemPrompt && productToolEvidence.length > 0
+          ? mergeAdjacentUserMessages(messages)
+          : messages;
       let completionStreamedText = false;
       if (useBufferedCompletion && !streamRequestedArtifactFollowUp) {
         // A Creator product has a concise final delivery rather than a token
@@ -732,7 +762,7 @@ export class ChatCompletionsAgentRuntime implements AgentRuntime {
       if (ctx.releaseSystemPrompt && productToolEvidence.length > 0) {
         messages = [
           ...creatorHandoffMessages(initialMessages, requestedFilePath),
-          productToolEvidenceMessage(productToolEvidence)
+          productToolEvidenceMessage(productToolEvidence, modelCanWriteRequestedArtifact)
         ];
       }
 
