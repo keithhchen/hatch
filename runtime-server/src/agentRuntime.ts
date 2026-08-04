@@ -380,7 +380,7 @@ export class ChatCompletionsAgentRuntime implements AgentRuntime {
     for (let turn = 0; turn < maxTurns; turn += 1) {
       ensureNotCancelled(ctx);
       let completion: ChatCompletionResult | undefined;
-      const useBufferedCompletion = requiresBufferedDelivery || (isPinnedCreatorProduct && hasCompletedToolTurn);
+      const useBufferedCompletion = requiresBufferedDelivery || (hasCompletedToolTurn && (isPinnedCreatorProduct || Boolean(requestedFilePath)));
       const followUpTools = useBufferedCompletion && requestedFilePath && completedProductArtifacts.length === 0 ? [] : tools;
       if (useBufferedCompletion) {
         // A Creator product has a concise final delivery rather than a token
@@ -451,7 +451,7 @@ export class ChatCompletionsAgentRuntime implements AgentRuntime {
               signal: ctx.abortSignal
             })
           : content;
-        if (isPinnedCreatorProduct && !deliveryWorkflow && requestedFilePath && finalContent.trim() && completedProductArtifacts.length === 0) {
+        if (!deliveryWorkflow && requestedFilePath && finalContent.trim() && completedProductArtifacts.length === 0) {
           const writeToolCallId = `${input.run_id}_delivery_${turn + 1}`;
           const writeArgs = { path: requestedFilePath, content: finalContent };
           const eventBase = toolEventBase(input, writeToolCallId, "file_write", writeArgs, resourceRoots, activeSkillsForRun, skillContext.aliases, ctx);
