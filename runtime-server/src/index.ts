@@ -747,6 +747,7 @@ async function runOneTurn(
       skillRuntime,
       toolScope: "main",
       releaseSystemPrompt: materializedRelease?.systemPrompt,
+      releaseAgentCorpus: Boolean(binding.agentCorpusRoot),
       releaseDeliveryWorkflow: materializedRelease?.deliveryWorkflow,
       releaseDeliveryAuditContext: materializedRelease?.deliveryAuditContext,
       knowledgeAvailable: Boolean(

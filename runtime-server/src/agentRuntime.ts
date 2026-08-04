@@ -69,6 +69,7 @@ export type RunContext = {
   allowSkillRun?: boolean;
   abortSignal?: AbortSignal;
   releaseSystemPrompt?: string;
+  releaseAgentCorpus?: boolean;
   releaseDeliveryWorkflow?: DeliveryWorkflow;
   releaseDeliveryAuditContext?: {
     productPromise: string;
@@ -383,7 +384,7 @@ export class ChatCompletionsAgentRuntime implements AgentRuntime {
       let completion: ChatCompletionResult | undefined;
       const useBufferedCompletion = requiresBufferedDelivery || (hasCompletedToolTurn && (isPinnedCreatorProduct || Boolean(requestedFilePath)));
       const streamRequestedArtifactFollowUp = useBufferedCompletion && Boolean(requestedFilePath) && !deliveryWorkflow;
-      const modelCanWriteRequestedArtifact = Boolean(requestedFilePath && !deliveryWorkflow && !isPinnedCreatorProduct);
+      const modelCanWriteRequestedArtifact = Boolean(requestedFilePath && ctx.releaseAgentCorpus && !deliveryWorkflow);
       const followUpTools = useBufferedCompletion
         && requestedFilePath
         && completedProductArtifacts.length === 0
