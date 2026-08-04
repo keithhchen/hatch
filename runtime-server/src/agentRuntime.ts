@@ -272,6 +272,26 @@ function productToolEvidenceMessage(evidence: ProductToolEvidence[]): ChatComple
   };
 }
 
+function creatorHandoffMessages(messages: ChatCompletionMessage[], requestedFilePath?: string): ChatCompletionMessage[] {
+  if (!requestedFilePath || messages.length === 0) return messages;
+  const lastIndex = messages.length - 1;
+  return messages.map((message, index) => {
+    if (index !== lastIndex || message.role !== "user") return message;
+    const task = (message.content ?? "")
+      .replace(/\s*(?:and\s+)?save\b[\s\S]*$/i, "")
+      .replace(/\s*(?:并)?(?:将|把)?[\s\S]*?(?:保存|存储)[\s\S]*$/u, "")
+      .trim();
+    return {
+      ...message,
+      content: [
+        task || "Complete the Consumer's requested work.",
+        "Return the complete deliverable text now using only the approved Workspace evidence.",
+        "Runtime will persist the response to the requested output file automatically after delivery."
+      ].join("\n\n")
+    };
+  });
+}
+
 type WorkspacePathPolicy = {
   requiredReads: Set<string>;
   completedReads: Set<string>;
@@ -711,7 +731,7 @@ export class ChatCompletionsAgentRuntime implements AgentRuntime {
 
       if (ctx.releaseSystemPrompt && productToolEvidence.length > 0) {
         messages = [
-          ...initialMessages,
+          ...creatorHandoffMessages(initialMessages, requestedFilePath),
           productToolEvidenceMessage(productToolEvidence)
         ];
       }
