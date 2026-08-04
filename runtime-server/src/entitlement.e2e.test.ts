@@ -374,14 +374,14 @@ test("Creator Release retries an empty buffered final before delivering an expli
         return;
       }
       if (requests.length === 2) {
-        assert.equal(request.stream, false);
-        writeJsonModelCompletion(res, "");
+        assert.equal(request.stream, true);
+        writeSseModelCompletion(res, "");
         return;
       }
       assert.equal(requests.length, 3);
-      assert.equal(request.stream, false);
+      assert.equal(request.stream, true);
       assert.match(JSON.stringify(request.messages), /previous assistant response was empty/);
-      writeJsonModelCompletion(res, "RECOVERED LOCAL EVIDENCE FINAL");
+      writeSseModelCompletion(res, "RECOVERED LOCAL EVIDENCE FINAL");
     })().catch((error) => {
       res.writeHead(500);
       res.end(error instanceof Error ? error.message : String(error));
@@ -914,13 +914,14 @@ async function createPinnedToolHandoffMock(): Promise<{
         return;
       }
       assert.equal(requests.length, 2);
-      assert.equal(request.stream, false);
+      assert.equal(request.stream, request.tools === undefined);
       for (const message of request.messages ?? []) {
         if (message.role === "assistant") {
           assert.ok(typeof message.content === "string" && message.content.trim().length > 0);
         }
       }
-      writeJsonModelCompletion(res, "LOCAL EVIDENCE FINAL");
+      if (request.stream === true) writeSseModelCompletion(res, "LOCAL EVIDENCE FINAL");
+      else writeJsonModelCompletion(res, "LOCAL EVIDENCE FINAL");
     })().catch((error) => {
       res.writeHead(500);
       res.end(error instanceof Error ? error.message : String(error));

@@ -382,8 +382,10 @@ export class ChatCompletionsAgentRuntime implements AgentRuntime {
       ensureNotCancelled(ctx);
       let completion: ChatCompletionResult | undefined;
       const useBufferedCompletion = requiresBufferedDelivery || (hasCompletedToolTurn && (isPinnedCreatorProduct || Boolean(requestedFilePath)));
+      const streamRequestedArtifactFollowUp = useBufferedCompletion && Boolean(requestedFilePath) && !deliveryWorkflow;
       const followUpTools = useBufferedCompletion && requestedFilePath && completedProductArtifacts.length === 0 ? [] : tools;
-      if (useBufferedCompletion) {
+      let completionStreamedText = false;
+      if (useBufferedCompletion && !streamRequestedArtifactFollowUp) {
         // A Creator product has a concise final delivery rather than a token
         // stream. Kimi's non-streaming completion is materially more reliable
         // after local tool turns than leaving an SSE request open. Keep the
@@ -408,6 +410,7 @@ export class ChatCompletionsAgentRuntime implements AgentRuntime {
         })) {
           if (event.type === "text") {
             ensureNotCancelled(ctx);
+            completionStreamedText = true;
             yield {
               type: "assistant.delta",
               run_id: input.run_id,
@@ -503,7 +506,7 @@ export class ChatCompletionsAgentRuntime implements AgentRuntime {
           if (diffEvent) yield diffEvent;
           completedProductArtifacts.push(requestedFilePath);
           const deliveredContent = `${finalContent}\n\nCompleted and saved the result to ${requestedFilePath}.`;
-          if (useBufferedCompletion) {
+          if (useBufferedCompletion && !completionStreamedText) {
             yield {
               type: "assistant.delta",
               run_id: input.run_id,
@@ -518,7 +521,7 @@ export class ChatCompletionsAgentRuntime implements AgentRuntime {
           };
           return;
         }
-        if (useBufferedCompletion) {
+        if (useBufferedCompletion && !completionStreamedText) {
           yield {
             type: "assistant.delta",
             run_id: input.run_id,
