@@ -921,6 +921,9 @@ async function createPinnedToolHandoffMock(): Promise<{
       assert.equal(requests.length, 2);
       assert.equal(request.stream, request.tools === undefined);
       assert.equal(request.max_completion_tokens, 3_000);
+      for (let index = 1; index < (request.messages ?? []).length; index += 1) {
+        assert.equal(request.messages[index - 1]?.role === "user" && request.messages[index]?.role === "user", false);
+      }
       for (const message of request.messages ?? []) {
         if (message.role === "assistant") {
           assert.ok(typeof message.content === "string" && message.content.trim().length > 0);

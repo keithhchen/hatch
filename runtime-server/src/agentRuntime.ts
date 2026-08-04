@@ -384,6 +384,9 @@ export class ChatCompletionsAgentRuntime implements AgentRuntime {
       const useBufferedCompletion = requiresBufferedDelivery || (hasCompletedToolTurn && (isPinnedCreatorProduct || Boolean(requestedFilePath)));
       const streamRequestedArtifactFollowUp = useBufferedCompletion && Boolean(requestedFilePath) && !deliveryWorkflow;
       const followUpTools = useBufferedCompletion && requestedFilePath && completedProductArtifacts.length === 0 ? [] : tools;
+      const providerMessages = ctx.releaseSystemPrompt && productToolEvidence.length > 0
+        ? mergeAdjacentUserMessages(messages)
+        : messages;
       let completionStreamedText = false;
       if (useBufferedCompletion && !streamRequestedArtifactFollowUp) {
         // A Creator product has a concise final delivery rather than a token
@@ -393,7 +396,7 @@ export class ChatCompletionsAgentRuntime implements AgentRuntime {
         // only the follow-up request after local evidence is buffered.
         completion = await completeChatCompletion(openai, {
           model,
-          messages,
+          messages: providerMessages,
           tools: followUpTools,
           temperature: provider.temperature,
           ...kimiThinkingPayload(),
@@ -402,7 +405,7 @@ export class ChatCompletionsAgentRuntime implements AgentRuntime {
       } else {
         for await (const event of streamChatCompletion(openai, {
           model,
-          messages,
+          messages: providerMessages,
           tools: followUpTools,
           temperature: provider.temperature,
           ...kimiThinkingPayload(),
@@ -1958,6 +1961,21 @@ function normalizeProviderMessages(messages: ChatCompletionMessage[]): ChatCompl
     if (!message.content?.trim()) return [];
     return [message];
   });
+}
+
+function mergeAdjacentUserMessages(messages: ChatCompletionMessage[]): ChatCompletionMessage[] {
+  return messages.reduce<ChatCompletionMessage[]>((result, message) => {
+    const previous = result.at(-1);
+    if (previous?.role === "user" && message.role === "user") {
+      result[result.length - 1] = {
+        ...previous,
+        content: `${previous.content}\n\n${message.content}`
+      };
+    } else {
+      result.push(message);
+    }
+    return result;
+  }, []);
 }
 
 function modelToolPayload(tools: ChatToolDefinition[]): {
