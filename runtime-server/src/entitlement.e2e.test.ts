@@ -335,7 +335,7 @@ test("Creator Release saves an explicit requested artifact after returning buffe
     const result = await runLocalHarness({
       serverUrl: await listen(runtime),
       workspace,
-      prompt: "Find Hatch in local files and save the review to result.md.",
+      prompt: "请在本地文件中查找 Hatch，并将复核结果保存为 result.md。",
       licenseToken: "license_fixture",
       entitlementId: entitlement.entitlement_id,
       approveTool: () => true
