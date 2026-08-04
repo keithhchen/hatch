@@ -368,6 +368,7 @@ export class ChatCompletionsAgentRuntime implements AgentRuntime {
     const productToolEvidence: ProductToolEvidence[] = [];
     const completedProductArtifacts: string[] = [];
     let hasCompletedToolTurn = false;
+    let emptyFinalRetries = 0;
     const tools = chatToolsForRun(ctx.clientTools, ctx.allowSkillRun !== false, ctx.allowedExternalTools, ctx.knowledgeAvailable, ctx.externalToolDefinitions);
 
     yield {
@@ -432,6 +433,25 @@ export class ChatCompletionsAgentRuntime implements AgentRuntime {
       auditMessages.push(assistantToolMessage);
 
       if (toolCalls.length === 0) {
+        if (!content.trim() && emptyFinalRetries < 2 && productToolEvidence.length > 0) {
+          emptyFinalRetries += 1;
+          messages.push({
+            role: "user",
+            content: [
+              "The previous assistant response was empty.",
+              "Return the complete final deliverable now as plain text, using only the approved local evidence already provided.",
+              requestedFilePath
+                ? `The Consumer explicitly requested the deliverable be saved to ${requestedFilePath}; include the complete deliverable text now so Runtime can save it.`
+                : "Answer the Consumer's request directly and do not return an empty response."
+            ].join("\n")
+          });
+          yield {
+            type: "assistant.delta",
+            run_id: input.run_id,
+            delta: { kind: "status", content: "Preparing the final deliverable from the approved Workspace evidence." }
+          };
+          continue;
+        }
         const finalContent = deliveryWorkflow && reviewer
           ? await produceAuditedFinal({
               creator: openai,

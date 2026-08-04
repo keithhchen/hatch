@@ -351,6 +351,69 @@ test("Creator Release saves an explicit requested artifact after returning buffe
   }
 });
 
+test("Creator Release retries an empty buffered final before delivering an explicit artifact", async () => {
+  const releaseFixture = await createReleaseFixture();
+  const workspace = await tempDirectory("hatch-empty-final-retry-workspace-");
+  process.env.HATCH_RUNTIME_DATA_DIR = await tempDirectory("hatch-empty-final-retry-runtime-");
+  await writeFile(path.join(workspace, "notes.txt"), "Hatch local evidence.\n", "utf8");
+  const requests: Array<Record<string, any>> = [];
+  const server = http.createServer((req, res) => {
+    void (async () => {
+      if (req.method !== "POST" || req.url !== "/v1/chat/completions") {
+        res.writeHead(404);
+        res.end("not found");
+        return;
+      }
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      const request = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, any>;
+      requests.push(request);
+      if (requests.length === 1) {
+        writeSseToolCall(res, "call_empty_retry_search", "file_search", { query: "Hatch", path: ".", max_results: 5 });
+        return;
+      }
+      if (requests.length === 2) {
+        assert.equal(request.stream, false);
+        writeJsonModelCompletion(res, "");
+        return;
+      }
+      assert.equal(requests.length, 3);
+      assert.equal(request.stream, false);
+      assert.match(JSON.stringify(request.messages), /previous assistant response was empty/);
+      writeJsonModelCompletion(res, "RECOVERED LOCAL EVIDENCE FINAL");
+    })().catch((error) => {
+      res.writeHead(500);
+      res.end(error instanceof Error ? error.message : String(error));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Expected mock TCP address");
+  configureMockModels(`http://127.0.0.1:${address.port}/v1`);
+  try {
+    const entitlement = entitlementFor(releaseFixture.releaseId, releaseFixture.digest);
+    const runtime = createRuntimeServer({
+      releaseResolver: new CreatorReleaseResolver(releaseFixture.root),
+      entitlementResolver: new MemoryEntitlementResolver("license_fixture", entitlement)
+    });
+    servers.push(runtime);
+    const result = await runLocalHarness({
+      serverUrl: await listen(runtime),
+      workspace,
+      prompt: "Find Hatch in local files and save the complete review to retry.md.",
+      licenseToken: "license_fixture",
+      entitlementId: entitlement.entitlement_id,
+      approveTool: () => true
+    });
+    assert.match(result.finalText, /RECOVERED LOCAL EVIDENCE FINAL/);
+    assert.match(result.finalText, /Completed and saved the result to retry\.md/);
+    assert.equal(await readFile(path.join(workspace, "retry.md"), "utf8"), "RECOVERED LOCAL EVIDENCE FINAL");
+    assert.equal(requests.length, 3);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
 test("buyer entitlement discovers and runs its server-pinned Release through real local tools", async () => {
   const releaseFixture = await createReleaseFixture();
   const workspace = await tempDirectory("hatch-buyer-workspace-");
