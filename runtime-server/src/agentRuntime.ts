@@ -278,7 +278,7 @@ function compactCreatorHandoffMessages(
   systemPrompt: string,
   initialMessages: ChatCompletionMessage[],
   evidence: ProductToolEvidence[],
-  requestedFilePath: string,
+  requestedFilePath: string | undefined,
   allowRequestedArtifactWrite: boolean
 ): ChatCompletionMessage[] {
   const handoff = creatorHandoffMessages(initialMessages, requestedFilePath);
@@ -447,7 +447,7 @@ export class ChatCompletionsAgentRuntime implements AgentRuntime {
         && !modelCanWriteRequestedArtifact
         ? []
         : tools;
-      const providerMessages = ctx.releaseAgentCorpus && requestedFilePath && productToolEvidence.length > 0
+      const providerMessages = ctx.releaseAgentCorpus && productToolEvidence.length > 0
         ? compactCreatorHandoffMessages(
             runtimeSystemPrompt,
             initialMessages,
