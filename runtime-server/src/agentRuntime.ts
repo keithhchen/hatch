@@ -263,6 +263,7 @@ function productToolEvidenceMessage(evidence: ProductToolEvidence[]): ChatComple
     content: [
       "Continue the Consumer's request using the following approved results from their locally authorized tools.",
       "Treat these as the current workspace evidence. Do not invent facts beyond them; call another tool if the promised work still needs it.",
+      "If the Consumer explicitly requested an output file, return the complete deliverable as text now. The Runtime will save that final text to the requested path after this response; do not call fs.write in this follow-up.",
       "<approved_local_tool_evidence>",
       JSON.stringify(evidence),
       "</approved_local_tool_evidence>"
@@ -338,6 +339,7 @@ export class ChatCompletionsAgentRuntime implements AgentRuntime {
     let resourceRoots = activeSkillResourceRoots(visibleSkillRecords, activeSkillsForRun);
     const seenImplicitInvocations = new Set<string>();
     const workspacePathPolicy = createWorkspacePathPolicy(input.message.content);
+    const requestedFilePath = requestedOutputPath(input.message.content);
     const runtimeSystemPrompt = buildRuntimeSystemPrompt(ctx.releaseSystemPrompt, deliveryWorkflow);
     const initialMessages: ChatCompletionMessage[] = [
       { role: "system", content: runtimeSystemPrompt },
@@ -379,6 +381,7 @@ export class ChatCompletionsAgentRuntime implements AgentRuntime {
       ensureNotCancelled(ctx);
       let completion: ChatCompletionResult | undefined;
       const useBufferedCompletion = requiresBufferedDelivery || (isPinnedCreatorProduct && hasCompletedToolTurn);
+      const followUpTools = useBufferedCompletion && requestedFilePath && completedProductArtifacts.length === 0 ? [] : tools;
       if (useBufferedCompletion) {
         // A Creator product has a concise final delivery rather than a token
         // stream. Kimi's non-streaming completion is materially more reliable
@@ -388,7 +391,7 @@ export class ChatCompletionsAgentRuntime implements AgentRuntime {
         completion = await completeChatCompletion(openai, {
           model,
           messages,
-          tools,
+          tools: followUpTools,
           temperature: provider.temperature,
           ...kimiThinkingPayload(),
           signal: modelRequestSignal(ctx.abortSignal)
@@ -397,7 +400,7 @@ export class ChatCompletionsAgentRuntime implements AgentRuntime {
         for await (const event of streamChatCompletion(openai, {
           model,
           messages,
-          tools,
+          tools: followUpTools,
           temperature: provider.temperature,
           ...kimiThinkingPayload(),
           signal: modelRequestSignal(ctx.abortSignal)
@@ -448,6 +451,48 @@ export class ChatCompletionsAgentRuntime implements AgentRuntime {
               signal: ctx.abortSignal
             })
           : content;
+        if (isPinnedCreatorProduct && !deliveryWorkflow && requestedFilePath && finalContent.trim() && completedProductArtifacts.length === 0) {
+          const writeToolCallId = `${input.run_id}_delivery_${turn + 1}`;
+          const writeArgs = { path: requestedFilePath, content: finalContent };
+          const eventBase = toolEventBase(input, writeToolCallId, "file_write", writeArgs, resourceRoots, activeSkillsForRun, skillContext.aliases, ctx);
+          yield {
+            type: "assistant.delta",
+            run_id: input.run_id,
+            delta: { kind: "status", content: "Saving the completed work to your Workspace." }
+          };
+          yield { ...eventBase, status: "requested" };
+          let result: Record<string, unknown>;
+          try {
+            result = await executeChatTool(input, ctx, writeToolCallId, "file_write", writeArgs, resourceRoots, activeSkillsForRun, skillContext.aliases, workspacePathPolicy);
+          } catch (error) {
+            yield {
+              ...eventBase,
+              status: "failed",
+              error: { code: "tool_failed", message: errorMessage(error) }
+            };
+            throw error;
+          }
+          const modelResult = modelVisibleToolResult(eventBase.name, result);
+          yield { ...eventBase, status: "completed", result: modelResult };
+          const diffEvent = workspaceDiffEvent(input.run_id, writeToolCallId, eventBase.name, result);
+          if (diffEvent) yield diffEvent;
+          completedProductArtifacts.push(requestedFilePath);
+          const deliveredContent = `${finalContent}\n\nCompleted and saved the result to ${requestedFilePath}.`;
+          if (useBufferedCompletion) {
+            yield {
+              type: "assistant.delta",
+              run_id: input.run_id,
+              delta: { kind: "text", content: deliveredContent }
+            };
+          }
+          yield {
+            type: "turn.completed",
+            run_id: input.run_id,
+            output: [{ type: "message", content: deliveredContent }],
+            usage: { input_tokens: usage.input_tokens, output_tokens: usage.output_tokens }
+          };
+          return;
+        }
         if (useBufferedCompletion) {
           yield {
             type: "assistant.delta",

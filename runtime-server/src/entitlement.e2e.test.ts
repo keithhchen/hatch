@@ -318,6 +318,39 @@ test("Creator Release buffers the model turn after local tool evidence", async (
   }
 });
 
+test("Creator Release saves an explicit requested artifact after returning buffered final text", async () => {
+  const releaseFixture = await createReleaseFixture();
+  const workspace = await tempDirectory("hatch-tool-delivery-workspace-");
+  process.env.HATCH_RUNTIME_DATA_DIR = await tempDirectory("hatch-tool-delivery-runtime-");
+  await writeFile(path.join(workspace, "notes.txt"), "Hatch local evidence.\n", "utf8");
+  const mock = await createPinnedToolHandoffMock();
+  configureMockModels(mock.baseUrl);
+  try {
+    const entitlement = entitlementFor(releaseFixture.releaseId, releaseFixture.digest);
+    const runtime = createRuntimeServer({
+      releaseResolver: new CreatorReleaseResolver(releaseFixture.root),
+      entitlementResolver: new MemoryEntitlementResolver("license_fixture", entitlement)
+    });
+    servers.push(runtime);
+    const result = await runLocalHarness({
+      serverUrl: await listen(runtime),
+      workspace,
+      prompt: "Find Hatch in local files and save the review to result.md.",
+      licenseToken: "license_fixture",
+      entitlementId: entitlement.entitlement_id,
+      approveTool: () => true
+    });
+
+    assert.match(result.finalText, /LOCAL EVIDENCE FINAL/);
+    assert.match(result.finalText, /Completed and saved the result to result\.md/);
+    assert.equal(await readFile(path.join(workspace, "result.md"), "utf8"), "LOCAL EVIDENCE FINAL");
+    assert.deepEqual(result.events.filter((event) => event.type === "tool_call.request").map((event) => event.name), ["fs.search", "fs.write"]);
+    assert.deepEqual(mock.requests[1]?.tools, []);
+  } finally {
+    await mock.close();
+  }
+});
+
 test("buyer entitlement discovers and runs its server-pinned Release through real local tools", async () => {
   const releaseFixture = await createReleaseFixture();
   const workspace = await tempDirectory("hatch-buyer-workspace-");
