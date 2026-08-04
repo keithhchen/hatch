@@ -425,8 +425,22 @@ export class ChatCompletionsAgentRuntime implements AgentRuntime {
       ensureNotCancelled(ctx);
       let completion: ChatCompletionResult | undefined;
       const useBufferedCompletion = requiresBufferedDelivery || (hasCompletedToolTurn && (isPinnedCreatorProduct || Boolean(requestedFilePath)));
-      const streamRequestedArtifactFollowUp = useBufferedCompletion && Boolean(requestedFilePath) && !deliveryWorkflow;
-      const modelCanWriteRequestedArtifact = Boolean(requestedFilePath && ctx.releaseAgentCorpus && !deliveryWorkflow);
+      // Once the Consumer asks for a concrete file, the Runtime owns the
+      // final persistence contract. The current Agent Corpus used to keep a
+      // tool-enabled SSE follow-up open after local reads; in production that
+      // left a real user waiting indefinitely after the evidence was already
+      // available. Make that handoff one bounded, non-tool completion. Keep
+      // the legacy Creator Release stream contract unchanged.
+      const streamRequestedArtifactFollowUp = useBufferedCompletion
+        && Boolean(requestedFilePath)
+        && !deliveryWorkflow
+        && !ctx.releaseAgentCorpus;
+      const modelCanWriteRequestedArtifact = Boolean(
+        requestedFilePath
+        && ctx.releaseAgentCorpus
+        && !deliveryWorkflow
+        && streamRequestedArtifactFollowUp
+      );
       const followUpTools = useBufferedCompletion
         && requestedFilePath
         && completedProductArtifacts.length === 0
