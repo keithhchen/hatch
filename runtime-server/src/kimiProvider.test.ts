@@ -9,7 +9,7 @@ import {
   requireKimiProviderConfig
 } from "./kimiProvider.js";
 
-test("Kimi-only provider defaults every runtime role to the non-thinking Kimi K2.6 profile", () => {
+test("Kimi-only provider defaults every runtime role to the thinking-enabled Kimi K2.6 profile", () => {
   assert.deepEqual(requireKimiProviderConfig({ LLM_API_KEY: "test-key" }), {
     apiKey: "test-key",
     baseURL: KIMI_DEFAULT_BASE_URL,
@@ -22,8 +22,8 @@ test("Kimi-only provider defaults every runtime role to the non-thinking Kimi K2
     creator_model: "kimi-k2.6",
     reviewer_model: "kimi-k2.6",
     compaction_model: "kimi-k2.6",
-    temperature: 0.6,
-    thinking_mode: "disabled"
+    temperature: 1,
+    thinking_mode: "enabled"
   });
 });
 

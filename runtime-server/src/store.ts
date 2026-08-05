@@ -246,6 +246,10 @@ export class RuntimeStore {
     await write;
   }
 
+  async close(): Promise<void> {
+    await this.writeChain;
+  }
+
   async readEvents(): Promise<StoreEvent[]> {
     await this.writeChain;
     const file = path.join(this.root, "events.jsonl");
@@ -262,6 +266,15 @@ export class RuntimeStore {
   async readConversation(conversationId: string): Promise<ConversationMessage[]> {
     const events = await this.readEvents();
     const messages: ConversationMessage[] = [];
+    const modelAssistantRuns = new Set(
+      events
+        .filter((event): event is Extract<StoreEvent, { type: "conversation.model_message" }> => (
+          event.type === "conversation.model_message"
+          && event.conversation_id === conversationId
+          && event.message.role === "assistant"
+        ))
+        .map((event) => event.run_id)
+    );
     for (const event of events) {
       if (!("conversation_id" in event) || event.conversation_id !== conversationId) {
         continue;
@@ -271,6 +284,11 @@ export class RuntimeStore {
       } else if (event.type === "conversation.model_message") {
         messages.push(event.message);
       } else if (event.type === "message.created") {
+        // The UI projection writes one assistant bubble after a completed
+        // turn, while Pi's canonical model transcript already stores the
+        // completed assistant message. Do not feed that projection row back
+        // to the next model request as a duplicate assistant turn.
+        if (event.role === "assistant" && modelAssistantRuns.has(event.run_id)) continue;
         messages.push({
           role: event.role,
           content: event.content

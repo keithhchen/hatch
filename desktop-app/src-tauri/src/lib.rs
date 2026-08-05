@@ -1,6 +1,22 @@
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
+
 use hatch_local_runner::{LocalRunner, ToolCallRequest};
 use serde_json::Value;
 use std::path::PathBuf;
+
+const LOCAL_TOOL_RESULT_TTL: Duration = Duration::from_secs(60);
+
+struct StoredToolResult {
+    created_at: Instant,
+    payload: Value,
+}
+
+fn local_tool_results() -> &'static Mutex<HashMap<String, StoredToolResult>> {
+    static RESULTS: OnceLock<Mutex<HashMap<String, StoredToolResult>>> = OnceLock::new();
+    RESULTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 #[tauri::command]
 fn default_workspace() -> String {
@@ -33,12 +49,60 @@ async fn pick_workspace_folder() -> Option<String> {
 }
 
 #[tauri::command]
-async fn execute_tool_call(workspace_root: String, request: Value) -> Result<Value, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        execute_tool_call_blocking(workspace_root, request)
-    })
-    .await
-    .map_err(to_string)?
+fn execute_tool_call(
+    workspace_root: String,
+    request: Value,
+) -> Result<(), String> {
+    // Local tools belong to the Desktop, but they must not block its WebView.
+    // The result is stored as a short-lived job and polled by the renderer so
+    // the UI remains responsive while the bounded runner performs file work.
+    let run_id = request
+        .get("run_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let tool_call_id = request
+        .get("tool_call_id")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    let result_key = tool_call_id.clone();
+
+    std::thread::spawn(move || {
+        let payload = match execute_tool_call_blocking(workspace_root, request) {
+            Ok(result) => result,
+            Err(error) => serde_json::json!({
+                "type": "tool_call.result",
+                "run_id": run_id,
+                "tool_call_id": tool_call_id,
+                "status": "error",
+                "error": {
+                    "code": "local_runner_error",
+                    "message": error
+                }
+            }),
+        };
+
+        if let Ok(mut results) = local_tool_results().lock() {
+            results.retain(|_, result| result.created_at.elapsed() < LOCAL_TOOL_RESULT_TTL);
+            results.insert(
+                result_key,
+                StoredToolResult {
+                    created_at: Instant::now(),
+                    payload,
+                },
+            );
+        }
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+fn poll_tool_call(tool_call_id: String) -> Option<Value> {
+    let mut results = local_tool_results().lock().ok()?;
+    results.retain(|_, result| result.created_at.elapsed() < LOCAL_TOOL_RESULT_TTL);
+    results.remove(&tool_call_id).map(|result| result.payload)
 }
 
 fn execute_tool_call_blocking(workspace_root: String, request: Value) -> Result<Value, String> {
@@ -64,7 +128,8 @@ pub fn run() {
             default_workspace,
             ensure_workspace,
             pick_workspace_folder,
-            execute_tool_call
+            execute_tool_call,
+            poll_tool_call
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Hatch desktop app");

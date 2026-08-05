@@ -536,10 +536,7 @@ function App() {
 
     try {
       const result = await withTimeout(
-        invokeTauri("execute_tool_call", {
-          workspaceRoot: workspaceRef.current,
-          request: approvedByUser ? { ...message, approval: "approved_by_user" } : message
-        }),
+        invokeLocalToolCall(message, approvedByUser),
         LOCAL_TOOL_TIMEOUT_MS,
         `Local tool timed out after ${Math.round(LOCAL_TOOL_TIMEOUT_MS / 1000)}s: ${message.name}`
       );
@@ -573,6 +570,41 @@ function App() {
       tool_call_id: message.tool_call_id,
       status: "error",
       error: { code, message: reason }
+    });
+  }
+
+  function invokeLocalToolCall(message, approvedByUser) {
+    const request = approvedByUser ? { ...message, approval: "approved_by_user" } : message;
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      let pollTimer;
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(pollTimer);
+        callback(value);
+      };
+      const poll = async () => {
+        if (settled) return;
+        try {
+          const result = await invokeTauri("poll_tool_call", {
+            toolCallId: request.tool_call_id
+          });
+          if (result) {
+            finish(resolve, result);
+            return;
+          }
+        } catch (error) {
+          finish(reject, error);
+          return;
+        }
+        pollTimer = window.setTimeout(poll, 100);
+      };
+
+      invokeTauri("execute_tool_call", {
+        workspaceRoot: workspaceRef.current,
+        request
+      }).then(poll).catch((error) => finish(reject, error));
     });
   }
 

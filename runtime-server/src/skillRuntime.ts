@@ -6,7 +6,7 @@ import {
   type RuntimeCompactionMessage
 } from "./compaction.js";
 import {
-  ChatCompletionsAgentRuntime,
+  createAgentRuntime,
   type AgentRuntime,
   type RunContext,
   type RuntimeSessionSkills
@@ -193,7 +193,7 @@ export class SkillRuntime {
       }
     };
 
-    const runtime = this.options.createWorkerRuntime?.() ?? new ChatCompletionsAgentRuntime();
+    const runtime = this.options.createWorkerRuntime?.() ?? createAgentRuntime();
     try {
       let output = "";
       for await (const event of runtime.run(workerInput, workerContext)) {

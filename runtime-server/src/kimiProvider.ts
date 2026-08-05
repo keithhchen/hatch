@@ -1,9 +1,10 @@
 export const KIMI_MODEL = "kimi-k2.6";
-// Kimi K2.6 requires temperature=0.6 when thinking is disabled. Keep this in
-// the single provider profile so Factory, Runtime, and audits cannot drift
-// into the provider's default thinking mode for evidence-heavy turns.
-export const KIMI_TEMPERATURE = 0.6;
-export const KIMI_THINKING = { type: "disabled" } as const;
+// Keep the provider profile in one place so Factory, Runtime, and audits all
+// use the same thinking-enabled Kimi contract.
+// Kimi K2.6 currently accepts only temperature=1. Thinking remains enabled;
+// this is a provider contract, not a user-facing creativity setting.
+export const KIMI_TEMPERATURE = 1;
+export const KIMI_THINKING = { type: "enabled" } as const;
 export const KIMI_DEFAULT_BASE_URL = "https://api.moonshot.cn/v1";
 
 export type KimiProviderConfig = {
@@ -20,14 +21,10 @@ export type KimiModelRuntimeRecord = {
   reviewer_model: typeof KIMI_MODEL;
   compaction_model: typeof KIMI_MODEL;
   temperature: typeof KIMI_TEMPERATURE;
-  thinking_mode: "disabled";
+  thinking_mode: "enabled";
 };
 
-/**
- * Moonshot defaults Kimi K2.6 to thinking when this field is omitted. Send
- * the explicit disabled mode so evidence-grounded deliveries reserve their
- * completion budget for the user-visible answer.
- */
+/** Send the explicit thinking mode so every runtime role is observable. */
 export function kimiThinkingPayload(): { thinking: typeof KIMI_THINKING } {
   return { thinking: KIMI_THINKING };
 }

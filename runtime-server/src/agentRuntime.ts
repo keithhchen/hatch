@@ -33,6 +33,7 @@ import {
   type SkillsRenderResult,
   type SkillRecord
 } from "./skills.js";
+import { PiAgentRuntime } from "./piAgentRuntime.js";
 
 export type RuntimeSessionSkills = {
   records: SkillRecord[];
@@ -228,14 +229,14 @@ export class DeterministicAgentRuntime implements AgentRuntime {
   }
 }
 
-type ChatCompletionMessage = {
+export type ChatCompletionMessage = {
   role: "system" | "user" | "assistant" | "tool";
   content: string | null;
   tool_calls?: ChatToolCall[];
   tool_call_id?: string;
 };
 
-type ChatToolCall = {
+export type ChatToolCall = {
   id: string;
   type: "function";
   function: {
@@ -314,7 +315,7 @@ function creatorHandoffMessages(messages: ChatCompletionMessage[], requestedFile
   });
 }
 
-type WorkspacePathPolicy = {
+export type WorkspacePathPolicy = {
   requiredReads: Set<string>;
   completedReads: Set<string>;
 };
@@ -822,7 +823,7 @@ type DeliveryAuditInput = {
   signal?: AbortSignal;
 };
 
-async function produceAuditedFinal(input: {
+export async function produceAuditedFinal(input: {
   creator: any;
   creatorModel: string;
   reviewer: any;
@@ -876,7 +877,7 @@ async function produceAuditedFinal(input: {
   return "I can’t safely complete the requested deliverable from the available evidence. I can continue once the missing or conflicting support is provided.";
 }
 
-async function auditProposedDeliveryTool(input: {
+export async function auditProposedDeliveryTool(input: {
   reviewer: any;
   reviewerModel: string;
   workflow: DeliveryWorkflow;
@@ -1144,7 +1145,7 @@ function stripJsonFence(value: string): string {
   return value.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
 }
 
-function ensureNotCancelled(ctx: RunContext): void {
+export function ensureNotCancelled(ctx: RunContext): void {
   if (ctx.state.status === "cancelled" || ctx.abortSignal?.aborted) {
     throw new Error("Run canceled");
   }
@@ -1189,7 +1190,7 @@ function toolFailureResult(error: unknown): Record<string, unknown> {
   };
 }
 
-function workspaceDiffEvent(
+export function workspaceDiffEvent(
   runId: string,
   sourceToolCallId: string,
   toolName: string,
@@ -1208,7 +1209,7 @@ function workspaceDiffEvent(
   };
 }
 
-function modelVisibleToolResult(toolName: string, result: Record<string, unknown>): Record<string, unknown> {
+export function modelVisibleToolResult(toolName: string, result: Record<string, unknown>): Record<string, unknown> {
   if (!isWorkspaceMutationTool(toolName)) return result;
   const { diff: _diff, diff_truncated: _diffTruncated, ...rest } = result;
   return rest;
@@ -1241,7 +1242,10 @@ function failedModelToolEvent(
 }
 
 export function createAgentRuntime(): AgentRuntime {
-  return new ChatCompletionsAgentRuntime();
+  // Production Runtime uses Pi Core's implemented Agent loop. The legacy
+  // ChatCompletionsAgentRuntime remains in this file only while old fixture
+  // tests and delivery helpers are migrated; it is not the production path.
+  return new PiAgentRuntime();
 }
 
 function searchQuery(prompt: string): string {
@@ -1252,7 +1256,7 @@ function searchQuery(prompt: string): string {
   return "Hatch";
 }
 
-function requestedOutputPath(prompt: string): string | undefined {
+export function requestedOutputPath(prompt: string): string | undefined {
   const verbs = "(?:(?:save|write|create)\\b|保存|写入|创建)";
   const connectors = "(?:(?:to|as|at)\\b|到|为|至)";
   const quoted = prompt.match(new RegExp(`${verbs}[^\"'\\n]*?${connectors}\\s+[\"“']([^\"”'\\n]+)[\"”']`, "i"));
@@ -1282,7 +1286,7 @@ function firstLocalFilePath(searchResult: Record<string, unknown>): string | und
   return typeof path === "string" && path.length > 0 ? path : undefined;
 }
 
-function buildRuntimeSystemPrompt(releaseSystemPrompt?: string, deliveryWorkflow?: DeliveryWorkflow): string {
+export function buildRuntimeSystemPrompt(releaseSystemPrompt?: string, deliveryWorkflow?: DeliveryWorkflow): string {
   if (releaseSystemPrompt) {
     return [
       "You are the server-side runtime for one exact, server-pinned Hatch Creator Agent.",
@@ -1311,7 +1315,7 @@ function buildBaseSystemPrompt(): string {
   ].join("\n");
 }
 
-function buildRuntimeContextMessages(
+export function buildRuntimeContextMessages(
   projectInstructions: ProjectInstructions | undefined,
   skillsSection: string,
   activatedSkills: ActivatedSkill[] = [],
@@ -1353,7 +1357,7 @@ function isLikelyWorkspacePath(candidate: string): boolean {
   return /\.[A-Za-z0-9]{1,12}$/.test(lastSegment);
 }
 
-function createWorkspacePathPolicy(currentUserMessage: string): WorkspacePathPolicy {
+export function createWorkspacePathPolicy(currentUserMessage: string): WorkspacePathPolicy {
   return {
     requiredReads: new Set(extractMentionedWorkspacePaths(currentUserMessage).map(normalizeWorkspacePathToken)),
     completedReads: new Set()
@@ -1442,14 +1446,14 @@ function renderSkillResources(resourcePaths: string[], truncated: boolean): stri
   ].join("\n");
 }
 
-function activeSkillResourceRoots(visibleSkills: SkillRecord[], activatedSkills: ActivatedSkill[]): string[] {
+export function activeSkillResourceRoots(visibleSkills: SkillRecord[], activatedSkills: ActivatedSkill[]): string[] {
   return [...new Set([
     ...skillResourceRoots(visibleSkills),
     ...activatedSkills.map((skill) => skill.directory)
   ])];
 }
 
-function chatToolsForRun(
+export function chatToolsForRun(
   clientTools: ClientToolName[],
   includeSkillRun = true,
   allowedExternalTools?: string[],
@@ -1673,7 +1677,7 @@ function parseToolArguments(raw: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
-async function executeChatTool(
+export async function executeChatTool(
   input: RunStart,
   ctx: RunContext,
   toolCallId: string,
@@ -1798,7 +1802,7 @@ async function executeChatTool(
       });
 }
 
-function toolEventBase(
+export function toolEventBase(
   input: RunStart,
   toolCallId: string,
   name: string,
@@ -1868,7 +1872,7 @@ function toolEventBase(
   };
 }
 
-async function implicitSkillInvocationFromTool(
+export async function implicitSkillInvocationFromTool(
   toolName: string,
   args: Record<string, unknown>,
   skills: SkillRecord[],
@@ -1891,7 +1895,7 @@ async function implicitSkillInvocationFromTool(
   return undefined;
 }
 
-function skillInvocationEvent(
+export function skillInvocationEvent(
   runId: string,
   toolCallId: string,
   toolName: string,
@@ -1986,7 +1990,7 @@ function skillRelativeResourceMatches(skill: ActivatedSkill, relativePath: strin
   )) || skill.resource_manifest_truncated;
 }
 
-function runtimeSkillActivationFromToolResult(toolName: string, result: Record<string, unknown>): ActivatedSkill | undefined {
+export function runtimeSkillActivationFromToolResult(toolName: string, result: Record<string, unknown>): ActivatedSkill | undefined {
   if (toolName !== "file_read") return undefined;
   const skillPath = typeof result.path === "string" ? path.resolve(result.path) : "";
   const content = typeof result.content === "string" ? result.content : "";
@@ -2062,7 +2066,7 @@ function modelToolPayload(tools: ChatToolDefinition[]): {
   return tools.length > 0 ? { tools, tool_choice: "auto" } : {};
 }
 
-function mergeRuntimeActiveSkill(existing: ActivatedSkill[], next: ActivatedSkill): ActivatedSkill[] {
+export function mergeRuntimeActiveSkill(existing: ActivatedSkill[], next: ActivatedSkill): ActivatedSkill[] {
   return [
     ...existing.filter((skill) => skill.path !== next.path),
     next
@@ -2092,7 +2096,7 @@ function isSkillMarkdownPath(candidate: string): boolean {
   return candidate.endsWith("/SKILL.md") || candidate.endsWith("\\SKILL.md");
 }
 
-function errorMessage(error: unknown): string {
+export function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error);
 }

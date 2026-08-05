@@ -2466,8 +2466,8 @@ test("pre-turn auto compaction appends a checkpoint and sends compacted history 
     assert.ok(result.events.some((event) => event.type === "session.compacted" && event.phase === "pre_turn"));
     assert.equal(mock.requests.length, 2);
     assert.ok(mock.requests.every((request) => request.model === "kimi-k2.6"));
-    assert.ok(mock.requests.every((request) => request.temperature === 0.6));
-    assert.ok(mock.requests.every((request) => request.thinking?.type === "disabled"));
+    assert.ok(mock.requests.every((request) => request.temperature === 1));
+    assert.ok(mock.requests.every((request) => request.thinking?.type === "enabled"));
     const normalMessages = mock.requests[1]?.messages ?? [];
     assert.ok(normalMessages.some((message: Record<string, unknown>) => String(message.content ?? "").includes(SUMMARY_PREFIX)));
     assert.ok(normalMessages.some((message: Record<string, unknown>) => String(message.content ?? "").includes("current user after pre-turn compact")));
@@ -2525,8 +2525,8 @@ test("manual /compact runs a standalone compaction turn without a normal agent r
     assert.equal(result.finalText, "Compaction complete.");
     assert.equal(mock.requests.length, 1);
     assert.equal(mock.requests[0]?.model, "kimi-k2.6");
-    assert.equal(mock.requests[0]?.temperature, 0.6);
-    assert.equal(mock.requests[0]?.thinking?.type, "disabled");
+    assert.equal(mock.requests[0]?.temperature, 1);
+    assert.equal(mock.requests[0]?.thinking?.type, "enabled");
     assert.ok(result.events.some((event) => event.type === "session.compacted" && event.trigger === "manual" && event.phase === "standalone_turn"));
     assert.ok(result.events.some((event) => event.type === "turn.state" && event.status === "compacting"));
   } finally {
