@@ -73,6 +73,7 @@ const ConnectionSchema = z.object({
   tenant_id: z.string().min(1),
   kind: z.enum(["http", "mcp"]),
   secret_ref: z.string().min(1).nullable(),
+  secret: z.string().min(1).nullable().optional(),
   config: z.object({
     url: z.string().url(),
     // Creator HTTP tools default to POST for backwards compatibility. GET is
@@ -194,8 +195,8 @@ export class RegistryCreatorToolControlPlane implements CreatorToolControlPlane 
 
 async function requestHeaders(connection: ResolvedConnection, resolver: SecretResolver): Promise<Record<string, string>> {
   const headers = { ...(connection.config.headers ?? {}) };
-  if (!connection.secret_ref) return headers;
-  const secret = await resolver.resolve(connection.secret_ref);
+  if (!connection.secret_ref && !connection.secret) return headers;
+  const secret = connection.secret ?? await resolver.resolve(connection.secret_ref!);
   if (!secret) throw new Error(`Control Plane secret is unavailable for connection ${connection.id}`);
   const auth = connection.config.auth ?? { header: "Authorization", prefix: "Bearer " };
   headers[auth.header] = `${auth.prefix}${secret}`;

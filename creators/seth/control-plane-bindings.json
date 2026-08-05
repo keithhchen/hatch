@@ -1,7 +1,8 @@
 {
   "creator_id": "seth",
   "agent_id": "alpha-lite",
-  "secret_ref": "env:SETH_ALPHA_LITE_API_KEY",
+  "secret_ref": null,
+  "secret": "58b560539f3edbb6459a8ab03a15e0f2a463e7b875d75312",
   "status": "active",
   "connections": [
     {

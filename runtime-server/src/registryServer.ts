@@ -76,10 +76,11 @@ async function route(
         connectionId: decodeURIComponent(connectionMatch[1]!),
         kind: body.kind === "mcp" ? "mcp" : "http",
         secretRef: body.secret_ref === null || body.secret_ref === undefined ? null : String(body.secret_ref),
+        secret: body.secret === null || body.secret === undefined ? null : String(body.secret),
         config: body.config && typeof body.config === "object" && !Array.isArray(body.config) ? body.config as Record<string, unknown> : {},
         status: body.status === "disabled" ? "disabled" : "active"
       });
-      sendJson(response, 200, { id: connection.id, creator_id: connection.tenant_id, kind: connection.kind, secret_ref: connection.secret_ref, config: connection.config, status: connection.status });
+      sendJson(response, 200, { id: connection.id, creator_id: connection.tenant_id, kind: connection.kind, secret_ref: connection.secret_ref, secret: connection.secret, config: connection.config, status: connection.status });
     } catch (error) {
       sendJson(response, 422, { detail: error instanceof Error ? error.message : String(error) });
     }
@@ -124,7 +125,7 @@ async function route(
         agentId: decodeURIComponent(runtimeToolMatch[2]!),
         toolId: decodeURIComponent(runtimeToolMatch[3]!)
       });
-      sendJson(response, 200, { id: connection.id, tenant_id: connection.tenant_id, kind: connection.kind, secret_ref: connection.secret_ref, config: connection.config, status: connection.status });
+      sendJson(response, 200, { id: connection.id, tenant_id: connection.tenant_id, kind: connection.kind, secret_ref: connection.secret_ref, secret: connection.secret, config: connection.config, status: connection.status });
     } catch (error) {
       sendJson(response, 404, { detail: error instanceof Error ? error.message : String(error) });
     }

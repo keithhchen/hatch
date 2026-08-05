@@ -110,7 +110,6 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           IMAGE_PREFIX: ${{ needs.build-and-push.outputs.image_prefix }}
           RELEASE_TAG: ${{ env.RELEASE_TAG }}
-          SETH_ALPHA_LITE_API_KEY: ${{ secrets.SETH_ALPHA_LITE_API_KEY }}
         run: |
           set -euo pipefail
           printf '%s\n' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
@@ -118,14 +117,7 @@ jobs:
           test -f .env
           test -f compose.app.yml
           grep -q '^HATCH_DOMAIN=' .env
-          if test -n "${SETH_ALPHA_LITE_API_KEY:-}"; then
-            if grep -q '^SETH_ALPHA_LITE_API_KEY=' .env; then
-              sed -i "s#^SETH_ALPHA_LITE_API_KEY=.*#SETH_ALPHA_LITE_API_KEY=$SETH_ALPHA_LITE_API_KEY#" .env
-            else
-              printf 'SETH_ALPHA_LITE_API_KEY=%s\n' "$SETH_ALPHA_LITE_API_KEY" >> .env
-            fi
-          fi
-          for key in LLM_API_KEY HATCH_REGISTRY_DATABASE_URL HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN HATCH_AUTH_SIGNING_SECRET DASHSCOPE_API_KEY POSTGRES_PASSWORD SETH_ALPHA_LITE_API_KEY; do
+          for key in LLM_API_KEY HATCH_REGISTRY_DATABASE_URL HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN HATCH_AUTH_SIGNING_SECRET DASHSCOPE_API_KEY POSTGRES_PASSWORD; do
             grep -Eq "^${key}=[^[:space:]]+" .env || { echo "Missing non-empty $key in /opt/hatch/.env"; exit 1; }
           done
           docker network inspect hatch_internal >/dev/null
@@ -166,6 +158,7 @@ jobs:
             "https://$domain/v1/agent-corpora?creator_id=seth&agent_id=alpha-lite"
           runtime_token="$(grep '^HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN=' /opt/hatch/.env | cut -d= -f2-)"
           seed="$GITHUB_WORKSPACE/creators/seth/control-plane-bindings.json"
+          secret="$(jq -r '.secret' "$seed")"
           while IFS= read -r encoded; do
             connection="$(printf '%s' "$encoded" | base64 --decode)"
             connection_id="$(printf '%s' "$connection" | jq -r '.id')"
@@ -173,7 +166,7 @@ jobs:
             curl -4 --noproxy '*' --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 3 \
               -X PUT "https://$domain/v1/control-plane/connections/$connection_id" \
               -H "Authorization: Bearer $runtime_token" -H "X-Hatch-Tenant-Id: seth" -H "Content-Type: application/json" \
-              --data "$(jq -cn --argjson config "$config" '{kind:"http", secret_ref:"env:SETH_ALPHA_LITE_API_KEY", config:$config, status:"active"}')" >/dev/null
+              --data "$(jq -cn --arg secret "$secret" --argjson config "$config" '{kind:"http", secret_ref:null, secret:$secret, config:$config, status:"active"}')" >/dev/null
           done < <(jq -r '.connections[] | @base64' "$seed")
           while IFS= read -r encoded; do
             connection="$(printf '%s' "$encoded" | base64 --decode)"

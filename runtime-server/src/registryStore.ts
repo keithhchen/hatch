@@ -40,6 +40,7 @@ export type CreatorToolConnection = {
   tenant_id: string;
   kind: "http" | "mcp";
   secret_ref: string | null;
+  secret: string | null;
   config: Record<string, unknown>;
   status: "active" | "disabled";
 };
@@ -165,6 +166,7 @@ export class RegistryStoreTs {
     connectionId: string;
     kind: "http" | "mcp";
     secretRef: string | null;
+    secret: string | null;
     config: Record<string, unknown>;
     status: "active" | "disabled";
   }): Promise<CreatorToolConnection> {
@@ -176,15 +178,16 @@ export class RegistryStoreTs {
       tenant_id: input.tenantId,
       kind: input.kind,
       secret_ref: input.secretRef,
+      secret: input.secret,
       config: input.config,
       status: input.status
     };
     this.toolConnections.set(connection.id, connection);
     if (this.pool) {
-      await this.pool.query(`INSERT INTO tool_connections (id, tenant_id, kind, secret_ref, config_json, status)
-        VALUES ($1,$2,$3,$4,$5,$6)
-        ON CONFLICT (id) DO UPDATE SET tenant_id=EXCLUDED.tenant_id, kind=EXCLUDED.kind, secret_ref=EXCLUDED.secret_ref, config_json=EXCLUDED.config_json, status=EXCLUDED.status`,
-        [connection.id, connection.tenant_id, connection.kind, connection.secret_ref, JSON.stringify(connection.config), connection.status]);
+      await this.pool.query(`INSERT INTO tool_connections (id, tenant_id, kind, secret_ref, secret_value, config_json, status)
+        VALUES ($1,$2,$3,$4,$5,$6,$7)
+        ON CONFLICT (id) DO UPDATE SET tenant_id=EXCLUDED.tenant_id, kind=EXCLUDED.kind, secret_ref=EXCLUDED.secret_ref, secret_value=EXCLUDED.secret_value, config_json=EXCLUDED.config_json, status=EXCLUDED.status`,
+        [connection.id, connection.tenant_id, connection.kind, connection.secret_ref, connection.secret, JSON.stringify(connection.config), connection.status]);
     } else {
       await this.persistState();
     }
@@ -230,7 +233,7 @@ export class RegistryStoreTs {
       return connection;
     }
     if (this.pool) {
-      const result = await this.pool.query(`SELECT c.id, c.tenant_id, c.kind, c.secret_ref, c.config_json, c.status
+      const result = await this.pool.query(`SELECT c.id, c.tenant_id, c.kind, c.secret_ref, c.secret_value, c.config_json, c.status
         FROM agent_tool_bindings AS b JOIN tool_connections AS c ON c.id=b.connection_id
         WHERE b.tenant_id=$1 AND b.agent_id=$2 AND b.tool_id=$3`,
         [input.tenantId, input.agentId, input.toolId]);
@@ -276,9 +279,11 @@ export class RegistryStoreTs {
         tenant_id TEXT NOT NULL,
         kind TEXT NOT NULL,
         secret_ref TEXT,
+        secret_value TEXT,
         config_json TEXT NOT NULL,
         status TEXT NOT NULL
       );
+      ALTER TABLE tool_connections ADD COLUMN IF NOT EXISTS secret_value TEXT;
       CREATE TABLE IF NOT EXISTS agent_tool_bindings (
         tenant_id TEXT NOT NULL,
         agent_id TEXT NOT NULL,
@@ -296,7 +301,7 @@ export class RegistryStoreTs {
         for (const row of corpora.rows) this.corpora.set(key(row.creator_id, row.agent_id), rowToCorpus(row));
         const access = await this.pool.query("SELECT entitlement_id, user_id, creator_id, agent_id, product_id, status, granted_at FROM agent_access");
         for (const row of access.rows) this.access.set(row.entitlement_id, rowToAccess(row));
-        const connections = await this.pool.query("SELECT id, tenant_id, kind, secret_ref, config_json, status FROM tool_connections");
+        const connections = await this.pool.query("SELECT id, tenant_id, kind, secret_ref, secret_value, config_json, status FROM tool_connections");
         for (const row of connections.rows) this.toolConnections.set(row.id, rowToToolConnection(row));
         const bindings = await this.pool.query("SELECT tenant_id, agent_id, tool_id, connection_id FROM agent_tool_bindings");
         for (const row of bindings.rows) this.toolBindings.set(toolBindingKey(row.tenant_id, row.agent_id, row.tool_id), String(row.connection_id));
@@ -310,7 +315,7 @@ export class RegistryStoreTs {
       const state = JSON.parse(await readFile(this.statePath, "utf8")) as RegistryState;
       for (const corpus of state.agent_corpora ?? []) this.corpora.set(key(corpus.creator_id, corpus.agent_id), corpus);
       for (const grant of state.agent_access ?? []) this.access.set(grant.entitlement_id, grant);
-      for (const connection of state.tool_connections ?? []) this.toolConnections.set(connection.id, connection);
+      for (const connection of state.tool_connections ?? []) this.toolConnections.set(connection.id, { ...connection, secret: connection.secret ?? null });
       for (const binding of state.agent_tool_bindings ?? []) this.toolBindings.set(toolBindingKey(binding.tenant_id, binding.agent_id, binding.tool_id), binding.connection_id);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
@@ -357,7 +362,7 @@ export class RegistryStoreTs {
 
   private async readToolConnection(connectionId: string): Promise<CreatorToolConnection | undefined> {
     if (!this.pool) return undefined;
-    const result = await this.pool.query("SELECT id, tenant_id, kind, secret_ref, config_json, status FROM tool_connections WHERE id=$1", [connectionId]);
+    const result = await this.pool.query("SELECT id, tenant_id, kind, secret_ref, secret_value, config_json, status FROM tool_connections WHERE id=$1", [connectionId]);
     const row = result.rows[0];
     if (!row) return undefined;
     const connection = rowToToolConnection(row);
@@ -400,6 +405,7 @@ function rowToToolConnection(row: Record<string, any>): CreatorToolConnection {
     tenant_id: String(row.tenant_id),
     kind: row.kind === "mcp" ? "mcp" : "http",
     secret_ref: row.secret_ref === null || row.secret_ref === undefined ? null : String(row.secret_ref),
+    secret: row.secret_value === null || row.secret_value === undefined ? null : String(row.secret_value),
     config: typeof row.config_json === "string" ? JSON.parse(row.config_json) : row.config_json,
     status: row.status === "disabled" ? "disabled" : "active"
   };

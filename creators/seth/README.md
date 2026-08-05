@@ -7,10 +7,8 @@ boundaries.
 
 The Agent Corpus declares eight Creator HTTP operations in
 `agent-corpus/agent.json`. Their server-side connections and bindings are
-listed in `control-plane-bindings.json`; this file is a deployment seed, not a
-credential store. The actual API key must be available to Runtime as
-`SETH_ALPHA_LITE_API_KEY` and is referenced as
-`env:SETH_ALPHA_LITE_API_KEY`.
+listed in `control-plane-bindings.json`; this file is the Creator data seed,
+including the plaintext API key used by the Control Plane connection.
 
 The connections use `GET` and pass tool arguments as query parameters. The
 Runtime's generic Creator HTTP executor supports this without exposing the
