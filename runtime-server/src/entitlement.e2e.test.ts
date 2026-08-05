@@ -62,7 +62,7 @@ test("Release delivery workflow hides unsafe drafts and proposed writes until an
     assert.ok(mock.requests.some((request) => JSON.stringify(request).includes("FACTORY_REVISION_INSTRUCTION")));
     assert.ok(mock.requests.every((request) => request.model === "kimi-k2.6"));
     assert.ok(mock.requests.every((request) => request.temperature === 0.6));
-    assert.ok(mock.requests.every((request) => request.thinking?.type === "disabled"));
+    assert.ok(mock.requests.every((request) => request.thinking?.type === "enabled"));
     assert.ok(mock.requests.every((request) => {
       const tools = (request.tools ?? []).map((tool: Record<string, any>) => tool.function?.name);
       return !tools.includes("web_search") && !tools.includes("api_request") && !tools.includes("mcp_call");
@@ -71,7 +71,7 @@ test("Release delivery workflow hides unsafe drafts and proposed writes until an
     assert.ok(reviewerRequests.length > 0);
     assert.ok(reviewerRequests.every((request) => request.model === "kimi-k2.6"));
     assert.ok(reviewerRequests.every((request) => request.temperature === 0.6));
-    assert.ok(reviewerRequests.every((request) => request.thinking?.type === "disabled"));
+    assert.ok(reviewerRequests.every((request) => request.thinking?.type === "enabled"));
     assert.ok(reviewerRequests.every((request) => request.reasoning_format === undefined));
     for (const request of reviewerRequests) {
       assert.match(String(request.messages?.[0]?.content ?? ""), /^FACTORY_AUDIT_INSTRUCTION/);
@@ -181,7 +181,7 @@ test("delivery audit covers a large response in bounded reviewer batches", async
     assert.deepEqual(batchSizes, [20, 1]);
     assert.ok(reviewerRequests.every((request) => request.max_completion_tokens === 2_500));
     assert.ok(reviewerRequests.every((request) => request.temperature === 0.6));
-    assert.ok(reviewerRequests.every((request) => request.thinking?.type === "disabled"));
+    assert.ok(reviewerRequests.every((request) => request.thinking?.type === "enabled"));
   } finally {
     await mock.close();
   }
@@ -240,7 +240,7 @@ test("delivery audit uses Kimi-compatible JSON object mode with local schema val
     const reviewerRequests = mock.requests.filter((request) => request.response_format?.type === "json_object");
     assert.deepEqual(reviewerRequests.map((request) => request.response_format?.type), ["json_object"]);
     assert.ok(reviewerRequests.every((request) => request.model === "kimi-k2.6" && request.temperature === 0.6));
-    assert.ok(reviewerRequests.every((request) => request.thinking?.type === "disabled"));
+    assert.ok(reviewerRequests.every((request) => request.thinking?.type === "enabled"));
   } finally {
     await mock.close();
   }
@@ -309,7 +309,10 @@ test("Creator Release buffers the model turn after local tool evidence", async (
     assert.deepEqual(result.events.filter((event) => event.type === "tool_call.request").map((event) => event.name), ["fs.search"]);
     assert.equal(mock.requests.length, 2);
     assert.equal(mock.requests[0]?.stream, true);
-    assert.equal(mock.requests[1]?.stream, false);
+    // Pi Core keeps the follow-up on its normal AssistantMessage stream;
+    // the bounded evidence handoff is a context projection, not a transport
+    // switch to a second non-streaming runtime.
+    assert.equal(mock.requests[1]?.stream, true);
     assert.ok(mock.requests[1]?.messages?.some((message: Record<string, unknown>) => (
       message.role === "user" && String(message.content ?? "").includes("approved_local_tool_evidence")
     )));

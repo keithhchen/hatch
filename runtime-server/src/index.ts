@@ -18,6 +18,7 @@ import { RunStateMachine } from "./runState.js";
 import { ServerToolExecutor } from "./serverTools.js";
 import { SkillRuntime } from "./skillRuntime.js";
 import { RuntimeStore, type RunStatus } from "./store.js";
+import { PostgresStore } from "./postgresStore.js";
 import { ToolBridge } from "./toolBridge.js";
 import { CreatorReleaseResolver, type ResolvedCreatorRelease } from "./release.js";
 import { EntitlementError, FileEntitlementResolver, RegistryEntitlementResolver, isAgentCorpusEntitlement, isReleaseEntitlement, type EntitlementResolver } from "./entitlements.js";
@@ -42,6 +43,7 @@ export type RuntimeServer = {
 
 export type RuntimeServerOptions = {
   createRuntime?: () => AgentRuntime;
+  conversationStore?: RuntimeStore;
   releaseResolver?: CreatorReleaseResolver;
   entitlementResolver?: EntitlementResolver;
   /** Registry-installed current Agent Corpus root, keyed by creator/agent. */
@@ -136,8 +138,9 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     ?? (process.env.HATCH_ENTITLEMENTS_FILE ? new FileEntitlementResolver(process.env.HATCH_ENTITLEMENTS_FILE) : undefined);
   const agentCorpusResolver = options.agentCorpusResolver
     ?? (process.env.HATCH_AGENT_CORPUS_ROOT ? new AgentCorpusResolver(process.env.HATCH_AGENT_CORPUS_ROOT) : undefined);
+  const conversationStore = options.conversationStore ?? createConversationStore();
   const server = http.createServer((req, res) => {
-    void handleHttpRequest(req, res, releaseResolver, entitlementResolver, agentCorpusResolver);
+    void handleHttpRequest(req, res, releaseResolver, entitlementResolver, agentCorpusResolver, conversationStore);
   });
 
   const wss = new WebSocketServer({ server, path: "/runtime" });
@@ -145,6 +148,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     const task = handleRuntimeSocket(
       socket,
       activeConversationRuns,
+      conversationStore,
       createRuntime,
       releaseResolver,
       entitlementResolver,
@@ -166,6 +170,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       await new Promise<void>((resolve) => wss.close(() => resolve()));
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
       await Promise.allSettled([...connectionTasks]);
+      await conversationStore.close();
     }
   };
 }
@@ -175,7 +180,8 @@ async function handleHttpRequest(
   res: http.ServerResponse,
   releaseResolver?: CreatorReleaseResolver,
   entitlementResolver?: EntitlementResolver,
-  agentCorpusResolver?: AgentCorpusResolver
+  agentCorpusResolver?: AgentCorpusResolver,
+  conversationStore?: RuntimeStore
 ): Promise<void> {
   setCorsHeaders(res);
   if (req.method === "OPTIONS") {
@@ -275,7 +281,7 @@ async function handleHttpRequest(
       writeJson(res, 400, { error: { code: "binding_required", message: "A signed-in entitlement binding is required." } });
       return;
     }
-    const store = new RuntimeStore();
+    const store = conversationStore ?? createConversationStore();
     writeJson(res, 200, {
       conversation_id: conversationId,
       product_id: binding.productId,
@@ -305,6 +311,13 @@ function setCorsHeaders(res: http.ServerResponse): void {
   res.setHeader("access-control-allow-headers", "authorization, content-type");
 }
 
+function createConversationStore(): RuntimeStore {
+  const databaseUrl = process.env.HATCH_RUNTIME_DATABASE_URL
+    ?? process.env.HATCH_REGISTRY_DATABASE_URL
+    ?? process.env.DATABASE_URL;
+  return databaseUrl ? new PostgresStore({ connectionString: databaseUrl }) : new RuntimeStore();
+}
+
 function writeJson(res: http.ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "content-type": "application/json" });
   res.end(JSON.stringify(body));
@@ -327,6 +340,7 @@ function releaseConversationRun(
 async function handleRuntimeSocket(
   socket: WebSocket,
   activeConversationRuns: Map<string, string>,
+  store: RuntimeStore,
   createRuntime: () => AgentRuntime,
   releaseResolver?: CreatorReleaseResolver,
   entitlementResolver?: EntitlementResolver,
@@ -337,7 +351,6 @@ async function handleRuntimeSocket(
   let hello: ClientHello | undefined;
   let binding: SessionBinding | undefined;
   let sessionSkills: RuntimeSessionSkills | undefined;
-  const store = new RuntimeStore();
   const serverTools = new ServerToolExecutor();
   const runtime = createRuntime();
   const activeRuns = new Set<Promise<void>>();
