@@ -1,0 +1,8 @@
+[
+  {
+    "id": "seth-alpha-lite-tool-routing",
+    "question": "Search the Seth database for NVIDIA.",
+    "expected_behavior": "Use creator.seth.search-company with q=NVIDIA and preserve the returned evidence boundary.",
+    "synthetic": true
+  }
+]

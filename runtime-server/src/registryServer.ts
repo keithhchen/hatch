@@ -11,10 +11,11 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const accounts = new AccountStoreTs(store.databasePool());
   await accounts.ensureSchema();
   const publishToken = environment.HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN?.trim() || "";
+  const runtimeServiceToken = environment.HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN?.trim() || "";
   const authSecret = environment.HATCH_AUTH_SIGNING_SECRET?.trim() || "";
   const server = http.createServer((request, response) => {
-    void route(request, response, { store, accounts, publishToken, authSecret }).catch((error) => {
-      sendJson(response, 500, { detail: error instanceof Error ? error.message : String(error) });
+    void route(request, response, { store, accounts, publishToken, runtimeServiceToken, authSecret }).catch((error) => {
+      sendJson(response, errorStatus(error), { detail: error instanceof Error ? error.message : String(error) });
     });
   });
   const port = Number(environment.REGISTRY_PORT ?? 8100);
@@ -29,7 +30,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
 async function route(
   request: http.IncomingMessage,
   response: http.ServerResponse,
-  context: { store: RegistryStoreTs; accounts: AccountStoreTs; publishToken: string; authSecret: string },
+  context: { store: RegistryStoreTs; accounts: AccountStoreTs; publishToken: string; runtimeServiceToken: string; authSecret: string },
 ): Promise<void> {
   if (request.method === "OPTIONS") { response.writeHead(204, corsHeaders()); response.end(); return; }
   const url = new URL(request.url ?? "/", "http://registry.local");
@@ -61,6 +62,72 @@ async function route(
 
   if (url.pathname === "/v1/catalog/agents" && request.method === "GET") {
     sendJson(response, 200, await context.store.listAllAgentCorpora());
+    return;
+  }
+
+  const connectionMatch = url.pathname.match(/^\/v1\/control-plane\/connections\/([^/]+)$/);
+  if (connectionMatch && request.method === "PUT") {
+    requireRuntimeServiceAuth(request, context.runtimeServiceToken);
+    const tenantId = request.headers["x-hatch-tenant-id"]?.toString() ?? "";
+    const body = await readJson(request);
+    try {
+      const connection = await context.store.upsertCreatorToolConnection({
+        tenantId,
+        connectionId: decodeURIComponent(connectionMatch[1]!),
+        kind: body.kind === "mcp" ? "mcp" : "http",
+        secretRef: body.secret_ref === null || body.secret_ref === undefined ? null : String(body.secret_ref),
+        config: body.config && typeof body.config === "object" && !Array.isArray(body.config) ? body.config as Record<string, unknown> : {},
+        status: body.status === "disabled" ? "disabled" : "active"
+      });
+      sendJson(response, 200, { id: connection.id, creator_id: connection.tenant_id, kind: connection.kind, secret_ref: connection.secret_ref, config: connection.config, status: connection.status });
+    } catch (error) {
+      sendJson(response, 422, { detail: error instanceof Error ? error.message : String(error) });
+    }
+    return;
+  }
+
+  const bindingMatch = url.pathname.match(/^\/v1\/creators\/([^/]+)\/agents\/([^/]+)\/tools\/([^/]+)$/);
+  if (bindingMatch && request.method === "PUT") {
+    requireRuntimeServiceAuth(request, context.runtimeServiceToken);
+    const creatorId = decodeURIComponent(bindingMatch[1]!);
+    if (request.headers["x-hatch-creator-id"]?.toString() !== creatorId) {
+      sendJson(response, 403, { detail: "creator path does not match authenticated creator" });
+      return;
+    }
+    const body = await readJson(request);
+    try {
+      await context.store.bindCreatorTool({
+        tenantId: creatorId,
+        agentId: decodeURIComponent(bindingMatch[2]!),
+        toolId: decodeURIComponent(bindingMatch[3]!),
+        connectionId: String(body.connection_id ?? "")
+      });
+      response.writeHead(204, corsHeaders());
+      response.end();
+    } catch (error) {
+      sendJson(response, 422, { detail: error instanceof Error ? error.message : String(error) });
+    }
+    return;
+  }
+
+  const runtimeToolMatch = url.pathname.match(/^\/v1\/runtime\/(?:tenants|creators)\/([^/]+)\/agents\/([^/]+)\/tools\/([^/]+)$/);
+  if (runtimeToolMatch && request.method === "GET") {
+    requireRuntimeServiceAuth(request, context.runtimeServiceToken);
+    const tenantId = decodeURIComponent(runtimeToolMatch[1]!);
+    if (request.headers["x-hatch-tenant-id"]?.toString() !== tenantId) {
+      sendJson(response, 403, { detail: "runtime tenant header does not match route" });
+      return;
+    }
+    try {
+      const connection = await context.store.resolveCreatorToolConnection({
+        tenantId,
+        agentId: decodeURIComponent(runtimeToolMatch[2]!),
+        toolId: decodeURIComponent(runtimeToolMatch[3]!)
+      });
+      sendJson(response, 200, { id: connection.id, tenant_id: connection.tenant_id, kind: connection.kind, secret_ref: connection.secret_ref, config: connection.config, status: connection.status });
+    } catch (error) {
+      sendJson(response, 404, { detail: error instanceof Error ? error.message : String(error) });
+    }
     return;
   }
   if (url.pathname === "/v1/creator/agents" && request.method === "GET") {
@@ -123,6 +190,20 @@ function bearer(request: http.IncomingMessage): string | undefined {
   const value = request.headers.authorization ?? "";
   const [scheme, token] = value.split(" ", 2);
   return scheme?.toLowerCase() === "bearer" ? token : undefined;
+}
+
+function requireRuntimeServiceAuth(request: http.IncomingMessage, configuredToken: string): void {
+  if (!configuredToken || bearer(request) !== configuredToken) {
+    const error = new Error("A valid Registry runtime service token is required.");
+    (error as Error & { status?: number }).status = 401;
+    throw error;
+  }
+}
+
+function errorStatus(error: unknown): number {
+  return error && typeof error === "object" && typeof (error as { status?: unknown }).status === "number"
+    ? (error as { status: number }).status
+    : 500;
 }
 
 async function readBytes(request: http.IncomingMessage, max = 64 * 1024 * 1024): Promise<Uint8Array> {

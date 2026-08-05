@@ -101,6 +101,45 @@
         ],
         "summary": "The product completed package, live-task, and comparison checks and is ready to publish."
       }
+    },
+    {
+      "product_id": "alpha-lite",
+      "creator_id": "seth",
+      "release_id": "alpha-lite@1.0.0",
+      "release_digest": "sha256:0000e9ceafb59d8bf9946129c653d60bcfc251729f08ca1261fdaf7f61bbc7c7",
+      "version": "1.0.0",
+      "name": "Seth Database Alpha Lite",
+      "description": "Public-evidence and research-lead access for listed-company and relationship research.",
+      "promise": "Use Seth's database to locate company facts, research packages, and relationship candidates while preserving evidence boundaries.",
+      "boundaries": [
+        "Does not provide investment advice or guarantee research outcomes.",
+        "Does not treat relationship candidates as confirmed relationships.",
+        "Does not convert low-confidence classifications or research gaps into facts.",
+        "Does not hide missing evidence, source boundaries, or stale data.",
+        "Does not expose the Seth API credential."
+      ],
+      "price_minor": 0,
+      "currency": "USD",
+      "pricing_model": "free",
+      "publication": {
+        "status": "ready",
+        "summary": "Initial Seth Alpha Lite package is ready for zero-value UAT publication."
+      },
+      "review": {
+        "status": "ready",
+        "scenarios_checked": 1,
+        "held_out_checks": 1,
+        "coverage": ["HTTP tool routing", "Evidence boundary"],
+        "boundaries": [
+          "Candidates are not confirmed relationships.",
+          "Missing evidence must remain visible."
+        ],
+        "checks": [
+          { "id": "package", "label": "Seth package verified", "passed": true },
+          { "id": "runtime", "label": "Seth HTTP tool smoke test completed", "passed": true }
+        ],
+        "summary": "Initial Seth Alpha Lite package is ready for production UAT."
+      }
     }
   ]
 }

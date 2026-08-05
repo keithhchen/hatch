@@ -1,0 +1,8 @@
+[
+  {
+    "id": "seth-alpha-lite-relationship-boundary",
+    "input": "Does the relationship index prove that two companies work together?",
+    "expected_behavior": "Explain that relationship entries are research candidates and must not be presented as confirmed relationships.",
+    "synthetic": true
+  }
+]

@@ -56,6 +56,56 @@ test("Creator tools fail closed when a Corpus requires a missing Control Plane",
   );
 });
 
+test("Creator HTTP tools support GET query parameters and server-side API-key headers", async (t) => {
+  const target = createServer((request, response) => {
+    const url = new URL(request.url ?? "/", "http://127.0.0.1");
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({
+      method: request.method,
+      q: url.searchParams.get("q"),
+      authorization: request.headers["x-api-key"] ?? null
+    }));
+  });
+  await new Promise<void>((resolve) => target.listen(0, "127.0.0.1", resolve));
+  t.after(() => target.close());
+
+  const registry = createServer((request, response) => {
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({
+      id: "seth-alpha-lite-search", tenant_id: "seth", kind: "http", secret_ref: "secret:seth-alpha-lite",
+      config: {
+        url: `http://127.0.0.1:${(target.address() as { port: number }).port}/api/agent/search`,
+        method: "GET",
+        auth: { header: "X-API-Key", prefix: "" }
+      }, status: "active"
+    }));
+  });
+  await new Promise<void>((resolve) => registry.listen(0, "127.0.0.1", resolve));
+  t.after(() => registry.close());
+
+  const controlPlane = new RegistryCreatorToolControlPlane({
+    registryUrl: `http://127.0.0.1:${(registry.address() as { port: number }).port}`,
+    serviceToken: "internal-test",
+    secretResolver: { async resolve(secretRef) {
+      assert.equal(secretRef, "secret:seth-alpha-lite");
+      return "test-seth-key";
+    } }
+  });
+  const sethCorpus = {
+    tools: [{
+      id: "creator.seth.search-company",
+      kind: "http_function",
+      connection_ref: "seth-alpha-lite-search",
+      operation: "search_company",
+      input_schema: { type: "object", properties: { q: { type: "string" } }, required: ["q"], additionalProperties: false }
+    }]
+  } as unknown as AgentCorpus;
+  const [tool] = await resolveCreatorTools(controlPlane, "seth", "alpha-lite", sethCorpus);
+  assert.deepEqual(await tool!.execute({ q: "NVIDIA" }), {
+    method: "GET", q: "NVIDIA", authorization: "test-seth-key"
+  });
+});
+
 test("Creator MCP tools use Streamable HTTP initialization, session headers, and SSE responses", async (t) => {
   const calls: Array<{ method: string; session?: string; protocol?: string }> = [];
   const server = createServer(async (request, response) => {

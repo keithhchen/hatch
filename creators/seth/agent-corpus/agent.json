@@ -1,0 +1,147 @@
+{
+  "contract_version": "1",
+  "agent_id": "alpha-lite",
+  "creator": {
+    "id": "seth",
+    "name": "Seth"
+  },
+  "product": {
+    "id": "alpha-lite",
+    "name": "Seth Database Alpha Lite",
+    "description": "A public-evidence and research-lead interface for listed-company and relationship research."
+  },
+  "instructions": {
+    "system": {
+      "id": "seth-system",
+      "path": "instructions/system.md",
+      "sha256": "sha256:d6c43e7e86159f5dd0fe07cc414af554a339275d20ed7a01c5ce91a2401f5c77",
+      "description": "Initial Seth research-assistant system prompt."
+    }
+  },
+  "skills": [],
+  "knowledge": {
+    "documents": []
+  },
+  "tools": [
+    {
+      "id": "hatch.web_search",
+      "kind": "hatch_builtin",
+      "capability": "web_search",
+      "description": "Search current public information when the Seth database does not provide enough evidence."
+    },
+    {
+      "id": "hatch.file_search",
+      "kind": "hatch_builtin",
+      "capability": "file_search",
+      "description": "Search the Agent's isolated knowledge namespace when it contains research material."
+    },
+    {
+      "id": "creator.seth.status",
+      "kind": "http_function",
+      "connection_ref": "seth-alpha-lite-status",
+      "operation": "get_status",
+      "description": "Check Seth Database Alpha Lite status and data boundaries.",
+      "input_schema": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
+    },
+    {
+      "id": "creator.seth.search-company",
+      "kind": "http_function",
+      "connection_ref": "seth-alpha-lite-search",
+      "operation": "search_company",
+      "description": "Search listed companies by company name or ticker.",
+      "input_schema": {
+        "type": "object",
+        "properties": { "q": { "type": "string", "minLength": 1 } },
+        "required": ["q"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "creator.seth.company-detail",
+      "kind": "http_function",
+      "connection_ref": "seth-alpha-lite-company-detail",
+      "operation": "get_company_detail",
+      "description": "Get company identity, classification, readiness, and known data gaps.",
+      "input_schema": {
+        "type": "object",
+        "properties": { "ticker": { "type": "string", "minLength": 1 } },
+        "required": ["ticker"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "creator.seth.research-pack",
+      "kind": "http_function",
+      "connection_ref": "seth-alpha-lite-research-pack",
+      "operation": "get_research_pack",
+      "description": "Get a company's research package and evidence-grounding guardrails.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "ticker": { "type": "string", "minLength": 1 },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 8 }
+        },
+        "required": ["ticker"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "creator.seth.relationship-index",
+      "kind": "http_function",
+      "connection_ref": "seth-alpha-lite-relationship-index",
+      "operation": "get_relationship_index",
+      "description": "Get candidate company relationships; candidates are not confirmed relationships.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "ticker": { "type": "string", "minLength": 1 },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 10 }
+        },
+        "required": ["ticker"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "creator.seth.showcase-lite",
+      "kind": "http_function",
+      "connection_ref": "seth-alpha-lite-showcase",
+      "operation": "get_showcase_lite",
+      "description": "Get the complete Alpha Lite showcase data package.",
+      "input_schema": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
+    },
+    {
+      "id": "creator.seth.openapi",
+      "kind": "http_function",
+      "connection_ref": "seth-alpha-lite-openapi",
+      "operation": "get_openapi",
+      "description": "Get the Seth Database Alpha Lite OpenAPI description.",
+      "input_schema": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
+    },
+    {
+      "id": "creator.seth.agent-manifest",
+      "kind": "http_function",
+      "connection_ref": "seth-alpha-lite-manifest",
+      "operation": "get_agent_manifest",
+      "description": "Get the Seth Database Alpha Lite Agent Manifest.",
+      "input_schema": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
+    }
+  ],
+  "evaluations": {
+    "synthetic_qa": [
+      {
+        "id": "seth-synthetic-qa",
+        "path": "evals/synthetic-qa.json",
+        "sha256": "sha256:32d8a45784746178dc82c2533145e254ed9bb4343accb48f2c50e5759ea0129f",
+        "description": "Minimal routing check for the packaged Seth HTTP tool."
+      }
+    ],
+    "held_out": [
+      {
+        "id": "seth-held-out",
+        "path": "evals/held-out.json",
+        "sha256": "sha256:90522f83254c90a6de5650564a8db6d8e37b3ab8c485a9fff9b4252e97b7b04a",
+        "description": "Minimal boundary check for relationship candidates."
+      }
+    ]
+  }
+}

@@ -75,6 +75,9 @@ const ConnectionSchema = z.object({
   secret_ref: z.string().min(1).nullable(),
   config: z.object({
     url: z.string().url(),
+    // Creator HTTP tools default to POST for backwards compatibility. GET is
+    // needed by already-packaged Creator APIs such as Seth Alpha Lite.
+    method: z.enum(["GET", "POST"]).default("POST"),
     headers: z.record(z.string(), z.string()).optional(),
     auth: z.object({
       header: z.string().min(1).default("Authorization"),
@@ -142,7 +145,7 @@ export class RegistryCreatorToolControlPlane implements CreatorToolControlPlane 
           description: declared.description ?? `Call ${declared.operation} through the Creator's configured HTTP connection.`,
           parameters: declared.input_schema ?? emptyObjectSchema()
         },
-        execute: async (arguments_) => httpJsonCall(connection.config.url, headers, arguments_, this.options.timeoutMs)
+        execute: async (arguments_) => httpJsonCall(connection.config.url, headers, arguments_, this.options.timeoutMs, connection.config.method)
       }];
     }
     // One initialized MCP session is shared by every allowed operation for this
@@ -199,13 +202,31 @@ async function requestHeaders(connection: ResolvedConnection, resolver: SecretRe
   return headers;
 }
 
-async function httpJsonCall(url: string, headers: Record<string, string>, payload: Record<string, unknown>, timeoutMs?: number): Promise<Record<string, unknown>> {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json", ...headers },
-    body: JSON.stringify(payload),
+async function httpJsonCall(
+  url: string,
+  headers: Record<string, string>,
+  payload: Record<string, unknown>,
+  timeoutMs?: number,
+  method: "GET" | "POST" = "POST"
+): Promise<Record<string, unknown>> {
+  const requestUrl = new URL(url);
+  const requestHeaders: Record<string, string> = { accept: "application/json", ...headers };
+  const request: RequestInit = {
+    method,
+    headers: requestHeaders,
     signal: timeoutSignal(timeoutMs)
-  });
+  };
+  if (method === "GET") {
+    for (const [key, value] of Object.entries(payload)) {
+      if (value === undefined || value === null) continue;
+      const serialized = typeof value === "object" ? JSON.stringify(value) : String(value);
+      requestUrl.searchParams.set(key, serialized);
+    }
+  } else {
+    requestHeaders["content-type"] = "application/json";
+    request.body = JSON.stringify(payload);
+  }
+  const response = await fetch(requestUrl, request);
   const body = await response.text();
   if (!response.ok) throw new Error(`Creator HTTP tool failed with HTTP ${response.status}: ${body.slice(0, 500)}`);
   const value = parseObject(body, "Creator HTTP tool returned a non-object response");
