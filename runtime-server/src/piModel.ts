@@ -13,7 +13,7 @@ export const KIMI_MODEL = "kimi-k2.6" as const;
 export const KIMI_DEFAULT_BASE_URL = "https://api.moonshot.cn/v1";
 export const KIMI_DEFAULT_THINKING_LEVEL: ThinkingLevel = "high";
 // Thinking stays enabled, but delivery must have a finite response budget.
-export const KIMI_DEFAULT_MAX_OUTPUT_TOKENS = 2_048;
+export const KIMI_DEFAULT_MAX_OUTPUT_TOKENS = 1_024;
 export const KIMI_DEFAULT_TIMEOUT_MS = 120_000;
 
 const KIMI_PROVIDER_CN = "moonshotai-cn" as const;
