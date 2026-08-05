@@ -248,7 +248,6 @@ afterEach(async () => {
   delete process.env.HATCH_SKILL_PRODUCT;
   delete process.env.HATCH_MODEL_CONTEXT_WINDOW_CHARS;
   delete process.env.HATCH_MODEL_CONTEXT_WINDOW_TOKENS;
-  delete process.env.HATCH_AUTO_COMPACT_LIMIT_TOKENS;
   delete process.env.HATCH_SKILLS_CONFIG;
   if (initialCodexHome === undefined) {
     delete process.env.CODEX_HOME;
@@ -1703,14 +1702,16 @@ test("skills section renders Codex-style progressive disclosure without SKILL.md
   assert.ok(report.included_count >= 2);
 });
 
-test("chat completions runtime uses generic file_read for skill path loading", async () => {
+test("Pi runtime uses generic file_read for skill path loading", async () => {
   const runtimeSource = await readFile(new URL("../src/agentRuntime.ts", import.meta.url), "utf8");
+  const piRuntimeSource = await readFile(new URL("../src/piAgentRuntime.ts", import.meta.url), "utf8");
   const toolsSource = await readFile(new URL("../src/tools.ts", import.meta.url), "utf8");
   const specs = modelToolSpecsForRun(["fs.read"], { hasMcpServers: false });
   const fileRead = specs.find((spec) => spec.name === "file_read");
   const fileList = specs.find((spec) => spec.name === "file_list");
 
-  assert.match(runtimeSource, /chat\.completions\.create/);
+  assert.match(piRuntimeSource, /new Agent\(/);
+  assert.match(piRuntimeSource, /createKimiStreamFn/);
   assert.match(runtimeSource, /modelToolSpecsForRun/);
   assert.doesNotMatch(runtimeSource, /function chatModelToolSpecs/);
   assert.match(toolsSource, /name: "file_read"[\s\S]*?locality: "hybrid"/);
@@ -2289,11 +2290,9 @@ test("compaction transcript preserves prior checkpoint summaries for later hando
   assert.doesNotMatch(transcript, /project-only instructions/);
 
   const replacement = buildCompactedHistory(messages, `${SUMMARY_PREFIX}\nSecond compacted summary.`);
-  assert.deepEqual(replacement, [
-    { role: "user", content: "retained user before first compact" },
-    { role: "user", content: "new user after first compact" },
-    { role: "user", content: `${SUMMARY_PREFIX}\nSecond compacted summary.` }
-  ]);
+  assert.equal(replacement[0]?.role, "compactionSummary");
+  assert.match(String(replacement[0]?.content), /Second compacted summary/);
+  assert.deepEqual(replacement.slice(1), messages.map((message) => message));
 });
 
 test("compaction checkpoints replace model-visible history while preserving append-only events", async () => {
@@ -2432,7 +2431,7 @@ test("pre-turn auto compaction appends a checkpoint and sends compacted history 
     conversation_id: "conv_pre_compact",
     run_id: "old_pre",
     role: "user",
-    content: `old pre-turn user ${"x".repeat(240)}`
+    content: `old pre-turn user ${"x".repeat(500_000)}`
   });
   await store.append({
     type: "message.created",
@@ -2441,13 +2440,40 @@ test("pre-turn auto compaction appends a checkpoint and sends compacted history 
     role: "assistant",
     content: "old assistant payload should be summarized away"
   });
+  await store.append({
+    type: "message.created",
+    conversation_id: "conv_pre_compact",
+    run_id: "middle_pre",
+    role: "user",
+    content: `middle pre-turn context ${"y".repeat(500_000)}`
+  });
+  await store.append({
+    type: "message.created",
+    conversation_id: "conv_pre_compact",
+    run_id: "middle_pre",
+    role: "assistant",
+    content: "middle assistant context"
+  });
+  await store.append({
+    type: "message.created",
+    conversation_id: "conv_pre_compact",
+    run_id: "recent_pre",
+    role: "user",
+    content: "recent pre-turn context"
+  });
+  await store.append({
+    type: "message.created",
+    conversation_id: "conv_pre_compact",
+    run_id: "recent_pre",
+    role: "assistant",
+    content: "recent assistant context"
+  });
 
   const mock = await createPreTurnCompactionChatCompletionsServer();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
-  process.env.HATCH_AUTO_COMPACT_LIMIT_TOKENS = "10";
 
   runtimeServer = createRuntimeServer();
   const serverUrl = await listen(runtimeServer);
@@ -2468,10 +2494,10 @@ test("pre-turn auto compaction appends a checkpoint and sends compacted history 
     assert.ok(mock.requests.every((request) => request.model === "kimi-k2.6"));
     assert.ok(mock.requests.every((request) => request.temperature === 1));
     assert.ok(mock.requests.every((request) => request.thinking?.type === "enabled"));
-    const normalMessages = mock.requests[1]?.messages ?? [];
-    assert.ok(normalMessages.some((message: Record<string, unknown>) => String(message.content ?? "").includes(SUMMARY_PREFIX)));
-    assert.ok(normalMessages.some((message: Record<string, unknown>) => String(message.content ?? "").includes("current user after pre-turn compact")));
-    assert.ok(!normalMessages.some((message: Record<string, unknown>) => String(message.content ?? "").includes("old assistant payload")));
+    const normalText = requestMessagesText(mock.requests[1]);
+    assert.match(normalText, /Pre-turn compacted summary\./);
+    assert.match(normalText, /current user after pre-turn compact/);
+    assert.doesNotMatch(normalText, /old assistant payload/);
   } finally {
     session.close();
     await mock.close();
@@ -2481,7 +2507,7 @@ test("pre-turn auto compaction appends a checkpoint and sends compacted history 
   assert.ok(events.some((event) => event.type === "message.created" && event.content.includes("old assistant payload")));
   assert.ok(events.some((event) => event.type === "conversation.compacted" && event.phase === "pre_turn"));
   const visible = await new RuntimeStore(dataDir).readConversation("conv_pre_compact");
-  assert.ok(visible.some((message) => String(message.content ?? "").includes(SUMMARY_PREFIX)));
+  assert.ok(visible.some((message) => message.role === "compactionSummary" && String(message.content ?? "").includes("Pre-turn compacted summary.")));
   assert.ok(!visible.some((message) => String(message.content ?? "").includes("old assistant payload")));
 });
 
@@ -2494,7 +2520,7 @@ test("manual /compact runs a standalone compaction turn without a normal agent r
     conversation_id: "conv_manual_compact",
     run_id: "old_manual",
     role: "user",
-    content: "manual compact prior user"
+    content: `manual compact prior user ${"x".repeat(500_000)}`
   });
   await store.append({
     type: "message.created",
@@ -2502,6 +2528,34 @@ test("manual /compact runs a standalone compaction turn without a normal agent r
     run_id: "old_manual",
     role: "assistant",
     content: "manual compact prior assistant"
+  });
+  await store.append({
+    type: "message.created",
+    conversation_id: "conv_manual_compact",
+    run_id: "middle_manual",
+    role: "user",
+    content: `middle manual context ${"y".repeat(500_000)}`
+  });
+  await store.append({
+    type: "message.created",
+    conversation_id: "conv_manual_compact",
+    run_id: "middle_manual",
+    role: "assistant",
+    content: "middle manual assistant"
+  });
+  await store.append({
+    type: "message.created",
+    conversation_id: "conv_manual_compact",
+    run_id: "recent_manual",
+    role: "user",
+    content: "recent manual context"
+  });
+  await store.append({
+    type: "message.created",
+    conversation_id: "conv_manual_compact",
+    run_id: "recent_manual",
+    role: "assistant",
+    content: "recent manual assistant"
   });
 
   const mock = await createManualCompactionChatCompletionsServer();
@@ -2535,9 +2589,13 @@ test("manual /compact runs a standalone compaction turn without a normal agent r
   }
 
   const visible = await new RuntimeStore(dataDir).readConversation("conv_manual_compact");
-  assert.deepEqual(visible, [
-    { role: "user", content: "manual compact prior user" },
-    { role: "user", content: `${SUMMARY_PREFIX}\nManual compacted summary.` }
+  assert.equal(visible[0]?.role, "compactionSummary");
+  assert.match(String(visible[0]?.content), /Manual compacted summary\./);
+  assert.match(String(visible[1]?.content), /^middle manual context/);
+  assert.equal(visible[2]?.content, "middle manual assistant");
+  assert.deepEqual(visible.slice(3), [
+    { role: "user", content: "recent manual context" },
+    { role: "assistant", content: "recent manual assistant" }
   ]);
 });
 
@@ -2549,7 +2607,6 @@ test("mid-turn auto compaction checkpoints tool context before continuing the to
   process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
-  process.env.HATCH_AUTO_COMPACT_LIMIT_TOKENS = "20";
 
   runtimeServer = createRuntimeServer();
   const serverUrl = await listen(runtimeServer);
@@ -2558,7 +2615,7 @@ test("mid-turn auto compaction checkpoints tool context before continuing the to
       serverUrl,
       workspace,
       conversationId: "conv_mid_compact",
-      prompt: "Search web first, then continue after compaction."
+      prompt: `Search web first, then continue after compaction. ${"x".repeat(1_100_000)}`
     });
 
     assert.match(result.finalText, /mid-turn final/);
@@ -2566,8 +2623,8 @@ test("mid-turn auto compaction checkpoints tool context before continuing the to
     assert.ok(result.events.some((event) => event.type === "session.compacted" && event.phase === "mid_turn"));
     assert.equal(mock.requests.length, 3);
     const finalMessages = mock.requests[2]?.messages ?? [];
-    assert.ok(finalMessages.some((message: Record<string, unknown>) => String(message.content ?? "").includes(SUMMARY_PREFIX)));
-    assert.ok(!finalMessages.some((message: Record<string, unknown>) => message.role === "tool"));
+    assert.match(requestMessagesText(mock.requests[2]), /Mid-turn tool result summary\./);
+    assert.ok(finalMessages.some((message: Record<string, unknown>) => message.role === "tool"));
   } finally {
     await mock.close();
   }
@@ -2584,7 +2641,6 @@ test("mid-turn compaction waits for a complete assistant tool-call batch", async
   process.env.LLM_API_KEY = "test-key";
   process.env.OPENAI_BASE_URL = mock.baseUrl;
   process.env.HATCH_CREATOR_MODEL = "kimi-k2.6";
-  process.env.HATCH_AUTO_COMPACT_LIMIT_TOKENS = "1";
 
   runtimeServer = createRuntimeServer();
   const serverUrl = await listen(runtimeServer);
@@ -2593,7 +2649,7 @@ test("mid-turn compaction waits for a complete assistant tool-call batch", async
       serverUrl,
       workspace,
       conversationId: "conv_multi_tool_batch_compact",
-      prompt: "Run both server tools before continuing."
+      prompt: `Run both server tools before continuing. ${"x".repeat(1_100_000)}`
     });
 
     assert.match(result.finalText, /multi-tool batch final/);
@@ -3188,7 +3244,7 @@ test("chat completions runtime emits failed tool_call.delta for unknown model to
       serverUrl,
       workspace,
       prompt: "Call an unsupported tool."
-    }), /Unknown Chat Completions tool: unknown_tool/);
+    }), /Unknown Pi tool: unknown_tool/);
 
     const events = await new RuntimeStore(dataDir).readEvents();
     assert.ok(events.some((event) => (
@@ -5055,17 +5111,19 @@ async function createPreTurnCompactionChatCompletionsServer(): Promise<{
       const request = JSON.parse(body) as Record<string, any>;
       requests.push(request);
 
-      if (!request.stream) {
-        assert.match(String(request.messages?.[0]?.content ?? ""), /CONTEXT CHECKPOINT COMPACTION/);
-        assert.match(String(request.messages?.[1]?.content ?? ""), /old assistant payload should be summarized away/);
-        writeJsonCompletion(res, "Pre-turn compacted summary.");
+      if (requests.length === 1) {
+        assert.equal(request.stream, true);
+        assert.match(requestMessagesText(request), /old assistant payload should be summarized away/);
+        writeFinal(res, "Pre-turn compacted summary.");
         return;
       }
 
       const messages = request.messages ?? [];
-      assert.ok(messages.some((message: Record<string, unknown>) => String(message.content ?? "").includes(`${SUMMARY_PREFIX}\nPre-turn compacted summary.`)));
-      assert.ok(messages.some((message: Record<string, unknown>) => String(message.content ?? "").includes("current user after pre-turn compact")));
-      assert.ok(!messages.some((message: Record<string, unknown>) => String(message.content ?? "").includes("old assistant payload should be summarized away")));
+      const requestText = requestMessagesText(request);
+      assert.equal(request.stream, true);
+      assert.match(requestText, /Pre-turn compacted summary\./);
+      assert.match(requestText, /current user after pre-turn compact/);
+      assert.doesNotMatch(requestText, /old assistant payload should be summarized away/);
       writeFinal(res, "pre-turn final");
     })().catch((error) => {
       res.writeHead(500);
@@ -5106,10 +5164,9 @@ async function createManualCompactionChatCompletionsServer(): Promise<{
       const body = await readRequestBody(req);
       const request = JSON.parse(body) as Record<string, any>;
       requests.push(request);
-      assert.equal(request.stream, false);
-      assert.match(String(request.messages?.[0]?.content ?? ""), /CONTEXT CHECKPOINT COMPACTION/);
-      assert.match(String(request.messages?.[1]?.content ?? ""), /manual compact prior assistant/);
-      writeJsonCompletion(res, "Manual compacted summary.");
+      assert.equal(request.stream, true);
+      assert.match(requestMessagesText(request), /manual compact prior assistant/);
+      writeFinal(res, "Manual compacted summary.");
     })().catch((error) => {
       res.writeHead(500);
       res.end(error instanceof Error ? error.message : String(error));
@@ -5182,16 +5239,15 @@ async function createMidTurnCompactionChatCompletionsServer(): Promise<{
         return;
       }
 
-      if (!request.stream) {
-        assert.match(String(request.messages?.[0]?.content ?? ""), /CONTEXT CHECKPOINT COMPACTION/);
-        assert.match(String(request.messages?.[1]?.content ?? ""), /Hatch runtime architecture/);
-        writeJsonCompletion(res, "Mid-turn tool result summary.");
+      if (requests.length === 2) {
+        assert.equal(request.stream, true);
+        writeFinal(res, "Mid-turn tool result summary.");
         return;
       }
 
       const messages = request.messages ?? [];
-      assert.ok(messages.some((message: Record<string, unknown>) => String(message.content ?? "").includes(`${SUMMARY_PREFIX}\nMid-turn tool result summary.`)));
-      assert.ok(!messages.some((message: Record<string, unknown>) => message.role === "tool"));
+      assert.match(requestMessagesText(request), /Mid-turn tool result summary\./, requestMessageSummary(request));
+      assert.ok(messages.some((message: Record<string, unknown>) => message.role === "tool"));
       writeFinal(res, "mid-turn final");
     })().catch((error) => {
       res.writeHead(500);
@@ -5276,18 +5332,15 @@ async function createMultiToolBatchCompactionChatCompletionsServer(): Promise<{
         return;
       }
 
-      if (!request.stream) {
-        assert.match(String(request.messages?.[0]?.content ?? ""), /CONTEXT CHECKPOINT COMPACTION/);
-        const transcript = String(request.messages?.[1]?.content ?? "");
-        assert.match(transcript, /multi tool batch query/);
-        assert.match(transcript, /batch_endpoint/);
-        writeJsonCompletion(res, "Multi-tool batch summary.");
+      if (requests.length === 2) {
+        assert.equal(request.stream, true);
+        writeFinal(res, "Multi-tool batch summary.");
         return;
       }
 
       const messages = request.messages ?? [];
-      assert.ok(messages.some((message: Record<string, unknown>) => String(message.content ?? "").includes(`${SUMMARY_PREFIX}\nMulti-tool batch summary.`)));
-      assert.ok(!messages.some((message: Record<string, unknown>) => message.role === "tool"));
+      assert.match(requestMessagesText(request), /Multi-tool batch summary\./, requestMessageSummary(request));
+      assert.ok(messages.some((message: Record<string, unknown>) => message.role === "tool"));
       writeFinal(res, "multi-tool batch final");
     })().catch((error) => {
       res.writeHead(500);
@@ -6322,6 +6375,22 @@ function writeJsonCompletion(res: http.ServerResponse, content: string): void {
       finish_reason: "stop"
     }]
   }));
+}
+
+function requestMessagesText(request: Record<string, any> | undefined): string {
+  return JSON.stringify(request?.messages ?? []);
+}
+
+function requestMessageSummary(request: Record<string, any> | undefined): string {
+  const summary = JSON.stringify((request?.messages ?? []).map((message: Record<string, unknown>) => ({
+    role: message.role,
+    content: typeof message.content === "string"
+      ? message.content.slice(0, 120)
+      : Array.isArray(message.content)
+        ? message.content.map((part: Record<string, unknown>) => part.text).join(" ").slice(0, 120)
+        : typeof message.content
+  })));
+  return summary;
 }
 
 function runtimeContextContent(request: Record<string, any>, pattern: RegExp): string {

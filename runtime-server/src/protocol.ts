@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { Usage } from "@earendil-works/pi-ai";
 
 export const PROTOCOL_VERSION = "0.3";
 export const MAX_TOOL_RESULT_BYTES = 4 * 1024 * 1024;
@@ -107,8 +108,11 @@ export type ToolResult = z.infer<typeof ToolCallResultSchema>;
 export type RunCancel = z.infer<typeof TurnCancelSchema>;
 export type InboundMessage = z.infer<typeof InboundMessageSchema>;
 export type ConversationMessage = {
-  role: "user" | "assistant" | "tool";
+  role: "user" | "assistant" | "tool" | "compactionSummary";
   content: string | null;
+  tokens_before?: number;
+  usage?: Usage;
+  tool_name?: string;
   tool_calls?: Array<{
     id: string;
     type: "function";

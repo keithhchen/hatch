@@ -19,7 +19,7 @@ import {
 import { toolPreapprovedBySkills } from "./skillPermissions.js";
 import type { ProjectInstructions } from "./projectDocs.js";
 import type { DeliveryWorkflow } from "./release.js";
-import { KIMI_TEMPERATURE, KIMI_THINKING, kimiThinkingPayload, requireKimiProviderConfig } from "./kimiProvider.js";
+import { KIMI_TEMPERATURE } from "./kimiProvider.js";
 import {
   detectImplicitSkillInvocationForCommand,
   detectImplicitSkillInvocationForPath,
@@ -34,6 +34,7 @@ import {
   type SkillRecord
 } from "./skills.js";
 import { PiAgentRuntime } from "./piAgentRuntime.js";
+import type { PiAgentPromptRunner } from "./piPrompt.js";
 
 export type RuntimeSessionSkills = {
   records: SkillRecord[];
@@ -229,14 +230,14 @@ export class DeterministicAgentRuntime implements AgentRuntime {
   }
 }
 
-export type ChatCompletionMessage = {
+export type PiModelMessage = {
   role: "system" | "user" | "assistant" | "tool";
   content: string | null;
-  tool_calls?: ChatToolCall[];
+  tool_calls?: PiToolCall[];
   tool_call_id?: string;
 };
 
-export type ChatToolCall = {
+export type PiToolCall = {
   id: string;
   type: "function";
   function: {
@@ -245,7 +246,7 @@ export type ChatToolCall = {
   };
 };
 
-type ChatToolDefinition = {
+type PiToolDefinition = {
   type: "function";
   function: {
     name: string;
@@ -253,67 +254,6 @@ type ChatToolDefinition = {
     parameters: Record<string, unknown>;
   };
 };
-
-type ProductToolEvidence = {
-  tool: string;
-  result: Record<string, unknown>;
-};
-
-function productToolEvidenceMessage(evidence: ProductToolEvidence[], allowRequestedArtifactWrite = false): ChatCompletionMessage {
-  return {
-    role: "user",
-    content: [
-      "Continue the Consumer's request using the following approved results from their locally authorized tools.",
-      "Treat these as the current workspace evidence. Do not invent facts beyond them; call another tool if the promised work still needs it.",
-      allowRequestedArtifactWrite
-        ? "If the Consumer explicitly requested an output file, return the complete deliverable as text now or use the approved local write tool for that exact requested path."
-        : "If the Consumer explicitly requested an output file, return the complete deliverable as text now. The Runtime will save that final text to the requested path after this response; do not call fs.write in this follow-up.",
-      "<approved_local_tool_evidence>",
-      JSON.stringify(evidence),
-      "</approved_local_tool_evidence>"
-    ].join("\n\n")
-  };
-}
-
-function compactCreatorHandoffMessages(
-  systemPrompt: string,
-  initialMessages: ChatCompletionMessage[],
-  evidence: ProductToolEvidence[],
-  requestedFilePath: string | undefined,
-  allowRequestedArtifactWrite: boolean
-): ChatCompletionMessage[] {
-  const handoff = creatorHandoffMessages(initialMessages, requestedFilePath);
-  const task = [...handoff].reverse().find((message) => message.role === "user")?.content
-    || "Complete the Consumer's requested work.";
-  const evidenceMessage = productToolEvidenceMessage(evidence, allowRequestedArtifactWrite);
-  return [
-    { role: "system", content: systemPrompt },
-    {
-      role: "user",
-      content: `${task}\n\n${evidenceMessage.content}`
-    }
-  ];
-}
-
-function creatorHandoffMessages(messages: ChatCompletionMessage[], requestedFilePath?: string): ChatCompletionMessage[] {
-  if (!requestedFilePath || messages.length === 0) return messages;
-  const lastIndex = messages.length - 1;
-  return messages.map((message, index) => {
-    if (index !== lastIndex || message.role !== "user") return message;
-    const task = (message.content ?? "")
-      .replace(/\s*(?:and\s+)?save\b[\s\S]*$/i, "")
-      .replace(/\s*(?:并)?(?:将|把)?[\s\S]*?(?:保存|存储)[\s\S]*$/u, "")
-      .trim();
-    return {
-      ...message,
-      content: [
-        task || "Complete the Consumer's requested work.",
-        "Return the complete deliverable text now using only the approved Workspace evidence.",
-        "Runtime will persist the response to the requested output file automatically after delivery."
-      ].join("\n\n")
-    };
-  });
-}
 
 export type WorkspacePathPolicy = {
   requiredReads: Set<string>;
@@ -329,9 +269,8 @@ const DeliveryAuditResultSchema = z.object({
   }).strict())
 }).strict();
 type ClaimInventoryUnit = { unit_id: string; text: string };
-// Every clause still receives an independent verdict. Twenty per reviewer
-// request keeps the audit bounded while avoiding dozens of serial Kimi calls
-// for a single substantive Creator deliverable.
+// Every clause still receives an independent verdict. Twenty clauses per
+// reviewer request avoids dozens of serial Kimi calls for one deliverable.
 const DELIVERY_AUDIT_BATCH_SIZE = 20;
 const DELIVERY_AUDIT_MAX_ATTEMPTS = 3;
 class DeliveryCoverageLimitError extends Error {
@@ -350,487 +289,22 @@ type DeliveryAuditResult = z.infer<typeof DeliveryAuditResultSchema> & {
   };
 };
 
-export class ChatCompletionsAgentRuntime implements AgentRuntime {
-  async *run(input: RunStart, ctx: RunContext): AsyncIterable<OutboundMessage> {
-    const provider = requireKimiProviderConfig();
-
-    const OpenAI = (await import("openai")).default;
-    const openai = new OpenAI({
-      apiKey: provider.apiKey,
-      baseURL: provider.baseURL,
-      // AbortSignal is propagated with every call below. The client-level
-      // deadline closes the remaining gap when an upstream SSE/socket ignores
-      // an abort after connection establishment.
-      timeout: modelRequestTimeoutMs(),
-      maxRetries: 1
-    });
-    const model = provider.model;
-    const deliveryWorkflow = ctx.releaseDeliveryWorkflow;
-    const isPinnedCreatorProduct = Boolean(ctx.releaseSystemPrompt);
-    const reviewer = deliveryWorkflow ? openai : undefined;
-    // A pinned Creator Release is normally governed by publish-time Evals and
-    // must keep Kimi's genuine SSE stream intact. Buffer a response only for
-    // the explicitly enabled, regulated per-delivery audit path. Coupling
-    // "pinned release" to non-streaming made every Creator Agent look like it
-    // had lost delta streaming, even when no delivery audit was active.
-    const requiresBufferedDelivery = Boolean(isPinnedCreatorProduct && deliveryWorkflow && reviewer);
-    const reviewerModel = provider.model;
-    const skillRecords = ctx.sessionSkills.records;
-    let activeSkillsForRun = [...(ctx.activatedSkills ?? [])];
-    const projectInstructions = ctx.sessionSkills.projectInstructions;
-    const visibleSkillRecords = ctx.sessionSkills.visibleRecords;
-    const skillContext = ctx.sessionSkills.rendered;
-    let resourceRoots = activeSkillResourceRoots(visibleSkillRecords, activeSkillsForRun);
-    const seenImplicitInvocations = new Set<string>();
-    const workspacePathPolicy = createWorkspacePathPolicy(input.message.content);
-    const requestedFilePath = requestedOutputPath(input.message.content);
-    const runtimeSystemPrompt = buildRuntimeSystemPrompt(ctx.releaseSystemPrompt, deliveryWorkflow);
-    const initialMessages: ChatCompletionMessage[] = [
-      { role: "system", content: runtimeSystemPrompt },
-      ...buildRuntimeContextMessages(
-        projectInstructions,
-        skillContext.section,
-        activeSkillsForRun,
-        ctx.workspaceRoot
-      ),
-      ...ctx.messages.map((message) => ({
-        role: message.role,
-        content: message.content,
-        ...(message.tool_calls ? { tool_calls: message.tool_calls } : {}),
-        ...(message.tool_call_id ? { tool_call_id: message.tool_call_id } : {})
-      }))
-    ];
-    // Kimi can emit several local tool calls in a single turn but is not
-    // reliable when its next request receives the corresponding sequence of
-    // `tool` role messages. Keep that exact protocol history for the audited
-    // record; give a Creator Release one contiguous, server-private evidence
-    // handoff for its next reasoning step instead. This is not a product
-    // schema or synthetic data: it is the actual result of the Consumer's
-    // locally authorized tools.
-    let messages = [...initialMessages];
-    const auditMessages = [...initialMessages];
-    const productToolEvidence: ProductToolEvidence[] = [];
-    const completedProductArtifacts: string[] = [];
-    let hasCompletedToolTurn = false;
-    let emptyFinalRetries = 0;
-    const tools = chatToolsForRun(ctx.clientTools, ctx.allowSkillRun !== false, ctx.allowedExternalTools, ctx.knowledgeAvailable, ctx.externalToolDefinitions);
-
-    yield {
-      type: "assistant.delta",
-      run_id: input.run_id,
-      delta: { kind: "status", content: "Getting your Agent ready." }
-    };
-
-    const maxTurns = Number(process.env.HATCH_MAX_TOOL_TURNS ?? 12);
-    for (let turn = 0; turn < maxTurns; turn += 1) {
-      ensureNotCancelled(ctx);
-      let completion: ChatCompletionResult | undefined;
-      const useBufferedCompletion = requiresBufferedDelivery || (hasCompletedToolTurn && (isPinnedCreatorProduct || Boolean(requestedFilePath)));
-      // Once the Consumer asks for a concrete file, the Runtime owns the
-      // final persistence contract. The current Agent Corpus used to keep a
-      // tool-enabled SSE follow-up open after local reads; in production that
-      // left a real user waiting indefinitely after the evidence was already
-      // available. Make that handoff one bounded, non-tool completion. Keep
-      // the legacy Creator Release stream contract unchanged.
-      const streamRequestedArtifactFollowUp = useBufferedCompletion
-        && Boolean(requestedFilePath)
-        && !deliveryWorkflow
-        && !ctx.releaseAgentCorpus;
-      const modelCanWriteRequestedArtifact = Boolean(
-        requestedFilePath
-        && ctx.releaseAgentCorpus
-        && !deliveryWorkflow
-        && streamRequestedArtifactFollowUp
-      );
-      const followUpTools = useBufferedCompletion
-        && requestedFilePath
-        && completedProductArtifacts.length === 0
-        && !modelCanWriteRequestedArtifact
-        ? []
-        : tools;
-      const providerMessages = ctx.releaseAgentCorpus && productToolEvidence.length > 0
-        ? compactCreatorHandoffMessages(
-            runtimeSystemPrompt,
-            initialMessages,
-            productToolEvidence,
-            requestedFilePath,
-            modelCanWriteRequestedArtifact
-          )
-        : ctx.releaseSystemPrompt && productToolEvidence.length > 0
-          ? mergeAdjacentUserMessages(messages)
-          : messages;
-      let completionStreamedText = false;
-      if (useBufferedCompletion && !streamRequestedArtifactFollowUp) {
-        // A Creator product has a concise final delivery rather than a token
-        // stream. Kimi's non-streaming completion is materially more reliable
-        // after local tool turns than leaving an SSE request open. Keep the
-        // first request streamed so an ordinary Creator chat still feels live;
-        // only the follow-up request after local evidence is buffered.
-        completion = await completeChatCompletion(openai, {
-          model,
-          messages: providerMessages,
-          tools: followUpTools,
-          temperature: provider.temperature,
-          ...kimiThinkingPayload(),
-          signal: modelRequestSignal(ctx.abortSignal)
-        });
-      } else {
-        for await (const event of streamChatCompletion(openai, {
-          model,
-          messages: providerMessages,
-          tools: followUpTools,
-          temperature: provider.temperature,
-          ...kimiThinkingPayload(),
-          signal: modelRequestSignal(ctx.abortSignal)
-        })) {
-          if (event.type === "text") {
-            ensureNotCancelled(ctx);
-            completionStreamedText = true;
-            yield {
-              type: "assistant.delta",
-              run_id: input.run_id,
-              delta: { kind: "text", content: event.delta }
-            };
-          } else {
-            completion = event;
-          }
-        }
-      }
-      if (!completion) {
-        throw new Error("Chat Completions stream ended without a completion result");
-      }
-
-      const { content, toolCalls, usage } = completion;
-
-      const assistantToolMessage: ConversationMessage = {
-        role: "assistant",
-        content: content || null,
-        ...(toolCalls.length ? { tool_calls: toolCalls } : {})
-      };
-      messages.push(assistantToolMessage);
-      auditMessages.push(assistantToolMessage);
-
-      if (toolCalls.length === 0) {
-        if (!content.trim() && emptyFinalRetries < 2 && productToolEvidence.length > 0) {
-          emptyFinalRetries += 1;
-          messages.push({
-            role: "user",
-            content: [
-              "The previous assistant response was empty.",
-              "Return the complete final deliverable now as plain text, using only the approved local evidence already provided.",
-              requestedFilePath
-                ? `The Consumer explicitly requested the deliverable be saved to ${requestedFilePath}; include the complete deliverable text now so Runtime can save it.`
-                : "Answer the Consumer's request directly and do not return an empty response."
-            ].join("\n")
-          });
-          yield {
-            type: "assistant.delta",
-            run_id: input.run_id,
-            delta: { kind: "status", content: "Preparing the final deliverable from the approved Workspace evidence." }
-          };
-          continue;
-        }
-        const finalContent = deliveryWorkflow && reviewer
-          ? await produceAuditedFinal({
-              creator: openai,
-              creatorModel: model,
-              reviewer,
-              reviewerModel,
-              workflow: deliveryWorkflow,
-              draft: content,
-              messages: auditMessages.slice(0, -1),
-              systemPrompt: initialMessages[0]?.content ?? "",
-              auditContext: ctx.releaseDeliveryAuditContext,
-              // The audited flow can make several model requests (draft,
-              // claim batches, and a revision). Pass the parent cancellation
-              // signal through and give each network request its own bounded
-              // deadline below; reusing one timeout signal would make later
-              // audit batches inherit an already-expired deadline.
-              signal: ctx.abortSignal
-            })
-          : content;
-        // A requested artifact must be delivered whether or not this
-        // deployment enables the optional per-delivery reviewer. When the
-        // reviewer is active, finalContent is already the audited candidate;
-        // the Runtime owns this post-audit write so the Consumer does not
-        // depend on the model remembering a second file_write call.
-        if (requestedFilePath && finalContent.trim() && completedProductArtifacts.length === 0) {
-          const writeToolCallId = `${input.run_id}_delivery_${turn + 1}`;
-          const writeArgs = { path: requestedFilePath, content: finalContent };
-          const eventBase = toolEventBase(input, writeToolCallId, "file_write", writeArgs, resourceRoots, activeSkillsForRun, skillContext.aliases, ctx);
-          yield {
-            type: "assistant.delta",
-            run_id: input.run_id,
-            delta: { kind: "status", content: "Saving the completed work to your Workspace." }
-          };
-          yield { ...eventBase, status: "requested" };
-          let result: Record<string, unknown>;
-          try {
-            result = await executeChatTool(input, ctx, writeToolCallId, "file_write", writeArgs, resourceRoots, activeSkillsForRun, skillContext.aliases, workspacePathPolicy);
-          } catch (error) {
-            yield {
-              ...eventBase,
-              status: "failed",
-              error: { code: "tool_failed", message: errorMessage(error) }
-            };
-            throw error;
-          }
-          const modelResult = modelVisibleToolResult(eventBase.name, result);
-          yield { ...eventBase, status: "completed", result: modelResult };
-          const diffEvent = workspaceDiffEvent(input.run_id, writeToolCallId, eventBase.name, result);
-          if (diffEvent) yield diffEvent;
-          completedProductArtifacts.push(requestedFilePath);
-          const deliveredContent = `${finalContent}\n\nCompleted and saved the result to ${requestedFilePath}.`;
-          if (useBufferedCompletion && !completionStreamedText) {
-            yield {
-              type: "assistant.delta",
-              run_id: input.run_id,
-              delta: { kind: "text", content: deliveredContent }
-            };
-          }
-          yield {
-            type: "turn.completed",
-            run_id: input.run_id,
-            output: [{ type: "message", content: deliveredContent }],
-            usage: { input_tokens: usage.input_tokens, output_tokens: usage.output_tokens }
-          };
-          return;
-        }
-        if (useBufferedCompletion && !completionStreamedText) {
-          yield {
-            type: "assistant.delta",
-            run_id: input.run_id,
-            delta: { kind: "text", content: finalContent }
-          };
-        }
-        yield {
-          type: "turn.completed",
-          run_id: input.run_id,
-          output: [{
-            type: "message",
-            content: finalContent
-          }],
-          usage: {
-            input_tokens: usage.input_tokens,
-            output_tokens: usage.output_tokens
-          }
-        };
-        return;
-      }
-
-      const toolResultMessages: ConversationMessage[] = [];
-      let suppressPersistenceForTurn = false;
-      for (const toolCall of toolCalls) {
-        ensureNotCancelled(ctx);
-        let toolArguments: Record<string, unknown>;
-        let eventBase: Extract<OutboundMessage, { type: "tool_call.delta" }>;
-        try {
-          toolArguments = parseToolArguments(toolCall.function.arguments);
-          eventBase = toolEventBase(input, toolCall.id, toolCall.function.name, toolArguments, resourceRoots, activeSkillsForRun, skillContext.aliases, ctx);
-        } catch (error) {
-          yield failedModelToolEvent(input.run_id, toolCall.id, toolCall.function.name, error);
-          throw error;
-        }
-        const deliveryRejection = deliveryWorkflow && reviewer
-          ? await auditProposedDeliveryTool({
-              reviewer,
-              reviewerModel,
-              workflow: deliveryWorkflow,
-              toolName: toolCall.function.name,
-              arguments: toolArguments,
-              messages: auditMessages,
-              systemPrompt: initialMessages[0]?.content ?? "",
-              auditContext: ctx.releaseDeliveryAuditContext,
-              signal: ctx.abortSignal
-            })
-          : undefined;
-        if (deliveryRejection) {
-          suppressPersistenceForTurn = true;
-          messages.push({
-            role: "tool",
-            tool_call_id: toolCall.id,
-            content: JSON.stringify(deliveryRejection)
-          });
-          auditMessages.push({
-            role: "tool",
-            tool_call_id: toolCall.id,
-            content: JSON.stringify(deliveryRejection)
-          });
-          productToolEvidence.push({
-            tool: toolCall.function.name,
-            result: deliveryRejection
-          });
-          continue;
-        }
-        yield {
-          type: "assistant.delta",
-          run_id: input.run_id,
-          delta: { kind: "status", content: `Calling tool ${toolCall.function.name}.` }
-        };
-        yield {
-          ...eventBase,
-          status: "requested"
-        };
-        let result: Record<string, unknown>;
-        let toolExecutionFailed = false;
-        try {
-          result = await executeChatTool(input, ctx, toolCall.id, toolCall.function.name, toolArguments, resourceRoots, activeSkillsForRun, skillContext.aliases, workspacePathPolicy);
-        } catch (error) {
-          toolExecutionFailed = true;
-          result = toolFailureResult(error);
-          yield {
-            ...eventBase,
-            status: "failed",
-            error: {
-              code: "tool_failed",
-              message: errorMessage(error)
-            }
-          };
-        }
-        const modelResult = modelVisibleToolResult(eventBase.name, result);
-        const activation = runtimeSkillActivationFromToolResult(toolCall.function.name, modelResult);
-        if (activation) {
-          activeSkillsForRun = mergeRuntimeActiveSkill(activeSkillsForRun, activation);
-          resourceRoots = activeSkillResourceRoots(visibleSkillRecords, activeSkillsForRun);
-        }
-        const toolResultMessage: ConversationMessage = {
-          role: "tool",
-          tool_call_id: toolCall.id,
-          content: JSON.stringify(modelResult)
-        };
-        messages.push(toolResultMessage);
-        auditMessages.push(toolResultMessage);
-        toolResultMessages.push(toolResultMessage);
-        productToolEvidence.push({
-          tool: toolCall.function.name,
-          result: modelResult
-        });
-        if (!toolExecutionFailed) {
-          yield {
-            ...eventBase,
-            status: "completed",
-            result: modelResult
-          };
-          const diffEvent = workspaceDiffEvent(input.run_id, toolCall.id, eventBase.name, result);
-          if (diffEvent) {
-            yield diffEvent;
-          }
-          const implicitInvocation = await implicitSkillInvocationFromTool(
-            toolCall.function.name,
-            toolArguments,
-            skillRecords,
-            ctx.workspaceRoot
-          );
-          if (implicitInvocation) {
-            const invocationKey = `${implicitInvocation.skill.scope}:${implicitInvocation.skill.path}:${implicitInvocation.skill.name}`;
-            if (!seenImplicitInvocations.has(invocationKey)) {
-              seenImplicitInvocations.add(invocationKey);
-              yield skillInvocationEvent(input.run_id, toolCall.id, toolCall.function.name, toolArguments, implicitInvocation);
-            }
-          }
-          if (eventBase.name === "fs.write"
-            && typeof toolArguments.path === "string"
-            && (isPinnedCreatorProduct || toolArguments.path === requestedFilePath)) {
-            completedProductArtifacts.push(toolArguments.path);
-          }
-        }
-        yield {
-          type: "assistant.delta",
-          run_id: input.run_id,
-          delta: { kind: "status", content: toolExecutionFailed
-            ? `Tool ${toolCall.function.name} failed; returning the error to the model.`
-            : `Tool ${toolCall.function.name} completed.` }
-        };
-      }
-
-      if (!suppressPersistenceForTurn) {
-        await ctx.persistModelMessage?.(deliveryWorkflow
-          ? { ...assistantToolMessage, content: null }
-          : assistantToolMessage);
-        for (const toolResultMessage of toolResultMessages) {
-          await ctx.persistModelMessage?.(toolResultMessage);
-        }
-      }
-
-      // A Creator product's promised work is fulfilled once the Agent has
-      // successfully written its completed artifact into the Consumer's
-      // selected workspace. Do not turn a generic chat loop into a second,
-      // invisible self-review pass after delivery.
-      if ((isPinnedCreatorProduct || Boolean(requestedFilePath)) && !deliveryWorkflow && completedProductArtifacts.length > 0) {
-        const paths = [...new Set(completedProductArtifacts)];
-        const renderedPaths = paths.map((item) => `\`${item}\``).join(", ");
-        const finalContent = `Completed and saved the result to ${renderedPaths}.`;
-        yield {
-          type: "assistant.delta",
-          run_id: input.run_id,
-          delta: { kind: "text", content: finalContent }
-        };
-        yield {
-          type: "turn.completed",
-          run_id: input.run_id,
-          output: [{ type: "message", content: finalContent }],
-          usage: { input_tokens: 0, output_tokens: 0 }
-        };
-        return;
-      }
-
-      if (ctx.releaseSystemPrompt && productToolEvidence.length > 0) {
-        messages = [
-          ...creatorHandoffMessages(initialMessages, requestedFilePath),
-          productToolEvidenceMessage(productToolEvidence, modelCanWriteRequestedArtifact)
-        ];
-      }
-
-      hasCompletedToolTurn = true;
-
-      const compactedMessages = isPinnedCreatorProduct
-        ? undefined
-        : await ctx.compactMessagesIfNeeded?.(messages, "mid_turn");
-      if (compactedMessages) {
-        messages.splice(0, messages.length, {
-          role: "system",
-          content: runtimeSystemPrompt
-        }, ...buildRuntimeContextMessages(
-          projectInstructions,
-          skillContext.section,
-          activeSkillsForRun,
-          ctx.workspaceRoot
-        ), ...compactedMessages.map((message) => ({
-          role: message.role,
-          content: message.content
-        })));
-        yield {
-          type: "assistant.delta",
-          run_id: input.run_id,
-          delta: { kind: "status", content: "Compacted conversation context before continuing the tool loop." }
-        };
-      }
-    }
-
-    throw new Error(`Exceeded HATCH_MAX_TOOL_TURNS (${maxTurns}) without a final assistant response`);
-  }
-}
-
 type DeliveryAuditInput = {
-  reviewer: any;
-  reviewerModel: string;
+  runner: PiAgentPromptRunner;
   workflow: DeliveryWorkflow;
   candidate: string;
   candidateKind: "final_response" | "file_write";
-  messages: ChatCompletionMessage[];
+  messages: PiModelMessage[];
   systemPrompt: string;
   auditContext?: RunContext["releaseDeliveryAuditContext"];
   signal?: AbortSignal;
 };
 
 export async function produceAuditedFinal(input: {
-  creator: any;
-  creatorModel: string;
-  reviewer: any;
-  reviewerModel: string;
+  runner: PiAgentPromptRunner;
   workflow: DeliveryWorkflow;
   draft: string;
-  messages: ChatCompletionMessage[];
+  messages: PiModelMessage[];
   systemPrompt: string;
   auditContext?: RunContext["releaseDeliveryAuditContext"];
   signal?: AbortSignal;
@@ -841,8 +315,7 @@ export async function produceAuditedFinal(input: {
 
   for (let pass = 0; pass < input.workflow.max_revision_passes; pass += 1) {
     candidate = await reviseDeliveryCandidate({
-      creator: input.creator,
-      creatorModel: input.creatorModel,
+      runner: input.runner,
       workflow: input.workflow,
       candidate,
       audit,
@@ -857,8 +330,7 @@ export async function produceAuditedFinal(input: {
   }
 
   const safePartial = await reviseDeliveryCandidate({
-    creator: input.creator,
-    creatorModel: input.creatorModel,
+    runner: input.runner,
     workflow: input.workflow,
     candidate,
     audit,
@@ -878,12 +350,11 @@ export async function produceAuditedFinal(input: {
 }
 
 export async function auditProposedDeliveryTool(input: {
-  reviewer: any;
-  reviewerModel: string;
+  runner: PiAgentPromptRunner;
   workflow: DeliveryWorkflow;
   toolName: string;
   arguments: Record<string, unknown>;
-  messages: ChatCompletionMessage[];
+  messages: PiModelMessage[];
   systemPrompt: string;
   auditContext?: RunContext["releaseDeliveryAuditContext"];
   signal?: AbortSignal;
@@ -903,8 +374,7 @@ export async function auditProposedDeliveryTool(input: {
   let audit: DeliveryAuditResult;
   try {
     audit = await auditDeliveryCandidate({
-      reviewer: input.reviewer,
-      reviewerModel: input.reviewerModel,
+      runner: input.runner,
       workflow: input.workflow,
       candidate: content,
       candidateKind: "file_write",
@@ -969,38 +439,27 @@ async function requestDeliveryAuditBatch(
   let lastError: unknown;
   for (let attempt = 1; attempt <= DELIVERY_AUDIT_MAX_ATTEMPTS; attempt += 1) {
     try {
-      const response = await input.reviewer.chat.completions.create({
-        model: input.reviewerModel,
-        messages: [{
-          role: "system",
-          content: [
-            input.workflow.audit_instruction,
-            "Runtime batching rule: claim_inventory has already been split into auditable clauses. Return exactly one short claim row for each supplied unit_id, with a terse source ID or evidence reference. Do not split a unit into additional rows. If any factual, causal, or boundary-sensitive part of that unit is unsupported, mark the one row non-entailed."
-          ].join("\n\n")
-        }, {
-          role: "user",
-          content: JSON.stringify({
-            evidence_authority: input.workflow.audit.evidence_authority,
-            user_input: userInputEvidence(input.messages),
-            approved_tool_evidence: approvedToolEvidence(input.messages),
-            protected_knowledge: input.auditContext?.protectedKnowledge ?? "",
-            candidate_kind: input.candidateKind,
-            product_promise: input.auditContext?.productPromise ?? "",
-            product_boundaries: input.auditContext?.productBoundaries ?? [],
-            draft_deliverable: batch.map((unit) => unit.text).join("\n"),
-            claim_inventory: batch,
-            required_json: input.workflow.audit_result_format
-          })
-        }],
-        response_format: { type: "json_object" },
+      const content = await input.runner({
+        systemPrompt: [
+          input.workflow.audit_instruction,
+          "Runtime batching rule: claim_inventory has already been split into auditable clauses. Return exactly one short claim row for each supplied unit_id, with a terse source ID or evidence reference. Do not split a unit into additional rows. If any factual, causal, or boundary-sensitive part of that unit is unsupported, mark the one row non-entailed."
+        ].join("\n\n"),
+        prompt: JSON.stringify({
+          evidence_authority: input.workflow.audit.evidence_authority,
+          user_input: userInputEvidence(input.messages),
+          approved_tool_evidence: approvedToolEvidence(input.messages),
+          protected_knowledge: input.auditContext?.protectedKnowledge ?? "",
+          candidate_kind: input.candidateKind,
+          product_promise: input.auditContext?.productPromise ?? "",
+          product_boundaries: input.auditContext?.productBoundaries ?? [],
+          draft_deliverable: batch.map((unit) => unit.text).join("\n"),
+          claim_inventory: batch,
+          required_json: input.workflow.audit_result_format
+        }),
+        responseFormat: { type: "json_object" },
         temperature: KIMI_TEMPERATURE,
-        ...kimiThinkingPayload(),
-        max_completion_tokens: 2_500
-      }, { signal: modelRequestSignal(input.signal) });
-      const content = response.choices?.[0]?.message?.content;
-      if (typeof content !== "string" || !content.trim()) {
-        throw new Error("Delivery reviewer returned no structured audit");
-      }
+        signal: input.signal
+      });
       const parsed = DeliveryAuditResultSchema.parse(JSON.parse(stripJsonFence(content)));
       const returnedBatchIds = new Set(parsed.claims.map((claim) => claim.unit_id));
       const unknownIds = [...returnedBatchIds].filter((id) => !batchIds.has(id));
@@ -1022,47 +481,36 @@ function chunkClaimInventory(units: ClaimInventoryUnit[], size: number): ClaimIn
 }
 
 async function reviseDeliveryCandidate(input: {
-  creator: any;
-  creatorModel: string;
+  runner: PiAgentPromptRunner;
   workflow: DeliveryWorkflow;
   candidate: string;
   audit: DeliveryAuditResult;
-  messages: ChatCompletionMessage[];
+  messages: PiModelMessage[];
   systemPrompt: string;
   auditContext?: RunContext["releaseDeliveryAuditContext"];
   safePartial: boolean;
   signal?: AbortSignal;
 }): Promise<string> {
-  const response = await input.creator.chat.completions.create({
-    model: input.creatorModel,
-    messages: [{
-      role: "system",
-      content: [
-        input.systemPrompt,
-        "## Runtime delivery revision",
-        input.workflow.revision_instruction
-      ].join("\n\n")
-    }, {
-      role: "user",
-      content: JSON.stringify({
-        evidence_authority: input.workflow.audit.evidence_authority,
-        user_input: userInputEvidence(input.messages),
-        approved_tool_evidence: approvedToolEvidence(input.messages),
-        protected_knowledge: input.auditContext?.protectedKnowledge ?? "",
-        product_promise: input.auditContext?.productPromise ?? "",
-        product_boundaries: input.auditContext?.productBoundaries ?? [],
-        draft_deliverable: input.candidate,
-        claim_audit: input.audit,
-        boundary_safe_partial_requested: input.safePartial
-      })
-    }],
+  const content = await input.runner({
+    systemPrompt: [
+      input.systemPrompt,
+      "## Runtime delivery revision",
+      input.workflow.revision_instruction
+    ].join("\n\n"),
+    prompt: JSON.stringify({
+      evidence_authority: input.workflow.audit.evidence_authority,
+      user_input: userInputEvidence(input.messages),
+      approved_tool_evidence: approvedToolEvidence(input.messages),
+      protected_knowledge: input.auditContext?.protectedKnowledge ?? "",
+      product_promise: input.auditContext?.productPromise ?? "",
+      product_boundaries: input.auditContext?.productBoundaries ?? [],
+      draft_deliverable: input.candidate,
+      claim_audit: input.audit,
+      boundary_safe_partial_requested: input.safePartial
+    }),
     temperature: KIMI_TEMPERATURE,
-    ...kimiThinkingPayload()
-  }, { signal: modelRequestSignal(input.signal) });
-  const content = response.choices?.[0]?.message?.content;
-  if (typeof content !== "string" || !content.trim()) {
-    throw new Error("Creator model returned no revised delivery");
-  }
+    signal: input.signal
+  });
   return content;
 }
 
@@ -1072,13 +520,13 @@ function deliveryAuditPassed(audit: DeliveryAuditResult): boolean {
     && audit.claims.every((claim) => claim.verdict === "entailed");
 }
 
-function userInputEvidence(messages: ChatCompletionMessage[]): string[] {
+function userInputEvidence(messages: PiModelMessage[]): string[] {
   return messages
     .filter((message) => message.role === "user")
     .map((message) => typeof message.content === "string" ? message.content : JSON.stringify(message.content ?? ""));
 }
 
-function approvedToolEvidence(messages: ChatCompletionMessage[]): Array<{ tool_call_id: string; result: unknown }> {
+function approvedToolEvidence(messages: PiModelMessage[]): Array<{ tool_call_id: string; result: unknown }> {
   return messages.flatMap((message) => {
     if (message.role !== "tool" || typeof message.tool_call_id !== "string") return [];
     const raw = typeof message.content === "string" ? message.content : JSON.stringify(message.content ?? "");
@@ -1183,13 +631,6 @@ function toolError(error: unknown): { code: string; message: string } {
   };
 }
 
-function toolFailureResult(error: unknown): Record<string, unknown> {
-  return {
-    status: "error",
-    error: toolError(error)
-  };
-}
-
 export function workspaceDiffEvent(
   runId: string,
   sourceToolCallId: string,
@@ -1219,32 +660,8 @@ function isWorkspaceMutationTool(toolName: string): boolean {
   return toolName === "fs.write" || toolName === "fs.patch" || toolName === "file_write" || toolName === "file_patch";
 }
 
-function failedModelToolEvent(
-  runId: string,
-  toolCallId: string,
-  name: string,
-  error: unknown
-): Extract<OutboundMessage, { type: "tool_call.delta" }> {
-  return toolEvent(
-    runId,
-    toolCallId,
-    name || "unknown_tool",
-    "server",
-    "none",
-    "failed",
-    {},
-    undefined,
-    {
-      code: "invalid_tool_call",
-      message: errorMessage(error)
-    }
-  );
-}
-
 export function createAgentRuntime(): AgentRuntime {
-  // Production Runtime uses Pi Core's implemented Agent loop. The legacy
-  // ChatCompletionsAgentRuntime remains in this file only while old fixture
-  // tests and delivery helpers are migrated; it is not the production path.
+  // Production Runtime uses Pi Core's implemented Agent loop.
   return new PiAgentRuntime();
 }
 
@@ -1320,7 +737,7 @@ export function buildRuntimeContextMessages(
   skillsSection: string,
   activatedSkills: ActivatedSkill[] = [],
   workspaceRoot?: string
-): ChatCompletionMessage[] {
+): PiModelMessage[] {
   return [
     renderLocalWorkspaceContext(workspaceRoot),
     projectInstructions?.content ?? "",
@@ -1459,7 +876,7 @@ export function chatToolsForRun(
   allowedExternalTools?: string[],
   knowledgeAvailable = false,
   externalToolDefinitions: RunContext["externalToolDefinitions"] = []
-): ChatToolDefinition[] {
+): PiToolDefinition[] {
   const allowed = allowedExternalTools === undefined ? undefined : new Set(allowedExternalTools);
   const builtins = modelToolSpecsForRun(clientTools, { hasMcpServers: hasConfiguredMcpServers(), hasKnowledge: knowledgeAvailable })
     .filter((spec) => includeSkillRun || spec.name !== "skill_run")
@@ -1491,7 +908,7 @@ function tool(
   description: string,
   properties: Record<string, unknown>,
   required: string[]
-): ChatToolDefinition {
+): PiToolDefinition {
   return {
     type: "function",
     function: {
@@ -1503,165 +920,6 @@ function tool(
         required,
         additionalProperties: false
       }
-    }
-  };
-}
-
-type ChatCompletionResult = {
-  type: "complete";
-  content: string;
-  toolCalls: ChatToolCall[];
-  usage: {
-    input_tokens: number;
-    output_tokens: number;
-  };
-};
-
-type ChatCompletionStreamEvent = {
-  type: "text";
-  delta: string;
-} | ChatCompletionResult;
-
-function modelRequestTimeoutMs(): number {
-  // Kimi can take more than a minute to produce an evidence-grounded
-  // follow-up after several local file reads. Keep this bounded, but do not
-  // abort a legitimate production delivery at the old 90-second default.
-  const fallback = 180_000;
-  const configured = Number(process.env.HATCH_MODEL_REQUEST_TIMEOUT_MS ?? fallback);
-  return Number.isFinite(configured) && configured > 0 ? configured : fallback;
-}
-
-function modelRequestSignal(parent?: AbortSignal): AbortSignal {
-  const timeout = AbortSignal.timeout(modelRequestTimeoutMs());
-  return parent ? AbortSignal.any([parent, timeout]) : timeout;
-}
-
-async function completeChatCompletion(
-  openai: any,
-  request: {
-    model: string;
-    messages: ChatCompletionMessage[];
-    tools: ChatToolDefinition[];
-    temperature: number;
-    thinking?: typeof KIMI_THINKING;
-    signal?: AbortSignal;
-  }
-): Promise<ChatCompletionResult> {
-  const response = await openai.chat.completions.create({
-    model: request.model,
-    messages: normalizeProviderMessages(request.messages),
-    ...modelToolPayload(request.tools),
-    temperature: request.temperature,
-    ...kimiThinkingPayload(),
-    max_completion_tokens: 3_000,
-    stream: false
-  }, request.signal ? { signal: request.signal } : undefined);
-  const message = response.choices?.[0]?.message;
-  if (!message) throw new Error("Chat Completions returned no message");
-  const rawCalls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
-  const toolCalls = rawCalls
-    .filter((call: any) => call?.type === "function" && typeof call?.function?.name === "string")
-    .map((call: any, index: number): ChatToolCall => ({
-      id: typeof call.id === "string" && call.id ? call.id : `tool_call_${index}`,
-      type: "function",
-      function: {
-        name: call.function.name,
-        arguments: typeof call.function.arguments === "string" ? call.function.arguments : "{}"
-      }
-    }));
-  return {
-    type: "complete",
-    content: typeof message.content === "string" ? message.content : "",
-    toolCalls,
-    usage: {
-      input_tokens: Number(response.usage?.prompt_tokens ?? response.usage?.input_tokens ?? 0),
-      output_tokens: Number(response.usage?.completion_tokens ?? response.usage?.output_tokens ?? 0)
-    }
-  };
-}
-
-async function* streamChatCompletion(
-  openai: any,
-  request: {
-    model: string;
-    messages: ChatCompletionMessage[];
-    tools: ChatToolDefinition[];
-    temperature: number;
-    thinking?: typeof KIMI_THINKING;
-    signal?: AbortSignal;
-  }
-): AsyncIterable<ChatCompletionStreamEvent> {
-  const stream = await openai.chat.completions.create({
-    model: request.model,
-    messages: normalizeProviderMessages(request.messages),
-    ...modelToolPayload(request.tools),
-    temperature: request.temperature,
-    ...kimiThinkingPayload(),
-    max_completion_tokens: 3_000,
-    stream: true
-  }, request.signal ? { signal: request.signal } : undefined);
-
-  let content = "";
-  let inputTokens = 0;
-  let outputTokens = 0;
-  const calls = new Map<number, ChatToolCall>();
-
-  for await (const chunk of stream as AsyncIterable<any>) {
-    const usage = chunk.usage;
-    inputTokens += Number(usage?.prompt_tokens ?? usage?.input_tokens ?? 0);
-    outputTokens += Number(usage?.completion_tokens ?? usage?.output_tokens ?? 0);
-    const choice = chunk.choices?.[0];
-    const delta = choice?.delta;
-    if (!delta) continue;
-
-    if (typeof delta.content === "string" && delta.content.length > 0) {
-      content += delta.content;
-      yield { type: "text", delta: delta.content };
-    }
-
-    for (const toolCallDelta of delta.tool_calls ?? []) {
-      const index = Number(toolCallDelta.index ?? 0);
-      const current = calls.get(index) ?? {
-        id: "",
-        type: "function" as const,
-        function: {
-          name: "",
-          arguments: ""
-        }
-      };
-      if (typeof toolCallDelta.id === "string") {
-        current.id = toolCallDelta.id;
-      }
-      if (typeof toolCallDelta.function?.name === "string") {
-        current.function.name += toolCallDelta.function.name;
-      }
-      if (typeof toolCallDelta.function?.arguments === "string") {
-        current.function.arguments += toolCallDelta.function.arguments;
-      }
-      calls.set(index, current);
-    }
-
-    // Some OpenAI-compatible providers send finish_reason but keep the SSE
-    // connection open. The completion is usable at this point; do not make
-    // the client wait for a provider-specific connection close.
-    if (choice?.finish_reason) {
-      break;
-    }
-  }
-
-  yield {
-    type: "complete",
-    content,
-    toolCalls: [...calls.entries()]
-      .sort(([left], [right]) => left - right)
-      .map(([, call], index) => ({
-        ...call,
-        id: call.id || `tool_call_${index}`
-      }))
-      .filter((call) => call.function.name.length > 0),
-    usage: {
-      input_tokens: inputTokens,
-      output_tokens: outputTokens
     }
   };
 }
@@ -2018,54 +1276,6 @@ export function runtimeSkillActivationFromToolResult(toolName: string, result: R
   }
 }
 
-/**
- * Moonshot's Chat Completions endpoint rejects historical assistant messages
- * whose content is null/empty, even when they carry valid tool_calls. The
- * OpenAI protocol permits that shape, and Hatch keeps it internally so the
- * visible conversation can hide protected tool-call content. Normalize only
- * at the provider boundary: retain the tool calls, give the provider a
- * non-empty private handoff, and drop any orphaned empty assistant record.
- */
-function normalizeProviderMessages(messages: ChatCompletionMessage[]): ChatCompletionMessage[] {
-  return messages.flatMap((message) => {
-    if (message.role !== "assistant") return [message];
-    if (message.tool_calls?.length && !message.content?.trim()) {
-      return [{
-        ...message,
-        content: "Calling the requested tools."
-      }];
-    }
-    if (!message.content?.trim()) return [];
-    return [message];
-  });
-}
-
-function mergeAdjacentUserMessages(messages: ChatCompletionMessage[]): ChatCompletionMessage[] {
-  return messages.reduce<ChatCompletionMessage[]>((result, message) => {
-    const previous = result.at(-1);
-    if (previous?.role === "user" && message.role === "user") {
-      result[result.length - 1] = {
-        ...previous,
-        content: `${previous.content}\n\n${message.content}`
-      };
-    } else {
-      result.push(message);
-    }
-    return result;
-  }, []);
-}
-
-function modelToolPayload(tools: ChatToolDefinition[]): {
-  tools?: ChatToolDefinition[];
-  tool_choice?: "auto";
-} {
-  // Moonshot can return an empty assistant message when an otherwise valid
-  // text follow-up is sent as `tools: []` with `tool_choice: auto`. Omitting
-  // the tool fields makes the follow-up an ordinary text completion while
-  // preserving automatic tool selection on turns that actually have tools.
-  return tools.length > 0 ? { tools, tool_choice: "auto" } : {};
-}
-
 export function mergeRuntimeActiveSkill(existing: ActivatedSkill[], next: ActivatedSkill): ActivatedSkill[] {
   return [
     ...existing.filter((skill) => skill.path !== next.path),
@@ -2087,7 +1297,7 @@ function effectiveClientToolApproval(
 
 function requireDispatchClientTool(dispatch: ModelToolDispatch): ClientToolName {
   if (dispatch.target === "server") {
-    throw new Error(`Chat Completions tool is not client-local: ${dispatch.spec.name}`);
+    throw new Error(`Pi tool is not client-local: ${dispatch.spec.name}`);
   }
   return dispatch.clientTool;
 }

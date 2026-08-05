@@ -1,5 +1,6 @@
 import {
   Agent,
+  convertToLlm,
   type AgentEvent,
   type AgentMessage,
   type AgentTool
@@ -12,7 +13,7 @@ import {
   activeSkillResourceRoots,
   buildRuntimeContextMessages,
   buildRuntimeSystemPrompt,
-  type ChatCompletionMessage,
+  type PiModelMessage,
   chatToolsForRun,
   createWorkspacePathPolicy,
   ensureNotCancelled,
@@ -31,10 +32,12 @@ import {
   type RunContext,
   type WorkspacePathPolicy
 } from "./agentRuntime.js";
-import { KIMI_MODEL, requireKimiProviderConfig } from "./kimiProvider.js";
+import { KIMI_MODEL } from "./kimiProvider.js";
+import { SUMMARY_PREFIX, SUMMARY_SUFFIX } from "./compaction.js";
 import { createKimiModel, createKimiStreamFn } from "./piModel.js";
+import { runPiAgentPrompt, type PiAgentPromptRunner } from "./piPrompt.js";
 
-export type ChatToolDefinition = {
+export type PiToolDefinition = {
   type: "function";
   function: {
     name: string;
@@ -98,7 +101,7 @@ type ToolEventState = {
 export class PiAgentRuntime implements AgentRuntime {
   async *run(input: RunStart, ctx: RunContext): AsyncIterable<OutboundMessage> {
     const model = createKimiModel();
-    const streamFn = createKimiStreamFn({ maxRetries: 1, maxRetryDelayMs: 30_000 });
+    const streamFn = createKimiStreamFn();
     const queue = new AsyncQueue<OutboundMessage>();
     const workspacePathPolicy = createWorkspacePathPolicy(input.message.content);
     const visibleSkills = ctx.sessionSkills.visibleRecords;
@@ -115,7 +118,6 @@ export class PiAgentRuntime implements AgentRuntime {
     const deliveryReviewer = deliveryWorkflow ? await createDeliveryReviewer() : undefined;
     const transcriptMessages: ConversationMessage[] = [];
     const completedArtifactPaths: string[] = [];
-    let emptyFinalRetryUsed = false;
 
     const contextMessages = buildRuntimeContextMessages(
       ctx.sessionSkills.projectInstructions,
@@ -142,6 +144,11 @@ export class PiAgentRuntime implements AgentRuntime {
 
     const agent = new Agent({
       streamFn,
+      // Pi's default Agent projection only accepts the three provider
+      // message roles. Use Pi's harness projector so its native
+      // compactionSummary message remains model-visible with Pi's standard
+      // summary delimiters.
+      convertToLlm,
       initialState: {
         systemPrompt: buildRuntimeSystemPrompt(ctx.releaseSystemPrompt, ctx.releaseDeliveryWorkflow),
         model,
@@ -149,13 +156,10 @@ export class PiAgentRuntime implements AgentRuntime {
         messages: [...contextMessages, ...storedMessages],
         tools
       },
-      toolExecution: "sequential",
-      maxRetryDelayMs: 30_000,
       beforeToolCall: deliveryReviewer && deliveryWorkflow
         ? async ({ toolCall, args }, signal) => {
           const rejection = await auditProposedDeliveryTool({
-            reviewer: deliveryReviewer,
-            reviewerModel: KIMI_MODEL,
+            runner: deliveryReviewer,
             workflow: deliveryWorkflow,
             toolName: toolCall.name,
             arguments: args as Record<string, unknown>,
@@ -177,55 +181,18 @@ export class PiAgentRuntime implements AgentRuntime {
         if (isHatchToolFailure(result.details)) return { isError: true };
         return undefined;
       },
-      prepareNextTurnWithContext: async ({ context, toolResults }) => {
-        // Creator Releases and file-producing Agent Corpora get one bounded
-        // evidence handoff after local tools. This keeps the next Kimi request
-        // from carrying a large raw tool transcript while preserving Pi's
-        // normal tool loop for generic conversations.
-        const shouldHandoff = toolResults.length > 0
-          && !deliveryWorkflow
-          && (Boolean(ctx.releaseSystemPrompt) || Boolean(ctx.releaseAgentCorpus && requestedFilePath));
-        if (!shouldHandoff) return undefined;
-        const evidence = toolResults.map((result) => ({
-          tool: result.toolName,
-          is_error: result.isError,
-          output: boundText(result.content
-            .filter((block) => block.type === "text")
-            .map((block) => block.text)
-            .join("\n"))
-        }));
-        const handoff = [
-          ...contextMessages.map((message) => piText(message)).filter(Boolean),
-          input.message.content,
-          "",
-          "Use only the following approved Workspace tool evidence to complete the request.",
-          "<approved_local_tool_evidence>",
-          JSON.stringify(evidence),
-          "</approved_local_tool_evidence>"
-        ].join("\n");
-        return {
-          context: {
-            ...context,
-            messages: [
-              ...storedMessages,
-              piUserMessage(handoff)
-            ],
-            tools: []
-          }
-        };
-      },
       transformContext: async (messages) => {
-        // Pre-turn compaction is already performed by index.ts. Pi's context
-        // transform should only attempt the mid-turn checkpoint after a real
-        // tool result, otherwise it would immediately compact the replacement
-        // history a second time on the first model request.
+        // Pi owns the live transcript. Runtime only invokes the product's
+        // compaction adapter when the normal context projection says it is
+        // needed; it never replaces a tool call/result pair with an ad-hoc
+        // evidence user message.
         if (!ctx.compactMessagesIfNeeded || !hasExecutedTool || compacting) return messages;
         const runtimeMessages = messages
           .filter(isModelMessage)
           .map(toRuntimeCompactionMessage);
         compacting = true;
         try {
-          const replacement = await ctx.compactMessagesIfNeeded(runtimeMessages, "mid_turn");
+        const replacement = await ctx.compactMessagesIfNeeded(runtimeMessages, "mid_turn");
           if (!replacement) return messages;
           return [
             ...contextMessages,
@@ -258,17 +225,6 @@ export class PiAgentRuntime implements AgentRuntime {
         },
         getResourceRoots: () => resourceRoots,
         setHasExecutedTool: () => { hasExecutedTool = true; },
-        requestEmptyFinalRetry: () => {
-          if (emptyFinalRetryUsed) return;
-          emptyFinalRetryUsed = true;
-          agent.followUp(piUserMessage([
-            "The previous assistant response was empty.",
-            "Return the complete final deliverable now as plain text, using only the approved local evidence already provided.",
-            requestedFilePath
-              ? `The Consumer explicitly requested the deliverable be saved to ${requestedFilePath}; include the complete deliverable text now so Runtime can save it.`
-              : "Answer the Consumer's request directly and do not return an empty response."
-          ].join("\n")));
-        },
         deliveryWorkflow,
         transcriptMessages,
         completedArtifactPaths,
@@ -301,10 +257,7 @@ export class PiAgentRuntime implements AgentRuntime {
       if (!draftContent.trim()) throw new Error("Pi Agent returned an empty final response");
       const auditedContent = deliveryWorkflow && deliveryReviewer
         ? await produceAuditedFinal({
-          creator: deliveryReviewer,
-          creatorModel: KIMI_MODEL,
-          reviewer: deliveryReviewer,
-          reviewerModel: KIMI_MODEL,
+          runner: deliveryReviewer,
           workflow: deliveryWorkflow,
           draft: draftContent,
           messages: auditMessagesForRun(ctx, transcriptMessages, finalAssistant),
@@ -439,7 +392,7 @@ export class PiAgentRuntime implements AgentRuntime {
   private createTool(
     input: RunStart,
     ctx: RunContext,
-    definition: ChatToolDefinition,
+    definition: PiToolDefinition,
     getActiveSkills: () => ActivatedSkill[],
     getResourceRoots: () => string[],
     workspacePathPolicy: WorkspacePathPolicy
@@ -493,7 +446,6 @@ export class PiAgentRuntime implements AgentRuntime {
     setActiveSkills: (skills: ActivatedSkill[]) => void;
     getResourceRoots: () => string[];
     setHasExecutedTool: () => void;
-    requestEmptyFinalRetry: () => void;
     deliveryWorkflow?: RunContext["releaseDeliveryWorkflow"];
     transcriptMessages: ConversationMessage[];
     completedArtifactPaths: string[];
@@ -513,7 +465,6 @@ export class PiAgentRuntime implements AgentRuntime {
       setActiveSkills,
       getResourceRoots,
       setHasExecutedTool,
-      requestEmptyFinalRetry,
       deliveryWorkflow,
       transcriptMessages,
       completedArtifactPaths,
@@ -554,7 +505,7 @@ export class PiAgentRuntime implements AgentRuntime {
           setTerminalError(new Error(assistant.errorMessage ?? `Pi Agent stopped: ${assistant.stopReason}`));
         } else if (assistant.stopReason === "stop" && !assistant.content.some((block) => block.type === "toolCall")) {
           if (hasText) setFinalAssistant(assistant);
-          else requestEmptyFinalRetry();
+          else setTerminalError(new Error("Pi Agent returned an empty final response"));
         }
       } else if (event.message.role === "toolResult") {
         const converted = fromPiMessage(event.message as ToolResultMessage);
@@ -651,7 +602,7 @@ export class PiAgentRuntime implements AgentRuntime {
           }
         });
         if (state?.invalid) {
-          setTerminalError(new Error(`Unknown Chat Completions tool: ${event.toolName}`));
+          setTerminalError(new Error(`Unknown Pi tool: ${event.toolName}`));
           agent.abort();
         }
       } else {
@@ -685,7 +636,7 @@ export class PiAgentRuntime implements AgentRuntime {
         && !last.content.some((block) => block.type === "toolCall")) {
         setFinalAssistant(last);
       } else if (last) {
-        setTerminalError(new Error(last.errorMessage ?? `Exceeded HATCH_MAX_TOOL_TURNS (${boundedAgentTurns()}) without a final assistant response`));
+        setTerminalError(new Error(last.errorMessage ?? "Pi Agent ended without a final assistant response"));
       }
       return;
     }
@@ -696,22 +647,15 @@ export class PiAgentRuntime implements AgentRuntime {
   }
 }
 
-async function createDeliveryReviewer(): Promise<any> {
-  const provider = requireKimiProviderConfig();
-  const OpenAI = (await import("openai")).default;
-  return new OpenAI({
-    apiKey: provider.apiKey,
-    baseURL: provider.baseURL,
-    timeout: 180_000,
-    maxRetries: 1
-  });
+function createDeliveryReviewer(): PiAgentPromptRunner {
+  return runPiAgentPrompt;
 }
 
 function auditMessagesForRun(
   ctx: RunContext,
   transcriptMessages: ConversationMessage[],
   finalAssistant: AssistantMessage | undefined
-): ChatCompletionMessage[] {
+): PiModelMessage[] {
   const transcript = finalAssistant && transcriptMessages.length > 0
     ? transcriptMessages.slice(0, -1)
     : transcriptMessages;
@@ -728,7 +672,16 @@ function auditMessagesForRun(
   ];
 }
 
-function toAuditMessage(message: ConversationMessage): ChatCompletionMessage {
+function toAuditMessage(message: ConversationMessage): PiModelMessage {
+  if (message.role === "compactionSummary") {
+    return {
+      role: "user",
+      content: `${SUMMARY_PREFIX}${message.content ?? ""}${SUMMARY_SUFFIX}`
+    };
+  }
+  if (message.role !== "assistant") {
+    return { role: "user", content: "" };
+  }
   return {
     role: message.role,
     content: message.content ?? null,
@@ -738,7 +691,10 @@ function toAuditMessage(message: ConversationMessage): ChatCompletionMessage {
 }
 
 function isModelMessage(message: AgentMessage): boolean {
-  return message.role === "user" || message.role === "assistant" || message.role === "toolResult";
+  return message.role === "user"
+    || message.role === "assistant"
+    || message.role === "toolResult"
+    || message.role === "compactionSummary";
 }
 
 function piUserMessage(content: string): AgentMessage {
@@ -751,11 +707,19 @@ function piUserMessage(content: string): AgentMessage {
 
 function toPiMessage(message: ConversationMessage): AgentMessage {
   if (message.role === "user") return piUserMessage(message.content ?? "");
+  if (message.role === "compactionSummary") {
+    return {
+      role: "compactionSummary",
+      summary: message.content ?? "",
+      tokensBefore: message.tokens_before ?? 0,
+      timestamp: Date.now()
+    };
+  }
   if (message.role === "tool") {
     return {
       role: "toolResult",
       toolCallId: message.tool_call_id ?? "unknown-tool-call",
-      toolName: toolNameFromCall(message),
+      toolName: message.tool_name ?? toolNameFromCall(message),
       content: [{ type: "text", text: boundText(message.content ?? "") }],
       isError: false,
       details: {},
@@ -778,9 +742,9 @@ function toPiMessage(message: ConversationMessage): AgentMessage {
     role: "assistant",
     content,
     api: "openai-completions",
-    provider: "moonshotai",
-    model: "kimi-k2.6",
-    usage: emptyUsage(),
+    provider: createKimiModel().provider,
+    model: KIMI_MODEL,
+    usage: message.usage ?? emptyUsage(),
     stopReason: message.tool_calls?.length ? "toolUse" : "stop",
     timestamp: Date.now()
   } as unknown as AssistantMessage;
@@ -791,7 +755,8 @@ function fromPiMessage(message: AssistantMessage | ToolResultMessage): Conversat
     return {
       role: "tool",
       content: boundText(message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n")),
-      tool_call_id: message.toolCallId
+      tool_call_id: message.toolCallId,
+      tool_name: message.toolName
     };
   }
   const text = message.content
@@ -808,7 +773,8 @@ function fromPiMessage(message: AssistantMessage | ToolResultMessage): Conversat
   return {
     role: "assistant",
     content: text || null,
-    ...(calls.length > 0 ? { tool_calls: calls } : {})
+    ...(calls.length > 0 ? { tool_calls: calls } : {}),
+    ...(message.usage.totalTokens > 0 ? { usage: message.usage } : {})
   };
 }
 
@@ -817,6 +783,9 @@ function toRuntimeCompactionMessage(message: AgentMessage): {
   content?: string | null;
   tool_calls?: unknown;
   tool_call_id?: string;
+  tool_name?: string;
+  usage?: AssistantMessage["usage"];
+  tokens_before?: number;
 } {
   if (message.role === "user") {
     return { role: "user", content: piText(message) };
@@ -825,12 +794,24 @@ function toRuntimeCompactionMessage(message: AgentMessage): {
     return {
       role: "tool",
       content: piText(message),
-      tool_call_id: message.toolCallId
+      tool_call_id: message.toolCallId,
+      tool_name: message.toolName
     };
+  }
+  if (message.role === "compactionSummary") {
+    return {
+      role: "compactionSummary",
+      content: message.summary,
+      tokens_before: message.tokensBefore
+    };
+  }
+  if (message.role !== "assistant") {
+    return { role: "user", content: "" };
   }
   return {
     role: "assistant",
     content: piText(message),
+    usage: message.usage,
     tool_calls: Array.isArray((message as { content?: unknown }).content)
       ? (message as { content: unknown[] }).content.filter((block) => typeof block === "object" && block !== null && (block as { type?: unknown }).type === "toolCall")
       : []
@@ -888,11 +869,6 @@ function boundToolResult(result: Record<string, unknown>): Record<string, unknow
 
 function boundText(value: string): string {
   return value.length <= 50_000 ? value : `${value.slice(0, 50_000)}\n[tool output truncated]`;
-}
-
-function boundedAgentTurns(): number {
-  const configured = Number(process.env.HATCH_MAX_TOOL_TURNS ?? 12);
-  return Number.isInteger(configured) && configured > 0 ? Math.min(configured, 50) : 12;
 }
 
 function emptyUsage(): AssistantMessage["usage"] {

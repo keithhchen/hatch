@@ -15,8 +15,8 @@ import { appendFile, mkdir, readFile, readdir, rm, stat, writeFile } from "node:
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { zipSync } from "fflate";
-import OpenAI from "openai";
-import { KIMI_TEMPERATURE, KIMI_THINKING, kimiThinkingPayload, requireKimiProviderConfig } from "./kimiProvider.js";
+import { KIMI_TEMPERATURE, KIMI_THINKING, requireKimiProviderConfig } from "./kimiProvider.js";
+import { runPiAgentPrompt, type PiAgentPromptRunner } from "./piPrompt.js";
 
 const execFile = promisify(execFileCallback);
 // A repair is deliberately a small agent-authored patch, never a local
@@ -24,10 +24,8 @@ const execFile = promisify(execFileCallback);
 // several chances to satisfy hard provenance gates without re-distilling the
 // entire course on every compiler error.
 const MAX_REPAIR_ATTEMPTS = 5;
-const MAX_REPAIR_COMPLETION_TOKENS = 12_000;
 const SOURCE_PACK_SCHEMA = "hatch.creator-factory.private-source-pack.v1";
 const SOURCE_PACK_PATCH_SCHEMA = "hatch.creator-factory.private-source-pack-patch.v1";
-const DEFAULT_FACTORY_REQUEST_TIMEOUT_MS = 8 * 60_000;
 
 type IntakeDocument = {
   source_id: string;
@@ -136,12 +134,12 @@ async function main(): Promise<void> {
   const intake = await readJson<Intake>(path.join(intakeDir, "intake.json"));
   const sourceBundle = await readNormalizedSources(intakeDir, intake.documents);
   const provider = requireKimiProviderConfig();
-  const openai = new OpenAI({ apiKey: provider.apiKey, baseURL: provider.baseURL });
+  const agentRunner = runPiAgentPrompt;
   const runId = `factory_${randomUUID()}`;
   const agentSystem = factorySystemPrompt({ skill, workflow, contract });
   let envelope = resumed
     ? await readEnvelopeFromPack(packDir)
-    : await askFactoryAgent(openai, provider.model, agentSystem, initialUserPrompt({ intake, sourceBundle }));
+    : await askFactoryAgent(agentRunner, agentSystem, initialUserPrompt({ intake, sourceBundle }));
   let lastFailure = "";
 
   for (let attempt = 0; attempt <= MAX_REPAIR_ATTEMPTS; attempt += 1) {
@@ -226,7 +224,7 @@ async function main(): Promise<void> {
       ].join("\n");
       const compactContext = await buildRepairContext({ envelope, intake, intakeDir, failure: lastFailure, exactTraceDiagnostic });
       try {
-        const repair = await askFactoryRepairAgent(openai, provider.model, factoryRepairSystemPrompt(), repairUserPrompt({ intake, failure: lastFailure, exactTraceDiagnostic, compactContext }));
+        const repair = await askFactoryRepairAgent(agentRunner, factoryRepairSystemPrompt(), repairUserPrompt({ intake, failure: lastFailure, exactTraceDiagnostic, compactContext }));
         await appendFile(path.join(args.resume ?? args.output!, "agent-repairs.jsonl"), `${JSON.stringify({ attempt: attempt + 1, failure: lastFailure, repair })}\n`, "utf8");
         assertRepairTargetsFailure(repair, lastFailure);
         const patched = applyFactoryPatch(envelope, repair);
@@ -362,61 +360,34 @@ function repairOutputShape(): string {
   ].join("\n");
 }
 
-async function askFactoryAgent(openai: OpenAI, model: string, system: string, user: string): Promise<FactoryEnvelope> {
-  // Moonshot's OpenAI-compatible endpoint accepts `thinking`; the SDK's
-  // upstream TypeScript surface intentionally does not model provider fields.
-  const request: any = {
-    model,
+async function askFactoryAgent(runner: PiAgentPromptRunner, system: string, user: string): Promise<FactoryEnvelope> {
+  const content = await runner({
+    systemPrompt: system,
+    prompt: user,
     temperature: KIMI_TEMPERATURE,
-    messages: [{ role: "system", content: system }, { role: "user", content: user }],
-    response_format: { type: "json_object" },
-    max_completion_tokens: 18_000,
-    ...kimiThinkingPayload(),
-    // A source pack can be large. Streaming prevents the proxy from holding
-    // the whole JSON response before any bytes reach the client, while the
-    // completed content is still validated as one atomic compiler input.
-    stream: true
-  };
-  const stream = await (openai as any).chat.completions.create(request, {
-    signal: factoryRequestSignal()
+    responseFormat: { type: "json_object" }
   });
-  let content = "";
-  for await (const chunk of stream) {
-    content += chunk.choices?.[0]?.delta?.content ?? "";
-  }
-  if (!content) throw new Error("Kimi Factory Agent returned no private source pack");
+  if (!content.trim()) throw new Error("Pi Factory Agent returned no private source pack");
   let parsed: unknown;
-  try { parsed = JSON.parse(content); } catch { throw new Error("Kimi Factory Agent returned invalid JSON"); }
+  try { parsed = JSON.parse(stripJsonFence(content)); } catch {
+    throw new FactoryAgentResponseError("Pi Factory Agent returned invalid JSON", content.slice(0, 16_000));
+  }
   return validateEnvelope(parsed);
 }
 
-async function askFactoryRepairAgent(openai: OpenAI, model: string, system: string, user: string): Promise<FactoryPatch> {
-  const request: any = {
-    model,
+async function askFactoryRepairAgent(runner: PiAgentPromptRunner, system: string, user: string): Promise<FactoryPatch> {
+  const content = await runner({
+    systemPrompt: system,
+    prompt: user,
     temperature: KIMI_TEMPERATURE,
-    messages: [{ role: "system", content: system }, { role: "user", content: user }],
-    response_format: { type: "json_object" },
-    // A provenance failure can span several compact source documents. The old
-    // 2k cap truncated a valid agent repair mid-JSON, turning a correct
-    // fail-closed rejection into an opaque format failure. This budget still
-    // applies only to a bounded patch of the existing private pack.
-    max_completion_tokens: MAX_REPAIR_COMPLETION_TOKENS,
-    ...kimiThinkingPayload(),
-    // Repairs are intentionally small. Unlike first-pass distillation, they
-    // should return one bounded patch; non-streaming avoids a provider-side
-    // stream that can remain open after the complete JSON is available.
-    stream: false
-  };
-  const completion = await (openai as any).chat.completions.create(request, {
-    signal: factoryRequestSignal()
+    responseFormat: { type: "json_object" }
   });
-  const content = completion.choices?.[0]?.message?.content ?? "";
-  if (!content) throw new Error("Kimi Factory Agent returned no repair patch");
+  if (!content.trim()) throw new Error("Pi Factory Agent returned no repair patch");
   let parsed: unknown;
   try {
     parsed = JSON.parse(stripJsonFence(content));
   } catch {
-    throw new FactoryAgentResponseError("Kimi Factory Agent returned invalid repair JSON", content.slice(0, 16_000));
+    throw new FactoryAgentResponseError("Pi Factory Agent returned invalid repair JSON", content.slice(0, 16_000));
   }
   return validateFactoryPatch(parsed);
 }
@@ -425,12 +396,6 @@ function stripJsonFence(content: string): string {
   const trimmed = content.trim();
   const fenced = trimmed.match(/^```(?:json)?\s*\n([\s\S]*?)\n```$/i);
   return fenced ? fenced[1] : trimmed;
-}
-
-function factoryRequestSignal(): AbortSignal {
-  const configured = Number(process.env.HATCH_FACTORY_REQUEST_TIMEOUT_MS ?? DEFAULT_FACTORY_REQUEST_TIMEOUT_MS);
-  const timeoutMs = Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_FACTORY_REQUEST_TIMEOUT_MS;
-  return AbortSignal.timeout(timeoutMs);
 }
 
 function validateEnvelope(value: unknown): FactoryEnvelope {

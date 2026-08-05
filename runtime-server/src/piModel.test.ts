@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   KIMI_DEFAULT_BASE_URL,
-  KIMI_DEFAULT_MAX_OUTPUT_TOKENS,
   KIMI_MODEL,
   createKimiAgent,
   createKimiAgentOptions,
@@ -92,7 +91,10 @@ test("Pi AI request uses Moonshot endpoint, key, model, and enabled thinking", a
   assert.equal(body.model, KIMI_MODEL);
   assert.equal(body.stream, true);
   assert.deepEqual(body.thinking, { type: "enabled" });
-  assert.equal(body.max_tokens, KIMI_DEFAULT_MAX_OUTPUT_TOKENS);
+  // No Hatch delivery/turn cap is injected. Pi derives this from the Kimi
+  // model profile and clamps it against the actual request context.
+  assert.equal(typeof body.max_tokens, "number");
+  assert.ok(Number(body.max_tokens) > 100_000);
   assert.equal(agent.state.messages.at(-1)?.role, "assistant");
 });
 
@@ -158,7 +160,7 @@ test("stream timeout bounds an SSE body that never reaches a finish reason", asy
   assert.ok(Date.now() - started < 500, "stream timeout should be bounded");
   assert.equal(final?.role, "assistant");
   assert.equal(final?.stopReason, "error");
-  assert.match(final?.errorMessage ?? "", /timed out after 30ms/);
+  assert.match(final?.errorMessage ?? "", /idle timeout after 30ms/);
   assert.equal(upstreamCancelled, true);
 });
 
