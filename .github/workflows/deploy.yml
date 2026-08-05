@@ -110,6 +110,7 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           IMAGE_PREFIX: ${{ needs.build-and-push.outputs.image_prefix }}
           RELEASE_TAG: ${{ env.RELEASE_TAG }}
+          SETH_ALPHA_LITE_API_KEY: ${{ secrets.SETH_ALPHA_LITE_API_KEY }}
         run: |
           set -euo pipefail
           printf '%s\n' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
@@ -117,6 +118,13 @@ jobs:
           test -f .env
           test -f compose.app.yml
           grep -q '^HATCH_DOMAIN=' .env
+          if test -n "${SETH_ALPHA_LITE_API_KEY:-}"; then
+            if grep -q '^SETH_ALPHA_LITE_API_KEY=' .env; then
+              sed -i "s#^SETH_ALPHA_LITE_API_KEY=.*#SETH_ALPHA_LITE_API_KEY=$SETH_ALPHA_LITE_API_KEY#" .env
+            else
+              printf 'SETH_ALPHA_LITE_API_KEY=%s\n' "$SETH_ALPHA_LITE_API_KEY" >> .env
+            fi
+          fi
           for key in LLM_API_KEY HATCH_REGISTRY_DATABASE_URL HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN HATCH_AUTH_SIGNING_SECRET DASHSCOPE_API_KEY POSTGRES_PASSWORD SETH_ALPHA_LITE_API_KEY; do
             grep -Eq "^${key}=[^[:space:]]+" .env || { echo "Missing non-empty $key in /opt/hatch/.env"; exit 1; }
           done
