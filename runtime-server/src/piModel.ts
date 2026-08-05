@@ -12,7 +12,9 @@ import { KIMI_TEMPERATURE } from "./kimiProvider.js";
 export const KIMI_MODEL = "kimi-k2.6" as const;
 export const KIMI_DEFAULT_BASE_URL = "https://api.moonshot.cn/v1";
 export const KIMI_DEFAULT_THINKING_LEVEL: ThinkingLevel = "high";
-export const KIMI_DEFAULT_MAX_OUTPUT_TOKENS = 8_192;
+// Thinking stays enabled, but delivery must have a finite response budget.
+export const KIMI_DEFAULT_MAX_OUTPUT_TOKENS = 4_096;
+export const KIMI_DEFAULT_TIMEOUT_MS = 120_000;
 
 const KIMI_PROVIDER_CN = "moonshotai-cn" as const;
 const KIMI_PROVIDER_GLOBAL = "moonshotai" as const;
@@ -162,7 +164,10 @@ function resolveKimiOptions(options: KimiAdapterOptions): ResolvedKimiOptions {
     ...endpoint,
     fetch: options.fetch,
     headers: options.headers,
-    timeoutMs: positiveIntegerOption("timeoutMs", options.timeoutMs),
+    timeoutMs: positiveIntegerOption(
+      "timeoutMs",
+      options.timeoutMs ?? Number(env.HATCH_LLM_TIMEOUT_MS ?? KIMI_DEFAULT_TIMEOUT_MS)
+    ),
     maxRetries: positiveIntegerOption("maxRetries", options.maxRetries),
     maxRetryDelayMs: positiveIntegerOption("maxRetryDelayMs", options.maxRetryDelayMs),
     maxTokens: positiveIntegerOption("maxTokens", options.maxTokens ?? Number(env.HATCH_MAX_OUTPUT_TOKENS ?? KIMI_DEFAULT_MAX_OUTPUT_TOKENS)) ?? KIMI_DEFAULT_MAX_OUTPUT_TOKENS,
