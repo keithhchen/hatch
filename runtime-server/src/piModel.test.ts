@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   KIMI_DEFAULT_BASE_URL,
-  KIMI_DEFAULT_DELIVERY_MAX_OUTPUT_TOKENS,
   KIMI_DEFAULT_MAX_OUTPUT_TOKENS,
   KIMI_MODEL,
   createKimiAgent,
@@ -95,35 +94,6 @@ test("Pi AI request uses Moonshot endpoint, key, model, and enabled thinking", a
   assert.deepEqual(body.thinking, { type: "enabled" });
   assert.equal(body.max_tokens, KIMI_DEFAULT_MAX_OUTPUT_TOKENS);
   assert.equal(agent.state.messages.at(-1)?.role, "assistant");
-});
-
-test("approved evidence handoff uses a separate bounded delivery budget", async () => {
-  const calls: Array<{ init: RequestInit }> = [];
-  const fetch: typeof globalThis.fetch = async (_input, init) => {
-    calls.push({ init: init ?? {} });
-    return streamResponse();
-  };
-  const env = {
-    LLM_API_KEY: "kimi-test-key",
-    HATCH_MAX_OUTPUT_TOKENS: "4096",
-    HATCH_DELIVERY_MAX_OUTPUT_TOKENS: String(KIMI_DEFAULT_DELIVERY_MAX_OUTPUT_TOKENS)
-  };
-  const streamFn = createKimiStreamFn({ env, fetch });
-  const model = createKimiModel({ env });
-  const stream = await streamFn(model, {
-    messages: [{
-      role: "user",
-      content: "Use only the following approved Workspace tool evidence.\n<approved_local_tool_evidence>...",
-      timestamp: Date.now()
-    }],
-    tools: []
-  });
-  for await (const _event of stream) {
-    // Drain the Pi event stream so the provider request completes.
-  }
-
-  const body = JSON.parse(String(calls[0]?.init.body)) as Record<string, unknown>;
-  assert.equal(body.max_tokens, KIMI_DEFAULT_DELIVERY_MAX_OUTPUT_TOKENS);
 });
 
 test("finish_reason completes a non-closing SSE response without dropping abort support", async () => {

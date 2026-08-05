@@ -1,7 +1,6 @@
 import { Agent, type AgentOptions, type StreamFn } from "@earendil-works/pi-agent-core";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 import type {
-  Context,
   FetchFunction,
   Model,
   ProviderHeaders,
@@ -13,10 +12,8 @@ import { KIMI_TEMPERATURE } from "./kimiProvider.js";
 export const KIMI_MODEL = "kimi-k2.6" as const;
 export const KIMI_DEFAULT_BASE_URL = "https://api.moonshot.cn/v1";
 export const KIMI_DEFAULT_THINKING_LEVEL: ThinkingLevel = "high";
-// Thinking stays enabled. Ordinary turns keep the normal model budget; the
-// approved-evidence delivery turn has its own smaller budget below.
-export const KIMI_DEFAULT_MAX_OUTPUT_TOKENS = 4_096;
-export const KIMI_DEFAULT_DELIVERY_MAX_OUTPUT_TOKENS = 1_024;
+// Thinking stays enabled, but delivery must have a finite response budget.
+export const KIMI_DEFAULT_MAX_OUTPUT_TOKENS = 1_024;
 export const KIMI_DEFAULT_TIMEOUT_MS = 120_000;
 
 const KIMI_PROVIDER_CN = "moonshotai-cn" as const;
@@ -54,7 +51,6 @@ export interface KimiAdapterOptions {
   maxRetries?: number;
   maxRetryDelayMs?: number;
   maxTokens?: number;
-  deliveryMaxTokens?: number;
   thinkingLevel?: ThinkingLevel;
 }
 
@@ -74,7 +70,6 @@ type ResolvedKimiOptions = {
   maxRetries?: number;
   maxRetryDelayMs?: number;
   maxTokens: number;
-  deliveryMaxTokens: number;
   thinkingLevel: ThinkingLevel;
 };
 
@@ -176,10 +171,6 @@ function resolveKimiOptions(options: KimiAdapterOptions): ResolvedKimiOptions {
     maxRetries: positiveIntegerOption("maxRetries", options.maxRetries),
     maxRetryDelayMs: positiveIntegerOption("maxRetryDelayMs", options.maxRetryDelayMs),
     maxTokens: positiveIntegerOption("maxTokens", options.maxTokens ?? Number(env.HATCH_MAX_OUTPUT_TOKENS ?? KIMI_DEFAULT_MAX_OUTPUT_TOKENS)) ?? KIMI_DEFAULT_MAX_OUTPUT_TOKENS,
-    deliveryMaxTokens: positiveIntegerOption(
-      "deliveryMaxTokens",
-      options.deliveryMaxTokens ?? Number(env.HATCH_DELIVERY_MAX_OUTPUT_TOKENS ?? KIMI_DEFAULT_DELIVERY_MAX_OUTPUT_TOKENS)
-    ) ?? KIMI_DEFAULT_DELIVERY_MAX_OUTPUT_TOKENS,
     thinkingLevel
   };
 }
@@ -215,8 +206,7 @@ function streamFnFor(config: ResolvedKimiOptions): StreamFn {
         : undefined,
       maxRetries: options?.maxRetries ?? config.maxRetries,
       maxRetryDelayMs: options?.maxRetryDelayMs ?? config.maxRetryDelayMs,
-      maxTokens: options?.maxTokens
-        ?? (isApprovedEvidenceDeliveryTurn(context) ? config.deliveryMaxTokens : config.maxTokens),
+      maxTokens: options?.maxTokens ?? config.maxTokens,
       temperature: options?.temperature ?? KIMI_TEMPERATURE,
       reasoning: options?.reasoning === ("off" as string)
         ? config.thinkingLevel
@@ -226,18 +216,6 @@ function streamFnFor(config: ResolvedKimiOptions): StreamFn {
 
     return api.streamSimple(model, context, streamOptions);
   };
-}
-
-/**
- * The Pi context transform replaces raw tool history with this explicit
- * evidence handoff. Give only that final answer turn the smaller delivery
- * budget; ordinary tool-selection and chat turns retain their normal budget.
- */
-function isApprovedEvidenceDeliveryTurn(context: Context): boolean {
-  const last = context.messages.at(-1);
-  return last?.role === "user"
-    && typeof last.content === "string"
-    && last.content.includes("<approved_local_tool_evidence>");
 }
 
 function sseEventHasFinishReason(event: string): boolean {
