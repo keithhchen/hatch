@@ -225,9 +225,10 @@ not rare-failure machinery.
 - Thinking: enabled.
 - Provider fallback: none in the first version.
 
-Thinking tokens are part of context and output budgeting. Hatch must not disable
-thinking to hide a budget bug. Instead it must bound tool results, compact context,
-and reserve enough output budget for the final response.
+Thinking is enabled through Pi's normal thinking-level option. Hatch does not add a
+delivery-stage or per-turn output budget. When no explicit caller cap is supplied,
+Pi AI uses the model profile's `maxTokens` and clamps it to the available context;
+Pi owns the thinking-token policy for the selected level.
 
 Reasoning content is server-private and is never projected into Desktop history.
 
@@ -243,17 +244,17 @@ Before a run, Runtime builds context from:
 4. recent completed conversation messages;
 5. the new user message.
 
-Hatch may call Pi's implemented estimation and compaction helpers between completed
-turns. It does not call unfinished `AgentHarness.compact()` behavior.
+Hatch may call Pi's implemented estimation and compaction helpers at the normal
+context checkpoint. It does not call unfinished `AgentHarness.compact()` behavior.
 
 Rules:
 
 - never delete full chat history because context was compacted;
-- never carry raw, unbounded file or shell output into later model calls;
-- prefer a bounded tool result plus an artifact/reference for large output;
+- bound file and shell output at the tool boundary before it enters Pi's transcript;
+- keep the standard assistant tool-call → tool-result pair in the next request;
 - preserve the user's request, active constraints, accepted decisions, file changes,
   and unresolved work in the summary;
-- reserve completion budget for a final deliverable while thinking remains enabled.
+- let Pi compact the context only when its normal context policy requires it.
 
 ## 9. Local tool execution
 

@@ -3,8 +3,8 @@ import "dotenv/config";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import OpenAI from "openai";
-import { KIMI_TEMPERATURE, kimiThinkingPayload, requireKimiProviderConfig } from "./kimiProvider.js";
+import { requireKimiProviderConfig } from "./kimiProvider.js";
+import { runPiAgentPrompt, type PiAgentPromptRunner } from "./piPrompt.js";
 import { CreatorReleasePublicSchema, CreatorReleaseResolver } from "./release.js";
 import { materializeCreatorRelease } from "./releaseMaterialization.js";
 
@@ -25,14 +25,14 @@ if (!Array.isArray(heldOut) || heldOut.length === 0 || heldOut.some((item) => !i
 const resolver = new CreatorReleaseResolver(path.dirname(path.dirname(releaseDirectory)));
 const release = await resolver.resolve(publicRelease.release_id, publicRelease.digest);
 const provider = requireKimiProviderConfig();
-const client = new OpenAI({ apiKey: provider.apiKey, baseURL: provider.baseURL });
+const agentRunner = runPiAgentPrompt;
 
 const candidate: Candidate[] = [];
 const baseline: Candidate[] = [];
 for (const item of heldOut) {
   const materialized = await materializeCreatorRelease(release, item.input, []);
-  candidate.push({ id: item.id, response: await complete(client, provider.model, materialized.systemPrompt, item.input) });
-  baseline.push({ id: item.id, response: await complete(client, provider.model, genericSystemPrompt(), item.input) });
+  candidate.push({ id: item.id, response: await complete(agentRunner, materialized.systemPrompt, item.input) });
+  baseline.push({ id: item.id, response: await complete(agentRunner, genericSystemPrompt(), item.input) });
 }
 
 const judgments: Judgment[] = [];
@@ -42,7 +42,7 @@ for (const item of heldOut) {
   const reverse = Number.parseInt(shortHash(item.id).slice(0, 2), 16) % 2 === 1;
   const first = reverse ? generic.response : creator.response;
   const second = reverse ? creator.response : generic.response;
-  const verdict = await judge(client, provider.model, item, first, second);
+  const verdict = await judge(agentRunner, item, first, second);
   judgments.push({
     id: item.id,
     candidate_passed: reverse ? verdict.b_passed : verdict.a_passed,
@@ -86,11 +86,9 @@ function parseArgs(values: string[]): { release: string; heldOut: string; output
   return { release, heldOut, output };
 }
 
-async function complete(client: OpenAI, model: string, system: string, input: string): Promise<string> {
-  const request: any = { model, temperature: KIMI_TEMPERATURE, ...kimiThinkingPayload(), max_completion_tokens: 1800, messages: [{ role: "system", content: system }, { role: "user", content: input }] };
-  const response = await client.chat.completions.create(request);
-  const content = response.choices?.[0]?.message?.content;
-  if (!content?.trim()) throw new Error("Kimi comparison candidate returned no response");
+async function complete(runner: PiAgentPromptRunner, system: string, input: string): Promise<string> {
+  const content = await runner({ systemPrompt: system, prompt: input });
+  if (!content.trim()) throw new Error("Pi comparison candidate returned no response");
   return content;
 }
 
@@ -98,14 +96,13 @@ function genericSystemPrompt(): string {
   return "You are a helpful general-purpose assistant. Answer the user directly using only the information in their message. Do not claim access to files, courses, Creator methods, hidden policies, or private context.";
 }
 
-async function judge(client: OpenAI, model: string, item: HeldOut, answerA: string, answerB: string): Promise<{ a_passed: boolean; b_passed: boolean; a_score: number; b_score: number; rationale: string }> {
-  const request: any = {
-    model, temperature: KIMI_TEMPERATURE, ...kimiThinkingPayload(), response_format: { type: "json_object" }, max_completion_tokens: 1200,
-    messages: [{ role: "system", content: "You are an independent release evaluator. Judge two anonymous answers only against the supplied observable checks. Do not reward length, style, or hidden knowledge. Return JSON {a_passed:boolean,b_passed:boolean,a_score:number,b_score:number,rationale:string}; scores are 0 to 1." }, { role: "user", content: JSON.stringify({ probe: item.input, expected_behavior: item.expected_behavior, observable_checks: item.observable_checks, answer_a: answerA, answer_b: answerB }) }]
-  };
-  const response = await client.chat.completions.create(request);
-  const raw = response.choices?.[0]?.message?.content;
-  if (!raw) throw new Error("Kimi blind judge returned no JSON");
+async function judge(runner: PiAgentPromptRunner, item: HeldOut, answerA: string, answerB: string): Promise<{ a_passed: boolean; b_passed: boolean; a_score: number; b_score: number; rationale: string }> {
+  const raw = await runner({
+    systemPrompt: "You are an independent release evaluator. Judge two anonymous answers only against the supplied observable checks. Do not reward length, style, or hidden knowledge. Return JSON {a_passed:boolean,b_passed:boolean,a_score:number,b_score:number,rationale:string}; scores are 0 to 1.",
+    prompt: JSON.stringify({ probe: item.input, expected_behavior: item.expected_behavior, observable_checks: item.observable_checks, answer_a: answerA, answer_b: answerB }),
+    responseFormat: { type: "json_object" }
+  });
+  if (!raw.trim()) throw new Error("Pi blind judge returned no JSON");
   const value = JSON.parse(raw) as Record<string, unknown>;
   if (typeof value.a_passed !== "boolean" || typeof value.b_passed !== "boolean" || typeof value.a_score !== "number" || typeof value.b_score !== "number" || typeof value.rationale !== "string") throw new Error("Kimi blind judge returned invalid JSON");
   return value as { a_passed: boolean; b_passed: boolean; a_score: number; b_score: number; rationale: string };

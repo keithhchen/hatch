@@ -1,23 +1,26 @@
 import { Agent, type AgentOptions, type StreamFn } from "@earendil-works/pi-agent-core";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
 import type {
-  Context,
   FetchFunction,
   Model,
+  Models,
+  ProviderStreams,
   ProviderHeaders,
   SimpleStreamOptions,
+  AssistantMessageEventStream,
   ThinkingLevel
 } from "@earendil-works/pi-ai";
+import { createModels, createProvider } from "@earendil-works/pi-ai";
+import { envApiKeyAuth } from "@earendil-works/pi-ai";
 import { KIMI_TEMPERATURE } from "./kimiProvider.js";
 
 export const KIMI_MODEL = "kimi-k2.6" as const;
 export const KIMI_DEFAULT_BASE_URL = "https://api.moonshot.cn/v1";
 export const KIMI_DEFAULT_THINKING_LEVEL: ThinkingLevel = "high";
-// Thinking stays enabled. Ordinary turns keep the normal model budget; the
-// approved-evidence delivery turn has its own smaller budget below.
-export const KIMI_DEFAULT_MAX_OUTPUT_TOKENS = 4_096;
-export const KIMI_DEFAULT_DELIVERY_MAX_OUTPUT_TOKENS = 1_024;
-export const KIMI_DEFAULT_TIMEOUT_MS = 120_000;
+// Pi owns the model output budget. When callers do not provide maxTokens,
+// pi-ai uses the model profile and clamps it to the available context.
+// Thinking remains enabled through the normal Pi thinkingLevel option.
+export const KIMI_DEFAULT_HTTP_IDLE_TIMEOUT_MS = 300_000;
 
 const KIMI_PROVIDER_CN = "moonshotai-cn" as const;
 const KIMI_PROVIDER_GLOBAL = "moonshotai" as const;
@@ -25,15 +28,6 @@ const KIMI_HOSTS = new Set(["api.moonshot.cn", "api.moonshot.ai"]);
 
 export type KimiProvider = typeof KIMI_PROVIDER_CN | typeof KIMI_PROVIDER_GLOBAL;
 export type KimiModel = Model<"openai-completions">;
-
-export type ChatToolDefinition = {
-  type: "function";
-  function: {
-    name: string;
-    description: string;
-    parameters: Record<string, unknown>;
-  };
-};
 
 /**
  * Configuration accepted by the Kimi adapter.
@@ -54,7 +48,6 @@ export interface KimiAdapterOptions {
   maxRetries?: number;
   maxRetryDelayMs?: number;
   maxTokens?: number;
-  deliveryMaxTokens?: number;
   thinkingLevel?: ThinkingLevel;
 }
 
@@ -73,8 +66,7 @@ type ResolvedKimiOptions = {
   timeoutMs?: number;
   maxRetries?: number;
   maxRetryDelayMs?: number;
-  maxTokens: number;
-  deliveryMaxTokens: number;
+  maxTokens?: number;
   thinkingLevel: ThinkingLevel;
 };
 
@@ -169,17 +161,10 @@ function resolveKimiOptions(options: KimiAdapterOptions): ResolvedKimiOptions {
     ...endpoint,
     fetch: options.fetch,
     headers: options.headers,
-    timeoutMs: positiveIntegerOption(
-      "timeoutMs",
-      options.timeoutMs ?? Number(env.HATCH_LLM_TIMEOUT_MS ?? KIMI_DEFAULT_TIMEOUT_MS)
-    ),
+    timeoutMs: positiveIntegerOption("timeoutMs", options.timeoutMs),
     maxRetries: positiveIntegerOption("maxRetries", options.maxRetries),
     maxRetryDelayMs: positiveIntegerOption("maxRetryDelayMs", options.maxRetryDelayMs),
-    maxTokens: positiveIntegerOption("maxTokens", options.maxTokens ?? Number(env.HATCH_MAX_OUTPUT_TOKENS ?? KIMI_DEFAULT_MAX_OUTPUT_TOKENS)) ?? KIMI_DEFAULT_MAX_OUTPUT_TOKENS,
-    deliveryMaxTokens: positiveIntegerOption(
-      "deliveryMaxTokens",
-      options.deliveryMaxTokens ?? Number(env.HATCH_DELIVERY_MAX_OUTPUT_TOKENS ?? KIMI_DEFAULT_DELIVERY_MAX_OUTPUT_TOKENS)
-    ) ?? KIMI_DEFAULT_DELIVERY_MAX_OUTPUT_TOKENS,
+    maxTokens: positiveIntegerOption("maxTokens", options.maxTokens),
     thinkingLevel
   };
 }
@@ -209,15 +194,24 @@ function streamFnFor(config: ResolvedKimiOptions): StreamFn {
     const streamOptions: SimpleStreamOptions = {
       ...options,
       apiKey: options?.apiKey ?? config.apiKey,
-      fetch: finishAwareFetch(options?.fetch ?? config.fetch ?? globalThis.fetch, config.timeoutMs),
+      fetch: finishAwareFetch(
+        options?.fetch ?? config.fetch ?? globalThis.fetch,
+        config.timeoutMs ?? KIMI_DEFAULT_HTTP_IDLE_TIMEOUT_MS
+      ),
       headers: config.headers || options?.headers
         ? { ...config.headers, ...options?.headers }
         : undefined,
       maxRetries: options?.maxRetries ?? config.maxRetries,
       maxRetryDelayMs: options?.maxRetryDelayMs ?? config.maxRetryDelayMs,
-      maxTokens: options?.maxTokens
-        ?? (isApprovedEvidenceDeliveryTurn(context) ? config.deliveryMaxTokens : config.maxTokens),
+      ...(options?.maxTokens === undefined && config.maxTokens !== undefined
+        ? { maxTokens: config.maxTokens }
+        : {}),
       temperature: options?.temperature ?? KIMI_TEMPERATURE,
+      onPayload: async (payload, payloadModel) => {
+        const normalized = normalizeKimiPayload(payload);
+        const transformed = await options?.onPayload?.(normalized, payloadModel);
+        return transformed === undefined ? normalized : transformed;
+      },
       reasoning: options?.reasoning === ("off" as string)
         ? config.thinkingLevel
         : options?.reasoning ?? config.thinkingLevel,
@@ -229,15 +223,30 @@ function streamFnFor(config: ResolvedKimiOptions): StreamFn {
 }
 
 /**
- * The Pi context transform replaces raw tool history with this explicit
- * evidence handoff. Give only that final answer turn the smaller delivery
- * budget; ordinary tool-selection and chat turns retain their normal budget.
+ * Moonshot rejects an assistant tool-call message whose content is null or
+ * empty, although that shape is valid in the OpenAI Chat Completions schema.
+ * Keep Pi's canonical tool-call/result history and apply only Moonshot's
+ * documented provider-boundary rule: omit the empty content field.
  */
-function isApprovedEvidenceDeliveryTurn(context: Context): boolean {
-  const last = context.messages.at(-1);
-  return last?.role === "user"
-    && typeof last.content === "string"
-    && last.content.includes("<approved_local_tool_evidence>");
+function normalizeKimiPayload(payload: unknown): unknown {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+  const body = payload as { messages?: unknown };
+  if (!Array.isArray(body.messages)) return payload;
+  return {
+    ...body,
+    messages: body.messages.flatMap((message) => {
+      if (!message || typeof message !== "object" || Array.isArray(message)) return [message];
+      const candidate = message as { role?: unknown; content?: unknown; tool_calls?: unknown };
+      if (candidate.role !== "assistant") return [message];
+      if (Array.isArray(candidate.tool_calls) && candidate.tool_calls.length > 0
+        && (typeof candidate.content !== "string" || candidate.content.trim().length === 0)) {
+        const normalized = { ...candidate } as Record<string, unknown>;
+        delete normalized.content;
+        return [normalized];
+      }
+      return [message];
+    })
+  };
 }
 
 function sseEventHasFinishReason(event: string): boolean {
@@ -265,7 +274,7 @@ function sseEventHasFinishReason(event: string): boolean {
  */
 function finishAwareFetch(baseFetch: FetchFunction, timeoutMs?: number): FetchFunction {
   return async (input, init) => {
-    const response = await baseFetch(input, localTestInit(input, init));
+    const response = await baseFetch(input, init);
     if (
       !response.ok ||
       !response.body ||
@@ -289,14 +298,19 @@ function finishAwareFetch(baseFetch: FetchFunction, timeoutMs?: number): FetchFu
           controller.error(error);
         };
 
-        if (timeoutMs !== undefined && timeoutMs > 0) {
-          // The OpenAI SDK timeout only covers receiving response headers. A
-          // provider can keep an SSE body open forever after headers arrive,
-          // so enforce the same finite delivery budget over the body itself.
-          timeoutHandle = setTimeout(() => {
-            failStream(new Error(`Provider stream timed out after ${timeoutMs}ms`));
-          }, timeoutMs);
-        }
+        const armIdleTimeout = (): void => {
+          if (timeoutHandle) clearTimeout(timeoutHandle);
+          if (timeoutMs !== undefined && timeoutMs > 0) {
+            // Pi's coding-agent uses an HTTP idle timeout for response bodies.
+            // This is deliberately not a turn/output budget: every provider
+            // chunk gives the model another full idle interval to respond.
+            timeoutHandle = setTimeout(() => {
+              failStream(new Error(`Provider stream idle timeout after ${timeoutMs}ms`));
+            }, timeoutMs);
+          }
+        };
+
+        armIdleTimeout();
 
         void (async () => {
           const decoder = new TextDecoder();
@@ -339,6 +353,7 @@ function finishAwareFetch(baseFetch: FetchFunction, timeoutMs?: number): FetchFu
                 return;
               }
               buffer += decoder.decode(next.value, { stream: true });
+              armIdleTimeout();
               if (emitCompleteEvents()) return;
             }
           } catch (error) {
@@ -369,34 +384,40 @@ function finishAwareFetch(baseFetch: FetchFunction, timeoutMs?: number): FetchFu
 }
 
 /**
- * The repository's local HTTP doubles still assert the legacy Moonshot field
- * while the real Pi adapter correctly emits `max_tokens` for Moonshot. Keep
- * this test-only normalization out of official production requests.
- */
-function localTestInit(input: Parameters<FetchFunction>[0], init?: RequestInit): RequestInit | undefined {
-  if (!init || typeof init.body !== "string") return init;
-  let hostname = "";
-  try {
-    hostname = new URL(input instanceof Request ? input.url : String(input)).hostname;
-  } catch {
-    return init;
-  }
-  if (!(hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1")) return init;
-  try {
-    const payload = JSON.parse(init.body) as Record<string, unknown>;
-    if (payload.max_tokens === undefined || payload.max_completion_tokens !== undefined) return init;
-    return { ...init, body: JSON.stringify({ ...payload, max_completion_tokens: 3_000 }) };
-  } catch {
-    return init;
-  }
-}
-
-/**
  * Create the Pi Core StreamFn backed by the implemented OpenAI Completions API.
  * The returned function is safe to pass directly as AgentOptions.streamFn.
  */
 export function createKimiStreamFn(options: KimiAdapterOptions = {}): StreamFn {
   return streamFnFor(resolveKimiOptions(options));
+}
+
+/**
+ * Build Pi's provider/model collection for helpers that use the same model
+ * boundary as the Agent loop, such as Pi's native compaction implementation.
+ */
+export function createKimiModels(options: KimiAdapterOptions = {}): { models: Models; model: KimiModel } {
+  const config = resolveKimiOptions(options);
+  const model = createKimiModel(config);
+  const stream = streamFnFor(config) as (
+    requestModel: KimiModel,
+    context: Parameters<StreamFn>[1],
+    streamOptions?: SimpleStreamOptions
+  ) => AssistantMessageEventStream;
+  const api: ProviderStreams = {
+    stream: (requestModel, context, streamOptions) => stream(requestModel as KimiModel, context, streamOptions),
+    streamSimple: (requestModel, context, streamOptions) => stream(requestModel as KimiModel, context, streamOptions)
+  };
+  const provider = createProvider({
+    id: model.provider,
+    name: "Moonshot Kimi",
+    baseUrl: model.baseUrl,
+    auth: { apiKey: envApiKeyAuth("LLM API key", ["LLM_API_KEY"]) },
+    models: [model],
+    api
+  });
+  const models = createModels();
+  models.setProvider(provider);
+  return { models, model };
 }
 
 /** Build AgentOptions with a Kimi model, key resolver, and enabled thinking. */

@@ -67,7 +67,7 @@ npm run build
 npm run test
 ```
 
-Tests inject a deterministic fake runtime where needed. The server entrypoint itself always uses the Chat Completions runtime.
+Tests inject deterministic Pi provider doubles where needed. The server entrypoint itself always uses the Pi Core Agent runtime; Moonshot is reached through Pi AI's OpenAI-compatible transport.
 
 ## Skills And Tools
 
@@ -125,20 +125,20 @@ name = "github:yeet"
 enabled = false
 ```
 
-This package implements the Agent Skills protocol semantics over a Kimi K2.6 Chat Completions loop:
+This package implements the Agent Skills protocol semantics over a Pi Core Agent using Kimi K2.6 through Pi AI:
 
 ```text
 startup context: skill name + description + public SKILL.md locator
 selection: main agent calls `skill_run` with the public skill id and task
 private execution: SkillRuntime loads the complete private SKILL.md inside a headless worker session
 resource loading: the worker loads private skill resources on demand
-tool execution: Chat Completions function calls mapped to server tools or brokered local tools
+tool execution: Pi tool calls mapped to server tools or brokered local tools
 tool events: requested/completed/failed status streams as `tool_call.delta`; local writes can also stream `workspace.diff`
 ```
 
-It does not expose `load_skill(skill_id)` as a model-visible tool. `skill_run` is the product runtime boundary: it is a normal Chat Completions function tool to the main agent, while the private skill body stays inside the server worker. The main agent cannot use `file_read` to load protected `SKILL.md` content.
+It does not expose `load_skill(skill_id)` as a model-visible tool. `skill_run` is the product runtime boundary: it is a normal Pi tool to the main agent, while the private skill body stays inside the server worker. The main agent cannot use `file_read` to load protected `SKILL.md` content.
 
-Hatch does not use the Responses API or OpenAI hosted/local `shellTool`. Those are OpenAI implementation surfaces for mounting and executing skills. Hatch keeps the protocol portable by using OpenAI-compatible Chat Completions with function calling.
+Hatch does not use the Responses API or OpenAI hosted/local `shellTool`. The Agent harness is Pi Core + Pi AI. Pi AI uses Moonshot's OpenAI-compatible Completions transport at the provider boundary; Hatch does not instantiate a second OpenAI SDK client or maintain a parallel model loop.
 
 ## Runtime Contract
 
@@ -173,7 +173,7 @@ model tool_call
 -> tool_call.result from local harness when client-local
 -> tool_call.delta completed/failed/cancelled
 -> workspace.diff when a completed local write/patch returns file changes
--> tool result message appended back into Chat Completions
+-> Pi tool result appended to the Agent transcript
 -> next model call or turn.completed
 ```
 
@@ -208,11 +208,11 @@ Run-scoped `runtime.event` records and structured `tool.call` records include `c
 
 ## Context Compaction
 
-Hatch follows the Codex-style compaction model over Chat Completions:
+Hatch follows Pi's implemented compaction model:
 
 ```text
 old model-visible history
--> special compaction LLM call
+-> Pi's native compaction preparation and summary call
 -> append conversation.compacted checkpoint to events.jsonl
 -> replace active model-visible history with replacement_history
 -> continue the original turn or next turn
@@ -228,14 +228,9 @@ pre-turn auto compact             before appending the current user message
 mid-turn auto compact             after a tool result before the next model call
 ```
 
-The compaction prompt asks for a concise handoff summary. The replacement history keeps recent real user messages up to about 20,000 estimated tokens, then appends a `user` message prefixed with `CONTEXT CHECKPOINT COMPACTION`. Base instructions, skill catalog, and any current-turn skill injections are still rebuilt separately by the server on every model call.
+Pi's native compaction prompt asks for a concise summary. The replacement history is the Pi-selected `compactionSummary` message followed by Pi's retained tail, including complete assistant tool-call/tool-result pairs. Base instructions, skill catalog, and any current-turn skill injections are still rebuilt separately by the server on every model call.
 
-Auto compaction is enabled when a context limit is configured:
-
-```text
-HATCH_MODEL_CONTEXT_WINDOW_TOKENS=256000   # auto compact at 90%
-HATCH_AUTO_COMPACT_LIMIT_TOKENS=230400     # direct override
-```
+Auto compaction uses Pi's model profile context window and `DEFAULT_COMPACTION_SETTINGS`; there is no Hatch-specific token threshold or replacement-history truncation override.
 
 ## Run Locally
 
@@ -360,7 +355,6 @@ HATCH_COMPACTION_MODEL=kimi-k2.6
 PORT=8400
 LLM_API_KEY=...
 OPENAI_BASE_URL=https://api.moonshot.cn/v1
-HATCH_MODEL_CONTEXT_WINDOW_TOKENS=256000
 HATCH_WEB_SEARCH_PROVIDER=bocha
 HATCH_WEB_SEARCH_URL=https://api.bocha.cn/v1/web-search
 HATCH_WEB_SEARCH_API_KEY=<server-side CWebSearch/Bocha key>
@@ -369,7 +363,7 @@ HATCH_REGISTRY_URL=http://registry:8100
 HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN=<runtime-service-token>
 ```
 
-Spec v1 uses Kimi K2.6 exclusively for Creator execution and context compaction. Every call uses the live-verified non-thinking profile: `thinking: { type: "disabled" }` with `temperature=0.6`; omitting `thinking` makes Kimi enter its default reasoning mode and can consume the completion budget before returning a deliverable. There is no alternate-model fallback. Use Kimi's official `LLM_API_KEY` variable for credentials.
+Spec v1 uses Kimi K2.6 exclusively for Creator execution, delivery review, and context compaction. Thinking is always enabled through Pi's normal thinking-level option; temperature follows the provider contract. Pi owns the model profile, context estimate, compaction policy, retries, and output behavior. There is no alternate-model fallback. Use Kimi's official `LLM_API_KEY` variable for credentials.
 Release-level Evals are the default Creator quality gate. Ordinary Creator products stream Kimi's actual response to the Consumer Desktop. `HATCH_RUNTIME_DELIVERY_AUDIT=enforce` is an optional regulated-deployment override: it performs a second Kimi claim audit before delivery and intentionally withholds text streaming until that audit finishes.
 `OPENAI_BASE_URL` falls back to `https://api.moonshot.cn/v1` and is restricted to official Moonshot endpoints (plus loopback test doubles). Use the `.ai` endpoint only with a matching international Kimi key. If any model override is present, it must be exactly `kimi-k2.6` or startup fails closed.
 `HATCH_MCP_SERVERS` is optional. When set, the model can call `mcp_call`; the server sends MCP `tools/call` JSON-RPC requests and the client never sees MCP credentials.
@@ -421,7 +415,7 @@ approval.result
 Execution surface:
 
 ```text
-model-visible: Chat Completions function tools
+model-visible: Pi tools serialized through the OpenAI-compatible provider transport
 server tools: web_search, api_request, mcp_call
 client transport: file_list/file_search/file_read/file_write/file_patch/shell_exec/git_diff -> fs.*, shell.exec, git.diff
 ```

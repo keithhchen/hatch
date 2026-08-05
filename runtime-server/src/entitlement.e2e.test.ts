@@ -76,7 +76,7 @@ test("Release delivery workflow hides unsafe drafts and proposed writes until an
     for (const request of reviewerRequests) {
       assert.match(String(request.messages?.[0]?.content ?? ""), /^FACTORY_AUDIT_INSTRUCTION/);
       assert.match(String(request.messages?.[0]?.content ?? ""), /Runtime batching rule/);
-      const payload = JSON.parse(String(request.messages?.[1]?.content ?? "{}"));
+      const payload = JSON.parse(messageContentText(request.messages?.[1]?.content));
       assert.deepEqual(payload.evidence_authority, {
         user_fact_sources: ["user_input", "approved_tool_evidence"],
         creator_method_sources: ["protected_knowledge"],
@@ -147,7 +147,7 @@ test("delivery audit treats an omitted claim unit as a failed review and revises
     assert.doesNotMatch(JSON.stringify(result.events), /UNSUPPORTED SECOND/);
     const reviewerRequests = mock.requests.filter((request) => request.response_format?.type === "json_object");
     assert.ok(reviewerRequests.length >= 2);
-    const firstPayload = JSON.parse(String(reviewerRequests[0]?.messages?.[1]?.content ?? "{}"));
+    const firstPayload = JSON.parse(messageContentText(reviewerRequests[0]?.messages?.[1]?.content));
     assert.equal(firstPayload.claim_inventory.length, 2);
   } finally {
     await mock.close();
@@ -177,9 +177,10 @@ test("delivery audit covers a large response in bounded reviewer batches", async
     assert.equal(result.finalText, coverageBatchDraft());
     const reviewerRequests = mock.requests.filter((request) => request.response_format?.type === "json_object");
     assert.equal(reviewerRequests.length, 2);
-    const batchSizes = reviewerRequests.map((request) => JSON.parse(String(request.messages[1].content)).claim_inventory.length);
+    const batchSizes = reviewerRequests.map((request) => JSON.parse(messageContentText(request.messages[1].content)).claim_inventory.length);
     assert.deepEqual(batchSizes, [20, 1]);
-    assert.ok(reviewerRequests.every((request) => request.max_completion_tokens === 2_500));
+    assert.ok(reviewerRequests.every((request) => request.max_completion_tokens === undefined));
+    assert.ok(reviewerRequests.every((request) => Number(request.max_tokens) > 100_000));
     assert.ok(reviewerRequests.every((request) => request.temperature === 1));
     assert.ok(reviewerRequests.every((request) => request.thinking?.type === "enabled"));
   } finally {
@@ -283,7 +284,7 @@ test("Creator Releases stream by default even when they carry an offline audit p
   }
 });
 
-test("Creator Release buffers the model turn after local tool evidence", async () => {
+test("Creator Release keeps Pi's assistant tool-call and tool-result history", async () => {
   const releaseFixture = await createReleaseFixture();
   const workspace = await tempDirectory("hatch-tool-handoff-workspace-");
   process.env.HATCH_RUNTIME_DATA_DIR = await tempDirectory("hatch-tool-handoff-runtime-");
@@ -309,11 +310,14 @@ test("Creator Release buffers the model turn after local tool evidence", async (
     assert.deepEqual(result.events.filter((event) => event.type === "tool_call.request").map((event) => event.name), ["fs.search"]);
     assert.equal(mock.requests.length, 2);
     assert.equal(mock.requests[0]?.stream, true);
-    // Pi Core keeps the follow-up on its normal AssistantMessage stream;
-    // the bounded evidence handoff is a context projection, not a transport
-    // switch to a second non-streaming runtime.
     assert.equal(mock.requests[1]?.stream, true);
     assert.ok(mock.requests[1]?.messages?.some((message: Record<string, unknown>) => (
+      message.role === "assistant" && Array.isArray(message.tool_calls)
+    )));
+    assert.ok(mock.requests[1]?.messages?.some((message: Record<string, unknown>) => (
+      message.role === "tool" && typeof message.tool_call_id === "string"
+    )));
+    assert.ok(!mock.requests[1]?.messages?.some((message: Record<string, unknown>) => (
       message.role === "user" && String(message.content ?? "").includes("approved_local_tool_evidence")
     )));
   } finally {
@@ -348,14 +352,14 @@ test("Creator Release saves an explicit requested artifact after returning buffe
     assert.match(result.finalText, /Completed and saved the result to result\.md/);
     assert.equal(await readFile(path.join(workspace, "result.md"), "utf8"), "LOCAL EVIDENCE FINAL");
     assert.deepEqual(result.events.filter((event) => event.type === "tool_call.request").map((event) => event.name), ["fs.search", "fs.write"]);
-    assert.equal(mock.requests[1]?.tools, undefined);
+    assert.ok(Array.isArray(mock.requests[1]?.tools));
     assert.equal(mock.requests[1]?.tool_choice, undefined);
   } finally {
     await mock.close();
   }
 });
 
-test("Creator Release retries an empty buffered final before delivering an explicit artifact", async () => {
+test("Creator Release surfaces Pi's empty final response without an implicit follow-up", async () => {
   const releaseFixture = await createReleaseFixture();
   const workspace = await tempDirectory("hatch-empty-final-retry-workspace-");
   process.env.HATCH_RUNTIME_DATA_DIR = await tempDirectory("hatch-empty-final-retry-runtime-");
@@ -374,21 +378,17 @@ test("Creator Release retries an empty buffered final before delivering an expli
       requests.push(request);
       if (requests.length === 1) {
         assert.equal(request.stream, true);
-        assert.equal(request.max_completion_tokens, 3_000);
+        assert.ok(Number(request.max_tokens) > 100_000);
         writeSseToolCall(res, "call_empty_retry_search", "file_search", { query: "Hatch", path: ".", max_results: 5 });
         return;
       }
       if (requests.length === 2) {
         assert.equal(request.stream, true);
-        assert.equal(request.max_completion_tokens, 3_000);
+        assert.ok(Number(request.max_tokens) > 100_000);
         writeSseModelCompletion(res, "");
         return;
       }
-      assert.equal(requests.length, 3);
-      assert.equal(request.stream, true);
-      assert.equal(request.max_completion_tokens, 3_000);
-      assert.match(JSON.stringify(request.messages), /previous assistant response was empty/);
-      writeSseModelCompletion(res, "RECOVERED LOCAL EVIDENCE FINAL");
+      throw new Error("Pi Agent must not issue an implicit empty-final follow-up");
     })().catch((error) => {
       res.writeHead(500);
       res.end(error instanceof Error ? error.message : String(error));
@@ -405,18 +405,19 @@ test("Creator Release retries an empty buffered final before delivering an expli
       entitlementResolver: new MemoryEntitlementResolver("license_fixture", entitlement)
     });
     servers.push(runtime);
-    const result = await runLocalHarness({
-      serverUrl: await listen(runtime),
-      workspace,
-      prompt: "Find Hatch in local files and save the complete review to retry.md.",
-      licenseToken: "license_fixture",
-      entitlementId: entitlement.entitlement_id,
-      approveTool: () => true
-    });
-    assert.match(result.finalText, /RECOVERED LOCAL EVIDENCE FINAL/);
-    assert.match(result.finalText, /Completed and saved the result to retry\.md/);
-    assert.equal(await readFile(path.join(workspace, "retry.md"), "utf8"), "RECOVERED LOCAL EVIDENCE FINAL");
-    assert.equal(requests.length, 3);
+    const serverUrl = await listen(runtime);
+    await assert.rejects(
+      () => runLocalHarness({
+        serverUrl,
+        workspace,
+        prompt: "Find Hatch in local files and save the complete review to retry.md.",
+        licenseToken: "license_fixture",
+        entitlementId: entitlement.entitlement_id,
+        approveTool: () => true
+      }),
+      /empty final response/
+    );
+    assert.equal(requests.length, 2);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
@@ -800,6 +801,20 @@ function configureMockModels(baseUrl: string): void {
   process.env.HATCH_RUNTIME_DELIVERY_AUDIT = "enforce";
 }
 
+function messageContentText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return content === undefined ? "{}" : JSON.stringify(content);
+  return content
+    .filter((part): part is { type: "text"; text: string } => (
+      typeof part === "object"
+      && part !== null
+      && (part as Record<string, unknown>).type === "text"
+      && typeof (part as Record<string, unknown>).text === "string"
+    ))
+    .map((part) => part.text)
+    .join("");
+}
+
 async function createDeliveryAuditMock(mode: "revise" | "safe_partial" | "compatibility" | "coverage_gap" | "coverage_batches" | "malformed_then_valid" | "schema_unsupported_then_json"): Promise<{
   baseUrl: string;
   requests: Array<Record<string, any>>;
@@ -827,17 +842,17 @@ async function createDeliveryAuditMock(mode: "revise" | "safe_partial" | "compat
           return;
         }
         if (mode === "malformed_then_valid" && reviewerResponseCount === 1) {
-          writeJsonModelCompletion(res, "{malformed");
+          writeSseModelCompletion(res, "{malformed");
           return;
         }
-        const payload = JSON.parse(String(request.messages?.[1]?.content ?? "{}"));
+      const payload = JSON.parse(messageContentText(request.messages?.[1]?.content));
         const draft = String(payload.draft_deliverable ?? "");
         const passed = draft.startsWith("SAFE");
         const inventory = Array.isArray(payload.claim_inventory) ? payload.claim_inventory : [];
         const reviewedInventory = mode === "coverage_gap" && draft.includes("UNSUPPORTED SECOND")
           ? inventory.slice(0, 1)
           : inventory;
-        writeJsonModelCompletion(res, JSON.stringify({
+        writeSseModelCompletion(res, JSON.stringify({
           claims: reviewedInventory.map((unit: Record<string, unknown>) => ({
             unit_id: unit.unit_id,
             claim: unit.text || draft || "empty",
@@ -870,15 +885,15 @@ async function createDeliveryAuditMock(mode: "revise" | "safe_partial" | "compat
         return;
       }
 
-      const revisionPayload = JSON.parse(String(request.messages?.[1]?.content ?? "{}"));
+      const revisionPayload = JSON.parse(messageContentText(request.messages?.[1]?.content));
       if (mode === "safe_partial" && revisionPayload.boundary_safe_partial_requested === true) {
-        writeJsonModelCompletion(res, "SAFE PARTIAL");
+        writeSseModelCompletion(res, "SAFE PARTIAL");
       } else if (mode === "safe_partial") {
-        writeJsonModelCompletion(res, "UNSAFE REVISION");
+        writeSseModelCompletion(res, "UNSAFE REVISION");
       } else if (mode === "coverage_gap") {
-        writeJsonModelCompletion(res, "SAFE COVERED");
+        writeSseModelCompletion(res, "SAFE COVERED");
       } else {
-        writeJsonModelCompletion(res, "SAFE FINAL");
+        writeSseModelCompletion(res, "SAFE FINAL");
       }
     })().catch((error) => {
       res.writeHead(500).end(error instanceof Error ? error.message : String(error));
@@ -913,7 +928,7 @@ async function createPinnedToolHandoffMock(): Promise<{
       requests.push(request);
       if (requests.length === 1) {
         assert.equal(request.stream, true);
-        assert.equal(request.max_completion_tokens, 3_000);
+        assert.ok(Number(request.max_tokens) > 100_000);
         writeSseToolCall(res, "call_local_search", "file_search", {
           query: "Hatch",
           path: ".",
@@ -922,14 +937,16 @@ async function createPinnedToolHandoffMock(): Promise<{
         return;
       }
       assert.equal(requests.length, 2);
-      assert.equal(request.stream, request.tools === undefined);
-      assert.equal(request.max_completion_tokens, 3_000);
-      for (let index = 1; index < (request.messages ?? []).length; index += 1) {
-        assert.equal(request.messages[index - 1]?.role === "user" && request.messages[index]?.role === "user", false);
-      }
+      assert.equal(request.stream, true);
+      assert.ok(Array.isArray(request.tools));
+      assert.ok(Number(request.max_tokens) > 100_000);
       for (const message of request.messages ?? []) {
         if (message.role === "assistant") {
-          assert.ok(typeof message.content === "string" && message.content.trim().length > 0);
+          if (Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
+            assert.equal("content" in message, false);
+          } else {
+            assert.ok(typeof message.content === "string" && message.content.trim().length > 0);
+          }
         }
       }
       if (request.stream === true) writeSseModelCompletion(res, "LOCAL EVIDENCE FINAL");

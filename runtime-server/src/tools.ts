@@ -335,7 +335,7 @@ export function requireModelTool(name: string): ModelToolSpec {
     .flatMap((tool) => tool.model ? [toModelToolSpec(tool)] : [])
     .find((tool) => tool.name === name);
   if (!spec) {
-    throw new Error(`Unknown Chat Completions tool: ${name}`);
+    throw new Error(`Unknown Pi tool: ${name}`);
   }
   return spec;
 }
@@ -353,7 +353,7 @@ export function requireModelToolDispatch(name: string): ModelToolDispatch {
   }
 
   if (!spec.clientTool) {
-    throw new Error(`Chat Completions tool has no client runtime tool: ${spec.name}`);
+    throw new Error(`Pi tool has no client runtime tool: ${spec.name}`);
   }
 
   if (spec.locality === "client") {
