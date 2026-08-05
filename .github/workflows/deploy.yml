@@ -94,9 +94,13 @@ jobs:
       - name: Prepare application definition
         run: |
           set -euo pipefail
-          sudo install -m 640 compose.app.yml /opt/hatch/
-          sudo mkdir -p /opt/hatch/dashboard
-          sudo install -m 640 docs/proof/creator-dashboard-clean-catalog-v1/product-catalog.json /opt/hatch/dashboard/product-catalog.json
+          install -m 640 compose.app.yml /opt/hatch/
+          mkdir -p /opt/hatch/dashboard
+          if test -e /opt/hatch/dashboard/product-catalog.json; then
+            echo "Keeping the server-owned product catalog"
+          else
+            install -m 640 docs/proof/creator-dashboard-clean-catalog-v1/product-catalog.json /opt/hatch/dashboard/product-catalog.json
+          fi
       - name: Pull and switch application containers
         env:
           GHCR_USERNAME: ${{ github.actor }}
