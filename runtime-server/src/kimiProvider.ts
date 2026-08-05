@@ -1,7 +1,9 @@
 export const KIMI_MODEL = "kimi-k2.6";
 // Keep the provider profile in one place so Factory, Runtime, and audits all
 // use the same thinking-enabled Kimi contract.
-export const KIMI_TEMPERATURE = 0.6;
+// Kimi K2.6 currently accepts only temperature=1. Thinking remains enabled;
+// this is a provider contract, not a user-facing creativity setting.
+export const KIMI_TEMPERATURE = 1;
 export const KIMI_THINKING = { type: "enabled" } as const;
 export const KIMI_DEFAULT_BASE_URL = "https://api.moonshot.cn/v1";
 

@@ -61,7 +61,7 @@ test("Release delivery workflow hides unsafe drafts and proposed writes until an
     assert.ok(mock.requests.some((request) => JSON.stringify(request).includes("FACTORY_AUDIT_INSTRUCTION")));
     assert.ok(mock.requests.some((request) => JSON.stringify(request).includes("FACTORY_REVISION_INSTRUCTION")));
     assert.ok(mock.requests.every((request) => request.model === "kimi-k2.6"));
-    assert.ok(mock.requests.every((request) => request.temperature === 0.6));
+    assert.ok(mock.requests.every((request) => request.temperature === 1));
     assert.ok(mock.requests.every((request) => request.thinking?.type === "enabled"));
     assert.ok(mock.requests.every((request) => {
       const tools = (request.tools ?? []).map((tool: Record<string, any>) => tool.function?.name);
@@ -70,7 +70,7 @@ test("Release delivery workflow hides unsafe drafts and proposed writes until an
     const reviewerRequests = mock.requests.filter((request) => request.response_format?.type === "json_object");
     assert.ok(reviewerRequests.length > 0);
     assert.ok(reviewerRequests.every((request) => request.model === "kimi-k2.6"));
-    assert.ok(reviewerRequests.every((request) => request.temperature === 0.6));
+    assert.ok(reviewerRequests.every((request) => request.temperature === 1));
     assert.ok(reviewerRequests.every((request) => request.thinking?.type === "enabled"));
     assert.ok(reviewerRequests.every((request) => request.reasoning_format === undefined));
     for (const request of reviewerRequests) {
@@ -180,7 +180,7 @@ test("delivery audit covers a large response in bounded reviewer batches", async
     const batchSizes = reviewerRequests.map((request) => JSON.parse(String(request.messages[1].content)).claim_inventory.length);
     assert.deepEqual(batchSizes, [20, 1]);
     assert.ok(reviewerRequests.every((request) => request.max_completion_tokens === 2_500));
-    assert.ok(reviewerRequests.every((request) => request.temperature === 0.6));
+    assert.ok(reviewerRequests.every((request) => request.temperature === 1));
     assert.ok(reviewerRequests.every((request) => request.thinking?.type === "enabled"));
   } finally {
     await mock.close();
@@ -239,7 +239,7 @@ test("delivery audit uses Kimi-compatible JSON object mode with local schema val
     assert.equal(result.finalText, "SAFE FINAL");
     const reviewerRequests = mock.requests.filter((request) => request.response_format?.type === "json_object");
     assert.deepEqual(reviewerRequests.map((request) => request.response_format?.type), ["json_object"]);
-    assert.ok(reviewerRequests.every((request) => request.model === "kimi-k2.6" && request.temperature === 0.6));
+    assert.ok(reviewerRequests.every((request) => request.model === "kimi-k2.6" && request.temperature === 1));
     assert.ok(reviewerRequests.every((request) => request.thinking?.type === "enabled"));
   } finally {
     await mock.close();
