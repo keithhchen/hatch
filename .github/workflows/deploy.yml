@@ -96,9 +96,7 @@ jobs:
           set -euo pipefail
           install -m 640 compose.app.yml /opt/hatch/
           mkdir -p /opt/hatch/dashboard
-          catalog_tmp="$(mktemp)"
-          install -m 640 docs/proof/creator-dashboard-clean-catalog-v1/product-catalog.json "$catalog_tmp"
-          mv -f "$catalog_tmp" /opt/hatch/dashboard/product-catalog.json
+          sudo -n install -m 640 docs/proof/creator-dashboard-clean-catalog-v1/product-catalog.json /opt/hatch/dashboard/product-catalog.json
       - name: Pull and switch application containers
         env:
           GHCR_USERNAME: ${{ github.actor }}
