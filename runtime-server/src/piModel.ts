@@ -13,7 +13,7 @@ export const KIMI_MODEL = "kimi-k2.6" as const;
 export const KIMI_DEFAULT_BASE_URL = "https://api.moonshot.cn/v1";
 export const KIMI_DEFAULT_THINKING_LEVEL: ThinkingLevel = "high";
 // Thinking stays enabled, but delivery must have a finite response budget.
-export const KIMI_DEFAULT_MAX_OUTPUT_TOKENS = 4_096;
+export const KIMI_DEFAULT_MAX_OUTPUT_TOKENS = 2_048;
 export const KIMI_DEFAULT_TIMEOUT_MS = 120_000;
 
 const KIMI_PROVIDER_CN = "moonshotai-cn" as const;
@@ -200,7 +200,7 @@ function streamFnFor(config: ResolvedKimiOptions): StreamFn {
     const streamOptions: SimpleStreamOptions = {
       ...options,
       apiKey: options?.apiKey ?? config.apiKey,
-      fetch: finishAwareFetch(options?.fetch ?? config.fetch ?? globalThis.fetch),
+      fetch: finishAwareFetch(options?.fetch ?? config.fetch ?? globalThis.fetch, config.timeoutMs),
       headers: config.headers || options?.headers
         ? { ...config.headers, ...options?.headers }
         : undefined,
@@ -241,7 +241,7 @@ function sseEventHasFinishReason(event: string): boolean {
  * send finish_reason and keep the TCP stream open; complete the provider body
  * at that protocol boundary while retaining the original request signal.
  */
-function finishAwareFetch(baseFetch: FetchFunction): FetchFunction {
+function finishAwareFetch(baseFetch: FetchFunction, timeoutMs?: number): FetchFunction {
   return async (input, init) => {
     const response = await baseFetch(input, localTestInit(input, init));
     if (
@@ -255,8 +255,27 @@ function finishAwareFetch(baseFetch: FetchFunction): FetchFunction {
     const upstream = response.body;
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     let cancelled = false;
+    let streamClosed = false;
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
     const body = new ReadableStream<Uint8Array>({
       start(controller) {
+        const failStream = (error: Error): void => {
+          if (streamClosed) return;
+          streamClosed = true;
+          cancelled = true;
+          void reader?.cancel(error);
+          controller.error(error);
+        };
+
+        if (timeoutMs !== undefined && timeoutMs > 0) {
+          // The OpenAI SDK timeout only covers receiving response headers. A
+          // provider can keep an SSE body open forever after headers arrive,
+          // so enforce the same finite delivery budget over the body itself.
+          timeoutHandle = setTimeout(() => {
+            failStream(new Error(`Provider stream timed out after ${timeoutMs}ms`));
+          }, timeoutMs);
+        }
+
         void (async () => {
           const decoder = new TextDecoder();
           const encoder = new TextEncoder();
@@ -272,6 +291,7 @@ function finishAwareFetch(baseFetch: FetchFunction): FetchFunction {
               controller.enqueue(encoder.encode(event));
               if (sseEventHasFinishReason(event)) {
                 controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+                streamClosed = true;
                 cancelled = true;
                 void reader?.cancel();
                 controller.close();
@@ -290,21 +310,30 @@ function finishAwareFetch(baseFetch: FetchFunction): FetchFunction {
                   controller.enqueue(encoder.encode(buffer));
                   buffer = "";
                 }
-                if (!cancelled) controller.close();
+                if (!cancelled) {
+                  streamClosed = true;
+                  controller.close();
+                }
                 return;
               }
               buffer += decoder.decode(next.value, { stream: true });
               if (emitCompleteEvents()) return;
             }
           } catch (error) {
-            if (!cancelled) controller.error(error);
+            if (!streamClosed && !cancelled) {
+              streamClosed = true;
+              controller.error(error);
+            }
           } finally {
+            if (timeoutHandle) clearTimeout(timeoutHandle);
             reader?.releaseLock();
           }
         })();
       },
       cancel(reason) {
+        streamClosed = true;
         cancelled = true;
+        if (timeoutHandle) clearTimeout(timeoutHandle);
         return reader?.cancel(reason);
       }
     });

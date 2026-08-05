@@ -133,6 +133,35 @@ test("finish_reason completes a non-closing SSE response without dropping abort 
   assert.equal(upstreamCancelled, true);
 });
 
+test("stream timeout bounds an SSE body that never reaches a finish reason", async () => {
+  let upstreamCancelled = false;
+  const encoder = new TextEncoder();
+  const fetch: typeof globalThis.fetch = async () => new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+          choices: [{ index: 0, delta: { role: "assistant", content: "thinking" }, finish_reason: null }]
+        })}\n\n`));
+      },
+      cancel() {
+        upstreamCancelled = true;
+      }
+    }),
+    { status: 200, headers: { "content-type": "text/event-stream" } }
+  );
+
+  const agent = createKimiAgent({ env: { LLM_API_KEY: "kimi-test-key" }, fetch, timeoutMs: 30 });
+  const started = Date.now();
+  await agent.prompt("Return a bounded response");
+
+  const final = agent.state.messages.at(-1);
+  assert.ok(Date.now() - started < 500, "stream timeout should be bounded");
+  assert.equal(final?.role, "assistant");
+  assert.equal(final?.stopReason, "error");
+  assert.match(final?.errorMessage ?? "", /timed out after 30ms/);
+  assert.equal(upstreamCancelled, true);
+});
+
 test("Agent.abort reaches the pi-ai request and preserves the aborted result", async () => {
   let resolveStarted!: () => void;
   const started = new Promise<void>((resolve) => {
