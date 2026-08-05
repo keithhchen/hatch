@@ -72,7 +72,7 @@ test("Creator HTTP tools support GET query parameters and server-side API-key he
   const registry = createServer((request, response) => {
     response.setHeader("content-type", "application/json");
     response.end(JSON.stringify({
-      id: "seth-alpha-lite-search", tenant_id: "seth", kind: "http", secret_ref: "secret:seth-alpha-lite",
+      id: "seth-alpha-lite-search", tenant_id: "seth", kind: "http", secret_ref: null, secret: "test-seth-key",
       config: {
         url: `http://127.0.0.1:${(target.address() as { port: number }).port}/api/agent/search`,
         method: "GET",
@@ -85,11 +85,7 @@ test("Creator HTTP tools support GET query parameters and server-side API-key he
 
   const controlPlane = new RegistryCreatorToolControlPlane({
     registryUrl: `http://127.0.0.1:${(registry.address() as { port: number }).port}`,
-    serviceToken: "internal-test",
-    secretResolver: { async resolve(secretRef) {
-      assert.equal(secretRef, "secret:seth-alpha-lite");
-      return "test-seth-key";
-    } }
+    serviceToken: "internal-test"
   });
   const sethCorpus = {
     tools: [{
