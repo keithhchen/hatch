@@ -442,10 +442,10 @@ h2 {
 
 .permission-control {
   display: grid;
-  flex: 0 1 270px;
+  flex: 0 1 430px;
   gap: 2px;
-  grid-template-columns: auto minmax(150px, 1fr);
-  min-width: 240px;
+  grid-template-columns: auto minmax(280px, 1fr);
+  min-width: 360px;
 }
 
 .permission-control select {
@@ -470,36 +470,6 @@ h2 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.shell-toggle {
-  display: grid;
-  flex: 0 1 265px;
-  gap: 2px;
-  min-width: 205px;
-}
-
-.shell-toggle-row {
-  align-items: center;
-  display: flex;
-  gap: 7px;
-}
-
-.shell-toggle-row input {
-  accent-color: var(--hatch-accent);
-  margin: 0;
-  min-height: auto;
-  width: auto;
-}
-
-.shell-toggle-row strong {
-  font-size: 12px;
-  margin: 0;
-}
-
-.shell-toggle small {
-  color: var(--hatch-text-secondary);
-  font-size: 10px;
 }
 
 .thread-root {
@@ -1343,8 +1313,7 @@ h2 {
 
   .header-agent,
   .workspace-selector,
-  .permission-control,
-  .shell-toggle {
+  .permission-control {
     flex-basis: 100%;
     max-width: none;
     min-width: 0;

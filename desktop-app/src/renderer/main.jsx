@@ -29,6 +29,7 @@ import {
   creatorAgentFromEntitlement,
   CHANGE_TOOLS,
   localToolsForPermissionPolicy,
+  normalizePermissionPolicy,
   profileStorageKey,
   requiresUserApproval,
   workspaceGrantLabel
@@ -52,9 +53,8 @@ const DEFAULT_AUTH_URL = import.meta.env.VITE_HATCH_AUTH_URL || "https://hatch.t
 const CONFIGURED_AUTH_SESSION = configuredAuthSession();
 const EMPTY_PROFILE = Object.freeze({ id: "anonymous", name: "User", initials: "U" });
 const PERMISSION_MODES = Object.freeze([
-  { value: PERMISSION_POLICIES.READ_ONLY, label: "Read only", detail: "Read files only" },
-  { value: PERMISSION_POLICIES.ASK_BEFORE_CHANGES, label: "Ask before changes", detail: "Ask before file changes" },
-  { value: PERMISSION_POLICIES.ALLOW_CHANGES, label: "Allow changes", detail: "Allow file changes" }
+  { value: PERMISSION_POLICIES.ASK_BEFORE_CHANGES, label: "Ask before changes", detail: "Ask before file changes and shell commands" },
+  { value: PERMISSION_POLICIES.ALLOW_CHANGES, label: "Allow changes", detail: "Allow file changes and shell commands" }
 ]);
 const DEFAULT_PERMISSION_MODE = DEFAULT_PERMISSION_POLICY;
 const ApprovalContext = createContext(null);
@@ -67,7 +67,6 @@ function App() {
   const workspaceRef = useRef("");
   const activeRunRef = useRef(null);
   const permissionRef = useRef(DEFAULT_PERMISSION_MODE);
-  const shellAccessRef = useRef(true);
   const imeRef = useRef({ composing: false });
   const connectedRef = useRef(false);
   const connectingRef = useRef(false);
@@ -88,7 +87,6 @@ function App() {
   const [signInError, setSignInError] = useState("");
   const [workspaceGranted, setWorkspaceGranted] = useState(false);
   const [permissionMode, setPermissionMode] = useState(DEFAULT_PERMISSION_MODE);
-  const [shellAccess, setShellAccess] = useState(true);
   const [interruptedRun, setInterruptedRun] = useState(null);
   const [conversationId, setConversationId] = useState("desktop-chat");
   const [status, setStatus] = useState("Offline");
@@ -214,17 +212,14 @@ function App() {
     const conversationKey = profileStorageKey(buyerProfile.id, "conversationId");
     const activeRunKey = profileStorageKey(buyerProfile.id, "activeRun");
     const permissionKey = profileStorageKey(buyerProfile.id, "permissionMode");
-    const shellKey = profileStorageKey(buyerProfile.id, "shellAccess");
     const savedWorkspace = localStorage.getItem(workspaceKey) || "";
     const savedConversationId = localStorage.getItem(conversationKey) || `conversation_${buyerProfile.id}`;
     const savedRun = parseStoredJson(localStorage.getItem(activeRunKey));
     const savedPermission = localStorage.getItem(permissionKey);
-    const nextPermission = PERMISSION_MODES.some((mode) => mode.value === savedPermission)
-      ? savedPermission
-      : DEFAULT_PERMISSION_MODE;
-    const nextShellAccess = nextPermission === PERMISSION_POLICIES.READ_ONLY
-      ? false
-      : localStorage.getItem(shellKey) !== "false";
+    const nextPermission = normalizePermissionPolicy(savedPermission);
+    if (savedPermission !== nextPermission) {
+      localStorage.setItem(permissionKey, nextPermission);
+    }
     setWorkspace(savedWorkspace);
     workspaceRef.current = savedWorkspace;
     setWorkspaceDraft(savedWorkspace);
@@ -232,8 +227,6 @@ function App() {
     setConversationId(savedConversationId);
     permissionRef.current = nextPermission;
     setPermissionMode(nextPermission);
-    shellAccessRef.current = nextShellAccess;
-    setShellAccess(nextShellAccess);
     if (savedRun) {
       activeRunRef.current = savedRun;
       setInterruptedRun(savedRun);
@@ -343,7 +336,7 @@ function App() {
         ...(targetCreatorId ? { creator_id: targetCreatorId } : {}),
         client_version: "0.1.0",
         workspace_root: normalizedWorkspace,
-        local_tools: localToolsForPermissionPolicy(permissionRef.current, { enableShell: shellAccessRef.current }),
+        local_tools: localToolsForPermissionPolicy(permissionRef.current),
       }));
     });
     socket.addEventListener("message", (event) => {
@@ -503,17 +496,9 @@ function App() {
   }
 
   async function handleToolRequest(message) {
-    if (message.name === "shell.exec" && !shellAccessRef.current) {
-      sendToolDenied(message, "Shell access is disabled for this session.", "shell_disabled");
-      return;
-    }
     const isChange = CHANGE_TOOLS.includes(message.name);
-    if (permissionRef.current === PERMISSION_POLICIES.READ_ONLY && isChange) {
-      sendToolDenied(message, "This permission mode allows reads only.", "permission_denied");
-      return;
-    }
-    let approvedByUser = permissionRef.current === PERMISSION_POLICIES.ALLOW_CHANGES && isChange;
-    if (!approvedByUser && (message.approval === "ask" || requiresUserApproval(message.name, permissionRef.current))) {
+    let authorizedByDesktop = permissionRef.current === PERMISSION_POLICIES.ALLOW_CHANGES && isChange;
+    if (!authorizedByDesktop && (message.approval === "ask" || requiresUserApproval(message.name, permissionRef.current))) {
       const approved = await requestToolApproval(message);
       if (!approved) {
         upsertToolEvent({
@@ -537,12 +522,12 @@ function App() {
         });
         return;
       }
-      approvedByUser = true;
+      authorizedByDesktop = true;
     }
 
     try {
       const result = await withTimeout(
-        invokeLocalToolCall(message, approvedByUser),
+        invokeLocalToolCall(message, authorizedByDesktop),
         LOCAL_TOOL_TIMEOUT_MS,
         `Local tool timed out after ${Math.round(LOCAL_TOOL_TIMEOUT_MS / 1000)}s: ${message.name}`
       );
@@ -568,19 +553,8 @@ function App() {
     }
   }
 
-  function sendToolDenied(message, reason, code = "approval_denied") {
-    upsertToolEvent({ ...message, locality: "client", status: "failed", error: { code, message: reason } });
-    send({
-      type: "tool_call.result",
-      run_id: message.run_id,
-      tool_call_id: message.tool_call_id,
-      status: "error",
-      error: { code, message: reason }
-    });
-  }
-
-  function invokeLocalToolCall(message, approvedByUser) {
-    const request = approvedByUser ? { ...message, approval: "approved_by_user" } : message;
+  function invokeLocalToolCall(message, authorizedByDesktop) {
+    const request = authorizedByDesktop ? { ...message, approval: "approved_by_user" } : message;
     return new Promise((resolve, reject) => {
       let settled = false;
       let pollTimer;
@@ -664,23 +638,10 @@ function App() {
 
   function updatePermissionMode(nextMode) {
     if (!PERMISSION_MODES.some((mode) => mode.value === nextMode)) return;
-    const nextShellAccess = nextMode === PERMISSION_POLICIES.READ_ONLY ? false : shellAccessRef.current;
     permissionRef.current = nextMode;
     setPermissionMode(nextMode);
-    shellAccessRef.current = nextShellAccess;
-    setShellAccess(nextShellAccess);
     localStorage.setItem(profileStorageKey(buyerProfile.id, "permissionMode"), nextMode);
-    localStorage.setItem(profileStorageKey(buyerProfile.id, "shellAccess"), String(nextShellAccess));
     setStatus(`Permission updated: ${permissionModeLabel(nextMode)}`);
-    void restartRuntimeSession();
-  }
-
-  function updateShellAccess(nextValue) {
-    const nextShellAccess = Boolean(nextValue) && permissionRef.current !== PERMISSION_POLICIES.READ_ONLY;
-    shellAccessRef.current = nextShellAccess;
-    setShellAccess(nextShellAccess);
-    localStorage.setItem(profileStorageKey(buyerProfile.id, "shellAccess"), String(nextShellAccess));
-    setStatus(nextShellAccess ? "Shell access enabled — approval is still required" : "Shell access disabled");
     void restartRuntimeSession();
   }
 
@@ -1032,19 +993,6 @@ function App() {
                 {PERMISSION_MODES.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
               </select>
               <small>{permissionModeDetail(permissionMode)}</small>
-            </label>
-            <label className="shell-toggle">
-              <span className="label">Shell access</span>
-              <span className="shell-toggle-row">
-                <input
-                  type="checkbox"
-                  checked={shellAccess}
-                  disabled={permissionMode === PERMISSION_POLICIES.READ_ONLY}
-                  onChange={(event) => updateShellAccess(event.target.checked)}
-                />
-                <strong>{shellAccess ? "On" : "Off"}</strong>
-              </span>
-              <small>Commands always ask for approval</small>
             </label>
           </div>
         </header>
@@ -1462,7 +1410,7 @@ function permissionModeLabel(value) {
 }
 
 function permissionModeDetail(value) {
-  return PERMISSION_MODES.find((mode) => mode.value === value)?.detail || "Ask before file changes";
+  return PERMISSION_MODES.find((mode) => mode.value === value)?.detail || "Ask before file changes and shell commands";
 }
 
 function SignInScreen({ profile, onSignIn, status, error }) {

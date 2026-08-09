@@ -49,10 +49,7 @@ async fn pick_workspace_folder() -> Option<String> {
 }
 
 #[tauri::command]
-fn execute_tool_call(
-    workspace_root: String,
-    request: Value,
-) -> Result<(), String> {
+fn execute_tool_call(workspace_root: String, request: Value) -> Result<(), String> {
     // Local tools belong to the Desktop, but they must not block its WebView.
     // The result is stored as a short-lived job and polled by the renderer so
     // the UI remains responsive while the bounded runner performs file work.
@@ -233,5 +230,47 @@ mod tests {
             std::fs::read_to_string(temp.path().join("output.txt")).unwrap(),
             "approved by the desktop user"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_shell_commands_without_desktop_policy_approval() {
+        let temp = tempdir().unwrap();
+        let error = execute_tool_call_blocking(
+            temp.path().to_string_lossy().to_string(),
+            json!({
+                "type": "tool_call.request",
+                "run_id": "run_test",
+                "tool_call_id": "call_shell_denied",
+                "name": "shell.exec",
+                "arguments": { "command": "printf denied", "timeout_ms": 30000 },
+                "approval": "auto"
+            }),
+        )
+        .unwrap_err();
+
+        assert!(error.contains("requires explicit approval"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn executes_shell_commands_after_desktop_policy_approval() {
+        let temp = tempdir().unwrap();
+        let output = execute_tool_call_blocking(
+            temp.path().to_string_lossy().to_string(),
+            json!({
+                "type": "tool_call.request",
+                "run_id": "run_test",
+                "tool_call_id": "call_shell_approved",
+                "name": "shell.exec",
+                "arguments": { "command": "printf shell-ok", "timeout_ms": 30000 },
+                "approval": "approved_by_user"
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(output["type"], "tool_call.result");
+        assert_eq!(output["status"], "ok");
+        assert_eq!(output["result"]["stdout"], "shell-ok");
     }
 }
