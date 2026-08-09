@@ -7,7 +7,6 @@
     "serve": "npm run build && node dist/index.js",
     "serve:registry": "npm run build && node dist/registryServer.js",
     "dev": "node dist/index.js",
-    "client": "node dist/localHarness.js",
     "start": "node dist/index.js",
     "build": "rm -rf dist && tsc -p tsconfig.json",
     "test": "npm run build && node --test --test-concurrency=1 dist/*.test.js"

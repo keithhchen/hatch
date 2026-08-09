@@ -9,7 +9,6 @@ import { WebSocket } from "ws";
 import { AgentCorpusResolver, CorpusKnowledgeProvider, HttpKnowledgeProvider, loadAgentCorpus, QdrantKnowledgeProvider } from "./agentCorpus.js";
 import { DeterministicAgentRuntime } from "./agentRuntime.js";
 import { createRuntimeServer } from "./index.js";
-import { runLocalHarness } from "./localHarness.js";
 
 const tempRoots: string[] = [];
 afterEach(async () => {
@@ -179,57 +178,7 @@ test("Agent Corpus resolver loads the Registry current creator/agent path", asyn
   await assert.rejects(new AgentCorpusResolver(root).resolve("other-creator", "signal-resume-review"), /missing|ENOENT|Agent Corpus/);
 });
 
-test("Runtime can run a current Agent Corpus directly", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-agent-corpus-runtime-"));
-  const workspace = await mkdtemp(path.join(os.tmpdir(), "hatch-agent-corpus-workspace-"));
-  tempRoots.push(root, workspace);
-  const creatorRoot = path.join(root, "maya-chen", "signal-resume-review");
-  await mkdir(path.join(creatorRoot, "instructions"), { recursive: true });
-  await mkdir(path.join(creatorRoot, "evals"), { recursive: true });
-  const system = "Review the supplied file using the Creator's method.";
-  const evals = "[]";
-  await writeFile(path.join(creatorRoot, "instructions/system.md"), system, "utf8");
-  await writeFile(path.join(creatorRoot, "evals/evals.json"), evals, "utf8");
-  const asset = (assetPath: string, content: string, id: string) => ({ id, path: assetPath, sha256: digest(content) });
-  await writeFile(path.join(creatorRoot, "agent.json"), JSON.stringify({
-    contract_version: "1",
-    agent_id: "signal-resume-review",
-    creator: { id: "maya-chen", name: "Maya Chen" },
-    product: {
-      id: "signal-resume-review",
-      name: "Signal Resume Review",
-      description: "Review a resume.",
-    },
-    instructions: { system: asset("instructions/system.md", system, "instructions-system") },
-    skills: [],
-    knowledge: { documents: [] },
-    tools: [
-      { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" },
-      { id: "hatch.local.fs", kind: "local_harness", capability: "filesystem" }
-    ],
-    evaluations: { synthetic_qa: [asset("evals/evals.json", evals, "synthetic")], held_out: [asset("evals/evals.json", evals, "held-out")] }
-  }), "utf8");
-  const runtime = createRuntimeServer({
-    createRuntime: () => new DeterministicAgentRuntime(),
-    agentCorpusResolver: new AgentCorpusResolver(root)
-  });
-  await new Promise<void>((resolve) => runtime.server.listen(0, "127.0.0.1", resolve));
-  const address = runtime.server.address();
-  assert.ok(address && typeof address === "object");
-  try {
-    const result = await runLocalHarness({
-      serverUrl: `ws://127.0.0.1:${address.port}/runtime`,
-      workspace,
-      creatorId: "maya-chen",
-      agentId: "signal-resume-review",
-      productId: "signal-resume-review",
-      prompt: "Review the resume in my folder."
-    });
-    assert.match(result.finalText, /finished|ready/i);
-  } finally {
-    await runtime.close();
-  }
-});
+
 
 test("current Agent Corpus entitlements are discoverable and bind the Desktop session", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-agent-corpus-entitlement-"));
