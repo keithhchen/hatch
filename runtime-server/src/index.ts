@@ -13,7 +13,6 @@ import {
 } from "./compaction.js";
 import { createAgentRuntime, type AgentRuntime, type RuntimeSessionSkills } from "./agentRuntime.js";
 import { parseInboundMessage, PROTOCOL_VERSION, type ClientHello, type OutboundMessage, type OutputFinishReason, type RunStart } from "./protocol.js";
-import { loadProjectInstructions } from "./projectDocs.js";
 import { RunStateMachine } from "./runState.js";
 import { ServerToolExecutor } from "./serverTools.js";
 import { SkillRuntime } from "./skillRuntime.js";
@@ -382,7 +381,7 @@ async function handleRuntimeSocket(
             ));
           }
           hello = message;
-          sessionSkills = await buildSessionSkills(hello.workspace_root, Boolean(binding.agentCorpusRoot));
+          sessionSkills = await buildSessionSkills(Boolean(binding.agentCorpusRoot));
           await store.append({
             type: "session.started",
             installation_id: message.installation_id,
@@ -393,7 +392,6 @@ async function handleRuntimeSocket(
             corpus_digest: binding.corpusDigest,
             ...(binding.entitlementId ? { entitlement_id: binding.entitlementId } : {}),
             client_version: message.client_version,
-            workspace_root: hello.workspace_root,
             local_tools: hello.local_tools
           });
           await send({
@@ -703,7 +701,6 @@ async function runOneTurn(
       allowedExternalTools: materializedAgent?.externalTools,
       agentSystemPrompt: materializedAgent?.systemPrompt,
       deliveryAuditContext: materializedAgent?.deliveryAuditContext,
-      workspaceRoot: hello.workspace_root,
       store,
       emit: send,
       createWorkerRuntime: () => createRuntime()
@@ -725,7 +722,6 @@ async function runOneTurn(
       // into the server-private prompt. Product execution remains one Agent
       // session rather than a generic parent delegating to another worker.
       allowSkillRun: !binding.agentCorpusRoot,
-      workspaceRoot: hello.workspace_root,
       persistModelMessage: async (message) => {
         await store.append({
           type: "conversation.model_message",
@@ -806,25 +802,20 @@ async function runOneTurn(
   }
 }
 
-async function buildSessionSkills(
-  workspaceRoot?: string,
-  protectedCorpus = false
-): Promise<RuntimeSessionSkills> {
+async function buildSessionSkills(protectedCorpus = false): Promise<RuntimeSessionSkills> {
   // The Agent Corpus materializer loads matching protected SKILL.md files into the
   // direct server Agent. Do not also expose it as a model-selectable catalog
   // entry: that creates an unnecessary nested skill worker and lets the same
   // method run through two different delivery paths.
-  const records = protectedCorpus ? [] : await discoverSkills({ workspaceRoot });
+  const records = protectedCorpus ? [] : await discoverSkills();
   const visibleRecords = visibleSkillsForSession(records);
   const rendered = await includeSkillInstructions()
     ? renderSkillsSection(visibleRecords, { executionMode: "protected" })
     : emptyRenderedSkills();
-  const projectInstructions = await loadProjectInstructions(workspaceRoot);
   return {
     records,
     visibleRecords,
-    rendered,
-    ...(projectInstructions ? { projectInstructions } : {})
+    rendered
   };
 }
 

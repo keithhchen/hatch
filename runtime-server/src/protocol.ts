@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { Usage } from "@earendil-works/pi-ai";
 
-export const PROTOCOL_VERSION = "0.4";
+export const PROTOCOL_VERSION = "0.5";
 export const MAX_TOOL_RESULT_BYTES = 4 * 1024 * 1024;
 export const ClientToolNameSchema = z.enum([
   "fs.list",
@@ -28,18 +28,10 @@ export const ClientHelloSchema = z.object({
   user_id: z.string().min(1).optional(),
   product_id: z.string().min(1).optional(),
   client_version: z.string().optional(),
-  workspace_root: z.string().min(1).optional(),
   local_tools: z.array(ClientToolNameSchema)
 }).strict().superRefine((message, ctx) => {
   if (!message.auth_token && !message.license_token) {
     ctx.addIssue({ code: "custom", path: ["auth_token"], message: "auth_token is required" });
-  }
-  if (message.local_tools.length > 0 && !message.workspace_root) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["workspace_root"],
-      message: "workspace_root is required when local_tools are declared"
-    });
   }
   // agent_id and creator_id are checked against the server-owned entitlement;
   // a client can never use them to broaden its purchased Agent scope.

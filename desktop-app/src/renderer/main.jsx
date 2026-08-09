@@ -43,7 +43,7 @@ import {
   validateAndSaveAuthSession
 } from "./auth-session.js";
 
-const PROTOCOL_VERSION = "0.4";
+const PROTOCOL_VERSION = "0.5";
 const OUTPUT_FILTERED_COPY = "This response was blocked by the output safety check.";
 const SKILL_ACTIVITY_PART = "hatch.skill_activity";
 const SKILL_RUN_ACTIVITY_PART = "hatch.skill_run_activity";
@@ -148,6 +148,11 @@ function App() {
     const content = textFromAppendMessage(appendMessage).trim();
     if (!content) return;
 
+    // Workspace and permission changes are pending Desktop preferences until a
+    // new turn starts. Tool calls within a turn always use this stable snapshot.
+    workspaceRef.current = workspace;
+    permissionRef.current = permissionMode;
+
     const runId = `run_${Date.now()}`;
     const assistantId = `${runId}_assistant`;
     const startedAt = Date.now();
@@ -172,7 +177,7 @@ function App() {
         content
       }
     });
-  }, [buyerProfile.id, connected, conversationId, send]);
+  }, [buyerProfile.id, connected, conversationId, permissionMode, send, workspace]);
 
   const runtime = useExternalStoreRuntime({
     messages,
@@ -335,7 +340,6 @@ function App() {
         ...(targetAgentId ? { agent_id: targetAgentId } : {}),
         ...(targetCreatorId ? { creator_id: targetCreatorId } : {}),
         client_version: "0.1.0",
-        workspace_root: normalizedWorkspace,
         local_tools: localToolsForPermissionPolicy(permissionRef.current),
       }));
     });
@@ -616,40 +620,23 @@ function App() {
 
   async function switchWorkspace(nextWorkspace) {
     const normalized = await invokeTauri("ensure_workspace", { workspaceRoot: nextWorkspace.trim() });
-    if (normalized === workspaceRef.current && connectedRef.current) return;
+    if (normalized === workspace) return;
 
-    const activeRun = activeRunRef.current;
-    if (activeRun) {
-      send({ type: "turn.cancel", run_id: activeRun.runId, reason: "workspace_changed" });
-      finishAssistant(activeRun.assistantId, "Task stopped because the workspace changed.", "failed");
-      activeRunRef.current = null;
-      localStorage.removeItem(profileStorageKey(buyerProfile.id, "activeRun"));
-      setInterruptedRun(null);
-    }
-    disconnectRuntime();
     setWorkspace(normalized);
-    workspaceRef.current = normalized;
     setWorkspaceDraft(normalized);
     setWorkspaceGranted(true);
+    if (connectionConfigRef.current) {
+      connectionConfigRef.current.workspace = normalized;
+    }
     localStorage.setItem(profileStorageKey(buyerProfile.id, "workspaceRoot"), normalized);
-    setStatus("Switching workspace…");
-    await connectRuntime({ workspace: normalized, conversationId, preserveMessages: true });
+    setStatus("Workspace updated for the next turn");
   }
 
   function updatePermissionMode(nextMode) {
     if (!PERMISSION_MODES.some((mode) => mode.value === nextMode)) return;
-    permissionRef.current = nextMode;
     setPermissionMode(nextMode);
     localStorage.setItem(profileStorageKey(buyerProfile.id, "permissionMode"), nextMode);
-    setStatus(`Permission updated: ${permissionModeLabel(nextMode)}`);
-    void restartRuntimeSession();
-  }
-
-  async function restartRuntimeSession() {
-    const config = connectionConfigRef.current;
-    if (!config || !workspaceGranted) return;
-    disconnectRuntime();
-    await connectRuntime({ ...config, workspace: workspaceRef.current, preserveMessages: true });
+    setStatus(`Permission updated for the next turn: ${permissionModeLabel(nextMode)}`);
   }
 
   function startNewConversation() {

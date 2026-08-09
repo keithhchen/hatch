@@ -85,7 +85,6 @@ async function createHarness(
     serverTools,
     toolBridge: bridge,
     clientTools: ["fs.read"],
-    workspaceRoot: root,
     store,
     emit: async (event) => {
       outbound.push(event);
