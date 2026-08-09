@@ -62,11 +62,12 @@ DEPLOY_USER       # dedicated hatch-deploy user with Docker access
 DEPLOY_SSH_KEY    # private key for DEPLOY_USER
 ```
 
-The application CD builds and pushes immutable images on a GitHub-hosted
-runner. Only the deploy job runs on the Shanghai self-hosted runner, where it
-pulls the prebuilt images and switches the local Compose project. The Shanghai
-server never builds application images. No application secret or long-lived
-GHCR credential is placed in GitHub Actions.
+The application CD uses Buildx, `docker/build-push-action`, and the GitHub
+Actions cache to build and push immutable images on a GitHub-hosted runner.
+Only the deploy job runs on the Shanghai self-hosted runner, where it pulls the
+prebuilt images and switches the local Compose project. The Shanghai server
+never builds application images. No application secret or long-lived GHCR
+credential is placed in GitHub Actions.
 
 ## Release flow
 
