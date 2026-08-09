@@ -22,7 +22,6 @@ describe("consumer product contract", () => {
   it("uses generic agent-home copy while presenting the demo creator", () => {
     expect(PRODUCT_COPY.home).toBe("Your agents");
     expect(DEFAULT_CREATOR_AGENT.name).toBe("Creator Agent");
-    expect(PRODUCT_COPY.workspaceRequired).not.toMatch(/resume/i);
   });
 
   it("renders Creator identity from public Release metadata", () => {

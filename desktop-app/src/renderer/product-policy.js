@@ -32,9 +32,6 @@ function initials(name) {
 
 export const PRODUCT_COPY = Object.freeze({
   home: "Your agents",
-  workspaceRequired: "Choose a workspace to continue",
-  readPolicy: "Hatch can only read files inside the folder you choose.",
-  changePolicy: "File changes and shell commands stay inside your workspace and follow the permission setting you choose.",
   activeRunGuard: "This task is still active. Stop or close it before starting another conversation."
 });
 

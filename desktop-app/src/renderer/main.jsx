@@ -78,7 +78,6 @@ function App() {
   const approvalResolversRef = useRef(new Map());
   const [serverUrl] = useState(DEFAULT_RUNTIME_URL);
   const [workspace, setWorkspace] = useState("");
-  const [workspaceDraft, setWorkspaceDraft] = useState("");
   const [signedIn, setSignedIn] = useState(false);
   const [buyerSession, setBuyerSession] = useState(() => CONFIGURED_AUTH_SESSION ?? loadSavedAuthSession());
   const [creatorAgentEntitlements, setCreatorAgentEntitlements] = useState([]);
@@ -222,7 +221,6 @@ function App() {
     }
     setWorkspace(savedWorkspace);
     workspaceRef.current = savedWorkspace;
-    setWorkspaceDraft(savedWorkspace);
     setWorkspaceGranted(Boolean(savedWorkspace));
     setConversationId(savedConversationId);
     permissionRef.current = nextPermission;
@@ -588,27 +586,11 @@ function App() {
     });
   }
 
-  async function grantWorkspace() {
-    try {
-      const normalized = await invokeTauri("ensure_workspace", { workspaceRoot: workspaceDraft.trim() });
-      setWorkspace(normalized);
-      workspaceRef.current = normalized;
-      setWorkspaceDraft(normalized);
-      setWorkspaceGranted(true);
-      localStorage.setItem(profileStorageKey(buyerProfile.id, "workspaceRoot"), normalized);
-      setStatus("Folder access granted");
-      await connectRuntime({ workspace: normalized, conversationId, preserveMessages: false });
-    } catch (error) {
-      setStatus(errorMessage(error));
-    }
-  }
-
-  async function chooseWorkspace({ activate = workspaceGranted } = {}) {
+  async function chooseWorkspace() {
     try {
       const selected = await invokeTauri("pick_workspace_folder");
       if (!selected) return;
-      setWorkspaceDraft(selected);
-      if (activate) await switchWorkspace(selected);
+      await switchWorkspace(selected);
     } catch (error) {
       setStatus(errorMessage(error));
     }
@@ -629,7 +611,6 @@ function App() {
     disconnectRuntime();
     setWorkspace(normalized);
     workspaceRef.current = normalized;
-    setWorkspaceDraft(normalized);
     setWorkspaceGranted(true);
     localStorage.setItem(profileStorageKey(buyerProfile.id, "workspaceRoot"), normalized);
     setStatus("Switching workspace…");
@@ -963,54 +944,18 @@ function App() {
 
       <section className="chat-shell">
         <header className="chat-header">
-          <div className="chat-context-row">
-            <div className="header-agent">
-              <span className="label">Agent</span>
-              <strong>{creatorAgent.name} · {creatorAgent.creator}</strong>
-            </div>
-            <button
-              aria-label="Choose workspace folder"
-              className="workspace-selector secondary"
-              type="button"
-              onClick={() => void chooseWorkspace()}
-            >
-              <span className="workspace-selector-icon" aria-hidden="true">⌂</span>
-              <span className="workspace-selector-copy">
-                <span className="label">Workspace</span>
-                <strong>{workspaceGranted ? workspaceGrantLabel(workspace) : "Choose a folder"}</strong>
-              </span>
-              <span className="workspace-selector-action">Change</span>
-            </button>
-          </div>
-          <div className="chat-settings-row">
-            <label className="permission-control">
-              <span className="label">Permissions</span>
-              <select
-                aria-label="Workspace permissions"
-                value={permissionMode}
-                onChange={(event) => updatePermissionMode(event.target.value)}
-              >
-                {PERMISSION_MODES.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
-              </select>
-              <small>{permissionModeDetail(permissionMode)}</small>
-            </label>
+          <div className="header-agent">
+            <span className="label">Agent</span>
+            <strong>{creatorAgent.name} · {creatorAgent.creator}</strong>
           </div>
         </header>
 
-        {!workspaceGranted ? (
-          <WorkspaceGrant
-            draft={workspaceDraft}
-            onChoose={() => void chooseWorkspace({ activate: false })}
-            onGrant={() => void grantWorkspace()}
-            status={status}
-          />
-        ) : (
         <ApprovalContext.Provider value={{ requests: approvalRequests, resolveToolApproval }}>
           <AssistantRuntimeProvider runtime={runtime}>
             <ThreadPrimitive.Root className="thread-root">
               <ThreadPrimitive.Viewport className="thread-viewport">
                 <ThreadPrimitive.Empty>
-                  <EmptyThread connected={connected} creatorAgent={creatorAgent} />
+                  <EmptyThread connected={connected} creatorAgent={creatorAgent} workspaceGranted={workspaceGranted} />
                 </ThreadPrimitive.Empty>
                 <ThreadPrimitive.Messages components={{ Message: HatchMessage }} />
               </ThreadPrimitive.Viewport>
@@ -1022,28 +967,57 @@ function App() {
                     onCompositionEnd={endImeComposition}
                     onCompositionStart={startImeComposition}
                     onKeyDownCapture={stopImeEnterSubmit}
-                    placeholder={connected ? `Message ${creatorAgent.name}` : "Connection is restoring…"}
+                    placeholder={workspaceGranted
+                      ? connected ? `Message ${creatorAgent.name}` : "Connection is restoring…"
+                      : "Choose a workspace to begin"}
                     submitMode="enter"
                     rows={1}
                   />
-                  {running ? (
-                    <button
-                      aria-label="Stop streaming"
-                      className="send-button stop-button"
-                      type="button"
-                      onClick={() => void cancelRun()}
-                    >
-                      Stop
-                    </button>
-                  ) : (
-                    <ComposerPrimitive.Send className="send-button">Send</ComposerPrimitive.Send>
-                  )}
+                  <div className="composer-actions">
+                    <div className="composer-settings">
+                      <button
+                        aria-label="Choose workspace folder"
+                        className="composer-control workspace-composer-control"
+                        title={workspace || "Choose a workspace folder"}
+                        type="button"
+                        onClick={() => void chooseWorkspace()}
+                      >
+                        <WorkspaceIcon />
+                        <span className="composer-control-label">
+                          {workspaceGranted ? workspaceGrantLabel(workspace) : "Choose workspace"}
+                        </span>
+                        <span className="composer-control-caret" aria-hidden="true">⌄</span>
+                      </button>
+                      <label className="composer-control permission-composer-control" title={permissionModeDetail(permissionMode)}>
+                        <ShieldIcon />
+                        <select
+                          aria-label="Workspace permissions"
+                          value={permissionMode}
+                          onChange={(event) => updatePermissionMode(event.target.value)}
+                        >
+                          {PERMISSION_MODES.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
+                        </select>
+                        <span className="composer-control-caret" aria-hidden="true">⌄</span>
+                      </label>
+                    </div>
+                    {running ? (
+                      <button
+                        aria-label="Stop streaming"
+                        className="send-button stop-button"
+                        type="button"
+                        onClick={() => void cancelRun()}
+                      >
+                        Stop
+                      </button>
+                    ) : (
+                      <ComposerPrimitive.Send className="send-button">Send</ComposerPrimitive.Send>
+                    )}
+                  </div>
                 </ComposerPrimitive.Root>
               </ThreadPrimitive.ViewportFooter>
             </ThreadPrimitive.Root>
           </AssistantRuntimeProvider>
         </ApprovalContext.Provider>
-        )}
         {interruptedRun ? (
           <div className="recovery-banner" role="alert">
             <div><strong>Your task is safe.</strong><span>It paused before completion. Hatch will restore the session automatically, or you can close it explicitly.</span></div>
@@ -1389,14 +1363,18 @@ function toolEventFromApproval(message) {
   };
 }
 
-function EmptyThread({ connected, creatorAgent }) {
+function EmptyThread({ connected, creatorAgent, workspaceGranted }) {
   return (
     <div className="empty-thread">
       <span className="creator-avatar large">{creatorAgent.creatorInitials}</span>
       <span className="empty-kicker">{creatorAgent.creator}</span>
-      <h2>{connected ? `What would you like to work on?` : "Your conversation is offline."}</h2>
+      <h2>{!workspaceGranted
+        ? "Choose a workspace to begin."
+        : connected ? "What would you like to work on?" : "Your conversation is offline."}</h2>
       <p>
-        {connected
+        {!workspaceGranted
+          ? "Use the workspace control in the message box to choose a folder on this computer."
+          : connected
           ? creatorAgent.description
           : "Your conversation and unfinished task stay here while the connection is restored."}
       </p>
@@ -1411,6 +1389,25 @@ function permissionModeLabel(value) {
 
 function permissionModeDetail(value) {
   return PERMISSION_MODES.find((mode) => mode.value === value)?.detail || "Ask before file changes and shell commands";
+}
+
+function WorkspaceIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20">
+      <path d="M2.75 5.75h5l1.5 1.75h8v7.25a1.5 1.5 0 0 1-1.5 1.5h-13V5.75Z" />
+      <path d="M2.75 5.75v-.5a1.5 1.5 0 0 1 1.5-1.5h3l1.5 2" />
+    </svg>
+  );
+}
+
+function ShieldIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20">
+      <path d="M10 2.5 16 5v4.75c0 3.7-2.5 6.3-6 7.75-3.5-1.45-6-4.05-6-7.75V5l6-2.5Z" />
+      <path d="M10 6.25v4" />
+      <path d="M10 13.5h.01" />
+    </svg>
+  );
 }
 
 function SignInScreen({ profile, onSignIn, status, error }) {
@@ -1462,32 +1459,6 @@ function SignInScreen({ profile, onSignIn, status, error }) {
         <small>Your access stays on this computer until you sign out.</small>
       </section>
     </main>
-  );
-}
-
-function WorkspaceGrant({ draft, onChoose, onGrant, status }) {
-  return (
-    <div className="workspace-gate">
-      <section className="workspace-card">
-        <span className="permission-icon">⌂</span>
-        <span className="eyebrow">One-time setup</span>
-        <h2>{PRODUCT_COPY.workspaceRequired}</h2>
-        <p>{PRODUCT_COPY.readPolicy}</p>
-        <div className="field">
-          <span>Folder</span>
-          <button className={`workspace-picker ${draft ? "selected" : ""}`} type="button" onClick={onChoose}>
-            <span className="workspace-picker-path">{draft || "Choose a folder on this computer"}</span>
-            <span className="workspace-picker-action">Choose folder</span>
-          </button>
-        </div>
-        <button type="button" onClick={onGrant} disabled={!draft.trim()}>Grant access to this folder</button>
-        <div className="permission-policy">
-          <strong>You're in control</strong>
-          <span>{PRODUCT_COPY.changePolicy}</span>
-        </div>
-        {status && status !== "Offline" ? <small className="gate-status">{status}</small> : null}
-      </section>
-    </div>
   );
 }
 
