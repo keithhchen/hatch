@@ -971,6 +971,7 @@ function App() {
 
         {!workspaceGranted ? (
           <WorkspaceOnboarding
+            creatorName={creatorAgent.creator}
             draft={workspaceDraft}
             onChoose={() => void chooseWorkspace({ activate: false })}
             onGrant={() => void grantWorkspace()}
@@ -1432,13 +1433,13 @@ function ShieldIcon() {
   );
 }
 
-function WorkspaceOnboarding({ draft, onChoose, onGrant, status }) {
+function WorkspaceOnboarding({ creatorName, draft, onChoose, onGrant, status }) {
   return (
     <div className="workspace-onboarding">
       <section className="workspace-onboarding-card">
         <div className="workspace-onboarding-icon"><WorkspaceIcon /></div>
         <h2>{PRODUCT_COPY.workspaceRequired}</h2>
-        <p>{PRODUCT_COPY.workspaceScope}</p>
+        <p>{creatorName}&apos;s agent only works with files inside the folder you choose.</p>
 
         <button className={`workspace-picker ${draft ? "selected" : ""}`} type="button" onClick={onChoose}>
           <WorkspaceIcon />

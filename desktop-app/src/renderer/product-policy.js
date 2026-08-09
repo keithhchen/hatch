@@ -33,7 +33,6 @@ function initials(name) {
 export const PRODUCT_COPY = Object.freeze({
   home: "Your agents",
   workspaceRequired: "Choose a workspace to continue",
-  workspaceScope: "Hatch works only with files inside the folder you choose.",
   activeRunGuard: "This task is still active. Stop or close it before starting another conversation."
 });
 
