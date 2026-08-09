@@ -53,8 +53,8 @@ const DEFAULT_AUTH_URL = import.meta.env.VITE_HATCH_AUTH_URL || "https://hatch.t
 const CONFIGURED_AUTH_SESSION = configuredAuthSession();
 const EMPTY_PROFILE = Object.freeze({ id: "anonymous", name: "User", initials: "U" });
 const PERMISSION_MODES = Object.freeze([
-  { value: PERMISSION_POLICIES.ASK_BEFORE_CHANGES, label: "Ask before changes", detail: "Ask before file changes and shell commands" },
-  { value: PERMISSION_POLICIES.ALLOW_CHANGES, label: "Allow changes", detail: "Allow file changes and shell commands" }
+  { value: PERMISSION_POLICIES.ASK_BEFORE_CHANGES, label: "请求批准", detail: "Shell 命令和文件变更前请求批准" },
+  { value: PERMISSION_POLICIES.ALLOW_CHANGES, label: "完全访问", detail: "允许 Shell 命令和文件变更" }
 ]);
 const DEFAULT_PERMISSION_MODE = DEFAULT_PERMISSION_POLICY;
 const ApprovalContext = createContext(null);
@@ -78,6 +78,7 @@ function App() {
   const approvalResolversRef = useRef(new Map());
   const [serverUrl] = useState(DEFAULT_RUNTIME_URL);
   const [workspace, setWorkspace] = useState("");
+  const [workspaceDraft, setWorkspaceDraft] = useState("");
   const [signedIn, setSignedIn] = useState(false);
   const [buyerSession, setBuyerSession] = useState(() => CONFIGURED_AUTH_SESSION ?? loadSavedAuthSession());
   const [creatorAgentEntitlements, setCreatorAgentEntitlements] = useState([]);
@@ -221,6 +222,7 @@ function App() {
     }
     setWorkspace(savedWorkspace);
     workspaceRef.current = savedWorkspace;
+    setWorkspaceDraft(savedWorkspace);
     setWorkspaceGranted(Boolean(savedWorkspace));
     setConversationId(savedConversationId);
     permissionRef.current = nextPermission;
@@ -586,11 +588,27 @@ function App() {
     });
   }
 
-  async function chooseWorkspace() {
+  async function grantWorkspace() {
+    try {
+      const normalized = await invokeTauri("ensure_workspace", { workspaceRoot: workspaceDraft.trim() });
+      setWorkspace(normalized);
+      workspaceRef.current = normalized;
+      setWorkspaceDraft(normalized);
+      setWorkspaceGranted(true);
+      localStorage.setItem(profileStorageKey(buyerProfile.id, "workspaceRoot"), normalized);
+      setStatus("Folder access granted");
+      await connectRuntime({ workspace: normalized, conversationId, preserveMessages: false });
+    } catch (error) {
+      setStatus(errorMessage(error));
+    }
+  }
+
+  async function chooseWorkspace({ activate = workspaceGranted } = {}) {
     try {
       const selected = await invokeTauri("pick_workspace_folder");
       if (!selected) return;
-      await switchWorkspace(selected);
+      setWorkspaceDraft(selected);
+      if (activate) await switchWorkspace(selected);
     } catch (error) {
       setStatus(errorMessage(error));
     }
@@ -611,6 +629,7 @@ function App() {
     disconnectRuntime();
     setWorkspace(normalized);
     workspaceRef.current = normalized;
+    setWorkspaceDraft(normalized);
     setWorkspaceGranted(true);
     localStorage.setItem(profileStorageKey(buyerProfile.id, "workspaceRoot"), normalized);
     setStatus("Switching workspace…");
@@ -950,12 +969,20 @@ function App() {
           </div>
         </header>
 
+        {!workspaceGranted ? (
+          <WorkspaceOnboarding
+            draft={workspaceDraft}
+            onChoose={() => void chooseWorkspace({ activate: false })}
+            onGrant={() => void grantWorkspace()}
+            status={status}
+          />
+        ) : (
         <ApprovalContext.Provider value={{ requests: approvalRequests, resolveToolApproval }}>
           <AssistantRuntimeProvider runtime={runtime}>
             <ThreadPrimitive.Root className="thread-root">
               <ThreadPrimitive.Viewport className="thread-viewport">
                 <ThreadPrimitive.Empty>
-                  <EmptyThread connected={connected} creatorAgent={creatorAgent} workspaceGranted={workspaceGranted} />
+                  <EmptyThread connected={connected} creatorAgent={creatorAgent} />
                 </ThreadPrimitive.Empty>
                 <ThreadPrimitive.Messages components={{ Message: HatchMessage }} />
               </ThreadPrimitive.Viewport>
@@ -967,9 +994,7 @@ function App() {
                     onCompositionEnd={endImeComposition}
                     onCompositionStart={startImeComposition}
                     onKeyDownCapture={stopImeEnterSubmit}
-                    placeholder={workspaceGranted
-                      ? connected ? `Message ${creatorAgent.name}` : "Connection is restoring…"
-                      : "Choose a workspace to begin"}
+                    placeholder={connected ? `Message ${creatorAgent.name}` : "Connection is restoring…"}
                     submitMode="enter"
                     rows={1}
                   />
@@ -1018,6 +1043,7 @@ function App() {
             </ThreadPrimitive.Root>
           </AssistantRuntimeProvider>
         </ApprovalContext.Provider>
+        )}
         {interruptedRun ? (
           <div className="recovery-banner" role="alert">
             <div><strong>Your task is safe.</strong><span>It paused before completion. Hatch will restore the session automatically, or you can close it explicitly.</span></div>
@@ -1363,18 +1389,14 @@ function toolEventFromApproval(message) {
   };
 }
 
-function EmptyThread({ connected, creatorAgent, workspaceGranted }) {
+function EmptyThread({ connected, creatorAgent }) {
   return (
     <div className="empty-thread">
       <span className="creator-avatar large">{creatorAgent.creatorInitials}</span>
       <span className="empty-kicker">{creatorAgent.creator}</span>
-      <h2>{!workspaceGranted
-        ? "Choose a workspace to begin."
-        : connected ? "What would you like to work on?" : "Your conversation is offline."}</h2>
+      <h2>{connected ? "What would you like to work on?" : "Your conversation is offline."}</h2>
       <p>
-        {!workspaceGranted
-          ? "Use the workspace control in the message box to choose a folder on this computer."
-          : connected
+        {connected
           ? creatorAgent.description
           : "Your conversation and unfinished task stay here while the connection is restored."}
       </p>
@@ -1384,11 +1406,11 @@ function EmptyThread({ connected, creatorAgent, workspaceGranted }) {
 }
 
 function permissionModeLabel(value) {
-  return PERMISSION_MODES.find((mode) => mode.value === value)?.label || "Ask before changes";
+  return PERMISSION_MODES.find((mode) => mode.value === value)?.label || "请求批准";
 }
 
 function permissionModeDetail(value) {
-  return PERMISSION_MODES.find((mode) => mode.value === value)?.detail || "Ask before file changes and shell commands";
+  return PERMISSION_MODES.find((mode) => mode.value === value)?.detail || "Shell 命令和文件变更前请求批准";
 }
 
 function WorkspaceIcon() {
@@ -1407,6 +1429,44 @@ function ShieldIcon() {
       <path d="M10 6.25v4" />
       <path d="M10 13.5h.01" />
     </svg>
+  );
+}
+
+function WorkspaceOnboarding({ draft, onChoose, onGrant, status }) {
+  return (
+    <div className="workspace-onboarding">
+      <section className="workspace-onboarding-card">
+        <div className="workspace-onboarding-icon"><WorkspaceIcon /></div>
+        <span className="eyebrow">Workspace setup</span>
+        <h2>{PRODUCT_COPY.workspaceRequired}</h2>
+        <p>{PRODUCT_COPY.workspaceScope}</p>
+
+        <div className="workspace-steps" aria-label="Workspace setup steps">
+          <span className={draft ? "complete" : "active"}><b>1</b> Choose folder</span>
+          <i aria-hidden="true" />
+          <span className={draft ? "active" : ""}><b>2</b> Confirm access</span>
+        </div>
+
+        <button className={`workspace-picker ${draft ? "selected" : ""}`} type="button" onClick={onChoose}>
+          <WorkspaceIcon />
+          <span className="workspace-picker-copy">
+            <small>Workspace folder</small>
+            <strong>{draft ? workspaceGrantLabel(draft) : "Choose a folder on this computer"}</strong>
+          </span>
+          <span className="workspace-picker-action">{draft ? "Change" : "Choose"}</span>
+        </button>
+
+        <div className="workspace-scope-note">
+          <ShieldIcon />
+          <span><strong>You're in control</strong><small>{PRODUCT_COPY.workspaceChangePolicy}</small></span>
+        </div>
+
+        <button className="workspace-grant-button" type="button" onClick={onGrant} disabled={!draft.trim()}>
+          Grant access to this folder
+        </button>
+        {status && status !== "Offline" ? <small className="workspace-onboarding-status">{status}</small> : null}
+      </section>
+    </div>
   );
 }
 
