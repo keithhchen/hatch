@@ -582,8 +582,7 @@ h2 {
 }
 
 .workspace-onboarding-icon svg,
-.workspace-picker svg,
-.workspace-scope-note svg {
+.workspace-picker svg {
   fill: none;
   flex: 0 0 auto;
   height: 19px;
@@ -603,57 +602,6 @@ h2 {
 .workspace-onboarding-card > p {
   color: var(--hatch-text-secondary);
   line-height: 1.55;
-}
-
-.workspace-steps {
-  align-items: center;
-  color: #929994;
-  display: grid;
-  font-size: 11px;
-  font-weight: 700;
-  gap: 10px;
-  grid-template-columns: auto minmax(24px, 1fr) auto;
-  margin: 2px 0;
-}
-
-.workspace-steps span {
-  align-items: center;
-  display: inline-flex;
-  gap: 6px;
-  white-space: nowrap;
-}
-
-.workspace-steps b {
-  align-items: center;
-  border: 1px solid var(--hatch-border);
-  border-radius: 50%;
-  display: inline-flex;
-  font-size: 10px;
-  height: 20px;
-  justify-content: center;
-  width: 20px;
-}
-
-.workspace-steps i {
-  background: var(--hatch-border-subtle);
-  height: 1px;
-}
-
-.workspace-steps .active,
-.workspace-steps .complete {
-  color: var(--hatch-ink);
-}
-
-.workspace-steps .active b {
-  background: var(--hatch-inverse);
-  border-color: var(--hatch-inverse);
-  color: var(--hatch-inverse-text);
-}
-
-.workspace-steps .complete b {
-  background: color-mix(in srgb, var(--hatch-accent) 12%, var(--hatch-panel));
-  border-color: color-mix(in srgb, var(--hatch-accent) 30%, var(--hatch-border));
-  color: var(--hatch-accent);
 }
 
 .workspace-picker {
@@ -678,18 +626,11 @@ h2 {
 }
 
 .workspace-picker-copy {
-  display: grid;
-  gap: 3px;
   min-width: 0;
 }
 
-.workspace-picker-copy small {
-  color: var(--hatch-text-secondary);
-  font-size: 10px;
-  font-weight: 650;
-}
-
 .workspace-picker-copy strong {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -699,33 +640,6 @@ h2 {
   color: var(--hatch-accent);
   font-size: 12px;
   margin-left: auto;
-}
-
-.workspace-scope-note {
-  align-items: center;
-  background: color-mix(in srgb, var(--hatch-accent) 5%, var(--hatch-panel));
-  border-radius: 10px;
-  color: var(--hatch-text-secondary);
-  display: flex;
-  gap: 11px;
-  padding: 12px;
-}
-
-.workspace-scope-note span,
-.workspace-scope-note strong,
-.workspace-scope-note small {
-  display: block;
-}
-
-.workspace-scope-note strong {
-  color: var(--hatch-ink);
-  font-size: 12px;
-}
-
-.workspace-scope-note small {
-  font-size: 11px;
-  line-height: 1.45;
-  margin-top: 3px;
 }
 
 .workspace-grant-button {

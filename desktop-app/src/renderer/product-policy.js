@@ -34,7 +34,6 @@ export const PRODUCT_COPY = Object.freeze({
   home: "Your agents",
   workspaceRequired: "Choose a workspace to continue",
   workspaceScope: "Hatch works only with files inside the folder you choose.",
-  workspaceChangePolicy: "All shell commands and file changes follow the permission setting you choose.",
   activeRunGuard: "This task is still active. Stop or close it before starting another conversation."
 });
 

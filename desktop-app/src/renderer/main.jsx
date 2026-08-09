@@ -1437,29 +1437,16 @@ function WorkspaceOnboarding({ draft, onChoose, onGrant, status }) {
     <div className="workspace-onboarding">
       <section className="workspace-onboarding-card">
         <div className="workspace-onboarding-icon"><WorkspaceIcon /></div>
-        <span className="eyebrow">Workspace setup</span>
         <h2>{PRODUCT_COPY.workspaceRequired}</h2>
         <p>{PRODUCT_COPY.workspaceScope}</p>
-
-        <div className="workspace-steps" aria-label="Workspace setup steps">
-          <span className={draft ? "complete" : "active"}><b>1</b> Choose folder</span>
-          <i aria-hidden="true" />
-          <span className={draft ? "active" : ""}><b>2</b> Confirm access</span>
-        </div>
 
         <button className={`workspace-picker ${draft ? "selected" : ""}`} type="button" onClick={onChoose}>
           <WorkspaceIcon />
           <span className="workspace-picker-copy">
-            <small>Workspace folder</small>
             <strong>{draft ? workspaceGrantLabel(draft) : "Choose a folder on this computer"}</strong>
           </span>
           <span className="workspace-picker-action">{draft ? "Change" : "Choose"}</span>
         </button>
-
-        <div className="workspace-scope-note">
-          <ShieldIcon />
-          <span><strong>You're in control</strong><small>{PRODUCT_COPY.workspaceChangePolicy}</small></span>
-        </div>
 
         <button className="workspace-grant-button" type="button" onClick={onGrant} disabled={!draft.trim()}>
           Grant access to this folder
