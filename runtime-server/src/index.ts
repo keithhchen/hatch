@@ -12,7 +12,7 @@ import {
   type RuntimeCompactionMessage
 } from "./compaction.js";
 import { createAgentRuntime, type AgentRuntime, type RuntimeSessionSkills } from "./agentRuntime.js";
-import { parseInboundMessage, PROTOCOL_VERSION, type ClientHello, type OutboundMessage, type RunStart } from "./protocol.js";
+import { parseInboundMessage, PROTOCOL_VERSION, type ClientHello, type OutboundMessage, type OutputFinishReason, type RunStart } from "./protocol.js";
 import { loadProjectInstructions } from "./projectDocs.js";
 import { RunStateMachine } from "./runState.js";
 import { ServerToolExecutor } from "./serverTools.js";
@@ -32,6 +32,13 @@ import {
   visibleSkillsForSession
 } from "./skills.js";
 import { verifyHatchAuthToken } from "./authToken.js";
+import {
+  createOutputGuardFromEnvironment,
+  GuardedAssistantOutput,
+  PassThroughOutputGuard,
+  type GuardedOutputResult,
+  type OutputGuard
+} from "./outputGuard.js";
 
 export type RuntimeServer = {
   server: http.Server;
@@ -45,6 +52,7 @@ export type RuntimeServerOptions = {
   entitlementResolver?: EntitlementResolver;
   /** Registry-installed current Agent Corpus root, keyed by creator/agent. */
   agentCorpusResolver?: AgentCorpusResolver;
+  outputGuard?: OutputGuard;
   commerceEventSink?: CommerceEventSink;
   /**
    * A local write requires an explicit decision in the Desktop client. Keep
@@ -88,6 +96,7 @@ export async function createRuntimeServerFromEnvironment(
   environment: NodeJS.ProcessEnv = process.env
 ): Promise<RuntimeServer> {
   return createRuntimeServer({
+    outputGuard: createOutputGuardFromEnvironment(environment),
     commerceEventSink: await commerceEventSinkFromEnvironment(environment),
     entitlementResolver: environment.HATCH_REGISTRY_URL?.trim()
       ? new RegistryEntitlementResolver(environment.HATCH_REGISTRY_URL.trim())
@@ -132,6 +141,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   const agentCorpusResolver = options.agentCorpusResolver
     ?? (process.env.HATCH_AGENT_CORPUS_ROOT ? new AgentCorpusResolver(process.env.HATCH_AGENT_CORPUS_ROOT) : undefined);
   const conversationStore = options.conversationStore ?? createConversationStore();
+  const outputGuard = options.outputGuard ?? new PassThroughOutputGuard();
   const server = http.createServer((req, res) => {
     void handleHttpRequest(req, res, entitlementResolver, agentCorpusResolver, conversationStore);
   });
@@ -145,6 +155,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       createRuntime,
       entitlementResolver,
       agentCorpusResolver,
+      outputGuard,
       options.commerceEventSink,
       options.clientToolTimeoutMs ?? clientToolTimeoutMs()
     );
@@ -317,6 +328,7 @@ async function handleRuntimeSocket(
   createRuntime: () => AgentRuntime,
   entitlementResolver?: EntitlementResolver,
   agentCorpusResolver?: AgentCorpusResolver,
+  outputGuard: OutputGuard = new PassThroughOutputGuard(),
   commerceEventSink?: CommerceEventSink,
   toolResultTimeoutMs = clientToolTimeoutMs()
 ): Promise<void> {
@@ -334,15 +346,6 @@ async function handleRuntimeSocket(
     if (socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify(outbound));
     }
-    const conversationId = "run_id" in outbound && outbound.run_id
-      ? activeRunStates.get(outbound.run_id)?.conversationId
-      : undefined;
-    await store.append({
-      type: "runtime.event",
-      conversation_id: conversationId,
-      run_id: "run_id" in outbound ? outbound.run_id : undefined,
-      event: outbound
-    });
   };
   const broker = new ClientToolBroker(send, store, toolResultTimeoutMs);
   const toolBridge = new ToolBridge(broker, serverTools);
@@ -513,7 +516,7 @@ async function handleRuntimeSocket(
           });
           activeRunStates.set(message.run_id, state);
           await state.queued();
-          const task = runOneTurn(boundMessage, hello, sessionSkills, binding, broker, serverTools, toolBridge, runtime, createRuntime, store, state, send, activeSkillRuntimes, commerceEventSink);
+          const task = runOneTurn(boundMessage, hello, sessionSkills, binding, broker, serverTools, toolBridge, runtime, createRuntime, store, state, send, activeSkillRuntimes, outputGuard, commerceEventSink);
           activeRuns.add(task);
           task.finally(() => {
             activeRuns.delete(task);
@@ -587,13 +590,73 @@ async function runOneTurn(
   state: RunStateMachine,
   send: (message: OutboundMessage) => Promise<void>,
   activeSkillRuntimes: Map<string, SkillRuntime>,
+  outputGuard: OutputGuard,
   commerceEventSink?: CommerceEventSink
 ): Promise<void> {
   let skillRuntime: SkillRuntime | undefined;
   let deliveredArtifact: DeliveryArtifact | undefined;
   try {
     await state.start();
+    const priorMessages = await store.readConversation(input.conversation_id);
+    const persistUserMessage = async (): Promise<void> => {
+      await store.append({
+        type: "conversation.model_message",
+        conversation_id: input.conversation_id,
+        run_id: input.run_id,
+        message: input.message
+      });
+    };
+    const guardedOutput = new GuardedAssistantOutput(outputGuard, input.run_id);
     const deliveryBinding = deliveryBindingFromSession(binding);
+    let approvedAssistantText = "";
+    const emitReleased = async (result: GuardedOutputResult): Promise<void> => {
+      for (const content of result.released) {
+        approvedAssistantText += content;
+        await send({
+          type: "assistant.delta",
+          run_id: input.run_id,
+          delta: { kind: "text", content }
+        });
+      }
+    };
+    const commitTerminal = async (
+      finishReason: OutputFinishReason,
+      recordDelivery = true
+    ): Promise<void> => {
+      const content = finishReason === "content_filter"
+        ? '<runtime_status output_guard="blocked" />'
+        : approvedAssistantText;
+      await store.append({
+        type: "conversation.model_message",
+        conversation_id: input.conversation_id,
+        run_id: input.run_id,
+        message: { role: "assistant", content },
+        finish_reason: finishReason
+      });
+      if (finishReason === "stop" && recordDelivery && commerceEventSink && deliveryBinding) {
+        const receipt = await recordCompletedDelivery(
+          commerceEventSink,
+          deliveryBinding,
+          input.conversation_id,
+          input.run_id,
+          deliveredArtifact ?? { type: "message", content: approvedAssistantText }
+        );
+        await send({ type: "delivery.ready", run_id: input.run_id, ...receipt });
+      }
+      await send({ type: "turn.completed", run_id: input.run_id, finish_reason: finishReason });
+      await state.complete();
+    };
+    const sendFixedAssistant = async (content: string): Promise<void> => {
+      const pushed = await guardedOutput.push(content);
+      await emitReleased(pushed);
+      if (pushed.blocked) {
+        await commitTerminal("content_filter", false);
+        return;
+      }
+      const final = await guardedOutput.finish();
+      await emitReleased(final);
+      await commitTerminal(final.blocked ? "content_filter" : "stop", false);
+    };
     if (commerceEventSink && deliveryBinding) {
       const completedDelivery = await findCompletedDelivery(
         commerceEventSink,
@@ -602,44 +665,29 @@ async function runOneTurn(
         input.run_id
       );
       if (completedDelivery) {
+        await persistUserMessage();
         await send({ type: "delivery.ready", run_id: input.run_id, ...completedDelivery });
-        await send({
-          type: "turn.completed",
-          run_id: input.run_id,
-          output: [{ type: "message", content: "This delivery was already completed. The existing artifact has not been changed." }],
-          usage: { input_tokens: 0, output_tokens: 0 }
-        });
-        await state.complete();
+        await sendFixedAssistant("This delivery was already completed. The existing artifact has not been changed.");
         return;
       }
     }
-    let priorMessages = await store.readConversation(input.conversation_id);
     if (input.message.content.trim() === "/compact") {
       await compactAndEmit(input, store, state, send, priorMessages, {
         trigger: "manual",
         phase: "standalone_turn",
         reason: "user_requested"
       });
-      await send({
-        type: "turn.completed",
-        run_id: input.run_id,
-        output: [{
-          type: "message",
-          content: "Compaction complete."
-        }],
-        usage: {
-          input_tokens: 0,
-          output_tokens: 0
-        }
-      });
-      await state.complete();
+      await persistUserMessage();
+      await sendFixedAssistant("Compaction complete.");
       return;
     }
 
     const preTurnCompaction = await compactIfNeeded(input, store, state, send, priorMessages, "pre_turn");
+    let runtimeMessages = priorMessages;
     if (preTurnCompaction) {
-      priorMessages = preTurnCompaction.replacement_history;
+      runtimeMessages = preTurnCompaction.replacement_history;
     }
+    await persistUserMessage();
 
     const materializedAgent = binding.agentCorpusRoot
       ? await materializeAgentCorpus(binding.agentCorpusRoot, input.message.content, hello.local_tools)
@@ -661,14 +709,7 @@ async function runOneTurn(
       createWorkerRuntime: () => createRuntime()
     });
     activeSkillRuntimes.set(input.run_id, skillRuntime);
-    await store.append({
-      type: "message.created",
-      conversation_id: input.conversation_id,
-      run_id: input.run_id,
-      role: input.message.role,
-      content: input.message.content
-    });
-    const messages = [...priorMessages, input.message];
+    const messages = [...runtimeMessages, input.message];
 
     for await (const event of runtime.run(input, {
       clientBroker: broker,
@@ -712,6 +753,15 @@ async function runOneTurn(
       }
       await persistServerToolCallEvent(event, input, store);
       await persistSkillEvent(event, input, store);
+      if (event.type === "assistant.delta" && event.delta.kind === "text") {
+        const result = await guardedOutput.push(event.delta.content);
+        await emitReleased(result);
+        if (result.blocked) {
+          await commitTerminal("content_filter");
+          return;
+        }
+        continue;
+      }
       if (
         event.type === "tool_call.delta"
         && event.locality === "client"
@@ -726,27 +776,14 @@ async function runOneTurn(
         };
       }
       if (event.type === "turn.completed") {
-        const artifactContent = event.output.map((item) => item.content).join("\n");
-        await store.append({
-          type: "message.created",
-          conversation_id: input.conversation_id,
-          run_id: input.run_id,
-          role: "assistant",
-          content: artifactContent
-        });
-        if (commerceEventSink && deliveryBinding) {
-          const receipt = await recordCompletedDelivery(
-            commerceEventSink,
-            deliveryBinding,
-            input.conversation_id,
-            input.run_id,
-            deliveredArtifact ?? { type: "message", content: artifactContent }
-          );
-          await send({ type: "delivery.ready", run_id: input.run_id, ...receipt });
-        }
-        await send(event);
-        await state.complete();
-        continue;
+        const final = await guardedOutput.finish();
+        await emitReleased(final);
+        await commitTerminal(
+          event.finish_reason === "content_filter" || final.blocked
+            ? "content_filter"
+            : "stop"
+        );
+        return;
       }
       await send(event);
     }

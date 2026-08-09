@@ -34,6 +34,12 @@ services:
       HATCH_AGENT_CORPUS_ROOT: /var/lib/hatch/corpora
       HATCH_QDRANT_URL: http://qdrant:6333
       HATCH_COMMERCE_LEDGER_FILE: /var/lib/hatch/commerce/ledger.jsonl
+      HATCH_OUTPUT_GUARD: ${HATCH_OUTPUT_GUARD:-enforce}
+      HATCH_OUTPUT_GUARD_REGION: ${HATCH_OUTPUT_GUARD_REGION:-cn-shanghai}
+      HATCH_OUTPUT_GUARD_ENDPOINT: ${HATCH_OUTPUT_GUARD_ENDPOINT:-green-cip-vpc.cn-shanghai.aliyuncs.com}
+      HATCH_OUTPUT_GUARD_SERVICE: ${HATCH_OUTPUT_GUARD_SERVICE:-response_security_check_pro}
+      ALIBABA_CLOUD_ECS_METADATA: ${ALIBABA_CLOUD_ECS_METADATA:-HatchRuntimeRole}
+      ALIBABA_CLOUD_IMDSV1_DISABLE: ${ALIBABA_CLOUD_IMDSV1_DISABLE:-true}
     volumes:
       - corpus_data:/var/lib/hatch/corpora:ro
       - commerce_data:/var/lib/hatch/commerce

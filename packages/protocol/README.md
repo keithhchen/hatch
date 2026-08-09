@@ -1,6 +1,6 @@
 # Hatch Protocol
 
-Canonical provider-agnostic wire protocol 0.3 and Agent Corpus v1.
+Canonical provider-agnostic wire protocol 0.4 and Agent Corpus v1.
 
 This package owns the JSON Schema for the server/Desktop local-client boundary. The TypeScript runtime server and Rust local runner currently mirror this schema directly; generated TS and Rust types should be introduced from this package before the protocol is expanded further.
 

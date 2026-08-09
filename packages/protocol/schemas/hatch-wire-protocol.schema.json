@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hatch.dev/protocol/hatch-wire-protocol-0.3.schema.json",
+  "$id": "https://hatch.dev/protocol/hatch-wire-protocol-0.4.schema.json",
   "title": "Hatch Wire Protocol",
   "type": "object",
   "oneOf": [
@@ -9,7 +9,7 @@
   ],
   "$defs": {
     "protocolVersion": {
-      "const": "0.3"
+      "const": "0.4"
     },
     "digest": {
       "type": "string",
@@ -496,31 +496,11 @@
     "turnCompleted": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "run_id", "output", "usage"],
+      "required": ["type", "run_id", "finish_reason"],
       "properties": {
         "type": { "const": "turn.completed" },
         "run_id": { "type": "string" },
-        "output": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": ["type", "content"],
-            "properties": {
-              "type": { "const": "message" },
-              "content": { "type": "string" }
-            }
-          }
-        },
-        "usage": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["input_tokens", "output_tokens"],
-          "properties": {
-            "input_tokens": { "type": "integer", "minimum": 0 },
-            "output_tokens": { "type": "integer", "minimum": 0 }
-          }
-        }
+        "finish_reason": { "enum": ["stop", "content_filter"] }
       }
     },
     "deliveryReady": {

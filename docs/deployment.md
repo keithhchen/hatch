@@ -1,6 +1,8 @@
-# Hatch deployment
+# Hatch cloud deployment
 
-Hatch uses two Compose projects on the Shanghai server:
+Hatch currently has one environment: the cloud development Runtime on the
+Shanghai server. Consumer Desktop connects to this Runtime; no local, staging,
+or separate production Runtime exists. The server uses two Compose projects:
 
 ```text
 /opt/hatch/
@@ -19,6 +21,10 @@ Hatch uses two Compose projects on the Shanghai server:
    Never commit this file or put these values in GitHub Actions.
    The file must also contain non-empty `HATCH_REGISTRY_DATABASE_URL`,
    `HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN`, and `HATCH_AUTH_SIGNING_SECRET`.
+   The Runtime also requires `HATCH_OUTPUT_GUARD=enforce`. Attach the
+   project-level `HatchRuntimeRole` to the ECS instance before deploying; the
+   container obtains short-lived credentials from IMDSv2 and uses the Shanghai
+   Guardrails VPC endpoint.
    CD validates these names without printing their values. `QDRANT_IMAGE`
    should be a pinned `qdrant/qdrant:<version>` tag; the default is `v1.14.1`.
 3. Create the external network once:
@@ -47,7 +53,7 @@ Hatch uses two Compose projects on the Shanghai server:
 
 ## GitHub secrets
 
-The application secrets stay only in `/opt/hatch/.env` on the production host.
+The application secrets stay only in `/opt/hatch/.env` on the Shanghai host.
 Configure these repository secrets for the legacy SSH/bootstrap path:
 
 ```text
@@ -56,7 +62,7 @@ DEPLOY_USER       # dedicated hatch-deploy user with Docker access
 DEPLOY_SSH_KEY    # private key for DEPLOY_USER
 ```
 
-The normal application CD runs on the production self-hosted runner. It uses
+The application CD runs on the Shanghai self-hosted runner. It uses
 the ephemeral `GITHUB_TOKEN` to build and push immutable images, then switches
 the local Compose project; no application secret or long-lived GHCR credential
 is placed in GitHub Actions.
@@ -68,7 +74,7 @@ Pushes to `master` run:
 ```text
 GitHub Actions
   → build and test TypeScript services
-  → build runtime, dashboard, and Caddy images on the production runner
+  → build runtime, dashboard, and Caddy images on the Shanghai runner
   → push immutable SHA tags to GHCR
   → switch only Registry, Runtime, Dashboard, and Caddy containers
   → seed the canonical Agent Corpus

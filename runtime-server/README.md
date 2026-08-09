@@ -11,7 +11,9 @@ Desktop local client / Rust runner
 ```
 
 The client never receives provider credentials and never imports an LLM SDK.
-The production local executor is the Desktop/Tauri client and its Rust `local-runner` sidecar. It executes deterministic local tools while agent thinking, sessions, skill loading, and all LLM calls stay on the TypeScript server.
+The local executor is the Desktop/Tauri client and its Rust `local-runner`
+sidecar. It executes deterministic local tools while agent thinking, sessions,
+skill loading, and all LLM calls stay on the single Shanghai cloud Runtime.
 The canonical wire protocol schema lives in `../packages/protocol/schemas/hatch-wire-protocol.schema.json`; the server and Rust runner should mirror that schema until generated TS/Rust types are introduced.
 
 ## Agent Corpus
@@ -24,7 +26,7 @@ only the matching local Skill and its references, and never puts Evals into the
 runtime context. The Corpus declares `hatch.web_search`; the retrieval tool is
 exposed as `hatch.file_search` only when a knowledge provider is configured.
 
-The production retrieval provider is Qdrant plus DashScope. Run Qdrant from
+The retrieval provider is Qdrant plus DashScope. Run Qdrant from
 `infra/docker-compose.rag.yml` and configure `HATCH_QDRANT_URL` (use
 `http://127.0.0.1:6333` when Runtime runs as a host service; use
 `http://qdrant:6333` when it shares the Compose network),
@@ -74,7 +76,9 @@ explicit roots passed by the creator/runtime package
 
 It does not scan workspace `.codex/skills`, workspace ancestor `.codex/skills`, `$CODEX_HOME/skills`, `$CODEX_HOME/skills/.system`, `$CODEX_HOME/plugins/cache`, `/etc/codex/skills`, or `~/.codex` by default. Symlinked skill folders are followed inside configured server-side skill roots.
 
-`HATCH_SKILL_ROOTS` is a path-delimited list of creator/server-owned skill roots. Use it for local development or packaged creator app skills; do not rely on user workspace folders as implicit skill sources.
+`HATCH_SKILL_ROOTS` is a path-delimited list of creator/server-owned skill roots.
+Use it for packaged creator app skills; do not rely on user workspace folders
+as implicit skill sources.
 
 Project instructions are loaded from `AGENTS.md` files along the path from the detected project root to the current workspace root. In each directory, `AGENTS.override.md` wins over `AGENTS.md`; additional fallback filenames can be configured with `project_doc_fallback_filenames`. `project_root_markers` controls project-doc root detection only, not skill discovery. `project_doc_max_bytes` caps the total injected project-doc bytes, and `0` disables project-doc injection.
 
@@ -267,7 +271,14 @@ npm run serve
 
 ## Protocol
 
-Protocol version: `0.3`.
+Protocol version: `0.4`.
+
+Assistant text from the single Shanghai cloud Runtime is released through
+Alibaba AI Guardrails in delayed segments. It runs with
+`HATCH_OUTPUT_GUARD=enforce` and `response_security_check_pro` on the Shanghai
+VPC endpoint. Consumer Desktop never connects to a separate local Runtime. The
+SDK uses the ECS RAM role credential chain; never place a long-lived Alibaba
+AccessKey in Runtime configuration.
 
 Canonical schema: `../packages/protocol/schemas/hatch-wire-protocol.schema.json`.
 

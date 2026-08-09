@@ -217,14 +217,7 @@ export class DeterministicAgentRuntime implements AgentRuntime {
     yield {
       type: "turn.completed",
       run_id: input.run_id,
-      output: [{
-        type: "message",
-        content: finalContent
-      }],
-      usage: {
-        input_tokens: prompt.length,
-        output_tokens: 64
-      }
+      finish_reason: "stop"
     };
   }
 }

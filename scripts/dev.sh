@@ -8,7 +8,7 @@ source "$ROOT/.env"
 set +a
 
 # The product Runtime, Registry, and Corpus storage are cloud-owned. This
-# entrypoint starts only the local Consumer Desktop; it never creates a local
-# Runtime or local Registry that could silently diverge from production.
+# entrypoint starts only the Consumer Desktop; it never creates another Runtime
+# or Registry that could diverge from the single Shanghai cloud environment.
 cd "$ROOT/desktop-app"
 npm run dev

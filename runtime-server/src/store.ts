@@ -1,6 +1,6 @@
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import type { ConversationMessage } from "./protocol.js";
+import type { ConversationMessage, OutputFinishReason } from "./protocol.js";
 import type { CompactionPhase, CompactionReason, CompactionTrigger } from "./compaction.js";
 
 export type RunStatus = "queued" | "running" | "waiting_for_tool" | "compacting" | "completed" | "failed" | "cancelled";
@@ -22,6 +22,7 @@ export type VisibleConversationMessage = {
   role: "user" | "assistant";
   content: string;
   timestamp: string;
+  finish_reason?: OutputFinishReason;
   tool_calls?: VisibleConversationToolCall[];
   skill_events?: VisibleConversationSkillEvent[];
   skill_runs?: VisibleConversationSkillRun[];
@@ -99,6 +100,7 @@ export type StoreEvent =
       conversation_id: string;
       run_id: string;
       message: ConversationMessage;
+      finish_reason?: OutputFinishReason;
       timestamp: string;
     }
   | {
@@ -380,18 +382,52 @@ export class RuntimeStore {
       }
     }
 
-    return events
-      .filter((event): event is Extract<StoreEvent, { type: "message.created" }> => (
-        event.type === "message.created" && event.conversation_id === conversationId
-      ))
-      .map((event) => {
+    const modelVisibleKeys = new Set(
+      events
+        .filter((event): event is Extract<StoreEvent, { type: "conversation.model_message" }> => (
+          event.type === "conversation.model_message"
+          && event.conversation_id === conversationId
+          && (
+            event.message.role === "user"
+            || (event.message.role === "assistant" && event.finish_reason !== undefined)
+          )
+        ))
+        .map((event) => `${event.run_id}:${event.message.role}`)
+    );
+    const visibleEvents = events.filter((event): event is (
+      Extract<StoreEvent, { type: "message.created" }>
+      | Extract<StoreEvent, { type: "conversation.model_message" }>
+    ) => {
+      if (!("conversation_id" in event) || event.conversation_id !== conversationId) return false;
+      if (event.type === "conversation.model_message") {
+        return event.message.role === "user"
+          || (event.message.role === "assistant" && event.finish_reason !== undefined);
+      }
+      if (event.type === "message.created") {
+        return !modelVisibleKeys.has(`${event.run_id}:${event.role}`);
+      }
+      return false;
+    });
+
+    return visibleEvents.map((event) => {
+        const role = event.type === "message.created" ? event.role : event.message.role;
+        if (role !== "user" && role !== "assistant") {
+          throw new Error(`Unsupported visible conversation role: ${role}`);
+        }
         const message: VisibleConversationMessage = {
           run_id: event.run_id,
-          role: event.role,
-          content: event.content,
+          role,
+          content: event.type === "message.created"
+            ? event.content
+            : event.finish_reason === "content_filter"
+              ? ""
+              : event.message.content ?? "",
           timestamp: event.timestamp
         };
-        if (event.role === "assistant") {
+        if (event.type === "conversation.model_message" && event.finish_reason) {
+          message.finish_reason = event.finish_reason;
+        }
+        if (role === "assistant") {
           const toolCalls = [...(toolCallsByRun.get(event.run_id)?.values() ?? [])]
             .sort((left, right) => left.first_timestamp.localeCompare(right.first_timestamp));
           if (toolCalls.length > 0) {

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { Usage } from "@earendil-works/pi-ai";
 
-export const PROTOCOL_VERSION = "0.3";
+export const PROTOCOL_VERSION = "0.4";
 export const MAX_TOOL_RESULT_BYTES = 4 * 1024 * 1024;
 export const ClientToolNameSchema = z.enum([
   "fs.list",
@@ -109,6 +109,8 @@ export type ConversationMessage = {
   }>;
   tool_call_id?: string;
 };
+
+export type OutputFinishReason = "stop" | "content_filter";
 
 export type RuntimeReady = {
   type: "session.ready";
@@ -276,14 +278,7 @@ export type CompactionEvent = {
 export type RunFinal = {
   type: "turn.completed";
   run_id: string;
-  output: Array<{
-    type: "message";
-    content: string;
-  }>;
-  usage: {
-    input_tokens: number;
-    output_tokens: number;
-  };
+  finish_reason: OutputFinishReason;
 };
 
 export type RunError = {

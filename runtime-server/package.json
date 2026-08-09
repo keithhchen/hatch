@@ -9,9 +9,14 @@
     "dev": "node dist/index.js",
     "start": "node dist/index.js",
     "build": "rm -rf dist && tsc -p tsconfig.json",
+    "eval:output-guard": "npm run build && node scripts/eval-output-guard.mjs",
     "test": "npm run build && node --test --test-concurrency=1 dist/*.test.js"
   },
   "dependencies": {
+    "@alicloud/credentials": "^2.4.5",
+    "@alicloud/green20220302": "^3.4.4",
+    "@alicloud/openapi-client": "^0.4.15",
+    "@alicloud/tea-util": "^1.4.11",
     "@earendil-works/pi-agent-core": "0.83.0",
     "@earendil-works/pi-ai": "0.83.0",
     "dotenv": "^17.2.0",

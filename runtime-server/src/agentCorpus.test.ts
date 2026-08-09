@@ -244,7 +244,7 @@ test("current Agent Corpus entitlements are discoverable and bind the Desktop se
       socket.once("message", (data) => resolve(JSON.parse(String(data)) as Record<string, unknown>));
       socket.once("open", () => socket.send(JSON.stringify({
         type: "client.hello",
-        protocol_version: "0.3",
+        protocol_version: "0.4",
         installation_id: "desktop-jordan",
         license_token: "license-jordan",
         entitlement_id: entitlement.entitlement_id,

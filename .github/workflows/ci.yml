@@ -48,7 +48,7 @@ jobs:
         run: npm run build
 
   containers:
-    name: Build production containers
+    name: Build deployable containers
     runs-on: ubuntu-latest
     needs: [runtime, dashboard]
     steps:

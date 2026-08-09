@@ -283,8 +283,8 @@ export class PiAgentRuntime implements AgentRuntime {
       if (savedPath) finalContent = `${finalContent}\n\nCompleted and saved the result to ${savedPath}.`;
       if (deliveryWorkflow) {
         // Delivery drafts are intentionally not streamed before the audit.
-        // Persist only the accepted final answer, never an unsafe candidate.
-        await ctx.persistModelMessage?.({ role: "assistant", content: finalContent });
+        // The unified outbound Guard decides whether the accepted draft can be
+        // emitted and persisted as the terminal assistant message.
         yield {
           type: "assistant.delta",
           run_id: input.run_id,
@@ -302,11 +302,7 @@ export class PiAgentRuntime implements AgentRuntime {
       yield {
         type: "turn.completed",
         run_id: input.run_id,
-        output: [{ type: "message", content: finalContent }],
-        usage: {
-          input_tokens: Number(finalAssistant.usage?.input ?? 0),
-          output_tokens: Number(finalAssistant.usage?.output ?? 0)
-        }
+        finish_reason: "stop"
       };
     } finally {
       agent.abort();
@@ -495,15 +491,17 @@ export class PiAgentRuntime implements AgentRuntime {
         const assistant = event.message as AssistantMessage;
         const converted = fromPiMessage(assistant);
         transcriptMessages.push(converted);
-        const isFinalAssistant = assistant.stopReason === "stop"
-          && !assistant.content.some((block) => block.type === "toolCall");
+        const hasToolCall = assistant.content.some((block) => block.type === "toolCall");
         const hasText = assistant.content.some((block) => block.type === "text" && block.text.trim().length > 0);
-        if (!deliveryWorkflow || !isFinalAssistant) {
-          await ctx.persistModelMessage?.(converted);
+        if (hasToolCall) {
+          // Assistant text is guarded at the unified outbound boundary. Keep
+          // only the tool-call structure in durable model history so a later
+          // blocked text segment cannot race Pi's message_end persistence.
+          await ctx.persistModelMessage?.({ ...converted, content: null });
         }
         if (assistant.stopReason === "error" || assistant.stopReason === "aborted") {
           setTerminalError(new Error(assistant.errorMessage ?? `Pi Agent stopped: ${assistant.stopReason}`));
-        } else if (assistant.stopReason === "stop" && !assistant.content.some((block) => block.type === "toolCall")) {
+        } else if (assistant.stopReason === "stop" && !hasToolCall) {
           if (hasText) setFinalAssistant(assistant);
           else setTerminalError(new Error("Pi Agent returned an empty final response"));
         }

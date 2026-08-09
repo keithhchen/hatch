@@ -42,7 +42,8 @@ import {
   validateAndSaveAuthSession
 } from "./auth-session.js";
 
-const PROTOCOL_VERSION = "0.3";
+const PROTOCOL_VERSION = "0.4";
+const OUTPUT_FILTERED_COPY = "This response was blocked by the output safety check.";
 const SKILL_ACTIVITY_PART = "hatch.skill_activity";
 const SKILL_RUN_ACTIVITY_PART = "hatch.skill_run_activity";
 const LOCAL_TOOL_TIMEOUT_MS = 45_000;
@@ -463,9 +464,14 @@ function App() {
 
     if (message.type === "turn.completed") {
       const activeRun = activeRunRef.current;
-      const finalText = message.output.map((item) => item.content).join("\n");
       if (activeRun) {
-        finishAssistant(activeRun.assistantId, finalText || activeRun.text || "Done.", "completed");
+        finishAssistant(
+          activeRun.assistantId,
+          message.finish_reason === "content_filter"
+            ? OUTPUT_FILTERED_COPY
+            : activeRun.text || "Done.",
+          message.finish_reason === "content_filter" ? "content_filter" : "completed"
+        );
       }
       activeRunRef.current = null;
       localStorage.removeItem(profileStorageKey(buyerProfile.id, "activeRun"));
@@ -802,7 +808,9 @@ function App() {
   function finishAssistant(id, text, statusValue) {
     setMessages((current) => current.map((message) => {
       if (message.id !== id) return message;
-      const parts = assistantParts(message).filter((part) => part.type !== "text");
+      const parts = statusValue === "content_filter"
+        ? []
+        : assistantParts(message).filter((part) => part.type !== "text");
       if (text) {
         parts.push({ type: "text", text });
       }
@@ -1125,12 +1133,13 @@ function historyMessageToThreadMessage(message, index) {
   if (message.role === "user") {
     return makeUserMessage(id, message.content ?? "", createdAt);
   }
-  const activityParts = historyActivityParts(message);
-  const text = message.content ?? "";
+  const filtered = message.finish_reason === "content_filter";
+  const activityParts = filtered ? [] : historyActivityParts(message);
+  const text = filtered ? OUTPUT_FILTERED_COPY : message.content ?? "";
   const lastTool = [...activityParts].reverse().find((part) => part.type === "tool-call");
   const lastSkill = [...activityParts].reverse().find(isSkillActivityPart);
-  return makeAssistantMessage(id, message.content ?? "", {
-    status: "completed",
+  return makeAssistantMessage(id, text, {
+    status: filtered ? "content_filter" : "completed",
     createdAt,
     content: [
       ...activityParts,
@@ -1139,6 +1148,7 @@ function historyMessageToThreadMessage(message, index) {
     custom: {
       runId: message.run_id,
       hydrated: true,
+      ...(filtered ? { outputGuardBlocked: true } : {}),
       ...(lastSkill
         ? {
             latestSkill: {
@@ -1583,7 +1593,10 @@ function AssistantRunHeader() {
   const activeTool = [...toolParts].reverse().find((part) => !part.result && !part.isError);
   const latestTool = [...toolParts].reverse()[0];
   const failed = status?.type === "incomplete" || custom.status === "failed";
-  const summary = failed
+  const filtered = custom.status === "content_filter";
+  const summary = filtered
+    ? `Blocked · ${elapsed}`
+    : failed
     ? `Couldn't finish · ${elapsed}`
     : isRunning && activeTool
       ? `${toolDisplay(activeTool.toolName).running} ${elapsed}`

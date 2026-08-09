@@ -197,8 +197,11 @@ export class SkillRuntime {
     try {
       let output = "";
       for await (const event of runtime.run(workerInput, workerContext)) {
+        if (event.type === "assistant.delta" && event.delta.kind === "text") {
+          output += event.delta.content;
+          continue;
+        }
         if (event.type === "turn.completed") {
-          output = event.output.map((item) => item.content).join("\n");
           continue;
         }
         if (event.type === "tool_call.delta") {

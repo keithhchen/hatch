@@ -107,10 +107,14 @@ function workerDone(output = "worker complete"): AgentRuntime {
   return {
     async *run(input): AsyncIterable<OutboundMessage> {
       yield {
+        type: "assistant.delta",
+        run_id: input.run_id,
+        delta: { kind: "text", content: output }
+      };
+      yield {
         type: "turn.completed",
         run_id: input.run_id,
-        output: [{ type: "message", content: output }],
-        usage: { input_tokens: 0, output_tokens: 1 }
+        finish_reason: "stop"
       };
     }
   };
@@ -198,8 +202,7 @@ test("SkillRuntime cancellation is terminal and ignores a late protected-tool re
         yield {
           type: "turn.completed",
           run_id: input.run_id,
-          output: [{ type: "message", content: "should not complete" }],
-          usage: { input_tokens: 0, output_tokens: 1 }
+          finish_reason: "stop"
         };
       }
     }));

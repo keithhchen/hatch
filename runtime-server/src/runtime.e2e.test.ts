@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
 import { WebSocket } from "ws";
-import { DeterministicAgentRuntime } from "./agentRuntime.js";
+import { DeterministicAgentRuntime, type AgentRuntime } from "./agentRuntime.js";
 import { buildCompactedHistory, RUNTIME_CONTEXT_PREFIX, runtimeMessagesTranscript, SUMMARY_PREFIX } from "./compaction.js";
 import { clientToolTimeoutMs, createRuntimeServer, scopedConversationId, type RuntimeServer } from "./index.js";
 import type { OutboundMessage } from "./protocol.js";
@@ -30,6 +30,7 @@ import {
 import { parseAllowedTools, toolPreapprovedBySkills } from "./skillPermissions.js";
 import { RuntimeStore, type StoreEvent } from "./store.js";
 import { modelToolSpecsForRun, requireClientToolEnabled, requireModelToolDispatch, requireTool } from "./tools.js";
+import type { OutputGuard, OutputGuardInput } from "./outputGuard.js";
 
 let runtimeServer: RuntimeServer | undefined;
 let tempDirs: string[] = [];
@@ -220,6 +221,98 @@ test("runtime server exposes visible conversation history for client hydration",
     ["contract-review", "activated", "explicit", "explicit_mention", undefined, undefined],
     ["contract-review", "invoked", "implicit", "skill_doc_read", "call_file_read", "file_read"]
   ]);
+});
+
+test("Output Guard releases passed segments but commits only a blocked terminal marker", async () => {
+  const dataDir = await tempWorkspace();
+  const store = new RuntimeStore(dataDir);
+  const guardCalls: OutputGuardInput[] = [];
+  const outputGuard: OutputGuard = {
+    async check(input) {
+      guardCalls.push(input);
+      return input.content.includes("SECRET") ? "block" : "pass";
+    }
+  };
+  const runtime: AgentRuntime = {
+    async *run(input) {
+      yield {
+        type: "assistant.delta",
+        run_id: input.run_id,
+        delta: { kind: "text", content: "a".repeat(101) }
+      };
+      yield {
+        type: "assistant.delta",
+        run_id: input.run_id,
+        delta: { kind: "text", content: "SECRET" }
+      };
+      yield { type: "turn.completed", run_id: input.run_id, finish_reason: "stop" };
+    }
+  };
+  runtimeServer = createRuntimeServer({
+    conversationStore: store,
+    createRuntime: () => runtime,
+    outputGuard
+  });
+  const serverUrl = await listen(runtimeServer);
+  const socket = new WebSocket(serverUrl);
+  const messages: OutboundMessage[] = [];
+  socket.on("message", (data) => messages.push(JSON.parse(String(data)) as OutboundMessage));
+  await new Promise<void>((resolve, reject) => {
+    socket.once("open", resolve);
+    socket.once("error", reject);
+  });
+  socket.send(JSON.stringify({
+    type: "client.hello",
+    protocol_version: PROTOCOL_VERSION,
+    installation_id: "guard-test",
+    license_token: "guard-test",
+    local_tools: []
+  }));
+  await waitForSocketMessage(messages, (message) => message.type === "session.ready");
+  socket.send(JSON.stringify({
+    type: "client.message",
+    run_id: "run_guard_block",
+    conversation_id: "guard-conversation",
+    message: { role: "user", content: "Try to disclose the secret." }
+  }));
+
+  const terminal = await waitForSocketMessage(messages, (message) => (
+    message.type === "turn.completed" && message.run_id === "run_guard_block"
+  ));
+  assert.equal(terminal.type, "turn.completed");
+  assert.equal(terminal.finish_reason, "content_filter");
+  assert.equal(
+    messages
+      .filter((message) => message.type === "assistant.delta" && message.delta.kind === "text")
+      .map((message) => message.type === "assistant.delta" ? message.delta.content : "")
+      .join(""),
+    "a".repeat(100)
+  );
+  assert.deepEqual(guardCalls.map(({ chatId, sessionId, done }) => [chatId, sessionId, done]), [
+    ["run_guard_block", "run_guard_block", false],
+    ["run_guard_block", "run_guard_block", true]
+  ]);
+
+  const events = await store.readEvents();
+  assert.ok(!events.some((event) => event.type === "runtime.event" || event.type === "message.created"));
+  const terminalRecords = events.filter((event) => (
+    event.type === "conversation.model_message"
+    && event.run_id === "run_guard_block"
+    && event.message.role === "assistant"
+    && event.finish_reason !== undefined
+  ));
+  assert.equal(terminalRecords.length, 1);
+  assert.equal(terminalRecords[0]?.type, "conversation.model_message");
+  if (terminalRecords[0]?.type === "conversation.model_message") {
+    assert.equal(terminalRecords[0].finish_reason, "content_filter");
+    assert.equal(terminalRecords[0].message.content, '<runtime_status output_guard="blocked" />');
+  }
+  const visible = await store.readVisibleConversation("guard-conversation");
+  assert.deepEqual(visible.map(({ role, content, finish_reason }) => ({ role, content, finish_reason })), [
+    { role: "user", content: "Try to disclose the secret.", finish_reason: undefined },
+    { role: "assistant", content: "", finish_reason: "content_filter" }
+  ]);
+  socket.close();
 });
 
 beforeEach(() => {
@@ -1777,13 +1870,7 @@ test("server rejects concurrent runs for the same conversation across WebSocket 
   const storedMessages = await new RuntimeStore(dataDir).readConversation("conv_busy");
   assert.deepEqual(storedMessages.map((message) => message.content), ["Find Hatch."]);
   const events = await new RuntimeStore(dataDir).readEvents();
-  assert.ok(events.some((event) => (
-    event.type === "runtime.event"
-    && typeof event.event === "object"
-    && event.event !== null
-    && (event.event as Record<string, unknown>).type === "turn.failed"
-    && (event.event as Record<string, unknown>).run_id === "run_busy_2"
-  )));
+  assert.ok(!events.some((event) => event.type === "runtime.event"));
 });
 
 test("server releases a conversation lock when the client disconnects mid-run", async () => {
@@ -1957,23 +2044,7 @@ test("run cancel for an unknown run does not cancel the active run", async () =>
   const events = await new RuntimeStore(dataDir).readEvents();
   assert.ok(events.some((event) => event.type === "turn.state" && event.run_id === "run_cancel_active" && event.to === "cancelled"));
   assert.ok(events.some((event) => event.type === "tool.call" && event.run_id === "run_cancel_active" && event.status === "cancelled"));
-  assert.ok(events.some((event) => (
-    event.type === "runtime.event"
-    && event.run_id === "run_cancel_active"
-    && typeof event.event === "object"
-    && event.event !== null
-    && (event.event as Record<string, unknown>).type === "tool_call.delta"
-    && (event.event as Record<string, unknown>).status === "cancelled"
-    && (event.event as Record<string, unknown>).tool_call_id === toolRequest.tool_call_id
-  )));
-  assert.ok(!events.some((event) => (
-    event.type === "runtime.event"
-    && event.run_id === "run_cancel_active"
-    && typeof event.event === "object"
-    && event.event !== null
-    && (event.event as Record<string, unknown>).type === "turn.failed"
-    && ((event.event as Record<string, unknown>).error as Record<string, unknown> | undefined)?.code === "run_failed"
-  )));
+  assert.ok(!events.some((event) => event.type === "runtime.event"));
 });
 
 
