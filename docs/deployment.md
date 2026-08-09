@@ -62,10 +62,11 @@ DEPLOY_USER       # dedicated hatch-deploy user with Docker access
 DEPLOY_SSH_KEY    # private key for DEPLOY_USER
 ```
 
-The application CD runs on the Shanghai self-hosted runner. It uses
-the ephemeral `GITHUB_TOKEN` to build and push immutable images, then switches
-the local Compose project; no application secret or long-lived GHCR credential
-is placed in GitHub Actions.
+The application CD builds and pushes immutable images on a GitHub-hosted
+runner. Only the deploy job runs on the Shanghai self-hosted runner, where it
+pulls the prebuilt images and switches the local Compose project. The Shanghai
+server never builds application images. No application secret or long-lived
+GHCR credential is placed in GitHub Actions.
 
 ## Release flow
 
@@ -74,7 +75,7 @@ Pushes to `master` run:
 ```text
 GitHub Actions
   → build and test TypeScript services
-  → build runtime, dashboard, and Caddy images on the Shanghai runner
+  → build runtime, dashboard, and Caddy images on a GitHub-hosted runner
   → push immutable SHA tags to GHCR
   → switch only Registry, Runtime, Dashboard, and Caddy containers
   → seed the canonical Agent Corpus
