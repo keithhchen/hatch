@@ -1450,7 +1450,7 @@ function WorkspaceOnboarding({ creatorName, draft, onChoose, onGrant, status }) 
         </button>
 
         <button className="workspace-grant-button" type="button" onClick={onGrant} disabled={!draft.trim()}>
-          Grant access to this folder
+          Start
         </button>
         {status && status !== "Offline" ? <small className="workspace-onboarding-status">{status}</small> : null}
       </section>
