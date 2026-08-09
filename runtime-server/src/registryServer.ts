@@ -147,7 +147,8 @@ async function route(
   if (accessMatch && request.method === "POST") {
     const account = await authenticate(request, context.accounts, context.authSecret, "user");
     if (!account) { sendJson(response, 401, { detail: "A valid user account token is required." }); return; }
-    try { sendJson(response, 201, await context.store.grantAgentAccess(account.id, decodeURIComponent(accessMatch[1]!), decodeURIComponent(accessMatch[2]!))); }
+    const body = await readJsonOptional(request);
+    try { sendJson(response, 201, await context.store.grantAgentAccess(account.id, decodeURIComponent(accessMatch[1]!), decodeURIComponent(accessMatch[2]!), typeof body.order_id === "string" ? body.order_id : undefined)); }
     catch (error) { sendError(response, error, { agent_not_found: [404, "Agent not found."] }); }
     return;
   }
@@ -221,6 +222,14 @@ async function readBytes(request: http.IncomingMessage, max = 64 * 1024 * 1024):
 
 async function readJson(request: http.IncomingMessage): Promise<Record<string, unknown>> {
   const payload = JSON.parse(Buffer.from(await readBytes(request, 1024 * 1024)).toString("utf8")) as unknown;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("JSON body must be an object");
+  return payload as Record<string, unknown>;
+}
+
+async function readJsonOptional(request: http.IncomingMessage): Promise<Record<string, unknown>> {
+  const bytes = await readBytes(request, 1024 * 1024);
+  if (bytes.byteLength === 0) return {};
+  const payload = JSON.parse(Buffer.from(bytes).toString("utf8")) as unknown;
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("JSON body must be an object");
   return payload as Record<string, unknown>;
 }

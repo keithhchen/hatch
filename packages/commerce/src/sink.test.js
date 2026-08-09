@@ -6,7 +6,8 @@ const identity = {
   buyer_id: "buyer_fixture",
   creator_id: "creator_fixture",
   product_id: "product_fixture",
-  agent_id: "agent_fixture"
+  agent_id: "agent_fixture",
+  corpus_digest: `sha256:${"a".repeat(64)}`
 };
 
 async function ledgerThroughArtifact() {

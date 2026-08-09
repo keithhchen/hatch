@@ -52,13 +52,9 @@ services:
     environment:
       HATCH_CREATOR_DASHBOARD_API_HOST: 0.0.0.0
       HATCH_CREATOR_DASHBOARD_API_PORT: 8500
-      HATCH_CREATOR_DASHBOARD_ALLOW_EMPTY_CATALOG: "1"
       HATCH_REGISTRY_URL: http://registry:8100
-      HATCH_CREATOR_PRODUCT_CATALOG_PATH: /var/lib/hatch/dashboard/product-catalog.json
       HATCH_COMMERCE_LEDGER_PATH: /var/lib/hatch/commerce/ledger.jsonl
-      HATCH_CREATOR_PRODUCT_STATE_PATH: /var/lib/hatch/dashboard/product-state.json
     volumes:
-      - ./dashboard:/var/lib/hatch/dashboard
       - commerce_data:/var/lib/hatch/commerce
     networks:
       - hatch_internal

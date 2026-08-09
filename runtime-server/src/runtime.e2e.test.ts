@@ -70,11 +70,11 @@ test("runtime server exposes visible conversation history for client hydration",
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   const store = new RuntimeStore(dataDir);
   const historyBinding = {
-    tenantId: "tenant-history",
+    creatorId: "creator-history",
     userId: "user-history",
     productId: "product-history",
-    releaseId: "release-history",
-    releaseDigest: `sha256:${"1".repeat(64)}`
+    agentId: "agent-history",
+    corpusDigest: `sha256:${"1".repeat(64)}`
   };
   const storedConversationId = scopedConversationId(historyBinding, "desktop-chat");
   await store.append({
@@ -158,11 +158,11 @@ test("runtime server exposes visible conversation history for client hydration",
   historyUrl.protocol = "http:";
   historyUrl.pathname = "/conversations/desktop-chat/messages";
   historyUrl.search = new URLSearchParams({
-    tenant_id: historyBinding.tenantId,
+    creator_id: historyBinding.creatorId,
     user_id: historyBinding.userId,
     product_id: historyBinding.productId,
-    release_id: historyBinding.releaseId,
-    release_digest: historyBinding.releaseDigest
+    agent_id: historyBinding.agentId,
+    corpus_digest: historyBinding.corpusDigest
   }).toString();
   const response = await fetch(historyUrl);
   assert.equal(response.status, 200);

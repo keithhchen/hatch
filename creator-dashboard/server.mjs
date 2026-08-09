@@ -9,7 +9,6 @@ import {
   projectBuyerOrders,
   projectCreatorDashboard
 } from "../packages/commerce/src/index.js";
-import { CreatorProductStore } from "./src/product-store.js";
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 
@@ -17,30 +16,10 @@ export async function createDashboardApp(options = {}) {
   const ledgerPath = options.ledgerPath
     ?? process.env.HATCH_COMMERCE_LEDGER_PATH
     ?? path.join(currentDirectory, ".local-uat", "ledger.jsonl");
-  const productStatePath = options.productStatePath
-    ?? process.env.HATCH_CREATOR_PRODUCT_STATE_PATH
-    ?? path.join(currentDirectory, ".local-uat", "product-state.json");
-  const productCatalogPath = options.productCatalogPath
-    ?? process.env.HATCH_CREATOR_PRODUCT_CATALOG_PATH;
-  if (!productCatalogPath) {
-    throw new Error("Configure HATCH_CREATOR_PRODUCT_CATALOG_PATH with an imported Dashboard product catalog.");
-  }
   const registryUrl = options.registryUrl
     ?? process.env.HATCH_REGISTRY_URL
     ?? "http://127.0.0.1:8100";
-  const registryPublishServiceToken = options.registryPublishServiceToken
-    ?? process.env.HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN;
-  if (!registryPublishServiceToken) {
-    throw new Error("Configure HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN for authenticated Registry publishing.");
-  }
-
-  const [ledger, products] = await Promise.all([
-    CommerceLedger.open({ filePath: ledgerPath }),
-    CreatorProductStore.open({
-      catalogPath: path.resolve(productCatalogPath),
-      statePath: productStatePath
-    })
-  ]);
+  const ledger = await CommerceLedger.open({ filePath: ledgerPath });
   const fetchImpl = options.fetchImpl ?? fetch;
 
   const handler = async (request, response) => {
@@ -105,15 +84,12 @@ export async function createDashboardApp(options = {}) {
         if (!creatorId || !productId) {
           return send(response, 400, { error: { code: "invalid_checkout", message: "creator_id and product_id are required." } });
         }
-        const product = products.getForCreator(creatorId, productId);
-        if (!product) {
-          return send(response, 404, { error: { code: "product_unavailable", message: "This Agent is not currently available for purchase." } });
-        }
         const catalog = await registryRequest(registryUrl, "/v1/catalog/agents", { fetchImpl });
         const agent = catalog.find((entry) => entry.creator_id === creatorId && entry.product_id === productId);
         if (!agent) {
           return send(response, 404, { error: { code: "agent_unavailable", message: "The published Agent could not be found." } });
         }
+        const product = catalogAgentToProduct(agent);
 
         // Payment is intentionally a zero-value checkout for this stage. The
         // order still goes through the same paid/order/entitlement path so a
@@ -125,7 +101,7 @@ export async function createDashboardApp(options = {}) {
           const grant = await registryRequest(
             registryUrl,
             `/v1/user/agents/${encodeURIComponent(creatorId)}/${encodeURIComponent(agent.agent_id)}/access`,
-            { method: "POST", fetchImpl, headers: { authorization: `Bearer ${bearerToken(request)}` } }
+            { method: "POST", body: JSON.stringify({ order_id: existing.order_id }), fetchImpl, headers: { authorization: `Bearer ${bearerToken(request)}` } }
           );
           await recordEntitlementGrant(ledger, existing, grant);
           return send(response, 200, { order: projectBuyerOrders(ledger.listEvents(), authentication.profile.id).find((order) => order.order_id === existing.order_id), payment: zeroPayment(existing.order_id, existing.currency), entitlement: grant });
@@ -137,10 +113,10 @@ export async function createDashboardApp(options = {}) {
           buyer_id: authentication.profile.id,
           buyer_display_name: authentication.profile.display_name,
           creator_id: creatorId,
+          agent_id: agent.agent_id,
           product_id: productId,
           product_name: product.name,
-          release_id: product.release_id,
-          release_digest: product.release_digest,
+          corpus_digest: agent.corpus_digest,
           gross_minor: 0,
           currency: product.currency,
           payment_status: "paid",
@@ -149,7 +125,7 @@ export async function createDashboardApp(options = {}) {
         const grant = await registryRequest(
           registryUrl,
           `/v1/user/agents/${encodeURIComponent(creatorId)}/${encodeURIComponent(agent.agent_id)}/access`,
-          { method: "POST", fetchImpl, headers: { authorization: `Bearer ${bearerToken(request)}` } }
+          { method: "POST", body: JSON.stringify({ order_id: order.order_id }), fetchImpl, headers: { authorization: `Bearer ${bearerToken(request)}` } }
         );
         await recordEntitlementGrant(ledger, order, grant);
         return send(response, 201, {
@@ -184,78 +160,25 @@ export async function createDashboardApp(options = {}) {
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const profile = authentication.profile;
         const projection = projectCreatorDashboard(ledger.listEvents(), profile.id);
+        const creatorProducts = async () => {
+          const agents = await registryRequest(registryUrl, "/v1/creator/agents", {
+            fetchImpl,
+            headers: { authorization: `Bearer ${bearerToken(request)}` }
+          });
+          return Array.isArray(agents) ? agents.map(catalogAgentToProduct) : [];
+        };
         if (request.method === "GET" && url.pathname === "/v1/creator/me") {
           return send(response, 200, publicProfile(profile));
         }
         if (request.method === "GET" && url.pathname === "/v1/creator/overview") {
           return send(response, 200, {
             metrics: projection.metrics,
-            products: products.listForCreator(profile.id),
+            products: await creatorProducts(),
             recent_orders: projection.orders.slice(0, 5)
           });
         }
         if (request.method === "GET" && url.pathname === "/v1/creator/products") {
-          return send(response, 200, { products: products.listForCreator(profile.id) });
-        }
-        const publishMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/publish$/);
-        if (request.method === "POST" && publishMatch) {
-          const productId = decodeURIComponent(publishMatch[1]);
-          const currentProduct = products.getForCreator(profile.id, productId);
-          if (currentProduct?.status === "published") {
-            return send(response, 409, {
-              error: {
-                code: "already_published",
-                message: "This exact product release is already published.",
-                release_id: currentProduct.release_id,
-                release_digest: currentProduct.release_digest,
-                published_at: currentProduct.published_at
-              }
-            });
-          }
-          const publishRequest = products.getPublishRequest(profile.id, productId);
-          if (!publishRequest) {
-            return send(response, 409, {
-              error: {
-                code: "product_not_publishable",
-                message: "This product has not completed its release checks."
-              }
-            });
-          }
-          // Agent Corpus publication is owned by the Factory's --publish flow.
-          // Dashboard only confirms that the canonical TypeScript Registry has
-          // the exact Agent available before recording its own UI state.
-          const catalog = await registryRequest(registryUrl, "/v1/catalog/agents", {
-            fetchImpl,
-            headers: { authorization: `Bearer ${registryPublishServiceToken}` }
-          });
-          const agent = Array.isArray(catalog)
-            ? catalog.find((entry) => entry?.creator_id === profile.id && entry?.product_id === productId)
-            : null;
-          if (!agent) {
-            return send(response, 409, {
-              error: {
-                code: "agent_not_published",
-                message: "Publish this Agent Corpus through the Factory before marking the product published."
-              }
-            });
-          }
-          const registryRecord = {
-            ...publishRequest,
-            creator_id: profile.id,
-            product_id: productId,
-            agent_id: agent.agent_id,
-            corpus_digest: agent.corpus_digest,
-            published_at: agent.published_at ?? new Date().toISOString()
-          };
-          const product = await products.markPublished(registryRecord);
-          return send(response, 200, {
-            product,
-            registry: {
-              release_id: registryRecord.release_id,
-              release_digest: registryRecord.release_digest,
-              published_at: registryRecord.published_at
-            }
-          });
+          return send(response, 200, { products: await creatorProducts() });
         }
         if (request.method === "GET" && url.pathname === "/v1/creator/orders") {
           return send(response, 200, { orders: projection.orders });
@@ -290,7 +213,7 @@ export async function createDashboardApp(options = {}) {
     }
   };
 
-  return { handler, ledger, products };
+  return { handler, ledger };
 }
 
 export async function startDashboardServer(options = {}) {
@@ -311,9 +234,9 @@ async function registryRequest(registryUrl, pathname, options = {}) {
   });
   const payload = await response.json();
   if (!response.ok) {
-    const error = new Error(payload.detail ?? "Registry rejected the release.");
+    const error = new Error(payload.detail ?? "Registry rejected the Agent request.");
     error.status = response.status;
-    error.code = "registry_rejected_release";
+    error.code = "registry_rejected_agent_request";
     throw error;
   }
   return payload;
@@ -366,9 +289,10 @@ function mergeRegistryAgents(access, catalog) {
       product: {
         id: entry.product_id,
         name: entry.product_name,
-        description: entry.product_description || "Work with this Creator Agent in your own files and context."
+        description: entry.product_description || "Work with this Creator Agent in your own files and context.",
+        promise: entry.product_promise || entry.product_description || ""
       },
-      presentation: {}
+      presentation: entry.presentation ?? {}
     }];
   });
 }
@@ -396,10 +320,30 @@ async function recordEntitlementGrant(ledger, order, grant) {
     order_id: order.order_id,
     buyer_id: order.buyer_id,
     creator_id: order.creator_id,
+    agent_id: order.agent_id,
     product_id: order.product_id,
-    release_id: order.release_id,
-    release_digest: order.release_digest
+    corpus_digest: order.corpus_digest
   }, { idempotencyKey: `entitlement:${order.order_id}` });
+}
+
+function catalogAgentToProduct(agent) {
+  const offer = agent?.product_offer ?? {};
+  return {
+    product_id: agent.product_id,
+    creator_id: agent.creator_id,
+    agent_id: agent.agent_id,
+    corpus_digest: agent.corpus_digest,
+    name: agent.product_name,
+    description: agent.product_description ?? "",
+    promise: agent.product_promise ?? agent.product_description ?? "",
+    boundaries: agent.product_boundaries ?? [],
+    status: "published",
+    price_minor: Number.isInteger(offer.amount_minor) ? offer.amount_minor : 0,
+    currency: offer.currency ?? "USD",
+    pricing_model: offer.model ?? null,
+    published_at: agent.published_at ?? null,
+    presentation: agent.presentation ?? {}
+  };
 }
 
 function bearerToken(request) {

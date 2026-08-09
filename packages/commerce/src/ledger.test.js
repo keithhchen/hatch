@@ -16,10 +16,10 @@ async function seedLocalUatCommerce(ledger, fixture = {}) {
     buyerId: "buyer_fixture",
     buyerDisplayName: "Fixture Buyer",
     creatorId: "creator_fixture",
+    agentId: "agent_fixture",
     productId: "product_fixture",
     productName: "Fixture Product",
-    releaseId: "product-fixture@1.0.0",
-    releaseDigest: `sha256:${"a".repeat(64)}`,
+    corpusDigest: `sha256:${"a".repeat(64)}`,
     orderId: "order_fixture",
     entitlementId: "entitlement_fixture",
     ...fixture
@@ -29,10 +29,10 @@ async function seedLocalUatCommerce(ledger, fixture = {}) {
     buyer_id: values.buyerId,
     buyer_display_name: values.buyerDisplayName,
     creator_id: values.creatorId,
+    agent_id: values.agentId,
     product_id: values.productId,
     product_name: values.productName,
-    release_id: values.releaseId,
-    release_digest: values.releaseDigest,
+    corpus_digest: values.corpusDigest,
     gross_minor: 3900,
     currency: "USD"
   }, { idempotencyKey: `order:${values.orderId}:placed` });
@@ -41,9 +41,9 @@ async function seedLocalUatCommerce(ledger, fixture = {}) {
     order_id: values.orderId,
     buyer_id: values.buyerId,
     creator_id: values.creatorId,
+    agent_id: values.agentId,
     product_id: values.productId,
-    release_id: values.releaseId,
-    release_digest: values.releaseDigest
+    corpus_digest: values.corpusDigest
   }, { idempotencyKey: `order:${values.orderId}:entitlement` });
   return values;
 }
@@ -69,9 +69,9 @@ test("one delivery recognizes the exact 90/10 split and projects the same creato
     entitlement_id: fixture.entitlementId,
     buyer_id: fixture.buyerId,
     creator_id: fixture.creatorId,
+    agent_id: fixture.agentId,
     product_id: fixture.productId,
-    release_id: fixture.releaseId,
-    release_digest: fixture.releaseDigest
+    corpus_digest: fixture.corpusDigest
   }, { idempotencyKey: "task:task_jordan_001:started" });
   await ledger.append("artifact.created", {
     artifact_id: "artifact_jordan_001",
@@ -79,9 +79,9 @@ test("one delivery recognizes the exact 90/10 split and projects the same creato
     order_id: fixture.orderId,
     buyer_id: fixture.buyerId,
     creator_id: fixture.creatorId,
+    agent_id: fixture.agentId,
     product_id: fixture.productId,
-    release_id: fixture.releaseId,
-    release_digest: fixture.releaseDigest,
+    corpus_digest: fixture.corpusDigest,
     artifact_digest: "sha256:artifact"
   }, { idempotencyKey: "artifact:artifact_jordan_001:created" });
   await ledger.append("delivery.completed", {
@@ -91,18 +91,18 @@ test("one delivery recognizes the exact 90/10 split and projects the same creato
     order_id: fixture.orderId,
     buyer_id: fixture.buyerId,
     creator_id: fixture.creatorId,
+    agent_id: fixture.agentId,
     product_id: fixture.productId,
-    release_id: fixture.releaseId,
-    release_digest: fixture.releaseDigest
+    corpus_digest: fixture.corpusDigest
   }, { idempotencyKey: "delivery:delivery_jordan_001:completed" });
   await ledger.append("revenue.recognized", {
     recognition_id: "revenue_jordan_001",
     delivery_id: "delivery_jordan_001",
     order_id: fixture.orderId,
     creator_id: fixture.creatorId,
+    agent_id: fixture.agentId,
     product_id: fixture.productId,
-    release_id: fixture.releaseId,
-    release_digest: fixture.releaseDigest,
+    corpus_digest: fixture.corpusDigest,
     gross_minor: 3900,
     creator_share_minor: 3510,
     hatch_share_minor: 390,
@@ -113,9 +113,9 @@ test("one delivery recognizes the exact 90/10 split and projects the same creato
     entitlement_id: fixture.entitlementId,
     order_id: fixture.orderId,
     creator_id: fixture.creatorId,
+    agent_id: fixture.agentId,
     product_id: fixture.productId,
-    release_id: fixture.releaseId,
-    release_digest: fixture.releaseDigest,
+    corpus_digest: fixture.corpusDigest,
     status: "active"
   }]);
   assert.deepEqual(projectCreatorDashboard(ledger.listEvents(), fixture.creatorId).metrics, {
@@ -128,9 +128,9 @@ test("one delivery recognizes the exact 90/10 split and projects the same creato
   const [order] = projectCreatorDashboard(ledger.listEvents(), fixture.creatorId).orders;
   assert.deepEqual({
     creator_id: fixture.creatorId,
+    agent_id: order.agent_id,
     product_id: order.product_id,
-    release_id: order.release_id,
-    release_digest: order.release_digest,
+    corpus_digest: order.corpus_digest,
     order_id: order.order_id,
     entitlement_id: order.entitlement_id,
     task_id: order.task_id,
@@ -140,9 +140,9 @@ test("one delivery recognizes the exact 90/10 split and projects the same creato
     recognition_id: order.recognition_id
   }, {
     creator_id: "creator_fixture",
+    agent_id: "agent_fixture",
     product_id: "product_fixture",
-    release_id: "product-fixture@1.0.0",
-    release_digest: `sha256:${"a".repeat(64)}`,
+    corpus_digest: `sha256:${"a".repeat(64)}`,
     order_id: "order_fixture",
     entitlement_id: "entitlement_fixture",
     task_id: "task_jordan_001",
@@ -170,9 +170,9 @@ test("replaying the same idempotent mutation never duplicates a charge or delive
       buyer_id: fixture.buyerId,
       buyer_display_name: "Jordan Lee",
       creator_id: fixture.creatorId,
+      agent_id: fixture.agentId,
       product_id: fixture.productId,
-      release_id: fixture.releaseId,
-      release_digest: fixture.releaseDigest,
+      corpus_digest: fixture.corpusDigest,
       gross_minor: 9999,
       currency: "USD"
     }, { idempotencyKey: `order:${fixture.orderId}:placed` }),
@@ -188,9 +188,9 @@ test("creator projection isolates another creator's orders", async () => {
     buyer_id: "buyer_other",
     buyer_display_name: "Other Buyer",
     creator_id: "creator_other",
+    agent_id: "agent_other",
     product_id: "product_other",
-    release_id: "release_other_1_0_0",
-    release_digest: "sha256:other",
+    corpus_digest: `sha256:${"c".repeat(64)}`,
     gross_minor: 12500,
     currency: "USD"
   }, { idempotencyKey: "order:order_other:placed" });
@@ -210,9 +210,9 @@ test("revenue cannot be recognized before a delivery or with an invalid split", 
       delivery_id: "missing_delivery",
       order_id: fixture.orderId,
       creator_id: fixture.creatorId,
+      agent_id: fixture.agentId,
       product_id: fixture.productId,
-      release_id: fixture.releaseId,
-      release_digest: fixture.releaseDigest,
+      corpus_digest: fixture.corpusDigest,
       gross_minor: 3900,
       creator_share_minor: 3510,
       hatch_share_minor: 390,
@@ -229,10 +229,10 @@ test("zero-value checkout is still a real order and can project buyer history", 
     buyer_id: "buyer_zero",
     buyer_display_name: "Zero Buyer",
     creator_id: "creator_zero",
+    agent_id: "agent_zero",
     product_id: "product_zero",
     product_name: "Zero Product",
-    release_id: "product-zero@1.0.0",
-    release_digest: `sha256:${"b".repeat(64)}`,
+    corpus_digest: `sha256:${"b".repeat(64)}`,
     gross_minor: 0,
     currency: "USD",
     payment_status: "paid",
@@ -242,7 +242,9 @@ test("zero-value checkout is still a real order and can project buyer history", 
   assert.deepEqual(projectBuyerOrders(ledger.listEvents(), "buyer_zero"), [{
     order_id: "order_zero",
     creator_id: "creator_zero",
+    agent_id: "agent_zero",
     product_id: "product_zero",
+    corpus_digest: `sha256:${"b".repeat(64)}`,
     product_name: "Zero Product",
     gross_minor: 0,
     currency: "USD",

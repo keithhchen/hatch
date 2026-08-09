@@ -20,6 +20,15 @@ export type PublishedAgentCorpus = {
   product_id: string;
   product_name: string;
   product_description?: string;
+  product_promise?: string;
+  product_boundaries: string[];
+  product_offer?: {
+    model?: "per_delivery" | "subscription";
+    amount_minor: number;
+    currency: string;
+    unit?: string;
+  };
+  presentation: Record<string, unknown>;
   knowledge_namespace: string;
   status: "published";
   published_at: string;
@@ -31,6 +40,7 @@ export type AgentAccessGrant = {
   creator_id: string;
   agent_id: string;
   product_id: string;
+  order_id?: string;
   status: "active";
   granted_at: string;
 };
@@ -111,6 +121,10 @@ export class RegistryStoreTs {
         product_id: verified.product.id,
         product_name: verified.product.name,
         ...(verified.product.description ? { product_description: verified.product.description } : {}),
+        ...(verified.product.promise ? { product_promise: verified.product.promise } : {}),
+        product_boundaries: verified.product.boundaries,
+        ...(verified.product.offer ? { product_offer: verified.product.offer } : {}),
+        presentation: verified.product.presentation,
         knowledge_namespace: `${verified.creator.id}:${verified.agentId}`,
         status: "published",
         published_at: new Date().toISOString(),
@@ -138,17 +152,26 @@ export class RegistryStoreTs {
 
   async close(): Promise<void> { await this.pool?.end(); }
 
-  async grantAgentAccess(userId: string, creatorId: string, agentId: string): Promise<AgentAccessGrant> {
+  async grantAgentAccess(userId: string, creatorId: string, agentId: string, orderId?: string): Promise<AgentAccessGrant> {
     const corpus = this.getAgentCorpus(creatorId, agentId);
     if (!corpus) throw new Error("agent_not_found");
     const existing = [...this.access.values()].find((item) => item.user_id === userId && item.creator_id === creatorId && item.agent_id === agentId);
-    if (existing) return existing;
+    if (existing) {
+      if (orderId && !existing.order_id) {
+        const updated = { ...existing, order_id: orderId };
+        this.access.set(updated.entitlement_id, updated);
+        await this.persistAccess(updated);
+        return updated;
+      }
+      return existing;
+    }
     const grant: AgentAccessGrant = {
       entitlement_id: `ent_${randomUUID().replaceAll("-", "")}`,
       user_id: userId,
       creator_id: creatorId,
       agent_id: agentId,
       product_id: corpus.product_id,
+      ...(orderId ? { order_id: orderId } : {}),
       status: "active",
       granted_at: new Date().toISOString(),
     };
@@ -259,6 +282,7 @@ export class RegistryStoreTs {
         product_id TEXT NOT NULL,
         product_name TEXT NOT NULL,
         product_description TEXT,
+        product_json TEXT,
         knowledge_namespace TEXT NOT NULL,
         status TEXT NOT NULL,
         published_at TIMESTAMPTZ NOT NULL,
@@ -270,6 +294,7 @@ export class RegistryStoreTs {
         creator_id TEXT NOT NULL,
         agent_id TEXT NOT NULL,
         product_id TEXT NOT NULL,
+        order_id TEXT,
         status TEXT NOT NULL,
         granted_at TIMESTAMPTZ NOT NULL,
         UNIQUE (user_id, creator_id, agent_id)
@@ -284,6 +309,8 @@ export class RegistryStoreTs {
         status TEXT NOT NULL
       );
       ALTER TABLE tool_connections ADD COLUMN IF NOT EXISTS secret_value TEXT;
+      ALTER TABLE agent_corpora ADD COLUMN IF NOT EXISTS product_json TEXT;
+      ALTER TABLE agent_access ADD COLUMN IF NOT EXISTS order_id TEXT;
       CREATE TABLE IF NOT EXISTS agent_tool_bindings (
         tenant_id TEXT NOT NULL,
         agent_id TEXT NOT NULL,
@@ -297,9 +324,9 @@ export class RegistryStoreTs {
   private async load(): Promise<void> {
     if (this.pool) {
       try {
-        const corpora = await this.pool.query("SELECT creator_id, agent_id, corpus_digest, creator_name, product_id, product_name, product_description, knowledge_namespace, status, published_at FROM agent_corpora");
+        const corpora = await this.pool.query("SELECT creator_id, agent_id, corpus_digest, creator_name, product_id, product_name, product_description, product_json, knowledge_namespace, status, published_at FROM agent_corpora");
         for (const row of corpora.rows) this.corpora.set(key(row.creator_id, row.agent_id), rowToCorpus(row));
-        const access = await this.pool.query("SELECT entitlement_id, user_id, creator_id, agent_id, product_id, status, granted_at FROM agent_access");
+        const access = await this.pool.query("SELECT entitlement_id, user_id, creator_id, agent_id, product_id, order_id, status, granted_at FROM agent_access");
         for (const row of access.rows) this.access.set(row.entitlement_id, rowToAccess(row));
         const connections = await this.pool.query("SELECT id, tenant_id, kind, secret_ref, secret_value, config_json, status FROM tool_connections");
         for (const row of connections.rows) this.toolConnections.set(row.id, rowToToolConnection(row));
@@ -313,7 +340,11 @@ export class RegistryStoreTs {
     if (!this.statePath) return;
     try {
       const state = JSON.parse(await readFile(this.statePath, "utf8")) as RegistryState;
-      for (const corpus of state.agent_corpora ?? []) this.corpora.set(key(corpus.creator_id, corpus.agent_id), corpus);
+      for (const corpus of state.agent_corpora ?? []) this.corpora.set(key(corpus.creator_id, corpus.agent_id), {
+        ...corpus,
+        product_boundaries: corpus.product_boundaries ?? [],
+        presentation: corpus.presentation ?? {}
+      });
       for (const grant of state.agent_access ?? []) this.access.set(grant.entitlement_id, grant);
       for (const connection of state.tool_connections ?? []) this.toolConnections.set(connection.id, { ...connection, secret: connection.secret ?? null });
       for (const binding of state.agent_tool_bindings ?? []) this.toolBindings.set(toolBindingKey(binding.tenant_id, binding.agent_id, binding.tool_id), binding.connection_id);
@@ -325,10 +356,10 @@ export class RegistryStoreTs {
   private async persistCorpus(corpus: PublishedAgentCorpus): Promise<void> {
     this.corpora.set(key(corpus.creator_id, corpus.agent_id), corpus);
     if (this.pool) {
-      await this.pool.query(`INSERT INTO agent_corpora (creator_id, agent_id, corpus_digest, creator_name, product_id, product_name, product_description, knowledge_namespace, status, published_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-        ON CONFLICT (creator_id, agent_id) DO UPDATE SET corpus_digest=EXCLUDED.corpus_digest, creator_name=EXCLUDED.creator_name, product_id=EXCLUDED.product_id, product_name=EXCLUDED.product_name, product_description=EXCLUDED.product_description, knowledge_namespace=EXCLUDED.knowledge_namespace, status=EXCLUDED.status, published_at=EXCLUDED.published_at`,
-        [corpus.creator_id, corpus.agent_id, corpus.corpus_digest, corpus.creator_name, corpus.product_id, corpus.product_name, corpus.product_description ?? null, corpus.knowledge_namespace, corpus.status, corpus.published_at]);
+      await this.pool.query(`INSERT INTO agent_corpora (creator_id, agent_id, corpus_digest, creator_name, product_id, product_name, product_description, product_json, knowledge_namespace, status, published_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        ON CONFLICT (creator_id, agent_id) DO UPDATE SET corpus_digest=EXCLUDED.corpus_digest, creator_name=EXCLUDED.creator_name, product_id=EXCLUDED.product_id, product_name=EXCLUDED.product_name, product_description=EXCLUDED.product_description, product_json=EXCLUDED.product_json, knowledge_namespace=EXCLUDED.knowledge_namespace, status=EXCLUDED.status, published_at=EXCLUDED.published_at`,
+        [corpus.creator_id, corpus.agent_id, corpus.corpus_digest, corpus.creator_name, corpus.product_id, corpus.product_name, corpus.product_description ?? null, JSON.stringify({ promise: corpus.product_promise, boundaries: corpus.product_boundaries, offer: corpus.product_offer, presentation: corpus.presentation }), corpus.knowledge_namespace, corpus.status, corpus.published_at]);
       return;
     }
     await this.persistState();
@@ -336,7 +367,7 @@ export class RegistryStoreTs {
 
   private async persistAccess(grant: AgentAccessGrant): Promise<void> {
     if (this.pool) {
-      await this.pool.query(`INSERT INTO agent_access (entitlement_id, user_id, creator_id, agent_id, product_id, status, granted_at) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (user_id, creator_id, agent_id) DO NOTHING`, [grant.entitlement_id, grant.user_id, grant.creator_id, grant.agent_id, grant.product_id, grant.status, grant.granted_at]);
+      await this.pool.query(`INSERT INTO agent_access (entitlement_id, user_id, creator_id, agent_id, product_id, order_id, status, granted_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (user_id, creator_id, agent_id) DO UPDATE SET order_id=COALESCE(agent_access.order_id, EXCLUDED.order_id)`, [grant.entitlement_id, grant.user_id, grant.creator_id, grant.agent_id, grant.product_id, grant.order_id ?? null, grant.status, grant.granted_at]);
       return;
     }
     await this.persistState();
@@ -374,6 +405,7 @@ export class RegistryStoreTs {
 function key(creatorId: string, agentId: string): string { return `${creatorId}:${agentId}`; }
 function byPublishedAt(a: PublishedAgentCorpus, b: PublishedAgentCorpus): number { return Date.parse(b.published_at) - Date.parse(a.published_at); }
 function rowToCorpus(row: Record<string, any>): PublishedAgentCorpus {
+  const product = typeof row.product_json === "string" ? JSON.parse(row.product_json) : row.product_json ?? {};
   return {
     creator_id: String(row.creator_id),
     agent_id: String(row.agent_id),
@@ -382,6 +414,10 @@ function rowToCorpus(row: Record<string, any>): PublishedAgentCorpus {
     product_id: String(row.product_id),
     product_name: String(row.product_name),
     ...(row.product_description ? { product_description: String(row.product_description) } : {}),
+    ...(product.promise ? { product_promise: String(product.promise) } : {}),
+    product_boundaries: Array.isArray(product.boundaries) ? product.boundaries.map(String) : [],
+    ...(product.offer && typeof product.offer === "object" ? { product_offer: product.offer } : {}),
+    presentation: product.presentation && typeof product.presentation === "object" ? product.presentation : {},
     knowledge_namespace: String(row.knowledge_namespace),
     status: "published",
     published_at: new Date(row.published_at).toISOString(),
@@ -394,6 +430,7 @@ function rowToAccess(row: Record<string, any>): AgentAccessGrant {
     creator_id: String(row.creator_id),
     agent_id: String(row.agent_id),
     product_id: String(row.product_id),
+    ...(row.order_id ? { order_id: String(row.order_id) } : {}),
     status: "active",
     granted_at: new Date(row.granted_at).toISOString(),
   };

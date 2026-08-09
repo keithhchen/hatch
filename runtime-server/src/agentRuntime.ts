@@ -18,7 +18,7 @@ import {
 } from "./tools.js";
 import { toolPreapprovedBySkills } from "./skillPermissions.js";
 import type { ProjectInstructions } from "./projectDocs.js";
-import type { DeliveryWorkflow } from "./release.js";
+import type { DeliveryWorkflow } from "./deliveryAudit.js";
 import { KIMI_TEMPERATURE } from "./kimiProvider.js";
 import {
   detectImplicitSkillInvocationForCommand,
@@ -70,10 +70,9 @@ export type RunContext = {
   skillRunId?: string;
   allowSkillRun?: boolean;
   abortSignal?: AbortSignal;
-  releaseSystemPrompt?: string;
-  releaseAgentCorpus?: boolean;
-  releaseDeliveryWorkflow?: DeliveryWorkflow;
-  releaseDeliveryAuditContext?: {
+  agentSystemPrompt?: string;
+  deliveryWorkflow?: DeliveryWorkflow;
+  deliveryAuditContext?: {
     productPromise: string;
     productBoundaries: string[];
     protectedKnowledge: string;
@@ -296,7 +295,7 @@ type DeliveryAuditInput = {
   candidateKind: "final_response" | "file_write";
   messages: PiModelMessage[];
   systemPrompt: string;
-  auditContext?: RunContext["releaseDeliveryAuditContext"];
+  auditContext?: RunContext["deliveryAuditContext"];
   signal?: AbortSignal;
 };
 
@@ -306,7 +305,7 @@ export async function produceAuditedFinal(input: {
   draft: string;
   messages: PiModelMessage[];
   systemPrompt: string;
-  auditContext?: RunContext["releaseDeliveryAuditContext"];
+  auditContext?: RunContext["deliveryAuditContext"];
   signal?: AbortSignal;
 }): Promise<string> {
   let candidate = input.draft;
@@ -356,7 +355,7 @@ export async function auditProposedDeliveryTool(input: {
   arguments: Record<string, unknown>;
   messages: PiModelMessage[];
   systemPrompt: string;
-  auditContext?: RunContext["releaseDeliveryAuditContext"];
+  auditContext?: RunContext["deliveryAuditContext"];
   signal?: AbortSignal;
 }): Promise<Record<string, unknown> | undefined> {
   if (input.toolName === "file_patch" || input.toolName === "fs.patch") {
@@ -364,7 +363,7 @@ export async function auditProposedDeliveryTool(input: {
       status: "error",
       error: {
         code: "delivery_audit_requires_full_content",
-        message: "This Release requires a claim audit over the complete proposed artifact. Read the current file and propose the full replacement with file_write."
+        message: "This Agent requires a claim audit over the complete proposed artifact. Read the current file and propose the full replacement with file_write."
       }
     };
   }
@@ -398,7 +397,7 @@ export async function auditProposedDeliveryTool(input: {
     status: "error",
     error: {
       code: "delivery_claim_audit_failed",
-      message: "The proposed artifact was not delivered because it contains claims that are not safe under the Release contract. Revise the complete artifact and call file_write again.",
+      message: "The proposed artifact was not delivered because it contains claims that are not safe under the Agent contract. Revise the complete artifact and call file_write again.",
       violations: audit.claims
         .filter((claim) => claim.verdict !== "entailed")
         .map(({ claim, verdict, evidence }) => ({ claim, verdict, evidence }))
@@ -487,7 +486,7 @@ async function reviseDeliveryCandidate(input: {
   audit: DeliveryAuditResult;
   messages: PiModelMessage[];
   systemPrompt: string;
-  auditContext?: RunContext["releaseDeliveryAuditContext"];
+  auditContext?: RunContext["deliveryAuditContext"];
   safePartial: boolean;
   signal?: AbortSignal;
 }): Promise<string> {
@@ -703,8 +702,8 @@ function firstLocalFilePath(searchResult: Record<string, unknown>): string | und
   return typeof path === "string" && path.length > 0 ? path : undefined;
 }
 
-export function buildRuntimeSystemPrompt(releaseSystemPrompt?: string, deliveryWorkflow?: DeliveryWorkflow): string {
-  if (releaseSystemPrompt) {
+export function buildRuntimeSystemPrompt(agentSystemPrompt?: string, deliveryWorkflow?: DeliveryWorkflow): string {
+  if (agentSystemPrompt) {
     return [
       "You are the server-side runtime for one exact, server-pinned Hatch Creator Agent.",
       "The private Creator product instructions below define the work. Execute them directly in this session; do not delegate them to skill_run or describe private implementation to the Consumer.",
@@ -713,7 +712,7 @@ export function buildRuntimeSystemPrompt(releaseSystemPrompt?: string, deliveryW
         `Deliver complete but concise work. The final artifact must remain fully auditable: use no more than ${deliveryWorkflow.audit.coverage.max_units} distinct factual or evaluative clauses, remove repetition rather than omitting material findings, and preserve every necessary caveat.`
       ] : []),
       "",
-      releaseSystemPrompt
+      agentSystemPrompt
     ].join("\n");
   }
   return buildBaseSystemPrompt();

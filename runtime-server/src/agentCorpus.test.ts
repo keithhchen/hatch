@@ -179,7 +179,7 @@ test("Agent Corpus resolver loads the Registry current creator/agent path", asyn
   await assert.rejects(new AgentCorpusResolver(root).resolve("other-creator", "signal-resume-review"), /missing|ENOENT|Agent Corpus/);
 });
 
-test("Runtime can run a current Agent Corpus without a Creator Release resolver", async () => {
+test("Runtime can run a current Agent Corpus directly", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-agent-corpus-runtime-"));
   const workspace = await mkdtemp(path.join(os.tmpdir(), "hatch-agent-corpus-workspace-"));
   tempRoots.push(root, workspace);
@@ -306,6 +306,7 @@ test("current Agent Corpus entitlements are discoverable and bind the Desktop se
     });
     assert.equal(ready.type, "session.ready");
     assert.equal(ready.agent_id, "signal-resume-review");
+    assert.match(String(ready.corpus_digest), /^sha256:[a-f0-9]{64}$/);
     socket.close();
   } finally {
     await runtime.close();

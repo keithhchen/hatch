@@ -29,7 +29,6 @@ function App() {
   const [agents, setAgents] = useState([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(Boolean(token));
-  const [publishing, setPublishing] = useState(false);
 
   async function loadDashboard(activeToken = token) {
     const [nextProfile, nextOverview, nextAgents] = await Promise.all([
@@ -81,22 +80,6 @@ function App() {
     }
   }
 
-  async function publish(product) {
-    setPublishing(true);
-    setError("");
-    try {
-      await dashboardRequest(`/v1/creator/products/${encodeURIComponent(product.product_id)}/publish`, {
-        method: "POST",
-        token
-      });
-      await loadDashboard(token);
-    } catch (nextError) {
-      setError(nextError.message);
-    } finally {
-      setPublishing(false);
-    }
-  }
-
   async function logout() {
     try {
       await dashboardRequest("/v1/auth/logout", { method: "POST", token });
@@ -133,8 +116,8 @@ function App() {
       </aside>
       <main className="dashboard-main">
         {error ? <div className="notice" role="alert">{error}</div> : null}
-        {active === "Home" ? <Home profile={profile} overview={overview} agents={agents} onPublish={publish} publishing={publishing} /> : null}
-        {active === "Products" ? <Products products={overview.products} agents={agents} onPublish={publish} publishing={publishing} /> : null}
+        {active === "Home" ? <Home profile={profile} overview={overview} agents={agents} /> : null}
+        {active === "Products" ? <Products products={overview.products} agents={agents} /> : null}
         {active === "Orders" ? <Orders orders={overview.recent_orders} /> : null}
         {active === "Payouts" ? <Payouts metrics={overview.metrics} /> : null}
       </main>
@@ -168,9 +151,10 @@ function Loading() {
   return <div className="loading-page"><span className="loading-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><span className="hatch-wordmark">Hatch.</span></span><p>Opening your workspace…</p></div>;
 }
 
-function Home({ profile, overview, agents, onPublish, publishing }) {
+function Home({ profile, overview, agents }) {
   const product = overview.products[0];
   const hasRevenue = overview.metrics.gross_minor > 0;
+  if (!product) return <><header className="page-heading home-heading"><span className="eyebrow">Good afternoon</span><h1>{profile.display_name.split(" ")[0]}, publish your first Agent Corpus.</h1></header><AgentList agents={agents} /></>;
   return (
     <>
       <header className="page-heading home-heading">
@@ -179,7 +163,7 @@ function Home({ profile, overview, agents, onPublish, publishing }) {
         <p>{homeStatusDescription(product)}</p>
       </header>
       <section className="home-grid">
-        <ProductCard product={product} onPublish={onPublish} publishing={publishing} featured />
+        <ProductCard product={product} featured />
         <article className="earnings-card">
           <span className="eyebrow">Your earnings</span>
           <strong>{formatMoney(overview.metrics.creator_share_minor)}</strong>
@@ -193,11 +177,11 @@ function Home({ profile, overview, agents, onPublish, publishing }) {
   );
 }
 
-function Products({ products, agents, onPublish, publishing }) {
+function Products({ products, agents }) {
   return (
     <section>
       <header className="page-heading"><span className="eyebrow">Your products</span><h1>Products your audience can use.</h1><p>Each product is published under your name and priced by you.</p></header>
-      <div className="product-list">{products.map((product) => <ProductCard key={product.product_id} product={product} onPublish={onPublish} publishing={publishing} />)}</div>
+      <div className="product-list">{products.map((product) => <ProductCard key={product.product_id} product={product} />)}</div>
       <AgentList agents={agents} />
     </section>
   );
@@ -356,19 +340,13 @@ function MyAgents({ library, orders, onOpen }) {
   );
 }
 
-function ProductCard({ product, onPublish, publishing, featured = false }) {
-  const readyToPublish = product.status === "ready_to_publish";
-  const published = product.status === "published";
+function ProductCard({ product, featured = false }) {
   return (
     <article className={`product-card ${featured ? "featured" : ""}`}>
-      <div className="product-topline"><span className={`status-chip ${product.status}`}>{productStatusLabel(product.status)}</span><span>v{product.version}</span></div>
+      <div className="product-topline"><span className={`status-chip ${product.status}`}>{productStatusLabel(product.status)}</span><span>{product.agent_id}</span></div>
       <h2>{product.name}</h2>
       <p>{product.promise}</p>
       <div className="product-price"><strong>{formatMoney(product.price_minor, product.currency)}</strong><span>{pricingModelLabel(product.pricing_model)}</span></div>
-      <button className={readyToPublish ? "primary inline" : "secondary"} disabled={!readyToPublish || publishing || published} onClick={() => onPublish(product)}>
-        {publishing && readyToPublish ? "Publishing…" : readyToPublish ? "Publish product" : published ? "Live" : "Preparing product"}
-        <span aria-hidden="true">→</span>
-      </button>
     </article>
   );
 }
@@ -401,7 +379,7 @@ function homeStatusPhrase(status) {
 
 function homeStatusDescription(product) {
   if (product.status === "published") return "Your audience can now buy it directly from you.";
-  if (product.status === "ready_to_publish") return "Your release is ready. Publish it whenever you are ready to share it.";
+  if (product.status === "ready_to_publish") return "Your Agent Corpus is ready to publish whenever you are ready to share it.";
   return "Hatch is turning your source material into a product your audience can use.";
 }
 

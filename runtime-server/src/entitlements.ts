@@ -2,8 +2,6 @@ import { readFile } from "node:fs/promises";
 import { z } from "zod";
 import { verifyHatchAuthToken } from "./authToken.js";
 
-const DigestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
-
 const EntitlementCommonSchema = z.object({
   entitlement_id: z.string().min(1),
   order_id: z.string().min(1).optional(),
@@ -13,21 +11,12 @@ const EntitlementCommonSchema = z.object({
   status: z.literal("active")
 }).strict();
 
-const ReleaseEntitlementBindingSchema = EntitlementCommonSchema.extend({
-  tenant_id: z.string().min(1),
-  release_id: z.string().min(1),
-  release_digest: DigestSchema,
-}).strict();
-
 const AgentCorpusEntitlementBindingSchema = EntitlementCommonSchema.extend({
   creator_id: z.string().min(1),
   agent_id: z.string().min(1),
 }).strict();
 
-export const EntitlementBindingSchema = z.union([
-  ReleaseEntitlementBindingSchema,
-  AgentCorpusEntitlementBindingSchema
-]);
+export const EntitlementBindingSchema = AgentCorpusEntitlementBindingSchema;
 
 // Keep the application-facing type intentionally flat: callers can inspect
 // the optional binding selector without carrying the Zod union through every
@@ -39,33 +28,15 @@ export type EntitlementBinding = {
   creator_id: string;
   product_id: string;
   status: "active";
-  tenant_id?: string;
-  release_id?: string;
-  release_digest?: string;
-  agent_id?: string;
+  agent_id: string;
 };
 
-export function isAgentCorpusEntitlement(
-  binding: EntitlementBinding
-): binding is EntitlementBinding & { agent_id: string } {
-  return "agent_id" in binding;
-}
-
-export function isReleaseEntitlement(
-  binding: EntitlementBinding
-): binding is EntitlementBinding & { tenant_id: string; release_id: string; release_digest: string } {
-  return typeof binding.release_id === "string" && typeof binding.release_digest === "string";
-}
-
-const StoredEntitlementSchema = z.union([
-  ReleaseEntitlementBindingSchema.extend({ license_token: z.string().min(1) }).strict(),
-  AgentCorpusEntitlementBindingSchema.extend({ license_token: z.string().min(1) }).strict()
-]);
+const StoredEntitlementSchema = AgentCorpusEntitlementBindingSchema.extend({ license_token: z.string().min(1) }).strict();
 
 export type EntitlementLookup = {
   /** Signed Registry account token. */
   authToken?: string;
-  /** Legacy name retained only for local fixtures while callers migrate. */
+  /** Development-only opaque token used by local fixtures. */
   licenseToken?: string;
   entitlementId?: string;
   installationId?: string;
@@ -79,7 +50,7 @@ export interface EntitlementResolver {
 /**
  * Development adapter for an exported commerce entitlement projection.
  * The file is server-side and maps opaque license tokens to active bindings;
- * neither the Desktop nor the Creator Release can choose a digest.
+ * neither the Desktop nor an Agent Corpus can choose a broader scope.
  */
 export class FileEntitlementResolver implements EntitlementResolver {
   constructor(private readonly filePath: string) {}

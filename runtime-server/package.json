@@ -6,11 +6,6 @@
   "scripts": {
     "serve": "npm run build && node dist/index.js",
     "serve:registry": "npm run build && node dist/registryServer.js",
-    "demo:consumer": "npm run build && node dist/consumerDemo.js",
-    "proof:connected": "npm run build && node dist/connectedProofRunner.js",
-    "uat:release": "npm run build && node dist/runtimeUatRunner.js",
-    "factory:skill": "npm run build && node dist/factorySkillExecutor.js",
-    "compare:blind": "npm run build && node dist/blindComparisonRunner.js",
     "dev": "node dist/index.js",
     "client": "node dist/localHarness.js",
     "start": "node dist/index.js",

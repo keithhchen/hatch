@@ -114,7 +114,7 @@ export class PiAgentRuntime implements AgentRuntime {
     let compacting = false;
     let hasExecutedTool = false;
     const requestedFilePath = requestedOutputPath(input.message.content);
-    const deliveryWorkflow = ctx.releaseDeliveryWorkflow;
+    const deliveryWorkflow = ctx.deliveryWorkflow;
     const deliveryReviewer = deliveryWorkflow ? await createDeliveryReviewer() : undefined;
     const transcriptMessages: ConversationMessage[] = [];
     const completedArtifactPaths: string[] = [];
@@ -150,7 +150,7 @@ export class PiAgentRuntime implements AgentRuntime {
       // summary delimiters.
       convertToLlm,
       initialState: {
-        systemPrompt: buildRuntimeSystemPrompt(ctx.releaseSystemPrompt, ctx.releaseDeliveryWorkflow),
+        systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, ctx.deliveryWorkflow),
         model,
         thinkingLevel: "high",
         messages: [...contextMessages, ...storedMessages],
@@ -164,8 +164,8 @@ export class PiAgentRuntime implements AgentRuntime {
             toolName: toolCall.name,
             arguments: args as Record<string, unknown>,
             messages: auditMessagesForRun(ctx, transcriptMessages, undefined),
-            systemPrompt: buildRuntimeSystemPrompt(ctx.releaseSystemPrompt, deliveryWorkflow),
-            auditContext: ctx.releaseDeliveryAuditContext,
+            systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, deliveryWorkflow),
+            auditContext: ctx.deliveryAuditContext,
             signal
           });
           return rejection
@@ -261,8 +261,8 @@ export class PiAgentRuntime implements AgentRuntime {
           workflow: deliveryWorkflow,
           draft: draftContent,
           messages: auditMessagesForRun(ctx, transcriptMessages, finalAssistant),
-          systemPrompt: buildRuntimeSystemPrompt(ctx.releaseSystemPrompt, deliveryWorkflow),
-          auditContext: ctx.releaseDeliveryAuditContext,
+          systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, deliveryWorkflow),
+          auditContext: ctx.deliveryAuditContext,
           signal: ctx.abortSignal
         })
         : draftContent;
@@ -446,7 +446,7 @@ export class PiAgentRuntime implements AgentRuntime {
     setActiveSkills: (skills: ActivatedSkill[]) => void;
     getResourceRoots: () => string[];
     setHasExecutedTool: () => void;
-    deliveryWorkflow?: RunContext["releaseDeliveryWorkflow"];
+    deliveryWorkflow?: RunContext["deliveryWorkflow"];
     transcriptMessages: ConversationMessage[];
     completedArtifactPaths: string[];
     seenImplicitInvocations: Set<string>;
@@ -660,7 +660,7 @@ function auditMessagesForRun(
     ? transcriptMessages.slice(0, -1)
     : transcriptMessages;
   return [
-    { role: "system", content: buildRuntimeSystemPrompt(ctx.releaseSystemPrompt, ctx.releaseDeliveryWorkflow) },
+    { role: "system", content: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, ctx.deliveryWorkflow) },
     ...buildRuntimeContextMessages(
       ctx.sessionSkills.projectInstructions,
       ctx.sessionSkills.rendered.section,

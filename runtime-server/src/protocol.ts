@@ -24,12 +24,9 @@ export const ClientHelloSchema = z.object({
   license_token: z.string().min(1).optional(),
   entitlement_id: z.string().min(1).optional(),
   creator_id: z.string().min(1).optional(),
-  tenant_id: z.string().min(1).optional(),
   agent_id: z.string().min(1).optional(),
   user_id: z.string().min(1).optional(),
   product_id: z.string().min(1).optional(),
-  release_id: z.string().min(1).optional(),
-  release_digest: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(),
   client_version: z.string().optional(),
   workspace_root: z.string().min(1).optional(),
   local_tools: z.array(ClientToolNameSchema)
@@ -44,19 +41,8 @@ export const ClientHelloSchema = z.object({
       message: "workspace_root is required when local_tools are declared"
     });
   }
-  if ((message.release_id === undefined) !== (message.release_digest === undefined)) {
-    ctx.addIssue({ code: "custom", path: ["release_id"], message: "release_id and release_digest must be supplied together" });
-  }
-  if (message.entitlement_id && (message.release_id || message.release_digest)) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["entitlement_id"],
-      message: "entitlement_id cannot be combined with client-selected Creator Release fields"
-    });
-  }
-  // An entitlement may point at either a legacy Release or the Registry's
-  // current Agent Corpus. In the latter case agent_id is a selector that is
-  // checked against the server-side entitlement, never trusted by itself.
+  // agent_id and creator_id are checked against the server-owned entitlement;
+  // a client can never use them to broaden its purchased Agent scope.
 });
 
 export const ClientMessageSchema = z.object({
@@ -128,12 +114,10 @@ export type RuntimeReady = {
   type: "session.ready";
   accepted_protocol_version: typeof PROTOCOL_VERSION;
   creator_id?: string;
-  tenant_id?: string;
   user_id: string;
   product_id: string;
-  release_id?: string;
-  release_digest?: string;
   agent_id?: string;
+  corpus_digest: string;
   entitlement_id?: string;
   creator_agent?: {
     creator: { id: string; name: string };

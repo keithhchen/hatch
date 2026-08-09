@@ -29,7 +29,16 @@ export const AgentCorpusSchema = z.object({
   product: z.object({
     id: z.string().min(1),
     name: z.string().min(1),
-    description: z.string().min(1).optional()
+    description: z.string().min(1).optional(),
+    promise: z.string().min(1).optional(),
+    boundaries: z.array(z.string().min(1)).default([]),
+    offer: z.object({
+      model: z.enum(["per_delivery", "subscription"]).optional(),
+      amount_minor: z.number().int().nonnegative(),
+      currency: z.string().regex(/^[A-Z]{3}$/),
+      unit: z.string().min(1).optional()
+    }).strict().optional(),
+    presentation: z.record(z.string(), z.unknown()).default({})
   }).strict(),
   instructions: z.object({ system: AssetSchema }).strict(),
   skills: z.array(z.object({
@@ -68,6 +77,7 @@ export type CreatorCorpusTool = {
 export type ResolvedAgentCorpus = {
   root: string;
   corpus: AgentCorpus;
+  digest: string;
 };
 
 /**
@@ -84,7 +94,7 @@ export class AgentCorpusResolver {
     if (corpus.creator.id !== creatorId || corpus.agent_id !== agentId) {
       throw new Error("Agent Corpus binding does not match the requested creator and agent");
     }
-    return { root: corpusRoot, corpus };
+    return { root: corpusRoot, corpus, digest: await agentCorpusDigest(corpusRoot, corpus) };
   }
 
   async list(creatorId: string): Promise<ResolvedAgentCorpus[]> {
@@ -418,6 +428,25 @@ export async function loadAgentCorpus(root: string): Promise<AgentCorpus> {
     if (digest !== asset.sha256) throw new Error(`Agent Corpus asset digest mismatch: ${asset.path}`);
   }
   return corpus;
+}
+
+/** Computes the same installed-Corpus digest that Registry records at publish time. */
+export async function agentCorpusDigest(root: string, corpus: AgentCorpus): Promise<string> {
+  const manifestPath = await containedPath(root, "agent.json");
+  const manifestDigest = `sha256:${createHash("sha256").update(await readFile(manifestPath)).digest("hex")}`;
+  const assets = [
+    corpus.instructions.system,
+    ...corpus.skills.flatMap((skill) => [skill.instruction, ...skill.references.map((reference) => reference.asset)]),
+    ...corpus.knowledge.documents,
+    ...corpus.evaluations.synthetic_qa,
+    ...corpus.evaluations.held_out
+  ];
+  const rows: Array<[string, string]> = [
+    ["agent.json", manifestDigest],
+    ...assets.map((asset): [string, string] => [asset.path.replaceAll(path.sep, "/"), asset.sha256])
+  ];
+  rows.sort((left, right) => left[0].localeCompare(right[0]));
+  return `sha256:${createHash("sha256").update(JSON.stringify(rows)).digest("hex")}`;
 }
 
 function findForbiddenKeys(value: unknown, forbidden: Set<string>, found: Set<string> = new Set()): string[] {

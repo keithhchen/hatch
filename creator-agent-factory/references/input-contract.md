@@ -71,7 +71,7 @@ The heading is context; the first non-empty paragraph after it is the exact clai
 - optional `few_shot_ids`: QA ids selected as positive runtime demonstrations;
   only `direct` and `composed` examples are eligible. Boundary, out-of-scope,
   and held-out cases remain evaluation material.
-- `held_out_evals`: release-only prompts that never appear in synthetic QA or
+- `held_out_evals`: evaluation-only prompts that never appear in synthetic QA or
   few-shots. Each declares observable checks and the failure risk of a generic
   baseline.
 
@@ -84,4 +84,4 @@ Answers are synthetic expansion. Do not write them as Creator quotations. A boun
 
 `work/evidence-ledger.md` and `work/semantic-audit.md` are recommended private
 records. They document what the Agent retained, rejected, inferred, and repaired;
-the compiler copies them only into Factory work and never into the Release.
+the compiler copies them only into Factory work and never into the Agent Corpus.

@@ -6,39 +6,20 @@ This is the clean TypeScript implementation of the Hatch runtime loop:
 server agent runtime
   owns LLM calls, skill catalog, web/API tools
 
-local harness
+Desktop local client / Rust runner
   owns filesystem, shell, git, workspace containment
 ```
 
 The client never receives provider credentials and never imports an LLM SDK.
-The TypeScript `localHarness` in this package is a scriptable dev/test harness for the wire protocol. The production local executor target is the Rust `local-runner`/Tauri sidecar: it should execute deterministic local tools only, while agent thinking, sessions, skill loading, and all LLM calls stay on the TypeScript server.
+The production local executor is the Desktop/Tauri client and its Rust `local-runner` sidecar. It executes deterministic local tools while agent thinking, sessions, skill loading, and all LLM calls stay on the TypeScript server.
 The canonical wire protocol schema lives in `../packages/protocol/schemas/hatch-wire-protocol.schema.json`; the server and Rust runner should mirror that schema until generated TS/Rust types are introduced.
 
-## Creator Releases
-
-Set `HATCH_RELEASES_DIR` to a server-owned Release store. An explicit 0.3
-`client.hello` binds `tenant_id`, `user_id`, `product_id`, `release_id`, and
-`release_digest`. The Runtime resolves exactly
-`$HATCH_RELEASES_DIR/<release_id>/<release_digest>/{public,private}.json`,
-recomputes the canonical public/private digest, verifies every protected Skill
-and RAG asset digest, and rejects product or identity mismatches. Contract v1
-also rejects undeclared files and accepts only the exact five-file execution
-package: `public.json`, `private.json`, `skills/<product-id>/SKILL.md`,
-`rag/documents.json`, and `rag/chunks.json`. Factory review records, source
-material, Evals, and traces never cross into Runtime. The private
-system prompt and protected Skill root are materialized only in server memory;
-only the public binding is returned in `session.ready`.
-
-Local legacy harness sessions without explicit binding receive deterministic
-local-UAT defaults. Published Release sessions must always send the explicit
-binding and configure the Release store.
-
-## Current Agent Corpus
+## Agent Corpus
 
 The current publish path can resolve a runtime-free Corpus directly from
 `HATCH_AGENT_CORPUS_ROOT/<creator_id>/<agent_id>`. A `client.hello` that carries
-`creator_id` and `agent_id` loads that current Corpus without requiring a legacy
-Creator Release. The server always loads `instructions/system.md`, activates
+`creator_id` and `agent_id` loads that current Corpus directly. The server
+always loads `instructions/system.md`, activates
 only the matching local Skill and its references, and never puts Evals into the
 runtime context. The Corpus declares `hatch.web_search`; the retrieval tool is
 exposed as `hatch.file_search` only when a knowledge provider is configured.
@@ -157,9 +138,9 @@ conversation: current user message
 
 AGENTS.md project instructions use a `# AGENTS.md instructions ... <INSTRUCTIONS>` user-context shape. The public skill catalog is injected as server-authored `user` context prefixed with `HATCH RUNTIME CONTEXT`; private skill instructions are injected only into the worker context. Context compaction excludes rebuilt server context messages because the server reconstructs them from fixed session state.
 
-Model-visible function tools are generated from the canonical runtime tool spec registry in `tools.ts`. Server tools are always owned by the runtime server. Client tools are exposed only when the `client.hello.local_tools` session capability says the local harness can execute them.
+Model-visible function tools are generated from the canonical runtime tool spec registry in `tools.ts`. Server tools are always owned by the runtime server. Client tools are exposed only when the `client.hello.local_tools` session capability says the Desktop client can execute them.
 `file_read` and `file_list` are local workspace tools for the main agent. Protected skill resource paths are available only to SkillRuntime through the same ToolBridge and are never sent to the client as server-hosted skill content.
-`shell_exec` accepts an optional `justification` field as model-visible reasoning context for the command. Local tools currently run with `auto` permission when the client declares the capability; the local Rust harness still enforces workspace containment and deterministic execution policy.
+`shell_exec` accepts an optional `justification` field as model-visible reasoning context for the command. Local tools currently run with `auto` permission when the client declares the capability; the Rust `local-runner` still enforces workspace containment and deterministic execution policy.
 SkillRuntime loads the private `SKILL.md` and its resource manifest server-side. Relative paths under `references/`, `scripts/`, and `assets/` resolve against the worker's private skill directory. The main conversation receives only the worker result and redacted `skill.run` status.
 
 Activated Skill `allowed-tools` frontmatter is parsed and preserved for protocol fidelity and future policy tightening. In the current max-permission runtime, local tools already run as `auto`, so `allowed-tools` does not add permission beyond `client.hello.local_tools`, does not grant server tools, and never bypasses workspace containment. Current mappings remain intentionally small for when approval policies are reintroduced: `Read`/`List`/`Search` map to read-only `fs.*` tools, `Write` maps to `fs.write`, `Edit` maps to `fs.patch`, and `Bash(git:*)` matches only `shell.exec` commands whose first command token is `git`.
@@ -169,8 +150,8 @@ The tool call loop is:
 ```text
 model tool_call
 -> tool_call.delta requested
--> server tool execution or tool_call.request to local harness
--> tool_call.result from local harness when client-local
+-> server tool execution or tool_call.request to the Desktop client
+-> tool_call.result from the Desktop client when client-local
 -> tool_call.delta completed/failed/cancelled
 -> workspace.diff when a completed local write/patch returns file changes
 -> Pi tool result appended to the Agent transcript
@@ -198,10 +179,10 @@ HATCH_RUNTIME_DATA_DIR=/path/to/runtime-data
 ```
 
 The client declares local workspace capability once in `client.hello` with `workspace_root` and `local_tools`; duplicate `client.hello` messages on the same connection are rejected so capability cannot be reset mid-session. Each `client.message` sends only the current user message plus `conversation_id`. `local_tools: []` is allowed for a no-local-workspace session; any declared `fs.*`, `shell.exec`, or `git.diff` capability requires `workspace_root`. The server hydrates prior user/assistant messages from this store before each agent run.
-Explicitly bound conversation history is namespaced by the complete tenant,
-user, product, Release ID, and digest tuple. `GET /conversations/:id/messages`
-requires those five values as query parameters (or `X-Hatch-*` headers), so an
-identical conversation ID in another tenant or Release cannot hydrate it.
+Explicitly bound conversation history is namespaced by creator, user, Agent,
+product, and Corpus digest. `GET /conversations/:id/messages` requires that
+binding as query parameters, so an identical conversation ID under another
+Agent Corpus cannot hydrate it.
 `local_tools` is limited to local client capabilities (`fs.*`, `shell.exec`, `git.diff`). Server-side tools such as `web_search`, `api_request`, and `mcp_call` are owned and exposed by the server.
 `tool_call.result` is accepted only after `client.hello` and only as a response to a pending `tool_call.request`; `status: ok` must include `result`, and `status: error` must include `error`.
 Run-scoped `runtime.event` records and structured `tool.call` records include `conversation_id` when they occur inside a conversation run. Client-local tools are recorded by the broker, and server-local tools are recorded from the emitted `tool_call.delta` stream, so the append-only log can be audited by conversation without relying on client-side transcript state. Store appends are serialized per runtime store, and outbound protocol events are persisted as `runtime.event` before the server advances the next state transition.
@@ -234,109 +215,18 @@ Auto compaction uses Pi's model profile context window and `DEFAULT_COMPACTION_S
 
 ## Run Locally
 
-Terminal 1:
+Start the Runtime server with:
 
 ```bash
 npm run build
 npm run serve
 ```
 
-Terminal 2:
-
-```bash
-npm run client -- \
-  --server ws://127.0.0.1:8400/runtime \
-  --workspace /path/to/workspace \
-  --conversation my-session
-```
-
-This opens an interactive chat:
-
-```text
-you> Read README.md and summarize it.
-assistant> ...
-tools> shell.exec
-```
-
-The dev harness declares the full local tool set by default, including `shell.exec`. Pass `--no-shell` only when you need to simulate a restricted local client.
-
-Use `/exit` or `/quit` to close the chat.
-
-By default this package's dev harness executes local tools with Node.js so tests can run without the desktop app. To run the production-shaped local path, point the harness at the Rust sidecar:
-
-```bash
-cargo build --manifest-path ../local-runner/Cargo.toml
-export HATCH_LOCAL_RUNNER_BIN=../local-runner/target/debug/hatch-local-runner
-npm run client -- \
-  --server ws://127.0.0.1:8400/runtime \
-  --workspace /path/to/workspace
-```
-
-The same setting can be passed for a single run with `--rust-runner /path/to/hatch-local-runner`.
-
-For one-shot scripted runs, pass `--prompt`:
-
-```bash
-npm run client -- --trace \
-  --server ws://127.0.0.1:8400/runtime \
-  --workspace /path/to/workspace \
-  --prompt "Find Hatch. Save a summary."
-```
-
-For the connected V1 proof, the Consumer run is allowed to create an order
-only after the exact immutable Release resolves as `published` from the live
-Registry. The runner checks this before creating its output directory, Ledger,
-order, or entitlement:
-
-```bash
-npm run proof:connected -- \
-  --factory-root /absolute/path/to/completed-factory-output \
-  --execute \
-  --registry-url http://127.0.0.1:8100 \
-  --output-root /absolute/path/to/empty-consumer-proof \
-  --workspace-input /absolute/path/to/jordan-workspace \
-  --prompt "Review my resume for the target role and save the completed review." \
-  --rust-runner-bin /absolute/path/to/hatch-local-runner
-```
-
-The resulting `workflow-result.json` records both the Registry publication and
-the later `order.placed` timestamp, so a post-hoc publication cannot make an
-out-of-order demo appear connected.
-
-Before publication, run the exact immutable Release against input-only held-out
-cases through the real Runtime, live Kimi K2.6 candidate, and delivery audit.
-The command independently resolves the Release digest, materializes the private
-Skill/RAG/few-shots, opens normal entitlement-bound Runtime sessions, and writes
-an atomic Factory-compatible `runtime-results.json`:
-
-```bash
-export LLM_API_KEY=... # inject at execution time; never commit it
-npm run uat:release -- \
-  --release /absolute/factory-root/release/<product-id>@<version>/sha256:<digest> \
-  --inputs /absolute/factory-root/review/held-out-inputs.json \
-  --output /absolute/factory-root/review/runtime-results.json \
-  --workspace-input /absolute/path/to/seed-workspace \
-  --profile-input /absolute/path/to/user-profile.md \
-  --model-profile kimi-k2.6
-```
-
-Add `--preflight` to validate the exact Release, held-outs, workspace/profile
-paths, delivery workflow, and Kimi-only profile without reading an API key or
-making a network request. By default the executable creates a temporary exact
-entitlement. To exercise an existing server-side entitlement projection, pass
-all three together: `--entitlements <json> --license-token <opaque-token>
---entitlement-id <id>`. The entitlement must already pin the same Creator,
-product, Release ID, and digest. `--rust-runner-bin <binary>` switches local
-tool execution from the Node test harness to the production-shaped Rust
-sidecar.
-
-This runner does not reuse `semantic_uat` candidate outputs. Its report records
-the exact server-pinned Release ID/digest, Kimi-only runtime profile, private
-materialization proof (hash only), delivery-audit activation, and each
-Consumer-visible result, workspace inputs, and observed local tool
-requests/results. Local tool execution and artifact delivery are then
-proved separately by `proof:connected` with the Rust runner and a fresh output
-directory; an old proof directory is not valid evidence for a new Release.
+For local filesystem, shell, and Git operations, connect the Desktop/Tauri
+client. The Runtime-side protocol boundary is `client.hello` plus
+`client.message`, with local tool execution carried by
+`tool_call.request`/`tool_call.result`; the Desktop client and Rust
+`local-runner` own those operations.
 
 ## Configure The Runtime
 
@@ -364,7 +254,7 @@ HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN=<runtime-service-token>
 ```
 
 Spec v1 uses Kimi K2.6 exclusively for Creator execution, delivery review, and context compaction. Thinking is always enabled through Pi's normal thinking-level option; temperature follows the provider contract. Pi owns the model profile, context estimate, compaction policy, retries, and output behavior. There is no alternate-model fallback. Use Kimi's official `LLM_API_KEY` variable for credentials.
-Release-level Evals are the default Creator quality gate. Ordinary Creator products stream Kimi's actual response to the Consumer Desktop. `HATCH_RUNTIME_DELIVERY_AUDIT=enforce` is an optional regulated-deployment override: it performs a second Kimi claim audit before delivery and intentionally withholds text streaming until that audit finishes.
+Corpus Evals are the default Creator quality gate. Ordinary Creator products stream Kimi's actual response to the Consumer Desktop. `HATCH_RUNTIME_DELIVERY_AUDIT=enforce` is an optional regulated-deployment override: it performs a second Kimi claim audit before delivery and intentionally withholds text streaming until that audit finishes.
 `OPENAI_BASE_URL` falls back to `https://api.moonshot.cn/v1` and is restricted to official Moonshot endpoints (plus loopback test doubles). Use the `.ai` endpoint only with a matching international Kimi key. If any model override is present, it must be exactly `kimi-k2.6` or startup fails closed.
 `HATCH_MCP_SERVERS` is optional. When set, the model can call `mcp_call`; the server sends MCP `tools/call` JSON-RPC requests and the client never sees MCP credentials.
 `hatch.web_search` is a Hatch built-in tool. With `HATCH_WEB_SEARCH_PROVIDER=bocha`, Runtime uses the existing CWebSearch contract (`query`, `freshness`, `summary`, `count`) and normalizes Bocha's response to Hatch's stable `{ query, results }` shape. `HATCH_WEB_SEARCH_API_KEY` stays server-side and never enters the Agent Corpus or Desktop. Creator-owned HTTP/MCP tools are resolved exclusively through the Registry Control Plane using `HATCH_REGISTRY_URL` and `HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN`; the Runtime never reads connection URLs or credentials from the Corpus or local environment.

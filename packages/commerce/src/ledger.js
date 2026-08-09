@@ -123,9 +123,9 @@ export function projectBuyerEntitlements(events, buyerId) {
       entitlement_id: event.entitlement_id,
       order_id: event.order_id,
       creator_id: event.creator_id,
+      agent_id: event.agent_id,
       product_id: event.product_id,
-      release_id: event.release_id,
-      release_digest: event.release_digest,
+      corpus_digest: event.corpus_digest,
       status: "active"
     }));
 }
@@ -139,7 +139,9 @@ export function projectBuyerOrders(events, buyerId) {
     .map((event) => ({
       order_id: event.order_id,
       creator_id: event.creator_id,
+      agent_id: event.agent_id,
       product_id: event.product_id,
+      corpus_digest: event.corpus_digest,
       product_name: event.product_name ?? null,
       gross_minor: event.gross_minor,
       currency: event.currency,
@@ -189,8 +191,8 @@ export function projectCreatorDashboard(events, creatorId) {
       creator_share_minor: refundedOrders.has(order.order_id) ? 0 : revenue?.creator_share_minor ?? 0,
       hatch_share_minor: refundedOrders.has(order.order_id) ? 0 : revenue?.hatch_share_minor ?? 0,
       occurred_at: order.occurred_at,
-      release_id: order.release_id,
-      release_digest: order.release_digest,
+      agent_id: order.agent_id,
+      corpus_digest: order.corpus_digest,
       entitlement_id: entitlement?.entitlement_id ?? null,
       task_id: task?.task_id ?? null,
       artifact_id: artifact?.artifact_id ?? null,
@@ -232,36 +234,36 @@ function validateEvent(event, events) {
     }
   }
   if (event.event_type === "order.placed") {
-    requireFields(event, ["order_id", "buyer_id", "creator_id", "product_id", "release_id", "release_digest", "currency"]);
+    requireFields(event, ["order_id", "buyer_id", "creator_id", "agent_id", "product_id", "corpus_digest", "currency"]);
     requireNonNegativeInteger(event.gross_minor, "gross_minor");
   }
   if (event.event_type === "entitlement.granted") {
-    requireFields(event, ["entitlement_id", "order_id", "buyer_id", "creator_id", "product_id", "release_id", "release_digest"]);
+    requireFields(event, ["entitlement_id", "order_id", "buyer_id", "creator_id", "agent_id", "product_id", "corpus_digest"]);
     const order = requirePrior(events, "order.placed", "order_id", event.order_id);
-    requireIdentityMatch(order, event, ["buyer_id", "creator_id", "product_id", "release_id", "release_digest"]);
+    requireIdentityMatch(order, event, ["buyer_id", "creator_id", "agent_id", "product_id", "corpus_digest"]);
   }
   if (event.event_type === "task.started") {
-    requireFields(event, ["task_id", "order_id", "entitlement_id", "buyer_id", "creator_id", "product_id", "release_id", "release_digest"]);
+    requireFields(event, ["task_id", "order_id", "entitlement_id", "buyer_id", "creator_id", "agent_id", "product_id", "corpus_digest"]);
     const entitlement = requirePrior(events, "entitlement.granted", "entitlement_id", event.entitlement_id);
-    requireIdentityMatch(entitlement, event, ["order_id", "buyer_id", "creator_id", "product_id", "release_id", "release_digest"]);
+    requireIdentityMatch(entitlement, event, ["order_id", "buyer_id", "creator_id", "agent_id", "product_id", "corpus_digest"]);
   }
   if (event.event_type === "artifact.created") {
-    requireFields(event, ["artifact_id", "task_id", "order_id", "buyer_id", "creator_id", "product_id", "release_id", "release_digest", "artifact_digest"]);
+    requireFields(event, ["artifact_id", "task_id", "order_id", "buyer_id", "creator_id", "agent_id", "product_id", "corpus_digest", "artifact_digest"]);
     const task = requirePrior(events, "task.started", "task_id", event.task_id);
-    requireIdentityMatch(task, event, ["order_id", "buyer_id", "creator_id", "product_id", "release_id", "release_digest"]);
+    requireIdentityMatch(task, event, ["order_id", "buyer_id", "creator_id", "agent_id", "product_id", "corpus_digest"]);
   }
   if (event.event_type === "delivery.completed") {
-    requireFields(event, ["delivery_id", "artifact_id", "task_id", "order_id", "buyer_id", "creator_id", "product_id", "release_id", "release_digest"]);
+    requireFields(event, ["delivery_id", "artifact_id", "task_id", "order_id", "buyer_id", "creator_id", "agent_id", "product_id", "corpus_digest"]);
     const artifact = requirePrior(events, "artifact.created", "artifact_id", event.artifact_id);
-    requireIdentityMatch(artifact, event, ["task_id", "order_id", "buyer_id", "creator_id", "product_id", "release_id", "release_digest"]);
+    requireIdentityMatch(artifact, event, ["task_id", "order_id", "buyer_id", "creator_id", "agent_id", "product_id", "corpus_digest"]);
     if (events.some((item) => item.event_type === "delivery.completed" && item.task_id === event.task_id)) {
       throw new CommerceInvariantError("task_already_delivered", `Task ${event.task_id} already has a Delivery`);
     }
   }
   if (event.event_type === "revenue.recognized") {
-    requireFields(event, ["recognition_id", "delivery_id", "order_id", "creator_id", "product_id", "release_id", "release_digest", "currency"]);
+    requireFields(event, ["recognition_id", "delivery_id", "order_id", "creator_id", "agent_id", "product_id", "corpus_digest", "currency"]);
     const delivery = requirePrior(events, "delivery.completed", "delivery_id", event.delivery_id);
-    requireIdentityMatch(delivery, event, ["order_id", "creator_id", "product_id", "release_id", "release_digest"]);
+    requireIdentityMatch(delivery, event, ["order_id", "creator_id", "agent_id", "product_id", "corpus_digest"]);
     requirePositiveInteger(event.gross_minor, "gross_minor");
     requireNonNegativeInteger(event.creator_share_minor, "creator_share_minor");
     requireNonNegativeInteger(event.hatch_share_minor, "hatch_share_minor");

@@ -1,8 +1,7 @@
 # Hatch Pi Cloud Runtime contract
 
 Status: normative MVP architecture. This document uses only behavior implemented
-and tested in Pi `0.83.0`. The speculative durable `AgentHarness v2` design is
-recorded separately in `research-pi-durable-harness-v2.md` and is not part of the
+and tested in Pi `0.83.0`; speculative durable-harness behavior is outside the
 Hatch implementation contract.
 
 ## 1. Product outcome
@@ -59,7 +58,7 @@ rare process-failure recovery.
 
 ```text
 Dashboard / Registry
-  account, Creator, Agent release, order, entitlement
+  account, Creator, current Agent Corpus, order, entitlement
                   |
                   v
 Cloud Runtime ----+---- Postgres
@@ -80,7 +79,7 @@ Desktop
 ### Cloud Runtime owns
 
 - authenticating the account and checking Agent entitlement;
-- binding a conversation to an immutable Agent release;
+- binding a conversation to the current Agent and Corpus digest;
 - loading server-private Agent instructions and corpus;
 - constructing and running an in-memory Pi `Agent`;
 - calling Kimi with thinking enabled;
@@ -106,7 +105,7 @@ conversation history.
 
 - account identity integration;
 - Creator and Agent ownership;
-- release version, digest, price, and publish state;
+- current Corpus digest, product offer, and publish state;
 - order and entitlement;
 - service-to-service authorization.
 
@@ -123,13 +122,12 @@ The initial schema needs only these concepts:
 - `account_id`
 - `entitlement_id`
 - `agent_id`
-- `release_id`
-- `release_digest`
+- `corpus_digest`
 - `title`
 - `created_at`, `updated_at`
 
-A conversation remains pinned to its original release. A newly published Agent
-release affects a new conversation, not an existing one.
+A conversation records the Corpus digest used for its runs. Publishing a new
+Corpus creates a new current binding and does not rewrite prior audit records.
 
 ### `conversation_messages`
 
@@ -189,10 +187,10 @@ which context is sent to the model.
 
 For `client.message`:
 
-1. Runtime authenticates the account and confirms entitlement to the bound release.
+1. Runtime authenticates the account and confirms entitlement to the bound Agent.
 2. Runtime inserts the account message and a `running` run.
 3. Runtime loads the latest checkpoint plus completed messages after it.
-4. Runtime resolves the Agent release, system prompt, skills, corpus, and tool list.
+4. Runtime resolves the current Agent Corpus, system prompt, skills, knowledge, and tool list.
 5. Runtime constructs Pi `Agent` with Kimi, thinking enabled, and remote tool adapters.
 6. Runtime subscribes to Pi lifecycle events.
 7. Runtime calls `Agent.prompt()` with the new account message.
@@ -238,7 +236,7 @@ Model context is a projection of history, not the history itself.
 
 Before a run, Runtime builds context from:
 
-1. current Agent release instructions;
+1. current Agent Corpus instructions;
 2. relevant Agent Corpus / RAG evidence;
 3. the latest compacted summary, if present;
 4. recent completed conversation messages;
@@ -345,7 +343,7 @@ The production protocol requires:
 
 - authenticated connection handshake;
 - account and entitlement binding;
-- Agent release and conversation binding;
+- Agent Corpus and conversation binding;
 - client capability declaration for local tools;
 - conversation snapshot and pagination;
 - `client.message` with `client_message_id`;
@@ -377,7 +375,7 @@ part of these steps.
 
 - Desktop uses only the production Registry and Runtime endpoints.
 - The same account sees only entitled or owned Agents.
-- A conversation is pinned to an immutable Agent release.
+- A conversation records the exact Agent Corpus digest used for each run.
 - A user can select Workspace, permissions, and Shell access, then complete a task.
 - Pi `Agent` performs the server-side loop with Kimi thinking enabled.
 - File and Shell tools execute only on Desktop and within the granted Workspace.

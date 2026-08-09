@@ -3,12 +3,10 @@
     "license_token": "jordan-local-demo-access",
     "entitlement_id": "ent_jordan_maya_resume_review",
     "order_id": "order_jordan_maya_resume_review",
-    "tenant_id": "tenant_jordan_demo",
     "user_id": "buyer_jordan_lee",
     "creator_id": "maya-chen",
     "product_id": "maya-chen-resume-review",
-    "release_id": "maya-chen-resume-review@1.0.0",
-    "release_digest": "sha256:1590101c6fb7dbcb09e84973c3d98f0607cf70b691a3dec23ab511c61fb3fb39",
+    "agent_id": "signal-resume-review",
     "status": "active"
   }
 ]

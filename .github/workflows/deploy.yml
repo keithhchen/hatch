@@ -98,12 +98,6 @@ jobs:
         run: |
           set -euo pipefail
           install -m 640 compose.app.yml /opt/hatch/
-          mkdir -p /opt/hatch/dashboard
-          runtime_image="${IMAGE_PREFIX}/runtime:${RELEASE_TAG}"
-          docker run --rm -u 0 \
-            -v "$GITHUB_WORKSPACE/docs/proof/creator-dashboard-clean-catalog-v1/product-catalog.json:/source/catalog.json:ro" \
-            -v "/opt/hatch/dashboard:/target" \
-            "$runtime_image" node -e 'const fs=require("node:fs"); fs.copyFileSync("/source/catalog.json", "/target/product-catalog.json"); fs.chmodSync("/target/product-catalog.json", 0o640);'
       - name: Pull and switch application containers
         env:
           GHCR_USERNAME: ${{ github.actor }}

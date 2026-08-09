@@ -18,8 +18,9 @@ Buyer Desktop
   -> usable artifact + Delivery
 ```
 
-The authoritative v1 acceptance contract is
-[docs/spec-v1-execution-contract.md](docs/spec-v1-execution-contract.md).
+The canonical product/runtime contract is the current
+[Agent Corpus v1](packages/protocol/AGENT_CORPUS.md) plus the
+[wire protocol 0.3](packages/protocol/schemas/hatch-wire-protocol.schema.json).
 
 The connected demonstration follows two concrete people rather than anonymous
 test fixtures:
@@ -75,22 +76,22 @@ production entrypoint.
 `packages/commerce/` provides the append-only Ledger and projections shared by
 buyer entitlement and Creator revenue reporting.
 
-`creator-dashboard/` is the Creator-facing SaaS surface for publishing a
-release-ready product and viewing orders, deliveries, and the 90/10 revenue
-projection from that same Ledger.
+`creator-dashboard/` is the Creator-facing SaaS surface for viewing published
+Agent products, orders, deliveries, and the 90/10 revenue projection from that
+same Ledger. Publication itself is owned by the Factory-to-Registry path.
 
 ## Repository map
 
 ```text
-creator-agent-factory/   internal distillation and release workflow
+creator-agent-factory/   internal distillation and Agent Corpus publish workflow
 desktop-app/             Tauri/React Consumer application
 local-runner/            Rust local tool boundary
 runtime-server/          TypeScript cloud Agent Runtime + Registry
 platform-registry/       legacy Registry migration source
-packages/protocol/       canonical wire and Release schemas
+packages/protocol/       canonical wire and Agent Corpus schemas
 packages/commerce/       entitlement, Delivery, and revenue Ledger
 privacyd/                optional local privacy transformation experiments
-landing/                 public website
+archive/landing-skill-app/ historical website (not deployed)
 docs/                    product contracts and proof artifacts
 ```
 
@@ -111,7 +112,7 @@ Copy `.env.example` to `.env`, supply a Moonshot credential, then run:
 Hatch v1 deliberately uses `kimi-k2.6` for Creator-Agent generation,
 delivery auditing, blind evaluation, Runtime turns, and context compaction.
 These roles do not silently fall back to another model. Provider credentials
-remain process environment only and must never enter a Creator Release or proof
+remain process environment only and must never enter an Agent Corpus or proof
 bundle.
 
 The Desktop connects to the TypeScript Runtime at
@@ -133,6 +134,6 @@ automation. Developer builds are intentionally unsigned; public distribution
 still requires Apple Developer signing and notarization credentials.
 
 Passing component tests is not sufficient proof of v1. Completion requires one
-Release to be distilled and published, consumed from the installed Desktop,
+Agent Corpus to be distilled and published, consumed from the installed Desktop,
 delivered through local tools, and reflected in the same Commerce Ledger and
 Creator Dashboard.

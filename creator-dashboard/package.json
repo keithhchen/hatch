@@ -6,7 +6,6 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "api": "node server.mjs",
-    "catalog:import": "node scripts/import-product-catalog.mjs",
     "build": "vite build",
     "test": "node --test src/*.test.js"
   },

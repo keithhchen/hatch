@@ -131,14 +131,14 @@ Cover all four categories. For every held-out record:
 - supporting source-fact or derived-rule IDs.
 
 Keep expected behavior and checks in Factory review data. Later candidate and
-baseline generation may receive only the input prompt and immutable Release.
+baseline generation may receive only the input prompt and current Agent Corpus.
 
 ## 7. Audit before compilation
 
 The same executing Agent performs two passes: first a completeness self-audit,
 then an adversarial pass that actively tries to disprove the draft. Do not add a
 sub-Agent or multi-Agent orchestrator to the product workflow. Neither pass may
-inspect old proof or a previous Release.
+inspect old proof or a previous Corpus build.
 
 Check:
 

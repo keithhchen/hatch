@@ -20,11 +20,9 @@ import { SkillRuntime } from "./skillRuntime.js";
 import { RuntimeStore, type RunStatus } from "./store.js";
 import { PostgresStore } from "./postgresStore.js";
 import { ToolBridge } from "./toolBridge.js";
-import { CreatorReleaseResolver, type ResolvedCreatorRelease } from "./release.js";
-import { EntitlementError, FileEntitlementResolver, RegistryEntitlementResolver, isAgentCorpusEntitlement, isReleaseEntitlement, type EntitlementResolver } from "./entitlements.js";
+import { EntitlementError, FileEntitlementResolver, RegistryEntitlementResolver, type EntitlementResolver } from "./entitlements.js";
 import { findCompletedDelivery, recordCompletedDelivery, type CommerceEventSink, type DeliveryArtifact, type DeliveryBinding } from "./delivery.js";
-import { materializeCreatorRelease, permittedLocalTools } from "./releaseMaterialization.js";
-import { materializeAgentCorpusRoot } from "./releaseMaterialization.js";
+import { materializeAgentCorpus } from "./agentCorpusMaterialization.js";
 import { creatorToolControlPlaneFromEnvironment, resolveCreatorTools } from "./creatorTools.js";
 import { AgentCorpusResolver, createKnowledgeProvider, knowledgeProviderConfigured, type AgentCorpus } from "./agentCorpus.js";
 import {
@@ -44,7 +42,6 @@ export type RuntimeServer = {
 export type RuntimeServerOptions = {
   createRuntime?: () => AgentRuntime;
   conversationStore?: RuntimeStore;
-  releaseResolver?: CreatorReleaseResolver;
   entitlementResolver?: EntitlementResolver;
   /** Registry-installed current Agent Corpus root, keyed by creator/agent. */
   agentCorpusResolver?: AgentCorpusResolver;
@@ -114,17 +111,15 @@ export function clientToolTimeoutMs(raw = process.env.HATCH_CLIENT_TOOL_TIMEOUT_
 }
 
 type SessionBinding = {
-  tenantId: string;
+  creatorId: string;
   userId: string;
+  agentId: string;
   productId: string;
-  releaseId: string;
-  releaseDigest: string;
-  release?: ResolvedCreatorRelease;
+  corpusDigest: string;
   agentCorpus?: AgentCorpus;
   agentCorpusRoot?: string;
   entitlementId?: string;
   orderId?: string;
-  creatorId?: string;
   explicit: boolean;
 };
 
@@ -132,15 +127,13 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   const activeConversationRuns = new Map<string, string>();
   const connectionTasks = new Set<Promise<void>>();
   const createRuntime = options.createRuntime ?? createAgentRuntime;
-  const releaseResolver = options.releaseResolver
-    ?? (process.env.HATCH_RELEASES_DIR ? new CreatorReleaseResolver(process.env.HATCH_RELEASES_DIR) : undefined);
   const entitlementResolver = options.entitlementResolver
     ?? (process.env.HATCH_ENTITLEMENTS_FILE ? new FileEntitlementResolver(process.env.HATCH_ENTITLEMENTS_FILE) : undefined);
   const agentCorpusResolver = options.agentCorpusResolver
     ?? (process.env.HATCH_AGENT_CORPUS_ROOT ? new AgentCorpusResolver(process.env.HATCH_AGENT_CORPUS_ROOT) : undefined);
   const conversationStore = options.conversationStore ?? createConversationStore();
   const server = http.createServer((req, res) => {
-    void handleHttpRequest(req, res, releaseResolver, entitlementResolver, agentCorpusResolver, conversationStore);
+    void handleHttpRequest(req, res, entitlementResolver, agentCorpusResolver, conversationStore);
   });
 
   const wss = new WebSocketServer({ server, path: "/runtime" });
@@ -150,7 +143,6 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       activeConversationRuns,
       conversationStore,
       createRuntime,
-      releaseResolver,
       entitlementResolver,
       agentCorpusResolver,
       options.commerceEventSink,
@@ -178,7 +170,6 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
 async function handleHttpRequest(
   req: http.IncomingMessage,
   res: http.ServerResponse,
-  releaseResolver?: CreatorReleaseResolver,
   entitlementResolver?: EntitlementResolver,
   agentCorpusResolver?: AgentCorpusResolver,
   conversationStore?: RuntimeStore
@@ -209,22 +200,25 @@ async function handleHttpRequest(
     }
     try {
       const creatorAgents = claims?.role === "creator" && agentCorpusResolver
-        ? (await agentCorpusResolver.list(claims.sub)).map(({ corpus }) => ({
+        ? (await agentCorpusResolver.list(claims.sub)).map(({ corpus, digest }) => ({
           entitlement_id: `creator:${claims.sub}:${corpus.agent_id}`,
           creator_id: corpus.creator.id,
           agent_id: corpus.agent_id,
+          corpus_digest: digest,
           creator: corpus.creator,
           product: {
             id: corpus.product.id,
             name: corpus.product.name,
-            description: corpus.product.description ?? ""
+            description: corpus.product.description ?? "",
+            ...(corpus.product.promise ? { promise: corpus.product.promise } : {}),
+            ...(corpus.product.boundaries.length ? { boundaries: corpus.product.boundaries } : {}),
+            ...(corpus.product.offer ? { offer: corpus.product.offer } : {})
           },
-          presentation: {}
+          presentation: corpus.product.presentation
         }))
         : await Promise.all((await entitlementResolver!.list({ authToken, licenseToken: authToken })).map(async (entitlement) => {
-        if (!isReleaseEntitlement(entitlement)) {
           if (!agentCorpusResolver) throw new Error("Current Agent Corpus resolver is unavailable");
-          const resolved = await agentCorpusResolver.resolve(entitlement.creator_id, entitlement.agent_id!);
+          const resolved = await agentCorpusResolver.resolve(entitlement.creator_id, entitlement.agent_id);
           if (resolved.corpus.product.id !== entitlement.product_id || resolved.corpus.creator.id !== entitlement.creator_id) {
             throw new Error(`Entitlement ${entitlement.entitlement_id} does not match its current Agent Corpus`);
           }
@@ -232,33 +226,18 @@ async function handleHttpRequest(
             entitlement_id: entitlement.entitlement_id,
             creator_id: entitlement.creator_id,
             agent_id: entitlement.agent_id,
+            corpus_digest: resolved.digest,
             creator: resolved.corpus.creator,
             product: {
               id: resolved.corpus.product.id,
               name: resolved.corpus.product.name,
               description: resolved.corpus.product.description ?? "",
+              ...(resolved.corpus.product.promise ? { promise: resolved.corpus.product.promise } : {}),
+              ...(resolved.corpus.product.boundaries.length ? { boundaries: resolved.corpus.product.boundaries } : {}),
+              ...(resolved.corpus.product.offer ? { offer: resolved.corpus.product.offer } : {})
             },
-            presentation: {}
+            presentation: resolved.corpus.product.presentation
           };
-        }
-        if (!releaseResolver) throw new Error("Creator Release resolver is unavailable");
-        const release = await releaseResolver.resolve(entitlement.release_id, entitlement.release_digest);
-        if (release.public.product_id !== entitlement.product_id || release.public.creator_id !== entitlement.creator_id) {
-          throw new Error(`Entitlement ${entitlement.entitlement_id} does not match its pinned Creator Release`);
-        }
-        return {
-          entitlement_id: entitlement.entitlement_id,
-          creator: release.public.creator,
-          product: {
-            id: release.public.product_id,
-            name: release.public.product.name,
-            description: release.public.product.description,
-            promise: release.public.product.promise,
-            boundaries: release.public.product.boundaries,
-            offer: release.public.product.price
-          },
-          presentation: release.public.presentation
-        };
         }));
       writeJson(res, 200, { creator_agents: creatorAgents });
     } catch (error) {
@@ -272,7 +251,7 @@ async function handleHttpRequest(
     const conversationId = decodeURIComponent(match[1] ?? "");
     let binding: SessionBinding | undefined;
     try {
-      binding = await bindingFromHistoryRequest(req, url, releaseResolver, entitlementResolver, agentCorpusResolver);
+      binding = await bindingFromHistoryRequest(req, url, entitlementResolver, agentCorpusResolver);
     } catch (error) {
       writeJson(res, 403, { error: { code: "entitlement_required", message: errorMessage(error) } });
       return;
@@ -285,17 +264,11 @@ async function handleHttpRequest(
     writeJson(res, 200, {
       conversation_id: conversationId,
       product_id: binding.productId,
-      ...(binding.agentCorpus ? {
-        creator_id: binding.agentCorpus.creator.id,
-        agent_id: binding.agentCorpus.agent_id
-      } : {
-        tenant_id: binding.tenantId,
-        release_id: binding.releaseId,
-        release_digest: binding.releaseDigest
-      }),
+      creator_id: binding.creatorId,
+      agent_id: binding.agentId,
       messages: sanitizeBoundHistory(
         await store.readVisibleConversation(scopedConversationId(binding, conversationId)),
-        binding.releaseId
+        binding.agentId
       )
     });
     return;
@@ -342,7 +315,6 @@ async function handleRuntimeSocket(
   activeConversationRuns: Map<string, string>,
   store: RuntimeStore,
   createRuntime: () => AgentRuntime,
-  releaseResolver?: CreatorReleaseResolver,
   entitlementResolver?: EntitlementResolver,
   agentCorpusResolver?: AgentCorpusResolver,
   commerceEventSink?: CommerceEventSink,
@@ -358,7 +330,7 @@ async function handleRuntimeSocket(
   const activeSkillRuntimes = new Map<string, SkillRuntime>();
 
   const send = async (message: OutboundMessage): Promise<void> => {
-    const outbound = protectPrivateReleaseBoundary(message, binding?.release, binding?.agentCorpusRoot);
+    const outbound = protectPrivateAgentBoundary(message, binding?.agentCorpusRoot, binding?.agentId);
     if (socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify(outbound));
     }
@@ -391,7 +363,7 @@ async function handleRuntimeSocket(
             });
             return;
           }
-          binding = await resolveSessionBinding(message, releaseResolver, entitlementResolver, agentCorpusResolver);
+          binding = await resolveSessionBinding(message, entitlementResolver, agentCorpusResolver);
           if (binding.agentCorpus && binding.agentCorpusRoot) {
             serverTools.setKnowledgeScope({
               provider: createKnowledgeProvider(binding.agentCorpusRoot, binding.agentCorpus),
@@ -406,19 +378,16 @@ async function handleRuntimeSocket(
               binding.agentCorpus
             ));
           }
-          hello = binding.release
-            ? { ...message, local_tools: permittedLocalTools(binding.release, message.local_tools) }
-            : message;
-          sessionSkills = await buildSessionSkills(hello.workspace_root, binding.release, Boolean(binding.agentCorpusRoot));
+          hello = message;
+          sessionSkills = await buildSessionSkills(hello.workspace_root, Boolean(binding.agentCorpusRoot));
           await store.append({
             type: "session.started",
             installation_id: message.installation_id,
-            tenant_id: binding.tenantId,
+            creator_id: binding.creatorId,
             user_id: binding.userId,
+            agent_id: binding.agentId,
             product_id: binding.productId,
-            release_id: binding.releaseId,
-            release_digest: binding.releaseDigest,
-            ...(binding.agentCorpus ? { agent_id: binding.agentCorpus.agent_id } : {}),
+            corpus_digest: binding.corpusDigest,
             ...(binding.entitlementId ? { entitlement_id: binding.entitlementId } : {}),
             client_version: message.client_version,
             workspace_root: hello.workspace_root,
@@ -427,31 +396,12 @@ async function handleRuntimeSocket(
           await send({
             type: "session.ready",
             accepted_protocol_version: PROTOCOL_VERSION,
+            creator_id: binding.creatorId,
             user_id: binding.userId,
+            agent_id: binding.agentId,
             product_id: binding.productId,
-            ...(binding.agentCorpus ? {
-              creator_id: binding.agentCorpus.creator.id,
-              agent_id: binding.agentCorpus.agent_id
-            } : {
-              tenant_id: binding.tenantId,
-              release_id: binding.releaseId,
-              release_digest: binding.releaseDigest
-            }),
+            corpus_digest: binding.corpusDigest,
             ...(binding.entitlementId ? { entitlement_id: binding.entitlementId } : {}),
-            ...(binding.release ? {
-              creator_agent: {
-                creator: binding.release.public.creator,
-                product: {
-                  id: binding.release.public.product_id,
-                  name: binding.release.public.product.name,
-                  description: binding.release.public.product.description,
-                  promise: binding.release.public.product.promise,
-                  boundaries: binding.release.public.product.boundaries,
-                  offer: binding.release.public.product.price
-                },
-                presentation: binding.release.public.presentation
-              }
-            } : {}),
             ...(binding.agentCorpus ? {
               creator_agent: {
                 creator: binding.agentCorpus.creator,
@@ -459,8 +409,11 @@ async function handleRuntimeSocket(
                   id: binding.agentCorpus.product.id,
                   name: binding.agentCorpus.product.name,
                   description: binding.agentCorpus.product.description ?? "",
+                  ...(binding.agentCorpus.product.promise ? { promise: binding.agentCorpus.product.promise } : {}),
+                  ...(binding.agentCorpus.product.boundaries.length ? { boundaries: binding.agentCorpus.product.boundaries } : {}),
+                  ...(binding.agentCorpus.product.offer ? { offer: binding.agentCorpus.product.offer } : {})
                 },
-                presentation: {}
+                presentation: binding.agentCorpus.product.presentation
               }
             } : {})
           });
@@ -597,32 +550,23 @@ async function handleRuntimeSocket(
   });
 }
 
-export function protectPrivateReleaseBoundary(
+export function protectPrivateAgentBoundary(
   message: OutboundMessage,
-  release?: ResolvedCreatorRelease,
-  agentCorpusRoot?: string
+  agentCorpusRoot?: string,
+  agentId = "creator-agent"
 ): OutboundMessage {
-  if (!release && !agentCorpusRoot) return message;
-  if (!release) {
-    if (message.type === "tool_call.delta" && message.locality === "server") {
-      const serializedArguments = JSON.stringify(message.arguments ?? {});
-      if (serializedArguments.includes(agentCorpusRoot!)) {
-        return { ...message, arguments: {}, result: message.result ? { private_result_redacted: true } : undefined };
-      }
-    }
-    return message;
-  }
+  if (!agentCorpusRoot) return message;
   if (message.type === "skill.activated" || message.type === "skill.invoked") {
     return {
       ...message,
-      path: `release://${release.public.release_id}/protected-skill/${encodeURIComponent(message.name)}`,
+      path: `agent://${encodeURIComponent(agentId)}/protected-skill/${encodeURIComponent(message.name)}`,
       ...(message.type === "skill.activated" ? { resource_paths: [], resource_manifest_truncated: false } : {}),
-      ...(message.type === "skill.invoked" ? { trigger: { ...message.trigger, path: message.trigger.path ? "release://private" : undefined } } : {})
+      ...(message.type === "skill.invoked" ? { trigger: { ...message.trigger, path: message.trigger.path ? "agent://private" : undefined } } : {})
     } as OutboundMessage;
   }
   if (message.type === "tool_call.delta" && message.locality === "server") {
     const serializedArguments = JSON.stringify(message.arguments ?? {});
-    if ([release.releaseDirectory, release.protectedSkillsRoot, release.ragRoot].some((root) => serializedArguments.includes(root))) {
+    if (serializedArguments.includes(agentCorpusRoot)) {
       return { ...message, arguments: {}, result: message.result ? { private_result_redacted: true } : undefined };
     }
   }
@@ -697,11 +641,9 @@ async function runOneTurn(
       priorMessages = preTurnCompaction.replacement_history;
     }
 
-    const materializedRelease = binding.release
-      ? await materializeCreatorRelease(binding.release, input.message.content, hello.local_tools)
-      : binding.agentCorpusRoot
-        ? await materializeAgentCorpusRoot(binding.agentCorpusRoot, input.message.content, hello.local_tools)
-        : undefined;
+    const materializedAgent = binding.agentCorpusRoot
+      ? await materializeAgentCorpus(binding.agentCorpusRoot, input.message.content, hello.local_tools)
+      : undefined;
     skillRuntime = new SkillRuntime({
       parentInput: input,
       parentState: state,
@@ -709,11 +651,10 @@ async function runOneTurn(
       clientBroker: broker,
       serverTools,
       toolBridge,
-      clientTools: materializedRelease?.localTools ?? hello.local_tools,
-      allowedExternalTools: materializedRelease?.externalTools,
-      releaseSystemPrompt: materializedRelease?.systemPrompt,
-      releaseDeliveryWorkflow: materializedRelease?.deliveryWorkflow,
-      releaseDeliveryAuditContext: materializedRelease?.deliveryAuditContext,
+      clientTools: materializedAgent?.localTools ?? hello.local_tools,
+      allowedExternalTools: materializedAgent?.externalTools,
+      agentSystemPrompt: materializedAgent?.systemPrompt,
+      deliveryAuditContext: materializedAgent?.deliveryAuditContext,
       workspaceRoot: hello.workspace_root,
       store,
       emit: send,
@@ -736,13 +677,13 @@ async function runOneTurn(
       messages,
       sessionSkills,
       activatedSkills: [],
-      clientTools: materializedRelease?.localTools ?? hello.local_tools,
-      allowedExternalTools: materializedRelease?.externalTools,
-      externalToolDefinitions: materializedRelease?.externalToolDefinitions,
-      // A Creator Release has already materialized its one protected Skill
-      // into the server-private system prompt. Product execution is a single
-      // Agent session, not a generic parent Agent delegating to a second one.
-      allowSkillRun: !binding.release && !binding.agentCorpusRoot,
+      clientTools: materializedAgent?.localTools ?? hello.local_tools,
+      allowedExternalTools: materializedAgent?.externalTools,
+      externalToolDefinitions: materializedAgent?.externalToolDefinitions,
+      // An Agent Corpus has already materialized matching protected Skills
+      // into the server-private prompt. Product execution remains one Agent
+      // session rather than a generic parent delegating to another worker.
+      allowSkillRun: !binding.agentCorpusRoot,
       workspaceRoot: hello.workspace_root,
       persistModelMessage: async (message) => {
         await store.append({
@@ -759,10 +700,8 @@ async function runOneTurn(
       toolBridge,
       skillRuntime,
       toolScope: "main",
-      releaseSystemPrompt: materializedRelease?.systemPrompt,
-      releaseAgentCorpus: Boolean(binding.agentCorpusRoot),
-      releaseDeliveryWorkflow: materializedRelease?.deliveryWorkflow,
-      releaseDeliveryAuditContext: materializedRelease?.deliveryAuditContext,
+      agentSystemPrompt: materializedAgent?.systemPrompt,
+      deliveryAuditContext: materializedAgent?.deliveryAuditContext,
       knowledgeAvailable: Boolean(
         binding.agentCorpus?.knowledge.documents.length
         && knowledgeProviderConfigured()
@@ -832,14 +771,13 @@ async function runOneTurn(
 
 async function buildSessionSkills(
   workspaceRoot?: string,
-  release?: ResolvedCreatorRelease,
   protectedCorpus = false
 ): Promise<RuntimeSessionSkills> {
-  // The Release materializer loads the exact protected SKILL.md into the
+  // The Agent Corpus materializer loads matching protected SKILL.md files into the
   // direct server Agent. Do not also expose it as a model-selectable catalog
   // entry: that creates an unnecessary nested skill worker and lets the same
   // method run through two different delivery paths.
-  const records = release || protectedCorpus ? [] : await discoverSkills({ workspaceRoot });
+  const records = protectedCorpus ? [] : await discoverSkills({ workspaceRoot });
   const visibleRecords = visibleSkillsForSession(records);
   const rendered = await includeSkillInstructions()
     ? renderSkillsSection(visibleRecords, { executionMode: "protected" })
@@ -855,20 +793,13 @@ async function buildSessionSkills(
 
 async function resolveSessionBinding(
   hello: ClientHello,
-  releaseResolver?: CreatorReleaseResolver,
   entitlementResolver?: EntitlementResolver,
   agentCorpusResolver?: AgentCorpusResolver
 ): Promise<SessionBinding> {
   const authToken = hello.auth_token ?? hello.license_token;
   const authClaims = verifyHatchAuthToken(authToken);
   if (hello.agent_id) {
-    if (hello.release_id || hello.release_digest) {
-      throw new EntitlementError(
-        "agent_scope_conflict",
-        "agent_id cannot be combined with a client-selected Creator Release binding."
-      );
-    }
-          if (!agentCorpusResolver) {
+    if (!agentCorpusResolver) {
       throw new EntitlementError(
         "agent_corpus_unavailable",
         "The requested Creator Agent is not available on this Runtime."
@@ -876,13 +807,16 @@ async function resolveSessionBinding(
     }
     const selectedCreatorId = authClaims?.role === "creator"
       ? authClaims.sub
-      : hello.creator_id ?? hello.tenant_id;
+      : hello.creator_id;
     if (!selectedCreatorId) {
       throw new EntitlementError("creator_required", "creator_id is required when selecting a Creator Agent.");
     }
     const resolved = await agentCorpusResolver.resolve(selectedCreatorId, hello.agent_id);
     let corpusEntitlement: Awaited<ReturnType<EntitlementResolver["resolve"]>> | undefined;
-    if (hello.entitlement_id && authClaims?.role !== "creator") {
+    if (authClaims?.role !== "creator" && entitlementResolver) {
+      if (!hello.entitlement_id) {
+        throw new EntitlementError("entitlement_required", "A valid Creator Agent entitlement is required.");
+      }
       if (!entitlementResolver) {
         throw new EntitlementError("entitlement_unavailable", "This Creator Agent entitlement cannot be verified.");
       }
@@ -892,8 +826,7 @@ async function resolveSessionBinding(
         entitlementId: hello.entitlement_id,
         installationId: hello.installation_id
       });
-      if (!isAgentCorpusEntitlement(entitlement)
-        || entitlement.agent_id !== hello.agent_id
+      if (entitlement.agent_id !== hello.agent_id
         || entitlement.creator_id !== resolved.corpus.creator.id
         || entitlement.product_id !== resolved.corpus.product.id) {
         throw new EntitlementError("agent_entitlement_mismatch", "This Creator Agent is not available for the signed-in account.");
@@ -904,24 +837,20 @@ async function resolveSessionBinding(
       throw new Error("Agent Corpus product binding mismatch");
     }
     return {
-      tenantId: resolved.corpus.creator.id,
+      creatorId: resolved.corpus.creator.id,
       userId: authClaims?.sub ?? corpusEntitlement?.user_id ?? hello.user_id ?? hello.installation_id,
+      agentId: resolved.corpus.agent_id,
       productId: resolved.corpus.product.id,
-      // The wire protocol still carries these legacy scope fields for older
-      // Desktop clients. They are derived from the current Corpus and do not
-      // cause a Creator Release to be loaded or resolved.
-      releaseId: `agent:${resolved.corpus.agent_id}`,
-      releaseDigest: corpusDigest(resolved.corpus, resolved.root),
+      corpusDigest: resolved.digest,
       agentCorpus: resolved.corpus,
       agentCorpusRoot: resolved.root,
       ...(corpusEntitlement ? { entitlementId: corpusEntitlement.entitlement_id, orderId: corpusEntitlement.order_id } : {}),
-      creatorId: resolved.corpus.creator.id,
       explicit: true
     };
   }
-  const productMode = Boolean(releaseResolver || entitlementResolver);
+  const productMode = Boolean(entitlementResolver || agentCorpusResolver);
   if (productMode) {
-    if (!entitlementResolver || (!releaseResolver && !agentCorpusResolver)) {
+    if (!entitlementResolver || !agentCorpusResolver) {
       throw new EntitlementError(
         "entitlement_configuration_incomplete",
         "Creator Agent access is unavailable because entitlement verification is not fully configured."
@@ -936,93 +865,59 @@ async function resolveSessionBinding(
       entitlementId: hello.entitlement_id,
       installationId: hello.installation_id
     });
-    if (isAgentCorpusEntitlement(entitlement)) {
-      if (!agentCorpusResolver) {
-        throw new EntitlementError("agent_corpus_unavailable", "The requested Creator Agent is not available on this Runtime.");
-      }
-      const resolved = await agentCorpusResolver.resolve(entitlement.creator_id, entitlement.agent_id);
-      if (resolved.corpus.product.id !== entitlement.product_id || resolved.corpus.creator.id !== entitlement.creator_id) {
-        throw new Error("Entitlement does not match its current Agent Corpus");
-      }
-      return {
-        tenantId: entitlement.creator_id,
-        userId: entitlement.user_id,
-        productId: entitlement.product_id,
-        releaseId: `agent:${resolved.corpus.agent_id}`,
-        releaseDigest: corpusDigest(resolved.corpus, resolved.root),
-        entitlementId: entitlement.entitlement_id,
-        orderId: entitlement.order_id,
-        creatorId: entitlement.creator_id,
-        agentCorpus: resolved.corpus,
-        agentCorpusRoot: resolved.root,
-        explicit: true
-      };
-    }
-    if (!isReleaseEntitlement(entitlement)) {
-      throw new EntitlementError("agent_corpus_unavailable", "The current Agent Corpus entitlement must select an agent_id.");
-    }
-    if (!releaseResolver) throw new EntitlementError("release_unavailable", "Creator Release is unavailable.");
-    const release = await releaseResolver.resolve(entitlement.release_id, entitlement.release_digest);
-    if (release.public.product_id !== entitlement.product_id || release.public.creator_id !== entitlement.creator_id) {
-      throw new Error("Entitlement does not match its pinned Creator Release");
+    const resolved = await agentCorpusResolver.resolve(entitlement.creator_id, entitlement.agent_id);
+    if (resolved.corpus.product.id !== entitlement.product_id || resolved.corpus.creator.id !== entitlement.creator_id) {
+      throw new Error("Entitlement does not match its current Agent Corpus");
     }
     return {
-      tenantId: entitlement.tenant_id,
+      creatorId: entitlement.creator_id,
       userId: entitlement.user_id,
+      agentId: entitlement.agent_id,
       productId: entitlement.product_id,
-      releaseId: entitlement.release_id,
-      releaseDigest: entitlement.release_digest,
+      corpusDigest: resolved.digest,
       entitlementId: entitlement.entitlement_id,
       orderId: entitlement.order_id,
-      creatorId: entitlement.creator_id,
-      release,
+      agentCorpus: resolved.corpus,
+      agentCorpusRoot: resolved.root,
       explicit: true
     };
   }
 
   // Resolver-free mode is intentionally limited to local development and tests.
   // In product mode all scope is derived from a server-verified entitlement above.
-  const tenantId = hello.tenant_id ?? `local-${shortHash(authToken ?? hello.installation_id)}`;
+  const creatorId = hello.creator_id ?? `local-${shortHash(authToken ?? hello.installation_id)}`;
   const userId = authClaims?.sub ?? hello.user_id ?? hello.installation_id;
-  const releaseId = hello.release_id ?? "local-uat-release";
-  const releaseDigest = hello.release_digest ?? `sha256:${"0".repeat(64)}`;
-  const release = hello.release_id && releaseResolver ? await releaseResolver.resolve(releaseId, releaseDigest) : undefined;
-  if (hello.release_id && !releaseResolver) throw new Error("HATCH_RELEASES_DIR is required for an explicit Creator Release");
-  const productId = hello.product_id ?? release?.public.product_id ?? "local-uat-product";
-  if (release && release.public.product_id !== productId) throw new Error("Creator Release product binding mismatch");
+  const agentId = hello.agent_id ?? "local-agent";
+  const productId = hello.product_id ?? "local-product";
   return {
-    tenantId, userId, productId, releaseId, releaseDigest, release,
-    explicit: Boolean(hello.tenant_id || hello.user_id || hello.product_id || hello.release_id || hello.release_digest)
+    creatorId,
+    userId,
+    agentId,
+    productId,
+    corpusDigest: `sha256:${"0".repeat(64)}`,
+    explicit: Boolean(hello.creator_id || hello.user_id || hello.agent_id || hello.product_id)
   };
 }
 
-export function scopedConversationId(binding: Pick<SessionBinding, "tenantId" | "userId" | "productId" | "releaseId" | "releaseDigest">, conversationId: string): string {
-  return `scope:${shortHash([binding.tenantId, binding.userId, binding.productId, binding.releaseId, binding.releaseDigest].join("\u0000"))}:${conversationId}`;
+export function scopedConversationId(binding: Pick<SessionBinding, "creatorId" | "userId" | "agentId" | "productId" | "corpusDigest">, conversationId: string): string {
+  return `scope:${shortHash([binding.creatorId, binding.userId, binding.agentId, binding.productId, binding.corpusDigest].join("\u0000"))}:${conversationId}`;
 }
 
 function shortHash(value: string): string {
   return createHash("sha256").update(value).digest("hex").slice(0, 24);
 }
 
-function corpusDigest(corpus: AgentCorpus, _root: string): string {
-  // The Registry's published digest is the source of truth.  A standalone
-  // Runtime resolver does not receive Registry metadata, so derive a stable
-  // scope digest from the manifest while preserving the wire checksum shape.
-  return `sha256:${createHash("sha256").update(JSON.stringify(corpus)).digest("hex")}`;
-}
-
 async function bindingFromHistoryRequest(
   req: http.IncomingMessage,
   url: URL,
-  releaseResolver?: CreatorReleaseResolver,
   entitlementResolver?: EntitlementResolver,
   agentCorpusResolver?: AgentCorpusResolver
 ): Promise<SessionBinding | undefined> {
   const entitlementId = url.searchParams.get("entitlement_id") ?? undefined;
   const authToken = bearerToken(req);
-  const productMode = Boolean(releaseResolver || entitlementResolver);
+  const productMode = Boolean(entitlementResolver || agentCorpusResolver);
   if (productMode) {
-    if (!entitlementResolver || (!releaseResolver && !agentCorpusResolver)) {
+    if (!entitlementResolver || !agentCorpusResolver) {
       throw new EntitlementError(
         "entitlement_configuration_incomplete",
         "Creator Agent access is unavailable because entitlement verification is not fully configured."
@@ -1032,62 +927,36 @@ async function bindingFromHistoryRequest(
       throw new EntitlementError("entitlement_required", "A Bearer token and Creator Agent entitlement are required.");
     }
     const entitlement = await entitlementResolver.resolve({ authToken, licenseToken: authToken, entitlementId });
-    if (isAgentCorpusEntitlement(entitlement)) {
-      if (!agentCorpusResolver) {
-        throw new EntitlementError("agent_corpus_unavailable", "The current Agent Corpus is not available on this Runtime.");
-      }
-      const creatorId = url.searchParams.get("creator_id");
-      const agentId = url.searchParams.get("agent_id");
-      if (creatorId !== entitlement.creator_id || agentId !== entitlement.agent_id) {
-        throw new EntitlementError("agent_entitlement_mismatch", "Conversation history is outside the purchased Agent scope.");
-      }
-      const resolved = await agentCorpusResolver.resolve(entitlement.creator_id, entitlement.agent_id);
-      if (resolved.corpus.product.id !== entitlement.product_id || resolved.corpus.creator.id !== entitlement.creator_id) {
-        throw new Error("Entitlement does not match its current Agent Corpus");
-      }
-      return {
-        tenantId: entitlement.creator_id,
-        userId: entitlement.user_id,
-        productId: entitlement.product_id,
-        releaseId: `agent:${resolved.corpus.agent_id}`,
-        releaseDigest: corpusDigest(resolved.corpus, resolved.root),
-        entitlementId: entitlement.entitlement_id,
-        orderId: entitlement.order_id,
-        creatorId: entitlement.creator_id,
-        agentCorpus: resolved.corpus,
-        agentCorpusRoot: resolved.root,
-        explicit: true
-      };
+    const creatorId = url.searchParams.get("creator_id");
+    const agentId = url.searchParams.get("agent_id");
+    if (creatorId !== entitlement.creator_id || agentId !== entitlement.agent_id) {
+      throw new EntitlementError("agent_entitlement_mismatch", "Conversation history is outside the purchased Agent scope.");
     }
-    if (!isReleaseEntitlement(entitlement)) {
-      throw new EntitlementError("agent_corpus_history_requires_agent", "Current Agent Corpus history requires agent_id.");
-    }
-    if (!releaseResolver) throw new EntitlementError("release_unavailable", "Creator Release history is unavailable.");
-    const release = await releaseResolver.resolve(entitlement.release_id, entitlement.release_digest);
-    if (release.public.product_id !== entitlement.product_id || release.public.creator_id !== entitlement.creator_id) {
-      throw new Error("Entitlement does not match its pinned Creator Release");
+    const resolved = await agentCorpusResolver.resolve(entitlement.creator_id, entitlement.agent_id);
+    if (resolved.corpus.product.id !== entitlement.product_id || resolved.corpus.creator.id !== entitlement.creator_id) {
+      throw new Error("Entitlement does not match its current Agent Corpus");
     }
     return {
-      tenantId: entitlement.tenant_id,
+      creatorId: entitlement.creator_id,
       userId: entitlement.user_id,
+      agentId: entitlement.agent_id,
       productId: entitlement.product_id,
-      releaseId: entitlement.release_id,
-      releaseDigest: entitlement.release_digest,
+      corpusDigest: resolved.digest,
       entitlementId: entitlement.entitlement_id,
       orderId: entitlement.order_id,
-      creatorId: entitlement.creator_id,
-      release,
+      agentCorpus: resolved.corpus,
+      agentCorpusRoot: resolved.root,
       explicit: true
     };
   }
 
   // Self-reported scope is accepted only when no product resolver is configured.
-  // This keeps the existing resolver-free local harness usable without creating a
+  // This keeps resolver-free local development usable without creating a
   // production authorization bypass.
   const value = (name: string): string | undefined => url.searchParams.get(name) ?? (typeof req.headers[`x-hatch-${name.replaceAll("_", "-")}`] === "string" ? String(req.headers[`x-hatch-${name.replaceAll("_", "-")}`]) : undefined);
-  const [tenantId, userId, productId, releaseId, releaseDigest] = [value("tenant_id"), value("user_id"), value("product_id"), value("release_id"), value("release_digest")];
-  if (!tenantId || !userId || !productId || !releaseId || !releaseDigest || !/^sha256:[a-f0-9]{64}$/.test(releaseDigest)) return undefined;
-  return { tenantId, userId, productId, releaseId, releaseDigest, explicit: true };
+  const [creatorId, userId, agentId, productId, corpusDigestValue] = [value("creator_id"), value("user_id"), value("agent_id"), value("product_id"), value("corpus_digest")];
+  if (!creatorId || !userId || !agentId || !productId || !corpusDigestValue || !/^sha256:[a-f0-9]{64}$/.test(corpusDigestValue)) return undefined;
+  return { creatorId, userId, agentId, productId, corpusDigest: corpusDigestValue, explicit: true };
 }
 
 function bearerToken(req: http.IncomingMessage): string | undefined {
@@ -1098,28 +967,28 @@ function bearerToken(req: http.IncomingMessage): string | undefined {
 }
 
 function deliveryBindingFromSession(binding: SessionBinding): DeliveryBinding | undefined {
-  if (!binding.entitlementId || !binding.orderId || !binding.creatorId) return undefined;
+  if (!binding.entitlementId || !binding.orderId) return undefined;
   return {
     entitlementId: binding.entitlementId,
     orderId: binding.orderId,
     userId: binding.userId,
     creatorId: binding.creatorId,
+    agentId: binding.agentId,
     productId: binding.productId,
-    releaseId: binding.releaseId,
-    releaseDigest: binding.releaseDigest
+    corpusDigest: binding.corpusDigest
   };
 }
 
-function sanitizeBoundHistory(messages: Awaited<ReturnType<RuntimeStore["readVisibleConversation"]>>, releaseId: string): Awaited<ReturnType<RuntimeStore["readVisibleConversation"]>> {
+function sanitizeBoundHistory(messages: Awaited<ReturnType<RuntimeStore["readVisibleConversation"]>>, agentId: string): Awaited<ReturnType<RuntimeStore["readVisibleConversation"]>> {
   return messages.map((message) => ({
     ...message,
     ...(message.skill_events ? {
       skill_events: message.skill_events.map((event) => ({
         ...event,
-        path: `release://${releaseId}/protected-skill/${encodeURIComponent(event.name)}`,
+        path: `agent://${encodeURIComponent(agentId)}/protected-skill/${encodeURIComponent(event.name)}`,
         resource_paths: event.resource_paths ? [] : undefined,
         resource_manifest_truncated: event.resource_manifest_truncated === undefined ? undefined : false,
-        trigger: event.trigger ? { ...event.trigger, path: event.trigger.path ? "release://private" : undefined } : undefined
+        trigger: event.trigger ? { ...event.trigger, path: event.trigger.path ? "agent://private" : undefined } : undefined
       }))
     } : {}),
     ...(message.tool_calls ? {

@@ -25,7 +25,21 @@
       "properties": {
         "id": { "$ref": "#/$defs/identifier" },
         "name": { "type": "string", "minLength": 1 },
-        "description": { "type": "string", "minLength": 1 }
+        "description": { "type": "string", "minLength": 1 },
+        "promise": { "type": "string", "minLength": 1 },
+        "boundaries": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "offer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["amount_minor", "currency"],
+          "properties": {
+            "model": { "type": "string", "enum": ["per_delivery", "subscription"] },
+            "amount_minor": { "type": "integer", "minimum": 0 },
+            "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+            "unit": { "type": "string", "minLength": 1 }
+          }
+        },
+        "presentation": { "type": "object", "additionalProperties": true }
       }
     },
     "instructions": {

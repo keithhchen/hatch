@@ -1,3 +1,0 @@
-The isolated semantic pass produced a private source pack for Signal Resume Review from the complete raw intake. It wrote nine provenance-bearing normalized source documents, 42 source facts, nine composed operational rules, four separated synthetic-QA categories, and release holdouts that are not reused as few-shots.
-
-No Creator-authored JSON, claim labels, prompt, biography, result, or authority statement was requested. The Factory generated those internal construction artifacts from the raw directory and one-sentence product intent. The compiler remains responsible for independently checking raw-intake provenance, support closure, held-out separation, public/private boundaries, and release integrity.

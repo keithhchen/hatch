@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { strToU8, zipSync } from "fflate";
 import { test } from "node:test";
+import { AgentCorpusResolver } from "./agentCorpus.js";
 import { RegistryStoreTs } from "./registryStore.js";
 
 function digest(text: string): string { return `sha256:${createHash("sha256").update(text).digest("hex")}`; }
@@ -18,7 +19,15 @@ function bundle(agentName = "Signal Review"): Uint8Array {
     contract_version: "1",
     agent_id: "signal-review",
     creator: { id: "maya-chen", name: "Maya Chen" },
-    product: { id: "signal-review", name: agentName },
+    product: {
+      id: "signal-review",
+      name: agentName,
+      description: "Evidence-first review.",
+      promise: "Turn a resume into a signal map.",
+      boundaries: ["Does not invent evidence."],
+      offer: { model: "per_delivery", amount_minor: 0, currency: "USD", unit: "review" },
+      presentation: { accent: "fern" }
+    },
     instructions: { system: asset("system", "instructions/system.md", system) },
     skills: [],
     knowledge: { documents: [{ ...asset("cases", "knowledge/cases.md", knowledge), retrieval_only: true, source_summary: "Cases" }] },
@@ -52,8 +61,19 @@ test("TypeScript Registry publishes a clean Corpus and indexes knowledge only", 
   assert.equal(published.creator_id, "maya-chen");
   assert.equal(published.agent_id, "signal-review");
   assert.equal(calls.length, 1);
+  const runtimeResolution = await new AgentCorpusResolver(path.join(root, "corpora")).resolve("maya-chen", "signal-review");
+  assert.equal(runtimeResolution.digest, published.corpus_digest);
   const restored = await RegistryStoreTs.open({ corpusRoot: path.join(root, "corpora"), statePath, indexer: indexer as never, environment: {} });
-  assert.equal(restored.getAgentCorpus("maya-chen", "signal-review")?.corpus_digest, published.corpus_digest);
+  const restoredCorpus = restored.getAgentCorpus("maya-chen", "signal-review");
+  assert.equal(restoredCorpus?.corpus_digest, published.corpus_digest);
+  assert.equal(restoredCorpus?.product_promise, "Turn a resume into a signal map.");
+  assert.deepEqual(restoredCorpus?.product_boundaries, ["Does not invent evidence."]);
+  assert.deepEqual(restoredCorpus?.product_offer, { model: "per_delivery", amount_minor: 0, currency: "USD", unit: "review" });
+  assert.deepEqual(restoredCorpus?.presentation, { accent: "fern" });
+  const grant = await restored.grantAgentAccess("buyer-one", "maya-chen", "signal-review", "order-one");
+  assert.equal(grant.order_id, "order-one");
+  const reopened = await RegistryStoreTs.open({ corpusRoot: path.join(root, "corpora"), statePath, indexer: indexer as never, environment: {} });
+  assert.equal(reopened.listAgentAccess("buyer-one")[0]?.order_id, "order-one");
   const installed = await readFile(path.join(root, "corpora/maya-chen/signal-review/knowledge/cases.md"), "utf8");
   assert.match(installed, /Long reference material/);
 });

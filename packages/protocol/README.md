@@ -1,9 +1,8 @@
 # Hatch Protocol
 
-Canonical provider-agnostic protocol 0.3, Agent Corpus v1, and legacy Creator
-Release contract v1.
+Canonical provider-agnostic wire protocol 0.3 and Agent Corpus v1.
 
-This package owns the JSON Schema for the server/local-harness boundary. The TypeScript runtime server and Rust local runner currently mirror this schema directly; generated TS and Rust types should be introduced from this package before the protocol is expanded further.
+This package owns the JSON Schema for the server/Desktop local-client boundary. The TypeScript runtime server and Rust local runner currently mirror this schema directly; generated TS and Rust types should be introduced from this package before the protocol is expanded further.
 
 Current boundaries:
 
@@ -20,8 +19,6 @@ Schema:
 schemas/hatch-wire-protocol.schema.json
 schemas/agent-corpus.schema.json
 schemas/creator-agent.schema.json
-schemas/creator-release-public.schema.json
-schemas/creator-release-private.schema.json
 ```
 
 ## Agent Corpus v1
@@ -69,7 +66,7 @@ become retrieval knowledge. The retained `evals/` assets are for validation,
 not an instruction channel.
 
 `tools` is declarative. `hatch.web_search` is mandatory for every Agent.
-`hatch.local.*` declares a Desktop local-harness capability. `creator.*` HTTP
+`hatch.local.*` declares a Desktop local capability. `creator.*` HTTP
 and MCP tools carry only a `connection_ref` plus the allowed operation or tool;
 their endpoints and credentials live in Hatch Control Plane, outside the
 Corpus.
@@ -78,10 +75,8 @@ At publish time Registry binds one `creator_id + agent_id` to its own isolated
 knowledge space. A Runtime turns that binding into `hatch.file_search`; neither
 the Corpus nor the Desktop carries a knowledge-base/vector-store identifier.
 
-The public Release schema is client-safe Registry/Desktop metadata. The private
-schema is Runtime-only and contains the system prompt, protected Skill and RAG
-asset references, selected few-shots, and runtime policy. Synthetic QA, Evals,
-source traces, and other Factory/Creator-review artifacts remain outside the
-Runtime Release. Both halves carry
-the same immutable `release_id` and `sha256:` digest; private fields are never
-valid wire-protocol payload fields.
+Registry publishes exactly one current Corpus per `creator_id + agent_id` and
+records its computed `corpus_digest`. Runtime loads protected instructions and
+assets directly from that installed Corpus. Desktop receives only product
+metadata, the Agent identity, the current digest, and runtime events; it never
+receives protected Corpus files.
