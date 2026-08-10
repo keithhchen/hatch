@@ -695,12 +695,6 @@ function App() {
         return;
       }
     }
-    // The Composer is a window-session draft. Once the user sends it, clear
-    // the saved draft explicitly; assistant-ui may reset its internal input
-    // without emitting a DOM change event.
-    setComposerDraftValue("");
-    setDroppedFiles([]);
-
     // Workspace and permission changes are pending Desktop preferences until a
     // new turn starts. The native window captures this exact snapshot before
     // the Runtime may request a local tool; the renderer never sends a path or
@@ -712,6 +706,13 @@ function App() {
       setStatus(`Couldn't prepare native workspace access: ${errorMessage(error)}`);
       return;
     }
+    // The Composer is a window-session draft. Clear it only after the native
+    // authority snapshot succeeds; a failed send preparation must leave the
+    // user's text and attachments recoverable instead of silently discarding
+    // them. assistant-ui may reset its internal input without emitting a DOM
+    // change event, so this explicit projection remains necessary.
+    setComposerDraftValue("");
+    setDroppedFiles([]);
     workspaceRef.current = accessSnapshot.displayPath;
     workspaceGrantRef.current = workspaceGrant;
     permissionRef.current = accessSnapshot.permissionMode;
@@ -741,7 +742,11 @@ function App() {
     patchWindowContext({ activeRun: activeRunRef.current });
     setMessages((current) => [
       ...current,
-      makeUserMessage(`${runId}_user`, content, startedAt),
+      // Keep the optimistic projection faithful to what Runtime receives.
+      // Native drop contents are bounded and marked as untrusted by
+      // appendNativeDropContext; omitting them here made the local transcript
+      // disagree with the durable Conversation until the next hydration.
+      makeUserMessage(`${runId}_user`, messageContent, startedAt),
       makeAssistantPlaceholder(assistantId, runId, startedAt)
     ]);
     setRunning(true);
@@ -2039,6 +2044,12 @@ function App() {
     return () => document.removeEventListener("contextmenu", suppressProductContextMenu, true);
   }, []);
 
+  const pendingApprovalEntry = Object.entries(approvalRequests)
+    .find(([, request]) => request?.status === "pending");
+  const pendingApproval = pendingApprovalEntry
+    ? { toolCallId: pendingApprovalEntry[0], ...pendingApprovalEntry[1] }
+    : null;
+
   function clearInterruptedRun() {
     activeRunRef.current = null;
     setInterruptedRun(null);
@@ -2533,6 +2544,12 @@ function App() {
                   <ThreadPrimitive.Messages components={{ Message: HatchMessage }} />
                 </ThreadPrimitive.Viewport>
                 <ThreadPrimitive.ViewportFooter className="composer-footer">
+                  {pendingApproval ? (
+                    <ComposerApprovalBanner
+                      approval={pendingApproval}
+                      onResolve={resolveToolApproval}
+                    />
+                  ) : null}
                   <ComposerPrimitive.Root className="composer">
                     <DesktopComposerInput
                       key={conversationId}
@@ -2863,6 +2880,25 @@ function DesktopComposerInput({
       {...props}
       onChange={(event) => onDraftChange?.(event.target.value)}
     />
+  );
+}
+
+function ComposerApprovalBanner({ approval, onResolve }) {
+  const message = approval?.message ?? {};
+  const reason = message.reason || approvalReasonText(message);
+  const command = message.name === "shell_exec" ? fullShellCommand(message) : "";
+  return (
+    <div className="composer-approval-banner" role="alert" aria-live="assertive">
+      <div className="composer-approval-copy">
+        <strong>Approval needed</strong>
+        <span>{reason}</span>
+        {command ? <code title={command}>{command}</code> : null}
+      </div>
+      <div className="approval-actions composer-approval-actions">
+        <button type="button" onClick={() => onResolve?.(approval.toolCallId, true)}>Allow</button>
+        <button className="secondary" type="button" onClick={() => onResolve?.(approval.toolCallId, false)}>Deny</button>
+      </div>
+    </div>
   );
 }
 

@@ -1305,6 +1305,61 @@ h2 {
   z-index: 5;
 }
 
+/* A pending tool approval is anchored to the composer as a durable action,
+ * not only rendered in the historical tool row.  This keeps the decision
+ * reachable while the transcript scrolls and makes the high-risk boundary
+ * legible in every window tier without introducing a blocking OS sheet. */
+.composer-approval-banner {
+  align-items: center;
+  background: color-mix(in srgb, #fffaf0 88%, var(--hatch-panel));
+  border: 1px solid #e2d0a3;
+  border-radius: 10px;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin: 0 auto 8px;
+  max-width: 960px;
+  min-width: 0;
+  padding: 8px 10px;
+  position: relative;
+  width: 100%;
+  z-index: 1;
+}
+
+.composer-approval-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.composer-approval-copy strong {
+  color: #45391f;
+  font-size: 12px;
+}
+
+.composer-approval-copy span {
+  color: #6d6148;
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-approval-copy code {
+  color: #6d6148;
+  font-family: var(--hatch-font-mono);
+  font-size: 11px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-approval-actions {
+  flex: 0 0 auto;
+}
+
 .composer {
   align-items: stretch;
   background: var(--hatch-panel);
@@ -2269,6 +2324,15 @@ button.composer-control:focus-visible {
   .approval-gate {
     align-items: stretch;
     grid-template-columns: 1fr;
+  }
+
+  .composer-approval-banner {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .composer-approval-actions {
+    justify-content: flex-end;
   }
 }
 
