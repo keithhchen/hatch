@@ -9,8 +9,10 @@
 
 use std::{
     collections::HashMap,
+    fs,
+    io::Write,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
 };
 
 use serde::{Deserialize, Serialize};
@@ -57,6 +59,98 @@ const CONTEXT_TOOL_COPY_OUTPUT: &str = "hatch.context.tool.copy-output";
 
 const MAX_CONVERSATION_ID_BYTES: usize = 256;
 const MAX_CONTEXT_TARGET_BYTES: usize = 1_024;
+const CONVERSATION_WINDOW_MANIFEST_FILE: &str = "conversation-windows.json";
+const CONVERSATION_WINDOW_MANIFEST_SCHEMA_VERSION: u32 = 1;
+const MAX_RESTORED_CONVERSATION_WINDOWS: usize = 16;
+const MAX_CONVERSATION_WINDOW_MANIFEST_BYTES: usize = 64 * 1024;
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ConversationWindowManifest {
+    schema_version: u32,
+    conversation_ids: Vec<String>,
+}
+
+impl Default for ConversationWindowManifest {
+    fn default() -> Self {
+        Self {
+            schema_version: CONVERSATION_WINDOW_MANIFEST_SCHEMA_VERSION,
+            conversation_ids: Vec::new(),
+        }
+    }
+}
+
+fn conversation_window_manifest_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+fn normalize_manifest_conversation_ids(ids: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut normalized = ids
+        .into_iter()
+        .filter_map(|id| validate_conversation_id(&id).ok())
+        .collect::<Vec<_>>();
+    normalized.sort();
+    normalized.dedup();
+    normalized.truncate(MAX_RESTORED_CONVERSATION_WINDOWS);
+    normalized
+}
+
+fn conversation_window_manifest_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("conversation_window_manifest_path_failed: {error}"))?
+        .join(CONVERSATION_WINDOW_MANIFEST_FILE))
+}
+
+fn read_conversation_window_manifest<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<ConversationWindowManifest, String> {
+    let path = conversation_window_manifest_path(app)?;
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(ConversationWindowManifest::default())
+        }
+        Err(error) => return Err(format!("conversation_window_manifest_read_failed: {error}")),
+    };
+    if bytes.len() > MAX_CONVERSATION_WINDOW_MANIFEST_BYTES {
+        return Err("conversation_window_manifest_invalid: Manifest is too large".into());
+    }
+    let mut manifest: ConversationWindowManifest = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("conversation_window_manifest_invalid: {error}"))?;
+    if manifest.schema_version != CONVERSATION_WINDOW_MANIFEST_SCHEMA_VERSION {
+        return Err("conversation_window_manifest_invalid: Unsupported schema version".into());
+    }
+    manifest.conversation_ids = normalize_manifest_conversation_ids(manifest.conversation_ids);
+    Ok(manifest)
+}
+
+fn write_conversation_window_manifest<R: Runtime>(
+    app: &AppHandle<R>,
+    manifest: &ConversationWindowManifest,
+) -> Result<(), String> {
+    let path = conversation_window_manifest_path(app)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("conversation_window_manifest_write_failed: {error}"))?;
+    }
+    let temporary = path.with_extension("json.tmp");
+    let bytes = serde_json::to_vec(manifest)
+        .map_err(|error| format!("conversation_window_manifest_encode_failed: {error}"))?;
+    let mut file = fs::OpenOptions::new();
+    file.create(true).truncate(true).write(true);
+    let mut file = file
+        .open(&temporary)
+        .map_err(|error| format!("conversation_window_manifest_write_failed: {error}"))?;
+    file.write_all(&bytes)
+        .map_err(|error| format!("conversation_window_manifest_write_failed: {error}"))?;
+    file.sync_all()
+        .map_err(|error| format!("conversation_window_manifest_sync_failed: {error}"))?;
+    fs::rename(&temporary, &path)
+        .map_err(|error| format!("conversation_window_manifest_commit_failed: {error}"))
+}
 
 /// The renderer projects only presentational command state into this value.
 /// It is deliberately window-scoped and never grants access to a workspace,
@@ -226,6 +320,7 @@ pub struct NativeCommandRouter {
 #[derive(Default)]
 struct NativeCommandRouterState {
     active_window_label: Option<String>,
+    preserve_conversation_manifest_on_exit: bool,
     command_state_by_window: HashMap<String, NativeCommandState>,
     conversations_by_id: HashMap<String, ConversationWindowEntry>,
     conversation_by_label: HashMap<String, String>,
@@ -371,6 +466,9 @@ impl NativeCommandRouter {
             WindowEvent::Focused(false) => {}
             WindowEvent::Destroyed => {
                 self.clear_window(window.label());
+                if !self.should_preserve_conversation_manifest() {
+                    let _ = persist_conversation_window_manifest(window.app_handle(), self);
+                }
                 let _ = self.refresh_native_menu(window.app_handle());
             }
             _ => {}
@@ -385,6 +483,23 @@ impl NativeCommandRouter {
                 .entry(label.to_string())
                 .or_insert_with(NativeCommandState::default);
         }
+    }
+
+    /// Keep the manifest intact while Tauri tears down windows for a normal
+    /// application quit/restart. A user closing one conversation window does
+    /// not set this flag, so that individual window is removed from the next
+    /// manifest snapshot.
+    pub fn preserve_conversation_manifest_on_exit(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.preserve_conversation_manifest_on_exit = true;
+        }
+    }
+
+    fn should_preserve_conversation_manifest(&self) -> bool {
+        self.state
+            .lock()
+            .map(|state| state.preserve_conversation_manifest_on_exit)
+            .unwrap_or(false)
     }
 
     fn clear_active_window_if(&self, label: &str) {
@@ -500,6 +615,16 @@ impl NativeCommandRouter {
         app.set_menu(menu)
             .map(|_| ())
             .map_err(|error| format!("native_menu_install_failed: {error}"))
+    }
+
+    fn conversation_ids(&self) -> Result<Vec<String>, String> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| "Native command router is unavailable")?;
+        Ok(normalize_manifest_conversation_ids(
+            state.conversations_by_id.keys().cloned(),
+        ))
     }
 
     /// Remove transient context state and any reverse conversation lookup as
@@ -730,6 +855,47 @@ impl NativeCommandRouter {
     }
 }
 
+fn persist_conversation_window_manifest<R: Runtime>(
+    app: &AppHandle<R>,
+    router: &NativeCommandRouter,
+) -> Result<(), String> {
+    let _guard = conversation_window_manifest_lock()
+        .lock()
+        .map_err(|_| "Conversation window manifest lock is unavailable")?;
+    let manifest = ConversationWindowManifest {
+        schema_version: CONVERSATION_WINDOW_MANIFEST_SCHEMA_VERSION,
+        conversation_ids: router.conversation_ids()?,
+    };
+    write_conversation_window_manifest(app, &manifest)
+}
+
+/// Recreate the native conversation windows left in app-data by a previous
+/// process. The manifest contains only server-issued conversation IDs; each
+/// restored WebView still performs normal auth, account binding, workspace
+/// revalidation and snapshot hydration before it can run anything.
+pub fn restore_conversation_windows<R: Runtime>(
+    app: &AppHandle<R>,
+    router: &NativeCommandRouter,
+) -> Result<usize, String> {
+    let _guard = conversation_window_manifest_lock()
+        .lock()
+        .map_err(|_| "Conversation window manifest lock is unavailable")?;
+    let manifest = read_conversation_window_manifest(app)?;
+    drop(_guard);
+
+    let mut restored = 0;
+    for conversation_id in manifest.conversation_ids {
+        if open_conversation_window_impl(app, conversation_id, router, false).is_ok() {
+            restored += 1;
+        }
+    }
+    // Rewrite after filtering invalid/stale IDs and after all builders have
+    // reserved their labels. A corrupted or over-sized manifest therefore
+    // cannot make every subsequent launch retry the same bad entries.
+    persist_conversation_window_manifest(app, router)?;
+    Ok(restored)
+}
+
 /// Install one native application menu for all Hatch windows. macOS displays
 /// an app-wide menu; the router's focused-window state is updated by
 /// `WindowEvent::Focused`, so a menu selection still reaches the correct
@@ -865,8 +1031,15 @@ pub async fn open_conversation_window(
     router: State<'_, NativeCommandRouter>,
 ) -> Result<OpenConversationWindowResult, String> {
     let conversation_id = validate_conversation_id(&conversation_id)?;
-    let router = router.inner().clone();
+    open_conversation_window_impl(&app, conversation_id, router.inner(), true)
+}
 
+fn open_conversation_window_impl<R: Runtime>(
+    app: &AppHandle<R>,
+    conversation_id: String,
+    router: &NativeCommandRouter,
+    persist_manifest: bool,
+) -> Result<OpenConversationWindowResult, String> {
     // A previous ready entry can become stale if a platform destroys a window
     // before its Destroyed event reaches our registry. Recover once instead of
     // returning a dead label; a Creating entry remains reserved to prevent two
@@ -917,7 +1090,7 @@ pub async fn open_conversation_window(
                 let page_conversation_id = conversation_id.clone();
                 let page_label = label.clone();
                 let builder = WebviewWindowBuilder::new(
-                    &app,
+                    app,
                     label.clone(),
                     WebviewUrl::App(conversation_window_path(&conversation_id)),
                 )
@@ -949,6 +1122,14 @@ pub async fn open_conversation_window(
                 if let Err(error) = builder.build() {
                     router.forget_conversation_if(&conversation_id, &label);
                     return Err(format!("native_window_create_failed: {error}"));
+                }
+
+                if persist_manifest {
+                    // A manifest write failure must not make an already
+                    // visible conversation window unusable. The frame/context
+                    // settings path is likewise best effort; a later launch
+                    // simply starts with the durable main window.
+                    let _ = persist_conversation_window_manifest(app, router);
                 }
 
                 return Ok(OpenConversationWindowResult {
@@ -1405,13 +1586,14 @@ mod tests {
     use super::{
         app_menu_command, application_command_definition, artifact_open_menu_label,
         artifact_reveal_menu_label, checked_command_label, context_menu_command,
-        conversation_window_label, validate_context_position, validate_context_target,
-        validate_conversation_id, ConversationReservation, ConversationWindowPhase,
-        NativeCommandRouter, NativeCommandState, NativeContextMenuKind, NativeContextMenuPosition,
-        NativeMenuSnapshot, COMMAND_ABOUT_OPEN, COMMAND_CONVERSATION_NEW,
-        COMMAND_CONVERSATION_NEW_WINDOW, COMMAND_INSPECTOR_TOGGLE, COMMAND_RUN_STOP,
-        COMMAND_SETTINGS_OPEN, COMMAND_SIDEBAR_TOGGLE, COMMAND_VIEW_ZOOM_IN, COMMAND_VIEW_ZOOM_OUT,
-        COMMAND_VIEW_ZOOM_RESET, COMMAND_WORKSPACE_CHOOSE,
+        conversation_window_label, normalize_manifest_conversation_ids, validate_context_position,
+        validate_context_target, validate_conversation_id, ConversationReservation,
+        ConversationWindowPhase, NativeCommandRouter, NativeCommandState, NativeContextMenuKind,
+        NativeContextMenuPosition, NativeMenuSnapshot, COMMAND_ABOUT_OPEN,
+        COMMAND_CONVERSATION_NEW, COMMAND_CONVERSATION_NEW_WINDOW, COMMAND_INSPECTOR_TOGGLE,
+        COMMAND_RUN_STOP, COMMAND_SETTINGS_OPEN, COMMAND_SIDEBAR_TOGGLE, COMMAND_VIEW_ZOOM_IN,
+        COMMAND_VIEW_ZOOM_OUT, COMMAND_VIEW_ZOOM_RESET, COMMAND_WORKSPACE_CHOOSE,
+        MAX_RESTORED_CONVERSATION_WINDOWS,
     };
 
     #[test]
@@ -1426,6 +1608,38 @@ mod tests {
             || character.is_ascii_digit()
             || character == '-'));
         assert!(first.len() <= 64);
+    }
+
+    #[test]
+    fn conversation_window_manifest_normalizes_ids_and_bounds_restore_count() {
+        let mut ids = vec![
+            "conv-b".to_string(),
+            "conv-a".to_string(),
+            "conv-a".to_string(),
+            "bad\nvalue".to_string(),
+            "".to_string(),
+        ];
+        ids.extend(
+            (0..(MAX_RESTORED_CONVERSATION_WINDOWS + 4)).map(|index| format!("conv-{index:02}")),
+        );
+
+        let normalized_duplicates = normalize_manifest_conversation_ids(vec![
+            "conv-a".to_string(),
+            "conv-a".to_string(),
+            "conv-b".to_string(),
+        ]);
+        let normalized = normalize_manifest_conversation_ids(ids);
+        assert!(normalized.len() <= MAX_RESTORED_CONVERSATION_WINDOWS);
+        assert!(normalized.windows(2).all(|pair| pair[0] < pair[1]));
+        assert_eq!(
+            normalized_duplicates
+                .iter()
+                .filter(|id| *id == "conv-a")
+                .count(),
+            1
+        );
+        assert!(!normalized.iter().any(|id| id.contains('\n')));
+        assert!(!normalized.iter().any(String::is_empty));
     }
 
     #[test]

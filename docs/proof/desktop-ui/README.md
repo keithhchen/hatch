@@ -34,9 +34,10 @@ The preview's `New window` action calls the same native
 bounded `conv_preview_*` identifier. It therefore exercises real Tauri
 conversation-window creation, native title-bar ownership, focus routing, and
 close lifecycle without requiring an account. This is lifecycle evidence only:
-it does not prove cloud Conversation Library hydration, durable Run recovery,
-or crash/restart restoration. The latter remain covered by the runtime/native
-tests and the external rows in the acceptance matrix.
+it does not prove cloud Conversation Library hydration or durable Run recovery.
+Dynamic-window restart restoration is covered separately by a native-owned
+app-data manifest and a clean-quit UAT; crash/reload recovery of the renderer
+and cloud Run remains an external row in the acceptance matrix.
 
 On 2026-08-11 macOS UAT, a uniquely named preview bundle opened the primary
 window plus two `Hatch — Conversation` windows. The accessibility tree exposed
@@ -44,6 +45,15 @@ different `conv_preview_*` URLs in each window. Closing the front window
 revealed the second window; closing that one returned to the primary window.
 A screenshot was captured during this run; it is intentionally not checked in
 as a product fixture because the generated IDs are ephemeral.
+
+The same uniquely named preview then executed a restart loop. Two server-shaped
+`conv_preview_*` windows were opened, `conversation-windows.json` contained
+both IDs, `Cmd-Q` preserved the manifest, and the next launch restored a
+`Hatch — Conversation` window. Closing the front restored window exposed the
+other conversation; the manifest then contained only the surviving ID. This
+proves native manifest persistence, normal-quit restore, stable labels and
+per-window close cleanup. It does not claim crash recovery of an in-flight
+renderer or Run.
 
 The rebuilt preview now subscribes to the same semantic native-command bridge
 as the signed-in shell. In a fresh process, the macOS View menu was opened,
@@ -68,7 +78,7 @@ resulting capture is checked in as
 ## Automated evidence recorded with these captures
 
 - Renderer: 21 files / 84 tests
-- Rust Tauri library: 40 passed / 1 ignored (unlocked Keychain smoke)
+- Rust Tauri library: 41 passed / 1 ignored (unlocked Keychain smoke)
 - Runtime: 226 Node subtests passed with an isolated `HATCH_RUNTIME_DATA_DIR`
 - LocalRunner: 43 tests passed (filesystem, shell and macOS Seatbelt suites)
 - `npm run build:web`

@@ -2023,6 +2023,11 @@ pub fn run() {
             let router = app.state::<window_commands::NativeCommandRouter>();
             window_commands::install_native_menu(app.handle(), router.inner())
                 .map_err(std::io::Error::other)?;
+            // Conversation windows are native-owned session surfaces. Their
+            // manifest is restored before the main renderer finishes booting;
+            // each restored WebView still revalidates auth, account binding,
+            // workspace grant and conversation snapshot on its own.
+            let _ = window_commands::restore_conversation_windows(app.handle(), router.inner());
             Ok(())
         })
         .on_menu_event(|app, event| {
@@ -2116,8 +2121,19 @@ pub fn run() {
                 cancel_active_tool_calls(&active);
             }
         })
-        .run(tauri::generate_context!())
-        .expect("failed to run Hatch desktop app");
+        .build(tauri::generate_context!())
+        .expect("failed to build Hatch desktop app")
+        .run(|app: &AppHandle, event| {
+            if matches!(event, tauri::RunEvent::ExitRequested { .. }) {
+                if let Some(router) = app.try_state::<window_commands::NativeCommandRouter>() {
+                    // Tauri destroys every window during a normal quit. Keep
+                    // the manifest intact so the next launch can recreate
+                    // the same conversation windows; an individual close
+                    // outside app-exit still removes only that entry.
+                    router.preserve_conversation_manifest_on_exit();
+                }
+            }
+        });
 }
 
 fn to_string(error: impl std::fmt::Display) -> String {
