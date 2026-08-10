@@ -20,7 +20,7 @@
 | Regular / compact / minimal layout tier | PASS（macOS UAT） | `regular-1180x780`、`compact-860x600`、`minimal-640x600`；preview accessibility tree | 多显示器和 Windows 尺寸行为 |
 | Inspector 先折叠，Sidebar 不堆到主内容上方 | PASS（macOS UAT） | compact/minimal captures；tier controller tests | Windows DPI/resize 真机循环 |
 | Pane divider pointer/keyboard/double-click | PASS（本机） | renderer tests、ARIA splitter implementation | VoiceOver/Narrator 朗读与真实系统输入 |
-| Toolbar / composer overflow 与 Native `…` 菜单 | PASS（本机 + macOS UAT） | semantic registry、`show_native_command_menu`、View menu UAT | Windows menu metrics 与高 DPI popup 定位 |
+| Toolbar / composer overflow 与 Native `…` 菜单 | PASS（本机 + macOS UAT） | semantic registry、`show_native_command_menu`、View menu UAT；fresh preview 已验证 `Hide Sidebar` → pane state → 下一次菜单 `Show Sidebar` 的完整闭环 | Windows menu metrics 与高 DPI popup 定位 |
 | Table/code/diff/log 局部 overflow | PASS（本机） | wrapper CSS、renderer tests/build；无 page-level overflow contract | 80%/150%/200% 在双平台的视觉回归 |
 | 每窗口 Conversation、Workspace、draft、zoom、scroll、cursor 独立保存 | PARTIAL | native settings schema、account-scoped window context、renderer/native tests；macOS uniquely named preview UAT 实际创建主窗口 + 两个不同 `conv_preview_*` conversation windows，关闭前窗后其余窗口仍存活；Rust 三窗口关闭中间窗口回归测试 | 三个并行真实窗口关闭/重开及 crash/restart E2E；云端 hydration 的真实账户窗口验收 |
 | Conversation Library 与 server-issued IDs | PASS（本机） | Runtime REST/WS tests（含同一 Account 的 Agent A 三会话与 Agent B 两会话层级/跨 Agent 拒绝）、renderer client tests；不再以 timestamp 作为新 ID | 端到端真实账户与真实桌面窗口的 A/B agent 五会话验收 |
@@ -48,4 +48,4 @@ desktop-app: npm run build  # strict ad-hoc DMG UAT
 ```
 
 `npm run build:app` 与 `npm run build` 产物是 ad-hoc/UAT `.app`/DMG，当前验证的 DMG 为
-`Hatch_0.1.0_aarch64.dmg`（`sha256:f094da8c27d3314b68b4ef0df59fc3ab0f8a6d627aab9f4c3a2da7ac91ee8d41`）。它们不是可发布的 notarized artifact。正式发布必须在 CI 注入真实 Developer ID/Team ID，并完成签名、notarization、安装后重启和无 prompt 验收。
+`Hatch_0.1.0_aarch64.dmg`（`sha256:9342140e5ec4cc0707ded151bff7fe79183edf97a342ae9601c5719f5d9c5c3c`）。它们不是可发布的 notarized artifact。正式发布必须在 CI 注入真实 Developer ID/Team ID，并完成签名、notarization、安装后重启和无 prompt 验收。

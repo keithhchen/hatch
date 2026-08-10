@@ -45,6 +45,16 @@ revealed the second window; closing that one returned to the primary window.
 A screenshot was captured during this run; it is intentionally not checked in
 as a product fixture because the generated IDs are ephemeral.
 
+The rebuilt preview now subscribes to the same semantic native-command bridge
+as the signed-in shell. In a fresh process, the macOS View menu was opened,
+`Hide Sidebar` was selected, and the accessibility tree then exposed the
+conversation surface without the source list and a `Show sidebar` toolbar
+control. Reopening View immediately changed the native item to `Show Sidebar`.
+This proves the full native-menu → semantic event → pane state → native-menu
+label loop, rather than only proving that a popup can be displayed. The
+resulting capture is checked in as
+`native-menu-sidebar-collapsed-1180x780.jpeg`.
+
 | Capture | What it proves |
 | --- | --- |
 | `regular-1180x780.png` | Native traffic lights, integrated titlebar/toolbar, source-list sidebar, conversation surface, inspector |
@@ -52,6 +62,7 @@ as a product fixture because the generated IDs are ephemeral.
 | `minimal-640x600.png` | Main surface remains usable at the configured minimum; side panes are off-canvas |
 | `minimal-sidebar-overlay.png` | Sidebar opens as a focus-scoped overlay and returns focus to its opener |
 | `minimal-inspector-overlay.png` | Inspector opens as a focus-scoped trailing overlay and closes with Escape |
+| `native-menu-sidebar-collapsed-1180x780.jpeg` | Native View → Hide Sidebar changes the live pane and the next View menu says Show Sidebar |
 | `final-sign-in-1180x780.jpeg` | Final release `.app` launch shows the ordinary Sign in surface without a Login Keychain unlock prompt |
 
 ## Automated evidence recorded with these captures
@@ -65,9 +76,9 @@ as a product fixture because the generated IDs are ephemeral.
 - `npm run build` (strict ad-hoc/UAT DMG verification; not a publishable notarized artifact)
 
 The native menu was also exercised against the built `.app`: View exposes
-Show Sidebar, Show Inspector, Zoom In, Zoom Out, Actual Size, and Enter Full
-Screen; Settings and About open as independent native auxiliary windows. The
-release build displayed the ordinary Sign in screen without a
+dynamic Hide/Show Sidebar and Hide/Show Inspector labels, plus Zoom In, Zoom
+Out, Actual Size, and Enter Full Screen; Settings and About open as independent
+native auxiliary windows. The release build displayed the ordinary Sign in screen without a
 Login Keychain unlock prompt; persistent Keychain access remains restricted to
 the separately configured Developer ID distribution lane. Workspace picker
 calls are parented to the invoking window, and artifact Reveal accepts only a

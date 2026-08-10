@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { DesktopWindowShell } from "./desktop-shell.jsx";
 import { DESKTOP_LAYOUT } from "./desktop-layout.js";
@@ -7,7 +8,9 @@ import {
   conversationIdFromLocation,
   isEditableContextTarget,
   nativeContextRequest,
-  requestNativeContextMenu
+  requestNativeContextMenu,
+  routeNativeCommand,
+  subscribeNativeCommands
 } from "./native-commands.js";
 
 const AGENTS = [
@@ -60,6 +63,13 @@ export function DesktopPreview() {
   const [sidebarWidth, setSidebarWidth] = useState(DESKTOP_LAYOUT.sidebar.default);
   const [inspectorWidth, setInspectorWidth] = useState(DESKTOP_LAYOUT.inspector.default);
   const [selectedAgent, setSelectedAgent] = useState(AGENTS[0]);
+  const handleNativePreviewCommand = useCallback((payload) => {
+    void routeNativeCommand(payload, {
+      onNewConversationWindow: openPreviewConversationWindow,
+      onToggleSidebar: () => setSidebarPreference((current) => current === "open" ? "closed" : "open"),
+      onToggleInspector: () => setInspectorPreference((current) => current === "open" ? "closed" : "open")
+    });
+  }, [openPreviewConversationWindow]);
   const showPreviewContextMenu = useCallback((event, request) => {
     const intercepted = requestNativeContextMenu({
       event,
@@ -69,6 +79,30 @@ export function DesktopPreview() {
     });
     return intercepted;
   }, []);
+
+  useEffect(() => {
+    if (!window.__TAURI_INTERNALS__) return undefined;
+    return subscribeNativeCommands({
+      listenImpl: listen,
+      onCommand: handleNativePreviewCommand,
+      onError: () => {}
+    });
+  }, [handleNativePreviewCommand]);
+
+  useEffect(() => {
+    if (!window.__TAURI_INTERNALS__) return;
+    void invoke("set_native_command_state", {
+      state: {
+        newConversationEnabled: true,
+        newWindowEnabled: true,
+        workspaceEnabled: true,
+        settingsEnabled: true,
+        runStopEnabled: false,
+        sidebarVisible: sidebarPreference === "open",
+        inspectorVisible: inspectorPreference === "open"
+      }
+    }).catch(() => {});
+  }, [inspectorPreference, sidebarPreference]);
 
   useEffect(() => {
     if (!window.__TAURI_INTERNALS__) return undefined;
