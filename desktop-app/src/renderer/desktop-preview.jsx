@@ -4,6 +4,7 @@ import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { DesktopWindowShell } from "./desktop-shell.jsx";
 import { DESKTOP_LAYOUT } from "./desktop-layout.js";
 import {
+  conversationIdFromLocation,
   isEditableContextTarget,
   nativeContextRequest,
   requestNativeContextMenu
@@ -20,8 +21,19 @@ const AGENTS = [
  * title-bar behavior can be checked without a real account or model run.
  */
 export function DesktopPreview() {
+  const [previewConversationId] = useState(
+    () => conversationIdFromLocation() || "conv_preview_database_tools"
+  );
+  const openPreviewConversationWindow = useCallback(async () => {
+    if (!window.__TAURI_INTERNALS__) return;
+    const suffix = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    await invoke("open_conversation_window", {
+      conversationId: `conv_preview_${suffix}`
+    });
+  }, []);
+
   useEffect(() => {
-    const title = "Hatch · Desktop Preview";
+    const title = `Hatch · Preview · ${previewConversationId}`;
     document.title = title;
     if (!window.__TAURI_INTERNALS__) return undefined;
     const previewTier = String(import.meta.env.VITE_HATCH_DESKTOP_PREVIEW_TIER || "")
@@ -42,7 +54,7 @@ export function DesktopPreview() {
     }
     void current.setFocus();
     return undefined;
-  }, []);
+  }, [previewConversationId]);
   const [sidebarPreference, setSidebarPreference] = useState("open");
   const [inspectorPreference, setInspectorPreference] = useState("open");
   const [sidebarWidth, setSidebarWidth] = useState(DESKTOP_LAYOUT.sidebar.default);
@@ -77,8 +89,8 @@ export function DesktopPreview() {
       onInspectorPreferenceChange={setInspectorPreference}
       onSidebarWidthChange={setSidebarWidth}
       onInspectorWidthChange={setInspectorWidth}
-      sidebar={<PreviewSidebar selectedAgent={selectedAgent} onSelectAgent={setSelectedAgent} onContextMenu={showPreviewContextMenu} />}
-      toolbar={<PreviewToolbar selectedAgent={selectedAgent} />}
+      sidebar={<PreviewSidebar selectedAgent={selectedAgent} onSelectAgent={setSelectedAgent} onContextMenu={showPreviewContextMenu} conversationId={previewConversationId} onOpenConversationWindow={openPreviewConversationWindow} />}
+      toolbar={<PreviewToolbar selectedAgent={selectedAgent} conversationId={previewConversationId} onOpenConversationWindow={openPreviewConversationWindow} />}
       inspector={<PreviewInspector selectedAgent={selectedAgent} />}
     >
       <section className="chat-shell desktop-chat-shell preview-chat-shell">
@@ -130,10 +142,10 @@ export function DesktopPreview() {
   );
 }
 
-function PreviewSidebar({ selectedAgent, onSelectAgent, onContextMenu }) {
+function PreviewSidebar({ selectedAgent, onSelectAgent, onContextMenu, conversationId, onOpenConversationWindow }) {
   return (
     <div className="desktop-sidebar-content">
-      <div className="desktop-sidebar-heading"><span className="hatch-wordmark">Hatch</span><button className="sidebar-new-conversation" type="button"><span>+</span><span>New conversation</span></button></div>
+      <div className="desktop-sidebar-heading"><span className="hatch-wordmark">Hatch</span><button className="sidebar-new-conversation" type="button" onClick={onOpenConversationWindow} aria-label="Open preview conversation in a new window"><span>+</span><span>New window</span></button></div>
       <nav className="desktop-source-list" aria-label="Creator Agents">
         <div className="desktop-source-list-label">Your agents</div>
         {AGENTS.map((agent) => (
@@ -142,19 +154,20 @@ function PreviewSidebar({ selectedAgent, onSelectAgent, onContextMenu }) {
           </button>
         ))}
         <div className="desktop-source-list-label conversations-label">Conversations</div>
-        <button type="button" className="desktop-source-row conversation selected" onContextMenu={(event) => onContextMenu?.(event, { kind: "conversation", target: "conv_preview_database_tools" })}><span className="conversation-row-glyph">⌁</span><span className="desktop-source-row-copy"><strong>Database tooling review</strong><small>Current conversation</small></span></button>
+        <button type="button" className="desktop-source-row conversation selected" onContextMenu={(event) => onContextMenu?.(event, { kind: "conversation", target: conversationId })}><span className="conversation-row-glyph">⌁</span><span className="desktop-source-row-copy"><strong>Database tooling review</strong><small>{conversationId}</small></span></button>
       </nav>
       <div className="desktop-sidebar-footer"><span className="avatar">SU</span><span className="desktop-sidebar-account"><strong>Seth UAT</strong><small>Signed in</small></span><button type="button" className="profile-sign-out">Sign out</button></div>
     </div>
   );
 }
 
-function PreviewToolbar({ selectedAgent }) {
+function PreviewToolbar({ selectedAgent, conversationId, onOpenConversationWindow }) {
   return (
     <div className="desktop-toolbar-context">
-      <div className="desktop-toolbar-title"><span className="label">Conversation</span><strong>Database tooling review</strong></div>
+      <div className="desktop-toolbar-title"><span className="label">Conversation</span><strong>Database tooling review</strong><small>{conversationId}</small></div>
       <span className="desktop-toolbar-separator" />
       <div className="desktop-toolbar-agent"><span className="label">Agent</span><strong>{selectedAgent.name}</strong></div>
+      <button type="button" className="secondary compact preview-open-window" onClick={onOpenConversationWindow}>New window</button>
     </div>
   );
 }

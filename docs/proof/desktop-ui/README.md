@@ -29,6 +29,15 @@ VITE_HATCH_DESKTOP_PREVIEW=1 VITE_HATCH_DESKTOP_PREVIEW_TIER=minimal \
 The preview flag is opt-in and is not set by normal development, release, or
 distribution builds.
 
+The preview's `New window` action calls the same native
+`open_conversation_window` command used by the signed-in shell, with a
+bounded `conv_preview_*` identifier. It therefore exercises real Tauri
+conversation-window creation, native title-bar ownership, focus routing, and
+close lifecycle without requiring an account. This is lifecycle evidence only:
+it does not prove cloud Conversation Library hydration, durable Run recovery,
+or crash/restart restoration. The latter remain covered by the runtime/native
+tests and the external rows in the acceptance matrix.
+
 | Capture | What it proves |
 | --- | --- |
 | `regular-1180x780.png` | Native traffic lights, integrated titlebar/toolbar, source-list sidebar, conversation surface, inspector |

@@ -1630,8 +1630,24 @@ button.composer-control:focus-visible {
   white-space: nowrap;
 }
 
+.desktop-toolbar-title small {
+  color: var(--text-secondary);
+  font-family: var(--hatch-font-mono);
+  font-size: 9px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .desktop-toolbar-title { max-width: min(28vw, 290px); }
 .desktop-toolbar-agent { max-width: min(19vw, 190px); }
+
+.preview-open-window {
+  flex: 0 0 auto;
+  font-size: 11px;
+  min-height: 28px;
+  padding: 0 8px;
+}
 
 .desktop-toolbar-separator {
   background: var(--border-separator);
