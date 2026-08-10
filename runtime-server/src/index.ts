@@ -34,6 +34,7 @@ import { verifyHatchAuthToken } from "./authToken.js";
 import {
   createOutputGuardFromEnvironment,
   GuardedAssistantOutput,
+  OUTPUT_GUARD_BLOCKED_MODEL_MESSAGE,
   PassThroughOutputGuard,
   type GuardedOutputResult,
   type OutputGuard
@@ -591,6 +592,11 @@ async function runOneTurn(
   outputGuard: OutputGuard,
   commerceEventSink?: CommerceEventSink
 ): Promise<void> {
+  const turnStarted = performance.now();
+  let setupCompleted = turnStarted;
+  let modelFirstText: number | undefined;
+  let firstSafeSegment: number | undefined;
+  const guardTiming: Array<import("./outputGuard.js").OutputGuardTiming & { released_ms?: number }> = [];
   let skillRuntime: SkillRuntime | undefined;
   let deliveredArtifact: DeliveryArtifact | undefined;
   try {
@@ -604,17 +610,31 @@ async function runOneTurn(
         message: input.message
       });
     };
-    const guardedOutput = new GuardedAssistantOutput(outputGuard, input.run_id);
+    const guardedOutput = new GuardedAssistantOutput(
+      outputGuard,
+      input.run_id,
+      undefined,
+      undefined,
+      undefined,
+      (timing) => guardTiming.push({
+        ...timing,
+        started_ms: timing.started_ms - turnStarted
+      })
+    );
     const deliveryBinding = deliveryBindingFromSession(binding);
     let approvedAssistantText = "";
     const emitReleased = async (result: GuardedOutputResult): Promise<void> => {
       for (const content of result.released) {
         approvedAssistantText += content;
+        const releasedAt = performance.now();
+        firstSafeSegment ??= releasedAt;
         await send({
           type: "assistant.delta",
           run_id: input.run_id,
           delta: { kind: "text", content }
         });
+        const timing = guardTiming.find((entry) => entry.outcome === "pass" && entry.released_ms === undefined);
+        if (timing) timing.released_ms = releasedAt - turnStarted;
       }
     };
     const commitTerminal = async (
@@ -622,7 +642,7 @@ async function runOneTurn(
       recordDelivery = true
     ): Promise<void> => {
       const content = finishReason === "content_filter"
-        ? '<runtime_status output_guard="blocked" />'
+        ? OUTPUT_GUARD_BLOCKED_MODEL_MESSAGE
         : approvedAssistantText;
       await store.append({
         type: "conversation.model_message",
@@ -641,7 +661,19 @@ async function runOneTurn(
         );
         await send({ type: "delivery.ready", run_id: input.run_id, ...receipt });
       }
-      await send({ type: "turn.completed", run_id: input.run_id, finish_reason: finishReason });
+      const completedAt = performance.now();
+      await send({
+        type: "turn.completed",
+        run_id: input.run_id,
+        finish_reason: finishReason,
+        timing: {
+          total_ms: completedAt - turnStarted,
+          setup_ms: setupCompleted - turnStarted,
+          ...(modelFirstText === undefined ? {} : { model_first_text_ms: modelFirstText - turnStarted }),
+          ...(firstSafeSegment === undefined ? {} : { first_safe_segment_ms: firstSafeSegment - turnStarted }),
+          guard: guardTiming
+        }
+      });
       await state.complete();
     };
     const sendFixedAssistant = async (content: string): Promise<void> => {
@@ -690,6 +722,7 @@ async function runOneTurn(
     const materializedAgent = binding.agentCorpusRoot
       ? await materializeAgentCorpus(binding.agentCorpusRoot, input.message.content, hello.local_tools)
       : undefined;
+    setupCompleted = performance.now();
     skillRuntime = new SkillRuntime({
       parentInput: input,
       parentState: state,
@@ -750,6 +783,7 @@ async function runOneTurn(
       await persistServerToolCallEvent(event, input, store);
       await persistSkillEvent(event, input, store);
       if (event.type === "assistant.delta" && event.delta.kind === "text") {
+        modelFirstText ??= performance.now();
         const result = await guardedOutput.push(event.delta.content);
         await emitReleased(result);
         if (result.blocked) {

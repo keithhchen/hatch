@@ -156,7 +156,13 @@ function App() {
     const runId = `run_${Date.now()}`;
     const assistantId = `${runId}_assistant`;
     const startedAt = Date.now();
-    activeRunRef.current = { runId, assistantId, text: "", startedAt };
+    activeRunRef.current = {
+      runId,
+      assistantId,
+      text: "",
+      startedAt,
+      timing: { questionSentAt: startedAt }
+    };
     localStorage.setItem(profileStorageKey(buyerProfile.id, "activeRun"), JSON.stringify({
       runId, assistantId, startedAt, conversationId
     }));
@@ -400,6 +406,8 @@ function App() {
       if (message.delta.kind === "text") {
         const activeRun = activeRunRef.current;
         if (!activeRun) return;
+        activeRun.timing.firstSafeDeltaReceivedAt ??= Date.now();
+        activeRun.timing.firstTextPaintAt ??= Date.now();
         activeRun.text += message.delta.content;
         appendAssistantText(activeRun.assistantId, message.delta.content);
       } else {
@@ -462,13 +470,14 @@ function App() {
     if (message.type === "turn.completed") {
       const activeRun = activeRunRef.current;
       if (activeRun) {
-        finishAssistant(
-          activeRun.assistantId,
-          message.finish_reason === "content_filter"
-            ? OUTPUT_FILTERED_COPY
-            : activeRun.text || "Done.",
-          message.finish_reason === "content_filter" ? "content_filter" : "completed"
-        );
+        activeRun.timing.turnCompletedReceivedAt = Date.now();
+        activeRun.timing.server = message.timing;
+        if (message.finish_reason === "content_filter") {
+          finishAssistant(activeRun.assistantId, OUTPUT_FILTERED_COPY, "content_filter");
+        } else {
+          finishAssistant(activeRun.assistantId, activeRun.text || "Done.", "completed");
+        }
+        saveAssistantTiming(activeRun.assistantId, activeRun.runId, activeRun.timing, Date.now());
       }
       activeRunRef.current = null;
       localStorage.removeItem(profileStorageKey(buyerProfile.id, "activeRun"));
@@ -750,6 +759,20 @@ function App() {
         content: parts,
         status: { type: "running" }
       };
+    }));
+  }
+
+  function saveAssistantTiming(id, runId, timing, fullResponseAt) {
+    const summary = reportTurnTiming(runId, timing, fullResponseAt);
+    updateAssistantMessage(id, (message) => ({
+      ...message,
+      metadata: {
+        ...(message.metadata ?? {}),
+        custom: {
+          ...(message.metadata?.custom ?? {}),
+          turnTiming: summary
+        }
+      }
     }));
   }
 
@@ -1499,10 +1522,12 @@ function SignInScreen({ profile, onSignIn, status, error }) {
 
 function HatchMessage() {
   const role = useMessage((message) => message.role);
+  const status = useMessage((message) => message.status);
+  const streaming = role === "assistant" && status?.type === "running";
   return (
     <MessagePrimitive.Root className={`chat-message ${role}`}>
       {role === "assistant" ? <AssistantRunHeader /> : null}
-      <div className={`message-surface ${role}`}>
+      <div className={`message-surface ${role}${streaming ? " streaming" : ""}`}>
         <MessagePrimitive.Parts
           unstable_showEmptyOnNonTextEnd={false}
           components={{
@@ -1561,10 +1586,18 @@ function AssistantRunHeader() {
           : `Answered · ${elapsed}`;
 
   return (
-    <div className="run-summary">
-      <span className={`activity-dot ${failed ? "failed" : isRunning ? "running" : "done"}`} />
-      <span>{summary}</span>
-    </div>
+    <>
+      <div className="run-summary">
+        <span className={`activity-dot ${failed ? "failed" : isRunning ? "running" : "done"}`} />
+        <span>{summary}</span>
+      </div>
+      {custom.turnTiming ? (
+        <details className="turn-timing">
+          <summary>Timing</summary>
+          <pre>{JSON.stringify(custom.turnTiming, null, 2)}</pre>
+        </details>
+      ) : null}
+    </>
   );
 }
 
@@ -1625,6 +1658,26 @@ function isTaskCheckbox(child) {
 
 function joinClassNames(...classNames) {
   return classNames.filter(Boolean).join(" ") || undefined;
+}
+
+function reportTurnTiming(runId, timing, fullResponseAt) {
+  const sinceQuestion = (timestamp) => timestamp === undefined
+    ? undefined
+    : timestamp - timing.questionSentAt;
+  const summary = {
+    run_id: runId,
+    measured_at: new Date().toISOString(),
+    client_ms: {
+      question_to_first_safe_delta: sinceQuestion(timing.firstSafeDeltaReceivedAt),
+      question_to_first_text_paint: sinceQuestion(timing.firstTextPaintAt),
+      question_to_turn_completed: sinceQuestion(timing.turnCompletedReceivedAt),
+      question_to_full_response: sinceQuestion(fullResponseAt)
+    },
+    server_ms: timing.server
+  };
+  localStorage.setItem("hatch.debug.lastTurnTiming", JSON.stringify(summary));
+  console.info("[hatch:turn-timing]", summary);
+  return summary;
 }
 
 function AssistantEmptyText() {

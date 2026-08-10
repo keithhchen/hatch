@@ -305,12 +305,82 @@ test("Output Guard releases passed segments but commits only a blocked terminal 
   assert.equal(terminalRecords[0]?.type, "conversation.model_message");
   if (terminalRecords[0]?.type === "conversation.model_message") {
     assert.equal(terminalRecords[0].finish_reason, "content_filter");
-    assert.equal(terminalRecords[0].message.content, '<runtime_status output_guard="blocked" />');
+    assert.equal(
+      terminalRecords[0].message.content,
+      "My previous response was blocked before delivery and was not shown to the user. I must not reproduce or continue the blocked content."
+    );
   }
   const visible = await store.readVisibleConversation("guard-conversation");
   assert.deepEqual(visible.map(({ role, content, finish_reason }) => ({ role, content, finish_reason })), [
     { role: "user", content: "Try to disclose the secret.", finish_reason: undefined },
     { role: "assistant", content: "", finish_reason: "content_filter" }
+  ]);
+  socket.close();
+});
+
+test("Output Guard provider errors degrade to a normal committed response", async () => {
+  const dataDir = await tempWorkspace();
+  const store = new RuntimeStore(dataDir);
+  const outputGuard: OutputGuard = {
+    async check() {
+      throw new Error("guard timeout");
+    }
+  };
+  const runtime: AgentRuntime = {
+    async *run(input) {
+      yield {
+        type: "assistant.delta",
+        run_id: input.run_id,
+        delta: { kind: "text", content: "A normal answer after Guard degradation." }
+      };
+      yield { type: "turn.completed", run_id: input.run_id, finish_reason: "stop" };
+    }
+  };
+  runtimeServer = createRuntimeServer({
+    conversationStore: store,
+    createRuntime: () => runtime,
+    outputGuard
+  });
+  const serverUrl = await listen(runtimeServer);
+  const socket = new WebSocket(serverUrl);
+  const messages: OutboundMessage[] = [];
+  socket.on("message", (data) => messages.push(JSON.parse(String(data)) as OutboundMessage));
+  await new Promise<void>((resolve, reject) => {
+    socket.once("open", resolve);
+    socket.once("error", reject);
+  });
+  socket.send(JSON.stringify({
+    type: "client.hello",
+    protocol_version: PROTOCOL_VERSION,
+    installation_id: "guard-error-test",
+    license_token: "guard-error-test",
+    local_tools: []
+  }));
+  await waitForSocketMessage(messages, (message) => message.type === "session.ready");
+  socket.send(JSON.stringify({
+    type: "client.message",
+    run_id: "run_guard_error",
+    conversation_id: "guard-error-conversation",
+    message: { role: "user", content: "Give me a normal answer." }
+  }));
+
+  const terminal = await waitForSocketMessage(messages, (message) => (
+    message.type === "turn.completed" && message.run_id === "run_guard_error"
+  ));
+  assert.equal(terminal.type, "turn.completed");
+  assert.equal(terminal.finish_reason, "stop");
+  assert.equal(
+    messages
+      .filter((message) => message.type === "assistant.delta" && message.delta.kind === "text")
+      .map((message) => message.type === "assistant.delta" ? message.delta.content : "")
+      .join(""),
+    "A normal answer after Guard degradation."
+  );
+
+  const visible = await store.readVisibleConversation("guard-error-conversation");
+  assert.deepEqual(visible.map(({ role, content, finish_reason }) => ({ role, content, finish_reason })), [
+    { role: "user", content: "Give me a normal answer.", finish_reason: undefined },
+    { role: "assistant", content: "A normal answer after Guard degradation.", finish_reason: "stop" }
   ]);
   socket.close();
 });
@@ -1355,7 +1425,7 @@ test("Pi runtime uses generic file_read for skill path loading", async () => {
   const fileList = specs.find((spec) => spec.name === "file_list");
 
   assert.match(piRuntimeSource, /new Agent\(/);
-  assert.match(piRuntimeSource, /createKimiStreamFn/);
+  assert.match(piRuntimeSource, /createPiStreamFn/);
   assert.match(runtimeSource, /modelToolSpecsForRun/);
   assert.doesNotMatch(runtimeSource, /function chatModelToolSpecs/);
   assert.match(toolsSource, /name: "file_read"[\s\S]*?locality: "hybrid"/);

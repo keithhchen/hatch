@@ -38,7 +38,7 @@ test("GuardedAssistantOutput releases semantic segments in order and always send
       done: false
     },
     {
-      content: "fgh",
+      content: "abcdefgh",
       chatId: "run_guard",
       sessionId: "run_guard",
       done: true
@@ -46,7 +46,7 @@ test("GuardedAssistantOutput releases semantic segments in order and always send
   ]);
 });
 
-test("GuardedAssistantOutput fails closed and discards unreleased content", async () => {
+test("GuardedAssistantOutput discards unreleased content on an explicit block", async () => {
   const guard = new RecordingGuard(({ content }) => content.includes("secret") ? "block" : "pass");
   const output = new GuardedAssistantOutput(guard, "run_block", 5, 7);
 
@@ -57,17 +57,30 @@ test("GuardedAssistantOutput fails closed and discards unreleased content", asyn
   assert.deepEqual(await output.push("later"), { released: [], blocked: true });
   assert.deepEqual(await output.finish(), { released: [], blocked: true });
   assert.equal(guard.calls.length, 2);
-  assert.equal(guard.calls[1]?.content, "!secret");
+  assert.equal(guard.calls[1]?.content, "hello!secret");
 });
 
-test("GuardedAssistantOutput treats provider errors as a block", async () => {
+test("GuardedAssistantOutput uses overlap for detection without releasing it twice", async () => {
+  const guard = new RecordingGuard(({ content }) => content.includes("secret") ? "block" : "pass");
+  const output = new GuardedAssistantOutput(guard, "run_overlap", 5, 7);
+
+  assert.deepEqual(await output.push("abcsecretx"), {
+    released: ["abcse"],
+    blocked: false
+  });
+  assert.deepEqual(await output.finish(), { released: [], blocked: true });
+  assert.equal(guard.calls[1]?.content, "abcsecretx");
+});
+
+test("GuardedAssistantOutput degrades provider errors to pass", async () => {
   const output = new GuardedAssistantOutput({
     async check() {
       throw new Error("provider unavailable");
     }
   }, "run_error", 5, 7);
 
-  assert.deepEqual(await output.push("abcdef"), { released: [], blocked: true });
+  assert.deepEqual(await output.push("abcdef"), { released: ["abcde"], blocked: false });
+  assert.deepEqual(await output.finish(), { released: ["f"], blocked: false });
 });
 
 test("Output Guard environment defaults to off and rejects unknown modes", () => {
@@ -91,7 +104,7 @@ test("Output Guard scopes its verdict to the custom output-disclosure dimension"
   ]), "block");
 });
 
-test("Output Guard fails closed without a valid custom output-disclosure verdict", () => {
+test("Output Guard rejects missing or invalid custom output-disclosure verdicts", () => {
   assert.throws(
     () => outputLeakVerdict([{ type: "promptAttack", suggestion: "pass" }]),
     /customLabel result is unavailable/

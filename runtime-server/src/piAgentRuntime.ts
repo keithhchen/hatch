@@ -30,9 +30,8 @@ import {
   type RunContext,
   type WorkspacePathPolicy
 } from "./agentRuntime.js";
-import { KIMI_MODEL } from "./kimiProvider.js";
 import { SUMMARY_PREFIX, SUMMARY_SUFFIX } from "./compaction.js";
-import { createKimiModel, createKimiStreamFn } from "./piModel.js";
+import { createPiModel, createPiStreamFn } from "./piModel.js";
 import { runPiAgentPrompt, type PiAgentPromptRunner } from "./piPrompt.js";
 
 export type PiToolDefinition = {
@@ -98,8 +97,8 @@ type ToolEventState = {
  */
 export class PiAgentRuntime implements AgentRuntime {
   async *run(input: RunStart, ctx: RunContext): AsyncIterable<OutboundMessage> {
-    const model = createKimiModel();
-    const streamFn = createKimiStreamFn();
+    const model = createPiModel();
+    const streamFn = createPiStreamFn();
     const queue = new AsyncQueue<OutboundMessage>();
     const workspacePathPolicy = createWorkspacePathPolicy(input.message.content);
     const visibleSkills = ctx.sessionSkills.visibleRecords;
@@ -717,8 +716,8 @@ function toPiMessage(message: ConversationMessage): AgentMessage {
     role: "assistant",
     content,
     api: "openai-completions",
-    provider: createKimiModel().provider,
-    model: KIMI_MODEL,
+    provider: createPiModel().provider,
+    model: createPiModel().id,
     usage: message.usage ?? emptyUsage(),
     stopReason: message.tool_calls?.length ? "toolUse" : "stop",
     timestamp: Date.now()

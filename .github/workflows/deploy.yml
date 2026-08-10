@@ -12,31 +12,17 @@ permissions:
 env:
   RELEASE_TAG: ${{ github.sha }}
 
+concurrency:
+  group: hatch-cloud-deployment
+  cancel-in-progress: true
+
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
     outputs:
       image_prefix: ${{ steps.image.outputs.prefix }}
     steps:
-      - name: Checkout source through GitHub API
-        env:
-          SOURCE_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          temp_dir="$(mktemp -d)"
-          archive="$temp_dir/source.tgz"
-          curl -4 --fail --silent --show-error --location --retry 5 --retry-delay 2 \
-            -H "Authorization: Bearer $SOURCE_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/$GITHUB_REPOSITORY/tarball/$GITHUB_SHA" \
-            -o "$archive"
-          root_dir="$(tar -tzf "$archive" | sed -n '1s#/.*##p')"
-          test -n "$root_dir"
-          rm -rf "$GITHUB_WORKSPACE"
-          mkdir -p "$GITHUB_WORKSPACE"
-          tar -xzf "$archive" -C "$temp_dir"
-          cp -a "$temp_dir/$root_dir/." "$GITHUB_WORKSPACE/"
-          rm -rf "$temp_dir"
+      - uses: actions/checkout@v4
       - name: Normalize image name
         id: image
         run: |
@@ -49,24 +35,34 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Push Runtime/Registry image
-        run: |
-          set -euo pipefail
-          image="${{ steps.image.outputs.prefix }}/runtime:${RELEASE_TAG}"
-          docker build -f Dockerfile.runtime -t "$image" .
-          docker push "$image"
-      - name: Push Dashboard image
-        run: |
-          set -euo pipefail
-          image="${{ steps.image.outputs.prefix }}/dashboard:${RELEASE_TAG}"
-          docker build -f Dockerfile.dashboard -t "$image" .
-          docker push "$image"
-      - name: Push Caddy image
-        run: |
-          set -euo pipefail
-          image="${{ steps.image.outputs.prefix }}/caddy:${RELEASE_TAG}"
-          docker build -f Dockerfile.caddy -t "$image" .
-          docker push "$image"
+      - uses: docker/setup-buildx-action@v3
+      - name: Build and push Runtime/Registry image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.runtime
+          push: true
+          tags: ${{ steps.image.outputs.prefix }}/runtime:${{ env.RELEASE_TAG }}
+          cache-from: type=gha,scope=runtime
+          cache-to: type=gha,scope=runtime,mode=max
+      - name: Build and push Dashboard image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.dashboard
+          push: true
+          tags: ${{ steps.image.outputs.prefix }}/dashboard:${{ env.RELEASE_TAG }}
+          cache-from: type=gha,scope=dashboard
+          cache-to: type=gha,scope=dashboard,mode=max
+      - name: Build and push Caddy image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.caddy
+          push: true
+          tags: ${{ steps.image.outputs.prefix }}/caddy:${{ env.RELEASE_TAG }}
+          cache-from: type=gha,scope=caddy
+          cache-to: type=gha,scope=caddy,mode=max
 
   deploy:
     runs-on: [self-hosted, linux, x64, hatch-prod]
@@ -98,6 +94,15 @@ jobs:
         run: |
           set -euo pipefail
           install -m 640 compose.app.yml /opt/hatch/
+      - name: Install LLM provider credentials
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.HATCH_DEEPSEEK_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$DEEPSEEK_API_KEY"
+          sed -i '/^DEEPSEEK_API_KEY=/d' /opt/hatch/.env
+          printf 'DEEPSEEK_API_KEY=%s\n' "$DEEPSEEK_API_KEY" >> /opt/hatch/.env
+          chmod 600 /opt/hatch/.env
       - name: Pull and switch application containers
         env:
           GHCR_USERNAME: ${{ github.actor }}
@@ -111,7 +116,7 @@ jobs:
           test -f .env
           test -f compose.app.yml
           grep -q '^HATCH_DOMAIN=' .env
-          for key in LLM_API_KEY HATCH_REGISTRY_DATABASE_URL HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN HATCH_AUTH_SIGNING_SECRET DASHSCOPE_API_KEY POSTGRES_PASSWORD; do
+          for key in LLM_API_KEY DEEPSEEK_API_KEY HATCH_REGISTRY_DATABASE_URL HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN HATCH_AUTH_SIGNING_SECRET DASHSCOPE_API_KEY POSTGRES_PASSWORD; do
             grep -Eq "^${key}=[^[:space:]]+" .env || { echo "Missing non-empty $key in /opt/hatch/.env"; exit 1; }
           done
           docker network inspect hatch_internal >/dev/null

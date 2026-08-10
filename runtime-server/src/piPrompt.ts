@@ -1,4 +1,4 @@
-import { createKimiAgent } from "./piModel.js";
+import { createPiAgent } from "./piModel.js";
 
 export type PiAgentPromptOptions = {
   systemPrompt?: string;
@@ -16,7 +16,7 @@ export type PiAgentPromptRunner = (options: PiAgentPromptOptions) => Promise<str
  * but they do not get a second model client or a separate turn budget.
  */
 export function runPiAgentPrompt(options: PiAgentPromptOptions): Promise<string> {
-  const agent = createKimiAgent({
+  const agent = createPiAgent({
     initialState: {
       systemPrompt: options.systemPrompt ?? "",
       messages: [],

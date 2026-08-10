@@ -7,6 +7,8 @@ import {
   createKimiAgentOptions,
   createKimiModel,
   createKimiStreamFn,
+  createPiAgent,
+  createPiModel,
   normalizeKimiBaseUrl
 } from "./piModel.js";
 
@@ -209,5 +211,67 @@ test("non-Moonshot endpoints and missing LLM_API_KEY fail closed", () => {
   assert.throws(
     () => createKimiStreamFn({ env: {} }),
     /Missing LLM_API_KEY/
+  );
+});
+
+test("active DeepSeek profile uses its own model, endpoint, and credential", async () => {
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  const fetch: typeof globalThis.fetch = async (input, init) => {
+    calls.push({ url: input instanceof Request ? input.url : String(input), init: init ?? {} });
+    return streamResponse("deepseek pong");
+  };
+  const env = {
+    HATCH_LLM_PROFILE: "deepseek-v4-flash",
+    DEEPSEEK_API_KEY: "deepseek-test-key",
+    LLM_API_KEY: "unused-kimi-key"
+  };
+
+  const model = createPiModel({ env });
+  assert.equal(model.id, "deepseek-v4-flash");
+  assert.equal(model.provider, "deepseek");
+  assert.equal(model.baseUrl, "https://api.deepseek.com");
+
+  const agent = createPiAgent({ env, fetch, timeoutMs: 8_000 });
+  await agent.prompt("Say pong");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]!.url, "https://api.deepseek.com/chat/completions");
+  assert.equal(new Headers(calls[0]!.init.headers).get("authorization"), "Bearer deepseek-test-key");
+  const body = JSON.parse(String(calls[0]!.init.body)) as Record<string, unknown>;
+  assert.equal(body.model, "deepseek-v4-flash");
+  assert.equal(body.stream, true);
+  assert.equal(body.thinking, undefined);
+});
+
+test("Kimi no-thinking profile sends the official disabled payload without temperature", async () => {
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  const fetch: typeof globalThis.fetch = async (input, init) => {
+    calls.push({ url: input instanceof Request ? input.url : String(input), init: init ?? {} });
+    return streamResponse("fast pong");
+  };
+  const env = {
+    HATCH_LLM_PROFILE: "kimi-k2.6-no-thinking",
+    LLM_API_KEY: "kimi-test-key"
+  };
+
+  const model = createPiModel({ env });
+  assert.equal(model.id, KIMI_MODEL);
+  assert.equal(model.reasoning, false);
+  const agent = createPiAgent({ env, fetch, timeoutMs: 8_000 });
+  await agent.prompt("Say pong");
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]!.url, `${KIMI_DEFAULT_BASE_URL}/chat/completions`);
+  const body = JSON.parse(String(calls[0]!.init.body)) as Record<string, unknown>;
+  assert.equal(body.model, KIMI_MODEL);
+  assert.deepEqual(body.thinking, { type: "disabled" });
+  assert.equal(body.temperature, undefined);
+  assert.equal(body.reasoning_effort, undefined);
+});
+
+test("active profile rejects unknown names and missing provider credentials", () => {
+  assert.throws(() => createPiModel({ env: { HATCH_LLM_PROFILE: "unknown" } }), /Unknown HATCH_LLM_PROFILE/);
+  assert.throws(
+    () => createPiAgent({ env: { HATCH_LLM_PROFILE: "deepseek-v4-flash" } }),
+    /Missing DEEPSEEK_API_KEY/
   );
 });
