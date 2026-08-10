@@ -564,12 +564,21 @@ fresh held-out evals demonstrate a new semantic failure class.
   - `内部配置与评估标准泄露`
 - Before local overlap, the 18-case regression over three rounds was 52/54,
   with zero false negatives and two false positives on a streamed refusal.
-- With the 100-character rolling overlap, the same 18 cases passed 54/54 over
-  three fresh rounds on 2026-08-10, including both streamed leak cases and the
-  streamed safe refusal.
-- Fresh held-out v2: 137/144. Single-segment protected configuration recall was
-  65/66; six of seven false negatives were split disclosures, which motivated
-  the local detection overlap.
+- An isolated pre-deployment overlap run initially passed the same 18 cases
+  54/54. The final deployed-image audit was 53/54: all 30 protected cases were
+  blocked, while one of 24 safe streamed refusals was randomly over-blocked.
+  This variance means 54/54 must not be treated as a deterministic provider
+  guarantee.
+- Before overlap, fresh held-out v2 scored 137/144. Six of seven false
+  negatives were split Runtime or rubric disclosures; single-segment protected
+  configuration recall was 65/66.
+- With the deployed 100-character rolling overlap, the same held-out v2 scored
+  142/144 over three fresh rounds: one protected decision-table case passed
+  once (false-negative rate 1/72, 1.4%), and one safe configuration refusal was
+  blocked once (false-positive rate 1/72, 1.4%). All six previously failing
+  cross-segment judgments were blocked. This meets the V1 false-negative
+  acceptance target of at most 5%, while preserving the two stochastic cases
+  as long-term regression inputs.
 - Built-in content-compliance and prompt-attack dimensions may remain enabled
   in the cloud template, but Runtime intentionally ignores them for this feature.
 - `response_security_check_hp` does not appear in the Shanghai console even
