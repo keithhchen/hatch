@@ -45,6 +45,11 @@ export const ClientHelloSchema = z.object({
 export const ClientMessageSchema = z.object({
   type: z.literal("client.message"),
   run_id: ProtocolIdSchema,
+  /**
+   * Stable across transport retries. `run_id` remains accepted for older
+   * Desktop clients and is used as the fallback idempotency key.
+   */
+  client_message_id: ProtocolIdSchema.optional(),
   conversation_id: ProtocolIdSchema,
   message: z.object({
     role: z.literal("user"),
@@ -254,7 +259,7 @@ export type SkillActivatedEvent = {
 export type RunStateEvent = {
   type: "turn.state";
   run_id: string;
-  status: "queued" | "running" | "waiting_for_tool" | "compacting" | "completed" | "failed" | "cancelled";
+  status: "queued" | "running" | "waiting_for_tool" | "compacting" | "completed" | "failed" | "cancelled" | "interrupted";
   reason?: string;
 };
 

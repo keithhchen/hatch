@@ -3,7 +3,7 @@ import path from "node:path";
 import { ClientToolNameSchema, type ClientToolName, type ConversationMessage, type OutputFinishReason } from "./protocol.js";
 import type { CompactionPhase, CompactionReason, CompactionTrigger } from "./compaction.js";
 
-export type RunStatus = "queued" | "running" | "waiting_for_tool" | "compacting" | "completed" | "failed" | "cancelled";
+export type RunStatus = "queued" | "running" | "waiting_for_tool" | "compacting" | "completed" | "failed" | "cancelled" | "interrupted";
 
 export type ActivatedSkill = {
   name: string;
@@ -233,6 +233,15 @@ export class RuntimeStore {
   private writeChain: Promise<void> = Promise.resolve();
 
   constructor(private readonly root = process.env.HATCH_RUNTIME_DATA_DIR ?? path.resolve(".hatch-runtime")) {}
+
+  /**
+   * Local ConversationRepository uses the same app-data directory, while
+   * intentionally keeping a separate durable control-plane file from this
+   * append-only transcript projection.
+   */
+  get dataDirectory(): string {
+    return this.root;
+  }
 
   async append(event: StoreEventInput): Promise<void> {
     assertCanonicalPersistedToolNames(event);

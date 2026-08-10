@@ -1,6 +1,7 @@
 # Hatch Protocol
 
-Canonical provider-agnostic wire protocol 0.6 and Agent Corpus v1.
+Canonical provider-agnostic wire protocol 0.6, durable Conversation API v1,
+and Agent Corpus v1.
 
 This package owns the JSON Schema for the server/Desktop local-client boundary. The TypeScript runtime server and Rust local runner currently mirror this schema directly; generated TS and Rust types should be introduced from this package before the protocol is expanded further.
 
@@ -17,9 +18,38 @@ Schema:
 
 ```text
 schemas/hatch-wire-protocol.schema.json
+schemas/hatch-conversation-api-v1.schema.json
 schemas/agent-corpus.schema.json
 schemas/creator-agent.schema.json
 ```
+
+## Conversation API v1
+
+`hatch-conversation-api-v1.schema.json` describes the framework-neutral
+REST read/control contract for the Conversation Library. A Conversation is a
+server-owned object permanently bound to an account and Creator Agent; clients
+may choose a title or idempotency key but cannot supply or change that binding.
+
+The Runtime serves the following authenticated, binding-scoped routes:
+
+```text
+POST  /v1/conversations                         create (client_request_id idempotency)
+GET   /v1/conversations?agent_id&status&cursor  list a Creator Agent's library
+GET   /v1/conversations/:id                      metadata
+PATCH /v1/conversations/:id                      metadata with version/CAS
+GET   /v1/conversations/:id/snapshot?after_cursor
+GET   /v1/conversations/:id/events?after_cursor
+GET   /v1/conversations/:id/runs
+POST  /v1/conversations/:id/runs                durable run reservation
+GET   /v1/conversations/:id/runs/:runId
+POST  /v1/conversations/:id/runs/:runId/cancel
+```
+
+The live executor remains `/runtime`: `client.message.client_message_id` is a
+stable retry key, while legacy clients fall back to `run_id`. A reconnect can
+read a snapshot plus cursor events; it must never infer permission to replay a
+pending tool call. Explicit WebSocket subscribe/attach/reclaim is the next
+protocol increment, once executor leases and window ownership are wired in.
 
 ## Agent Corpus v1
 
