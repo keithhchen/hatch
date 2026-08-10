@@ -426,7 +426,7 @@ Application menu、Toolbar、shortcuts 与 context menus 共用 command label、
 Native 交付顺序：
 
 1. Application menu、Native context menu、parented picker/dialog、window-state integration。
-2. Notifications、Finder/Explorer integration、Quick Look 或平台对应的 Open 行为，以及 Dock/taskbar attention。
+2. Notifications、Finder/Explorer integration、Quick Look/Open，以及 Dock/taskbar attention（当前实现已覆盖；Windows 与 signed-package UAT 仍在 P4）。
 3. Settings/About windows、少量 title-bar accessories，以及适合 Native 呈现的低频高风险 approval。
 
 Context menu 规则：
