@@ -1857,6 +1857,19 @@ button.composer-control:focus-visible {
 .desktop-source-row-copy strong { font-size: 12px; font-weight: 600; }
 .desktop-source-row-copy small { color: var(--text-secondary); font-size: 10px; }
 
+.conversation-rename-input {
+  background: var(--surface-sidebar);
+  border: 1px solid var(--hatch-accent);
+  border-radius: 4px;
+  color: inherit;
+  font: inherit;
+  line-height: 1.25;
+  min-width: 0;
+  outline: 2px solid color-mix(in srgb, var(--hatch-accent) 22%, transparent);
+  padding: 2px 4px;
+  width: 100%;
+}
+
 .conversation-row-glyph {
   color: var(--text-secondary);
   flex: 0 0 25px;

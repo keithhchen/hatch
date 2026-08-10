@@ -234,6 +234,8 @@ function App() {
   const [conversations, setConversations] = useState([]);
   const [conversationLibraryStatus, setConversationLibraryStatus] = useState("idle");
   const [conversationLibraryError, setConversationLibraryError] = useState("");
+  const [renamingConversationId, setRenamingConversationId] = useState("");
+  const [renameDraft, setRenameDraft] = useState("");
   const [status, setStatus] = useState("Offline");
   const [connected, setConnected] = useState(false);
   const [running, setRunning] = useState(false);
@@ -1897,7 +1899,7 @@ function App() {
     onNewConversation: startNewConversation,
     onNewConversationWindow: startNewConversationInWindow,
     onOpenConversationWindow: (target) => openConversationInNewWindow(takeNativeContextTarget(target), { announce: false }),
-    onRenameConversation: (target) => void renameConversation(takeNativeContextTarget(target)),
+    onRenameConversation: (target) => beginRenameConversation(takeNativeContextTarget(target)),
     onArchiveConversation: (target) => void archiveConversation(takeNativeContextTarget(target)),
     onToggleSidebar: () => setSidebarPreference((current) => current === "open" ? "closed" : "open"),
     onToggleInspector: () => setInspectorPreference((current) => current === "open" ? "closed" : "open"),
@@ -2067,24 +2069,46 @@ function App() {
     setStatus("Conversation selected");
   }
 
-  async function renameConversation(targetId) {
+  function beginRenameConversation(targetId) {
     const target = conversations.find((item) => item.id === targetId);
     if (!target) {
       setStatus("That conversation is no longer in the Library.");
       return;
     }
-    const nextTitle = window.prompt("Rename conversation", target.title || "Conversation");
-    if (nextTitle === null || !nextTitle.trim()) return;
+    setRenamingConversationId(target.id);
+    setRenameDraft(target.title || conversationTitle(target.id));
+    window.requestAnimationFrame(() => {
+      const selector = `[data-conversation-rename="${CSS.escape(target.id)}"]`;
+      document.querySelector(selector)?.focus();
+    });
+  }
+
+  function cancelRenameConversation() {
+    setRenamingConversationId("");
+    setRenameDraft("");
+  }
+
+  async function commitRenameConversation(targetId, value = renameDraft) {
+    const target = conversations.find((item) => item.id === targetId);
+    const nextTitle = String(value || "").trim();
+    if (!target || !nextTitle) {
+      cancelRenameConversation();
+      return;
+    }
     const binding = conversationBindingFor();
-    if (!binding || !buyerSession?.accessToken) return;
+    if (!binding || !buyerSession?.accessToken) {
+      cancelRenameConversation();
+      return;
+    }
     try {
       const result = await updateConversation(serverUrl, buyerSession.accessToken, binding, target.id, {
-        title: nextTitle.trim(),
+        title: nextTitle,
         version: target.version
       });
       const updated = result?.conversation;
       if (!updated?.id) throw new Error("Runtime returned an invalid Conversation.");
       setConversations((current) => current.map((item) => item.id === updated.id ? updated : item));
+      cancelRenameConversation();
       setStatus("Conversation renamed");
     } catch (error) {
       setStatus(`Couldn't rename the conversation: ${errorMessage(error)}`);
@@ -2383,6 +2407,11 @@ function App() {
           onSelectConversation={selectConversation}
           onNewConversation={startNewConversation}
           onConversationContextMenu={showNativeContextMenu}
+          renamingConversationId={renamingConversationId}
+          renameDraft={renameDraft}
+          onRenameDraftChange={setRenameDraft}
+          onCommitRename={commitRenameConversation}
+          onCancelRename={cancelRenameConversation}
           onSignOut={() => void signOut()}
         />
       )}
@@ -2503,6 +2532,11 @@ function DesktopSidebar({
   onSelectConversation,
   onNewConversation,
   onConversationContextMenu,
+  renamingConversationId,
+  renameDraft,
+  onRenameDraftChange,
+  onCommitRename,
+  onCancelRename,
   onSignOut
 }) {
   const listedConversations = Array.isArray(conversations) ? conversations : [];
@@ -2542,25 +2576,59 @@ function DesktopSidebar({
         <div className="desktop-source-list-label conversations-label">Conversations</div>
         {visibleConversations.length > 0 ? visibleConversations.map((conversation) => {
           const selected = conversation.id === conversationId;
+          const renaming = conversation.id === renamingConversationId;
           return (
-            <button
-              className={`desktop-source-row conversation ${selected ? "selected" : ""}`}
-              key={conversation.id}
-              type="button"
-              aria-current={selected ? "page" : undefined}
-              title={conversation.title || conversation.id}
-              onClick={() => onSelectConversation?.(conversation)}
-              onContextMenu={(event) => onConversationContextMenu?.(event, {
-                kind: "conversation",
-                target: conversation.id
-              })}
-            >
-              <span className="conversation-row-glyph" aria-hidden="true">⌁</span>
-              <span className="desktop-source-row-copy">
-                <strong>{conversation.title || conversationTitle(conversation.id)}</strong>
-                <small>{selected ? "Current conversation" : "Conversation"}</small>
-              </span>
-            </button>
+            renaming ? (
+              <div
+                className={`desktop-source-row conversation ${selected ? "selected" : ""}`}
+                key={conversation.id}
+                aria-current={selected ? "page" : undefined}
+                onContextMenu={(event) => onConversationContextMenu?.(event, {
+                  kind: "conversation",
+                  target: conversation.id
+                })}
+              >
+                <span className="conversation-row-glyph" aria-hidden="true">⌁</span>
+                <span className="desktop-source-row-copy">
+                  <input
+                    aria-label="Rename conversation"
+                    className="conversation-rename-input"
+                    data-conversation-rename={conversation.id}
+                    value={renameDraft}
+                    onChange={(event) => onRenameDraftChange?.(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        void onCommitRename?.(conversation.id, event.currentTarget.value);
+                      } else if (event.key === "Escape") {
+                        event.preventDefault();
+                        onCancelRename?.();
+                      }
+                    }}
+                  />
+                  <small>Rename with Enter · cancel with Escape</small>
+                </span>
+              </div>
+            ) : (
+              <button
+                className={`desktop-source-row conversation ${selected ? "selected" : ""}`}
+                key={conversation.id}
+                type="button"
+                aria-current={selected ? "page" : undefined}
+                title={conversation.title || conversation.id}
+                onClick={() => onSelectConversation?.(conversation)}
+                onContextMenu={(event) => onConversationContextMenu?.(event, {
+                  kind: "conversation",
+                  target: conversation.id
+                })}
+              >
+                <span className="conversation-row-glyph" aria-hidden="true">⌁</span>
+                <span className="desktop-source-row-copy">
+                  <strong>{conversation.title || conversationTitle(conversation.id)}</strong>
+                  <small>{selected ? "Current conversation" : "Conversation"}</small>
+                </span>
+              </button>
+            )
           );
         }) : (
           <div className="desktop-source-empty">No conversations yet</div>
