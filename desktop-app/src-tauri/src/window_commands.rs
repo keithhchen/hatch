@@ -43,6 +43,7 @@ pub const COMMAND_VIEW_ZOOM_IN: &str = "view.zoomIn";
 pub const COMMAND_VIEW_ZOOM_OUT: &str = "view.zoomOut";
 pub const COMMAND_VIEW_ZOOM_RESET: &str = "view.zoomReset";
 pub const COMMAND_ARTIFACT_REVEAL: &str = "artifact.reveal";
+pub const COMMAND_ARTIFACT_QUICK_LOOK: &str = "artifact.quickLook";
 pub const COMMAND_ARTIFACT_COPY_PATH: &str = "artifact.copyPath";
 pub const COMMAND_TOOL_COPY_OUTPUT: &str = "tool.copyOutput";
 
@@ -50,6 +51,7 @@ const CONTEXT_CONVERSATION_RENAME: &str = "hatch.context.conversation.rename";
 const CONTEXT_CONVERSATION_OPEN_WINDOW: &str = "hatch.context.conversation.open-window";
 const CONTEXT_CONVERSATION_ARCHIVE: &str = "hatch.context.conversation.archive";
 const CONTEXT_ARTIFACT_REVEAL: &str = "hatch.context.artifact.reveal";
+const CONTEXT_ARTIFACT_QUICK_LOOK: &str = "hatch.context.artifact.quick-look";
 const CONTEXT_ARTIFACT_COPY_PATH: &str = "hatch.context.artifact.copy-path";
 const CONTEXT_TOOL_COPY_OUTPUT: &str = "hatch.context.tool.copy-output";
 
@@ -1229,6 +1231,7 @@ fn build_context_menu<R: Runtime>(
         ],
         NativeContextMenuKind::Artifact => &[
             (CONTEXT_ARTIFACT_REVEAL, artifact_reveal_menu_label()),
+            (CONTEXT_ARTIFACT_QUICK_LOOK, artifact_open_menu_label()),
             (CONTEXT_ARTIFACT_COPY_PATH, "Copy Path"),
         ],
         NativeContextMenuKind::ToolResult => &[(CONTEXT_TOOL_COPY_OUTPUT, "Copy Output")],
@@ -1260,6 +1263,21 @@ fn artifact_reveal_menu_label() -> &'static str {
     }
 }
 
+fn artifact_open_menu_label() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        "Quick Look"
+    }
+    #[cfg(target_os = "windows")]
+    {
+        "Open"
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        "Open"
+    }
+}
+
 fn app_menu_command(menu_id: &str) -> Option<&'static str> {
     application_command_definition(menu_id).map(|definition| definition.id)
 }
@@ -1279,6 +1297,9 @@ fn context_menu_command(menu_id: &str) -> Option<(&'static str, NativeContextMen
             NativeContextMenuKind::Conversation,
         )),
         CONTEXT_ARTIFACT_REVEAL => Some((COMMAND_ARTIFACT_REVEAL, NativeContextMenuKind::Artifact)),
+        CONTEXT_ARTIFACT_QUICK_LOOK => {
+            Some((COMMAND_ARTIFACT_QUICK_LOOK, NativeContextMenuKind::Artifact))
+        }
         CONTEXT_ARTIFACT_COPY_PATH => {
             Some((COMMAND_ARTIFACT_COPY_PATH, NativeContextMenuKind::Artifact))
         }
@@ -1382,14 +1403,15 @@ fn stable_hash64(bytes: &[u8]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        app_menu_command, application_command_definition, artifact_reveal_menu_label,
-        checked_command_label, context_menu_command, conversation_window_label,
-        validate_context_position, validate_context_target, validate_conversation_id,
-        ConversationReservation, ConversationWindowPhase, NativeCommandRouter, NativeCommandState,
-        NativeContextMenuKind, NativeContextMenuPosition, NativeMenuSnapshot, COMMAND_ABOUT_OPEN,
-        COMMAND_CONVERSATION_NEW, COMMAND_CONVERSATION_NEW_WINDOW, COMMAND_INSPECTOR_TOGGLE,
-        COMMAND_RUN_STOP, COMMAND_SETTINGS_OPEN, COMMAND_SIDEBAR_TOGGLE, COMMAND_VIEW_ZOOM_IN,
-        COMMAND_VIEW_ZOOM_OUT, COMMAND_VIEW_ZOOM_RESET, COMMAND_WORKSPACE_CHOOSE,
+        app_menu_command, application_command_definition, artifact_open_menu_label,
+        artifact_reveal_menu_label, checked_command_label, context_menu_command,
+        conversation_window_label, validate_context_position, validate_context_target,
+        validate_conversation_id, ConversationReservation, ConversationWindowPhase,
+        NativeCommandRouter, NativeCommandState, NativeContextMenuKind, NativeContextMenuPosition,
+        NativeMenuSnapshot, COMMAND_ABOUT_OPEN, COMMAND_CONVERSATION_NEW,
+        COMMAND_CONVERSATION_NEW_WINDOW, COMMAND_INSPECTOR_TOGGLE, COMMAND_RUN_STOP,
+        COMMAND_SETTINGS_OPEN, COMMAND_SIDEBAR_TOGGLE, COMMAND_VIEW_ZOOM_IN, COMMAND_VIEW_ZOOM_OUT,
+        COMMAND_VIEW_ZOOM_RESET, COMMAND_WORKSPACE_CHOOSE,
     };
 
     #[test]
@@ -1500,6 +1522,10 @@ mod tests {
             context_menu_command("hatch.context.artifact.reveal"),
             Some(("artifact.reveal", NativeContextMenuKind::Artifact))
         );
+        assert_eq!(
+            context_menu_command("hatch.context.artifact.quick-look"),
+            Some(("artifact.quickLook", NativeContextMenuKind::Artifact))
+        );
         assert_eq!(context_menu_command("unexpected"), None);
     }
 
@@ -1533,6 +1559,14 @@ mod tests {
         assert_eq!(artifact_reveal_menu_label(), "Reveal in Explorer");
         #[cfg(all(unix, not(target_os = "macos")))]
         assert_eq!(artifact_reveal_menu_label(), "Reveal in File Manager");
+    }
+
+    #[test]
+    fn artifact_open_uses_the_platform_preview_name() {
+        #[cfg(target_os = "macos")]
+        assert_eq!(artifact_open_menu_label(), "Quick Look");
+        #[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
+        assert_eq!(artifact_open_menu_label(), "Open");
     }
 
     #[test]

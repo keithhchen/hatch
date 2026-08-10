@@ -37,6 +37,7 @@ fn main() {
             "read_native_drop_contexts",
             "pick_workspace_folder",
             "reveal_workspace_artifact",
+            "open_workspace_artifact",
             "request_window_attention",
             "set_window_tool_context",
             "clear_window_tool_context",

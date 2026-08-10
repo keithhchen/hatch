@@ -16,6 +16,7 @@ describe("native renderer commands", () => {
     const onOpenConversationWindow = vi.fn();
     const onToggleSidebar = vi.fn();
     const onZoomIn = vi.fn();
+    const onQuickLookArtifact = vi.fn();
 
     await expect(routeNativeCommand({ id: NATIVE_COMMAND.CONVERSATION_NEW }, {
       onNewConversation,
@@ -30,11 +31,18 @@ describe("native renderer commands", () => {
     }, { onOpenConversationWindow })).resolves.toBe(true);
     await expect(routeNativeCommand({ id: NATIVE_COMMAND.SIDEBAR_TOGGLE }, { onToggleSidebar })).resolves.toBe(true);
     await expect(routeNativeCommand({ id: NATIVE_COMMAND.VIEW_ZOOM_IN }, { onZoomIn })).resolves.toBe(true);
+    await expect(routeNativeCommand({
+      id: NATIVE_COMMAND.ARTIFACT_QUICK_LOOK,
+      source: "context-menu",
+      context: "artifact",
+      target: "artifact_123"
+    }, { onQuickLookArtifact })).resolves.toBe(true);
 
     expect(onNewConversation).toHaveBeenCalledWith(undefined, expect.objectContaining({ id: NATIVE_COMMAND.CONVERSATION_NEW }));
     expect(onOpenConversationWindow).toHaveBeenCalledWith("conversation_123", expect.objectContaining({ context: "conversation" }));
     expect(onToggleSidebar).toHaveBeenCalledTimes(1);
     expect(onZoomIn).toHaveBeenCalledTimes(1);
+    expect(onQuickLookArtifact).toHaveBeenCalledWith("artifact_123", expect.objectContaining({ context: "artifact" }));
   });
 
   it("ignores malformed and unsupported native events", async () => {

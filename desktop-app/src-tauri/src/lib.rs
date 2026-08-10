@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::fs;
 use std::process::Command;
+#[cfg(unix)]
+use std::process::Stdio;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex, OnceLock,
@@ -965,6 +967,81 @@ fn reveal_workspace_artifact(
         .ok_or_else(|| {
             "artifact_reveal_failed: The system file browser could not reveal the artifact".into()
         })
+}
+
+/// Open an artifact with the platform's native preview/default-file action.
+///
+/// The renderer still supplies only an opaque workspace grant and a relative
+/// path. The path is resolved and contained by `resolve_workspace_artifact_path`
+/// immediately before handing it to the operating system. On macOS,
+/// `qlmanage -p` is the system Quick Look launcher; Windows uses the documented
+/// ShellExecute `open` verb so the user's default file association decides what
+/// opens. Other Unix desktops use `xdg-open` as their native default handler.
+#[tauri::command]
+fn open_workspace_artifact(
+    app: AppHandle,
+    request: WorkspaceArtifactRequest,
+) -> Result<(), String> {
+    let path =
+        resolve_workspace_artifact_path(&app, &request.workspace_grant_id, &request.relative_path)?;
+    open_workspace_artifact_with_platform(&path)
+}
+
+fn open_workspace_artifact_with_platform(path: &std::path::Path) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let status = Command::new("/usr/bin/qlmanage")
+        .arg("-p")
+        .arg(path)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    #[cfg(target_os = "windows")]
+    return open_workspace_artifact_windows(path);
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let status = Command::new("xdg-open")
+        .arg(path)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+
+    #[cfg(any(target_os = "macos", all(unix, not(target_os = "macos"))))]
+    status
+        .map_err(|error| format!("artifact_open_failed: {error}"))?
+        .success()
+        .then_some(())
+        .ok_or_else(|| {
+            "artifact_open_failed: The native file preview could not open the artifact".into()
+        })
+}
+
+#[cfg(target_os = "windows")]
+fn open_workspace_artifact_windows(path: &std::path::Path) -> Result<(), String> {
+    use std::iter::once;
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+
+    let operation: Vec<u16> = std::ffi::OsStr::new("open")
+        .encode_wide()
+        .chain(once(0))
+        .collect();
+    let file: Vec<u16> = path.as_os_str().encode_wide().chain(once(0)).collect();
+    // ShellExecuteW returns a value greater than 32 on success. Passing the
+    // path as a wide string avoids command-shell parsing and quoting issues.
+    let result = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            operation.as_ptr(),
+            file.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            1,
+        )
+    };
+    if (result as usize) > 32 {
+        Ok(())
+    } else {
+        Err("artifact_open_failed: Windows could not open the artifact".into())
+    }
 }
 
 #[tauri::command]
@@ -1960,6 +2037,7 @@ pub fn run() {
             read_native_drop_contexts,
             pick_workspace_folder,
             reveal_workspace_artifact,
+            open_workspace_artifact,
             request_window_attention,
             set_window_tool_context,
             clear_window_tool_context,

@@ -19,7 +19,7 @@ macOS 与 Windows 都是一等平台。V1 使用 Tauri 稳定支持的 Native su
 - P1：React `DesktopWindowShell`、regular/compact/minimal tier、split divider、native-like overlay、局部 table/code overflow 与 accessibility contract。
 - P2：durable Conversation/Run repository、REST/WS idempotency、active-run exclusion、restart→`interrupted`，以及 Desktop Conversation Library 的 list/create/select/rename/archive 基础接线。每个 native window 现在保存自己的 Conversation、Workspace grant、permission、active-run projection、`composerDraft` 与 snapshot cursor；context 以 account id 绑定，换账号登录时不会恢复上一账号的 Conversation、workspace 投影或草稿；profile settings 只作为旧单窗口数据的迁移 fallback，workspace onboarding 的旧 `draft` 字段不再冒充 Composer draft。V1 的恢复边界是 observer recovery（snapshot + cursor replay）；断开或 Runtime 重启会把未完成 Run 标为 `interrupted`，不自动 reclaim、重放 tool 或伪装成 `running`。
 - P3：Tauri application/context menu、semantic command routing、focused-window new-conversation scaffold 与 window-scoped bridge。
-- P3 尚未完整交付的系统集成：Quick Look/Open；Reveal、Notifications/Dock attention 与独立 Settings/About auxiliary windows 已接入受支持的窄 native bridge。
+- P3：Artifact 的 Quick Look/Open 已接入 grant-bound native bridge；macOS 使用系统 Quick Look launcher，Windows 使用默认文件关联的 ShellExecute `open`，Unix fallback 使用 `xdg-open`。Reveal、Notifications/Dock attention 与独立 Settings/About auxiliary windows 也已接入受支持的窄 native bridge。
 - 尚未宣称 P4 完成：Windows 真机、VoiceOver/Narrator、签名发布包、双屏/DPI/IME 和完整 multi-window recovery 仍需目标环境验收。
 
 macOS UAT 证据：
@@ -31,7 +31,7 @@ macOS UAT 证据：
 - [Minimal Inspector overlay](proof/desktop-ui/minimal-inspector-overlay.png)
 - [Native menu → collapsed sidebar](proof/desktop-ui/native-menu-sidebar-collapsed-1180x780.jpeg)
 
-已通过的自动验证（2026-08-11 当前 worktree）：Renderer `21 files / 84 tests`；Rust `39 passed / 1 ignored Keychain smoke`；Runtime Node test `226 passed`；LocalRunner `43 passed`；Web build；Tauri release `.app` build；production-session `cargo check`。Runtime 验证必须使用独立的 `HATCH_RUNTIME_DATA_DIR`，避免复用旧的 durable idempotency fixture。
+已通过的自动验证（2026-08-11 当前 worktree）：Renderer `21 files / 84 tests`；Rust `40 passed / 1 ignored Keychain smoke`；Runtime Node test `226 passed`；LocalRunner `43 passed`；Web build；Tauri release `.app` build；production-session `cargo check`。Runtime 验证必须使用独立的 `HATCH_RUNTIME_DATA_DIR`，避免复用旧的 durable idempotency fixture。
 
 详细的逐条状态、证据和外部验收边界见 [Desktop UI v1 验收矩阵](proof/desktop-ui/acceptance-matrix.md)。矩阵区分本机 PASS、实现但缺环境的 PARTIAL/EXTERNAL，以及明确延期的 DEFERRED；本 spec 在 P4 所列跨平台条件全部通过前不会标记为 complete。
 
@@ -421,7 +421,7 @@ Application menu、Toolbar、shortcuts 与 context menus 共用 command label、
 - 没有可路由的 Hatch window 时，Native application menu 的 product commands 必须 disabled。`Focused(false)` 不应过早清空最后一个 Hatch window，因为点击 macOS/Windows native menu 可暂时移开 WebView focus；另一个 Hatch window 的 `Focused(true)` 替换目标，`Destroyed` 必须清除它的 command state、pending context target 和 conversation-window registry entry。
 - Sidebar / Inspector 使用 Native `CheckMenuItem`，check state 来自该窗口的 command snapshot。菜单选择可乐观翻转 checkmark；若 event delivery 失败必须回滚，下一次 renderer 完整 snapshot 为最终真相。
 - Toolbar 的唯一 `…` 调用 `show_native_command_menu({ request: { position } })`。Native menu 必须从同一 registry 构建，至少包含 New Conversation、New Window、Open Workspace、Sidebar、Inspector、Zoom In/Out/Actual Size、Stop Run 与 Settings；不得由 renderer 传入任意 menu item 或 enablement。
-- `artifact.reveal` 已通过 `reveal_workspace_artifact({ workspaceGrantId, relativePath })` 接入 Finder/Explorer；Rust 在每次调用前重新解析 grant、canonicalize 并检查 containment。`artifact.quickLook` 仍是 P4 平台能力合同，在 macOS Quick Look / Windows Open 对等实现前不得显示为可工作的占位 action。
+- `artifact.reveal` 已通过 `reveal_workspace_artifact({ workspaceGrantId, relativePath })` 接入 Finder/Explorer；`artifact.quickLook` 通过同一 grant-bound contract 接入：macOS 调用系统 Quick Look launcher，Windows 调用 ShellExecute `open`，其他 Unix 使用 `xdg-open`。Rust 在每次调用前重新解析 grant、canonicalize 并检查 containment；未通过 grant 校验时不能启动任何外部 opener。
 
 Native 交付顺序：
 
@@ -444,7 +444,7 @@ Context menu 规则：
 - Background window 需要 approval 时请求 Dock/taskbar attention。
 - `Cancelled`、`Failed`、`Offline`、`Needs Approval` 是不同状态；用户主动 Stop 不得显示为失败。
 
-当前 worktree 已交付的 P3 子集是 application menu、toolbar overflow、conversation/tool-result/artifact 的 native context popup、semantic command routing、per-window command enablement/check state、native conversation-window lifecycle、zoom commands、parented Workspace picker/drop、grant-bound Finder/Explorer Reveal、non-modal Dock/taskbar attention，以及独立 Settings/About auxiliary windows。`artifact.quickLook` 仍是明确的 deferred integration。
+当前 worktree 已交付的 P3 子集是 application menu、toolbar overflow、conversation/tool-result/artifact 的 native context popup、semantic command routing、per-window command enablement/check state、native conversation-window lifecycle、zoom commands、parented Workspace picker/drop、grant-bound Finder/Explorer Reveal、grant-bound Quick Look/Open、non-modal Dock/taskbar attention，以及独立 Settings/About auxiliary windows。macOS native menu UAT 已确认 artifact 菜单显示 `Quick Look`；Windows `ShellExecuteW` 与高 DPI/Explorer 行为仍需 Windows 真机验收。
 
 ### P4：跨平台验收
 
@@ -507,9 +507,12 @@ V1 只有在以下条件全部通过后才算完成：
 - [Apple: Scroll views](https://developer.apple.com/design/human-interface-guidelines/scroll-views)
 - [Apple: Drag and drop](https://developer.apple.com/design/human-interface-guidelines/drag-and-drop)
 - [Apple Keychain Services](https://developer.apple.com/documentation/security/keychain-services)
+- [Apple Quick Look UI](https://developer.apple.com/documentation/quicklookui)
+- [Apple QLPreviewPanel](https://developer.apple.com/documentation/quicklookui/qlpreviewpanel)
 - [Microsoft: Title bar customization](https://learn.microsoft.com/en-us/windows/apps/develop/title-bar?tabs=winui3)
 - [Microsoft: NavigationView](https://learn.microsoft.com/en-us/windows/apps/develop/ui/controls/navigationview)
 - [Microsoft: Command bar](https://learn.microsoft.com/en-us/windows/apps/design/controls/command-bar)
+- [Microsoft: ShellExecute](https://learn.microsoft.com/en-us/windows/win32/shell/launch)
 - [Microsoft: Credential Locker](https://learn.microsoft.com/en-us/windows/apps/develop/security/credential-locker)
 - [Microsoft: PasswordVault app isolation](https://learn.microsoft.com/en-us/uwp/api/windows.security.credentials.passwordvault)
 - [Microsoft: Detect package identity](https://learn.microsoft.com/en-us/windows/msix/detect-package-identity)

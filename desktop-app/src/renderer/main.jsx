@@ -1939,6 +1939,27 @@ function App() {
     }
   }
 
+  async function openArtifactInNativePreview(target) {
+    const artifact = String(target || "").trim();
+    const grant = workspaceGrantRef.current || workspaceGrant;
+    const relativePath = artifactRelativePath(artifact, workspaceRef.current || workspace);
+    if (!grant?.grant_id || !relativePath) {
+      setStatus("Preview is available only for an artifact inside the granted workspace.");
+      return;
+    }
+    try {
+      await invokeTauri("open_workspace_artifact", {
+        request: {
+          workspaceGrantId: grant.grant_id,
+          relativePath
+        }
+      });
+      setStatus("Artifact opened in the native preview");
+    } catch (error) {
+      setStatus(`Hatch couldn't preview the artifact: ${errorMessage(error)}`);
+    }
+  }
+
   // Keep the single native listener stable while its actions always observe
   // the latest React state. Rust routes only to this focused WebView window.
   nativeCommandHandlersRef.current = {
@@ -1965,6 +1986,7 @@ function App() {
       });
     },
     onRevealArtifact: (target) => void revealArtifact(takeNativeContextTarget(target)),
+    onQuickLookArtifact: (target) => void openArtifactInNativePreview(takeNativeContextTarget(target)),
     onCopyArtifactPath: (target) => copyNativeContextTarget(target, "Path"),
     onCopyToolOutput: (target) => copyNativeContextTarget(target, "Output")
   };

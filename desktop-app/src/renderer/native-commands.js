@@ -25,6 +25,7 @@ export const NATIVE_COMMAND = Object.freeze({
   SETTINGS_OPEN: "settings.open",
   ABOUT_OPEN: "about.open",
   ARTIFACT_REVEAL: "artifact.reveal",
+  ARTIFACT_QUICK_LOOK: "artifact.quickLook",
   ARTIFACT_COPY_PATH: "artifact.copyPath",
   TOOL_COPY_OUTPUT: "tool.copyOutput"
 });
@@ -98,6 +99,8 @@ function commandHandlerFor(commandId, handlers) {
       return handlers.onOpenAbout;
     case NATIVE_COMMAND.ARTIFACT_REVEAL:
       return handlers.onRevealArtifact;
+    case NATIVE_COMMAND.ARTIFACT_QUICK_LOOK:
+      return handlers.onQuickLookArtifact;
     case NATIVE_COMMAND.ARTIFACT_COPY_PATH:
       return handlers.onCopyArtifactPath;
     case NATIVE_COMMAND.TOOL_COPY_OUTPUT:

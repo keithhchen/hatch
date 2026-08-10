@@ -68,7 +68,7 @@ resulting capture is checked in as
 ## Automated evidence recorded with these captures
 
 - Renderer: 21 files / 84 tests
-- Rust Tauri library: 39 passed / 1 ignored (unlocked Keychain smoke)
+- Rust Tauri library: 40 passed / 1 ignored (unlocked Keychain smoke)
 - Runtime: 226 Node subtests passed with an isolated `HATCH_RUNTIME_DATA_DIR`
 - LocalRunner: 43 tests passed (filesystem, shell and macOS Seatbelt suites)
 - `npm run build:web`
@@ -81,9 +81,14 @@ Out, Actual Size, and Enter Full Screen; Settings and About open as independent
 native auxiliary windows. The release build displayed the ordinary Sign in screen without a
 Login Keychain unlock prompt; persistent Keychain access remains restricted to
 the separately configured Developer ID distribution lane. Workspace picker
-calls are parented to the invoking window, and artifact Reveal accepts only a
-grant ID plus a workspace-relative path; Rust re-checks canonical containment
-before opening Finder/Explorer.
+calls are parented to the invoking window, and artifact Reveal and Quick
+Look/Open accept only a grant ID plus a workspace-relative path; Rust re-checks
+canonical containment before opening Finder/Explorer or handing the path to the
+platform opener. On macOS, a fresh preview UAT opened the artifact context
+popup and its accessibility tree exposed `Reveal in Finder`, `Quick Look`, and
+`Copy Path`; the popup route carried the semantic `artifact.quickLook` command.
+Windows ShellExecute and a valid-grant invocation remain real-platform
+acceptance items.
 
 The product window disables WebKit devtools in its Tauri window configuration.
 On the rebuilt ad-hoc app, a product-area secondary click therefore did not
@@ -122,6 +127,7 @@ pixel clone of AppKit: Tauri owns the native window/menu boundary while React
 owns transcript, Markdown, code, tables, tool activity, and composer content.
 
 The remaining platform work is explicit in the parent spec: Windows UAT and
-accessibility, signed release verification, and a true Quick Look/Open parity
-surface. Finder/Explorer Reveal, non-modal window attention, and independent
-Settings/About auxiliary windows are now covered by the native bridge.
+accessibility, signed release verification, and a valid-grant Quick Look/Open
+invocation on each target OS. Finder/Explorer Reveal, the macOS Quick Look
+menu route, non-modal window attention, and independent Settings/About
+auxiliary windows are now covered by the native bridge.

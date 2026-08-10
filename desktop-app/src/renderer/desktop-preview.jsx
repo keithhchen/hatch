@@ -149,7 +149,7 @@ export function DesktopPreview() {
                       </table>
                     </div>
                     <p>推荐先用 <code>creator_seth_search_company</code>。长 identifier 不应被逐字符拆开。</p>
-                    <pre><code>{"SELECT symbol, name\nFROM companies\nWHERE name ILIKE '%hatch%';"}</code></pre>
+                    <pre onContextMenu={(event) => showPreviewContextMenu(event, { kind: "artifact", target: "database-tools.sql" })}><code>{"SELECT symbol, name\nFROM companies\nWHERE name ILIKE '%hatch%';"}</code></pre>
                   </div>
                 </div>
               </div>
