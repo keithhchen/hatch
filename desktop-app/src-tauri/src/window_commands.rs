@@ -1198,7 +1198,7 @@ fn build_context_menu<R: Runtime>(
             (CONTEXT_CONVERSATION_ARCHIVE, "Archive Conversation"),
         ],
         NativeContextMenuKind::Artifact => &[
-            (CONTEXT_ARTIFACT_REVEAL, "Reveal in Finder"),
+            (CONTEXT_ARTIFACT_REVEAL, artifact_reveal_menu_label()),
             (CONTEXT_ARTIFACT_COPY_PATH, "Copy Path"),
         ],
         NativeContextMenuKind::ToolResult => &[(CONTEXT_TOOL_COPY_OUTPUT, "Copy Output")],
@@ -1213,6 +1213,21 @@ fn build_context_menu<R: Runtime>(
     builder
         .build()
         .map_err(|error| format!("native_context_menu_build_failed: {error}"))
+}
+
+fn artifact_reveal_menu_label() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        "Reveal in Finder"
+    }
+    #[cfg(target_os = "windows")]
+    {
+        "Reveal in Explorer"
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        "Reveal in File Manager"
+    }
 }
 
 fn app_menu_command(menu_id: &str) -> Option<&'static str> {
@@ -1337,14 +1352,14 @@ fn stable_hash64(bytes: &[u8]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::{
-        app_menu_command, application_command_definition, context_menu_command,
-        conversation_window_label, validate_context_position, validate_context_target,
-        validate_conversation_id, ConversationReservation, ConversationWindowPhase,
-        NativeCommandRouter, NativeCommandState, NativeContextMenuKind, NativeContextMenuPosition,
-        COMMAND_ABOUT_OPEN, COMMAND_CONVERSATION_NEW, COMMAND_CONVERSATION_NEW_WINDOW,
-        COMMAND_INSPECTOR_TOGGLE, COMMAND_RUN_STOP, COMMAND_SETTINGS_OPEN, COMMAND_SIDEBAR_TOGGLE,
-        COMMAND_VIEW_ZOOM_IN, COMMAND_VIEW_ZOOM_OUT, COMMAND_VIEW_ZOOM_RESET,
-        COMMAND_WORKSPACE_CHOOSE,
+        app_menu_command, application_command_definition, artifact_reveal_menu_label,
+        context_menu_command, conversation_window_label, validate_context_position,
+        validate_context_target, validate_conversation_id, ConversationReservation,
+        ConversationWindowPhase, NativeCommandRouter, NativeCommandState, NativeContextMenuKind,
+        NativeContextMenuPosition, COMMAND_ABOUT_OPEN, COMMAND_CONVERSATION_NEW,
+        COMMAND_CONVERSATION_NEW_WINDOW, COMMAND_INSPECTOR_TOGGLE, COMMAND_RUN_STOP,
+        COMMAND_SETTINGS_OPEN, COMMAND_SIDEBAR_TOGGLE, COMMAND_VIEW_ZOOM_IN, COMMAND_VIEW_ZOOM_OUT,
+        COMMAND_VIEW_ZOOM_RESET, COMMAND_WORKSPACE_CHOOSE,
     };
 
     #[test]
@@ -1456,6 +1471,16 @@ mod tests {
             Some(("artifact.reveal", NativeContextMenuKind::Artifact))
         );
         assert_eq!(context_menu_command("unexpected"), None);
+    }
+
+    #[test]
+    fn artifact_reveal_uses_the_platform_file_browser_name() {
+        #[cfg(target_os = "macos")]
+        assert_eq!(artifact_reveal_menu_label(), "Reveal in Finder");
+        #[cfg(target_os = "windows")]
+        assert_eq!(artifact_reveal_menu_label(), "Reveal in Explorer");
+        #[cfg(all(unix, not(target_os = "macos")))]
+        assert_eq!(artifact_reveal_menu_label(), "Reveal in File Manager");
     }
 
     #[test]
