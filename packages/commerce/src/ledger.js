@@ -408,7 +408,7 @@ export function projectCreatorDashboard(events, creatorId) {
       product_name: order.product_name ?? null,
       gross_minor: order.gross_minor,
       currency: order.currency,
-      status: refundedOrders.has(order.order_id) ? "refunded" : revenue ? "delivered" : "paid",
+      status: refundedOrders.has(order.order_id) ? "refunded" : (revenue || delivery) ? "delivered" : "paid",
       creator_share_minor: refundedOrders.has(order.order_id) ? 0 : revenue?.creator_share_minor ?? 0,
       hatch_share_minor: refundedOrders.has(order.order_id) ? 0 : revenue?.hatch_share_minor ?? 0,
       occurred_at: order.occurred_at,

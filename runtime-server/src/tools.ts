@@ -262,7 +262,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     model: {
       name: "file_patch",
       locality: "client",
-      description: "Patch a UTF-8 file inside the client-declared local workspace using Hatch patch format.",
+      description: "Patch a UTF-8 file inside the client-declared local workspace using Hatch patch format. The patch must start with `HATCH-PATCH v1` and use either `append\\n---\\n<text>` or `replace\\n--- old\\n<old text>\\n--- new\\n<new text>`; do not send a unified diff.",
       properties: {
         path: stringSchema("Workspace-relative file path."),
         patch: stringSchema("Patch text.")
