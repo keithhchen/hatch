@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-clear-window-tool-context"
+description = "Enables the clear_window_tool_context command without any pre-configured scope."
+commands.allow = ["clear_window_tool_context"]
+
+[[permission]]
+identifier = "deny-clear-window-tool-context"
+description = "Denies the clear_window_tool_context command without any pre-configured scope."
+commands.deny = ["clear_window_tool_context"]

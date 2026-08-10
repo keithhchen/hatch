@@ -121,4 +121,17 @@ artifact/Release only after the protected `desktop-production` Environment
 attests a signed picker→local-tool smoke for the exact commit. Distribution
 builds require a Developer ID certificate, hardened-runtime signing, Apple
 notarization, and successful stapling; missing release credentials fail closed.
-Ad-hoc DMGs remain local UAT artifacts and are never published.
+The same lane must set `HATCH_PERSISTENT_SESSION=1` and the expected
+`HATCH_APPLE_TEAM_ID`; the bundled executable validates its own Developer ID
+Application signature, Team ID, and bundle identifier before it may use the
+production Keychain session item. The build also checks those values from the
+final signed `.app`, rather than trusting the requested signing identity.
+Ad-hoc DMGs remain local UAT artifacts, never persist a session to Login
+Keychain, and are never published.
+
+There is no Windows distribution lane yet. In particular, a signed `.exe`,
+NSIS/MSI installer, or `HATCH_PERSISTENT_SESSION=1` alone must not enable
+opaque-token persistence: Win32 Generic Credential Manager entries are scoped
+to the user rather than Hatch's app identity. A Windows release lane remains
+blocked on MSIX package identity, AppContainer Credential Locker, package/
+publisher verification, and the corresponding signed-package UAT.

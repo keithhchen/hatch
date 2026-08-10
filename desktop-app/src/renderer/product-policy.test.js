@@ -77,18 +77,18 @@ describe("consumer product contract", () => {
       .toEqual(["Ask before changes", "Allow changes"]);
     expect(permissionPolicyLabel(PERMISSION_POLICIES.ASK_BEFORE_CHANGES)).toBe("Ask before changes");
     expect(permissionPolicyLabel(PERMISSION_POLICIES.ALLOW_CHANGES)).toBe("Allow changes");
-    expect(permissionPolicyDetail(PERMISSION_POLICIES.ALLOW_CHANGES)).toMatch(/file changes and shell commands/);
+    expect(permissionPolicyDetail(PERMISSION_POLICIES.ALLOW_CHANGES)).toMatch(/file changes; ask before every shell command/);
     expect(PERMISSION_OPTIONS.map((option) => `${option.label} ${option.detail}`).join(" "))
       .not.toMatch(/full access|完全访问/i);
   });
 
-  it("applies the selected changes policy to files and every shell command", () => {
+  it("lets Allow cover files but keeps every shell command behind approval", () => {
     expect(requiresUserApproval("file_write", PERMISSION_POLICIES.ASK_BEFORE_CHANGES)).toBe(true);
     expect(requiresUserApproval("file_patch", PERMISSION_POLICIES.ASK_BEFORE_CHANGES)).toBe(true);
     expect(requiresUserApproval("shell_exec", PERMISSION_POLICIES.ASK_BEFORE_CHANGES)).toBe(true);
     expect(requiresUserApproval("file_write", PERMISSION_POLICIES.ALLOW_CHANGES)).toBe(false);
     expect(requiresUserApproval("file_patch", PERMISSION_POLICIES.ALLOW_CHANGES)).toBe(false);
-    expect(requiresUserApproval("shell_exec", PERMISSION_POLICIES.ALLOW_CHANGES)).toBe(false);
+    expect(requiresUserApproval("shell_exec", PERMISSION_POLICIES.ALLOW_CHANGES)).toBe(true);
   });
 
   it("guards new conversations while a run remains active", () => {

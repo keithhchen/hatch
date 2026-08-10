@@ -1,0 +1,86 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "capabilities": [
+    {
+      "identifier": "desktop-auxiliary",
+      "description": "Settings and About windows are content-only native auxiliary surfaces.",
+      "windows": ["settings", "about"],
+      "permissions": [
+        "core:default",
+        "core:window:allow-start-dragging"
+      ]
+    },
+    {
+      "identifier": "desktop-main",
+      "description": "The main Hatch window may use the narrow native bridge for its own session, window settings, workspace context, and local tool lifecycle.",
+      "windows": ["main"],
+      "permissions": [
+        "core:default",
+        "core:window:allow-start-dragging",
+        "core:webview:allow-set-webview-zoom",
+        "allow-default-workspace",
+        "allow-ensure-workspace",
+        "allow-pick-workspace-folder",
+        "allow-reveal-workspace-artifact",
+        "allow-request-window-attention",
+        "allow-set-window-tool-context",
+        "allow-clear-window-tool-context",
+        "allow-execute-tool-call",
+        "allow-approve-pending-tool-call",
+        "allow-deny-pending-tool-call",
+        "allow-cancel-tool-call",
+        "allow-poll-tool-call",
+        "allow-read-auth-token",
+        "allow-write-auth-token",
+        "allow-clear-auth-token",
+        "allow-read-app-settings",
+        "allow-write-app-settings",
+        "allow-read-window-settings",
+        "allow-patch-window-settings",
+        "allow-open-conversation-window",
+        "allow-open-settings-window",
+        "allow-open-about-window",
+        "allow-set-native-command-state",
+        "allow-show-native-command-menu",
+        "allow-show-native-context-menu",
+        "allow-open-external-url",
+        "allow-revoke-workspace-grant"
+      ]
+    },
+    {
+      "identifier": "desktop-conversation-window",
+      "description": "A dynamically created conversation window receives the same window-scoped bridge; native authority still keys every grant and pending tool call by its label.",
+      "windows": ["conversation-*"],
+      "permissions": [
+        "core:default",
+        "core:window:allow-start-dragging",
+        "core:webview:allow-set-webview-zoom",
+        "allow-default-workspace",
+        "allow-ensure-workspace",
+        "allow-pick-workspace-folder",
+        "allow-reveal-workspace-artifact",
+        "allow-request-window-attention",
+        "allow-set-window-tool-context",
+        "allow-clear-window-tool-context",
+        "allow-execute-tool-call",
+        "allow-approve-pending-tool-call",
+        "allow-deny-pending-tool-call",
+        "allow-cancel-tool-call",
+        "allow-poll-tool-call",
+        "allow-read-auth-token",
+        "allow-write-auth-token",
+        "allow-clear-auth-token",
+        "allow-read-window-settings",
+        "allow-patch-window-settings",
+        "allow-open-conversation-window",
+        "allow-open-settings-window",
+        "allow-open-about-window",
+        "allow-set-native-command-state",
+        "allow-show-native-command-menu",
+        "allow-show-native-context-menu",
+        "allow-open-external-url",
+        "allow-revoke-workspace-grant"
+      ]
+    }
+  ]
+}

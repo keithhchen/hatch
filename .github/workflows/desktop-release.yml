@@ -63,6 +63,12 @@ jobs:
         working-directory: desktop-app
         env:
           HATCH_DISTRIBUTION_BUILD: "1"
+          # Only this Developer ID distribution lane may compile persistent
+          # Keychain support. `tauri dev` and ad-hoc UAT packages stay
+          # process-memory-only so transient code identities never contend for
+          # a Login Keychain ACL.
+          HATCH_PERSISTENT_SESSION: "1"
+          HATCH_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
           VITE_HATCH_RUNTIME_URL: ${{ vars.HATCH_RUNTIME_URL || 'wss://hatch.tokenquadrant.cn/v1/runtime' }}
         run: npm run build:distribution

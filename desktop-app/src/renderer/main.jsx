@@ -6,6 +6,9 @@ import "@fontsource-variable/noto-serif-sc";
 import "@fontsource/instrument-serif/400.css";
 import "@fontsource/dm-mono/400.css";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { availableMonitors, getCurrentWindow, PhysicalPosition, PhysicalSize } from "@tauri-apps/api/window";
 import {
   AssistantRuntimeProvider,
   ComposerPrimitive,
@@ -23,27 +26,28 @@ import {
   DEFAULT_CREATOR_AGENT,
   DEFAULT_PERMISSION_POLICY,
   PERMISSION_OPTIONS,
-  PERMISSION_POLICIES,
   PRODUCT_COPY,
-  canStartConversation,
   creatorAgentFromSession,
   creatorAgentFromEntitlement,
-  CHANGE_TOOLS,
   PLATFORM_LOCAL_TOOLS,
   normalizePermissionPolicy,
   permissionPolicyDetail,
   permissionPolicyLabel,
-  shouldRequestDesktopApproval,
   workspaceGrantLabel
 } from "./product-policy.js";
 import { fetchPurchasedCreatorAgents, runtimeHttpUrl } from "./entitlement-client.js";
+import {
+  createConversation,
+  getConversationSnapshot,
+  listConversations,
+  updateConversation
+} from "./conversation-client.js";
 import {
   clearAuthSession,
   createTauriAuthStorage,
   loadSavedAuthSession,
   isAuthInvalidError,
   isNetworkError,
-  isSecureSessionReadError,
   startAuthSessionSignOut
 } from "./auth-session.js";
 import {
@@ -65,7 +69,7 @@ import {
   validateRestoredWorkspace,
   workspacePickerSelection
 } from "./workspace-restore.js";
-import { accessSnapshotForToolCall, createTurnAccessSnapshot } from "./turn-access-snapshot.js";
+import { createTurnAccessSnapshot } from "./turn-access-snapshot.js";
 import { canUseAnotherAccountFromNetworkError } from "./network-error-recovery.js";
 import {
   entitlementRefreshNeedsReconnect,
@@ -79,6 +83,23 @@ import {
   localToolTransportDeadlineMs,
   statusAfterLocalToolStop
 } from "./local-tool-lifecycle.js";
+import { DesktopWindowShell } from "./desktop-shell.jsx";
+import { clampWindowFrame, normalizeWindowFrame } from "./desktop-window-frame.js";
+import {
+  DESKTOP_LAYOUT,
+  DESKTOP_ZOOM,
+  nextZoom,
+  normalizeWindowLayoutPreferences,
+  normalizeZoom
+} from "./desktop-layout.js";
+import { DesktopPreview } from "./desktop-preview.jsx";
+import {
+  conversationIdFromLocation,
+  nativeContextRequest,
+  requestNativeContextMenu,
+  routeNativeCommand,
+  subscribeNativeCommands
+} from "./native-commands.js";
 
 const PROTOCOL_VERSION = "0.6";
 const OUTPUT_FILTERED_COPY = "This response was blocked by the output safety check.";
@@ -90,8 +111,54 @@ const BROWSE_CATALOG_URL = import.meta.env.VITE_HATCH_CATALOG_URL || "https://ha
 const EMPTY_PROFILE = Object.freeze({ id: "anonymous", name: "User", initials: "U" });
 const DEFAULT_PERMISSION_MODE = DEFAULT_PERMISSION_POLICY;
 const ApprovalContext = createContext(null);
+const NativeContextMenuContext = createContext(null);
+
+function auxiliaryWindowMode(locationLike = globalThis.location) {
+  const params = new URLSearchParams(typeof locationLike?.search === "string" ? locationLike.search : "");
+  if (params.get("settings") === "1") return "settings";
+  if (params.get("about") === "1") return "about";
+  return "";
+}
+
+function DesktopAuxiliaryWindow({ kind }) {
+  const about = kind === "about";
+  return (
+    <main className="desktop-auxiliary-window" aria-labelledby="auxiliary-window-title">
+      <header className="desktop-auxiliary-header" data-tauri-drag-region>
+        <span className="desktop-auxiliary-mark" aria-hidden="true">●</span>
+        <div>
+          <p className="desktop-auxiliary-kicker">HATCH</p>
+          <h1 id="auxiliary-window-title">{about ? "About Hatch" : "Settings"}</h1>
+        </div>
+      </header>
+      {about ? (
+        <section className="desktop-auxiliary-content">
+          <p className="desktop-auxiliary-lede">Creator agents, on your terms.</p>
+          <p>Hatch keeps the desktop boundary native while React renders the conversation work surface.</p>
+          <dl className="desktop-auxiliary-facts">
+            <div><dt>Version</dt><dd>0.1.0</dd></div>
+            <div><dt>Architecture</dt><dd>Tauri Hybrid</dd></div>
+          </dl>
+        </section>
+      ) : (
+        <section className="desktop-auxiliary-content">
+          <p className="desktop-auxiliary-lede">Desktop behavior</p>
+          <div className="desktop-auxiliary-row"><span>Window layout</span><strong>Per-window</strong></div>
+          <div className="desktop-auxiliary-row"><span>Application zoom</span><strong>80%–200%</strong></div>
+          <div className="desktop-auxiliary-row"><span>Workspace access</span><strong>Native grant</strong></div>
+          <p className="desktop-auxiliary-note">Conversation, pane, frame and zoom preferences are stored per window. Secrets stay in the native session boundary.</p>
+        </section>
+      )}
+    </main>
+  );
+}
 
 function App() {
+  if (import.meta.env.DEV && import.meta.env.VITE_HATCH_DESKTOP_PREVIEW === "1") {
+    return <DesktopPreview />;
+  }
+  const auxiliaryMode = auxiliaryWindowMode();
+  if (auxiliaryMode) return <DesktopAuxiliaryWindow kind={auxiliaryMode} />;
   const authStorageRef = useRef(null);
   const settingsStoreRef = useRef(null);
   if (!authStorageRef.current) {
@@ -124,7 +191,16 @@ function App() {
   const pendingLocalToolsRef = useRef(new Map());
   const entitlementRefreshRef = useRef(false);
   const lastEntitlementRefreshRef = useRef(0);
-  const pendingClearSessionRef = useRef(null);
+  const nativeCommandHandlersRef = useRef({});
+  const nativeContextTargetsRef = useRef(new Map());
+  const nativeContextTargetSequenceRef = useRef(0);
+  const requestedConversationIdRef = useRef(conversationIdFromLocation());
+  const conversationLibraryRequestRef = useRef(0);
+  const conversationCursorRef = useRef(0);
+  // Window context is deliberately separate from profile preferences. A
+  // second Conversation window must be able to use another Conversation and
+  // Workspace without last-writer-wins updates from the first window.
+  const windowContextRef = useRef({});
   const [serverUrl] = useState(DEFAULT_RUNTIME_URL);
   const [workspace, setWorkspace] = useState("");
   const [workspaceDraft, setWorkspaceDraft] = useState("");
@@ -132,7 +208,6 @@ function App() {
   const [workspaceDraftGrant, setWorkspaceDraftGrant] = useState(null);
   const [authState, setAuthState] = useState("loading");
   const [startupError, setStartupError] = useState("");
-  const [secureSessionError, setSecureSessionError] = useState("");
   const [settingsMigrationNotice, setSettingsMigrationNotice] = useState("");
   const [settingsReady, setSettingsReady] = useState(false);
   const [bootstrapAttempt, setBootstrapAttempt] = useState(0);
@@ -144,15 +219,27 @@ function App() {
   const [signInStatus, setSignInStatus] = useState("idle");
   const [signInError, setSignInError] = useState("");
   const [workspaceGranted, setWorkspaceGranted] = useState(false);
+  const [droppedFiles, setDroppedFiles] = useState([]);
   const [permissionMode, setPermissionMode] = useState(DEFAULT_PERMISSION_MODE);
   const [interruptedRun, setInterruptedRun] = useState(null);
-  const [conversationId, setConversationId] = useState("desktop-chat");
+  const [conversationId, setConversationId] = useState(() => requestedConversationIdRef.current || "desktop-chat");
+  const [conversations, setConversations] = useState([]);
+  const [conversationLibraryStatus, setConversationLibraryStatus] = useState("idle");
+  const [conversationLibraryError, setConversationLibraryError] = useState("");
   const [status, setStatus] = useState("Offline");
   const [connected, setConnected] = useState(false);
   const [running, setRunning] = useState(false);
   const [messages, setMessages] = useState([]);
   const [approvalRequests, setApprovalRequests] = useState({});
   const [creatorAgent, setCreatorAgent] = useState(DEFAULT_CREATOR_AGENT);
+  const [sidebarPreference, setSidebarPreference] = useState("open");
+  const [sidebarWidth, setSidebarWidth] = useState(DESKTOP_LAYOUT.sidebar.default);
+  const [inspectorPreference, setInspectorPreference] = useState("open");
+  const [inspectorWidth, setInspectorWidth] = useState(DESKTOP_LAYOUT.inspector.default);
+  const [applicationZoom, setApplicationZoom] = useState(DESKTOP_ZOOM.default);
+  const [windowLayoutReady, setWindowLayoutReady] = useState(false);
+  const [windowContextReady, setWindowContextReady] = useState(false);
+  const [windowStateRestored, setWindowStateRestored] = useState(false);
   const buyerProfile = buyerSession?.profile ?? EMPTY_PROFILE;
   const signedIn = authState === "signed-in";
 
@@ -162,6 +249,16 @@ function App() {
 
   function setProfileSetting(key, value, profileId = buyerProfile.id) {
     settingsStoreRef.current?.setProfile(profileId, key, value);
+  }
+
+  function patchWindowContext(patch = {}) {
+    const next = {
+      ...windowContextRef.current,
+      ...patch
+    };
+    windowContextRef.current = next;
+    if (!window.__TAURI_INTERNALS__) return;
+    void invokeTauri("patch_window_settings", { patch: { context: next } }).catch(() => {});
   }
 
   function getConversationId(profileId, entitlementId, fallback) {
@@ -199,12 +296,13 @@ function App() {
     const mustRebindRuntime = entitlementRefreshNeedsReconnect(connectionConfigRef.current, selected);
     if (mustRebindRuntime) {
       disconnectRuntime();
-      const fallback = selected
-        ? `conversation_${profileId}_${selected.creator_id || "creator"}_${selected.agent_id || selected.product?.id || "agent"}`
-        : `conversation_${profileId}_desktop`;
-      setConversationId(selected
+      // A legacy Runtime may still expose the historical single transcript
+      // route, but a new Conversation ID must always come from the Library.
+      // Never mint an authoritative conversation id in the renderer.
+      const fallback = "desktop-chat";
+      setConversationId(requestedConversationIdRef.current || (selected
         ? getConversationId(profileId, selected.entitlement_id, fallback)
-        : fallback);
+        : fallback));
       setMessages([]);
     }
     setBuyerSession(session);
@@ -252,7 +350,7 @@ function App() {
 
   function resetToSignedOut() {
     disconnectRuntime();
-    pendingClearSessionRef.current = null;
+    void clearNativeToolContext();
     activeRunRef.current = null;
     setInterruptedRun(null);
     setBuyerSession(null);
@@ -271,31 +369,38 @@ function App() {
     setConversationId("desktop-chat");
     setSignInStatus("idle");
     setStartupError("");
-    setSecureSessionError("");
     setSettingsMigrationNotice("");
     connectionConfigRef.current = null;
   }
 
-  async function clearSavedSessionOrShowError(session, clearPromise) {
-    pendingClearSessionRef.current = session;
+  async function synchronizeNativeToolContext(accessSnapshot) {
+    const workspaceGrantId = String(accessSnapshot?.workspaceGrantId || "").trim();
+    if (!workspaceGrantId) throw new Error("Choose a workspace folder before starting a task.");
+    return invokeTauri("set_window_tool_context", {
+      workspaceGrantId,
+      permissionPolicy: accessSnapshot.permissionMode
+    });
+  }
+
+  async function clearNativeToolContext() {
+    try {
+      await invokeTauri("clear_window_tool_context");
+    } catch {
+      // The process may already be closing. Rust also clears per-window
+      // authority on WindowEvent::Destroyed.
+    }
+  }
+
+  async function clearSavedSession(session, clearPromise) {
     try {
       await (clearPromise ?? clearAuthSession(session, authStorageRef.current));
     } catch {
-      setSecureSessionError("Hatch couldn't remove the saved session from macOS Keychain. This Mac may still be signed in. Try again before switching accounts or handing over the device.");
-      setAuthState("secure-session-error");
+      resetToSignedOut();
+      setSignInError("Hatch couldn't clear the saved sign-in from this Mac. Sign in again to replace it.");
       return false;
     }
     resetToSignedOut();
     return true;
-  }
-
-  async function retrySecureSessionClear() {
-    const session = pendingClearSessionRef.current;
-    if (!session) {
-      resetToSignedOut();
-      return;
-    }
-    await clearSavedSessionOrShowError(session);
   }
 
   useEffect(() => {
@@ -304,25 +409,14 @@ function App() {
       if (window.__TAURI_INTERNALS__) {
         try {
           purgeLegacySensitiveStorage(window.localStorage);
-        } catch (error) {
-          if (cancelled) return;
-          setSecureSessionError(`Hatch couldn't remove legacy browser session data from this Mac: ${errorMessage(error)}`);
-          setAuthState("secure-session-read-error");
-          return;
+        } catch {
+          // Legacy cleanup is best effort and must not block normal Sign in.
         }
       }
       await settingsStoreRef.current.load();
       if (cancelled) return;
       setSettingsReady(true);
-      let savedSession;
-      try {
-        savedSession = await loadSavedAuthSession(authStorageRef.current);
-      } catch (error) {
-        if (cancelled) return;
-        setSecureSessionError(errorMessage(error));
-        setAuthState(isSecureSessionReadError(error) ? "secure-session-read-error" : "network-error");
-        return;
-      }
+      const savedSession = await loadSavedAuthSession(authStorageRef.current);
       if (!savedSession) {
         setAuthState("signed-out");
         return;
@@ -333,7 +427,7 @@ function App() {
       } catch (error) {
         if (cancelled) return;
         if (isAuthInvalidError(error)) {
-          const cleared = await clearSavedSessionOrShowError(savedSession);
+          const cleared = await clearSavedSession(savedSession);
           if (cleared) setSignInError("");
           return;
         }
@@ -356,7 +450,7 @@ function App() {
       applySignedInSession(buyerSession, entitlements, { preserveCurrent });
     } catch (error) {
       if (isAuthInvalidError(error)) {
-        await clearSavedSessionOrShowError(buyerSession);
+        await clearSavedSession(buyerSession);
         return;
       }
       if (startup) {
@@ -386,6 +480,99 @@ function App() {
       document.removeEventListener("visibilitychange", refresh);
     };
   }, [buyerSession?.accessToken, signedIn]);
+
+  function conversationBindingFor(entitlementId = selectedEntitlementId) {
+    const entitlement = creatorAgentEntitlements.find((item) => item.entitlement_id === entitlementId);
+    return entitlement ? {
+      entitlementId: entitlement.entitlement_id,
+      creatorId: entitlement.creator_id,
+      agentId: entitlement.agent_id
+    } : null;
+  }
+
+  async function loadConversationLibrary() {
+    if (!signedIn || !buyerSession?.accessToken || !selectedEntitlementId) {
+      setConversations([]);
+      setConversationLibraryStatus("idle");
+      return;
+    }
+    const binding = conversationBindingFor();
+    if (!binding?.entitlementId || !binding.creatorId || !binding.agentId) {
+      setConversationLibraryStatus("unavailable");
+      setConversationLibraryError("Conversation Library is waiting for the Agent binding.");
+      return;
+    }
+    const requestId = ++conversationLibraryRequestRef.current;
+    setConversationLibraryStatus("loading");
+    setConversationLibraryError("");
+    try {
+      const payload = await listConversations(serverUrl, buyerSession.accessToken, binding, {
+        status: "active",
+        limit: 100
+      });
+      if (requestId !== conversationLibraryRequestRef.current) return;
+      let nextConversations = Array.isArray(payload?.conversations)
+        ? payload.conversations.filter((item) => item?.id && item.status !== "archived")
+        : [];
+      let requested = requestedConversationIdRef.current;
+      const saved = getConversationId(
+        buyerProfile.id,
+        selectedEntitlementId,
+        ""
+      );
+      const savedServerConversation = isServerConversationId(saved) && nextConversations.some((item) => item.id === saved)
+        ? saved
+        : "";
+      // A URL can be supplied by another window, but the current Agent list
+      // is the authority for whether that Conversation belongs here. Do not
+      // hydrate or execute an ID that the bound Library did not return.
+      const requestedServerConversation = isServerConversationId(requested)
+        && nextConversations.some((item) => item.id === requested)
+        ? requested
+        : "";
+      let nextId = requestedServerConversation || savedServerConversation || nextConversations[0]?.id || "";
+
+      if (!nextId && !requestedServerConversation) {
+        const created = await createConversation(serverUrl, buyerSession.accessToken, binding, {
+          title: `New ${creatorAgent.name} conversation`,
+          clientRequestId: `desktop-bootstrap-${stableRandomId()}`
+        });
+        const conversation = created?.conversation;
+        if (!conversation?.id) throw new Error("Runtime returned an invalid Conversation.");
+        nextId = conversation.id;
+        nextConversations = [conversation, ...nextConversations];
+      }
+      if (requestId !== conversationLibraryRequestRef.current) return;
+      if (nextId && nextId !== conversationId) {
+        disconnectRuntime();
+        conversationCursorRef.current = 0;
+        setMessages([]);
+        setConversationId(nextId);
+        setConversationIdForEntitlement(buyerProfile.id, selectedEntitlementId, nextId);
+      }
+      if (requested && isServerConversationId(requested) && !requestedServerConversation) {
+        setConversationLibraryError("That Conversation is not available for the selected Creator Agent.");
+      }
+      requestedConversationIdRef.current = "";
+      setConversations(nextConversations);
+      setConversationLibraryStatus("ready");
+    } catch (error) {
+      if (requestId !== conversationLibraryRequestRef.current) return;
+      // A server without the P2 Library API can still serve legacy transcript
+      // reads. Keep that compatibility path explicit and never fabricate a
+      // new server Conversation ID in the renderer.
+      setConversationLibraryStatus("unavailable");
+      setConversationLibraryError(errorMessage(error));
+      setStatus("Conversation Library unavailable — keeping the legacy session.");
+    }
+  }
+
+  useEffect(() => {
+    void loadConversationLibrary();
+    return () => {
+      conversationLibraryRequestRef.current += 1;
+    };
+  }, [buyerSession?.accessToken, selectedEntitlementId, signedIn]);
 
   const send = useCallback((message) => {
     const socket = socketRef.current;
@@ -440,17 +627,27 @@ function App() {
     if (!content) return;
 
     // Workspace and permission changes are pending Desktop preferences until a
-    // new turn starts. Tool calls within a turn always use this stable snapshot.
+    // new turn starts. The native window captures this exact snapshot before
+    // the Runtime may request a local tool; the renderer never sends a path or
+    // an `approved_by_user` flag to authorize the tool itself.
     const accessSnapshot = createTurnAccessSnapshot(workspaceGrant?.grant_id, workspace, permissionMode);
+    try {
+      await synchronizeNativeToolContext(accessSnapshot);
+    } catch (error) {
+      setStatus(`Couldn't prepare native workspace access: ${errorMessage(error)}`);
+      return;
+    }
     workspaceRef.current = accessSnapshot.displayPath;
     workspaceGrantRef.current = workspaceGrant;
     permissionRef.current = accessSnapshot.permissionMode;
 
-    const runId = `run_${Date.now()}`;
+    const runId = `run_${stableRandomId()}`;
+    const clientMessageId = `message_${stableRandomId()}`;
     const assistantId = `${runId}_assistant`;
     const startedAt = Date.now();
     activeRunRef.current = {
       runId,
+      clientMessageId,
       assistantId,
       text: "",
       startedAt,
@@ -459,12 +656,14 @@ function App() {
     };
     setProfileSetting("active_run", {
       runId,
+      clientMessageId,
       assistantId,
       startedAt,
       conversationId,
       accessSnapshot,
       timing: { questionSentAt: startedAt }
     });
+    patchWindowContext({ activeRun: activeRunRef.current });
     setMessages((current) => [
       ...current,
       makeUserMessage(`${runId}_user`, content, startedAt),
@@ -476,6 +675,7 @@ function App() {
     send({
       type: "client.message",
       run_id: runId,
+      client_message_id: clientMessageId,
       conversation_id: conversationId.trim() || "desktop-chat",
       message: {
         role: "user",
@@ -517,19 +717,68 @@ function App() {
     }
   }, []);
 
+  // Hydrate the invoking native window's context before profile-level legacy
+  // migration runs. The profile store remains a compatibility fallback for
+  // the original single-window build, but it must not be the authority once
+  // a second Conversation window exists.
   useEffect(() => {
-    if (!settingsReady || !signedIn || !buyerSession?.profile?.id) return;
+    if (!settingsReady || !signedIn || !buyerSession?.profile?.id) {
+      setWindowContextReady(false);
+      windowContextRef.current = {};
+      return;
+    }
+    let cancelled = false;
+    setWindowContextReady(false);
+    void invokeTauri("read_window_settings").then((saved) => {
+      if (cancelled) return;
+      const context = saved?.context && typeof saved.context === "object" && !Array.isArray(saved.context)
+        ? saved.context
+        : {};
+      windowContextRef.current = {
+        ...context,
+        conversationId: typeof context.conversationId === "string" ? context.conversationId : "",
+        workspaceGrant: normalizeWorkspaceGrant(context.workspaceGrant),
+        permissionMode: context.permissionMode ? normalizePermissionPolicy(context.permissionMode) : "",
+        activeRun: parseStoredJson(context.activeRun),
+        conversationCursor: Number.isFinite(Number(context.conversationCursor))
+          ? Math.max(0, Number(context.conversationCursor))
+          : 0
+      };
+      conversationCursorRef.current = requestedConversationIdRef.current
+        && requestedConversationIdRef.current !== windowContextRef.current.conversationId
+        ? 0
+        : windowContextRef.current.conversationCursor;
+      setWindowContextReady(true);
+    }).catch(() => {
+      if (!cancelled) {
+        windowContextRef.current = {};
+        setWindowContextReady(true);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [buyerSession?.profile?.id, settingsReady, signedIn]);
+
+  useEffect(() => {
+    if (!settingsReady || !windowContextReady || !signedIn || !buyerSession?.profile?.id) return;
     let cancelled = false;
     const profileId = buyerSession.profile.id;
-    const savedWorkspaceGrant = normalizeWorkspaceGrant(getProfileSetting("workspace_grant", null));
+    setWindowStateRestored(false);
+    const windowContext = windowContextRef.current;
+    const openedFromConversationWindow = Boolean(requestedConversationIdRef.current);
+    const savedWorkspaceGrant = normalizeWorkspaceGrant(windowContext.workspaceGrant)
+      || (!openedFromConversationWindow ? normalizeWorkspaceGrant(getProfileSetting("workspace_grant", null)) : null);
     const legacySavedWorkspace = getProfileSetting("workspace_root", "");
     const savedConversationId = getConversationId(
       buyerProfile.id,
       selectedEntitlementId,
-      `conversation_${buyerProfile.id}_${selectedEntitlementId || "desktop"}`
+      "desktop-chat"
     );
-    const savedRun = parseStoredJson(getProfileSetting("active_run", null));
-    const savedPermission = getProfileSetting("permission_mode");
+    const windowConversationId = typeof windowContext.conversationId === "string"
+      ? windowContext.conversationId.trim()
+      : "";
+    const savedRun = parseStoredJson(windowContext.activeRun)
+      || (!openedFromConversationWindow ? parseStoredJson(getProfileSetting("active_run", null)) : null);
+    const savedPermission = windowContext.permissionMode || getProfileSetting("permission_mode");
     const nextPermission = normalizePermissionPolicy(savedPermission);
     if (savedPermission !== nextPermission) {
       setProfileSetting("permission_mode", nextPermission);
@@ -541,7 +790,7 @@ function App() {
     setWorkspaceDraft(savedWorkspaceGrant?.display_path || "");
     setWorkspaceDraftGrant(savedWorkspaceGrant);
     setWorkspaceGranted(false);
-    setConversationId(savedConversationId);
+    setConversationId(requestedConversationIdRef.current || windowConversationId || savedConversationId);
     permissionRef.current = nextPermission;
     setPermissionMode(nextPermission);
     if (savedRun) {
@@ -592,6 +841,7 @@ function App() {
             settingsStoreRef.current.clearProfileKey(profileId, "workspace_grant"),
             invokeTauri("revoke_workspace_grant", { workspaceGrantId: restored.staleGrant.grant_id })
           ]);
+          patchWindowContext({ workspaceGrant: null });
           if (!cancelled) setStatus(restored.status);
         } catch {
           if (!cancelled) setStatus(`${restored.status} Hatch couldn't clear the stale saved path; it will retry next launch.`);
@@ -604,9 +854,175 @@ function App() {
           : restored.status);
       }
     }
-    void restoreWorkspace();
+    void restoreWorkspace().finally(() => {
+      if (!cancelled) setWindowStateRestored(true);
+    });
     return () => { cancelled = true; };
-  }, [buyerProfile.id, buyerSession?.profile?.id, selectedEntitlementId, settingsReady, signedIn]);
+  }, [buyerProfile.id, buyerSession?.profile?.id, selectedEntitlementId, settingsReady, signedIn, windowContextReady]);
+
+  // Persist only after the native window context has been read and the
+  // workspace restore attempt has completed. This prevents the first React
+  // render's defaults from overwriting another window's saved context.
+  useEffect(() => {
+    if (!windowContextReady || !windowStateRestored || !signedIn) return;
+    patchWindowContext({
+      conversationId,
+      workspaceGrant,
+      permissionMode,
+      draft: workspaceDraft,
+      activeRun: activeRunRef.current,
+      conversationCursor: conversationCursorRef.current
+    });
+  }, [conversationId, permissionMode, signedIn, windowContextReady, windowStateRestored, workspaceDraft, workspaceGrant]);
+
+  // Window geometry is machine-local and intentionally separate from the
+  // cloud Conversation. Rust namespaces this state by the invoking native
+  // window label, so concurrent windows patch only their own entry.
+  useEffect(() => {
+    if (!settingsReady || !signedIn || !buyerSession?.profile?.id) {
+      setWindowLayoutReady(false);
+      return;
+    }
+    let cancelled = false;
+    setWindowLayoutReady(false);
+    void invokeTauri("read_window_settings").then((saved) => {
+      if (cancelled) return;
+      const next = normalizeWindowLayoutPreferences(saved?.layout);
+      setSidebarPreference(next.sidebarPreference);
+      setSidebarWidth(next.sidebarWidth);
+      setInspectorPreference(next.inspectorPreference);
+      setInspectorWidth(next.inspectorWidth);
+      setApplicationZoom(next.zoom);
+      setWindowLayoutReady(true);
+    }).catch(() => {
+      if (!cancelled) setWindowLayoutReady(true);
+    });
+    return () => { cancelled = true; };
+  }, [buyerSession?.profile?.id, settingsReady, signedIn]);
+
+  useEffect(() => {
+    if (!windowLayoutReady || !signedIn || !buyerSession?.profile?.id) return;
+    void invokeTauri("patch_window_settings", {
+      patch: {
+        layout: {
+        sidebarPreference,
+        sidebarWidth,
+        inspectorPreference,
+        inspectorWidth,
+        zoom: normalizeZoom(applicationZoom)
+        }
+      }
+    }).catch(() => {});
+  }, [applicationZoom, buyerSession?.profile?.id, inspectorPreference, inspectorWidth, sidebarPreference, sidebarWidth, signedIn, windowLayoutReady]);
+
+  // Tauri's supported Window APIs expose physical outer geometry. Persist it
+  // independently of auth so a signed-out launch still restores the user's
+  // frame, then clamp it to a currently connected monitor before applying it.
+  // This mirrors native window-state behavior without reparenting the WebView
+  // or depending on an unstable plugin API.
+  useEffect(() => {
+    if (!window.__TAURI_INTERNALS__) return undefined;
+    let cancelled = false;
+    let resizeUnlisten = null;
+    let moveUnlisten = null;
+    let debounceTimer = null;
+    const appWindow = getCurrentWindow();
+
+    const persistFrame = async ({ force = false } = {}) => {
+      // A close can arrive during the debounce window. Flush one last read
+      // before marking the effect cancelled so the user's final resize/move
+      // is not lost merely because the WebView is being torn down.
+      if (cancelled && !force) return;
+      try {
+        const [position, size] = await Promise.all([
+          appWindow.outerPosition(),
+          appWindow.outerSize()
+        ]);
+        if (cancelled && !force) return;
+        await invokeTauri("patch_window_settings", {
+          patch: {
+            frame: {
+              x: position.x,
+              y: position.y,
+              width: size.width,
+              height: size.height
+            }
+          }
+        });
+      } catch {
+        // Geometry persistence is best effort; the OS still owns the live
+        // frame and a transient display/API failure must not affect the chat.
+      }
+    };
+    const schedulePersist = () => {
+      if (debounceTimer) window.clearTimeout(debounceTimer);
+      debounceTimer = window.setTimeout(() => {
+        debounceTimer = null;
+        void persistFrame();
+      }, 180);
+    };
+    const bind = async () => {
+      try {
+        const saved = await invokeTauri("read_window_settings");
+        const savedFrame = normalizeWindowFrame(saved?.frame);
+        if (!cancelled && savedFrame) {
+          const monitors = await availableMonitors();
+          const frame = clampWindowFrame(savedFrame, monitors);
+          await appWindow.setSize(new PhysicalSize(frame.width, frame.height));
+          await appWindow.setPosition(new PhysicalPosition(frame.x, frame.y));
+        }
+      } catch {
+        // A first launch or an unavailable monitor API simply uses the config
+        // defaults; it must not prevent the renderer from mounting.
+      }
+      if (cancelled) return;
+      resizeUnlisten = await appWindow.onResized(schedulePersist);
+      moveUnlisten = await appWindow.onMoved(schedulePersist);
+      if (cancelled) {
+        resizeUnlisten?.();
+        moveUnlisten?.();
+      }
+    };
+    void bind();
+    return () => {
+      void persistFrame({ force: true });
+      cancelled = true;
+      if (debounceTimer) window.clearTimeout(debounceTimer);
+      resizeUnlisten?.();
+      moveUnlisten?.();
+    };
+  }, []);
+
+  // Cmd/Ctrl +/-/0 is an application command, not browser page zoom. It is
+  // kept in the same per-window settings object as pane widths so each
+  // conversation window can have its own readable scale.
+  useEffect(() => {
+    if (!windowLayoutReady) return undefined;
+    const onKeyDown = (event) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+      const key = event.key;
+      if (!["=", "+", "-", "0"].includes(key)) return;
+      event.preventDefault();
+      if (key === "0") {
+        setApplicationZoom(DESKTOP_ZOOM.default);
+      } else {
+        setApplicationZoom((current) => nextZoom(current, key === "-" ? "decrease" : "increase"));
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [windowLayoutReady]);
+
+  useEffect(() => {
+    if (!windowLayoutReady) return undefined;
+    const zoom = normalizeZoom(applicationZoom);
+    if (window.__TAURI_INTERNALS__) {
+      void getCurrentWebview().setZoom(zoom).catch(() => {});
+    } else if (typeof document !== "undefined") {
+      document.documentElement.style.zoom = String(zoom);
+    }
+    return undefined;
+  }, [applicationZoom, windowLayoutReady]);
 
   useEffect(() => () => {
     intentionalDisconnectRef.current = true;
@@ -618,6 +1034,7 @@ function App() {
 
   useEffect(() => {
     if (!signedIn || !workspaceGranted || !workspaceGrant?.grant_id || !selectedEntitlementId) return;
+    if (conversationLibraryStatus === "loading" || conversationLibraryStatus === "idle") return;
     const entitlement = creatorAgentEntitlements.find((item) => item.entitlement_id === selectedEntitlementId);
     const desiredBinding = runtimeBindingForEntitlement(entitlement);
     const hasConnection = connectedRef.current || socketRef.current || connectingRef.current;
@@ -631,7 +1048,7 @@ function App() {
       creatorId: desiredBinding?.creatorId,
       preserveMessages: true
     });
-  }, [connected, conversationId, creatorAgentEntitlements, selectedEntitlementId, signedIn, workspaceGrant, workspaceGranted]);
+  }, [connected, conversationId, conversationLibraryStatus, creatorAgentEntitlements, selectedEntitlementId, signedIn, workspaceGrant, workspaceGranted]);
 
   function scheduleRuntimeReconnect() {
     if (intentionalDisconnectRef.current || reconnectTimerRef.current || !connectionConfigRef.current) return;
@@ -688,7 +1105,7 @@ function App() {
     connectionConfigRef.current = {
       serverUrl: targetServerUrl.trim(),
       workspaceGrant: targetWorkspaceGrant,
-      conversationId: targetConversationId.trim() || `conversation_${buyerProfile.id}_${targetEntitlementId}`,
+      conversationId: targetConversationId.trim() || "desktop-chat",
       entitlementId: targetEntitlementId,
       ...(targetAgentId ? { agentId: targetAgentId } : {}),
       ...(targetCreatorId ? { creatorId: targetCreatorId } : {})
@@ -696,7 +1113,7 @@ function App() {
     setConversationIdForEntitlement(
       buyerProfile.id,
       targetEntitlementId,
-      targetConversationId.trim() || `conversation_${buyerProfile.id}_${targetEntitlementId}`
+      targetConversationId.trim() || "desktop-chat"
     );
 
     let normalizedWorkspaceGrant;
@@ -712,15 +1129,48 @@ function App() {
       connectionConfigRef.current.workspaceGrant = normalizedWorkspaceGrant;
       setProfileSetting("workspace_grant", normalizedWorkspaceGrant);
       setStatus("Loading history...");
-      const activeConversationId = targetConversationId.trim() || `conversation_${buyerProfile.id}_${targetEntitlementId}`;
-      const history = await loadConversationHistory(
-        targetServerUrl.trim(),
-        activeConversationId,
-        targetEntitlementId,
-        buyerSession.accessToken,
-        { agentId: targetAgentId, creatorId: targetCreatorId }
-      );
-      if (!connection.preserveMessages || messages.length === 0) {
+      const activeConversationId = targetConversationId.trim() || "desktop-chat";
+      let history;
+      let snapshotLoaded = false;
+      try {
+        const snapshot = await getConversationSnapshot(
+          targetServerUrl.trim(),
+          buyerSession.accessToken,
+          {
+            entitlementId: targetEntitlementId,
+            agentId: targetAgentId,
+            creatorId: targetCreatorId
+          },
+          activeConversationId,
+          conversationCursorRef.current
+        );
+        history = Array.isArray(snapshot?.messages) ? snapshot.messages : [];
+        if (Number.isFinite(Number(snapshot?.cursor))) {
+          conversationCursorRef.current = Math.max(
+            conversationCursorRef.current,
+            Number(snapshot.cursor)
+          );
+          patchWindowContext({ conversationCursor: conversationCursorRef.current });
+        }
+        snapshotLoaded = true;
+      } catch (snapshotError) {
+        // Keep old Runtime history readable during the P2 rollout. A P2
+        // Runtime will normally take the snapshot branch; the legacy route is
+        // read-only compatibility and never creates a Conversation.
+        history = await loadConversationHistory(
+          targetServerUrl.trim(),
+          activeConversationId,
+          targetEntitlementId,
+          buyerSession.accessToken,
+          { agentId: targetAgentId, creatorId: targetCreatorId }
+        ).catch(() => {
+          throw snapshotError;
+        });
+      }
+      // A snapshot is the canonical observer recovery boundary. Replacing
+      // the local projection after reconnect prevents optimistic user/assistant
+      // placeholders from being duplicated when a socket closes mid-turn.
+      if (snapshotLoaded || !connection.preserveMessages || messages.length === 0) {
         setMessages(history.map(historyMessageToThreadMessage));
       }
       setStatus("Connecting...");
@@ -913,6 +1363,7 @@ function App() {
       }
       activeRunRef.current = null;
       setProfileSetting("active_run", undefined);
+      patchWindowContext({ activeRun: null });
       setInterruptedRun(null);
       setRunning(false);
       setStatus(statusAfterLocalToolStop("Completed", localToolsStopped));
@@ -935,6 +1386,7 @@ function App() {
       }
       activeRunRef.current = null;
       setProfileSetting("active_run", undefined);
+      patchWindowContext({ activeRun: null });
       setInterruptedRun(null);
       setRunning(false);
       setStatus(statusAfterLocalToolStop("Failed", localToolsStopped));
@@ -942,42 +1394,10 @@ function App() {
   }
 
   async function handleToolRequest(message) {
-    const accessSnapshot = accessSnapshotForToolCall(activeRunRef.current, {
-      workspaceGrantId: workspaceGrantRef.current?.grant_id,
-      displayPath: workspaceRef.current,
-      permissionMode: permissionRef.current
-    });
-    const isChange = CHANGE_TOOLS.includes(message.name);
-    let authorizedByDesktop = accessSnapshot.permissionMode === PERMISSION_POLICIES.ALLOW_CHANGES && isChange;
-    if (!authorizedByDesktop && shouldRequestDesktopApproval(message, accessSnapshot.permissionMode)) {
-      const approved = await requestToolApproval(message);
-      if (!approved) {
-        upsertToolEvent({
-          ...message,
-          locality: "client",
-          status: "failed",
-          error: {
-            code: "approval_denied",
-            message: `Tool call rejected by user: ${message.name}`
-          }
-        });
-        send({
-          type: "tool_call.result",
-          run_id: message.run_id,
-          tool_call_id: message.tool_call_id,
-          status: "error",
-          error: {
-            code: "approval_denied",
-            message: `Tool call rejected by user: ${message.name}`
-          }
-        });
-        return;
-      }
-      authorizedByDesktop = true;
-    }
-
     try {
-      const result = await invokeLocalToolCall(message, authorizedByDesktop, accessSnapshot.workspaceGrantId);
+      // NativeToolAuthority derives the current window's opaque grant and
+      // Ask/Allow policy. This request is untrusted input, not authority.
+      const result = await invokeLocalToolCall(message);
       send(result);
     } catch (error) {
       const localError = {
@@ -1007,8 +1427,8 @@ function App() {
     }
   }
 
-  function invokeLocalToolCall(message, authorizedByDesktop, workspaceGrantId) {
-    const request = authorizedByDesktop ? { ...message, approval: "approved_by_user" } : message;
+  function invokeLocalToolCall(message) {
+    const request = { ...message };
     const deadlineMs = localToolTransportDeadlineMs(request);
     return new Promise((resolve, reject) => {
       let settled = false;
@@ -1020,6 +1440,7 @@ function App() {
         settled = true;
         window.clearTimeout(pollTimer);
         window.clearTimeout(deadlineTimer);
+        approvalResolversRef.current.delete(request.tool_call_id);
         if (pendingLocalToolsRef.current.get(request.tool_call_id)?.request === request) {
           pendingLocalToolsRef.current.delete(request.tool_call_id);
         }
@@ -1093,10 +1514,23 @@ function App() {
         void cancel("timeout").catch(() => {});
       }, deadlineMs);
 
-      invokeTauri("execute_tool_call", {
-        workspaceGrantId,
-        request
-      }).then(poll).catch((error) => finish(reject, error));
+      invokeTauri("execute_tool_call", { request }).then((submission) => {
+        if (submission?.status === "approval_required") {
+          // The visual inline gate is only a projection of the native pending
+          // record. The renderer cannot manufacture approval metadata; its
+          // action names an already-recorded call in this WebviewWindow.
+          void requestToolApproval(request).then(async (approved) => {
+            try {
+              await invokeTauri(approved ? "approve_pending_tool_call" : "deny_pending_tool_call", {
+                toolCallId: request.tool_call_id
+              });
+            } catch (error) {
+              finish(reject, error);
+            }
+          });
+        }
+        poll();
+      }).catch((error) => finish(reject, error));
     });
   }
 
@@ -1171,6 +1605,61 @@ function App() {
     setStatus("Workspace updated for the next turn");
   }
 
+  // Native drag/drop is intentionally a projection boundary: Rust turns
+  // dropped directories into grants first, while files arrive as bounded
+  // display metadata for the composer. No renderer path is accepted as tool
+  // authority, and keyboard/file-picker alternatives remain available.
+  useEffect(() => {
+    if (!window.__TAURI_INTERNALS__) return undefined;
+    let unlisten;
+    let cancelled = false;
+    void listen("hatch://native-drop", ({ payload }) => {
+      if (cancelled || !payload || typeof payload !== "object") return;
+      const directories = Array.isArray(payload.directories) ? payload.directories : [];
+      const files = Array.isArray(payload.files) ? payload.files : [];
+      if (files.length > 0) {
+        setDroppedFiles((current) => {
+          const next = [...current, ...files.map((name) => String(name).trim()).filter(Boolean)];
+          return [...new Set(next)].slice(-8);
+        });
+      }
+      const candidate = normalizeWorkspaceGrant(directories[0]);
+      if (!candidate?.grant_id) {
+        if (files.length > 0) setStatus(`${files.length} file${files.length === 1 ? "" : "s"} ready as context`);
+        return;
+      }
+      void (async () => {
+        try {
+          const normalized = normalizeWorkspaceGrant(await invokeTauri("ensure_workspace", {
+            workspaceGrantId: candidate.grant_id
+          }));
+          if (!normalized) throw new Error("The dropped workspace grant is invalid.");
+          setWorkspace(normalized.display_path);
+          workspaceRef.current = normalized.display_path;
+          workspaceGrantRef.current = normalized;
+          setWorkspaceGrant(normalized);
+          setWorkspaceDraft(normalized.display_path);
+          setWorkspaceDraftGrant(normalized);
+          setWorkspaceGranted(true);
+          setProfileSetting("workspace_grant", normalized);
+          setStatus("Folder dropped — workspace access granted");
+          if (selectedEntitlementId) {
+            await connectRuntime({ workspaceGrant: normalized, conversationId, preserveMessages: true });
+          }
+        } catch (error) {
+          setStatus(errorMessage(error));
+        }
+      })();
+    }).then((dispose) => {
+      unlisten = dispose;
+      if (cancelled) unlisten?.();
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [conversationId, selectedEntitlementId]);
+
   function updatePermissionMode(nextMode) {
     if (!PERMISSION_OPTIONS.some((mode) => mode.value === nextMode)) return;
     setPermissionMode(nextMode);
@@ -1178,25 +1667,216 @@ function App() {
     setStatus(`Permission updated for the next turn: ${permissionPolicyLabel(nextMode)}`);
   }
 
-  function startNewConversation() {
-    const guard = canStartConversation({ activeRun: activeRunRef.current, connected });
-    if (!guard.allowed) {
-      setStatus(activeRunRef.current
-        ? "Stop or close the active task before starting another conversation."
-        : "Connect before starting a new conversation.");
-      return;
+  async function createLibraryConversation({ allowActiveRun = false } = {}) {
+    if (activeRunRef.current && !allowActiveRun) {
+      setStatus("Stop or close the active task before starting another conversation.");
+      return "";
     }
-    const nextId = `conversation_${buyerProfile.id}_${Date.now()}`;
+    const binding = conversationBindingFor();
+    if (!binding || !buyerSession?.accessToken) {
+      setStatus("Choose a Creator Agent before starting a conversation.");
+      return "";
+    }
+    try {
+      const result = await createConversation(serverUrl, buyerSession.accessToken, binding, {
+        title: `New ${creatorAgent.name} conversation`,
+        clientRequestId: `desktop-create-${stableRandomId()}`
+      });
+      const conversation = result?.conversation;
+      if (!conversation?.id) throw new Error("Runtime returned an invalid Conversation.");
+      setConversations((current) => [
+        conversation,
+        ...current.filter((item) => item.id !== conversation.id)
+      ]);
+      return conversation.id;
+    } catch (error) {
+      setConversationLibraryError(errorMessage(error));
+      setStatus("Conversation Library unavailable. Try again when you're online.");
+      return "";
+    }
+  }
+
+  async function startNewConversation() {
+    const nextId = await createLibraryConversation();
+    if (!nextId) return "";
+    disconnectRuntime();
+    conversationCursorRef.current = 0;
     setConversationId(nextId);
     setMessages([]);
     setConversationIdForEntitlement(buyerProfile.id, selectedEntitlementId, nextId);
     setStatus("New conversation ready");
+    return nextId;
   }
+
+  async function openConversationInNewWindow(nextConversationId, { announce = true } = {}) {
+    const target = String(nextConversationId || "").trim();
+    if (!target) return false;
+    try {
+      await invokeTauri("open_conversation_window", { conversationId: target });
+      if (announce) setStatus("Conversation opened in a new window");
+      return true;
+    } catch (error) {
+      setStatus(`Hatch couldn't open the conversation window: ${errorMessage(error)}`);
+      return false;
+    }
+  }
+
+  async function startNewConversationInWindow() {
+    // The current window intentionally keeps its existing conversation. The
+    // receiving window reads this ID from its native URL before restoring its
+    // own scoped workspace and layout state.
+    const nextId = await createLibraryConversation({ allowActiveRun: true });
+    return nextId ? openConversationInNewWindow(nextId) : false;
+  }
+
+  function rememberNativeContextTarget(value) {
+    const target = String(value || "").trim();
+    if (!target) return "";
+    const key = `context-${Date.now()}-${++nativeContextTargetSequenceRef.current}`;
+    nativeContextTargetsRef.current.set(key, target);
+    while (nativeContextTargetsRef.current.size > 32) {
+      const oldest = nativeContextTargetsRef.current.keys().next().value;
+      nativeContextTargetsRef.current.delete(oldest);
+    }
+    return key;
+  }
+
+  function takeNativeContextTarget(key) {
+    const value = nativeContextTargetsRef.current.get(key);
+    if (value !== undefined) nativeContextTargetsRef.current.delete(key);
+    return value ?? String(key || "").trim();
+  }
+
+  const showNativeContextMenu = useCallback((event, request) => {
+    const savedTarget = typeof request?.target === "string" ? request.target : "";
+    const targetKey = savedTarget ? rememberNativeContextTarget(savedTarget) : "";
+    const nativeRequest = nativeContextRequest(event, request?.kind, targetKey || savedTarget);
+    const intercepted = requestNativeContextMenu({
+      event,
+      request: nativeRequest,
+      invokeImpl: invokeTauri,
+      packaged: Boolean(window.__TAURI_INTERNALS__),
+      onError: () => {
+        if (targetKey) nativeContextTargetsRef.current.delete(targetKey);
+        setStatus("Hatch couldn't open the native context menu.");
+      }
+    });
+    if (!intercepted && targetKey) nativeContextTargetsRef.current.delete(targetKey);
+    return intercepted;
+  }, []);
+
+  const showNativeCommandMenu = useCallback((event) => {
+    const rect = event?.currentTarget?.getBoundingClientRect?.();
+    const position = rect
+      ? { x: Number(rect.right), y: Number(rect.bottom) }
+      : null;
+    void invokeTauri("show_native_command_menu", {
+      request: position ? { position } : { position: null }
+    }).catch(() => setStatus("Hatch couldn't open the command menu."));
+  }, []);
+
+  async function copyNativeContextTarget(key, label) {
+    const value = takeNativeContextTarget(key);
+    if (!value) return;
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard access is unavailable");
+      await navigator.clipboard.writeText(value);
+      setStatus(`${label} copied`);
+    } catch {
+      setStatus(`Hatch couldn't copy the ${label.toLowerCase()}.`);
+    }
+  }
+
+  async function revealArtifact(target) {
+    const artifact = String(target || "").trim();
+    const grant = workspaceGrantRef.current || workspaceGrant;
+    const relativePath = artifactRelativePath(artifact, workspaceRef.current || workspace);
+    if (!grant?.grant_id || !relativePath) {
+      setStatus("Reveal is available only for an artifact inside the granted workspace.");
+      return;
+    }
+    try {
+      await invokeTauri("reveal_workspace_artifact", {
+        request: {
+          workspaceGrantId: grant.grant_id,
+          relativePath
+        }
+      });
+      setStatus("Artifact revealed in the file browser");
+    } catch (error) {
+      setStatus(`Hatch couldn't reveal the artifact: ${errorMessage(error)}`);
+    }
+  }
+
+  // Keep the single native listener stable while its actions always observe
+  // the latest React state. Rust routes only to this focused WebView window.
+  nativeCommandHandlersRef.current = {
+    onNewConversation: startNewConversation,
+    onNewConversationWindow: startNewConversationInWindow,
+    onOpenConversationWindow: (target) => openConversationInNewWindow(takeNativeContextTarget(target), { announce: false }),
+    onRenameConversation: (target) => void renameConversation(takeNativeContextTarget(target)),
+    onArchiveConversation: (target) => void archiveConversation(takeNativeContextTarget(target)),
+    onToggleSidebar: () => setSidebarPreference((current) => current === "open" ? "closed" : "open"),
+    onToggleInspector: () => setInspectorPreference((current) => current === "open" ? "closed" : "open"),
+    onStopRun: () => cancelRun(),
+    onZoomIn: () => setApplicationZoom((current) => nextZoom(current, "increase")),
+    onZoomOut: () => setApplicationZoom((current) => nextZoom(current, "decrease")),
+    onZoomReset: () => setApplicationZoom(DESKTOP_ZOOM.default),
+    onChooseWorkspace: () => chooseWorkspace(),
+    onOpenSettings: () => {
+      void invokeTauri("open_settings_window").catch((error) => {
+        setStatus(`Hatch couldn't open Settings: ${errorMessage(error)}`);
+      });
+    },
+    onOpenAbout: () => {
+      void invokeTauri("open_about_window").catch((error) => {
+        setStatus(`Hatch couldn't open About: ${errorMessage(error)}`);
+      });
+    },
+    onRevealArtifact: (target) => void revealArtifact(takeNativeContextTarget(target)),
+    onCopyArtifactPath: (target) => copyNativeContextTarget(target, "Path"),
+    onCopyToolOutput: (target) => copyNativeContextTarget(target, "Output")
+  };
+
+  useEffect(() => {
+    if (!window.__TAURI_INTERNALS__) return undefined;
+    void invokeTauri("set_native_command_state", {
+      state: {
+        newConversationEnabled: signedIn && conversationLibraryStatus !== "loading",
+        newWindowEnabled: signedIn,
+        workspaceEnabled: signedIn,
+        // Settings/About are app-level surfaces and remain available while
+        // signed out. Authentication state must not make the native menu
+        // look broken before the first session is established.
+        settingsEnabled: true,
+        runStopEnabled: Boolean(signedIn && running && activeRunRef.current),
+        sidebarVisible: sidebarPreference === "open",
+        inspectorVisible: inspectorPreference === "open"
+      }
+    }).catch(() => {});
+    return undefined;
+  }, [conversationLibraryStatus, inspectorPreference, running, sidebarPreference, signedIn]);
+
+  useEffect(() => {
+    if (!window.__TAURI_INTERNALS__) return undefined;
+    return subscribeNativeCommands({
+      listenImpl: listen,
+      onCommand: (payload) => {
+        void routeNativeCommand(payload, nativeCommandHandlersRef.current).catch((error) => {
+          setStatus(`Hatch couldn't run the native command: ${errorMessage(error)}`);
+        });
+      },
+      onError: (error) => {
+        console.warn("[hatch:native-command-listener]", error);
+      }
+    });
+  }, []);
 
   function clearInterruptedRun() {
     activeRunRef.current = null;
     setInterruptedRun(null);
     setProfileSetting("active_run", undefined);
+    patchWindowContext({ activeRun: null });
     setStatus("Paused task closed by you");
   }
 
@@ -1211,7 +1891,7 @@ function App() {
       const persistedSession = persistedDesktopSessionFromError(error);
       if (persistedSession) {
         if (isAuthInvalidError(error)) {
-          const cleared = await clearSavedSessionOrShowError(persistedSession);
+          const cleared = await clearSavedSession(persistedSession);
           if (cleared) setSignInError("Hatch couldn't verify the new session. Please sign in again.");
           return;
         }
@@ -1236,7 +1916,7 @@ function App() {
     );
     void serverRevoke;
     disconnectRuntime();
-    const cleared = await clearSavedSessionOrShowError(buyerSession, localClear);
+    const cleared = await clearSavedSession(buyerSession, localClear);
     if (cleared) setSignInError("");
   }
 
@@ -1264,9 +1944,76 @@ function App() {
     setSelectedEntitlementId(entitlement.entitlement_id);
     setCreatorAgent(creatorAgentFromEntitlement(entitlement));
     setProfileSetting("last_selected_entitlement_id", entitlement.entitlement_id);
-    if (!sameEntitlement) setMessages([]);
-    const fallback = `conversation_${buyerProfile.id}_${entitlement.creator_id || "creator"}_${entitlement.agent_id || entitlement.product.id}`;
-    setConversationId(getConversationId(buyerProfile.id, entitlement.entitlement_id, fallback));
+    if (!sameEntitlement) {
+      setMessages([]);
+      conversationCursorRef.current = 0;
+      setConversations([]);
+      setConversationLibraryStatus("loading");
+      // Never carry a Conversation ID across Creator Agents. The Library
+      // effect will select or create an ID bound to the newly selected Agent.
+      setConversationId("desktop-chat");
+    }
+  }
+
+  function selectConversation(conversation) {
+    const nextId = String(conversation?.id || "").trim();
+    if (!nextId || nextId === conversationId) return;
+    if (activeRunRef.current) {
+      setStatus("Stop or open a new window before switching away from the active task.");
+      return;
+    }
+    disconnectRuntime();
+    conversationCursorRef.current = 0;
+    setMessages([]);
+    setConversationId(nextId);
+    setConversationIdForEntitlement(buyerProfile.id, selectedEntitlementId, nextId);
+    setStatus("Conversation selected");
+  }
+
+  async function renameConversation(targetId) {
+    const target = conversations.find((item) => item.id === targetId);
+    if (!target) {
+      setStatus("That conversation is no longer in the Library.");
+      return;
+    }
+    const nextTitle = window.prompt("Rename conversation", target.title || "Conversation");
+    if (nextTitle === null || !nextTitle.trim()) return;
+    const binding = conversationBindingFor();
+    if (!binding || !buyerSession?.accessToken) return;
+    try {
+      const result = await updateConversation(serverUrl, buyerSession.accessToken, binding, target.id, {
+        title: nextTitle.trim(),
+        version: target.version
+      });
+      const updated = result?.conversation;
+      if (!updated?.id) throw new Error("Runtime returned an invalid Conversation.");
+      setConversations((current) => current.map((item) => item.id === updated.id ? updated : item));
+      setStatus("Conversation renamed");
+    } catch (error) {
+      setStatus(`Couldn't rename the conversation: ${errorMessage(error)}`);
+    }
+  }
+
+  async function archiveConversation(targetId) {
+    const target = conversations.find((item) => item.id === targetId);
+    const binding = conversationBindingFor();
+    if (!target || !binding || !buyerSession?.accessToken) return;
+    try {
+      await updateConversation(serverUrl, buyerSession.accessToken, binding, target.id, {
+        status: "archived",
+        version: target.version
+      });
+      const remaining = conversations.filter((item) => item.id !== target.id);
+      setConversations(remaining);
+      if (target.id === conversationId) {
+        const replacement = remaining[0];
+        if (replacement) selectConversation(replacement);
+        else await startNewConversation();
+      }
+      setStatus("Conversation archived");
+    } catch (error) {
+      setStatus(`Couldn't archive the conversation: ${errorMessage(error)}`);
+    }
   }
 
   function requestToolApproval(message) {
@@ -1285,6 +2032,12 @@ function App() {
         locality: "client",
         status: "requested"
       });
+      // If the executor window is in the background, ask the OS for a
+      // non-modal Dock/taskbar attention pulse. Approval remains inline and
+      // never turns into a blocking system sheet.
+      if (window.__TAURI_INTERNALS__) {
+        void invokeTauri("request_window_attention").catch(() => {});
+      }
     });
   }
 
@@ -1482,19 +2235,6 @@ function App() {
   }
 
   if (authState === "loading") return <LaunchScreen />;
-  if (authState === "secure-session-error") {
-    return <SecureSessionErrorScreen message={secureSessionError} onRetry={() => void retrySecureSessionClear()} />;
-  }
-  if (authState === "secure-session-read-error") {
-    return (
-      <SecureSessionErrorScreen
-        actionLabel="Retry opening the saved session"
-        message={secureSessionError}
-        onRetry={() => { setAuthState("loading"); setBootstrapAttempt((value) => value + 1); }}
-        title="Hatch couldn't open your saved session"
-      />
-    );
-  }
   if (authState === "network-error") {
     return (
       <NetworkErrorScreen
@@ -1525,67 +2265,56 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
-      <aside className="control-panel">
-        <div className="brand">
-          <img className="hatch-mark" src={hatchMarkUrl} alt="" />
-          <div>
-            <h1 className="hatch-wordmark">Hatch.</h1>
-            <p>Creator agents, on your terms</p>
-          </div>
-        </div>
-
-        <section className="profile-card">
-          <span className="avatar">{buyerProfile.initials}</span>
-          <div><strong>{buyerProfile.name}</strong><span>Signed in</span></div>
-          <button className="profile-sign-out" type="button" onClick={() => void signOut()}>Sign out</button>
-        </section>
-
-        <section className="side-section agent-nav">
-          <h2>{PRODUCT_COPY.home}</h2>
-          {creatorAgentEntitlements.map((entitlement) => {
-            const agent = creatorAgentFromEntitlement(entitlement);
-            return (
-              <button
-                className={`agent-nav-item ${entitlement.entitlement_id === selectedEntitlementId ? "active" : ""}`}
-                key={entitlement.entitlement_id}
-                type="button"
-                onClick={() => selectCreatorAgent(entitlement)}
-              >
-                <span className="creator-avatar">{agent.creatorInitials}</span>
-                <span><strong>{agent.name}</strong><small>by {agent.creator}</small></span>
-              </button>
-            );
-          })}
-        </section>
-        <button className="secondary new-conversation" type="button" onClick={startNewConversation}>+ New conversation</button>
-      </aside>
-
-      <section className="chat-shell">
-        <header className="chat-header">
-          <div className="header-agent">
-            <span className="label">Agent</span>
-            <strong>{creatorAgent.name} · {creatorAgent.creator}</strong>
-            {settingsMigrationNotice ? <small className="settings-migration-notice" role="status">{settingsMigrationNotice}</small> : null}
-          </div>
-          {workspaceGranted && !connected ? (
-            <div className="connection-recovery" role="status" aria-live="polite">
-              <span>
-                <strong>Offline</strong>
-                <small>{status === "Offline" ? "Your conversation stays here while Hatch reconnects." : status}</small>
-              </span>
-              <button
-                className="secondary compact"
-                type="button"
-                onClick={retryRuntimeConnection}
-                disabled={["Loading history...", "Connecting...", "Restoring connection…"].includes(status)}
-              >
-                {["Loading history...", "Connecting...", "Restoring connection…"].includes(status) ? "Connecting…" : "Retry"}
-              </button>
-            </div>
-          ) : null}
-        </header>
-
+    <DesktopWindowShell
+      sidebarPreference={sidebarPreference}
+      sidebarWidth={sidebarWidth}
+      inspectorPreference={inspectorPreference}
+      inspectorWidth={inspectorWidth}
+      onSidebarPreferenceChange={setSidebarPreference}
+      onSidebarWidthChange={setSidebarWidth}
+      onInspectorPreferenceChange={setInspectorPreference}
+      onInspectorWidthChange={setInspectorWidth}
+      onShowOverflow={showNativeCommandMenu}
+      sidebar={(
+        <DesktopSidebar
+          profile={buyerProfile}
+          entitlements={creatorAgentEntitlements}
+          selectedEntitlementId={selectedEntitlementId}
+          conversationId={conversationId}
+          conversations={conversations}
+          onSelectAgent={selectCreatorAgent}
+          onSelectConversation={selectConversation}
+          onNewConversation={startNewConversation}
+          onConversationContextMenu={showNativeContextMenu}
+          onSignOut={() => void signOut()}
+        />
+      )}
+      toolbar={(
+        <DesktopConversationToolbar
+          creatorAgent={creatorAgent}
+          conversationId={conversationId}
+          conversationTitle={conversations.find((item) => item.id === conversationId)?.title || ""}
+          connected={connected}
+          workspaceGranted={workspaceGranted}
+          status={status}
+          notice={conversationLibraryError || settingsMigrationNotice}
+          onRetry={retryRuntimeConnection}
+        />
+      )}
+      inspector={(
+        <DesktopInspector
+          creatorAgent={creatorAgent}
+          workspace={workspace}
+          workspaceGranted={workspaceGranted}
+          permissionMode={permissionMode}
+          running={running}
+          status={status}
+          onChooseWorkspace={() => void chooseWorkspace()}
+          onPermissionChange={updatePermissionMode}
+        />
+      )}
+    >
+      <section className="chat-shell desktop-chat-shell">
         {!workspaceGranted ? (
           <WorkspaceOnboarding
             creatorName={creatorAgent.creator}
@@ -1595,72 +2324,57 @@ function App() {
             status={status}
           />
         ) : (
-        <ApprovalContext.Provider value={{ requests: approvalRequests, resolveToolApproval }}>
-          <AssistantRuntimeProvider runtime={runtime}>
-            <ThreadPrimitive.Root className="thread-root">
-              <ThreadPrimitive.Viewport className="thread-viewport">
-                <ThreadPrimitive.Empty>
-                  <EmptyThread connected={connected} creatorAgent={creatorAgent} />
-                </ThreadPrimitive.Empty>
-                <ThreadPrimitive.Messages components={{ Message: HatchMessage }} />
-              </ThreadPrimitive.Viewport>
-              <ThreadPrimitive.ViewportFooter className="composer-footer">
-                <ComposerPrimitive.Root className="composer">
-                  <ComposerPrimitive.Input
-                    className="composer-input"
-                    onBlur={resetImeComposition}
-                    onCompositionEnd={endImeComposition}
-                    onCompositionStart={startImeComposition}
-                    onKeyDownCapture={stopImeEnterSubmit}
-                    placeholder={connected ? `Message ${creatorAgent.name}` : "Connection is restoring…"}
-                    submitMode="enter"
-                    rows={1}
-                  />
-                  <div className="composer-actions">
-                    <div className="composer-settings">
-                      <button
-                        aria-label="Choose workspace folder"
-                        className="composer-control workspace-composer-control"
-                        title={workspace || "Choose a workspace folder"}
-                        type="button"
-                        onClick={() => void chooseWorkspace()}
-                      >
-                        <WorkspaceIcon />
-                        <span className="composer-control-label">
-                          {workspaceGranted ? workspaceGrantLabel(workspace) : "Choose workspace"}
-                        </span>
-                        <span className="composer-control-caret" aria-hidden="true">⌄</span>
-                      </button>
-                      <label className="composer-control permission-composer-control" title={permissionPolicyDetail(permissionMode)}>
-                        <ShieldIcon />
-                        <select
-                          aria-label="Workspace permissions"
-                          value={permissionMode}
-                          onChange={(event) => updatePermissionMode(event.target.value)}
+          <ApprovalContext.Provider value={{ requests: approvalRequests, resolveToolApproval }}>
+            <NativeContextMenuContext.Provider value={showNativeContextMenu}>
+              <AssistantRuntimeProvider runtime={runtime}>
+                <ThreadPrimitive.Root className="thread-root">
+                <ThreadPrimitive.Viewport className="thread-viewport">
+                  <ThreadPrimitive.Empty>
+                    <EmptyThread connected={connected} creatorAgent={creatorAgent} />
+                  </ThreadPrimitive.Empty>
+                  <ThreadPrimitive.Messages components={{ Message: HatchMessage }} />
+                </ThreadPrimitive.Viewport>
+                <ThreadPrimitive.ViewportFooter className="composer-footer">
+                  <ComposerPrimitive.Root className="composer">
+                    <ComposerPrimitive.Input
+                      className="composer-input"
+                      onBlur={resetImeComposition}
+                      onCompositionEnd={endImeComposition}
+                      onCompositionStart={startImeComposition}
+                      onKeyDownCapture={stopImeEnterSubmit}
+                      placeholder={connected ? "Message" : "Connection is restoring…"}
+                      submitMode="enter"
+                      rows={1}
+                    />
+                    <div className="composer-actions">
+                      <ComposerControls
+                        droppedFiles={droppedFiles}
+                        workspace={workspace}
+                        workspaceGranted={workspaceGranted}
+                        permissionMode={permissionMode}
+                        onChooseWorkspace={() => void chooseWorkspace()}
+                        onPermissionChange={updatePermissionMode}
+                        onRemoveDroppedFile={(name) => setDroppedFiles((current) => current.filter((item) => item !== name))}
+                      />
+                      {running ? (
+                        <button
+                          aria-label="Stop streaming"
+                          className="send-button stop-button"
+                          type="button"
+                          onClick={() => void cancelRun()}
                         >
-                          {PERMISSION_OPTIONS.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
-                        </select>
-                        <span className="composer-control-caret" aria-hidden="true">⌄</span>
-                      </label>
+                          Stop
+                        </button>
+                      ) : (
+                        <ComposerPrimitive.Send className="send-button">Send</ComposerPrimitive.Send>
+                      )}
                     </div>
-                    {running ? (
-                      <button
-                        aria-label="Stop streaming"
-                        className="send-button stop-button"
-                        type="button"
-                        onClick={() => void cancelRun()}
-                      >
-                        Stop
-                      </button>
-                    ) : (
-                      <ComposerPrimitive.Send className="send-button">Send</ComposerPrimitive.Send>
-                    )}
-                  </div>
-                </ComposerPrimitive.Root>
-              </ThreadPrimitive.ViewportFooter>
-            </ThreadPrimitive.Root>
-          </AssistantRuntimeProvider>
-        </ApprovalContext.Provider>
+                  </ComposerPrimitive.Root>
+                </ThreadPrimitive.ViewportFooter>
+                </ThreadPrimitive.Root>
+              </AssistantRuntimeProvider>
+            </NativeContextMenuContext.Provider>
+          </ApprovalContext.Provider>
         )}
         {interruptedRun ? (
           <div className="recovery-banner" role="alert">
@@ -1669,8 +2383,229 @@ function App() {
           </div>
         ) : null}
       </section>
-    </main>
+    </DesktopWindowShell>
   );
+}
+
+function DesktopSidebar({
+  profile,
+  entitlements,
+  selectedEntitlementId,
+  conversationId,
+  conversations,
+  onSelectAgent,
+  onSelectConversation,
+  onNewConversation,
+  onConversationContextMenu,
+  onSignOut
+}) {
+  const listedConversations = Array.isArray(conversations) ? conversations : [];
+  const hasCurrentConversation = listedConversations.some((item) => item.id === conversationId);
+  const visibleConversations = hasCurrentConversation || !conversationId
+    ? listedConversations
+    : [{ id: conversationId, title: "Current conversation", status: "active" }, ...listedConversations];
+  return (
+    <div className="desktop-sidebar-content">
+      <div className="desktop-sidebar-heading">
+        <span className="hatch-wordmark">Hatch</span>
+        <button className="sidebar-new-conversation" type="button" onClick={onNewConversation}>
+          <span aria-hidden="true">+</span><span>New conversation</span>
+        </button>
+      </div>
+      <nav className="desktop-source-list" aria-label="Creator Agents">
+        <div className="desktop-source-list-label">{PRODUCT_COPY.home}</div>
+        {entitlements.map((entitlement) => {
+          const agent = creatorAgentFromEntitlement(entitlement);
+          const selected = entitlement.entitlement_id === selectedEntitlementId;
+          return (
+            <button
+              aria-current={selected ? "page" : undefined}
+              className={`desktop-source-row agent ${selected ? "selected" : ""}`}
+              key={entitlement.entitlement_id}
+              type="button"
+              onClick={() => onSelectAgent(entitlement)}
+            >
+              <span className="creator-avatar">{agent.creatorInitials}</span>
+              <span className="desktop-source-row-copy">
+                <strong title={agent.name}>{agent.name}</strong>
+                <small>by {agent.creator}</small>
+              </span>
+            </button>
+          );
+        })}
+        <div className="desktop-source-list-label conversations-label">Conversations</div>
+        {visibleConversations.length > 0 ? visibleConversations.map((conversation) => {
+          const selected = conversation.id === conversationId;
+          return (
+            <button
+              className={`desktop-source-row conversation ${selected ? "selected" : ""}`}
+              key={conversation.id}
+              type="button"
+              aria-current={selected ? "page" : undefined}
+              title={conversation.title || conversation.id}
+              onClick={() => onSelectConversation?.(conversation)}
+              onContextMenu={(event) => onConversationContextMenu?.(event, {
+                kind: "conversation",
+                target: conversation.id
+              })}
+            >
+              <span className="conversation-row-glyph" aria-hidden="true">⌁</span>
+              <span className="desktop-source-row-copy">
+                <strong>{conversation.title || conversationTitle(conversation.id)}</strong>
+                <small>{selected ? "Current conversation" : "Conversation"}</small>
+              </span>
+            </button>
+          );
+        }) : (
+          <div className="desktop-source-empty">No conversations yet</div>
+        )}
+      </nav>
+      <div className="desktop-sidebar-footer">
+        <span className="avatar">{profile.initials}</span>
+        <span className="desktop-sidebar-account"><strong>{profile.name}</strong><small>Signed in</small></span>
+        <button className="profile-sign-out" type="button" onClick={onSignOut}>Sign out</button>
+      </div>
+    </div>
+  );
+}
+
+function DesktopConversationToolbar({ creatorAgent, conversationId, conversationTitle: providedTitle, connected, workspaceGranted, status, notice, onRetry }) {
+  const connecting = ["Loading history...", "Connecting...", "Restoring connection…"].includes(status);
+  const title = providedTitle || conversationTitle(conversationId);
+  return (
+    <>
+      <div className="desktop-toolbar-context">
+        <div className="desktop-toolbar-title" title={title}>
+          <span className="label">Conversation</span>
+          <strong>{title}</strong>
+        </div>
+        <span className="desktop-toolbar-separator" aria-hidden="true" />
+        <div className="desktop-toolbar-agent" title={`${creatorAgent.name} · ${creatorAgent.creator}`}>
+          <span className="label">Agent</span>
+          <strong>{creatorAgent.name}</strong>
+        </div>
+        {notice ? <small className="settings-migration-notice" role="status">{notice}</small> : null}
+      </div>
+      {workspaceGranted && !connected ? (
+        <div className="desktop-connection-recovery" role="status" aria-live="polite">
+          <span className="connection-state-dot" aria-hidden="true" />
+          <span className="desktop-connection-copy">
+            <strong>{connecting ? "Connecting" : "Offline"}</strong>
+            <small>{status === "Offline" ? "Conversation is kept locally while Hatch reconnects." : status}</small>
+          </span>
+          <button className="secondary compact" type="button" onClick={onRetry} disabled={connecting}>
+            {connecting ? "Connecting…" : "Retry"}
+          </button>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function DesktopInspector({
+  creatorAgent,
+  workspace,
+  workspaceGranted,
+  permissionMode,
+  running,
+  status,
+  onChooseWorkspace,
+  onPermissionChange
+}) {
+  return (
+    <div className="desktop-inspector-content">
+      <section className="inspector-section">
+        <span className="inspector-kicker">Workspace</span>
+        <strong className="inspector-workspace-path" title={workspace || "No folder selected"}>
+          {workspaceGranted ? workspaceGrantLabel(workspace) : "No workspace selected"}
+        </strong>
+        <button className="secondary compact inspector-action" type="button" onClick={onChooseWorkspace}>
+          {workspaceGranted ? "Change folder" : "Choose folder"}
+        </button>
+      </section>
+      <section className="inspector-section">
+        <span className="inspector-kicker">Permissions</span>
+        <label className="inspector-select-control">
+          <ShieldIcon />
+          <select aria-label="Workspace permissions" value={permissionMode} onChange={(event) => onPermissionChange(event.target.value)}>
+            {PERMISSION_OPTIONS.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
+          </select>
+        </label>
+        <p>{permissionPolicyDetail(permissionMode)}</p>
+      </section>
+      <section className="inspector-section">
+        <span className="inspector-kicker">Run</span>
+        <div className="inspector-run-state">
+          <span className={`activity-dot ${running ? "running" : status.toLowerCase().includes("fail") ? "failed" : "done"}`} />
+          <strong>{running ? "Working" : status || "Ready"}</strong>
+        </div>
+      </section>
+      <section className="inspector-section agent-boundary-section">
+        <span className="inspector-kicker">Creator Agent</span>
+        <strong>{creatorAgent.name}</strong>
+        <p>by {creatorAgent.creator}. This conversation keeps the Agent context it started with.</p>
+      </section>
+    </div>
+  );
+}
+
+function ComposerControls({ droppedFiles = [], workspace, workspaceGranted, permissionMode, onChooseWorkspace, onPermissionChange, onRemoveDroppedFile }) {
+  const controls = (
+    <>
+      <button
+        aria-label="Choose workspace folder"
+        className="composer-control workspace-composer-control"
+        title={workspace || "Choose a workspace folder"}
+        type="button"
+        onClick={onChooseWorkspace}
+      >
+        <WorkspaceIcon />
+        <span className="composer-control-label">{workspaceGranted ? workspaceGrantLabel(workspace) : "Choose workspace"}</span>
+        <span className="composer-control-caret" aria-hidden="true">⌄</span>
+      </button>
+      <label className="composer-control permission-composer-control" title={permissionPolicyDetail(permissionMode)}>
+        <ShieldIcon />
+        <select aria-label="Workspace permissions" value={permissionMode} onChange={(event) => onPermissionChange(event.target.value)}>
+          {PERMISSION_OPTIONS.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
+        </select>
+        <span className="composer-control-caret" aria-hidden="true">⌄</span>
+      </label>
+    </>
+  );
+  return (
+    <div className="composer-controls">
+      {droppedFiles.length > 0 ? (
+        <div className="composer-attachments" aria-label="Dropped context files">
+          {droppedFiles.map((name) => (
+            <span className="composer-attachment" key={name} title={name}>
+              <span className="composer-attachment-name">{name}</span>
+              <button type="button" aria-label={`Remove ${name}`} onClick={() => onRemoveDroppedFile?.(name)}>×</button>
+            </span>
+          ))}
+        </div>
+      ) : null}
+      <div className="composer-settings">{controls}</div>
+      <details className="composer-overflow">
+        <summary className="composer-control composer-overflow-trigger" aria-label="More composer options" title="More composer options">•••</summary>
+        <div className="composer-overflow-menu" role="menu">{controls}</div>
+      </details>
+    </div>
+  );
+}
+
+function conversationTitle(conversationId) {
+  const value = String(conversationId || "").trim();
+  if (!value || value === "desktop-chat") return "New conversation";
+  return value.replace(/^conversation_[^_]+_/, "Conversation ").replaceAll("_", " ");
+}
+
+function isServerConversationId(value) {
+  return /^conv_[a-z0-9]+$/i.test(String(value || "").trim());
+}
+
+function stableRandomId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID().replaceAll("-", "");
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 14)}`;
 }
 
 async function loadConversationHistory(serverUrl, conversationId, entitlementId, accessToken, binding = {}) {
@@ -2096,20 +3031,6 @@ function NetworkErrorScreen({ message, onRetry, onSignOut }) {
   );
 }
 
-function SecureSessionErrorScreen({ message, onRetry, title = "Hatch couldn't finish signing out", actionLabel = "Try removing the session again" }) {
-  return (
-    <main className="welcome-screen status-screen">
-      <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch.</strong></div>
-      <section className="status-card">
-        <span className="eyebrow">Secure session</span>
-        <h1>{title}</h1>
-        <p>{message}</p>
-        <button type="button" onClick={onRetry}>{actionLabel}</button>
-      </section>
-    </main>
-  );
-}
-
 function UnsupportedRoleScreen({ profile, onSignOut }) {
   return (
     <main className="welcome-screen status-screen">
@@ -2180,7 +3101,7 @@ function SignInScreen({ onSignIn, status, error }) {
           </button>
         </form>
         {error ? <small className="sign-in-error" role="alert">{error}</small> : null}
-        <small>Hatch keeps your secure session on this computer until you sign out.</small>
+        <small>Hatch keeps you signed in on this computer until you sign out.</small>
       </section>
     </main>
   );
@@ -2276,7 +3197,8 @@ function MarkdownText() {
     <StreamdownTextPrimitive
       className="markdown-body"
       components={{
-        li: MarkdownListItem
+        li: MarkdownListItem,
+        table: MarkdownTable
       }}
       containerClassName="markdown-container"
       controls={false}
@@ -2318,6 +3240,14 @@ function MarkdownListItem({ children, className, node, ...props }) {
   );
 }
 
+function MarkdownTable({ children, ...props }) {
+  return (
+    <div className="markdown-table-scroll" tabIndex={0} aria-label="Scrollable table">
+      <table {...props}>{children}</table>
+    </div>
+  );
+}
+
 function isTaskCheckbox(child) {
   return React.isValidElement(child) && child.type === "input" && child.props?.type === "checkbox";
 }
@@ -2346,20 +3276,42 @@ function ToolGroup({ children }) {
 
 function HatchToolCall(props) {
   const approvals = useContext(ApprovalContext);
+  const showNativeContextMenu = useContext(NativeContextMenuContext);
   const approvalRequest = approvals?.requests?.[props.toolCallId];
   const display = toolDisplay(props.toolName);
   const state = toolState(props, approvalRequest);
   const target = toolTarget(props.args);
   const label = toolActionLabel(display.action, state, target);
   const summary = toolResultSummary(props);
+  const artifactTarget = toolArtifactTarget(props);
+  const copyTarget = toolResultCopyTarget(props);
   const pendingApproval = approvalRequest?.status === "pending";
 
   return (
-    <div className={`tool-call ${state}`}>
+    <div
+      className={`tool-call ${state}`}
+      onContextMenu={(event) => showNativeContextMenu?.(event, {
+        kind: "tool-result",
+        target: copyTarget
+      })}
+    >
       <div className="tool-summary">
         <span className="tool-icon">{display.icon}</span>
         <span className="tool-label">{label}</span>
-        {summary ? <span className="tool-meta">{summary}</span> : null}
+        {summary ? (
+          <span
+            className="tool-meta"
+            onContextMenu={artifactTarget ? (event) => {
+              const intercepted = showNativeContextMenu?.(event, {
+                kind: "artifact",
+                target: artifactTarget
+              });
+              if (intercepted) event.stopPropagation();
+            } : undefined}
+          >
+            {summary}
+          </span>
+        ) : null}
       </div>
       {pendingApproval || approvalRequest?.status ? <div className="tool-detail">
         {pendingApproval ? (
@@ -2367,6 +3319,9 @@ function HatchToolCall(props) {
             <div>
               <strong>Allow this action?</strong>
               <p>{approvalRequest.message.reason || approvalReasonText(approvalRequest.message)}</p>
+              {approvalRequest.message.name === "shell_exec" && fullShellCommand(approvalRequest.message) ? (
+                <pre className="approval-command" aria-label="Full shell command">{fullShellCommand(approvalRequest.message)}</pre>
+              ) : null}
             </div>
             <div className="approval-actions">
               <button type="button" onClick={() => approvals.resolveToolApproval(props.toolCallId, true)}>
@@ -2451,9 +3406,14 @@ function approvalReasonText(message) {
     return `Update ${toolTarget(message.arguments) || "a file"} in the selected workspace.`;
   }
   if (message.name === "shell_exec") {
-    return `Run command: ${toolTarget(message.arguments) || "shell command"}`;
+    return "Run this shell command in the selected workspace.";
   }
   return `Run ${message.name} locally in the selected workspace.`;
+}
+
+function fullShellCommand(message) {
+  const command = message?.arguments?.command;
+  return typeof command === "string" ? command.trim() : "";
 }
 
 function parseStoredJson(value) {
@@ -2540,6 +3500,45 @@ function toolTarget(args) {
   return compact.length > 58 ? `${compact.slice(0, 55)}...` : compact;
 }
 
+function toolArtifactTarget(part) {
+  const candidates = [
+    part?.result?.path,
+    part?.result?.artifact_path,
+    part?.result?.file_path,
+    part?.args?.path
+  ];
+  return candidates.find((candidate) => typeof candidate === "string" && candidate.trim())?.trim() || "";
+}
+
+function artifactRelativePath(artifactPath, workspaceRoot) {
+  const artifact = String(artifactPath || "").trim().replaceAll("\\", "/");
+  const root = String(workspaceRoot || "").trim().replaceAll("\\", "/").replace(/\/+$/, "");
+  if (!artifact || !root) return "";
+  const prefix = `${root}/`;
+  if (artifact.startsWith(prefix)) return artifact.slice(prefix.length);
+  // Runtime artifacts may already be workspace-relative. Absolute paths that
+  // do not share the current display root remain untrusted and are rejected;
+  // Rust performs the authoritative containment check again.
+  if (artifact.startsWith("/") || /^[A-Za-z]:\//.test(artifact)) return "";
+  return artifact;
+}
+
+function toolResultCopyTarget(part) {
+  const result = part?.result;
+  if (typeof result?.output === "string") return result.output;
+  if (typeof result?.content === "string") return result.content;
+  if (typeof result?.diff === "string") return result.diff;
+  if (result && typeof result === "object") {
+    try {
+      return JSON.stringify(result, null, 2);
+    } catch {
+      // Fall through to the tool call id, which is still a useful support
+      // reference if a malformed tool result cannot be serialized.
+    }
+  }
+  return String(part?.toolCallId || part?.tool_call_id || "").trim();
+}
+
 function toolResultSummary(part) {
   if (part.isError) {
     const message = part.result?.message ?? part.result?.error ?? "failed";
@@ -2579,6 +3578,11 @@ async function invokeTauri(command, args) {
   try {
     return await invoke(command, args);
   } catch (error) {
+    // Browser preview intentionally has no local authority. Keep its visual
+    // demo usable, but never transform a failed packaged native command into
+    // a fake success.
+    const browserPreview = !globalThis.window?.__TAURI_INTERNALS__;
+    if (!browserPreview) throw error;
     if (command === "default_workspace") {
       return "";
     }
@@ -2587,6 +3591,19 @@ async function invokeTauri(command, args) {
         grant_id: args?.workspaceGrantId ?? "browser-preview-grant",
         display_path: args?.displayPath ?? "Browser preview workspace"
       };
+    }
+    if (command === "set_window_tool_context") {
+      return {
+        grant_id: args?.workspaceGrantId ?? "browser-preview-grant",
+        display_path: "Browser preview workspace"
+      };
+    }
+    if (command === "clear_window_tool_context") return null;
+    if (command === "execute_tool_call") {
+      return { status: "started", toolCallId: args?.request?.tool_call_id ?? "browser-preview-call" };
+    }
+    if (command === "approve_pending_tool_call" || command === "deny_pending_tool_call") {
+      return { status: command === "approve_pending_tool_call" ? "started" : "denied", toolCallId: args?.toolCallId };
     }
     throw error;
   }

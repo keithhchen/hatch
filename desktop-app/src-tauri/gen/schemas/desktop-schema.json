@@ -177,6 +177,330 @@
       "description": "Permission identifier",
       "oneOf": [
         {
+          "description": "Enables the approve_pending_tool_call command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-approve-pending-tool-call",
+          "markdownDescription": "Enables the approve_pending_tool_call command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the cancel_tool_call command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-cancel-tool-call",
+          "markdownDescription": "Enables the cancel_tool_call command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the clear_auth_token command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-clear-auth-token",
+          "markdownDescription": "Enables the clear_auth_token command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the clear_window_tool_context command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-clear-window-tool-context",
+          "markdownDescription": "Enables the clear_window_tool_context command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the default_workspace command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-default-workspace",
+          "markdownDescription": "Enables the default_workspace command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the deny_pending_tool_call command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-deny-pending-tool-call",
+          "markdownDescription": "Enables the deny_pending_tool_call command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the ensure_workspace command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-ensure-workspace",
+          "markdownDescription": "Enables the ensure_workspace command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the execute_tool_call command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-execute-tool-call",
+          "markdownDescription": "Enables the execute_tool_call command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_about_window command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-about-window",
+          "markdownDescription": "Enables the open_about_window command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_conversation_window command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-conversation-window",
+          "markdownDescription": "Enables the open_conversation_window command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_external_url command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-external-url",
+          "markdownDescription": "Enables the open_external_url command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_settings_window command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-settings-window",
+          "markdownDescription": "Enables the open_settings_window command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the patch_window_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-patch-window-settings",
+          "markdownDescription": "Enables the patch_window_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the pick_workspace_folder command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-pick-workspace-folder",
+          "markdownDescription": "Enables the pick_workspace_folder command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the poll_tool_call command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-poll-tool-call",
+          "markdownDescription": "Enables the poll_tool_call command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the read_app_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-read-app-settings",
+          "markdownDescription": "Enables the read_app_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the read_auth_token command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-read-auth-token",
+          "markdownDescription": "Enables the read_auth_token command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the read_window_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-read-window-settings",
+          "markdownDescription": "Enables the read_window_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the request_window_attention command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-request-window-attention",
+          "markdownDescription": "Enables the request_window_attention command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the reveal_workspace_artifact command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-reveal-workspace-artifact",
+          "markdownDescription": "Enables the reveal_workspace_artifact command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the revoke_workspace_grant command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-revoke-workspace-grant",
+          "markdownDescription": "Enables the revoke_workspace_grant command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_native_command_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-native-command-state",
+          "markdownDescription": "Enables the set_native_command_state command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_window_tool_context command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-set-window-tool-context",
+          "markdownDescription": "Enables the set_window_tool_context command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the show_native_command_menu command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-show-native-command-menu",
+          "markdownDescription": "Enables the show_native_command_menu command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the show_native_context_menu command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-show-native-context-menu",
+          "markdownDescription": "Enables the show_native_context_menu command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the write_app_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-write-app-settings",
+          "markdownDescription": "Enables the write_app_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the write_auth_token command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-write-auth-token",
+          "markdownDescription": "Enables the write_auth_token command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the approve_pending_tool_call command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-approve-pending-tool-call",
+          "markdownDescription": "Denies the approve_pending_tool_call command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the cancel_tool_call command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-cancel-tool-call",
+          "markdownDescription": "Denies the cancel_tool_call command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the clear_auth_token command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-clear-auth-token",
+          "markdownDescription": "Denies the clear_auth_token command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the clear_window_tool_context command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-clear-window-tool-context",
+          "markdownDescription": "Denies the clear_window_tool_context command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the default_workspace command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-default-workspace",
+          "markdownDescription": "Denies the default_workspace command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the deny_pending_tool_call command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-deny-pending-tool-call",
+          "markdownDescription": "Denies the deny_pending_tool_call command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the ensure_workspace command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-ensure-workspace",
+          "markdownDescription": "Denies the ensure_workspace command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the execute_tool_call command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-execute-tool-call",
+          "markdownDescription": "Denies the execute_tool_call command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_about_window command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-about-window",
+          "markdownDescription": "Denies the open_about_window command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_conversation_window command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-conversation-window",
+          "markdownDescription": "Denies the open_conversation_window command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_external_url command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-external-url",
+          "markdownDescription": "Denies the open_external_url command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_settings_window command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-settings-window",
+          "markdownDescription": "Denies the open_settings_window command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the patch_window_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-patch-window-settings",
+          "markdownDescription": "Denies the patch_window_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the pick_workspace_folder command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-pick-workspace-folder",
+          "markdownDescription": "Denies the pick_workspace_folder command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the poll_tool_call command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-poll-tool-call",
+          "markdownDescription": "Denies the poll_tool_call command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the read_app_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-read-app-settings",
+          "markdownDescription": "Denies the read_app_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the read_auth_token command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-read-auth-token",
+          "markdownDescription": "Denies the read_auth_token command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the read_window_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-read-window-settings",
+          "markdownDescription": "Denies the read_window_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the request_window_attention command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-request-window-attention",
+          "markdownDescription": "Denies the request_window_attention command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the reveal_workspace_artifact command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-reveal-workspace-artifact",
+          "markdownDescription": "Denies the reveal_workspace_artifact command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the revoke_workspace_grant command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-revoke-workspace-grant",
+          "markdownDescription": "Denies the revoke_workspace_grant command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_native_command_state command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-native-command-state",
+          "markdownDescription": "Denies the set_native_command_state command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_window_tool_context command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-set-window-tool-context",
+          "markdownDescription": "Denies the set_window_tool_context command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the show_native_command_menu command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-show-native-command-menu",
+          "markdownDescription": "Denies the show_native_command_menu command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the show_native_context_menu command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-show-native-context-menu",
+          "markdownDescription": "Denies the show_native_context_menu command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the write_app_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-write-app-settings",
+          "markdownDescription": "Denies the write_app_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the write_auth_token command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-write-auth-token",
+          "markdownDescription": "Denies the write_auth_token command without any pre-configured scope."
+        },
+        {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",
           "type": "string",
           "const": "core:default",

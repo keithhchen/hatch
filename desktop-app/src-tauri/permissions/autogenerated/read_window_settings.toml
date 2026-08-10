@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-read-window-settings"
+description = "Enables the read_window_settings command without any pre-configured scope."
+commands.allow = ["read_window_settings"]
+
+[[permission]]
+identifier = "deny-read-window-settings"
+description = "Denies the read_window_settings command without any pre-configured scope."
+commands.deny = ["read_window_settings"]
