@@ -102,6 +102,10 @@ import {
   routeNativeCommand,
   subscribeNativeCommands
 } from "./native-commands.js";
+import {
+  appendNativeDropContext,
+  normalizeNativeDropFile
+} from "./native-drop-context.js";
 
 const PROTOCOL_VERSION = "0.6";
 const OUTPUT_FILTERED_COPY = "This response was blocked by the output safety check.";
@@ -254,6 +258,13 @@ function App() {
   const composerDraftRef = useRef("");
   const buyerProfile = buyerSession?.profile ?? EMPTY_PROFILE;
   const signedIn = authState === "signed-in";
+
+  // A pending native file projection belongs to exactly one conversation. It
+  // must never follow the window when the user switches the Library row or
+  // Creator Agent before sending.
+  useEffect(() => {
+    setDroppedFiles([]);
+  }, [conversationId]);
 
   function getProfileSetting(key, fallback = undefined, profileId = buyerProfile.id) {
     return settingsStoreRef.current?.getProfile(profileId, key, fallback) ?? fallback;
@@ -659,10 +670,23 @@ function App() {
 
     const content = textFromAppendMessage(appendMessage).trim();
     if (!content) return;
+    let messageContent = content;
+    if (droppedFiles.length > 0) {
+      try {
+        const attached = await invokeTauri("read_native_drop_contexts", {
+          contextIds: droppedFiles.map((file) => file.contextId)
+        });
+        messageContent = appendNativeDropContext(content, attached);
+      } catch (error) {
+        setStatus(`Couldn't attach the dropped files: ${errorMessage(error)}`);
+        return;
+      }
+    }
     // The Composer is a window-session draft. Once the user sends it, clear
     // the saved draft explicitly; assistant-ui may reset its internal input
     // without emitting a DOM change event.
     setComposerDraftValue("");
+    setDroppedFiles([]);
 
     // Workspace and permission changes are pending Desktop preferences until a
     // new turn starts. The native window captures this exact snapshot before
@@ -717,10 +741,10 @@ function App() {
       conversation_id: conversationId.trim() || "desktop-chat",
       message: {
         role: "user",
-        content
+        content: messageContent
       }
     });
-  }, [buyerProfile.id, connected, conversationId, permissionMode, send, workspace, workspaceGrant]);
+  }, [buyerProfile.id, connected, conversationId, droppedFiles, permissionMode, send, workspace, workspaceGrant]);
 
   const runtime = useExternalStoreRuntime({
     messages,
@@ -1692,8 +1716,9 @@ function App() {
 
   // Native drag/drop is intentionally a projection boundary: Rust turns
   // dropped directories into grants first, while files arrive as bounded
-  // display metadata for the composer. No renderer path is accepted as tool
-  // authority, and keyboard/file-picker alternatives remain available.
+  // display metadata plus opaque one-shot context handles. No renderer path
+  // is accepted as tool authority, and keyboard/file-picker alternatives
+  // remain available.
   useEffect(() => {
     if (!window.__TAURI_INTERNALS__) return undefined;
     let unlisten;
@@ -1701,11 +1726,14 @@ function App() {
     void listen("hatch://native-drop", ({ payload }) => {
       if (cancelled || !payload || typeof payload !== "object") return;
       const directories = Array.isArray(payload.directories) ? payload.directories : [];
-      const files = Array.isArray(payload.files) ? payload.files : [];
+      const files = Array.isArray(payload.files)
+        ? payload.files.map(normalizeNativeDropFile).filter(Boolean)
+        : [];
       if (files.length > 0) {
         setDroppedFiles((current) => {
-          const next = [...current, ...files.map((name) => String(name).trim()).filter(Boolean)];
-          return [...new Set(next)].slice(-8);
+          const byId = new Map(current.map((file) => [file.contextId, file]));
+          for (const file of files) byId.set(file.contextId, file);
+          return [...byId.values()].slice(-8);
         });
       }
       const candidate = normalizeWorkspaceGrant(directories[0]);
@@ -2489,7 +2517,7 @@ function App() {
                         permissionMode={permissionMode}
                         onChooseWorkspace={() => void chooseWorkspace()}
                         onPermissionChange={updatePermissionMode}
-                        onRemoveDroppedFile={(name) => setDroppedFiles((current) => current.filter((item) => item !== name))}
+                        onRemoveDroppedFile={(contextId) => setDroppedFiles((current) => current.filter((item) => item.contextId !== contextId))}
                       />
                       {running ? (
                         <button
@@ -2750,10 +2778,10 @@ function ComposerControls({ droppedFiles = [], workspace, workspaceGranted, perm
     <div className="composer-controls">
       {droppedFiles.length > 0 ? (
         <div className="composer-attachments" aria-label="Dropped context files">
-          {droppedFiles.map((name) => (
-            <span className="composer-attachment" key={name} title={name}>
-              <span className="composer-attachment-name">{name}</span>
-              <button type="button" aria-label={`Remove ${name}`} onClick={() => onRemoveDroppedFile?.(name)}>×</button>
+          {droppedFiles.map((file) => (
+            <span className="composer-attachment" key={file.contextId} title={file.displayName}>
+              <span className="composer-attachment-name">{file.displayName}</span>
+              <button type="button" aria-label={`Remove ${file.displayName}`} onClick={() => onRemoveDroppedFile?.(file.contextId)}>×</button>
             </span>
           ))}
         </div>

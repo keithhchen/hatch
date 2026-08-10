@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fs;
 use std::process::Command;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -50,6 +51,10 @@ const SETTINGS_FILE: &str = "settings.json";
 const WINDOW_SETTINGS_NAMESPACE: &str = "window_settings";
 const WORKSPACE_GRANTS_FILE: &str = "workspace-grants.json";
 const WORKSPACE_GRANTS_SCHEMA_VERSION: u32 = 1;
+const NATIVE_DROP_CONTEXT_TTL: Duration = Duration::from_secs(10 * 60);
+const MAX_NATIVE_DROP_CONTEXTS: usize = 8;
+const MAX_NATIVE_DROP_CONTEXT_BYTES: u64 = 64 * 1024;
+const MAX_NATIVE_DROP_CONTEXT_REQUESTS: usize = 8;
 
 struct StoredToolResult {
     created_at: Instant,
@@ -404,6 +409,202 @@ struct WorkspaceGrantInfo {
     display_path: String,
 }
 
+/// A file dropped from Finder/Explorer is an explicit user gesture, but its
+/// path must not become renderer authority. Keep the path in Rust only, give
+/// the renderer a short-lived opaque handle, and consume it once when the
+/// user sends the composer message.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeDropContextInfo {
+    context_id: String,
+    display_name: String,
+    size: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeDropContextContent {
+    context_id: String,
+    display_name: String,
+    kind: String,
+    text: String,
+    truncated: bool,
+}
+
+#[derive(Clone, Debug)]
+struct StoredNativeDropContext {
+    display_name: String,
+    canonical_path: PathBuf,
+    size: u64,
+    created_at: Instant,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct NativeDropContextKey {
+    window_label: String,
+    context_id: String,
+}
+
+#[derive(Clone, Default)]
+struct NativeDropContextStore {
+    state: Arc<Mutex<HashMap<NativeDropContextKey, StoredNativeDropContext>>>,
+}
+
+impl NativeDropContextStore {
+    fn insert(
+        &self,
+        window_label: &str,
+        path: &std::path::Path,
+    ) -> Result<NativeDropContextInfo, String> {
+        let metadata = fs::symlink_metadata(path).map_err(to_string)?;
+        if !metadata.file_type().is_file() {
+            return Err("native_drop_context_invalid: Only regular files can be attached".into());
+        }
+        let canonical_path = fs::canonicalize(path).map_err(to_string)?;
+        let canonical_metadata = fs::metadata(&canonical_path).map_err(to_string)?;
+        if !canonical_metadata.is_file() {
+            return Err(
+                "native_drop_context_invalid: The dropped item is no longer a regular file".into(),
+            );
+        }
+        let display_name = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .filter(|name| !name.trim().is_empty())
+            .ok_or_else(|| {
+                "native_drop_context_invalid: The dropped file has no name".to_string()
+            })?;
+        let size = canonical_metadata.len();
+        let context_id = format!("drop_{}", uuid::Uuid::new_v4().simple());
+        let key = NativeDropContextKey {
+            window_label: window_label.to_string(),
+            context_id: context_id.clone(),
+        };
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "Native drop context store is unavailable")?;
+        state.retain(|_, entry| entry.created_at.elapsed() < NATIVE_DROP_CONTEXT_TTL);
+        while state
+            .keys()
+            .filter(|key| key.window_label == window_label)
+            .count()
+            >= MAX_NATIVE_DROP_CONTEXTS
+        {
+            let oldest = state
+                .iter()
+                .filter(|(key, _)| key.window_label == window_label)
+                .min_by_key(|(_, entry)| entry.created_at)
+                .map(|(key, _)| key.clone());
+            let Some(oldest) = oldest else { break };
+            state.remove(&oldest);
+        }
+        state.insert(
+            key,
+            StoredNativeDropContext {
+                display_name: display_name.clone(),
+                canonical_path,
+                size,
+                created_at: Instant::now(),
+            },
+        );
+        Ok(NativeDropContextInfo {
+            context_id,
+            display_name,
+            size,
+        })
+    }
+
+    fn consume(
+        &self,
+        window_label: &str,
+        context_ids: Vec<String>,
+    ) -> Result<Vec<NativeDropContextContent>, String> {
+        if context_ids.len() > MAX_NATIVE_DROP_CONTEXT_REQUESTS {
+            return Err("native_drop_context_invalid: Too many dropped files".into());
+        }
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "Native drop context store is unavailable")?;
+        state.retain(|_, entry| entry.created_at.elapsed() < NATIVE_DROP_CONTEXT_TTL);
+        let mut output = Vec::with_capacity(context_ids.len());
+        for context_id in context_ids {
+            if context_id.len() > 96 || !context_id.starts_with("drop_") {
+                return Err("native_drop_context_invalid: Invalid dropped file handle".into());
+            }
+            let key = NativeDropContextKey {
+                window_label: window_label.to_string(),
+                context_id: context_id.clone(),
+            };
+            let Some(entry) = state.get(&key).cloned() else {
+                return Err(
+                    "native_drop_context_missing: The dropped file is no longer available".into(),
+                );
+            };
+            let current_path = fs::canonicalize(&entry.canonical_path).map_err(|error| {
+                format!(
+                    "native_drop_context_unavailable: Could not reopen {}: {error}",
+                    entry.display_name
+                )
+            })?;
+            if current_path != entry.canonical_path {
+                return Err(format!(
+                    "native_drop_context_changed: The dropped file changed before it was sent: {}",
+                    entry.display_name
+                ));
+            }
+            let metadata = fs::metadata(&current_path).map_err(to_string)?;
+            if !metadata.is_file() {
+                return Err(format!(
+                    "native_drop_context_invalid: The dropped item is no longer a file: {}",
+                    entry.display_name
+                ));
+            }
+            let (kind, text, truncated) = if entry.size > MAX_NATIVE_DROP_CONTEXT_BYTES {
+                (
+                    "oversized".to_string(),
+                    format!(
+                        "[Hatch omitted this file because it is larger than {} KiB. Use the local file_read tool if you want a bounded read.]",
+                        MAX_NATIVE_DROP_CONTEXT_BYTES / 1024
+                    ),
+                    true,
+                )
+            } else {
+                let bytes = fs::read(&current_path).map_err(|error| {
+                    format!(
+                        "native_drop_context_unavailable: Could not read {}: {error}",
+                        entry.display_name
+                    )
+                })?;
+                match String::from_utf8(bytes) {
+                    Ok(text) => ("text".to_string(), text, false),
+                    Err(_) => (
+                        "binary".to_string(),
+                        "[Hatch omitted binary file bytes. Use an appropriate local tool to inspect this file.]".into(),
+                        false,
+                    ),
+                }
+            };
+            state.remove(&key);
+            output.push(NativeDropContextContent {
+                context_id,
+                display_name: entry.display_name,
+                kind,
+                text,
+                truncated,
+            });
+        }
+        Ok(output)
+    }
+
+    fn clear_window(&self, window_label: &str) {
+        if let Ok(mut state) = self.state.lock() {
+            state.retain(|key, _| key.window_label != window_label);
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct WorkspaceArtifactRequest {
@@ -704,6 +905,15 @@ fn ensure_workspace(
         grant_id: scoped.grant_id.clone(),
         display_path: scoped.path.to_string_lossy().to_string(),
     })
+}
+
+#[tauri::command]
+fn read_native_drop_contexts(
+    window: WebviewWindow,
+    context_ids: Vec<String>,
+    store: State<'_, NativeDropContextStore>,
+) -> Result<Vec<NativeDropContextContent>, String> {
+    store.inner().consume(window.label(), context_ids)
 }
 
 #[tauri::command]
@@ -1054,8 +1264,10 @@ fn resolve_secure_session_storage() -> Result<SecureSessionStorage, String> {
         // Microsoft documents those as readable and writable by user
         // processes, not by a signed-app ACL. Authenticode verifies a binary
         // but does not turn that user-wide vault entry into an app-only secret.
-        // Until Hatch ships an MSIX/AppContainer Credential Locker backend and
-        // verifies its package identity at runtime, a release switch must fail
+        // PasswordVault/AppContainer package identity is not an app-only secret
+        // boundary for a regular desktop process: another full-trust process
+        // under the same user can read the locker. Until Hatch has a
+        // device-bound/session challenge backend, a release switch must fail
         // closed instead of silently persisting an opaque bearer token there.
         debug_assert!(!windows_backend_can_persist_opaque_session(
             WindowsOpaqueTokenBackend::GenericCredentialManager
@@ -1081,22 +1293,21 @@ enum WindowsOpaqueTokenBackend {
     // Win32 Credential Manager generic credentials are scoped to the current
     // user, not to Hatch's package/signing identity.
     GenericCredentialManager,
-    // This is the required future backend: MSIX package identity plus
-    // AppContainer Credential Locker access. It is not implemented yet.
-    AppContainerCredentialLocker,
+    // MSIX/AppContainer PasswordVault is intentionally not approved as an
+    // opaque-token backend: it does not provide an app-only secret boundary
+    // against another same-user full-trust process.
+    AppContainerCredentialLockerUnapproved,
 }
 
 #[cfg(any(target_os = "windows", test))]
 fn windows_backend_can_persist_opaque_session(backend: WindowsOpaqueTokenBackend) -> bool {
-    matches!(
-        backend,
-        WindowsOpaqueTokenBackend::AppContainerCredentialLocker
-    )
+    let _ = backend;
+    false
 }
 
 #[cfg(target_os = "windows")]
 fn windows_persistent_session_error() -> String {
-    "Windows persistent sessions are not enabled: Win32 Credential Manager generic credentials are user-process readable, and this build has no verified MSIX/AppContainer Credential Locker backend. Hatch will not persist an opaque session token here."
+    "Windows persistent sessions are not enabled: Win32 Credential Manager and PasswordVault are not app-only secret boundaries for same-user desktop processes. Hatch will not persist an opaque session token until a device-bound session backend is verified."
         .into()
 }
 
@@ -1729,6 +1940,7 @@ fn execute_tool_call_in_workspace(
 pub fn run() {
     tauri::Builder::default()
         .manage(NativeToolAuthority::default())
+        .manage(NativeDropContextStore::default())
         .manage(window_commands::NativeCommandRouter::default())
         .setup(|app| {
             let router = app.state::<window_commands::NativeCommandRouter>();
@@ -1745,6 +1957,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             default_workspace,
             ensure_workspace,
+            read_native_drop_contexts,
             pick_workspace_folder,
             reveal_workspace_artifact,
             request_window_attention,
@@ -1778,8 +1991,9 @@ pub fn run() {
             if let WindowEvent::DragDrop(DragDropEvent::Drop { paths, position }) = event {
                 // The OS delivers these paths to Rust. A dropped directory is
                 // converted into the same native grant as NSOpenPanel/IFileDialog
-                // before the renderer sees it; a dropped file is presentation
-                // metadata only and never becomes tool authority by itself.
+                // before the renderer sees it; a dropped file becomes a
+                // short-lived, one-shot native context handle. The renderer
+                // never receives the dropped path or gains filesystem authority.
                 let mut directories = Vec::new();
                 let mut files = Vec::new();
                 for path in paths {
@@ -1789,8 +2003,12 @@ pub fn run() {
                         {
                             directories.push(grant);
                         }
-                    } else if let Some(name) = path.file_name().and_then(|value| value.to_str()) {
-                        files.push(name.to_string());
+                    } else if let Some(store) =
+                        window.app_handle().try_state::<NativeDropContextStore>()
+                    {
+                        if let Ok(info) = store.insert(window.label(), path) {
+                            files.push(info);
+                        }
                     }
                 }
                 let _ = window.emit(
@@ -1804,6 +2022,9 @@ pub fn run() {
             }
             if !matches!(event, WindowEvent::Destroyed) {
                 return;
+            }
+            if let Some(drop_contexts) = window.try_state::<NativeDropContextStore>() {
+                drop_contexts.clear_window(window.label());
             }
             let Some(authority) = window.try_state::<NativeToolAuthority>() else {
                 return;
@@ -1832,8 +2053,8 @@ mod tests {
         merge_json_object, persistent_session_build_requested_from, read_ephemeral_auth_token,
         validate_artifact_relative_path, validate_workspace_path,
         windows_backend_can_persist_opaque_session, write_ephemeral_auth_token,
-        ChangePermissionPolicy, NativeToolAuthority, NativeToolCall, ToolCallDisposition,
-        WindowToolCallKey, WindowToolContext, WindowsOpaqueTokenBackend,
+        ChangePermissionPolicy, NativeDropContextStore, NativeToolAuthority, NativeToolCall,
+        ToolCallDisposition, WindowToolCallKey, WindowToolContext, WindowsOpaqueTokenBackend,
         PRODUCTION_CREDENTIAL_SERVICE,
     };
     use serde_json::json;
@@ -2039,8 +2260,8 @@ mod tests {
         assert!(!windows_backend_can_persist_opaque_session(
             WindowsOpaqueTokenBackend::GenericCredentialManager
         ));
-        assert!(windows_backend_can_persist_opaque_session(
-            WindowsOpaqueTokenBackend::AppContainerCredentialLocker
+        assert!(!windows_backend_can_persist_opaque_session(
+            WindowsOpaqueTokenBackend::AppContainerCredentialLockerUnapproved
         ));
     }
 
@@ -2431,5 +2652,45 @@ mod tests {
             .lock()
             .unwrap()
             .remove(&tool_call_id);
+    }
+
+    #[test]
+    fn native_drop_context_is_window_scoped_one_shot_and_pathless() {
+        let temp = tempdir().unwrap();
+        let path = temp.path().join("notes.md");
+        std::fs::write(&path, "user-provided context").unwrap();
+        let store = NativeDropContextStore::default();
+        let info = store.insert("window-a", &path).unwrap();
+        assert_eq!(info.display_name, "notes.md");
+        assert!(!serde_json::to_string(&info)
+            .unwrap()
+            .contains(temp.path().to_string_lossy().as_ref()));
+        assert!(store
+            .consume("window-b", vec![info.context_id.clone()])
+            .is_err());
+        let contents = store
+            .consume("window-a", vec![info.context_id.clone()])
+            .unwrap();
+        assert_eq!(contents[0].kind, "text");
+        assert_eq!(contents[0].text, "user-provided context");
+        assert!(store.consume("window-a", vec![info.context_id]).is_err());
+    }
+
+    #[test]
+    fn native_drop_context_rejects_symlink_and_marks_binary_without_exposing_bytes() {
+        let temp = tempdir().unwrap();
+        let binary = temp.path().join("image.bin");
+        std::fs::write(&binary, [0, 159, 146, 150]).unwrap();
+        let store = NativeDropContextStore::default();
+        let info = store.insert("window-a", &binary).unwrap();
+        let contents = store.consume("window-a", vec![info.context_id]).unwrap();
+        assert_eq!(contents[0].kind, "binary");
+        assert!(contents[0].text.contains("omitted binary"));
+        #[cfg(unix)]
+        {
+            let link = temp.path().join("link.bin");
+            std::os::unix::fs::symlink(&binary, &link).unwrap();
+            assert!(store.insert("window-a", &link).is_err());
+        }
     }
 }

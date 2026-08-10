@@ -15,7 +15,7 @@
 | --- | --- | --- | --- |
 | Dev/debug/ad-hoc session 不触发 Keychain 解锁 | PASS（本机） | ad-hoc `.app` 启动进入普通 Sign in；无 Login Keychain prompt；Rust 认证测试 | 正式 Developer ID 包的重启读取需签名环境 |
 | 正式 macOS secure session identity gate | PARTIAL | production flag `cargo check`；Team ID、bundle ID、Developer ID requirement 检查；release workflow | 真实 Developer ID + notarization + clean-account restart UAT |
-| Windows persistent session | EXTERNAL | Win32 Generic Credential Manager 路径 fail-closed；CI workflow 已声明 Windows job | MSIX/AppContainer PasswordVault backend、签名包和 Windows UAT |
+| Windows persistent session | EXTERNAL / BLOCKED BY THREAT MODEL | Win32 Generic Credential Manager 与 PasswordVault 路径均 fail-closed；同用户 full-trust 进程可读 PasswordVault 的官方限制已记录 | 另立 device-bound session backend、Windows 签名/UAT 与 same-user 负测；不能用 MSIX/AppContainer PasswordVault 直接解锁 |
 | Workspace / approval authority 在 Rust | PASS（本机） | grant-bound picker/drop、canonical containment、pending approval state；Rust 34 tests | Windows runner 的编译和真实 junction/ACL UAT |
 | Regular / compact / minimal layout tier | PASS（macOS UAT） | `regular-1180x780`、`compact-860x600`、`minimal-640x600`；preview accessibility tree | 多显示器和 Windows 尺寸行为 |
 | Inspector 先折叠，Sidebar 不堆到主内容上方 | PASS（macOS UAT） | compact/minimal captures；tier controller tests | Windows DPI/resize 真机循环 |
@@ -26,11 +26,12 @@
 | Conversation Library 与 server-issued IDs | PASS（本机） | Runtime REST/WS tests、renderer client tests；不再以 timestamp 作为新 ID | 端到端真实账户的 A/B agent 五会话验收 |
 | Durable Run、幂等 message、observer recovery | PASS（本机） | Runtime 225 tests；断连/启动标为 `interrupted`，不重放 tool | 桌面应用 crash/reload 的真实 attach/replay UAT |
 | Native application/context menu 与 focused-window routing | PASS（macOS UAT） | View menu、context registry、window lifecycle tests；重打包 preview 的 conversation-row secondary click AX tree 为 Rename/Open/Archive，且不含 `WKMenuItemIdentifierInspectElement`；Tauri `devtools:false` | Windows native popup 和多窗口焦点 UAT |
+| Conversation rename 与文件拖拽上下文 | PASS（本机代码 + tests） | Rename 使用侧栏 inline editor（Enter/Escape），不再调用 `window.prompt`；native drop 只传 window-scoped opaque handle，Rust 做一次 bounded UTF-8 projection；Renderer 20 files / 82 tests、Rust drop-context tests | macOS/Windows Finder/Explorer 真实拖放、IME 与大型/二进制文件人工验收 |
 | Finder/Explorer Reveal 与 window attention | PASS（代码 + macOS bridge） | grant-bound reveal、attention command；artifact Quick Look 未伪装 | Windows Explorer 和 Dock/taskbar 真机行为 |
 | Settings/About auxiliary windows | PASS（macOS UAT） | 独立 native auxiliary windows 与 accessibility tree | Windows owner/focus/close parity |
 | Quick Look / Windows Open | DEFERRED | spec contract 保留，当前菜单不暴露假动作 | 另立平台集成任务与双端验收 |
 | VoiceOver / Narrator、IME、drag/drop、fullscreen、Snap、DPI | EXTERNAL | ARIA/focus contract、CI Windows job、macOS manual tree evidence | 真实目标平台人工验收 |
-| Web build、Tauri app build、DMG、Rust、Runtime、LocalRunner | PASS（本机） | Renderer 80、Rust 34+1 ignored、Runtime 225、LocalRunner 43；`build:web`、`build:app`、`build` 的 strict ad-hoc DMG 校验 | CI runner 与发布签名链路 |
+| Web build、Tauri app build、DMG、Rust、Runtime、LocalRunner | PASS（本机） | Renderer 82、Rust 36+1 ignored、Runtime 225、LocalRunner 43；`build:web`、`build:app`、`build` 的 strict ad-hoc DMG 校验 | CI runner 与发布签名链路 |
 
 ## 运行证据
 

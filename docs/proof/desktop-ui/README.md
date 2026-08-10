@@ -40,8 +40,8 @@ distribution builds.
 
 ## Automated evidence recorded with these captures
 
-- Renderer: 19 files / 80 tests
-- Rust Tauri library: 34 passed / 1 ignored (unlocked Keychain smoke)
+- Renderer: 20 files / 82 tests
+- Rust Tauri library: 36 passed / 1 ignored (unlocked Keychain smoke)
 - Runtime: 225 Node subtests passed with an isolated `HATCH_RUNTIME_DATA_DIR`
 - LocalRunner: 43 tests passed (filesystem, shell and macOS Seatbelt suites)
 - `npm run build:web`
@@ -68,6 +68,13 @@ still the place to inspect HTML during development.
 The rebuilt native preview also exercised a conversation-row secondary click;
 the accessibility tree exposed `Rename Conversation`, `Open in New Window`,
 and `Archive Conversation` from the Tauri popup rather than a WebKit menu.
+
+File drops now remain native-authoritative: a dropped file produces only a
+window-scoped opaque handle and display-name chip. On Send, Rust revalidates
+and reads a bounded UTF-8 snapshot once; the renderer projects it into an
+explicit untrusted `<attached_context>` block and never receives the absolute
+path. Binary and oversized files produce a bounded explanation instead of
+raw bytes.
 
 The macOS accessibility tree additionally confirmed that a minimal overlay
 removes the hidden pane from the main tree, focuses its close action on open,

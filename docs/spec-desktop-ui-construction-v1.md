@@ -15,7 +15,7 @@ macOS 与 Windows 都是一等平台。V1 使用 Tauri 稳定支持的 Native su
 
 本 spec 已对应到专用 worktree `codex/desktop-ui-construction`。当前完成范围：
 
-- P0：debug/ad-hoc/UAT session 只使用进程内 token；macOS 正式签名包进入受 Developer ID / Team ID 约束的 Keychain。Windows 的 Win32 Generic Credential Manager 不具备 app identity ACL，当前明确 fail-closed，待 MSIX/AppContainer Credential Locker backend；Rust 持有 Workspace/approval authority。
+- P0：debug/ad-hoc/UAT session 只使用进程内 token；macOS 正式签名包进入受 Developer ID / Team ID 约束的 Keychain。Windows 的 Win32 Generic Credential Manager 与 PasswordVault 都不能提供同用户 full-trust 进程不可读的 app-only bearer-token 边界，当前明确 fail-closed，未来须另立 device-bound session backend；Rust 持有 Workspace/approval authority。
 - P1：React `DesktopWindowShell`、regular/compact/minimal tier、split divider、native-like overlay、局部 table/code overflow 与 accessibility contract。
 - P2：durable Conversation/Run repository、REST/WS idempotency、active-run exclusion、restart→`interrupted`，以及 Desktop Conversation Library 的 list/create/select/rename/archive 基础接线。每个 native window 现在保存自己的 Conversation、Workspace grant、permission、active-run projection、`composerDraft` 与 snapshot cursor；profile settings 只作为旧单窗口数据的迁移 fallback，workspace onboarding 的旧 `draft` 字段不再冒充 Composer draft。V1 的恢复边界是 observer recovery（snapshot + cursor replay）；断开或 Runtime 重启会把未完成 Run 标为 `interrupted`，不自动 reclaim、重放 tool 或伪装成 `running`。
 - P3：Tauri application/context menu、semantic command routing、focused-window new-conversation scaffold 与 window-scoped bridge。
@@ -30,7 +30,7 @@ macOS UAT 证据：
 - [Minimal Sidebar overlay](proof/desktop-ui/minimal-sidebar-overlay.png)
 - [Minimal Inspector overlay](proof/desktop-ui/minimal-inspector-overlay.png)
 
-已通过的自动验证（2026-08-11 当前 worktree）：Renderer `19 files / 80 tests`；Rust `34 passed / 1 ignored Keychain smoke`；Runtime Node test `225 passed`；LocalRunner `43 passed`；Web build；Tauri release `.app` build；production-session `cargo check`。Runtime 验证必须使用独立的 `HATCH_RUNTIME_DATA_DIR`，避免复用旧的 durable idempotency fixture。
+已通过的自动验证（2026-08-11 当前 worktree）：Renderer `20 files / 82 tests`；Rust `36 passed / 1 ignored Keychain smoke`；Runtime Node test `225 passed`；LocalRunner `43 passed`；Web build；Tauri release `.app` build；production-session `cargo check`。Runtime 验证必须使用独立的 `HATCH_RUNTIME_DATA_DIR`，避免复用旧的 durable idempotency fixture。
 
 详细的逐条状态、证据和外部验收边界见 [Desktop UI v1 验收矩阵](proof/desktop-ui/acceptance-matrix.md)。矩阵区分本机 PASS、实现但缺环境的 PARTIAL/EXTERNAL，以及明确延期的 DEFERRED；本 spec 在 P4 所列跨平台条件全部通过前不会标记为 complete。
 
@@ -79,7 +79,7 @@ V1 的 DesktopShell 由 React 实现，但必须遵守桌面 layout 与 interact
 | Conversation | Cloud Runtime / Postgres | ID、owner、固定 Creator Agent binding、title、status、timestamps、version |
 | Messages 与 conversation events | Cloud Runtime / Postgres | 使用单调 event cursor 的持久有序历史 |
 | Run | Cloud Runtime / Postgres | lifecycle、active-run exclusion、server executor ownership、cancel、observer recovery；V1 不提供 executor reclaim |
-| Opaque session token | OS credential vault | macOS 正式签名包使用 Developer-ID-gated Keychain；Windows 在 MSIX/AppContainer Credential Locker 实现并验收前只使用进程内 session。dev 与 ad-hoc UAT 始终使用进程内 session，token 使用期间驻留 memory |
+| Opaque session token | OS credential vault | macOS 正式签名包使用 Developer-ID-gated Keychain；Windows 在经过 threat-model 证明的 device-bound backend 实现并验收前只使用进程内 session。MSIX/AppContainer PasswordVault 不视为足够的 app-only boundary；dev 与 ad-hoc UAT 始终使用进程内 session，token 使用期间驻留 memory |
 | Workspace Authorization | Rust | 当前 window/conversation 对应的、由 Native picker/drop 选中的 authoritative root 与 capability |
 | Conversation 本机偏好 | Native app-data | Workspace reference、permission、shell policy 等机器相关且非敏感的本地关联 |
 | Window Session | Native app-data / SQLite | window ID、conversation ID、bounds、zoom、sidebar、inspector、composerDraft、conversation cursor、viewport scrollTop |
@@ -246,7 +246,7 @@ Markdown table 的 scroll container 必须是 wrapper，不能把 `<table>` 自�
 
 - 每个重要动作都必须对应 semantic command、menu 和可通过键盘完成的路径。
 - 文件夹拖到 Workspace target 可创建或更新当前窗口的 Workspace Authorization。
-- 文件拖进 Composer 可添加为上下文。
+- 文件拖进 Composer 可添加为上下文：Native 生成 window-scoped、短生命周期、one-shot 的 opaque drop handle；发送前由 Rust 重新校验路径并做 bounded UTF-8 text projection。Renderer 只看到文件名与 attachment chip，不看到绝对路径、bookmark 或 grant；单文件最多 64 KiB，最多 8 个，binary/超限内容只显示受限说明，发送后的内容作为 user message 的明确 `<attached_context>` 区块，不获得后续 filesystem authority。
 - 所有 drag-and-drop 操作都有 picker、menu 或 keyboard 等价路径。
 - IME composition 期间不得误触发 send、stop 或 global command。
 - `Escape` 只关闭 transient UI，不停止 Run。
@@ -455,7 +455,7 @@ V1 只有在以下条件全部通过后才算完成：
 - Conversation 创建请求重试时保持幂等，不产生重复对象。
 - 关闭一个窗口不影响其他 Conversation 或 Run。
 - network disconnect、renderer reload、application crash 恢复后，通过 snapshot/cursor observer recovery 不出现重复 user message、assistant placeholder 或 event；进行中的 Run 显示 `Interrupted`，V1 不自动 reclaim 或重放工具。
-- Authentication secret 不出现在 Web Storage、URL、log、settings 或 Conversation data 中；正式签名 macOS Keychain 通过 packaged-app 验证；dev/ad-hoc UAT 与当前 Windows 包只能使用进程内 session，不能把 raw token 写入浏览器存储作为替代。macOS release UAT 还必须验证重启后的 Keychain read/write 无 unlock prompt，且 `codesign -dvvv` 的 Developer ID Application、Team ID 与 bundle identifier 均与 CI configuration 一致。Windows persistent-session acceptance 在 MSIX/AppContainer backend 落地后才可开始。
+- Authentication secret 不出现在 Web Storage、URL、log、settings 或 Conversation data 中；正式签名 macOS Keychain 通过 packaged-app 验证；dev/ad-hoc UAT 与当前 Windows 包只能使用进程内 session，不能把 raw token 写入浏览器存储作为替代。macOS release UAT 还必须验证重启后的 Keychain read/write 无 unlock prompt，且 `codesign -dvvv` 的 Developer ID Application、Team ID 与 bundle identifier 均与 CI configuration 一致。Windows persistent-session acceptance 只有在 device-bound backend 与 same-user full-trust 负测通过后才可开始；PasswordVault 不满足该门槛。
 - Renderer 无法通过传入 arbitrary absolute workspace path 扩大授权；Rust 测试继续拒绝 `..` traversal、absolute tool path、symlink escape、cleared Workspace 与 capability violation。
 - Product context menus 使用 Native menu，且不出现 `Inspect Element`。
 - `640×600`、`860×600`、`1180×780` 在 80%、100%、150%、200% zoom 下无页面级横向滚动；Sidebar、Composer、Stop 与 Approval 始终可达。

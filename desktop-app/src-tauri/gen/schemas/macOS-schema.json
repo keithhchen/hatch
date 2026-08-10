@@ -279,6 +279,12 @@
           "markdownDescription": "Enables the read_auth_token command without any pre-configured scope."
         },
         {
+          "description": "Enables the read_native_drop_contexts command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-read-native-drop-contexts",
+          "markdownDescription": "Enables the read_native_drop_contexts command without any pre-configured scope."
+        },
+        {
           "description": "Enables the read_window_settings command without any pre-configured scope.",
           "type": "string",
           "const": "allow-read-window-settings",
@@ -439,6 +445,12 @@
           "type": "string",
           "const": "deny-read-auth-token",
           "markdownDescription": "Denies the read_auth_token command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the read_native_drop_contexts command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-read-native-drop-contexts",
+          "markdownDescription": "Denies the read_native_drop_contexts command without any pre-configured scope."
         },
         {
           "description": "Denies the read_window_settings command without any pre-configured scope.",
