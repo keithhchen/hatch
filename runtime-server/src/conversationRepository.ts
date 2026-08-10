@@ -51,7 +51,9 @@ export type ConversationRunRecord = {
   startedAt?: string;
   completedAt?: string;
   interruptedReason?: string;
+  /** Opaque, Runtime-generated connection owner. Never supplied by Desktop. */
   executorId?: string;
+  /** Reserved for a future renewable cross-process lease protocol; unused in V1. */
   executorLeaseExpiresAt?: string;
 };
 
@@ -131,9 +133,9 @@ export interface ConversationRepository {
   appendEvent(input: Omit<ConversationJournalEvent, "cursor" | "createdAt"> & { createdAt?: string }): Promise<ConversationJournalEvent>;
   snapshot(conversationId: string, afterCursor?: number): Promise<ConversationSnapshot>;
   /**
-   * A restarted Runtime must not resurrect work from its old executor. Pending
-   * tool calls are converted into Interrupted; a later attach/reclaim feature
-   * can explicitly create a new executor lease instead of replaying effects.
+   * V1 recovery never resurrects work from a lost executor. Pending tool calls
+   * become Interrupted; a future attach/reclaim protocol must mint a new lease
+   * and must not replay effects from this Run.
    */
   interruptActiveRuns(reason: string): Promise<ConversationRunRecord[]>;
 }
@@ -566,8 +568,10 @@ export class FileConversationRepository extends InMemoryConversationRepository {
 
 /**
  * Postgres backend. The partial unique index is the cross-process source of
- * truth for active-run exclusion; the in-memory map in the WebSocket server is
- * only an optimisation for fast feedback.
+ * truth for competing Run creation; the in-memory map in the WebSocket server
+ * is only an optimisation for fast feedback. V1 recovery is intentionally
+ * single-executor-process per repository; cross-process reclaim needs an
+ * explicit renewable lease protocol rather than a startup sweep.
  */
 export const POSTGRES_CONVERSATION_REPOSITORY_SCHEMA = `
 CREATE TABLE IF NOT EXISTS hatch_conversations (

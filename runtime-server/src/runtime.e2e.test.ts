@@ -172,15 +172,15 @@ test("Conversation API schema declares durable cursor, idempotency, and interrup
   const schemaPath = path.resolve("..", "packages", "protocol", "schemas", "hatch-conversation-api-v1.schema.json");
   const schema = JSON.parse(await readFile(schemaPath, "utf8")) as {
     $id: string;
+    description: string;
     $defs: {
       runStatus: { enum: string[] };
-      createRunRequest: { required: string[] };
       cursor: { minimum: number };
     };
   };
   assert.equal(schema.$id, "https://hatch.dev/protocol/hatch-conversation-api-v1.schema.json");
   assert.ok(schema.$defs.runStatus.enum.includes("interrupted"));
-  assert.deepEqual(schema.$defs.createRunRequest.required, ["client_message_id"]);
+  assert.match(schema.description, /WebSocket.*only executable Run creation/i);
   assert.equal(schema.$defs.cursor.minimum, 0);
 });
 
@@ -2102,7 +2102,7 @@ test("server releases a conversation lock when the client disconnects mid-run", 
     return events.some((event) => (
       event.type === "turn.state"
       && event.run_id === "run_disconnect_lock_1"
-      && event.to === "cancelled"
+      && event.to === "interrupted"
     ));
   });
 

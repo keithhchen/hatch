@@ -6,6 +6,7 @@ import path from "node:path";
 import { afterEach, test } from "node:test";
 import { WebSocket } from "ws";
 import { DeterministicAgentRuntime } from "./agentRuntime.js";
+import { InMemoryConversationRepository } from "./conversationRepository.js";
 import { createRuntimeServer, type RuntimeServer } from "./index.js";
 import { PROTOCOL_VERSION, type OutboundMessage } from "./protocol.js";
 import { RuntimeStore } from "./store.js";
@@ -101,7 +102,7 @@ test("Conversation HTTP API owns metadata, pagination, versions, and cursor snap
   assert.equal((afterAgentUpdate.body as { conversation: { id: string } }).conversation.id, first.conversation.id);
 });
 
-test("Run HTTP API is idempotent by client message, excludes active runs, and cancels a reservation", async () => {
+test("Run HTTP API rejects a detached reservation instead of occupying an executor slot", async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-runs-"));
   runtime = createRuntimeServer({ conversationStore: new RuntimeStore(dataDir) });
   const base = await listen(runtime.server);
@@ -116,35 +117,12 @@ test("Run HTTP API is idempotent by client message, excludes active runs, and ca
     method: "POST",
     body: { client_message_id: "message_1" }
   });
-  assert.equal(first.response.status, 201);
-  const firstRun = (first.body as { run: { id: string; status: string }; executor_attached: boolean }).run;
-  assert.equal(firstRun.status, "queued");
-  assert.equal((first.body as { executor_attached: boolean }).executor_attached, false);
+  assert.equal(first.response.status, 409);
+  assert.equal((first.body as { error: { code: string } }).error.code, "executor_attach_required");
 
-  const replay = await json(base, `${pathPrefix}/runs?${scope}`, {
-    method: "POST",
-    body: { client_message_id: "message_1" }
-  });
-  assert.equal(replay.response.status, 200);
-  assert.equal((replay.body as { run: { id: string } }).run.id, firstRun.id);
-  const busy = await json(base, `${pathPrefix}/runs?${scope}`, {
-    method: "POST",
-    body: { client_message_id: "message_2" }
-  });
-  assert.equal(busy.response.status, 409);
-  assert.equal((busy.body as { error: { code: string } }).error.code, "conversation_busy");
-
-  const cancelled = await json(base, `${pathPrefix}/runs/${encodeURIComponent(firstRun.id)}/cancel?${scope}`, {
-    method: "POST",
-    body: { reason: "User closed the draft" }
-  });
-  assert.equal(cancelled.response.status, 200);
-  assert.equal((cancelled.body as { run: { status: string } }).run.status, "cancelled");
-  const second = await json(base, `${pathPrefix}/runs?${scope}`, {
-    method: "POST",
-    body: { client_message_id: "message_2" }
-  });
-  assert.equal(second.response.status, 201);
+  const listed = await json(base, `${pathPrefix}/runs?${scope}`);
+  assert.equal(listed.response.status, 200);
+  assert.deepEqual((listed.body as { runs: unknown[] }).runs, []);
 });
 
 test("WebSocket retries use client_message_id without creating a second run or replaying tools", async () => {
@@ -194,6 +172,137 @@ test("WebSocket retries use client_message_id without creating a second run or r
   socket.close();
 });
 
+test("Runtime startup interrupts a carried active Run instead of reclaiming or replaying it", async () => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-startup-recovery-"));
+  const repository = new InMemoryConversationRepository();
+  const conversation = (await repository.createConversation({
+    id: "conversation_startup_recovery",
+    publicId: "conversation_startup_recovery",
+    ownerAccountId: binding.user_id,
+    creatorId: binding.creator_id,
+    agentId: binding.agent_id,
+    productId: binding.product_id,
+    corpusDigest: binding.corpus_digest
+  })).conversation;
+  await repository.createRun({
+    id: "run_startup_recovery",
+    conversationId: conversation.id,
+    clientMessageId: "message_startup_recovery",
+    corpusDigest: binding.corpus_digest,
+    executorId: "executor_lost_process"
+  });
+
+  runtime = createRuntimeServer({
+    conversationStore: new RuntimeStore(dataDir),
+    conversationRepository: repository
+  });
+  await listen(runtime.server);
+  await waitForCondition(async () => (await repository.getRun(conversation.id, "run_startup_recovery"))?.status === "interrupted");
+
+  const snapshot = await repository.snapshot(conversation.id);
+  assert.equal(snapshot.runs[0]?.status, "interrupted");
+  assert.ok(snapshot.events.some((event) => (
+    event.type === "run.state"
+    && event.payload.status === "interrupted"
+    && event.payload.reason === "Runtime restarted; the executor connection was lost."
+  )));
+  assert.ok(!snapshot.events.some((event) => event.type === "message.created"));
+});
+
+test("two windows get distinct executor leases; disconnect is Interrupted and recovery is observer-only", async () => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-recovery-"));
+  const repository = new InMemoryConversationRepository();
+  runtime = createRuntimeServer({
+    conversationStore: new RuntimeStore(dataDir),
+    conversationRepository: repository,
+    createRuntime: () => new DeterministicAgentRuntime()
+  });
+  const base = await listen(runtime.server);
+  const conversationId = "conversation_recovery";
+  // Resolver-free test mode stores the raw public ID; product mode uses the
+  // same repository path after deriving its binding server-side.
+  const durableId = conversationId;
+
+  const firstMessages: OutboundMessage[] = [];
+  const firstSocket = await openRuntimeSocket(base, "same-installation", firstMessages);
+  firstSocket.send(JSON.stringify({
+    type: "client.message",
+    run_id: "run_recovery_first",
+    client_message_id: "message_recovery_first",
+    conversation_id: conversationId,
+    message: { role: "user", content: "Find Hatch." }
+  }));
+  await waitForSocket(firstMessages, (message) => message.type === "tool_call.request" && message.run_id === "run_recovery_first");
+  const beforeDisconnect = await repository.snapshot(durableId);
+  const beforeCursor = beforeDisconnect.cursor;
+  const firstRun = await repository.getRun(durableId, "run_recovery_first");
+  assert.ok(firstRun?.executorId?.startsWith("executor_"));
+  assert.notEqual(firstRun?.executorId, "same-installation");
+
+  const secondMessages: OutboundMessage[] = [];
+  const secondSocket = await openRuntimeSocket(base, "same-installation", secondMessages);
+  secondSocket.send(JSON.stringify({
+    type: "client.message",
+    run_id: "run_recovery_parallel",
+    client_message_id: "message_recovery_parallel",
+    conversation_id: conversationId,
+    message: { role: "user", content: "Start another task." }
+  }));
+  const busy = await waitForSocket(secondMessages, (message) => (
+    message.type === "turn.failed" && message.run_id === "run_recovery_parallel"
+  ));
+  assert.equal(busy.type, "turn.failed");
+  if (busy.type === "turn.failed") assert.equal(busy.error.code, "conversation_busy");
+
+  firstSocket.close();
+  await waitForCondition(async () => (await repository.getRun(durableId, "run_recovery_first"))?.status === "interrupted");
+
+  const replay = await repository.snapshot(durableId, beforeCursor);
+  const replayEvents = replay.events;
+  assert.ok(replayEvents.some((event) => (
+    event.type === "run.state"
+    && event.payload.status === "interrupted"
+    && event.payload.reason === "Client disconnected"
+  )));
+
+  // Same intent is an observer/retry acknowledgement only. It never takes the
+  // lost lease or repeats its outstanding local-tool call.
+  secondSocket.send(JSON.stringify({
+    type: "client.message",
+    run_id: "run_recovery_retry",
+    client_message_id: "message_recovery_first",
+    conversation_id: conversationId,
+    message: { role: "user", content: "Find Hatch." }
+  }));
+  const retry = await waitForSocket(secondMessages, (message) => (
+    message.type === "turn.state"
+    && message.run_id === "run_recovery_first"
+    && message.status === "interrupted"
+    && message.reason === "Idempotent client message replay"
+  ));
+  assert.equal(retry.type, "turn.state");
+  assert.ok(!secondMessages.some((message) => message.type === "tool_call.request" && message.run_id === "run_recovery_retry"));
+
+  // A fresh user intent can start a replacement Run after the old executor is
+  // interrupted. The new window receives its own server-generated lease.
+  secondSocket.send(JSON.stringify({
+    type: "client.message",
+    run_id: "run_recovery_replacement",
+    client_message_id: "message_recovery_replacement",
+    conversation_id: conversationId,
+    message: { role: "user", content: "Find Hatch again." }
+  }));
+  const replacement = await waitForSocket(secondMessages, (message) => (
+    (message.type === "tool_call.request" || message.type === "turn.failed")
+    && message.run_id === "run_recovery_replacement"
+  ));
+  assert.equal(replacement.type, "tool_call.request");
+  const replacementRun = await repository.getRun(durableId, "run_recovery_replacement");
+  assert.ok(replacementRun?.executorId?.startsWith("executor_"));
+  assert.notEqual(replacementRun?.executorId, firstRun?.executorId);
+  secondSocket.close();
+});
+
 async function listen(server: http.Server): Promise<string> {
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -225,4 +334,31 @@ async function waitForSocket(
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error("Timed out waiting for WebSocket message");
+}
+
+async function openRuntimeSocket(base: string, installationId: string, messages: OutboundMessage[]): Promise<WebSocket> {
+  const socket = new WebSocket(base.replace("http:", "ws:") + "/runtime");
+  socket.on("message", (value) => messages.push(JSON.parse(String(value)) as OutboundMessage));
+  await new Promise<void>((resolve, reject) => {
+    socket.once("open", resolve);
+    socket.once("error", reject);
+  });
+  socket.send(JSON.stringify({
+    type: "client.hello",
+    protocol_version: PROTOCOL_VERSION,
+    installation_id: installationId,
+    license_token: "recovery-license",
+    local_tools: ["file_search"]
+  }));
+  await waitForSocket(messages, (message) => message.type === "session.ready");
+  return socket;
+}
+
+async function waitForCondition(predicate: () => boolean | Promise<boolean>, timeoutMs = 3_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Timed out waiting for condition");
 }
