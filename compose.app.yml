@@ -33,6 +33,7 @@ services:
       HATCH_REGISTRY_URL: http://registry:8100
       HATCH_AGENT_CORPUS_ROOT: /var/lib/hatch/corpora
       HATCH_QDRANT_URL: http://qdrant:6333
+      HATCH_LLM_PROFILE: ${HATCH_LLM_PROFILE:-kimi-k2.6-no-thinking}
       HATCH_COMMERCE_LEDGER_FILE: /var/lib/hatch/commerce/ledger.jsonl
       HATCH_OUTPUT_GUARD: ${HATCH_OUTPUT_GUARD:-enforce}
       HATCH_OUTPUT_GUARD_REGION: ${HATCH_OUTPUT_GUARD_REGION:-cn-shanghai}

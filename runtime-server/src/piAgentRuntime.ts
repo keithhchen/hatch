@@ -19,22 +19,19 @@ import {
   ensureNotCancelled,
   errorMessage,
   executeChatTool,
-  implicitSkillInvocationFromTool,
   mergeRuntimeActiveSkill,
   modelVisibleToolResult,
   produceAuditedFinal,
   requestedOutputPath,
   runtimeSkillActivationFromToolResult,
-  skillInvocationEvent,
   toolEventBase,
   workspaceDiffEvent,
   type AgentRuntime,
   type RunContext,
   type WorkspacePathPolicy
 } from "./agentRuntime.js";
-import { KIMI_MODEL } from "./kimiProvider.js";
 import { SUMMARY_PREFIX, SUMMARY_SUFFIX } from "./compaction.js";
-import { createKimiModel, createKimiStreamFn } from "./piModel.js";
+import { createPiModel, createPiStreamFn } from "./piModel.js";
 import { runPiAgentPrompt, type PiAgentPromptRunner } from "./piPrompt.js";
 
 export type PiToolDefinition = {
@@ -100,15 +97,14 @@ type ToolEventState = {
  */
 export class PiAgentRuntime implements AgentRuntime {
   async *run(input: RunStart, ctx: RunContext): AsyncIterable<OutboundMessage> {
-    const model = createKimiModel();
-    const streamFn = createKimiStreamFn();
+    const model = createPiModel();
+    const streamFn = createPiStreamFn();
     const queue = new AsyncQueue<OutboundMessage>();
     const workspacePathPolicy = createWorkspacePathPolicy(input.message.content);
     const visibleSkills = ctx.sessionSkills.visibleRecords;
     let activeSkills = [...(ctx.activatedSkills ?? [])];
     let resourceRoots = activeSkillResourceRoots(visibleSkills, activeSkills);
     const toolEvents = new Map<string, ToolEventState>();
-    const seenImplicitInvocations = new Set<string>();
     let terminalError: Error | undefined;
     let finalAssistant: AssistantMessage | undefined;
     let compacting = false;
@@ -120,10 +116,8 @@ export class PiAgentRuntime implements AgentRuntime {
     const completedArtifactPaths: string[] = [];
 
     const contextMessages = buildRuntimeContextMessages(
-      ctx.sessionSkills.projectInstructions,
       ctx.sessionSkills.rendered.section,
-      activeSkills,
-      ctx.workspaceRoot
+      activeSkills
     ).map((message) => piUserMessage(message.content ?? ""));
     const storedMessages = ctx.messages.slice(0, -1).map(toPiMessage);
     const toolDefinitions = chatToolsForRun(
@@ -228,7 +222,6 @@ export class PiAgentRuntime implements AgentRuntime {
         deliveryWorkflow,
         transcriptMessages,
         completedArtifactPaths,
-        seenImplicitInvocations,
         setFinalAssistant: (message) => { finalAssistant = message; },
         setTerminalError: (error) => { terminalError ??= error; }
       });
@@ -445,7 +438,6 @@ export class PiAgentRuntime implements AgentRuntime {
     deliveryWorkflow?: RunContext["deliveryWorkflow"];
     transcriptMessages: ConversationMessage[];
     completedArtifactPaths: string[];
-    seenImplicitInvocations: Set<string>;
     setFinalAssistant: (message: AssistantMessage) => void;
     setTerminalError: (error: Error) => void;
   }): Promise<void> {
@@ -464,7 +456,6 @@ export class PiAgentRuntime implements AgentRuntime {
       deliveryWorkflow,
       transcriptMessages,
       completedArtifactPaths,
-      seenImplicitInvocations,
       setFinalAssistant,
       setTerminalError
     } = options;
@@ -553,19 +544,6 @@ export class PiAgentRuntime implements AgentRuntime {
         run_id: input.run_id,
         delta: { kind: "status", content: `Calling tool ${event.toolName}.` }
       });
-      const invocation = await implicitSkillInvocationFromTool(
-        event.toolName,
-        args,
-        ctx.sessionSkills.records,
-        ctx.workspaceRoot
-      );
-      if (invocation) {
-        const key = `${invocation.skill.scope}:${invocation.skill.path}:${invocation.skill.name}`;
-        if (!seenImplicitInvocations.has(key)) {
-          seenImplicitInvocations.add(key);
-          queue.push(skillInvocationEvent(input.run_id, event.toolCallId, event.toolName, args, invocation));
-        }
-      }
       return;
     }
 
@@ -660,10 +638,8 @@ function auditMessagesForRun(
   return [
     { role: "system", content: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, ctx.deliveryWorkflow) },
     ...buildRuntimeContextMessages(
-      ctx.sessionSkills.projectInstructions,
       ctx.sessionSkills.rendered.section,
-      ctx.activatedSkills ?? [],
-      ctx.workspaceRoot
+      ctx.activatedSkills ?? []
     ),
     ...ctx.messages.map(toAuditMessage),
     ...transcript.map(toAuditMessage)
@@ -740,8 +716,8 @@ function toPiMessage(message: ConversationMessage): AgentMessage {
     role: "assistant",
     content,
     api: "openai-completions",
-    provider: createKimiModel().provider,
-    model: KIMI_MODEL,
+    provider: createPiModel().provider,
+    model: createPiModel().id,
     usage: message.usage ?? emptyUsage(),
     stopReason: message.tool_calls?.length ? "toolUse" : "stop",
     timestamp: Date.now()

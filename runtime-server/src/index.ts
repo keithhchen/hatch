@@ -13,7 +13,6 @@ import {
 } from "./compaction.js";
 import { createAgentRuntime, type AgentRuntime, type RuntimeSessionSkills } from "./agentRuntime.js";
 import { parseInboundMessage, PROTOCOL_VERSION, type ClientHello, type OutboundMessage, type OutputFinishReason, type RunStart } from "./protocol.js";
-import { loadProjectInstructions } from "./projectDocs.js";
 import { RunStateMachine } from "./runState.js";
 import { ServerToolExecutor } from "./serverTools.js";
 import { SkillRuntime } from "./skillRuntime.js";
@@ -42,6 +41,7 @@ import { verifyHatchAuthToken } from "./authToken.js";
 import {
   createOutputGuardFromEnvironment,
   GuardedAssistantOutput,
+  OUTPUT_GUARD_BLOCKED_MODEL_MESSAGE,
   PassThroughOutputGuard,
   type GuardedOutputResult,
   type OutputGuard
@@ -253,6 +253,7 @@ async function handleHttpRequest(
           presentation: corpus.product.presentation
         }))
         : await Promise.all((await entitlementResolver!.list({ authToken, licenseToken: authToken })).map(async (entitlement) => {
+          assertEntitlementMatchesIdentity(claims, entitlement);
           if (!agentCorpusResolver) throw new Error("Current Agent Corpus resolver is unavailable");
           const resolved = await agentCorpusResolver.resolve(entitlement.creator_id, entitlement.agent_id);
           if (resolved.corpus.product.id !== entitlement.product_id || resolved.corpus.creator.id !== entitlement.creator_id) {
@@ -408,7 +409,7 @@ async function handleRuntimeSocket(
             ));
           }
           hello = message;
-          sessionSkills = await buildSessionSkills(hello.workspace_root, Boolean(binding.agentCorpusRoot));
+          sessionSkills = await buildSessionSkills(Boolean(binding.agentCorpusRoot));
           await store.append({
             type: "session.started",
             installation_id: message.installation_id,
@@ -419,7 +420,6 @@ async function handleRuntimeSocket(
             corpus_digest: binding.corpusDigest,
             ...(binding.entitlementId ? { entitlement_id: binding.entitlementId } : {}),
             client_version: message.client_version,
-            workspace_root: hello.workspace_root,
             local_tools: hello.local_tools
           });
           await send({
@@ -619,6 +619,11 @@ async function runOneTurn(
   outputGuard: OutputGuard,
   commerceEventSink?: CommerceEventSink
 ): Promise<void> {
+  const turnStarted = performance.now();
+  let setupCompleted = turnStarted;
+  let modelFirstText: number | undefined;
+  let firstSafeSegment: number | undefined;
+  const guardTiming: Array<import("./outputGuard.js").OutputGuardTiming & { released_ms?: number }> = [];
   let skillRuntime: SkillRuntime | undefined;
   let deliveredArtifact: DeliveryArtifact | undefined;
   try {
@@ -632,17 +637,31 @@ async function runOneTurn(
         message: input.message
       });
     };
-    const guardedOutput = new GuardedAssistantOutput(outputGuard, input.run_id);
+    const guardedOutput = new GuardedAssistantOutput(
+      outputGuard,
+      input.run_id,
+      undefined,
+      undefined,
+      undefined,
+      (timing) => guardTiming.push({
+        ...timing,
+        started_ms: timing.started_ms - turnStarted
+      })
+    );
     const deliveryBinding = deliveryBindingFromSession(binding);
     let approvedAssistantText = "";
     const emitReleased = async (result: GuardedOutputResult): Promise<void> => {
       for (const content of result.released) {
         approvedAssistantText += content;
+        const releasedAt = performance.now();
+        firstSafeSegment ??= releasedAt;
         await send({
           type: "assistant.delta",
           run_id: input.run_id,
           delta: { kind: "text", content }
         });
+        const timing = guardTiming.find((entry) => entry.outcome === "pass" && entry.released_ms === undefined);
+        if (timing) timing.released_ms = releasedAt - turnStarted;
       }
     };
     const commitTerminal = async (
@@ -650,7 +669,7 @@ async function runOneTurn(
       recordDelivery = true
     ): Promise<void> => {
       const content = finishReason === "content_filter"
-        ? '<runtime_status output_guard="blocked" />'
+        ? OUTPUT_GUARD_BLOCKED_MODEL_MESSAGE
         : approvedAssistantText;
       await store.append({
         type: "conversation.model_message",
@@ -669,7 +688,19 @@ async function runOneTurn(
         );
         await send({ type: "delivery.ready", run_id: input.run_id, ...receipt });
       }
-      await send({ type: "turn.completed", run_id: input.run_id, finish_reason: finishReason });
+      const completedAt = performance.now();
+      await send({
+        type: "turn.completed",
+        run_id: input.run_id,
+        finish_reason: finishReason,
+        timing: {
+          total_ms: completedAt - turnStarted,
+          setup_ms: setupCompleted - turnStarted,
+          ...(modelFirstText === undefined ? {} : { model_first_text_ms: modelFirstText - turnStarted }),
+          ...(firstSafeSegment === undefined ? {} : { first_safe_segment_ms: firstSafeSegment - turnStarted }),
+          guard: guardTiming
+        }
+      });
       await state.complete();
     };
     const sendFixedAssistant = async (content: string): Promise<void> => {
@@ -718,6 +749,7 @@ async function runOneTurn(
     const materializedAgent = binding.agentCorpusRoot
       ? await materializeAgentCorpus(binding.agentCorpusRoot, input.message.content, hello.local_tools)
       : undefined;
+    setupCompleted = performance.now();
     skillRuntime = new SkillRuntime({
       parentInput: input,
       parentState: state,
@@ -729,7 +761,6 @@ async function runOneTurn(
       allowedExternalTools: materializedAgent?.externalTools,
       agentSystemPrompt: materializedAgent?.systemPrompt,
       deliveryAuditContext: materializedAgent?.deliveryAuditContext,
-      workspaceRoot: hello.workspace_root,
       store,
       emit: send,
       createWorkerRuntime: () => createRuntime()
@@ -751,7 +782,6 @@ async function runOneTurn(
       // into the server-private prompt. Product execution remains one Agent
       // session rather than a generic parent delegating to another worker.
       allowSkillRun: !binding.agentCorpusRoot,
-      workspaceRoot: hello.workspace_root,
       persistModelMessage: async (message) => {
         await store.append({
           type: "conversation.model_message",
@@ -780,6 +810,7 @@ async function runOneTurn(
       await persistServerToolCallEvent(event, input, store);
       await persistSkillEvent(event, input, store);
       if (event.type === "assistant.delta" && event.delta.kind === "text") {
+        modelFirstText ??= performance.now();
         const result = await guardedOutput.push(event.delta.content);
         await emitReleased(result);
         if (result.blocked) {
@@ -832,25 +863,20 @@ async function runOneTurn(
   }
 }
 
-async function buildSessionSkills(
-  workspaceRoot?: string,
-  protectedCorpus = false
-): Promise<RuntimeSessionSkills> {
+async function buildSessionSkills(protectedCorpus = false): Promise<RuntimeSessionSkills> {
   // The Agent Corpus materializer loads matching protected SKILL.md files into the
   // direct server Agent. Do not also expose it as a model-selectable catalog
   // entry: that creates an unnecessary nested skill worker and lets the same
   // method run through two different delivery paths.
-  const records = protectedCorpus ? [] : await discoverSkills({ workspaceRoot });
+  const records = protectedCorpus ? [] : await discoverSkills();
   const visibleRecords = visibleSkillsForSession(records);
   const rendered = await includeSkillInstructions()
     ? renderSkillsSection(visibleRecords, { executionMode: "protected" })
     : emptyRenderedSkills();
-  const projectInstructions = await loadProjectInstructions(workspaceRoot);
   return {
     records,
     visibleRecords,
-    rendered,
-    ...(projectInstructions ? { projectInstructions } : {})
+    rendered
   };
 }
 
@@ -897,6 +923,7 @@ async function resolveSessionBinding(
         entitlementId: hello.entitlement_id,
         installationId: hello.installation_id
       });
+      assertEntitlementMatchesIdentity(authClaims, entitlement);
       if (entitlement.agent_id !== hello.agent_id
         || entitlement.creator_id !== resolved.corpus.creator.id
         || entitlement.product_id !== resolved.corpus.product.id) {
@@ -936,6 +963,7 @@ async function resolveSessionBinding(
       entitlementId: hello.entitlement_id,
       installationId: hello.installation_id
     });
+    assertEntitlementMatchesIdentity(authClaims, entitlement);
     const resolved = await agentCorpusResolver.resolve(entitlement.creator_id, entitlement.agent_id);
     if (resolved.corpus.product.id !== entitlement.product_id || resolved.corpus.creator.id !== entitlement.creator_id) {
       throw new Error("Entitlement does not match its current Agent Corpus");
@@ -985,6 +1013,15 @@ function legacyAuthClaims(authToken: string | undefined, authIdentityResolver?: 
   return verifyHatchAuthToken(authToken);
 }
 
+function assertEntitlementMatchesIdentity(
+  identity: AuthIdentity | undefined,
+  entitlement: { user_id: string }
+): void {
+  if (identity?.role === "user" && entitlement.user_id !== identity.sub) {
+    throw new EntitlementError("agent_entitlement_mismatch", "This Creator Agent is not available for the signed-in account.");
+  }
+}
+
 export function scopedConversationId(binding: Pick<SessionBinding, "creatorId" | "userId" | "agentId" | "productId" | "corpusDigest">, conversationId: string): string {
   return `scope:${shortHash([binding.creatorId, binding.userId, binding.agentId, binding.productId, binding.corpusDigest].join("\u0000"))}:${conversationId}`;
 }
@@ -1018,6 +1055,7 @@ async function bindingFromHistoryRequest(
       throw new EntitlementError("authentication_required", "A valid Hatch session is required.");
     }
     const entitlement = await entitlementResolver.resolve({ authToken, licenseToken: authToken, entitlementId });
+    assertEntitlementMatchesIdentity(authIdentity ?? legacyAuthClaims(authToken, authIdentityResolver), entitlement);
     const creatorId = url.searchParams.get("creator_id");
     const agentId = url.searchParams.get("agent_id");
     if (creatorId !== entitlement.creator_id || agentId !== entitlement.agent_id) {

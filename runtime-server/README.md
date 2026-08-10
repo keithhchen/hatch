@@ -80,21 +80,15 @@ It does not scan workspace `.codex/skills`, workspace ancestor `.codex/skills`, 
 Use it for packaged creator app skills; do not rely on user workspace folders
 as implicit skill sources.
 
-Project instructions are loaded from `AGENTS.md` files along the path from the detected project root to the current workspace root. In each directory, `AGENTS.override.md` wins over `AGENTS.md`; additional fallback filenames can be configured with `project_doc_fallback_filenames`. `project_root_markers` controls project-doc root detection only, not skill discovery. `project_doc_max_bytes` caps the total injected project-doc bytes, and `0` disables project-doc injection.
-
 `agents/openai.yaml` is parsed for OpenAI Agent Skills metadata. `policy.allow_implicit_invocation: false` hides the skill from implicit model selection; explicit `$skill-name` mentions or linked `[$skill-name](/path/to/SKILL.md)` mentions still activate it for that turn. `policy.products` is enforced only when `HATCH_SKILL_PRODUCT` is set to `codex`, `chatgpt`, or `atlas`; by default product-restricted skills are not model-visible.
 
 The runtime tracks protected skill execution on the event stream. The main agent receives public metadata and invokes `skill_run`; the server creates a headless `SkillRuntime` session that reads the private `SKILL.md`. The client sees `skill.run` status and brokered tool correlation, but never receives the worker prompt or raw transcript.
 
 The model-visible skills list follows Agent Skills progressive-disclosure budgeting: it uses at most 2% of a known model context window, or 8,000 characters when the context window is unknown. Set `HATCH_MODEL_CONTEXT_WINDOW_CHARS` when a provider exposes a known window. `HATCH_SKILL_METADATA_BUDGET_CHARS` can override the computed value for deterministic tests or constrained deployments.
 
-`HATCH_SKILLS_CONFIG=/path/to/config.toml` can configure skills and project docs. `project_root_markers` controls `AGENTS.md` project-doc root detection. `include_instructions = false` suppresses the session skills catalog. `[skills.bundled].enabled = false` excludes bundled `runtime-server/skills`. `[[skills.config]]` entries configure individual skills by path or by skill name. Rules are applied in file order, so a later name selector can override an earlier path selector and vice versa:
+`HATCH_SKILLS_CONFIG=/path/to/config.toml` can configure skills. `include_instructions = false` suppresses the session skills catalog. `[skills.bundled].enabled = false` excludes bundled `runtime-server/skills`. `[[skills.config]]` entries configure individual skills by path or by skill name. Rules are applied in file order, so a later name selector can override an earlier path selector and vice versa:
 
 ```toml
-project_root_markers = [".git"]
-project_doc_fallback_filenames = ["PROJECT.md"]
-project_doc_max_bytes = 32768
-
 [skills]
 include_instructions = false
 
@@ -131,16 +125,15 @@ The server builds base instructions for each model call from:
 
 ```text
 system: runtime identity, security rules, and tool execution boundaries
-user context: AGENTS.md project instructions loaded for the session
 user context: server-rendered per-session Agent Skills catalog
 worker context: private skill instructions inside SkillRuntime only
 conversation: server-hydrated prior user/assistant messages
 conversation: current user message
 ```
 
-`client.hello` initializes the session skill context once: the server discovers skills, renders the catalog, loads project instructions, and stores that context on the WebSocket session. Later `client.message` turns reuse the same rendered catalog so the model-call prefix stays stable for prompt caching. New sessions discover again.
+`client.hello` initializes the session skill context once: the server discovers skills, renders the catalog, and stores that context on the WebSocket session. Later `client.message` turns reuse the same rendered catalog so the model-call prefix stays stable for prompt caching. New sessions discover again.
 
-AGENTS.md project instructions use a `# AGENTS.md instructions ... <INSTRUCTIONS>` user-context shape. The public skill catalog is injected as server-authored `user` context prefixed with `HATCH RUNTIME CONTEXT`; private skill instructions are injected only into the worker context. Context compaction excludes rebuilt server context messages because the server reconstructs them from fixed session state.
+The public skill catalog is injected as server-authored `user` context prefixed with `HATCH RUNTIME CONTEXT`; private skill instructions are injected only into the worker context. Context compaction excludes rebuilt server context messages because the server reconstructs them from fixed session state. Consumer workspace paths and project instruction files are never sent to the Runtime or model.
 
 Model-visible function tools are generated from the canonical runtime tool spec registry in `tools.ts`. Server tools are always owned by the runtime server. Client tools are exposed only when the `client.hello.local_tools` session capability says the Desktop client can execute them.
 `file_read` and `file_list` are local workspace tools for the main agent. Protected skill resource paths are available only to SkillRuntime through the same ToolBridge and are never sent to the client as server-hosted skill content.
@@ -182,7 +175,7 @@ Override the location with:
 HATCH_RUNTIME_DATA_DIR=/path/to/runtime-data
 ```
 
-The client declares local workspace capability once in `client.hello` with `workspace_root` and `local_tools`; duplicate `client.hello` messages on the same connection are rejected so capability cannot be reset mid-session. Each `client.message` sends only the current user message plus `conversation_id`. `local_tools: []` is allowed for a no-local-workspace session; any declared `fs.*`, `shell.exec`, or `git.diff` capability requires `workspace_root`. The server hydrates prior user/assistant messages from this store before each agent run.
+The client declares its local tool capability once in `client.hello` with `local_tools`; duplicate `client.hello` messages on the same connection are rejected. Each `client.message` sends only the current user message plus `conversation_id`. The Consumer-selected workspace remains Desktop-only and is applied when the Desktop executes a local tool call. The server hydrates prior user/assistant messages from this store before each agent run.
 Explicitly bound conversation history is namespaced by creator, user, Agent,
 product, and Corpus digest. `GET /conversations/:id/messages` requires that
 binding as query parameters, so an identical conversation ID under another

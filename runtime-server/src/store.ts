@@ -83,7 +83,6 @@ export type StoreEvent =
       product_id?: string;
       corpus_digest?: string;
       client_version?: string;
-      workspace_root?: string;
       local_tools?: string[];
       timestamp: string;
     }

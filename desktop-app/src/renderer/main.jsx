@@ -29,6 +29,7 @@ import {
   creatorAgentFromEntitlement,
   CHANGE_TOOLS,
   localToolsForPermissionPolicy,
+  normalizePermissionPolicy,
   requiresUserApproval,
   workspaceGrantLabel
 } from "./product-policy.js";
@@ -47,7 +48,7 @@ import {
 } from "./auth-session.js";
 import { createTauriSettingsStore } from "./desktop-settings.js";
 
-const PROTOCOL_VERSION = "0.4";
+const PROTOCOL_VERSION = "0.5";
 const OUTPUT_FILTERED_COPY = "This response was blocked by the output safety check.";
 const SKILL_ACTIVITY_PART = "hatch.skill_activity";
 const SKILL_RUN_ACTIVITY_PART = "hatch.skill_run_activity";
@@ -57,9 +58,8 @@ const DEFAULT_AUTH_URL = import.meta.env.VITE_HATCH_AUTH_URL || "https://hatch.t
 const BROWSE_CATALOG_URL = import.meta.env.VITE_HATCH_CATALOG_URL || "https://hatch.tokenquadrant.cn/agents";
 const EMPTY_PROFILE = Object.freeze({ id: "anonymous", name: "User", initials: "U" });
 const PERMISSION_MODES = Object.freeze([
-  { value: PERMISSION_POLICIES.READ_ONLY, label: "Read only", detail: "Read files only" },
-  { value: PERMISSION_POLICIES.ASK_BEFORE_CHANGES, label: "Ask before changes", detail: "Ask before file changes" },
-  { value: PERMISSION_POLICIES.ALLOW_CHANGES, label: "Allow changes", detail: "Allow file changes" }
+  { value: PERMISSION_POLICIES.ASK_BEFORE_CHANGES, label: "请求批准", detail: "Shell 命令和文件变更前请求批准" },
+  { value: PERMISSION_POLICIES.ALLOW_CHANGES, label: "完全访问", detail: "允许 Shell 命令和文件变更" }
 ]);
 const DEFAULT_PERMISSION_MODE = DEFAULT_PERMISSION_POLICY;
 const ApprovalContext = createContext(null);
@@ -80,7 +80,6 @@ function App() {
   const workspaceRef = useRef("");
   const activeRunRef = useRef(null);
   const permissionRef = useRef(DEFAULT_PERMISSION_MODE);
-  const shellAccessRef = useRef(true);
   const imeRef = useRef({ composing: false });
   const connectedRef = useRef(false);
   const connectingRef = useRef(false);
@@ -108,7 +107,6 @@ function App() {
   const [signInError, setSignInError] = useState("");
   const [workspaceGranted, setWorkspaceGranted] = useState(false);
   const [permissionMode, setPermissionMode] = useState(DEFAULT_PERMISSION_MODE);
-  const [shellAccess, setShellAccess] = useState(true);
   const [interruptedRun, setInterruptedRun] = useState(null);
   const [conversationId, setConversationId] = useState("desktop-chat");
   const [status, setStatus] = useState("Offline");
@@ -303,12 +301,27 @@ function App() {
     const content = textFromAppendMessage(appendMessage).trim();
     if (!content) return;
 
+    // Workspace and permission changes are pending Desktop preferences until a
+    // new turn starts. Tool calls within a turn always use this stable snapshot.
+    workspaceRef.current = workspace;
+    permissionRef.current = permissionMode;
+
     const runId = `run_${Date.now()}`;
     const assistantId = `${runId}_assistant`;
     const startedAt = Date.now();
-    activeRunRef.current = { runId, assistantId, text: "", startedAt };
+    activeRunRef.current = {
+      runId,
+      assistantId,
+      text: "",
+      startedAt,
+      timing: { questionSentAt: startedAt }
+    };
     setProfileSetting("active_run", {
-      runId, assistantId, startedAt, conversationId
+      runId,
+      assistantId,
+      startedAt,
+      conversationId,
+      timing: { questionSentAt: startedAt }
     });
     setMessages((current) => [
       ...current,
@@ -327,7 +340,7 @@ function App() {
         content
       }
     });
-  }, [buyerProfile.id, connected, conversationId, send]);
+  }, [buyerProfile.id, connected, conversationId, permissionMode, send, workspace]);
 
   const runtime = useExternalStoreRuntime({
     messages,
@@ -372,12 +385,10 @@ function App() {
     );
     const savedRun = parseStoredJson(getProfileSetting("active_run", null));
     const savedPermission = getProfileSetting("permission_mode");
-    const nextPermission = PERMISSION_MODES.some((mode) => mode.value === savedPermission)
-      ? savedPermission
-      : DEFAULT_PERMISSION_MODE;
-    const nextShellAccess = nextPermission === PERMISSION_POLICIES.READ_ONLY
-      ? false
-      : getProfileSetting("shell_access", true) !== false && getProfileSetting("shell_access", "true") !== "false";
+    const nextPermission = normalizePermissionPolicy(savedPermission);
+    if (savedPermission !== nextPermission) {
+      setProfileSetting("permission_mode", nextPermission);
+    }
     setWorkspace(savedWorkspace);
     workspaceRef.current = savedWorkspace;
     setWorkspaceDraft(savedWorkspace);
@@ -385,8 +396,6 @@ function App() {
     setConversationId(savedConversationId);
     permissionRef.current = nextPermission;
     setPermissionMode(nextPermission);
-    shellAccessRef.current = nextShellAccess;
-    setShellAccess(nextShellAccess);
     if (savedRun) {
       activeRunRef.current = savedRun;
       setInterruptedRun(savedRun);
@@ -499,8 +508,7 @@ function App() {
         ...(targetAgentId ? { agent_id: targetAgentId } : {}),
         ...(targetCreatorId ? { creator_id: targetCreatorId } : {}),
         client_version: "0.1.0",
-        workspace_root: normalizedWorkspace,
-        local_tools: localToolsForPermissionPolicy(permissionRef.current, { enableShell: shellAccessRef.current }),
+        local_tools: localToolsForPermissionPolicy(permissionRef.current),
       }));
     });
     socket.addEventListener("message", (event) => {
@@ -560,6 +568,8 @@ function App() {
       if (message.delta.kind === "text") {
         const activeRun = activeRunRef.current;
         if (!activeRun) return;
+        activeRun.timing.firstSafeDeltaReceivedAt ??= Date.now();
+        activeRun.timing.firstTextPaintAt ??= Date.now();
         activeRun.text += message.delta.content;
         appendAssistantText(activeRun.assistantId, message.delta.content);
       } else {
@@ -622,13 +632,14 @@ function App() {
     if (message.type === "turn.completed") {
       const activeRun = activeRunRef.current;
       if (activeRun) {
-        finishAssistant(
-          activeRun.assistantId,
-          message.finish_reason === "content_filter"
-            ? OUTPUT_FILTERED_COPY
-            : activeRun.text || "Done.",
-          message.finish_reason === "content_filter" ? "content_filter" : "completed"
-        );
+        activeRun.timing.turnCompletedReceivedAt = Date.now();
+        activeRun.timing.server = message.timing;
+        if (message.finish_reason === "content_filter") {
+          finishAssistant(activeRun.assistantId, OUTPUT_FILTERED_COPY, "content_filter");
+        } else {
+          finishAssistant(activeRun.assistantId, activeRun.text || "Done.", "completed");
+        }
+        saveAssistantTiming(activeRun.assistantId, activeRun.runId, activeRun.timing, Date.now());
       }
       activeRunRef.current = null;
       setProfileSetting("active_run", undefined);
@@ -660,17 +671,9 @@ function App() {
   }
 
   async function handleToolRequest(message) {
-    if (message.name === "shell.exec" && !shellAccessRef.current) {
-      sendToolDenied(message, "Shell access is disabled for this session.", "shell_disabled");
-      return;
-    }
     const isChange = CHANGE_TOOLS.includes(message.name);
-    if (permissionRef.current === PERMISSION_POLICIES.READ_ONLY && isChange) {
-      sendToolDenied(message, "This permission mode allows reads only.", "permission_denied");
-      return;
-    }
-    let approvedByUser = permissionRef.current === PERMISSION_POLICIES.ALLOW_CHANGES && isChange;
-    if (!approvedByUser && (message.approval === "ask" || requiresUserApproval(message.name, permissionRef.current))) {
+    let authorizedByDesktop = permissionRef.current === PERMISSION_POLICIES.ALLOW_CHANGES && isChange;
+    if (!authorizedByDesktop && (message.approval === "ask" || requiresUserApproval(message.name, permissionRef.current))) {
       const approved = await requestToolApproval(message);
       if (!approved) {
         upsertToolEvent({
@@ -694,12 +697,12 @@ function App() {
         });
         return;
       }
-      approvedByUser = true;
+      authorizedByDesktop = true;
     }
 
     try {
       const result = await withTimeout(
-        invokeLocalToolCall(message, approvedByUser),
+        invokeLocalToolCall(message, authorizedByDesktop),
         LOCAL_TOOL_TIMEOUT_MS,
         `Local tool timed out after ${Math.round(LOCAL_TOOL_TIMEOUT_MS / 1000)}s: ${message.name}`
       );
@@ -725,19 +728,8 @@ function App() {
     }
   }
 
-  function sendToolDenied(message, reason, code = "approval_denied") {
-    upsertToolEvent({ ...message, locality: "client", status: "failed", error: { code, message: reason } });
-    send({
-      type: "tool_call.result",
-      run_id: message.run_id,
-      tool_call_id: message.tool_call_id,
-      status: "error",
-      error: { code, message: reason }
-    });
-  }
-
-  function invokeLocalToolCall(message, approvedByUser) {
-    const request = approvedByUser ? { ...message, approval: "approved_by_user" } : message;
+  function invokeLocalToolCall(message, authorizedByDesktop) {
+    const request = authorizedByDesktop ? { ...message, approval: "approved_by_user" } : message;
     return new Promise((resolve, reject) => {
       let settled = false;
       let pollTimer;
@@ -799,53 +791,23 @@ function App() {
 
   async function switchWorkspace(nextWorkspace) {
     const normalized = await invokeTauri("ensure_workspace", { workspaceRoot: nextWorkspace.trim() });
-    if (normalized === workspaceRef.current && connectedRef.current) return;
+    if (normalized === workspace) return;
 
-    const activeRun = activeRunRef.current;
-    if (activeRun) {
-      send({ type: "turn.cancel", run_id: activeRun.runId, reason: "workspace_changed" });
-      finishAssistant(activeRun.assistantId, "Task stopped because the workspace changed.", "failed");
-      activeRunRef.current = null;
-      setProfileSetting("active_run", undefined);
-      setInterruptedRun(null);
-    }
-    disconnectRuntime();
     setWorkspace(normalized);
-    workspaceRef.current = normalized;
     setWorkspaceDraft(normalized);
     setWorkspaceGranted(true);
+    if (connectionConfigRef.current) {
+      connectionConfigRef.current.workspace = normalized;
+    }
     setProfileSetting("workspace_root", normalized);
-    setStatus("Switching workspace…");
-    await connectRuntime({ workspace: normalized, conversationId, preserveMessages: true });
+    setStatus("Workspace updated for the next turn");
   }
 
   function updatePermissionMode(nextMode) {
     if (!PERMISSION_MODES.some((mode) => mode.value === nextMode)) return;
-    const nextShellAccess = nextMode === PERMISSION_POLICIES.READ_ONLY ? false : shellAccessRef.current;
-    permissionRef.current = nextMode;
     setPermissionMode(nextMode);
-    shellAccessRef.current = nextShellAccess;
-    setShellAccess(nextShellAccess);
     setProfileSetting("permission_mode", nextMode);
-    setProfileSetting("shell_access", nextShellAccess);
-    setStatus(`Permission updated: ${permissionModeLabel(nextMode)}`);
-    void restartRuntimeSession();
-  }
-
-  function updateShellAccess(nextValue) {
-    const nextShellAccess = Boolean(nextValue) && permissionRef.current !== PERMISSION_POLICIES.READ_ONLY;
-    shellAccessRef.current = nextShellAccess;
-    setShellAccess(nextShellAccess);
-    setProfileSetting("shell_access", nextShellAccess);
-    setStatus(nextShellAccess ? "Shell access enabled — approval is still required" : "Shell access disabled");
-    void restartRuntimeSession();
-  }
-
-  async function restartRuntimeSession() {
-    const config = connectionConfigRef.current;
-    if (!config || !workspaceGranted) return;
-    disconnectRuntime();
-    await connectRuntime({ ...config, workspace: workspaceRef.current, preserveMessages: true });
+    setStatus(`Permission updated for the next turn: ${permissionModeLabel(nextMode)}`);
   }
 
   function startNewConversation() {
@@ -973,6 +935,20 @@ function App() {
         content: parts,
         status: { type: "running" }
       };
+    }));
+  }
+
+  function saveAssistantTiming(id, runId, timing, fullResponseAt) {
+    const summary = reportTurnTiming(runId, timing, fullResponseAt);
+    updateAssistantMessage(id, (message) => ({
+      ...message,
+      metadata: {
+        ...(message.metadata ?? {}),
+        custom: {
+          ...(message.metadata?.custom ?? {}),
+          turnTiming: summary
+        }
+      }
     }));
   }
 
@@ -1188,55 +1164,15 @@ function App() {
 
       <section className="chat-shell">
         <header className="chat-header">
-          <div className="chat-context-row">
-            <div className="header-agent">
-              <span className="label">Agent</span>
-              <strong>{creatorAgent.name} · {creatorAgent.creator}</strong>
-            </div>
-            <button
-              aria-label="Choose workspace folder"
-              className="workspace-selector secondary"
-              type="button"
-              onClick={() => void chooseWorkspace()}
-            >
-              <span className="workspace-selector-icon" aria-hidden="true">⌂</span>
-              <span className="workspace-selector-copy">
-                <span className="label">Workspace</span>
-                <strong>{workspaceGranted ? workspaceGrantLabel(workspace) : "Choose a folder"}</strong>
-              </span>
-              <span className="workspace-selector-action">Change</span>
-            </button>
-          </div>
-          <div className="chat-settings-row">
-            <label className="permission-control">
-              <span className="label">Permissions</span>
-              <select
-                aria-label="Workspace permissions"
-                value={permissionMode}
-                onChange={(event) => updatePermissionMode(event.target.value)}
-              >
-                {PERMISSION_MODES.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
-              </select>
-              <small>{permissionModeDetail(permissionMode)}</small>
-            </label>
-            <label className="shell-toggle">
-              <span className="label">Shell access</span>
-              <span className="shell-toggle-row">
-                <input
-                  type="checkbox"
-                  checked={shellAccess}
-                  disabled={permissionMode === PERMISSION_POLICIES.READ_ONLY}
-                  onChange={(event) => updateShellAccess(event.target.checked)}
-                />
-                <strong>{shellAccess ? "On" : "Off"}</strong>
-              </span>
-              <small>Commands always ask for approval</small>
-            </label>
+          <div className="header-agent">
+            <span className="label">Agent</span>
+            <strong>{creatorAgent.name} · {creatorAgent.creator}</strong>
           </div>
         </header>
 
         {!workspaceGranted ? (
-          <WorkspaceGrant
+          <WorkspaceOnboarding
+            creatorName={creatorAgent.creator}
             draft={workspaceDraft}
             onChoose={() => void chooseWorkspace({ activate: false })}
             onGrant={() => void grantWorkspace()}
@@ -1264,18 +1200,46 @@ function App() {
                     submitMode="enter"
                     rows={1}
                   />
-                  {running ? (
-                    <button
-                      aria-label="Stop streaming"
-                      className="send-button stop-button"
-                      type="button"
-                      onClick={() => void cancelRun()}
-                    >
-                      Stop
-                    </button>
-                  ) : (
-                    <ComposerPrimitive.Send className="send-button">Send</ComposerPrimitive.Send>
-                  )}
+                  <div className="composer-actions">
+                    <div className="composer-settings">
+                      <button
+                        aria-label="Choose workspace folder"
+                        className="composer-control workspace-composer-control"
+                        title={workspace || "Choose a workspace folder"}
+                        type="button"
+                        onClick={() => void chooseWorkspace()}
+                      >
+                        <WorkspaceIcon />
+                        <span className="composer-control-label">
+                          {workspaceGranted ? workspaceGrantLabel(workspace) : "Choose workspace"}
+                        </span>
+                        <span className="composer-control-caret" aria-hidden="true">⌄</span>
+                      </button>
+                      <label className="composer-control permission-composer-control" title={permissionModeDetail(permissionMode)}>
+                        <ShieldIcon />
+                        <select
+                          aria-label="Workspace permissions"
+                          value={permissionMode}
+                          onChange={(event) => updatePermissionMode(event.target.value)}
+                        >
+                          {PERMISSION_MODES.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
+                        </select>
+                        <span className="composer-control-caret" aria-hidden="true">⌄</span>
+                      </label>
+                    </div>
+                    {running ? (
+                      <button
+                        aria-label="Stop streaming"
+                        className="send-button stop-button"
+                        type="button"
+                        onClick={() => void cancelRun()}
+                      >
+                        Stop
+                      </button>
+                    ) : (
+                      <ComposerPrimitive.Send className="send-button">Send</ComposerPrimitive.Send>
+                    )}
+                  </div>
                 </ComposerPrimitive.Root>
               </ThreadPrimitive.ViewportFooter>
             </ThreadPrimitive.Root>
@@ -1632,7 +1596,7 @@ function EmptyThread({ connected, creatorAgent }) {
     <div className="empty-thread">
       <span className="creator-avatar large">{creatorAgent.creatorInitials}</span>
       <span className="empty-kicker">{creatorAgent.creator}</span>
-      <h2>{connected ? `What would you like to work on?` : "Your conversation is offline."}</h2>
+      <h2>{connected ? "What would you like to work on?" : "Your conversation is offline."}</h2>
       <p>
         {connected
           ? creatorAgent.description
@@ -1644,11 +1608,55 @@ function EmptyThread({ connected, creatorAgent }) {
 }
 
 function permissionModeLabel(value) {
-  return PERMISSION_MODES.find((mode) => mode.value === value)?.label || "Ask before changes";
+  return PERMISSION_MODES.find((mode) => mode.value === value)?.label || "请求批准";
 }
 
 function permissionModeDetail(value) {
-  return PERMISSION_MODES.find((mode) => mode.value === value)?.detail || "Ask before file changes";
+  return PERMISSION_MODES.find((mode) => mode.value === value)?.detail || "Shell 命令和文件变更前请求批准";
+}
+
+function WorkspaceIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20">
+      <path d="M2.75 5.75h5l1.5 1.75h8v7.25a1.5 1.5 0 0 1-1.5 1.5h-13V5.75Z" />
+      <path d="M2.75 5.75v-.5a1.5 1.5 0 0 1 1.5-1.5h3l1.5 2" />
+    </svg>
+  );
+}
+
+function ShieldIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20">
+      <path d="M10 2.5 16 5v4.75c0 3.7-2.5 6.3-6 7.75-3.5-1.45-6-4.05-6-7.75V5l6-2.5Z" />
+      <path d="M10 6.25v4" />
+      <path d="M10 13.5h.01" />
+    </svg>
+  );
+}
+
+function WorkspaceOnboarding({ creatorName, draft, onChoose, onGrant, status }) {
+  return (
+    <div className="workspace-onboarding">
+      <section className="workspace-onboarding-card">
+        <div className="workspace-onboarding-icon"><WorkspaceIcon /></div>
+        <h2>{PRODUCT_COPY.workspaceRequired}</h2>
+        <p>{creatorName}&apos;s agent only works with files inside the folder you choose.</p>
+
+        <button className={`workspace-picker ${draft ? "selected" : ""}`} type="button" onClick={onChoose}>
+          <WorkspaceIcon />
+          <span className="workspace-picker-copy">
+            <strong>{draft ? workspaceGrantLabel(draft) : "Choose a folder on this computer"}</strong>
+          </span>
+          <span className="workspace-picker-action">{draft ? "Change" : "Choose"}</span>
+        </button>
+
+        <button className="workspace-grant-button" type="button" onClick={onGrant} disabled={!draft.trim()}>
+          Start
+        </button>
+        {status && status !== "Offline" ? <small className="workspace-onboarding-status">{status}</small> : null}
+      </section>
+    </div>
+  );
 }
 
 function LaunchScreen() {
@@ -1739,38 +1747,14 @@ function SignInScreen({ onSignIn, status, error }) {
   );
 }
 
-function WorkspaceGrant({ draft, onChoose, onGrant, status }) {
-  return (
-    <div className="workspace-gate">
-      <section className="workspace-card">
-        <span className="permission-icon">⌂</span>
-        <span className="eyebrow">One-time setup</span>
-        <h2>{PRODUCT_COPY.workspaceRequired}</h2>
-        <p>{PRODUCT_COPY.readPolicy}</p>
-        <div className="field">
-          <span>Folder</span>
-          <button className={`workspace-picker ${draft ? "selected" : ""}`} type="button" onClick={onChoose}>
-            <span className="workspace-picker-path">{draft || "Choose a folder on this computer"}</span>
-            <span className="workspace-picker-action">Choose folder</span>
-          </button>
-        </div>
-        <button type="button" onClick={onGrant} disabled={!draft.trim()}>Grant access to this folder</button>
-        <div className="permission-policy">
-          <strong>You're in control</strong>
-          <span>{PRODUCT_COPY.changePolicy}</span>
-        </div>
-        {status && status !== "Offline" ? <small className="gate-status">{status}</small> : null}
-      </section>
-    </div>
-  );
-}
-
 function HatchMessage() {
   const role = useMessage((message) => message.role);
+  const status = useMessage((message) => message.status);
+  const streaming = role === "assistant" && status?.type === "running";
   return (
     <MessagePrimitive.Root className={`chat-message ${role}`}>
       {role === "assistant" ? <AssistantRunHeader /> : null}
-      <div className={`message-surface ${role}`}>
+      <div className={`message-surface ${role}${streaming ? " streaming" : ""}`}>
         <MessagePrimitive.Parts
           unstable_showEmptyOnNonTextEnd={false}
           components={{
@@ -1829,10 +1813,18 @@ function AssistantRunHeader() {
           : `Answered · ${elapsed}`;
 
   return (
-    <div className="run-summary">
-      <span className={`activity-dot ${failed ? "failed" : isRunning ? "running" : "done"}`} />
-      <span>{summary}</span>
-    </div>
+    <>
+      <div className="run-summary">
+        <span className={`activity-dot ${failed ? "failed" : isRunning ? "running" : "done"}`} />
+        <span>{summary}</span>
+      </div>
+      {custom.turnTiming ? (
+        <details className="turn-timing">
+          <summary>Timing</summary>
+          <pre>{JSON.stringify(custom.turnTiming, null, 2)}</pre>
+        </details>
+      ) : null}
+    </>
   );
 }
 
@@ -1893,6 +1885,26 @@ function isTaskCheckbox(child) {
 
 function joinClassNames(...classNames) {
   return classNames.filter(Boolean).join(" ") || undefined;
+}
+
+function reportTurnTiming(runId, timing, fullResponseAt) {
+  const sinceQuestion = (timestamp) => timestamp === undefined
+    ? undefined
+    : timestamp - timing.questionSentAt;
+  const summary = {
+    run_id: runId,
+    measured_at: new Date().toISOString(),
+    client_ms: {
+      question_to_first_safe_delta: sinceQuestion(timing.firstSafeDeltaReceivedAt),
+      question_to_first_text_paint: sinceQuestion(timing.firstTextPaintAt),
+      question_to_turn_completed: sinceQuestion(timing.turnCompletedReceivedAt),
+      question_to_full_response: sinceQuestion(fullResponseAt)
+    },
+    server_ms: timing.server
+  };
+  localStorage.setItem("hatch.debug.lastTurnTiming", JSON.stringify(summary));
+  console.info("[hatch:turn-timing]", summary);
+  return summary;
 }
 
 function AssistantEmptyText() {

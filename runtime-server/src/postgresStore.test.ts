@@ -321,7 +321,10 @@ test("Postgres visible history projects canonical terminal finish reasons", asyn
     type: "conversation.model_message",
     conversation_id: "guard-history",
     run_id: "run-guard",
-    message: { role: "assistant", content: '<runtime_status output_guard="blocked" />' },
+    message: {
+      role: "assistant",
+      content: "My previous response was blocked before delivery and was not shown to the user. I must not reproduce or continue the blocked content."
+    },
     finish_reason: "content_filter",
     timestamp: "2026-08-10T00:00:01.000Z"
   });

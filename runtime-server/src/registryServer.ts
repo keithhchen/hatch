@@ -12,7 +12,8 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   await accounts.ensureSchema();
   const publishToken = environment.HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN?.trim() || "";
   const runtimeServiceToken = environment.HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN?.trim() || "";
-  const authSecret = environment.HATCH_AUTH_SIGNING_SECRET?.trim() || "";
+  const legacyHmacEnabled = environment.HATCH_ENABLE_LEGACY_HMAC_AUTH?.trim().toLowerCase() === "true";
+  const authSecret = legacyHmacEnabled ? environment.HATCH_AUTH_SIGNING_SECRET?.trim() || "" : "";
   const server = http.createServer((request, response) => {
     void route(request, response, { store, accounts, publishToken, runtimeServiceToken, authSecret }).catch((error) => {
       sendJson(response, errorStatus(error), { detail: error instanceof Error ? error.message : String(error) });

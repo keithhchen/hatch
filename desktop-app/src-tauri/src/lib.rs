@@ -1,7 +1,7 @@
 use std::collections::HashMap;
+use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
-use std::process::Command;
 
 use hatch_local_runner::{LocalRunner, ToolCallRequest};
 use serde_json::Value;
@@ -54,10 +54,7 @@ async fn pick_workspace_folder() -> Option<String> {
 }
 
 #[tauri::command]
-fn execute_tool_call(
-    workspace_root: String,
-    request: Value,
-) -> Result<(), String> {
+fn execute_tool_call(workspace_root: String, request: Value) -> Result<(), String> {
     // Local tools belong to the Desktop, but they must not block its WebView.
     // The result is stored as a short-lived job and polled by the renderer so
     // the UI remains responsive while the bounded runner performs file work.
@@ -115,13 +112,23 @@ fn read_auth_token() -> Result<Option<String>, String> {
     #[cfg(target_os = "macos")]
     {
         let output = Command::new("/usr/bin/security")
-            .args(["find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", KEYCHAIN_ACCOUNT, "-w"])
+            .args([
+                "find-generic-password",
+                "-s",
+                KEYCHAIN_SERVICE,
+                "-a",
+                KEYCHAIN_ACCOUNT,
+                "-w",
+            ])
             .output()
             .map_err(to_string)?;
         if !output.status.success() {
             return Ok(None);
         }
-        let token = String::from_utf8(output.stdout).map_err(to_string)?.trim().to_string();
+        let token = String::from_utf8(output.stdout)
+            .map_err(to_string)?
+            .trim()
+            .to_string();
         return Ok((!token.is_empty()).then_some(token));
     }
     #[cfg(not(target_os = "macos"))]
@@ -138,7 +145,16 @@ fn write_auth_token(token: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         let status = Command::new("/usr/bin/security")
-            .args(["add-generic-password", "-U", "-s", KEYCHAIN_SERVICE, "-a", KEYCHAIN_ACCOUNT, "-w", token.trim()])
+            .args([
+                "add-generic-password",
+                "-U",
+                "-s",
+                KEYCHAIN_SERVICE,
+                "-a",
+                KEYCHAIN_ACCOUNT,
+                "-w",
+                token.trim(),
+            ])
             .status()
             .map_err(to_string)?;
         if !status.success() {
@@ -158,7 +174,13 @@ fn clear_auth_token() -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         let status = Command::new("/usr/bin/security")
-            .args(["delete-generic-password", "-s", KEYCHAIN_SERVICE, "-a", KEYCHAIN_ACCOUNT])
+            .args([
+                "delete-generic-password",
+                "-s",
+                KEYCHAIN_SERVICE,
+                "-a",
+                KEYCHAIN_ACCOUNT,
+            ])
             .status()
             .map_err(to_string)?;
         // Deleting an item that is already absent is a successful local logout.
@@ -179,7 +201,7 @@ fn read_app_settings(app: AppHandle) -> Result<String, String> {
     match std::fs::read_to_string(path) {
         Ok(value) => Ok(value),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok("{}".into()),
-        Err(error) => Err(error.to_string())
+        Err(error) => Err(error.to_string()),
     }
 }
 
@@ -209,15 +231,25 @@ fn open_external_url(url: String) -> Result<(), String> {
     let status = Command::new("cmd").args(["/C", "start", "", &url]).status();
     #[cfg(all(unix, not(target_os = "macos")))]
     let status = Command::new("xdg-open").arg(&url).status();
-    status.map_err(to_string)?.success().then_some(()).ok_or_else(|| "The system browser could not be opened".into())
+    status
+        .map_err(to_string)?
+        .success()
+        .then_some(())
+        .ok_or_else(|| "The system browser could not be opened".into())
 }
 
 fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(app.path().app_data_dir().map_err(to_string)?.join(SETTINGS_FILE))
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(to_string)?
+        .join(SETTINGS_FILE))
 }
 
 fn is_allowed_browse_url(url: &str) -> bool {
-    let Ok(parsed) = url::Url::parse(url) else { return false; };
+    let Ok(parsed) = url::Url::parse(url) else {
+        return false;
+    };
     parsed.scheme() == "https"
         && parsed.host_str() == Some("hatch.tokenquadrant.cn")
         && (parsed.path() == "/agents" || parsed.path().starts_with("/agents/"))
@@ -281,7 +313,9 @@ fn to_string(error: impl std::fmt::Display) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{default_workspace, ensure_workspace, execute_tool_call_blocking, is_allowed_browse_url};
+    use super::{
+        default_workspace, ensure_workspace, execute_tool_call_blocking, is_allowed_browse_url,
+    };
     use serde_json::json;
     use tempfile::tempdir;
 
@@ -318,11 +352,19 @@ mod tests {
 
     #[test]
     fn browse_opener_allows_only_the_hatch_catalog_origin() {
-        assert!(is_allowed_browse_url("https://hatch.tokenquadrant.cn/agents"));
-        assert!(is_allowed_browse_url("https://hatch.tokenquadrant.cn/agents/signal"));
-        assert!(!is_allowed_browse_url("https://hatch.tokenquadrant.cn/agents-redirect"));
+        assert!(is_allowed_browse_url(
+            "https://hatch.tokenquadrant.cn/agents"
+        ));
+        assert!(is_allowed_browse_url(
+            "https://hatch.tokenquadrant.cn/agents/signal"
+        ));
+        assert!(!is_allowed_browse_url(
+            "https://hatch.tokenquadrant.cn/agents-redirect"
+        ));
         assert!(!is_allowed_browse_url("https://evil.example/agents"));
-        assert!(!is_allowed_browse_url("https://hatch.tokenquadrant.cn.evil/agents"));
+        assert!(!is_allowed_browse_url(
+            "https://hatch.tokenquadrant.cn.evil/agents"
+        ));
     }
 
     #[test]
@@ -366,5 +408,47 @@ mod tests {
             std::fs::read_to_string(temp.path().join("output.txt")).unwrap(),
             "approved by the desktop user"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_shell_commands_without_desktop_policy_approval() {
+        let temp = tempdir().unwrap();
+        let error = execute_tool_call_blocking(
+            temp.path().to_string_lossy().to_string(),
+            json!({
+                "type": "tool_call.request",
+                "run_id": "run_test",
+                "tool_call_id": "call_shell_denied",
+                "name": "shell.exec",
+                "arguments": { "command": "printf denied", "timeout_ms": 30000 },
+                "approval": "auto"
+            }),
+        )
+        .unwrap_err();
+
+        assert!(error.contains("requires explicit approval"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn executes_shell_commands_after_desktop_policy_approval() {
+        let temp = tempdir().unwrap();
+        let output = execute_tool_call_blocking(
+            temp.path().to_string_lossy().to_string(),
+            json!({
+                "type": "tool_call.request",
+                "run_id": "run_test",
+                "tool_call_id": "call_shell_approved",
+                "name": "shell.exec",
+                "arguments": { "command": "printf shell-ok", "timeout_ms": 30000 },
+                "approval": "approved_by_user"
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(output["type"], "tool_call.result");
+        assert_eq!(output["status"], "ok");
+        assert_eq!(output["result"]["stdout"], "shell-ok");
     }
 }

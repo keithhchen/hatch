@@ -273,7 +273,6 @@ Keychain 读不到、被用户删除或 app 无权访问时，按“没有 sessi
       "last_selected_entitlement_id": "ent_123",
       "workspace_root": "/Users/jordan/project",
       "permission_mode": "ask-before-changes",
-      "shell_access": false,
       "conversation_id_by_entitlement": {
         "ent_123": "conversation_user_123_ent_123"
       }

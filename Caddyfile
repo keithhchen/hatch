@@ -23,7 +23,7 @@
     # TypeScript Registry APIs. Keep the public paths stable so Factory and
     # Desktop can use HATCH_REGISTRY_URL without knowing the private service
     # name. Dashboard-specific /v1/creator/products routes remain below.
-    @registry_api path /v1/agent-corpora* /v1/catalog/agents* /v1/auth/signup /v1/auth/signin /v1/auth/me /v1/user/agent-access /v1/user/agents/* /v1/creator/agents /v1/creator/agent-corpora /v1/runtime/tenants/* /v1/runtime/creators/* /v1/control-plane/connections/* /v1/creators/*
+    @registry_api path /v1/agent-corpora* /v1/catalog/agents* /v1/auth/signup /v1/auth/signin /v1/auth/me /v1/auth/logout /v1/user/agent-access /v1/user/agents/* /v1/creator/agents /v1/creator/agent-corpora /v1/runtime/tenants/* /v1/runtime/creators/* /v1/control-plane/connections/* /v1/creators/*
     handle @registry_api {
         reverse_proxy registry:8100
     }
