@@ -989,12 +989,14 @@ fn open_workspace_artifact(
 
 fn open_workspace_artifact_with_platform(path: &std::path::Path) -> Result<(), String> {
     #[cfg(target_os = "macos")]
-    let status = Command::new("/usr/bin/qlmanage")
+    return Command::new("/usr/bin/qlmanage")
         .arg("-p")
         .arg(path)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .status();
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("artifact_open_failed: {error}"));
     #[cfg(target_os = "windows")]
     return open_workspace_artifact_windows(path);
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -1004,7 +1006,7 @@ fn open_workspace_artifact_with_platform(path: &std::path::Path) -> Result<(), S
         .stderr(Stdio::null())
         .status();
 
-    #[cfg(any(target_os = "macos", all(unix, not(target_os = "macos"))))]
+    #[cfg(all(unix, not(target_os = "macos")))]
     status
         .map_err(|error| format!("artifact_open_failed: {error}"))?
         .success()

@@ -19,7 +19,7 @@ macOS 与 Windows 都是一等平台。V1 使用 Tauri 稳定支持的 Native su
 - P1：React `DesktopWindowShell`、regular/compact/minimal tier、split divider、native-like overlay、局部 table/code overflow 与 accessibility contract。
 - P2：durable Conversation/Run repository、REST/WS idempotency、active-run exclusion、restart→`interrupted`，以及 Desktop Conversation Library 的 list/create/select/rename/archive 基础接线。每个 native window 现在保存自己的 Conversation、Workspace grant、permission、active-run projection、`composerDraft` 与 snapshot cursor；context 以 account id 绑定，换账号登录时不会恢复上一账号的 Conversation、workspace 投影或草稿；profile settings 只作为旧单窗口数据的迁移 fallback，workspace onboarding 的旧 `draft` 字段不再冒充 Composer draft。Profile preference writes 使用 Native field patch，不再让多个 renderer 以整份 JSON last-writer-wins 覆盖彼此的 account/window settings。V1 的恢复边界是 observer recovery（snapshot + cursor replay）；断开或 Runtime 重启会把未完成 Run 标为 `interrupted`，不自动 reclaim、重放 tool 或伪装成 `running`。
 - P3：Tauri application/context menu、semantic command routing、focused-window new-conversation scaffold 与 window-scoped bridge。
-- P3：Artifact 的 Quick Look/Open 已接入 grant-bound native bridge；macOS 使用系统 Quick Look launcher，Windows 使用默认文件关联的 ShellExecute `open`，Unix fallback 使用 `xdg-open`。Reveal、Notifications/Dock attention 与独立 Settings/About auxiliary windows 也已接入受支持的窄 native bridge。
+- P3：Artifact 的 Quick Look/Open 已接入 grant-bound native bridge；macOS 使用非阻塞的系统 Quick Look launcher，Windows 使用默认文件关联的 ShellExecute `open`，Unix fallback 使用 `xdg-open`。Reveal、Notifications/Dock attention 与独立 Settings/About auxiliary windows 也已接入受支持的窄 native bridge。
 - 尚未宣称 P4 完成：Windows 真机、VoiceOver/Narrator、签名发布包、双屏/DPI/IME，以及 renderer/Run 层的 crash/reload attach-replay 仍需目标环境验收。Native dynamic conversation-window manifest 已支持正常退出恢复和单窗关闭清理；这不等同于正在执行 Run 的 crash recovery。
 
 macOS UAT 证据：
