@@ -1138,15 +1138,45 @@ fn checked_command_menu_item<R: Runtime>(
             definition.id
         ));
     }
-    let mut builder = CheckMenuItemBuilder::with_id(definition.id, definition.label)
-        .enabled(snapshot.command_enabled(definition.id))
-        .checked(snapshot.command_checked(definition.id).unwrap_or(false));
+    let mut builder =
+        CheckMenuItemBuilder::with_id(definition.id, checked_command_label(definition, snapshot))
+            .enabled(snapshot.command_enabled(definition.id))
+            .checked(snapshot.command_checked(definition.id).unwrap_or(false));
     if let Some(accelerator) = definition.accelerator {
         builder = builder.accelerator(accelerator);
     }
     builder
         .build(app)
         .map_err(|error| format!("native_menu_item_build_failed: {error}"))
+}
+
+fn checked_command_label<'a>(
+    definition: &'a CommandDefinition,
+    snapshot: &NativeMenuSnapshot,
+) -> &'a str {
+    match definition.id {
+        COMMAND_SIDEBAR_TOGGLE => {
+            if snapshot
+                .command_checked(COMMAND_SIDEBAR_TOGGLE)
+                .unwrap_or(false)
+            {
+                "Hide Sidebar"
+            } else {
+                "Show Sidebar"
+            }
+        }
+        COMMAND_INSPECTOR_TOGGLE => {
+            if snapshot
+                .command_checked(COMMAND_INSPECTOR_TOGGLE)
+                .unwrap_or(false)
+            {
+                "Hide Inspector"
+            } else {
+                "Show Inspector"
+            }
+        }
+        _ => definition.label,
+    }
 }
 
 fn build_command_overflow_menu<R: Runtime>(
@@ -1353,13 +1383,13 @@ fn stable_hash64(bytes: &[u8]) -> u64 {
 mod tests {
     use super::{
         app_menu_command, application_command_definition, artifact_reveal_menu_label,
-        context_menu_command, conversation_window_label, validate_context_position,
-        validate_context_target, validate_conversation_id, ConversationReservation,
-        ConversationWindowPhase, NativeCommandRouter, NativeCommandState, NativeContextMenuKind,
-        NativeContextMenuPosition, COMMAND_ABOUT_OPEN, COMMAND_CONVERSATION_NEW,
-        COMMAND_CONVERSATION_NEW_WINDOW, COMMAND_INSPECTOR_TOGGLE, COMMAND_RUN_STOP,
-        COMMAND_SETTINGS_OPEN, COMMAND_SIDEBAR_TOGGLE, COMMAND_VIEW_ZOOM_IN, COMMAND_VIEW_ZOOM_OUT,
-        COMMAND_VIEW_ZOOM_RESET, COMMAND_WORKSPACE_CHOOSE,
+        checked_command_label, context_menu_command, conversation_window_label,
+        validate_context_position, validate_context_target, validate_conversation_id,
+        ConversationReservation, ConversationWindowPhase, NativeCommandRouter, NativeCommandState,
+        NativeContextMenuKind, NativeContextMenuPosition, NativeMenuSnapshot, COMMAND_ABOUT_OPEN,
+        COMMAND_CONVERSATION_NEW, COMMAND_CONVERSATION_NEW_WINDOW, COMMAND_INSPECTOR_TOGGLE,
+        COMMAND_RUN_STOP, COMMAND_SETTINGS_OPEN, COMMAND_SIDEBAR_TOGGLE, COMMAND_VIEW_ZOOM_IN,
+        COMMAND_VIEW_ZOOM_OUT, COMMAND_VIEW_ZOOM_RESET, COMMAND_WORKSPACE_CHOOSE,
     };
 
     #[test]
@@ -1471,6 +1501,28 @@ mod tests {
             Some(("artifact.reveal", NativeContextMenuKind::Artifact))
         );
         assert_eq!(context_menu_command("unexpected"), None);
+    }
+
+    #[test]
+    fn pane_menu_labels_follow_the_native_show_hide_convention() {
+        let definition = application_command_definition(COMMAND_SIDEBAR_TOGGLE).unwrap();
+        let open = NativeMenuSnapshot {
+            has_focused_window: true,
+            state: NativeCommandState::default(),
+        };
+        assert_eq!(checked_command_label(definition, &open), "Hide Sidebar");
+
+        let closed = NativeMenuSnapshot {
+            has_focused_window: true,
+            state: NativeCommandState {
+                sidebar_visible: false,
+                inspector_visible: false,
+                ..NativeCommandState::default()
+            },
+        };
+        assert_eq!(checked_command_label(definition, &closed), "Show Sidebar");
+        let inspector = application_command_definition(COMMAND_INSPECTOR_TOGGLE).unwrap();
+        assert_eq!(checked_command_label(inspector, &closed), "Show Inspector");
     }
 
     #[test]
