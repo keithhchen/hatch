@@ -153,7 +153,7 @@ import {
   appendTimelineText,
   historyTimelineEntries,
   prependTurnActivity,
-  reconcileTimelineText,
+  terminalTimelineParts,
   toolActionLabel,
   toolDisplay,
   toolResultSummary,
@@ -2918,9 +2918,12 @@ function App() {
   function finishAssistant(id, text, statusValue) {
     setMessages((current) => current.map((message) => {
       if (message.id !== id) return message;
-      const parts = statusValue === "content_filter"
-        ? []
-        : reconcileTimelineText(assistantParts(message), text);
+      const parts = terminalTimelineParts(
+        assistantParts(message),
+        text,
+        statusValue,
+        message.metadata?.custom?.runId
+      );
       const custom = {
         ...(message.metadata?.custom ?? {}),
         status: statusValue,
