@@ -14,6 +14,7 @@ import {
   ComposerPrimitive,
   MessagePrimitive,
   ThreadPrimitive,
+  unstable_useComposerInput,
   useExternalStoreRuntime,
   useMessage
 } from "@assistant-ui/react";
@@ -197,6 +198,9 @@ function App() {
   const requestedConversationIdRef = useRef(conversationIdFromLocation());
   const conversationLibraryRequestRef = useRef(0);
   const conversationCursorRef = useRef(0);
+  const viewportRef = useRef(null);
+  const viewportScrollTopRef = useRef(0);
+  const viewportScrollPersistTimerRef = useRef(null);
   // Window context is deliberately separate from profile preferences. A
   // second Conversation window must be able to use another Conversation and
   // Workspace without last-writer-wins updates from the first window.
@@ -230,6 +234,7 @@ function App() {
   const [connected, setConnected] = useState(false);
   const [running, setRunning] = useState(false);
   const [messages, setMessages] = useState([]);
+  const [composerDraft, setComposerDraft] = useState("");
   const [approvalRequests, setApprovalRequests] = useState({});
   const [creatorAgent, setCreatorAgent] = useState(DEFAULT_CREATOR_AGENT);
   const [sidebarPreference, setSidebarPreference] = useState("open");
@@ -240,6 +245,7 @@ function App() {
   const [windowLayoutReady, setWindowLayoutReady] = useState(false);
   const [windowContextReady, setWindowContextReady] = useState(false);
   const [windowStateRestored, setWindowStateRestored] = useState(false);
+  const composerDraftRef = useRef("");
   const buyerProfile = buyerSession?.profile ?? EMPTY_PROFILE;
   const signedIn = authState === "signed-in";
 
@@ -259,6 +265,26 @@ function App() {
     windowContextRef.current = next;
     if (!window.__TAURI_INTERNALS__) return;
     void invokeTauri("patch_window_settings", { patch: { context: next } }).catch(() => {});
+  }
+
+  function setComposerDraftValue(value) {
+    const next = String(value ?? "");
+    composerDraftRef.current = next;
+    windowContextRef.current = {
+      ...windowContextRef.current,
+      composerDraft: next
+    };
+    setComposerDraft(next);
+  }
+
+  function handleViewportScroll(event) {
+    const next = Math.max(0, Number(event.currentTarget?.scrollTop) || 0);
+    viewportScrollTopRef.current = next;
+    window.clearTimeout(viewportScrollPersistTimerRef.current);
+    viewportScrollPersistTimerRef.current = window.setTimeout(() => {
+      viewportScrollPersistTimerRef.current = null;
+      patchWindowContext({ scrollTop: viewportScrollTopRef.current });
+    }, 180);
   }
 
   function getConversationId(profileId, entitlementId, fallback) {
@@ -360,6 +386,8 @@ function App() {
     setSelectedEntitlementId("");
     setCreatorAgent(DEFAULT_CREATOR_AGENT);
     setMessages([]);
+    setComposerDraftValue("");
+    viewportScrollTopRef.current = 0;
     setWorkspace("");
     setWorkspaceDraft("");
     setWorkspaceGrant(null);
@@ -625,6 +653,10 @@ function App() {
 
     const content = textFromAppendMessage(appendMessage).trim();
     if (!content) return;
+    // The Composer is a window-session draft. Once the user sends it, clear
+    // the saved draft explicitly; assistant-ui may reset its internal input
+    // without emitting a DOM change event.
+    setComposerDraftValue("");
 
     // Workspace and permission changes are pending Desktop preferences until a
     // new turn starts. The native window captures this exact snapshot before
@@ -740,6 +772,10 @@ function App() {
         workspaceGrant: normalizeWorkspaceGrant(context.workspaceGrant),
         permissionMode: context.permissionMode ? normalizePermissionPolicy(context.permissionMode) : "",
         activeRun: parseStoredJson(context.activeRun),
+        composerDraft: typeof context.composerDraft === "string" ? context.composerDraft : "",
+        scrollTop: Number.isFinite(Number(context.scrollTop))
+          ? Math.max(0, Number(context.scrollTop))
+          : 0,
         conversationCursor: Number.isFinite(Number(context.conversationCursor))
           ? Math.max(0, Number(context.conversationCursor))
           : 0
@@ -748,6 +784,9 @@ function App() {
         && requestedConversationIdRef.current !== windowContextRef.current.conversationId
         ? 0
         : windowContextRef.current.conversationCursor;
+      composerDraftRef.current = windowContextRef.current.composerDraft;
+      setComposerDraft(windowContextRef.current.composerDraft);
+      viewportScrollTopRef.current = windowContextRef.current.scrollTop;
       setWindowContextReady(true);
     }).catch(() => {
       if (!cancelled) {
@@ -789,6 +828,10 @@ function App() {
     setWorkspaceGrant(null);
     setWorkspaceDraft(savedWorkspaceGrant?.display_path || "");
     setWorkspaceDraftGrant(savedWorkspaceGrant);
+    setComposerDraftValue(typeof windowContext.composerDraft === "string" ? windowContext.composerDraft : "");
+    viewportScrollTopRef.current = Number.isFinite(Number(windowContext.scrollTop))
+      ? Math.max(0, Number(windowContext.scrollTop))
+      : 0;
     setWorkspaceGranted(false);
     setConversationId(requestedConversationIdRef.current || windowConversationId || savedConversationId);
     permissionRef.current = nextPermission;
@@ -871,9 +914,45 @@ function App() {
       permissionMode,
       draft: workspaceDraft,
       activeRun: activeRunRef.current,
-      conversationCursor: conversationCursorRef.current
+      conversationCursor: conversationCursorRef.current,
+      scrollTop: viewportScrollTopRef.current
     });
   }, [conversationId, permissionMode, signedIn, windowContextReady, windowStateRestored, workspaceDraft, workspaceGrant]);
+
+  useEffect(() => {
+    if (!windowContextReady || !windowStateRestored || !signedIn) return undefined;
+    const applyScroll = () => {
+      if (viewportRef.current) viewportRef.current.scrollTop = viewportScrollTopRef.current;
+    };
+    const frame = window.requestAnimationFrame(applyScroll);
+    return () => window.cancelAnimationFrame(frame);
+  }, [messages, signedIn, windowContextReady, windowStateRestored]);
+
+  useEffect(() => () => {
+    window.clearTimeout(viewportScrollPersistTimerRef.current);
+    viewportScrollPersistTimerRef.current = null;
+    if (windowContextReady && signedIn) {
+      patchWindowContext({ scrollTop: viewportScrollTopRef.current });
+    }
+  }, [signedIn, windowContextReady]);
+
+  // Composer text is user data, but unlike the workspace onboarding draft it
+  // belongs to the active window session. Debounce app-data writes so normal
+  // typing does not turn into one synchronous native file write per keypress;
+  // flush on teardown/beforeunload so a quick close still keeps the draft.
+  useEffect(() => {
+    if (!windowContextReady || !windowStateRestored || !signedIn) return undefined;
+    const timer = window.setTimeout(() => {
+      patchWindowContext({ composerDraft: composerDraftRef.current });
+    }, 180);
+    const flush = () => patchWindowContext({ composerDraft: composerDraftRef.current });
+    window.addEventListener("beforeunload", flush);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("beforeunload", flush);
+      flush();
+    };
+  }, [composerDraft, signedIn, windowContextReady, windowStateRestored]);
 
   // Window geometry is machine-local and intentionally separate from the
   // cloud Conversation. Rust namespaces this state by the invoking native
@@ -2328,7 +2407,11 @@ function App() {
             <NativeContextMenuContext.Provider value={showNativeContextMenu}>
               <AssistantRuntimeProvider runtime={runtime}>
                 <ThreadPrimitive.Root className="thread-root">
-                <ThreadPrimitive.Viewport className="thread-viewport">
+                <ThreadPrimitive.Viewport
+                  ref={viewportRef}
+                  className="thread-viewport"
+                  onScroll={handleViewportScroll}
+                >
                   <ThreadPrimitive.Empty>
                     <EmptyThread connected={connected} creatorAgent={creatorAgent} />
                   </ThreadPrimitive.Empty>
@@ -2336,8 +2419,13 @@ function App() {
                 </ThreadPrimitive.Viewport>
                 <ThreadPrimitive.ViewportFooter className="composer-footer">
                   <ComposerPrimitive.Root className="composer">
-                    <ComposerPrimitive.Input
+                    <DesktopComposerInput
+                      key={conversationId}
                       className="composer-input"
+                      draftKey={conversationId}
+                      initialDraft={composerDraft}
+                      ready={windowContextReady && windowStateRestored}
+                      onDraftChange={setComposerDraftValue}
                       onBlur={resetImeComposition}
                       onCompositionEnd={endImeComposition}
                       onCompositionStart={startImeComposition}
@@ -2590,6 +2678,37 @@ function ComposerControls({ droppedFiles = [], workspace, workspaceGranted, perm
         <div className="composer-overflow-menu" role="menu">{controls}</div>
       </details>
     </div>
+  );
+}
+
+/**
+ * assistant-ui owns the live composer value. This thin adapter mirrors text
+ * changes into the native per-window session and restores a draft only when
+ * the window context is ready or the active Conversation changes. It avoids
+ * passing a competing `value` prop to ComposerPrimitive.Input, which would
+ * interfere with its IME and autosize behavior.
+ */
+function DesktopComposerInput({
+  draftKey,
+  initialDraft,
+  ready,
+  onDraftChange,
+  ...props
+}) {
+  const { setText } = unstable_useComposerInput();
+  const appliedKeyRef = useRef(null);
+
+  useEffect(() => {
+    if (!ready || appliedKeyRef.current === draftKey) return;
+    appliedKeyRef.current = draftKey;
+    setText(String(initialDraft || ""));
+  }, [draftKey, initialDraft, ready, setText]);
+
+  return (
+    <ComposerPrimitive.Input
+      {...props}
+      onChange={(event) => onDraftChange?.(event.target.value)}
+    />
   );
 }
 

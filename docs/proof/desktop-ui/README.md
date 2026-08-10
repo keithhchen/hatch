@@ -4,6 +4,12 @@ These captures are macOS UAT evidence for the Tauri Hybrid shell. They are
 not a substitute for Windows, VoiceOver, Narrator, signed-package, DPI, IME,
 or multi-monitor acceptance.
 
+The regular/compact/minimal captures use the development-only `DesktopPreview`
+fixture and a sizing harness so the shell can be exercised without an account;
+they prove pane composition and structured-content behavior, not cloud
+Conversation or Run persistence. The final sign-in capture is from the built
+ad-hoc `.app`.
+
 | Capture | What it proves |
 | --- | --- |
 | `regular-1180x780.png` | Native traffic lights, integrated titlebar/toolbar, source-list sidebar, conversation surface, inspector |
@@ -30,6 +36,14 @@ the separately configured Developer ID distribution lane. Workspace picker
 calls are parented to the invoking window, and artifact Reveal accepts only a
 grant ID plus a workspace-relative path; Rust re-checks canonical containment
 before opening Finder/Explorer.
+
+The macOS accessibility tree additionally confirmed that a minimal overlay
+removes the hidden pane from the main tree, focuses its close action on open,
+and returns focus to the toolbar toggle after Escape. Window app-data now
+stores `composerDraft` and `viewport scrollTop` separately from the workspace
+onboarding draft, so a close/reopen does not discard unfinished input or the
+reading position (the persistence path is covered by renderer/native settings
+tests; a full crash/restart proof still belongs to P4).
 
 ## Native UX judgment
 

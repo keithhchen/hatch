@@ -304,6 +304,45 @@ function PaneOverlay({ id, kind, label, onClose, returnFocusRef, children }) {
     firstFocusable?.focus();
   }, []);
 
+  // Native accessibility clients can perform Tab traversal at the WebView
+  // boundary instead of bubbling a React keydown from the focused control.
+  // Capture at document level while this scope is mounted so the overlay
+  // remains a real focus trap in both browser and packaged WebView UAT.
+  useEffect(() => {
+    const handleDocumentKeyDown = (event) => {
+      const root = paneRef.current;
+      if (!root) return;
+      const active = document.activeElement;
+      const inside = root.contains(active);
+      if (event.key === "Escape" && (inside || root.getAttribute("aria-hidden") !== "true")) {
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab" || !inside) return;
+      const focusable = [...root.querySelectorAll(
+        "button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])"
+      )].filter((element) => element.getAttribute("aria-hidden") !== "true");
+      if (focusable.length === 0) {
+        event.preventDefault();
+        root.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && active === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleDocumentKeyDown, true);
+    return () => document.removeEventListener("keydown", handleDocumentKeyDown, true);
+  }, [onClose]);
+
   return (
     <div className={`desktop-pane-overlay ${kind}`} role="presentation">
       <button className="desktop-overlay-scrim" aria-label={`Close ${label}`} type="button" onClick={onClose} />
@@ -314,6 +353,7 @@ function PaneOverlay({ id, kind, label, onClose, returnFocusRef, children }) {
         aria-label={label}
         role="dialog"
         aria-modal="true"
+        tabIndex={-1}
         onKeyDown={(event) => {
           if (event.key === "Escape") {
             event.preventDefault();

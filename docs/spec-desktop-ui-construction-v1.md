@@ -17,7 +17,7 @@ macOS 与 Windows 都是一等平台。V1 使用 Tauri 稳定支持的 Native su
 
 - P0：debug/ad-hoc/UAT session 只使用进程内 token；macOS 正式签名包进入受 Developer ID / Team ID 约束的 Keychain。Windows 的 Win32 Generic Credential Manager 不具备 app identity ACL，当前明确 fail-closed，待 MSIX/AppContainer Credential Locker backend；Rust 持有 Workspace/approval authority。
 - P1：React `DesktopWindowShell`、regular/compact/minimal tier、split divider、native-like overlay、局部 table/code overflow 与 accessibility contract。
-- P2：durable Conversation/Run repository、REST/WS idempotency、active-run exclusion、restart→`interrupted`，以及 Desktop Conversation Library 的 list/create/select/rename/archive 基础接线。每个 native window 现在保存自己的 Conversation、Workspace grant、permission、active-run projection 与 snapshot cursor；profile settings 只作为旧单窗口数据的迁移 fallback。V1 的恢复边界是 observer recovery（snapshot + cursor replay）；断开或 Runtime 重启会把未完成 Run 标为 `interrupted`，不自动 reclaim、重放 tool 或伪装成 `running`。
+- P2：durable Conversation/Run repository、REST/WS idempotency、active-run exclusion、restart→`interrupted`，以及 Desktop Conversation Library 的 list/create/select/rename/archive 基础接线。每个 native window 现在保存自己的 Conversation、Workspace grant、permission、active-run projection、`composerDraft` 与 snapshot cursor；profile settings 只作为旧单窗口数据的迁移 fallback，workspace onboarding 的旧 `draft` 字段不再冒充 Composer draft。V1 的恢复边界是 observer recovery（snapshot + cursor replay）；断开或 Runtime 重启会把未完成 Run 标为 `interrupted`，不自动 reclaim、重放 tool 或伪装成 `running`。
 - P3：Tauri application/context menu、semantic command routing、focused-window new-conversation scaffold 与 window-scoped bridge。
 - P3 尚未完整交付的系统集成：Quick Look/Open；Reveal、Notifications/Dock attention 与独立 Settings/About auxiliary windows 已接入受支持的窄 native bridge。
 - 尚未宣称 P4 完成：Windows 真机、VoiceOver/Narrator、签名发布包、双屏/DPI/IME 和完整 multi-window recovery 仍需目标环境验收。
@@ -80,7 +80,7 @@ V1 的 DesktopShell 由 React 实现，但必须遵守桌面 layout 与 interact
 | Opaque session token | OS credential vault | macOS 正式签名包使用 Developer-ID-gated Keychain；Windows 在 MSIX/AppContainer Credential Locker 实现并验收前只使用进程内 session。dev 与 ad-hoc UAT 始终使用进程内 session，token 使用期间驻留 memory |
 | Workspace Authorization | Rust | 当前 window/conversation 对应的、由 Native picker/drop 选中的 authoritative root 与 capability |
 | Conversation 本机偏好 | Native app-data | Workspace reference、permission、shell policy 等机器相关且非敏感的本地关联 |
-| Window Session | Native app-data / SQLite | window ID、conversation ID、bounds、zoom、sidebar、inspector、draft、scroll cursor |
+| Window Session | Native app-data / SQLite | window ID、conversation ID、bounds、zoom、sidebar、inspector、composerDraft、conversation cursor、viewport scrollTop |
 | 瞬时 view state | 当前 renderer | IME composition、selection、popover 等不应恢复的 UI 状态 |
 
 ## 产品层级
