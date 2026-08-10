@@ -1,7 +1,7 @@
 import "dotenv/config";
 
 import http from "node:http";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
 import { ZodError } from "zod";
@@ -19,6 +19,17 @@ import { ServerToolExecutor } from "./serverTools.js";
 import { SkillRuntime } from "./skillRuntime.js";
 import { RuntimeStore } from "./store.js";
 import { PostgresStore } from "./postgresStore.js";
+import {
+  assertConversationBinding,
+  ConversationRepositoryError,
+  FileConversationRepository,
+  PostgresConversationRepository,
+  type ConversationBinding,
+  type ConversationJournalEvent,
+  type ConversationRepository,
+  type ConversationRecord,
+  type ConversationRunRecord
+} from "./conversationRepository.js";
 import { ToolBridge } from "./toolBridge.js";
 import {
   EntitlementError,
@@ -67,6 +78,8 @@ export const MAX_RUNTIME_WEBSOCKET_PAYLOAD_BYTES = 5 * 1024 * 1024;
 export type RuntimeServerOptions = {
   createRuntime?: () => AgentRuntime;
   conversationStore?: RuntimeStore;
+  /** Durable Conversation/Run control-plane. Defaults to Postgres or local app-data. */
+  conversationRepository?: ConversationRepository;
   entitlementResolver?: EntitlementResolver;
   /** Production identity verifier owned by the Registry. */
   authIdentityResolver?: AuthIdentityResolver;
@@ -523,8 +536,12 @@ function combineCapacityReleases(...releases: Array<() => void>): () => void {
   };
 }
 
+type ActiveRunControl = {
+  cancel: (reason: string) => Promise<void>;
+};
 export function createRuntimeServer(options: RuntimeServerOptions = {}): RuntimeServer {
   const activeConversationRuns = new Map<string, string>();
+  const activeRunControls = new Map<string, ActiveRunControl>();
   const connectionTasks = new Set<Promise<void>>();
   const createRuntime = options.createRuntime ?? createAgentRuntime;
   const entitlementResolver = options.entitlementResolver;
@@ -598,6 +615,11 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     throw new Error("maxActiveRunsPerConnection must be a positive safe integer");
   }
   const conversationStore = options.conversationStore ?? createConversationStore();
+  const conversationRepository = options.conversationRepository ?? createConversationRepository(conversationStore);
+  // A restart never silently resumes a tool-effecting run. The durable status
+  // becomes Interrupted before a new socket can create a replacement run.
+  const repositoryReady = conversationRepository.initialize()
+    .then(() => conversationRepository.interruptActiveRuns("Runtime restarted before the executor lease was reclaimed."));
   const outputGuard = options.outputGuard ?? new PassThroughOutputGuard();
   const httpRequestGate = new CapacityGate(
     options.maxHttpRequestsGlobal ?? 64,
@@ -673,7 +695,10 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       authIdentityResolver,
       legacyHmacAuth,
       requestAbortController.signal,
-      maxHttpResponseBytes
+      maxHttpResponseBytes,
+      conversationRepository,
+      repositoryReady,
+      activeRunControls
     );
     void requestTask.catch((error) => {
       if (!res.destroyed && !res.writableEnded) handleHttpRequestFailure(res, error);
@@ -725,7 +750,10 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       helloTimeoutMs,
       connectionHeartbeatMs,
       connectionIdleTimeoutMs,
+      activeRunControls,
       conversationStore,
+      conversationRepository,
+      repositoryReady,
       createRuntime,
       entitlementResolver,
       agentCorpusResolver,
@@ -756,6 +784,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
       await Promise.allSettled([...connectionTasks]);
       await conversationStore.close();
+      await conversationRepository.close();
     }
   };
 }
@@ -769,7 +798,10 @@ async function handleHttpRequest(
   authIdentityResolver?: AuthIdentityResolver,
   legacyHmacAuth: LegacyHmacAuth = { enabled: false },
   signal?: AbortSignal,
-  maxHttpResponseBytes = 8 * 1024 * 1024
+  maxHttpResponseBytes = 8 * 1024 * 1024,
+  conversationRepository?: ConversationRepository,
+  repositoryReady?: Promise<unknown>,
+  activeRunControls?: Map<string, ActiveRunControl>
 ): Promise<void> {
   setCorsHeaders(res);
   if (req.method === "OPTIONS") {
@@ -868,6 +900,33 @@ async function handleHttpRequest(
     return;
   }
 
+  if (url.pathname === "/v1/conversations" || url.pathname.startsWith("/v1/conversations/")) {
+    if (!conversationRepository) {
+      writeJson(res, 503, { error: { code: "conversation_repository_unavailable", message: "Conversation storage is unavailable." } });
+      return;
+    }
+    try {
+      await repositoryReady;
+      await handleConversationHttpRequest(
+        req,
+        res,
+        url,
+        conversationRepository,
+        conversationStore,
+        entitlementResolver,
+        agentCorpusResolver,
+        authIdentityResolver,
+        legacyHmacAuth,
+        signal,
+        activeRunControls,
+        maxHttpResponseBytes
+      );
+    } catch (error) {
+      writeConversationHttpError(res, error);
+    }
+    return;
+  }
+
   const match = url.pathname.match(/^\/conversations\/([^/]+)\/messages$/);
   if (req.method === "GET" && match) {
     const conversationId = decodeURIComponent(match[1] ?? "");
@@ -891,11 +950,18 @@ async function handleHttpRequest(
       return;
     }
     const store = conversationStore ?? createConversationStore();
-    const storageConversationId = scopedConversationId(binding, conversationId);
-    const messages = sanitizeBoundHistory(
-      await store.readVisibleConversation(storageConversationId),
-      binding.agentId
-    );
+    const durableHistoryId = durableConversationId(binding, conversationId);
+    const durableMessages = await store.readVisibleConversation(durableHistoryId);
+    // Keep old Desktop builds readable during the migration from the
+    // corpus-digest-scoped transcript key. New WS runs always write to the
+    // durable identity so an Agent Corpus update cannot orphan history.
+    const legacyHistoryId = scopedConversationId(binding, conversationId);
+    const storageConversationId = durableMessages.length > 0 || durableHistoryId === legacyHistoryId
+      ? durableHistoryId
+      : legacyHistoryId;
+    const messages = durableMessages.length > 0 || durableHistoryId === legacyHistoryId
+      ? durableMessages
+      : await store.readVisibleConversation(legacyHistoryId);
     const historyTruncated = typeof (store as RuntimeStore & {
       visibleConversationTruncated?: (id: string) => Promise<boolean>;
     }).visibleConversationTruncated === "function"
@@ -908,7 +974,10 @@ async function handleHttpRequest(
       product_id: binding.productId,
       creator_id: binding.creatorId,
       agent_id: binding.agentId,
-      messages,
+      messages: sanitizeBoundHistory(
+        messages,
+        binding.agentId
+      ),
       history_truncated: historyTruncated
     }, maxHttpResponseBytes);
     return;
@@ -918,9 +987,396 @@ async function handleHttpRequest(
   res.end("not found");
 }
 
+class ConversationHttpError extends Error {
+  constructor(readonly status: number, readonly code: string, message: string) {
+    super(message);
+    this.name = "ConversationHttpError";
+  }
+}
+
+/**
+ * HTTP is the durable Library/read model. The WebSocket remains the executor
+ * transport for a run, but both paths use the same repository and binding.
+ * This makes renderer reload/reconnect recovery possible without treating the
+ * transcript event log as a control-plane database.
+ */
+async function handleConversationHttpRequest(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  url: URL,
+  repository: ConversationRepository,
+  store: RuntimeStore | undefined,
+  entitlementResolver: EntitlementResolver | undefined,
+  agentCorpusResolver: AgentCorpusResolver | undefined,
+  authIdentityResolver: AuthIdentityResolver | undefined,
+  legacyHmacAuth: LegacyHmacAuth,
+  signal: AbortSignal | undefined,
+  activeRunControls: Map<string, ActiveRunControl> | undefined,
+  maxHttpResponseBytes: number
+): Promise<void> {
+  const binding = await requireConversationBinding(
+    req,
+    url,
+    entitlementResolver,
+    agentCorpusResolver,
+    authIdentityResolver,
+    legacyHmacAuth,
+    signal
+  );
+  const repoBinding = conversationBinding(binding);
+  const writeResponse = (status: number, body: unknown) => writeJsonBounded(res, status, body, maxHttpResponseBytes);
+
+  if (url.pathname === "/v1/conversations") {
+    if (req.method === "GET") {
+      const status = parseConversationStatus(url.searchParams.get("status"));
+      const limit = parsePositiveInteger(url.searchParams.get("limit"), "limit", 100);
+      const page = await repository.listConversations(repoBinding, {
+        ...(status ? { status } : {}),
+        ...(url.searchParams.get("cursor") ? { cursor: url.searchParams.get("cursor")! } : {}),
+        ...(limit ? { limit } : {})
+      });
+      writeResponse(200, {
+        conversations: page.conversations.map(publicConversation),
+        ...(page.nextCursor ? { next_cursor: page.nextCursor } : {})
+      });
+      return;
+    }
+    if (req.method === "POST") {
+      const body = await readJsonObject(req);
+      rejectUnknownFields(body, ["title", "client_request_id"]);
+      const title = optionalString(body, "title", 500);
+      const clientRequestId = optionalString(body, "client_request_id", 256);
+      const publicId = `conv_${randomUUID().replaceAll("-", "")}`;
+      const created = await repository.createConversation({
+        ...repoBinding,
+        id: durableConversationId(binding, publicId),
+        publicId,
+        ...(title ? { title } : {}),
+        ...(clientRequestId ? { clientRequestId } : {})
+      });
+      writeResponse(created.created ? 201 : 200, { conversation: publicConversation(created.conversation), created: created.created });
+      return;
+    }
+    throw new ConversationHttpError(405, "method_not_allowed", "Use GET or POST for /v1/conversations.");
+  }
+
+  const conversationMatch = url.pathname.match(/^\/v1\/conversations\/([^/]+)$/);
+  if (conversationMatch) {
+    const resolved = await requireBoundConversation(repository, binding, decodeURIComponent(conversationMatch[1] ?? ""));
+    if (req.method === "GET") {
+      writeResponse(200, { conversation: publicConversation(resolved) });
+      return;
+    }
+    if (req.method === "PATCH") {
+      const body = await readJsonObject(req);
+      rejectUnknownFields(body, ["title", "status", "version"]);
+      const title = body.title === null ? null : optionalString(body, "title", 500);
+      const status = body.status === undefined ? undefined : parseConversationStatus(valueString(body, "status"));
+      const expectedVersion = body.version === undefined ? undefined : positiveIntegerValue(body.version, "version", Number.MAX_SAFE_INTEGER);
+      if (body.title === undefined && body.status === undefined) {
+        throw new ConversationHttpError(400, "metadata_required", "Provide title or status when updating a conversation.");
+      }
+      const updated = await repository.updateConversation(resolved.id, {
+        ...(body.title !== undefined ? { title } : {}),
+        ...(status ? { status } : {}),
+        ...(expectedVersion ? { expectedVersion } : {})
+      });
+      writeResponse(200, { conversation: publicConversation(updated) });
+      return;
+    }
+    throw new ConversationHttpError(405, "method_not_allowed", "Use GET or PATCH for a conversation.");
+  }
+
+  const snapshotMatch = url.pathname.match(/^\/v1\/conversations\/([^/]+)\/(snapshot|events)$/);
+  if (snapshotMatch && req.method === "GET") {
+    const conversation = await requireBoundConversation(repository, binding, decodeURIComponent(snapshotMatch[1] ?? ""));
+    const afterCursor = parseNonNegativeInteger(url.searchParams.get("after_cursor"), "after_cursor");
+    const snapshot = await repository.snapshot(conversation.id, afterCursor ?? 0);
+    const eventResponse = snapshot.events.map(publicJournalEvent);
+    if (snapshotMatch[2] === "events") {
+      writeResponse(200, { conversation_id: conversation.publicId, events: eventResponse, cursor: snapshot.cursor });
+      return;
+    }
+    const messages = store
+      ? sanitizeBoundHistory(await store.readVisibleConversation(conversation.id), binding.agentId)
+      : [];
+    writeResponse(200, {
+      conversation: publicConversation(snapshot.conversation),
+      runs: snapshot.runs.map(publicRun),
+      messages,
+      events: eventResponse,
+      cursor: snapshot.cursor
+    });
+    return;
+  }
+
+  const runsMatch = url.pathname.match(/^\/v1\/conversations\/([^/]+)\/runs$/);
+  if (runsMatch) {
+    const conversation = await requireBoundConversation(repository, binding, decodeURIComponent(runsMatch[1] ?? ""));
+    if (req.method === "GET") {
+      writeResponse(200, { conversation_id: conversation.publicId, runs: (await repository.listRuns(conversation.id)).map(publicRun) });
+      return;
+    }
+    if (req.method === "POST") {
+      const body = await readJsonObject(req);
+      rejectUnknownFields(body, ["client_message_id"]);
+      const clientMessageId = requiredString(body, "client_message_id", 256);
+      const created = await repository.createRun({
+        id: `run_${randomUUID().replaceAll("-", "")}`,
+        conversationId: conversation.id,
+        clientMessageId,
+        corpusDigest: binding.corpusDigest
+      });
+      writeResponse(created.created ? 201 : 200, {
+        run: publicRun(created.run),
+        created: created.created,
+        // A WebSocket executor attach/reclaim endpoint is intentionally not
+        // implied by this reservation. It must explicitly own the executor
+        // lease and never infer permission to replay a pending tool call.
+        executor_attached: false
+      });
+      return;
+    }
+    throw new ConversationHttpError(405, "method_not_allowed", "Use GET or POST for runs.");
+  }
+
+  const runMatch = url.pathname.match(/^\/v1\/conversations\/([^/]+)\/runs\/([^/]+)(?:\/(cancel))?$/);
+  if (runMatch) {
+    const conversation = await requireBoundConversation(repository, binding, decodeURIComponent(runMatch[1] ?? ""));
+    const runId = decodeURIComponent(runMatch[2] ?? "");
+    if (runMatch[3] === "cancel" && req.method === "POST") {
+      const body = await readJsonObject(req);
+      rejectUnknownFields(body, ["reason"]);
+      const reason = optionalString(body, "reason", 500) ?? "Run cancelled";
+      const control = activeRunControls?.get(runControlKey(conversation.id, runId));
+      if (control) {
+        await control.cancel(reason);
+      } else {
+        await repository.transitionRun(runId, "cancelled", reason);
+      }
+      const run = await repository.getRun(conversation.id, runId);
+      if (!run) throw new ConversationHttpError(404, "run_not_found", `Run ${runId} was not found.`);
+      writeResponse(200, { run: publicRun(run) });
+      return;
+    }
+    if (!runMatch[3] && req.method === "GET") {
+      const run = await repository.getRun(conversation.id, runId);
+      if (!run) throw new ConversationHttpError(404, "run_not_found", `Run ${runId} was not found.`);
+      writeResponse(200, { run: publicRun(run) });
+      return;
+    }
+    throw new ConversationHttpError(405, "method_not_allowed", "Use GET for a run or POST for /cancel.");
+  }
+
+  throw new ConversationHttpError(404, "not_found", "Conversation route was not found.");
+}
+
+async function requireConversationBinding(
+  req: http.IncomingMessage,
+  url: URL,
+  entitlementResolver?: EntitlementResolver,
+  agentCorpusResolver?: AgentCorpusResolver,
+  authIdentityResolver?: AuthIdentityResolver,
+  legacyHmacAuth: LegacyHmacAuth = { enabled: false },
+  signal?: AbortSignal
+): Promise<SessionBinding> {
+  try {
+    const binding = await bindingFromHistoryRequest(
+      req,
+      url,
+      entitlementResolver,
+      agentCorpusResolver,
+      authIdentityResolver,
+      legacyHmacAuth,
+      signal
+    );
+    if (!binding) throw new ConversationHttpError(400, "binding_required", "A signed-in Creator Agent binding is required.");
+    return binding;
+  } catch (error) {
+    if (error instanceof ConversationHttpError) throw error;
+    throw new ConversationHttpError(403, "entitlement_required", errorMessage(error));
+  }
+}
+
+async function requireBoundConversation(
+  repository: ConversationRepository,
+  binding: SessionBinding,
+  publicId: string
+) {
+  if (!publicId) throw new ConversationHttpError(400, "conversation_id_required", "A conversation ID is required.");
+  const conversation = await repository.getConversation(durableConversationId(binding, publicId));
+  if (!conversation) throw new ConversationHttpError(404, "conversation_not_found", `Conversation ${publicId} was not found.`);
+  try {
+    assertConversationBinding(conversation, conversationBinding(binding));
+  } catch (error) {
+    if (error instanceof ConversationRepositoryError) {
+      throw new ConversationHttpError(403, error.code, error.message);
+    }
+    throw error;
+  }
+  return conversation;
+}
+
+function conversationBinding(binding: SessionBinding): ConversationBinding {
+  if (!binding.explicit) {
+    // Resolver-free mode is an intentionally local fixture mode. It preserves
+    // the historic raw conversation-id behavior across local installations;
+    // production bindings always use the server-verified values below.
+    return {
+      ownerAccountId: "local-development",
+      creatorId: "local-development",
+      agentId: "local-agent",
+      productId: "local-product",
+      corpusDigest: binding.corpusDigest
+    };
+  }
+  return {
+    // Product mode always keeps the verified account as the owner.
+    ownerAccountId: binding.userId,
+    creatorId: binding.creatorId,
+    agentId: binding.agentId,
+    productId: binding.productId,
+    corpusDigest: binding.corpusDigest
+  };
+}
+
+function publicConversation(conversation: ConversationRecord): Record<string, unknown> {
+  return {
+    id: conversation.publicId,
+    creator_id: conversation.creatorId,
+    agent_id: conversation.agentId,
+    product_id_at_creation: conversation.productIdAtCreation,
+    ...(conversation.title ? { title: conversation.title } : {}),
+    status: conversation.status,
+    created_at: conversation.createdAt,
+    updated_at: conversation.updatedAt,
+    version: conversation.version
+  };
+}
+
+function publicRun(run: ConversationRunRecord): Record<string, unknown> {
+  return {
+    id: run.id,
+    client_message_id: run.clientMessageId,
+    status: run.status,
+    corpus_digest: run.corpusDigest,
+    created_at: run.createdAt,
+    ...(run.startedAt ? { started_at: run.startedAt } : {}),
+    ...(run.completedAt ? { completed_at: run.completedAt } : {}),
+    ...(run.interruptedReason ? { interrupted_reason: run.interruptedReason } : {})
+  };
+}
+
+function publicJournalEvent(event: ConversationJournalEvent): Record<string, unknown> {
+  return {
+    cursor: event.cursor,
+    ...(event.runId ? { run_id: event.runId } : {}),
+    type: event.type,
+    payload: event.payload,
+    created_at: event.createdAt
+  };
+}
+
+function parseConversationStatus(value: string | null): "active" | "archived" | undefined {
+  if (value === null || value === "") return undefined;
+  if (value === "active" || value === "archived") return value;
+  throw new ConversationHttpError(400, "invalid_status", "status must be active or archived.");
+}
+
+function parsePositiveInteger(value: string | null, field: string, max: number): number | undefined {
+  if (value === null || value === "") return undefined;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > max) {
+    throw new ConversationHttpError(400, "invalid_request", `${field} must be an integer between 1 and ${max}.`);
+  }
+  return parsed;
+}
+
+function parseNonNegativeInteger(value: string | null, field: string): number | undefined {
+  if (value === null || value === "") return undefined;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > Number.MAX_SAFE_INTEGER) {
+    throw new ConversationHttpError(400, "invalid_request", `${field} must be a non-negative integer.`);
+  }
+  return parsed;
+}
+
+async function readJsonObject(req: http.IncomingMessage): Promise<Record<string, unknown>> {
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of req) {
+    const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    total += value.byteLength;
+    if (total > 1_048_576) throw new ConversationHttpError(413, "request_too_large", "Conversation request body is limited to 1 MiB.");
+    chunks.push(value);
+  }
+  if (chunks.length === 0) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    throw new ConversationHttpError(400, "invalid_json", "Request body must be JSON.");
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new ConversationHttpError(400, "invalid_json", "Request body must be a JSON object.");
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function valueString(body: Record<string, unknown>, field: string): string {
+  const value = body[field];
+  if (typeof value !== "string") throw new ConversationHttpError(400, "invalid_request", `${field} must be a string.`);
+  return value;
+}
+
+function optionalString(body: Record<string, unknown>, field: string, maxLength: number): string | undefined {
+  if (body[field] === undefined) return undefined;
+  const value = valueString(body, field).trim();
+  if (value.length === 0 || value.length > maxLength) {
+    throw new ConversationHttpError(400, "invalid_request", `${field} must contain 1 to ${maxLength} characters.`);
+  }
+  return value;
+}
+
+function requiredString(body: Record<string, unknown>, field: string, maxLength: number): string {
+  const value = optionalString(body, field, maxLength);
+  if (!value) throw new ConversationHttpError(400, "invalid_request", `${field} is required.`);
+  return value;
+}
+
+function positiveIntegerValue(value: unknown, field: string, max: number): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1 || value > max) {
+    throw new ConversationHttpError(400, "invalid_request", `${field} must be a positive integer.`);
+  }
+  return value;
+}
+
+function rejectUnknownFields(body: Record<string, unknown>, allowed: string[]): void {
+  const unexpected = Object.keys(body).filter((key) => !allowed.includes(key));
+  if (unexpected.length > 0) {
+    throw new ConversationHttpError(400, "invalid_request", `Unsupported field${unexpected.length > 1 ? "s" : ""}: ${unexpected.join(", ")}.`);
+  }
+}
+
+function writeConversationHttpError(res: http.ServerResponse, error: unknown): void {
+  if (error instanceof ConversationHttpError) {
+    writeJson(res, error.status, { error: { code: error.code, message: error.message } });
+    return;
+  }
+  if (error instanceof ConversationRepositoryError) {
+    const status = error.code === "conversation_not_found" || error.code === "run_not_found" ? 404
+      : error.code === "conversation_busy" || error.code === "version_conflict" ? 409
+        : error.code === "conversation_binding_mismatch" ? 403
+          : 400;
+    writeJson(res, status, { error: { code: error.code, message: error.message } });
+    return;
+  }
+  writeJson(res, 500, { error: { code: "conversation_request_failed", message: errorMessage(error) } });
+}
+
 function setCorsHeaders(res: http.ServerResponse): void {
   res.setHeader("access-control-allow-origin", "*");
-  res.setHeader("access-control-allow-methods", "GET, OPTIONS");
+  res.setHeader("access-control-allow-methods", "GET, POST, PATCH, OPTIONS");
   res.setHeader("access-control-allow-headers", "authorization, content-type");
 }
 
@@ -985,6 +1441,15 @@ function createConversationStore(environment: NodeJS.ProcessEnv = process.env): 
     : new RuntimeStore(environment.HATCH_RUNTIME_DATA_DIR ?? path.resolve(".hatch-runtime"));
 }
 
+function createConversationRepository(store: RuntimeStore): ConversationRepository {
+  if (store instanceof PostgresStore) {
+    // Share the existing pool so the transcript projection and durable
+    // Conversation control-plane use one Runtime database lifecycle.
+    return new PostgresConversationRepository({ pool: store.pool });
+  }
+  return new FileConversationRepository(store.dataDirectory);
+}
+
 function writeJson(res: http.ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "content-type": "application/json" });
   res.end(JSON.stringify(body));
@@ -1013,6 +1478,10 @@ function writeJsonBounded(
   res.end(serialized);
 }
 
+function runControlKey(conversationId: string, runId: string): string {
+  return `${conversationId}\u0000${runId}`;
+}
+
 function releaseConversationRun(
   activeConversationRuns: Map<string, string>,
   conversationId: string,
@@ -1038,7 +1507,10 @@ async function handleRuntimeSocket(
   helloTimeoutMs: number,
   connectionHeartbeatMs: number,
   connectionIdleTimeoutMs: number,
+  activeRunControls: Map<string, ActiveRunControl>,
   store: RuntimeStore,
+  conversationRepository: ConversationRepository,
+  repositoryReady: Promise<unknown>,
   createRuntime: () => AgentRuntime,
   entitlementResolver?: EntitlementResolver,
   agentCorpusResolver?: AgentCorpusResolver,
@@ -1374,20 +1846,20 @@ async function handleRuntimeSocket(
             return;
           }
           cancellingRunIds.add(message.run_id);
-          activeRunAbortControllers.get(message.run_id)?.abort(new Error(message.reason ?? "Run canceled"));
-          const brokerCancellation = broker.cancelRun(message.run_id, message.reason ?? "Run canceled");
+          const reason = message.reason ?? "Run canceled";
+          activeRunAbortControllers.get(message.run_id)?.abort(new Error(reason));
+          const control = activeRunControls.get(runControlKey(state.conversationId, message.run_id));
           try {
-            await state.cancel(message.reason ?? "Run canceled").catch(() => undefined);
-            await activeSkillRuntimes.get(message.run_id)?.cancelParentRun(message.run_id).catch(() => undefined);
-            await brokerCancellation;
-            await send({
-              type: "turn.failed",
-              run_id: message.run_id,
-              error: {
-                code: "run_cancelled",
-                message: message.reason ?? "Run canceled"
-              }
-            });
+            if (control) {
+              await control.cancel(reason);
+            } else {
+              // Defensive fallback for the tiny interval while a newly-created
+              // run is being registered with the process-local control map.
+              await state.cancel(reason).catch(() => undefined);
+              await activeSkillRuntimes.get(message.run_id)?.cancelParentRun(message.run_id);
+              await broker.cancelRun(message.run_id, reason);
+              await send({ type: "turn.failed", run_id: message.run_id, error: { code: "run_cancelled", message: reason } });
+            }
           } finally {
             cancellingRunIds.delete(message.run_id);
             if (!activeRunStates.has(message.run_id)) reservedRunIds.delete(message.run_id);
@@ -1407,7 +1879,25 @@ async function handleRuntimeSocket(
             });
             return;
           }
-          const storageConversationId = binding.explicit ? scopedConversationId(binding, message.conversation_id) : message.conversation_id;
+          // Durable identity deliberately excludes corpus_digest: an Agent
+          // update must not orphan an existing Account/Creator/Agent thread.
+          const storageConversationId = binding.explicit
+            ? durableConversationId(binding, message.conversation_id)
+            : message.conversation_id;
+          const clientMessageId = message.client_message_id ?? message.run_id;
+          if (reservedRunIds.has(message.run_id) || activeConversationRuns.has(storageConversationId)) {
+            await repositoryReady;
+            const existing = await conversationRepository.getRunByClientMessageId(storageConversationId, clientMessageId);
+            if (existing) {
+              await send({
+                type: "turn.state",
+                run_id: existing.id,
+                status: existing.status,
+                reason: "Idempotent client message replay"
+              });
+              return;
+            }
+          }
           if (reservedRunIds.has(message.run_id)) {
             await send({
               type: "turn.failed",
@@ -1599,10 +2089,57 @@ async function handleRuntimeSocket(
           pendingAuthorization.detachConnectionAbort();
           pendingAuthorization.releaseAuthorizationCapacity();
           if (authorizationSlotRunId === message.run_id) authorizationSlotRunId = undefined;
+
+          let durableRun: { run: ConversationRunRecord; created: boolean };
+          try {
+            await repositoryReady;
+            await conversationRepository.createConversation({
+              ...conversationBinding(binding),
+              id: storageConversationId,
+              publicId: message.conversation_id
+            });
+            durableRun = await conversationRepository.createRun({
+              id: message.run_id,
+              conversationId: storageConversationId,
+              // Existing clients use run_id as their stable retry key until
+              // they send client_message_id from this protocol extension.
+              clientMessageId,
+              corpusDigest: binding.corpusDigest,
+              executorId: hello.installation_id,
+              executorLeaseExpiresAt: new Date(Date.now() + 5 * 60_000).toISOString()
+            });
+          } catch (error) {
+            releaseConversationRun(activeConversationRuns, storageConversationId, message.run_id);
+            reservedRunIds.delete(message.run_id);
+            pendingAuthorization.releaseActiveRunCapacity();
+            if (error instanceof ConversationRepositoryError && error.code === "conversation_busy") {
+              await send({
+                type: "turn.failed",
+                run_id: message.run_id,
+                error: { code: "conversation_busy", message: error.message }
+              });
+              return;
+            }
+            throw error;
+          }
+          if (!durableRun.created) {
+            releaseConversationRun(activeConversationRuns, storageConversationId, message.run_id);
+            reservedRunIds.delete(message.run_id);
+            pendingAuthorization.releaseActiveRunCapacity();
+            await send({
+              type: "turn.state",
+              run_id: durableRun.run.id,
+              status: durableRun.run.status,
+              reason: "Idempotent client message replay"
+            });
+            return;
+          }
+
           const boundMessage: RunStart = { ...message, conversation_id: storageConversationId };
           const runAbortController = new AbortController();
           activeRunAbortControllers.set(message.run_id, runAbortController);
           const state = new RunStateMachine(message.run_id, storageConversationId, store, async (status, reason) => {
+            await conversationRepository.transitionRun(message.run_id, status, reason);
             await send({
               type: "turn.state",
               run_id: message.run_id,
@@ -1611,14 +2148,28 @@ async function handleRuntimeSocket(
             });
           });
           activeRunStates.set(message.run_id, state);
+          const cancelActiveRun = async (reason: string): Promise<void> => {
+            runAbortController.abort(new Error(reason));
+            await state.cancel(reason).catch(() => undefined);
+            await activeSkillRuntimes.get(message.run_id)?.cancelParentRun(message.run_id);
+            await broker.cancelRun(message.run_id, reason);
+            await send({
+              type: "turn.failed",
+              run_id: message.run_id,
+              error: { code: "run_cancelled", message: reason }
+            });
+          };
+          activeRunControls.set(runControlKey(storageConversationId, message.run_id), { cancel: cancelActiveRun });
           try {
             await state.queued();
           } catch {
             activeRunStates.delete(message.run_id);
             activeRunAbortControllers.delete(message.run_id);
+            activeRunControls.delete(runControlKey(storageConversationId, message.run_id));
             releaseConversationRun(activeConversationRuns, storageConversationId, message.run_id);
             reservedRunIds.delete(message.run_id);
             pendingAuthorization.releaseActiveRunCapacity();
+            await conversationRepository.transitionRun(message.run_id, "failed", "Run setup failed").catch(() => undefined);
             await send({
               type: "turn.failed",
               run_id: message.run_id,
@@ -1640,6 +2191,7 @@ async function handleRuntimeSocket(
             runtime,
             createRuntime,
             store,
+            conversationRepository,
             state,
             send,
             activeSkillRuntimes,
@@ -1653,6 +2205,7 @@ async function handleRuntimeSocket(
             activeRunStates.delete(message.run_id);
             activeRunAbortControllers.delete(message.run_id);
             if (!cancellingRunIds.has(message.run_id)) reservedRunIds.delete(message.run_id);
+            activeRunControls.delete(runControlKey(storageConversationId, message.run_id));
             releaseConversationRun(activeConversationRuns, storageConversationId, message.run_id);
             pendingAuthorization.releaseActiveRunCapacity();
           };
@@ -1681,6 +2234,9 @@ async function handleRuntimeSocket(
         try {
           const reason = "Client disconnected";
           const states = [...activeRunStates.values()];
+          for (const state of states) {
+            activeRunControls.delete(runControlKey(state.conversationId, state.runId));
+          }
           await Promise.allSettled(states.map((state) => state.cancel(reason)));
           await broker.cancelAll(reason).catch(() => undefined);
           await Promise.allSettled([...messageTasks]);
@@ -1727,6 +2283,7 @@ async function runOneTurn(
   runtime: AgentRuntime,
   createRuntime: () => AgentRuntime,
   store: RuntimeStore,
+  conversationRepository: ConversationRepository,
   state: RunStateMachine,
   send: (message: OutboundMessage) => Promise<void>,
   activeSkillRuntimes: Map<string, SkillRuntime>,
@@ -1760,6 +2317,12 @@ async function runOneTurn(
         conversation_id: input.conversation_id,
         run_id: input.run_id,
         message: input.message
+      });
+      await conversationRepository.appendEvent({
+        conversationId: input.conversation_id,
+        runId: input.run_id,
+        type: "message.created",
+        payload: { role: "user", content: input.message.content }
       });
     };
     const guardedOutput = new GuardedAssistantOutput(
@@ -1802,6 +2365,16 @@ async function runOneTurn(
         run_id: input.run_id,
         message: { role: "assistant", content },
         finish_reason: finishReason
+      });
+      await conversationRepository.appendEvent({
+        conversationId: input.conversation_id,
+        runId: input.run_id,
+        type: "message.created",
+        payload: {
+          role: "assistant",
+          content: finishReason === "content_filter" ? "" : approvedAssistantText,
+          ...(finishReason === "content_filter" ? { finish_reason: finishReason } : {})
+        }
       });
       if (finishReason === "stop" && recordDelivery && commerceEventSink && deliveryBinding) {
         const receipt = await recordCompletedDelivery(
@@ -2262,6 +2835,19 @@ function controlledTurnAuthorizationError(error: unknown): { code: string; messa
 
 export function scopedConversationId(binding: Pick<SessionBinding, "creatorId" | "userId" | "agentId" | "productId" | "corpusDigest">, conversationId: string): string {
   return `scope:${shortHash([binding.creatorId, binding.userId, binding.agentId, binding.productId, binding.corpusDigest].join("\u0000"))}:${conversationId}`;
+}
+
+/**
+ * P2 durable Conversation identity. Unlike the legacy transcript scope above,
+ * this intentionally excludes corpusDigest: corpus revision is recorded on
+ * each Run, while a Conversation remains bound to the same Account and Creator
+ * Agent across Agent Corpus updates.
+ */
+export function durableConversationId(
+  binding: Pick<SessionBinding, "creatorId" | "userId" | "agentId" | "productId">,
+  conversationId: string
+): string {
+  return `conversation:${shortHash([binding.creatorId, binding.userId, binding.agentId, binding.productId].join("\u0000"))}:${conversationId}`;
 }
 
 function shortHash(value: string): string {

@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hatch.dev/protocol/hatch-conversation-api-v1.schema.json",
+  "title": "Hatch Conversation API v1",
+  "description": "Framework-neutral REST read/control contract for durable Hatch Conversations and Runs. WebSocket remains the live executor transport; this schema deliberately does not authorize tool replay.",
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "cursor": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "conversationStatus": {
+      "type": "string",
+      "enum": ["active", "archived"]
+    },
+    "runStatus": {
+      "type": "string",
+      "enum": ["queued", "running", "waiting_for_tool", "compacting", "completed", "failed", "cancelled", "interrupted"]
+    },
+    "conversation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "creator_id", "agent_id", "product_id_at_creation", "status", "created_at", "updated_at", "version"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id", "description": "Server-issued opaque public ID; owner and Agent binding are server-derived." },
+        "creator_id": { "$ref": "#/$defs/id" },
+        "agent_id": { "$ref": "#/$defs/id" },
+        "product_id_at_creation": { "$ref": "#/$defs/id" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "status": { "$ref": "#/$defs/conversationStatus" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" },
+        "version": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "client_message_id", "status", "corpus_digest", "created_at"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "client_message_id": { "$ref": "#/$defs/id", "description": "Stable idempotency key; retries return this same Run." },
+        "status": { "$ref": "#/$defs/runStatus" },
+        "corpus_digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "started_at": { "type": "string", "format": "date-time" },
+        "completed_at": { "type": "string", "format": "date-time" },
+        "interrupted_reason": { "type": "string" }
+      }
+    },
+    "journalEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cursor", "type", "payload", "created_at"],
+      "properties": {
+        "cursor": { "$ref": "#/$defs/cursor" },
+        "run_id": { "$ref": "#/$defs/id" },
+        "type": { "type": "string", "enum": ["conversation.created", "conversation.updated", "run.created", "run.state", "message.created"] },
+        "payload": { "type": "object", "additionalProperties": true },
+        "created_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "createConversationRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "client_request_id": { "$ref": "#/$defs/id", "description": "Optional stable idempotency key for Conversation creation." }
+      }
+    },
+    "updateConversationRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version"],
+      "properties": {
+        "title": { "type": ["string", "null"], "maxLength": 500 },
+        "status": { "$ref": "#/$defs/conversationStatus" },
+        "version": { "type": "integer", "minimum": 1, "description": "Optimistic concurrency version." }
+      },
+      "anyOf": [{ "required": ["title"] }, { "required": ["status"] }]
+    },
+    "createRunRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["client_message_id"],
+      "properties": {
+        "client_message_id": { "$ref": "#/$defs/id" }
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["error"],
+      "properties": {
+        "error": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["code", "message"],
+          "properties": {
+            "code": { "type": "string" },
+            "message": { "type": "string" }
+          }
+        }
+      }
+    }
+  },
+  "oneOf": [
+    { "$ref": "#/$defs/createConversationRequest" },
+    { "$ref": "#/$defs/updateConversationRequest" },
+    { "$ref": "#/$defs/createRunRequest" },
+    { "$ref": "#/$defs/conversation" },
+    { "$ref": "#/$defs/run" },
+    { "$ref": "#/$defs/journalEvent" },
+    { "$ref": "#/$defs/error" }
+  ]
+}

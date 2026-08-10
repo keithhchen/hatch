@@ -40,7 +40,8 @@
         "compacting",
         "completed",
         "failed",
-        "cancelled"
+        "cancelled",
+        "interrupted"
       ]
     },
     "jsonObject": {
@@ -143,6 +144,12 @@
       "properties": {
         "type": { "const": "client.message" },
         "run_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "client_message_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "Stable idempotency key for a user message. Clients that predate this field use run_id as the fallback key."
+        },
         "conversation_id": { "type": "string", "minLength": 1, "maxLength": 256 },
         "message": {
           "type": "object",
