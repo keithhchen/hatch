@@ -514,8 +514,24 @@ function piStreamFnFor(config: ResolvedKimiOptions & { profile: LlmProfile }): S
     maxRetries: options?.maxRetries ?? config.maxRetries,
     maxRetryDelayMs: options?.maxRetryDelayMs ?? config.maxRetryDelayMs,
     ...(options?.maxTokens === undefined && config.maxTokens !== undefined ? { maxTokens: config.maxTokens } : {}),
+    onPayload: async (payload, payloadModel) => {
+      const normalized = normalizeProfilePayload(payload, config.profile);
+      const transformed = await options?.onPayload?.(normalized, payloadModel);
+      return transformed === undefined ? normalized : transformed;
+    },
     timeoutMs: options?.timeoutMs ?? config.timeoutMs
   });
+}
+
+function normalizeProfilePayload(payload: unknown, profile: LlmProfile): unknown {
+  const normalized = profile.normalizeEmptyToolCallContent ? normalizeKimiPayload(payload) : payload;
+  if (!profile.thinkingType || !normalized || typeof normalized !== "object" || Array.isArray(normalized)) {
+    return normalized;
+  }
+  return {
+    ...(normalized as Record<string, unknown>),
+    thinking: { type: profile.thinkingType }
+  };
 }
 
 export function createPiStreamFn(options: KimiAdapterOptions = {}): StreamFn {

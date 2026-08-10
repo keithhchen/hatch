@@ -1,6 +1,6 @@
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 
-export const LLM_PROFILE_NAMES = ["kimi-k2.6", "deepseek-v4-flash"] as const;
+export const LLM_PROFILE_NAMES = ["kimi-k2.6", "kimi-k2.6-no-thinking", "deepseek-v4-flash"] as const;
 export type LlmProfileName = (typeof LLM_PROFILE_NAMES)[number];
 
 export type LlmProfile = {
@@ -15,6 +15,7 @@ export type LlmProfile = {
   reasoning: boolean;
   thinkingLevel: ThinkingLevel;
   temperature?: number;
+  thinkingType?: "enabled" | "disabled";
   normalizeEmptyToolCallContent: boolean;
 };
 
@@ -31,6 +32,20 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     reasoning: true,
     thinkingLevel: "high",
     temperature: 1,
+    normalizeEmptyToolCallContent: true
+  },
+  "kimi-k2.6-no-thinking": {
+    name: "kimi-k2.6-no-thinking",
+    provider: "moonshotai-cn",
+    providerName: "Moonshot Kimi",
+    model: "kimi-k2.6",
+    baseUrl: "https://api.moonshot.cn/v1",
+    apiKeyEnv: "LLM_API_KEY",
+    contextWindow: 262_144,
+    maxTokens: 32_768,
+    reasoning: false,
+    thinkingLevel: "minimal",
+    thinkingType: "disabled",
     normalizeEmptyToolCallContent: true
   },
   "deepseek-v4-flash": {
