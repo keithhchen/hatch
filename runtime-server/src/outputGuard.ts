@@ -34,6 +34,16 @@ export type GuardedOutputResult = {
   blocked: boolean;
 };
 
+export type OutputGuardTiming = {
+  segment: number;
+  done: boolean;
+  content_chars: number;
+  detection_chars: number;
+  started_ms: number;
+  duration_ms: number;
+  outcome: "pass" | "block" | "degraded";
+};
+
 /**
  * Per-run text buffer. It contains no durable state and never logs content.
  */
@@ -42,13 +52,16 @@ export class GuardedAssistantOutput {
   private detectionOverlap = "";
   private first = true;
   private terminal = false;
+  private segment = 0;
 
   constructor(
     private readonly guard: OutputGuard,
     private readonly runId: string,
     private readonly firstSegmentChars = DEFAULT_OUTPUT_GUARD_FIRST_SEGMENT_CHARS,
     private readonly laterSegmentChars = DEFAULT_OUTPUT_GUARD_LATER_SEGMENT_CHARS,
-    private readonly detectionOverlapChars = firstSegmentChars
+    private readonly detectionOverlapChars = firstSegmentChars,
+    private readonly observeTiming?: (timing: OutputGuardTiming) => void,
+    private readonly clock: () => number = () => performance.now()
   ) {}
 
   async push(content: string): Promise<GuardedOutputResult> {
@@ -90,12 +103,23 @@ export class GuardedAssistantOutput {
 
   private async check(content: string, done: boolean): Promise<OutputGuardVerdict> {
     const detectionContent = this.detectionOverlap + content;
+    const segment = ++this.segment;
+    const started = this.clock();
     try {
       const verdict = await this.guard.check({
         content: detectionContent,
         chatId: this.runId,
         sessionId: this.runId,
         done
+      });
+      this.observeTiming?.({
+        segment,
+        done,
+        content_chars: content.length,
+        detection_chars: detectionContent.length,
+        started_ms: started,
+        duration_ms: this.clock() - started,
+        outcome: verdict
       });
       if (verdict === "block") {
         this.terminal = true;
@@ -104,6 +128,15 @@ export class GuardedAssistantOutput {
         return "block";
       }
     } catch {
+      this.observeTiming?.({
+        segment,
+        done,
+        content_chars: content.length,
+        detection_chars: detectionContent.length,
+        started_ms: started,
+        duration_ms: this.clock() - started,
+        outcome: "degraded"
+      });
       // Guard availability must not turn a provider outage into a failed user
       // turn. Only an explicit provider block withholds generated text.
     }
