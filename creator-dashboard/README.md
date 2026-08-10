@@ -20,6 +20,7 @@ Start Registry first, then:
 
 ```bash
 HATCH_REGISTRY_URL=http://127.0.0.1:8100 \
+HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN=replace-with-the-same-private-registry-token \
 HATCH_COMMERCE_LEDGER_PATH=.local-uat/ledger.jsonl \
 npm run api
 ```
@@ -40,5 +41,10 @@ npm test
 npm run build
 ```
 
-The API test covers Registry-backed Creator products and idempotent zero-value
-checkout with an entitlement pinned to the current Agent Corpus digest.
+The commerce service token is shared only by Dashboard and Registry. User
+bearers can read their access projection but cannot mint entitlements; checkout
+first commits an order to the ledger, then calls the private Registry mutation.
+
+The API test covers Registry-backed Creator products, fail-closed commerce
+authentication, and idempotent zero-value checkout with an entitlement pinned
+to the current Agent Corpus digest.

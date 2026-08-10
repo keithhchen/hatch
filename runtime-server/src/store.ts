@@ -1,6 +1,6 @@
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import type { ConversationMessage, OutputFinishReason } from "./protocol.js";
+import { ClientToolNameSchema, type ClientToolName, type ConversationMessage, type OutputFinishReason } from "./protocol.js";
 import type { CompactionPhase, CompactionReason, CompactionTrigger } from "./compaction.js";
 
 export type RunStatus = "queued" | "running" | "waiting_for_tool" | "compacting" | "completed" | "failed" | "cancelled";
@@ -83,7 +83,7 @@ export type StoreEvent =
       product_id?: string;
       corpus_digest?: string;
       client_version?: string;
-      local_tools?: string[];
+      local_tools?: ClientToolName[];
       timestamp: string;
     }
   | {
@@ -235,6 +235,7 @@ export class RuntimeStore {
   constructor(private readonly root = process.env.HATCH_RUNTIME_DATA_DIR ?? path.resolve(".hatch-runtime")) {}
 
   async append(event: StoreEventInput): Promise<void> {
+    assertCanonicalPersistedToolNames(event);
     const record = {
       timestamp: new Date().toISOString(),
       ...event
@@ -261,7 +262,7 @@ export class RuntimeStore {
     return content
       .split(/\r?\n/)
       .filter(Boolean)
-      .map((line) => JSON.parse(line) as StoreEvent);
+      .map((line) => normalizePersistedStoreEvent(JSON.parse(line) as StoreEvent));
   }
 
   async readConversation(conversationId: string): Promise<ConversationMessage[]> {
@@ -506,6 +507,92 @@ export class RuntimeStore {
     return session;
   }
 
+}
+
+export function normalizePersistedStoreEvent(event: StoreEvent): StoreEvent {
+  if (event.type === "session.started" && event.local_tools) {
+    const local_tools = event.local_tools.map((name) => (
+      ClientToolNameSchema.parse(normalizePersistedLocalToolName(name))
+    ));
+    return local_tools.every((name, index) => name === event.local_tools?.[index])
+      ? event
+      : { ...event, local_tools };
+  }
+  if (event.type === "tool.call") {
+    const name = normalizePersistedLocalToolName(event.name);
+    return name === event.name ? event : { ...event, name };
+  }
+  if (event.type !== "skill.invoked") return event;
+  const persistedTool = String(event.trigger.tool);
+  const tool = normalizePersistedLocalToolName(persistedTool);
+  if (tool !== "file_read" && tool !== "shell_exec") {
+    throw new Error(`Unsupported persisted skill trigger tool: ${persistedTool}`);
+  }
+  return {
+    ...event,
+    trigger: {
+      ...event.trigger,
+      tool
+    }
+  };
+}
+
+export function assertCanonicalPersistedToolNames(event: unknown): void {
+  if (!event || typeof event !== "object" || Array.isArray(event)) return;
+  const record = event as Record<string, unknown>;
+  if (record.type === "session.started" && Array.isArray(record.local_tools)) {
+    for (const name of record.local_tools) {
+      assertCanonicalClientToolName(name, "session.started.local_tools");
+    }
+    return;
+  }
+  if (record.type === "tool.call") {
+    if (record.locality === "client") {
+      assertCanonicalClientToolName(record.name, "tool.call.name");
+    } else {
+      assertNotLegacyLocalToolName(record.name, "tool.call.name");
+    }
+    return;
+  }
+  if (record.type === "skill.invoked") {
+    const trigger = record.trigger;
+    if (trigger && typeof trigger === "object" && !Array.isArray(trigger)) {
+      const tool = (trigger as Record<string, unknown>).tool;
+      assertNotLegacyLocalToolName(tool, "skill.invoked.trigger.tool");
+      if (tool !== "file_read" && tool !== "shell_exec") {
+        throw new Error("skill.invoked.trigger.tool must be file_read or shell_exec");
+      }
+    }
+  }
+}
+
+function assertCanonicalClientToolName(value: unknown, field: string): asserts value is ClientToolName {
+  assertNotLegacyLocalToolName(value, field);
+  if (!ClientToolNameSchema.safeParse(value).success) {
+    throw new Error(`${field} must be a canonical local tool name`);
+  }
+}
+
+function assertNotLegacyLocalToolName(value: unknown, field: string): void {
+  if (typeof value !== "string") return;
+  const canonical = normalizePersistedLocalToolName(value);
+  if (canonical !== value) {
+    throw new Error(`${field} must use canonical local tool name ${canonical}, not ${value}`);
+  }
+}
+
+const persistedLocalToolNameMigrations = new Map<string, string>([
+  ["fs.list", "file_list"],
+  ["fs.search", "file_search"],
+  ["fs.read", "file_read"],
+  ["fs.write", "file_write"],
+  ["fs.patch", "file_patch"],
+  ["shell.exec", "shell_exec"],
+  ["git.diff", "git_diff"]
+]);
+
+function normalizePersistedLocalToolName(name: string): string {
+  return persistedLocalToolNameMigrations.get(name) ?? name;
 }
 
 function visibleSkillEventKey(event: VisibleConversationSkillEvent): string {

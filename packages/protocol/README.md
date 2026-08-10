@@ -1,6 +1,6 @@
 # Hatch Protocol
 
-Canonical provider-agnostic wire protocol 0.4 and Agent Corpus v1.
+Canonical provider-agnostic wire protocol 0.6 and Agent Corpus v1.
 
 This package owns the JSON Schema for the server/Desktop local-client boundary. The TypeScript runtime server and Rust local runner currently mirror this schema directly; generated TS and Rust types should be introduced from this package before the protocol is expanded further.
 
@@ -66,7 +66,8 @@ become retrieval knowledge. The retained `evals/` assets are for validation,
 not an instruction channel.
 
 `tools` is declarative. `hatch.web_search` is mandatory for every Agent.
-`hatch.local.*` declares a Desktop local capability. `creator.*` HTTP
+`hatch.local.*` describes a product dependency but never filters the complete
+local tool set declared by Desktop. `creator.*` HTTP
 and MCP tools carry only a `connection_ref` plus the allowed operation or tool;
 their endpoints and credentials live in Hatch Control Plane, outside the
 Corpus.

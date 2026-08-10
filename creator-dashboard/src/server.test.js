@@ -23,12 +23,14 @@ const catalogAgent = {
 
 test("creator products are projected directly from the Agent Corpus Registry", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-creator-"));
-  const registry = registryFixture({ role: "creator" });
+  const logoutTokens = [];
+  const registry = registryFixture({ role: "creator", logoutTokens });
   await listen(registry);
   context.after(() => registry.close());
   const dashboard = await createDashboardApp({
     ledgerPath: path.join(directory, "ledger.jsonl"),
-    registryUrl: serverUrl(registry)
+    registryUrl: serverUrl(registry),
+    commerceServiceToken: "commerce-test-token"
   });
   const api = createServer(dashboard.handler);
   await listen(api);
@@ -47,6 +49,13 @@ test("creator products are projected directly from the Agent Corpus Registry", a
   assert.deepEqual(overview.products[0].boundaries, catalogAgent.product_boundaries);
   assert.equal(overview.products[0].status, "published");
   assert.equal(overview.metrics.orders, 0);
+
+  const logout = await fetch(`${serverUrl(api)}/v1/auth/logout`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}` }
+  });
+  assert.equal(logout.status, 204);
+  assert.deepEqual(logoutTokens, [`Bearer ${token}`]);
 });
 
 test("zero-value checkout creates an idempotent Agent Corpus order and entitlement", async (context) => {
@@ -57,13 +66,21 @@ test("zero-value checkout creates an idempotent Agent Corpus order and entitleme
   context.after(() => registry.close());
   const dashboard = await createDashboardApp({
     ledgerPath: path.join(directory, "ledger.jsonl"),
-    registryUrl: serverUrl(registry)
+    registryUrl: serverUrl(registry),
+    commerceServiceToken: "commerce-test-token"
   });
   const api = createServer(dashboard.handler);
   await listen(api);
   context.after(() => api.close());
 
   const token = await login(api);
+  const bypass = await fetch(`${serverUrl(api)}/v1/user/agents/${catalogAgent.creator_id}/${catalogAgent.agent_id}/access`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}` }
+  });
+  assert.equal(bypass.status, 404);
+  assert.equal(accessBodies.length, 0);
+
   const checkout = () => fetch(`${serverUrl(api)}/v1/user/checkout`, {
     method: "POST",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
@@ -85,7 +102,33 @@ test("zero-value checkout creates an idempotent Agent Corpus order and entitleme
   assert.equal(dashboard.ledger.listEvents().length, 2);
 });
 
-function registryFixture({ role, accessBodies = [] }) {
+test("checkout fails closed before writing an order when commerce service auth is missing", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-commerce-auth-"));
+  const accessBodies = [];
+  const registry = registryFixture({ role: "user", accessBodies });
+  await listen(registry);
+  context.after(() => registry.close());
+  const dashboard = await createDashboardApp({
+    ledgerPath: path.join(directory, "ledger.jsonl"),
+    registryUrl: serverUrl(registry),
+    commerceServiceToken: ""
+  });
+  const api = createServer(dashboard.handler);
+  await listen(api);
+  context.after(() => api.close());
+
+  const token = await login(api);
+  const response = await fetch(`${serverUrl(api)}/v1/user/checkout`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ creator_id: catalogAgent.creator_id, product_id: catalogAgent.product_id })
+  });
+  assert.equal(response.status, 503);
+  assert.deepEqual(dashboard.ledger.listEvents(), []);
+  assert.deepEqual(accessBodies, []);
+});
+
+function registryFixture({ role, accessBodies = [], logoutTokens = [] }) {
   return createServer(async (request, response) => {
     const requestUrl = new URL(request.url ?? "/", "http://registry.test");
     let content = "";
@@ -102,6 +145,12 @@ function registryFixture({ role, accessBodies = [] }) {
       response.end(JSON.stringify(account));
       return;
     }
+    if (requestUrl.pathname === "/v1/auth/logout" && request.method === "POST") {
+      logoutTokens.push(request.headers.authorization);
+      response.statusCode = 204;
+      response.end();
+      return;
+    }
     if (requestUrl.pathname === "/v1/catalog/agents" || requestUrl.pathname === "/v1/creator/agents") {
       response.end(JSON.stringify([catalogAgent]));
       return;
@@ -110,14 +159,16 @@ function registryFixture({ role, accessBodies = [] }) {
       response.end(JSON.stringify([]));
       return;
     }
-    if (requestUrl.pathname === `/v1/user/agents/${catalogAgent.creator_id}/${catalogAgent.agent_id}/access`) {
-      accessBodies.push(content ? JSON.parse(content) : {});
+    if (requestUrl.pathname === "/v1/commerce/agent-access") {
+      assert.equal(request.headers.authorization, "Bearer commerce-test-token");
+      const accessBody = content ? JSON.parse(content) : {};
+      accessBodies.push(accessBody);
       response.end(JSON.stringify({
         entitlement_id: "ent_zero",
-        order_id: content ? JSON.parse(content).order_id : undefined,
-        user_id: "buyer-zero",
-        creator_id: catalogAgent.creator_id,
-        agent_id: catalogAgent.agent_id,
+        order_id: accessBody.order_id,
+        user_id: accessBody.user_id,
+        creator_id: accessBody.creator_id,
+        agent_id: accessBody.agent_id,
         product_id: catalogAgent.product_id,
         status: "active",
         granted_at: "2026-08-02T00:00:00.000Z"

@@ -4,9 +4,12 @@ Status: implemented and verified
 
 ## Goal
 
-The Agent may know its full System Prompt, Skills, RAG, and Tool Results, but
-unapproved output must not reach the user, durable chat history, or the next
-model turn.
+The Agent may know its full System Prompt, Skills, RAG, and Tool Results. When
+the configured Guard returns an explicit `block`, that output must not reach the
+user, durable chat history, or the next model turn. Guard timeout, throttling,
+malformed output, or provider failure is deliberately fail-open in V1; those
+responses are unclassified rather than approved. This is an explicit
+availability-over-confidentiality product choice, not a fail-closed guarantee.
 
 The V1 cloud classifier has one narrow policy: block actual disclosure of the
 current Agent's non-public System/Developer prompts, Skills, or other hidden
@@ -413,23 +416,26 @@ Blocked result:
 
 The raw Tool Result is neither persisted nor returned to the Agent.
 
-## Deferred change: simplify local tools
+## Local-tool naming boundary
 
-This is a separate implementation change, recorded here but not part of the
-streaming Guard design. Keep one tool name across the model, Runtime, wire
-protocol, client, logs, and persisted events:
+This is separate from streaming Guard behavior, but Guard records must use the
+same names as the rest of the product. The current model, Runtime, wire,
+Desktop, logs, and new persisted events all use exactly:
 
 ```text
-read
-write
-edit
-grep
-bash
+file_list
+file_search
+file_read
+file_write
+file_patch
+shell_exec
+git_diff
 ```
 
-Remove the `fs.*`, `file_*`, `shell_exec`, and `git_diff` alias families.
-`bash` covers listing files and `git diff`; `grep` provides the common
-read-only search path without requiring the model to compose a shell command.
+There is no current `fs.*` alias family and no provider-only rename. Historical
+records may be normalized while they are read, but new records use only the
+names above. `hatch.file_search` / `hatch_file_search` is a separately
+namespaced server-owned Creator knowledge tool, not a local Workspace tool.
 
 Each tool needs one definition:
 
@@ -459,7 +465,7 @@ client-declared workspace.
 ## Implementation status
 
 The earlier persistence, wire protocol, projection, and Desktop mismatches have
-been resolved. Protocol 0.4 uses `finish_reason`; new guarded runs persist
+been resolved. Protocol 0.6 uses `finish_reason`; new guarded runs persist
 canonical `conversation.model_message` records; raw deltas and terminal wire
 events are not durable; Desktop renders `content_filter` locally and rehydrates
 the same outcome from server history. Local detection overlap is implemented

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ClientToolBroker } from "./clientBroker.js";
+import { MAX_TOOL_RESULT_BYTES } from "./protocol.js";
 import type { RunStateMachine } from "./runState.js";
 import type { RuntimeStore } from "./store.js";
 
@@ -45,7 +46,7 @@ test("cancel owns an unreturned tool promise and ignores late results", async ()
   try {
     const executePromise = broker.execute(
       "parent-run",
-      "fs.read",
+      "file_read",
       { path: "pending.txt" },
       undefined,
       "skill-tool-call",
@@ -161,7 +162,7 @@ test("cancellation owns the caller promise while dispatch is blocked at each awa
     const runId = `dispatch-${phase}`;
     const executePromise = broker.execute(
       runId,
-      "fs.read",
+      "file_read",
       { path: "dispatch-window.txt" },
       state,
       `dispatch-tool-${phase.replaceAll(" ", "-")}`
@@ -184,4 +185,188 @@ test("cancellation owns the caller promise while dispatch is blocked at each awa
     }
     assert.equal(stored.filter((event) => event.type === "tool.call" && event.status === "cancelled").length, 1);
   }
+});
+
+test("tool results settle the worker even when terminal observability fails", async () => {
+  for (const outcome of ["success", "error", "oversize"] as const) {
+    let requestSeen!: () => void;
+    const requested = new Promise<void>((resolve) => { requestSeen = resolve; });
+    const store = {
+      append: async (event: StoreEventInput) => {
+        if (event.type === "tool.call" && event.status !== "requested") {
+          throw new Error(`terminal store unavailable: ${outcome}`);
+        }
+      }
+    } as unknown as RuntimeStore;
+    const broker = new ClientToolBroker(
+      async (message) => {
+        if (message.type === "tool_call.request") requestSeen();
+        if (message.type === "approval.result") throw new Error("approval event unavailable");
+      },
+      store,
+      10_000
+    );
+    const runId = `result-${outcome}`;
+    const toolCallId = `tool-${outcome}`;
+    const execution = broker.execute(
+      runId,
+      "file_write",
+      { path: "result.txt", content: "content" },
+      undefined,
+      toolCallId,
+      { approvalOverride: "ask" }
+    );
+    await requested;
+
+    if (outcome === "success") {
+      assert.equal(await broker.handleResult({
+        type: "tool_call.result",
+        run_id: runId,
+        tool_call_id: toolCallId,
+        status: "ok",
+        result: { saved: true }
+      }), true);
+      assert.deepEqual(await execution, { saved: true });
+    } else if (outcome === "error") {
+      assert.equal(await broker.handleResult({
+        type: "tool_call.result",
+        run_id: runId,
+        tool_call_id: toolCallId,
+        status: "error",
+        error: { code: "write_failed", message: "client write failed" }
+      }), true);
+      await assert.rejects(execution, /client write failed/);
+    } else {
+      assert.equal(await broker.handleResult({
+        type: "tool_call.result",
+        run_id: runId,
+        tool_call_id: toolCallId,
+        status: "ok",
+        result: { content: "x".repeat(MAX_TOOL_RESULT_BYTES) }
+      }), true);
+      await assert.rejects(execution, /transport envelope/);
+    }
+  }
+});
+
+test("cancelAll claims every pending call before failing store and emit fan-out", async () => {
+  let requestCount = 0;
+  let markRequestsSeen!: () => void;
+  const requestsSeen = new Promise<void>((resolve) => { markRequestsSeen = resolve; });
+  const store = {
+    append: async (event: StoreEventInput) => {
+      if (event.type === "tool.call" && event.status === "cancelled") {
+        throw new Error("cancel audit unavailable");
+      }
+    }
+  } as unknown as RuntimeStore;
+  const broker = new ClientToolBroker(async (message) => {
+    if (message.type === "tool_call.request") {
+      requestCount += 1;
+      if (requestCount === 2) markRequestsSeen();
+    }
+    if (message.type === "tool_call.delta" && message.status === "cancelled") {
+      throw new Error("cancel emit unavailable");
+    }
+  }, store, 10_000);
+  const first = broker.execute("cancel-all-one", "file_read", { path: "one" }, undefined, "tool-one");
+  const second = broker.execute("cancel-all-two", "file_read", { path: "two" }, undefined, "tool-two");
+  await requestsSeen;
+
+  await broker.cancelAll("disconnect despite observability outage");
+  await assert.rejects(first, /disconnect despite observability outage/);
+  await assert.rejects(second, /disconnect despite observability outage/);
+  assert.equal(await broker.cancelRun("cancel-all-one"), 0);
+  assert.equal(await broker.cancelRun("cancel-all-two"), 0);
+});
+
+test("timeout store failure is handled and does not emit unhandledRejection", async () => {
+  const unhandled: unknown[] = [];
+  const onUnhandled = (error: unknown) => unhandled.push(error);
+  process.on("unhandledRejection", onUnhandled);
+  const store = {
+    append: async (event: StoreEventInput) => {
+      if (event.type === "tool.call" && event.status === "failed") {
+        throw new Error("timeout audit unavailable");
+      }
+    }
+  } as unknown as RuntimeStore;
+  const broker = new ClientToolBroker(async () => undefined, store, 10);
+  try {
+    await assert.rejects(
+      broker.execute("timeout-run", "file_read", { path: "timeout" }, undefined, "timeout-tool"),
+      /Timed out waiting/
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.deepEqual(unhandled, []);
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+  }
+});
+
+test("a stale timeout cannot delete a new call that reuses the same IDs", async () => {
+  const store = { append: async () => undefined } as unknown as RuntimeStore;
+  const broker = new ClientToolBroker(async () => undefined, store, 100);
+  const first = broker.execute("reused-run", "file_read", { path: "first" }, undefined, "reused-tool");
+
+  // Make the first timer due without yielding to the timers phase. The old
+  // result is then claimed and the same key is reused before that callback runs.
+  const deadline = Date.now() + 125;
+  while (Date.now() < deadline) {
+    // Intentional short event-loop block for deterministic stale-timer ordering.
+  }
+  const firstHandled = broker.handleResult({
+    type: "tool_call.result",
+    run_id: "reused-run",
+    tool_call_id: "reused-tool",
+    status: "ok",
+    result: { content: "first result" }
+  });
+  const second = broker.execute("reused-run", "file_read", { path: "second" }, undefined, "reused-tool");
+  await firstHandled;
+  assert.deepEqual(await first, { content: "first result" });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  assert.equal(await broker.handleResult({
+    type: "tool_call.result",
+    run_id: "reused-run",
+    tool_call_id: "reused-tool",
+    status: "ok",
+    result: { content: "second result" }
+  }), true);
+  assert.deepEqual(await second, { content: "second result" });
+});
+
+test("broker keys are collision-free and duplicate tool_call_id cannot overwrite pending work", async () => {
+  let requestCount = 0;
+  let markCollisionRequests!: () => void;
+  const collisionRequests = new Promise<void>((resolve) => { markCollisionRequests = resolve; });
+  const store = { append: async () => undefined } as unknown as RuntimeStore;
+  const broker = new ClientToolBroker(async (message) => {
+    if (message.type === "tool_call.request") {
+      requestCount += 1;
+      if (requestCount === 2) markCollisionRequests();
+    }
+  }, store, 10_000);
+
+  const colonLeft = broker.execute("a:b", "file_read", { path: "left" }, undefined, "c");
+  const colonRight = broker.execute("a", "file_read", { path: "right" }, undefined, "b:c");
+  await collisionRequests;
+  await broker.cancelAll("collision test complete");
+  await assert.rejects(colonLeft, /collision test complete/);
+  await assert.rejects(colonRight, /collision test complete/);
+
+  const original = broker.execute("same-run", "file_read", { path: "original" }, undefined, "same-tool");
+  await assert.rejects(
+    broker.execute("same-run", "file_read", { path: "replacement" }, undefined, "same-tool"),
+    /Duplicate client tool call ID/
+  );
+  assert.equal(await broker.handleResult({
+    type: "tool_call.result",
+    run_id: "same-run",
+    tool_call_id: "same-tool",
+    status: "ok",
+    result: { content: "original result" }
+  }), true);
+  assert.deepEqual(await original, { content: "original result" });
 });

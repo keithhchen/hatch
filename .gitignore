@@ -34,6 +34,8 @@ coverage/
 # Rust / Tauri
 target/
 Cargo.lock
+!desktop-app/src-tauri/Cargo.lock
+!local-runner/Cargo.lock
 src-tauri/target/
 local-runner/target/
 

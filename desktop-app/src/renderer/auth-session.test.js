@@ -6,10 +6,12 @@ import {
   hydrateAuthSession,
   isAuthInvalidError,
   isNetworkError,
+  isSecureSessionReadError,
   loadSavedAuthSession,
   revokeAuthSession,
   saveAuthSession,
-  signInAuthSession
+  signInAuthSession,
+  startAuthSessionSignOut
 } from "./auth-session.js";
 
 describe("account sessions", () => {
@@ -77,6 +79,30 @@ describe("account sessions", () => {
     await expect(revokeAuthSession("https://hatch.example", "opaque-token", fetchImpl)).resolves.toBeUndefined();
   });
 
+  it("does not make local Keychain deletion wait for a hung server revoke", async () => {
+    const events = [];
+    const storage = {
+      async clearToken() { events.push("local-clear"); }
+    };
+    const fetchImpl = vi.fn(async (_url, options) => {
+      events.push("server-revoke-started");
+      await new Promise(() => {});
+      return new Response(null, { status: 204, signal: options.signal });
+    });
+
+    const { serverRevoke, localClear } = startAuthSessionSignOut(
+      "https://hatch.example",
+      { accessToken: "opaque-token" },
+      storage,
+      fetchImpl,
+      { timeoutMs: 10 }
+    );
+    await localClear;
+    expect(events).toContain("local-clear");
+    expect(events.indexOf("local-clear")).toBeLessThanOrEqual(events.indexOf("server-revoke-started"));
+    await expect(serverRevoke).resolves.toBeUndefined();
+  });
+
   it("uses the native bridge when available and falls back in a web-only test", async () => {
     const invoke = vi.fn(async (command) => command === "read_auth_token" ? "native-token" : undefined);
     const storage = createTauriAuthStorage(invoke);
@@ -85,6 +111,28 @@ describe("account sessions", () => {
     await storage.clearToken();
     expect(invoke).toHaveBeenCalledWith("write_auth_token", { token: "next-token" });
     expect(invoke).toHaveBeenCalledWith("clear_auth_token");
+  });
+
+  it("surfaces a packaged Keychain clear failure instead of claiming local sign-out", async () => {
+    const invoke = vi.fn(async (command) => {
+      if (command === "clear_auth_token") throw new Error("Keychain is locked");
+      return command === "read_auth_token" ? "native-token" : undefined;
+    });
+    const storage = createTauriAuthStorage(invoke, { strict: true });
+
+    await expect(storage.clearToken()).rejects.toThrow("Keychain is locked");
+    expect(invoke).toHaveBeenCalledWith("clear_auth_token");
+  });
+
+  it("surfaces packaged Keychain read or ACL failures instead of pretending to be signed out", async () => {
+    const storage = createTauriAuthStorage(async (command) => {
+      if (command === "read_auth_token") throw new Error("Keychain ACL denied access");
+    }, { strict: true });
+
+    const error = await loadSavedAuthSession(storage).catch((value) => value);
+    expect(isSecureSessionReadError(error)).toBe(true);
+    expect(error.message).toContain("couldn't read the saved session");
+    expect(error.cause?.message).toBe("Keychain ACL denied access");
   });
 });
 

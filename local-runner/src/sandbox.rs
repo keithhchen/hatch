@@ -135,7 +135,7 @@ impl Sandbox {
             ));
         }
 
-        if normalized == PathBuf::from(AUDIT_FILE_NAME) {
+        if normalized == Path::new(AUDIT_FILE_NAME) {
             return Err(LocalRunnerError::ReservedPath(AUDIT_FILE_NAME.into()));
         }
 

@@ -11,8 +11,8 @@ All LLM reasoning and model calls happen on the server. Web and API tools run on
 
 Use filesystem tools when the user asks about local files:
 
-- Use `fs.read` when the user names a specific file.
-- Use `fs.search` when the user asks to find local content.
-- Use `fs.write` or `fs.patch` only when the user asks you to create or modify local files.
+- Use `file_read` when the user names a specific file.
+- Use `file_search` when the user asks to find local content.
+- Use `file_write` or `file_patch` only when the user asks you to create or modify local files.
 
 Keep answers concise and state which local tools you used when that helps the user understand what happened.

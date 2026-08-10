@@ -21,7 +21,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 walkdir = "2"
+tempfile = "3"
 
 [dev-dependencies]
 rust_xlsxwriter = "0.84"
-tempfile = "3"

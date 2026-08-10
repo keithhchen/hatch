@@ -7,27 +7,22 @@ export type SkillToolGrant = {
 };
 
 const toolAliases = new Map<string, ClientToolName[]>([
-  ["read", ["fs.read"]],
-  ["file_read", ["fs.read"]],
-  ["fs.read", ["fs.read"]],
-  ["list", ["fs.list"]],
-  ["ls", ["fs.list"]],
-  ["file_list", ["fs.list"]],
-  ["fs.list", ["fs.list"]],
-  ["search", ["fs.search"]],
-  ["grep", ["fs.search"]],
-  ["file_search", ["fs.search"]],
-  ["fs.search", ["fs.search"]],
-  ["write", ["fs.write"]],
-  ["file_write", ["fs.write"]],
-  ["fs.write", ["fs.write"]],
-  ["edit", ["fs.patch"]],
-  ["multiedit", ["fs.patch"]],
-  ["file_patch", ["fs.patch"]],
-  ["fs.patch", ["fs.patch"]],
-  ["git", ["git.diff"]],
-  ["git_diff", ["git.diff"]],
-  ["git.diff", ["git.diff"]]
+  ["read", ["file_read"]],
+  ["file_read", ["file_read"]],
+  ["list", ["file_list"]],
+  ["ls", ["file_list"]],
+  ["file_list", ["file_list"]],
+  ["search", ["file_search"]],
+  ["grep", ["file_search"]],
+  ["file_search", ["file_search"]],
+  ["write", ["file_write"]],
+  ["file_write", ["file_write"]],
+  ["edit", ["file_patch"]],
+  ["multiedit", ["file_patch"]],
+  ["file_patch", ["file_patch"]],
+  ["shell_exec", ["shell_exec"]],
+  ["git", ["git_diff"]],
+  ["git_diff", ["git_diff"]]
 ]);
 
 export function parseAllowedTools(source?: string): SkillToolGrant[] {
@@ -64,11 +59,11 @@ function parseAllowedToolToken(token: string): SkillToolGrant[] {
   if (bash) {
     const inner = bash[1]?.trim();
     if (!inner || inner === "*" || inner === "*:*") {
-      return [{ tool: "shell.exec" }];
+      return [{ tool: "shell_exec" }];
     }
     return splitBashPatterns(inner).flatMap((pattern) => {
       const prefix = commandPrefixPattern(pattern);
-      return prefix ? [{ tool: "shell.exec" as const, shellPrefix: prefix }] : [];
+      return prefix ? [{ tool: "shell_exec" as const, shellPrefix: prefix }] : [];
     });
   }
 
@@ -77,7 +72,7 @@ function parseAllowedToolToken(token: string): SkillToolGrant[] {
 
 function grantMatches(grant: SkillToolGrant, tool: ClientToolName, args: Record<string, unknown>): boolean {
   if (grant.tool !== tool) return false;
-  if (grant.tool !== "shell.exec" || !grant.shellPrefix) return true;
+  if (grant.tool !== "shell_exec" || !grant.shellPrefix) return true;
   const command = typeof args.command === "string" ? args.command : "";
   return commandStartsWith(command, grant.shellPrefix);
 }

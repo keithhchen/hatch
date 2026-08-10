@@ -34,7 +34,10 @@ The retrieval provider is Qdrant plus DashScope. Run Qdrant from
 Registry indexes only `knowledge/*.md` at Corpus publication time. Runtime
 exposes `hatch.file_search` only for an Agent with knowledge and calls Qdrant
 on demand, then reranks candidates with `qwen3-rerank`; it never eagerly puts
-retrieved knowledge in the system prompt. `HATCH_KNOWLEDGE_MODE=corpus-test`
+retrieved knowledge in the system prompt. Every staged vector carries the
+Corpus digest, and Runtime queries only the digest bound to the current
+session, so an incomplete republish cannot leak into the active Agent.
+`HATCH_KNOWLEDGE_MODE=corpus-test`
 remains reserved for explicit contract tests.
 
 ## Install
@@ -133,14 +136,14 @@ conversation: current user message
 
 `client.hello` initializes the session skill context once: the server discovers skills, renders the catalog, and stores that context on the WebSocket session. Later `client.message` turns reuse the same rendered catalog so the model-call prefix stays stable for prompt caching. New sessions discover again.
 
-The public skill catalog is injected as server-authored `user` context prefixed with `HATCH RUNTIME CONTEXT`; private skill instructions are injected only into the worker context. Context compaction excludes rebuilt server context messages because the server reconstructs them from fixed session state. Consumer workspace paths and project instruction files are never sent to the Runtime or model.
+The public skill catalog is injected as server-authored `user` context prefixed with `HATCH RUNTIME CONTEXT`; private skill instructions are injected only into the worker context. Context compaction excludes rebuilt server context messages because the server reconstructs them from fixed session state. The selected Workspace root, native grant, and project instruction files are not session fields and are never injected merely because a folder was selected. User-authorized local-tool output can naturally contain a path and becomes model context; literal path replacement is not a privacy or containment boundary.
 
-Model-visible function tools are generated from the canonical runtime tool spec registry in `tools.ts`. Server tools are always owned by the runtime server. Client tools are exposed only when the `client.hello.local_tools` session capability says the Desktop client can execute them.
-`file_read` and `file_list` are local workspace tools for the main agent. Protected skill resource paths are available only to SkillRuntime through the same ToolBridge and are never sent to the client as server-hosted skill content.
-`shell_exec` accepts an optional `justification` field as model-visible reasoning context for the command. Local tools currently run with `auto` permission when the client declares the capability; the Rust `local-runner` still enforces workspace containment and deterministic execution policy.
+Model-visible function tools are generated from the canonical runtime tool spec registry in `tools.ts`. Server tools are always owned by the runtime server. Client tools are exposed only when the `client.hello.local_tools` session capability says the Desktop client can execute them. Local tools use one name at every current boundary—model, Runtime dispatch, wire, events, and persistence: `file_list`, `file_search`, `file_read`, `file_write`, `file_patch`, `shell_exec`, and `git_diff`. There is no provider-specific rename and no current `fs.*` family. Old dotted Desktop capability declarations fail protocol validation instead of creating a partially working session. Dotted names are recognized only while reading historical JSONL/Postgres events; Runtime never emits or newly stores them.
+`file_read` and `file_list` are hybrid functions: a protected Skill resource path is handled server-side inside SkillRuntime, while a Workspace-relative path dispatches the same canonical call to the Desktop. Protected skill resource paths are never sent to the client as server-hosted skill content. Creator knowledge retrieval remains a separate server tool: runtime name `hatch.file_search`, model name `hatch_file_search`; it is not the local `file_search` tool.
+`shell_exec` accepts an optional `justification` field as model-visible reasoning context for the command. Shell has no independent enable/disable toggle: a healthy supported Desktop always declares it. The Runtime transports declared local tools as `auto`; the Desktop still applies its user-selected `Ask before changes` or `Allow changes` policy to every file mutation and every Shell command. The Rust `local-runner` independently enforces a path-based Workspace sandbox, a clean environment, bounded output, and fail-closed network/IPC restrictions; an approval marker cannot disable those controls. A hardlink already present inside the Workspace still denotes its shared inode, so the product does not misrepresent path labels as separate file ownership.
 SkillRuntime loads the private `SKILL.md` and its resource manifest server-side. Relative paths under `references/`, `scripts/`, and `assets/` resolve against the worker's private skill directory. The main conversation receives only the worker result and redacted `skill.run` status.
 
-Activated Skill `allowed-tools` frontmatter is parsed and preserved for protocol fidelity and future policy tightening. In the current max-permission runtime, local tools already run as `auto`, so `allowed-tools` does not add permission beyond `client.hello.local_tools`, does not grant server tools, and never bypasses workspace containment. Current mappings remain intentionally small for when approval policies are reintroduced: `Read`/`List`/`Search` map to read-only `fs.*` tools, `Write` maps to `fs.write`, `Edit` maps to `fs.patch`, and `Bash(git:*)` matches only `shell.exec` commands whose first command token is `git`.
+Activated Skill `allowed-tools` frontmatter is parsed and preserved for protocol fidelity and future policy tightening. In the current max-permission runtime, local tools already run as `auto`, so `allowed-tools` does not add permission beyond `client.hello.local_tools`, does not grant server tools, and never bypasses workspace containment. Current mappings remain intentionally small for when approval policies are reintroduced: `Read`/`List`/`Search` map to the read-only `file_*` tools, `Write` maps to `file_write`, `Edit` maps to `file_patch`, and `Bash(git:*)` matches only `shell_exec` commands whose first command token is `git`.
 
 The tool call loop is:
 
@@ -155,7 +158,7 @@ model tool_call
 -> next model call or turn.completed
 ```
 
-The current default runtime is max-permission: all declared client-local tools run as `auto`, so the normal user path emits no approval gate. `approval.request` and `approval.result` remain protocol event types only for a future restricted policy mode.
+The Runtime-side transport is max-permission: all declared client-local tools are requested as `auto`, so the cloud loop emits no separate approval gate. This does not bypass the Consumer Desktop's local change policy or native authorization gate. `approval.request` and `approval.result` remain protocol event types only for a future server-driven restricted policy mode.
 
 Run lifecycle state is streamed separately as `turn.state`: an accepted run first emits `queued`, then `running`, `waiting_for_tool`, `compacting`, `completed`, `failed`, or `cancelled` as the server-owned state machine transitions. Successful runs stream `turn.completed` before the terminal `turn.state: completed`, so clients can render the answer and then close the turn when the state machine completes.
 `turn.cancel` is scoped to the target `run_id`: unknown runs return `unknown_run`, and cancellation never cancels pending tools for a different run on the same socket.
@@ -163,26 +166,34 @@ Cancelled runs terminate with `cancelled` and `run_cancelled`; they do not emit 
 
 ## Persistence
 
-Runtime sessions, messages, run state transitions, tool calls, and emitted events are persisted as JSONL:
+Loopback development and explicit fixture mode can persist Runtime sessions,
+messages, run state transitions, tool calls, and emitted events as JSONL:
 
 ```text
 .hatch-runtime/events.jsonl
 ```
 
-Override the location with:
+Override that local-only location with:
 
 ```bash
 HATCH_RUNTIME_DATA_DIR=/path/to/runtime-data
 ```
 
-The client declares its local tool capability once in `client.hello` with `local_tools`; duplicate `client.hello` messages on the same connection are rejected. Each `client.message` sends only the current user message plus `conversation_id`. The Consumer-selected workspace remains Desktop-only and is applied when the Desktop executes a local tool call. The server hydrates prior user/assistant messages from this store before each agent run.
+A non-loopback Runtime fails closed unless `HATCH_RUNTIME_DATABASE_URL` points
+to its dedicated Postgres role/schema. Production does not fall back to the
+global JSONL file or reuse the Registry database credential. Postgres writes
+use bounded connection/query deadlines, atomic per-conversation and binding
+scope quotas, and a compacted replay window; visible history remains a
+separate bounded recent window rather than becoming model context again.
+
+The client declares its full local tool capability once in `client.hello` with `local_tools`; Agent Corpus metadata does not reduce that declaration, and permission decisions remain exclusively in the Desktop executor. Duplicate `client.hello` messages on the same connection are rejected. Each `client.message` sends only the current user message plus `conversation_id`. Before any Registry await, the Runtime synchronously reserves the connection and bound conversation, then re-introspects an opaque Registry session when configured and always resolves an existing entitlement binding again. A revoke after `client.hello` therefore takes effect on the next turn without allowing parallel messages to amplify Registry work. Registry verification, including its response body, is bounded by `HATCH_REGISTRY_AUTH_TIMEOUT_MS` and is cancelled when the socket closes. The Consumer-selected Workspace grant remains Desktop-only and is applied when the Desktop executes a local tool call; only the resulting tool content crosses the Runtime boundary. The server hydrates prior user/assistant messages from this store before each agent run.
 Explicitly bound conversation history is namespaced by creator, user, Agent,
 product, and Corpus digest. `GET /conversations/:id/messages` requires that
 binding as query parameters, so an identical conversation ID under another
 Agent Corpus cannot hydrate it.
-`local_tools` is limited to local client capabilities (`fs.*`, `shell.exec`, `git.diff`). Server-side tools such as `web_search`, `api_request`, and `mcp_call` are owned and exposed by the server.
+`local_tools` is limited to local client capabilities (`file_*`, `shell_exec`, `git_diff`). Server-side tools such as `web_search`, `api_request`, and `mcp_call` are owned and exposed by the server.
 `tool_call.result` is accepted only after `client.hello` and only as a response to a pending `tool_call.request`; `status: ok` must include `result`, and `status: error` must include `error`.
-Run-scoped `runtime.event` records and structured `tool.call` records include `conversation_id` when they occur inside a conversation run. Client-local tools are recorded by the broker, and server-local tools are recorded from the emitted `tool_call.delta` stream, so the append-only log can be audited by conversation without relying on client-side transcript state. Store appends are serialized per runtime store, and outbound protocol events are persisted as `runtime.event` before the server advances the next state transition.
+Run-scoped `runtime.event` records and structured `tool.call` records include `conversation_id` when they occur inside a conversation run. Client-local tools are recorded by the broker, and server-local tools are recorded from the emitted `tool_call.delta` stream, so the append-only log can be audited by conversation without relying on client-side transcript state. Store appends are serialized per bounded storage scope, and outbound protocol events are persisted as `runtime.event` before the server advances the next state transition.
 
 ## Context Compaction
 
@@ -248,7 +259,13 @@ HATCH_WEB_SEARCH_API_KEY=<server-side CWebSearch/Bocha key>
 HATCH_MCP_SERVERS='{"docs":{"url":"https://example.com/mcp"}}'
 HATCH_REGISTRY_URL=http://registry:8100
 HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN=<runtime-service-token>
+HATCH_RUNTIME_DATABASE_URL=<dedicated-runtime-postgres-url>
 ```
+
+Configure `HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN` only on Registry and
+Dashboard, never Runtime. Public user
+sessions can read `GET /v1/user/agent-access`; only the checkout service may
+call the private entitlement mutation after it has committed a matching order.
 
 Spec v1 uses Kimi K2.6 exclusively for Creator execution, delivery review, and context compaction. Thinking is always enabled through Pi's normal thinking-level option; temperature follows the provider contract. Pi owns the model profile, context estimate, compaction policy, retries, and output behavior. There is no alternate-model fallback. Use Kimi's official `LLM_API_KEY` variable for credentials.
 Corpus Evals are the default Creator quality gate. Ordinary Creator products stream Kimi's actual response to the Consumer Desktop. `HATCH_RUNTIME_DELIVERY_AUDIT=enforce` is an optional regulated-deployment override: it performs a second Kimi claim audit before delivery and intentionally withholds text streaming until that audit finishes.
@@ -264,7 +281,7 @@ npm run serve
 
 ## Protocol
 
-Protocol version: `0.4`.
+Protocol version: `0.6`. This version makes the underscore local-tool names canonical on the wire; a `0.5` hello is rejected with `protocol_error` so an old Desktop cannot enter a partially compatible session.
 
 Assistant text from the single Shanghai cloud Runtime is released through
 Alibaba AI Guardrails in delayed segments. It runs with
@@ -311,5 +328,6 @@ Execution surface:
 ```text
 model-visible: Pi tools serialized through the OpenAI-compatible provider transport
 server tools: web_search, api_request, mcp_call
-client transport: file_list/file_search/file_read/file_write/file_patch/shell_exec/git_diff -> fs.*, shell.exec, git.diff
+canonical model + Runtime + events + persistence + wire: file_list/file_search/file_read/file_write/file_patch/shell_exec/git_diff
+Creator knowledge search remains separate: hatch_file_search (model) -> hatch.file_search (server Runtime)
 ```

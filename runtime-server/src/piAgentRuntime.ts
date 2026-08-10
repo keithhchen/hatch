@@ -97,6 +97,7 @@ type ToolEventState = {
  */
 export class PiAgentRuntime implements AgentRuntime {
   async *run(input: RunStart, ctx: RunContext): AsyncIterable<OutboundMessage> {
+    ctx.abortSignal?.throwIfAborted();
     const model = createPiModel();
     const streamFn = createPiStreamFn();
     const queue = new AsyncQueue<OutboundMessage>();
@@ -203,40 +204,51 @@ export class PiAgentRuntime implements AgentRuntime {
       }
     });
 
-    agent.subscribe(async (event) => {
-      await this.handleEvent({
-        event,
-        agent,
-        input,
-        ctx,
-        queue,
-        toolEvents,
-        workspacePathPolicy,
-        getActiveSkills: () => activeSkills,
-        setActiveSkills: (next) => {
-          activeSkills = next;
-          resourceRoots = activeSkillResourceRoots(visibleSkills, activeSkills);
-        },
-        getResourceRoots: () => resourceRoots,
-        setHasExecutedTool: () => { hasExecutedTool = true; },
-        deliveryWorkflow,
-        transcriptMessages,
-        completedArtifactPaths,
-        setFinalAssistant: (message) => { finalAssistant = message; },
-        setTerminalError: (error) => { terminalError ??= error; }
-      });
-    });
-
-    // Pass an explicit Pi UserMessage so the current user turn stays a plain
-    // text payload in the OpenAI-compatible request (and in the persistence
-    // projection), instead of Agent.prompt(string)'s text-block form.
-    const promptPromise = agent.prompt(piUserMessage(input.message.content))
-      .catch((error) => {
-        terminalError = error instanceof Error ? error : new Error(String(error));
-      })
-      .finally(() => queue.close());
+    // Abort the provider-backed Pi loop as soon as the owning Runtime run is
+    // cancelled or its socket disconnects. The Runtime keeps the global run
+    // reservation until this generator actually settles, so an abort that is
+    // slow (or ignored below the Agent boundary) cannot amplify model work.
+    const abortAgent = () => agent.abort();
+    ctx.abortSignal?.addEventListener("abort", abortAgent, { once: true });
 
     try {
+      agent.subscribe(async (event) => {
+        await this.handleEvent({
+          event,
+          agent,
+          input,
+          ctx,
+          queue,
+          toolEvents,
+          workspacePathPolicy,
+          getActiveSkills: () => activeSkills,
+          setActiveSkills: (next) => {
+            activeSkills = next;
+            resourceRoots = activeSkillResourceRoots(visibleSkills, activeSkills);
+          },
+          getResourceRoots: () => resourceRoots,
+          setHasExecutedTool: () => { hasExecutedTool = true; },
+          deliveryWorkflow,
+          transcriptMessages,
+          completedArtifactPaths,
+          setFinalAssistant: (message) => { finalAssistant = message; },
+          setTerminalError: (error) => { terminalError ??= error; }
+        });
+      });
+
+      // Do not create a fresh Pi run if cancellation won the narrow window
+      // before prompt startup. Once prompt() starts, abortAgent owns the same
+      // Agent AbortController that is passed to the provider request.
+      ensureNotCancelled(ctx);
+      // Pass an explicit Pi UserMessage so the current user turn stays a plain
+      // text payload in the OpenAI-compatible request (and in persistence),
+      // instead of Agent.prompt(string)'s text-block form.
+      const promptPromise = agent.prompt(piUserMessage(input.message.content))
+        .catch((error) => {
+          terminalError = error instanceof Error ? error : new Error(String(error));
+        })
+        .finally(() => queue.close());
+
       while (true) {
         const item = await queue.next();
         if (item.kind === "done") break;
@@ -298,6 +310,7 @@ export class PiAgentRuntime implements AgentRuntime {
         finish_reason: "stop"
       };
     } finally {
+      ctx.abortSignal?.removeEventListener("abort", abortAgent);
       agent.abort();
     }
   }
@@ -405,7 +418,8 @@ export class PiAgentRuntime implements AgentRuntime {
             getResourceRoots(),
             getActiveSkills(),
             ctx.sessionSkills.rendered.aliases,
-            workspacePathPolicy
+            workspacePathPolicy,
+            signal
           );
         } catch (error) {
           result = {
@@ -584,7 +598,7 @@ export class PiAgentRuntime implements AgentRuntime {
       } else {
         queue.push({ ...eventBase, status: "completed", result: visibleResult });
         if (
-          (eventBase.name === "fs.write" || eventBase.name === "file_write")
+          eventBase.name === "file_write"
           && typeof eventBase.arguments?.path === "string"
         ) {
           completedArtifactPaths.push(eventBase.arguments.path);
@@ -818,7 +832,7 @@ function toolNameFromCall(message: ConversationMessage): string {
 function redactDeliveryWriteArguments(
   event: Extract<OutboundMessage, { type: "tool_call.delta" }>
 ): Extract<OutboundMessage, { type: "tool_call.delta" }> {
-  if (event.name !== "fs.write" && event.name !== "file_write") return event;
+  if (event.name !== "file_write") return event;
   const pathValue = event.arguments && typeof event.arguments.path === "string"
     ? { path: event.arguments.path }
     : {};

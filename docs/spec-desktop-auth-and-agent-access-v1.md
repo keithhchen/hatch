@@ -17,7 +17,9 @@
 5. Web Storage 不保存 token，也不保存持久化的 Desktop application state。token 进 Keychain，非敏感设置进 Tauri native app-data store。
 6. Auth 与 entitlement 完全分离。`/v1/auth/me` 证明是谁，`/v1/user/agent-access` 决定当前能使用哪些 Agent；`[]` 是有效响应。
 7. 多个 Agent 时恢复该账号上一次使用的 Agent；没有可恢复的 Agent 时选最新 active Agent；完全没有 Agent 时进入 empty state。
-8. Registry 是账号和 access 的权威源，Runtime 每次建立会话仍然在云端复核 entitlement；Desktop 的判断只负责 UX，不负责授权。
+8. Registry 是账号和 access 的权威源。Runtime 在建立 WebSocket、读取 history，
+   以及每个 `client.message` 创建 run 之前都重新验证 opaque session 与
+   entitlement；Desktop 的判断只负责 UX，不负责授权。
 9. 数据库不做大重构：保留 `accounts`、`agent_corpora`、`agent_access` 和 Commerce append-only Ledger，只新增最小的 `account_sessions`，并修正两个现有 access projection bug。
 
 ## 2. 为什么当前流程会让用户困惑
@@ -143,6 +145,11 @@ Find an Agent built around a creator's proven method.
 
 V1 不是 OAuth client，而是 Hatch 自己的 first-party account API：Desktop 通过 TLS 将 email/password 发送到 Hatch Registry，Registry 验证密码后签发 Hatch session。
 
+Consumer Desktop 只接受 `role: user`。Creator 凭据本身仍是有效 Hatch
+身份，但 Desktop 必须显示明确的 buyer-account 提示，并允许安全退出；
+不能把 Creator 的 `agent-access` 角色错误伪装成密码错误、网络错误或
+session 失效。
+
 这是针对当前产品约束的最小方案：没有 browser redirect、SSO、PKCE、refresh-token family、cookie jar 或多个 identity provider。密码只在登录请求内存中存在，Desktop 不落盘，也不把它交给第三方。
 
 这不是对 OAuth 的否定。若以后加入 Google/Apple/企业 SSO，必须重开一个 OAuth/OIDC 设计，采用 external browser + Authorization Code + PKCE；native app 不应使用 embedded web-view 登录。[RFC 8252](https://www.rfc-editor.org/info/rfc8252/) 明确要求 native app 的 OAuth authorization 使用 external user-agent。[RFC 9700](https://www.rfc-editor.org/rfc/rfc9700.html) 也将 Resource Owner Password Credentials Grant 列为不可使用。当前方案之所以不违反该结论，是因为它不是 OAuth password grant，而是 Hatch first-party sign-in endpoint。
@@ -234,7 +241,11 @@ Response：
 
 `200 []` 是合法的“已登录但没有 Agent”。Registry 在服务端把 `agent_access` 与当前 `agent_corpora` presentation 合并；Desktop 不再先拉 access 再拉整个 public catalog。`/v1/catalog/agents` 仍可给官网使用，但不是 Desktop 启动依赖。
 
-Runtime 在 WebSocket 建立和 history request 时继续根据 `entitlement_id` 重新复核当前 access；不能因为 Desktop 曾经拿到过列表就信任它。
+Runtime 在 WebSocket 建立、history request，以及每个 `client.message`
+创建 run 前继续根据 `entitlement_id` 重新复核当前 opaque session 与
+access；不能因为 Desktop 曾经拿到过列表或已经建立 socket 就信任它。
+登录后被 revoke 的 session 或 entitlement 必须在下一 turn 产生可行动的
+认证/授权错误，并且不能启动 Agent run。
 
 ### 5.5 Runtime 的验证边界
 
@@ -254,12 +265,16 @@ Runtime 在 WebSocket 建立和 history request 时继续根据 `entitlement_id`
 只有一个 active account session，避免 profile chooser 和多 session UI：
 
 ```text
-Keychain service: dev.hatch.local
+Keychain service: dev.hatch.local.desktop-session.v2
 Keychain account: active-session
 Keychain value:  opaque session token (raw string)
 ```
 
-Keychain 读不到、被用户删除或 app 无权访问时，按“没有 session”处理，显示 Signed out；不能用 preview identity 兜底。
+只有 `errSecItemNotFound` 表示“没有 session”并进入 Signed out。Keychain
+锁定、ACL、读取或旧 item 清理失败必须进入可重试的 secure-session
+recovery，不能伪装成已退出，也不能用 preview identity 兜底。旧
+`dev.hatch.local` item 由 Security.framework 一次性迁移；v2 写入成功而旧
+item 删除失败属于显式 partial success，下次启动继续清理。
 
 ### 6.2 Native app-data：非敏感设置
 
@@ -271,7 +286,10 @@ Keychain 读不到、被用户删除或 app 无权访问时，按“没有 sessi
   "accounts": {
     "user_123": {
       "last_selected_entitlement_id": "ent_123",
-      "workspace_root": "/Users/jordan/project",
+      "workspace_grant": {
+        "grant_id": "workspace_opaque_native_id",
+        "display_path": "/Users/jordan/project"
+      },
       "permission_mode": "ask-before-changes",
       "conversation_id_by_entitlement": {
         "ent_123": "conversation_user_123_ent_123"
@@ -283,10 +301,16 @@ Keychain 读不到、被用户删除或 app 无权访问时，按“没有 sessi
 
 说明：
 
-- `workspace_root` 是本机权限偏好，不代表已重新授予 folder access；启动后仍要让 Tauri 验证路径。
+- renderer 只保存 opaque `grant_id` 与展示路径，不保存可由 WebView 伪造为
+  授权的 raw root。native grant store 保存 macOS bookmark；启动恢复先做
+  bookmark resolve 与真实 `read_dir` 探针，失败就回 onboarding。
 - `last_selected_entitlement_id` 只影响默认打开哪个 Agent，不是 authorization。
 - conversation history 的权威数据仍在 Cloud Runtime/Postgres；本地只保存恢复所需的非敏感标识。
-- 旧 `localStorage` key 不迁移 raw token。发布迁移时删除 auth keys；非敏感设置可一次性复制到 native store。
+- 旧 `localStorage` key 绝不迁移 raw token 或 raw Workspace path。升级代码
+  只可读取有效的两档 permission policy 与 conversation id，一次性写入
+  native store 后删除这些旧 key；旧 Workspace 必须通过原生 folder picker
+  重新选择。所有 auth/token/session key 必须删除而不能复制。无法可靠识别
+  旧格式时，显示一次性安全 reset 提示，不能静默声称迁移成功。
 
 ### 6.3 Agent 选择算法
 
@@ -381,7 +405,16 @@ CREATE INDEX account_sessions_account_active_idx
 - 外部浏览器只用于公开 Catalog，不用于 Desktop 身份注入；
 - 401 与 network/5xx 明确分流，避免把离线用户误登出；
 - token 不泄露到 logs、URLs、public catalog 或 conversation；
-- Runtime/Registry 全链路 TLS，登录 endpoint 必须 rate-limit，密码 verifier 保持强 hash。
+- Desktop 到 Caddy 的所有身份与 Runtime 流量都使用 TLS。当前单机部署中，
+  Caddy、Runtime 与 Registry 之间只通过不对 host 发布端口的专用 Compose
+  network 通信；这是明确的同主机 trusted-hop 例外，不应被描述成 mTLS。
+  一旦服务跨主机或该 network 不再专用，必须在迁移前启用 TLS/mTLS。
+- signup/signin 在应用层使用可信 client IP 的硬请求预算，以及按 route
+  分离的 normalized-identity 失败预算；正确凭据可清 identity 失败，但不能
+  绕过 IP 预算。key 仅保留 hash、内存有界，超限返回 `429` 与
+  `Retry-After`。密码校验对未知账号也执行等价的异步强 hash 工作，并限制
+  active/queued KDF 数量，避免明显的 account-enumeration timing oracle 与
+  event-loop 阻塞。
 
 这是在当前产品选择下的最小安全设计。若将“符合 native app 的 OAuth best practice”作为未来目标，下一阶段才加入 RFC 8252 的 external browser + PKCE；不会现在为了“看起来标准”而引入用户明确不要的 SSO 流程。
 
@@ -390,13 +423,16 @@ CREATE INDEX account_sessions_account_active_idx
 实现按以下顺序落地：
 
 1. Registry 增加 `account_sessions`、signin/me/logout、opaque token hash/expiry/revoke。
-2. Runtime 改为调用 Registry 验证 session，不再复制 HMAC parser；保持现有 entitlement binding 校验。
+2. Runtime 改为调用 Registry 验证 session，不再复制 HMAC parser；建立
+   socket、读取 history 和每个新 turn 都保持 entitlement binding 校验。
 3. `agent-access` 返回完整 presentation，空数组为正常结果；修正两处 access projection/upsert bug。
 4. Desktop 增加 Keychain/native settings adapter；删除 token 的 localStorage 路径。
 5. Desktop 启动 bootstrap：`no token -> Signed out`、`401 -> Signed out`、`network -> Network Error`、`[] -> Empty state`。
 6. 删除 returning-profile/Preview/Continue/Use a different account 组件和文案。
 7. 增加外部官网 Browse、focus refresh、last-selected Agent 恢复。
 8. 旧 build 的 HMAC/localStorage session 仅保留为 local fixture/migration compatibility；生产 Desktop 不再注入 preview identity，旧用户首次升级重新登录。
+9. Registry 的 signup/signin 增加有界双维度限流，并让不存在账号的密码
+   验证走等价 KDF 路径。
 
 ## 11. 验收矩阵
 
@@ -414,6 +450,10 @@ CREATE INDEX account_sessions_account_active_idx
 | 从官网返回 | 自动 refresh；新 entitlement 出现即进入 Library |
 | Sign out | best-effort server revoke + 立即删除 Keychain；回 Signed out |
 | Runtime 收到错误 entitlement | 服务端拒绝；Desktop 不能绕过 |
+| session 在 hello 后被 revoke | 下一条消息在 run 创建前拒绝；不调用 Agent |
+| entitlement 在 hello 后被 disable/revoke | 下一条消息在 run 创建前拒绝；提示 refresh Agent |
+| Creator 账号登录 Consumer Desktop | 身份不被伪装成失败；显示 buyer-account 提示并可安全退出 |
+| 同一 IP 或 email 高频 signup/signin | `429` + `Retry-After`；另一维度不可绕过 |
 
 ## 12. 已确认的 V1 决策
 
@@ -426,6 +466,9 @@ CREATE INDEX account_sessions_account_active_idx
 - 多 Agent 默认恢复上一个。
 - 启动断网显示 Network Error page；运行中断网显示 offline banner。
 - session 默认 30 天 idle、90 天 absolute；以 server-side 为准。
+- Consumer Desktop 只支持 buyer/user role；Creator 使用 Creator Portal。
+- Runtime 在每个用户 turn 前重新验证 session 与 entitlement。
+- first-party signup/signin 使用 IP 硬预算和分 route 的 identity 失败预算。
 - 不重构 Commerce Ledger，不把 Desktop 偏好塞进数据库。
 
 ## 13. 实现与验证记录

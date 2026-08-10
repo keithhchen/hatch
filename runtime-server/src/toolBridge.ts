@@ -15,6 +15,7 @@ export type ToolBridgeRequest = {
   arguments: Record<string, unknown>;
   clientTools: ClientToolName[];
   state: RunStateMachine;
+  signal?: AbortSignal;
 };
 
 /**
@@ -32,7 +33,7 @@ export class ToolBridge {
     const parsed = tool.schema.parse(request.arguments) as Record<string, unknown>;
 
     if (tool.locality === "server") {
-      return this.serverTools.execute(request.name, parsed);
+      return this.serverTools.execute(request.name, parsed, request.signal);
     }
 
     requireClientToolEnabled(request.clientTools, request.name as ClientToolName);

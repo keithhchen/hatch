@@ -23,7 +23,7 @@
     # TypeScript Registry APIs. Keep the public paths stable so Factory and
     # Desktop can use HATCH_REGISTRY_URL without knowing the private service
     # name. Dashboard-specific /v1/creator/products routes remain below.
-    @registry_api path /v1/agent-corpora* /v1/catalog/agents* /v1/auth/signup /v1/auth/signin /v1/auth/me /v1/auth/logout /v1/user/agent-access /v1/user/agents/* /v1/creator/agents /v1/creator/agent-corpora /v1/runtime/tenants/* /v1/runtime/creators/* /v1/control-plane/connections/* /v1/creators/*
+    @registry_api path /v1/agent-corpora* /v1/catalog/agents* /v1/auth/signup /v1/auth/signin /v1/auth/me /v1/auth/logout /v1/user/agent-access /v1/creator/agents /v1/creator/agent-corpora /v1/runtime/tenants/* /v1/runtime/creators/* /v1/control-plane/connections/* /v1/creators/*
     handle @registry_api {
         reverse_proxy registry:8100
     }
@@ -38,6 +38,11 @@
     handle /v1/* {
         reverse_proxy dashboard:8500
     }
+
+    # Stable entrypoint used by the packaged Consumer Desktop. The buyer Portal
+    # opens on its Explore catalog, while keeping the Desktop allowlist narrow.
+    @buyer_catalog_entry path /agents /agents/*
+    redir @buyer_catalog_entry /portal/ 308
 
     # Vite's production base path is /portal/; the Dashboard container serves
     # the built static files and its API from the same origin.

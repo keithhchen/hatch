@@ -247,7 +247,7 @@ fn executes_canonical_tool_call_requests_for_filesystem_tools() {
 
     let write = runner.execute_tool_call_request(tool_request(
         "call_write",
-        "fs.write",
+        "file_write",
         json!({
             "path": "notes/hatch.txt",
             "content": "Hatch routes local tools through Rust.\n"
@@ -264,7 +264,7 @@ fn executes_canonical_tool_call_requests_for_filesystem_tools() {
 
     let read = runner.execute_tool_call_request(tool_request(
         "call_read",
-        "fs.read",
+        "file_read",
         json!({ "path": "notes/hatch.txt" }),
     ));
     assert_ok_result(read, |result| {
@@ -276,7 +276,7 @@ fn executes_canonical_tool_call_requests_for_filesystem_tools() {
 
     let search = runner.execute_tool_call_request(tool_request(
         "call_search",
-        "fs.search",
+        "file_search",
         json!({ "path": ".", "query": "Rust", "max_results": 5 }),
     ));
     assert_ok_result(search, |result| {
@@ -289,7 +289,7 @@ fn executes_canonical_tool_call_requests_for_filesystem_tools() {
 
     let list = runner.execute_tool_call_request(tool_request(
         "call_list",
-        "fs.list",
+        "file_list",
         json!({ "path": "notes" }),
     ));
     assert_ok_result(list, |result| {
@@ -301,7 +301,7 @@ fn executes_canonical_tool_call_requests_for_filesystem_tools() {
 }
 
 #[test]
-fn canonical_fs_read_extracts_xlsx_text_without_shelling_out() {
+fn canonical_file_read_extracts_xlsx_text_without_shelling_out() {
     let temp = tempdir().unwrap();
     let runner = LocalRunner::new(temp.path()).unwrap();
     let workbook_path = temp.path().join("2024 Birthday Dinner.xlsx");
@@ -315,7 +315,7 @@ fn canonical_fs_read_extracts_xlsx_text_without_shelling_out() {
 
     let read = runner.execute_tool_call_request(tool_request(
         "call_xlsx_read",
-        "fs.read",
+        "file_read",
         json!({ "path": "2024 Birthday Dinner.xlsx" }),
     ));
 
@@ -328,7 +328,7 @@ fn canonical_fs_read_extracts_xlsx_text_without_shelling_out() {
 }
 
 #[test]
-fn fs_read_enforces_one_mib_boundary_for_utf8_files() {
+fn file_read_enforces_one_mib_boundary_for_utf8_files() {
     const MAX_READ_BYTES: usize = 1024 * 1024;
     let temp = tempdir().unwrap();
     let runner = LocalRunner::new(temp.path()).unwrap();
@@ -347,7 +347,7 @@ fn fs_read_enforces_one_mib_boundary_for_utf8_files() {
 
     let exact = runner.execute_tool_call_request(tool_request(
         "call_exact_utf8",
-        "fs.read",
+        "file_read",
         json!({ "path": "exact-utf8.txt" }),
     ));
     assert_ok_result(exact, |result| {
@@ -358,7 +358,7 @@ fn fs_read_enforces_one_mib_boundary_for_utf8_files() {
 
     let over = runner.execute_tool_call_request(tool_request(
         "call_over_utf8",
-        "fs.read",
+        "file_read",
         json!({ "path": "over-utf8.txt" }),
     ));
     assert_error_result(over, |error| {
@@ -386,7 +386,7 @@ fn xlsx_rendered_output_rejects_over_limit_without_truncating() {
 
     let under = runner.execute_tool_call_request(tool_request(
         "call_xlsx_under",
-        "fs.read",
+        "file_read",
         json!({ "path": "xlsx-under-limit.xlsx" }),
     ));
     assert_ok_result(under, |result| {
@@ -395,7 +395,7 @@ fn xlsx_rendered_output_rejects_over_limit_without_truncating() {
 
     let over = runner.execute_tool_call_request(tool_request(
         "call_xlsx_over",
-        "fs.read",
+        "file_read",
         json!({ "path": "xlsx-over-limit.xlsx" }),
     ));
     assert_error_result(over, |error| {
@@ -414,7 +414,7 @@ fn canonical_tool_call_result_reports_sandbox_errors() {
 
     let result = runner.execute_tool_call_request(tool_request(
         "call_escape",
-        "fs.read",
+        "file_read",
         json!({ "path": "../outside.txt" }),
     ));
 
@@ -433,15 +433,44 @@ fn canonical_tool_call_result_rejects_unknown_local_tools() {
     let runner = LocalRunner::new(temp.path()).unwrap();
 
     let result =
-        runner.execute_tool_call_request(tool_request("call_unknown", "unknown.tool", json!({})));
+        runner.execute_tool_call_request(tool_request("call_unknown", "unknown_tool", json!({})));
 
     assert_error_result(result, |error| {
         assert_eq!(error["code"], "invalid_tool_call");
         assert!(error["message"]
             .as_str()
             .unwrap()
-            .contains("unsupported local tool: unknown.tool"));
+            .contains("unsupported local tool: unknown_tool"));
     });
+}
+
+#[test]
+fn rejects_legacy_dotted_tool_names_instead_of_silently_adapting_them() {
+    let temp = tempdir().unwrap();
+    let runner = LocalRunner::new(temp.path()).unwrap();
+
+    for legacy_name in [
+        "fs.list",
+        "fs.search",
+        "fs.read",
+        "fs.write",
+        "fs.patch",
+        "shell.exec",
+        "git.diff",
+    ] {
+        let result = runner.execute_tool_call_request(tool_request(
+            "call_legacy_name",
+            legacy_name,
+            json!({}),
+        ));
+        assert_error_result(result, |error| {
+            assert_eq!(error["code"], "invalid_tool_call");
+            assert_eq!(
+                error["message"],
+                format!("unsupported local tool: {legacy_name}")
+            );
+        });
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -452,7 +481,7 @@ fn canonical_shell_exec_runs() {
 
     let result = runner.execute_tool_call_request(tool_request(
         "call_shell",
-        "shell.exec",
+        "shell_exec",
         json!({
             "command": "printf shell-ok",
             "timeout_ms": 30000
@@ -472,7 +501,7 @@ fn shell_exec_fails_closed_without_a_supported_sandbox_backend() {
     let runner = LocalRunner::new(temp.path()).unwrap();
     let result = runner.execute_tool_call_request(tool_request(
         "call_shell_unsupported",
-        "shell.exec",
+        "shell_exec",
         json!({ "command": "printf unsafe", "timeout_ms": 30000 }),
     ));
     assert_error_result(result, |error| {
@@ -488,7 +517,7 @@ fn pre_cancelled_tool_call_returns_a_structured_cancellation() {
     let cancel = Arc::new(AtomicBool::new(true));
     assert!(cancel.load(Ordering::Acquire));
     let result = runner.execute_tool_call_request_with_cancel(
-        tool_request("call_cancelled", "fs.list", json!({ "path": "." })),
+        tool_request("call_cancelled", "file_list", json!({ "path": "." })),
         cancel,
     );
     assert_error_result(result, |error| {
@@ -503,7 +532,7 @@ fn shell_exec_rejects_timeouts_outside_the_runtime_contract() {
     let runner = LocalRunner::new(temp.path()).unwrap();
     let result = runner.execute_tool_call_request(tool_request(
         "call_invalid_shell_timeout",
-        "shell.exec",
+        "shell_exec",
         json!({ "command": "printf hatch", "timeout_ms": 99 }),
     ));
     assert_error_result(result, |error| {
@@ -518,13 +547,13 @@ fn rejects_absolute_and_parent_paths_for_all_file_mutations() {
     for path in ["/tmp/escaped", "../escaped", "nested/../../escaped"] {
         let write = runner.execute_tool_call_request(tool_request(
             "call_bad_write",
-            "fs.write",
+            "file_write",
             json!({ "path": path, "content": "no" }),
         ));
         assert_error_result(write, |error| assert_eq!(error["code"], "tool_failed"));
         let patch = runner.execute_tool_call_request(tool_request(
             "call_bad_patch",
-            "fs.patch",
+            "file_patch",
             json!({ "path": path, "patch": "HATCH-PATCH v1\nappend\n---\nno" }),
         ));
         assert_error_result(patch, |error| assert_eq!(error["code"], "tool_failed"));
@@ -541,7 +570,7 @@ fn oversized_tool_result_is_rejected_before_serialization() {
 
     let result = runner.execute_tool_call_request(tool_request(
         "call_large_list",
-        "fs.list",
+        "file_list",
         json!({ "path": "." }),
     ));
     assert_error_result(result, |error| {
@@ -568,7 +597,7 @@ fn canonical_git_diff_returns_workspace_diff() {
 
     let result = runner.execute_tool_call_request(tool_request(
         "call_git_diff",
-        "git.diff",
+        "git_diff",
         json!({ "path": "notes.txt" }),
     ));
 
@@ -601,7 +630,7 @@ fn sidecar_serve_processes_multiple_jsonl_tool_calls() {
                 "type": "tool_call.request",
                 "run_id": "run_sidecar",
                 "tool_call_id": "call_write",
-                "name": "fs.write",
+                "name": "file_write",
                 "arguments": {
                     "path": "notes/sidecar.txt",
                     "content": "sidecar jsonl works\n"
@@ -617,7 +646,7 @@ fn sidecar_serve_processes_multiple_jsonl_tool_calls() {
                 "type": "tool_call.request",
                 "run_id": "run_sidecar",
                 "tool_call_id": "call_read",
-                "name": "fs.read",
+                "name": "file_read",
                 "arguments": {
                     "path": "notes/sidecar.txt"
                 },

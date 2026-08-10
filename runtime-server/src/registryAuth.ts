@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes, randomUUID, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID, scrypt, timingSafeEqual } from "node:crypto";
 import { Pool } from "pg";
 
 export type AccountRole = "user" | "creator";
@@ -19,12 +19,93 @@ export type AuthenticatedSession = { account: Account; session: AccountSession }
 
 const SESSION_IDLE_MS = 30 * 24 * 60 * 60 * 1000;
 const SESSION_ABSOLUTE_MS = 90 * 24 * 60 * 60 * 1000;
+const MAX_EMAIL_LENGTH = 254;
+const MAX_DISPLAY_NAME_LENGTH = 128;
+const MAX_PASSWORD_BYTES = 1024;
+const DUMMY_PASSWORD_SALT = Buffer.from("aGF0Y2gtYXV0aC1kdW1teQ", "base64url");
+const DUMMY_PASSWORD_HASH = "GgnEEGHD4FH61njbBvExGZYO_ElDIZDZYcck-3crTvSAS-ax_FQ6fSLq3jheMCL8H7Ra6SMbFJ6cGx2_g11DVw";
+
+export type PasswordWorkOptions = { concurrency: number; maxQueue: number };
+export const DEFAULT_PASSWORD_WORK_OPTIONS: PasswordWorkOptions = { concurrency: 4, maxQueue: 64 };
+
+export class PasswordWorkCapacityError extends Error {
+  constructor() {
+    super("Authentication password work capacity is exhausted");
+    this.name = "PasswordWorkCapacityError";
+  }
+}
+
+/** Bounds both active libuv scrypt work and the application-side wait queue. */
+export class PasswordHasher {
+  private active = 0;
+  private readonly queue: Array<() => void> = [];
+
+  constructor(private readonly options: PasswordWorkOptions = DEFAULT_PASSWORD_WORK_OPTIONS) {
+    if (!Number.isSafeInteger(options.concurrency) || options.concurrency <= 0) {
+      throw new Error("Password scrypt concurrency must be a positive integer");
+    }
+    if (!Number.isSafeInteger(options.maxQueue) || options.maxQueue < 0) {
+      throw new Error("Password scrypt maxQueue must be a non-negative integer");
+    }
+  }
+
+  async derive(password: string, salt: Buffer): Promise<string> {
+    await this.acquire();
+    try {
+      return await derivePasswordAsync(password, salt);
+    } finally {
+      this.release();
+    }
+  }
+
+  private acquire(): Promise<void> {
+    if (this.active < this.options.concurrency) {
+      this.active += 1;
+      return Promise.resolve();
+    }
+    if (this.queue.length >= this.options.maxQueue) throw new PasswordWorkCapacityError();
+    return new Promise<void>((resolve) => this.queue.push(resolve));
+  }
+
+  private release(): void {
+    const next = this.queue.shift();
+    if (next) next();
+    else this.active -= 1;
+  }
+}
+
+const DEFAULT_PASSWORD_HASHER = new PasswordHasher();
+
+export function passwordWorkOptionsFromEnvironment(
+  environment: NodeJS.ProcessEnv = process.env
+): PasswordWorkOptions {
+  return {
+    concurrency: integerEnvironmentSetting(
+      environment,
+      "HATCH_AUTH_SCRYPT_CONCURRENCY",
+      DEFAULT_PASSWORD_WORK_OPTIONS.concurrency,
+      1,
+      32
+    ),
+    maxQueue: integerEnvironmentSetting(
+      environment,
+      "HATCH_AUTH_SCRYPT_MAX_QUEUE",
+      DEFAULT_PASSWORD_WORK_OPTIONS.maxQueue,
+      0,
+      10_000
+    )
+  };
+}
 
 export class AccountStoreTs {
   private readonly accounts = new Map<string, Account>();
   private readonly sessions = new Map<string, AccountSession>();
+  private readonly accountCreations = new Map<string, Promise<Account>>();
 
-  constructor(private readonly pool?: Pool) {}
+  constructor(
+    private readonly pool?: Pool,
+    private readonly passwordHasher: PasswordHasher = DEFAULT_PASSWORD_HASHER
+  ) {}
 
   async ensureSchema(): Promise<void> {
     if (!this.pool) return;
@@ -54,7 +135,7 @@ export class AccountStoreTs {
   }
 
   async getByEmail(email: string): Promise<Account | undefined> {
-    const normalized = email.trim().toLowerCase();
+    const normalized = normalizeAccountIdentity(email);
     if (!this.pool) return [...this.accounts.values()].find((account) => account.email === normalized);
     const result = await this.pool.query("SELECT id, role, email, display_name, password_salt, password_hash, created_at FROM accounts WHERE email=$1", [normalized]);
     return result.rows[0] ? rowToAccount(result.rows[0]) : undefined;
@@ -67,20 +148,46 @@ export class AccountStoreTs {
   }
 
   async create(email: string, password: string, role: AccountRole, displayName: string): Promise<Account> {
-    const normalized = normalizeSignup(email, password, role, displayName);
-    if (await this.getByEmail(normalized.email)) throw new Error("email_already_registered");
+    const normalized = validateSignupCredentials(email, password, role, displayName);
+    const previous = this.accountCreations.get(normalized.email);
+    const creation = (previous ? previous.catch(() => undefined) : Promise.resolve(undefined))
+      .then(() => this.createOnce(normalized.email, password, role, normalized.displayName));
+    this.accountCreations.set(normalized.email, creation);
+    try {
+      return await creation;
+    } finally {
+      if (this.accountCreations.get(normalized.email) === creation) {
+        this.accountCreations.delete(normalized.email);
+      }
+    }
+  }
+
+  private async createOnce(
+    normalizedEmail: string,
+    password: string,
+    role: AccountRole,
+    normalizedDisplayName: string,
+  ): Promise<Account> {
+    if (await this.getByEmail(normalizedEmail)) throw new Error("email_already_registered");
     const salt = randomBytes(16);
     const account: Account = {
-      id: accountId(role, normalized.displayName),
+      id: accountId(role, normalizedDisplayName),
       role,
-      email: normalized.email,
-      display_name: normalized.displayName,
+      email: normalizedEmail,
+      display_name: normalizedDisplayName,
       password_salt: salt.toString("base64url"),
-      password_hash: derivePassword(password, salt),
+      password_hash: await this.passwordHasher.derive(password, salt),
       created_at: new Date().toISOString(),
     };
     if (this.pool) {
-      await this.pool.query("INSERT INTO accounts (id, role, email, display_name, password_salt, password_hash, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7)", [account.id, account.role, account.email, account.display_name, account.password_salt, account.password_hash, account.created_at]);
+      const result = await this.pool.query(
+        `INSERT INTO accounts (id, role, email, display_name, password_salt, password_hash, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT (email) DO NOTHING
+         RETURNING id`,
+        [account.id, account.role, account.email, account.display_name, account.password_salt, account.password_hash, account.created_at],
+      );
+      if (result.rowCount !== 1) throw new Error("email_already_registered");
     } else this.accounts.set(account.id, account);
     return account;
   }
@@ -133,20 +240,32 @@ export class AccountStoreTs {
       return { account, session: nextSession };
     }
 
-    const result = await this.pool.query(`SELECT
-      s.id, s.account_id, s.token_hash, s.client_type, s.created_at, s.last_seen_at,
-      s.idle_expires_at, s.absolute_expires_at, s.revoked_at,
-      a.id AS account_id_value, a.role, a.email, a.display_name,
-      a.password_salt, a.password_hash, a.created_at AS account_created_at
-      FROM account_sessions AS s
-      JOIN accounts AS a ON a.id = s.account_id
-      WHERE s.token_hash=$1`, [tokenHash]);
+    const nowIso = new Date(now).toISOString();
+    const proposedIdleExpiry = new Date(now + SESSION_IDLE_MS).toISOString();
+    // One conditional UPDATE is the session authority. It cannot return a row
+    // that a concurrent logout has already revoked, and logout cannot return
+    // until an earlier refresh holding the same row lock has completed.
+    const result = await this.pool.query(`UPDATE account_sessions AS s
+      SET last_seen_at=$2::timestamptz,
+          idle_expires_at=LEAST($3::timestamptz, s.absolute_expires_at)
+      FROM accounts AS a
+      WHERE s.token_hash=$1
+        AND a.id=s.account_id
+        AND s.revoked_at IS NULL
+        AND s.idle_expires_at > $2::timestamptz
+        AND s.absolute_expires_at > $2::timestamptz
+      RETURNING
+        s.id, s.account_id, s.token_hash, s.client_type, s.created_at, s.last_seen_at,
+        s.idle_expires_at, s.absolute_expires_at, s.revoked_at,
+        a.id AS account_id_value, a.role, a.email, a.display_name,
+        a.password_salt, a.password_hash, a.created_at AS account_created_at`, [
+      tokenHash,
+      nowIso,
+      proposedIdleExpiry,
+    ]);
     const row = result.rows[0];
     if (!row) return undefined;
-    const session = rowToSession(row);
-    if (!sessionIsActive(session, now)) return undefined;
-    const refreshed = refreshedSession(session, now);
-    await this.pool.query("UPDATE account_sessions SET last_seen_at=$2, idle_expires_at=$3 WHERE id=$1", [session.id, refreshed.last_seen_at, refreshed.idle_expires_at]);
+    const refreshed = rowToSession(row);
     const account: Account = {
       id: String(row.account_id_value),
       role: row.role as AccountRole,
@@ -168,16 +287,44 @@ export class AccountStoreTs {
     }
     this.sessions.delete(tokenHash);
   }
+
+  async verifyPassword(password: string, account: Account | undefined): Promise<boolean> {
+    return verifyPassword(password, account, this.passwordHasher);
+  }
 }
 
 export function accountPublic(account: Account): AccountPublic {
   return { id: account.id, role: account.role, email: account.email, display_name: account.display_name };
 }
 
-export function verifyPassword(password: string, account: Account): boolean {
-  const candidate = Buffer.from(derivePassword(password, Buffer.from(account.password_salt, "base64url")));
-  const expected = Buffer.from(account.password_hash);
-  return candidate.length === expected.length && timingSafeEqual(candidate, expected);
+export function normalizeAccountIdentity(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+export function validateSigninCredentials(email: string, password: string): string {
+  const normalizedEmail = normalizeAccountIdentity(email);
+  if (!normalizedEmail.includes("@") || normalizedEmail.length < 5 || normalizedEmail.length > MAX_EMAIL_LENGTH) {
+    throw new Error("email_invalid");
+  }
+  if (!password) throw new Error("password_required");
+  if (Buffer.byteLength(password, "utf8") > MAX_PASSWORD_BYTES) throw new Error("password_too_long");
+  return normalizedEmail;
+}
+
+/**
+ * Always performs the same scrypt work, including for an unknown account, so
+ * signin failures do not expose account existence through a cheap miss path.
+ */
+export async function verifyPassword(
+  password: string,
+  account: Account | undefined,
+  passwordHasher: PasswordHasher = DEFAULT_PASSWORD_HASHER
+): Promise<boolean> {
+  const salt = account ? Buffer.from(account.password_salt, "base64url") : DUMMY_PASSWORD_SALT;
+  const candidate = Buffer.from(await passwordHasher.derive(password, salt));
+  const expected = Buffer.from(account?.password_hash ?? DUMMY_PASSWORD_HASH);
+  const matches = candidate.length === expected.length && timingSafeEqual(candidate, expected);
+  return Boolean(account) && matches;
 }
 
 export function createAuthToken(account: Account, secret: string, now = Date.now()): string {
@@ -220,22 +367,39 @@ function refreshedSession(session: AccountSession, now: number): AccountSession 
   };
 }
 
-function normalizeSignup(email: string, password: string, role: AccountRole, displayName: string): { email: string; displayName: string } {
-  const normalizedEmail = email.trim().toLowerCase();
+export function validateSignupCredentials(email: string, password: string, role: AccountRole, displayName: string): { email: string; displayName: string } {
+  const normalizedEmail = validateSigninCredentials(email, password);
   const normalizedName = displayName.trim().replace(/\s+/g, " ");
-  if (!normalizedEmail.includes("@") || normalizedEmail.length < 5) throw new Error("email_invalid");
   if (password.length < 8) throw new Error("password_too_short");
   if (role !== "user" && role !== "creator") throw new Error("role_invalid");
   if (!normalizedName) throw new Error("display_name_required");
+  if (normalizedName.length > MAX_DISPLAY_NAME_LENGTH) throw new Error("display_name_too_long");
   return { email: normalizedEmail, displayName: normalizedName };
 }
 
 function accountId(role: AccountRole, displayName: string): string {
   const slug = displayName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const boundedSlug = slug.slice(0, 115).replace(/-+$/g, "");
   const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
-  return `${slug || role}_${suffix}`;
+  return `${boundedSlug || role}_${suffix}`;
 }
-function derivePassword(password: string, salt: Buffer): string { return scryptSync(password, salt, 64, { N: 2 ** 14, r: 8, p: 1 }).toString("base64url"); }
+function derivePasswordAsync(password: string, salt: Buffer): Promise<string> {
+  return new Promise((resolve, reject) => {
+    scrypt(password, salt, 64, { N: 2 ** 14, r: 8, p: 1 }, (error, derivedKey) => {
+      if (error) reject(error);
+      else resolve(derivedKey.toString("base64url"));
+    });
+  });
+}
+function integerEnvironmentSetting(environment: NodeJS.ProcessEnv, name: string, fallback: number, minimum: number, maximum: number): number {
+  const raw = environment[name]?.trim();
+  if (!raw) return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < minimum || value > maximum) {
+    throw new Error(`${name} must be an integer between ${minimum} and ${maximum}`);
+  }
+  return value;
+}
 function encodeJson(value: Record<string, unknown>): string { return Buffer.from(JSON.stringify(value)).toString("base64url"); }
 function sign(value: string, secret: string): string { return createHmac("sha256", secret).update(value).digest("base64url"); }
 function rowToAccount(row: Record<string, any>): Account {

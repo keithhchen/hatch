@@ -27,11 +27,52 @@ export function createDesktopSettingsStore({ read = async () => null, write = as
       else state.accounts[id][key] = value;
       persist();
     },
+    async importProfile(profileId, values) {
+      if (!values || typeof values !== "object" || Array.isArray(values)) {
+        throw new Error("Imported Desktop settings must be an object.");
+      }
+      const id = String(profileId || "anonymous");
+      const previous = state;
+      state = {
+        ...state,
+        accounts: {
+          ...state.accounts,
+          [id]: { ...(state.accounts[id] ?? {}), ...values }
+        }
+      };
+      try {
+        await enqueueWrite(JSON.stringify(state));
+      } catch (error) {
+        state = previous;
+        throw error;
+      }
+      return state.accounts[id];
+    },
     removeProfile(profileId, key) {
       const id = String(profileId || "anonymous");
       if (!state.accounts[id]) return;
       delete state.accounts[id][key];
       persist();
+    },
+    async clearProfileKey(profileId, key) {
+      const id = String(profileId || "anonymous");
+      if (!state.accounts[id] || !(key in state.accounts[id])) return;
+      const previous = state;
+      const nextProfile = { ...state.accounts[id] };
+      delete nextProfile[key];
+      state = {
+        ...state,
+        accounts: {
+          ...state.accounts,
+          [id]: nextProfile
+        }
+      };
+      try {
+        await enqueueWrite(JSON.stringify(state));
+      } catch (error) {
+        state = previous;
+        throw error;
+      }
     },
     snapshot() {
       return JSON.parse(JSON.stringify(state));
@@ -39,12 +80,17 @@ export function createDesktopSettingsStore({ read = async () => null, write = as
   };
 
   function persist() {
-    const serialized = JSON.stringify(state);
-    writeChain = writeChain.then(() => write(serialized)).catch(() => {});
+    void enqueueWrite(JSON.stringify(state));
+  }
+
+  function enqueueWrite(serialized) {
+    const pending = writeChain.then(() => write(serialized));
+    writeChain = pending.catch(() => {});
+    return pending;
   }
 }
 
-export function createTauriSettingsStore(invokeImpl) {
+export function createTauriSettingsStore(invokeImpl, { strict = false } = {}) {
   let fallback = null;
   return createDesktopSettingsStore({
     async read() {
@@ -60,8 +106,9 @@ export function createTauriSettingsStore(invokeImpl) {
       fallback = serialized;
       try {
         await invokeImpl("write_app_settings", { settings: serialized });
-      } catch {
+      } catch (error) {
         // Keep the in-memory fallback for the current renderer lifetime.
+        if (strict) throw error;
       }
     }
   });

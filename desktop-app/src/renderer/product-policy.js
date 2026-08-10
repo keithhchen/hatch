@@ -36,9 +36,9 @@ export const PRODUCT_COPY = Object.freeze({
   activeRunGuard: "This task is still active. Stop or close it before starting another conversation."
 });
 
-export const READ_TOOLS = Object.freeze(["fs.list", "fs.search", "fs.read", "git.diff"]);
-export const SHELL_TOOLS = Object.freeze(["shell.exec"]);
-export const CHANGE_TOOLS = Object.freeze(["fs.write", "fs.patch", ...SHELL_TOOLS]);
+export const READ_TOOLS = Object.freeze(["file_list", "file_search", "file_read", "git_diff"]);
+export const SHELL_TOOLS = Object.freeze(["shell_exec"]);
+export const CHANGE_TOOLS = Object.freeze(["file_write", "file_patch", ...SHELL_TOOLS]);
 
 // This is the complete set of local tools understood by the desktop/runtime
 // protocol. It is a capability declaration, not a grant: the selected
@@ -55,28 +55,31 @@ export const PERMISSION_POLICIES = Object.freeze({
   ALLOW_CHANGES: "allow-changes"
 });
 
+export const PERMISSION_OPTIONS = Object.freeze([
+  Object.freeze({
+    value: PERMISSION_POLICIES.ASK_BEFORE_CHANGES,
+    label: "Ask before changes",
+    detail: "Ask before file changes and shell commands"
+  }),
+  Object.freeze({
+    value: PERMISSION_POLICIES.ALLOW_CHANGES,
+    label: "Allow changes",
+    detail: "Allow file changes and shell commands without asking"
+  })
+]);
+
 // Reads are automatic. File changes and every shell command follow the same
 // user-selected changes policy.
 export const DEFAULT_PERMISSION_POLICY = PERMISSION_POLICIES.ASK_BEFORE_CHANGES;
 
-export const LOCAL_TOOLS_BY_PERMISSION_POLICY = Object.freeze({
-  [PERMISSION_POLICIES.ASK_BEFORE_CHANGES]: PLATFORM_LOCAL_TOOLS,
-  [PERMISSION_POLICIES.ALLOW_CHANGES]: PLATFORM_LOCAL_TOOLS
-});
-
 function assertPermissionPolicy(policy) {
-  if (!Object.hasOwn(LOCAL_TOOLS_BY_PERMISSION_POLICY, policy)) {
+  if (!Object.values(PERMISSION_POLICIES).includes(policy)) {
     throw new Error(`Unknown permission policy: ${policy}`);
   }
 }
 
-export function localToolsForPermissionPolicy(policy = DEFAULT_PERMISSION_POLICY) {
-  assertPermissionPolicy(policy);
-  return LOCAL_TOOLS_BY_PERMISSION_POLICY[policy];
-}
-
 export function normalizePermissionPolicy(policy) {
-  return Object.hasOwn(LOCAL_TOOLS_BY_PERMISSION_POLICY, policy)
+  return Object.values(PERMISSION_POLICIES).includes(policy)
     ? policy
     : DEFAULT_PERMISSION_POLICY;
 }
@@ -84,6 +87,22 @@ export function normalizePermissionPolicy(policy) {
 export function requiresUserApproval(toolName, policy = DEFAULT_PERMISSION_POLICY) {
   assertPermissionPolicy(policy);
   return CHANGE_TOOLS.includes(toolName) && policy !== PERMISSION_POLICIES.ALLOW_CHANGES;
+}
+
+export function shouldRequestDesktopApproval(toolRequest, policy = DEFAULT_PERMISSION_POLICY) {
+  // Runtime metadata cannot turn automatic reads into consent prompts. The
+  // user's Desktop change policy is the sole approval source.
+  return requiresUserApproval(toolRequest?.name, policy);
+}
+
+export function permissionPolicyLabel(policy) {
+  return PERMISSION_OPTIONS.find((option) => option.value === policy)?.label
+    ?? PERMISSION_OPTIONS[0].label;
+}
+
+export function permissionPolicyDetail(policy) {
+  return PERMISSION_OPTIONS.find((option) => option.value === policy)?.detail
+    ?? PERMISSION_OPTIONS[0].detail;
 }
 
 export function canStartConversation({ activeRun, connected }) {

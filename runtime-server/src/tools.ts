@@ -178,8 +178,8 @@ export const toolRegistry = new Map<string, ToolDefinition>([
       required: ["skill_id", "task"]
     }
   }],
-  ["fs.list", {
-    name: "fs.list",
+  ["file_list", {
+    name: "file_list",
     locality: "client",
     approval: "auto",
     description: "List files inside the client-declared local workspace.",
@@ -187,7 +187,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     model: {
       name: "file_list",
       locality: "hybrid",
-      description: "List a server-hosted skill resource directory by full path, or list files inside the client-declared local workspace when fs.list is enabled.",
+      description: "List a server-hosted skill resource directory by full path, or list files inside the client-declared local workspace when file_list is enabled.",
       properties: {
         path: stringSchema("Full skill resource directory path or workspace-relative path to list.")
       },
@@ -195,8 +195,8 @@ export const toolRegistry = new Map<string, ToolDefinition>([
       availability: "always"
     }
   }],
-  ["fs.search", {
-    name: "fs.search",
+  ["file_search", {
+    name: "file_search",
     locality: "client",
     approval: "auto",
     description: "Search files inside the client-declared local workspace.",
@@ -218,8 +218,8 @@ export const toolRegistry = new Map<string, ToolDefinition>([
       availability: "client_capability"
     }
   }],
-  ["fs.read", {
-    name: "fs.read",
+  ["file_read", {
+    name: "file_read",
     locality: "client",
     approval: "auto",
     description: "Read a UTF-8 file inside the client-declared local workspace.",
@@ -227,7 +227,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     model: {
       name: "file_read",
       locality: "hybrid",
-      description: "Read a UTF-8 file. Server-hosted skill bundle paths are read on the server; workspace paths are read by the local client when fs.read is enabled.",
+      description: "Read a UTF-8 file. Server-hosted skill bundle paths are read on the server; workspace paths are read by the local client when file_read is enabled.",
       properties: {
         path: stringSchema("Full skill resource path or workspace-relative file path.")
       },
@@ -235,8 +235,8 @@ export const toolRegistry = new Map<string, ToolDefinition>([
       availability: "always"
     }
   }],
-  ["fs.write", {
-    name: "fs.write",
+  ["file_write", {
+    name: "file_write",
     locality: "client",
     approval: "auto",
     description: "Write a UTF-8 file inside the client-declared local workspace.",
@@ -253,8 +253,8 @@ export const toolRegistry = new Map<string, ToolDefinition>([
       availability: "client_capability"
     }
   }],
-  ["fs.patch", {
-    name: "fs.patch",
+  ["file_patch", {
+    name: "file_patch",
     locality: "client",
     approval: "auto",
     description: "Patch a UTF-8 file inside the client-declared local workspace.",
@@ -271,8 +271,8 @@ export const toolRegistry = new Map<string, ToolDefinition>([
       availability: "client_capability"
     }
   }],
-  ["shell.exec", {
-    name: "shell.exec",
+  ["shell_exec", {
+    name: "shell_exec",
     locality: "client",
     approval: "auto",
     description: "Run a shell command on the user's machine inside the local workspace policy.",
@@ -294,8 +294,8 @@ export const toolRegistry = new Map<string, ToolDefinition>([
       availability: "client_capability"
     }
   }],
-  ["git.diff", {
-    name: "git.diff",
+  ["git_diff", {
+    name: "git_diff",
     locality: "client",
     approval: "auto",
     description: "Read git diff output from the client-declared workspace.",
@@ -312,6 +312,25 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     }
   }]
 ]);
+
+/** Local tools have exactly one name across model, Runtime, persistence, and wire. */
+export function assertClientToolNameInvariant(
+  registry: ReadonlyMap<string, ToolDefinition> = toolRegistry
+): void {
+  for (const [registeredName, tool] of registry) {
+    if (registeredName !== tool.name) {
+      throw new Error(`Tool registry key does not match its canonical name: ${registeredName} != ${tool.name}`);
+    }
+    if (tool.locality !== "client") continue;
+    if (tool.model?.name !== tool.name) {
+      throw new Error(
+        `Client tool must use one canonical name at every boundary: ${tool.name} != ${tool.model?.name ?? "<missing>"}`
+      );
+    }
+  }
+}
+
+assertClientToolNameInvariant();
 
 export function requireTool(name: string): ToolDefinition {
   const tool = toolRegistry.get(name);
@@ -371,7 +390,7 @@ export function requireModelToolDispatch(name: string): ModelToolDispatch {
     spec,
     runtimeName: spec.runtimeName,
     clientTool: spec.clientTool,
-    serverEventName: spec.name,
+    serverEventName: spec.runtimeName,
     clientEventName: spec.clientTool,
     approval: spec.approval
   };

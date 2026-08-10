@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hatch.dev/protocol/hatch-wire-protocol-0.5.schema.json",
+  "$id": "https://hatch.dev/protocol/hatch-wire-protocol-0.6.schema.json",
   "title": "Hatch Wire Protocol",
   "type": "object",
   "oneOf": [
@@ -9,7 +9,7 @@
   ],
   "$defs": {
     "protocolVersion": {
-      "const": "0.5"
+      "const": "0.6"
     },
     "digest": {
       "type": "string",
@@ -18,13 +18,13 @@
     "clientToolName": {
       "type": "string",
       "enum": [
-        "fs.list",
-        "fs.search",
-        "fs.read",
-        "fs.write",
-        "fs.patch",
-        "shell.exec",
-        "git.diff"
+        "file_list",
+        "file_search",
+        "file_read",
+        "file_write",
+        "file_patch",
+        "shell_exec",
+        "git_diff"
       ]
     },
     "toolApproval": {
@@ -52,8 +52,8 @@
       "additionalProperties": false,
       "required": ["code", "message"],
       "properties": {
-        "code": { "type": "string" },
-        "message": { "type": "string" }
+        "code": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "message": { "type": "string", "maxLength": 16384 }
       }
     },
     "conversationMessage": {
@@ -120,17 +120,18 @@
       "properties": {
         "type": { "const": "client.hello" },
         "protocol_version": { "$ref": "#/$defs/protocolVersion" },
-        "installation_id": { "type": "string", "minLength": 1 },
-        "auth_token": { "type": "string", "minLength": 1 },
-        "license_token": { "type": "string", "minLength": 1 },
-        "entitlement_id": { "type": "string", "minLength": 1 },
-        "creator_id": { "type": "string", "minLength": 1 },
-        "agent_id": { "type": "string", "minLength": 1 },
-        "user_id": { "type": "string", "minLength": 1 },
-        "product_id": { "type": "string", "minLength": 1 },
-        "client_version": { "type": "string" },
+        "installation_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "auth_token": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "license_token": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "entitlement_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "creator_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "agent_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "user_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "product_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "client_version": { "type": "string", "maxLength": 256 },
         "local_tools": {
           "type": "array",
+          "maxItems": 7,
           "items": { "$ref": "#/$defs/clientToolName" }
         }
       }
@@ -141,15 +142,15 @@
       "required": ["type", "run_id", "conversation_id", "message"],
       "properties": {
         "type": { "const": "client.message" },
-        "run_id": { "type": "string", "minLength": 1 },
-        "conversation_id": { "type": "string", "minLength": 1 },
+        "run_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "conversation_id": { "type": "string", "minLength": 1, "maxLength": 256 },
         "message": {
           "type": "object",
           "additionalProperties": false,
           "required": ["role", "content"],
           "properties": {
             "role": { "const": "user" },
-            "content": { "type": "string" }
+            "content": { "type": "string", "maxLength": 262144 }
           }
         }
       }
@@ -160,8 +161,8 @@
       "required": ["type", "run_id", "tool_call_id", "status", "result"],
       "properties": {
         "type": { "const": "tool_call.result" },
-        "run_id": { "type": "string", "minLength": 1 },
-        "tool_call_id": { "type": "string", "minLength": 1 },
+        "run_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "tool_call_id": { "type": "string", "minLength": 1, "maxLength": 256 },
         "status": { "const": "ok" },
         "result": { "$ref": "#/$defs/jsonObject" }
       }
@@ -172,8 +173,8 @@
       "required": ["type", "run_id", "tool_call_id", "status", "error"],
       "properties": {
         "type": { "const": "tool_call.result" },
-        "run_id": { "type": "string", "minLength": 1 },
-        "tool_call_id": { "type": "string", "minLength": 1 },
+        "run_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "tool_call_id": { "type": "string", "minLength": 1, "maxLength": 256 },
         "status": { "const": "error" },
         "error": { "$ref": "#/$defs/error" }
       }
@@ -184,8 +185,8 @@
       "required": ["type", "run_id"],
       "properties": {
         "type": { "const": "turn.cancel" },
-        "run_id": { "type": "string", "minLength": 1 },
-        "reason": { "type": "string" }
+        "run_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "reason": { "type": "string", "maxLength": 4096 }
       }
     },
     "inboundMessage": {

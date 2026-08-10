@@ -84,6 +84,9 @@
 
 为避免只依赖 GUI，本次也用同一生产链路执行了可复现 runner：
 
+> 这份证据记录的是当时的 protocol 0.5，因此保留旧名 `fs.read` / `fs.write`。
+> 当前 protocol 0.6 中对应名称是 `file_read` / `file_write`；旧名不再是可调用接口。
+
 - Commerce：创建合成用户、购买 Agent、确认 order 和 entitlement。
 - Runtime：通过生产 WebSocket 执行 `fs.read` × 2 和 `fs.write` × 1。
 - 事件数：26
@@ -110,7 +113,7 @@
 
 初始真实链路会在读取文件后停留在准备阶段，不能稳定产生最终文件。原因是工具证据 handoff 把不必要的工具历史带入了后续模型请求，导致上下文膨胀并破坏边界交付。
 
-处理方式：Runtime 将当前任务和已批准证据压缩为 bounded handoff；文件写入由 Runtime-owned `fs.write` 完成；没有写文件请求时不再错误地携带工具协议。
+处理方式：Runtime 将当前任务和已批准证据压缩为 bounded handoff；当时的文件写入由 Runtime-owned `fs.write`（现为 `file_write`）完成；没有写文件请求时不再错误地携带工具协议。
 
 ### 3. Kimi 默认 thinking 消耗了 bounded delivery 的 completion budget
 

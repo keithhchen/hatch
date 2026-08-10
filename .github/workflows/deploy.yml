@@ -17,8 +17,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  verify-server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify Runtime and Registry
+        working-directory: runtime-server
+        run: |
+          npm ci
+          npm test
+      - name: Verify cross-process Commerce ledger
+        working-directory: packages/commerce
+        run: npm test
+      - name: Verify Creator Dashboard
+        working-directory: creator-dashboard
+        run: |
+          npm ci
+          npm test
+          npm run build
+
   build-and-push:
     runs-on: ubuntu-latest
+    needs: verify-server
     outputs:
       image_prefix: ${{ steps.image.outputs.prefix }}
     steps:
@@ -94,6 +117,7 @@ jobs:
         run: |
           set -euo pipefail
           install -m 640 compose.app.yml /opt/hatch/
+          install -m 640 compose.infra.yml /opt/hatch/
       - name: Install LLM provider credentials
         env:
           DEEPSEEK_API_KEY: ${{ secrets.HATCH_DEEPSEEK_API_KEY }}
@@ -103,6 +127,55 @@ jobs:
           sed -i '/^DEEPSEEK_API_KEY=/d' /opt/hatch/.env
           printf 'DEEPSEEK_API_KEY=%s\n' "$DEEPSEEK_API_KEY" >> /opt/hatch/.env
           chmod 600 /opt/hatch/.env
+      - name: Provision isolated Runtime Postgres role
+        run: |
+          set -euo pipefail
+          cd /opt/hatch
+          test -f .env
+          test -f compose.infra.yml
+          runtime_db_password="$(sed -n 's/^HATCH_RUNTIME_DB_PASSWORD=//p' .env | tail -n 1)"
+          if test -z "$runtime_db_password"; then
+            runtime_db_password="$(openssl rand -hex 32)"
+            sed -i '/^HATCH_RUNTIME_DB_PASSWORD=/d' .env
+            printf 'HATCH_RUNTIME_DB_PASSWORD=%s\n' "$runtime_db_password" >> .env
+            chmod 600 .env
+          fi
+          printf '%s' "$runtime_db_password" | grep -Eq '^[a-f0-9]{64}$' || {
+            echo "HATCH_RUNTIME_DB_PASSWORD must be exactly 64 lowercase hexadecimal characters" >&2
+            exit 1
+          }
+          postgres_user="$(sed -n 's/^POSTGRES_USER=//p' .env | tail -n 1)"
+          postgres_database="$(sed -n 's/^POSTGRES_DB=//p' .env | tail -n 1)"
+          postgres_user="${postgres_user:-hatch}"
+          postgres_database="${postgres_database:-hatch}"
+          for identifier in "$postgres_user" "$postgres_database"; do
+            printf '%s' "$identifier" | grep -Eq '^[A-Za-z_][A-Za-z0-9_]*$' || {
+              echo "POSTGRES_USER and POSTGRES_DB must be simple SQL identifiers" >&2
+              exit 1
+            }
+          done
+          infra=(docker compose --env-file .env -f compose.infra.yml)
+          "${infra[@]}" up -d postgres
+          postgres_ready=0
+          for _attempt in $(seq 1 30); do
+            if "${infra[@]}" exec -T postgres pg_isready -U "$postgres_user" -d "$postgres_database" >/dev/null 2>&1; then
+              postgres_ready=1
+              break
+            fi
+            sleep 2
+          done
+          test "$postgres_ready" = 1 || { echo "Postgres did not become ready for Runtime role provisioning" >&2; exit 1; }
+          {
+            printf "SELECT format('CREATE ROLE hatch_runtime LOGIN PASSWORD %%L', '%s') WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='hatch_runtime') \\gexec\n" "$runtime_db_password"
+            printf "SELECT format('ALTER ROLE hatch_runtime LOGIN PASSWORD %%L', '%s') \\gexec\n" "$runtime_db_password"
+            printf 'CREATE SCHEMA IF NOT EXISTS hatch_runtime AUTHORIZATION hatch_runtime;\n'
+            printf 'ALTER SCHEMA hatch_runtime OWNER TO hatch_runtime;\n'
+            printf 'REVOKE CREATE ON SCHEMA public FROM PUBLIC;\n'
+            printf 'DO $hatch$ BEGIN IF to_regclass('\''public.hatch_conversation_events'\'') IS NOT NULL AND to_regclass('\''hatch_runtime.hatch_conversation_events'\'') IS NULL THEN EXECUTE '\''ALTER TABLE public.hatch_conversation_events SET SCHEMA hatch_runtime'\''; END IF; END $hatch$;\n'
+            printf 'ALTER TABLE IF EXISTS hatch_runtime.hatch_conversation_events OWNER TO hatch_runtime;\n'
+            printf 'ALTER SEQUENCE IF EXISTS hatch_runtime.hatch_conversation_events_id_seq OWNER TO hatch_runtime;\n'
+            printf 'ALTER ROLE hatch_runtime IN DATABASE "%s" SET search_path TO hatch_runtime, pg_catalog;\n' "$postgres_database"
+          } | "${infra[@]}" exec -T postgres psql -q -v ON_ERROR_STOP=1 -U "$postgres_user" -d "$postgres_database"
       - name: Pull and switch application containers
         env:
           GHCR_USERNAME: ${{ github.actor }}
@@ -116,7 +189,7 @@ jobs:
           test -f .env
           test -f compose.app.yml
           grep -q '^HATCH_DOMAIN=' .env
-          for key in LLM_API_KEY DEEPSEEK_API_KEY HATCH_REGISTRY_DATABASE_URL HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN DASHSCOPE_API_KEY POSTGRES_PASSWORD; do
+          for key in LLM_API_KEY DEEPSEEK_API_KEY HATCH_REGISTRY_DATABASE_URL HATCH_RUNTIME_DB_PASSWORD HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN DASHSCOPE_API_KEY POSTGRES_PASSWORD; do
             grep -Eq "^${key}=[^[:space:]]+" .env || { echo "Missing non-empty $key in /opt/hatch/.env"; exit 1; }
           done
           docker network inspect hatch_internal >/dev/null
@@ -185,6 +258,15 @@ jobs:
           test -n "$domain"
           curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/healthz" >/dev/null
           curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/api/health" >/dev/null
+          curl -4 --noproxy '*' --fail --location --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/agents" >/dev/null
+          logout_status="$(curl -4 --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' -X POST "https://$domain/v1/auth/logout")"
+          test "$logout_status" = 204
+          me_status="$(curl -4 --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' "https://$domain/v1/auth/me")"
+          test "$me_status" = 401
+          public_grant_status="$(curl -4 --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' -X POST "https://$domain/v1/user/agents/probe/probe/access")"
+          test "$public_grant_status" = 404
+          private_grant_status="$(curl -4 --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' -X POST "https://$domain/v1/commerce/agent-access")"
+          test "$private_grant_status" = 404
       - name: Roll back application release when health fails
         if: failure()
         run: |

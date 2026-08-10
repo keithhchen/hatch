@@ -1,24 +1,108 @@
 import "dotenv/config";
 import http from "node:http";
 import { URL } from "node:url";
-import { AccountStoreTs, accountPublic, verifyAuthToken, verifyPassword, type Account, type AccountRole } from "./registryAuth.js";
+import {
+  AuthRateLimiter,
+  TrustedProxyPolicy,
+  authRateLimitOptionsFromEnvironment,
+  authRequestSourceIp,
+  authTrustedProxyPolicyFromEnvironment
+} from "./authRateLimit.js";
+import {
+  AccountStoreTs,
+  PasswordHasher,
+  PasswordWorkCapacityError,
+  accountPublic,
+  normalizeAccountIdentity,
+  passwordWorkOptionsFromEnvironment,
+  validateSigninCredentials,
+  validateSignupCredentials,
+  verifyAuthToken,
+  type Account,
+  type AccountRole
+} from "./registryAuth.js";
 import { RegistryStoreTs } from "./registryStore.js";
+import { MAX_AGENT_CORPUS_BUNDLE_BYTES } from "./registryCorpus.js";
+import {
+  HttpRequestGate,
+  PublishWorkGate,
+  SessionQueryGate,
+  httpRequestLimitOptionsFromEnvironment,
+  publishWorkLimitOptionsFromEnvironment,
+  sessionQueryLimitOptionsFromEnvironment,
+  type GateLease,
+} from "./registryRequestLimits.js";
 
 export type RegistryServer = { server: http.Server; close: () => Promise<void> };
+type RegistryContext = {
+  store: RegistryStoreTs;
+  accounts: AccountStoreTs;
+  authRateLimiter: AuthRateLimiter;
+  sessionQueryGate: SessionQueryGate;
+  publishWorkGate: PublishWorkGate;
+  trustedProxies: TrustedProxyPolicy;
+  publishToken: string;
+  runtimeServiceToken: string;
+  commerceServiceToken: string;
+  authSecret: string;
+};
 
 export async function createRegistryServerFromEnvironment(environment: NodeJS.ProcessEnv = process.env): Promise<RegistryServer> {
+  const authRateLimitOptions = authRateLimitOptionsFromEnvironment(environment);
+  const passwordWorkOptions = passwordWorkOptionsFromEnvironment(environment);
+  const trustedProxies = authTrustedProxyPolicyFromEnvironment(environment);
   const store = await RegistryStoreTs.open({ environment });
-  const accounts = new AccountStoreTs(store.databasePool());
+  const accounts = new AccountStoreTs(store.databasePool(), new PasswordHasher(passwordWorkOptions));
   await accounts.ensureSchema();
   const publishToken = environment.HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN?.trim() || "";
   const runtimeServiceToken = environment.HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN?.trim() || "";
+  const commerceServiceToken = environment.HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN?.trim() || "";
   const legacyHmacEnabled = environment.HATCH_ENABLE_LEGACY_HMAC_AUTH?.trim().toLowerCase() === "true";
   const authSecret = legacyHmacEnabled ? environment.HATCH_AUTH_SIGNING_SECRET?.trim() || "" : "";
+  const authRateLimiter = new AuthRateLimiter(authRateLimitOptions);
+  const sessionQueryGate = new SessionQueryGate(sessionQueryLimitOptionsFromEnvironment(environment));
+  const publishWorkGate = new PublishWorkGate(publishWorkLimitOptionsFromEnvironment(environment));
+  const httpLimits = httpRequestLimitOptionsFromEnvironment(environment);
+  const httpRequestGate = new HttpRequestGate(httpLimits);
   const server = http.createServer((request, response) => {
-    void route(request, response, { store, accounts, publishToken, runtimeServiceToken, authSecret }).catch((error) => {
-      sendJson(response, errorStatus(error), { detail: error instanceof Error ? error.message : String(error) });
-    });
+    const suppliedBearer = bearer(request);
+    const internalRuntime = Boolean(
+      (runtimeServiceToken && request.headers["x-hatch-runtime-service-token"] === runtimeServiceToken)
+      || (runtimeServiceToken && suppliedBearer === runtimeServiceToken)
+      || (commerceServiceToken && suppliedBearer === commerceServiceToken)
+      || (publishToken && suppliedBearer === publishToken)
+    );
+    const admission = httpRequestGate.begin(
+      authRequestSourceIp(request, trustedProxies),
+      !internalRuntime,
+    );
+    if (!admission.allowed) {
+      request.resume();
+      response.once("finish", () => request.destroy());
+      sendJson(response, admission.reason === "source_capacity" ? 429 : 503, {
+        detail: "Registry is temporarily busy. Try again shortly.",
+      }, { "retry-after": String(admission.retryAfterSeconds), connection: "close" });
+      return;
+    }
+    const routeTask = route(request, response, { store, accounts, authRateLimiter, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, commerceServiceToken, authSecret })
+      .catch((error) => {
+        const status = errorStatus(error);
+        if (status >= 500) console.error("Registry request failed", error);
+        sendJson(response, status, {
+          detail: status >= 500
+            ? "Registry request failed."
+            : error instanceof SyntaxError
+              ? "Request body must be valid JSON."
+              : error instanceof Error ? error.message : String(error)
+        });
+      });
+    holdAdmissionUntilRequestAndRouteSettle(request, response, routeTask, admission);
   });
+  server.maxConnections = httpLimits.maxConnections;
+  server.headersTimeout = httpLimits.headersTimeoutMs;
+  server.requestTimeout = httpLimits.requestTimeoutMs;
+  server.keepAliveTimeout = 5_000;
+  server.maxHeadersCount = 100;
   const port = Number(environment.REGISTRY_PORT ?? 8100);
   const host = environment.REGISTRY_HOST ?? "127.0.0.1";
   await new Promise<void>((resolve) => server.listen(port, host, resolve));
@@ -31,48 +115,127 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
 async function route(
   request: http.IncomingMessage,
   response: http.ServerResponse,
-  context: { store: RegistryStoreTs; accounts: AccountStoreTs; publishToken: string; runtimeServiceToken: string; authSecret: string },
+  context: RegistryContext,
 ): Promise<void> {
   if (request.method === "OPTIONS") { response.writeHead(204, corsHeaders()); response.end(); return; }
   const url = new URL(request.url ?? "/", "http://registry.local");
   if (request.method === "GET" && url.pathname === "/health") { sendJson(response, 200, { status: "ok" }); return; }
 
   if (url.pathname === "/v1/auth/signup" && request.method === "POST") {
+    if (!beginAuthSourceAttempt(request, response, context)) return;
+    const body = await readJson(request);
+    const email = String(body.email ?? "");
+    const password = String(body.password ?? "");
+    const role = body.role as AccountRole;
+    const displayName = String(body.display_name ?? "");
+    let identity = normalizeAccountIdentity(email);
+    const attempt = context.authRateLimiter.checkIdentity("signup", identity);
     try {
-      const body = await readJson(request);
-      const account = await context.accounts.create(String(body.email ?? ""), String(body.password ?? ""), body.role as AccountRole, String(body.display_name ?? ""));
-      sendJson(response, 201, sessionResponse(account, await context.accounts.createSession(account)));
-    } catch (error) { sendError(response, error, { email_already_registered: [409, "Email is already registered."] }); }
+      identity = validateSignupCredentials(email, password, role, displayName).email;
+    } catch (error) {
+      const failure = context.authRateLimiter.recordFailure("signup", identity);
+      if (attempt.identityLimited) sendRateLimited(response, attempt.retryAfterSeconds);
+      else if (failure.limited) sendRateLimited(response, failure.retryAfterSeconds);
+      else sendAuthInputError(response, error);
+      return;
+    }
+    let account: Account;
+    try {
+      account = await context.accounts.create(email, password, role, displayName);
+    } catch (error) {
+      if (error instanceof PasswordWorkCapacityError) {
+        sendAuthBusy(response);
+        return;
+      }
+      const failure = context.authRateLimiter.recordFailure("signup", identity);
+      if (attempt.identityLimited) sendRateLimited(response, attempt.retryAfterSeconds);
+      else if (failure.limited) sendRateLimited(response, failure.retryAfterSeconds);
+      else sendError(response, error, { email_already_registered: [409, "Email is already registered."] });
+      return;
+    }
+    context.authRateLimiter.recordSuccess("signup", identity);
+    sendAuthJson(response, 201, sessionResponse(account, await context.accounts.createSession(account)));
     return;
   }
   if (url.pathname === "/v1/auth/signin" && request.method === "POST") {
+    if (!beginAuthSourceAttempt(request, response, context)) return;
     const body = await readJson(request);
-    const account = await context.accounts.getByEmail(String(body.email ?? ""));
-    if (!account || !verifyPassword(String(body.password ?? ""), account)) { sendJson(response, 401, { detail: "Email or password is incorrect." }); return; }
-    sendJson(response, 200, sessionResponse(account, await context.accounts.createSession(account)));
+    const email = String(body.email ?? "");
+    const password = String(body.password ?? "");
+    let identity = normalizeAccountIdentity(email);
+    const attempt = context.authRateLimiter.checkIdentity("signin", identity);
+    try {
+      identity = validateSigninCredentials(email, password);
+    } catch (error) {
+      const failure = context.authRateLimiter.recordFailure("signin", identity);
+      if (attempt.identityLimited) sendRateLimited(response, attempt.retryAfterSeconds);
+      else if (failure.limited) sendRateLimited(response, failure.retryAfterSeconds);
+      else sendAuthInputError(response, error);
+      return;
+    }
+    const account = await context.accounts.getByEmail(identity);
+    let passwordMatches: boolean;
+    try {
+      passwordMatches = await context.accounts.verifyPassword(password, account);
+    } catch (error) {
+      if (error instanceof PasswordWorkCapacityError) {
+        sendAuthBusy(response);
+        return;
+      }
+      throw error;
+    }
+    if (!passwordMatches || !account) {
+      const failure = context.authRateLimiter.recordFailure("signin", identity);
+      if (attempt.identityLimited) sendRateLimited(response, attempt.retryAfterSeconds);
+      else if (failure.limited) sendRateLimited(response, failure.retryAfterSeconds);
+      else sendAuthJson(response, 401, { detail: "Email or password is incorrect." });
+      return;
+    }
+    context.authRateLimiter.recordSuccess("signin", identity);
+    sendAuthJson(response, 200, sessionResponse(account, await context.accounts.createSession(account)));
     return;
   }
   if (url.pathname === "/v1/auth/me" && request.method === "GET") {
-    const token = bearer(request);
-    const session = await context.accounts.resolveSession(token);
-    if (session) {
-      sendJson(response, 200, { ...accountPublic(session.account), session_expires_at: session.session.absolute_expires_at });
-      return;
+    const lease = beginSessionQuery(request, response, context);
+    if (!lease) return;
+    try {
+      const token = bearer(request);
+      const session = await context.accounts.resolveSession(token);
+      if (session) {
+        sendAuthJson(response, 200, { ...accountPublic(session.account), session_expires_at: session.session.absolute_expires_at });
+        return;
+      }
+      const account = await authenticateLegacy(token, context.accounts, context.authSecret);
+      if (!account) { sendAuthJson(response, 401, { detail: "A valid account token is required." }); return; }
+      sendAuthJson(response, 200, accountPublic(account));
+    } finally {
+      lease.release();
     }
-    const account = await authenticateLegacy(token, context.accounts, context.authSecret);
-    if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
-    sendJson(response, 200, accountPublic(account));
     return;
   }
   if (url.pathname === "/v1/auth/logout" && request.method === "POST") {
-    await context.accounts.revokeSession(bearer(request));
-    response.writeHead(204, corsHeaders());
-    response.end();
+    const lease = beginSessionQuery(request, response, context);
+    if (!lease) return;
+    try {
+      await context.accounts.revokeSession(bearer(request));
+      response.writeHead(204, { ...corsHeaders(), "cache-control": "no-store" });
+      response.end();
+    } finally {
+      lease.release();
+    }
     return;
   }
 
   if (url.pathname === "/v1/catalog/agents" && request.method === "GET") {
-    sendJson(response, 200, await context.store.listAllAgentCorpora());
+    const limit = boundedQueryInteger(url, "limit", 20, 1, 20);
+    const offset = boundedQueryInteger(url, "offset", 0, 0, 100_000);
+    const rows = await context.store.listAllAgentCorpora({ limit: limit + 1, offset });
+    const page = rows.slice(0, limit);
+    sendJson(response, 200, page, {
+      "x-hatch-page-limit": String(limit),
+      "x-hatch-page-offset": String(offset),
+      ...(rows.length > limit ? { "x-hatch-next-offset": String(offset + limit) } : {}),
+    });
     return;
   }
 
@@ -143,24 +306,51 @@ async function route(
     return;
   }
   if (url.pathname === "/v1/creator/agents" && request.method === "GET") {
-    const account = await authenticate(request, context.accounts, context.authSecret, "creator");
+    const account = await authenticate(request, response, context, "creator");
+    if (account === SESSION_QUERY_REJECTED) return;
     if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
     sendJson(response, 200, await context.store.listAgentCorpora(account.id));
     return;
   }
   if (url.pathname === "/v1/user/agent-access" && request.method === "GET") {
-    const account = await authenticate(request, context.accounts, context.authSecret, "user");
+    const account = await authenticate(request, response, context, "user");
+    if (account === SESSION_QUERY_REJECTED) return;
     if (!account) { sendJson(response, 401, { detail: "A valid user account token is required." }); return; }
-    sendJson(response, 200, context.store.listAgentAccessPresentation(account.id));
+    const requestedEntitlement = url.searchParams.get("entitlement_id");
+    if (requestedEntitlement !== null) {
+      if (!requestedEntitlement || requestedEntitlement.length > 256) {
+        const error = new Error("entitlement_id must contain at most 256 characters.");
+        (error as Error & { status?: number }).status = 400;
+        throw error;
+      }
+      sendJson(
+        response,
+        200,
+        await context.store.listAgentAccessPresentation(account.id, { entitlementId: requestedEntitlement }),
+      );
+      return;
+    }
+    const limit = boundedQueryInteger(url, "limit", 20, 1, 20);
+    const offset = boundedQueryInteger(url, "offset", 0, 0, 100_000);
+    const rows = await context.store.listAgentAccessPresentation(account.id, { limit: limit + 1, offset });
+    const page = rows.slice(0, limit);
+    sendJson(response, 200, page, {
+      "x-hatch-page-limit": String(limit),
+      "x-hatch-page-offset": String(offset),
+      ...(rows.length > limit ? { "x-hatch-next-offset": String(offset + limit) } : {}),
+    });
     return;
   }
-  const accessMatch = url.pathname.match(/^\/v1\/user\/agents\/([^/]+)\/([^/]+)\/access$/);
-  if (accessMatch && request.method === "POST") {
-    const account = await authenticate(request, context.accounts, context.authSecret, "user");
-    if (!account) { sendJson(response, 401, { detail: "A valid user account token is required." }); return; }
-    const body = await readJsonOptional(request);
-    try { sendJson(response, 201, await context.store.grantAgentAccess(account.id, decodeURIComponent(accessMatch[1]!), decodeURIComponent(accessMatch[2]!), typeof body.order_id === "string" ? body.order_id : undefined)); }
-    catch (error) { sendError(response, error, { agent_not_found: [404, "Agent not found."] }); }
+
+  if (url.pathname === "/v1/commerce/agent-access" && request.method === "POST") {
+    requireCommerceServiceAuth(request, context.commerceServiceToken);
+    const body = await readJson(request);
+    const userId = requiredCommerceField(body, "user_id");
+    const creatorId = requiredCommerceField(body, "creator_id");
+    const agentId = requiredCommerceField(body, "agent_id");
+    const orderId = requiredCommerceField(body, "order_id");
+    try { sendJson(response, 201, await context.store.grantAgentAccess(userId, creatorId, agentId, orderId)); }
+    catch (error) { sendError(response, error, { agent_not_found: [404, "Agent not found."], order_id_required: [400, "order_id is required."] }); }
     return;
   }
 
@@ -168,16 +358,31 @@ async function route(
     if (!context.publishToken || bearer(request) !== context.publishToken) { sendJson(response, 403, { detail: "A valid Registry publish token is required." }); return; }
     const creatorId = url.searchParams.get("creator_id") ?? "";
     const agentId = url.searchParams.get("agent_id") ?? "";
-    try { sendJson(response, 201, await context.store.publishAgentCorpusBundle(creatorId, agentId, await readBytes(request))); }
-    catch (error) { sendError(response, error, { agent_not_found: [404, "Agent not found."] }); }
+    const lease = beginPublishWork(response, context, "registry-publish-service", false);
+    if (!lease) return;
+    try {
+      sendJson(response, 201, await context.store.publishAgentCorpusBundle(creatorId, agentId, await readBytes(request, MAX_AGENT_CORPUS_BUNDLE_BYTES)));
+    } catch (error) {
+      sendError(response, error, { agent_not_found: [404, "Agent not found."] });
+    } finally {
+      lease.release();
+    }
     return;
   }
   if (url.pathname === "/v1/creator/agent-corpora" && request.method === "POST") {
-    const account = await authenticate(request, context.accounts, context.authSecret, "creator");
+    const account = await authenticate(request, response, context, "creator");
+    if (account === SESSION_QUERY_REJECTED) return;
     if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
     const agentId = url.searchParams.get("agent_id") ?? "";
-    try { sendJson(response, 201, await context.store.publishAgentCorpusBundle(account.id, agentId, await readBytes(request))); }
-    catch (error) { sendError(response, error); }
+    const lease = beginPublishWork(response, context, `creator:${account.id}`);
+    if (!lease) return;
+    try {
+      sendJson(response, 201, await context.store.publishAgentCorpusBundle(account.id, agentId, await readBytes(request, MAX_AGENT_CORPUS_BUNDLE_BYTES)));
+    } catch (error) {
+      sendError(response, error);
+    } finally {
+      lease.release();
+    }
     return;
   }
   const corpusMatch = url.pathname.match(/^\/v1\/agent-corpora\/([^/]+)(?:\/([^/]+))?$/);
@@ -193,12 +398,25 @@ async function route(
   sendJson(response, 404, { detail: "Route not found." });
 }
 
-async function authenticate(request: http.IncomingMessage, accounts: AccountStoreTs, secret: string, role?: AccountRole): Promise<Account | undefined> {
-  const session = await accounts.resolveSession(bearer(request));
-  if (session && (!role || session.account.role === role)) return session.account;
-  const claims = verifyAuthToken(bearer(request), secret);
-  if (!claims || (role && claims.role !== role)) return undefined;
-  return accounts.getById(claims.sub);
+const SESSION_QUERY_REJECTED = Symbol("session-query-rejected");
+
+async function authenticate(
+  request: http.IncomingMessage,
+  response: http.ServerResponse,
+  context: RegistryContext,
+  role?: AccountRole,
+): Promise<Account | undefined | typeof SESSION_QUERY_REJECTED> {
+  const lease = beginSessionQuery(request, response, context);
+  if (!lease) return SESSION_QUERY_REJECTED;
+  try {
+    const session = await context.accounts.resolveSession(bearer(request));
+    if (session && (!role || session.account.role === role)) return session.account;
+    const claims = verifyAuthToken(bearer(request), context.authSecret);
+    if (!claims || (role && claims.role !== role)) return undefined;
+    return context.accounts.getById(claims.sub);
+  } finally {
+    lease.release();
+  }
 }
 
 async function authenticateLegacy(token: string | undefined, accounts: AccountStoreTs, secret: string): Promise<Account | undefined> {
@@ -234,13 +452,133 @@ function requireRuntimeServiceAuth(request: http.IncomingMessage, configuredToke
   }
 }
 
+function requireCommerceServiceAuth(request: http.IncomingMessage, configuredToken: string): void {
+  if (!configuredToken || bearer(request) !== configuredToken) {
+    const error = new Error("A valid Registry commerce service token is required.");
+    (error as Error & { status?: number }).status = 401;
+    throw error;
+  }
+}
+
+function requiredCommerceField(body: Record<string, unknown>, field: string): string {
+  const value = typeof body[field] === "string" ? body[field].trim() : "";
+  if (!value || value.length > 256) {
+    const error = new Error(`${field} is required and must not exceed 256 characters.`);
+    (error as Error & { status?: number }).status = 400;
+    throw error;
+  }
+  return value;
+}
+
+function boundedQueryInteger(
+  url: URL,
+  name: string,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number {
+  const raw = url.searchParams.get(name);
+  if (raw === null || raw === "") return fallback;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+    const error = new Error(`${name} must be an integer between ${minimum} and ${maximum}.`);
+    (error as Error & { status?: number }).status = 400;
+    throw error;
+  }
+  return value;
+}
+
+function holdAdmissionUntilRequestAndRouteSettle(
+  request: http.IncomingMessage,
+  response: http.ServerResponse,
+  routeTask: Promise<void>,
+  lease: GateLease,
+): void {
+  let routeSettled = false;
+  let requestSettled = request.complete || request.readableEnded || request.destroyed;
+  let released = false;
+  const releaseIfDone = () => {
+    if (released || !routeSettled || !requestSettled) return;
+    released = true;
+    lease.release();
+  };
+  const settleRequest = () => {
+    requestSettled = true;
+    releaseIfDone();
+  };
+  request.once("end", settleRequest);
+  request.once("aborted", settleRequest);
+  request.once("close", settleRequest);
+  response.once("finish", () => {
+    // If a route rejected before consuming a POST body, close that connection
+    // after the response instead of letting an untracked slow upload linger.
+    if (!request.complete && !request.destroyed) request.destroy();
+  });
+  const settleRoute = () => {
+    routeSettled = true;
+    releaseIfDone();
+  };
+  void routeTask.then(settleRoute, settleRoute);
+}
+
+function beginSessionQuery(
+  request: http.IncomingMessage,
+  response: http.ServerResponse,
+  context: RegistryContext,
+): GateLease | undefined {
+  const internalRuntime = context.runtimeServiceToken
+    && request.headers["x-hatch-runtime-service-token"] === context.runtimeServiceToken;
+  const decision = context.sessionQueryGate.begin(
+    authRequestSourceIp(request, context.trustedProxies),
+    !internalRuntime,
+  );
+  if (decision.allowed) return decision;
+  if (decision.reason === "global_capacity") {
+    sendAuthJson(response, 503, { detail: "Authentication is temporarily busy. Try again shortly." }, {
+      "retry-after": String(decision.retryAfterSeconds),
+    });
+  } else {
+    sendAuthJson(response, 429, { detail: "Too many session checks. Try again later." }, {
+      "retry-after": String(decision.retryAfterSeconds),
+    });
+  }
+  return undefined;
+}
+
+function beginPublishWork(
+  response: http.ServerResponse,
+  context: RegistryContext,
+  publisher: string,
+  enforceRate = true,
+): GateLease | undefined {
+  const decision = context.publishWorkGate.begin(publisher, enforceRate);
+  if (decision.allowed) return decision;
+  const publisherLimited = decision.reason === "publisher_capacity" || decision.reason === "publisher_rate";
+  sendJson(
+    response,
+    publisherLimited ? 429 : 503,
+    { detail: "Agent Corpus publishing is temporarily busy. Try again shortly." },
+    { "retry-after": String(decision.retryAfterSeconds) },
+  );
+  return undefined;
+}
+
 function errorStatus(error: unknown): number {
-  return error && typeof error === "object" && typeof (error as { status?: unknown }).status === "number"
-    ? (error as { status: number }).status
-    : 500;
+  if (error && typeof error === "object" && typeof (error as { status?: unknown }).status === "number") {
+    return (error as { status: number }).status;
+  }
+  if (error instanceof SyntaxError) return 400;
+  if (error instanceof Error && error.message === "Request body is too large") return 413;
+  return 500;
 }
 
 async function readBytes(request: http.IncomingMessage, max = 64 * 1024 * 1024): Promise<Uint8Array> {
+  const declaredLength = request.headers["content-length"];
+  if (typeof declaredLength === "string") {
+    const parsedLength = Number(declaredLength);
+    if (!Number.isSafeInteger(parsedLength) || parsedLength < 0) throw new SyntaxError("Content-Length is invalid");
+    if (parsedLength > max) throw new Error("Request body is too large");
+  }
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
@@ -249,7 +587,7 @@ async function readBytes(request: http.IncomingMessage, max = 64 * 1024 * 1024):
     if (size > max) throw new Error("Request body is too large");
     chunks.push(value);
   }
-  return new Uint8Array(Buffer.concat(chunks));
+  return Buffer.concat(chunks, size);
 }
 
 async function readJson(request: http.IncomingMessage): Promise<Record<string, unknown>> {
@@ -258,24 +596,77 @@ async function readJson(request: http.IncomingMessage): Promise<Record<string, u
   return payload as Record<string, unknown>;
 }
 
-async function readJsonOptional(request: http.IncomingMessage): Promise<Record<string, unknown>> {
-  const bytes = await readBytes(request, 1024 * 1024);
-  if (bytes.byteLength === 0) return {};
-  const payload = JSON.parse(Buffer.from(bytes).toString("utf8")) as unknown;
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("JSON body must be an object");
-  return payload as Record<string, unknown>;
+function beginAuthSourceAttempt(
+  request: http.IncomingMessage,
+  response: http.ServerResponse,
+  context: RegistryContext,
+): boolean {
+  const decision = context.authRateLimiter.beginSourceAttempt(
+    authRequestSourceIp(request, context.trustedProxies),
+  );
+  if (decision.allowed) return true;
+  sendRateLimited(response, decision.retryAfterSeconds);
+  return false;
 }
 
-function sendJson(response: http.ServerResponse, status: number, payload: unknown): void {
-  response.writeHead(status, { ...corsHeaders(), "content-type": "application/json; charset=utf-8" });
+function sendRateLimited(response: http.ServerResponse, retryAfterSeconds: number): void {
+  sendAuthJson(response, 429, { detail: "Too many authentication attempts. Try again later." }, {
+    "retry-after": String(retryAfterSeconds)
+  });
+}
+
+function sendAuthBusy(response: http.ServerResponse): void {
+  sendAuthJson(response, 503, { detail: "Authentication is temporarily busy. Try again shortly." }, {
+    "retry-after": "1"
+  });
+}
+
+function sendAuthInputError(response: http.ServerResponse, error: unknown): void {
+  const details: Record<string, string> = {
+    email_invalid: "Enter a valid email address no longer than 254 characters.",
+    password_required: "Enter a password.",
+    password_too_short: "Password must contain at least 8 characters.",
+    password_too_long: "Password must not exceed 1024 UTF-8 bytes.",
+    role_invalid: "Account role must be user or creator.",
+    display_name_required: "Display name is required.",
+    display_name_too_long: "Display name must not exceed 128 characters."
+  };
+  const code = error instanceof Error ? error.message : "auth_input_invalid";
+  sendAuthJson(response, 400, { detail: details[code] ?? "Authentication input is invalid." });
+}
+
+function sendAuthJson(
+  response: http.ServerResponse,
+  status: number,
+  payload: unknown,
+  headers: Record<string, string> = {}
+): void {
+  sendJson(response, status, payload, { "cache-control": "no-store", ...headers });
+}
+
+function sendJson(
+  response: http.ServerResponse,
+  status: number,
+  payload: unknown,
+  headers: Record<string, string> = {}
+): void {
+  response.writeHead(status, { ...corsHeaders(), "content-type": "application/json; charset=utf-8", ...headers });
   response.end(JSON.stringify(payload));
 }
 function sendError(response: http.ServerResponse, error: unknown, known: Record<string, [number, string]> = {}): void {
   const message = error instanceof Error ? error.message : String(error);
-  const [status, detail] = known[message] ?? (error instanceof Error && error.name === "AgentCorpusVerificationError" ? [422, message] : [422, message]);
-  sendJson(response, status, { detail });
+  const expected = known[message];
+  if (expected) {
+    sendJson(response, expected[0], { detail: expected[1] });
+    return;
+  }
+  if (error instanceof Error && error.name === "AgentCorpusVerificationError") {
+    sendJson(response, 422, { detail: message });
+    return;
+  }
+  throw error;
 }
-function corsHeaders(): Record<string, string> { return { "access-control-allow-origin": "*", "access-control-allow-methods": "GET,POST,OPTIONS", "access-control-allow-headers": "authorization,content-type,x-hatch-creator-id" }; }
+function corsHeaders(): Record<string, string> { return { "access-control-allow-origin": "*", "access-control-allow-methods": "GET,POST,OPTIONS", "access-control-allow-headers": "authorization,content-type,x-hatch-creator-id", "access-control-expose-headers": "retry-after,x-hatch-page-limit,x-hatch-page-offset,x-hatch-next-offset" }; }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   createRegistryServerFromEnvironment().then(({ server }) => {

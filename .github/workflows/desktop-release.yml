@@ -11,6 +11,10 @@ permissions:
 jobs:
   macos-dmg:
     runs-on: macos-latest
+    # Configure required reviewers on this Environment. Their checklist must
+    # include the signed-app picker → file_list → shell_exec Workspace smoke for
+    # the exact release commit; a permanent repository boolean is not evidence.
+    environment: desktop-production
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -26,15 +30,60 @@ jobs:
       - name: Install frontend dependencies
         working-directory: desktop-app
         run: npm ci
+      - name: Verify native Workspace grant and Desktop bridge
+        run: |
+          cargo test --locked --manifest-path local-runner/Cargo.toml
+          cargo test --locked --manifest-path desktop-app/src-tauri/Cargo.toml
       - name: Renderer tests
         working-directory: desktop-app
         run: npm run test:renderer
-      - name: Build unsigned distribution DMG
+      - name: Require signed release inputs
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
+          APPLE_NOTARY_APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
+          APPLE_NOTARY_PASSWORD: ${{ secrets.APPLE_NOTARY_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          HATCH_SIGNED_WORKSPACE_SMOKE_SHA: ${{ vars.HATCH_SIGNED_WORKSPACE_SMOKE_SHA }}
+        run: |
+          test -n "$APPLE_CERTIFICATE_P12_BASE64" || { echo "Missing APPLE_CERTIFICATE_P12_BASE64 release secret" >&2; exit 1; }
+          test -n "$APPLE_CERTIFICATE_PASSWORD" || { echo "Missing APPLE_CERTIFICATE_PASSWORD release secret" >&2; exit 1; }
+          test -n "$APPLE_SIGNING_IDENTITY" || { echo "Missing APPLE_SIGNING_IDENTITY release variable" >&2; exit 1; }
+          test -n "$APPLE_NOTARY_APPLE_ID" || { echo "Missing APPLE_NOTARY_APPLE_ID release secret" >&2; exit 1; }
+          test -n "$APPLE_NOTARY_PASSWORD" || { echo "Missing APPLE_NOTARY_PASSWORD release secret" >&2; exit 1; }
+          test -n "$APPLE_TEAM_ID" || { echo "Missing APPLE_TEAM_ID release secret" >&2; exit 1; }
+          test "$HATCH_SIGNED_WORKSPACE_SMOKE_SHA" = "$GITHUB_SHA" || { echo "HATCH_SIGNED_WORKSPACE_SMOKE_SHA must equal this exact release commit after signed-app UAT" >&2; exit 1; }
+      - name: Import Developer ID certificate
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          p12-password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      - name: Build Developer ID-signed distribution DMG
         working-directory: desktop-app
         env:
           HATCH_DISTRIBUTION_BUILD: "1"
+          APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
           VITE_HATCH_RUNTIME_URL: ${{ vars.HATCH_RUNTIME_URL || 'wss://hatch.tokenquadrant.cn/v1/runtime' }}
         run: npm run build:distribution
+      - name: Notarize and staple distribution DMG
+        working-directory: desktop-app
+        env:
+          APPLE_NOTARY_APPLE_ID: ${{ secrets.APPLE_NOTARY_APPLE_ID }}
+          APPLE_NOTARY_PASSWORD: ${{ secrets.APPLE_NOTARY_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          dmg_files=(src-tauri/target/release/bundle/dmg/*.dmg)
+          test "${#dmg_files[@]}" -eq 1 || { echo "Expected exactly one distribution DMG" >&2; exit 1; }
+          test -f "${dmg_files[0]}" || { echo "Distribution DMG was not produced" >&2; exit 1; }
+          xcrun notarytool submit "${dmg_files[0]}" \
+            --apple-id "$APPLE_NOTARY_APPLE_ID" \
+            --password "$APPLE_NOTARY_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait
+          xcrun stapler staple "${dmg_files[0]}"
+          xcrun stapler validate "${dmg_files[0]}"
+          shasum -a 256 "${dmg_files[0]}"
       - name: Upload DMG artifact
         uses: actions/upload-artifact@v4
         with:
