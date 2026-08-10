@@ -41,7 +41,6 @@ import {
   loadSavedAuthSession,
   validateAndSaveAuthSession
 } from "./auth-session.js";
-import { takeAssistantAnimationChunk } from "./text-animation.js";
 
 const PROTOCOL_VERSION = "0.4";
 const OUTPUT_FILTERED_COPY = "This response was blocked by the output safety check.";
@@ -78,7 +77,6 @@ function App() {
   const reconnectAttemptRef = useRef(0);
   const intentionalDisconnectRef = useRef(true);
   const approvalResolversRef = useRef(new Map());
-  const textAnimationRef = useRef(new Map());
   const [serverUrl] = useState(DEFAULT_RUNTIME_URL);
   const [workspace, setWorkspace] = useState("");
   const [workspaceDraft, setWorkspaceDraft] = useState("");
@@ -100,13 +98,6 @@ function App() {
   const [approvalRequests, setApprovalRequests] = useState({});
   const [creatorAgent, setCreatorAgent] = useState(DEFAULT_CREATOR_AGENT);
   const buyerProfile = buyerSession?.profile ?? EMPTY_PROFILE;
-
-  useEffect(() => () => {
-    for (const animation of textAnimationRef.current.values()) {
-      window.cancelAnimationFrame(animation.frame);
-    }
-    textAnimationRef.current.clear();
-  }, []);
 
   const send = useCallback((message) => {
     const socket = socketRef.current;
@@ -419,8 +410,9 @@ function App() {
         const activeRun = activeRunRef.current;
         if (!activeRun) return;
         activeRun.timing.firstSafeDeltaReceivedAt ??= Date.now();
+        activeRun.timing.firstTextPaintAt ??= Date.now();
         activeRun.text += message.delta.content;
-        enqueueAssistantText(activeRun.assistantId, message.delta.content);
+        appendAssistantText(activeRun.assistantId, message.delta.content);
       } else {
         setStatus(message.delta.content);
         updateAssistantMetadataForRun(message.run_id, {
@@ -484,17 +476,11 @@ function App() {
         activeRun.timing.turnCompletedReceivedAt = Date.now();
         activeRun.timing.server = message.timing;
         if (message.finish_reason === "content_filter") {
-          cancelAssistantTextAnimation(activeRun.assistantId);
           finishAssistant(activeRun.assistantId, OUTPUT_FILTERED_COPY, "content_filter");
-          saveAssistantTiming(activeRun.assistantId, activeRun.runId, activeRun.timing, Date.now());
         } else {
-          finishAssistantAfterAnimation(
-            activeRun.assistantId,
-            activeRun.text || "Done.",
-            activeRun.runId,
-            activeRun.timing
-          );
+          finishAssistant(activeRun.assistantId, activeRun.text || "Done.", "completed");
         }
+        saveAssistantTiming(activeRun.assistantId, activeRun.runId, activeRun.timing, Date.now());
       }
       activeRunRef.current = null;
       localStorage.removeItem(profileStorageKey(buyerProfile.id, "activeRun"));
@@ -508,7 +494,6 @@ function App() {
       const activeRun = activeRunRef.current;
       const text = `Run failed: ${message.error?.message || "Unknown error"}`;
       if (activeRun) {
-        cancelAssistantTextAnimation(activeRun.assistantId);
         finishAssistant(activeRun.assistantId, text, "failed");
       } else {
         setMessages((current) => [
@@ -827,65 +812,6 @@ function App() {
         status: { type: "running" }
       };
     }));
-  }
-
-  function enqueueAssistantText(id, content) {
-    if (!content) return;
-    let animation = textAnimationRef.current.get(id);
-    if (!animation) {
-      animation = {
-        pending: "",
-        frame: 0,
-        onDrained: null,
-        timing: activeRunRef.current?.assistantId === id
-          ? activeRunRef.current.timing
-          : undefined
-      };
-      textAnimationRef.current.set(id, animation);
-    }
-    animation.pending += content;
-    scheduleAssistantTextFrame(id, animation);
-  }
-
-  function scheduleAssistantTextFrame(id, animation) {
-    if (animation.frame) return;
-    animation.frame = window.requestAnimationFrame(() => {
-      animation.frame = 0;
-      const { chunk, remaining } = takeAssistantAnimationChunk(animation.pending);
-      animation.pending = remaining;
-      if (chunk) {
-        if (animation.timing) animation.timing.firstTextPaintAt ??= Date.now();
-        appendAssistantText(id, chunk);
-      }
-      if (animation.pending) {
-        scheduleAssistantTextFrame(id, animation);
-        return;
-      }
-      const onDrained = animation.onDrained;
-      textAnimationRef.current.delete(id);
-      onDrained?.();
-    });
-  }
-
-  function finishAssistantAfterAnimation(id, text, runId, timing) {
-    const animation = textAnimationRef.current.get(id);
-    if (!animation || (!animation.pending && !animation.frame)) {
-      textAnimationRef.current.delete(id);
-      finishAssistant(id, text, "completed");
-      saveAssistantTiming(id, runId, timing, Date.now());
-      return;
-    }
-    animation.onDrained = () => {
-      finishAssistant(id, text, "completed");
-      saveAssistantTiming(id, runId, timing, Date.now());
-    };
-  }
-
-  function cancelAssistantTextAnimation(id) {
-    const animation = textAnimationRef.current.get(id);
-    if (!animation) return;
-    window.cancelAnimationFrame(animation.frame);
-    textAnimationRef.current.delete(id);
   }
 
   function saveAssistantTiming(id, runId, timing, fullResponseAt) {
@@ -1791,10 +1717,7 @@ function reportTurnTiming(runId, timing, fullResponseAt) {
       question_to_first_safe_delta: sinceQuestion(timing.firstSafeDeltaReceivedAt),
       question_to_first_text_paint: sinceQuestion(timing.firstTextPaintAt),
       question_to_turn_completed: sinceQuestion(timing.turnCompletedReceivedAt),
-      question_to_full_response: sinceQuestion(fullResponseAt),
-      animation_tail: timing.turnCompletedReceivedAt === undefined
-        ? undefined
-        : Math.max(0, fullResponseAt - timing.turnCompletedReceivedAt)
+      question_to_full_response: sinceQuestion(fullResponseAt)
     },
     server_ms: timing.server
   };
