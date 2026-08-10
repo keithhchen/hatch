@@ -4,6 +4,9 @@ These captures are macOS UAT evidence for the Tauri Hybrid shell. They are
 not a substitute for Windows, VoiceOver, Narrator, signed-package, DPI, IME,
 or multi-monitor acceptance.
 
+For the requirement-by-requirement status and explicit evidence boundaries, see
+[acceptance-matrix.md](acceptance-matrix.md).
+
 The regular/compact/minimal captures use the development-only `DesktopPreview`
 fixture and a sizing harness so the shell can be exercised without an account;
 they prove pane composition and structured-content behavior, not cloud
@@ -27,6 +30,7 @@ ad-hoc `.app`.
 - LocalRunner: 43 tests passed (filesystem, shell and macOS Seatbelt suites)
 - `npm run build:web`
 - `npm run build:app` (release `.app`, ad-hoc/UAT; not a publishable notarized artifact)
+- `npm run build` (strict ad-hoc/UAT DMG verification; not a publishable notarized artifact)
 
 The native menu was also exercised against the built `.app`: View exposes
 Show Sidebar, Show Inspector, Zoom In, Zoom Out, Actual Size, and Enter Full
