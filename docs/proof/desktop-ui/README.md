@@ -42,7 +42,7 @@ distribution builds.
 
 - Renderer: 20 files / 82 tests
 - Rust Tauri library: 36 passed / 1 ignored (unlocked Keychain smoke)
-- Runtime: 225 Node subtests passed with an isolated `HATCH_RUNTIME_DATA_DIR`
+- Runtime: 226 Node subtests passed with an isolated `HATCH_RUNTIME_DATA_DIR`
 - LocalRunner: 43 tests passed (filesystem, shell and macOS Seatbelt suites)
 - `npm run build:web`
 - `npm run build:app` (release `.app`, ad-hoc/UAT; not a publishable notarized artifact)

@@ -30,7 +30,7 @@ macOS UAT 证据：
 - [Minimal Sidebar overlay](proof/desktop-ui/minimal-sidebar-overlay.png)
 - [Minimal Inspector overlay](proof/desktop-ui/minimal-inspector-overlay.png)
 
-已通过的自动验证（2026-08-11 当前 worktree）：Renderer `20 files / 82 tests`；Rust `36 passed / 1 ignored Keychain smoke`；Runtime Node test `225 passed`；LocalRunner `43 passed`；Web build；Tauri release `.app` build；production-session `cargo check`。Runtime 验证必须使用独立的 `HATCH_RUNTIME_DATA_DIR`，避免复用旧的 durable idempotency fixture。
+已通过的自动验证（2026-08-11 当前 worktree）：Renderer `20 files / 82 tests`；Rust `36 passed / 1 ignored Keychain smoke`；Runtime Node test `226 passed`；LocalRunner `43 passed`；Web build；Tauri release `.app` build；production-session `cargo check`。Runtime 验证必须使用独立的 `HATCH_RUNTIME_DATA_DIR`，避免复用旧的 durable idempotency fixture。
 
 详细的逐条状态、证据和外部验收边界见 [Desktop UI v1 验收矩阵](proof/desktop-ui/acceptance-matrix.md)。矩阵区分本机 PASS、实现但缺环境的 PARTIAL/EXTERNAL，以及明确延期的 DEFERRED；本 spec 在 P4 所列跨平台条件全部通过前不会标记为 complete。
 
