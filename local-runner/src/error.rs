@@ -48,6 +48,12 @@ pub enum LocalRunnerError {
         exit_code: i32,
         stderr: String,
     },
+    #[error("secure shell sandbox is unavailable: {0}")]
+    ShellSandboxUnavailable(String),
+    #[error("secure shell sandbox initialization failed: {0}")]
+    ShellSandboxInitialization(String),
+    #[error("local tool execution was cancelled")]
+    ToolExecutionCancelled,
     #[error("spreadsheet read error at {path}: {message}")]
     SpreadsheetRead { path: String, message: String },
     #[error("io error at {}: {source}", path.display())]

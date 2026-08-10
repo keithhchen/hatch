@@ -2,6 +2,8 @@ use crate::{LocalRunner, LocalRunnerError};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 pub const MAX_TOOL_RESULT_BYTES: usize = 4 * 1024 * 1024;
 
@@ -46,12 +48,28 @@ pub struct ToolCallError {
 
 impl LocalRunner {
     pub fn execute_tool_call_request(&self, request: ToolCallRequest) -> ToolCallResult {
+        self.execute_tool_call_request_with_cancel(request, Arc::new(AtomicBool::new(false)))
+    }
+
+    pub fn execute_tool_call_request_with_cancel(
+        &self,
+        request: ToolCallRequest,
+        cancel: Arc<AtomicBool>,
+    ) -> ToolCallResult {
         if request.message_type != "tool_call.request" {
             return tool_call_error(
                 request.run_id,
                 request.tool_call_id,
                 "invalid_tool_call",
                 format!("expected tool_call.request, got {}", request.message_type),
+            );
+        }
+        if cancel.load(Ordering::Acquire) {
+            return tool_call_error(
+                request.run_id,
+                request.tool_call_id,
+                "cancelled",
+                "local tool execution was cancelled",
             );
         }
 
@@ -63,7 +81,7 @@ impl LocalRunner {
             "fs.read" => self.protocol_fs_read(&request.arguments),
             "fs.write" => self.protocol_fs_write(&request.arguments),
             "fs.patch" => self.protocol_fs_patch(&request.arguments),
-            "shell.exec" => self.protocol_shell_exec(&request.arguments),
+            "shell.exec" => self.protocol_shell_exec(&request.arguments, cancel.as_ref()),
             "git.diff" => self.protocol_git_diff(&request.arguments),
             _ => Err(ProtocolToolError::UnsupportedTool(request.name)),
         };
@@ -148,13 +166,13 @@ impl LocalRunner {
         Ok(json!({ "diff": diff }))
     }
 
-    fn protocol_shell_exec(&self, arguments: &Value) -> ProtocolResult {
+    fn protocol_shell_exec(&self, arguments: &Value, cancel: &AtomicBool) -> ProtocolResult {
         let command = string_argument(arguments, "command", None)?;
         let timeout_ms = usize_argument(arguments, "timeout_ms", Some(30_000))?;
         if !(100..=120_000).contains(&timeout_ms) {
             return Err(ProtocolToolError::InvalidTimeout);
         }
-        let output = self.shell_exec(&command, timeout_ms as u64)?;
+        let output = self.shell_exec_with_cancel(&command, timeout_ms as u64, cancel)?;
         Ok(json!({
             "stdout": output.stdout,
             "stderr": output.stderr,
@@ -194,6 +212,11 @@ impl ProtocolToolError {
             Self::Runner(LocalRunnerError::FileTooLarge { .. })
             | Self::Runner(LocalRunnerError::RenderedFileTooLarge { .. }) => "file_too_large",
             Self::InvalidTimeout => "invalid_tool_call",
+            Self::Runner(LocalRunnerError::ShellSandboxUnavailable(_)) => {
+                "shell_sandbox_unavailable"
+            }
+            Self::Runner(LocalRunnerError::ShellSandboxInitialization(_)) => "shell_sandbox_failed",
+            Self::Runner(LocalRunnerError::ToolExecutionCancelled) => "cancelled",
             Self::Runner(_) => "tool_failed",
         }
     }

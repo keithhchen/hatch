@@ -85,10 +85,26 @@ Supported canonical local tools today:
 - `shell.exec`
 - `git.diff`
 
-`shell.exec` runs `sh -lc` inside the sandbox root, kills the process after
-`timeout_ms`, and returns `stdout`, `stderr`, `exit_code`, `timed_out`, and
-truncation flags. Both pipes are continuously drained, each retains at most
-1 MiB, and the returned stdout/stderr combined are capped at 1 MiB. `fs.read`
+On macOS, `shell.exec` runs `/bin/sh -c` under `/usr/bin/sandbox-exec` with a
+deny-by-default Seatbelt profile. It canonicalizes the Workspace, grants
+read/write access only to that subtree, leaves required system runtimes
+read-only, denies network and ambient IPC (including Unix sockets, Keychain,
+Apple Events, launchd, and access to outside processes), and clears the parent
+environment. `HOME` and `TMPDIR` point to a per-call hidden scratch directory
+inside the Workspace, which is removed after execution. Canonical Workspace
+paths in stdout and stderr are replaced with `<WORKSPACE>`.
+
+If Seatbelt or its self-check is unavailable, shell execution fails closed;
+there is no unsafe host-shell fallback. Non-macOS builds likewise reject only
+`shell.exec` with `shell_sandbox_unavailable`; typed filesystem tools remain
+available. An App-Sandboxed host must arrange for the shell execution process
+itself to resolve the Workspace bookmark. A dynamic PowerBox grant activated
+only in the parent process is not inherited by a spawned shell.
+
+Shell execution kills its process group after `timeout_ms` or when the caller's
+cancellation token is set, and returns `stdout`, `stderr`, `exit_code`,
+`timed_out`, and truncation flags. Both pipes are continuously drained and the
+returned stdout/stderr combined are capped at 1 MiB. `fs.read`
 rejects ordinary files larger than 1 MiB and rejects XLSX files whose rendered
 text exceeds 1 MiB with `file_too_large`; it never silently truncates file
 content. The serialized local `tool_call.result` envelope is capped at 4 MiB.

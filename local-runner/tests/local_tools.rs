@@ -7,6 +7,8 @@ use std::fs;
 use std::io::Write;
 use std::process::Command;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use tempfile::tempdir;
 
 #[test]
@@ -442,7 +444,7 @@ fn canonical_tool_call_result_rejects_unknown_local_tools() {
     });
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
 #[test]
 fn canonical_shell_exec_runs() {
     let temp = tempdir().unwrap();
@@ -463,6 +465,38 @@ fn canonical_shell_exec_runs() {
     });
 }
 
+#[cfg(not(target_os = "macos"))]
+#[test]
+fn shell_exec_fails_closed_without_a_supported_sandbox_backend() {
+    let temp = tempdir().unwrap();
+    let runner = LocalRunner::new(temp.path()).unwrap();
+    let result = runner.execute_tool_call_request(tool_request(
+        "call_shell_unsupported",
+        "shell.exec",
+        json!({ "command": "printf unsafe", "timeout_ms": 30000 }),
+    ));
+    assert_error_result(result, |error| {
+        assert_eq!(error["code"], "shell_sandbox_unavailable");
+        assert!(error["message"].as_str().unwrap().contains("refusing"));
+    });
+}
+
+#[test]
+fn pre_cancelled_tool_call_returns_a_structured_cancellation() {
+    let temp = tempdir().unwrap();
+    let runner = LocalRunner::new(temp.path()).unwrap();
+    let cancel = Arc::new(AtomicBool::new(true));
+    assert!(cancel.load(Ordering::Acquire));
+    let result = runner.execute_tool_call_request_with_cancel(
+        tool_request("call_cancelled", "fs.list", json!({ "path": "." })),
+        cancel,
+    );
+    assert_error_result(result, |error| {
+        assert_eq!(error["code"], "cancelled");
+        assert_eq!(error["message"], "local tool execution was cancelled");
+    });
+}
+
 #[test]
 fn shell_exec_rejects_timeouts_outside_the_runtime_contract() {
     let temp = tempdir().unwrap();
@@ -472,7 +506,9 @@ fn shell_exec_rejects_timeouts_outside_the_runtime_contract() {
         "shell.exec",
         json!({ "command": "printf hatch", "timeout_ms": 99 }),
     ));
-    assert_error_result(result, |error| assert_eq!(error["code"], "invalid_tool_call"));
+    assert_error_result(result, |error| {
+        assert_eq!(error["code"], "invalid_tool_call")
+    });
 }
 
 #[test]
