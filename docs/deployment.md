@@ -132,6 +132,8 @@ Keychain, and are never published.
 There is no Windows distribution lane yet. In particular, a signed `.exe`,
 NSIS/MSI installer, or `HATCH_PERSISTENT_SESSION=1` alone must not enable
 opaque-token persistence: Win32 Generic Credential Manager entries are scoped
-to the user rather than Hatch's app identity. A Windows release lane remains
-blocked on MSIX package identity, AppContainer Credential Locker, package/
-publisher verification, and the corresponding signed-package UAT.
+to the user rather than Hatch's app identity, and PasswordVault/Credential Locker
+does not provide the required Hatch-only bearer-token boundary against another
+same-user full-trust process. A Windows release lane remains blocked on a
+device-bound/session-challenge backend, its package/publisher verification,
+same-user negative tests, and the corresponding signed-package UAT.

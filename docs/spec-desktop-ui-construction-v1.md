@@ -292,7 +292,7 @@ Tokens 使用语义命名，例如 `surface.sidebar`、`border.separator`、`tex
    - 当前服务端使用 opaque session token，不存在需要在本计划中虚构的 refresh/access token 分层；
    - macOS 正式签名包将 opaque session token 保存到 Keychain，并把 settings 迁入 Native app-data；Windows 不能把 Win32 Generic Credential Manager 当作对等实现：Microsoft 明确该类 credential 可由 user processes 读写，Authenticode 不能把它变成 app-only vault；
    - `tauri dev` 与 ad-hoc UAT 默认不读写真实 secure store，避免临时 code identity 反复触发系统解锁；
-   - 只有 CI 明确设置 `HATCH_PERSISTENT_SESSION=1`、完成稳定签名与 identity 校验的发行包才启用持久 secure storage；macOS 还必须编入预期 Team ID，并在 runtime 以 Security.framework 验证 Developer ID Application、bundle identifier 与 Team ID。Windows 当前遇到该 flag 必须 fail-closed，直到 MSIX package identity + AppContainer Credential Locker + runtime package verification 可用；
+   - 只有 CI 明确设置 `HATCH_PERSISTENT_SESSION=1`、完成稳定签名与 identity 校验的发行包才启用持久 secure storage；macOS 还必须编入预期 Team ID，并在 runtime 以 Security.framework 验证 Developer ID Application、bundle identifier 与 Team ID。Windows 当前遇到该 flag 必须 fail-closed；只有在另立的 device-bound/session-challenge backend 证明了 app-only 或设备绑定边界，并通过同用户 full-trust 进程负测、签名发布与真机 UAT 后，才可讨论持久化，不把 MSIX/AppContainer PasswordVault 当作充分条件；
    - production credential namespace 与历史 dev/UAT Keychain item 分离，启动不迁移旧 item；不能为消除系统提示而放宽 ACL、调用 `security` CLI 或回退到 Web Storage；
    - 同步最新 master 后先验证已有行为和 tests，再处理剩余平台缺口。
 6. 在 Rust 中建立最小 `WorkspaceContext`，复用现有 Native `WorkspaceGrantStore`，但不把它扩展成通用权限平台：
@@ -474,7 +474,7 @@ V1 只有在以下条件全部通过后才算完成：
 建议拆分为以下 Pull Requests：
 
 1. 集成基线、ADR、version locking 与 capabilities。
-2. 实现 Windows secure session storage：MSIX package identity、AppContainer Credential Locker、runtime package identity verification、Windows signing CI 与真机验收；在此之前保持进程内 session，并实现最小 Rust WorkspaceContext 与 approval state。
+2. 单独评估 Windows secure session backend：优先 device-bound/session-challenge 或 Windows Hello/passkey 方案；必须先完成 threat-model、同用户 full-trust 负测、Windows signing CI 与真机验收。在此之前保持进程内 session，并实现最小 Rust WorkspaceContext 与 approval state。
 3. Desktop primitives、title-bar treatment 与 resizable split layout。
 4. Conversation 与 Run service contracts。
 5. Conversation Library、multi-window lifecycle 与 restoration。

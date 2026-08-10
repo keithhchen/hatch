@@ -307,17 +307,18 @@ name 增加 app-only ACL。因此即使 Windows build 意外带有
 `HATCH_PERSISTENT_SESSION=1`，Native bridge 也必须 fail closed；正常 Windows
 dev/UAT/当前 release candidate 都保持进程内 session。
 
-要启用 Windows persistent session，必须作为独立 release capability 同时交付：
+要启用 Windows persistent session，必须先作为独立 release capability 交付一个
+经过 threat-model 证明的 device-bound/session-challenge backend，并同时完成：
 
-1. MSIX package identity 与受信任的 package signing CI；
-2. AppContainer-bound Credential Locker/PasswordVault backend（普通 desktop process
-   可访问所有 user lockers，不足以满足此边界）；
-3. runtime `GetCurrentPackageFullName`/package identity verification，以及 signer/
-   publisher 与 release configuration 的一致性检查；
-4. Windows 真机 UAT：新装、登录、重启、退出、更新、损坏/未签名包、不同 user 与
+1. 明确证明 app-only 或设备绑定边界；同用户 full-trust 进程的读取/重放负测必须
+   失败。MSIX package identity、Authenticode 或 AppContainer runtime gate 本身不足以
+   把 PasswordVault/Credential Locker 变成 Hatch-only bearer-token vault；
+2. 受信任的 Windows signing CI、package/publisher verification，以及 backend 的
+   runtime identity checks；
+3. Windows 真机 UAT：新装、登录、重启、退出、更新、损坏/未签名包、不同 user 与
    另一 app 的 credential-access negative test；
-5. Tauri 的 workspace picker、file drop、WebView2、shell fail-closed 路径在
-   AppContainer 权限模型下重新验收。
+4. Tauri 的 workspace picker、file drop、WebView2、shell fail-closed 路径在该
+   backend 与打包权限模型下重新验收。
 
 在这些条件满足前，不得通过 Generic Credential Manager、DPAPI-user scope、app-data
 文件或 localStorage 来“补齐”自动登录。
