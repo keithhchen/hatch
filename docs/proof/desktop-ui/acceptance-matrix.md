@@ -48,4 +48,4 @@ desktop-app: npm run build  # strict ad-hoc DMG UAT
 ```
 
 `npm run build:app` 与 `npm run build` 产物是 ad-hoc/UAT `.app`/DMG，当前验证的 DMG 为
-`Hatch_0.1.0_aarch64.dmg`（`sha256:00e4dc2f3097f977b0e2cfe70dee54d0840b84a3c8e6a48f8af13bd7a8449311`）。它们不是可发布的 notarized artifact。正式发布必须在 CI 注入真实 Developer ID/Team ID，并完成签名、notarization、安装后重启和无 prompt 验收。
+`Hatch_0.1.0_aarch64.dmg`（`sha256:32efa5c2bdd49f6ada46518aa9eb4592efd3036313c4c188384f1106413637c9`）。它们不是可发布的 notarized artifact。正式发布必须在 CI 注入真实 Developer ID/Team ID，并完成签名、notarization、安装后重启和无 prompt 验收。
