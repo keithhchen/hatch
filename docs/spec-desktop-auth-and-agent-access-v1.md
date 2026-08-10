@@ -90,6 +90,8 @@ flowchart LR
 7. `agent-access` 返回 `200 []`：仍显示 `Signed in`，进入 empty state。
 8. `agent-access` 返回一个或多个 active Agent：恢复最近使用的 Agent 并进入正常 Library。
 
+Keychain 没有 item、锁定、ACL 拒绝或读取异常，都按“没有可用 token”处理，直接显示同一个 `Signed out` / Sign in 页面；这些情况不再有独立的 secure-session 页面或中间身份状态。
+
 ### 4.3 已打开后的网络断开
 
 如果账号和 Agent 已经加载完成，运行期间网络断开只显示 in-context offline banner：
@@ -270,11 +272,12 @@ Keychain account: active-session
 Keychain value:  opaque session token (raw string)
 ```
 
-只有 `errSecItemNotFound` 表示“没有 session”并进入 Signed out。Keychain
-锁定、ACL、读取或旧 item 清理失败必须进入可重试的 secure-session
-recovery，不能伪装成已退出，也不能用 preview identity 兜底。旧
-`dev.hatch.local` item 由 Security.framework 一次性迁移；v2 写入成功而旧
-item 删除失败属于显式 partial success，下次启动继续清理。
+读取到非空 opaque token 后才进入自动验证。`errSecItemNotFound`、Keychain
+锁定、ACL、读取失败都按“没有可用 token”处理并显示同一个 Sign in 页面；不
+显示 secure-session recovery，也不使用 preview identity 兜底。读取成功但
+`/v1/auth/me` 返回 `401` 时清除本机 token 并回到 Sign in；网络失败则保留
+token 并显示 Network Error。旧 `dev.hatch.local` item 仍由
+Security.framework 一次性迁移；清理失败是 best-effort，不改变登录页面路由。
 
 ### 6.2 Native app-data：非敏感设置
 
