@@ -1339,11 +1339,12 @@ mod tests {
     use super::{
         app_menu_command, application_command_definition, context_menu_command,
         conversation_window_label, validate_context_position, validate_context_target,
-        validate_conversation_id, ConversationReservation, NativeCommandRouter, NativeCommandState,
-        NativeContextMenuKind, NativeContextMenuPosition, COMMAND_ABOUT_OPEN,
-        COMMAND_CONVERSATION_NEW, COMMAND_CONVERSATION_NEW_WINDOW, COMMAND_INSPECTOR_TOGGLE,
-        COMMAND_RUN_STOP, COMMAND_SETTINGS_OPEN, COMMAND_SIDEBAR_TOGGLE, COMMAND_VIEW_ZOOM_IN,
-        COMMAND_VIEW_ZOOM_OUT, COMMAND_VIEW_ZOOM_RESET, COMMAND_WORKSPACE_CHOOSE,
+        validate_conversation_id, ConversationReservation, ConversationWindowPhase,
+        NativeCommandRouter, NativeCommandState, NativeContextMenuKind, NativeContextMenuPosition,
+        COMMAND_ABOUT_OPEN, COMMAND_CONVERSATION_NEW, COMMAND_CONVERSATION_NEW_WINDOW,
+        COMMAND_INSPECTOR_TOGGLE, COMMAND_RUN_STOP, COMMAND_SETTINGS_OPEN, COMMAND_SIDEBAR_TOGGLE,
+        COMMAND_VIEW_ZOOM_IN, COMMAND_VIEW_ZOOM_OUT, COMMAND_VIEW_ZOOM_RESET,
+        COMMAND_WORKSPACE_CHOOSE,
     };
 
     #[test]
@@ -1374,6 +1375,53 @@ mod tests {
         router.clear_window(&label);
         assert!(matches!(
             router.reserve_conversation("conversation-1").unwrap(),
+            ConversationReservation::New { .. }
+        ));
+    }
+
+    #[test]
+    fn conversation_registry_keeps_three_parallel_windows_independent() {
+        let router = NativeCommandRouter::default();
+        let mut labels = Vec::new();
+        for conversation_id in ["conversation-a", "conversation-b", "conversation-c"] {
+            let label = match router.reserve_conversation(conversation_id).unwrap() {
+                ConversationReservation::New { label } => label,
+                reservation => panic!("expected a new reservation, got {reservation:?}"),
+            };
+            router.mark_conversation_ready(conversation_id, &label);
+            labels.push(label);
+        }
+        assert_eq!(
+            labels
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            3
+        );
+
+        for conversation_id in ["conversation-a", "conversation-b", "conversation-c"] {
+            assert!(matches!(
+                router.reserve_conversation(conversation_id).unwrap(),
+                ConversationReservation::Existing {
+                    phase: ConversationWindowPhase::Ready,
+                    ..
+                }
+            ));
+        }
+
+        // Closing the middle window releases only its own reverse lookup;
+        // the other two remain reusable and keep their stable labels.
+        router.clear_window(&labels[1]);
+        assert!(matches!(
+            router.reserve_conversation("conversation-a").unwrap(),
+            ConversationReservation::Existing { .. }
+        ));
+        assert!(matches!(
+            router.reserve_conversation("conversation-c").unwrap(),
+            ConversationReservation::Existing { .. }
+        ));
+        assert!(matches!(
+            router.reserve_conversation("conversation-b").unwrap(),
             ConversationReservation::New { .. }
         ));
     }
