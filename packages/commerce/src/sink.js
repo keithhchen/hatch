@@ -24,6 +24,10 @@ export class LedgerCommerceSink {
     if (!order) {
       throw new CommerceInvariantError("missing_prior_event", `order.placed with order_id=${delivery.order_id} is required`);
     }
+    // A zero-value checkout is a valid entitlement. Record the delivery,
+    // but do not create a revenue.recognized event that violates the
+    // positive revenue invariant.
+    if (order.gross_minor === 0) return undefined;
     const hatchShareMinor = Math.floor(
       (order.gross_minor * this.hatchShareBasisPoints) / 10000,
     );
