@@ -2,6 +2,20 @@ import { readFile } from "node:fs/promises";
 import { z } from "zod";
 import { verifyHatchAuthToken } from "./authToken.js";
 
+export type AuthIdentity = {
+  sub: string;
+  role: "user" | "creator";
+  exp?: number;
+};
+
+/**
+ * Runtime-side identity verification. Production implementations ask the
+ * Registry; they do not duplicate the Registry's session-token format.
+ */
+export interface AuthIdentityResolver {
+  resolveIdentity(authToken?: string): Promise<AuthIdentity | undefined>;
+}
+
 const EntitlementCommonSchema = z.object({
   entitlement_id: z.string().min(1),
   order_id: z.string().min(1).optional(),
@@ -82,7 +96,7 @@ export class FileEntitlementResolver implements EntitlementResolver {
 }
 
 /** Production adapter: access grants are owned by the Registry, not a local file. */
-export class RegistryEntitlementResolver implements EntitlementResolver {
+export class RegistryEntitlementResolver implements EntitlementResolver, AuthIdentityResolver {
   constructor(
     private readonly registryUrl: string,
     private readonly fetchImpl: typeof fetch = fetch,
@@ -93,6 +107,7 @@ export class RegistryEntitlementResolver implements EntitlementResolver {
     const response = await this.fetchImpl(new URL("/v1/user/agent-access", this.registryUrl).toString(), {
       headers: { authorization: `Bearer ${input.authToken}`, accept: "application/json" },
     });
+    if (response.status === 401) throw new EntitlementError("auth_invalid", "Your Hatch session is no longer valid.");
     if (!response.ok) throw new EntitlementError("entitlement_registry_unavailable", "Creator Agent access is temporarily unavailable.");
     const payload = await response.json();
     // Registry grants carry bookkeeping fields (for example `granted_at`) that
@@ -107,6 +122,30 @@ export class RegistryEntitlementResolver implements EntitlementResolver {
     const binding = (await this.list(input)).find((entry) => entry.entitlement_id === input.entitlementId);
     if (!binding) throw new EntitlementError("entitlement_not_found", "This Creator Agent is not available for the signed-in account.");
     return binding;
+  }
+
+  async resolveIdentity(authToken?: string): Promise<AuthIdentity | undefined> {
+    if (!authToken) return undefined;
+    let response: Response;
+    try {
+      response = await this.fetchImpl(new URL("/v1/auth/me", this.registryUrl).toString(), {
+        headers: { authorization: `Bearer ${authToken}`, accept: "application/json" },
+      });
+    } catch {
+      throw new EntitlementError("auth_registry_unavailable", "Hatch account verification is temporarily unavailable.");
+    }
+    if (response.status === 401) return undefined;
+    if (!response.ok) throw new EntitlementError("auth_registry_unavailable", "Hatch account verification is temporarily unavailable.");
+    const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+    if (typeof payload.id !== "string" || !payload.id || (payload.role !== "user" && payload.role !== "creator")) {
+      throw new EntitlementError("auth_registry_invalid", "The Registry returned an invalid account identity.");
+    }
+    const expiresAt = typeof payload.session_expires_at === "string" ? Date.parse(payload.session_expires_at) : Number.NaN;
+    return {
+      sub: payload.id,
+      role: payload.role,
+      ...(Number.isFinite(expiresAt) ? { exp: Math.floor(expiresAt / 1000) } : {})
+    };
   }
 }
 

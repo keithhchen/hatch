@@ -1,7 +1,7 @@
 import "dotenv/config";
 import http from "node:http";
 import { URL } from "node:url";
-import { AccountStoreTs, accountPublic, createAuthToken, verifyAuthToken, verifyPassword, type Account, type AccountRole } from "./registryAuth.js";
+import { AccountStoreTs, accountPublic, verifyAuthToken, verifyPassword, type Account, type AccountRole } from "./registryAuth.js";
 import { RegistryStoreTs } from "./registryStore.js";
 
 export type RegistryServer = { server: http.Server; close: () => Promise<void> };
@@ -12,7 +12,8 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   await accounts.ensureSchema();
   const publishToken = environment.HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN?.trim() || "";
   const runtimeServiceToken = environment.HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN?.trim() || "";
-  const authSecret = environment.HATCH_AUTH_SIGNING_SECRET?.trim() || "";
+  const legacyHmacEnabled = environment.HATCH_ENABLE_LEGACY_HMAC_AUTH?.trim().toLowerCase() === "true";
+  const authSecret = legacyHmacEnabled ? environment.HATCH_AUTH_SIGNING_SECRET?.trim() || "" : "";
   const server = http.createServer((request, response) => {
     void route(request, response, { store, accounts, publishToken, runtimeServiceToken, authSecret }).catch((error) => {
       sendJson(response, errorStatus(error), { detail: error instanceof Error ? error.message : String(error) });
@@ -37,26 +38,36 @@ async function route(
   if (request.method === "GET" && url.pathname === "/health") { sendJson(response, 200, { status: "ok" }); return; }
 
   if (url.pathname === "/v1/auth/signup" && request.method === "POST") {
-    if (!context.authSecret) { sendJson(response, 503, { detail: "Account authentication is not configured." }); return; }
     try {
       const body = await readJson(request);
       const account = await context.accounts.create(String(body.email ?? ""), String(body.password ?? ""), body.role as AccountRole, String(body.display_name ?? ""));
-      sendJson(response, 201, { token: createAuthToken(account, context.authSecret), account: accountPublic(account) });
+      sendJson(response, 201, sessionResponse(account, await context.accounts.createSession(account)));
     } catch (error) { sendError(response, error, { email_already_registered: [409, "Email is already registered."] }); }
     return;
   }
   if (url.pathname === "/v1/auth/signin" && request.method === "POST") {
-    if (!context.authSecret) { sendJson(response, 503, { detail: "Account authentication is not configured." }); return; }
     const body = await readJson(request);
     const account = await context.accounts.getByEmail(String(body.email ?? ""));
     if (!account || !verifyPassword(String(body.password ?? ""), account)) { sendJson(response, 401, { detail: "Email or password is incorrect." }); return; }
-    sendJson(response, 200, { token: createAuthToken(account, context.authSecret), account: accountPublic(account) });
+    sendJson(response, 200, sessionResponse(account, await context.accounts.createSession(account)));
     return;
   }
   if (url.pathname === "/v1/auth/me" && request.method === "GET") {
-    const account = await authenticate(request, context.accounts, context.authSecret);
+    const token = bearer(request);
+    const session = await context.accounts.resolveSession(token);
+    if (session) {
+      sendJson(response, 200, { ...accountPublic(session.account), session_expires_at: session.session.absolute_expires_at });
+      return;
+    }
+    const account = await authenticateLegacy(token, context.accounts, context.authSecret);
     if (!account) { sendJson(response, 401, { detail: "A valid account token is required." }); return; }
     sendJson(response, 200, accountPublic(account));
+    return;
+  }
+  if (url.pathname === "/v1/auth/logout" && request.method === "POST") {
+    await context.accounts.revokeSession(bearer(request));
+    response.writeHead(204, corsHeaders());
+    response.end();
     return;
   }
 
@@ -140,7 +151,7 @@ async function route(
   if (url.pathname === "/v1/user/agent-access" && request.method === "GET") {
     const account = await authenticate(request, context.accounts, context.authSecret, "user");
     if (!account) { sendJson(response, 401, { detail: "A valid user account token is required." }); return; }
-    sendJson(response, 200, context.store.listAgentAccess(account.id));
+    sendJson(response, 200, context.store.listAgentAccessPresentation(account.id));
     return;
   }
   const accessMatch = url.pathname.match(/^\/v1\/user\/agents\/([^/]+)\/([^/]+)\/access$/);
@@ -183,9 +194,30 @@ async function route(
 }
 
 async function authenticate(request: http.IncomingMessage, accounts: AccountStoreTs, secret: string, role?: AccountRole): Promise<Account | undefined> {
+  const session = await accounts.resolveSession(bearer(request));
+  if (session && (!role || session.account.role === role)) return session.account;
   const claims = verifyAuthToken(bearer(request), secret);
   if (!claims || (role && claims.role !== role)) return undefined;
   return accounts.getById(claims.sub);
+}
+
+async function authenticateLegacy(token: string | undefined, accounts: AccountStoreTs, secret: string): Promise<Account | undefined> {
+  const claims = verifyAuthToken(token, secret);
+  if (!claims) return undefined;
+  return accounts.getById(claims.sub);
+}
+
+function sessionResponse(account: Account, issued: { token: string; session: { absolute_expires_at: string } }): Record<string, unknown> {
+  return {
+    // Keep the top-level token for older Desktop builds during migration. New
+    // clients read session.token and use the opaque, revocable value.
+    token: issued.token,
+    session: {
+      token: issued.token,
+      expires_at: issued.session.absolute_expires_at
+    },
+    account: accountPublic(account)
+  };
 }
 
 function bearer(request: http.IncomingMessage): string | undefined {

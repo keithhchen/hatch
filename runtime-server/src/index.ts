@@ -19,7 +19,14 @@ import { SkillRuntime } from "./skillRuntime.js";
 import { RuntimeStore, type RunStatus } from "./store.js";
 import { PostgresStore } from "./postgresStore.js";
 import { ToolBridge } from "./toolBridge.js";
-import { EntitlementError, FileEntitlementResolver, RegistryEntitlementResolver, type EntitlementResolver } from "./entitlements.js";
+import {
+  EntitlementError,
+  FileEntitlementResolver,
+  RegistryEntitlementResolver,
+  type AuthIdentity,
+  type AuthIdentityResolver,
+  type EntitlementResolver
+} from "./entitlements.js";
 import { findCompletedDelivery, recordCompletedDelivery, type CommerceEventSink, type DeliveryArtifact, type DeliveryBinding } from "./delivery.js";
 import { materializeAgentCorpus } from "./agentCorpusMaterialization.js";
 import { creatorToolControlPlaneFromEnvironment, resolveCreatorTools } from "./creatorTools.js";
@@ -50,6 +57,8 @@ export type RuntimeServerOptions = {
   createRuntime?: () => AgentRuntime;
   conversationStore?: RuntimeStore;
   entitlementResolver?: EntitlementResolver;
+  /** Production identity verifier owned by the Registry. */
+  authIdentityResolver?: AuthIdentityResolver;
   /** Registry-installed current Agent Corpus root, keyed by creator/agent. */
   agentCorpusResolver?: AgentCorpusResolver;
   outputGuard?: OutputGuard;
@@ -95,12 +104,13 @@ export async function commerceEventSinkFromEnvironment(
 export async function createRuntimeServerFromEnvironment(
   environment: NodeJS.ProcessEnv = process.env
 ): Promise<RuntimeServer> {
+  const registryUrl = environment.HATCH_REGISTRY_URL?.trim();
+  const registryAuth = registryUrl ? new RegistryEntitlementResolver(registryUrl) : undefined;
   return createRuntimeServer({
     outputGuard: createOutputGuardFromEnvironment(environment),
     commerceEventSink: await commerceEventSinkFromEnvironment(environment),
-    entitlementResolver: environment.HATCH_REGISTRY_URL?.trim()
-      ? new RegistryEntitlementResolver(environment.HATCH_REGISTRY_URL.trim())
-      : undefined,
+    entitlementResolver: registryAuth,
+    authIdentityResolver: registryAuth,
     agentCorpusResolver: environment.HATCH_AGENT_CORPUS_ROOT?.trim()
       ? new AgentCorpusResolver(environment.HATCH_AGENT_CORPUS_ROOT.trim())
       : undefined
@@ -138,12 +148,14 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   const createRuntime = options.createRuntime ?? createAgentRuntime;
   const entitlementResolver = options.entitlementResolver
     ?? (process.env.HATCH_ENTITLEMENTS_FILE ? new FileEntitlementResolver(process.env.HATCH_ENTITLEMENTS_FILE) : undefined);
+  const authIdentityResolver = options.authIdentityResolver
+    ?? (entitlementResolver instanceof RegistryEntitlementResolver ? entitlementResolver : undefined);
   const agentCorpusResolver = options.agentCorpusResolver
     ?? (process.env.HATCH_AGENT_CORPUS_ROOT ? new AgentCorpusResolver(process.env.HATCH_AGENT_CORPUS_ROOT) : undefined);
   const conversationStore = options.conversationStore ?? createConversationStore();
   const outputGuard = options.outputGuard ?? new PassThroughOutputGuard();
   const server = http.createServer((req, res) => {
-    void handleHttpRequest(req, res, entitlementResolver, agentCorpusResolver, conversationStore);
+    void handleHttpRequest(req, res, entitlementResolver, agentCorpusResolver, conversationStore, authIdentityResolver);
   });
 
   const wss = new WebSocketServer({ server, path: "/runtime" });
@@ -155,6 +167,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       createRuntime,
       entitlementResolver,
       agentCorpusResolver,
+      authIdentityResolver,
       outputGuard,
       options.commerceEventSink,
       options.clientToolTimeoutMs ?? clientToolTimeoutMs()
@@ -183,7 +196,8 @@ async function handleHttpRequest(
   res: http.ServerResponse,
   entitlementResolver?: EntitlementResolver,
   agentCorpusResolver?: AgentCorpusResolver,
-  conversationStore?: RuntimeStore
+  conversationStore?: RuntimeStore,
+  authIdentityResolver?: AuthIdentityResolver
 ): Promise<void> {
   setCorsHeaders(res);
   if (req.method === "OPTIONS") {
@@ -200,9 +214,20 @@ async function handleHttpRequest(
 
   if (req.method === "GET" && url.pathname === "/v1/me/creator-agents") {
     const authToken = bearerToken(req);
-    const claims = verifyHatchAuthToken(authToken);
     if (!authToken) {
       writeJson(res, 401, { error: { code: "authentication_required", message: "Sign in to view purchased Creator Agents." } });
+      return;
+    }
+    let identity: AuthIdentity | undefined;
+    try {
+      identity = await resolveAuthIdentity(authToken, authIdentityResolver);
+    } catch (error) {
+      writeJson(res, 503, { error: { code: error instanceof EntitlementError ? error.code : "authentication_unavailable", message: errorMessage(error) } });
+      return;
+    }
+    const claims = identity ?? legacyAuthClaims(authToken, authIdentityResolver);
+    if (authIdentityResolver && !identity) {
+      writeJson(res, 401, { error: { code: "authentication_required", message: "Your Hatch session is no longer valid." } });
       return;
     }
     if (!claims && !entitlementResolver) {
@@ -228,6 +253,7 @@ async function handleHttpRequest(
           presentation: corpus.product.presentation
         }))
         : await Promise.all((await entitlementResolver!.list({ authToken, licenseToken: authToken })).map(async (entitlement) => {
+          assertEntitlementMatchesIdentity(claims, entitlement);
           if (!agentCorpusResolver) throw new Error("Current Agent Corpus resolver is unavailable");
           const resolved = await agentCorpusResolver.resolve(entitlement.creator_id, entitlement.agent_id);
           if (resolved.corpus.product.id !== entitlement.product_id || resolved.corpus.creator.id !== entitlement.creator_id) {
@@ -262,7 +288,7 @@ async function handleHttpRequest(
     const conversationId = decodeURIComponent(match[1] ?? "");
     let binding: SessionBinding | undefined;
     try {
-      binding = await bindingFromHistoryRequest(req, url, entitlementResolver, agentCorpusResolver);
+      binding = await bindingFromHistoryRequest(req, url, entitlementResolver, agentCorpusResolver, authIdentityResolver);
     } catch (error) {
       writeJson(res, 403, { error: { code: "entitlement_required", message: errorMessage(error) } });
       return;
@@ -328,6 +354,7 @@ async function handleRuntimeSocket(
   createRuntime: () => AgentRuntime,
   entitlementResolver?: EntitlementResolver,
   agentCorpusResolver?: AgentCorpusResolver,
+  authIdentityResolver?: AuthIdentityResolver,
   outputGuard: OutputGuard = new PassThroughOutputGuard(),
   commerceEventSink?: CommerceEventSink,
   toolResultTimeoutMs = clientToolTimeoutMs()
@@ -366,7 +393,7 @@ async function handleRuntimeSocket(
             });
             return;
           }
-          binding = await resolveSessionBinding(message, entitlementResolver, agentCorpusResolver);
+          binding = await resolveSessionBinding(message, entitlementResolver, agentCorpusResolver, authIdentityResolver);
           if (binding.agentCorpus && binding.agentCorpusRoot) {
             serverTools.setKnowledgeScope({
               provider: createKnowledgeProvider(binding.agentCorpusRoot, binding.agentCorpus),
@@ -856,10 +883,15 @@ async function buildSessionSkills(protectedCorpus = false): Promise<RuntimeSessi
 async function resolveSessionBinding(
   hello: ClientHello,
   entitlementResolver?: EntitlementResolver,
-  agentCorpusResolver?: AgentCorpusResolver
+  agentCorpusResolver?: AgentCorpusResolver,
+  authIdentityResolver?: AuthIdentityResolver
 ): Promise<SessionBinding> {
   const authToken = hello.auth_token ?? hello.license_token;
-  const authClaims = verifyHatchAuthToken(authToken);
+  const authIdentity = await resolveAuthIdentity(authToken, authIdentityResolver);
+  const authClaims = authIdentity ?? legacyAuthClaims(authToken, authIdentityResolver);
+  if (authIdentityResolver && !authIdentity) {
+    throw new EntitlementError("authentication_required", "A valid Hatch session is required.");
+  }
   if (hello.agent_id) {
     if (!agentCorpusResolver) {
       throw new EntitlementError(
@@ -875,12 +907,15 @@ async function resolveSessionBinding(
     }
     const resolved = await agentCorpusResolver.resolve(selectedCreatorId, hello.agent_id);
     let corpusEntitlement: Awaited<ReturnType<EntitlementResolver["resolve"]>> | undefined;
+    if (authClaims?.role !== "creator" && !entitlementResolver) {
+      throw new EntitlementError(
+        "entitlement_configuration_incomplete",
+        "Creator Agent access is unavailable because entitlement verification is not fully configured."
+      );
+    }
     if (authClaims?.role !== "creator" && entitlementResolver) {
       if (!hello.entitlement_id) {
         throw new EntitlementError("entitlement_required", "A valid Creator Agent entitlement is required.");
-      }
-      if (!entitlementResolver) {
-        throw new EntitlementError("entitlement_unavailable", "This Creator Agent entitlement cannot be verified.");
       }
       const entitlement = await entitlementResolver.resolve({
         authToken,
@@ -888,6 +923,7 @@ async function resolveSessionBinding(
         entitlementId: hello.entitlement_id,
         installationId: hello.installation_id
       });
+      assertEntitlementMatchesIdentity(authClaims, entitlement);
       if (entitlement.agent_id !== hello.agent_id
         || entitlement.creator_id !== resolved.corpus.creator.id
         || entitlement.product_id !== resolved.corpus.product.id) {
@@ -927,6 +963,7 @@ async function resolveSessionBinding(
       entitlementId: hello.entitlement_id,
       installationId: hello.installation_id
     });
+    assertEntitlementMatchesIdentity(authClaims, entitlement);
     const resolved = await agentCorpusResolver.resolve(entitlement.creator_id, entitlement.agent_id);
     if (resolved.corpus.product.id !== entitlement.product_id || resolved.corpus.creator.id !== entitlement.creator_id) {
       throw new Error("Entitlement does not match its current Agent Corpus");
@@ -961,6 +998,30 @@ async function resolveSessionBinding(
   };
 }
 
+async function resolveAuthIdentity(
+  authToken: string | undefined,
+  authIdentityResolver?: AuthIdentityResolver
+): Promise<AuthIdentity | undefined> {
+  if (!authIdentityResolver) return undefined;
+  return authIdentityResolver.resolveIdentity(authToken);
+}
+
+function legacyAuthClaims(authToken: string | undefined, authIdentityResolver?: AuthIdentityResolver): AuthIdentity | undefined {
+  // HMAC verification is retained only for local fixture/migration mode. A
+  // Runtime configured with the Registry verifier never reaches this branch.
+  if (authIdentityResolver) return undefined;
+  return verifyHatchAuthToken(authToken);
+}
+
+function assertEntitlementMatchesIdentity(
+  identity: AuthIdentity | undefined,
+  entitlement: { user_id: string }
+): void {
+  if (identity?.role === "user" && entitlement.user_id !== identity.sub) {
+    throw new EntitlementError("agent_entitlement_mismatch", "This Creator Agent is not available for the signed-in account.");
+  }
+}
+
 export function scopedConversationId(binding: Pick<SessionBinding, "creatorId" | "userId" | "agentId" | "productId" | "corpusDigest">, conversationId: string): string {
   return `scope:${shortHash([binding.creatorId, binding.userId, binding.agentId, binding.productId, binding.corpusDigest].join("\u0000"))}:${conversationId}`;
 }
@@ -973,10 +1034,12 @@ async function bindingFromHistoryRequest(
   req: http.IncomingMessage,
   url: URL,
   entitlementResolver?: EntitlementResolver,
-  agentCorpusResolver?: AgentCorpusResolver
+  agentCorpusResolver?: AgentCorpusResolver,
+  authIdentityResolver?: AuthIdentityResolver
 ): Promise<SessionBinding | undefined> {
   const entitlementId = url.searchParams.get("entitlement_id") ?? undefined;
   const authToken = bearerToken(req);
+  const authIdentity = await resolveAuthIdentity(authToken, authIdentityResolver);
   const productMode = Boolean(entitlementResolver || agentCorpusResolver);
   if (productMode) {
     if (!entitlementResolver || !agentCorpusResolver) {
@@ -988,7 +1051,11 @@ async function bindingFromHistoryRequest(
     if (!entitlementId || !authToken) {
       throw new EntitlementError("entitlement_required", "A Bearer token and Creator Agent entitlement are required.");
     }
+    if (authIdentityResolver && !authIdentity) {
+      throw new EntitlementError("authentication_required", "A valid Hatch session is required.");
+    }
     const entitlement = await entitlementResolver.resolve({ authToken, licenseToken: authToken, entitlementId });
+    assertEntitlementMatchesIdentity(authIdentity ?? legacyAuthClaims(authToken, authIdentityResolver), entitlement);
     const creatorId = url.searchParams.get("creator_id");
     const agentId = url.searchParams.get("agent_id");
     if (creatorId !== entitlement.creator_id || agentId !== entitlement.agent_id) {

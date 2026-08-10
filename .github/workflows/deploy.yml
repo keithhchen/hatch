@@ -116,7 +116,7 @@ jobs:
           test -f .env
           test -f compose.app.yml
           grep -q '^HATCH_DOMAIN=' .env
-          for key in LLM_API_KEY DEEPSEEK_API_KEY HATCH_REGISTRY_DATABASE_URL HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN HATCH_AUTH_SIGNING_SECRET DASHSCOPE_API_KEY POSTGRES_PASSWORD; do
+          for key in LLM_API_KEY DEEPSEEK_API_KEY HATCH_REGISTRY_DATABASE_URL HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN DASHSCOPE_API_KEY POSTGRES_PASSWORD; do
             grep -Eq "^${key}=[^[:space:]]+" .env || { echo "Missing non-empty $key in /opt/hatch/.env"; exit 1; }
           done
           docker network inspect hatch_internal >/dev/null

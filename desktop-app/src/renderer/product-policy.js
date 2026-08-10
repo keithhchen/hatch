@@ -81,11 +81,6 @@ export function normalizePermissionPolicy(policy) {
     : DEFAULT_PERMISSION_POLICY;
 }
 
-export function profileStorageKey(profileId, key) {
-  if (!profileId || !key) throw new Error("profileId and key are required");
-  return `hatch.profile.${encodeURIComponent(profileId)}.${key}`;
-}
-
 export function requiresUserApproval(toolName, policy = DEFAULT_PERMISSION_POLICY) {
   assertPermissionPolicy(policy);
   return CHANGE_TOOLS.includes(toolName) && policy !== PERMISSION_POLICIES.ALLOW_CHANGES;
