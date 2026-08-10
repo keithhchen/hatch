@@ -6,17 +6,13 @@ use calamine::{open_workbook_auto, Data, Reader};
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::fs::{self, OpenOptions};
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::thread;
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 use walkdir::WalkDir;
 
-#[cfg(unix)]
-use std::os::unix::process::CommandExt;
-
-const MAX_COMMAND_OUTPUT_BYTES: usize = 1024 * 1024;
 const MAX_WORKSPACE_DIFF_BYTES: usize = 64 * 1024;
 const MAX_SEARCH_FILES_SCANNED: usize = 2_000;
 const MAX_SEARCH_FILE_BYTES: u64 = 1024 * 1024;
@@ -213,7 +209,16 @@ impl LocalRunner {
     }
 
     pub fn shell_exec(&self, command: &str, timeout_ms: u64) -> Result<ShellExecOutput> {
-        let result = self.shell_exec_inner(command, timeout_ms);
+        self.shell_exec_with_cancel(command, timeout_ms, &AtomicBool::new(false))
+    }
+
+    pub(crate) fn shell_exec_with_cancel(
+        &self,
+        command: &str,
+        timeout_ms: u64,
+        cancel: &AtomicBool,
+    ) -> Result<ShellExecOutput> {
+        let result = crate::shell::execute(self.sandbox.root(), command, timeout_ms, cancel);
         let detail = match &result {
             Ok(output) => json!({
                 "command_bytes": command.len(),
@@ -516,82 +521,6 @@ impl LocalRunner {
         }
     }
 
-    fn shell_exec_inner(&self, command: &str, timeout_ms: u64) -> Result<ShellExecOutput> {
-        let mut shell = Command::new("sh");
-        #[cfg(unix)]
-        unsafe {
-            shell.pre_exec(|| {
-                if libc::setpgid(0, 0) == -1 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
-        let mut child = shell
-            .arg("-lc")
-            .arg(command)
-            .current_dir(self.sandbox.root())
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|source| LocalRunnerError::io(self.sandbox.root(), source))?;
-
-        let mut stdout_pipe = child
-            .stdout
-            .take()
-            .ok_or_else(|| LocalRunnerError::InvalidPath("shell stdout pipe".into()))?;
-        let mut stderr_pipe = child
-            .stderr
-            .take()
-            .ok_or_else(|| LocalRunnerError::InvalidPath("shell stderr pipe".into()))?;
-        let stdout_reader =
-            thread::spawn(move || drain_command_output(&mut stdout_pipe, MAX_COMMAND_OUTPUT_BYTES));
-        let stderr_reader =
-            thread::spawn(move || drain_command_output(&mut stderr_pipe, MAX_COMMAND_OUTPUT_BYTES));
-
-        let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-        let mut timed_out = false;
-        loop {
-            if child
-                .try_wait()
-                .map_err(|source| LocalRunnerError::io(self.sandbox.root(), source))?
-                .is_some()
-            {
-                break;
-            }
-            if Instant::now() >= deadline {
-                timed_out = true;
-                terminate_shell_process(&mut child)
-                    .map_err(|source| LocalRunnerError::io(self.sandbox.root(), source))?;
-                break;
-            }
-            thread::sleep(Duration::from_millis(10));
-        }
-
-        let status = child
-            .wait()
-            .map_err(|source| LocalRunnerError::io(self.sandbox.root(), source))?;
-        let stdout_output = stdout_reader
-            .join()
-            .map_err(|_| LocalRunnerError::InvalidPath("shell stdout reader".into()))?
-            .map_err(|source| LocalRunnerError::io(self.sandbox.root(), source))?;
-        let stderr_output = stderr_reader
-            .join()
-            .map_err(|_| LocalRunnerError::InvalidPath("shell stderr reader".into()))?
-            .map_err(|source| LocalRunnerError::io(self.sandbox.root(), source))?;
-        let (stdout, stderr, stdout_combined_truncated, stderr_combined_truncated) =
-            cap_combined_command_output(&stdout_output.bytes, &stderr_output.bytes);
-        Ok(ShellExecOutput {
-            stdout,
-            stderr,
-            exit_code: status.code().unwrap_or(-1),
-            timed_out,
-            stdout_truncated: stdout_output.truncated || stdout_combined_truncated,
-            stderr_truncated: stderr_output.truncated || stderr_combined_truncated,
-        })
-    }
-
     fn git_diff_inner(&self, path: &Path) -> Result<String> {
         self.stat_inner(path)?;
         let output = Command::new("git")
@@ -630,24 +559,6 @@ impl LocalRunner {
             Err(error) => self.audit.record_failure(tool, paths, detail, error),
         }
     }
-}
-
-#[cfg(unix)]
-fn terminate_shell_process(child: &mut std::process::Child) -> std::io::Result<()> {
-    let process_group = child.id() as libc::pid_t;
-    let result = unsafe { libc::kill(-process_group, libc::SIGKILL) };
-    if result == -1 {
-        let error = std::io::Error::last_os_error();
-        if error.raw_os_error() != Some(libc::ESRCH) {
-            return Err(error);
-        }
-    }
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn terminate_shell_process(child: &mut std::process::Child) -> std::io::Result<()> {
-    child.kill()
 }
 
 fn display_input_path(path: &Path) -> String {
@@ -721,43 +632,6 @@ fn truncate_command_output(bytes: &[u8], max_bytes: usize) -> (String, bool) {
         used += width;
     }
     (output, true)
-}
-
-#[derive(Debug)]
-struct BoundedCommandOutput {
-    bytes: Vec<u8>,
-    truncated: bool,
-}
-
-fn drain_command_output<R: Read>(
-    reader: &mut R,
-    max_bytes: usize,
-) -> std::io::Result<BoundedCommandOutput> {
-    let mut bytes = Vec::with_capacity(max_bytes);
-    let mut chunk = [0u8; 8192];
-    let mut truncated = false;
-    loop {
-        let read = reader.read(&mut chunk)?;
-        if read == 0 {
-            break;
-        }
-        let remaining = max_bytes.saturating_sub(bytes.len());
-        if remaining > 0 {
-            bytes.extend_from_slice(&chunk[..read.min(remaining)]);
-        }
-        if read > remaining {
-            truncated = true;
-        }
-    }
-    Ok(BoundedCommandOutput { bytes, truncated })
-}
-
-fn cap_combined_command_output(stdout: &[u8], stderr: &[u8]) -> (String, String, bool, bool) {
-    let stdout_budget = stdout.len().min(MAX_COMMAND_OUTPUT_BYTES);
-    let stderr_budget = MAX_COMMAND_OUTPUT_BYTES.saturating_sub(stdout_budget);
-    let (stdout, stdout_truncated) = truncate_command_output(stdout, stdout_budget);
-    let (stderr, stderr_truncated) = truncate_command_output(stderr, stderr_budget);
-    (stdout, stderr, stdout_truncated, stderr_truncated)
 }
 
 fn is_xlsx_path(path: &Path) -> bool {

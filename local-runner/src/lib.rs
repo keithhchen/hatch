@@ -3,6 +3,7 @@ mod error;
 mod patch;
 mod protocol;
 mod sandbox;
+mod shell;
 mod tools;
 
 pub use error::{LocalRunnerError, Result};

@@ -1,16 +1,21 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile, rename, rm } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, writeFile, rename, rm, readdir, stat } from "node:fs/promises";
 import path from "node:path";
-import { Pool } from "pg";
+import { Pool, type QueryConfig } from "pg";
 import {
   extractAgentCorpusBundle,
-  installCurrentCorpus,
+  prepareCurrentCorpusInstall,
   verifyAgentCorpus,
-  type VerifiedAgentCorpus,
   AgentCorpusVerificationError,
+  type CurrentCorpusInstallTransaction,
 } from "./registryCorpus.js";
 import { loadAgentCorpus } from "./agentCorpus.js";
-import { ingestAgentCorpusKnowledge, QdrantKnowledgeIndexer } from "./qdrantIndexer.js";
+import {
+  ingestAgentCorpusKnowledge,
+  removeAgentCorpusKnowledge,
+  QdrantKnowledgeIndexer,
+  type AgentKnowledgeIndexer,
+} from "./qdrantIndexer.js";
 
 export type PublishedAgentCorpus = {
   creator_id: string;
@@ -51,6 +56,19 @@ export type AgentAccessPresentation = AgentAccessGrant & {
   presentation: Record<string, unknown>;
 };
 
+export type AgentAccessListOptions = {
+  entitlementId?: string;
+  limit?: number;
+  offset?: number;
+};
+
+export const MAX_AGENT_CORPORA_PER_CREATOR = 20;
+export const MAX_CORPUS_BYTES_PER_CREATOR = 256 * 1024 * 1024;
+export const MAX_CORPUS_BYTES_GLOBAL = 20 * 1024 * 1024 * 1024;
+export const MAX_CORPUS_FILES_PER_CREATOR = 4_096;
+export const MAX_CORPUS_FILES_GLOBAL = 100_000;
+const DEFAULT_REGISTRY_PUBLISH_TIMEOUT_MS = 60_000;
+
 export type CreatorToolConnection = {
   id: string;
   tenant_id: string;
@@ -69,26 +87,61 @@ type RegistryState = {
   agent_tool_bindings?: Array<{ tenant_id: string; agent_id: string; tool_id: string; connection_id: string }>;
 };
 
+type CorpusInstallJournal = {
+  creator_id: string;
+  agent_id: string;
+  new_digest: string;
+  previous_digest?: string;
+  current_path: string;
+  prepared_path: string;
+  backup_path: string;
+};
+
 export class RegistryStoreTs {
   private readonly corpora = new Map<string, PublishedAgentCorpus>();
+  private readonly corpusBytes = new Map<string, number>();
+  private readonly corpusFiles = new Map<string, number>();
   private readonly access = new Map<string, AgentAccessGrant>();
+  private readonly accessMutations = new Map<string, Promise<AgentAccessGrant>>();
+  private readonly publishMutations = new Map<string, Promise<void>>();
   private readonly toolConnections = new Map<string, CreatorToolConnection>();
   private readonly toolBindings = new Map<string, string>();
   private readonly pool?: Pool;
   private readonly statePath?: string;
-  private indexer?: QdrantKnowledgeIndexer;
+  private readonly publishTimeoutMs: number;
+  private indexer?: AgentKnowledgeIndexer;
+  private publishOutcomeUnknown?: Error;
 
-  private constructor(private readonly corpusRoot: string, options: { databaseUrl?: string; statePath?: string; indexer?: QdrantKnowledgeIndexer }) {
+  private constructor(private readonly corpusRoot: string, options: {
+    databaseUrl?: string;
+    databaseTimeoutMs: number;
+    statePath?: string;
+    indexer?: AgentKnowledgeIndexer;
+    pool?: Pool;
+    publishTimeoutMs: number;
+  }) {
     this.statePath = options.statePath;
     this.indexer = options.indexer;
-    if (options.databaseUrl) this.pool = new Pool({ connectionString: options.databaseUrl, max: 10 });
+    this.publishTimeoutMs = options.publishTimeoutMs;
+    if (options.pool && options.databaseUrl) throw new Error("RegistryStoreTs.open cannot accept both pool and databaseUrl");
+    if (options.pool) this.pool = options.pool;
+    else if (options.databaseUrl) this.pool = new Pool({
+      connectionString: options.databaseUrl,
+      max: 10,
+      connectionTimeoutMillis: options.databaseTimeoutMs,
+      query_timeout: options.databaseTimeoutMs,
+      statement_timeout: options.databaseTimeoutMs,
+      idleTimeoutMillis: 30_000,
+    });
   }
 
   static async open(options: {
     corpusRoot?: string;
     databaseUrl?: string;
     statePath?: string;
-    indexer?: QdrantKnowledgeIndexer;
+    indexer?: AgentKnowledgeIndexer;
+    pool?: Pool;
+    publishTimeoutMs?: number;
     environment?: NodeJS.ProcessEnv;
   } = {}): Promise<RegistryStoreTs> {
     const environment = options.environment ?? process.env;
@@ -96,29 +149,132 @@ export class RegistryStoreTs {
       path.resolve(options.corpusRoot ?? environment.HATCH_AGENT_CORPUS_ROOT ?? "agent-corpora"),
       {
         databaseUrl: options.databaseUrl ?? (environment.HATCH_REGISTRY_DATABASE_URL?.trim() || undefined),
+        databaseTimeoutMs: registryDatabaseTimeoutMs(environment),
         statePath: options.statePath ?? (environment.HATCH_REGISTRY_STATE_PATH?.trim() || undefined),
         indexer: options.indexer ?? QdrantKnowledgeIndexer.fromEnvironment(environment),
+        pool: options.pool,
+        publishTimeoutMs: options.publishTimeoutMs ?? registryPublishTimeoutMs(environment),
       },
     );
     // Postgres-backed stores must create their tables before loading them.
     // The in-memory/state-file path intentionally has no schema step.
     if (store.pool) await store.ensureSchema();
     await store.load();
+    await store.recoverPendingCorpusInstalls();
+    await store.loadCorpusByteAccounting();
+    await store.resumePendingIndexCleanup();
     return store;
   }
 
   async publishAgentCorpusBundle(creatorId: string, agentId: string, bundle: Uint8Array): Promise<PublishedAgentCorpus> {
+    if (this.publishOutcomeUnknown) throw this.publishOutcomeUnknown;
+    const deadline = new PublishDeadline(this.publishTimeoutMs);
+    // Quotas, the state-file snapshot, and the filesystem current pointer are
+    // one Registry-wide transaction boundary, so direct callers are serialized
+    // even when they bypass the HTTP publish-work gate.
+    const mutationKey = "registry-publish";
+    const previousMutation = this.publishMutations.get(mutationKey) ?? Promise.resolve();
+    let releaseMutation!: () => void;
+    const mutationTurn = new Promise<void>((resolve) => { releaseMutation = resolve; });
+    const mutationTail = previousMutation.then(() => mutationTurn);
+    this.publishMutations.set(mutationKey, mutationTail);
+    void mutationTail.then(() => {
+      if (this.publishMutations.get(mutationKey) === mutationTail) this.publishMutations.delete(mutationKey);
+    });
+    try {
+      await deadline.wait(previousMutation);
+      if (this.publishOutcomeUnknown) throw this.publishOutcomeUnknown;
+      deadline.throwIfExpired();
+      return await this.publishAgentCorpusBundleOnce(creatorId, agentId, bundle, deadline);
+    } finally {
+      deadline.dispose();
+      const deferred = deadline.deferredCompletion();
+      if (deferred) void deferred.finally(releaseMutation);
+      else releaseMutation();
+    }
+  }
+
+  private async publishAgentCorpusBundleOnce(
+    creatorId: string,
+    agentId: string,
+    bundle: Uint8Array,
+    deadline: PublishDeadline,
+  ): Promise<PublishedAgentCorpus> {
     const staging = path.join(path.dirname(this.corpusRoot), `.agent-corpus-upload-${randomUUID()}`);
     await mkdir(staging, { recursive: true });
+    let install: CurrentCorpusInstallTransaction | undefined;
+    let indexAttempted = false;
+    let metadataCommitted = false;
+    let verifiedDigest: string | undefined;
+    let priorCorpus: PublishedAgentCorpus | undefined;
+    let stagedDigestCleanupMarker: string | undefined;
+    let installJournal: string | undefined;
+    let preserveInstallForRecovery = false;
     try {
-      await extractAgentCorpusBundle(bundle, staging);
-      const verified = await verifyAgentCorpus(staging, creatorId, agentId);
+      await extractAgentCorpusBundle(bundle, staging, { signal: deadline.signal });
+      const verified = await verifyAgentCorpus(staging, creatorId, agentId, { signal: deadline.signal });
+      verifiedDigest = verified.digest;
+      const corpusKey = key(verified.creator.id, verified.agentId);
+      priorCorpus = this.corpora.get(corpusKey);
+      const existingBytes = this.corpusBytes.get(corpusKey) ?? 0;
+      const existingFiles = this.corpusFiles.get(corpusKey) ?? 0;
+      const creatorBytes = [...this.corpusBytes.entries()]
+        .filter(([candidate]) => candidate.startsWith(`${verified.creator.id}:`))
+        .reduce((total, [, bytes]) => total + bytes, 0);
+      const globalBytes = [...this.corpusBytes.values()].reduce((total, bytes) => total + bytes, 0);
+      const creatorFiles = [...this.corpusFiles.entries()]
+        .filter(([candidate]) => candidate.startsWith(`${verified.creator.id}:`))
+        .reduce((total, [, files]) => total + files, 0);
+      const globalFiles = [...this.corpusFiles.values()].reduce((total, files) => total + files, 0);
+      if (creatorBytes - existingBytes + verified.totalBytes > MAX_CORPUS_BYTES_PER_CREATOR) {
+        throw new AgentCorpusVerificationError("Creator Agent Corpus storage quota exceeded");
+      }
+      if (globalBytes - existingBytes + verified.totalBytes > MAX_CORPUS_BYTES_GLOBAL) {
+        throw new AgentCorpusVerificationError("Registry Agent Corpus storage quota exceeded");
+      }
+      if (creatorFiles - existingFiles + verified.totalFiles > MAX_CORPUS_FILES_PER_CREATOR) {
+        throw new AgentCorpusVerificationError("Creator Agent Corpus file quota exceeded");
+      }
+      if (globalFiles - existingFiles + verified.totalFiles > MAX_CORPUS_FILES_GLOBAL) {
+        throw new AgentCorpusVerificationError("Registry Agent Corpus file quota exceeded");
+      }
+      if (
+        !this.corpora.has(corpusKey)
+        && !this.corpusBytes.has(corpusKey)
+        && new Set([
+          ...[...this.corpora.values()].filter((item) => item.creator_id === verified.creator.id).map((item) => item.agent_id),
+          ...[...this.corpusBytes.keys()].filter((candidate) => candidate.startsWith(`${verified.creator.id}:`)).map((candidate) => candidate.slice(verified.creator.id.length + 1)),
+        ]).size >= MAX_AGENT_CORPORA_PER_CREATOR
+      ) {
+        throw new AgentCorpusVerificationError(`A Creator may publish at most ${MAX_AGENT_CORPORA_PER_CREATOR} Agents`);
+      }
       const knowledgeDocuments = verified.corpus.knowledge.documents;
       if (knowledgeDocuments.length > 0 && !this.indexer) {
         throw new Error("Agent Corpus includes knowledge documents but Qdrant knowledge index is not configured");
       }
-      const destination = await installCurrentCorpus(verified, this.corpusRoot);
-      if (this.indexer) await ingestAgentCorpusKnowledge(this.indexer, { corpus: verified.corpus, path: destination });
+      install = await prepareCurrentCorpusInstall(verified, this.corpusRoot, { signal: deadline.signal });
+      installJournal = await this.createCorpusInstallJournal(
+        verified.creator.id,
+        verified.agentId,
+        verified.digest,
+        priorCorpus?.corpus_digest,
+        install,
+      );
+      if (this.indexer) {
+        if (priorCorpus?.corpus_digest !== verified.digest) {
+          stagedDigestCleanupMarker = await this.createIndexCleanupMarker(
+            verified.creator.id,
+            verified.agentId,
+            verified.digest,
+          );
+        }
+        indexAttempted = true;
+        await deadline.wait(ingestAgentCorpusKnowledge(this.indexer, {
+          corpus: verified.corpus,
+          path: install.preparedPath,
+          digest: verified.digest,
+        }, deadline.signal));
+      }
       const published: PublishedAgentCorpus = {
         creator_id: verified.creator.id,
         agent_id: verified.agentId,
@@ -135,8 +291,87 @@ export class RegistryStoreTs {
         status: "published",
         published_at: new Date().toISOString(),
       };
-      await this.persistCorpus(published);
+      deadline.throwIfExpired();
+      await install.commit();
+      try {
+        await this.persistCorpus(published, deadline);
+        metadataCommitted = true;
+      } catch (persistError) {
+        let canonicalDigest: string | undefined;
+        try {
+          canonicalDigest = await this.readCanonicalCorpusDigest(verified.creator.id, verified.agentId);
+        } catch (reconciliationError) {
+          preserveInstallForRecovery = true;
+          this.publishOutcomeUnknown = new AggregateError(
+            [persistError, reconciliationError],
+            "Agent Corpus metadata commit outcome is unknown; restart Registry to run install-journal recovery",
+          );
+          throw this.publishOutcomeUnknown;
+        }
+        if (canonicalDigest === verified.digest) {
+          // PostgreSQL may commit and then lose the response. A canonical
+          // re-read turns that ambiguous transport failure into success.
+          this.corpora.set(corpusKey, published);
+          metadataCommitted = true;
+        } else {
+          throw persistError;
+        }
+      }
+      this.corpusBytes.set(corpusKey, verified.totalBytes);
+      this.corpusFiles.set(corpusKey, verified.totalFiles);
+      const finalized = await install.finalize().then(() => true, () => false);
+      if (finalized && installJournal) {
+        await rm(installJournal, { force: true }).catch(() => undefined);
+      }
+      if (stagedDigestCleanupMarker) {
+        await rm(stagedDigestCleanupMarker, { force: true }).catch(() => undefined);
+      }
+      if (this.indexer && priorCorpus && priorCorpus.corpus_digest !== verified.digest) {
+        const oldDigestCleanupMarker = await this.createIndexCleanupMarker(
+          verified.creator.id,
+          verified.agentId,
+          priorCorpus.corpus_digest,
+        ).catch(() => undefined);
+        if (oldDigestCleanupMarker) {
+        await cleanIndexDigestBestEffort(
+          this.indexer,
+          verified.creator.id,
+          verified.agentId,
+          priorCorpus.corpus_digest,
+          oldDigestCleanupMarker,
+          deadline,
+        );
+        }
+      }
       return published;
+    } catch (error) {
+      if (!metadataCommitted && install && !preserveInstallForRecovery) {
+        try {
+          await install.rollback();
+          if (installJournal) await rm(installJournal, { force: true });
+        } catch (rollbackError) {
+          throw new AggregateError([error, rollbackError], "Agent Corpus publish failed and filesystem rollback did not complete");
+        }
+      }
+      if (
+        !metadataCommitted
+        && !preserveInstallForRecovery
+        && indexAttempted
+        && this.indexer
+        && verifiedDigest
+        && verifiedDigest !== priorCorpus?.corpus_digest
+        && stagedDigestCleanupMarker
+      ) {
+        await cleanIndexDigestBestEffort(
+          this.indexer,
+          creatorId,
+          agentId,
+          verifiedDigest,
+          stagedDigestCleanupMarker,
+          deadline,
+        );
+      }
+      throw error;
     } finally {
       await rm(staging, { recursive: true, force: true });
     }
@@ -150,30 +385,87 @@ export class RegistryStoreTs {
     return this.corpora.get(key(creatorId, agentId));
   }
 
-  async listAllAgentCorpora(): Promise<PublishedAgentCorpus[]> {
-    return [...this.corpora.values()].sort(byPublishedAt);
+  async listAllAgentCorpora(options: { limit?: number; offset?: number } = {}): Promise<PublishedAgentCorpus[]> {
+    const limit = options.limit ?? 20;
+    const offset = options.offset ?? 0;
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 21) throw new Error("catalog limit is invalid");
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset > 100_000) throw new Error("catalog offset is invalid");
+    return [...this.corpora.values()].sort(byPublishedAt).slice(offset, offset + limit);
   }
 
   databasePool(): Pool | undefined { return this.pool; }
 
   async close(): Promise<void> { await this.pool?.end(); }
 
-  async grantAgentAccess(userId: string, creatorId: string, agentId: string, orderId?: string): Promise<AgentAccessGrant> {
+  async grantAgentAccess(userId: string, creatorId: string, agentId: string, orderId: string): Promise<AgentAccessGrant> {
+    const normalizedOrderId = orderId.trim();
+    if (!normalizedOrderId) throw new Error("order_id_required");
+    const binding = accessBindingKey(userId, creatorId, agentId);
+    const previous = this.accessMutations.get(binding);
+    const mutation = (previous ? previous.catch(() => undefined) : Promise.resolve(undefined))
+      .then(() => this.grantAgentAccessOnce(userId, creatorId, agentId, normalizedOrderId));
+    this.accessMutations.set(binding, mutation);
+    try {
+      return await mutation;
+    } finally {
+      if (this.accessMutations.get(binding) === mutation) this.accessMutations.delete(binding);
+    }
+  }
+
+  private async grantAgentAccessOnce(userId: string, creatorId: string, agentId: string, orderId: string): Promise<AgentAccessGrant> {
     const corpus = this.getAgentCorpus(creatorId, agentId);
     if (!corpus) throw new Error("agent_not_found");
+    const grantedAt = new Date().toISOString();
+
+    if (this.pool) {
+      // The unique binding, not the caller-generated entitlement id, is the
+      // authority. RETURNING gives every Registry replica the same canonical
+      // row when concurrent checkout requests race across processes.
+      const result = await this.pool.query(`INSERT INTO agent_access
+        (entitlement_id, user_id, creator_id, agent_id, product_id, order_id, status, granted_at)
+        VALUES ($1,$2,$3,$4,$5,$6,'active',$7)
+        ON CONFLICT (user_id, creator_id, agent_id) DO UPDATE SET
+          product_id=EXCLUDED.product_id,
+          order_id=EXCLUDED.order_id,
+          status='active',
+          granted_at=CASE WHEN agent_access.status='active' THEN agent_access.granted_at ELSE EXCLUDED.granted_at END
+        RETURNING entitlement_id, user_id, creator_id, agent_id, product_id, order_id, status, granted_at`, [
+        `ent_${randomUUID().replaceAll("-", "")}`,
+        userId,
+        creatorId,
+        agentId,
+        corpus.product_id,
+        orderId,
+        grantedAt
+      ]);
+      const canonical = rowToAccess(result.rows[0]);
+      for (const [entitlementId, cached] of this.access) {
+        if (accessBindingKey(cached.user_id, cached.creator_id, cached.agent_id) === accessBindingKey(userId, creatorId, agentId)) {
+          this.access.delete(entitlementId);
+        }
+      }
+      this.access.set(canonical.entitlement_id, canonical);
+      return canonical;
+    }
+
     const existing = [...this.access.values()].find((item) => item.user_id === userId && item.creator_id === creatorId && item.agent_id === agentId);
     if (existing) {
-      const orderChanged = orderId !== undefined && orderId !== existing.order_id;
+      const orderChanged = orderId !== existing.order_id;
       if (existing.status !== "active" || orderChanged || existing.product_id !== corpus.product_id) {
         const updated = {
           ...existing,
           product_id: corpus.product_id,
           status: "active" as const,
-          ...(orderId !== undefined ? { order_id: orderId } : {}),
-          ...(existing.status !== "active" ? { granted_at: new Date().toISOString() } : {})
+          order_id: orderId,
+          ...(existing.status !== "active" ? { granted_at: grantedAt } : {})
         };
         this.access.set(updated.entitlement_id, updated);
-        await this.persistAccess(updated);
+        try {
+          await this.persistState();
+        } catch (error) {
+          this.access.set(existing.entitlement_id, existing);
+          throw error;
+        }
         return updated;
       }
       return existing;
@@ -184,23 +476,63 @@ export class RegistryStoreTs {
       creator_id: creatorId,
       agent_id: agentId,
       product_id: corpus.product_id,
-      ...(orderId ? { order_id: orderId } : {}),
+      order_id: orderId,
       status: "active",
-      granted_at: new Date().toISOString(),
+      granted_at: grantedAt,
     };
     this.access.set(grant.entitlement_id, grant);
-    await this.persistAccess(grant);
+    try {
+      await this.persistState();
+    } catch (error) {
+      this.access.delete(grant.entitlement_id);
+      throw error;
+    }
     return grant;
   }
 
-  listAgentAccess(userId: string): AgentAccessGrant[] {
+  async listAgentAccess(userId: string, options: AgentAccessListOptions = {}): Promise<AgentAccessGrant[]> {
+    const page = accessListPage(options);
+    if (this.pool) {
+      const result = await this.pool.query(`SELECT entitlement_id, user_id, creator_id, agent_id, product_id, order_id, status, granted_at
+        FROM agent_access
+        WHERE user_id=$1 AND status='active'${options.entitlementId ? " AND entitlement_id=$2" : ""}
+        ORDER BY granted_at DESC
+        LIMIT $${options.entitlementId ? 3 : 2} OFFSET $${options.entitlementId ? 4 : 3}`,
+      options.entitlementId
+        ? [userId, options.entitlementId, page.limit, page.offset]
+        : [userId, page.limit, page.offset]);
+      const canonical = result.rows.map(rowToAccess);
+      for (const [entitlementId, cached] of this.access) {
+        if (cached.user_id === userId) this.access.delete(entitlementId);
+      }
+      for (const grant of canonical) this.access.set(grant.entitlement_id, grant);
+      return canonical;
+    }
     return [...this.access.values()]
       .filter((item) => item.user_id === userId && item.status === "active")
-      .sort((left, right) => Date.parse(right.granted_at) - Date.parse(left.granted_at));
+      .filter((item) => !options.entitlementId || item.entitlement_id === options.entitlementId)
+      .sort((left, right) => Date.parse(right.granted_at) - Date.parse(left.granted_at))
+      .slice(page.offset, page.offset + page.limit);
   }
 
-  listAgentAccessPresentation(userId: string): AgentAccessPresentation[] {
-    return this.listAgentAccess(userId).flatMap((grant) => {
+  async listAgentAccessPresentation(userId: string, options: AgentAccessListOptions = {}): Promise<AgentAccessPresentation[]> {
+    const page = accessListPage(options);
+    if (this.pool) {
+      const result = await this.pool.query(`SELECT
+          a.entitlement_id, a.user_id, a.creator_id, a.agent_id, a.product_id, a.order_id,
+          a.status AS access_status, a.granted_at,
+          c.creator_name, c.product_name, c.product_description, c.product_json
+        FROM agent_access AS a
+        JOIN agent_corpora AS c ON c.creator_id=a.creator_id AND c.agent_id=a.agent_id
+        WHERE a.user_id=$1 AND a.status='active' AND c.status='published'${options.entitlementId ? " AND a.entitlement_id=$2" : ""}
+        ORDER BY a.granted_at DESC
+        LIMIT $${options.entitlementId ? 3 : 2} OFFSET $${options.entitlementId ? 4 : 3}`,
+      options.entitlementId
+        ? [userId, options.entitlementId, page.limit, page.offset]
+        : [userId, page.limit, page.offset]);
+      return result.rows.map(rowToAccessPresentation);
+    }
+    return (await this.listAgentAccess(userId, options)).flatMap((grant) => {
       const corpus = this.getAgentCorpus(grant.creator_id, grant.agent_id);
       if (!corpus || corpus.status !== "published") return [];
       return [{
@@ -281,12 +613,6 @@ export class RegistryStoreTs {
 
   async resolveCreatorToolConnection(input: { tenantId: string; agentId: string; toolId: string }): Promise<CreatorToolConnection> {
     const bindingKey = toolBindingKey(input.tenantId, input.agentId, input.toolId);
-    const connectionId = this.toolBindings.get(bindingKey);
-    const connection = connectionId ? this.toolConnections.get(connectionId) : undefined;
-    if (connection) {
-      if (connection.status !== "active") throw new Error(`tool connection is not active: ${connection.id}`);
-      return connection;
-    }
     if (this.pool) {
       const result = await this.pool.query(`SELECT c.id, c.tenant_id, c.kind, c.secret_ref, c.secret_value, c.config_json, c.status
         FROM agent_tool_bindings AS b JOIN tool_connections AS c ON c.id=b.connection_id
@@ -300,6 +626,13 @@ export class RegistryStoreTs {
         this.toolBindings.set(bindingKey, resolved.id);
         return resolved;
       }
+      throw new Error(`no Control Plane binding for ${input.tenantId}/${input.agentId}/${input.toolId}`);
+    }
+    const connectionId = this.toolBindings.get(bindingKey);
+    const connection = connectionId ? this.toolConnections.get(connectionId) : undefined;
+    if (connection) {
+      if (connection.status !== "active") throw new Error(`tool connection is not active: ${connection.id}`);
+      return connection;
     }
     throw new Error(`no Control Plane binding for ${input.tenantId}/${input.agentId}/${input.toolId}`);
   }
@@ -385,38 +718,265 @@ export class RegistryStoreTs {
     }
   }
 
-  private async persistCorpus(corpus: PublishedAgentCorpus): Promise<void> {
-    this.corpora.set(key(corpus.creator_id, corpus.agent_id), corpus);
+  private async loadCorpusByteAccounting(): Promise<void> {
+    this.corpusBytes.clear();
+    this.corpusFiles.clear();
+    let creators;
+    try { creators = await readdir(this.corpusRoot, { withFileTypes: true }); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    for (const creator of creators) {
+      if (!creator.isDirectory() || creator.name.startsWith(".")) continue;
+      const creatorRoot = path.join(this.corpusRoot, creator.name);
+      for (const agent of await readdir(creatorRoot, { withFileTypes: true })) {
+        if (!agent.isDirectory() || agent.name.startsWith(".")) continue;
+        const usage = await directoryUsage(path.join(creatorRoot, agent.name));
+        this.corpusBytes.set(key(creator.name, agent.name), usage.bytes);
+        this.corpusFiles.set(key(creator.name, agent.name), usage.files);
+      }
+    }
+  }
+
+  private async createCorpusInstallJournal(
+    creatorId: string,
+    agentId: string,
+    newDigest: string,
+    previousDigest: string | undefined,
+    install: CurrentCorpusInstallTransaction,
+  ): Promise<string> {
+    const directory = path.join(this.corpusRoot, ".install-journal");
+    const journalPath = path.join(directory, `${creatorId}--${agentId}--${randomUUID()}.json`);
+    await writeDurableJsonFile(journalPath, {
+      creator_id: creatorId,
+      agent_id: agentId,
+      new_digest: newDigest,
+      ...(previousDigest ? { previous_digest: previousDigest } : {}),
+      current_path: install.currentPath,
+      prepared_path: install.preparedPath,
+      backup_path: install.backupPath,
+    });
+    return journalPath;
+  }
+
+  private async recoverPendingCorpusInstalls(): Promise<void> {
+    const directory = path.join(this.corpusRoot, ".install-journal");
+    let entries;
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    for (const entry of entries.filter((candidate) => candidate.isFile() && candidate.name.endsWith(".json"))) {
+      const journalPath = path.join(directory, entry.name);
+      const journal = await this.readCorpusInstallJournal(journalPath);
+      const canonicalDigest = await this.readCanonicalCorpusDigest(journal.creator_id, journal.agent_id);
+      const currentDigest = await verifiedDigestAt(
+        journal.current_path,
+        journal.creator_id,
+        journal.agent_id,
+      );
+
+      if (canonicalDigest === journal.new_digest) {
+        if (currentDigest !== journal.new_digest) {
+          throw new Error(`Agent Corpus recovery found committed metadata without its filesystem current: ${journal.creator_id}/${journal.agent_id}`);
+        }
+        await rm(journal.prepared_path, { recursive: true, force: true });
+        await rm(journal.backup_path, { recursive: true, force: true });
+        await rm(journalPath, { force: true });
+        continue;
+      }
+
+      // A later publish may already have installed the canonical version. In
+      // that case this old journal is superseded and must not roll it back.
+      if (canonicalDigest && currentDigest === canonicalDigest) {
+        await rm(journal.prepared_path, { recursive: true, force: true });
+        await rm(journal.backup_path, { recursive: true, force: true });
+        await rm(journalPath, { force: true });
+        continue;
+      }
+
+      if (await pathExists(journal.backup_path)) {
+        const displaced = `${journal.current_path}.${randomUUID()}.recovery`;
+        const hadCurrent = await pathExists(journal.current_path);
+        if (hadCurrent) await rename(journal.current_path, displaced);
+        try {
+          await rename(journal.backup_path, journal.current_path);
+        } catch (error) {
+          if (hadCurrent) await rename(displaced, journal.current_path).catch(() => undefined);
+          throw error;
+        }
+        if (hadCurrent) await rm(displaced, { recursive: true, force: true });
+      } else if (currentDigest === journal.new_digest) {
+        if (journal.previous_digest) {
+          throw new Error(`Agent Corpus recovery cannot restore missing backup for ${journal.creator_id}/${journal.agent_id}`);
+        }
+        await rm(journal.current_path, { recursive: true, force: true });
+      }
+      await rm(journal.prepared_path, { recursive: true, force: true });
+
+      const restoredDigest = await verifiedDigestAt(
+        journal.current_path,
+        journal.creator_id,
+        journal.agent_id,
+      );
+      const expectedDigest = canonicalDigest ?? journal.previous_digest;
+      if (restoredDigest !== expectedDigest) {
+        throw new Error(`Agent Corpus recovery could not restore canonical filesystem state for ${journal.creator_id}/${journal.agent_id}`);
+      }
+      await rm(journalPath, { force: true });
+    }
+  }
+
+  private async readCorpusInstallJournal(journalPath: string): Promise<CorpusInstallJournal> {
+    const metadata = await stat(journalPath);
+    if (metadata.size > 16_384) throw new Error(`Agent Corpus install journal is oversized: ${journalPath}`);
+    const parsed = JSON.parse(await readFile(journalPath, "utf8")) as Partial<CorpusInstallJournal>;
+    if (
+      typeof parsed.creator_id !== "string"
+      || typeof parsed.agent_id !== "string"
+      || typeof parsed.new_digest !== "string"
+      || typeof parsed.current_path !== "string"
+      || typeof parsed.prepared_path !== "string"
+      || typeof parsed.backup_path !== "string"
+      || !/^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/.test(parsed.creator_id)
+      || !/^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/.test(parsed.agent_id)
+      || !/^sha256:[a-f0-9]{64}$/.test(parsed.new_digest)
+      || (parsed.previous_digest !== undefined && !/^sha256:[a-f0-9]{64}$/.test(parsed.previous_digest))
+    ) throw new Error(`Agent Corpus install journal is invalid: ${journalPath}`);
+    const expectedCurrent = path.join(this.corpusRoot, parsed.creator_id, parsed.agent_id);
+    const expectedDirectory = path.dirname(expectedCurrent);
+    if (
+      path.resolve(parsed.current_path) !== expectedCurrent
+      || path.dirname(path.resolve(parsed.prepared_path)) !== expectedDirectory
+      || path.dirname(path.resolve(parsed.backup_path)) !== expectedDirectory
+      || !path.basename(parsed.prepared_path).startsWith(`.${parsed.agent_id}.`)
+      || !path.basename(parsed.prepared_path).endsWith(".prepared")
+      || !path.basename(parsed.backup_path).startsWith(`.${parsed.agent_id}.`)
+      || !path.basename(parsed.backup_path).endsWith(".backup")
+    ) throw new Error(`Agent Corpus install journal paths are invalid: ${journalPath}`);
+    return parsed as CorpusInstallJournal;
+  }
+
+  private async createIndexCleanupMarker(
+    creatorId: string,
+    agentId: string,
+    corpusDigest: string,
+  ): Promise<string> {
+    const directory = path.join(this.corpusRoot, ".index-gc");
+    const marker = path.join(directory, `${creatorId}--${agentId}--${corpusDigest.slice("sha256:".length)}.json`);
+    await writeDurableJsonFile(marker, {
+      creator_id: creatorId,
+      agent_id: agentId,
+      corpus_digest: corpusDigest,
+    });
+    return marker;
+  }
+
+  private async resumePendingIndexCleanup(): Promise<void> {
+    if (!this.indexer) return;
+    const directory = path.join(this.corpusRoot, ".index-gc");
+    let entries;
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    // Bound startup repair work. Remaining markers stay durable for the next
+    // process start instead of making Registry availability depend on Qdrant.
+    for (const entry of entries.filter((candidate) => candidate.isFile() && candidate.name.endsWith(".json")).slice(0, 20)) {
+      const markerPath = path.join(directory, entry.name);
+      let marker: { creator_id: string; agent_id: string; corpus_digest: string };
+      try {
+        const metadata = await stat(markerPath);
+        if (metadata.size > 4_096) throw new Error("cleanup marker is oversized");
+        marker = JSON.parse(await readFile(markerPath, "utf8")) as typeof marker;
+        if (
+          !/^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/.test(marker.creator_id)
+          || !/^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/.test(marker.agent_id)
+          || !/^sha256:[a-f0-9]{64}$/.test(marker.corpus_digest)
+        ) throw new Error("cleanup marker is invalid");
+      } catch {
+        continue;
+      }
+      const currentDigest = await this.readCanonicalCorpusDigest(marker.creator_id, marker.agent_id);
+      if (currentDigest === marker.corpus_digest) {
+        await rm(markerPath, { force: true });
+        continue;
+      }
+      try {
+        const latestDigest = await this.readCanonicalCorpusDigest(marker.creator_id, marker.agent_id);
+        if (latestDigest === marker.corpus_digest) {
+          await rm(markerPath, { force: true });
+          continue;
+        }
+        await removeAgentCorpusKnowledge(
+          this.indexer,
+          marker.creator_id,
+          marker.agent_id,
+          marker.corpus_digest,
+        );
+        const digestAfterDelete = await this.readCanonicalCorpusDigest(marker.creator_id, marker.agent_id);
+        if (digestAfterDelete === marker.corpus_digest) {
+          const current = await verifyAgentCorpus(
+            path.join(this.corpusRoot, marker.creator_id, marker.agent_id),
+            marker.creator_id,
+            marker.agent_id,
+          );
+          await ingestAgentCorpusKnowledge(this.indexer, current);
+        }
+        await rm(markerPath, { force: true });
+      } catch {
+        // Keep the marker so a later Registry process can retry.
+      }
+    }
+  }
+
+  private async readCanonicalCorpusDigest(creatorId: string, agentId: string): Promise<string | undefined> {
+    if (!this.pool) return this.corpora.get(key(creatorId, agentId))?.corpus_digest;
+    const result = await this.pool.query(
+      "SELECT corpus_digest FROM agent_corpora WHERE creator_id=$1 AND agent_id=$2",
+      [creatorId, agentId],
+    );
+    return result.rows[0]?.corpus_digest ? String(result.rows[0].corpus_digest) : undefined;
+  }
+
+  private async persistCorpus(corpus: PublishedAgentCorpus, deadline: PublishDeadline): Promise<void> {
+    const corpusKey = key(corpus.creator_id, corpus.agent_id);
     if (this.pool) {
-      await this.pool.query(`INSERT INTO agent_corpora (creator_id, agent_id, corpus_digest, creator_name, product_id, product_name, product_description, product_json, knowledge_namespace, status, published_at)
+      const query: QueryConfig & { query_timeout: number } = {
+        text: `INSERT INTO agent_corpora (creator_id, agent_id, corpus_digest, creator_name, product_id, product_name, product_description, product_json, knowledge_namespace, status, published_at)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
         ON CONFLICT (creator_id, agent_id) DO UPDATE SET corpus_digest=EXCLUDED.corpus_digest, creator_name=EXCLUDED.creator_name, product_id=EXCLUDED.product_id, product_name=EXCLUDED.product_name, product_description=EXCLUDED.product_description, product_json=EXCLUDED.product_json, knowledge_namespace=EXCLUDED.knowledge_namespace, status=EXCLUDED.status, published_at=EXCLUDED.published_at`,
-        [corpus.creator_id, corpus.agent_id, corpus.corpus_digest, corpus.creator_name, corpus.product_id, corpus.product_name, corpus.product_description ?? null, JSON.stringify({ promise: corpus.product_promise, boundaries: corpus.product_boundaries, offer: corpus.product_offer, presentation: corpus.presentation }), corpus.knowledge_namespace, corpus.status, corpus.published_at]);
+        values: [corpus.creator_id, corpus.agent_id, corpus.corpus_digest, corpus.creator_name, corpus.product_id, corpus.product_name, corpus.product_description ?? null, JSON.stringify({ promise: corpus.product_promise, boundaries: corpus.product_boundaries, offer: corpus.product_offer, presentation: corpus.presentation }), corpus.knowledge_namespace, corpus.status, corpus.published_at],
+        query_timeout: deadline.remainingMs(),
+      };
+      await this.pool.query(query);
+      // The database row is authoritative. Do not expose the new metadata in
+      // this process until the upsert has actually committed.
+      this.corpora.set(corpusKey, corpus);
       return;
     }
-    await this.persistState();
+    const nextCorpora = new Map(this.corpora);
+    nextCorpora.set(corpusKey, corpus);
+    await this.persistState({ corpora: nextCorpora.values(), signal: deadline.signal });
+    this.corpora.set(corpusKey, corpus);
   }
 
-  private async persistAccess(grant: AgentAccessGrant): Promise<void> {
-    if (this.pool) {
-      await this.pool.query(`INSERT INTO agent_access (entitlement_id, user_id, creator_id, agent_id, product_id, order_id, status, granted_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-        ON CONFLICT (user_id, creator_id, agent_id) DO UPDATE SET
-          product_id=EXCLUDED.product_id,
-          order_id=COALESCE(EXCLUDED.order_id, agent_access.order_id),
-          status=EXCLUDED.status,
-          granted_at=EXCLUDED.granted_at`, [grant.entitlement_id, grant.user_id, grant.creator_id, grant.agent_id, grant.product_id, grant.order_id ?? null, grant.status, grant.granted_at]);
-      return;
-    }
-    await this.persistState();
-  }
-
-  private async persistState(): Promise<void> {
+  private async persistState(options: {
+    corpora?: Iterable<PublishedAgentCorpus>;
+    signal?: AbortSignal;
+  } = {}): Promise<void> {
     if (!this.statePath) return;
+    throwIfAborted(options.signal);
     await mkdir(path.dirname(this.statePath), { recursive: true });
     const temporary = `${this.statePath}.${randomUUID()}.tmp`;
     const state = {
       schema_version: 1,
-      agent_corpora: [...this.corpora.values()],
+      agent_corpora: [...(options.corpora ?? this.corpora.values())],
       agent_access: [...this.access.values()],
       tool_connections: [...this.toolConnections.values()],
       agent_tool_bindings: [...this.toolBindings.entries()].map(([binding, connection_id]) => {
@@ -424,8 +984,16 @@ export class RegistryStoreTs {
         return { tenant_id, agent_id, tool_id: toolParts.join("\u0000"), connection_id };
       })
     };
-    await writeFile(temporary, JSON.stringify(state, null, 2) + "\n", "utf8");
-    await rename(temporary, this.statePath);
+    try {
+      await writeFile(temporary, JSON.stringify(state, null, 2) + "\n", {
+        encoding: "utf8",
+        signal: options.signal,
+      });
+      throwIfAborted(options.signal);
+      await rename(temporary, this.statePath);
+    } finally {
+      await rm(temporary, { force: true }).catch(() => undefined);
+    }
   }
 
   private async readToolConnection(connectionId: string): Promise<CreatorToolConnection | undefined> {
@@ -439,7 +1007,129 @@ export class RegistryStoreTs {
   }
 }
 
+export function registryDatabaseTimeoutMs(environment: NodeJS.ProcessEnv = process.env): number {
+  const raw = environment.HATCH_REGISTRY_DB_TIMEOUT_MS?.trim();
+  if (!raw) return 5_000;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 100 || value > 60_000) {
+    throw new Error("HATCH_REGISTRY_DB_TIMEOUT_MS must be an integer between 100 and 60000");
+  }
+  return value;
+}
+
+export class RegistryPublishTimeoutError extends Error {
+  readonly code = "registry_publish_timeout";
+  readonly status = 504;
+
+  constructor(timeoutMs: number) {
+    super(`Agent Corpus publish exceeded its ${timeoutMs}ms hard deadline`);
+    this.name = "RegistryPublishTimeoutError";
+  }
+}
+
+export function registryPublishTimeoutMs(environment: NodeJS.ProcessEnv = process.env): number {
+  const raw = environment.HATCH_REGISTRY_PUBLISH_TIMEOUT_MS?.trim();
+  if (!raw) return DEFAULT_REGISTRY_PUBLISH_TIMEOUT_MS;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 100 || value > 300_000) {
+    throw new Error("HATCH_REGISTRY_PUBLISH_TIMEOUT_MS must be an integer between 100 and 300000");
+  }
+  return value;
+}
+
+class PublishDeadline {
+  readonly signal: AbortSignal;
+  private readonly controller = new AbortController();
+  private readonly expiresAt: number;
+  private readonly timer: NodeJS.Timeout;
+  private readonly deferredOperations: Promise<void>[] = [];
+
+  constructor(private readonly timeoutMs: number) {
+    this.signal = this.controller.signal;
+    this.expiresAt = performance.now() + timeoutMs;
+    this.timer = setTimeout(() => {
+      this.controller.abort(new RegistryPublishTimeoutError(timeoutMs));
+    }, timeoutMs);
+  }
+
+  remainingMs(): number {
+    this.throwIfExpired();
+    return Math.max(1, Math.ceil(this.expiresAt - performance.now()));
+  }
+
+  throwIfExpired(): void {
+    throwIfAborted(this.signal);
+    if (performance.now() >= this.expiresAt) {
+      const error = new RegistryPublishTimeoutError(this.timeoutMs);
+      this.controller.abort(error);
+      throw error;
+    }
+  }
+
+  async wait<T>(operation: Promise<T>): Promise<T> {
+    this.throwIfExpired();
+    return new Promise<T>((resolve, reject) => {
+      const onAbort = () => reject(this.signal.reason);
+      this.signal.addEventListener("abort", onAbort, { once: true });
+      operation.then(
+        (value) => {
+          this.signal.removeEventListener("abort", onAbort);
+          resolve(value);
+        },
+        (error) => {
+          this.signal.removeEventListener("abort", onAbort);
+          reject(error);
+        },
+      );
+    });
+  }
+
+  dispose(): void {
+    clearTimeout(this.timer);
+  }
+
+  defer(operation: Promise<void>): void {
+    this.deferredOperations.push(operation);
+  }
+
+  deferredCompletion(): Promise<void> | undefined {
+    if (this.deferredOperations.length === 0) return undefined;
+    return Promise.allSettled(this.deferredOperations).then(() => undefined);
+  }
+}
+
 function key(creatorId: string, agentId: string): string { return `${creatorId}:${agentId}`; }
+function accessListPage(options: AgentAccessListOptions): { limit: number; offset: number } {
+  if (options.entitlementId !== undefined) {
+    if (!options.entitlementId || options.entitlementId.length > 256) throw new Error("entitlementId is invalid");
+    return { limit: 1, offset: 0 };
+  }
+  const limit = options.limit ?? 20;
+  const offset = options.offset ?? 0;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 21) throw new Error("agent access limit is invalid");
+  if (!Number.isSafeInteger(offset) || offset < 0 || offset > 100_000) throw new Error("agent access offset is invalid");
+  return { limit, offset };
+}
+async function directoryUsage(root: string): Promise<{ bytes: number; files: number }> {
+  let bytes = 0;
+  let files = 0;
+  for (const entry of await readdir(root, { withFileTypes: true })) {
+    const absolute = path.join(root, entry.name);
+    if (entry.isDirectory()) {
+      const nested = await directoryUsage(absolute);
+      bytes += nested.bytes;
+      files += nested.files;
+    } else if (entry.isFile()) {
+      bytes += (await stat(absolute)).size;
+      files += 1;
+    }
+    else throw new AgentCorpusVerificationError(`Agent Corpus contains unsupported filesystem entry: ${absolute}`);
+  }
+  return { bytes, files };
+}
+function accessBindingKey(userId: string, creatorId: string, agentId: string): string {
+  return `${userId}\u0000${creatorId}\u0000${agentId}`;
+}
 function byPublishedAt(a: PublishedAgentCorpus, b: PublishedAgentCorpus): number { return Date.parse(b.published_at) - Date.parse(a.published_at); }
 function rowToCorpus(row: Record<string, any>): PublishedAgentCorpus {
   const product = typeof row.product_json === "string" ? JSON.parse(row.product_json) : row.product_json ?? {};
@@ -470,6 +1160,31 @@ function rowToAccess(row: Record<string, any>): AgentAccessGrant {
     ...(row.order_id ? { order_id: String(row.order_id) } : {}),
     status: row.status === "active" ? "active" : row.status === "revoked" ? "revoked" : "disabled",
     granted_at: new Date(row.granted_at).toISOString(),
+  };
+}
+
+function rowToAccessPresentation(row: Record<string, any>): AgentAccessPresentation {
+  const product = typeof row.product_json === "string" ? JSON.parse(row.product_json) : row.product_json ?? {};
+  return {
+    entitlement_id: String(row.entitlement_id),
+    user_id: String(row.user_id),
+    creator_id: String(row.creator_id),
+    agent_id: String(row.agent_id),
+    product_id: String(row.product_id),
+    ...(row.order_id ? { order_id: String(row.order_id) } : {}),
+    status: "active",
+    granted_at: new Date(row.granted_at).toISOString(),
+    creator: { id: String(row.creator_id), name: String(row.creator_name) },
+    product: {
+      id: String(row.product_id),
+      name: String(row.product_name),
+      description: row.product_description
+        ? String(row.product_description)
+        : "Work with this Creator Agent in your own files and context.",
+    },
+    presentation: product.presentation && typeof product.presentation === "object"
+      ? product.presentation
+      : {},
   };
 }
 
@@ -513,6 +1228,104 @@ function validateConnectionConfig(config: Record<string, unknown>): void {
     }
   };
   scan(config);
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  throw signal.reason instanceof Error ? signal.reason : new Error("Registry operation was aborted");
+}
+
+async function cleanIndexDigestBestEffort(
+  indexer: AgentKnowledgeIndexer,
+  creatorId: string,
+  agentId: string,
+  corpusDigest: string,
+  markerPath: string,
+  deadline: PublishDeadline,
+): Promise<void> {
+  // Cleanup receives a fresh indexer-level timeout instead of the already
+  // aborted publish signal. If the hard publish deadline has elapsed, cleanup
+  // continues in the background but cannot delay the caller's timeout result.
+  const cleanupSignal = AbortSignal.timeout(5_000);
+  const cleanup = waitForAbort(
+    removeAgentCorpusKnowledge(indexer, creatorId, agentId, corpusDigest, cleanupSignal),
+    cleanupSignal,
+  ).then(
+    () => rm(markerPath, { force: true }).then(() => undefined),
+    () => undefined,
+  );
+  deadline.defer(cleanup);
+  if (deadline.signal.aborted) {
+    void cleanup;
+    return;
+  }
+  await deadline.wait(cleanup).catch(() => undefined);
+}
+
+async function waitForAbort<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) throw signal.reason;
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    operation.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
+async function writeDurableJsonFile(filePath: string, value: Record<string, unknown>): Promise<void> {
+  const directory = path.dirname(filePath);
+  const temporary = `${filePath}.${randomUUID()}.tmp`;
+  await mkdir(directory, { recursive: true });
+  let handle;
+  try {
+    handle = await open(temporary, "wx", 0o600);
+    await handle.writeFile(`${JSON.stringify(value)}\n`, "utf8");
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+    await rename(temporary, filePath);
+    await syncDirectory(directory);
+  } finally {
+    await handle?.close().catch(() => undefined);
+    await rm(temporary, { force: true }).catch(() => undefined);
+  }
+}
+
+async function syncDirectory(directory: string): Promise<void> {
+  let handle;
+  try {
+    handle = await open(directory, "r");
+    await handle.sync();
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+}
+
+async function pathExists(candidate: string): Promise<boolean> {
+  try {
+    await lstat(candidate);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+async function verifiedDigestAt(
+  corpusPath: string,
+  creatorId: string,
+  agentId: string,
+): Promise<string | undefined> {
+  if (!(await pathExists(corpusPath))) return undefined;
+  return (await verifyAgentCorpus(corpusPath, creatorId, agentId)).digest;
 }
 
 export { AgentCorpusVerificationError };

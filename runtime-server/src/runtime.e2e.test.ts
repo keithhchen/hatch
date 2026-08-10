@@ -9,7 +9,7 @@ import { DeterministicAgentRuntime, type AgentRuntime } from "./agentRuntime.js"
 import { buildCompactedHistory, RUNTIME_CONTEXT_PREFIX, runtimeMessagesTranscript, SUMMARY_PREFIX } from "./compaction.js";
 import { clientToolTimeoutMs, createRuntimeServer, scopedConversationId, type RuntimeServer } from "./index.js";
 import type { OutboundMessage } from "./protocol.js";
-import { ClientToolNameSchema, parseInboundMessage, PROTOCOL_VERSION } from "./protocol.js";
+import { ClientHelloSchema, ClientToolNameSchema, parseInboundMessage, PROTOCOL_VERSION } from "./protocol.js";
 import {
   discoverSkills,
   explicitDollarSkillMentions,
@@ -29,7 +29,14 @@ import {
 } from "./skills.js";
 import { parseAllowedTools, toolPreapprovedBySkills } from "./skillPermissions.js";
 import { RuntimeStore, type StoreEvent } from "./store.js";
-import { modelToolSpecsForRun, requireClientToolEnabled, requireModelToolDispatch, requireTool } from "./tools.js";
+import {
+  assertClientToolNameInvariant,
+  modelToolSpecsForRun,
+  requireClientToolEnabled,
+  requireModelToolDispatch,
+  requireTool,
+  toolRegistry
+} from "./tools.js";
 import type { OutputGuard, OutputGuardInput } from "./outputGuard.js";
 
 let runtimeServer: RuntimeServer | undefined;
@@ -45,14 +52,120 @@ function createDeterministicRuntimeServer(): RuntimeServer {
 test("runtime protocol mirrors the canonical wire schema", async () => {
   const schemaPath = path.resolve("..", "packages", "protocol", "schemas", "hatch-wire-protocol.schema.json");
   const schema = JSON.parse(await readFile(schemaPath, "utf8")) as {
+    $id: string;
     $defs: {
       protocolVersion: { const: string };
       clientToolName: { enum: string[] };
+      skillInvoked: {
+        properties: {
+          trigger: { properties: { tool: { enum: string[] } } };
+        };
+      };
     };
   };
 
+  assert.equal(schema.$id, "https://hatch.dev/protocol/hatch-wire-protocol-0.6.schema.json");
   assert.equal(schema.$defs.protocolVersion.const, PROTOCOL_VERSION);
   assert.deepEqual(schema.$defs.clientToolName.enum, [...ClientToolNameSchema.options]);
+  assert.deepEqual(schema.$defs.skillInvoked.properties.trigger.properties.tool.enum, ["shell_exec", "file_read"]);
+});
+
+test("legacy dotted JSONL local-tool names normalize to canonical underscore names", async () => {
+  const dataDir = await tempWorkspace();
+  const legacyToolCallNames = ["fs.list", "fs.search", "fs.read", "fs.write", "fs.patch", "shell.exec", "git.diff"];
+  const events = [
+    {
+      type: "session.started",
+      installation_id: "legacy-desktop",
+      local_tools: legacyToolCallNames,
+      timestamp: new Date(0).toISOString()
+    },
+    {
+      type: "skill.invoked",
+      conversation_id: "conversation-legacy",
+      run_id: "run-legacy-read",
+      name: "legacy-read",
+      path: "/skills/legacy-read/SKILL.md",
+      scope: "server",
+      invocation_type: "implicit",
+      reason: "skill_doc_read",
+      source_tool_call_id: "call-legacy-read",
+      trigger: { tool: "fs.read", path: "/skills/legacy-read/SKILL.md" },
+      timestamp: new Date(0).toISOString()
+    },
+    {
+      type: "skill.invoked",
+      conversation_id: "conversation-legacy",
+      run_id: "run-legacy-shell",
+      name: "legacy-shell",
+      path: "/skills/legacy-shell/scripts/run.sh",
+      scope: "server",
+      invocation_type: "implicit",
+      reason: "script_run",
+      source_tool_call_id: "call-legacy-shell",
+      trigger: { tool: "shell.exec", command: "./scripts/run.sh" },
+      timestamp: new Date(1).toISOString()
+    },
+    ...legacyToolCallNames.map((name, index) => ({
+      type: "tool.call",
+      conversation_id: "conversation-legacy",
+      run_id: "run-legacy-tools",
+      tool_call_id: `call-legacy-tool-${index}`,
+      name,
+      arguments: {},
+      status: "completed",
+      timestamp: new Date(index + 2).toISOString()
+    }))
+  ];
+  await writeFile(
+    path.join(dataDir, "events.jsonl"),
+    `${events.map((event) => JSON.stringify(event)).join("\n")}\n`,
+    "utf8"
+  );
+
+  const stored = await new RuntimeStore(dataDir).readEvents();
+  assert.deepEqual(
+    stored.find((event) => event.type === "session.started")?.local_tools,
+    ["file_list", "file_search", "file_read", "file_write", "file_patch", "shell_exec", "git_diff"]
+  );
+  assert.deepEqual(
+    stored
+      .filter((event) => event.type === "skill.invoked")
+      .map((event) => event.trigger.tool),
+    ["file_read", "shell_exec"]
+  );
+  assert.deepEqual(
+    stored
+      .filter((event) => event.type === "tool.call")
+      .map((event) => event.name),
+    ["file_list", "file_search", "file_read", "file_write", "file_patch", "shell_exec", "git_diff"]
+  );
+
+  const store = new RuntimeStore(dataDir);
+  await assert.rejects(
+    store.append({
+      type: "tool.call",
+      run_id: "new-run",
+      tool_call_id: "new-call",
+      name: "fs.read",
+      arguments: {},
+      status: "requested"
+    }),
+    /must use canonical local tool name file_read/
+  );
+});
+
+test("current wire and parser reject old dotted Desktop capability names", () => {
+  const legacyHello = {
+    type: "client.hello",
+    protocol_version: PROTOCOL_VERSION,
+    installation_id: "legacy-desktop",
+    auth_token: "legacy-token",
+    local_tools: ["fs.list", "fs.read", "shell.exec", "git.diff", "file_read"]
+  };
+
+  assert.equal(ClientHelloSchema.safeParse(legacyHello).success, false);
+  assert.throws(() => parseInboundMessage(legacyHello));
 });
 
 test("Desktop write approval window is long enough for a deliberate user decision", () => {
@@ -96,7 +209,7 @@ test("runtime server exposes visible conversation history for client hydration",
     conversation_id: storedConversationId,
     run_id: "run_old_1",
     tool_call_id: "call_file_read",
-    name: "fs.read",
+    name: "file_read",
     arguments: { path: "2024 Birthday Dinner.xlsx" },
     status: "requested",
     locality: "client",
@@ -107,7 +220,7 @@ test("runtime server exposes visible conversation history for client hydration",
     conversation_id: storedConversationId,
     run_id: "run_old_1",
     tool_call_id: "call_file_read",
-    name: "fs.read",
+    name: "file_read",
     arguments: { path: "2024 Birthday Dinner.xlsx" },
     status: "completed",
     locality: "client",
@@ -204,7 +317,7 @@ test("runtime server exposes visible conversation history for client hydration",
     toolCall.result?.content
   ]), [[
     "call_file_read",
-    "fs.read",
+    "file_read",
     "completed",
     "client",
     "auto",
@@ -465,7 +578,7 @@ test("run start accepts only the current user message, not a client transcript o
     run_id: "run_x",
     conversation_id: "conv_x",
     message: { role: "user", content: "message 1" },
-    enabled_tools: ["fs.read"]
+    enabled_tools: ["file_read"]
   }), /Unrecognized key/);
 
   assert.doesNotThrow(() => parseInboundMessage({
@@ -482,7 +595,7 @@ test("client hello declares local tool capability and rejects server tools", () 
     protocol_version: PROTOCOL_VERSION,
     installation_id: "install_x",
     license_token: "license_x",
-    local_tools: ["fs.read", "fs.search", "git.diff"]
+    local_tools: ["file_read", "file_search", "git_diff"]
   }));
 
   assert.throws(() => parseInboundMessage({
@@ -499,7 +612,7 @@ test("client hello declares local tool capability and rejects server tools", () 
     installation_id: "install_x",
     license_token: "license_x",
     workspace_root: "/private/consumer/workspace",
-    local_tools: ["fs.read"]
+    local_tools: ["file_read"]
   }), /Unrecognized key/);
 });
 
@@ -524,7 +637,7 @@ test("client hello requires an explicit local tool capability list", () => {
     protocol_version: PROTOCOL_VERSION,
     installation_id: "install_x",
     license_token: "license_x",
-    local_tools: ["fs.read"]
+    local_tools: ["file_read"]
   }));
 });
 
@@ -703,10 +816,14 @@ test("skills follow official SKILL.md frontmatter naming semantics", async () =>
 test("skill allowed-tools map official tool names to local tool grants", () => {
   const grants = parseAllowedTools("Read, Write Bash(git:*) Bash(jq:*)");
   assert.deepEqual(grants, [
-    { tool: "fs.read" },
-    { tool: "fs.write" },
-    { tool: "shell.exec", shellPrefix: "git" },
-    { tool: "shell.exec", shellPrefix: "jq" }
+    { tool: "file_read" },
+    { tool: "file_write" },
+    { tool: "shell_exec", shellPrefix: "git" },
+    { tool: "shell_exec", shellPrefix: "jq" }
+  ]);
+  assert.deepEqual(parseAllowedTools("file_read file_list"), [
+    { tool: "file_read" },
+    { tool: "file_list" }
   ]);
 
   const skills = [{
@@ -719,10 +836,10 @@ test("skill allowed-tools map official tool names to local tool grants", () => {
     resource_manifest_truncated: false,
     activated_at: new Date(0).toISOString()
   }];
-  assert.equal(toolPreapprovedBySkills(skills, "fs.write", { path: "out.md", content: "ok" }), true);
-  assert.equal(toolPreapprovedBySkills(skills, "shell.exec", { command: "git --version" }), true);
-  assert.equal(toolPreapprovedBySkills(skills, "shell.exec", { command: "printf hi" }), false);
-  assert.equal(toolPreapprovedBySkills(skills, "fs.patch", { path: "out.md", patch: "" }), false);
+  assert.equal(toolPreapprovedBySkills(skills, "file_write", { path: "out.md", content: "ok" }), true);
+  assert.equal(toolPreapprovedBySkills(skills, "shell_exec", { command: "git --version" }), true);
+  assert.equal(toolPreapprovedBySkills(skills, "shell_exec", { command: "printf hi" }), false);
+  assert.equal(toolPreapprovedBySkills(skills, "file_patch", { path: "out.md", patch: "" }), false);
 });
 
 test("configured server-side skill roots, symlinked skill folders, and implicit policy are discovered", async () => {
@@ -1416,29 +1533,49 @@ test("skills section renders Codex-style progressive disclosure without SKILL.md
   assert.ok(report.included_count >= 2);
 });
 
-test("Pi runtime uses generic file_read for skill path loading", async () => {
+test("Pi runtime uses canonical file_read for skill path loading", async () => {
   const runtimeSource = await readFile(new URL("../src/agentRuntime.ts", import.meta.url), "utf8");
   const piRuntimeSource = await readFile(new URL("../src/piAgentRuntime.ts", import.meta.url), "utf8");
   const toolsSource = await readFile(new URL("../src/tools.ts", import.meta.url), "utf8");
-  const specs = modelToolSpecsForRun(["fs.read"], { hasMcpServers: false });
+  const specs = modelToolSpecsForRun(["file_read"], { hasMcpServers: false });
   const fileRead = specs.find((spec) => spec.name === "file_read");
   const fileList = specs.find((spec) => spec.name === "file_list");
 
   assert.match(piRuntimeSource, /new Agent\(/);
   assert.match(piRuntimeSource, /createPiStreamFn/);
+  assert.match(piRuntimeSource, /addEventListener\("abort", abortAgent/);
+  assert.match(piRuntimeSource, /removeEventListener\("abort", abortAgent/);
   assert.match(runtimeSource, /modelToolSpecsForRun/);
   assert.doesNotMatch(runtimeSource, /function chatModelToolSpecs/);
   assert.match(toolsSource, /name: "file_read"[\s\S]*?locality: "hybrid"/);
   assert.match(toolsSource, /name: "file_list"[\s\S]*?locality: "hybrid"/);
-  assert.equal(fileRead?.runtimeName, "fs.read");
-  assert.equal(fileRead?.clientTool, "fs.read");
+  assert.equal(fileRead?.runtimeName, "file_read");
+  assert.equal(fileRead?.clientTool, "file_read");
   assert.equal(fileRead?.locality, "hybrid");
-  assert.equal(fileList?.runtimeName, "fs.list");
+  assert.equal(fileList?.runtimeName, "file_list");
   assert.equal(fileList?.locality, "hybrid");
   assert.doesNotMatch(runtimeSource, /@openai\/agents/);
   assert.doesNotMatch(runtimeSource, /shellTool/);
   assert.doesNotMatch(runtimeSource, /read_skill_file/);
   assert.doesNotMatch(runtimeSource, /load_skill/);
+});
+
+test("every client tool has one canonical name across the model and Runtime", () => {
+  assert.doesNotThrow(() => assertClientToolNameInvariant());
+  assert.deepEqual(
+    [...toolRegistry.values()]
+      .filter((tool) => tool.locality === "client")
+      .map((tool) => [tool.name, tool.model?.name]),
+    [
+      ["file_list", "file_list"],
+      ["file_search", "file_search"],
+      ["file_read", "file_read"],
+      ["file_write", "file_write"],
+      ["file_patch", "file_patch"],
+      ["shell_exec", "shell_exec"],
+      ["git_diff", "git_diff"]
+    ]
+  );
 });
 
 test("tool registry owns model tool dispatch locality and event-name mapping", () => {
@@ -1450,22 +1587,23 @@ test("tool registry owns model tool dispatch locality and event-name mapping", (
 
   const fileSearch = requireModelToolDispatch("file_search");
   assert.equal(fileSearch.target, "client");
-  assert.equal(fileSearch.clientTool, "fs.search");
-  assert.equal(fileSearch.eventName, "fs.search");
+  assert.equal(fileSearch.spec.runtimeName, "file_search");
+  assert.equal(fileSearch.clientTool, "file_search");
+  assert.equal(fileSearch.eventName, "file_search");
   assert.equal(fileSearch.approval, "auto");
 
   const fileRead = requireModelToolDispatch("file_read");
   assert.equal(fileRead.target, "hybrid");
-  assert.equal(fileRead.runtimeName, "fs.read");
-  assert.equal(fileRead.clientTool, "fs.read");
+  assert.equal(fileRead.runtimeName, "file_read");
+  assert.equal(fileRead.clientTool, "file_read");
   assert.equal(fileRead.serverEventName, "file_read");
-  assert.equal(fileRead.clientEventName, "fs.read");
+  assert.equal(fileRead.clientEventName, "file_read");
 
-  assert.throws(() => requireClientToolEnabled(["fs.read"], "fs.search"), /Client tool is not enabled/);
-  assert.throws(() => requireTool("fs.read").schema.parse({ path: "README.md", extra: true }), /Unrecognized key|unrecognized/i);
+  assert.throws(() => requireClientToolEnabled(["file_read"], "file_search"), /Client tool is not enabled/);
+  assert.throws(() => requireTool("file_read").schema.parse({ path: "README.md", extra: true }), /Unrecognized key|unrecognized/i);
   assert.deepEqual(requireTool("web.search").schema.parse({ query: "Hatch" }), { query: "Hatch", limit: 5 });
   assert.throws(() => requireTool("web.search").schema.parse({ query: "Hatch", extra: true }), /Unrecognized key|unrecognized/i);
-  assert.deepEqual(requireTool("shell.exec").schema.parse({
+  assert.deepEqual(requireTool("shell_exec").schema.parse({
     command: "printf hatch",
     justification: "Inspect shell behavior"
   }), {
@@ -1473,7 +1611,7 @@ test("tool registry owns model tool dispatch locality and event-name mapping", (
     timeout_ms: 30000,
     justification: "Inspect shell behavior"
   });
-  const shellSpec = modelToolSpecsForRun(["shell.exec"], { hasMcpServers: false }).find((tool) => tool.name === "shell_exec");
+  const shellSpec = modelToolSpecsForRun(["shell_exec"], { hasMcpServers: false }).find((tool) => tool.name === "shell_exec");
   assert.ok(shellSpec);
   assert.ok("justification" in shellSpec.properties);
 
@@ -1482,6 +1620,10 @@ test("tool registry owns model tool dispatch locality and event-name mapping", (
   assert.ok(!configuredWithoutKnowledge.some((tool) => tool.name === "hatch_file_search"));
   const configuredWithKnowledge = modelToolSpecsForRun([], { hasMcpServers: false, hasKnowledge: true });
   assert.ok(configuredWithKnowledge.some((tool) => tool.name === "hatch_file_search"));
+  const knowledgeSearch = requireModelToolDispatch("hatch_file_search");
+  assert.equal(knowledgeSearch.target, "server");
+  assert.equal(knowledgeSearch.runtimeName, "hatch.file_search");
+  assert.equal(knowledgeSearch.eventName, "hatch.file_search");
 });
 
 
@@ -1698,6 +1840,50 @@ test("skill resources can be read by catalog path and cannot escape the skills r
   await assert.rejects(() => readSkillResourceByPath(path.join(path.dirname(skill.path), "..", "..", "package.json")), /escapes skills root/);
 });
 
+test("server rejects protocol 0.5 hello explicitly before accepting protocol 0.6", async () => {
+  const dataDir = await tempWorkspace();
+  process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
+
+  runtimeServer = createRuntimeServer();
+  const serverUrl = await listen(runtimeServer);
+  const socket = new WebSocket(serverUrl);
+  const messages: OutboundMessage[] = [];
+  socket.on("message", (data) => {
+    messages.push(JSON.parse(String(data)) as OutboundMessage);
+  });
+  await new Promise<void>((resolve, reject) => {
+    socket.once("open", resolve);
+    socket.once("error", reject);
+  });
+
+  socket.send(JSON.stringify({
+    type: "client.hello",
+    protocol_version: "0.5",
+    installation_id: "install_protocol_05",
+    license_token: "license_protocol_05",
+    local_tools: ["file_read"]
+  }));
+  const rejected = await waitForSocketMessage(messages, (message) => message.type === "turn.failed");
+  assert.ok(rejected.type === "turn.failed");
+  assert.equal(rejected.error.code, "protocol_error");
+  assert.match(rejected.error.message, /0\.6/);
+
+  socket.send(JSON.stringify({
+    type: "client.hello",
+    protocol_version: PROTOCOL_VERSION,
+    installation_id: "install_protocol_06",
+    license_token: "license_protocol_06",
+    local_tools: ["file_read"]
+  }));
+  await waitForSocketMessage(messages, (message) => message.type === "session.ready");
+  socket.close();
+
+  const sessions = (await new RuntimeStore(dataDir).readEvents())
+    .filter((event) => event.type === "session.started");
+  assert.equal(sessions.length, 1);
+  assert.equal(sessions[0]?.installation_id, "install_protocol_06");
+});
+
 
 
 
@@ -1726,7 +1912,7 @@ test("server rejects duplicate client hello on the same connection", async () =>
     protocol_version: PROTOCOL_VERSION,
     installation_id: "install_once",
     license_token: "license_once",
-    local_tools: ["fs.read"]
+    local_tools: ["file_read"]
   }));
   await waitForSocketMessage(messages, (message) => message.type === "session.ready");
 
@@ -1735,7 +1921,7 @@ test("server rejects duplicate client hello on the same connection", async () =>
     protocol_version: PROTOCOL_VERSION,
     installation_id: "install_twice",
     license_token: "license_twice",
-    local_tools: ["fs.write"]
+    local_tools: ["file_write"]
   }));
   const error = await waitForSocketMessage(messages, (message) => message.type === "turn.failed");
   assert.ok(error.type === "turn.failed");
@@ -1747,7 +1933,7 @@ test("server rejects duplicate client hello on the same connection", async () =>
   assert.equal(sessions.length, 1);
   assert.ok(sessions[0]?.type === "session.started");
   assert.equal(sessions[0].installation_id, "install_once");
-  assert.deepEqual(sessions[0].local_tools, ["fs.read"]);
+  assert.deepEqual(sessions[0].local_tools, ["file_read"]);
 });
 
 test("server requires client hello before tool results", async () => {
@@ -1806,7 +1992,7 @@ test("server rejects concurrent runs for the same conversation across WebSocket 
     protocol_version: PROTOCOL_VERSION,
     installation_id: "install_busy",
     license_token: "license_busy",
-    local_tools: ["fs.list", "fs.search", "fs.read", "fs.write", "fs.patch", "git.diff"]
+    local_tools: ["file_list", "file_search", "file_read", "file_write", "file_patch", "git_diff"]
   }));
   await waitForSocketMessage(firstMessages, (message) => message.type === "session.ready");
 
@@ -1832,7 +2018,7 @@ test("server rejects concurrent runs for the same conversation across WebSocket 
     protocol_version: PROTOCOL_VERSION,
     installation_id: "install_busy_2",
     license_token: "license_busy",
-    local_tools: ["fs.list", "fs.search", "fs.read", "fs.write", "fs.patch", "git.diff"]
+    local_tools: ["file_list", "file_search", "file_read", "file_write", "file_patch", "git_diff"]
   }));
   await waitForSocketMessage(secondMessages, (message) => message.type === "session.ready");
 
@@ -1879,7 +2065,7 @@ test("server releases a conversation lock when the client disconnects mid-run", 
     protocol_version: PROTOCOL_VERSION,
     installation_id: "install_disconnect_lock_1",
     license_token: "license_disconnect_lock",
-    local_tools: ["fs.list", "fs.search", "fs.read", "fs.write", "fs.patch", "git.diff"]
+    local_tools: ["file_list", "file_search", "file_read", "file_write", "file_patch", "git_diff"]
   }));
   await waitForSocketMessage(firstMessages, (message) => message.type === "session.ready");
 
@@ -1918,7 +2104,7 @@ test("server releases a conversation lock when the client disconnects mid-run", 
     protocol_version: PROTOCOL_VERSION,
     installation_id: "install_disconnect_lock_2",
     license_token: "license_disconnect_lock",
-    local_tools: ["fs.list", "fs.search", "fs.read", "fs.write", "fs.patch", "git.diff"]
+    local_tools: ["file_list", "file_search", "file_read", "file_write", "file_patch", "git_diff"]
   }));
   await waitForSocketMessage(secondMessages, (message) => message.type === "session.ready");
 
@@ -1976,7 +2162,7 @@ test("run cancel for an unknown run does not cancel the active run", async () =>
     protocol_version: PROTOCOL_VERSION,
     installation_id: "install_cancel_targeted",
     license_token: "license_cancel_targeted",
-    local_tools: ["fs.list", "fs.search", "fs.read", "fs.write", "fs.patch", "git.diff"]
+    local_tools: ["file_list", "file_search", "file_read", "file_write", "file_patch", "git_diff"]
   }));
   await waitForSocketMessage(messages, (message) => message.type === "session.ready");
 

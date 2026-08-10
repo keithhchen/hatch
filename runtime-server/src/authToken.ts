@@ -9,7 +9,7 @@ export type HatchAuthClaims = {
 /** Verify the small stateless token issued by Platform Registry. */
 export function verifyHatchAuthToken(
   token: string | undefined,
-  secret = process.env.HATCH_AUTH_SIGNING_SECRET?.trim()
+  secret?: string
 ): HatchAuthClaims | undefined {
   if (!token || !secret) return undefined;
   const parts = token.split(".");

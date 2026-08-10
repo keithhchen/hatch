@@ -15,7 +15,8 @@ export type PiAgentPromptRunner = (options: PiAgentPromptOptions) => Promise<str
  * main runtime. Product workflows may choose the prompt and provider payload,
  * but they do not get a second model client or a separate turn budget.
  */
-export function runPiAgentPrompt(options: PiAgentPromptOptions): Promise<string> {
+export async function runPiAgentPrompt(options: PiAgentPromptOptions): Promise<string> {
+  options.signal?.throwIfAborted();
   const agent = createPiAgent({
     initialState: {
       systemPrompt: options.systemPrompt ?? "",
@@ -32,30 +33,30 @@ export function runPiAgentPrompt(options: PiAgentPromptOptions): Promise<string>
     }
   });
   const abort = (): void => agent.abort();
-  if (options.signal?.aborted) abort();
-  else options.signal?.addEventListener("abort", abort, { once: true });
+  options.signal?.addEventListener("abort", abort, { once: true });
 
-  return (async () => {
-    try {
-      await agent.prompt(options.prompt);
-      if (options.signal?.aborted) throw new Error("Pi Agent prompt aborted");
-      const message = [...agent.state.messages]
-        .reverse()
-        .find((candidate) => candidate.role === "assistant");
-      if (!message || message.role !== "assistant") {
-        throw new Error("Pi Agent prompt ended without an assistant response");
-      }
-      if (message.stopReason === "error" || message.stopReason === "aborted") {
-        throw new Error(message.errorMessage ?? `Pi Agent prompt stopped: ${message.stopReason}`);
-      }
-      const content = textContent(message.content);
-      if (!content.trim()) throw new Error("Pi Agent prompt returned an empty response");
-      return content;
-    } finally {
-      options.signal?.removeEventListener("abort", abort);
-      agent.abort();
+  try {
+    // Covers a cancellation that wins after Agent construction but before its
+    // prompt owns an AbortController.
+    options.signal?.throwIfAborted();
+    await agent.prompt(options.prompt);
+    options.signal?.throwIfAborted();
+    const message = [...agent.state.messages]
+      .reverse()
+      .find((candidate) => candidate.role === "assistant");
+    if (!message || message.role !== "assistant") {
+      throw new Error("Pi Agent prompt ended without an assistant response");
     }
-  })();
+    if (message.stopReason === "error" || message.stopReason === "aborted") {
+      throw new Error(message.errorMessage ?? `Pi Agent prompt stopped: ${message.stopReason}`);
+    }
+    const content = textContent(message.content);
+    if (!content.trim()) throw new Error("Pi Agent prompt returned an empty response");
+    return content;
+  } finally {
+    options.signal?.removeEventListener("abort", abort);
+    agent.abort();
+  }
 }
 
 function textContent(content: unknown): string {

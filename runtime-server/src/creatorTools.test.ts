@@ -56,6 +56,33 @@ test("Creator tools fail closed when a Corpus requires a missing Control Plane",
   );
 });
 
+test("Creator tool declarations resolve sequentially and stop when the owning hello is aborted", async () => {
+  const twoToolCorpus = {
+    tools: [
+      { ...corpus.tools[1], id: "creator.market-one" },
+      { ...corpus.tools[1], id: "creator.market-two" }
+    ]
+  } as unknown as AgentCorpus;
+  const controller = new AbortController();
+  let calls = 0;
+  let markFirstStarted!: () => void;
+  const firstStarted = new Promise<void>((resolve) => { markFirstStarted = resolve; });
+  const controlPlane: CreatorToolControlPlane = {
+    resolve: async (request) => {
+      calls += 1;
+      markFirstStarted();
+      return new Promise((_resolve, reject) => {
+        request.signal?.addEventListener("abort", () => reject(request.signal?.reason), { once: true });
+      });
+    }
+  };
+  const pending = resolveCreatorTools(controlPlane, "tenant-1", "agent-1", twoToolCorpus, controller.signal);
+  await firstStarted;
+  controller.abort(new Error("hello closed"));
+  await assert.rejects(pending, /hello closed/);
+  assert.equal(calls, 1);
+});
+
 test("Creator HTTP tools support GET query parameters and server-side API-key headers", async (t) => {
   const target = createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
@@ -100,6 +127,39 @@ test("Creator HTTP tools support GET query parameters and server-side API-key he
   assert.deepEqual(await tool!.execute({ q: "NVIDIA" }), {
     method: "GET", q: "NVIDIA", authorization: "test-seth-key"
   });
+});
+
+test("Creator HTTP tools cancel an oversized chunked response before buffering it", async (t) => {
+  const target = createServer((_request, response) => {
+    response.setHeader("content-type", "application/json");
+    response.write('{"content":"');
+    for (let index = 0; index < 65; index += 1) {
+      response.write(Buffer.alloc(64 * 1024, 0x78));
+    }
+    response.end('"}');
+  });
+  await new Promise<void>((resolve) => target.listen(0, "127.0.0.1", resolve));
+  t.after(() => target.close());
+  const registry = createServer((_request, response) => {
+    response.setHeader("content-type", "application/json");
+    response.end(JSON.stringify({
+      id: "market-data-api",
+      tenant_id: "tenant-1",
+      kind: "http",
+      secret_ref: null,
+      config: { url: `http://127.0.0.1:${(target.address() as { port: number }).port}/oversized` },
+      status: "active"
+    }));
+  });
+  await new Promise<void>((resolve) => registry.listen(0, "127.0.0.1", resolve));
+  t.after(() => registry.close());
+
+  const controlPlane = new RegistryCreatorToolControlPlane({
+    registryUrl: `http://127.0.0.1:${(registry.address() as { port: number }).port}`,
+    serviceToken: "internal-test"
+  });
+  const [tool] = await resolveCreatorTools(controlPlane, "tenant-1", "agent-1", corpus);
+  await assert.rejects(tool!.execute({ ticker: "HATCH" }), /Response body exceeds/);
 });
 
 test("Creator MCP tools use Streamable HTTP initialization, session headers, and SSE responses", async (t) => {

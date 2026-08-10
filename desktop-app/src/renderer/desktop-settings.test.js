@@ -10,12 +10,12 @@ describe("desktop native settings", () => {
     });
     await store.load();
     store.setProfile("user_123", "last_selected_entitlement_id", "ent_signal");
-    store.setProfile("user_123", "workspace_root", "/tmp/project");
+    store.setProfile("user_123", "workspace_grant", { grant_id: "grant_project", display_path: "/tmp/project" });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(store.getProfile("user_123", "last_selected_entitlement_id")).toBe("ent_signal");
     expect(JSON.parse(serialized)).toEqual({
       schema_version: 1,
-      accounts: { user_123: { last_selected_entitlement_id: "ent_signal", workspace_root: "/tmp/project" } }
+      accounts: { user_123: { last_selected_entitlement_id: "ent_signal", workspace_grant: { grant_id: "grant_project", display_path: "/tmp/project" } } }
     });
     expect(store.getProfile("other", "last_selected_entitlement_id", "none")).toBe("none");
   });

@@ -1,34 +1,39 @@
 import { z } from "zod";
 import type { Usage } from "@earendil-works/pi-ai";
 
-export const PROTOCOL_VERSION = "0.5";
+export const PROTOCOL_VERSION = "0.6";
 export const MAX_TOOL_RESULT_BYTES = 4 * 1024 * 1024;
+export const MAX_PROTOCOL_ID_CHARS = 256;
+export const MAX_AUTH_TOKEN_CHARS = 4 * 1024;
+export const MAX_USER_MESSAGE_CHARS = 256 * 1024;
+export const MAX_ERROR_MESSAGE_CHARS = 16 * 1024;
+const ProtocolIdSchema = z.string().min(1).max(MAX_PROTOCOL_ID_CHARS);
 export const ClientToolNameSchema = z.enum([
-  "fs.list",
-  "fs.search",
-  "fs.read",
-  "fs.write",
-  "fs.patch",
-  "shell.exec",
-  "git.diff"
+  "file_list",
+  "file_search",
+  "file_read",
+  "file_write",
+  "file_patch",
+  "shell_exec",
+  "git_diff"
 ]);
 export type ClientToolName = z.infer<typeof ClientToolNameSchema>;
 
 export const ClientHelloSchema = z.object({
   type: z.literal("client.hello"),
   protocol_version: z.literal(PROTOCOL_VERSION),
-  installation_id: z.string().min(1),
-  auth_token: z.string().min(1).optional(),
+  installation_id: ProtocolIdSchema,
+  auth_token: z.string().min(1).max(MAX_AUTH_TOKEN_CHARS).optional(),
   // Kept only for old local fixtures during the migration. Production clients
   // send auth_token issued by Registry.
-  license_token: z.string().min(1).optional(),
-  entitlement_id: z.string().min(1).optional(),
-  creator_id: z.string().min(1).optional(),
-  agent_id: z.string().min(1).optional(),
-  user_id: z.string().min(1).optional(),
-  product_id: z.string().min(1).optional(),
-  client_version: z.string().optional(),
-  local_tools: z.array(ClientToolNameSchema)
+  license_token: z.string().min(1).max(MAX_AUTH_TOKEN_CHARS).optional(),
+  entitlement_id: ProtocolIdSchema.optional(),
+  creator_id: ProtocolIdSchema.optional(),
+  agent_id: ProtocolIdSchema.optional(),
+  user_id: ProtocolIdSchema.optional(),
+  product_id: ProtocolIdSchema.optional(),
+  client_version: z.string().max(MAX_PROTOCOL_ID_CHARS).optional(),
+  local_tools: z.array(ClientToolNameSchema).max(ClientToolNameSchema.options.length)
 }).strict().superRefine((message, ctx) => {
   if (!message.auth_token && !message.license_token) {
     ctx.addIssue({ code: "custom", path: ["auth_token"], message: "auth_token is required" });
@@ -39,38 +44,38 @@ export const ClientHelloSchema = z.object({
 
 export const ClientMessageSchema = z.object({
   type: z.literal("client.message"),
-  run_id: z.string().min(1),
-  conversation_id: z.string().min(1),
+  run_id: ProtocolIdSchema,
+  conversation_id: ProtocolIdSchema,
   message: z.object({
     role: z.literal("user"),
-    content: z.string()
+    content: z.string().max(MAX_USER_MESSAGE_CHARS)
   }).strict()
 }).strict();
 
 export const ToolCallResultSchema = z.discriminatedUnion("status", [
   z.object({
     type: z.literal("tool_call.result"),
-    run_id: z.string().min(1),
-    tool_call_id: z.string().min(1),
+    run_id: ProtocolIdSchema,
+    tool_call_id: ProtocolIdSchema,
     status: z.literal("ok"),
     result: z.record(z.string(), z.unknown())
   }).strict(),
   z.object({
     type: z.literal("tool_call.result"),
-    run_id: z.string().min(1),
-    tool_call_id: z.string().min(1),
+    run_id: ProtocolIdSchema,
+    tool_call_id: ProtocolIdSchema,
     status: z.literal("error"),
     error: z.object({
-      code: z.string(),
-      message: z.string()
+      code: z.string().min(1).max(128),
+      message: z.string().max(MAX_ERROR_MESSAGE_CHARS)
     }).strict()
   }).strict()
 ]);
 
 export const TurnCancelSchema = z.object({
   type: z.literal("turn.cancel"),
-  run_id: z.string().min(1),
-  reason: z.string().optional()
+  run_id: ProtocolIdSchema,
+  reason: z.string().max(4096).optional()
 }).strict();
 
 export const InboundMessageSchema = z.discriminatedUnion("type", [

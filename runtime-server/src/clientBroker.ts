@@ -55,6 +55,10 @@ export class ClientToolBroker {
       return Promise.reject(error);
     }
     const approval = options.approvalOverride ?? tool.approval;
+    const key = pendingKey(runId, toolCallId);
+    if (this.pending.has(key)) {
+      return Promise.reject(new Error(`Duplicate client tool call ID for run ${runId}: ${toolCallId}`));
+    }
     const request: ToolRequest = {
       type: "tool_call.request",
       run_id: runId,
@@ -66,10 +70,14 @@ export class ClientToolBroker {
       ...(options.skillRunId ? { skill_run_id: options.skillRunId } : {})
     };
 
+    let createdPending!: PendingCall;
     const result = new Promise<Record<string, unknown>>((resolve, reject) => {
       const timeout = setTimeout(() => {
-        this.pending.delete(pendingKey(runId, toolCallId));
-        void this.store.append({
+        // A due timer can already be queued when its old call settles and the
+        // same IDs are reused. Only that exact PendingCall may claim the key.
+        if (!this.isPending(key, createdPending)) return;
+        this.pending.delete(key);
+        void observe(() => this.store.append({
           type: "tool.call",
           conversation_id: state?.conversationId,
           run_id: runId,
@@ -82,11 +90,11 @@ export class ClientToolBroker {
           ...(options.scope ? { scope: options.scope } : {}),
           ...(options.skillRunId ? { skill_run_id: options.skillRunId } : {}),
           error: { message: `Timed out waiting for client tool result: ${name}` }
-        });
+        })).catch(() => undefined);
         reject(new Error(`Timed out waiting for client tool result: ${name}`));
       }, this.timeoutMs);
 
-      this.pending.set(pendingKey(runId, toolCallId), {
+      createdPending = {
         resolve,
         reject,
         timeout,
@@ -99,14 +107,14 @@ export class ClientToolBroker {
         scope: options.scope,
         skillRunId: options.skillRunId,
         state
-      });
+      };
+      this.pending.set(key, createdPending);
     });
     // The caller does not receive `result` until after requested/emit completes.
     // Cancellation can reject it during that window, so attach ownership now
     // without changing the promise returned to the caller below.
     void result.catch(() => undefined);
 
-    const key = pendingKey(runId, toolCallId);
     const pending = this.pending.get(key);
     if (!pending) {
       return Promise.reject(new Error(`Client tool pending state was not created: ${toolCallId}`));
@@ -182,23 +190,28 @@ export class ClientToolBroker {
         code: "tool_result_too_large",
         message: `Tool result exceeds the ${MAX_TOOL_RESULT_BYTES}-byte transport envelope; narrow the request.`
       };
-      await this.emitApprovalDecision(pending, "approved", error.message);
-      await this.store.append({
-        type: "tool.call",
-        conversation_id: pending.conversationId,
-        run_id: message.run_id,
-        tool_call_id: message.tool_call_id,
-        name: pending.name,
-        arguments: projectToolArgumentsForVisibility(pending.scope, pending.name, pending.arguments),
-        status: "failed",
-        locality: "client",
-        approval: pending.approval,
-        ...(pending.scope ? { scope: pending.scope } : {}),
-        ...(pending.skillRunId ? { skill_run_id: pending.skillRunId } : {}),
-        error
-      });
-      await pending.state?.resumeFromTool().catch(() => undefined);
+      // The worker-facing promise is the lifecycle authority. Settle it before
+      // fallible audit/event fan-out so a store outage cannot orphan the run.
+      const resume = observe(() => pending.state?.resumeFromTool());
       pending.reject(new Error(error.message));
+      await Promise.allSettled([
+        observe(() => this.emitApprovalDecision(pending, "approved", error.message)),
+        observe(() => this.store.append({
+          type: "tool.call",
+          conversation_id: pending.conversationId,
+          run_id: message.run_id,
+          tool_call_id: message.tool_call_id,
+          name: pending.name,
+          arguments: projectToolArgumentsForVisibility(pending.scope, pending.name, pending.arguments),
+          status: "failed",
+          locality: "client",
+          approval: pending.approval,
+          ...(pending.scope ? { scope: pending.scope } : {}),
+          ...(pending.skillRunId ? { skill_run_id: pending.skillRunId } : {}),
+          error
+        })),
+        resume
+      ]);
       return true;
     }
 
@@ -206,101 +219,112 @@ export class ClientToolBroker {
     clearTimeout(pending.timeout);
 
     if (message.status === "error") {
-      await this.emitApprovalDecision(pending, message.error?.code === "approval_denied" ? "denied" : "approved", message.error?.message);
-      await this.store.append({
+      const resume = observe(() => pending.state?.resumeFromTool());
+      pending.reject(new Error(message.error?.message ?? "Client tool failed"));
+      await Promise.allSettled([
+        observe(() => this.emitApprovalDecision(pending, message.error?.code === "approval_denied" ? "denied" : "approved", message.error?.message)),
+        observe(() => this.store.append({
+          type: "tool.call",
+          conversation_id: pending.conversationId,
+          run_id: message.run_id,
+          tool_call_id: message.tool_call_id,
+          name: pending.name,
+          arguments: projectToolArgumentsForVisibility(pending.scope, pending.name, pending.arguments),
+          status: "failed",
+          locality: "client",
+          approval: pending.approval,
+          ...(pending.scope ? { scope: pending.scope } : {}),
+          ...(pending.skillRunId ? { skill_run_id: pending.skillRunId } : {}),
+          error: message.error
+        })),
+        resume
+      ]);
+      return true;
+    }
+
+    const result = message.result ?? {};
+    const resume = observe(() => pending.state?.resumeFromTool());
+    pending.resolve(result);
+    await Promise.allSettled([
+      observe(() => this.emitApprovalDecision(pending, "approved")),
+      observe(() => this.store.append({
         type: "tool.call",
         conversation_id: pending.conversationId,
         run_id: message.run_id,
         tool_call_id: message.tool_call_id,
         name: pending.name,
         arguments: projectToolArgumentsForVisibility(pending.scope, pending.name, pending.arguments),
-        status: "failed",
+        status: "completed",
         locality: "client",
         approval: pending.approval,
         ...(pending.scope ? { scope: pending.scope } : {}),
         ...(pending.skillRunId ? { skill_run_id: pending.skillRunId } : {}),
-        error: message.error
-      });
-      await pending.state?.resumeFromTool().catch(() => undefined);
-      pending.reject(new Error(message.error?.message ?? "Client tool failed"));
-      return true;
-    }
-
-    await this.emitApprovalDecision(pending, "approved");
-    await this.store.append({
-      type: "tool.call",
-      conversation_id: pending.conversationId,
-      run_id: message.run_id,
-      tool_call_id: message.tool_call_id,
-      name: pending.name,
-      arguments: projectToolArgumentsForVisibility(pending.scope, pending.name, pending.arguments),
-      status: "completed",
-      locality: "client",
-      approval: pending.approval,
-      ...(pending.scope ? { scope: pending.scope } : {}),
-      ...(pending.skillRunId ? { skill_run_id: pending.skillRunId } : {}),
-      result: projectToolResultForVisibility(pending.scope, pending.name, message.result ?? {})
-    });
-    await pending.state?.resumeFromTool().catch(() => undefined);
-    pending.resolve(message.result ?? {});
+        result: projectToolResultForVisibility(pending.scope, pending.name, result)
+      })),
+      resume
+    ]);
     return true;
   }
 
   async cancelAll(reason = "Client broker canceled"): Promise<void> {
-    for (const [key, pending] of this.pending) {
-      await this.cancelPendingCall(key, pending, reason);
-    }
+    const claimed = this.claimPendingCalls(() => true, reason);
+    await Promise.allSettled(claimed.map((pending) => this.observeCancellation(pending, reason)));
   }
 
   async cancelRun(runId: string, reason = "Run canceled"): Promise<number> {
-    let cancelled = 0;
-    for (const [key, pending] of this.pending) {
-      if (pending.runId !== runId) continue;
-      await this.cancelPendingCall(key, pending, reason);
-      cancelled += 1;
-    }
-    return cancelled;
+    const claimed = this.claimPendingCalls((pending) => pending.runId === runId, reason);
+    await Promise.allSettled(claimed.map((pending) => this.observeCancellation(pending, reason)));
+    return claimed.length;
   }
 
-  private async cancelPendingCall(key: string, pending: PendingCall, reason: string): Promise<void> {
-    // Claim the call before any I/O. A client result racing cancellation must
-    // never be able to complete the same protected-worker request afterward.
-    if (this.pending.get(key) !== pending) return;
-    this.pending.delete(key);
-    clearTimeout(pending.timeout);
-    // Settle the worker-facing promise before any awaited observability fan-out.
-    // Protected workers must unwind even when the client event sink is slow.
-    pending.reject(new Error(reason));
-    await this.store.append({
-      type: "tool.call",
-      conversation_id: pending.conversationId,
-      run_id: pending.runId,
-      tool_call_id: pending.toolCallId,
-      name: pending.name,
-      arguments: projectToolArgumentsForVisibility(pending.scope, pending.name, pending.arguments),
-      status: "cancelled",
-      locality: "client",
-      approval: pending.approval,
-      ...(pending.scope ? { scope: pending.scope } : {}),
-      ...(pending.skillRunId ? { skill_run_id: pending.skillRunId } : {}),
-      error: { message: reason }
-    });
-    await this.emit({
-      type: "tool_call.delta",
-      run_id: pending.runId,
-      tool_call_id: pending.toolCallId,
-      name: pending.name,
-      locality: "client",
-      approval: pending.approval,
-      status: "cancelled",
-      arguments: projectToolArgumentsForVisibility(pending.scope, pending.name, pending.arguments),
-      error: {
-        code: "tool_cancelled",
-        message: reason
-      },
-      ...(pending.scope ? { scope: pending.scope } : {}),
-      ...(pending.skillRunId ? { skill_run_id: pending.skillRunId } : {})
-    });
+  private claimPendingCalls(predicate: (pending: PendingCall) => boolean, reason: string): PendingCall[] {
+    const claimed: PendingCall[] = [];
+    for (const [key, pending] of this.pending) {
+      if (!predicate(pending) || this.pending.get(key) !== pending) continue;
+      this.pending.delete(key);
+      clearTimeout(pending.timeout);
+      pending.reject(new Error(reason));
+      claimed.push(pending);
+    }
+    return claimed;
+  }
+
+  private async observeCancellation(pending: PendingCall, reason: string): Promise<void> {
+    // Audit persistence and client observability are deliberately independent:
+    // either one may fail during disconnect without blocking the other or the
+    // already-settled protected worker.
+    await Promise.allSettled([
+      observe(() => this.store.append({
+        type: "tool.call",
+        conversation_id: pending.conversationId,
+        run_id: pending.runId,
+        tool_call_id: pending.toolCallId,
+        name: pending.name,
+        arguments: projectToolArgumentsForVisibility(pending.scope, pending.name, pending.arguments),
+        status: "cancelled",
+        locality: "client",
+        approval: pending.approval,
+        ...(pending.scope ? { scope: pending.scope } : {}),
+        ...(pending.skillRunId ? { skill_run_id: pending.skillRunId } : {}),
+        error: { message: reason }
+      })),
+      observe(() => this.emit({
+        type: "tool_call.delta",
+        run_id: pending.runId,
+        tool_call_id: pending.toolCallId,
+        name: pending.name,
+        locality: "client",
+        approval: pending.approval,
+        status: "cancelled",
+        arguments: projectToolArgumentsForVisibility(pending.scope, pending.name, pending.arguments),
+        error: {
+          code: "tool_cancelled",
+          message: reason
+        },
+        ...(pending.scope ? { scope: pending.scope } : {}),
+        ...(pending.skillRunId ? { skill_run_id: pending.skillRunId } : {})
+      }))
+    ]);
   }
 
   private emitApprovalDecision(
@@ -321,7 +345,15 @@ export class ClientToolBroker {
 }
 
 function pendingKey(runId: string, toolCallId: string): string {
-  return `${runId}:${toolCallId}`;
+  return JSON.stringify([runId, toolCallId]);
+}
+
+function observe<T>(operation: () => T | Promise<T>): Promise<T> {
+  try {
+    return Promise.resolve(operation());
+  } catch (error) {
+    return Promise.reject(error);
+  }
 }
 
 function approvalReason(args: Record<string, unknown>): { reason?: string } {

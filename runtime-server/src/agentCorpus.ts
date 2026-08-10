@@ -1,64 +1,80 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
+import { readBoundedJsonObject } from "./boundedResponse.js";
 
 const DigestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
+const IdentifierSchema = z.string().min(1).max(128).regex(/^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/);
+const ToolIdentifierSchema = z.string().min(1).max(256).regex(/^(?:hatch|creator)\.[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/);
+const NameSchema = z.string().min(1).max(256);
+const DescriptionSchema = z.string().min(1).max(4_096);
+const PathSchema = z.string().min(1).max(1_024);
+const BoundedJsonObjectSchema = z.record(z.string().min(1).max(128), z.unknown()).superRefine((value, context) => {
+  const failure = embeddedJsonLimitFailure(value);
+  if (failure) context.addIssue({ code: "custom", message: failure });
+});
+
+export const AGENT_CORPUS_MANIFEST_MAX_BYTES = 1024 * 1024;
+export const AGENT_CORPUS_ASSET_MAX_BYTES = 4 * 1024 * 1024;
+export const AGENT_CORPUS_TOTAL_ASSET_MAX_BYTES = 16 * 1024 * 1024;
+
 const AssetSchema = z.object({
-  id: z.string().min(1),
-  path: z.string().min(1),
+  id: IdentifierSchema,
+  path: PathSchema,
   sha256: DigestSchema,
-  description: z.string().min(1).optional()
+  description: DescriptionSchema.optional()
 }).strict();
 
 const ToolSchema = z.object({
-  id: z.string().min(1),
-  kind: z.string().min(1),
-  capability: z.string().min(1).optional(),
-  connection_ref: z.string().min(1).optional(),
-  operation: z.string().min(1).optional(),
-  tool_name: z.string().min(1).optional(),
-  description: z.string().min(1).optional(),
-  input_schema: z.record(z.string(), z.unknown()).optional()
+  id: ToolIdentifierSchema,
+  kind: z.string().min(1).max(64),
+  capability: z.string().min(1).max(64).optional(),
+  connection_ref: IdentifierSchema.optional(),
+  operation: z.string().min(1).max(256).optional(),
+  tool_name: z.string().min(1).max(256).optional(),
+  description: DescriptionSchema.optional(),
+  input_schema: BoundedJsonObjectSchema.optional()
 }).strict();
 
 export const AgentCorpusSchema = z.object({
   contract_version: z.literal("1"),
-  agent_id: z.string().min(1),
-  creator: z.object({ id: z.string().min(1), name: z.string().min(1) }).strict(),
+  agent_id: IdentifierSchema,
+  creator: z.object({ id: IdentifierSchema, name: NameSchema }).strict(),
   product: z.object({
-    id: z.string().min(1),
-    name: z.string().min(1),
-    description: z.string().min(1).optional(),
-    promise: z.string().min(1).optional(),
-    boundaries: z.array(z.string().min(1)).default([]),
+    id: IdentifierSchema,
+    name: NameSchema,
+    description: DescriptionSchema.optional(),
+    promise: DescriptionSchema.optional(),
+    boundaries: z.array(z.string().min(1).max(512)).max(32).default([]),
     offer: z.object({
       model: z.enum(["per_delivery", "subscription"]).optional(),
-      amount_minor: z.number().int().nonnegative(),
+      amount_minor: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
       currency: z.string().regex(/^[A-Z]{3}$/),
-      unit: z.string().min(1).optional()
+      unit: z.string().min(1).max(128).optional()
     }).strict().optional(),
-    presentation: z.record(z.string(), z.unknown()).default({})
+    presentation: BoundedJsonObjectSchema.default({})
   }).strict(),
   instructions: z.object({ system: AssetSchema }).strict(),
   skills: z.array(z.object({
-    id: z.string().min(1),
-    name: z.string().min(1),
-    when_to_use: z.string().min(1),
+    id: IdentifierSchema,
+    name: NameSchema,
+    when_to_use: DescriptionSchema,
     instruction: AssetSchema,
-    references: z.array(z.object({ asset: AssetSchema, kind: z.string().min(1) }).strict()).default([]),
-    allowed_tool_ids: z.array(z.string().min(1)).default([])
-  }).strict()).default([]),
+    references: z.array(z.object({ asset: AssetSchema, kind: z.enum(["method", "style", "example", "few_shots"]) }).strict()).max(64).default([]),
+    allowed_tool_ids: z.array(ToolIdentifierSchema).max(64).default([])
+  }).strict()).max(32).default([]),
   knowledge: z.object({
     documents: z.array(AssetSchema.extend({
       retrieval_only: z.literal(true),
-      source_summary: z.string().min(1)
-    }).strict()).default([])
+      source_summary: DescriptionSchema
+    }).strict()).max(256).default([])
   }).strict().default({ documents: [] }),
-  tools: z.array(ToolSchema).min(1),
+  tools: z.array(ToolSchema).min(1).max(64),
   evaluations: z.object({
-    synthetic_qa: z.array(AssetSchema).min(1),
-    held_out: z.array(AssetSchema).min(1)
+    synthetic_qa: z.array(AssetSchema).min(1).max(128),
+    held_out: z.array(AssetSchema).min(1).max(128)
   }).strict()
 }).strict();
 
@@ -88,16 +104,20 @@ export type ResolvedAgentCorpus = {
 export class AgentCorpusResolver {
   constructor(private readonly root: string) {}
 
-  async resolve(creatorId: string, agentId: string): Promise<ResolvedAgentCorpus> {
+  async resolve(creatorId: string, agentId: string, signal?: AbortSignal): Promise<ResolvedAgentCorpus> {
+    signal?.throwIfAborted();
     const corpusRoot = await containedPath(this.root, path.join(creatorId, agentId));
-    const corpus = await loadAgentCorpus(corpusRoot);
+    const corpus = await loadAgentCorpus(corpusRoot, signal);
     if (corpus.creator.id !== creatorId || corpus.agent_id !== agentId) {
       throw new Error("Agent Corpus binding does not match the requested creator and agent");
     }
-    return { root: corpusRoot, corpus, digest: await agentCorpusDigest(corpusRoot, corpus) };
+    const digest = await agentCorpusDigest(corpusRoot, corpus, signal);
+    signal?.throwIfAborted();
+    return { root: corpusRoot, corpus, digest };
   }
 
-  async list(creatorId: string): Promise<ResolvedAgentCorpus[]> {
+  async list(creatorId: string, signal?: AbortSignal): Promise<ResolvedAgentCorpus[]> {
+    signal?.throwIfAborted();
     const creatorRoot = await containedPath(this.root, creatorId);
     const entries = await (async () => {
       try {
@@ -108,10 +128,12 @@ export class AgentCorpusResolver {
     })();
     const agents: ResolvedAgentCorpus[] = [];
     for (const entry of entries) {
+      signal?.throwIfAborted();
       if (!entry.isDirectory()) continue;
       try {
-        agents.push(await this.resolve(creatorId, entry.name));
+        agents.push(await this.resolve(creatorId, entry.name, signal));
       } catch {
+        signal?.throwIfAborted();
         // A single incomplete staging directory must not hide other agents.
       }
     }
@@ -122,8 +144,10 @@ export class AgentCorpusResolver {
 export type KnowledgeSearchRequest = {
   creatorId: string;
   agentId: string;
+  corpusDigest: string;
   query: string;
   limit: number;
+  signal?: AbortSignal;
 };
 
 export type KnowledgeHit = {
@@ -161,7 +185,8 @@ class UnconfiguredKnowledgeProvider implements KnowledgeProvider {
 export class HttpKnowledgeProvider implements KnowledgeProvider {
   constructor(
     private readonly endpoint: string,
-    private readonly headers: Record<string, string> = {}
+    private readonly headers: Record<string, string> = {},
+    private readonly timeoutMs = 120_000
   ) {}
 
   async search(request: KnowledgeSearchRequest): Promise<KnowledgeHit[]> {
@@ -171,12 +196,14 @@ export class HttpKnowledgeProvider implements KnowledgeProvider {
       body: JSON.stringify({
         creator_id: request.creatorId,
         agent_id: request.agentId,
+        corpus_digest: request.corpusDigest,
         query: request.query,
         top_k: request.limit
-      })
+      }),
+      signal: boundedKnowledgeSignal(request.signal, this.timeoutMs)
     });
     if (!response.ok) throw new Error(`Knowledge provider failed with HTTP ${response.status}`);
-    const payload = await response.json() as { hits?: unknown };
+    const payload = await readBoundedJsonObject(response) as { hits?: unknown };
     if (!Array.isArray(payload.hits)) return [];
     return payload.hits.flatMap((item): KnowledgeHit[] => {
       if (!item || typeof item !== "object") return [];
@@ -199,20 +226,23 @@ export class QdrantKnowledgeProvider implements KnowledgeProvider {
   private readonly collection: string;
   private readonly embeddingBaseUrl: string;
   private readonly rerankBaseUrl: string;
+  private readonly timeoutMs: number;
 
   constructor(
     private readonly qdrantUrl: string,
     private readonly qdrantApiKey: string | undefined,
     private readonly dashscopeApiKey: string,
-    options: { collection?: string; embeddingBaseUrl?: string; rerankBaseUrl?: string } = {}
+    options: { collection?: string; embeddingBaseUrl?: string; rerankBaseUrl?: string; timeoutMs?: number } = {}
   ) {
     this.collection = options.collection?.trim() || "hatch_knowledge_text_v4_1024";
     this.embeddingBaseUrl = (options.embeddingBaseUrl?.trim() || "https://dashscope.aliyuncs.com/compatible-mode/v1").replace(/\/$/, "");
     this.rerankBaseUrl = (options.rerankBaseUrl?.trim() || "https://dashscope.aliyuncs.com/compatible-api/v1").replace(/\/$/, "");
+    this.timeoutMs = options.timeoutMs ?? 120_000;
   }
 
   async search(request: KnowledgeSearchRequest): Promise<KnowledgeHit[]> {
-    const queryVector = await this.embed(request.query);
+    request.signal?.throwIfAborted();
+    const queryVector = await this.embed(request.query, request.signal);
     const response = await this.qdrantRequest(`/collections/${encodeURIComponent(this.collection)}/points/query`, {
       query: queryVector,
       // Fixed candidate window keeps retrieval quality predictable. The
@@ -222,10 +252,11 @@ export class QdrantKnowledgeProvider implements KnowledgeProvider {
       filter: {
         must: [
           { key: "creator_id", match: { value: request.creatorId } },
-          { key: "agent_id", match: { value: request.agentId } }
+          { key: "agent_id", match: { value: request.agentId } },
+          { key: "corpus_digest", match: { value: request.corpusDigest } }
         ]
       }
-    });
+    }, request.signal);
     const result = response.result;
     const points = result && typeof result === "object" && !Array.isArray(result)
       ? (result as Record<string, unknown>).points
@@ -251,7 +282,7 @@ export class QdrantKnowledgeProvider implements KnowledgeProvider {
       : [];
     if (candidates.length === 0) return [];
     const finalLimit = Math.max(1, Math.min(request.limit, 6));
-    const reranked = await this.rerank(request.query, candidates.map((item) => item.text), finalLimit);
+    const reranked = await this.rerank(request.query, candidates.map((item) => item.text), finalLimit, request.signal);
     return reranked
       .map((item) => {
         const candidate = candidates[item.index];
@@ -269,12 +300,12 @@ export class QdrantKnowledgeProvider implements KnowledgeProvider {
       .slice(0, finalLimit);
   }
 
-  private async embed(text: string): Promise<number[]> {
+  private async embed(text: string, signal?: AbortSignal): Promise<number[]> {
     const response = await this.dashscopeRequest("/embeddings", {
       model: "text-embedding-v4",
       input: [text],
       dimensions: 1024
-    }, this.embeddingBaseUrl);
+    }, this.embeddingBaseUrl, signal);
     const rows = response.data;
     const embedding = Array.isArray(rows) && rows[0] && typeof rows[0] === "object"
       ? (rows[0] as Record<string, unknown>).embedding
@@ -285,13 +316,18 @@ export class QdrantKnowledgeProvider implements KnowledgeProvider {
     return embedding;
   }
 
-  private async rerank(query: string, documents: string[], limit: number): Promise<Array<{ index: number; score: number }>> {
+  private async rerank(
+    query: string,
+    documents: string[],
+    limit: number,
+    signal?: AbortSignal
+  ): Promise<Array<{ index: number; score: number }>> {
     const response = await this.dashscopeRequest("/reranks", {
       model: "qwen3-rerank",
       query,
       documents,
       top_n: Math.min(limit, documents.length)
-    }, this.rerankBaseUrl);
+    }, this.rerankBaseUrl, signal);
     const results = response.results ?? (response.output && typeof response.output === "object" ? (response.output as Record<string, unknown>).results : undefined);
     if (!Array.isArray(results)) throw new Error("DashScope rerank response is invalid");
     return results.flatMap((item): Array<{ index: number; score: number }> => {
@@ -303,25 +339,60 @@ export class QdrantKnowledgeProvider implements KnowledgeProvider {
     });
   }
 
-  private async qdrantRequest(pathname: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
-    return this.httpJson(`${this.qdrantUrl.replace(/\/$/, "")}${pathname}`, body, this.qdrantApiKey ? { "api-key": this.qdrantApiKey } : {});
+  private async qdrantRequest(
+    pathname: string,
+    body: Record<string, unknown>,
+    signal?: AbortSignal
+  ): Promise<Record<string, unknown>> {
+    return this.httpJson(
+      `${this.qdrantUrl.replace(/\/$/, "")}${pathname}`,
+      body,
+      this.qdrantApiKey ? { "api-key": this.qdrantApiKey } : {},
+      signal
+    );
   }
 
-  private async dashscopeRequest(pathname: string, body: Record<string, unknown>, baseUrl: string): Promise<Record<string, unknown>> {
-    return this.httpJson(`${baseUrl.replace(/\/$/, "")}${pathname}`, body, { authorization: `Bearer ${this.dashscopeApiKey}` });
+  private async dashscopeRequest(
+    pathname: string,
+    body: Record<string, unknown>,
+    baseUrl: string,
+    signal?: AbortSignal
+  ): Promise<Record<string, unknown>> {
+    return this.httpJson(
+      `${baseUrl.replace(/\/$/, "")}${pathname}`,
+      body,
+      { authorization: `Bearer ${this.dashscopeApiKey}` },
+      signal
+    );
   }
 
-  private async httpJson(url: string, body: Record<string, unknown>, extraHeaders: Record<string, string>): Promise<Record<string, unknown>> {
+  private async httpJson(
+    url: string,
+    body: Record<string, unknown>,
+    extraHeaders: Record<string, string>,
+    signal?: AbortSignal
+  ): Promise<Record<string, unknown>> {
     const response = await fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json", accept: "application/json", ...extraHeaders },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal: boundedKnowledgeSignal(signal, this.timeoutMs)
     });
-    const payload = await response.json().catch(() => ({})) as unknown;
+    let payload: unknown = {};
+    try {
+      payload = await readBoundedJsonObject(response);
+    } catch (error) {
+      if (response.ok) throw error;
+    }
     if (!response.ok) throw new Error(`Knowledge provider failed with HTTP ${response.status}`);
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("Knowledge provider returned an invalid response");
     return payload as Record<string, unknown>;
   }
+}
+
+function boundedKnowledgeSignal(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
+  const timeout = AbortSignal.timeout(Math.max(1, timeoutMs));
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
 
 export function knowledgeProviderConfigured(environment: NodeJS.ProcessEnv = process.env): boolean {
@@ -334,6 +405,7 @@ export function knowledgeProviderConfigured(environment: NodeJS.ProcessEnv = pro
 export function createKnowledgeProvider(
   root: string,
   corpus: AgentCorpus,
+  corpusDigest: string,
   environment: NodeJS.ProcessEnv = process.env
 ): KnowledgeProvider {
   const qdrantUrl = environment.HATCH_QDRANT_URL?.trim();
@@ -353,7 +425,7 @@ export function createKnowledgeProvider(
   // The corpus-backed adapter exists only for explicit local contract tests,
   // never as an implicit production substitute.
   if (environment.HATCH_KNOWLEDGE_MODE === "corpus-test") {
-    return new CorpusKnowledgeProvider(root, corpus);
+    return new CorpusKnowledgeProvider(root, corpus, corpusDigest);
   }
   return new UnconfiguredKnowledgeProvider();
 }
@@ -366,12 +438,16 @@ export function createKnowledgeProvider(
 export class CorpusKnowledgeProvider implements KnowledgeProvider {
   constructor(
     private readonly root: string,
-    private readonly corpus: AgentCorpus
+    private readonly corpus: AgentCorpus,
+    private readonly corpusDigest?: string
   ) {}
 
   async search(request: KnowledgeSearchRequest): Promise<KnowledgeHit[]> {
     if (request.creatorId !== this.corpus.creator.id || request.agentId !== this.corpus.agent_id) {
       throw new Error("Knowledge query is outside the Agent Corpus creator scope");
+    }
+    if (this.corpusDigest && request.corpusDigest !== this.corpusDigest) {
+      throw new Error("Knowledge query is outside the Agent Corpus publish digest");
     }
     const hits: KnowledgeHit[] = [];
     for (const document of this.corpus.knowledge.documents) {
@@ -397,9 +473,13 @@ export class CorpusKnowledgeProvider implements KnowledgeProvider {
   }
 }
 
-export async function loadAgentCorpus(root: string): Promise<AgentCorpus> {
+export async function loadAgentCorpus(root: string, signal?: AbortSignal): Promise<AgentCorpus> {
   const manifestPath = await containedPath(root, "agent.json");
-  const corpus = AgentCorpusSchema.parse(JSON.parse(await readFile(manifestPath, "utf8")));
+  const manifest = await readFile(manifestPath, signal ? { signal } : undefined);
+  if (manifest.byteLength > AGENT_CORPUS_MANIFEST_MAX_BYTES) {
+    throw new Error("Agent Corpus manifest is too large");
+  }
+  const corpus = AgentCorpusSchema.parse(JSON.parse(manifest.toString("utf8")));
   const forbidden = new Set(["provider", "api_key", "credential", "credentials", "endpoint", "vector_store_id", "raw_material", "factory_trace"]);
   const leaked = findForbiddenKeys(corpus, forbidden);
   if (leaked.length) throw new Error(`Agent Corpus contains runtime or Factory fields: ${leaked.join(", ")}`);
@@ -422,18 +502,65 @@ export async function loadAgentCorpus(root: string): Promise<AgentCorpus> {
     ...corpus.evaluations.synthetic_qa,
     ...corpus.evaluations.held_out
   ];
+  let totalAssetBytes = 0;
   for (const asset of assets) {
     const absolute = await containedPath(root, asset.path);
-    const digest = `sha256:${createHash("sha256").update(await readFile(absolute)).digest("hex")}`;
+    const metadata = await stat(absolute);
+    if (!metadata.isFile() || metadata.size > AGENT_CORPUS_ASSET_MAX_BYTES) {
+      throw new Error(`Agent Corpus asset exceeds the ${AGENT_CORPUS_ASSET_MAX_BYTES} byte limit: ${asset.path}`);
+    }
+    totalAssetBytes += metadata.size;
+    if (totalAssetBytes > AGENT_CORPUS_TOTAL_ASSET_MAX_BYTES) {
+      throw new Error(`Agent Corpus assets exceed the ${AGENT_CORPUS_TOTAL_ASSET_MAX_BYTES} byte total limit`);
+    }
+    const digest = await fileSha256(absolute, signal);
     if (digest !== asset.sha256) throw new Error(`Agent Corpus asset digest mismatch: ${asset.path}`);
   }
   return corpus;
 }
 
+function embeddedJsonLimitFailure(value: Record<string, unknown>): string | undefined {
+  let encoded: string;
+  try {
+    encoded = JSON.stringify(value);
+  } catch {
+    return "embedded JSON must be serializable";
+  }
+  if (Buffer.byteLength(encoded, "utf8") > 16 * 1024) return "embedded JSON must not exceed 16 KiB";
+
+  let nodes = 0;
+  const pending: Array<{ value: unknown; depth: number }> = [{ value, depth: 0 }];
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    nodes += 1;
+    if (nodes > 1_024) return "embedded JSON must not exceed 1024 values";
+    if (current.depth > 8) return "embedded JSON must not exceed 8 levels";
+    if (typeof current.value === "string" && current.value.length > 4_096) {
+      return "embedded JSON strings must not exceed 4096 characters";
+    }
+    if (Array.isArray(current.value)) {
+      if (current.value.length > 128) return "embedded JSON arrays must not exceed 128 items";
+      for (const child of current.value) pending.push({ value: child, depth: current.depth + 1 });
+    } else if (current.value && typeof current.value === "object") {
+      const entries = Object.entries(current.value);
+      if (entries.length > 128) return "embedded JSON objects must not exceed 128 fields";
+      for (const [key, child] of entries) {
+        if (key.length > 128) return "embedded JSON keys must not exceed 128 characters";
+        pending.push({ value: child, depth: current.depth + 1 });
+      }
+    }
+  }
+  return undefined;
+}
+
 /** Computes the same installed-Corpus digest that Registry records at publish time. */
-export async function agentCorpusDigest(root: string, corpus: AgentCorpus): Promise<string> {
+export async function agentCorpusDigest(
+  root: string,
+  corpus: AgentCorpus,
+  signal?: AbortSignal
+): Promise<string> {
   const manifestPath = await containedPath(root, "agent.json");
-  const manifestDigest = `sha256:${createHash("sha256").update(await readFile(manifestPath)).digest("hex")}`;
+  const manifestDigest = await fileSha256(manifestPath, signal);
   const assets = [
     corpus.instructions.system,
     ...corpus.skills.flatMap((skill) => [skill.instruction, ...skill.references.map((reference) => reference.asset)]),
@@ -449,6 +576,17 @@ export async function agentCorpusDigest(root: string, corpus: AgentCorpus): Prom
   return `sha256:${createHash("sha256").update(JSON.stringify(rows)).digest("hex")}`;
 }
 
+async function fileSha256(filePath: string, signal?: AbortSignal): Promise<string> {
+  signal?.throwIfAborted();
+  const hash = createHash("sha256");
+  const stream = createReadStream(filePath, signal ? { signal } : undefined);
+  for await (const chunk of stream) {
+    signal?.throwIfAborted();
+    hash.update(chunk as Buffer);
+  }
+  return `sha256:${hash.digest("hex")}`;
+}
+
 function findForbiddenKeys(value: unknown, forbidden: Set<string>, found: Set<string> = new Set()): string[] {
   if (Array.isArray(value)) {
     for (const item of value) findForbiddenKeys(item, forbidden, found);
@@ -461,9 +599,17 @@ function findForbiddenKeys(value: unknown, forbidden: Set<string>, found: Set<st
   return [...found].sort();
 }
 
-export async function readCorpusAsset(root: string, asset: { path: string; sha256: string }): Promise<string> {
+export async function readCorpusAsset(
+  root: string,
+  asset: { path: string; sha256: string },
+  signal?: AbortSignal
+): Promise<string> {
   const absolute = await containedPath(root, asset.path);
-  const content = await readFile(absolute, "utf8");
+  const metadata = await stat(absolute);
+  if (!metadata.isFile() || metadata.size > AGENT_CORPUS_ASSET_MAX_BYTES) {
+    throw new Error(`Agent Corpus asset exceeds the ${AGENT_CORPUS_ASSET_MAX_BYTES} byte limit: ${asset.path}`);
+  }
+  const content = await readFile(absolute, signal ? { encoding: "utf8", signal } : "utf8");
   const digest = `sha256:${createHash("sha256").update(content).digest("hex")}`;
   if (digest !== asset.sha256) throw new Error(`Agent Corpus asset digest mismatch: ${asset.path}`);
   return content;

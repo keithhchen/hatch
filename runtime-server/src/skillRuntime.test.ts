@@ -84,7 +84,7 @@ async function createHarness(
     clientBroker: broker,
     serverTools,
     toolBridge: bridge,
-    clientTools: ["fs.read"],
+    clientTools: ["file_read"],
     store,
     emit: async (event) => {
       outbound.push(event);
@@ -168,7 +168,7 @@ test("SkillRuntime cancellation is terminal and ignores a late protected-tool re
           runId: input.run_id,
           skillRunId: ctx.skillRunId,
           toolCallId: "worker-pending-read",
-          name: "fs.read",
+          name: "file_read",
           arguments: { path: "notes.txt" },
           clientTools: ctx.clientTools,
           state: ctx.state
@@ -177,7 +177,7 @@ test("SkillRuntime cancellation is terminal and ignores a late protected-tool re
           type: "tool_call.delta",
           run_id: input.run_id,
           tool_call_id: "worker-pending-read",
-          name: "fs.read",
+          name: "file_read",
           locality: "client",
           approval: "auto",
           status: "requested",
@@ -190,7 +190,7 @@ test("SkillRuntime cancellation is terminal and ignores a late protected-tool re
           type: "tool_call.delta",
           run_id: input.run_id,
           tool_call_id: "worker-pending-read",
-          name: "fs.read",
+          name: "file_read",
           locality: "client",
           approval: "auto",
           status: "completed",

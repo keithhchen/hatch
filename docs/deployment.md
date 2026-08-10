@@ -20,7 +20,45 @@ or separate production Runtime exists. The server uses two Compose projects:
    DashScope, Postgres, Web Search, and publish-token values.
    Never commit this file or put these values in GitHub Actions.
    The file must also contain non-empty `HATCH_REGISTRY_DATABASE_URL`,
-   `HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN`, and `HATCH_REGISTRY_URL`.
+   `HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN`, `HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN`,
+   and `HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN`. `HATCH_RUNTIME_DB_PASSWORD` may
+   start empty on the first deployment; CD generates it, then creates or rotates
+   the isolated `hatch_runtime` database role. Runtime never receives the
+   Registry database credential.
+   The commerce token is shared only by Dashboard and Registry: checkout writes
+   the order ledger first, then this authenticated service boundary creates the
+   entitlement. A user bearer cannot grant Agent access directly.
+   Registry applies a hard request budget to the client IP and separate
+   signup/signin failure budgets to the normalized identity. Correct
+   credentials may clear that route's identity-failure bucket, but never the
+   source-IP budget. Defaults are a 10-minute window, 60 attempts per IP,
+   10 failures per identity and route, and 20,000 live buckets per dimension;
+   tune `HATCH_AUTH_RATE_LIMIT_*` only from measured traffic. Rejected requests
+   return `429` and `Retry-After`; bounded async scrypt saturation returns a
+   retryable `503` instead of blocking Registry's event loop.
+   Opaque-session lookups have a separate source budget and global database
+   concurrency bound. Runtime authenticates its internal fan-in with
+   `HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN`, so many buyers sharing the Runtime
+   container do not consume one public source bucket; internal calls still
+   consume the global concurrency bound. Registry also sets explicit HTTP
+   connection/header/request timeouts and a 5-second Postgres query timeout.
+
+   Creator publishing is bounded before decompression: at most 16 MiB and 256
+   files per Corpus, 20 Agents and 256 MiB/4,096 files per Creator, plus global
+   byte/file quotas. Public Creator uploads are rate- and concurrency-limited;
+   the trusted Factory/deploy publisher has a reserved admission slot. The
+   complete pipeline has a hard deadline, stages Qdrant vectors by Corpus
+   digest, and switches current filesystem/metadata state only after
+   verification. Metadata and embedded JSON are bounded, and catalog/access
+   responses are paged. Tune these limits only with an explicit storage and
+   memory budget.
+
+   `compose.app.yml` lets Registry and Runtime trust forwarded client IP only
+   because neither has a published host port and every direct peer is on the dedicated
+   `hatch_internal` network. A different topology must set
+   `HATCH_AUTH_TRUSTED_PROXY_CIDRS` to the exact sanitizing reverse-proxy ranges;
+   never copy the Compose private-range default onto a publicly reachable
+   Registry.
    The Runtime also requires `HATCH_OUTPUT_GUARD=enforce`. Attach the
    project-level `HatchRuntimeRole` to the ECS instance before deploying; the
    container obtains short-lived credentials from IMDSv2 and uses the Shanghai
@@ -42,14 +80,6 @@ or separate production Runtime exists. The server uses two Compose projects:
 
    This creates persistent Docker volumes for Postgres and Qdrant. Normal
    application CD does not recreate or restart these services.
-
-5. The application CD creates `/opt/hatch/dashboard` and imports the canonical
-   Dashboard product catalog on first deployment. No manual catalog copy is
-   required.
-
-   ```bash
-   mkdir -p /opt/hatch/dashboard
-   ```
 
 ## GitHub secrets
 
@@ -75,18 +105,20 @@ Pushes to `master` run:
 
 ```text
 GitHub Actions
-  → build and test TypeScript services
+  → fail closed on Runtime/Registry, Commerce, and Dashboard tests
   → build runtime, dashboard, and Caddy images on a GitHub-hosted runner
   → push immutable SHA tags to GHCR
   → switch only Registry, Runtime, Dashboard, and Caddy containers
   → seed the canonical Agent Corpus
   → embed and index its retrieval-only knowledge in Qdrant
-  → verify /healthz and /api/health
+  → verify /healthz, /api/health, the Desktop /agents entrypoint, and public auth routing
   → restore the previous SHA on failed health checks
 ```
 
 The Desktop app is not part of the server Compose project. Tags such as
 `v0.1.0` run the macOS workflow, which builds the Tauri app and publishes a DMG
-artifact/Release. Without Apple Developer secrets this artifact is ad-hoc
-signed and not notarized; Apple signing and notarization can be added later
-without changing the server CD.
+artifact/Release only after the protected `desktop-production` Environment
+attests a signed picker→local-tool smoke for the exact commit. Distribution
+builds require a Developer ID certificate, hardened-runtime signing, Apple
+notarization, and successful stapling; missing release credentials fail closed.
+Ad-hoc DMGs remain local UAT artifacts and are never published.

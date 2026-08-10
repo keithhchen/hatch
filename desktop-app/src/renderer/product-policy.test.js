@@ -4,7 +4,7 @@ import {
   ADVERTISED_LOCAL_TOOLS,
   CHANGE_TOOLS,
   DEFAULT_PERMISSION_POLICY,
-  LOCAL_TOOLS_BY_PERMISSION_POLICY,
+  PERMISSION_OPTIONS,
   PERMISSION_POLICIES,
   PLATFORM_LOCAL_TOOLS,
   PRODUCT_COPY,
@@ -12,9 +12,11 @@ import {
   SHELL_TOOLS,
   creatorAgentFromSession,
   canStartConversation,
-  localToolsForPermissionPolicy,
   normalizePermissionPolicy,
-  requiresUserApproval
+  permissionPolicyDetail,
+  permissionPolicyLabel,
+  requiresUserApproval,
+  shouldRequestDesktopApproval
 } from "./product-policy.js";
 
 describe("consumer product contract", () => {
@@ -37,29 +39,30 @@ describe("consumer product contract", () => {
     });
   });
 
-  it.each(["fs.write", "fs.patch", "shell.exec"])("requires approval for %s", (tool) => {
+  it.each(["file_write", "file_patch", "shell_exec"])("requires approval for %s", (tool) => {
     expect(requiresUserApproval(tool)).toBe(true);
   });
 
   it("does not require per-call approval for reads after a workspace grant", () => {
-    expect(requiresUserApproval("fs.read")).toBe(false);
+    expect(requiresUserApproval("file_read")).toBe(false);
+    expect(shouldRequestDesktopApproval({ name: "file_read", approval: "ask" })).toBe(false);
+    expect(shouldRequestDesktopApproval({ name: "file_list", approval: "ask" })).toBe(false);
   });
 
   it("treats every shell command as a change while advertising all local tools", () => {
-    expect(READ_TOOLS).toEqual(["fs.list", "fs.search", "fs.read", "git.diff"]);
-    expect(SHELL_TOOLS).toEqual(["shell.exec"]);
-    expect(CHANGE_TOOLS).toEqual(["fs.write", "fs.patch", "shell.exec"]);
+    expect(READ_TOOLS).toEqual(["file_list", "file_search", "file_read", "git_diff"]);
+    expect(SHELL_TOOLS).toEqual(["shell_exec"]);
+    expect(CHANGE_TOOLS).toEqual(["file_write", "file_patch", "shell_exec"]);
     expect(PLATFORM_LOCAL_TOOLS).toEqual([...READ_TOOLS, ...CHANGE_TOOLS]);
     expect(ADVERTISED_LOCAL_TOOLS).toEqual(PLATFORM_LOCAL_TOOLS);
   });
 
-  it("always exposes shell and change capabilities for both permission policies", () => {
+  it("keeps the complete hello capability declaration independent of Ask/Allow", () => {
     expect(DEFAULT_PERMISSION_POLICY).toBe(PERMISSION_POLICIES.ASK_BEFORE_CHANGES);
-    expect(localToolsForPermissionPolicy(PERMISSION_POLICIES.ASK_BEFORE_CHANGES))
-      .toEqual(PLATFORM_LOCAL_TOOLS);
-    expect(localToolsForPermissionPolicy(PERMISSION_POLICIES.ALLOW_CHANGES))
-      .toEqual(PLATFORM_LOCAL_TOOLS);
-    expect(LOCAL_TOOLS_BY_PERMISSION_POLICY).not.toHaveProperty("read-only");
+    const helloForAsk = { local_tools: [...PLATFORM_LOCAL_TOOLS] };
+    const helloForAllow = { local_tools: [...PLATFORM_LOCAL_TOOLS] };
+    expect(helloForAsk.local_tools).toEqual(helloForAllow.local_tools);
+    expect(helloForAsk.local_tools).toContain("shell_exec");
   });
 
   it("migrates removed or unknown permission policies to ask before changes", () => {
@@ -69,13 +72,23 @@ describe("consumer product contract", () => {
       .toBe(PERMISSION_POLICIES.ALLOW_CHANGES);
   });
 
+  it("uses precise change-policy labels without implying unrestricted access", () => {
+    expect(PERMISSION_OPTIONS.map((option) => option.label))
+      .toEqual(["Ask before changes", "Allow changes"]);
+    expect(permissionPolicyLabel(PERMISSION_POLICIES.ASK_BEFORE_CHANGES)).toBe("Ask before changes");
+    expect(permissionPolicyLabel(PERMISSION_POLICIES.ALLOW_CHANGES)).toBe("Allow changes");
+    expect(permissionPolicyDetail(PERMISSION_POLICIES.ALLOW_CHANGES)).toMatch(/file changes and shell commands/);
+    expect(PERMISSION_OPTIONS.map((option) => `${option.label} ${option.detail}`).join(" "))
+      .not.toMatch(/full access|完全访问/i);
+  });
+
   it("applies the selected changes policy to files and every shell command", () => {
-    expect(requiresUserApproval("fs.write", PERMISSION_POLICIES.ASK_BEFORE_CHANGES)).toBe(true);
-    expect(requiresUserApproval("fs.patch", PERMISSION_POLICIES.ASK_BEFORE_CHANGES)).toBe(true);
-    expect(requiresUserApproval("shell.exec", PERMISSION_POLICIES.ASK_BEFORE_CHANGES)).toBe(true);
-    expect(requiresUserApproval("fs.write", PERMISSION_POLICIES.ALLOW_CHANGES)).toBe(false);
-    expect(requiresUserApproval("fs.patch", PERMISSION_POLICIES.ALLOW_CHANGES)).toBe(false);
-    expect(requiresUserApproval("shell.exec", PERMISSION_POLICIES.ALLOW_CHANGES)).toBe(false);
+    expect(requiresUserApproval("file_write", PERMISSION_POLICIES.ASK_BEFORE_CHANGES)).toBe(true);
+    expect(requiresUserApproval("file_patch", PERMISSION_POLICIES.ASK_BEFORE_CHANGES)).toBe(true);
+    expect(requiresUserApproval("shell_exec", PERMISSION_POLICIES.ASK_BEFORE_CHANGES)).toBe(true);
+    expect(requiresUserApproval("file_write", PERMISSION_POLICIES.ALLOW_CHANGES)).toBe(false);
+    expect(requiresUserApproval("file_patch", PERMISSION_POLICIES.ALLOW_CHANGES)).toBe(false);
+    expect(requiresUserApproval("shell_exec", PERMISSION_POLICIES.ALLOW_CHANGES)).toBe(false);
   });
 
   it("guards new conversations while a run remains active", () => {

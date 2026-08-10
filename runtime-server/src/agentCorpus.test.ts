@@ -6,13 +6,48 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, test } from "node:test";
 import { WebSocket } from "ws";
-import { AgentCorpusResolver, CorpusKnowledgeProvider, HttpKnowledgeProvider, loadAgentCorpus, QdrantKnowledgeProvider } from "./agentCorpus.js";
+import { AgentCorpusResolver, AgentCorpusSchema, CorpusKnowledgeProvider, HttpKnowledgeProvider, loadAgentCorpus, QdrantKnowledgeProvider } from "./agentCorpus.js";
 import { DeterministicAgentRuntime } from "./agentRuntime.js";
 import { createRuntimeServer } from "./index.js";
 
 const tempRoots: string[] = [];
 afterEach(async () => {
   await Promise.all(tempRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
+
+test("Agent Corpus bounds catalog metadata, arrays, and embedded JSON", () => {
+  const asset = { id: "asset", path: "evals/asset.json", sha256: `sha256:${"a".repeat(64)}` };
+  const base = {
+    contract_version: "1",
+    agent_id: "bounded-agent",
+    creator: { id: "bounded-creator", name: "Bounded Creator" },
+    product: { id: "bounded-product", name: "Bounded Product", presentation: {} },
+    instructions: { system: { ...asset, id: "system", path: "instructions/system.md" } },
+    skills: [],
+    knowledge: { documents: [] },
+    tools: [{ id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" }],
+    evaluations: { synthetic_qa: [{ ...asset, id: "synthetic" }], held_out: [{ ...asset, id: "held-out" }] },
+  };
+  assert.equal(AgentCorpusSchema.safeParse(base).success, true);
+  assert.equal(AgentCorpusSchema.safeParse({
+    ...base,
+    product: { ...base.product, description: "x".repeat(8_193) },
+  }).success, false);
+  assert.equal(AgentCorpusSchema.safeParse({
+    ...base,
+    tools: Array.from({ length: 129 }, (_, index) => ({
+      id: `creator.bound.tool-${index}`,
+      kind: "http_function",
+      connection_ref: "bounded-connection",
+      operation: "run",
+    })),
+  }).success, false);
+  let nested: Record<string, unknown> = {};
+  for (let index = 0; index < 10; index += 1) nested = { child: nested };
+  assert.equal(AgentCorpusSchema.safeParse({
+    ...base,
+    product: { ...base.product, presentation: nested },
+  }).success, false);
 });
 
 test("Agent Corpus loads clean assets and scopes knowledge by creator and agent", async () => {
@@ -52,11 +87,11 @@ test("Agent Corpus loads clean assets and scopes knowledge by creator and agent"
 
   const loaded = await loadAgentCorpus(root);
   const provider = new CorpusKnowledgeProvider(root, loaded);
-  const hits = await provider.search({ creatorId: "maya-chen", agentId: "signal-resume-review", query: "strongest evidence", limit: 4 });
+  const hits = await provider.search({ creatorId: "maya-chen", agentId: "signal-resume-review", corpusDigest: `sha256:${"1".repeat(64)}`, query: "strongest evidence", limit: 4 });
   assert.equal(hits.length, 1);
   assert.match(hits[0]!.text, /strongest evidence/);
   await assert.rejects(
-    provider.search({ creatorId: "other-creator", agentId: "signal-resume-review", query: "evidence", limit: 4 }),
+    provider.search({ creatorId: "other-creator", agentId: "signal-resume-review", corpusDigest: `sha256:${"1".repeat(64)}`, query: "evidence", limit: 4 }),
     /creator scope/
   );
 });
@@ -77,12 +112,14 @@ test("remote KnowledgeProvider always sends the current creator and agent scope"
     const hits = await new HttpKnowledgeProvider(`http://127.0.0.1:${address.port}/search`).search({
       creatorId: "maya-chen",
       agentId: "signal-resume-review",
+      corpusDigest: `sha256:${"1".repeat(64)}`,
       query: "evidence",
       limit: 4
     });
     assert.deepEqual(received, {
       creator_id: "maya-chen",
       agent_id: "signal-resume-review",
+      corpus_digest: `sha256:${"1".repeat(64)}`,
       query: "evidence",
       top_k: 4
     });
@@ -131,10 +168,11 @@ test("Qdrant KnowledgeProvider embeds, scopes, reranks, and returns source metad
       embeddingBaseUrl: base,
       rerankBaseUrl: base
     });
-    const hits = await provider.search({ creatorId: "maya-chen", agentId: "signal-resume-review", query: "evidence", limit: 1 });
+    const hits = await provider.search({ creatorId: "maya-chen", agentId: "signal-resume-review", corpusDigest: `sha256:${"1".repeat(64)}`, query: "evidence", limit: 1 });
     assert.deepEqual((qdrantQuery?.filter as Record<string, unknown>)?.must, [
       { key: "creator_id", match: { value: "maya-chen" } },
-      { key: "agent_id", match: { value: "signal-resume-review" } }
+      { key: "agent_id", match: { value: "signal-resume-review" } },
+      { key: "corpus_digest", match: { value: `sha256:${"1".repeat(64)}` } }
     ]);
     assert.equal(qdrantQuery?.limit, 30);
     assert.equal(hits.length, 1);
@@ -244,7 +282,7 @@ test("current Agent Corpus entitlements are discoverable and bind the Desktop se
       socket.once("message", (data) => resolve(JSON.parse(String(data)) as Record<string, unknown>));
       socket.once("open", () => socket.send(JSON.stringify({
         type: "client.hello",
-        protocol_version: "0.5",
+        protocol_version: "0.6",
         installation_id: "desktop-jordan",
         license_token: "license-jordan",
         entitlement_id: entitlement.entitlement_id,

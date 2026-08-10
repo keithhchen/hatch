@@ -91,10 +91,11 @@ Desktop
 ### Desktop owns
 
 - login and production Runtime connection;
-- Agent, Workspace, permission, and Shell-access selection;
+- Agent and Workspace selection, plus one change policy: `Ask before changes`
+  or `Allow changes`;
 - native folder authorization;
 - local file and shell execution;
-- approval UI before disallowed mutations;
+- approval UI for file changes and Shell commands under `Ask before changes`;
 - rendering the server's conversation projection;
 - stopping the current live run.
 
@@ -259,24 +260,64 @@ Rules:
 All Workspace file and shell tools execute on Desktop. Runtime sends a typed request;
 Desktop returns a typed result.
 
+Every supported Desktop advertises the same complete local capability set in every
+`client.hello`: `file_list`, `file_search`, `file_read`, `file_write`,
+`file_patch`, `shell_exec`, and `git_diff`. Agent Corpus metadata and the selected
+change policy must not remove tools from that list. These exact underscore names
+are used at the model, Runtime, protocol, event, persistence, and Desktop
+boundaries; there is no parallel `fs.*` family or provider-only rename. The
+server-owned Creator knowledge tool remains explicitly namespaced as
+`hatch.file_search` (model function `hatch_file_search`) and is not the local
+Workspace `file_search` tool.
+
 Required request fields:
 
 - `run_id`
 - `tool_call_id`
 - tool name
 - validated arguments
-- permission requirement
+- Runtime approval advisory (currently always `auto`; it is not an authorization)
 
 Required Desktop checks:
 
+- a native folder picker created the opaque Workspace grant, and Desktop restored
+  and probed that grant successfully before showing the composer or connecting
+  local tools;
 - the target resolves inside the currently granted Workspace;
-- read operations stay inside the currently granted Workspace;
+- `file_list`, `file_search`, `file_read`, and `git_diff` execute automatically;
 - file changes and every Shell command request approval when the selected
   changes policy requires it;
 - Shell is always available as a Desktop capability and has no separate user
   setting;
 - command and output are shown in a user-comprehensible form;
 - output returned to Runtime is bounded.
+
+The granted Workspace is a user-data security boundary, not merely the Shell's
+working directory. On the supported macOS Desktop, `shell_exec` must run behind
+an OS-enforced, fail-closed sandbox: the command may read and write the granted
+Workspace, may read the minimum system runtime and executable paths needed to
+run, and may use a per-call private scratch directory. It may not read or write
+other user data or open network connections. Relative paths, absolute paths,
+redirection, symlinks, nested shells, and child processes are all subject to the
+same kernel policy. Approval changes whether a requested mutation needs a user
+gesture; it never weakens containment.
+
+This is a path-access boundary rather than a promise to duplicate filesystem
+inodes. If a user deliberately places a pre-existing hard link in the Workspace,
+writing that Workspace path retains the operating system's normal shared-inode
+semantics. Hatch does not follow or open an outside path to perform that write.
+
+The production Desktop must self-check the secure Shell backend before declaring
+its normal capabilities. If that backend is unavailable, Hatch blocks the local
+tool connection with an actionable error and never falls back to a raw host
+shell.
+
+The Workspace grant identifier, selected root, and project instruction files are
+not `client.hello` or tool-request fields and are never uploaded merely because a
+Workspace was selected. User-authorized tool output can naturally contain a path
+(for example, `pwd` or a compiler diagnostic), and that result is sent to the
+Runtime as model context. Literal path replacement may reduce accidental display,
+but is not a privacy or containment boundary and must not be described as one.
 
 Changing Workspace or permission settings during a chat applies to the next user
 turn. It does not mutate a tool call already in progress.
@@ -341,7 +382,7 @@ into another completion.
 
 ## 13. Protocol surface
 
-The production protocol requires:
+The production protocol 0.6 requires:
 
 - authenticated connection handshake;
 - account and entitlement binding;
@@ -380,8 +421,15 @@ part of these steps.
 - A conversation records the exact Agent Corpus digest used for each run.
 - A user can select Workspace and whether Hatch asks before changes, then
   complete a task with Shell available.
+- The native Workspace grant is selected and read-probed during onboarding; the
+  composer and local-tool connection are unavailable until that gate succeeds.
+- Every hello advertises the complete supported local tool set. Reads run
+  automatically; only `file_write`, `file_patch`, and `shell_exec` consult the
+  Desktop's Ask/Allow policy.
 - Pi `Agent` performs the server-side loop with Kimi thinking enabled.
-- File and Shell tools execute only on Desktop and within the granted Workspace.
+- File and Shell tools execute only on Desktop; Shell cannot open other user-data
+  paths or the network, and writable paths are limited to the granted Workspace
+  and private per-call scratch, subject to documented hard-link inode semantics.
 - Changes request approval according to the selected permission policy.
 - Completed chat history survives Desktop restart and is loaded from Postgres.
 - Context compaction does not remove visible chat history.

@@ -29,9 +29,9 @@ test("ToolBridge routes local tools with scope and correlation intact", async ()
     scope: "main",
     runId: "run_main",
     toolCallId: "call_main",
-    name: "fs.read",
+    name: "file_read",
     arguments: { path: "notes.txt" },
-    clientTools: ["fs.read"],
+    clientTools: ["file_read"],
     state
   }), { content: "local result" });
   assert.deepEqual(await bridge.execute({
@@ -39,15 +39,15 @@ test("ToolBridge routes local tools with scope and correlation intact", async ()
     runId: "run_parent",
     skillRunId: "skill_123",
     toolCallId: "call_skill",
-    name: "fs.read",
+    name: "file_read",
     arguments: { path: "notes.txt" },
-    clientTools: ["fs.read"],
+    clientTools: ["file_read"],
     state
   }), { content: "local result" });
 
   assert.deepEqual(localCalls, [
-    ["run_main", "fs.read", { path: "notes.txt" }, state, "call_main", { scope: "main" }],
-    ["run_parent", "fs.read", { path: "notes.txt" }, state, "call_skill", { scope: "skill_run", skillRunId: "skill_123" }]
+    ["run_main", "file_read", { path: "notes.txt" }, state, "call_main", { scope: "main" }],
+    ["run_parent", "file_read", { path: "notes.txt" }, state, "call_skill", { scope: "skill_run", skillRunId: "skill_123" }]
   ]);
   assert.deepEqual(serverCalls, []);
 });
@@ -66,6 +66,7 @@ test("ToolBridge routes server tools without sending them to the client broker",
     }
   } as unknown as ServerToolExecutor;
   const bridge = new ToolBridge(broker, serverTools);
+  const controller = new AbortController();
 
   const result = await bridge.execute({
     scope: "skill_run",
@@ -75,14 +76,15 @@ test("ToolBridge routes server tools without sending them to the client broker",
     name: "api.request",
     arguments: { endpoint: "policy.lookup", payload: { region: "us" } },
     clientTools: [],
-    state
+    state,
+    signal: controller.signal
   });
 
   assert.deepEqual(result, { status: "ok" });
   assert.deepEqual(serverCalls, [["api.request", {
     endpoint: "policy.lookup",
     payload: { region: "us" }
-  }]]);
+  }, controller.signal]]);
 });
 
 test("ToolBridge rejects invalid schemas and unavailable local capabilities before dispatch", async () => {
@@ -100,16 +102,16 @@ test("ToolBridge rejects invalid schemas and unavailable local capabilities befo
     scope: "main",
     runId: "run_invalid",
     toolCallId: "call_invalid",
-    name: "fs.read",
+    name: "file_read",
     arguments: {},
-    clientTools: ["fs.read"],
+    clientTools: ["file_read"],
     state
   }));
   await assert.rejects(() => bridge.execute({
     scope: "main",
     runId: "run_disabled",
     toolCallId: "call_disabled",
-    name: "fs.read",
+    name: "file_read",
     arguments: { path: "notes.txt" },
     clientTools: [],
     state
@@ -134,9 +136,9 @@ test("ToolBridge preserves cancellation ownership and ignores a late local resul
     runId: "run_cancel",
     skillRunId: "skill_cancel",
     toolCallId: "call_pending",
-    name: "fs.read",
+    name: "file_read",
     arguments: { path: "pending.txt" },
-    clientTools: ["fs.read"],
+    clientTools: ["file_read"],
     state
   });
 

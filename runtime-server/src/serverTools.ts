@@ -1,6 +1,7 @@
 import { requireTool } from "./tools.js";
 import type { KnowledgeProvider } from "./agentCorpus.js";
 import type { RuntimeCreatorTool } from "./creatorTools.js";
+import { assertBoundedJsonValue, readBoundedJsonObject, readBoundedResponseText } from "./boundedResponse.js";
 
 type McpServerConfig = {
   url: string;
@@ -11,6 +12,7 @@ type KnowledgeScope = {
   provider: KnowledgeProvider;
   creatorId: string;
   agentId: string;
+  corpusDigest: string;
 };
 
 export class ServerToolExecutor {
@@ -27,55 +29,75 @@ export class ServerToolExecutor {
     this.resolvedCreatorTools = new Map(tools.map((tool) => [tool.id, tool]));
   }
 
-  async executeCreatorTool(tool: { id: string }, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  async executeCreatorTool(
+    tool: { id: string },
+    args: Record<string, unknown>,
+    signal?: AbortSignal
+  ): Promise<Record<string, unknown>> {
     const resolved = this.resolvedCreatorTools.get(tool.id);
     if (!resolved) throw new Error(`Creator tool is not resolved by the Registry Control Plane: ${tool.id}`);
-    return resolved.execute(args);
+    const result = await resolved.execute(args, boundedSignal(signal, this.timeoutMs));
+    assertBoundedJsonValue(result);
+    return result;
   }
 
-  async execute(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  async execute(
+    name: string,
+    args: Record<string, unknown>,
+    signal?: AbortSignal
+  ): Promise<Record<string, unknown>> {
     const tool = requireTool(name);
     if (tool.locality !== "server") {
       throw new Error(`Tool is not server-local: ${name}`);
     }
 
     const parsedArgs = tool.schema.parse(args) as Record<string, unknown>;
+    const requestSignal = boundedSignal(signal, this.timeoutMs);
 
     if (name === "web.search" || name === "hatch.web_search") {
-      return this.webSearch(parsedArgs);
+      const result = await this.webSearch(parsedArgs, requestSignal);
+      assertBoundedJsonValue(result);
+      return result;
     }
 
     if (name === "hatch.file_search") {
-      return this.fileSearch(parsedArgs);
+      const result = await this.fileSearch(parsedArgs, requestSignal);
+      assertBoundedJsonValue(result);
+      return result;
     }
 
     if (name === "api.request") {
-      return this.apiRequest(parsedArgs);
+      const result = await this.apiRequest(parsedArgs);
+      assertBoundedJsonValue(result);
+      return result;
     }
 
     if (name === "mcp.call") {
-      return this.mcpCall(parsedArgs);
+      const result = await this.mcpCall(parsedArgs, requestSignal);
+      assertBoundedJsonValue(result);
+      return result;
     }
 
     throw new Error(`No server executor for tool: ${name}`);
   }
 
-  private async webSearch(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  private async webSearch(args: Record<string, unknown>, signal: AbortSignal): Promise<Record<string, unknown>> {
     const query = String(args.query);
     const limit = Number(args.limit ?? 5);
     const endpoint = process.env.HATCH_WEB_SEARCH_URL?.trim();
     const provider = process.env.HATCH_WEB_SEARCH_PROVIDER?.trim().toLowerCase();
     if (provider === "bocha" || process.env.HATCH_WEB_SEARCH_API_KEY?.trim()) {
-      return this.bochaSearch(query, limit, endpoint);
+      return this.bochaSearch(query, limit, endpoint, signal);
     }
     if (endpoint) {
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "content-type": "application/json", accept: "application/json" },
-        body: JSON.stringify({ query, limit })
+        body: JSON.stringify({ query, limit }),
+        signal
       });
       if (!response.ok) throw new Error(`Hatch web search failed with HTTP ${response.status}`);
-      const payload = await response.json() as { results?: unknown };
+      const payload = await readBoundedJsonObject(response) as { results?: unknown };
       return { query, results: Array.isArray(payload.results) ? payload.results.slice(0, Math.max(1, Math.min(limit, 10))) : [] };
     }
     if (process.env.NODE_ENV === "production") {
@@ -101,7 +123,8 @@ export class ServerToolExecutor {
   private async bochaSearch(
     query: string,
     limit: number,
-    configuredEndpoint?: string
+    configuredEndpoint: string | undefined,
+    signal: AbortSignal
   ): Promise<Record<string, unknown>> {
     const apiKey = process.env.HATCH_WEB_SEARCH_API_KEY?.trim();
     if (!apiKey) {
@@ -121,9 +144,15 @@ export class ServerToolExecutor {
         freshness: "noLimit",
         summary: true,
         count
-      })
+      }),
+      signal
     });
-    const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
+    let payload: Record<string, unknown> = {};
+    try {
+      payload = await readBoundedJsonObject(response);
+    } catch (error) {
+      if (response.ok) throw error;
+    }
     if (!response.ok) {
       const message = String(payload.msg ?? payload.message ?? "provider request failed");
       throw new Error(`Hatch web search failed with HTTP ${response.status}: ${message.slice(0, 300)}`);
@@ -153,15 +182,17 @@ export class ServerToolExecutor {
     return { query, results };
   }
 
-  private async fileSearch(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  private async fileSearch(args: Record<string, unknown>, signal: AbortSignal): Promise<Record<string, unknown>> {
     if (!this.knowledgeScope) {
       throw new Error("hatch.file_search is unavailable because this Agent has no knowledge provider");
     }
     const hits = await this.knowledgeScope.provider.search({
       creatorId: this.knowledgeScope.creatorId,
       agentId: this.knowledgeScope.agentId,
+      corpusDigest: this.knowledgeScope.corpusDigest,
       query: String(args.query),
-      limit: Number(args.limit ?? 6)
+      limit: Number(args.limit ?? 6),
+      signal
     });
     return {
       query: String(args.query),
@@ -185,7 +216,7 @@ export class ServerToolExecutor {
     };
   }
 
-  private async mcpCall(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+  private async mcpCall(args: Record<string, unknown>, signal: AbortSignal): Promise<Record<string, unknown>> {
     const serverName = String(args.server);
     const toolName = String(args.tool);
     const config = configuredMcpServers()[serverName];
@@ -209,14 +240,19 @@ export class ServerToolExecutor {
           arguments: args.arguments ?? {}
         }
       }),
-      signal: AbortSignal.timeout(this.timeoutMs)
+      signal
     }).catch((error: unknown) => {
+      if (signal.aborted
+        && signal.reason instanceof Error
+        && signal.reason.name !== "TimeoutError") {
+        throw signal.reason;
+      }
       if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError" || /timeout|aborted/i.test(error.message))) {
         throw new Error(`MCP call timed out after ${this.timeoutMs}ms`);
       }
       throw error;
     });
-    const text = await response.text();
+    const text = await readBoundedResponseText(response);
     if (!response.ok) {
       throw new Error(`MCP call failed with HTTP ${response.status}: ${text.slice(0, 500)}`);
     }
@@ -228,6 +264,11 @@ export class ServerToolExecutor {
       response: parseJsonIfPossible(text)
     };
   }
+}
+
+function boundedSignal(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
+  const timeout = AbortSignal.timeout(Math.max(1, timeoutMs));
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
 
 export function hasConfiguredMcpServers(): boolean {

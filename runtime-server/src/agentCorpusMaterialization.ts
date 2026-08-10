@@ -1,5 +1,14 @@
 import type { ClientToolName } from "./protocol.js";
-import { loadAgentCorpus, readCorpusAsset } from "./agentCorpus.js";
+import { agentCorpusDigest, loadAgentCorpus, readCorpusAsset } from "./agentCorpus.js";
+
+export const MAX_MATERIALIZED_AGENT_PROMPT_BYTES = 4 * 1024 * 1024;
+
+export class AgentCorpusChangedError extends Error {
+  constructor() {
+    super("This Creator Agent changed. Reconnect before starting another turn.");
+    this.name = "AgentCorpusChangedError";
+  }
+}
 
 export type MaterializedAgentCorpus = {
   systemPrompt: string;
@@ -24,26 +33,49 @@ export type MaterializedAgentCorpus = {
 export async function materializeAgentCorpus(
   corpusRoot: string,
   userQuery: string,
-  advertisedLocalTools: ClientToolName[]
+  advertisedLocalTools: ClientToolName[],
+  expectedDigest?: string,
+  signal?: AbortSignal
 ): Promise<MaterializedAgentCorpus> {
-  const corpus = await loadAgentCorpus(corpusRoot);
-  const system = await readCorpusAsset(corpusRoot, corpus.instructions.system);
+  signal?.throwIfAborted();
+  const corpus = await loadAgentCorpus(corpusRoot, signal);
+  if (expectedDigest && await agentCorpusDigest(corpusRoot, corpus, signal) !== expectedDigest) {
+    throw new AgentCorpusChangedError();
+  }
+  const system = await readCorpusAsset(corpusRoot, corpus.instructions.system, signal);
   const activeSkills = corpus.skills.filter((skill) => skillMatchesQuery(skill.name, skill.when_to_use, userQuery));
   const skillSections: string[] = [];
   for (const skill of activeSkills) {
-    const instruction = await readCorpusAsset(corpusRoot, skill.instruction);
+    signal?.throwIfAborted();
+    const instruction = await readCorpusAsset(corpusRoot, skill.instruction, signal);
     const references = [];
     for (const reference of skill.references) {
-      references.push(`### ${reference.kind}\n${await readCorpusAsset(corpusRoot, reference.asset)}`);
+      references.push(`### ${reference.kind}\n${await readCorpusAsset(corpusRoot, reference.asset, signal)}`);
     }
     skillSections.push(`<creator_skill id=${JSON.stringify(skill.id)}>\n${instruction}${references.length ? `\n\n${references.join("\n\n")}` : ""}\n</creator_skill>`);
   }
   // Retrieval-only knowledge is never eagerly injected. hatch.file_search
   // performs an Agent-scoped lookup only when the model needs long-tail facts.
   const protectedKnowledge = [system, ...skillSections].filter(Boolean).join("\n\n");
+  if (Buffer.byteLength(protectedKnowledge, "utf8") > MAX_MATERIALIZED_AGENT_PROMPT_BYTES) {
+    throw new Error(`Materialized Agent prompt exceeds the ${MAX_MATERIALIZED_AGENT_PROMPT_BYTES} byte limit`);
+  }
+  // Close the revalidation-to-materialization race: every read above checked
+  // the old manifest's asset digest, and this final manifest digest ensures a
+  // publish did not swap the root while those assets were being assembled.
+  if (expectedDigest && await agentCorpusDigest(corpusRoot, corpus, signal) !== expectedDigest) {
+    throw new AgentCorpusChangedError();
+  }
   return {
     systemPrompt: protectedKnowledge,
-    localTools: corpusLocalTools(corpus, advertisedLocalTools),
+    // Platform-local tools are a Desktop capability, not a Creator permission.
+    // PR7 intentionally removed per-Agent/per-session File and Shell toggles:
+    // once the Desktop advertises a tool, the native Workspace grant,
+    // Ask/Allow policy, and local OS sandbox are the authority. Intersecting
+    // with optional `local_harness` manifest entries made otherwise healthy
+    // sessions silently lose file_list/shell_exec (for example an API-focused
+    // Agent Corpus), even though the user had already chosen a Workspace.
+    localTools: [...advertisedLocalTools],
     externalTools: corpusExternalTools(corpus),
     externalToolDefinitions: corpusExternalToolDefinitions(corpus),
     deliveryAuditContext: {
@@ -59,20 +91,6 @@ function skillMatchesQuery(name: string, whenToUse: string, query: string): bool
   if (terms.size === 0) return false;
   const queryTerms = query.toLocaleLowerCase().match(/[\p{L}\p{N}_-]{2,}/gu) ?? [];
   return queryTerms.some((term) => terms.has(term));
-}
-
-function corpusLocalTools(
-  corpus: Awaited<ReturnType<typeof loadAgentCorpus>>,
-  advertised: ClientToolName[]
-): ClientToolName[] {
-  const capabilities = new Set(corpus.tools.filter((tool) => tool.kind === "local_harness").map((tool) => tool.capability));
-  const allowed = new Set<ClientToolName>();
-  if (capabilities.has("filesystem")) {
-    for (const tool of ["fs.list", "fs.search", "fs.read", "fs.write", "fs.patch"] as ClientToolName[]) allowed.add(tool);
-  }
-  if (capabilities.has("shell")) allowed.add("shell.exec");
-  if (capabilities.has("git")) allowed.add("git.diff");
-  return advertised.filter((tool) => allowed.has(tool));
 }
 
 function corpusExternalTools(corpus: Awaited<ReturnType<typeof loadAgentCorpus>>): string[] {

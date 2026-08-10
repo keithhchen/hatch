@@ -87,10 +87,10 @@ external tool need must match an external tool declared by the product and
 supported by the intent. Mark a genuine missing integration unresolved instead
 of inventing an adapter.
 
-For Hatch Desktop, `fs.list`, `fs.read`, and `fs.write` are available inside
+For Hatch Desktop, `file_list`, `file_read`, and `file_write` are available inside
 the Consumer-selected workspace. This is runtime context, not Creator input.
-Declare `fs.read` when the product must inspect real local files and `fs.write`
-when it must leave a usable artifact; add `fs.list` only when it needs to
+Declare `file_read` when the product must inspect real local files and `file_write`
+when it must leave a usable artifact; add `file_list` only when it needs to
 discover files. Do not declare a capability merely because it exists.
 
 Record private implementation needs in `factory-plan.json.tool_needs`; put only

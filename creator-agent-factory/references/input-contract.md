@@ -24,8 +24,8 @@ material; the Creator never fills it in.
 
 Never infer a price. Use zero with an explicit unset status in private notes
 when the intent does not state one; obtain a real price before publication.
-Supported local capabilities are limited to the Runtime contract: `fs.list`,
-`fs.read`, and `fs.write` inside the Consumer-selected workspace. They are
+Supported local capabilities are limited to the Runtime contract: `file_list`,
+`file_read`, and `file_write` inside the Consumer-selected workspace. They are
 Hatch platform context, not Creator configuration. An extraction utility is not
 a product capability; declare only the capabilities needed to inspect or
 deliver the bounded product.

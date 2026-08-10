@@ -22,45 +22,72 @@ import "./styles.css";
 import {
   DEFAULT_CREATOR_AGENT,
   DEFAULT_PERMISSION_POLICY,
+  PERMISSION_OPTIONS,
   PERMISSION_POLICIES,
   PRODUCT_COPY,
   canStartConversation,
   creatorAgentFromSession,
   creatorAgentFromEntitlement,
   CHANGE_TOOLS,
-  localToolsForPermissionPolicy,
+  PLATFORM_LOCAL_TOOLS,
   normalizePermissionPolicy,
-  requiresUserApproval,
+  permissionPolicyDetail,
+  permissionPolicyLabel,
+  shouldRequestDesktopApproval,
   workspaceGrantLabel
 } from "./product-policy.js";
 import { fetchPurchasedCreatorAgents, runtimeHttpUrl } from "./entitlement-client.js";
 import {
-  fetchAuthAccount,
-  signInAuthSession,
   clearAuthSession,
   createTauriAuthStorage,
-  hydrateAuthSession,
   loadSavedAuthSession,
   isAuthInvalidError,
   isNetworkError,
-  revokeAuthSession,
-  saveAuthSession
+  isSecureSessionReadError,
+  startAuthSessionSignOut
 } from "./auth-session.js";
+import {
+  CONSUMER_DESKTOP_ROLE_MESSAGE,
+  persistedDesktopSessionFromError,
+  resolveDesktopSession,
+  signInDesktopSession
+} from "./desktop-auth-flow.js";
+import { openCreatorAgentCatalog } from "./catalog-opener.js";
+import { projectApprovedRuntimeStream, summarizeTurnTiming } from "./stream-projection.js";
 import { createTauriSettingsStore } from "./desktop-settings.js";
+import {
+  importLegacyProfileSettings,
+  purgeLegacySensitiveStorage
+} from "./legacy-settings-migration.js";
+import {
+  isInvalidWorkspaceGrantError,
+  normalizeWorkspaceGrant,
+  validateRestoredWorkspace,
+  workspacePickerSelection
+} from "./workspace-restore.js";
+import { accessSnapshotForToolCall, createTurnAccessSnapshot } from "./turn-access-snapshot.js";
+import { canUseAnotherAccountFromNetworkError } from "./network-error-recovery.js";
+import {
+  entitlementRefreshNeedsReconnect,
+  runtimeBindingForEntitlement,
+  runtimeBindingMatches
+} from "./entitlement-binding.js";
+import {
+  LOCAL_TOOL_STOP_UNCONFIRMED,
+  committedResultAfterCancellation,
+  localToolCancellationError,
+  localToolTransportDeadlineMs,
+  statusAfterLocalToolStop
+} from "./local-tool-lifecycle.js";
 
-const PROTOCOL_VERSION = "0.5";
+const PROTOCOL_VERSION = "0.6";
 const OUTPUT_FILTERED_COPY = "This response was blocked by the output safety check.";
 const SKILL_ACTIVITY_PART = "hatch.skill_activity";
 const SKILL_RUN_ACTIVITY_PART = "hatch.skill_run_activity";
-const LOCAL_TOOL_TIMEOUT_MS = 45_000;
 const DEFAULT_RUNTIME_URL = import.meta.env.VITE_HATCH_RUNTIME_URL || "wss://hatch.tokenquadrant.cn/v1/runtime";
 const DEFAULT_AUTH_URL = import.meta.env.VITE_HATCH_AUTH_URL || "https://hatch.tokenquadrant.cn";
 const BROWSE_CATALOG_URL = import.meta.env.VITE_HATCH_CATALOG_URL || "https://hatch.tokenquadrant.cn/agents";
 const EMPTY_PROFILE = Object.freeze({ id: "anonymous", name: "User", initials: "U" });
-const PERMISSION_MODES = Object.freeze([
-  { value: PERMISSION_POLICIES.ASK_BEFORE_CHANGES, label: "请求批准", detail: "Shell 命令和文件变更前请求批准" },
-  { value: PERMISSION_POLICIES.ALLOW_CHANGES, label: "完全访问", detail: "允许 Shell 命令和文件变更" }
-]);
 const DEFAULT_PERMISSION_MODE = DEFAULT_PERMISSION_POLICY;
 const ApprovalContext = createContext(null);
 
@@ -72,12 +99,17 @@ function App() {
       strict: typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__)
     });
   }
-  if (!settingsStoreRef.current) settingsStoreRef.current = createTauriSettingsStore(invoke);
+  if (!settingsStoreRef.current) {
+    settingsStoreRef.current = createTauriSettingsStore(invoke, {
+      strict: typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__)
+    });
+  }
   const socketRef = useRef(null);
   // Runtime messages arrive on a WebSocket listener created before React has
   // necessarily re-rendered after a folder grant. Local tool execution must
   // therefore use the latest explicit grant, not a stale render closure.
   const workspaceRef = useRef("");
+  const workspaceGrantRef = useRef(null);
   const activeRunRef = useRef(null);
   const permissionRef = useRef(DEFAULT_PERMISSION_MODE);
   const imeRef = useRef({ composing: false });
@@ -89,13 +121,19 @@ function App() {
   const reconnectAttemptRef = useRef(0);
   const intentionalDisconnectRef = useRef(true);
   const approvalResolversRef = useRef(new Map());
+  const pendingLocalToolsRef = useRef(new Map());
   const entitlementRefreshRef = useRef(false);
   const lastEntitlementRefreshRef = useRef(0);
+  const pendingClearSessionRef = useRef(null);
   const [serverUrl] = useState(DEFAULT_RUNTIME_URL);
   const [workspace, setWorkspace] = useState("");
   const [workspaceDraft, setWorkspaceDraft] = useState("");
+  const [workspaceGrant, setWorkspaceGrant] = useState(null);
+  const [workspaceDraftGrant, setWorkspaceDraftGrant] = useState(null);
   const [authState, setAuthState] = useState("loading");
   const [startupError, setStartupError] = useState("");
+  const [secureSessionError, setSecureSessionError] = useState("");
+  const [settingsMigrationNotice, setSettingsMigrationNotice] = useState("");
   const [settingsReady, setSettingsReady] = useState(false);
   const [bootstrapAttempt, setBootstrapAttempt] = useState(0);
   const [entitlementRefreshing, setEntitlementRefreshing] = useState(false);
@@ -158,6 +196,17 @@ function App() {
   function applySignedInSession(session, entitlements, { preserveCurrent = false } = {}) {
     const profileId = session.profile?.id || EMPTY_PROFILE.id;
     const selected = chooseEntitlement(entitlements, profileId, preserveCurrent ? selectedEntitlementId : "");
+    const mustRebindRuntime = entitlementRefreshNeedsReconnect(connectionConfigRef.current, selected);
+    if (mustRebindRuntime) {
+      disconnectRuntime();
+      const fallback = selected
+        ? `conversation_${profileId}_${selected.creator_id || "creator"}_${selected.agent_id || selected.product?.id || "agent"}`
+        : `conversation_${profileId}_desktop`;
+      setConversationId(selected
+        ? getConversationId(profileId, selected.entitlement_id, fallback)
+        : fallback);
+      setMessages([]);
+    }
     setBuyerSession(session);
     setCreatorAgentEntitlements(entitlements);
     setSelectedEntitlementId(selected?.entitlement_id || "");
@@ -169,31 +218,126 @@ function App() {
     setSignInStatus("ready");
   }
 
+  function applyUnsupportedRoleSession(session) {
+    setBuyerSession(session);
+    setCreatorAgentEntitlements([]);
+    setSelectedEntitlementId("");
+    setCreatorAgent(DEFAULT_CREATOR_AGENT);
+    setStartupError("");
+    setAuthState("unsupported-role");
+    setSignInStatus("ready");
+  }
+
+  async function applyResolvedDesktopSession(result, options = {}) {
+    if (window.__TAURI_INTERNALS__) {
+      try {
+        const migration = await importLegacyProfileSettings({
+          profileId: result.session.profile.id,
+          legacyStorage: window.localStorage,
+          settingsStore: settingsStoreRef.current
+        });
+        setSettingsMigrationNotice(migration.notice);
+      } catch {
+        setSettingsMigrationNotice("Hatch couldn't move your previous workspace settings. The legacy values were kept and Hatch will retry next launch; choose a workspace again if needed.");
+      }
+    } else {
+      setSettingsMigrationNotice("");
+    }
+    if (result.state === "unsupported-role") {
+      applyUnsupportedRoleSession(result.session);
+      return;
+    }
+    applySignedInSession(result.session, result.entitlements, options);
+  }
+
+  function resetToSignedOut() {
+    disconnectRuntime();
+    pendingClearSessionRef.current = null;
+    activeRunRef.current = null;
+    setInterruptedRun(null);
+    setBuyerSession(null);
+    setAuthState("signed-out");
+    setCreatorAgentEntitlements([]);
+    setEntitlementError("");
+    setSelectedEntitlementId("");
+    setCreatorAgent(DEFAULT_CREATOR_AGENT);
+    setMessages([]);
+    setWorkspace("");
+    setWorkspaceDraft("");
+    setWorkspaceGrant(null);
+    setWorkspaceDraftGrant(null);
+    workspaceGrantRef.current = null;
+    setWorkspaceGranted(false);
+    setConversationId("desktop-chat");
+    setSignInStatus("idle");
+    setStartupError("");
+    setSecureSessionError("");
+    setSettingsMigrationNotice("");
+    connectionConfigRef.current = null;
+  }
+
+  async function clearSavedSessionOrShowError(session, clearPromise) {
+    pendingClearSessionRef.current = session;
+    try {
+      await (clearPromise ?? clearAuthSession(session, authStorageRef.current));
+    } catch {
+      setSecureSessionError("Hatch couldn't remove the saved session from macOS Keychain. This Mac may still be signed in. Try again before switching accounts or handing over the device.");
+      setAuthState("secure-session-error");
+      return false;
+    }
+    resetToSignedOut();
+    return true;
+  }
+
+  async function retrySecureSessionClear() {
+    const session = pendingClearSessionRef.current;
+    if (!session) {
+      resetToSignedOut();
+      return;
+    }
+    await clearSavedSessionOrShowError(session);
+  }
+
   useEffect(() => {
     let cancelled = false;
     async function bootstrapAuth() {
+      if (window.__TAURI_INTERNALS__) {
+        try {
+          purgeLegacySensitiveStorage(window.localStorage);
+        } catch (error) {
+          if (cancelled) return;
+          setSecureSessionError(`Hatch couldn't remove legacy browser session data from this Mac: ${errorMessage(error)}`);
+          setAuthState("secure-session-read-error");
+          return;
+        }
+      }
       await settingsStoreRef.current.load();
       if (cancelled) return;
       setSettingsReady(true);
-      const savedSession = await loadSavedAuthSession(authStorageRef.current);
+      let savedSession;
+      try {
+        savedSession = await loadSavedAuthSession(authStorageRef.current);
+      } catch (error) {
+        if (cancelled) return;
+        setSecureSessionError(errorMessage(error));
+        setAuthState(isSecureSessionReadError(error) ? "secure-session-read-error" : "network-error");
+        return;
+      }
       if (!savedSession) {
         setAuthState("signed-out");
         return;
       }
       try {
-        const account = await fetchAuthAccount(DEFAULT_AUTH_URL, savedSession.accessToken);
-        const session = hydrateAuthSession(savedSession, account);
-        const entitlements = await fetchPurchasedCreatorAgents(DEFAULT_AUTH_URL, session.accessToken);
-        if (!cancelled) applySignedInSession(session, entitlements);
+        const result = await resolveDesktopSession(savedSession, DEFAULT_AUTH_URL);
+        if (!cancelled) await applyResolvedDesktopSession(result);
       } catch (error) {
         if (cancelled) return;
         if (isAuthInvalidError(error)) {
-          await clearAuthSession(savedSession, authStorageRef.current);
-          setBuyerSession(null);
-          setAuthState("signed-out");
-          setSignInError("");
+          const cleared = await clearSavedSessionOrShowError(savedSession);
+          if (cleared) setSignInError("");
           return;
         }
+        setBuyerSession(savedSession);
         setStartupError(errorMessage(error));
         setAuthState("network-error");
       }
@@ -212,14 +356,7 @@ function App() {
       applySignedInSession(buyerSession, entitlements, { preserveCurrent });
     } catch (error) {
       if (isAuthInvalidError(error)) {
-        await clearAuthSession(buyerSession, authStorageRef.current);
-        disconnectRuntime();
-        setBuyerSession(null);
-        setCreatorAgentEntitlements([]);
-        setEntitlementError("");
-        setSelectedEntitlementId("");
-        setCreatorAgent(DEFAULT_CREATOR_AGENT);
-        setAuthState("signed-out");
+        await clearSavedSessionOrShowError(buyerSession);
         return;
       }
       if (startup) {
@@ -265,7 +402,8 @@ function App() {
       run_id: activeRun.runId,
       reason: "user_requested"
     });
-    setStatus("Cancelling");
+    const localToolsStopped = await cancelPendingLocalTools("user_requested", activeRun.runId);
+    setStatus(localToolsStopped ? "Cancelling" : "Couldn't confirm that the local tool stopped");
   }, [send]);
 
   const resolveToolApproval = useCallback((toolCallId, approved) => {
@@ -303,8 +441,10 @@ function App() {
 
     // Workspace and permission changes are pending Desktop preferences until a
     // new turn starts. Tool calls within a turn always use this stable snapshot.
-    workspaceRef.current = workspace;
-    permissionRef.current = permissionMode;
+    const accessSnapshot = createTurnAccessSnapshot(workspaceGrant?.grant_id, workspace, permissionMode);
+    workspaceRef.current = accessSnapshot.displayPath;
+    workspaceGrantRef.current = workspaceGrant;
+    permissionRef.current = accessSnapshot.permissionMode;
 
     const runId = `run_${Date.now()}`;
     const assistantId = `${runId}_assistant`;
@@ -314,6 +454,7 @@ function App() {
       assistantId,
       text: "",
       startedAt,
+      accessSnapshot,
       timing: { questionSentAt: startedAt }
     };
     setProfileSetting("active_run", {
@@ -321,6 +462,7 @@ function App() {
       assistantId,
       startedAt,
       conversationId,
+      accessSnapshot,
       timing: { questionSentAt: startedAt }
     });
     setMessages((current) => [
@@ -340,7 +482,7 @@ function App() {
         content
       }
     });
-  }, [buyerProfile.id, connected, conversationId, permissionMode, send, workspace]);
+  }, [buyerProfile.id, connected, conversationId, permissionMode, send, workspace, workspaceGrant]);
 
   const runtime = useExternalStoreRuntime({
     messages,
@@ -377,7 +519,10 @@ function App() {
 
   useEffect(() => {
     if (!settingsReady || !signedIn || !buyerSession?.profile?.id) return;
-    const savedWorkspace = getProfileSetting("workspace_root", "");
+    let cancelled = false;
+    const profileId = buyerSession.profile.id;
+    const savedWorkspaceGrant = normalizeWorkspaceGrant(getProfileSetting("workspace_grant", null));
+    const legacySavedWorkspace = getProfileSetting("workspace_root", "");
     const savedConversationId = getConversationId(
       buyerProfile.id,
       selectedEntitlementId,
@@ -389,10 +534,13 @@ function App() {
     if (savedPermission !== nextPermission) {
       setProfileSetting("permission_mode", nextPermission);
     }
-    setWorkspace(savedWorkspace);
-    workspaceRef.current = savedWorkspace;
-    setWorkspaceDraft(savedWorkspace);
-    setWorkspaceGranted(Boolean(savedWorkspace));
+    setWorkspace("");
+    workspaceRef.current = "";
+    workspaceGrantRef.current = null;
+    setWorkspaceGrant(null);
+    setWorkspaceDraft(savedWorkspaceGrant?.display_path || "");
+    setWorkspaceDraftGrant(savedWorkspaceGrant);
+    setWorkspaceGranted(false);
     setConversationId(savedConversationId);
     permissionRef.current = nextPermission;
     setPermissionMode(nextPermission);
@@ -404,6 +552,60 @@ function App() {
       activeRunRef.current = null;
       setInterruptedRun(null);
     }
+    async function restoreWorkspace() {
+      let legacyClearFailed = false;
+      if (legacySavedWorkspace) {
+        try {
+          await settingsStoreRef.current.clearProfileKey(profileId, "workspace_root");
+        } catch {
+          legacyClearFailed = true;
+          if (!cancelled) setStatus("Choose your previous workspace again. Hatch couldn't clear the legacy path and will retry next launch.");
+        }
+      }
+      const restored = await validateRestoredWorkspace(savedWorkspaceGrant, (grantId) => invokeTauri("ensure_workspace", {
+        workspaceGrantId: grantId
+      }));
+      if (cancelled) return;
+      if (restored.state === "valid") {
+        setWorkspace(restored.workspace);
+        workspaceRef.current = restored.workspace;
+        workspaceGrantRef.current = restored.grant;
+        setWorkspaceGrant(restored.grant);
+        setWorkspaceDraft(restored.workspace);
+        setWorkspaceDraftGrant(restored.grant);
+        setWorkspaceGranted(true);
+        if (restored.workspace !== savedWorkspaceGrant?.display_path) {
+          setProfileSetting("workspace_grant", restored.grant, profileId);
+        }
+        return;
+      }
+      setWorkspace("");
+      workspaceRef.current = "";
+      workspaceGrantRef.current = null;
+      setWorkspaceGrant(null);
+      setWorkspaceGranted(false);
+      if (restored.state === "stale") {
+        setWorkspaceDraft("");
+        setWorkspaceDraftGrant(null);
+        try {
+          await Promise.all([
+            settingsStoreRef.current.clearProfileKey(profileId, "workspace_grant"),
+            invokeTauri("revoke_workspace_grant", { workspaceGrantId: restored.staleGrant.grant_id })
+          ]);
+          if (!cancelled) setStatus(restored.status);
+        } catch {
+          if (!cancelled) setStatus(`${restored.status} Hatch couldn't clear the stale saved path; it will retry next launch.`);
+        }
+      } else if (!cancelled && !savedRun) {
+        setStatus(legacySavedWorkspace
+          ? legacyClearFailed
+            ? "Choose your previous workspace again. Hatch couldn't clear the legacy path and will retry next launch."
+            : "Choose your previous workspace again so macOS can grant Hatch access from the folder picker."
+          : restored.status);
+      }
+    }
+    void restoreWorkspace();
+    return () => { cancelled = true; };
   }, [buyerProfile.id, buyerSession?.profile?.id, selectedEntitlementId, settingsReady, signedIn]);
 
   useEffect(() => () => {
@@ -411,13 +613,25 @@ function App() {
     window.clearTimeout(reconnectTimerRef.current);
     reconnectTimerRef.current = null;
     socketRef.current?.close();
+    void cancelPendingLocalTools("transport_failure");
   }, []);
 
   useEffect(() => {
-    if (!signedIn || !workspaceGranted || !workspace || !selectedEntitlementId) return;
-    if (connectedRef.current || socketRef.current || connectingRef.current) return;
-    void connectRuntime({ workspace, conversationId, preserveMessages: true });
-  }, [conversationId, selectedEntitlementId, signedIn, workspace, workspaceGranted]);
+    if (!signedIn || !workspaceGranted || !workspaceGrant?.grant_id || !selectedEntitlementId) return;
+    const entitlement = creatorAgentEntitlements.find((item) => item.entitlement_id === selectedEntitlementId);
+    const desiredBinding = runtimeBindingForEntitlement(entitlement);
+    const hasConnection = connectedRef.current || socketRef.current || connectingRef.current;
+    if (hasConnection && runtimeBindingMatches(connectionConfigRef.current, desiredBinding)) return;
+    if (hasConnection) disconnectRuntime();
+    void connectRuntime({
+      workspaceGrant,
+      conversationId,
+      entitlementId: desiredBinding?.entitlementId,
+      agentId: desiredBinding?.agentId,
+      creatorId: desiredBinding?.creatorId,
+      preserveMessages: true
+    });
+  }, [connected, conversationId, creatorAgentEntitlements, selectedEntitlementId, signedIn, workspaceGrant, workspaceGranted]);
 
   function scheduleRuntimeReconnect() {
     if (intentionalDisconnectRef.current || reconnectTimerRef.current || !connectionConfigRef.current) return;
@@ -430,16 +644,40 @@ function App() {
     }, delay);
   }
 
+  function retryRuntimeConnection() {
+    if (connectedRef.current || connectingRef.current) return;
+    const retryConnection = connectionConfigRef.current ?? {
+      serverUrl,
+      workspaceGrant,
+      conversationId,
+      entitlementId: selectedEntitlementId,
+      agentId: creatorAgentEntitlements.find((item) => item.entitlement_id === selectedEntitlementId)?.agent_id,
+      creatorId: creatorAgentEntitlements.find((item) => item.entitlement_id === selectedEntitlementId)?.creator_id
+    };
+    window.clearTimeout(reconnectTimerRef.current);
+    reconnectTimerRef.current = null;
+    reconnectAttemptRef.current = 0;
+    connectionTokenRef.current += 1;
+    intentionalDisconnectRef.current = true;
+    const staleSocket = socketRef.current;
+    socketRef.current = null;
+    staleSocket?.close();
+    connectedRef.current = false;
+    setConnected(false);
+    setStatus("Restoring connection…");
+    void connectRuntime({ ...retryConnection, preserveMessages: true });
+  }
+
   async function connectRuntime(connection = {}) {
     if (connectedRef.current || socketRef.current || connectingRef.current) return;
     const targetServerUrl = connection.serverUrl || serverUrl;
-    const targetWorkspace = connection.workspace || workspace;
+    const targetWorkspaceGrant = normalizeWorkspaceGrant(connection.workspaceGrant) || workspaceGrant;
     const targetConversationId = connection.conversationId || conversationId;
     const targetEntitlementId = connection.entitlementId || selectedEntitlementId;
     const selectedEntitlement = creatorAgentEntitlements.find((item) => item.entitlement_id === targetEntitlementId);
     const targetAgentId = connection.agentId || selectedEntitlement?.agent_id;
     const targetCreatorId = connection.creatorId || selectedEntitlement?.creator_id;
-    if (!targetServerUrl.trim() || !targetWorkspace.trim() || !buyerSession?.accessToken || !targetEntitlementId) {
+    if (!targetServerUrl.trim() || !targetWorkspaceGrant?.grant_id || !buyerSession?.accessToken || !targetEntitlementId) {
       setStatus("Choose a folder before starting the connection.");
       return;
     }
@@ -449,27 +687,30 @@ function App() {
     intentionalDisconnectRef.current = false;
     connectionConfigRef.current = {
       serverUrl: targetServerUrl.trim(),
-      workspace: targetWorkspace.trim(),
+      workspaceGrant: targetWorkspaceGrant,
       conversationId: targetConversationId.trim() || `conversation_${buyerProfile.id}_${targetEntitlementId}`,
       entitlementId: targetEntitlementId,
       ...(targetAgentId ? { agentId: targetAgentId } : {}),
       ...(targetCreatorId ? { creatorId: targetCreatorId } : {})
     };
-    setProfileSetting("workspace_root", targetWorkspace.trim());
     setConversationIdForEntitlement(
       buyerProfile.id,
       targetEntitlementId,
       targetConversationId.trim() || `conversation_${buyerProfile.id}_${targetEntitlementId}`
     );
 
-    let normalizedWorkspace;
+    let normalizedWorkspaceGrant;
     try {
-      normalizedWorkspace = await invokeTauri("ensure_workspace", {
-        workspaceRoot: targetWorkspace.trim()
-      });
-      setWorkspace(normalizedWorkspace);
-      workspaceRef.current = normalizedWorkspace;
-      connectionConfigRef.current.workspace = normalizedWorkspace;
+      normalizedWorkspaceGrant = normalizeWorkspaceGrant(await invokeTauri("ensure_workspace", {
+        workspaceGrantId: targetWorkspaceGrant.grant_id
+      }));
+      if (!normalizedWorkspaceGrant) throw new Error("The native workspace grant is invalid.");
+      setWorkspace(normalizedWorkspaceGrant.display_path);
+      workspaceRef.current = normalizedWorkspaceGrant.display_path;
+      workspaceGrantRef.current = normalizedWorkspaceGrant;
+      setWorkspaceGrant(normalizedWorkspaceGrant);
+      connectionConfigRef.current.workspaceGrant = normalizedWorkspaceGrant;
+      setProfileSetting("workspace_grant", normalizedWorkspaceGrant);
       setStatus("Loading history...");
       const activeConversationId = targetConversationId.trim() || `conversation_${buyerProfile.id}_${targetEntitlementId}`;
       const history = await loadConversationHistory(
@@ -485,8 +726,25 @@ function App() {
       setStatus("Connecting...");
     } catch (error) {
       if (requestToken === connectionTokenRef.current) {
-        setStatus(`Connection unavailable — ${errorMessage(error)}`);
-        scheduleRuntimeReconnect();
+        if (isInvalidWorkspaceGrantError(error)) {
+          workspaceRef.current = "";
+          workspaceGrantRef.current = null;
+          connectionConfigRef.current = null;
+          intentionalDisconnectRef.current = true;
+          setWorkspace("");
+          setWorkspaceDraft("");
+          setWorkspaceGrant(null);
+          setWorkspaceDraftGrant(null);
+          setWorkspaceGranted(false);
+          setStatus("Workspace access is no longer available. Choose the folder again to continue.");
+          void Promise.allSettled([
+            settingsStoreRef.current.clearProfileKey(buyerProfile.id, "workspace_grant"),
+            invokeTauri("revoke_workspace_grant", { workspaceGrantId: targetWorkspaceGrant.grant_id })
+          ]);
+        } else {
+          setStatus(`Connection unavailable — ${errorMessage(error)}`);
+          scheduleRuntimeReconnect();
+        }
       }
       return;
     } finally {
@@ -508,7 +766,7 @@ function App() {
         ...(targetAgentId ? { agent_id: targetAgentId } : {}),
         ...(targetCreatorId ? { creator_id: targetCreatorId } : {}),
         client_version: "0.1.0",
-        local_tools: localToolsForPermissionPolicy(permissionRef.current),
+        local_tools: [...PLATFORM_LOCAL_TOOLS],
       }));
     });
     socket.addEventListener("message", (event) => {
@@ -517,10 +775,16 @@ function App() {
     });
     socket.addEventListener("error", () => {
       setStatus("Connection problem. Your work has been kept.");
+      void cancelPendingLocalTools("transport_failure").then((stopped) => {
+        if (!stopped) setStatus(LOCAL_TOOL_STOP_UNCONFIRMED);
+      });
     });
     socket.addEventListener("close", () => {
       if (socketRef.current !== socket) return;
       rejectPendingApprovals();
+      void cancelPendingLocalTools("transport_failure").then((stopped) => {
+        if (!stopped) setStatus(LOCAL_TOOL_STOP_UNCONFIRMED);
+      });
       socketRef.current = null;
       connectedRef.current = false;
       setConnected(false);
@@ -545,6 +809,9 @@ function App() {
     reconnectTimerRef.current = null;
     reconnectAttemptRef.current = 0;
     rejectPendingApprovals();
+    void cancelPendingLocalTools("transport_failure").then((stopped) => {
+      if (!stopped) setStatus(LOCAL_TOOL_STOP_UNCONFIRMED);
+    });
     const socket = socketRef.current;
     socketRef.current = null;
     socket?.close();
@@ -566,12 +833,10 @@ function App() {
 
     if (message.type === "assistant.delta") {
       if (message.delta.kind === "text") {
-        const activeRun = activeRunRef.current;
-        if (!activeRun) return;
-        activeRun.timing.firstSafeDeltaReceivedAt ??= Date.now();
-        activeRun.timing.firstTextPaintAt ??= Date.now();
-        activeRun.text += message.delta.content;
-        appendAssistantText(activeRun.assistantId, message.delta.content);
+        const projection = projectApprovedRuntimeStream(activeRunRef.current, message);
+        if (!projection) return;
+        activeRunRef.current = projection.activeRun;
+        appendAssistantText(projection.assistantId, projection.content);
       } else {
         setStatus(message.delta.content);
         updateAssistantMetadataForRun(message.run_id, {
@@ -630,26 +895,32 @@ function App() {
     }
 
     if (message.type === "turn.completed") {
-      const activeRun = activeRunRef.current;
-      if (activeRun) {
-        activeRun.timing.turnCompletedReceivedAt = Date.now();
-        activeRun.timing.server = message.timing;
-        if (message.finish_reason === "content_filter") {
-          finishAssistant(activeRun.assistantId, OUTPUT_FILTERED_COPY, "content_filter");
+      const localToolsStopped = await cancelPendingLocalTools("turn_completed", message.run_id);
+      const projection = projectApprovedRuntimeStream(activeRunRef.current, message);
+      if (projection) {
+        activeRunRef.current = projection.activeRun;
+        if (projection.finishReason === "content_filter") {
+          finishAssistant(projection.assistantId, OUTPUT_FILTERED_COPY, "content_filter");
         } else {
-          finishAssistant(activeRun.assistantId, activeRun.text || "Done.", "completed");
+          finishAssistant(projection.assistantId, projection.text, "completed");
         }
-        saveAssistantTiming(activeRun.assistantId, activeRun.runId, activeRun.timing, Date.now());
+        saveAssistantTiming(
+          projection.assistantId,
+          projection.runId,
+          projection.activeRun.timing,
+          projection.completedAt
+        );
       }
       activeRunRef.current = null;
       setProfileSetting("active_run", undefined);
       setInterruptedRun(null);
       setRunning(false);
-      setStatus("Completed");
+      setStatus(statusAfterLocalToolStop("Completed", localToolsStopped));
       return;
     }
 
     if (message.type === "turn.failed") {
+      const localToolsStopped = await cancelPendingLocalTools("turn_failed", message.run_id);
       const activeRun = activeRunRef.current;
       const text = `Run failed: ${message.error?.message || "Unknown error"}`;
       if (activeRun) {
@@ -666,14 +937,19 @@ function App() {
       setProfileSetting("active_run", undefined);
       setInterruptedRun(null);
       setRunning(false);
-      setStatus("Failed");
+      setStatus(statusAfterLocalToolStop("Failed", localToolsStopped));
     }
   }
 
   async function handleToolRequest(message) {
+    const accessSnapshot = accessSnapshotForToolCall(activeRunRef.current, {
+      workspaceGrantId: workspaceGrantRef.current?.grant_id,
+      displayPath: workspaceRef.current,
+      permissionMode: permissionRef.current
+    });
     const isChange = CHANGE_TOOLS.includes(message.name);
-    let authorizedByDesktop = permissionRef.current === PERMISSION_POLICIES.ALLOW_CHANGES && isChange;
-    if (!authorizedByDesktop && (message.approval === "ask" || requiresUserApproval(message.name, permissionRef.current))) {
+    let authorizedByDesktop = accessSnapshot.permissionMode === PERMISSION_POLICIES.ALLOW_CHANGES && isChange;
+    if (!authorizedByDesktop && shouldRequestDesktopApproval(message, accessSnapshot.permissionMode)) {
       const approved = await requestToolApproval(message);
       if (!approved) {
         upsertToolEvent({
@@ -701,17 +977,20 @@ function App() {
     }
 
     try {
-      const result = await withTimeout(
-        invokeLocalToolCall(message, authorizedByDesktop),
-        LOCAL_TOOL_TIMEOUT_MS,
-        `Local tool timed out after ${Math.round(LOCAL_TOOL_TIMEOUT_MS / 1000)}s: ${message.name}`
-      );
+      const result = await invokeLocalToolCall(message, authorizedByDesktop, accessSnapshot.workspaceGrantId);
       send(result);
     } catch (error) {
       const localError = {
-        code: error?.code === "local_tool_timeout" ? "local_tool_timeout" : "local_runner_error",
+        code: ["local_tool_timeout", "local_tool_cancelled", "local_tool_cancel_failed"].includes(error?.code)
+          ? error.code
+          : "local_runner_error",
         message: errorMessage(error)
       };
+      if (localError.code === "local_tool_cancel_failed") {
+        setStatus("Hatch couldn't confirm that the local tool stopped. Check the workspace before continuing.");
+      } else if (localError.code === "local_tool_timeout") {
+        setStatus("Local tool timed out and was stopped.");
+      }
       upsertToolEvent({
         ...message,
         locality: "client",
@@ -728,16 +1007,65 @@ function App() {
     }
   }
 
-  function invokeLocalToolCall(message, authorizedByDesktop) {
+  function invokeLocalToolCall(message, authorizedByDesktop, workspaceGrantId) {
     const request = authorizedByDesktop ? { ...message, approval: "approved_by_user" } : message;
+    const deadlineMs = localToolTransportDeadlineMs(request);
     return new Promise((resolve, reject) => {
       let settled = false;
+      let cancellationPromise = null;
       let pollTimer;
+      let deadlineTimer;
       const finish = (callback, value) => {
         if (settled) return;
         settled = true;
         window.clearTimeout(pollTimer);
+        window.clearTimeout(deadlineTimer);
+        if (pendingLocalToolsRef.current.get(request.tool_call_id)?.request === request) {
+          pendingLocalToolsRef.current.delete(request.tool_call_id);
+        }
         callback(value);
+      };
+      const cancel = (reason) => {
+        if (settled) return Promise.resolve(true);
+        if (cancellationPromise) return cancellationPromise;
+        cancellationPromise = (async () => {
+          try {
+            const acknowledged = await invokeTauri("cancel_tool_call", {
+              toolCallId: request.tool_call_id
+            });
+            if (!acknowledged) {
+              const completed = await invokeTauri("poll_tool_call", {
+                toolCallId: request.tool_call_id
+              });
+              if (completed) {
+                finish(resolve, completed);
+                return true;
+              }
+              const missing = new Error(`Native local tool job was not found: ${request.tool_call_id}`);
+              missing.code = "local_tool_cancel_failed";
+              throw missing;
+            }
+            const completed = await invokeTauri("poll_tool_call", {
+              toolCallId: request.tool_call_id
+            }).catch(() => null);
+            // A non-shell file operation may commit between the cancel signal
+            // and its next safe point. Preserve that honest native result
+            // instead of falsely claiming the operation was stopped.
+            const committed = committedResultAfterCancellation(completed);
+            if (committed) {
+              finish(resolve, committed);
+              return true;
+            }
+            finish(reject, localToolCancellationError(request, reason, deadlineMs));
+            return true;
+          } catch (error) {
+            const cancellationError = error instanceof Error ? error : new Error(errorMessage(error));
+            if (!cancellationError.code) cancellationError.code = "local_tool_cancel_failed";
+            finish(reject, cancellationError);
+            throw cancellationError;
+          }
+        })();
+        return cancellationPromise;
       };
       const poll = async () => {
         if (settled) return;
@@ -756,23 +1084,47 @@ function App() {
         pollTimer = window.setTimeout(poll, 100);
       };
 
+      pendingLocalToolsRef.current.set(request.tool_call_id, {
+        request,
+        runId: request.run_id,
+        cancel
+      });
+      deadlineTimer = window.setTimeout(() => {
+        void cancel("timeout").catch(() => {});
+      }, deadlineMs);
+
       invokeTauri("execute_tool_call", {
-        workspaceRoot: workspaceRef.current,
+        workspaceGrantId,
         request
       }).then(poll).catch((error) => finish(reject, error));
     });
   }
 
+  async function cancelPendingLocalTools(reason, runId = null) {
+    const pending = [...pendingLocalToolsRef.current.values()]
+      .filter((entry) => !runId || entry.runId === runId);
+    if (pending.length === 0) return true;
+    const outcomes = await Promise.allSettled(pending.map((entry) => entry.cancel(reason)));
+    return outcomes.every((outcome) => outcome.status === "fulfilled");
+  }
+
   async function grantWorkspace() {
     try {
-      const normalized = await invokeTauri("ensure_workspace", { workspaceRoot: workspaceDraft.trim() });
-      setWorkspace(normalized);
-      workspaceRef.current = normalized;
-      setWorkspaceDraft(normalized);
+      if (!workspaceDraftGrant?.grant_id) throw new Error("Choose a workspace folder before starting.");
+      const normalized = normalizeWorkspaceGrant(await invokeTauri("ensure_workspace", {
+        workspaceGrantId: workspaceDraftGrant.grant_id
+      }));
+      if (!normalized) throw new Error("The native workspace grant is invalid.");
+      setWorkspace(normalized.display_path);
+      workspaceRef.current = normalized.display_path;
+      workspaceGrantRef.current = normalized;
+      setWorkspaceGrant(normalized);
+      setWorkspaceDraft(normalized.display_path);
+      setWorkspaceDraftGrant(normalized);
       setWorkspaceGranted(true);
-      setProfileSetting("workspace_root", normalized);
+      setProfileSetting("workspace_grant", normalized);
       setStatus("Folder access granted");
-      await connectRuntime({ workspace: normalized, conversationId, preserveMessages: false });
+      await connectRuntime({ workspaceGrant: normalized, conversationId, preserveMessages: false });
     } catch (error) {
       setStatus(errorMessage(error));
     }
@@ -781,33 +1133,49 @@ function App() {
   async function chooseWorkspace({ activate = workspaceGranted } = {}) {
     try {
       const selected = await invokeTauri("pick_workspace_folder");
-      if (!selected) return;
-      setWorkspaceDraft(selected);
-      if (activate) await switchWorkspace(selected);
+      const selection = workspacePickerSelection({
+        workspace,
+        draft: workspaceDraft,
+        pendingGrant: workspaceDraftGrant,
+        granted: workspaceGranted
+      }, selected);
+      if (!selection.changed) return;
+      setWorkspaceDraft(selection.draft);
+      setWorkspaceDraftGrant(selection.pendingGrant);
+      if (activate) await switchWorkspace(selection.pendingGrant);
     } catch (error) {
       setStatus(errorMessage(error));
     }
   }
 
-  async function switchWorkspace(nextWorkspace) {
-    const normalized = await invokeTauri("ensure_workspace", { workspaceRoot: nextWorkspace.trim() });
-    if (normalized === workspace) return;
+  async function switchWorkspace(nextWorkspaceGrant) {
+    const candidate = normalizeWorkspaceGrant(nextWorkspaceGrant);
+    if (!candidate) throw new Error("The folder picker did not return a native workspace grant.");
+    const normalized = normalizeWorkspaceGrant(await invokeTauri("ensure_workspace", {
+      workspaceGrantId: candidate.grant_id
+    }));
+    if (!normalized) throw new Error("The native workspace grant is invalid.");
+    if (normalized.grant_id === workspaceGrant?.grant_id) return;
 
-    setWorkspace(normalized);
-    setWorkspaceDraft(normalized);
+    setWorkspace(normalized.display_path);
+    workspaceRef.current = normalized.display_path;
+    workspaceGrantRef.current = normalized;
+    setWorkspaceGrant(normalized);
+    setWorkspaceDraft(normalized.display_path);
+    setWorkspaceDraftGrant(normalized);
     setWorkspaceGranted(true);
     if (connectionConfigRef.current) {
-      connectionConfigRef.current.workspace = normalized;
+      connectionConfigRef.current.workspaceGrant = normalized;
     }
-    setProfileSetting("workspace_root", normalized);
+    setProfileSetting("workspace_grant", normalized);
     setStatus("Workspace updated for the next turn");
   }
 
   function updatePermissionMode(nextMode) {
-    if (!PERMISSION_MODES.some((mode) => mode.value === nextMode)) return;
+    if (!PERMISSION_OPTIONS.some((mode) => mode.value === nextMode)) return;
     setPermissionMode(nextMode);
     setProfileSetting("permission_mode", nextMode);
-    setStatus(`Permission updated for the next turn: ${permissionModeLabel(nextMode)}`);
+    setStatus(`Permission updated for the next turn: ${permissionPolicyLabel(nextMode)}`);
   }
 
   function startNewConversation() {
@@ -837,13 +1205,22 @@ function App() {
     setSignInError("");
     try {
       if (!credentials) throw new Error("Enter your email and password.");
-      const signedInSession = await signInAuthSession(credentials, DEFAULT_AUTH_URL);
-      const account = await fetchAuthAccount(DEFAULT_AUTH_URL, signedInSession.accessToken);
-      const nextSession = hydrateAuthSession(signedInSession, account);
-      const entitlements = await fetchPurchasedCreatorAgents(DEFAULT_AUTH_URL, nextSession.accessToken);
-      await saveAuthSession(nextSession, authStorageRef.current);
-      applySignedInSession(nextSession, entitlements);
+      const result = await signInDesktopSession(credentials, DEFAULT_AUTH_URL, authStorageRef.current);
+      await applyResolvedDesktopSession(result);
     } catch (error) {
+      const persistedSession = persistedDesktopSessionFromError(error);
+      if (persistedSession) {
+        if (isAuthInvalidError(error)) {
+          const cleared = await clearSavedSessionOrShowError(persistedSession);
+          if (cleared) setSignInError("Hatch couldn't verify the new session. Please sign in again.");
+          return;
+        }
+        setBuyerSession(persistedSession);
+        setStartupError(errorMessage(error));
+        setSignInStatus("ready");
+        setAuthState("network-error");
+        return;
+      }
       setSignInStatus("error");
       setSignInError(isNetworkError(error)
         ? "Hatch can't reach the service. Check your connection and try again."
@@ -852,43 +1229,42 @@ function App() {
   }
 
   async function signOut() {
+    const { serverRevoke, localClear } = startAuthSessionSignOut(
+      DEFAULT_AUTH_URL,
+      buyerSession,
+      authStorageRef.current
+    );
+    void serverRevoke;
     disconnectRuntime();
-    await revokeAuthSession(DEFAULT_AUTH_URL, buyerSession?.accessToken);
-    await clearAuthSession(buyerSession, authStorageRef.current);
-    activeRunRef.current = null;
-    setInterruptedRun(null);
-    setBuyerSession(null);
-    setAuthState("signed-out");
-    setCreatorAgentEntitlements([]);
-    setEntitlementError("");
-    setSelectedEntitlementId("");
-    setCreatorAgent(DEFAULT_CREATOR_AGENT);
-    setMessages([]);
-    setWorkspace("");
-    setWorkspaceDraft("");
-    setWorkspaceGranted(false);
-    setConversationId("desktop-chat");
-    setSignInStatus("idle");
-    setSignInError("");
+    const cleared = await clearSavedSessionOrShowError(buyerSession, localClear);
+    if (cleared) setSignInError("");
   }
 
   async function openBrowseCatalog() {
     try {
-      await invokeTauri("open_external_url", { url: BROWSE_CATALOG_URL });
-    } catch {
-      // Vite-only renderer tests do not have the native opener command.
-      const opened = window.open(BROWSE_CATALOG_URL, "_blank", "noopener,noreferrer");
-      if (!opened) setStatus("Open the Hatch Creator Agent catalog in your browser.");
+      await openCreatorAgentCatalog({
+        catalogUrl: BROWSE_CATALOG_URL,
+        invokeImpl: invokeTauri,
+        windowObject: window,
+        packaged: Boolean(window.__TAURI_INTERNALS__)
+      });
+      setEntitlementError("");
+    } catch (error) {
+      setEntitlementError(errorMessage(error));
     }
   }
 
   function selectCreatorAgent(entitlement) {
-    if (entitlement.entitlement_id === selectedEntitlementId) return;
+    const sameEntitlement = entitlement.entitlement_id === selectedEntitlementId;
+    if (sameEntitlement && runtimeBindingMatches(
+      connectionConfigRef.current,
+      runtimeBindingForEntitlement(entitlement)
+    )) return;
     disconnectRuntime();
     setSelectedEntitlementId(entitlement.entitlement_id);
     setCreatorAgent(creatorAgentFromEntitlement(entitlement));
     setProfileSetting("last_selected_entitlement_id", entitlement.entitlement_id);
-    setMessages([]);
+    if (!sameEntitlement) setMessages([]);
     const fallback = `conversation_${buyerProfile.id}_${entitlement.creator_id || "creator"}_${entitlement.agent_id || entitlement.product.id}`;
     setConversationId(getConversationId(buyerProfile.id, entitlement.entitlement_id, fallback));
   }
@@ -1106,8 +1482,30 @@ function App() {
   }
 
   if (authState === "loading") return <LaunchScreen />;
+  if (authState === "secure-session-error") {
+    return <SecureSessionErrorScreen message={secureSessionError} onRetry={() => void retrySecureSessionClear()} />;
+  }
+  if (authState === "secure-session-read-error") {
+    return (
+      <SecureSessionErrorScreen
+        actionLabel="Retry opening the saved session"
+        message={secureSessionError}
+        onRetry={() => { setAuthState("loading"); setBootstrapAttempt((value) => value + 1); }}
+        title="Hatch couldn't open your saved session"
+      />
+    );
+  }
   if (authState === "network-error") {
-    return <NetworkErrorScreen message={startupError} onRetry={() => { setAuthState("loading"); setBootstrapAttempt((value) => value + 1); }} />;
+    return (
+      <NetworkErrorScreen
+        message={startupError}
+        onRetry={() => { setAuthState("loading"); setBootstrapAttempt((value) => value + 1); }}
+        onSignOut={canUseAnotherAccountFromNetworkError(buyerSession) ? () => void signOut() : null}
+      />
+    );
+  }
+  if (authState === "unsupported-role") {
+    return <UnsupportedRoleScreen profile={buyerProfile} onSignOut={() => void signOut()} />;
   }
   if (!signedIn) {
     return <SignInScreen onSignIn={(credentials) => void signIn(credentials)} status={signInStatus} error={signInError} />;
@@ -1121,6 +1519,7 @@ function App() {
         onSignOut={() => void signOut()}
         refreshing={entitlementRefreshing}
         error={entitlementError}
+        notice={settingsMigrationNotice}
       />
     );
   }
@@ -1167,7 +1566,24 @@ function App() {
           <div className="header-agent">
             <span className="label">Agent</span>
             <strong>{creatorAgent.name} · {creatorAgent.creator}</strong>
+            {settingsMigrationNotice ? <small className="settings-migration-notice" role="status">{settingsMigrationNotice}</small> : null}
           </div>
+          {workspaceGranted && !connected ? (
+            <div className="connection-recovery" role="status" aria-live="polite">
+              <span>
+                <strong>Offline</strong>
+                <small>{status === "Offline" ? "Your conversation stays here while Hatch reconnects." : status}</small>
+              </span>
+              <button
+                className="secondary compact"
+                type="button"
+                onClick={retryRuntimeConnection}
+                disabled={["Loading history...", "Connecting...", "Restoring connection…"].includes(status)}
+              >
+                {["Loading history...", "Connecting...", "Restoring connection…"].includes(status) ? "Connecting…" : "Retry"}
+              </button>
+            </div>
+          ) : null}
         </header>
 
         {!workspaceGranted ? (
@@ -1215,14 +1631,14 @@ function App() {
                         </span>
                         <span className="composer-control-caret" aria-hidden="true">⌄</span>
                       </button>
-                      <label className="composer-control permission-composer-control" title={permissionModeDetail(permissionMode)}>
+                      <label className="composer-control permission-composer-control" title={permissionPolicyDetail(permissionMode)}>
                         <ShieldIcon />
                         <select
                           aria-label="Workspace permissions"
                           value={permissionMode}
                           onChange={(event) => updatePermissionMode(event.target.value)}
                         >
-                          {PERMISSION_MODES.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
+                          {PERMISSION_OPTIONS.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
                         </select>
                         <span className="composer-control-caret" aria-hidden="true">⌄</span>
                       </label>
@@ -1607,14 +2023,6 @@ function EmptyThread({ connected, creatorAgent }) {
   );
 }
 
-function permissionModeLabel(value) {
-  return PERMISSION_MODES.find((mode) => mode.value === value)?.label || "请求批准";
-}
-
-function permissionModeDetail(value) {
-  return PERMISSION_MODES.find((mode) => mode.value === value)?.detail || "Shell 命令和文件变更前请求批准";
-}
-
 function WorkspaceIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 20 20">
@@ -1672,7 +2080,7 @@ function LaunchScreen() {
   );
 }
 
-function NetworkErrorScreen({ message, onRetry }) {
+function NetworkErrorScreen({ message, onRetry, onSignOut }) {
   return (
     <main className="welcome-screen status-screen">
       <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch.</strong></div>
@@ -1682,12 +2090,42 @@ function NetworkErrorScreen({ message, onRetry }) {
         <p>{message || "Check your connection and try again."}</p>
         <small>Your saved access stays on this computer.</small>
         <button type="button" onClick={onRetry}>Retry</button>
+        {onSignOut ? <button className="secondary" type="button" onClick={onSignOut}>Sign out / use another account</button> : null}
       </section>
     </main>
   );
 }
 
-function EmptyAgentsScreen({ profile, onBrowse, onRefresh, onSignOut, refreshing, error }) {
+function SecureSessionErrorScreen({ message, onRetry, title = "Hatch couldn't finish signing out", actionLabel = "Try removing the session again" }) {
+  return (
+    <main className="welcome-screen status-screen">
+      <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch.</strong></div>
+      <section className="status-card">
+        <span className="eyebrow">Secure session</span>
+        <h1>{title}</h1>
+        <p>{message}</p>
+        <button type="button" onClick={onRetry}>{actionLabel}</button>
+      </section>
+    </main>
+  );
+}
+
+function UnsupportedRoleScreen({ profile, onSignOut }) {
+  return (
+    <main className="welcome-screen status-screen">
+      <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch.</strong></div>
+      <section className="status-card">
+        <span className="eyebrow">Consumer Desktop</span>
+        <h1>Use a buyer account in this app</h1>
+        <p>{CONSUMER_DESKTOP_ROLE_MESSAGE}</p>
+        <small>{profile.name} is signed in as a Creator.</small>
+        <button type="button" onClick={onSignOut}>Sign out</button>
+      </section>
+    </main>
+  );
+}
+
+function EmptyAgentsScreen({ profile, onBrowse, onRefresh, onSignOut, refreshing, error, notice }) {
   return (
     <main className="welcome-screen status-screen empty-agents-screen">
       <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch.</strong></div>
@@ -1700,6 +2138,7 @@ function EmptyAgentsScreen({ profile, onBrowse, onRefresh, onSignOut, refreshing
         <span className="eyebrow">Your Creator Agents</span>
         <h1>Find an Agent built around a creator's proven method.</h1>
         <p>Your account is ready. Browse the catalog to find an Agent for your work.</p>
+        {notice ? <p className="status-inline-notice" role="status">{notice}</p> : null}
         {error ? <p className="status-inline-error" role="status">{error}</p> : null}
         <button type="button" onClick={onBrowse}>Browse Creator Agents</button>
         <button className="secondary status-refresh" type="button" onClick={onRefresh} disabled={refreshing}>
@@ -1888,21 +2327,7 @@ function joinClassNames(...classNames) {
 }
 
 function reportTurnTiming(runId, timing, fullResponseAt) {
-  const sinceQuestion = (timestamp) => timestamp === undefined
-    ? undefined
-    : timestamp - timing.questionSentAt;
-  const summary = {
-    run_id: runId,
-    measured_at: new Date().toISOString(),
-    client_ms: {
-      question_to_first_safe_delta: sinceQuestion(timing.firstSafeDeltaReceivedAt),
-      question_to_first_text_paint: sinceQuestion(timing.firstTextPaintAt),
-      question_to_turn_completed: sinceQuestion(timing.turnCompletedReceivedAt),
-      question_to_full_response: sinceQuestion(fullResponseAt)
-    },
-    server_ms: timing.server
-  };
-  localStorage.setItem("hatch.debug.lastTurnTiming", JSON.stringify(summary));
+  const summary = summarizeTurnTiming(runId, timing, fullResponseAt);
   console.info("[hatch:turn-timing]", summary);
   return summary;
 }
@@ -2019,13 +2444,13 @@ function SkillDetailRow({ label, value }) {
 }
 
 function approvalReasonText(message) {
-  if (message.name === "fs.write") {
+  if (message.name === "file_write") {
     return `Write ${toolTarget(message.arguments) || "a file"} in the selected workspace.`;
   }
-  if (message.name === "fs.patch") {
+  if (message.name === "file_patch") {
     return `Update ${toolTarget(message.arguments) || "a file"} in the selected workspace.`;
   }
-  if (message.name === "shell.exec") {
+  if (message.name === "shell_exec") {
     return `Run command: ${toolTarget(message.arguments) || "shell command"}`;
   }
   return `Run ${message.name} locally in the selected workspace.`;
@@ -2085,15 +2510,16 @@ function methodDisplayName(name) {
 }
 
 function toolDisplay(name) {
-  const normalized = String(name).replaceAll("_", ".");
+  const canonical = String(name);
+  const normalized = canonical.replaceAll("_", ".");
   if (normalized.includes("web.search")) return { action: "Search the web", running: "Searching the web", icon: "◎" };
-  if (normalized.includes("file.search") || normalized.includes("fs.search")) return { action: "Search files", running: "Searching files", icon: "⌕" };
-  if (normalized.includes("file.read") || normalized.includes("fs.read")) return { action: "Read file", running: "Reading file", icon: "▣" };
-  if (normalized.includes("file.list") || normalized.includes("fs.list")) return { action: "List files", running: "Listing files", icon: "☷" };
-  if (normalized.includes("file.write") || normalized.includes("fs.write")) return { action: "Write file", running: "Writing file", icon: "✎" };
-  if (normalized.includes("file.patch") || normalized.includes("fs.patch")) return { action: "Edit file", running: "Editing file", icon: "✎" };
-  if (normalized.includes("shell.exec")) return { action: "Run command", running: "Running command", icon: ">_" };
-  if (normalized.includes("git.diff")) return { action: "Review changes", running: "Reviewing changes", icon: "Δ" };
+  if (canonical.includes("file_search")) return { action: "Search files", running: "Searching files", icon: "⌕" };
+  if (canonical.includes("file_read")) return { action: "Read file", running: "Reading file", icon: "▣" };
+  if (canonical.includes("file_list")) return { action: "List files", running: "Listing files", icon: "☷" };
+  if (canonical.includes("file_write")) return { action: "Write file", running: "Writing file", icon: "✎" };
+  if (canonical.includes("file_patch")) return { action: "Edit file", running: "Editing file", icon: "✎" };
+  if (canonical.includes("shell_exec")) return { action: "Run command", running: "Running command", icon: ">_" };
+  if (canonical.includes("git_diff")) return { action: "Review changes", running: "Reviewing changes", icon: "Δ" };
   if (normalized.includes("api.request")) return { action: "Contact service", running: "Contacting service", icon: "↗" };
   if (normalized.includes("mcp.call")) return { action: "Use connected service", running: "Using connected service", icon: "◇" };
   return { action: "Run a step", running: "Running a step", icon: "·" };
@@ -2157,24 +2583,13 @@ async function invokeTauri(command, args) {
       return "";
     }
     if (command === "ensure_workspace") {
-      return args?.workspaceRoot ?? "";
+      return {
+        grant_id: args?.workspaceGrantId ?? "browser-preview-grant",
+        display_path: args?.displayPath ?? "Browser preview workspace"
+      };
     }
     throw error;
   }
-}
-
-function withTimeout(promise, timeoutMs, message) {
-  let timeoutId;
-  const timeout = new Promise((_, reject) => {
-    timeoutId = window.setTimeout(() => {
-      const error = new Error(message);
-      error.code = "local_tool_timeout";
-      reject(error);
-    }, timeoutMs);
-  });
-  return Promise.race([promise, timeout]).finally(() => {
-    window.clearTimeout(timeoutId);
-  });
 }
 
 createRoot(document.getElementById("root")).render(<App />);

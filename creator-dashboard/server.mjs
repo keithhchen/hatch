@@ -19,6 +19,9 @@ export async function createDashboardApp(options = {}) {
   const registryUrl = options.registryUrl
     ?? process.env.HATCH_REGISTRY_URL
     ?? "http://127.0.0.1:8100";
+  const commerceServiceToken = options.commerceServiceToken
+    ?? process.env.HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN
+    ?? "";
   const ledger = await CommerceLedger.open({ filePath: ledgerPath });
   const fetchImpl = options.fetchImpl ?? fetch;
 
@@ -42,6 +45,11 @@ export async function createDashboardApp(options = {}) {
         return send(response, 200, { token: auth.token, profile: publicProfile(auth.account) });
       }
       if (request.method === "POST" && url.pathname === "/v1/auth/logout") {
+        await registryRequest(registryUrl, "/v1/auth/logout", {
+          method: "POST",
+          fetchImpl,
+          headers: { authorization: `Bearer ${bearerToken(request)}` }
+        });
         return send(response, 204, undefined);
       }
       if (request.method === "GET" && url.pathname === "/v1/auth/me") {
@@ -78,6 +86,9 @@ export async function createDashboardApp(options = {}) {
       if (request.method === "POST" && url.pathname === "/v1/user/checkout") {
         const authentication = await authenticate(request, registryUrl, "user", fetchImpl);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
+        if (!commerceServiceToken.trim()) {
+          return send(response, 503, { error: { code: "commerce_unavailable", message: "Commerce entitlement service is not configured." } });
+        }
         const body = await readJson(request);
         const creatorId = String(body.creator_id ?? "").trim();
         const productId = String(body.product_id ?? "").trim();
@@ -100,8 +111,18 @@ export async function createDashboardApp(options = {}) {
         if (existing) {
           const grant = await registryRequest(
             registryUrl,
-            `/v1/user/agents/${encodeURIComponent(creatorId)}/${encodeURIComponent(agent.agent_id)}/access`,
-            { method: "POST", body: JSON.stringify({ order_id: existing.order_id }), fetchImpl, headers: { authorization: `Bearer ${bearerToken(request)}` } }
+            "/v1/commerce/agent-access",
+            {
+              method: "POST",
+              body: JSON.stringify({
+                order_id: existing.order_id,
+                user_id: authentication.profile.id,
+                creator_id: creatorId,
+                agent_id: agent.agent_id
+              }),
+              fetchImpl,
+              headers: { authorization: `Bearer ${commerceServiceToken}` }
+            }
           );
           await recordEntitlementGrant(ledger, existing, grant);
           return send(response, 200, { order: projectBuyerOrders(ledger.listEvents(), authentication.profile.id).find((order) => order.order_id === existing.order_id), payment: zeroPayment(existing.order_id, existing.currency), entitlement: grant });
@@ -124,8 +145,18 @@ export async function createDashboardApp(options = {}) {
         }, { idempotencyKey: orderKey });
         const grant = await registryRequest(
           registryUrl,
-          `/v1/user/agents/${encodeURIComponent(creatorId)}/${encodeURIComponent(agent.agent_id)}/access`,
-          { method: "POST", body: JSON.stringify({ order_id: order.order_id }), fetchImpl, headers: { authorization: `Bearer ${bearerToken(request)}` } }
+          "/v1/commerce/agent-access",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              order_id: order.order_id,
+              user_id: authentication.profile.id,
+              creator_id: creatorId,
+              agent_id: agent.agent_id
+            }),
+            fetchImpl,
+            headers: { authorization: `Bearer ${commerceServiceToken}` }
+          }
         );
         await recordEntitlementGrant(ledger, order, grant);
         return send(response, 201, {
@@ -133,17 +164,6 @@ export async function createDashboardApp(options = {}) {
           payment: zeroPayment(order.order_id, product.currency),
           entitlement: grant
         });
-      }
-
-      const accessMatch = url.pathname.match(/^\/v1\/user\/agents\/([^/]+)\/([^/]+)\/access$/);
-      if (request.method === "POST" && accessMatch) {
-        const authentication = await authenticate(request, registryUrl, "user", fetchImpl);
-        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
-        return send(response, 201, await registryRequest(
-          registryUrl,
-          `/v1/user/agents/${encodeURIComponent(accessMatch[1])}/${encodeURIComponent(accessMatch[2])}/access`,
-          { method: "POST", fetchImpl, headers: { authorization: `Bearer ${bearerToken(request)}` } }
-        ));
       }
 
       if (request.method === "GET" && url.pathname === "/v1/creator/agents") {
@@ -232,9 +252,9 @@ async function registryRequest(registryUrl, pathname, options = {}) {
     ...requestOptions,
     headers: { "content-type": "application/json", ...(options.headers ?? {}) }
   });
-  const payload = await response.json();
+  const payload = response.status === 204 ? undefined : await response.json();
   if (!response.ok) {
-    const error = new Error(payload.detail ?? "Registry rejected the Agent request.");
+    const error = new Error(payload?.detail ?? "Registry rejected the Agent request.");
     error.status = response.status;
     error.code = "registry_rejected_agent_request";
     throw error;

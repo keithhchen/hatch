@@ -54,8 +54,12 @@ export async function loadSavedAuthSession(storage) {
   try {
     const accessToken = await storage.readToken();
     return accessToken ? Object.freeze({ accessToken }) : null;
-  } catch {
-    return null;
+  } catch (error) {
+    throw clientError(
+      "Hatch couldn't read the saved session from macOS Keychain.",
+      "secure_session_read_failed",
+      error
+    );
   }
 }
 
@@ -71,16 +75,50 @@ export async function clearAuthSession(session, storage) {
   await storage.clearToken();
 }
 
-export async function revokeAuthSession(registryUrl, accessToken, fetchImpl = fetch) {
+export async function revokeAuthSession(
+  registryUrl,
+  accessToken,
+  fetchImpl = fetch,
+  { timeoutMs = 1_500 } = {}
+) {
   if (!accessToken) return;
+  const controller = new AbortController();
+  let timeoutId;
   try {
-    await fetchImpl(new URL("/v1/auth/logout", registryUrl).toString(), {
-      method: "POST",
-      headers: { authorization: `Bearer ${accessToken}`, accept: "application/json" }
-    });
+    const request = Promise.resolve().then(() => fetchImpl(
+      new URL("/v1/auth/logout", registryUrl).toString(),
+      {
+        method: "POST",
+        headers: { authorization: `Bearer ${accessToken}`, accept: "application/json" },
+        signal: controller.signal
+      }
+    )).catch(() => undefined);
+    await Promise.race([
+      request,
+      new Promise((resolve) => {
+        timeoutId = setTimeout(resolve, Math.max(1, timeoutMs));
+      })
+    ]);
   } catch {
     // Local sign-out still completes when the service is offline.
+  } finally {
+    clearTimeout(timeoutId);
+    controller.abort();
   }
+}
+
+export function startAuthSessionSignOut(
+  registryUrl,
+  session,
+  storage,
+  fetchImpl = fetch,
+  options = {}
+) {
+  // Start the bounded server revoke first, but never make local Keychain
+  // deletion wait for a slow or offline network.
+  const serverRevoke = revokeAuthSession(registryUrl, session?.accessToken, fetchImpl, options);
+  const localClear = clearAuthSession(session, storage);
+  return { serverRevoke, localClear };
 }
 
 export function createTauriAuthStorage(invokeImpl, { strict = false } = {}) {
@@ -89,7 +127,7 @@ export function createTauriAuthStorage(invokeImpl, { strict = false } = {}) {
     async readToken() {
       try {
         const token = await invokeImpl("read_auth_token");
-        if (typeof token === "string" && token.trim()) fallbackToken = token.trim();
+        fallbackToken = typeof token === "string" && token.trim() ? token.trim() : null;
       } catch (error) {
         // Web-only renderer tests and Vite preview have no native Keychain.
         if (strict) throw error;
@@ -97,20 +135,23 @@ export function createTauriAuthStorage(invokeImpl, { strict = false } = {}) {
       return fallbackToken;
     },
     async writeToken(token) {
-      fallbackToken = token;
       try {
         await invokeImpl("write_auth_token", { token });
+        fallbackToken = token;
       } catch (error) {
         // Keep the in-memory fallback for the current renderer lifetime.
         if (strict) throw error;
+        fallbackToken = token;
       }
     },
     async clearToken() {
-      fallbackToken = null;
       try {
         await invokeImpl("clear_auth_token");
-      } catch {
+        fallbackToken = null;
+      } catch (error) {
         // Clearing the in-memory value is sufficient when no native bridge exists.
+        if (strict) throw error;
+        fallbackToken = null;
       }
     }
   };
@@ -134,6 +175,10 @@ export function isNetworkError(error) {
 
 export function isAuthInvalidError(error) {
   return error?.code === "auth_invalid" || error?.status === 401;
+}
+
+export function isSecureSessionReadError(error) {
+  return error?.code === "secure_session_read_failed";
 }
 
 function makeSessionFromAccount(account, accessToken, expiresAt) {

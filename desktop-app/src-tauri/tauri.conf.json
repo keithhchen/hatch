@@ -29,6 +29,9 @@
       "icons/icon.ico"
     ],
     "category": "Productivity",
-    "shortDescription": "Creator agents that work with your files, with your permission."
+    "shortDescription": "Creator agents that work with your files, with your permission.",
+    "macOS": {
+      "infoPlist": "Info.plist"
+    }
   }
 }

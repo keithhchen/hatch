@@ -64,7 +64,7 @@ agent-corpus/
 
 ## 工具与认证
 
-`hatch.web_search` 与 `hatch.file_search` 是每个 Corpus 都必须声明的 Hatch built-in。后者由 Registry 为每个 `creator.id + agent_id` 提供隔离的 retrieval namespace，即使 `knowledge.documents` 为空也保持一致。`hatch.local.*` 只声明产品确实需要的 Desktop capability，Desktop 决定当前用户是否提供。
+`hatch.web_search` 与 `hatch.file_search` 是每个 Corpus 都必须声明的 Hatch built-in。后者由 Registry 为每个 `creator.id + agent_id` 提供隔离的 retrieval namespace，即使 `knowledge.documents` 为空也保持一致。`hatch.local.*` 只描述 Creator Agent 的产品依赖；它不裁剪 Desktop 在 `client.hello` 中固定声明的完整本地工具集，也不参与 Ask/Allow 决策。Native Workspace grant、Desktop change policy 与本机 runner 才是执行权限边界。
 
 Creator HTTP/MCP 工具分别使用 `kind: "http_function"` 或 `kind: "mcp_tool"`，只声明 `creator.*` 的 id、`connection_ref`、允许的 operation/tool name 和 input schema。没有 URL、API key、OAuth token 或 MCP bearer token。
 
@@ -76,4 +76,4 @@ Registry 在发布时只把 `knowledge.documents` 上传到该 `creator.id + age
 
 ## Runtime 的职责
 
-Runtime 只在验证通过的 Corpus 之上运行：始终加载 system、先给模型 Skill catalog、仅在执行某 Skill 时加载它的 `SKILL.md + references`、仅在需要证据时调用 `hatch.file_search`、合并 Hatch built-ins、Creator tools 和 Desktop local tools。Kimi 2.6、delta streaming、RAG provider、approval 与 trace 均在 Runtime，不反向污染 Corpus。
+Runtime 只在验证通过的 Corpus 之上运行：始终加载 system、先给模型 Skill catalog、仅在执行某 Skill 时加载它的 `SKILL.md + references`、仅在需要证据时调用 `hatch.file_search`，并把 Hatch built-ins、Creator tools 与 Desktop 已声明的完整 local tool set 合并；Corpus 不能减去 Desktop 工具。Kimi 2.6、delta streaming、RAG provider、approval 与 trace 均在 Runtime，不反向污染 Corpus。

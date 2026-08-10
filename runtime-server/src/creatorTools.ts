@@ -1,6 +1,7 @@
 import type { AgentCorpus, CreatorCorpusTool } from "./agentCorpus.js";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
+import { assertBoundedJsonValue, readBoundedResponseText } from "./boundedResponse.js";
 
 export type CreatorToolFunction = {
   name: string;
@@ -19,13 +20,14 @@ export type RuntimeCreatorTool = {
   kind: "http" | "mcp";
   connectionRef: string;
   function: CreatorToolFunction;
-  execute: (arguments_: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  execute: (arguments_: Record<string, unknown>, signal?: AbortSignal) => Promise<Record<string, unknown>>;
 };
 
 export type CreatorToolResolutionRequest = {
   tenantId: string;
   agentId: string;
   tool: CreatorCorpusTool;
+  signal?: AbortSignal;
 };
 
 /**
@@ -41,14 +43,22 @@ export async function resolveCreatorTools(
   controlPlane: CreatorToolControlPlane | undefined,
   tenantId: string,
   agentId: string,
-  corpus: AgentCorpus
+  corpus: AgentCorpus,
+  signal?: AbortSignal
 ): Promise<RuntimeCreatorTool[]> {
   const declared = corpus.tools.filter((tool): tool is CreatorToolResolutionRequest["tool"] => tool.kind === "http_function" || tool.kind === "mcp_tool");
   if (declared.length === 0) return [];
   if (!controlPlane) {
     throw new Error("Creator tool bindings are unavailable: configure the Hatch Control Plane before loading this Agent.");
   }
-  const resolved = (await Promise.all(declared.map((tool) => controlPlane.resolve({ tenantId, agentId, tool })))).flat();
+  // A Corpus can declare dozens of tools. Resolve them sequentially so one
+  // hello cannot fan out dozens of Control Plane/MCP requests at once; the
+  // Runtime hello admission gates bound concurrency across connections.
+  const resolved: RuntimeCreatorTool[] = [];
+  for (const tool of declared) {
+    signal?.throwIfAborted();
+    resolved.push(...await controlPlane.resolve({ tenantId, agentId, tool, signal }));
+  }
   const modelNames = new Set<string>();
   for (const tool of resolved) {
     if (!tool.id.startsWith("creator.")) throw new Error(`Control Plane returned an invalid Creator tool id: ${tool.id}`);
@@ -96,10 +106,12 @@ export interface SecretResolver {
 
 /** Production secret references are resolved by the Runtime host, never Registry. */
 export class EnvironmentSecretResolver implements SecretResolver {
+  constructor(private readonly environment: NodeJS.ProcessEnv = process.env) {}
+
   async resolve(secretRef: string): Promise<string | undefined> {
     const match = secretRef.match(/^env:([A-Za-z_][A-Za-z0-9_]*)$/);
     if (!match) throw new Error(`Unsupported Secret Manager reference: ${secretRef}`);
-    const value = process.env[match[1]!]?.trim();
+    const value = this.environment[match[1]!]?.trim();
     if (!value) throw new Error(`Runtime secret is unavailable: ${secretRef}`);
     return value;
   }
@@ -114,7 +126,11 @@ export function creatorToolControlPlaneFromEnvironment(
   if (!registryUrl || !serviceToken) {
     throw new Error("HATCH_REGISTRY_URL and HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN must be configured together for Creator tools");
   }
-  return new RegistryCreatorToolControlPlane({ registryUrl, serviceToken });
+  return new RegistryCreatorToolControlPlane({
+    registryUrl,
+    serviceToken,
+    secretResolver: new EnvironmentSecretResolver(environment)
+  });
 }
 
 /**
@@ -146,14 +162,21 @@ export class RegistryCreatorToolControlPlane implements CreatorToolControlPlane 
           description: declared.description ?? `Call ${declared.operation} through the Creator's configured HTTP connection.`,
           parameters: declared.input_schema ?? emptyObjectSchema()
         },
-        execute: async (arguments_) => httpJsonCall(connection.config.url, headers, arguments_, this.options.timeoutMs, connection.config.method)
+        execute: async (arguments_, signal) => httpJsonCall(
+          connection.config.url,
+          headers,
+          arguments_,
+          this.options.timeoutMs,
+          connection.config.method,
+          signal
+        )
       }];
     }
     // One initialized MCP session is shared by every allowed operation for this
     // Creator tool binding. The Corpus remains transport-agnostic: it only
     // declares the connection reference and the allowed operation names.
     const client = new StreamableHttpMcpClient(connection.config.url, headers, this.options.timeoutMs);
-    const remoteTools = await client.listTools();
+    const remoteTools = await client.listTools(request.signal);
     const remote = remoteTools.find((tool) => tool.name === declared.tool_name);
     if (!remote) {
       throw new Error(`MCP connection ${connection.id} does not expose declared Agent operation: ${declared.tool_name}`);
@@ -168,7 +191,7 @@ export class RegistryCreatorToolControlPlane implements CreatorToolControlPlane 
         description: declared.description ?? remote.description ?? `Call ${remote.name} through the Creator's configured MCP connection.`,
         parameters: declared.input_schema ?? mcpInputSchema(remote.inputSchema)
       },
-      execute: async (arguments_) => client.callTool(remote.name, arguments_)
+      execute: async (arguments_, signal) => client.callTool(remote.name, arguments_, signal)
     }];
   }
 
@@ -180,9 +203,9 @@ export class RegistryCreatorToolControlPlane implements CreatorToolControlPlane 
         "x-hatch-tenant-id": request.tenantId,
         accept: "application/json"
       },
-      signal: timeoutSignal(this.options.timeoutMs)
+      signal: timeoutSignal(this.options.timeoutMs, request.signal)
     });
-    const body = await response.text();
+    const body = await readBoundedResponseText(response);
     if (!response.ok) throw new Error(`Control Plane could not resolve ${request.tool.id}: HTTP ${response.status}`);
     const connection = ConnectionSchema.parse(JSON.parse(body));
     const expectedKind = request.tool.kind === "http_function" ? "http" : "mcp";
@@ -208,14 +231,15 @@ async function httpJsonCall(
   headers: Record<string, string>,
   payload: Record<string, unknown>,
   timeoutMs?: number,
-  method: "GET" | "POST" = "POST"
+  method: "GET" | "POST" = "POST",
+  signal?: AbortSignal
 ): Promise<Record<string, unknown>> {
   const requestUrl = new URL(url);
   const requestHeaders: Record<string, string> = { accept: "application/json", ...headers };
   const request: RequestInit = {
     method,
     headers: requestHeaders,
-    signal: timeoutSignal(timeoutMs)
+    signal: timeoutSignal(timeoutMs, signal)
   };
   if (method === "GET") {
     for (const [key, value] of Object.entries(payload)) {
@@ -228,9 +252,10 @@ async function httpJsonCall(
     request.body = JSON.stringify(payload);
   }
   const response = await fetch(requestUrl, request);
-  const body = await response.text();
+  const body = await readBoundedResponseText(response);
   if (!response.ok) throw new Error(`Creator HTTP tool failed with HTTP ${response.status}: ${body.slice(0, 500)}`);
   const value = parseObject(body, "Creator HTTP tool returned a non-object response");
+  assertBoundedJsonValue(value);
   return value;
 }
 
@@ -256,8 +281,8 @@ class StreamableHttpMcpClient {
     private readonly timeoutMs?: number,
   ) {}
 
-  async listTools(): Promise<McpRemoteTool[]> {
-    const response = await this.request("tools/list", {});
+  async listTools(signal?: AbortSignal): Promise<McpRemoteTool[]> {
+    const response = await this.request("tools/list", {}, signal);
     const tools = (response.result as Record<string, unknown> | undefined)?.tools;
     if (!Array.isArray(tools)) throw new Error("MCP tools/list returned no tools array");
     return tools.map((tool) => {
@@ -273,8 +298,12 @@ class StreamableHttpMcpClient {
     });
   }
 
-  async callTool(name: string, arguments_: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const response = await this.request("tools/call", { name, arguments: arguments_ });
+  async callTool(
+    name: string,
+    arguments_: Record<string, unknown>,
+    signal?: AbortSignal
+  ): Promise<Record<string, unknown>> {
+    const response = await this.request("tools/call", { name, arguments: arguments_ }, signal);
     const result = response.result;
     if (!result || typeof result !== "object" || Array.isArray(result)) {
       throw new Error("Creator MCP tools/call returned no result object");
@@ -284,24 +313,29 @@ class StreamableHttpMcpClient {
     return result as Record<string, unknown>;
   }
 
-  private async request(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
-    await this.initialize();
-    return this.post(method, params, true);
+  private async request(
+    method: string,
+    params: Record<string, unknown>,
+    signal?: AbortSignal
+  ): Promise<Record<string, unknown>> {
+    signal?.throwIfAborted();
+    await this.initialize(signal);
+    return this.post(method, params, true, false, signal);
   }
 
-  private async initialize(): Promise<void> {
+  private async initialize(signal?: AbortSignal): Promise<void> {
     if (!this.initialization) {
-      this.initialization = this.doInitialize();
+      this.initialization = this.doInitialize(signal);
     }
     return this.initialization;
   }
 
-  private async doInitialize(): Promise<void> {
+  private async doInitialize(signal?: AbortSignal): Promise<void> {
     const initialized = await this.post("initialize", {
       protocolVersion: this.protocolVersion,
       capabilities: {},
       clientInfo: { name: "hatch-runtime", version: "0.1.0" },
-    }, false);
+    }, false, false, signal);
     const result = initialized.result as Record<string, unknown> | undefined;
     const negotiated = typeof result?.protocolVersion === "string" ? result.protocolVersion : this.protocolVersion;
     if (negotiated !== this.protocolVersion) {
@@ -309,10 +343,16 @@ class StreamableHttpMcpClient {
     }
     // This notification is intentionally best-effort: a server may return 202
     // with an empty body for notifications, which is compliant Streamable HTTP.
-    await this.post("notifications/initialized", {}, true, true);
+    await this.post("notifications/initialized", {}, true, true, signal);
   }
 
-  private async post(method: string, params: Record<string, unknown>, initialized: boolean, notification = false): Promise<Record<string, unknown>> {
+  private async post(
+    method: string,
+    params: Record<string, unknown>,
+    initialized: boolean,
+    notification = false,
+    signal?: AbortSignal
+  ): Promise<Record<string, unknown>> {
     const requestHeaders: Record<string, string> = {
       "content-type": "application/json",
       accept: "application/json, text/event-stream",
@@ -327,15 +367,16 @@ class StreamableHttpMcpClient {
       method: "POST",
       headers: requestHeaders,
       body: JSON.stringify(body),
-      signal: timeoutSignal(this.timeoutMs),
+      signal: timeoutSignal(this.timeoutMs, signal),
     });
     const session = response.headers.get("MCP-Session-Id");
     if (session) this.sessionId = session;
-    const responseBody = await response.text();
+    const responseBody = await readBoundedResponseText(response);
     if (!response.ok) throw new Error(`Creator MCP tool failed with HTTP ${response.status}: ${responseBody.slice(0, 500)}`);
     if (notification && !responseBody.trim()) return {};
     const value = parseMcpResponse(responseBody);
     if (value.error) throw new Error(`Creator MCP tool returned an error: ${JSON.stringify(value.error).slice(0, 500)}`);
+    assertBoundedJsonValue(value);
     return value;
   }
 }
@@ -373,6 +414,7 @@ function parseObject(body: string, error: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function timeoutSignal(timeoutMs = 30_000): AbortSignal {
-  return AbortSignal.timeout(Math.max(1, timeoutMs));
+function timeoutSignal(timeoutMs = 30_000, signal?: AbortSignal): AbortSignal {
+  const timeout = AbortSignal.timeout(Math.max(1, timeoutMs));
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
