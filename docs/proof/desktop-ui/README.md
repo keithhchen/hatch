@@ -57,7 +57,7 @@ as a product fixture because the generated IDs are ephemeral.
 ## Automated evidence recorded with these captures
 
 - Renderer: 21 files / 84 tests
-- Rust Tauri library: 38 passed / 1 ignored (unlocked Keychain smoke)
+- Rust Tauri library: 39 passed / 1 ignored (unlocked Keychain smoke)
 - Runtime: 226 Node subtests passed with an isolated `HATCH_RUNTIME_DATA_DIR`
 - LocalRunner: 43 tests passed (filesystem, shell and macOS Seatbelt suites)
 - `npm run build:web`
