@@ -6,6 +6,12 @@ import { RuntimeOptions } from "@alicloud/tea-util";
 
 export type OutputGuardVerdict = "pass" | "block";
 
+export const DEFAULT_OUTPUT_GUARD_FIRST_SEGMENT_CHARS = 100;
+export const DEFAULT_OUTPUT_GUARD_LATER_SEGMENT_CHARS = 250;
+
+export const OUTPUT_GUARD_BLOCKED_MODEL_MESSAGE =
+  "My previous response was blocked before delivery and was not shown to the user. I must not reproduce or continue the blocked content.";
+
 export type OutputGuardInput = {
   content: string;
   chatId: string;
@@ -33,14 +39,16 @@ export type GuardedOutputResult = {
  */
 export class GuardedAssistantOutput {
   private pending = "";
+  private detectionOverlap = "";
   private first = true;
   private terminal = false;
 
   constructor(
     private readonly guard: OutputGuard,
     private readonly runId: string,
-    private readonly firstSegmentChars = 100,
-    private readonly laterSegmentChars = 250
+    private readonly firstSegmentChars = DEFAULT_OUTPUT_GUARD_FIRST_SEGMENT_CHARS,
+    private readonly laterSegmentChars = DEFAULT_OUTPUT_GUARD_LATER_SEGMENT_CHARS,
+    private readonly detectionOverlapChars = firstSegmentChars
   ) {}
 
   async push(content: string): Promise<GuardedOutputResult> {
@@ -81,21 +89,28 @@ export class GuardedAssistantOutput {
   }
 
   private async check(content: string, done: boolean): Promise<OutputGuardVerdict> {
+    const detectionContent = this.detectionOverlap + content;
     try {
       const verdict = await this.guard.check({
-        content,
+        content: detectionContent,
         chatId: this.runId,
         sessionId: this.runId,
         done
       });
-      if (verdict === "pass") return verdict;
+      if (verdict === "block") {
+        this.terminal = true;
+        this.pending = "";
+        this.detectionOverlap = "";
+        return "block";
+      }
     } catch {
-      // Output moderation is fail-closed. Provider details belong in metrics,
-      // never in conversation history or user-visible errors.
+      // Guard availability must not turn a provider outage into a failed user
+      // turn. Only an explicit provider block withholds generated text.
     }
-    this.terminal = true;
-    this.pending = "";
-    return "block";
+    this.detectionOverlap = this.detectionOverlapChars > 0
+      ? detectionContent.slice(-this.detectionOverlapChars)
+      : "";
+    return "pass";
   }
 }
 
@@ -188,7 +203,9 @@ export class AliyunOutputGuard implements OutputGuard {
  * The service can run several independent protection dimensions. Hatch uses
  * this adapter only for output disclosure, so input-oriented prompt-attack or
  * general content-moderation verdicts must not widen the product policy.
- * Missing or malformed custom-label results fail closed.
+ * Missing or malformed custom-label results throw here and are degraded to
+ * pass by GuardedAssistantOutput. Only an explicit custom-label block is a
+ * content-filter outcome.
  */
 export function outputLeakVerdict(
   detail: Array<{ type?: string; suggestion?: string }> | undefined

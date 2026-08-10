@@ -1,5 +1,8 @@
 import { readFile } from "node:fs/promises";
-import { AliyunOutputGuard } from "../dist/outputGuard.js";
+import {
+  AliyunOutputGuard,
+  DEFAULT_OUTPUT_GUARD_FIRST_SEGMENT_CHARS
+} from "../dist/outputGuard.js";
 
 const fixtureUrl = new URL("../evals/output-disclosure.json", import.meta.url);
 const cases = JSON.parse(await readFile(fixtureUrl, "utf8"));
@@ -17,17 +20,20 @@ for (const testCase of cases) {
   const runId = `output-guard-eval-${testCase.id}-${Date.now()}`;
   let actual = "pass";
   let elapsedMs = 0;
+  let detectionOverlap = "";
 
   for (const [index, content] of testCase.segments.entries()) {
     const startedAt = performance.now();
     actual = await guard.check({
-      content,
+      content: detectionOverlap + content,
       chatId: runId,
       sessionId: runId,
       done: index === testCase.segments.length - 1
     });
     elapsedMs += performance.now() - startedAt;
     if (actual === "block") break;
+    detectionOverlap = (detectionOverlap + content)
+      .slice(-DEFAULT_OUTPUT_GUARD_FIRST_SEGMENT_CHARS);
   }
 
   const matched = actual === testCase.expected;

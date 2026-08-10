@@ -35,6 +35,7 @@ import { verifyHatchAuthToken } from "./authToken.js";
 import {
   createOutputGuardFromEnvironment,
   GuardedAssistantOutput,
+  OUTPUT_GUARD_BLOCKED_MODEL_MESSAGE,
   PassThroughOutputGuard,
   type GuardedOutputResult,
   type OutputGuard
@@ -624,7 +625,7 @@ async function runOneTurn(
       recordDelivery = true
     ): Promise<void> => {
       const content = finishReason === "content_filter"
-        ? '<runtime_status output_guard="blocked" />'
+        ? OUTPUT_GUARD_BLOCKED_MODEL_MESSAGE
         : approvedAssistantText;
       await store.append({
         type: "conversation.model_message",

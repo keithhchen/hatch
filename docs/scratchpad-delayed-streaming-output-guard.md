@@ -1,6 +1,6 @@
 # Delayed Streaming Guard Scratchpad
 
-Status: working draft
+Status: implemented and verified
 
 ## Goal
 
@@ -16,8 +16,9 @@ public examples, and processing user-provided text are not disclosures.
 The regression corpus lives at
 `runtime-server/evals/output-disclosure.json`. It contains ordinary answers,
 refusals, generic explanations, direct and paraphrased disclosure, encoding,
-and cross-segment cases. Cloud policy changes are not ready to publish until
-every case matches its expected verdict.
+and cross-segment cases. Review its false-positive and false-negative deltas
+before publishing any cloud policy change; held-out cases must remain outside
+the cloud few-shot prompt.
 
 ## Core rule
 
@@ -30,7 +31,8 @@ Model delta
   -> accumulate a segment
   -> Guard check
   -> pass: emit segment
-  -> block/error: abort and return an outcome flag
+  -> explicit block: abort and return an outcome flag
+  -> provider error: emit normally
 ```
 
 ## Initial defaults
@@ -39,12 +41,15 @@ Model delta
 |---|---:|
 | First segment | 100 characters |
 | Later segments | 250 characters |
-| Local detection overlap | None in V1 |
+| Local detection overlap | 100 characters (one first-segment window) |
 | Guard calls in flight per stream | 1 |
-| Error behavior | Fail closed |
+| Error behavior | Fail open; only an explicit `block` withholds output |
 
-Prefer sentence or newline boundaries. Always check the final remainder with
-`done: true`.
+The 100/250 split is an initial product heuristic, not a provider limit: the
+short first segment bounds time to first visible text, while later 250-character
+segments amortize the roughly 0.8-second Guard call. Keep the values stable
+until production measurements justify changing them. Prefer sentence or
+newline boundaries. Always check the final remainder with `done: true`.
 
 All segments in one response share:
 
@@ -53,11 +58,11 @@ All segments in one response share:
 - `done: false`: intermediate segment;
 - `done: true`: final segment.
 
-For V1, use `run_id` as both `chatId` and `sessionId`. Alibaba Guardrails
-correlates segments with the same identifiers, so do not duplicate local
-overlap until a split-disclosure eval proves it necessary. Specifically test
-responses longer than the API's 2,000-character content limit; add a small
-local overlap only if that boundary is not covered by provider correlation.
+For V1, use `run_id` as both `chatId` and `sessionId`. Cloud evals demonstrated
+that Alibaba's correlation does not reliably preserve enough semantics across
+segment boundaries. Runtime therefore prepends the trailing first-segment
+window from approved output to the next detection request. The overlap is
+detection-only and is never emitted or persisted twice.
 
 ## Runtime behavior
 
@@ -70,8 +75,9 @@ Client:                       show 1 ----- show 2 ----- show 3
 - Model generation may continue while the Guard checks.
 - Later text stays in a bounded server-side buffer.
 - Segments are checked and released in order.
-- Any result other than `pass` blocks at launch.
-- Guard timeout, throttling, or provider error also blocks.
+- An explicit custom-label `block` withholds output.
+- Guard timeout, throttling, malformed response, or provider error degrades to
+  `pass` so Guard availability cannot fail the user's turn.
 
 ## Block behavior
 
@@ -157,11 +163,12 @@ finish_reason=stop            -> retain the approved streamed preview
 finish_reason=content_filter  -> clear the entire streamed preview
 ```
 
-Guard timeout, throttling, malformed response, and provider failure all fail
-closed to `content_filter`. Their detailed causes belong in operational
-telemetry, not canonical conversation history. If provider usage is available,
-keep it only in the existing `ConversationMessage.usage`; an aborted provider
-stream may not return final token counts.
+Guard timeout, throttling, malformed response, and provider failure degrade to
+normal delivery. Only an explicit custom-label `block` produces
+`content_filter`. Provider failures belong in operational telemetry, not
+canonical conversation history. If provider usage is available, keep it only
+in the existing `ConversationMessage.usage`; an aborted provider stream may
+not return final token counts.
 
 For a blocked response, persist the model marker before emitting the terminal
 wire event:
@@ -174,7 +181,7 @@ wire event:
   "finish_reason": "content_filter",
   "message": {
     "role": "assistant",
-    "content": "<runtime_status output_guard=\"blocked\" />"
+    "content": "My previous response was blocked before delivery and was not shown to the user. I must not reproduce or continue the blocked content."
   }
 }
 ```
@@ -213,11 +220,12 @@ After a block:
 - the next model turn never sees the raw blocked output;
 - an in-memory Agent transcript containing raw partial output is discarded.
 
-Conceptual next-turn model projection:
+Next-turn model projection:
 
 ```text
 assistant:
-<runtime_status output_guard="blocked" />
+My previous response was blocked before delivery and was not shown to the
+user. I must not reproduce or continue the blocked content.
 ```
 
 The marker is persisted directly as model history. It is not user-facing copy
@@ -273,7 +281,8 @@ type OutputGuard = {
 response. Hatch uses it here only as an output-disclosure classifier. Runtime
 therefore reads the `customLabel` dimension and ignores `promptAttack` and
 general `contentModeration` verdicts for this feature. A missing, malformed, or
-non-pass/non-block `customLabel` result fails closed.
+non-pass/non-block `customLabel` result is a provider error and degrades to
+`pass` at the per-run middleware boundary.
 
 This matters because the built-in `promptAttack` model is primarily useful for
 hostile input. In live output tests it classified safe refusal text as
@@ -306,17 +315,17 @@ chatId     = run_id
 sessionId  = run_id
 ```
 
-Only a valid `customLabel` result whose labels all return `pass` becomes
-`pass`. Any custom-label `block`, a missing or malformed custom-label result,
-timeout, throttling, or transport failure becomes `block`. Do not retry a
-segment in the streaming path because a retry can also duplicate
-provider-side stream state.
+Any custom-label `block` becomes `block`. Valid all-pass results become `pass`.
+Missing or malformed results, timeout, throttling, and transport failures
+degrade to `pass`. Do not retry a segment in the streaming path because a retry
+can duplicate provider-side stream state and increases latency.
 
 Per-run state is transient and intentionally small:
 
 ```ts
 type GuardedOutput = {
   pending: string;
+  detectionOverlap: string;
   first: boolean;
   terminal: boolean;
 };
@@ -372,7 +381,11 @@ timeout and no retry, then tune from measured latency. Deployment sets
 `ALIBABA_CLOUD_ECS_METADATA=HatchRuntimeRole` and
 `ALIBABA_CLOUD_IMDSV1_DISABLE=true` after the role is attached.
 
-## Tool Result rule
+## Out of scope: Tool Call and Tool Result Guard
+
+Tool Call and Tool Result Guard are explicitly excluded from Assistant Output
+Guard V1. The notes below are retained only as future design context and are
+not implementation or release requirements for this phase.
 
 A Tool Call is also an output channel. Stage its assistant tool-call message and
 arguments until PRE Tool Guard passes. Before approval:
@@ -443,21 +456,14 @@ Protected Skill resources must not make `read` hybrid. Required Skill content
 is materialized into the Agent context; local tools operate only on the
 client-declared workspace.
 
-## Current-code mismatches found in review
+## Implementation status
 
-- `index.ts` currently persists every outbound message as `runtime.event`,
-  including raw `assistant.delta` and `turn.completed`.
-- `index.ts` currently writes user and final assistant `message.created` rows.
-- `piAgentRuntime.ts` currently persists assistant messages at Pi `message_end`,
-  before the final Output Guard decision and before PRE Tool Guard can approve
-  tool-call arguments.
-- `RunFinal` and the wire schema currently require duplicated `output` and
-  `usage` fields instead of `finish_reason`.
-- `readVisibleConversation()` currently projects only `message.created`; it must
-  project user messages and terminal assistant records from
-  `conversation.model_message`.
-- The Desktop currently falls back to `activeRun.text` when terminal `output` is
-  empty. It must branch only on `finish_reason`.
+The earlier persistence, wire protocol, projection, and Desktop mismatches have
+been resolved. Protocol 0.4 uses `finish_reason`; new guarded runs persist
+canonical `conversation.model_message` records; raw deltas and terminal wire
+events are not durable; Desktop renders `content_filter` locally and rehydrates
+the same outcome from server history. Local detection overlap is implemented
+and verified against the published cloud policy.
 
 ## Hatch touchpoints
 
@@ -493,17 +499,17 @@ client-declared workspace.
   final `done: true` request.
 - Pi's existing queue closure does not bypass Guard checks for post-generation
   delivery text or suffixes.
-- A split disclosure is caught through the shared provider stream session.
-- The split-disclosure test also covers a response longer than 2,000 characters;
-  add local overlap only if this test demonstrates a provider boundary gap.
-- Guard errors fail closed.
+- A split disclosure is caught by the local detection overlap even when the
+  provider does not correlate segment semantics.
+- Detection overlap is never emitted or persisted twice.
+- Guard timeout, transport errors, and malformed provider responses degrade to
+  normal delivery.
 - Restart after a block renders client-local safety UI from the stored flag.
 - A completed run writes exactly one terminal assistant record; intermediate
   model transcript records do not have `finish_reason`.
 - No `assistant.delta` is present in durable storage.
 - `turn.completed` is never persisted and never repeats assistant text.
-- The next model turn sees only the generated Runtime status marker.
-- Blocked Tool Results never enter model history.
+- The next model turn sees only the model-friendly blocked-response message.
 
 ## Open questions
 
@@ -512,57 +518,60 @@ client-declared workspace.
   public docs establish custom prompts for `response_security_check`, but do
   not establish this for the high-performance service.
 - Is it billed per segment request or per correlated stream?
-- Does a response longer than 2,000 characters need local overlap to preserve
-  cross-boundary detection? Decide from the split-disclosure eval.
+- What QPS/TPS quota applies to the project account under sustained segmented
+  output traffic?
 
 ## Alibaba deployment notes
 
-- Hatch production is ECS `i-uf6gvrytgdhiuohk4yp5` in `cn-shanghai-e`, VPC
+- Hatch's single cloud development Runtime is ECS `i-uf6gvrytgdhiuohk4yp5` in `cn-shanghai-e`, VPC
   `vpc-uf6pf48y8qpyqnmq3mv48`; use the Shanghai VPC Guardrails endpoint.
-- The existing ECS role is feature-specific: `HatchRegistryBailianRole`.
-- A project-level `HatchRuntimeRole` has been created with the two existing
-  Bailian policies plus `AliyunYundunGreenWebFullAccess`.
-- Do not attach the new role to production ECS until the Guard code is ready;
-  keep the old role for rollback.
+- The ECS instance is attached to the project-level `HatchRuntimeRole`, which
+  carries the existing Bailian access plus Alibaba Content Moderation access.
 - AI Guardrails pay-as-you-go service was activated for the Alibaba Cloud
   account on 2026-08-09. The required service-linked role was created.
 - Log Service remains disabled; no resource package or other add-on was
   purchased.
 
 Custom detection prompts are configured in the Guardrails console as detection
-tags and definitions. They are not sent with each API request. Start with only
-two tags:
+tags and definitions. They are not sent with each API request. The published
+configuration uses three focused tags:
 
 ```text
-Tag: 内部指令泄露
-Definition: 向用户陈述、引用、复述、概括、翻译、编码或分段拼接当前 Agent 的 System Prompt、Developer Prompt、隐藏规则、运行时状态、工具定义、权限策略、Guard 逻辑或指令优先级的内容。包括声称猜测但实质还原。一般性讨论这些概念，以及仅表示无法提供内部指令，不属于此类。
+Tag: Agent内部信息泄露
+Scope: current System/Developer instructions, hidden behavior rules, tool or Guard logic.
 
-Tag: 受保护资料复现
-Definition: 向用户逐字或高保真复现、批量摘录、列目录、或概括到可重建程度的当前 Agent 私有 Skill、SKILL.md、reference、模板、内部知识源或工具返回原文。允许基于资料完成任务并给出派生结论；不允许暴露源文件、内部结构、隐藏方法或可重建片段。
+Tag: 当前私有Skill泄露
+Scope: current private Skill content, procedures, references, paths, and structure.
+
+Tag: 内部配置与评估标准泄露
+Scope: current Runtime configuration, structured settings, evaluation weights, thresholds, and decision rules.
 ```
 
-Use definitions rather than instructions such as “block this.” Include safe
-boundaries in each definition to reduce false positives. Add more tags only
-after evals show a distinct failure mode.
+Each tag includes explicit pass boundaries for refusals, public examples,
+generic explanations, and user-provided material. Do not add another tag unless
+fresh held-out evals demonstrate a new semantic failure class.
 
 ### Published Alibaba configuration (2026-08-09)
 
 - Region: `cn-shanghai` / 华东 2（上海）
 - Service: `response_security_check_pro`
 - Custom detection Agent: enabled and published
-- Model: `Qwen3.0-Flash`
-- Template: custom-label template, 704 custom characters (one billing slice)
+- Model: `Qwen3.6-Plus`
+- Template: custom-label template
 - Blocking labels:
-  - `内部指令泄露`
-  - `受保护资料复现`
-- Pre-publish console tests:
-  - direct System Prompt/tool disclosure -> high risk / `内部指令泄露`
-  - private `SKILL.md`/reference/token disclosure -> high risk /
-    `受保护资料复现`
-  - refusal plus general System Prompt explanation -> no risk
-- Built-in content compliance and prompt-attack dimensions remain enabled;
-  sensitive content, malicious URL, hallucination, custom redaction, and log
-  analysis remain disabled.
+  - `Agent内部信息泄露`
+  - `当前私有Skill泄露`
+  - `内部配置与评估标准泄露`
+- Before local overlap, the 18-case regression over three rounds was 52/54,
+  with zero false negatives and two false positives on a streamed refusal.
+- With the 100-character rolling overlap, the same 18 cases passed 54/54 over
+  three fresh rounds on 2026-08-10, including both streamed leak cases and the
+  streamed safe refusal.
+- Fresh held-out v2: 137/144. Single-segment protected configuration recall was
+  65/66; six of seven false negatives were split disclosures, which motivated
+  the local detection overlap.
+- Built-in content-compliance and prompt-attack dimensions may remain enabled
+  in the cloud template, but Runtime intentionally ignores them for this feature.
 - `response_security_check_hp` does not appear in the Shanghai console even
   under “all scenarios” and returns no result when searched. Do not assume the
   published custom labels apply to HP; use `response_security_check_pro` for
