@@ -9,6 +9,7 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   AssistantRuntimeProvider,
   ComposerPrimitive,
+  MessagePartPrimitive,
   MessagePrimitive,
   ThreadPrimitive,
   useExternalStoreRuntime,
@@ -79,11 +80,26 @@ import {
   localToolTransportDeadlineMs,
   statusAfterLocalToolStop
 } from "./local-tool-lifecycle.js";
+import {
+  SKILL_ACTIVITY_PART,
+  SKILL_RUN_ACTIVITY_PART,
+  TURN_ACTIVITY_PART,
+  activityGroupPath,
+  activitySummary,
+  appendTimelineText,
+  historyTimelineEntries,
+  prependTurnActivity,
+  reconcileTimelineText,
+  toolActionLabel,
+  toolDisplay,
+  toolResultSummary,
+  toolState,
+  toolTarget,
+  upsertTimelinePart
+} from "./activity-ui.js";
 
 const PROTOCOL_VERSION = "0.6";
 const OUTPUT_FILTERED_COPY = "This response was blocked by the output safety check.";
-const SKILL_ACTIVITY_PART = "hatch.skill_activity";
-const SKILL_RUN_ACTIVITY_PART = "hatch.skill_run_activity";
 const DEFAULT_RUNTIME_URL = import.meta.env.VITE_HATCH_RUNTIME_URL || "wss://hatch.tokenquadrant.cn/v1/runtime";
 const DEFAULT_AUTH_URL = import.meta.env.VITE_HATCH_AUTH_URL || "https://hatch.tokenquadrant.cn";
 const BROWSE_CATALOG_URL = import.meta.env.VITE_HATCH_CATALOG_URL || "https://hatch.tokenquadrant.cn/agents";
@@ -1299,16 +1315,9 @@ function App() {
   function appendAssistantText(id, delta) {
     setMessages((current) => current.map((message) => {
       if (message.id !== id) return message;
-      const parts = assistantParts(message);
-      const textIndex = parts.findLastIndex((part) => part.type === "text");
-      if (textIndex >= 0) {
-        parts[textIndex] = { ...parts[textIndex], text: `${parts[textIndex].text}${delta}` };
-      } else {
-        parts.push({ type: "text", text: delta });
-      }
       return {
         ...message,
-        content: parts,
+        content: appendTimelineText(assistantParts(message), delta),
         status: { type: "running" }
       };
     }));
@@ -1333,10 +1342,7 @@ function App() {
       if (message.id !== id) return message;
       const parts = statusValue === "content_filter"
         ? []
-        : assistantParts(message).filter((part) => part.type !== "text");
-      if (text) {
-        parts.push({ type: "text", text });
-      }
+        : reconcileTimelineText(assistantParts(message), text);
       const custom = {
         ...(message.metadata?.custom ?? {}),
         status: statusValue,
@@ -1366,18 +1372,13 @@ function App() {
       ));
       const existing = existingIndex >= 0 ? parts[existingIndex] : undefined;
       const nextPart = toolPartFromEvent(event, existing);
-      const withoutExisting = parts.filter((part) => !(
-        part.type === "tool-call" && part.toolCallId === event.tool_call_id
-      ));
-      const firstTextIndex = withoutExisting.findIndex((part) => part.type === "text");
-      if (firstTextIndex >= 0) {
-        withoutExisting.splice(firstTextIndex, 0, nextPart);
-      } else {
-        withoutExisting.push(nextPart);
-      }
       return {
         ...message,
-        content: withoutExisting,
+        content: upsertTimelinePart(
+          parts,
+          nextPart,
+          (part) => part.type === "tool-call" && part.toolCallId === event.tool_call_id
+        ),
         status: event.status === "failed"
           ? { type: "running" }
           : message.status ?? { type: "running" },
@@ -1402,16 +1403,9 @@ function App() {
     updateAssistantMessage(activeRun.assistantId, (message) => {
       const parts = assistantParts(message);
       const nextPart = skillActivityPartFromEvent(event);
-      const withoutExisting = parts.filter((part) => !isSameSkillActivityPart(part, nextPart));
-      const firstTextIndex = withoutExisting.findIndex((part) => part.type === "text");
-      if (firstTextIndex >= 0) {
-        withoutExisting.splice(firstTextIndex, 0, nextPart);
-      } else {
-        withoutExisting.push(nextPart);
-      }
       return {
         ...message,
-        content: withoutExisting,
+        content: upsertTimelinePart(parts, nextPart, (part) => isSameSkillActivityPart(part, nextPart)),
         status: message.status ?? { type: "running" },
         metadata: {
           ...(message.metadata ?? {}),
@@ -1434,16 +1428,9 @@ function App() {
     updateAssistantMessage(activeRun.assistantId, (message) => {
       const parts = assistantParts(message);
       const nextPart = skillRunActivityPartFromEvent(event);
-      const withoutExisting = parts.filter((part) => !isSameSkillRunActivityPart(part, nextPart));
-      const firstTextIndex = withoutExisting.findIndex((part) => part.type === "text");
-      if (firstTextIndex >= 0) {
-        withoutExisting.splice(firstTextIndex, 0, nextPart);
-      } else {
-        withoutExisting.push(nextPart);
-      }
       return {
         ...message,
-        content: withoutExisting,
+        content: upsertTimelinePart(parts, nextPart, (part) => isSameSkillRunActivityPart(part, nextPart)),
         status: message.status ?? { type: "running" },
         metadata: {
           ...(message.metadata ?? {}),
@@ -1700,17 +1687,17 @@ function historyMessageToThreadMessage(message, index) {
     return makeUserMessage(id, message.content ?? "", createdAt);
   }
   const filtered = message.finish_reason === "content_filter";
-  const activityParts = filtered ? [] : historyActivityParts(message);
   const text = filtered ? OUTPUT_FILTERED_COPY : message.content ?? "";
+  const content = filtered
+    ? [{ type: "text", text }]
+    : historyOrderedParts(message);
+  const activityParts = content.filter(isActivityPart);
   const lastTool = [...activityParts].reverse().find((part) => part.type === "tool-call");
   const lastSkill = [...activityParts].reverse().find(isSkillActivityPart);
   return makeAssistantMessage(id, text, {
     status: filtered ? "content_filter" : "completed",
     createdAt,
-    content: [
-      ...activityParts,
-      ...(text ? [{ type: "text", text }] : [])
-    ],
+    content,
     custom: {
       runId: message.run_id,
       hydrated: true,
@@ -1737,42 +1724,22 @@ function historyMessageToThreadMessage(message, index) {
   });
 }
 
+function historyOrderedParts(message) {
+  const timeline = historyTimelineEntries(message);
+  if (!timeline) {
+    return message.content ? [{ type: "text", text: message.content }] : [];
+  }
+  return timeline.map((entry) => {
+    if (entry.type === "tool_call") return historyToolCallToPart(entry.value);
+    if (entry.type === "skill_run") return skillRunActivityPartFromEvent(entry.value);
+    if (entry.type === "skill_event") return skillActivityPartFromEvent(entry.value);
+    return entry;
+  });
+}
+
 function messageCreatedAt(timestamp) {
   const parsed = Date.parse(timestamp ?? "");
   return Number.isFinite(parsed) ? parsed : Date.now();
-}
-
-function historyActivityParts(message) {
-  const timeline = [
-    ...(Array.isArray(message.skill_events)
-      ? message.skill_events.map((event) => ({
-          type: "skill",
-          timestamp: event.timestamp ?? message.timestamp,
-          event
-        }))
-      : []),
-    ...(Array.isArray(message.skill_runs)
-      ? message.skill_runs.map((event) => ({
-          type: "skill-run",
-          timestamp: event.timestamp ?? message.timestamp,
-          event
-        }))
-      : []),
-    ...(Array.isArray(message.tool_calls)
-      ? message.tool_calls.map((event) => ({
-          type: "tool",
-          timestamp: event.first_timestamp ?? event.timestamp ?? message.timestamp,
-          event
-        }))
-      : [])
-  ];
-  return timeline
-    .sort((left, right) => String(left.timestamp ?? "").localeCompare(String(right.timestamp ?? "")))
-    .map((entry) => entry.type === "skill"
-      ? skillActivityPartFromEvent(entry.event)
-      : entry.type === "skill-run"
-        ? skillRunActivityPartFromEvent(entry.event)
-        : historyToolCallToPart(entry.event));
 }
 
 function makeUserMessage(id, text, createdAt = Date.now()) {
@@ -1790,10 +1757,11 @@ function makeUserMessage(id, text, createdAt = Date.now()) {
 }
 
 function makeAssistantMessage(id, text, options = {}) {
+  const content = options.content ?? (text ? [{ type: "text", text }] : []);
   return {
     id,
     role: "assistant",
-    content: options.content ?? (text ? [{ type: "text", text }] : []),
+    content: prependTurnActivity(content, options.custom?.runId),
     createdAt: new Date(options.createdAt ?? Date.now()),
     status: options.status === "failed"
       ? { type: "incomplete", reason: "error", error: { message: text } }
@@ -1812,7 +1780,7 @@ function makeAssistantPlaceholder(id, runId, startedAt) {
   return {
     id,
     role: "assistant",
-    content: [],
+    content: prependTurnActivity([], runId),
     createdAt: new Date(startedAt),
     status: { type: "running" },
     metadata: {
@@ -2188,40 +2156,59 @@ function SignInScreen({ onSignIn, status, error }) {
 
 function HatchMessage() {
   const role = useMessage((message) => message.role);
-  const status = useMessage((message) => message.status);
-  const streaming = role === "assistant" && status?.type === "running";
+  if (role !== "assistant") {
+    return (
+      <MessagePrimitive.Root className={`chat-message ${role}`}>
+        <div className={`message-surface ${role}`}>
+          <MessagePrimitive.Parts components={{ Text: PlainText }} />
+        </div>
+      </MessagePrimitive.Root>
+    );
+  }
   return (
     <MessagePrimitive.Root className={`chat-message ${role}`}>
-      {role === "assistant" ? <AssistantRunHeader /> : null}
-      <div className={`message-surface ${role}${streaming ? " streaming" : ""}`}>
-        <MessagePrimitive.Parts
-          unstable_showEmptyOnNonTextEnd={false}
-          components={{
-            Text: role === "assistant" ? MarkdownText : PlainText,
-            Empty: AssistantEmptyText,
-            data: {
-              by_name: {
-                [SKILL_ACTIVITY_PART]: SkillActivityPart,
-                [SKILL_RUN_ACTIVITY_PART]: SkillRunActivityPart
-              }
-            },
-            tools: {
-              Fallback: HatchToolCall
-            },
-            ToolGroup: ToolGroup
-          }}
-        />
-      </div>
+      <MessagePrimitive.GroupedParts groupBy={activityGroupPath} indicator="never">
+        {renderAssistantTimelinePart}
+      </MessagePrimitive.GroupedParts>
+      <AssistantTurnTiming />
     </MessagePrimitive.Root>
   );
 }
 
-function AssistantRunHeader() {
+function renderAssistantTimelinePart({ part, children }) {
+  switch (part.type) {
+    case "group-activity":
+      return <AssistantActivityBlock indices={part.indices}>{children}</AssistantActivityBlock>;
+    case "group-tools":
+      return <TimelineToolGroup indices={part.indices}>{children}</TimelineToolGroup>;
+    case "text":
+      return <AssistantMarkdownPart />;
+    case "image":
+      return <MessagePartPrimitive.Image />;
+    case "tool-call":
+      return part.toolUI ?? <HatchToolCall {...part} />;
+    case "data":
+      if (part.name === TURN_ACTIVITY_PART) return null;
+      if (part.name === SKILL_ACTIVITY_PART) return <SkillActivityPart data={part.data} />;
+      if (part.name === SKILL_RUN_ACTIVITY_PART) return <SkillRunActivityPart data={part.data} />;
+      return part.dataRendererUI ?? null;
+    default:
+      return null;
+  }
+}
+
+function AssistantActivityBlock({ indices, children }) {
+  const approvals = useContext(ApprovalContext);
   const custom = useMessage((message) => message.metadata?.custom ?? {});
   const status = useMessage((message) => message.status);
   const parts = useMessage((message) => message.content ?? []);
+  const groupParts = indices.map((index) => parts[index]).filter(Boolean);
+  const isTurnActivity = groupParts.some(isTurnActivityPart);
+  const visibleActivityParts = groupParts.filter(isActivityPart);
   const [now, setNow] = useState(Date.now());
   const isRunning = status?.type === "running";
+  const [open, setOpen] = useState(isRunning && visibleActivityParts.length > 0);
+  const hadVisibleActivity = useRef(visibleActivityParts.length > 0);
 
   useEffect(() => {
     if (!isRunning) return undefined;
@@ -2229,46 +2216,131 @@ function AssistantRunHeader() {
     return () => window.clearInterval(timer);
   }, [isRunning]);
 
-  if (!custom.runId) return null;
+  useEffect(() => {
+    if (hadVisibleActivity.current || visibleActivityParts.length === 0) return;
+    hadVisibleActivity.current = true;
+    if (isRunning) setOpen(true);
+  }, [isRunning, visibleActivityParts.length]);
 
-  const startedAt = Number(custom.startedAt ?? Date.now());
+  if (!isTurnActivity) return children;
+
+  const startedAt = Number(custom.startedAt);
   const completedAt = Number(custom.completedAt ?? now);
-  const elapsed = formatDuration(Math.max(0, completedAt - startedAt));
-  const toolParts = Array.isArray(parts) ? parts.filter((part) => part.type === "tool-call") : [];
-  const activeTool = [...toolParts].reverse().find((part) => !part.result && !part.isError);
-  const latestTool = [...toolParts].reverse()[0];
+  const elapsedMs = Number.isFinite(startedAt) ? Math.max(0, completedAt - startedAt) : undefined;
+  const activityParts = Array.isArray(parts) ? parts.filter(isActivityPart) : [];
+  const active = activeActivity(activityParts, approvals?.requests ?? {});
+  const hasAnswerText = Array.isArray(parts) && parts.some((part) => part.type === "text" && part.text);
   const failed = status?.type === "incomplete" || custom.status === "failed";
   const filtered = custom.status === "content_filter";
-  const summary = filtered
-    ? `Blocked · ${elapsed}`
-    : failed
-    ? `Couldn't finish · ${elapsed}`
-    : isRunning && activeTool
-      ? `${toolDisplay(activeTool.toolName).running} ${elapsed}`
-      : isRunning
-        ? `Working · ${elapsed}`
-        : latestTool
-          ? `Finished · ${elapsed}`
-          : `Answered · ${elapsed}`;
-
-  return (
+  const summary = activitySummary({
+    isRunning,
+    failed,
+    filtered,
+    elapsedMs,
+    activeLabel: active?.label ?? (isRunning && hasAnswerText ? "Answering" : "")
+  });
+  const icon = filtered ? "⊘" : failed ? "!" : isRunning ? active?.icon ?? "✦" : "✓";
+  const tone = filtered || failed ? "failed" : isRunning ? "running" : "completed";
+  const summaryContent = (
     <>
-      <div className="run-summary">
-        <span className={`activity-dot ${failed ? "failed" : isRunning ? "running" : "done"}`} />
-        <span>{summary}</span>
-      </div>
-      {custom.turnTiming ? (
-        <details className="turn-timing">
-          <summary>Timing</summary>
-          <pre>{JSON.stringify(custom.turnTiming, null, 2)}</pre>
-        </details>
+      <span className="assistant-activity-icon" aria-hidden="true">{icon}</span>
+      <span className="assistant-activity-title">{summary}</span>
+      {visibleActivityParts.length > 0 ? (
+        <span className="activity-group-chevron" aria-hidden="true">⌄</span>
       ) : null}
     </>
+  );
+
+  if (visibleActivityParts.length === 0) {
+    return <div className={`assistant-activity-summary ${tone}`}>{summaryContent}</div>;
+  }
+
+  return (
+    <details
+      className={`assistant-activity-block ${tone}`}
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary className="assistant-activity-summary expandable">{summaryContent}</summary>
+      <div className="assistant-activity-items">{children}</div>
+    </details>
+  );
+}
+
+function AssistantTurnTiming() {
+  const custom = useMessage((message) => message.metadata?.custom ?? {});
+  if (!custom.turnTiming) return null;
+  return (
+    <details className="turn-timing">
+      <summary>Timing</summary>
+      <pre>{JSON.stringify(custom.turnTiming, null, 2)}</pre>
+    </details>
+  );
+}
+
+function isActivityPart(part) {
+  return part?.type === "tool-call" || isSkillActivityPart(part) || isSkillRunActivityPart(part);
+}
+
+function isTurnActivityPart(part) {
+  return part?.type === "data" && part.name === TURN_ACTIVITY_PART;
+}
+
+function activeActivity(parts, approvalRequests) {
+  for (const part of [...parts].reverse()) {
+    if (part.type === "tool-call") {
+      const state = toolState(part, approvalRequests[part.toolCallId]);
+      if (state === "approval") return { icon: "!", label: "Waiting for approval" };
+      if (state === "running") {
+        const display = toolDisplay(part.toolName);
+        return {
+          icon: display.icon,
+          label: toolActionLabel(display, "running", toolTarget(part.args))
+        };
+      }
+      continue;
+    }
+    if (isSkillRunActivityPart(part) && ["requested", "running"].includes(part.data?.status)) {
+      return { icon: "◇", label: `Applying ${methodDisplayName(part.data?.name)}` };
+    }
+  }
+  return null;
+}
+
+function TimelineToolGroup({ indices, children }) {
+  const status = useMessage((message) => message.status);
+  const [open, setOpen] = useState(status?.type === "running");
+  const count = indices.length;
+  if (count <= 1) return children;
+  return (
+    <details
+      className="activity-tool-group"
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary>
+        <span className="activity-group-icon" aria-hidden="true">▤</span>
+        <span>Used {count} tools</span>
+        <span className="activity-group-chevron" aria-hidden="true">⌄</span>
+      </summary>
+      <div className="activity-tool-items">
+        {children}
+      </div>
+    </details>
   );
 }
 
 function PlainText({ text }) {
   return <p className="plain-text">{text}</p>;
+}
+
+function AssistantMarkdownPart() {
+  const status = useMessage((message) => message.status);
+  return (
+    <div className={`message-surface assistant${status?.type === "running" ? " streaming" : ""}`}>
+      <MarkdownText />
+    </div>
+  );
 }
 
 function MarkdownText() {
@@ -2332,25 +2404,13 @@ function reportTurnTiming(runId, timing, fullResponseAt) {
   return summary;
 }
 
-function AssistantEmptyText() {
-  return <span className="assistant-pending">Thinking</span>;
-}
-
-function ToolGroup({ children }) {
-  return (
-    <div className="tool-group">
-      {children}
-    </div>
-  );
-}
-
 function HatchToolCall(props) {
   const approvals = useContext(ApprovalContext);
   const approvalRequest = approvals?.requests?.[props.toolCallId];
   const display = toolDisplay(props.toolName);
   const state = toolState(props, approvalRequest);
   const target = toolTarget(props.args);
-  const label = toolActionLabel(display.action, state, target);
+  const label = toolActionLabel(display, state, target);
   const summary = toolResultSummary(props);
   const pendingApproval = approvalRequest?.status === "pending";
 
@@ -2391,17 +2451,11 @@ function SkillActivityPart({ data }) {
   const status = data.status === "invoked" ? "invoked" : "activated";
   const display = skillActivityDisplay(data);
   return (
-    <details className={`skill-activity ${status}`}>
-      <summary>
-        <span className="skill-icon">{display.icon}</span>
-        <span className="skill-label">{display.label}</span>
-        <span className="skill-meta">{display.meta}</span>
-      </summary>
-      <div className="skill-detail">
-        <SkillDetailRow label="Method" value={methodDisplayName(data.name)} />
-        <p className="skill-explanation">This method is provided and maintained by the Creator.</p>
-      </div>
-    </details>
+    <div className={`activity-row skill-activity ${status}`}>
+      <span className="skill-icon">{display.icon}</span>
+      <span className="skill-label">{display.label}</span>
+      <span className="skill-meta">{display.meta}</span>
+    </div>
   );
 }
 
@@ -2419,26 +2473,10 @@ function SkillRunActivityPart({ data }) {
           : `Applying ${methodName}`;
   const icon = status === "completed" ? "◆" : status === "failed" || status === "cancelled" ? "!" : "◇";
   return (
-    <details className={`skill-activity skill-run-${status}`} open={status === "failed"}>
-      <summary>
-        <span className="skill-icon">{icon}</span>
-        <span className="skill-label">{label}</span>
-        <span className="skill-meta">Creator method</span>
-      </summary>
-      <div className="skill-detail">
-        <SkillDetailRow label="Method" value={methodName} />
-        {data.error?.message ? <SkillDetailRow label="Error" value={data.error.message} /> : null}
-      </div>
-    </details>
-  );
-}
-
-function SkillDetailRow({ label, value }) {
-  if (!value) return null;
-  return (
-    <div className="skill-detail-row">
-      <span>{label}</span>
-      <code>{value}</code>
+    <div className={`activity-row skill-activity skill-run-${status}`}>
+      <span className="skill-icon">{icon}</span>
+      <span className="skill-label">{label}</span>
+      <span className="skill-meta">{data.error?.message || "Creator method"}</span>
     </div>
   );
 }
@@ -2464,16 +2502,6 @@ function parseStoredJson(value) {
   } catch {
     return null;
   }
-}
-
-function toolState(part, approvalRequest) {
-  if (approvalRequest?.status === "pending") return "approval";
-  if (approvalRequest?.status === "approved" && part.result === undefined && !part.isError) return "running";
-  if (approvalRequest?.status === "denied") return "failed";
-  if (part.isError || part.status?.type === "incomplete") return "failed";
-  if (part.result !== undefined || part.status?.type === "complete") return "completed";
-  if (part.status?.type === "requires-action" || part.approval?.approved === undefined && part.approval) return "approval";
-  return "running";
 }
 
 function skillActivityDisplay(data) {
@@ -2507,66 +2535,6 @@ function methodDisplayName(name) {
     .filter(Boolean)
     .map((part) => `${part[0].toUpperCase()}${part.slice(1)}`)
     .join(" ");
-}
-
-function toolDisplay(name) {
-  const canonical = String(name);
-  const normalized = canonical.replaceAll("_", ".");
-  if (normalized.includes("web.search")) return { action: "Search the web", running: "Searching the web", icon: "◎" };
-  if (canonical.includes("file_search")) return { action: "Search files", running: "Searching files", icon: "⌕" };
-  if (canonical.includes("file_read")) return { action: "Read file", running: "Reading file", icon: "▣" };
-  if (canonical.includes("file_list")) return { action: "List files", running: "Listing files", icon: "☷" };
-  if (canonical.includes("file_write")) return { action: "Write file", running: "Writing file", icon: "✎" };
-  if (canonical.includes("file_patch")) return { action: "Edit file", running: "Editing file", icon: "✎" };
-  if (canonical.includes("shell_exec")) return { action: "Run command", running: "Running command", icon: ">_" };
-  if (canonical.includes("git_diff")) return { action: "Review changes", running: "Reviewing changes", icon: "Δ" };
-  if (normalized.includes("api.request")) return { action: "Contact service", running: "Contacting service", icon: "↗" };
-  if (normalized.includes("mcp.call")) return { action: "Use connected service", running: "Using connected service", icon: "◇" };
-  return { action: "Run a step", running: "Running a step", icon: "·" };
-}
-
-function toolActionLabel(action, state, target) {
-  const suffix = target ? ` ${target}` : "";
-  if (state === "completed") return `${action} complete${suffix}`;
-  if (state === "failed") return `${action} failed${suffix}`;
-  if (state === "approval") return `${action} needs approval${suffix}`;
-  return `${action}${suffix}`;
-}
-
-function toolTarget(args) {
-  const value = args?.path ?? args?.query ?? args?.command ?? args?.endpoint ?? args?.tool;
-  if (typeof value !== "string" || value.length === 0) return "";
-  const compact = value.replace(/\s+/g, " ").trim();
-  return compact.length > 58 ? `${compact.slice(0, 55)}...` : compact;
-}
-
-function toolResultSummary(part) {
-  if (part.isError) {
-    const message = part.result?.message ?? part.result?.error ?? "failed";
-    return String(message).slice(0, 80);
-  }
-  const result = part.result;
-  if (!result) return "";
-  if (typeof result.output === "string") return summarizeText(result.output);
-  if (typeof result.content === "string") return summarizeText(result.content);
-  if (typeof result.diff === "string") return "diff ready";
-  if (Array.isArray(result.entries)) return `${result.entries.length} entries`;
-  if (Array.isArray(result.matches)) return `${result.matches.length} matches`;
-  return "completed";
-}
-
-function summarizeText(text) {
-  const compact = text.replace(/\s+/g, " ").trim();
-  if (!compact) return "empty";
-  return compact.length > 80 ? `${compact.slice(0, 77)}...` : compact;
-}
-
-function formatDuration(ms) {
-  const seconds = Math.floor(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const rest = seconds % 60;
-  return `${minutes}m ${rest}s`;
 }
 
 function errorMessage(error) {

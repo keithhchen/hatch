@@ -23,10 +23,23 @@ export type VisibleConversationMessage = {
   content: string;
   timestamp: string;
   finish_reason?: OutputFinishReason;
+  parts?: VisibleConversationPart[];
   tool_calls?: VisibleConversationToolCall[];
   skill_events?: VisibleConversationSkillEvent[];
   skill_runs?: VisibleConversationSkillRun[];
 };
+
+export type VisibleConversationPart =
+  | { type: "text"; start: number; end: number }
+  | { type: "tool_call"; tool_call_id: string }
+  | {
+      type: "skill_event";
+      name: string;
+      status: "activated" | "invoked";
+      reason: "explicit_mention" | "script_run" | "skill_doc_read";
+      source_tool_call_id?: string;
+    }
+  | { type: "skill_run"; skill_run_id: string };
 
 export type VisibleConversationSkillRun = {
   run_id: string;
@@ -100,6 +113,7 @@ export type StoreEvent =
       run_id: string;
       message: ConversationMessage;
       finish_reason?: OutputFinishReason;
+      visible_parts?: VisibleConversationPart[];
       timestamp: string;
     }
   | {
@@ -426,6 +440,9 @@ export class RuntimeStore {
         };
         if (event.type === "conversation.model_message" && event.finish_reason) {
           message.finish_reason = event.finish_reason;
+          if (event.visible_parts) {
+            message.parts = event.visible_parts;
+          }
         }
         if (role === "assistant") {
           const toolCalls = [...(toolCallsByRun.get(event.run_id)?.values() ?? [])]
