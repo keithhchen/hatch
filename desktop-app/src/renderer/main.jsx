@@ -3411,7 +3411,6 @@ function SignInScreen({ onSignIn, status, error }) {
         </form>
         {error ? <small className="sign-in-error" role="alert">{error}</small> : null}
         <small>Hatch keeps you signed in on this computer until you sign out.</small>
-        <small>Hatch keeps you signed in on this computer until you sign out.</small>
       </section>
     </main>
   );
