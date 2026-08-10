@@ -256,7 +256,7 @@ h2 {
   display: block;
   font-size: 13px;
   margin-top: 2px;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .status-light,
@@ -794,7 +794,7 @@ h2 {
 .message-surface {
   line-height: 1.55;
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .message-surface.user {
@@ -804,7 +804,7 @@ h2 {
   color: var(--hatch-inverse-text);
   max-width: min(640px, 76%);
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   padding: 10px 13px;
   width: fit-content;
   word-break: break-word;
@@ -911,7 +911,7 @@ h2 {
   line-height: 1.64;
   max-width: 100%;
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   user-select: text;
   -webkit-user-select: text;
 }
@@ -1003,8 +1003,9 @@ h2 {
   font-family: var(--hatch-font-mono);
   font-size: 0.92em;
   padding: 2px 5px;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  overflow-wrap: normal;
+  white-space: nowrap;
+  word-break: normal;
 }
 
 .markdown-body pre {
@@ -1023,18 +1024,19 @@ h2 {
   background: transparent;
   color: inherit;
   display: block;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
   padding: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
+  white-space: pre;
+  word-break: normal;
 }
 
 .markdown-body table {
   border-collapse: collapse;
-  display: block;
-  max-width: 100%;
-  min-width: 0;
-  overflow: auto;
+  display: table;
+  inline-size: max-content;
+  max-width: none;
+  min-inline-size: 100%;
+  overflow: visible;
   user-select: text;
   -webkit-user-select: text;
 }
@@ -1132,8 +1134,10 @@ h2 {
   color: var(--hatch-ink);
   font-family: var(--hatch-font-mono);
   font-size: 12px;
+  overflow: hidden;
   min-width: 0;
-  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .skill-explanation {
@@ -1289,8 +1293,8 @@ h2 {
   min-width: 0;
   overflow: auto;
   padding: 9px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  overflow-wrap: normal;
+  white-space: pre;
   user-select: text;
   -webkit-user-select: text;
 }
