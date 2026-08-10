@@ -21,17 +21,17 @@
 | Inspector 先折叠，Sidebar 不堆到主内容上方 | PASS（macOS UAT） | compact/minimal captures；tier controller tests | Windows DPI/resize 真机循环 |
 | Pane divider pointer/keyboard/double-click | PASS（本机） | renderer tests、ARIA splitter implementation | VoiceOver/Narrator 朗读与真实系统输入 |
 | Toolbar / composer overflow 与 Native `…` 菜单 | PASS（本机 + macOS UAT） | semantic registry、`show_native_command_menu`、View menu UAT；fresh preview 已验证 `Hide Sidebar` → pane state → 下一次菜单 `Show Sidebar` 的完整闭环 | Windows menu metrics 与高 DPI popup 定位 |
-| Table/code/diff/log 局部 overflow | PASS（本机） | wrapper CSS、renderer tests/build；无 page-level overflow contract | 80%/150%/200% 在双平台的视觉回归 |
+| Table/code/diff/log 局部 overflow | PASS（macOS UAT + 本机） | wrapper CSS、renderer tests/build；`zoom-80-1180x780.jpeg`、`zoom-150-1180x780.jpeg`、`zoom-200-table-overflow-1180x780.jpeg`；200% 截图显示 table 自己横向滚动且 composer 固定 | Windows 80%/150%/200% 与高 DPI 视觉回归 |
 | 每窗口 Conversation、Workspace、draft、zoom、scroll、cursor 独立保存 | PARTIAL | native settings schema、account-scoped window context、renderer/native tests；macOS uniquely named preview UAT 实际创建主窗口 + 两个不同 `conv_preview_*` conversation windows；`conversation-windows.json` 原子 manifest 在 Cmd-Q 后保留，下一次启动恢复 conversation window，关闭前窗后其余窗口仍存活并从 manifest 移除；Rust 三窗口关闭中间窗口回归测试 | crash/reload 时 renderer 与云端 hydration 的真实账户 E2E；三个并行窗口的真实 bounds/scroll/draft 全量验收 |
 | Conversation Library 与 server-issued IDs | PASS（本机） | Runtime REST/WS tests（含同一 Account 的 Agent A 三会话与 Agent B 两会话层级/跨 Agent 拒绝）、renderer client tests；不再以 timestamp 作为新 ID | 端到端真实账户与真实桌面窗口的 A/B agent 五会话验收 |
 | Durable Run、幂等 message、observer recovery | PASS（本机） | Runtime 226 tests；断连/启动标为 `interrupted`，不重放 tool | 桌面应用 crash/reload 的真实 attach/replay UAT |
 | Native application/context menu 与 focused-window routing | PASS（macOS UAT） | View menu、context registry、window lifecycle tests；重打包 preview 的 conversation-row secondary click AX tree 为 Rename/Open/Archive，且不含 `WKMenuItemIdentifierInspectElement`；Tauri `devtools:false`；preview 的 New window 使用真实 Tauri dynamic window command | Windows native popup 和多窗口焦点 UAT |
-| Conversation rename 与文件拖拽上下文 | PASS（本机代码 + tests） | Rename 使用侧栏 inline editor（Enter/Escape），不再调用 `window.prompt`；native drop 只传 window-scoped opaque handle，Rust 做一次 bounded UTF-8 projection；Renderer 21 files / 84 tests、Rust drop-context tests | macOS/Windows Finder/Explorer 真实拖放、IME 与大型/二进制文件人工验收 |
+| Conversation rename 与文件拖拽上下文 | PASS（本机代码 + tests） | Rename 使用侧栏 inline editor（Enter/Escape），不再调用 `window.prompt`；native drop 只传 window-scoped opaque handle，Rust 做一次 bounded UTF-8 projection；Renderer 21 files / 86 tests、Rust drop-context tests | macOS/Windows Finder/Explorer 真实拖放、IME 与大型/二进制文件人工验收 |
 | Finder/Explorer Reveal 与 window attention | PASS（代码 + macOS bridge） | grant-bound reveal、attention command；artifact opener 复用同一 Rust containment gate | Windows Explorer 和 Dock/taskbar 真机行为 |
 | Settings/About auxiliary windows | PASS（macOS UAT） | 独立 native auxiliary windows 与 accessibility tree | Windows owner/focus/close parity |
 | Quick Look / Windows Open | PARTIAL | `artifact.quickLook` semantic command、native artifact popup、Rust grant-bound `open_workspace_artifact`；macOS UAT AX tree 显示 `Quick Look`，Windows 使用 `ShellExecuteW(open)` | macOS valid-grant Quick Look 实际打开、Windows 编译/Explorer/UAT、Linux `xdg-open` fallback |
 | VoiceOver / Narrator、IME、drag/drop、fullscreen、Snap、DPI | EXTERNAL | ARIA/focus contract、CI Windows job、macOS manual tree evidence | 真实目标平台人工验收 |
-| Web build、Tauri app build、DMG、Rust、Runtime、LocalRunner | PASS（本机） | Renderer 84、Rust 41+1 ignored、Runtime 226、LocalRunner 43；`build:web`、`build:app`、`build` 的 strict ad-hoc DMG 校验 | CI runner 与发布签名链路 |
+| Web build、Tauri app build、DMG、Rust、Runtime、LocalRunner | PASS（本机） | Renderer 86、Rust 41+1 ignored、Runtime 226、LocalRunner 43；`build:web`、`build:app`、`build` 的 strict ad-hoc DMG 校验 | CI runner 与发布签名链路 |
 
 ## 运行证据
 
@@ -48,4 +48,4 @@ desktop-app: npm run build  # strict ad-hoc DMG UAT
 ```
 
 `npm run build:app` 与 `npm run build` 产物是 ad-hoc/UAT `.app`/DMG，当前验证的 DMG 为
-`Hatch_0.1.0_aarch64.dmg`（`sha256:dfe231606ad78630ac31e06a37a5c513e6b72379ecf3a95b81f1d54f634993df`）。它们不是可发布的 notarized artifact。正式发布必须在 CI 注入真实 Developer ID/Team ID，并完成签名、notarization、安装后重启和无 prompt 验收。
+`Hatch_0.1.0_aarch64.dmg`（`sha256:00e4dc2f3097f977b0e2cfe70dee54d0840b84a3c8e6a48f8af13bd7a8449311`）。它们不是可发布的 notarized artifact。正式发布必须在 CI 注入真实 Developer ID/Team ID，并完成签名、notarization、安装后重启和无 prompt 验收。

@@ -40,6 +40,7 @@ import { fetchPurchasedCreatorAgents, runtimeHttpUrl } from "./entitlement-clien
 import {
   createConversation,
   getConversationSnapshot,
+  interruptedRunFromSnapshot,
   listConversations,
   updateConversation
 } from "./conversation-client.js";
@@ -739,7 +740,7 @@ function App() {
       accessSnapshot,
       timing: { questionSentAt: startedAt }
     });
-    patchWindowContext({ activeRun: activeRunRef.current });
+    patchWindowContext({ activeRun: activeRunRef.current, dismissedRunId: null });
     setMessages((current) => [
       ...current,
       // Keep the optimistic projection faithful to what Runtime receives.
@@ -825,6 +826,9 @@ function App() {
         workspaceGrant: normalizeWorkspaceGrant(accountBoundContext.workspaceGrant),
         permissionMode: accountBoundContext.permissionMode ? normalizePermissionPolicy(accountBoundContext.permissionMode) : "",
         activeRun: parseStoredJson(accountBoundContext.activeRun),
+        dismissedRunId: typeof accountBoundContext.dismissedRunId === "string"
+          ? accountBoundContext.dismissedRunId.trim()
+          : "",
         composerDraft: typeof accountBoundContext.composerDraft === "string" ? accountBoundContext.composerDraft : "",
         scrollTop: Number.isFinite(Number(accountBoundContext.scrollTop))
           ? Math.max(0, Number(accountBoundContext.scrollTop))
@@ -870,6 +874,10 @@ function App() {
       : "";
     const savedRun = parseStoredJson(windowContext.activeRun)
       || (!openedFromConversationWindow ? parseStoredJson(getProfileSetting("active_run", null)) : null);
+    const dismissedRunId = typeof windowContext.dismissedRunId === "string"
+      ? windowContext.dismissedRunId.trim()
+      : "";
+    const restorableRun = savedRun?.runId && savedRun.runId === dismissedRunId ? null : savedRun;
     const savedPermission = windowContext.permissionMode || getProfileSetting("permission_mode");
     const nextPermission = normalizePermissionPolicy(savedPermission);
     if (savedPermission !== nextPermission) {
@@ -889,9 +897,9 @@ function App() {
     setConversationId(requestedConversationIdRef.current || windowConversationId || savedConversationId);
     permissionRef.current = nextPermission;
     setPermissionMode(nextPermission);
-    if (savedRun) {
-      activeRunRef.current = savedRun;
-      setInterruptedRun(savedRun);
+    if (restorableRun) {
+      activeRunRef.current = restorableRun;
+      setInterruptedRun(restorableRun);
       setStatus("Task paused — restoring connection");
     } else {
       activeRunRef.current = null;
@@ -942,7 +950,7 @@ function App() {
         } catch {
           if (!cancelled) setStatus(`${restored.status} Hatch couldn't clear the stale saved path; it will retry next launch.`);
         }
-      } else if (!cancelled && !savedRun) {
+      } else if (!cancelled && !restorableRun) {
         setStatus(legacySavedWorkspace
           ? legacyClearFailed
             ? "Choose your previous workspace again. Hatch couldn't clear the legacy path and will retry next launch."
@@ -1284,6 +1292,28 @@ function App() {
           );
           patchWindowContext({ conversationCursor: conversationCursorRef.current });
         }
+        const interruptedSnapshotRun = interruptedRunFromSnapshot(
+          snapshot,
+          activeRunRef.current,
+          windowContextRef.current.dismissedRunId
+        );
+        if (interruptedSnapshotRun) {
+          const recoveredRun = activeRunRef.current?.runId === interruptedSnapshotRun.runId
+            ? interruptedSnapshotRun
+            : {
+                ...interruptedSnapshotRun,
+                accessSnapshot: createTurnAccessSnapshot(
+                  workspaceGrantRef.current?.grant_id || targetWorkspaceGrant?.grant_id,
+                  workspaceRef.current || targetWorkspaceGrant?.display_path || "",
+                  permissionRef.current
+                )
+              };
+          activeRunRef.current = recoveredRun;
+          setInterruptedRun(recoveredRun);
+          setRunning(false);
+          setStatus("Task interrupted — your work is safe");
+          patchWindowContext({ activeRun: recoveredRun, dismissedRunId: null });
+        }
         snapshotLoaded = true;
       } catch (snapshotError) {
         // Keep old Runtime history readable during the P2 rollout. A P2
@@ -1495,7 +1525,7 @@ function App() {
       }
       activeRunRef.current = null;
       setProfileSetting("active_run", undefined);
-      patchWindowContext({ activeRun: null });
+      patchWindowContext({ activeRun: null, dismissedRunId: null });
       setInterruptedRun(null);
       setRunning(false);
       setStatus(statusAfterLocalToolStop("Completed", localToolsStopped));
@@ -1518,7 +1548,7 @@ function App() {
       }
       activeRunRef.current = null;
       setProfileSetting("active_run", undefined);
-      patchWindowContext({ activeRun: null });
+      patchWindowContext({ activeRun: null, dismissedRunId: null });
       setInterruptedRun(null);
       setRunning(false);
       setStatus(statusAfterLocalToolStop("Failed", localToolsStopped));
@@ -2051,10 +2081,11 @@ function App() {
     : null;
 
   function clearInterruptedRun() {
+    const dismissedRunId = String(activeRunRef.current?.runId || interruptedRun?.runId || "").trim();
     activeRunRef.current = null;
     setInterruptedRun(null);
     setProfileSetting("active_run", undefined);
-    patchWindowContext({ activeRun: null });
+    patchWindowContext({ activeRun: null, dismissedRunId: dismissedRunId || null });
     setStatus("Paused task closed by you");
   }
 

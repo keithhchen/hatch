@@ -1663,12 +1663,46 @@ fn open_external_url(url: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let status = Command::new("/usr/bin/open").arg(&url).status();
     #[cfg(target_os = "windows")]
-    let status = Command::new("cmd").args(["/C", "start", "", &url]).status();
+    return open_external_url_windows(&url);
     #[cfg(all(unix, not(target_os = "macos")))]
     let status = Command::new("xdg-open").arg(&url).status();
+
+    #[cfg(any(target_os = "macos", all(unix, not(target_os = "macos"))))]
     status
         .map_err(to_string)?
         .success()
+        .then_some(())
+        .ok_or_else(|| "The system browser could not be opened".into())
+}
+
+#[cfg(target_os = "windows")]
+fn open_external_url_windows(url: &str) -> Result<(), String> {
+    use std::iter::once;
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+
+    let operation: Vec<u16> = std::ffi::OsStr::new("open")
+        .encode_wide()
+        .chain(once(0))
+        .collect();
+    let target: Vec<u16> = std::ffi::OsStr::new(url)
+        .encode_wide()
+        .chain(once(0))
+        .collect();
+    // The URL has already passed the allow-list check. Passing it directly to
+    // ShellExecuteW avoids `cmd /C start` parsing, where query-string
+    // punctuation could otherwise become shell syntax.
+    let result = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            operation.as_ptr(),
+            target.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            1,
+        )
+    };
+    ((result as usize) > 32)
         .then_some(())
         .ok_or_else(|| "The system browser could not be opened".into())
 }

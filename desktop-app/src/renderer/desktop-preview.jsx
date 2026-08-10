@@ -2,8 +2,9 @@ import React, { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { DesktopWindowShell } from "./desktop-shell.jsx";
-import { DESKTOP_LAYOUT } from "./desktop-layout.js";
+import { DESKTOP_LAYOUT, DESKTOP_ZOOM, nextZoom } from "./desktop-layout.js";
 import {
   conversationIdFromLocation,
   isEditableContextTarget,
@@ -62,14 +63,41 @@ export function DesktopPreview() {
   const [inspectorPreference, setInspectorPreference] = useState("open");
   const [sidebarWidth, setSidebarWidth] = useState(DESKTOP_LAYOUT.sidebar.default);
   const [inspectorWidth, setInspectorWidth] = useState(DESKTOP_LAYOUT.inspector.default);
+  const [applicationZoom, setApplicationZoom] = useState(DESKTOP_ZOOM.default);
   const [selectedAgent, setSelectedAgent] = useState(AGENTS[0]);
   const handleNativePreviewCommand = useCallback((payload) => {
     void routeNativeCommand(payload, {
       onNewConversationWindow: openPreviewConversationWindow,
       onToggleSidebar: () => setSidebarPreference((current) => current === "open" ? "closed" : "open"),
-      onToggleInspector: () => setInspectorPreference((current) => current === "open" ? "closed" : "open")
+      onToggleInspector: () => setInspectorPreference((current) => current === "open" ? "closed" : "open"),
+      onZoomIn: () => setApplicationZoom((current) => nextZoom(current, "increase")),
+      onZoomOut: () => setApplicationZoom((current) => nextZoom(current, "decrease")),
+      onZoomReset: () => setApplicationZoom(DESKTOP_ZOOM.default)
     });
   }, [openPreviewConversationWindow]);
+
+  // The preview is a real native-window fixture, so application zoom must use
+  // the same WebView zoom bridge as the product shell. This makes the 80–200%
+  // overflow and collapse captures exercise production behavior instead of a
+  // CSS-only mock. Zoom remains per native window and never changes the OS
+  // frame size.
+  useEffect(() => {
+    if (!window.__TAURI_INTERNALS__) return undefined;
+    void getCurrentWebview().setZoom(applicationZoom).catch(() => {});
+    return undefined;
+  }, [applicationZoom]);
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+      if (!["=", "+", "-", "0"].includes(event.key)) return;
+      event.preventDefault();
+      if (event.key === "0") setApplicationZoom(DESKTOP_ZOOM.default);
+      else setApplicationZoom((current) => nextZoom(current, event.key === "-" ? "decrease" : "increase"));
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
   const showPreviewContextMenu = useCallback((event, request) => {
     const intercepted = requestNativeContextMenu({
       event,

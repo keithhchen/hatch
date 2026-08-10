@@ -73,11 +73,14 @@ resulting capture is checked in as
 | `minimal-sidebar-overlay.png` | Sidebar opens as a focus-scoped overlay and returns focus to its opener |
 | `minimal-inspector-overlay.png` | Inspector opens as a focus-scoped trailing overlay and closes with Escape |
 | `native-menu-sidebar-collapsed-1180x780.jpeg` | Native View → Hide Sidebar changes the live pane and the next View menu says Show Sidebar |
+| `zoom-80-1180x780.jpeg` | 80% application zoom keeps all three panes, toolbar, table and composer reachable |
+| `zoom-150-1180x780.jpeg` | 150% application zoom promotes the conversation surface while keeping Send and structured content usable |
+| `zoom-200-table-overflow-1180x780.jpeg` | 200% application zoom collapses side panes and leaves table overflow local to its wrapper |
 | `final-sign-in-1180x780.jpeg` | Final release `.app` launch shows the ordinary Sign in surface without a Login Keychain unlock prompt |
 
 ## Automated evidence recorded with these captures
 
-- Renderer: 21 files / 84 tests
+- Renderer: 21 files / 86 tests
 - Rust Tauri library: 41 passed / 1 ignored (unlocked Keychain smoke)
 - Runtime: 226 Node subtests passed with an isolated `HATCH_RUNTIME_DATA_DIR`
 - LocalRunner: 43 tests passed (filesystem, shell and macOS Seatbelt suites)
@@ -99,6 +102,13 @@ popup and its accessibility tree exposed `Reveal in Finder`, `Quick Look`, and
 `Copy Path`; the popup route carried the semantic `artifact.quickLook` command.
 Windows ShellExecute and a valid-grant invocation remain real-platform
 acceptance items.
+
+The preview fixture also routes Zoom In, Zoom Out and Actual Size through the
+same native semantic command bridge and WebView zoom API as the signed-in
+shell. A fresh `Hatch Preview Zoom` bundle was exercised at 80%, 150% and
+200%. At 200%, the source list and inspector collapsed instead of squeezing
+the conversation into a mobile stack; the long table exposed only its own
+horizontal scroll region while the composer and Send action remained fixed.
 
 The product window disables WebKit devtools in its Tauri window configuration.
 On the rebuilt ad-hoc app, a product-area secondary click therefore did not

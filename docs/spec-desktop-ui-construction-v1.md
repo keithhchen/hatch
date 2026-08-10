@@ -30,8 +30,11 @@ macOS UAT 证据：
 - [Minimal Sidebar overlay](proof/desktop-ui/minimal-sidebar-overlay.png)
 - [Minimal Inspector overlay](proof/desktop-ui/minimal-inspector-overlay.png)
 - [Native menu → collapsed sidebar](proof/desktop-ui/native-menu-sidebar-collapsed-1180x780.jpeg)
+- [80% application zoom](proof/desktop-ui/zoom-80-1180x780.jpeg)
+- [150% application zoom](proof/desktop-ui/zoom-150-1180x780.jpeg)
+- [200% application zoom → local table overflow](proof/desktop-ui/zoom-200-table-overflow-1180x780.jpeg)
 
-已通过的自动验证（2026-08-11 当前 worktree）：Renderer `21 files / 84 tests`；Rust `41 passed / 1 ignored Keychain smoke`；Runtime Node test `226 passed`；LocalRunner `43 passed`；Web build；Tauri preview/release `.app` build；production-session `cargo check`。另有 macOS preview UAT 验证 dynamic conversation-window manifest 的 Cmd-Q 保留、下次启动恢复及单窗关闭清理。Runtime 验证必须使用独立的 `HATCH_RUNTIME_DATA_DIR`，避免复用旧的 durable idempotency fixture。
+已通过的自动验证（2026-08-11 当前 worktree）：Renderer `21 files / 86 tests`；Rust `41 passed / 1 ignored Keychain smoke`；Runtime Node test `226 passed`；LocalRunner `43 passed`；Web build；Tauri preview/release `.app` build；production-session `cargo check`。另有 macOS preview UAT 验证 dynamic conversation-window manifest 的 Cmd-Q 保留、下次启动恢复及单窗关闭清理。Runtime 验证必须使用独立的 `HATCH_RUNTIME_DATA_DIR`，避免复用旧的 durable idempotency fixture。
 
 详细的逐条状态、证据和外部验收边界见 [Desktop UI v1 验收矩阵](proof/desktop-ui/acceptance-matrix.md)。矩阵区分本机 PASS、实现但缺环境的 PARTIAL/EXTERNAL，以及明确延期的 DEFERRED；本 spec 在 P4 所列跨平台条件全部通过前不会标记为 complete。
 
@@ -83,7 +86,7 @@ V1 的 DesktopShell 由 React 实现，但必须遵守桌面 layout 与 interact
 | Opaque session token | OS credential vault | macOS 正式签名包使用 Developer-ID-gated Keychain；Windows 在经过 threat-model 证明的 device-bound backend 实现并验收前只使用进程内 session。MSIX/AppContainer PasswordVault 不视为足够的 app-only boundary；dev 与 ad-hoc UAT 始终使用进程内 session，token 使用期间驻留 memory |
 | Workspace Authorization | Rust | 当前 window/conversation 对应的、由 Native picker/drop 选中的 authoritative root 与 capability |
 | Conversation 本机偏好 | Native app-data | Workspace reference、permission、shell policy 等机器相关且非敏感的本地关联 |
-| Window Session | Native app-data / SQLite | window ID、conversation ID、bounds、zoom、sidebar、inspector、composerDraft、conversation cursor、viewport scrollTop |
+| Window Session | Native app-data / SQLite | window ID、conversation ID、bounds、zoom、sidebar、inspector、composerDraft、conversation cursor、viewport scrollTop、dismissed interrupted-run ID |
 | 瞬时 view state | 当前 renderer | IME composition、selection、popover 等不应恢复的 UI 状态 |
 
 ## 产品层级
@@ -386,6 +389,7 @@ Library 按 Creator Agent 分组显示 Conversations。一个 Creator Agent 下�
 - V1 为每个 Conversation 指定一个 primary executor window；再次打开时聚焦已有窗口，避免重复 approval executor。
 - 关闭窗口不删除 Conversation。
 - network disconnect、renderer reload 或 application restart 后，通过 snapshot + event cursor reconciliation 恢复 Conversation；正在执行的 Run 进入明确的 `Interrupted`，不会被客户端或 Runtime 自动重放。
+- 若 renderer 在进程退出前来不及写入 `activeRun`，启动后的 snapshot 仍会把 durable `interrupted` Run 投影为只读恢复 banner；用户明确关闭后按 run ID 记录 dismissal，避免下一次 hydration 反复弹出同一任务。
 - local-tool 或 approval 只路由到当前 executor window；V1 不在另一个窗口重新接管 executor，避免重复 tool execution。
 - logout、token expiry 与 entitlement change 广播到所有窗口。
 

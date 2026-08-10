@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   conversationScope,
   createConversation,
+  interruptedRunFromSnapshot,
   listConversations,
   updateConversation
 } from "./conversation-client.js";
@@ -52,5 +53,40 @@ describe("conversation client", () => {
 
   it("does not invent authority when a scope field is absent", () => {
     expect([...conversationScope({ entitlementId: "ent_a" })]).toEqual([["entitlement_id", "ent_a"]]);
+  });
+
+  it("projects a durable interrupted run without creating an executor claim", () => {
+    const projected = interruptedRunFromSnapshot({
+      runs: [{
+        id: "run_crashed",
+        client_message_id: "message_crashed",
+        status: "interrupted",
+        interrupted_reason: "Runtime restarted",
+        created_at: "2026-08-11T00:00:00.000Z"
+      }]
+    });
+    expect(projected).toMatchObject({
+      runId: "run_crashed",
+      clientMessageId: "message_crashed",
+      status: "interrupted",
+      interruptedReason: "Runtime restarted"
+    });
+    expect(projected).not.toHaveProperty("executorId");
+  });
+
+  it("keeps the renderer's richer run projection and respects dismissal", () => {
+    const current = {
+      runId: "run_same",
+      assistantId: "run_same_assistant",
+      accessSnapshot: { workspaceGrantId: "grant_1" },
+      text: "partial"
+    };
+    const snapshot = { runs: [{ id: "run_same", status: "interrupted", interrupted_reason: "Client disconnected" }] };
+    expect(interruptedRunFromSnapshot(snapshot, current)).toMatchObject({
+      ...current,
+      status: "interrupted",
+      interruptedReason: "Client disconnected"
+    });
+    expect(interruptedRunFromSnapshot(snapshot, current, "run_same")).toBeNull();
   });
 });
