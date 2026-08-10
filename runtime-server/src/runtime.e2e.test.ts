@@ -443,7 +443,6 @@ test("client hello does not accept explicit skill selection", () => {
     protocol_version: PROTOCOL_VERSION,
     installation_id: "install_x",
     license_token: "license_x",
-    workspace_root: "/tmp/workspace",
     local_tools: [],
     skill_id: "repo-assistant"
   }), /Unrecognized key/);
@@ -477,13 +476,12 @@ test("run start accepts only the current user message, not a client transcript o
   }));
 });
 
-test("client hello declares local workspace capability and rejects server tools", () => {
+test("client hello declares local tool capability and rejects server tools", () => {
   assert.doesNotThrow(() => parseInboundMessage({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
     installation_id: "install_x",
     license_token: "license_x",
-    workspace_root: "/tmp/workspace",
     local_tools: ["fs.read", "fs.search", "git.diff"]
   }));
 
@@ -492,18 +490,25 @@ test("client hello declares local workspace capability and rejects server tools"
     protocol_version: PROTOCOL_VERSION,
     installation_id: "install_x",
     license_token: "license_x",
-    workspace_root: "/tmp/workspace",
     local_tools: ["web.search"]
   }), /Invalid option/);
-});
 
-test("client hello requires explicit local workspace capability", () => {
   assert.throws(() => parseInboundMessage({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
     installation_id: "install_x",
     license_token: "license_x",
-    workspace_root: "/tmp/workspace"
+    workspace_root: "/private/consumer/workspace",
+    local_tools: ["fs.read"]
+  }), /Unrecognized key/);
+});
+
+test("client hello requires an explicit local tool capability list", () => {
+  assert.throws(() => parseInboundMessage({
+    type: "client.hello",
+    protocol_version: PROTOCOL_VERSION,
+    installation_id: "install_x",
+    license_token: "license_x"
   }));
 
   assert.doesNotThrow(() => parseInboundMessage({
@@ -514,13 +519,13 @@ test("client hello requires explicit local workspace capability", () => {
     local_tools: []
   }));
 
-  assert.throws(() => parseInboundMessage({
+  assert.doesNotThrow(() => parseInboundMessage({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
     installation_id: "install_x",
     license_token: "license_x",
     local_tools: ["fs.read"]
-  }), /workspace_root is required/);
+  }));
 });
 
 test("tool result requires a matching payload for its status", () => {
@@ -764,12 +769,12 @@ test("configured server-side skill roots, symlinked skill folders, and implicit 
   delete process.env.HATCH_TS_SKILLS_ROOT;
   process.env.HATCH_SKILL_ROOTS = [rootSkills, nestedSkills].join(path.delimiter);
 
-  const discovered = await discoverSkills({ workspaceRoot: nested });
+  const discovered = await discoverSkills();
   assert.ok(discovered.some((skill) => skill.name === "implicit-skill"));
   assert.ok(discovered.some((skill) => skill.name === "manual-skill"));
   assert.ok(discovered.some((skill) => skill.name === "shared-skill"));
 
-  const implicitCatalog = await listSkills({ workspaceRoot: nested, prompt: "please inspect nested workspace skills" });
+  const implicitCatalog = await listSkills({ prompt: "please inspect nested workspace skills" });
   assert.ok(implicitCatalog.some((skill) => skill.name === "implicit-skill"));
   assert.ok(!implicitCatalog.some((skill) => skill.name === "manual-skill"));
   const implicitVisible = visibleSkillsForPrompt(discovered, "please inspect nested workspace skills");
@@ -777,11 +782,11 @@ test("configured server-side skill roots, symlinked skill folders, and implicit 
   assert.ok(implicitResourceRoots.some((root) => root.endsWith("implicit-skill")));
   assert.ok(!implicitResourceRoots.some((root) => root.endsWith("manual-skill")));
 
-  const explicitCatalog = await listSkills({ workspaceRoot: nested, prompt: "please use $manual-skill now" });
+  const explicitCatalog = await listSkills({ prompt: "please use $manual-skill now" });
   assert.ok(explicitCatalog.some((skill) => skill.name === "manual-skill"));
   const explicitVisible = visibleSkillsForPrompt(discovered, "please use $manual-skill now");
   assert.ok(skillResourceRoots(explicitVisible).some((root) => root.endsWith("manual-skill")));
-  const plainTextCatalog = await listSkills({ workspaceRoot: nested, prompt: "please use manual-skill now" });
+  const plainTextCatalog = await listSkills({ prompt: "please use manual-skill now" });
   assert.ok(!plainTextCatalog.some((skill) => skill.name === "manual-skill"));
   assert.deepEqual(
     [...explicitSkillMentions("run $manual-skill, /shared-skill, and implicit-skill", ["manual-skill", "implicit-skill", "shared-skill"])],
@@ -851,7 +856,7 @@ test("project .codex skills are ignored by default and only load from explicit r
   ].join("\n"), "utf8");
   delete process.env.HATCH_TS_SKILLS_ROOT;
 
-  const discovered = await discoverSkills({ workspaceRoot: nested });
+  const discovered = await discoverSkills();
   const names = discovered.map((skill) => skill.name);
   assert.ok(!names.includes("project-skill"));
   assert.ok(!names.includes("nested-project-skill"));
@@ -860,99 +865,13 @@ test("project .codex skills are ignored by default and only load from explicit r
     path.join(workspace, ".codex", "skills"),
     path.join(nested, ".codex", "skills")
   ].join(path.delimiter);
-  const configured = await discoverSkills({ workspaceRoot: nested });
+  const configured = await discoverSkills();
   const configuredNames = configured.map((skill) => skill.name);
   assert.ok(configuredNames.includes("project-skill"));
   assert.ok(configuredNames.includes("nested-project-skill"));
   assert.ok(configured
     .filter((skill) => skill.name === "project-skill" || skill.name === "nested-project-skill")
     .every((skill) => skill.scope === "user"));
-});
-
-test("project root marker config does not trigger workspace skill discovery", async () => {
-  const workspace = await tempWorkspace();
-  const configDir = await tempWorkspace();
-  const nested = path.join(workspace, "services", "api");
-  const agentSkillDir = path.join(workspace, ".agents", "skills", "marker-agent-skill");
-  const codexSkillDir = path.join(workspace, ".codex", "skills", "marker-codex-skill");
-  await mkdir(agentSkillDir, { recursive: true });
-  await mkdir(codexSkillDir, { recursive: true });
-  await mkdir(nested, { recursive: true });
-  await writeFile(path.join(workspace, "hatch-root.marker"), "", "utf8");
-  await writeFile(path.join(agentSkillDir, "SKILL.md"), [
-    "---",
-    "name: marker-agent-skill",
-    "description: Marker agent skill. Use when testing configured repo root markers.",
-    "---",
-    "",
-    "# Marker Agent"
-  ].join("\n"), "utf8");
-  await writeFile(path.join(codexSkillDir, "SKILL.md"), [
-    "---",
-    "name: marker-codex-skill",
-    "description: Marker Codex skill. Use when testing configured repo root markers.",
-    "---",
-    "",
-    "# Marker Codex"
-  ].join("\n"), "utf8");
-  const configPath = path.join(configDir, "config.toml");
-  await writeFile(configPath, 'project_root_markers = ["hatch-root.marker"]', "utf8");
-  process.env.HATCH_SKILLS_CONFIG = configPath;
-  delete process.env.HATCH_TS_SKILLS_ROOT;
-
-  const discovered = await discoverSkills({ workspaceRoot: nested });
-  const names = discovered.map((skill) => skill.name);
-  assert.ok(!names.includes("marker-agent-skill"));
-  assert.ok(!names.includes("marker-codex-skill"));
-
-  process.env.HATCH_SKILL_ROOTS = path.join(workspace, ".agents", "skills");
-  const configured = await discoverSkills({ workspaceRoot: nested });
-  const configuredNames = configured.map((skill) => skill.name);
-  assert.ok(configuredNames.includes("marker-agent-skill"));
-  assert.ok(!configuredNames.includes("marker-codex-skill"));
-  assert.equal(configured.find((skill) => skill.name === "marker-agent-skill")?.scope, "user");
-});
-
-test("workspace ancestor .agents skills are ignored unless configured as server roots", async () => {
-  const workspace = await tempWorkspace();
-  const configDir = await tempWorkspace();
-  const nested = path.join(workspace, "services", "api");
-  const rootSkillDir = path.join(workspace, ".agents", "skills", "root-marker-disabled-skill");
-  const nestedSkillDir = path.join(nested, ".agents", "skills", "nested-marker-enabled-skill");
-  await mkdir(rootSkillDir, { recursive: true });
-  await mkdir(nestedSkillDir, { recursive: true });
-  await mkdir(path.join(workspace, ".git"), { recursive: true });
-  await writeFile(path.join(rootSkillDir, "SKILL.md"), [
-    "---",
-    "name: root-marker-disabled-skill",
-    "description: Root skill. Use when testing disabled root marker discovery.",
-    "---",
-    "",
-    "# Root Marker Disabled"
-  ].join("\n"), "utf8");
-  await writeFile(path.join(nestedSkillDir, "SKILL.md"), [
-    "---",
-    "name: nested-marker-enabled-skill",
-    "description: Nested skill. Use when testing disabled root marker discovery.",
-    "---",
-    "",
-    "# Nested Marker Enabled"
-  ].join("\n"), "utf8");
-  const configPath = path.join(configDir, "config.toml");
-  await writeFile(configPath, "project_root_markers = []", "utf8");
-  process.env.HATCH_SKILLS_CONFIG = configPath;
-  delete process.env.HATCH_TS_SKILLS_ROOT;
-
-  const discovered = await discoverSkills({ workspaceRoot: nested });
-  const names = discovered.map((skill) => skill.name);
-  assert.ok(!names.includes("root-marker-disabled-skill"));
-  assert.ok(!names.includes("nested-marker-enabled-skill"));
-
-  process.env.HATCH_SKILL_ROOTS = path.join(nested, ".agents", "skills");
-  const configured = await discoverSkills({ workspaceRoot: nested });
-  const configuredNames = configured.map((skill) => skill.name);
-  assert.ok(!configuredNames.includes("root-marker-disabled-skill"));
-  assert.ok(configuredNames.includes("nested-marker-enabled-skill"));
 });
 
 test("CODEX_HOME user, system cache, and plugin skill roots are ignored by default", async () => {
@@ -1586,12 +1505,10 @@ test("tool registry owns model tool dispatch locality and event-name mapping", (
 test("compaction transcript preserves prior checkpoint summaries for later handoff summaries", () => {
   const previousSummary = `${SUMMARY_PREFIX}\nPrevious compacted context that must survive.`;
   const runtimeContext = `${RUNTIME_CONTEXT_PREFIX}\nserver-rendered skill catalog`;
-  const projectDocsContext = "# AGENTS.md instructions for /workspace\n\n<INSTRUCTIONS>\nproject-only instructions\n</INSTRUCTIONS>";
   const messages = [
     { role: "user", content: "retained user before first compact" },
     { role: "user", content: previousSummary },
     { role: "user", content: runtimeContext },
-    { role: "user", content: projectDocsContext },
     { role: "assistant", content: "assistant work after first compact" },
     { role: "user", content: "new user after first compact" }
   ];
@@ -1599,7 +1516,6 @@ test("compaction transcript preserves prior checkpoint summaries for later hando
   const transcript = runtimeMessagesTranscript(messages);
   assert.match(transcript, /Previous compacted context that must survive/);
   assert.doesNotMatch(transcript, /server-rendered skill catalog/);
-  assert.doesNotMatch(transcript, /project-only instructions/);
 
   const replacement = buildCompactedHistory(messages, `${SUMMARY_PREFIX}\nSecond compacted summary.`);
   assert.equal(replacement[0]?.role, "compactionSummary");
@@ -1810,7 +1726,6 @@ test("server rejects duplicate client hello on the same connection", async () =>
     protocol_version: PROTOCOL_VERSION,
     installation_id: "install_once",
     license_token: "license_once",
-    workspace_root: workspace,
     local_tools: ["fs.read"]
   }));
   await waitForSocketMessage(messages, (message) => message.type === "session.ready");
@@ -1820,7 +1735,6 @@ test("server rejects duplicate client hello on the same connection", async () =>
     protocol_version: PROTOCOL_VERSION,
     installation_id: "install_twice",
     license_token: "license_twice",
-    workspace_root: path.join(workspace, "other"),
     local_tools: ["fs.write"]
   }));
   const error = await waitForSocketMessage(messages, (message) => message.type === "turn.failed");
@@ -1892,7 +1806,6 @@ test("server rejects concurrent runs for the same conversation across WebSocket 
     protocol_version: PROTOCOL_VERSION,
     installation_id: "install_busy",
     license_token: "license_busy",
-    workspace_root: workspace,
     local_tools: ["fs.list", "fs.search", "fs.read", "fs.write", "fs.patch", "git.diff"]
   }));
   await waitForSocketMessage(firstMessages, (message) => message.type === "session.ready");
@@ -1919,7 +1832,6 @@ test("server rejects concurrent runs for the same conversation across WebSocket 
     protocol_version: PROTOCOL_VERSION,
     installation_id: "install_busy_2",
     license_token: "license_busy",
-    workspace_root: workspace,
     local_tools: ["fs.list", "fs.search", "fs.read", "fs.write", "fs.patch", "git.diff"]
   }));
   await waitForSocketMessage(secondMessages, (message) => message.type === "session.ready");
@@ -1967,7 +1879,6 @@ test("server releases a conversation lock when the client disconnects mid-run", 
     protocol_version: PROTOCOL_VERSION,
     installation_id: "install_disconnect_lock_1",
     license_token: "license_disconnect_lock",
-    workspace_root: workspace,
     local_tools: ["fs.list", "fs.search", "fs.read", "fs.write", "fs.patch", "git.diff"]
   }));
   await waitForSocketMessage(firstMessages, (message) => message.type === "session.ready");
@@ -2007,7 +1918,6 @@ test("server releases a conversation lock when the client disconnects mid-run", 
     protocol_version: PROTOCOL_VERSION,
     installation_id: "install_disconnect_lock_2",
     license_token: "license_disconnect_lock",
-    workspace_root: workspace,
     local_tools: ["fs.list", "fs.search", "fs.read", "fs.write", "fs.patch", "git.diff"]
   }));
   await waitForSocketMessage(secondMessages, (message) => message.type === "session.ready");
@@ -2066,7 +1976,6 @@ test("run cancel for an unknown run does not cancel the active run", async () =>
     protocol_version: PROTOCOL_VERSION,
     installation_id: "install_cancel_targeted",
     license_token: "license_cancel_targeted",
-    workspace_root: workspace,
     local_tools: ["fs.list", "fs.search", "fs.read", "fs.write", "fs.patch", "git.diff"]
   }));
   await waitForSocketMessage(messages, (message) => message.type === "session.ready");
@@ -4313,7 +4222,6 @@ function stableModelPrefix(request: Record<string, any>): Array<{ role: string; 
     if (
       role === "system"
       || content.startsWith(RUNTIME_CONTEXT_PREFIX)
-      || content.startsWith("# AGENTS.md instructions")
     ) {
       prefix.push({ role, content });
       continue;
@@ -4321,15 +4229,6 @@ function stableModelPrefix(request: Record<string, any>): Array<{ role: string; 
     break;
   }
   return prefix;
-}
-
-function projectInstructionsContent(request: Record<string, any>): string {
-  const message = (request.messages ?? [])
-    .filter((item: Record<string, unknown>) => item.role === "user")
-    .map((item: Record<string, unknown>) => String(item.content ?? ""))
-    .find((content: string) => content.startsWith("# AGENTS.md instructions"));
-  assert.ok(message, "Expected AGENTS.md project instructions context");
-  return message;
 }
 
 async function waitForSocketMessage(

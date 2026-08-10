@@ -351,10 +351,10 @@ h2 {
 }
 
 .chat-header {
+  align-items: center;
   border-bottom: 1px solid #d9ddd6;
-  display: grid;
-  gap: 0;
-  min-height: 112px;
+  display: flex;
+  min-height: 62px;
   padding: 0 24px;
 }
 
@@ -367,139 +367,10 @@ h2 {
   white-space: nowrap;
 }
 
-.header-agent,
-.permission-control {
-  min-width: 0;
-}
-
-.chat-context-row,
-.chat-settings-row {
-  align-items: center;
-  display: flex;
-  min-width: 0;
-}
-
-.chat-context-row {
-  gap: 28px;
-  min-height: 62px;
-}
-
-.chat-settings-row {
-  border-top: 1px solid var(--hatch-border-subtle);
-  gap: 18px;
-  min-height: 50px;
-}
-
 .header-agent {
   flex: 1 1 auto;
   max-width: 520px;
-}
-
-.workspace-selector {
-  align-items: center;
-  display: flex;
-  flex: 0 1 300px;
-  gap: 9px;
   min-width: 0;
-  padding: 7px 11px;
-  text-align: left;
-}
-
-.workspace-selector-icon {
-  align-items: center;
-  background: #f1e0d6;
-  border-radius: 6px;
-  color: var(--hatch-accent);
-  display: inline-flex;
-  flex: 0 0 24px;
-  font-size: 15px;
-  height: 24px;
-  justify-content: center;
-}
-
-.workspace-selector-copy {
-  display: grid;
-  gap: 1px;
-  min-width: 0;
-}
-
-.workspace-selector strong {
-  max-width: 100%;
-}
-
-.workspace-selector-action {
-  color: var(--hatch-text-secondary);
-  font-size: 12px;
-  font-weight: 500;
-  margin-left: auto;
-  white-space: nowrap;
-}
-
-.workspace-selector:hover,
-.workspace-selector:focus-visible {
-  border-color: color-mix(in srgb, var(--hatch-accent) 48%, var(--hatch-border));
-}
-
-.permission-control {
-  display: grid;
-  flex: 0 1 270px;
-  gap: 2px;
-  grid-template-columns: auto minmax(150px, 1fr);
-  min-width: 240px;
-}
-
-.permission-control select {
-  background: var(--hatch-panel);
-  border: 1px solid var(--hatch-border);
-  border-radius: 7px;
-  color: var(--hatch-ink);
-  min-height: 34px;
-  min-width: 0;
-  padding: 0 28px 0 9px;
-}
-
-.permission-control > .label {
-  align-self: center;
-  grid-row: 1 / span 2;
-  margin-right: 2px;
-}
-
-.permission-control small {
-  color: var(--hatch-text-secondary);
-  font-size: 10px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.shell-toggle {
-  display: grid;
-  flex: 0 1 265px;
-  gap: 2px;
-  min-width: 205px;
-}
-
-.shell-toggle-row {
-  align-items: center;
-  display: flex;
-  gap: 7px;
-}
-
-.shell-toggle-row input {
-  accent-color: var(--hatch-accent);
-  margin: 0;
-  min-height: auto;
-  width: auto;
-}
-
-.shell-toggle-row strong {
-  font-size: 12px;
-  margin: 0;
-}
-
-.shell-toggle small {
-  color: var(--hatch-text-secondary);
-  font-size: 10px;
 }
 
 .thread-root {
@@ -581,8 +452,7 @@ h2 {
   gap: 10px;
 }
 
-.sign-in-card,
-.workspace-card {
+.sign-in-card {
   background: color-mix(in srgb, var(--hatch-panel) 96%, transparent);
   border: 1px solid var(--hatch-border-subtle);
   border-radius: 16px;
@@ -656,14 +526,12 @@ h2 {
   margin: 0;
 }
 
-.sign-in-card p,
-.workspace-card p {
+.sign-in-card p {
   color: #5f6963;
   line-height: 1.55;
 }
 
-.sign-in-card small,
-.gate-status {
+.sign-in-card small {
   color: #7a837e;
   text-align: center;
 }
@@ -677,51 +545,112 @@ h2 {
   text-transform: uppercase;
 }
 
-.workspace-gate {
+.workspace-onboarding {
   align-items: center;
+  background:
+    radial-gradient(circle at 50% 18%, color-mix(in srgb, var(--hatch-accent) 8%, transparent), transparent 38%),
+    var(--hatch-canvas);
   display: flex;
   justify-content: center;
   min-height: 0;
-  overflow: hidden;
+  overflow: auto;
   padding: 32px;
 }
 
-.workspace-card {
+.workspace-onboarding-card {
+  background: color-mix(in srgb, var(--hatch-panel) 97%, transparent);
+  border: 1px solid var(--hatch-border-subtle);
+  border-radius: 18px;
+  box-shadow: 0 22px 60px rgba(54, 41, 31, 0.09);
   display: grid;
-  gap: 15px;
-  max-width: 520px;
-  padding: 30px;
+  gap: 16px;
+  max-width: 560px;
+  padding: 32px;
   width: 100%;
 }
 
-.workspace-card h2 {
-  font-size: 28px;
-  margin: 0;
-}
-
-.permission-icon {
+.workspace-onboarding-icon {
   align-items: center;
   background: color-mix(in srgb, var(--hatch-accent) 10%, var(--hatch-panel));
+  border: 1px solid color-mix(in srgb, var(--hatch-accent) 18%, var(--hatch-border-subtle));
   border-radius: 12px;
+  color: var(--hatch-accent);
   display: flex;
-  font-size: 24px;
-  height: 48px;
+  height: 46px;
   justify-content: center;
-  width: 48px;
+  width: 46px;
 }
 
-.permission-policy {
-  background: var(--hatch-panel-muted);
-  border-radius: 9px;
-  display: grid;
-  font-size: 12px;
-  gap: 4px;
-  line-height: 1.45;
-  padding: 12px;
+.workspace-onboarding-icon svg,
+.workspace-picker svg {
+  fill: none;
+  flex: 0 0 auto;
+  height: 19px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.55;
+  width: 19px;
 }
 
-.permission-policy span {
+.workspace-onboarding-card h2 {
+  font-size: 32px;
+  letter-spacing: -0.02em;
+  line-height: 1.08;
+}
+
+.workspace-onboarding-card > p {
   color: var(--hatch-text-secondary);
+  line-height: 1.55;
+}
+
+.workspace-picker {
+  align-items: center;
+  background: var(--hatch-panel-muted);
+  border-color: var(--hatch-border);
+  border-radius: 11px;
+  color: var(--hatch-ink);
+  display: flex;
+  gap: 11px;
+  justify-content: flex-start;
+  min-height: 66px;
+  padding: 10px 12px;
+  text-align: left;
+  width: 100%;
+}
+
+.workspace-picker:hover,
+.workspace-picker:focus-visible,
+.workspace-picker.selected {
+  border-color: color-mix(in srgb, var(--hatch-accent) 42%, var(--hatch-border));
+}
+
+.workspace-picker-copy {
+  min-width: 0;
+}
+
+.workspace-picker-copy strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-picker-action {
+  color: var(--hatch-accent);
+  font-size: 12px;
+  margin-left: auto;
+}
+
+.workspace-grant-button {
+  min-height: 44px;
+  width: 100%;
+}
+
+.workspace-onboarding-status {
+  color: var(--hatch-text-secondary);
+  font-size: 11px;
+  text-align: center;
 }
 
 .recovery-banner {
@@ -1295,17 +1224,17 @@ h2 {
 }
 
 .composer {
-  align-items: end;
+  align-items: stretch;
   background: var(--hatch-panel);
   border: 1px solid var(--hatch-border);
-  border-radius: 8px;
+  border-radius: 16px;
   box-shadow: 0 8px 28px rgba(54, 41, 31, 0.08);
-  display: grid;
-  gap: 10px;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   margin: 0 auto;
   max-width: 900px;
-  padding: 9px;
+  padding: 10px;
 }
 
 .composer-input {
@@ -1314,15 +1243,107 @@ h2 {
   color: var(--hatch-ink);
   line-height: 1.45;
   max-height: 180px;
-  min-height: 38px;
+  min-height: 54px;
   outline: none;
   padding: 8px 7px;
   resize: none;
   width: 100%;
 }
 
+.composer-actions,
+.composer-settings {
+  align-items: center;
+  display: flex;
+  min-width: 0;
+}
+
+.composer-actions {
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.composer-settings {
+  gap: 4px;
+  overflow: hidden;
+}
+
+.composer-control {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--hatch-text-secondary);
+  display: inline-flex;
+  flex: 0 1 auto;
+  font-family: var(--hatch-font-sans);
+  font-size: 12px;
+  gap: 6px;
+  min-height: 30px;
+  min-width: 0;
+  padding: 5px 7px;
+  transition: background .12s, border-color .12s, color .12s;
+}
+
+button.composer-control {
+  cursor: pointer;
+}
+
+.composer-control:hover,
+.composer-control:focus-within,
+button.composer-control:focus-visible {
+  background: var(--hatch-panel-muted);
+  border-color: var(--hatch-border-subtle);
+  color: var(--hatch-ink);
+}
+
+.composer-control svg {
+  fill: none;
+  flex: 0 0 16px;
+  height: 16px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.55;
+  width: 16px;
+}
+
+.workspace-composer-control {
+  max-width: 260px;
+}
+
+.composer-control-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.permission-composer-control {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.permission-composer-control select {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  min-width: 0;
+  outline: 0;
+  padding: 0;
+}
+
+.composer-control-caret {
+  color: color-mix(in srgb, currentColor 65%, transparent);
+  flex: 0 0 auto;
+  font-size: 11px;
+  line-height: 1;
+}
+
 .send-button {
-  min-width: 72px;
+  min-height: 32px;
+  min-width: 64px;
 }
 
 .stop-button {
@@ -1348,33 +1369,29 @@ h2 {
   }
 
   .chat-header {
-    gap: 10px;
     min-height: auto;
     padding: 12px 18px;
   }
 
-  .chat-context-row,
-  .chat-settings-row {
-    align-items: stretch;
-    flex-wrap: wrap;
-  }
-
-  .chat-context-row {
-    gap: 12px;
-  }
-
-  .chat-settings-row {
-    gap: 12px;
-    padding-top: 10px;
-  }
-
-  .header-agent,
-  .workspace-selector,
-  .permission-control,
-  .shell-toggle {
-    flex-basis: 100%;
+  .header-agent {
     max-width: none;
-    min-width: 0;
+  }
+
+  .composer-footer {
+    padding: 12px 14px 16px;
+  }
+
+  .workspace-composer-control {
+    max-width: 180px;
+  }
+
+  .workspace-onboarding {
+    align-items: flex-start;
+    padding: 20px 14px;
+  }
+
+  .workspace-onboarding-card {
+    padding: 24px;
   }
 
   .thread-root {

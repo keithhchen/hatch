@@ -14,7 +14,6 @@ import {
 import type { AssistantMessage, ToolResultMessage, Usage } from "@earendil-works/pi-ai";
 import type { ConversationMessage } from "./protocol.js";
 import { createPiModel, createPiModels } from "./piModel.js";
-import { PROJECT_DOCS_CONTEXT_PREFIX } from "./projectDocs.js";
 
 // These are Pi's own model-facing compaction delimiters. Keep the export name
 // for the existing event/UI projection, but do not invent a second summary
@@ -304,7 +303,7 @@ function hasUsage(usage: Usage): boolean {
 }
 
 function isRebuiltRuntimeContext(content: string): boolean {
-  return content.startsWith(RUNTIME_CONTEXT_PREFIX) || content.startsWith(PROJECT_DOCS_CONTEXT_PREFIX);
+  return content.startsWith(RUNTIME_CONTEXT_PREFIX);
 }
 
 function unwrapSummary(value: string): string {

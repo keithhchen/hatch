@@ -17,19 +17,15 @@ import {
   type ToolApproval
 } from "./tools.js";
 import { toolPreapprovedBySkills } from "./skillPermissions.js";
-import type { ProjectInstructions } from "./projectDocs.js";
 import type { DeliveryWorkflow } from "./deliveryAudit.js";
 import { KIMI_TEMPERATURE } from "./kimiProvider.js";
 import {
-  detectImplicitSkillInvocationForCommand,
-  detectImplicitSkillInvocationForPath,
   isSkillResourcePath,
   listSkillResourceDirectory,
   listSkillBundleResourcePaths,
   parseSkillMarkdown,
   readSkillResourceByPath,
   skillResourceRoots,
-  type ImplicitSkillInvocation,
   type SkillsRenderResult,
   type SkillRecord
 } from "./skills.js";
@@ -40,7 +36,6 @@ export type RuntimeSessionSkills = {
   records: SkillRecord[];
   visibleRecords: SkillRecord[];
   rendered: SkillsRenderResult;
-  projectInstructions?: ProjectInstructions;
 };
 
 export type RunContext = {
@@ -61,7 +56,6 @@ export type RunContext = {
     description?: string;
     input_schema?: Record<string, unknown>;
   }>;
-  workspaceRoot?: string;
   persistModelMessage?: (message: ConversationMessage) => Promise<void>;
   compactMessagesIfNeeded?: (messages: RuntimeCompactionMessage[], phase: "mid_turn") => Promise<ConversationMessage[] | undefined>;
   toolBridge?: ToolBridge;
@@ -725,28 +719,15 @@ function buildBaseSystemPrompt(): string {
 }
 
 export function buildRuntimeContextMessages(
-  projectInstructions: ProjectInstructions | undefined,
   skillsSection: string,
-  activatedSkills: ActivatedSkill[] = [],
-  workspaceRoot?: string
+  activatedSkills: ActivatedSkill[] = []
 ): PiModelMessage[] {
   return [
-    renderLocalWorkspaceContext(workspaceRoot),
-    projectInstructions?.content ?? "",
     renderActivatedSkillsSection(activatedSkills),
     renderAvailableSkillsContext(skillsSection)
   ]
     .filter((content) => content.length > 0)
     .map((content) => ({ role: "user" as const, content }));
-}
-
-function renderLocalWorkspaceContext(workspaceRoot: string | undefined): string {
-  if (!workspaceRoot) return "";
-  return [
-    `${RUNTIME_CONTEXT_PREFIX}: LOCAL WORKSPACE`,
-    `Client-declared workspace root: ${workspaceRoot}`,
-    "All relative local file paths resolve under this exact workspace root."
-  ].filter(Boolean).join("\n");
 }
 
 function extractMentionedWorkspacePaths(message: string): string[] {
@@ -1119,55 +1100,6 @@ export function toolEventBase(
     status: "requested",
     ...(ctx?.toolScope ? { scope: ctx.toolScope } : {}),
     ...(ctx?.skillRunId ? { skill_run_id: ctx.skillRunId } : {})
-  };
-}
-
-export async function implicitSkillInvocationFromTool(
-  toolName: string,
-  args: Record<string, unknown>,
-  skills: SkillRecord[],
-  workspaceRoot: string | undefined
-): Promise<ImplicitSkillInvocation | undefined> {
-  const workdir = workspaceRoot ? path.resolve(workspaceRoot) : undefined;
-  if (!workdir) return undefined;
-  if (toolName === "shell_exec") {
-    const command = typeof args.command === "string" ? args.command : "";
-    return command
-      ? detectImplicitSkillInvocationForCommand(skills, command, workdir)
-      : undefined;
-  }
-  if (toolName === "file_read") {
-    const targetPath = typeof args.path === "string" ? args.path : "";
-    return targetPath
-      ? detectImplicitSkillInvocationForPath(skills, targetPath, workdir)
-      : undefined;
-  }
-  return undefined;
-}
-
-export function skillInvocationEvent(
-  runId: string,
-  toolCallId: string,
-  toolName: string,
-  args: Record<string, unknown>,
-  invocation: ImplicitSkillInvocation
-): OutboundMessage {
-  const command = typeof args.command === "string" ? args.command : undefined;
-  const targetPath = typeof args.path === "string" ? args.path : undefined;
-  return {
-    type: "skill.invoked",
-    run_id: runId,
-    name: invocation.skill.name,
-    path: invocation.skill.path,
-    scope: invocation.skill.scope,
-    status: "invoked",
-    invocation_type: "implicit",
-    source_tool_call_id: toolCallId,
-    reason: invocation.reason,
-    trigger: {
-      tool: toolName === "shell_exec" ? "shell_exec" : "file_read",
-      ...(toolName === "shell_exec" ? { command } : { path: targetPath ?? invocation.path })
-    }
   };
 }
 

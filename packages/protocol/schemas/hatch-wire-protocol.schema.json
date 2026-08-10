@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hatch.dev/protocol/hatch-wire-protocol-0.4.schema.json",
+  "$id": "https://hatch.dev/protocol/hatch-wire-protocol-0.5.schema.json",
   "title": "Hatch Wire Protocol",
   "type": "object",
   "oneOf": [
@@ -9,7 +9,7 @@
   ],
   "$defs": {
     "protocolVersion": {
-      "const": "0.4"
+      "const": "0.5"
     },
     "digest": {
       "type": "string",
@@ -129,7 +129,6 @@
         "user_id": { "type": "string", "minLength": 1 },
         "product_id": { "type": "string", "minLength": 1 },
         "client_version": { "type": "string" },
-        "workspace_root": { "type": "string", "minLength": 1 },
         "local_tools": {
           "type": "array",
           "items": { "$ref": "#/$defs/clientToolName" }

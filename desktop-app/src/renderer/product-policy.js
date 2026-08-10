@@ -33,14 +33,12 @@ function initials(name) {
 export const PRODUCT_COPY = Object.freeze({
   home: "Your agents",
   workspaceRequired: "Choose a workspace to continue",
-  readPolicy: "Hatch can only read files inside the folder you choose.",
-  changePolicy: "File changes and shell commands stay inside your workspace and ask for approval.",
   activeRunGuard: "This task is still active. Stop or close it before starting another conversation."
 });
 
 export const READ_TOOLS = Object.freeze(["fs.list", "fs.search", "fs.read", "git.diff"]);
-export const CHANGE_TOOLS = Object.freeze(["fs.write", "fs.patch"]);
 export const SHELL_TOOLS = Object.freeze(["shell.exec"]);
+export const CHANGE_TOOLS = Object.freeze(["fs.write", "fs.patch", ...SHELL_TOOLS]);
 
 // This is the complete set of local tools understood by the desktop/runtime
 // protocol. It is a capability declaration, not a grant: the selected
@@ -48,25 +46,22 @@ export const SHELL_TOOLS = Object.freeze(["shell.exec"]);
 // be executed.
 export const PLATFORM_LOCAL_TOOLS = Object.freeze([
   ...READ_TOOLS,
-  ...CHANGE_TOOLS,
-  ...SHELL_TOOLS
+  ...CHANGE_TOOLS
 ]);
 export const ADVERTISED_LOCAL_TOOLS = PLATFORM_LOCAL_TOOLS;
 
 export const PERMISSION_POLICIES = Object.freeze({
-  READ_ONLY: "read-only",
   ASK_BEFORE_CHANGES: "ask-before-changes",
   ALLOW_CHANGES: "allow-changes"
 });
 
-// Keep the existing desktop behavior as the safe default: reads are automatic
-// and file changes require an in-window approval. Shell is opt-in separately.
+// Reads are automatic. File changes and every shell command follow the same
+// user-selected changes policy.
 export const DEFAULT_PERMISSION_POLICY = PERMISSION_POLICIES.ASK_BEFORE_CHANGES;
 
 export const LOCAL_TOOLS_BY_PERMISSION_POLICY = Object.freeze({
-  [PERMISSION_POLICIES.READ_ONLY]: READ_TOOLS,
-  [PERMISSION_POLICIES.ASK_BEFORE_CHANGES]: Object.freeze([...READ_TOOLS, ...CHANGE_TOOLS]),
-  [PERMISSION_POLICIES.ALLOW_CHANGES]: Object.freeze([...READ_TOOLS, ...CHANGE_TOOLS])
+  [PERMISSION_POLICIES.ASK_BEFORE_CHANGES]: PLATFORM_LOCAL_TOOLS,
+  [PERMISSION_POLICIES.ALLOW_CHANGES]: PLATFORM_LOCAL_TOOLS
 });
 
 function assertPermissionPolicy(policy) {
@@ -75,23 +70,15 @@ function assertPermissionPolicy(policy) {
   }
 }
 
-/**
- * Resolve the local capabilities for a user-selected policy.
- * `enableShell` is deliberately explicit because shell is never part of the
- * default policy, even when file changes are allowed.
- */
-export function localToolsForPermissionPolicy(
-  policy = DEFAULT_PERMISSION_POLICY,
-  { enableShell = false } = {}
-) {
+export function localToolsForPermissionPolicy(policy = DEFAULT_PERMISSION_POLICY) {
   assertPermissionPolicy(policy);
-  if (enableShell && policy === PERMISSION_POLICIES.READ_ONLY) {
-    throw new Error("shell.exec is not compatible with the read-only policy");
-  }
-  return Object.freeze([
-    ...LOCAL_TOOLS_BY_PERMISSION_POLICY[policy],
-    ...(enableShell ? SHELL_TOOLS : [])
-  ]);
+  return LOCAL_TOOLS_BY_PERMISSION_POLICY[policy];
+}
+
+export function normalizePermissionPolicy(policy) {
+  return Object.hasOwn(LOCAL_TOOLS_BY_PERMISSION_POLICY, policy)
+    ? policy
+    : DEFAULT_PERMISSION_POLICY;
 }
 
 export function profileStorageKey(profileId, key) {
@@ -101,7 +88,6 @@ export function profileStorageKey(profileId, key) {
 
 export function requiresUserApproval(toolName, policy = DEFAULT_PERMISSION_POLICY) {
   assertPermissionPolicy(policy);
-  if (toolName === "shell.exec") return true;
   return CHANGE_TOOLS.includes(toolName) && policy !== PERMISSION_POLICIES.ALLOW_CHANGES;
 }
 

@@ -270,9 +270,11 @@ Required request fields:
 Required Desktop checks:
 
 - the target resolves inside the currently granted Workspace;
-- read operations obey the selected read policy;
-- changes request approval when the selected policy requires it;
-- Shell runs only when Shell access is enabled;
+- read operations stay inside the currently granted Workspace;
+- file changes and every Shell command request approval when the selected
+  changes policy requires it;
+- Shell is always available as a Desktop capability and has no separate user
+  setting;
 - command and output are shown in a user-comprehensible form;
 - output returned to Runtime is bounded.
 
@@ -376,7 +378,8 @@ part of these steps.
 - Desktop uses only the production Registry and Runtime endpoints.
 - The same account sees only entitled or owned Agents.
 - A conversation records the exact Agent Corpus digest used for each run.
-- A user can select Workspace, permissions, and Shell access, then complete a task.
+- A user can select Workspace and whether Hatch asks before changes, then
+  complete a task with Shell available.
 - Pi `Agent` performs the server-side loop with Kimi thinking enabled.
 - File and Shell tools execute only on Desktop and within the granted Workspace.
 - Changes request approval according to the selected permission policy.

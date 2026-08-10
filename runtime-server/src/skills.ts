@@ -83,7 +83,6 @@ export type ImplicitSkillInvocation = {
 };
 
 export type SkillDiscoveryOptions = {
-  workspaceRoot?: string;
   prompt?: string;
   roots?: Array<{
     path: string;
@@ -131,7 +130,6 @@ const maxDescriptionChars = 1024;
 const skillDescriptionTruncationWarningThresholdChars = 100;
 const skillBundleResourceDirs = ["scripts", "references", "assets"];
 const pluginManifestPaths = [".codex-plugin/plugin.json", ".claude-plugin/plugin.json"];
-const defaultProjectRootMarkers = [".git"];
 const skillsIntroWithAbsolutePaths = "A skill is a set of instructions provided through a `SKILL.md` source. Below is the list of skills that can be used. Each entry includes a name, description, and source locator. `file` locators are on the host filesystem, `environment resource` locators are owned by an execution environment, `orchestrator resource` locators are opaque non-filesystem resources, and `custom resource` locators use their provider's access mechanism.";
 const skillsIntroWithAliases = "A skill is a set of local instructions to follow that is stored in a `SKILL.md` file. Below is the list of skills that can be used. Each entry includes a name, description, and a short path that can be expanded into an absolute path using the skill roots table.";
 
@@ -158,15 +156,6 @@ type RuntimeSkillsConfig = {
   includeInstructions: boolean;
   bundledSkillsEnabled: boolean;
   rules: SkillConfigRule[];
-  projectRootMarkers: string[];
-  projectDocMaxBytes: number;
-  projectDocFallbackFilenames: string[];
-};
-
-export type ProjectDocsRuntimeConfig = {
-  projectRootMarkers: string[];
-  projectDocMaxBytes: number;
-  projectDocFallbackFilenames: string[];
 };
 
 export function skillsRoot(): string {
@@ -181,15 +170,6 @@ export async function listSkills(options: string | SkillDiscoveryOptions = {}): 
 
 export async function includeSkillInstructions(): Promise<boolean> {
   return (await loadRuntimeSkillsConfig()).includeInstructions;
-}
-
-export async function loadProjectDocsRuntimeConfig(): Promise<ProjectDocsRuntimeConfig> {
-  const config = await loadRuntimeSkillsConfig();
-  return {
-    projectRootMarkers: config.projectRootMarkers,
-    projectDocMaxBytes: config.projectDocMaxBytes,
-    projectDocFallbackFilenames: config.projectDocFallbackFilenames
-  };
 }
 
 export async function discoverSkills(options: string | SkillDiscoveryOptions = {}): Promise<SkillRecord[]> {
@@ -976,10 +956,7 @@ function defaultRuntimeSkillsConfig(): RuntimeSkillsConfig {
   return {
     includeInstructions: true,
     bundledSkillsEnabled: true,
-    rules: [],
-    projectRootMarkers: [...defaultProjectRootMarkers],
-    projectDocMaxBytes: 32 * 1024,
-    projectDocFallbackFilenames: []
+    rules: []
   };
 }
 
@@ -1032,18 +1009,6 @@ function parseRuntimeSkillsConfig(source: string, baseDir: string): RuntimeSkill
     const match = line.match(/^([A-Za-z0-9_-]+)\s*=\s*(.+)$/);
     if (!match) continue;
     const [, key, rawValue] = match;
-    if (!section && key === "project_root_markers") {
-      config.projectRootMarkers = parseTomlStringArray(rawValue) ?? config.projectRootMarkers;
-      continue;
-    }
-    if (!section && key === "project_doc_max_bytes") {
-      config.projectDocMaxBytes = parseTomlNonNegativeInteger(rawValue) ?? config.projectDocMaxBytes;
-      continue;
-    }
-    if (!section && key === "project_doc_fallback_filenames") {
-      config.projectDocFallbackFilenames = parseTomlStringArray(rawValue) ?? config.projectDocFallbackFilenames;
-      continue;
-    }
     if (section === "skills") {
       if (key === "include_instructions") {
         config.includeInstructions = parseTomlBoolean(rawValue) ?? config.includeInstructions;
@@ -1091,34 +1056,6 @@ function skillConfigRuleKey(rule: SkillConfigRule): string {
 function parseTomlBoolean(value: string): boolean | undefined {
   const trimmed = value.trim();
   return trimmed === "true" ? true : trimmed === "false" ? false : undefined;
-}
-
-function parseTomlNonNegativeInteger(value: string): number | undefined {
-  const parsed = Number(value.trim());
-  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
-}
-
-function parseTomlStringArray(value: string): string[] | undefined {
-  const trimmed = value.trim();
-  if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) {
-    return undefined;
-  }
-  const body = trimmed.slice(1, -1).trim();
-  if (!body) {
-    return [];
-  }
-  const items: string[] = [];
-  for (const rawItem of body.split(",")) {
-    const item = rawItem.trim();
-    if (!item) {
-      continue;
-    }
-    if (!/^(['"]).*\1$/.test(item)) {
-      return undefined;
-    }
-    items.push(unquoteTomlString(item));
-  }
-  return items;
 }
 
 function unquoteTomlString(value: string): string {

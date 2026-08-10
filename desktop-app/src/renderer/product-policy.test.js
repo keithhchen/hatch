@@ -13,6 +13,7 @@ import {
   creatorAgentFromSession,
   canStartConversation,
   localToolsForPermissionPolicy,
+  normalizePermissionPolicy,
   profileStorageKey,
   requiresUserApproval
 } from "./product-policy.js";
@@ -21,7 +22,7 @@ describe("consumer product contract", () => {
   it("uses generic agent-home copy while presenting the demo creator", () => {
     expect(PRODUCT_COPY.home).toBe("Your agents");
     expect(DEFAULT_CREATOR_AGENT.name).toBe("Creator Agent");
-    expect(PRODUCT_COPY.workspaceRequired).not.toMatch(/resume/i);
+    expect(PRODUCT_COPY.workspaceRequired).toMatch(/workspace/i);
   });
 
   it("renders Creator identity from public Release metadata", () => {
@@ -50,32 +51,37 @@ describe("consumer product contract", () => {
     expect(requiresUserApproval("fs.read")).toBe(false);
   });
 
-  it("advertises shell as a protocol local tool without changing the read/change groups", () => {
+  it("treats every shell command as a change while advertising all local tools", () => {
     expect(READ_TOOLS).toEqual(["fs.list", "fs.search", "fs.read", "git.diff"]);
-    expect(CHANGE_TOOLS).toEqual(["fs.write", "fs.patch"]);
     expect(SHELL_TOOLS).toEqual(["shell.exec"]);
-    expect(PLATFORM_LOCAL_TOOLS).toEqual([...READ_TOOLS, ...CHANGE_TOOLS, ...SHELL_TOOLS]);
+    expect(CHANGE_TOOLS).toEqual(["fs.write", "fs.patch", "shell.exec"]);
+    expect(PLATFORM_LOCAL_TOOLS).toEqual([...READ_TOOLS, ...CHANGE_TOOLS]);
     expect(ADVERTISED_LOCAL_TOOLS).toEqual(PLATFORM_LOCAL_TOOLS);
   });
 
-  it("maps permission policies to safe local tool capabilities", () => {
+  it("always exposes shell and change capabilities for both permission policies", () => {
     expect(DEFAULT_PERMISSION_POLICY).toBe(PERMISSION_POLICIES.ASK_BEFORE_CHANGES);
-    expect(LOCAL_TOOLS_BY_PERMISSION_POLICY[PERMISSION_POLICIES.READ_ONLY])
-      .toEqual(READ_TOOLS);
     expect(localToolsForPermissionPolicy(PERMISSION_POLICIES.ASK_BEFORE_CHANGES))
-      .toEqual([...READ_TOOLS, ...CHANGE_TOOLS]);
+      .toEqual(PLATFORM_LOCAL_TOOLS);
     expect(localToolsForPermissionPolicy(PERMISSION_POLICIES.ALLOW_CHANGES))
-      .toEqual([...READ_TOOLS, ...CHANGE_TOOLS]);
-    expect(localToolsForPermissionPolicy(PERMISSION_POLICIES.ASK_BEFORE_CHANGES, { enableShell: true }))
-      .toEqual([...READ_TOOLS, ...CHANGE_TOOLS, ...SHELL_TOOLS]);
-    expect(() => localToolsForPermissionPolicy(PERMISSION_POLICIES.READ_ONLY, { enableShell: true }))
-      .toThrow(/read-only policy/);
+      .toEqual(PLATFORM_LOCAL_TOOLS);
+    expect(LOCAL_TOOLS_BY_PERMISSION_POLICY).not.toHaveProperty("read-only");
   });
 
-  it("keeps shell approval mandatory even when file changes are allowed", () => {
+  it("migrates removed or unknown permission policies to ask before changes", () => {
+    expect(normalizePermissionPolicy("read-only")).toBe(PERMISSION_POLICIES.ASK_BEFORE_CHANGES);
+    expect(normalizePermissionPolicy("unknown")).toBe(PERMISSION_POLICIES.ASK_BEFORE_CHANGES);
+    expect(normalizePermissionPolicy(PERMISSION_POLICIES.ALLOW_CHANGES))
+      .toBe(PERMISSION_POLICIES.ALLOW_CHANGES);
+  });
+
+  it("applies the selected changes policy to files and every shell command", () => {
+    expect(requiresUserApproval("fs.write", PERMISSION_POLICIES.ASK_BEFORE_CHANGES)).toBe(true);
+    expect(requiresUserApproval("fs.patch", PERMISSION_POLICIES.ASK_BEFORE_CHANGES)).toBe(true);
+    expect(requiresUserApproval("shell.exec", PERMISSION_POLICIES.ASK_BEFORE_CHANGES)).toBe(true);
     expect(requiresUserApproval("fs.write", PERMISSION_POLICIES.ALLOW_CHANGES)).toBe(false);
     expect(requiresUserApproval("fs.patch", PERMISSION_POLICIES.ALLOW_CHANGES)).toBe(false);
-    expect(requiresUserApproval("shell.exec", PERMISSION_POLICIES.ALLOW_CHANGES)).toBe(true);
+    expect(requiresUserApproval("shell.exec", PERMISSION_POLICIES.ALLOW_CHANGES)).toBe(false);
   });
 
   it("guards new conversations while a run remains active", () => {

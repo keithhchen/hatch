@@ -47,7 +47,6 @@ type SkillRuntimeOptions = {
   agentSystemPrompt?: RunContext["agentSystemPrompt"];
   deliveryWorkflow?: RunContext["deliveryWorkflow"];
   deliveryAuditContext?: RunContext["deliveryAuditContext"];
-  workspaceRoot?: string;
   store: RuntimeStore;
   emit: (event: OutboundMessage) => Promise<void>;
   createWorkerRuntime?: () => AgentRuntime;
@@ -161,7 +160,6 @@ export class SkillRuntime {
       agentSystemPrompt: this.options.agentSystemPrompt,
       deliveryWorkflow: this.options.deliveryWorkflow,
       deliveryAuditContext: this.options.deliveryAuditContext,
-      workspaceRoot: this.options.workspaceRoot,
       toolScope: "skill_run",
       skillRunId,
       allowSkillRun: false,
