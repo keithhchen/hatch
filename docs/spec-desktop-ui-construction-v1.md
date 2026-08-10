@@ -30,7 +30,7 @@ macOS UAT 证据：
 - [Minimal Sidebar overlay](proof/desktop-ui/minimal-sidebar-overlay.png)
 - [Minimal Inspector overlay](proof/desktop-ui/minimal-inspector-overlay.png)
 
-已通过的自动验证（2026-08-11 当前 worktree）：Renderer `19 files / 80 tests`；Rust `34 passed / 1 ignored Keychain smoke`；Runtime Node test `101 passed`；Web build；Tauri release `.app` build；production-session `cargo check`。Runtime 验证必须使用独立的 `HATCH_RUNTIME_DATA_DIR`，避免复用旧的 durable idempotency fixture。
+已通过的自动验证（2026-08-11 当前 worktree）：Renderer `19 files / 80 tests`；Rust `34 passed / 1 ignored Keychain smoke`；Runtime Node test `225 passed`；LocalRunner `43 passed`；Web build；Tauri release `.app` build；production-session `cargo check`。Runtime 验证必须使用独立的 `HATCH_RUNTIME_DATA_DIR`，避免复用旧的 durable idempotency fixture。
 
 ## 目标
 

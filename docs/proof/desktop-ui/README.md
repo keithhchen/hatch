@@ -23,7 +23,8 @@ ad-hoc `.app`.
 
 - Renderer: 19 files / 80 tests
 - Rust Tauri library: 34 passed / 1 ignored (unlocked Keychain smoke)
-- Runtime: 101 Node subtests passed with an isolated `HATCH_RUNTIME_DATA_DIR`
+- Runtime: 225 Node subtests passed with an isolated `HATCH_RUNTIME_DATA_DIR`
+- LocalRunner: 43 tests passed (filesystem, shell and macOS Seatbelt suites)
 - `npm run build:web`
 - `npm run build:app` (release `.app`, ad-hoc/UAT; not a publishable notarized artifact)
 
