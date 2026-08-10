@@ -86,6 +86,7 @@ import {
 } from "./local-tool-lifecycle.js";
 import { DesktopWindowShell } from "./desktop-shell.jsx";
 import { clampWindowFrame, normalizeWindowFrame } from "./desktop-window-frame.js";
+import { accountScopedWindowContext } from "./desktop-window-context.js";
 import {
   DESKTOP_LAYOUT,
   DESKTOP_ZOOM,
@@ -279,6 +280,11 @@ function App() {
       ...windowContextRef.current,
       ...patch
     };
+    // Window labels are stable across launches, but a user can sign out and
+    // sign in as another account in the same native window. Keep the
+    // presentational context account-scoped so a composer draft, Conversation
+    // id, or restored workspace projection can never cross that boundary.
+    if (buyerProfile.id) next.accountId = buyerProfile.id;
     windowContextRef.current = next;
     if (!window.__TAURI_INTERNALS__) return;
     void invokeTauri("patch_window_settings", { patch: { context: next } }).catch(() => {});
@@ -796,18 +802,23 @@ function App() {
       const context = saved?.context && typeof saved.context === "object" && !Array.isArray(saved.context)
         ? saved.context
         : {};
+      // Context written by older builds had no account binding. Discard it
+      // once rather than risking a cross-account draft or Conversation
+      // projection; pane/frame preferences remain available independently.
+      const accountBoundContext = accountScopedWindowContext(context, buyerSession.profile.id);
       windowContextRef.current = {
-        ...context,
-        conversationId: typeof context.conversationId === "string" ? context.conversationId : "",
-        workspaceGrant: normalizeWorkspaceGrant(context.workspaceGrant),
-        permissionMode: context.permissionMode ? normalizePermissionPolicy(context.permissionMode) : "",
-        activeRun: parseStoredJson(context.activeRun),
-        composerDraft: typeof context.composerDraft === "string" ? context.composerDraft : "",
-        scrollTop: Number.isFinite(Number(context.scrollTop))
-          ? Math.max(0, Number(context.scrollTop))
+        ...accountBoundContext,
+        accountId: buyerSession.profile.id,
+        conversationId: typeof accountBoundContext.conversationId === "string" ? accountBoundContext.conversationId : "",
+        workspaceGrant: normalizeWorkspaceGrant(accountBoundContext.workspaceGrant),
+        permissionMode: accountBoundContext.permissionMode ? normalizePermissionPolicy(accountBoundContext.permissionMode) : "",
+        activeRun: parseStoredJson(accountBoundContext.activeRun),
+        composerDraft: typeof accountBoundContext.composerDraft === "string" ? accountBoundContext.composerDraft : "",
+        scrollTop: Number.isFinite(Number(accountBoundContext.scrollTop))
+          ? Math.max(0, Number(accountBoundContext.scrollTop))
           : 0,
-        conversationCursor: Number.isFinite(Number(context.conversationCursor))
-          ? Math.max(0, Number(context.conversationCursor))
+        conversationCursor: Number.isFinite(Number(accountBoundContext.conversationCursor))
+          ? Math.max(0, Number(accountBoundContext.conversationCursor))
           : 0
       };
       conversationCursorRef.current = requestedConversationIdRef.current

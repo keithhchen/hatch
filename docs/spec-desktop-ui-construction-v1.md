@@ -17,7 +17,7 @@ macOS 与 Windows 都是一等平台。V1 使用 Tauri 稳定支持的 Native su
 
 - P0：debug/ad-hoc/UAT session 只使用进程内 token；macOS 正式签名包进入受 Developer ID / Team ID 约束的 Keychain。Windows 的 Win32 Generic Credential Manager 与 PasswordVault 都不能提供同用户 full-trust 进程不可读的 app-only bearer-token 边界，当前明确 fail-closed，未来须另立 device-bound session backend；Rust 持有 Workspace/approval authority。
 - P1：React `DesktopWindowShell`、regular/compact/minimal tier、split divider、native-like overlay、局部 table/code overflow 与 accessibility contract。
-- P2：durable Conversation/Run repository、REST/WS idempotency、active-run exclusion、restart→`interrupted`，以及 Desktop Conversation Library 的 list/create/select/rename/archive 基础接线。每个 native window 现在保存自己的 Conversation、Workspace grant、permission、active-run projection、`composerDraft` 与 snapshot cursor；profile settings 只作为旧单窗口数据的迁移 fallback，workspace onboarding 的旧 `draft` 字段不再冒充 Composer draft。V1 的恢复边界是 observer recovery（snapshot + cursor replay）；断开或 Runtime 重启会把未完成 Run 标为 `interrupted`，不自动 reclaim、重放 tool 或伪装成 `running`。
+- P2：durable Conversation/Run repository、REST/WS idempotency、active-run exclusion、restart→`interrupted`，以及 Desktop Conversation Library 的 list/create/select/rename/archive 基础接线。每个 native window 现在保存自己的 Conversation、Workspace grant、permission、active-run projection、`composerDraft` 与 snapshot cursor；context 以 account id 绑定，换账号登录时不会恢复上一账号的 Conversation、workspace 投影或草稿；profile settings 只作为旧单窗口数据的迁移 fallback，workspace onboarding 的旧 `draft` 字段不再冒充 Composer draft。V1 的恢复边界是 observer recovery（snapshot + cursor replay）；断开或 Runtime 重启会把未完成 Run 标为 `interrupted`，不自动 reclaim、重放 tool 或伪装成 `running`。
 - P3：Tauri application/context menu、semantic command routing、focused-window new-conversation scaffold 与 window-scoped bridge。
 - P3 尚未完整交付的系统集成：Quick Look/Open；Reveal、Notifications/Dock attention 与独立 Settings/About auxiliary windows 已接入受支持的窄 native bridge。
 - 尚未宣称 P4 完成：Windows 真机、VoiceOver/Narrator、签名发布包、双屏/DPI/IME 和完整 multi-window recovery 仍需目标环境验收。
@@ -30,7 +30,7 @@ macOS UAT 证据：
 - [Minimal Sidebar overlay](proof/desktop-ui/minimal-sidebar-overlay.png)
 - [Minimal Inspector overlay](proof/desktop-ui/minimal-inspector-overlay.png)
 
-已通过的自动验证（2026-08-11 当前 worktree）：Renderer `20 files / 82 tests`；Rust `36 passed / 1 ignored Keychain smoke`；Runtime Node test `226 passed`；LocalRunner `43 passed`；Web build；Tauri release `.app` build；production-session `cargo check`。Runtime 验证必须使用独立的 `HATCH_RUNTIME_DATA_DIR`，避免复用旧的 durable idempotency fixture。
+已通过的自动验证（2026-08-11 当前 worktree）：Renderer `21 files / 84 tests`；Rust `36 passed / 1 ignored Keychain smoke`；Runtime Node test `226 passed`；LocalRunner `43 passed`；Web build；Tauri release `.app` build；production-session `cargo check`。Runtime 验证必须使用独立的 `HATCH_RUNTIME_DATA_DIR`，避免复用旧的 durable idempotency fixture。
 
 详细的逐条状态、证据和外部验收边界见 [Desktop UI v1 验收矩阵](proof/desktop-ui/acceptance-matrix.md)。矩阵区分本机 PASS、实现但缺环境的 PARTIAL/EXTERNAL，以及明确延期的 DEFERRED；本 spec 在 P4 所列跨平台条件全部通过前不会标记为 complete。
 

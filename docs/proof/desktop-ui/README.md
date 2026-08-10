@@ -40,7 +40,7 @@ distribution builds.
 
 ## Automated evidence recorded with these captures
 
-- Renderer: 20 files / 82 tests
+- Renderer: 21 files / 84 tests
 - Rust Tauri library: 36 passed / 1 ignored (unlocked Keychain smoke)
 - Runtime: 226 Node subtests passed with an isolated `HATCH_RUNTIME_DATA_DIR`
 - LocalRunner: 43 tests passed (filesystem, shell and macOS Seatbelt suites)
@@ -80,9 +80,11 @@ The macOS accessibility tree additionally confirmed that a minimal overlay
 removes the hidden pane from the main tree, focuses its close action on open,
 and returns focus to the toolbar toggle after Escape. Window app-data now
 stores `composerDraft` and `viewport scrollTop` separately from the workspace
-onboarding draft, so a close/reopen does not discard unfinished input or the
-reading position (the persistence path is covered by renderer/native settings
-tests; a full crash/restart proof still belongs to P4).
+onboarding draft, and binds the context to the signed-in account, so a
+close/reopen does not discard unfinished input or the reading position while a
+sign-out/sign-in transition cannot leak it across accounts (the persistence path
+is covered by renderer/native settings tests; a full crash/restart proof still
+belongs to P4).
 
 ## Native UX judgment
 
