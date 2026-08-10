@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { strToU8, zipSync } from "fflate";
-import { test } from "node:test";
+import test from "node:test";
 import { AgentCorpusResolver } from "./agentCorpus.js";
 import { RegistryStoreTs } from "./registryStore.js";
 
@@ -85,4 +85,65 @@ test("TypeScript Registry requires Qdrant when a Corpus contains knowledge", asy
     store.publishAgentCorpusBundle("maya-chen", "signal-review", bundle()),
     /Qdrant knowledge index is not configured/
   );
+});
+
+test("Registry access projection respects status and joins current presentation", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-registry-access-"));
+  const statePath = path.join(root, "state.json");
+  await writeFile(statePath, JSON.stringify({
+    schema_version: 1,
+    agent_corpora: [{
+      creator_id: "maya",
+      agent_id: "signal",
+      corpus_digest: "sha256:signal",
+      creator_name: "Maya Chen",
+      product_id: "signal-product",
+      product_name: "Signal Review",
+      product_description: "Review work",
+      product_boundaries: [],
+      presentation: { accent: "orange" },
+      knowledge_namespace: "maya:signal",
+      status: "published",
+      published_at: "2026-08-03T00:00:00.000Z"
+    }],
+    agent_access: [
+      {
+        entitlement_id: "ent_active",
+        user_id: "jordan",
+        creator_id: "maya",
+        agent_id: "signal",
+        product_id: "signal-product",
+        status: "active",
+        granted_at: "2026-08-03T00:00:00.000Z"
+      },
+      {
+        entitlement_id: "ent_revoked",
+        user_id: "jordan",
+        creator_id: "maya",
+        agent_id: "other",
+        product_id: "other-product",
+        status: "revoked",
+        granted_at: "2026-08-04T00:00:00.000Z"
+      }
+    ]
+  }), "utf8");
+
+  const store = await RegistryStoreTs.open({ corpusRoot: path.join(root, "corpora"), statePath });
+  try {
+    assert.deepEqual(store.listAgentAccess("jordan").map((grant) => grant.entitlement_id), ["ent_active"]);
+    assert.deepEqual(store.listAgentAccessPresentation("jordan")[0], {
+      entitlement_id: "ent_active",
+      user_id: "jordan",
+      creator_id: "maya",
+      agent_id: "signal",
+      product_id: "signal-product",
+      status: "active",
+      granted_at: "2026-08-03T00:00:00.000Z",
+      creator: { id: "maya", name: "Maya Chen" },
+      product: { id: "signal-product", name: "Signal Review", description: "Review work" },
+      presentation: { accent: "orange" }
+    });
+  } finally {
+    await store.close();
+  }
 });

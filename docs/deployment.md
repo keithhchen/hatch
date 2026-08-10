@@ -17,10 +17,10 @@ or separate production Runtime exists. The server uses two Compose projects:
 
 1. Install Docker Engine and the Compose plugin on the Shanghai host.
 2. Create `/opt/hatch/.env` from the root `.env.example` and fill the LLM,
-   DashScope, Postgres, Registry signing, Web Search, and publish-token values.
+   DashScope, Postgres, Web Search, and publish-token values.
    Never commit this file or put these values in GitHub Actions.
    The file must also contain non-empty `HATCH_REGISTRY_DATABASE_URL`,
-   `HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN`, and `HATCH_AUTH_SIGNING_SECRET`.
+   `HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN`, and `HATCH_REGISTRY_URL`.
    The Runtime also requires `HATCH_OUTPUT_GUARD=enforce`. Attach the
    project-level `HatchRuntimeRole` to the ECS instance before deploying; the
    container obtains short-lived credentials from IMDSv2 and uses the Shanghai

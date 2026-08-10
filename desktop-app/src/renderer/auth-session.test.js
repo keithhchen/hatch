@@ -1,74 +1,99 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   clearAuthSession,
-  configuredAuthSession,
+  createTauriAuthStorage,
+  fetchAuthAccount,
+  hydrateAuthSession,
+  isAuthInvalidError,
+  isNetworkError,
   loadSavedAuthSession,
+  revokeAuthSession,
   saveAuthSession,
-  sessionStorageKey,
-  signInAuthSession,
-  validateAndSaveAuthSession
+  signInAuthSession
 } from "./auth-session.js";
 
 describe("account sessions", () => {
-  it("loads an injected signed account token", () => {
-    expect(configuredAuthSession({
-      VITE_HATCH_ACCOUNT_ID: "maya-chen",
-      VITE_HATCH_DISPLAY_NAME: "Maya Chen",
-      VITE_HATCH_ACCOUNT_ROLE: "creator",
-      VITE_HATCH_AUTH_TOKEN: "signed-token"
-    })).toEqual({
-      profile: { id: "maya-chen", name: "Maya Chen", role: "creator", initials: "MC" },
-      accessToken: "signed-token"
-    });
-  });
-
-  it("signs in against the Registry without inventing a local identity", async () => {
-    const fetchImpl = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        token: "signed-token",
-        account: { id: "maya-chen", role: "creator", email: "maya@example.com", display_name: "Maya Chen" }
-      })
-    }));
-    await expect(signInAuthSession(
-      { email: " Maya@example.com ", password: "password123" },
+  it("signs in against the Registry and accepts an empty Agent library", async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      account: { id: "user_123", role: "user", email: "jordan@example.com", display_name: "Jordan Lee" },
+      session: { token: "opaque-token", expires_at: "2026-11-08T00:00:00.000Z" }
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    const signedIn = await signInAuthSession(
+      { email: " Jordan@example.com ", password: "password123" },
       "https://hatch.example",
       fetchImpl
-    )).resolves.toEqual({
-      profile: { id: "maya-chen", name: "Maya Chen", role: "creator", initials: "MC" },
-      accessToken: "signed-token"
+    );
+    expect(signedIn).toEqual({
+      profile: { id: "user_123", name: "Jordan Lee", role: "user", initials: "JL" },
+      accessToken: "opaque-token",
+      expiresAt: "2026-11-08T00:00:00.000Z"
     });
     expect(fetchImpl).toHaveBeenCalledWith("https://hatch.example/v1/auth/signin", expect.objectContaining({ method: "POST" }));
   });
 
-  it("saves and restores separate account profiles", () => {
-    const storage = memoryStorage();
-    const maya = { profile: { id: "maya-chen", name: "Maya Chen", role: "creator", initials: "MC" }, accessToken: "maya-token" };
-    const jordan = { profile: { id: "user_123", name: "Jordan Lee", role: "user", initials: "JL" }, accessToken: "jordan-token" };
-    saveAuthSession(maya, storage);
-    saveAuthSession(jordan, storage);
-    expect(loadSavedAuthSession(storage)).toEqual(jordan);
-    clearAuthSession(jordan, storage);
-    expect(storage.getItem(sessionStorageKey(maya.profile.id))).not.toBeNull();
-    expect(loadSavedAuthSession(storage)).toBeNull();
+  it("stores only the opaque token in the secure storage adapter", async () => {
+    const storage = memorySecureStorage();
+    const session = {
+      profile: { id: "user_123", name: "Jordan Lee", role: "user", initials: "JL" },
+      accessToken: "opaque-token"
+    };
+    await saveAuthSession(session, storage);
+    await expect(loadSavedAuthSession(storage)).resolves.toEqual({ accessToken: "opaque-token" });
+    expect(storage.value).toBe("opaque-token");
+    await clearAuthSession(session, storage);
+    await expect(loadSavedAuthSession(storage)).resolves.toBeNull();
   });
 
-  it("persists only after the account agent library check succeeds", async () => {
-    const storage = memoryStorage();
-    const session = { profile: { id: "user_123", name: "Jordan", role: "user", initials: "J" }, accessToken: "signed-token" };
-    await expect(validateAndSaveAuthSession(session, async (token) => {
-      expect(token).toBe("signed-token");
-      return [{ entitlement_id: "ent_signal" }];
-    }, storage)).resolves.toEqual([{ entitlement_id: "ent_signal" }]);
-    expect(loadSavedAuthSession(storage)).toEqual(session);
+  it("hydrates the identity only after Registry /auth/me confirms the session", async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      id: "user_123",
+      role: "user",
+      email: "jordan@example.com",
+      display_name: "Jordan Lee",
+      session_expires_at: "2026-11-08T00:00:00.000Z"
+    }), { status: 200 }));
+    const account = await fetchAuthAccount("https://hatch.example", "opaque-token", fetchImpl);
+    expect(hydrateAuthSession({ accessToken: "opaque-token" }, account)).toMatchObject({
+      profile: { id: "user_123", role: "user" },
+      accessToken: "opaque-token",
+      expiresAt: "2026-11-08T00:00:00.000Z"
+    });
+  });
+
+  it("distinguishes an invalid session from a network failure", async () => {
+    const invalid = await fetchAuthAccount("https://hatch.example", "expired", async () => new Response(
+      JSON.stringify({ detail: "A valid account token is required." }), { status: 401 }
+    )).catch((error) => error);
+    expect(isAuthInvalidError(invalid)).toBe(true);
+
+    const offline = await fetchAuthAccount("https://hatch.example", "opaque-token", async () => {
+      throw new Error("offline");
+    }).catch((error) => error);
+    expect(isNetworkError(offline)).toBe(true);
+  });
+
+  it("makes logout best effort so local sign-out can complete offline", async () => {
+    const fetchImpl = vi.fn(async () => { throw new Error("offline"); });
+    await expect(revokeAuthSession("https://hatch.example", "opaque-token", fetchImpl)).resolves.toBeUndefined();
+  });
+
+  it("uses the native bridge when available and falls back in a web-only test", async () => {
+    const invoke = vi.fn(async (command) => command === "read_auth_token" ? "native-token" : undefined);
+    const storage = createTauriAuthStorage(invoke);
+    await expect(storage.readToken()).resolves.toBe("native-token");
+    await storage.writeToken("next-token");
+    await storage.clearToken();
+    expect(invoke).toHaveBeenCalledWith("write_auth_token", { token: "next-token" });
+    expect(invoke).toHaveBeenCalledWith("clear_auth_token");
   });
 });
 
-function memoryStorage() {
-  const values = new Map();
+function memorySecureStorage() {
+  let value = null;
   return {
-    getItem: (key) => values.get(key) ?? null,
-    setItem: (key, value) => values.set(key, String(value)),
-    removeItem: (key) => values.delete(key)
+    get value() { return value; },
+    async readToken() { return value; },
+    async writeToken(next) { value = next; },
+    async clearToken() { value = null; }
   };
 }

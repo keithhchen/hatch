@@ -29,18 +29,23 @@ import {
   creatorAgentFromEntitlement,
   CHANGE_TOOLS,
   localToolsForPermissionPolicy,
-  profileStorageKey,
   requiresUserApproval,
   workspaceGrantLabel
 } from "./product-policy.js";
 import { fetchPurchasedCreatorAgents, runtimeHttpUrl } from "./entitlement-client.js";
 import {
+  fetchAuthAccount,
   signInAuthSession,
   clearAuthSession,
-  configuredAuthSession,
+  createTauriAuthStorage,
+  hydrateAuthSession,
   loadSavedAuthSession,
-  validateAndSaveAuthSession
+  isAuthInvalidError,
+  isNetworkError,
+  revokeAuthSession,
+  saveAuthSession
 } from "./auth-session.js";
+import { createTauriSettingsStore } from "./desktop-settings.js";
 
 const PROTOCOL_VERSION = "0.4";
 const OUTPUT_FILTERED_COPY = "This response was blocked by the output safety check.";
@@ -49,7 +54,7 @@ const SKILL_RUN_ACTIVITY_PART = "hatch.skill_run_activity";
 const LOCAL_TOOL_TIMEOUT_MS = 45_000;
 const DEFAULT_RUNTIME_URL = import.meta.env.VITE_HATCH_RUNTIME_URL || "wss://hatch.tokenquadrant.cn/v1/runtime";
 const DEFAULT_AUTH_URL = import.meta.env.VITE_HATCH_AUTH_URL || "https://hatch.tokenquadrant.cn";
-const CONFIGURED_AUTH_SESSION = configuredAuthSession();
+const BROWSE_CATALOG_URL = import.meta.env.VITE_HATCH_CATALOG_URL || "https://hatch.tokenquadrant.cn/agents";
 const EMPTY_PROFILE = Object.freeze({ id: "anonymous", name: "User", initials: "U" });
 const PERMISSION_MODES = Object.freeze([
   { value: PERMISSION_POLICIES.READ_ONLY, label: "Read only", detail: "Read files only" },
@@ -60,6 +65,14 @@ const DEFAULT_PERMISSION_MODE = DEFAULT_PERMISSION_POLICY;
 const ApprovalContext = createContext(null);
 
 function App() {
+  const authStorageRef = useRef(null);
+  const settingsStoreRef = useRef(null);
+  if (!authStorageRef.current) {
+    authStorageRef.current = createTauriAuthStorage(invoke, {
+      strict: typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__)
+    });
+  }
+  if (!settingsStoreRef.current) settingsStoreRef.current = createTauriSettingsStore(invoke);
   const socketRef = useRef(null);
   // Runtime messages arrive on a WebSocket listener created before React has
   // necessarily re-rendered after a folder grant. Local tool execution must
@@ -77,11 +90,18 @@ function App() {
   const reconnectAttemptRef = useRef(0);
   const intentionalDisconnectRef = useRef(true);
   const approvalResolversRef = useRef(new Map());
+  const entitlementRefreshRef = useRef(false);
+  const lastEntitlementRefreshRef = useRef(0);
   const [serverUrl] = useState(DEFAULT_RUNTIME_URL);
   const [workspace, setWorkspace] = useState("");
   const [workspaceDraft, setWorkspaceDraft] = useState("");
-  const [signedIn, setSignedIn] = useState(false);
-  const [buyerSession, setBuyerSession] = useState(() => CONFIGURED_AUTH_SESSION ?? loadSavedAuthSession());
+  const [authState, setAuthState] = useState("loading");
+  const [startupError, setStartupError] = useState("");
+  const [settingsReady, setSettingsReady] = useState(false);
+  const [bootstrapAttempt, setBootstrapAttempt] = useState(0);
+  const [entitlementRefreshing, setEntitlementRefreshing] = useState(false);
+  const [entitlementError, setEntitlementError] = useState("");
+  const [buyerSession, setBuyerSession] = useState(null);
   const [creatorAgentEntitlements, setCreatorAgentEntitlements] = useState([]);
   const [selectedEntitlementId, setSelectedEntitlementId] = useState("");
   const [signInStatus, setSignInStatus] = useState("idle");
@@ -98,6 +118,139 @@ function App() {
   const [approvalRequests, setApprovalRequests] = useState({});
   const [creatorAgent, setCreatorAgent] = useState(DEFAULT_CREATOR_AGENT);
   const buyerProfile = buyerSession?.profile ?? EMPTY_PROFILE;
+  const signedIn = authState === "signed-in";
+
+  function getProfileSetting(key, fallback = undefined, profileId = buyerProfile.id) {
+    return settingsStoreRef.current?.getProfile(profileId, key, fallback) ?? fallback;
+  }
+
+  function setProfileSetting(key, value, profileId = buyerProfile.id) {
+    settingsStoreRef.current?.setProfile(profileId, key, value);
+  }
+
+  function getConversationId(profileId, entitlementId, fallback) {
+    const byEntitlement = getProfileSetting("conversation_id_by_entitlement", {}, profileId);
+    if (byEntitlement && typeof byEntitlement === "object" && entitlementId && typeof byEntitlement[entitlementId] === "string") {
+      return byEntitlement[entitlementId];
+    }
+    return getProfileSetting("conversation_id", fallback, profileId) || fallback;
+  }
+
+  function setConversationIdForEntitlement(profileId, entitlementId, value) {
+    if (!entitlementId || !value) return;
+    const current = getProfileSetting("conversation_id_by_entitlement", {}, profileId);
+    setProfileSetting("conversation_id_by_entitlement", {
+      ...(current && typeof current === "object" ? current : {}),
+      [entitlementId]: value
+    }, profileId);
+  }
+
+  function chooseEntitlement(entitlements, profileId, currentId = "") {
+    if (!Array.isArray(entitlements) || entitlements.length === 0) return null;
+    const active = entitlements
+      .filter((item) => item?.status === "active")
+      .sort((left, right) => Date.parse(right.granted_at || "") - Date.parse(left.granted_at || ""));
+    if (active.length === 0) return null;
+    const current = active.find((item) => item.entitlement_id === currentId);
+    if (current) return current;
+    const previousId = settingsStoreRef.current?.getProfile(profileId, "last_selected_entitlement_id", "");
+    return active.find((item) => item.entitlement_id === previousId) || active[0];
+  }
+
+  function applySignedInSession(session, entitlements, { preserveCurrent = false } = {}) {
+    const profileId = session.profile?.id || EMPTY_PROFILE.id;
+    const selected = chooseEntitlement(entitlements, profileId, preserveCurrent ? selectedEntitlementId : "");
+    setBuyerSession(session);
+    setCreatorAgentEntitlements(entitlements);
+    setSelectedEntitlementId(selected?.entitlement_id || "");
+    setCreatorAgent(selected ? creatorAgentFromEntitlement(selected) : DEFAULT_CREATOR_AGENT);
+    setEntitlementError("");
+    if (selected) setProfileSetting("last_selected_entitlement_id", selected.entitlement_id, profileId);
+    setStartupError("");
+    setAuthState("signed-in");
+    setSignInStatus("ready");
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    async function bootstrapAuth() {
+      await settingsStoreRef.current.load();
+      if (cancelled) return;
+      setSettingsReady(true);
+      const savedSession = await loadSavedAuthSession(authStorageRef.current);
+      if (!savedSession) {
+        setAuthState("signed-out");
+        return;
+      }
+      try {
+        const account = await fetchAuthAccount(DEFAULT_AUTH_URL, savedSession.accessToken);
+        const session = hydrateAuthSession(savedSession, account);
+        const entitlements = await fetchPurchasedCreatorAgents(DEFAULT_AUTH_URL, session.accessToken);
+        if (!cancelled) applySignedInSession(session, entitlements);
+      } catch (error) {
+        if (cancelled) return;
+        if (isAuthInvalidError(error)) {
+          await clearAuthSession(savedSession, authStorageRef.current);
+          setBuyerSession(null);
+          setAuthState("signed-out");
+          setSignInError("");
+          return;
+        }
+        setStartupError(errorMessage(error));
+        setAuthState("network-error");
+      }
+    }
+    void bootstrapAuth();
+    return () => { cancelled = true; };
+  }, [bootstrapAttempt]);
+
+  async function refreshEntitlements({ startup = false, preserveCurrent = true } = {}) {
+    if (!buyerSession?.accessToken || entitlementRefreshRef.current) return;
+    entitlementRefreshRef.current = true;
+    setEntitlementRefreshing(true);
+    lastEntitlementRefreshRef.current = Date.now();
+    try {
+      const entitlements = await fetchPurchasedCreatorAgents(DEFAULT_AUTH_URL, buyerSession.accessToken);
+      applySignedInSession(buyerSession, entitlements, { preserveCurrent });
+    } catch (error) {
+      if (isAuthInvalidError(error)) {
+        await clearAuthSession(buyerSession, authStorageRef.current);
+        disconnectRuntime();
+        setBuyerSession(null);
+        setCreatorAgentEntitlements([]);
+        setEntitlementError("");
+        setSelectedEntitlementId("");
+        setCreatorAgent(DEFAULT_CREATOR_AGENT);
+        setAuthState("signed-out");
+        return;
+      }
+      if (startup) {
+        setStartupError(errorMessage(error));
+        setAuthState("network-error");
+      } else {
+        setEntitlementError("Connection lost. Your account stays here. Retry when you’re online.");
+        setStatus("Couldn't refresh your Agents. Try again when you're online.");
+      }
+    } finally {
+      entitlementRefreshRef.current = false;
+      setEntitlementRefreshing(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!signedIn || !buyerSession?.accessToken) return undefined;
+    const refresh = () => {
+      if (document.visibilityState === "hidden") return;
+      if (Date.now() - lastEntitlementRefreshRef.current < 1500) return;
+      void refreshEntitlements({ preserveCurrent: true });
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [buyerSession?.accessToken, signedIn]);
 
   const send = useCallback((message) => {
     const socket = socketRef.current;
@@ -154,9 +307,9 @@ function App() {
     const assistantId = `${runId}_assistant`;
     const startedAt = Date.now();
     activeRunRef.current = { runId, assistantId, text: "", startedAt };
-    localStorage.setItem(profileStorageKey(buyerProfile.id, "activeRun"), JSON.stringify({
+    setProfileSetting("active_run", {
       runId, assistantId, startedAt, conversationId
-    }));
+    });
     setMessages((current) => [
       ...current,
       makeUserMessage(`${runId}_user`, content, startedAt),
@@ -210,21 +363,21 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const workspaceKey = profileStorageKey(buyerProfile.id, "workspaceRoot");
-    const conversationKey = profileStorageKey(buyerProfile.id, "conversationId");
-    const activeRunKey = profileStorageKey(buyerProfile.id, "activeRun");
-    const permissionKey = profileStorageKey(buyerProfile.id, "permissionMode");
-    const shellKey = profileStorageKey(buyerProfile.id, "shellAccess");
-    const savedWorkspace = localStorage.getItem(workspaceKey) || "";
-    const savedConversationId = localStorage.getItem(conversationKey) || `conversation_${buyerProfile.id}`;
-    const savedRun = parseStoredJson(localStorage.getItem(activeRunKey));
-    const savedPermission = localStorage.getItem(permissionKey);
+    if (!settingsReady || !signedIn || !buyerSession?.profile?.id) return;
+    const savedWorkspace = getProfileSetting("workspace_root", "");
+    const savedConversationId = getConversationId(
+      buyerProfile.id,
+      selectedEntitlementId,
+      `conversation_${buyerProfile.id}_${selectedEntitlementId || "desktop"}`
+    );
+    const savedRun = parseStoredJson(getProfileSetting("active_run", null));
+    const savedPermission = getProfileSetting("permission_mode");
     const nextPermission = PERMISSION_MODES.some((mode) => mode.value === savedPermission)
       ? savedPermission
       : DEFAULT_PERMISSION_MODE;
     const nextShellAccess = nextPermission === PERMISSION_POLICIES.READ_ONLY
       ? false
-      : localStorage.getItem(shellKey) !== "false";
+      : getProfileSetting("shell_access", true) !== false && getProfileSetting("shell_access", "true") !== "false";
     setWorkspace(savedWorkspace);
     workspaceRef.current = savedWorkspace;
     setWorkspaceDraft(savedWorkspace);
@@ -242,7 +395,7 @@ function App() {
       activeRunRef.current = null;
       setInterruptedRun(null);
     }
-  }, [buyerProfile.id]);
+  }, [buyerProfile.id, buyerSession?.profile?.id, selectedEntitlementId, settingsReady, signedIn]);
 
   useEffect(() => () => {
     intentionalDisconnectRef.current = true;
@@ -288,13 +441,17 @@ function App() {
     connectionConfigRef.current = {
       serverUrl: targetServerUrl.trim(),
       workspace: targetWorkspace.trim(),
-      conversationId: targetConversationId.trim() || `conversation_${buyerProfile.id}`,
+      conversationId: targetConversationId.trim() || `conversation_${buyerProfile.id}_${targetEntitlementId}`,
       entitlementId: targetEntitlementId,
       ...(targetAgentId ? { agentId: targetAgentId } : {}),
       ...(targetCreatorId ? { creatorId: targetCreatorId } : {})
     };
-    localStorage.setItem(profileStorageKey(buyerProfile.id, "workspaceRoot"), targetWorkspace.trim());
-    localStorage.setItem(profileStorageKey(buyerProfile.id, "conversationId"), targetConversationId.trim() || `conversation_${buyerProfile.id}`);
+    setProfileSetting("workspace_root", targetWorkspace.trim());
+    setConversationIdForEntitlement(
+      buyerProfile.id,
+      targetEntitlementId,
+      targetConversationId.trim() || `conversation_${buyerProfile.id}_${targetEntitlementId}`
+    );
 
     let normalizedWorkspace;
     try {
@@ -305,7 +462,7 @@ function App() {
       workspaceRef.current = normalizedWorkspace;
       connectionConfigRef.current.workspace = normalizedWorkspace;
       setStatus("Loading history...");
-      const activeConversationId = targetConversationId.trim() || "desktop-chat";
+      const activeConversationId = targetConversationId.trim() || `conversation_${buyerProfile.id}_${targetEntitlementId}`;
       const history = await loadConversationHistory(
         targetServerUrl.trim(),
         activeConversationId,
@@ -474,7 +631,7 @@ function App() {
         );
       }
       activeRunRef.current = null;
-      localStorage.removeItem(profileStorageKey(buyerProfile.id, "activeRun"));
+      setProfileSetting("active_run", undefined);
       setInterruptedRun(null);
       setRunning(false);
       setStatus("Completed");
@@ -495,7 +652,7 @@ function App() {
         ]);
       }
       activeRunRef.current = null;
-      localStorage.removeItem(profileStorageKey(buyerProfile.id, "activeRun"));
+      setProfileSetting("active_run", undefined);
       setInterruptedRun(null);
       setRunning(false);
       setStatus("Failed");
@@ -621,7 +778,7 @@ function App() {
       workspaceRef.current = normalized;
       setWorkspaceDraft(normalized);
       setWorkspaceGranted(true);
-      localStorage.setItem(profileStorageKey(buyerProfile.id, "workspaceRoot"), normalized);
+      setProfileSetting("workspace_root", normalized);
       setStatus("Folder access granted");
       await connectRuntime({ workspace: normalized, conversationId, preserveMessages: false });
     } catch (error) {
@@ -649,7 +806,7 @@ function App() {
       send({ type: "turn.cancel", run_id: activeRun.runId, reason: "workspace_changed" });
       finishAssistant(activeRun.assistantId, "Task stopped because the workspace changed.", "failed");
       activeRunRef.current = null;
-      localStorage.removeItem(profileStorageKey(buyerProfile.id, "activeRun"));
+      setProfileSetting("active_run", undefined);
       setInterruptedRun(null);
     }
     disconnectRuntime();
@@ -657,7 +814,7 @@ function App() {
     workspaceRef.current = normalized;
     setWorkspaceDraft(normalized);
     setWorkspaceGranted(true);
-    localStorage.setItem(profileStorageKey(buyerProfile.id, "workspaceRoot"), normalized);
+    setProfileSetting("workspace_root", normalized);
     setStatus("Switching workspace…");
     await connectRuntime({ workspace: normalized, conversationId, preserveMessages: true });
   }
@@ -669,8 +826,8 @@ function App() {
     setPermissionMode(nextMode);
     shellAccessRef.current = nextShellAccess;
     setShellAccess(nextShellAccess);
-    localStorage.setItem(profileStorageKey(buyerProfile.id, "permissionMode"), nextMode);
-    localStorage.setItem(profileStorageKey(buyerProfile.id, "shellAccess"), String(nextShellAccess));
+    setProfileSetting("permission_mode", nextMode);
+    setProfileSetting("shell_access", nextShellAccess);
     setStatus(`Permission updated: ${permissionModeLabel(nextMode)}`);
     void restartRuntimeSession();
   }
@@ -679,7 +836,7 @@ function App() {
     const nextShellAccess = Boolean(nextValue) && permissionRef.current !== PERMISSION_POLICIES.READ_ONLY;
     shellAccessRef.current = nextShellAccess;
     setShellAccess(nextShellAccess);
-    localStorage.setItem(profileStorageKey(buyerProfile.id, "shellAccess"), String(nextShellAccess));
+    setProfileSetting("shell_access", nextShellAccess);
     setStatus(nextShellAccess ? "Shell access enabled — approval is still required" : "Shell access disabled");
     void restartRuntimeSession();
   }
@@ -702,14 +859,14 @@ function App() {
     const nextId = `conversation_${buyerProfile.id}_${Date.now()}`;
     setConversationId(nextId);
     setMessages([]);
-    localStorage.setItem(profileStorageKey(buyerProfile.id, "conversationId"), nextId);
+    setConversationIdForEntitlement(buyerProfile.id, selectedEntitlementId, nextId);
     setStatus("New conversation ready");
   }
 
   function clearInterruptedRun() {
     activeRunRef.current = null;
     setInterruptedRun(null);
-    localStorage.removeItem(profileStorageKey(buyerProfile.id, "activeRun"));
+    setProfileSetting("active_run", undefined);
     setStatus("Paused task closed by you");
   }
 
@@ -717,38 +874,50 @@ function App() {
     setSignInStatus("loading");
     setSignInError("");
     try {
-      const nextSession = credentials ? await signInAuthSession(credentials, DEFAULT_AUTH_URL) : buyerSession;
-      if (!nextSession) throw new Error("Sign in to continue.");
-      const entitlements = await validateAndSaveAuthSession(
-        nextSession,
-        (accessToken) => fetchPurchasedCreatorAgents(DEFAULT_AUTH_URL, accessToken)
-      );
-      const selected = entitlements[0];
-      setBuyerSession(nextSession);
-      setCreatorAgentEntitlements(entitlements);
-      setSelectedEntitlementId(selected?.entitlement_id || "");
-      setCreatorAgent(selected ? creatorAgentFromEntitlement(selected) : DEFAULT_CREATOR_AGENT);
-      setSignedIn(true);
-      setSignInStatus("ready");
+      if (!credentials) throw new Error("Enter your email and password.");
+      const signedInSession = await signInAuthSession(credentials, DEFAULT_AUTH_URL);
+      const account = await fetchAuthAccount(DEFAULT_AUTH_URL, signedInSession.accessToken);
+      const nextSession = hydrateAuthSession(signedInSession, account);
+      const entitlements = await fetchPurchasedCreatorAgents(DEFAULT_AUTH_URL, nextSession.accessToken);
+      await saveAuthSession(nextSession, authStorageRef.current);
+      applySignedInSession(nextSession, entitlements);
     } catch (error) {
       setSignInStatus("error");
-      setSignInError(errorMessage(error));
+      setSignInError(isNetworkError(error)
+        ? "Hatch can't reach the service. Check your connection and try again."
+        : errorMessage(error));
     }
   }
 
-  function signOut() {
+  async function signOut() {
     disconnectRuntime();
-    clearAuthSession(buyerSession);
+    await revokeAuthSession(DEFAULT_AUTH_URL, buyerSession?.accessToken);
+    await clearAuthSession(buyerSession, authStorageRef.current);
     activeRunRef.current = null;
     setInterruptedRun(null);
     setBuyerSession(null);
-    setSignedIn(false);
+    setAuthState("signed-out");
     setCreatorAgentEntitlements([]);
+    setEntitlementError("");
     setSelectedEntitlementId("");
     setCreatorAgent(DEFAULT_CREATOR_AGENT);
     setMessages([]);
+    setWorkspace("");
+    setWorkspaceDraft("");
+    setWorkspaceGranted(false);
+    setConversationId("desktop-chat");
     setSignInStatus("idle");
     setSignInError("");
+  }
+
+  async function openBrowseCatalog() {
+    try {
+      await invokeTauri("open_external_url", { url: BROWSE_CATALOG_URL });
+    } catch {
+      // Vite-only renderer tests do not have the native opener command.
+      const opened = window.open(BROWSE_CATALOG_URL, "_blank", "noopener,noreferrer");
+      if (!opened) setStatus("Open the Hatch Creator Agent catalog in your browser.");
+    }
   }
 
   function selectCreatorAgent(entitlement) {
@@ -756,8 +925,10 @@ function App() {
     disconnectRuntime();
     setSelectedEntitlementId(entitlement.entitlement_id);
     setCreatorAgent(creatorAgentFromEntitlement(entitlement));
+    setProfileSetting("last_selected_entitlement_id", entitlement.entitlement_id);
     setMessages([]);
-    setConversationId(`conversation_${buyerProfile.id}_${entitlement.creator_id || "creator"}_${entitlement.agent_id || entitlement.product.id}`);
+    const fallback = `conversation_${buyerProfile.id}_${entitlement.creator_id || "creator"}_${entitlement.agent_id || entitlement.product.id}`;
+    setConversationId(getConversationId(buyerProfile.id, entitlement.entitlement_id, fallback));
   }
 
   function requestToolApproval(message) {
@@ -958,8 +1129,24 @@ function App() {
     }));
   }
 
+  if (authState === "loading") return <LaunchScreen />;
+  if (authState === "network-error") {
+    return <NetworkErrorScreen message={startupError} onRetry={() => { setAuthState("loading"); setBootstrapAttempt((value) => value + 1); }} />;
+  }
   if (!signedIn) {
-    return <SignInScreen profile={buyerSession?.profile} onSignIn={(credentials) => void signIn(credentials)} status={signInStatus} error={signInError} />;
+    return <SignInScreen onSignIn={(credentials) => void signIn(credentials)} status={signInStatus} error={signInError} />;
+  }
+  if (creatorAgentEntitlements.length === 0) {
+    return (
+      <EmptyAgentsScreen
+        profile={buyerProfile}
+        onBrowse={() => void openBrowseCatalog()}
+        onRefresh={() => void refreshEntitlements({ preserveCurrent: true })}
+        onSignOut={() => void signOut()}
+        refreshing={entitlementRefreshing}
+        error={entitlementError}
+      />
+    );
   }
 
   return (
@@ -976,7 +1163,7 @@ function App() {
         <section className="profile-card">
           <span className="avatar">{buyerProfile.initials}</span>
           <div><strong>{buyerProfile.name}</strong><span>Signed in</span></div>
-          <button className="profile-sign-out" type="button" onClick={signOut}>Sign out</button>
+          <button className="profile-sign-out" type="button" onClick={() => void signOut()}>Sign out</button>
         </section>
 
         <section className="side-section agent-nav">
@@ -995,7 +1182,6 @@ function App() {
               </button>
             );
           })}
-          {creatorAgentEntitlements.length === 0 ? <p className="empty-library">No purchased agents yet.</p> : null}
         </section>
         <button className="secondary new-conversation" type="button" onClick={startNewConversation}>+ New conversation</button>
       </aside>
@@ -1465,15 +1651,65 @@ function permissionModeDetail(value) {
   return PERMISSION_MODES.find((mode) => mode.value === value)?.detail || "Ask before file changes";
 }
 
-function SignInScreen({ profile, onSignIn, status, error }) {
-  const [manual, setManual] = useState(!profile);
+function LaunchScreen() {
+  return (
+    <main className="welcome-screen status-screen">
+      <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch.</strong></div>
+      <section className="status-card">
+        <span className="eyebrow">Hatch</span>
+        <h1>Opening your workspace…</h1>
+        <p>Checking your account and Creator Agents.</p>
+      </section>
+    </main>
+  );
+}
+
+function NetworkErrorScreen({ message, onRetry }) {
+  return (
+    <main className="welcome-screen status-screen">
+      <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch.</strong></div>
+      <section className="status-card">
+        <span className="eyebrow">Connection</span>
+        <h1>Hatch can't reach the service</h1>
+        <p>{message || "Check your connection and try again."}</p>
+        <small>Your saved access stays on this computer.</small>
+        <button type="button" onClick={onRetry}>Retry</button>
+      </section>
+    </main>
+  );
+}
+
+function EmptyAgentsScreen({ profile, onBrowse, onRefresh, onSignOut, refreshing, error }) {
+  return (
+    <main className="welcome-screen status-screen empty-agents-screen">
+      <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch.</strong></div>
+      <section className="status-card empty-agents-card">
+        <div className="empty-agents-header">
+          <span className="avatar">{profile.initials}</span>
+          <span><strong>{profile.name}</strong><small>Signed in</small></span>
+          <button className="profile-sign-out" type="button" onClick={onSignOut}>Sign out</button>
+        </div>
+        <span className="eyebrow">Your Creator Agents</span>
+        <h1>Find an Agent built around a creator's proven method.</h1>
+        <p>Your account is ready. Browse the catalog to find an Agent for your work.</p>
+        {error ? <p className="status-inline-error" role="status">{error}</p> : null}
+        <button type="button" onClick={onBrowse}>Browse Creator Agents</button>
+        <button className="secondary status-refresh" type="button" onClick={onRefresh} disabled={refreshing}>
+          {refreshing ? "Refreshing…" : "Refresh"}
+        </button>
+      </section>
+    </main>
+  );
+}
+
+function SignInScreen({ onSignIn, status, error }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const loading = status === "loading";
 
   function submit(event) {
     event.preventDefault();
-    onSignIn(manual ? { email, password } : undefined);
+    onSignIn({ email, password });
   }
 
   return (
@@ -1484,34 +1720,20 @@ function SignInScreen({ profile, onSignIn, status, error }) {
         <h1>Your trusted creator agents, in one place.</h1>
         <p>Sign in to use the Creator Agents available to your account.</p>
         <form className="sign-in-form" onSubmit={submit}>
-          {manual ? (
-            <>
-              <label className="field">
-                <span>Email</span>
-                <input autoCapitalize="none" autoComplete="email" spellCheck="false" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" disabled={loading} />
-              </label>
-              <label className="field">
-                <span>Password</span>
-                <input autoComplete="current-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Your password" disabled={loading} />
-              </label>
-            </>
-          ) : (
-            <div className="returning-profile">
-              <span className="avatar">{profile.initials}</span>
-              <span><strong>{profile.name}</strong><small>Your agents are ready on this computer.</small></span>
-            </div>
-          )}
-          <button type="submit" disabled={loading || (manual && (!email.trim() || !password.trim()))}>
-            {loading ? "Signing in…" : manual ? "Sign in" : `Continue as ${profile.name}`}
+          <label className="field">
+            <span>Email</span>
+            <input autoCapitalize="none" autoComplete="email" spellCheck="false" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" disabled={loading} />
+          </label>
+          <label className="field">
+            <span>Password</span>
+            <input autoComplete="current-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Your password" disabled={loading} />
+          </label>
+          <button type="submit" disabled={loading || (!email.trim() || !password.trim())}>
+            {loading ? "Signing in…" : "Sign in"}
           </button>
         </form>
         {error ? <small className="sign-in-error" role="alert">{error}</small> : null}
-        {profile ? (
-          <button className="sign-in-switch" type="button" onClick={() => { setManual((value) => !value); setEmail(""); setPassword(""); }} disabled={loading}>
-            {manual ? `Continue as ${profile.name}` : "Use a different account"}
-          </button>
-        ) : null}
-        <small>Your access stays on this computer until you sign out.</small>
+        <small>Hatch keeps your secure session on this computer until you sign out.</small>
       </section>
     </main>
   );
@@ -1799,6 +2021,7 @@ function approvalReasonText(message) {
 
 function parseStoredJson(value) {
   if (!value) return null;
+  if (typeof value === "object") return value;
   try {
     return JSON.parse(value);
   } catch {
@@ -1919,7 +2142,7 @@ async function invokeTauri(command, args) {
     return await invoke(command, args);
   } catch (error) {
     if (command === "default_workspace") {
-      return localStorage.getItem("hatch.workspaceRoot") || "";
+      return "";
     }
     if (command === "ensure_workspace") {
       return args?.workspaceRoot ?? "";

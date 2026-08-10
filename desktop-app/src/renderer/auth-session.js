@@ -1,88 +1,165 @@
-const ACTIVE_SESSION_KEY = "hatch.auth.activeProfile";
-const SESSION_KEY_PREFIX = "hatch.auth.profile.";
-
-export function configuredAuthSession(environment = import.meta.env) {
-  const id = environment.VITE_HATCH_ACCOUNT_ID?.trim();
-  const name = environment.VITE_HATCH_DISPLAY_NAME?.trim();
-  const accessToken = environment.VITE_HATCH_AUTH_TOKEN?.trim();
-  const role = environment.VITE_HATCH_ACCOUNT_ROLE?.trim();
-  if (!id || !name || !accessToken || !["user", "creator"].includes(role)) return null;
-  return makeSession({ id, name, role, accessToken });
-}
-
 export async function signInAuthSession({ email, password }, registryUrl, fetchImpl = fetch) {
   const normalizedEmail = String(email ?? "").trim().toLowerCase();
   const normalizedPassword = String(password ?? "");
   if (!normalizedEmail) throw new Error("Enter your email.");
   if (!normalizedPassword) throw new Error("Enter your password.");
-  const response = await fetchImpl(new URL("/v1/auth/signin", registryUrl).toString(), {
-    method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
-    body: JSON.stringify({ email: normalizedEmail, password: normalizedPassword })
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload?.detail || "Email or password is incorrect.");
-  if (!payload?.account?.role || !payload?.account?.id || !payload?.token) {
-    throw new Error("The Registry returned an invalid account.");
+
+  let response;
+  try {
+    response = await fetchImpl(new URL("/v1/auth/signin", registryUrl).toString(), {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ email: normalizedEmail, password: normalizedPassword })
+    });
+  } catch (error) {
+    throw clientError("Hatch can't reach the service. Check your connection and try again.", "network_error", error);
   }
-  return makeSession({
-    id: payload.account.id,
-    name: payload.account.display_name,
-    role: payload.account.role,
-    accessToken: payload.token
-  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(payload?.detail || "Email or password is incorrect.");
+    error.code = response.status === 401 ? "invalid_credentials" : "auth_request_failed";
+    error.status = response.status;
+    throw error;
+  }
+  const token = payload?.session?.token || payload?.token;
+  if (!payload?.account?.role || !payload?.account?.id || !token) {
+    throw clientError("The Registry returned an invalid account.", "auth_request_failed");
+  }
+  return makeSessionFromAccount(payload.account, token, payload.session?.expires_at);
 }
 
-export function loadSavedAuthSession(storage = globalThis.localStorage) {
+export async function fetchAuthAccount(registryUrl, accessToken, fetchImpl = fetch) {
+  if (!accessToken) throw clientError("A valid account session is required.", "auth_invalid", null, 401);
+  let response;
   try {
-    const profileId = storage?.getItem(ACTIVE_SESSION_KEY);
-    if (!profileId) return null;
-    const value = JSON.parse(storage.getItem(sessionStorageKey(profileId)) || "null");
-    if (!isStoredSession(value) || value.profile.id !== profileId) return null;
-    return makeSession({ id: value.profile.id, name: value.profile.name, role: value.profile.role, accessToken: value.accessToken });
+    response = await fetchImpl(new URL("/v1/auth/me", registryUrl).toString(), {
+      headers: { authorization: `Bearer ${accessToken}`, accept: "application/json" }
+    });
+  } catch (error) {
+    throw clientError("Hatch can't reach the service. Check your connection and try again.", "network_error", error);
+  }
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const code = response.status === 401 ? "auth_invalid" : "auth_request_failed";
+    throw clientError(payload?.detail || "We couldn't verify this account session.", code, null, response.status);
+  }
+  if (!payload?.id || !payload?.role || !["user", "creator"].includes(payload.role)) {
+    throw clientError("The Registry returned an invalid account.", "auth_request_failed");
+  }
+  return payload;
+}
+
+export async function loadSavedAuthSession(storage) {
+  if (!storage?.readToken) return null;
+  try {
+    const accessToken = await storage.readToken();
+    return accessToken ? Object.freeze({ accessToken }) : null;
   } catch {
     return null;
   }
 }
 
-export function saveAuthSession(session, storage = globalThis.localStorage) {
+export async function saveAuthSession(session, storage) {
   if (!isStoredSession(session)) throw new Error("A valid session is required.");
-  storage.setItem(sessionStorageKey(session.profile.id), JSON.stringify({
-    profile: { id: session.profile.id, name: session.profile.name, role: session.profile.role },
-    accessToken: session.accessToken
-  }));
-  storage.setItem(ACTIVE_SESSION_KEY, session.profile.id);
+  if (!storage?.writeToken) throw new Error("Secure session storage is unavailable.");
+  await storage.writeToken(session.accessToken);
+  return session;
 }
 
-export async function validateAndSaveAuthSession(session, loadPurchasedAgents, storage = globalThis.localStorage) {
-  if (!isStoredSession(session)) throw new Error("A valid session is required.");
-  const agents = await loadPurchasedAgents(session.accessToken);
-  if (!Array.isArray(agents) || agents.length === 0) {
-    throw new Error("No Creator Agents are available for this account yet.");
+export async function clearAuthSession(session, storage) {
+  if (!storage?.clearToken) return;
+  await storage.clearToken();
+}
+
+export async function revokeAuthSession(registryUrl, accessToken, fetchImpl = fetch) {
+  if (!accessToken) return;
+  try {
+    await fetchImpl(new URL("/v1/auth/logout", registryUrl).toString(), {
+      method: "POST",
+      headers: { authorization: `Bearer ${accessToken}`, accept: "application/json" }
+    });
+  } catch {
+    // Local sign-out still completes when the service is offline.
   }
-  saveAuthSession(session, storage);
-  return agents;
 }
 
-export function clearAuthSession(session, storage = globalThis.localStorage) {
-  const profileId = session?.profile?.id;
-  if (profileId) storage.removeItem(sessionStorageKey(profileId));
-  if (!profileId || storage.getItem(ACTIVE_SESSION_KEY) === profileId) storage.removeItem(ACTIVE_SESSION_KEY);
+export function createTauriAuthStorage(invokeImpl, { strict = false } = {}) {
+  let fallbackToken = null;
+  return {
+    async readToken() {
+      try {
+        const token = await invokeImpl("read_auth_token");
+        if (typeof token === "string" && token.trim()) fallbackToken = token.trim();
+      } catch (error) {
+        // Web-only renderer tests and Vite preview have no native Keychain.
+        if (strict) throw error;
+      }
+      return fallbackToken;
+    },
+    async writeToken(token) {
+      fallbackToken = token;
+      try {
+        await invokeImpl("write_auth_token", { token });
+      } catch (error) {
+        // Keep the in-memory fallback for the current renderer lifetime.
+        if (strict) throw error;
+      }
+    },
+    async clearToken() {
+      fallbackToken = null;
+      try {
+        await invokeImpl("clear_auth_token");
+      } catch {
+        // Clearing the in-memory value is sufficient when no native bridge exists.
+      }
+    }
+  };
 }
 
-export function sessionStorageKey(profileId) {
-  return `${SESSION_KEY_PREFIX}${encodeURIComponent(profileId)}`;
+export function hydrateAuthSession(session, account) {
+  if (!isStoredSession(session)) throw new Error("A valid session is required.");
+  if (!account?.id || !account?.display_name || !["user", "creator"].includes(account.role)) {
+    throw new Error("The Registry returned an invalid account.");
+  }
+  return makeSessionFromAccount(account, session.accessToken, session.expiresAt || account.session_expires_at);
 }
 
-function makeSession({ id, name, role, accessToken }) {
-  return Object.freeze({
-    profile: Object.freeze({ id, name, role, initials: initials(name) }),
-    accessToken
+export function isStoredSession(value) {
+  return Boolean(value?.accessToken);
+}
+
+export function isNetworkError(error) {
+  return error?.code === "network_error";
+}
+
+export function isAuthInvalidError(error) {
+  return error?.code === "auth_invalid" || error?.status === 401;
+}
+
+function makeSessionFromAccount(account, accessToken, expiresAt) {
+  return makeSession({
+    id: account.id,
+    name: account.display_name,
+    role: account.role,
+    accessToken,
+    expiresAt
   });
 }
 
-function isStoredSession(value) {
-  return Boolean(value?.profile?.id && value?.profile?.name && ["user", "creator"].includes(value?.profile?.role) && value?.accessToken);
+function makeSession({ id, name, role, accessToken, expiresAt }) {
+  return Object.freeze({
+    ...(id && name && role ? { profile: Object.freeze({ id, name, role, initials: initials(name) }) } : {}),
+    accessToken,
+    ...(expiresAt ? { expiresAt } : {})
+  });
+}
+
+function clientError(message, code, cause = null, status) {
+  const error = new Error(message);
+  error.code = code;
+  if (status) error.status = status;
+  if (cause) error.cause = cause;
+  return error;
 }
 
 function initials(name) {

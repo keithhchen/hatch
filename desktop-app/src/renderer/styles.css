@@ -230,13 +230,6 @@ h2 {
   box-shadow: inset 0 0 0 1px rgba(214, 95, 59, 0.2);
 }
 
-.empty-library {
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.45;
-  margin: 8px 4px;
-}
-
 .sign-in-error {
   color: #a64232;
   line-height: 1.4;
@@ -582,11 +575,82 @@ h2 {
 }
 
 .sign-in-card,
+.status-card,
 .workspace-card {
   background: color-mix(in srgb, var(--hatch-panel) 96%, transparent);
   border: 1px solid var(--hatch-border-subtle);
   border-radius: 16px;
   box-shadow: 0 22px 60px rgba(54, 41, 31, 0.09);
+}
+
+.status-screen {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+}
+
+.status-card {
+  display: grid;
+  gap: 16px;
+  margin: 16vh auto 0;
+  max-width: 520px;
+  padding: 38px;
+  width: min(100%, 520px);
+}
+
+.status-card h1 {
+  font-family: var(--hatch-font-display);
+  font-size: 36px;
+  font-weight: 400;
+  letter-spacing: -0.03em;
+  line-height: 1.08;
+  margin: 0;
+}
+
+.status-card p,
+.status-card small {
+  color: #5f6963;
+  line-height: 1.55;
+}
+
+.status-inline-error {
+  background: rgba(180, 71, 61, 0.08);
+  border: 1px solid rgba(180, 71, 61, 0.18);
+  border-radius: 8px;
+  color: #9b4137 !important;
+  font-size: 13px;
+  padding: 9px 11px;
+}
+
+.empty-agents-card {
+  max-width: 560px;
+}
+
+.empty-agents-header {
+  align-items: center;
+  display: flex;
+  gap: 11px;
+  margin-bottom: 18px;
+}
+
+.empty-agents-header strong,
+.empty-agents-header small {
+  display: block;
+}
+
+.empty-agents-header small {
+  color: #69736d;
+  margin-top: 2px;
+}
+
+.empty-agents-header .profile-sign-out {
+  margin-left: auto;
+}
+
+.status-refresh {
+  justify-self: center;
+  min-height: auto;
+  padding: 5px 9px;
 }
 
 .sign-in-card {
@@ -611,40 +675,6 @@ h2 {
   color: var(--hatch-ink);
   font-size: 13px;
   font-weight: 650;
-}
-
-.returning-profile {
-  align-items: center;
-  background: color-mix(in srgb, var(--hatch-accent) 5%, var(--hatch-panel));
-  border: 1px solid var(--hatch-border-subtle);
-  border-radius: 10px;
-  display: flex;
-  gap: 11px;
-  padding: 12px;
-}
-
-.returning-profile strong,
-.returning-profile small {
-  display: block;
-}
-
-.returning-profile small {
-  margin-top: 3px;
-  text-align: left;
-}
-
-.sign-in-switch {
-  background: transparent;
-  border: 0;
-  color: var(--hatch-text-secondary);
-  font-size: 13px;
-  justify-self: center;
-  min-height: auto;
-  padding: 3px 6px;
-}
-
-.sign-in-switch:hover {
-  color: var(--hatch-ink);
 }
 
 .sign-in-card h1 {

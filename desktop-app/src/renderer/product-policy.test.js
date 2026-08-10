@@ -13,7 +13,6 @@ import {
   creatorAgentFromSession,
   canStartConversation,
   localToolsForPermissionPolicy,
-  profileStorageKey,
   requiresUserApproval
 } from "./product-policy.js";
 
@@ -35,11 +34,6 @@ describe("consumer product contract", () => {
       id: "plan", creator: "Ari Cole", creatorInitials: "AC", name: "Adaptive Plan",
       description: "A useful plan.", boundary: "", presentation: { accent: "green" }
     });
-  });
-
-  it("isolates persisted state by signed-in profile", () => {
-    expect(profileStorageKey("buyer_fixture", "workspaceRoot"))
-      .not.toBe(profileStorageKey("buyer_someone_else", "workspaceRoot"));
   });
 
   it.each(["fs.write", "fs.patch", "shell.exec"])("requires approval for %s", (tool) => {

@@ -41,8 +41,14 @@ export type AgentAccessGrant = {
   agent_id: string;
   product_id: string;
   order_id?: string;
-  status: "active";
+  status: "active" | "revoked" | "disabled";
   granted_at: string;
+};
+
+export type AgentAccessPresentation = AgentAccessGrant & {
+  creator: { id: string; name: string };
+  product: { id: string; name: string; description: string };
+  presentation: Record<string, unknown>;
 };
 
 export type CreatorToolConnection = {
@@ -157,8 +163,15 @@ export class RegistryStoreTs {
     if (!corpus) throw new Error("agent_not_found");
     const existing = [...this.access.values()].find((item) => item.user_id === userId && item.creator_id === creatorId && item.agent_id === agentId);
     if (existing) {
-      if (orderId && !existing.order_id) {
-        const updated = { ...existing, order_id: orderId };
+      const orderChanged = orderId !== undefined && orderId !== existing.order_id;
+      if (existing.status !== "active" || orderChanged || existing.product_id !== corpus.product_id) {
+        const updated = {
+          ...existing,
+          product_id: corpus.product_id,
+          status: "active" as const,
+          ...(orderId !== undefined ? { order_id: orderId } : {}),
+          ...(existing.status !== "active" ? { granted_at: new Date().toISOString() } : {})
+        };
         this.access.set(updated.entitlement_id, updated);
         await this.persistAccess(updated);
         return updated;
@@ -181,7 +194,26 @@ export class RegistryStoreTs {
   }
 
   listAgentAccess(userId: string): AgentAccessGrant[] {
-    return [...this.access.values()].filter((item) => item.user_id === userId && item.status === "active");
+    return [...this.access.values()]
+      .filter((item) => item.user_id === userId && item.status === "active")
+      .sort((left, right) => Date.parse(right.granted_at) - Date.parse(left.granted_at));
+  }
+
+  listAgentAccessPresentation(userId: string): AgentAccessPresentation[] {
+    return this.listAgentAccess(userId).flatMap((grant) => {
+      const corpus = this.getAgentCorpus(grant.creator_id, grant.agent_id);
+      if (!corpus || corpus.status !== "published") return [];
+      return [{
+        ...grant,
+        creator: { id: corpus.creator_id, name: corpus.creator_name },
+        product: {
+          id: corpus.product_id,
+          name: corpus.product_name,
+          description: corpus.product_description ?? "Work with this Creator Agent in your own files and context."
+        },
+        presentation: corpus.presentation
+      }];
+    });
   }
 
   async upsertCreatorToolConnection(input: {
@@ -367,7 +399,12 @@ export class RegistryStoreTs {
 
   private async persistAccess(grant: AgentAccessGrant): Promise<void> {
     if (this.pool) {
-      await this.pool.query(`INSERT INTO agent_access (entitlement_id, user_id, creator_id, agent_id, product_id, order_id, status, granted_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (user_id, creator_id, agent_id) DO UPDATE SET order_id=COALESCE(agent_access.order_id, EXCLUDED.order_id)`, [grant.entitlement_id, grant.user_id, grant.creator_id, grant.agent_id, grant.product_id, grant.order_id ?? null, grant.status, grant.granted_at]);
+      await this.pool.query(`INSERT INTO agent_access (entitlement_id, user_id, creator_id, agent_id, product_id, order_id, status, granted_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        ON CONFLICT (user_id, creator_id, agent_id) DO UPDATE SET
+          product_id=EXCLUDED.product_id,
+          order_id=COALESCE(EXCLUDED.order_id, agent_access.order_id),
+          status=EXCLUDED.status,
+          granted_at=EXCLUDED.granted_at`, [grant.entitlement_id, grant.user_id, grant.creator_id, grant.agent_id, grant.product_id, grant.order_id ?? null, grant.status, grant.granted_at]);
       return;
     }
     await this.persistState();
@@ -431,7 +468,7 @@ function rowToAccess(row: Record<string, any>): AgentAccessGrant {
     agent_id: String(row.agent_id),
     product_id: String(row.product_id),
     ...(row.order_id ? { order_id: String(row.order_id) } : {}),
-    status: "active",
+    status: row.status === "active" ? "active" : row.status === "revoked" ? "revoked" : "disabled",
     granted_at: new Date(row.granted_at).toISOString(),
   };
 }

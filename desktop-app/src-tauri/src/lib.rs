@@ -1,12 +1,17 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
+use std::process::Command;
 
 use hatch_local_runner::{LocalRunner, ToolCallRequest};
 use serde_json::Value;
 use std::path::PathBuf;
+use tauri::{AppHandle, Manager};
 
 const LOCAL_TOOL_RESULT_TTL: Duration = Duration::from_secs(60);
+const KEYCHAIN_SERVICE: &str = "dev.hatch.local";
+const KEYCHAIN_ACCOUNT: &str = "active-session";
+const SETTINGS_FILE: &str = "settings.json";
 
 struct StoredToolResult {
     created_at: Instant,
@@ -105,6 +110,119 @@ fn poll_tool_call(tool_call_id: String) -> Option<Value> {
     results.remove(&tool_call_id).map(|result| result.payload)
 }
 
+#[tauri::command]
+fn read_auth_token() -> Result<Option<String>, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let output = Command::new("/usr/bin/security")
+            .args(["find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", KEYCHAIN_ACCOUNT, "-w"])
+            .output()
+            .map_err(to_string)?;
+        if !output.status.success() {
+            return Ok(None);
+        }
+        let token = String::from_utf8(output.stdout).map_err(to_string)?.trim().to_string();
+        return Ok((!token.is_empty()).then_some(token));
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(None)
+    }
+}
+
+#[tauri::command]
+fn write_auth_token(token: String) -> Result<(), String> {
+    if token.trim().is_empty() {
+        return Err("A non-empty session token is required".into());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let status = Command::new("/usr/bin/security")
+            .args(["add-generic-password", "-U", "-s", KEYCHAIN_SERVICE, "-a", KEYCHAIN_ACCOUNT, "-w", token.trim()])
+            .status()
+            .map_err(to_string)?;
+        if !status.success() {
+            return Err("Hatch could not save the secure session".into());
+        }
+        return Ok(());
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = token;
+        Err("Secure session storage is only available on macOS".into())
+    }
+}
+
+#[tauri::command]
+fn clear_auth_token() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let status = Command::new("/usr/bin/security")
+            .args(["delete-generic-password", "-s", KEYCHAIN_SERVICE, "-a", KEYCHAIN_ACCOUNT])
+            .status()
+            .map_err(to_string)?;
+        // Deleting an item that is already absent is a successful local logout.
+        if !status.success() {
+            return Ok(());
+        }
+        return Ok(());
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(())
+    }
+}
+
+#[tauri::command]
+fn read_app_settings(app: AppHandle) -> Result<String, String> {
+    let path = settings_path(&app)?;
+    match std::fs::read_to_string(path) {
+        Ok(value) => Ok(value),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok("{}".into()),
+        Err(error) => Err(error.to_string())
+    }
+}
+
+#[tauri::command]
+fn write_app_settings(app: AppHandle, settings: String) -> Result<(), String> {
+    let parsed: Value = serde_json::from_str(&settings).map_err(to_string)?;
+    if !parsed.is_object() {
+        return Err("Desktop settings must be a JSON object".into());
+    }
+    let path = settings_path(&app)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(to_string)?;
+    }
+    let temporary = path.with_extension("json.tmp");
+    std::fs::write(&temporary, settings.as_bytes()).map_err(to_string)?;
+    std::fs::rename(&temporary, &path).map_err(to_string)
+}
+
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    if !is_allowed_browse_url(&url) {
+        return Err("Only the Hatch Creator Agent catalog can be opened from this action".into());
+    }
+    #[cfg(target_os = "macos")]
+    let status = Command::new("/usr/bin/open").arg(&url).status();
+    #[cfg(target_os = "windows")]
+    let status = Command::new("cmd").args(["/C", "start", "", &url]).status();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let status = Command::new("xdg-open").arg(&url).status();
+    status.map_err(to_string)?.success().then_some(()).ok_or_else(|| "The system browser could not be opened".into())
+}
+
+fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app.path().app_data_dir().map_err(to_string)?.join(SETTINGS_FILE))
+}
+
+fn is_allowed_browse_url(url: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(url) else { return false; };
+    parsed.scheme() == "https"
+        && parsed.host_str() == Some("hatch.tokenquadrant.cn")
+        && (parsed.path() == "/agents" || parsed.path().starts_with("/agents/"))
+}
+
 fn execute_tool_call_blocking(workspace_root: String, request: Value) -> Result<Value, String> {
     let workspace = ensure_workspace(workspace_root)?;
     let runner = LocalRunner::new(workspace).map_err(to_string)?;
@@ -129,7 +247,13 @@ pub fn run() {
             ensure_workspace,
             pick_workspace_folder,
             execute_tool_call,
-            poll_tool_call
+            poll_tool_call,
+            read_auth_token,
+            write_auth_token,
+            clear_auth_token,
+            read_app_settings,
+            write_app_settings,
+            open_external_url
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Hatch desktop app");
@@ -157,7 +281,7 @@ fn to_string(error: impl std::fmt::Display) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{default_workspace, ensure_workspace, execute_tool_call_blocking};
+    use super::{default_workspace, ensure_workspace, execute_tool_call_blocking, is_allowed_browse_url};
     use serde_json::json;
     use tempfile::tempdir;
 
@@ -190,6 +314,15 @@ mod tests {
     #[test]
     fn startup_never_silently_grants_a_default_folder() {
         assert!(default_workspace().is_empty());
+    }
+
+    #[test]
+    fn browse_opener_allows_only_the_hatch_catalog_origin() {
+        assert!(is_allowed_browse_url("https://hatch.tokenquadrant.cn/agents"));
+        assert!(is_allowed_browse_url("https://hatch.tokenquadrant.cn/agents/signal"));
+        assert!(!is_allowed_browse_url("https://hatch.tokenquadrant.cn/agents-redirect"));
+        assert!(!is_allowed_browse_url("https://evil.example/agents"));
+        assert!(!is_allowed_browse_url("https://hatch.tokenquadrant.cn.evil/agents"));
     }
 
     #[test]
