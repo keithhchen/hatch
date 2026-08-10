@@ -13,6 +13,7 @@ import type {
 import { createModels, createProvider } from "@earendil-works/pi-ai";
 import { envApiKeyAuth } from "@earendil-works/pi-ai";
 import { KIMI_TEMPERATURE } from "./kimiProvider.js";
+import { requireLlmApiKey, resolveLlmProfile, type LlmProfile } from "./llmProfiles.js";
 
 export const KIMI_MODEL = "kimi-k2.6" as const;
 export const KIMI_DEFAULT_BASE_URL = "https://api.moonshot.cn/v1";
@@ -60,7 +61,7 @@ export interface KimiAgentOptions extends KimiAdapterOptions {
 type ResolvedKimiOptions = {
   apiKey: string;
   baseUrl: string;
-  provider: KimiProvider;
+  provider: string;
   fetch?: FetchFunction;
   headers?: ProviderHeaders;
   timeoutMs?: number;
@@ -453,10 +454,115 @@ export function createKimiAgent(options: KimiAgentOptions = {}): Agent {
 
 // Names that make the adapter's Pi role explicit for callers that do not want
 // to couple their code to the provider-specific Kimi naming.
-export const createPiModel = createKimiModel;
-export const createPiStreamFn = createKimiStreamFn;
-export const createPiAgentOptions = createKimiAgentOptions;
-export const createPiAgent = createKimiAgent;
+export function createPiModel(options: KimiAdapterOptions = {}): KimiModel {
+  const env = options.env ?? process.env;
+  const profile = resolveLlmProfile(env);
+  if (profile.name === "kimi-k2.6") return createKimiModel(options);
+  return modelForProfile(profile);
+}
+
+function modelForProfile(profile: LlmProfile): KimiModel {
+  return {
+    id: profile.model,
+    name: profile.model,
+    api: "openai-completions",
+    provider: profile.provider,
+    baseUrl: profile.baseUrl,
+    reasoning: profile.reasoning,
+    input: ["text", "image"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: profile.contextWindow,
+    maxTokens: profile.maxTokens,
+    compat: {
+      supportsStore: false,
+      supportsDeveloperRole: false,
+      supportsReasoningEffort: false,
+      maxTokensField: "max_tokens",
+      supportsStrictMode: false,
+      thinkingFormat: "deepseek"
+    }
+  } as KimiModel;
+}
+
+function resolvePiOptions(options: KimiAdapterOptions): ResolvedKimiOptions & { profile: LlmProfile } {
+  const env = options.env ?? process.env;
+  const profile = resolveLlmProfile(env);
+  if (profile.name === "kimi-k2.6") return { ...resolveKimiOptions(options), profile };
+  return {
+    apiKey: options.apiKey?.trim() || requireLlmApiKey(profile, env),
+    baseUrl: profile.baseUrl,
+    provider: profile.provider,
+    fetch: options.fetch,
+    headers: options.headers,
+    timeoutMs: positiveIntegerOption("timeoutMs", options.timeoutMs),
+    maxRetries: positiveIntegerOption("maxRetries", options.maxRetries),
+    maxRetryDelayMs: positiveIntegerOption("maxRetryDelayMs", options.maxRetryDelayMs),
+    maxTokens: positiveIntegerOption("maxTokens", options.maxTokens),
+    thinkingLevel: options.thinkingLevel ?? profile.thinkingLevel,
+    profile
+  };
+}
+
+function piStreamFnFor(config: ResolvedKimiOptions & { profile: LlmProfile }): StreamFn {
+  if (config.profile.name === "kimi-k2.6") return streamFnFor(config);
+  const api = openAICompletionsApi();
+  return (model, context, options?: SimpleStreamOptions) => api.streamSimple(model, context, {
+    ...options,
+    apiKey: options?.apiKey ?? config.apiKey,
+    fetch: finishAwareFetch(options?.fetch ?? config.fetch ?? globalThis.fetch, config.timeoutMs ?? KIMI_DEFAULT_HTTP_IDLE_TIMEOUT_MS),
+    headers: config.headers || options?.headers ? { ...config.headers, ...options?.headers } : undefined,
+    maxRetries: options?.maxRetries ?? config.maxRetries,
+    maxRetryDelayMs: options?.maxRetryDelayMs ?? config.maxRetryDelayMs,
+    ...(options?.maxTokens === undefined && config.maxTokens !== undefined ? { maxTokens: config.maxTokens } : {}),
+    timeoutMs: options?.timeoutMs ?? config.timeoutMs
+  });
+}
+
+export function createPiStreamFn(options: KimiAdapterOptions = {}): StreamFn {
+  return piStreamFnFor(resolvePiOptions(options));
+}
+
+export function createPiModels(options: KimiAdapterOptions = {}): { models: Models; model: KimiModel } {
+  const config = resolvePiOptions(options);
+  const model = config.profile.name === "kimi-k2.6" ? createKimiModel(config) : modelForProfile(config.profile);
+  const stream = piStreamFnFor(config) as (requestModel: KimiModel, context: Parameters<StreamFn>[1], streamOptions?: SimpleStreamOptions) => AssistantMessageEventStream;
+  const api: ProviderStreams = {
+    stream: (requestModel, context, streamOptions) => stream(requestModel as KimiModel, context, streamOptions),
+    streamSimple: (requestModel, context, streamOptions) => stream(requestModel as KimiModel, context, streamOptions)
+  };
+  const provider = createProvider({
+    id: model.provider,
+    name: config.profile.providerName,
+    baseUrl: model.baseUrl,
+    auth: { apiKey: envApiKeyAuth("LLM API key", [config.profile.apiKeyEnv]) },
+    models: [model],
+    api
+  });
+  const models = createModels();
+  models.setProvider(provider);
+  return { models, model };
+}
+
+export function createPiAgentOptions(options: KimiAgentOptions = {}): AgentOptions {
+  const config = resolvePiOptions(options);
+  const model = config.profile.name === "kimi-k2.6" ? createKimiModel(config) : modelForProfile(config.profile);
+  const agentOptions: AgentOptions = {
+    ...(options.agentOptions ?? {}),
+    initialState: {
+      ...(options.initialState ?? {}),
+      model,
+      thinkingLevel: config.thinkingLevel
+    },
+    streamFn: piStreamFnFor(config),
+    getApiKey: () => config.apiKey
+  };
+  if (config.maxRetryDelayMs !== undefined && agentOptions.maxRetryDelayMs === undefined) agentOptions.maxRetryDelayMs = config.maxRetryDelayMs;
+  return agentOptions;
+}
+
+export function createPiAgent(options: KimiAgentOptions = {}): Agent {
+  return new Agent(createPiAgentOptions(options));
+}
 
 // Compatibility names used by the runtime's Pi lane.
 export const createKimiPiModel = createKimiModel;

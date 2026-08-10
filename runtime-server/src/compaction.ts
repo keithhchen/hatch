@@ -13,7 +13,7 @@ import {
 } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, ToolResultMessage, Usage } from "@earendil-works/pi-ai";
 import type { ConversationMessage } from "./protocol.js";
-import { createKimiModel, createKimiModels } from "./piModel.js";
+import { createPiModel, createPiModels } from "./piModel.js";
 import { PROJECT_DOCS_CONTEXT_PREFIX } from "./projectDocs.js";
 
 // These are Pi's own model-facing compaction delimiters. Keep the export name
@@ -63,14 +63,14 @@ export type CompactionCheckpoint = {
  * replacement threshold here.
  */
 export function shouldAutoCompactMessages(messages: RuntimeCompactionMessage[]): boolean {
-  const model = createKimiModel();
+  const model = createPiModel();
   const contextTokens = estimateContextTokens(messages.map(toPiMessage)).tokens;
   return shouldCompact(contextTokens, model.contextWindow, DEFAULT_COMPACTION_SETTINGS);
 }
 
 /** Derived only from Pi's model context window and its default reserve. */
 export function autoCompactTokenLimit(): number {
-  const model = createKimiModel();
+  const model = createPiModel();
   return model.contextWindow - DEFAULT_COMPACTION_SETTINGS.reserveTokens;
 }
 
@@ -94,7 +94,7 @@ export async function compactRuntimeMessages(
     throw new Error("Pi compaction is not applicable to the current session");
   }
 
-  const { models, model } = createKimiModels();
+  const { models, model } = createPiModels();
   const result = await compact(preparation.value, models, model, undefined, undefined, "high");
   if (!result.ok) throw result.error;
 
@@ -193,7 +193,7 @@ function toPiMessage(message: RuntimeCompactionMessage): AgentMessage {
     } as ToolResultMessage;
   }
 
-  const model = createKimiModel();
+  const model = createPiModel();
   const content: AssistantMessage["content"] = [];
   if (message.content) content.push({ type: "text", text: message.content });
   for (const call of toolCalls(message.tool_calls)) {

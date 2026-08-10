@@ -1506,7 +1506,7 @@ test("Pi runtime uses generic file_read for skill path loading", async () => {
   const fileList = specs.find((spec) => spec.name === "file_list");
 
   assert.match(piRuntimeSource, /new Agent\(/);
-  assert.match(piRuntimeSource, /createKimiStreamFn/);
+  assert.match(piRuntimeSource, /createPiStreamFn/);
   assert.match(runtimeSource, /modelToolSpecsForRun/);
   assert.doesNotMatch(runtimeSource, /function chatModelToolSpecs/);
   assert.match(toolsSource, /name: "file_read"[\s\S]*?locality: "hybrid"/);
