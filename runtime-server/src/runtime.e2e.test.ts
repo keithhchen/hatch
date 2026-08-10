@@ -360,6 +360,88 @@ test("runtime server exposes visible conversation history for client hydration",
   ]);
 });
 
+test("visible history preserves guarded text and tool interleave order", async () => {
+  const dataDir = await tempWorkspace();
+  const store = new RuntimeStore(dataDir);
+  const beforeTool = "A".repeat(101);
+  const afterTool = "After the tool.";
+  const runtime: AgentRuntime = {
+    async *run(input) {
+      yield {
+        type: "assistant.delta",
+        run_id: input.run_id,
+        delta: { kind: "text", content: beforeTool }
+      };
+      yield {
+        type: "tool_call.delta",
+        run_id: input.run_id,
+        tool_call_id: "call_interleave",
+        name: "web.search",
+        locality: "server",
+        approval: "none",
+        status: "requested",
+        arguments: { query: "ordered timeline" }
+      };
+      yield {
+        type: "tool_call.delta",
+        run_id: input.run_id,
+        tool_call_id: "call_interleave",
+        name: "web.search",
+        locality: "server",
+        approval: "none",
+        status: "completed",
+        arguments: { query: "ordered timeline" },
+        result: { matches: [] }
+      };
+      yield {
+        type: "assistant.delta",
+        run_id: input.run_id,
+        delta: { kind: "text", content: afterTool }
+      };
+      yield { type: "turn.completed", run_id: input.run_id, finish_reason: "stop" };
+    }
+  };
+  runtimeServer = createRuntimeServer({
+    conversationStore: store,
+    createRuntime: () => runtime
+  });
+  const serverUrl = await listen(runtimeServer);
+  const socket = new WebSocket(serverUrl);
+  const messages: OutboundMessage[] = [];
+  socket.on("message", (data) => messages.push(JSON.parse(String(data)) as OutboundMessage));
+  await new Promise<void>((resolve, reject) => {
+    socket.once("open", resolve);
+    socket.once("error", reject);
+  });
+  socket.send(JSON.stringify({
+    type: "client.hello",
+    protocol_version: PROTOCOL_VERSION,
+    installation_id: "ordered-history-test",
+    license_token: "ordered-history-test",
+    local_tools: []
+  }));
+  await waitForSocketMessage(messages, (message) => message.type === "session.ready");
+  socket.send(JSON.stringify({
+    type: "client.message",
+    run_id: "run_ordered_history",
+    conversation_id: "ordered-history",
+    message: { role: "user", content: "Use a tool between two text segments." }
+  }));
+  await waitForSocketMessage(messages, (message) => (
+    message.type === "turn.completed" && message.run_id === "run_ordered_history"
+  ));
+
+  const visible = await store.readVisibleConversation("ordered-history");
+  const assistant = visible.find((message) => message.role === "assistant");
+  assert.equal(assistant?.content, `${beforeTool}${afterTool}`);
+  assert.deepEqual(assistant?.parts, [
+    { type: "text", start: 0, end: 100 },
+    { type: "tool_call", tool_call_id: "call_interleave" },
+    { type: "text", start: 100, end: beforeTool.length + afterTool.length }
+  ]);
+  socket.close();
+});
+
 test("Output Guard releases passed segments but commits only a blocked terminal marker", async () => {
   const dataDir = await tempWorkspace();
   const store = new RuntimeStore(dataDir);
