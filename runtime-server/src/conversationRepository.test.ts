@@ -222,7 +222,7 @@ class ConversationPostgresFake implements PostgresQueryExecutor {
       if (row) row.updated_at = updatedAt;
       return { rows: [] };
     }
-    if (/^\s*SELECT \* FROM hatch_conversation_runs WHERE conversation_id = \$1 AND client_message_id/i.test(text)) {
+    if (/^\s*SELECT \* FROM hatch_conversation_runs\s+WHERE conversation_id = \$1 AND client_message_id/i.test(text)) {
       const [conversationId, messageId] = values ?? [];
       return this.rows([...this.runs.values()].filter((row) => row.conversation_id === conversationId && row.client_message_id === messageId));
     }
