@@ -1487,11 +1487,11 @@ function App() {
   }
   if (authState === "secure-session-read-error") {
     return (
-      <SecureSessionErrorScreen
-        actionLabel="Retry opening the saved session"
-        message={secureSessionError}
-        onRetry={() => { setAuthState("loading"); setBootstrapAttempt((value) => value + 1); }}
-        title="Hatch couldn't open your saved session"
+      <SignInScreen
+        error={signInError || secureSessionError}
+        onRetrySavedSession={() => { setAuthState("loading"); setBootstrapAttempt((value) => value + 1); }}
+        onSignIn={(credentials) => void signIn(credentials)}
+        status={signInStatus}
       />
     );
   }
@@ -2149,7 +2149,7 @@ function EmptyAgentsScreen({ profile, onBrowse, onRefresh, onSignOut, refreshing
   );
 }
 
-function SignInScreen({ onSignIn, status, error }) {
+function SignInScreen({ onSignIn, status, error, onRetrySavedSession }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const loading = status === "loading";
@@ -2180,6 +2180,7 @@ function SignInScreen({ onSignIn, status, error }) {
           </button>
         </form>
         {error ? <small className="sign-in-error" role="alert">{error}</small> : null}
+        {onRetrySavedSession ? <button className="secondary" type="button" onClick={onRetrySavedSession}>Retry opening saved session</button> : null}
         <small>Hatch keeps your secure session on this computer until you sign out.</small>
       </section>
     </main>
