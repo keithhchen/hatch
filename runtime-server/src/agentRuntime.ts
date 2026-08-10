@@ -580,8 +580,8 @@ function stripJsonFence(value: string): string {
 }
 
 export function ensureNotCancelled(ctx: RunContext): void {
-  if (ctx.state.status === "cancelled" || ctx.abortSignal?.aborted) {
-    throw new Error("Run canceled");
+  if (ctx.state.status === "cancelled" || ctx.state.status === "interrupted" || ctx.abortSignal?.aborted) {
+    throw new Error(ctx.state.status === "interrupted" ? "Run interrupted" : "Run canceled");
   }
 }
 

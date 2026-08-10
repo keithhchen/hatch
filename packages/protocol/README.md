@@ -40,16 +40,40 @@ PATCH /v1/conversations/:id                      metadata with version/CAS
 GET   /v1/conversations/:id/snapshot?after_cursor
 GET   /v1/conversations/:id/events?after_cursor
 GET   /v1/conversations/:id/runs
-POST  /v1/conversations/:id/runs                durable run reservation
 GET   /v1/conversations/:id/runs/:runId
 POST  /v1/conversations/:id/runs/:runId/cancel
 ```
 
-The live executor remains `/runtime`: `client.message.client_message_id` is a
-stable retry key, while legacy clients fall back to `run_id`. A reconnect can
-read a snapshot plus cursor events; it must never infer permission to replay a
-pending tool call. Explicit WebSocket subscribe/attach/reclaim is the next
-protocol increment, once executor leases and window ownership are wired in.
+`POST /v1/conversations/:id/runs` intentionally returns
+`409 executor_attach_required`: a REST request cannot safely create a queued
+Run without an executor window that can answer local-tool and approval work.
+
+### Executor lease and recovery V1
+
+The live executor is only `/runtime`: `client.message.client_message_id` is a
+stable user-intent key, while legacy clients fall back to `run_id`. The Runtime
+generates an opaque executor ID for each WebSocket; it never treats a
+client-supplied `installation_id` as a window or executor identity. The durable
+repository permits one active Run per Conversation, so separate Desktop windows
+may observe one Conversation but only the owning connection executes it.
+
+In V1, **attach means observer recovery**, not executor takeover:
+
+1. Store the last journal cursor after rendering a snapshot.
+2. On renderer reload or reconnect, read `snapshot?after_cursor=<cursor>` (or
+   `events?after_cursor=<cursor>`) and reconcile by cursor, Run ID, and
+   `client_message_id`.
+3. Do not resend a known `client_message_id` to restart work. The server returns
+   the existing Run state and never replays pending local tools or approvals.
+
+There is no `client.run.attach` or executor-reclaim endpoint in V1. Local tools
+and approvals remain bound to their original native window; losing that
+connection or an idle/heartbeat close marks that Run as `interrupted`. On
+Runtime restart, the exclusive V1 recovery pass marks its repository's active
+Runs as `interrupted`; active-active executor processes require a future
+renewable lease/fencing protocol. A new user action with a new
+`client_message_id` creates a replacement Run. Explicit user Stop remains
+`cancelled`; it is not the same state as an executor loss.
 
 ## Agent Corpus v1
 

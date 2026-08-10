@@ -631,7 +631,7 @@ export class PiAgentRuntime implements AgentRuntime {
       return;
     }
 
-    if (event.type === "turn_end" && ctx.state.status === "cancelled") {
+    if (event.type === "turn_end" && (ctx.state.status === "cancelled" || ctx.state.status === "interrupted")) {
       agent.abort();
     }
   }
