@@ -58,6 +58,13 @@ calls are parented to the invoking window, and artifact Reveal accepts only a
 grant ID plus a workspace-relative path; Rust re-checks canonical containment
 before opening Finder/Explorer.
 
+The product window disables WebKit devtools in its Tauri window configuration.
+On the rebuilt ad-hoc app, a product-area secondary click therefore did not
+expose `Inspect Element`; the live renderer's conversation/tool/artifact rows
+route their DOM `contextmenu` events to the semantic Tauri popup, while text
+inputs retain the operating-system editing menu. The browser/Vite preview is
+still the place to inspect HTML during development.
+
 The macOS accessibility tree additionally confirmed that a minimal overlay
 removes the hidden pane from the main tree, focuses its close action on open,
 and returns focus to the toolbar toggle after Escape. Window app-data now

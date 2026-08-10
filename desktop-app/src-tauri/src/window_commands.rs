@@ -822,6 +822,9 @@ fn open_auxiliary_window(
     .resizable(true)
     .visible(false)
     .focused(false)
+    // Product windows must not expose WebKit's browser/devtools context menu.
+    // The browser/Vite preview remains the development inspection surface.
+    .devtools(false)
     .on_page_load(move |window, payload| {
         if payload.event() == PageLoadEvent::Finished {
             let _ = window.show();
@@ -922,6 +925,9 @@ pub async fn open_conversation_window(
                 .resizable(true)
                 .visible(false)
                 .focused(false)
+                // Keep secondary product windows aligned with the main window:
+                // no browser Inspect Element affordance in ad-hoc/debug UAT.
+                .devtools(false)
                 .on_page_load(move |window, payload| {
                     if payload.event() != PageLoadEvent::Finished {
                         return;
@@ -956,10 +962,10 @@ pub async fn open_conversation_window(
     Err("native_window_registry_unavailable: Could not reserve a conversation window".into())
 }
 
-/// Opt-in context-menu bridge for non-editable product surfaces. This does not
-/// install a global WebView contextmenu interceptor, so text inputs preserve
-/// the standard browser menu and development builds retain normal DevTools
-/// behavior outside explicitly requested Hatch surfaces.
+/// Opt-in context-menu bridge for non-editable product surfaces. Text inputs
+/// preserve the standard operating-system editing menu; product windows have
+/// WebKit devtools disabled, while the browser/Vite preview remains the
+/// development inspection surface.
 #[tauri::command]
 pub fn show_native_context_menu(
     app: AppHandle,

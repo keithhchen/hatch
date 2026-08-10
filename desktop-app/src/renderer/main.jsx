@@ -96,6 +96,7 @@ import {
 import { DesktopPreview } from "./desktop-preview.jsx";
 import {
   conversationIdFromLocation,
+  isEditableContextTarget,
   nativeContextRequest,
   requestNativeContextMenu,
   routeNativeCommand,
@@ -1952,6 +1953,20 @@ function App() {
         console.warn("[hatch:native-command-listener]", error);
       }
     });
+  }, []);
+
+  // WebKit's default product-area context menu includes Inspect Element when
+  // DevTools are available. Product surfaces must never expose that browser
+  // affordance: the row/tool/artifact handlers above still open Hatch's
+  // semantic native menu, while editable controls retain Cut/Copy/Paste and
+  // the browser preview keeps its normal DevTools menu.
+  useEffect(() => {
+    if (!window.__TAURI_INTERNALS__) return undefined;
+    const suppressProductContextMenu = (event) => {
+      if (!isEditableContextTarget(event.target)) event.preventDefault();
+    };
+    document.addEventListener("contextmenu", suppressProductContextMenu, true);
+    return () => document.removeEventListener("contextmenu", suppressProductContextMenu, true);
   }, []);
 
   function clearInterruptedRun() {

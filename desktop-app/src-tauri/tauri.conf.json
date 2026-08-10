@@ -20,7 +20,8 @@
         "resizable": true,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
-        "zoomHotkeysEnabled": false
+        "zoomHotkeysEnabled": false,
+        "devtools": false
       }
     ]
   },

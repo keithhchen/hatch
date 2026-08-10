@@ -25,7 +25,7 @@
 | 每窗口 Conversation、Workspace、draft、zoom、scroll、cursor 独立保存 | PARTIAL | native settings schema、renderer/native tests；URL conversation window routing | 三个并行真实窗口关闭/重开及 crash/restart E2E |
 | Conversation Library 与 server-issued IDs | PASS（本机） | Runtime REST/WS tests、renderer client tests；不再以 timestamp 作为新 ID | 端到端真实账户的 A/B agent 五会话验收 |
 | Durable Run、幂等 message、observer recovery | PASS（本机） | Runtime 225 tests；断连/启动标为 `interrupted`，不重放 tool | 桌面应用 crash/reload 的真实 attach/replay UAT |
-| Native application/context menu 与 focused-window routing | PASS（macOS UAT） | View menu、context registry、window lifecycle tests | Windows native popup 和多窗口焦点 UAT |
+| Native application/context menu 与 focused-window routing | PASS（macOS UAT） | View menu、context registry、window lifecycle tests；重打包 app 的 secondary-click AX tree 不含 `WKMenuItemIdentifierInspectElement`；Tauri `devtools:false` | Windows native popup 和多窗口焦点 UAT |
 | Finder/Explorer Reveal 与 window attention | PASS（代码 + macOS bridge） | grant-bound reveal、attention command；artifact Quick Look 未伪装 | Windows Explorer 和 Dock/taskbar 真机行为 |
 | Settings/About auxiliary windows | PASS（macOS UAT） | 独立 native auxiliary windows 与 accessibility tree | Windows owner/focus/close parity |
 | Quick Look / Windows Open | DEFERRED | spec contract 保留，当前菜单不暴露假动作 | 另立平台集成任务与双端验收 |
@@ -47,4 +47,4 @@ desktop-app: npm run build  # strict ad-hoc DMG UAT
 ```
 
 `npm run build:app` 与 `npm run build` 产物是 ad-hoc/UAT `.app`/DMG，当前验证的 DMG 为
-`Hatch_0.1.0_aarch64.dmg`（`sha256:79440b3d220c0a04bd39a0529805189fffd0234f94ae02339c0786fafeb1aef3`）。它们不是可发布的 notarized artifact。正式发布必须在 CI 注入真实 Developer ID/Team ID，并完成签名、notarization、安装后重启和无 prompt 验收。
+`Hatch_0.1.0_aarch64.dmg`（`sha256:dabd9bbd96dde92fb77b85400388ee137c06881404cb7ef19558b6ff3a64bc66`）。它们不是可发布的 notarized artifact。正式发布必须在 CI 注入真实 Developer ID/Team ID，并完成签名、notarization、安装后重启和无 prompt 验收。
