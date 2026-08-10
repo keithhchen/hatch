@@ -279,6 +279,22 @@ export type RunFinal = {
   type: "turn.completed";
   run_id: string;
   finish_reason: OutputFinishReason;
+  timing?: {
+    total_ms: number;
+    setup_ms: number;
+    model_first_text_ms?: number;
+    first_safe_segment_ms?: number;
+    guard: Array<{
+      segment: number;
+      done: boolean;
+      content_chars: number;
+      detection_chars: number;
+      started_ms: number;
+      duration_ms: number;
+      outcome: "pass" | "block" | "degraded";
+      released_ms?: number;
+    }>;
+  };
 };
 
 export type RunError = {
