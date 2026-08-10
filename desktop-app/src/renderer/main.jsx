@@ -141,6 +141,7 @@ function App() {
   const [buyerSession, setBuyerSession] = useState(null);
   const [creatorAgentEntitlements, setCreatorAgentEntitlements] = useState([]);
   const [selectedEntitlementId, setSelectedEntitlementId] = useState("");
+  const selectedEntitlementIdRef = useRef("");
   const [signInStatus, setSignInStatus] = useState("idle");
   const [signInError, setSignInError] = useState("");
   const [workspaceGranted, setWorkspaceGranted] = useState(false);
@@ -155,6 +156,8 @@ function App() {
   const [creatorAgent, setCreatorAgent] = useState(DEFAULT_CREATOR_AGENT);
   const buyerProfile = buyerSession?.profile ?? EMPTY_PROFILE;
   const signedIn = authState === "signed-in";
+
+  selectedEntitlementIdRef.current = selectedEntitlementId;
 
   function getProfileSetting(key, fallback = undefined, profileId = buyerProfile.id) {
     return settingsStoreRef.current?.getProfile(profileId, key, fallback) ?? fallback;
@@ -195,7 +198,11 @@ function App() {
 
   function applySignedInSession(session, entitlements, { preserveCurrent = false } = {}) {
     const profileId = session.profile?.id || EMPTY_PROFILE.id;
-    const selected = chooseEntitlement(entitlements, profileId, preserveCurrent ? selectedEntitlementId : "");
+    const selected = chooseEntitlement(
+      entitlements,
+      profileId,
+      preserveCurrent ? selectedEntitlementIdRef.current : ""
+    );
     const mustRebindRuntime = entitlementRefreshNeedsReconnect(connectionConfigRef.current, selected);
     if (mustRebindRuntime) {
       disconnectRuntime();
@@ -385,7 +392,7 @@ function App() {
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", refresh);
     };
-  }, [buyerSession?.accessToken, signedIn]);
+  }, [buyerSession?.accessToken, signedIn, selectedEntitlementId]);
 
   const send = useCallback((message) => {
     const socket = socketRef.current;
