@@ -8,10 +8,26 @@ For the requirement-by-requirement status and explicit evidence boundaries, see
 [acceptance-matrix.md](acceptance-matrix.md).
 
 The regular/compact/minimal captures use the development-only `DesktopPreview`
-fixture and a sizing harness so the shell can be exercised without an account;
-they prove pane composition and structured-content behavior, not cloud
-Conversation or Run persistence. The final sign-in capture is from the built
-ad-hoc `.app`.
+fixture and an environment-selected native window size, so the shell can be
+exercised without an account. There are no in-page tier controls: the preview
+calls the Tauri window sizing API, then the same `ResizeObserver`/native resize
+path drives the production shell's layout tier. These captures prove pane
+composition and structured-content behavior, not cloud Conversation or Run
+persistence. The final sign-in capture is from the built ad-hoc `.app`.
+
+The clean capture commands are:
+
+```text
+VITE_HATCH_DESKTOP_PREVIEW=1 VITE_HATCH_DESKTOP_PREVIEW_TIER=regular \
+  npx tauri build --debug --bundles app --config '{"identifier":"dev.hatch.preview"}'
+VITE_HATCH_DESKTOP_PREVIEW=1 VITE_HATCH_DESKTOP_PREVIEW_TIER=compact \
+  npx tauri build --debug --bundles app --config '{"identifier":"dev.hatch.preview"}'
+VITE_HATCH_DESKTOP_PREVIEW=1 VITE_HATCH_DESKTOP_PREVIEW_TIER=minimal \
+  npx tauri build --debug --bundles app --config '{"identifier":"dev.hatch.preview"}'
+```
+
+The preview flag is opt-in and is not set by normal development, release, or
+distribution builds.
 
 | Capture | What it proves |
 | --- | --- |

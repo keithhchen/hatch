@@ -155,7 +155,10 @@ function DesktopAuxiliaryWindow({ kind }) {
 }
 
 function App() {
-  if (import.meta.env.DEV && import.meta.env.VITE_HATCH_DESKTOP_PREVIEW === "1") {
+  // The preview is opt-in at build time and is never enabled by normal dev,
+  // release, or distribution builds. Keeping the switch environment-based
+  // also lets the static debug bundle exercise a real native window for UAT.
+  if (import.meta.env.VITE_HATCH_DESKTOP_PREVIEW === "1") {
     return <DesktopPreview />;
   }
   const auxiliaryMode = auxiliaryWindowMode();

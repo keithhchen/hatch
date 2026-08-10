@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { DesktopWindowShell } from "./desktop-shell.jsx";
 import { DESKTOP_LAYOUT } from "./desktop-layout.js";
 
@@ -14,17 +15,27 @@ const AGENTS = [
  */
 export function DesktopPreview() {
   useEffect(() => {
-    const title = "Hatch · Desktop UI UAT";
+    const title = "Hatch · Desktop Preview";
     document.title = title;
     if (!window.__TAURI_INTERNALS__) return undefined;
-    let cancelled = false;
-    void import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
-      if (cancelled) return;
-      const current = getCurrentWindow();
-      void current.setTitle(title);
-      void current.setFocus();
-    }).catch(() => {});
-    return () => { cancelled = true; };
+    const previewTier = String(import.meta.env.VITE_HATCH_DESKTOP_PREVIEW_TIER || "")
+      .trim()
+      .toLowerCase();
+    const previewSize = {
+      regular: { width: 1180, height: 780 },
+      compact: { width: 860, height: 600 },
+      minimal: { width: 640, height: 600 }
+    }[previewTier];
+    const current = getCurrentWindow();
+    void current.setTitle(title);
+    if (previewSize) {
+      // This is a development-only sizing harness that drives the real native
+      // window. It deliberately lives outside the product shell, so captures
+      // do not need fake in-page tier buttons or viewport CSS tricks.
+      void current.setSize(new LogicalSize(previewSize.width, previewSize.height));
+    }
+    void current.setFocus();
+    return undefined;
   }, []);
   const [sidebarPreference, setSidebarPreference] = useState("open");
   const [inspectorPreference, setInspectorPreference] = useState("open");

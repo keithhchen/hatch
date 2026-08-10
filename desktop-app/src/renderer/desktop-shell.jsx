@@ -409,7 +409,15 @@ function useShellResize(shellRef, setTier) {
       if (Number.isFinite(width)) update(width);
     });
     observer.observe(shell);
-    return () => observer.disconnect();
+    // Native window resize events are the authoritative fallback when a
+    // WebView compositor briefly reports its previous content width while the
+    // NSWindow/ HWND frame is being committed (notably at the minimum size).
+    const onWindowResize = () => update(window.innerWidth);
+    window.addEventListener("resize", onWindowResize);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", onWindowResize);
+    };
   }, [shellRef, setTier]);
 }
 
