@@ -71,6 +71,7 @@ import {
   validateRestoredWorkspace,
   workspacePickerSelection
 } from "./workspace-restore.js";
+import { usesLegacyProfileRunFallback } from "./desktop-window-context.js";
 import { createTurnAccessSnapshot } from "./turn-access-snapshot.js";
 import { canUseAnotherAccountFromNetworkError } from "./network-error-recovery.js";
 import {
@@ -277,6 +278,16 @@ function App() {
 
   function setProfileSetting(key, value, profileId = buyerProfile.id) {
     settingsStoreRef.current?.setProfile(profileId, key, value);
+  }
+
+  // Conversation windows are independent native contexts. Only the original
+  // main window may use the legacy profile-level run slot as a migration
+  // fallback; otherwise two windows can overwrite one another's recovery
+  // projection even though their native contexts are separate.
+  function setLegacyProfileActiveRun(value) {
+    if (usesLegacyProfileRunFallback(requestedConversationIdRef.current)) {
+      setProfileSetting("active_run", value);
+    }
   }
 
   function patchWindowContext(patch = {}) {
@@ -731,7 +742,7 @@ function App() {
       accessSnapshot,
       timing: { questionSentAt: startedAt }
     };
-    setProfileSetting("active_run", {
+    setLegacyProfileActiveRun({
       runId,
       clientMessageId,
       assistantId,
@@ -1524,7 +1535,7 @@ function App() {
         );
       }
       activeRunRef.current = null;
-      setProfileSetting("active_run", undefined);
+      setLegacyProfileActiveRun(undefined);
       patchWindowContext({ activeRun: null, dismissedRunId: null });
       setInterruptedRun(null);
       setRunning(false);
@@ -1547,7 +1558,7 @@ function App() {
         ]);
       }
       activeRunRef.current = null;
-      setProfileSetting("active_run", undefined);
+      setLegacyProfileActiveRun(undefined);
       patchWindowContext({ activeRun: null, dismissedRunId: null });
       setInterruptedRun(null);
       setRunning(false);
@@ -2084,7 +2095,7 @@ function App() {
     const dismissedRunId = String(activeRunRef.current?.runId || interruptedRun?.runId || "").trim();
     activeRunRef.current = null;
     setInterruptedRun(null);
-    setProfileSetting("active_run", undefined);
+    setLegacyProfileActiveRun(undefined);
     patchWindowContext({ activeRun: null, dismissedRunId: dismissedRunId || null });
     setStatus("Paused task closed by you");
   }

@@ -255,6 +255,12 @@
           "markdownDescription": "Enables the open_workspace_artifact command without any pre-configured scope."
         },
         {
+          "description": "Enables the patch_app_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-patch-app-settings",
+          "markdownDescription": "Enables the patch_app_settings command without any pre-configured scope."
+        },
+        {
           "description": "Enables the patch_window_settings command without any pre-configured scope.",
           "type": "string",
           "const": "allow-patch-window-settings",
@@ -427,6 +433,12 @@
           "type": "string",
           "const": "deny-open-workspace-artifact",
           "markdownDescription": "Denies the open_workspace_artifact command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the patch_app_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-patch-app-settings",
+          "markdownDescription": "Denies the patch_app_settings command without any pre-configured scope."
         },
         {
           "description": "Denies the patch_window_settings command without any pre-configured scope.",

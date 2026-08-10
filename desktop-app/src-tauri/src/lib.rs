@@ -1544,6 +1544,66 @@ fn write_app_settings(app: AppHandle, settings: String) -> Result<(), String> {
     write_app_settings_value(&path, &parsed)
 }
 
+/// Atomically patch one account's non-secret preferences without replacing
+/// the whole settings document. Each renderer owns a separate in-memory
+/// settings snapshot; a full-document write from two native windows could
+/// otherwise erase the other window's latest profile update (or its window
+/// namespace) with a last-writer-wins race.
+#[tauri::command]
+fn patch_app_settings(app: AppHandle, patch: Value) -> Result<(), String> {
+    let _guard = app_settings_lock()
+        .lock()
+        .map_err(|_| "Desktop settings lock is unavailable")?;
+    let path = settings_path(&app)?;
+    let mut settings = read_app_settings_value(&path)?;
+    apply_profile_settings_patch(&mut settings, &patch)?;
+    write_app_settings_value(&path, &settings)
+}
+
+fn apply_profile_settings_patch(settings: &mut Value, patch: &Value) -> Result<(), String> {
+    let object = patch
+        .as_object()
+        .ok_or_else(|| "Desktop settings patch must be a JSON object".to_string())?;
+    let profile_id = object
+        .get("profileId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Desktop settings patch requires profileId".to_string())?;
+    let set = object.get("set").and_then(Value::as_object);
+    let remove = object.get("remove").and_then(Value::as_array);
+    if set.is_none() && remove.is_none() {
+        return Err("Desktop settings patch requires set or remove".into());
+    }
+    let root = settings
+        .as_object_mut()
+        .ok_or_else(|| "Desktop settings must be a JSON object".to_string())?;
+    let accounts = root
+        .entry("accounts".to_string())
+        .or_insert_with(|| Value::Object(serde_json::Map::new()))
+        .as_object_mut()
+        .ok_or_else(|| "Desktop settings accounts must be an object".to_string())?;
+    let profile = accounts
+        .entry(profile_id.to_string())
+        .or_insert_with(|| Value::Object(serde_json::Map::new()))
+        .as_object_mut()
+        .ok_or_else(|| "Desktop settings profile must be an object".to_string())?;
+    if let Some(values) = set {
+        for (key, value) in values {
+            profile.insert(key.clone(), value.clone());
+        }
+    }
+    if let Some(keys) = remove {
+        for key in keys {
+            let key = key
+                .as_str()
+                .ok_or_else(|| "Desktop settings remove entries must be strings".to_string())?;
+            profile.remove(key);
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn read_window_settings(app: AppHandle, window: WebviewWindow) -> Result<Value, String> {
     let _guard = app_settings_lock()
@@ -2090,6 +2150,7 @@ pub fn run() {
             clear_auth_token,
             read_app_settings,
             write_app_settings,
+            patch_app_settings,
             read_window_settings,
             patch_window_settings,
             open_external_url,
@@ -2701,6 +2762,46 @@ mod tests {
         assert_eq!(settings["window-a"]["sidebar"]["hidden"], true);
         assert!(settings["window-a"].get("draft").is_none());
         assert_eq!(settings["window-b"]["inspector"]["visible"], true);
+    }
+
+    #[test]
+    fn profile_settings_patch_keeps_other_accounts_and_window_namespace() {
+        let mut settings = json!({
+            "schema_version": 1,
+            "accounts": {
+                "user-a": { "theme": "dark", "workspace_grant": { "grant_id": "old" } },
+                "user-b": { "permission_mode": "read-only" }
+            },
+            "window_settings": {
+                "conversation-a": { "context": { "conversationId": "conv_a" } }
+            }
+        });
+        super::apply_profile_settings_patch(
+            &mut settings,
+            &json!({
+                "profileId": "user-a",
+                "set": { "workspace_grant": { "grant_id": "new" }, "permission_mode": "allow-changes" },
+                "remove": ["theme"]
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            settings["accounts"]["user-a"]["workspace_grant"]["grant_id"],
+            "new"
+        );
+        assert_eq!(
+            settings["accounts"]["user-a"]["permission_mode"],
+            "allow-changes"
+        );
+        assert!(settings["accounts"]["user-a"].get("theme").is_none());
+        assert_eq!(
+            settings["accounts"]["user-b"]["permission_mode"],
+            "read-only"
+        );
+        assert_eq!(
+            settings["window_settings"]["conversation-a"]["context"]["conversationId"],
+            "conv_a"
+        );
     }
 
     #[cfg(unix)]

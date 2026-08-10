@@ -39,6 +39,7 @@
         "allow-clear-auth-token",
         "allow-read-app-settings",
         "allow-write-app-settings",
+        "allow-patch-app-settings",
         "allow-read-window-settings",
         "allow-patch-window-settings",
         "allow-open-conversation-window",

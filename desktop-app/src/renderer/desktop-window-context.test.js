@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { accountScopedWindowContext } from "./desktop-window-context.js";
+import {
+  accountScopedWindowContext,
+  usesLegacyProfileRunFallback
+} from "./desktop-window-context.js";
 
 describe("desktop window context account boundary", () => {
   it("restores only a context explicitly owned by the signed-in account", () => {
@@ -14,5 +17,10 @@ describe("desktop window context account boundary", () => {
     expect(accountScopedWindowContext([], "account-a")).toEqual({});
     expect(accountScopedWindowContext({ accountId: "account-a" }, "")).toEqual({});
   });
-});
 
+  it("keeps the profile active-run slot only for the original main window", () => {
+    expect(usesLegacyProfileRunFallback("")).toBe(true);
+    expect(usesLegacyProfileRunFallback("   ")).toBe(true);
+    expect(usesLegacyProfileRunFallback("conv_server_123")).toBe(false);
+  });
+});

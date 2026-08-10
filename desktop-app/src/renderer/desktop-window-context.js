@@ -12,3 +12,12 @@ export function accountScopedWindowContext(value, accountId) {
   return value;
 }
 
+/**
+ * The original single-window build used one profile-level active-run slot.
+ * Once a Conversation window has a server ID in its URL, its run projection
+ * belongs exclusively to the native window context and must never fall back
+ * to that shared legacy slot.
+ */
+export function usesLegacyProfileRunFallback(requestedConversationId) {
+  return String(requestedConversationId ?? "").trim() === "";
+}

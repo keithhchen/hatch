@@ -51,6 +51,7 @@ fn main() {
             "clear_auth_token",
             "read_app_settings",
             "write_app_settings",
+            "patch_app_settings",
             "read_window_settings",
             "patch_window_settings",
             "open_conversation_window",
