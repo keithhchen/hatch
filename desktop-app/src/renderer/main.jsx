@@ -486,7 +486,7 @@ function App() {
         if (message.finish_reason === "content_filter") {
           cancelAssistantTextAnimation(activeRun.assistantId);
           finishAssistant(activeRun.assistantId, OUTPUT_FILTERED_COPY, "content_filter");
-          reportTurnTiming(activeRun.runId, activeRun.timing, Date.now());
+          saveAssistantTiming(activeRun.assistantId, activeRun.runId, activeRun.timing, Date.now());
         } else {
           finishAssistantAfterAnimation(
             activeRun.assistantId,
@@ -872,12 +872,12 @@ function App() {
     if (!animation || (!animation.pending && !animation.frame)) {
       textAnimationRef.current.delete(id);
       finishAssistant(id, text, "completed");
-      reportTurnTiming(runId, timing, Date.now());
+      saveAssistantTiming(id, runId, timing, Date.now());
       return;
     }
     animation.onDrained = () => {
       finishAssistant(id, text, "completed");
-      reportTurnTiming(runId, timing, Date.now());
+      saveAssistantTiming(id, runId, timing, Date.now());
     };
   }
 
@@ -886,6 +886,20 @@ function App() {
     if (!animation) return;
     window.cancelAnimationFrame(animation.frame);
     textAnimationRef.current.delete(id);
+  }
+
+  function saveAssistantTiming(id, runId, timing, fullResponseAt) {
+    const summary = reportTurnTiming(runId, timing, fullResponseAt);
+    updateAssistantMessage(id, (message) => ({
+      ...message,
+      metadata: {
+        ...(message.metadata ?? {}),
+        custom: {
+          ...(message.metadata?.custom ?? {}),
+          turnTiming: summary
+        }
+      }
+    }));
   }
 
   function finishAssistant(id, text, statusValue) {
@@ -1692,10 +1706,18 @@ function AssistantRunHeader() {
           : `Answered · ${elapsed}`;
 
   return (
-    <div className="run-summary">
-      <span className={`activity-dot ${failed ? "failed" : isRunning ? "running" : "done"}`} />
-      <span>{summary}</span>
-    </div>
+    <>
+      <div className="run-summary">
+        <span className={`activity-dot ${failed ? "failed" : isRunning ? "running" : "done"}`} />
+        <span>{summary}</span>
+      </div>
+      {custom.turnTiming ? (
+        <details className="turn-timing">
+          <summary>Timing</summary>
+          <pre>{JSON.stringify(custom.turnTiming, null, 2)}</pre>
+        </details>
+      ) : null}
+    </>
   );
 }
 
@@ -1778,6 +1800,7 @@ function reportTurnTiming(runId, timing, fullResponseAt) {
   };
   localStorage.setItem("hatch.debug.lastTurnTiming", JSON.stringify(summary));
   console.info("[hatch:turn-timing]", summary);
+  return summary;
 }
 
 function AssistantEmptyText() {
