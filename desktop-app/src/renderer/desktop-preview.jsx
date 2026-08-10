@@ -1,7 +1,13 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { DesktopWindowShell } from "./desktop-shell.jsx";
 import { DESKTOP_LAYOUT } from "./desktop-layout.js";
+import {
+  isEditableContextTarget,
+  nativeContextRequest,
+  requestNativeContextMenu
+} from "./native-commands.js";
 
 const AGENTS = [
   { id: "seth", initials: "S", name: "Seth Database Alpha Lite", creator: "Seth" },
@@ -42,6 +48,24 @@ export function DesktopPreview() {
   const [sidebarWidth, setSidebarWidth] = useState(DESKTOP_LAYOUT.sidebar.default);
   const [inspectorWidth, setInspectorWidth] = useState(DESKTOP_LAYOUT.inspector.default);
   const [selectedAgent, setSelectedAgent] = useState(AGENTS[0]);
+  const showPreviewContextMenu = useCallback((event, request) => {
+    const intercepted = requestNativeContextMenu({
+      event,
+      request: nativeContextRequest(event, request?.kind, request?.target),
+      invokeImpl: invoke,
+      packaged: Boolean(window.__TAURI_INTERNALS__)
+    });
+    return intercepted;
+  }, []);
+
+  useEffect(() => {
+    if (!window.__TAURI_INTERNALS__) return undefined;
+    const suppressProductContextMenu = (event) => {
+      if (!isEditableContextTarget(event.target)) event.preventDefault();
+    };
+    document.addEventListener("contextmenu", suppressProductContextMenu, true);
+    return () => document.removeEventListener("contextmenu", suppressProductContextMenu, true);
+  }, []);
 
   return (
     <DesktopWindowShell
@@ -53,7 +77,7 @@ export function DesktopPreview() {
       onInspectorPreferenceChange={setInspectorPreference}
       onSidebarWidthChange={setSidebarWidth}
       onInspectorWidthChange={setInspectorWidth}
-      sidebar={<PreviewSidebar selectedAgent={selectedAgent} onSelectAgent={setSelectedAgent} />}
+      sidebar={<PreviewSidebar selectedAgent={selectedAgent} onSelectAgent={setSelectedAgent} onContextMenu={showPreviewContextMenu} />}
       toolbar={<PreviewToolbar selectedAgent={selectedAgent} />}
       inspector={<PreviewInspector selectedAgent={selectedAgent} />}
     >
@@ -106,7 +130,7 @@ export function DesktopPreview() {
   );
 }
 
-function PreviewSidebar({ selectedAgent, onSelectAgent }) {
+function PreviewSidebar({ selectedAgent, onSelectAgent, onContextMenu }) {
   return (
     <div className="desktop-sidebar-content">
       <div className="desktop-sidebar-heading"><span className="hatch-wordmark">Hatch</span><button className="sidebar-new-conversation" type="button"><span>+</span><span>New conversation</span></button></div>
@@ -118,7 +142,7 @@ function PreviewSidebar({ selectedAgent, onSelectAgent }) {
           </button>
         ))}
         <div className="desktop-source-list-label conversations-label">Conversations</div>
-        <button type="button" className="desktop-source-row conversation selected"><span className="conversation-row-glyph">⌁</span><span className="desktop-source-row-copy"><strong>Database tooling review</strong><small>Current conversation</small></span></button>
+        <button type="button" className="desktop-source-row conversation selected" onContextMenu={(event) => onContextMenu?.(event, { kind: "conversation", target: "conv_preview_database_tools" })}><span className="conversation-row-glyph">⌁</span><span className="desktop-source-row-copy"><strong>Database tooling review</strong><small>Current conversation</small></span></button>
       </nav>
       <div className="desktop-sidebar-footer"><span className="avatar">SU</span><span className="desktop-sidebar-account"><strong>Seth UAT</strong><small>Signed in</small></span><button type="button" className="profile-sign-out">Sign out</button></div>
     </div>

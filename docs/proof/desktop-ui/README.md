@@ -65,6 +65,10 @@ route their DOM `contextmenu` events to the semantic Tauri popup, while text
 inputs retain the operating-system editing menu. The browser/Vite preview is
 still the place to inspect HTML during development.
 
+The rebuilt native preview also exercised a conversation-row secondary click;
+the accessibility tree exposed `Rename Conversation`, `Open in New Window`,
+and `Archive Conversation` from the Tauri popup rather than a WebKit menu.
+
 The macOS accessibility tree additionally confirmed that a minimal overlay
 removes the hidden pane from the main tree, focuses its close action on open,
 and returns focus to the toolbar toggle after Escape. Window app-data now
