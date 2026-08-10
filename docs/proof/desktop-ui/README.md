@@ -38,6 +38,13 @@ it does not prove cloud Conversation Library hydration, durable Run recovery,
 or crash/restart restoration. The latter remain covered by the runtime/native
 tests and the external rows in the acceptance matrix.
 
+On 2026-08-11 macOS UAT, a uniquely named preview bundle opened the primary
+window plus two `Hatch — Conversation` windows. The accessibility tree exposed
+different `conv_preview_*` URLs in each window. Closing the front window
+revealed the second window; closing that one returned to the primary window.
+A screenshot was captured during this run; it is intentionally not checked in
+as a product fixture because the generated IDs are ephemeral.
+
 | Capture | What it proves |
 | --- | --- |
 | `regular-1180x780.png` | Native traffic lights, integrated titlebar/toolbar, source-list sidebar, conversation surface, inspector |
