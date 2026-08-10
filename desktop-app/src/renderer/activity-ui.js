@@ -158,6 +158,14 @@ export function reconcileTimelineText(parts, terminalText) {
   return appendTimelineText(parts, terminalText.slice(visibleText.length));
 }
 
+export function terminalTimelineParts(parts, terminalText, status, runId) {
+  if (status === "content_filter") {
+    const content = terminalText ? [{ type: "text", text: terminalText }] : [];
+    return prependTurnActivity(content, runId);
+  }
+  return reconcileTimelineText(parts, terminalText);
+}
+
 export function historyTimelineEntries(message) {
   if (!Array.isArray(message.parts)) return null;
   const tools = new Map((message.tool_calls ?? []).map((tool) => [tool.tool_call_id, tool]));

@@ -254,12 +254,19 @@ test("runtime server exposes visible conversation history for client hydration",
       path: "/server/skills/contract-review/SKILL.md"
     }
   });
+  const beforeTool = "I need to read the sheet. ";
+  const afterTool = "The rows are ready.";
   await store.append({
-    type: "message.created",
+    type: "conversation.model_message",
     conversation_id: storedConversationId,
     run_id: "run_old_1",
-    role: "assistant",
-    content: "I still need to read the spreadsheet."
+    message: { role: "assistant", content: `${beforeTool}${afterTool}` },
+    finish_reason: "stop",
+    visible_parts: [
+      { type: "text", start: 0, end: beforeTool.length },
+      { type: "tool_call", tool_call_id: "call_file_read" },
+      { type: "text", start: beforeTool.length, end: beforeTool.length + afterTool.length }
+    ]
   });
 
   runtimeServer = createDeterministicRuntimeServer();
@@ -282,6 +289,10 @@ test("runtime server exposes visible conversation history for client hydration",
       role: string;
       content: string;
       run_id: string;
+      parts?: Array<
+        | { type: "text"; start: number; end: number }
+        | { type: "tool_call"; tool_call_id: string }
+      >;
       tool_calls?: Array<{
         tool_call_id: string;
         name: string;
@@ -304,7 +315,7 @@ test("runtime server exposes visible conversation history for client hydration",
   assert.equal(payload.conversation_id, "desktop-chat");
   assert.deepEqual(payload.messages.map((message) => [message.role, message.content]), [
     ["user", "Read the birthday dinner sheet."],
-    ["assistant", "I still need to read the spreadsheet."]
+    ["assistant", `${beforeTool}${afterTool}`]
   ]);
   assert.equal(payload.messages[0]?.tool_calls, undefined);
   assert.equal(payload.messages[0]?.skill_events, undefined);
@@ -323,6 +334,11 @@ test("runtime server exposes visible conversation history for client hydration",
     "auto",
     "birthday dinner rows"
   ]]);
+  assert.deepEqual(payload.messages[1]?.parts, [
+    { type: "text", start: 0, end: beforeTool.length },
+    { type: "tool_call", tool_call_id: "call_file_read" },
+    { type: "text", start: beforeTool.length, end: beforeTool.length + afterTool.length }
+  ]);
   assert.deepEqual(payload.messages[1]?.skill_events?.map((skillEvent) => [
     skillEvent.name,
     skillEvent.status,

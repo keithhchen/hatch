@@ -9,6 +9,7 @@ import {
   historyTimelineEntries,
   prependTurnActivity,
   reconcileTimelineText,
+  terminalTimelineParts,
   toolActionLabel,
   toolDisplay,
   toolResultSummary,
@@ -154,6 +155,18 @@ describe("activity accordion projection", () => {
       ...parts.slice(0, -1),
       { type: "text", text: "再回答。补充。" }
     ]);
+  });
+
+  it("replaces every provisional part with the client-owned blocked state", () => {
+    expect(terminalTimelineParts([
+      { type: "data", name: TURN_ACTIVITY_PART, data: { id: "run-1:activity", run_id: "run-1" } },
+      { type: "text", text: "safe preview" },
+      toolPart({ toolCallId: "read" })
+    ], "This response was blocked by the output safety check.", "content_filter", "run-1"))
+      .toEqual([
+        { type: "data", name: TURN_ACTIVITY_PART, data: { id: "run-1:activity", run_id: "run-1" } },
+        { type: "text", text: "This response was blocked by the output safety check." }
+      ]);
   });
 
   it("hydrates persisted text and activity in committed order", () => {
