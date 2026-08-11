@@ -19,7 +19,7 @@ macOS 与 Windows 都是一等平台。V1 使用 Tauri 稳定支持的 Native su
 - P1：React `DesktopWindowShell`、regular/compact/minimal tier、split divider、native-like overlay、局部 table/code overflow 与 accessibility contract。macOS-only 的 Overlay titlebar 配置放在 `tauri.macos.conf.json`，基础配置保留 Windows 的系统 frame/caption buttons，不把 macOS chrome 泄漏到 Windows。
 - P2：durable Conversation/Run repository、REST/WS idempotency、active-run exclusion、restart→`interrupted`，以及 Desktop Conversation Library 的 list/create/select/rename/archive 基础接线。每个 native window 现在保存自己的 Conversation、Workspace grant、permission、active-run projection、`composerDraft` 与 snapshot cursor；context 以 account id 绑定，换账号登录时不会恢复上一账号的 Conversation、workspace 投影或草稿；profile settings 只作为旧单窗口数据的迁移 fallback，workspace onboarding 的旧 `draft` 字段不再冒充 Composer draft。Profile preference writes 使用 Native field patch，不再让多个 renderer 以整份 JSON last-writer-wins 覆盖彼此的 account/window settings。V1 的恢复边界是 observer recovery（snapshot + cursor replay）；断开或 Runtime 重启会把未完成 Run 标为 `interrupted`，不自动 reclaim、重放 tool 或伪装成 `running`。
 - P3：Tauri application/context menu、semantic command routing、focused-window new-conversation scaffold 与 window-scoped bridge。
-- P3：Artifact 的 Quick Look/Open 已接入 grant-bound native bridge；macOS 使用非阻塞的系统 Quick Look launcher，Windows 使用默认文件关联的 ShellExecute `open`，Unix fallback 使用 `xdg-open`。Reveal、Notifications/Dock attention 与独立 Settings/About auxiliary windows 也已接入受支持的窄 native bridge。
+- P3：Artifact 的 Quick Look/Open 已接入 grant-bound native bridge；macOS 在主 AppKit 线程显示系统 `QLPreviewPanel`（不可用时才回退到 `qlmanage` launcher），Windows 使用默认文件关联的 ShellExecute `open`，Unix fallback 使用 `xdg-open`。Reveal、Notifications/Dock attention 与独立 Settings/About auxiliary windows 也已接入受支持的窄 native bridge。
 - 尚未宣称 P4 完成：Windows 真机、VoiceOver/Narrator、签名发布包、双屏/DPI/IME，以及 renderer/Run 层的 crash/reload attach-replay 仍需目标环境验收。Native dynamic conversation-window manifest 已通过正常退出和 preview 进程强制终止后的恢复测试，并支持单窗关闭清理；这不等同于正在执行 Run 的 crash recovery。
 
 macOS UAT 证据：
@@ -34,7 +34,7 @@ macOS UAT 证据：
 - [150% application zoom](proof/desktop-ui/zoom-150-1180x780.jpeg)
 - [200% application zoom → local table overflow](proof/desktop-ui/zoom-200-table-overflow-1180x780.jpeg)
 
-已通过的自动验证（2026-08-11 当前 worktree）：Renderer `24 files / 107 tests`；Rust `44 passed / 1 ignored Keychain smoke`；Runtime Node test `226 passed`；LocalRunner `43 passed`；Web build；Tauri preview/release `.app` build；production-session `cargo check`。Renderer style contract 也锁定了 system `color-scheme`、system accent、Increase Contrast、Reduced Motion 与 visible focus，确保 WebKit 原生控件跟随 Light/Dark，并锁定 shell overflow、container-query tiers 与结构化内容的局部横向滚动；Conversation snapshot 现在会在确认 cursor 前验证 journal 顺序、事件类型、Run 引用并做 cursor 幂等去重。另有 macOS preview UAT 验证 dynamic conversation-window manifest 的 Cmd-Q 保留、下次启动恢复及单窗关闭清理；preview 还提供 native workspace picker、grant-bound artifact Reveal/Quick Look/Open 的可重复 UAT fixture，但有效 grant 下 Quick Look 实际窗口仍属于 P4 外部验收。Runtime 验证必须使用独立的 `HATCH_RUNTIME_DATA_DIR`，避免复用旧的 durable idempotency fixture。
+已通过的自动验证（2026-08-11 当前 worktree）：Renderer `24 files / 107 tests`；Rust `44 passed / 1 ignored Keychain smoke`；Runtime Node test `226 passed`；LocalRunner `43 passed`；Web build；Tauri preview/release `.app` build；production-session `cargo check`。Renderer style contract 也锁定了 system `color-scheme`、system accent、Increase Contrast、Reduced Motion 与 visible focus，确保 WebKit 原生控件跟随 Light/Dark，并锁定 shell overflow、container-query tiers 与结构化内容的局部横向滚动；Conversation snapshot 现在会在确认 cursor 前验证 journal 顺序、事件类型、Run 引用并做 cursor 幂等去重。另有 macOS preview UAT 验证 dynamic conversation-window manifest 的 Cmd-Q 保留、下次启动恢复及单窗关闭清理；preview 还提供 native workspace picker、grant-bound artifact Reveal/Quick Look/Open 的可重复 UAT fixture，并已在有效 grant 下打开可见的系统 `QLPreviewPanel`（证据见 `quick-look-native-panel.jpeg`）。Runtime 验证必须使用独立的 `HATCH_RUNTIME_DATA_DIR`，避免复用旧的 durable idempotency fixture。
 
 详细的逐条状态、证据和外部验收边界见 [Desktop UI v1 验收矩阵](proof/desktop-ui/acceptance-matrix.md)。矩阵区分本机 PASS、实现但缺环境的 PARTIAL/EXTERNAL，以及明确延期的 DEFERRED；本 spec 在 P4 所列跨平台条件全部通过前不会标记为 complete。
 
@@ -425,7 +425,7 @@ Application menu、Toolbar、shortcuts 与 context menus 共用 command label、
 - 没有可路由的 Hatch window 时，Native application menu 的 product commands 必须 disabled。`Focused(false)` 不应过早清空最后一个 Hatch window，因为点击 macOS/Windows native menu 可暂时移开 WebView focus；另一个 Hatch window 的 `Focused(true)` 替换目标，`Destroyed` 必须清除它的 command state、pending context target 和 conversation-window registry entry。
 - Sidebar / Inspector 使用 Native `CheckMenuItem`，check state 来自该窗口的 command snapshot。菜单选择可乐观翻转 checkmark；若 event delivery 失败必须回滚，下一次 renderer 完整 snapshot 为最终真相。
 - Toolbar 的唯一 `…` 调用 `show_native_command_menu({ request: { position } })`。Native menu 必须从同一 registry 构建，至少包含 New Conversation、New Window、Open Workspace、Sidebar、Inspector、Zoom In/Out/Actual Size、Stop Run 与 Settings；不得由 renderer 传入任意 menu item 或 enablement。
-- `artifact.reveal` 已通过 `reveal_workspace_artifact({ workspaceGrantId, relativePath })` 接入 Finder/Explorer；`artifact.quickLook` 通过同一 grant-bound contract 接入：macOS 调用系统 Quick Look launcher，Windows 调用 ShellExecute `open`，其他 Unix 使用 `xdg-open`。Rust 在每次调用前重新解析 grant、canonicalize 并检查 containment；未通过 grant 校验时不能启动任何外部 opener。
+- `artifact.reveal` 已通过 `reveal_workspace_artifact({ workspaceGrantId, relativePath })` 接入 Finder/Explorer；`artifact.quickLook` 通过同一 grant-bound contract 接入：macOS 在主 AppKit 线程显示系统 `QLPreviewPanel`（面板不可用时回退到 `qlmanage` launcher），Windows 调用 ShellExecute `open`，其他 Unix 使用 `xdg-open`。Rust 在每次调用前重新解析 grant、canonicalize 并检查 containment；未通过 grant 校验时不能启动任何外部 opener。
 
 Native 交付顺序：
 
@@ -448,7 +448,7 @@ Context menu 规则：
 - Background window 需要 approval 时请求 Dock/taskbar attention。
 - `Cancelled`、`Failed`、`Offline`、`Needs Approval` 是不同状态；用户主动 Stop 不得显示为失败。
 
-当前 worktree 已交付的 P3 子集是 application menu、toolbar overflow、conversation/tool-result/artifact 的 native context popup、semantic command routing、per-window command enablement/check state、native conversation-window lifecycle、zoom commands、parented Workspace picker/drop、grant-bound Finder/Explorer Reveal、grant-bound Quick Look/Open、non-modal Dock/taskbar attention，以及独立 Settings/About auxiliary windows。macOS native menu UAT 已确认 artifact 菜单显示 `Quick Look`；Windows `ShellExecuteW` 与高 DPI/Explorer 行为仍需 Windows 真机验收。
+当前 worktree 已交付的 P3 子集是 application menu、toolbar overflow、conversation/tool-result/artifact 的 native context popup、semantic command routing、per-window command enablement/check state、native conversation-window lifecycle、zoom commands、parented Workspace picker/drop、grant-bound Finder/Explorer Reveal、grant-bound Quick Look/Open、non-modal Dock/taskbar attention，以及独立 Settings/About auxiliary windows。macOS native menu UAT 已确认 artifact 菜单显示 `Quick Look`，并在有效 grant 下实际显示可见的系统 `QLPreviewPanel`；Windows `ShellExecuteW` 与高 DPI/Explorer 行为仍需 Windows 真机验收。
 
 ### P4：跨平台验收
 

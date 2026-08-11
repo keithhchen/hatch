@@ -26,11 +26,20 @@ mod window_commands;
 mod workspace_grants;
 
 #[cfg(target_os = "macos")]
+use dispatch2::{run_on_main, MainThreadBound};
+#[cfg(target_os = "macos")]
 use objc2::{rc::Retained, runtime::Bool};
 #[cfg(target_os = "macos")]
+use objc2_app_kit::NSApplication;
+#[cfg(target_os = "macos")]
 use objc2_foundation::{
-    NSData, NSURLBookmarkCreationOptions, NSURLBookmarkResolutionOptions, NSURL,
+    NSData, NSPoint, NSRect, NSSize, NSURLBookmarkCreationOptions, NSURLBookmarkResolutionOptions,
+    NSURL,
 };
+#[cfg(target_os = "macos")]
+use objc2_quick_look_ui::QLPreviewPanel;
+#[cfg(target_os = "macos")]
+use quicklook::{PreviewItem, QuickLookPanel};
 #[cfg(target_os = "macos")]
 use security_framework::os::macos::code_signing::{
     Flags as CodeSigningFlags, SecCode, SecRequirement,
@@ -61,6 +70,9 @@ const MAX_NATIVE_DROP_CONTEXT_SOURCE_BYTES: u64 = 1024 * 1024;
 const MAX_NATIVE_DROP_CONTEXT_BYTES: usize = 64 * 1024;
 const MAX_NATIVE_DROP_CONTEXT_TOTAL_BYTES: usize = 128 * 1024;
 const MAX_NATIVE_DROP_CONTEXT_REQUESTS: usize = 8;
+
+#[cfg(target_os = "macos")]
+static QUICK_LOOK_PANEL: OnceLock<Mutex<Option<MainThreadBound<QuickLookPanel>>>> = OnceLock::new();
 
 struct StoredToolResult {
     created_at: Instant,
@@ -1148,8 +1160,9 @@ fn reveal_workspace_artifact(
 ///
 /// The renderer still supplies only an opaque workspace grant and a relative
 /// path. The path is resolved and contained by `resolve_workspace_artifact_path`
-/// immediately before handing it to the operating system. On macOS,
-/// `qlmanage -p` is the system Quick Look launcher; Windows uses the documented
+/// immediately before handing it to the operating system. On macOS, Apple's
+/// `QLPreviewPanel` is the primary path and `qlmanage -p` is retained as a
+/// fallback; Windows uses the documented
 /// ShellExecute `open` verb so the user's default file association decides what
 /// opens. Other Unix desktops use `xdg-open` as their native default handler.
 #[tauri::command]
@@ -1164,14 +1177,7 @@ fn open_workspace_artifact(
 
 fn open_workspace_artifact_with_platform(path: &std::path::Path) -> Result<(), String> {
     #[cfg(target_os = "macos")]
-    return Command::new("/usr/bin/qlmanage")
-        .arg("-p")
-        .arg(path)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map(|_| ())
-        .map_err(|error| format!("artifact_open_failed: {error}"));
+    return open_workspace_artifact_macos(path);
     #[cfg(target_os = "windows")]
     return open_workspace_artifact_windows(path);
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -1189,6 +1195,66 @@ fn open_workspace_artifact_with_platform(path: &std::path::Path) -> Result<(), S
         .ok_or_else(|| {
             "artifact_open_failed: The native file preview could not open the artifact".into()
         })
+}
+
+#[cfg(target_os = "macos")]
+fn open_workspace_artifact_macos(path: &std::path::Path) -> Result<(), String> {
+    let path = path.to_path_buf();
+    let panel_path = path.clone();
+    let panel_result = run_on_main(move |mtm| {
+        let panel_store = QUICK_LOOK_PANEL.get_or_init(|| Mutex::new(None));
+        let mut panel = panel_store
+            .lock()
+            .map_err(|_| "artifact_open_failed: Quick Look panel state was poisoned".to_string())?;
+
+        if panel.is_none() {
+            let quicklook = QuickLookPanel::shared().ok_or_else(|| {
+                "artifact_open_failed: Quick Look panel is unavailable on this host".to_string()
+            })?;
+            *panel = Some(MainThreadBound::new(quicklook, mtm.clone()));
+        }
+
+        let quicklook = panel
+            .as_ref()
+            .expect("Quick Look panel initialized")
+            .get(mtm);
+        let item = PreviewItem::from_file_url(&panel_path, None).ok_or_else(|| {
+            "artifact_open_failed: Quick Look could not represent the artifact path".to_string()
+        })?;
+        quicklook.set_items(vec![item]);
+        quicklook.reload_if_dirty();
+        NSApplication::sharedApplication(mtm.clone()).activate();
+        quicklook.show();
+        // QLPreviewPanel can retain a stale off-screen frame after a previous
+        // host session. Re-center and order the shared AppKit panel explicitly
+        // so this command always produces an observable native window.
+        if let Some(native_panel) = unsafe { QLPreviewPanel::sharedPreviewPanel(mtm) } {
+            native_panel.setFloatingPanel(true);
+            native_panel.setHidesOnDeactivate(false);
+            native_panel.setBecomesKeyOnlyIfNeeded(false);
+            native_panel.setFrame_display(
+                NSRect::new(NSPoint::new(600.0, 200.0), NSSize::new(760.0, 560.0)),
+                true,
+            );
+            native_panel.orderFrontRegardless();
+            native_panel.makeKeyAndOrderFront(None);
+        }
+        Ok::<(), String>(())
+    });
+
+    match panel_result {
+        Ok(()) => Ok(()),
+        Err(panel_error) => Command::new("/usr/bin/qlmanage")
+            .arg("-p")
+            .arg(path)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map(|_| ())
+            .map_err(|fallback_error| {
+                format!("{panel_error}; qlmanage fallback failed: {fallback_error}")
+            }),
+    }
 }
 
 #[cfg(target_os = "windows")]

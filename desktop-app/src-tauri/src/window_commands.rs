@@ -836,21 +836,23 @@ impl NativeCommandRouter {
             .flatten()
     }
 
+    #[cfg(test)]
     fn clear_pending_context_if(
         &self,
         window_label: &str,
-        kind: NativeContextMenuKind,
-        target: &Option<String>,
+        expected_kind: NativeContextMenuKind,
+        expected_target: &Option<String>,
     ) {
-        if let Ok(mut state) = self.state.lock() {
-            let matches_request = state
-                .pending_context_by_window
-                .get(window_label)
-                .map(|pending| pending.kind == kind && pending.target == *target)
-                .unwrap_or(false);
-            if matches_request {
-                state.pending_context_by_window.remove(window_label);
-            }
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
+        let matches = state
+            .pending_context_by_window
+            .get(window_label)
+            .map(|pending| pending.kind == expected_kind && pending.target == *expected_target)
+            .unwrap_or(false);
+        if matches {
+            state.pending_context_by_window.remove(window_label);
         }
     }
 }
@@ -1185,10 +1187,10 @@ pub fn show_native_context_menu(
         Some(position) => menu.popup_at(native_window, position),
         None => menu.popup(native_window),
     };
-    // Selecting a context action consumes the pending record in
-    // `route_menu_event`; dismissing the popup does not. Clear only our own
-    // record so a canceled popup cannot leak an old target into a later menu.
-    router.clear_pending_context_if(window.label(), kind, &target);
+    // Do not clear the pending record here. On macOS the native popup returns
+    // before the user chooses an item; `route_menu_event` consumes the record
+    // later. A canceled popup is harmless because the next popup for this
+    // window replaces it, and window destruction clears it unconditionally.
     result
         .map(|_| true)
         .map_err(|error| format!("native_context_menu_show_failed: {error}"))

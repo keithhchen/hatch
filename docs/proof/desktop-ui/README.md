@@ -77,9 +77,10 @@ The preview Inspector also exercises the production native workspace boundary:
 grant in the fixture, and enables the artifact popup only after that grant is
 present. The artifact target is a repository-relative spec file, so the
 fixture exercises the same Rust containment check used by the signed-in shell.
-This proves picker → grant projection → semantic artifact request wiring; it
-does not claim that a valid-grant Quick Look panel has been visually accepted
-on every target OS.
+This proves picker → grant projection → semantic artifact request wiring. On
+macOS, the same valid-grant fixture now opens the native `QLPreviewPanel`; the
+checked-in capture is `quick-look-native-panel.jpeg`. Windows `ShellExecuteW`
+and the corresponding Explorer/Open behavior remain target-device acceptance.
 
 | Capture | What it proves |
 | --- | --- |
@@ -89,6 +90,7 @@ on every target OS.
 | `minimal-sidebar-overlay.png` | Sidebar opens as a focus-scoped overlay and returns focus to its opener |
 | `minimal-inspector-overlay.png` | Inspector opens as a focus-scoped trailing overlay and closes with Escape |
 | `native-menu-sidebar-collapsed-1180x780.jpeg` | Native View → Hide Sidebar changes the live pane and the next View menu says Show Sidebar |
+| `quick-look-native-panel.jpeg` | A valid-grant artifact action opens the visible macOS system `QLPreviewPanel` |
 | `multi-window-grant-inspector-collapsed.jpeg` | One dynamic conversation window keeps its own workspace grant while its Inspector is collapsed |
 | `multi-window-default-inspector.jpeg` | A second dynamic conversation window has a different server-shaped ID, no grant, and its Inspector open |
 | `crash-reload-restored-window.jpeg` | After a forced preview-process termination, a dynamic `conv_preview_*` window is restored from the native manifest |
@@ -144,8 +146,10 @@ canonical containment before opening Finder/Explorer or handing the path to the
 platform opener. On macOS, a fresh preview UAT opened the artifact context
 popup and its accessibility tree exposed `Reveal in Finder`, `Quick Look`, and
 `Copy Path`; the popup route carried the semantic `artifact.quickLook` command.
-Windows ShellExecute and a valid-grant invocation remain real-platform
-acceptance items.
+Selecting it opened a visible 760×560 system `QLPreviewPanel` for the
+grant-bound Markdown artifact; the capture is `quick-look-native-panel.jpeg`.
+Windows ShellExecute and a valid-grant Explorer/Open invocation remain
+real-platform acceptance items.
 
 The preview fixture also routes Zoom In, Zoom Out and Actual Size through the
 same native semantic command bridge and WebView zoom API as the signed-in
@@ -204,9 +208,9 @@ pixel clone of AppKit: Tauri owns the native window/menu boundary while React
 owns transcript, Markdown, code, tables, tool activity, and composer content.
 
 The remaining platform work is explicit in the parent spec: Windows UAT and
-accessibility, signed release verification, and a valid-grant Quick Look/Open
-invocation on each target OS. Finder/Explorer Reveal, the macOS Quick Look
-menu route, non-modal window attention, and independent Settings/About
+accessibility, signed release verification, and a valid-grant Open invocation
+on Windows. Finder/Explorer Reveal, the macOS Quick Look menu route and
+visible panel, non-modal window attention, and independent Settings/About
 auxiliary windows are now covered by the native bridge.
 
 The latest preview UAT also opened two dynamic conversation windows from the
