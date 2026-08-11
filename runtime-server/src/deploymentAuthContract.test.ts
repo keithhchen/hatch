@@ -12,6 +12,10 @@ test("production routes logout to Registry and disables legacy HMAC auth", async
   assert.match(registryMatcher, /(?:^|\s)\/v1\/auth\/logout(?:\s|$)/);
   assert.doesNotMatch(registryMatcher, /\/v1\/user\/agents\/\*/,
     "public routing must not expose the entitlement mutation path");
+  const runtimeMatcher = caddyfile.match(/^\s*@runtime_api path ([^\n]+)$/m)?.[1];
+  assert.ok(runtimeMatcher, "Caddyfile must declare the Runtime HTTP API matcher");
+  assert.match(runtimeMatcher, /(?:^|\s)\/v1\/conversations\*(?:\s|$)/,
+    "Conversation Library routes must reach Runtime before the Dashboard /v1 catch-all");
 
   const deployWorkflow = await readFile(
     path.join(repositoryRoot, ".github", "workflows", "deploy.yml"),
