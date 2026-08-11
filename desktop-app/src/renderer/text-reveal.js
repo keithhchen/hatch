@@ -1,5 +1,5 @@
-export const DEFAULT_TEXT_REVEAL_TARGET_MS = 1600;
-export const DEFAULT_TEXT_REVEAL_MAX_LAG_MS = 2400;
+export const DEFAULT_TEXT_REVEAL_TARGET_MS = 3200;
+export const DEFAULT_TEXT_REVEAL_MAX_LAG_MS = 4800;
 
 const TEXT_REVEAL_FLUSH_EVENTS = new Set([
   "approval.request",

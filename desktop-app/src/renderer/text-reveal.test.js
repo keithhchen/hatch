@@ -54,9 +54,9 @@ describe("adaptive text reveal", () => {
     expect(fixture.revealed.map((entry) => entry.content).join("")).toBe("你");
     expect(fixture.scheduledFrames()).toBe(1);
 
-    fixture.advanceTo(800);
-    expect(fixture.revealed.map((entry) => entry.content).join("").length).toBeGreaterThan(1);
     fixture.advanceTo(1600);
+    expect(fixture.revealed.map((entry) => entry.content).join("").length).toBeGreaterThan(1);
+    fixture.advanceTo(3200);
 
     expect(fixture.revealed.map((entry) => entry.content).join("")).toBe("你好，世界");
     expect(fixture.controller.hasPending("run-1")).toBe(false);
