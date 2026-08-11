@@ -85,6 +85,30 @@ resulting capture is checked in as
 - Runtime: 226 Node subtests passed with an isolated `HATCH_RUNTIME_DATA_DIR`
 - LocalRunner: 43 tests passed (filesystem, shell and macOS Seatbelt suites)
 - `npm run build:web`
+
+## Desktop-native visual review
+
+The captures are reviewed against the behavior users normally associate with a
+desktop application, rather than against a pixel-perfect macOS imitation:
+
+- **Pass on macOS preview:** the system traffic lights remain native; the
+  title/toolbar is one chrome band; panes use source-list rows, separators and
+  selection rather than stacked web cards; the main conversation keeps its
+  width while Inspector and Sidebar collapse discretely.
+- **Pass on the interaction model:** regular → compact → minimal is a small
+  state machine, not a mobile breakpoint; compact panes overlay the document,
+  the Composer remains outside the conversation scroller, and overflow is a
+  native menu shared with application and context commands.
+- **Pass on content behavior:** tables, code and logs retain their structure
+  and scroll locally; long titles use ellipsis; the window itself does not
+  become a horizontally scrolling webpage. The 200% capture is the strongest
+  visual check of this contract.
+- **Intentionally WebView-owned:** transcript, Markdown, tool timeline and
+  Composer remain React content. This is the chosen Tauri Hybrid boundary, not
+  an accidental browser fallback.
+- **Still external:** Windows caption/menu metrics, Narrator, Snap/DPI,
+  VoiceOver/IME, real Finder/Explorer drag/drop, and signed/notarized release
+  behavior require the target-platform UAT listed in the acceptance matrix.
 - `npm run build:app` (release `.app`, ad-hoc/UAT; not a publishable notarized artifact)
 - `npm run build` (strict ad-hoc/UAT DMG verification; not a publishable notarized artifact)
 
