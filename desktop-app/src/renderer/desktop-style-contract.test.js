@@ -11,4 +11,22 @@ describe("desktop system appearance contract", () => {
     );
     expect(stylesheet).not.toMatch(/color-scheme:\s*light\s*;/);
   });
+
+  it("keeps desktop layout state in the shell and localizes structured overflow", () => {
+    expect(stylesheet).toMatch(
+      /\.desktop-window-shell\s*\{[\s\S]*?overflow:\s*hidden;[\s\S]*?min-width:\s*0;/
+    );
+    expect(stylesheet).toMatch(
+      /\.desktop-main\s*\{[\s\S]*?container-type:\s*inline-size;/
+    );
+    expect(stylesheet).toMatch(
+      /\.markdown-table-scroll\s*\{[\s\S]*?max-inline-size:\s*100%;[\s\S]*?overflow-x:\s*auto;/
+    );
+    expect(stylesheet).toMatch(
+      /\.markdown-body \.markdown-table-scroll table\s*\{[\s\S]*?display:\s*table;[\s\S]*?min-inline-size:\s*100%;/
+    );
+    expect(stylesheet).not.toMatch(/overflow-wrap:\s*anywhere/);
+    expect(stylesheet).not.toMatch(/\.markdown-body\s+table[^\{]*\{[^\}]*display:\s*block/);
+    expect(stylesheet).not.toMatch(/@media\s*\([^)]*width\s*:/);
+  });
 });
