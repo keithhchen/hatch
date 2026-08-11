@@ -4,6 +4,13 @@ export function isServerConversationId(value) {
   return /^conv_[a-z0-9]+$/i.test(String(value || "").trim());
 }
 
+export function restorableConversationId(value, fallback = "desktop-chat") {
+  const normalized = String(value || "").trim();
+  return isServerConversationId(normalized) || normalized === "desktop-chat"
+    ? normalized
+    : fallback;
+}
+
 /**
  * The Conversation Library is the renderer's authority for server-issued
  * Conversation IDs.  A failed/old Library endpoint may keep the legacy

@@ -26,6 +26,34 @@ export function creatorAgentFromEntitlement(entitlement) {
   return creatorAgentFromSession({ creator_agent: entitlement });
 }
 
+/**
+ * A Runtime projection may refine the public Agent presentation, but it must
+ * never replace the Agent selected from the authenticated entitlement with a
+ * generic fallback or with metadata from another binding.
+ */
+export function creatorAgentFromBoundSession(message, entitlement, currentAgent) {
+  if (!message?.creator_agent?.creator?.name || !message?.creator_agent?.product?.name) {
+    return currentAgent;
+  }
+  const expected = {
+    entitlementId: String(entitlement?.entitlement_id || ""),
+    agentId: String(entitlement?.agent_id || ""),
+    creatorId: String(entitlement?.creator_id || "")
+  };
+  const received = {
+    entitlementId: String(message.entitlement_id || ""),
+    agentId: String(message.agent_id || ""),
+    creatorId: String(message.creator_id || "")
+  };
+  if (!expected.entitlementId
+    || expected.entitlementId !== received.entitlementId
+    || expected.agentId !== received.agentId
+    || expected.creatorId !== received.creatorId) {
+    return currentAgent;
+  }
+  return creatorAgentFromSession(message);
+}
+
 function initials(name) {
   return String(name).trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() || "").join("") || "C";
 }

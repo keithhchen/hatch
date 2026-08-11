@@ -36,4 +36,16 @@ describe("desktop system appearance contract", () => {
     expect(stylesheet).toMatch(/@media\s*\(prefers-contrast:\s*more\)[\s\S]*?border-separator/);
     expect(stylesheet).toMatch(/\.desktop-window-shell\s+:focus-visible\s*\{[\s\S]*?outline:\s*2px\s+solid\s+var\(--focus-ring\)/);
   });
+
+  it("keeps workspace and permission controls in the compact composer tier", () => {
+    expect(stylesheet).toMatch(/\.composer-controls\s*\{[\s\S]*?flex:\s*1\s+1\s+auto;/);
+    expect(stylesheet).toMatch(/\.composer-settings\s*\{[\s\S]*?overflow:\s*visible;/);
+    expect(stylesheet).toMatch(/@container\s*\(max-width:\s*560px\)[\s\S]*?\.composer-settings \.attachment-composer-control\s*\{\s*display:\s*none;\s*\}/);
+    expect(stylesheet).not.toMatch(/@container\s*\(max-width:\s*560px\)[\s\S]*?\.composer-controls \.composer-settings\s*\{\s*display:\s*none;/);
+  });
+
+  it("uses only the insertion caret for composer text focus", () => {
+    expect(stylesheet).not.toMatch(/\.composer:focus-within\s*\{/);
+    expect(stylesheet).toMatch(/\.desktop-window-shell \.composer-input:focus-visible\s*\{\s*outline:\s*none;\s*\}/);
+  });
 });

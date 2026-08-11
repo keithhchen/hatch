@@ -1405,8 +1405,9 @@ h2 {
 }
 
 .composer-settings {
+  flex: 1 1 auto;
   gap: 4px;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .composer-control {
@@ -1450,7 +1451,7 @@ button.composer-control:focus-visible {
 }
 
 .workspace-composer-control {
-  max-width: 260px;
+  max-width: min(260px, 42cqw);
 }
 
 .composer-control-label {
@@ -1460,6 +1461,7 @@ button.composer-control:focus-visible {
 }
 
 .permission-composer-control {
+  max-width: min(180px, 42cqw);
   position: relative;
   flex-shrink: 0;
 }
@@ -1671,13 +1673,6 @@ button.composer-control:focus-visible {
 .desktop-toolbar-title { max-width: min(28vw, 290px); }
 .desktop-toolbar-agent { max-width: min(19vw, 190px); }
 
-.preview-open-window {
-  flex: 0 0 auto;
-  font-size: 11px;
-  min-height: 28px;
-  padding: 0 8px;
-}
-
 .desktop-toolbar-separator {
   background: var(--border-separator);
   height: 24px;
@@ -1850,7 +1845,30 @@ button.composer-control:focus-visible {
   padding: 10px 12px 14px;
 }
 
+.desktop-source-empty.compact {
+  font-size: 11px;
+  padding: 7px 12px 9px 35px;
+}
+
 .desktop-source-list-label.conversations-label { border-top: 1px solid var(--border-separator); margin-top: 8px; }
+
+.desktop-agent-conversation-group {
+  border-left: 1px solid color-mix(in srgb, var(--hatch-accent) 38%, var(--border-separator));
+  display: grid;
+  gap: 1px;
+  margin: 0 0 5px 19px;
+  min-width: 0;
+  padding: 0 0 1px 8px;
+}
+
+.desktop-agent-conversation-label {
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  padding: 5px 7px 3px;
+  text-transform: uppercase;
+}
 
 .desktop-source-row {
   align-items: center;
@@ -1901,6 +1919,19 @@ button.composer-control:focus-visible {
 
 .desktop-source-row-copy strong { font-size: 12px; font-weight: 600; }
 .desktop-source-row-copy small { color: var(--text-secondary); font-size: 10px; }
+
+.desktop-agent-disclosure {
+  color: var(--text-secondary);
+  flex: 0 0 auto;
+  font-size: 15px;
+  line-height: 1;
+  margin-left: auto;
+}
+
+.desktop-agent-conversation-group .desktop-source-row {
+  min-height: 34px;
+  padding-block: 4px;
+}
 
 .conversation-rename-input {
   background: var(--surface-sidebar);
@@ -2093,14 +2124,6 @@ button.composer-control:focus-visible {
   scroll-padding-bottom: 20px;
 }
 
-.preview-thread-viewport {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--surface-window) 86%, transparent), var(--surface-window));
-}
-
-.preview-chat-shell .chat-message { max-width: 900px; }
-
-.preview-chat-shell .markdown-body p { max-width: 760px; }
-
 .desktop-chat-shell .composer-footer {
   background: var(--surface-window);
   padding: 12px clamp(14px, 3vw, 26px) 18px;
@@ -2118,6 +2141,7 @@ button.composer-control:focus-visible {
 .composer-controls {
   align-items: flex-end;
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   min-width: 0;
 }
@@ -2192,7 +2216,7 @@ button.composer-control:focus-visible {
   box-shadow: 0 10px 25px rgba(43, 31, 22, .16);
   display: grid;
   gap: 3px;
-  min-width: 210px;
+  min-width: 180px;
   padding: 5px;
   position: absolute;
   right: 0;
@@ -2202,7 +2226,11 @@ button.composer-control:focus-visible {
 .composer-overflow-menu .composer-control { justify-content: flex-start; max-width: 100%; width: 100%; }
 
 @container (max-width: 560px) {
-  .composer-controls .composer-settings { display: none; }
+  /* Workspace and permission are turn-level state, not optional overflow.
+   * Keep both controls in the composer so a compact desktop window does not
+   * hide the controls that determine native tool authority. Attachments are
+   * the only item that moves into the local overflow menu. */
+  .composer-settings .attachment-composer-control { display: none; }
   .composer-overflow { display: block; }
   .desktop-chat-shell .composer { border-radius: 12px; }
 }
@@ -2290,6 +2318,12 @@ button.composer-control:focus-visible {
 .desktop-window-shell :focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
+}
+
+/* The insertion caret is sufficient focus feedback inside the composer. Do
+ * not draw WebKit's rectangular outline through the rounded input shell. */
+.desktop-window-shell .composer-input:focus-visible {
+  outline: none;
 }
 
 .desktop-window-shell select { accent-color: var(--hatch-accent); }

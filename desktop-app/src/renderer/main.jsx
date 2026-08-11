@@ -28,7 +28,7 @@ import {
   DEFAULT_PERMISSION_POLICY,
   PERMISSION_OPTIONS,
   PRODUCT_COPY,
-  creatorAgentFromSession,
+  creatorAgentFromBoundSession,
   creatorAgentFromEntitlement,
   PLATFORM_LOCAL_TOOLS,
   normalizePermissionPolicy,
@@ -46,6 +46,7 @@ import {
   isTerminalRunStatus,
   listConversations,
   reconcileConversationSnapshot,
+  restorableConversationId,
   shouldOpenNewConversationInWindow,
   updateConversation
 } from "./conversation-client.js";
@@ -109,7 +110,6 @@ import {
   normalizeWindowLayoutPreferences,
   normalizeZoom
 } from "./desktop-layout.js";
-import { DesktopPreview } from "./desktop-preview.jsx";
 import {
   conversationBindingFromLocation,
   conversationIdFromLocation,
@@ -124,6 +124,7 @@ import {
   normalizeNativeDropAttachment,
   normalizeNativeDropFile
 } from "./native-drop-context.js";
+import { invokeDesktopCommand } from "./native-invoke-boundary.js";
 
 const PROTOCOL_VERSION = "0.7";
 const OUTPUT_FILTERED_COPY = "This response was blocked by the output safety check.";
@@ -178,12 +179,6 @@ function DesktopAuxiliaryWindow({ kind }) {
 }
 
 function App() {
-  // The preview is opt-in at build time and is never enabled by normal dev,
-  // release, or distribution builds. Keeping the switch environment-based
-  // also lets the static debug bundle exercise a real native window for UAT.
-  if (import.meta.env.VITE_HATCH_DESKTOP_PREVIEW === "1") {
-    return <DesktopPreview />;
-  }
   const auxiliaryMode = auxiliaryWindowMode();
   if (auxiliaryMode) return <DesktopAuxiliaryWindow kind={auxiliaryMode} />;
   const authStorageRef = useRef(null);
@@ -422,9 +417,11 @@ function App() {
       // route, but a new Conversation ID must always come from the Library.
       // Never mint an authoritative conversation id in the renderer.
       const fallback = "desktop-chat";
-      setConversationId(requestedConversationIdRef.current || (selected
+      const savedConversationId = selected
         ? getConversationId(profileId, selected.entitlement_id, fallback)
-        : fallback));
+        : fallback;
+      setConversationId(requestedConversationIdRef.current
+        || restorableConversationId(savedConversationId, fallback));
       setMessages([]);
     }
     setBuyerSession(session);
@@ -1081,14 +1078,16 @@ function App() {
     const savedWorkspaceGrant = normalizeWorkspaceGrant(windowContext.workspaceGrant)
       || (!openedFromConversationWindow ? normalizeWorkspaceGrant(getProfileSetting("workspace_grant", null)) : null);
     const legacySavedWorkspace = getProfileSetting("workspace_root", "");
-    const savedConversationId = getConversationId(
+    const storedConversationId = getConversationId(
       buyerProfile.id,
       selectedEntitlementId,
       "desktop-chat"
     );
-    const windowConversationId = typeof windowContext.conversationId === "string"
+    const savedConversationId = restorableConversationId(storedConversationId);
+    const storedWindowConversationId = typeof windowContext.conversationId === "string"
       ? windowContext.conversationId.trim()
       : "";
+    const windowConversationId = restorableConversationId(storedWindowConversationId, "");
     const savedRun = parseStoredJson(windowContext.activeRun)
       || (!openedFromConversationWindow ? parseStoredJson(getProfileSetting("active_run", null)) : null);
     const dismissedRunId = typeof windowContext.dismissedRunId === "string"
@@ -1769,7 +1768,14 @@ function App() {
   async function handleRuntimeMessage(message, sourceSocket = socketRef.current, sourceToken = connectionTokenRef.current) {
     if (!isCurrentRuntimeTransport(sourceSocket, sourceToken)) return;
     if (message.type === "session.ready") {
-      setCreatorAgent(creatorAgentFromSession(message));
+      const selectedEntitlement = creatorAgentEntitlements.find(
+        (entitlement) => entitlement.entitlement_id === selectedEntitlementId
+      );
+      setCreatorAgent((current) => creatorAgentFromBoundSession(
+        message,
+        selectedEntitlement,
+        current
+      ));
       connectedRef.current = true;
       reconnectAttemptRef.current = 0;
       setConnected(true);
@@ -2587,8 +2593,21 @@ function App() {
     // A manual Agent switch is an explicit user choice. Do not let the
     // launch URL/context hint re-apply the previous window binding.
     requestedConversationBindingRef.current = null;
+    // A manual Agent switch is also a navigation boundary. The previous
+    // Conversation belongs to the old Agent and must not remain as a URL
+    // hint while the new Agent's Library is loading.
+    requestedConversationIdRef.current = "";
     const nextBinding = runtimeBindingForEntitlement(entitlement);
-    if (nextBinding) patchWindowContext(nextBinding);
+    if (nextBinding) {
+      patchWindowContext({
+        ...nextBinding,
+        conversationId: "desktop-chat",
+        conversationCursor: 0,
+        composerDraft: "",
+        activeRun: null,
+        dismissedRunId: ""
+      });
+    }
     setSelectedEntitlementId(entitlement.entitlement_id);
     setCreatorAgent(creatorAgentFromEntitlement(entitlement));
     setProfileSetting("last_selected_entitlement_id", entitlement.entitlement_id);
@@ -2597,6 +2616,7 @@ function App() {
       conversationCursorRef.current = 0;
       setConversations([]);
       setConversationLibraryStatus("loading");
+      setComposerDraftValue("");
       // Never carry a Conversation ID across Creator Agents. The Library
       // effect will select or create an ID bound to the newly selected Agent.
       setConversationId("desktop-chat");
@@ -2956,6 +2976,7 @@ function App() {
           selectedEntitlementId={selectedEntitlementId}
           conversationId={conversationId}
           conversations={conversations}
+          conversationLibraryStatus={conversationLibraryStatus}
           conversationLibraryReady={conversationLibraryStatus === "ready"}
           onSelectAgent={selectCreatorAgent}
           onSelectConversation={selectConversation}
@@ -3093,6 +3114,7 @@ function DesktopSidebar({
   selectedEntitlementId,
   conversationId,
   conversations,
+  conversationLibraryStatus,
   conversationLibraryReady,
   onSelectAgent,
   onSelectConversation,
@@ -3106,10 +3128,9 @@ function DesktopSidebar({
   onSignOut
 }) {
   const listedConversations = Array.isArray(conversations) ? conversations : [];
-  const hasCurrentConversation = listedConversations.some((item) => item.id === conversationId);
-  const visibleConversations = hasCurrentConversation || !conversationId
-    ? listedConversations
-    : [{ id: conversationId, title: "Current conversation", status: "active" }, ...listedConversations];
+  // The server-issued Library is the only list authority. Never synthesize a
+  // row for a URL/profile ID that the selected Agent's Library did not return.
+  const visibleConversations = listedConversations;
   return (
     <div className="desktop-sidebar-content">
       <div className="desktop-sidebar-heading">
@@ -3129,81 +3150,60 @@ function DesktopSidebar({
           const agent = creatorAgentFromEntitlement(entitlement);
           const selected = entitlement.entitlement_id === selectedEntitlementId;
           return (
-            <button
-              aria-current={selected ? "page" : undefined}
-              className={`desktop-source-row agent ${selected ? "selected" : ""}`}
-              key={entitlement.entitlement_id}
-              type="button"
-              onClick={() => onSelectAgent(entitlement)}
-            >
-              <span className="creator-avatar">{agent.creatorInitials}</span>
-              <span className="desktop-source-row-copy">
-                <strong title={agent.name}>{agent.name}</strong>
-                <small>by {agent.creator}</small>
-              </span>
-            </button>
+            <React.Fragment key={entitlement.entitlement_id}>
+              <button
+                aria-current={selected ? "page" : undefined}
+                aria-expanded={selected}
+                className={`desktop-source-row agent ${selected ? "selected" : ""}`}
+                type="button"
+                onClick={() => onSelectAgent(entitlement)}
+              >
+                <span className="creator-avatar">{agent.creatorInitials}</span>
+                <span className="desktop-source-row-copy">
+                  <strong title={agent.name}>{agent.name}</strong>
+                  <small>by {agent.creator}</small>
+                </span>
+                <span className="desktop-agent-disclosure" aria-hidden="true">{selected ? "⌄" : "›"}</span>
+              </button>
+              {selected ? (
+                <div className="desktop-agent-conversation-group" role="group" aria-label={`${agent.name} conversations`}>
+                  <div className="desktop-agent-conversation-label">Conversations</div>
+                  {conversationLibraryStatus === "loading" || conversationLibraryStatus === "idle" ? (
+                    <div className="desktop-source-empty compact">Loading conversations…</div>
+                  ) : visibleConversations.length > 0 ? visibleConversations.map((conversation) => {
+                    const conversationSelected = conversation.id === conversationId;
+                    const renaming = conversation.id === renamingConversationId;
+                    return (
+                      renaming ? (
+                        <ConversationSourceRow
+                          key={conversation.id}
+                          conversation={conversation}
+                          selected={conversationSelected}
+                          renaming
+                          renameDraft={renameDraft}
+                          onRenameDraftChange={onRenameDraftChange}
+                          onCommitRename={onCommitRename}
+                          onCancelRename={onCancelRename}
+                          onContextMenu={onConversationContextMenu}
+                        />
+                      ) : (
+                        <ConversationSourceRow
+                          key={conversation.id}
+                          conversation={conversation}
+                          selected={conversationSelected}
+                          onSelect={onSelectConversation}
+                          onContextMenu={onConversationContextMenu}
+                        />
+                      )
+                    );
+                  }) : (
+                    <div className="desktop-source-empty compact">No conversations yet</div>
+                  )}
+                </div>
+              ) : null}
+            </React.Fragment>
           );
         })}
-        <div className="desktop-source-list-label conversations-label">Conversations</div>
-        {visibleConversations.length > 0 ? visibleConversations.map((conversation) => {
-          const selected = conversation.id === conversationId;
-          const renaming = conversation.id === renamingConversationId;
-          return (
-            renaming ? (
-              <div
-                className={`desktop-source-row conversation ${selected ? "selected" : ""}`}
-                key={conversation.id}
-                aria-current={selected ? "page" : undefined}
-                onContextMenu={(event) => onConversationContextMenu?.(event, {
-                  kind: "conversation",
-                  target: conversation.id
-                })}
-              >
-                <span className="conversation-row-glyph" aria-hidden="true">⌁</span>
-                <span className="desktop-source-row-copy">
-                  <input
-                    aria-label="Rename conversation"
-                    className="conversation-rename-input"
-                    data-conversation-rename={conversation.id}
-                    value={renameDraft}
-                    onChange={(event) => onRenameDraftChange?.(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        void onCommitRename?.(conversation.id, event.currentTarget.value);
-                      } else if (event.key === "Escape") {
-                        event.preventDefault();
-                        onCancelRename?.();
-                      }
-                    }}
-                  />
-                  <small>Rename with Enter · cancel with Escape</small>
-                </span>
-              </div>
-            ) : (
-              <button
-                className={`desktop-source-row conversation ${selected ? "selected" : ""}`}
-                key={conversation.id}
-                type="button"
-                aria-current={selected ? "page" : undefined}
-                title={conversation.title || conversation.id}
-                onClick={() => onSelectConversation?.(conversation)}
-                onContextMenu={(event) => onConversationContextMenu?.(event, {
-                  kind: "conversation",
-                  target: conversation.id
-                })}
-              >
-                <span className="conversation-row-glyph" aria-hidden="true">⌁</span>
-                <span className="desktop-source-row-copy">
-                  <strong>{conversation.title || conversationTitle(conversation.id)}</strong>
-                  <small>{selected ? "Current conversation" : "Conversation"}</small>
-                </span>
-              </button>
-            )
-          );
-        }) : (
-          <div className="desktop-source-empty">No conversations yet</div>
-        )}
       </nav>
       <div className="desktop-sidebar-footer">
         <span className="avatar">{profile.initials}</span>
@@ -3211,6 +3211,69 @@ function DesktopSidebar({
         <button className="profile-sign-out" type="button" onClick={onSignOut}>Sign out</button>
       </div>
     </div>
+  );
+}
+
+function ConversationSourceRow({
+  conversation,
+  selected,
+  renaming = false,
+  renameDraft = "",
+  onSelect,
+  onContextMenu,
+  onRenameDraftChange,
+  onCommitRename,
+  onCancelRename
+}) {
+  const contextMenu = (event) => onContextMenu?.(event, {
+    kind: "conversation",
+    target: conversation.id
+  });
+  if (renaming) {
+    return (
+      <div
+        className={`desktop-source-row conversation ${selected ? "selected" : ""}`}
+        aria-current={selected ? "page" : undefined}
+        onContextMenu={contextMenu}
+      >
+        <span className="conversation-row-glyph" aria-hidden="true">⌁</span>
+        <span className="desktop-source-row-copy">
+          <input
+            aria-label="Rename conversation"
+            className="conversation-rename-input"
+            data-conversation-rename={conversation.id}
+            value={renameDraft}
+            onChange={(event) => onRenameDraftChange?.(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                void onCommitRename?.(conversation.id, event.currentTarget.value);
+              } else if (event.key === "Escape") {
+                event.preventDefault();
+                onCancelRename?.();
+              }
+            }}
+          />
+          <small>Rename with Enter · cancel with Escape</small>
+        </span>
+      </div>
+    );
+  }
+  return (
+    <button
+      className={`desktop-source-row conversation ${selected ? "selected" : ""}`}
+      type="button"
+      aria-current={selected ? "page" : undefined}
+      title={conversation.title || conversation.id}
+      onClick={() => onSelect?.(conversation)}
+      onContextMenu={contextMenu}
+    >
+      <span className="conversation-row-glyph" aria-hidden="true">⌁</span>
+      <span className="desktop-source-row-copy">
+        <strong>{conversation.title || conversationTitle(conversation.id)}</strong>
+        <small>{selected ? "Current conversation" : "Conversation"}</small>
+      </span>
+    </button>
   );
 }
 
@@ -3295,37 +3358,17 @@ function DesktopInspector({
 }
 
 function ComposerControls({ droppedFiles = [], workspace, workspaceGranted, permissionMode, onChooseWorkspace, onChooseFiles, onPermissionChange, onRemoveDroppedFile }) {
-  const controls = (
-    <>
-      <button
-        aria-label="Attach context files"
-        className="composer-control attachment-composer-control"
-        title="Attach context files"
-        type="button"
-        onClick={onChooseFiles}
-      >
-        <span aria-hidden="true">＋</span>
-        <span className="composer-control-label">Attach files</span>
-      </button>
-      <button
-        aria-label="Choose workspace folder"
-        className="composer-control workspace-composer-control"
-        title={workspace || "Choose a workspace folder"}
-        type="button"
-        onClick={onChooseWorkspace}
-      >
-        <WorkspaceIcon />
-        <span className="composer-control-label">{workspaceGranted ? workspaceGrantLabel(workspace) : "Choose workspace"}</span>
-        <span className="composer-control-caret" aria-hidden="true">⌄</span>
-      </button>
-      <label className="composer-control permission-composer-control" title={permissionPolicyDetail(permissionMode)}>
-        <ShieldIcon />
-        <select aria-label="Workspace permissions" value={permissionMode} onChange={(event) => onPermissionChange(event.target.value)}>
-          {PERMISSION_OPTIONS.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
-        </select>
-        <span className="composer-control-caret" aria-hidden="true">⌄</span>
-      </label>
-    </>
+  const attachmentControl = () => (
+    <button
+      aria-label="Attach context files"
+      className="composer-control attachment-composer-control"
+      title="Attach context files"
+      type="button"
+      onClick={onChooseFiles}
+    >
+      <span aria-hidden="true">＋</span>
+      <span className="composer-control-label">Attach files</span>
+    </button>
   );
   return (
     <div className="composer-controls">
@@ -3339,10 +3382,30 @@ function ComposerControls({ droppedFiles = [], workspace, workspaceGranted, perm
           ))}
         </div>
       ) : null}
-      <div className="composer-settings">{controls}</div>
+      <div className="composer-settings">
+        {attachmentControl()}
+        <button
+          aria-label="Choose workspace folder"
+          className="composer-control workspace-composer-control"
+          title={workspace || "Choose a workspace folder"}
+          type="button"
+          onClick={onChooseWorkspace}
+        >
+          <WorkspaceIcon />
+          <span className="composer-control-label">{workspaceGranted ? workspaceGrantLabel(workspace) : "Choose workspace"}</span>
+          <span className="composer-control-caret" aria-hidden="true">⌄</span>
+        </button>
+        <label className="composer-control permission-composer-control" title={permissionPolicyDetail(permissionMode)}>
+          <ShieldIcon />
+          <select aria-label="Workspace permissions" value={permissionMode} onChange={(event) => onPermissionChange(event.target.value)}>
+            {PERMISSION_OPTIONS.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
+          </select>
+          <span className="composer-control-caret" aria-hidden="true">⌄</span>
+        </label>
+      </div>
       <details className="composer-overflow">
         <summary className="composer-control composer-overflow-trigger" aria-label="More composer options" title="More composer options">•••</summary>
-        <div className="composer-overflow-menu" role="menu">{controls}</div>
+        <div className="composer-overflow-menu" role="menu">{attachmentControl()}</div>
       </details>
     </div>
   );
@@ -4455,38 +4518,10 @@ async function discardNativeDropContexts(contextIds) {
 }
 
 async function invokeTauri(command, args) {
-  try {
-    return await invoke(command, args);
-  } catch (error) {
-    // Browser preview intentionally has no local authority. Keep its visual
-    // demo usable, but never transform a failed packaged native command into
-    // a fake success.
-    const browserPreview = !globalThis.window?.__TAURI_INTERNALS__;
-    if (!browserPreview) throw error;
-    if (command === "default_workspace") {
-      return "";
-    }
-    if (command === "ensure_workspace") {
-      return {
-        grant_id: args?.workspaceGrantId ?? "browser-preview-grant",
-        display_path: args?.displayPath ?? "Browser preview workspace"
-      };
-    }
-    if (command === "set_window_tool_context") {
-      return {
-        grant_id: args?.workspaceGrantId ?? "browser-preview-grant",
-        display_path: "Browser preview workspace"
-      };
-    }
-    if (command === "clear_window_tool_context") return null;
-    if (command === "execute_tool_call") {
-      return { status: "started", toolCallId: args?.request?.tool_call_id ?? "browser-preview-call" };
-    }
-    if (command === "approve_pending_tool_call" || command === "deny_pending_tool_call") {
-      return { status: command === "approve_pending_tool_call" ? "started" : "denied", toolCallId: args?.toolCallId };
-    }
-    throw error;
-  }
+  return invokeDesktopCommand(command, args, {
+    invokeImpl: invoke,
+    packaged: Boolean(globalThis.window?.__TAURI_INTERNALS__)
+  });
 }
 
 createRoot(document.getElementById("root")).render(<App />);

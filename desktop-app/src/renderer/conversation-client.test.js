@@ -5,6 +5,7 @@ import {
   createConversation,
   interruptedRunFromSnapshot,
   isServerConversationId,
+  restorableConversationId,
   isTerminalRunStatus,
   listConversations,
   reconcileConversationSnapshot,
@@ -37,6 +38,13 @@ describe("conversation client", () => {
     expect(isServerConversationId("conv_0123abc"), "server id").toBe(true);
     expect(isServerConversationId("desktop-chat"), "legacy id").toBe(false);
     expect(isServerConversationId("conversation_account_1"), "renderer id").toBe(false);
+  });
+
+  it("does not restore arbitrary legacy IDs across Creator Agents", () => {
+    expect(restorableConversationId("conv_0123abc")).toBe("conv_0123abc");
+    expect(restorableConversationId("desktop-chat")).toBe("desktop-chat");
+    expect(restorableConversationId("conversation_account_1_123")).toBe("desktop-chat");
+    expect(restorableConversationId("conversation_account_1_123", "")).toBe("");
   });
 
   it("recognizes terminal durable run states", () => {
