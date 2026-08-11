@@ -85,6 +85,83 @@ export async function getConversationSnapshot(serverUrl, accessToken, binding, c
   );
 }
 
+const SNAPSHOT_EVENT_TYPES = new Set([
+  "conversation.created",
+  "conversation.updated",
+  "run.created",
+  "run.state",
+  "message.created"
+]);
+
+/**
+ * Reconcile the journal portion of a durable snapshot without creating a
+ * second transcript projection in the renderer. The Runtime response already
+ * contains the canonical full `messages` and `runs` projections; the journal
+ * is the cursor/idempotency boundary that proves which changes were included.
+ *
+ * We therefore validate and de-duplicate journal events before accepting the
+ * reported cursor. A malformed, out-of-order, or unknown event must not allow
+ * the renderer to advance its cursor past state it has not safely projected.
+ */
+export function reconcileConversationSnapshot(snapshot, { afterCursor = 0 } = {}) {
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
+    throw conversationClientError("The Conversation snapshot is invalid.", "snapshot_invalid");
+  }
+  const priorCursor = Number(afterCursor);
+  if (!Number.isSafeInteger(priorCursor) || priorCursor < 0) {
+    throw conversationClientError("The Conversation cursor is invalid.", "snapshot_invalid");
+  }
+  const reportedCursor = Number(snapshot.cursor);
+  if (!Number.isSafeInteger(reportedCursor) || reportedCursor < priorCursor) {
+    throw conversationClientError("The Conversation snapshot cursor is invalid.", "snapshot_invalid");
+  }
+  const runs = Array.isArray(snapshot.runs) ? snapshot.runs : [];
+  const runIds = new Set(runs.map((run) => String(run?.id ?? run?.run_id ?? "").trim()).filter(Boolean));
+  const events = Array.isArray(snapshot.events) ? snapshot.events : [];
+  const seen = new Set();
+  const reconciledEvents = [];
+  let previousCursor = priorCursor;
+  for (const event of events) {
+    if (!event || typeof event !== "object" || Array.isArray(event)) {
+      throw conversationClientError("The Conversation journal is invalid.", "snapshot_invalid");
+    }
+    const cursor = Number(event.cursor);
+    if (!Number.isSafeInteger(cursor) || cursor <= 0) {
+      throw conversationClientError("The Conversation journal cursor is invalid.", "snapshot_invalid");
+    }
+    // A server may return an event already covered by a retrying request. It
+    // is safe to discard that duplicate, but never to accept a new event out
+    // of order.
+    if (cursor <= priorCursor || seen.has(cursor)) continue;
+    if (cursor < previousCursor) {
+      throw conversationClientError("The Conversation journal is out of order.", "snapshot_invalid");
+    }
+    if (!SNAPSHOT_EVENT_TYPES.has(String(event.type || ""))) {
+      throw conversationClientError("The Conversation journal contains an unknown event.", "snapshot_invalid");
+    }
+    const runId = String(event.run_id ?? event.runId ?? "").trim();
+    if (runId && !runIds.has(runId)) {
+      throw conversationClientError("The Conversation journal references an unknown Run.", "snapshot_invalid");
+    }
+    const payload = event.payload;
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      throw conversationClientError("The Conversation journal payload is invalid.", "snapshot_invalid");
+    }
+    seen.add(cursor);
+    previousCursor = cursor;
+    reconciledEvents.push(event);
+  }
+  if (reconciledEvents.length && previousCursor > reportedCursor) {
+    throw conversationClientError("The Conversation journal exceeds its snapshot cursor.", "snapshot_invalid");
+  }
+  return {
+    messages: Array.isArray(snapshot.messages) ? snapshot.messages : [],
+    runs,
+    events: reconciledEvents,
+    cursor: reportedCursor
+  };
+}
+
 /**
  * Project a durable Runtime snapshot into the renderer's interrupted-task
  * affordance. The snapshot is authoritative for a run that was interrupted

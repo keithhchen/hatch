@@ -44,6 +44,7 @@ import {
   isServerConversationId,
   isTerminalRunStatus,
   listConversations,
+  reconcileConversationSnapshot,
   shouldOpenNewConversationInWindow,
   updateConversation
 } from "./conversation-client.js";
@@ -1382,13 +1383,11 @@ function App() {
           conversationCursorRef.current
         );
         if (requestToken !== connectionTokenRef.current) return;
-        history = Array.isArray(snapshot?.messages) ? snapshot.messages : [];
-        if (Number.isFinite(Number(snapshot?.cursor))) {
-          snapshotCursor = Math.max(
-            conversationCursorRef.current,
-            Number(snapshot.cursor)
-          );
-        }
+        const reconciledSnapshot = reconcileConversationSnapshot(snapshot, {
+          afterCursor: conversationCursorRef.current
+        });
+        history = reconciledSnapshot.messages;
+        snapshotCursor = reconciledSnapshot.cursor;
         // Keep the pre-snapshot local identity stable while reconciling. If
         // this window's saved Run is already terminal, do not clear it and
         // then accidentally adopt an unrelated historical interrupted Run
@@ -1434,6 +1433,11 @@ function App() {
         }
         snapshotLoaded = true;
       } catch (snapshotError) {
+        // A malformed journal is an integrity failure, not a rollout/version
+        // miss. Do not silently downgrade it to the legacy history endpoint;
+        // that could display an incomplete projection while hiding the fact
+        // that the cursor boundary was not safely reconciled.
+        if (snapshotError?.code === "snapshot_invalid") throw snapshotError;
         // Keep old Runtime history readable during the P2 rollout. A P2
         // Runtime will normally take the snapshot branch; the legacy route is
         // read-only compatibility and never creates a Conversation.

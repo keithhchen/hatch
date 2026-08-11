@@ -6,6 +6,7 @@ import {
   isServerConversationId,
   isTerminalRunStatus,
   listConversations,
+  reconcileConversationSnapshot,
   shouldOpenNewConversationInWindow,
   updateConversation
 } from "./conversation-client.js";
@@ -129,6 +130,40 @@ describe("conversation client", () => {
       runId: "run_other_window",
       status: "interrupted"
     });
+  });
+
+  it("reconciles sparse journal cursors idempotently before accepting the snapshot cursor", () => {
+    const result = reconcileConversationSnapshot({
+      messages: [{ run_id: "run_1", role: "user", content: "hello" }],
+      runs: [{ id: "run_1", status: "completed" }],
+      events: [
+        { cursor: 2, type: "run.created", run_id: "run_1", payload: {} },
+        { cursor: 4, type: "run.state", run_id: "run_1", payload: { status: "completed" } },
+        { cursor: 4, type: "run.state", run_id: "run_1", payload: { status: "completed" } }
+      ],
+      cursor: 4
+    }, { afterCursor: 1 });
+    expect(result.events.map((event) => event.cursor)).toEqual([2, 4]);
+    expect(result.cursor).toBe(4);
+    expect(result.messages).toHaveLength(1);
+  });
+
+  it("rejects an unsafe journal rather than advancing the persisted cursor", () => {
+    expect(() => reconcileConversationSnapshot({
+      messages: [],
+      runs: [{ id: "run_1", status: "running" }],
+      events: [
+        { cursor: 3, type: "run.state", run_id: "run_1", payload: {} },
+        { cursor: 2, type: "run.created", run_id: "run_1", payload: {} }
+      ],
+      cursor: 3
+    })).toThrowError(expect.objectContaining({ code: "snapshot_invalid" }));
+    expect(() => reconcileConversationSnapshot({
+      messages: [],
+      runs: [{ id: "run_1", status: "running" }],
+      events: [{ cursor: 1, type: "run.state", run_id: "run_unknown", payload: {} }],
+      cursor: 1
+    })).toThrowError(expect.objectContaining({ code: "snapshot_invalid" }));
   });
 
   it("skips a dismissed interrupted run and projects the next durable one", () => {
