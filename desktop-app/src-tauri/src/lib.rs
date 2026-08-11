@@ -172,11 +172,7 @@ impl NativeToolCall {
     }
 
     fn requires_native_approval(&self, policy: &ChangePermissionPolicy) -> bool {
-        // A selected Allow policy covers ordinary, structured file changes.
-        // Shell remains a separately high-risk execution surface: the user
-        // must see and approve every command, even on a trusted workspace.
-        self.name == "shell_exec"
-            || (self.is_change() && *policy == ChangePermissionPolicy::AskBeforeChanges)
+        self.is_change() && *policy == ChangePermissionPolicy::AskBeforeChanges
     }
 }
 
@@ -2841,13 +2837,37 @@ mod tests {
     }
 
     #[test]
-    fn shell_always_requires_a_native_pending_record() {
+    fn allow_policy_starts_shell_without_a_native_pending_record() {
         let authority = NativeToolAuthority::default();
         install_context(
             &authority,
             "window-a",
             "workspace_a",
             ChangePermissionPolicy::AllowChanges,
+        );
+        let call = NativeToolCall::from_renderer_request(json!({
+            "type": "tool_call.request",
+            "run_id": "run_test",
+            "tool_call_id": "call_shell",
+            "name": "shell_exec",
+            "arguments": { "command": "printf must-be-reviewed", "timeout_ms": 30000 }
+        }))
+        .unwrap();
+        let key = WindowToolCallKey::new("window-a", call.tool_call_id.clone());
+        assert!(matches!(
+            authority.submit(key, call).unwrap(),
+            ToolCallDisposition::Start(_)
+        ));
+    }
+
+    #[test]
+    fn ask_policy_requires_a_native_pending_record_for_shell() {
+        let authority = NativeToolAuthority::default();
+        install_context(
+            &authority,
+            "window-a",
+            "workspace_a",
+            ChangePermissionPolicy::AskBeforeChanges,
         );
         let call = NativeToolCall::from_renderer_request(json!({
             "type": "tool_call.request",

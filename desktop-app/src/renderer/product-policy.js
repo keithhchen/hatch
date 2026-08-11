@@ -92,13 +92,12 @@ export const PERMISSION_OPTIONS = Object.freeze([
   Object.freeze({
     value: PERMISSION_POLICIES.ALLOW_CHANGES,
     label: "Allow changes",
-    detail: "Allow file changes; ask before every shell command"
+    detail: "Allow file changes and shell commands"
   })
 ]);
 
-// Reads are automatic. Allow can cover structured file changes, but Shell is
-// deliberately a separate high-risk capability and always requires a native
-// per-command approval.
+// Reads are automatic. Ask requires approval for every change tool; Allow
+// covers the same complete change-tool set, including shell commands.
 export const DEFAULT_PERMISSION_POLICY = PERMISSION_POLICIES.ASK_BEFORE_CHANGES;
 
 function assertPermissionPolicy(policy) {
@@ -115,8 +114,7 @@ export function normalizePermissionPolicy(policy) {
 
 export function requiresUserApproval(toolName, policy = DEFAULT_PERMISSION_POLICY) {
   assertPermissionPolicy(policy);
-  return toolName === "shell_exec"
-    || (CHANGE_TOOLS.includes(toolName) && policy !== PERMISSION_POLICIES.ALLOW_CHANGES);
+  return CHANGE_TOOLS.includes(toolName) && policy !== PERMISSION_POLICIES.ALLOW_CHANGES;
 }
 
 export function shouldRequestDesktopApproval(toolRequest, policy = DEFAULT_PERMISSION_POLICY) {
