@@ -44,6 +44,7 @@ import {
   isServerConversationId,
   isTerminalRunStatus,
   listConversations,
+  shouldOpenNewConversationInWindow,
   updateConversation
 } from "./conversation-client.js";
 import {
@@ -1999,6 +2000,9 @@ function App() {
   }
 
   async function startNewConversation() {
+    if (shouldOpenNewConversationInWindow(activeRunRef.current)) {
+      return startNewConversationInWindow();
+    }
     const nextId = await createLibraryConversation();
     if (!nextId) return "";
     disconnectRuntime();

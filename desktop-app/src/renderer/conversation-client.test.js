@@ -6,6 +6,7 @@ import {
   isServerConversationId,
   isTerminalRunStatus,
   listConversations,
+  shouldOpenNewConversationInWindow,
   updateConversation
 } from "./conversation-client.js";
 
@@ -28,6 +29,13 @@ describe("conversation client", () => {
     expect(isTerminalRunStatus("cancelled")).toBe(true);
     expect(isTerminalRunStatus("interrupted")).toBe(false);
     expect(isTerminalRunStatus("running")).toBe(false);
+  });
+
+  it("routes a non-terminal task to a separate Conversation window", () => {
+    expect(shouldOpenNewConversationInWindow({ runId: "run_live", status: "running" })).toBe(true);
+    expect(shouldOpenNewConversationInWindow({ id: "run_interrupted", status: "interrupted" })).toBe(true);
+    expect(shouldOpenNewConversationInWindow({ runId: "run_done", status: "completed" })).toBe(false);
+    expect(shouldOpenNewConversationInWindow(null)).toBe(false);
   });
 
   it("uses the verified entitlement scope and lists durable records", async () => {
