@@ -13,7 +13,7 @@
 
 | 契约 | 状态 | 当前证据 | 尚未证明的部分 |
 | --- | --- | --- | --- |
-| Dev/debug/ad-hoc session 不触发 Keychain 解锁 | PASS（本机） | 最新重建 ad-hoc `.app` 冷启动（09:16 macOS UAT）进入普通 Sign in；Computer Use AX tree/截图均无 Login Keychain prompt；Rust 认证测试 | 正式 Developer ID 包的重启读取需签名环境 |
+| Dev/debug/ad-hoc session 不触发 Keychain 解锁 | PASS（本机） | 最新重建 ad-hoc `.app` 冷启动（09:22 macOS UAT）进入普通 Sign in；Computer Use AX tree/截图均无 Login Keychain prompt；Rust 认证测试 | 正式 Developer ID 包的重启读取需签名环境 |
 | 正式 macOS secure session identity gate | PARTIAL | production flag `cargo check`；Team ID、bundle ID、Developer ID requirement 检查；release workflow | 真实 Developer ID + notarization + clean-account restart UAT |
 | Windows persistent session | EXTERNAL / BLOCKED BY THREAT MODEL | Win32 Generic Credential Manager 与 PasswordVault 路径均 fail-closed；同用户 full-trust 进程可读 PasswordVault 的官方限制已记录 | 另立 device-bound session backend、Windows 签名/UAT 与 same-user 负测；不能用 MSIX/AppContainer PasswordVault 直接解锁 |
 | Workspace / approval authority 在 Rust | PASS（本机） | grant-bound picker/drop、canonical containment、pending approval state；Approval 同时保留 transcript inline card 与 composer 上方 persistent action；Rust 44 tests | Windows runner 的编译和真实 junction/ACL UAT |
@@ -49,7 +49,7 @@ desktop-app: npm run build  # strict ad-hoc DMG UAT
 ```
 
 `npm run build:app` 与 `npm run build` 产物是 ad-hoc/UAT `.app`/DMG，当前验证的 DMG 为
-`Hatch_0.1.0_aarch64.dmg`（`sha256:1c815e75593e9cd24031006e8b5f0c1593b90675dce9a71e01cf54003ea230e2`，15,247,585 bytes）。它们不是可发布的 notarized artifact。正式发布必须在 CI 注入真实 Developer ID/Team ID，并完成签名、notarization、安装后重启和无 prompt 验收。
+`Hatch_0.1.0_aarch64.dmg`（`sha256:5426d231040921fba5e4de70475bf12410cc036c2e761796d65255ad3709345f`，15,247,120 bytes）。它们不是可发布的 notarized artifact。正式发布必须在 CI 注入真实 Developer ID/Team ID，并完成签名、notarization、安装后重启和无 prompt 验收。
 
 本机另外尝试了 `x86_64-pc-windows-gnu` 交叉 `cargo check`，并生成并提交了
 Windows Tauri capability schema；检查在 Tauri 的 `tauri-winres` 阶段因本机没有

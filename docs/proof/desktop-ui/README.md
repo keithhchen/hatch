@@ -146,7 +146,7 @@ The rebuilt native preview also exercised a conversation-row secondary click;
 the accessibility tree exposed `Rename Conversation`, `Open in New Window`,
 and `Archive Conversation` from the Tauri popup rather than a WebKit menu.
 
-The latest rebuilt ad-hoc `.app` was cold-launched again at 09:16 local time
+The latest rebuilt ad-hoc `.app` was cold-launched again at 09:22 local time
 after the recovery hardening. Computer Use captured and visually inspected a
 fresh screenshot: native traffic lights and the integrated title band were
 present, the ordinary Sign in card rendered without a Login Keychain prompt,
