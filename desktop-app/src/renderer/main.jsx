@@ -236,6 +236,7 @@ function App() {
   const [signInError, setSignInError] = useState("");
   const [workspaceGranted, setWorkspaceGranted] = useState(false);
   const [droppedFiles, setDroppedFiles] = useState([]);
+  const droppedFilesRef = useRef([]);
   const [permissionMode, setPermissionMode] = useState(DEFAULT_PERMISSION_MODE);
   const [interruptedRun, setInterruptedRun] = useState(null);
   const [conversationId, setConversationId] = useState(() => requestedConversationIdRef.current || "desktop-chat");
@@ -267,8 +268,18 @@ function App() {
   // must never follow the window when the user switches the Library row or
   // Creator Agent before sending.
   useEffect(() => {
+    discardDroppedContextIds(droppedFilesRef.current.map((file) => file.contextId));
+    droppedFilesRef.current = [];
     setDroppedFiles([]);
   }, [conversationId]);
+
+  useEffect(() => {
+    droppedFilesRef.current = droppedFiles;
+  }, [droppedFiles]);
+
+  useEffect(() => () => {
+    discardDroppedContextIds(droppedFilesRef.current.map((file) => file.contextId));
+  }, []);
 
   selectedEntitlementIdRef.current = selectedEntitlementId;
 
@@ -278,6 +289,14 @@ function App() {
 
   function setProfileSetting(key, value, profileId = buyerProfile.id) {
     settingsStoreRef.current?.setProfile(profileId, key, value);
+  }
+
+  function discardDroppedContextIds(contextIds) {
+    const ids = Array.isArray(contextIds)
+      ? contextIds.filter((value) => typeof value === "string" && value.trim())
+      : [];
+    if (ids.length === 0 || !window.__TAURI_INTERNALS__) return;
+    void invokeTauri("discard_native_drop_contexts", { contextIds: ids }).catch(() => {});
   }
 
   // Conversation windows are independent native contexts. Only the original
@@ -695,6 +714,20 @@ function App() {
 
     const content = textFromAppendMessage(appendMessage).trim();
     if (!content) return;
+    // Workspace and permission changes are pending Desktop preferences until a
+    // new turn starts. The native window captures this exact snapshot before
+    // the Runtime may request a local tool; the renderer never sends a path or
+    // an `approved_by_user` flag to authorize the tool itself.
+    const accessSnapshot = createTurnAccessSnapshot(workspaceGrant?.grant_id, workspace, permissionMode);
+    try {
+      await synchronizeNativeToolContext(accessSnapshot);
+    } catch (error) {
+      setStatus(`Couldn't prepare native workspace access: ${errorMessage(error)}`);
+      return;
+    }
+    // Install native authority before consuming one-shot dropped contexts. If
+    // the workspace/permission snapshot is rejected, the chips remain fully
+    // retryable instead of silently losing their native handles.
     let messageContent = content;
     if (droppedFiles.length > 0) {
       try {
@@ -707,23 +740,13 @@ function App() {
         return;
       }
     }
-    // Workspace and permission changes are pending Desktop preferences until a
-    // new turn starts. The native window captures this exact snapshot before
-    // the Runtime may request a local tool; the renderer never sends a path or
-    // an `approved_by_user` flag to authorize the tool itself.
-    const accessSnapshot = createTurnAccessSnapshot(workspaceGrant?.grant_id, workspace, permissionMode);
-    try {
-      await synchronizeNativeToolContext(accessSnapshot);
-    } catch (error) {
-      setStatus(`Couldn't prepare native workspace access: ${errorMessage(error)}`);
-      return;
-    }
     // The Composer is a window-session draft. Clear it only after the native
     // authority snapshot succeeds; a failed send preparation must leave the
     // user's text and attachments recoverable instead of silently discarding
     // them. assistant-ui may reset its internal input without emitting a DOM
     // change event, so this explicit projection remains necessary.
     setComposerDraftValue("");
+    droppedFilesRef.current = [];
     setDroppedFiles([]);
     workspaceRef.current = accessSnapshot.displayPath;
     workspaceGrantRef.current = workspaceGrant;
@@ -2616,7 +2639,11 @@ function App() {
                         permissionMode={permissionMode}
                         onChooseWorkspace={() => void chooseWorkspace()}
                         onPermissionChange={updatePermissionMode}
-                        onRemoveDroppedFile={(contextId) => setDroppedFiles((current) => current.filter((item) => item.contextId !== contextId))}
+                        onRemoveDroppedFile={(contextId) => {
+                          discardDroppedContextIds([contextId]);
+                          droppedFilesRef.current = droppedFilesRef.current.filter((item) => item.contextId !== contextId);
+                          setDroppedFiles((current) => current.filter((item) => item.contextId !== contextId));
+                        }}
                       />
                       {running ? (
                         <button
