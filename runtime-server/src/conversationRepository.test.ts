@@ -19,6 +19,7 @@ const binding = {
   productId: "product_a",
   corpusDigest: `sha256:${"a".repeat(64)}`
 };
+const inputDigest = `sha256:${"b".repeat(64)}`;
 
 function conversationInput(id: string, publicId = id, clientRequestId?: string) {
   return {
@@ -70,24 +71,37 @@ test("ConversationRepository enforces idempotent client messages and one active 
     id: "run_1",
     conversationId: conversation.id,
     clientMessageId: "message_1",
+    inputDigest,
     corpusDigest: binding.corpusDigest
   });
   const replay = await repository.createRun({
     id: "run_replayed_with_a_new_transport_id",
     conversationId: conversation.id,
     clientMessageId: "message_1",
+    inputDigest,
     corpusDigest: binding.corpusDigest
   });
   assert.equal(first.created, true);
   assert.equal(replay.created, false);
   assert.equal(replay.run.id, "run_1");
   assert.equal((await repository.getRunByClientMessageId(conversation.id, "message_1"))?.id, "run_1");
+  await assert.rejects(
+    () => repository.createRun({
+      id: "run_tampered_retry",
+      conversationId: conversation.id,
+      clientMessageId: "message_1",
+      inputDigest: `sha256:${"c".repeat(64)}`,
+      corpusDigest: binding.corpusDigest
+    }),
+    (error: unknown) => error instanceof ConversationRepositoryError && error.code === "client_message_conflict"
+  );
 
   await assert.rejects(
     () => repository.createRun({
       id: "run_2",
       conversationId: conversation.id,
       clientMessageId: "message_2",
+      inputDigest,
       corpusDigest: binding.corpusDigest
     }),
     (error: unknown) => error instanceof ConversationRepositoryError
@@ -101,6 +115,7 @@ test("ConversationRepository enforces idempotent client messages and one active 
     id: "run_2",
     conversationId: conversation.id,
     clientMessageId: "message_2",
+    inputDigest,
     corpusDigest: binding.corpusDigest
   });
   assert.equal(second.created, true);
@@ -121,6 +136,7 @@ test("FileConversationRepository survives restart and interrupts rather than rep
     id: "run_pending",
     conversationId: conversation.id,
     clientMessageId: "message_pending",
+    inputDigest,
     corpusDigest: binding.corpusDigest
   });
   await first.close();
@@ -144,6 +160,7 @@ test("Postgres ConversationRepository schema has durable idempotency, active-run
   assert.match(POSTGRES_CONVERSATION_REPOSITORY_SCHEMA, /UNIQUE \(conversation_id, client_message_id\)/);
   assert.match(POSTGRES_CONVERSATION_REPOSITORY_SCHEMA, /WHERE status IN \('queued', 'running', 'waiting_for_tool', 'compacting'\)/);
   assert.match(POSTGRES_CONVERSATION_REPOSITORY_SCHEMA, /cursor BIGSERIAL PRIMARY KEY/);
+  assert.match(POSTGRES_CONVERSATION_REPOSITORY_SCHEMA, /input_digest TEXT NOT NULL/);
   assert.match(POSTGRES_CONVERSATION_REPOSITORY_SCHEMA, /interrupted/);
 });
 
@@ -155,6 +172,7 @@ test("Postgres ConversationRepository maps the same durable contract through its
     id: "postgres_run",
     conversationId: conversation.id,
     clientMessageId: "postgres_message",
+    inputDigest,
     corpusDigest: binding.corpusDigest
   })).run;
   assert.equal((await repository.getRunByClientMessageId(conversation.id, "postgres_message"))?.id, run.id);
@@ -227,9 +245,9 @@ class ConversationPostgresFake implements PostgresQueryExecutor {
       return this.rows([...this.runs.values()].filter((row) => row.conversation_id === conversationId && row.client_message_id === messageId));
     }
     if (/^\s*INSERT INTO hatch_conversation_runs/i.test(text)) {
-      const [id, conversationId, messageId, digest, executorId, lease] = values ?? [];
+      const [id, conversationId, messageId, messageDigest, digest, executorId, lease] = values ?? [];
       const row: DatabaseRow = {
-        id, conversation_id: conversationId, client_message_id: messageId, status: "queued", corpus_digest: digest,
+        id, conversation_id: conversationId, client_message_id: messageId, input_digest: messageDigest, status: "queued", corpus_digest: digest,
         executor_id: executorId, executor_lease_expires_at: lease, interrupted_reason: null,
         created_at: "2026-08-11T00:00:01.000Z", started_at: null, completed_at: null
       };

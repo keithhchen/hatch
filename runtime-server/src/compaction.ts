@@ -12,7 +12,11 @@ import {
   type SessionTreeEntry
 } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, ToolResultMessage, Usage } from "@earendil-works/pi-ai";
-import type { ConversationMessage } from "./protocol.js";
+import {
+  renderUserMessageForModel,
+  type ContextAttachment,
+  type ConversationMessage
+} from "./protocol.js";
 import { createPiModel, createPiModels } from "./piModel.js";
 
 // These are Pi's own model-facing compaction delimiters. Keep the export name
@@ -29,6 +33,7 @@ export type CompactionReason = "context_limit" | "user_requested";
 export type RuntimeCompactionMessage = {
   role: string;
   content?: string | null;
+  attachments?: ContextAttachment[];
   tool_calls?: unknown;
   tool_call_id?: string;
   tool_name?: string;
@@ -146,7 +151,10 @@ export function runtimeMessagesTranscript(messages: RuntimeCompactionMessage[]):
     .map((message, index) => {
       const parts = [`[${index + 1}] ${message.role}`];
       if (message.tool_call_id) parts.push(`tool_call_id=${message.tool_call_id}`);
-      if (message.content) parts.push(String(message.content));
+      const content = message.role === "user"
+        ? renderUserMessageForModel({ content: message.content ?? null, attachments: message.attachments })
+        : message.content;
+      if (content) parts.push(String(content));
       if (message.tool_calls) parts.push(`tool_calls=${JSON.stringify(message.tool_calls)}`);
       return parts.join("\n");
     })
@@ -178,7 +186,11 @@ function toPiMessage(message: RuntimeCompactionMessage): AgentMessage {
     );
   }
   if (message.role === "user") {
-    return { role: "user", content: message.content ?? "", timestamp: Date.now() };
+    return {
+      role: "user",
+      content: renderUserMessageForModel({ content: message.content ?? null, attachments: message.attachments }),
+      timestamp: Date.now()
+    };
   }
   if (message.role === "tool") {
     return {

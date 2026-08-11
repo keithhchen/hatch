@@ -100,7 +100,7 @@ test("Runtime rejects another user's entitlement for an introspected session", a
       socket!.once("message", (data) => resolve(JSON.parse(String(data)) as Record<string, unknown>));
       socket!.once("open", () => socket!.send(JSON.stringify({
         type: "client.hello",
-        protocol_version: "0.6",
+        protocol_version: "0.7",
         installation_id: "desktop-mallory",
         auth_token: "opaque-mallory",
         entitlement_id: entitlement.entitlement_id,
@@ -233,7 +233,7 @@ test("Runtime re-introspects a Creator session per turn without requiring a buye
     const readyResponse = nextSocketMessage(socket);
     socket.send(JSON.stringify({
       type: "client.hello",
-      protocol_version: "0.6",
+      protocol_version: "0.7",
       installation_id: "desktop-creator-maya",
       auth_token: "opaque-creator-session",
       creator_id: "creator_maya",
@@ -324,7 +324,7 @@ test("Runtime admits only one client hello while Registry authorization is pendi
     });
     const hello = {
       type: "client.hello",
-      protocol_version: "0.6",
+      protocol_version: "0.7",
       installation_id: "desktop-concurrent-hello",
       auth_token: "opaque-user-session",
       entitlement_id: entitlement.entitlement_id,
@@ -688,7 +688,7 @@ async function connectAuthorizedSocket(runtimePort: number, entitlement: Entitle
   const response = nextSocketMessage(socket);
   socket.send(JSON.stringify({
     type: "client.hello",
-    protocol_version: "0.6",
+    protocol_version: "0.7",
     installation_id: "desktop-jordan",
     auth_token: "opaque-user-session",
     entitlement_id: entitlement.entitlement_id,

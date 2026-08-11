@@ -281,7 +281,7 @@ npm run serve
 
 ## Protocol
 
-Protocol version: `0.6`. This version makes the underscore local-tool names canonical on the wire; a `0.5` hello is rejected with `protocol_error` so an old Desktop cannot enter a partially compatible session.
+Protocol version: `0.7`. This version adds structured, bounded user context attachments; a `0.6` hello is rejected with `protocol_error` so an old Desktop cannot enter a partially compatible session.
 
 Assistant text from the single Shanghai cloud Runtime is released through
 Alibaba AI Guardrails in delayed segments. It runs with

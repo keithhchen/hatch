@@ -13,7 +13,15 @@ import {
   type RuntimeCompactionMessage
 } from "./compaction.js";
 import { createAgentRuntime, type AgentRuntime, type RuntimeSessionSkills } from "./agentRuntime.js";
-import { parseInboundMessage, PROTOCOL_VERSION, type ClientHello, type OutboundMessage, type OutputFinishReason, type RunStart } from "./protocol.js";
+import {
+  clientMessageInputDigest,
+  parseInboundMessage,
+  PROTOCOL_VERSION,
+  type ClientHello,
+  type OutboundMessage,
+  type OutputFinishReason,
+  type RunStart
+} from "./protocol.js";
 import { RunStateMachine } from "./runState.js";
 import { ServerToolExecutor } from "./serverTools.js";
 import { SkillRuntime } from "./skillRuntime.js";
@@ -1252,6 +1260,7 @@ function publicRun(run: ConversationRunRecord): Record<string, unknown> {
   return {
     id: run.id,
     client_message_id: run.clientMessageId,
+    ...(run.inputDigest ? { input_digest: run.inputDigest } : {}),
     status: run.status,
     corpus_digest: run.corpusDigest,
     created_at: run.createdAt,
@@ -1884,10 +1893,22 @@ async function handleRuntimeSocket(
             ? durableConversationId(binding, message.conversation_id)
             : message.conversation_id;
           const clientMessageId = message.client_message_id ?? message.run_id;
+          const inputDigest = clientMessageInputDigest(message.message);
           if (reservedRunIds.has(message.run_id) || activeConversationRuns.has(storageConversationId)) {
             await repositoryReady;
             const existing = await conversationRepository.getRunByClientMessageId(storageConversationId, clientMessageId);
             if (existing) {
+              if (existing.inputDigest && existing.inputDigest !== inputDigest) {
+                await send({
+                  type: "turn.failed",
+                  run_id: message.run_id,
+                  error: {
+                    code: "client_message_conflict",
+                    message: "This client_message_id was already used with different message or attachment content."
+                  }
+                });
+                return;
+              }
               await send({
                 type: "turn.state",
                 run_id: existing.id,
@@ -2113,6 +2134,7 @@ async function handleRuntimeSocket(
               // Existing clients use run_id as their stable retry key until
               // they send client_message_id from this protocol extension.
               clientMessageId,
+              inputDigest,
               corpusDigest: binding.corpusDigest,
               executorId
             });
@@ -2125,6 +2147,17 @@ async function handleRuntimeSocket(
                 type: "turn.failed",
                 run_id: message.run_id,
                 error: { code: "conversation_busy", message: error.message }
+              });
+              return;
+            }
+            if (error instanceof ConversationRepositoryError && error.code === "client_message_conflict") {
+              await send({
+                type: "turn.failed",
+                run_id: message.run_id,
+                error: {
+                  code: "client_message_conflict",
+                  message: "This client_message_id was already used with different message or attachment content."
+                }
               });
               return;
             }
@@ -2356,7 +2389,11 @@ async function runOneTurn(
         conversationId: input.conversation_id,
         runId: input.run_id,
         type: "message.created",
-        payload: { role: "user", content: input.message.content }
+        payload: {
+          role: "user",
+          content: input.message.content,
+          ...(input.message.attachments?.length ? { attachments: input.message.attachments } : {})
+        }
       });
     };
     const guardedOutput = new GuardedAssistantOutput(

@@ -44,6 +44,7 @@
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "client_message_id": { "$ref": "#/$defs/id", "description": "Stable idempotency key; retries return this same Run." },
+        "input_digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$", "description": "Runtime-derived digest of user text and structured attachment projections. Reusing a client_message_id with different input is rejected for new protocol 0.7 Runs." },
         "status": { "$ref": "#/$defs/runStatus" },
         "corpus_digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
         "created_at": { "type": "string", "format": "date-time" },
