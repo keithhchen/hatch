@@ -72,6 +72,15 @@ label loop, rather than only proving that a popup can be displayed. The
 resulting capture is checked in as
 `native-menu-sidebar-collapsed-1180x780.jpeg`.
 
+The preview Inspector also exercises the production native workspace boundary:
+`Choose folder` opens the parented OS picker, stores only the returned opaque
+grant in the fixture, and enables the artifact popup only after that grant is
+present. The artifact target is a repository-relative spec file, so the
+fixture exercises the same Rust containment check used by the signed-in shell.
+This proves picker → grant projection → semantic artifact request wiring; it
+does not claim that a valid-grant Quick Look panel has been visually accepted
+on every target OS.
+
 | Capture | What it proves |
 | --- | --- |
 | `regular-1180x780.png` | Native traffic lights, integrated titlebar/toolbar, source-list sidebar, conversation surface, inspector |
@@ -87,7 +96,7 @@ resulting capture is checked in as
 
 ## Automated evidence recorded with these captures
 
-- Renderer: 23 files / 104 tests
+- Renderer: 23 files / 106 tests
 - Rust Tauri library: 44 passed / 1 ignored (unlocked Keychain smoke)
 - Runtime: 226 Node subtests passed with an isolated `HATCH_RUNTIME_DATA_DIR`
 - LocalRunner: 43 tests passed (filesystem, shell and macOS Seatbelt suites)

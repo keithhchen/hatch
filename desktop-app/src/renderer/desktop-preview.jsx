@@ -65,16 +65,62 @@ export function DesktopPreview() {
   const [inspectorWidth, setInspectorWidth] = useState(DESKTOP_LAYOUT.inspector.default);
   const [applicationZoom, setApplicationZoom] = useState(DESKTOP_ZOOM.default);
   const [selectedAgent, setSelectedAgent] = useState(AGENTS[0]);
+  const [workspaceGrant, setWorkspaceGrant] = useState(null);
+  const [previewStatus, setPreviewStatus] = useState("");
+
+  const choosePreviewWorkspace = useCallback(async () => {
+    if (!window.__TAURI_INTERNALS__) {
+      setPreviewStatus("Native workspace picker is available in the packaged preview.");
+      return;
+    }
+    try {
+      const grant = await invoke("pick_workspace_folder");
+      if (!grant) {
+        setPreviewStatus("Workspace selection canceled.");
+        return;
+      }
+      setWorkspaceGrant(grant);
+      setPreviewStatus(`Workspace granted: ${grant.display_path || grant.grant_id}`);
+    } catch (error) {
+      setPreviewStatus(`Workspace selection failed: ${String(error?.message || error)}`);
+    }
+  }, []);
+
+  const openPreviewArtifact = useCallback(async (target, command) => {
+    setPreviewStatus(`Artifact action requested: ${String(target || "(missing target)")}`);
+    const relativePath = previewArtifactRelativePath(target);
+    if (!workspaceGrant?.grant_id || !relativePath) {
+      setPreviewStatus("Choose a workspace before opening this artifact.");
+      return;
+    }
+    try {
+      await invoke(command, {
+        request: {
+          workspaceGrantId: workspaceGrant.grant_id,
+          relativePath
+        }
+      });
+      setPreviewStatus(command === "reveal_workspace_artifact"
+        ? "Artifact revealed in the native file browser."
+        : "Artifact opened in the native preview.");
+    } catch (error) {
+      setPreviewStatus(`Artifact action failed: ${String(error?.message || error)}`);
+    }
+  }, [workspaceGrant]);
+
   const handleNativePreviewCommand = useCallback((payload) => {
     void routeNativeCommand(payload, {
       onNewConversationWindow: openPreviewConversationWindow,
+      onChooseWorkspace: choosePreviewWorkspace,
       onToggleSidebar: () => setSidebarPreference((current) => current === "open" ? "closed" : "open"),
       onToggleInspector: () => setInspectorPreference((current) => current === "open" ? "closed" : "open"),
       onZoomIn: () => setApplicationZoom((current) => nextZoom(current, "increase")),
       onZoomOut: () => setApplicationZoom((current) => nextZoom(current, "decrease")),
-      onZoomReset: () => setApplicationZoom(DESKTOP_ZOOM.default)
+      onZoomReset: () => setApplicationZoom(DESKTOP_ZOOM.default),
+      onRevealArtifact: (target) => openPreviewArtifact(target, "reveal_workspace_artifact"),
+      onQuickLookArtifact: (target) => openPreviewArtifact(target, "open_workspace_artifact")
     });
-  }, [openPreviewConversationWindow]);
+  }, [choosePreviewWorkspace, openPreviewArtifact, openPreviewConversationWindow]);
 
   // The preview is a real native-window fixture, so application zoom must use
   // the same WebView zoom bridge as the product shell. This makes the 80–200%
@@ -153,7 +199,14 @@ export function DesktopPreview() {
       onInspectorWidthChange={setInspectorWidth}
       sidebar={<PreviewSidebar selectedAgent={selectedAgent} onSelectAgent={setSelectedAgent} onContextMenu={showPreviewContextMenu} conversationId={previewConversationId} onOpenConversationWindow={openPreviewConversationWindow} />}
       toolbar={<PreviewToolbar selectedAgent={selectedAgent} conversationId={previewConversationId} onOpenConversationWindow={openPreviewConversationWindow} />}
-      inspector={<PreviewInspector selectedAgent={selectedAgent} />}
+      inspector={(
+        <PreviewInspector
+          selectedAgent={selectedAgent}
+          workspaceGrant={workspaceGrant}
+          previewStatus={previewStatus}
+          onChooseWorkspace={choosePreviewWorkspace}
+        />
+      )}
     >
       <section className="chat-shell desktop-chat-shell preview-chat-shell">
         <div className="thread-root">
@@ -177,7 +230,7 @@ export function DesktopPreview() {
                       </table>
                     </div>
                     <p>推荐先用 <code>creator_seth_search_company</code>。长 identifier 不应被逐字符拆开。</p>
-                    <pre onContextMenu={(event) => showPreviewContextMenu(event, { kind: "artifact", target: "database-tools.sql" })}><code>{"SELECT symbol, name\nFROM companies\nWHERE name ILIKE '%hatch%';"}</code></pre>
+                    <pre onContextMenu={(event) => showPreviewContextMenu(event, { kind: "artifact", target: "docs/spec-desktop-ui-construction-v1.md" })}><code>{"SELECT symbol, name\nFROM companies\nWHERE name ILIKE '%hatch%';"}</code></pre>
                   </div>
                 </div>
               </div>
@@ -202,6 +255,14 @@ export function DesktopPreview() {
       </section>
     </DesktopWindowShell>
   );
+}
+
+export function previewArtifactRelativePath(target) {
+  const value = String(target || "").trim().replaceAll("\\", "/");
+  if (!value || value.startsWith("/") || /^[A-Za-z]:\//.test(value)) return "";
+  const parts = value.split("/");
+  if (parts.some((part) => !part || part === "." || part === ".." || /[\u0000-\u001f\u007f]/.test(part))) return "";
+  return parts.join("/");
 }
 
 function PreviewSidebar({ selectedAgent, onSelectAgent, onContextMenu, conversationId, onOpenConversationWindow }) {
@@ -234,10 +295,10 @@ function PreviewToolbar({ selectedAgent, conversationId, onOpenConversationWindo
   );
 }
 
-function PreviewInspector({ selectedAgent }) {
+function PreviewInspector({ selectedAgent, workspaceGrant, previewStatus, onChooseWorkspace }) {
   return (
     <div className="desktop-inspector-content">
-      <section className="inspector-section"><span className="inspector-kicker">Workspace</span><strong className="inspector-workspace-path">database-workspace</strong><button type="button" className="secondary compact inspector-action">Change folder</button></section>
+      <section className="inspector-section"><span className="inspector-kicker">Workspace</span><strong className="inspector-workspace-path" title={workspaceGrant?.display_path || "No workspace selected"}>{workspaceGrant?.display_path || "No workspace selected"}</strong><button type="button" className="secondary compact inspector-action" onClick={onChooseWorkspace}>{workspaceGrant ? "Change folder" : "Choose folder"}</button>{previewStatus ? <p role="status">{previewStatus}</p> : null}</section>
       <section className="inspector-section"><span className="inspector-kicker">Permissions</span><span className="inspector-select-control">◈ Ask before changes</span><p>Hatch asks before every file change and shell command.</p></section>
       <section className="inspector-section"><span className="inspector-kicker">Run</span><div className="inspector-run-state"><span className="activity-dot done" /><strong>Ready</strong></div></section>
       <section className="inspector-section"><span className="inspector-kicker">Creator Agent</span><strong>{selectedAgent.name}</strong><p>by {selectedAgent.creator}. The inspector remains an optional pane, never a squeezed card.</p></section>
