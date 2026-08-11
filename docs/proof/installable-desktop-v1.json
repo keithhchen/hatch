@@ -1,8 +1,8 @@
 {
   "artifact": "desktop-app/src-tauri/target/release/bundle/dmg/Hatch_0.1.0_aarch64.dmg",
   "architecture": "arm64",
-  "bytes": 15248915,
-  "sha256": "3c37edf76f86f99f5ea332d59f2ba0b18c9cff2e1eca2fec149761b4cc2fae2f",
+  "bytes": 15248784,
+  "sha256": "0229208e1224399b26aad848f3c25f661dc0af7d95ca7228df82c9659d3da9f3",
   "build_command": "npm run build:dmg:ci",
   "disk_image_checksum_valid": true,
   "mounted_contents_verified": true,

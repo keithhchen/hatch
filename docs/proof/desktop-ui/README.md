@@ -87,7 +87,7 @@ resulting capture is checked in as
 
 ## Automated evidence recorded with these captures
 
-- Renderer: 23 files / 102 tests
+- Renderer: 23 files / 103 tests
 - Rust Tauri library: 44 passed / 1 ignored (unlocked Keychain smoke)
 - Runtime: 226 Node subtests passed with an isolated `HATCH_RUNTIME_DATA_DIR`
 - LocalRunner: 43 tests passed (filesystem, shell and macOS Seatbelt suites)
@@ -153,10 +153,11 @@ The rebuilt native preview also exercised a conversation-row secondary click;
 the accessibility tree exposed `Rename Conversation`, `Open in New Window`,
 and `Archive Conversation` from the Tauri popup rather than a WebKit menu.
 
-The latest rebuilt ad-hoc `.app` was cold-launched again at 09:22 local time
-after the recovery hardening. Computer Use captured and visually inspected a
-fresh screenshot: native traffic lights and the integrated title band were
-present, the ordinary Sign in card rendered without a Login Keychain prompt,
+The latest rebuilt ad-hoc `.app` was cold-launched again at 10:10 local time
+after the recovery and per-window workspace hardening. Computer Use captured
+and visually inspected a fresh screenshot: native traffic lights and the
+integrated title band were present, the ordinary Sign in card rendered without
+a Login Keychain prompt,
 and the accessibility tree exposed the Email, Password, and disabled Sign in
 controls. The same run opened the macOS View menu (dynamic pane commands and
 zoom commands) and Settings as a separate `Hatch Settings` window; this is a
