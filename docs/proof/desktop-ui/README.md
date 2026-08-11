@@ -80,7 +80,7 @@ resulting capture is checked in as
 
 ## Automated evidence recorded with these captures
 
-- Renderer: 22 files / 95 tests
+- Renderer: 22 files / 96 tests
 - Rust Tauri library: 44 passed / 1 ignored (unlocked Keychain smoke)
 - Runtime: 226 Node subtests passed with an isolated `HATCH_RUNTIME_DATA_DIR`
 - LocalRunner: 43 tests passed (filesystem, shell and macOS Seatbelt suites)
@@ -145,6 +145,16 @@ still the place to inspect HTML during development.
 The rebuilt native preview also exercised a conversation-row secondary click;
 the accessibility tree exposed `Rename Conversation`, `Open in New Window`,
 and `Archive Conversation` from the Tauri popup rather than a WebKit menu.
+
+The latest rebuilt ad-hoc `.app` was cold-launched again at 09:16 local time
+after the recovery hardening. Computer Use captured and visually inspected a
+fresh screenshot: native traffic lights and the integrated title band were
+present, the ordinary Sign in card rendered without a Login Keychain prompt,
+and the accessibility tree exposed the Email, Password, and disabled Sign in
+controls. The same run opened the macOS View menu (dynamic pane commands and
+zoom commands) and Settings as a separate `Hatch Settings` window; this is a
+fresh UAT observation, while the checked-in captures above remain the stable
+visual fixtures.
 
 File drops now remain native-authoritative: a dropped file produces only a
 window-scoped opaque handle and display-name chip. Rust reads an immutable,

@@ -1389,7 +1389,12 @@ function App() {
             Number(snapshot.cursor)
           );
         }
-        const activeRunId = String(activeRunRef.current?.runId || "").trim();
+        // Keep the pre-snapshot local identity stable while reconciling. If
+        // this window's saved Run is already terminal, do not clear it and
+        // then accidentally adopt an unrelated historical interrupted Run
+        // from the same Conversation.
+        const activeRunBeforeSnapshot = activeRunRef.current;
+        const activeRunId = String(activeRunBeforeSnapshot?.runId || "").trim();
         const durableRun = activeRunId && Array.isArray(snapshot?.runs)
           ? snapshot.runs.find((run) => String(run?.id ?? run?.run_id ?? "").trim() === activeRunId)
           : null;
@@ -1405,7 +1410,9 @@ function App() {
         }
         const interruptedSnapshotRun = interruptedRunFromSnapshot(
           snapshot,
-          activeRunRef.current,
+          durableRun && isTerminalRunStatus(durableRun.status)
+            ? activeRunBeforeSnapshot
+            : activeRunRef.current,
           windowContextRef.current.dismissedRunId
         );
         if (interruptedSnapshotRun) {

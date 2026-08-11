@@ -114,6 +114,23 @@ describe("conversation client", () => {
     expect(interruptedRunFromSnapshot(snapshot, current, "run_same")).toBeNull();
   });
 
+  it("does not replace a terminal current Run with another historical interruption", () => {
+    const snapshot = {
+      runs: [
+        { id: "run_current", status: "completed" },
+        { id: "run_other_window", status: "interrupted", interrupted_reason: "Other window closed" }
+      ]
+    };
+    expect(interruptedRunFromSnapshot(snapshot, {
+      runId: "run_current",
+      status: "interrupted"
+    })).toBeNull();
+    expect(interruptedRunFromSnapshot(snapshot, null)).toMatchObject({
+      runId: "run_other_window",
+      status: "interrupted"
+    });
+  });
+
   it("skips a dismissed interrupted run and projects the next durable one", () => {
     const snapshot = {
       runs: [
