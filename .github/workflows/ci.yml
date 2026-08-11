@@ -133,6 +133,12 @@ jobs:
           # vault-backed bearer-token path.
           HATCH_PERSISTENT_SESSION: "0"
         run: npx tauri build --debug --bundles nsis
+      - name: Upload unsigned Windows installer for UAT
+        uses: actions/upload-artifact@v4
+        with:
+          name: hatch-desktop-windows-unsigned
+          path: desktop-app/src-tauri/target/debug/bundle/nsis/*.exe
+          if-no-files-found: error
 
   containers:
     name: Build deployable containers

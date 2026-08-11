@@ -32,7 +32,7 @@
 | Quick Look / Windows Open | PARTIAL | `artifact.quickLook` semantic command、native artifact popup、Rust grant-bound `open_workspace_artifact`；macOS UAT AX tree 显示 `Quick Look`，Windows 使用 `ShellExecuteW(open)` | macOS valid-grant Quick Look 实际打开、Windows 编译/Explorer/UAT、Linux `xdg-open` fallback |
 | Desktop-native visual review | PASS（macOS preview） | Native traffic lights/title chrome、离散 regular/compact/minimal 状态、overlay pane、native overflow/context menu、局部 table/code scroll；详见 [visual review](README.md#desktop-native-visual-review) | Windows caption/menu metrics、DPI/Snap、VoiceOver/Narrator 与真实 Finder/Explorer UAT |
 | VoiceOver / Narrator、IME、drag/drop、fullscreen、Snap、DPI | EXTERNAL | ARIA/focus contract、CI Windows job、macOS manual tree evidence | 真实目标平台人工验收 |
-| Web build、Tauri app build、DMG、Rust、Runtime、LocalRunner | PASS（本机） | Renderer 93、Rust 44+1 ignored、Runtime 226、LocalRunner 43；`build:web`、`build:app`、`build` 的 strict ad-hoc DMG 校验 | CI runner 与发布签名链路；Windows CI 另执行 unsigned NSIS bundle build |
+| Web build、Tauri app build、DMG、Rust、Runtime、LocalRunner | PASS（本机） | Renderer 93、Rust 44+1 ignored、Runtime 226、LocalRunner 43；`build:web`、`build:app`、`build` 的 strict ad-hoc DMG 校验 | CI runner 与发布签名链路；Windows CI 另执行并上传 unsigned NSIS installer，仍需 Windows 真机 UAT |
 
 ## 运行证据
 
