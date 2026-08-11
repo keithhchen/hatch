@@ -45,6 +45,8 @@ export type ConversationRunRecord = {
   id: string;
   conversationId: string;
   clientMessageId: string;
+  /** Hash of the exact user content + structured attachments for idempotency. */
+  inputDigest?: string;
   status: DurableRunStatus;
   corpusDigest: string;
   createdAt: string;
@@ -90,6 +92,8 @@ export type CreateRunInput = {
   id: string;
   conversationId: string;
   clientMessageId: string;
+  /** Runtime-computed; never supplied as trusted client authority. */
+  inputDigest: string;
   corpusDigest: string;
   executorId?: string;
   executorLeaseExpiresAt?: string;
@@ -104,7 +108,7 @@ export type UpdateConversationInput = {
 
 export class ConversationRepositoryError extends Error {
   constructor(
-    readonly code: "conversation_not_found" | "conversation_binding_mismatch" | "conversation_archived" | "conversation_busy" | "version_conflict" | "run_not_found" | "run_id_conflict",
+    readonly code: "conversation_not_found" | "conversation_binding_mismatch" | "conversation_archived" | "conversation_busy" | "version_conflict" | "run_not_found" | "run_id_conflict" | "client_message_conflict",
     message: string,
     readonly existingRun?: ConversationRunRecord
   ) {
@@ -178,6 +182,7 @@ function publicRunEvent(run: ConversationRunRecord): Record<string, unknown> {
   return {
     id: run.id,
     client_message_id: run.clientMessageId,
+    ...(run.inputDigest ? { input_digest: run.inputDigest } : {}),
     status: run.status,
     corpus_digest: run.corpusDigest,
     ...(run.interruptedReason ? { reason: run.interruptedReason } : {})
@@ -320,12 +325,16 @@ export class InMemoryConversationRepository implements ConversationRepository {
       const sameMessage = [...this.runs.values()].find((run) => (
         run.conversationId === input.conversationId && run.clientMessageId === input.clientMessageId
       ));
-      if (sameMessage) return { run: cloneRun(sameMessage), created: false };
+      if (sameMessage) {
+        assertSameRunInput(sameMessage, input);
+        return { run: cloneRun(sameMessage), created: false };
+      }
       const existingById = this.runs.get(input.id);
       if (existingById) {
         if (existingById.conversationId !== input.conversationId || existingById.clientMessageId !== input.clientMessageId) {
           throw new ConversationRepositoryError("run_id_conflict", `Run ${input.id} already belongs to another message`);
         }
+        assertSameRunInput(existingById, input);
         return { run: cloneRun(existingById), created: false };
       }
       const active = [...this.runs.values()].find((run) => run.conversationId === input.conversationId && isActiveRun(run.status));
@@ -340,6 +349,7 @@ export class InMemoryConversationRepository implements ConversationRepository {
         id: input.id,
         conversationId: input.conversationId,
         clientMessageId: input.clientMessageId,
+        inputDigest: input.inputDigest,
         status: "queued",
         corpusDigest: input.corpusDigest,
         createdAt: now(),
@@ -598,6 +608,7 @@ CREATE TABLE IF NOT EXISTS hatch_conversation_runs (
   id TEXT PRIMARY KEY,
   conversation_id TEXT NOT NULL REFERENCES hatch_conversations(id) ON DELETE CASCADE,
   client_message_id TEXT NOT NULL,
+  input_digest TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'waiting_for_tool', 'compacting', 'completed', 'failed', 'cancelled', 'interrupted')),
   corpus_digest TEXT NOT NULL,
   executor_id TEXT,
@@ -608,6 +619,10 @@ CREATE TABLE IF NOT EXISTS hatch_conversation_runs (
   completed_at TIMESTAMPTZ,
   UNIQUE (conversation_id, client_message_id)
 );
+-- Existing repositories predate input_digest. Preserve their historical Runs
+-- as nullable records: new Runs always write a digest, and legacy Runs remain
+-- replayable rather than becoming unreadable during a rolling upgrade.
+ALTER TABLE hatch_conversation_runs ADD COLUMN IF NOT EXISTS input_digest TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS hatch_conversation_one_active_run_idx
   ON hatch_conversation_runs (conversation_id)
   WHERE status IN ('queued', 'running', 'waiting_for_tool', 'compacting');
@@ -794,15 +809,19 @@ export class PostgresConversationRepository implements ConversationRepository {
     const existing = await this.pool.query<RunRow>(`
       SELECT * FROM hatch_conversation_runs WHERE conversation_id = $1 AND client_message_id = $2
     `, [input.conversationId, input.clientMessageId]);
-    if (existing.rows[0]) return { run: runFromRow(existing.rows[0]), created: false };
+    if (existing.rows[0]) {
+      const run = runFromRow(existing.rows[0]);
+      assertSameRunInput(run, input);
+      return { run, created: false };
+    }
     try {
       const result = await this.pool.query<RunRow>(`
         INSERT INTO hatch_conversation_runs (
-          id, conversation_id, client_message_id, status, corpus_digest, executor_id, executor_lease_expires_at
-        ) VALUES ($1, $2, $3, 'queued', $4, $5, $6)
+          id, conversation_id, client_message_id, input_digest, status, corpus_digest, executor_id, executor_lease_expires_at
+        ) VALUES ($1, $2, $3, $4, 'queued', $5, $6, $7)
         RETURNING *
       `, [
-        input.id, input.conversationId, input.clientMessageId, input.corpusDigest,
+        input.id, input.conversationId, input.clientMessageId, input.inputDigest, input.corpusDigest,
         input.executorId ?? null, input.executorLeaseExpiresAt ?? null
       ]);
       const run = runFromRow(requireRow(result.rows[0], "Run insert returned no row"));
@@ -813,7 +832,11 @@ export class PostgresConversationRepository implements ConversationRepository {
       const duplicate = await this.pool.query<RunRow>(`
         SELECT * FROM hatch_conversation_runs WHERE conversation_id = $1 AND client_message_id = $2
       `, [input.conversationId, input.clientMessageId]);
-      if (duplicate.rows[0]) return { run: runFromRow(duplicate.rows[0]), created: false };
+      if (duplicate.rows[0]) {
+        const run = runFromRow(duplicate.rows[0]);
+        assertSameRunInput(run, input);
+        return { run, created: false };
+      }
       const active = await this.pool.query<RunRow>(`
         SELECT * FROM hatch_conversation_runs
         WHERE conversation_id = $1 AND status IN ('queued', 'running', 'waiting_for_tool', 'compacting')
@@ -962,6 +985,7 @@ type RunRow = QueryResultRow & {
   id: string;
   conversation_id: string;
   client_message_id: string;
+  input_digest: string | null;
   status: DurableRunStatus;
   corpus_digest: string;
   executor_id: string | null;
@@ -1004,6 +1028,7 @@ function runFromRow(row: RunRow): ConversationRunRecord {
     id: row.id,
     conversationId: row.conversation_id,
     clientMessageId: row.client_message_id,
+    ...(row.input_digest ? { inputDigest: row.input_digest } : {}),
     status: row.status,
     corpusDigest: row.corpus_digest,
     createdAt: iso(row.created_at),
@@ -1058,6 +1083,19 @@ function assertSameConversationBinding(existing: ConversationRecord, expected: C
     || existing.productId !== expected.productId
   ) {
     throw new ConversationRepositoryError("conversation_binding_mismatch", "Conversation is outside the authenticated Creator Agent binding");
+  }
+}
+
+function assertSameRunInput(existing: ConversationRunRecord, input: CreateRunInput): void {
+  // Nullable digest is deliberately tolerated only for Runs written before
+  // protocol 0.7. New Runs always carry one, so a reused idempotency key can
+  // never silently point at different attachment content.
+  if (existing.inputDigest && existing.inputDigest !== input.inputDigest) {
+    throw new ConversationRepositoryError(
+      "client_message_conflict",
+      `client_message_id ${input.clientMessageId} was already used with different user input`,
+      cloneRun(existing)
+    );
   }
 }
 

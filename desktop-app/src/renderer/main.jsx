@@ -105,11 +105,11 @@ import {
   subscribeNativeCommands
 } from "./native-commands.js";
 import {
-  appendNativeDropContext,
+  normalizeNativeDropAttachment,
   normalizeNativeDropFile
 } from "./native-drop-context.js";
 
-const PROTOCOL_VERSION = "0.6";
+const PROTOCOL_VERSION = "0.7";
 const OUTPUT_FILTERED_COPY = "This response was blocked by the output safety check.";
 const SKILL_ACTIVITY_PART = "hatch.skill_activity";
 const SKILL_RUN_ACTIVITY_PART = "hatch.skill_run_activity";
@@ -235,6 +235,7 @@ function App() {
   const [signInError, setSignInError] = useState("");
   const [workspaceGranted, setWorkspaceGranted] = useState(false);
   const [droppedFiles, setDroppedFiles] = useState([]);
+  const droppedFilesRef = useRef([]);
   const [permissionMode, setPermissionMode] = useState(DEFAULT_PERMISSION_MODE);
   const [interruptedRun, setInterruptedRun] = useState(null);
   const [conversationId, setConversationId] = useState(() => requestedConversationIdRef.current || "desktop-chat");
@@ -262,10 +263,16 @@ function App() {
   const buyerProfile = buyerSession?.profile ?? EMPTY_PROFILE;
   const signedIn = authState === "signed-in";
 
+  useEffect(() => {
+    droppedFilesRef.current = droppedFiles;
+  }, [droppedFiles]);
+
   // A pending native file projection belongs to exactly one conversation. It
   // must never follow the window when the user switches the Library row or
-  // Creator Agent before sending.
+  // Creator Agent before sending. Discard is idempotent because a successful
+  // send has already consumed the native one-shot handle.
   useEffect(() => {
+    void discardNativeDropContexts(droppedFilesRef.current.map((file) => file.contextId));
     setDroppedFiles([]);
   }, [conversationId]);
 
@@ -636,8 +643,12 @@ function App() {
   const send = useCallback((message) => {
     const socket = socketRef.current;
     if (!socket || socket.readyState !== WebSocket.OPEN) return false;
-    socket.send(JSON.stringify(message));
-    return true;
+    try {
+      socket.send(JSON.stringify(message));
+      return true;
+    } catch {
+      return false;
+    }
   }, []);
 
   const cancelRun = useCallback(async () => {
@@ -684,18 +695,6 @@ function App() {
 
     const content = textFromAppendMessage(appendMessage).trim();
     if (!content) return;
-    let messageContent = content;
-    if (droppedFiles.length > 0) {
-      try {
-        const attached = await invokeTauri("read_native_drop_contexts", {
-          contextIds: droppedFiles.map((file) => file.contextId)
-        });
-        messageContent = appendNativeDropContext(content, attached);
-      } catch (error) {
-        setStatus(`Couldn't attach the dropped files: ${errorMessage(error)}`);
-        return;
-      }
-    }
     // Workspace and permission changes are pending Desktop preferences until a
     // new turn starts. The native window captures this exact snapshot before
     // the Runtime may request a local tool; the renderer never sends a path or
@@ -705,6 +704,39 @@ function App() {
       await synchronizeNativeToolContext(accessSnapshot);
     } catch (error) {
       setStatus(`Couldn't prepare native workspace access: ${errorMessage(error)}`);
+      return;
+    }
+    let attachments = [];
+    let preparedDroppedFiles = droppedFiles;
+    if (droppedFiles.length > 0) {
+      try {
+        const prepared = await prepareNativeDropAttachments(droppedFiles);
+        attachments = prepared.attachments;
+        preparedDroppedFiles = prepared.files;
+      } catch (error) {
+        setStatus(`Couldn't attach the dropped files: ${errorMessage(error)}`);
+        return;
+      }
+    }
+    const runId = `run_${stableRandomId()}`;
+    const clientMessageId = `message_${stableRandomId()}`;
+    const outboundMessage = {
+      type: "client.message",
+      run_id: runId,
+      client_message_id: clientMessageId,
+      conversation_id: conversationId.trim() || "desktop-chat",
+      message: {
+        role: "user",
+        content,
+        ...(attachments.length > 0 ? { attachments } : {})
+      }
+    };
+    if (!send(outboundMessage)) {
+      // `read_native_drop_contexts` is intentionally one-shot. Keep its
+      // immutable projection in this window's draft state so a transient
+      // socket failure remains retryable without reopening the external file.
+      setDroppedFiles(preparedDroppedFiles);
+      setStatus("Service unavailable. Your message will stay here.");
       return;
     }
     // The Composer is a window-session draft. Clear it only after the native
@@ -718,8 +750,6 @@ function App() {
     workspaceGrantRef.current = workspaceGrant;
     permissionRef.current = accessSnapshot.permissionMode;
 
-    const runId = `run_${stableRandomId()}`;
-    const clientMessageId = `message_${stableRandomId()}`;
     const assistantId = `${runId}_assistant`;
     const startedAt = Date.now();
     activeRunRef.current = {
@@ -743,26 +773,16 @@ function App() {
     patchWindowContext({ activeRun: activeRunRef.current, dismissedRunId: null });
     setMessages((current) => [
       ...current,
-      // Keep the optimistic projection faithful to what Runtime receives.
-      // Native drop contents are bounded and marked as untrusted by
-      // appendNativeDropContext; omitting them here made the local transcript
-      // disagree with the durable Conversation until the next hydration.
-      makeUserMessage(`${runId}_user`, messageContent, startedAt),
+      // Runtime receives the user text plus structured attachments. Keep the
+      // optimistic message text clean and retain only attachment metadata in
+      // the local UI projection; the untrusted body is never flattened into
+      // `message.content` by the renderer.
+      makeUserMessage(`${runId}_user`, content, startedAt, { attachments }),
       makeAssistantPlaceholder(assistantId, runId, startedAt)
     ]);
     setRunning(true);
     setStatus("Running");
 
-    send({
-      type: "client.message",
-      run_id: runId,
-      client_message_id: clientMessageId,
-      conversation_id: conversationId.trim() || "desktop-chat",
-      message: {
-        role: "user",
-        content: messageContent
-      }
-    });
   }, [buyerProfile.id, connected, conversationId, droppedFiles, permissionMode, send, workspace, workspaceGrant]);
 
   const runtime = useExternalStoreRuntime({
@@ -1770,8 +1790,7 @@ function App() {
   // Native drag/drop is intentionally a projection boundary: Rust turns
   // dropped directories into grants first, while files arrive as bounded
   // display metadata plus opaque one-shot context handles. No renderer path
-  // is accepted as tool authority, and keyboard/file-picker alternatives
-  // remain available.
+  // is accepted as tool authority.
   useEffect(() => {
     if (!window.__TAURI_INTERNALS__) return undefined;
     let unlisten;
@@ -2605,7 +2624,10 @@ function App() {
                         permissionMode={permissionMode}
                         onChooseWorkspace={() => void chooseWorkspace()}
                         onPermissionChange={updatePermissionMode}
-                        onRemoveDroppedFile={(contextId) => setDroppedFiles((current) => current.filter((item) => item.contextId !== contextId))}
+                        onRemoveDroppedFile={(contextId) => {
+                          void discardNativeDropContexts([contextId]);
+                          setDroppedFiles((current) => current.filter((item) => item.contextId !== contextId));
+                        }}
                       />
                       {running ? (
                         <button
@@ -2972,7 +2994,9 @@ function historyMessageToThreadMessage(message, index) {
   const id = `history_${message.run_id ?? "message"}_${index}`;
   const createdAt = messageCreatedAt(message.timestamp);
   if (message.role === "user") {
-    return makeUserMessage(id, message.content ?? "", createdAt);
+    return makeUserMessage(id, message.content ?? "", createdAt, {
+      attachments: message.attachments
+    });
   }
   const filtered = message.finish_reason === "content_filter";
   const activityParts = filtered ? [] : historyActivityParts(message);
@@ -3050,7 +3074,8 @@ function historyActivityParts(message) {
         : historyToolCallToPart(entry.event));
 }
 
-function makeUserMessage(id, text, createdAt = Date.now()) {
+function makeUserMessage(id, text, createdAt = Date.now(), options = {}) {
+  const attachments = attachmentPresentationMetadata(options.attachments);
   return {
     id,
     role: "user",
@@ -3058,10 +3083,30 @@ function makeUserMessage(id, text, createdAt = Date.now()) {
     createdAt: new Date(createdAt),
     metadata: {
       custom: {
-        source: "hatch"
+        source: "hatch",
+        ...(attachments.length > 0 ? { attachments } : {})
       }
     }
   };
+}
+
+function attachmentPresentationMetadata(attachments) {
+  if (!Array.isArray(attachments)) return [];
+  return attachments.flatMap((attachment) => {
+    if (!attachment || typeof attachment !== "object") return [];
+    const attachmentId = typeof attachment.attachment_id === "string" ? attachment.attachment_id : "";
+    const displayName = typeof attachment.display_name === "string" ? attachment.display_name : "";
+    const mediaType = typeof attachment.media_type === "string" ? attachment.media_type : "";
+    const sourceBytes = Number(attachment.source_bytes);
+    if (!attachmentId || !displayName || !mediaType || !Number.isSafeInteger(sourceBytes)) return [];
+    return [{
+      attachment_id: attachmentId,
+      display_name: displayName,
+      media_type: mediaType,
+      source_bytes: sourceBytes,
+      truncated: attachment.truncated === true
+    }];
+  });
 }
 
 function makeAssistantMessage(id, text, options = {}) {
@@ -3912,6 +3957,62 @@ function errorMessage(error) {
   if (typeof error === "string") return error;
   if (error && typeof error === "object" && "message" in error) return error.message;
   return JSON.stringify(error);
+}
+
+async function prepareNativeDropAttachments(files) {
+  const pending = Array.isArray(files) ? files : [];
+  const seen = new Set();
+  const preparedById = new Map();
+  const missingIds = [];
+  for (const file of pending) {
+    const contextId = typeof file?.contextId === "string" ? file.contextId : "";
+    if (!contextId || seen.has(contextId)) {
+      throw new Error("The dropped-file list is invalid. Remove it and drop the file again.");
+    }
+    seen.add(contextId);
+    if (file?.attachment?.attachment_id === contextId) {
+      preparedById.set(contextId, file.attachment);
+    } else {
+      missingIds.push(contextId);
+    }
+  }
+
+  if (missingIds.length > 0) {
+    const snapshots = await invokeTauri("read_native_drop_contexts", { contextIds: missingIds });
+    if (!Array.isArray(snapshots) || snapshots.length !== missingIds.length) {
+      throw new Error("Native attachment snapshots were incomplete. Drop the files again.");
+    }
+    const expectedIds = new Set(missingIds);
+    for (const snapshot of snapshots) {
+      const normalized = normalizeNativeDropAttachment(snapshot);
+      if (!normalized || !expectedIds.delete(normalized.contextId) || preparedById.has(normalized.contextId)) {
+        throw new Error("Native attachment snapshot was invalid. Drop the files again.");
+      }
+      preparedById.set(normalized.contextId, normalized.attachment);
+    }
+    if (expectedIds.size > 0) {
+      throw new Error("Native attachment snapshots did not match the dropped files.");
+    }
+  }
+
+  return {
+    attachments: pending.map((file) => preparedById.get(file.contextId)),
+    files: pending.map((file) => file.attachment?.attachment_id === file.contextId
+      ? file
+      : { ...file, attachment: preparedById.get(file.contextId) })
+  };
+}
+
+async function discardNativeDropContexts(contextIds) {
+  const ids = [...new Set((Array.isArray(contextIds) ? contextIds : [])
+    .filter((contextId) => typeof contextId === "string" && contextId.startsWith("drop_")))];
+  if (ids.length === 0 || !globalThis.window?.__TAURI_INTERNALS__) return;
+  try {
+    await invokeTauri("discard_native_drop_contexts", { contextIds: ids });
+  } catch {
+    // The handle may already have been consumed or expired. It never carries
+    // a path, so cleanup failure cannot increase renderer authority.
+  }
 }
 
 async function invokeTauri(command, args) {

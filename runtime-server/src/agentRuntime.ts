@@ -1,6 +1,12 @@
 import path from "node:path";
 import { z } from "zod";
-import type { ClientToolName, ConversationMessage, OutboundMessage, RunStart } from "./protocol.js";
+import {
+  renderUserMessageForModel,
+  type ClientToolName,
+  type ConversationMessage,
+  type OutboundMessage,
+  type RunStart
+} from "./protocol.js";
 import type { ClientToolBroker } from "./clientBroker.js";
 import type { RunStateMachine } from "./runState.js";
 import type { ActivatedSkill } from "./store.js";
@@ -80,7 +86,9 @@ export interface AgentRuntime {
 
 export class DeterministicAgentRuntime implements AgentRuntime {
   async *run(input: RunStart, ctx: RunContext): AsyncIterable<OutboundMessage> {
-    const prompt = ctx.messages.map((message) => message.content).join("\n");
+    const prompt = ctx.messages.map((message) => (
+      message.role === "user" ? renderUserMessageForModel(message) : message.content
+    )).join("\n");
     let toolEventIndex = 1;
     ensureNotCancelled(ctx);
     const visibleSkills = ctx.sessionSkills.visibleRecords;

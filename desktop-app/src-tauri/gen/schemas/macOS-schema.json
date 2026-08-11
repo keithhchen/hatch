@@ -213,6 +213,12 @@
           "markdownDescription": "Enables the deny_pending_tool_call command without any pre-configured scope."
         },
         {
+          "description": "Enables the discard_native_drop_contexts command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-discard-native-drop-contexts",
+          "markdownDescription": "Enables the discard_native_drop_contexts command without any pre-configured scope."
+        },
+        {
           "description": "Enables the ensure_workspace command without any pre-configured scope.",
           "type": "string",
           "const": "allow-ensure-workspace",
@@ -385,6 +391,12 @@
           "type": "string",
           "const": "deny-deny-pending-tool-call",
           "markdownDescription": "Denies the deny_pending_tool_call command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the discard_native_drop_contexts command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-discard-native-drop-contexts",
+          "markdownDescription": "Denies the discard_native_drop_contexts command without any pre-configured scope."
         },
         {
           "description": "Denies the ensure_workspace command without any pre-configured scope.",

@@ -1,6 +1,12 @@
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import { ClientToolNameSchema, type ClientToolName, type ConversationMessage, type OutputFinishReason } from "./protocol.js";
+import {
+  ClientToolNameSchema,
+  type ClientToolName,
+  type ContextAttachment,
+  type ConversationMessage,
+  type OutputFinishReason
+} from "./protocol.js";
 import type { CompactionPhase, CompactionReason, CompactionTrigger } from "./compaction.js";
 
 export type RunStatus = "queued" | "running" | "waiting_for_tool" | "compacting" | "completed" | "failed" | "cancelled" | "interrupted";
@@ -22,6 +28,8 @@ export type VisibleConversationMessage = {
   role: "user" | "assistant";
   content: string;
   timestamp: string;
+  /** Metadata is enough for history chips; raw attachment text stays in the durable model record. */
+  attachments?: Array<Omit<ContextAttachment, "text">>;
   finish_reason?: OutputFinishReason;
   tool_calls?: VisibleConversationToolCall[];
   skill_events?: VisibleConversationSkillEvent[];
@@ -433,6 +441,9 @@ export class RuntimeStore {
               : event.message.content ?? "",
           timestamp: event.timestamp
         };
+        if (event.type === "conversation.model_message" && event.message.attachments?.length) {
+          message.attachments = event.message.attachments.map(({ text: _text, ...attachment }) => attachment);
+        }
         if (event.type === "conversation.model_message" && event.finish_reason) {
           message.finish_reason = event.finish_reason;
         }
