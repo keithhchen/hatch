@@ -34,7 +34,7 @@ macOS UAT 证据：
 - [150% application zoom](proof/desktop-ui/zoom-150-1180x780.jpeg)
 - [200% application zoom → local table overflow](proof/desktop-ui/zoom-200-table-overflow-1180x780.jpeg)
 
-已通过的自动验证（2026-08-11 当前 worktree）：Renderer `21 files / 89 tests`；Rust `44 passed / 1 ignored Keychain smoke`；Runtime Node test `226 passed`；LocalRunner `43 passed`；Web build；Tauri preview/release `.app` build；production-session `cargo check`。另有 macOS preview UAT 验证 dynamic conversation-window manifest 的 Cmd-Q 保留、下次启动恢复及单窗关闭清理。Runtime 验证必须使用独立的 `HATCH_RUNTIME_DATA_DIR`，避免复用旧的 durable idempotency fixture。
+已通过的自动验证（2026-08-11 当前 worktree）：Renderer `21 files / 92 tests`；Rust `44 passed / 1 ignored Keychain smoke`；Runtime Node test `226 passed`；LocalRunner `43 passed`；Web build；Tauri preview/release `.app` build；production-session `cargo check`。另有 macOS preview UAT 验证 dynamic conversation-window manifest 的 Cmd-Q 保留、下次启动恢复及单窗关闭清理。Runtime 验证必须使用独立的 `HATCH_RUNTIME_DATA_DIR`，避免复用旧的 durable idempotency fixture。
 
 详细的逐条状态、证据和外部验收边界见 [Desktop UI v1 验收矩阵](proof/desktop-ui/acceptance-matrix.md)。矩阵区分本机 PASS、实现但缺环境的 PARTIAL/EXTERNAL，以及明确延期的 DEFERRED；本 spec 在 P4 所列跨平台条件全部通过前不会标记为 complete。
 
