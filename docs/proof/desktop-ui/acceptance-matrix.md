@@ -32,7 +32,7 @@
 | Quick Look / Windows Open | PARTIAL | `artifact.quickLook` semantic command、native artifact popup、Rust grant-bound `open_workspace_artifact`；macOS UAT AX tree 显示 `Quick Look`，Windows 使用 `ShellExecuteW(open)` | macOS valid-grant Quick Look 实际打开、Windows 编译/Explorer/UAT、Linux `xdg-open` fallback |
 | Desktop-native visual review | PASS（macOS preview） | Native traffic lights/title chrome、离散 regular/compact/minimal 状态、overlay pane、native overflow/context menu、局部 table/code scroll；详见 [visual review](README.md#desktop-native-visual-review) | Windows caption/menu metrics、DPI/Snap、VoiceOver/Narrator 与真实 Finder/Explorer UAT |
 | VoiceOver / Narrator、IME、drag/drop、fullscreen、Snap、DPI | EXTERNAL | ARIA/focus contract、CI Windows job、macOS manual tree evidence | 真实目标平台人工验收 |
-| Web build、Tauri app build、DMG、Rust、Runtime、LocalRunner | PASS（本机） | Renderer 96、Rust 44+1 ignored、Runtime 226、LocalRunner 43；`build:web`、`build:app`、`build` 的 strict ad-hoc DMG 校验 | CI runner 与发布签名链路；Windows CI 另执行并上传 unsigned NSIS installer，仍需 Windows 真机 UAT |
+| Web build、Tauri app build、DMG、Rust、Runtime、LocalRunner | PASS（本机；Windows 仅 cross-check） | Renderer 96、Rust 44+1 ignored、Runtime 226、LocalRunner 43；`build:web`、`build:app`、`build` 的 strict ad-hoc DMG 校验；`x86_64-pc-windows-gnu cargo check --lib` 使用 rustup target + LLVM-RC/clang 通过 | CI runner 与发布签名链路；Windows installer、真实 Explorer/IME/DPI/Snap/Narrator UAT 仍未证明 |
 
 ## 运行证据
 
@@ -51,9 +51,10 @@ desktop-app: npm run build  # strict ad-hoc DMG UAT
 `npm run build:app` 与 `npm run build` 产物是 ad-hoc/UAT `.app`/DMG，当前验证的 DMG 为
 `Hatch_0.1.0_aarch64.dmg`（`sha256:5426d231040921fba5e4de70475bf12410cc036c2e761796d65255ad3709345f`，15,247,120 bytes）。它们不是可发布的 notarized artifact。正式发布必须在 CI 注入真实 Developer ID/Team ID，并完成签名、notarization、安装后重启和无 prompt 验收。
 
-本机另外尝试了 `x86_64-pc-windows-gnu` 交叉 `cargo check`，并生成并提交了
-Windows Tauri capability schema；当前 `rustup` 虽报告该 target 已安装，但实际
-`cargo` 使用的 Homebrew/rustup host toolchain 无法加载该 target 的 `core/std`
-sysroot，检查在编译依赖阶段即以 `E0463` 停止；本机也没有
-`x86_64-w64-mingw32-windres`。因此没有把它计为 Windows 编译或 UAT 通过，必须由
-Windows CI/真机重新编译和验收。
+本机先用默认 Homebrew `cargo` 尝试 `x86_64-pc-windows-gnu`，因 host/toolchain
+混用而在 `core/std` 处得到 `E0463`；随后显式指定 rustup 的 `RUSTC/RUSTDOC`，并
+用 Homebrew `llvm-rc` + `clang --target=x86_64-pc-windows-gnu` 为 resource
+preprocess，`cargo check --locked --target x86_64-pc-windows-gnu --lib` 已通过。
+这只是 Rust library cross-check，不是 Windows app/installer build；本机仍没有
+Windows SDK、真实 Explorer/IME/DPI/Snap/Narrator 环境，因此必须由 Windows
+CI/真机重新编译和验收。
