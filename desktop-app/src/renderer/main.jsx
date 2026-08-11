@@ -1807,6 +1807,48 @@ function App() {
     setStatus("Workspace updated for the next turn");
   }
 
+  function mergeDroppedFiles(incoming) {
+    const files = Array.isArray(incoming) ? incoming.filter(Boolean) : [];
+    if (files.length === 0) return [];
+    const current = droppedFilesRef.current;
+    const byId = new Map(current.map((file) => [file.contextId, file]));
+    for (const file of files) byId.set(file.contextId, file);
+    const next = [...byId.values()].slice(-8);
+    const keep = new Set(next.map((file) => file.contextId));
+    const evicted = [...byId.keys()].filter((contextId) => !keep.has(contextId));
+    if (evicted.length > 0) void discardNativeDropContexts(evicted);
+    droppedFilesRef.current = next;
+    setDroppedFiles(next);
+    return next;
+  }
+
+  function nativeDropStatus(files, rejectedFiles) {
+    const acceptedCount = Array.isArray(files) ? files.length : 0;
+    const rejected = Array.isArray(rejectedFiles) ? rejectedFiles.filter(Boolean) : [];
+    const acceptedLabel = acceptedCount > 0
+      ? `${acceptedCount} file${acceptedCount === 1 ? "" : "s"} ready as context`
+      : "";
+    if (rejected.length === 0) return acceptedLabel;
+    const rejectedLabel = `${rejected.length} file${rejected.length === 1 ? "" : "s"} couldn't be attached`;
+    const reason = typeof rejected[0]?.reason === "string" ? rejected[0].reason : "Try a UTF-8 text file under 1 MiB.";
+    return acceptedLabel ? `${acceptedLabel}; ${rejectedLabel}` : `${rejectedLabel} — ${reason}`;
+  }
+
+  async function chooseContextFiles() {
+    try {
+      const result = await invokeTauri("pick_native_drop_files");
+      const files = Array.isArray(result?.files)
+        ? result.files.map(normalizeNativeDropFile).filter(Boolean)
+        : [];
+      const rejectedFiles = Array.isArray(result?.rejectedFiles) ? result.rejectedFiles : [];
+      if (files.length > 0) mergeDroppedFiles(files);
+      const message = nativeDropStatus(files, rejectedFiles);
+      if (message) setStatus(message);
+    } catch (error) {
+      setStatus(`Couldn't attach files: ${errorMessage(error)}`);
+    }
+  }
+
   // Native drag/drop is intentionally a projection boundary: Rust turns
   // dropped directories into grants first, while files arrive as bounded
   // display metadata plus opaque one-shot context handles. No renderer path
@@ -1821,16 +1863,14 @@ function App() {
       const files = Array.isArray(payload.files)
         ? payload.files.map(normalizeNativeDropFile).filter(Boolean)
         : [];
+      const rejectedFiles = Array.isArray(payload.rejectedFiles) ? payload.rejectedFiles : [];
       if (files.length > 0) {
-        setDroppedFiles((current) => {
-          const byId = new Map(current.map((file) => [file.contextId, file]));
-          for (const file of files) byId.set(file.contextId, file);
-          return [...byId.values()].slice(-8);
-        });
+        mergeDroppedFiles(files);
       }
       const candidate = normalizeWorkspaceGrant(directories[0]);
       if (!candidate?.grant_id) {
-        if (files.length > 0) setStatus(`${files.length} file${files.length === 1 ? "" : "s"} ready as context`);
+        const message = nativeDropStatus(files, rejectedFiles);
+        if (message) setStatus(message);
         return;
       }
       void (async () => {
@@ -1847,7 +1887,10 @@ function App() {
           setWorkspaceDraftGrant(normalized);
           setWorkspaceGranted(true);
           setProfileSetting("workspace_grant", normalized);
-          setStatus("Folder dropped — workspace access granted");
+          const dropStatus = nativeDropStatus(files, rejectedFiles);
+          setStatus(dropStatus
+            ? `Folder dropped — workspace access granted; ${dropStatus}`
+            : "Folder dropped — workspace access granted");
           if (selectedEntitlementId) {
             await connectRuntime({ workspaceGrant: normalized, conversationId, preserveMessages: true });
           }
@@ -2643,6 +2686,7 @@ function App() {
                         workspaceGranted={workspaceGranted}
                         permissionMode={permissionMode}
                         onChooseWorkspace={() => void chooseWorkspace()}
+                        onChooseFiles={() => void chooseContextFiles()}
                         onPermissionChange={updatePermissionMode}
                         onRemoveDroppedFile={(contextId) => {
                           void discardNativeDropContexts([contextId]);
@@ -2882,9 +2926,19 @@ function DesktopInspector({
   );
 }
 
-function ComposerControls({ droppedFiles = [], workspace, workspaceGranted, permissionMode, onChooseWorkspace, onPermissionChange, onRemoveDroppedFile }) {
+function ComposerControls({ droppedFiles = [], workspace, workspaceGranted, permissionMode, onChooseWorkspace, onChooseFiles, onPermissionChange, onRemoveDroppedFile }) {
   const controls = (
     <>
+      <button
+        aria-label="Attach context files"
+        className="composer-control attachment-composer-control"
+        title="Attach context files"
+        type="button"
+        onClick={onChooseFiles}
+      >
+        <span aria-hidden="true">＋</span>
+        <span className="composer-control-label">Attach files</span>
+      </button>
       <button
         aria-label="Choose workspace folder"
         className="composer-control workspace-composer-control"

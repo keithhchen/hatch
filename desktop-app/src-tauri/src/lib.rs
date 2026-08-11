@@ -429,6 +429,20 @@ struct NativeDropContextInfo {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct NativeDropRejectionInfo {
+    display_name: String,
+    reason: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeDropPickResult {
+    files: Vec<NativeDropContextInfo>,
+    rejected_files: Vec<NativeDropRejectionInfo>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct NativeDropContextContent {
     context_id: String,
     display_name: String,
@@ -679,6 +693,30 @@ fn decode_native_drop_text(bytes: &[u8], truncated: bool) -> Result<(String, boo
         return Err("native_drop_context_invalid: Attachment must be text, not binary data".into());
     }
     Ok((text, truncated))
+}
+
+fn safe_drop_display_name(value: &str) -> String {
+    let sanitized = value
+        .chars()
+        .map(|character| {
+            if character.is_control() {
+                '\u{FFFD}'
+            } else {
+                character
+            }
+        })
+        .collect::<String>();
+    sanitized.chars().take(255).collect()
+}
+
+fn native_drop_rejection_reason(error: &str) -> &'static str {
+    if error.contains("native_drop_context_too_large") {
+        "File is larger than the 1 MiB attachment limit."
+    } else if error.contains("UTF-8") || error.contains("binary") {
+        "Only UTF-8 text files can be attached."
+    } else {
+        "This item could not be attached as bounded text context."
+    }
 }
 
 fn native_drop_media_type(path: &std::path::Path) -> &'static str {
@@ -1005,6 +1043,45 @@ fn read_native_drop_contexts(
     store: State<'_, NativeDropContextStore>,
 ) -> Result<Vec<NativeDropContextContent>, String> {
     store.inner().consume(window.label(), context_ids)
+}
+
+#[tauri::command]
+async fn pick_native_drop_files(
+    window: WebviewWindow,
+    store: State<'_, NativeDropContextStore>,
+) -> Result<NativeDropPickResult, String> {
+    let selected = rfd::AsyncFileDialog::new()
+        .set_title("Attach context files")
+        .set_parent(&window)
+        .pick_files()
+        .await;
+    let Some(handles) = selected else {
+        return Ok(NativeDropPickResult {
+            files: Vec::new(),
+            rejected_files: Vec::new(),
+        });
+    };
+    let mut files = Vec::new();
+    let mut rejected_files = Vec::new();
+    for handle in handles {
+        // Invalid UTF-8/binary/oversized files are rejected at the same Rust
+        // boundary as Finder/Explorer drops. Do not expose their path or raw
+        // bytes to the renderer; the UI can keep the picker path retryable.
+        match store.inner().insert(window.label(), handle.path()) {
+            Ok(info) => files.push(info),
+            Err(error) => rejected_files.push(NativeDropRejectionInfo {
+                display_name: safe_drop_display_name(&handle.file_name()),
+                reason: native_drop_rejection_reason(&error).to_string(),
+            }),
+        }
+        if files.len() >= MAX_NATIVE_DROP_CONTEXTS {
+            break;
+        }
+    }
+    Ok(NativeDropPickResult {
+        files,
+        rejected_files,
+    })
 }
 
 #[tauri::command]
@@ -2234,6 +2311,7 @@ pub fn run() {
             default_workspace,
             ensure_workspace,
             read_native_drop_contexts,
+            pick_native_drop_files,
             discard_native_drop_contexts,
             pick_workspace_folder,
             reveal_workspace_artifact,
@@ -2275,6 +2353,7 @@ pub fn run() {
                 // never receives the dropped path or gains filesystem authority.
                 let mut directories = Vec::new();
                 let mut files = Vec::new();
+                let mut rejected_files = Vec::new();
                 for path in paths {
                     if path.is_dir() {
                         if let Ok(grant) =
@@ -2285,8 +2364,16 @@ pub fn run() {
                     } else if let Some(store) =
                         window.app_handle().try_state::<NativeDropContextStore>()
                     {
-                        if let Ok(info) = store.insert(window.label(), path) {
-                            files.push(info);
+                        let display_name = path
+                            .file_name()
+                            .map(|name| safe_drop_display_name(&name.to_string_lossy()))
+                            .unwrap_or_else(|| "Dropped file".to_string());
+                        match store.insert(window.label(), &path) {
+                            Ok(info) => files.push(info),
+                            Err(error) => rejected_files.push(NativeDropRejectionInfo {
+                                display_name,
+                                reason: native_drop_rejection_reason(&error).to_string(),
+                            }),
                         }
                     }
                 }
@@ -2295,6 +2382,7 @@ pub fn run() {
                     serde_json::json!({
                         "directories": directories,
                         "files": files,
+                        "rejectedFiles": rejected_files,
                         "position": { "x": position.x, "y": position.y }
                     }),
                 );

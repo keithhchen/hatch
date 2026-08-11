@@ -273,6 +273,12 @@
           "markdownDescription": "Enables the patch_window_settings command without any pre-configured scope."
         },
         {
+          "description": "Enables the pick_native_drop_files command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-pick-native-drop-files",
+          "markdownDescription": "Enables the pick_native_drop_files command without any pre-configured scope."
+        },
+        {
           "description": "Enables the pick_workspace_folder command without any pre-configured scope.",
           "type": "string",
           "const": "allow-pick-workspace-folder",
@@ -457,6 +463,12 @@
           "type": "string",
           "const": "deny-patch-window-settings",
           "markdownDescription": "Denies the patch_window_settings command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the pick_native_drop_files command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-pick-native-drop-files",
+          "markdownDescription": "Denies the pick_native_drop_files command without any pre-configured scope."
         },
         {
           "description": "Denies the pick_workspace_folder command without any pre-configured scope.",

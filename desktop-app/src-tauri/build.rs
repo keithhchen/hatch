@@ -35,6 +35,7 @@ fn main() {
             "default_workspace",
             "ensure_workspace",
             "read_native_drop_contexts",
+            "pick_native_drop_files",
             "discard_native_drop_contexts",
             "pick_workspace_folder",
             "reveal_workspace_artifact",

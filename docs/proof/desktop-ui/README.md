@@ -80,8 +80,8 @@ resulting capture is checked in as
 
 ## Automated evidence recorded with these captures
 
-- Renderer: 21 files / 88 tests
-- Rust Tauri library: 42 passed / 1 ignored (unlocked Keychain smoke)
+- Renderer: 21 files / 89 tests
+- Rust Tauri library: 44 passed / 1 ignored (unlocked Keychain smoke)
 - Runtime: 226 Node subtests passed with an isolated `HATCH_RUNTIME_DATA_DIR`
 - LocalRunner: 43 tests passed (filesystem, shell and macOS Seatbelt suites)
 - `npm run build:web`
@@ -122,11 +122,13 @@ the accessibility tree exposed `Rename Conversation`, `Open in New Window`,
 and `Archive Conversation` from the Tauri popup rather than a WebKit menu.
 
 File drops now remain native-authoritative: a dropped file produces only a
-window-scoped opaque handle and display-name chip. On Send, Rust revalidates
-and reads a bounded UTF-8 snapshot once; the renderer projects it into an
-explicit untrusted `<attached_context>` block and never receives the absolute
-path. Binary and oversized files produce a bounded explanation instead of
-raw bytes.
+window-scoped opaque handle and display-name chip. Rust reads an immutable,
+bounded UTF-8 snapshot at the drop gesture and never stores the path for a
+later renderer read. On Send, the renderer sends a protocol `0.7`
+`message.attachments` projection (metadata, bounded text, SHA-256 and
+truncation); Runtime validates it, records metadata in the journal, and adds
+an explicit untrusted framing block only for model input. Binary, invalid
+UTF-8 and oversized files never cross the bridge as raw bytes.
 
 The macOS accessibility tree additionally confirmed that a minimal overlay
 removes the hidden pane from the main tree, focuses its close action on open,

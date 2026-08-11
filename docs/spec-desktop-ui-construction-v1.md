@@ -34,7 +34,7 @@ macOS UAT 证据：
 - [150% application zoom](proof/desktop-ui/zoom-150-1180x780.jpeg)
 - [200% application zoom → local table overflow](proof/desktop-ui/zoom-200-table-overflow-1180x780.jpeg)
 
-已通过的自动验证（2026-08-11 当前 worktree）：Renderer `21 files / 88 tests`；Rust `42 passed / 1 ignored Keychain smoke`；Runtime Node test `226 passed`；LocalRunner `43 passed`；Web build；Tauri preview/release `.app` build；production-session `cargo check`。另有 macOS preview UAT 验证 dynamic conversation-window manifest 的 Cmd-Q 保留、下次启动恢复及单窗关闭清理。Runtime 验证必须使用独立的 `HATCH_RUNTIME_DATA_DIR`，避免复用旧的 durable idempotency fixture。
+已通过的自动验证（2026-08-11 当前 worktree）：Renderer `21 files / 89 tests`；Rust `44 passed / 1 ignored Keychain smoke`；Runtime Node test `226 passed`；LocalRunner `43 passed`；Web build；Tauri preview/release `.app` build；production-session `cargo check`。另有 macOS preview UAT 验证 dynamic conversation-window manifest 的 Cmd-Q 保留、下次启动恢复及单窗关闭清理。Runtime 验证必须使用独立的 `HATCH_RUNTIME_DATA_DIR`，避免复用旧的 durable idempotency fixture。
 
 详细的逐条状态、证据和外部验收边界见 [Desktop UI v1 验收矩阵](proof/desktop-ui/acceptance-matrix.md)。矩阵区分本机 PASS、实现但缺环境的 PARTIAL/EXTERNAL，以及明确延期的 DEFERRED；本 spec 在 P4 所列跨平台条件全部通过前不会标记为 complete。
 
@@ -250,7 +250,7 @@ Markdown table 的 scroll container 必须是 wrapper，不能把 `<table>` 自�
 
 - 每个重要动作都必须对应 semantic command、menu 和可通过键盘完成的路径。
 - 文件夹拖到 Workspace target 可创建或更新当前窗口的 Workspace Authorization。
-- 文件拖进 Composer 可添加为上下文：Native 生成 window-scoped、短生命周期、one-shot 的 opaque drop handle；发送前由 Rust 重新校验路径并做 bounded UTF-8 text projection。Renderer 只看到文件名与 attachment chip，不看到绝对路径、bookmark 或 grant；单文件最多 64 KiB，最多 8 个，binary/超限内容只显示受限说明，发送后的内容作为 user message 的明确 `<attached_context>` 区块，不获得后续 filesystem authority。
+- 文件拖进 Composer 可添加为上下文：Native 在 drop gesture 发生时验证并读取 bounded UTF-8 snapshot，随后只保存 window-scoped、短生命周期、one-shot 的 opaque handle；发送时不重新打开路径，也不把路径 authority 交给 renderer。Renderer 只看到文件名与 attachment chip，不看到绝对路径、bookmark 或 grant；单文件 projection 最多 64 KiB、source 最多 1 MiB、最多 8 个、总 projection 最多 128 KiB，binary/不符合 UTF-8 或超限文件在 Native boundary 被拒绝并显示受限说明。发送使用 wire protocol `0.7` 的结构化 `message.attachments`（`attachment_id`、display name、MIME、source bytes、bounded text、SHA-256、truncated），Runtime 再校验并以明确的 untrusted framing 生成模型输入、写入 journal；附件不获得后续 filesystem authority。
 - 所有 drag-and-drop 操作都有 picker、menu 或 keyboard 等价路径。
 - IME composition 期间不得误触发 send、stop 或 global command。
 - `Escape` 只关闭 transient UI，不停止 Run。
