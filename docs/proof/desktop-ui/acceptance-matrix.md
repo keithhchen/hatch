@@ -51,7 +51,7 @@ desktop-app: npm run build  # strict ad-hoc DMG UAT
 ```
 
 `npm run build:app` 与 `npm run build` 产物是 ad-hoc/UAT `.app`/DMG，当前验证的 DMG 为
-`Hatch_0.1.0_aarch64.dmg`（`sha256:d9f8bd3f5aa5c035b253db52e6755885bcd714050d71ccbe2945914802830dc6`，15,248,789 bytes）。它们不是可发布的 notarized artifact。正式发布必须在 CI 注入真实 Developer ID/Team ID，并完成签名、notarization、安装后重启和无 prompt 验收。
+`Hatch_0.1.0_aarch64.dmg`（`sha256:5604ce437750cbb335bb8c4d8b8503e54998e3cde4036291e8c7e204d130c345`，15,263,069 bytes）。它们不是可发布的 notarized artifact。正式发布必须在 CI 注入真实 Developer ID/Team ID，并完成签名、notarization、安装后重启和无 prompt 验收。
 
 本机先用默认 Homebrew `cargo` 尝试 `x86_64-pc-windows-gnu`，因 host/toolchain
 混用而在 `core/std` 处得到 `E0463`；随后显式指定 rustup 的 `RUSTC/RUSTDOC`，并
