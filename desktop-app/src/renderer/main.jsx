@@ -1622,14 +1622,18 @@ function App() {
       if (socketRef.current !== socket) return;
       setStatus("Connection problem. Your work has been kept.");
       void cancelPendingLocalTools("transport_failure").then((stopped) => {
-        if (!stopped) setStatus(LOCAL_TOOL_STOP_UNCONFIRMED);
+        if (!stopped && isCurrentRuntimeTransport(socket, requestToken)) {
+          setStatus(LOCAL_TOOL_STOP_UNCONFIRMED);
+        }
       });
     });
     socket.addEventListener("close", () => {
       if (socketRef.current !== socket) return;
       rejectPendingApprovals();
       void cancelPendingLocalTools("transport_failure").then((stopped) => {
-        if (!stopped) setStatus(LOCAL_TOOL_STOP_UNCONFIRMED);
+        if (!stopped && isCurrentRuntimeTransport(socket, requestToken)) {
+          setStatus(LOCAL_TOOL_STOP_UNCONFIRMED);
+        }
       });
       socketRef.current = null;
       connectedRef.current = false;
@@ -1649,14 +1653,16 @@ function App() {
 
   function disconnectRuntime() {
     intentionalDisconnectRef.current = true;
-    connectionTokenRef.current += 1;
+    const disconnectToken = ++connectionTokenRef.current;
     connectingRef.current = false;
     window.clearTimeout(reconnectTimerRef.current);
     reconnectTimerRef.current = null;
     reconnectAttemptRef.current = 0;
     rejectPendingApprovals();
     void cancelPendingLocalTools("transport_failure").then((stopped) => {
-      if (!stopped) setStatus(LOCAL_TOOL_STOP_UNCONFIRMED);
+      if (!stopped && connectionTokenRef.current === disconnectToken) {
+        setStatus(LOCAL_TOOL_STOP_UNCONFIRMED);
+      }
     });
     const socket = socketRef.current;
     socketRef.current = null;
