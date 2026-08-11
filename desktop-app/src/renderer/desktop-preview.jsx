@@ -1,10 +1,15 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { DesktopWindowShell } from "./desktop-shell.jsx";
-import { DESKTOP_LAYOUT, DESKTOP_ZOOM, nextZoom } from "./desktop-layout.js";
+import {
+  DESKTOP_LAYOUT,
+  DESKTOP_ZOOM,
+  nextZoom,
+  normalizeWindowLayoutPreferences
+} from "./desktop-layout.js";
 import {
   conversationIdFromLocation,
   isEditableContextTarget,
@@ -18,6 +23,7 @@ const AGENTS = [
   { id: "seth", initials: "S", name: "Seth Database Alpha Lite", creator: "Seth" },
   { id: "maya", initials: "M", name: "Signal Resume Review", creator: "Maya Chen" }
 ];
+const PERSISTENCE_FIXTURE = import.meta.env.VITE_HATCH_DESKTOP_PREVIEW_PERSISTENCE === "1";
 
 /**
  * A development-only visual/UAT fixture. It deliberately uses the production
@@ -67,6 +73,108 @@ export function DesktopPreview() {
   const [selectedAgent, setSelectedAgent] = useState(AGENTS[0]);
   const [workspaceGrant, setWorkspaceGrant] = useState(null);
   const [previewStatus, setPreviewStatus] = useState("");
+  const [composerDraft, setComposerDraft] = useState("");
+  const [previewSettingsReady, setPreviewSettingsReady] = useState(false);
+  const previewContextRef = useRef({ conversationId: previewConversationId });
+  const previewViewportRef = useRef(null);
+  const previewScrollTopRef = useRef(0);
+  const previewDraftTimerRef = useRef(null);
+  const previewScrollTimerRef = useRef(null);
+
+  const patchPreviewContext = useCallback((patch = {}) => {
+    const next = {
+      ...previewContextRef.current,
+      ...patch,
+      conversationId: previewConversationId
+    };
+    previewContextRef.current = next;
+    if (window.__TAURI_INTERNALS__) {
+      void invoke("patch_window_settings", { patch: { context: next } }).catch(() => {});
+    }
+  }, [previewConversationId]);
+
+  useEffect(() => {
+    if (!window.__TAURI_INTERNALS__) {
+      setPreviewSettingsReady(true);
+      return undefined;
+    }
+    let cancelled = false;
+    void invoke("read_window_settings").then((saved) => {
+      if (cancelled) return;
+      const layout = normalizeWindowLayoutPreferences(saved?.layout);
+      setSidebarPreference(layout.sidebarPreference);
+      setSidebarWidth(layout.sidebarWidth);
+      setInspectorPreference(layout.inspectorPreference);
+      setInspectorWidth(layout.inspectorWidth);
+      setApplicationZoom(layout.zoom);
+
+      const context = normalizePreviewWindowContext(saved?.context);
+      previewContextRef.current = { ...context, conversationId: previewConversationId };
+      setComposerDraft(context.composerDraft);
+      previewScrollTopRef.current = context.scrollTop;
+      if (context.selectedAgentId) {
+        const restoredAgent = AGENTS.find((agent) => agent.id === context.selectedAgentId);
+        if (restoredAgent) setSelectedAgent(restoredAgent);
+      }
+      if (context.workspaceGrant) setWorkspaceGrant(context.workspaceGrant);
+      setPreviewSettingsReady(true);
+    }).catch(() => {
+      if (!cancelled) setPreviewSettingsReady(true);
+    });
+    return () => { cancelled = true; };
+  }, [previewConversationId]);
+
+  useEffect(() => {
+    if (!previewSettingsReady || !window.__TAURI_INTERNALS__) return undefined;
+    void invoke("patch_window_settings", {
+      patch: {
+        layout: {
+          sidebarPreference,
+          sidebarWidth,
+          inspectorPreference,
+          inspectorWidth,
+          zoom: applicationZoom
+        }
+      }
+    }).catch(() => {});
+    return undefined;
+  }, [applicationZoom, inspectorPreference, inspectorWidth, previewSettingsReady, sidebarPreference, sidebarWidth]);
+
+  useEffect(() => {
+    if (!previewSettingsReady) return undefined;
+    window.clearTimeout(previewDraftTimerRef.current);
+    previewDraftTimerRef.current = window.setTimeout(() => {
+      previewDraftTimerRef.current = null;
+      patchPreviewContext({ composerDraft });
+    }, 180);
+    return () => window.clearTimeout(previewDraftTimerRef.current);
+  }, [composerDraft, patchPreviewContext, previewSettingsReady]);
+
+  useEffect(() => {
+    if (!previewSettingsReady) return undefined;
+    patchPreviewContext({ selectedAgentId: selectedAgent.id });
+    return undefined;
+  }, [patchPreviewContext, previewSettingsReady, selectedAgent.id]);
+
+  useEffect(() => {
+    if (!previewSettingsReady) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      if (previewViewportRef.current) {
+        previewViewportRef.current.scrollTop = previewScrollTopRef.current;
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [previewConversationId, previewSettingsReady]);
+
+  const handlePreviewScroll = useCallback((event) => {
+    previewScrollTopRef.current = Math.max(0, Number(event.currentTarget?.scrollTop) || 0);
+    if (!previewSettingsReady) return;
+    window.clearTimeout(previewScrollTimerRef.current);
+    previewScrollTimerRef.current = window.setTimeout(() => {
+      previewScrollTimerRef.current = null;
+      patchPreviewContext({ scrollTop: previewScrollTopRef.current });
+    }, 180);
+  }, [patchPreviewContext, previewSettingsReady]);
 
   const choosePreviewWorkspace = useCallback(async () => {
     if (!window.__TAURI_INTERNALS__) {
@@ -80,11 +188,12 @@ export function DesktopPreview() {
         return;
       }
       setWorkspaceGrant(grant);
+      patchPreviewContext({ workspaceGrant: grant });
       setPreviewStatus(`Workspace granted: ${grant.display_path || grant.grant_id}`);
     } catch (error) {
       setPreviewStatus(`Workspace selection failed: ${String(error?.message || error)}`);
     }
-  }, []);
+  }, [patchPreviewContext]);
 
   const openPreviewArtifact = useCallback(async (target, command) => {
     setPreviewStatus(`Artifact action requested: ${String(target || "(missing target)")}`);
@@ -222,7 +331,7 @@ export function DesktopPreview() {
     >
       <section className="chat-shell desktop-chat-shell preview-chat-shell">
         <div className="thread-root">
-          <div className="thread-viewport preview-thread-viewport">
+          <div ref={previewViewportRef} className="thread-viewport preview-thread-viewport" onScroll={handlePreviewScroll}>
             <article className="chat-message user">
               <div className="message-surface user"><p className="plain-text">请检查这些数据库工具，并说明哪一个适合关键词搜索。</p></div>
             </article>
@@ -243,6 +352,13 @@ export function DesktopPreview() {
                     </div>
                     <p>推荐先用 <code>creator_seth_search_company</code>。长 identifier 不应被逐字符拆开。</p>
                     <pre onContextMenu={(event) => showPreviewContextMenu(event, { kind: "artifact", target: "docs/spec-desktop-ui-construction-v1.md" })}><code>{"SELECT symbol, name\nFROM companies\nWHERE name ILIKE '%hatch%';"}</code></pre>
+                    {PERSISTENCE_FIXTURE ? (
+                      <div className="preview-persistence-notes" aria-label="Long conversation content for persistence UAT">
+                        {Array.from({ length: 10 }, (_, index) => (
+                          <p key={index}>Persistence fixture note {index + 1}: this content intentionally extends the conversation viewport so its scroll position can be restored per native window.</p>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -250,7 +366,14 @@ export function DesktopPreview() {
           </div>
           <footer className="composer-footer">
             <div className="composer">
-              <textarea className="composer-input" aria-label="Message preview agent" placeholder="Message Seth Database Alpha Lite" rows={1} />
+              <textarea
+                className="composer-input"
+                aria-label="Message preview agent"
+                placeholder="Message Seth Database Alpha Lite"
+                rows={1}
+                value={composerDraft}
+                onChange={(event) => setComposerDraft(event.target.value)}
+              />
               <div className="composer-actions">
                 <div className="composer-controls">
                   <div className="composer-settings">
@@ -275,6 +398,28 @@ export function previewArtifactRelativePath(target) {
   const parts = value.split("/");
   if (parts.some((part) => !part || part === "." || part === ".." || /[\u0000-\u001f\u007f]/.test(part))) return "";
   return parts.join("/");
+}
+
+export function normalizePreviewWindowContext(value) {
+  const candidate = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const workspace = candidate.workspaceGrant;
+  const workspaceGrant = workspace && typeof workspace === "object" && !Array.isArray(workspace)
+    ? (() => {
+      const grantId = String(workspace.grant_id ?? workspace.grantId ?? "").trim();
+      if (!grantId) return null;
+      return {
+        grant_id: grantId,
+        display_path: String(workspace.display_path ?? workspace.displayPath ?? "").trim()
+      };
+    })()
+    : null;
+  const scrollTop = Number(candidate.scrollTop);
+  return {
+    composerDraft: typeof candidate.composerDraft === "string" ? candidate.composerDraft : "",
+    scrollTop: Number.isFinite(scrollTop) ? Math.max(0, scrollTop) : 0,
+    selectedAgentId: typeof candidate.selectedAgentId === "string" ? candidate.selectedAgentId.trim() : "",
+    workspaceGrant
+  };
 }
 
 function PreviewSidebar({ selectedAgent, onSelectAgent, onContextMenu, conversationId, onOpenConversationWindow }) {

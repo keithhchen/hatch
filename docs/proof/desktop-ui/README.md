@@ -31,6 +31,8 @@ VITE_HATCH_DESKTOP_PREVIEW=1 VITE_HATCH_DESKTOP_PREVIEW_TIER=compact \
   npx tauri build --debug --bundles app --config '{"identifier":"dev.hatch.preview"}'
 VITE_HATCH_DESKTOP_PREVIEW=1 VITE_HATCH_DESKTOP_PREVIEW_TIER=minimal \
   npx tauri build --debug --bundles app --config '{"identifier":"dev.hatch.preview"}'
+VITE_HATCH_DESKTOP_PREVIEW=1 VITE_HATCH_DESKTOP_PREVIEW_PERSISTENCE=1 \
+  npx tauri build --debug --bundles app --config '{"productName":"Hatch Preview Window State UAT","identifier":"dev.hatch.preview.windowstate.uat"}'
 ```
 
 The preview flag is opt-in and is not set by normal development, release, or
@@ -45,6 +47,22 @@ it does not prove cloud Conversation Library hydration or durable Run recovery.
 Dynamic-window restart restoration is covered separately by a native-owned
 app-data manifest and a clean-quit UAT; crash/reload recovery of the renderer
 and cloud Run remains an external row in the acceptance matrix.
+
+Per-window UI state persistence has a separate opt-in fixture. Build it with
+`VITE_HATCH_DESKTOP_PREVIEW=1 VITE_HATCH_DESKTOP_PREVIEW_PERSISTENCE=1`.
+The fixture uses the same native `read_window_settings` /
+`patch_window_settings` bridge as the product shell and persists only the
+window projection: selected Agent, sidebar/Inspector state, zoom, composer
+draft and conversation `scrollTop`. It does not use Web Storage and does not
+pretend that its fixture notes are cloud Conversation messages. In the
+2026-08-11 macOS UAT, two different `conv_preview_*` windows were given
+different drafts and pane state; one also used Seth at 110% zoom, while the
+other used Maya with a 480px scroll position. The app-data settings file and
+conversation manifest were inspected, the preview process was terminated with
+`SIGKILL`, and the relaunch restored the Maya window's draft, Agent, scroll
+position and collapsed Inspector. These captures prove native shell-state
+recovery; renderer/Run attach-replay and real cloud Conversation recovery
+remain separate P4 gates.
 
 On 2026-08-11 macOS UAT, a uniquely named preview bundle opened the primary
 window plus two `Hatch — Conversation` windows. The accessibility tree exposed
@@ -94,6 +112,11 @@ and the corresponding Explorer/Open behavior remain target-device acceptance.
 | `multi-window-grant-inspector-collapsed.jpeg` | One dynamic conversation window keeps its own workspace grant while its Inspector is collapsed |
 | `multi-window-default-inspector.jpeg` | A second dynamic conversation window has a different server-shaped ID, no grant, and its Inspector open |
 | `crash-reload-restored-window.jpeg` | After a forced preview-process termination, a dynamic `conv_preview_*` window is restored from the native manifest |
+| `multi-window-draft-zoom-seth.jpeg` | One dynamic window keeps its own Seth selection, composer draft, closed Sidebar and 110% zoom |
+| `multi-window-draft-scroll-maya-persistence.jpeg` | A second dynamic window keeps a different Maya draft, open Sidebar, closed Inspector and non-zero conversation scroll |
+| `crash-reload-draft-scroll-restored.jpeg` | After `SIGKILL` and relaunch, the Maya window restores its draft, Agent, scroll position and pane state |
+| `multi-window-draft-scroll-maya.jpeg` | Earlier persistence capture of a dynamic Maya window with an independent draft and scroll position |
+| `crash-reload-draft-zoom-restored.jpeg` | Earlier restart capture of a dynamic window restoring its independent draft and zoom |
 | `zoom-80-1180x780.jpeg` | 80% application zoom keeps all three panes, toolbar, table and composer reachable |
 | `zoom-150-1180x780.jpeg` | 150% application zoom promotes the conversation surface while keeping Send and structured content usable |
 | `zoom-200-table-overflow-1180x780.jpeg` | 200% application zoom collapses side panes and leaves table overflow local to its wrapper |
@@ -101,7 +124,7 @@ and the corresponding Explorer/Open behavior remain target-device acceptance.
 
 ## Automated evidence recorded with these captures
 
-- Renderer: 24 files / 107 tests
+- Renderer: 24 files / 109 tests
 - Rust Tauri library: 44 passed / 1 ignored (unlocked Keychain smoke)
 - Runtime: 226 Node subtests passed with an isolated `HATCH_RUNTIME_DATA_DIR`
 - LocalRunner: 43 tests passed (filesystem, shell and macOS Seatbelt suites)
@@ -219,11 +242,15 @@ collapsed its Inspector; the second had a different `conv_preview_*` URL, no
 workspace grant, and its Inspector open. The checked-in captures make the
 per-window projection visible. This is stronger than a registry-only test, but
 it still does not prove cloud hydration, independent draft/scroll persistence,
-or crash/reload recovery.
+or renderer/Run crash/reload recovery. The separate persistence fixture above
+now proves restoration of the native window projection (draft, scroll, Agent,
+zoom and pane state) across a forced process termination.
 
 The same fixture then recorded two dynamic IDs in `conversation-windows.json`,
 terminated the preview process with `SIGKILL`, and relaunched it. The focused
 window reopened as one of the recorded `Hatch — Conversation` windows, and the
-other ID was still recoverable after closing the first. This proves native
-application-shell crash restoration; it intentionally does not claim that an
-in-flight Renderer/Run is reattached or replayed.
+other ID was still recoverable after closing the first. The persistence variant
+also restored the selected Agent, draft, scroll position and pane state from
+native app-data. This proves native application-shell crash restoration; it
+intentionally does not claim that an in-flight Renderer/Run is reattached or
+replayed.
