@@ -4,6 +4,20 @@ export function isServerConversationId(value) {
   return /^conv_[a-z0-9]+$/i.test(String(value || "").trim());
 }
 
+/**
+ * The Conversation Library is the renderer's authority for server-issued
+ * Conversation IDs.  A failed/old Library endpoint may keep the legacy
+ * read-only session alive, but it must never make an arbitrary URL ID
+ * executable before the current Agent binding has been verified.
+ */
+export function canConnectConversation({ libraryStatus, conversationId } = {}) {
+  const status = String(libraryStatus || "").trim().toLowerCase();
+  const id = String(conversationId || "").trim();
+  if (status === "ready") return isServerConversationId(id);
+  if (status === "unavailable") return id === "desktop-chat";
+  return false;
+}
+
 export function isTerminalRunStatus(value) {
   return new Set(["completed", "failed", "cancelled"]).has(
     String(value || "").trim().toLowerCase()

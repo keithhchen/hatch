@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  canConnectConversation,
   conversationScope,
   createConversation,
   interruptedRunFromSnapshot,
@@ -18,6 +19,20 @@ function response(body, ok = true, status = 200) {
 }
 
 describe("conversation client", () => {
+  it("requires a verified Library before connecting a server Conversation", () => {
+    expect(canConnectConversation({ libraryStatus: "idle", conversationId: "conv_a" })).toBe(false);
+    expect(canConnectConversation({ libraryStatus: "loading", conversationId: "conv_a" })).toBe(false);
+    expect(canConnectConversation({ libraryStatus: "unavailable", conversationId: "conv_a" })).toBe(false);
+    expect(canConnectConversation({ libraryStatus: "ready", conversationId: "desktop-chat" })).toBe(false);
+    expect(canConnectConversation({ libraryStatus: "ready", conversationId: "conv_a" })).toBe(true);
+  });
+
+  it("keeps only the bounded legacy migration ID alive when Library is unavailable", () => {
+    expect(canConnectConversation({ libraryStatus: "unavailable", conversationId: "desktop-chat" })).toBe(true);
+    expect(canConnectConversation({ libraryStatus: "unavailable", conversationId: "conversation_account_1_123" })).toBe(false);
+    expect(canConnectConversation({ libraryStatus: "unavailable", conversationId: "" })).toBe(false);
+  });
+
   it("accepts only server-issued conversation IDs for new turns", () => {
     expect(isServerConversationId("conv_0123abc"), "server id").toBe(true);
     expect(isServerConversationId("desktop-chat"), "legacy id").toBe(false);

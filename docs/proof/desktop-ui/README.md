@@ -138,7 +138,7 @@ and the corresponding Explorer/Open behavior remain target-device acceptance.
 
 ## Automated evidence recorded with these captures
 
-- Renderer: 24 files / 109 tests
+- Renderer: 24 files / 111 tests
 - Rust Tauri library: 44 passed / 1 ignored (unlocked Keychain smoke)
 - Runtime: 226 Node subtests passed with an isolated `HATCH_RUNTIME_DATA_DIR`
 - LocalRunner: 43 tests passed (filesystem, shell and macOS Seatbelt suites)

@@ -39,6 +39,7 @@ import {
 import { fetchPurchasedCreatorAgents, runtimeHttpUrl } from "./entitlement-client.js";
 import {
   createConversation,
+  canConnectConversation,
   getConversationSnapshot,
   interruptedRunFromSnapshot,
   isServerConversationId,
@@ -1331,7 +1332,7 @@ function App() {
 
   useEffect(() => {
     if (!signedIn || !workspaceGranted || !workspaceGrant?.grant_id || !selectedEntitlementId) return;
-    if (conversationLibraryStatus === "loading" || conversationLibraryStatus === "idle") return;
+    if (!canConnectConversation({ libraryStatus: conversationLibraryStatus, conversationId })) return;
     const entitlement = creatorAgentEntitlements.find((item) => item.entitlement_id === selectedEntitlementId);
     const desiredBinding = runtimeBindingForEntitlement(entitlement);
     const hasConnection = connectedRef.current || socketRef.current || connectingRef.current;
@@ -1475,6 +1476,15 @@ function App() {
     const selectedEntitlement = creatorAgentEntitlements.find((item) => item.entitlement_id === targetEntitlementId);
     const targetAgentId = connection.agentId || selectedEntitlement?.agent_id;
     const targetCreatorId = connection.creatorId || selectedEntitlement?.creator_id;
+    if (!canConnectConversation({
+      libraryStatus: conversationLibraryStatus,
+      conversationId: targetConversationId
+    })) {
+      setStatus(conversationLibraryStatus === "unavailable"
+        ? "Conversation Library unavailable. Hatch will not connect an unverified Conversation."
+        : "Preparing your Conversation Library…");
+      return;
+    }
     if (!targetServerUrl.trim() || !targetWorkspaceGrant?.grant_id || !buyerSession?.accessToken || !targetEntitlementId) {
       setStatus("Choose a folder before starting the connection.");
       return;
