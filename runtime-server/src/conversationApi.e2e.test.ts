@@ -238,6 +238,7 @@ test("Runtime startup interrupts a carried active Run instead of reclaiming or r
     id: "run_startup_recovery",
     conversationId: conversation.id,
     clientMessageId: "message_startup_recovery",
+    inputDigest: `sha256:${"a".repeat(64)}`,
     corpusDigest: binding.corpus_digest,
     executorId: "executor_lost_process"
   });
