@@ -49,6 +49,10 @@ import {
   updateConversation
 } from "./conversation-client.js";
 import {
+  conversationCreationScope,
+  createConversationCreationTracker
+} from "./conversation-create-retry.js";
+import {
   clearAuthSession,
   createTauriAuthStorage,
   isRemoteAuthSessionCleared,
@@ -214,6 +218,10 @@ function App() {
   const nativeContextTargetSequenceRef = useRef(0);
   const requestedConversationIdRef = useRef(conversationIdFromLocation());
   const conversationLibraryRequestRef = useRef(0);
+  const conversationCreationTrackerRef = useRef(null);
+  if (!conversationCreationTrackerRef.current) {
+    conversationCreationTrackerRef.current = createConversationCreationTracker();
+  }
   const conversationCursorRef = useRef(0);
   const viewportRef = useRef(null);
   const viewportScrollTopRef = useRef(0);
@@ -603,6 +611,25 @@ function App() {
     } : null;
   }
 
+  function conversationCreationRequest(binding, purpose = "create") {
+    const scope = conversationCreationScope({
+      accountId: buyerProfile.id,
+      binding,
+      purpose
+    });
+    const clientRequestId = conversationCreationTrackerRef.current.requestId(
+      scope,
+      () => `desktop-${purpose}-${stableRandomId()}`
+    );
+    return { scope, clientRequestId };
+  }
+
+  function settleConversationCreation(scope, error = null) {
+    conversationCreationTrackerRef.current.settle(scope, {
+      retryable: error?.code === "network_error"
+    });
+  }
+
   async function loadConversationLibrary() {
     if (!signedIn || !buyerSession?.accessToken || !selectedEntitlementId) {
       setConversations([]);
@@ -646,16 +673,23 @@ function App() {
       let nextId = requestedServerConversation || savedServerConversation || nextConversations[0]?.id || "";
 
       if (!nextId && !requestedServerConversation) {
-        const created = await createConversation(serverUrl, buyerSession.accessToken, binding, {
-          title: `New ${creatorAgent.name} conversation`,
-          clientRequestId: `desktop-bootstrap-${stableRandomId()}`
-        });
-        const conversation = created?.conversation;
-        if (!isServerConversationId(conversation?.id)) {
-          throw new Error("Runtime returned an invalid server Conversation ID.");
+        const creation = conversationCreationRequest(binding, "bootstrap");
+        try {
+          const created = await createConversation(serverUrl, buyerSession.accessToken, binding, {
+            title: `New ${creatorAgent.name} conversation`,
+            clientRequestId: creation.clientRequestId
+          });
+          const conversation = created?.conversation;
+          if (!isServerConversationId(conversation?.id)) {
+            throw new Error("Runtime returned an invalid server Conversation ID.");
+          }
+          settleConversationCreation(creation.scope);
+          nextId = conversation.id;
+          nextConversations = [conversation, ...nextConversations];
+        } catch (error) {
+          settleConversationCreation(creation.scope, error);
+          throw error;
         }
-        nextId = conversation.id;
-        nextConversations = [conversation, ...nextConversations];
       }
       if (requestId !== conversationLibraryRequestRef.current) return;
       if (nextId && nextId !== conversationId) {
@@ -689,15 +723,28 @@ function App() {
     };
   }, [buyerSession?.accessToken, selectedEntitlementId, signedIn]);
 
-  const send = useCallback((message) => {
-    const socket = socketRef.current;
-    if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+  function isCurrentRuntimeTransport(socket, requestToken) {
+    return Boolean(
+      socket
+      && socketRef.current === socket
+      && connectionTokenRef.current === requestToken
+      && !intentionalDisconnectRef.current
+    );
+  }
+
+  function sendRuntimeMessage(socket, requestToken, message) {
+    if (!isCurrentRuntimeTransport(socket, requestToken) || socket.readyState !== WebSocket.OPEN) return false;
     try {
       socket.send(JSON.stringify(message));
       return true;
     } catch {
       return false;
     }
+  }
+
+  const send = useCallback((message) => {
+    const socket = socketRef.current;
+    return sendRuntimeMessage(socket, connectionTokenRef.current, message);
   }, []);
 
   const cancelRun = useCallback(async () => {
@@ -1556,9 +1603,23 @@ function App() {
     });
     socket.addEventListener("message", (event) => {
       if (socketRef.current !== socket) return;
-      void handleRuntimeMessage(JSON.parse(event.data));
+      try {
+        void handleRuntimeMessage(JSON.parse(event.data), socket, requestToken).catch(() => {
+          if (isCurrentRuntimeTransport(socket, requestToken)) {
+            setStatus("Connection sent an invalid response. Restoring your session…");
+          }
+        });
+      } catch {
+        // A malformed frame is untrusted transport input. Keep the current
+        // connection alive long enough for its normal close/reconnect path;
+        // never let parsing a stale frame tear down the React render loop.
+        if (isCurrentRuntimeTransport(socket, requestToken)) {
+          setStatus("Connection sent an invalid response. Restoring your session…");
+        }
+      }
     });
     socket.addEventListener("error", () => {
+      if (socketRef.current !== socket) return;
       setStatus("Connection problem. Your work has been kept.");
       void cancelPendingLocalTools("transport_failure").then((stopped) => {
         if (!stopped) setStatus(LOCAL_TOOL_STOP_UNCONFIRMED);
@@ -1606,7 +1667,8 @@ function App() {
     setStatus(activeRunRef.current ? "Task paused — your work has been kept" : "Offline");
   }
 
-  async function handleRuntimeMessage(message) {
+  async function handleRuntimeMessage(message, sourceSocket = socketRef.current, sourceToken = connectionTokenRef.current) {
+    if (!isCurrentRuntimeTransport(sourceSocket, sourceToken)) return;
     if (message.type === "session.ready") {
       setCreatorAgent(creatorAgentFromSession(message));
       connectedRef.current = true;
@@ -1615,12 +1677,13 @@ function App() {
       setStatus("Ready");
       const socket = socketRef.current;
       if (socket) {
-        await reconcileLiveSnapshot(socket, connectionTokenRef.current);
+        await reconcileLiveSnapshot(socket, sourceToken);
       }
       return;
     }
 
     if (message.type === "assistant.delta") {
+      if (!message.run_id || activeRunRef.current?.runId !== message.run_id) return;
       if (message.delta.kind === "text") {
         const projection = projectApprovedRuntimeStream(activeRunRef.current, message);
         if (!projection) return;
@@ -1636,6 +1699,7 @@ function App() {
     }
 
     if (message.type === "turn.state") {
+      if (!message.run_id || activeRunRef.current?.runId !== message.run_id) return;
       setStatus(message.status);
       updateAssistantMetadataForRun(message.run_id, {
         runtimeStatus: message.status
@@ -1644,6 +1708,7 @@ function App() {
     }
 
     if (message.type === "approval.request" || message.type === "approval.result") {
+      if (!message.run_id || activeRunRef.current?.runId !== message.run_id) return;
       upsertToolEvent(toolEventFromApproval(message));
       setStatus(message.type === "approval.request"
         ? `Approval requested: ${message.name}`
@@ -1652,27 +1717,34 @@ function App() {
     }
 
     if (message.type === "tool_call.delta") {
+      if (!message.run_id || activeRunRef.current?.runId !== message.run_id) return;
       upsertToolEvent(message);
       return;
     }
 
     if (message.type === "tool_call.request") {
+      if (!message.run_id || activeRunRef.current?.runId !== message.run_id) return;
       upsertToolEvent({
         ...message,
         locality: "client",
         status: "requested"
       });
-      await handleToolRequest(message);
+      await handleToolRequest(message, {
+        socket: sourceSocket,
+        requestToken: sourceToken
+      });
       return;
     }
 
     if (message.type === "skill.activated" || message.type === "skill.invoked") {
+      if (!message.run_id || activeRunRef.current?.runId !== message.run_id) return;
       upsertSkillEvent(message);
       setStatus(`${message.status === "activated" ? "Creator method ready" : "Creator method applied"}: ${message.name}`);
       return;
     }
 
     if (message.type === "skill.run") {
+      if (!message.run_id || activeRunRef.current?.runId !== message.run_id) return;
       upsertSkillRun(message);
       setStatus(skillRunStatusLabel(message));
       return;
@@ -1684,8 +1756,12 @@ function App() {
     }
 
     if (message.type === "turn.completed") {
+      const sourceRun = activeRunRef.current;
+      if (!message.run_id || !sourceRun || sourceRun.runId !== message.run_id) return;
       const localToolsStopped = await cancelPendingLocalTools("turn_completed", message.run_id);
-      const projection = projectApprovedRuntimeStream(activeRunRef.current, message);
+      if (!isCurrentRuntimeTransport(sourceSocket, sourceToken) || activeRunRef.current?.runId !== sourceRun.runId) return;
+      const projection = projectApprovedRuntimeStream(sourceRun, message);
+      if (!projection) return;
       if (projection) {
         activeRunRef.current = projection.activeRun;
         if (projection.finishReason === "content_filter") {
@@ -1710,8 +1786,11 @@ function App() {
     }
 
     if (message.type === "turn.failed") {
+      const sourceRun = activeRunRef.current;
+      if (!message.run_id || !sourceRun || sourceRun.runId !== message.run_id) return;
       const localToolsStopped = await cancelPendingLocalTools("turn_failed", message.run_id);
-      const activeRun = activeRunRef.current;
+      if (!isCurrentRuntimeTransport(sourceSocket, sourceToken) || activeRunRef.current?.runId !== sourceRun.runId) return;
+      const activeRun = sourceRun;
       const text = `Run failed: ${message.error?.message || "Unknown error"}`;
       if (activeRun) {
         finishAssistant(activeRun.assistantId, text, "failed");
@@ -1732,13 +1811,20 @@ function App() {
     }
   }
 
-  async function handleToolRequest(message) {
+  async function handleToolRequest(message, transport = {}) {
+    const sourceSocket = transport.socket;
+    const sourceToken = transport.requestToken;
+    const isTransportCurrent = () => isCurrentRuntimeTransport(sourceSocket, sourceToken)
+      && activeRunRef.current?.runId === message.run_id;
+    if (!isTransportCurrent()) return;
     try {
       // NativeToolAuthority derives the current window's opaque grant and
       // Ask/Allow policy. This request is untrusted input, not authority.
-      const result = await invokeLocalToolCall(message);
-      send(result);
+      const result = await invokeLocalToolCall(message, isTransportCurrent);
+      if (!isTransportCurrent()) return;
+      sendRuntimeMessage(sourceSocket, sourceToken, result);
     } catch (error) {
+      if (!isTransportCurrent()) return;
       const localError = {
         code: ["local_tool_timeout", "local_tool_cancelled", "local_tool_cancel_failed"].includes(error?.code)
           ? error.code
@@ -1756,7 +1842,7 @@ function App() {
         status: "failed",
         error: localError
       });
-      send({
+      sendRuntimeMessage(sourceSocket, sourceToken, {
         type: "tool_call.result",
         run_id: message.run_id,
         tool_call_id: message.tool_call_id,
@@ -1766,7 +1852,7 @@ function App() {
     }
   }
 
-  function invokeLocalToolCall(message) {
+  function invokeLocalToolCall(message, isTransportCurrent = () => true) {
     const request = { ...message };
     const deadlineMs = localToolTransportDeadlineMs(request);
     return new Promise((resolve, reject) => {
@@ -1854,11 +1940,19 @@ function App() {
       }, deadlineMs);
 
       invokeTauri("execute_tool_call", { request }).then((submission) => {
+        if (!isTransportCurrent()) {
+          void cancel("transport_failure").catch(() => {});
+          return;
+        }
         if (submission?.status === "approval_required") {
           // The visual inline gate is only a projection of the native pending
           // record. The renderer cannot manufacture approval metadata; its
           // action names an already-recorded call in this WebviewWindow.
           void requestToolApproval(request).then(async (approved) => {
+            if (!isTransportCurrent()) {
+              finish(reject, localToolCancellationError(request, "transport_failure", deadlineMs));
+              return;
+            }
             try {
               await invokeTauri(approved ? "approve_pending_tool_call" : "deny_pending_tool_call", {
                 toolCallId: request.tool_call_id
@@ -2062,21 +2156,24 @@ function App() {
       setStatus("Choose a Creator Agent before starting a conversation.");
       return "";
     }
+    const creation = conversationCreationRequest(binding, "create");
     try {
       const result = await createConversation(serverUrl, buyerSession.accessToken, binding, {
         title: `New ${creatorAgent.name} conversation`,
-        clientRequestId: `desktop-create-${stableRandomId()}`
+        clientRequestId: creation.clientRequestId
       });
       const conversation = result?.conversation;
       if (!isServerConversationId(conversation?.id)) {
         throw new Error("Runtime returned an invalid server Conversation ID.");
       }
+      settleConversationCreation(creation.scope);
       setConversations((current) => [
         conversation,
         ...current.filter((item) => item.id !== conversation.id)
       ]);
       return conversation.id;
     } catch (error) {
+      settleConversationCreation(creation.scope, error);
       setConversationLibraryError(errorMessage(error));
       setStatus("Conversation Library unavailable. Try again when you're online.");
       return "";

@@ -166,6 +166,26 @@ describe("conversation client", () => {
     })).toThrowError(expect.objectContaining({ code: "snapshot_invalid" }));
   });
 
+  it("rejects a repeated cursor whose journal payload changed", () => {
+    expect(() => reconcileConversationSnapshot({
+      messages: [],
+      runs: [{ id: "run_1", status: "completed" }],
+      events: [
+        { cursor: 2, type: "run.state", run_id: "run_1", payload: { status: "running" } },
+        { cursor: 2, type: "run.state", run_id: "run_1", payload: { status: "completed" } }
+      ],
+      cursor: 2
+    })).toThrowError(expect.objectContaining({ code: "snapshot_invalid" }));
+  });
+
+  it("rejects an incomplete projection instead of advancing its cursor", () => {
+    expect(() => reconcileConversationSnapshot({
+      runs: [],
+      events: [],
+      cursor: 1
+    })).toThrowError(expect.objectContaining({ code: "snapshot_invalid" }));
+  });
+
   it("skips a dismissed interrupted run and projects the next durable one", () => {
     const snapshot = {
       runs: [

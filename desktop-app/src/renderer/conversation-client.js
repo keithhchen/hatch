@@ -115,10 +115,25 @@ export function reconcileConversationSnapshot(snapshot, { afterCursor = 0 } = {}
   if (!Number.isSafeInteger(reportedCursor) || reportedCursor < priorCursor) {
     throw conversationClientError("The Conversation snapshot cursor is invalid.", "snapshot_invalid");
   }
-  const runs = Array.isArray(snapshot.runs) ? snapshot.runs : [];
+  if (!Array.isArray(snapshot.messages) || !Array.isArray(snapshot.runs) || !Array.isArray(snapshot.events)) {
+    throw conversationClientError("The Conversation snapshot projection is invalid.", "snapshot_invalid");
+  }
+  if (snapshot.messages.some((message) => (
+    !message || typeof message !== "object" || Array.isArray(message)
+  ))) {
+    throw conversationClientError("The Conversation message projection is invalid.", "snapshot_invalid");
+  }
+  const runs = snapshot.runs;
+  if (runs.some((run) => (
+    !run || typeof run !== "object" || Array.isArray(run)
+      || !String(run.id ?? run.run_id ?? "").trim()
+  ))) {
+    throw conversationClientError("The Conversation Run projection is invalid.", "snapshot_invalid");
+  }
   const runIds = new Set(runs.map((run) => String(run?.id ?? run?.run_id ?? "").trim()).filter(Boolean));
-  const events = Array.isArray(snapshot.events) ? snapshot.events : [];
+  const events = snapshot.events;
   const seen = new Set();
+  const fingerprints = new Map();
   const reconciledEvents = [];
   let previousCursor = priorCursor;
   for (const event of events) {
@@ -132,7 +147,18 @@ export function reconcileConversationSnapshot(snapshot, { afterCursor = 0 } = {}
     // A server may return an event already covered by a retrying request. It
     // is safe to discard that duplicate, but never to accept a new event out
     // of order.
-    if (cursor <= priorCursor || seen.has(cursor)) continue;
+    if (cursor <= priorCursor) continue;
+    const fingerprint = canonicalSnapshotValue(event);
+    if (seen.has(cursor)) {
+      // A repeated cursor is idempotent only when it names the exact same
+      // journal event. Silently accepting a different payload at the same
+      // cursor would let a corrupted/replayed response advance the window
+      // past a state the renderer did not actually reconcile.
+      if (fingerprints.get(cursor) !== fingerprint) {
+        throw conversationClientError("The Conversation journal repeats a cursor with different data.", "snapshot_invalid");
+      }
+      continue;
+    }
     if (cursor < previousCursor) {
       throw conversationClientError("The Conversation journal is out of order.", "snapshot_invalid");
     }
@@ -148,6 +174,7 @@ export function reconcileConversationSnapshot(snapshot, { afterCursor = 0 } = {}
       throw conversationClientError("The Conversation journal payload is invalid.", "snapshot_invalid");
     }
     seen.add(cursor);
+    fingerprints.set(cursor, fingerprint);
     previousCursor = cursor;
     reconciledEvents.push(event);
   }
@@ -155,11 +182,23 @@ export function reconcileConversationSnapshot(snapshot, { afterCursor = 0 } = {}
     throw conversationClientError("The Conversation journal exceeds its snapshot cursor.", "snapshot_invalid");
   }
   return {
-    messages: Array.isArray(snapshot.messages) ? snapshot.messages : [],
+    messages: snapshot.messages,
     runs,
     events: reconciledEvents,
     cursor: reportedCursor
   };
+}
+
+// Runtime JSON object key order is not a semantic part of a journal event.
+// Canonicalizing keys lets us distinguish a true idempotent duplicate from a
+// same-cursor event whose payload changed while keeping the check deterministic
+// and dependency-free in the renderer.
+function canonicalSnapshotValue(value) {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalSnapshotValue).join(",")}]`;
+  return `{${Object.keys(value).sort().map((key) => (
+    `${JSON.stringify(key)}:${canonicalSnapshotValue(value[key])}`
+  )).join(",")}}`;
 }
 
 /**
