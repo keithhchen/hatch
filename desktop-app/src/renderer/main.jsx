@@ -2216,6 +2216,7 @@ function App() {
     const dismissedRunId = String(activeRunRef.current?.runId || interruptedRun?.runId || "").trim();
     activeRunRef.current = null;
     setInterruptedRun(null);
+    setRunning(false);
     setLegacyProfileActiveRun(undefined);
     patchWindowContext({ activeRun: null, dismissedRunId: dismissedRunId || null });
     setStatus("Paused task closed by you");
