@@ -11,6 +11,9 @@ For the reproducible macOS/Windows CI package candidates, their SHA-256 evidence
 records, and the boundary between automation and real-device UAT, see
 [automated-ci-uat.md](automated-ci-uat.md).
 
+For the separate signed/notarized release artifact contract and its protected
+target-device gate, see [release-uat-contract.md](release-uat-contract.md).
+
 The regular/compact/minimal captures use the development-only `DesktopPreview`
 fixture and an environment-selected native window size, so the shell can be
 exercised without an account. There are no in-page tier controls: the preview

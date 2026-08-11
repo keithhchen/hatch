@@ -14,7 +14,7 @@
 | 契约 | 状态 | 当前证据 | 尚未证明的部分 |
 | --- | --- | --- | --- |
 | Dev/debug/ad-hoc session 不触发 Keychain 解锁 | PASS（本机） | 最新重建 ad-hoc `.app` 冷启动（09:22 macOS UAT）进入普通 Sign in；Computer Use AX tree/截图均无 Login Keychain prompt；Rust 认证测试 | 正式 Developer ID 包的重启读取需签名环境 |
-| 正式 macOS secure session identity gate | PARTIAL | production flag `cargo check`；Team ID、bundle ID、Developer ID requirement 检查；release workflow | 真实 Developer ID + notarization + clean-account restart UAT |
+| 正式 macOS secure session identity gate | PARTIAL | production flag `cargo check`；Team ID、bundle ID、Developer ID requirement 检查；`desktop-release.yml` 现在要求 source SHA、Developer ID/notarization、不可变 DMG manifest/hash 和受保护 target UAT 后才可 publish | 真实 Developer ID + notarization + clean-account restart UAT 与 required-reviewer 记录 |
 | Windows persistent session | EXTERNAL / BLOCKED BY THREAT MODEL | Win32 Generic Credential Manager 与 PasswordVault 路径均 fail-closed；同用户 full-trust 进程可读 PasswordVault 的官方限制已记录 | 另立 device-bound session backend、Windows 签名/UAT 与 same-user 负测；不能用 MSIX/AppContainer PasswordVault 直接解锁 |
 | Workspace / approval authority 在 Rust | PASS（本机） | grant-bound picker/drop、canonical containment、pending approval state；Approval 同时保留 transcript inline card 与 composer 上方 persistent action；Rust 44 tests | Windows runner 的编译和真实 junction/ACL UAT |
 | Regular / compact / minimal layout tier | PASS（macOS UAT） | `regular-1180x780`、`compact-860x600`、`minimal-640x600`；preview accessibility tree | 多显示器和 Windows 尺寸行为 |
@@ -33,6 +33,7 @@
 | Desktop-native visual review | PASS（macOS preview） | Native traffic lights/title chrome、离散 regular/compact/minimal 状态、overlay pane、native overflow/context menu、局部 table/code scroll；详见 [visual review](README.md#desktop-native-visual-review) | Windows caption/menu metrics、DPI/Snap、VoiceOver/Narrator 与真实 Finder/Explorer UAT |
 | VoiceOver / Narrator、IME、drag/drop、fullscreen、Snap、DPI | EXTERNAL | ARIA/focus contract、CI Windows job、macOS manual tree evidence | 真实目标平台人工验收 |
 | macOS / Windows 自动 UAT 候选包与证据记录 | PARTIAL（CI 配置） | PR、`master` 与手动 CI 都构建 ad-hoc macOS `.app`→DMG / unsigned Windows NSIS，并上传 package SHA-256、source SHA、runner 与 `HATCH_PERSISTENT_SESSION=0` 的 JSON evidence；另有受保护 self-hosted target-UAT skeleton 复核同一 source/hash 后采集安装、冷启动、截图与日志；详见 [automated CI UAT](automated-ci-uat.md) | 下载后的同一不可变包仍须在真实目标设备安装、启动和完成人工 P4；CI 不能代替 VoiceOver/Narrator、IME、Explorer/Finder、Snap/DPI 或签名发布验收 |
+| Signed/notarized release package identity 与 publication gate | PARTIAL（受保护 workflow contract） | `record-desktop-release-artifact.mjs` 在 notarization/staple 后记录 source SHA、tag、DMG bytes/SHA-256 和 signed/persistent-session contract；target job 用 default-branch verifier 复核同一 artifact 后才允许 publish；详见 [release UAT contract](release-uat-contract.md) | GitHub Developer ID/notary secrets、`desktop-release-uat` required reviewer、真实 interactive macOS runner、clean-account Keychain restart 与完整视觉/Workspace smoke 尚未在本机证明 |
 | Web build、Tauri app build、DMG、Rust、Runtime、LocalRunner | PASS（本机；Windows 仅 cross-check） | Renderer 98、Rust 44+1 ignored、Runtime 226、LocalRunner 43；`build:web`、`build:app`、`build` 的 strict ad-hoc DMG 校验；`x86_64-pc-windows-gnu cargo check --lib` 使用 rustup target + LLVM-RC/clang 通过 | CI runner 与发布签名链路；Windows installer、真实 Explorer/IME/DPI/Snap/Narrator UAT 仍未证明 |
 
 ## 运行证据

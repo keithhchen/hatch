@@ -85,8 +85,49 @@ a block at that point is a UAT result, not an automation failure to work around.
 
 This workflow is not enabled as a release lane and has no signing secrets. The
 macOS candidate remains ad-hoc; the Windows candidate remains unsigned. A
-notarized/signed release still uses the separate protected release workflow and
-requires artifact-level post-install acceptance.
+notarized/signed release uses the separate protected
+[`desktop-release.yml`](../../../.github/workflows/desktop-release.yml) lane and
+requires artifact-level post-install acceptance. The candidate workflow must
+not be used to publish a release.
+
+## Protected signed-release workflow
+
+The signed macOS lane is intentionally a three-stage contract:
+
+1. `build-release` runs only from a `vMAJOR.MINOR.PATCH` tag, checks that
+   `HATCH_SIGNED_WORKSPACE_SMOKE_SHA` equals the exact `GITHUB_SHA`, and runs
+   the Developer ID build plus notarization/stapling in the protected
+   `desktop-production` Environment.
+2. After stapling, the job writes
+   `release-artifact.json`. It records the source SHA, tag, filename, byte
+   count, and `sha256:<64 hex digits>` of the final DMG, as well as the signed,
+   notarized, persistent-session contract. The manifest and DMG are uploaded
+   together as one immutable artifact named for the workflow run.
+3. `release-target-uat` downloads that same artifact, but checks out the
+   protected default branch for the verifier. It rejects any source/tag/hash
+   mismatch before a dedicated interactive `self-hosted, macos, arm64` runner
+   installs and cold-launches the exact DMG. `codesign`, Gatekeeper (`spctl`),
+   stapler validation, screenshot, and process/log evidence are collected. A
+   required reviewer on `desktop-release-uat` must inspect the screenshot and
+   verify the clean restart/Keychain, Workspace grant, native menu, resize,
+   and accessibility checklist for that exact hash.
+
+Only when both protected jobs succeed does `publish-release` download and
+re-verify the immutable artifact and attach that exact DMG plus its manifest to
+the GitHub Release. A manual dispatch from a branch (rather than a tag) fails
+the signed-input step; it cannot publish a branch build accidentally. The
+release manifest helpers are covered by the same Node test lane as the ad-hoc
+UAT helpers:
+
+```text
+node --test scripts/uat/release-artifact.test.mjs
+```
+
+The contract is documented in
+[`release-uat-contract.md`](release-uat-contract.md). Real Developer ID
+secrets, notarization, the protected Environments, and an interactive runner
+are external GitHub configuration; they are intentionally not represented by
+local ad-hoc evidence.
 
 ## Local dry run
 
