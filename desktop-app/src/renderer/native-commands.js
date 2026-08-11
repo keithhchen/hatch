@@ -154,6 +154,31 @@ export function conversationIdFromLocation(locationLike = globalThis.location) {
   return normalizeConversationId(value);
 }
 
+/**
+ * Normalize the non-secret account/Agent binding carried by a secondary
+ * window URL or native window context. These values are routing hints only;
+ * the renderer must still match them against the signed-in entitlement list
+ * and the Runtime must re-authorize every request.
+ */
+export function normalizeConversationBinding(value = {}) {
+  const entitlementId = normalizeConversationId(value?.entitlementId ?? value?.entitlement_id);
+  const creatorId = normalizeConversationId(value?.creatorId ?? value?.creator_id);
+  const agentId = normalizeConversationId(value?.agentId ?? value?.agent_id);
+  if (!entitlementId && !creatorId && !agentId) return null;
+  if (!entitlementId || !creatorId || !agentId) return null;
+  return Object.freeze({ entitlementId, creatorId, agentId });
+}
+
+export function conversationBindingFromLocation(locationLike = globalThis.location) {
+  const search = typeof locationLike?.search === "string" ? locationLike.search : "";
+  const params = new URLSearchParams(search);
+  return normalizeConversationBinding({
+    entitlementId: params.get("entitlement_id"),
+    creatorId: params.get("creator_id"),
+    agentId: params.get("agent_id")
+  });
+}
+
 export function normalizeConversationId(value) {
   const normalized = typeof value === "string" ? value.trim() : "";
   if (!normalized || normalized.length > MAX_CONVERSATION_ID_BYTES || /[\u0000-\u001f\u007f]/.test(normalized)) {

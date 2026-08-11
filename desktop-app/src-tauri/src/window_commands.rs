@@ -417,6 +417,28 @@ pub struct NativeCommandMenuRequest {
     pub position: Option<NativeContextMenuPosition>,
 }
 
+/// Non-secret routing hints for a secondary Conversation window. The
+/// renderer receives these only as a URL/context hint; Runtime requests still
+/// re-check the signed-in account and entitlement binding.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OpenConversationWindowRequest {
+    pub conversation_id: String,
+    #[serde(default)]
+    pub entitlement_id: Option<String>,
+    #[serde(default)]
+    pub creator_id: Option<String>,
+    #[serde(default)]
+    pub agent_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ConversationWindowBinding {
+    entitlement_id: String,
+    creator_id: String,
+    agent_id: String,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenConversationWindowResult {
@@ -887,7 +909,7 @@ pub fn restore_conversation_windows<R: Runtime>(
 
     let mut restored = 0;
     for conversation_id in manifest.conversation_ids {
-        if open_conversation_window_impl(app, conversation_id, router, false).is_ok() {
+        if open_conversation_window_impl(app, conversation_id, None, router, false).is_ok() {
             restored += 1;
         }
     }
@@ -1030,15 +1052,26 @@ pub fn open_about_window(app: AppHandle) -> Result<OpenAuxiliaryWindowResult, St
 pub async fn open_conversation_window(
     app: AppHandle,
     conversation_id: String,
+    entitlement_id: Option<String>,
+    creator_id: Option<String>,
+    agent_id: Option<String>,
     router: State<'_, NativeCommandRouter>,
 ) -> Result<OpenConversationWindowResult, String> {
-    let conversation_id = validate_conversation_id(&conversation_id)?;
-    open_conversation_window_impl(&app, conversation_id, router.inner(), true)
+    let request = OpenConversationWindowRequest {
+        conversation_id,
+        entitlement_id,
+        creator_id,
+        agent_id,
+    };
+    let conversation_id = validate_conversation_id(&request.conversation_id)?;
+    let binding = validate_conversation_window_binding(&request)?;
+    open_conversation_window_impl(&app, conversation_id, binding, router.inner(), true)
 }
 
 fn open_conversation_window_impl<R: Runtime>(
     app: &AppHandle<R>,
     conversation_id: String,
+    binding: Option<ConversationWindowBinding>,
     router: &NativeCommandRouter,
     persist_manifest: bool,
 ) -> Result<OpenConversationWindowResult, String> {
@@ -1094,7 +1127,7 @@ fn open_conversation_window_impl<R: Runtime>(
                 let builder = WebviewWindowBuilder::new(
                     app,
                     label.clone(),
-                    WebviewUrl::App(conversation_window_path(&conversation_id)),
+                    WebviewUrl::App(conversation_window_path(&conversation_id, binding.as_ref())),
                 )
                 .title("Hatch — Conversation")
                 .inner_size(1180.0, 780.0)
@@ -1506,6 +1539,45 @@ fn validate_conversation_id(value: &str) -> Result<String, String> {
     Ok(value.to_string())
 }
 
+fn validate_binding_id(value: &str, field: &str) -> Result<String, String> {
+    let value = value.trim();
+    if value.is_empty()
+        || value.len() > MAX_CONVERSATION_ID_BYTES
+        || value.chars().any(char::is_control)
+    {
+        return Err(format!(
+            "conversation_window_binding_invalid: {field} must be bounded non-control text"
+        ));
+    }
+    Ok(value.to_string())
+}
+
+fn validate_conversation_window_binding(
+    request: &OpenConversationWindowRequest,
+) -> Result<Option<ConversationWindowBinding>, String> {
+    let provided = request.entitlement_id.is_some()
+        || request.creator_id.is_some()
+        || request.agent_id.is_some();
+    if !provided {
+        return Ok(None);
+    }
+    let entitlement_id = validate_binding_id(
+        request.entitlement_id.as_deref().unwrap_or_default(),
+        "entitlement_id",
+    )?;
+    let creator_id = validate_binding_id(
+        request.creator_id.as_deref().unwrap_or_default(),
+        "creator_id",
+    )?;
+    let agent_id =
+        validate_binding_id(request.agent_id.as_deref().unwrap_or_default(), "agent_id")?;
+    Ok(Some(ConversationWindowBinding {
+        entitlement_id,
+        creator_id,
+        agent_id,
+    }))
+}
+
 fn validate_context_target(value: &str) -> Result<String, String> {
     let value = value.trim();
     if value.is_empty()
@@ -1532,10 +1604,28 @@ fn validate_context_position(
     Ok(LogicalPosition::new(position.x, position.y))
 }
 
-fn conversation_window_path(conversation_id: &str) -> PathBuf {
+fn conversation_window_path(
+    conversation_id: &str,
+    binding: Option<&ConversationWindowBinding>,
+) -> PathBuf {
     let encoded =
         url::form_urlencoded::byte_serialize(conversation_id.as_bytes()).collect::<String>();
-    PathBuf::from(format!("index.html?conversation_id={encoded}"))
+    let mut path = format!("index.html?conversation_id={encoded}");
+    if let Some(binding) = binding {
+        for (name, value) in [
+            ("entitlement_id", binding.entitlement_id.as_str()),
+            ("creator_id", binding.creator_id.as_str()),
+            ("agent_id", binding.agent_id.as_str()),
+        ] {
+            let encoded =
+                url::form_urlencoded::byte_serialize(value.as_bytes()).collect::<String>();
+            path.push('&');
+            path.push_str(name);
+            path.push('=');
+            path.push_str(&encoded);
+        }
+    }
+    PathBuf::from(path)
 }
 
 /// Tauri labels must be portable across macOS and Windows. Keep a short,
@@ -1588,10 +1678,11 @@ mod tests {
     use super::{
         app_menu_command, application_command_definition, artifact_open_menu_label,
         artifact_reveal_menu_label, checked_command_label, context_menu_command,
-        conversation_window_label, normalize_manifest_conversation_ids, validate_context_position,
-        validate_context_target, validate_conversation_id, ConversationReservation,
-        ConversationWindowPhase, NativeCommandRouter, NativeCommandState, NativeContextMenuKind,
-        NativeContextMenuPosition, NativeMenuSnapshot, COMMAND_ABOUT_OPEN,
+        conversation_window_label, conversation_window_path, normalize_manifest_conversation_ids,
+        validate_context_position, validate_context_target, validate_conversation_id,
+        validate_conversation_window_binding, ConversationReservation, ConversationWindowPhase,
+        NativeCommandRouter, NativeCommandState, NativeContextMenuKind, NativeContextMenuPosition,
+        NativeMenuSnapshot, OpenConversationWindowRequest, COMMAND_ABOUT_OPEN,
         COMMAND_CONVERSATION_NEW, COMMAND_CONVERSATION_NEW_WINDOW, COMMAND_INSPECTOR_TOGGLE,
         COMMAND_RUN_STOP, COMMAND_SETTINGS_OPEN, COMMAND_SIDEBAR_TOGGLE, COMMAND_VIEW_ZOOM_IN,
         COMMAND_VIEW_ZOOM_OUT, COMMAND_VIEW_ZOOM_RESET, COMMAND_WORKSPACE_CHOOSE,
@@ -1610,6 +1701,43 @@ mod tests {
             || character.is_ascii_digit()
             || character == '-'));
         assert!(first.len() <= 64);
+    }
+
+    #[test]
+    fn conversation_window_route_carries_optional_agent_binding() {
+        let request = OpenConversationWindowRequest {
+            conversation_id: "conv_123".into(),
+            entitlement_id: Some("ent_A".into()),
+            creator_id: Some("creator_A".into()),
+            agent_id: Some("agent_A".into()),
+        };
+        let binding = validate_conversation_window_binding(&request).unwrap();
+        let binding = binding.as_ref().unwrap();
+        let path = conversation_window_path("conv_123", Some(binding));
+        let path = path.to_string_lossy();
+        assert!(path.contains("conversation_id=conv_123"));
+        assert!(path.contains("entitlement_id=ent_A"));
+        assert!(path.contains("creator_id=creator_A"));
+        assert!(path.contains("agent_id=agent_A"));
+    }
+
+    #[test]
+    fn conversation_window_binding_rejects_partial_or_controlled_input() {
+        let partial = OpenConversationWindowRequest {
+            conversation_id: "conv_123".into(),
+            entitlement_id: Some("ent_A".into()),
+            creator_id: None,
+            agent_id: Some("agent_A".into()),
+        };
+        assert!(validate_conversation_window_binding(&partial).is_err());
+
+        let controlled = OpenConversationWindowRequest {
+            conversation_id: "conv_123".into(),
+            entitlement_id: Some("ent_A\nx".into()),
+            creator_id: Some("creator_A".into()),
+            agent_id: Some("agent_A".into()),
+        };
+        assert!(validate_conversation_window_binding(&controlled).is_err());
     }
 
     #[test]

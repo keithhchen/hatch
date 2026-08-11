@@ -3,8 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 import {
   NATIVE_COMMAND,
   NATIVE_COMMAND_EVENT,
+  conversationBindingFromLocation,
   conversationIdFromLocation,
   isEditableContextTarget,
+  normalizeConversationBinding,
   requestNativeContextMenu,
   routeNativeCommand,
   subscribeNativeCommands
@@ -120,5 +122,12 @@ describe("native renderer commands", () => {
     expect(isEditableContextTarget({ closest: () => null })).toBe(false);
     expect(conversationIdFromLocation({ search: "?conversation_id=conversation_123" })).toBe("conversation_123");
     expect(conversationIdFromLocation({ search: "?conversation_id=bad%0Avalue" })).toBe("");
+    expect(conversationBindingFromLocation({
+      search: "?entitlement_id=ent_A&creator_id=creator_A&agent_id=agent_A"
+    })).toEqual({ entitlementId: "ent_A", creatorId: "creator_A", agentId: "agent_A" });
+    expect(conversationBindingFromLocation({
+      search: "?entitlement_id=ent_A&creator_id=creator_A"
+    })).toBeNull();
+    expect(normalizeConversationBinding({ entitlement_id: "bad\nvalue", creator_id: "c", agent_id: "a" })).toBeNull();
   });
 });

@@ -111,8 +111,10 @@ import {
 } from "./desktop-layout.js";
 import { DesktopPreview } from "./desktop-preview.jsx";
 import {
+  conversationBindingFromLocation,
   conversationIdFromLocation,
   isEditableContextTarget,
+  normalizeConversationBinding,
   nativeContextRequest,
   requestNativeContextMenu,
   routeNativeCommand,
@@ -221,6 +223,7 @@ function App() {
   const nativeContextTargetsRef = useRef(new Map());
   const nativeContextTargetSequenceRef = useRef(0);
   const requestedConversationIdRef = useRef(conversationIdFromLocation());
+  const requestedConversationBindingRef = useRef(conversationBindingFromLocation());
   // Preserve the launch role even after Conversation Library hydration clears
   // the one-shot URL request. Dynamic Conversation windows must never write
   // their workspace back into the main window's legacy profile fallback.
@@ -385,12 +388,17 @@ function App() {
     }, profileId);
   }
 
-  function chooseEntitlement(entitlements, profileId, currentId = "") {
+  function chooseEntitlement(entitlements, profileId, currentId = "", preferredBinding = null) {
     if (!Array.isArray(entitlements) || entitlements.length === 0) return null;
     const active = entitlements
       .filter((item) => item?.status === "active")
       .sort((left, right) => Date.parse(right.granted_at || "") - Date.parse(left.granted_at || ""));
     if (active.length === 0) return null;
+    if (preferredBinding?.entitlementId) {
+      return active.find((item) => item.entitlement_id === preferredBinding.entitlementId
+        && item.creator_id === preferredBinding.creatorId
+        && item.agent_id === preferredBinding.agentId) || null;
+    }
     const current = active.find((item) => item.entitlement_id === currentId);
     if (current) return current;
     const previousId = settingsStoreRef.current?.getProfile(profileId, "last_selected_entitlement_id", "");
@@ -399,10 +407,13 @@ function App() {
 
   function applySignedInSession(session, entitlements, { preserveCurrent = false } = {}) {
     const profileId = session.profile?.id || EMPTY_PROFILE.id;
+    const launchBinding = requestedConversationBindingRef.current
+      || normalizeConversationBinding(windowContextRef.current);
     const selected = chooseEntitlement(
       entitlements,
       profileId,
-      preserveCurrent ? selectedEntitlementIdRef.current : ""
+      preserveCurrent ? selectedEntitlementIdRef.current : "",
+      launchBinding
     );
     const mustRebindRuntime = entitlementRefreshNeedsReconnect(connectionConfigRef.current, selected);
     if (mustRebindRuntime) {
@@ -420,7 +431,9 @@ function App() {
     setCreatorAgentEntitlements(entitlements);
     setSelectedEntitlementId(selected?.entitlement_id || "");
     setCreatorAgent(selected ? creatorAgentFromEntitlement(selected) : DEFAULT_CREATOR_AGENT);
-    setEntitlementError("");
+    setEntitlementError(launchBinding && !selected
+      ? "This Conversation window's Creator Agent binding is no longer available in this account."
+      : "");
     if (selected) setProfileSetting("last_selected_entitlement_id", selected.entitlement_id, profileId);
     setStartupError("");
     setAuthState("signed-in");
@@ -627,6 +640,11 @@ function App() {
     } : null;
   }
 
+  function launchConversationBinding() {
+    return requestedConversationBindingRef.current
+      || normalizeConversationBinding(windowContextRef.current);
+  }
+
   function conversationCreationRequest(binding, purpose = "create") {
     const scope = conversationCreationScope({
       accountId: buyerProfile.id,
@@ -656,6 +674,25 @@ function App() {
     if (!binding?.entitlementId || !binding.creatorId || !binding.agentId) {
       setConversationLibraryStatus("unavailable");
       setConversationLibraryError("Conversation Library is waiting for the Agent binding.");
+      return;
+    }
+    const launchBinding = launchConversationBinding();
+    if (conversationWindowRef.current
+      && isServerConversationId(requestedConversationIdRef.current)
+      && !launchBinding) {
+      // A legacy native manifest may contain a server Conversation id but no
+      // saved Agent binding. Do not guess from profile order or silently
+      // create a replacement under another Agent; require an explicit
+      // server-issued route/context on the next open.
+      setConversationLibraryStatus("unavailable");
+      setConversationLibraryError("This Conversation window needs its Creator Agent binding before it can be restored.");
+      return;
+    }
+    if (conversationWindowRef.current && launchBinding && !runtimeBindingMatches(launchBinding, binding)) {
+      // Wait for the context-binding selector effect to choose the exact
+      // Creator Agent. Never issue a Library request for the profile's
+      // default Agent while a restored secondary window is still rebinding.
+      setConversationLibraryStatus("loading");
       return;
     }
     const requestId = ++conversationLibraryRequestRef.current;
@@ -733,11 +770,12 @@ function App() {
   }
 
   useEffect(() => {
+    if (!windowContextReady) return undefined;
     void loadConversationLibrary();
     return () => {
       conversationLibraryRequestRef.current += 1;
     };
-  }, [buyerSession?.accessToken, selectedEntitlementId, signedIn]);
+  }, [buyerSession?.accessToken, selectedEntitlementId, signedIn, windowContextReady]);
 
   function isCurrentRuntimeTransport(socket, requestToken) {
     return Boolean(
@@ -989,6 +1027,9 @@ function App() {
           ? Math.max(0, Number(accountBoundContext.conversationCursor))
           : 0
       };
+      if (conversationWindowRef.current && !requestedConversationBindingRef.current) {
+        requestedConversationBindingRef.current = normalizeConversationBinding(windowContextRef.current);
+      }
       conversationCursorRef.current = requestedConversationIdRef.current
         && requestedConversationIdRef.current !== windowContextRef.current.conversationId
         ? 0
@@ -1005,6 +1046,30 @@ function App() {
     });
     return () => { cancelled = true; };
   }, [buyerSession?.profile?.id, settingsReady, signedIn]);
+
+  // A restored secondary window may be relaunched from the native manifest
+  // with only its conversation id. Its last native context still contains
+  // the immutable Agent binding; re-select that entitlement before the
+  // Conversation Library request. URL/context values are only hints and must
+  // match the signed-in entitlement projection exactly.
+  useEffect(() => {
+    if (!windowContextReady || !signedIn || !conversationWindowRef.current) return;
+    const binding = launchConversationBinding();
+    if (!binding || creatorAgentEntitlements.length === 0) return;
+    const selected = creatorAgentEntitlements.find((item) => item.entitlement_id === binding.entitlementId
+      && item.creator_id === binding.creatorId
+      && item.agent_id === binding.agentId);
+    if (!selected) {
+      if (selectedEntitlementId) setSelectedEntitlementId("");
+      setEntitlementError("This Conversation window's Creator Agent binding is no longer available in this account.");
+      return;
+    }
+    if (selectedEntitlementId !== selected.entitlement_id) {
+      setSelectedEntitlementId(selected.entitlement_id);
+      setCreatorAgent(creatorAgentFromEntitlement(selected));
+      setEntitlementError("");
+    }
+  }, [creatorAgentEntitlements, selectedEntitlementId, signedIn, windowContextReady]);
 
   useEffect(() => {
     if (!settingsReady || !windowContextReady || !signedIn || !buyerSession?.profile?.id) return;
@@ -1129,6 +1194,7 @@ function App() {
     if (!windowContextReady || !windowStateRestored || !signedIn) return;
     patchWindowContext({
       conversationId,
+      ...(conversationBindingFor() || {}),
       workspaceGrant,
       permissionMode,
       draft: workspaceDraft,
@@ -2234,8 +2300,18 @@ function App() {
       setStatus("Only a server Conversation can be opened in a new window.");
       return false;
     }
+    const binding = conversationBindingFor();
+    if (!binding?.entitlementId || !binding.creatorId || !binding.agentId) {
+      setStatus("Choose a Creator Agent before opening a Conversation window.");
+      return false;
+    }
     try {
-      await invokeTauri("open_conversation_window", { conversationId: target });
+      await invokeTauri("open_conversation_window", {
+        conversationId: target,
+        entitlementId: binding.entitlementId,
+        creatorId: binding.creatorId,
+        agentId: binding.agentId
+      });
       if (announce) setStatus("Conversation opened in a new window");
       return true;
     } catch (error) {
@@ -2508,6 +2584,9 @@ function App() {
       runtimeBindingForEntitlement(entitlement)
     )) return;
     disconnectRuntime();
+    // A manual Agent switch is an explicit user choice. Do not let the
+    // launch URL/context hint re-apply the previous window binding.
+    requestedConversationBindingRef.current = null;
     setSelectedEntitlementId(entitlement.entitlement_id);
     setCreatorAgent(creatorAgentFromEntitlement(entitlement));
     setProfileSetting("last_selected_entitlement_id", entitlement.entitlement_id);
