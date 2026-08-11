@@ -9,9 +9,9 @@
         reverse_proxy runtime:8400
     }
 
-    # Desktop HTTP discovery and conversation history endpoints.
-    @runtime_agents path /v1/me/creator-agents
-    handle @runtime_agents {
+    # Desktop HTTP APIs owned by Runtime.
+    @runtime_api path /v1/me/creator-agents /v1/conversations*
+    handle @runtime_api {
         reverse_proxy runtime:8400
     }
 
