@@ -49,9 +49,18 @@ export function DesktopWindowShell({
   useShellResize(shellRef, setTier);
 
   useEffect(() => {
-    if (tier !== LAYOUT_TIERS.MINIMAL) setSidebarOverlayOpen(false);
-    if (tier === LAYOUT_TIERS.REGULAR) setInspectorOverlayOpen(false);
-  }, [tier]);
+    if (tier !== LAYOUT_TIERS.MINIMAL && sidebarOverlayOpen) {
+      setSidebarOverlayOpen(false);
+      // A live resize can auto-collapse an open overlay. Return focus to the
+      // command that can reopen it instead of leaving focus on a detached DOM
+      // node (which is especially visible to VoiceOver/Narrator users).
+      queueMicrotask(() => sidebarToggleRef.current?.focus());
+    }
+    if (tier === LAYOUT_TIERS.REGULAR && inspectorOverlayOpen) {
+      setInspectorOverlayOpen(false);
+      queueMicrotask(() => inspectorToggleRef.current?.focus());
+    }
+  }, [inspectorOverlayOpen, sidebarOverlayOpen, tier]);
 
   const closeSidebarOverlay = () => {
     setSidebarOverlayOpen(false);
