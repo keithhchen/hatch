@@ -14,9 +14,11 @@ import {
   ClientToolNameSchema,
   clientMessageInputDigest,
   contextAttachmentTextSha256,
+  LEGACY_PROTOCOL_VERSION,
   parseInboundMessage,
   PROTOCOL_VERSION,
-  renderUserMessageForModel
+  renderUserMessageForModel,
+  SUPPORTED_PROTOCOL_VERSIONS
 } from "./protocol.js";
 import {
   discoverSkills,
@@ -62,7 +64,7 @@ test("runtime protocol mirrors the canonical wire schema", async () => {
   const schema = JSON.parse(await readFile(schemaPath, "utf8")) as {
     $id: string;
     $defs: {
-      protocolVersion: { const: string };
+      protocolVersion: { enum: string[] };
       clientToolName: { enum: string[] };
       skillInvoked: {
         properties: {
@@ -73,7 +75,7 @@ test("runtime protocol mirrors the canonical wire schema", async () => {
   };
 
   assert.equal(schema.$id, "https://hatch.dev/protocol/hatch-wire-protocol-0.7.schema.json");
-  assert.equal(schema.$defs.protocolVersion.const, PROTOCOL_VERSION);
+  assert.deepEqual(schema.$defs.protocolVersion.enum, [...SUPPORTED_PROTOCOL_VERSIONS]);
   assert.deepEqual(schema.$defs.clientToolName.enum, [...ClientToolNameSchema.options]);
   assert.deepEqual(schema.$defs.skillInvoked.properties.trigger.properties.tool.enum, ["shell_exec", "file_read"]);
 });
@@ -1900,7 +1902,7 @@ test("skill resources can be read by catalog path and cannot escape the skills r
   await assert.rejects(() => readSkillResourceByPath(path.join(path.dirname(skill.path), "..", "..", "package.json")), /escapes skills root/);
 });
 
-test("server rejects protocol 0.6 hello explicitly before accepting protocol 0.7", async () => {
+test("server accepts protocol 0.6 and 0.7 while rejecting older clients", async () => {
   const dataDir = await tempWorkspace();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
 
@@ -1926,22 +1928,49 @@ test("server rejects protocol 0.6 hello explicitly before accepting protocol 0.7
   const rejected = await waitForSocketMessage(messages, (message) => message.type === "turn.failed");
   assert.ok(rejected.type === "turn.failed");
   assert.equal(rejected.error.code, "protocol_error");
+  assert.match(rejected.error.message, /0\.6/);
   assert.match(rejected.error.message, /0\.7/);
 
   socket.send(JSON.stringify({
     type: "client.hello",
-    protocol_version: PROTOCOL_VERSION,
-    installation_id: "install_protocol_06",
-    license_token: "license_protocol_06",
+    protocol_version: LEGACY_PROTOCOL_VERSION,
+    installation_id: "install_protocol_legacy",
+    license_token: "license_protocol_legacy",
     local_tools: ["file_read"]
   }));
-  await waitForSocketMessage(messages, (message) => message.type === "session.ready");
+  const legacyReady = await waitForSocketMessage(messages, (message) => message.type === "session.ready");
+  assert.ok(legacyReady.type === "session.ready");
+  assert.equal(legacyReady.accepted_protocol_version, LEGACY_PROTOCOL_VERSION);
   socket.close();
+
+  const currentSocket = new WebSocket(serverUrl);
+  const currentMessages: OutboundMessage[] = [];
+  currentSocket.on("message", (data) => {
+    currentMessages.push(JSON.parse(String(data)) as OutboundMessage);
+  });
+  await new Promise<void>((resolve, reject) => {
+    currentSocket.once("open", resolve);
+    currentSocket.once("error", reject);
+  });
+  currentSocket.send(JSON.stringify({
+    type: "client.hello",
+    protocol_version: PROTOCOL_VERSION,
+    installation_id: "install_protocol_current",
+    license_token: "license_protocol_current",
+    local_tools: ["file_read"]
+  }));
+  const currentReady = await waitForSocketMessage(currentMessages, (message) => message.type === "session.ready");
+  assert.ok(currentReady.type === "session.ready");
+  assert.equal(currentReady.accepted_protocol_version, PROTOCOL_VERSION);
+  currentSocket.close();
 
   const sessions = (await new RuntimeStore(dataDir).readEvents())
     .filter((event) => event.type === "session.started");
-  assert.equal(sessions.length, 1);
-  assert.equal(sessions[0]?.installation_id, "install_protocol_06");
+  assert.equal(sessions.length, 2);
+  assert.deepEqual(
+    sessions.map((session) => session.installation_id),
+    ["install_protocol_legacy", "install_protocol_current"]
+  );
 });
 
 

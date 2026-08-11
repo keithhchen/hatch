@@ -16,7 +16,6 @@ import { createAgentRuntime, type AgentRuntime, type RuntimeSessionSkills } from
 import {
   clientMessageInputDigest,
   parseInboundMessage,
-  PROTOCOL_VERSION,
   type ClientHello,
   type OutboundMessage,
   type OutputFinishReason,
@@ -1761,7 +1760,7 @@ async function handleRuntimeSocket(
             clearTimeout(helloDeadline);
             await send({
               type: "session.ready",
-              accepted_protocol_version: PROTOCOL_VERSION,
+              accepted_protocol_version: message.protocol_version,
               creator_id: binding.creatorId,
               user_id: binding.userId,
               agent_id: binding.agentId,

@@ -9,7 +9,8 @@
   ],
   "$defs": {
     "protocolVersion": {
-      "const": "0.7"
+      "type": "string",
+      "enum": ["0.6", "0.7"]
     },
     "digest": {
       "type": "string",
