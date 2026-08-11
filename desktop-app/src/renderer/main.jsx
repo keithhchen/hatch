@@ -2068,8 +2068,9 @@ function App() {
       if (!isCurrentRuntimeTransport(sourceSocket, sourceToken) || activeRunRef.current?.runId !== sourceRun.runId) return;
       const projection = projectApprovedRuntimeStream(sourceRun, message);
       if (!projection) return;
-      if (projection) {
-        activeRunRef.current = projection.activeRun;
+      activeRunRef.current = projection.activeRun;
+      const finishVisibleTurn = () => {
+        if (activeRunRef.current?.runId !== projection.runId) return;
         if (projection.finishReason === "content_filter") {
           finishAssistant(projection.assistantId, OUTPUT_FILTERED_COPY, "content_filter");
         } else {
@@ -2079,15 +2080,22 @@ function App() {
           projection.assistantId,
           projection.runId,
           projection.activeRun.timing,
-          projection.completedAt
+          Date.now()
         );
+        activeRunRef.current = null;
+        setLegacyProfileActiveRun(undefined);
+        patchWindowContext({ activeRun: null, dismissedRunId: null });
+        setInterruptedRun(null);
+        setRunning(false);
+        setStatus(statusAfterLocalToolStop("Completed", localToolsStopped));
+      };
+      if (projection.finishReason === "content_filter") {
+        finishVisibleTurn();
+      } else if (textRevealRef.current) {
+        textRevealRef.current.complete(message.run_id, finishVisibleTurn);
+      } else {
+        finishVisibleTurn();
       }
-      activeRunRef.current = null;
-      setLegacyProfileActiveRun(undefined);
-      patchWindowContext({ activeRun: null, dismissedRunId: null });
-      setInterruptedRun(null);
-      setRunning(false);
-      setStatus(statusAfterLocalToolStop("Completed", localToolsStopped));
       return;
     }
 
@@ -4215,7 +4223,12 @@ function AssistantActivityBlock({ indices, children }) {
   const summaryContent = (
     <>
       <span className="assistant-activity-icon" aria-hidden="true"><ActivityGlyph icon={icon} /></span>
-      <span className="assistant-activity-title">{summary}</span>
+      <span
+        className={`assistant-activity-title${isRunning ? " status-text-shimmer" : ""}`}
+        style={isRunning ? { "--shimmer-spread": `${Math.max(24, summary.length * 2)}px` } : undefined}
+      >
+        {summary}
+      </span>
       {visibleActivityParts.length > 0 ? (
         <ChevronDown className="activity-group-chevron" aria-hidden="true" />
       ) : null}

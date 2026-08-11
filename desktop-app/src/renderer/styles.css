@@ -902,6 +902,31 @@ h2 {
   white-space: nowrap;
 }
 
+/* Ported from content_agent's TextShimmer. Running state labels get the
+ * motion treatment; transcript prose remains ordinary selectable text. */
+.status-text-shimmer {
+  animation: status-text-shimmer 3s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  background-clip: text;
+  background-image:
+    linear-gradient(
+      90deg,
+      transparent calc(50% - var(--shimmer-spread, 24px)),
+      var(--hatch-canvas),
+      transparent calc(50% + var(--shimmer-spread, 24px))
+    ),
+    linear-gradient(var(--hatch-text-secondary), var(--hatch-text-secondary));
+  background-position: 100% center, 0 center;
+  background-repeat: no-repeat, padding-box;
+  background-size: 250% 100%, auto;
+  color: transparent;
+}
+
+@keyframes status-text-shimmer {
+  0% { background-position: 100% center, 0 center; }
+  80%,
+  100% { background-position: 0% center, 0 center; }
+}
+
 .activity-group-chevron {
   color: color-mix(in srgb, var(--hatch-text-secondary) 72%, transparent);
   display: inline-flex;
@@ -995,15 +1020,16 @@ h2 {
   ul,
   ol,
   blockquote,
+  hr,
   pre,
   .markdown-table-scroll
 ) {
-  animation: markdown-block-reveal 200ms ease-out both;
+  animation: markdown-block-reveal 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 @keyframes markdown-block-reveal {
   from {
-    opacity: 0.35;
+    opacity: 0.15;
   }
 
   to {
@@ -1012,7 +1038,13 @@ h2 {
 }
 
 .markdown-body h1,
-.markdown-body h2,
+.markdown-body h2 {
+  color: inherit;
+  font-family: var(--hatch-font-display);
+  font-weight: 400;
+  letter-spacing: normal;
+}
+
 .markdown-body h3,
 .markdown-body h4 {
   color: inherit;
@@ -1081,6 +1113,15 @@ h2 {
 .markdown-body blockquote p {
   line-height: 24px;
   margin: 0 0 4px;
+}
+
+.markdown-body hr {
+  background: transparent;
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, var(--hatch-ink) 15%, transparent);
+  height: 0;
+  margin: 28px 0;
+  padding: 0;
 }
 
 .markdown-body p:last-child,
@@ -1205,14 +1246,14 @@ h2 {
 .markdown-body th,
 .markdown-body td {
   border: 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--hatch-ink) 8%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--hatch-ink) 5%, transparent);
   padding: 10px 24px 10px 0;
   text-align: left;
   vertical-align: baseline;
 }
 
 .markdown-body th {
-  border-bottom-color: color-mix(in srgb, var(--hatch-ink) 18%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--hatch-ink) 15%, transparent);
   font-weight: 600;
   line-height: 16px;
   padding-bottom: 8px;
@@ -2420,6 +2461,8 @@ button.composer-control:focus-visible {
 
   .connection-spinner,
   .activity-spinner { animation: none; }
+
+  .status-text-shimmer { animation: none; }
 
   .message-surface.assistant.streaming .markdown-body > :where(
     p,

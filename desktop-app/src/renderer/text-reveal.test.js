@@ -75,6 +75,29 @@ describe("adaptive text reveal", () => {
     expect(fixture.scheduledFrames()).toBe(0);
   });
 
+  it("drains a completed turn at the reveal pace before settling it", () => {
+    const fixture = revealFixture();
+    let settled = false;
+    fixture.controller.enqueue({
+      runId: "run-1",
+      assistantId: "assistant-1",
+      content: "最后一段不能突然全部出现"
+    });
+
+    expect(fixture.controller.complete("run-1", () => { settled = true; })).toBe(true);
+    expect(settled).toBe(false);
+    expect(fixture.revealed.map((entry) => entry.content).join("")).toBe("最");
+
+    fixture.advanceTo(1600);
+    expect(settled).toBe(false);
+    expect(fixture.controller.hasPending("run-1")).toBe(true);
+    fixture.advanceTo(3200);
+
+    expect(fixture.revealed.map((entry) => entry.content).join("")).toBe("最后一段不能突然全部出现");
+    expect(settled).toBe(true);
+    expect(fixture.controller.hasPending("run-1")).toBe(false);
+  });
+
   it("discards unrevealed text on a content-filter terminal", () => {
     const fixture = revealFixture();
     fixture.controller.enqueue({
@@ -114,7 +137,7 @@ describe("adaptive text reveal", () => {
     ]) {
       expect(textRevealBoundary({ type })).toBe("flush");
     }
-    expect(textRevealBoundary({ type: "turn.completed", finish_reason: "stop" })).toBe("flush");
+    expect(textRevealBoundary({ type: "turn.completed", finish_reason: "stop" })).toBe("drain");
     expect(textRevealBoundary({ type: "turn.completed", finish_reason: "content_filter" })).toBe("discard");
     expect(textRevealBoundary({ type: "turn.state" })).toBe("none");
   });

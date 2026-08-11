@@ -14,7 +14,7 @@ const TEXT_REVEAL_FLUSH_EVENTS = new Set([
 
 export function textRevealBoundary(message) {
   if (message?.type === "turn.completed") {
-    return message.finish_reason === "content_filter" ? "discard" : "flush";
+    return message.finish_reason === "content_filter" ? "discard" : "drain";
   }
   return TEXT_REVEAL_FLUSH_EVENTS.has(message?.type) ? "flush" : "none";
 }
@@ -62,6 +62,15 @@ export function createTextRevealController({
     lastFrameAt = 0;
   };
 
+  const settleDrainedStream = () => {
+    if (!stream || stream.pending.length > 0) return false;
+    const onDrained = stream.onDrained;
+    stream.onDrained = null;
+    clearQueue();
+    onDrained?.();
+    return true;
+  };
+
   const reveal = (graphemes) => {
     if (!stream || graphemes.length === 0) return;
     onReveal({
@@ -92,7 +101,7 @@ export function createTextRevealController({
     lastFrameAt = current;
 
     if (stream.pending.length === 0) {
-      clearQueue();
+      settleDrainedStream();
       return;
     }
     schedule();
@@ -102,13 +111,25 @@ export function createTextRevealController({
     if (!stream || (runId && stream.runId !== runId)) return false;
     cancelScheduledFrame();
     reveal(stream.pending.splice(0));
-    clearQueue();
+    settleDrainedStream();
+    return true;
+  };
+
+  const complete = (runId, onDrained) => {
+    if (typeof onDrained !== "function") throw new TypeError("onDrained is required");
+    if (!stream || (runId && stream.runId !== runId)) {
+      onDrained();
+      return false;
+    }
+    stream.onDrained = onDrained;
+    if (!settleDrainedStream()) schedule();
     return true;
   };
 
   const discard = (runId) => {
     if (!stream || (runId && stream.runId !== runId)) return false;
     cancelScheduledFrame();
+    stream.onDrained = null;
     clearQueue();
     if (!runId || stream.runId === runId) stream = null;
     return true;
@@ -122,7 +143,7 @@ export function createTextRevealController({
       flush();
       stream = null;
     }
-    stream ??= { runId, assistantId, pending: [] };
+    stream ??= { runId, assistantId, pending: [], onDrained: null };
 
     if (shouldRevealImmediately()) {
       reveal(graphemes);
@@ -142,6 +163,7 @@ export function createTextRevealController({
 
   return {
     enqueue,
+    complete,
     flush,
     discard,
     hasPending: (runId) => Boolean(

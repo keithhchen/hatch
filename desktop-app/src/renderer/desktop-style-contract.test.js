@@ -35,6 +35,8 @@ describe("desktop system appearance contract", () => {
     expect(stylesheet).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*?transition-duration:\s*0\.01ms\s*!important/);
     expect(stylesheet).toMatch(/\.activity-spinner\s*\{[\s\S]*?animation:\s*connection-spin 1s linear infinite;/);
     expect(stylesheet).toMatch(/prefers-reduced-motion[\s\S]*?\.activity-spinner\s*\{\s*animation:\s*none;/);
+    expect(stylesheet).toMatch(/\.status-text-shimmer\s*\{[\s\S]*?animation:\s*status-text-shimmer 3s/);
+    expect(stylesheet).toMatch(/prefers-reduced-motion[\s\S]*?\.status-text-shimmer\s*\{\s*animation:\s*none;/);
     expect(stylesheet).toMatch(/@media\s*\(prefers-contrast:\s*more\)[\s\S]*?border-separator/);
     expect(stylesheet).toMatch(/\.desktop-window-shell\s+:focus-visible\s*\{[\s\S]*?outline:\s*2px\s+solid\s+var\(--focus-ring\)/);
   });
@@ -60,10 +62,16 @@ describe("desktop system appearance contract", () => {
       /\.markdown-body h1\s*\{[\s\S]*?font-size:\s*24px;[\s\S]*?line-height:\s*32px;/
     );
     expect(stylesheet).toMatch(
+      /\.markdown-body h1,\s*\.markdown-body h2\s*\{[\s\S]*?font-family:\s*var\(--hatch-font-display\);[\s\S]*?font-weight:\s*400;/
+    );
+    expect(stylesheet).toMatch(
       /\.markdown-body blockquote::before\s*\{[\s\S]*?width:\s*3px;/
     );
     expect(stylesheet).toMatch(
       /\.markdown-body th,\s*\.markdown-body td\s*\{[\s\S]*?border-bottom:\s*1px solid[^;]*;[\s\S]*?padding:\s*10px 24px 10px 0;/
+    );
+    expect(stylesheet).toMatch(
+      /\.markdown-body hr\s*\{[\s\S]*?border-top:\s*1px solid[^;]*15%[^;]*;[\s\S]*?margin:\s*28px 0;/
     );
     expect(stylesheet).not.toMatch(/\.markdown-table-scroll\s*\{[^}]*border:\s*1px/);
   });
@@ -71,9 +79,9 @@ describe("desktop system appearance contract", () => {
   it("softens only newly mounted streaming Markdown blocks", () => {
     const blockReveal = stylesheet.match(/@keyframes markdown-block-reveal\s*\{([\s\S]*?)\n\}/)?.[1] ?? "";
     expect(stylesheet).toMatch(
-      /\.message-surface\.assistant\.streaming \.markdown-body > :where\([\s\S]*?\.markdown-table-scroll[\s\S]*?animation:\s*markdown-block-reveal 200ms ease-out both;/
+      /\.message-surface\.assistant\.streaming \.markdown-body > :where\([\s\S]*?\.markdown-table-scroll[\s\S]*?animation:\s*markdown-block-reveal 700ms cubic-bezier\(0\.22, 1, 0\.36, 1\) both;/
     );
-    expect(blockReveal).toMatch(/opacity:\s*0\.35;[\s\S]*?opacity:\s*1;/);
+    expect(blockReveal).toMatch(/opacity:\s*0\.15;[\s\S]*?opacity:\s*1;/);
     expect(blockReveal).not.toMatch(/transform:/);
     expect(stylesheet).not.toMatch(/\.message-surface\.assistant\.streaming\s*\{[^}]*animation:/);
     expect(stylesheet).toMatch(
