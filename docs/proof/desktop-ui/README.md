@@ -91,6 +91,7 @@ on every target OS.
 | `native-menu-sidebar-collapsed-1180x780.jpeg` | Native View → Hide Sidebar changes the live pane and the next View menu says Show Sidebar |
 | `multi-window-grant-inspector-collapsed.jpeg` | One dynamic conversation window keeps its own workspace grant while its Inspector is collapsed |
 | `multi-window-default-inspector.jpeg` | A second dynamic conversation window has a different server-shaped ID, no grant, and its Inspector open |
+| `crash-reload-restored-window.jpeg` | After a forced preview-process termination, a dynamic `conv_preview_*` window is restored from the native manifest |
 | `zoom-80-1180x780.jpeg` | 80% application zoom keeps all three panes, toolbar, table and composer reachable |
 | `zoom-150-1180x780.jpeg` | 150% application zoom promotes the conversation surface while keeping Send and structured content usable |
 | `zoom-200-table-overflow-1180x780.jpeg` | 200% application zoom collapses side panes and leaves table overflow local to its wrapper |
@@ -215,3 +216,10 @@ workspace grant, and its Inspector open. The checked-in captures make the
 per-window projection visible. This is stronger than a registry-only test, but
 it still does not prove cloud hydration, independent draft/scroll persistence,
 or crash/reload recovery.
+
+The same fixture then recorded two dynamic IDs in `conversation-windows.json`,
+terminated the preview process with `SIGKILL`, and relaunched it. The focused
+window reopened as one of the recorded `Hatch — Conversation` windows, and the
+other ID was still recoverable after closing the first. This proves native
+application-shell crash restoration; it intentionally does not claim that an
+in-flight Renderer/Run is reattached or replayed.
