@@ -125,6 +125,14 @@ jobs:
         run: cargo test --locked --manifest-path local-runner/Cargo.toml
       - name: Test Tauri bridge on Windows
         run: cargo test --locked --manifest-path desktop-app/src-tauri/Cargo.toml
+      - name: Build unsigned Windows NSIS bundle
+        working-directory: desktop-app
+        env:
+          # Windows persistence is intentionally fail-closed until a
+          # device-bound session backend exists; CI must never exercise a
+          # vault-backed bearer-token path.
+          HATCH_PERSISTENT_SESSION: "0"
+        run: npx tauri build --debug --bundles nsis
 
   containers:
     name: Build deployable containers

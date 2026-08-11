@@ -596,7 +596,7 @@ function App() {
       });
       if (requestId !== conversationLibraryRequestRef.current) return;
       let nextConversations = Array.isArray(payload?.conversations)
-        ? payload.conversations.filter((item) => item?.id && item.status !== "archived")
+        ? payload.conversations.filter((item) => isServerConversationId(item?.id) && item.status !== "archived")
         : [];
       let requested = requestedConversationIdRef.current;
       const saved = getConversationId(
@@ -622,7 +622,9 @@ function App() {
           clientRequestId: `desktop-bootstrap-${stableRandomId()}`
         });
         const conversation = created?.conversation;
-        if (!conversation?.id) throw new Error("Runtime returned an invalid Conversation.");
+        if (!isServerConversationId(conversation?.id)) {
+          throw new Error("Runtime returned an invalid server Conversation ID.");
+        }
         nextId = conversation.id;
         nextConversations = [conversation, ...nextConversations];
       }
@@ -1312,11 +1314,11 @@ function App() {
       ...(targetAgentId ? { agentId: targetAgentId } : {}),
       ...(targetCreatorId ? { creatorId: targetCreatorId } : {})
     };
-    setConversationIdForEntitlement(
-      buyerProfile.id,
-      targetEntitlementId,
-      targetConversationId.trim() || "desktop-chat"
-    );
+    // Legacy `desktop-chat` remains read-only during Runtime rollout. Never
+    // persist it over a server-issued Conversation selected by the Library.
+    if (isServerConversationId(targetConversationId)) {
+      setConversationIdForEntitlement(buyerProfile.id, targetEntitlementId, targetConversationId.trim());
+    }
 
     let normalizedWorkspaceGrant;
     try {
@@ -1981,7 +1983,9 @@ function App() {
         clientRequestId: `desktop-create-${stableRandomId()}`
       });
       const conversation = result?.conversation;
-      if (!conversation?.id) throw new Error("Runtime returned an invalid Conversation.");
+      if (!isServerConversationId(conversation?.id)) {
+        throw new Error("Runtime returned an invalid server Conversation ID.");
+      }
       setConversations((current) => [
         conversation,
         ...current.filter((item) => item.id !== conversation.id)
@@ -2008,7 +2012,10 @@ function App() {
 
   async function openConversationInNewWindow(nextConversationId, { announce = true } = {}) {
     const target = String(nextConversationId || "").trim();
-    if (!target) return false;
+    if (!isServerConversationId(target)) {
+      setStatus("Only a server Conversation can be opened in a new window.");
+      return false;
+    }
     try {
       await invokeTauri("open_conversation_window", { conversationId: target });
       if (announce) setStatus("Conversation opened in a new window");
@@ -2299,7 +2306,11 @@ function App() {
 
   function selectConversation(conversation) {
     const nextId = String(conversation?.id || "").trim();
-    if (!nextId || nextId === conversationId) return;
+    if (!isServerConversationId(nextId)) {
+      setStatus("That Conversation is not a server record.");
+      return;
+    }
+    if (nextId === conversationId) return;
     if (activeRunRef.current) {
       setStatus("Stop or open a new window before switching away from the active task.");
       return;
