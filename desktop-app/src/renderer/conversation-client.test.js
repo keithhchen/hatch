@@ -3,6 +3,7 @@ import {
   conversationScope,
   createConversation,
   interruptedRunFromSnapshot,
+  isServerConversationId,
   listConversations,
   updateConversation
 } from "./conversation-client.js";
@@ -14,6 +15,12 @@ function response(body, ok = true, status = 200) {
 }
 
 describe("conversation client", () => {
+  it("accepts only server-issued conversation IDs for new turns", () => {
+    expect(isServerConversationId("conv_0123abc"), "server id").toBe(true);
+    expect(isServerConversationId("desktop-chat"), "legacy id").toBe(false);
+    expect(isServerConversationId("conversation_account_1"), "renderer id").toBe(false);
+  });
+
   it("uses the verified entitlement scope and lists durable records", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(response({ conversations: [{ id: "conv_1" }] }));
     const result = await listConversations("wss://runtime.test/v1/runtime", "token", binding, {}, fetchImpl);
@@ -88,5 +95,23 @@ describe("conversation client", () => {
       interruptedReason: "Client disconnected"
     });
     expect(interruptedRunFromSnapshot(snapshot, current, "run_same")).toBeNull();
+  });
+
+  it("skips a dismissed interrupted run and projects the next durable one", () => {
+    const snapshot = {
+      runs: [
+        { id: "run_old", status: "interrupted", interrupted_reason: "old" },
+        { id: "run_dismissed", status: "interrupted", interrupted_reason: "closed" },
+        { id: "run_new", status: "interrupted", interrupted_reason: "new" }
+      ]
+    };
+    expect(interruptedRunFromSnapshot(snapshot, null, "run_dismissed")).toMatchObject({
+      runId: "run_new",
+      interruptedReason: "new"
+    });
+    expect(interruptedRunFromSnapshot({ runs: snapshot.runs.slice(0, 2) }, null, "run_dismissed")).toMatchObject({
+      runId: "run_old",
+      interruptedReason: "old"
+    });
   });
 });

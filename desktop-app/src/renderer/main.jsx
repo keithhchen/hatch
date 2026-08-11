@@ -41,6 +41,7 @@ import {
   createConversation,
   getConversationSnapshot,
   interruptedRunFromSnapshot,
+  isServerConversationId,
   listConversations,
   updateConversation
 } from "./conversation-client.js";
@@ -709,6 +710,18 @@ function App() {
       return;
     }
 
+    // `desktop-chat` is a read-only migration identifier. A new Desktop turn
+    // must always target a server-issued Conversation from the Library; the
+    // legacy history endpoint remains available only so older sessions can
+    // be viewed while the Runtime rolls forward.
+    const activeConversationId = conversationId.trim();
+    if (!isServerConversationId(activeConversationId)) {
+      setStatus(conversationLibraryStatus === "loading"
+        ? "Preparing your Conversation Library…"
+        : "Conversation Library unavailable. Try again when you're online.");
+      return;
+    }
+
     const content = textFromAppendMessage(appendMessage).trim();
     if (!content) return;
     // Workspace and permission changes are pending Desktop preferences until a
@@ -740,7 +753,7 @@ function App() {
       type: "client.message",
       run_id: runId,
       client_message_id: clientMessageId,
-      conversation_id: conversationId.trim() || "desktop-chat",
+      conversation_id: activeConversationId,
       message: {
         role: "user",
         content,
@@ -803,13 +816,13 @@ function App() {
       makeAssistantPlaceholder(assistantId, runId, startedAt)
     ]);
 
-  }, [buyerProfile.id, connected, conversationId, droppedFiles, permissionMode, send, workspace, workspaceGrant]);
+  }, [buyerProfile.id, connected, conversationId, conversationLibraryStatus, droppedFiles, permissionMode, send, workspace, workspaceGrant]);
 
   const runtime = useExternalStoreRuntime({
     messages,
     isRunning: running,
     isLoading: status === "Loading history...",
-    isSendDisabled: !connected || running,
+    isSendDisabled: !connected || running || conversationLibraryStatus !== "ready" || !isServerConversationId(conversationId),
     onNew: sendUserMessage,
     onCancel: cancelRun,
     unstable_capabilities: {
@@ -2112,8 +2125,8 @@ function App() {
     if (!window.__TAURI_INTERNALS__) return undefined;
     void invokeTauri("set_native_command_state", {
       state: {
-        newConversationEnabled: signedIn && conversationLibraryStatus !== "loading",
-        newWindowEnabled: signedIn,
+        newConversationEnabled: signedIn && conversationLibraryStatus === "ready",
+        newWindowEnabled: signedIn && conversationLibraryStatus === "ready",
         workspaceEnabled: signedIn,
         // Settings/About are app-level surfaces and remain available while
         // signed out. Authentication state must not make the native menu
@@ -2595,6 +2608,7 @@ function App() {
           selectedEntitlementId={selectedEntitlementId}
           conversationId={conversationId}
           conversations={conversations}
+          conversationLibraryReady={conversationLibraryStatus === "ready"}
           onSelectAgent={selectCreatorAgent}
           onSelectConversation={selectConversation}
           onNewConversation={startNewConversation}
@@ -2731,6 +2745,7 @@ function DesktopSidebar({
   selectedEntitlementId,
   conversationId,
   conversations,
+  conversationLibraryReady,
   onSelectAgent,
   onSelectConversation,
   onNewConversation,
@@ -2751,7 +2766,12 @@ function DesktopSidebar({
     <div className="desktop-sidebar-content">
       <div className="desktop-sidebar-heading">
         <span className="hatch-wordmark">Hatch</span>
-        <button className="sidebar-new-conversation" type="button" onClick={onNewConversation}>
+        <button
+          className="sidebar-new-conversation"
+          type="button"
+          disabled={!conversationLibraryReady}
+          onClick={onNewConversation}
+        >
           <span aria-hidden="true">+</span><span>New conversation</span>
         </button>
       </div>
@@ -3034,10 +3054,6 @@ function conversationTitle(conversationId) {
   const value = String(conversationId || "").trim();
   if (!value || value === "desktop-chat") return "New conversation";
   return value.replace(/^conversation_[^_]+_/, "Conversation ").replaceAll("_", " ");
-}
-
-function isServerConversationId(value) {
-  return /^conv_[a-z0-9]+$/i.test(String(value || "").trim());
 }
 
 function stableRandomId() {

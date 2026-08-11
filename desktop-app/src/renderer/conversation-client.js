@@ -1,5 +1,9 @@
 import { runtimeHttpUrl } from "./entitlement-client.js";
 
+export function isServerConversationId(value) {
+  return /^conv_[a-z0-9]+$/i.test(String(value || "").trim());
+}
+
 /**
  * Small renderer client for the durable Conversation Library.  The renderer
  * supplies only the current entitlement binding; Runtime re-verifies the
@@ -74,15 +78,16 @@ export async function getConversationSnapshot(serverUrl, accessToken, binding, c
  */
 export function interruptedRunFromSnapshot(snapshot, currentRun = null, dismissedRunId = "") {
   const runs = Array.isArray(snapshot?.runs) ? snapshot.runs : [];
+  const dismissed = String(dismissedRunId || "").trim();
   const interrupted = [...runs]
     .filter((run) => run && run.status === "interrupted")
     .map((run) => ({
       run,
       id: String(run.id ?? run.run_id ?? "").trim()
     }))
-    .filter((entry) => entry.id)
+    .filter((entry) => entry.id && entry.id !== dismissed)
     .at(-1);
-  if (!interrupted || interrupted.id === String(dismissedRunId || "").trim()) return null;
+  if (!interrupted) return null;
 
   const { run, id } = interrupted;
   if (currentRun?.runId && currentRun.runId !== id) return null;
