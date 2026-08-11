@@ -37,6 +37,11 @@ The manifest has this minimum identity:
     "persistent_session": "enabled",
     "signed": true,
     "notarized": true
+  },
+  "provenance": {
+    "signing_identity": "Developer ID Application: …",
+    "team_id": "<10-character Team ID>",
+    "bundle_identifier": "dev.hatch.local"
   }
 }
 ```
@@ -66,6 +71,8 @@ The runner verifies the exact artifact, mounts the DMG read-only, copies the
 app to an isolated install directory, and records:
 
 - `codesign --verify --deep --strict`;
+- `codesign -dvvv` identity, Team ID, and bundle identifier checks against the
+  manifest;
 - Gatekeeper assessment via `spctl --assess --type execute`;
 - `xcrun stapler validate`;
 - cold-launch process state, stdout/stderr, system log, and a screenshot.

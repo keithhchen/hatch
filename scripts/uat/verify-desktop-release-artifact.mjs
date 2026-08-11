@@ -99,6 +99,14 @@ function validateReport(report) {
     throw new Error("The release evidence report does not establish a signed, notarized distribution package.");
   }
   if (
+    !/^[A-Z0-9]{10}$/.test(String(report.provenance?.team_id ?? "")) ||
+    typeof report.provenance?.bundle_identifier !== "string" ||
+    report.provenance.bundle_identifier.length === 0 ||
+    report.provenance.signing_identity === "-"
+  ) {
+    throw new Error("The release evidence report does not establish its Developer ID identity metadata.");
+  }
+  if (
     typeof report.package.filename !== "string" ||
     !report.package.filename.toLowerCase().endsWith(".dmg") ||
     !Number.isSafeInteger(report.package.bytes) ||

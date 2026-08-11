@@ -211,6 +211,12 @@ jobs:
           test -d "$mount_path/Hatch.app" || { echo "DMG has no Hatch.app" >&2; exit 1; }
           ditto "$mount_path/Hatch.app" "$install_root/Hatch.app"
           codesign --verify --deep --strict "$install_root/Hatch.app" 2>&1 | tee evidence/codesign-verify.txt
+          codesign -dvvv "$install_root/Hatch.app" 2> evidence/codesign-details.txt || true
+          grep -F 'Authority=Developer ID Application:' evidence/codesign-details.txt
+          team_id="$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).provenance.team_id)' "$(find candidate -type f -name release-artifact.json -print -quit)")"
+          bundle_identifier="$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).provenance.bundle_identifier)' "$(find candidate -type f -name release-artifact.json -print -quit)")"
+          grep -F "TeamIdentifier=$team_id" evidence/codesign-details.txt
+          grep -F "Identifier=$bundle_identifier" evidence/codesign-details.txt
           spctl --assess --type execute --verbose=4 "$install_root/Hatch.app" 2>&1 | tee evidence/gatekeeper-assess.txt
           xcrun stapler validate "$dmg_path" 2>&1 | tee evidence/stapler-validate.txt
           executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$install_root/Hatch.app/Contents/Info.plist")"
