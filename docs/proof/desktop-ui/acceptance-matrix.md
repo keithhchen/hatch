@@ -32,7 +32,6 @@
 | Quick Look / Windows Open | PARTIAL | `artifact.quickLook` semantic command、native artifact popup、Rust grant-bound `open_workspace_artifact`；macOS UAT AX tree 显示 `Quick Look`，Windows 使用 `ShellExecuteW(open)` | macOS valid-grant Quick Look 实际打开、Windows 编译/Explorer/UAT、Linux `xdg-open` fallback |
 | Desktop-native visual review | PASS（macOS preview） | Native traffic lights/title chrome、离散 regular/compact/minimal 状态、overlay pane、native overflow/context menu、局部 table/code scroll；详见 [visual review](README.md#desktop-native-visual-review) | Windows caption/menu metrics、DPI/Snap、VoiceOver/Narrator 与真实 Finder/Explorer UAT |
 | VoiceOver / Narrator、IME、drag/drop、fullscreen、Snap、DPI | EXTERNAL | ARIA/focus contract、CI Windows job、macOS manual tree evidence | 真实目标平台人工验收 |
-| macOS / Windows 自动 UAT 候选包与证据记录 | PARTIAL（CI 配置） | PR、`master` 与手动 CI 都构建 ad-hoc macOS `.app`→DMG / unsigned Windows NSIS，并上传 package SHA-256、source SHA、runner 与 `HATCH_PERSISTENT_SESSION=0` 的 JSON evidence；另有受保护 self-hosted target-UAT skeleton 复核同一 source/hash 后采集安装、冷启动、截图与日志；详见 [automated CI UAT](automated-ci-uat.md) | 下载后的同一不可变包仍须在真实目标设备安装、启动和完成人工 P4；CI 不能代替 VoiceOver/Narrator、IME、Explorer/Finder、Snap/DPI 或签名发布验收 |
 | Web build、Tauri app build、DMG、Rust、Runtime、LocalRunner | PASS（本机；Windows 仅 cross-check） | Renderer 98、Rust 44+1 ignored、Runtime 226、LocalRunner 43；`build:web`、`build:app`、`build` 的 strict ad-hoc DMG 校验；`x86_64-pc-windows-gnu cargo check --lib` 使用 rustup target + LLVM-RC/clang 通过 | CI runner 与发布签名链路；Windows installer、真实 Explorer/IME/DPI/Snap/Narrator UAT 仍未证明 |
 
 ## 运行证据
