@@ -96,7 +96,7 @@ on every target OS.
 
 ## Automated evidence recorded with these captures
 
-- Renderer: 23 files / 106 tests
+- Renderer: 24 files / 106 tests
 - Rust Tauri library: 44 passed / 1 ignored (unlocked Keychain smoke)
 - Runtime: 226 Node subtests passed with an isolated `HATCH_RUNTIME_DATA_DIR`
 - LocalRunner: 43 tests passed (filesystem, shell and macOS Seatbelt suites)
