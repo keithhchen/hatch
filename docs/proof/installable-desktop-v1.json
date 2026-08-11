@@ -3,7 +3,7 @@
   "architecture": "arm64",
   "bytes": 15248784,
   "sha256": "0229208e1224399b26aad848f3c25f661dc0af7d95ca7228df82c9659d3da9f3",
-  "build_command": "npm run build:dmg:ci",
+  "build_command": "npm run build",
   "disk_image_checksum_valid": true,
   "mounted_contents_verified": true,
   "bundle_contains": [
