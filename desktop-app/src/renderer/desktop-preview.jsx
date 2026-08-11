@@ -154,6 +154,17 @@ export function DesktopPreview() {
     return intercepted;
   }, []);
 
+  const showPreviewCommandMenu = useCallback((event) => {
+    if (!window.__TAURI_INTERNALS__) return;
+    const rect = event?.currentTarget?.getBoundingClientRect?.();
+    const position = rect
+      ? { x: Number(rect.right), y: Number(rect.bottom) }
+      : null;
+    void invoke("show_native_command_menu", {
+      request: position ? { position } : { position: null }
+    }).catch(() => setPreviewStatus("Native command menu could not be opened."));
+  }, []);
+
   useEffect(() => {
     if (!window.__TAURI_INTERNALS__) return undefined;
     return subscribeNativeCommands({
@@ -197,6 +208,7 @@ export function DesktopPreview() {
       onInspectorPreferenceChange={setInspectorPreference}
       onSidebarWidthChange={setSidebarWidth}
       onInspectorWidthChange={setInspectorWidth}
+      onShowOverflow={showPreviewCommandMenu}
       sidebar={<PreviewSidebar selectedAgent={selectedAgent} onSelectAgent={setSelectedAgent} onContextMenu={showPreviewContextMenu} conversationId={previewConversationId} onOpenConversationWindow={openPreviewConversationWindow} />}
       toolbar={<PreviewToolbar selectedAgent={selectedAgent} conversationId={previewConversationId} onOpenConversationWindow={openPreviewConversationWindow} />}
       inspector={(
