@@ -1,0 +1,3 @@
+"NSDocumentsFolderUsageDescription" = "Hatch needs access to the workspace folder you choose so its local tools can read and update that folder.";
+"NSDesktopFolderUsageDescription" = "Hatch needs access to the workspace folder you choose so its local tools can read and update that folder.";
+"NSDownloadsFolderUsageDescription" = "Hatch needs access to the workspace folder you choose so its local tools can read and update that folder.";

@@ -1,3 +1,5 @@
+import { englishMessage } from "./i18n.js";
+
 export async function fetchPurchasedCreatorAgents(registryUrl, authToken, fetchImpl = fetch) {
   let accessResponse;
   try {
@@ -5,25 +7,45 @@ export async function fetchPurchasedCreatorAgents(registryUrl, authToken, fetchI
       headers: { authorization: `Bearer ${authToken}`, accept: "application/json" }
     });
   } catch (error) {
-    throw clientError("Hatch can't reach the service. Check your connection and try again.", "network_error", error);
+    throw clientError(
+      englishMessage("error.network.unreachable"),
+      "network_error",
+      error,
+      undefined,
+      "error.network.unreachable"
+    );
   }
   const accessPayload = await accessResponse.json().catch(() => ({}));
   if (!accessResponse.ok) {
     throw clientError(
-      accessPayload?.detail || "We couldn't open your agents. Try signing in again.",
+      accessPayload?.detail || englishMessage(
+        accessResponse.status === 401 ? "error.auth.invalidSession" : "error.entitlement.requestFailed"
+      ),
       accessResponse.status === 401 ? "auth_invalid" : "entitlement_request_failed",
       null,
-      accessResponse.status
+      accessResponse.status,
+      accessResponse.status === 401 ? "error.auth.invalidSession" : "error.entitlement.requestFailed"
     );
   }
-  if (!Array.isArray(accessPayload)) throw new Error("We couldn't open your agent library. Try again.");
+  if (!Array.isArray(accessPayload)) {
+    throw localizedError(
+      englishMessage("error.entitlement.invalidLibrary"),
+      "error.entitlement.invalidLibrary"
+    );
+  }
   return accessPayload
     .filter(isCreatorAgentEntitlement)
     .sort((left, right) => Date.parse(right.granted_at || "") - Date.parse(left.granted_at || ""));
 }
 
 export function runtimeHttpUrl(runtimeUrl, pathname) {
-  const url = new URL(runtimeUrl);
+  let url;
+  try {
+    url = new URL(runtimeUrl);
+  } catch (error) {
+    if (error && typeof error === "object") error.i18nKey = "error.entitlement.invalidRuntimeUrl";
+    throw error;
+  }
   url.protocol = url.protocol === "wss:" ? "https:" : "http:";
   url.pathname = pathname;
   url.search = "";
@@ -42,10 +64,17 @@ function isCreatorAgentEntitlement(value) {
   );
 }
 
-function clientError(message, code, cause = null, status) {
-  const error = new Error(message);
+function clientError(message, code, cause = null, status, i18nKey, i18nValues) {
+  const error = localizedError(message, i18nKey, i18nValues);
   error.code = code;
   if (status) error.status = status;
   if (cause) error.cause = cause;
+  return error;
+}
+
+function localizedError(message, i18nKey, i18nValues) {
+  const error = new Error(message);
+  error.i18nKey = i18nKey;
+  if (i18nValues) error.i18nValues = i18nValues;
   return error;
 }

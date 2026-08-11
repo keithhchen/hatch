@@ -47,8 +47,10 @@ describe("one-time legacy Desktop settings migration", () => {
     });
     expect(result).toMatchObject({
       status: "completed",
+      statusKey: "migration.status.completed",
       importedKeys: ["permission_mode", "conversation_id"],
-      resetKeys: ["workspaceRoot", "activeRun"]
+      resetKeys: ["workspaceRoot", "activeRun"],
+      noticeKey: "migration.notice.importedAndReset"
     });
     expect(storage.peek("hatch.auth.activeProfile")).toBeNull();
     expect(storage.peek(authKey)).toBeNull();
@@ -71,8 +73,12 @@ describe("one-time legacy Desktop settings migration", () => {
     });
     await store.load();
 
-    await expect(importLegacyProfileSettings({ profileId, legacyStorage: storage, settingsStore: store }))
-      .rejects.toThrow("native store unavailable");
+    const error = await importLegacyProfileSettings({ profileId, legacyStorage: storage, settingsStore: store })
+      .catch((caught) => caught);
+    expect(error).toMatchObject({
+      message: "native store unavailable",
+      i18nKey: "error.migration.importFailed"
+    });
     expect(storage.getItem(workspaceKey)).toBe("/Users/jordan/project");
     expect(storage.peek("hatch.auth.activeProfile")).toBeNull();
     expect(storage.peek(authKey)).toBeNull();
@@ -92,8 +98,36 @@ describe("one-time legacy Desktop settings migration", () => {
     await store.load();
 
     await expect(importLegacyProfileSettings({ profileId, legacyStorage: storage, settingsStore: store }))
-      .resolves.toEqual({ status: "already-imported", notice: "" });
+      .resolves.toEqual({
+        status: "already-imported",
+        statusKey: "migration.status.alreadyImported",
+        notice: "",
+        noticeKey: ""
+      });
     expect(storage.readKeys).toEqual([]);
+  });
+
+  it("returns stable status and notice keys for every migration outcome", async () => {
+    await expect(importLegacyProfileSettings({})).resolves.toEqual({
+      status: "not-available",
+      statusKey: "migration.status.notAvailable",
+      notice: "",
+      noticeKey: ""
+    });
+
+    const profileId = "user_empty";
+    const storage = memoryWebStorage();
+    const store = createDesktopSettingsStore({ read: async () => null, write: async () => {} });
+    await store.load();
+    await expect(importLegacyProfileSettings({ profileId, legacyStorage: storage, settingsStore: store }))
+      .resolves.toEqual({
+        status: "nothing-to-import",
+        statusKey: "migration.status.nothingToImport",
+        notice: "",
+        noticeKey: "",
+        importedKeys: [],
+        resetKeys: []
+      });
   });
 });
 

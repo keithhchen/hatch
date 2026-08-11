@@ -38,11 +38,52 @@ describe("buyer Creator Agent library", () => {
   });
 
   it("maps an invalid session to auth_invalid", async () => {
-    await expect(fetchPurchasedCreatorAgents(
+    const error = await fetchPurchasedCreatorAgents(
       "https://hatch.example",
       "expired-token",
       async () => new Response(JSON.stringify({ detail: "expired" }), { status: 401 })
-    )).rejects.toMatchObject({ code: "auth_invalid", status: 401 });
+    ).catch((caught) => caught);
+    expect(error).toMatchObject({
+      message: "expired",
+      code: "auth_invalid",
+      status: 401,
+      i18nKey: "error.auth.invalidSession"
+    });
+  });
+
+  it("preserves Registry error detail and adds a generic entitlement fallback key", async () => {
+    const error = await fetchPurchasedCreatorAgents(
+      "https://hatch.example",
+      "opaque-token",
+      async () => new Response(JSON.stringify({ detail: "Registry maintenance window" }), { status: 503 })
+    ).catch((caught) => caught);
+
+    expect(error).toMatchObject({
+      message: "Registry maintenance window",
+      code: "entitlement_request_failed",
+      status: 503,
+      i18nKey: "error.entitlement.requestFailed"
+    });
+  });
+
+  it("labels malformed libraries and runtime URLs with stable localization keys", async () => {
+    const malformedLibrary = await fetchPurchasedCreatorAgents(
+      "https://hatch.example",
+      "opaque-token",
+      async () => new Response("{}", { status: 200 })
+    ).catch((caught) => caught);
+    expect(malformedLibrary).toMatchObject({
+      message: "We couldn't open your agent library. Try again.",
+      i18nKey: "error.entitlement.invalidLibrary"
+    });
+
+    let invalidUrl;
+    try {
+      runtimeHttpUrl("not a URL", "/messages");
+    } catch (error) {
+      invalidUrl = error;
+    }
+    expect(invalidUrl).toMatchObject({ i18nKey: "error.entitlement.invalidRuntimeUrl" });
   });
 
   it("maps secure websocket runtimes to secure HTTP discovery", () => {
