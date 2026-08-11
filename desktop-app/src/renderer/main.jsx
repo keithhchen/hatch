@@ -42,6 +42,7 @@ import {
   getConversationSnapshot,
   interruptedRunFromSnapshot,
   isServerConversationId,
+  isTerminalRunStatus,
   listConversations,
   updateConversation
 } from "./conversation-client.js";
@@ -822,7 +823,11 @@ function App() {
     messages,
     isRunning: running,
     isLoading: status === "Loading history...",
-    isSendDisabled: !connected || running || conversationLibraryStatus !== "ready" || !isServerConversationId(conversationId),
+    isSendDisabled: !connected
+      || running
+      || Boolean(interruptedRun)
+      || conversationLibraryStatus !== "ready"
+      || !isServerConversationId(conversationId),
     onNew: sendUserMessage,
     onCancel: cancelRun,
     unstable_capabilities: {
@@ -930,7 +935,11 @@ function App() {
     const dismissedRunId = typeof windowContext.dismissedRunId === "string"
       ? windowContext.dismissedRunId.trim()
       : "";
-    const restorableRun = savedRun?.runId && savedRun.runId === dismissedRunId ? null : savedRun;
+    const restorableRun = savedRun?.runId
+      && !isTerminalRunStatus(savedRun.status)
+      && savedRun.runId !== dismissedRunId
+      ? savedRun
+      : null;
     const savedPermission = windowContext.permissionMode || getProfileSetting("permission_mode");
     const nextPermission = normalizePermissionPolicy(savedPermission);
     if (savedPermission !== nextPermission) {
@@ -1314,6 +1323,10 @@ function App() {
       normalizedWorkspaceGrant = normalizeWorkspaceGrant(await invokeTauri("ensure_workspace", {
         workspaceGrantId: targetWorkspaceGrant.grant_id
       }));
+      // A newer Conversation/Agent selection may have invalidated this
+      // request while the native grant was being revalidated. Never let an
+      // older request write workspace, cursor, or message state into it.
+      if (requestToken !== connectionTokenRef.current) return;
       if (!normalizedWorkspaceGrant) throw new Error("The native workspace grant is invalid.");
       setWorkspace(normalizedWorkspaceGrant.display_path);
       workspaceRef.current = normalizedWorkspaceGrant.display_path;
@@ -1325,6 +1338,7 @@ function App() {
       const activeConversationId = targetConversationId.trim() || "desktop-chat";
       let history;
       let snapshotLoaded = false;
+      let snapshotCursor = null;
       try {
         const snapshot = await getConversationSnapshot(
           targetServerUrl.trim(),
@@ -1337,13 +1351,27 @@ function App() {
           activeConversationId,
           conversationCursorRef.current
         );
+        if (requestToken !== connectionTokenRef.current) return;
         history = Array.isArray(snapshot?.messages) ? snapshot.messages : [];
         if (Number.isFinite(Number(snapshot?.cursor))) {
-          conversationCursorRef.current = Math.max(
+          snapshotCursor = Math.max(
             conversationCursorRef.current,
             Number(snapshot.cursor)
           );
-          patchWindowContext({ conversationCursor: conversationCursorRef.current });
+        }
+        const activeRunId = String(activeRunRef.current?.runId || "").trim();
+        const durableRun = activeRunId && Array.isArray(snapshot?.runs)
+          ? snapshot.runs.find((run) => String(run?.id ?? run?.run_id ?? "").trim() === activeRunId)
+          : null;
+        if (durableRun && isTerminalRunStatus(durableRun.status)) {
+          // A renderer can close after the server has already completed or
+          // cancelled a Run. Clear the optimistic recovery projection before
+          // it permanently blocks the next Composer turn.
+          activeRunRef.current = null;
+          setInterruptedRun(null);
+          setRunning(false);
+          setLegacyProfileActiveRun(undefined);
+          patchWindowContext({ activeRun: null, dismissedRunId: null });
         }
         const interruptedSnapshotRun = interruptedRunFromSnapshot(
           snapshot,
@@ -1381,12 +1409,21 @@ function App() {
         ).catch(() => {
           throw snapshotError;
         });
+        if (requestToken !== connectionTokenRef.current) return;
       }
+      if (requestToken !== connectionTokenRef.current) return;
       // A snapshot is the canonical observer recovery boundary. Replacing
       // the local projection after reconnect prevents optimistic user/assistant
       // placeholders from being duplicated when a socket closes mid-turn.
       if (snapshotLoaded || !connection.preserveMessages || messages.length === 0) {
         setMessages(history.map(historyMessageToThreadMessage));
+      }
+      if (snapshotCursor !== null && requestToken === connectionTokenRef.current) {
+        // Persist the cursor only after the corresponding snapshot projection
+        // has been installed, so a crash cannot claim events were rendered
+        // before their messages/run state reached the UI.
+        conversationCursorRef.current = snapshotCursor;
+        patchWindowContext({ conversationCursor: snapshotCursor });
       }
       setStatus("Connecting...");
     } catch (error) {
@@ -2730,7 +2767,7 @@ function App() {
         )}
         {interruptedRun ? (
           <div className="recovery-banner" role="alert">
-            <div><strong>Your task is safe.</strong><span>It paused before completion. Hatch will restore the session automatically, or you can close it explicitly.</span></div>
+            <div><strong>Your task is safe.</strong><span>The Conversation is restored. This task will not resume or replay tools automatically; close it before starting a new task.</span></div>
             <button className="secondary compact" type="button" onClick={clearInterruptedRun}>Close task</button>
           </div>
         ) : null}

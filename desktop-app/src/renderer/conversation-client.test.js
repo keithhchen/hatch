@@ -4,6 +4,7 @@ import {
   createConversation,
   interruptedRunFromSnapshot,
   isServerConversationId,
+  isTerminalRunStatus,
   listConversations,
   updateConversation
 } from "./conversation-client.js";
@@ -19,6 +20,14 @@ describe("conversation client", () => {
     expect(isServerConversationId("conv_0123abc"), "server id").toBe(true);
     expect(isServerConversationId("desktop-chat"), "legacy id").toBe(false);
     expect(isServerConversationId("conversation_account_1"), "renderer id").toBe(false);
+  });
+
+  it("recognizes terminal durable run states", () => {
+    expect(isTerminalRunStatus("completed")).toBe(true);
+    expect(isTerminalRunStatus("failed")).toBe(true);
+    expect(isTerminalRunStatus("cancelled")).toBe(true);
+    expect(isTerminalRunStatus("interrupted")).toBe(false);
+    expect(isTerminalRunStatus("running")).toBe(false);
   });
 
   it("uses the verified entitlement scope and lists durable records", async () => {
@@ -112,6 +121,15 @@ describe("conversation client", () => {
     expect(interruptedRunFromSnapshot({ runs: snapshot.runs.slice(0, 2) }, null, "run_dismissed")).toMatchObject({
       runId: "run_old",
       interruptedReason: "old"
+    });
+    expect(interruptedRunFromSnapshot(snapshot, {
+      runId: "run_old",
+      assistantId: "run_old_assistant",
+      text: "partial"
+    })).toMatchObject({
+      runId: "run_old",
+      interruptedReason: "old",
+      text: "partial"
     });
   });
 });

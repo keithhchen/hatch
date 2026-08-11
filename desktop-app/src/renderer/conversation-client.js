@@ -4,6 +4,12 @@ export function isServerConversationId(value) {
   return /^conv_[a-z0-9]+$/i.test(String(value || "").trim());
 }
 
+export function isTerminalRunStatus(value) {
+  return new Set(["completed", "failed", "cancelled"]).has(
+    String(value || "").trim().toLowerCase()
+  );
+}
+
 /**
  * Small renderer client for the durable Conversation Library.  The renderer
  * supplies only the current entitlement binding; Runtime re-verifies the
@@ -79,14 +85,17 @@ export async function getConversationSnapshot(serverUrl, accessToken, binding, c
 export function interruptedRunFromSnapshot(snapshot, currentRun = null, dismissedRunId = "") {
   const runs = Array.isArray(snapshot?.runs) ? snapshot.runs : [];
   const dismissed = String(dismissedRunId || "").trim();
-  const interrupted = [...runs]
+  const interruptedEntries = [...runs]
     .filter((run) => run && run.status === "interrupted")
     .map((run) => ({
       run,
       id: String(run.id ?? run.run_id ?? "").trim()
     }))
-    .filter((entry) => entry.id && entry.id !== dismissed)
-    .at(-1);
+    .filter((entry) => entry.id && entry.id !== dismissed);
+  const currentRunId = String(currentRun?.runId || "").trim();
+  const interrupted = currentRunId
+    ? interruptedEntries.find((entry) => entry.id === currentRunId)
+    : interruptedEntries.at(-1);
   if (!interrupted) return null;
 
   const { run, id } = interrupted;
