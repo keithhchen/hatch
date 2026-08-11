@@ -21,3 +21,12 @@ export function accountScopedWindowContext(value, accountId) {
 export function usesLegacyProfileRunFallback(requestedConversationId) {
   return String(requestedConversationId ?? "").trim() === "";
 }
+
+/**
+ * Profile-level workspace state is only a migration fallback for the
+ * original main window. A dynamic Conversation window owns its grant in the
+ * native window context and must not overwrite the main window's preference.
+ */
+export function shouldPersistWorkspaceToProfile(isConversationWindow) {
+  return !Boolean(isConversationWindow);
+}

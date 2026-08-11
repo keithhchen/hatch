@@ -80,7 +80,10 @@ import {
   validateRestoredWorkspace,
   workspacePickerSelection
 } from "./workspace-restore.js";
-import { usesLegacyProfileRunFallback } from "./desktop-window-context.js";
+import {
+  shouldPersistWorkspaceToProfile,
+  usesLegacyProfileRunFallback
+} from "./desktop-window-context.js";
 import { createTurnAccessSnapshot } from "./turn-access-snapshot.js";
 import { canUseAnotherAccountFromNetworkError } from "./network-error-recovery.js";
 import {
@@ -217,6 +220,10 @@ function App() {
   const nativeContextTargetsRef = useRef(new Map());
   const nativeContextTargetSequenceRef = useRef(0);
   const requestedConversationIdRef = useRef(conversationIdFromLocation());
+  // Preserve the launch role even after Conversation Library hydration clears
+  // the one-shot URL request. Dynamic Conversation windows must never write
+  // their workspace back into the main window's legacy profile fallback.
+  const conversationWindowRef = useRef(Boolean(requestedConversationIdRef.current));
   const conversationLibraryRequestRef = useRef(0);
   const conversationCreationTrackerRef = useRef(null);
   if (!conversationCreationTrackerRef.current) {
@@ -305,6 +312,14 @@ function App() {
 
   function setProfileSetting(key, value, profileId = buyerProfile.id) {
     settingsStoreRef.current?.setProfile(profileId, key, value);
+  }
+
+  function persistWorkspaceGrant(grant, profileId = buyerProfile.id) {
+    if (!shouldPersistWorkspaceToProfile(conversationWindowRef.current)) {
+      patchWindowContext({ workspaceGrant: grant });
+      return;
+    }
+    setProfileSetting("workspace_grant", grant, profileId);
   }
 
   // Conversation windows are independent native contexts. Only the original
@@ -1068,7 +1083,7 @@ function App() {
         setWorkspaceDraftGrant(restored.grant);
         setWorkspaceGranted(true);
         if (restored.workspace !== savedWorkspaceGrant?.display_path) {
-          setProfileSetting("workspace_grant", restored.grant, profileId);
+          persistWorkspaceGrant(restored.grant, profileId);
         }
         return;
       }
@@ -1082,7 +1097,9 @@ function App() {
         setWorkspaceDraftGrant(null);
         try {
           await Promise.all([
-            settingsStoreRef.current.clearProfileKey(profileId, "workspace_grant"),
+            !shouldPersistWorkspaceToProfile(conversationWindowRef.current)
+              ? Promise.resolve()
+              : settingsStoreRef.current.clearProfileKey(profileId, "workspace_grant"),
             invokeTauri("revoke_workspace_grant", { workspaceGrantId: restored.staleGrant.grant_id })
           ]);
           patchWindowContext({ workspaceGrant: null });
@@ -1495,7 +1512,7 @@ function App() {
       workspaceGrantRef.current = normalizedWorkspaceGrant;
       setWorkspaceGrant(normalizedWorkspaceGrant);
       connectionConfigRef.current.workspaceGrant = normalizedWorkspaceGrant;
-      setProfileSetting("workspace_grant", normalizedWorkspaceGrant);
+      persistWorkspaceGrant(normalizedWorkspaceGrant);
       setStatus("Loading history...");
       const activeConversationId = targetConversationId.trim() || "desktop-chat";
       let history;
@@ -1995,7 +2012,7 @@ function App() {
       setWorkspaceDraft(normalized.display_path);
       setWorkspaceDraftGrant(normalized);
       setWorkspaceGranted(true);
-      setProfileSetting("workspace_grant", normalized);
+      persistWorkspaceGrant(normalized);
       setStatus("Folder access granted");
       await connectRuntime({ workspaceGrant: normalized, conversationId, preserveMessages: false });
     } catch (error) {
@@ -2040,7 +2057,7 @@ function App() {
     if (connectionConfigRef.current) {
       connectionConfigRef.current.workspaceGrant = normalized;
     }
-    setProfileSetting("workspace_grant", normalized);
+    persistWorkspaceGrant(normalized);
     setStatus("Workspace updated for the next turn");
   }
 
@@ -2123,7 +2140,7 @@ function App() {
           setWorkspaceDraft(normalized.display_path);
           setWorkspaceDraftGrant(normalized);
           setWorkspaceGranted(true);
-          setProfileSetting("workspace_grant", normalized);
+          persistWorkspaceGrant(normalized);
           const dropStatus = nativeDropStatus(files, rejectedFiles);
           setStatus(dropStatus
             ? `Folder dropped — workspace access granted; ${dropStatus}`

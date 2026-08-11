@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   accountScopedWindowContext,
-  usesLegacyProfileRunFallback
+  usesLegacyProfileRunFallback,
+  shouldPersistWorkspaceToProfile
 } from "./desktop-window-context.js";
 
 describe("desktop window context account boundary", () => {
@@ -22,5 +23,11 @@ describe("desktop window context account boundary", () => {
     expect(usesLegacyProfileRunFallback("")).toBe(true);
     expect(usesLegacyProfileRunFallback("   ")).toBe(true);
     expect(usesLegacyProfileRunFallback("conv_server_123")).toBe(false);
+  });
+
+  it("keeps dynamic Conversation workspaces out of the profile fallback", () => {
+    expect(shouldPersistWorkspaceToProfile(false)).toBe(true);
+    expect(shouldPersistWorkspaceToProfile(true)).toBe(false);
+    expect(shouldPersistWorkspaceToProfile(undefined)).toBe(true);
   });
 });
