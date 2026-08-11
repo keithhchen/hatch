@@ -983,6 +983,34 @@ h2 {
   -webkit-user-select: text;
 }
 
+/* Streamdown keeps an in-progress block mounted while text is appended, so
+ * this runs once when a new top-level Markdown child enters the transcript.
+ * It never fades the assistant container or already-rendered siblings. */
+.message-surface.assistant.streaming .markdown-body > :where(
+  p,
+  h1,
+  h2,
+  h3,
+  h4,
+  ul,
+  ol,
+  blockquote,
+  pre,
+  .markdown-table-scroll
+) {
+  animation: markdown-block-reveal 200ms ease-out both;
+}
+
+@keyframes markdown-block-reveal {
+  from {
+    opacity: 0.35;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
 .markdown-body h1,
 .markdown-body h2,
 .markdown-body h3,
@@ -2392,6 +2420,19 @@ button.composer-control:focus-visible {
 
   .connection-spinner,
   .activity-spinner { animation: none; }
+
+  .message-surface.assistant.streaming .markdown-body > :where(
+    p,
+    h1,
+    h2,
+    h3,
+    h4,
+    ul,
+    ol,
+    blockquote,
+    pre,
+    .markdown-table-scroll
+  ) { animation: none; }
 }
 
 .desktop-auxiliary-window {
