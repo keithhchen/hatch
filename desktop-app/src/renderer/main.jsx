@@ -1318,6 +1318,90 @@ function App() {
     void connectRuntime({ ...retryConnection, preserveMessages: true });
   }
 
+  function projectDurableSnapshotRun(snapshot, targetWorkspaceGrant) {
+    // Keep the pre-snapshot local identity stable while reconciling. If this
+    // window's saved Run is already terminal, do not clear it and then
+    // accidentally adopt an unrelated historical interrupted Run from the
+    // same Conversation.
+    const activeRunBeforeSnapshot = activeRunRef.current;
+    const activeRunId = String(activeRunBeforeSnapshot?.runId || "").trim();
+    const durableRun = activeRunId && Array.isArray(snapshot?.runs)
+      ? snapshot.runs.find((run) => String(run?.id ?? run?.run_id ?? "").trim() === activeRunId)
+      : null;
+    if (durableRun && isTerminalRunStatus(durableRun.status)) {
+      // A renderer can close after the server has already completed or
+      // cancelled a Run. Clear the optimistic recovery projection before it
+      // permanently blocks the next Composer turn.
+      activeRunRef.current = null;
+      setInterruptedRun(null);
+      setRunning(false);
+      setLegacyProfileActiveRun(undefined);
+      patchWindowContext({ activeRun: null, dismissedRunId: null });
+    }
+    const interruptedSnapshotRun = interruptedRunFromSnapshot(
+      snapshot,
+      durableRun && isTerminalRunStatus(durableRun.status)
+        ? activeRunBeforeSnapshot
+        : activeRunRef.current,
+      windowContextRef.current.dismissedRunId
+    );
+    if (!interruptedSnapshotRun) return;
+    const recoveredRun = activeRunRef.current?.runId === interruptedSnapshotRun.runId
+      ? interruptedSnapshotRun
+      : {
+          ...interruptedSnapshotRun,
+          accessSnapshot: createTurnAccessSnapshot(
+            workspaceGrantRef.current?.grant_id || targetWorkspaceGrant?.grant_id,
+            workspaceRef.current || targetWorkspaceGrant?.display_path || "",
+            permissionRef.current
+          )
+        };
+    activeRunRef.current = recoveredRun;
+    setInterruptedRun(recoveredRun);
+    setRunning(false);
+    setStatus("Task interrupted — your work is safe");
+    patchWindowContext({ activeRun: recoveredRun, dismissedRunId: null });
+  }
+
+  async function reconcileLiveSnapshot(socket, requestToken) {
+    const config = connectionConfigRef.current;
+    if (!config || socketRef.current !== socket || requestToken !== connectionTokenRef.current) return;
+    try {
+      // The initial HTTP snapshot and WebSocket hello have a small race: a
+      // server event can land between them. Read the journal again after the
+      // authenticated socket is ready, using the cursor already projected.
+      const snapshot = await getConversationSnapshot(
+        config.serverUrl,
+        buyerSession.accessToken,
+        {
+          entitlementId: config.entitlementId,
+          agentId: config.agentId,
+          creatorId: config.creatorId
+        },
+        config.conversationId,
+        conversationCursorRef.current
+      );
+      if (socketRef.current !== socket || requestToken !== connectionTokenRef.current) return;
+      const reconciled = reconcileConversationSnapshot(snapshot, {
+        afterCursor: conversationCursorRef.current
+      });
+      // The Runtime returns the complete canonical message projection even
+      // for an after_cursor request. Replacing the local projection removes
+      // optimistic duplicates without replaying tools or assistant effects.
+      setMessages(reconciled.messages.map(historyMessageToThreadMessage));
+      projectDurableSnapshotRun(snapshot, config.workspaceGrant);
+      if (reconciled.cursor > conversationCursorRef.current) {
+        conversationCursorRef.current = reconciled.cursor;
+        patchWindowContext({ conversationCursor: reconciled.cursor });
+      }
+    } catch (error) {
+      if (socketRef.current !== socket || requestToken !== connectionTokenRef.current) return;
+      if (error?.code === "snapshot_invalid") {
+        setStatus("Conversation recovery could not be verified. Reconnect to continue.");
+      }
+    }
+  }
+
   async function connectRuntime(connection = {}) {
     if (connectedRef.current || socketRef.current || connectingRef.current) return;
     const targetServerUrl = connection.serverUrl || serverUrl;
@@ -1388,49 +1472,7 @@ function App() {
         });
         history = reconciledSnapshot.messages;
         snapshotCursor = reconciledSnapshot.cursor;
-        // Keep the pre-snapshot local identity stable while reconciling. If
-        // this window's saved Run is already terminal, do not clear it and
-        // then accidentally adopt an unrelated historical interrupted Run
-        // from the same Conversation.
-        const activeRunBeforeSnapshot = activeRunRef.current;
-        const activeRunId = String(activeRunBeforeSnapshot?.runId || "").trim();
-        const durableRun = activeRunId && Array.isArray(snapshot?.runs)
-          ? snapshot.runs.find((run) => String(run?.id ?? run?.run_id ?? "").trim() === activeRunId)
-          : null;
-        if (durableRun && isTerminalRunStatus(durableRun.status)) {
-          // A renderer can close after the server has already completed or
-          // cancelled a Run. Clear the optimistic recovery projection before
-          // it permanently blocks the next Composer turn.
-          activeRunRef.current = null;
-          setInterruptedRun(null);
-          setRunning(false);
-          setLegacyProfileActiveRun(undefined);
-          patchWindowContext({ activeRun: null, dismissedRunId: null });
-        }
-        const interruptedSnapshotRun = interruptedRunFromSnapshot(
-          snapshot,
-          durableRun && isTerminalRunStatus(durableRun.status)
-            ? activeRunBeforeSnapshot
-            : activeRunRef.current,
-          windowContextRef.current.dismissedRunId
-        );
-        if (interruptedSnapshotRun) {
-          const recoveredRun = activeRunRef.current?.runId === interruptedSnapshotRun.runId
-            ? interruptedSnapshotRun
-            : {
-                ...interruptedSnapshotRun,
-                accessSnapshot: createTurnAccessSnapshot(
-                  workspaceGrantRef.current?.grant_id || targetWorkspaceGrant?.grant_id,
-                  workspaceRef.current || targetWorkspaceGrant?.display_path || "",
-                  permissionRef.current
-                )
-              };
-          activeRunRef.current = recoveredRun;
-          setInterruptedRun(recoveredRun);
-          setRunning(false);
-          setStatus("Task interrupted — your work is safe");
-          patchWindowContext({ activeRun: recoveredRun, dismissedRunId: null });
-        }
+        projectDurableSnapshotRun(snapshot, targetWorkspaceGrant);
         snapshotLoaded = true;
       } catch (snapshotError) {
         // A malformed journal is an integrity failure, not a rollout/version
@@ -1571,6 +1613,10 @@ function App() {
       reconnectAttemptRef.current = 0;
       setConnected(true);
       setStatus("Ready");
+      const socket = socketRef.current;
+      if (socket) {
+        await reconcileLiveSnapshot(socket, connectionTokenRef.current);
+      }
       return;
     }
 
