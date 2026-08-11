@@ -4,6 +4,9 @@ on:
   pull_request:
   push:
     branches: [master]
+  # This is the reproducible, non-production package lane for cross-platform UAT.
+  # It is deliberately separate from the protected signed-release workflow.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -80,24 +83,65 @@ jobs:
         run: npm run test:renderer
       - name: Build renderer
         run: npm run build:web
+      - name: Test desktop UAT evidence helpers
+        working-directory: .
+        run: node --test scripts/uat/*.test.mjs
 
   desktop-native:
-    name: Desktop native and LocalRunner tests
+    name: Desktop native, LocalRunner, and macOS UAT package
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop-app/package-lock.json
       - name: Select stable Rust toolchain
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
+      - name: Install renderer dependencies
+        working-directory: desktop-app
+        run: npm ci
       - name: Check Rust formatting
         run: |
           cargo fmt --manifest-path local-runner/Cargo.toml -- --check
           cargo fmt --manifest-path desktop-app/src-tauri/Cargo.toml -- --check
+      - name: Test renderer and web build on macOS
+        working-directory: desktop-app
+        run: |
+          npm run test:renderer
+          npm run build:web
       - name: Test LocalRunner
         run: cargo test --locked --manifest-path local-runner/Cargo.toml
       - name: Test Tauri bridge
         run: cargo test --locked --manifest-path desktop-app/src-tauri/Cargo.toml
+      - name: Build ad-hoc macOS DMG for target-device UAT
+        working-directory: desktop-app
+        env:
+          # The UAT lane intentionally proves that its artifact cannot enable
+          # persistent credential storage. Signed distribution is handled only
+          # by desktop-release.yml in the protected environment.
+          HATCH_PERSISTENT_SESSION: "0"
+        run: npm run build:dmg:ci
+      - name: Record macOS automated UAT evidence
+        env:
+          HATCH_PERSISTENT_SESSION: "0"
+        run: >-
+          node scripts/uat/record-desktop-uat-artifact.mjs
+          --platform macos
+          --artifact-dir desktop-app/src-tauri/target/release/bundle/dmg
+          --output artifacts/desktop-uat/macos.json
+      - name: Upload ad-hoc macOS UAT package and evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: hatch-desktop-macos-ad-hoc-uat
+          path: |
+            desktop-app/src-tauri/target/release/bundle/dmg/*.dmg
+            artifacts/desktop-uat/macos.json
+          if-no-files-found: error
+          retention-days: 7
 
   desktop-native-windows:
     name: Desktop native bridge on Windows
@@ -133,12 +177,24 @@ jobs:
           # vault-backed bearer-token path.
           HATCH_PERSISTENT_SESSION: "0"
         run: npx tauri build --debug --bundles nsis
+      - name: Record Windows automated UAT evidence
+        shell: bash
+        env:
+          HATCH_PERSISTENT_SESSION: "0"
+        run: >-
+          node scripts/uat/record-desktop-uat-artifact.mjs
+          --platform windows
+          --artifact-dir desktop-app/src-tauri/target/debug/bundle/nsis
+          --output artifacts/desktop-uat/windows.json
       - name: Upload unsigned Windows installer for UAT
         uses: actions/upload-artifact@v4
         with:
           name: hatch-desktop-windows-unsigned
-          path: desktop-app/src-tauri/target/debug/bundle/nsis/*.exe
+          path: |
+            desktop-app/src-tauri/target/debug/bundle/nsis/*.exe
+            artifacts/desktop-uat/windows.json
           if-no-files-found: error
+          retention-days: 7
 
   containers:
     name: Build deployable containers
