@@ -43,7 +43,6 @@ import {
   loadSavedAuthSession,
   isAuthInvalidError,
   isNetworkError,
-  isSecureSessionReadError,
   startAuthSessionSignOut
 } from "./auth-session.js";
 import {
@@ -124,7 +123,6 @@ function App() {
   const pendingLocalToolsRef = useRef(new Map());
   const entitlementRefreshRef = useRef(false);
   const lastEntitlementRefreshRef = useRef(0);
-  const pendingClearSessionRef = useRef(null);
   const [serverUrl] = useState(DEFAULT_RUNTIME_URL);
   const [workspace, setWorkspace] = useState("");
   const [workspaceDraft, setWorkspaceDraft] = useState("");
@@ -132,7 +130,6 @@ function App() {
   const [workspaceDraftGrant, setWorkspaceDraftGrant] = useState(null);
   const [authState, setAuthState] = useState("loading");
   const [startupError, setStartupError] = useState("");
-  const [secureSessionError, setSecureSessionError] = useState("");
   const [settingsMigrationNotice, setSettingsMigrationNotice] = useState("");
   const [settingsReady, setSettingsReady] = useState(false);
   const [bootstrapAttempt, setBootstrapAttempt] = useState(0);
@@ -259,7 +256,6 @@ function App() {
 
   function resetToSignedOut() {
     disconnectRuntime();
-    pendingClearSessionRef.current = null;
     activeRunRef.current = null;
     setInterruptedRun(null);
     setBuyerSession(null);
@@ -277,32 +273,22 @@ function App() {
     setWorkspaceGranted(false);
     setConversationId("desktop-chat");
     setSignInStatus("idle");
+    setSignInError("");
     setStartupError("");
-    setSecureSessionError("");
     setSettingsMigrationNotice("");
     connectionConfigRef.current = null;
   }
 
-  async function clearSavedSessionOrShowError(session, clearPromise) {
-    pendingClearSessionRef.current = session;
+  async function clearSavedSession(session, clearPromise) {
     try {
       await (clearPromise ?? clearAuthSession(session, authStorageRef.current));
     } catch {
-      setSecureSessionError("Hatch couldn't remove the saved session from macOS Keychain. This Mac may still be signed in. Try again before switching accounts or handing over the device.");
-      setAuthState("secure-session-error");
+      resetToSignedOut();
+      setSignInError("Hatch couldn't clear the saved sign-in from this Mac. Sign in again to replace it.");
       return false;
     }
     resetToSignedOut();
     return true;
-  }
-
-  async function retrySecureSessionClear() {
-    const session = pendingClearSessionRef.current;
-    if (!session) {
-      resetToSignedOut();
-      return;
-    }
-    await clearSavedSessionOrShowError(session);
   }
 
   useEffect(() => {
@@ -311,25 +297,14 @@ function App() {
       if (window.__TAURI_INTERNALS__) {
         try {
           purgeLegacySensitiveStorage(window.localStorage);
-        } catch (error) {
-          if (cancelled) return;
-          setSecureSessionError(`Hatch couldn't remove legacy browser session data from this Mac: ${errorMessage(error)}`);
-          setAuthState("secure-session-read-error");
-          return;
+        } catch {
+          // Legacy cleanup is best effort and must not become a third auth page.
         }
       }
       await settingsStoreRef.current.load();
       if (cancelled) return;
       setSettingsReady(true);
-      let savedSession;
-      try {
-        savedSession = await loadSavedAuthSession(authStorageRef.current);
-      } catch (error) {
-        if (cancelled) return;
-        setSecureSessionError(errorMessage(error));
-        setAuthState(isSecureSessionReadError(error) ? "secure-session-read-error" : "network-error");
-        return;
-      }
+      const savedSession = await loadSavedAuthSession(authStorageRef.current);
       if (!savedSession) {
         setAuthState("signed-out");
         return;
@@ -340,7 +315,7 @@ function App() {
       } catch (error) {
         if (cancelled) return;
         if (isAuthInvalidError(error)) {
-          const cleared = await clearSavedSessionOrShowError(savedSession);
+          const cleared = await clearSavedSession(savedSession);
           if (cleared) setSignInError("");
           return;
         }
@@ -363,7 +338,7 @@ function App() {
       applySignedInSession(buyerSession, entitlements, { preserveCurrent });
     } catch (error) {
       if (isAuthInvalidError(error)) {
-        await clearSavedSessionOrShowError(buyerSession);
+        await clearSavedSession(buyerSession);
         return;
       }
       if (startup) {
@@ -1218,7 +1193,7 @@ function App() {
       const persistedSession = persistedDesktopSessionFromError(error);
       if (persistedSession) {
         if (isAuthInvalidError(error)) {
-          const cleared = await clearSavedSessionOrShowError(persistedSession);
+          const cleared = await clearSavedSession(persistedSession);
           if (cleared) setSignInError("Hatch couldn't verify the new session. Please sign in again.");
           return;
         }
@@ -1243,7 +1218,7 @@ function App() {
     );
     void serverRevoke;
     disconnectRuntime();
-    const cleared = await clearSavedSessionOrShowError(buyerSession, localClear);
+    const cleared = await clearSavedSession(buyerSession, localClear);
     if (cleared) setSignInError("");
   }
 
@@ -1489,19 +1464,6 @@ function App() {
   }
 
   if (authState === "loading") return <LaunchScreen />;
-  if (authState === "secure-session-error") {
-    return <SecureSessionErrorScreen message={secureSessionError} onRetry={() => void retrySecureSessionClear()} />;
-  }
-  if (authState === "secure-session-read-error") {
-    return (
-      <SignInScreen
-        error={signInError || secureSessionError}
-        onRetrySavedSession={() => { setAuthState("loading"); setBootstrapAttempt((value) => value + 1); }}
-        onSignIn={(credentials) => void signIn(credentials)}
-        status={signInStatus}
-      />
-    );
-  }
   if (authState === "network-error") {
     return (
       <NetworkErrorScreen
@@ -2103,20 +2065,6 @@ function NetworkErrorScreen({ message, onRetry, onSignOut }) {
   );
 }
 
-function SecureSessionErrorScreen({ message, onRetry, title = "Hatch couldn't finish signing out", actionLabel = "Try removing the session again" }) {
-  return (
-    <main className="welcome-screen status-screen">
-      <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch.</strong></div>
-      <section className="status-card">
-        <span className="eyebrow">Secure session</span>
-        <h1>{title}</h1>
-        <p>{message}</p>
-        <button type="button" onClick={onRetry}>{actionLabel}</button>
-      </section>
-    </main>
-  );
-}
-
 function UnsupportedRoleScreen({ profile, onSignOut }) {
   return (
     <main className="welcome-screen status-screen">
@@ -2156,7 +2104,7 @@ function EmptyAgentsScreen({ profile, onBrowse, onRefresh, onSignOut, refreshing
   );
 }
 
-function SignInScreen({ onSignIn, status, error, onRetrySavedSession }) {
+function SignInScreen({ onSignIn, status, error }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const loading = status === "loading";
@@ -2187,8 +2135,7 @@ function SignInScreen({ onSignIn, status, error, onRetrySavedSession }) {
           </button>
         </form>
         {error ? <small className="sign-in-error" role="alert">{error}</small> : null}
-        {onRetrySavedSession ? <button className="secondary" type="button" onClick={onRetrySavedSession}>Retry opening saved session</button> : null}
-        <small>Hatch keeps your secure session on this computer until you sign out.</small>
+        <small>Hatch keeps you signed in on this computer until you sign out.</small>
       </section>
     </main>
   );
