@@ -408,7 +408,7 @@ function App() {
   function applySignedInSession(session, entitlements, { preserveCurrent = false } = {}) {
     const profileId = session.profile?.id || EMPTY_PROFILE.id;
     const launchBinding = requestedConversationBindingRef.current
-      || normalizeConversationBinding(windowContextRef.current);
+      || (conversationWindowRef.current ? normalizeConversationBinding(windowContextRef.current) : null);
     const selected = chooseEntitlement(
       entitlements,
       profileId,
@@ -642,7 +642,7 @@ function App() {
 
   function launchConversationBinding() {
     return requestedConversationBindingRef.current
-      || normalizeConversationBinding(windowContextRef.current);
+      || (conversationWindowRef.current ? normalizeConversationBinding(windowContextRef.current) : null);
   }
 
   function conversationCreationRequest(binding, purpose = "create") {
@@ -2587,6 +2587,8 @@ function App() {
     // A manual Agent switch is an explicit user choice. Do not let the
     // launch URL/context hint re-apply the previous window binding.
     requestedConversationBindingRef.current = null;
+    const nextBinding = runtimeBindingForEntitlement(entitlement);
+    if (nextBinding) patchWindowContext(nextBinding);
     setSelectedEntitlementId(entitlement.entitlement_id);
     setCreatorAgent(creatorAgentFromEntitlement(entitlement));
     setProfileSetting("last_selected_entitlement_id", entitlement.entitlement_id);
