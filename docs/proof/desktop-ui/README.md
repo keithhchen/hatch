@@ -89,6 +89,8 @@ on every target OS.
 | `minimal-sidebar-overlay.png` | Sidebar opens as a focus-scoped overlay and returns focus to its opener |
 | `minimal-inspector-overlay.png` | Inspector opens as a focus-scoped trailing overlay and closes with Escape |
 | `native-menu-sidebar-collapsed-1180x780.jpeg` | Native View → Hide Sidebar changes the live pane and the next View menu says Show Sidebar |
+| `multi-window-grant-inspector-collapsed.jpeg` | One dynamic conversation window keeps its own workspace grant while its Inspector is collapsed |
+| `multi-window-default-inspector.jpeg` | A second dynamic conversation window has a different server-shaped ID, no grant, and its Inspector open |
 | `zoom-80-1180x780.jpeg` | 80% application zoom keeps all three panes, toolbar, table and composer reachable |
 | `zoom-150-1180x780.jpeg` | 150% application zoom promotes the conversation surface while keeping Send and structured content usable |
 | `zoom-200-table-overflow-1180x780.jpeg` | 200% application zoom collapses side panes and leaves table overflow local to its wrapper |
@@ -205,3 +207,11 @@ accessibility, signed release verification, and a valid-grant Quick Look/Open
 invocation on each target OS. Finder/Explorer Reveal, the macOS Quick Look
 menu route, non-modal window attention, and independent Settings/About
 auxiliary windows are now covered by the native bridge.
+
+The latest preview UAT also opened two dynamic conversation windows from the
+same primary window. The first window was granted the repository workspace and
+collapsed its Inspector; the second had a different `conv_preview_*` URL, no
+workspace grant, and its Inspector open. The checked-in captures make the
+per-window projection visible. This is stronger than a registry-only test, but
+it still does not prove cloud hydration, independent draft/scroll persistence,
+or crash/reload recovery.
