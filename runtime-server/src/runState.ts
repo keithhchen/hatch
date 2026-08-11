@@ -1,13 +1,14 @@
 import type { RunStatus, RuntimeStore } from "./store.js";
 
 const allowedTransitions: Record<RunStatus, RunStatus[]> = {
-  queued: ["running", "cancelled", "failed"],
-  running: ["waiting_for_tool", "compacting", "completed", "failed", "cancelled"],
-  waiting_for_tool: ["running", "compacting", "completed", "failed", "cancelled"],
-  compacting: ["running", "completed", "failed", "cancelled"],
+  queued: ["running", "cancelled", "failed", "interrupted"],
+  running: ["waiting_for_tool", "compacting", "completed", "failed", "cancelled", "interrupted"],
+  waiting_for_tool: ["running", "compacting", "completed", "failed", "cancelled", "interrupted"],
+  compacting: ["running", "completed", "failed", "cancelled", "interrupted"],
   completed: [],
   failed: [],
-  cancelled: []
+  cancelled: [],
+  interrupted: []
 };
 
 export class RunStateMachine {
@@ -60,6 +61,10 @@ export class RunStateMachine {
 
   async cancel(reason: string): Promise<void> {
     await this.transition("cancelled", reason);
+  }
+
+  async interrupt(reason: string): Promise<void> {
+    await this.transition("interrupted", reason);
   }
 
   private async transition(next: RunStatus, reason?: string): Promise<void> {

@@ -1,6 +1,7 @@
 # Hatch Protocol
 
-Canonical provider-agnostic wire protocol 0.6 and Agent Corpus v1.
+Canonical provider-agnostic wire protocol 0.7, durable Conversation API v1,
+and Agent Corpus v1.
 
 This package owns the JSON Schema for the server/Desktop local-client boundary. The TypeScript runtime server and Rust local runner currently mirror this schema directly; generated TS and Rust types should be introduced from this package before the protocol is expanded further.
 
@@ -17,9 +18,62 @@ Schema:
 
 ```text
 schemas/hatch-wire-protocol.schema.json
+schemas/hatch-conversation-api-v1.schema.json
 schemas/agent-corpus.schema.json
 schemas/creator-agent.schema.json
 ```
+
+## Conversation API v1
+
+`hatch-conversation-api-v1.schema.json` describes the framework-neutral
+REST read/control contract for the Conversation Library. A Conversation is a
+server-owned object permanently bound to an account and Creator Agent; clients
+may choose a title or idempotency key but cannot supply or change that binding.
+
+The Runtime serves the following authenticated, binding-scoped routes:
+
+```text
+POST  /v1/conversations                         create (client_request_id idempotency)
+GET   /v1/conversations?agent_id&status&cursor  list a Creator Agent's library
+GET   /v1/conversations/:id                      metadata
+PATCH /v1/conversations/:id                      metadata with version/CAS
+GET   /v1/conversations/:id/snapshot?after_cursor
+GET   /v1/conversations/:id/events?after_cursor
+GET   /v1/conversations/:id/runs
+GET   /v1/conversations/:id/runs/:runId
+POST  /v1/conversations/:id/runs/:runId/cancel
+```
+
+`POST /v1/conversations/:id/runs` intentionally returns
+`409 executor_attach_required`: a REST request cannot safely create a queued
+Run without an executor window that can answer local-tool and approval work.
+
+### Executor lease and recovery V1
+
+The live executor is only `/runtime`: `client.message.client_message_id` is a
+stable user-intent key, while legacy clients fall back to `run_id`. The Runtime
+generates an opaque executor ID for each WebSocket; it never treats a
+client-supplied `installation_id` as a window or executor identity. The durable
+repository permits one active Run per Conversation, so separate Desktop windows
+may observe one Conversation but only the owning connection executes it.
+
+In V1, **attach means observer recovery**, not executor takeover:
+
+1. Store the last journal cursor after rendering a snapshot.
+2. On renderer reload or reconnect, read `snapshot?after_cursor=<cursor>` (or
+   `events?after_cursor=<cursor>`) and reconcile by cursor, Run ID, and
+   `client_message_id`.
+3. Do not resend a known `client_message_id` to restart work. The server returns
+   the existing Run state and never replays pending local tools or approvals.
+
+There is no `client.run.attach` or executor-reclaim endpoint in V1. Local tools
+and approvals remain bound to their original native window; losing that
+connection or an idle/heartbeat close marks that Run as `interrupted`. On
+Runtime restart, the exclusive V1 recovery pass marks its repository's active
+Runs as `interrupted`; active-active executor processes require a future
+renewable lease/fencing protocol. A new user action with a new
+`client_message_id` creates a replacement Run. Explicit user Stop remains
+`cancelled`; it is not the same state as an executor loss.
 
 ## Agent Corpus v1
 

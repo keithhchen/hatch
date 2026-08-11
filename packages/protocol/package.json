@@ -1,10 +1,11 @@
 {
   "name": "@hatch/protocol",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "exports": {
     "./hatch-wire-protocol.schema.json": "./schemas/hatch-wire-protocol.schema.json",
+    "./hatch-conversation-api-v1.schema.json": "./schemas/hatch-conversation-api-v1.schema.json",
     "./agent-corpus.schema.json": "./schemas/agent-corpus.schema.json",
     "./creator-agent.schema.json": "./schemas/creator-agent.schema.json"
   }

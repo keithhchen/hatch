@@ -6,7 +6,12 @@ import {
   type AgentTool
 } from "@earendil-works/pi-agent-core";
 import { Type, type AssistantMessage, type ToolResultMessage } from "@earendil-works/pi-ai";
-import type { ConversationMessage, OutboundMessage, RunStart } from "./protocol.js";
+import {
+  renderUserMessageForModel,
+  type ConversationMessage,
+  type OutboundMessage,
+  type RunStart
+} from "./protocol.js";
 import type { ActivatedSkill } from "./store.js";
 import {
   auditProposedDeliveryTool,
@@ -631,7 +636,7 @@ export class PiAgentRuntime implements AgentRuntime {
       return;
     }
 
-    if (event.type === "turn_end" && ctx.state.status === "cancelled") {
+    if (event.type === "turn_end" && (ctx.state.status === "cancelled" || ctx.state.status === "interrupted")) {
       agent.abort();
     }
   }
@@ -667,6 +672,9 @@ function toAuditMessage(message: ConversationMessage): PiModelMessage {
       content: `${SUMMARY_PREFIX}${message.content ?? ""}${SUMMARY_SUFFIX}`
     };
   }
+  if (message.role === "user") {
+    return { role: "user", content: renderUserMessageForModel(message) };
+  }
   if (message.role !== "assistant") {
     return { role: "user", content: "" };
   }
@@ -694,7 +702,7 @@ function piUserMessage(content: string): AgentMessage {
 }
 
 function toPiMessage(message: ConversationMessage): AgentMessage {
-  if (message.role === "user") return piUserMessage(message.content ?? "");
+  if (message.role === "user") return piUserMessage(renderUserMessageForModel(message));
   if (message.role === "compactionSummary") {
     return {
       role: "compactionSummary",

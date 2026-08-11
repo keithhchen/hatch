@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hatch.dev/protocol/hatch-wire-protocol-0.6.schema.json",
+  "$id": "https://hatch.dev/protocol/hatch-wire-protocol-0.7.schema.json",
   "title": "Hatch Wire Protocol",
   "type": "object",
   "oneOf": [
@@ -9,7 +9,7 @@
   ],
   "$defs": {
     "protocolVersion": {
-      "const": "0.6"
+      "const": "0.7"
     },
     "digest": {
       "type": "string",
@@ -40,7 +40,8 @@
         "compacting",
         "completed",
         "failed",
-        "cancelled"
+        "cancelled",
+        "interrupted"
       ]
     },
     "jsonObject": {
@@ -68,6 +69,11 @@
         "content": {
           "type": ["string", "null"]
         },
+        "attachments": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/contextAttachment" }
+        },
         "tool_call_id": {
           "type": "string"
         },
@@ -76,6 +82,26 @@
           "items": { "$ref": "#/$defs/chatToolCall" }
         }
       }
+    },
+    "contextAttachment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attachment_id", "display_name", "media_type", "source_bytes", "text", "text_sha256", "truncated"],
+      "properties": {
+        "attachment_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "display_name": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "media_type": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 128,
+          "pattern": "^[a-z0-9][a-z0-9!#$&^_.+-]*/[a-z0-9][a-z0-9!#$&^_.+-]*$"
+        },
+        "source_bytes": { "type": "integer", "minimum": 0, "maximum": 1048576 },
+        "text": { "type": "string", "maxLength": 65536 },
+        "text_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "truncated": { "type": "boolean" }
+      },
+      "description": "A bounded UTF-8 text projection prepared after an explicit user gesture. It deliberately carries no file path, bookmark, grant, URL, or binary bytes. Runtime additionally enforces UTF-8 byte and digest validation."
     },
     "chatToolCall": {
       "type": "object",
@@ -143,6 +169,12 @@
       "properties": {
         "type": { "const": "client.message" },
         "run_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "client_message_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "description": "Stable idempotency key for a user message. Clients that predate this field use run_id as the fallback key."
+        },
         "conversation_id": { "type": "string", "minLength": 1, "maxLength": 256 },
         "message": {
           "type": "object",
@@ -150,7 +182,12 @@
           "required": ["role", "content"],
           "properties": {
             "role": { "const": "user" },
-            "content": { "type": "string", "maxLength": 262144 }
+            "content": { "type": "string", "maxLength": 262144 },
+            "attachments": {
+              "type": "array",
+              "maxItems": 8,
+              "items": { "$ref": "#/$defs/contextAttachment" }
+            }
           }
         }
       }

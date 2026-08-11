@@ -233,8 +233,9 @@ export class SkillRuntime {
         output
       };
     } catch (error) {
+      const parentStopped = this.options.parentState.status === "cancelled" || this.options.parentState.status === "interrupted";
       const failure = {
-        code: this.options.parentState.status === "cancelled" || controller.signal.aborted || this.cancelledParents.has(this.options.parentState.runId) ? "skill_cancelled" : "skill_failed",
+        code: parentStopped || controller.signal.aborted || this.cancelledParents.has(this.options.parentState.runId) ? "skill_cancelled" : "skill_failed",
         message: error instanceof Error ? error.message : String(error)
       };
       await this.persistState(skill, skillRunId, failure.code === "skill_cancelled" ? "cancelled" : "failed", failure);

@@ -1578,7 +1578,7 @@ function signLegacyToken(secret: string, subject: string): string {
 function hello(token: string, installationId: string): Record<string, unknown> {
   return {
     type: "client.hello",
-    protocol_version: "0.6",
+    protocol_version: "0.7",
     installation_id: installationId,
     auth_token: token,
     local_tools: []

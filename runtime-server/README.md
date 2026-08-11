@@ -281,7 +281,7 @@ npm run serve
 
 ## Protocol
 
-Protocol version: `0.6`. This version makes the underscore local-tool names canonical on the wire; a `0.5` hello is rejected with `protocol_error` so an old Desktop cannot enter a partially compatible session.
+Protocol version: `0.7`. This version adds structured, bounded user context attachments; a `0.6` hello is rejected with `protocol_error` so an old Desktop cannot enter a partially compatible session.
 
 Assistant text from the single Shanghai cloud Runtime is released through
 Alibaba AI Guardrails in delayed segments. It runs with
@@ -291,6 +291,33 @@ SDK uses the ECS RAM role credential chain; never place a long-lived Alibaba
 AccessKey in Runtime configuration.
 
 Canonical schema: `../packages/protocol/schemas/hatch-wire-protocol.schema.json`.
+
+### Durable Conversation recovery V1
+
+The durable control plane (`ConversationRepository`) is separate from the
+append-only transcript projection. It owns Conversation metadata, idempotency,
+the one-active-Run constraint, and the cursor journal used by a Desktop window
+to reconcile after reload.
+
+- `/runtime` `client.message` is the only executable Run-creation path. REST
+  `POST /v1/conversations/:id/runs` returns
+  `409 executor_attach_required`, so it cannot leave an unowned queued Run.
+- The Runtime creates an opaque executor ID per WebSocket connection. It does
+  not use the Desktop's installation ID as a window identity; multiple windows
+  from one installation are still distinct executor candidates.
+- A reconnect/reload is an observer recovery: fetch a snapshot and then cursor
+  events, deduplicate by cursor/Run/client message ID, and render the durable
+  state. Re-sending an existing `client_message_id` returns that Run's state;
+  it never replays a pending tool call or approval.
+- Losing the executor connection, heartbeat, or Runtime process transitions an
+  active Run to `interrupted`. Explicit `turn.cancel` remains `cancelled`.
+  A new user intent with a new client message ID starts a replacement Run.
+- V1 deliberately has no executor-attach or reclaim endpoint. It assumes one
+  active Runtime executor process for a repository; active-active deployment
+  requires a future renewable lease/fencing protocol before it is supported.
+
+The full framework-neutral route contract is in
+`../packages/protocol/README.md#executor-lease-and-recovery-v1`.
 
 Inbound:
 
