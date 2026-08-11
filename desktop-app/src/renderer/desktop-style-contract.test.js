@@ -37,11 +37,12 @@ describe("desktop system appearance contract", () => {
     expect(stylesheet).toMatch(/\.desktop-window-shell\s+:focus-visible\s*\{[\s\S]*?outline:\s*2px\s+solid\s+var\(--focus-ring\)/);
   });
 
-  it("keeps workspace and permission controls in the compact composer tier", () => {
+  it("keeps every composer control visible at every desktop window tier", () => {
     expect(stylesheet).toMatch(/\.composer-controls\s*\{[\s\S]*?flex:\s*1\s+1\s+auto;/);
     expect(stylesheet).toMatch(/\.composer-settings\s*\{[\s\S]*?overflow:\s*visible;/);
-    expect(stylesheet).toMatch(/@container\s*\(max-width:\s*560px\)[\s\S]*?\.composer-settings \.attachment-composer-control\s*\{\s*display:\s*none;\s*\}/);
-    expect(stylesheet).not.toMatch(/@container\s*\(max-width:\s*560px\)[\s\S]*?\.composer-controls \.composer-settings\s*\{\s*display:\s*none;/);
+    expect(stylesheet).not.toMatch(/\.composer-overflow/);
+    expect(stylesheet).not.toMatch(/\.attachment-composer-control\s*\{[^}]*display:\s*none/);
+    expect(stylesheet).not.toMatch(/\.composer-settings\s*\{[^}]*display:\s*none/);
   });
 
   it("uses only the insertion caret for composer text focus", () => {

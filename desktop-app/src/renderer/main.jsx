@@ -19,6 +19,19 @@ import {
   useMessage
 } from "@assistant-ui/react";
 import { StreamdownTextPrimitive } from "@assistant-ui/react-streamdown";
+import {
+  ArrowUp,
+  ChevronDown,
+  ChevronRight,
+  FolderOpen,
+  LoaderCircle,
+  MessageSquare,
+  Paperclip,
+  Plus,
+  RefreshCw,
+  ShieldAlert,
+  Square
+} from "lucide-react";
 import "streamdown/styles.css";
 import "../../../packages/brand/tokens.css";
 import hatchMarkUrl from "../../../packages/brand/hatch-mark.svg";
@@ -3094,6 +3107,7 @@ function App() {
           selectedEntitlementId={selectedEntitlementId}
           conversationId={conversationId}
           conversations={conversations}
+          conversationLibraryError={conversationLibraryError}
           conversationLibraryStatus={conversationLibraryStatus}
           conversationLibraryReady={conversationLibraryStatus === "ready"}
           onSelectAgent={selectCreatorAgent}
@@ -3114,9 +3128,9 @@ function App() {
           conversationId={conversationId}
           conversationTitle={conversations.find((item) => item.id === conversationId)?.title || ""}
           connected={connected}
+          conversationLibraryReady={conversationLibraryStatus === "ready"}
           workspaceGranted={workspaceGranted}
           status={status}
-          notice={conversationLibraryError || settingsMigrationNotice}
           onRetry={retryRuntimeConnection}
         />
       )}
@@ -3197,15 +3211,22 @@ function App() {
                       />
                       {running ? (
                         <button
-                          aria-label="Stop streaming"
+                          aria-label="Stop response"
                           className="send-button stop-button"
+                          title="Stop"
                           type="button"
                           onClick={() => void cancelRun()}
                         >
-                          Stop
+                          <Square aria-hidden="true" fill="currentColor" strokeWidth={0} />
                         </button>
                       ) : (
-                        <ComposerPrimitive.Send className="send-button">Send</ComposerPrimitive.Send>
+                        <ComposerPrimitive.Send
+                          aria-label="Send message"
+                          className="send-button"
+                          title="Send"
+                        >
+                          <ArrowUp aria-hidden="true" />
+                        </ComposerPrimitive.Send>
                       )}
                     </div>
                   </ComposerPrimitive.Root>
@@ -3232,6 +3253,7 @@ function DesktopSidebar({
   selectedEntitlementId,
   conversationId,
   conversations,
+  conversationLibraryError,
   conversationLibraryStatus,
   conversationLibraryReady,
   onSelectAgent,
@@ -3259,7 +3281,7 @@ function DesktopSidebar({
           disabled={!conversationLibraryReady}
           onClick={onNewConversation}
         >
-          <span aria-hidden="true">+</span><span>New conversation</span>
+          <Plus aria-hidden="true" /><span>New conversation</span>
         </button>
       </div>
       <nav className="desktop-source-list" aria-label="Creator Agents">
@@ -3281,13 +3303,23 @@ function DesktopSidebar({
                   <strong title={agent.name}>{agent.name}</strong>
                   <small>by {agent.creator}</small>
                 </span>
-                <span className="desktop-agent-disclosure" aria-hidden="true">{selected ? "⌄" : "›"}</span>
+                {selected
+                  ? <ChevronDown className="desktop-agent-disclosure" aria-hidden="true" />
+                  : <ChevronRight className="desktop-agent-disclosure" aria-hidden="true" />}
               </button>
               {selected ? (
                 <div className="desktop-agent-conversation-group" role="group" aria-label={`${agent.name} conversations`}>
                   <div className="desktop-agent-conversation-label">Conversations</div>
                   {conversationLibraryStatus === "loading" || conversationLibraryStatus === "idle" ? (
                     <div className="desktop-source-empty compact">Loading conversations…</div>
+                  ) : conversationLibraryStatus === "unavailable" ? (
+                    <div
+                      className="desktop-source-empty compact"
+                      role="status"
+                      title={conversationLibraryError || undefined}
+                    >
+                      Conversations unavailable · retrying
+                    </div>
                   ) : visibleConversations.length > 0 ? visibleConversations.map((conversation) => {
                     const conversationSelected = conversation.id === conversationId;
                     const renaming = conversation.id === renamingConversationId;
@@ -3354,7 +3386,7 @@ function ConversationSourceRow({
         aria-current={selected ? "page" : undefined}
         onContextMenu={contextMenu}
       >
-        <span className="conversation-row-glyph" aria-hidden="true">⌁</span>
+        <MessageSquare className="conversation-row-glyph" aria-hidden="true" />
         <span className="desktop-source-row-copy">
           <input
             aria-label="Rename conversation"
@@ -3386,7 +3418,7 @@ function ConversationSourceRow({
       onClick={() => onSelect?.(conversation)}
       onContextMenu={contextMenu}
     >
-      <span className="conversation-row-glyph" aria-hidden="true">⌁</span>
+      <MessageSquare className="conversation-row-glyph" aria-hidden="true" />
       <span className="desktop-source-row-copy">
         <strong>{conversation.title || conversationTitle(conversation.id)}</strong>
         <small>{selected ? "Current conversation" : "Conversation"}</small>
@@ -3395,34 +3427,34 @@ function ConversationSourceRow({
   );
 }
 
-function DesktopConversationToolbar({ creatorAgent, conversationId, conversationTitle: providedTitle, connected, workspaceGranted, status, notice, onRetry }) {
-  const connecting = ["Loading history...", "Connecting...", "Restoring connection…"].includes(status);
+function DesktopConversationToolbar({ creatorAgent, conversationId, conversationTitle: providedTitle, connected, conversationLibraryReady, workspaceGranted, status, onRetry }) {
+  const connecting = /connecting|loading history|restoring|preparing/i.test(String(status || ""));
   const title = providedTitle || conversationTitle(conversationId);
   return (
     <>
-      <div className="desktop-toolbar-context">
-        <div className="desktop-toolbar-title" title={title}>
-          <span className="label">Conversation</span>
-          <strong>{title}</strong>
-        </div>
-        <span className="desktop-toolbar-separator" aria-hidden="true" />
-        <div className="desktop-toolbar-agent" title={`${creatorAgent.name} · ${creatorAgent.creator}`}>
-          <span className="label">Agent</span>
-          <strong>{creatorAgent.name}</strong>
-        </div>
-        {notice ? <small className="settings-migration-notice" role="status">{notice}</small> : null}
+      <div
+        aria-label={`${title}, ${creatorAgent.name} by ${creatorAgent.creator}`}
+        className="desktop-toolbar-context"
+        title={`${title} · ${creatorAgent.name} by ${creatorAgent.creator}`}
+      >
+        <strong className="desktop-toolbar-conversation">{title}</strong>
+        <span className="desktop-toolbar-context-divider" aria-hidden="true">·</span>
+        <span className="desktop-toolbar-agent-name">{creatorAgent.name}</span>
       </div>
-      {workspaceGranted && !connected ? (
-        <div className="desktop-connection-recovery" role="status" aria-live="polite">
-          <span className="connection-state-dot" aria-hidden="true" />
-          <span className="desktop-connection-copy">
-            <strong>{connecting ? "Connecting" : "Offline"}</strong>
-            <small>{status === "Offline" ? "Conversation is kept locally while Hatch reconnects." : status}</small>
-          </span>
-          <button className="secondary compact" type="button" onClick={onRetry} disabled={connecting}>
-            {connecting ? "Connecting…" : "Retry"}
-          </button>
-        </div>
+      {workspaceGranted && conversationLibraryReady && !connected ? (
+        <button
+          aria-busy={connecting || undefined}
+          aria-label={connecting ? "Connecting" : "Reconnect"}
+          className="chrome-icon-button desktop-connection-action"
+          disabled={connecting}
+          title={connecting ? "Connecting" : "Reconnect"}
+          type="button"
+          onClick={onRetry}
+        >
+          {connecting
+            ? <LoaderCircle className="connection-spinner" aria-hidden="true" />
+            : <RefreshCw aria-hidden="true" />}
+        </button>
       ) : null}
     </>
   );
@@ -3476,7 +3508,7 @@ function DesktopInspector({
 }
 
 function ComposerControls({ droppedFiles = [], workspace, workspaceGranted, permissionMode, onChooseWorkspace, onChooseFiles, onPermissionChange, onRemoveDroppedFile }) {
-  const attachmentControl = () => (
+  const attachmentControl = (
     <button
       aria-label="Attach context files"
       className="composer-control attachment-composer-control"
@@ -3484,7 +3516,7 @@ function ComposerControls({ droppedFiles = [], workspace, workspaceGranted, perm
       type="button"
       onClick={onChooseFiles}
     >
-      <span aria-hidden="true">＋</span>
+      <Paperclip aria-hidden="true" />
       <span className="composer-control-label">Attach files</span>
     </button>
   );
@@ -3501,7 +3533,7 @@ function ComposerControls({ droppedFiles = [], workspace, workspaceGranted, perm
         </div>
       ) : null}
       <div className="composer-settings">
-        {attachmentControl()}
+        {attachmentControl}
         <button
           aria-label="Choose workspace folder"
           className="composer-control workspace-composer-control"
@@ -3511,20 +3543,16 @@ function ComposerControls({ droppedFiles = [], workspace, workspaceGranted, perm
         >
           <WorkspaceIcon />
           <span className="composer-control-label">{workspaceGranted ? workspaceGrantLabel(workspace) : "Choose workspace"}</span>
-          <span className="composer-control-caret" aria-hidden="true">⌄</span>
+          <ChevronDown className="composer-control-caret" aria-hidden="true" />
         </button>
         <label className="composer-control permission-composer-control" title={permissionPolicyDetail(permissionMode)}>
           <ShieldIcon />
           <select aria-label="Workspace permissions" value={permissionMode} onChange={(event) => onPermissionChange(event.target.value)}>
             {PERMISSION_OPTIONS.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
           </select>
-          <span className="composer-control-caret" aria-hidden="true">⌄</span>
+          <ChevronDown className="composer-control-caret" aria-hidden="true" />
         </label>
       </div>
-      <details className="composer-overflow">
-        <summary className="composer-control composer-overflow-trigger" aria-label="More composer options" title="More composer options">•••</summary>
-        <div className="composer-overflow-menu" role="menu">{attachmentControl()}</div>
-      </details>
     </div>
   );
 }
@@ -3964,22 +3992,11 @@ function EmptyThread({ connected, creatorAgent }) {
 }
 
 function WorkspaceIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 20 20">
-      <path d="M2.75 5.75h5l1.5 1.75h8v7.25a1.5 1.5 0 0 1-1.5 1.5h-13V5.75Z" />
-      <path d="M2.75 5.75v-.5a1.5 1.5 0 0 1 1.5-1.5h3l1.5 2" />
-    </svg>
-  );
+  return <FolderOpen aria-hidden="true" />;
 }
 
 function ShieldIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 20 20">
-      <path d="M10 2.5 16 5v4.75c0 3.7-2.5 6.3-6 7.75-3.5-1.45-6-4.05-6-7.75V5l6-2.5Z" />
-      <path d="M10 6.25v4" />
-      <path d="M10 13.5h.01" />
-    </svg>
-  );
+  return <ShieldAlert aria-hidden="true" />;
 }
 
 function WorkspaceOnboarding({ creatorName, draft, onChoose, onGrant, status }) {
@@ -4185,7 +4202,7 @@ function AssistantRunHeader() {
       </div>
       {custom.turnTiming ? (
         <details className="turn-timing">
-          <summary>Timing</summary>
+          <summary><ChevronRight className="details-disclosure" aria-hidden="true" />Timing</summary>
           <pre>{JSON.stringify(custom.turnTiming, null, 2)}</pre>
         </details>
       ) : null}

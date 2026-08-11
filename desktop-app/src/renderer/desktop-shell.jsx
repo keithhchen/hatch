@@ -1,4 +1,5 @@
 import React, { useEffect, useId, useRef, useState } from "react";
+import { Ellipsis, PanelLeft, PanelRight, X } from "lucide-react";
 import {
   DESKTOP_LAYOUT,
   LAYOUT_TIERS,
@@ -213,7 +214,7 @@ export function DesktopToolbar({
         title={sidebarExpanded ? "Hide Sidebar" : "Show Sidebar"}
         onClick={onToggleSidebar}
       >
-        <SidebarIcon />
+        <PanelLeft aria-hidden="true" />
       </button>
       <div className="desktop-toolbar-content">{children}</div>
       <div className="desktop-toolbar-drag-region" data-tauri-drag-region />
@@ -225,7 +226,7 @@ export function DesktopToolbar({
         title="More commands"
         onClick={onShowOverflow}
       >
-        <span aria-hidden="true">•••</span>
+        <Ellipsis aria-hidden="true" />
       </button>
       <button
         ref={inspectorToggleRef}
@@ -237,7 +238,7 @@ export function DesktopToolbar({
         title={inspectorExpanded ? "Hide Inspector" : "Show Inspector"}
         onClick={onToggleInspector}
       >
-        <InspectorIcon />
+        <PanelRight aria-hidden="true" />
       </button>
     </header>
   );
@@ -392,7 +393,7 @@ function PaneOverlay({ id, kind, label, onClose, returnFocusRef, children }) {
         <div className="desktop-overlay-heading">
           <strong>{label}</strong>
           <button className="chrome-icon-button" type="button" onClick={onClose} aria-label={`Close ${label}`}>
-            <CloseIcon />
+            <X aria-hidden="true" />
           </button>
         </div>
         {children}
@@ -441,30 +442,4 @@ function platformName() {
   if (platform.includes("mac")) return "macos";
   if (platform.includes("win")) return "windows";
   return "other";
-}
-
-function SidebarIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 16 16">
-      <rect x="1.25" y="1.25" width="13.5" height="13.5" rx="1.5" />
-      <path d="M5.5 1.75v12.5" />
-    </svg>
-  );
-}
-
-function InspectorIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 16 16">
-      <rect x="1.25" y="1.25" width="13.5" height="13.5" rx="1.5" />
-      <path d="M10.5 1.75v12.5" />
-    </svg>
-  );
-}
-
-function CloseIcon() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 16 16">
-      <path d="m4 4 8 8M12 4l-8 8" />
-    </svg>
-  );
 }

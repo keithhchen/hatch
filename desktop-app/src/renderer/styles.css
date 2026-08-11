@@ -367,17 +367,6 @@ h2 {
   min-width: 0;
 }
 
-.settings-migration-notice {
-  color: #705628;
-  display: block;
-  font-size: 10px;
-  margin-top: 3px;
-  max-width: 520px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .connection-recovery {
   align-items: center;
   background: #fff7e1;
@@ -867,9 +856,23 @@ h2 {
 }
 
 .turn-timing summary {
+  align-items: center;
   cursor: pointer;
+  display: inline-flex;
+  gap: 3px;
+  list-style: none;
   user-select: none;
 }
+
+.turn-timing summary::-webkit-details-marker { display: none; }
+
+.turn-timing .details-disclosure {
+  height: 13px;
+  transition: transform .12s ease;
+  width: 13px;
+}
+
+.turn-timing[open] .details-disclosure { transform: rotate(90deg); }
 
 .turn-timing pre {
   background: color-mix(in srgb, var(--hatch-panel) 82%, transparent);
@@ -1481,13 +1484,25 @@ button.composer-control:focus-visible {
 .composer-control-caret {
   color: color-mix(in srgb, currentColor 65%, transparent);
   flex: 0 0 auto;
-  font-size: 11px;
-  line-height: 1;
+  height: 13px !important;
+  width: 13px !important;
 }
 
 .send-button {
-  min-height: 32px;
-  min-width: 64px;
+  border-radius: 9px;
+  flex: 0 0 34px;
+  height: 34px;
+  min-height: 34px;
+  min-width: 34px;
+  padding: 0;
+  width: 34px;
+}
+
+.send-button svg {
+  height: 17px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  width: 17px;
 }
 
 .stop-button {
@@ -1640,83 +1655,42 @@ button.composer-control:focus-visible {
 .desktop-toolbar-context {
   align-items: center;
   display: flex;
-  gap: 10px;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.desktop-toolbar-title,
-.desktop-toolbar-agent {
-  display: grid;
-  gap: 1px;
-  min-width: 0;
-}
-
-.desktop-toolbar-title strong,
-.desktop-toolbar-agent strong {
   font-size: 12px;
-  font-weight: 650;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.desktop-toolbar-title small {
-  color: var(--text-secondary);
-  font-family: var(--hatch-font-mono);
-  font-size: 9px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.desktop-toolbar-title { max-width: min(28vw, 290px); }
-.desktop-toolbar-agent { max-width: min(19vw, 190px); }
-
-.desktop-toolbar-separator {
-  background: var(--border-separator);
-  height: 24px;
-  width: 1px;
-}
-
-.desktop-connection-recovery {
-  align-items: center;
-  background: color-mix(in srgb, #fff7e1 84%, var(--surface-toolbar));
-  border: 1px solid color-mix(in srgb, #e2ca8d 75%, var(--border-separator));
-  border-radius: 7px;
-  display: flex;
-  flex: 0 1 390px;
-  gap: 7px;
-  margin-left: auto;
+  gap: 5px;
+  max-width: min(54vw, 480px);
   min-width: 0;
-  padding: 4px 5px 4px 7px;
+  overflow: hidden;
 }
 
-.connection-state-dot {
-  background: #b88931;
-  border-radius: 50%;
-  flex: 0 0 7px;
-  height: 7px;
-  width: 7px;
-}
-
-.desktop-connection-copy {
-  display: grid;
-  gap: 1px;
-  min-width: 0;
-}
-
-.desktop-connection-copy strong,
-.desktop-connection-copy small {
+.desktop-toolbar-conversation,
+.desktop-toolbar-agent-name {
   display: block;
-  font-size: 10px;
-  line-height: 1.2;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.desktop-connection-copy small { color: #6b6045; }
+.desktop-toolbar-conversation {
+  font-weight: 650;
+}
+
+.desktop-toolbar-agent-name,
+.desktop-toolbar-context-divider {
+  color: var(--text-secondary);
+}
+
+.desktop-toolbar-agent-name { flex: 0 1 auto; }
+
+.desktop-toolbar-context-divider {
+  flex: 0 0 auto;
+}
+
+.desktop-connection-action { color: #8a6728; }
+
+.connection-spinner { animation: connection-spin .9s linear infinite; }
+
+@keyframes connection-spin { to { transform: rotate(360deg); } }
 
 .desktop-sidebar,
 .desktop-inspector,
@@ -1812,11 +1786,7 @@ button.composer-control:focus-visible {
   border-color: var(--border-separator);
 }
 
-.sidebar-new-conversation > span:first-child {
-  font-size: 17px;
-  font-weight: 400;
-  line-height: 1;
-}
+.sidebar-new-conversation > svg { height: 14px; width: 14px; }
 
 .desktop-source-list {
   display: flex;
@@ -1923,9 +1893,9 @@ button.composer-control:focus-visible {
 .desktop-agent-disclosure {
   color: var(--text-secondary);
   flex: 0 0 auto;
-  font-size: 15px;
-  line-height: 1;
+  height: 14px;
   margin-left: auto;
+  width: 14px;
 }
 
 .desktop-agent-conversation-group .desktop-source-row {
@@ -1948,9 +1918,10 @@ button.composer-control:focus-visible {
 
 .conversation-row-glyph {
   color: var(--text-secondary);
-  flex: 0 0 25px;
-  font-size: 18px;
-  text-align: center;
+  flex: 0 0 15px;
+  height: 15px;
+  margin-inline: 5px;
+  width: 15px;
 }
 
 .desktop-sidebar-footer {
@@ -2193,45 +2164,7 @@ button.composer-control:focus-visible {
 
 .composer-attachment button:hover { color: var(--hatch-ink); }
 
-.composer-overflow {
-  display: none;
-  position: relative;
-}
-
-.composer-overflow > summary { list-style: none; }
-.composer-overflow > summary::-webkit-details-marker { display: none; }
-
-.composer-overflow-trigger {
-  cursor: pointer;
-  font-family: var(--hatch-font-mono);
-  letter-spacing: 1px;
-  min-width: 31px;
-}
-
-.composer-overflow-menu {
-  background: var(--hatch-panel);
-  border: 1px solid var(--border-separator);
-  border-radius: 8px;
-  bottom: calc(100% + 7px);
-  box-shadow: 0 10px 25px rgba(43, 31, 22, .16);
-  display: grid;
-  gap: 3px;
-  min-width: 180px;
-  padding: 5px;
-  position: absolute;
-  right: 0;
-  z-index: 12;
-}
-
-.composer-overflow-menu .composer-control { justify-content: flex-start; max-width: 100%; width: 100%; }
-
 @container (max-width: 560px) {
-  /* Workspace and permission are turn-level state, not optional overflow.
-   * Keep both controls in the composer so a compact desktop window does not
-   * hide the controls that determine native tool authority. Attachments are
-   * the only item that moves into the local overflow menu. */
-  .composer-settings .attachment-composer-control { display: none; }
-  .composer-overflow { display: block; }
   .desktop-chat-shell .composer { border-radius: 12px; }
 }
 
@@ -2351,6 +2284,8 @@ button.composer-control:focus-visible {
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
   }
+
+  .connection-spinner { animation: none; }
 }
 
 .desktop-auxiliary-window {
@@ -2474,7 +2409,6 @@ button.composer-control:focus-visible {
     --hatch-inverse-text: #1f1e1b;
   }
 
-  .desktop-connection-recovery { background: #3a3324; border-color: #766234; }
-  .desktop-connection-copy small { color: #dfd0a6; }
+  .desktop-connection-action { color: #dfd0a6; }
   .desktop-overlay-scrim { background: rgba(0, 0, 0, .42); }
 }
