@@ -55,6 +55,11 @@ import {
   createConversationCreationTracker
 } from "./conversation-create-retry.js";
 import {
+  isRetryableConversationLibraryError,
+  conversationLibraryRetryScope,
+  createConversationLibraryRetryController
+} from "./conversation-library-retry.js";
+import {
   clearAuthSession,
   createTauriAuthStorage,
   isRemoteAuthSessionCleared,
@@ -224,6 +229,14 @@ function App() {
   // their workspace back into the main window's legacy profile fallback.
   const conversationWindowRef = useRef(Boolean(requestedConversationIdRef.current));
   const conversationLibraryRequestRef = useRef(0);
+  const conversationLibraryRetryTimerRef = useRef(null);
+  const conversationLibraryRetryableRef = useRef(false);
+  const conversationLibraryLoadingRef = useRef(false);
+  const conversationLibraryStatusRef = useRef("idle");
+  const conversationLibraryRetryControllerRef = useRef(null);
+  if (!conversationLibraryRetryControllerRef.current) {
+    conversationLibraryRetryControllerRef.current = createConversationLibraryRetryController();
+  }
   const conversationCreationTrackerRef = useRef(null);
   if (!conversationCreationTrackerRef.current) {
     conversationCreationTrackerRef.current = createConversationCreationTracker();
@@ -263,6 +276,7 @@ function App() {
   const [conversations, setConversations] = useState([]);
   const [conversationLibraryStatus, setConversationLibraryStatus] = useState("idle");
   const [conversationLibraryError, setConversationLibraryError] = useState("");
+  const [conversationLibraryRetryNonce, setConversationLibraryRetryNonce] = useState(0);
   const [renamingConversationId, setRenamingConversationId] = useState("");
   const [renameDraft, setRenameDraft] = useState("");
   const [status, setStatus] = useState("Offline");
@@ -288,6 +302,10 @@ function App() {
   useEffect(() => {
     droppedFilesRef.current = droppedFiles;
   }, [droppedFiles]);
+
+  useEffect(() => {
+    conversationLibraryStatusRef.current = conversationLibraryStatus;
+  }, [conversationLibraryStatus]);
 
   // A pending native file projection belongs to exactly one conversation. It
   // must never follow the window when the user switches the Library row or
@@ -595,6 +613,15 @@ function App() {
     try {
       const entitlements = await fetchPurchasedCreatorAgents(DEFAULT_AUTH_URL, buyerSession.accessToken);
       applySignedInSession(buyerSession, entitlements, { preserveCurrent });
+      // A successful entitlement refresh is also evidence that the service is
+      // reachable again. Re-run a previously network-failed Library request
+      // after React applies any Agent rebinding, without changing its pending
+      // bootstrap clientRequestId.
+      if (conversationLibraryRetryableRef.current
+        && conversationLibraryStatusRef.current === "unavailable"
+        && !conversationLibraryLoadingRef.current) {
+        setConversationLibraryRetryNonce((current) => current + 1);
+      }
     } catch (error) {
       if (isAuthInvalidError(error)) {
         await clearSavedSession(buyerSession);
@@ -620,11 +647,23 @@ function App() {
       if (Date.now() - lastEntitlementRefreshRef.current < 1500) return;
       void refreshEntitlements({ preserveCurrent: true });
     };
+    const recoverLibrary = () => {
+      if (document.visibilityState === "hidden" || entitlementRefreshRef.current) return;
+      triggerConversationLibraryRecovery({ manual: true });
+    };
     window.addEventListener("focus", refresh);
+    window.addEventListener("online", refresh);
     document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("focus", recoverLibrary);
+    window.addEventListener("online", recoverLibrary);
+    document.addEventListener("visibilitychange", recoverLibrary);
     return () => {
       window.removeEventListener("focus", refresh);
+      window.removeEventListener("online", refresh);
       document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("focus", recoverLibrary);
+      window.removeEventListener("online", recoverLibrary);
+      document.removeEventListener("visibilitychange", recoverLibrary);
     };
   }, [buyerSession?.accessToken, signedIn, selectedEntitlementId]);
 
@@ -661,14 +700,73 @@ function App() {
     });
   }
 
+  function clearConversationLibraryRetryTimer() {
+    if (conversationLibraryRetryTimerRef.current === null) return;
+    window.clearTimeout(conversationLibraryRetryTimerRef.current);
+    conversationLibraryRetryTimerRef.current = null;
+  }
+
+  function conversationLibraryScope(binding) {
+    return conversationLibraryRetryScope({
+      accountId: buyerProfile.id,
+      binding
+    });
+  }
+
+  function resetConversationLibraryRecovery(binding) {
+    const scope = conversationLibraryScope(binding);
+    conversationLibraryRetryControllerRef.current.reset(scope);
+    conversationLibraryRetryableRef.current = false;
+    clearConversationLibraryRetryTimer();
+  }
+
+  function scheduleConversationLibraryRetry(binding) {
+    const scope = conversationLibraryScope(binding);
+    const controller = conversationLibraryRetryControllerRef.current;
+    controller.setScope(scope);
+    const retry = controller.nextAutomaticRetry({ retryable: true });
+    if (!retry) return false;
+    clearConversationLibraryRetryTimer();
+    conversationLibraryRetryTimerRef.current = window.setTimeout(() => {
+      conversationLibraryRetryTimerRef.current = null;
+      if (!signedIn || !buyerSession?.accessToken || conversationLibraryLoadingRef.current) return;
+      const currentBinding = conversationBindingFor();
+      if (!currentBinding || conversationLibraryScope(currentBinding) !== scope) return;
+      setConversationLibraryRetryNonce((current) => current + 1);
+    }, retry.delay);
+    return true;
+  }
+
+  function triggerConversationLibraryRecovery({ manual = false } = {}) {
+    if (!signedIn || !buyerSession?.accessToken || !selectedEntitlementId) return false;
+    if (conversationLibraryStatusRef.current !== "unavailable"
+      || !conversationLibraryRetryableRef.current
+      || conversationLibraryLoadingRef.current) return false;
+    const binding = conversationBindingFor();
+    if (!binding?.entitlementId || !binding.creatorId || !binding.agentId) return false;
+    const controller = conversationLibraryRetryControllerRef.current;
+    const scope = conversationLibraryScope(binding);
+    controller.setScope(scope);
+    if (manual && !controller.allowManualTrigger()) return false;
+    clearConversationLibraryRetryTimer();
+    setConversationLibraryRetryNonce((current) => current + 1);
+    return true;
+  }
+
   async function loadConversationLibrary() {
     if (!signedIn || !buyerSession?.accessToken || !selectedEntitlementId) {
+      conversationLibraryLoadingRef.current = false;
+      conversationLibraryRetryableRef.current = false;
+      clearConversationLibraryRetryTimer();
       setConversations([]);
       setConversationLibraryStatus("idle");
       return;
     }
     const binding = conversationBindingFor();
     if (!binding?.entitlementId || !binding.creatorId || !binding.agentId) {
+      conversationLibraryLoadingRef.current = false;
+      conversationLibraryRetryableRef.current = false;
+      clearConversationLibraryRetryTimer();
       setConversationLibraryStatus("unavailable");
       setConversationLibraryError("Conversation Library is waiting for the Agent binding.");
       return;
@@ -681,6 +779,9 @@ function App() {
       // saved Agent binding. Do not guess from profile order or silently
       // create a replacement under another Agent; require an explicit
       // server-issued route/context on the next open.
+      conversationLibraryLoadingRef.current = false;
+      conversationLibraryRetryableRef.current = false;
+      clearConversationLibraryRetryTimer();
       setConversationLibraryStatus("unavailable");
       setConversationLibraryError("This Conversation window needs its Creator Agent binding before it can be restored.");
       return;
@@ -689,10 +790,13 @@ function App() {
       // Wait for the context-binding selector effect to choose the exact
       // Creator Agent. Never issue a Library request for the profile's
       // default Agent while a restored secondary window is still rebinding.
+      conversationLibraryLoadingRef.current = false;
       setConversationLibraryStatus("loading");
       return;
     }
     const requestId = ++conversationLibraryRequestRef.current;
+    conversationLibraryLoadingRef.current = true;
+    conversationLibraryRetryControllerRef.current.setScope(conversationLibraryScope(binding));
     setConversationLibraryStatus("loading");
     setConversationLibraryError("");
     try {
@@ -723,6 +827,7 @@ function App() {
       let nextId = requestedServerConversation || savedServerConversation || nextConversations[0]?.id || "";
 
       if (!nextId && !requestedServerConversation) {
+        if (requestId !== conversationLibraryRequestRef.current) return;
         const creation = conversationCreationRequest(binding, "bootstrap");
         try {
           const created = await createConversation(serverUrl, buyerSession.accessToken, binding, {
@@ -755,6 +860,8 @@ function App() {
       requestedConversationIdRef.current = "";
       setConversations(nextConversations);
       setConversationLibraryStatus("ready");
+      conversationLibraryLoadingRef.current = false;
+      resetConversationLibraryRecovery(binding);
     } catch (error) {
       if (requestId !== conversationLibraryRequestRef.current) return;
       // A server without the P2 Library API can still serve legacy transcript
@@ -763,6 +870,15 @@ function App() {
       setConversationLibraryStatus("unavailable");
       setConversationLibraryError(errorMessage(error));
       setStatus("Conversation Library unavailable — keeping the legacy session.");
+      conversationLibraryLoadingRef.current = false;
+      const retryable = isRetryableConversationLibraryError(error);
+      conversationLibraryRetryableRef.current = retryable;
+      if (retryable) {
+        scheduleConversationLibraryRetry(binding);
+      } else {
+        conversationLibraryRetryControllerRef.current.reset(conversationLibraryScope(binding));
+        clearConversationLibraryRetryTimer();
+      }
     }
   }
 
@@ -771,8 +887,10 @@ function App() {
     void loadConversationLibrary();
     return () => {
       conversationLibraryRequestRef.current += 1;
+      conversationLibraryLoadingRef.current = false;
+      clearConversationLibraryRetryTimer();
     };
-  }, [buyerSession?.accessToken, selectedEntitlementId, signedIn, windowContextReady]);
+  }, [buyerSession?.accessToken, conversationLibraryRetryNonce, selectedEntitlementId, signedIn, windowContextReady]);
 
   function isCurrentRuntimeTransport(socket, requestToken) {
     return Boolean(
