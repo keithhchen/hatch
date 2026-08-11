@@ -22,16 +22,29 @@ import {
 import { StreamdownTextPrimitive } from "@assistant-ui/react-streamdown";
 import {
   ArrowUp,
+  Ban,
+  Check,
   ChevronDown,
   ChevronRight,
+  CircleAlert,
+  ExternalLink,
+  FilePenLine,
+  FileSearch,
+  FileText,
   FolderOpen,
+  GitCompareArrows,
+  Globe2,
+  ListTree,
   LoaderCircle,
   MessageSquare,
   Paperclip,
+  Plug,
   Plus,
   RefreshCw,
   ShieldAlert,
-  Square
+  Square,
+  SquareTerminal,
+  Wrench
 } from "lucide-react";
 import "streamdown/styles.css";
 import "../../../packages/brand/tokens.css";
@@ -4232,7 +4245,7 @@ function AssistantActivityBlock({ indices, children }) {
   const tone = filtered || failed ? "failed" : isRunning ? "running" : "completed";
   const summaryContent = (
     <>
-      <span className="assistant-activity-icon" aria-hidden="true">{icon}</span>
+      <span className="assistant-activity-icon" aria-hidden="true"><ActivityGlyph icon={icon} /></span>
       <span className="assistant-activity-title">{summary}</span>
       {visibleActivityParts.length > 0 ? (
         <ChevronDown className="activity-group-chevron" aria-hidden="true" />
@@ -4308,7 +4321,7 @@ function TimelineToolGroup({ indices, children }) {
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary>
-        <span className="activity-group-icon" aria-hidden="true">▤</span>
+        <span className="activity-group-icon" aria-hidden="true"><Wrench /></span>
         <span>Used {count} tools</span>
         <ChevronDown className="activity-group-chevron" aria-hidden="true" />
       </summary>
@@ -4321,6 +4334,27 @@ function TimelineToolGroup({ indices, children }) {
 
 function PlainText({ text }) {
   return <p className="plain-text">{text}</p>;
+}
+
+const ACTIVITY_GLYPHS = {
+  "◎": Globe2,
+  "⌕": FileSearch,
+  "▣": FileText,
+  "☷": ListTree,
+  "✎": FilePenLine,
+  ">_": SquareTerminal,
+  "Δ": GitCompareArrows,
+  "↗": ExternalLink,
+  "◇": Plug,
+  "✓": Check,
+  "⊘": Ban,
+  "!": CircleAlert,
+  "✦": LoaderCircle
+};
+
+function ActivityGlyph({ icon }) {
+  const Icon = ACTIVITY_GLYPHS[icon] ?? Wrench;
+  return <Icon />;
 }
 
 function AssistantMarkdownPart() {
@@ -4424,7 +4458,7 @@ function HatchToolCall(props) {
       })}
     >
       <div className="tool-summary">
-        <span className="tool-icon">{display.icon}</span>
+        <span className="tool-icon"><ActivityGlyph icon={display.icon} /></span>
         <span className="tool-label">{label}</span>
         {summary ? (
           <span

@@ -830,18 +830,17 @@ h2 {
 
 .assistant-activity-summary {
   align-items: center;
-  border-bottom: 1px solid var(--hatch-border-subtle);
   color: var(--hatch-text-secondary);
   display: grid;
   font-size: 14px;
-  font-weight: 720;
+  font-weight: 600;
   gap: 9px;
   grid-template-columns: 20px minmax(0, 1fr);
   list-style: none;
-  margin: 0 0 12px;
+  margin: 0 0 8px;
   max-width: min(820px, 100%);
-  min-height: 34px;
-  padding: 1px 0 10px;
+  min-height: 30px;
+  padding: 1px 0 4px;
   user-select: none;
   -webkit-user-select: none;
 }
@@ -863,7 +862,7 @@ h2 {
 
 .assistant-activity-summary.expandable {
   cursor: pointer;
-  grid-template-columns: 20px minmax(0, 1fr) 18px;
+  grid-template-columns: 20px minmax(0, 1fr) 14px;
 }
 
 .assistant-activity-items {
@@ -876,10 +875,19 @@ h2 {
 }
 
 .assistant-activity-icon {
+  align-items: center;
   color: var(--hatch-text-secondary);
-  font-family: var(--hatch-font-mono);
-  font-size: 13px;
+  display: inline-flex;
+  justify-content: center;
   text-align: center;
+}
+
+.assistant-activity-icon svg,
+.activity-group-icon svg,
+.tool-icon svg {
+  height: 14px;
+  stroke-width: 1.7;
+  width: 14px;
 }
 
 .assistant-activity-title {
@@ -892,8 +900,11 @@ h2 {
 .activity-group-chevron {
   color: color-mix(in srgb, var(--hatch-text-secondary) 72%, transparent);
   display: inline-flex;
+  height: 13px;
   justify-content: center;
+  stroke-width: 1.7;
   transition: transform 140ms ease;
+  width: 13px;
 }
 
 .assistant-activity-block:not([open]) > summary .activity-group-chevron,
@@ -1118,17 +1129,18 @@ h2 {
 .activity-tool-group > summary {
   cursor: pointer;
   font-size: 13px;
-  font-weight: 720;
-  grid-template-columns: 20px minmax(0, 1fr) 18px;
+  font-weight: 600;
+  grid-template-columns: 20px minmax(0, 1fr) 14px;
   list-style: none;
   user-select: none;
   -webkit-user-select: none;
 }
 
 .activity-group-icon {
+  align-items: center;
   color: var(--hatch-text-secondary);
-  font-family: var(--hatch-font-mono);
-  font-size: 12px;
+  display: inline-flex;
+  justify-content: center;
   text-align: center;
 }
 
@@ -1237,16 +1249,17 @@ h2 {
 }
 
 .tool-icon {
+  align-items: center;
   color: var(--hatch-text-secondary);
-  font-family: var(--hatch-font-mono);
-  font-size: 12px;
+  display: inline-flex;
+  justify-content: center;
   text-align: center;
 }
 
 .tool-label {
   color: var(--hatch-text-secondary);
   font-size: 13px;
-  font-weight: 680;
+  font-weight: 540;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
