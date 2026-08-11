@@ -5,6 +5,7 @@ import {
   fetchAuthAccount,
   hydrateAuthSession,
   isAuthInvalidError,
+  isRemoteAuthSessionCleared,
   isNetworkError,
   loadSavedAuthSession,
   revokeAuthSession,
@@ -129,6 +130,13 @@ describe("account sessions", () => {
     }, { strict: true });
 
     await expect(loadSavedAuthSession(storage)).resolves.toBeNull();
+  });
+
+  it("accepts only a cleared event from another native window", () => {
+    expect(isRemoteAuthSessionCleared({ kind: "cleared", sourceWindow: "conversation-2" }, "main")).toBe(true);
+    expect(isRemoteAuthSessionCleared({ kind: "cleared", sourceWindow: "main" }, "main")).toBe(false);
+    expect(isRemoteAuthSessionCleared({ kind: "cleared" }, "main")).toBe(false);
+    expect(isRemoteAuthSessionCleared({ kind: "signed-in", sourceWindow: "conversation-2" }, "main")).toBe(false);
   });
 });
 

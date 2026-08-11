@@ -50,6 +50,7 @@ import {
 import {
   clearAuthSession,
   createTauriAuthStorage,
+  isRemoteAuthSessionCleared,
   loadSavedAuthSession,
   isAuthInvalidError,
   isNetworkError,
@@ -204,6 +205,7 @@ function App() {
   const intentionalDisconnectRef = useRef(true);
   const approvalResolversRef = useRef(new Map());
   const pendingLocalToolsRef = useRef(new Map());
+  const buyerSessionRef = useRef(null);
   const entitlementRefreshRef = useRef(false);
   const lastEntitlementRefreshRef = useRef(0);
   const nativeCommandHandlersRef = useRef({});
@@ -266,6 +268,7 @@ function App() {
   const composerDraftRef = useRef("");
   const buyerProfile = buyerSession?.profile ?? EMPTY_PROFILE;
   const signedIn = authState === "signed-in";
+  buyerSessionRef.current = buyerSession;
 
   useEffect(() => {
     droppedFilesRef.current = droppedFiles;
@@ -457,6 +460,30 @@ function App() {
     setSettingsMigrationNotice("");
     connectionConfigRef.current = null;
   }
+
+  // Session storage is process-wide while each WebView owns independent React
+  // state. Native clear_auth_token broadcasts only a semantic event so every
+  // other Conversation window drops its stale in-memory bearer and returns to
+  // Sign in; the source window is ignored because its own caller resets it.
+  useEffect(() => {
+    if (!window.__TAURI_INTERNALS__) return undefined;
+    const sourceWindow = getCurrentWindow().label;
+    let disposed = false;
+    let unlisten;
+    void listen("hatch://auth-session", ({ payload }) => {
+      if (disposed || !isRemoteAuthSessionCleared(payload, sourceWindow)) return;
+      if (!buyerSessionRef.current?.accessToken) return;
+      resetToSignedOut();
+      setSignInError("This session was signed out in another Hatch window.");
+    }).then((dispose) => {
+      unlisten = dispose;
+      if (disposed) unlisten?.();
+    }).catch(() => {});
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
 
   async function synchronizeNativeToolContext(accessSnapshot) {
     const workspaceGrantId = String(accessSnapshot?.workspaceGrantId || "").trim();

@@ -176,6 +176,14 @@ export function isAuthInvalidError(error) {
   return error?.code === "auth_invalid" || error?.status === 401;
 }
 
+export function isRemoteAuthSessionCleared(payload, sourceWindow) {
+  const eventSource = String(payload?.sourceWindow || "").trim();
+  const currentWindow = String(sourceWindow || "").trim();
+  return payload?.kind === "cleared"
+    && Boolean(eventSource)
+    && eventSource !== currentWindow;
+}
+
 function makeSessionFromAccount(account, accessToken, expiresAt) {
   return makeSession({
     id: account.id,

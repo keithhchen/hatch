@@ -1475,16 +1475,28 @@ fn write_auth_token(token: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn clear_auth_token() -> Result<(), String> {
-    match secure_session_storage()? {
-        SecureSessionStorage::Ephemeral => clear_ephemeral_auth_token(),
+fn clear_auth_token(window: WebviewWindow) -> Result<(), String> {
+    let result = match secure_session_storage() {
+        Err(error) => Err(error),
+        Ok(SecureSessionStorage::Ephemeral) => clear_ephemeral_auth_token(),
         #[cfg(target_os = "macos")]
-        SecureSessionStorage::Persistent => {
+        Ok(SecureSessionStorage::Persistent) => {
             delete_keychain_secret_if_present(PRODUCTION_CREDENTIAL_SERVICE)
         }
         #[cfg(target_os = "windows")]
-        SecureSessionStorage::Persistent => Err(windows_persistent_session_error()),
-    }
+        Ok(SecureSessionStorage::Persistent) => Err(windows_persistent_session_error()),
+    };
+    // The token itself never crosses this event. Other conversation windows
+    // must drop their in-memory session after logout/401, even when clearing
+    // the native store reports an error in a signed release build.
+    let _ = window.app_handle().emit(
+        "hatch://auth-session",
+        serde_json::json!({
+            "kind": "cleared",
+            "sourceWindow": window.label()
+        }),
+    );
+    result
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
