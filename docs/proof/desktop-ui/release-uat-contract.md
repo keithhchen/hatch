@@ -23,7 +23,7 @@ The manifest has this minimum identity:
 {
   "schema_version": 1,
   "kind": "hatch-desktop-release-artifact",
-  "source": { "git_sha": "<40-hex SHA>", "github_run_id": "<run>" },
+  "source": { "git_sha": "<40-hex SHA>", "github_run_id": "<current run>" },
   "release": { "tag": "v1.2.3" },
   "package": {
     "platform": "macos",
@@ -43,9 +43,10 @@ The manifest has this minimum identity:
 
 The DMG and manifest are uploaded in one immutable Actions artifact. The
 manifest is not trusted merely because it is JSON: the target and publication
-jobs hash the downloaded DMG again and compare bytes, hash, source SHA, and
-tag. A different file, a changed manifest, a different source, or a different
-tag stops the lane.
+jobs hash the downloaded DMG again and compare bytes, hash, source SHA, tag,
+and the current workflow run ID. A different file, a changed manifest, a
+different source, a different tag, or an artifact from another run stops the
+lane.
 
 ## Target-device gate
 

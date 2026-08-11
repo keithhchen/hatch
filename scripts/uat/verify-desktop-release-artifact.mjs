@@ -17,7 +17,8 @@ export async function verifyDesktopReleaseArtifact({
   artifactDirectory,
   expectedSha256 = null,
   expectedSourceSha = null,
-  expectedReleaseTag = null
+  expectedReleaseTag = null,
+  expectedRunId = null
 }) {
   if (!reportFile || !artifactDirectory) throw new Error("reportFile and artifactDirectory are required.");
 
@@ -37,6 +38,9 @@ export async function verifyDesktopReleaseArtifact({
   }
   if (expectedReleaseTag && report.release.tag !== expectedReleaseTag) {
     throw new Error("The supplied expected release tag does not match the release evidence report.");
+  }
+  if (expectedRunId && String(report.source.github_run_id ?? "") !== String(expectedRunId)) {
+    throw new Error("The supplied expected workflow run ID does not match the release evidence report.");
   }
 
   const candidates = (await findDesktopArtifacts(artifactDirectory, ".dmg"))
@@ -115,7 +119,14 @@ function readCliArguments(argv) {
     if (!value || values.has(name)) throw new Error(`Expected one value for --${name}.`);
     values.set(name, value);
   }
-  const accepted = new Set(["report", "artifact-dir", "expected-sha256", "expected-source-sha", "expected-release-tag"]);
+  const accepted = new Set([
+    "report",
+    "artifact-dir",
+    "expected-sha256",
+    "expected-source-sha",
+    "expected-release-tag",
+    "expected-run-id"
+  ]);
   for (const name of values.keys()) {
     if (!accepted.has(name)) throw new Error(`Unknown argument --${name}.`);
   }
@@ -124,7 +135,8 @@ function readCliArguments(argv) {
     artifactDirectory: values.get("artifact-dir"),
     expectedSha256: values.get("expected-sha256") ?? null,
     expectedSourceSha: values.get("expected-source-sha") ?? null,
-    expectedReleaseTag: values.get("expected-release-tag") ?? null
+    expectedReleaseTag: values.get("expected-release-tag") ?? null,
+    expectedRunId: values.get("expected-run-id") ?? null
   };
 }
 

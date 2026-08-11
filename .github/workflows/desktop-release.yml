@@ -179,6 +179,7 @@ jobs:
           EXPECTED_RELEASE_SHA256: ${{ needs.build-release.outputs.artifact_sha256 }}
           EXPECTED_SOURCE_SHA: ${{ github.sha }}
           EXPECTED_RELEASE_TAG: ${{ github.ref_name }}
+          EXPECTED_RELEASE_RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
           mkdir -p evidence
@@ -189,7 +190,8 @@ jobs:
             --artifact-dir candidate \
             --expected-sha256 "$EXPECTED_RELEASE_SHA256" \
             --expected-source-sha "$EXPECTED_SOURCE_SHA" \
-            --expected-release-tag "$EXPECTED_RELEASE_TAG" | tee evidence/package-verification.json
+            --expected-release-tag "$EXPECTED_RELEASE_TAG" \
+            --expected-run-id "$EXPECTED_RELEASE_RUN_ID" | tee evidence/package-verification.json
       - name: Install, cold launch, and collect signed-package evidence
         run: |
           set -euo pipefail
@@ -261,6 +263,7 @@ jobs:
           EXPECTED_RELEASE_SHA256: ${{ needs.build-release.outputs.artifact_sha256 }}
           EXPECTED_SOURCE_SHA: ${{ github.sha }}
           EXPECTED_RELEASE_TAG: ${{ github.ref_name }}
+          EXPECTED_RELEASE_RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
           report_path="$(find candidate -type f -name release-artifact.json -print -quit)"
@@ -270,7 +273,8 @@ jobs:
             --artifact-dir candidate \
             --expected-sha256 "$EXPECTED_RELEASE_SHA256" \
             --expected-source-sha "$EXPECTED_SOURCE_SHA" \
-            --expected-release-tag "$EXPECTED_RELEASE_TAG"
+            --expected-release-tag "$EXPECTED_RELEASE_TAG" \
+            --expected-run-id "$EXPECTED_RELEASE_RUN_ID"
       - name: Attach exact DMG and provenance manifest to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}

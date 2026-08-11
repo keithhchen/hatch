@@ -55,10 +55,23 @@ test("verifies the exact downloaded release bytes and source/tag binding", async
     artifactDirectory: path.join(candidate.root, "bundle"),
     expectedSha256: candidate.report.package.sha256,
     expectedSourceSha: SOURCE_SHA,
-    expectedReleaseTag: "v1.2.3"
+    expectedReleaseTag: "v1.2.3",
+    expectedRunId: "4242"
   });
   assert.equal(result.verified, true);
   assert.equal(result.package.sha256, candidate.report.package.sha256);
+});
+
+test("rejects a manifest from a different workflow run", async (t) => {
+  const candidate = await fixture(t);
+  await assert.rejects(
+    verifyDesktopReleaseArtifact({
+      reportFile: candidate.output,
+      artifactDirectory: path.join(candidate.root, "bundle"),
+      expectedRunId: "different-run"
+    }),
+    /workflow run ID/
+  );
 });
 
 test("rejects changed package bytes or a different source SHA", async (t) => {
