@@ -99,18 +99,21 @@ The signed macOS lane is intentionally a three-stage contract:
    the Developer ID build plus notarization/stapling in the protected
    `desktop-production` Environment.
 2. After stapling, the job writes
-   `release-artifact.json`. It records the source SHA, tag, filename, byte
-   count, and `sha256:<64 hex digits>` of the final DMG, as well as the signed,
-   notarized, persistent-session contract. The manifest and DMG are uploaded
-   together as one immutable artifact named for the workflow run.
+   `release-artifact.json`. It records the source SHA, current workflow run ID,
+   tag, filename, byte count, and `sha256:<64 hex digits>` of the final DMG,
+   as well as the signed, notarized, persistent-session contract and the
+   Developer ID signing identity, Team ID, and bundle identifier. The manifest
+   and DMG are uploaded together as one immutable artifact named for the
+   workflow run.
 3. `release-target-uat` downloads that same artifact, but checks out the
-   protected default branch for the verifier. It rejects any source/tag/hash
-   mismatch before a dedicated interactive `self-hosted, macos, arm64` runner
-   installs and cold-launches the exact DMG. `codesign`, Gatekeeper (`spctl`),
-   stapler validation, screenshot, and process/log evidence are collected. A
-   required reviewer on `desktop-release-uat` must inspect the screenshot and
-   verify the clean restart/Keychain, Workspace grant, native menu, resize,
-   and accessibility checklist for that exact hash.
+   protected default branch for the verifier. It rejects any source/run/tag/
+   hash/provenance mismatch before a dedicated interactive
+   `self-hosted, macos, arm64` runner installs and cold-launches the exact DMG.
+   `codesign`, Gatekeeper (`spctl`), stapler validation, screenshot, and
+   process/log evidence are collected. A required reviewer on
+   `desktop-release-uat` must inspect the screenshot and verify the clean
+   restart/Keychain, Workspace grant, native menu, resize, and accessibility
+   checklist for that exact hash.
 
 Only when both protected jobs succeed does `publish-release` download and
 re-verify the immutable artifact and attach that exact DMG plus its manifest to

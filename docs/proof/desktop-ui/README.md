@@ -87,7 +87,7 @@ resulting capture is checked in as
 
 ## Automated evidence recorded with these captures
 
-- Renderer: 22 files / 98 tests
+- Renderer: 23 files / 102 tests
 - Rust Tauri library: 44 passed / 1 ignored (unlocked Keychain smoke)
 - Runtime: 226 Node subtests passed with an isolated `HATCH_RUNTIME_DATA_DIR`
 - LocalRunner: 43 tests passed (filesystem, shell and macOS Seatbelt suites)
