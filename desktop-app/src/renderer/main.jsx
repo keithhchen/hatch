@@ -4235,7 +4235,7 @@ function AssistantActivityBlock({ indices, children }) {
       <span className="assistant-activity-icon" aria-hidden="true">{icon}</span>
       <span className="assistant-activity-title">{summary}</span>
       {visibleActivityParts.length > 0 ? (
-        <span className="activity-group-chevron" aria-hidden="true">⌄</span>
+        <ChevronDown className="activity-group-chevron" aria-hidden="true" />
       ) : null}
     </>
   );
@@ -4310,7 +4310,7 @@ function TimelineToolGroup({ indices, children }) {
       <summary>
         <span className="activity-group-icon" aria-hidden="true">▤</span>
         <span>Used {count} tools</span>
-        <span className="activity-group-chevron" aria-hidden="true">⌄</span>
+        <ChevronDown className="activity-group-chevron" aria-hidden="true" />
       </summary>
       <div className="activity-tool-items">
         {children}
