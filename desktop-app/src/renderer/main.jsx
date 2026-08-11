@@ -90,6 +90,7 @@ import {
 } from "./desktop-auth-flow.js";
 import { openCreatorAgentCatalog } from "./catalog-opener.js";
 import { projectApprovedRuntimeStream, summarizeTurnTiming } from "./stream-projection.js";
+import { createTextRevealController, textRevealBoundary } from "./text-reveal.js";
 import { createTauriSettingsStore } from "./desktop-settings.js";
 import {
   importLegacyProfileSettings,
@@ -246,6 +247,8 @@ function App() {
   const approvalResolversRef = useRef(new Map());
   const pendingLocalToolsRef = useRef(new Map());
   const buyerSessionRef = useRef(null);
+  const textRevealSinkRef = useRef(null);
+  const textRevealRef = useRef(null);
   const entitlementRefreshRef = useRef(false);
   const lastEntitlementRefreshRef = useRef(0);
   const nativeCommandHandlersRef = useRef({});
@@ -349,6 +352,19 @@ function App() {
   useEffect(() => () => {
     void discardNativeDropContexts(droppedFilesRef.current.map((file) => file.contextId));
   }, []);
+
+  textRevealSinkRef.current = appendAssistantText;
+  if (!textRevealRef.current) {
+    textRevealRef.current = createTextRevealController({
+      onReveal: ({ assistantId, content }) => {
+        textRevealSinkRef.current?.(assistantId, content);
+      },
+      shouldRevealImmediately: () => (
+        document.visibilityState !== "visible"
+        || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+      )
+    });
+  }
 
   selectedEntitlementIdRef.current = selectedEntitlementId;
 
@@ -940,6 +956,17 @@ function App() {
     }
   }
 
+  useEffect(() => {
+    const flushHiddenText = () => {
+      if (document.visibilityState !== "visible") textRevealRef.current?.flush();
+    };
+    document.addEventListener("visibilitychange", flushHiddenText);
+    return () => {
+      document.removeEventListener("visibilitychange", flushHiddenText);
+      textRevealRef.current?.discard();
+    };
+  }, []);
+
   const send = useCallback((message) => {
     const socket = socketRef.current;
     return sendRuntimeMessage(socket, connectionTokenRef.current, message);
@@ -1043,6 +1070,7 @@ function App() {
 
     const assistantId = `${runId}_assistant`;
     const startedAt = Date.now();
+    textRevealRef.current?.discard();
     activeRunRef.current = {
       runId,
       clientMessageId,
@@ -1868,6 +1896,7 @@ function App() {
     });
     socket.addEventListener("close", () => {
       if (socketRef.current !== socket) return;
+      textRevealRef.current?.flush(activeRunRef.current?.runId);
       rejectPendingApprovals();
       void cancelPendingLocalTools("transport_failure").then((stopped) => {
         if (!stopped && isCurrentRuntimeTransport(socket, requestToken)) {
@@ -1891,6 +1920,7 @@ function App() {
   }
 
   function disconnectRuntime() {
+    textRevealRef.current?.flush(activeRunRef.current?.runId);
     intentionalDisconnectRef.current = true;
     const disconnectToken = ++connectionTokenRef.current;
     connectingRef.current = false;
@@ -1934,13 +1964,24 @@ function App() {
       return;
     }
 
+    const revealBoundary = textRevealBoundary(message);
+    if (revealBoundary === "flush") {
+      textRevealRef.current?.flush(message.run_id);
+    } else if (revealBoundary === "discard") {
+      textRevealRef.current?.discard(message.run_id);
+    }
+
     if (message.type === "assistant.delta") {
       if (!message.run_id || activeRunRef.current?.runId !== message.run_id) return;
       if (message.delta.kind === "text") {
         const projection = projectApprovedRuntimeStream(activeRunRef.current, message);
         if (!projection) return;
         activeRunRef.current = projection.activeRun;
-        appendAssistantText(projection.assistantId, projection.content);
+        textRevealRef.current?.enqueue({
+          runId: message.run_id,
+          assistantId: projection.assistantId,
+          content: projection.content
+        });
       } else {
         setStatus(message.delta.content);
         updateAssistantMetadataForRun(message.run_id, {
@@ -2436,6 +2477,7 @@ function App() {
     if (shouldOpenNewConversationInWindow(activeRunRef.current)) {
       return startNewConversationInWindow();
     }
+    textRevealRef.current?.discard();
     const nextId = await createLibraryConversation();
     if (!nextId) return "";
     disconnectRuntime();
@@ -2668,6 +2710,7 @@ function App() {
 
   function clearInterruptedRun() {
     const dismissedRunId = String(activeRunRef.current?.runId || interruptedRun?.runId || "").trim();
+    textRevealRef.current?.discard();
     activeRunRef.current = null;
     setInterruptedRun(null);
     setRunning(false);

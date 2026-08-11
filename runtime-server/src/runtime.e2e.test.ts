@@ -45,7 +45,11 @@ import {
   requireTool,
   toolRegistry
 } from "./tools.js";
-import type { OutputGuard, OutputGuardInput } from "./outputGuard.js";
+import {
+  DEFAULT_OUTPUT_GUARD_FIRST_SEGMENT_CHARS,
+  type OutputGuard,
+  type OutputGuardInput
+} from "./outputGuard.js";
 
 let runtimeServer: RuntimeServer | undefined;
 let tempDirs: string[] = [];
@@ -379,7 +383,7 @@ test("runtime server exposes visible conversation history for client hydration",
 test("visible history preserves guarded text and tool interleave order", async () => {
   const dataDir = await tempWorkspace();
   const store = new RuntimeStore(dataDir);
-  const beforeTool = "A".repeat(101);
+  const beforeTool = "A".repeat(DEFAULT_OUTPUT_GUARD_FIRST_SEGMENT_CHARS + 1);
   const afterTool = "After the tool.";
   const runtime: AgentRuntime = {
     async *run(input) {
@@ -451,9 +455,13 @@ test("visible history preserves guarded text and tool interleave order", async (
   const assistant = visible.find((message) => message.role === "assistant");
   assert.equal(assistant?.content, `${beforeTool}${afterTool}`);
   assert.deepEqual(assistant?.parts, [
-    { type: "text", start: 0, end: 100 },
+    { type: "text", start: 0, end: DEFAULT_OUTPUT_GUARD_FIRST_SEGMENT_CHARS },
     { type: "tool_call", tool_call_id: "call_interleave" },
-    { type: "text", start: 100, end: beforeTool.length + afterTool.length }
+    {
+      type: "text",
+      start: DEFAULT_OUTPUT_GUARD_FIRST_SEGMENT_CHARS,
+      end: beforeTool.length + afterTool.length
+    }
   ]);
   socket.close();
 });
@@ -473,7 +481,10 @@ test("Output Guard releases passed segments but commits only a blocked terminal 
       yield {
         type: "assistant.delta",
         run_id: input.run_id,
-        delta: { kind: "text", content: "a".repeat(101) }
+        delta: {
+          kind: "text",
+          content: "a".repeat(DEFAULT_OUTPUT_GUARD_FIRST_SEGMENT_CHARS + 1)
+        }
       };
       yield {
         type: "assistant.delta",
@@ -521,7 +532,7 @@ test("Output Guard releases passed segments but commits only a blocked terminal 
       .filter((message) => message.type === "assistant.delta" && message.delta.kind === "text")
       .map((message) => message.type === "assistant.delta" ? message.delta.content : "")
       .join(""),
-    "a".repeat(100)
+    "a".repeat(DEFAULT_OUTPUT_GUARD_FIRST_SEGMENT_CHARS)
   );
   assert.deepEqual(guardCalls.map(({ chatId, sessionId, done }) => [chatId, sessionId, done]), [
     ["run_guard_block", "run_guard_block", false],
