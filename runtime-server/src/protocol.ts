@@ -2,7 +2,11 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { Usage } from "@earendil-works/pi-ai";
 
+export const LEGACY_PROTOCOL_VERSION = "0.6";
 export const PROTOCOL_VERSION = "0.7";
+export const SUPPORTED_PROTOCOL_VERSIONS = [LEGACY_PROTOCOL_VERSION, PROTOCOL_VERSION] as const;
+export const ProtocolVersionSchema = z.enum(SUPPORTED_PROTOCOL_VERSIONS);
+export type ProtocolVersion = z.infer<typeof ProtocolVersionSchema>;
 export const MAX_TOOL_RESULT_BYTES = 4 * 1024 * 1024;
 export const MAX_PROTOCOL_ID_CHARS = 256;
 export const MAX_AUTH_TOKEN_CHARS = 4 * 1024;
@@ -32,7 +36,7 @@ export type ClientToolName = z.infer<typeof ClientToolNameSchema>;
 
 export const ClientHelloSchema = z.object({
   type: z.literal("client.hello"),
-  protocol_version: z.literal(PROTOCOL_VERSION),
+  protocol_version: ProtocolVersionSchema,
   installation_id: ProtocolIdSchema,
   auth_token: z.string().min(1).max(MAX_AUTH_TOKEN_CHARS).optional(),
   // Kept only for old local fixtures during the migration. Production clients
@@ -216,7 +220,7 @@ export type OutputFinishReason = "stop" | "content_filter";
 
 export type RuntimeReady = {
   type: "session.ready";
-  accepted_protocol_version: typeof PROTOCOL_VERSION;
+  accepted_protocol_version: ProtocolVersion;
   creator_id?: string;
   user_id: string;
   product_id: string;
