@@ -64,6 +64,18 @@ position and collapsed Inspector. These captures prove native shell-state
 recovery; renderer/Run attach-replay and real cloud Conversation recovery
 remain separate P4 gates.
 
+In a follow-up run, the same fixture held three dynamic windows at once. The
+native manifest contained exactly three distinct `conv_preview_*` IDs. Their
+window projections were different: Seth with a closed Sidebar and 120% zoom,
+Maya with a granted `harness talk` workspace, independent draft and 110% zoom,
+and a second Maya window with a different draft, non-zero scroll and collapsed
+Inspector. After terminating both preview processes with `SIGKILL`, the next
+launch restored the Seth window and retained all three IDs in the manifest.
+The third-window capture is `three-window-third-state.jpeg`; the restart
+capture is `three-window-sigkill-restored.jpeg`. This is still native
+application-shell evidence, not proof of three real cloud Conversations or
+in-flight Run recovery.
+
 On 2026-08-11 macOS UAT, a uniquely named preview bundle opened the primary
 window plus two `Hatch — Conversation` windows. The accessibility tree exposed
 different `conv_preview_*` URLs in each window. Closing the front window
@@ -117,6 +129,8 @@ and the corresponding Explorer/Open behavior remain target-device acceptance.
 | `crash-reload-draft-scroll-restored.jpeg` | After `SIGKILL` and relaunch, the Maya window restores its draft, Agent, scroll position and pane state |
 | `multi-window-draft-scroll-maya.jpeg` | Earlier persistence capture of a dynamic Maya window with an independent draft and scroll position |
 | `crash-reload-draft-zoom-restored.jpeg` | Earlier restart capture of a dynamic window restoring its independent draft and zoom |
+| `three-window-third-state.jpeg` | Third simultaneous dynamic window with Maya, its own draft, a different workspace grant and 110% zoom |
+| `three-window-sigkill-restored.jpeg` | After terminating the preview processes, the Seth dynamic window restores while the manifest retains three IDs |
 | `zoom-80-1180x780.jpeg` | 80% application zoom keeps all three panes, toolbar, table and composer reachable |
 | `zoom-150-1180x780.jpeg` | 150% application zoom promotes the conversation surface while keeping Send and structured content usable |
 | `zoom-200-table-overflow-1180x780.jpeg` | 200% application zoom collapses side panes and leaves table overflow local to its wrapper |
