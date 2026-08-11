@@ -33,6 +33,8 @@ describe("desktop system appearance contract", () => {
   it("keeps accessibility appearance and motion preferences in the stylesheet contract", () => {
     expect(stylesheet).toMatch(/\.desktop-window-shell\s+select\s*\{[^}]*accent-color:\s*var\(--hatch-accent\)/);
     expect(stylesheet).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*?transition-duration:\s*0\.01ms\s*!important/);
+    expect(stylesheet).toMatch(/\.activity-spinner\s*\{[\s\S]*?animation:\s*connection-spin 1s linear infinite;/);
+    expect(stylesheet).toMatch(/prefers-reduced-motion[\s\S]*?\.activity-spinner\s*\{\s*animation:\s*none;/);
     expect(stylesheet).toMatch(/@media\s*\(prefers-contrast:\s*more\)[\s\S]*?border-separator/);
     expect(stylesheet).toMatch(/\.desktop-window-shell\s+:focus-visible\s*\{[\s\S]*?outline:\s*2px\s+solid\s+var\(--focus-ring\)/);
   });
@@ -48,5 +50,26 @@ describe("desktop system appearance contract", () => {
   it("uses only the insertion caret for composer text focus", () => {
     expect(stylesheet).not.toMatch(/\.composer:focus-within\s*\{/);
     expect(stylesheet).toMatch(/\.desktop-window-shell \.composer-input:focus-visible\s*\{\s*outline:\s*none;\s*\}/);
+  });
+
+  it("keeps long-form Markdown on the measured reading rhythm", () => {
+    expect(stylesheet).toMatch(
+      /\.markdown-body\s*\{[\s\S]*?font-size:\s*16px;[\s\S]*?line-height:\s*26px;/
+    );
+    expect(stylesheet).toMatch(
+      /\.markdown-body h1\s*\{[\s\S]*?font-size:\s*24px;[\s\S]*?line-height:\s*32px;/
+    );
+    expect(stylesheet).toMatch(
+      /\.markdown-body blockquote::before\s*\{[\s\S]*?width:\s*3px;/
+    );
+    expect(stylesheet).toMatch(
+      /\.markdown-body th,\s*\.markdown-body td\s*\{[\s\S]*?border-bottom:\s*1px solid[^;]*;[\s\S]*?padding:\s*10px 24px 10px 0;/
+    );
+    expect(stylesheet).not.toMatch(/\.markdown-table-scroll\s*\{[^}]*border:\s*1px/);
+  });
+
+  it("keeps tool approvals inline instead of duplicating them above the composer", () => {
+    expect(stylesheet).toMatch(/\.approval-gate\s*\{/);
+    expect(stylesheet).not.toMatch(/\.composer-approval-banner\s*\{/);
   });
 });

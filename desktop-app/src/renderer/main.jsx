@@ -2715,12 +2715,6 @@ function App() {
     return () => document.removeEventListener("contextmenu", suppressProductContextMenu, true);
   }, []);
 
-  const pendingApprovalEntry = Object.entries(approvalRequests)
-    .find(([, request]) => request?.status === "pending");
-  const pendingApproval = pendingApprovalEntry
-    ? { toolCallId: pendingApprovalEntry[0], ...pendingApprovalEntry[1] }
-    : null;
-
   function clearInterruptedRun() {
     const dismissedRunId = String(activeRunRef.current?.runId || interruptedRun?.runId || "").trim();
     textRevealRef.current?.discard();
@@ -3218,12 +3212,6 @@ function App() {
                   <ThreadPrimitive.Messages components={{ Message: HatchMessage }} />
                 </ThreadPrimitive.Viewport>
                 <ThreadPrimitive.ViewportFooter className="composer-footer">
-                  {pendingApproval ? (
-                    <ComposerApprovalBanner
-                      approval={pendingApproval}
-                      onResolve={resolveToolApproval}
-                    />
-                  ) : null}
                   <ComposerPrimitive.Root className="composer">
                     <DesktopComposerInput
                       key={conversationId}
@@ -3631,25 +3619,6 @@ function DesktopComposerInput({
       {...props}
       onChange={(event) => onDraftChange?.(event.target.value)}
     />
-  );
-}
-
-function ComposerApprovalBanner({ approval, onResolve }) {
-  const message = approval?.message ?? {};
-  const reason = message.reason || approvalReasonText(message);
-  const command = message.name === "shell_exec" ? fullShellCommand(message) : "";
-  return (
-    <div className="composer-approval-banner" role="alert" aria-live="assertive">
-      <div className="composer-approval-copy">
-        <strong>Approval needed</strong>
-        <span>{reason}</span>
-        {command ? <code title={command}>{command}</code> : null}
-      </div>
-      <div className="approval-actions composer-approval-actions">
-        <button type="button" onClick={() => onResolve?.(approval.toolCallId, true)}>Allow</button>
-        <button className="secondary" type="button" onClick={() => onResolve?.(approval.toolCallId, false)}>Deny</button>
-      </div>
-    </div>
   );
 }
 
@@ -4354,7 +4323,7 @@ const ACTIVITY_GLYPHS = {
 
 function ActivityGlyph({ icon }) {
   const Icon = ACTIVITY_GLYPHS[icon] ?? Wrench;
-  return <Icon />;
+  return <Icon className={icon === "✦" ? "activity-spinner" : undefined} />;
 }
 
 function AssistantMarkdownPart() {

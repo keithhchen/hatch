@@ -890,6 +890,11 @@ h2 {
   width: 14px;
 }
 
+.activity-spinner {
+  animation: connection-spin 1s linear infinite;
+  transform-origin: center;
+}
+
 .assistant-activity-title {
   min-width: 0;
   overflow: hidden;
@@ -960,17 +965,17 @@ h2 {
 }
 
 .markdown-container {
-  display: grid;
-  gap: 10px;
+  display: block;
   max-width: 100%;
   min-width: 0;
   overflow: hidden;
 }
 
 .markdown-body {
-  color: #202522;
-  font-size: 15px;
-  line-height: 1.64;
+  color: var(--hatch-ink);
+  font-family: inherit;
+  font-size: 16px;
+  line-height: 26px;
   max-width: 100%;
   min-width: 0;
   overflow-wrap: break-word;
@@ -978,13 +983,76 @@ h2 {
   -webkit-user-select: text;
 }
 
-.markdown-body p,
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4 {
+  color: inherit;
+  font-family: inherit;
+  font-weight: 600;
+  letter-spacing: normal;
+}
+
+.markdown-body h1 {
+  font-size: 24px;
+  line-height: 32px;
+  margin: 0 0 8px;
+}
+
+.markdown-body h2 {
+  font-size: 20px;
+  line-height: 28px;
+  margin: 16px 0 4px;
+}
+
+.markdown-body h3 {
+  font-size: 18px;
+  line-height: 28px;
+  margin: 16px 0 4px;
+}
+
+.markdown-body h4 {
+  font-size: 16px;
+  line-height: 24px;
+  margin: 16px 0 0;
+}
+
+.markdown-body p {
+  margin: 8px 0 4px;
+}
+
 .markdown-body ul,
-.markdown-body ol,
-.markdown-body pre,
-.markdown-body blockquote,
-.markdown-body table {
-  margin: 0 0 12px;
+.markdown-body ol {
+  margin: 8px 0 4px;
+}
+
+.markdown-body pre {
+  margin: 8px 0 12px;
+}
+
+.markdown-body blockquote {
+  color: inherit;
+  font-style: normal;
+  line-height: 24px;
+  margin: 0 0 8px;
+  padding: 8px 0 8px 24px;
+  position: relative;
+}
+
+.markdown-body blockquote::before {
+  background: color-mix(in srgb, var(--hatch-ink) 16%, transparent);
+  border-radius: 999px;
+  bottom: 8px;
+  content: "";
+  left: 0;
+  position: absolute;
+  top: 8px;
+  width: 3px;
+}
+
+.markdown-body blockquote p {
+  line-height: 24px;
+  margin: 0 0 4px;
 }
 
 .markdown-body p:last-child,
@@ -1001,7 +1069,7 @@ h2 {
 }
 
 .markdown-body li {
-  margin: 0 0 8px;
+  margin: 4px 0;
   min-width: 0;
   padding-left: 2px;
 }
@@ -1021,7 +1089,7 @@ h2 {
 .markdown-body li > pre,
 .markdown-body li > blockquote {
   display: block;
-  margin-top: 8px;
+  margin-top: 4px;
 }
 
 .markdown-body ul:has(> .markdown-task-item) {
@@ -1094,8 +1162,11 @@ h2 {
 
 .markdown-body table {
   border-collapse: collapse;
+  color: inherit;
   display: table;
+  font-size: 14px;
   inline-size: max-content;
+  line-height: 24px;
   max-width: none;
   min-inline-size: 100%;
   overflow: visible;
@@ -1105,8 +1176,29 @@ h2 {
 
 .markdown-body th,
 .markdown-body td {
-  border: 1px solid var(--hatch-border-subtle);
-  padding: 6px 8px;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--hatch-ink) 8%, transparent);
+  padding: 10px 24px 10px 0;
+  text-align: left;
+  vertical-align: baseline;
+}
+
+.markdown-body th {
+  border-bottom-color: color-mix(in srgb, var(--hatch-ink) 18%, transparent);
+  font-weight: 600;
+  line-height: 16px;
+  padding-bottom: 8px;
+  padding-top: 8px;
+  vertical-align: bottom;
+}
+
+.markdown-body tr:last-child td {
+  border-bottom-color: transparent;
+}
+
+.markdown-body th:last-child,
+.markdown-body td:last-child {
+  padding-right: 0;
 }
 
 .activity-row,
@@ -1388,61 +1480,6 @@ h2 {
   overflow: hidden;
   padding: 18px 24px 22px;
   z-index: 5;
-}
-
-/* A pending tool approval is anchored to the composer as a durable action,
- * not only rendered in the historical tool row.  This keeps the decision
- * reachable while the transcript scrolls and makes the high-risk boundary
- * legible in every window tier without introducing a blocking OS sheet. */
-.composer-approval-banner {
-  align-items: center;
-  background: color-mix(in srgb, #fffaf0 88%, var(--hatch-panel));
-  border: 1px solid #e2d0a3;
-  border-radius: 10px;
-  display: flex;
-  gap: 12px;
-  justify-content: space-between;
-  margin: 0 auto 8px;
-  max-width: 960px;
-  min-width: 0;
-  padding: 8px 10px;
-  position: relative;
-  width: 100%;
-  z-index: 1;
-}
-
-.composer-approval-copy {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.composer-approval-copy strong {
-  color: #45391f;
-  font-size: 12px;
-}
-
-.composer-approval-copy span {
-  color: #6d6148;
-  font-size: 12px;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.composer-approval-copy code {
-  color: #6d6148;
-  font-family: var(--hatch-font-mono);
-  font-size: 11px;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.composer-approval-actions {
-  flex: 0 0 auto;
 }
 
 .composer {
@@ -2297,9 +2334,9 @@ button.composer-control:focus-visible {
 
 .markdown-table-scroll {
   -webkit-overflow-scrolling: touch;
-  border: 1px solid var(--border-separator);
-  border-radius: 8px;
-  margin: 0 0 12px;
+  border: 0;
+  border-radius: 0;
+  margin: 0 0 8px;
   max-inline-size: 100%;
   overflow-x: auto;
   overscroll-behavior-inline: contain;
@@ -2343,15 +2380,6 @@ button.composer-control:focus-visible {
     align-items: stretch;
     grid-template-columns: 1fr;
   }
-
-  .composer-approval-banner {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .composer-approval-actions {
-    justify-content: flex-end;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2362,7 +2390,8 @@ button.composer-control:focus-visible {
     transition-duration: 0.01ms !important;
   }
 
-  .connection-spinner { animation: none; }
+  .connection-spinner,
+  .activity-spinner { animation: none; }
 }
 
 .desktop-auxiliary-window {
