@@ -80,11 +80,11 @@ resulting capture is checked in as
 
 ## Automated evidence recorded with these captures
 
-- Renderer: 21 files / 89 tests
+- Renderer: 21 files / 92 tests
 - Rust Tauri library: 44 passed / 1 ignored (unlocked Keychain smoke)
 - Runtime: 226 Node subtests passed with an isolated `HATCH_RUNTIME_DATA_DIR`
 - LocalRunner: 43 tests passed (filesystem, shell and macOS Seatbelt suites)
-- `npm run build:web`
+- `npm run build:web` (latest recovery-hardening bundle)
 
 ## Desktop-native visual review
 
@@ -115,8 +115,9 @@ desktop application, rather than against a pixel-perfect macOS imitation:
 The native menu was also exercised against the built `.app`: View exposes
 dynamic Hide/Show Sidebar and Hide/Show Inspector labels, plus Zoom In, Zoom
 Out, Actual Size, and Enter Full Screen; Settings and About open as independent
-native auxiliary windows. The release build displayed the ordinary Sign in screen without a
-Login Keychain unlock prompt; persistent Keychain access remains restricted to
+native auxiliary windows. The latest rebuilt release `.app` was cold-launched after
+recovery hardening; its accessibility tree and screenshot showed the ordinary Sign in
+screen without a Login Keychain unlock prompt. Persistent Keychain access remains restricted to
 the separately configured Developer ID distribution lane. Workspace picker
 calls are parented to the invoking window, and artifact Reveal and Quick
 Look/Open accept only a grant ID plus a workspace-relative path; Rust re-checks
