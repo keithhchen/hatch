@@ -49,7 +49,7 @@ desktop-app: npm run build  # strict ad-hoc DMG UAT
 ```
 
 `npm run build:app` 与 `npm run build` 产物是 ad-hoc/UAT `.app`/DMG，当前验证的 DMG 为
-`Hatch_0.1.0_aarch64.dmg`（`sha256:4f71ac71c15c4311c9da9b259722ed440570af77a4be857eb42ebe016b94314b`）。它们不是可发布的 notarized artifact。正式发布必须在 CI 注入真实 Developer ID/Team ID，并完成签名、notarization、安装后重启和无 prompt 验收。
+`Hatch_0.1.0_aarch64.dmg`（`sha256:fb32dafd82473e8d41e372e52d7fd8f5c2e4463e18f45c8dcb041bcebbfce267`）。它们不是可发布的 notarized artifact。正式发布必须在 CI 注入真实 Developer ID/Team ID，并完成签名、notarization、安装后重启和无 prompt 验收。
 
 本机另外尝试了 `x86_64-pc-windows-gnu` 交叉 `cargo check`，并生成并提交了
 Windows Tauri capability schema；检查在 Tauri 的 `tauri-winres` 阶段因本机没有
