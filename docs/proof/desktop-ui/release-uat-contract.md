@@ -61,7 +61,10 @@ lane.
 - Environment `desktop-production` with the Developer ID certificate,
   notarization credentials, Team ID, signing identity, runtime URL, and the
   exact post-signed-app smoke SHA;
-- Environment `desktop-release-uat` with required reviewers;
+- Environment `desktop-release-uat` with required reviewers to authorize use of
+  the dedicated interactive runner;
+- Environment `desktop-release-publish` with required reviewers to inspect the
+  completed target-UAT evidence before publication;
 - a disposable, interactive `self-hosted, macos, arm64` runner with screen
   capture permission and no production account/data;
 - the same default-branch verifier code as the workflow, kept under branch
@@ -94,11 +97,13 @@ The required reviewer checklist for the exact `package.sha256` includes:
 5. record any VoiceOver, drag/drop, IME, fullscreen, multi-display, or
    Workspace grant failure as a failed target UAT, not as a waiver.
 
-Only a successful protected target job can unlock `publish-release`. The
-publication job downloads and verifies the same immutable artifact a second
-time before attaching the DMG and manifest. If no target runner, secret, or
-review approval exists, the release remains unpublished; local ad-hoc UAT is
-not a bypass.
+Only a successful protected target job can enter `publish-release`; the
+`desktop-release-publish` approval is deliberately after target evidence exists,
+so a pre-flight runner approval cannot be mistaken for visual or Keychain
+acceptance. The publication job then downloads and verifies the same immutable
+artifact a second time before attaching the DMG and manifest. If no target
+runner, secret, or review approval exists, the release remains unpublished;
+local ad-hoc UAT is not a bypass.
 
 ## Local boundary
 

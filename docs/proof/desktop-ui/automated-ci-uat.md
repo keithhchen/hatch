@@ -110,17 +110,19 @@ The signed macOS lane is intentionally a three-stage contract:
    hash/provenance mismatch before a dedicated interactive
    `self-hosted, macos, arm64` runner installs and cold-launches the exact DMG.
    `codesign`, Gatekeeper (`spctl`), stapler validation, screenshot, and
-   process/log evidence are collected. A required reviewer on
-   `desktop-release-uat` must inspect the screenshot and verify the clean
-   restart/Keychain, Workspace grant, native menu, resize, and accessibility
-   checklist for that exact hash.
+   process/log evidence are collected. The `desktop-release-uat` Environment
+   approval authorizes use of the dedicated runner; it is not evidence review.
 
-Only when both protected jobs succeed does `publish-release` download and
-re-verify the immutable artifact and attach that exact DMG plus its manifest to
-the GitHub Release. A manual dispatch from a branch (rather than a tag) fails
-the signed-input step; it cannot publish a branch build accidentally. The
-release manifest helpers are covered by the same Node test lane as the ad-hoc
-UAT helpers:
+Only when both jobs succeed does `publish-release` enter the separately
+protected `desktop-release-publish` Environment. Its required reviewer can
+inspect the target job's screenshot/log artifact and verify the clean
+restart/Keychain, Workspace grant, native menu, resize, and accessibility
+checklist for that exact hash. After that post-UAT approval, the job downloads
+and re-verifies the immutable artifact and attaches that exact DMG plus its
+manifest to the GitHub Release. A manual dispatch from a branch (rather than a
+tag) fails the signed-input step; it cannot publish a branch build accidentally.
+The release manifest helpers are covered by the same Node test lane as the
+ad-hoc UAT helpers:
 
 ```text
 node --test scripts/uat/release-artifact.test.mjs

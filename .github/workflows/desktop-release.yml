@@ -248,6 +248,10 @@ jobs:
     needs: [build-release, release-target-uat]
     if: startsWith(github.ref, 'refs/tags/') && needs.build-release.result == 'success' && needs.release-target-uat.result == 'success'
     runs-on: ubuntu-latest
+    # This approval happens after the target job has produced its evidence.
+    # Configure required reviewers on this Environment; approving the
+    # pre-flight `desktop-release-uat` job alone must never publish a package.
+    environment: desktop-release-publish
     permissions:
       actions: read
       contents: write
