@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-request-window-attention"
+description = "Enables the request_window_attention command without any pre-configured scope."
+commands.allow = ["request_window_attention"]
+
+[[permission]]
+identifier = "deny-request-window-attention"
+description = "Denies the request_window_attention command without any pre-configured scope."
+commands.deny = ["request_window_attention"]

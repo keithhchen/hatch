@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-show-native-command-menu"
+description = "Enables the show_native_command_menu command without any pre-configured scope."
+commands.allow = ["show_native_command_menu"]
+
+[[permission]]
+identifier = "deny-show-native-command-menu"
+description = "Denies the show_native_command_menu command without any pre-configured scope."
+commands.deny = ["show_native_command_menu"]

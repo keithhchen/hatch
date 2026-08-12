@@ -6,8 +6,8 @@ import { RuntimeOptions } from "@alicloud/tea-util";
 
 export type OutputGuardVerdict = "pass" | "block";
 
-export const DEFAULT_OUTPUT_GUARD_FIRST_SEGMENT_CHARS = 100;
-export const DEFAULT_OUTPUT_GUARD_LATER_SEGMENT_CHARS = 250;
+export const DEFAULT_OUTPUT_GUARD_FIRST_SEGMENT_CHARS = 240;
+export const DEFAULT_OUTPUT_GUARD_LATER_SEGMENT_CHARS = 600;
 
 export const OUTPUT_GUARD_BLOCKED_MODEL_MESSAGE =
   "My previous response was blocked before delivery and was not shown to the user. I must not reproduce or continue the blocked content.";

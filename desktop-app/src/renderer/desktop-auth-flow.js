@@ -5,15 +5,22 @@ import {
   signInAuthSession
 } from "./auth-session.js";
 import { fetchPurchasedCreatorAgents } from "./entitlement-client.js";
+import { englishMessage } from "./i18n.js";
 
 export const CONSUMER_DESKTOP_ROLE_MESSAGE =
-  "This Creator account is valid, but Hatch Desktop is for buyer accounts. Sign out and use a buyer account.";
+  englishMessage("error.auth.unsupportedCreatorRole");
+export const CONSUMER_DESKTOP_ROLE_MESSAGE_KEY = "error.auth.unsupportedCreatorRole";
 
 export async function resolveDesktopSession(savedSession, registryUrl, fetchImpl = fetch) {
   const account = await fetchAuthAccount(registryUrl, savedSession.accessToken, fetchImpl);
   const session = hydrateAuthSession(savedSession, account);
   if (account.role !== "user") {
-    return Object.freeze({ state: "unsupported-role", session, entitlements: [] });
+    return Object.freeze({
+      state: "unsupported-role",
+      session,
+      entitlements: [],
+      messageKey: CONSUMER_DESKTOP_ROLE_MESSAGE_KEY
+    });
   }
   const entitlements = await fetchPurchasedCreatorAgents(registryUrl, session.accessToken, fetchImpl);
   return Object.freeze({ state: "ready", session, entitlements });

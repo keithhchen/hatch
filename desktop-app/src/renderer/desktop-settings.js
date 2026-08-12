@@ -1,6 +1,6 @@
 const SETTINGS_VERSION = 1;
 
-export function createDesktopSettingsStore({ read = async () => null, write = async () => {} } = {}) {
+export function createDesktopSettingsStore({ read = async () => null, write = async () => {}, patch = null } = {}) {
   let state = emptySettings();
   let loaded = false;
   let writeChain = Promise.resolve();
@@ -25,7 +25,7 @@ export function createDesktopSettingsStore({ read = async () => null, write = as
       if (!state.accounts[id]) state.accounts[id] = {};
       if (value === undefined) delete state.accounts[id][key];
       else state.accounts[id][key] = value;
-      persist();
+      persistProfilePatch(id, value === undefined ? { remove: [key] } : { set: { [key]: value } });
     },
     async importProfile(profileId, values) {
       if (!values || typeof values !== "object" || Array.isArray(values)) {
@@ -41,7 +41,7 @@ export function createDesktopSettingsStore({ read = async () => null, write = as
         }
       };
       try {
-        await enqueueWrite(JSON.stringify(state));
+        await enqueueProfilePatch(id, { set: values });
       } catch (error) {
         state = previous;
         throw error;
@@ -52,7 +52,7 @@ export function createDesktopSettingsStore({ read = async () => null, write = as
       const id = String(profileId || "anonymous");
       if (!state.accounts[id]) return;
       delete state.accounts[id][key];
-      persist();
+      persistProfilePatch(id, { remove: [key] });
     },
     async clearProfileKey(profileId, key) {
       const id = String(profileId || "anonymous");
@@ -68,7 +68,7 @@ export function createDesktopSettingsStore({ read = async () => null, write = as
         }
       };
       try {
-        await enqueueWrite(JSON.stringify(state));
+        await enqueueProfilePatch(id, { remove: [key] });
       } catch (error) {
         state = previous;
         throw error;
@@ -81,6 +81,21 @@ export function createDesktopSettingsStore({ read = async () => null, write = as
 
   function persist() {
     void enqueueWrite(JSON.stringify(state));
+  }
+
+  function persistProfilePatch(profileId, operation) {
+    if (typeof patch === "function") {
+      void enqueueProfilePatch(profileId, operation);
+    } else {
+      persist();
+    }
+  }
+
+  function enqueueProfilePatch(profileId, operation) {
+    if (typeof patch !== "function") return enqueueWrite(JSON.stringify(state));
+    const pending = writeChain.then(() => patch({ profileId, ...operation }));
+    writeChain = pending.catch(() => {});
+    return pending;
   }
 
   function enqueueWrite(serialized) {
@@ -108,6 +123,13 @@ export function createTauriSettingsStore(invokeImpl, { strict = false } = {}) {
         await invokeImpl("write_app_settings", { settings: serialized });
       } catch (error) {
         // Keep the in-memory fallback for the current renderer lifetime.
+        if (strict) throw error;
+      }
+    },
+    async patch(request) {
+      try {
+        await invokeImpl("patch_app_settings", { patch: request });
+      } catch (error) {
         if (strict) throw error;
       }
     }

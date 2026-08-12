@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ensure-workspace"
+description = "Enables the ensure_workspace command without any pre-configured scope."
+commands.allow = ["ensure_workspace"]
+
+[[permission]]
+identifier = "deny-ensure-workspace"
+description = "Denies the ensure_workspace command without any pre-configured scope."
+commands.deny = ["ensure_workspace"]

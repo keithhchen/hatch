@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-deny-pending-tool-call"
+description = "Enables the deny_pending_tool_call command without any pre-configured scope."
+commands.allow = ["deny_pending_tool_call"]
+
+[[permission]]
+identifier = "deny-deny-pending-tool-call"
+description = "Denies the deny_pending_tool_call command without any pre-configured scope."
+commands.deny = ["deny_pending_tool_call"]

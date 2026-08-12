@@ -1,0 +1,3 @@
+"NSDocumentsFolderUsageDescription" = "Hatch 需要访问你选择的工作区文件夹，以便本地工具读取和更新其中的文件。";
+"NSDesktopFolderUsageDescription" = "Hatch 需要访问你选择的工作区文件夹，以便本地工具读取和更新其中的文件。";
+"NSDownloadsFolderUsageDescription" = "Hatch 需要访问你选择的工作区文件夹，以便本地工具读取和更新其中的文件。";

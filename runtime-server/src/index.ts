@@ -16,6 +16,7 @@ import { createAgentRuntime, type AgentRuntime, type RuntimeSessionSkills } from
 import {
   clientMessageInputDigest,
   parseInboundMessage,
+  PROTOCOL_VERSION,
   type ClientHello,
   type OutboundMessage,
   type OutputFinishReason,
@@ -24,7 +25,7 @@ import {
 import { RunStateMachine } from "./runState.js";
 import { ServerToolExecutor } from "./serverTools.js";
 import { SkillRuntime } from "./skillRuntime.js";
-import { RuntimeStore } from "./store.js";
+import { RuntimeStore, type VisibleConversationPart } from "./store.js";
 import { PostgresStore } from "./postgresStore.js";
 import {
   assertConversationBinding,
@@ -2574,12 +2575,68 @@ async function runOneTurn(
       })
     );
     let approvedAssistantText = "";
+    const visibleParts: VisibleConversationPart[] = [];
+    const visibleActivityKeys = new Set<string>();
+    const recordVisiblePart = (message: OutboundMessage): void => {
+      if (!("run_id" in message) || message.run_id !== input.run_id) return;
+      if (message.type === "assistant.delta" && message.delta.kind === "text") {
+        const end = approvedAssistantText.length;
+        const start = end - message.delta.content.length;
+        if (start < 0) return;
+        const last = visibleParts.at(-1);
+        if (last?.type === "text" && last.end === start) {
+          last.end = end;
+        } else {
+          visibleParts.push({ type: "text", start, end });
+        }
+        return;
+      }
+      if (message.type === "tool_call.delta") {
+        const key = `tool:${message.tool_call_id}`;
+        if (!visibleActivityKeys.has(key)) {
+          visibleActivityKeys.add(key);
+          visibleParts.push({ type: "tool_call", tool_call_id: message.tool_call_id });
+        }
+        return;
+      }
+      if (message.type === "skill.invoked" || message.type === "skill.activated") {
+        const key = [
+          "skill",
+          message.status,
+          message.name,
+          message.reason,
+          "source_tool_call_id" in message ? message.source_tool_call_id : ""
+        ].join(":");
+        if (!visibleActivityKeys.has(key)) {
+          visibleActivityKeys.add(key);
+          visibleParts.push({
+            type: "skill_event",
+            name: message.name,
+            status: message.status,
+            reason: message.reason,
+            ...(message.type === "skill.invoked" ? { source_tool_call_id: message.source_tool_call_id } : {})
+          });
+        }
+        return;
+      }
+      if (message.type === "skill.run") {
+        const key = `skill-run:${message.skill_run_id}`;
+        if (!visibleActivityKeys.has(key)) {
+          visibleActivityKeys.add(key);
+          visibleParts.push({ type: "skill_run", skill_run_id: message.skill_run_id });
+        }
+      }
+    };
+    const emit = async (message: OutboundMessage): Promise<void> => {
+      await send(message);
+      recordVisiblePart(message);
+    };
     const emitReleased = async (result: GuardedOutputResult): Promise<void> => {
       for (const content of result.released) {
         approvedAssistantText += content;
         const releasedAt = performance.now();
         firstSafeSegment ??= releasedAt;
-        await send({
+        await emit({
           type: "assistant.delta",
           run_id: input.run_id,
           delta: { kind: "text", content }
@@ -2601,7 +2658,18 @@ async function runOneTurn(
         conversation_id: input.conversation_id,
         run_id: input.run_id,
         message: { role: "assistant", content },
-        finish_reason: finishReason
+        finish_reason: finishReason,
+        visible_parts: finishReason === "content_filter" ? [] : visibleParts
+      });
+      await conversationRepository.appendEvent({
+        conversationId: input.conversation_id,
+        runId: input.run_id,
+        type: "message.created",
+        payload: {
+          role: "assistant",
+          content: finishReason === "content_filter" ? "" : approvedAssistantText,
+          ...(finishReason === "content_filter" ? { finish_reason: finishReason } : {})
+        }
       });
       await conversationRepository.appendEvent({
         conversationId: input.conversation_id,
@@ -2631,7 +2699,7 @@ async function runOneTurn(
           );
           deliveryReservationConsumed = Boolean(deliveryReservation);
           receiptStatus = "recorded";
-          await send({ type: "delivery.ready", run_id: input.run_id, ...recorded, receipt_status: receiptStatus });
+          await emit({ type: "delivery.ready", run_id: input.run_id, ...recorded, receipt_status: receiptStatus });
         } catch (error) {
           if (!deliveryAccountingOutbox || !deliveryReservation) throw error;
           const command: DeliveryAccountingCommand = {
@@ -2647,12 +2715,12 @@ async function runOneTurn(
           deliveryAccountingPending = true;
           receiptStatus = "syncing";
           writeOperationalError("commerce_delivery_receipt_deferred", error);
-          await send({ type: "delivery.ready", run_id: input.run_id, ...receipt, receipt_status: receiptStatus });
+          await emit({ type: "delivery.ready", run_id: input.run_id, ...receipt, receipt_status: receiptStatus });
           scheduleDeliveryReconciliation();
         }
       }
       const completedAt = performance.now();
-      await send({
+      await emit({
         type: "turn.completed",
         run_id: input.run_id,
         finish_reason: finishReason,
@@ -2732,7 +2800,7 @@ async function runOneTurn(
       agentSystemPrompt: materializedAgent?.systemPrompt,
       deliveryAuditContext: materializedAgent?.deliveryAuditContext,
       store,
-      emit: send,
+      emit,
       createWorkerRuntime: () => createRuntime()
     });
     activeSkillRuntimes.set(input.run_id, skillRuntime);
@@ -2764,7 +2832,7 @@ async function runOneTurn(
         });
       },
       compactMessagesIfNeeded: async (runtimeMessages: RuntimeCompactionMessage[], phase) => {
-        const compacted = await compactIfNeeded(input, store, state, send, runtimeMessages, phase);
+        const compacted = await compactIfNeeded(input, store, state, emit, runtimeMessages, phase);
         return compacted?.replacement_history;
       },
       toolBridge,
@@ -2815,7 +2883,7 @@ async function runOneTurn(
         );
         return;
       }
-      await send(event);
+      await emit(event);
     }
   } catch (error) {
     if (state.status === "cancelled" || state.status === "interrupted") {

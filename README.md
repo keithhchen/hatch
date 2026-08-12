@@ -21,7 +21,7 @@ Buyer Desktop
 
 The canonical product/runtime contract is the current
 [Agent Corpus v1](packages/protocol/AGENT_CORPUS.md) plus the
-[wire protocol 0.6](packages/protocol/schemas/hatch-wire-protocol.schema.json).
+[wire protocol 0.7](packages/protocol/schemas/hatch-wire-protocol.schema.json).
 
 The connected demonstration follows two concrete people rather than anonymous
 test fixtures:
@@ -52,7 +52,7 @@ or Creator instructions.
 conversation state, server-side tools, protected Skill execution, and the
 WebSocket tool broker used by the Desktop.
 
-The canonical wire protocol is version `0.6` and lives in
+The canonical wire protocol is version `0.7` and lives in
 `packages/protocol/schemas/hatch-wire-protocol.schema.json`.
 
 Creator-private prompts, Skills, RAG material, generated Eval Questions, and

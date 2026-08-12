@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { isNetworkError } from "./auth-session.js";
 import {
   CONSUMER_DESKTOP_ROLE_MESSAGE,
+  CONSUMER_DESKTOP_ROLE_MESSAGE_KEY,
   persistedDesktopSessionFromError,
   signInDesktopSession
 } from "./desktop-auth-flow.js";
@@ -77,11 +78,13 @@ describe("Consumer Desktop authentication flow", () => {
     expect(result).toMatchObject({
       state: "unsupported-role",
       session: { profile: { id: "creator_maya", role: "creator" }, accessToken: "opaque-creator" },
-      entitlements: []
+      entitlements: [],
+      messageKey: "error.auth.unsupportedCreatorRole"
     });
     expect(storage.value).toBe("opaque-creator");
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     expect(CONSUMER_DESKTOP_ROLE_MESSAGE).toMatch(/Creator account is valid/);
+    expect(CONSUMER_DESKTOP_ROLE_MESSAGE_KEY).toBe("error.auth.unsupportedCreatorRole");
   });
 
   it("keeps an empty buyer access projection as a ready signed-in result", async () => {

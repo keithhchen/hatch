@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-write-auth-token"
+description = "Enables the write_auth_token command without any pre-configured scope."
+commands.allow = ["write_auth_token"]
+
+[[permission]]
+identifier = "deny-write-auth-token"
+description = "Denies the write_auth_token command without any pre-configured scope."
+commands.deny = ["write_auth_token"]

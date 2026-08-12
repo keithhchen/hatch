@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-write-app-settings"
+description = "Enables the write_app_settings command without any pre-configured scope."
+commands.allow = ["write_app_settings"]
+
+[[permission]]
+identifier = "deny-write-app-settings"
+description = "Denies the write_app_settings command without any pre-configured scope."
+commands.deny = ["write_app_settings"]
