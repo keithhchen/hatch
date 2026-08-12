@@ -1637,7 +1637,15 @@ button.composer-control:focus-visible {
 }
 
 .workspace-composer-control {
-  max-width: min(260px, 42cqw);
+  flex: 1 1 260px;
+  justify-content: flex-start;
+  max-width: none;
+}
+
+.workspace-composer-control .composer-control-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
 }
 
 .composer-control-label {
@@ -1873,6 +1881,48 @@ button.composer-control:focus-visible {
 
 .connection-spinner { animation: connection-spin .9s linear infinite; }
 
+.desktop-connection-status {
+  align-items: center;
+  color: var(--text-secondary);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 10px;
+  gap: 5px;
+  letter-spacing: .01em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.desktop-connection-status.compact {
+  font-size: 11px;
+  gap: 6px;
+}
+
+.desktop-connection-status.connected { color: #3f7656; }
+.desktop-connection-status.connecting { color: #8a6728; }
+.desktop-connection-status.offline { color: var(--text-secondary); }
+
+.desktop-connection-status .connection-spinner,
+.desktop-connection-dot {
+  flex: 0 0 12px;
+  height: 12px;
+  width: 12px;
+}
+
+.desktop-connection-dot {
+  background: currentColor;
+  border-radius: 50%;
+  display: inline-block;
+  height: 6px;
+  margin: 3px;
+  width: 6px;
+}
+
+.desktop-connection-status.compact .connection-spinner {
+  height: 13px;
+  width: 13px;
+}
+
 @keyframes connection-spin { to { transform: rotate(360deg); } }
 
 .desktop-sidebar,
@@ -1945,31 +1995,29 @@ button.composer-control:focus-visible {
 }
 
 .desktop-sidebar-heading .hatch-wordmark {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--hatch-font-display);
   font-size: 14px;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  font-weight: 400;
+  letter-spacing: -0.02em;
 }
 
-.sidebar-new-conversation {
+.sidebar-new-task {
   background: transparent;
   border-color: transparent;
-  color: var(--hatch-ink);
+  color: var(--text-secondary);
   font-size: 12px;
   font-weight: 600;
-  gap: 5px;
-  margin-left: auto;
-  min-height: 28px;
-  padding: 0 7px;
+  gap: 6px;
 }
 
-.sidebar-new-conversation:hover,
-.sidebar-new-conversation:focus-visible {
+.sidebar-new-task:hover,
+.sidebar-new-task:focus-visible {
   background: color-mix(in srgb, var(--hatch-ink) 7%, transparent);
   border-color: var(--border-separator);
+  color: var(--hatch-ink);
 }
 
-.sidebar-new-conversation > svg { height: 14px; width: 14px; }
+.sidebar-new-task > svg { height: 14px; width: 14px; }
 
 .desktop-source-list {
   display: flex;
@@ -2012,15 +2060,6 @@ button.composer-control:focus-visible {
   margin: 0 0 5px 19px;
   min-width: 0;
   padding: 0 0 1px 8px;
-}
-
-.desktop-agent-conversation-label {
-  color: var(--text-secondary);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: .04em;
-  padding: 5px 7px 3px;
-  text-transform: uppercase;
 }
 
 .desktop-source-row {
@@ -2082,9 +2121,12 @@ button.composer-control:focus-visible {
 }
 
 .desktop-agent-conversation-group .desktop-source-row {
+  gap: 0;
   min-height: 34px;
   padding-block: 4px;
 }
+
+.desktop-agent-conversation-group .sidebar-new-task { gap: 6px; }
 
 .conversation-rename-input {
   background: var(--surface-sidebar);
@@ -2097,14 +2139,6 @@ button.composer-control:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--hatch-accent) 22%, transparent);
   padding: 2px 4px;
   width: 100%;
-}
-
-.conversation-row-glyph {
-  color: var(--text-secondary);
-  flex: 0 0 15px;
-  height: 15px;
-  margin-inline: 5px;
-  width: 15px;
 }
 
 .desktop-sidebar-footer {
@@ -2136,10 +2170,69 @@ button.composer-control:focus-visible {
 .desktop-sidebar-account strong { font-size: 11px; }
 .desktop-sidebar-account small { color: var(--text-secondary); font-size: 10px; }
 
-.desktop-sidebar-footer .profile-sign-out {
-  font-size: 10px;
-  margin: 0 0 0 auto;
+.profile-menu {
+  flex: 0 0 auto;
+  margin-left: auto;
+  position: relative;
+}
+
+.profile-settings-button {
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  min-height: 30px;
+  min-width: 30px;
+  padding: 5px;
+}
+
+.profile-settings-button:hover,
+.profile-settings-button:focus-visible {
+  background: color-mix(in srgb, var(--hatch-ink) 7%, transparent);
+  border-color: transparent;
+  color: var(--hatch-ink);
+}
+
+.profile-settings-button > svg {
+  height: 16px;
+  width: 16px;
+}
+
+.profile-menu-popover {
+  background: var(--hatch-panel);
+  border: 1px solid var(--hatch-border);
+  border-radius: 8px;
+  bottom: calc(100% + 7px);
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--hatch-ink) 14%, transparent);
+  display: grid;
+  gap: 2px;
+  min-width: 140px;
   padding: 4px;
+  position: absolute;
+  right: 0;
+  z-index: 20;
+}
+
+.profile-menu-item {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: var(--hatch-ink);
+  display: flex;
+  font-size: 12px;
+  font-weight: 550;
+  justify-content: flex-start;
+  min-height: 32px;
+  padding: 0 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.profile-menu-item:hover,
+.profile-menu-item:focus-visible {
+  background: color-mix(in srgb, var(--hatch-ink) 7%, transparent);
+  border-color: transparent;
 }
 
 .desktop-inspector-content {
@@ -2175,7 +2268,10 @@ button.composer-control:focus-visible {
   line-height: 1.45;
 }
 
-.inspector-workspace-path {
+.inspector-section .inspector-workspace-path {
+  font-size: 11px;
+  font-weight: 550;
+  line-height: 1.35;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2215,9 +2311,6 @@ button.composer-control:focus-visible {
   outline: 0;
   width: 100%;
 }
-
-.inspector-run-state { align-items: center; display: flex; gap: 7px; }
-.inspector-run-state .activity-dot { height: 8px; width: 8px; }
 
 .desktop-pane-overlay {
   inset: 0;

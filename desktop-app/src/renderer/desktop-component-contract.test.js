@@ -29,6 +29,9 @@ describe("desktop component presentation contract", () => {
   it("keeps title-bar context compact and removes verbose status copy", () => {
     expect(source).toContain('className="desktop-toolbar-conversation"');
     expect(source).toContain('className="desktop-toolbar-agent-name"');
+    expect(source).toContain('aria-hidden="true">|</span>');
+    expect(source).toContain("creatorAgentContextTitle");
+    expect(source).toContain("getCurrentWindow().setTitle(title)");
     expect(source).not.toContain('className="desktop-connection-copy"');
     expect(source).not.toContain('className="settings-migration-notice"');
   });

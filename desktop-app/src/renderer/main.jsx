@@ -36,11 +36,11 @@ import {
   Globe2,
   ListTree,
   LoaderCircle,
-  MessageSquare,
   Paperclip,
   Plug,
   Plus,
   RefreshCw,
+  Settings,
   ShieldAlert,
   Square,
   SquareTerminal,
@@ -343,6 +343,13 @@ function App() {
   const buyerProfile = buyerSession?.profile ?? EMPTY_PROFILE;
   const signedIn = authState === "signed-in";
   buyerSessionRef.current = buyerSession;
+
+  useEffect(() => {
+    const title = signedIn ? creatorAgentContextTitle(creatorAgent) : "Hatch";
+    if (typeof document !== "undefined") document.title = title;
+    if (!window.__TAURI_INTERNALS__) return;
+    void getCurrentWindow().setTitle(title).catch(() => {});
+  }, [creatorAgent, signedIn]);
 
   useEffect(() => {
     droppedFilesRef.current = droppedFiles;
@@ -889,7 +896,7 @@ function App() {
         const creation = conversationCreationRequest(binding, "bootstrap");
         try {
           const created = await createConversation(serverUrl, buyerSession.accessToken, binding, {
-            title: `New ${creatorAgent.name} conversation`,
+            title: `New ${creatorAgent.name} task`,
             clientRequestId: creation.clientRequestId
           });
           const conversation = created?.conversation;
@@ -1746,6 +1753,7 @@ function App() {
     const requestToken = ++connectionTokenRef.current;
     connectingRef.current = true;
     intentionalDisconnectRef.current = false;
+    setStatus("Connecting…");
     connectionConfigRef.current = {
       serverUrl: targetServerUrl.trim(),
       workspaceGrant: targetWorkspaceGrant,
@@ -1969,7 +1977,7 @@ function App() {
       connectedRef.current = true;
       reconnectAttemptRef.current = 0;
       setConnected(true);
-      setStatus("Ready");
+      setStatus("Connected");
       const socket = socketRef.current;
       if (socket) {
         await reconcileLiveSnapshot(socket, sourceToken);
@@ -2473,7 +2481,7 @@ function App() {
     const creation = conversationCreationRequest(binding, "create");
     try {
       const result = await createConversation(serverUrl, buyerSession.accessToken, binding, {
-        title: `New ${creatorAgent.name} conversation`,
+        title: `New ${creatorAgent.name} task`,
         clientRequestId: creation.clientRequestId
       });
       const conversation = result?.conversation;
@@ -2506,7 +2514,7 @@ function App() {
     setConversationId(nextId);
     setMessages([]);
     setConversationIdForEntitlement(buyerProfile.id, selectedEntitlementId, nextId);
-    setStatus("New conversation ready");
+    setStatus("New task ready");
     return nextId;
   }
 
@@ -2590,6 +2598,12 @@ function App() {
     }).catch(() => setStatus("Hatch couldn't open the command menu."));
   }, []);
 
+  const openSettingsWindow = useCallback(() => {
+    void invokeTauri("open_settings_window").catch((error) => {
+      setStatus(`Hatch couldn't open Settings: ${errorMessage(error)}`);
+    });
+  }, []);
+
   async function copyNativeContextTarget(key, label) {
     const value = takeNativeContextTarget(key);
     if (!value) return;
@@ -2659,11 +2673,7 @@ function App() {
     onZoomOut: () => setApplicationZoom((current) => nextZoom(current, "decrease")),
     onZoomReset: () => setApplicationZoom(DESKTOP_ZOOM.default),
     onChooseWorkspace: () => chooseWorkspace(),
-    onOpenSettings: () => {
-      void invokeTauri("open_settings_window").catch((error) => {
-        setStatus(`Hatch couldn't open Settings: ${errorMessage(error)}`);
-      });
-    },
+    onOpenSettings: openSettingsWindow,
     onOpenAbout: () => {
       void invokeTauri("open_about_window").catch((error) => {
         setStatus(`Hatch couldn't open About: ${errorMessage(error)}`);
@@ -3167,15 +3177,15 @@ function App() {
           onRenameDraftChange={setRenameDraft}
           onCommitRename={commitRenameConversation}
           onCancelRename={cancelRenameConversation}
+          onOpenSettings={openSettingsWindow}
           onSignOut={() => void signOut()}
         />
       )}
       toolbar={(
         <DesktopConversationToolbar
           creatorAgent={creatorAgent}
-          conversationId={conversationId}
-          conversationTitle={conversations.find((item) => item.id === conversationId)?.title || ""}
           connected={connected}
+          conversationLibraryStatus={conversationLibraryStatus}
           conversationLibraryReady={conversationLibraryStatus === "ready"}
           workspaceGranted={workspaceGranted}
           status={status}
@@ -3188,8 +3198,6 @@ function App() {
           workspace={workspace}
           workspaceGranted={workspaceGranted}
           permissionMode={permissionMode}
-          running={running}
-          status={status}
           onChooseWorkspace={() => void chooseWorkspace()}
           onPermissionChange={updatePermissionMode}
         />
@@ -3307,24 +3315,41 @@ function DesktopSidebar({
   onRenameDraftChange,
   onCommitRename,
   onCancelRename,
+  onOpenSettings,
   onSignOut
 }) {
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const profileMenuRef = useRef(null);
+  const profileSettingsButtonRef = useRef(null);
   const listedConversations = Array.isArray(conversations) ? conversations : [];
   // The server-issued Library is the only list authority. Never synthesize a
   // row for a URL/profile ID that the selected Agent's Library did not return.
   const visibleConversations = listedConversations;
+
+  useEffect(() => {
+    if (!profileMenuOpen) return undefined;
+    const closeOnPointerDown = (event) => {
+      if (!profileMenuRef.current?.contains(event.target)) setProfileMenuOpen(false);
+    };
+    const closeOnEscape = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setProfileMenuOpen(false);
+      profileSettingsButtonRef.current?.focus();
+    };
+    document.addEventListener("pointerdown", closeOnPointerDown, true);
+    document.addEventListener("keydown", closeOnEscape, true);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnPointerDown, true);
+      document.removeEventListener("keydown", closeOnEscape, true);
+    };
+  }, [profileMenuOpen]);
+
+  const closeProfileMenu = () => setProfileMenuOpen(false);
   return (
     <div className="desktop-sidebar-content">
       <div className="desktop-sidebar-heading">
         <span className="hatch-wordmark">Hatch</span>
-        <button
-          className="sidebar-new-conversation"
-          type="button"
-          disabled={!conversationLibraryReady}
-          onClick={onNewConversation}
-        >
-          <Plus aria-hidden="true" /><span>New conversation</span>
-        </button>
       </div>
       <nav className="desktop-source-list" aria-label="Creator Agents">
         <div className="desktop-source-list-label">{PRODUCT_COPY.home}</div>
@@ -3350,17 +3375,27 @@ function DesktopSidebar({
                   : <ChevronRight className="desktop-agent-disclosure" aria-hidden="true" />}
               </button>
               {selected ? (
-                <div className="desktop-agent-conversation-group" role="group" aria-label={`${agent.name} conversations`}>
-                  <div className="desktop-agent-conversation-label">Conversations</div>
+                <div className="desktop-agent-conversation-group" role="group" aria-label={`${agent.name} tasks`}>
+                  <button
+                    aria-label="New task"
+                    className="desktop-source-row sidebar-new-task"
+                    disabled={!conversationLibraryReady}
+                    title="New task"
+                    type="button"
+                    onClick={onNewConversation}
+                  >
+                    <Plus aria-hidden="true" /><span>New task</span>
+                  </button>
                   {conversationLibraryStatus === "loading" || conversationLibraryStatus === "idle" ? (
-                    <div className="desktop-source-empty compact">Loading conversations…</div>
+                    <div className="desktop-source-empty compact">
+                      <DesktopConnectionStatus state="connecting" compact />
+                    </div>
                   ) : conversationLibraryStatus === "unavailable" ? (
                     <div
                       className="desktop-source-empty compact"
-                      role="status"
                       title={conversationLibraryError || undefined}
                     >
-                      Conversations unavailable · retrying
+                      <DesktopConnectionStatus state="offline" compact />
                     </div>
                   ) : visibleConversations.length > 0 ? visibleConversations.map((conversation) => {
                     const conversationSelected = conversation.id === conversationId;
@@ -3389,7 +3424,7 @@ function DesktopSidebar({
                       )
                     );
                   }) : (
-                    <div className="desktop-source-empty compact">No conversations yet</div>
+                    <div className="desktop-source-empty compact">No tasks yet</div>
                   )}
                 </div>
               ) : null}
@@ -3399,8 +3434,47 @@ function DesktopSidebar({
       </nav>
       <div className="desktop-sidebar-footer">
         <span className="avatar">{profile.initials}</span>
-        <span className="desktop-sidebar-account"><strong>{profile.name}</strong><small>Signed in</small></span>
-        <button className="profile-sign-out" type="button" onClick={onSignOut}>Sign out</button>
+        <span className="desktop-sidebar-account"><strong>{profile.name}</strong></span>
+        <div className="profile-menu" ref={profileMenuRef}>
+          <button
+            ref={profileSettingsButtonRef}
+            aria-expanded={profileMenuOpen}
+            aria-haspopup="menu"
+            aria-label="Settings"
+            className="profile-settings-button"
+            title="Settings"
+            type="button"
+            onClick={() => setProfileMenuOpen((open) => !open)}
+          >
+            <Settings aria-hidden="true" />
+          </button>
+          {profileMenuOpen ? (
+            <div className="profile-menu-popover" role="menu" aria-label="Account menu">
+              <button
+                className="profile-menu-item"
+                role="menuitem"
+                type="button"
+                onClick={() => {
+                  closeProfileMenu();
+                  onOpenSettings?.();
+                }}
+              >
+                Settings
+              </button>
+              <button
+                className="profile-menu-item"
+                role="menuitem"
+                type="button"
+                onClick={() => {
+                  closeProfileMenu();
+                  onSignOut?.();
+                }}
+              >
+                Sign out
+              </button>
+            </div>
+          ) : null}
+        </div>
       </div>
     </div>
   );
@@ -3428,10 +3502,9 @@ function ConversationSourceRow({
         aria-current={selected ? "page" : undefined}
         onContextMenu={contextMenu}
       >
-        <MessageSquare className="conversation-row-glyph" aria-hidden="true" />
         <span className="desktop-source-row-copy">
           <input
-            aria-label="Rename conversation"
+            aria-label="Rename task"
             className="conversation-rename-input"
             data-conversation-rename={conversation.id}
             value={renameDraft}
@@ -3460,29 +3533,58 @@ function ConversationSourceRow({
       onClick={() => onSelect?.(conversation)}
       onContextMenu={contextMenu}
     >
-      <MessageSquare className="conversation-row-glyph" aria-hidden="true" />
       <span className="desktop-source-row-copy">
         <strong>{conversation.title || conversationTitle(conversation.id)}</strong>
-        <small>{selected ? "Current conversation" : "Conversation"}</small>
       </span>
     </button>
   );
 }
 
-function DesktopConversationToolbar({ creatorAgent, conversationId, conversationTitle: providedTitle, connected, conversationLibraryReady, workspaceGranted, status, onRetry }) {
+function DesktopConnectionStatus({ state = "offline", compact = false }) {
+  const normalizedState = ["connected", "connecting", "offline"].includes(state) ? state : "offline";
+  const label = normalizedState === "connected"
+    ? "Connected"
+    : normalizedState === "connecting"
+      ? "Connecting"
+      : "Offline";
+  return (
+    <span
+      aria-live="polite"
+      className={`desktop-connection-status ${normalizedState}${compact ? " compact" : ""}`}
+      role="status"
+    >
+      {normalizedState === "connecting" ? (
+        <LoaderCircle className="connection-spinner" aria-hidden="true" />
+      ) : (
+        <span className="desktop-connection-dot" aria-hidden="true" />
+      )}
+      <span>{label}</span>
+    </span>
+  );
+}
+
+function DesktopConversationToolbar({ creatorAgent, connected, conversationLibraryStatus, conversationLibraryReady, workspaceGranted, status, onRetry }) {
   const connecting = /connecting|loading history|restoring|preparing/i.test(String(status || ""));
-  const title = providedTitle || conversationTitle(conversationId);
+  const connectionState = connected
+    ? "connected"
+    : (workspaceGranted && (conversationLibraryStatus === "loading" || conversationLibraryStatus === "idle")) || connecting
+      ? "connecting"
+      : "offline";
+  const creatorName = String(creatorAgent?.creator || "").trim() || "Creator";
+  const agentName = String(creatorAgent?.name || "").trim() || "Agent";
+  const title = creatorAgentContextTitle(creatorAgent);
   return (
     <>
       <div
-        aria-label={`${title}, ${creatorAgent.name} by ${creatorAgent.creator}`}
+        aria-label={title}
         className="desktop-toolbar-context"
-        title={`${title} · ${creatorAgent.name} by ${creatorAgent.creator}`}
+        title={title}
       >
-        <strong className="desktop-toolbar-conversation">{title}</strong>
-        <span className="desktop-toolbar-context-divider" aria-hidden="true">·</span>
-        <span className="desktop-toolbar-agent-name">{creatorAgent.name}</span>
+        <strong className="desktop-toolbar-conversation">{creatorName}</strong>
+        <span className="desktop-toolbar-context-divider" aria-hidden="true">|</span>
+        <span className="desktop-toolbar-agent-name">{agentName}</span>
       </div>
+      <DesktopConnectionStatus state={connectionState} />
       {workspaceGranted && conversationLibraryReady && !connected ? (
         <button
           aria-busy={connecting || undefined}
@@ -3507,8 +3609,6 @@ function DesktopInspector({
   workspace,
   workspaceGranted,
   permissionMode,
-  running,
-  status,
   onChooseWorkspace,
   onPermissionChange
 }) {
@@ -3532,13 +3632,6 @@ function DesktopInspector({
           </select>
         </label>
         <p>{permissionPolicyDetail(permissionMode)}</p>
-      </section>
-      <section className="inspector-section">
-        <span className="inspector-kicker">Run</span>
-        <div className="inspector-run-state">
-          <span className={`activity-dot ${running ? "running" : status.toLowerCase().includes("fail") ? "failed" : "done"}`} />
-          <strong>{running ? "Working" : status || "Ready"}</strong>
-        </div>
       </section>
       <section className="inspector-section agent-boundary-section">
         <span className="inspector-kicker">Creator Agent</span>
@@ -3575,7 +3668,9 @@ function ComposerControls({ droppedFiles = [], workspace, workspaceGranted, perm
         </div>
       ) : null}
       <div className="composer-settings">
-        {attachmentControl}
+        {/* Native drag/drop still projects bounded file context into the
+            composer. Keep the picker implementation available, but withhold
+            its button until that UX is ready. */}
         <button
           aria-label="Choose workspace folder"
           className="composer-control workspace-composer-control"
@@ -3630,10 +3725,16 @@ function DesktopComposerInput({
   );
 }
 
+function creatorAgentContextTitle(agent) {
+  const creator = String(agent?.creator || "").trim();
+  const name = String(agent?.name || "").trim();
+  return [creator, name].filter(Boolean).join(" | ") || "Hatch";
+}
+
 function conversationTitle(conversationId) {
   const value = String(conversationId || "").trim();
-  if (!value || value === "desktop-chat") return "New conversation";
-  return value.replace(/^conversation_[^_]+_/, "Conversation ").replaceAll("_", " ");
+  if (!value || value === "desktop-chat") return "New task";
+  return value.replace(/^conversation_[^_]+_/, "Task ").replaceAll("_", " ");
 }
 
 function stableRandomId() {
