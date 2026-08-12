@@ -226,9 +226,9 @@ jobs:
           test -n "$dmg_path" && test -n "$exe_path"
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" "$dmg_path" "$exe_path" --clobber
-            gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease=false --title "$GITHUB_REF_NAME" --notes "Hatch $GITHUB_REF_NAME"
+            gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease=false --latest --title "$GITHUB_REF_NAME" --notes "Hatch $GITHUB_REF_NAME"
           else
-            gh release create "$GITHUB_REF_NAME" "$dmg_path" "$exe_path" --title "$GITHUB_REF_NAME" --notes "Hatch $GITHUB_REF_NAME" --verify-tag
+            gh release create "$GITHUB_REF_NAME" "$dmg_path" "$exe_path" --latest --title "$GITHUB_REF_NAME" --notes "Hatch $GITHUB_REF_NAME" --verify-tag
           fi
 
   containers:
