@@ -645,6 +645,9 @@ export class PostgresStore extends RuntimeStore {
         };
         if (event.type === "conversation.model_message" && event.finish_reason) {
           message.finish_reason = event.finish_reason;
+          if (event.visible_parts) {
+            message.parts = event.visible_parts;
+          }
         }
         if (role === "assistant") {
           const toolCalls = [...(toolCallsByRun.get(event.run_id)?.values() ?? [])]

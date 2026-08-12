@@ -98,14 +98,11 @@ export async function loadSavedAuthSession(storage) {
   try {
     const accessToken = await storage.readToken();
     return accessToken ? Object.freeze({ accessToken }) : null;
-  } catch (error) {
-    throw clientError(
-      englishMessage("error.auth.secureSessionReadFailed"),
-      "secure_session_read_failed",
-      error,
-      undefined,
-      "error.auth.secureSessionReadFailed"
-    );
+  } catch {
+    // A missing, locked, or unreadable secure-store item is equivalent to no
+    // usable saved session in the desktop UX. Let the user sign in normally;
+    // do not strand the app behind a recovery screen or repeat the prompt.
+    return null;
   }
 }
 
@@ -237,8 +234,12 @@ export function isAuthInvalidError(error) {
   return error?.code === "auth_invalid" || error?.status === 401;
 }
 
-export function isSecureSessionReadError(error) {
-  return error?.code === "secure_session_read_failed";
+export function isRemoteAuthSessionCleared(payload, sourceWindow) {
+  const eventSource = String(payload?.sourceWindow || "").trim();
+  const currentWindow = String(sourceWindow || "").trim();
+  return payload?.kind === "cleared"
+    && Boolean(eventSource)
+    && eventSource !== currentWindow;
 }
 
 function makeSessionFromAccount(account, accessToken, expiresAt) {

@@ -1,22 +1,33 @@
 name: Hatch Desktop release
 
 on:
+  # A manual dispatch is useful for rehearsing the protected release lane, but
+  # publication still requires a tag and the exact package to pass target UAT.
   workflow_dispatch:
   push:
     tags: ["v*.*.*"]
 
+# The build and target-UAT jobs do not need write access. Publication receives
+# write access only after both protected environments have passed.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  macos-dmg:
+  build-release:
+    name: Build, sign, and notarize macOS release candidate
     runs-on: macos-latest
     # Configure required reviewers on this Environment. Their checklist must
     # include the signed-app picker → file_list → shell_exec Workspace smoke for
-    # the exact release commit; a permanent repository boolean is not evidence.
+    # the exact release commit; a repository boolean is not evidence.
     environment: desktop-production
+    outputs:
+      artifact_name: ${{ steps.release-identity.outputs.artifact_name }}
+      artifact_sha256: ${{ steps.release-identity.outputs.artifact_sha256 }}
+      artifact_bytes: ${{ steps.release-identity.outputs.artifact_bytes }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -47,13 +58,17 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           HATCH_SIGNED_WORKSPACE_SMOKE_SHA: ${{ vars.HATCH_SIGNED_WORKSPACE_SMOKE_SHA }}
         run: |
+          set -euo pipefail
           test -n "$APPLE_CERTIFICATE_P12_BASE64" || { echo "Missing APPLE_CERTIFICATE_P12_BASE64 release secret" >&2; exit 1; }
           test -n "$APPLE_CERTIFICATE_PASSWORD" || { echo "Missing APPLE_CERTIFICATE_PASSWORD release secret" >&2; exit 1; }
           test -n "$APPLE_SIGNING_IDENTITY" || { echo "Missing APPLE_SIGNING_IDENTITY release variable" >&2; exit 1; }
+          test "$APPLE_SIGNING_IDENTITY" != "-" || { echo "Ad-hoc signing is UAT-only" >&2; exit 1; }
           test -n "$APPLE_NOTARY_APPLE_ID" || { echo "Missing APPLE_NOTARY_APPLE_ID release secret" >&2; exit 1; }
           test -n "$APPLE_NOTARY_PASSWORD" || { echo "Missing APPLE_NOTARY_PASSWORD release secret" >&2; exit 1; }
           test -n "$APPLE_TEAM_ID" || { echo "Missing APPLE_TEAM_ID release secret" >&2; exit 1; }
           test "$HATCH_SIGNED_WORKSPACE_SMOKE_SHA" = "$GITHUB_SHA" || { echo "HATCH_SIGNED_WORKSPACE_SMOKE_SHA must equal this exact release commit after signed-app UAT" >&2; exit 1; }
+          test "$GITHUB_REF" = "refs/tags/$GITHUB_REF_NAME" || { echo "A release must run from a v*.*.* tag; manual dispatch may select a tag ref" >&2; exit 1; }
+          printf '%s\n' "$GITHUB_REF_NAME" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || { echo "Release tag must use vMAJOR.MINOR.PATCH" >&2; exit 1; }
       - name: Import Developer ID certificate
         uses: apple-actions/import-codesign-certs@v3
         with:
@@ -63,6 +78,12 @@ jobs:
         working-directory: desktop-app
         env:
           HATCH_DISTRIBUTION_BUILD: "1"
+          # Only this Developer ID distribution lane may compile persistent
+          # Keychain support. `tauri dev` and ad-hoc UAT packages stay
+          # process-memory-only so transient code identities never contend for
+          # a Login Keychain ACL.
+          HATCH_PERSISTENT_SESSION: "1"
+          HATCH_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
           VITE_HATCH_RUNTIME_URL: ${{ vars.HATCH_RUNTIME_URL || 'wss://hatch.tokenquadrant.cn/v1/runtime' }}
         run: npm run build:distribution
@@ -73,6 +94,7 @@ jobs:
           APPLE_NOTARY_PASSWORD: ${{ secrets.APPLE_NOTARY_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          set -euo pipefail
           dmg_files=(src-tauri/target/release/bundle/dmg/*.dmg)
           test "${#dmg_files[@]}" -eq 1 || { echo "Expected exactly one distribution DMG" >&2; exit 1; }
           test -f "${dmg_files[0]}" || { echo "Distribution DMG was not produced" >&2; exit 1; }
@@ -83,14 +105,192 @@ jobs:
             --wait
           xcrun stapler staple "${dmg_files[0]}"
           xcrun stapler validate "${dmg_files[0]}"
-          shasum -a 256 "${dmg_files[0]}"
-      - name: Upload DMG artifact
+      - name: Record immutable release artifact identity
+        id: release-identity
+        working-directory: desktop-app
+        env:
+          HATCH_DISTRIBUTION_BUILD: "1"
+          HATCH_PERSISTENT_SESSION: "1"
+          HATCH_RELEASE_NOTARIZED: "1"
+          APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
+          HATCH_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_WORKFLOW: ${{ github.workflow }}
+          GITHUB_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          mkdir -p ../artifacts/desktop-release
+          bundle_identifier="$(node -e 'console.log(JSON.parse(require("fs").readFileSync("src-tauri/tauri.conf.json", "utf8")).identifier)')"
+          export HATCH_BUNDLE_IDENTIFIER="$bundle_identifier"
+          node ../scripts/uat/record-desktop-release-artifact.mjs \
+            --artifact-dir src-tauri/target/release/bundle/dmg \
+            --output ../artifacts/desktop-release/release-artifact.json \
+            --source-sha "$GITHUB_SHA" \
+            --release-tag "$GITHUB_REF_NAME"
+          artifact_sha256="$(node -e 'console.log(JSON.parse(require("fs").readFileSync("../artifacts/desktop-release/release-artifact.json", "utf8")).package.sha256)')"
+          artifact_bytes="$(node -e 'console.log(JSON.parse(require("fs").readFileSync("../artifacts/desktop-release/release-artifact.json", "utf8")).package.bytes)')"
+          artifact_name="hatch-desktop-release-${GITHUB_RUN_ID}"
+          {
+            echo "artifact_name=$artifact_name"
+            echo "artifact_sha256=$artifact_sha256"
+            echo "artifact_bytes=$artifact_bytes"
+          } >> "$GITHUB_OUTPUT"
+          printf 'Release candidate identity: %s (%s bytes)\n' "$artifact_sha256" "$artifact_bytes"
+      - name: Upload exact signed release candidate
         uses: actions/upload-artifact@v4
         with:
-          name: hatch-desktop-macos
-          path: desktop-app/src-tauri/target/release/bundle/dmg/*.dmg
-      - name: Attach DMG to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+          name: ${{ steps.release-identity.outputs.artifact_name }}
+          path: |
+            desktop-app/src-tauri/target/release/bundle/dmg/*.dmg
+            artifacts/desktop-release/release-artifact.json
+          if-no-files-found: error
+          retention-days: 30
+
+  release-target-uat:
+    name: Protected macOS target-device release UAT
+    needs: build-release
+    if: needs.build-release.result == 'success'
+    # This must be a dedicated interactive macOS runner, not a hosted CI
+    # runner. Required reviewers on the Environment confirm the visual,
+    # Keychain-restart, Workspace grant, and native-menu checklist for the
+    # exact bytes below before publication can run.
+    runs-on: [self-hosted, macos, arm64]
+    environment: desktop-release-uat
+    permissions:
+      actions: read
+      contents: read
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Verify a candidate with the protected default-branch helper, not
+          # executable verifier code from the release candidate itself. The
+          # expected source SHA below remains the tagged candidate commit.
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Download exact release candidate
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build-release.outputs.artifact_name }}
+          path: candidate
+          github-token: ${{ github.token }}
+      - name: Verify release source, tag, and immutable DMG hash
+        env:
+          EXPECTED_RELEASE_SHA256: ${{ needs.build-release.outputs.artifact_sha256 }}
+          EXPECTED_SOURCE_SHA: ${{ github.sha }}
+          EXPECTED_RELEASE_TAG: ${{ github.ref_name }}
+          EXPECTED_RELEASE_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          report_path="$(find candidate -type f -name release-artifact.json -print -quit)"
+          test -n "$report_path" || { echo "Downloaded release artifact has no release-artifact.json" >&2; exit 1; }
+          node scripts/uat/verify-desktop-release-artifact.mjs \
+            --report "$report_path" \
+            --artifact-dir candidate \
+            --expected-sha256 "$EXPECTED_RELEASE_SHA256" \
+            --expected-source-sha "$EXPECTED_SOURCE_SHA" \
+            --expected-release-tag "$EXPECTED_RELEASE_TAG" \
+            --expected-run-id "$EXPECTED_RELEASE_RUN_ID" | tee evidence/package-verification.json
+      - name: Install, cold launch, and collect signed-package evidence
+        run: |
+          set -euo pipefail
+          uat_root="$(mktemp -d "$RUNNER_TEMP/hatch-release-uat.XXXXXX")"
+          mount_path="$uat_root/mount"
+          install_root="$uat_root/Applications"
+          mkdir -p "$mount_path" "$install_root"
+          dmg_path="$(find candidate -type f -name '*.dmg' -print -quit)"
+          test -n "$dmg_path" || { echo "Downloaded release artifact has no DMG" >&2; exit 1; }
+          app_pid=""
+          cleanup() {
+            if [ -n "$app_pid" ] && kill -0 "$app_pid" 2>/dev/null; then kill "$app_pid" || true; fi
+            hdiutil detach "$mount_path" -quiet 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          hdiutil attach "$dmg_path" -nobrowse -readonly -mountpoint "$mount_path"
+          test -d "$mount_path/Hatch.app" || { echo "DMG has no Hatch.app" >&2; exit 1; }
+          ditto "$mount_path/Hatch.app" "$install_root/Hatch.app"
+          codesign --verify --deep --strict "$install_root/Hatch.app" 2>&1 | tee evidence/codesign-verify.txt
+          codesign -dvvv "$install_root/Hatch.app" 2> evidence/codesign-details.txt || true
+          grep -F 'Authority=Developer ID Application:' evidence/codesign-details.txt
+          team_id="$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).provenance.team_id)' "$(find candidate -type f -name release-artifact.json -print -quit)")"
+          bundle_identifier="$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).provenance.bundle_identifier)' "$(find candidate -type f -name release-artifact.json -print -quit)")"
+          grep -F "TeamIdentifier=$team_id" evidence/codesign-details.txt
+          grep -F "Identifier=$bundle_identifier" evidence/codesign-details.txt
+          spctl --assess --type execute --verbose=4 "$install_root/Hatch.app" 2>&1 | tee evidence/gatekeeper-assess.txt
+          xcrun stapler validate "$dmg_path" 2>&1 | tee evidence/stapler-validate.txt
+          executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$install_root/Hatch.app/Contents/Info.plist")"
+          # Preserve HOME so the real UAT account can verify Keychain restart,
+          # while removing workflow credentials from the candidate process.
+          env -i \
+            HOME="$HOME" \
+            PATH="$PATH" \
+            TMPDIR="${TMPDIR:-/tmp}" \
+            LANG="${LANG:-en_US.UTF-8}" \
+            "$install_root/Hatch.app/Contents/MacOS/$executable" > evidence/app.stdout.log 2> evidence/app.stderr.log &
+          app_pid="$!"
+          sleep 8
+          kill -0 "$app_pid" || { echo "Hatch exited during cold launch" >&2; exit 1; }
+          screencapture -x evidence/cold-launch.png
+          test -s evidence/cold-launch.png || { echo "Interactive runner did not produce a screenshot" >&2; exit 1; }
+          log show --style compact --last 2m --predicate "process == '$executable'" > evidence/macos-system.log || true
+      - name: Upload target-device release UAT evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hatch-desktop-release-uat-${{ github.run_id }}
+          path: evidence
+          if-no-files-found: warn
+          retention-days: 90
+
+  publish-release:
+    name: Publish the exact UAT-approved release artifact
+    needs: [build-release, release-target-uat]
+    if: startsWith(github.ref, 'refs/tags/') && needs.build-release.result == 'success' && needs.release-target-uat.result == 'success'
+    runs-on: ubuntu-latest
+    # This approval happens after the target job has produced its evidence.
+    # Configure required reviewers on this Environment; approving the
+    # pre-flight `desktop-release-uat` job alone must never publish a package.
+    environment: desktop-release-publish
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Publication repeats verification with the protected default-branch
+          # helper before attaching the already UAT-approved bytes.
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Download exact UAT-approved candidate
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build-release.outputs.artifact_name }}
+          path: candidate
+          github-token: ${{ github.token }}
+      - name: Re-verify package before publication
+        env:
+          EXPECTED_RELEASE_SHA256: ${{ needs.build-release.outputs.artifact_sha256 }}
+          EXPECTED_SOURCE_SHA: ${{ github.sha }}
+          EXPECTED_RELEASE_TAG: ${{ github.ref_name }}
+          EXPECTED_RELEASE_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          report_path="$(find candidate -type f -name release-artifact.json -print -quit)"
+          test -n "$report_path"
+          node scripts/uat/verify-desktop-release-artifact.mjs \
+            --report "$report_path" \
+            --artifact-dir candidate \
+            --expected-sha256 "$EXPECTED_RELEASE_SHA256" \
+            --expected-source-sha "$EXPECTED_SOURCE_SHA" \
+            --expected-release-tag "$EXPECTED_RELEASE_TAG" \
+            --expected-run-id "$EXPECTED_RELEASE_RUN_ID"
+      - name: Attach exact DMG and provenance manifest to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" desktop-app/src-tauri/target/release/bundle/dmg/*.dmg --generate-notes
+        run: |
+          set -euo pipefail
+          dmg_path="$(find candidate -type f -name '*.dmg' -print -quit)"
+          report_path="$(find candidate -type f -name release-artifact.json -print -quit)"
+          test -n "$dmg_path" && test -n "$report_path"
+          gh release create "$GITHUB_REF_NAME" "$dmg_path" "$report_path" --generate-notes --verify-tag

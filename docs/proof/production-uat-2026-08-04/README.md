@@ -94,7 +94,11 @@
 - 交付文件：9,401 bytes
 - SHA-256：`fce4d55d3dc5991a7c727a484f0ff450197008789c5307f9ca78dd611f0afdb1`
 
-可复现脚本：[`scripts/production-uat-delivery.mjs`](../../../scripts/production-uat-delivery.mjs)
+这次历史 UAT 所用的 `scripts/production-uat-delivery.mjs` 没有保留在当前
+worktree，且它锁定的是已废弃的 protocol 0.5，不应再被当作可复现入口。当前的
+Desktop 候选包与可审计 SHA-256 入口见
+[Desktop automated CI UAT](../desktop-ui/automated-ci-uat.md)；生产 Runtime 的
+验证必须使用当前 protocol、受控的合成账户和单独批准的生产 UAT 运行册。
 
 ## 发现的问题与处理
 

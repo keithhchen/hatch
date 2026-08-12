@@ -14,7 +14,12 @@
       {
         "title": "Hatch",
         "width": 1180,
-        "height": 780
+        "height": 780,
+        "minWidth": 640,
+        "minHeight": 600,
+        "resizable": true,
+        "zoomHotkeysEnabled": false,
+        "devtools": false
       }
     ]
   },

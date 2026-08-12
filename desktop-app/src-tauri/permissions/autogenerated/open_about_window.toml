@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-open-about-window"
+description = "Enables the open_about_window command without any pre-configured scope."
+commands.allow = ["open_about_window"]
+
+[[permission]]
+identifier = "deny-open-about-window"
+description = "Denies the open_about_window command without any pre-configured scope."
+commands.deny = ["open_about_window"]

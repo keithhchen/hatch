@@ -265,16 +265,63 @@ access；不能因为 Desktop 曾经拿到过列表或已经建立 socket 就信
 只有一个 active account session，避免 profile chooser 和多 session UI：
 
 ```text
-Keychain service: dev.hatch.local.desktop-session.v2
+Keychain service: cn.tokenquadrant.hatch.desktop-session.v1
 Keychain account: active-session
 Keychain value:  opaque session token (raw string)
 ```
 
-只有 `errSecItemNotFound` 表示“没有 session”并进入 Signed out。Keychain
-锁定、ACL、读取或旧 item 清理失败必须进入可重试的 secure-session
-recovery，不能伪装成已退出，也不能用 preview identity 兜底。旧
-`dev.hatch.local` item 由 Security.framework 一次性迁移；v2 写入成功而旧
-item 删除失败属于显式 partial success，下次启动继续清理。
+存储模式是**编译期 capability**，不是 renderer 可修改的 setting：
+
+1. `tauri dev`、本地 debug、ad-hoc DMG 与所有临时 UAT 构建没有
+   `HATCH_PERSISTENT_SESSION=1`，只使用进程内 token。它们不读、写、迁移或
+   删除任何 Login Keychain item；重启后需要重新登录是刻意的安全/UX 取舍。
+2. 只有 release CI 同时设置 `HATCH_PERSISTENT_SESSION=1` 和
+   `HATCH_APPLE_TEAM_ID`，才会编译出持久化路径。macOS runtime 在每次进程首次
+   使用该路径前，通过 Security.framework 验证当前 executable 的**精确 bundle
+   identifier、Developer ID Application certificate 与 Team ID**；验证失败则
+   fail closed，不触碰 Keychain，也不降级到 Web Storage。
+3. 新的 production service 与历史 `dev.hatch.local.desktop-session.v2` 和
+   `dev.hatch.local` 隔离。应用启动不自动读取或迁移旧 item，避免多个
+   worktree/ad-hoc binary 争用旧 ACL 而每次弹 Login Keychain 密码。升级后的
+   用户可能需要重新登录一次；旧 item 的人工清理仅能作为显式 support 操作。
+
+稳定签名 app 首次登录创建 Keychain item 后，后续正常 read/write 应无系统密码
+对话框。不能通过宽松 ACL、“所有应用可读”、`security` CLI 或 `localStorage`
+解决提示问题。发行包启动时如果 token 存在就自动验证：验证成功进入工作区；
+`errSecItemNotFound`、Keychain locked、ACL 不匹配或其他读取失败都回到普通
+Sign in，而不是展示独立的 Secure Session recovery 页面。401 会清除失效 token
+并回到 Sign in；网络失败则保留 token，显示 Network Error，并允许稍后重试。
+清除 token 失败也只在 Sign in 页面内联提示，不能把 renderer 伪装成已退出或
+preview identity。
+
+发行验收必须验证实际 `.app`（不是仅验证 DMG）：`codesign -dvvv` 显示预期
+`Developer ID Application`、Team ID 和 identifier，hardened runtime/notarization/staple
+通过，且在干净用户账号完成登录、退出、重启后的 silent Keychain read/write。
+
+### 6.1.1 Windows persistent session status
+
+当前 Windows 不能声称与 macOS 对等。现有 `keyring` Windows backend 是 Win32
+Generic Credential Manager；Microsoft 文档明确 generic credentials 可由同一用户的
+processes 读写。Authenticode 只能验证 binary 的发布者/完整性，不能为该 target
+name 增加 app-only ACL。因此即使 Windows build 意外带有
+`HATCH_PERSISTENT_SESSION=1`，Native bridge 也必须 fail closed；正常 Windows
+dev/UAT/当前 release candidate 都保持进程内 session。
+
+要启用 Windows persistent session，必须先作为独立 release capability 交付一个
+经过 threat-model 证明的 device-bound/session-challenge backend，并同时完成：
+
+1. 明确证明 app-only 或设备绑定边界；同用户 full-trust 进程的读取/重放负测必须
+   失败。MSIX package identity、Authenticode 或 AppContainer runtime gate 本身不足以
+   把 PasswordVault/Credential Locker 变成 Hatch-only bearer-token vault；
+2. 受信任的 Windows signing CI、package/publisher verification，以及 backend 的
+   runtime identity checks；
+3. Windows 真机 UAT：新装、登录、重启、退出、更新、损坏/未签名包、不同 user 与
+   另一 app 的 credential-access negative test；
+4. Tauri 的 workspace picker、file drop、WebView2、shell fail-closed 路径在该
+   backend 与打包权限模型下重新验收。
+
+在这些条件满足前，不得通过 Generic Credential Manager、DPAPI-user scope、app-data
+文件或 localStorage 来“补齐”自动登录。
 
 ### 6.2 Native app-data：非敏感设置
 
@@ -480,7 +527,7 @@ CREATE INDEX account_sessions_account_active_idx
 - Registry 新增 `account_sessions`，raw opaque token 只回传给 Desktop；服务端存 SHA-256 hash，按 30 天 idle / 90 天 absolute 过期并支持 revoke。
 - Runtime production path 通过 Registry `/v1/auth/me` 验证 opaque session；旧 HMAC 只留给 resolver-free/local fixture path。
 - Registry `/v1/user/agent-access` 直接返回 presentation；`200 []` 保持为空状态，revoked/disabled grant 不会出现在结果中。
-- Desktop token 走 macOS Keychain command，非敏感设置走 Tauri app-data JSON；renderer 不再使用 Web Storage 或 Preview User。
+- Desktop token 在正式稳定签名 macOS 包走 Developer-ID-gated Keychain command；dev/ad-hoc UAT 只走进程内 token，非敏感设置走 Tauri app-data JSON；renderer 不再使用 Web Storage 或 Preview User。
 - Desktop 页面只有 Signed out、Signed in（有 Agent / empty state）和传输态 Network Error；Browse CTA 走系统浏览器 allowlist。
 
 验证清单：
@@ -489,7 +536,7 @@ CREATE INDEX account_sessions_account_active_idx
 - Runtime TypeScript build + node tests：96 tests passed。
 - Tauri Rust tests：5 tests passed（含外部 Catalog URL allowlist）。
 - client UAT（Vite + 本地 Registry）：Signed out、真实 opaque sign-in 后的 signed-in empty state、Browse CTA 可见、Registry 断开后的 signed-in 保留状态与 retry error 均已验证。
-- packaged native UAT（Tauri release bundle）：在线时显示真实 signed-in empty state 与 Browse CTA；启动时 Registry 不可达时显示 Network Error page，保留 Keychain session 并提供 Retry。临时测试使用了隔离的 app identifier/Keychain service，已在 UAT 后删除测试 secret 并恢复生产配置。
+- packaged native UAT（Tauri release bundle）：在线时显示真实 signed-in empty state 与 Browse CTA；启动时 Registry 不可达时显示 Network Error page，并提供 Retry。ad-hoc UAT 只保留进程内 session，不读取旧 Keychain item；正式 Developer ID 包另做 silent Keychain persistence UAT。
 - `desktop-app npm run build:web`、`git diff --check` 均通过；未修改 `master` worktree。
 
 ## 参考标准

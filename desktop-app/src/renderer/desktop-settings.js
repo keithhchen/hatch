@@ -1,15 +1,9 @@
-import { englishMessage } from "./i18n.js";
+const SETTINGS_VERSION = 1;
 
-const SETTINGS_VERSION = 2;
-const DEFAULT_APP_SETTINGS = Object.freeze({ language: "system" });
-
-export function createDesktopSettingsStore({ read = async () => null, write = async () => {} } = {}) {
+export function createDesktopSettingsStore({ read = async () => null, write = async () => {}, patch = null } = {}) {
   let state = emptySettings();
   let loaded = false;
   let writeChain = Promise.resolve();
-  let persistedState = state;
-  let pendingMutations = [];
-  let nextMutationId = 1;
 
   return {
     async load() {
@@ -20,103 +14,94 @@ export function createDesktopSettingsStore({ read = async () => null, write = as
       } catch {
         state = emptySettings();
       }
-      persistedState = state;
-      pendingMutations = [];
       loaded = true;
       return state;
     },
     getProfile(profileId, key, fallback = undefined) {
       return state.accounts?.[String(profileId)]?.[key] ?? fallback;
     },
-    getApp(key, fallback = undefined) {
-      return state.app?.[key] ?? fallback;
-    },
-    setApp(key, value) {
-      return updateApp(key, value);
-    },
     setProfile(profileId, key, value) {
-      void updateProfile(profileId, key, value).catch(() => {});
+      const id = String(profileId || "anonymous");
+      if (!state.accounts[id]) state.accounts[id] = {};
+      if (value === undefined) delete state.accounts[id][key];
+      else state.accounts[id][key] = value;
+      persistProfilePatch(id, value === undefined ? { remove: [key] } : { set: { [key]: value } });
     },
     async importProfile(profileId, values) {
       if (!values || typeof values !== "object" || Array.isArray(values)) {
-        throw new Error(englishMessage("error.settings.invalidImport"));
+        throw new Error("Imported Desktop settings must be an object.");
       }
       const id = String(profileId || "anonymous");
-      await enqueueMutation((current) => ({
-        ...current,
+      const previous = state;
+      state = {
+        ...state,
         accounts: {
-          ...current.accounts,
-          [id]: { ...(current.accounts[id] ?? {}), ...values }
+          ...state.accounts,
+          [id]: { ...(state.accounts[id] ?? {}), ...values }
         }
-      }));
+      };
+      try {
+        await enqueueProfilePatch(id, { set: values });
+      } catch (error) {
+        state = previous;
+        throw error;
+      }
       return state.accounts[id];
     },
     removeProfile(profileId, key) {
       const id = String(profileId || "anonymous");
       if (!state.accounts[id]) return;
-      void updateProfile(profileId, key, undefined).catch(() => {});
+      delete state.accounts[id][key];
+      persistProfilePatch(id, { remove: [key] });
     },
     async clearProfileKey(profileId, key) {
       const id = String(profileId || "anonymous");
       if (!state.accounts[id] || !(key in state.accounts[id])) return;
-      await updateProfile(profileId, key, undefined);
-    },
-    async clearAppKey(key) {
-      const hasDefault = Object.prototype.hasOwnProperty.call(DEFAULT_APP_SETTINGS, key);
-      if (!(key in state.app) && !hasDefault) return;
-      if (hasDefault && state.app[key] === DEFAULT_APP_SETTINGS[key]) return;
-      await updateApp(key, undefined);
+      const previous = state;
+      const nextProfile = { ...state.accounts[id] };
+      delete nextProfile[key];
+      state = {
+        ...state,
+        accounts: {
+          ...state.accounts,
+          [id]: nextProfile
+        }
+      };
+      try {
+        await enqueueProfilePatch(id, { remove: [key] });
+      } catch (error) {
+        state = previous;
+        throw error;
+      }
     },
     snapshot() {
       return JSON.parse(JSON.stringify(state));
     }
   };
 
-  function updateApp(key, value) {
-    return enqueueMutation((current) => {
-      const nextApp = { ...current.app };
-      if (value === undefined) restoreAppDefault(nextApp, key);
-      else nextApp[key] = value;
-      return { ...current, app: nextApp };
-    });
+  function persist() {
+    void enqueueWrite(JSON.stringify(state));
   }
 
-  function updateProfile(profileId, key, value) {
-    const id = String(profileId || "anonymous");
-    return enqueueMutation((current) => {
-      const nextProfile = { ...(current.accounts[id] ?? {}) };
-      if (value === undefined) delete nextProfile[key];
-      else nextProfile[key] = value;
-      return {
-        ...current,
-        accounts: { ...current.accounts, [id]: nextProfile }
-      };
-    });
+  function persistProfilePatch(profileId, operation) {
+    if (typeof patch === "function") {
+      void enqueueProfilePatch(profileId, operation);
+    } else {
+      persist();
+    }
   }
 
-  function enqueueMutation(apply) {
-    const mutation = { id: nextMutationId++, apply };
-    pendingMutations.push(mutation);
-    state = apply(state);
-    const pending = writeChain.then(async () => {
-      const nextPersistedState = apply(persistedState);
-      await write(JSON.stringify(nextPersistedState));
-      persistedState = nextPersistedState;
-      settleMutation(mutation.id);
-    }).catch((error) => {
-      settleMutation(mutation.id);
-      throw error;
-    });
+  function enqueueProfilePatch(profileId, operation) {
+    if (typeof patch !== "function") return enqueueWrite(JSON.stringify(state));
+    const pending = writeChain.then(() => patch({ profileId, ...operation }));
     writeChain = pending.catch(() => {});
     return pending;
   }
 
-  function settleMutation(id) {
-    pendingMutations = pendingMutations.filter((mutation) => mutation.id !== id);
-    state = pendingMutations.reduce(
-      (current, mutation) => mutation.apply(current),
-      persistedState
-    );
+  function enqueueWrite(serialized) {
+    const pending = writeChain.then(() => write(serialized));
+    writeChain = pending.catch(() => {});
+    return pending;
   }
 }
 
@@ -140,12 +125,19 @@ export function createTauriSettingsStore(invokeImpl, { strict = false } = {}) {
         // Keep the in-memory fallback for the current renderer lifetime.
         if (strict) throw error;
       }
+    },
+    async patch(request) {
+      try {
+        await invokeImpl("patch_app_settings", { patch: request });
+      } catch (error) {
+        if (strict) throw error;
+      }
     }
   });
 }
 
 function emptySettings() {
-  return { schema_version: SETTINGS_VERSION, app: { ...DEFAULT_APP_SETTINGS }, accounts: {} };
+  return { schema_version: SETTINGS_VERSION, accounts: {} };
 }
 
 function normalizeSettings(value) {
@@ -157,19 +149,5 @@ function normalizeSettings(value) {
   const accounts = parsed.accounts && typeof parsed.accounts === "object" && !Array.isArray(parsed.accounts)
     ? parsed.accounts
     : {};
-  const storedApp = parsed.app && typeof parsed.app === "object" && !Array.isArray(parsed.app)
-    ? parsed.app
-    : {};
-  const app = { ...DEFAULT_APP_SETTINGS, ...storedApp };
-  if (typeof app.language !== "string" || !app.language.trim()) {
-    app.language = DEFAULT_APP_SETTINGS.language;
-  }
-  return { schema_version: SETTINGS_VERSION, app, accounts };
-}
-
-function restoreAppDefault(app, key) {
-  delete app[key];
-  if (Object.prototype.hasOwnProperty.call(DEFAULT_APP_SETTINGS, key)) {
-    app[key] = DEFAULT_APP_SETTINGS[key];
-  }
+  return { schema_version: SETTINGS_VERSION, accounts };
 }

@@ -1,10 +1,10 @@
 export const DEFAULT_CREATOR_AGENT = Object.freeze({
   id: "creator-agent",
-  creator: "",
-  creatorInitials: "",
-  name: "",
-  description: "",
-  boundary: "",
+  creator: "Creator",
+  creatorInitials: "C",
+  name: "Creator Agent",
+  description: "Work with this Creator Agent in your own files and context.",
+  boundary: "The Agent works within the scope defined by its Creator.",
   presentation: {}
 });
 
@@ -16,7 +16,7 @@ export function creatorAgentFromSession(message) {
     creator: agent.creator.name,
     creatorInitials: initials(agent.creator.name),
     name: agent.product.name,
-    description: agent.product.description || "",
+    description: agent.product.description || "Work with this Creator Agent in your own files and context.",
     boundary: "",
     presentation: agent.presentation || {}
   });
@@ -26,13 +26,42 @@ export function creatorAgentFromEntitlement(entitlement) {
   return creatorAgentFromSession({ creator_agent: entitlement });
 }
 
-function initials(name) {
-  return String(name).trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() || "").join("");
+/**
+ * A Runtime projection may refine the public Agent presentation, but it must
+ * never replace the Agent selected from the authenticated entitlement with a
+ * generic fallback or with metadata from another binding.
+ */
+export function creatorAgentFromBoundSession(message, entitlement, currentAgent) {
+  if (!message?.creator_agent?.creator?.name || !message?.creator_agent?.product?.name) {
+    return currentAgent;
+  }
+  const expected = {
+    entitlementId: String(entitlement?.entitlement_id || ""),
+    agentId: String(entitlement?.agent_id || ""),
+    creatorId: String(entitlement?.creator_id || "")
+  };
+  const received = {
+    entitlementId: String(message.entitlement_id || ""),
+    agentId: String(message.agent_id || ""),
+    creatorId: String(message.creator_id || "")
+  };
+  if (!expected.entitlementId
+    || expected.entitlementId !== received.entitlementId
+    || expected.agentId !== received.agentId
+    || expected.creatorId !== received.creatorId) {
+    return currentAgent;
+  }
+  return creatorAgentFromSession(message);
 }
 
-export const CONVERSATION_GUARD_REASONS = Object.freeze({
-  ACTIVE_RUN: "active-run",
-  CONNECTION_RESTORING: "connection-restoring"
+function initials(name) {
+  return String(name).trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() || "").join("") || "C";
+}
+
+export const PRODUCT_COPY = Object.freeze({
+  home: "Your agents",
+  workspaceRequired: "Choose a workspace to continue",
+  activeRunGuard: "This task is still active. Stop or close it before starting another conversation."
 });
 
 export const READ_TOOLS = Object.freeze(["file_list", "file_search", "file_read", "git_diff"]);
@@ -57,18 +86,18 @@ export const PERMISSION_POLICIES = Object.freeze({
 export const PERMISSION_OPTIONS = Object.freeze([
   Object.freeze({
     value: PERMISSION_POLICIES.ASK_BEFORE_CHANGES,
-    labelKey: "permission.askBeforeChanges",
-    detailKey: "permission.askBeforeChangesDetail"
+    label: "Ask before changes",
+    detail: "Ask before file changes and shell commands"
   }),
   Object.freeze({
     value: PERMISSION_POLICIES.ALLOW_CHANGES,
-    labelKey: "permission.allowChanges",
-    detailKey: "permission.allowChangesDetail"
+    label: "Allow changes",
+    detail: "Allow file changes and shell commands"
   })
 ]);
 
-// Reads are automatic. File changes and every shell command follow the same
-// user-selected changes policy.
+// Reads are automatic. Ask requires approval for every change tool; Allow
+// covers the same complete change-tool set, including shell commands.
 export const DEFAULT_PERMISSION_POLICY = PERMISSION_POLICIES.ASK_BEFORE_CHANGES;
 
 function assertPermissionPolicy(policy) {
@@ -94,14 +123,24 @@ export function shouldRequestDesktopApproval(toolRequest, policy = DEFAULT_PERMI
   return requiresUserApproval(toolRequest?.name, policy);
 }
 
+export function permissionPolicyLabel(policy) {
+  return PERMISSION_OPTIONS.find((option) => option.value === policy)?.label
+    ?? PERMISSION_OPTIONS[0].label;
+}
+
+export function permissionPolicyDetail(policy) {
+  return PERMISSION_OPTIONS.find((option) => option.value === policy)?.detail
+    ?? PERMISSION_OPTIONS[0].detail;
+}
+
 export function canStartConversation({ activeRun, connected }) {
-  if (activeRun) return { allowed: false, reason: CONVERSATION_GUARD_REASONS.ACTIVE_RUN };
-  if (!connected) return { allowed: false, reason: CONVERSATION_GUARD_REASONS.CONNECTION_RESTORING };
+  if (activeRun) return { allowed: false, reason: PRODUCT_COPY.activeRunGuard };
+  if (!connected) return { allowed: false, reason: "The connection is still restoring. Please wait a moment." };
   return { allowed: true, reason: "" };
 }
 
 export function workspaceGrantLabel(path) {
-  if (!path) return "";
+  if (!path) return "No folder granted";
   const parts = path.replaceAll("\\", "/").split("/").filter(Boolean);
   return parts.at(-1) || path;
 }

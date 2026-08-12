@@ -17,8 +17,7 @@ import {
   LEGACY_PROTOCOL_VERSION,
   parseInboundMessage,
   PROTOCOL_VERSION,
-  renderUserMessageForModel,
-  SUPPORTED_PROTOCOL_VERSIONS
+  renderUserMessageForModel
 } from "./protocol.js";
 import {
   discoverSkills,
@@ -47,7 +46,11 @@ import {
   requireTool,
   toolRegistry
 } from "./tools.js";
-import type { OutputGuard, OutputGuardInput } from "./outputGuard.js";
+import {
+  DEFAULT_OUTPUT_GUARD_FIRST_SEGMENT_CHARS,
+  type OutputGuard,
+  type OutputGuardInput
+} from "./outputGuard.js";
 
 let runtimeServer: RuntimeServer | undefined;
 let tempDirs: string[] = [];
@@ -64,7 +67,7 @@ test("runtime protocol mirrors the canonical wire schema", async () => {
   const schema = JSON.parse(await readFile(schemaPath, "utf8")) as {
     $id: string;
     $defs: {
-      protocolVersion: { enum: string[] };
+      protocolVersion: { const: string };
       clientToolName: { enum: string[] };
       skillInvoked: {
         properties: {
@@ -75,7 +78,7 @@ test("runtime protocol mirrors the canonical wire schema", async () => {
   };
 
   assert.equal(schema.$id, "https://hatch.dev/protocol/hatch-wire-protocol-0.7.schema.json");
-  assert.deepEqual(schema.$defs.protocolVersion.enum, [...SUPPORTED_PROTOCOL_VERSIONS]);
+  assert.equal(schema.$defs.protocolVersion.const, PROTOCOL_VERSION);
   assert.deepEqual(schema.$defs.clientToolName.enum, [...ClientToolNameSchema.options]);
   assert.deepEqual(schema.$defs.skillInvoked.properties.trigger.properties.tool.enum, ["shell_exec", "file_read"]);
 });
@@ -280,12 +283,19 @@ test("runtime server exposes visible conversation history for client hydration",
       path: "/server/skills/contract-review/SKILL.md"
     }
   });
+  const beforeTool = "I need to read the sheet. ";
+  const afterTool = "The rows are ready.";
   await store.append({
-    type: "message.created",
+    type: "conversation.model_message",
     conversation_id: storedConversationId,
     run_id: "run_old_1",
-    role: "assistant",
-    content: "I still need to read the spreadsheet."
+    message: { role: "assistant", content: `${beforeTool}${afterTool}` },
+    finish_reason: "stop",
+    visible_parts: [
+      { type: "text", start: 0, end: beforeTool.length },
+      { type: "tool_call", tool_call_id: "call_file_read" },
+      { type: "text", start: beforeTool.length, end: beforeTool.length + afterTool.length }
+    ]
   });
 
   runtimeServer = createDeterministicRuntimeServer();
@@ -308,6 +318,10 @@ test("runtime server exposes visible conversation history for client hydration",
       role: string;
       content: string;
       run_id: string;
+      parts?: Array<
+        | { type: "text"; start: number; end: number }
+        | { type: "tool_call"; tool_call_id: string }
+      >;
       tool_calls?: Array<{
         tool_call_id: string;
         name: string;
@@ -330,7 +344,7 @@ test("runtime server exposes visible conversation history for client hydration",
   assert.equal(payload.conversation_id, "desktop-chat");
   assert.deepEqual(payload.messages.map((message) => [message.role, message.content]), [
     ["user", "Read the birthday dinner sheet."],
-    ["assistant", "I still need to read the spreadsheet."]
+    ["assistant", `${beforeTool}${afterTool}`]
   ]);
   assert.equal(payload.messages[0]?.tool_calls, undefined);
   assert.equal(payload.messages[0]?.skill_events, undefined);
@@ -349,6 +363,11 @@ test("runtime server exposes visible conversation history for client hydration",
     "auto",
     "birthday dinner rows"
   ]]);
+  assert.deepEqual(payload.messages[1]?.parts, [
+    { type: "text", start: 0, end: beforeTool.length },
+    { type: "tool_call", tool_call_id: "call_file_read" },
+    { type: "text", start: beforeTool.length, end: beforeTool.length + afterTool.length }
+  ]);
   assert.deepEqual(payload.messages[1]?.skill_events?.map((skillEvent) => [
     skillEvent.name,
     skillEvent.status,
@@ -360,6 +379,92 @@ test("runtime server exposes visible conversation history for client hydration",
     ["contract-review", "activated", "explicit", "explicit_mention", undefined, undefined],
     ["contract-review", "invoked", "implicit", "skill_doc_read", "call_file_read", "file_read"]
   ]);
+});
+
+test("visible history preserves guarded text and tool interleave order", async () => {
+  const dataDir = await tempWorkspace();
+  const store = new RuntimeStore(dataDir);
+  const beforeTool = "A".repeat(DEFAULT_OUTPUT_GUARD_FIRST_SEGMENT_CHARS + 1);
+  const afterTool = "After the tool.";
+  const runtime: AgentRuntime = {
+    async *run(input) {
+      yield {
+        type: "assistant.delta",
+        run_id: input.run_id,
+        delta: { kind: "text", content: beforeTool }
+      };
+      yield {
+        type: "tool_call.delta",
+        run_id: input.run_id,
+        tool_call_id: "call_interleave",
+        name: "web.search",
+        locality: "server",
+        approval: "none",
+        status: "requested",
+        arguments: { query: "ordered timeline" }
+      };
+      yield {
+        type: "tool_call.delta",
+        run_id: input.run_id,
+        tool_call_id: "call_interleave",
+        name: "web.search",
+        locality: "server",
+        approval: "none",
+        status: "completed",
+        arguments: { query: "ordered timeline" },
+        result: { matches: [] }
+      };
+      yield {
+        type: "assistant.delta",
+        run_id: input.run_id,
+        delta: { kind: "text", content: afterTool }
+      };
+      yield { type: "turn.completed", run_id: input.run_id, finish_reason: "stop" };
+    }
+  };
+  runtimeServer = createRuntimeServer({
+    conversationStore: store,
+    createRuntime: () => runtime
+  });
+  const serverUrl = await listen(runtimeServer);
+  const socket = new WebSocket(serverUrl);
+  const messages: OutboundMessage[] = [];
+  socket.on("message", (data) => messages.push(JSON.parse(String(data)) as OutboundMessage));
+  await new Promise<void>((resolve, reject) => {
+    socket.once("open", resolve);
+    socket.once("error", reject);
+  });
+  socket.send(JSON.stringify({
+    type: "client.hello",
+    protocol_version: PROTOCOL_VERSION,
+    installation_id: "ordered-history-test",
+    license_token: "ordered-history-test",
+    local_tools: []
+  }));
+  await waitForSocketMessage(messages, (message) => message.type === "session.ready");
+  socket.send(JSON.stringify({
+    type: "client.message",
+    run_id: "run_ordered_history",
+    conversation_id: "ordered-history",
+    message: { role: "user", content: "Use a tool between two text segments." }
+  }));
+  await waitForSocketMessage(messages, (message) => (
+    message.type === "turn.completed" && message.run_id === "run_ordered_history"
+  ));
+
+  const visible = await store.readVisibleConversation("ordered-history");
+  const assistant = visible.find((message) => message.role === "assistant");
+  assert.equal(assistant?.content, `${beforeTool}${afterTool}`);
+  assert.deepEqual(assistant?.parts, [
+    { type: "text", start: 0, end: DEFAULT_OUTPUT_GUARD_FIRST_SEGMENT_CHARS },
+    { type: "tool_call", tool_call_id: "call_interleave" },
+    {
+      type: "text",
+      start: DEFAULT_OUTPUT_GUARD_FIRST_SEGMENT_CHARS,
+      end: beforeTool.length + afterTool.length
+    }
+  ]);
+  socket.close();
 });
 
 test("Output Guard releases passed segments but commits only a blocked terminal marker", async () => {
@@ -377,7 +482,10 @@ test("Output Guard releases passed segments but commits only a blocked terminal 
       yield {
         type: "assistant.delta",
         run_id: input.run_id,
-        delta: { kind: "text", content: "a".repeat(101) }
+        delta: {
+          kind: "text",
+          content: "a".repeat(DEFAULT_OUTPUT_GUARD_FIRST_SEGMENT_CHARS + 1)
+        }
       };
       yield {
         type: "assistant.delta",
@@ -425,7 +533,7 @@ test("Output Guard releases passed segments but commits only a blocked terminal 
       .filter((message) => message.type === "assistant.delta" && message.delta.kind === "text")
       .map((message) => message.type === "assistant.delta" ? message.delta.content : "")
       .join(""),
-    "a".repeat(100)
+    "a".repeat(DEFAULT_OUTPUT_GUARD_FIRST_SEGMENT_CHARS)
   );
   assert.deepEqual(guardCalls.map(({ chatId, sessionId, done }) => [chatId, sessionId, done]), [
     ["run_guard_block", "run_guard_block", false],
@@ -1902,7 +2010,7 @@ test("skill resources can be read by catalog path and cannot escape the skills r
   await assert.rejects(() => readSkillResourceByPath(path.join(path.dirname(skill.path), "..", "..", "package.json")), /escapes skills root/);
 });
 
-test("server accepts protocol 0.6 and 0.7 while rejecting older clients", async () => {
+test("server rejects protocol 0.6 hello explicitly before accepting protocol 0.7", async () => {
   const dataDir = await tempWorkspace();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
 
@@ -1928,7 +2036,6 @@ test("server accepts protocol 0.6 and 0.7 while rejecting older clients", async 
   const rejected = await waitForSocketMessage(messages, (message) => message.type === "turn.failed");
   assert.ok(rejected.type === "turn.failed");
   assert.equal(rejected.error.code, "protocol_error");
-  assert.match(rejected.error.message, /0\.6/);
   assert.match(rejected.error.message, /0\.7/);
 
   socket.send(JSON.stringify({

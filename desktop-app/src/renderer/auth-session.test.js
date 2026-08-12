@@ -5,8 +5,8 @@ import {
   fetchAuthAccount,
   hydrateAuthSession,
   isAuthInvalidError,
+  isRemoteAuthSessionCleared,
   isNetworkError,
-  isSecureSessionReadError,
   loadSavedAuthSession,
   revokeAuthSession,
   saveAuthSession,
@@ -170,16 +170,19 @@ describe("account sessions", () => {
     expect(invoke).toHaveBeenCalledWith("clear_auth_token");
   });
 
-  it("surfaces packaged Keychain read or ACL failures instead of pretending to be signed out", async () => {
+  it("treats packaged Keychain read or ACL failures as signed out", async () => {
     const storage = createTauriAuthStorage(async (command) => {
       if (command === "read_auth_token") throw new Error("Keychain ACL denied access");
     }, { strict: true });
 
-    const error = await loadSavedAuthSession(storage).catch((value) => value);
-    expect(isSecureSessionReadError(error)).toBe(true);
-    expect(error.message).toContain("couldn't read the saved session");
-    expect(error.i18nKey).toBe("error.auth.secureSessionReadFailed");
-    expect(error.cause?.message).toBe("Keychain ACL denied access");
+    await expect(loadSavedAuthSession(storage)).resolves.toBeNull();
+  });
+
+  it("accepts only a cleared event from another native window", () => {
+    expect(isRemoteAuthSessionCleared({ kind: "cleared", sourceWindow: "conversation-2" }, "main")).toBe(true);
+    expect(isRemoteAuthSessionCleared({ kind: "cleared", sourceWindow: "main" }, "main")).toBe(false);
+    expect(isRemoteAuthSessionCleared({ kind: "cleared" }, "main")).toBe(false);
+    expect(isRemoteAuthSessionCleared({ kind: "signed-in", sourceWindow: "conversation-2" }, "main")).toBe(false);
   });
 
   it("annotates secure storage write failures without replacing their native message", async () => {

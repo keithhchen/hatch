@@ -700,3 +700,39 @@ test("Postgres visible history projects canonical terminal finish reasons", asyn
     finish_reason: "content_filter"
   }]);
 });
+
+test("Postgres visible history preserves committed text and tool order", async () => {
+  const { store } = storeFixture();
+  await append(store, {
+    type: "tool.call",
+    conversation_id: "ordered-history",
+    run_id: "run-ordered",
+    tool_call_id: "tool-read",
+    name: "file_read",
+    arguments: { path: "notes.txt" },
+    status: "completed",
+    locality: "client",
+    result: { content: "notes" },
+    timestamp: "2026-08-11T00:00:01.000Z"
+  });
+  const parts = [
+    { type: "text" as const, start: 0, end: 7 },
+    { type: "tool_call" as const, tool_call_id: "tool-read" },
+    { type: "text" as const, start: 7, end: 18 }
+  ];
+  await append(store, {
+    type: "conversation.model_message",
+    conversation_id: "ordered-history",
+    run_id: "run-ordered",
+    message: { role: "assistant", content: "Before.After tool." },
+    finish_reason: "stop",
+    visible_parts: parts,
+    timestamp: "2026-08-11T00:00:02.000Z"
+  });
+
+  const visible = await store.readVisibleConversation("ordered-history");
+  assert.equal(visible.length, 1);
+  assert.equal(visible[0]?.content, "Before.After tool.");
+  assert.deepEqual(visible[0]?.parts, parts);
+  assert.equal(visible[0]?.tool_calls?.[0]?.tool_call_id, "tool-read");
+});

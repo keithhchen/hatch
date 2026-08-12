@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-native-command-state"
+description = "Enables the set_native_command_state command without any pre-configured scope."
+commands.allow = ["set_native_command_state"]
+
+[[permission]]
+identifier = "deny-set-native-command-state"
+description = "Denies the set_native_command_state command without any pre-configured scope."
+commands.deny = ["set_native_command_state"]

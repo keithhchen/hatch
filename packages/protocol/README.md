@@ -3,11 +3,6 @@
 Canonical provider-agnostic wire protocol 0.7, durable Conversation API v1,
 and Agent Corpus v1.
 
-During the Desktop migration, Runtime also accepts protocol 0.6 and echoes the
-client's negotiated version in `session.ready.accepted_protocol_version`.
-Protocol 0.6 remains a compatibility lane only; structured context attachments
-are available to protocol 0.7 clients.
-
 This package owns the JSON Schema for the server/Desktop local-client boundary. The TypeScript runtime server and Rust local runner currently mirror this schema directly; generated TS and Rust types should be introduced from this package before the protocol is expanded further.
 
 Current boundaries:

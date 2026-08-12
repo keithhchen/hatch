@@ -102,6 +102,56 @@ test("Conversation HTTP API owns metadata, pagination, versions, and cursor snap
   assert.equal((afterAgentUpdate.body as { conversation: { id: string } }).conversation.id, first.conversation.id);
 });
 
+test("Conversation Library keeps three Agent A and two Agent B conversations in separate scopes", async () => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-library-hierarchy-"));
+  runtime = createRuntimeServer({ conversationStore: new RuntimeStore(dataDir) });
+  const base = await listen(runtime.server);
+  const agentA = new URLSearchParams(binding).toString();
+  const agentBBinding = {
+    ...binding,
+    creator_id: "creator_b",
+    agent_id: "agent_b",
+    product_id: "product_b"
+  };
+  const agentB = new URLSearchParams(agentBBinding).toString();
+
+  const createMany = async (scope: string, prefix: string, count: number) => {
+    const created = [] as Array<{ id: string; creator_id: string; agent_id: string }>;
+    for (let index = 1; index <= count; index += 1) {
+      const response = await json(base, `/v1/conversations?${scope}`, {
+        method: "POST",
+        body: {
+          title: `${prefix} conversation ${index}`,
+          client_request_id: `${prefix}_${index}`
+        }
+      });
+      assert.ok(response.response.status === 201 || response.response.status === 200);
+      created.push((response.body as { conversation: typeof created[number] }).conversation);
+    }
+    return created;
+  };
+
+  const conversationsA = await createMany(agentA, "agent_a", 3);
+  const conversationsB = await createMany(agentB, "agent_b", 2);
+  assert.equal(new Set(conversationsA.map((conversation) => conversation.id)).size, 3);
+  assert.equal(new Set(conversationsB.map((conversation) => conversation.id)).size, 2);
+
+  const listedA = await json(base, `/v1/conversations?${agentA}&limit=100`);
+  const listedB = await json(base, `/v1/conversations?${agentB}&limit=100`);
+  const idsA = (listedA.body as { conversations: Array<{ id: string; creator_id: string; agent_id: string }> }).conversations;
+  const idsB = (listedB.body as { conversations: Array<{ id: string; creator_id: string; agent_id: string }> }).conversations;
+  assert.equal(idsA.length, 3);
+  assert.equal(idsB.length, 2);
+  assert.ok(idsA.every((conversation) => conversation.creator_id === binding.creator_id && conversation.agent_id === binding.agent_id));
+  assert.ok(idsB.every((conversation) => conversation.creator_id === agentBBinding.creator_id && conversation.agent_id === agentBBinding.agent_id));
+
+  const crossAgentRead = await json(
+    base,
+    `/v1/conversations/${encodeURIComponent(conversationsA[0]!.id)}?${agentB}`
+  );
+  assert.equal(crossAgentRead.response.status, 404);
+});
+
 test("Run HTTP API rejects a detached reservation instead of occupying an executor slot", async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-runs-"));
   runtime = createRuntimeServer({ conversationStore: new RuntimeStore(dataDir) });

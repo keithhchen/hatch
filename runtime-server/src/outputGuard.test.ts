@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   createOutputGuardFromEnvironment,
+  DEFAULT_OUTPUT_GUARD_FIRST_SEGMENT_CHARS,
+  DEFAULT_OUTPUT_GUARD_LATER_SEGMENT_CHARS,
   GuardedAssistantOutput,
   outputLeakVerdict,
   PassThroughOutputGuard,
@@ -9,6 +11,11 @@ import {
   type OutputGuardInput,
   type OutputGuardVerdict
 } from "./outputGuard.js";
+
+test("Output Guard defaults favor fewer, longer semantic segments", () => {
+  assert.equal(DEFAULT_OUTPUT_GUARD_FIRST_SEGMENT_CHARS, 240);
+  assert.equal(DEFAULT_OUTPUT_GUARD_LATER_SEGMENT_CHARS, 600);
+});
 
 class RecordingGuard implements OutputGuard {
   readonly calls: OutputGuardInput[] = [];
