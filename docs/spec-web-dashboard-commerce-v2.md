@@ -1,5 +1,7 @@
 # Hatch Web Dashboard & Commerce Flow v2
 
+> Web 信息架构、public Browse、Library、Orders、Studio、Account、URL 与 Caddy 的最新规范见 [Hatch Public Browse, Library & Studio v1](./spec-public-browse-library-studio-v1.md)。若路径或命名冲突，以该规范为准。
+
 状态：Product / UX / Commerce contract draft
 
 日期：2026-08-12
