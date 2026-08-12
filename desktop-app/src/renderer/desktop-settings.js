@@ -1,4 +1,5 @@
 const SETTINGS_VERSION = 1;
+const DEFAULT_APP_SETTINGS = Object.freeze({ language: "system" });
 
 export function createDesktopSettingsStore({ read = async () => null, write = async () => {}, patch = null } = {}) {
   let state = emptySettings();
@@ -19,6 +20,25 @@ export function createDesktopSettingsStore({ read = async () => null, write = as
     },
     getProfile(profileId, key, fallback = undefined) {
       return state.accounts?.[String(profileId)]?.[key] ?? fallback;
+    },
+    getApp(key, fallback = undefined) {
+      return state.app?.[key] ?? fallback;
+    },
+    setApp(key, value) {
+      const normalizedKey = String(key || "").trim();
+      if (!normalizedKey) return Promise.resolve();
+      if (!state.app || typeof state.app !== "object") state.app = {};
+      const previous = state.app[normalizedKey];
+      if (value === undefined) delete state.app[normalizedKey];
+      else state.app[normalizedKey] = value;
+      return persistAppPatch(normalizedKey, value).catch((error) => {
+        if (previous === undefined) delete state.app[normalizedKey];
+        else state.app[normalizedKey] = previous;
+        throw error;
+      });
+    },
+    async clearAppKey(key) {
+      await this.setApp(key, undefined);
     },
     setProfile(profileId, key, value) {
       const id = String(profileId || "anonymous");
@@ -91,9 +111,24 @@ export function createDesktopSettingsStore({ read = async () => null, write = as
     }
   }
 
+  function persistAppPatch(key, value) {
+    if (typeof patch === "function") {
+      return enqueueAppPatch(value === undefined
+        ? { remove: [key] }
+        : { set: { [key]: value } });
+    }
+    return enqueueWrite(JSON.stringify(state));
+  }
+
   function enqueueProfilePatch(profileId, operation) {
     if (typeof patch !== "function") return enqueueWrite(JSON.stringify(state));
     const pending = writeChain.then(() => patch({ profileId, ...operation }));
+    writeChain = pending.catch(() => {});
+    return pending;
+  }
+
+  function enqueueAppPatch(operation) {
+    const pending = writeChain.then(() => patch({ app: operation }));
     writeChain = pending.catch(() => {});
     return pending;
   }
@@ -137,7 +172,7 @@ export function createTauriSettingsStore(invokeImpl, { strict = false } = {}) {
 }
 
 function emptySettings() {
-  return { schema_version: SETTINGS_VERSION, accounts: {} };
+  return { schema_version: SETTINGS_VERSION, app: { ...DEFAULT_APP_SETTINGS }, accounts: {} };
 }
 
 function normalizeSettings(value) {
@@ -149,5 +184,10 @@ function normalizeSettings(value) {
   const accounts = parsed.accounts && typeof parsed.accounts === "object" && !Array.isArray(parsed.accounts)
     ? parsed.accounts
     : {};
-  return { schema_version: SETTINGS_VERSION, accounts };
+  const storedApp = parsed.app && typeof parsed.app === "object" && !Array.isArray(parsed.app)
+    ? parsed.app
+    : {};
+  const app = { ...DEFAULT_APP_SETTINGS, ...storedApp };
+  if (typeof app.language !== "string" || !app.language.trim()) app.language = DEFAULT_APP_SETTINGS.language;
+  return { schema_version: SETTINGS_VERSION, app, accounts };
 }

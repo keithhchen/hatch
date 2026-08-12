@@ -4,8 +4,6 @@ on:
   # A manual dispatch is useful for rehearsing the protected release lane, but
   # publication still requires a tag and the exact package to pass target UAT.
   workflow_dispatch:
-  push:
-    tags: ["v*.*.*"]
 
 # The build and target-UAT jobs do not need write access. Publication receives
 # write access only after both protected environments have passed.

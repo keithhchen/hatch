@@ -7,7 +7,10 @@
       "windows": ["settings", "about"],
       "permissions": [
         "core:default",
-        "core:window:allow-start-dragging"
+        "core:window:allow-start-dragging",
+        "allow-read-app-settings",
+        "allow-write-app-settings",
+        "allow-patch-app-settings"
       ]
     },
     {
