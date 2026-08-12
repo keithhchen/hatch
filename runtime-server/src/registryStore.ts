@@ -3,12 +3,15 @@ import { lstat, mkdir, open, readFile, writeFile, rename, rm, readdir, stat } fr
 import path from "node:path";
 import { Pool, type QueryConfig } from "pg";
 import {
-  activateCurrentCorpus,
   extractAgentCorpusBundle,
+  activateCurrentCorpus,
+  immutableReleasePath,
+  materializeAgentCorpusRelease,
   prepareCurrentCorpusInstall,
   verifyAgentCorpus,
   AgentCorpusVerificationError,
   type CurrentCorpusInstallTransaction,
+  type VerifiedAgentCorpus,
 } from "./registryCorpus.js";
 import { loadAgentCorpus } from "./agentCorpus.js";
 import {
@@ -22,7 +25,6 @@ export type PublishedAgentCorpus = {
   creator_id: string;
   agent_id: string;
   corpus_digest: string;
-  backward_compatible_with?: string;
   creator_name: string;
   product_id: string;
   product_name: string;
@@ -41,43 +43,6 @@ export type PublishedAgentCorpus = {
   published_at: string;
 };
 
-export type RegistryDeploymentActivation = {
-  operationId: string;
-  /** `null` is an explicit compare against an absent current deployment. */
-  expectedCurrentDigest: string | null;
-};
-
-export class RegistryDeploymentConflictError extends Error {
-  readonly code = "stale_current_digest";
-
-  constructor(
-    readonly expectedCurrentDigest: string | null,
-    readonly currentCorpusDigest: string | null,
-    readonly targetCorpusDigest: string,
-  ) {
-    super("stale_current_digest");
-    this.name = "RegistryDeploymentConflictError";
-  }
-}
-
-/**
- * The Factory control plane approved one content-addressed candidate, but the
- * directory presented to Registry no longer verifies to that digest.  This is
- * a stale-approval conflict, not a new candidate that Registry may silently
- * stage or publish.
- */
-export class RegistryFactoryCandidateChangedError extends Error {
-  readonly code = "candidate_changed";
-
-  constructor(
-    readonly expectedCorpusDigest: string,
-    readonly currentCorpusDigest: string,
-  ) {
-    super("candidate_changed");
-    this.name = "RegistryFactoryCandidateChangedError";
-  }
-}
-
 export type AgentAccessGrant = {
   entitlement_id: string;
   user_id: string;
@@ -85,6 +50,8 @@ export type AgentAccessGrant = {
   agent_id: string;
   product_id: string;
   order_id?: string;
+  purchased_corpus_digest?: string;
+  version_policy?: "pinned" | "track_current_compatible";
   status: "active" | "revoked" | "disabled";
   granted_at: string;
 };
@@ -100,6 +67,18 @@ export type AgentAccessListOptions = {
   limit?: number;
   offset?: number;
 };
+
+export class RegistryDeploymentConflictError extends Error {
+  readonly code = "stale_current_digest";
+  constructor(
+    readonly expectedCurrentDigest: string | null,
+    readonly currentCorpusDigest: string | null,
+    readonly targetCorpusDigest: string
+  ) {
+    super("The current Agent Corpus changed before activation.");
+    this.name = "RegistryDeploymentConflictError";
+  }
+}
 
 export const MAX_AGENT_CORPORA_PER_CREATOR = 20;
 export const MAX_CORPUS_BYTES_PER_CREATOR = 256 * 1024 * 1024;
@@ -121,7 +100,7 @@ export type CreatorToolConnection = {
 type RegistryState = {
   schema_version: 1;
   agent_corpora: PublishedAgentCorpus[];
-  agent_access: Array<Partial<AgentAccessGrant>>;
+  agent_access: AgentAccessGrant[];
   tool_connections?: CreatorToolConnection[];
   agent_tool_bindings?: Array<{ tenant_id: string; agent_id: string; tool_id: string; connection_id: string }>;
 };
@@ -416,83 +395,6 @@ export class RegistryStoreTs {
     }
   }
 
-  /** Publish one exact, already-approved Factory bundle present on the Registry host. */
-  async publishAgentCorpusDirectory(
-    creatorId: string,
-    agentId: string,
-    corpusRoot: string,
-    expectedDigest: string,
-  ): Promise<PublishedAgentCorpus> {
-    const verified = await this.verifyApprovedFactoryCorpus(creatorId, agentId, corpusRoot, expectedDigest);
-    return this.publishVerifiedCorpus(verified);
-  }
-
-  /**
-   * Materialize and validate a Factory candidate without changing the serving
-   * pointer. Deployment orchestration must call activateAgentCorpusRelease in
-   * a separate, compare-and-swap step after its other durable writes succeed.
-   */
-  async stageAgentCorpusDirectory(
-    creatorId: string,
-    agentId: string,
-    corpusRoot: string,
-    expectedDigest: string,
-  ): Promise<PublishedAgentCorpus> {
-    const verified = await this.verifyApprovedFactoryCorpus(creatorId, agentId, corpusRoot, expectedDigest);
-    return this.stageVerifiedCorpus(verified);
-  }
-
-  async stageAgentCorpusBundle(creatorId: string, agentId: string, bundle: Uint8Array): Promise<PublishedAgentCorpus> {
-    const staging = path.join(path.dirname(this.corpusRoot), `.agent-corpus-stage-${randomUUID()}`);
-    await mkdir(staging, { recursive: true });
-    try {
-      await extractAgentCorpusBundle(bundle, staging);
-      return await this.stageVerifiedCorpus(await verifyAgentCorpus(staging, creatorId, agentId));
-    } finally {
-      await rm(staging, { recursive: true, force: true });
-    }
-  }
-
-  async activateAgentCorpusRelease(
-    creatorId: string,
-    agentId: string,
-    corpusDigest: string,
-    deployment?: RegistryDeploymentActivation,
-  ): Promise<PublishedAgentCorpus> {
-    if (!isCorpusDigest(corpusDigest)) throw new Error("invalid_corpus_digest");
-    if (deployment) validateDeploymentActivation(deployment);
-    return this.withDeploymentLock(key(creatorId, agentId), async () => {
-      const current = await this.readAuthoritativeCurrentCorpus(creatorId, agentId);
-      // Target-current is a replay even when the caller's original expected
-      // value is now stale. It also repairs a crash between metadata commit and
-      // pointer replacement.
-      if (current?.corpus_digest === corpusDigest) {
-        await this.ensureCurrentCorpusPointer(current);
-        return current;
-      }
-      if (deployment && (current?.corpus_digest ?? null) !== deployment.expectedCurrentDigest) {
-        throw new RegistryDeploymentConflictError(
-          deployment.expectedCurrentDigest,
-          current?.corpus_digest ?? null,
-          corpusDigest,
-        );
-      }
-
-      const verified = await this.loadStagedCorpus(creatorId, agentId, corpusDigest);
-      if (verified.corpus.knowledge.documents.length > 0 && !this.indexer) {
-        throw new Error("Agent Corpus includes knowledge documents but Qdrant knowledge index is not configured");
-      }
-      if (this.indexer) await ingestAgentCorpusKnowledge(this.indexer, {
-        corpus: verified.corpus,
-        path: verified.path,
-        digest: verified.digest
-      });
-      const activated = publishedCorpusFromVerified(verified, new Date().toISOString());
-      await this.commitCurrentCorpus(activated, deployment?.expectedCurrentDigest);
-      return activated;
-    });
-  }
-
   async listAgentCorpora(creatorId: string): Promise<PublishedAgentCorpus[]> {
     return [...this.corpora.values()].filter((item) => item.creator_id === creatorId).sort(byPublishedAt);
   }
@@ -517,13 +419,92 @@ export class RegistryStoreTs {
 
   async close(): Promise<void> { await this.pool?.end(); }
 
-  async grantAgentAccess(userId: string, creatorId: string, agentId: string, orderId: string): Promise<AgentAccessGrant> {
+  /** Stage a verified Factory candidate as an immutable release without changing current. */
+  async stageAgentCorpusDirectory(
+    creatorId: string,
+    agentId: string,
+    corpusRoot: string,
+    expectedDigest: string
+  ): Promise<PublishedAgentCorpus> {
+    const verified = await verifyAgentCorpus(corpusRoot, creatorId, agentId);
+    if (verified.digest !== expectedDigest) throw new Error("candidate_changed");
+    const immutableRoot = await materializeAgentCorpusRelease(verified, this.corpusRoot);
+    if (this.indexer) {
+      await ingestAgentCorpusKnowledge(this.indexer, {
+        corpus: verified.corpus,
+        path: immutableRoot,
+        digest: verified.digest
+      });
+    }
+    return publishedCorpusFromVerified(verified);
+  }
+
+  async getAgentCorpusRelease(
+    creatorId: string,
+    agentId: string,
+    corpusDigest: string
+  ): Promise<PublishedAgentCorpus | undefined> {
+    try {
+      const releaseRoot = immutableReleasePath(this.corpusRoot, creatorId, agentId, corpusDigest);
+      const verified = await verifyAgentCorpus(releaseRoot, creatorId, agentId);
+      if (verified.digest !== corpusDigest) return undefined;
+      return publishedCorpusFromVerified(verified);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw error;
+    }
+  }
+
+  async activateAgentCorpusRelease(
+    creatorId: string,
+    agentId: string,
+    corpusDigest: string,
+    options: { operationId: string; expectedCurrentDigest: string | null }
+  ): Promise<PublishedAgentCorpus> {
+    if (!options.operationId.trim()) throw new Error("invalid_deployment_operation_id");
+    const release = await this.getAgentCorpusRelease(creatorId, agentId, corpusDigest);
+    if (!release) throw new Error("agent_corpus_release_not_found");
+    const current = this.getAgentCorpus(creatorId, agentId)?.corpus_digest ?? null;
+    if (current === corpusDigest) {
+      await activateCurrentCorpus(creatorId, agentId, corpusDigest, this.corpusRoot);
+      return release;
+    }
+    if (current !== options.expectedCurrentDigest) {
+      throw new RegistryDeploymentConflictError(options.expectedCurrentDigest, current, corpusDigest);
+    }
+    const deadline = new PublishDeadline(this.publishTimeoutMs);
+    try {
+      await this.persistCorpus(release, deadline);
+      await activateCurrentCorpus(creatorId, agentId, corpusDigest, this.corpusRoot);
+      return release;
+    } finally {
+      deadline.dispose();
+    }
+  }
+
+  async grantAgentAccess(
+    userId: string,
+    creatorId: string,
+    agentId: string,
+    orderId: string,
+    entitlementId?: string,
+    purchasedCorpusDigest?: string,
+    versionPolicy: "pinned" | "track_current_compatible" = "pinned"
+  ): Promise<AgentAccessGrant> {
     const normalizedOrderId = orderId.trim();
     if (!normalizedOrderId) throw new Error("order_id_required");
     const binding = accessBindingKey(userId, creatorId, agentId);
     const previous = this.accessMutations.get(binding);
     const mutation = (previous ? previous.catch(() => undefined) : Promise.resolve(undefined))
-      .then(() => this.grantAgentAccessOnce(userId, creatorId, agentId, normalizedOrderId));
+      .then(() => this.grantAgentAccessOnce(
+        userId,
+        creatorId,
+        agentId,
+        normalizedOrderId,
+        entitlementId,
+        purchasedCorpusDigest,
+        versionPolicy
+      ));
     this.accessMutations.set(binding, mutation);
     try {
       return await mutation;
@@ -532,9 +513,19 @@ export class RegistryStoreTs {
     }
   }
 
-  private async grantAgentAccessOnce(userId: string, creatorId: string, agentId: string, orderId: string): Promise<AgentAccessGrant> {
+  private async grantAgentAccessOnce(
+    userId: string,
+    creatorId: string,
+    agentId: string,
+    orderId: string,
+    entitlementId?: string,
+    purchasedCorpusDigest?: string,
+    versionPolicy: "pinned" | "track_current_compatible" = "pinned"
+  ): Promise<AgentAccessGrant> {
     const corpus = this.getAgentCorpus(creatorId, agentId);
     if (!corpus) throw new Error("agent_not_found");
+    const boundDigest = purchasedCorpusDigest ?? corpus.corpus_digest;
+    if (boundDigest !== corpus.corpus_digest) throw new Error("corpus_digest_mismatch");
     const grantedAt = new Date().toISOString();
 
     if (this.pool) {
@@ -542,20 +533,24 @@ export class RegistryStoreTs {
       // authority. RETURNING gives every Registry replica the same canonical
       // row when concurrent checkout requests race across processes.
       const result = await this.pool.query(`INSERT INTO agent_access
-        (entitlement_id, user_id, creator_id, agent_id, product_id, order_id, status, granted_at)
-        VALUES ($1,$2,$3,$4,$5,$6,'active',$7)
+        (entitlement_id, user_id, creator_id, agent_id, product_id, order_id, purchased_corpus_digest, version_policy, status, granted_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'active',$9)
         ON CONFLICT (user_id, creator_id, agent_id) DO UPDATE SET
           product_id=EXCLUDED.product_id,
           order_id=EXCLUDED.order_id,
+          purchased_corpus_digest=EXCLUDED.purchased_corpus_digest,
+          version_policy=EXCLUDED.version_policy,
           status='active',
           granted_at=CASE WHEN agent_access.status='active' THEN agent_access.granted_at ELSE EXCLUDED.granted_at END
-        RETURNING entitlement_id, user_id, creator_id, agent_id, product_id, order_id, status, granted_at`, [
-        `ent_${randomUUID().replaceAll("-", "")}`,
+        RETURNING entitlement_id, user_id, creator_id, agent_id, product_id, order_id, purchased_corpus_digest, version_policy, status, granted_at`, [
+        entitlementId ?? `ent_${randomUUID().replaceAll("-", "")}`,
         userId,
         creatorId,
         agentId,
         corpus.product_id,
         orderId,
+        boundDigest,
+        versionPolicy,
         grantedAt
       ]);
       const canonical = rowToAccess(result.rows[0]);
@@ -577,6 +572,8 @@ export class RegistryStoreTs {
           product_id: corpus.product_id,
           status: "active" as const,
           order_id: orderId,
+          purchased_corpus_digest: boundDigest,
+          version_policy: versionPolicy,
           ...(existing.status !== "active" ? { granted_at: grantedAt } : {})
         };
         this.access.set(updated.entitlement_id, updated);
@@ -588,19 +585,17 @@ export class RegistryStoreTs {
         }
         return updated;
       }
-      // An entitlement id is a monotonic Commerce identity. Once revoked it
-      // cannot be made active again by a delayed/replayed grant outbox item;
-      // a later purchase must create a new entitlement id. This also makes
-      // grant/revoke delivery order independent at the Registry projection.
       return existing;
     }
     const grant: AgentAccessGrant = {
-      entitlement_id: entitlementId,
+      entitlement_id: entitlementId ?? `ent_${randomUUID().replaceAll("-", "")}`,
       user_id: userId,
       creator_id: creatorId,
       agent_id: agentId,
       product_id: corpus.product_id,
       order_id: orderId,
+      purchased_corpus_digest: boundDigest,
+      version_policy: versionPolicy,
       status: "active",
       granted_at: grantedAt,
     };
@@ -614,10 +609,33 @@ export class RegistryStoreTs {
     return grant;
   }
 
+  async revokeAgentAccess(entitlementId: string, userId: string): Promise<AgentAccessGrant | undefined> {
+    const existing = this.access.get(entitlementId);
+    if (!existing || existing.user_id !== userId) return undefined;
+    if (this.pool) {
+      const result = await this.pool.query(`UPDATE agent_access SET status='revoked'
+        WHERE entitlement_id=$1 AND user_id=$2
+        RETURNING entitlement_id, user_id, creator_id, agent_id, product_id, order_id, purchased_corpus_digest, version_policy, status, granted_at`, [entitlementId, userId]);
+      if (!result.rows[0]) return undefined;
+      const revoked = rowToAccess(result.rows[0]);
+      this.access.set(entitlementId, revoked);
+      return revoked;
+    }
+    const revoked: AgentAccessGrant = { ...existing, status: "revoked" };
+    this.access.set(entitlementId, revoked);
+    try {
+      await this.persistState();
+      return revoked;
+    } catch (error) {
+      this.access.set(entitlementId, existing);
+      throw error;
+    }
+  }
+
   async listAgentAccess(userId: string, options: AgentAccessListOptions = {}): Promise<AgentAccessGrant[]> {
     const page = accessListPage(options);
     if (this.pool) {
-      const result = await this.pool.query(`SELECT entitlement_id, user_id, creator_id, agent_id, product_id, order_id, status, granted_at
+      const result = await this.pool.query(`SELECT entitlement_id, user_id, creator_id, agent_id, product_id, order_id, purchased_corpus_digest, version_policy, status, granted_at
         FROM agent_access
         WHERE user_id=$1 AND status='active'${options.entitlementId ? " AND entitlement_id=$2" : ""}
         ORDER BY granted_at DESC
@@ -644,6 +662,7 @@ export class RegistryStoreTs {
     if (this.pool) {
       const result = await this.pool.query(`SELECT
           a.entitlement_id, a.user_id, a.creator_id, a.agent_id, a.product_id, a.order_id,
+          a.purchased_corpus_digest, a.version_policy,
           a.status AS access_status, a.granted_at,
           c.creator_name, c.product_name, c.product_description, c.product_json
         FROM agent_access AS a
@@ -670,21 +689,6 @@ export class RegistryStoreTs {
         presentation: corpus.presentation
       }];
     });
-  }
-
-  async revokeAgentAccess(userId: string, entitlementId: string): Promise<AgentAccessGrant> {
-    const existing = this.access.get(entitlementId);
-    if (!existing || existing.user_id !== userId) throw new Error("entitlement_not_found");
-    if (existing.status === "revoked") return existing;
-    const revoked: AgentAccessGrant = { ...existing, status: "revoked" };
-    this.access.set(entitlementId, revoked);
-    try {
-      await this.persistAccess(revoked);
-    } catch (error) {
-      this.access.set(entitlementId, existing);
-      throw error;
-    }
-    return revoked;
   }
 
   async upsertCreatorToolConnection(input: {
@@ -728,13 +732,8 @@ export class RegistryStoreTs {
     const connection = this.toolConnections.get(input.connectionId) ?? await this.readToolConnection(input.connectionId);
     if (!connection) throw new Error(`tool connection does not exist: ${input.connectionId}`);
     if (connection.tenant_id !== input.tenantId) throw new Error("a tool connection cannot cross tenant boundaries");
-    const published = this.getAgentCorpus(input.tenantId, input.agentId);
-    if (!published) throw new Error(`agent corpus does not exist: ${input.tenantId}/${input.agentId}`);
-    const corpus = (await new AgentCorpusResolver(this.corpusRoot).resolve(
-      input.tenantId,
-      input.agentId,
-      published.corpus_digest
-    )).corpus;
+    if (!this.getAgentCorpus(input.tenantId, input.agentId)) throw new Error(`agent corpus does not exist: ${input.tenantId}/${input.agentId}`);
+    const corpus = await loadAgentCorpus(path.join(this.corpusRoot, input.tenantId, input.agentId));
     const declared = corpus.tools.find((tool) => tool.id === input.toolId);
     if (!declared || (declared.kind !== "http_function" && declared.kind !== "mcp_tool")) {
       throw new Error(`Agent Corpus tool does not exist: ${input.toolId}`);
@@ -807,7 +806,8 @@ export class RegistryStoreTs {
         purchased_corpus_digest TEXT,
         version_policy TEXT NOT NULL DEFAULT 'pinned',
         status TEXT NOT NULL,
-        granted_at TIMESTAMPTZ NOT NULL
+        granted_at TIMESTAMPTZ NOT NULL,
+        UNIQUE (user_id, creator_id, agent_id)
       );
       CREATE TABLE IF NOT EXISTS tool_connections (
         id TEXT PRIMARY KEY,
@@ -823,7 +823,6 @@ export class RegistryStoreTs {
       ALTER TABLE agent_access ADD COLUMN IF NOT EXISTS order_id TEXT;
       ALTER TABLE agent_access ADD COLUMN IF NOT EXISTS purchased_corpus_digest TEXT;
       ALTER TABLE agent_access ADD COLUMN IF NOT EXISTS version_policy TEXT NOT NULL DEFAULT 'pinned';
-      ALTER TABLE agent_access DROP CONSTRAINT IF EXISTS agent_access_user_id_creator_id_agent_id_key;
       CREATE TABLE IF NOT EXISTS agent_tool_bindings (
         tenant_id TEXT NOT NULL,
         agent_id TEXT NOT NULL,
@@ -840,34 +839,29 @@ export class RegistryStoreTs {
         const corpora = await this.pool.query("SELECT creator_id, agent_id, corpus_digest, creator_name, product_id, product_name, product_description, product_json, knowledge_namespace, status, published_at FROM agent_corpora");
         for (const row of corpora.rows) this.corpora.set(key(row.creator_id, row.agent_id), rowToCorpus(row));
         const access = await this.pool.query("SELECT entitlement_id, user_id, creator_id, agent_id, product_id, order_id, purchased_corpus_digest, version_policy, status, granted_at FROM agent_access");
-        for (const row of access.rows) {
-          const grant = rowToAccess(row);
-          if (grant) this.access.set(grant.entitlement_id, grant);
-        }
+        for (const row of access.rows) this.access.set(row.entitlement_id, rowToAccess(row));
         const connections = await this.pool.query("SELECT id, tenant_id, kind, secret_ref, secret_value, config_json, status FROM tool_connections");
         for (const row of connections.rows) this.toolConnections.set(row.id, rowToToolConnection(row));
         const bindings = await this.pool.query("SELECT tenant_id, agent_id, tool_id, connection_id FROM agent_tool_bindings");
         for (const row of bindings.rows) this.toolBindings.set(toolBindingKey(row.tenant_id, row.agent_id, row.tool_id), String(row.connection_id));
+        return;
       } catch (error) {
         throw new Error(`Registry Postgres load failed: ${String(error)}`);
       }
-    } else if (this.statePath) {
-      try {
-        const state = JSON.parse(await readFile(this.statePath, "utf8")) as RegistryState;
-        for (const corpus of state.agent_corpora ?? []) this.corpora.set(key(corpus.creator_id, corpus.agent_id), {
-          ...corpus,
-          product_boundaries: corpus.product_boundaries ?? [],
-          presentation: corpus.presentation ?? {}
-        });
-        for (const candidate of state.agent_access ?? []) {
-          const grant = normalizeStoredAccess(candidate);
-          if (grant) this.access.set(grant.entitlement_id, grant);
-        }
-        for (const connection of state.tool_connections ?? []) this.toolConnections.set(connection.id, { ...connection, secret: connection.secret ?? null });
-        for (const binding of state.agent_tool_bindings ?? []) this.toolBindings.set(toolBindingKey(binding.tenant_id, binding.agent_id, binding.tool_id), binding.connection_id);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      }
+    }
+    if (!this.statePath) return;
+    try {
+      const state = JSON.parse(await readFile(this.statePath, "utf8")) as RegistryState;
+      for (const corpus of state.agent_corpora ?? []) this.corpora.set(key(corpus.creator_id, corpus.agent_id), {
+        ...corpus,
+        product_boundaries: corpus.product_boundaries ?? [],
+        presentation: corpus.presentation ?? {}
+      });
+      for (const grant of state.agent_access ?? []) this.access.set(grant.entitlement_id, grant);
+      for (const connection of state.tool_connections ?? []) this.toolConnections.set(connection.id, { ...connection, secret: connection.secret ?? null });
+      for (const binding of state.agent_tool_bindings ?? []) this.toolBindings.set(toolBindingKey(binding.tenant_id, binding.agent_id, binding.tool_id), binding.connection_id);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
   }
 
@@ -1252,6 +1246,24 @@ class PublishDeadline {
 }
 
 function key(creatorId: string, agentId: string): string { return `${creatorId}:${agentId}`; }
+function publishedCorpusFromVerified(verified: VerifiedAgentCorpus): PublishedAgentCorpus {
+  return {
+    creator_id: verified.creator.id,
+    agent_id: verified.agentId,
+    corpus_digest: verified.digest,
+    creator_name: verified.creator.name,
+    product_id: verified.product.id,
+    product_name: verified.product.name,
+    ...(verified.product.description ? { product_description: verified.product.description } : {}),
+    ...(verified.product.promise ? { product_promise: verified.product.promise } : {}),
+    product_boundaries: verified.product.boundaries,
+    ...(verified.product.offer ? { product_offer: verified.product.offer } : {}),
+    presentation: verified.product.presentation,
+    knowledge_namespace: `${verified.creator.id}:${verified.agentId}:${verified.digest}`,
+    status: "published",
+    published_at: new Date().toISOString()
+  };
+}
 function accessListPage(options: AgentAccessListOptions): { limit: number; offset: number } {
   if (options.entitlementId !== undefined) {
     if (!options.entitlementId || options.entitlementId.length > 256) throw new Error("entitlementId is invalid");
@@ -1284,37 +1296,12 @@ function accessBindingKey(userId: string, creatorId: string, agentId: string): s
   return `${userId}\u0000${creatorId}\u0000${agentId}`;
 }
 function byPublishedAt(a: PublishedAgentCorpus, b: PublishedAgentCorpus): number { return Date.parse(b.published_at) - Date.parse(a.published_at); }
-function publishedCorpusFromVerified(verified: VerifiedAgentCorpus, publishedAt: string): PublishedAgentCorpus {
-  const product = verified.corpus.product;
-  return {
-    creator_id: verified.creator.id,
-    agent_id: verified.agentId,
-    corpus_digest: verified.digest,
-    ...(verified.corpus.release?.backward_compatible_with
-      ? { backward_compatible_with: verified.corpus.release.backward_compatible_with }
-      : {}),
-    creator_name: verified.creator.name,
-    product_id: product.id,
-    product_name: product.name,
-    ...(product.description ? { product_description: product.description } : {}),
-    ...(product.promise ? { product_promise: product.promise } : {}),
-    product_boundaries: product.boundaries,
-    ...(product.offer ? { product_offer: product.offer } : {}),
-    presentation: product.presentation,
-    knowledge_namespace: `${verified.creator.id}:${verified.agentId}:${verified.digest}`,
-    status: "published",
-    published_at: publishedAt,
-  };
-}
 function rowToCorpus(row: Record<string, any>): PublishedAgentCorpus {
   const product = typeof row.product_json === "string" ? JSON.parse(row.product_json) : row.product_json ?? {};
   return {
     creator_id: String(row.creator_id),
     agent_id: String(row.agent_id),
     corpus_digest: String(row.corpus_digest),
-    ...(product.backward_compatible_with
-      ? { backward_compatible_with: String(product.backward_compatible_with) }
-      : {}),
     creator_name: String(row.creator_name),
     product_id: String(row.product_id),
     product_name: String(row.product_name),
@@ -1328,14 +1315,16 @@ function rowToCorpus(row: Record<string, any>): PublishedAgentCorpus {
     published_at: new Date(row.published_at).toISOString(),
   };
 }
-function rowToAccess(row: Record<string, any>): AgentAccessGrant | undefined {
-  return normalizeStoredAccess({
+function rowToAccess(row: Record<string, any>): AgentAccessGrant {
+  return {
     entitlement_id: String(row.entitlement_id),
     user_id: String(row.user_id),
     creator_id: String(row.creator_id),
     agent_id: String(row.agent_id),
     product_id: String(row.product_id),
     ...(row.order_id ? { order_id: String(row.order_id) } : {}),
+    ...(row.purchased_corpus_digest ? { purchased_corpus_digest: String(row.purchased_corpus_digest) } : {}),
+    version_policy: row.version_policy === "track_current_compatible" ? "track_current_compatible" : "pinned",
     status: row.status === "active" ? "active" : row.status === "revoked" ? "revoked" : "disabled",
     granted_at: new Date(row.granted_at).toISOString(),
   };
@@ -1350,6 +1339,8 @@ function rowToAccessPresentation(row: Record<string, any>): AgentAccessPresentat
     agent_id: String(row.agent_id),
     product_id: String(row.product_id),
     ...(row.order_id ? { order_id: String(row.order_id) } : {}),
+    ...(row.purchased_corpus_digest ? { purchased_corpus_digest: String(row.purchased_corpus_digest) } : {}),
+    version_policy: row.version_policy === "track_current_compatible" ? "track_current_compatible" : "pinned",
     status: "active",
     granted_at: new Date(row.granted_at).toISOString(),
     creator: { id: String(row.creator_id), name: String(row.creator_name) },
@@ -1384,19 +1375,6 @@ function toolBindingKey(tenantId: string, agentId: string, toolId: string): stri
 
 function validateIdentifier(value: string, field: string): void {
   if (!/^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/.test(value)) throw new Error(`${field} must be a valid identifier`);
-}
-
-function isCorpusDigest(value: string): boolean {
-  return /^sha256:[a-f0-9]{64}$/.test(value);
-}
-
-function validateDeploymentActivation(deployment: RegistryDeploymentActivation): void {
-  if (!deployment.operationId.trim() || deployment.operationId.length > 200) {
-    throw new Error("invalid_deployment_operation_id");
-  }
-  if (deployment.expectedCurrentDigest !== null && !isCorpusDigest(deployment.expectedCurrentDigest)) {
-    throw new Error("invalid_expected_current_digest");
-  }
 }
 
 function validateToolIdentifier(value: string, field: string): void {

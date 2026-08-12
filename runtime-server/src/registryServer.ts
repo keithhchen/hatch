@@ -23,7 +23,15 @@ import {
   type AccountRole
 } from "./registryAuth.js";
 import { RegistryStoreTs } from "./registryStore.js";
+import { RegistryDeploymentConflictError } from "./registryStore.js";
 import { MAX_AGENT_CORPUS_BUNDLE_BYTES } from "./registryCorpus.js";
+import { handleCreatorFactoryHttp } from "./creatorLearning/httpApi.js";
+import {
+  InMemoryCreatorFactoryRepository,
+  PostgresCreatorFactoryRepository,
+  type CreatorFactoryRepository
+} from "./creatorLearning/repository.js";
+import { CreatorFactoryService } from "./creatorLearning/service.js";
 import {
   HttpRequestGate,
   PublishWorkGate,
@@ -35,6 +43,7 @@ import {
 } from "./registryRequestLimits.js";
 
 export type RegistryServer = { server: http.Server; close: () => Promise<void> };
+export const CREATOR_FACTORY_JSON_BODY_MAX_BYTES = 32 * 1024 * 1024;
 type RegistryContext = {
   store: RegistryStoreTs;
   accounts: AccountStoreTs;
@@ -45,13 +54,10 @@ type RegistryContext = {
   publishToken: string;
   runtimeServiceToken: string;
   commerceServiceToken: string;
+  deploymentServiceToken: string;
+  factoryService: CreatorFactoryService;
   authSecret: string;
 };
-
-// Creator source text is limited to 5 MiB by CreatorFactoryService. JSON can
-// expand a UTF-16 code unit to a six-byte escape (for example, "\\u0000"), so
-// leave enough transport headroom without making the Registry body unbounded.
-export const CREATOR_FACTORY_JSON_BODY_MAX_BYTES = 32 * 1024 * 1024;
 
 export async function createRegistryServerFromEnvironment(environment: NodeJS.ProcessEnv = process.env): Promise<RegistryServer> {
   const authRateLimitOptions = authRateLimitOptionsFromEnvironment(environment);
@@ -69,6 +75,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const publishToken = environment.HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN?.trim() || "";
   const runtimeServiceToken = environment.HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN?.trim() || "";
   const commerceServiceToken = environment.HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN?.trim() || "";
+  const deploymentServiceToken = environment.HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN?.trim() || "";
   const legacyHmacEnabled = environment.HATCH_ENABLE_LEGACY_HMAC_AUTH?.trim().toLowerCase() === "true";
   const authSecret = legacyHmacEnabled ? environment.HATCH_AUTH_SIGNING_SECRET?.trim() || "" : "";
   const authRateLimiter = new AuthRateLimiter(authRateLimitOptions);
@@ -96,7 +103,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       }, { "retry-after": String(admission.retryAfterSeconds), connection: "close" });
       return;
     }
-    const routeTask = route(request, response, { store, accounts, authRateLimiter, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, commerceServiceToken, authSecret })
+    const routeTask = route(request, response, { store, accounts, authRateLimiter, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, commerceServiceToken, deploymentServiceToken, factoryService, authSecret })
       .catch((error) => {
         const status = errorStatus(error);
         if (status >= 500) console.error("Registry request failed", error);
@@ -130,12 +137,7 @@ export function creatorFactoryRepositoryForRegistry(
   registryPool?: NonNullable<ReturnType<RegistryStoreTs["databasePool"]>>
 ): CreatorFactoryRepository {
   const factoryDatabaseUrl = environment.HATCH_FACTORY_DATABASE_URL?.trim();
-  if (factoryDatabaseUrl) {
-    // Registry and Factory Worker intentionally connect through the Factory
-    // credential. Never create Factory tables through the Registry role when
-    // a least-privilege Factory database URL is configured.
-    return new PostgresCreatorFactoryRepository({ connectionString: factoryDatabaseUrl });
-  }
+  if (factoryDatabaseUrl) return new PostgresCreatorFactoryRepository({ connectionString: factoryDatabaseUrl });
   return registryPool
     ? new PostgresCreatorFactoryRepository({ pool: registryPool })
     : new InMemoryCreatorFactoryRepository();
@@ -153,30 +155,11 @@ async function route(
     return;
   }
   if (request.method === "GET" && (url.pathname === "/readyz" || url.pathname === "/health")) {
-    const credentialsReady = !context.production || Boolean(
-      context.authSecret
-      && context.publishToken
-      && context.runtimeServiceToken
-      && context.accessServiceToken
-      && context.deploymentServiceToken
-    );
     try {
       await context.store.checkReady();
-      sendJson(response, credentialsReady ? 200 : 503, {
-        status: credentialsReady ? "ok" : "unavailable",
-        checks: {
-          registry_store: "ready",
-          service_credentials: credentialsReady ? "ready" : "failed"
-        }
-      });
+      sendJson(response, 200, { status: "ok", checks: { registry_store: "ready" } });
     } catch {
-      sendJson(response, 503, {
-        status: "unavailable",
-        checks: {
-          registry_store: "failed",
-          service_credentials: credentialsReady ? "ready" : "failed"
-        }
-      });
+      sendJson(response, 503, { status: "unavailable", checks: { registry_store: "failed" } });
     }
     return;
   }
@@ -288,106 +271,42 @@ async function route(
 
   const internalFactoryStageMatch = url.pathname.match(/^\/v1\/internal\/deployments\/factory-runs\/([^/]+)\/stage$/);
   if (internalFactoryStageMatch && request.method === "POST") {
-    if (!context.deploymentServiceToken || bearer(request) !== context.deploymentServiceToken) {
-      sendJson(response, 403, { detail: "A valid Registry deployment service token is required." });
-      return;
-    }
+    requireDeploymentServiceAuth(request, context.deploymentServiceToken);
     const body = await readJson(request);
-    const creatorId = requiredString(body.creator_id);
-    const operationId = requiredString(body.operation_id);
-    const corpusDigest = requiredString(body.corpus_digest);
-    if (!creatorId || !validDeploymentOperationId(operationId) || !isCorpusDigest(corpusDigest)) {
-      sendJson(response, 400, { detail: "creator_id, operation_id, and a valid corpus_digest are required." });
-      return;
-    }
+    const creatorId = requiredCommerceField(body, "creator_id");
+    const operationId = requiredCommerceField(body, "operation_id");
+    const corpusDigest = requiredCommerceField(body, "corpus_digest");
     const runId = decodeURIComponent(internalFactoryStageMatch[1]!);
-    try {
-      const candidate = await context.factoryService.publishableCorpus(creatorId, runId);
-      if (candidate.corpusDigest !== corpusDigest) {
-        sendJson(response, 409, {
-          detail: "The Factory candidate changed. Review it again.",
-          code: "candidate_changed",
-          expected_corpus_digest: corpusDigest,
-          current_corpus_digest: candidate.corpusDigest,
-        });
-        return;
-      }
-      const staged = await context.store.stageAgentCorpusDirectory(
-        creatorId,
-        candidate.agentId,
-        candidate.corpusRoot,
-        candidate.corpusDigest,
-      );
-      sendJson(response, 201, {
-        ...staged,
-        factory_run_id: candidate.runId,
-        operation_id: operationId,
-        current: false,
+    const candidate = await context.factoryService.publishableCorpus(creatorId, runId);
+    if (candidate.corpusDigest !== corpusDigest) {
+      sendJson(response, 409, {
+        code: "candidate_changed",
+        detail: "The Factory candidate changed. Review it again.",
+        expected_corpus_digest: corpusDigest,
+        current_corpus_digest: candidate.corpusDigest
       });
-    } catch (error) {
-      if (error instanceof RegistryFactoryCandidateChangedError) {
-        sendJson(response, 409, {
-          detail: "The Factory candidate changed. Review it again.",
-          code: error.code,
-          expected_corpus_digest: error.expectedCorpusDigest,
-          current_corpus_digest: error.currentCorpusDigest,
-        });
-      } else {
-        sendError(response, error, {
-          invalid_status: [409, "Factory candidate is not publishable."],
-          run_not_found: [404, "Factory run not found."],
-        });
-      }
-    }
-    return;
-  }
-
-  const internalReleaseMatch = url.pathname.match(
-    /^\/v1\/internal\/deployments\/agent-corpora\/([^/]+)\/([^/]+)\/releases\/([^/]+)$/
-  );
-  if (internalReleaseMatch && request.method === "GET") {
-    if (!context.deploymentServiceToken || bearer(request) !== context.deploymentServiceToken) {
-      sendJson(response, 403, { detail: "A valid Registry deployment service token is required." });
       return;
     }
-    const creatorId = decodeURIComponent(internalReleaseMatch[1]!);
-    const agentId = decodeURIComponent(internalReleaseMatch[2]!);
-    const corpusDigest = decodeURIComponent(internalReleaseMatch[3]!);
-    if (!creatorId || !agentId || !isCorpusDigest(corpusDigest)) {
-      sendJson(response, 400, { detail: "creator id, agent id, and a valid sha256 Corpus digest are required." });
-      return;
-    }
-    const release = await context.store.getAgentCorpusRelease(creatorId, agentId, corpusDigest);
-    if (!release) {
-      sendJson(response, 404, { detail: "The requested Agent Corpus release is not materialized." });
-      return;
-    }
-    sendJson(response, 200, release);
+    const staged = await context.store.stageAgentCorpusDirectory(
+      creatorId,
+      candidate.agentId,
+      candidate.corpusRoot,
+      candidate.corpusDigest
+    );
+    sendJson(response, 201, { ...staged, factory_run_id: runId, operation_id: operationId, current: false });
     return;
   }
 
   const internalActivationMatch = url.pathname.match(/^\/v1\/internal\/deployments\/agent-corpora\/([^/]+)\/releases\/([^/]+)\/activate$/);
   if (internalActivationMatch && request.method === "POST") {
-    if (!context.deploymentServiceToken || bearer(request) !== context.deploymentServiceToken) {
-      sendJson(response, 403, { detail: "A valid Registry deployment service token is required." });
-      return;
-    }
+    requireDeploymentServiceAuth(request, context.deploymentServiceToken);
     const body = await readJson(request);
-    const creatorId = requiredString(body.creator_id);
-    const operationId = requiredString(body.operation_id);
-    const hasExpectedDigest = Object.prototype.hasOwnProperty.call(body, "expected_current_digest");
+    const creatorId = requiredCommerceField(body, "creator_id");
+    const operationId = requiredCommerceField(body, "operation_id");
+    if (!Object.hasOwn(body, "expected_current_digest")) throw new Error("expected_current_digest is required");
     const expectedCurrentDigest = body.expected_current_digest === null
       ? null
-      : requiredString(body.expected_current_digest);
-    if (!creatorId
-      || !validDeploymentOperationId(operationId)
-      || !hasExpectedDigest
-      || (expectedCurrentDigest !== null && !isCorpusDigest(expectedCurrentDigest))) {
-      sendJson(response, 400, {
-        detail: "creator_id, operation_id, and expected_current_digest (null or sha256 digest) are required."
-      });
-      return;
-    }
+      : requiredCommerceField(body, "expected_current_digest");
     const agentId = decodeURIComponent(internalActivationMatch[1]!);
     const corpusDigest = decodeURIComponent(internalActivationMatch[2]!);
     try {
@@ -395,82 +314,34 @@ async function route(
         creatorId,
         agentId,
         corpusDigest,
-        { operationId, expectedCurrentDigest },
+        { operationId, expectedCurrentDigest }
       );
-      sendJson(response, 200, {
-        agent_corpus: activated,
-        current: true,
-        operation_id: operationId,
-      });
+      sendJson(response, 200, { agent_corpus: activated, current: true, operation_id: operationId });
     } catch (error) {
       if (error instanceof RegistryDeploymentConflictError) {
         sendJson(response, 409, {
-          detail: "The current Agent Corpus changed before activation.",
           code: error.code,
+          detail: error.message,
           expected_current_digest: error.expectedCurrentDigest,
           current_corpus_digest: error.currentCorpusDigest,
-          target_corpus_digest: error.targetCorpusDigest,
+          target_corpus_digest: error.targetCorpusDigest
         });
       } else {
-        sendError(response, error, {
-          invalid_corpus_digest: [400, "A valid sha256 Corpus digest is required."],
-          invalid_deployment_operation_id: [400, "A valid deployment operation_id is required."],
-          invalid_expected_current_digest: [400, "expected_current_digest must be null or a valid sha256 digest."],
-          agent_corpus_release_not_found: [404, "The requested Agent Corpus release is not materialized."],
-        });
-      }
-    }
-    return;
-  }
-
-  const factoryPublishMatch = url.pathname.match(/^\/v1\/creator\/factory-runs\/([^/]+)\/publish$/);
-  if (factoryPublishMatch && request.method === "POST") {
-    const account = await authenticate(request, context.accounts, context.authSecret, "creator");
-    if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
-    try {
-      const body = await readJsonOptional(request);
-      const requestedDigest = requiredString(body.corpus_digest);
-      if (!isCorpusDigest(requestedDigest)) {
-        sendJson(response, 400, { detail: "A valid corpus_digest for the reviewed Factory candidate is required." });
-        return;
-      }
-      const candidate = await context.factoryService.publishableCorpus(account.id, decodeURIComponent(factoryPublishMatch[1]!));
-      if (requestedDigest !== candidate.corpusDigest) {
-        sendJson(response, 409, { detail: "The Factory candidate changed. Review it again.", code: "candidate_changed" });
-        return;
-      }
-      const published = await context.store.publishAgentCorpusDirectory(
-        account.id,
-        candidate.agentId,
-        candidate.corpusRoot,
-        candidate.corpusDigest,
-      );
-      sendJson(response, 201, { ...published, factory_run_id: candidate.runId });
-    } catch (error) {
-      if (error instanceof RegistryFactoryCandidateChangedError) {
-        sendJson(response, 409, {
-          detail: "The Factory candidate changed. Review it again.",
-          code: error.code,
-          expected_corpus_digest: error.expectedCorpusDigest,
-          current_corpus_digest: error.currentCorpusDigest,
-        });
-      } else {
-        sendError(response, error, { invalid_status: [409, "Factory candidate is not publishable."] });
+        throw error;
       }
     }
     return;
   }
 
   if (url.pathname.startsWith("/v1/creator/factory-runs")) {
-    const account = await authenticate(request, context.accounts, context.authSecret, "creator");
+    const account = await authenticate(request, response, context, "creator");
+    if (account === SESSION_QUERY_REJECTED) return;
     if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
     const result = await handleCreatorFactoryHttp({
       method: request.method ?? "GET",
       pathname: url.pathname,
       headers: { "idempotency-key": request.headers["idempotency-key"]?.toString() },
-      ...(request.method === "GET" ? {} : {
-        body: await readJsonOptional(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES)
-      }),
+      ...(request.method === "GET" ? {} : { body: await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES) }),
       creator: account
     }, context.factoryService);
     if (result) { sendJson(response, result.status, result.body); return; }
@@ -562,25 +433,6 @@ async function route(
     sendJson(response, 200, await context.store.listAgentCorpora(account.id));
     return;
   }
-  const activateCorpusMatch = url.pathname.match(/^\/v1\/creator\/agent-corpora\/([^/]+)\/releases\/([^/]+)\/activate$/);
-  if (activateCorpusMatch && request.method === "POST") {
-    const account = await authenticate(request, context.accounts, context.authSecret, "creator");
-    if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
-    try {
-      const activated = await context.store.activateAgentCorpusRelease(
-        account.id,
-        decodeURIComponent(activateCorpusMatch[1]!),
-        decodeURIComponent(activateCorpusMatch[2]!),
-      );
-      sendJson(response, 200, { agent_corpus: activated, current: true });
-    } catch (error) {
-      sendError(response, error, {
-        invalid_corpus_digest: [400, "A valid sha256 Corpus digest is required."],
-        agent_corpus_release_not_found: [404, "The requested Agent Corpus release is not materialized."],
-      });
-    }
-    return;
-  }
   if (url.pathname === "/v1/user/agent-access" && request.method === "GET") {
     const account = await authenticate(request, response, context, "user");
     if (account === SESSION_QUERY_REJECTED) return;
@@ -620,6 +472,51 @@ async function route(
     const orderId = requiredCommerceField(body, "order_id");
     try { sendJson(response, 201, await context.store.grantAgentAccess(userId, creatorId, agentId, orderId)); }
     catch (error) { sendError(response, error, { agent_not_found: [404, "Agent not found."], order_id_required: [400, "order_id is required."] }); }
+    return;
+  }
+
+  const commerceAccessMatch = url.pathname.match(/^\/v1\/user\/agents\/([^/]+)\/([^/]+)\/access$/);
+  if (commerceAccessMatch && request.method === "POST") {
+    requireCommerceServiceAuth(request, context.commerceServiceToken);
+    const body = await readJson(request);
+    const creatorId = decodeURIComponent(commerceAccessMatch[1]!);
+    const agentId = decodeURIComponent(commerceAccessMatch[2]!);
+    const userId = requiredCommerceField(body, "user_id");
+    const orderId = requiredCommerceField(body, "order_id");
+    const entitlementId = requiredCommerceField(body, "entitlement_id");
+    const purchasedCorpusDigest = requiredCommerceField(body, "purchased_corpus_digest");
+    const versionPolicy = body.version_policy === "track_current_compatible" ? "track_current_compatible" : "pinned";
+    try {
+      sendJson(response, 201, await context.store.grantAgentAccess(
+        userId,
+        creatorId,
+        agentId,
+        orderId,
+        entitlementId,
+        purchasedCorpusDigest,
+        versionPolicy
+      ));
+    } catch (error) {
+      sendError(response, error, {
+        agent_not_found: [404, "Agent not found."],
+        order_id_required: [400, "order_id is required."],
+        corpus_digest_mismatch: [409, "The purchased Corpus release is not the current published release."]
+      });
+    }
+    return;
+  }
+
+  const commerceRevokeMatch = url.pathname.match(/^\/v1\/user\/agent-access\/([^/]+)$/);
+  if (commerceRevokeMatch && request.method === "DELETE") {
+    requireCommerceServiceAuth(request, context.commerceServiceToken);
+    const body = await readJson(request);
+    const userId = requiredCommerceField(body, "user_id");
+    const revoked = await context.store.revokeAgentAccess(decodeURIComponent(commerceRevokeMatch[1]!), userId);
+    if (!revoked) {
+      sendJson(response, 404, { detail: "Agent access was not found." });
+      return;
+    }
+    sendJson(response, 200, revoked);
     return;
   }
 
@@ -713,18 +610,6 @@ function bearer(request: http.IncomingMessage): string | undefined {
   return scheme?.toLowerCase() === "bearer" ? token : undefined;
 }
 
-function requiredString(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function validDeploymentOperationId(value: string): boolean {
-  return value.length > 0 && value.length <= 200;
-}
-
-function isCorpusDigest(value: string): boolean {
-  return /^sha256:[a-f0-9]{64}$/.test(value);
-}
-
 function requireRuntimeServiceAuth(request: http.IncomingMessage, configuredToken: string): void {
   if (!configuredToken || bearer(request) !== configuredToken) {
     const error = new Error("A valid Registry runtime service token is required.");
@@ -736,6 +621,14 @@ function requireRuntimeServiceAuth(request: http.IncomingMessage, configuredToke
 function requireCommerceServiceAuth(request: http.IncomingMessage, configuredToken: string): void {
   if (!configuredToken || bearer(request) !== configuredToken) {
     const error = new Error("A valid Registry commerce service token is required.");
+    (error as Error & { status?: number }).status = 401;
+    throw error;
+  }
+}
+
+function requireDeploymentServiceAuth(request: http.IncomingMessage, configuredToken: string): void {
+  if (!configuredToken || bearer(request) !== configuredToken) {
+    const error = new Error("A valid Registry deployment service token is required.");
     (error as Error & { status?: number }).status = 401;
     throw error;
   }
@@ -862,21 +755,17 @@ async function readBytes(request: http.IncomingMessage, max = 64 * 1024 * 1024):
   }
   const chunks: Buffer[] = [];
   let size = 0;
-  let exceeded = false;
   for await (const chunk of request) {
     const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += value.byteLength;
-    if (size > max) {
-      exceeded = true;
-      continue;
-    }
-    if (!exceeded) chunks.push(value);
+    if (size > max) throw new Error("Request body is too large");
+    chunks.push(value);
   }
   return Buffer.concat(chunks, size);
 }
 
-async function readJson(request: http.IncomingMessage): Promise<Record<string, unknown>> {
-  const payload = JSON.parse(Buffer.from(await readBytes(request, 1024 * 1024)).toString("utf8")) as unknown;
+async function readJson(request: http.IncomingMessage, maxBytes = 1024 * 1024): Promise<Record<string, unknown>> {
+  const payload = JSON.parse(Buffer.from(await readBytes(request, maxBytes)).toString("utf8")) as unknown;
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) throw new Error("JSON body must be an object");
   return payload as Record<string, unknown>;
 }
@@ -956,5 +845,5 @@ function corsHeaders(): Record<string, string> { return { "access-control-allow-
 if (import.meta.url === `file://${process.argv[1]}`) {
   createRegistryServerFromEnvironment().then(({ server }) => {
     console.log(`Hatch TypeScript Registry listening on ${JSON.stringify(server.address())}`);
-  }).catch((error) => { writeOperationalError("registry_startup_failed", error); process.exitCode = 1; });
+  }).catch((error) => { console.error(error); process.exitCode = 1; });
 }

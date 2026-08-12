@@ -20,20 +20,29 @@ export interface AuthIdentityResolver {
 
 const EntitlementCommonSchema = z.object({
   entitlement_id: z.string().min(1),
-  order_id: z.string().min(1),
+  order_id: z.string().min(1).optional(),
   user_id: z.string().min(1),
   creator_id: z.string().min(1),
   product_id: z.string().min(1),
-  purchased_corpus_digest: CorpusDigestSchema,
-  effective_corpus_digest: CorpusDigestSchema.optional(),
-  version_policy: z.enum(["pinned", "track_current_compatible"]).default("pinned"),
-  version_history: EntitlementVersionHistorySchema.default([]),
   status: z.literal("active")
 }).strict();
 
 const AgentCorpusEntitlementBindingSchema = EntitlementCommonSchema.extend({
   creator_id: z.string().min(1),
   agent_id: z.string().min(1),
+  purchased_corpus_digest: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(),
+  effective_corpus_digest: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(),
+  version_policy: z.enum(["pinned", "track_current_compatible"]).optional(),
+  version_history: z.array(z.object({
+    from_digest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    to_digest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    from_release_id: z.string().nullable().optional(),
+    to_release_id: z.string().nullable().optional(),
+    compatibility_declaration_id: z.string().nullable().optional(),
+    reason: z.string().nullable().optional(),
+    actor_id: z.string().nullable().optional(),
+    advanced_at: z.string().optional()
+  }).strip()).optional(),
 }).strict();
 
 export const EntitlementBindingSchema = AgentCorpusEntitlementBindingSchema;
@@ -43,16 +52,28 @@ export const EntitlementBindingSchema = AgentCorpusEntitlementBindingSchema;
 // commerce adapter. The schema above remains the runtime authority.
 export type EntitlementBinding = {
   entitlement_id: string;
-  order_id: string;
+  order_id?: string;
   user_id: string;
   creator_id: string;
   product_id: string;
-  purchased_corpus_digest: string;
+  status: "active";
+  agent_id: string;
+  /** Immutable purchase snapshot. Required for Commerce-backed grants. */
+  purchased_corpus_digest?: string;
   effective_corpus_digest?: string;
   version_policy?: "pinned" | "track_current_compatible";
   version_history?: EntitlementVersionHistory[];
-  status: "active";
-  agent_id: string;
+};
+
+export type EntitlementVersionHistory = {
+  from_digest: string;
+  to_digest: string;
+  from_release_id?: string | null;
+  to_release_id?: string | null;
+  compatibility_declaration_id?: string | null;
+  reason?: string | null;
+  actor_id?: string | null;
+  advanced_at?: string;
 };
 
 const StoredEntitlementSchema = AgentCorpusEntitlementBindingSchema.extend({ license_token: z.string().min(1) }).strict();
@@ -65,17 +86,6 @@ export type EntitlementLookup = {
   entitlementId?: string;
   installationId?: string;
   signal?: AbortSignal;
-};
-
-export type EntitlementVersionHistory = {
-  from_digest: string;
-  to_digest: string;
-  from_release_id?: string | null;
-  to_release_id?: string | null;
-  compatibility_declaration_id?: string | null;
-  reason?: string | null;
-  actor_id?: string | null;
-  advanced_at?: string;
 };
 
 export interface EntitlementResolver {
@@ -110,12 +120,12 @@ export class FileEntitlementResolver implements EntitlementResolver {
     if (claims) {
       return registry
         .filter((entry) => claims.role === "user" && entry.user_id === claims.sub)
-        .map(({ license_token: _licenseToken, ...binding }) => normalizeBinding(binding));
+        .map(({ license_token: _licenseToken, ...binding }) => binding);
     }
     if (!input.licenseToken) return [];
     return registry
       .filter((entry) => entry.license_token === input.licenseToken)
-      .map(({ license_token: _licenseToken, ...binding }) => normalizeBinding(binding));
+      .map(({ license_token: _licenseToken, ...binding }) => binding);
   }
 
   async resolve(input: EntitlementLookup & { entitlementId: string }): Promise<EntitlementBinding> {
@@ -263,9 +273,7 @@ export class RegistryEntitlementResolver implements EntitlementResolver, AuthIde
 function parseRegistryEntitlements(payload: unknown): EntitlementBinding[] {
   // Registry grants carry bookkeeping/presentation fields that are not part of
   // the runtime authority. Parse only the binding contract and strip the rest.
-  return z.array(
-    EntitlementCommonSchema.extend({ agent_id: z.string().min(1).max(128) }).strip()
-  ).max(50).parse(payload);
+  return z.array(AgentCorpusEntitlementBindingSchema.strip()).max(50).parse(payload);
 }
 
 async function readBoundedResponseBody(response: Response, maximumBytes: number): Promise<string> {
@@ -314,16 +322,4 @@ export class EntitlementError extends Error {
     super(message);
     this.name = "EntitlementError";
   }
-}
-
-function normalizeBinding<T extends EntitlementBinding>(binding: T): T & Required<Pick<
-  EntitlementBinding,
-  "effective_corpus_digest" | "version_policy" | "version_history"
->> {
-  return {
-    ...binding,
-    effective_corpus_digest: binding.effective_corpus_digest ?? binding.purchased_corpus_digest,
-    version_policy: binding.version_policy ?? "pinned",
-    version_history: binding.version_history ?? []
-  };
 }

@@ -11,7 +11,7 @@ import type { CommerceEventSink, CommerceEventType } from "./delivery.js";
 import { DeliveryAccountingOutbox } from "./deliveryOutbox.js";
 import type { EntitlementBinding, EntitlementResolver } from "./entitlements.js";
 import { createRuntimeServer, type RuntimeServer } from "./index.js";
-import type { OutboundMessage } from "./protocol.js";
+import { PROTOCOL_VERSION, type OutboundMessage } from "./protocol.js";
 import { RuntimeStore } from "./store.js";
 
 const temporaryDirectories: string[] = [];
@@ -33,7 +33,7 @@ test("entitlement runs reserve, consume, release, and replay idempotently", asyn
         type: "tool_call.delta",
         run_id: input.run_id,
         tool_call_id: "write-local-artifact",
-        name: "fs.write",
+        name: "file_write",
         locality: "client",
         approval: "ask",
         status: "completed",
@@ -129,7 +129,7 @@ test("saved artifact completes while Commerce receipt syncs durably across Runti
         type: "tool_call.delta",
         run_id: input.run_id,
         tool_call_id: "write-before-outage",
-        name: "fs.write",
+        name: "file_write",
         locality: "client",
         approval: "ask",
         status: "completed",
@@ -335,7 +335,7 @@ async function startRuntime(
   });
   socket.send(JSON.stringify({
     type: "client.hello",
-    protocol_version: "0.4",
+    protocol_version: PROTOCOL_VERSION,
     installation_id: "desktop-commerce",
     license_token: "license-commerce",
     entitlement_id: fixture.entitlement.entitlement_id,

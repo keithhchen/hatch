@@ -27,20 +27,24 @@ export async function resolveEntitledAgentCorpus(
   entitlement: EntitlementBinding,
   commerce?: CommerceEventSink
 ): Promise<EntitledAgentCorpus> {
+  const purchasedDigest = entitlement.purchased_corpus_digest;
+  if (!purchasedDigest) {
+    throw new EntitlementError("entitlement_release_missing", "The entitlement has no purchased Corpus release.");
+  }
   const purchased = await requiredRelease(
     resolver,
     entitlement,
-    entitlement.purchased_corpus_digest,
+    purchasedDigest,
     "purchased"
   );
   const versionPolicy = entitlement.version_policy ?? "pinned";
   const originalHistory = entitlement.version_history ?? [];
   if (versionPolicy === "pinned") {
-    return selection(purchased, entitlement.purchased_corpus_digest, "pinned", originalHistory);
+    return selection(purchased, purchasedDigest, "pinned", originalHistory);
   }
 
   const declaredEffectiveDigest = entitlement.effective_corpus_digest
-    ?? entitlement.purchased_corpus_digest;
+    ?? purchasedDigest;
   const declaredEffective = declaredEffectiveDigest === purchased.digest
     ? purchased
     : await requiredRelease(resolver, entitlement, declaredEffectiveDigest, "effective");
@@ -49,11 +53,11 @@ export async function resolveEntitledAgentCorpus(
   try {
     current = await resolver.resolve(entitlement.creator_id, entitlement.agent_id);
   } catch {
-    return selection(declaredEffective, entitlement.purchased_corpus_digest, versionPolicy, originalHistory);
+    return selection(declaredEffective, purchasedDigest, versionPolicy, originalHistory);
   }
   if (current.digest === declaredEffective.digest
     || current.corpus.product.id !== entitlement.product_id) {
-    return selection(declaredEffective, entitlement.purchased_corpus_digest, versionPolicy, originalHistory);
+    return selection(declaredEffective, purchasedDigest, versionPolicy, originalHistory);
   }
 
   const lineage = await compatibleLineage(
@@ -63,7 +67,7 @@ export async function resolveEntitledAgentCorpus(
     current
   );
   if (!lineage || lineage.length < 2 || !commerce?.advanceEntitlementVersion) {
-    return selection(declaredEffective, entitlement.purchased_corpus_digest, versionPolicy, originalHistory);
+    return selection(declaredEffective, purchasedDigest, versionPolicy, originalHistory);
   }
 
   let selectedIndex = 0;
@@ -98,7 +102,7 @@ export async function resolveEntitledAgentCorpus(
 
   return selection(
     lineage[selectedIndex]!,
-    entitlement.purchased_corpus_digest,
+    purchasedDigest,
     versionPolicy,
     history
   );
