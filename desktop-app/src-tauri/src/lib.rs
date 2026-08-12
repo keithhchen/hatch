@@ -2030,18 +2030,24 @@ fn replace_file(source: &std::path::Path, destination: &std::path::Path) -> std:
         .encode_wide()
         .chain(Some(0))
         .collect::<Vec<_>>();
-    let moved = unsafe {
-        MoveFileExW(
-            source.as_ptr(),
-            destination.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-    };
-    if moved == 0 {
-        Err(std::io::Error::last_os_error())
-    } else {
-        Ok(())
+    for attempt in 0..8 {
+        let moved = unsafe {
+            MoveFileExW(
+                source.as_ptr(),
+                destination.as_ptr(),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+        };
+        if moved != 0 {
+            return Ok(());
+        }
+        let error = std::io::Error::last_os_error();
+        if error.kind() != std::io::ErrorKind::PermissionDenied || attempt == 7 {
+            return Err(error);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
     }
+    unreachable!()
 }
 
 // RFC 7396-style merge semantics scoped to one window namespace. `null`
