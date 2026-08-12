@@ -2565,12 +2565,11 @@ mod tests {
     use super::{
         clear_ephemeral_auth_token, default_workspace, is_allowed_browse_url, is_apple_team_id,
         merge_json_object, persistent_session_build_requested_from, read_ephemeral_auth_token,
-        validate_artifact_relative_path, validate_workspace_path,
+        replace_file, validate_artifact_relative_path, validate_workspace_path,
         windows_backend_can_persist_opaque_session, write_ephemeral_auth_token,
-        write_settings_file, replace_file, ChangePermissionPolicy, NativeDropContextStore,
-        NativeToolAuthority, NativeToolCall,
-        ToolCallDisposition, WindowToolCallKey, WindowToolContext, WindowsOpaqueTokenBackend,
-        PRODUCTION_CREDENTIAL_SERVICE,
+        write_settings_file, ChangePermissionPolicy, NativeDropContextStore, NativeToolAuthority,
+        NativeToolCall, ToolCallDisposition, WindowToolCallKey, WindowToolContext,
+        WindowsOpaqueTokenBackend, PRODUCTION_CREDENTIAL_SERVICE,
     };
     use serde_json::json;
     use std::sync::{atomic::AtomicBool, Arc};
