@@ -6,19 +6,9 @@
   "status": "active",
   "connections": [
     {
-      "id": "seth-alpha-lite-status",
-      "tool_id": "creator.seth.status",
-      "config": { "url": "http://8.130.172.170/api/agent/status", "method": "GET", "auth": { "header": "X-API-Key", "prefix": "" } }
-    },
-    {
       "id": "seth-alpha-lite-search",
       "tool_id": "creator.seth.search-company",
       "config": { "url": "http://8.130.172.170/api/agent/search", "method": "GET", "auth": { "header": "X-API-Key", "prefix": "" } }
-    },
-    {
-      "id": "seth-alpha-lite-company-detail",
-      "tool_id": "creator.seth.company-detail",
-      "config": { "url": "http://8.130.172.170/api/agent/company-detail", "method": "GET", "auth": { "header": "X-API-Key", "prefix": "" } }
     },
     {
       "id": "seth-alpha-lite-research-pack",
@@ -26,24 +16,24 @@
       "config": { "url": "http://8.130.172.170/api/agent/research-pack", "method": "GET", "auth": { "header": "X-API-Key", "prefix": "" } }
     },
     {
-      "id": "seth-alpha-lite-relationship-index",
-      "tool_id": "creator.seth.relationship-index",
-      "config": { "url": "http://8.130.172.170/api/agent/relationship-index", "method": "GET", "auth": { "header": "X-API-Key", "prefix": "" } }
+      "id": "seth-alpha-lite-financial-metrics",
+      "tool_id": "creator.seth.financial-metrics",
+      "config": { "url": "http://8.130.172.170/api/agent/financial-metrics", "method": "GET", "auth": { "header": "X-API-Key", "prefix": "" } }
     },
     {
-      "id": "seth-alpha-lite-showcase",
-      "tool_id": "creator.seth.showcase-lite",
-      "config": { "url": "http://8.130.172.170/api/agent/showcase-lite", "method": "GET", "auth": { "header": "X-API-Key", "prefix": "" } }
+      "id": "seth-alpha-lite-company-brief",
+      "tool_id": "creator.seth.company-brief",
+      "config": { "url": "http://8.130.172.170/api/agent/company-brief", "method": "GET", "auth": { "header": "X-API-Key", "prefix": "" } }
+    },
+    {
+      "id": "seth-alpha-lite-source-route",
+      "tool_id": "creator.seth.source-route",
+      "config": { "url": "http://8.130.172.170/api/agent/source-route", "method": "GET", "auth": { "header": "X-API-Key", "prefix": "" } }
     },
     {
       "id": "seth-alpha-lite-openapi",
       "tool_id": "creator.seth.openapi",
       "config": { "url": "http://8.130.172.170/openapi.json", "method": "GET", "auth": { "header": "X-API-Key", "prefix": "" } }
-    },
-    {
-      "id": "seth-alpha-lite-manifest",
-      "tool_id": "creator.seth.agent-manifest",
-      "config": { "url": "http://8.130.172.170/.well-known/agent-manifest.json", "method": "GET", "auth": { "header": "X-API-Key", "prefix": "" } }
     }
   ]
 }

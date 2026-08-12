@@ -54,3 +54,6 @@ htmlcov/
 # Logs
 *.log
 logs/
+
+# Local creator-corpus research captures (copyrighted source material)
+docs/research/creator-sourcing-2026-08-09/corpus/

@@ -1,0 +1,56 @@
+{
+  "runId": "demo-offer-critique-v1",
+  "creator": {
+    "id": "demo-creator",
+    "name": "Demo Creator"
+  },
+  "agentId": "publishable-offer-critique",
+  "product": {
+    "id": "publishable-offer-critique",
+    "name": "Publishable Offer Critique",
+    "description": "Choose the one material offer change and return customer-ready copy.",
+    "promise": "A decisive critique and a directly publishable revision.",
+    "boundaries": [
+      "Do not invent customer evidence, pricing facts, or guaranteed outcomes."
+    ]
+  },
+  "tools": [
+    {
+      "id": "hatch.web_search",
+      "kind": "hatch_builtin",
+      "capability": "web_search"
+    },
+    {
+      "id": "hatch.file_search",
+      "kind": "hatch_builtin",
+      "capability": "file_search"
+    }
+  ],
+  "taskName": "Publishable offer critique",
+  "taskBriefPath": "task.md",
+  "sources": [
+    {
+      "id": "S1",
+      "authority": "creator_current",
+      "title": "Creator's current workshop notes",
+      "path": "sources/current-method.md"
+    },
+    {
+      "id": "S2",
+      "authority": "private_material",
+      "title": "Authorized course excerpt",
+      "path": "sources/course-excerpt.md"
+    },
+    {
+      "id": "S3",
+      "authority": "public_context",
+      "title": "Public background article",
+      "path": "sources/public-context.md"
+    }
+  ],
+  "config": {
+    "developmentQuestions": 6,
+    "heldoutQuestions": 3,
+    "maxCorpusRevisions": 4
+  }
+}

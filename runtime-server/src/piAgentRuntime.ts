@@ -48,6 +48,17 @@ export type PiToolDefinition = {
   };
 };
 
+export type PiAgentRuntimeOptions = {
+  /**
+   * Override the model-visible tools for a specialized Runtime harness.
+   * Omit this option for the normal Hatch tool policy; pass an empty array for
+   * a hermetic run which must not expose or execute any tool.
+   */
+  toolDefinitions?: PiToolDefinition[];
+  /** Disable Runtime's implicit "save this answer" compatibility path. */
+  allowRequestedArtifactDelivery?: boolean;
+};
+
 type QueueItem<T> =
   | { kind: "value"; value: T }
   | { kind: "done" }
@@ -101,6 +112,8 @@ type ToolEventState = {
  * the client projection.
  */
 export class PiAgentRuntime implements AgentRuntime {
+  constructor(private readonly options: PiAgentRuntimeOptions = {}) {}
+
   async *run(input: RunStart, ctx: RunContext): AsyncIterable<OutboundMessage> {
     ctx.abortSignal?.throwIfAborted();
     const model = createPiModel();
@@ -115,7 +128,10 @@ export class PiAgentRuntime implements AgentRuntime {
     let finalAssistant: AssistantMessage | undefined;
     let compacting = false;
     let hasExecutedTool = false;
-    const requestedFilePath = requestedOutputPath(input.message.content);
+    const requestedFilePath = this.options.allowRequestedArtifactDelivery === false
+      || !ctx.clientTools.includes("fs.write")
+      ? undefined
+      : requestedOutputPath(input.message.content);
     const deliveryWorkflow = ctx.deliveryWorkflow;
     const deliveryReviewer = deliveryWorkflow ? await createDeliveryReviewer() : undefined;
     const transcriptMessages: ConversationMessage[] = [];
@@ -126,7 +142,7 @@ export class PiAgentRuntime implements AgentRuntime {
       activeSkills
     ).map((message) => piUserMessage(message.content ?? ""));
     const storedMessages = ctx.messages.slice(0, -1).map(toPiMessage);
-    const toolDefinitions = chatToolsForRun(
+    const toolDefinitions = this.options.toolDefinitions ?? chatToolsForRun(
       ctx.clientTools,
       ctx.allowSkillRun !== false,
       ctx.allowedExternalTools,
@@ -208,6 +224,9 @@ export class PiAgentRuntime implements AgentRuntime {
         }
       }
     });
+    const abortFromContext = (): void => agent.abort();
+    if (ctx.abortSignal?.aborted) abortFromContext();
+    else ctx.abortSignal?.addEventListener("abort", abortFromContext, { once: true });
 
     // Abort the provider-backed Pi loop as soon as the owning Runtime run is
     // cancelled or its socket disconnects. The Runtime keeps the global run

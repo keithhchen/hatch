@@ -285,16 +285,14 @@ export async function installCurrentCorpus(verified: VerifiedAgentCorpus, destin
   }
 }
 
-export async function listCurrentCorpora(root: string, creatorId: string): Promise<VerifiedAgentCorpus[]> {
-  const creatorRoot = containedPath(root, creatorId);
-  let entries;
-  try { entries = await readdir(creatorRoot, { withFileTypes: true }); } catch { return []; }
-  const result: VerifiedAgentCorpus[] = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    try { result.push(await verifyAgentCorpus(containedPath(creatorRoot, entry.name), creatorId, entry.name)); } catch { /* ignore incomplete entries */ }
+async function pathExists(target: string): Promise<boolean> {
+  try {
+    await access(target);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
   }
-  return result;
 }
 
 function assetDescriptors(corpus: AgentCorpus): Array<{ path: string; sha256: string }> {

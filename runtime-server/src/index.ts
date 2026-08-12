@@ -71,6 +71,7 @@ import {
   type GuardedOutputResult,
   type OutputGuard
 } from "./outputGuard.js";
+import { writeOperationalError } from "./operationalLogging.js";
 
 export type RuntimeServer = {
   server: http.Server;
@@ -170,22 +171,45 @@ type LegacyHmacAuth = {
 export async function commerceEventSinkFromEnvironment(
   environment: NodeJS.ProcessEnv = process.env
 ): Promise<CommerceEventSink | undefined> {
+  const commerceUrl = environment.HATCH_COMMERCE_URL?.trim();
+  if (commerceUrl) {
+    const serviceToken = environment.HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN?.trim();
+    if (!serviceToken) throw new Error("HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN is required with HATCH_COMMERCE_URL.");
+    return new HttpCommerceEventSink(commerceUrl, serviceToken);
+  }
+
   const ledgerFile = environment.HATCH_COMMERCE_LEDGER_FILE?.trim();
   if (!ledgerFile) return undefined;
+  if (environment.NODE_ENV === "production") {
+    throw new Error("Production Runtime must use HATCH_COMMERCE_URL; shared Commerce ledger files are development-only.");
+  }
 
   const commerce = await import(new URL("../../packages/commerce/src/index.js", import.meta.url).href) as {
     CommerceLedger: { open(options: { filePath: string }): Promise<{
       findByIdempotencyKey(key: string): unknown;
     }> };
+    CommerceService: new (ledger: unknown) => {
+      getEntitlement(entitlementId: string): unknown;
+      advanceEntitlementVersion(input: Record<string, unknown>, options: { idempotencyKey: string }): Promise<unknown>;
+      authorizeAndReserve(input: Record<string, unknown>, options: { idempotencyKey: string }): Promise<unknown>;
+      releaseReservation(input: Record<string, unknown>, options: { idempotencyKey: string }): Promise<unknown>;
+      completeDelivery(input: Record<string, unknown>, options: { idempotencyKey: string }): Promise<unknown>;
+    };
     LedgerCommerceSink: new (ledger: unknown) => {
       ingest(type: string, payload: Record<string, unknown>, options: { idempotencyKey: string }): Promise<unknown>;
     };
   };
   const ledger = await commerce.CommerceLedger.open({ filePath: ledgerFile });
   const recognizedSink = new commerce.LedgerCommerceSink(ledger);
+  const service = new commerce.CommerceService(ledger);
   return {
     append: (type, payload, options) => recognizedSink.ingest(type, payload, options),
-    findByIdempotencyKey: (key) => ledger.findByIdempotencyKey(key)
+    findByIdempotencyKey: (key) => ledger.findByIdempotencyKey(key),
+    getEntitlement: (entitlementId) => service.getEntitlement(entitlementId),
+    advanceEntitlementVersion: (input, options) => service.advanceEntitlementVersion(input, options),
+    authorizeAndReserve: (input, options) => service.authorizeAndReserve(input, options),
+    releaseReservation: (input, options) => service.releaseReservation(input, options),
+    completeDelivery: (input, options) => service.completeDelivery(input, options)
   };
 }
 
@@ -362,6 +386,7 @@ export async function createRuntimeServerFromEnvironment(
     })
     : undefined;
   return createRuntimeServer({
+    conversationStore,
     outputGuard: createOutputGuardFromEnvironment(environment),
     commerceEventSink: await commerceEventSinkFromEnvironment(environment),
     creatorToolControlPlane: creatorToolControlPlaneFromEnvironment(environment),
@@ -475,6 +500,9 @@ type SessionBinding = {
   agentId: string;
   productId: string;
   corpusDigest: string;
+  purchasedCorpusDigest?: string;
+  versionPolicy?: "pinned" | "track_current_compatible";
+  versionHistory?: EntitlementBinding["version_history"];
   agentCorpus?: AgentCorpus;
   agentCorpusRoot?: string;
   entitlementId?: string;
@@ -784,12 +812,14 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     server,
     wss,
     close: async () => {
+      if (reconciliationInterval) clearInterval(reconciliationInterval);
       for (const client of wss.clients) {
         client.close();
       }
       await new Promise<void>((resolve) => wss.close(() => resolve()));
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
       await Promise.allSettled([...connectionTasks]);
+      await Promise.allSettled([...reconciliationTasks]);
       await conversationStore.close();
       await conversationRepository.close();
     }
@@ -820,6 +850,20 @@ async function handleHttpRequest(
   const url = new URL(req.url ?? "/", "http://127.0.0.1");
   if (req.method === "GET" && url.pathname === "/healthz") {
     writeJson(res, 200, { ok: true });
+    return;
+  }
+  if (req.method === "GET" && url.pathname === "/readyz") {
+    const repository = readiness?.repository ?? "failed";
+    const deliveryAccounting = readiness?.deliveryAccounting ?? "disabled";
+    const ready = repository === "ready"
+      && (deliveryAccounting === "ready" || deliveryAccounting === "disabled");
+    writeJson(res, ready ? 200 : 503, {
+      ok: ready,
+      checks: {
+        conversation_repository: repository,
+        delivery_accounting: deliveryAccounting
+      }
+    });
     return;
   }
 
@@ -887,6 +931,10 @@ async function handleHttpRequest(
             creator_id: entitlement.creator_id,
             agent_id: entitlement.agent_id,
             corpus_digest: resolved.digest,
+            purchased_corpus_digest: resolved.purchased_corpus_digest,
+            effective_corpus_digest: resolved.effective_corpus_digest,
+            version_policy: resolved.version_policy,
+            version_history: resolved.version_history,
             creator: resolved.corpus.creator,
             product: {
               id: resolved.corpus.product.id,
@@ -928,6 +976,20 @@ async function handleHttpRequest(
         activeRunControls,
         maxHttpResponseBytes
       );
+    } catch (error) {
+      writeConversationHttpError(res, error);
+    }
+    return;
+  }
+
+  if (url.pathname === "/v1/conversations" || url.pathname.startsWith("/v1/conversations/")) {
+    if (!conversationRepository) {
+      writeJson(res, 503, { error: { code: "conversation_repository_unavailable", message: "Conversation storage is unavailable." } });
+      return;
+    }
+    try {
+      await repositoryReady;
+      await handleConversationHttpRequest(req, res, url, conversationRepository, conversationStore, entitlementResolver, agentCorpusResolver, commerceEventSink, activeRunControls);
     } catch (error) {
       writeConversationHttpError(res, error);
     }
@@ -1441,6 +1503,15 @@ function createConversationStore(environment: NodeJS.ProcessEnv = process.env): 
   return databaseUrl
     ? new PostgresStore({ connectionString: databaseUrl, environment })
     : new RuntimeStore(environment.HATCH_RUNTIME_DATA_DIR ?? path.resolve(".hatch-runtime"));
+}
+
+function createConversationRepository(store: RuntimeStore): ConversationRepository {
+  if (store instanceof PostgresStore) {
+    // Share the existing pool so the transcript projection and durable
+    // Conversation control-plane use one Runtime database lifecycle.
+    return new PostgresConversationRepository({ pool: store.pool });
+  }
+  return new FileConversationRepository(store.dataDirectory);
 }
 
 function createConversationRepository(store: RuntimeStore): ConversationRepository {
@@ -2364,6 +2435,10 @@ async function runOneTurn(
   const guardTiming: Array<import("./outputGuard.js").OutputGuardTiming & { released_ms?: number }> = [];
   let skillRuntime: SkillRuntime | undefined;
   let deliveredArtifact: DeliveryArtifact | undefined;
+  const deliveryBinding = deliveryBindingFromSession(binding);
+  let deliveryReservation: DeliveryUnitReservation | undefined;
+  let deliveryReservationConsumed = false;
+  let deliveryAccountingPending = false;
   try {
     abortSignal.throwIfAborted();
     await state.start();
@@ -2426,6 +2501,7 @@ async function runOneTurn(
       finishReason: OutputFinishReason,
       recordDelivery = true
     ): Promise<void> => {
+      let receiptStatus: "recorded" | "syncing" | undefined;
       const content = finishReason === "content_filter"
         ? OUTPUT_GUARD_BLOCKED_MODEL_MESSAGE
         : approvedAssistantText;
@@ -2447,14 +2523,42 @@ async function runOneTurn(
         }
       });
       if (finishReason === "stop" && recordDelivery && commerceEventSink && deliveryBinding) {
-        const receipt = await recordCompletedDelivery(
-          commerceEventSink,
+        const receipt = prepareDelivery(
           deliveryBinding,
           input.conversation_id,
           input.run_id,
           deliveredArtifact ?? { type: "message", content: approvedAssistantText }
         );
-        await send({ type: "delivery.ready", run_id: input.run_id, ...receipt });
+        try {
+          const recorded = await recordPreparedDelivery(
+            commerceEventSink,
+            deliveryBinding,
+            input.conversation_id,
+            input.run_id,
+            receipt,
+            deliveryReservation
+          );
+          deliveryReservationConsumed = Boolean(deliveryReservation);
+          receiptStatus = "recorded";
+          await send({ type: "delivery.ready", run_id: input.run_id, ...recorded, receipt_status: receiptStatus });
+        } catch (error) {
+          if (!deliveryAccountingOutbox || !deliveryReservation) throw error;
+          const command: DeliveryAccountingCommand = {
+            version: 1,
+            commandId: receipt.delivery_id,
+            binding: deliveryBinding,
+            conversationId: input.conversation_id,
+            runId: input.run_id,
+            artifact: { type: receipt.artifact_type, digest: receipt.artifact_digest },
+            reservation: deliveryReservation
+          };
+          await deliveryAccountingOutbox.enqueue(command);
+          deliveryAccountingPending = true;
+          receiptStatus = "syncing";
+          writeOperationalError("commerce_delivery_receipt_deferred", error);
+          await send({ type: "delivery.ready", run_id: input.run_id, ...receipt, receipt_status: receiptStatus });
+          scheduleDeliveryReconciliation();
+        }
       }
       const completedAt = performance.now();
       await send({
@@ -2482,19 +2586,11 @@ async function runOneTurn(
       await emitReleased(final);
       await commitTerminal(final.blocked ? "content_filter" : "stop", false);
     };
-    if (commerceEventSink && deliveryBinding) {
-      const completedDelivery = await findCompletedDelivery(
-        commerceEventSink,
-        deliveryBinding,
-        input.conversation_id,
-        input.run_id
-      );
-      if (completedDelivery) {
-        await persistUserMessage();
-        await send({ type: "delivery.ready", run_id: input.run_id, ...completedDelivery });
-        await sendFixedAssistant("This delivery was already completed. The existing artifact has not been changed.");
-        return;
-      }
+    if (completedDelivery) {
+      await persistUserMessage();
+      await send({ type: "delivery.ready", run_id: input.run_id, ...completedDelivery, receipt_status: "recorded" });
+      await sendFixedAssistant("This delivery was already completed. The existing artifact has not been changed.");
+      return;
     }
     if (input.message.content.trim() === "/compact") {
       await compactAndEmit(input, store, state, send, priorMessages, {
@@ -2597,8 +2693,7 @@ async function runOneTurn(
       ) {
         deliveredArtifact = {
           type: "file",
-          content: event.arguments.content,
-          ...(typeof event.arguments.path === "string" ? { path: event.arguments.path } : {})
+          content: event.arguments.content
         };
       }
       if (event.type === "turn.completed") {
@@ -2627,6 +2722,19 @@ async function runOneTurn(
       }
     });
   } finally {
+    if (commerceEventSink && deliveryReservation && !deliveryReservationConsumed && !deliveryAccountingPending) {
+      const releaseReason = state.status === "cancelled"
+        ? "run_cancelled"
+        : state.status === "failed"
+          ? "run_failed"
+          : "delivery_not_completed";
+      await releaseDeliveryUnit(commerceEventSink, deliveryReservation, releaseReason).catch((error) => {
+        // The Runtime terminal state is already authoritative. Keep the error
+        // visible to operators without replacing a completed/cancelled client
+        // response; the stable release key makes an operational retry safe.
+        writeOperationalError("commerce_delivery_reservation_release_failed", error);
+      });
+    }
     await skillRuntime?.cancelParentRun(input.run_id);
     activeSkillRuntimes.delete(input.run_id);
   }
@@ -2647,6 +2755,74 @@ async function buildSessionSkills(protectedCorpus = false): Promise<RuntimeSessi
     visibleRecords,
     rendered
   };
+}
+
+async function resolvePurchasedAgentCorpus(
+  resolver: AgentCorpusResolver,
+  entitlement: EntitlementBinding,
+  commerceEventSink?: CommerceEventSink
+): Promise<EntitledAgentCorpus> {
+  const authoritative = commerceEventSink?.getEntitlement
+    ? commerceEntitlementBinding(
+      await commerceEventSink.getEntitlement(entitlement.entitlement_id),
+      entitlement
+    )
+    : entitlement;
+  return resolveEntitledAgentCorpus(resolver, authoritative, commerceEventSink);
+}
+
+function commerceEntitlementBinding(value: unknown, registry: EntitlementBinding): EntitlementBinding {
+  const outer = recordValue(value);
+  const projection = Object.keys(recordValue(outer.entitlement)).length
+    ? recordValue(outer.entitlement)
+    : outer;
+  const identity = {
+    entitlement_id: projection.entitlement_id,
+    order_id: projection.order_id,
+    user_id: projection.buyer_id ?? projection.user_id,
+    creator_id: projection.creator_id,
+    agent_id: projection.agent_id,
+    product_id: projection.product_id,
+    purchased_corpus_digest: projection.purchased_corpus_digest ?? projection.corpus_digest
+  };
+  for (const [field, expected] of Object.entries({
+    entitlement_id: registry.entitlement_id,
+    order_id: registry.order_id,
+    user_id: registry.user_id,
+    creator_id: registry.creator_id,
+    agent_id: registry.agent_id,
+    product_id: registry.product_id,
+    purchased_corpus_digest: registry.purchased_corpus_digest
+  })) {
+    if (String(identity[field as keyof typeof identity] ?? "") !== String(expected)) {
+      throw new EntitlementError(
+        "entitlement_commerce_mismatch",
+        "Commerce and Registry disagree about this Creator Agent entitlement."
+      );
+    }
+  }
+  if (["revoked", "expired"].includes(String(projection.status ?? ""))) {
+    throw new EntitlementError("entitlement_not_active", "This Creator Agent entitlement is no longer active.");
+  }
+  const parsed = EntitlementBindingSchema.safeParse({
+    ...registry,
+    effective_corpus_digest: projection.effective_corpus_digest ?? identity.purchased_corpus_digest,
+    version_policy: projection.version_policy ?? registry.version_policy ?? "pinned",
+    version_history: projection.version_history ?? registry.version_history ?? []
+  });
+  if (!parsed.success) {
+    throw new EntitlementError(
+      "entitlement_commerce_invalid",
+      "Commerce returned an invalid Creator Agent entitlement snapshot."
+    );
+  }
+  return parsed.data;
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
 }
 
 async function resolveSessionBinding(
@@ -2695,11 +2871,17 @@ async function resolveSessionBinding(
       });
       assertEntitlementMatchesIdentity(authClaims, entitlement);
       if (entitlement.agent_id !== hello.agent_id
-        || entitlement.creator_id !== resolved.corpus.creator.id
-        || entitlement.product_id !== resolved.corpus.product.id) {
+        || entitlement.creator_id !== selectedCreatorId) {
+        throw new EntitlementError("agent_entitlement_mismatch", "This Creator Agent is not available for the signed-in account.");
+      }
+      entitledResolved = await resolvePurchasedAgentCorpus(agentCorpusResolver, entitlement, commerceEventSink);
+      resolved = entitledResolved;
+      if (entitlement.product_id !== resolved.corpus.product.id) {
         throw new EntitlementError("agent_entitlement_mismatch", "This Creator Agent is not available for the signed-in account.");
       }
       corpusEntitlement = entitlement;
+    } else {
+      resolved = await agentCorpusResolver.resolve(selectedCreatorId, hello.agent_id);
     }
     if (hello.product_id && hello.product_id !== resolved.corpus.product.id) {
       throw new Error("Agent Corpus product binding mismatch");
@@ -2712,7 +2894,13 @@ async function resolveSessionBinding(
       corpusDigest: resolved.digest,
       agentCorpus: resolved.corpus,
       agentCorpusRoot: resolved.root,
-      ...(corpusEntitlement ? { entitlementId: corpusEntitlement.entitlement_id, orderId: corpusEntitlement.order_id } : {}),
+      ...(corpusEntitlement ? {
+        entitlementId: corpusEntitlement.entitlement_id,
+        orderId: corpusEntitlement.order_id,
+        purchasedCorpusDigest: entitledResolved!.purchased_corpus_digest,
+        versionPolicy: entitledResolved!.version_policy,
+        versionHistory: entitledResolved!.version_history
+      } : {}),
       explicit: true
     };
   }
@@ -2737,7 +2925,7 @@ async function resolveSessionBinding(
     assertEntitlementMatchesIdentity(authClaims, entitlement);
     const resolved = await agentCorpusResolver.resolve(entitlement.creator_id, entitlement.agent_id, signal);
     if (resolved.corpus.product.id !== entitlement.product_id || resolved.corpus.creator.id !== entitlement.creator_id) {
-      throw new Error("Entitlement does not match its current Agent Corpus");
+      throw new Error("Entitlement does not match its purchased Agent Corpus");
     }
     return {
       creatorId: entitlement.creator_id,
@@ -2745,6 +2933,9 @@ async function resolveSessionBinding(
       agentId: entitlement.agent_id,
       productId: entitlement.product_id,
       corpusDigest: resolved.digest,
+      purchasedCorpusDigest: resolved.purchased_corpus_digest,
+      versionPolicy: resolved.version_policy,
+      versionHistory: resolved.version_history,
       entitlementId: entitlement.entitlement_id,
       orderId: entitlement.order_id,
       agentCorpus: resolved.corpus,
@@ -2962,7 +3153,7 @@ async function bindingFromHistoryRequest(
     }
     const resolved = await agentCorpusResolver.resolve(entitlement.creator_id, entitlement.agent_id, signal);
     if (resolved.corpus.product.id !== entitlement.product_id || resolved.corpus.creator.id !== entitlement.creator_id) {
-      throw new Error("Entitlement does not match its current Agent Corpus");
+      throw new Error("Entitlement does not match its purchased Agent Corpus");
     }
     return {
       creatorId: entitlement.creator_id,
@@ -2970,6 +3161,9 @@ async function bindingFromHistoryRequest(
       agentId: entitlement.agent_id,
       productId: entitlement.product_id,
       corpusDigest: resolved.digest,
+      purchasedCorpusDigest: resolved.purchased_corpus_digest,
+      versionPolicy: resolved.version_policy,
+      versionHistory: resolved.version_history,
       entitlementId: entitlement.entitlement_id,
       orderId: entitlement.order_id,
       agentCorpus: resolved.corpus,
@@ -2994,6 +3188,27 @@ function bearerToken(req: http.IncomingMessage): string | undefined {
   return match?.[1]?.trim() || undefined;
 }
 
+async function reconcileDeliveryAccountingOutbox(
+  outbox: DeliveryAccountingOutbox,
+  sink: CommerceEventSink
+): Promise<void> {
+  await outbox.reconcile(async (command) => {
+    await recordPreparedDelivery(
+      sink,
+      command.binding,
+      command.conversationId,
+      command.runId,
+      deliveryReceiptFromMetadata(
+        command.binding,
+        command.conversationId,
+        command.runId,
+        command.artifact
+      ),
+      command.reservation
+    );
+  });
+}
+
 function deliveryBindingFromSession(binding: SessionBinding): DeliveryBinding | undefined {
   if (!binding.entitlementId || !binding.orderId) return undefined;
   return {
@@ -3003,6 +3218,7 @@ function deliveryBindingFromSession(binding: SessionBinding): DeliveryBinding | 
     creatorId: binding.creatorId,
     agentId: binding.agentId,
     productId: binding.productId,
+    purchasedCorpusDigest: binding.purchasedCorpusDigest ?? binding.corpusDigest,
     corpusDigest: binding.corpusDigest
   };
 }
@@ -3155,7 +3371,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       console.log(`Hatch TS runtime listening on ws://${host}:${port}/runtime${commerce}`);
     });
   }).catch((error: unknown) => {
-    console.error("Unable to start Hatch Runtime:", error);
+    writeOperationalError("runtime_startup_failed", error);
     process.exitCode = 1;
   });
 }

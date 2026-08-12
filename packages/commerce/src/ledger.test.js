@@ -11,7 +11,10 @@ import {
   CommercePersistenceError,
   projectBuyerEntitlements,
   projectBuyerOrders,
-  projectCreatorDashboard
+  projectCreatorDashboard,
+  projectEntitlement,
+  projectOrder,
+  projectRefunds
 } from "./index.js";
 
 async function seedLocalUatCommerce(ledger, fixture = {}) {
@@ -59,6 +62,46 @@ function deterministicLedger(filePath) {
     idFactory: (type) => `${type.replaceAll(".", "_")}_${++sequence}`
   });
 }
+
+test("every persisted Commerce event carries the canonical audit envelope", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-commerce-audit-"));
+  const filePath = path.join(directory, "ledger.jsonl");
+  const ledger = await deterministicLedger(filePath);
+  const fixture = await seedLocalUatCommerce(ledger);
+  await ledger.append("task.started", {
+    task_id: "task_audit",
+    order_id: fixture.orderId,
+    entitlement_id: fixture.entitlementId,
+    buyer_id: fixture.buyerId,
+    creator_id: fixture.creatorId,
+    agent_id: fixture.agentId,
+    product_id: fixture.productId,
+    corpus_digest: fixture.corpusDigest
+  }, { idempotencyKey: "task:audit:started" });
+
+  const reopened = await CommerceLedger.open({ filePath });
+  const events = reopened.listEvents();
+  assert.equal(events.length, 3);
+  for (const event of events) {
+    assert.equal(event.schema_version, 1);
+    for (const field of [
+      "aggregate_type", "aggregate_id", "tenant_id", "actor_type", "actor_id",
+      "service_id", "request_id", "correlation_id", "causation_id", "reason"
+    ]) {
+      assert.ok(Object.hasOwn(event, field), `${event.event_type} missing ${field}`);
+    }
+    assert.equal(typeof event.aggregate_type, "string");
+    assert.equal(typeof event.aggregate_id, "string");
+    assert.equal(typeof event.actor_id, "string");
+    assert.equal(typeof event.request_id, "string");
+  }
+  assert.equal(events[0].aggregate_type, "order");
+  assert.equal(events[0].aggregate_id, fixture.orderId);
+  assert.equal(events[0].actor_id, fixture.buyerId);
+  assert.equal(events[0].request_id, `order:${fixture.orderId}:placed`);
+  assert.equal(events[2].actor_type, "service");
+  assert.equal(events[2].actor_id, "runtime");
+});
 
 test("one delivery recognizes the exact 90/10 split and projects the same creator dashboard", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-commerce-"));
@@ -345,10 +388,14 @@ test("zero-value checkout is still a real order and can project buyer history", 
     corpus_digest: `sha256:${"b".repeat(64)}`,
     product_name: "Zero Product",
     gross_minor: 0,
+    subtotal_minor: 0,
+    discount_minor: 0,
+    tax_minor: null,
+    total_minor: 0,
     currency: "USD",
     status: "paid",
-    payment_status: "paid",
-    payment_id: "pay_zero",
+    payment_status: "not_required",
+    payment_id: null,
     occurred_at: ledger.listEvents()[0].occurred_at,
     entitlement_id: null
   }]);

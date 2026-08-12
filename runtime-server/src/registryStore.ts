@@ -3,6 +3,7 @@ import { lstat, mkdir, open, readFile, writeFile, rename, rm, readdir, stat } fr
 import path from "node:path";
 import { Pool, type QueryConfig } from "pg";
 import {
+  activateCurrentCorpus,
   extractAgentCorpusBundle,
   prepareCurrentCorpusInstall,
   verifyAgentCorpus,
@@ -21,6 +22,7 @@ export type PublishedAgentCorpus = {
   creator_id: string;
   agent_id: string;
   corpus_digest: string;
+  backward_compatible_with?: string;
   creator_name: string;
   product_id: string;
   product_name: string;
@@ -38,6 +40,43 @@ export type PublishedAgentCorpus = {
   status: "published";
   published_at: string;
 };
+
+export type RegistryDeploymentActivation = {
+  operationId: string;
+  /** `null` is an explicit compare against an absent current deployment. */
+  expectedCurrentDigest: string | null;
+};
+
+export class RegistryDeploymentConflictError extends Error {
+  readonly code = "stale_current_digest";
+
+  constructor(
+    readonly expectedCurrentDigest: string | null,
+    readonly currentCorpusDigest: string | null,
+    readonly targetCorpusDigest: string,
+  ) {
+    super("stale_current_digest");
+    this.name = "RegistryDeploymentConflictError";
+  }
+}
+
+/**
+ * The Factory control plane approved one content-addressed candidate, but the
+ * directory presented to Registry no longer verifies to that digest.  This is
+ * a stale-approval conflict, not a new candidate that Registry may silently
+ * stage or publish.
+ */
+export class RegistryFactoryCandidateChangedError extends Error {
+  readonly code = "candidate_changed";
+
+  constructor(
+    readonly expectedCorpusDigest: string,
+    readonly currentCorpusDigest: string,
+  ) {
+    super("candidate_changed");
+    this.name = "RegistryFactoryCandidateChangedError";
+  }
+}
 
 export type AgentAccessGrant = {
   entitlement_id: string;
@@ -82,7 +121,7 @@ export type CreatorToolConnection = {
 type RegistryState = {
   schema_version: 1;
   agent_corpora: PublishedAgentCorpus[];
-  agent_access: AgentAccessGrant[];
+  agent_access: Array<Partial<AgentAccessGrant>>;
   tool_connections?: CreatorToolConnection[];
   agent_tool_bindings?: Array<{ tenant_id: string; agent_id: string; tool_id: string; connection_id: string }>;
 };
@@ -377,6 +416,83 @@ export class RegistryStoreTs {
     }
   }
 
+  /** Publish one exact, already-approved Factory bundle present on the Registry host. */
+  async publishAgentCorpusDirectory(
+    creatorId: string,
+    agentId: string,
+    corpusRoot: string,
+    expectedDigest: string,
+  ): Promise<PublishedAgentCorpus> {
+    const verified = await this.verifyApprovedFactoryCorpus(creatorId, agentId, corpusRoot, expectedDigest);
+    return this.publishVerifiedCorpus(verified);
+  }
+
+  /**
+   * Materialize and validate a Factory candidate without changing the serving
+   * pointer. Deployment orchestration must call activateAgentCorpusRelease in
+   * a separate, compare-and-swap step after its other durable writes succeed.
+   */
+  async stageAgentCorpusDirectory(
+    creatorId: string,
+    agentId: string,
+    corpusRoot: string,
+    expectedDigest: string,
+  ): Promise<PublishedAgentCorpus> {
+    const verified = await this.verifyApprovedFactoryCorpus(creatorId, agentId, corpusRoot, expectedDigest);
+    return this.stageVerifiedCorpus(verified);
+  }
+
+  async stageAgentCorpusBundle(creatorId: string, agentId: string, bundle: Uint8Array): Promise<PublishedAgentCorpus> {
+    const staging = path.join(path.dirname(this.corpusRoot), `.agent-corpus-stage-${randomUUID()}`);
+    await mkdir(staging, { recursive: true });
+    try {
+      await extractAgentCorpusBundle(bundle, staging);
+      return await this.stageVerifiedCorpus(await verifyAgentCorpus(staging, creatorId, agentId));
+    } finally {
+      await rm(staging, { recursive: true, force: true });
+    }
+  }
+
+  async activateAgentCorpusRelease(
+    creatorId: string,
+    agentId: string,
+    corpusDigest: string,
+    deployment?: RegistryDeploymentActivation,
+  ): Promise<PublishedAgentCorpus> {
+    if (!isCorpusDigest(corpusDigest)) throw new Error("invalid_corpus_digest");
+    if (deployment) validateDeploymentActivation(deployment);
+    return this.withDeploymentLock(key(creatorId, agentId), async () => {
+      const current = await this.readAuthoritativeCurrentCorpus(creatorId, agentId);
+      // Target-current is a replay even when the caller's original expected
+      // value is now stale. It also repairs a crash between metadata commit and
+      // pointer replacement.
+      if (current?.corpus_digest === corpusDigest) {
+        await this.ensureCurrentCorpusPointer(current);
+        return current;
+      }
+      if (deployment && (current?.corpus_digest ?? null) !== deployment.expectedCurrentDigest) {
+        throw new RegistryDeploymentConflictError(
+          deployment.expectedCurrentDigest,
+          current?.corpus_digest ?? null,
+          corpusDigest,
+        );
+      }
+
+      const verified = await this.loadStagedCorpus(creatorId, agentId, corpusDigest);
+      if (verified.corpus.knowledge.documents.length > 0 && !this.indexer) {
+        throw new Error("Agent Corpus includes knowledge documents but Qdrant knowledge index is not configured");
+      }
+      if (this.indexer) await ingestAgentCorpusKnowledge(this.indexer, {
+        corpus: verified.corpus,
+        path: verified.path,
+        digest: verified.digest
+      });
+      const activated = publishedCorpusFromVerified(verified, new Date().toISOString());
+      await this.commitCurrentCorpus(activated, deployment?.expectedCurrentDigest);
+      return activated;
+    });
+  }
+
   async listAgentCorpora(creatorId: string): Promise<PublishedAgentCorpus[]> {
     return [...this.corpora.values()].filter((item) => item.creator_id === creatorId).sort(byPublishedAt);
   }
@@ -394,6 +510,10 @@ export class RegistryStoreTs {
   }
 
   databasePool(): Pool | undefined { return this.pool; }
+
+  async checkReady(): Promise<void> {
+    if (this.pool) await this.pool.query("SELECT 1");
+  }
 
   async close(): Promise<void> { await this.pool?.end(); }
 
@@ -468,10 +588,14 @@ export class RegistryStoreTs {
         }
         return updated;
       }
+      // An entitlement id is a monotonic Commerce identity. Once revoked it
+      // cannot be made active again by a delayed/replayed grant outbox item;
+      // a later purchase must create a new entitlement id. This also makes
+      // grant/revoke delivery order independent at the Registry projection.
       return existing;
     }
     const grant: AgentAccessGrant = {
-      entitlement_id: `ent_${randomUUID().replaceAll("-", "")}`,
+      entitlement_id: entitlementId,
       user_id: userId,
       creator_id: creatorId,
       agent_id: agentId,
@@ -548,6 +672,21 @@ export class RegistryStoreTs {
     });
   }
 
+  async revokeAgentAccess(userId: string, entitlementId: string): Promise<AgentAccessGrant> {
+    const existing = this.access.get(entitlementId);
+    if (!existing || existing.user_id !== userId) throw new Error("entitlement_not_found");
+    if (existing.status === "revoked") return existing;
+    const revoked: AgentAccessGrant = { ...existing, status: "revoked" };
+    this.access.set(entitlementId, revoked);
+    try {
+      await this.persistAccess(revoked);
+    } catch (error) {
+      this.access.set(entitlementId, existing);
+      throw error;
+    }
+    return revoked;
+  }
+
   async upsertCreatorToolConnection(input: {
     tenantId: string;
     connectionId: string;
@@ -589,8 +728,13 @@ export class RegistryStoreTs {
     const connection = this.toolConnections.get(input.connectionId) ?? await this.readToolConnection(input.connectionId);
     if (!connection) throw new Error(`tool connection does not exist: ${input.connectionId}`);
     if (connection.tenant_id !== input.tenantId) throw new Error("a tool connection cannot cross tenant boundaries");
-    if (!this.getAgentCorpus(input.tenantId, input.agentId)) throw new Error(`agent corpus does not exist: ${input.tenantId}/${input.agentId}`);
-    const corpus = await loadAgentCorpus(path.join(this.corpusRoot, input.tenantId, input.agentId));
+    const published = this.getAgentCorpus(input.tenantId, input.agentId);
+    if (!published) throw new Error(`agent corpus does not exist: ${input.tenantId}/${input.agentId}`);
+    const corpus = (await new AgentCorpusResolver(this.corpusRoot).resolve(
+      input.tenantId,
+      input.agentId,
+      published.corpus_digest
+    )).corpus;
     const declared = corpus.tools.find((tool) => tool.id === input.toolId);
     if (!declared || (declared.kind !== "http_function" && declared.kind !== "mcp_tool")) {
       throw new Error(`Agent Corpus tool does not exist: ${input.toolId}`);
@@ -660,9 +804,10 @@ export class RegistryStoreTs {
         agent_id TEXT NOT NULL,
         product_id TEXT NOT NULL,
         order_id TEXT,
+        purchased_corpus_digest TEXT,
+        version_policy TEXT NOT NULL DEFAULT 'pinned',
         status TEXT NOT NULL,
-        granted_at TIMESTAMPTZ NOT NULL,
-        UNIQUE (user_id, creator_id, agent_id)
+        granted_at TIMESTAMPTZ NOT NULL
       );
       CREATE TABLE IF NOT EXISTS tool_connections (
         id TEXT PRIMARY KEY,
@@ -676,6 +821,9 @@ export class RegistryStoreTs {
       ALTER TABLE tool_connections ADD COLUMN IF NOT EXISTS secret_value TEXT;
       ALTER TABLE agent_corpora ADD COLUMN IF NOT EXISTS product_json TEXT;
       ALTER TABLE agent_access ADD COLUMN IF NOT EXISTS order_id TEXT;
+      ALTER TABLE agent_access ADD COLUMN IF NOT EXISTS purchased_corpus_digest TEXT;
+      ALTER TABLE agent_access ADD COLUMN IF NOT EXISTS version_policy TEXT NOT NULL DEFAULT 'pinned';
+      ALTER TABLE agent_access DROP CONSTRAINT IF EXISTS agent_access_user_id_creator_id_agent_id_key;
       CREATE TABLE IF NOT EXISTS agent_tool_bindings (
         tenant_id TEXT NOT NULL,
         agent_id TEXT NOT NULL,
@@ -691,30 +839,35 @@ export class RegistryStoreTs {
       try {
         const corpora = await this.pool.query("SELECT creator_id, agent_id, corpus_digest, creator_name, product_id, product_name, product_description, product_json, knowledge_namespace, status, published_at FROM agent_corpora");
         for (const row of corpora.rows) this.corpora.set(key(row.creator_id, row.agent_id), rowToCorpus(row));
-        const access = await this.pool.query("SELECT entitlement_id, user_id, creator_id, agent_id, product_id, order_id, status, granted_at FROM agent_access");
-        for (const row of access.rows) this.access.set(row.entitlement_id, rowToAccess(row));
+        const access = await this.pool.query("SELECT entitlement_id, user_id, creator_id, agent_id, product_id, order_id, purchased_corpus_digest, version_policy, status, granted_at FROM agent_access");
+        for (const row of access.rows) {
+          const grant = rowToAccess(row);
+          if (grant) this.access.set(grant.entitlement_id, grant);
+        }
         const connections = await this.pool.query("SELECT id, tenant_id, kind, secret_ref, secret_value, config_json, status FROM tool_connections");
         for (const row of connections.rows) this.toolConnections.set(row.id, rowToToolConnection(row));
         const bindings = await this.pool.query("SELECT tenant_id, agent_id, tool_id, connection_id FROM agent_tool_bindings");
         for (const row of bindings.rows) this.toolBindings.set(toolBindingKey(row.tenant_id, row.agent_id, row.tool_id), String(row.connection_id));
-        return;
       } catch (error) {
         throw new Error(`Registry Postgres load failed: ${String(error)}`);
       }
-    }
-    if (!this.statePath) return;
-    try {
-      const state = JSON.parse(await readFile(this.statePath, "utf8")) as RegistryState;
-      for (const corpus of state.agent_corpora ?? []) this.corpora.set(key(corpus.creator_id, corpus.agent_id), {
-        ...corpus,
-        product_boundaries: corpus.product_boundaries ?? [],
-        presentation: corpus.presentation ?? {}
-      });
-      for (const grant of state.agent_access ?? []) this.access.set(grant.entitlement_id, grant);
-      for (const connection of state.tool_connections ?? []) this.toolConnections.set(connection.id, { ...connection, secret: connection.secret ?? null });
-      for (const binding of state.agent_tool_bindings ?? []) this.toolBindings.set(toolBindingKey(binding.tenant_id, binding.agent_id, binding.tool_id), binding.connection_id);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    } else if (this.statePath) {
+      try {
+        const state = JSON.parse(await readFile(this.statePath, "utf8")) as RegistryState;
+        for (const corpus of state.agent_corpora ?? []) this.corpora.set(key(corpus.creator_id, corpus.agent_id), {
+          ...corpus,
+          product_boundaries: corpus.product_boundaries ?? [],
+          presentation: corpus.presentation ?? {}
+        });
+        for (const candidate of state.agent_access ?? []) {
+          const grant = normalizeStoredAccess(candidate);
+          if (grant) this.access.set(grant.entitlement_id, grant);
+        }
+        for (const connection of state.tool_connections ?? []) this.toolConnections.set(connection.id, { ...connection, secret: connection.secret ?? null });
+        for (const binding of state.agent_tool_bindings ?? []) this.toolBindings.set(toolBindingKey(binding.tenant_id, binding.agent_id, binding.tool_id), binding.connection_id);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
     }
   }
 
@@ -1131,12 +1284,37 @@ function accessBindingKey(userId: string, creatorId: string, agentId: string): s
   return `${userId}\u0000${creatorId}\u0000${agentId}`;
 }
 function byPublishedAt(a: PublishedAgentCorpus, b: PublishedAgentCorpus): number { return Date.parse(b.published_at) - Date.parse(a.published_at); }
+function publishedCorpusFromVerified(verified: VerifiedAgentCorpus, publishedAt: string): PublishedAgentCorpus {
+  const product = verified.corpus.product;
+  return {
+    creator_id: verified.creator.id,
+    agent_id: verified.agentId,
+    corpus_digest: verified.digest,
+    ...(verified.corpus.release?.backward_compatible_with
+      ? { backward_compatible_with: verified.corpus.release.backward_compatible_with }
+      : {}),
+    creator_name: verified.creator.name,
+    product_id: product.id,
+    product_name: product.name,
+    ...(product.description ? { product_description: product.description } : {}),
+    ...(product.promise ? { product_promise: product.promise } : {}),
+    product_boundaries: product.boundaries,
+    ...(product.offer ? { product_offer: product.offer } : {}),
+    presentation: product.presentation,
+    knowledge_namespace: `${verified.creator.id}:${verified.agentId}:${verified.digest}`,
+    status: "published",
+    published_at: publishedAt,
+  };
+}
 function rowToCorpus(row: Record<string, any>): PublishedAgentCorpus {
   const product = typeof row.product_json === "string" ? JSON.parse(row.product_json) : row.product_json ?? {};
   return {
     creator_id: String(row.creator_id),
     agent_id: String(row.agent_id),
     corpus_digest: String(row.corpus_digest),
+    ...(product.backward_compatible_with
+      ? { backward_compatible_with: String(product.backward_compatible_with) }
+      : {}),
     creator_name: String(row.creator_name),
     product_id: String(row.product_id),
     product_name: String(row.product_name),
@@ -1150,8 +1328,8 @@ function rowToCorpus(row: Record<string, any>): PublishedAgentCorpus {
     published_at: new Date(row.published_at).toISOString(),
   };
 }
-function rowToAccess(row: Record<string, any>): AgentAccessGrant {
-  return {
+function rowToAccess(row: Record<string, any>): AgentAccessGrant | undefined {
+  return normalizeStoredAccess({
     entitlement_id: String(row.entitlement_id),
     user_id: String(row.user_id),
     creator_id: String(row.creator_id),
@@ -1206,6 +1384,19 @@ function toolBindingKey(tenantId: string, agentId: string, toolId: string): stri
 
 function validateIdentifier(value: string, field: string): void {
   if (!/^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/.test(value)) throw new Error(`${field} must be a valid identifier`);
+}
+
+function isCorpusDigest(value: string): boolean {
+  return /^sha256:[a-f0-9]{64}$/.test(value);
+}
+
+function validateDeploymentActivation(deployment: RegistryDeploymentActivation): void {
+  if (!deployment.operationId.trim() || deployment.operationId.length > 200) {
+    throw new Error("invalid_deployment_operation_id");
+  }
+  if (deployment.expectedCurrentDigest !== null && !isCorpusDigest(deployment.expectedCurrentDigest)) {
+    throw new Error("invalid_expected_current_digest");
+  }
 }
 
 function validateToolIdentifier(value: string, field: string): void {

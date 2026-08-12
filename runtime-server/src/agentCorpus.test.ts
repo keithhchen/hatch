@@ -244,6 +244,7 @@ test("current Agent Corpus entitlements are discoverable and bind the Desktop se
     tools: [{ id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" }],
     evaluations: { synthetic_qa: [asset("evals/evals.json", evals, "synthetic")], held_out: [asset("evals/evals.json", evals, "held-out")] }
   }), "utf8");
+  const purchasedCorpusDigest = await agentCorpusDigest(creatorRoot, await loadAgentCorpus(creatorRoot));
   const entitlement = {
     entitlement_id: "ent_maya_resume",
     order_id: "order_maya_resume",
@@ -251,6 +252,7 @@ test("current Agent Corpus entitlements are discoverable and bind the Desktop se
     creator_id: "maya-chen",
     product_id: "signal-resume-review",
     agent_id: "signal-resume-review",
+    purchased_corpus_digest: purchasedCorpusDigest,
     status: "active" as const
   };
   const entitlementResolver = {
@@ -294,7 +296,34 @@ test("current Agent Corpus entitlements are discoverable and bind the Desktop se
     assert.equal(ready.type, "session.ready");
     assert.equal(ready.agent_id, "signal-resume-review");
     assert.match(String(ready.corpus_digest), /^sha256:[a-f0-9]{64}$/);
+    assert.equal(ready.purchased_corpus_digest, purchasedCorpusDigest);
+    assert.equal(ready.effective_corpus_digest, purchasedCorpusDigest);
+    assert.equal(ready.version_policy, "pinned");
+    assert.deepEqual(ready.version_history, []);
     socket.close();
+
+    entitlement.purchased_corpus_digest = `sha256:${"f".repeat(64)}`;
+    const rejectedSocket = new WebSocket(`ws://127.0.0.1:${address.port}/runtime`);
+    const rejected = await new Promise<Record<string, unknown>>((resolve, reject) => {
+      rejectedSocket.once("error", reject);
+      rejectedSocket.once("message", (data) => resolve(JSON.parse(String(data)) as Record<string, unknown>));
+      rejectedSocket.once("open", () => rejectedSocket.send(JSON.stringify({
+        type: "client.hello",
+        protocol_version: "0.4",
+        installation_id: "desktop-jordan-missing-release",
+        license_token: "license-jordan",
+        entitlement_id: entitlement.entitlement_id,
+        creator_id: entitlement.creator_id,
+        agent_id: entitlement.agent_id,
+        local_tools: []
+      })));
+    });
+    assert.equal(rejected.type, "turn.failed");
+    assert.deepEqual(rejected.error, {
+      code: "entitlement_release_unavailable",
+      message: "The purchased Creator Agent release is not available on this Runtime."
+    });
+    rejectedSocket.close();
   } finally {
     await runtime.close();
   }

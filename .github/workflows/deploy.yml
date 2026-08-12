@@ -1,16 +1,20 @@
 name: Hatch application CD
 
 on:
-  push:
+  workflow_run:
+    workflows: ["Hatch CI"]
+    types: [completed]
     branches: [master]
-  workflow_dispatch:
 
 permissions:
   contents: read
-  packages: write
+
+concurrency:
+  group: hatch-production
+  cancel-in-progress: false
 
 env:
-  RELEASE_TAG: ${{ github.sha }}
+  RELEASE_TAG: ${{ github.event.workflow_run.head_sha }}
 
 concurrency:
   group: hatch-cloud-deployment
@@ -40,6 +44,11 @@ jobs:
           npm run build
 
   build-and-push:
+    if: >-
+      ${{ github.event.workflow_run.conclusion == 'success'
+          && github.event.workflow_run.event == 'push'
+          && github.event.workflow_run.head_branch == 'master'
+          && github.event.workflow_run.head_repository.full_name == github.repository }}
     runs-on: ubuntu-latest
     needs: verify-server
     outputs:
@@ -90,6 +99,9 @@ jobs:
   deploy:
     runs-on: [self-hosted, linux, x64, hatch-prod]
     needs: build-and-push
+    permissions:
+      contents: read
+      packages: read
     steps:
       - name: Checkout source through GitHub API
         env:
@@ -101,7 +113,7 @@ jobs:
           curl -4 --fail --silent --show-error --location --retry 5 --retry-delay 2 \
             -H "Authorization: Bearer $SOURCE_TOKEN" \
             -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/$GITHUB_REPOSITORY/tarball/$GITHUB_SHA" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/tarball/$RELEASE_TAG" \
             -o "$archive"
           root_dir="$(tar -tzf "$archive" | sed -n '1s#/.*##p')"
           test -n "$root_dir"
@@ -192,12 +204,54 @@ jobs:
           for key in LLM_API_KEY DEEPSEEK_API_KEY HATCH_REGISTRY_DATABASE_URL HATCH_RUNTIME_DB_PASSWORD HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN DASHSCOPE_API_KEY POSTGRES_PASSWORD; do
             grep -Eq "^${key}=[^[:space:]]+" .env || { echo "Missing non-empty $key in /opt/hatch/.env"; exit 1; }
           done
+          payment_mode="$(sed -n 's/^HATCH_COMMERCE_PAYMENT_MODE=//p' .env | tail -n 1)"
+          payment_mode="${payment_mode:-disabled}"
+          case "$payment_mode" in
+            disabled) ;;
+            provider)
+              for key in HATCH_PAYMENT_PROVIDER_BASE_URL HATCH_PAYMENT_PROVIDER_API_TOKEN HATCH_PAYMENT_PROVIDER_WEBHOOK_SECRET; do
+                grep -Eq "^${key}=[^[:space:]]+" .env || { echo "Provider payment mode requires non-empty $key in /opt/hatch/.env"; exit 1; }
+              done
+              paid_launch_approved="$(sed -n 's/^HATCH_COMMERCE_PAID_LAUNCH_APPROVED=//p' .env | tail -n 1)"
+              test "$paid_launch_approved" = "true" || {
+                echo "Provider payment mode requires HATCH_COMMERCE_PAID_LAUNCH_APPROVED=true after merchant, tax, region, refund, payout, and reserve policy approval"
+                exit 1
+              }
+              payout_schedule="$(sed -n 's/^HATCH_PAYOUT_SCHEDULE=//p' .env | tail -n 1)"
+              payout_minimum="$(sed -n 's/^HATCH_PAYOUT_MINIMUM_MINOR=//p' .env | tail -n 1)"
+              test "$payout_schedule" = "immediate" || {
+                echo "Provider payment mode requires the explicitly approved HATCH_PAYOUT_SCHEDULE=immediate policy"
+                exit 1
+              }
+              printf '%s' "$payout_minimum" | grep -Eq '^[1-9][0-9]*$' || {
+                echo "Provider payment mode requires a positive HATCH_PAYOUT_MINIMUM_MINOR policy"
+                exit 1
+              }
+              ;;
+            *)
+              echo "Production HATCH_COMMERCE_PAYMENT_MODE must be disabled or provider"
+              exit 1
+              ;;
+          esac
+          db_users=""
+          for key in HATCH_REGISTRY_DATABASE_URL HATCH_FACTORY_DATABASE_URL HATCH_RUNTIME_DATABASE_URL HATCH_COMMERCE_DATABASE_URL; do
+            value="$(sed -n "s/^${key}=//p" .env)"
+            user="${value#*://}"
+            user="${user%%:*}"
+            test -n "$user" || { echo "Could not parse database role for $key"; exit 1; }
+            db_users="${db_users}${user}\n"
+          done
+          test "$(printf '%b' "$db_users" | sed '/^$/d' | sort -u | wc -l | tr -d ' ')" = 4 || {
+            echo "Registry, Factory, Runtime, and Commerce must use four distinct database roles"
+            exit 1
+          }
           docker network inspect hatch_internal >/dev/null
           if test -f .release.env; then
             cp -f .release.env .release.env.previous
           fi
           printf 'HATCH_IMAGE_PREFIX=%s\nHATCH_RELEASE_TAG=%s\n' "$IMAGE_PREFIX" "$RELEASE_TAG" > .release.env
-          docker compose --env-file .env --env-file .release.env -f compose.app.yml up -d --no-deps registry runtime dashboard caddy
+          docker compose --env-file .env --env-file .release.env -f compose.app.yml up -d --no-deps registry factory-worker runtime dashboard caddy
+          docker compose --env-file .env --env-file .release.env -f compose.app.yml ps --status running --services | grep -Fxq factory-worker
       - name: Seed canonical Agent Corpus and RAG index
         env:
           IMAGE_PREFIX: ${{ needs.build-and-push.outputs.image_prefix }}
@@ -274,5 +328,17 @@ jobs:
           cd /opt/hatch
           if test -f .release.env.previous; then
             cp .release.env.previous .release.env
-            docker compose --env-file .env --env-file .release.env -f compose.app.yml up -d --no-deps registry runtime dashboard caddy
+            docker compose --env-file .env --env-file .release.env -f compose.app.yml up -d --no-deps registry factory-worker runtime dashboard caddy
+            docker compose --env-file .env --env-file .release.env -f compose.app.yml ps --status running --services | grep -Fxq factory-worker
+            domain="$(grep '^HATCH_DOMAIN=' .env | cut -d= -f2-)"
+            test -n "$domain"
+            curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/health/dashboard" >/dev/null
+            curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/health/runtime" >/dev/null
+            curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/health/registry" >/dev/null
+          else
+            # A first release has no known-good image to restore. Do not leave
+            # an unverified stack serving traffic or let its tag become the
+            # previous release on the next attempt.
+            docker compose --env-file .env --env-file .release.env -f compose.app.yml stop caddy dashboard runtime factory-worker registry
+            rm -f .release.env
           fi
