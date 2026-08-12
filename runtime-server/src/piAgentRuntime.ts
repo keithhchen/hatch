@@ -48,6 +48,11 @@ export type PiToolDefinition = {
   };
 };
 
+export type PiAgentRuntimeOptions = {
+  toolDefinitions?: PiToolDefinition[];
+  allowRequestedArtifactDelivery?: boolean;
+};
+
 type QueueItem<T> =
   | { kind: "value"; value: T }
   | { kind: "done" }
@@ -101,6 +106,8 @@ type ToolEventState = {
  * the client projection.
  */
 export class PiAgentRuntime implements AgentRuntime {
+  constructor(private readonly options: PiAgentRuntimeOptions = {}) {}
+
   async *run(input: RunStart, ctx: RunContext): AsyncIterable<OutboundMessage> {
     ctx.abortSignal?.throwIfAborted();
     const model = createPiModel();
@@ -126,7 +133,7 @@ export class PiAgentRuntime implements AgentRuntime {
       activeSkills
     ).map((message) => piUserMessage(message.content ?? ""));
     const storedMessages = ctx.messages.slice(0, -1).map(toPiMessage);
-    const toolDefinitions = chatToolsForRun(
+    const toolDefinitions = this.options.toolDefinitions ?? chatToolsForRun(
       ctx.clientTools,
       ctx.allowSkillRun !== false,
       ctx.allowedExternalTools,
@@ -277,7 +284,7 @@ export class PiAgentRuntime implements AgentRuntime {
         })
         : draftContent;
       let finalContent = auditedContent;
-      const artifact = await this.persistRequestedArtifact({
+      const artifact = this.options.allowRequestedArtifactDelivery === false ? { events: [] } : await this.persistRequestedArtifact({
         input,
         ctx,
         requestedFilePath,

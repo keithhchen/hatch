@@ -1,11 +1,32 @@
 {$HATCH_DOMAIN} {
     encode gzip
 
+    # Public deploy probes expose readiness without opening service command
+    # routes. Each backend keeps its separate private liveness endpoint.
+    @runtime_health path /health/runtime
+    handle @runtime_health {
+        rewrite * /readyz
+        reverse_proxy runtime:8400
+    }
+
+    @dashboard_health path /health/dashboard
+    handle @dashboard_health {
+        rewrite * /readyz
+        reverse_proxy dashboard:8500
+    }
+
     # Desktop WebSocket endpoint. The public /v1 prefix is removed before the
     # request reaches the Runtime's native /runtime WebSocket path.
     @runtime_socket path /v1/runtime*
     handle @runtime_socket {
         uri strip_prefix /v1
+        reverse_proxy runtime:8400
+    }
+
+    # Keep the native Runtime WebSocket address shareable for Desktop clients
+    # that do not use the public /v1 compatibility prefix.
+    @runtime_native path /runtime*
+    handle @runtime_native {
         reverse_proxy runtime:8400
     }
 
@@ -20,38 +41,45 @@
         reverse_proxy runtime:8400
     }
 
-    # TypeScript Registry APIs. Keep the public paths stable so Factory and
-    # Desktop can use HATCH_REGISTRY_URL without knowing the private service
-    # name. Dashboard-specific /v1/creator/products routes remain below.
-    @registry_api path /v1/agent-corpora* /v1/catalog/agents* /v1/auth/signup /v1/auth/signin /v1/auth/me /v1/auth/logout /v1/user/agent-access /v1/creator/agents /v1/creator/agent-corpora /v1/runtime/tenants/* /v1/runtime/creators/* /v1/control-plane/connections/* /v1/creators/*
-    handle @registry_api {
+    # Expose only the Registry readiness check. Never bridge a broad public
+    # prefix to Registry command routes.
+    @registry_health path /health/registry
+    handle @registry_health {
+        rewrite * /readyz
         reverse_proxy registry:8100
     }
 
-    # Backwards-compatible private prefix for operational checks and local
-    # tooling. The Dashboard talks to Registry over the private Compose network.
-    handle_path /api/* {
-        reverse_proxy registry:8100
-    }
+    # Runtime accounting is an internal service-to-service API. Runtime calls
+    # Dashboard on hatch_internal; never expose these commands at the edge.
+    @internal_service_api path /v1/internal/commerce* /v1/internal/deployments*
+    respond @internal_service_api 404
 
-    # Creator and buyer Portal API.
+    # All browser APIs belong to the cookie-backed Dashboard BFF. In
+    # particular, /v1/auth/me must not be shadowed by Registry.
     handle /v1/* {
         reverse_proxy dashboard:8500
     }
 
-    # Stable entrypoint used by the packaged Consumer Desktop. The buyer Portal
-    # opens on its Explore catalog, while keeping the Desktop allowlist narrow.
-    @buyer_catalog_entry path /agents /agents/*
-    redir @buyer_catalog_entry /portal/ 308
-
-    # Vite's production base path is /portal/; the Dashboard container serves
-    # the built static files and its API from the same origin.
-    handle /portal* {
+    # Static assets and all addressable public/private pages are served by the
+    # Dashboard. The browser app owns auth/returnTo and private authorization.
+    handle /assets/* {
         reverse_proxy dashboard:8500
     }
 
-    @root path /
-    redir @root /portal/ 308
+    # The old /agents namespace remains a migration alias only; public product
+    # URLs are creator/product paths without the generic collection segment.
+    @legacy_agents path /agents /agents/*
+    redir @legacy_agents /explore 308
+
+    # Keep the legacy namespace resolvable while Dashboard performs resource-
+    # aware redirects for library/order/creator IDs. The root is an exact,
+    # unconditional migration to the new Explore home.
+    @legacy_portal_root path /portal /portal/
+    redir @legacy_portal_root /explore 308
+
+    handle /portal* {
+        reverse_proxy dashboard:8500
+    }
 
     handle {
         reverse_proxy dashboard:8500

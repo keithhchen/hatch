@@ -1,20 +1,20 @@
 name: Hatch application CD
 
 on:
-  push:
+  workflow_run:
+    workflows: ["Hatch CI"]
+    types: [completed]
     branches: [master]
-  workflow_dispatch:
 
 permissions:
   contents: read
-  packages: write
-
-env:
-  RELEASE_TAG: ${{ github.sha }}
 
 concurrency:
-  group: hatch-cloud-deployment
-  cancel-in-progress: true
+  group: hatch-production
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ github.event.workflow_run.head_sha }}
 
 jobs:
   verify-server:
@@ -40,6 +40,11 @@ jobs:
           npm run build
 
   build-and-push:
+    if: >-
+      ${{ github.event.workflow_run.conclusion == 'success'
+          && github.event.workflow_run.event == 'push'
+          && github.event.workflow_run.head_branch == 'master'
+          && github.event.workflow_run.head_repository.full_name == github.repository }}
     runs-on: ubuntu-latest
     needs: verify-server
     outputs:
@@ -90,6 +95,9 @@ jobs:
   deploy:
     runs-on: [self-hosted, linux, x64, hatch-prod]
     needs: build-and-push
+    permissions:
+      contents: read
+      packages: read
     steps:
       - name: Checkout source through GitHub API
         env:
@@ -101,7 +109,7 @@ jobs:
           curl -4 --fail --silent --show-error --location --retry 5 --retry-delay 2 \
             -H "Authorization: Bearer $SOURCE_TOKEN" \
             -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/$GITHUB_REPOSITORY/tarball/$GITHUB_SHA" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/tarball/$RELEASE_TAG" \
             -o "$archive"
           root_dir="$(tar -tzf "$archive" | sed -n '1s#/.*##p')"
           test -n "$root_dir"
@@ -189,15 +197,57 @@ jobs:
           test -f .env
           test -f compose.app.yml
           grep -q '^HATCH_DOMAIN=' .env
-          for key in LLM_API_KEY DEEPSEEK_API_KEY HATCH_REGISTRY_DATABASE_URL HATCH_RUNTIME_DB_PASSWORD HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN DASHSCOPE_API_KEY POSTGRES_PASSWORD; do
+          for key in LLM_API_KEY DEEPSEEK_API_KEY HATCH_REGISTRY_DATABASE_URL HATCH_RUNTIME_DB_PASSWORD HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN POSTGRES_FACTORY_PASSWORD POSTGRES_COMMERCE_PASSWORD DASHSCOPE_API_KEY POSTGRES_PASSWORD; do
             grep -Eq "^${key}=[^[:space:]]+" .env || { echo "Missing non-empty $key in /opt/hatch/.env"; exit 1; }
           done
+          payment_mode="$(sed -n 's/^HATCH_COMMERCE_PAYMENT_MODE=//p' .env | tail -n 1)"
+          payment_mode="${payment_mode:-disabled}"
+          case "$payment_mode" in
+            disabled) ;;
+            provider)
+              for key in HATCH_PAYMENT_PROVIDER_BASE_URL HATCH_PAYMENT_PROVIDER_API_TOKEN HATCH_PAYMENT_PROVIDER_WEBHOOK_SECRET; do
+                grep -Eq "^${key}=[^[:space:]]+" .env || { echo "Provider payment mode requires non-empty $key in /opt/hatch/.env"; exit 1; }
+              done
+              paid_launch_approved="$(sed -n 's/^HATCH_COMMERCE_PAID_LAUNCH_APPROVED=//p' .env | tail -n 1)"
+              test "$paid_launch_approved" = "true" || {
+                echo "Provider payment mode requires HATCH_COMMERCE_PAID_LAUNCH_APPROVED=true after merchant, tax, region, refund, payout, and reserve policy approval"
+                exit 1
+              }
+              payout_schedule="$(sed -n 's/^HATCH_PAYOUT_SCHEDULE=//p' .env | tail -n 1)"
+              payout_minimum="$(sed -n 's/^HATCH_PAYOUT_MINIMUM_MINOR=//p' .env | tail -n 1)"
+              test "$payout_schedule" = "immediate" || {
+                echo "Provider payment mode requires the explicitly approved HATCH_PAYOUT_SCHEDULE=immediate policy"
+                exit 1
+              }
+              printf '%s' "$payout_minimum" | grep -Eq '^[1-9][0-9]*$' || {
+                echo "Provider payment mode requires a positive HATCH_PAYOUT_MINIMUM_MINOR policy"
+                exit 1
+              }
+              ;;
+            *)
+              echo "Production HATCH_COMMERCE_PAYMENT_MODE must be disabled or provider"
+              exit 1
+              ;;
+          esac
+          db_users=""
+          for key in HATCH_REGISTRY_DATABASE_URL HATCH_FACTORY_DATABASE_URL HATCH_RUNTIME_DATABASE_URL HATCH_COMMERCE_DATABASE_URL; do
+            value="$(sed -n "s/^${key}=//p" .env)"
+            user="${value#*://}"
+            user="${user%%:*}"
+            test -n "$user" || { echo "Could not parse database role for $key"; exit 1; }
+            db_users="${db_users}${user}\n"
+          done
+          test "$(printf '%b' "$db_users" | sed '/^$/d' | sort -u | wc -l | tr -d ' ')" = 4 || {
+            echo "Registry, Factory, Runtime, and Commerce must use four distinct database roles"
+            exit 1
+          }
           docker network inspect hatch_internal >/dev/null
           if test -f .release.env; then
             cp -f .release.env .release.env.previous
           fi
           printf 'HATCH_IMAGE_PREFIX=%s\nHATCH_RELEASE_TAG=%s\n' "$IMAGE_PREFIX" "$RELEASE_TAG" > .release.env
-          docker compose --env-file .env --env-file .release.env -f compose.app.yml up -d --no-deps registry runtime dashboard caddy
+          docker compose --env-file .env --env-file .release.env -f compose.app.yml up -d --no-deps registry factory-worker runtime dashboard caddy
+          docker compose --env-file .env --env-file .release.env -f compose.app.yml ps --status running --services | grep -Fxq factory-worker
       - name: Seed canonical Agent Corpus and RAG index
         env:
           IMAGE_PREFIX: ${{ needs.build-and-push.outputs.image_prefix }}
@@ -211,23 +261,83 @@ jobs:
           docker run --rm -u "$(id -u):$(id -g)" \
             -v /tmp/hatch-demo-agent:/input:ro -v /tmp:/output \
             "$runtime_image" node scripts/create-agent-zip.mjs /input /output/hatch-demo-agent.zip
-          domain="$(grep '^HATCH_DOMAIN=' /opt/hatch/.env | cut -d= -f2-)"
           registry_token="$(grep '^HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN=' /opt/hatch/.env | cut -d= -f2-)"
-          curl -4 --noproxy '*' --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 3 \
-            -H "Authorization: Bearer $registry_token" \
-            -H "Content-Type: application/zip" \
-            --data-binary @/tmp/hatch-demo-agent.zip \
-            "https://$domain/v1/agent-corpora?creator_id=maya-chen&agent_id=signal-resume-review"
+          compose=(docker compose --env-file /opt/hatch/.env --env-file /opt/hatch/.release.env -f "$GITHUB_WORKSPACE/compose.app.yml")
+          registry_request_once() {
+            local method="$1" path="$2" token="$3" body="${4:-}" extra_headers="${5:-{}}"
+            "${compose[@]}" exec -T \
+              -e HATCH_REQUEST_METHOD="$method" \
+              -e HATCH_REQUEST_PATH="$path" \
+              -e HATCH_REQUEST_TOKEN="$token" \
+              -e HATCH_REQUEST_BODY="$body" \
+              -e HATCH_REQUEST_EXTRA_HEADERS="$extra_headers" \
+              registry node --input-type=module -e '
+                const body = process.env.HATCH_REQUEST_BODY || undefined;
+                const headers = { authorization: `Bearer ${process.env.HATCH_REQUEST_TOKEN}` };
+                Object.assign(headers, JSON.parse(process.env.HATCH_REQUEST_EXTRA_HEADERS || "{}"));
+                if (body !== undefined) headers["content-type"] = "application/json";
+                const response = await fetch(`http://127.0.0.1:8100${process.env.HATCH_REQUEST_PATH}`, {
+                  method: process.env.HATCH_REQUEST_METHOD,
+                  headers,
+                  body
+                });
+                const text = await response.text();
+                if (!response.ok) {
+                  process.stderr.write(text);
+                  process.exit(1);
+                }
+                process.stdout.write(text);
+              '
+          }
+          registry_request() {
+            local attempt
+            for attempt in $(seq 1 12); do
+              if registry_request_once "$@"; then return 0; fi
+              sleep 3
+            done
+            return 1
+          }
+          registry_publish_once() {
+            local archive="$1" creator_id="$2" agent_id="$3"
+            "${compose[@]}" exec -T \
+              -e HATCH_REQUEST_TOKEN="$registry_token" \
+              -e HATCH_CREATOR_ID="$creator_id" \
+              -e HATCH_AGENT_ID="$agent_id" \
+              registry node --input-type=module -e '
+                const chunks = [];
+                for await (const chunk of process.stdin) chunks.push(chunk);
+                const query = new URLSearchParams({ creator_id: process.env.HATCH_CREATOR_ID, agent_id: process.env.HATCH_AGENT_ID });
+                const response = await fetch(`http://127.0.0.1:8100/v1/agent-corpora?${query}`, {
+                  method: "POST",
+                  headers: {
+                    authorization: `Bearer ${process.env.HATCH_REQUEST_TOKEN}`,
+                    "content-type": "application/zip"
+                  },
+                  body: Buffer.concat(chunks)
+                });
+                const text = await response.text();
+                if (!response.ok) {
+                  process.stderr.write(text);
+                  process.exit(1);
+                }
+                process.stdout.write(text);
+              ' < "$archive"
+          }
+          registry_publish() {
+            local attempt
+            for attempt in $(seq 1 12); do
+              if registry_publish_once "$@"; then return 0; fi
+              sleep 3
+            done
+            return 1
+          }
+          registry_publish /tmp/hatch-demo-agent.zip maya-chen signal-resume-review
           rm -rf /tmp/hatch-seth-agent /tmp/hatch-seth-agent.zip
           runtime_image="${IMAGE_PREFIX}/runtime:${RELEASE_TAG}"
           docker run --rm -u "$(id -u):$(id -g)" \
             -v "$GITHUB_WORKSPACE/creators/seth/agent-corpus:/input:ro" -v /tmp:/output \
             "$runtime_image" node scripts/create-agent-zip.mjs /input /output/hatch-seth-agent.zip
-          curl -4 --noproxy '*' --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 3 \
-            -H "Authorization: Bearer $registry_token" \
-            -H "Content-Type: application/zip" \
-            --data-binary @/tmp/hatch-seth-agent.zip \
-            "https://$domain/v1/agent-corpora?creator_id=seth&agent_id=alpha-lite"
+          registry_publish /tmp/hatch-seth-agent.zip seth alpha-lite
           runtime_token="$(grep '^HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN=' /opt/hatch/.env | cut -d= -f2-)"
           seed="$GITHUB_WORKSPACE/creators/seth/control-plane-bindings.json"
           secret="$(jq -r '.secret' "$seed")"
@@ -235,19 +345,21 @@ jobs:
             connection="$(printf '%s' "$encoded" | base64 --decode)"
             connection_id="$(printf '%s' "$connection" | jq -r '.id')"
             config="$(printf '%s' "$connection" | jq -c '.config')"
-            curl -4 --noproxy '*' --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 3 \
-              -X PUT "https://$domain/v1/control-plane/connections/$connection_id" \
-              -H "Authorization: Bearer $runtime_token" -H "X-Hatch-Tenant-Id: seth" -H "Content-Type: application/json" \
-              --data "$(jq -cn --arg secret "$secret" --argjson config "$config" '{kind:"http", secret_ref:null, secret:$secret, config:$config, status:"active"}')" >/dev/null
+            registry_request PUT \
+              "/v1/control-plane/connections/$connection_id" \
+              "$runtime_token" \
+              "$(jq -cn --arg secret "$secret" --argjson config "$config" '{kind:"http", secret_ref:null, secret:$secret, config:$config, status:"active"}')" \
+              '{"X-Hatch-Tenant-Id":"seth"}' >/dev/null
           done < <(jq -r '.connections[] | @base64' "$seed")
           while IFS= read -r encoded; do
             connection="$(printf '%s' "$encoded" | base64 --decode)"
             tool_id="$(printf '%s' "$connection" | jq -r '.tool_id')"
             connection_id="$(printf '%s' "$connection" | jq -r '.id')"
-            curl -4 --noproxy '*' --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 3 \
-              -X PUT "https://$domain/v1/creators/seth/agents/alpha-lite/tools/$(printf '%s' "$tool_id" | jq -sRr @uri)" \
-              -H "Authorization: Bearer $runtime_token" -H "X-Hatch-Creator-Id: seth" -H "Content-Type: application/json" \
-              --data "$(jq -cn --arg connection_id "$connection_id" '{connection_id:$connection_id}')" >/dev/null
+            registry_request PUT \
+              "/v1/creators/seth/agents/alpha-lite/tools/$(printf '%s' "$tool_id" | jq -sRr @uri)" \
+              "$runtime_token" \
+              "$(jq -cn --arg connection_id "$connection_id" '{connection_id:$connection_id}')" \
+              '{"X-Hatch-Creator-Id":"seth"}' >/dev/null
           done < <(jq -r '.connections[] | @base64' "$seed")
       - name: Verify public health endpoints
         env:
@@ -256,9 +368,10 @@ jobs:
           set -euo pipefail
           domain="${HATCH_DOMAIN:-$(grep '^HATCH_DOMAIN=' /opt/hatch/.env | cut -d= -f2-)}"
           test -n "$domain"
-          curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/healthz" >/dev/null
-          curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/api/health" >/dev/null
-          curl -4 --noproxy '*' --fail --location --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/agents" >/dev/null
+          curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/health/dashboard" >/dev/null
+          curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/health/runtime" >/dev/null
+          curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/health/registry" >/dev/null
+          curl -4 --noproxy '*' --fail --location --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/explore" >/dev/null
           logout_status="$(curl -4 --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' -X POST "https://$domain/v1/auth/logout")"
           test "$logout_status" = 204
           me_status="$(curl -4 --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' "https://$domain/v1/auth/me")"
@@ -274,5 +387,17 @@ jobs:
           cd /opt/hatch
           if test -f .release.env.previous; then
             cp .release.env.previous .release.env
-            docker compose --env-file .env --env-file .release.env -f compose.app.yml up -d --no-deps registry runtime dashboard caddy
+            docker compose --env-file .env --env-file .release.env -f compose.app.yml up -d --no-deps registry factory-worker runtime dashboard caddy
+            docker compose --env-file .env --env-file .release.env -f compose.app.yml ps --status running --services | grep -Fxq factory-worker
+            domain="$(grep '^HATCH_DOMAIN=' .env | cut -d= -f2-)"
+            test -n "$domain"
+            curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/health/dashboard" >/dev/null
+            curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/health/runtime" >/dev/null
+            curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/health/registry" >/dev/null
+          else
+            # A first release has no known-good image to restore. Do not leave
+            # an unverified stack serving traffic or let its tag become the
+            # previous release on the next attempt.
+            docker compose --env-file .env --env-file .release.env -f compose.app.yml stop caddy dashboard runtime factory-worker registry
+            rm -f .release.env
           fi

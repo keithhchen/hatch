@@ -63,6 +63,27 @@ or separate production Runtime exists. The server uses two Compose projects:
    project-level `HatchRuntimeRole` to the ECS instance before deploying; the
    container obtains short-lived credentials from IMDSv2 and uses the Shanghai
    Guardrails VPC endpoint.
+   Keep `HATCH_COMMERCE_PAYMENT_MODE=disabled` until a production provider
+   bridge is configured. Enabling `provider` makes CD require non-empty
+   `HATCH_PAYMENT_PROVIDER_BASE_URL`, `HATCH_PAYMENT_PROVIDER_API_TOKEN`, and
+   `HATCH_PAYMENT_PROVIDER_WEBHOOK_SECRET`; sandbox/test payment modes are
+   rejected by production CD.
+   Provider mode is also rejected before any container switch unless
+   `HATCH_COMMERCE_PAID_LAUNCH_APPROVED=true`; this flag is an operational
+   approval record, not a substitute for the provider, tax, region, refund,
+   payout/KYC, currency, and reserve decisions.
+   The current payout scheduler supports only the explicit policy
+   `HATCH_PAYOUT_SCHEDULE=immediate` with a positive
+   `HATCH_PAYOUT_MINIMUM_MINOR`. The default is `disabled`; unsupported or
+   unstated schedules never submit provider transfers.
+   Configure `HATCH_SMOKE_EMAIL` and `HATCH_SMOKE_PASSWORD` with a dedicated
+   Buyer UAT account. CD never passes these values to application containers;
+   after health checks it uses them to verify the canonical public product,
+   cookie/CSRF login, a product-release-and-offer-keyed idempotent free checkout,
+   production cookie attributes, immutable order/access snapshots, durable receipt,
+   Order/Entitlement detail, success URL, and Desktop download route. Set
+   `HATCH_SMOKE_CREATOR_ID` / `HATCH_SMOKE_PRODUCT_ID` only when the canonical
+   zero-value smoke product differs from `maya-chen/signal-resume-review`.
    CD validates these names without printing their values. `QDRANT_IMAGE`
    should be a pinned `qdrant/qdrant:<version>` tag; the default is `v1.14.1`.
 3. Create the external network once:
@@ -78,8 +99,11 @@ or separate production Runtime exists. The server uses two Compose projects:
    docker compose --env-file .env -f compose.infra.yml up -d postgres qdrant
    ```
 
-   This creates persistent Docker volumes for Postgres and Qdrant. Normal
-   application CD does not recreate or restart these services.
+   This creates persistent Docker volumes for Postgres and Qdrant and runs the
+   idempotent role provisioner. On an existing single-role installation the
+   same workflow reassigns existing tables in place, preserving data while
+   making Dashboard the only owner of `commerce_*` tables. Normal application
+   CD does not recreate or restart these services.
 
 ## GitHub secrets
 
@@ -114,6 +138,22 @@ GitHub Actions
   → verify /healthz, /api/health, the Desktop /agents entrypoint, and public auth routing
   → restore the previous SHA on failed health checks
 ```
+
+CD starts only after the matching `Hatch CI` push run succeeds for the same
+repository, branch, and immutable commit SHA. A production concurrency group
+serializes releases so a slower older run cannot switch containers after a
+newer release or race the previous-release rollback file.
+After any verification failure CD restores the known-good release and verifies
+all three readiness endpoints again. On a first release, where no known-good
+tag exists, it stops the unverified application stack and removes the failed
+release marker instead of leaving it public or treating it as the next
+rollback target.
+
+Commerce alerts, safe replay commands, refund/access convergence, payout
+failure handling, and legacy UAT isolation are documented in
+[`commerce-operations-runbook.md`](./commerce-operations-runbook.md). Run that
+playbook from the private application network; internal Commerce routes are
+not exposed by Caddy.
 
 The Desktop app is not part of the server Compose project. Tags such as
 `v0.1.0` run the macOS workflow, which builds the Tauri app and publishes a DMG

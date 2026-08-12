@@ -5,13 +5,15 @@ import test from "node:test";
 
 const repositoryRoot = path.resolve(process.cwd(), "..");
 
-test("production routes logout to Registry and disables legacy HMAC auth", async () => {
+test("production keeps browser APIs on the Dashboard BFF and disables legacy HMAC auth", async () => {
   const caddyfile = await readFile(path.join(repositoryRoot, "Caddyfile"), "utf8");
-  const registryMatcher = caddyfile.match(/^\s*@registry_api path ([^\n]+)$/m)?.[1];
-  assert.ok(registryMatcher, "Caddyfile must declare the Registry API matcher");
-  assert.match(registryMatcher, /(?:^|\s)\/v1\/auth\/logout(?:\s|$)/);
-  assert.doesNotMatch(registryMatcher, /\/v1\/user\/agents\/\*/,
-    "public routing must not expose the entitlement mutation path");
+  assert.doesNotMatch(caddyfile, /^\s*@registry_api\b/m,
+    "the Registry must not own a broad public browser API matcher");
+  assert.match(caddyfile, /handle \/v1\/\*\s*\{[\s\S]*?reverse_proxy dashboard:8500/,
+    "all browser APIs must reach the cookie-backed Dashboard BFF");
+  const registryHealthBlock = caddyfile.match(/handle @registry_health \{([\s\S]*?)\n    \}/)?.[1] ?? "";
+  assert.doesNotMatch(registryHealthBlock, /\/v1\//,
+    "public routing must not expose Registry command routes");
   const runtimeMatcher = caddyfile.match(/^\s*@runtime_api path ([^\n]+)$/m)?.[1];
   assert.ok(runtimeMatcher, "Caddyfile must declare the Runtime HTTP API matcher");
   assert.match(runtimeMatcher, /(?:^|\s)\/v1\/conversations\*(?:\s|$)/,

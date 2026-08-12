@@ -537,7 +537,8 @@
       "properties": {
         "type": { "const": "turn.completed" },
         "run_id": { "type": "string" },
-        "finish_reason": { "enum": ["stop", "content_filter"] }
+        "finish_reason": { "enum": ["stop", "content_filter"] },
+        "receipt_status": { "enum": ["recorded", "syncing"] }
       }
     },
     "deliveryReady": {
@@ -552,7 +553,7 @@
         "artifact_digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
         "delivery_id": { "type": "string", "minLength": 1 },
         "artifact_type": { "enum": ["file", "message"] },
-        "artifact_path": { "type": "string", "minLength": 1 }
+        "receipt_status": { "enum": ["recorded", "syncing"] }
       }
     },
     "turnFailed": {
