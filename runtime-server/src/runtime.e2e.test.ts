@@ -14,6 +14,7 @@ import {
   ClientToolNameSchema,
   clientMessageInputDigest,
   contextAttachmentTextSha256,
+  LEGACY_PROTOCOL_VERSION,
   parseInboundMessage,
   PROTOCOL_VERSION,
   renderUserMessageForModel
@@ -2039,18 +2040,44 @@ test("server rejects protocol 0.6 hello explicitly before accepting protocol 0.7
 
   socket.send(JSON.stringify({
     type: "client.hello",
-    protocol_version: PROTOCOL_VERSION,
-    installation_id: "install_protocol_06",
-    license_token: "license_protocol_06",
+    protocol_version: LEGACY_PROTOCOL_VERSION,
+    installation_id: "install_protocol_legacy",
+    license_token: "license_protocol_legacy",
     local_tools: ["file_read"]
   }));
-  await waitForSocketMessage(messages, (message) => message.type === "session.ready");
+  const legacyReady = await waitForSocketMessage(messages, (message) => message.type === "session.ready");
+  assert.ok(legacyReady.type === "session.ready");
+  assert.equal(legacyReady.accepted_protocol_version, LEGACY_PROTOCOL_VERSION);
   socket.close();
+
+  const currentSocket = new WebSocket(serverUrl);
+  const currentMessages: OutboundMessage[] = [];
+  currentSocket.on("message", (data) => {
+    currentMessages.push(JSON.parse(String(data)) as OutboundMessage);
+  });
+  await new Promise<void>((resolve, reject) => {
+    currentSocket.once("open", resolve);
+    currentSocket.once("error", reject);
+  });
+  currentSocket.send(JSON.stringify({
+    type: "client.hello",
+    protocol_version: PROTOCOL_VERSION,
+    installation_id: "install_protocol_current",
+    license_token: "license_protocol_current",
+    local_tools: ["file_read"]
+  }));
+  const currentReady = await waitForSocketMessage(currentMessages, (message) => message.type === "session.ready");
+  assert.ok(currentReady.type === "session.ready");
+  assert.equal(currentReady.accepted_protocol_version, PROTOCOL_VERSION);
+  currentSocket.close();
 
   const sessions = (await new RuntimeStore(dataDir).readEvents())
     .filter((event) => event.type === "session.started");
-  assert.equal(sessions.length, 1);
-  assert.equal(sessions[0]?.installation_id, "install_protocol_06");
+  assert.equal(sessions.length, 2);
+  assert.deepEqual(
+    sessions.map((session) => session.installation_id),
+    ["install_protocol_legacy", "install_protocol_current"]
+  );
 });
 
 

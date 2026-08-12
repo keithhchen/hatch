@@ -1,8 +1,10 @@
+import { englishMessage } from "./i18n.js";
+
 export async function signInAuthSession({ email, password }, registryUrl, fetchImpl = fetch) {
   const normalizedEmail = String(email ?? "").trim().toLowerCase();
   const normalizedPassword = String(password ?? "");
-  if (!normalizedEmail) throw new Error("Enter your email.");
-  if (!normalizedPassword) throw new Error("Enter your password.");
+  if (!normalizedEmail) throw localizedError(englishMessage("error.auth.emailRequired"), "error.auth.emailRequired");
+  if (!normalizedPassword) throw localizedError(englishMessage("error.auth.passwordRequired"), "error.auth.passwordRequired");
 
   let response;
   try {
@@ -12,39 +14,81 @@ export async function signInAuthSession({ email, password }, registryUrl, fetchI
       body: JSON.stringify({ email: normalizedEmail, password: normalizedPassword })
     });
   } catch (error) {
-    throw clientError("Hatch can't reach the service. Check your connection and try again.", "network_error", error);
+    throw clientError(
+      englishMessage("error.network.unreachable"),
+      "network_error",
+      error,
+      undefined,
+      "error.network.unreachable"
+    );
   }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(payload?.detail || "Email or password is incorrect.");
-    error.code = response.status === 401 ? "invalid_credentials" : "auth_request_failed";
-    error.status = response.status;
-    throw error;
+    const invalidCredentials = response.status === 401;
+    throw clientError(
+      payload?.detail || englishMessage(invalidCredentials ? "error.auth.invalidCredentials" : "error.auth.signInFailed"),
+      invalidCredentials ? "invalid_credentials" : "auth_request_failed",
+      null,
+      response.status,
+      invalidCredentials ? "error.auth.invalidCredentials" : "error.auth.signInFailed"
+    );
   }
   const token = payload?.session?.token || payload?.token;
   if (!payload?.account?.role || !payload?.account?.id || !token) {
-    throw clientError("The Registry returned an invalid account.", "auth_request_failed");
+    throw clientError(
+      englishMessage("error.auth.invalidAccount"),
+      "auth_request_failed",
+      null,
+      undefined,
+      "error.auth.invalidAccount"
+    );
   }
   return makeSessionFromAccount(payload.account, token, payload.session?.expires_at);
 }
 
 export async function fetchAuthAccount(registryUrl, accessToken, fetchImpl = fetch) {
-  if (!accessToken) throw clientError("A valid account session is required.", "auth_invalid", null, 401);
+  if (!accessToken) {
+    throw clientError(
+      englishMessage("error.auth.invalidSession"),
+      "auth_invalid",
+      null,
+      401,
+      "error.auth.invalidSession"
+    );
+  }
   let response;
   try {
     response = await fetchImpl(new URL("/v1/auth/me", registryUrl).toString(), {
       headers: { authorization: `Bearer ${accessToken}`, accept: "application/json" }
     });
   } catch (error) {
-    throw clientError("Hatch can't reach the service. Check your connection and try again.", "network_error", error);
+    throw clientError(
+      englishMessage("error.network.unreachable"),
+      "network_error",
+      error,
+      undefined,
+      "error.network.unreachable"
+    );
   }
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     const code = response.status === 401 ? "auth_invalid" : "auth_request_failed";
-    throw clientError(payload?.detail || "We couldn't verify this account session.", code, null, response.status);
+    throw clientError(
+      payload?.detail || englishMessage(response.status === 401 ? "error.auth.invalidSession" : "error.auth.verifyFailed"),
+      code,
+      null,
+      response.status,
+      response.status === 401 ? "error.auth.invalidSession" : "error.auth.verifyFailed"
+    );
   }
   if (!payload?.id || !payload?.role || !["user", "creator"].includes(payload.role)) {
-    throw clientError("The Registry returned an invalid account.", "auth_request_failed");
+    throw clientError(
+      englishMessage("error.auth.invalidAccount"),
+      "auth_request_failed",
+      null,
+      undefined,
+      "error.auth.invalidAccount"
+    );
   }
   return payload;
 }
@@ -63,15 +107,27 @@ export async function loadSavedAuthSession(storage) {
 }
 
 export async function saveAuthSession(session, storage) {
-  if (!isStoredSession(session)) throw new Error("A valid session is required.");
-  if (!storage?.writeToken) throw new Error("Secure session storage is unavailable.");
-  await storage.writeToken(session.accessToken);
+  if (!isStoredSession(session)) {
+    throw localizedError(englishMessage("error.auth.validSessionRequired"), "error.auth.validSessionRequired");
+  }
+  if (!storage?.writeToken) {
+    throw localizedError(englishMessage("error.auth.secureStorageUnavailable"), "error.auth.secureStorageUnavailable");
+  }
+  try {
+    await storage.writeToken(session.accessToken);
+  } catch (error) {
+    throw annotateError(error, "error.auth.secureSessionWriteFailed");
+  }
   return session;
 }
 
 export async function clearAuthSession(session, storage) {
   if (!storage?.clearToken) return;
-  await storage.clearToken();
+  try {
+    await storage.clearToken();
+  } catch (error) {
+    throw annotateError(error, "error.auth.secureSessionClearFailed");
+  }
 }
 
 export async function revokeAuthSession(
@@ -129,7 +185,7 @@ export function createTauriAuthStorage(invokeImpl, { strict = false } = {}) {
         fallbackToken = typeof token === "string" && token.trim() ? token.trim() : null;
       } catch (error) {
         // Web-only renderer tests and Vite preview have no native Keychain.
-        if (strict) throw error;
+        if (strict) throw annotateError(error, "error.auth.secureSessionReadFailed");
       }
       return fallbackToken;
     },
@@ -139,7 +195,7 @@ export function createTauriAuthStorage(invokeImpl, { strict = false } = {}) {
         fallbackToken = token;
       } catch (error) {
         // Keep the in-memory fallback for the current renderer lifetime.
-        if (strict) throw error;
+        if (strict) throw annotateError(error, "error.auth.secureSessionWriteFailed");
         fallbackToken = token;
       }
     },
@@ -149,7 +205,7 @@ export function createTauriAuthStorage(invokeImpl, { strict = false } = {}) {
         fallbackToken = null;
       } catch (error) {
         // Clearing the in-memory value is sufficient when no native bridge exists.
-        if (strict) throw error;
+        if (strict) throw annotateError(error, "error.auth.secureSessionClearFailed");
         fallbackToken = null;
       }
     }
@@ -157,9 +213,11 @@ export function createTauriAuthStorage(invokeImpl, { strict = false } = {}) {
 }
 
 export function hydrateAuthSession(session, account) {
-  if (!isStoredSession(session)) throw new Error("A valid session is required.");
+  if (!isStoredSession(session)) {
+    throw localizedError(englishMessage("error.auth.validSessionRequired"), "error.auth.validSessionRequired");
+  }
   if (!account?.id || !account?.display_name || !["user", "creator"].includes(account.role)) {
-    throw new Error("The Registry returned an invalid account.");
+    throw localizedError(englishMessage("error.auth.invalidAccount"), "error.auth.invalidAccount");
   }
   return makeSessionFromAccount(account, session.accessToken, session.expiresAt || account.session_expires_at);
 }
@@ -202,11 +260,22 @@ function makeSession({ id, name, role, accessToken, expiresAt }) {
   });
 }
 
-function clientError(message, code, cause = null, status) {
-  const error = new Error(message);
+function clientError(message, code, cause = null, status, i18nKey, i18nValues) {
+  const error = localizedError(message, i18nKey, i18nValues);
   error.code = code;
   if (status) error.status = status;
   if (cause) error.cause = cause;
+  return error;
+}
+
+function localizedError(message, i18nKey, i18nValues) {
+  return annotateError(new Error(message), i18nKey, i18nValues);
+}
+
+function annotateError(error, i18nKey, i18nValues) {
+  if (!error || typeof error !== "object") return error;
+  error.i18nKey = i18nKey;
+  if (i18nValues) error.i18nValues = i18nValues;
   return error;
 }
 

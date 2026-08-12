@@ -15,6 +15,22 @@ import {
 } from "./auth-session.js";
 
 describe("account sessions", () => {
+  it("adds stable localization metadata to local credential validation errors", async () => {
+    const missingEmail = await signInAuthSession({ email: "", password: "secret" }, "https://hatch.example")
+      .catch((error) => error);
+    expect(missingEmail).toMatchObject({
+      message: "Enter your email.",
+      i18nKey: "error.auth.emailRequired"
+    });
+
+    const missingPassword = await signInAuthSession({ email: "jordan@example.com", password: "" }, "https://hatch.example")
+      .catch((error) => error);
+    expect(missingPassword).toMatchObject({
+      message: "Enter your password.",
+      i18nKey: "error.auth.passwordRequired"
+    });
+  });
+
   it("signs in against the Registry and accepts an empty Agent library", async () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
       account: { id: "user_123", role: "user", email: "jordan@example.com", display_name: "Jordan Lee" },
@@ -67,11 +83,37 @@ describe("account sessions", () => {
       JSON.stringify({ detail: "A valid account token is required." }), { status: 401 }
     )).catch((error) => error);
     expect(isAuthInvalidError(invalid)).toBe(true);
+    expect(invalid).toMatchObject({
+      message: "A valid account token is required.",
+      code: "auth_invalid",
+      status: 401,
+      i18nKey: "error.auth.invalidSession"
+    });
 
     const offline = await fetchAuthAccount("https://hatch.example", "opaque-token", async () => {
       throw new Error("offline");
     }).catch((error) => error);
     expect(isNetworkError(offline)).toBe(true);
+    expect(offline).toMatchObject({
+      code: "network_error",
+      i18nKey: "error.network.unreachable",
+      cause: { message: "offline" }
+    });
+  });
+
+  it("keeps server detail verbatim while attaching a generic sign-in fallback key", async () => {
+    const error = await signInAuthSession(
+      { email: "jordan@example.com", password: "wrong" },
+      "https://hatch.example",
+      async () => new Response(JSON.stringify({ detail: "Registry-specific credential detail" }), { status: 401 })
+    ).catch((caught) => caught);
+
+    expect(error).toMatchObject({
+      message: "Registry-specific credential detail",
+      code: "invalid_credentials",
+      status: 401,
+      i18nKey: "error.auth.invalidCredentials"
+    });
   });
 
   it("makes logout best effort so local sign-out can complete offline", async () => {
@@ -120,7 +162,11 @@ describe("account sessions", () => {
     });
     const storage = createTauriAuthStorage(invoke, { strict: true });
 
-    await expect(storage.clearToken()).rejects.toThrow("Keychain is locked");
+    const error = await storage.clearToken().catch((caught) => caught);
+    expect(error).toMatchObject({
+      message: "Keychain is locked",
+      i18nKey: "error.auth.secureSessionClearFailed"
+    });
     expect(invoke).toHaveBeenCalledWith("clear_auth_token");
   });
 
@@ -137,6 +183,22 @@ describe("account sessions", () => {
     expect(isRemoteAuthSessionCleared({ kind: "cleared", sourceWindow: "main" }, "main")).toBe(false);
     expect(isRemoteAuthSessionCleared({ kind: "cleared" }, "main")).toBe(false);
     expect(isRemoteAuthSessionCleared({ kind: "signed-in", sourceWindow: "conversation-2" }, "main")).toBe(false);
+  });
+
+  it("annotates secure storage write failures without replacing their native message", async () => {
+    const nativeError = new Error("Keychain write denied");
+    nativeError.code = "native_acl_denied";
+    const error = await saveAuthSession(
+      { accessToken: "opaque-token" },
+      { async writeToken() { throw nativeError; } }
+    ).catch((caught) => caught);
+
+    expect(error).toBe(nativeError);
+    expect(error).toMatchObject({
+      message: "Keychain write denied",
+      code: "native_acl_denied",
+      i18nKey: "error.auth.secureSessionWriteFailed"
+    });
   });
 });
 

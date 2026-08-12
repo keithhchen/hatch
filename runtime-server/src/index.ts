@@ -1761,7 +1761,7 @@ async function handleRuntimeSocket(
             clearTimeout(helloDeadline);
             await send({
               type: "session.ready",
-              accepted_protocol_version: PROTOCOL_VERSION,
+              accepted_protocol_version: message.protocol_version,
               creator_id: binding.creatorId,
               user_id: binding.userId,
               agent_id: binding.agentId,
@@ -2493,6 +2493,16 @@ async function runOneTurn(
         message: { role: "assistant", content },
         finish_reason: finishReason,
         visible_parts: finishReason === "content_filter" ? [] : visibleParts
+      });
+      await conversationRepository.appendEvent({
+        conversationId: input.conversation_id,
+        runId: input.run_id,
+        type: "message.created",
+        payload: {
+          role: "assistant",
+          content: finishReason === "content_filter" ? "" : approvedAssistantText,
+          ...(finishReason === "content_filter" ? { finish_reason: finishReason } : {})
+        }
       });
       await conversationRepository.appendEvent({
         conversationId: input.conversation_id,

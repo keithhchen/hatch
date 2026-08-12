@@ -1930,9 +1930,71 @@ fn write_app_settings_value(path: &std::path::Path, settings: &Value) -> Result<
         std::fs::create_dir_all(parent).map_err(to_string)?;
     }
     let serialized = serde_json::to_vec(settings).map_err(to_string)?;
-    let temporary = path.with_extension("json.tmp");
-    std::fs::write(&temporary, serialized).map_err(to_string)?;
-    std::fs::rename(&temporary, path).map_err(to_string)
+    write_settings_file(path, &serialized).map_err(to_string)
+}
+
+/// Persist settings through an independently named temporary file. The
+/// renderer may have more than one native window, and a fixed `.tmp` sibling
+/// would let concurrent writes overwrite one another before the final rename.
+fn write_settings_file(path: &std::path::Path, settings: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("settings.json");
+    let temporary =
+        path.with_file_name(format!("{file_name}.{}.tmp", uuid::Uuid::new_v4().simple()));
+    let result = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temporary)?;
+        file.write_all(settings)?;
+        file.sync_all()?;
+        drop(file);
+        replace_file(&temporary, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
+}
+
+#[cfg(not(target_os = "windows"))]
+fn replace_file(source: &std::path::Path, destination: &std::path::Path) -> std::io::Result<()> {
+    std::fs::rename(source, destination)
+}
+
+#[cfg(target_os = "windows")]
+fn replace_file(source: &std::path::Path, destination: &std::path::Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let destination = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let moved = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if moved == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
 }
 
 // RFC 7396-style merge semantics scoped to one window namespace. `null`
@@ -2505,7 +2567,8 @@ mod tests {
         merge_json_object, persistent_session_build_requested_from, read_ephemeral_auth_token,
         validate_artifact_relative_path, validate_workspace_path,
         windows_backend_can_persist_opaque_session, write_ephemeral_auth_token,
-        ChangePermissionPolicy, NativeDropContextStore, NativeToolAuthority, NativeToolCall,
+        write_settings_file, replace_file, ChangePermissionPolicy, NativeDropContextStore,
+        NativeToolAuthority, NativeToolCall,
         ToolCallDisposition, WindowToolCallKey, WindowToolContext, WindowsOpaqueTokenBackend,
         PRODUCTION_CREDENTIAL_SERVICE,
     };
@@ -2559,6 +2622,47 @@ mod tests {
         assert_eq!(output["type"], "tool_call.result");
         assert_eq!(output["status"], "ok");
         assert_eq!(output["result"]["content"], "Hatch desktop local harness");
+    }
+
+    #[test]
+    fn settings_file_replacement_overwrites_an_existing_destination() {
+        let temp = tempdir().unwrap();
+        let source = temp.path().join("settings.json.tmp");
+        let destination = temp.path().join("settings.json");
+        std::fs::write(&source, br#"{"language":"ja"}"#).unwrap();
+        std::fs::write(&destination, br#"{"language":"en"}"#).unwrap();
+
+        replace_file(&source, &destination).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(destination).unwrap(),
+            r#"{"language":"ja"}"#
+        );
+        assert!(!source.exists());
+    }
+
+    #[test]
+    fn concurrent_settings_writes_use_independent_temporary_files() {
+        let temp = tempdir().unwrap();
+        let destination = temp.path().join("settings.json");
+        std::fs::write(&destination, br#"{"language":"system"}"#).unwrap();
+        let payloads =
+            ["en", "zh-CN", "ja"].map(|language| format!(r#"{{"language":"{language}"}}"#));
+        let handles = payloads.clone().map(|payload| {
+            let destination = destination.clone();
+            std::thread::spawn(move || write_settings_file(&destination, payload.as_bytes()))
+        });
+
+        for handle in handles {
+            handle.join().unwrap().unwrap();
+        }
+
+        let stored = std::fs::read_to_string(&destination).unwrap();
+        assert!(payloads.contains(&stored));
+        assert!(std::fs::read_dir(temp.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .all(|entry| !entry.file_name().to_string_lossy().ends_with(".tmp")));
     }
 
     #[test]
