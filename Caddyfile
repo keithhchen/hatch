@@ -66,6 +66,11 @@
         reverse_proxy dashboard:8500
     }
 
+    # The old /agents namespace remains a migration alias only; public product
+    # URLs are creator/product paths without the generic collection segment.
+    @legacy_agents path /agents /agents/*
+    redir @legacy_agents /explore 308
+
     # Keep the legacy namespace resolvable while Dashboard performs resource-
     # aware redirects for library/order/creator IDs. The root is an exact,
     # unconditional migration to the new Explore home.
