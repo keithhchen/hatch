@@ -7,8 +7,9 @@ This repository contains two connected flows:
 
 ```text
 Creator sources
-  -> internal Creator Factory Skill
-  -> current Agent Corpus
+  -> Creator Factory Graph (Evidence / Eval / Corpus)
+  -> Creator-reviewed candidate Corpus
+  -> explicit approval and publication
   -> Registry (Postgres metadata + POSIX assets) + cloud Runtime
 
 Buyer Desktop
@@ -54,39 +55,61 @@ WebSocket tool broker used by the Desktop.
 The canonical wire protocol is version `0.6` and lives in
 `packages/protocol/schemas/hatch-wire-protocol.schema.json`.
 
-Creator-private prompts, Skills, RAG material, Evals, and synthetic Q&A remain
-server-side. The Desktop receives only client-safe product metadata and runtime
-events.
+Creator-private prompts, Skills, RAG material, generated Eval Questions, and
+Creator reference answers remain server-side. The Desktop receives only
+client-safe product metadata and runtime events.
 
 ### Creator production and publishing
 
-`creator-agent-factory/` is an internal, host-independent Codex Skill. It reads
-ordinary Creator materials and writes a clean Agent Corpus: system
-instructions, optional local Skills and references, optional retrieval-only
-knowledge, tools, and evaluation assets. It does not start Runtime, configure a
-database, or require the operator to fill JSON.
+Creator Factory v1 is a durable Graph implemented under
+`runtime-server/src/creatorLearning/`. One run handles one Creator, one bounded
+Task, and one numbered candidate lineage. Its Evidence, Eval, and Corpus LLM roles pause
+for the Creator's generated-task answers, keep held-out cases sealed, calibrate
+on Development, rerun the complete Regression Set after every Corpus change,
+materialize and verify a complete provisional Agent Corpus before every candidate
+execution, and invoke Hatch's existing full Runtime through an isolated one-shot
+CLI. Corpus compilation is genuinely layered: every evidence-justified System,
+Skill, Skill reference, and retrieval-only knowledge asset is emitted in full,
+hashed, declared in `agent.json`, and preserved across revisions. Optional layers
+may be empty only when the evidence does not require them; routing a requirement
+to an asset that was not materialized fails the run. The Creator Dashboard
+starts and resumes runs; Postgres and a dedicated worker own durable scheduling.
+See [Creator Factory implementation v1](docs/creator-factory-implementation-v1.md).
+
+`creator-agent-factory/` is retained as the earlier manual Skill-based authoring
+path. It is not the production orchestrator for the v1 Graph.
 
 The TypeScript Registry in `runtime-server/src/registryServer.ts` verifies and
-installs the current Agent Corpus into the shared POSIX corpus root.
-PostgreSQL stores only the current `(creator_id, agent_id)` metadata row; it
-never stores prompts, Skills, source material, credentials, or vector contents.
+installs each Agent Corpus as an immutable digest-addressed release, then
+atomically switches the current pointer. Purchased entitlements keep resolving
+their pinned digest after later publications or rollbacks.
+The Registry catalog keeps the current `(creator_id, agent_id)` metadata row;
+the separate Creator Factory run table durably stores its authorized input and
+minimal control state so work can resume after a restart. Both that table and
+the private Factory artifact volume must therefore be protected as Creator
+source data. Credentials and vector contents do not enter Factory artifacts.
 The old `platform-registry/` Python service is migration-only and is not the
 production entrypoint.
 
-`packages/commerce/` provides the append-only Ledger and projections shared by
-buyer entitlement and Creator revenue reporting.
+`packages/commerce/` provides the order, offer-revision, entitlement,
+delivery-unit, refund, revenue, and payout contracts. Production uses its
+PostgreSQL event repository with transactional outbox/inbox and a single
+Dashboard-hosted command API; the file ledger remains a local-test fallback.
+Production Compose gives Registry, Factory, Runtime, and Commerce distinct
+database login roles, and exposes only the credentials each service needs.
 
-`creator-dashboard/` is the Creator-facing SaaS surface for viewing published
-Agent products, orders, deliveries, and the 90/10 revenue projection from that
-same Ledger. Publication itself is owned by the Factory-to-Registry path.
+`creator-dashboard/` is the Creator-facing SaaS surface for starting and
+resuming Factory runs, and for viewing published Agent products, orders,
+deliveries, and the 90/10 revenue projection from that same Ledger. Publication
+remains an explicit action after a candidate reaches `ready`.
 
 ## Repository map
 
 ```text
-creator-agent-factory/   internal distillation and Agent Corpus publish workflow
+creator-agent-factory/   earlier manual Skill-based authoring path
 desktop-app/             Tauri/React Consumer application
 local-runner/            Rust local tool boundary
-runtime-server/          TypeScript cloud Agent Runtime + Registry
+runtime-server/          TypeScript Runtime + Registry + Creator Factory Graph/worker
 platform-registry/       legacy Registry migration source
 packages/protocol/       canonical wire and Agent Corpus schemas
 packages/commerce/       entitlement, Delivery, and revenue Ledger
@@ -109,9 +132,11 @@ Copy `.env.example` to `.env`, supply a Moonshot credential, then run:
 ./scripts/dev.sh
 ```
 
-Hatch v1 deliberately uses `kimi-k2.6` for Creator-Agent generation,
-delivery auditing, blind evaluation, Runtime turns, and context compaction.
-These roles do not silently fall back to another model. Provider credentials
+Hatch product Runtime remains on its existing `kimi-k2.6` path. Creator Factory's
+three LLM roles—Evidence, Eval, and Corpus—use a separate `kimi-k3` profile with
+the 1,048,576-token context profile and maximum reasoning effort; that Factory
+profile is never passed into candidate Runtime execution. These roles do not
+silently fall back to another model. Provider credentials
 remain process environment only and must never enter an Agent Corpus or proof
 bundle.
 

@@ -13,7 +13,10 @@ services:
       HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN: ${HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN:?set HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN in /opt/hatch/.env}
       HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN: ${HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN:?set HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN in /opt/hatch/.env}
       HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN: ${HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN:?set HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN in /opt/hatch/.env}
+      HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN: ${HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN:?set HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN in /opt/hatch/.env}
+      HATCH_FACTORY_DATABASE_URL: postgresql://hatch_factory:${POSTGRES_FACTORY_PASSWORD:?set POSTGRES_FACTORY_PASSWORD in /opt/hatch/.env}@postgres:5432/${POSTGRES_DB:-hatch}
       HATCH_AGENT_CORPUS_ROOT: /var/lib/hatch/corpora
+      HATCH_CREATOR_FACTORY_ROOT: /var/lib/hatch/creator-factory
       HATCH_QDRANT_URL: http://qdrant:6333
       HATCH_QDRANT_API_KEY: ${HATCH_QDRANT_API_KEY:-}
       HATCH_QDRANT_COLLECTION: ${HATCH_QDRANT_COLLECTION:-hatch_knowledge_text_v4_1024}
@@ -52,13 +55,46 @@ services:
       HATCH_AUTH_TRUSTED_PROXY_CIDRS: ${HATCH_AUTH_TRUSTED_PROXY_CIDRS:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fd00::/8}
     volumes:
       - corpus_data:/var/lib/hatch/corpora
+      - creator_factory_data:/var/lib/hatch/creator-factory
     networks:
       - hatch_internal
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8100/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8100/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 12
+
+  factory-worker:
+    image: ${HATCH_IMAGE_PREFIX:-ghcr.io/example/hatch}/runtime:${HATCH_RELEASE_TAG:-dev}
+    command: ["node", "dist/creatorFactoryWorker.js"]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    environment:
+      HATCH_FACTORY_DATABASE_URL: postgresql://hatch_factory:${POSTGRES_FACTORY_PASSWORD:?set POSTGRES_FACTORY_PASSWORD in /opt/hatch/.env}@postgres:5432/${POSTGRES_DB:-hatch}
+      HATCH_CREATOR_FACTORY_ROOT: /var/lib/hatch/creator-factory
+      HATCH_CREATOR_FACTORY_HATCH_TIMEOUT_MS: ${HATCH_CREATOR_FACTORY_HATCH_TIMEOUT_MS:-900000}
+      HATCH_CREATOR_FACTORY_WORKER_ID: ${HATCH_CREATOR_FACTORY_WORKER_ID:-}
+      HATCH_CREATOR_FACTORY_LEASE_MS: ${HATCH_CREATOR_FACTORY_LEASE_MS:-600000}
+      HATCH_CREATOR_FACTORY_HEARTBEAT_MS: ${HATCH_CREATOR_FACTORY_HEARTBEAT_MS:-60000}
+      HATCH_CREATOR_FACTORY_POLL_MS: ${HATCH_CREATOR_FACTORY_POLL_MS:-1000}
+      LLM_API_KEY: ${LLM_API_KEY:?set LLM_API_KEY in /opt/hatch/.env}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.moonshot.cn/v1}
+      HATCH_WEB_SEARCH_URL: ${HATCH_WEB_SEARCH_URL:-}
+      HATCH_WEB_SEARCH_PROVIDER: ${HATCH_WEB_SEARCH_PROVIDER:-}
+      HATCH_WEB_SEARCH_API_KEY: ${HATCH_WEB_SEARCH_API_KEY:-}
+      HATCH_OUTPUT_GUARD: ${HATCH_OUTPUT_GUARD:-enforce}
+      HATCH_OUTPUT_GUARD_REGION: ${HATCH_OUTPUT_GUARD_REGION:-cn-shanghai}
+      HATCH_OUTPUT_GUARD_ENDPOINT: ${HATCH_OUTPUT_GUARD_ENDPOINT:-green-cip-vpc.cn-shanghai.aliyuncs.com}
+      HATCH_OUTPUT_GUARD_SERVICE: ${HATCH_OUTPUT_GUARD_SERVICE:-response_security_check_pro}
+      ALIBABA_CLOUD_ECS_METADATA: ${ALIBABA_CLOUD_ECS_METADATA:-HatchRuntimeRole}
+      ALIBABA_CLOUD_IMDSV1_DISABLE: ${ALIBABA_CLOUD_IMDSV1_DISABLE:-true}
+    volumes:
+      - creator_factory_data:/var/lib/hatch/creator-factory
+    networks:
+      - hatch_internal
+    depends_on:
+      registry:
+        condition: service_healthy
 
   runtime:
     image: ${HATCH_IMAGE_PREFIX:-ghcr.io/example/hatch}/runtime:${HATCH_RELEASE_TAG:-dev}
@@ -71,6 +107,10 @@ services:
       HATCH_RUNTIME_DATABASE_URL: postgresql://hatch_runtime:${HATCH_RUNTIME_DB_PASSWORD:?set or let CD generate HATCH_RUNTIME_DB_PASSWORD in /opt/hatch/.env}@postgres:5432/${POSTGRES_DB:-hatch}
       HATCH_REGISTRY_URL: http://registry:8100
       HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN: ${HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN:?set HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN in /opt/hatch/.env}
+      HATCH_COMMERCE_URL: http://dashboard:8500
+      HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN: ${HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN:?set HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN in /opt/hatch/.env}
+      HATCH_RUNTIME_DATA_DIR: /var/lib/hatch/runtime
+      HATCH_DELIVERY_OUTBOX_FILE: /var/lib/hatch/runtime/delivery-accounting-outbox.json
       HATCH_REGISTRY_AUTH_TIMEOUT_MS: ${HATCH_REGISTRY_AUTH_TIMEOUT_MS:-5000}
       HATCH_CLIENT_TOOL_TIMEOUT_MS: ${HATCH_CLIENT_TOOL_TIMEOUT_MS:-300000}
       HATCH_RUNTIME_HELLO_TIMEOUT_MS: ${HATCH_RUNTIME_HELLO_TIMEOUT_MS:-10000}
@@ -127,7 +167,6 @@ services:
       HATCH_WEB_SEARCH_URL: ${HATCH_WEB_SEARCH_URL:-https://api.bocha.cn/v1/web-search}
       HATCH_WEB_SEARCH_API_KEY: ${HATCH_WEB_SEARCH_API_KEY:-}
       HATCH_MCP_SERVERS: ${HATCH_MCP_SERVERS:-}
-      HATCH_COMMERCE_LEDGER_FILE: /var/lib/hatch/commerce/ledger.jsonl
       HATCH_ENABLE_LEGACY_HMAC_AUTH: "false"
       HATCH_OUTPUT_GUARD: ${HATCH_OUTPUT_GUARD:-enforce}
       HATCH_OUTPUT_GUARD_REGION: ${HATCH_OUTPUT_GUARD_REGION:-cn-shanghai}
@@ -137,14 +176,19 @@ services:
       ALIBABA_CLOUD_IMDSV1_DISABLE: ${ALIBABA_CLOUD_IMDSV1_DISABLE:-true}
     volumes:
       - corpus_data:/var/lib/hatch/corpora:ro
-      - commerce_data:/var/lib/hatch/commerce
+      - runtime_data:/var/lib/hatch/runtime
     networks:
       - hatch_internal
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8400/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8400/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 12
+    depends_on:
+      registry:
+        condition: service_healthy
+      dashboard:
+        condition: service_healthy
 
   dashboard:
     image: ${HATCH_IMAGE_PREFIX:-ghcr.io/example/hatch}/dashboard:${HATCH_RELEASE_TAG:-dev}
@@ -155,13 +199,17 @@ services:
       HATCH_CREATOR_DASHBOARD_API_PORT: 8500
       HATCH_REGISTRY_URL: http://registry:8100
       HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN: ${HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN:?set HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN in /opt/hatch/.env}
-      HATCH_COMMERCE_LEDGER_PATH: /var/lib/hatch/commerce/ledger.jsonl
+      HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN: ${HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN:?set HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN in /opt/hatch/.env}
+      HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN: ${HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN:?set HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN in /opt/hatch/.env}
+      HATCH_COMMERCE_DATABASE_URL: postgresql://hatch_commerce:${POSTGRES_COMMERCE_PASSWORD:?set POSTGRES_COMMERCE_PASSWORD in /opt/hatch/.env}@postgres:5432/${POSTGRES_DB:-hatch}
+      HATCH_PORTAL_STATE_PATH: /var/lib/hatch/commerce/portal-state.json
+      HATCH_COMMERCE_PAYMENT_MODE: disabled
     volumes:
       - commerce_data:/var/lib/hatch/commerce
     networks:
       - hatch_internal
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8500/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8500/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -192,6 +240,10 @@ volumes:
     name: hatch_corpus_data
   commerce_data:
     name: hatch_commerce_data
+  runtime_data:
+    name: hatch_runtime_data
+  creator_factory_data:
+    name: hatch_creator_factory_data
   caddy_data:
     name: hatch_caddy_data
   caddy_config:

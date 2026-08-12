@@ -13,8 +13,10 @@ FROM node:22-slim AS production
 ENV NODE_ENV=production
 WORKDIR /app/creator-dashboard
 
-COPY creator-dashboard/package.json ./
+COPY creator-dashboard/package.json creator-dashboard/package-lock.json ./
+RUN npm ci --omit=dev
 COPY --from=build /workspace/creator-dashboard/server.mjs ./server.mjs
+COPY --from=build /workspace/creator-dashboard/portalState.mjs ./portalState.mjs
 COPY --from=build /workspace/creator-dashboard/src ./src
 COPY --from=build /workspace/creator-dashboard/dist ./dist
 COPY --from=build /workspace/creator-dashboard/public ./public

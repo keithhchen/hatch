@@ -64,7 +64,7 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
 };
 
 export function resolveLlmProfile(env: NodeJS.ProcessEnv = process.env): LlmProfile {
-  const configured = (env.HATCH_LLM_PROFILE?.trim() || "kimi-k2.6") as LlmProfileName;
+  const configured = (env.HATCH_LLM_PROFILE?.trim() || "kimi-k2.6-no-thinking") as LlmProfileName;
   const profile = PROFILES[configured];
   if (!profile) {
     throw new Error(`Unknown HATCH_LLM_PROFILE: ${configured}. Expected one of: ${LLM_PROFILE_NAMES.join(", ")}`);
