@@ -1,6 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import "@fontsource-variable/inter";
 import "@fontsource-variable/noto-sans-sc";
 import "@fontsource-variable/noto-serif-sc";
 import "@fontsource/instrument-serif/400.css";
@@ -279,22 +278,24 @@ function AuxiliaryLanguageSettings() {
     <div className="desktop-auxiliary-language" aria-busy={!ready || saving}>
       <div className="desktop-auxiliary-row">
         <span>{t("settings.language.label")}</span>
-        <select
-          aria-label={t("settings.language.label")}
-          disabled={!ready || saving}
-          value={preference}
-          onChange={(event) => void updateLanguage(event)}
-        >
-          {LANGUAGE_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.value === SYSTEM_LANGUAGE
-                ? `${t(option.labelKey)} (${languageNativeName(systemLanguage)})`
-                : option.nativeLabel}
-            </option>
-          ))}
-        </select>
+        <div className="desktop-language-select">
+          <select
+            aria-label={t("settings.language.label")}
+            disabled={!ready || saving}
+            value={preference}
+            onChange={(event) => void updateLanguage(event)}
+          >
+            {LANGUAGE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.value === SYSTEM_LANGUAGE
+                  ? `${t(option.labelKey)} (${languageNativeName(systemLanguage)})`
+                  : option.nativeLabel}
+              </option>
+            ))}
+          </select>
+          <ChevronDown aria-hidden="true" />
+        </div>
       </div>
-      <p className="desktop-auxiliary-note">{t("settings.language.description")}</p>
       {saved ? <small className="desktop-settings-save-status" role="status">{t("settings.language.saved")}</small> : null}
       {saveError ? <small className="desktop-settings-save-error" role="alert">{saveError}</small> : null}
     </div>
