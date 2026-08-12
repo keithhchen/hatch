@@ -73,6 +73,60 @@ test("Registry database timeout is bounded", () => {
   assert.throws(() => registryPublishTimeoutMs({ HATCH_REGISTRY_PUBLISH_TIMEOUT_MS: "99" }), /HATCH_REGISTRY_PUBLISH_TIMEOUT_MS/);
 });
 
+test("staged releases stay immutable until CAS activation and Commerce grants preserve the purchased digest", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-registry-deployment-"));
+  const corpusRoot = path.join(root, "corpora");
+  const source = path.join(root, "candidate");
+  await mkdir(source, { recursive: true });
+  await extractAgentCorpusBundle(bundle("Deployment Candidate", { knowledge: "# Candidate\n\nVersion one.\n" }), source);
+  const verified = await verifyAgentCorpus(source, "maya-chen", "signal-review");
+  const store = await RegistryStoreTs.open({
+    corpusRoot,
+    statePath: path.join(root, "registry.json"),
+    indexer: undefined,
+    environment: {}
+  });
+  try {
+    const staged = await store.stageAgentCorpusDirectory(
+      "maya-chen",
+      "signal-review",
+      source,
+      verified.digest
+    );
+    assert.equal(staged.corpus_digest, verified.digest);
+    assert.equal(store.getAgentCorpus("maya-chen", "signal-review"), undefined);
+
+    const activated = await store.activateAgentCorpusRelease(
+      "maya-chen",
+      "signal-review",
+      verified.digest,
+      { operationId: "publish-op-1", expectedCurrentDigest: null }
+    );
+    assert.equal(activated.corpus_digest, verified.digest);
+    assert.equal(
+      (await new AgentCorpusResolver(corpusRoot).resolve("maya-chen", "signal-review")).digest,
+      verified.digest
+    );
+
+    const grant = await store.grantAgentAccess(
+      "buyer-1",
+      "maya-chen",
+      "signal-review",
+      "order-1",
+      "entitlement-1",
+      verified.digest,
+      "pinned"
+    );
+    assert.equal(grant.entitlement_id, "entitlement-1");
+    assert.equal(grant.purchased_corpus_digest, verified.digest);
+    assert.equal(grant.version_policy, "pinned");
+    assert.equal((await store.revokeAgentAccess("entitlement-1", "buyer-1"))?.status, "revoked");
+  } finally {
+    await store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("TypeScript Registry publishes a clean Corpus and indexes knowledge only", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-ts-registry-"));
   const statePath = path.join(root, "registry.json");

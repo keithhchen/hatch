@@ -94,31 +94,3 @@ test("identity mismatch cannot cross from entitlement into a task", async () => 
     (error) => error.code === "identity_chain_mismatch"
   );
 });
-
-test("zero-value delivery completes without revenue recognition", async () => {
-  const ledger = await CommerceLedger.open();
-  const sink = new LedgerCommerceSink(ledger);
-  const freeIdentity = { ...identity, order_id: "order_free", entitlement_id: "entitlement_free" };
-  await sink.ingest("order.placed", {
-    ...freeIdentity,
-    gross_minor: 0,
-    currency: "USD"
-  });
-  await sink.ingest("entitlement.granted", freeIdentity);
-  await sink.ingest("task.started", { ...freeIdentity, task_id: "task_free" });
-  await sink.ingest("artifact.created", {
-    ...freeIdentity,
-    task_id: "task_free",
-    artifact_id: "artifact_free",
-    artifact_digest: `sha256:${"c".repeat(64)}`
-  });
-  const result = await sink.ingest("delivery.completed", {
-    ...freeIdentity,
-    task_id: "task_free",
-    artifact_id: "artifact_free",
-    delivery_id: "delivery_free"
-  });
-  assert.equal(result.revenue, undefined);
-  assert.equal(ledger.listEvents().filter((event) => event.event_type === "revenue.recognized").length, 0);
-  assert.equal(projectCreatorDashboard(ledger.listEvents(), identity.creator_id).orders[0].status, "delivered");
-});

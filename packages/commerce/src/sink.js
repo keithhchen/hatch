@@ -24,10 +24,28 @@ export class LedgerCommerceSink {
     if (!order) {
       throw new CommerceInvariantError("missing_prior_event", `order.placed with order_id=${delivery.order_id} is required`);
     }
-    // A zero-value checkout is a valid entitlement. Record the delivery, but
-    // do not create a revenue.recognized event that violates the positive
-    // revenue invariant.
-    if (order.gross_minor === 0) return undefined;
+    if (order.gross_minor === 0 || order.payment_status === "not_required") return null;
+
+    const priorRevenue = events.filter((event) => (
+      event.event_type === "revenue.recognized" && event.order_id === delivery.order_id
+    ));
+    const existingRevenue = priorRevenue.find((event) => event.delivery_id === delivery.delivery_id);
+    if (existingRevenue) return structuredClone(existingRevenue);
+    const includedUnits = order.included_units ?? 1;
+    const orderDeliveries = events.filter((event) => (
+      event.event_type === "delivery.completed" && event.order_id === delivery.order_id
+    ));
+    const deliveryIndex = orderDeliveries.findIndex((event) => event.delivery_id === delivery.delivery_id);
+    if (deliveryIndex < 0 || deliveryIndex >= includedUnits) {
+      throw new CommerceInvariantError("revenue_exhausted", `Order ${order.order_id} has no revenue left to recognize`);
+    }
+    const baseGrossMinor = Math.floor(order.gross_minor / includedUnits);
+    const grossMinor = deliveryIndex === includedUnits - 1
+      ? order.gross_minor - (baseGrossMinor * (includedUnits - 1))
+      : baseGrossMinor;
+    if (grossMinor <= 0) {
+      throw new CommerceInvariantError("revenue_exhausted", `Order ${order.order_id} has no revenue left to recognize`);
+    }
     const hatchShareMinor = Math.floor(
       (order.gross_minor * this.hatchShareBasisPoints) / 10000,
     );

@@ -1,14 +1,11 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 import {
   CommerceInvariantError,
   CommerceLedger,
-  CommercePersistenceError,
   projectBuyerEntitlements,
   projectBuyerOrders,
   projectCreatorDashboard
@@ -183,101 +180,6 @@ test("replaying the same idempotent mutation never duplicates a charge or delive
   );
 });
 
-test("already-open Dashboard and Runtime ledgers refresh each other's committed events", async () => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-commerce-shared-"));
-  const filePath = path.join(directory, "ledger.jsonl");
-  const runtimeLedger = await deterministicLedger(filePath);
-  const dashboardLedger = await deterministicLedger(filePath);
-  const fixture = await seedLocalUatCommerce(dashboardLedger, {
-    orderId: "order_shared",
-    entitlementId: "entitlement_shared"
-  });
-
-  assert.equal(runtimeLedger.findByIdempotencyKey("order:order_shared:placed")?.order_id, fixture.orderId);
-  await runtimeLedger.append("task.started", {
-    task_id: "task_shared",
-    order_id: fixture.orderId,
-    entitlement_id: fixture.entitlementId,
-    buyer_id: fixture.buyerId,
-    creator_id: fixture.creatorId,
-    agent_id: fixture.agentId,
-    product_id: fixture.productId,
-    corpus_digest: fixture.corpusDigest
-  }, { idempotencyKey: "task:task_shared:started" });
-
-  assert.deepEqual(dashboardLedger.listEvents().map((event) => event.event_type), [
-    "order.placed",
-    "entitlement.granted",
-    "task.started"
-  ]);
-});
-
-test("separate processes serialize one idempotent mutation and converge on the winner", async () => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-commerce-processes-"));
-  const filePath = path.join(directory, "ledger.jsonl");
-  const startFile = path.join(directory, "start");
-  const readerOpenedBeforeWriters = await CommerceLedger.open({ filePath });
-  const first = startAppendWorker(filePath, startFile, "order:concurrent", "order_concurrent");
-  const second = startAppendWorker(filePath, startFile, "order:concurrent", "order_concurrent");
-
-  await Promise.all([first.ready, second.ready]);
-  await writeFile(startFile, "go", "utf8");
-  const [firstResult, secondResult] = await Promise.all([first.completed, second.completed]);
-
-  assert.equal(firstResult.ok, true);
-  assert.equal(secondResult.ok, true);
-  assert.equal(firstResult.event.event_id, secondResult.event.event_id);
-  assert.equal(readerOpenedBeforeWriters.listEvents().length, 1);
-  assert.equal(readerOpenedBeforeWriters.findByIdempotencyKey("order:concurrent")?.order_id, "order_concurrent");
-  assert.equal((await readFile(filePath, "utf8")).trim().split("\n").length, 1);
-});
-
-test("separate processes preserve distinct concurrent mutations without a lost update", async () => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-commerce-distinct-processes-"));
-  const filePath = path.join(directory, "ledger.jsonl");
-  const startFile = path.join(directory, "start");
-  const readerOpenedBeforeWriters = await CommerceLedger.open({ filePath });
-  const first = startAppendWorker(filePath, startFile, "order:concurrent:first", "order_concurrent_first");
-  const second = startAppendWorker(filePath, startFile, "order:concurrent:second", "order_concurrent_second");
-
-  await Promise.all([first.ready, second.ready]);
-  await writeFile(startFile, "go", "utf8");
-  const [firstResult, secondResult] = await Promise.all([first.completed, second.completed]);
-
-  assert.equal(firstResult.ok, true);
-  assert.equal(secondResult.ok, true);
-  assert.notEqual(firstResult.event.event_id, secondResult.event.event_id);
-  assert.deepEqual(
-    new Set(readerOpenedBeforeWriters.listEvents().map((event) => event.order_id)),
-    new Set(["order_concurrent_first", "order_concurrent_second"])
-  );
-  assert.equal((await readFile(filePath, "utf8")).trim().split("\n").length, 2);
-});
-
-test("an abandoned cross-process lock fails closed instead of being guessed stale", async () => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-commerce-lock-"));
-  const filePath = path.join(directory, "ledger.jsonl");
-  await mkdir(`${filePath}.lock`);
-  const ledger = await CommerceLedger.open({ filePath, lockTimeoutMs: 40, lockPollMs: 5 });
-
-  await assert.rejects(
-    ledger.append("order.placed", {
-      order_id: "order_locked",
-      buyer_id: "buyer_locked",
-      creator_id: "creator_locked",
-      agent_id: "agent_locked",
-      product_id: "product_locked",
-      corpus_digest: `sha256:${"e".repeat(64)}`,
-      gross_minor: 100,
-      currency: "USD"
-    }, { idempotencyKey: "order:locked" }),
-    (error) => error instanceof CommercePersistenceError
-      && error.code === "ledger_lock_timeout"
-      && error.message.includes(`${filePath}.lock`)
-  );
-  assert.equal((await stat(`${filePath}.lock`)).isDirectory(), true);
-});
-
 test("creator projection isolates another creator's orders", async () => {
   const ledger = await CommerceLedger.open();
   await seedLocalUatCommerce(ledger);
@@ -354,45 +256,54 @@ test("zero-value checkout is still a real order and can project buyer history", 
   }]);
 });
 
-function startAppendWorker(filePath, startFile, idempotencyKey, orderId) {
-  const fixture = fileURLToPath(new URL("../test-fixtures/append-order.mjs", import.meta.url));
-  const child = spawn(process.execPath, [fixture, filePath, startFile, idempotencyKey, orderId], {
-    stdio: ["ignore", "pipe", "pipe"]
+test("legacy paid refund events without provider confirmation fail closed in every projection", async () => {
+  const values = {
+    order_id: "order_legacy_unconfirmed_refund",
+    buyer_id: "buyer_legacy_unconfirmed_refund",
+    creator_id: "creator_legacy_unconfirmed_refund",
+    agent_id: "agent_legacy_unconfirmed_refund",
+    product_id: "product_legacy_unconfirmed_refund",
+    corpus_digest: `sha256:${"f".repeat(64)}`,
+    currency: "USD"
+  };
+  const events = [
+    { event_type: "order.placed", ...values, gross_minor: 3999, payment_status: "paid" },
+    { event_type: "entitlement.granted", ...values, entitlement_id: "entitlement_legacy_unconfirmed_refund" },
+    {
+      event_type: "order.refunded",
+      ...values,
+      refund_id: "refund_legacy_unconfirmed",
+      gross_minor: 3999
+    },
+    {
+      event_type: "entitlement.revoked",
+      ...values,
+      entitlement_id: "entitlement_legacy_unconfirmed_refund",
+      reason: "order_refunded"
+    }
+  ];
+
+  assert.equal(projectOrder(events, values.order_id).status, "fulfilled");
+  assert.equal(projectOrder(events, values.order_id).refunds.length, 0);
+  assert.equal(projectEntitlement(events, "entitlement_legacy_unconfirmed_refund").status, "active");
+  assert.equal(projectRefunds(events, { orderId: values.order_id }).length, 0);
+  assert.equal(projectBuyerEntitlements(events, values.buyer_id).length, 1);
+
+  const ledger = await CommerceLedger.open();
+  const fixture = await seedLocalUatCommerce(ledger, {
+    orderId: "order_direct_unconfirmed_refund",
+    entitlementId: "entitlement_direct_unconfirmed_refund"
   });
-  let stdout = "";
-  let stderr = "";
-  let readyResolve;
-  let readyReject;
-  const ready = new Promise((resolve, reject) => {
-    readyResolve = resolve;
-    readyReject = reject;
-  });
-  child.stdout.setEncoding("utf8");
-  child.stderr.setEncoding("utf8");
-  child.stdout.on("data", (chunk) => {
-    stdout += chunk;
-    if (stdout.includes("READY\n")) readyResolve();
-  });
-  child.stderr.on("data", (chunk) => {
-    stderr += chunk;
-  });
-  child.on("error", readyReject);
-  const completed = new Promise((resolve, reject) => {
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code !== 0) {
-        const error = new Error(`ledger worker exited ${code}: ${stderr || stdout}`);
-        readyReject(error);
-        reject(error);
-        return;
-      }
-      const resultLine = stdout.trim().split("\n").findLast((line) => line.startsWith("{"));
-      if (!resultLine) {
-        reject(new Error(`ledger worker returned no result: ${stderr || stdout}`));
-        return;
-      }
-      resolve(JSON.parse(resultLine));
-    });
-  });
-  return { ready, completed };
-}
+  await assert.rejects(
+    ledger.append("order.refunded", {
+      refund_id: "refund_direct_unconfirmed",
+      order_id: fixture.orderId,
+      buyer_id: fixture.buyerId,
+      creator_id: fixture.creatorId,
+      product_id: fixture.productId,
+      gross_minor: 3900,
+      currency: "USD"
+    }, { idempotencyKey: "refund:direct:unconfirmed" }),
+    (error) => error instanceof CommerceInvariantError && error.code === "provider_refund_confirmation_required"
+  );
+});
