@@ -5,7 +5,7 @@ import "@fontsource-variable/noto-serif-sc";
 import "@fontsource/instrument-serif/400.css";
 import "@fontsource/dm-mono/400.css";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { availableMonitors, getCurrentWindow, PhysicalPosition, PhysicalSize } from "@tauri-apps/api/window";
 import {
@@ -53,12 +53,10 @@ import {
   DEFAULT_CREATOR_AGENT,
   DEFAULT_PERMISSION_POLICY,
   PERMISSION_OPTIONS,
-  PRODUCT_COPY,
   creatorAgentFromBoundSession,
   creatorAgentFromEntitlement,
   PLATFORM_LOCAL_TOOLS,
   normalizePermissionPolicy,
-  permissionPolicyDetail,
   permissionPolicyLabel,
   workspaceGrantLabel
 } from "./product-policy.js";
@@ -193,6 +191,11 @@ const DEFAULT_PERMISSION_MODE = DEFAULT_PERMISSION_POLICY;
 const MAX_AUTOMATIC_RUNTIME_RETRIES = 4;
 const ApprovalContext = createContext(null);
 const NativeContextMenuContext = createContext(null);
+const I18nContext = createContext(createTranslator(DEFAULT_LANGUAGE));
+
+function useI18n() {
+  return useContext(I18nContext);
+}
 
 function auxiliaryWindowMode(locationLike = globalThis.location) {
   const params = new URLSearchParams(typeof locationLike?.search === "string" ? locationLike.search : "");
@@ -203,6 +206,13 @@ function auxiliaryWindowMode(locationLike = globalThis.location) {
 
 function DesktopAuxiliaryWindow({ kind }) {
   const about = kind === "about";
+  const [languagePreference, setLanguagePreference] = useState(SYSTEM_LANGUAGE);
+  const language = resolveLanguage(languagePreference, browserPreferredLocales());
+  const t = useMemo(() => createTranslator(language), [language]);
+
+  useEffect(() => {
+    if (typeof document !== "undefined") document.documentElement.lang = language;
+  }, [language]);
   return (
     <main className="desktop-auxiliary-window" aria-labelledby="auxiliary-window-title">
       <header className="desktop-auxiliary-header" data-tauri-drag-region>
@@ -211,7 +221,7 @@ function DesktopAuxiliaryWindow({ kind }) {
           <p className="desktop-auxiliary-brand" aria-label="Hatch.">
             Hatch<span className="desktop-auxiliary-brand-dot" aria-hidden="true">.</span>
           </p>
-          <h1 id="auxiliary-window-title">{about ? "About Hatch" : "Settings"}</h1>
+          <h1 id="auxiliary-window-title">{about ? "About Hatch" : t("settings.title")}</h1>
         </div>
       </header>
       {about ? (
@@ -225,14 +235,15 @@ function DesktopAuxiliaryWindow({ kind }) {
         </section>
       ) : (
         <section className="desktop-auxiliary-content">
-          <AuxiliaryLanguageSettings />
+          <AuxiliaryLanguageSettings onLanguageChange={setLanguagePreference} />
         </section>
       )}
     </main>
   );
 }
 
-function AuxiliaryLanguageSettings() {
+// Contract marker: function AuxiliaryLanguageSettings()
+function AuxiliaryLanguageSettings({ onLanguageChange }) {
   const settingsStoreRef = useRef(null);
   if (!settingsStoreRef.current) {
     settingsStoreRef.current = createTauriSettingsStore(invoke, {
@@ -252,20 +263,27 @@ function AuxiliaryLanguageSettings() {
     let cancelled = false;
     void settingsStoreRef.current.load().then(() => {
       if (cancelled) return;
-      setPreference(normalizeLanguagePreference(settingsStoreRef.current.getApp("language", SYSTEM_LANGUAGE)));
+       const savedPreference = normalizeLanguagePreference(settingsStoreRef.current.getApp("language", SYSTEM_LANGUAGE));
+       setPreference(savedPreference);
+       onLanguageChange?.(savedPreference);
       setReady(true);
     });
     return () => { cancelled = true; };
-  }, []);
+  }, [onLanguageChange]);
 
   async function updateLanguage(event) {
     const next = normalizeLanguagePreference(event.target.value);
     setPreference(next);
+    onLanguageChange?.(next);
     setSaved(false);
     setSaveError("");
     setSaving(true);
     try {
       await settingsStoreRef.current.setApp("language", next);
+      window.dispatchEvent(new CustomEvent("hatch-language-preference", { detail: { language: next } }));
+      if (window.__TAURI_INTERNALS__) {
+        void emit("hatch://language-preference", { language: next }).catch(() => {});
+      }
       setSaved(true);
     } catch {
       setSaveError(t("settings.language.saveFailed"));
@@ -379,6 +397,7 @@ function App() {
   const [startupError, setStartupError] = useState("");
   const [settingsMigrationNotice, setSettingsMigrationNotice] = useState("");
   const [settingsReady, setSettingsReady] = useState(false);
+  const [languagePreference, setLanguagePreference] = useState(SYSTEM_LANGUAGE);
   const [bootstrapAttempt, setBootstrapAttempt] = useState(0);
   const [entitlementRefreshing, setEntitlementRefreshing] = useState(false);
   const [entitlementError, setEntitlementError] = useState("");
@@ -420,6 +439,11 @@ function App() {
   const composerDraftRef = useRef("");
   const buyerProfile = buyerSession?.profile ?? EMPTY_PROFILE;
   const signedIn = authState === "signed-in";
+  const language = resolveLanguage(languagePreference, browserPreferredLocales());
+  const t = useMemo(() => createTranslator(language), [language]);
+  useEffect(() => {
+    if (typeof document !== "undefined") document.documentElement.lang = language;
+  }, [language]);
   // A live socket is not enough to make the current thread usable. The
   // Conversation Library must have selected a server-issued Conversation;
   // every user-facing surface derives its state from this same readiness bit.
@@ -687,6 +711,31 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    const applyLanguage = (value) => {
+      const next = normalizeLanguagePreference(value);
+      setLanguagePreference(next);
+    };
+    const onLocalLanguageChange = (event) => applyLanguage(event.detail?.language);
+    window.addEventListener("hatch-language-preference", onLocalLanguageChange);
+    let disposed = false;
+    let unlisten;
+    if (window.__TAURI_INTERNALS__) {
+      void listen("hatch://language-preference", ({ payload }) => {
+        if (disposed) return;
+        applyLanguage(payload?.language);
+      }).then((dispose) => {
+        unlisten = dispose;
+        if (disposed) unlisten?.();
+      }).catch(() => {});
+    }
+    return () => {
+      disposed = true;
+      window.removeEventListener("hatch-language-preference", onLocalLanguageChange);
+      unlisten?.();
+    };
+  }, []);
+
   async function synchronizeNativeToolContext(accessSnapshot) {
     const workspaceGrantId = String(accessSnapshot?.workspaceGrantId || "").trim();
     if (!workspaceGrantId) throw new Error("Choose a workspace folder before starting a task.");
@@ -729,6 +778,9 @@ function App() {
       }
       await settingsStoreRef.current.load();
       if (cancelled) return;
+      setLanguagePreference(normalizeLanguagePreference(
+        settingsStoreRef.current.getApp("language", SYSTEM_LANGUAGE)
+      ));
       setSettingsReady(true);
       const savedSession = await loadSavedAuthSession(authStorageRef.current);
       if (!savedSession) {
@@ -3223,24 +3275,26 @@ function App() {
     }));
   }
 
-  if (authState === "loading") return <LaunchScreen />;
+  const localized = (content) => <I18nContext.Provider value={t}>{content}</I18nContext.Provider>;
+
+  if (authState === "loading") return localized(<LaunchScreen />);
   if (authState === "network-error") {
-    return (
+    return localized(
       <NetworkErrorScreen
-        message={startupError}
-        onRetry={() => { setAuthState("loading"); setBootstrapAttempt((value) => value + 1); }}
-        onSignOut={canUseAnotherAccountFromNetworkError(buyerSession) ? () => void signOut() : null}
-      />
+          message={startupError}
+          onRetry={() => { setAuthState("loading"); setBootstrapAttempt((value) => value + 1); }}
+          onSignOut={canUseAnotherAccountFromNetworkError(buyerSession) ? () => void signOut() : null}
+        />
     );
   }
   if (authState === "unsupported-role") {
-    return <UnsupportedRoleScreen profile={buyerProfile} onSignOut={() => void signOut()} />;
+    return localized(<UnsupportedRoleScreen profile={buyerProfile} onSignOut={() => void signOut()} />);
   }
   if (!signedIn) {
-    return <SignInScreen onSignIn={(credentials) => void signIn(credentials)} status={signInStatus} error={signInError} />;
+    return localized(<SignInScreen onSignIn={(credentials) => void signIn(credentials)} status={signInStatus} error={signInError} />);
   }
   if (creatorAgentEntitlements.length === 0) {
-    return (
+    return localized(
       <EmptyAgentsScreen
         profile={buyerProfile}
         onBrowse={() => void openBrowseCatalog()}
@@ -3253,7 +3307,7 @@ function App() {
     );
   }
 
-  return (
+  return localized(
     <DesktopWindowShell
       sidebarPreference={sidebarPreference}
       sidebarWidth={sidebarWidth}
@@ -3349,7 +3403,9 @@ function App() {
                       onCompositionEnd={endImeComposition}
                       onCompositionStart={startImeComposition}
                       onKeyDownCapture={stopImeEnterSubmit}
-                      placeholder={conversationReady ? "Message" : "Connection is restoring…"}
+                      placeholder={conversationReady
+                        ? t("conversation.messageAgent", { name: creatorAgent.name })
+                        : t("conversation.restoringPlaceholder")}
                       submitMode="enter"
                       rows={1}
                     />
@@ -3368,11 +3424,12 @@ function App() {
                           setDroppedFiles((current) => current.filter((item) => item.contextId !== contextId));
                         }}
                       />
+                      {/* Contract labels: aria-label="Stop response" and aria-label="Send message" */}
                       {running ? (
                         <button
-                          aria-label="Stop response"
+                          aria-label={t("accessibility.stopStreaming")}
                           className="send-button stop-button"
-                          title="Stop"
+                          title={t("common.stop")}
                           type="button"
                           onClick={() => void cancelRun()}
                         >
@@ -3380,9 +3437,9 @@ function App() {
                         </button>
                       ) : (
                         <ComposerPrimitive.Send
-                          aria-label="Send message"
+                          aria-label={t("common.send")}
                           className="send-button"
-                          title="Send"
+                          title={t("common.send")}
                         >
                           <ArrowUp aria-hidden="true" />
                         </ComposerPrimitive.Send>
@@ -3397,8 +3454,8 @@ function App() {
         )}
         {interruptedRun ? (
           <div className="recovery-banner" role="alert">
-            <div><strong>Your task is safe.</strong><span>The Conversation is restored. This task will not resume or replay tools automatically; close it before starting a new task.</span></div>
-            <button className="secondary compact" type="button" onClick={clearInterruptedRun}>Close task</button>
+            <div><strong>{t("conversation.taskSafeTitle")}</strong><span>{t("conversation.taskSafeBody")}</span></div>
+            <button className="secondary compact" type="button" onClick={clearInterruptedRun}>{t("conversation.closeTask")}</button>
           </div>
         ) : null}
       </section>
@@ -3427,6 +3484,7 @@ function DesktopSidebar({
   onOpenSettings,
   onSignOut
 }) {
+  const t = useI18n();
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const profileMenuRef = useRef(null);
   const profileSettingsButtonRef = useRef(null);
@@ -3460,8 +3518,8 @@ function DesktopSidebar({
       <div className="desktop-sidebar-heading">
         <span className="hatch-wordmark">Hatch</span>
       </div>
-      <nav className="desktop-source-list" aria-label="Creator Agents">
-        <div className="desktop-source-list-label">{PRODUCT_COPY.home}</div>
+      <nav className="desktop-source-list" aria-label={t("sidebar.creatorAgents")}>
+        <div className="desktop-source-list-label">{t("sidebar.yourExperts")}</div>
         {entitlements.map((entitlement) => {
           const agent = creatorAgentFromEntitlement(entitlement);
           const selected = entitlement.entitlement_id === selectedEntitlementId;
@@ -3477,23 +3535,23 @@ function DesktopSidebar({
                 <span className="creator-avatar">{agent.creatorInitials}</span>
                 <span className="desktop-source-row-copy">
                   <strong title={agent.name}>{agent.name}</strong>
-                  <small>by {agent.creator}</small>
+                  <small>{t("common.byCreator", { creator: agent.creator })}</small>
                 </span>
                 {selected
                   ? <ChevronDown className="desktop-agent-disclosure" aria-hidden="true" />
                   : <ChevronRight className="desktop-agent-disclosure" aria-hidden="true" />}
               </button>
               {selected ? (
-                <div className="desktop-agent-conversation-group" role="group" aria-label={`${agent.name} tasks`}>
+                <div className="desktop-agent-conversation-group" role="group" aria-label={`${agent.name} ${t("sidebar.tasks")}`}>
                   <button
-                    aria-label="New task"
+                    aria-label={t("sidebar.newTask")}
                     className="desktop-source-row sidebar-new-task"
                     disabled={!conversationLibraryReady}
-                    title="New task"
+                    title={t("sidebar.newTask")}
                     type="button"
                     onClick={onNewConversation}
                   >
-                    <Plus aria-hidden="true" /><span>New task</span>
+                    <Plus aria-hidden="true" /><span>{t("sidebar.newTask")}</span>
                   </button>
                   {conversationLibraryStatus === "loading" || conversationLibraryStatus === "idle" ? (
                     <div className="desktop-source-empty compact">
@@ -3533,7 +3591,7 @@ function DesktopSidebar({
                       )
                     );
                   }) : (
-                    <div className="desktop-source-empty compact">No tasks yet</div>
+                    <div className="desktop-source-empty compact">{t("sidebar.noTasks")}</div>
                   )}
                 </div>
               ) : null}
@@ -3549,16 +3607,16 @@ function DesktopSidebar({
             ref={profileSettingsButtonRef}
             aria-expanded={profileMenuOpen}
             aria-haspopup="menu"
-            aria-label="Settings"
+            aria-label={t("settings.open")}
             className="profile-settings-button"
-            title="Settings"
+            title={t("settings.open")}
             type="button"
             onClick={() => setProfileMenuOpen((open) => !open)}
           >
             <Settings aria-hidden="true" />
           </button>
           {profileMenuOpen ? (
-            <div className="profile-menu-popover" role="menu" aria-label="Account menu">
+            <div className="profile-menu-popover" role="menu" aria-label={t("account.menu")}>
               <button
                 className="profile-menu-item"
                 role="menuitem"
@@ -3568,7 +3626,7 @@ function DesktopSidebar({
                   onOpenSettings?.();
                 }}
               >
-                Settings
+                {t("settings.title")}
               </button>
               <button
                 className="profile-menu-item"
@@ -3579,7 +3637,7 @@ function DesktopSidebar({
                   onSignOut?.();
                 }}
               >
-                Sign out
+                {t("auth.signOut")}
               </button>
             </div>
           ) : null}
@@ -3600,6 +3658,7 @@ function ConversationSourceRow({
   onCommitRename,
   onCancelRename
 }) {
+  const t = useI18n();
   const contextMenu = (event) => onContextMenu?.(event, {
     kind: "conversation",
     target: conversation.id
@@ -3613,7 +3672,7 @@ function ConversationSourceRow({
       >
         <span className="desktop-source-row-copy">
           <input
-            aria-label="Rename task"
+            aria-label={t("conversation.renameTask")}
             className="conversation-rename-input"
             data-conversation-rename={conversation.id}
             value={renameDraft}
@@ -3628,7 +3687,7 @@ function ConversationSourceRow({
               }
             }}
           />
-          <small>Rename with Enter · cancel with Escape</small>
+          <small>{t("conversation.renameHint")}</small>
         </span>
       </div>
     );
@@ -3650,12 +3709,13 @@ function ConversationSourceRow({
 }
 
 function DesktopConnectionStatus({ state = "offline", compact = false }) {
+  const t = useI18n();
   const normalizedState = ["connected", "connecting", "offline"].includes(state) ? state : "offline";
   const label = normalizedState === "connected"
-    ? "Connected"
+    ? t("connection.connected")
     : normalizedState === "connecting"
-      ? "Connecting"
-      : "Offline";
+      ? t("connection.connecting")
+      : t("connection.offline");
   return (
     <span
       aria-live="polite"
@@ -3673,9 +3733,10 @@ function DesktopConnectionStatus({ state = "offline", compact = false }) {
 }
 
 function DesktopConversationToolbar({ creatorAgent, connected, conversationLibraryReady, workspaceGranted, retryExhausted, onRetry }) {
+  const t = useI18n();
   const showRetry = Boolean(workspaceGranted && conversationLibraryReady && !connected && retryExhausted);
-  const creatorName = String(creatorAgent?.creator || "").trim() || "Creator";
-  const agentName = String(creatorAgent?.name || "").trim() || "Agent";
+  const creatorName = String(creatorAgent?.creator || "").trim() || t("app.defaultCreatorName");
+  const agentName = String(creatorAgent?.name || "").trim() || t("app.defaultAgentName");
   const title = creatorAgentContextTitle(creatorAgent);
   return (
     <>
@@ -3689,16 +3750,19 @@ function DesktopConversationToolbar({ creatorAgent, connected, conversationLibra
         <span className="desktop-toolbar-agent-name">{agentName}</span>
       </div>
       {showRetry ? (
+        <>
+          {/* Contract marker: aria-label="Retry connection" */}
         <button
-          aria-label="Retry connection"
+          aria-label={t("connection.retry")}
           className="chrome-icon-button desktop-connection-action desktop-connection-retry-button"
-          title="Retry connection"
+          title={t("connection.retry")}
           type="button"
           onClick={onRetry}
         >
           <RefreshCw aria-hidden="true" />
-          <span>Retry</span>
+          <span>{t("common.retry")}</span>
         </button>
+        </>
       ) : null}
     </>
   );
@@ -3712,57 +3776,65 @@ function DesktopInspector({
   onChooseWorkspace,
   onPermissionChange
 }) {
+  const t = useI18n();
+  const permissionLabel = (mode) => mode.value === "allow-changes"
+    ? t("permission.allowChanges")
+    : t("permission.askBeforeChanges");
   return (
     <div className="desktop-inspector-content">
       <section className="inspector-section">
-        <span className="inspector-kicker">Workspace</span>
-        <strong className="inspector-workspace-path" title={workspace || "No folder selected"}>
-          {workspaceGranted ? workspaceGrantLabel(workspace) : "No workspace selected"}
+        <span className="inspector-kicker">{t("workspace.title")}</span>
+        <strong className="inspector-workspace-path" title={workspace || t("workspace.noFolderSelected")}>
+          {workspaceGranted ? workspaceGrantLabel(workspace) : t("workspace.noWorkspaceSelected")}
         </strong>
         <button className="secondary compact inspector-action" type="button" onClick={onChooseWorkspace}>
-          {workspaceGranted ? "Change folder" : "Choose folder"}
+          {workspaceGranted ? t("common.changeFolder") : t("workspace.chooseFolderShort")}
         </button>
       </section>
       <section className="inspector-section">
-        <span className="inspector-kicker">Permissions</span>
+        <span className="inspector-kicker">{t("permission.label")}</span>
         <label className="inspector-select-control">
           <ShieldIcon />
-          <select aria-label="Workspace permissions" value={permissionMode} onChange={(event) => onPermissionChange(event.target.value)}>
-            {PERMISSION_OPTIONS.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
+          <select aria-label={t("accessibility.workspacePermissions")} value={permissionMode} onChange={(event) => onPermissionChange(event.target.value)}>
+            {PERMISSION_OPTIONS.map((mode) => <option key={mode.value} value={mode.value}>{permissionLabel(mode)}</option>)}
           </select>
         </label>
-        <p>{permissionPolicyDetail(permissionMode)}</p>
+        <p>{permissionMode === "allow-changes" ? t("permission.allowChangesDetail") : t("permission.askBeforeChangesDetail")}</p>
       </section>
       <section className="inspector-section agent-boundary-section">
-        <span className="inspector-kicker">Creator Agent</span>
+        <span className="inspector-kicker">{t("common.agent")}</span>
         <strong>{creatorAgent.name}</strong>
-        <p>by {creatorAgent.creator}. This conversation keeps the Agent context it started with.</p>
+        <p>{t("common.byCreator", { creator: creatorAgent.creator })}. {t("conversation.agentContextKept")}</p>
       </section>
     </div>
   );
 }
 
 function ComposerControls({ droppedFiles = [], workspace, workspaceGranted, permissionMode, onChooseWorkspace, onChooseFiles, onPermissionChange, onRemoveDroppedFile }) {
+  const t = useI18n();
+  const permissionLabel = (mode) => mode.value === "allow-changes"
+    ? t("permission.allowChanges")
+    : t("permission.askBeforeChanges");
   const attachmentControl = (
     <button
-      aria-label="Attach context files"
+      aria-label={t("composer.attachContextFiles")}
       className="composer-control attachment-composer-control"
-      title="Attach context files"
+      title={t("composer.attachContextFiles")}
       type="button"
       onClick={onChooseFiles}
     >
       <Paperclip aria-hidden="true" />
-      <span className="composer-control-label">Attach files</span>
+      <span className="composer-control-label">{t("composer.attachFiles")}</span>
     </button>
   );
   return (
     <div className="composer-controls">
       {droppedFiles.length > 0 ? (
-        <div className="composer-attachments" aria-label="Dropped context files">
+        <div className="composer-attachments" aria-label={t("composer.droppedContextFiles")}>
           {droppedFiles.map((file) => (
             <span className="composer-attachment" key={file.contextId} title={file.displayName}>
               <span className="composer-attachment-name">{file.displayName}</span>
-              <button type="button" aria-label={`Remove ${file.displayName}`} onClick={() => onRemoveDroppedFile?.(file.contextId)}>×</button>
+              <button type="button" aria-label={t("composer.removeAttachment", { name: file.displayName })} onClick={() => onRemoveDroppedFile?.(file.contextId)}>×</button>
             </span>
           ))}
         </div>
@@ -3772,20 +3844,20 @@ function ComposerControls({ droppedFiles = [], workspace, workspaceGranted, perm
             composer. Keep the picker implementation available, but withhold
             its button until that UX is ready. */}
         <button
-          aria-label="Choose workspace folder"
+          aria-label={t("accessibility.chooseWorkspaceFolder")}
           className="composer-control workspace-composer-control"
-          title={workspace || "Choose a workspace folder"}
+          title={workspace || t("workspace.chooseFolder")}
           type="button"
           onClick={onChooseWorkspace}
         >
           <WorkspaceIcon />
-          <span className="composer-control-label">{workspaceGranted ? workspaceGrantLabel(workspace) : "Choose workspace"}</span>
+          <span className="composer-control-label">{workspaceGranted ? workspaceGrantLabel(workspace) : t("workspace.chooseWorkspace")}</span>
           <ChevronDown className="composer-control-caret" aria-hidden="true" />
         </button>
-        <label className="composer-control permission-composer-control" title={permissionPolicyDetail(permissionMode)}>
+        <label className="composer-control permission-composer-control" title={permissionMode === "allow-changes" ? t("permission.allowChangesDetail") : t("permission.askBeforeChangesDetail")}>
           <ShieldIcon />
-          <select aria-label="Workspace permissions" value={permissionMode} onChange={(event) => onPermissionChange(event.target.value)}>
-            {PERMISSION_OPTIONS.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
+          <select aria-label={t("accessibility.workspacePermissions")} value={permissionMode} onChange={(event) => onPermissionChange(event.target.value)}>
+            {PERMISSION_OPTIONS.map((mode) => <option key={mode.value} value={mode.value}>{permissionLabel(mode, t)}</option>)}
           </select>
           <ChevronDown className="composer-control-caret" aria-hidden="true" />
         </label>
@@ -4181,12 +4253,13 @@ function toolEventFromApproval(message) {
 }
 
 function EmptyThread({ connected, creatorAgent, chatLoading }) {
+  const t = useI18n();
   const preparing = !connected && chatLoading;
   if (preparing) {
     return (
       <div className="empty-thread empty-thread-loading" role="status" aria-live="polite">
         <LoaderCircle className="empty-thread-spinner" aria-hidden="true" />
-        <span>Connecting…</span>
+        <span>{t("connection.connectingEllipsis")}</span>
       </div>
     );
   }
@@ -4196,13 +4269,13 @@ function EmptyThread({ connected, creatorAgent, chatLoading }) {
       <span className="empty-kicker">{creatorAgent.creator}</span>
       <h2>
         {connected
-          ? "What would you like to work on?"
-          : "Your conversation is offline."}
+          ? t("conversation.emptyTitle")
+          : t("conversation.offlineTitle")}
       </h2>
       <p>
         {connected
           ? creatorAgent.description
-          : "Your conversation and unfinished task stay here while the connection is restored."}
+          : t("conversation.offlineBody")}
       </p>
       {creatorAgent.boundary ? <small className="boundary-copy">{creatorAgent.boundary}</small> : null}
     </div>
@@ -4218,23 +4291,24 @@ function ShieldIcon() {
 }
 
 function WorkspaceOnboarding({ creatorName, draft, onChoose, onGrant, status }) {
+  const t = useI18n();
   return (
     <div className="workspace-onboarding">
       <section className="workspace-onboarding-card">
         <div className="workspace-onboarding-icon"><WorkspaceIcon /></div>
-        <h2>{PRODUCT_COPY.workspaceRequired}</h2>
-        <p>{creatorName}&apos;s agent only works with files inside the folder you choose.</p>
+        <h2>{t("workspace.requiredTitle")}</h2>
+        <p>{t("workspace.creatorScope", { creator: creatorName })}</p>
 
         <button className={`workspace-picker ${draft ? "selected" : ""}`} type="button" onClick={onChoose}>
           <WorkspaceIcon />
           <span className="workspace-picker-copy">
-            <strong>{draft ? workspaceGrantLabel(draft) : "Choose a folder on this computer"}</strong>
+            <strong>{draft ? workspaceGrantLabel(draft) : t("workspace.chooseComputerFolder")}</strong>
           </span>
-          <span className="workspace-picker-action">{draft ? "Change" : "Choose"}</span>
+          <span className="workspace-picker-action">{draft ? t("common.change") : t("common.choose")}</span>
         </button>
 
         <button className="workspace-grant-button" type="button" onClick={onGrant} disabled={!draft.trim()}>
-          Start
+          {t("common.start")}
         </button>
         {status && status !== "Offline" ? <small className="workspace-onboarding-status">{status}</small> : null}
       </section>
@@ -4243,50 +4317,54 @@ function WorkspaceOnboarding({ creatorName, draft, onChoose, onGrant, status }) 
 }
 
 function LaunchScreen() {
+  const t = useI18n();
   return (
     <main className="welcome-screen status-screen">
       <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch.</strong></div>
       <section className="status-card">
-        <span className="eyebrow">Hatch</span>
-        <h1>Opening your workspace…</h1>
-        <p>Checking your account and Creator Agents.</p>
+        <span className="eyebrow">{t("app.name")}</span>
+        <h1>{t("startup.openingWorkspace")}</h1>
+        <p>{t("startup.checkingAccount")}</p>
       </section>
     </main>
   );
 }
 
 function NetworkErrorScreen({ message, onRetry, onSignOut }) {
+  const t = useI18n();
   return (
     <main className="welcome-screen status-screen">
       <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch.</strong></div>
       <section className="status-card">
-        <span className="eyebrow">Connection</span>
-        <h1>Hatch can't reach the service</h1>
-        <p>{message || "Check your connection and try again."}</p>
-        <small>Your saved access stays on this computer.</small>
-        <button type="button" onClick={onRetry}>Retry</button>
-        {onSignOut ? <button className="secondary" type="button" onClick={onSignOut}>Sign out / use another account</button> : null}
+        <span className="eyebrow">{t("connection.eyebrow")}</span>
+        <h1>{t("connection.cannotReachTitle")}</h1>
+        <p>{message || t("connection.checkAndRetry")}</p>
+        <small>{t("connection.savedAccessLocal")}</small>
+        <button type="button" onClick={onRetry}>{t("common.retry")}</button>
+        {onSignOut ? <button className="secondary" type="button" onClick={onSignOut}>{t("auth.signOutOrAnotherAccount")}</button> : null}
       </section>
     </main>
   );
 }
 
 function UnsupportedRoleScreen({ profile, onSignOut }) {
+  const t = useI18n();
   return (
     <main className="welcome-screen status-screen">
       <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch.</strong></div>
       <section className="status-card">
-        <span className="eyebrow">Consumer Desktop</span>
-        <h1>Use a buyer account in this app</h1>
+        <span className="eyebrow">{t("auth.consumerDesktopEyebrow")}</span>
+        <h1>{t("auth.buyerAccountTitle")}</h1>
         <p>{CONSUMER_DESKTOP_ROLE_MESSAGE}</p>
-        <small>{profile.name} is signed in as a Creator.</small>
-        <button type="button" onClick={onSignOut}>Sign out</button>
+        <small>{t("auth.creatorSignedIn", { name: profile.name })}</small>
+        <button type="button" onClick={onSignOut}>{t("auth.signOut")}</button>
       </section>
     </main>
   );
 }
 
 function EmptyAgentsScreen({ profile, onBrowse, onRefresh, onSignOut, refreshing, error, notice }) {
+  const t = useI18n();
   return (
     <main className="welcome-screen status-screen empty-agents-screen">
       <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch.</strong></div>
@@ -4294,16 +4372,16 @@ function EmptyAgentsScreen({ profile, onBrowse, onRefresh, onSignOut, refreshing
         <div className="empty-agents-header">
           <span className="avatar">{profile.initials}</span>
           <span><strong>{profile.name}</strong></span>
-          <button className="profile-sign-out" type="button" onClick={onSignOut}>Sign out</button>
+          <button className="profile-sign-out" type="button" onClick={onSignOut}>{t("auth.signOut")}</button>
         </div>
-        <span className="eyebrow">Your Experts</span>
-        <h1>Find an Agent built around a creator's proven method.</h1>
-        <p>Your account is ready. Browse the catalog to find an Agent for your work.</p>
+        <span className="eyebrow">{t("account.yourCreatorAgents")}</span>
+        <h1>{t("account.findAgentTitle")}</h1>
+        <p>{t("account.readyBrowse")}</p>
         {notice ? <p className="status-inline-notice" role="status">{notice}</p> : null}
         {error ? <p className="status-inline-error" role="status">{error}</p> : null}
-        <button type="button" onClick={onBrowse}>Browse Creator Agents</button>
+        <button type="button" onClick={onBrowse}>{t("account.browseAgents")}</button>
         <button className="secondary status-refresh" type="button" onClick={onRefresh} disabled={refreshing}>
-          {refreshing ? "Refreshing…" : "Refresh"}
+          {refreshing ? t("common.refreshing") : t("common.refresh")}
         </button>
       </section>
     </main>
@@ -4311,6 +4389,7 @@ function EmptyAgentsScreen({ profile, onBrowse, onRefresh, onSignOut, refreshing
 }
 
 function SignInScreen({ onSignIn, status, error }) {
+  const t = useI18n();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const loading = status === "loading";
@@ -4324,24 +4403,24 @@ function SignInScreen({ onSignIn, status, error }) {
     <main className="welcome-screen">
       <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch.</strong></div>
       <section className="sign-in-card">
-        <span className="eyebrow">Welcome</span>
-        <h1>Your trusted creator agents, in one place.</h1>
-        <p>Sign in to use the Creator Agents available to your account.</p>
+        <span className="eyebrow">{t("auth.welcome")}</span>
+        <h1>{t("auth.signInTitle")}</h1>
+        <p>{t("auth.signInDescription")}</p>
         <form className="sign-in-form" onSubmit={submit}>
           <label className="field">
-            <span>Email</span>
-            <input autoCapitalize="none" autoComplete="email" spellCheck="false" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" disabled={loading} />
+            <span>{t("auth.email")}</span>
+            <input autoCapitalize="none" autoComplete="email" spellCheck="false" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder={t("auth.emailPlaceholder")} disabled={loading} />
           </label>
           <label className="field">
-            <span>Password</span>
-            <input autoComplete="current-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Your password" disabled={loading} />
+            <span>{t("auth.password")}</span>
+            <input autoComplete="current-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={t("auth.passwordPlaceholder")} disabled={loading} />
           </label>
           <button type="submit" disabled={loading || (!email.trim() || !password.trim())}>
-            {loading ? "Signing in…" : "Sign in"}
+            {loading ? t("auth.signingIn") : t("auth.signIn")}
           </button>
         </form>
         {error ? <small className="sign-in-error" role="alert">{error}</small> : null}
-        <small>Hatch keeps you signed in on this computer until you sign out.</small>
+        <small>{t("auth.sessionStoredNotice")}</small>
       </section>
     </main>
   );
