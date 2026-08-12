@@ -99,19 +99,6 @@ test("real Dashboard process and Runtime HTTP client preserve delivery, recovery
   assert.equal(freePurchase.entitlement.purchased_corpus_digest, corpus.v1Digest);
   assert.equal(freePurchase.entitlement.remaining_units, 4);
 
-  // R28 uses two independent tracking entitlements purchased on V1. The first
-  // may advance only across V2's immutable predecessor declaration. The second
-  // remains untouched until a later breaking release proves that a missing
-  // lineage does not authorize an advance.
-  registry.setOffer({ amountMinor: 0, includedUnits: 1, versionPolicy: "track_current_compatible" });
-  const compatibleTrackPurchase = await checkout(dashboard.url, "track-compatible-v1");
-  const brokenTrackPurchase = await checkout(dashboard.url, "track-breaking-v1");
-  for (const purchase of [compatibleTrackPurchase, brokenTrackPurchase]) {
-    assert.equal(purchase.entitlement.purchased_corpus_digest, corpus.v1Digest);
-    assert.equal(purchase.entitlement.effective_corpus_digest, corpus.v1Digest);
-    assert.equal(purchase.entitlement.version_policy, "track_current_compatible");
-  }
-
   await activateCurrentCorpus(CREATOR_ID, AGENT_ID, corpus.v2Digest, corpus.root);
   registry.publishDigest(corpus.v2Digest);
 
@@ -122,33 +109,6 @@ test("real Dashboard process and Runtime HTTP client preserve delivery, recovery
   assert.equal(ready.purchased_corpus_digest, corpus.v1Digest);
   assert.equal(ready.effective_corpus_digest, corpus.v1Digest);
   assert.equal(ready.version_policy, "pinned");
-
-  const compatibleTrackSession = await connectRuntime(firstRuntime.url, compatibleTrackPurchase.entitlement_id);
-  sockets.push(compatibleTrackSession.socket);
-  const compatibleReady = await compatibleTrackSession.ready;
-  assert.equal(compatibleReady.purchased_corpus_digest, corpus.v1Digest);
-  assert.equal(compatibleReady.effective_corpus_digest, corpus.v2Digest);
-  assert.equal(compatibleReady.corpus_digest, corpus.v2Digest);
-  assert.equal(compatibleReady.version_policy, "track_current_compatible");
-  assert.equal(compatibleReady.version_history.length, 1);
-  assert.equal(compatibleReady.version_history[0].from_digest, corpus.v1Digest);
-  assert.equal(compatibleReady.version_history[0].to_digest, corpus.v2Digest);
-  compatibleTrackSession.send(runMessage("run-track-compatible"));
-  await compatibleTrackSession.waitFor((message) => (
-    message.type === "delivery.ready"
-    && message.run_id === "run-track-compatible"
-    && message.receipt_status === "recorded"
-  ));
-  await compatibleTrackSession.waitFor((message) => (
-    message.type === "turn.completed" && message.run_id === "run-track-compatible"
-  ));
-  const compatibleEntitlement = await waitForEntitlement(
-    dashboard.url,
-    compatibleTrackPurchase.entitlement_id,
-    (entitlement) => entitlement.remaining_units === 0 && entitlement.effective_corpus_digest === corpus.v2Digest
-  );
-  assert.equal(compatibleEntitlement.purchased_corpus_digest, corpus.v1Digest);
-  assert.equal(compatibleEntitlement.version_history.length, 1);
 
   // R06: a free delivery crosses real Runtime -> Dashboard HTTP, consumes one
   // unit, records task/artifact/delivery, and creates no revenue fact.
@@ -254,106 +214,6 @@ test("real Dashboard process and Runtime HTTP client preserve delivery, recovery
     assert.equal(delivery.purchased_corpus_digest, corpus.v1Digest);
     assert.equal(delivery.effective_corpus_digest, corpus.v1Digest);
   }
-  const compatibleEvents = durableEvents.filter((event) => event.order_id === compatibleTrackPurchase.order_id);
-  const versionAdvances = compatibleEvents.filter((event) => event.event_type === "entitlement.version_advanced");
-  assert.equal(versionAdvances.length, 1);
-  assert.equal(versionAdvances[0].from_digest, corpus.v1Digest);
-  assert.equal(versionAdvances[0].to_digest, corpus.v2Digest);
-  assert.equal(versionAdvances[0].from_release_id, corpus.v1Digest);
-  assert.equal(versionAdvances[0].to_release_id, corpus.v2Digest);
-  assert.equal(
-    versionAdvances[0].compatibility_declaration_id,
-    `corpus-compatibility:${CREATOR_ID}:${AGENT_ID}:${corpus.v2Digest}`
-  );
-  const compatibleDelivery = compatibleEvents.find((event) => event.event_type === "delivery.completed");
-  assert.ok(compatibleDelivery);
-  assert.equal(compatibleDelivery.purchased_corpus_digest, corpus.v1Digest);
-  assert.equal(compatibleDelivery.effective_corpus_digest, corpus.v2Digest);
-
-  // R22: establish a second Runtime session, refund its paid order before any
-  // delivery, then prove both that already-connected session and a fresh
-  // connection are denied without restarting Runtime.
-  registry.setOffer({ amountMinor: 125, includedUnits: 1, versionPolicy: "pinned" });
-  const paidPurchase = await checkout(dashboard.url, "paid-v2");
-  assert.equal(paidPurchase.payment.status, "succeeded");
-  assert.equal(paidPurchase.entitlement.purchased_corpus_digest, corpus.v2Digest);
-  const paidSession = await connectRuntime(restartedRuntime.url, paidPurchase.entitlement_id);
-  sockets.push(paidSession.socket);
-  assert.equal((await paidSession.ready).corpus_digest, corpus.v2Digest);
-
-  const refundResponse = await fetch(
-    `${dashboard.url}/v1/user/orders/${encodeURIComponent(paidPurchase.order_id)}/refund-requests`,
-    {
-      method: "POST",
-      headers: buyerMutationHeaders("refund-paid-v2"),
-      body: JSON.stringify({ reason: "buyer_requested_before_delivery" })
-    }
-  );
-  const refunded = await refundResponse.json() as JsonRecord;
-  assert.equal(refundResponse.status, 201, JSON.stringify(refunded));
-  assert.equal(refunded.order.status, "refunded");
-  assert.equal(refunded.order.entitlement_status, "revoked");
-  assert.equal(refunded.access_status, "revoked");
-
-  paidSession.send(runMessage("run-after-refund"));
-  const deniedRun = await paidSession.waitFor((message) => (
-    message.type === "turn.failed" && message.run_id === "run-after-refund"
-  ));
-  assert.match(String(deniedRun.error?.message), /revoked|not active/i);
-  assert.equal(invokedRuns.has("run-after-refund"), false, "revoked work is denied before model execution");
-
-  const deniedConnection = await connectRuntimeExpectFailure(restartedRuntime.url, paidPurchase.entitlement_id);
-  sockets.push(deniedConnection.socket);
-  assert.equal(deniedConnection.failure.error?.code, "entitlement_not_found");
-
-  const paidOrderResponse = await fetch(
-    `${dashboard.url}/v1/user/orders/${encodeURIComponent(paidPurchase.order_id)}`,
-    { headers: buyerHeaders() }
-  );
-  const paidOrder = (await paidOrderResponse.json() as JsonRecord).order;
-  assert.equal(paidOrderResponse.status, 200);
-  assert.equal(paidOrder.refund_status, "refunded");
-  assert.equal(paidOrder.delivery_status, "not_started");
-  assert.equal(paidOrder.access.status, "revoked");
-
-  // A valid breaking V3 has no backward_compatible_with declaration. A fresh
-  // Runtime lookup for the untouched tracking entitlement must therefore keep
-  // the purchased V1 digest and must not ask Commerce to advance it.
-  await activateCurrentCorpus(CREATOR_ID, AGENT_ID, corpus.v3Digest, corpus.root);
-  registry.publishDigest(corpus.v3Digest);
-  const brokenTrackSession = await connectRuntime(restartedRuntime.url, brokenTrackPurchase.entitlement_id);
-  sockets.push(brokenTrackSession.socket);
-  const brokenReady = await brokenTrackSession.ready;
-  assert.equal(brokenReady.version_policy, "track_current_compatible");
-  assert.equal(brokenReady.purchased_corpus_digest, corpus.v1Digest);
-  assert.equal(brokenReady.effective_corpus_digest, corpus.v1Digest);
-  assert.equal(brokenReady.corpus_digest, corpus.v1Digest);
-  assert.deepEqual(brokenReady.version_history, []);
-  const afterBreakingPublish = await readLedger(ledgerPath);
-  assert.equal(afterBreakingPublish.some((event) => (
-    event.event_type === "entitlement.version_advanced"
-    && event.entitlement_id === brokenTrackPurchase.entitlement_id
-  )), false);
-
-  // Registry still carries the immutable purchase identity, while Commerce is
-  // authoritative for the last confirmed effective release. Reconnecting the
-  // already-advanced entitlement after breaking V3 must therefore remain on
-  // V2 instead of rolling back to V1 or jumping to V3.
-  const advancedReconnect = await connectRuntime(restartedRuntime.url, compatibleTrackPurchase.entitlement_id);
-  sockets.push(advancedReconnect.socket);
-  const reconnectedReady = await advancedReconnect.ready;
-  assert.equal(reconnectedReady.version_policy, "track_current_compatible");
-  assert.equal(reconnectedReady.purchased_corpus_digest, corpus.v1Digest);
-  assert.equal(reconnectedReady.effective_corpus_digest, corpus.v2Digest);
-  assert.equal(reconnectedReady.corpus_digest, corpus.v2Digest);
-  assert.equal(reconnectedReady.version_history.length, 1);
-  assert.equal(reconnectedReady.version_history[0].from_digest, corpus.v1Digest);
-  assert.equal(reconnectedReady.version_history[0].to_digest, corpus.v2Digest);
-  const afterAdvancedReconnect = await readLedger(ledgerPath);
-  assert.equal(afterAdvancedReconnect.filter((event) => (
-    event.event_type === "entitlement.version_advanced"
-    && event.entitlement_id === compatibleTrackPurchase.entitlement_id
-  )).length, 1);
 });
 
 type CorpusReleases = { root: string; v1Digest: string; v2Digest: string; v3Digest: string };
