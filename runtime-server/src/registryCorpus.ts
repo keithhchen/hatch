@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { cp, lstat, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { access, cp, lstat, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { unzipSync } from "fflate";
 import {
@@ -285,7 +285,76 @@ export async function installCurrentCorpus(verified: VerifiedAgentCorpus, destin
   }
 }
 
-async function pathExists(target: string): Promise<boolean> {
+/** Materialize a verified release without changing the Runtime's current pointer. */
+export async function materializeAgentCorpusRelease(
+  verified: VerifiedAgentCorpus,
+  destinationRoot: string
+): Promise<string> {
+  const destination = immutableReleasePath(destinationRoot, verified.creator.id, verified.agentId, verified.digest);
+  if (await exists(destination)) {
+    const existing = await verifyAgentCorpus(destination, verified.creator.id, verified.agentId);
+    if (existing.digest !== verified.digest) throw new AgentCorpusVerificationError("Immutable Agent Corpus path contains a different digest");
+    return destination;
+  }
+  const temporary = `${destination}.${process.pid}.${randomUUID()}.tmp`;
+  await mkdir(path.dirname(destination), { recursive: true });
+  await cp(verified.path, temporary, { recursive: true, force: false });
+  try {
+    const copied = await verifyAgentCorpus(temporary, verified.creator.id, verified.agentId);
+    if (copied.digest !== verified.digest) throw new AgentCorpusVerificationError("Copied Agent Corpus digest changed during materialization");
+    try {
+      await rename(temporary, destination);
+    } catch (error) {
+      if (!await exists(destination)) throw error;
+      const concurrent = await verifyAgentCorpus(destination, verified.creator.id, verified.agentId);
+      if (concurrent.digest !== verified.digest) throw error;
+    }
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
+  return destination;
+}
+
+/** Atomically activate an already materialized content-addressed release. */
+export async function activateCurrentCorpus(
+  creatorId: string,
+  agentId: string,
+  corpusDigest: string,
+  destinationRoot: string
+): Promise<void> {
+  const release = immutableReleasePath(destinationRoot, creatorId, agentId, corpusDigest);
+  const verified = await verifyAgentCorpus(release, creatorId, agentId);
+  if (verified.digest !== corpusDigest) throw new AgentCorpusVerificationError("Immutable Agent Corpus digest mismatch");
+  const pointerPath = currentPointerPath(destinationRoot, creatorId, agentId);
+  const temporary = `${pointerPath}.${process.pid}.${randomUUID()}.tmp`;
+  await mkdir(path.dirname(pointerPath), { recursive: true });
+  try {
+    await writeFile(temporary, `${JSON.stringify({
+      schema_version: 1,
+      creator_id: creatorId,
+      agent_id: agentId,
+      corpus_digest: corpusDigest,
+      activated_at: new Date().toISOString()
+    })}\n`, "utf8");
+    await rename(temporary, pointerPath);
+  } finally {
+    await rm(temporary, { force: true });
+  }
+}
+
+export function immutableReleasePath(root: string, creatorId: string, agentId: string, digest: string): string {
+  if (!IDENTIFIER.test(creatorId) || !IDENTIFIER.test(agentId) || !DIGEST.test(digest)) {
+    throw new AgentCorpusVerificationError("Invalid immutable Agent Corpus identity");
+  }
+  return containedPath(root, path.join(".immutable-corpora", creatorId, agentId, `sha256-${digest.slice(7)}`));
+}
+
+export function currentPointerPath(root: string, creatorId: string, agentId: string): string {
+  if (!IDENTIFIER.test(creatorId) || !IDENTIFIER.test(agentId)) throw new AgentCorpusVerificationError("Invalid Agent Corpus identity");
+  return containedPath(root, path.join(".current-corpora", creatorId, `${agentId}.json`));
+}
+
+async function exists(target: string): Promise<boolean> {
   try {
     await access(target);
     return true;
@@ -293,6 +362,18 @@ async function pathExists(target: string): Promise<boolean> {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
     throw error;
   }
+}
+
+export async function listCurrentCorpora(root: string, creatorId: string): Promise<VerifiedAgentCorpus[]> {
+  const creatorRoot = containedPath(root, creatorId);
+  let entries;
+  try { entries = await readdir(creatorRoot, { withFileTypes: true }); } catch { return []; }
+  const result: VerifiedAgentCorpus[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    try { result.push(await verifyAgentCorpus(containedPath(creatorRoot, entry.name), creatorId, entry.name)); } catch { /* ignore incomplete entries */ }
+  }
+  return result;
 }
 
 function assetDescriptors(corpus: AgentCorpus): Array<{ path: string; sha256: string }> {

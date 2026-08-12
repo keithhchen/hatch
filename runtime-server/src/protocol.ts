@@ -226,20 +226,11 @@ export type RuntimeReady = {
   product_id: string;
   agent_id?: string;
   corpus_digest: string;
-  entitlement_id?: string;
   purchased_corpus_digest?: string;
   effective_corpus_digest?: string;
   version_policy?: "pinned" | "track_current_compatible";
-  version_history?: Array<{
-    from_digest: string;
-    to_digest: string;
-    from_release_id?: string | null;
-    to_release_id?: string | null;
-    compatibility_declaration_id?: string | null;
-    reason?: string | null;
-    actor_id?: string | null;
-    advanced_at?: string;
-  }>;
+  version_history?: Array<Record<string, unknown>>;
+  entitlement_id?: string;
   creator_agent?: {
     creator: { id: string; name: string };
     product: {
@@ -262,6 +253,7 @@ export type DeliveryReady = {
   artifact_digest: string;
   delivery_id: string;
   artifact_type: "file" | "message";
+  /** Accounting may be durably queued after the user-visible artifact is saved. */
   receipt_status?: "recorded" | "syncing";
 };
 
@@ -398,6 +390,7 @@ export type RunFinal = {
   type: "turn.completed";
   run_id: string;
   finish_reason: OutputFinishReason;
+  receipt_status?: "recorded" | "syncing";
   timing?: {
     total_ms: number;
     setup_ms: number;

@@ -668,11 +668,8 @@ function searchQuery(prompt: string): string {
 }
 
 export function requestedOutputPath(prompt: string): string | undefined {
-  // Require both English word boundaries. Without the leading boundary,
-  // ordinary task text such as "Rewrite ... exactly what you need" was
-  // misread as "write ... at you" and incorrectly triggered fs.write.
-  const verbs = "(?:(?:\\b(?:save|write|create)\\b)|保存|写入|创建)";
-  const connectors = "(?:(?:\\b(?:to|as|at)\\b)|到|为|至)";
+  const verbs = "(?:(?:save|write|create)\\b|保存|写入|创建)";
+  const connectors = "(?:(?:to|as|at)\\b|到|为|至)";
   const quoted = prompt.match(new RegExp(`${verbs}[^\"'\\n]*?${connectors}\\s+[\"“']([^\"”'\\n]+)[\"”']`, "i"));
   const bare = prompt.match(new RegExp(`${verbs}[^\\n]*?${connectors}\\s+([A-Za-z0-9_.\\/-]+)`, "i"));
   const candidate = (quoted?.[1] ?? bare?.[1] ?? "")

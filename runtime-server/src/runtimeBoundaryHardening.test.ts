@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createHash, createHmac } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
@@ -1447,6 +1447,7 @@ test("HTTP global gate and request deadline bound abort-ignoring authorization w
 });
 
 test("disconnect cleanup finishes when cancellation persistence fails", async () => {
+  const attemptId = randomUUID();
   let storeClosed = false;
   const store = {
     append: async (event: { type: string; status?: string; to?: string }) => {
@@ -1479,7 +1480,7 @@ test("disconnect cleanup finishes when cancellation persistence fails", async ()
     socket.send(JSON.stringify({ ...hello("fixture-token", "disconnect-install"), local_tools: ["file_read"] }));
     await ready;
     const requested = waitForMessage(socket, (message) => message.type === "tool_call.request");
-    socket.send(JSON.stringify(clientMessage("disconnect-run", "disconnect-conversation")));
+    socket.send(JSON.stringify(clientMessage(`disconnect-run-${attemptId}`, `disconnect-conversation-${attemptId}`)));
     await requested;
     socket.close();
 

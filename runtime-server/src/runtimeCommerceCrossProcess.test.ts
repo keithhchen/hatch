@@ -15,7 +15,7 @@ import { HttpCommerceEventSink } from "./commerceHttpSink.js";
 import { DeliveryAccountingOutbox } from "./deliveryOutbox.js";
 import { RegistryEntitlementResolver } from "./entitlements.js";
 import { createRuntimeServer, type RuntimeServer } from "./index.js";
-import type { OutboundMessage } from "./protocol.js";
+import { PROTOCOL_VERSION, type OutboundMessage } from "./protocol.js";
 import {
   activateCurrentCorpus,
   materializeAgentCorpusRelease,
@@ -214,6 +214,51 @@ test("real Dashboard process and Runtime HTTP client preserve delivery, recovery
     assert.equal(delivery.purchased_corpus_digest, corpus.v1Digest);
     assert.equal(delivery.effective_corpus_digest, corpus.v1Digest);
   }
+  // R22: establish a second Runtime session, cancel its free order before any
+  // delivery, then prove both that already-connected session and a fresh
+  // connection are denied without restarting Runtime.
+  const revokedPurchase = await checkout(dashboard.url, "revoked-free-v2");
+  assert.equal(revokedPurchase.payment.status, "not_required");
+  assert.equal(revokedPurchase.entitlement.purchased_corpus_digest, corpus.v2Digest);
+  const revokedSession = await connectRuntime(restartedRuntime.url, revokedPurchase.entitlement_id);
+  sockets.push(revokedSession.socket);
+  assert.equal((await revokedSession.ready).corpus_digest, corpus.v2Digest);
+
+  const refundResponse = await fetch(
+    `${dashboard.url}/v1/user/orders/${encodeURIComponent(revokedPurchase.order_id)}/refund-requests`,
+    {
+      method: "POST",
+      headers: buyerMutationHeaders("cancel-free-v2"),
+      body: JSON.stringify({ reason: "buyer_requested_before_delivery" })
+    }
+  );
+  const refunded = await refundResponse.json() as JsonRecord;
+  assert.equal(refundResponse.status, 201, JSON.stringify(refunded));
+  assert.equal(refunded.order.status, "cancelled");
+  assert.equal(refunded.order.entitlement_status, "revoked");
+  assert.equal(refunded.access_status, "revoked");
+
+  revokedSession.send(runMessage("run-after-refund"));
+  const deniedRun = await revokedSession.waitFor((message) => (
+    message.type === "turn.failed" && message.run_id === "run-after-refund"
+  ));
+  assert.match(String(deniedRun.error?.message), /revoked|not active|no longer available/i);
+  assert.equal(invokedRuns.has("run-after-refund"), false, "revoked work is denied before model execution");
+
+  const deniedConnection = await connectRuntimeExpectFailure(restartedRuntime.url, revokedPurchase.entitlement_id);
+  sockets.push(deniedConnection.socket);
+  assert.equal(deniedConnection.failure.error?.code, "entitlement_not_found");
+
+  const revokedOrderResponse = await fetch(
+    `${dashboard.url}/v1/user/orders/${encodeURIComponent(revokedPurchase.order_id)}`,
+    { headers: buyerHeaders() }
+  );
+  const revokedOrder = (await revokedOrderResponse.json() as JsonRecord).order;
+  assert.equal(revokedOrderResponse.status, 200);
+  assert.equal(revokedOrder.refund_status, "refunded");
+  assert.equal(revokedOrder.delivery_status, "not_started");
+  assert.equal(revokedOrder.access.status, "revoked");
+
 });
 
 type CorpusReleases = { root: string; v1Digest: string; v2Digest: string; v3Digest: string };
@@ -538,7 +583,7 @@ function scenarioRuntimeFactory(input: {
         type: "tool_call.delta",
         run_id: run.run_id,
         tool_call_id: `write-${run.run_id}`,
-        name: "fs.write",
+        name: "file_write",
         locality: "client",
         approval: "ask",
         status: "completed",
@@ -620,14 +665,20 @@ async function openRuntimeSocket(runtimeUrl: string): Promise<Omit<RuntimeConnec
     socket,
     messages,
     send: (message) => socket.send(JSON.stringify(message)),
-    waitFor: (predicate, timeoutMs) => waitFor(() => messages.find(predicate), timeoutMs)
+    waitFor: async (predicate, timeoutMs) => {
+      try {
+        return await waitFor(() => messages.find(predicate), timeoutMs);
+      } catch (error) {
+        throw new Error(`${error instanceof Error ? error.message : String(error)}; messages=${JSON.stringify(messages)}`);
+      }
+    }
   };
 }
 
 function hello(entitlementId: string): JsonRecord {
   return {
     type: "client.hello",
-    protocol_version: "0.4",
+    protocol_version: PROTOCOL_VERSION,
     installation_id: "desktop-cross-process",
     auth_token: BUYER_TOKEN,
     entitlement_id: entitlementId,

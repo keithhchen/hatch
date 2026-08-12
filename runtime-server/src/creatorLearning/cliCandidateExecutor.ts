@@ -149,7 +149,7 @@ async function runChildProcess(
       cleanup();
       resolve(payload);
     });
-    child.stdin.on("error", fail);
+    child.stdin.on("error", (error) => fail(signal?.aborted ? abortError(signal) : error));
     child.stdin.end(`${JSON.stringify(input)}\n`);
   });
 }

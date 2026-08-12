@@ -33,10 +33,55 @@ export async function createDashboardApp(options = {}) {
   const registryUrl = options.registryUrl
     ?? process.env.HATCH_REGISTRY_URL
     ?? "http://127.0.0.1:8100";
-  const commerceServiceToken = options.commerceServiceToken
-    ?? process.env.HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN
-    ?? "";
-  const ledger = await CommerceLedger.open({ filePath: ledgerPath });
+  const publicOrigin = options.publicOrigin
+    ?? process.env.HATCH_PUBLIC_ORIGIN
+    ?? (process.env.NODE_ENV === "production" ? "https://hatch.tokenquadrant.cn" : "http://127.0.0.1:8500");
+  let PostgresPool = options.PostgresPool;
+  let ledger = options.ledger;
+  if (!ledger && commerceDatabaseUrl) {
+    if (!PostgresPool) ({ Pool: PostgresPool } = await import("pg"));
+    ledger = await PostgresCommerceLedger.open({
+      Pool: PostgresPool,
+      connectionString: commerceDatabaseUrl,
+      poolOptions: { max: Number(options.commercePoolSize ?? process.env.HATCH_COMMERCE_POOL_SIZE ?? 10) }
+    });
+  }
+  if (!ledger) {
+    if (process.env.NODE_ENV === "production" && options.allowFileLedger !== true) {
+      throw new Error("HATCH_COMMERCE_DATABASE_URL is required in production; the JSONL ledger is development-only.");
+    }
+    ledger = await CommerceLedger.open({ filePath: ledgerPath });
+  }
+  if (commerceDatabaseUrl && !PostgresPool) ({ Pool: PostgresPool } = await import("pg"));
+  const portalStatePath = options.portalStatePath
+    ?? process.env.HATCH_PORTAL_STATE_PATH
+    ?? `${ledgerPath}.portal.json`;
+  const portalState = options.portalState ?? await PortalStateStore.open(commerceDatabaseUrl
+    ? {
+        Pool: PostgresPool,
+        connectionString: commerceDatabaseUrl,
+        poolOptions: { max: Math.max(2, Math.min(5, Number(options.commercePoolSize ?? process.env.HATCH_COMMERCE_POOL_SIZE ?? 10))) }
+      }
+    : { filePath: portalStatePath });
+  const telemetry = options.telemetry ?? await PortalTelemetryStore.open(commerceDatabaseUrl
+    ? {
+        Pool: PostgresPool,
+        connectionString: commerceDatabaseUrl,
+        poolOptions: { max: 2 }
+      }
+    : {
+        filePath: options.telemetryPath
+          ?? process.env.HATCH_PORTAL_TELEMETRY_PATH
+          ?? `${portalStatePath}.telemetry.jsonl`
+      });
+  const recordTelemetry = (eventName, attributes, idempotencyKey) => telemetry
+    .record(eventName, attributes, { idempotencyKey })
+    .catch(() => undefined);
+  const analyticsRateLimit = Math.max(1, Number(options.analyticsRateLimit
+    ?? process.env.HATCH_ANALYTICS_RATE_LIMIT_PER_MINUTE
+    ?? 120));
+  const analyticsRateWindowMs = Math.max(1_000, Number(options.analyticsRateWindowMs ?? 60_000));
+  const analyticsRateWindows = new Map();
   const fetchImpl = options.fetchImpl ?? fetch;
   const factoryRequestMaxBytes = options.factoryRequestMaxBytes ?? CREATOR_FACTORY_JSON_BODY_MAX_BYTES;
   const configuredPaymentMode = options.paymentMode ?? process.env.HATCH_COMMERCE_PAYMENT_MODE ?? "disabled";
@@ -75,6 +120,7 @@ export async function createDashboardApp(options = {}) {
   const exposeBearerTokens = options.exposeBearerTokens === true;
   const registryAccessServiceToken = options.registryAccessServiceToken
     ?? process.env.HATCH_REGISTRY_ACCESS_SERVICE_TOKEN
+    ?? process.env.HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN
     ?? "";
   const registryDeploymentServiceToken = options.registryDeploymentServiceToken
     ?? process.env.HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN
@@ -792,11 +838,11 @@ export async function createDashboardApp(options = {}) {
         });
       }
       if (request.method === "POST" && url.pathname === "/v1/auth/logout") {
-        await registryRequest(registryUrl, "/v1/auth/logout", {
-          method: "POST",
-          fetchImpl,
-          headers: { authorization: `Bearer ${bearerToken(request)}` }
-        });
+        const csrfError = cookieCsrfError(request);
+        if (csrfError) return send(response, csrfError.status, csrfError.body);
+        const webSessionId = requestCookies(request).hatch_web_session;
+        if (webSessionId) await portalState.deleteWebSession(webSessionId);
+        clearWebSessionCookies(request, response);
         return send(response, 204, undefined);
       }
       if (request.method === "GET" && url.pathname === "/v1/auth/me") {
@@ -1060,9 +1106,6 @@ export async function createDashboardApp(options = {}) {
       if (request.method === "POST" && url.pathname === "/v1/user/checkout") {
         const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
-        if (!commerceServiceToken.trim()) {
-          return send(response, 503, { error: { code: "commerce_unavailable", message: "Commerce entitlement service is not configured." } });
-        }
         const body = await readJson(request);
         const commandKey = requireCommandKey(request, body);
         const creatorId = String(body.creator_id ?? "").trim();
@@ -1098,63 +1141,15 @@ export async function createDashboardApp(options = {}) {
         if (!agent) {
           return send(response, 404, { error: { code: "agent_unavailable", message: "The published Agent could not be found." } });
         }
-        const product = catalogAgentToProduct(agent);
-
-        // Payment is intentionally a zero-value checkout for this stage. The
-        // order still goes through the same paid/order/entitlement path so a
-        // real provider can replace this boundary later without changing the
-        // consumer or Runtime contracts.
-        const orderKey = `order:${authentication.profile.id}:${creatorId}:${productId}`;
-        const existing = ledger.findByIdempotencyKey(orderKey);
-        if (existing) {
-          const grant = await registryRequest(
-            registryUrl,
-            "/v1/commerce/agent-access",
-            {
-              method: "POST",
-              body: JSON.stringify({
-                order_id: existing.order_id,
-                user_id: authentication.profile.id,
-                creator_id: creatorId,
-                agent_id: agent.agent_id
-              }),
-              fetchImpl,
-              headers: { authorization: `Bearer ${commerceServiceToken}` }
-            }
-          );
-          await recordEntitlementGrant(ledger, existing, grant);
-          return send(response, 200, { order: projectBuyerOrders(ledger.listEvents(), authentication.profile.id).find((order) => order.order_id === existing.order_id), payment: zeroPayment(existing.order_id, existing.currency), entitlement: grant });
-        }
-
-        const orderId = `order_${randomId()}`;
-        const order = await ledger.append("order.placed", {
-          order_id: orderId,
-          buyer_id: authentication.profile.id,
-          buyer_display_name: authentication.profile.display_name,
-          creator_id: creatorId,
-          agent_id: agent.agent_id,
-          product_id: productId,
-          product_name: product.name,
-          corpus_digest: agent.corpus_digest,
-          gross_minor: 0,
-          currency: product.currency,
-          payment_status: "paid",
-          payment_id: `pay_zero_${orderId.slice("order_".length)}`
-        }, { idempotencyKey: orderKey });
-        const grant = await registryRequest(
-          registryUrl,
-          "/v1/commerce/agent-access",
-          {
-            method: "POST",
-            body: JSON.stringify({
-              order_id: order.order_id,
-              user_id: authentication.profile.id,
-              creator_id: creatorId,
-              agent_id: agent.agent_id
-            }),
-            fetchImpl,
-            headers: { authorization: `Bearer ${commerceServiceToken}` }
-          }
+        const product = publicCatalogAgent(
+          agent,
+          portalState.getCreatorProduct(agent.creator_id, agent.product_id),
+          paymentMode,
+          await authoritativeProductOffer(
+            commerce,
+            agent,
+            portalState.getCreatorProduct(agent.creator_id, agent.product_id)
+          )
         );
         if (!product.offer || product.availability !== "published") {
           return send(response, 409, { error: { code: "not_for_sale", message: "This Agent does not have an active offer." } });
@@ -1203,6 +1198,11 @@ export async function createDashboardApp(options = {}) {
           commandKey
         });
         return send(response, outcome.replayed ? 200 : 201, outcome.body);
+      }
+
+      const accessMatch = url.pathname.match(/^\/v1\/user\/agents\/([^/]+)\/([^/]+)\/access$/);
+      if (request.method === "POST" && accessMatch) {
+        return send(response, 404, { error: { code: "not_found", message: "Route not found." } });
       }
 
       if (request.method === "GET" && url.pathname === "/v1/creator/agents") {
@@ -1990,9 +1990,9 @@ async function registryRequest(registryUrl, pathname, options = {}) {
     ...requestOptions,
     headers: { "content-type": "application/json", ...(options.headers ?? {}) }
   });
-  const payload = response.status === 204 ? undefined : await response.json();
+  const payload = await response.json();
   if (!response.ok) {
-    const error = new Error(payload?.detail ?? "Registry rejected the Agent request.");
+    const error = new Error(payload.detail ?? "Registry rejected the Agent request.");
     error.status = response.status;
     error.code = payload.code ?? "registry_rejected_agent_request";
     if (payload.details !== undefined) error.details = payload.details;

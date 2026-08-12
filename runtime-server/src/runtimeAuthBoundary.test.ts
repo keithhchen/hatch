@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import http from "node:http";
 import test from "node:test";
 import { WebSocket } from "ws";
@@ -180,6 +181,7 @@ test("Runtime blocks a real WebSocket turn when its entitlement is revoked after
 });
 
 test("Runtime re-introspects a Creator session per turn without requiring a buyer entitlement", async () => {
+  const runId = `run-creator-authorized-${randomUUID()}`;
   let identityCalls = 0;
   let runCalls = 0;
   const identityResolver = {
@@ -243,9 +245,9 @@ test("Runtime re-introspects a Creator session per turn without requiring a buye
     assert.equal((await readyResponse).type, "session.ready");
 
     const completedResponse = waitForSocketMessage(socket, (message) => message.type === "turn.completed");
-    socket.send(JSON.stringify(clientMessage("run-creator-authorized")));
+    socket.send(JSON.stringify(clientMessage(runId)));
     const completed = await completedResponse;
-    assert.equal(completed.run_id, "run-creator-authorized");
+    assert.equal(completed.run_id, runId);
     assert.equal(runCalls, 1);
     assert.equal(identityCalls, 2);
   } finally {
@@ -658,6 +660,9 @@ async function createRevocableRuntimeScenario(): Promise<{
     close: async () => {
       scenario.socket?.close();
       await runtime.close();
+      // Node's global fetch keeps the Registry connection alive. Closing the
+      // fixture must not wait for the client keep-alive timeout.
+      registry.closeAllConnections();
       await new Promise<void>((resolve, reject) => registry.close((error) => error ? reject(error) : resolve()));
     }
   };
