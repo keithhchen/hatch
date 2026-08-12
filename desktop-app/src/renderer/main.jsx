@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "@fontsource-variable/inter";
 import "@fontsource-variable/noto-sans-sc";
@@ -106,6 +106,14 @@ import { projectApprovedRuntimeStream, summarizeTurnTiming } from "./stream-proj
 import { createTextRevealController, textRevealBoundary } from "./text-reveal.js";
 import { createTauriSettingsStore } from "./desktop-settings.js";
 import {
+  DEFAULT_LANGUAGE,
+  LANGUAGE_OPTIONS,
+  SYSTEM_LANGUAGE,
+  createTranslator,
+  normalizeLanguagePreference,
+  resolveLanguage
+} from "./i18n.js";
+import {
   importLegacyProfileSettings,
   purgeLegacySensitiveStorage
 } from "./legacy-settings-migration.js";
@@ -198,9 +206,11 @@ function DesktopAuxiliaryWindow({ kind }) {
   return (
     <main className="desktop-auxiliary-window" aria-labelledby="auxiliary-window-title">
       <header className="desktop-auxiliary-header" data-tauri-drag-region>
-        <span className="desktop-auxiliary-mark" aria-hidden="true">●</span>
+        <img className="desktop-auxiliary-mark" src={hatchMarkUrl} alt="" />
         <div>
-          <p className="desktop-auxiliary-kicker">HATCH</p>
+          <p className="desktop-auxiliary-brand" aria-label="Hatch.">
+            Hatch<span className="desktop-auxiliary-brand-dot" aria-hidden="true">.</span>
+          </p>
           <h1 id="auxiliary-window-title">{about ? "About Hatch" : "Settings"}</h1>
         </div>
       </header>
@@ -215,14 +225,78 @@ function DesktopAuxiliaryWindow({ kind }) {
         </section>
       ) : (
         <section className="desktop-auxiliary-content">
-          <p className="desktop-auxiliary-lede">Desktop behavior</p>
-          <div className="desktop-auxiliary-row"><span>Window layout</span><strong>Per-window</strong></div>
-          <div className="desktop-auxiliary-row"><span>Application zoom</span><strong>80%–200%</strong></div>
-          <div className="desktop-auxiliary-row"><span>Workspace access</span><strong>Native grant</strong></div>
-          <p className="desktop-auxiliary-note">Conversation, pane, frame and zoom preferences are stored per window. Secrets stay in the native session boundary.</p>
+          <AuxiliaryLanguageSettings />
         </section>
       )}
     </main>
+  );
+}
+
+function AuxiliaryLanguageSettings() {
+  const settingsStoreRef = useRef(null);
+  if (!settingsStoreRef.current) {
+    settingsStoreRef.current = createTauriSettingsStore(invoke, {
+      strict: typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__)
+    });
+  }
+  const systemLanguage = resolveLanguage(SYSTEM_LANGUAGE, browserPreferredLocales());
+  const [preference, setPreference] = useState(SYSTEM_LANGUAGE);
+  const [ready, setReady] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [saved, setSaved] = useState(false);
+  const language = resolveLanguage(preference, browserPreferredLocales());
+  const t = useMemo(() => createTranslator(language), [language]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void settingsStoreRef.current.load().then(() => {
+      if (cancelled) return;
+      setPreference(normalizeLanguagePreference(settingsStoreRef.current.getApp("language", SYSTEM_LANGUAGE)));
+      setReady(true);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function updateLanguage(event) {
+    const next = normalizeLanguagePreference(event.target.value);
+    setPreference(next);
+    setSaved(false);
+    setSaveError("");
+    setSaving(true);
+    try {
+      await settingsStoreRef.current.setApp("language", next);
+      setSaved(true);
+    } catch {
+      setSaveError(t("settings.language.saveFailed"));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="desktop-auxiliary-language" aria-busy={!ready || saving}>
+      <div className="desktop-auxiliary-row">
+        <span>{t("settings.language.label")}</span>
+        <select
+          aria-label={t("settings.language.label")}
+          disabled={!ready || saving}
+          value={preference}
+          onChange={(event) => void updateLanguage(event)}
+        >
+          {LANGUAGE_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.value === SYSTEM_LANGUAGE
+                ? `${t(option.labelKey)} (${languageNativeName(systemLanguage)})`
+                : option.nativeLabel}
+            </option>
+          ))}
+        </select>
+      </div>
+      <p className="desktop-auxiliary-note">{t("settings.language.description")}</p>
+      {saved ? <small className="desktop-settings-save-status" role="status">{t("settings.language.saved")}</small> : null}
+      {saveError ? <small className="desktop-settings-save-error" role="alert">{saveError}</small> : null}
+    </div>
   );
 }
 
@@ -326,6 +400,7 @@ function App() {
   const [renameDraft, setRenameDraft] = useState("");
   const [status, setStatus] = useState("Offline");
   const [connected, setConnected] = useState(false);
+  const [chatLoading, setChatLoading] = useState(false);
   const [running, setRunning] = useState(false);
   const [messages, setMessages] = useState([]);
   const [composerDraft, setComposerDraft] = useState("");
@@ -342,6 +417,12 @@ function App() {
   const composerDraftRef = useRef("");
   const buyerProfile = buyerSession?.profile ?? EMPTY_PROFILE;
   const signedIn = authState === "signed-in";
+  // A live socket is not enough to make the current thread usable. The
+  // Conversation Library must have selected a server-issued Conversation;
+  // every user-facing surface derives its state from this same readiness bit.
+  const conversationReady = connected
+    && conversationLibraryStatus === "ready"
+    && isServerConversationId(conversationId);
   buyerSessionRef.current = buyerSession;
 
   useEffect(() => {
@@ -1025,7 +1106,7 @@ function App() {
 
   const sendUserMessage = useCallback(async (appendMessage) => {
     const socket = socketRef.current;
-    if (!connected || !socket || socket.readyState !== WebSocket.OPEN) {
+    if (!conversationReady || !socket || socket.readyState !== WebSocket.OPEN) {
       setStatus("Service unavailable. Your message will stay here.");
       return;
     }
@@ -1141,13 +1222,13 @@ function App() {
       makeAssistantPlaceholder(assistantId, runId, startedAt)
     ]);
 
-  }, [buyerProfile.id, connected, conversationId, conversationLibraryStatus, droppedFiles, permissionMode, send, workspace, workspaceGrant]);
+  }, [buyerProfile.id, conversationId, conversationLibraryStatus, conversationReady, droppedFiles, permissionMode, send, workspace, workspaceGrant]);
 
   const runtime = useExternalStoreRuntime({
     messages,
     isRunning: running,
     isLoading: status === "Loading history...",
-    isSendDisabled: !connected
+    isSendDisabled: !conversationReady
       || running
       || Boolean(interruptedRun)
       || conversationLibraryStatus !== "ready"
@@ -1639,6 +1720,7 @@ function App() {
     staleSocket?.close();
     connectedRef.current = false;
     setConnected(false);
+    setChatLoading(true);
     setStatus("Restoring connection…");
     void connectRuntime({ ...retryConnection, preserveMessages: true });
   }
@@ -1740,12 +1822,14 @@ function App() {
       libraryStatus: conversationLibraryStatus,
       conversationId: targetConversationId
     })) {
+      setChatLoading(false);
       setStatus(conversationLibraryStatus === "unavailable"
         ? "Conversation Library unavailable. Hatch will not connect an unverified Conversation."
         : "Preparing your Conversation Library…");
       return;
     }
     if (!targetServerUrl.trim() || !targetWorkspaceGrant?.grant_id || !buyerSession?.accessToken || !targetEntitlementId) {
+      setChatLoading(false);
       setStatus("Choose a folder before starting the connection.");
       return;
     }
@@ -1753,6 +1837,7 @@ function App() {
     const requestToken = ++connectionTokenRef.current;
     connectingRef.current = true;
     intentionalDisconnectRef.current = false;
+    setChatLoading(true);
     setStatus("Connecting…");
     connectionConfigRef.current = {
       serverUrl: targetServerUrl.trim(),
@@ -1847,6 +1932,7 @@ function App() {
     } catch (error) {
       if (requestToken === connectionTokenRef.current) {
         if (isInvalidWorkspaceGrantError(error)) {
+          setChatLoading(false);
           workspaceRef.current = "";
           workspaceGrantRef.current = null;
           connectionConfigRef.current = null;
@@ -1862,6 +1948,7 @@ function App() {
             invokeTauri("revoke_workspace_grant", { workspaceGrantId: targetWorkspaceGrant.grant_id })
           ]);
         } else {
+          setChatLoading(true);
           setStatus(`Connection unavailable — ${errorMessage(error)}`);
           scheduleRuntimeReconnect();
         }
@@ -1932,9 +2019,11 @@ function App() {
         setInterruptedRun(activeRunRef.current);
       }
       if (!intentionalDisconnectRef.current) {
+        setChatLoading(true);
         setStatus("Connection lost — restoring your session…");
         scheduleRuntimeReconnect();
       } else {
+        setChatLoading(false);
         setStatus(activeRunRef.current ? "Task paused — your work has been kept" : "Offline");
       }
     });
@@ -1959,6 +2048,7 @@ function App() {
     socket?.close();
     connectedRef.current = false;
     setConnected(false);
+    setChatLoading(false);
     setRunning(false);
     setStatus(activeRunRef.current ? "Task paused — your work has been kept" : "Offline");
   }
@@ -1977,6 +2067,7 @@ function App() {
       connectedRef.current = true;
       reconnectAttemptRef.current = 0;
       setConnected(true);
+      setChatLoading(false);
       setStatus("Connected");
       const socket = socketRef.current;
       if (socket) {
@@ -2510,6 +2601,7 @@ function App() {
     const nextId = await createLibraryConversation();
     if (!nextId) return "";
     disconnectRuntime();
+    setChatLoading(true);
     conversationCursorRef.current = 0;
     setConversationId(nextId);
     setMessages([]);
@@ -2850,6 +2942,7 @@ function App() {
       return;
     }
     disconnectRuntime();
+    setChatLoading(true);
     conversationCursorRef.current = 0;
     setMessages([]);
     setConversationId(nextId);
@@ -3184,7 +3277,7 @@ function App() {
       toolbar={(
         <DesktopConversationToolbar
           creatorAgent={creatorAgent}
-          connected={connected}
+          connected={conversationReady}
           conversationLibraryStatus={conversationLibraryStatus}
           conversationLibraryReady={conversationLibraryStatus === "ready"}
           workspaceGranted={workspaceGranted}
@@ -3223,7 +3316,11 @@ function App() {
                   onScroll={handleViewportScroll}
                 >
                   <ThreadPrimitive.Empty>
-                    <EmptyThread connected={connected} creatorAgent={creatorAgent} />
+                    <EmptyThread
+                      connected={conversationReady}
+                      creatorAgent={creatorAgent}
+                      chatLoading={chatLoading}
+                    />
                   </ThreadPrimitive.Empty>
                   <ThreadPrimitive.Messages components={{ Message: HatchMessage }} />
                 </ThreadPrimitive.Viewport>
@@ -3240,7 +3337,7 @@ function App() {
                       onCompositionEnd={endImeComposition}
                       onCompositionStart={startImeComposition}
                       onKeyDownCapture={stopImeEnterSubmit}
-                      placeholder={connected ? "Message" : "Connection is restoring…"}
+                      placeholder={conversationReady ? "Message" : "Connection is restoring…"}
                       submitMode="enter"
                       rows={1}
                     />
@@ -4080,12 +4177,25 @@ function toolEventFromApproval(message) {
   };
 }
 
-function EmptyThread({ connected, creatorAgent }) {
+function EmptyThread({ connected, creatorAgent, chatLoading }) {
+  const preparing = !connected && chatLoading;
+  if (preparing) {
+    return (
+      <div className="empty-thread empty-thread-loading" role="status" aria-live="polite">
+        <LoaderCircle className="empty-thread-spinner" aria-hidden="true" />
+        <span>Connecting…</span>
+      </div>
+    );
+  }
   return (
     <div className="empty-thread">
       <span className="creator-avatar large">{creatorAgent.creatorInitials}</span>
       <span className="empty-kicker">{creatorAgent.creator}</span>
-      <h2>{connected ? "What would you like to work on?" : "Your conversation is offline."}</h2>
+      <h2>
+        {connected
+          ? "What would you like to work on?"
+          : "Your conversation is offline."}
+      </h2>
       <p>
         {connected
           ? creatorAgent.description
@@ -4180,10 +4290,10 @@ function EmptyAgentsScreen({ profile, onBrowse, onRefresh, onSignOut, refreshing
       <section className="status-card empty-agents-card">
         <div className="empty-agents-header">
           <span className="avatar">{profile.initials}</span>
-          <span><strong>{profile.name}</strong><small>Signed in</small></span>
+          <span><strong>{profile.name}</strong></span>
           <button className="profile-sign-out" type="button" onClick={onSignOut}>Sign out</button>
         </div>
-        <span className="eyebrow">Your Creator Agents</span>
+        <span className="eyebrow">Your Experts</span>
         <h1>Find an Agent built around a creator's proven method.</h1>
         <p>Your account is ready. Browse the catalog to find an Agent for your work.</p>
         {notice ? <p className="status-inline-notice" role="status">{notice}</p> : null}
@@ -4725,6 +4835,22 @@ function errorMessage(error) {
   if (typeof error === "string") return error;
   if (error && typeof error === "object" && "message" in error) return error.message;
   return JSON.stringify(error);
+}
+
+function browserPreferredLocales() {
+  if (typeof navigator === "undefined") return [DEFAULT_LANGUAGE];
+  if (Array.isArray(navigator.languages) && navigator.languages.length > 0) {
+    return navigator.languages.filter((locale) => typeof locale === "string" && locale.trim());
+  }
+  return typeof navigator.language === "string" && navigator.language.trim()
+    ? [navigator.language]
+    : [DEFAULT_LANGUAGE];
+}
+
+function languageNativeName(language) {
+  return LANGUAGE_OPTIONS.find((option) => option.value === language)?.nativeLabel
+    || LANGUAGE_OPTIONS.find((option) => option.value === DEFAULT_LANGUAGE)?.nativeLabel
+    || "English";
 }
 
 async function prepareNativeDropAttachments(files) {

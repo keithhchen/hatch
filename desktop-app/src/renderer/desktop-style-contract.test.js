@@ -49,6 +49,15 @@ describe("desktop system appearance contract", () => {
     expect(stylesheet).not.toMatch(/\.composer-settings\s*\{[^}]*display:\s*none/);
   });
 
+  it("keeps the workspace control left aligned without clipping its label", () => {
+    expect(stylesheet).toMatch(
+      /\.workspace-composer-control\s*\{[\s\S]*?justify-content:\s*flex-start;[\s\S]*?min-width:\s*0;/
+    );
+    expect(stylesheet).toMatch(
+      /\.workspace-composer-control \.composer-control-label\s*\{[\s\S]*?overflow:\s*visible;[\s\S]*?text-overflow:\s*clip;/
+    );
+  });
+
   it("uses only the insertion caret for composer text focus", () => {
     expect(stylesheet).not.toMatch(/\.composer:focus-within\s*\{/);
     expect(stylesheet).toMatch(/\.desktop-window-shell \.composer-input:focus-visible\s*\{\s*outline:\s*none;\s*\}/);
