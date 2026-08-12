@@ -289,7 +289,7 @@ test("Corpus prompt compiles lossless full-layer replacements with concrete dest
   assert.match(call.systemPrompt, /submit exactly one complete System instruction asset/i);
   assert.match(call.systemPrompt, /Change rationale, Requirements traceability, and Preservation audit/i);
   assert.match(call.systemPrompt, /Never submit a path: the host derives every canonical path/i);
-  assert.match(call.systemPrompt, /entire complete corrected Corpus.*never only an affected asset\/section/is);
+  assert.match(call.systemPrompt, /rejected finalizer also preserves the complete draft/i);
   assert.match(call.prompt, /Previous accepted complete compilation/);
   assert.match(call.prompt, /PREVIOUS_SYSTEM_BOUNDARY/);
   assert.match(call.prompt, /PREVIOUS_KNOWLEDGE_ITEM/);

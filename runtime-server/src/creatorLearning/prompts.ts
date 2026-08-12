@@ -190,7 +190,7 @@ ${FACTORY_DECISION_PRIORITIES}
 
 ${CORPUS_ETHOS}
 
-Compile cognitive content only. Never generate an \`agent.json\`, manifest, SHA/digest, tool declaration/configuration, runtime/provider/streaming/approval/retrieval configuration, URL, connection reference, credential, secret, price, offer metadata, or release metadata. Product and tool declarations are owned outside this LLM call. The only tool-related output permitted is a Skill's \`allowed_tool_ids\` metadata, and every ID there must exactly match one of the externally supplied Available tool IDs. Do not invent, rename, configure, or request a tool. If none is supplied or needed, write \`allowed_tool_ids: []\`.
+Compile cognitive content only. Never generate an \`agent.json\`, manifest, SHA/digest, tool declaration/configuration, runtime/provider/streaming/approval/retrieval configuration, URL, connection reference, credential, secret, price, offer metadata, or release metadata. Product and tool declarations are owned outside this LLM call. Use only the available local submission tools; the only tool-related output permitted is a Skill's \`allowed_tool_ids\` metadata, and every ID there must exactly match one of the externally supplied Available tool IDs. Do not invent, rename, configure, or request a tool. If none is supplied or needed, write \`allowed_tool_ids: []\`.
 
 The four cognitive layers have hard boundaries:
 - System (derived path \`instructions/system.md\`): identity, worldview, global priorities, product boundaries, refusal rules, cross-cutting interaction/output/quality requirements, and globally useful examples that must affect every run.
@@ -212,15 +212,15 @@ Before writing, build a requirement inventory from the externally owned Product 
 
 Resolve contradictions explicitly using the authority order: name both sides, state which one governs, and explain what happens to the rejected requirement. Never hide a conflict by averaging, compressing, or summarizing it away. Trace every resulting runtime requirement to exactly one or more concrete emitted asset IDs, derived paths, and layers. On revision, account for every previous asset and requirement in the preservation audit. Any deletion, merge, rename, path change, or layer move must be listed item by item with old and new asset ID/path/layer, replacement, authority, and reason; blanket claims such as “streamlined,” “covered above,” or “unchanged” are insufficient.
 
-Do not serialize the whole result as one JSON object, do not reproduce a delimiter template, and do not return an ordinary assistant answer. Think through the complete replacement first, then use only the available local submission tools:
+Do not serialize the whole result as one JSON object, do not reproduce a delimiter template, and do not return an ordinary assistant answer. First establish the complete requirement inventory, asset architecture, IDs, dependencies, and preservation plan. Do not privately author every asset before the first tool turn. Build the host-retained draft through coherent bounded tranches; the final draft is a complete replacement even though each intermediate turn is not:
 - submit exactly one complete System instruction asset;
 - submit each justified Skill with its ID, name, trigger, complete Markdown, and exact allowed-tool IDs;
 - submit each justified reference with its ID, parent Skill ID, reference kind, and complete Markdown;
 - submit each justified knowledge document with its ID, reader-facing source summary, and complete purified Markdown;
 - separately submit complete Change rationale, Requirements traceability, and Preservation audit sections;
-- finally call the finalize tool and continue until its validation is accepted.
+- after the retained inventory is complete, call the finalize tool and continue until its validation is accepted.
 
-Valid reference kinds are exactly method, style, example, and few_shots. IDs must be globally unique lowercase Agent Corpus identifiers. Never submit a path: the host derives every canonical path. Never submit a manifest, digest, runtime configuration, or tool declaration. The Preservation audit must contain Retained, Added or changed, Removed, Merged, Conflict resolutions, and Asset identity, path, or layer changes subsections, each itemized as specified above. Any rejection or tool error requires re-submitting the entire complete corrected Corpus—System, every retained optional asset, all three audits, and finalizer—in one atomic replacement batch, never only an affected asset/section and never a shortened summary.`,
+Valid reference kinds are exactly method, style, example, and few_shots. IDs must be globally unique lowercase Agent Corpus identifiers. Never submit a path: the host derives every canonical path. Never submit a manifest, digest, runtime configuration, or tool declaration. The Preservation audit must contain Retained, Added or changed, Removed, Merged, Conflict resolutions, and Asset identity, path, or layer changes subsections, each itemized as specified above. A tool error rolls back only that tool turn; the prior retained draft remains authoritative. A rejected finalizer also preserves the complete draft: replace the specifically affected asset or audit section and finalize again. Restart and re-submit the entire Corpus only when the retained draft is fundamentally unsalvageable. The finalized output—not every intermediate tool turn—must be a complete, non-shortened replacement.`,
     prompt: factoryContext(`
 Creator: ${args.creatorName}
 Task: ${args.taskName}

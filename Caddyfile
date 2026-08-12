@@ -23,6 +23,13 @@
         reverse_proxy runtime:8400
     }
 
+    # Keep the native Runtime WebSocket address shareable for Desktop clients
+    # that do not use the public /v1 compatibility prefix.
+    @runtime_native path /runtime*
+    handle @runtime_native {
+        reverse_proxy runtime:8400
+    }
+
     # Desktop HTTP APIs owned by Runtime.
     @runtime_api path /v1/me/creator-agents /v1/conversations*
     handle @runtime_api {
@@ -32,27 +39,6 @@
     @runtime_history path /conversations/*
     handle @runtime_history {
         reverse_proxy runtime:8400
-    }
-
-    # TypeScript Registry APIs. Keep the public paths stable so Factory and
-    # Desktop can use HATCH_REGISTRY_URL without knowing the private service
-    # name. Dashboard-specific /v1/creator/products routes remain below.
-    @registry_api path /v1/agent-corpora* /v1/catalog/agents* /v1/auth/signup /v1/auth/signin /v1/auth/me /v1/auth/logout /v1/user/agent-access /v1/creator/agents /v1/creator/agent-corpora /v1/runtime/tenants/* /v1/runtime/creators/* /v1/control-plane/connections/* /v1/creators/*
-    handle @registry_api {
-        reverse_proxy registry:8100
-    }
-
-    # `/v1/auth/me` and `/v1/creator/agents` are intentionally shared by the
-    # Desktop/Registry API and the cookie-backed Web BFF. A Desktop call always
-    # carries its opaque Authorization bearer; browser Portal calls carry only
-    # the HttpOnly Web session cookie and must reach Dashboard. Routing only on
-    # the path would shadow Dashboard and log the user out after every refresh.
-    @registry_bearer_api {
-        path /v1/auth/me /v1/creator/agents
-        header Authorization *
-    }
-    handle @registry_bearer_api {
-        reverse_proxy registry:8100
     }
 
     # Expose only the Registry readiness check. Never bridge a broad public
@@ -68,24 +54,27 @@
     @internal_service_api path /v1/internal/commerce* /v1/internal/deployments*
     respond @internal_service_api 404
 
-    # Creator and buyer Portal API.
+    # All browser APIs belong to the cookie-backed Dashboard BFF. In
+    # particular, /v1/auth/me must not be shadowed by Registry.
     handle /v1/* {
         reverse_proxy dashboard:8500
     }
 
-    # Stable entrypoint used by the packaged Consumer Desktop. The buyer Portal
-    # opens on its Explore catalog, while keeping the Desktop allowlist narrow.
-    @buyer_catalog_entry path /agents /agents/*
-    redir @buyer_catalog_entry /portal/ 308
-
-    # Vite's production base path is /portal/; the Dashboard container serves
-    # the built static files and its API from the same origin.
-    handle /portal* {
+    # Static assets and all addressable public/private pages are served by the
+    # Dashboard. The browser app owns auth/returnTo and private authorization.
+    handle /assets/* {
         reverse_proxy dashboard:8500
     }
 
-    @root path /
-    redir @root /agents 308
+    # Keep the legacy namespace resolvable while Dashboard performs resource-
+    # aware redirects for library/order/creator IDs. The root is an exact,
+    # unconditional migration to the new Explore home.
+    @legacy_portal_root path /portal /portal/
+    redir @legacy_portal_root /explore 308
+
+    handle /portal* {
+        reverse_proxy dashboard:8500
+    }
 
     handle {
         reverse_proxy dashboard:8500

@@ -5,7 +5,7 @@ const e2eDashboardPort = Number(process.env.HATCH_E2E_PORT ?? 18_500);
 const e2eRegistryPort = Number(process.env.HATCH_E2E_REGISTRY_PORT ?? e2eDashboardPort + 1);
 const e2eControlToken = "hatch-commerce-v2-e2e-control";
 
-export async function signIn(page, role = "buyer", returnTo = "/agents") {
+export async function signIn(page, role = "buyer", returnTo = "/explore") {
   const credentials = role === "creator"
     ? { email: "creator@example.test", password: "creator-password" }
     : { email: "buyer@example.test", password: "buyer-password" };

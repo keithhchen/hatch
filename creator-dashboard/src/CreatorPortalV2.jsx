@@ -5,7 +5,7 @@ import { creatorOrderQuery, payoutActionLabel, payoutCanRetry } from "./storefro
 import { creatorRouteTitle, parseCreatorRoute } from "./creatorRoutes.js";
 import "./creatorPortalV2.css";
 
-const ROOT = "/portal/creator";
+const ROOT = "/studio";
 const PRODUCT_TABS = [
   ["overview", "Overview"],
   ["test", "Test & improve"],
@@ -55,6 +55,13 @@ export function CreatorPortalV2({
         <button className="cpv2-brand" type="button" onClick={() => go(ROOT)} aria-label="Hatch creator home">
           <span aria-hidden="true">◒</span> Hatch.
         </button>
+        <nav className="cpv2-global-nav" aria-label="Hatch spaces">
+          <SpaceLink href="/explore" navigate={go}>Explore</SpaceLink>
+          <SpaceLink href="/library" navigate={go}>Library</SpaceLink>
+          <SpaceLink href="/studio" navigate={go} active={route.section === "home"}>Studio</SpaceLink>
+          <SpaceLink href="/studio/orders" navigate={go} active={route.section === "orders"}>Orders</SpaceLink>
+          <SpaceLink href="/account" navigate={go}>Account</SpaceLink>
+        </nav>
         <nav aria-label="Creator dashboard">
           <NavButton active={route.section === "home"} onClick={() => go(ROOT)}>Home</NavButton>
           <NavButton active={route.section === "products"} onClick={() => go(`${ROOT}/products`)}>Products</NavButton>
@@ -72,6 +79,15 @@ export function CreatorPortalV2({
       </main>
     </div>
   );
+}
+
+function SpaceLink({ href, navigate, active = false, children }) {
+  function handleClick(event) {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    void navigate(href);
+  }
+  return <a href={href} aria-current={active ? "page" : undefined} onClick={handleClick}>{children}</a>;
 }
 
 function NavButton({ active, children, onClick }) {
@@ -152,11 +168,11 @@ function ProductsPage({ token, request, navigate }) {
       {(payload) => {
         const products = arrayOf(unwrap(payload, "products"));
         return <>
-          <PageHeader eyebrow="Products" title="From a method to a product people can use." body="Factory creates a candidate. You approve its behavior, define the offer, preview the storefront, and publish explicitly." action="Create product" onAction={() => navigate(`${ROOT}/products/new/factory`)} />
+          <PageHeader eyebrow="Products" title="From a method to a product people can use." body="Factory creates a candidate. You approve its behavior, define the offer, preview the storefront, and publish explicitly." action="Create product" onAction={() => navigate(`${ROOT}/factory`)} />
           {pendingRuns.length ? <PendingFactoryRuns runs={pendingRuns} navigate={navigate} /> : null}
           {products.length ? <section className="cpv2-product-grid" aria-label="Products">
             {products.map((product) => <ProductCard key={idOf(product, "product")} product={product} onOpen={() => navigate(`${ROOT}/products/${encodeURIComponent(idOf(product, "product"))}`)} />)}
-          </section> : pendingRuns.length ? null : <EmptyState title="Create your first product" body="Start with one narrow task, authorized sources, and a deliverable you would stand behind." action="Open Factory" onAction={() => navigate(`${ROOT}/products/new/factory`)} />}
+          </section> : pendingRuns.length ? null : <EmptyState title="Create your first product" body="Start with one narrow task, authorized sources, and a deliverable you would stand behind." action="Open Factory" onAction={() => navigate(`${ROOT}/factory`)} />}
         </>;
       }}
     </PageBoundary>
@@ -170,7 +186,7 @@ function PendingFactoryRuns({ runs, navigate }) {
       <div className="cpv2-card-top"><StatusChip status={run.status}>{productStatus(run.status)}</StatusChip><span>Candidate pending</span></div>
       <h2>{run.task_name ?? "Untitled Factory run"}</h2>
       <p>{["waiting_for_creator", "awaiting_answers"].includes(run.status) ? "Answer the pending Factory questions to continue." : run.status === "needs_attention" ? "Review the failed checkpoint and retry when it is safe." : "Distillation is running. Candidate review will appear as soon as the verified Corpus is ready."}</p>
-      <div className="cpv2-card-foot"><small>{run.updated_at ? `Updated ${dateTime(run.updated_at)}` : "Saved on server"}</small><button className="cpv2-secondary" type="button" onClick={() => navigate(`${ROOT}/factory/runs/${encodeURIComponent(run.id)}`)}>Open Factory</button></div>
+      <div className="cpv2-card-foot"><small>{run.updated_at ? `Updated ${dateTime(run.updated_at)}` : "Saved on server"}</small><button className="cpv2-secondary" type="button" onClick={() => navigate(`${ROOT}/factory/${encodeURIComponent(run.id)}`)}>Open Factory</button></div>
     </article>)}</div>
   </section>;
 }
@@ -267,7 +283,7 @@ function DataControlsPanel({ product }) {
 function FactoryPage({ token, request, productId, runId, navigate, registerNavigationGuard }) {
   const runBase = productId
     ? `${ROOT}/products/${encodeURIComponent(productId)}/factory/runs`
-    : `${ROOT}/factory/runs`;
+    : `${ROOT}/factory`;
   if (productId === undefined) return <>
     <div className="cpv2-factory-bar"><button type="button" onClick={() => navigate(`${ROOT}/products`)}>← Back to products</button><span role="status">Open a saved run to continue questions, retry a checkpoint, or inspect progress.</span></div>
     <CreatorFactoryRuns
@@ -400,7 +416,7 @@ function FactoryDraftForm({ initial, token, request, navigate, registerNavigatio
       });
       const created = unwrap(run, "run") ?? run;
       const runId = idOf(created, "run");
-      navigate(runId ? `${ROOT}/factory/runs/${encodeURIComponent(runId)}` : `${ROOT}/factory`);
+      navigate(runId ? `${ROOT}/factory/${encodeURIComponent(runId)}` : `${ROOT}/factory`);
     } catch (nextError) { setError(friendlyError(nextError)); }
     finally { setStarting(false); }
   }
@@ -570,7 +586,7 @@ function PreviewPage({ token, request, navigate, productId }) {
   }
 
   if (published) {
-    const publicUrl = published.public_url ?? published.product?.public_url;
+    const publicUrl = canonicalPublicUrl(published.canonical_url ?? published.public_url ?? published.product?.canonical_url ?? published.product?.public_url);
     return <section className="cpv2-published" aria-live="polite"><span aria-hidden="true">✓</span><h1>Your product is live</h1><p>Buyer checkout now resolves this immutable release and offer pair.</p><label>Share link<input readOnly value={publicUrl ?? "Publication completed"} onFocus={(event) => event.target.select()} /></label><div>{publicUrl ? <button className="cpv2-primary" type="button" onClick={() => copy(publicUrl)}>{copied ? "Copied" : "Copy link"}</button> : null}{publicUrl ? <a className="cpv2-secondary" href={safePublicUrl(publicUrl)} target="_blank" rel="noreferrer">View storefront</a> : null}<button className="cpv2-secondary" type="button" onClick={() => navigate(`${ROOT}/products/${encodeURIComponent(productId)}`)}>Back to product</button></div>{error ? <InlineError>{error}</InlineError> : null}</section>;
   }
 
@@ -589,7 +605,7 @@ function PreviewPage({ token, request, navigate, productId }) {
       {error ? <InlineError>{error}</InlineError> : null}
       <div className="cpv2-preview-tools"><span className="cpv2-private-badge">Not public</span><div role="group" aria-label="Preview viewport"><button type="button" className={viewport === "desktop" ? "is-active" : ""} aria-pressed={viewport === "desktop"} onClick={() => setViewport("desktop")}>Desktop</button><button type="button" className={viewport === "mobile" ? "is-active" : ""} aria-pressed={viewport === "mobile"} onClick={() => setViewport("mobile")}>Mobile</button></div></div>
       <div className={`cpv2-storefront-frame is-${viewport}`}><StorefrontDetails product={product} creatorName={preview.creator?.display_name ?? preview.creator_name} offer={offer} offerText={offer ? offerLabel(offer) : "Offer not configured"} mode="preview" headingLevel={2} desktopRequirement={preview.desktop_requirement ?? product.desktop_requirement} refundPolicy={preview.refund_policy?.summary ?? preview.refund_policy_summary ?? offer?.refund_policy_summary ?? offer?.refund_policy_version} releaseLabel={candidate ? `Candidate v${candidate.version ?? "—"} · ${candidate.digest ?? "digest not provided"}` : "Candidate not provided"} action={<button type="button" disabled>Preview checkout</button>} /></div>
-      <article className="cpv2-card cpv2-readiness"><SectionHeading eyebrow="Publish readiness" title="Final checks" /><ul>{readiness.map((item) => <li key={item.label} className={item.ready ? "is-ready" : ""}><span>{item.ready ? "✓" : "!"}</span><strong>{item.label}</strong><small>{item.detail}</small></li>)}</ul>{confirming ? <div className="cpv2-confirm cpv2-confirm-publish"><div><p><strong>Publish this immutable candidate and offer?</strong><br />The public current pointer changes only after materialization succeeds.</p><dl className="cpv2-confirm-facts"><Fact label="Product" value={product.name ?? product.product_name ?? productId} /><Fact label="Candidate" value={`v${candidate?.version ?? "—"} · ${candidate?.digest ?? "Not provided"}`} /><Fact label="Offer" value={offer ? `${offerLabel(offer)} · revision ${offer.revision ?? "—"}` : "Not configured"} /><Fact label="Public URL" value={preview.public_url ?? `/agents/${preview.creator?.id ?? "creator"}/${productId}`} /></dl><small>Publishing creates an immutable release. Future changes require another release or an audited rollback.</small></div><button className="cpv2-secondary" type="button" onClick={() => setConfirming(false)}>Cancel</button><button className="cpv2-primary" type="button" disabled={!ready || publishing} aria-busy={publishing} onClick={() => publish({ ...preview, product, candidate, offer })}>{publishing ? "Publishing…" : "Confirm publish"}</button></div> : <button className="cpv2-primary" type="button" disabled={!ready} onClick={() => setConfirming(true)}>Publish</button>}</article>
+      <article className="cpv2-card cpv2-readiness"><SectionHeading eyebrow="Publish readiness" title="Final checks" /><ul>{readiness.map((item) => <li key={item.label} className={item.ready ? "is-ready" : ""}><span>{item.ready ? "✓" : "!"}</span><strong>{item.label}</strong><small>{item.detail}</small></li>)}</ul>{confirming ? <div className="cpv2-confirm cpv2-confirm-publish"><div><p><strong>Publish this immutable candidate and offer?</strong><br />The public current pointer changes only after materialization succeeds.</p><dl className="cpv2-confirm-facts"><Fact label="Product" value={product.name ?? product.product_name ?? productId} /><Fact label="Candidate" value={`v${candidate?.version ?? "—"} · ${candidate?.digest ?? "Not provided"}`} /><Fact label="Offer" value={offer ? `${offerLabel(offer)} · revision ${offer.revision ?? "—"}` : "Not configured"} /><Fact label="Public URL" value={preview.public_url ?? `/creators/${preview.creator?.slug ?? preview.creator?.id ?? "creator"}/${product?.product_slug ?? product?.product_id ?? productId}`} /></dl><small>Publishing creates an immutable release. Future changes require another release or an audited rollback.</small></div><button className="cpv2-secondary" type="button" onClick={() => setConfirming(false)}>Cancel</button><button className="cpv2-primary" type="button" disabled={!ready || publishing} aria-busy={publishing} onClick={() => publish({ ...preview, product, candidate, offer })}>{publishing ? "Publishing…" : "Confirm publish"}</button></div> : <button className="cpv2-primary" type="button" disabled={!ready} onClick={() => setConfirming(true)}>Publish</button>}</article>
     </>;
   }}</PageBoundary>;
 }
@@ -677,11 +693,11 @@ function PaginatedOrders({ initialPayload, query, token, request, navigate }) {
   }
 
   if (!page.orders.length) return <EmptyState title="No matching orders" body="Try a different filter, or share a published storefront to reach your first Buyer." />;
-  return <><div className="cpv2-pagination-status" role="status">Loaded {page.orders.length} order{page.orders.length === 1 ? "" : "s"}{page.cursor ? "; more are available" : "; end of results"}.</div><OrderList orders={page.orders} onOpen={(order) => navigate(`${ROOT}/orders/${encodeURIComponent(idOf(order, "order"))}`)} detailed />{error ? <InlineError>{error}</InlineError> : null}{page.cursor ? <button className="cpv2-load-more cpv2-secondary" type="button" disabled={loadingMore} aria-busy={loadingMore} onClick={loadMore}>{loadingMore ? "Loading…" : "Load next page"}</button> : null}</>;
+  return <><div className="cpv2-pagination-status" role="status">Loaded {page.orders.length} order{page.orders.length === 1 ? "" : "s"}{page.cursor ? "; more are available" : "; end of results"}.</div><OrderList orders={page.orders} onOpen={(order) => navigate(`${ROOT}/orders/${encodeURIComponent(order.order_number ?? order.order_reference ?? idOf(order, "order"))}`)} detailed />{error ? <InlineError>{error}</InlineError> : null}{page.cursor ? <button className="cpv2-load-more cpv2-secondary" type="button" disabled={loadingMore} aria-busy={loadingMore} onClick={loadMore}>{loadingMore ? "Loading…" : "Load next page"}</button> : null}</>;
 }
 
 function OrderList({ orders, onOpen, detailed = false }) {
-  return <div className="cpv2-order-list" role="list">{orders.map((order) => <article className="cpv2-order" role="listitem" key={idOf(order, "order")}><div><span className="cpv2-kicker">{order.order_reference ?? idOf(order, "order")}</span><h2>{order.product_name ?? order.product?.name ?? "Product order"}</h2><p>{order.buyer_display_name ?? "Buyer"} · {dateTime(order.created_at ?? order.placed_at)}</p></div><dl><Fact label="Order" value={humanStatus(order.status ?? order.order_status)} /><Fact label="Payment" value={humanStatus(order.payment_status ?? (Number(order.gross_minor) === 0 ? "not_required" : "processing"))} />{detailed ? <><Fact label="Delivery" value={humanStatus(order.delivery_status ?? "not_started")} /><Fact label="Revenue" value={humanStatus(order.revenue_status ?? "pending")} /></> : null}<Fact label="Total" value={money(order.total_minor ?? order.gross_minor ?? order.amount_minor ?? 0, order.currency)} /></dl><button className="cpv2-secondary" type="button" onClick={() => onOpen(order)} aria-label={`View order ${order.order_reference ?? idOf(order, "order")}`}>View order</button></article>)}</div>;
+  return <div className="cpv2-order-list" role="list">{orders.map((order) => { const reference = order.order_number ?? order.order_reference ?? idOf(order, "order"); return <article className="cpv2-order" role="listitem" key={idOf(order, "order")}><div><span className="cpv2-kicker">{reference}</span><h2>{order.product_name ?? order.product?.name ?? "Product order"}</h2><p>{order.buyer_display_name ?? "Buyer"} · {dateTime(order.created_at ?? order.placed_at)}</p></div><dl><Fact label="Order" value={humanStatus(order.status ?? order.order_status)} /><Fact label="Payment" value={humanStatus(order.payment_status ?? (Number(order.gross_minor) === 0 ? "not_required" : "processing"))} />{detailed ? <><Fact label="Delivery" value={humanStatus(order.delivery_status ?? "not_started")} /><Fact label="Revenue" value={humanStatus(order.revenue_status ?? "pending")} /></> : null}<Fact label="Total" value={money(order.total_minor ?? order.gross_minor ?? order.amount_minor ?? 0, order.currency)} /></dl><button className="cpv2-secondary" type="button" onClick={() => onOpen(order)} aria-label={`View order ${reference}`}>View order</button></article>; })}</div>;
 }
 
 function OrderPage({ token, request, navigate, orderId }) {
@@ -851,7 +867,7 @@ function defaultNavigate(path) {
 }
 
 function nextCreatorAction(products) {
-  if (!products.length) return { label: "Start here", tone: "draft", title: "Create one focused product", body: "Define the task and authorized sources in Factory.", action: "Open Factory", href: `${ROOT}/products/new/factory` };
+  if (!products.length) return { label: "Start here", tone: "draft", title: "Create one focused product", body: "Define the task and authorized sources in Factory.", action: "Open Factory", href: `${ROOT}/factory` };
   for (const product of products) {
     const candidate = candidateOf(product);
     const next = productNextAction(product, candidate, offerOf(product));
@@ -914,6 +930,14 @@ function unwrap(payload, key) { return payload && Object.prototype.hasOwnPropert
 function initials(name) { return String(name || "C").split(/\s+/).slice(0, 2).map((word) => word[0]?.toUpperCase()).join("") || "C"; }
 function firstName(name) { return String(name || "Creator").trim().split(/\s+/)[0]; }
 function mutationKey() { return globalThis.crypto?.randomUUID?.() ?? `ui-${Date.now()}-${Math.random().toString(16).slice(2)}`; }
-function safePublicUrl(value) { const text = String(value ?? ""); return /^https?:\/\//i.test(text) || /^\/agents(?:\/|$)/.test(text) ? text : undefined; }
+function safePublicUrl(value) { const text = String(value ?? ""); return /^https?:\/\//i.test(text) || /^\/creators(?:\/|$)/.test(text) || /^\/agents(?:\/|$)/.test(text) ? text : undefined; }
+
+function canonicalPublicUrl(value) {
+  const text = String(value ?? "");
+  if (!text) return undefined;
+  if (/^\/agents\//.test(text)) return `/creators/${text.slice("/agents/".length)}`;
+  if (/^\/portal\/agents\//.test(text)) return `/creators/${text.slice("/portal/agents/".length)}`;
+  return text;
+}
 function listCopy(value, fallback) { const items = arrayOf(value); return items.length ? items.map((item) => typeof item === "string" ? item : item.label ?? item.description).filter(Boolean).join(" · ") : fallback; }
 function friendlyError(error) { if (!error) return "An unexpected error occurred."; if (error.status === 401) return "Your session expired. Sign in again to continue."; if (error.status === 403) return "This Creator account cannot access that resource."; if (error.status === 404) return "The requested resource no longer exists."; if (error.status === 409) return "This page changed in another tab. Refresh the latest version before trying again."; if (error.status === 429) return "Too many requests. Your work is preserved; try again shortly."; return error.message || "The service is temporarily unavailable. Try again."; }

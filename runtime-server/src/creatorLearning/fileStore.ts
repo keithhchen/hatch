@@ -118,6 +118,29 @@ export class FactoryFileStore {
     ));
   }
 
+  /**
+   * Recover timing records left running after the previous CLI process died.
+   * Their real monotonic duration is unknowable, so never manufacture one.
+   */
+  async abandonRunningExecutions(completedAt: string): Promise<number> {
+    const rows = await this.listExecutionTimings();
+    let abandoned = 0;
+    for (const row of rows) {
+      if (row.status !== "running") continue;
+      const current = await this.readExecutionTiming(row.executionId, row.sealed);
+      if (current.status !== "running") continue;
+      const recovered: FactoryExecutionTiming = {
+        ...current,
+        status: "abandoned",
+        completedAt
+      };
+      validateExecutionTiming(recovered);
+      await this.writeExecutionTiming(recovered, true);
+      abandoned += 1;
+    }
+    return abandoned;
+  }
+
   async writeArtifact(relativePath: string, content: string, sealed = false): Promise<ArtifactRef> {
     const namespace = sealed ? "sealed" : "artifacts";
     const relative = path.posix.join(namespace, safeRelative(relativePath));
@@ -284,7 +307,7 @@ function validateExecutionTiming(value: unknown): FactoryExecutionTiming {
     row.contractVersion !== "1"
     || typeof row.executionId !== "string"
     || typeof row.runId !== "string"
-    || !["running", "completed", "failed", "aborted"].includes(String(status))
+    || !["running", "completed", "failed", "aborted", "abandoned"].includes(String(status))
     || typeof row.startedAt !== "string"
     || typeof row.sealed !== "boolean"
     || !metadata
@@ -327,10 +350,14 @@ function validateExecutionTiming(value: unknown): FactoryExecutionTiming {
     );
   if (!validMetadata) throw new Error("Invalid Factory execution timing metadata");
   const isRunning = status === "running";
+  const isAbandoned = status === "abandoned";
   if (isRunning && (row.completedAt !== undefined || row.elapsedMs !== undefined)) {
     throw new Error("Running Factory execution timing cannot contain a completion");
   }
-  if (!isRunning && (
+  if (isAbandoned && (typeof row.completedAt !== "string" || row.elapsedMs !== undefined)) {
+    throw new Error("Abandoned Factory execution timing requires completedAt and no invented elapsedMs");
+  }
+  if (!isRunning && !isAbandoned && (
     typeof row.completedAt !== "string"
     || typeof row.elapsedMs !== "number"
     || !Number.isFinite(row.elapsedMs)
@@ -446,6 +473,7 @@ function validateFailureTelemetry(value: unknown): asserts value is FactoryPromp
     "rejected",
     "toolNames",
     "finalizerOutcome",
+    "finalizerValidationCode",
     "finalizerPosition",
     "transaction"
   ]);
@@ -461,8 +489,10 @@ function validateFailureTelemetry(value: unknown): asserts value is FactoryPromp
     || new Set(last.toolNames).size !== last.toolNames.length
     || last.toolNames.some((name) => typeof name !== "string" || !SUBMISSION_TOOL_NAMES.has(name))
     || !["absent", "accepted", "rejected", "error"].includes(String(last.finalizerOutcome))
+    || (last.finalizerValidationCode !== undefined
+      && !/^[A-Z][A-Z0-9_]{0,63}$/.test(String(last.finalizerValidationCode)))
     || !["absent", "last", "not_last", "multiple"].includes(String(last.finalizerPosition))
-    || !["finalized", "cleared", "rolled_back", "no_draft"].includes(String(last.transaction))
+    || !["finalized", "retained", "cleared", "rolled_back", "no_draft"].includes(String(last.transaction))
   ) {
     throw new Error("Invalid Factory last tool-turn telemetry fields");
   }

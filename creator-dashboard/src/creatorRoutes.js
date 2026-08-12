@@ -1,14 +1,19 @@
-const ROOT = "/portal/creator";
+const ROOT = "/studio";
+const LEGACY_ROOT = "/portal/creator";
 const PRODUCT_TABS = new Set(["overview", "test", "examples", "versions", "data-controls"]);
 
 export function parseCreatorRoute(pathname) {
   const clean = `/${String(pathname ?? "").split(/[?#]/)[0].split("/").filter(Boolean).join("/")}`;
-  const normalized = clean === "/portal" ? ROOT : clean;
+  const legacyPath = clean === LEGACY_ROOT || clean.startsWith(`${LEGACY_ROOT}/`);
+  const normalized = clean === "/portal" ? ROOT : clean === LEGACY_ROOT || clean.startsWith(`${LEGACY_ROOT}/`)
+    ? `${ROOT}${clean.slice(LEGACY_ROOT.length)}`
+    : clean;
   if (normalized !== ROOT && !normalized.startsWith(`${ROOT}/`)) return { kind: "not-found", section: "" };
   const segments = normalized.slice(ROOT.length).split("/").filter(Boolean).map(safeDecode);
   if (!segments.length) return { kind: "home", section: "home" };
   if (segments[0] === "factory") {
     if (segments[1] === "runs" && segments[2]) return { kind: "factory", section: "products", runId: segments[2] };
+    if (segments[1] && !legacyPath) return { kind: "factory", section: "products", runId: segments[1] };
     return segments.length === 1 ? { kind: "factory", section: "products" } : { kind: "not-found", section: "products" };
   }
   if (segments[0] === "products") {

@@ -4,7 +4,7 @@ import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { runCreatorFactoryCli } from "./creatorFactoryCli.js";
+import { runCreatorFactoryCli, timingReport } from "./creatorFactoryCli.js";
 import { CreatorFactory } from "./creatorLearning/engine.js";
 import { FactoryFileStore } from "./creatorLearning/fileStore.js";
 import {
@@ -54,6 +54,30 @@ test("execution sidecars preserve running power-loss state and explicit aborted 
   assert.equal(rows.find((row) => row.executionId === interrupted.executionId)?.status, "running");
   assert.equal(rows.find((row) => row.executionId === cancelled.executionId)?.status, "aborted");
   assert.equal(rows.find((row) => row.executionId === cancelled.executionId)?.sealed, true);
+});
+
+test("CLI recovery marks process-loss timings abandoned without inventing elapsed time", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-factory-timing-abandoned-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const store = new FactoryFileStore(root, "timing-abandoned");
+  await store.initialize();
+  await store.beginExecution({
+    startedAt: "2030-01-01T00:00:00.000Z",
+    sealed: false,
+    metadata: factoryMetadata("corpus.compile")
+  });
+
+  assert.equal(await store.abandonRunningExecutions("2030-01-01T00:01:00.000Z"), 1);
+  assert.equal(await store.abandonRunningExecutions("2030-01-01T00:02:00.000Z"), 0);
+  const [row] = await store.listExecutionTimings();
+  assert.equal(row?.status, "abandoned");
+  assert.equal(row?.completedAt, "2030-01-01T00:01:00.000Z");
+  assert.equal(row?.elapsedMs, undefined);
+
+  const report = timingReport(store.runId, store.directory, [row!]);
+  assert.equal(report.summary.abandoned, 1);
+  assert.equal(report.summary.running, 0);
+  assert.equal(report.summary.settledElapsedMs, 0);
 });
 
 test("failed LLM retry gets a unique sidecar and elapsed uses monotonic time across wall-clock rollback", async (t) => {
@@ -293,7 +317,7 @@ test("every Factory LLM/Hatch call is timed and held-out sentinel stays out of s
   assert.equal(cliOutput.includes(heldoutSentinel), false);
 });
 
-function factoryMetadata(purpose: "evidence.extract" | "eval.judge_result") {
+function factoryMetadata(purpose: "evidence.extract" | "eval.judge_result" | "corpus.compile") {
   return {
     boundary: "factory_llm" as const,
     purpose,

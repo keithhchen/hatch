@@ -303,7 +303,7 @@ export type FactoryOutputContract =
   | { kind: "corpus_audit" }
   | { kind: "corpus_compilation"; availableToolIds: string[] };
 
-export type FactoryExecutionStatus = "running" | "completed" | "failed" | "aborted";
+export type FactoryExecutionStatus = "running" | "completed" | "failed" | "aborted" | "abandoned";
 
 export type FactorySubmissionToolName =
   | "restart_submission"
@@ -357,8 +357,10 @@ export type FactoryPromptFailureTelemetry = {
     rejected: number;
     toolNames: FactorySubmissionToolName[];
     finalizerOutcome: "absent" | "accepted" | "rejected" | "error";
+    /** Host-owned, content-free validator code for a rejected finalizer. */
+    finalizerValidationCode?: string;
     finalizerPosition: "absent" | "last" | "not_last" | "multiple";
-    transaction: "finalized" | "cleared" | "rolled_back" | "no_draft";
+    transaction: "finalized" | "retained" | "cleared" | "rolled_back" | "no_draft";
   };
 };
 
@@ -390,7 +392,7 @@ export type FactoryExecutionTiming = {
   /** Wall-clock timestamps are for operator orientation only. */
   startedAt: string;
   completedAt?: string;
-  /** Always measured from a monotonic clock, never derived from timestamps. */
+  /** Always measured from a monotonic clock, never derived from timestamps. Absent for abandoned work. */
   elapsedMs?: number;
   sealed: boolean;
   metadata: FactoryExecutionMetadata;

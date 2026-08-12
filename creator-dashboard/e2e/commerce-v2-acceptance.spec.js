@@ -6,7 +6,7 @@ import {
   signIn
 } from "./helpers.js";
 
-const PUBLIC_PRODUCT = "/agents/creator-e2e/signal-resume-review";
+const PUBLIC_PRODUCT = "/creators/creator-e2e/signal-resume-review";
 const CREATOR_TOKEN = "creator-e2e-token";
 const BUYER_TOKEN = "buyer-e2e-token";
 
@@ -41,7 +41,7 @@ test("R03 duplicate submit plus a lost response retries to one free order and en
   const profile = await browserJson(page, "/v1/auth/me");
 
   await page.getByRole("button", { name: "Get for free" }).click();
-  await expect(page).toHaveURL(/\/portal\/checkout\//);
+  await expect(page).toHaveURL(/\/checkout\//);
   await page.getByLabel("I confirm this offer and its refund terms.").check();
 
   const checkoutId = new URL(page.url()).pathname.split("/").at(-1);
@@ -85,7 +85,7 @@ test("R03 duplicate submit plus a lost response retries to one free order and en
   const retryResponse = page.waitForResponse((response) => response.url().endsWith(confirmUrl) && response.request().method() === "POST");
   await page.getByRole("button", { name: "Add to my account" }).click();
   expect((await retryResponse).status()).toBe(200);
-  await expect(page).toHaveURL(/\/portal\/orders\/[^/]+\/success$/);
+  await expect(page).toHaveURL(/\/orders\/[^/]+\/success$/);
   await expect(page.getByText(/Free · Access granted/)).toBeVisible();
 
   const [orders, entitlements, commerceState] = await Promise.all([
@@ -109,7 +109,7 @@ test("R04 changed offer shows the old/new quote, has zero Commerce side effects,
     await createBuyerFromProduct(page, email, "Offer Change Buyer");
     const profile = await browserJson(page, "/v1/auth/me");
     await page.getByRole("button", { name: "Get for free" }).click();
-    await expect(page).toHaveURL(/\/portal\/checkout\//);
+    await expect(page).toHaveURL(/\/checkout\//);
 
     await e2eControl(request, "/__e2e/offer", {
       method: "POST",
@@ -137,7 +137,7 @@ test("R04 changed offer shows the old/new quote, has zero Commerce side effects,
     await page.getByRole("button", { name: "Get for free" }).click();
     await page.getByLabel("I confirm this offer and its refund terms.").check();
     await page.getByRole("button", { name: "Add to my account" }).click();
-    await expect(page).toHaveURL(/\/portal\/orders\/[^/]+\/success$/);
+    await expect(page).toHaveURL(/\/orders\/[^/]+\/success$/);
 
     const afterFreshConfirmation = await e2eControl(request, `/__e2e/commerce?buyer_id=${encodeURIComponent(profile.id)}`);
     expect(afterFreshConfirmation.events.filter((event) => event.event_type === "order.placed")).toHaveLength(1);
@@ -188,7 +188,7 @@ test("R30 keyboard-only Buyer flow completes free checkout with stable focus and
   await keyboardTabTo(page, authenticatedCta);
   await page.keyboard.press("Enter");
 
-  await expect(page).toHaveURL(/\/portal\/checkout\//);
+  await expect(page).toHaveURL(/\/checkout\//);
   const checkoutHeading = page.getByRole("heading", { level: 1, name: "Review the real offer." });
   await expect(checkoutHeading).toBeFocused();
   await expectNoSeriousAccessibilityViolations(page);
@@ -201,7 +201,7 @@ test("R30 keyboard-only Buyer flow completes free checkout with stable focus and
   await keyboardTabTo(page, confirmOrder);
   await page.keyboard.press("Enter");
 
-  await expect(page).toHaveURL(/\/portal\/orders\/[^/]+\/success$/);
+  await expect(page).toHaveURL(/\/orders\/[^/]+\/success$/);
   const successHeading = page.getByRole("heading", { level: 1, name: "Signal Resume Review is ready." });
   await expect(successHeading).toBeFocused();
   await expect(page.getByText("Access granted", { exact: true }).first()).toBeVisible();
@@ -210,7 +210,7 @@ test("R30 keyboard-only Buyer flow completes free checkout with stable focus and
 });
 
 test("R13 Factory autosave survives refresh and a failed flush blocks in-app navigation", async ({ page }) => {
-  await signIn(page, "creator", "/portal/creator/products/new/factory");
+  await signIn(page, "creator", "/studio/products/new/factory");
   const taskName = `Refresh-safe Browser Draft ${Date.now()}`;
   await page.getByLabel("Task name").fill(taskName);
   await page.getByLabel("Task promise").fill("Save this task on the server before navigation.");
@@ -236,13 +236,13 @@ test("R13 Factory autosave survives refresh and a failed flush blocks in-app nav
   });
   await page.getByLabel("Task name").fill(`${taskName} unsaved`);
   await page.getByRole("button", { name: "Products", exact: true }).click();
-  await expect(page).toHaveURL(/\/portal\/creator\/products\/new\/factory$/);
+  await expect(page).toHaveURL(/\/studio\/products\/new\/factory$/);
   await expect(page.getByRole("alert")).toContainText("kept you on this page");
   expect(failedWrites).toBeGreaterThan(0);
 
   await page.unroute("**/v1/creator/factory-drafts/default");
   await page.getByRole("button", { name: "Products", exact: true }).click();
-  await expect(page).toHaveURL(/\/portal\/creator\/products$/);
+  await expect(page).toHaveURL(/\/studio\/products$/);
 });
 
 test("R14 two browser sessions reject a stale Factory draft instead of overwriting the newer server version", async ({ browser }) => {
@@ -254,8 +254,8 @@ test("R14 two browser sessions reject a stale Factory draft instead of overwriti
   const staleValue = `Stale browser must not overwrite ${Date.now()}`;
   try {
     await Promise.all([
-      signIn(firstPage, "creator", "/portal/creator/products/new/factory"),
-      signIn(stalePage, "creator", "/portal/creator/products/new/factory")
+      signIn(firstPage, "creator", "/studio/products/new/factory"),
+      signIn(stalePage, "creator", "/studio/products/new/factory")
     ]);
     await expect(firstPage.getByLabel("Task name")).toBeVisible();
     await expect(stalePage.getByLabel("Task name")).toBeVisible();
@@ -281,7 +281,7 @@ test("R15 a replacement Factory question batch quarantines old answers and expos
   const runId = "factory_question_replacement";
   const oldAnswer = "Prioritize the signed customer interview and preserve its exact scope.";
   const newAnswer = "Use the verified delivery log and exclude the superseded interview draft.";
-  const route = `/portal/creator/factory/runs/${runId}`;
+  const route = `/studio/factory/${runId}`;
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await e2eControl(request, "/__e2e/factory-question-batch", {
     method: "POST",
@@ -351,7 +351,7 @@ test("R15 a replacement Factory question batch quarantines old answers and expos
 test("R16 a failed critical gate disables keyboard approval and the server rejects a forged approve", async ({ page, request }) => {
   const productId = "blocked-browser-product";
   const candidateId = "factory_blocked_browser";
-  await signIn(page, "creator", `/portal/creator/products/${productId}/candidates/${candidateId}`);
+  await signIn(page, "creator", `/studio/products/${productId}/candidates/${candidateId}`);
   await expect(page.getByRole("heading", { level: 2, name: "Critical gates block approval" })).toBeVisible();
   await expect(page.getByText("Blocked", { exact: true })).toBeVisible();
   const approve = page.getByRole("button", { name: "Approve candidate" });
@@ -381,7 +381,7 @@ test("R19/R20/R30 keyboard Creator flow publishes two immutable releases, shares
   const candidateV2 = `factory_${productId.replaceAll("-", "_")}_v2`;
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
 
-  await signIn(page, "creator", "/portal/creator/products/new/factory");
+  await signIn(page, "creator", "/studio/products/new/factory");
   await page.getByLabel("Task name").fill(productId);
   await page.getByLabel("Task promise").fill("Turn an approved method into a shareable, immutable delivery.");
   await page.getByLabel("Source title").fill("Reviewed Creator method");
@@ -389,20 +389,20 @@ test("R19/R20/R30 keyboard Creator flow publishes two immutable releases, shares
   const startDistillation = page.getByRole("button", { name: "Start distillation" });
   await startDistillation.focus();
   await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(new RegExp(`/portal/creator/factory/runs/${candidateV1}$`));
+  await expect(page).toHaveURL(new RegExp(`/studio/factory/${candidateV1}$`));
   const reviewCandidate = page.getByRole("button", { name: "Review candidate" });
   await reviewCandidate.focus();
   await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(new RegExp(`/portal/creator/products/${productId}/candidates/${candidateV1}$`));
+  await expect(page).toHaveURL(new RegExp(`/studio/products/${productId}/candidates/${candidateV1}$`));
   await keyboardApproveCandidate(page, true);
   await keyboardSaveFreeOfferAndPublish(page, productId);
   const shareLink = page.getByLabel("Share link");
-  await expect(shareLink).toHaveValue(`/agents/creator-e2e/${productId}`);
+  await expect(shareLink).toHaveValue(`/creators/creator-e2e/${productId}`);
   const copyLink = page.getByRole("button", { name: "Copy link" });
   await copyLink.focus();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("button", { name: "Copied" })).toBeVisible();
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(`/agents/creator-e2e/${productId}`);
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(`/creators/creator-e2e/${productId}`);
 
   const firstProduct = (await creatorProduct(request, productId)).product;
   expect(firstProduct.releases).toHaveLength(1);
@@ -411,7 +411,7 @@ test("R19/R20/R30 keyboard Creator flow publishes two immutable releases, shares
   expect(buyerSnapshot.order.release_id).toBe(firstRelease.release_id);
   expect(buyerSnapshot.entitlement.purchased_corpus_digest).toBe(firstRelease.corpus_digest);
 
-  await page.goto(`/portal/creator/products/${productId}/candidates/${candidateV2}`);
+  await page.goto(`/studio/products/${productId}/candidates/${candidateV2}`);
   await keyboardApproveCandidate(page, false);
   await keyboardSaveFreeOfferAndPublish(page, productId);
   const secondProduct = (await creatorProduct(request, productId)).product;
@@ -433,7 +433,7 @@ test("R19/R20/R30 keyboard Creator flow publishes two immutable releases, shares
   expect(missingReason.status()).toBe(422);
   expect((await missingReason.json()).error.code).toBe("audit_reason_required");
 
-  await page.goto(`/portal/creator/products/${productId}/releases/${firstRelease.release_id}`);
+  await page.goto(`/studio/products/${productId}/releases/${firstRelease.release_id}`);
   await expect(page.getByRole("heading", { level: 1, name: "Release" })).toBeVisible();
   await page.getByLabel("Offer revision").selectOption(String(firstRelease.offer_revision));
   await page.getByLabel("Audit reason").fill("Restore the first browser-verified behavior.");
@@ -478,7 +478,7 @@ test("R19/R20/R30 keyboard Creator flow publishes two immutable releases, shares
 });
 
 test("R21 Creator Orders uses a real cursor to load all 13 filtered orders", async ({ page }) => {
-  await signIn(page, "creator", "/portal/creator/orders");
+  await signIn(page, "creator", "/studio/orders");
   await page.getByLabel("Product ID").fill("pagination-product");
   const firstPage = page.waitForResponse((response) => response.url().includes("/v1/creator/orders?") && response.url().includes("product=pagination-product") && response.url().includes("limit=12"));
   await page.getByLabel("Rows per page").selectOption("12");
@@ -533,7 +533,7 @@ async function keyboardSaveFreeOfferAndPublish(page, productId) {
   const save = page.getByRole("button", { name: "Save and preview" });
   await save.focus();
   await page.keyboard.press("Enter");
-  await expect(page).toHaveURL(new RegExp(`/portal/creator/products/${escapeRegExp(productId)}/preview`));
+  await expect(page).toHaveURL(new RegExp(`/studio/products/${escapeRegExp(productId)}/preview`));
   await expect(page.getByRole("heading", { level: 1, name: "See exactly what Buyers will see." })).toBeFocused();
   const publish = page.getByRole("button", { name: "Publish", exact: true });
   await expect(publish).toBeEnabled();

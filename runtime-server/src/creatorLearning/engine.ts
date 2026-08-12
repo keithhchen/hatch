@@ -47,7 +47,7 @@ import type {
   QaEvaluation
 } from "./types.js";
 
-const PROMPT_VERSION = "creator-factory-v3-transactional-repair";
+const PROMPT_VERSION = "creator-factory-v6-planned-incremental-corpus";
 const SEALED_FAILURE_MESSAGE = "Sealed Factory operation failed; sensitive diagnostics were not persisted";
 // Conservative character ceiling leaves ample room inside K3's 1M-token
 // context for instructions, multilingual tokenization, reasoning, and output.
@@ -1386,12 +1386,26 @@ export class CreatorFactory {
     failureTelemetry?: Parameters<NonNullable<FactoryPromptCall["reportFailureTelemetry"]>>[0]
   ): Promise<void> {
     const clock = this.executionClock();
-    await store.settleExecution(timing, {
-      status: store.signal?.aborted || isAbortError(error) ? "aborted" : "failed",
+    const settlement = {
+      status: store.signal?.aborted || isAbortError(error) ? "aborted" as const : "failed" as const,
       completedAt: clock.wallNow().toISOString(),
-      elapsedMs: monotonicElapsed(monotonicStart, clock.monotonicNow()),
-      ...(failureTelemetry ? { failureTelemetry } : {})
-    });
+      elapsedMs: monotonicElapsed(monotonicStart, clock.monotonicNow())
+    };
+    try {
+      await store.settleExecution(timing, {
+        ...settlement,
+        ...(failureTelemetry ? { failureTelemetry } : {})
+      });
+    } catch (settlementError) {
+      // Failure telemetry is diagnostic only. If its strict schema rejects a
+      // producer bug, preserve the real execution failure and settle without
+      // telemetry instead of leaving a false `running` record.
+      const message = settlementError instanceof Error ? settlementError.message : String(settlementError);
+      if (!failureTelemetry || !/^Invalid Factory (?:failure telemetry|last tool-turn telemetry)/.test(message)) {
+        throw settlementError;
+      }
+      await store.settleExecution(timing, settlement);
+    }
   }
 
   private async needsAttention(

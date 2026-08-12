@@ -11,7 +11,8 @@ import { dashboardRequest } from "./data.js";
 import "../../packages/brand/tokens.css";
 import "./styles.css";
 
-const CREATOR_ROOT = "/portal/creator";
+const CREATOR_ROOT = "/studio";
+const LEGACY_CREATOR_ROOT = "/portal/creator";
 
 function App() {
   const location = useBrowserLocation();
@@ -89,17 +90,23 @@ function App() {
     invalidate
   };
 
-  if (location.pathname === "/" || location.pathname === "/portal" || location.pathname === "/portal/") {
+  // `/` is the public Explore home for every role. Only the legacy Portal
+  // root gets the migration redirect; a signed-in Creator or Buyer should
+  // still be able to share/open the same public home without being sent into
+  // a private workspace.
+  if (location.pathname === "/portal" || location.pathname === "/portal/") {
     if (location.pathname.startsWith("/portal") && sessionStatus === "loading") return <AppLoading />;
-    const destination = profile?.role === "creator" ? CREATOR_ROOT : profile?.role === "user" ? "/portal/library" : "/agents";
-    return <RouteRedirect to={destination} navigate={location.navigate} />;
+    return <RouteRedirect to="/explore" navigate={location.navigate} />;
   }
 
   if (location.pathname === "/download") {
-    return <RouteRedirect to="/agents" navigate={location.navigate} />;
+    return <RouteRedirect to="/explore" navigate={location.navigate} />;
   }
 
-  if (location.pathname === CREATOR_ROOT || location.pathname.startsWith(`${CREATOR_ROOT}/`)) {
+  if (location.pathname === CREATOR_ROOT
+    || location.pathname.startsWith(`${CREATOR_ROOT}/`)
+    || location.pathname === LEGACY_CREATOR_ROOT
+    || location.pathname.startsWith(`${LEGACY_CREATOR_ROOT}/`)) {
     if (sessionStatus === "loading") return <AppLoading />;
     if (sessionStatus !== "authenticated") {
       return <RouteRedirect to={`/sign-in?returnTo=${encodeURIComponent(location.href)}`} navigate={location.navigate} />;
@@ -115,7 +122,7 @@ function App() {
         profile={profile}
         onLogout={async () => {
           await signOut();
-          location.navigate("/agents", { replace: true });
+          location.navigate("/explore", { replace: true });
         }}
       />
     );
@@ -175,7 +182,7 @@ function RoleBoundary({ navigate }) {
       <span className="hatch-wordmark">Hatch.</span>
       <h1>Creator access is required.</h1>
       <p>This account can use purchased Agents, but it cannot edit Creator products.</p>
-      <button className="primary" type="button" onClick={() => navigate("/portal/library", { replace: true })}>Open your library</button>
+      <button className="primary" type="button" onClick={() => navigate("/library", { replace: true })}>Open your library</button>
     </main>
   );
 }

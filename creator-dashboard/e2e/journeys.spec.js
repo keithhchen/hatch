@@ -11,7 +11,7 @@ test.beforeEach(async ({}, testInfo) => {
 });
 
 test("anonymous Buyer completes free checkout and can recover every durable route", async ({ page, context }) => {
-  await page.goto("/agents/creator-e2e/signal-resume-review");
+  await page.goto("/creators/creator-e2e/signal-resume-review");
   await expectNoSeriousAccessibilityViolations(page);
 
   await page.getByRole("link", { name: "Get for free" }).click();
@@ -21,14 +21,14 @@ test("anonymous Buyer completes free checkout and can recover every durable rout
   await page.getByLabel("Password").fill("buyer-password");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
 
-  await expect(page).toHaveURL(/\/agents\/creator-e2e\/signal-resume-review$/);
+  await expect(page).toHaveURL(/\/creators\/creator-e2e\/signal-resume-review$/);
   await page.getByRole("button", { name: "Get for free" }).click();
-  await expect(page).toHaveURL(/\/portal\/checkout\//);
+  await expect(page).toHaveURL(/\/checkout\//);
   await expect(page.getByRole("heading", { level: 1, name: "Review the real offer." })).toBeVisible();
   await page.getByLabel("I confirm this offer and its refund terms.").check();
   await page.getByRole("button", { name: "Add to my account" }).click();
 
-  await expect(page).toHaveURL(/\/portal\/orders\/[^/]+\/success$/);
+  await expect(page).toHaveURL(/\/orders\/[^/]+\/success$/);
   const successUrl = page.url();
   await expect(page.getByRole("heading", { level: 1, name: "Signal Resume Review is ready." })).toBeVisible();
   await expect(page.getByText(/Free · Access granted/)).toBeVisible();
@@ -41,7 +41,7 @@ test("anonymous Buyer completes free checkout and can recover every durable rout
   await page.reload();
   await expect(page.getByRole("heading", { level: 1, name: "Signal Resume Review is ready." })).toBeVisible();
   await page.getByRole("link", { name: "View order receipt" }).click();
-  await expect(page).toHaveURL(/\/portal\/orders\/[^/]+$/);
+  await expect(page).toHaveURL(/\/orders\/[^/]+$/);
   await expect(page.getByRole("heading", { level: 1, name: "Signal Resume Review" })).toBeVisible();
   await expect(page.getByRole("definition").filter({ hasText: /^Not required$/ })).toBeVisible();
   await page.reload();
@@ -49,13 +49,13 @@ test("anonymous Buyer completes free checkout and can recover every durable rout
 
   await page.goto(successUrl);
   await page.getByRole("link", { name: "View access details" }).click();
-  await expect(page).toHaveURL(/\/portal\/library\/[^/]+$/);
+  await expect(page).toHaveURL(/\/library\/[^/]+\/[^/]+$/);
   await expect(page.getByRole("link", { name: "Back to Library" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Back to Explore" })).toHaveCount(0);
   await page.reload();
   await expect(page.getByRole("heading", { level: 1, name: "Signal Resume Review" })).toBeVisible();
   await page.getByRole("link", { name: "Back to Library" }).click();
-  await expect(page).toHaveURL(/\/portal\/library$/);
+  await expect(page).toHaveURL(/\/library$/);
   await expect(page.getByRole("heading", { level: 1, name: "Agents your account can use." })).toBeVisible();
   await page.reload();
   await expect(page.getByRole("heading", { level: 1, name: "Agents your account can use." })).toBeVisible();
@@ -77,16 +77,16 @@ test("anonymous Buyer completes free checkout and can recover every durable rout
   await page.getByLabel("Email").fill("buyer@example.test");
   await page.getByLabel("Password").fill("buyer-password");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await expect(page).toHaveURL(/\/agents$/);
+  await expect(page).toHaveURL(/\/explore$/);
 });
 
 test("Creator can recover Home, Products, Orders and honest Payouts routes", async ({ page }) => {
-  await signIn(page, "creator", "/portal/creator");
+  await signIn(page, "creator", "/studio");
   await expect(page.getByRole("heading", { level: 1, name: /Maya, here’s the next useful step/ })).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
   await page.getByRole("button", { name: "Products", exact: true }).click();
-  await expect(page).toHaveURL(/\/portal\/creator\/products$/);
+  await expect(page).toHaveURL(/\/studio\/products$/);
   await expect(page.getByRole("heading", { level: 1, name: "From a method to a product people can use." })).toBeVisible();
   await page.reload();
   await expect(page.getByRole("button", { name: "Open product" }).first()).toBeVisible();
@@ -100,12 +100,12 @@ test("Creator can recover Home, Products, Orders and honest Payouts routes", asy
 });
 
 test("keyboard reaches skip navigation and route changes focus the Creator h1", async ({ page }) => {
-  await page.goto("/agents/creator-e2e/signal-resume-review");
+  await page.goto("/creators/creator-e2e/signal-resume-review");
   const skipLink = page.getByRole("link", { name: "Skip to content" });
   await keyboardTabTo(page, skipLink);
   await expect(skipLink).toBeFocused();
 
-  await signIn(page, "creator", "/portal/creator");
+  await signIn(page, "creator", "/studio");
   await expect(page.getByRole("heading", { level: 1 })).toBeFocused();
   await page.getByRole("button", { name: "Products", exact: true }).click();
   await expect(page.getByRole("heading", { level: 1, name: "From a method to a product people can use." })).toBeFocused();

@@ -13,8 +13,9 @@ export function createProductMetadata(input = {}) {
   const productName = cleanText(input.productName, "Creator Agent", 120);
   const creatorName = cleanText(input.creatorName, "Hatch Creator", 120);
   const description = cleanText(input.description, DEFAULT_DESCRIPTION, 300);
+  const routePrefix = String(input.routePrefix ?? "/agents").replace(/\/+$/, "") || "/agents";
   const canonicalUrl = new URL(
-    `/agents/${encodeURIComponent(creatorSlug)}/${encodeURIComponent(productSlug)}`,
+    `${routePrefix}/${encodeURIComponent(creatorSlug)}/${encodeURIComponent(productSlug)}`,
     origin
   ).toString();
   const imageUrl = optionalPublicUrl(input.imageUrl, origin);
@@ -72,8 +73,8 @@ export function injectProductMetadata(documentHtml, metadata) {
 }
 
 /** Generic metadata for catalog/auth routes when no product is resolved. */
-export function createDefaultMetadata(origin) {
-  const canonicalUrl = new URL("/agents", safeOrigin(origin)).toString();
+export function createDefaultMetadata(origin, routePrefix = "/agents") {
+  const canonicalUrl = new URL(String(routePrefix || "/agents"), safeOrigin(origin)).toString();
   return Object.freeze({
     title: DEFAULT_TITLE,
     description: DEFAULT_DESCRIPTION,
@@ -81,10 +82,10 @@ export function createDefaultMetadata(origin) {
   });
 }
 
-export function createUnavailableProductMetadata(origin, creatorSlug, productSlug) {
+export function createUnavailableProductMetadata(origin, creatorSlug, productSlug, routePrefix = "/agents") {
   const safe = safeOrigin(origin);
   const canonicalUrl = new URL(
-    `/agents/${encodeURIComponent(requiredSegment(creatorSlug, "creatorSlug"))}/${encodeURIComponent(requiredSegment(productSlug, "productSlug"))}`,
+    `${String(routePrefix || "/agents").replace(/\/+$/, "")}/${encodeURIComponent(requiredSegment(creatorSlug, "creatorSlug"))}/${encodeURIComponent(requiredSegment(productSlug, "productSlug"))}`,
     safe
   ).toString();
   return Object.freeze({

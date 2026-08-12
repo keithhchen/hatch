@@ -6,11 +6,16 @@ import {
   normalizeKimiBaseUrl,
   type KimiAdapterOptions
 } from "../piModel.js";
+import { resolveFactoryLlmProfile } from "../llmProfiles.js";
 import { createFactorySubmissionProtocol } from "./factorySubmission.js";
 import type { FactoryPromptFailureTelemetry, FactoryPromptRunner } from "./types.js";
 
 export const FACTORY_KIMI_K3_MODEL = "kimi-k3" as const;
-export const FACTORY_KIMI_K3_TOKEN_BUDGET = 1_048_576;
+const FACTORY_KIMI_K3_PROFILE = resolveFactoryLlmProfile();
+/** Total input + preserved multi-turn history + output capacity. */
+export const FACTORY_KIMI_K3_CONTEXT_WINDOW = FACTORY_KIMI_K3_PROFILE.contextWindow;
+/** Moonshot's documented Kimi K3 default maximum for one completion. */
+export const FACTORY_KIMI_K3_MAX_COMPLETION_TOKENS = FACTORY_KIMI_K3_PROFILE.maxTokens;
 export const FACTORY_PROVIDER_QUOTA_MESSAGE =
   "Factory LLM provider quota is unavailable; recharge or increase the provider quota, then retry this stage";
 export const FACTORY_PROVIDER_TRANSIENT_MESSAGE =
@@ -63,7 +68,7 @@ export function createFactoryKimiK3Model(
     api: "openai-completions",
     provider: new URL(baseUrl).hostname === "api.moonshot.ai" ? "moonshotai" : "moonshotai-cn",
     baseUrl,
-    reasoning: true,
+    reasoning: FACTORY_KIMI_K3_PROFILE.reasoning,
     thinkingLevelMap: {
       off: null,
       minimal: null,
@@ -80,14 +85,14 @@ export function createFactoryKimiK3Model(
       cacheRead: 0.3,
       cacheWrite: 0
     },
-    contextWindow: FACTORY_KIMI_K3_TOKEN_BUDGET,
-    maxTokens: FACTORY_KIMI_K3_TOKEN_BUDGET,
+    contextWindow: FACTORY_KIMI_K3_PROFILE.contextWindow,
+    maxTokens: FACTORY_KIMI_K3_PROFILE.maxTokens,
     compat: {
       supportsStore: false,
       supportsDeveloperRole: false,
       supportsReasoningEffort: true,
       maxTokensField: "max_completion_tokens",
-      supportsStrictMode: false,
+      supportsStrictMode: true,
       thinkingFormat: "openai",
       requiresReasoningContentOnAssistantMessages: true
     }
@@ -98,7 +103,11 @@ export function createFactoryKimiK3Model(
 function normalizeFactoryKimiK3Payload(payload: unknown): unknown {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
   const normalized = { ...(payload as Record<string, unknown>) };
-  normalized.reasoning_effort = "max";
+  normalized.reasoning_effort = FACTORY_KIMI_K3_PROFILE.thinkingLevel;
+  // Every Factory node has exactly one valid handoff channel: its local
+  // submission tools. `auto` previously allowed a long prose-only response
+  // that the host necessarily discarded as stopped_without_finalize.
+  normalized.tool_choice = "required";
   delete normalized.thinking;
   delete normalized.temperature;
   delete normalized.top_p;
@@ -167,7 +176,7 @@ function failureCode(
 ): FactoryPromptFailureTelemetry["code"] {
   if (aborted) return "aborted";
   const message = error instanceof Error ? error.message : String(error);
-  if (/exact submission tool cycle/i.test(message)) return "exact_submission_cycle";
+  if (/exact submission tool cycle|repeated final validation failure/i.test(message)) return "exact_submission_cycle";
   if (/without an accepted finalize/i.test(message)) return "stopped_without_finalize";
   if (/did not complete: length|output token limit/i.test(message)) return "provider_incomplete";
   const providerFailure = classifyFactoryProviderFailure(error);
@@ -192,9 +201,9 @@ export function createFactoryKimiK3PromptRunner(
         messages: [],
         tools: submission.tools,
         model: createFactoryKimiK3Model(adapterOptions),
-        thinkingLevel: "max"
+        thinkingLevel: FACTORY_KIMI_K3_PROFILE.thinkingLevel
       },
-      streamFn: createKimiStreamFn({ ...adapterOptions, thinkingLevel: "max" }),
+      streamFn: createKimiStreamFn({ ...adapterOptions, thinkingLevel: FACTORY_KIMI_K3_PROFILE.thinkingLevel }),
       onPayload: async (payload) => normalizeFactoryKimiK3Payload(payload),
       transformContext: async (messages) => submission.sanitizeContext(messages),
       toolExecution: "sequential",

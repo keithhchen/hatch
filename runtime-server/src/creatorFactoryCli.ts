@@ -54,23 +54,29 @@ export async function runCreatorFactoryCli(argv = process.argv.slice(2)): Promis
   if (command === "start") {
     if (!parsed.values.input) throw usage("start requires --input <factory-input.json>");
     const input = await loadInputManifest(path.resolve(parsed.values.input));
-    printState(await factory.start(input), root);
+    await withMutationSignal(async (signal) => {
+      printState(await factory.start(input, { signal }), root);
+    });
     return;
   }
   if (command === "resume") {
     const runId = requiredRunId(parsed.values["run-id"]);
-    let state;
-    if (parsed.values.answers) {
-      const answers = await readFile(path.resolve(parsed.values.answers), "utf8");
-      state = await factory.submitCreatorAnswers(
-        runId,
-        answers,
-        parseCreatorAnswerQuestionBatchId(answers)
-      );
-    } else {
-      state = await factory.resume(runId);
-    }
-    printState(state, root);
+    await withMutationSignal(async (signal) => {
+      await recoverAbandonedCliExecutions(root, runId);
+      let state;
+      if (parsed.values.answers) {
+        const answers = await readFile(path.resolve(parsed.values.answers), "utf8");
+        state = await factory.submitCreatorAnswers(
+          runId,
+          answers,
+          parseCreatorAnswerQuestionBatchId(answers),
+          { signal }
+        );
+      } else {
+        state = await factory.resume(runId, { signal });
+      }
+      printState(state, root);
+    });
     return;
   }
   if (command === "status") {
@@ -78,7 +84,11 @@ export async function runCreatorFactoryCli(argv = process.argv.slice(2)): Promis
     return;
   }
   if (command === "retry") {
-    printState(await factory.retry(requiredRunId(parsed.values["run-id"])), root);
+    const runId = requiredRunId(parsed.values["run-id"]);
+    await withMutationSignal(async (signal) => {
+      await recoverAbandonedCliExecutions(root, runId);
+      printState(await factory.retry(runId, { signal }), root);
+    });
     return;
   }
   if (command === "timings") {
@@ -185,6 +195,7 @@ type TimingNodeSummary = {
   completed: number;
   failed: number;
   aborted: number;
+  abandoned: number;
   settledElapsedMs: number;
   averageSettledElapsedMs?: number;
 };
@@ -198,6 +209,7 @@ type TimingReport = {
     completed: number;
     failed: number;
     aborted: number;
+    abandoned: number;
     settledElapsedMs: number;
     byNode: TimingNodeSummary[];
   };
@@ -205,7 +217,7 @@ type TimingReport = {
 };
 
 export function timingReport(runId: string, runDirectory: string, executions: FactoryExecutionTiming[]): TimingReport {
-  const counts = { running: 0, completed: 0, failed: 0, aborted: 0 };
+  const counts = { running: 0, completed: 0, failed: 0, aborted: 0, abandoned: 0 };
   const byNode = new Map<TimingNodeSummary["node"], TimingNodeSummary>();
   let settledElapsedMs = 0;
   for (const execution of executions) {
@@ -218,6 +230,7 @@ export function timingReport(runId: string, runDirectory: string, executions: Fa
       completed: 0,
       failed: 0,
       aborted: 0,
+      abandoned: 0,
       settledElapsedMs: 0
     };
     summary.attempts += 1;
@@ -250,7 +263,7 @@ function renderTimingReport(report: TimingReport): string {
   const lines = [
     `Creator Factory timings — ${report.runId}`,
     `Run directory: ${report.runDirectory}`,
-    `Attempts: ${report.summary.attempts} (completed ${report.summary.completed}, failed ${report.summary.failed}, aborted ${report.summary.aborted}, running ${report.summary.running})`,
+    `Attempts: ${report.summary.attempts} (completed ${report.summary.completed}, failed ${report.summary.failed}, aborted ${report.summary.aborted}, abandoned ${report.summary.abandoned}, running ${report.summary.running})`,
     `Settled elapsed: ${formatElapsed(report.summary.settledElapsedMs)}`,
     "",
     "By node:"
@@ -272,6 +285,25 @@ function renderTimingReport(report: TimingReport): string {
     ].join(" | "));
   }
   return `${lines.join("\n")}\n`;
+}
+
+async function recoverAbandonedCliExecutions(root: string, runId: string): Promise<void> {
+  const store = new FactoryFileStore(root, runId);
+  await store.loadState();
+  await store.abandonRunningExecutions(new Date().toISOString());
+}
+
+async function withMutationSignal<T>(operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const controller = new AbortController();
+  const abort = (): void => controller.abort(new Error("Creator Factory CLI interrupted by operator"));
+  process.once("SIGINT", abort);
+  process.once("SIGTERM", abort);
+  try {
+    return await operation(controller.signal);
+  } finally {
+    process.removeListener("SIGINT", abort);
+    process.removeListener("SIGTERM", abort);
+  }
 }
 
 function formatElapsed(milliseconds: number): string {

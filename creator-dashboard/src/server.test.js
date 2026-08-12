@@ -233,6 +233,36 @@ test("Creator can approve a verified candidate, set an offer, preview, publish, 
   assert.equal(dashboard.ledger.listEvents().filter((event) => event.event_type === "offer.activated").length, 2);
 });
 
+test("public slug aliases resolve in the API and redirect browsers to the canonical product URL", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-slug-alias-"));
+  const aliasedAgent = {
+    ...catalogAgent,
+    creator_slug: "maya-chen",
+    product_slug: "signal-resume-review",
+    creator_slug_aliases: ["maya-old"],
+    product_slug_aliases: ["resume-review-old"]
+  };
+  const registry = registryFixture({ role: "user", catalogAgents: [aliasedAgent] });
+  await listen(registry);
+  context.after(() => registry.close());
+  const dashboard = await createDashboardApp({
+    ledgerPath: path.join(directory, "ledger.jsonl"),
+    registryUrl: serverUrl(registry)
+  });
+  const api = createServer(dashboard.handler);
+  await listen(api);
+  context.after(() => api.close());
+
+  const browserResponse = await fetch(`${serverUrl(api)}/creators/maya-old/resume-review-old`, { redirect: "manual" });
+  assert.equal(browserResponse.status, 308);
+  assert.equal(browserResponse.headers.get("location"), "/creators/maya-chen/signal-resume-review");
+
+  const apiResponse = await fetch(`${serverUrl(api)}/v1/public/products/maya-old/resume-review-old`);
+  const body = await apiResponse.json();
+  assert.equal(apiResponse.status, 200, JSON.stringify(body));
+  assert.equal(body.agent.public_url, "/creators/maya-chen/signal-resume-review");
+});
+
 test("Factory-only first publish does not seed a fake legacy deployment", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-first-publish-"));
   const deploymentCalls = [];
@@ -599,6 +629,10 @@ test("V2 checkout session persists a free receipt and entitlement detail", async
   assert.equal(detailResponse.status, 200);
   assert.equal(detail.agent.available, true);
   assert.equal(detail.agent.offer.amount_minor, 0);
+  const canonicalDetailResponse = await fetch(`${serverUrl(api)}/v1/public/products/${catalogAgent.creator_id}/${catalogAgent.product_id}`);
+  const canonicalDetail = await canonicalDetailResponse.json();
+  assert.equal(canonicalDetailResponse.status, 200);
+  assert.equal(canonicalDetail.agent.offer.amount_minor, 0);
 
   const createSession = () => fetch(`${serverUrl(api)}/v1/checkout-sessions`, {
     method: "POST",
@@ -646,11 +680,26 @@ test("V2 checkout session persists a free receipt and entitlement detail", async
   assert.equal(order.actions.can_request_refund, false);
   assert.equal(order.actions.can_cancel_access, true);
 
+  const canonicalOrdersResponse = await fetch(`${serverUrl(api)}/v1/orders`, { headers });
+  const canonicalOrders = await canonicalOrdersResponse.json();
+  assert.equal(canonicalOrdersResponse.status, 200);
+  assert.equal(canonicalOrders.orders.length, 1);
+  const canonicalOrderResponse = await fetch(`${serverUrl(api)}/v1/orders/${encodeURIComponent(order.order_number ?? confirmed.order_id)}`, { headers });
+  assert.equal(canonicalOrderResponse.status, 200);
+  assert.equal((await canonicalOrderResponse.json()).order.order_id, confirmed.order_id);
+  const canonicalLibraryResponse = await fetch(`${serverUrl(api)}/v1/library`, { headers });
+  const canonicalLibrary = await canonicalLibraryResponse.json();
+  assert.equal(canonicalLibraryResponse.status, 200);
+  assert.equal(canonicalLibrary.entitlements.length, 1);
+
   const entitlementResponse = await fetch(`${serverUrl(api)}/v1/user/entitlements/${confirmed.entitlement_id}`, { headers });
   const entitlement = (await entitlementResponse.json()).entitlement;
   assert.equal(entitlementResponse.status, 200);
   assert.equal(entitlement.product.name, catalogAgent.product_name);
   assert.equal(entitlement.remaining_units, 1);
+  const canonicalEntitlementResponse = await fetch(`${serverUrl(api)}/v1/library/${confirmed.entitlement_id}`, { headers });
+  assert.equal(canonicalEntitlementResponse.status, 200);
+  assert.equal((await canonicalEntitlementResponse.json()).entitlement.entitlement_id, confirmed.entitlement_id);
 
   await recordDelivery(dashboard, { order: confirmed.order, entitlement: confirmed.entitlement }, {
     prefix: "buyer-entitlement-history",
@@ -708,7 +757,7 @@ test("a free order can remove access before delivery", async (context) => {
   const confirmation = await confirmationResponse.json();
   assert.equal(confirmationResponse.status, 201, JSON.stringify(confirmation));
 
-  const cancellationResponse = await fetch(`${serverUrl(api)}/v1/user/orders/${confirmation.order_id}/refund-requests`, {
+  const cancellationResponse = await fetch(`${serverUrl(api)}/v1/orders/${confirmation.order_id}/cancel`, {
     method: "POST",
     headers,
     body: JSON.stringify({ reason: "buyer_removed_free_access" })

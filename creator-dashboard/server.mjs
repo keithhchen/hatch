@@ -751,13 +751,48 @@ export async function createDashboardApp(options = {}) {
         }
         return send(response, 404, { error: { code: "not_found", message: "Internal Commerce route not found." } });
       }
-      if (request.method === "GET" && (url.pathname === "/portal" || url.pathname.startsWith("/portal/"))) {
+      if (request.method === "GET" && url.pathname.startsWith("/portal")) {
+        const legacyLocation = await resolveLegacyRouteLocation({
+          pathname: url.pathname,
+          search: url.search,
+          request,
+          registryUrl,
+          fetchImpl,
+          portalState,
+          commerce
+        });
+        if (legacyLocation) {
+          response.writeHead(308, { location: legacyLocation, "cache-control": "no-cache" });
+          return response.end();
+        }
+      }
+      if (request.method === "GET" && (url.pathname === "/portal" || url.pathname === "/portal/")) {
+        return servePortalAsset(url.pathname, response);
+      }
+      if (request.method === "GET" && url.pathname.startsWith("/portal/")) {
+        return send(response, 404, { error: { code: "legacy_route_not_found", message: "That legacy Hatch link is no longer available." } });
+      }
+      // `/agents` was the old public namespace. Keep old shared links useful,
+      // but make the readable `/creators/...` URL the only canonical address.
+      if (request.method === "GET" && (url.pathname === "/agents" || url.pathname === "/agents/")) {
+        response.writeHead(308, { location: `/explore${url.search}`, "cache-control": "no-cache" });
+        return response.end();
+      }
+      const legacyPublicProduct = url.pathname.match(/^\/agents\/([^/]+)\/([^/]+)$/);
+      if (request.method === "GET" && legacyPublicProduct) {
+        response.writeHead(308, {
+          location: `/creators/${legacyPublicProduct[1]}/${legacyPublicProduct[2]}${url.search}`,
+          "cache-control": "no-cache"
+        });
+        return response.end();
+      }
+      if (request.method === "GET" && (url.pathname === "/assets" || url.pathname.startsWith("/assets/"))) {
         return servePortalAsset(url.pathname, response);
       }
       if (request.method === "GET" && isPublicPortalRoute(url.pathname)) {
-        let metadata = createDefaultMetadata(publicOrigin);
+        let metadata = createDefaultMetadata(publicOrigin, "/explore");
         let portalStatus = 200;
-        const productRoute = url.pathname.match(/^\/agents\/([^/]+)\/([^/]+)$/);
+        const productRoute = url.pathname.match(/^\/(?:creators|agents)\/([^/]+)\/([^/]+)$/);
         if (productRoute) {
           try {
             await portalState.refresh?.();
@@ -767,6 +802,11 @@ export async function createDashboardApp(options = {}) {
             const agent = findCatalogAgent(catalog, creatorSelector, productSelector);
             const state = agent ? portalState.getCreatorProduct(agent.creator_id, agent.product_id) : undefined;
             if (agent && state?.status !== "withdrawn") {
+              const canonicalPath = publicProductPath(agent);
+              if (canonicalPath !== url.pathname) {
+                response.writeHead(308, { location: `${canonicalPath}${url.search}`, "cache-control": "no-cache" });
+                return response.end();
+              }
               const activeOffer = await authoritativeProductOffer(commerce, agent, state);
               const product = publicCatalogAgent(
                 agent,
@@ -776,15 +816,16 @@ export async function createDashboardApp(options = {}) {
               );
               metadata = createProductMetadata({
                 origin: publicOrigin,
-                creatorSlug: agent.creator_id,
-                productSlug: agent.product_id,
+                creatorSlug: agent.creator_slug ?? agent.creator_id,
+                productSlug: agent.product_slug ?? agent.product_id,
+                routePrefix: "/creators",
                 productName: product.product_name ?? product.name,
                 creatorName: product.creator_name ?? product.creator_display_name ?? agent.creator_id,
                 description: product.promise ?? product.description,
                 imageUrl: product.image_url ?? product.presentation?.image_url
               });
             } else {
-              metadata = createUnavailableProductMetadata(publicOrigin, creatorSelector, productSelector);
+              metadata = createUnavailableProductMetadata(publicOrigin, creatorSelector, productSelector, "/creators");
               portalStatus = 404;
             }
           } catch {
@@ -794,7 +835,7 @@ export async function createDashboardApp(options = {}) {
         }
         return servePortalIndex(response, metadata, portalStatus);
       }
-      if (request.method === "POST" && url.pathname === "/v1/auth/login") {
+      if (request.method === "POST" && ["/v1/auth/login", "/v1/auth/sign-in"].includes(url.pathname)) {
         const originError = crossSiteMutationError(request);
         if (originError) return send(response, originError.status, originError.body);
         const body = await readJson(request);
@@ -813,7 +854,7 @@ export async function createDashboardApp(options = {}) {
           profile
         });
       }
-      if (request.method === "POST" && url.pathname === "/v1/auth/signup") {
+      if (request.method === "POST" && ["/v1/auth/signup", "/v1/auth/sign-up"].includes(url.pathname)) {
         const originError = crossSiteMutationError(request);
         if (originError) return send(response, originError.status, originError.body);
         const body = await readJson(request);
@@ -837,7 +878,7 @@ export async function createDashboardApp(options = {}) {
           profile
         });
       }
-      if (request.method === "POST" && url.pathname === "/v1/auth/logout") {
+      if (request.method === "POST" && ["/v1/auth/logout", "/v1/auth/sign-out"].includes(url.pathname)) {
         const csrfError = cookieCsrfError(request);
         if (csrfError) return send(response, csrfError.status, csrfError.body);
         const webSessionId = requestCookies(request).hatch_web_session;
@@ -851,7 +892,7 @@ export async function createDashboardApp(options = {}) {
         return send(response, 200, authentication.profile);
       }
 
-      if (request.method === "GET" && url.pathname === "/v1/catalog/agents") {
+      if (request.method === "GET" && ["/v1/catalog/agents", "/v1/public/products"].includes(url.pathname)) {
         const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
         const buyer = await optionalBuyer(request, registryUrl, fetchImpl, portalState);
         const entitlements = buyer ? commerce.listBuyerEntitlements(buyer.id) : [];
@@ -872,10 +913,42 @@ export async function createDashboardApp(options = {}) {
         return send(response, 200, products);
       }
 
-      const catalogDetailMatch = url.pathname.match(/^\/v1\/catalog\/agents\/([^/]+)\/([^/]+)$/);
-      if (request.method === "GET" && catalogDetailMatch) {
+      const publicCreatorMatch = url.pathname.match(/^\/v1\/public\/creators\/([^/]+)$/);
+      if (request.method === "GET" && publicCreatorMatch) {
         const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
-        const agent = findCatalogAgent(catalog, decodeURIComponent(catalogDetailMatch[1]), decodeURIComponent(catalogDetailMatch[2]));
+        const creatorSelector = decodeURIComponent(publicCreatorMatch[1]);
+        const creatorProducts = catalog.filter((entry) => (
+          selectorMatches(creatorSelector, selectorValues(entry, "creator"))
+          && portalState.getCreatorProduct(entry.creator_id, entry.product_id)?.status !== "withdrawn"
+        ));
+        if (!creatorProducts.length) return send(response, 404, { error: { code: "creator_not_found", message: "Creator was not found." } });
+        const products = await Promise.all(creatorProducts.map(async (entry) => {
+          const state = portalState.getCreatorProduct(entry.creator_id, entry.product_id);
+          return publicCatalogAgent(entry, state, paymentMode, await authoritativeProductOffer(commerce, entry, state));
+        }));
+        const first = products[0];
+        return send(response, 200, {
+          creator: {
+            id: first.creator_id,
+            slug: first.creator_slug ?? first.creator_id,
+            name: first.creator_name ?? first.creator_display_name ?? first.creator_id,
+            verified: Boolean(first.creator_verified)
+          },
+          products
+        });
+      }
+
+      const catalogDetailMatch = url.pathname.match(/^\/v1\/catalog\/agents\/([^/]+)\/([^/]+)$/);
+      const publicProductMatch = url.pathname.match(/^\/v1\/public\/products\/([^/]+)\/([^/]+)$/);
+      const publicCreatorProductMatch = url.pathname.match(/^\/v1\/public\/creators\/([^/]+)\/products\/([^/]+)$/);
+      if (request.method === "GET" && (catalogDetailMatch || publicProductMatch || publicCreatorProductMatch)) {
+        const detailSelectors = catalogDetailMatch
+          ? catalogDetailMatch.slice(1)
+          : publicProductMatch
+            ? publicProductMatch.slice(1)
+            : publicCreatorProductMatch.slice(1);
+        const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
+        const agent = findCatalogAgent(catalog, decodeURIComponent(detailSelectors[0]), decodeURIComponent(detailSelectors[1]));
         const creatorState = agent ? portalState.getCreatorProduct(agent.creator_id, agent.product_id) : undefined;
         if (!agent || creatorState?.status === "withdrawn") return send(response, 404, { error: { code: "agent_unavailable", message: "The published Agent could not be found." } });
         const buyer = await optionalBuyer(request, registryUrl, fetchImpl, portalState);
@@ -1029,36 +1102,47 @@ export async function createDashboardApp(options = {}) {
         return send(response, 200, { creator_agents: mergeRegistryAgents(access, catalog) });
       }
 
-      if (request.method === "GET" && url.pathname === "/v1/user/orders") {
+      if (request.method === "GET" && ["/v1/user/orders", "/v1/orders"].includes(url.pathname)) {
         const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const status = url.searchParams.get("status");
         const orders = commerce.listBuyerOrders(authentication.profile.id)
+          .map((order) => orderDetail(order))
           .filter((order) => !status || status === "all" || order.status === status);
         const page = paginate(orders, url);
         return send(response, 200, { orders: page.items, next_cursor: page.next_cursor });
       }
 
-      const buyerOrderMatch = url.pathname.match(/^\/v1\/user\/orders\/([^/]+)$/);
+      const buyerOrderMatch = url.pathname.match(/^\/v1\/(?:user\/orders|orders)\/([^/]+)$/);
       if (request.method === "GET" && buyerOrderMatch) {
         const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
-        const order = commerce.getOrder(decodeURIComponent(buyerOrderMatch[1]));
-        if (order?.buyer_id !== authentication.profile.id) {
+        const order = resolveOrderIdentifier(commerce, decodeURIComponent(buyerOrderMatch[1]), authentication.profile.id);
+        if (order && order.buyer_id && order.buyer_id !== authentication.profile.id) {
           return send(response, 404, { error: { code: "order_not_found", message: "Order was not found." } });
         }
         if (!order) return send(response, 404, { error: { code: "order_not_found", message: "Order was not found." } });
         return send(response, 200, { order: orderDetail(order) });
       }
 
-      const buyerRefundMatch = url.pathname.match(/^\/v1\/user\/orders\/([^/]+)\/refund-requests$/);
+      const buyerRefundMatch = url.pathname.match(/^\/v1\/(?:user\/orders|orders)\/([^/]+)\/(refund-requests|cancel)$/);
       if (request.method === "POST" && buyerRefundMatch) {
         const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
-        const orderId = decodeURIComponent(buyerRefundMatch[1]);
-        const current = commerce.getOrder(orderId);
-        if (!current || current.buyer_id !== authentication.profile.id) {
+        const requestedOrder = decodeURIComponent(buyerRefundMatch[1]);
+        const current = resolveOrderIdentifier(commerce, requestedOrder, authentication.profile.id);
+        if (!current || (current.buyer_id && current.buyer_id !== authentication.profile.id)) {
           return send(response, 404, { error: { code: "order_not_found", message: "Order was not found." } });
+        }
+        const orderId = current.order_id;
+        const isCancel = buyerRefundMatch[2] === "cancel";
+        if (isCancel && current.gross_minor !== 0) {
+          return send(response, 409, {
+            error: {
+              code: "paid_cancel_not_supported",
+              message: "Paid cancellation is not available yet."
+            }
+          });
         }
         if (current.gross_minor === 0 && current.deliveries.length > 0) {
           return send(response, 409, {
@@ -1628,7 +1712,7 @@ export async function createDashboardApp(options = {}) {
               offer_revision: current.offer_active?.revision,
               release_id: current.release?.release_id
             }, `publish-succeeded:${current.release?.release_id}`);
-            return send(response, 200, { product, release: current.release, public_url: current.public_url });
+            return send(response, 200, { product, release: current.release, public_url: current.public_url, canonical_url: canonicalPublicUrl(current.public_url) });
           }
           const product = (await creatorProducts()).find((entry) => entry.product_id === productId);
           if (!product) return send(response, 404, { error: { code: "product_not_found", message: "Product was not found." } });
@@ -1700,7 +1784,8 @@ export async function createDashboardApp(options = {}) {
               state
             ),
             release: state.release,
-            public_url: state.public_url
+            public_url: state.public_url,
+            canonical_url: canonicalPublicUrl(state.public_url)
           });
         }
 
@@ -1748,7 +1833,7 @@ export async function createDashboardApp(options = {}) {
                 corpusDigest: current.release.corpus_digest
               });
             }
-            return send(response, 200, { product, release: current.release, public_url: current.public_url });
+          return send(response, 200, { product, release: current.release, public_url: current.public_url, canonical_url: canonicalPublicUrl(current.public_url) });
           }
           const product = (await creatorProducts()).find((entry) => entry.product_id === productId);
           if (!product?.agent_id) throw stateError("product_not_found", "Product Agent was not found.", 404);
@@ -1771,7 +1856,7 @@ export async function createDashboardApp(options = {}) {
             creatorBearer: bearerToken(request)
           });
           const rolledBackProduct = creatorProductView(product, state);
-          return send(response, 200, { product: rolledBackProduct, release: state.release, public_url: state.public_url });
+          return send(response, 200, { product: rolledBackProduct, release: state.release, public_url: state.public_url, canonical_url: canonicalPublicUrl(state.public_url) });
         }
 
         if (request.method === "GET" && url.pathname === "/v1/creator/orders") {
@@ -1788,7 +1873,8 @@ export async function createDashboardApp(options = {}) {
         const creatorOrderMatch = url.pathname.match(/^\/v1\/creator\/orders\/([^/]+)$/);
         if (request.method === "GET" && creatorOrderMatch) {
           requireCapability(profile, "commerce:read");
-          const order = creatorOrders.find((entry) => entry.order_id === decodeURIComponent(creatorOrderMatch[1]));
+          const identifier = decodeURIComponent(creatorOrderMatch[1]);
+          const order = creatorOrders.find((entry) => entry.order_id === identifier || entry.order_number === identifier);
           if (!order) return send(response, 404, { error: { code: "order_not_found", message: "Order was not found." } });
           return send(response, 200, { order });
         }
@@ -1797,11 +1883,12 @@ export async function createDashboardApp(options = {}) {
           const body = await readJson(request);
           requireCapability(profile, "refund:create");
           const commandKey = requireCommandKey(request, body);
-          const orderId = decodeURIComponent(creatorRefundMatch[1]);
-          const current = commerce.getOrder(orderId);
+          const identifier = decodeURIComponent(creatorRefundMatch[1]);
+          const current = creatorOrders.find((entry) => entry.order_id === identifier || entry.order_number === identifier);
           if (!current || current.creator_id !== profile.id) {
             return send(response, 404, { error: { code: "order_not_found", message: "Order was not found." } });
           }
+          const orderId = current.order_id;
           const reason = String(body.reason ?? "").trim();
           if (!reason) throw stateError("audit_reason_required", "Explain why this order is being refunded.", 422);
           const providerRefund = await confirmedProviderRefund(paymentProvider, current, {
@@ -1840,7 +1927,7 @@ export async function createDashboardApp(options = {}) {
           const providerSession = await paymentProvider.createPayoutAccountSession({
             creator_id: profile.id,
             currency,
-            return_url: "/portal/creator/settings/payouts",
+            return_url: "/studio/payouts",
             idempotency_key: commandKey
           });
           const account = await commerce.updatePayoutAccount({
@@ -1885,7 +1972,7 @@ export async function createDashboardApp(options = {}) {
         }
       }
 
-      if (request.method === "GET" && ["/v1/buyer/entitlements", "/v1/user/entitlements"].includes(url.pathname)) {
+      if (request.method === "GET" && ["/v1/buyer/entitlements", "/v1/user/entitlements", "/v1/library"].includes(url.pathname)) {
         const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
@@ -1901,6 +1988,40 @@ export async function createDashboardApp(options = {}) {
           entitlements: page.items,
           next_cursor: page.next_cursor
         });
+      }
+
+      const libraryIdMatch = url.pathname.match(/^\/v1\/library\/([^/]+)$/);
+      if (request.method === "GET" && libraryIdMatch) {
+        const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
+        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
+        const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
+        const entitlement = enrichEntitlements(
+          commerce.listBuyerEntitlements(authentication.profile.id),
+          catalog,
+          commerce.listDeliveries({ buyerId: authentication.profile.id })
+        ).find((entry) => entry.entitlement_id === decodeURIComponent(libraryIdMatch[1]));
+        if (!entitlement) return send(response, 404, { error: { code: "entitlement_not_found", message: "Access record was not found." } });
+        return send(response, 200, { entitlement });
+      }
+
+      const librarySlugMatch = url.pathname.match(/^\/v1\/library\/([^/]+)\/([^/]+)$/);
+      if (request.method === "GET" && librarySlugMatch) {
+        const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
+        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
+        const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
+        const entitlements = enrichEntitlements(
+          commerce.listBuyerEntitlements(authentication.profile.id),
+          catalog,
+          commerce.listDeliveries({ buyerId: authentication.profile.id })
+        );
+        const creatorSelector = decodeURIComponent(librarySlugMatch[1]);
+        const productSelector = decodeURIComponent(librarySlugMatch[2]);
+        const entitlement = entitlements.find((entry) => (
+          [entry.creator_id, entry.creator_slug, entry.creator?.slug].filter(Boolean).includes(creatorSelector)
+          && [entry.product_id, entry.product_slug, entry.product?.slug, entry.product?.id].filter(Boolean).includes(productSelector)
+        ));
+        if (!entitlement) return send(response, 404, { error: { code: "entitlement_not_found", message: "Access record was not found." } });
+        return send(response, 200, { entitlement });
       }
 
       const buyerEntitlementMatch = url.pathname.match(/^\/v1\/(?:buyer|user)\/entitlements\/([^/]+)$/);
@@ -2355,7 +2476,7 @@ async function confirmCheckoutSession({ session, authentication, registryUrl, fe
       product_id: session.product.product_id,
       amount_minor: amountMinor,
       currency: session.totals?.currency ?? session.offer_snapshot.currency,
-      return_url: `/portal/checkout/${encodeURIComponent(session.checkout_session_id)}`,
+      return_url: `/checkout/${encodeURIComponent(session.checkout_session_id)}`,
       idempotency_key: `checkout:${session.checkout_session_id}:provider-payment`,
       ...(paymentMode === "sandbox" && paymentScenario ? { scenario: paymentScenario } : {})
     });
@@ -2936,7 +3057,20 @@ async function activatePublishedOffer(
 
 async function authoritativeProductOffer(commerce, agent, creatorState) {
   const active = commerce.getActiveOffer(agent.creator_id, agent.product_id);
-  if (active || creatorState) return active;
+  if (creatorState) {
+    const committedReleaseId = creatorState.release?.release_id ?? creatorState.release?.corpus_digest;
+    // A product that is still in a pending first publish has no committed
+    // public tuple. Do not leak an offer that Commerce activated before the
+    // Registry pointer/Portal state commit.
+    if (!committedReleaseId) return null;
+    const activeReleaseId = active?.release_id ?? active?.corpus_digest;
+    if (active && String(activeReleaseId ?? "") === String(committedReleaseId)) return active;
+    // During a deployment retry Commerce may briefly contain the next offer
+    // while the public pointer still serves the previous immutable release.
+    // Keep the last committed snapshot visible until the saga converges.
+    return normalizeOffer(creatorState.offer_active, agent);
+  }
+  if (active) return active;
 
   // Registry manifests predating Commerce V2 carried the initial offer next
   // to the Corpus. Migrate that tuple exactly once before it is shown or
@@ -2963,7 +3097,7 @@ function checkoutOutcomeBody(session, order, entitlement, payment) {
     order_id: order?.order_id ?? session.order_id,
     status: order?.status ?? (session.status === "completed" ? "fulfilled" : session.status),
     entitlement_id: entitlementId,
-    redirect_url: order?.order_id ? `/portal/orders/${encodeURIComponent(order.order_id)}/success` : null,
+    redirect_url: order?.order_id ? `/orders/${encodeURIComponent(orderNumberFor(order))}/success` : null,
     order: order ?? null,
     payment: payment ?? {
       payment_id: null,
@@ -3009,13 +3143,21 @@ function publicAgentSnapshot(product) {
   };
 }
 
+function canonicalPublicUrl(value) {
+  const text = String(value ?? "");
+  const match = text.match(/^\/agents\/([^/]+)\/([^/]+)$/);
+  return match ? `/creators/${match[1]}/${match[2]}` : (text || undefined);
+}
+
 function publicCatalogAgent(agent, creatorState, paymentMode = "disabled", commerceOffer) {
   // Once a product enters the V2 workflow, only the Commerce activation is
   // authoritative. Registry product_offer remains a legacy migration seed.
   const deployedAgent = creatorState?.release?.catalog_snapshot ?? agent;
-  const offer = creatorState
-    ? normalizeOffer(creatorState.offer_active, deployedAgent)
-    : commerceOffer ?? normalizeOffer(deployedAgent.product_offer, deployedAgent);
+  // A published Portal state carries the workflow snapshot, but Commerce is
+  // the authority for the active offer revision. Only fall back to the state
+  // or legacy Registry offer while migrating an unpublished/legacy tuple.
+  const offer = commerceOffer
+    ?? (creatorState ? normalizeOffer(creatorState.offer_active, deployedAgent) : normalizeOffer(deployedAgent.product_offer, deployedAgent));
   const withdrawn = creatorState?.status === "withdrawn";
   const checkoutAvailable = Boolean(!withdrawn && offer && (offer.amount_minor === 0 || isPaidMode(paymentMode)));
   return {
@@ -3023,14 +3165,15 @@ function publicCatalogAgent(agent, creatorState, paymentMode = "disabled", comme
     promise: deployedAgent.product_promise ?? deployedAgent.product_description ?? "",
     description: deployedAgent.product_description ?? "",
     boundaries: deployedAgent.product_boundaries ?? [],
-    creator_slug: deployedAgent.creator_id,
-    product_slug: deployedAgent.product_id,
+    creator_slug: deployedAgent.creator_slug ?? deployedAgent.creator_id,
+    product_slug: deployedAgent.product_slug ?? deployedAgent.product_id,
     availability: withdrawn ? "withdrawn" : checkoutAvailable ? "published" : "not_for_sale",
     available: checkoutAvailable,
     offer,
     ...(offer ? { product_offer: offer } : {}),
     release_id: creatorState?.release?.release_id ?? deployedAgent.corpus_digest,
-    public_url: `/agents/${encodeURIComponent(deployedAgent.creator_id)}/${encodeURIComponent(deployedAgent.product_id)}`
+    public_url: `/creators/${encodeURIComponent(deployedAgent.creator_slug ?? deployedAgent.creator_id)}/${encodeURIComponent(deployedAgent.product_slug ?? deployedAgent.product_id)}`,
+    legacy_public_url: `/agents/${encodeURIComponent(deployedAgent.creator_id)}/${encodeURIComponent(deployedAgent.product_id)}`
   };
 }
 
@@ -3081,9 +3224,29 @@ function normalizeOffer(value, agent = {}) {
 
 function findCatalogAgent(catalog, creatorSelector, productSelector) {
   return (Array.isArray(catalog) ? catalog : []).find((entry) => (
-    [entry.creator_id, entry.creator_slug].filter(Boolean).includes(creatorSelector)
-    && [entry.product_id, entry.product_slug, entry.agent_id].filter(Boolean).includes(productSelector)
+    selectorMatches(creatorSelector, selectorValues(entry, "creator"))
+    && selectorMatches(productSelector, selectorValues(entry, "product"))
   ));
+}
+
+function selectorMatches(value, candidates) {
+  return candidates.some((candidate) => String(candidate) === String(value));
+}
+
+function selectorValues(entry, kind) {
+  const aliases = kind === "creator"
+    ? [entry?.creator_slug_aliases, entry?.creator?.slug_aliases, entry?.slug_aliases?.creator]
+    : [entry?.product_slug_aliases, entry?.product?.slug_aliases, entry?.slug_aliases?.product];
+  const values = kind === "creator"
+    ? [entry?.creator_id, entry?.creator_slug]
+    : [entry?.product_id, entry?.product_slug, entry?.agent_id];
+  return [...new Set([...values, ...aliases.flatMap((value) => Array.isArray(value) ? value : [])].filter(Boolean).map(String))];
+}
+
+function publicProductPath(agent) {
+  const creator = agent?.creator_slug ?? agent?.creator_id;
+  const product = agent?.product_slug ?? agent?.product_id;
+  return `/creators/${encodeURIComponent(creator)}/${encodeURIComponent(product)}`;
 }
 
 function creatorProductViews(agents, runs, states, creatorId) {
@@ -3151,7 +3314,7 @@ function creatorProductView(agent, state, run) {
     offer_active: state?.offer_active ?? normalizeOffer(agent.product_offer, agent),
     release: state?.release ?? null,
     releases: state?.releases ?? (state?.release ? [state.release] : []),
-    public_url: state?.public_url ?? (base.status === "published" ? `/agents/${encodeURIComponent(base.creator_id)}/${encodeURIComponent(base.product_id)}` : null),
+    public_url: canonicalPublicUrl(state?.public_url) ?? (base.status === "published" ? `/creators/${encodeURIComponent(base.creator_slug ?? base.creator_id)}/${encodeURIComponent(base.product_slug ?? base.product_id)}` : null),
     readiness: {
       candidate_approved: candidateApproved,
       offer_valid: Boolean(state?.offer_draft ?? normalizeOffer(agent.product_offer, agent)),
@@ -3245,7 +3408,7 @@ function storefrontPreview(product, profile, state, paymentMode = "disabled") {
     candidate: presentedCandidate,
     offer,
     resource_version: state?.version ?? product.resource_version ?? 0,
-    public_url: `/agents/${encodeURIComponent(profile.id)}/${encodeURIComponent(product.product_id)}`,
+    public_url: `/creators/${encodeURIComponent(profile.slug ?? profile.id)}/${encodeURIComponent(product.product_slug ?? product.product_id)}`,
     readiness: publishReadiness({ ...product, offer }, state, paymentMode),
     preview: true
   };
@@ -3326,11 +3489,15 @@ function enrichEntitlements(entitlements, catalog, deliveries = []) {
       status: entitlement.status === "active" && entitlement.reserved_units > 0 ? "reserved" : entitlement.status,
       product: agent ? {
         id: agent.product_id,
+        product_id: agent.product_id,
+        slug: agent.product_slug ?? agent.product_id,
         name: agent.product_name,
         description: agent.product_description,
         promise: agent.product_promise
-      } : { id: entitlement.product_id, name: entitlement.product_id },
-      creator: agent ? { id: agent.creator_id, name: agent.creator_name } : { id: entitlement.creator_id },
+      } : { id: entitlement.product_id, product_id: entitlement.product_id, name: entitlement.product_id },
+      creator: agent ? { id: agent.creator_id, slug: agent.creator_slug ?? agent.creator_id, name: agent.creator_name } : { id: entitlement.creator_id, slug: entitlement.creator_id },
+      creator_slug: agent?.creator_slug ?? entitlement.creator_id,
+      product_slug: agent?.product_slug ?? entitlement.product_id,
       granted_units: entitlement.granted_units ?? 1,
       remaining_units: entitlement.remaining_units ?? 1,
       unit: entitlement.unit ?? "delivery",
@@ -3369,6 +3536,7 @@ function orderDetail(order, events = []) {
     : events.some((event) => event.order_id === order.order_id && event.event_type === "revenue.recognized");
   return {
     ...order,
+    order_number: order.order_number ?? stableOrderNumber(order),
     creator: order.creator_snapshot ?? { id: order.creator_id, name: order.creator_display_name ?? order.creator_id },
     status: refunded
       ? order.status
@@ -3398,6 +3566,24 @@ function orderDetail(order, events = []) {
     },
     timeline
   };
+}
+
+function stableOrderNumber(order) {
+  const timestamp = Date.parse(order?.created_at ?? order?.occurred_at ?? "") || Date.now();
+  const year = new Date(timestamp).getUTCFullYear();
+  const digest = createHash("sha256").update(String(order?.order_id ?? order?.id ?? "order")).digest("hex").slice(0, 8).toUpperCase();
+  return `HCH-${year}-${digest}`;
+}
+
+function orderNumberFor(order) {
+  return order?.order_number ?? stableOrderNumber(order);
+}
+
+function resolveOrderIdentifier(commerce, identifier, buyerId) {
+  const value = String(identifier ?? "");
+  const direct = commerce.getOrder(value);
+  if (direct && (!buyerId || direct.buyer_id === buyerId)) return direct;
+  return commerce.listBuyerOrders(buyerId).find((order) => stableOrderNumber(order) === value || order.order_number === value);
 }
 
 function randomId() {
@@ -3888,11 +4074,78 @@ function ageMs(value, nowMs) {
 }
 
 function isPublicPortalRoute(pathname) {
-  return pathname === "/agents"
+  return pathname === "/"
+    || pathname === "/explore"
+    || pathname.startsWith("/explore/")
+    || pathname === "/agents"
     || pathname.startsWith("/agents/")
+    || pathname === "/creators"
+    || pathname.startsWith("/creators/")
+    || pathname === "/library"
+    || pathname.startsWith("/library/")
+    || pathname === "/orders"
+    || pathname.startsWith("/orders/")
+    || pathname === "/checkout"
+    || pathname.startsWith("/checkout/")
+    || pathname === "/studio"
+    || pathname.startsWith("/studio/")
+    || pathname === "/account"
+    || pathname.startsWith("/account/")
+    || pathname === "/portal"
+    || pathname.startsWith("/portal/")
     || pathname === "/sign-in"
     || pathname === "/sign-up"
     || pathname === "/download";
+}
+
+async function resolveLegacyRouteLocation({ pathname, search = "", request, registryUrl, fetchImpl, portalState, commerce }) {
+  const libraryMatch = pathname.match(/^\/portal\/(?:library|my-agents)\/([^/]+)$/);
+  const orderMatch = pathname.match(/^\/portal\/orders\/([^/]+)$/);
+  if (libraryMatch || orderMatch) {
+    const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
+    if (!authentication.error) {
+      if (libraryMatch) {
+        const identifier = decodeURIComponent(libraryMatch[1]);
+        const entitlement = commerce.listBuyerEntitlements(authentication.profile.id)
+          .find((item) => item.entitlement_id === identifier || item.id === identifier);
+        if (entitlement) {
+          try {
+            const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
+            const agent = catalog.find((item) => item.creator_id === entitlement.creator_id && item.product_id === entitlement.product_id);
+            if (agent) {
+              const creator = agent.creator_slug ?? agent.creator_id;
+              const product = agent.product_slug ?? agent.product_id;
+              return `/library/${encodeURIComponent(creator)}/${encodeURIComponent(product)}${search}`;
+            }
+          } catch {
+            // Fall back to the stable entitlement route when the catalog is unavailable.
+          }
+        }
+      } else {
+        const order = resolveOrderIdentifier(commerce, decodeURIComponent(orderMatch[1]), authentication.profile.id);
+        if (order) return `/orders/${encodeURIComponent(orderNumberFor(order))}${search}`;
+      }
+    }
+  }
+  return legacyRouteLocation(pathname, search);
+}
+
+function legacyRouteLocation(pathname, search = "") {
+  const suffix = String(search || "");
+  if (pathname === "/portal" || pathname === "/portal/") return `/explore${suffix}`;
+  if (pathname === "/portal/agents" || pathname === "/portal/agents/") return `/explore${suffix}`;
+  const publicAgent = pathname.match(/^\/portal\/agents\/([^/]+)\/([^/]+)$/);
+  if (publicAgent) return `/creators/${publicAgent[1]}/${publicAgent[2]}${suffix}`;
+  if (pathname === "/portal/library" || pathname === "/portal/my-agents") return `/library${suffix}`;
+  if (pathname.startsWith("/portal/library/")) return `/library/${pathname.slice("/portal/library/".length)}${suffix}`;
+  if (pathname === "/portal/orders") return `/orders${suffix}`;
+  if (pathname.startsWith("/portal/orders/")) return `/orders/${pathname.slice("/portal/orders/".length)}${suffix}`;
+  if (pathname === "/portal/subscriptions" || pathname === "/portal/subscriptions/") return `/explore${suffix}`;
+  if (pathname === "/portal/settings" || pathname === "/portal/settings/") return `/account${suffix}`;
+  if (pathname.startsWith("/portal/checkout/")) return `/checkout/${pathname.slice("/portal/checkout/".length)}${suffix}`;
+  if (pathname === "/portal/creator" || pathname === "/portal/creator/") return `/studio${suffix}`;
+  if (pathname.startsWith("/portal/creator/")) return `/studio/${pathname.slice("/portal/creator/".length)}${suffix}`;
+  return undefined;
 }
 
 async function servePortalIndex(response, metadata, status = 200) {
@@ -3914,9 +4167,15 @@ async function servePortalIndex(response, metadata, status = 200) {
 async function servePortalAsset(requestPath, response) {
   let relativePath;
   try {
-    relativePath = decodeURIComponent(requestPath === "/portal" || requestPath === "/portal/"
-      ? "index.html"
-      : requestPath.slice("/portal/".length));
+    if (requestPath === "/portal" || requestPath === "/portal/" || requestPath === "/assets" || !path.extname(requestPath)) {
+      relativePath = "index.html";
+    } else if (requestPath.startsWith("/assets/")) {
+      relativePath = decodeURIComponent(requestPath.slice("/".length));
+    } else if (requestPath.startsWith("/portal/")) {
+      relativePath = decodeURIComponent(requestPath.slice("/portal/".length));
+    } else {
+      relativePath = decodeURIComponent(requestPath.slice("/".length));
+    }
   } catch {
     return send(response, 400, { error: { code: "invalid_path", message: "Invalid portal asset path." } });
   }

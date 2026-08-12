@@ -3,7 +3,12 @@ import { StorefrontDetails } from "./StorefrontDetails.jsx";
 import "./buyerPortalV2.css";
 
 const DEFAULT_DOWNLOAD_URL = "https://github.com/keithhchen/hatch/releases/latest";
-const PUBLIC_ROUTE_NAMES = new Set(["catalog", "product", "sign-in", "sign-up", "account-help", "not-found"]);
+const EXPLORE_ROOT = "/explore";
+const LIBRARY_ROOT = "/library";
+const ORDERS_ROOT = "/orders";
+const CHECKOUT_ROOT = "/checkout";
+const ACCOUNT_ROOT = "/account";
+const PUBLIC_ROUTE_NAMES = new Set(["catalog", "creator", "product", "sign-in", "sign-up", "account-help", "not-found"]);
 
 /**
  * BuyerPortalV2 integration contract
@@ -29,29 +34,29 @@ const PUBLIC_ROUTE_NAMES = new Set(["catalog", "product", "sign-in", "sign-up", 
  *   }
  *
  * Response shapes are intentionally tolerant during migration:
- *   GET  /v1/catalog/agents -> Agent[] | { agents: Agent[] }
- *   GET  /v1/catalog/agents/:creator/:product -> Agent | { agent: Agent }
+ *   GET  /v1/public/products -> Product[] | { products: Product[] }
+ *   GET  /v1/public/products/:creator/:product -> Product | { product: Product, agent?: Product }
  *   POST /v1/checkout-sessions -> Checkout | { checkout_session: Checkout }
  *   GET  /v1/checkout-sessions/:id -> same as above
  *   POST /v1/checkout-sessions/:id/confirm
  *        -> { order_id, status, entitlement_id?, redirect_url? }
- *   GET  /v1/user/orders -> { orders: Order[], next_cursor? }
- *   GET  /v1/user/orders/:id -> Order | { order: Order }
- *   GET  /v1/user/entitlements -> { entitlements: Entitlement[], next_cursor? }
- *   GET  /v1/user/entitlements/:id -> Entitlement | { entitlement: Entitlement }
+ *   GET  /v1/orders -> { orders: Order[], next_cursor? }
+ *   GET  /v1/orders/:id -> Order | { order: Order }
+ *   GET  /v1/library -> { entitlements: Entitlement[], next_cursor? }
+ *   GET  /v1/library/:id -> Entitlement | { entitlement: Entitlement }
  *
  * Product/checkout/order payloads may expose either nested snapshots or the
  * equivalent flat migration fields. Helpers in this module normalize both.
  */
 export const BUYER_PORTAL_V2_ENDPOINTS = Object.freeze({
-  catalog: "/v1/catalog/agents",
+  catalog: "/v1/public/products",
   checkoutSessions: "/v1/checkout-sessions",
-  orders: "/v1/user/orders",
-  entitlements: "/v1/user/entitlements"
+  orders: "/v1/orders",
+  entitlements: "/v1/library"
 });
 
 export function BuyerPortalV2({
-  pathname = "/agents",
+  pathname = EXPLORE_ROOT,
   search = "",
   navigate,
   request,
@@ -77,12 +82,16 @@ export function BuyerPortalV2({
   let page;
   if (route.name === "catalog") {
     page = <CatalogPage request={request} navigate={navigate} session={session} />;
+  } else if (route.name === "creator") {
+    page = <CreatorPublicPage creatorSlug={route.params.creatorSlug} request={request} navigate={navigate} session={session} />;
   } else if (route.name === "product") {
     page = <ProductPage route={route} request={request} navigate={navigate} session={session} downloadUrl={downloadUrl} />;
   } else if (route.name === "sign-in" || route.name === "sign-up") {
     return <AuthPage mode={route.name} search={location.search} request={request} navigate={navigate} session={session} />;
   } else if (route.name === "library") {
     page = <LibraryPage search={location.search} request={request} navigate={navigate} />;
+  } else if (route.name === "entitlement-slug") {
+    page = <EntitlementSlugPage creatorSlug={route.params.creatorSlug} productSlug={route.params.productSlug} request={request} navigate={navigate} session={session} downloadUrl={downloadUrl} />;
   } else if (route.name === "entitlement") {
     page = <EntitlementPage id={route.params.entitlementId} request={request} navigate={navigate} session={session} downloadUrl={downloadUrl} />;
   } else if (route.name === "checkout") {
@@ -110,13 +119,22 @@ export function matchBuyerRoute(inputPathname) {
   const pathname = normalizePathname(inputPathname);
   const segments = pathname.split("/").filter(Boolean).map(safeDecode);
 
-  if (segments.length === 1 && segments[0] === "agents") return { name: "catalog", params: {} };
-  if (segments.length === 3 && segments[0] === "agents") {
+  if (segments.length === 0 || (segments.length === 1 && ["explore", "agents"].includes(segments[0]))) return { name: "catalog", params: {} };
+  if (segments.length === 3 && ["creators", "agents"].includes(segments[0])) {
     return { name: "product", params: { creatorSlug: segments[1], productSlug: segments[2] } };
   }
+  if (segments.length === 2 && segments[0] === "creators") return { name: "creator", params: { creatorSlug: segments[1] } };
   if (segments.length === 1 && segments[0] === "sign-in") return { name: "sign-in", params: {} };
   if (segments.length === 1 && segments[0] === "sign-up") return { name: "sign-up", params: {} };
   if (segments.length === 2 && segments[0] === "account" && segments[1] === "help") return { name: "account-help", params: {} };
+  if (segments.length === 1 && segments[0] === "library") return { name: "library", params: {} };
+  if (segments.length === 2 && segments[0] === "library") return { name: "entitlement", params: { entitlementId: segments[1] } };
+  if (segments.length === 3 && segments[0] === "library") return { name: "entitlement-slug", params: { creatorSlug: segments[1], productSlug: segments[2] } };
+  if (segments.length === 1 && segments[0] === "orders") return { name: "orders", params: {} };
+  if (segments.length === 3 && segments[0] === "orders" && segments[2] === "success") return { name: "success", params: { orderId: segments[1], orderNumber: segments[1] } };
+  if (segments.length === 2 && segments[0] === "orders") return { name: "order", params: { orderId: segments[1], orderNumber: segments[1] } };
+  if (segments.length === 2 && segments[0] === "checkout") return { name: "checkout", params: { checkoutSessionId: segments[1] } };
+  if (segments.length === 1 && segments[0] === "account") return { name: "settings", params: {} };
   if (segments.length === 2 && segments[0] === "portal" && segments[1] === "library") return { name: "library", params: {} };
   if (segments.length === 2 && segments[0] === "portal" && segments[1] === "settings") return { name: "settings", params: {} };
   if (segments.length === 2 && segments[0] === "portal" && segments[1] === "subscriptions") return { name: "subscriptions", params: {} };
@@ -140,9 +158,9 @@ function BuyerShell({ route, navigate, session, downloadUrl, children }) {
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState("");
   const authenticated = session.status === "authenticated";
-  const active = route.name === "catalog" || route.name === "product"
+  const active = route.name === "catalog" || route.name === "creator" || route.name === "product"
     ? "explore"
-    : route.name === "library" || route.name === "entitlement"
+    : route.name === "library" || route.name === "entitlement" || route.name === "entitlement-slug"
       ? "library"
       : route.name === "orders" || route.name === "order" || route.name === "success"
         ? "orders"
@@ -156,7 +174,7 @@ function BuyerShell({ route, navigate, session, downloadUrl, children }) {
     setSignOutError("");
     try {
       await session.signOut();
-      navigateTo(navigate, "/agents", { replace: true });
+      navigateTo(navigate, EXPLORE_ROOT, { replace: true });
     } catch (error) {
       setSignOutError(friendlyError(error));
     } finally {
@@ -169,23 +187,23 @@ function BuyerShell({ route, navigate, session, downloadUrl, children }) {
       <a className="buyer-v2__skip" href="#buyer-main">Skip to content</a>
       <header className="buyer-v2__header">
         <div className="buyer-v2__header-inner">
-          <RouterLink className="buyer-v2__brand" to="/agents" navigate={navigate} aria-label="Hatch home">
+          <RouterLink className="buyer-v2__brand" to={EXPLORE_ROOT} navigate={navigate} aria-label="Hatch home">
             <span aria-hidden="true" className="buyer-v2__brand-mark">H</span><span>Hatch.</span>
           </RouterLink>
           <nav className="buyer-v2__nav" aria-label="Buyer navigation">
-            <RouterLink to="/agents" navigate={navigate} aria-current={active === "explore" ? "page" : undefined}>Explore</RouterLink>
-            {authenticated ? <RouterLink to="/portal/library" navigate={navigate} aria-current={active === "library" ? "page" : undefined}>Library</RouterLink> : null}
-            {authenticated ? <RouterLink to="/portal/orders" navigate={navigate} aria-current={active === "orders" ? "page" : undefined}>Orders</RouterLink> : null}
+            <RouterLink to={EXPLORE_ROOT} navigate={navigate} aria-current={active === "explore" ? "page" : undefined}>Explore</RouterLink>
+            {authenticated ? <RouterLink to={LIBRARY_ROOT} navigate={navigate} aria-current={active === "library" ? "page" : undefined}>Library</RouterLink> : null}
+            {authenticated ? <RouterLink to={ORDERS_ROOT} navigate={navigate} aria-current={active === "orders" ? "page" : undefined}>Orders</RouterLink> : null}
           </nav>
           <div className="buyer-v2__account">
             <a className="buyer-v2__download-quiet" href={downloadUrl} target="_blank" rel="noreferrer">Download</a>
             {authenticated ? (
               <>
-                <RouterLink className="buyer-v2__avatar" to="/portal/settings" navigate={navigate} aria-label="Account settings" aria-current={active === "settings" ? "page" : undefined}>{initialsFor(session.user)}</RouterLink>
+                <RouterLink className="buyer-v2__avatar" to={ACCOUNT_ROOT} navigate={navigate} aria-label="Account settings" aria-current={active === "settings" ? "page" : undefined}>{initialsFor(session.user)}</RouterLink>
                 <button type="button" className="buyer-v2__plain-button" disabled={signingOut} onClick={signOut}>{signingOut ? "Signing out…" : "Sign out"}</button>
               </>
             ) : (
-              <RouterLink className="buyer-v2__header-cta" to="/sign-in?returnTo=%2Fagents" navigate={navigate}>Sign in</RouterLink>
+              <RouterLink className="buyer-v2__header-cta" to={`/sign-in?returnTo=${encodeURIComponent(EXPLORE_ROOT)}`} navigate={navigate}>Sign in</RouterLink>
             )}
           </div>
         </div>
@@ -224,6 +242,27 @@ function CatalogPage({ request, navigate, session }) {
   );
 }
 
+function CreatorPublicPage({ creatorSlug, request, navigate, session }) {
+  const endpoint = `/v1/public/creators/${encodeURIComponent(creatorSlug)}`;
+  const resource = useRemote(async (signal) => unwrap(await callRequest(request, endpoint, { signal }), ["creator"]), endpoint);
+  usePageTitle(resource.data?.creator?.name ? `${resource.data.creator.name} · Hatch` : "Creator · Hatch");
+  if (resource.status === "loading") return <div className="buyer-v2__container buyer-v2__page"><PageSkeleton label="Loading creator" /></div>;
+  if (resource.status === "error") return <div className="buyer-v2__container buyer-v2__page"><RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} returnTo={`/creators/${encodeURIComponent(creatorSlug)}`} /></div>;
+  const creator = resource.data?.creator ?? resource.data;
+  const products = collectionFrom(resource.data, ["products", "agents", "items"]);
+  return (
+    <div className="buyer-v2__container buyer-v2__page">
+      <RouterLink className="buyer-v2__back-link" to={EXPLORE_ROOT} navigate={navigate}>← Explore</RouterLink>
+      <header className="buyer-v2__page-heading">
+        <span className="buyer-v2__eyebrow">Creator</span>
+        <h1>{creator?.name ?? creator?.display_name ?? creatorSlug}</h1>
+        <p>{creator?.bio ?? creator?.description ?? "Published methods for work in your own Workspace."}</p>
+      </header>
+      {products.length ? <section className="buyer-v2__catalog-grid" aria-label={`${creator?.name ?? creatorSlug} products`}>{products.map((product) => <CatalogCard key={productKey(product)} product={product} navigate={navigate} authenticated={session.status === "authenticated"} />)}</section> : <EmptyState title="No public products yet" body="This Creator has not published a product that can be browsed." action={<RouterLink className="buyer-v2__button buyer-v2__button--primary" to={EXPLORE_ROOT} navigate={navigate}>Explore all products</RouterLink>} />}
+    </div>
+  );
+}
+
 function CatalogCard({ product, navigate }) {
   const path = productPath(product);
   const offer = offerFor(product);
@@ -237,7 +276,7 @@ function CatalogCard({ product, navigate }) {
       <h2>{productName(product)}</h2>
       <p>{productPromise(product)}</p>
       <div className="buyer-v2__card-footer">
-        <div><strong>{accessStatus(access) === "active" ? "In your library" : offerLabel(offer)}</strong><span>{offerUnitLabel(offer)}</span></div>
+        <div><strong>{accessStatus(access) === "active" ? "In your library" : product.availability === "published" ? offerLabel(offer) : "Coming soon"}</strong><span>{product.availability === "published" ? offerUnitLabel(offer) : "Not available yet"}</span></div>
         <RouterLink className="buyer-v2__button buyer-v2__button--secondary" to={path} navigate={navigate}>View details</RouterLink>
       </div>
     </article>
@@ -246,7 +285,7 @@ function CatalogCard({ product, navigate }) {
 
 function ProductPage({ route, request, navigate, session, downloadUrl }) {
   const { creatorSlug, productSlug } = route.params;
-  const path = `/agents/${encodeURIComponent(creatorSlug)}/${encodeURIComponent(productSlug)}`;
+  const path = `/creators/${encodeURIComponent(creatorSlug)}/${encodeURIComponent(productSlug)}`;
   const endpoint = `${BUYER_PORTAL_V2_ENDPOINTS.catalog}/${encodeURIComponent(creatorSlug)}/${encodeURIComponent(productSlug)}`;
   const resource = useRemote(async (signal) => unwrap(await callRequest(request, endpoint, { signal }), ["agent", "product"]), endpoint);
   const product = resource.data;
@@ -260,12 +299,12 @@ function ProductPage({ route, request, navigate, session, downloadUrl }) {
 
   return (
     <div className="buyer-v2__container buyer-v2__page">
-      <RouterLink className="buyer-v2__back-link" to="/agents" navigate={navigate}>← All Creator Agents</RouterLink>
+      <RouterLink className="buyer-v2__back-link" to={EXPLORE_ROOT} navigate={navigate}>← Explore</RouterLink>
       <StorefrontDetails
         product={product}
         creatorName={creatorName(product)}
         offer={offerFor(product)}
-        offerText={offerLabel(offerFor(product))}
+        offerText={product.availability === "published" ? offerLabel(offerFor(product)) : "Unavailable in this release"}
         desktopRequirement={desktopRequirement}
         refundPolicy={refundCopy(product)}
         releaseLabel={product.release_label || product.release?.label}
@@ -294,7 +333,14 @@ function ProductAction({ product, currentPath, request, navigate, session, downl
   const [mutation, setMutation] = useState({ status: "idle", error: null });
   const checkoutIntentKey = useRef(requestId());
   const amount = offerAmount(offer);
-  const purchasable = Boolean(offer && offerId(offer) && productId(product)) && product.available !== false && product.status !== "withdrawn";
+  // This release only exposes the real free acquisition path. Paid offers
+  // remain visible as unavailable until a provider-backed checkout is
+  // explicitly enabled; never render a Buy CTA that will only fail later.
+  const purchasable = Boolean(offer && offerId(offer) && productId(product))
+    && offerAmount(offer) === 0
+    && product.availability === "published"
+    && product.available !== false
+    && product.status !== "withdrawn";
   const isAnonymous = session.status !== "authenticated";
   const isOwnerCreator = session.user?.role === "creator"
     && String(session.user?.id ?? "") === String(product.creator_id ?? product.creator?.id ?? "");
@@ -310,7 +356,7 @@ function ProductAction({ product, currentPath, request, navigate, session, downl
       const checkout = unwrap(response, ["checkout_session", "checkout"]);
       const id = checkout.checkout_session_id || checkout.id;
       if (!id) throw clientContractError("Checkout response did not include checkout_session_id.");
-      navigateTo(navigate, `/portal/checkout/${encodeURIComponent(id)}`);
+      navigateTo(navigate, `${CHECKOUT_ROOT}/${encodeURIComponent(id)}`);
     } catch (error) {
       setMutation({ status: "error", error });
     }
@@ -323,11 +369,11 @@ function ProductAction({ product, currentPath, request, navigate, session, downl
   if (isOwnerCreator) {
     title = "This is your published storefront.";
     body = "Buyers see the same promise, boundaries and active offer shown here.";
-    action = <RouterLink className="buyer-v2__button buyer-v2__button--secondary" to={`/portal/creator/products/${encodeURIComponent(productId(product))}`} navigate={navigate}>Manage product</RouterLink>;
+    action = <RouterLink className="buyer-v2__button buyer-v2__button--secondary" to={`/studio/products/${encodeURIComponent(productId(product))}`} navigate={navigate}>Manage product</RouterLink>;
   } else if (status === "active" || status === "reserved") {
     title = status === "reserved" ? "A delivery is in progress." : "This Agent is ready.";
     body = status === "reserved" ? "Return to Hatch Desktop to continue safely." : "Open Hatch Desktop with this account, then choose a Workspace.";
-    action = <><RouterLink className="buyer-v2__button buyer-v2__button--primary" to={`/portal/library/${encodeURIComponent(access.entitlement_id ?? access.id)}`} navigate={navigate}>View access</RouterLink><a className="buyer-v2__button buyer-v2__button--secondary" href={desktopUrl(access, product)} onClick={() => trackPortalEvent(request, "desktop_open_clicked", productTelemetry(product))}>Open Hatch Desktop</a></>;
+    action = <><RouterLink className="buyer-v2__button buyer-v2__button--primary" to={libraryPathFor(product, access)} navigate={navigate}>View in Library</RouterLink><a className="buyer-v2__button buyer-v2__button--secondary" href={desktopUrl(access, product)} onClick={() => trackPortalEvent(request, "desktop_open_clicked", productTelemetry(product))}>Open Hatch Desktop</a></>;
   } else if (status === "pending") {
     title = "Setting up your access…";
     body = "Your order is confirmed. Access will appear as soon as fulfillment finishes.";
@@ -498,10 +544,10 @@ function CheckoutPage({ id, request, navigate, session, openPayment }) {
         resource.reload();
         return;
       }
-      const redirectUrl = result.redirect_url || result.payment_url || response.redirect_url;
+      const paymentRedirectUrl = result.payment_url || response.payment_url || response.payment?.redirect_url;
       const orderId = result.order_id || result.id || response.order_id;
-      if (redirectUrl) {
-        openPayment(redirectUrl);
+      if (paymentRedirectUrl) {
+        openPayment(paymentRedirectUrl);
         return;
       }
       if (["pending", "processing", "payment_pending", "requires_action"].includes(confirmationStatus)) {
@@ -517,7 +563,7 @@ function CheckoutPage({ id, request, navigate, session, openPayment }) {
         return;
       }
       if (!orderId) throw clientContractError("Checkout confirmation did not include order_id.");
-      navigateTo(navigate, `/portal/orders/${encodeURIComponent(orderId)}/success`, { replace: true });
+      navigateTo(navigate, result.redirect_url || response.redirect_url || `/orders/${encodeURIComponent(orderId)}/success`, { replace: true });
     } catch (error) {
       setMutation({ status: "error", error });
       if (error.status === 409 || error.status === 502 || error.code === "fulfillment_pending") resource.reload();
@@ -657,8 +703,8 @@ function SuccessPage({ id, request, navigate, downloadUrl, session }) {
         <span className="buyer-v2__eyebrow">What happens next</span>
         <ol><li><span>1</span>Sign in to Desktop with this account.</li><li><span>2</span>Choose this Agent and a Workspace.</li><li><span>3</span>Review local permissions before changes.</li></ol>
         <div className="buyer-v2__detail-links">
-          <RouterLink to={`/portal/orders/${encodeURIComponent(id)}`} navigate={navigate}>View order receipt →</RouterLink>
-          {entitlementId ? <RouterLink to={`/portal/library/${encodeURIComponent(entitlementId)}`} navigate={navigate}>View access details →</RouterLink> : null}
+          <RouterLink to={`/orders/${encodeURIComponent(orderReference(order))}`} navigate={navigate}>View order receipt →</RouterLink>
+          {entitlementId ? <RouterLink to={libraryPathFor(product, entitlement)} navigate={navigate}>View access details →</RouterLink> : null}
         </div>
       </section>
     </div>
@@ -706,6 +752,16 @@ function EntitlementCard({ entitlement, navigate }) {
       <div className="buyer-v2__card-footer"><span>{unitsLabel(entitlement)}</span><RouterLink className="buyer-v2__button buyer-v2__button--secondary" to={`/portal/library/${encodeURIComponent(id)}`} navigate={navigate}>View access</RouterLink></div>
     </article>
   );
+}
+
+function EntitlementSlugPage({ creatorSlug, productSlug, request, navigate, session, downloadUrl }) {
+  const endpoint = `/v1/library/${encodeURIComponent(creatorSlug)}/${encodeURIComponent(productSlug)}`;
+  const resource = useRemote(async (signal) => unwrap(await callRequest(request, endpoint, { signal }), ["entitlement"]), endpoint);
+  useUnauthorized(resource.error, session);
+  if (resource.status === "loading") return <div className="buyer-v2__container buyer-v2__page"><DetailSkeleton /></div>;
+  if (resource.status === "error") return <div className="buyer-v2__container buyer-v2__page"><RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} returnTo={`/library/${encodeURIComponent(creatorSlug)}/${encodeURIComponent(productSlug)}`} /></div>;
+  const entitlementId = entitlementIdFor(resource.data);
+  return <EntitlementPage id={entitlementId} request={request} navigate={navigate} session={session} downloadUrl={downloadUrl} />;
 }
 
 function EntitlementPage({ id, request, navigate, session, downloadUrl }) {
@@ -779,7 +835,7 @@ function OrderRow({ order, navigate }) {
     <article className="buyer-v2__order-row">
       <div><span>{dateTime(order.created_at || order.occurred_at, true)}</span><h2>{productName(product)}</h2><small>#{orderReference(order)}</small></div>
       <div className="buyer-v2__order-row-status"><strong>{orderAmount(order) === 0 ? "Free" : money(orderAmount(order), order.currency)}</strong><StatusChip status={orderStatus(order)} label={orderStatusLabel(order)} /></div>
-      <RouterLink className="buyer-v2__button buyer-v2__button--secondary" to={`/portal/orders/${encodeURIComponent(id)}`} navigate={navigate}>View order</RouterLink>
+      <RouterLink className="buyer-v2__button buyer-v2__button--secondary" to={`/orders/${encodeURIComponent(orderReference(order))}`} navigate={navigate}>View order</RouterLink>
     </article>
   );
 }
@@ -796,7 +852,8 @@ function OrderPage({ id, request, navigate, session }) {
     if (refundState.status === "pending") return;
     setRefundState({ status: "pending", error: null });
     try {
-      await callRequest(request, `${endpoint}/refund-requests`, jsonMutation("POST", { reason: "buyer_requested" }, refundIntentKey.current));
+      const mutationPath = canCancelAccess ? `${endpoint}/cancel` : `${endpoint}/refund-requests`;
+      await callRequest(request, mutationPath, jsonMutation("POST", { reason: "buyer_requested" }, refundIntentKey.current));
       setRefundState({ status: "succeeded", error: null });
       resource.reload();
     } catch (error) {
@@ -822,7 +879,7 @@ function OrderPage({ id, request, navigate, session }) {
 
   return (
     <div className="buyer-v2__container buyer-v2__page">
-      <RouterLink className="buyer-v2__back-link" to="/portal/orders" navigate={navigate}>← Back to Orders</RouterLink>
+      <RouterLink className="buyer-v2__back-link" to={ORDERS_ROOT} navigate={navigate}>← Back to Orders</RouterLink>
       <header className="buyer-v2__detail-heading"><div><span className="buyer-v2__eyebrow">Order #{orderReference(order)}</span><h1>{productName(product)}</h1><p>Created {dateTime(order.created_at || order.occurred_at)}</p></div><StatusChip status={orderStatus(order)} label={orderStatusLabel(order)} /></header>
       <div className="buyer-v2__detail-grid">
         <section className="buyer-v2__detail-card"><h2>Receipt</h2><DefinitionList rows={[
@@ -836,7 +893,7 @@ function OrderPage({ id, request, navigate, session }) {
           ["Offer", order.offer_snapshot ? `${offerLabel(order.offer_snapshot)} · ${offerUnitLabel(order.offer_snapshot)}` : order.offer_label || "Purchase-time offer snapshot"],
           ["Release", order.release_snapshot?.label || order.release_snapshot?.release_id || order.release_label || order.release_id || "Purchase-time release"]
         ]} />{entitlementId ? <RouterLink className="buyer-v2__text-link" to={`/portal/library/${encodeURIComponent(entitlementId)}`} navigate={navigate}>View access details →</RouterLink> : null}</section>
-        <aside className="buyer-v2__order-actions"><span className="buyer-v2__eyebrow">Order actions</span><h2>{orderActionTitle(order)}</h2><p>{orderActionCopy(order)}</p>{successReady(order, order.entitlement) ? <RouterLink className="buyer-v2__button buyer-v2__button--primary" to={`/portal/orders/${encodeURIComponent(id)}/success`} navigate={navigate}>Open activation steps</RouterLink> : null}{canReverseOrder ? <button className="buyer-v2__button buyer-v2__button--secondary" type="button" disabled={refundState.status === "pending"} onClick={requestRefund}>{refundState.status === "pending" ? "Submitting request…" : reversalLabel}</button> : null}{refundState.error ? <InlineError error={refundState.error} /> : null}{refundState.status === "succeeded" ? <div className="buyer-v2__inline-notice" role="status">{reversalSuccess}</div> : null}</aside>
+        <aside className="buyer-v2__order-actions"><span className="buyer-v2__eyebrow">Order actions</span><h2>{orderActionTitle(order)}</h2><p>{orderActionCopy(order)}</p>{successReady(order, order.entitlement) ? <RouterLink className="buyer-v2__button buyer-v2__button--primary" to={`/orders/${encodeURIComponent(orderReference(order))}/success`} navigate={navigate}>Open activation steps</RouterLink> : null}{canReverseOrder ? <button className="buyer-v2__button buyer-v2__button--secondary" type="button" disabled={refundState.status === "pending"} onClick={requestRefund}>{refundState.status === "pending" ? "Submitting request…" : reversalLabel}</button> : null}{refundState.error ? <InlineError error={refundState.error} /> : null}{refundState.status === "succeeded" ? <div className="buyer-v2__inline-notice" role="status">{reversalSuccess}</div> : null}</aside>
       </div>
       <section className="buyer-v2__timeline-section"><div><span className="buyer-v2__eyebrow">Commerce timeline</span><h2>What happened, in order.</h2></div><Timeline entries={entries} /></section>
     </div>
@@ -919,13 +976,14 @@ function LoadMore({ resource }) {
 }
 
 function RouterLink({ to, navigate, onClick, children, ...props }) {
+  const href = canonicalWebPath(to);
   function handleClick(event) {
     onClick?.(event);
     if (event.defaultPrevented || !navigate || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || props.target) return;
     event.preventDefault();
-    navigate(to);
+    navigate(href);
   }
-  return <a {...props} href={to} onClick={handleClick}>{children}</a>;
+  return <a {...props} href={href} onClick={handleClick}>{children}</a>;
 }
 
 function useRemote(loader, key, enabled = true) {
@@ -1060,8 +1118,8 @@ function splitLocation(pathname, search) {
 }
 
 function normalizePathname(value) {
-  const pathname = String(value || "/agents").split("#")[0].split("?")[0];
-  if (!pathname.startsWith("/")) return "/agents";
+  const pathname = String(value || EXPLORE_ROOT).split("#")[0].split("?")[0];
+  if (!pathname.startsWith("/")) return EXPLORE_ROOT;
   return pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
 }
 
@@ -1071,20 +1129,54 @@ function normalizeSearch(value) {
 }
 
 function safeReturnTo(value) {
-  const candidate = String(value || "");
-  if (!candidate.startsWith("/") || candidate.startsWith("//") || candidate.includes("\\") || /[\u0000-\u001f]/.test(candidate)) return "/agents";
+  const candidate = canonicalWebPath(String(value || ""));
+  if (!candidate.startsWith("/") || candidate.startsWith("//") || candidate.includes("\\") || /[\u0000-\u001f]/.test(candidate)) return EXPLORE_ROOT;
   const pathname = candidate.split("?")[0].split("#")[0];
-  const allowed = pathname === "/agents" || pathname.startsWith("/agents/") || pathname.startsWith("/portal/") || pathname.startsWith("/account/");
-  return allowed ? candidate : "/agents";
+  const allowed = pathname === "/"
+    || pathname === EXPLORE_ROOT
+    || pathname.startsWith("/creators/")
+    || pathname.startsWith("/library")
+    || pathname.startsWith("/orders")
+    || pathname.startsWith("/checkout/")
+    || pathname === "/studio"
+    || pathname.startsWith("/studio/")
+    || pathname === ACCOUNT_ROOT
+    || pathname.startsWith("/account/");
+  return allowed ? candidate : EXPLORE_ROOT;
 }
 
 function navigateTo(navigate, to, options) {
-  if (typeof navigate === "function") return navigate(to, options);
+  const destination = canonicalWebPath(to);
+  if (typeof navigate === "function") return navigate(destination, options);
   if (typeof window !== "undefined") {
-    if (options?.replace) window.location.replace(to);
-    else window.location.assign(to);
+    if (options?.replace) window.location.replace(destination);
+    else window.location.assign(destination);
   }
   return undefined;
+}
+
+function canonicalWebPath(value) {
+  if (typeof value !== "string" || !value.startsWith("/")) return value;
+  const hashIndex = value.indexOf("#");
+  const hash = hashIndex >= 0 ? value.slice(hashIndex) : "";
+  const withoutHash = hashIndex >= 0 ? value.slice(0, hashIndex) : value;
+  const queryIndex = withoutHash.indexOf("?");
+  const pathname = queryIndex >= 0 ? withoutHash.slice(0, queryIndex) : withoutHash;
+  const suffix = queryIndex >= 0 ? withoutHash.slice(queryIndex) : "";
+  const segments = pathname.split("/").filter(Boolean);
+  const encodedSegments = (items) => items.map((segment) => encodeURIComponent(safeDecode(segment))).join("/");
+  if (segments[0] === "agents") {
+    return segments.length >= 3
+      ? `/creators/${encodedSegments(segments.slice(1))}${suffix}${hash}`
+      : `${EXPLORE_ROOT}${suffix}${hash}`;
+  }
+  if (segments[0] !== "portal") return value;
+  if (segments[1] === "creator") return `/studio${segments.slice(2).length ? `/${encodedSegments(segments.slice(2))}` : ""}${suffix}${hash}`;
+  if (segments[1] === "library") return `/library${segments.slice(2).length ? `/${encodedSegments(segments.slice(2))}` : ""}${suffix}${hash}`;
+  if (segments[1] === "orders") return `/orders${segments.slice(2).length ? `/${encodedSegments(segments.slice(2))}` : ""}${suffix}${hash}`;
+  if (segments[1] === "checkout") return `/checkout${segments.slice(2).length ? `/${encodedSegments(segments.slice(2))}` : ""}${suffix}${hash}`;
+  if (segments[1] === "settings") return `${ACCOUNT_ROOT}${suffix}${hash}`;
+  return value;
 }
 
 function defaultOpenPayment(url) {
@@ -1144,7 +1236,15 @@ function orderIdFor(value) { return value?.order_id || value?.id; }
 function productPath(value) {
   const creator = value?.creator_slug || value?.creator?.slug || value?.creator_id || value?.creator?.id || "creator";
   const product = value?.product_slug || value?.slug || productId(value) || value?.agent_id || "agent";
-  return `/agents/${encodeURIComponent(creator)}/${encodeURIComponent(product)}`;
+  return `/creators/${encodeURIComponent(creator)}/${encodeURIComponent(product)}`;
+}
+
+function libraryPathFor(product, entitlement) {
+  const creator = product?.creator_slug || product?.creator?.slug || entitlement?.creator_slug || entitlement?.creator?.slug || product?.creator_id || entitlement?.creator_id;
+  const slug = product?.product_slug || product?.slug || productId(product) || entitlement?.product_slug || entitlement?.product?.slug;
+  if (creator && slug) return `/library/${encodeURIComponent(creator)}/${encodeURIComponent(slug)}`;
+  const id = entitlement?.entitlement_id || entitlement?.id;
+  return id ? `/library/${encodeURIComponent(id)}` : LIBRARY_ROOT;
 }
 
 function productKey(value) { return `${value?.creator_id || value?.creator_slug || value?.creator?.id || "creator"}:${productId(value) || value?.agent_id || value?.product_slug || "product"}`; }

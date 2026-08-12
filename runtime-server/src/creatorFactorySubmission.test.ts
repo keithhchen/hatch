@@ -364,7 +364,7 @@ test("a conflicting sibling rolls back the whole batch and never exposes a false
   assert.ok(receipts.every((value) => !value.startsWith("FINALIZED")));
 });
 
-test("an exact repeated rejected-finalizer transition fails closed and reports content-free telemetry", async () => {
+test("a repeated finalizer validation code stops semantic repair loops even when authored content changes", async () => {
   const responses = [
     toolTurn([
       {
@@ -378,7 +378,7 @@ test("an exact repeated rejected-finalizer transition fails closed and reports c
       {
         id: "same-incomplete-new-call-id",
         name: "submit_question",
-        arguments: { id: "Q1", question: "same", intent: "same", leakage_group: "same" }
+        arguments: { id: "Q1", question: "different authored attempt", intent: "changed", leakage_group: "changed" }
       },
       { id: "same-rejected-finalizer-new-call-id", name: "finalize_questions", arguments: {} }
     ])
@@ -391,7 +391,7 @@ test("an exact repeated rejected-finalizer transition fails closed and reports c
     fetch: async () => {
       providerTurns += 1;
       const response = responses.shift();
-      if (!response) throw new Error("Exact cycle was not stopped");
+      if (!response) throw new Error("Semantic validation cycle was not stopped");
       return response;
     }
   });
@@ -404,13 +404,14 @@ test("an exact repeated rejected-finalizer transition fails closed and reports c
       outputContract: { kind: "question_set", expectedCount: 2 },
       reportFailureTelemetry: (value) => { telemetry = value; }
     }),
-    /detected an exact submission tool cycle before FINALIZED/
+    /repeated final validation failure QUESTION_COUNT_MISMATCH/
   );
-  assert.equal(providerTurns, 2, "the second identical rejected transition proves the cycle");
+  assert.equal(providerTurns, 2, "one explicit repair attempt is allowed before the same structural failure stops the run");
   assert.equal(telemetry?.code, "exact_submission_cycle");
   assert.equal(telemetry?.exactCycleKind, "repeated_final_validation");
   assert.equal(telemetry?.lastToolTurn?.finalizerOutcome, "rejected");
-  assert.equal(JSON.stringify(telemetry).includes("same"), false, "telemetry must not retain authored IDs, args, or content");
+  assert.equal(telemetry?.lastToolTurn?.finalizerValidationCode, "QUESTION_COUNT_MISMATCH");
+  assert.equal(JSON.stringify(telemetry).includes("authored"), false, "telemetry must not retain authored IDs, args, or content");
 });
 
 test("a repeated batch without its required finalizer is classified without weakening exact-cycle detection", async () => {
@@ -607,6 +608,74 @@ test("Corpus tools derive paths and canonical-render every layer in one accepted
   const offeredSchemas = JSON.stringify((requests[0].tools as unknown[]) ?? []);
   assert.doesNotMatch(offeredSchemas, /\"path\"/);
   assert.doesNotMatch(offeredSchemas, /manifest|sha256/i);
+});
+
+test("Corpus draft commits bounded partial turns and repairs a rejected finalizer in place", async () => {
+  const preservation = [
+    "## Retained\nNone — initial compilation.",
+    "## Added or changed\n- system, skill, and reference added.",
+    "## Removed\nNone.",
+    "## Merged\nNone.",
+    "## Conflict resolutions\nNone.",
+    "## Asset identity, path, or layer changes\nNone."
+  ].join("\n");
+  const { output, requests } = await run({
+    purpose: "corpus.compile",
+    systemPrompt: "compiler system",
+    prompt: "complete evidence",
+    outputContract: { kind: "corpus_compilation", availableToolIds: [] }
+  }, [
+    toolTurn([
+      { id: "partial-system", name: "submit_system_instructions", arguments: { content: "# Identity\nDecide clearly." } },
+      {
+        id: "partial-skill",
+        name: "submit_skill",
+        arguments: {
+          id: "offer-builder",
+          name: "Offer Builder",
+          when_to_use: "When building an offer.",
+          allowed_tool_ids: [],
+          content: "# Procedure\nChoose one outcome."
+        }
+      }
+    ]),
+    toolTurn([
+      {
+        id: "bad-reference",
+        name: "submit_reference",
+        arguments: {
+          id: "offer-method",
+          parent_skill_id: "missing-skill",
+          reference_kind: "method",
+          content: "# Method\nPrefer a narrow promise."
+        }
+      },
+      { id: "rationale", name: "submit_corpus_audit_section", arguments: { section: "change_rationale", markdown: "Initial compilation." } },
+      { id: "trace", name: "submit_corpus_audit_section", arguments: { section: "requirements_traceability", markdown: "- R1 -> offer-builder." } },
+      { id: "preservation", name: "submit_corpus_audit_section", arguments: { section: "preservation_audit", markdown: preservation } },
+      { id: "bad-finalize", name: "finalize_corpus", arguments: {} }
+    ]),
+    toolTurn([
+      {
+        id: "fixed-reference",
+        name: "submit_reference",
+        arguments: {
+          id: "offer-method",
+          parent_skill_id: "offer-builder",
+          reference_kind: "method",
+          content: "# Method\nPrefer a narrow promise."
+        }
+      },
+      { id: "fixed-finalize", name: "finalize_corpus", arguments: {} }
+    ])
+  ]);
+
+  const corpus = parseCorpusCompilation(output);
+  assert.equal(corpus.systemInstructions, "# Identity\nDecide clearly.");
+  assert.equal(corpus.references[0]!.parentSkillId, "offer-builder");
+  assert.equal(requests.length, 3);
+  assert.match(JSON.stringify(requests[1]), /system=1\/1; skills=1/);
+  assert.match(JSON.stringify(requests[2]), /REJECTED code=CORPUS_REFERENCE_PARENT_UNKNOWN; complete draft retained/);
 });
 
 function minimalCorpusCalls(

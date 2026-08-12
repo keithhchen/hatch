@@ -1,17 +1,27 @@
 import { expect, test } from "@playwright/test";
 import { expectNoHorizontalOverflow, signIn } from "./helpers.js";
 
-test("canonical public product is readable without auth at every acceptance viewport", async ({ page }, testInfo) => {
-  const response = await page.goto("/agents/creator-e2e/signal-resume-review");
+test("the root URL is the public Explore home, not a role-specific workspace redirect", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "Root routing is asserted once; viewport coverage starts at the canonical public product.");
+  const response = await page.goto("/");
   expect(response).not.toBeNull();
-  const canonicalUrl = `${new URL(page.url()).origin}/agents/creator-e2e/signal-resume-review`;
+  expect(response.status()).toBe(200);
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("heading", { level: 1, name: "Methods you can put to work." })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Sign in" })).toBeVisible();
+});
+
+test("canonical public product is readable without auth at every acceptance viewport", async ({ page }, testInfo) => {
+  const response = await page.goto("/creators/creator-e2e/signal-resume-review");
+  expect(response).not.toBeNull();
+  const canonicalUrl = `${new URL(page.url()).origin}/creators/creator-e2e/signal-resume-review`;
   const serverHtml = await response.text();
   expect(serverHtml).toContain("<title>Signal Resume Review by Maya Creator · Hatch</title>");
   expect(serverHtml).toContain(`<link rel="canonical" href="${canonicalUrl}" />`);
   expect(serverHtml).toContain('<meta name="description" content="Find the strongest credible signal without inventing evidence." />');
   expect(serverHtml).toContain('<meta property="og:title" content="Signal Resume Review by Maya Creator · Hatch" />');
   expect(serverHtml).toContain(`<meta property="og:url" content="${canonicalUrl}" />`);
-  const unavailableUrl = `${new URL(page.url()).origin}/agents/creator-e2e/not-published`;
+  const unavailableUrl = `${new URL(page.url()).origin}/creators/creator-e2e/not-published`;
   const unavailableResponse = await page.request.get(unavailableUrl);
   expect(unavailableResponse.status()).toBe(404);
   const unavailableHtml = await unavailableResponse.text();
@@ -77,7 +87,7 @@ test("canonical public product is readable without auth at every acceptance view
 
 test("authenticated mobile navigation keeps account controls reachable", async ({ page }, testInfo) => {
   test.skip(!testInfo.project.name.startsWith("mobile-"), "Mobile account controls are covered at both acceptance widths.");
-  await signIn(page, "buyer", "/portal/library");
+  await signIn(page, "buyer", "/library");
   await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
   await expectNoHorizontalOverflow(page);
 });

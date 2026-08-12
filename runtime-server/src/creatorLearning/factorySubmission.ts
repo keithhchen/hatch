@@ -108,7 +108,11 @@ type SubmissionTelemetryState = Omit<FactoryPromptFailureTelemetry,
 
 type ToolReceipt = {
   content: Array<{ type: "text"; text: string }>;
-  details: { status: "accepted" | "idempotent" | "rejected"; tool: string };
+  details: {
+    status: "accepted" | "idempotent" | "rejected";
+    tool: string;
+    validationCode?: string;
+  };
   terminate?: boolean;
 };
 
@@ -378,11 +382,12 @@ function receipt(
   tool: string,
   status: ToolReceipt["details"]["status"],
   message: string,
-  terminate = false
+  terminate = false,
+  validationCode?: string
 ): ToolReceipt {
   return {
     content: [{ type: "text", text: message }],
-    details: { status, tool },
+    details: { status, tool, ...(validationCode ? { validationCode } : {}) },
     ...(terminate ? { terminate: true } : {})
   };
 }
@@ -427,6 +432,18 @@ function singleton<T>(existing: T | undefined, candidate: T, label: string): "ac
   if (existing === undefined) return "accepted";
   if (same(existing, candidate)) return "idempotent";
   throw new Error(`${label} conflicts with an earlier submission; finalize/restart with a complete replacement`);
+}
+
+function upsertById<T>(rows: T[], candidate: T, key: (row: T) => string): "accepted" | "idempotent" {
+  const id = key(candidate);
+  const index = rows.findIndex((row) => key(row) === id);
+  if (index < 0) {
+    rows.push(candidate);
+    return "accepted";
+  }
+  if (same(rows[index], candidate)) return "idempotent";
+  rows[index] = candidate;
+  return "accepted";
 }
 
 function renderQuestions(rows: QuestionSubmission[]): string {
@@ -562,7 +579,7 @@ function instructionsFor(contract: FactoryOutputContract): string {
     return `${shared}\nSubmit every Evidence section separately, then finalize_evidence. Required sections, in host-rendered order: ${contract.requiredSections.join("; ")}.`;
   }
   if (contract.kind === "corpus_compilation") {
-    return `${shared}\nPaths, manifests, and digests are host-derived: never submit them. Re-emit the complete System and every retained Skill/reference/knowledge asset. Submit all three audit sections separately, then finalize_corpus. Allowed runtime tool IDs are exactly: ${contract.availableToolIds.length > 0 ? contract.availableToolIds.join(", ") : "none"}.`;
+    return `Your output is accepted only through the local Corpus submission tools supplied with this call. Use only the available local submission tools; tool calls are a typed handoff to the host, not external actions. Do not print the Corpus as assistant prose and do not wrap tool arguments in code fences. First reason through the complete requirement inventory, layer boundaries, asset IDs, dependencies, and preservation obligations. Do not privately draft every asset before the first tool turn. Build one host-retained draft over multiple bounded turns: author and submit the System first, then coherent tranches of roughly one to four related assets, then the audit sections. A successful submit-only turn commits its submitted assets to that draft; receipts report the retained inventory. Re-submitting the same asset ID replaces that asset in the retained draft; use this for precise corrections. An optional restart_submission discards the whole retained draft and must be first if used. Any tool error rolls back only that turn and preserves the prior retained draft. Call finalize_corpus as the last call only when the retained draft is complete. A rejected finalizer preserves the draft: correct only the reported problem, then finalize again. FINALIZED means the complete Corpus passed host validation; stop immediately after it. Paths, manifests, and digests are host-derived: never submit them. The final draft must contain the complete System and every retained Skill/reference/knowledge asset plus all three audit sections. Allowed runtime tool IDs are exactly: ${contract.availableToolIds.length > 0 ? contract.availableToolIds.join(", ") : "none"}.`;
   }
   return shared;
 }
@@ -590,6 +607,7 @@ export function createFactorySubmissionProtocol(
   let committed = emptyDraft();
   let turn: TurnState | undefined;
   const seenTransitions = new Set<string>();
+  const rejectedFinalizerCodes = new Set<string>();
   const telemetry: SubmissionTelemetryState = {
     turnsObserved: 0,
     toolTurnsObserved: 0,
@@ -640,9 +658,9 @@ export function createFactorySubmissionProtocol(
     const finalizers = names.reduce<number[]>((rows, name, index) => (
       name === finalizerName ? [...rows, index] : rows
     ), []);
-    if (finalizers.length === 0) return "BATCH_FINALIZER_REQUIRED";
+    if (finalizers.length === 0 && contract.kind !== "corpus_compilation") return "BATCH_FINALIZER_REQUIRED";
     if (finalizers.length > 1) return "BATCH_FINALIZER_DUPLICATE";
-    if (finalizers[0] !== names.length - 1) return "BATCH_FINALIZER_MUST_BE_LAST";
+    if (finalizers.length === 1 && finalizers[0] !== names.length - 1) return "BATCH_FINALIZER_MUST_BE_LAST";
     const restarts = names.reduce<number[]>((rows, name, index) => (
       name === "restart_submission" ? [...rows, index] : rows
     ), []);
@@ -672,6 +690,7 @@ export function createFactorySubmissionProtocol(
     label: name,
     description,
     parameters,
+    constrainedSampling: { type: "json_schema", strict: "require" },
     executionMode: "sequential",
     execute: async (_toolCallId, params) => apply(working(), params as Record<string, unknown>)
   });
@@ -710,13 +729,19 @@ export function createFactorySubmissionProtocol(
       return receipt(tool, "accepted", `FINALIZED; atomic batch accepted; ${inventory(draft)}`, true);
     } catch (error) {
       const failure = validationFailure(error);
-      // A rejected finalization starts a new attempt. This is deliberately a
-      // successful tool receipt so the turn can atomically commit the reset.
-      turn!.working = emptyDraft();
+      // Corpus repair keeps the validated-so-far draft so a small structural
+      // correction does not regenerate every large cognitive asset. Other
+      // compact contracts retain their full-replacement behavior.
+      const preserveDraft = contract.kind === "corpus_compilation";
+      if (!preserveDraft) turn!.working = emptyDraft();
       return receipt(
         tool,
         "rejected",
-        `REJECTED code=${failure.code}; draft cleared; resubmit complete replacement and ${finalizerName}. ${failure.reason}`
+        preserveDraft
+          ? `REJECTED code=${failure.code}; complete draft retained; correct the reported field or asset, then ${finalizerName}. ${failure.reason}`
+          : `REJECTED code=${failure.code}; draft cleared; resubmit complete replacement and ${finalizerName}. ${failure.reason}`,
+        false,
+        failure.code
       );
     }
   };
@@ -866,8 +891,10 @@ export function createFactorySubmissionProtocol(
       Type.Object({ content: text }, { additionalProperties: false }),
       (draft, params) => {
         const content = body(params.content, "content");
-        const status = singleton(draft.corpus.systemInstructions, content, "System instructions");
-        if (status === "accepted") draft.corpus.systemInstructions = content;
+        const status = draft.corpus.systemInstructions !== undefined && same(draft.corpus.systemInstructions, content)
+          ? "idempotent"
+          : "accepted";
+        draft.corpus.systemInstructions = content;
         return staged("submit_system_instructions", status, "system", draft);
       }
     ));
@@ -896,7 +923,7 @@ export function createFactorySubmissionProtocol(
           allowedToolIds,
           content: body(params.content, "content")
         };
-        const status = addUnique(draft.corpus.skills, candidate, (item) => item.id, "Skill");
+        const status = upsertById(draft.corpus.skills, candidate, (item) => item.id);
         return staged("submit_skill", status, "skill", draft);
       }
     ));
@@ -927,7 +954,7 @@ export function createFactorySubmissionProtocol(
           referenceKind: referenceKind as CorpusReferenceSubmission["referenceKind"],
           content: body(params.content, "content")
         };
-        const status = addUnique(draft.corpus.references, candidate, (item) => item.id, "Reference");
+        const status = upsertById(draft.corpus.references, candidate, (item) => item.id);
         return staged("submit_reference", status, "reference", draft);
       }
     ));
@@ -943,7 +970,7 @@ export function createFactorySubmissionProtocol(
           sourceSummary: metadata(params.source_summary, "source_summary"),
           content: body(params.content, "content")
         };
-        const status = addUnique(draft.corpus.knowledge, candidate, (item) => item.id, "Knowledge");
+        const status = upsertById(draft.corpus.knowledge, candidate, (item) => item.id);
         return staged("submit_knowledge", status, "knowledge", draft);
       }
     ));
@@ -961,8 +988,11 @@ export function createFactorySubmissionProtocol(
       (draft, params) => {
         const section = params.section as keyof CorpusSubmission["auditSections"];
         const markdown = body(params.markdown, "markdown");
-        const status = singleton(draft.corpus.auditSections[section], markdown, `Audit section ${section}`);
-        if (status === "accepted") draft.corpus.auditSections[section] = markdown;
+        const status = draft.corpus.auditSections[section] !== undefined
+          && same(draft.corpus.auditSections[section], markdown)
+          ? "idempotent"
+          : "accepted";
+        draft.corpus.auditSections[section] = markdown;
         return staged("submit_corpus_audit_section", status, `audit section=${section}`, draft);
       }
     ));
@@ -1088,6 +1118,14 @@ export function createFactorySubmissionProtocol(
             rejected: statuses.filter((status) => status === "rejected").length,
             toolNames: [...new Set(toolCalls.flatMap((call) => knownToolName(call.name) ? [call.name] : []))],
             finalizerOutcome,
+            ...(finalizerIndexes.length === 1
+              && typeof (event.toolResults[finalizerIndexes[0]!]?.details as Record<string, unknown> | undefined)?.validationCode === "string"
+              ? {
+                  finalizerValidationCode: String(
+                    (event.toolResults[finalizerIndexes[0]!]!.details as Record<string, unknown>).validationCode
+                  )
+                }
+              : {}),
             finalizerPosition: finalizerIndexes.length === 0
               ? "absent"
               : finalizerIndexes.length > 1
@@ -1099,11 +1137,21 @@ export function createFactorySubmissionProtocol(
               ? "rolled_back"
               : candidate.finalized
                 ? "finalized"
-                : activeTurn.working
-                  ? "cleared"
+              : activeTurn.working
+                  ? contract.kind === "corpus_compilation" ? "retained" : "cleared"
                   : "no_draft"
           };
           telemetry.lastToolTurn = lastToolTurn;
+          if (finalizerOutcome === "rejected" && lastToolTurn.finalizerValidationCode) {
+            if (rejectedFinalizerCodes.has(lastToolTurn.finalizerValidationCode)) {
+              telemetry.exactCycleKind = "repeated_final_validation";
+              turn = undefined;
+              throw new Error(
+                `Factory ${purpose} repeated final validation failure ${lastToolTurn.finalizerValidationCode}`
+              );
+            }
+            rejectedFinalizerCodes.add(lastToolTurn.finalizerValidationCode);
+          }
         }
         if (toolCalls.length > 0 && !candidate.finalized) {
           const transition = fingerprint({

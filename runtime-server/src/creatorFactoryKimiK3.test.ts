@@ -3,7 +3,8 @@ import test from "node:test";
 import { KIMI_MODEL as PROVIDER_KIMI_MODEL } from "./kimiProvider.js";
 import {
   FACTORY_KIMI_K3_MODEL,
-  FACTORY_KIMI_K3_TOKEN_BUDGET,
+  FACTORY_KIMI_K3_CONTEXT_WINDOW,
+  FACTORY_KIMI_K3_MAX_COMPLETION_TOKENS,
   FACTORY_PROVIDER_CONFIGURATION_MESSAGE,
   FACTORY_PROVIDER_QUOTA_MESSAGE,
   FACTORY_PROVIDER_TRANSIENT_MESSAGE,
@@ -76,7 +77,7 @@ function toolStreamResponse(
   });
 }
 
-test("Factory Evidence/Eval/Corpus prompt gateway uses dedicated Kimi K3 max profile", async (t) => {
+test("Factory Evidence/Eval/Corpus prompt gateway uses dedicated Kimi K3 high-reasoning profile", async (t) => {
   const previousKey = process.env.LLM_API_KEY;
   const previousBaseUrl = process.env.OPENAI_BASE_URL;
   const previousFetch = globalThis.fetch;
@@ -124,13 +125,13 @@ test("Factory Evidence/Eval/Corpus prompt gateway uses dedicated Kimi K3 max pro
 
   const body = JSON.parse(String(request.init.body)) as Record<string, unknown>;
   assert.equal(body.model, FACTORY_KIMI_K3_MODEL);
-  assert.equal(body.reasoning_effort, "max");
-  assert.equal(typeof body.max_completion_tokens, "number");
-  assert.ok(
-    Number(body.max_completion_tokens) >= FACTORY_KIMI_K3_TOKEN_BUDGET - 10_000,
-    "Pi should expose nearly the full 1M K3 completion budget for a short Factory prompt"
+  assert.equal(body.reasoning_effort, "high");
+  assert.equal(body.tool_choice, "required");
+  assert.equal(body.max_completion_tokens, FACTORY_KIMI_K3_MAX_COMPLETION_TOKENS);
+  assert.equal(
+    (body.tools as Array<{ function: { strict?: boolean } }>).every((tool) => tool.function.strict === true),
+    true
   );
-  assert.ok(Number(body.max_completion_tokens) <= FACTORY_KIMI_K3_TOKEN_BUDGET);
   assert.equal("max_tokens" in body, false);
   assert.equal("thinking" in body, false);
   assert.equal("temperature" in body, false);
@@ -140,10 +141,11 @@ test("Factory Evidence/Eval/Corpus prompt gateway uses dedicated Kimi K3 max pro
 
   const factoryModel = createFactoryKimiK3Model({ env: { OPENAI_BASE_URL: process.env.OPENAI_BASE_URL } });
   assert.equal(factoryModel.id, FACTORY_KIMI_K3_MODEL);
-  assert.equal(factoryModel.contextWindow, FACTORY_KIMI_K3_TOKEN_BUDGET);
-  assert.equal(factoryModel.maxTokens, FACTORY_KIMI_K3_TOKEN_BUDGET);
+  assert.equal(factoryModel.contextWindow, FACTORY_KIMI_K3_CONTEXT_WINDOW);
+  assert.equal(factoryModel.maxTokens, FACTORY_KIMI_K3_MAX_COMPLETION_TOKENS);
   assert.equal(factoryModel.reasoning, true);
   assert.equal(factoryModel.compat?.supportsReasoningEffort, true);
+  assert.equal(factoryModel.compat?.supportsStrictMode, true);
   assert.equal(factoryModel.compat?.maxTokensField, "max_completion_tokens");
   assert.equal(factoryModel.compat?.thinkingFormat, "openai");
   assert.deepEqual(PI_FACTORY_MODEL, { provider: "moonshot", model: FACTORY_KIMI_K3_MODEL });

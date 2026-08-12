@@ -269,7 +269,7 @@ test("Kimi no-thinking profile sends the official disabled payload without tempe
 });
 
 test("active profile rejects unknown names and missing provider credentials", () => {
-  assert.throws(() => createPiModel({ env: { HATCH_LLM_PROFILE: "unknown" } }), /Unknown HATCH_LLM_PROFILE/);
+  assert.throws(() => createPiModel({ env: { HATCH_LLM_PROFILE: "unknown" } }), /Unknown (?:Runtime )?HATCH_LLM_PROFILE/);
   assert.throws(
     () => createPiAgent({ env: { HATCH_LLM_PROFILE: "deepseek-v4-flash" } }),
     /Missing DEEPSEEK_API_KEY/

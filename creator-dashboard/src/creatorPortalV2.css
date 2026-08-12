@@ -18,9 +18,12 @@
 .cpv2-sidebar { position: sticky; z-index: 5; top: 0; display: flex; height: 100vh; min-width: 0; flex-direction: column; padding: 27px 19px 19px; border-right: 1px solid var(--hatch-border-subtle, rgba(54,41,31,.1)); background: color-mix(in srgb, var(--hatch-panel, #fbf7f0) 85%, transparent); backdrop-filter: blur(20px); }
 .cpv2-brand { display: flex; min-height: 44px; align-items: center; gap: 9px; padding: 0 7px; border: 0; background: transparent; color: inherit; font-family: var(--hatch-font-display, Georgia, serif); font-size: 28px; }
 .cpv2-brand > span { color: var(--hatch-accent, #d65f3b); font-family: sans-serif; font-size: 22px; }
-.cpv2-sidebar nav { display: grid; gap: 4px; margin-top: 42px; }
-.cpv2-sidebar nav button { min-height: 44px; padding: 10px 13px; border: 0; border-radius: 10px; background: transparent; color: var(--hatch-text-secondary, #74675e); text-align: left; }
-.cpv2-sidebar nav button:hover, .cpv2-sidebar nav button.is-active { background: var(--hatch-panel-muted, #ece4d8); color: var(--hatch-ink, #201813); }
+.cpv2-sidebar > nav:not(.cpv2-global-nav) { display: grid; gap: 4px; margin-top: 28px; }
+.cpv2-sidebar > nav:not(.cpv2-global-nav) button { min-height: 44px; padding: 10px 13px; border: 0; border-radius: 10px; background: transparent; color: var(--hatch-text-secondary, #74675e); text-align: left; }
+.cpv2-sidebar > nav:not(.cpv2-global-nav) button:hover, .cpv2-sidebar > nav:not(.cpv2-global-nav) button.is-active { background: var(--hatch-panel-muted, #ece4d8); color: var(--hatch-ink, #201813); }
+.cpv2-global-nav { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; }
+.cpv2-global-nav a { display: inline-flex; min-height: 44px; align-items: center; padding: 10px 7px; color: var(--hatch-text-secondary, #74675e); font-size: 11px; text-decoration: none; }
+.cpv2-global-nav a:hover { color: var(--hatch-ink, #201813); }
 .cpv2-account { display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 10px; align-items: center; margin-top: auto; padding-top: 18px; border-top: 1px solid var(--hatch-border-subtle, rgba(54,41,31,.1)); }
 .cpv2-avatar { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 50%; background: var(--hatch-inverse, #202522); color: var(--hatch-inverse-text, #f4f1e9); font-size: 12px; }
 .cpv2-account strong, .cpv2-account small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -297,8 +300,9 @@
   .cpv2 { grid-template-columns: 1fr; }
   .cpv2-sidebar { position: static; height: auto; padding: 14px 16px; }
   .cpv2-brand { font-size: 24px; }
-  .cpv2-sidebar nav { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 10px; overflow-x: auto; }
-  .cpv2-sidebar nav button { padding: 8px 6px; text-align: center; font-size: 11px; }
+  .cpv2-sidebar > nav:not(.cpv2-global-nav) { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 10px; overflow-x: auto; }
+  .cpv2-sidebar > nav:not(.cpv2-global-nav) button { padding: 8px 6px; text-align: center; font-size: 11px; }
+  .cpv2-global-nav { margin-top: 4px; }
   .cpv2-account { grid-template-columns: 34px minmax(0, 1fr) auto; margin-top: 12px; padding-top: 12px; }
   .cpv2-account button { grid-column: auto; min-width: 72px; padding: 0; text-align: right; }
   .cpv2-avatar { width: 34px; height: 34px; }
@@ -332,7 +336,7 @@
 @media (max-width: 390px) {
   .cpv2-main { padding-inline: 14px; }
   .cpv2-sidebar { padding-inline: 12px; }
-  .cpv2-sidebar nav button { font-size: 10px; }
+  .cpv2-sidebar > nav:not(.cpv2-global-nav) button { font-size: 10px; }
   .cpv2-page-header h1 { font-size: 39px; }
   .cpv2-product-card { padding: 22px; }
   .cpv2-card-top { align-items: flex-start; flex-direction: column; }
