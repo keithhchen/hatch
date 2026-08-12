@@ -3743,6 +3743,7 @@ function DesktopConversationToolbar({ creatorAgent, connected, conversationLibra
       <div
         aria-label={title}
         className="desktop-toolbar-context"
+        data-tauri-drag-region
         title={title}
       >
         <strong className="desktop-toolbar-conversation">{creatorName}</strong>

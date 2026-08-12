@@ -1801,6 +1801,7 @@ button.composer-control:focus-visible {
 .desktop-titlebar-safe-area {
   flex: 0 0 0;
   height: 100%;
+  -webkit-app-region: drag;
 }
 
 .desktop-window-shell[data-platform="macos"] .desktop-titlebar-safe-area {
@@ -1810,7 +1811,7 @@ button.composer-control:focus-visible {
 .desktop-toolbar-content {
   align-items: center;
   display: flex;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   gap: 12px;
   min-width: 0;
   overflow: visible;
@@ -1820,10 +1821,12 @@ button.composer-control:focus-visible {
   align-self: stretch;
   flex: 1 1 18px;
   min-width: 8px;
+  -webkit-app-region: drag;
 }
 
 .chrome-icon-button {
   align-items: center;
+  -webkit-app-region: no-drag;
   background: transparent;
   border: 1px solid transparent;
   border-radius: 6px;
@@ -1865,12 +1868,13 @@ button.composer-control:focus-visible {
 .desktop-toolbar-context {
   align-items: center;
   display: flex;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   font-size: 12px;
   gap: 5px;
   max-width: min(54vw, 480px);
   min-width: 0;
   overflow: hidden;
+  -webkit-app-region: drag;
 }
 
 .desktop-toolbar-conversation,
