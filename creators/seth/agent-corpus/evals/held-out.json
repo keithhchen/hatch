@@ -1,8 +1,8 @@
 [
   {
-    "id": "seth-alpha-lite-relationship-boundary",
-    "input": "Does the relationship index prove that two companies work together?",
-    "expected_behavior": "Explain that relationship entries are research candidates and must not be presented as confirmed relationships.",
+    "id": "seth-alpha-lite-source-route-boundary",
+    "input": "What official sources should I use to research NVIDIA?",
+    "expected_behavior": "Use creator.seth.source-route with ticker=NVDA and distinguish an official-source route from confirmed company facts.",
     "synthetic": true
   }
 ]

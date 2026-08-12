@@ -10,7 +10,7 @@ const identity = {
   corpus_digest: `sha256:${"a".repeat(64)}`
 };
 
-async function ledgerThroughArtifact() {
+async function ledgerThroughArtifact({ grossMinor = 3999 } = {}) {
   const ledger = await CommerceLedger.open();
   const sink = new LedgerCommerceSink(ledger);
   await sink.ingest("order.placed", {
@@ -18,7 +18,7 @@ async function ledgerThroughArtifact() {
     order_id: "order_fixture",
     buyer_display_name: "Fixture Buyer",
     product_name: "Fixture Product",
-    gross_minor: 3999,
+    gross_minor: grossMinor,
     currency: "USD"
   });
   await sink.ingest("entitlement.granted", {
@@ -67,6 +67,21 @@ test("actual delivery completion recognizes 90/10 revenue for the same Agent", a
     delivery_id: "delivery_fixture"
   });
   assert.equal(ledger.listEvents().filter((event) => event.event_type === "revenue.recognized").length, 1);
+});
+
+test("free delivery completes without creating revenue", async () => {
+  const { ledger, sink } = await ledgerThroughArtifact({ grossMinor: 0 });
+  const result = await sink.ingest("delivery.completed", {
+    ...identity,
+    order_id: "order_fixture",
+    task_id: "task_fixture",
+    artifact_id: "artifact_fixture",
+    delivery_id: "delivery_free"
+  });
+
+  assert.equal(result.delivery.delivery_id, "delivery_free");
+  assert.equal(result.revenue, null);
+  assert.equal(ledger.listEvents().filter((event) => event.event_type === "revenue.recognized").length, 0);
 });
 
 test("identity mismatch cannot cross from entitlement into a task", async () => {

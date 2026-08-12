@@ -257,7 +257,7 @@ h1, h2 { font-family: var(--hatch-font-display); font-weight: 400; }
 @media(max-width: 680px) {
   .dashboard-shell { grid-template-columns: 1fr; }
   .sidebar { position: static; height: auto; padding: 18px; }
-  .sidebar nav { grid-template-columns: repeat(4,1fr); margin-top: 18px; }
+  .sidebar nav { grid-template-columns: repeat(5,1fr); margin-top: 18px; }
   .sidebar nav button { padding: 8px 4px; text-align: center; font-size: 11px; }
   .creator-card { display: none; }
   .dashboard-main { padding: 34px 18px 54px; }

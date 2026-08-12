@@ -14,7 +14,7 @@
     "system": {
       "id": "seth-system",
       "path": "instructions/system.md",
-      "sha256": "sha256:d6c43e7e86159f5dd0fe07cc414af554a339275d20ed7a01c5ce91a2401f5c77",
+      "sha256": "sha256:51ad3c1c028e3fb09967480e639abbb012539cc378b5d3154d6e4f4bce91d698",
       "description": "Initial Seth research-assistant system prompt."
     }
   },
@@ -36,14 +36,6 @@
       "description": "Search the Agent's isolated knowledge namespace when it contains research material."
     },
     {
-      "id": "creator.seth.status",
-      "kind": "http_function",
-      "connection_ref": "seth-alpha-lite-status",
-      "operation": "get_status",
-      "description": "Check Seth Database Alpha Lite status and data boundaries.",
-      "input_schema": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
-    },
-    {
       "id": "creator.seth.search-company",
       "kind": "http_function",
       "connection_ref": "seth-alpha-lite-search",
@@ -57,19 +49,6 @@
       }
     },
     {
-      "id": "creator.seth.company-detail",
-      "kind": "http_function",
-      "connection_ref": "seth-alpha-lite-company-detail",
-      "operation": "get_company_detail",
-      "description": "Get company identity, classification, readiness, and known data gaps.",
-      "input_schema": {
-        "type": "object",
-        "properties": { "ticker": { "type": "string", "minLength": 1 } },
-        "required": ["ticker"],
-        "additionalProperties": false
-      }
-    },
-    {
       "id": "creator.seth.research-pack",
       "kind": "http_function",
       "connection_ref": "seth-alpha-lite-research-pack",
@@ -78,36 +57,50 @@
       "input_schema": {
         "type": "object",
         "properties": {
-          "ticker": { "type": "string", "minLength": 1 },
-          "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 8 }
+          "ticker": { "type": "string", "minLength": 1 }
         },
         "required": ["ticker"],
         "additionalProperties": false
       }
     },
     {
-      "id": "creator.seth.relationship-index",
+      "id": "creator.seth.financial-metrics",
       "kind": "http_function",
-      "connection_ref": "seth-alpha-lite-relationship-index",
-      "operation": "get_relationship_index",
-      "description": "Get candidate company relationships; candidates are not confirmed relationships.",
+      "connection_ref": "seth-alpha-lite-financial-metrics",
+      "operation": "get_financial_metrics",
+      "description": "Get specific financial metrics for a company.",
       "input_schema": {
         "type": "object",
-        "properties": {
-          "ticker": { "type": "string", "minLength": 1 },
-          "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 10 }
-        },
+        "properties": { "ticker": { "type": "string", "minLength": 1 } },
         "required": ["ticker"],
         "additionalProperties": false
       }
     },
     {
-      "id": "creator.seth.showcase-lite",
+      "id": "creator.seth.company-brief",
       "kind": "http_function",
-      "connection_ref": "seth-alpha-lite-showcase",
-      "operation": "get_showcase_lite",
-      "description": "Get the complete Alpha Lite showcase data package.",
-      "input_schema": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
+      "connection_ref": "seth-alpha-lite-company-brief",
+      "operation": "get_company_brief",
+      "description": "Get a concise company research brief.",
+      "input_schema": {
+        "type": "object",
+        "properties": { "ticker": { "type": "string", "minLength": 1 } },
+        "required": ["ticker"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "id": "creator.seth.source-route",
+      "kind": "http_function",
+      "connection_ref": "seth-alpha-lite-source-route",
+      "operation": "get_source_route",
+      "description": "Get the official-source route for researching a company.",
+      "input_schema": {
+        "type": "object",
+        "properties": { "ticker": { "type": "string", "minLength": 1 } },
+        "required": ["ticker"],
+        "additionalProperties": false
+      }
     },
     {
       "id": "creator.seth.openapi",
@@ -115,14 +108,6 @@
       "connection_ref": "seth-alpha-lite-openapi",
       "operation": "get_openapi",
       "description": "Get the Seth Database Alpha Lite OpenAPI description.",
-      "input_schema": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
-    },
-    {
-      "id": "creator.seth.agent-manifest",
-      "kind": "http_function",
-      "connection_ref": "seth-alpha-lite-manifest",
-      "operation": "get_agent_manifest",
-      "description": "Get the Seth Database Alpha Lite Agent Manifest.",
       "input_schema": { "type": "object", "properties": {}, "required": [], "additionalProperties": false }
     }
   ],
@@ -139,8 +124,8 @@
       {
         "id": "seth-held-out",
         "path": "evals/held-out.json",
-        "sha256": "sha256:90522f83254c90a6de5650564a8db6d8e37b3ab8c485a9fff9b4252e97b7b04a",
-        "description": "Minimal boundary check for relationship candidates."
+        "sha256": "sha256:818d21bf2fc6240fc63c19dd6d44354b4c60259b15e62815abbb7e7cd58be333",
+        "description": "Minimal boundary check for official source routes."
       }
     ]
   }

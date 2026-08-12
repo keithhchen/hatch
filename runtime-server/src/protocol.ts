@@ -227,6 +227,19 @@ export type RuntimeReady = {
   agent_id?: string;
   corpus_digest: string;
   entitlement_id?: string;
+  purchased_corpus_digest?: string;
+  effective_corpus_digest?: string;
+  version_policy?: "pinned" | "track_current_compatible";
+  version_history?: Array<{
+    from_digest: string;
+    to_digest: string;
+    from_release_id?: string | null;
+    to_release_id?: string | null;
+    compatibility_declaration_id?: string | null;
+    reason?: string | null;
+    actor_id?: string | null;
+    advanced_at?: string;
+  }>;
   creator_agent?: {
     creator: { id: string; name: string };
     product: {
@@ -249,7 +262,7 @@ export type DeliveryReady = {
   artifact_digest: string;
   delivery_id: string;
   artifact_type: "file" | "message";
-  artifact_path?: string;
+  receipt_status?: "recorded" | "syncing";
 };
 
 export type AgentDelta = {

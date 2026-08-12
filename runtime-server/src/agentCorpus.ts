@@ -96,11 +96,37 @@ export type ResolvedAgentCorpus = {
   digest: string;
 };
 
-/**
- * Resolves the one current Corpus installed by Registry. The Runtime only
- * needs a creator/agent lookup; it does not know how the Corpus was produced
- * or how its retrieval index was populated.
- */
+export type CurrentAgentCorpusPointer = {
+  schema_version: 1;
+  creator_id: string;
+  agent_id: string;
+  corpus_digest: string;
+  activated_at: string;
+};
+
+/** Content-addressed directory used for an immutable published Corpus. */
+export function immutableAgentCorpusPath(root: string, creatorId: string, agentId: string, corpusDigest: string): string {
+  validateCorpusIdentity(creatorId, agentId);
+  if (!DigestSchema.safeParse(corpusDigest).success) throw new Error("Agent Corpus digest is invalid");
+  return containedStorePath(
+    root,
+    path.join(IMMUTABLE_CORPORA_DIRECTORY, creatorId, agentId, `sha256-${corpusDigest.slice("sha256:".length)}`)
+  );
+}
+
+/** Atomic pointer file used to select the current release without mutating it. */
+export function currentAgentCorpusPointerPath(root: string, creatorId: string, agentId: string): string {
+  validateCorpusIdentity(creatorId, agentId);
+  return containedStorePath(root, path.join(CURRENT_CORPORA_DIRECTORY, creatorId, `${agentId}.json`));
+}
+
+/** Legacy mutable layout retained only as a digest-verified migration source. */
+export function legacyAgentCorpusPath(root: string, creatorId: string, agentId: string): string {
+  validateCorpusIdentity(creatorId, agentId);
+  return containedStorePath(root, path.join(creatorId, agentId));
+}
+
+/** Resolves current or explicitly pinned immutable Agent Corpus releases. */
 export class AgentCorpusResolver {
   constructor(private readonly root: string) {}
 
@@ -138,6 +164,26 @@ export class AgentCorpusResolver {
       }
     }
     return agents;
+  }
+
+  private async currentDigest(creatorId: string, agentId: string): Promise<string | undefined> {
+    const pointerPath = currentAgentCorpusPointerPath(this.root, creatorId, agentId);
+    let raw: unknown;
+    try {
+      raw = JSON.parse(await readFile(pointerPath, "utf8"));
+    } catch (error) {
+      if (isMissingPath(error)) return undefined;
+      throw new Error(`Agent Corpus current pointer is invalid: ${String(error)}`);
+    }
+    const parsed = z.object({
+      schema_version: z.literal(1),
+      creator_id: z.literal(creatorId),
+      agent_id: z.literal(agentId),
+      corpus_digest: DigestSchema,
+      activated_at: z.string().datetime()
+    }).strict().safeParse(raw);
+    if (!parsed.success) throw new Error(`Agent Corpus current pointer is invalid: ${creatorId}/${agentId}`);
+    return parsed.data.corpus_digest;
   }
 }
 

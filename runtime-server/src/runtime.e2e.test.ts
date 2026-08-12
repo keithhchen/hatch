@@ -194,6 +194,22 @@ test("Conversation API schema declares durable cursor, idempotency, and interrup
   assert.equal(schema.$defs.cursor.minimum, 0);
 });
 
+test("Conversation API schema declares durable cursor, idempotency, and interrupted recovery state", async () => {
+  const schemaPath = path.resolve("..", "packages", "protocol", "schemas", "hatch-conversation-api-v1.schema.json");
+  const schema = JSON.parse(await readFile(schemaPath, "utf8")) as {
+    $id: string;
+    $defs: {
+      runStatus: { enum: string[] };
+      createRunRequest: { required: string[] };
+      cursor: { minimum: number };
+    };
+  };
+  assert.equal(schema.$id, "https://hatch.dev/protocol/hatch-conversation-api-v1.schema.json");
+  assert.ok(schema.$defs.runStatus.enum.includes("interrupted"));
+  assert.deepEqual(schema.$defs.createRunRequest.required, ["client_message_id"]);
+  assert.equal(schema.$defs.cursor.minimum, 0);
+});
+
 test("Desktop write approval window is long enough for a deliberate user decision", () => {
   assert.equal(clientToolTimeoutMs(undefined), 300_000);
   assert.equal(clientToolTimeoutMs("900000"), 900_000);

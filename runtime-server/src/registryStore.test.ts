@@ -34,6 +34,7 @@ function bundle(
     contract_version: "1",
     agent_id: "signal-review",
     creator: { id: "maya-chen", name: "Maya Chen" },
+    ...(backwardCompatibleWith ? { release: { backward_compatible_with: backwardCompatibleWith } } : {}),
     product: {
       id: "signal-review",
       name: agentName,
@@ -95,7 +96,8 @@ test("TypeScript Registry publishes a clean Corpus and indexes knowledge only", 
   assert.deepEqual(restoredCorpus?.product_boundaries, ["Does not invent evidence."]);
   assert.deepEqual(restoredCorpus?.product_offer, { model: "per_delivery", amount_minor: 0, currency: "USD", unit: "review" });
   assert.deepEqual(restoredCorpus?.presentation, { accent: "fern" });
-  const grant = await restored.grantAgentAccess("buyer-one", "maya-chen", "signal-review", "order-one");
+  const grant = await restored.grantAgentAccess("buyer-one", "maya-chen", "signal-review", "order-one", "entitlement-one", published.corpus_digest);
+  assert.equal(grant.entitlement_id, "entitlement-one");
   assert.equal(grant.order_id, "order-one");
   await assert.rejects(
     restored.grantAgentAccess("buyer-missing-order", "maya-chen", "signal-review", ""),
@@ -111,6 +113,271 @@ test("TypeScript Registry publishes a clean Corpus and indexes knowledge only", 
   assert.equal((await reopened.listAgentAccess("buyer-concurrent"))[0]?.entitlement_id, concurrent[0].entitlement_id);
   const installed = await readFile(path.join(root, "corpora/maya-chen/signal-review/knowledge/cases.md"), "utf8");
   assert.match(installed, /Long reference material/);
+});
+
+test("legacy access without an order and immutable purchase digest is explicitly isolated", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-ts-registry-legacy-access-"));
+  const statePath = path.join(root, "registry.json");
+  await writeFile(statePath, JSON.stringify({
+    schema_version: 1,
+    agent_corpora: [],
+    agent_access: [{
+      entitlement_id: "legacy-lifetime-access",
+      user_id: "legacy-buyer",
+      creator_id: "legacy-creator",
+      agent_id: "legacy-agent",
+      product_id: "legacy-product",
+      status: "active",
+      granted_at: "2025-01-01T00:00:00.000Z"
+    }],
+    creator_tool_connections: []
+  }));
+
+  const store = await RegistryStoreTs.open({
+    corpusRoot: path.join(root, "corpora"),
+    statePath,
+    environment: {}
+  });
+
+  assert.deepEqual(store.listAgentAccess("legacy-buyer"), []);
+  await store.close();
+});
+
+test("Registry accepts only immutable same-agent compatibility predecessors", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-ts-registry-compatible-"));
+  const indexer = { replaceAgentDocuments: async () => {} };
+  const store = await RegistryStoreTs.open({
+    corpusRoot: path.join(root, "corpora"),
+    statePath: path.join(root, "registry.json"),
+    indexer: indexer as never,
+    environment: {}
+  });
+  const first = await store.publishAgentCorpusBundle("maya-chen", "signal-review", bundle("Signal Review V1"));
+  const compatible = await store.publishAgentCorpusBundle(
+    "maya-chen",
+    "signal-review",
+    bundle("Signal Review V2", first.corpus_digest)
+  );
+  assert.equal(compatible.backward_compatible_with, first.corpus_digest);
+  const resolved = await new AgentCorpusResolver(path.join(root, "corpora")).resolve(
+    "maya-chen",
+    "signal-review",
+    compatible.corpus_digest
+  );
+  assert.equal(resolved.corpus.release?.backward_compatible_with, first.corpus_digest);
+  const trackedGrant = await store.grantAgentAccess(
+    "buyer-compatible",
+    "maya-chen",
+    "signal-review",
+    "order-compatible",
+    "entitlement-compatible",
+    first.corpus_digest,
+    "track_current_compatible"
+  );
+  assert.equal(trackedGrant.version_policy, "track_current_compatible");
+  assert.equal(trackedGrant.effective_corpus_digest, first.corpus_digest);
+  assert.deepEqual(trackedGrant.version_history, []);
+  await assert.rejects(
+    store.publishAgentCorpusBundle(
+      "maya-chen",
+      "signal-review",
+      bundle("Signal Review invalid", `sha256:${"f".repeat(64)}`)
+    ),
+    /immutable release for the same creator and agent/
+  );
+});
+
+test("Registry stages Factory candidates without changing current and activates them with CAS", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-ts-registry-stage-cas-"));
+  const corpusRoot = path.join(root, "corpora");
+  const statePath = path.join(root, "registry.json");
+  const indexer = { replaceAgentDocuments: async () => {} };
+  const store = await RegistryStoreTs.open({ corpusRoot, statePath, indexer: indexer as never, environment: {} });
+  const resolver = new AgentCorpusResolver(corpusRoot);
+
+  const first = await store.stageAgentCorpusBundle("maya-chen", "signal-review", bundle("Signal Review staged V1"));
+  assert.equal(store.getAgentCorpus("maya-chen", "signal-review"), undefined);
+  const exactStaged = await store.getAgentCorpusRelease("maya-chen", "signal-review", first.corpus_digest);
+  assert.equal(exactStaged?.corpus_digest, first.corpus_digest);
+  assert.equal(exactStaged?.product_name, "Signal Review staged V1");
+  assert.equal(store.getAgentCorpus("maya-chen", "signal-review"), undefined, "an exact release read must not activate it");
+  assert.equal(
+    await store.getAgentCorpusRelease("maya-chen", "another-agent", first.corpus_digest),
+    undefined,
+    "the exact release authority is scoped to creator and agent"
+  );
+  await assert.rejects(resolver.resolve("maya-chen", "signal-review"), /ENOENT|not materialized/);
+  assert.equal(
+    (await resolver.resolve("maya-chen", "signal-review", first.corpus_digest)).digest,
+    first.corpus_digest,
+    "stage must durably materialize the immutable release"
+  );
+
+  const activatedFirst = await store.activateAgentCorpusRelease(
+    "maya-chen",
+    "signal-review",
+    first.corpus_digest,
+    { operationId: "deploy-first", expectedCurrentDigest: null }
+  );
+  assert.equal(activatedFirst.corpus_digest, first.corpus_digest);
+  assert.equal((await resolver.resolve("maya-chen", "signal-review")).digest, first.corpus_digest);
+
+  const second = await store.stageAgentCorpusBundle("maya-chen", "signal-review", bundle("Signal Review staged V2", first.corpus_digest));
+  const exactSecond = await store.getAgentCorpusRelease("maya-chen", "signal-review", second.corpus_digest);
+  assert.equal(exactSecond?.backward_compatible_with, first.corpus_digest);
+  assert.equal(
+    (await resolver.resolve("maya-chen", "signal-review")).digest,
+    first.corpus_digest,
+    "a later stage must not move the serving pointer"
+  );
+  await assert.rejects(
+    store.activateAgentCorpusRelease(
+      "maya-chen",
+      "signal-review",
+      second.corpus_digest,
+      { operationId: "deploy-stale", expectedCurrentDigest: null }
+    ),
+    (error: unknown) => error instanceof RegistryDeploymentConflictError
+      && error.expectedCurrentDigest === null
+      && error.currentCorpusDigest === first.corpus_digest
+  );
+
+  const activatedSecond = await store.activateAgentCorpusRelease(
+    "maya-chen",
+    "signal-review",
+    second.corpus_digest,
+    { operationId: "deploy-second", expectedCurrentDigest: first.corpus_digest }
+  );
+  const replay = await store.activateAgentCorpusRelease(
+    "maya-chen",
+    "signal-review",
+    second.corpus_digest,
+    { operationId: "deploy-second", expectedCurrentDigest: first.corpus_digest }
+  );
+  assert.deepEqual(replay, activatedSecond, "target-current is an idempotent replay even after CAS has advanced");
+  assert.equal((await resolver.resolve("maya-chen", "signal-review")).digest, second.corpus_digest);
+});
+
+test("Factory directory stage and publish reject a replaced candidate before any side effect", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-ts-registry-factory-digest-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const indexCalls: unknown[] = [];
+  const indexer = { replaceAgentDocuments: async (...args: unknown[]) => { indexCalls.push(args); } };
+  const corpusRoot = path.join(root, "corpora");
+  const store = await RegistryStoreTs.open({
+    corpusRoot,
+    statePath: path.join(root, "registry.json"),
+    indexer: indexer as never,
+    environment: {}
+  });
+
+  for (const operation of ["stage", "publish"] as const) {
+    const source = path.join(root, `${operation}-candidate`);
+    await extractAgentCorpusBundle(bundle(`Approved ${operation}`), source);
+    const approved = await verifyAgentCorpus(source, "maya-chen", "signal-review");
+
+    // Simulate replacement after Factory returned its ready DB digest but
+    // before Registry re-read the hand-off directory.
+    await rm(source, { recursive: true, force: true });
+    await extractAgentCorpusBundle(bundle(`Replaced ${operation}`), source);
+    const replacement = await verifyAgentCorpus(source, "maya-chen", "signal-review");
+    assert.notEqual(replacement.digest, approved.digest);
+
+    await assert.rejects(
+      operation === "stage"
+        ? store.stageAgentCorpusDirectory(
+            "maya-chen",
+            "signal-review",
+            source,
+            approved.digest,
+          )
+        : store.publishAgentCorpusDirectory(
+            "maya-chen",
+            "signal-review",
+            source,
+            approved.digest,
+          ),
+      (error: unknown) => error instanceof RegistryFactoryCandidateChangedError
+        && error.expectedCorpusDigest === approved.digest
+        && error.currentCorpusDigest === replacement.digest
+    );
+
+    assert.equal(indexCalls.length, 0, `${operation} must not index a changed candidate`);
+    assert.equal(store.getAgentCorpus("maya-chen", "signal-review"), undefined);
+    assert.equal(await store.getAgentCorpusRelease("maya-chen", "signal-review", approved.digest), undefined);
+    assert.equal(await store.getAgentCorpusRelease("maya-chen", "signal-review", replacement.digest), undefined);
+  }
+
+  assert.deepEqual(await store.listAllAgentCorpora(), []);
+  await assert.rejects(
+    new AgentCorpusResolver(corpusRoot).resolve("maya-chen", "signal-review"),
+    /ENOENT|not materialized/
+  );
+});
+
+test("Registry serializes competing CAS activations and only one target wins", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-ts-registry-cas-race-"));
+  const corpusRoot = path.join(root, "corpora");
+  const indexer = { replaceAgentDocuments: async () => {} };
+  const store = await RegistryStoreTs.open({
+    corpusRoot,
+    statePath: path.join(root, "registry.json"),
+    indexer: indexer as never,
+    environment: {}
+  });
+  const first = await store.stageAgentCorpusBundle("maya-chen", "signal-review", bundle("Signal Review race V1"));
+  await store.activateAgentCorpusRelease("maya-chen", "signal-review", first.corpus_digest, {
+    operationId: "race-initial",
+    expectedCurrentDigest: null
+  });
+  const second = await store.stageAgentCorpusBundle("maya-chen", "signal-review", bundle("Signal Review race V2", first.corpus_digest));
+  const third = await store.stageAgentCorpusBundle("maya-chen", "signal-review", bundle("Signal Review race V3", first.corpus_digest));
+  const attempts = await Promise.allSettled([
+    store.activateAgentCorpusRelease("maya-chen", "signal-review", second.corpus_digest, {
+      operationId: "race-second",
+      expectedCurrentDigest: first.corpus_digest
+    }),
+    store.activateAgentCorpusRelease("maya-chen", "signal-review", third.corpus_digest, {
+      operationId: "race-third",
+      expectedCurrentDigest: first.corpus_digest
+    })
+  ]);
+  assert.equal(attempts.filter((attempt) => attempt.status === "fulfilled").length, 1);
+  const rejection = attempts.find((attempt) => attempt.status === "rejected");
+  assert.ok(rejection?.status === "rejected" && rejection.reason instanceof RegistryDeploymentConflictError);
+  const current = store.getAgentCorpus("maya-chen", "signal-review");
+  assert.ok(current?.corpus_digest === second.corpus_digest || current?.corpus_digest === third.corpus_digest);
+  assert.equal((await new AgentCorpusResolver(corpusRoot).resolve("maya-chen", "signal-review")).digest, current?.corpus_digest);
+});
+
+test("Registry open repairs a stale filesystem pointer from durable current metadata", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-ts-registry-pointer-repair-"));
+  const corpusRoot = path.join(root, "corpora");
+  const statePath = path.join(root, "registry.json");
+  const indexer = { replaceAgentDocuments: async () => {} };
+  const store = await RegistryStoreTs.open({ corpusRoot, statePath, indexer: indexer as never, environment: {} });
+  const first = await store.publishAgentCorpusBundle("maya-chen", "signal-review", bundle("Signal Review repair V1"));
+  const second = await store.stageAgentCorpusBundle("maya-chen", "signal-review", bundle("Signal Review repair V2", first.corpus_digest));
+  await store.activateAgentCorpusRelease("maya-chen", "signal-review", second.corpus_digest, {
+    operationId: "repair-second",
+    expectedCurrentDigest: first.corpus_digest
+  });
+
+  // This is the on-disk shape of a process dying after metadata commit but
+  // before the final pointer replacement: durable metadata says V2 while the
+  // old V1 pointer remains.
+  await writeFile(currentAgentCorpusPointerPath(corpusRoot, "maya-chen", "signal-review"), JSON.stringify({
+    schema_version: 1,
+    creator_id: "maya-chen",
+    agent_id: "signal-review",
+    corpus_digest: first.corpus_digest,
+    activated_at: new Date(0).toISOString()
+  }) + "\n", "utf8");
+  assert.equal((await new AgentCorpusResolver(corpusRoot).resolve("maya-chen", "signal-review")).digest, first.corpus_digest);
+
+  const reopened = await RegistryStoreTs.open({ corpusRoot, statePath, indexer: indexer as never, environment: {} });
+  assert.equal(reopened.getAgentCorpus("maya-chen", "signal-review")?.corpus_digest, second.corpus_digest);
+  assert.equal((await new AgentCorpusResolver(corpusRoot).resolve("maya-chen", "signal-review")).digest, second.corpus_digest);
 });
 
 test("TypeScript Registry requires Qdrant when a Corpus contains knowledge", async () => {

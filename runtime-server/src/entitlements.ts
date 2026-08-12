@@ -20,10 +20,14 @@ export interface AuthIdentityResolver {
 
 const EntitlementCommonSchema = z.object({
   entitlement_id: z.string().min(1),
-  order_id: z.string().min(1).optional(),
+  order_id: z.string().min(1),
   user_id: z.string().min(1),
   creator_id: z.string().min(1),
   product_id: z.string().min(1),
+  purchased_corpus_digest: CorpusDigestSchema,
+  effective_corpus_digest: CorpusDigestSchema.optional(),
+  version_policy: z.enum(["pinned", "track_current_compatible"]).default("pinned"),
+  version_history: EntitlementVersionHistorySchema.default([]),
   status: z.literal("active")
 }).strict();
 
@@ -39,10 +43,14 @@ export const EntitlementBindingSchema = AgentCorpusEntitlementBindingSchema;
 // commerce adapter. The schema above remains the runtime authority.
 export type EntitlementBinding = {
   entitlement_id: string;
-  order_id?: string;
+  order_id: string;
   user_id: string;
   creator_id: string;
   product_id: string;
+  purchased_corpus_digest: string;
+  effective_corpus_digest?: string;
+  version_policy?: "pinned" | "track_current_compatible";
+  version_history?: EntitlementVersionHistory[];
   status: "active";
   agent_id: string;
 };
@@ -57,6 +65,17 @@ export type EntitlementLookup = {
   entitlementId?: string;
   installationId?: string;
   signal?: AbortSignal;
+};
+
+export type EntitlementVersionHistory = {
+  from_digest: string;
+  to_digest: string;
+  from_release_id?: string | null;
+  to_release_id?: string | null;
+  compatibility_declaration_id?: string | null;
+  reason?: string | null;
+  actor_id?: string | null;
+  advanced_at?: string;
 };
 
 export interface EntitlementResolver {
@@ -91,12 +110,12 @@ export class FileEntitlementResolver implements EntitlementResolver {
     if (claims) {
       return registry
         .filter((entry) => claims.role === "user" && entry.user_id === claims.sub)
-        .map(({ license_token: _licenseToken, ...binding }) => binding);
+        .map(({ license_token: _licenseToken, ...binding }) => normalizeBinding(binding));
     }
     if (!input.licenseToken) return [];
     return registry
       .filter((entry) => entry.license_token === input.licenseToken)
-      .map(({ license_token: _licenseToken, ...binding }) => binding);
+      .map(({ license_token: _licenseToken, ...binding }) => normalizeBinding(binding));
   }
 
   async resolve(input: EntitlementLookup & { entitlementId: string }): Promise<EntitlementBinding> {
@@ -295,4 +314,16 @@ export class EntitlementError extends Error {
     super(message);
     this.name = "EntitlementError";
   }
+}
+
+function normalizeBinding<T extends EntitlementBinding>(binding: T): T & Required<Pick<
+  EntitlementBinding,
+  "effective_corpus_digest" | "version_policy" | "version_history"
+>> {
+  return {
+    ...binding,
+    effective_corpus_digest: binding.effective_corpus_digest ?? binding.purchased_corpus_digest,
+    version_policy: binding.version_policy ?? "pinned",
+    version_history: binding.version_history ?? []
+  };
 }

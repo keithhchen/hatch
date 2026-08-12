@@ -42,10 +42,12 @@ test("Registry entitlement resolver strips registry bookkeeping fields", async (
     "https://registry.example.test",
     async () => new Response(JSON.stringify([{
       entitlement_id: "ent_demo",
+      order_id: "order_demo",
       user_id: "user_demo",
       creator_id: "creator_demo",
       agent_id: "agent_demo",
       product_id: "product_demo",
+      purchased_corpus_digest: `sha256:${"a".repeat(64)}`,
       status: "active",
       granted_at: "2026-08-02T15:00:00.000Z",
     }]), { status: 200, headers: { "content-type": "application/json" } }),
@@ -54,10 +56,15 @@ test("Registry entitlement resolver strips registry bookkeeping fields", async (
   const [binding] = await resolver.list({ authToken: "signed-user-token" });
   assert.deepEqual(binding, {
     entitlement_id: "ent_demo",
+    order_id: "order_demo",
     user_id: "user_demo",
     creator_id: "creator_demo",
     agent_id: "agent_demo",
     product_id: "product_demo",
+    purchased_corpus_digest: `sha256:${"a".repeat(64)}`,
+    effective_corpus_digest: `sha256:${"a".repeat(64)}`,
+    version_policy: "pinned",
+    version_history: [],
     status: "active",
   });
 });
