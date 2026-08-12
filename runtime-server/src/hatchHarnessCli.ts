@@ -11,6 +11,7 @@ import { FileConversationRepository } from "./conversationRepository.js";
 import type { EntitlementBinding, EntitlementLookup, EntitlementResolver } from "./entitlements.js";
 import { createRuntimeServer, type RuntimeServer } from "./index.js";
 import { createOutputGuardFromEnvironment } from "./outputGuard.js";
+import { PROTOCOL_VERSION } from "./protocol.js";
 import { installCurrentCorpus, verifyAgentCorpus } from "./registryCorpus.js";
 import { RuntimeStore } from "./store.js";
 
@@ -167,7 +168,7 @@ async function executeOneTurn(
     socket.once("open", () => {
       socket.send(JSON.stringify({
         type: "client.hello",
-        protocol_version: "0.4",
+        protocol_version: PROTOCOL_VERSION,
         installation_id: installationId,
         license_token: "factory-harness-local",
         entitlement_id: "factory-harness-entitlement",
