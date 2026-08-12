@@ -191,6 +191,7 @@ const DEFAULT_AUTH_URL = import.meta.env.VITE_HATCH_AUTH_URL || "https://hatch.t
 const BROWSE_CATALOG_URL = import.meta.env.VITE_HATCH_CATALOG_URL || "https://hatch.tokenquadrant.cn/agents";
 const EMPTY_PROFILE = Object.freeze({ id: "anonymous", name: "User", initials: "U" });
 const DEFAULT_PERMISSION_MODE = DEFAULT_PERMISSION_POLICY;
+const MAX_AUTOMATIC_RUNTIME_RETRIES = 4;
 const ApprovalContext = createContext(null);
 const NativeContextMenuContext = createContext(null);
 
@@ -400,6 +401,7 @@ function App() {
   const [renameDraft, setRenameDraft] = useState("");
   const [status, setStatus] = useState("Offline");
   const [connected, setConnected] = useState(false);
+  const [runtimeRetryExhausted, setRuntimeRetryExhausted] = useState(false);
   const [chatLoading, setChatLoading] = useState(false);
   const [running, setRunning] = useState(false);
   const [messages, setMessages] = useState([]);
@@ -1692,6 +1694,12 @@ function App() {
   function scheduleRuntimeReconnect() {
     if (intentionalDisconnectRef.current || reconnectTimerRef.current || !connectionConfigRef.current) return;
     const attempt = reconnectAttemptRef.current;
+    if (attempt >= MAX_AUTOMATIC_RUNTIME_RETRIES) {
+      setRuntimeRetryExhausted(true);
+      setChatLoading(false);
+      setStatus("Connection unavailable. Retry when you are ready.");
+      return;
+    }
     const delay = Math.min(10_000, 800 * 2 ** Math.min(attempt, 4));
     reconnectAttemptRef.current += 1;
     reconnectTimerRef.current = window.setTimeout(() => {
@@ -1713,6 +1721,7 @@ function App() {
     window.clearTimeout(reconnectTimerRef.current);
     reconnectTimerRef.current = null;
     reconnectAttemptRef.current = 0;
+    setRuntimeRetryExhausted(false);
     connectionTokenRef.current += 1;
     intentionalDisconnectRef.current = true;
     const staleSocket = socketRef.current;
@@ -1837,6 +1846,7 @@ function App() {
     const requestToken = ++connectionTokenRef.current;
     connectingRef.current = true;
     intentionalDisconnectRef.current = false;
+    setRuntimeRetryExhausted(false);
     setChatLoading(true);
     setStatus("Connecting…");
     connectionConfigRef.current = {
@@ -2048,6 +2058,7 @@ function App() {
     socket?.close();
     connectedRef.current = false;
     setConnected(false);
+    setRuntimeRetryExhausted(false);
     setChatLoading(false);
     setRunning(false);
     setStatus(activeRunRef.current ? "Task paused — your work has been kept" : "Offline");
@@ -2066,6 +2077,7 @@ function App() {
       ));
       connectedRef.current = true;
       reconnectAttemptRef.current = 0;
+      setRuntimeRetryExhausted(false);
       setConnected(true);
       setChatLoading(false);
       setStatus("Connected");
@@ -3277,11 +3289,10 @@ function App() {
       toolbar={(
         <DesktopConversationToolbar
           creatorAgent={creatorAgent}
-          connected={conversationReady}
-          conversationLibraryStatus={conversationLibraryStatus}
+          connected={connected}
           conversationLibraryReady={conversationLibraryStatus === "ready"}
           workspaceGranted={workspaceGranted}
-          status={status}
+          retryExhausted={runtimeRetryExhausted}
           onRetry={retryRuntimeConnection}
         />
       )}
@@ -3660,13 +3671,8 @@ function DesktopConnectionStatus({ state = "offline", compact = false }) {
   );
 }
 
-function DesktopConversationToolbar({ creatorAgent, connected, conversationLibraryStatus, conversationLibraryReady, workspaceGranted, status, onRetry }) {
-  const connecting = /connecting|loading history|restoring|preparing/i.test(String(status || ""));
-  const connectionState = connected
-    ? "connected"
-    : (workspaceGranted && (conversationLibraryStatus === "loading" || conversationLibraryStatus === "idle")) || connecting
-      ? "connecting"
-      : "offline";
+function DesktopConversationToolbar({ creatorAgent, connected, conversationLibraryReady, workspaceGranted, retryExhausted, onRetry }) {
+  const showRetry = Boolean(workspaceGranted && conversationLibraryReady && !connected && retryExhausted);
   const creatorName = String(creatorAgent?.creator || "").trim() || "Creator";
   const agentName = String(creatorAgent?.name || "").trim() || "Agent";
   const title = creatorAgentContextTitle(creatorAgent);
@@ -3681,20 +3687,16 @@ function DesktopConversationToolbar({ creatorAgent, connected, conversationLibra
         <span className="desktop-toolbar-context-divider" aria-hidden="true">|</span>
         <span className="desktop-toolbar-agent-name">{agentName}</span>
       </div>
-      <DesktopConnectionStatus state={connectionState} />
-      {workspaceGranted && conversationLibraryReady && !connected ? (
+      {showRetry ? (
         <button
-          aria-busy={connecting || undefined}
-          aria-label={connecting ? "Connecting" : "Reconnect"}
-          className="chrome-icon-button desktop-connection-action"
-          disabled={connecting}
-          title={connecting ? "Connecting" : "Reconnect"}
+          aria-label="Retry connection"
+          className="chrome-icon-button desktop-connection-action desktop-connection-retry-button"
+          title="Retry connection"
           type="button"
           onClick={onRetry}
         >
-          {connecting
-            ? <LoaderCircle className="connection-spinner" aria-hidden="true" />
-            : <RefreshCw aria-hidden="true" />}
+          <RefreshCw aria-hidden="true" />
+          <span>Retry</span>
         </button>
       ) : null}
     </>

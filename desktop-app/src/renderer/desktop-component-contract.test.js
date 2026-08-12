@@ -42,6 +42,14 @@ describe("desktop component presentation contract", () => {
     expect(source).toContain("setChatLoading(true)");
   });
 
+  it("keeps connection recovery quiet until bounded retries are exhausted", () => {
+    expect(source).toContain("MAX_AUTOMATIC_RUNTIME_RETRIES");
+    expect(source).toContain("setRuntimeRetryExhausted(true)");
+    expect(source).toContain('className="chrome-icon-button desktop-connection-action desktop-connection-retry-button"');
+    expect(source).toContain('aria-label="Retry connection"');
+    expect(source).not.toContain("<DesktopConnectionStatus state={connectionState}");
+  });
+
   it("exposes language selection in the native Settings window", () => {
     expect(source).toContain("function AuxiliaryLanguageSettings()");
     expect(source).toContain('settingsStoreRef.current.setApp("language", next)');

@@ -102,4 +102,10 @@ describe("desktop system appearance contract", () => {
     expect(stylesheet).toMatch(/\.approval-gate\s*\{/);
     expect(stylesheet).not.toMatch(/\.composer-approval-banner\s*\{/);
   });
+
+  it("keeps the manual connection retry compact and visible", () => {
+    expect(stylesheet).toMatch(
+      /\.desktop-connection-retry-button\s*\{[\s\S]*?flex:\s*0 0 auto;[\s\S]*?width:\s*auto;/
+    );
+  });
 });

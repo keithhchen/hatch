@@ -1899,6 +1899,18 @@ button.composer-control:focus-visible {
 
 .desktop-connection-action { color: #8a6728; }
 
+.desktop-connection-retry-button {
+  flex: 0 0 auto;
+  gap: 5px;
+  padding: 0 8px;
+  width: auto;
+}
+
+.desktop-connection-retry-button svg {
+  height: 14px;
+  width: 14px;
+}
+
 .connection-spinner { animation: connection-spin .9s linear infinite; }
 
 .desktop-connection-status {
