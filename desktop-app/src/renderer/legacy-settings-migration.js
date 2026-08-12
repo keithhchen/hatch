@@ -1,6 +1,14 @@
 import { PERMISSION_POLICIES } from "./product-policy.js";
+import { englishMessage } from "./i18n.js";
 
 export const LEGACY_SETTINGS_IMPORT_MARKER = "legacy_web_storage_import_v1";
+
+const MIGRATION_STATUS_KEYS = Object.freeze({
+  "not-available": "migration.status.notAvailable",
+  "already-imported": "migration.status.alreadyImported",
+  completed: "migration.status.completed",
+  "nothing-to-import": "migration.status.nothingToImport"
+});
 
 const LEGACY_FIELDS = Object.freeze([
   Object.freeze({ legacy: "permissionMode", native: "permission_mode", validate: validPermission }),
@@ -14,14 +22,14 @@ const LEGACY_AUTH_PROFILE_PREFIX = "hatch.auth.profile.";
 
 export async function importLegacyProfileSettings({ profileId, legacyStorage, settingsStore }) {
   if (!profileId || !legacyStorage || !settingsStore?.importProfile) {
-    return { status: "not-available", notice: "" };
+    return migrationResult("not-available");
   }
   // Secret cleanup is independent from preference migration. Never copy or
   // parse legacy auth payloads; remove every known key even if native settings
   // persistence later fails.
   purgeLegacySensitiveStorage(legacyStorage);
   if (settingsStore.getProfile(profileId, LEGACY_SETTINGS_IMPORT_MARKER, false)) {
-    return { status: "already-imported", notice: "" };
+    return migrationResult("already-imported");
   }
 
   const imported = {};
@@ -47,20 +55,25 @@ export async function importLegacyProfileSettings({ profileId, legacyStorage, se
     resetKeys.push(field);
   }
 
-  await settingsStore.importProfile(profileId, {
-    ...imported,
-    [LEGACY_SETTINGS_IMPORT_MARKER]: true
-  });
+  try {
+    await settingsStore.importProfile(profileId, {
+      ...imported,
+      [LEGACY_SETTINGS_IMPORT_MARKER]: true
+    });
+  } catch (error) {
+    throw annotateError(error, "error.migration.importFailed");
+  }
   for (const key of removableKeys) legacyStorage.removeItem(key);
 
   const migrated = importedKeys.length > 0;
   const reset = resetKeys.length > 0;
-  return {
-    status: migrated || reset ? "completed" : "nothing-to-import",
+  const status = migrated || reset ? "completed" : "nothing-to-import";
+  return migrationResult(status, {
     importedKeys,
     resetKeys,
-    notice: migrationNotice({ migrated, reset })
-  };
+    notice: migrationNotice({ migrated, reset }),
+    noticeKey: migrationNoticeKey({ migrated, reset })
+  });
 }
 
 export function legacyProfileStorageKey(profileId, field) {
@@ -95,9 +108,32 @@ function validConversationId(value) {
 
 function migrationNotice({ migrated, reset }) {
   if (migrated && reset) {
-    return "Previous Desktop preferences were moved to Hatch app storage. An unfinished task or invalid legacy value was safely reset.";
+    return englishMessage("migration.notice.importedAndReset");
   }
-  if (migrated) return "Previous Desktop preferences were moved to Hatch app storage.";
-  if (reset) return "An unfinished task or invalid legacy setting was safely reset. Choose a workspace again if needed.";
+  if (migrated) return englishMessage("migration.notice.imported");
+  if (reset) return englishMessage("migration.notice.reset");
   return "";
+}
+
+function migrationNoticeKey({ migrated, reset }) {
+  if (migrated && reset) return "migration.notice.importedAndReset";
+  if (migrated) return "migration.notice.imported";
+  if (reset) return "migration.notice.reset";
+  return "";
+}
+
+function migrationResult(status, values = {}) {
+  return {
+    status,
+    statusKey: MIGRATION_STATUS_KEYS[status],
+    notice: "",
+    noticeKey: "",
+    ...values
+  };
+}
+
+function annotateError(error, i18nKey) {
+  if (!error || typeof error !== "object") return error;
+  error.i18nKey = i18nKey;
+  return error;
 }

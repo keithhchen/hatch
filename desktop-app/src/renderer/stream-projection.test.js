@@ -1,6 +1,11 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { projectApprovedRuntimeStream, summarizeTurnTiming } from "./stream-projection.js";
+import {
+  EMPTY_ASSISTANT_RESPONSE,
+  EMPTY_ASSISTANT_RESPONSE_KEY,
+  projectApprovedRuntimeStream,
+  summarizeTurnTiming
+} from "./stream-projection.js";
 
 describe("approved runtime stream projection", () => {
   it("projects an approved text delta synchronously without a paint or queue abstraction", async () => {
@@ -62,6 +67,23 @@ describe("approved runtime stream projection", () => {
       finishReason: "stop",
       completedAt: 160
     });
+  });
+
+  it("exports a stable localization key for the unchanged empty-response fallback", () => {
+    const projection = projectApprovedRuntimeStream({
+      runId: "run_empty",
+      assistantId: "assistant_empty",
+      text: "",
+      timing: { questionSentAt: 100 }
+    }, {
+      type: "turn.completed",
+      run_id: "run_empty",
+      finish_reason: "stop"
+    }, 160);
+
+    expect(projection.text).toBe(EMPTY_ASSISTANT_RESPONSE);
+    expect(projection.textKey).toBe(EMPTY_ASSISTANT_RESPONSE_KEY);
+    expect(EMPTY_ASSISTANT_RESPONSE_KEY).toBe("conversation.emptyResponse");
   });
 
   it("reports honest update-queued timing and never emits the former paint metric", () => {

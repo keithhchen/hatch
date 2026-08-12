@@ -3,27 +3,25 @@ import {
   DEFAULT_CREATOR_AGENT,
   ADVERTISED_LOCAL_TOOLS,
   CHANGE_TOOLS,
+  CONVERSATION_GUARD_REASONS,
   DEFAULT_PERMISSION_POLICY,
   PERMISSION_OPTIONS,
   PERMISSION_POLICIES,
   PLATFORM_LOCAL_TOOLS,
-  PRODUCT_COPY,
   READ_TOOLS,
   SHELL_TOOLS,
   creatorAgentFromSession,
   canStartConversation,
   normalizePermissionPolicy,
-  permissionPolicyDetail,
-  permissionPolicyLabel,
   requiresUserApproval,
   shouldRequestDesktopApproval
 } from "./product-policy.js";
 
 describe("consumer product contract", () => {
-  it("uses generic agent-home copy while presenting the demo creator", () => {
-    expect(PRODUCT_COPY.home).toBe("Your agents");
-    expect(DEFAULT_CREATOR_AGENT.name).toBe("Creator Agent");
-    expect(PRODUCT_COPY.workspaceRequired).toMatch(/workspace/i);
+  it("keeps fallback agent metadata free of embedded UI copy", () => {
+    expect(DEFAULT_CREATOR_AGENT.id).toBe("creator-agent");
+    expect(DEFAULT_CREATOR_AGENT.name).toBe("");
+    expect(DEFAULT_CREATOR_AGENT.description).toBe("");
   });
 
   it("renders Creator identity from public Release metadata", () => {
@@ -72,14 +70,19 @@ describe("consumer product contract", () => {
       .toBe(PERMISSION_POLICIES.ALLOW_CHANGES);
   });
 
-  it("uses precise change-policy labels without implying unrestricted access", () => {
-    expect(PERMISSION_OPTIONS.map((option) => option.label))
-      .toEqual(["Ask before changes", "Allow changes"]);
-    expect(permissionPolicyLabel(PERMISSION_POLICIES.ASK_BEFORE_CHANGES)).toBe("Ask before changes");
-    expect(permissionPolicyLabel(PERMISSION_POLICIES.ALLOW_CHANGES)).toBe("Allow changes");
-    expect(permissionPolicyDetail(PERMISSION_POLICIES.ALLOW_CHANGES)).toMatch(/file changes and shell commands/);
-    expect(PERMISSION_OPTIONS.map((option) => `${option.label} ${option.detail}`).join(" "))
-      .not.toMatch(/full access|完全访问/i);
+  it("keeps policy values separate from localized labels", () => {
+    expect(PERMISSION_OPTIONS).toEqual([
+      {
+        value: PERMISSION_POLICIES.ASK_BEFORE_CHANGES,
+        labelKey: "permission.askBeforeChanges",
+        detailKey: "permission.askBeforeChangesDetail"
+      },
+      {
+        value: PERMISSION_POLICIES.ALLOW_CHANGES,
+        labelKey: "permission.allowChanges",
+        detailKey: "permission.allowChangesDetail"
+      }
+    ]);
   });
 
   it("applies the selected changes policy to files and every shell command", () => {
@@ -93,7 +96,7 @@ describe("consumer product contract", () => {
 
   it("guards new conversations while a run remains active", () => {
     expect(canStartConversation({ activeRun: { runId: "run_1" }, connected: true }))
-      .toEqual({ allowed: false, reason: PRODUCT_COPY.activeRunGuard });
+      .toEqual({ allowed: false, reason: CONVERSATION_GUARD_REASONS.ACTIVE_RUN });
     expect(canStartConversation({ activeRun: null, connected: true }).allowed).toBe(true);
   });
 });

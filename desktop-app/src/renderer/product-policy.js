@@ -1,10 +1,10 @@
 export const DEFAULT_CREATOR_AGENT = Object.freeze({
   id: "creator-agent",
-  creator: "Creator",
-  creatorInitials: "C",
-  name: "Creator Agent",
-  description: "Work with this Creator Agent in your own files and context.",
-  boundary: "The Agent works within the scope defined by its Creator.",
+  creator: "",
+  creatorInitials: "",
+  name: "",
+  description: "",
+  boundary: "",
   presentation: {}
 });
 
@@ -16,7 +16,7 @@ export function creatorAgentFromSession(message) {
     creator: agent.creator.name,
     creatorInitials: initials(agent.creator.name),
     name: agent.product.name,
-    description: agent.product.description || "Work with this Creator Agent in your own files and context.",
+    description: agent.product.description || "",
     boundary: "",
     presentation: agent.presentation || {}
   });
@@ -27,13 +27,12 @@ export function creatorAgentFromEntitlement(entitlement) {
 }
 
 function initials(name) {
-  return String(name).trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() || "").join("") || "C";
+  return String(name).trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() || "").join("");
 }
 
-export const PRODUCT_COPY = Object.freeze({
-  home: "Your agents",
-  workspaceRequired: "Choose a workspace to continue",
-  activeRunGuard: "This task is still active. Stop or close it before starting another conversation."
+export const CONVERSATION_GUARD_REASONS = Object.freeze({
+  ACTIVE_RUN: "active-run",
+  CONNECTION_RESTORING: "connection-restoring"
 });
 
 export const READ_TOOLS = Object.freeze(["file_list", "file_search", "file_read", "git_diff"]);
@@ -58,13 +57,13 @@ export const PERMISSION_POLICIES = Object.freeze({
 export const PERMISSION_OPTIONS = Object.freeze([
   Object.freeze({
     value: PERMISSION_POLICIES.ASK_BEFORE_CHANGES,
-    label: "Ask before changes",
-    detail: "Ask before file changes and shell commands"
+    labelKey: "permission.askBeforeChanges",
+    detailKey: "permission.askBeforeChangesDetail"
   }),
   Object.freeze({
     value: PERMISSION_POLICIES.ALLOW_CHANGES,
-    label: "Allow changes",
-    detail: "Allow file changes and shell commands without asking"
+    labelKey: "permission.allowChanges",
+    detailKey: "permission.allowChangesDetail"
   })
 ]);
 
@@ -95,24 +94,14 @@ export function shouldRequestDesktopApproval(toolRequest, policy = DEFAULT_PERMI
   return requiresUserApproval(toolRequest?.name, policy);
 }
 
-export function permissionPolicyLabel(policy) {
-  return PERMISSION_OPTIONS.find((option) => option.value === policy)?.label
-    ?? PERMISSION_OPTIONS[0].label;
-}
-
-export function permissionPolicyDetail(policy) {
-  return PERMISSION_OPTIONS.find((option) => option.value === policy)?.detail
-    ?? PERMISSION_OPTIONS[0].detail;
-}
-
 export function canStartConversation({ activeRun, connected }) {
-  if (activeRun) return { allowed: false, reason: PRODUCT_COPY.activeRunGuard };
-  if (!connected) return { allowed: false, reason: "The connection is still restoring. Please wait a moment." };
+  if (activeRun) return { allowed: false, reason: CONVERSATION_GUARD_REASONS.ACTIVE_RUN };
+  if (!connected) return { allowed: false, reason: CONVERSATION_GUARD_REASONS.CONNECTION_RESTORING };
   return { allowed: true, reason: "" };
 }
 
 export function workspaceGrantLabel(path) {
-  if (!path) return "No folder granted";
+  if (!path) return "";
   const parts = path.replaceAll("\\", "/").split("/").filter(Boolean);
   return parts.at(-1) || path;
 }

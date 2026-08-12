@@ -165,11 +165,20 @@ fn ensure_workspace(
 }
 
 #[tauri::command]
-async fn pick_workspace_folder(app: AppHandle) -> Result<Option<WorkspaceGrantInfo>, String> {
-    let selected = rfd::AsyncFileDialog::new()
-        .set_title("Choose a workspace")
-        .pick_folder()
-        .await;
+async fn pick_workspace_folder(
+    app: AppHandle,
+    title: Option<String>,
+) -> Result<Option<WorkspaceGrantInfo>, String> {
+    let dialog = rfd::AsyncFileDialog::new();
+    let dialog = match title
+        .as_deref()
+        .map(str::trim)
+        .filter(|title| !title.is_empty())
+    {
+        Some(title) => dialog.set_title(title),
+        None => dialog,
+    };
+    let selected = dialog.pick_folder().await;
     let Some(handle) = selected else {
         return Ok(None);
     };
@@ -455,9 +464,73 @@ fn write_app_settings(app: AppHandle, settings: String) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(to_string)?;
     }
-    let temporary = path.with_extension("json.tmp");
-    std::fs::write(&temporary, settings.as_bytes()).map_err(to_string)?;
-    std::fs::rename(&temporary, &path).map_err(to_string)
+    write_settings_file(&path, settings.as_bytes()).map_err(to_string)
+}
+
+fn write_settings_file(path: &std::path::Path, settings: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("settings.json");
+    let temporary =
+        path.with_file_name(format!("{file_name}.{}.tmp", uuid::Uuid::new_v4().simple()));
+    let result = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temporary)?;
+        file.write_all(settings)?;
+        file.sync_all()?;
+        drop(file);
+        replace_file(&temporary, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
+}
+
+#[cfg(not(target_os = "windows"))]
+fn replace_file(source: &std::path::Path, destination: &std::path::Path) -> std::io::Result<()> {
+    std::fs::rename(source, destination)
+}
+
+#[cfg(target_os = "windows")]
+fn replace_file(source: &std::path::Path, destination: &std::path::Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let source = source
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let destination = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let moved = unsafe {
+        MoveFileExW(
+            source.as_ptr(),
+            destination.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if moved != 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[tauri::command]
+fn system_locale() -> Option<String> {
+    sys_locale::get_locale()
 }
 
 #[tauri::command]
@@ -793,6 +866,7 @@ pub fn run() {
             clear_auth_token,
             read_app_settings,
             write_app_settings,
+            system_locale,
             open_external_url,
             revoke_workspace_grant
         ])
@@ -806,7 +880,10 @@ fn to_string(error: impl std::fmt::Display) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{default_workspace, is_allowed_browse_url, validate_workspace_path};
+    use super::{
+        default_workspace, is_allowed_browse_url, replace_file, system_locale,
+        validate_workspace_path, write_settings_file,
+    };
     use serde_json::json;
     use std::sync::{atomic::AtomicBool, Arc};
     use tempfile::tempdir;
@@ -844,8 +921,56 @@ mod tests {
     }
 
     #[test]
+    fn settings_file_replacement_overwrites_an_existing_destination() {
+        let temp = tempdir().unwrap();
+        let source = temp.path().join("settings.json.tmp");
+        let destination = temp.path().join("settings.json");
+        std::fs::write(&source, br#"{"language":"ja"}"#).unwrap();
+        std::fs::write(&destination, br#"{"language":"en"}"#).unwrap();
+
+        replace_file(&source, &destination).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(destination).unwrap(),
+            r#"{"language":"ja"}"#
+        );
+        assert!(!source.exists());
+    }
+
+    #[test]
+    fn concurrent_settings_writes_use_independent_temporary_files() {
+        let temp = tempdir().unwrap();
+        let destination = temp.path().join("settings.json");
+        std::fs::write(&destination, br#"{"language":"system"}"#).unwrap();
+        let payloads =
+            ["en", "zh-CN", "ja"].map(|language| format!(r#"{{"language":"{language}"}}"#));
+        let handles = payloads.clone().map(|payload| {
+            let destination = destination.clone();
+            std::thread::spawn(move || write_settings_file(&destination, payload.as_bytes()))
+        });
+
+        for handle in handles {
+            handle.join().unwrap().unwrap();
+        }
+
+        let stored = std::fs::read_to_string(&destination).unwrap();
+        assert!(payloads.contains(&stored));
+        assert!(std::fs::read_dir(temp.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .all(|entry| !entry.file_name().to_string_lossy().ends_with(".tmp")));
+    }
+
+    #[test]
     fn startup_never_silently_grants_a_default_folder() {
         assert!(default_workspace().is_empty());
+    }
+
+    #[test]
+    fn native_system_locale_is_absent_or_non_empty() {
+        if let Some(locale) = system_locale() {
+            assert!(!locale.trim().is_empty());
+        }
     }
 
     #[cfg(unix)]

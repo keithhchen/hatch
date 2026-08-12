@@ -29,7 +29,11 @@
       "icons/icon.ico"
     ],
     "category": "Productivity",
-    "shortDescription": "Creator agents that work with your files, with your permission.",
+    "resources": {
+      "locales/en.lproj/InfoPlist.strings": "en.lproj/InfoPlist.strings",
+      "locales/zh-Hans.lproj/InfoPlist.strings": "zh-Hans.lproj/InfoPlist.strings",
+      "locales/ja.lproj/InfoPlist.strings": "ja.lproj/InfoPlist.strings"
+    },
     "macOS": {
       "infoPlist": "Info.plist"
     }
