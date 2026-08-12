@@ -226,10 +226,6 @@ export type RuntimeReady = {
   product_id: string;
   agent_id?: string;
   corpus_digest: string;
-  purchased_corpus_digest?: string;
-  effective_corpus_digest?: string;
-  version_policy?: "pinned" | "track_current_compatible";
-  version_history?: Array<Record<string, unknown>>;
   entitlement_id?: string;
   creator_agent?: {
     creator: { id: string; name: string };
@@ -253,8 +249,7 @@ export type DeliveryReady = {
   artifact_digest: string;
   delivery_id: string;
   artifact_type: "file" | "message";
-  /** Accounting may be durably queued after the user-visible artifact is saved. */
-  receipt_status?: "recorded" | "syncing";
+  artifact_path?: string;
 };
 
 export type AgentDelta = {
@@ -390,7 +385,6 @@ export type RunFinal = {
   type: "turn.completed";
   run_id: string;
   finish_reason: OutputFinishReason;
-  receipt_status?: "recorded" | "syncing";
   timing?: {
     total_ms: number;
     setup_ms: number;

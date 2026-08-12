@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { readBoundedJsonObject } from "./boundedResponse.js";
@@ -15,8 +15,6 @@ const BoundedJsonObjectSchema = z.record(z.string().min(1).max(128), z.unknown()
   const failure = embeddedJsonLimitFailure(value);
   if (failure) context.addIssue({ code: "custom", message: failure });
 });
-const IMMUTABLE_CORPORA_DIRECTORY = ".immutable-corpora";
-const CURRENT_CORPORA_DIRECTORY = ".current-corpora";
 
 export const AGENT_CORPUS_MANIFEST_MAX_BYTES = 1024 * 1024;
 export const AGENT_CORPUS_ASSET_MAX_BYTES = 4 * 1024 * 1024;
@@ -44,7 +42,6 @@ export const AgentCorpusSchema = z.object({
   contract_version: z.literal("1"),
   agent_id: IdentifierSchema,
   creator: z.object({ id: IdentifierSchema, name: NameSchema }).strict(),
-  release: z.object({ backward_compatible_with: DigestSchema }).strict().optional(),
   product: z.object({
     id: IdentifierSchema,
     name: NameSchema,
@@ -107,42 +104,14 @@ export type ResolvedAgentCorpus = {
 export class AgentCorpusResolver {
   constructor(private readonly root: string) {}
 
-  async resolve(
-    creatorId: string,
-    agentId: string,
-    digestOrSignal?: string | AbortSignal,
-    explicitSignal?: AbortSignal
-  ): Promise<ResolvedAgentCorpus> {
-    const selectedDigest = typeof digestOrSignal === "string" ? digestOrSignal : undefined;
-    const signal = typeof digestOrSignal === "string" ? explicitSignal : digestOrSignal;
+  async resolve(creatorId: string, agentId: string, signal?: AbortSignal): Promise<ResolvedAgentCorpus> {
     signal?.throwIfAborted();
-    const currentDigest = selectedDigest ?? await this.readCurrentDigest(creatorId, agentId);
-    let corpusRoot = currentDigest
-      ? await containedPath(this.root, path.join(
-        IMMUTABLE_CORPORA_DIRECTORY,
-        creatorId,
-        agentId,
-        `sha256-${currentDigest.slice("sha256:".length)}`
-      ))
-      : await containedPath(this.root, path.join(creatorId, agentId));
-    let corpus: AgentCorpus;
-    try {
-      corpus = await loadAgentCorpus(corpusRoot, signal);
-    } catch (error) {
-      if (!currentDigest || (error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      // Migration fixtures may still hold a digest-exact release in the
-      // legacy current directory. The digest check below prevents fallback to
-      // a different release.
-      corpusRoot = await containedPath(this.root, path.join(creatorId, agentId));
-      corpus = await loadAgentCorpus(corpusRoot, signal);
-    }
+    const corpusRoot = await containedPath(this.root, path.join(creatorId, agentId));
+    const corpus = await loadAgentCorpus(corpusRoot, signal);
     if (corpus.creator.id !== creatorId || corpus.agent_id !== agentId) {
       throw new Error("Agent Corpus binding does not match the requested creator and agent");
     }
     const digest = await agentCorpusDigest(corpusRoot, corpus, signal);
-    if (currentDigest && digest !== currentDigest) {
-      throw new Error(`Agent Corpus release digest mismatch: expected ${currentDigest}, received ${digest}`);
-    }
     signal?.throwIfAborted();
     return { root: corpusRoot, corpus, digest };
   }
@@ -150,51 +119,25 @@ export class AgentCorpusResolver {
   async list(creatorId: string, signal?: AbortSignal): Promise<ResolvedAgentCorpus[]> {
     signal?.throwIfAborted();
     const creatorRoot = await containedPath(this.root, creatorId);
-    const legacyEntries = await (async () => {
+    const entries = await (async () => {
       try {
         return await (await import("node:fs/promises")).readdir(creatorRoot, { withFileTypes: true });
       } catch {
         return [];
       }
     })();
-    const pointerRoot = await containedPath(this.root, path.join(CURRENT_CORPORA_DIRECTORY, creatorId));
-    const pointerEntries = await readdir(pointerRoot, { withFileTypes: true }).catch(() => []);
-    const agentIds = new Set<string>();
-    for (const entry of legacyEntries) if (entry.isDirectory()) agentIds.add(entry.name);
-    for (const entry of pointerEntries) {
-      if (entry.isFile() && entry.name.endsWith(".json")) agentIds.add(entry.name.slice(0, -5));
-    }
     const agents: ResolvedAgentCorpus[] = [];
-    for (const agentId of [...agentIds].sort()) {
+    for (const entry of entries) {
       signal?.throwIfAborted();
+      if (!entry.isDirectory()) continue;
       try {
-        agents.push(await this.resolve(creatorId, agentId, signal));
+        agents.push(await this.resolve(creatorId, entry.name, signal));
       } catch {
         signal?.throwIfAborted();
         // A single incomplete staging directory must not hide other agents.
       }
     }
     return agents;
-  }
-
-  private async readCurrentDigest(creatorId: string, agentId: string): Promise<string | undefined> {
-    const pointerPath = await containedPath(this.root, path.join(CURRENT_CORPORA_DIRECTORY, creatorId, `${agentId}.json`));
-    let raw: unknown;
-    try {
-      raw = JSON.parse(await readFile(pointerPath, "utf8"));
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
-      throw error;
-    }
-    const parsed = z.object({
-      schema_version: z.literal(1),
-      creator_id: z.literal(creatorId),
-      agent_id: z.literal(agentId),
-      corpus_digest: DigestSchema,
-      activated_at: z.string().datetime()
-    }).strict().safeParse(raw);
-    if (!parsed.success) throw new Error(`Agent Corpus current pointer is invalid: ${creatorId}/${agentId}`);
-    return parsed.data.corpus_digest;
   }
 }
 

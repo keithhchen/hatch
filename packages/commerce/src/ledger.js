@@ -1,7 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { mkdir, open, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { hostname } from "node:os";
 import path from "node:path";
+
+const DEFAULT_LOCK_TIMEOUT_MS = 10_000;
+const DEFAULT_LOCK_POLL_MS = 20;
 
 const EVENT_TYPES = new Set([
   "order.placed",
@@ -14,9 +18,17 @@ const EVENT_TYPES = new Set([
 ]);
 
 export class CommerceInvariantError extends Error {
-  constructor(code, message) {
-    super(message);
+  constructor(code, message, options) {
+    super(message, options);
     this.name = "CommerceInvariantError";
+    this.code = code;
+  }
+}
+
+export class CommercePersistenceError extends Error {
+  constructor(code, message, options) {
+    super(message, options);
+    this.name = "CommercePersistenceError";
     this.code = code;
   }
 }
@@ -31,33 +43,24 @@ export class CommerceLedger {
     this.filePath = options.filePath;
     this.clock = options.clock ?? (() => new Date());
     this.idFactory = options.idFactory ?? ((type) => `${type.replaceAll(".", "_")}_${randomUUID()}`);
-    this.lockTimeoutMs = options.lockTimeoutMs ?? 5000;
-    this.staleLockMs = options.staleLockMs ?? 30000;
+    this.lockTimeoutMs = positiveIntegerOption(options.lockTimeoutMs, DEFAULT_LOCK_TIMEOUT_MS, "lockTimeoutMs");
+    this.lockPollMs = positiveIntegerOption(options.lockPollMs, DEFAULT_LOCK_POLL_MS, "lockPollMs");
   }
 
   static async open(options = {}) {
     const ledger = new CommerceLedger(options);
     if (!options.filePath) return ledger;
-    let content = "";
-    try {
-      content = await readFile(options.filePath, "utf8");
-    } catch (error) {
-      if (error?.code !== "ENOENT") throw error;
-    }
-    for (const line of content.split("\n")) {
-      if (!line.trim()) continue;
-      ledger.#ingest(JSON.parse(line), { replay: true });
-    }
+    ledger.#replaceSnapshot(await readLedgerSnapshot(options.filePath));
     return ledger;
   }
 
   listEvents() {
-    this.#reloadFromDiskSync();
+    this.#refreshSnapshotSync();
     return this.#events.map((event) => structuredClone(event));
   }
 
   findByIdempotencyKey(key) {
-    this.#reloadFromDiskSync();
+    this.#refreshSnapshotSync();
     const event = this.#idempotency.get(key);
     return event ? structuredClone(event) : undefined;
   }
@@ -66,65 +69,77 @@ export class CommerceLedger {
     if (!EVENT_TYPES.has(type)) {
       throw new CommerceInvariantError("unknown_event_type", `Unsupported commerce event: ${type}`);
     }
-    return this.#enqueueWrite(async () => {
-      const releaseLock = this.filePath ? await acquireFileLock(this.filePath, {
-        timeoutMs: this.lockTimeoutMs,
-        staleLockMs: this.staleLockMs
-      }) : async () => {};
-      try {
-        if (this.filePath) await this.#reloadFromDisk();
-        const stagedEvents = this.#events.map((event) => structuredClone(event));
-        const stagedIds = new Set(this.#eventIds);
-        const stagedIdempotency = new Map(this.#idempotency);
-        const results = [];
+    if (!options.idempotencyKey?.trim()) {
+      throw new CommerceInvariantError("idempotency_required", "Every commerce mutation requires an idempotency key");
+    }
+    const operation = this.#writeChain.then(() => this.#appendSerialized(type, payload, options));
+    // A failed persistence attempt must not poison all later operations on
+    // this instance. Callers still receive the original rejection.
+    this.#writeChain = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
 
-        for (const mutation of mutations) {
-          const type = mutation?.type;
-          const idempotencyKey = mutation?.idempotencyKey;
-          assertMutation(type, idempotencyKey);
-          const normalizedPayload = normalizePayload(type, mutation?.payload ?? {}, idempotencyKey);
-          assertPayloadEnvelope(normalizedPayload);
-          const existing = stagedIdempotency.get(idempotencyKey);
-          if (existing) {
-            const incomingDigest = payloadDigest(type, normalizedPayload);
-            const replayDigest = payloadDigest(type, normalizePayload(type, eventPayload(existing), idempotencyKey));
-            if (existing.payload_digest !== incomingDigest && replayDigest !== incomingDigest) {
-              throw new CommerceInvariantError(
-                "idempotency_conflict",
-                `Idempotency key ${idempotencyKey} was already used with a different payload`
-              );
-            }
-            results.push(structuredClone(existing));
-            continue;
-          }
-
-          const event = {
-            ...normalizedPayload,
-            event_id: mutation.eventId ?? this.idFactory(type),
-            event_type: type,
-            occurred_at: this.clock().toISOString(),
-            idempotency_key: idempotencyKey,
-            payload_digest: payloadDigest(type, normalizedPayload)
-          };
-          if (stagedIds.has(event.event_id)) {
-            throw new CommerceInvariantError("duplicate_event_id", `Duplicate event id: ${event.event_id}`);
-          }
-          validateEvent(event, stagedEvents);
-          stagedEvents.push(Object.freeze(structuredClone(event)));
-          stagedIds.add(event.event_id);
-          stagedIdempotency.set(idempotencyKey, event);
-          results.push(structuredClone(event));
-        }
-
-        if (this.filePath && results.some((event) => !this.#eventIds.has(event.event_id))) {
-          await persistEventsAtomically(this.filePath, stagedEvents);
-        }
-        this.#replaceState(stagedEvents);
-        return results;
-      } finally {
-        await releaseLock();
-      }
+  async #appendSerialized(type, payload, options) {
+    if (!this.filePath) {
+      return this.#appendToSnapshot(type, payload, options, this.#events);
+    }
+    return withLedgerLock(this.filePath, {
+      timeoutMs: this.lockTimeoutMs,
+      pollMs: this.lockPollMs
+    }, async () => {
+      const events = await readLedgerSnapshot(this.filePath);
+      this.#replaceSnapshot(events);
+      const result = this.#appendToSnapshot(type, payload, options, events, { ingest: false });
+      if (result.existing) return result.event;
+      const nextEvents = validateLedgerSnapshot([...events, result.event]);
+      await persistLedgerSnapshot(this.filePath, nextEvents);
+      this.#replaceSnapshot(nextEvents);
+      return structuredClone(result.event);
     });
+  }
+
+  #appendToSnapshot(type, payload, options, events, behavior = {}) {
+    const existing = events.find((event) => event.idempotency_key === options.idempotencyKey);
+    if (existing) {
+      const incomingDigest = payloadDigest(type, payload);
+      if (existing.payload_digest !== incomingDigest) {
+        throw new CommerceInvariantError(
+          "idempotency_conflict",
+          `Idempotency key ${options.idempotencyKey} was already used with a different payload`
+        );
+      }
+      return behavior.ingest === false
+        ? { existing: true, event: structuredClone(existing) }
+        : structuredClone(existing);
+    }
+    const event = {
+      ...structuredClone(payload),
+      event_id: options.eventId ?? this.idFactory(type),
+      event_type: type,
+      occurred_at: this.clock().toISOString(),
+      idempotency_key: options.idempotencyKey,
+      payload_digest: payloadDigest(type, payload)
+    };
+    validateEvent(event, events);
+    if (events.some((candidate) => candidate.event_id === event.event_id)) {
+      throw new CommerceInvariantError("duplicate_event_id", `Duplicate event id: ${event.event_id}`);
+    }
+    if (behavior.ingest === false) return { existing: false, event };
+    this.#ingest(event, { replay: false });
+    return structuredClone(event);
+  }
+
+  #refreshSnapshotSync() {
+    if (!this.filePath) return;
+    this.#replaceSnapshot(readLedgerSnapshotSync(this.filePath));
+  }
+
+  #replaceSnapshot(events) {
+    const validated = validateLedgerSnapshot(events);
+    this.#events = [];
+    this.#eventIds = new Set();
+    this.#idempotency = new Map();
+    for (const event of validated) this.#ingest(event, { replay: true });
   }
 
   #ingest(event, { replay }) {
@@ -137,10 +152,185 @@ export class CommerceLedger {
         `Duplicate idempotency key: ${event.idempotency_key}`
       );
     }
-    this.#events.push(Object.freeze(structuredClone(event)));
-    this.#eventIds.add(event.event_id);
-    this.#idempotency.set(event.idempotency_key, event);
+    const stored = Object.freeze(structuredClone(event));
+    this.#events.push(stored);
+    this.#eventIds.add(stored.event_id);
+    this.#idempotency.set(stored.idempotency_key, stored);
   }
+}
+
+async function readLedgerSnapshot(filePath) {
+  try {
+    return parseLedgerContent(await readFile(filePath, "utf8"), filePath);
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
+}
+
+function readLedgerSnapshotSync(filePath) {
+  try {
+    return parseLedgerContent(readFileSync(filePath, "utf8"), filePath);
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
+}
+
+function parseLedgerContent(content, filePath) {
+  const events = [];
+  for (const [index, line] of content.split("\n").entries()) {
+    if (!line.trim()) continue;
+    try {
+      events.push(JSON.parse(line));
+    } catch (error) {
+      throw new CommerceInvariantError(
+        "corrupt_ledger",
+        `Commerce ledger ${filePath} has invalid JSON on line ${index + 1}`,
+        { cause: error }
+      );
+    }
+  }
+  return validateLedgerSnapshot(events);
+}
+
+function validateLedgerSnapshot(events) {
+  const validated = [];
+  const eventIds = new Set();
+  const idempotencyKeys = new Set();
+  for (const rawEvent of events) {
+    if (!rawEvent || typeof rawEvent !== "object" || Array.isArray(rawEvent)) {
+      throw new CommerceInvariantError("corrupt_ledger", "Commerce ledger contains a non-object event");
+    }
+    const event = structuredClone(rawEvent);
+    if (!EVENT_TYPES.has(event.event_type)) {
+      throw new CommerceInvariantError("corrupt_ledger", `Unsupported persisted commerce event: ${event.event_type}`);
+    }
+    if (eventIds.has(event.event_id)) {
+      throw new CommerceInvariantError("corrupt_ledger", `Duplicate event id: ${event.event_id}`);
+    }
+    if (idempotencyKeys.has(event.idempotency_key)) {
+      throw new CommerceInvariantError("corrupt_ledger", `Duplicate idempotency key: ${event.idempotency_key}`);
+    }
+    validateEvent(event, validated);
+    validated.push(Object.freeze(event));
+    eventIds.add(event.event_id);
+    idempotencyKeys.add(event.idempotency_key);
+  }
+  return validated;
+}
+
+async function persistLedgerSnapshot(filePath, events) {
+  const directory = path.dirname(filePath);
+  await mkdir(directory, { recursive: true });
+  const temporaryPath = path.join(
+    directory,
+    `.${path.basename(filePath)}.${process.pid}.${randomUUID()}.tmp`
+  );
+  const serialized = events.length > 0
+    ? `${events.map((event) => JSON.stringify(event)).join("\n")}\n`
+    : "";
+  let handle;
+  try {
+    handle = await open(temporaryPath, "wx", 0o600);
+    await handle.writeFile(serialized, "utf8");
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+    await rename(temporaryPath, filePath);
+    await syncDirectory(directory);
+  } catch (error) {
+    throw new CommercePersistenceError(
+      "ledger_persist_failed",
+      `Could not atomically persist commerce ledger ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error }
+    );
+  } finally {
+    await handle?.close().catch(() => undefined);
+    await rm(temporaryPath, { force: true }).catch(() => undefined);
+  }
+}
+
+async function syncDirectory(directory) {
+  let handle;
+  try {
+    handle = await open(directory, "r");
+    await handle.sync();
+  } catch (error) {
+    // Some development filesystems do not support directory fsync. The file
+    // itself was fsynced before atomic rename; production Linux volumes do.
+    if (!["EINVAL", "ENOTSUP", "EISDIR", "EPERM"].includes(error?.code)) throw error;
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+}
+
+async function withLedgerLock(filePath, options, operation) {
+  const lockPath = `${filePath}.lock`;
+  await mkdir(path.dirname(filePath), { recursive: true });
+  const startedAt = Date.now();
+  while (true) {
+    try {
+      await mkdir(lockPath, { mode: 0o700 });
+      break;
+    } catch (error) {
+      if (error?.code !== "EEXIST") {
+        throw new CommercePersistenceError(
+          "ledger_lock_failed",
+          `Could not acquire commerce ledger lock ${lockPath}: ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error }
+        );
+      }
+      if (Date.now() - startedAt >= options.timeoutMs) {
+        throw new CommercePersistenceError(
+          "ledger_lock_timeout",
+          `Timed out waiting for commerce ledger lock ${lockPath}. Locks are never auto-stolen; after verifying no Dashboard or Runtime writer is active, remove this lock directory manually.`
+        );
+      }
+      await delay(options.pollMs);
+    }
+  }
+
+  try {
+    await writeFile(path.join(lockPath, "owner.json"), `${JSON.stringify({
+      hostname: hostname(),
+      pid: process.pid,
+      acquired_at: new Date().toISOString()
+    })}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
+  } catch (error) {
+    await rm(lockPath, { recursive: true, force: true }).catch(() => undefined);
+    throw new CommercePersistenceError(
+      "ledger_lock_failed",
+      `Could not initialize commerce ledger lock ${lockPath}: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error }
+    );
+  }
+
+  try {
+    return await operation();
+  } finally {
+    try {
+      await rm(lockPath, { recursive: true });
+    } catch (error) {
+      throw new CommercePersistenceError(
+        "ledger_lock_release_failed",
+        `Could not release commerce ledger lock ${lockPath}: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error }
+      );
+    }
+  }
+}
+
+function positiveIntegerOption(value, fallback, name) {
+  const resolved = value ?? fallback;
+  if (!Number.isSafeInteger(resolved) || resolved <= 0) {
+    throw new CommerceInvariantError("invalid_ledger_option", `${name} must be a positive integer`);
+  }
+  return resolved;
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 export function projectBuyerEntitlements(events, buyerId) {
@@ -218,9 +408,9 @@ export function projectCreatorDashboard(events, creatorId) {
       product_name: order.product_name ?? null,
       gross_minor: order.gross_minor,
       currency: order.currency,
-      status: refundedOrders.has(order.order_id) ? "refunded" : delivery ? "delivered" : "paid",
-      creator_share_minor: creatorShareMinor,
-      hatch_share_minor: hatchShareMinor,
+      status: refundedOrders.has(order.order_id) ? "refunded" : (revenue || delivery) ? "delivered" : "paid",
+      creator_share_minor: refundedOrders.has(order.order_id) ? 0 : revenue?.creator_share_minor ?? 0,
+      hatch_share_minor: refundedOrders.has(order.order_id) ? 0 : revenue?.hatch_share_minor ?? 0,
       occurred_at: order.occurred_at,
       agent_id: order.agent_id,
       corpus_digest: order.corpus_digest,
@@ -259,7 +449,7 @@ function canonicalJson(value) {
 }
 
 function validateEvent(event, events) {
-  for (const key of ["event_id", "event_type", "occurred_at", "idempotency_key"]) {
+  for (const key of ["event_id", "event_type", "occurred_at", "idempotency_key", "payload_digest"]) {
     if (typeof event[key] !== "string" || !event[key]) {
       throw new CommerceInvariantError("invalid_event", `${key} is required`);
     }

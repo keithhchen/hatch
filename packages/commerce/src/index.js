@@ -1,7 +1,7 @@
 export {
   CommerceLedger,
   CommerceInvariantError,
-  projectActiveOffer,
+  CommercePersistenceError,
   projectBuyerEntitlements,
   projectBuyerOrders,
   projectCreatorDashboard

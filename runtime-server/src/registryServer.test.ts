@@ -23,7 +23,7 @@ test("TypeScript Registry exposes auth and Corpus catalog endpoints", async () =
     assert.ok(address && typeof address !== "string");
     const base = `http://127.0.0.1:${address.port}`;
     const health = await fetch(`${base}/health`);
-    assert.deepEqual(await health.json(), { status: "ok", checks: { registry_store: "ready" } });
+    assert.deepEqual(await health.json(), { status: "ok" });
     const signup = await fetch(`${base}/v1/auth/signup`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: "user@example.com", password: "password-123", role: "user", display_name: "Test User" }) });
     assert.equal(signup.status, 201);
     assert.equal(signup.headers.get("cache-control"), "no-store");
@@ -55,9 +55,7 @@ test("TypeScript Registry exposes auth and Corpus catalog endpoints", async () =
       headers: { authorization: `Bearer ${auth.session.token}`, "content-type": "application/json" },
       body: JSON.stringify({ order_id: "order_forged" })
     });
-    // The route exists only for the private Commerce principal; an ordinary
-    // account can discover no mutation authority from possessing a session.
-    assert.equal(selfGrant.status, 401);
+    assert.equal(selfGrant.status, 404);
 
     const userTokenOnCommerceRoute = await fetch(`${base}/v1/commerce/agent-access`, {
       method: "POST",
