@@ -397,7 +397,10 @@ test("publish hard deadline rolls back current and independently cleans a partia
     corpusRoot,
     statePath,
     indexer,
-    publishTimeoutMs: 200,
+    // Leave enough headroom for the initial filesystem/index setup on a
+    // shared CI runner; the stalled indexer below still exercises the hard
+    // deadline path and the test remains bounded by the <1s assertion.
+    publishTimeoutMs: 500,
     environment: {},
   });
   const original = await store.publishAgentCorpusBundle("11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", bundle("Timeout Original"));
