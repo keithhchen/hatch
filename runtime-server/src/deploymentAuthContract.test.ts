@@ -27,7 +27,7 @@ test("production keeps browser APIs on the Dashboard BFF and disables legacy HMA
   assert.ok(requiredKeys, "deploy workflow must validate production secrets");
   assert.doesNotMatch(requiredKeys, /HATCH_AUTH_SIGNING_SECRET/);
   assert.match(requiredKeys, /HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN/);
-  assert.match(requiredKeys, /HATCH_RUNTIME_DB_PASSWORD/);
+  assert.doesNotMatch(requiredKeys, /HATCH_RUNTIME_DB_PASSWORD/);
   assert.match(deployWorkflow, /^  verify-server:\n/m);
   assert.match(
     deployWorkflow,
@@ -81,7 +81,7 @@ test("production Compose gives every service only its required secrets", async (
 
   assert.match(runtime, /HATCH_RUNTIME_DATABASE_URL:/);
   assert.match(runtime, /HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN:/);
-  assert.doesNotMatch(runtime, /HATCH_REGISTRY_DATABASE_URL:/);
+  assert.match(runtime, /HATCH_RUNTIME_DATABASE_URL:/);
   assert.doesNotMatch(runtime, /HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN:/);
   assert.doesNotMatch(runtime, /HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN:/);
   assert.doesNotMatch(runtime, /POSTGRES_PASSWORD:/);
