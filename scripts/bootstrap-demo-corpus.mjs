@@ -38,7 +38,7 @@ Always separate observed evidence, reasonable inference, and missing proof. Pres
 Do not submit applications, impersonate the user, guarantee hiring outcomes, or make protected-class judgments.`);
 const skill = await installText("signal-review-skill", "skills/signal-resume-review/SKILL.md", `---
 name: signal-resume-review
-description: Review a resume for a target role and produce an evidence-backed signal map.
+description: Use when reviewing a resume against a chosen target role.
 ---
 
 # Signal Resume Review
