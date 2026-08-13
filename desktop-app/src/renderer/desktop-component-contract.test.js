@@ -35,4 +35,24 @@ describe("desktop component presentation contract", () => {
     expect(source).not.toContain('className="desktop-connection-copy"');
     expect(source).not.toContain('className="settings-migration-notice"');
   });
+
+  it("shows a real connection spinner while an individual chat is loading", () => {
+    expect(source).toContain('className="empty-thread-spinner"');
+    expect(source).toContain("chatLoading");
+    expect(source).toContain("setChatLoading(true)");
+  });
+
+  it("keeps connection recovery quiet until bounded retries are exhausted", () => {
+    expect(source).toContain("MAX_AUTOMATIC_RUNTIME_RETRIES");
+    expect(source).toContain("setRuntimeRetryExhausted(true)");
+    expect(source).toContain('className="chrome-icon-button desktop-connection-action desktop-connection-retry-button"');
+    expect(source).toContain('aria-label="Retry connection"');
+    expect(source).not.toContain("<DesktopConnectionStatus state={connectionState}");
+  });
+
+  it("exposes language selection in the native Settings window", () => {
+    expect(source).toContain("function AuxiliaryLanguageSettings()");
+    expect(source).toContain('settingsStoreRef.current.setApp("language", next)');
+    expect(source).toContain('className="desktop-auxiliary-language"');
+  });
 });

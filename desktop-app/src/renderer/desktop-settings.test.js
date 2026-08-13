@@ -15,6 +15,7 @@ describe("desktop native settings", () => {
     expect(store.getProfile("user_123", "last_selected_entitlement_id")).toBe("ent_signal");
     expect(JSON.parse(serialized)).toEqual({
       schema_version: 1,
+      app: { language: "system" },
       accounts: { user_123: { last_selected_entitlement_id: "ent_signal", workspace_grant: { grant_id: "grant_project", display_path: "/tmp/project" } } }
     });
     expect(store.getProfile("other", "last_selected_entitlement_id", "none")).toBe("none");
@@ -28,11 +29,18 @@ describe("desktop native settings", () => {
       if (command === "patch_app_settings") {
         const current = JSON.parse(values.get("settings") || "{}");
         current.schema_version ??= 1;
+        current.app ??= { language: "system" };
         current.accounts ??= {};
+        if (args.patch.app) {
+          Object.assign(current.app, args.patch.app.set || {});
+          for (const key of args.patch.app.remove || []) delete current.app[key];
+        }
         const id = args.patch.profileId;
-        current.accounts[id] ??= {};
-        for (const [key, value] of Object.entries(args.patch.set || {})) current.accounts[id][key] = value;
-        for (const key of args.patch.remove || []) delete current.accounts[id][key];
+        if (id) {
+          current.accounts[id] ??= {};
+          for (const [key, value] of Object.entries(args.patch.set || {})) current.accounts[id][key] = value;
+          for (const key of args.patch.remove || []) delete current.accounts[id][key];
+        }
         values.set("settings", JSON.stringify(current));
       }
       return null;
@@ -46,6 +54,30 @@ describe("desktop native settings", () => {
       patch: { profileId: "user_123", set: { permission_mode: "read-only" } }
     });
     expect(invoke.mock.calls.some(([command]) => command.includes("localStorage"))).toBe(false);
+  });
+
+  it("persists app-wide language preferences through the native patch", async () => {
+    const values = new Map([["settings", JSON.stringify({ schema_version: 1, accounts: {} })]]);
+    const invoke = vi.fn(async (command, args) => {
+      if (command === "read_app_settings") return values.get("settings");
+      if (command === "patch_app_settings") {
+        const current = JSON.parse(values.get("settings"));
+        current.app ??= { language: "system" };
+        Object.assign(current.app, args.patch.app?.set || {});
+        for (const key of args.patch.app?.remove || []) delete current.app[key];
+        values.set("settings", JSON.stringify(current));
+      }
+      return null;
+    });
+    const store = createTauriSettingsStore(invoke);
+    await store.load();
+    expect(store.getApp("language")).toBe("system");
+    await store.setApp("language", "zh-CN");
+    expect(store.getApp("language")).toBe("zh-CN");
+    expect(JSON.parse(values.get("settings")).app.language).toBe("zh-CN");
+    expect(invoke).toHaveBeenCalledWith("patch_app_settings", {
+      patch: { app: { set: { language: "zh-CN" } } }
+    });
   });
 
   it("uses native field patches so two renderer stores cannot erase each other's window-adjacent preferences", async () => {

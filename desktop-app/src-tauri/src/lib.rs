@@ -1809,8 +1809,55 @@ fn patch_app_settings(app: AppHandle, patch: Value) -> Result<(), String> {
         .map_err(|_| "Desktop settings lock is unavailable")?;
     let path = settings_path(&app)?;
     let mut settings = read_app_settings_value(&path)?;
-    apply_profile_settings_patch(&mut settings, &patch)?;
+    let object = patch
+        .as_object()
+        .ok_or_else(|| "Desktop settings patch must be a JSON object".to_string())?;
+    let mut applied = false;
+    if object.get("app").is_some() {
+        apply_app_settings_patch(&mut settings, object.get("app").unwrap())?;
+        applied = true;
+    }
+    if object.get("profileId").is_some() {
+        apply_profile_settings_patch(&mut settings, &patch)?;
+        applied = true;
+    }
+    if !applied {
+        return Err("Desktop settings patch requires app or profileId".into());
+    }
     write_app_settings_value(&path, &settings)
+}
+
+fn apply_app_settings_patch(settings: &mut Value, patch: &Value) -> Result<(), String> {
+    let object = patch
+        .as_object()
+        .ok_or_else(|| "Desktop app settings patch must be a JSON object".to_string())?;
+    let set = object.get("set").and_then(Value::as_object);
+    let remove = object.get("remove").and_then(Value::as_array);
+    if set.is_none() && remove.is_none() {
+        return Err("Desktop app settings patch requires set or remove".into());
+    }
+    let root = settings
+        .as_object_mut()
+        .ok_or_else(|| "Desktop settings must be a JSON object".to_string())?;
+    let app = root
+        .entry("app".to_string())
+        .or_insert_with(|| Value::Object(serde_json::Map::new()))
+        .as_object_mut()
+        .ok_or_else(|| "Desktop app settings must be an object".to_string())?;
+    if let Some(values) = set {
+        for (key, value) in values {
+            app.insert(key.clone(), value.clone());
+        }
+    }
+    if let Some(keys) = remove {
+        for key in keys {
+            let key = key
+                .as_str()
+                .ok_or_else(|| "Desktop app settings remove entries must be strings".to_string())?;
+            app.remove(key);
+        }
+    }
+    Ok(())
 }
 
 fn apply_profile_settings_patch(settings: &mut Value, patch: &Value) -> Result<(), String> {
@@ -1985,18 +2032,24 @@ fn replace_file(source: &std::path::Path, destination: &std::path::Path) -> std:
         .encode_wide()
         .chain(Some(0))
         .collect::<Vec<_>>();
-    let moved = unsafe {
-        MoveFileExW(
-            source.as_ptr(),
-            destination.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-    };
-    if moved == 0 {
-        Err(std::io::Error::last_os_error())
-    } else {
-        Ok(())
+    for attempt in 0..8 {
+        let moved = unsafe {
+            MoveFileExW(
+                source.as_ptr(),
+                destination.as_ptr(),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+        };
+        if moved != 0 {
+            return Ok(());
+        }
+        let error = std::io::Error::last_os_error();
+        if error.kind() != std::io::ErrorKind::PermissionDenied || attempt == 7 {
+            return Err(error);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
     }
+    unreachable!()
 }
 
 // RFC 7396-style merge semantics scoped to one window namespace. `null`

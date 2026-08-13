@@ -417,6 +417,22 @@ h2 {
   text-align: center;
 }
 
+.empty-thread-loading {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  min-height: 180px;
+  padding: 12vh 24px;
+}
+
+.empty-thread-spinner {
+  animation: connection-spin .9s linear infinite;
+  color: var(--hatch-text-secondary);
+  height: 22px;
+  width: 22px;
+}
+
 .empty-kicker {
   color: #7a837e;
   font-size: 12px;
@@ -1604,7 +1620,7 @@ h2 {
   color: var(--hatch-text-secondary);
   display: inline-flex;
   flex: 0 1 auto;
-  font-family: var(--hatch-font-sans);
+  font-family: var(--hatch-font-ui);
   font-size: 12px;
   gap: 6px;
   min-height: 30px;
@@ -1637,15 +1653,18 @@ button.composer-control:focus-visible {
 }
 
 .workspace-composer-control {
-  flex: 1 1 260px;
+  flex: 1 1 auto;
   justify-content: flex-start;
+  min-width: 0;
   max-width: none;
 }
 
 .workspace-composer-control .composer-control-label {
-  flex: 1 1 auto;
-  min-width: 0;
+  flex: 0 1 auto;
+  min-width: max-content;
+  overflow: visible;
   text-align: left;
+  text-overflow: clip;
 }
 
 .composer-control-label {
@@ -1728,7 +1747,7 @@ button.composer-control:focus-visible {
   background: var(--surface-window);
   color: var(--hatch-ink);
   display: grid;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--hatch-font-ui);
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 52px minmax(0, 1fr);
   grid-template-areas:
@@ -1782,6 +1801,7 @@ button.composer-control:focus-visible {
 .desktop-titlebar-safe-area {
   flex: 0 0 0;
   height: 100%;
+  -webkit-app-region: drag;
 }
 
 .desktop-window-shell[data-platform="macos"] .desktop-titlebar-safe-area {
@@ -1794,17 +1814,19 @@ button.composer-control:focus-visible {
   flex: 0 1 auto;
   gap: 12px;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .desktop-toolbar-drag-region {
   align-self: stretch;
   flex: 1 1 18px;
   min-width: 8px;
+  -webkit-app-region: drag;
 }
 
 .chrome-icon-button {
   align-items: center;
+  -webkit-app-region: no-drag;
   background: transparent;
   border: 1px solid transparent;
   border-radius: 6px;
@@ -1846,11 +1868,13 @@ button.composer-control:focus-visible {
 .desktop-toolbar-context {
   align-items: center;
   display: flex;
+  flex: 0 1 auto;
   font-size: 12px;
   gap: 5px;
   max-width: min(54vw, 480px);
   min-width: 0;
   overflow: hidden;
+  -webkit-app-region: drag;
 }
 
 .desktop-toolbar-conversation,
@@ -1879,6 +1903,18 @@ button.composer-control:focus-visible {
 
 .desktop-connection-action { color: #8a6728; }
 
+.desktop-connection-retry-button {
+  flex: 0 0 auto;
+  gap: 5px;
+  padding: 0 8px;
+  width: auto;
+}
+
+.desktop-connection-retry-button svg {
+  height: 14px;
+  width: 14px;
+}
+
 .connection-spinner { animation: connection-spin .9s linear infinite; }
 
 .desktop-connection-status {
@@ -1890,6 +1926,8 @@ button.composer-control:focus-visible {
   gap: 5px;
   letter-spacing: .01em;
   line-height: 1;
+  min-width: max-content;
+  overflow: visible;
   white-space: nowrap;
 }
 
@@ -2277,7 +2315,13 @@ button.composer-control:focus-visible {
   white-space: nowrap;
 }
 
-.inspector-action { justify-self: start; }
+.inspector-action {
+  font-size: 11px;
+  font-weight: 550;
+  justify-self: start;
+  min-height: 30px;
+  padding-inline: 9px;
+}
 
 .inspector-select-control {
   align-items: center;
@@ -2386,7 +2430,7 @@ button.composer-control:focus-visible {
 }
 
 .composer-controls {
-  align-items: flex-end;
+  align-items: stretch;
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
@@ -2398,6 +2442,7 @@ button.composer-control:focus-visible {
   display: flex;
   gap: 4px;
   min-width: 0;
+  width: 100%;
 }
 
 .composer-attachments {
@@ -2589,24 +2634,29 @@ button.composer-control:focus-visible {
 .desktop-auxiliary-mark {
   display: grid;
   place-items: center;
-  inline-size: 34px;
-  block-size: 34px;
+  inline-size: 42px;
+  block-size: 42px;
+  object-fit: contain;
   color: var(--hatch-accent);
   border-radius: 10px;
   background: var(--hatch-panel-muted);
   box-shadow: inset 0 0 0 1px var(--border-separator);
 }
 
-.desktop-auxiliary-kicker {
+.desktop-auxiliary-brand {
   margin: 0 0 3px;
-  color: var(--hatch-text-secondary);
-  font: 600 10px/1 var(--hatch-font-ui);
-  letter-spacing: .14em;
+  color: var(--hatch-ink);
+  font: 400 34px/1 var(--hatch-font-display);
+  letter-spacing: -.03em;
+}
+
+.desktop-auxiliary-brand-dot {
+  color: var(--hatch-accent);
 }
 
 .desktop-auxiliary-header h1 {
   margin: 0;
-  font: 600 25px/1.15 var(--hatch-font-ui);
+  font: 600 27px/1.15 var(--hatch-font-ui);
   letter-spacing: -.02em;
 }
 
@@ -2665,6 +2715,77 @@ button.composer-control:focus-visible {
   color: var(--hatch-text-secondary) !important;
   font-size: 13px !important;
 }
+
+.desktop-auxiliary-language {
+  margin: 0;
+  padding: 0;
+}
+
+.desktop-auxiliary-language .desktop-auxiliary-row {
+  align-items: center;
+  border-block-end: 0;
+  padding-block: 10px 0;
+}
+
+.desktop-language-select {
+  min-inline-size: 170px;
+  position: relative;
+}
+
+.desktop-language-select select {
+  appearance: none;
+  -webkit-appearance: none;
+  display: block;
+  inline-size: 100%;
+  min-inline-size: 170px;
+  min-block-size: 36px;
+  padding: 0 34px 0 12px;
+  border: 1px solid color-mix(in srgb, var(--hatch-ink) 14%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--hatch-panel) 86%, var(--hatch-canvas));
+  color: var(--hatch-ink);
+  font: 13px/1.2 var(--hatch-font-ui);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--hatch-ink) 7%, transparent);
+  cursor: pointer;
+  transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
+}
+
+.desktop-language-select select:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--hatch-ink) 24%, transparent);
+  background: var(--hatch-panel);
+}
+
+.desktop-language-select select:focus-visible {
+  outline: none;
+  border-color: var(--hatch-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--hatch-accent) 18%, transparent);
+}
+
+.desktop-language-select select:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.desktop-language-select > svg {
+  position: absolute;
+  inset-inline-end: 11px;
+  inset-block-start: 50%;
+  inline-size: 15px;
+  block-size: 15px;
+  color: var(--hatch-text-secondary);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.desktop-settings-save-status,
+.desktop-settings-save-error {
+  display: block;
+  margin-block-start: 8px;
+  font-size: 11px;
+}
+
+.desktop-settings-save-status { color: #3f7656; }
+.desktop-settings-save-error { color: #a64232; }
 
 @media (prefers-contrast: more) {
   .desktop-window-shell {

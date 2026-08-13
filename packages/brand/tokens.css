@@ -11,7 +11,7 @@
   --hatch-inverse: #202522;
   --hatch-inverse-text: #f4f1e9;
   --hatch-font-display: "Instrument Serif", "Noto Serif SC Variable", "Noto Serif SC", "Songti SC", STSong, Georgia, serif;
-  --hatch-font-ui: "Inter Variable", "Noto Sans SC Variable", "Noto Sans SC", "PingFang SC", sans-serif;
+  --hatch-font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "PingFang SC", "Hiragino Sans GB", "Segoe UI", "Noto Sans SC", "Helvetica Neue", Arial, sans-serif;
   --hatch-font-mono: "DM Mono", "SFMono-Regular", Consolas, monospace;
 }
 
