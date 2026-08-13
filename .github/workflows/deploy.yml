@@ -138,23 +138,18 @@ jobs:
           sed -i '/^DEEPSEEK_API_KEY=/d' /opt/hatch/.env
           printf 'DEEPSEEK_API_KEY=%s\n' "$DEEPSEEK_API_KEY" >> /opt/hatch/.env
           chmod 600 /opt/hatch/.env
-      - name: Provision isolated Runtime Postgres role
+      - name: Ensure shared Postgres is ready
         run: |
           set -euo pipefail
           cd /opt/hatch
           test -f .env
           test -f compose.infra.yml
-          runtime_db_password="$(sed -n 's/^HATCH_RUNTIME_DB_PASSWORD=//p' .env | tail -n 1)"
-          if test -z "$runtime_db_password"; then
-            runtime_db_password="$(openssl rand -hex 32)"
-            sed -i '/^HATCH_RUNTIME_DB_PASSWORD=/d' .env
-            printf 'HATCH_RUNTIME_DB_PASSWORD=%s\n' "$runtime_db_password" >> .env
+          if ! grep -Eq '^HATCH_DATABASE_URL=[^[:space:]]+' .env; then
+            database_url="$(sed -n 's/^HATCH_REGISTRY_DATABASE_URL=//p' .env | tail -n 1)"
+            test -n "$database_url" || { echo "Missing HATCH_DATABASE_URL in /opt/hatch/.env" >&2; exit 1; }
+            printf 'HATCH_DATABASE_URL=%s\n' "$database_url" >> .env
             chmod 600 .env
           fi
-          printf '%s' "$runtime_db_password" | grep -Eq '^[a-f0-9]{64}$' || {
-            echo "HATCH_RUNTIME_DB_PASSWORD must be exactly 64 lowercase hexadecimal characters" >&2
-            exit 1
-          }
           postgres_user="$(sed -n 's/^POSTGRES_USER=//p' .env | tail -n 1)"
           postgres_database="$(sed -n 's/^POSTGRES_DB=//p' .env | tail -n 1)"
           postgres_user="${postgres_user:-hatch}"
@@ -175,18 +170,7 @@ jobs:
             fi
             sleep 2
           done
-          test "$postgres_ready" = 1 || { echo "Postgres did not become ready for Runtime role provisioning" >&2; exit 1; }
-          {
-            printf "SELECT format('CREATE ROLE hatch_runtime LOGIN PASSWORD %%L', '%s') WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='hatch_runtime') \\gexec\n" "$runtime_db_password"
-            printf "SELECT format('ALTER ROLE hatch_runtime LOGIN PASSWORD %%L', '%s') \\gexec\n" "$runtime_db_password"
-            printf 'CREATE SCHEMA IF NOT EXISTS hatch_runtime AUTHORIZATION hatch_runtime;\n'
-            printf 'ALTER SCHEMA hatch_runtime OWNER TO hatch_runtime;\n'
-            printf 'REVOKE CREATE ON SCHEMA public FROM PUBLIC;\n'
-            printf 'DO $hatch$ BEGIN IF to_regclass('\''public.hatch_conversation_events'\'') IS NOT NULL AND to_regclass('\''hatch_runtime.hatch_conversation_events'\'') IS NULL THEN EXECUTE '\''ALTER TABLE public.hatch_conversation_events SET SCHEMA hatch_runtime'\''; END IF; END $hatch$;\n'
-            printf 'ALTER TABLE IF EXISTS hatch_runtime.hatch_conversation_events OWNER TO hatch_runtime;\n'
-            printf 'ALTER SEQUENCE IF EXISTS hatch_runtime.hatch_conversation_events_id_seq OWNER TO hatch_runtime;\n'
-            printf 'ALTER ROLE hatch_runtime IN DATABASE "%s" SET search_path TO hatch_runtime, pg_catalog;\n' "$postgres_database"
-          } | "${infra[@]}" exec -T postgres psql -q -v ON_ERROR_STOP=1 -U "$postgres_user" -d "$postgres_database"
+          test "$postgres_ready" = 1 || { echo "Postgres did not become ready" >&2; exit 1; }
       - name: Pull and switch application containers
         env:
           GHCR_USERNAME: ${{ github.actor }}
@@ -200,7 +184,7 @@ jobs:
           test -f .env
           test -f compose.app.yml
           grep -q '^HATCH_DOMAIN=' .env
-          for key in LLM_API_KEY DEEPSEEK_API_KEY HATCH_REGISTRY_DATABASE_URL HATCH_RUNTIME_DB_PASSWORD HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN POSTGRES_FACTORY_PASSWORD POSTGRES_COMMERCE_PASSWORD DASHSCOPE_API_KEY POSTGRES_PASSWORD; do
+          for key in LLM_API_KEY DEEPSEEK_API_KEY HATCH_DATABASE_URL HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN DASHSCOPE_API_KEY POSTGRES_PASSWORD; do
             grep -Eq "^${key}=[^[:space:]]+" .env || { echo "Missing non-empty $key in /opt/hatch/.env"; exit 1; }
           done
           payment_mode="$(sed -n 's/^HATCH_COMMERCE_PAYMENT_MODE=//p' .env | tail -n 1)"
@@ -232,18 +216,6 @@ jobs:
               exit 1
               ;;
           esac
-          db_users=""
-          for key in HATCH_REGISTRY_DATABASE_URL HATCH_FACTORY_DATABASE_URL HATCH_RUNTIME_DATABASE_URL HATCH_COMMERCE_DATABASE_URL; do
-            value="$(sed -n "s/^${key}=//p" .env)"
-            user="${value#*://}"
-            user="${user%%:*}"
-            test -n "$user" || { echo "Could not parse database role for $key"; exit 1; }
-            db_users="${db_users}${user}\n"
-          done
-          test "$(printf '%b' "$db_users" | sed '/^$/d' | sort -u | wc -l | tr -d ' ')" = 4 || {
-            echo "Registry, Factory, Runtime, and Commerce must use four distinct database roles"
-            exit 1
-          }
           docker network inspect hatch_internal >/dev/null
           if test -f .release.env; then
             cp -f .release.env .release.env.previous

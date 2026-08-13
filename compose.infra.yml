@@ -8,13 +8,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-hatch}
       POSTGRES_USER: ${POSTGRES_USER:-hatch_admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in /opt/hatch/.env}
-      POSTGRES_REGISTRY_PASSWORD: ${POSTGRES_REGISTRY_PASSWORD:?set POSTGRES_REGISTRY_PASSWORD in /opt/hatch/.env}
-      POSTGRES_FACTORY_PASSWORD: ${POSTGRES_FACTORY_PASSWORD:?set POSTGRES_FACTORY_PASSWORD in /opt/hatch/.env}
-      POSTGRES_RUNTIME_PASSWORD: ${POSTGRES_RUNTIME_PASSWORD:?set POSTGRES_RUNTIME_PASSWORD in /opt/hatch/.env}
-      POSTGRES_COMMERCE_PASSWORD: ${POSTGRES_COMMERCE_PASSWORD:?set POSTGRES_COMMERCE_PASSWORD in /opt/hatch/.env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./scripts/provision-postgres-roles.sh:/docker-entrypoint-initdb.d/10-hatch-service-roles.sh:ro
     networks:
       - hatch_internal
     healthcheck:

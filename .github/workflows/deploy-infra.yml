@@ -33,18 +33,14 @@ jobs:
         run: |
           set -euo pipefail
           install -m 640 compose.infra.yml /opt/hatch/compose.infra.yml
-          install -d -m 750 /opt/hatch/scripts
-          install -m 750 scripts/provision-postgres-roles.sh /opt/hatch/scripts/provision-postgres-roles.sh
       - name: Start infrastructure only
         run: |
           set -euo pipefail
           cd /opt/hatch
           test -f .env
-          for key in POSTGRES_PASSWORD POSTGRES_REGISTRY_PASSWORD POSTGRES_FACTORY_PASSWORD POSTGRES_RUNTIME_PASSWORD POSTGRES_COMMERCE_PASSWORD; do
+          for key in POSTGRES_PASSWORD; do
             grep -Eq "^${key}=[^[:space:]]+" .env || { echo "Missing non-empty $key in /opt/hatch/.env"; exit 1; }
           done
           docker network inspect hatch_internal >/dev/null 2>&1 || docker network create hatch_internal
           docker compose --env-file .env -f compose.infra.yml up -d postgres qdrant
           docker compose --env-file .env -f compose.infra.yml ps --status running postgres qdrant
-          docker compose --env-file .env -f compose.infra.yml exec -T postgres \
-            /bin/sh /docker-entrypoint-initdb.d/10-hatch-service-roles.sh

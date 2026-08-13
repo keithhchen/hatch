@@ -19,12 +19,11 @@ or separate production Runtime exists. The server uses two Compose projects:
 2. Create `/opt/hatch/.env` from the root `.env.example` and fill the LLM,
    DashScope, Postgres, Web Search, and publish-token values.
    Never commit this file or put these values in GitHub Actions.
-   The file must also contain non-empty `HATCH_REGISTRY_DATABASE_URL`,
-   `HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN`, `HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN`,
-   and `HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN`. `HATCH_RUNTIME_DB_PASSWORD` may
-   start empty on the first deployment; CD generates it, then creates or rotates
-   the isolated `hatch_runtime` database role. Runtime never receives the
-   Registry database credential.
+   The file must also contain the non-empty `HATCH_DATABASE_URL`.
+   This simple deployment uses one database login for all four services.
+   It must also contain `HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN`,
+   `HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN`,
+   and `HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN`.
    The commerce token is shared only by Dashboard and Registry: checkout writes
    the order ledger first, then this authenticated service boundary creates the
    entitlement. A user bearer cannot grant Agent access directly.
@@ -99,11 +98,8 @@ or separate production Runtime exists. The server uses two Compose projects:
    docker compose --env-file .env -f compose.infra.yml up -d postgres qdrant
    ```
 
-   This creates persistent Docker volumes for Postgres and Qdrant and runs the
-   idempotent role provisioner. On an existing single-role installation the
-   same workflow reassigns existing tables in place, preserving data while
-   making Dashboard the only owner of `commerce_*` tables. Normal application
-   CD does not recreate or restart these services.
+   This creates persistent Docker volumes for Postgres and Qdrant. Normal
+   application CD does not recreate or restart these services.
 
 ## GitHub secrets
 
