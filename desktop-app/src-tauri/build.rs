@@ -64,6 +64,7 @@ fn main() {
             "show_native_context_menu",
             "open_external_url",
             "revoke_workspace_grant",
+            "read_product_open_links",
         ]),
     ))
     .expect("failed to build Hatch Tauri permissions");

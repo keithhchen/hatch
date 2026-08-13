@@ -37,17 +37,17 @@ export function creatorAgentFromBoundSession(message, entitlement, currentAgent)
   }
   const expected = {
     entitlementId: String(entitlement?.entitlement_id || ""),
-    agentId: String(entitlement?.agent_id || ""),
+    productId: String(entitlement?.product_id || ""),
     creatorId: String(entitlement?.creator_id || "")
   };
   const received = {
     entitlementId: String(message.entitlement_id || ""),
-    agentId: String(message.agent_id || ""),
+    productId: String(message.product_id || ""),
     creatorId: String(message.creator_id || "")
   };
   if (!expected.entitlementId
     || expected.entitlementId !== received.entitlementId
-    || expected.agentId !== received.agentId
+    || expected.productId !== received.productId
     || expected.creatorId !== received.creatorId) {
     return currentAgent;
   }

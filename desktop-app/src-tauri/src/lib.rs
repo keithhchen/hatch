@@ -19,6 +19,7 @@ use tauri::{
     AppHandle, DragDropEvent, Emitter, Manager, State, UserAttentionType, WebviewWindow,
     WindowEvent,
 };
+use tauri_plugin_deep_link::DeepLinkExt;
 
 mod window_commands;
 
@@ -70,6 +71,7 @@ const MAX_NATIVE_DROP_CONTEXT_SOURCE_BYTES: u64 = 1024 * 1024;
 const MAX_NATIVE_DROP_CONTEXT_BYTES: usize = 64 * 1024;
 const MAX_NATIVE_DROP_CONTEXT_TOTAL_BYTES: usize = 128 * 1024;
 const MAX_NATIVE_DROP_CONTEXT_REQUESTS: usize = 8;
+const PRODUCT_OPEN_EVENT: &str = "hatch://product-open";
 
 #[cfg(target_os = "macos")]
 static QUICK_LOOK_PANEL: OnceLock<Mutex<Option<MainThreadBound<QuickLookPanel>>>> = OnceLock::new();
@@ -2147,7 +2149,60 @@ fn is_allowed_browse_url(url: &str) -> bool {
     };
     parsed.scheme() == "https"
         && parsed.host_str() == Some("hatch.tokenquadrant.cn")
-        && (parsed.path() == "/agents" || parsed.path().starts_with("/agents/"))
+        && (parsed.path() == "/explore"
+            || is_uuid_route(parsed.path(), "/products/")
+            || is_uuid_route(parsed.path(), "/creators/"))
+}
+
+fn is_uuid_route(path: &str, prefix: &str) -> bool {
+    let value = path.strip_prefix(prefix).unwrap_or_default();
+    value.len() == 36
+        && value
+            .as_bytes()
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| matches!(index, 8 | 13 | 18 | 23) || byte.is_ascii_hexdigit())
+        && value.as_bytes().get(14) == Some(&b'4')
+        && matches!(value.as_bytes().get(19), Some(b'8' | b'9' | b'a' | b'b'))
+}
+
+fn normalize_product_open_url(url: &url::Url) -> Option<String> {
+    if url.scheme() != "hatch" || url.host_str() != Some("products") || url.path() != "/open" {
+        return None;
+    }
+    let entitlement_id = url
+        .query_pairs()
+        .find(|(key, _)| key == "entitlement_id")
+        .map(|(_, value)| value.into_owned())?;
+    let product_id = url
+        .query_pairs()
+        .find(|(key, _)| key == "product_id")
+        .map(|(_, value)| value.into_owned())?;
+    if !is_uuid_route(&format!("/{entitlement_id}"), "/")
+        || !is_uuid_route(&format!("/{product_id}"), "/")
+    {
+        return None;
+    }
+    if let Some(creator_id) = url
+        .query_pairs()
+        .find(|(key, _)| key == "creator_id")
+        .map(|(_, value)| value.into_owned())
+    {
+        if !is_uuid_route(&format!("/{creator_id}"), "/") {
+            return None;
+        }
+    }
+    Some(url.to_string())
+}
+
+#[tauri::command]
+fn read_product_open_links(app: AppHandle) -> Result<Vec<String>, String> {
+    let urls = app
+        .deep_link()
+        .get_current()
+        .map_err(to_string)?
+        .unwrap_or_default();
+    Ok(urls.iter().filter_map(normalize_product_open_url).collect())
 }
 
 fn workspace_grants_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -2476,10 +2531,36 @@ fn execute_tool_call_in_workspace(
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            let links = argv
+                .iter()
+                .filter_map(|argument| url::Url::parse(argument).ok())
+                .filter_map(|url| normalize_product_open_url(&url))
+                .collect::<Vec<_>>();
+            if !links.is_empty() {
+                let _ = app.emit(PRODUCT_OPEN_EVENT, links);
+            }
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
+        .plugin(tauri_plugin_deep_link::init())
         .manage(NativeToolAuthority::default())
         .manage(NativeDropContextStore::default())
         .manage(window_commands::NativeCommandRouter::default())
         .setup(|app| {
+            let deep_link_app = app.handle().clone();
+            app.deep_link().on_open_url(move |event| {
+                let links = event
+                    .urls()
+                    .iter()
+                    .filter_map(normalize_product_open_url)
+                    .collect::<Vec<_>>();
+                if !links.is_empty() {
+                    let _ = deep_link_app.emit(PRODUCT_OPEN_EVENT, links);
+                }
+            });
             let router = app.state::<window_commands::NativeCommandRouter>();
             window_commands::install_native_menu(app.handle(), router.inner())
                 .map_err(std::io::Error::other)?;
@@ -2523,6 +2604,7 @@ pub fn run() {
             patch_window_settings,
             open_external_url,
             revoke_workspace_grant,
+            read_product_open_links,
             window_commands::open_conversation_window,
             window_commands::open_settings_window,
             window_commands::open_about_window,
@@ -2812,18 +2894,47 @@ mod tests {
     #[test]
     fn browse_opener_allows_only_the_hatch_catalog_origin() {
         assert!(is_allowed_browse_url(
-            "https://hatch.tokenquadrant.cn/agents"
+            "https://hatch.tokenquadrant.cn/explore"
         ));
         assert!(is_allowed_browse_url(
-            "https://hatch.tokenquadrant.cn/agents/signal"
+            "https://hatch.tokenquadrant.cn/products/550e8400-e29b-41d4-a716-446655440000"
+        ));
+        assert!(is_allowed_browse_url(
+            "https://hatch.tokenquadrant.cn/creators/550e8400-e29b-41d4-a716-446655440000"
         ));
         assert!(!is_allowed_browse_url(
-            "https://hatch.tokenquadrant.cn/agents-redirect"
+            "https://hatch.tokenquadrant.cn/products/not-a-uuid"
         ));
-        assert!(!is_allowed_browse_url("https://evil.example/agents"));
         assert!(!is_allowed_browse_url(
-            "https://hatch.tokenquadrant.cn.evil/agents"
+            "https://hatch.tokenquadrant.cn/agents"
         ));
+        assert!(!is_allowed_browse_url(
+            "https://evil.example/products/550e8400-e29b-41d4-a716-446655440000"
+        ));
+        assert!(!is_allowed_browse_url(
+            "https://hatch.tokenquadrant.cn.evil/products/550e8400-e29b-41d4-a716-446655440000"
+        ));
+    }
+
+    #[test]
+    fn product_open_deep_link_is_canonical_and_uuid_bound() {
+        let valid = url::Url::parse(
+            "hatch://products/open?entitlement_id=7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001&product_id=9cc7b10c-4db0-4d8a-8c2f-2e2c8cba1003&creator_id=8bb7b10c-4db0-4d8a-8c2f-2e2c8cba1002",
+        )
+        .unwrap();
+        assert!(super::normalize_product_open_url(&valid).is_some());
+
+        let legacy = url::Url::parse(
+            "hatch://agents/open?entitlement_id=7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001&product_id=9cc7b10c-4db0-4d8a-8c2f-2e2c8cba1003",
+        )
+        .unwrap();
+        assert!(super::normalize_product_open_url(&legacy).is_none());
+
+        let malformed = url::Url::parse(
+            "hatch://products/open?entitlement_id=ent_old&product_id=9cc7b10c-4db0-4d8a-8c2f-2e2c8cba1003",
+        )
+        .unwrap();
+        assert!(super::normalize_product_open_url(&malformed).is_none());
     }
 
     #[test]

@@ -7,7 +7,7 @@ import test from "node:test";
 import { createDashboardApp } from "../server.mjs";
 
 const DENIED_CASES = [
-  ["product:read", "GET", "/v1/creator/agents"],
+  ["product:read", "GET", "/v1/creator/products"],
   ["product:read", "GET", "/v1/creator/factory-drafts/draft-1"],
   ["product:read", "GET", "/v1/creator/factory-runs/run-1"],
   ["product:read", "GET", "/v1/creator/products/product-1/releases"],

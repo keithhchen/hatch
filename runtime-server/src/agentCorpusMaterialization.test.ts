@@ -7,6 +7,9 @@ import test from "node:test";
 import { materializeAgentCorpus } from "./agentCorpusMaterialization.js";
 import type { ClientToolName } from "./protocol.js";
 
+const CREATOR_ID = "11111111-1111-4111-8111-111111111111";
+const PRODUCT_ID = "22222222-2222-4222-8222-222222222222";
+
 const allDesktopTools: ClientToolName[] = [
   "file_list",
   "file_search",
@@ -28,9 +31,8 @@ test("Agent Corpus cannot remove File or Shell capabilities advertised by Deskto
     await writeFile(path.join(root, "evals/evals.json"), evaluations, "utf8");
     await writeFile(path.join(root, "agent.json"), JSON.stringify({
       contract_version: "1",
-      agent_id: "api-focused-agent",
-      creator: { id: "creator", name: "Creator" },
-      product: { id: "api-focused-product", name: "API Focused Agent" },
+      creator: { id: CREATOR_ID, name: "Creator" },
+      product: { id: PRODUCT_ID, name: "API Focused Agent" },
       instructions: { system: asset("instructions/system.md", system, "system") },
       skills: [],
       knowledge: { documents: [] },
@@ -62,9 +64,8 @@ test("Runtime never invents a local capability the Desktop did not advertise", a
     await writeFile(path.join(root, "evals/evals.json"), evaluations, "utf8");
     await writeFile(path.join(root, "agent.json"), JSON.stringify({
       contract_version: "1",
-      agent_id: "limited-client-agent",
-      creator: { id: "creator", name: "Creator" },
-      product: { id: "limited-client-product", name: "Limited Client Agent" },
+      creator: { id: CREATOR_ID, name: "Creator" },
+      product: { id: PRODUCT_ID, name: "Limited Client Agent" },
       instructions: { system: asset("instructions/system.md", system, "system") },
       skills: [],
       knowledge: { documents: [] },

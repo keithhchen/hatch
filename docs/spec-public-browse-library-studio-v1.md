@@ -1,5 +1,7 @@
 # Hatch Public Browse, Library & Studio v1
 
+> Historical UX baseline. Route and identity examples in this document predate the UUID cutover; use [UUID Product Identity v1](./spec-uuid-product-identity-v1.md) and [Web Dashboard & Commerce Flow v2](./spec-web-dashboard-commerce-v2.md) for the implemented canonical surface. No legacy route redirect is supported.
+
 状态：Product / UX / Web routing contract
 
 日期：2026-08-12

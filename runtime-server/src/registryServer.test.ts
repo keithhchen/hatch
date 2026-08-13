@@ -6,6 +6,9 @@ import path from "node:path";
 import { test } from "node:test";
 import { createRegistryServerFromEnvironment } from "./registryServer.js";
 
+const CREATOR_ID = "11111111-1111-4111-8111-111111111111";
+const PRODUCT_ID = "22222222-2222-4222-8222-222222222222";
+
 test("TypeScript Registry exposes auth and Corpus catalog endpoints", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-ts-registry-server-"));
   const registry = await createRegistryServerFromEnvironment({
@@ -35,7 +38,7 @@ test("TypeScript Registry exposes auth and Corpus catalog endpoints", async () =
     assert.equal(me.status, 200);
     assert.equal(me.headers.get("cache-control"), "no-store");
     const mePayload = await me.json() as { id: string; session_expires_at: string };
-    assert.match(mePayload.id, /test-user/);
+    assert.match(mePayload.id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     assert.match(mePayload.session_expires_at, /^20/);
 
     const legacy = legacyAuthToken(auth.account.id, "user", "test-secret");
@@ -44,13 +47,13 @@ test("TypeScript Registry exposes auth and Corpus catalog endpoints", async () =
     });
     assert.equal(rejectedLegacy.status, 401);
 
-    const access = await fetch(`${base}/v1/user/agent-access`, {
+    const access = await fetch(`${base}/v1/user/product-access`, {
       headers: { authorization: `Bearer ${auth.session.token}` }
     });
     assert.equal(access.status, 200);
     assert.deepEqual(await access.json(), []);
 
-    const selfGrant = await fetch(`${base}/v1/user/agents/maya/signal/access`, {
+    const selfGrant = await fetch(`${base}/v1/user/products/${PRODUCT_ID}/access`, {
       method: "POST",
       headers: { authorization: `Bearer ${auth.session.token}`, "content-type": "application/json" },
       body: JSON.stringify({ order_id: "order_forged" })
@@ -59,24 +62,24 @@ test("TypeScript Registry exposes auth and Corpus catalog endpoints", async () =
     // account can discover no mutation authority from possessing a session.
     assert.equal(selfGrant.status, 401);
 
-    const userTokenOnCommerceRoute = await fetch(`${base}/v1/commerce/agent-access`, {
+    const userTokenOnCommerceRoute = await fetch(`${base}/v1/commerce/product-access`, {
       method: "POST",
       headers: { authorization: `Bearer ${auth.session.token}`, "content-type": "application/json" },
-      body: JSON.stringify({ user_id: auth.account.id, creator_id: "maya", agent_id: "signal", order_id: "order_forged" })
+      body: JSON.stringify({ user_id: auth.account.id, creator_id: CREATOR_ID, product_id: PRODUCT_ID, order_id: "order_forged" })
     });
     assert.equal(userTokenOnCommerceRoute.status, 401);
 
-    const missingOrder = await fetch(`${base}/v1/commerce/agent-access`, {
+    const missingOrder = await fetch(`${base}/v1/commerce/product-access`, {
       method: "POST",
       headers: { authorization: "Bearer commerce-test-token", "content-type": "application/json" },
-      body: JSON.stringify({ user_id: auth.account.id, creator_id: "maya", agent_id: "signal" })
+      body: JSON.stringify({ user_id: auth.account.id, creator_id: CREATOR_ID, product_id: PRODUCT_ID })
     });
     assert.equal(missingOrder.status, 400);
 
-    const commerceOnly = await fetch(`${base}/v1/commerce/agent-access`, {
+    const commerceOnly = await fetch(`${base}/v1/commerce/product-access`, {
       method: "POST",
       headers: { authorization: "Bearer commerce-test-token", "content-type": "application/json" },
-      body: JSON.stringify({ user_id: auth.account.id, creator_id: "maya", agent_id: "signal", order_id: "order_real" })
+      body: JSON.stringify({ user_id: auth.account.id, creator_id: CREATOR_ID, product_id: PRODUCT_ID, order_id: "order_real" })
     });
     assert.equal(commerceOnly.status, 404);
 

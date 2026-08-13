@@ -31,9 +31,9 @@ test("Registry Creator Factory API authenticates ownership and creates idempoten
   const creatorA = await signup(base, "factory-a@example.com", "Creator A");
   const creatorB = await signup(base, "factory-b@example.com", "Creator B");
   const body = {
-    agent_id: "publishable-reply",
+    product_id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
     product: {
-      id: "publishable-reply",
+      id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
       name: "Publishable Reply",
       description: "One finished customer response.",
       promise: "A decisive reply grounded in Creator evidence.",

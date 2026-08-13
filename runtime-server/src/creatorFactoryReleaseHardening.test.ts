@@ -348,7 +348,7 @@ test("post-call sealed question validation keeps a sensitive leakage group behin
   const taskBrief = await store.writeArtifact("input/task-brief.md", "Produce a complete result.");
   const evidence = await store.writeArtifact("evidence/evidence.md", "# Task evidence\nVisible evidence.");
   const state = {
-    creator: { id: "creator-one", name: "Creator One" },
+    creator: { id: "11111111-1111-4111-8111-111111111111", name: "Creator One" },
     taskName: "One task",
     artifacts: { taskBrief, evidence }
   } as Pick<FactoryRunState, "creator" | "taskName" | "artifacts">;
@@ -388,7 +388,7 @@ test("post-call sealed question validation keeps a sensitive leakage group behin
 function sampleInput(runId: string): FactoryStartInput {
   return {
     runId,
-    creator: { id: "creator-one", name: "Creator One" },
+    creator: { id: "11111111-1111-4111-8111-111111111111", name: "Creator One" },
     taskName: "Publishable offer critique",
     taskBrief: "Choose one material change and return usable copy.",
     sources: [{

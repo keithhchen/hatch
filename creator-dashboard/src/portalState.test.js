@@ -109,7 +109,7 @@ test("Creator approval, offer, and publish form one versioned workflow", async (
   });
   assert.equal(published.status, "published");
   assert.equal(published.offer_active.amount_minor, 0);
-  assert.match(published.public_url, /^\/agents\//);
+  assert.match(published.public_url, /^\/products\//);
   const withdrawn = await store.withdrawProduct("creator-1", "product-1", published.version, {
     reason: "Pause the listing for review.",
     command_key: "withdraw-command-1"

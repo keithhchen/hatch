@@ -13,10 +13,10 @@ import {
 import type { PostgresQueryExecutor } from "./postgresStore.js";
 
 const binding = {
-  ownerAccountId: "account_1",
-  creatorId: "creator_a",
-  agentId: "agent_a",
-  productId: "product_a",
+  ownerAccountId: "11111111-1111-4111-8111-111111111111",
+  creatorId: "22222222-2222-4222-8222-222222222222",
+  agentId: "33333333-3333-4333-8333-333333333333",
+  productId: "33333333-3333-4333-8333-333333333333",
   corpusDigest: `sha256:${"a".repeat(64)}`
 };
 const inputDigest = `sha256:${"b".repeat(64)}`;
@@ -40,8 +40,8 @@ test("ConversationRepository stores first-class metadata, versions it, and pages
   assert.equal(one.created, true);
   assert.equal(idempotent.created, false);
   assert.equal(idempotent.conversation.id, "conversation_1");
-  assert.equal(one.conversation.ownerAccountId, "account_1");
-  assert.equal(one.conversation.productIdAtCreation, "product_a");
+  assert.equal(one.conversation.ownerAccountId, binding.ownerAccountId);
+  assert.equal(one.conversation.productIdAtCreation, binding.productId);
   assert.equal(one.conversation.version, 1);
 
   const renamed = await repository.updateConversation(one.conversation.id, {

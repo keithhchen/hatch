@@ -11,6 +11,12 @@ import { DeterministicAgentRuntime } from "./agentRuntime.js";
 import { createRuntimeServer } from "./index.js";
 
 const tempRoots: string[] = [];
+const CREATOR_ID = "11111111-1111-4111-8111-111111111111";
+const PRODUCT_ID = "22222222-2222-4222-8222-222222222222";
+const OTHER_CREATOR_ID = "33333333-3333-4333-8333-333333333333";
+const ENTITLEMENT_ID = "44444444-4444-4444-8444-444444444444";
+const ORDER_ID = "55555555-5555-4555-8555-555555555555";
+const USER_ID = "66666666-6666-4666-8666-666666666666";
 afterEach(async () => {
   await Promise.all(tempRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
@@ -19,9 +25,8 @@ test("Agent Corpus bounds catalog metadata, arrays, and embedded JSON", () => {
   const asset = { id: "asset", path: "evals/asset.json", sha256: `sha256:${"a".repeat(64)}` };
   const base = {
     contract_version: "1",
-    agent_id: "bounded-agent",
-    creator: { id: "bounded-creator", name: "Bounded Creator" },
-    product: { id: "bounded-product", name: "Bounded Product", presentation: {} },
+    creator: { id: CREATOR_ID, name: "Bounded Creator" },
+    product: { id: PRODUCT_ID, name: "Bounded Product", presentation: {} },
     instructions: { system: { ...asset, id: "system", path: "instructions/system.md" } },
     skills: [],
     knowledge: { documents: [] },
@@ -65,10 +70,9 @@ test("Agent Corpus loads clean assets and scopes knowledge by creator and agent"
   await writeFile(path.join(root, "evals/evals.json"), evals, "utf8");
   const corpus = {
     contract_version: "1",
-    agent_id: "signal-resume-review",
-    creator: { id: "maya-chen", name: "Maya Chen" },
+    creator: { id: CREATOR_ID, name: "Maya Chen" },
     product: {
-      id: "signal-resume-review",
+      id: PRODUCT_ID,
       name: "Signal Resume Review",
     },
     instructions: { system: asset("instructions/system.md", system, "instructions-system") },
@@ -87,11 +91,11 @@ test("Agent Corpus loads clean assets and scopes knowledge by creator and agent"
 
   const loaded = await loadAgentCorpus(root);
   const provider = new CorpusKnowledgeProvider(root, loaded);
-  const hits = await provider.search({ creatorId: "maya-chen", agentId: "signal-resume-review", corpusDigest: `sha256:${"1".repeat(64)}`, query: "strongest evidence", limit: 4 });
+  const hits = await provider.search({ creatorId: CREATOR_ID, agentId: PRODUCT_ID, corpusDigest: `sha256:${"1".repeat(64)}`, query: "strongest evidence", limit: 4 });
   assert.equal(hits.length, 1);
   assert.match(hits[0]!.text, /strongest evidence/);
   await assert.rejects(
-    provider.search({ creatorId: "other-creator", agentId: "signal-resume-review", corpusDigest: `sha256:${"1".repeat(64)}`, query: "evidence", limit: 4 }),
+    provider.search({ creatorId: OTHER_CREATOR_ID, agentId: PRODUCT_ID, corpusDigest: `sha256:${"1".repeat(64)}`, query: "evidence", limit: 4 }),
     /creator scope/
   );
 });
@@ -110,15 +114,15 @@ test("remote KnowledgeProvider always sends the current creator and agent scope"
   assert.ok(address && typeof address === "object");
   try {
     const hits = await new HttpKnowledgeProvider(`http://127.0.0.1:${address.port}/search`).search({
-      creatorId: "maya-chen",
-      agentId: "signal-resume-review",
+      creatorId: CREATOR_ID,
+      agentId: PRODUCT_ID,
       corpusDigest: `sha256:${"1".repeat(64)}`,
       query: "evidence",
       limit: 4
     });
     assert.deepEqual(received, {
-      creator_id: "maya-chen",
-      agent_id: "signal-resume-review",
+      creator_id: CREATOR_ID,
+      agent_id: PRODUCT_ID,
       corpus_digest: `sha256:${"1".repeat(64)}`,
       query: "evidence",
       top_k: 4
@@ -189,7 +193,7 @@ test("Qdrant KnowledgeProvider embeds, scopes, reranks, and returns source metad
 test("Agent Corpus resolver loads the Registry current creator/agent path", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-agent-corpus-root-"));
   tempRoots.push(root);
-  const creatorRoot = path.join(root, "maya-chen", "signal-resume-review");
+  const creatorRoot = path.join(root, CREATOR_ID, PRODUCT_ID);
   await mkdir(path.join(creatorRoot, "instructions"), { recursive: true });
   await mkdir(path.join(creatorRoot, "evals"), { recursive: true });
   const system = "Global method.";
@@ -199,10 +203,9 @@ test("Agent Corpus resolver loads the Registry current creator/agent path", asyn
   const asset = (assetPath: string, content: string, id: string) => ({ id, path: assetPath, sha256: digest(content) });
   await writeFile(path.join(creatorRoot, "agent.json"), JSON.stringify({
     contract_version: "1",
-    agent_id: "signal-resume-review",
-    creator: { id: "maya-chen", name: "Maya Chen" },
+    creator: { id: CREATOR_ID, name: "Maya Chen" },
     product: {
-      id: "signal-resume-review",
+      id: PRODUCT_ID,
       name: "Signal Resume Review",
     },
     instructions: { system: asset("instructions/system.md", system, "instructions-system") },
@@ -211,9 +214,9 @@ test("Agent Corpus resolver loads the Registry current creator/agent path", asyn
     tools: [{ id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" }],
     evaluations: { synthetic_qa: [asset("evals/evals.json", evals, "synthetic")], held_out: [asset("evals/evals.json", evals, "held-out")] }
   }), "utf8");
-  const resolved = await new AgentCorpusResolver(root).resolve("maya-chen", "signal-resume-review");
-  assert.equal(resolved.corpus.product.id, "signal-resume-review");
-  await assert.rejects(new AgentCorpusResolver(root).resolve("other-creator", "signal-resume-review"), /missing|ENOENT|Agent Corpus/);
+  const resolved = await new AgentCorpusResolver(root).resolve(CREATOR_ID, PRODUCT_ID);
+  assert.equal(resolved.corpus.product.id, PRODUCT_ID);
+  await assert.rejects(new AgentCorpusResolver(root).resolve(OTHER_CREATOR_ID, PRODUCT_ID), /missing|ENOENT|Agent Corpus/);
 });
 
 
@@ -221,7 +224,7 @@ test("Agent Corpus resolver loads the Registry current creator/agent path", asyn
 test("current Agent Corpus entitlements are discoverable and bind the Desktop session", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-agent-corpus-entitlement-"));
   tempRoots.push(root);
-  const creatorRoot = path.join(root, "maya-chen", "signal-resume-review");
+  const creatorRoot = path.join(root, CREATOR_ID, PRODUCT_ID);
   await mkdir(path.join(creatorRoot, "instructions"), { recursive: true });
   await mkdir(path.join(creatorRoot, "evals"), { recursive: true });
   const system = "Review the supplied file using Maya's method.";
@@ -231,10 +234,9 @@ test("current Agent Corpus entitlements are discoverable and bind the Desktop se
   const asset = (assetPath: string, content: string, id: string) => ({ id, path: assetPath, sha256: digest(content) });
   await writeFile(path.join(creatorRoot, "agent.json"), JSON.stringify({
     contract_version: "1",
-    agent_id: "signal-resume-review",
-    creator: { id: "maya-chen", name: "Maya Chen" },
+    creator: { id: CREATOR_ID, name: "Maya Chen" },
     product: {
-      id: "signal-resume-review",
+      id: PRODUCT_ID,
       name: "Signal Resume Review",
       description: "Review a resume.",
     },
@@ -245,12 +247,12 @@ test("current Agent Corpus entitlements are discoverable and bind the Desktop se
     evaluations: { synthetic_qa: [asset("evals/evals.json", evals, "synthetic")], held_out: [asset("evals/evals.json", evals, "held-out")] }
   }), "utf8");
   const entitlement = {
-    entitlement_id: "ent_maya_resume",
-    order_id: "order_maya_resume",
-    user_id: "buyer-jordan",
-    creator_id: "maya-chen",
-    product_id: "signal-resume-review",
-    agent_id: "signal-resume-review",
+    entitlement_id: ENTITLEMENT_ID,
+    order_id: ORDER_ID,
+    user_id: USER_ID,
+    creator_id: CREATOR_ID,
+    product_id: PRODUCT_ID,
+    agent_id: PRODUCT_ID,
     status: "active" as const
   };
   const entitlementResolver = {
@@ -273,8 +275,8 @@ test("current Agent Corpus entitlements are discoverable and bind the Desktop se
       headers: { authorization: "Bearer license-jordan" }
     });
     assert.equal(library.status, 200);
-    const payload = await library.json() as { creator_agents: Array<{ agent_id: string }> };
-    assert.equal(payload.creator_agents[0]?.agent_id, "signal-resume-review");
+    const payload = await library.json() as { creator_agents: Array<{ product_id: string }> };
+    assert.equal(payload.creator_agents[0]?.product_id, PRODUCT_ID);
 
     const socket = new WebSocket(`ws://127.0.0.1:${address.port}/runtime`);
     const ready = await new Promise<Record<string, unknown>>((resolve, reject) => {
@@ -287,12 +289,12 @@ test("current Agent Corpus entitlements are discoverable and bind the Desktop se
         license_token: "license-jordan",
         entitlement_id: entitlement.entitlement_id,
         creator_id: entitlement.creator_id,
-        agent_id: entitlement.agent_id,
+        product_id: entitlement.product_id,
         local_tools: []
       })));
     });
     assert.equal(ready.type, "session.ready");
-    assert.equal(ready.agent_id, "signal-resume-review");
+    assert.equal(ready.product_id, PRODUCT_ID);
     assert.match(String(ready.corpus_digest), /^sha256:[a-f0-9]{64}$/);
     socket.close();
   } finally {

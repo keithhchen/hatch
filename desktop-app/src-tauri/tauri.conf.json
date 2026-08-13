@@ -23,6 +23,13 @@
       }
     ]
   },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["hatch"]
+      }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": ["app", "dmg"],

@@ -9,10 +9,10 @@ import { signSandboxWebhook } from "../providerAdapters.mjs";
 
 const WEBHOOK_SECRET = "finance-bff-webhook-secret";
 const paidAgent = {
-  creator_id: "creator-finance",
+  creator_id: "2c4e6f90-0f29-4c8b-a7d1-5e9b4c1f8a33",
   creator_name: "Finance Creator",
-  agent_id: "finance-agent",
-  product_id: "finance-product",
+  agent_id: "7d6b2e11-3c48-4f95-b2a0-8e1d6c7f9b44",
+  product_id: "7d6b2e11-3c48-4f95-b2a0-8e1d6c7f9b44",
   product_name: "Finance Product",
   product_description: "A paid Agent used to verify the finance boundary.",
   product_promise: "One paid delivery.",
@@ -594,7 +594,7 @@ async function createFinanceFixture(context, options = {}) {
 
 async function createCheckout(api, idempotencyKey) {
   const detailResponse = await fetch(
-    `${serverUrl(api)}/v1/catalog/agents/${paidAgent.creator_id}/${paidAgent.product_id}`
+    `${serverUrl(api)}/v1/public/products/${paidAgent.product_id}`
   );
   const detail = await detailResponse.json();
   assert.equal(detailResponse.status, 200, JSON.stringify(detail));
@@ -603,7 +603,7 @@ async function createCheckout(api, idempotencyKey) {
     headers: mutationHeaders("buyer-token", idempotencyKey),
     body: JSON.stringify({
       product_id: paidAgent.product_id,
-      offer_id: detail.agent.offer.offer_id
+      offer_id: detail.product.offer.offer_id
     })
   });
   const body = await response.json();
@@ -720,15 +720,15 @@ function registryFixture({ grants, revocations, grantFailures = 0 }) {
       response.end(JSON.stringify({ detail: "invalid token" }));
       return;
     }
-    if (url.pathname === "/v1/catalog/agents" || url.pathname === "/v1/creator/agents") {
+    if (url.pathname === "/v1/public/products" || url.pathname === "/v1/creator/products") {
       response.end(JSON.stringify([paidAgent]));
       return;
     }
-    if (url.pathname === "/v1/user/agent-access" && request.method === "GET") {
+    if (url.pathname === "/v1/user/product-access" && request.method === "GET") {
       response.end(JSON.stringify([]));
       return;
     }
-    if (url.pathname === `/v1/user/agents/${paidAgent.creator_id}/${paidAgent.agent_id}/access`
+    if (url.pathname === `/v1/user/products/${paidAgent.product_id}/access`
       && request.method === "POST") {
       const body = JSON.parse(content);
       grantAttempts += 1;
@@ -747,7 +747,7 @@ function registryFixture({ grants, revocations, grantFailures = 0 }) {
       }));
       return;
     }
-    const revokeMatch = url.pathname.match(/^\/v1\/user\/agent-access\/([^/]+)$/);
+    const revokeMatch = url.pathname.match(/^\/v1\/user\/product-access\/([^/]+)$/);
     if (request.method === "DELETE" && revokeMatch) {
       revocations.push(decodeURIComponent(revokeMatch[1]));
       response.end(JSON.stringify({

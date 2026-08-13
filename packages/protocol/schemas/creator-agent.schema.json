@@ -5,16 +5,15 @@
   "description": "The self-contained canonical contract for one runtime-free Hatch Agent Corpus.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["contract_version", "agent_id", "creator", "product", "instructions", "tools", "evaluations"],
+  "required": ["contract_version", "creator", "product", "instructions", "tools", "evaluations"],
   "properties": {
     "contract_version": { "const": "1" },
-    "agent_id": { "$ref": "#/$defs/identifier" },
     "creator": {
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "name"],
       "properties": {
-        "id": { "$ref": "#/$defs/identifier" },
+        "id": { "$ref": "#/$defs/uuidV4" },
         "name": { "type": "string", "minLength": 1, "maxLength": 256 }
       }
     },
@@ -23,7 +22,7 @@
       "additionalProperties": false,
       "required": ["id", "name"],
       "properties": {
-        "id": { "$ref": "#/$defs/identifier" },
+        "id": { "$ref": "#/$defs/uuidV4" },
         "name": { "type": "string", "minLength": 1, "maxLength": 256 },
         "description": { "type": "string", "minLength": 1, "maxLength": 4096 },
         "promise": { "type": "string", "minLength": 1, "maxLength": 4096 },
@@ -90,6 +89,7 @@
   },
   "$defs": {
     "identifier": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$", "minLength": 1, "maxLength": 128 },
+    "uuidV4": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
     "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
     "asset": {
       "type": "object",

@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { z } from "zod";
 import { verifyHatchAuthToken } from "./authToken.js";
+import { UUID_V4_RE, isUuidV4 } from "./identity.js";
 
 export type AuthIdentity = {
   sub: string;
@@ -44,6 +45,22 @@ const AgentCorpusEntitlementBindingSchema = EntitlementCommonSchema.extend({
     advanced_at: z.string().optional()
   }).strip()).optional(),
 }).strict();
+
+// Registry is the production authority after the UUID cutover. Keep the
+// explicit file/HMAC adapter above usable for local migration fixtures, but
+// never allow a Registry response to reintroduce text identities.
+const CanonicalRegistryEntitlementBindingSchema = AgentCorpusEntitlementBindingSchema.extend({
+  entitlement_id: z.string().regex(UUID_V4_RE),
+  order_id: z.string().regex(UUID_V4_RE).optional(),
+  user_id: z.string().regex(UUID_V4_RE),
+  creator_id: z.string().regex(UUID_V4_RE),
+  agent_id: z.string().regex(UUID_V4_RE),
+  product_id: z.string().regex(UUID_V4_RE)
+}).strict().superRefine((binding, context) => {
+  if (binding.agent_id !== binding.product_id) {
+    context.addIssue({ code: "custom", path: ["product_id"], message: "agent_id must equal product_id after the UUID cutover" });
+  }
+});
 
 export const EntitlementBindingSchema = AgentCorpusEntitlementBindingSchema;
 
@@ -214,7 +231,7 @@ export class RegistryEntitlementResolver implements EntitlementResolver, AuthIde
     } catch {
       payload = {};
     }
-    if (typeof payload.id !== "string" || !payload.id || (payload.role !== "user" && payload.role !== "creator")) {
+    if (typeof payload.id !== "string" || !isUuidV4(payload.id) || (payload.role !== "user" && payload.role !== "creator")) {
       throw new EntitlementError("auth_registry_invalid", "The Registry returned an invalid account identity.");
     }
     const expiresAt = typeof payload.session_expires_at === "string" ? Date.parse(payload.session_expires_at) : Number.NaN;
@@ -273,7 +290,7 @@ export class RegistryEntitlementResolver implements EntitlementResolver, AuthIde
 function parseRegistryEntitlements(payload: unknown): EntitlementBinding[] {
   // Registry grants carry bookkeeping/presentation fields that are not part of
   // the runtime authority. Parse only the binding contract and strip the rest.
-  return z.array(AgentCorpusEntitlementBindingSchema.strip()).max(50).parse(payload);
+  return z.array(CanonicalRegistryEntitlementBindingSchema.strip()).max(50).parse(payload);
 }
 
 async function readBoundedResponseBody(response: Response, maximumBytes: number): Promise<string> {

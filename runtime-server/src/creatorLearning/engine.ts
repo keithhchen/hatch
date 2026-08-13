@@ -28,6 +28,7 @@ import { materializeAgentCorpusBundle } from "./corpusBundle.js";
 import { FactoryFileStore } from "./fileStore.js";
 import { classifyFactoryProviderFailure } from "./factoryKimiK3.js";
 import { issueQuestionBatch, requireQuestionBatchId } from "./questionBatch.js";
+import { requireUuidV4 } from "../identity.js";
 import { validateFactorySourceManifest } from "./sourceScope.js";
 import type {
   ActiveQaEvaluationScope,
@@ -1948,14 +1949,12 @@ function normalizeFactoryIdentity(input: FactoryStartInput): {
   agentId: string;
   product: FactoryRunState["product"];
 } {
+  requireUuidV4(input.creator?.id, "creator.id");
   const suppliedAgentId = input.agentId?.trim();
-  const agentId = suppliedAgentId || `agent-${createHash("sha256")
-    .update(`${input.creator.id}\u0000${input.taskName.trim()}`)
-    .digest("hex")
-    .slice(0, 16)}`;
-  requireCorpusIdentifier(agentId, "agentId");
-  const productId = input.product?.id?.trim() || agentId;
-  requireCorpusIdentifier(productId, "product.id");
+  const suppliedProductId = input.product?.id?.trim();
+  const agentId = requireUuidV4(suppliedAgentId || suppliedProductId || randomUUID(), "product.id");
+  const productId = requireUuidV4(suppliedProductId || agentId, "product.id");
+  if (agentId !== productId) throw new Error("agentId and product.id must identify the same Product UUID");
   const productName = input.product?.name?.trim() || input.taskName.trim();
   const description = input.product?.description?.trim() || input.taskBrief.trim();
   const promise = input.product?.promise?.trim();

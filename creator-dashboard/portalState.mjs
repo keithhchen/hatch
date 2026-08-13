@@ -418,8 +418,9 @@ export class PortalStateStore {
       };
       record.releases = [clone(record.release)];
       record.offer_active = offerSnapshot ? { ...clone(offerSnapshot), status: "active" } : null;
+      record.offer_revision = Number(offerSnapshot?.revision ?? 0);
       record.active_deployment_id = record.release.deployment_operation_id;
-      record.public_url = `/agents/${encodeURIComponent(creatorId)}/${encodeURIComponent(productId)}`;
+      record.public_url = `/products/${encodeURIComponent(productId)}`;
       record.status = "published";
       record.updated_at = now;
       appendAudit(record, "release.migrated", creatorId, "registry_release_migration", {
@@ -708,7 +709,7 @@ export class PortalStateStore {
       record.offer_active = { ...operation.offer_snapshot, status: "active" };
       record.active_deployment_id = operation.operation_id;
       record.status = "published";
-      record.public_url = `/agents/${encodeURIComponent(creatorId)}/${encodeURIComponent(productId)}`;
+      record.public_url = `/products/${encodeURIComponent(productId)}`;
       record.published_at = now;
       record.updated_at = now;
       record.last_publish_operation = { ...operation, completed_at: now };
@@ -920,7 +921,7 @@ export class PortalStateStore {
       record.releases.push(clone(record.release));
       record.offer_active = { ...record.offer_draft, status: "active" };
       record.status = "published";
-      record.public_url = `/agents/${encodeURIComponent(creatorId)}/${encodeURIComponent(productId)}`;
+      record.public_url = `/products/${encodeURIComponent(productId)}`;
       record.published_at = record.release.published_at;
       record.updated_at = this.clock().toISOString();
       return record;

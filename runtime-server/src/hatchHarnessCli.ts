@@ -13,6 +13,7 @@ import { FileConversationRepository } from "./conversationRepository.js";
 import type { EntitlementBinding, EntitlementLookup, EntitlementResolver } from "./entitlements.js";
 import { createRuntimeServer, type RuntimeServer } from "./index.js";
 import { createOutputGuardFromEnvironment } from "./outputGuard.js";
+import { requireUuidV4 } from "./identity.js";
 import {
   PROTOCOL_VERSION,
   ToolCallResultSchema,
@@ -41,6 +42,9 @@ const LOCAL_TOOLS = [
   "shell_exec",
   "git_diff"
 ] as const satisfies readonly ClientToolName[];
+const FACTORY_HARNESS_ENTITLEMENT_ID = "77777777-7777-4777-8777-777777777777";
+const FACTORY_HARNESS_ORDER_ID = "88888888-8888-4888-8888-888888888888";
+const FACTORY_HARNESS_USER_ID = "99999999-9999-4999-8999-999999999999";
 
 export type HatchHarnessCliInput = {
   corpusRoot: string;
@@ -220,10 +224,10 @@ async function executeOneTurn(
         protocol_version: PROTOCOL_VERSION,
         installation_id: installationId,
         license_token: "factory-harness-local",
-        entitlement_id: "factory-harness-entitlement",
+        entitlement_id: FACTORY_HARNESS_ENTITLEMENT_ID,
         creator_id: input.creatorId,
-        agent_id: input.agentId,
-        user_id: "creator-factory-evaluator",
+        product_id: input.agentId,
+        user_id: FACTORY_HARNESS_USER_ID,
         local_tools: [...LOCAL_TOOLS]
       } satisfies ClientHello;
       socket.send(JSON.stringify(hello));
@@ -249,7 +253,7 @@ async function executeOneTurn(
               `Hatch Runtime negotiated unexpected protocol version: ${String(message.accepted_protocol_version)}`
             );
           }
-          if (message.creator_id !== input.creatorId || message.agent_id !== input.agentId) {
+          if (message.creator_id !== input.creatorId || message.product_id !== input.agentId) {
             throw new Error("Hatch Runtime bound a different Creator Agent");
           }
           if (message.corpus_digest !== input.corpusDigest) {
@@ -332,13 +336,13 @@ function factoryHarnessEntitlementResolver(
   productId: string
 ): EntitlementResolver {
   const binding: EntitlementBinding = {
-    entitlement_id: "factory-harness-entitlement",
-    order_id: "factory-harness-order",
-    user_id: "creator-factory-evaluator",
+    entitlement_id: FACTORY_HARNESS_ENTITLEMENT_ID,
+    order_id: FACTORY_HARNESS_ORDER_ID,
+    user_id: FACTORY_HARNESS_USER_ID,
     creator_id: input.creatorId,
     product_id: productId,
     status: "active",
-    agent_id: input.agentId
+    agent_id: productId
   };
   const authorized = (lookup: EntitlementLookup): boolean => (
     lookup.licenseToken === "factory-harness-local"
@@ -708,7 +712,8 @@ function delay(milliseconds: number): Promise<void> {
 
 function validateInput(input: HatchHarnessCliInput): void {
   if (!path.isAbsolute(input.corpusRoot)) throw new Error("corpusRoot must be an absolute path");
-  if (!input.creatorId.trim() || !input.agentId.trim()) throw new Error("creatorId and agentId are required");
+  requireUuidV4(input.creatorId, "creatorId");
+  requireUuidV4(input.agentId, "agentId/productId");
   if (!/^sha256:[a-f0-9]{64}$/.test(input.corpusDigest)) throw new Error("corpusDigest is invalid");
   if (!input.question.trim()) throw new Error("question is required");
   if (Buffer.byteLength(input.question) > MAX_STDIN_BYTES) throw new Error("question exceeds the Factory harness limit");

@@ -12,7 +12,6 @@ import "../../packages/brand/tokens.css";
 import "./styles.css";
 
 const CREATOR_ROOT = "/studio";
-const LEGACY_CREATOR_ROOT = "/portal/creator";
 
 function App() {
   const location = useBrowserLocation();
@@ -90,23 +89,16 @@ function App() {
     invalidate
   };
 
-  // `/` is the public Explore home for every role. Only the legacy Portal
-  // root gets the migration redirect; a signed-in Creator or Buyer should
-  // still be able to share/open the same public home without being sent into
-  // a private workspace.
-  if (location.pathname === "/portal" || location.pathname === "/portal/") {
-    if (location.pathname.startsWith("/portal") && sessionStatus === "loading") return <AppLoading />;
-    return <RouteRedirect to="/explore" navigate={location.navigate} />;
-  }
+  // The UUID cutover intentionally has no legacy Portal redirect. Unknown
+  // legacy paths must remain 404 so stale links cannot silently target a
+  // different resource.
 
   if (location.pathname === "/download") {
     return <RouteRedirect to="/explore" navigate={location.navigate} />;
   }
 
   if (location.pathname === CREATOR_ROOT
-    || location.pathname.startsWith(`${CREATOR_ROOT}/`)
-    || location.pathname === LEGACY_CREATOR_ROOT
-    || location.pathname.startsWith(`${LEGACY_CREATOR_ROOT}/`)) {
+    || location.pathname.startsWith(`${CREATOR_ROOT}/`)) {
     if (sessionStatus === "loading") return <AppLoading />;
     if (sessionStatus !== "authenticated") {
       return <RouteRedirect to={`/sign-in?returnTo=${encodeURIComponent(location.href)}`} navigate={location.navigate} />;

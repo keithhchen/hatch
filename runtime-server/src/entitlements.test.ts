@@ -11,6 +11,12 @@ import {
   registryAuthorizationTimeoutMs
 } from "./entitlements.js";
 
+const USER_ID = "11111111-1111-4111-8111-111111111111";
+const CREATOR_ID = "22222222-2222-4222-8222-222222222222";
+const PRODUCT_ID = "33333333-3333-4333-8333-333333333333";
+const ENTITLEMENT_ID = "44444444-4444-4444-8444-444444444444";
+const ORDER_ID = "55555555-5555-4555-8555-555555555555";
+
 test("file entitlement fixtures require explicit legacy HMAC opt-in and secret", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-file-entitlements-"));
   const fixture = path.join(root, "entitlements.json");
@@ -41,11 +47,12 @@ test("Registry entitlement resolver strips registry bookkeeping fields", async (
   const resolver = new RegistryEntitlementResolver(
     "https://registry.example.test",
     async () => new Response(JSON.stringify([{
-      entitlement_id: "ent_demo",
-      user_id: "user_demo",
-      creator_id: "creator_demo",
-      agent_id: "agent_demo",
-      product_id: "product_demo",
+      entitlement_id: ENTITLEMENT_ID,
+      order_id: ORDER_ID,
+      user_id: USER_ID,
+      creator_id: CREATOR_ID,
+      agent_id: PRODUCT_ID,
+      product_id: PRODUCT_ID,
       status: "active",
       granted_at: "2026-08-02T15:00:00.000Z",
     }]), { status: 200, headers: { "content-type": "application/json" } }),
@@ -53,11 +60,12 @@ test("Registry entitlement resolver strips registry bookkeeping fields", async (
 
   const [binding] = await resolver.list({ authToken: "signed-user-token" });
   assert.deepEqual(binding, {
-    entitlement_id: "ent_demo",
-    user_id: "user_demo",
-    creator_id: "creator_demo",
-    agent_id: "agent_demo",
-    product_id: "product_demo",
+    entitlement_id: ENTITLEMENT_ID,
+    order_id: ORDER_ID,
+    user_id: USER_ID,
+    creator_id: CREATOR_ID,
+    agent_id: PRODUCT_ID,
+    product_id: PRODUCT_ID,
     status: "active",
   });
 });
@@ -69,20 +77,35 @@ test("Registry entitlement resolution requests only the selected binding", async
     async (input) => {
       requestedUrl = String(input);
       return new Response(JSON.stringify([{
-        entitlement_id: "ent_selected",
-        user_id: "user_demo",
-        creator_id: "creator_demo",
-        agent_id: "agent_demo",
-        product_id: "product_demo",
+        entitlement_id: ENTITLEMENT_ID,
+        user_id: USER_ID,
+        creator_id: CREATOR_ID,
+        agent_id: PRODUCT_ID,
+        product_id: PRODUCT_ID,
         status: "active",
       }]), { status: 200 });
     },
   );
   assert.equal((await resolver.resolve({
     authToken: "opaque-token",
-    entitlementId: "ent_selected",
-  })).entitlement_id, "ent_selected");
-  assert.equal(new URL(requestedUrl).searchParams.get("entitlement_id"), "ent_selected");
+    entitlementId: ENTITLEMENT_ID,
+  })).entitlement_id, ENTITLEMENT_ID);
+  assert.equal(new URL(requestedUrl).searchParams.get("entitlement_id"), ENTITLEMENT_ID);
+});
+
+test("Registry entitlement resolver rejects pre-cutover text identities and split product aliases", async () => {
+  const resolver = new RegistryEntitlementResolver(
+    "https://registry.example.test",
+    async () => new Response(JSON.stringify([{
+      entitlement_id: "ent_old",
+      user_id: USER_ID,
+      creator_id: CREATOR_ID,
+      agent_id: PRODUCT_ID,
+      product_id: "product_old",
+      status: "active"
+    }]), { status: 200 })
+  );
+  await assert.rejects(resolver.list({ authToken: "signed-user-token" }), /Invalid uuid|invalid/i);
 });
 
 test("Registry authorization rejects oversized bodies before buffering them", async () => {
@@ -104,7 +127,7 @@ test("Registry identity resolver treats 401 as signed-out and returns server exp
   const fetchImpl = async (_url: string | URL | Request, init?: RequestInit) => {
     serviceHeader = new Headers(init?.headers).get("x-hatch-runtime-service-token");
     return new Response(JSON.stringify({
-    id: "user_jordan",
+    id: USER_ID,
     role: "user",
     display_name: "Jordan Lee",
     session_expires_at: "2026-11-08T00:00:00.000Z"
@@ -114,7 +137,7 @@ test("Registry identity resolver treats 401 as signed-out and returns server exp
     serviceToken: "runtime-service-token",
   });
   assert.deepEqual(await resolver.resolveIdentity("opaque-token"), {
-    sub: "user_jordan",
+    sub: USER_ID,
     role: "user",
     exp: Math.floor(Date.parse("2026-11-08T00:00:00.000Z") / 1000)
   });

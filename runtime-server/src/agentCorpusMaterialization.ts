@@ -1,5 +1,6 @@
 import type { ClientToolName } from "./protocol.js";
 import { agentCorpusDigest, loadAgentCorpus, readCorpusAsset } from "./agentCorpus.js";
+import { parseSkillMarkdown } from "./skills.js";
 
 export const MAX_MATERIALIZED_AGENT_PROMPT_BYTES = 4 * 1024 * 1024;
 
@@ -47,7 +48,12 @@ export async function materializeAgentCorpus(
   const skillSections: string[] = [];
   for (const skill of activeSkills) {
     signal?.throwIfAborted();
-    const instruction = await readCorpusAsset(corpusRoot, skill.instruction, signal);
+    const rawInstruction = await readCorpusAsset(corpusRoot, skill.instruction, signal);
+    const parsedSkill = parseSkillMarkdown(rawInstruction);
+    if (parsedSkill.manifest.name !== skill.id || parsedSkill.manifest.description !== skill.when_to_use) {
+      throw new Error(`Agent Corpus Skill metadata mismatch: ${skill.instruction.path}`);
+    }
+    const instruction = parsedSkill.instructions;
     const references = [];
     for (const reference of skill.references) {
       references.push(`### ${reference.kind}\n${await readCorpusAsset(corpusRoot, reference.asset, signal)}`);

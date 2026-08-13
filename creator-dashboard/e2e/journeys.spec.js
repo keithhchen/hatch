@@ -11,7 +11,7 @@ test.beforeEach(async ({}, testInfo) => {
 });
 
 test("anonymous Buyer completes free checkout and can recover every durable route", async ({ page, context }) => {
-  await page.goto("/creators/creator-e2e/signal-resume-review");
+  await page.goto("/products/f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42");
   await expectNoSeriousAccessibilityViolations(page);
 
   await page.getByRole("link", { name: "Get for free" }).click();
@@ -21,7 +21,7 @@ test("anonymous Buyer completes free checkout and can recover every durable rout
   await page.getByLabel("Password").fill("buyer-password");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
 
-  await expect(page).toHaveURL(/\/creators\/creator-e2e\/signal-resume-review$/);
+  await expect(page).toHaveURL(/\/products\/f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42$/);
   await page.getByRole("button", { name: "Get for free" }).click();
   await expect(page).toHaveURL(/\/checkout\//);
   await expect(page.getByRole("heading", { level: 1, name: "Review the real offer." })).toBeVisible();
@@ -49,7 +49,7 @@ test("anonymous Buyer completes free checkout and can recover every durable rout
 
   await page.goto(successUrl);
   await page.getByRole("link", { name: "View access details" }).click();
-  await expect(page).toHaveURL(/\/library\/[^/]+\/[^/]+$/);
+  await expect(page).toHaveURL(/\/library\/[^/]+$/);
   await expect(page.getByRole("link", { name: "Back to Library" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Back to Explore" })).toHaveCount(0);
   await page.reload();
@@ -100,7 +100,7 @@ test("Creator can recover Home, Products, Orders and honest Payouts routes", asy
 });
 
 test("keyboard reaches skip navigation and route changes focus the Creator h1", async ({ page }) => {
-  await page.goto("/creators/creator-e2e/signal-resume-review");
+  await page.goto("/products/f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42");
   const skipLink = page.getByRole("link", { name: "Skip to content" });
   await keyboardTabTo(page, skipLink);
   await expect(skipLink).toBeFocused();

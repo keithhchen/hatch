@@ -26,6 +26,7 @@ import { RegistryStoreTs } from "./registryStore.js";
 import { RegistryDeploymentConflictError } from "./registryStore.js";
 import { MAX_AGENT_CORPUS_BUNDLE_BYTES } from "./registryCorpus.js";
 import { handleCreatorFactoryHttp } from "./creatorLearning/httpApi.js";
+import { isUuidV4 } from "./identity.js";
 import {
   InMemoryCreatorFactoryRepository,
   PostgresCreatorFactoryRepository,
@@ -347,16 +348,55 @@ async function route(
     if (result) { sendJson(response, result.status, result.body); return; }
   }
 
-  if (url.pathname === "/v1/catalog/agents" && request.method === "GET") {
+  if (url.pathname === "/v1/public/products" && request.method === "GET") {
     const limit = boundedQueryInteger(url, "limit", 20, 1, 20);
     const offset = boundedQueryInteger(url, "offset", 0, 0, 100_000);
     const rows = await context.store.listAllAgentCorpora({ limit: limit + 1, offset });
     const page = rows.slice(0, limit);
-    sendJson(response, 200, page, {
+    sendJson(response, 200, page.map(publicProductRow), {
       "x-hatch-page-limit": String(limit),
       "x-hatch-page-offset": String(offset),
       ...(rows.length > limit ? { "x-hatch-next-offset": String(offset + limit) } : {}),
     });
+    return;
+  }
+
+  if (url.pathname === "/v1/public/creators" && request.method === "GET") {
+    const limit = boundedQueryInteger(url, "limit", 20, 1, 20);
+    const offset = boundedQueryInteger(url, "offset", 0, 0, 100_000);
+    const rows = await context.store.listAllAgentCorpora({ limit: Math.min(20_000, offset + limit + 1), offset: 0 });
+    const creators = new Map<string, { id: string; name: string; product_count: number }>();
+    for (const row of rows) {
+      const current = creators.get(row.creator_id) ?? { id: row.creator_id, name: row.creator_name, product_count: 0 };
+      current.product_count += 1;
+      creators.set(row.creator_id, current);
+    }
+    const page = [...creators.values()].slice(offset, offset + limit);
+    sendJson(response, 200, page, {
+      "x-hatch-page-limit": String(limit),
+      "x-hatch-page-offset": String(offset),
+      ...(creators.size > offset + limit ? { "x-hatch-next-offset": String(offset + limit) } : {}),
+    });
+    return;
+  }
+
+  const publicProductMatch = url.pathname.match(/^\/v1\/public\/products\/([^/]+)$/);
+  if (publicProductMatch && request.method === "GET") {
+    const productId = decodeURIComponent(publicProductMatch[1]!);
+    if (!isUuidV4(productId)) { sendJson(response, 404, { detail: "Product not found." }); return; }
+    const row = (await context.store.listAllAgentCorpora({ limit: 20, offset: 0 })).find((item) => item.product_id === productId);
+    if (!row) { sendJson(response, 404, { detail: "Product not found." }); return; }
+    sendJson(response, 200, publicProductRow(row));
+    return;
+  }
+
+  const publicCreatorMatch = url.pathname.match(/^\/v1\/public\/creators\/([^/]+)$/);
+  if (publicCreatorMatch && request.method === "GET") {
+    const creatorId = decodeURIComponent(publicCreatorMatch[1]!);
+    if (!isUuidV4(creatorId)) { sendJson(response, 404, { detail: "Creator not found." }); return; }
+    const rows = await context.store.listAgentCorpora(creatorId);
+    if (!rows.length) { sendJson(response, 404, { detail: "Creator not found." }); return; }
+    sendJson(response, 200, { creator: { id: creatorId, name: rows[0]!.creator_name }, products: rows.map(publicProductRow) });
     return;
   }
 
@@ -382,7 +422,7 @@ async function route(
     return;
   }
 
-  const bindingMatch = url.pathname.match(/^\/v1\/creators\/([^/]+)\/agents\/([^/]+)\/tools\/([^/]+)$/);
+  const bindingMatch = url.pathname.match(/^\/v1\/creators\/([^/]+)\/products\/([^/]+)\/tools\/([^/]+)$/);
   if (bindingMatch && request.method === "PUT") {
     requireRuntimeServiceAuth(request, context.runtimeServiceToken);
     const creatorId = decodeURIComponent(bindingMatch[1]!);
@@ -406,7 +446,7 @@ async function route(
     return;
   }
 
-  const runtimeToolMatch = url.pathname.match(/^\/v1\/runtime\/(?:tenants|creators)\/([^/]+)\/agents\/([^/]+)\/tools\/([^/]+)$/);
+  const runtimeToolMatch = url.pathname.match(/^\/v1\/runtime\/(?:tenants|creators)\/([^/]+)\/products\/([^/]+)\/tools\/([^/]+)$/);
   if (runtimeToolMatch && request.method === "GET") {
     requireRuntimeServiceAuth(request, context.runtimeServiceToken);
     const tenantId = decodeURIComponent(runtimeToolMatch[1]!);
@@ -426,14 +466,14 @@ async function route(
     }
     return;
   }
-  if (url.pathname === "/v1/creator/agents" && request.method === "GET") {
+  if (url.pathname === "/v1/creator/products" && request.method === "GET") {
     const account = await authenticate(request, response, context, "creator");
     if (account === SESSION_QUERY_REJECTED) return;
     if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
     sendJson(response, 200, await context.store.listAgentCorpora(account.id));
     return;
   }
-  if (url.pathname === "/v1/user/agent-access" && request.method === "GET") {
+  if (url.pathname === "/v1/user/product-access" && request.method === "GET") {
     const account = await authenticate(request, response, context, "user");
     if (account === SESSION_QUERY_REJECTED) return;
     if (!account) { sendJson(response, 401, { detail: "A valid user account token is required." }); return; }
@@ -447,14 +487,14 @@ async function route(
       sendJson(
         response,
         200,
-        await context.store.listAgentAccessPresentation(account.id, { entitlementId: requestedEntitlement }),
+        (await context.store.listAgentAccessPresentation(account.id, { entitlementId: requestedEntitlement })).map(publicAccessRow),
       );
       return;
     }
     const limit = boundedQueryInteger(url, "limit", 20, 1, 20);
     const offset = boundedQueryInteger(url, "offset", 0, 0, 100_000);
     const rows = await context.store.listAgentAccessPresentation(account.id, { limit: limit + 1, offset });
-    const page = rows.slice(0, limit);
+    const page = rows.slice(0, limit).map(publicAccessRow);
     sendJson(response, 200, page, {
       "x-hatch-page-limit": String(limit),
       "x-hatch-page-offset": String(offset),
@@ -463,24 +503,24 @@ async function route(
     return;
   }
 
-  if (url.pathname === "/v1/commerce/agent-access" && request.method === "POST") {
+  if (url.pathname === "/v1/commerce/product-access" && request.method === "POST") {
     requireCommerceServiceAuth(request, context.commerceServiceToken);
     const body = await readJson(request);
     const userId = requiredCommerceField(body, "user_id");
     const creatorId = requiredCommerceField(body, "creator_id");
-    const agentId = requiredCommerceField(body, "agent_id");
+    const agentId = requiredCommerceField(body, "product_id");
     const orderId = requiredCommerceField(body, "order_id");
     try { sendJson(response, 201, await context.store.grantAgentAccess(userId, creatorId, agentId, orderId)); }
     catch (error) { sendError(response, error, { agent_not_found: [404, "Agent not found."], order_id_required: [400, "order_id is required."] }); }
     return;
   }
 
-  const commerceAccessMatch = url.pathname.match(/^\/v1\/user\/agents\/([^/]+)\/([^/]+)\/access$/);
+  const commerceAccessMatch = url.pathname.match(/^\/v1\/user\/products\/([^/]+)\/access$/);
   if (commerceAccessMatch && request.method === "POST") {
     requireCommerceServiceAuth(request, context.commerceServiceToken);
     const body = await readJson(request);
-    const creatorId = decodeURIComponent(commerceAccessMatch[1]!);
-    const agentId = decodeURIComponent(commerceAccessMatch[2]!);
+    const agentId = decodeURIComponent(commerceAccessMatch[1]!);
+    const creatorId = requiredCommerceField(body, "creator_id");
     const userId = requiredCommerceField(body, "user_id");
     const orderId = requiredCommerceField(body, "order_id");
     const entitlementId = requiredCommerceField(body, "entitlement_id");
@@ -506,7 +546,7 @@ async function route(
     return;
   }
 
-  const commerceRevokeMatch = url.pathname.match(/^\/v1\/user\/agent-access\/([^/]+)$/);
+  const commerceRevokeMatch = url.pathname.match(/^\/v1\/user\/product-access\/([^/]+)$/);
   if (commerceRevokeMatch && request.method === "DELETE") {
     requireCommerceServiceAuth(request, context.commerceServiceToken);
     const body = await readJson(request);
@@ -520,10 +560,10 @@ async function route(
     return;
   }
 
-  if (url.pathname === "/v1/agent-corpora" && request.method === "POST") {
+  if (url.pathname === "/v1/product-corpora" && request.method === "POST") {
     if (!context.publishToken || bearer(request) !== context.publishToken) { sendJson(response, 403, { detail: "A valid Registry publish token is required." }); return; }
     const creatorId = url.searchParams.get("creator_id") ?? "";
-    const agentId = url.searchParams.get("agent_id") ?? "";
+    const agentId = url.searchParams.get("product_id") ?? "";
     const lease = beginPublishWork(response, context, "registry-publish-service", false);
     if (!lease) return;
     try {
@@ -535,11 +575,11 @@ async function route(
     }
     return;
   }
-  if (url.pathname === "/v1/creator/agent-corpora" && request.method === "POST") {
+  if (url.pathname === "/v1/creator/product-corpora" && request.method === "POST") {
     const account = await authenticate(request, response, context, "creator");
     if (account === SESSION_QUERY_REJECTED) return;
     if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
-    const agentId = url.searchParams.get("agent_id") ?? "";
+    const agentId = url.searchParams.get("product_id") ?? "";
     const lease = beginPublishWork(response, context, `creator:${account.id}`);
     if (!lease) return;
     try {
@@ -551,7 +591,7 @@ async function route(
     }
     return;
   }
-  const corpusMatch = url.pathname.match(/^\/v1\/agent-corpora\/([^/]+)(?:\/([^/]+))?$/);
+  const corpusMatch = url.pathname.match(/^\/v1\/product-corpora\/([^/]+)(?:\/([^/]+))?$/);
   if (corpusMatch && request.method === "GET") {
     const creatorId = decodeURIComponent(corpusMatch[1]!);
     if (corpusMatch[2]) {
@@ -642,6 +682,29 @@ function requiredCommerceField(body: Record<string, unknown>, field: string): st
     throw error;
   }
   return value;
+}
+
+function publicProductRow(row: Record<string, unknown>): Record<string, unknown> {
+  const { agent_id: _internalProductAlias, creator_slug: _creatorSlug, product_slug: _productSlug, ...publicRow } = row;
+  return {
+    ...publicRow,
+    creator: { id: publicRow.creator_id, name: publicRow.creator_name },
+    product: { id: publicRow.product_id, name: publicRow.product_name },
+    public_url: `/products/${encodeURIComponent(String(publicRow.product_id ?? ""))}`
+  };
+}
+
+function publicAccessRow(row: Record<string, unknown>): Record<string, unknown> {
+  const {
+    agent_id: _internalProductAlias,
+    creator_slug: _creatorSlug,
+    product_slug: _productSlug,
+    ...publicRow
+  } = row;
+  return {
+    ...publicRow,
+    product_id: publicRow.product_id ?? _internalProductAlias,
+  };
 }
 
 function boundedQueryInteger(

@@ -7,10 +7,10 @@ import test from "node:test";
 import { createDashboardApp } from "../server.mjs";
 
 const agent = {
-  creator_id: "creator-recovery",
+  creator_id: "8b7b0f4d-8c01-4a5a-9d4c-2f2e4f3c7a11",
   creator_name: "Recovery Creator",
-  agent_id: "recovery-agent",
-  product_id: "recovery-product",
+  agent_id: "7c7e2f55-22f1-4c59-9f68-7bd7df3d6a22",
+  product_id: "7c7e2f55-22f1-4c59-9f68-7bd7df3d6a22",
   product_name: "Recovery Product",
   product_description: "A recoverable free delivery.",
   product_promise: "Recover access without creating another order.",
@@ -37,11 +37,11 @@ test("confirmed checkout survives Registry outage and reconciles access idempote
       response.end(JSON.stringify({ id: "buyer-recovery", role: "user", display_name: "Recovery Buyer" }));
       return;
     }
-    if (request.url === "/v1/catalog/agents") {
+    if (request.url === "/v1/public/products") {
       response.end(JSON.stringify([agent]));
       return;
     }
-    if (request.url === `/v1/user/agents/${agent.creator_id}/${agent.agent_id}/access`) {
+    if (request.url === `/v1/user/products/${agent.product_id}/access`) {
       grantAttempts += 1;
       const input = JSON.parse(body);
       if (grantAttempts === 1) {
@@ -88,8 +88,8 @@ test("confirmed checkout survives Registry outage and reconciles access idempote
     "content-type": "application/json",
     "idempotency-key": "recovery-checkout"
   };
-  const detailResponse = await fetch(`${serverUrl(api)}/v1/catalog/agents/${agent.creator_id}/${agent.product_id}`);
-  const detail = (await detailResponse.json()).agent;
+  const detailResponse = await fetch(`${serverUrl(api)}/v1/public/products/${agent.product_id}`);
+  const detail = (await detailResponse.json()).product;
   const created = await fetch(`${serverUrl(api)}/v1/checkout-sessions`, {
     method: "POST",
     headers,

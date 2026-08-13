@@ -3,6 +3,8 @@ import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const repo = path.resolve(new URL("..", import.meta.url).pathname);
+const DEMO_CREATOR_ID = "6f6a3d24-48af-4f27-9c50-0d4f7e4e8a21";
+const DEMO_PRODUCT_ID = "f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42";
 const output = path.resolve(process.argv[2] ?? "/tmp/hatch-demo-agent");
 const source = path.join(repo, "fixtures/creator-factory/maya-signal-resume-raw/raw/course");
 
@@ -76,10 +78,9 @@ const heldOut = await installText("held-out", "evals/held-out.json", JSON.string
 
 const manifest = {
   contract_version: "1",
-  agent_id: "signal-resume-review",
-  creator: { id: "maya-chen", name: "Maya Chen" },
+  creator: { id: DEMO_CREATOR_ID, name: "Maya Chen" },
   product: {
-    id: "signal-resume-review",
+    id: DEMO_PRODUCT_ID,
     name: "Signal Resume Review",
     description: "An evidence-first resume review for a chosen target role.",
     promise: "Turn resume claims into a clear, defensible signal map and revision plan.",

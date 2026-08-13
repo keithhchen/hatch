@@ -1029,7 +1029,7 @@ async function handleHttpRequest(
           creatorAgents.push({
             entitlement_id: entitlement.entitlement_id,
             creator_id: entitlement.creator_id,
-            agent_id: entitlement.agent_id,
+            product_id: entitlement.product_id,
             corpus_digest: resolved.digest,
             purchased_corpus_digest: entitlement.purchased_corpus_digest ?? resolved.digest,
             effective_corpus_digest: resolved.digest,
@@ -1126,7 +1126,6 @@ async function handleHttpRequest(
       conversation_id: conversationId,
       product_id: binding.productId,
       creator_id: binding.creatorId,
-      agent_id: binding.agentId,
       messages: sanitizeBoundHistory(
         messages,
         binding.agentId
@@ -1391,7 +1390,6 @@ function publicConversation(conversation: ConversationRecord): Record<string, un
   return {
     id: conversation.publicId,
     creator_id: conversation.creatorId,
-    agent_id: conversation.agentId,
     product_id_at_creation: conversation.productIdAtCreation,
     ...(conversation.title ? { title: conversation.title } : {}),
     status: conversation.status,
@@ -1917,7 +1915,6 @@ async function handleRuntimeSocket(
               accepted_protocol_version: message.protocol_version,
               creator_id: binding.creatorId,
               user_id: binding.userId,
-              agent_id: binding.agentId,
               product_id: binding.productId,
               corpus_digest: binding.corpusDigest,
               ...(binding.purchasedCorpusDigest ? {
@@ -3273,8 +3270,8 @@ async function bindingFromHistoryRequest(
       entitlement
     );
     const creatorId = url.searchParams.get("creator_id");
-    const agentId = url.searchParams.get("agent_id");
-    if (creatorId !== entitlement.creator_id || agentId !== entitlement.agent_id) {
+    const productId = url.searchParams.get("product_id");
+    if (creatorId !== entitlement.creator_id || productId !== entitlement.product_id) {
       throw new EntitlementError("agent_entitlement_mismatch", "Conversation history is outside the purchased Agent scope.");
     }
     const resolved = entitlement.purchased_corpus_digest
@@ -3307,9 +3304,9 @@ async function bindingFromHistoryRequest(
   // This keeps resolver-free local development usable without creating a
   // production authorization bypass.
   const value = (name: string): string | undefined => url.searchParams.get(name) ?? (typeof req.headers[`x-hatch-${name.replaceAll("_", "-")}`] === "string" ? String(req.headers[`x-hatch-${name.replaceAll("_", "-")}`]) : undefined);
-  const [creatorId, userId, agentId, productId, corpusDigestValue] = [value("creator_id"), value("user_id"), value("agent_id"), value("product_id"), value("corpus_digest")];
-  if (!creatorId || !userId || !agentId || !productId || !corpusDigestValue || !/^sha256:[a-f0-9]{64}$/.test(corpusDigestValue)) return undefined;
-  return { creatorId, userId, agentId, productId, corpusDigest: corpusDigestValue, explicit: true };
+  const [creatorId, userId, productId, corpusDigestValue] = [value("creator_id"), value("user_id"), value("product_id"), value("corpus_digest")];
+  if (!creatorId || !userId || !productId || !corpusDigestValue || !/^sha256:[a-f0-9]{64}$/.test(corpusDigestValue)) return undefined;
+  return { creatorId, userId, agentId: productId, productId, corpusDigest: corpusDigestValue, explicit: true };
 }
 
 function bearerToken(req: http.IncomingMessage): string | undefined {

@@ -254,7 +254,9 @@ async function productFixture(): Promise<ProductFixture> {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-delivery-lifecycle-"));
   temporaryDirectories.push(root);
   const corpusRoot = path.join(root, "corpora");
-  const agentRoot = path.join(corpusRoot, "creator-commerce", "agent-commerce");
+  const creatorId = "6f6a3d24-48af-4f27-9c50-0d4f7e4e8a21";
+  const productId = "f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42";
+  const agentRoot = path.join(corpusRoot, creatorId, productId);
   await mkdir(path.join(agentRoot, "instructions"), { recursive: true });
   await mkdir(path.join(agentRoot, "evals"), { recursive: true });
   const system = "Complete the requested delivery.";
@@ -268,9 +270,8 @@ async function productFixture(): Promise<ProductFixture> {
   });
   await writeFile(path.join(agentRoot, "agent.json"), JSON.stringify({
     contract_version: "1",
-    agent_id: "agent-commerce",
-    creator: { id: "creator-commerce", name: "Commerce Creator" },
-    product: { id: "product-commerce", name: "Commerce Product" },
+    creator: { id: creatorId, name: "Commerce Creator" },
+    product: { id: productId, name: "Commerce Product" },
     instructions: { system: asset("instructions/system.md", system, "system") },
     skills: [],
     knowledge: { documents: [] },
@@ -280,14 +281,14 @@ async function productFixture(): Promise<ProductFixture> {
       held_out: [asset("evals/evals.json", evaluations, "held-out")]
     }
   }), "utf8");
-  const purchasedCorpus = await new AgentCorpusResolver(corpusRoot).resolve("creator-commerce", "agent-commerce");
+  const purchasedCorpus = await new AgentCorpusResolver(corpusRoot).resolve(creatorId, productId);
   const entitlement: EntitlementBinding = {
-    entitlement_id: "entitlement-commerce",
-    order_id: "order-commerce",
+    entitlement_id: "7ce5faf8-0849-413d-8aa0-ac5a371e0a81",
+    order_id: "8ce5faf8-0849-413d-8aa0-ac5a371e0a81",
     user_id: "buyer-commerce",
-    creator_id: "creator-commerce",
-    agent_id: "agent-commerce",
-    product_id: "product-commerce",
+    creator_id: creatorId,
+    agent_id: productId,
+    product_id: productId,
     purchased_corpus_digest: purchasedCorpus.digest,
     status: "active"
   };
@@ -340,7 +341,7 @@ async function startRuntime(
     license_token: "license-commerce",
     entitlement_id: fixture.entitlement.entitlement_id,
     creator_id: fixture.entitlement.creator_id,
-    agent_id: fixture.entitlement.agent_id,
+    product_id: fixture.entitlement.product_id,
     local_tools: []
   }));
   await waitForMessage(messages, (message) => message.type === "session.ready");

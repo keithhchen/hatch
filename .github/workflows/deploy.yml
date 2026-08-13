@@ -47,6 +47,9 @@ jobs:
           && github.event.workflow_run.head_repository.full_name == github.repository }}
     runs-on: ubuntu-latest
     needs: verify-server
+    permissions:
+      contents: read
+      packages: write
     outputs:
       image_prefix: ${{ steps.image.outputs.prefix }}
     steps:
@@ -298,16 +301,16 @@ jobs:
             return 1
           }
           registry_publish_once() {
-            local archive="$1" creator_id="$2" agent_id="$3"
+            local archive="$1" creator_id="$2" product_id="$3"
             "${compose[@]}" exec -T \
               -e HATCH_REQUEST_TOKEN="$registry_token" \
               -e HATCH_CREATOR_ID="$creator_id" \
-              -e HATCH_AGENT_ID="$agent_id" \
+              -e HATCH_PRODUCT_ID="$product_id" \
               registry node --input-type=module -e '
                 const chunks = [];
                 for await (const chunk of process.stdin) chunks.push(chunk);
-                const query = new URLSearchParams({ creator_id: process.env.HATCH_CREATOR_ID, agent_id: process.env.HATCH_AGENT_ID });
-                const response = await fetch(`http://127.0.0.1:8100/v1/agent-corpora?${query}`, {
+                const query = new URLSearchParams({ creator_id: process.env.HATCH_CREATOR_ID, product_id: process.env.HATCH_PRODUCT_ID });
+                const response = await fetch(`http://127.0.0.1:8100/v1/product-corpora?${query}`, {
                   method: "POST",
                   headers: {
                     authorization: `Bearer ${process.env.HATCH_REQUEST_TOKEN}`,
@@ -331,13 +334,13 @@ jobs:
             done
             return 1
           }
-          registry_publish /tmp/hatch-demo-agent.zip maya-chen signal-resume-review
+          registry_publish /tmp/hatch-demo-agent.zip 6f6a3d24-48af-4f27-9c50-0d4f7e4e8a21 f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42
           rm -rf /tmp/hatch-seth-agent /tmp/hatch-seth-agent.zip
           runtime_image="${IMAGE_PREFIX}/runtime:${RELEASE_TAG}"
           docker run --rm -u "$(id -u):$(id -g)" \
             -v "$GITHUB_WORKSPACE/creators/seth/agent-corpus:/input:ro" -v /tmp:/output \
             "$runtime_image" node scripts/create-agent-zip.mjs /input /output/hatch-seth-agent.zip
-          registry_publish /tmp/hatch-seth-agent.zip seth alpha-lite
+          registry_publish /tmp/hatch-seth-agent.zip 32ffccf7-893d-4ef3-bdbc-c82fc8fcb90b 026651b1-8a8a-4484-aac5-ace6bd662157
           runtime_token="$(grep '^HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN=' /opt/hatch/.env | cut -d= -f2-)"
           seed="$GITHUB_WORKSPACE/creators/seth/control-plane-bindings.json"
           secret="$(jq -r '.secret' "$seed")"
@@ -349,17 +352,17 @@ jobs:
               "/v1/control-plane/connections/$connection_id" \
               "$runtime_token" \
               "$(jq -cn --arg secret "$secret" --argjson config "$config" '{kind:"http", secret_ref:null, secret:$secret, config:$config, status:"active"}')" \
-              '{"X-Hatch-Tenant-Id":"seth"}' >/dev/null
+              '{"X-Hatch-Tenant-Id":"32ffccf7-893d-4ef3-bdbc-c82fc8fcb90b"}' >/dev/null
           done < <(jq -r '.connections[] | @base64' "$seed")
           while IFS= read -r encoded; do
             connection="$(printf '%s' "$encoded" | base64 --decode)"
             tool_id="$(printf '%s' "$connection" | jq -r '.tool_id')"
             connection_id="$(printf '%s' "$connection" | jq -r '.id')"
             registry_request PUT \
-              "/v1/creators/seth/agents/alpha-lite/tools/$(printf '%s' "$tool_id" | jq -sRr @uri)" \
+              "/v1/creators/32ffccf7-893d-4ef3-bdbc-c82fc8fcb90b/products/026651b1-8a8a-4484-aac5-ace6bd662157/tools/$(printf '%s' "$tool_id" | jq -sRr @uri)" \
               "$runtime_token" \
               "$(jq -cn --arg connection_id "$connection_id" '{connection_id:$connection_id}')" \
-              '{"X-Hatch-Creator-Id":"seth"}' >/dev/null
+              '{"X-Hatch-Creator-Id":"32ffccf7-893d-4ef3-bdbc-c82fc8fcb90b"}' >/dev/null
           done < <(jq -r '.connections[] | @base64' "$seed")
       - name: Verify public health endpoints
         env:
@@ -376,9 +379,9 @@ jobs:
           test "$logout_status" = 204
           me_status="$(curl -4 --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' "https://$domain/v1/auth/me")"
           test "$me_status" = 401
-          public_grant_status="$(curl -4 --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' -X POST "https://$domain/v1/user/agents/probe/probe/access")"
+          public_grant_status="$(curl -4 --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' -X POST "https://$domain/v1/user/products/probe/access")"
           test "$public_grant_status" = 404
-          private_grant_status="$(curl -4 --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' -X POST "https://$domain/v1/commerce/agent-access")"
+          private_grant_status="$(curl -4 --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' -X POST "https://$domain/v1/commerce/product-access")"
           test "$private_grant_status" = 404
       - name: Roll back application release when health fails
         if: failure()

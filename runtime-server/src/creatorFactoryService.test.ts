@@ -23,7 +23,7 @@ test("Creator Factory service persists complete product metadata and canonical d
   const repository = new InMemoryCreatorFactoryRepository();
   const service = new CreatorFactoryService(repository, root);
   const product = {
-    id: "research-brief",
+    id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
     name: "Research Brief",
     description: "A sourced executive brief.",
     promise: "One decision-ready recommendation.",
@@ -62,8 +62,8 @@ test("Creator Factory service persists complete product metadata and canonical d
     }
   ];
   const created = await service.create(
-    { id: "creator-release", name: "Release Creator" },
-    createRequest({ agentId: "research-brief", product, tools }),
+    { id: "11111111-1111-4111-8111-111111111111", name: "Release Creator" },
+    createRequest({ agentId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", product, tools }),
     "release-input-1"
   );
   assert.deepEqual(created.run.product, product);
@@ -73,7 +73,7 @@ test("Creator Factory service persists complete product metadata and canonical d
     ...tools.map((tool) => tool.id)
   ]);
 
-  const stored = await repository.getForCreator("creator-release", created.run.id);
+  const stored = await repository.getForCreator("11111111-1111-4111-8111-111111111111", created.run.id);
   assert.deepEqual(stored?.input.product, product);
   assert.deepEqual(stored?.input.tools, [
     { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" },
@@ -82,12 +82,12 @@ test("Creator Factory service persists complete product metadata and canonical d
   ]);
 
   const defaulted = await service.create(
-    { id: "creator-release", name: "Release Creator" },
+    { id: "11111111-1111-4111-8111-111111111111", name: "Release Creator" },
     createRequest({ taskName: "Default tool run" }),
     "release-input-default-tools"
   );
   assert.deepEqual(
-    (await repository.getForCreator("creator-release", defaulted.run.id))?.input.tools,
+    (await repository.getForCreator("11111111-1111-4111-8111-111111111111", defaulted.run.id))?.input.tools,
     [
       { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" },
       { id: "hatch.file_search", kind: "hatch_builtin", capability: "file_search" }
@@ -157,7 +157,7 @@ test("Creator Factory service rejects non-canonical or secret-bearing tool decla
   for (const [index, item] of invalid.entries()) {
     await assert.rejects(
       () => service.create(
-        { id: "creator-release", name: "Release Creator" },
+        { id: "11111111-1111-4111-8111-111111111111", name: "Release Creator" },
         createRequest({ tools: item.tools as CreateFactoryRunRequest["tools"] }),
         `invalid-tool-${index}`
       ),
@@ -182,7 +182,7 @@ test("Creator Factory service strictly validates offer and presentation metadata
   for (const [index, item] of invalid.entries()) {
     await assert.rejects(
       () => service.create(
-        { id: "creator-release", name: "Release Creator" },
+        { id: "11111111-1111-4111-8111-111111111111", name: "Release Creator" },
         createRequest({ product: item.product as CreateFactoryRunRequest["product"] }),
         `invalid-product-${index}`
       ),
@@ -214,15 +214,15 @@ test("Creator Factory service exposes only owned questions and candidate metadat
     }],
     config: { developmentQuestions: 2, heldoutQuestions: 1, maxCorpusRevisions: 2 }
   };
-  const created = await service.create({ id: "creator-service", name: "Service Creator" }, request, "request-1");
-  const replay = await service.create({ id: "creator-service", name: "Service Creator" }, request, "request-1");
+  const created = await service.create({ id: "11111111-1111-4111-8111-111111111111", name: "Service Creator" }, request, "request-1");
+  const replay = await service.create({ id: "11111111-1111-4111-8111-111111111111", name: "Service Creator" }, request, "request-1");
   assert.equal(created.created, true);
   assert.equal(replay.created, false);
   assert.equal(replay.run.id, created.run.id);
   assert.equal((await service.list("another-creator")).length, 0);
 
   await worker.workOnce();
-  const waiting = await service.get("creator-service", created.run.id);
+  const waiting = await service.get("11111111-1111-4111-8111-111111111111", created.run.id);
   assert.equal(waiting.status, "waiting_for_creator");
   assert.equal(waiting.pendingQuestions.length, 3);
   assert.ok(waiting.questionBatchId?.startsWith("qbatch_v1_"));
@@ -234,7 +234,7 @@ test("Creator Factory service exposes only owned questions and candidate metadat
     (error: unknown) => error instanceof CreatorFactoryRepositoryError && error.code === "run_not_found"
   );
   await assert.rejects(
-    () => service.submitAnswers("creator-service", created.run.id, {
+    () => service.submitAnswers("11111111-1111-4111-8111-111111111111", created.run.id, {
       expectedVersion: waiting.version,
       questionBatchId: "",
       answers: waiting.pendingQuestions.map((question) => ({ questionId: question.id, answer: "Stale" }))
@@ -242,7 +242,7 @@ test("Creator Factory service exposes only owned questions and candidate metadat
     /question_batch_id must not be empty/
   );
   await assert.rejects(
-    () => service.submitAnswers("creator-service", created.run.id, {
+    () => service.submitAnswers("11111111-1111-4111-8111-111111111111", created.run.id, {
       expectedVersion: waiting.version,
       questionBatchId: `qbatch_v1_${"f".repeat(64)}`,
       answers: waiting.pendingQuestions.map((question) => ({ questionId: question.id, answer: "Stale" }))
@@ -250,7 +250,7 @@ test("Creator Factory service exposes only owned questions and candidate metadat
     (error: unknown) => error instanceof CreatorFactoryRepositoryError && error.code === "version_conflict"
   );
   await assert.rejects(
-    () => service.submitAnswers("creator-service", created.run.id, {
+    () => service.submitAnswers("11111111-1111-4111-8111-111111111111", created.run.id, {
       expectedVersion: waiting.version,
       questionBatchId: waiting.questionBatchId!,
       answers: waiting.pendingQuestions.slice(0, 1).map((question) => ({ questionId: question.id, answer: "Incomplete" }))
@@ -258,7 +258,7 @@ test("Creator Factory service exposes only owned questions and candidate metadat
     /missing=/
   );
 
-  const queued = await service.submitAnswers("creator-service", created.run.id, {
+  const queued = await service.submitAnswers("11111111-1111-4111-8111-111111111111", created.run.id, {
     expectedVersion: waiting.version,
     submissionId: "answer-submit-1",
     questionBatchId: waiting.questionBatchId!,
@@ -271,7 +271,7 @@ test("Creator Factory service exposes only owned questions and candidate metadat
   });
   assert.equal(queued.status, "queued");
   assert.equal(queued.pendingQuestions.length, 0);
-  const replayed = await service.submitAnswers("creator-service", created.run.id, {
+  const replayed = await service.submitAnswers("11111111-1111-4111-8111-111111111111", created.run.id, {
     expectedVersion: waiting.version,
     submissionId: "answer-submit-1",
     questionBatchId: waiting.questionBatchId!,
@@ -286,7 +286,7 @@ test("Creator Factory service exposes only owned questions and candidate metadat
   assert.equal(replayed.version, queued.version);
 
   await worker.workOnce();
-  const ready = await service.get("creator-service", created.run.id);
+  const ready = await service.get("11111111-1111-4111-8111-111111111111", created.run.id);
   assert.equal(ready.status, "ready", ready.lastError);
   assert.equal(ready.candidate?.version, 2);
   assert.ok(ready.candidate?.systemDigest.startsWith("sha256:"));
@@ -294,7 +294,7 @@ test("Creator Factory service exposes only owned questions and candidate metadat
   assert.equal(ready.candidate?.corpusVerified, true);
   assert.equal(ready.pendingQuestions.length, 0);
   assert.equal(JSON.stringify(ready).includes("systemInstructions"), false);
-  const completed = await repository.getForCreator("creator-service", created.run.id);
+  const completed = await repository.getForCreator("11111111-1111-4111-8111-111111111111", created.run.id);
   const development = parseQaSet(await new FactoryFileStore(root, created.run.id).readArtifact(completed!.state!.artifacts.developmentQa!));
   const heldout = parseQaSet(await new FactoryFileStore(root, created.run.id).readArtifact(completed!.state!.artifacts.heldoutRounds[0]!));
   assert.equal([...development, ...heldout].some((row) => row.answer.includes("## Final post")), true);

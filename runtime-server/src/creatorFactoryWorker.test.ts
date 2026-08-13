@@ -30,11 +30,11 @@ test("durable worker claims a run, pauses for Creator answers, and resumes the s
   };
   await repository.create({
     id: "worker-run",
-    creatorId: "creator-worker",
+    creatorId: "11111111-1111-4111-8111-111111111111",
     idempotencyKey: "create-worker-run",
     input: {
       runId: "worker-run",
-      creator: { id: "creator-worker", name: "Worker Creator" },
+      creator: { id: "11111111-1111-4111-8111-111111111111", name: "Worker Creator" },
       taskName: "Ready-to-publish reply",
       taskBrief: "Return one decisive reply that can be published directly.",
       sources: [{
@@ -65,7 +65,7 @@ test("durable worker claims a run, pauses for Creator answers, and resumes the s
   const store = new FactoryFileStore(root, "worker-run");
   const questions = parseQuestions(await store.readArtifact(waiting!.state!.artifacts.currentQuestionBatch!));
   await repository.submitAnswers({
-    creatorId: "creator-worker",
+    creatorId: "11111111-1111-4111-8111-111111111111",
     runId: "worker-run",
     answers: {
       answerMarkdown: renderAnswers(questions),
@@ -87,11 +87,11 @@ test("worker never replays an old pending submission into a fresh replacement Qu
   const repository = new InMemoryCreatorFactoryRepository();
   await repository.create({
     id: "worker-stale-run",
-    creatorId: "creator-worker",
+    creatorId: "11111111-1111-4111-8111-111111111111",
     idempotencyKey: "create-stale-run",
     input: {
       runId: "worker-stale-run",
-      creator: { id: "creator-worker", name: "Worker Creator" },
+      creator: { id: "11111111-1111-4111-8111-111111111111", name: "Worker Creator" },
       taskName: "Ready-to-publish reply",
       taskBrief: "Return one decisive reply that can be published directly.",
       sources: [{ id: "S1", authority: "creator_current", title: "Current method", content: "Choose one usable answer." }],
@@ -109,7 +109,7 @@ test("worker never replays an old pending submission into a fresh replacement Qu
   const store = new FactoryFileStore(root, "worker-stale-run");
   const initialQuestions = parseQuestions(await store.readArtifact(oldBatch));
   await repository.submitAnswers({
-    creatorId: "creator-worker",
+    creatorId: "11111111-1111-4111-8111-111111111111",
     runId: "worker-stale-run",
     expectedVersion: initialWaiting!.version,
     answers: {
@@ -153,7 +153,7 @@ test("worker fails closed on legacy pending Creator answers without a run-scoped
   t.after(() => rm(root, { recursive: true, force: true }));
   const input: FactoryStartInput = {
     runId: "worker-unbound-answers",
-    creator: { id: "creator-worker", name: "Worker Creator" },
+    creator: { id: "11111111-1111-4111-8111-111111111111", name: "Worker Creator" },
     taskName: "Ready-to-publish reply",
     taskBrief: "Return one decisive reply that can be published directly.",
     sources: [{ id: "S1", authority: "creator_current", title: "Current method", content: "Choose one usable answer." }],

@@ -54,7 +54,8 @@
         "allow-show-native-command-menu",
         "allow-show-native-context-menu",
         "allow-open-external-url",
-        "allow-revoke-workspace-grant"
+        "allow-revoke-workspace-grant",
+        "allow-read-product-open-links"
       ]
     },
     {
@@ -95,7 +96,8 @@
         "allow-show-native-command-menu",
         "allow-show-native-context-menu",
         "allow-open-external-url",
-        "allow-revoke-workspace-grant"
+        "allow-revoke-workspace-grant",
+        "allow-read-product-open-links"
       ]
     }
   ]

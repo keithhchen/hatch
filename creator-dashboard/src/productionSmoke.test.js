@@ -14,13 +14,13 @@ test("production Commerce smoke covers public metadata and an idempotent authent
     const origin = serverUrl(server);
     response.setHeader("content-type", "application/json");
 
-    if (url.pathname === "/agents/maya-chen/signal-resume-review") {
+    if (url.pathname === "/products/f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42") {
       response.setHeader("content-type", "text/html");
       response.end(`<html><head><link rel="canonical" href="${origin}${url.pathname}" /></head></html>`);
       return;
     }
-    if (url.pathname === "/v1/catalog/agents/maya-chen/signal-resume-review") {
-      response.end(JSON.stringify({ agent: product() }));
+    if (url.pathname === "/v1/public/products/f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42") {
+      response.end(JSON.stringify({ product: product() }));
       return;
     }
     if (url.pathname === "/v1/auth/login" && request.method === "POST") {
@@ -39,7 +39,7 @@ test("production Commerce smoke covers public metadata and an idempotent authent
     }
     if (url.pathname === "/v1/checkout-sessions" && request.method === "POST") {
       assert.equal(request.headers["x-csrf-token"], "csrf-smoke");
-      assert.equal(body.offer_id, "offer-smoke");
+      assert.equal(body.offer_id, "0f9e675c-238f-46f6-a5ad-07c1bc290976");
       const key = String(request.headers["idempotency-key"]);
       commands.set(key, commands.get(key) ?? "checkout-smoke");
       response.statusCode = 201;
@@ -57,17 +57,17 @@ test("production Commerce smoke covers public metadata and an idempotent authent
       confirmations.set(key, confirmations.get(key) ?? "order-smoke");
       response.statusCode = 201;
       response.end(JSON.stringify({
-        order_id: "order-smoke",
-        entitlement_id: "entitlement-smoke",
+        order_id: "8ce5faf8-0849-413d-8aa0-ac5a371e0a81",
+        entitlement_id: "7ce5faf8-0849-413d-8aa0-ac5a371e0a81",
         payment: { status: "not_required" }
       }));
       return;
     }
-    if (url.pathname === "/v1/user/orders/order-smoke") {
+    if (url.pathname === "/v1/user/orders/8ce5faf8-0849-413d-8aa0-ac5a371e0a81") {
       response.end(JSON.stringify({
         order: {
-          order_id: "order-smoke",
-          offer_id: "offer-smoke",
+          order_id: "8ce5faf8-0849-413d-8aa0-ac5a371e0a81",
+          offer_id: "0f9e675c-238f-46f6-a5ad-07c1bc290976",
           offer_revision: 1,
           release_id: `sha256:${"a".repeat(64)}`,
           corpus_digest: `sha256:${"a".repeat(64)}`,
@@ -83,13 +83,13 @@ test("production Commerce smoke covers public metadata and an idempotent authent
       }));
       return;
     }
-    if (url.pathname === "/v1/user/entitlements/entitlement-smoke") {
+    if (url.pathname === "/v1/user/entitlements/7ce5faf8-0849-413d-8aa0-ac5a371e0a81") {
       response.end(JSON.stringify({
         entitlement: {
-          entitlement_id: "entitlement-smoke",
-          order_id: "order-smoke",
-          creator_id: "maya-chen",
-          product_id: "signal-resume-review",
+          entitlement_id: "7ce5faf8-0849-413d-8aa0-ac5a371e0a81",
+          order_id: "8ce5faf8-0849-413d-8aa0-ac5a371e0a81",
+          creator_id: "6f6a3d24-48af-4f27-9c50-0d4f7e4e8a21",
+          product_id: "f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42",
           purchased_corpus_digest: `sha256:${"a".repeat(64)}`,
           effective_corpus_digest: `sha256:${"a".repeat(64)}`,
           status: "active",
@@ -98,7 +98,7 @@ test("production Commerce smoke covers public metadata and an idempotent authent
       }));
       return;
     }
-    if (url.pathname === "/portal/orders/order-smoke/success" || url.pathname === "/download") {
+    if (url.pathname === "/orders/8ce5faf8-0849-413d-8aa0-ac5a371e0a81/success" || url.pathname === "/download") {
       response.setHeader("content-type", "text/html");
       response.end("<html>Hatch</html>");
       return;
@@ -119,10 +119,10 @@ test("production Commerce smoke covers public metadata and an idempotent authent
   });
   assert.deepEqual(authenticated, {
     mode: "authenticated",
-    creator_id: "maya-chen",
-    product_id: "signal-resume-review",
-    order_id: "order-smoke",
-    entitlement_id: "entitlement-smoke"
+    creator_id: "6f6a3d24-48af-4f27-9c50-0d4f7e4e8a21",
+    product_id: "f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42",
+    order_id: "8ce5faf8-0849-413d-8aa0-ac5a371e0a81",
+    entitlement_id: "7ce5faf8-0849-413d-8aa0-ac5a371e0a81"
   });
   const replay = await runCommerceV2Smoke({
     origin: serverUrl(server),
@@ -138,13 +138,13 @@ test("production Commerce smoke covers public metadata and an idempotent authent
 
 function product() {
   return {
-    creator_id: "maya-chen",
-    product_id: "signal-resume-review",
+    creator_id: "6f6a3d24-48af-4f27-9c50-0d4f7e4e8a21",
+    product_id: "f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42",
     available: true,
     availability: "published",
     corpus_digest: `sha256:${"a".repeat(64)}`,
     release_id: `sha256:${"a".repeat(64)}`,
-    offer: { offer_id: "offer-smoke", revision: 1, amount_minor: 0, currency: "USD" }
+    offer: { offer_id: "0f9e675c-238f-46f6-a5ad-07c1bc290976", revision: 1, amount_minor: 0, currency: "USD" }
   };
 }
 

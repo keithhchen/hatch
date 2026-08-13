@@ -10,6 +10,7 @@ import {
 } from "./creatorLearning/corpusBundle.js";
 import { FactoryFileStore } from "./creatorLearning/fileStore.js";
 import { verifyAgentCorpus } from "./registryCorpus.js";
+import { loadSkillByPath } from "./skills.js";
 
 const temporaryRoots: string[] = [];
 
@@ -96,10 +97,10 @@ test("Creator Factory materializes every Agent Corpus layer with exact bytes and
   ];
   const input: AgentCorpusBundleInput & { rawMaterial: string; factoryTrace: string } = {
     candidateRoot: "v3-fixed/agent-corpus",
-    creator: { id: "maya-chen", name: "Maya Chen" },
-    agentId: "signal-review",
+    creator: { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "Maya Chen" },
+    agentId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
     product: {
-      id: "signal-review",
+      id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
       name: "Signal Review",
       description: "Review a claim against supplied evidence.",
       promise: "Return an evidence-ranked verdict.",
@@ -169,10 +170,10 @@ test("Creator Factory materializes every Agent Corpus layer with exact bytes and
   assert.equal(materialized.assets.heldOut.path, `${materialized.bundleRoot}/evals/held-out.json`);
 
   const bundlePath = path.join(store.directory, ...materialized.bundleRoot.split("/"));
-  const verified = await verifyAgentCorpus(bundlePath, "maya-chen", "signal-review");
+  const verified = await verifyAgentCorpus(bundlePath, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "cccccccc-cccc-4ccc-8ccc-cccccccccccc");
   assert.equal(verified.digest, materialized.digest);
-  assert.equal(verified.corpus.creator.id, "maya-chen");
-  assert.equal(verified.corpus.agent_id, "signal-review");
+  assert.equal(verified.corpus.creator.id, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+  assert.equal(verified.corpus.agent_id, "cccccccc-cccc-4ccc-8ccc-cccccccccccc");
   assert.equal(verified.corpus.skills[0]?.instruction.path, "skills/claim-audit/SKILL.md");
   assert.deepEqual(verified.corpus.skills[0]?.references.map((item) => [item.asset.id, item.asset.path, item.kind]), [
     ["method-map", "skills/claim-audit/references/method-map.md", "method"],
@@ -197,11 +198,26 @@ test("Creator Factory materializes every Agent Corpus layer with exact bytes and
     "creator.signal.citations",
     "hatch.local.audit-files"
   ]);
-  await assert.rejects(verifyAgentCorpus(bundlePath, "other-creator", "signal-review"), /creator binding mismatch/);
-  await assert.rejects(verifyAgentCorpus(bundlePath, "maya-chen", "other-agent"), /agent binding mismatch/);
+  await assert.rejects(verifyAgentCorpus(bundlePath, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "cccccccc-cccc-4ccc-8ccc-cccccccccccc"), /creator binding mismatch/);
+  await assert.rejects(verifyAgentCorpus(bundlePath, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "dddddddd-dddd-4ddd-8ddd-dddddddddddd"), /agent binding mismatch/);
 
   assert.equal(await readFile(path.join(bundlePath, "instructions/system.md"), "utf8"), systemInstructions);
-  assert.equal(await readFile(path.join(bundlePath, "skills/claim-audit/SKILL.md"), "utf8"), skillInstructions);
+  const materializedSkill = await readFile(path.join(bundlePath, "skills/claim-audit/SKILL.md"), "utf8");
+  assert.equal(materializedSkill, [
+    "---",
+    'name: "claim-audit"',
+    'description: "Use when a claim needs an evidence audit."',
+    "---",
+    "",
+    skillInstructions
+  ].join("\n"));
+  const loadedSkill = await loadSkillByPath(
+    path.join(bundlePath, "skills/claim-audit/SKILL.md"),
+    [bundlePath]
+  );
+  assert.equal(loadedSkill.name, "claim-audit");
+  assert.equal(loadedSkill.description, "Use when a claim needs an evidence audit.");
+  assert.equal(loadedSkill.instructions, skillInstructions.trim());
   assert.equal(await readFile(path.join(bundlePath, "skills/claim-audit/references/method-map.md"), "utf8"), methodReference);
   assert.equal(await readFile(path.join(bundlePath, "skills/claim-audit/references/review-examples.md"), "utf8"), fewShotsReference);
   assert.equal(await readFile(path.join(bundlePath, "knowledge/source-ledger.md"), "utf8"), knowledgeDocument);
@@ -226,7 +242,7 @@ test("Creator Factory materializes every Agent Corpus layer with exact bytes and
   };
   assert.equal(manifest.instructions.system.sha256, digest(systemInstructions));
   assert.equal(manifest.instructions.system.sha256, materialized.assets.system.sha256);
-  assert.equal(manifest.skills[0]?.instruction.sha256, digest(skillInstructions));
+  assert.equal(manifest.skills[0]?.instruction.sha256, digest(materializedSkill));
   assert.equal(manifest.skills[0]?.instruction.sha256, materialized.assets.skills[0]?.instruction.sha256);
   assert.equal(manifest.skills[0]?.references[0]?.asset.sha256, digest(methodReference));
   assert.equal(manifest.skills[0]?.references[0]?.asset.sha256, materialized.assets.skills[0]?.references[0]?.asset.sha256);
@@ -269,7 +285,7 @@ test("Creator Factory keeps empty optional layers valid and injects both canonic
 
   const materialized = await materializeAgentCorpusBundle(store, baseInput("v1-empty/agent-corpus"));
   const bundlePath = path.join(store.directory, ...materialized.bundleRoot.split("/"));
-  const verified = await verifyAgentCorpus(bundlePath, "maya-chen", "signal-review");
+  const verified = await verifyAgentCorpus(bundlePath, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "cccccccc-cccc-4ccc-8ccc-cccccccccccc");
 
   assert.deepEqual(verified.corpus.skills, []);
   assert.deepEqual(verified.corpus.knowledge.documents, []);
@@ -402,9 +418,9 @@ test("Creator Factory rejects unsafe Agent Corpus candidate roots before writing
 function baseInput(candidateRoot: string): AgentCorpusBundleInput {
   return {
     candidateRoot,
-    creator: { id: "maya-chen", name: "Maya Chen" },
-    agentId: "signal-review",
-    product: { id: "signal-review", name: "Signal Review" },
+    creator: { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "Maya Chen" },
+    agentId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    product: { id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", name: "Signal Review" },
     systemInstructions: "Stay in scope.\n",
     syntheticQa: [],
     heldOut: []

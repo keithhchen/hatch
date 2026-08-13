@@ -1,12 +1,11 @@
 {
   "contract_version": "1",
-  "agent_id": "alpha-lite",
   "creator": {
-    "id": "seth",
+    "id": "32ffccf7-893d-4ef3-bdbc-c82fc8fcb90b",
     "name": "Seth"
   },
   "product": {
-    "id": "alpha-lite",
+    "id": "026651b1-8a8a-4484-aac5-ace6bd662157",
     "name": "Seth Database Alpha Lite",
     "description": "A public-evidence and research-lead interface for listed-company and relationship research."
   },

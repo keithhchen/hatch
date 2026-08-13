@@ -6,6 +6,9 @@ import { MAX_RUNTIME_RESPONSE_BODY_BYTES, readBoundedJsonObject } from "./bounde
 
 const COLLECTION = "hatch_knowledge_text_v4_1024";
 const DIMENSIONS = 1024;
+// DashScope's official OpenAI-compatible contract caps text-embedding-v3/v4
+// array input at 10 strings per request.
+const DASHSCOPE_EMBEDDING_BATCH_SIZE = 10;
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 
 export type KnowledgeDocument = {
@@ -103,9 +106,9 @@ export class QdrantKnowledgeIndexer {
       const raw = await readFile(path.join(corpusRoot, document.path), { encoding: "utf8", signal: options.signal });
       chunks.push(...splitMarkdown(raw, document));
     }
-    for (let start = 0; start < chunks.length; start += 16) {
+    for (let start = 0; start < chunks.length; start += DASHSCOPE_EMBEDDING_BATCH_SIZE) {
       throwIfAborted(options.signal);
-      const batch = chunks.slice(start, start + 16);
+      const batch = chunks.slice(start, start + DASHSCOPE_EMBEDDING_BATCH_SIZE);
       const vectors = await this.embed(batch.map((chunk) => chunk.text), options.signal);
       await this.qdrant("PUT", `/collections/${encodeURIComponent(this.collection)}/points?wait=true`, {
         points: batch.map((chunk, index) => ({

@@ -230,7 +230,7 @@ test("active held-out stays sealed behind an empty host placeholder until PASS r
 function sampleInput(runId: string): FactoryStartInput {
   return {
     runId,
-    creator: { id: "creator-provisional", name: "Creator Provisional" },
+    creator: { id: "11111111-1111-4111-8111-111111111111", name: "Creator Provisional" },
     taskName: "One publishable decision",
     taskBrief: "Make one supported tradeoff and return a complete usable result.",
     sources: [{

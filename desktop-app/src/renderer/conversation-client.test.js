@@ -13,7 +13,11 @@ import {
   updateConversation
 } from "./conversation-client.js";
 
-const binding = { entitlementId: "ent_a", creatorId: "creator_a", agentId: "agent_a" };
+const binding = {
+  entitlementId: "7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001",
+  creatorId: "8bb7b10c-4db0-4d8a-8c2f-2e2c8cba1002",
+  productId: "9cc7b10c-4db0-4d8a-8c2f-2e2c8cba1003"
+};
 
 function response(body, ok = true, status = 200) {
   return { ok, status, json: async () => body };
@@ -68,9 +72,9 @@ describe("conversation client", () => {
     expect(result.conversations[0].id).toBe("conv_1");
     const [url, init] = fetchImpl.mock.calls[0];
     expect(url).toContain("/v1/conversations?");
-    expect(url).toContain("entitlement_id=ent_a");
-    expect(url).toContain("creator_id=creator_a");
-    expect(url).toContain("agent_id=agent_a");
+    expect(url).toContain("entitlement_id=7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001");
+    expect(url).toContain("creator_id=8bb7b10c-4db0-4d8a-8c2f-2e2c8cba1002");
+    expect(url).toContain("product_id=9cc7b10c-4db0-4d8a-8c2f-2e2c8cba1003");
     expect(init.headers.authorization).toBe("Bearer token");
   });
 

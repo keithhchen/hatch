@@ -69,7 +69,7 @@ test("Creator Factory HTTP answers require question_batch_id before service disp
     pathname: "/v1/creator/factory-runs/run-1/answers",
     headers: {},
     body: { answers: [{ question_id: "I.Q1", answer: "Answer" }] },
-    creator: { id: "creator-1", display_name: "Creator One" }
+    creator: { id: "33333333-3333-4333-8333-333333333333", display_name: "Creator One" }
   }, {} as CreatorFactoryService);
 
   assert.equal(response?.status, 422);
@@ -256,7 +256,7 @@ async function passingRunner(call: FactoryPromptCall): Promise<string> {
 function sampleInput(runId: string, flavor: string): FactoryStartInput {
   return {
     runId,
-    creator: { id: "creator-binding", name: "Creator Binding" },
+    creator: { id: "11111111-1111-4111-8111-111111111111", name: "Creator Binding" },
     taskName: `One publishable decision ${flavor}`,
     taskBrief: `${flavor}: make one supported tradeoff and return a complete usable result.`,
     sources: [{

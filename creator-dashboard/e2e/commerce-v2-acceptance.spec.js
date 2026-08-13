@@ -6,7 +6,11 @@ import {
   signIn
 } from "./helpers.js";
 
-const PUBLIC_PRODUCT = "/creators/creator-e2e/signal-resume-review";
+const PUBLIC_PRODUCT = "/products/f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42";
+const PUBLIC_PRODUCT_ID = "f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42";
+const CREATOR_ID = "6f6a3d24-48af-4f27-9c50-0d4f7e4e8a21";
+const PAGINATION_PRODUCT_ID = "d4b6f3a1-2c87-4e59-9a10-6b7c8d9e0f12";
+const BLOCKED_PRODUCT_ID = "b7c1d2e3-4f56-4789-a012-3456789abcde";
 const CREATOR_TOKEN = "creator-e2e-token";
 const BUYER_TOKEN = "buyer-e2e-token";
 
@@ -114,7 +118,7 @@ test("R04 changed offer shows the old/new quote, has zero Commerce side effects,
     await e2eControl(request, "/__e2e/offer", {
       method: "POST",
       data: {
-        product_id: "signal-resume-review",
+        product_id: PUBLIC_PRODUCT_ID,
         offer: { revision: 2, amount_minor: 4900, currency: "USD" }
       }
     });
@@ -349,7 +353,7 @@ test("R15 a replacement Factory question batch quarantines old answers and expos
 });
 
 test("R16 a failed critical gate disables keyboard approval and the server rejects a forged approve", async ({ page, request }) => {
-  const productId = "blocked-browser-product";
+  const productId = BLOCKED_PRODUCT_ID;
   const candidateId = "factory_blocked_browser";
   await signIn(page, "creator", `/studio/products/${productId}/candidates/${candidateId}`);
   await expect(page.getByRole("heading", { level: 2, name: "Critical gates block approval" })).toBeVisible();
@@ -376,7 +380,7 @@ test("R16 a failed critical gate disables keyboard approval and the server rejec
 });
 
 test("R19/R20/R30 keyboard Creator flow publishes two immutable releases, shares, survives Registry rollback failure, and preserves purchase snapshots", async ({ page, context, request }, testInfo) => {
-  const productId = `browser-flow-product-r${testInfo.retry}`;
+  const productId = testInfo.retry ? "c2e3f4a5-6b78-4901-bc23-456789def012" : "c1e2f3a4-5b67-4890-ab12-3456789def01";
   const candidateV1 = `factory_${productId.replaceAll("-", "_")}_v1`;
   const candidateV2 = `factory_${productId.replaceAll("-", "_")}_v2`;
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
@@ -397,12 +401,12 @@ test("R19/R20/R30 keyboard Creator flow publishes two immutable releases, shares
   await keyboardApproveCandidate(page, true);
   await keyboardSaveFreeOfferAndPublish(page, productId);
   const shareLink = page.getByLabel("Share link");
-  await expect(shareLink).toHaveValue(`/creators/creator-e2e/${productId}`);
+  await expect(shareLink).toHaveValue(`/products/${productId}`);
   const copyLink = page.getByRole("button", { name: "Copy link" });
   await copyLink.focus();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("button", { name: "Copied" })).toBeVisible();
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(`/creators/creator-e2e/${productId}`);
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(`/products/${productId}`);
 
   const firstProduct = (await creatorProduct(request, productId)).product;
   expect(firstProduct.releases).toHaveLength(1);
@@ -474,13 +478,13 @@ test("R19/R20/R30 keyboard Creator flow publishes two immutable releases, shares
   });
   const rollbackAudit = finalState.product.audit_log.filter((entry) => ["release.rollback_started", "release.rolled_back"].includes(entry.action));
   expect(rollbackAudit.map((entry) => entry.action)).toEqual(["release.rollback_started", "release.rolled_back"]);
-  expect(rollbackAudit.every((entry) => entry.actor_id === "creator-e2e" && entry.reason === "Restore the first browser-verified behavior.")).toBeTruthy();
+  expect(rollbackAudit.every((entry) => entry.actor_id === CREATOR_ID && entry.reason === "Restore the first browser-verified behavior.")).toBeTruthy();
 });
 
 test("R21 Creator Orders uses a real cursor to load all 13 filtered orders", async ({ page }) => {
   await signIn(page, "creator", "/studio/orders");
-  await page.getByLabel("Product ID").fill("pagination-product");
-  const firstPage = page.waitForResponse((response) => response.url().includes("/v1/creator/orders?") && response.url().includes("product=pagination-product") && response.url().includes("limit=12"));
+  await page.getByLabel("Product ID").fill(PAGINATION_PRODUCT_ID);
+  const firstPage = page.waitForResponse((response) => response.url().includes("/v1/creator/orders?") && response.url().includes(`product=${PAGINATION_PRODUCT_ID}`) && response.url().includes("limit=12"));
   await page.getByLabel("Rows per page").selectOption("12");
   expect((await firstPage).status()).toBe(200);
   await expect(page.getByRole("status")).toHaveText("Loaded 12 orders; more are available.");
@@ -551,7 +555,7 @@ async function resetBaseOffer(request, revision) {
   return e2eControl(request, "/__e2e/offer", {
     method: "POST",
     data: {
-      product_id: "signal-resume-review",
+      product_id: PUBLIC_PRODUCT_ID,
       offer: { revision, amount_minor: 0, currency: "USD" }
     }
   });

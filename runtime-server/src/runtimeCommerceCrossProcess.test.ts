@@ -23,10 +23,10 @@ import {
 } from "./registryCorpus.js";
 import { RuntimeStore } from "./store.js";
 
-const CREATOR_ID = "creator-cross-process";
-const AGENT_ID = "agent-cross-process";
-const PRODUCT_ID = "product-cross-process";
-const BUYER_ID = "buyer-cross-process";
+const CREATOR_ID = "6f6a3d24-48af-4f27-9c50-0d4f7e4e8a21";
+const PRODUCT_ID = "f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42";
+const AGENT_ID = PRODUCT_ID;
+const BUYER_ID = "8e2b6f7a-3d6c-4f1b-9a2e-5c7d8f901234";
 const BUYER_TOKEN = "buyer-cross-process-token";
 const ACCESS_SERVICE_TOKEN = "registry-access-cross-process";
 const DEPLOYMENT_SERVICE_TOKEN = "registry-deployment-cross-process";
@@ -128,6 +128,10 @@ test("real Dashboard process and Runtime HTTP client preserve delivery, recovery
   // count remains reusable and no delivery or revenue is synthesized.
   freeSession.send(runMessage("run-failed"));
   await freeSession.waitFor((message) => message.type === "turn.failed" && message.run_id === "run-failed");
+  await waitForAsync(async () => {
+    const events = await readLedger(ledgerPath);
+    return events.some((event) => event.event_type === "entitlement.units_released" && event.reason === "run_failed") ? true : undefined;
+  });
   await waitForEntitlement(dashboard.url, freePurchase.entitlement_id, (entitlement) => (
     entitlement.remaining_units === 3 && entitlement.reserved_units === 0
   ));
@@ -299,7 +303,6 @@ async function writeCorpus(directory: string, systemText: string, compatibleWith
   });
   await writeFile(path.join(directory, "agent.json"), JSON.stringify({
     contract_version: "1",
-    agent_id: AGENT_ID,
     creator: { id: CREATOR_ID, name: "Cross Process Creator" },
     ...(compatibleWith ? { release: { backward_compatible_with: compatibleWith } } : {}),
     product: {
@@ -357,7 +360,7 @@ async function startRegistryFixture(corpus: CorpusReleases): Promise<RegistryFix
           ? json(response, 200, { id: BUYER_ID, role: "user", display_name: "Cross Process Buyer" })
           : json(response, 401, { detail: "A valid account token is required." });
       }
-      if (request.method === "GET" && url.pathname === "/v1/catalog/agents") {
+      if (request.method === "GET" && ["/v1/catalog/agents", "/v1/public/products"].includes(url.pathname)) {
         return json(response, 200, [{
           creator_id: CREATOR_ID,
           creator_name: "Cross Process Creator",
@@ -387,6 +390,33 @@ async function startRegistryFixture(corpus: CorpusReleases): Promise<RegistryFix
           presentation: { inputs: ["A local request"], outputs: ["A local file"] }
         }]);
       }
+      if (request.method === "GET" && url.pathname === `/v1/public/products/${PRODUCT_ID}`) {
+        return json(response, 200, {
+          creator_id: CREATOR_ID,
+          creator_name: "Cross Process Creator",
+          product_id: PRODUCT_ID,
+          product_name: "Cross Process Product",
+          product_description: "A product used to prove the real Runtime and Commerce boundary.",
+          product_promise: "Create one durable local delivery.",
+          product_boundaries: ["Does not upload private Workspace content."],
+          corpus_digest: currentDigest,
+          status: "published",
+          product_offer: {
+            offer_id: `offer-${currentDigest.slice(-12)}-${offer.amountMinor}-${offer.versionPolicy}`,
+            revision: offer.versionPolicy === "track_current_compatible" ? 2 : offer.amountMinor === 0 ? 1 : 3,
+            model: "per_delivery",
+            purchase_model: "per_delivery",
+            amount_minor: offer.amountMinor,
+            currency: "USD",
+            unit: "delivery",
+            included_units: offer.includedUnits,
+            refund_policy_version: "cross-process-v1",
+            version_policy: offer.versionPolicy,
+            status: "active"
+          },
+          presentation: { inputs: ["A local request"], outputs: ["A local file"] }
+        });
+      }
       const releaseAuthorityMatch = url.pathname.match(
         /^\/v1\/internal\/deployments\/agent-corpora\/([^/]+)\/([^/]+)\/releases\/([^/]+)$/
       );
@@ -409,14 +439,15 @@ async function startRegistryFixture(corpus: CorpusReleases): Promise<RegistryFix
           status: "published"
         });
       }
-      if (request.method === "GET" && url.pathname === "/v1/user/agent-access") {
+      if (request.method === "GET" && ["/v1/user/agent-access", "/v1/user/product-access"].includes(url.pathname)) {
         if (bearer(request.headers.authorization) !== BUYER_TOKEN) {
           return json(response, 401, { detail: "A valid account token is required." });
         }
         return json(response, 200, [...access.values()].filter((item) => item.status === "active"));
       }
       const grantMatch = url.pathname.match(/^\/v1\/user\/agents\/([^/]+)\/([^/]+)\/access$/);
-      if (request.method === "POST" && grantMatch) {
+      const productGrantMatch = url.pathname.match(/^\/v1\/user\/products\/([^/]+)\/access$/);
+      if (request.method === "POST" && (grantMatch || productGrantMatch)) {
         if (bearer(request.headers.authorization) !== ACCESS_SERVICE_TOKEN) {
           return json(response, 403, { detail: "A valid access service token is required." });
         }
@@ -429,8 +460,8 @@ async function startRegistryFixture(corpus: CorpusReleases): Promise<RegistryFix
           entitlement_id: entitlementId,
           order_id: String(body.order_id),
           user_id: String(body.user_id),
-          creator_id: decodeURIComponent(grantMatch[1]!),
-          agent_id: decodeURIComponent(grantMatch[2]!),
+          creator_id: grantMatch ? decodeURIComponent(grantMatch[1]!) : String(body.creator_id),
+          agent_id: grantMatch ? decodeURIComponent(grantMatch[2]!) : decodeURIComponent(productGrantMatch![1]!),
           product_id: PRODUCT_ID,
           purchased_corpus_digest: purchasedDigest,
           effective_corpus_digest: purchasedDigest,
@@ -441,7 +472,7 @@ async function startRegistryFixture(corpus: CorpusReleases): Promise<RegistryFix
         access.set(entitlementId, record);
         return json(response, 201, record);
       }
-      const revokeMatch = url.pathname.match(/^\/v1\/user\/agent-access\/([^/]+)$/);
+      const revokeMatch = url.pathname.match(/^\/v1\/user\/(?:agent-access|product-access)\/([^/]+)$/);
       if (request.method === "DELETE" && revokeMatch) {
         if (bearer(request.headers.authorization) !== ACCESS_SERVICE_TOKEN) {
           return json(response, 403, { detail: "A valid access service token is required." });
@@ -602,16 +633,15 @@ function scenarioRuntimeFactory(input: {
 }
 
 async function checkout(dashboardUrl: string, key: string): Promise<JsonRecord> {
-  const detailResponse = await fetch(`${dashboardUrl}/v1/catalog/agents/${CREATOR_ID}/${PRODUCT_ID}`);
+  const detailResponse = await fetch(`${dashboardUrl}/v1/public/products/${PRODUCT_ID}`);
   const detail = await detailResponse.json() as JsonRecord;
   assert.equal(detailResponse.status, 200, JSON.stringify(detail));
   const sessionResponse = await fetch(`${dashboardUrl}/v1/checkout-sessions`, {
     method: "POST",
     headers: buyerMutationHeaders(`${key}:session`),
     body: JSON.stringify({
-      creator_id: CREATOR_ID,
       product_id: PRODUCT_ID,
-      offer_id: detail.agent.offer.offer_id
+      offer_id: detail.product.offer.offer_id
     })
   });
   const sessionBody = await sessionResponse.json() as JsonRecord;
@@ -683,7 +713,6 @@ function hello(entitlementId: string): JsonRecord {
     auth_token: BUYER_TOKEN,
     entitlement_id: entitlementId,
     creator_id: CREATOR_ID,
-    agent_id: AGENT_ID,
     product_id: PRODUCT_ID,
     local_tools: []
   };
