@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { Usage } from "@earendil-works/pi-ai";
+import { UUID_V4_RE } from "./identity.js";
 
 export const LEGACY_PROTOCOL_VERSION = "0.6";
 export const PROTOCOL_VERSION = "0.7";
@@ -23,6 +24,7 @@ export const MAX_CONTEXT_ATTACHMENT_TEXT_BYTES = 64 * 1024;
 export const MAX_CONTEXT_ATTACHMENT_TOTAL_TEXT_BYTES = 128 * 1024;
 export const MAX_ERROR_MESSAGE_CHARS = 16 * 1024;
 const ProtocolIdSchema = z.string().min(1).max(MAX_PROTOCOL_ID_CHARS);
+const AuthorityIdSchema = z.string().regex(UUID_V4_RE);
 export const ClientToolNameSchema = z.enum([
   "file_list",
   "file_search",
@@ -42,20 +44,19 @@ export const ClientHelloSchema = z.object({
   // Kept only for old local fixtures during the migration. Production clients
   // send auth_token issued by Registry.
   license_token: z.string().min(1).max(MAX_AUTH_TOKEN_CHARS).optional(),
-  entitlement_id: ProtocolIdSchema.optional(),
-  creator_id: ProtocolIdSchema.optional(),
-  agent_id: ProtocolIdSchema.optional(),
-  user_id: ProtocolIdSchema.optional(),
-  product_id: ProtocolIdSchema.optional(),
+  entitlement_id: AuthorityIdSchema.optional(),
+  creator_id: AuthorityIdSchema.optional(),
+  user_id: AuthorityIdSchema.optional(),
+  product_id: AuthorityIdSchema.optional(),
   client_version: z.string().max(MAX_PROTOCOL_ID_CHARS).optional(),
   local_tools: z.array(ClientToolNameSchema).max(ClientToolNameSchema.options.length)
 }).strict().superRefine((message, ctx) => {
   if (!message.auth_token && !message.license_token) {
     ctx.addIssue({ code: "custom", path: ["auth_token"], message: "auth_token is required" });
   }
-  // agent_id and creator_id are checked against the server-owned entitlement;
-  // a client can never use them to broaden its purchased Agent scope.
-});
+  // creator_id and product_id are checked against the server-owned
+  // entitlement; a client can never use them to broaden its product scope.
+}).transform((message) => ({ ...message, agent_id: message.product_id }));
 
 /**
  * The only file-shaped value that can cross the WebSocket boundary. It is a
@@ -191,7 +192,10 @@ export const InboundMessageSchema = z.discriminatedUnion("type", [
   TurnCancelSchema
 ]);
 
-export type ClientHello = z.infer<typeof ClientHelloSchema>;
+// The wire contract is product_id-only. The parser adds agent_id as an
+// internal compatibility alias for Runtime code, but callers constructing a
+// canonical 0.7 hello must not send that legacy field.
+export type ClientHello = z.input<typeof ClientHelloSchema> & { agent_id?: string };
 export type RunStart = z.infer<typeof ClientMessageSchema>;
 export type ContextAttachment = z.infer<typeof ContextAttachmentSchema>;
 export type ToolResult = z.infer<typeof ToolCallResultSchema>;
@@ -224,7 +228,6 @@ export type RuntimeReady = {
   creator_id?: string;
   user_id: string;
   product_id: string;
-  agent_id?: string;
   corpus_digest: string;
   purchased_corpus_digest?: string;
   effective_corpus_digest?: string;

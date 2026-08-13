@@ -95,12 +95,15 @@ function createRequest(body: Record<string, unknown>): CreateFactoryRunRequest {
   const product = body.product === undefined
     ? undefined
     : productRequest(requireObject(body.product, "product"));
+  const productId = typeof body.product_id === "string" ? body.product_id : undefined;
   const tools = body.tools === undefined
     ? undefined
     : toolRequests(body.tools);
   return {
-    ...(typeof body.agent_id === "string" ? { agentId: body.agent_id } : {}),
-    ...(product === undefined ? {} : { product }),
+    ...(productId ? { agentId: productId } : {}),
+    ...(product === undefined && !productId ? {} : {
+      product: product ?? { id: productId }
+    }),
     ...(tools === undefined ? {} : { tools }),
     taskName: String(body.task_name ?? ""),
     taskBrief: String(body.task_brief ?? ""),
@@ -134,7 +137,7 @@ function requireObject(value: unknown, field: string): Record<string, unknown> {
 function publicView(view: CreatorFactoryRunView): Record<string, unknown> {
   return {
     id: view.id,
-    ...(view.agentId ? { agent_id: view.agentId } : {}),
+    ...(view.agentId ? { product_id: view.agentId } : {}),
     ...(view.product ? { product: view.product } : {}),
     ...(view.declaredToolIds ? { declared_tool_ids: view.declaredToolIds } : {}),
     task_name: view.taskName,

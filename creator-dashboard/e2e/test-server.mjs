@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -11,11 +12,19 @@ const registryPort = Number(process.env.HATCH_E2E_REGISTRY_PORT ?? dashboardPort
 const accessServiceToken = "e2e-registry-access-secret";
 const commerceServiceToken = "e2e-runtime-commerce-secret";
 const controlToken = "hatch-commerce-v2-e2e-control";
+const CREATOR_ID = "6f6a3d24-48af-4f27-9c50-0d4f7e4e8a21";
+const PUBLIC_PRODUCT_ID = "f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42";
+const PAGINATION_PRODUCT_ID = "d4b6f3a1-2c87-4e59-9a10-6b7c8d9e0f12";
+const BLOCKED_PRODUCT_ID = "b7c1d2e3-4f56-4789-a012-3456789abcde";
+const BROWSER_PRODUCT_IDS = [
+  "c1e2f3a4-5b67-4890-ab12-3456789def01",
+  "c2e3f4a5-6b78-4901-bc23-456789def012"
+];
 const corpusDigest = `sha256:${"a".repeat(64)}`;
 const temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-e2e-"));
 const accounts = new Map([
-  ["buyer@example.test", { id: "buyer-e2e", role: "user", display_name: "Jordan Buyer", password: "buyer-password", token: "buyer-e2e-token" }],
-  ["creator@example.test", { id: "creator-e2e", role: "creator", display_name: "Maya Creator", password: "creator-password", token: "creator-e2e-token" }]
+  ["buyer@example.test", { id: "a4f1c2d3-5678-4a90-bcde-1234567890ab", role: "user", display_name: "Jordan Buyer", password: "buyer-password", token: "buyer-e2e-token" }],
+  ["creator@example.test", { id: CREATOR_ID, role: "creator", display_name: "Maya Creator", password: "creator-password", token: "creator-e2e-token" }]
 ]);
 const accountsByToken = new Map([...accounts.values()].map((account) => [account.token, account]));
 const access = new Map();
@@ -26,11 +35,11 @@ let failNextReleaseActivation = false;
 let offerControlSequence = 0;
 
 const baseAgent = {
-  creator_id: "creator-e2e",
+  creator_id: CREATOR_ID,
   creator_name: "Maya Creator",
   creator_verified: true,
-  agent_id: "signal-resume-review",
-  product_id: "signal-resume-review",
+  agent_id: PUBLIC_PRODUCT_ID,
+  product_id: PUBLIC_PRODUCT_ID,
   product_name: "Signal Resume Review",
   product_description: "Turn a real resume into an evidence-backed rewrite plan.",
   product_promise: "Find the strongest credible signal without inventing evidence.",
@@ -39,7 +48,7 @@ const baseAgent = {
   status: "published",
   published_at: "2026-08-12T08:00:00.000Z",
   product_offer: {
-    offer_id: "offer-signal-e2e",
+    offer_id: "e4f5a6b7-8c90-4d12-a345-6789abcdef01",
     revision: 1,
     model: "per_delivery",
     purchase_model: "per_delivery",
@@ -59,15 +68,14 @@ const baseAgent = {
 };
 const agents = new Map([[baseAgent.product_id, baseAgent]]);
 const factoryRuns = new Map([
-  ...[0, 1].flatMap((retry) => {
-    const productId = `browser-flow-product-r${retry}`;
+  ...BROWSER_PRODUCT_IDS.flatMap((productId, retry) => {
     return [
       factoryRun({ productId, version: 1, retry }),
       factoryRun({ productId, version: 2, retry })
     ];
   }).map((run) => [run.id, run]),
   ["factory_blocked_browser", factoryRun({
-    productId: "blocked-browser-product",
+    productId: BLOCKED_PRODUCT_ID,
     version: 1,
     retry: "blocked",
     verified: false,
@@ -132,7 +140,7 @@ const registry = createServer(async (request, response) => {
       if (request.method === "GET" && url.pathname === "/__e2e/product-state") {
         const productId = String(url.searchParams.get("product_id") ?? "");
         return json(response, 200, {
-          product: dashboard?.portalState.getCreatorProduct("creator-e2e", productId) ?? null,
+          product: dashboard?.portalState.getCreatorProduct(CREATOR_ID, productId) ?? null,
           last_release_activation: lastReleaseActivation
         });
       }
@@ -186,7 +194,7 @@ const registry = createServer(async (request, response) => {
       const email = String(body.email ?? "");
       if (accounts.has(email)) return json(response, 409, { detail: "Email is already registered." });
       const account = {
-        id: `buyer-${accounts.size + 1}`,
+        id: randomUUID(),
         role: "user",
         display_name: String(body.display_name ?? "New Buyer"),
         password: String(body.password ?? ""),
@@ -202,10 +210,10 @@ const registry = createServer(async (request, response) => {
         ? json(response, 200, publicAccount(account))
         : json(response, 401, { detail: "A valid account token is required." });
     }
-    if (request.method === "GET" && url.pathname === "/v1/catalog/agents") {
+    if (request.method === "GET" && url.pathname === "/v1/public/products") {
       return json(response, 200, [...agents.values()].filter((entry) => entry.status === "published"));
     }
-    if (request.method === "GET" && url.pathname === "/v1/creator/agents") {
+    if (request.method === "GET" && url.pathname === "/v1/creator/products") {
       const account = authenticatedAccount(request);
       return account?.role === "creator" ? json(response, 200, [...agents.values()]) : json(response, 401, { detail: "Creator token required." });
     }
@@ -306,20 +314,20 @@ const registry = createServer(async (request, response) => {
       };
       return json(response, 200, { ...lastReleaseActivation, status: "active" });
     }
-    if (request.method === "GET" && url.pathname === "/v1/user/agent-access") {
+    if (request.method === "GET" && url.pathname === "/v1/user/product-access") {
       const account = authenticatedAccount(request);
       if (!account) return json(response, 401, { detail: "Account token required." });
       return json(response, 200, [...access.values()].filter((entry) => entry.user_id === account.id && entry.status === "active"));
     }
-    const grant = url.pathname.match(/^\/v1\/user\/agents\/([^/]+)\/([^/]+)\/access$/);
+    const grant = url.pathname.match(/^\/v1\/user\/products\/([^/]+)\/access$/);
     if (request.method === "POST" && grant) {
       if (bearer(request) !== accessServiceToken) return json(response, 403, { detail: "Access service token required." });
       const body = await readJson(request);
       const record = {
         user_id: String(body.user_id),
-        creator_id: decodeURIComponent(grant[1]),
-        agent_id: decodeURIComponent(grant[2]),
-        product_id: [...agents.values()].find((entry) => entry.agent_id === decodeURIComponent(grant[2]))?.product_id ?? decodeURIComponent(grant[2]),
+        creator_id: String(body.creator_id),
+        agent_id: decodeURIComponent(grant[1]),
+        product_id: decodeURIComponent(grant[1]),
         order_id: String(body.order_id),
         entitlement_id: String(body.entitlement_id),
         purchased_corpus_digest: String(body.purchased_corpus_digest),
@@ -328,7 +336,7 @@ const registry = createServer(async (request, response) => {
       access.set(record.entitlement_id, record);
       return json(response, 201, record);
     }
-    const revoke = url.pathname.match(/^\/v1\/user\/agent-access\/([^/]+)$/);
+    const revoke = url.pathname.match(/^\/v1\/user\/product-access\/([^/]+)$/);
     if (request.method === "DELETE" && revoke) {
       if (bearer(request) !== accessServiceToken) return json(response, 403, { detail: "Access service token required." });
       const body = await readJson(request);
@@ -419,7 +427,7 @@ function factoryRun({ productId, version, retry, verified = true, failedCritical
   const digestCharacter = verified ? String((Number(version) + 1) % 10) : "f";
   return {
     id: verified ? `factory_${productId.replaceAll("-", "_")}_v${version}` : "factory_blocked_browser",
-    agent_id: `${productId}-agent`,
+    agent_id: productId,
     status: "ready",
     factory_version: "browser-e2e-factory-v1",
     updated_at: `2026-08-12T0${Math.min(9, Number(version) || 1)}:00:00.000Z`,
@@ -473,7 +481,7 @@ function factoryQuestionRun() {
 
 function publishedAgent(run) {
   return {
-    creator_id: "creator-e2e",
+    creator_id: CREATOR_ID,
     creator_name: "Maya Creator",
     creator_verified: true,
     agent_id: run.agent_id,
@@ -496,19 +504,19 @@ function publishedAgent(run) {
 async function seedCreatorOrders(commerce) {
   for (let index = 1; index <= 13; index += 1) {
     await commerce.confirmCheckout({
-      buyer_id: `pagination-buyer-${index}`,
+      buyer_id: randomUUID(),
       buyer_display_name: `Pagination Buyer ${index}`,
-      creator_id: "creator-e2e",
+      creator_id: CREATOR_ID,
       creator_display_name: "Maya Creator",
-      agent_id: "pagination-agent",
-      product_id: "pagination-product",
+      agent_id: PAGINATION_PRODUCT_ID,
+      product_id: PAGINATION_PRODUCT_ID,
       product_name: "Pagination Product",
       corpus_digest: `sha256:${"d".repeat(64)}`,
-      release_id: "release-pagination-v1",
-      offer_id: "offer-pagination-v1",
+      release_id: `sha256:${"d".repeat(64)}`,
+      offer_id: "e9f0a1b2-c3d4-4567-8901-23456789abcd",
       offer_revision: 1,
       offer_snapshot: {
-        offer_id: "offer-pagination-v1",
+        offer_id: "e9f0a1b2-c3d4-4567-8901-23456789abcd",
         revision: 1,
         purchase_model: "per_delivery",
         amount_minor: 0,

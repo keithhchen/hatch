@@ -154,6 +154,10 @@ import {
   subscribeNativeCommands
 } from "./native-commands.js";
 import {
+  normalizeProductOpenPayload,
+  PRODUCT_OPEN_EVENT
+} from "./product-open.js";
+import {
   normalizeNativeDropAttachment,
   normalizeNativeDropFile
 } from "./native-drop-context.js";
@@ -180,7 +184,7 @@ const PROTOCOL_VERSION = "0.7";
 const OUTPUT_FILTERED_COPY = "This response was blocked by the output safety check.";
 const DEFAULT_RUNTIME_URL = import.meta.env.VITE_HATCH_RUNTIME_URL || "wss://hatch.tokenquadrant.cn/v1/runtime";
 const DEFAULT_AUTH_URL = import.meta.env.VITE_HATCH_AUTH_URL || "https://hatch.tokenquadrant.cn";
-const BROWSE_CATALOG_URL = import.meta.env.VITE_HATCH_CATALOG_URL || "https://hatch.tokenquadrant.cn/agents";
+const BROWSE_CATALOG_URL = import.meta.env.VITE_HATCH_CATALOG_URL || "https://hatch.tokenquadrant.cn/explore";
 const EMPTY_PROFILE = Object.freeze({ id: "anonymous", name: "User", initials: "U" });
 const DEFAULT_PERMISSION_MODE = DEFAULT_PERMISSION_POLICY;
 const ApprovalContext = createContext(null);
@@ -269,6 +273,7 @@ function App() {
   const nativeContextTargetSequenceRef = useRef(0);
   const requestedConversationIdRef = useRef(conversationIdFromLocation());
   const requestedConversationBindingRef = useRef(conversationBindingFromLocation());
+  const pendingProductOpenBindingRef = useRef(null);
   // Preserve the launch role even after Conversation Library hydration clears
   // the one-shot URL request. Dynamic Conversation windows must never write
   // their workspace back into the main window's legacy profile fallback.
@@ -475,7 +480,7 @@ function App() {
     if (preferredBinding?.entitlementId) {
       return active.find((item) => item.entitlement_id === preferredBinding.entitlementId
         && item.creator_id === preferredBinding.creatorId
-        && item.agent_id === preferredBinding.agentId) || null;
+        && (item.product_id || item.agent_id) === (preferredBinding.productId || preferredBinding.agentId)) || null;
     }
     const current = active.find((item) => item.entitlement_id === currentId);
     if (current) return current;
@@ -486,6 +491,7 @@ function App() {
   function applySignedInSession(session, entitlements, { preserveCurrent = false } = {}) {
     const profileId = session.profile?.id || EMPTY_PROFILE.id;
     const launchBinding = requestedConversationBindingRef.current
+      || pendingProductOpenBindingRef.current
       || (conversationWindowRef.current ? normalizeConversationBinding(windowContextRef.current) : null);
     const selected = chooseEntitlement(
       entitlements,
@@ -518,6 +524,9 @@ function App() {
     setStartupError("");
     setAuthState("signed-in");
     setSignInStatus("ready");
+    if (selected && pendingProductOpenBindingRef.current?.entitlementId === selected.entitlement_id) {
+      pendingProductOpenBindingRef.current = null;
+    }
   }
 
   function applyUnsupportedRoleSession(session) {
@@ -602,6 +611,36 @@ function App() {
       unlisten?.();
     };
   }, []);
+
+  // A browser receipt opens the native app with a non-secret routing hint.
+  // The Registry entitlement list remains the authority: this only selects a
+  // matching entitlement and never creates access from the URL itself.
+  useEffect(() => {
+    if (!window.__TAURI_INTERNALS__) return undefined;
+    let disposed = false;
+    let unlisten;
+    const handlePayload = (payload) => {
+      const binding = normalizeProductOpenPayload(payload)[0];
+      if (!binding || disposed) return;
+      pendingProductOpenBindingRef.current = binding;
+      if (buyerSession?.accessToken) {
+        void refreshEntitlements({ preserveCurrent: false });
+      }
+    };
+    void listen(PRODUCT_OPEN_EVENT, ({ payload }) => handlePayload(payload))
+      .then((dispose) => {
+        unlisten = dispose;
+        if (disposed) unlisten?.();
+      })
+      .catch(() => {});
+    void invokeDesktopCommand("read_product_open_links", {}, { invokeImpl: invoke })
+      .then(handlePayload)
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [buyerSession?.accessToken]);
 
   async function synchronizeNativeToolContext(accessSnapshot) {
     const workspaceGrantId = String(accessSnapshot?.workspaceGrantId || "").trim();
@@ -737,7 +776,8 @@ function App() {
     return entitlement ? {
       entitlementId: entitlement.entitlement_id,
       creatorId: entitlement.creator_id,
-      agentId: entitlement.agent_id
+      productId: entitlement.product_id || entitlement.agent_id,
+      agentId: entitlement.product_id || entitlement.agent_id
     } : null;
   }
 
@@ -1250,7 +1290,7 @@ function App() {
     if (!binding || creatorAgentEntitlements.length === 0) return;
     const selected = creatorAgentEntitlements.find((item) => item.entitlement_id === binding.entitlementId
       && item.creator_id === binding.creatorId
-      && item.agent_id === binding.agentId);
+      && (item.product_id || item.agent_id) === (binding.productId || binding.agentId));
     if (!selected) {
       if (selectedEntitlementId) setSelectedEntitlementId("");
       setEntitlementError("This Conversation window's Creator Agent binding is no longer available in this account.");
@@ -1602,7 +1642,8 @@ function App() {
       workspaceGrant,
       conversationId,
       entitlementId: desiredBinding?.entitlementId,
-      agentId: desiredBinding?.agentId,
+      productId: desiredBinding?.productId || desiredBinding?.agentId,
+      agentId: desiredBinding?.productId || desiredBinding?.agentId,
       creatorId: desiredBinding?.creatorId,
       preserveMessages: true
     });
@@ -1626,7 +1667,8 @@ function App() {
       workspaceGrant,
       conversationId,
       entitlementId: selectedEntitlementId,
-      agentId: creatorAgentEntitlements.find((item) => item.entitlement_id === selectedEntitlementId)?.agent_id,
+      productId: creatorAgentEntitlements.find((item) => item.entitlement_id === selectedEntitlementId)?.product_id,
+      agentId: creatorAgentEntitlements.find((item) => item.entitlement_id === selectedEntitlementId)?.product_id,
       creatorId: creatorAgentEntitlements.find((item) => item.entitlement_id === selectedEntitlementId)?.creator_id
     };
     window.clearTimeout(reconnectTimerRef.current);
@@ -1734,7 +1776,8 @@ function App() {
     const targetConversationId = connection.conversationId || conversationId;
     const targetEntitlementId = connection.entitlementId || selectedEntitlementId;
     const selectedEntitlement = creatorAgentEntitlements.find((item) => item.entitlement_id === targetEntitlementId);
-    const targetAgentId = connection.agentId || selectedEntitlement?.agent_id;
+    const targetProductId = connection.productId || connection.agentId || selectedEntitlement?.product_id;
+    const targetAgentId = targetProductId;
     const targetCreatorId = connection.creatorId || selectedEntitlement?.creator_id;
     if (!canConnectConversation({
       libraryStatus: conversationLibraryStatus,
@@ -1759,7 +1802,7 @@ function App() {
       workspaceGrant: targetWorkspaceGrant,
       conversationId: targetConversationId.trim() || "desktop-chat",
       entitlementId: targetEntitlementId,
-      ...(targetAgentId ? { agentId: targetAgentId } : {}),
+      ...(targetProductId ? { productId: targetProductId, agentId: targetProductId } : {}),
       ...(targetCreatorId ? { creatorId: targetCreatorId } : {})
     };
     // Legacy `desktop-chat` remains read-only during Runtime rollout. Never
@@ -1883,7 +1926,7 @@ function App() {
         installation_id: "desktop-local-install",
         auth_token: buyerSession.accessToken,
         entitlement_id: targetEntitlementId,
-        ...(targetAgentId ? { agent_id: targetAgentId } : {}),
+        ...(targetProductId ? { product_id: targetProductId } : {}),
         ...(targetCreatorId ? { creator_id: targetCreatorId } : {}),
         client_version: "0.1.0",
         local_tools: [...PLATFORM_LOCAL_TOOLS],
@@ -3758,7 +3801,7 @@ function historyUrlForRuntime(serverUrl, conversationId, entitlementId, binding 
   const url = new URL(runtimeHttpUrl(serverUrl, `/conversations/${encodeURIComponent(conversationId)}/messages`));
   url.searchParams.set("entitlement_id", entitlementId);
   if (binding.creatorId) url.searchParams.set("creator_id", binding.creatorId);
-  if (binding.agentId) url.searchParams.set("agent_id", binding.agentId);
+  if (binding.productId || binding.agentId) url.searchParams.set("product_id", binding.productId || binding.agentId);
   return url.toString();
 }
 

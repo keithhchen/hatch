@@ -19,7 +19,7 @@ const BATCH_ID_1 = deriveQuestionBatchId("factory_1", QUESTION_ARTIFACT_SHA, BAT
 const BATCH_ID_2 = deriveQuestionBatchId("factory_1", QUESTION_ARTIFACT_SHA, BATCH_NONCE_2);
 const BATCH_ID_3 = deriveQuestionBatchId("factory_1", QUESTION_ARTIFACT_SHA, BATCH_NONCE_3);
 
-function factoryInput(creatorId = "creator_a", runId = "factory_1"): FactoryStartInput {
+function factoryInput(creatorId = "11111111-1111-4111-8111-111111111111", runId = "factory_1"): FactoryStartInput {
   return {
     runId,
     creator: { id: creatorId, name: "Creator A" },
@@ -43,7 +43,7 @@ function state(
   return {
     contractVersion: "1",
     runId,
-    creator: { id: "creator_a", name: "Creator A" },
+    creator: { id: "11111111-1111-4111-8111-111111111111", name: "Creator A" },
     agentId: "launch-post",
     product: { id: "launch-post", name: "Publish-ready launch post" },
     taskName: "Publish-ready launch post",
@@ -99,30 +99,30 @@ test("In-memory repository scopes reads to the Creator and creates idempotently"
   const repository = new InMemoryCreatorFactoryRepository();
   const first = await repository.create({
     id: "factory_1",
-    creatorId: "creator_a",
+    creatorId: "11111111-1111-4111-8111-111111111111",
     idempotencyKey: "request_1",
     input: factoryInput()
   });
   const replay = await repository.create({
     id: "factory_transport_retry",
-    creatorId: "creator_a",
+    creatorId: "11111111-1111-4111-8111-111111111111",
     idempotencyKey: "request_1",
-    input: factoryInput("creator_a", "factory_transport_retry")
+    input: factoryInput("11111111-1111-4111-8111-111111111111", "factory_transport_retry")
   });
 
   assert.equal(first.created, true);
   assert.equal(replay.created, false);
   assert.equal(replay.run.id, "factory_1");
   assert.equal(replay.run.input.runId, "factory_1");
-  assert.equal((await repository.getForCreator("creator_a", "factory_1"))?.id, "factory_1");
-  assert.equal(await repository.getForCreator("creator_b", "factory_1"), undefined);
+  assert.equal((await repository.getForCreator("11111111-1111-4111-8111-111111111111", "factory_1"))?.id, "factory_1");
+  assert.equal(await repository.getForCreator("22222222-2222-4222-8222-222222222222", "factory_1"), undefined);
 
   await assert.rejects(
     () => repository.create({
       id: "factory_conflicting_retry",
-      creatorId: "creator_a",
+      creatorId: "11111111-1111-4111-8111-111111111111",
       idempotencyKey: "request_1",
-      input: { ...factoryInput("creator_a", "factory_conflicting_retry"), taskBrief: "A different request payload." }
+      input: { ...factoryInput("11111111-1111-4111-8111-111111111111", "factory_conflicting_retry"), taskBrief: "A different request payload." }
     }),
     (error: unknown) => error instanceof CreatorFactoryRepositoryError && error.code === "idempotency_conflict"
   );
@@ -130,18 +130,18 @@ test("In-memory repository scopes reads to the Creator and creates idempotently"
   await assert.rejects(
     () => repository.create({
       id: "factory_mismatch",
-      creatorId: "creator_b",
+      creatorId: "22222222-2222-4222-8222-222222222222",
       idempotencyKey: "request_2",
-      input: factoryInput("creator_a", "factory_mismatch")
+      input: factoryInput("11111111-1111-4111-8111-111111111111", "factory_mismatch")
     }),
     (error: unknown) => error instanceof CreatorFactoryRepositoryError && error.code === "creator_mismatch"
   );
   await assert.rejects(
     () => repository.create({
       id: "factory_1",
-      creatorId: "creator_b",
+      creatorId: "22222222-2222-4222-8222-222222222222",
       idempotencyKey: "request_3",
-      input: factoryInput("creator_b", "factory_1")
+      input: factoryInput("22222222-2222-4222-8222-222222222222", "factory_1")
     }),
     (error: unknown) => error instanceof CreatorFactoryRepositoryError && error.code === "run_id_conflict"
   );
@@ -151,7 +151,7 @@ test("In-memory queue fences leases and moves Creator answers back to queued wor
   const repository = new InMemoryCreatorFactoryRepository();
   await repository.create({
     id: "factory_1",
-    creatorId: "creator_a",
+    creatorId: "11111111-1111-4111-8111-111111111111",
     idempotencyKey: "request_1",
     input: factoryInput(),
     nextAttemptAt: "2026-08-12T00:00:00.000Z"
@@ -171,7 +171,7 @@ test("In-memory queue fences leases and moves Creator answers back to queued wor
     leaseToken: firstLeaseToken,
     now: "2026-08-12T00:00:01.500Z"
   });
-  assert.equal((await repository.getForCreator("creator_a", "factory_1"))?.version, firstLease.version);
+  assert.equal((await repository.getForCreator("11111111-1111-4111-8111-111111111111", "factory_1"))?.version, firstLease.version);
   await assert.rejects(
     () => repository.assertLease({
       runId: "factory_1",
@@ -204,7 +204,7 @@ test("In-memory queue fences leases and moves Creator answers back to queued wor
 
   await assert.rejects(
     () => repository.submitAnswers({
-      creatorId: "creator_a",
+      creatorId: "11111111-1111-4111-8111-111111111111",
       runId: "factory_1",
       answers: {}
     }),
@@ -213,7 +213,7 @@ test("In-memory queue fences leases and moves Creator answers back to queued wor
 
   await assert.rejects(
     () => repository.submitAnswers({
-      creatorId: "creator_b",
+      creatorId: "22222222-2222-4222-8222-222222222222",
       runId: "factory_1",
       answers: { answerMarkdown: "## Q1\nAnswer" }
     }),
@@ -221,7 +221,7 @@ test("In-memory queue fences leases and moves Creator answers back to queued wor
   );
   await assert.rejects(
     () => repository.submitAnswers({
-      creatorId: "creator_a",
+      creatorId: "11111111-1111-4111-8111-111111111111",
       runId: "factory_1",
       answers: { answerMarkdown: "## Q1\nAnswer" }
     }),
@@ -229,7 +229,7 @@ test("In-memory queue fences leases and moves Creator answers back to queued wor
   );
   await assert.rejects(
     () => repository.submitAnswers({
-      creatorId: "creator_a",
+      creatorId: "11111111-1111-4111-8111-111111111111",
       runId: "factory_1",
       answers: {
         answerMarkdown: "## Q1\nAnswer",
@@ -240,7 +240,7 @@ test("In-memory queue fences leases and moves Creator answers back to queued wor
   );
   await assert.rejects(
     () => repository.submitAnswers({
-      creatorId: "creator_a",
+      creatorId: "11111111-1111-4111-8111-111111111111",
       runId: "factory_1",
       expectedVersion: waiting.version - 1,
       answers: { answerMarkdown: "## Q1\nAnswer", questionBatchId: BATCH_ID_1 }
@@ -248,7 +248,7 @@ test("In-memory queue fences leases and moves Creator answers back to queued wor
     (error: unknown) => error instanceof CreatorFactoryRepositoryError && error.code === "version_conflict"
   );
   const queued = await repository.submitAnswers({
-    creatorId: "creator_a",
+    creatorId: "11111111-1111-4111-8111-111111111111",
     runId: "factory_1",
     expectedVersion: waiting.version,
     answers: {
@@ -263,7 +263,7 @@ test("In-memory queue fences leases and moves Creator answers back to queued wor
   assert.equal(queued.pendingAnswers?.questionBatchId, BATCH_ID_1);
 
   const queuedReplay = await repository.submitAnswers({
-    creatorId: "creator_a",
+    creatorId: "11111111-1111-4111-8111-111111111111",
     runId: "factory_1",
     expectedVersion: waiting.version,
     answers: {
@@ -278,7 +278,7 @@ test("In-memory queue fences leases and moves Creator answers back to queued wor
 
   await assert.rejects(
     () => repository.submitAnswers({
-      creatorId: "creator_a",
+      creatorId: "11111111-1111-4111-8111-111111111111",
       runId: "factory_1",
       answers: {
         answerMarkdown: "## Q1\nChanged answer",
@@ -297,7 +297,7 @@ test("In-memory queue fences leases and moves Creator answers back to queued wor
   assert.ok(secondLease?.leaseToken);
   assert.equal(secondLease.attempts, 2);
   const runningReplay = await repository.submitAnswers({
-    creatorId: "creator_a",
+    creatorId: "11111111-1111-4111-8111-111111111111",
     runId: "factory_1",
     answers: {
       answerMarkdown: "## Q1\nAnswer",
@@ -316,7 +316,7 @@ test("In-memory queue fences leases and moves Creator answers back to queued wor
     now: "2026-08-12T00:00:05.000Z"
   });
   const laterWaitingReplay = await repository.submitAnswers({
-    creatorId: "creator_a",
+    creatorId: "11111111-1111-4111-8111-111111111111",
     runId: "factory_1",
     answers: {
       answerMarkdown: "## Q1\nAnswer",
@@ -329,7 +329,7 @@ test("In-memory queue fences leases and moves Creator answers back to queued wor
 
   await assert.rejects(
     () => repository.submitAnswers({
-      creatorId: "creator_a",
+      creatorId: "11111111-1111-4111-8111-111111111111",
       runId: "factory_1",
       answers: {
         answers: [{ questionId: "Q1", answer: "Late answer for the old batch" }],
@@ -342,7 +342,7 @@ test("In-memory queue fences leases and moves Creator answers back to queued wor
 
   const structuredAnswers = [{ questionId: "H1", answer: "Replacement answer" }];
   const laterQueued = await repository.submitAnswers({
-    creatorId: "creator_a",
+    creatorId: "11111111-1111-4111-8111-111111111111",
     runId: "factory_1",
     expectedVersion: laterWaiting.version,
     answers: {
@@ -387,7 +387,7 @@ test("expired work can be reclaimed, while failure keeps it durably retryable", 
   const repository = new InMemoryCreatorFactoryRepository();
   await repository.create({
     id: "factory_1",
-    creatorId: "creator_a",
+    creatorId: "11111111-1111-4111-8111-111111111111",
     idempotencyKey: "request_1",
     input: factoryInput(),
     nextAttemptAt: "2026-08-12T00:00:00.000Z"
@@ -425,15 +425,15 @@ test("Postgres create binds an idempotency key to the canonical semantic input",
   const repository = new PostgresCreatorFactoryRepository(database);
   const first = await repository.create({
     id: "factory_1",
-    creatorId: "creator_a",
+    creatorId: "11111111-1111-4111-8111-111111111111",
     idempotencyKey: "request_1",
     input: factoryInput()
   });
   const replay = await repository.create({
     id: "factory_transport_retry",
-    creatorId: "creator_a",
+    creatorId: "11111111-1111-4111-8111-111111111111",
     idempotencyKey: "request_1",
-    input: factoryInput("creator_a", "factory_transport_retry")
+    input: factoryInput("11111111-1111-4111-8111-111111111111", "factory_transport_retry")
   });
   assert.equal(first.created, true);
   assert.equal(replay.created, false);
@@ -442,9 +442,9 @@ test("Postgres create binds an idempotency key to the canonical semantic input",
   await assert.rejects(
     () => repository.create({
       id: "factory_changed",
-      creatorId: "creator_a",
+      creatorId: "11111111-1111-4111-8111-111111111111",
       idempotencyKey: "request_1",
-      input: { ...factoryInput("creator_a", "factory_changed"), taskName: "Changed task" }
+      input: { ...factoryInput("11111111-1111-4111-8111-111111111111", "factory_changed"), taskName: "Changed task" }
     }),
     (error: unknown) => error instanceof CreatorFactoryRepositoryError && error.code === "idempotency_conflict"
   );
@@ -462,7 +462,7 @@ test("Postgres answer submission receipts survive status changes and fence confl
   }));
   const repository = new PostgresCreatorFactoryRepository(database);
   const submitted = await repository.submitAnswers({
-    creatorId: "creator_a",
+    creatorId: "11111111-1111-4111-8111-111111111111",
     runId: "factory_1",
     expectedVersion: 1,
     answers: {
@@ -474,7 +474,7 @@ test("Postgres answer submission receipts survive status changes and fence confl
   });
   assert.equal(submitted.status, "queued");
   const replay = await repository.submitAnswers({
-    creatorId: "creator_a",
+    creatorId: "11111111-1111-4111-8111-111111111111",
     runId: "factory_1",
     expectedVersion: 1,
     answers: {
@@ -489,7 +489,7 @@ test("Postgres answer submission receipts survive status changes and fence confl
 
   await assert.rejects(
     () => repository.submitAnswers({
-      creatorId: "creator_a",
+      creatorId: "11111111-1111-4111-8111-111111111111",
       runId: "factory_1",
       answers: {
         answerMarkdown: "## Q1\nAnswer",
@@ -512,7 +512,7 @@ test("Postgres answer submission receipts survive status changes and fence confl
   const staleRepository = new PostgresCreatorFactoryRepository(staleDatabase);
   await assert.rejects(
     () => staleRepository.submitAnswers({
-      creatorId: "creator_a",
+      creatorId: "11111111-1111-4111-8111-111111111111",
       runId: "factory_1",
       answers: {
         answers: [{ questionId: "Q1", answer: "Old batch answer" }],
@@ -736,7 +736,7 @@ class CapturingFactoryPostgres implements PostgresQueryExecutor {
 function databaseRow(overrides: Row = {}): Row {
   return {
     id: "factory_1",
-    creator_id: "creator_a",
+    creator_id: "11111111-1111-4111-8111-111111111111",
     idempotency_key: "request_1",
     input_digest: "sha256:test-input",
     input_jsonb: factoryInput(),

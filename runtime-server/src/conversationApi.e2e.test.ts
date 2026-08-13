@@ -14,10 +14,10 @@ import { RuntimeStore } from "./store.js";
 let runtime: RuntimeServer | undefined;
 
 const binding = {
-  creator_id: "creator_library",
-  user_id: "account_library",
-  agent_id: "agent_library",
-  product_id: "product_library",
+  creator_id: "22222222-2222-4222-8222-222222222222",
+  user_id: "11111111-1111-4111-8111-111111111111",
+  agent_id: "33333333-3333-4333-8333-333333333333",
+  product_id: "33333333-3333-4333-8333-333333333333",
   corpus_digest: `sha256:${"b".repeat(64)}`
 };
 
@@ -89,7 +89,7 @@ test("Conversation HTTP API owns metadata, pagination, versions, and cursor snap
   const replay = await json(base, `/v1/conversations/${encodeURIComponent(first.conversation.id)}/events?${scope}&after_cursor=${firstCursor}`);
   assert.deepEqual((replay.body as { events: Array<{ cursor: number }> }).events.map((event) => event.cursor), [snapshotBody.cursor]);
 
-  const crossAgentScope = new URLSearchParams({ ...binding, agent_id: "agent_other" }).toString();
+  const crossAgentScope = new URLSearchParams({ ...binding, product_id: "44444444-4444-4444-8444-444444444444" }).toString();
   const denied = await json(base, `/v1/conversations/${encodeURIComponent(first.conversation.id)}?${crossAgentScope}`);
   assert.equal(denied.response.status, 404);
 
@@ -109,14 +109,14 @@ test("Conversation Library keeps three Agent A and two Agent B conversations in 
   const agentA = new URLSearchParams(binding).toString();
   const agentBBinding = {
     ...binding,
-    creator_id: "creator_b",
-    agent_id: "agent_b",
-    product_id: "product_b"
+    creator_id: "55555555-5555-4555-8555-555555555555",
+    agent_id: "66666666-6666-4666-8666-666666666666",
+    product_id: "66666666-6666-4666-8666-666666666666"
   };
   const agentB = new URLSearchParams(agentBBinding).toString();
 
   const createMany = async (scope: string, prefix: string, count: number) => {
-    const created = [] as Array<{ id: string; creator_id: string; agent_id: string }>;
+    const created = [] as Array<{ id: string; creator_id: string; product_id_at_creation: string }>;
     for (let index = 1; index <= count; index += 1) {
       const response = await json(base, `/v1/conversations?${scope}`, {
         method: "POST",
@@ -138,12 +138,12 @@ test("Conversation Library keeps three Agent A and two Agent B conversations in 
 
   const listedA = await json(base, `/v1/conversations?${agentA}&limit=100`);
   const listedB = await json(base, `/v1/conversations?${agentB}&limit=100`);
-  const idsA = (listedA.body as { conversations: Array<{ id: string; creator_id: string; agent_id: string }> }).conversations;
-  const idsB = (listedB.body as { conversations: Array<{ id: string; creator_id: string; agent_id: string }> }).conversations;
+  const idsA = (listedA.body as { conversations: Array<{ id: string; creator_id: string; product_id_at_creation: string }> }).conversations;
+  const idsB = (listedB.body as { conversations: Array<{ id: string; creator_id: string; product_id_at_creation: string }> }).conversations;
   assert.equal(idsA.length, 3);
   assert.equal(idsB.length, 2);
-  assert.ok(idsA.every((conversation) => conversation.creator_id === binding.creator_id && conversation.agent_id === binding.agent_id));
-  assert.ok(idsB.every((conversation) => conversation.creator_id === agentBBinding.creator_id && conversation.agent_id === agentBBinding.agent_id));
+  assert.ok(idsA.every((conversation) => conversation.creator_id === binding.creator_id && conversation.product_id_at_creation === binding.product_id));
+  assert.ok(idsB.every((conversation) => conversation.creator_id === agentBBinding.creator_id && conversation.product_id_at_creation === agentBBinding.product_id));
 
   const crossAgentRead = await json(
     base,

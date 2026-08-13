@@ -429,14 +429,14 @@ pub struct OpenConversationWindowRequest {
     #[serde(default)]
     pub creator_id: Option<String>,
     #[serde(default)]
-    pub agent_id: Option<String>,
+    pub product_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ConversationWindowBinding {
     entitlement_id: String,
     creator_id: String,
-    agent_id: String,
+    product_id: String,
 }
 
 #[derive(Serialize)]
@@ -1054,14 +1054,14 @@ pub async fn open_conversation_window(
     conversation_id: String,
     entitlement_id: Option<String>,
     creator_id: Option<String>,
-    agent_id: Option<String>,
+    product_id: Option<String>,
     router: State<'_, NativeCommandRouter>,
 ) -> Result<OpenConversationWindowResult, String> {
     let request = OpenConversationWindowRequest {
         conversation_id,
         entitlement_id,
         creator_id,
-        agent_id,
+        product_id,
     };
     let conversation_id = validate_conversation_id(&request.conversation_id)?;
     let binding = validate_conversation_window_binding(&request)?;
@@ -1552,12 +1552,31 @@ fn validate_binding_id(value: &str, field: &str) -> Result<String, String> {
     Ok(value.to_string())
 }
 
+fn validate_uuid_v4(value: &str, field: &str) -> Result<String, String> {
+    let value = value.trim().to_ascii_lowercase();
+    let bytes = value.as_bytes();
+    let valid_hex = |byte: u8| byte.is_ascii_hexdigit();
+    let valid = bytes.len() == 36
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| matches!(index, 8 | 13 | 18 | 23) || valid_hex(*byte))
+        && bytes[14] == b'4'
+        && matches!(bytes[19], b'8' | b'9' | b'a' | b'b');
+    if !valid {
+        return Err(format!(
+            "conversation_window_binding_invalid: {field} must be a UUID v4"
+        ));
+    }
+    Ok(value)
+}
+
 fn validate_conversation_window_binding(
     request: &OpenConversationWindowRequest,
 ) -> Result<Option<ConversationWindowBinding>, String> {
     let provided = request.entitlement_id.is_some()
         || request.creator_id.is_some()
-        || request.agent_id.is_some();
+        || request.product_id.is_some();
     if !provided {
         return Ok(None);
     }
@@ -1569,12 +1588,14 @@ fn validate_conversation_window_binding(
         request.creator_id.as_deref().unwrap_or_default(),
         "creator_id",
     )?;
-    let agent_id =
-        validate_binding_id(request.agent_id.as_deref().unwrap_or_default(), "agent_id")?;
+    let product_id = validate_uuid_v4(
+        request.product_id.as_deref().unwrap_or_default(),
+        "product_id",
+    )?;
     Ok(Some(ConversationWindowBinding {
         entitlement_id,
         creator_id,
-        agent_id,
+        product_id,
     }))
 }
 
@@ -1615,7 +1636,7 @@ fn conversation_window_path(
         for (name, value) in [
             ("entitlement_id", binding.entitlement_id.as_str()),
             ("creator_id", binding.creator_id.as_str()),
-            ("agent_id", binding.agent_id.as_str()),
+            ("product_id", binding.product_id.as_str()),
         ] {
             let encoded =
                 url::form_urlencoded::byte_serialize(value.as_bytes()).collect::<String>();
@@ -1704,12 +1725,12 @@ mod tests {
     }
 
     #[test]
-    fn conversation_window_route_carries_optional_agent_binding() {
+    fn conversation_window_route_carries_optional_product_binding() {
         let request = OpenConversationWindowRequest {
             conversation_id: "conv_123".into(),
             entitlement_id: Some("ent_A".into()),
             creator_id: Some("creator_A".into()),
-            agent_id: Some("agent_A".into()),
+            product_id: Some("550e8400-e29b-41d4-a716-446655440000".into()),
         };
         let binding = validate_conversation_window_binding(&request).unwrap();
         let binding = binding.as_ref().unwrap();
@@ -1718,7 +1739,7 @@ mod tests {
         assert!(path.contains("conversation_id=conv_123"));
         assert!(path.contains("entitlement_id=ent_A"));
         assert!(path.contains("creator_id=creator_A"));
-        assert!(path.contains("agent_id=agent_A"));
+        assert!(path.contains("product_id=550e8400-e29b-41d4-a716-446655440000"));
     }
 
     #[test]
@@ -1727,7 +1748,7 @@ mod tests {
             conversation_id: "conv_123".into(),
             entitlement_id: Some("ent_A".into()),
             creator_id: None,
-            agent_id: Some("agent_A".into()),
+            product_id: Some("550e8400-e29b-41d4-a716-446655440000".into()),
         };
         assert!(validate_conversation_window_binding(&partial).is_err());
 
@@ -1735,7 +1756,7 @@ mod tests {
             conversation_id: "conv_123".into(),
             entitlement_id: Some("ent_A\nx".into()),
             creator_id: Some("creator_A".into()),
-            agent_id: Some("agent_A".into()),
+            product_id: Some("550e8400-e29b-41d4-a716-446655440000".into()),
         };
         assert!(validate_conversation_window_binding(&controlled).is_err());
     }

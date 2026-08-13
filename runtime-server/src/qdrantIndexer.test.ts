@@ -69,6 +69,38 @@ test("Qdrant stages points under corpus_digest and only deletes an explicitly ol
   assert.deepEqual(must.at(-1), { key: "corpus_digest", match: { value: OLD_CORPUS_DIGEST } });
 });
 
+test("DashScope text-embedding-v4 batches never exceed the official ten-input limit", async (context) => {
+  const embeddingBatchSizes: number[] = [];
+  const server = createServer(async (request, response) => {
+    const body = await readJsonBody(request);
+    response.setHeader("content-type", "application/json");
+    if (request.url?.endsWith("/embeddings")) {
+      const input = Array.isArray(body.input) ? body.input : [];
+      embeddingBatchSizes.push(input.length);
+      response.end(JSON.stringify({
+        data: input.map(() => ({ embedding: Array.from({ length: 1024 }, (_, index) => index === 0 ? 1 : 0) })),
+      }));
+      return;
+    }
+    response.end(JSON.stringify({ result: { status: "ok" } }));
+  });
+  const baseUrl = await listen(server);
+  context.after(() => closeServer(server));
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-qdrant-batch-limit-"));
+  await writeFile(
+    path.join(root, "knowledge.md"),
+    Array.from({ length: 11 }, (_, index) => `# Section ${index + 1}\n\nEvidence ${index + 1}.`).join("\n\n"),
+    "utf8",
+  );
+  const indexer = new QdrantKnowledgeIndexer(baseUrl, undefined, "dashscope-key", {
+    embeddingBaseUrl: baseUrl,
+    requestTimeoutMs: 1_000,
+  });
+
+  await indexer.stageAgentDocuments("maya", "signal", CORPUS_DIGEST, root, [document()]);
+  assert.deepEqual(embeddingBatchSizes, [10, 1]);
+});
+
 test("Qdrant and DashScope responses are bounded", async (context) => {
   let oversizedQdrant = true;
   const server = createServer(async (request, response) => {

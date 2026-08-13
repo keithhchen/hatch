@@ -3,7 +3,7 @@ import { englishMessage } from "./i18n.js";
 export async function fetchPurchasedCreatorAgents(registryUrl, authToken, fetchImpl = fetch) {
   let accessResponse;
   try {
-    accessResponse = await fetchImpl(new URL("/v1/user/agent-access", registryUrl).toString(), {
+    accessResponse = await fetchImpl(new URL("/v1/user/product-access", registryUrl).toString(), {
       headers: { authorization: `Bearer ${authToken}`, accept: "application/json" }
     });
   } catch (error) {
@@ -60,6 +60,7 @@ function isCreatorAgentEntitlement(value) {
     && value?.creator?.id
     && value?.creator?.name
     && value?.product?.id
+    && value?.product_id
     && value?.product?.name
   );
 }

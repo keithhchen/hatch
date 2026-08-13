@@ -284,7 +284,7 @@ test("Factory persists the frozen source manifest and rejects post-verification 
   );
   const input = {
     runId: "source-manifest-persistence",
-    creator: { id: "madeline-mann", name: "Madeline Mann" },
+    creator: { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "Madeline Mann" },
     taskName: "Interview answer",
     taskBrief: "Return one grounded interview answer.",
     ...resolved,

@@ -8,8 +8,9 @@ import {
   loadAgentCorpus,
   type AgentCorpus,
 } from "./agentCorpus.js";
+import { isUuidV4 } from "./identity.js";
+import { parseSkillMarkdown } from "./skills.js";
 
-const IDENTIFIER = /^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/;
 const DIGEST = /^sha256:[a-f0-9]{64}$/;
 export const MAX_AGENT_CORPUS_BUNDLE_BYTES = 16 * 1024 * 1024;
 export const MAX_AGENT_CORPUS_FILES = 256;
@@ -134,7 +135,7 @@ export async function verifyAgentCorpus(
   } catch (error) {
     throw new AgentCorpusVerificationError(`Agent Corpus is not runtime-loadable: ${error instanceof Error ? error.message : String(error)}`);
   }
-  if (!IDENTIFIER.test(corpus.agent_id) || !IDENTIFIER.test(corpus.creator.id)) {
+  if (!isUuidV4(corpus.agent_id) || !isUuidV4(corpus.creator.id)) {
     throw new AgentCorpusVerificationError("Agent Corpus identifiers are invalid");
   }
   if (expectedAgentId && corpus.agent_id !== expectedAgentId) throw new AgentCorpusVerificationError("Agent Corpus agent binding mismatch");
@@ -162,6 +163,25 @@ export async function verifyAgentCorpus(
     const actual = await sha256File(containedPath(root, relative), options.signal);
     if (actual !== descriptor.sha256) throw new AgentCorpusVerificationError(`Agent Corpus asset digest mismatch: ${relative}`);
     rows.push([relative.replaceAll(path.sep, "/"), actual]);
+  }
+  for (const skill of corpus.skills) {
+    let parsedSkill: ReturnType<typeof parseSkillMarkdown>;
+    try {
+      parsedSkill = parseSkillMarkdown(await readFile(
+        containedPath(root, skill.instruction.path),
+        { encoding: "utf8", signal: options.signal }
+      ));
+    } catch (error) {
+      throw new AgentCorpusVerificationError(
+        `Agent Corpus Skill is not runtime-loadable: ${skill.instruction.path}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+    if (parsedSkill.manifest.name !== skill.id) {
+      throw new AgentCorpusVerificationError(`Agent Corpus Skill name does not match manifest id: ${skill.instruction.path}`);
+    }
+    if (parsedSkill.manifest.description !== skill.when_to_use) {
+      throw new AgentCorpusVerificationError(`Agent Corpus Skill description does not match when_to_use: ${skill.instruction.path}`);
+    }
   }
   const actualPaths = await filesUnder(root, options.signal);
   const unexpected = actualPaths.filter((candidate) => !declared.has(candidate)).sort();
@@ -343,14 +363,14 @@ export async function activateCurrentCorpus(
 }
 
 export function immutableReleasePath(root: string, creatorId: string, agentId: string, digest: string): string {
-  if (!IDENTIFIER.test(creatorId) || !IDENTIFIER.test(agentId) || !DIGEST.test(digest)) {
+  if (!isUuidV4(creatorId) || !isUuidV4(agentId) || !DIGEST.test(digest)) {
     throw new AgentCorpusVerificationError("Invalid immutable Agent Corpus identity");
   }
   return containedPath(root, path.join(".immutable-corpora", creatorId, agentId, `sha256-${digest.slice(7)}`));
 }
 
 export function currentPointerPath(root: string, creatorId: string, agentId: string): string {
-  if (!IDENTIFIER.test(creatorId) || !IDENTIFIER.test(agentId)) throw new AgentCorpusVerificationError("Invalid Agent Corpus identity");
+  if (!isUuidV4(creatorId) || !isUuidV4(agentId)) throw new AgentCorpusVerificationError("Invalid Agent Corpus identity");
   return containedPath(root, path.join(".current-corpora", creatorId, `${agentId}.json`));
 }
 

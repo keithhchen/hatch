@@ -34,9 +34,9 @@ test("one-shot harness binds a verified Corpus and traverses the full Hatch Runt
   const heldoutSecret = "SEALED_CREATOR_REFERENCE_MUST_NEVER_BE_MODEL_VISIBLE";
   const bundle = await materializeAgentCorpusBundle(store, {
     candidateRoot: "v1-fixed/agent-corpus",
-    creator: { id: "creator-harness", name: "Creator Harness" },
-    agentId: "offer-review",
-    product: { id: "offer-review", name: "Offer Review" },
+    creator: { id: "11111111-1111-4111-8111-111111111111", name: "Creator Harness" },
+    agentId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    product: { id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", name: "Offer Review" },
     systemInstructions: system,
     skills: [{
       id: "offer-critique",
@@ -92,8 +92,8 @@ test("one-shot harness binds a verified Corpus and traverses the full Hatch Runt
   });
   const result = await runHatchHarness({
     corpusRoot,
-    creatorId: "creator-harness",
-    agentId: "offer-review",
+    creatorId: "11111111-1111-4111-8111-111111111111",
+    agentId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
     corpusDigest: bundle.digest,
     question: "Make the decisive recommendation.",
     timeoutMs: 5_000
@@ -126,17 +126,17 @@ test("one-shot harness rejects a stale whole-Corpus digest before Runtime starts
   await store.initialize();
   const bundle = await materializeAgentCorpusBundle(store, {
     candidateRoot: "v1-fixed/agent-corpus",
-    creator: { id: "creator-harness", name: "Creator Harness" },
-    agentId: "offer-review",
-    product: { id: "offer-review", name: "Offer Review" },
+    creator: { id: "11111111-1111-4111-8111-111111111111", name: "Creator Harness" },
+    agentId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    product: { id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", name: "Offer Review" },
     systemInstructions: "Use the verified instructions.",
     syntheticQa: [{}],
     heldOut: [{}]
   });
   await assert.rejects(runHatchHarness({
     corpusRoot: path.join(store.directory, ...bundle.bundleRoot.split("/")),
-    creatorId: "creator-harness",
-    agentId: "offer-review",
+    creatorId: "11111111-1111-4111-8111-111111111111",
+    agentId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
     corpusDigest: `sha256:${"f".repeat(64)}`,
     question: "Question",
     timeoutMs: 5_000
@@ -191,8 +191,8 @@ test("one-shot harness returns the last successful file delivery instead of assi
 
   const result = await runHatchHarness({
     corpusRoot,
-    creatorId: "creator-harness",
-    agentId: "offer-review",
+    creatorId: "11111111-1111-4111-8111-111111111111",
+    agentId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
     corpusDigest: bundle.digest,
     question: "Create and save the finished artifact to output.md.",
     timeoutMs: 5_000
@@ -231,8 +231,8 @@ test("one-shot harness forwards a local tool error and lets the Hatch Agent reco
 
   const result = await runHatchHarness({
     corpusRoot,
-    creatorId: "creator-harness",
-    agentId: "offer-review",
+    creatorId: "11111111-1111-4111-8111-111111111111",
+    agentId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
     corpusDigest: bundle.digest,
     question: "Use the workspace if possible.",
     timeoutMs: 5_000
@@ -250,8 +250,8 @@ test("one-shot harness fails before advertising tools when LocalRunner is unavai
   let runtimeCreated = false;
   await assert.rejects(runHatchHarness({
     corpusRoot,
-    creatorId: "creator-harness",
-    agentId: "offer-review",
+    creatorId: "11111111-1111-4111-8111-111111111111",
+    agentId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
     corpusDigest: bundle.digest,
     question: "Question",
     timeoutMs: 5_000
@@ -282,8 +282,8 @@ test("Factory candidate adapter uses a child CLI contract and propagates cancell
     runId: "factory-run",
     corpusVersion: 1,
     agentCorpusRoot: "/tmp/candidate-corpus",
-    creatorId: "creator-harness",
-    agentId: "offer-review",
+    creatorId: "11111111-1111-4111-8111-111111111111",
+    agentId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
     corpusDigest: `sha256:${"a".repeat(64)}`,
     systemInstructions: "Not sent as an alternative prompt path.",
     question: "One generated task"
@@ -402,8 +402,8 @@ test("Factory candidate child cannot inherit or dotenv-load deployment control-p
     runId: "factory-isolated-child",
     corpusVersion: 1,
     agentCorpusRoot: "/tmp/candidate-corpus",
-    creatorId: "creator-harness",
-    agentId: "offer-review",
+    creatorId: "11111111-1111-4111-8111-111111111111",
+    agentId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
     corpusDigest: `sha256:${"b".repeat(64)}`,
     systemInstructions: "Not sent as an alternative prompt path.",
     question: "One isolated generated task"
@@ -462,9 +462,9 @@ async function createMinimalHarnessCorpus(root: string, runId: string) {
   await store.initialize();
   const bundle = await materializeAgentCorpusBundle(store, {
     candidateRoot: "v1-fixed/agent-corpus",
-    creator: { id: "creator-harness", name: "Creator Harness" },
-    agentId: "offer-review",
-    product: { id: "offer-review", name: "Offer Review" },
+    creator: { id: "11111111-1111-4111-8111-111111111111", name: "Creator Harness" },
+    agentId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    product: { id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc", name: "Offer Review" },
     systemInstructions: "Produce one decisive, publishable result.",
     syntheticQa: [{}],
     heldOut: [{}]

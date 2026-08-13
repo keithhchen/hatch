@@ -8,14 +8,14 @@ const DEFAULT_DESCRIPTION = "Discover Creator Agents you can use with Hatch Desk
  */
 export function createProductMetadata(input = {}) {
   const origin = safeOrigin(input.origin);
-  const creatorSlug = requiredSegment(input.creatorSlug, "creatorSlug");
-  const productSlug = requiredSegment(input.productSlug, "productSlug");
+  const creatorId = requiredUuid(input.creatorId, "creatorId");
+  const productId = requiredUuid(input.productId, "productId");
   const productName = cleanText(input.productName, "Creator Agent", 120);
   const creatorName = cleanText(input.creatorName, "Hatch Creator", 120);
   const description = cleanText(input.description, DEFAULT_DESCRIPTION, 300);
-  const routePrefix = String(input.routePrefix ?? "/agents").replace(/\/+$/, "") || "/agents";
+  const routePrefix = String(input.routePrefix ?? "/products").replace(/\/+$/, "") || "/products";
   const canonicalUrl = new URL(
-    `${routePrefix}/${encodeURIComponent(creatorSlug)}/${encodeURIComponent(productSlug)}`,
+    `${routePrefix}/${encodeURIComponent(productId)}`,
     origin
   ).toString();
   const imageUrl = optionalPublicUrl(input.imageUrl, origin);
@@ -73,8 +73,8 @@ export function injectProductMetadata(documentHtml, metadata) {
 }
 
 /** Generic metadata for catalog/auth routes when no product is resolved. */
-export function createDefaultMetadata(origin, routePrefix = "/agents") {
-  const canonicalUrl = new URL(String(routePrefix || "/agents"), safeOrigin(origin)).toString();
+export function createDefaultMetadata(origin, routePrefix = "/explore") {
+  const canonicalUrl = new URL(String(routePrefix || "/explore"), safeOrigin(origin)).toString();
   return Object.freeze({
     title: DEFAULT_TITLE,
     description: DEFAULT_DESCRIPTION,
@@ -82,10 +82,10 @@ export function createDefaultMetadata(origin, routePrefix = "/agents") {
   });
 }
 
-export function createUnavailableProductMetadata(origin, creatorSlug, productSlug, routePrefix = "/agents") {
+export function createUnavailableProductMetadata(origin, productId, _unused = undefined, routePrefix = "/products") {
   const safe = safeOrigin(origin);
   const canonicalUrl = new URL(
-    `${String(routePrefix || "/agents").replace(/\/+$/, "")}/${encodeURIComponent(requiredSegment(creatorSlug, "creatorSlug"))}/${encodeURIComponent(requiredSegment(productSlug, "productSlug"))}`,
+    `${String(routePrefix || "/products").replace(/\/+$/, "")}/${encodeURIComponent(requiredUuid(productId, "productId"))}`,
     safe
   ).toString();
   return Object.freeze({
@@ -93,6 +93,41 @@ export function createUnavailableProductMetadata(origin, creatorSlug, productSlu
     description: "This Creator Agent is unavailable or has been withdrawn.",
     canonicalUrl
   });
+}
+
+/**
+ * Minimal no-JavaScript body for a shared Product URL. The normal page is
+ * still hydrated by the Dashboard SPA, but a crawler, text browser, or a
+ * user with scripts disabled should see the product promise and the same
+ * free-claim entry point instead of an empty root div.
+ */
+export function createProductNoScriptFallback(input = {}) {
+  const productId = requiredUuid(input.productId, "productId");
+  const creatorId = requiredUuid(input.creatorId, "creatorId");
+  const productName = cleanText(input.productName, "Creator Agent", 120);
+  const creatorName = cleanText(input.creatorName, "Hatch Creator", 120);
+  const description = cleanText(input.description, DEFAULT_DESCRIPTION, 300);
+  const productPath = `/products/${productId}`;
+  const creatorPath = `/creators/${creatorId}`;
+  const amountMinor = Number(input.amountMinor);
+  const isFree = Number.isSafeInteger(amountMinor) && amountMinor === 0;
+  const action = isFree
+    ? `<a href="/sign-in?returnTo=${escapeAttribute(encodeURIComponent(productPath))}">Get for free</a>`
+    : `<span>Not available yet</span>`;
+  return `<noscript data-hatch-product-fallback="true"><main><p><a href="${creatorPath}">${escapeHtml(creatorName)}</a></p><h1>${escapeHtml(productName)}</h1><p>${escapeHtml(description)}</p><p>${action}</p></main></noscript>`;
+}
+
+/** Insert the no-script fragment once, without disturbing the SPA shell. */
+export function injectProductNoScriptFallback(documentHtml, fallback) {
+  if (typeof documentHtml !== "string" || !/<body(?:\s[^>]*)?>/i.test(documentHtml)) {
+    throw new TypeError("A complete HTML document with a body element is required");
+  }
+  if (typeof fallback !== "string" || !fallback) return documentHtml;
+  const withoutPrior = documentHtml.replace(
+    /\s*<noscript data-hatch-product-fallback="true">[\s\S]*?<\/noscript>\s*/gi,
+    "\n"
+  );
+  return withoutPrior.replace(/<body(?:\s[^>]*)?>/i, (match) => `${match}\n    ${fallback}`);
 }
 
 function normalizeMetadata(value) {
@@ -130,6 +165,14 @@ function optionalPublicUrl(value, origin) {
 function requiredSegment(value, name) {
   const text = cleanText(value, "", 160);
   if (!text || /[\u0000-\u001f]/.test(text)) throw new TypeError(`${name} is required`);
+  return text;
+}
+
+function requiredUuid(value, name) {
+  const text = requiredSegment(value, name).toLowerCase();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(text)) {
+    throw new TypeError(`${name} must be a UUID v4`);
+  }
   return text;
 }
 

@@ -13,14 +13,17 @@ import { createProviderAdapter } from "./providerAdapters.mjs";
 import {
   createDefaultMetadata,
   createProductMetadata,
+  createProductNoScriptFallback,
   createUnavailableProductMetadata,
-  injectProductMetadata
+  injectProductMetadata,
+  injectProductNoScriptFallback
 } from "./publicMetadata.mjs";
 import { PortalTelemetryStore } from "./telemetry.mjs";
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_JSON_BODY_MAX_BYTES = 1024 * 1024;
 const CORPUS_DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/;
+const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 export const CREATOR_FACTORY_JSON_BODY_MAX_BYTES = 32 * 1024 * 1024;
 
 export async function createDashboardApp(options = {}) {
@@ -165,7 +168,7 @@ export async function createDashboardApp(options = {}) {
     const entitlementId = refunded.entitlement?.entitlement_id ?? session.entitlement_id;
     if (registryAccessServiceToken && entitlementId) {
       try {
-        await registryRequest(registryUrl, `/v1/user/agent-access/${encodeURIComponent(entitlementId)}`, {
+        await registryRequest(registryUrl, `/v1/user/product-access/${encodeURIComponent(entitlementId)}`, {
           method: "DELETE",
           body: JSON.stringify({ user_id: order.buyer_id }),
           fetchImpl,
@@ -285,11 +288,12 @@ export async function createDashboardApp(options = {}) {
         if (!registryAccessServiceToken) throw new Error("Registry access service token is not configured");
         const grant = await registryRequest(
           registryUrl,
-          `/v1/user/agents/${encodeURIComponent(event.creator_id)}/${encodeURIComponent(event.agent_id)}/access`,
+          `/v1/user/products/${encodeURIComponent(event.agent_id)}/access`,
           {
             method: "POST",
             body: JSON.stringify({
               user_id: event.buyer_id,
+              creator_id: event.creator_id,
               order_id: event.order_id,
               entitlement_id: event.entitlement_id,
               purchased_corpus_digest: event.purchased_corpus_digest ?? event.corpus_digest,
@@ -307,7 +311,7 @@ export async function createDashboardApp(options = {}) {
         if (!registryAccessServiceToken) throw new Error("Registry access service token is not configured");
         await registryRequest(
           registryUrl,
-          `/v1/user/agent-access/${encodeURIComponent(event.entitlement_id)}`,
+          `/v1/user/product-access/${encodeURIComponent(event.entitlement_id)}`,
           {
             method: "DELETE",
             body: JSON.stringify({ user_id: event.buyer_id }),
@@ -751,40 +755,8 @@ export async function createDashboardApp(options = {}) {
         }
         return send(response, 404, { error: { code: "not_found", message: "Internal Commerce route not found." } });
       }
-      if (request.method === "GET" && url.pathname.startsWith("/portal")) {
-        const legacyLocation = await resolveLegacyRouteLocation({
-          pathname: url.pathname,
-          search: url.search,
-          request,
-          registryUrl,
-          fetchImpl,
-          portalState,
-          commerce
-        });
-        if (legacyLocation) {
-          response.writeHead(308, { location: legacyLocation, "cache-control": "no-cache" });
-          return response.end();
-        }
-      }
-      if (request.method === "GET" && (url.pathname === "/portal" || url.pathname === "/portal/")) {
-        return servePortalAsset(url.pathname, response);
-      }
-      if (request.method === "GET" && url.pathname.startsWith("/portal/")) {
-        return send(response, 404, { error: { code: "legacy_route_not_found", message: "That legacy Hatch link is no longer available." } });
-      }
-      // `/agents` was the old public namespace. Keep old shared links useful,
-      // but make the readable `/creators/...` URL the only canonical address.
-      if (request.method === "GET" && (url.pathname === "/agents" || url.pathname === "/agents/")) {
-        response.writeHead(308, { location: `/explore${url.search}`, "cache-control": "no-cache" });
-        return response.end();
-      }
-      const legacyPublicProduct = url.pathname.match(/^\/agents\/([^/]+)\/([^/]+)$/);
-      if (request.method === "GET" && legacyPublicProduct) {
-        response.writeHead(308, {
-          location: `/creators/${legacyPublicProduct[1]}/${legacyPublicProduct[2]}${url.search}`,
-          "cache-control": "no-cache"
-        });
-        return response.end();
+      if (url.pathname === "/portal" || url.pathname.startsWith("/portal/") || url.pathname === "/agents" || url.pathname.startsWith("/agents/")) {
+        return send(response, 404, { error: { code: "route_not_found", message: "That route is no longer available." } });
       }
       if (request.method === "GET" && (url.pathname === "/assets" || url.pathname.startsWith("/assets/"))) {
         return servePortalAsset(url.pathname, response);
@@ -792,20 +764,29 @@ export async function createDashboardApp(options = {}) {
       if (request.method === "GET" && isPublicPortalRoute(url.pathname)) {
         let metadata = createDefaultMetadata(publicOrigin, "/explore");
         let portalStatus = 200;
-        const productRoute = url.pathname.match(/^\/(?:creators|agents)\/([^/]+)\/([^/]+)$/);
+        let noScriptFallback;
+        const productRoute = url.pathname.match(/^\/products\/([^/]+)$/);
+        const creatorRoute = url.pathname.match(/^\/creators\/([^/]+)$/);
+        if (url.pathname.startsWith("/creators/") && !creatorRoute) {
+          return send(response, 404, { error: { code: "creator_not_found", message: "Creator URL must use one UUID v4 segment." } });
+        }
+        if (creatorRoute && !UUID_V4_PATTERN.test(decodeURIComponent(creatorRoute[1]))) {
+          return send(response, 404, { error: { code: "creator_not_found", message: "Creator URL must use a UUID v4." } });
+        }
         if (productRoute) {
+          const productSelector = decodeURIComponent(productRoute[1]);
+          if (!UUID_V4_PATTERN.test(productSelector)) {
+            return send(response, 404, { error: { code: "product_not_found", message: "Product URL must use a UUID v4." } });
+          }
           try {
             await portalState.refresh?.();
-            const creatorSelector = decodeURIComponent(productRoute[1]);
-            const productSelector = decodeURIComponent(productRoute[2]);
             const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
-            const agent = findCatalogAgent(catalog, creatorSelector, productSelector);
+            const agent = findCatalogAgent(catalog, undefined, productSelector);
             const state = agent ? portalState.getCreatorProduct(agent.creator_id, agent.product_id) : undefined;
             if (agent && state?.status !== "withdrawn") {
               const canonicalPath = publicProductPath(agent);
               if (canonicalPath !== url.pathname) {
-                response.writeHead(308, { location: `${canonicalPath}${url.search}`, "cache-control": "no-cache" });
-                return response.end();
+                return send(response, 404, { error: { code: "product_not_found", message: "Product URL must use its canonical UUID v4." } });
               }
               const activeOffer = await authoritativeProductOffer(commerce, agent, state);
               const product = publicCatalogAgent(
@@ -816,16 +797,24 @@ export async function createDashboardApp(options = {}) {
               );
               metadata = createProductMetadata({
                 origin: publicOrigin,
-                creatorSlug: agent.creator_slug ?? agent.creator_id,
-                productSlug: agent.product_slug ?? agent.product_id,
-                routePrefix: "/creators",
+                creatorId: agent.creator_id,
+                productId: agent.product_id,
+                routePrefix: "/products",
                 productName: product.product_name ?? product.name,
                 creatorName: product.creator_name ?? product.creator_display_name ?? agent.creator_id,
                 description: product.promise ?? product.description,
                 imageUrl: product.image_url ?? product.presentation?.image_url
               });
+              noScriptFallback = createProductNoScriptFallback({
+                creatorId: product.creator_id,
+                creatorName: product.creator_name ?? product.creator_display_name,
+                productId: product.product_id,
+                productName: product.product_name ?? product.name,
+                description: product.promise ?? product.description,
+                amountMinor: product.offer?.amount_minor
+              });
             } else {
-              metadata = createUnavailableProductMetadata(publicOrigin, creatorSelector, productSelector, "/creators");
+              metadata = createUnavailableProductMetadata(publicOrigin, productSelector, productSelector, "/products");
               portalStatus = 404;
             }
           } catch {
@@ -833,7 +822,7 @@ export async function createDashboardApp(options = {}) {
             // outages must not turn an otherwise cached SPA shell into a 5xx.
           }
         }
-        return servePortalIndex(response, metadata, portalStatus);
+        return servePortalIndex(response, metadata, portalStatus, noScriptFallback);
       }
       if (request.method === "POST" && ["/v1/auth/login", "/v1/auth/sign-in"].includes(url.pathname)) {
         const originError = crossSiteMutationError(request);
@@ -892,7 +881,7 @@ export async function createDashboardApp(options = {}) {
         return send(response, 200, authentication.profile);
       }
 
-      if (request.method === "GET" && ["/v1/catalog/agents", "/v1/public/products"].includes(url.pathname)) {
+      if (request.method === "GET" && url.pathname === "/v1/public/products") {
         const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
         const buyer = await optionalBuyer(request, registryUrl, fetchImpl, portalState);
         const entitlements = buyer ? commerce.listBuyerEntitlements(buyer.id) : [];
@@ -913,12 +902,18 @@ export async function createDashboardApp(options = {}) {
         return send(response, 200, products);
       }
 
+      if (request.method === "GET" && url.pathname === "/v1/public/creators") {
+        const creators = await registryRequest(registryUrl, "/v1/public/creators", { fetchImpl });
+        return send(response, 200, Array.isArray(creators) ? creators : []);
+      }
+
       const publicCreatorMatch = url.pathname.match(/^\/v1\/public\/creators\/([^/]+)$/);
       if (request.method === "GET" && publicCreatorMatch) {
         const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
         const creatorSelector = decodeURIComponent(publicCreatorMatch[1]);
+        if (!UUID_V4_PATTERN.test(creatorSelector)) return send(response, 404, { error: { code: "creator_not_found", message: "Creator was not found." } });
         const creatorProducts = catalog.filter((entry) => (
-          selectorMatches(creatorSelector, selectorValues(entry, "creator"))
+          String(entry.creator_id) === String(creatorSelector)
           && portalState.getCreatorProduct(entry.creator_id, entry.product_id)?.status !== "withdrawn"
         ));
         if (!creatorProducts.length) return send(response, 404, { error: { code: "creator_not_found", message: "Creator was not found." } });
@@ -930,7 +925,6 @@ export async function createDashboardApp(options = {}) {
         return send(response, 200, {
           creator: {
             id: first.creator_id,
-            slug: first.creator_slug ?? first.creator_id,
             name: first.creator_name ?? first.creator_display_name ?? first.creator_id,
             verified: Boolean(first.creator_verified)
           },
@@ -938,17 +932,12 @@ export async function createDashboardApp(options = {}) {
         });
       }
 
-      const catalogDetailMatch = url.pathname.match(/^\/v1\/catalog\/agents\/([^/]+)\/([^/]+)$/);
-      const publicProductMatch = url.pathname.match(/^\/v1\/public\/products\/([^/]+)\/([^/]+)$/);
-      const publicCreatorProductMatch = url.pathname.match(/^\/v1\/public\/creators\/([^/]+)\/products\/([^/]+)$/);
-      if (request.method === "GET" && (catalogDetailMatch || publicProductMatch || publicCreatorProductMatch)) {
-        const detailSelectors = catalogDetailMatch
-          ? catalogDetailMatch.slice(1)
-          : publicProductMatch
-            ? publicProductMatch.slice(1)
-            : publicCreatorProductMatch.slice(1);
+      const publicProductMatch = url.pathname.match(/^\/v1\/public\/products\/([^/]+)$/);
+      if (request.method === "GET" && publicProductMatch) {
+        const detailSelectors = [publicProductMatch[1]];
+        if (!UUID_V4_PATTERN.test(decodeURIComponent(detailSelectors[0]))) return send(response, 404, { error: { code: "product_not_found", message: "Product was not found." } });
         const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
-        const agent = findCatalogAgent(catalog, decodeURIComponent(detailSelectors[0]), decodeURIComponent(detailSelectors[1]));
+        const agent = findCatalogAgent(catalog, undefined, decodeURIComponent(detailSelectors[0]));
         const creatorState = agent ? portalState.getCreatorProduct(agent.creator_id, agent.product_id) : undefined;
         if (!agent || creatorState?.status === "withdrawn") return send(response, 404, { error: { code: "agent_unavailable", message: "The published Agent could not be found." } });
         const buyer = await optionalBuyer(request, registryUrl, fetchImpl, portalState);
@@ -962,7 +951,7 @@ export async function createDashboardApp(options = {}) {
           request_id: requestId
         }, `product-viewed:${requestId}`);
         return send(response, 200, {
-          agent: withBuyerAccess(
+          product: withBuyerAccess(
             publicCatalogAgent(
               agent,
               creatorState,
@@ -980,11 +969,10 @@ export async function createDashboardApp(options = {}) {
         const body = await readJson(request);
         const commandKey = requireCommandKey(request, body);
         const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
-        const requestedProductId = String(body.product_id ?? body.product_slug ?? "").trim();
-        const requestedCreatorId = String(body.creator_id ?? body.creator_slug ?? "").trim();
+        const requestedProductId = String(body.product_id ?? "").trim();
+        if (!UUID_V4_PATTERN.test(requestedProductId)) return send(response, 400, { error: { code: "invalid_product_id", message: "product_id must be a UUID v4." } });
         const candidates = catalog.filter((entry) => (
           entry.product_id === requestedProductId
-          && (!requestedCreatorId || entry.creator_id === requestedCreatorId)
         ));
         if (candidates.length > 1) {
           return send(response, 409, { error: { code: "ambiguous_product", message: "This product id is not globally unique. Use the current public product link." } });
@@ -1089,11 +1077,11 @@ export async function createDashboardApp(options = {}) {
         return send(response, outcome.replayed ? 200 : 201, outcome.body);
       }
 
-      if (request.method === "GET" && url.pathname === "/v1/user/agents") {
+      if (request.method === "GET" && url.pathname === "/v1/user/product-access") {
         const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const [access, catalog] = await Promise.all([
-          registryRequest(registryUrl, "/v1/user/agent-access", {
+          registryRequest(registryUrl, "/v1/user/product-access", {
             fetchImpl,
             headers: { authorization: `Bearer ${bearerToken(request)}` }
           }),
@@ -1170,7 +1158,7 @@ export async function createDashboardApp(options = {}) {
         if (order.entitlement?.entitlement_id) {
           if (!registryAccessServiceToken) throw stateError("access_service_unavailable", "Registry access provisioning is not configured.", 503);
           try {
-            await registryRequest(registryUrl, `/v1/user/agent-access/${encodeURIComponent(order.entitlement.entitlement_id)}`, {
+            await registryRequest(registryUrl, `/v1/user/product-access/${encodeURIComponent(order.entitlement.entitlement_id)}`, {
               method: "DELETE",
               body: JSON.stringify({ user_id: authentication.profile.id }),
               fetchImpl,
@@ -1284,16 +1272,16 @@ export async function createDashboardApp(options = {}) {
         return send(response, outcome.replayed ? 200 : 201, outcome.body);
       }
 
-      const accessMatch = url.pathname.match(/^\/v1\/user\/agents\/([^/]+)\/([^/]+)\/access$/);
+      const accessMatch = url.pathname.match(/^\/v1\/user\/products\/([^/]+)\/access$/);
       if (request.method === "POST" && accessMatch) {
         return send(response, 404, { error: { code: "not_found", message: "Route not found." } });
       }
 
-      if (request.method === "GET" && url.pathname === "/v1/creator/agents") {
+      if (request.method === "GET" && url.pathname === "/v1/creator/products") {
         const authentication = await authenticate(request, registryUrl, "creator", fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         requireCapability(authentication.profile, "product:read");
-        return send(response, 200, await registryRequest(registryUrl, "/v1/creator/agents", {
+        return send(response, 200, await registryRequest(registryUrl, "/v1/creator/products", {
           fetchImpl,
           headers: { authorization: `Bearer ${bearerToken(request)}` }
         }));
@@ -1412,7 +1400,7 @@ export async function createDashboardApp(options = {}) {
         const creatorOrders = commerce.listCreatorOrders(profile.id).map((order) => orderDetail(order));
         let creatorAgentsPromise;
         const creatorAgents = async () => {
-          creatorAgentsPromise ??= registryRequest(registryUrl, "/v1/creator/agents", {
+          creatorAgentsPromise ??= registryRequest(registryUrl, "/v1/creator/products", {
             fetchImpl,
             headers: { authorization: `Bearer ${bearerToken(request)}` }
           });
@@ -2004,26 +1992,6 @@ export async function createDashboardApp(options = {}) {
         return send(response, 200, { entitlement });
       }
 
-      const librarySlugMatch = url.pathname.match(/^\/v1\/library\/([^/]+)\/([^/]+)$/);
-      if (request.method === "GET" && librarySlugMatch) {
-        const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
-        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
-        const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
-        const entitlements = enrichEntitlements(
-          commerce.listBuyerEntitlements(authentication.profile.id),
-          catalog,
-          commerce.listDeliveries({ buyerId: authentication.profile.id })
-        );
-        const creatorSelector = decodeURIComponent(librarySlugMatch[1]);
-        const productSelector = decodeURIComponent(librarySlugMatch[2]);
-        const entitlement = entitlements.find((entry) => (
-          [entry.creator_id, entry.creator_slug, entry.creator?.slug].filter(Boolean).includes(creatorSelector)
-          && [entry.product_id, entry.product_slug, entry.product?.slug, entry.product?.id].filter(Boolean).includes(productSelector)
-        ));
-        if (!entitlement) return send(response, 404, { error: { code: "entitlement_not_found", message: "Access record was not found." } });
-        return send(response, 200, { entitlement });
-      }
-
       const buyerEntitlementMatch = url.pathname.match(/^\/v1\/(?:buyer|user)\/entitlements\/([^/]+)$/);
       if (request.method === "GET" && buyerEntitlementMatch) {
         const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
@@ -2331,14 +2299,23 @@ function requireCapability(profile, capability) {
 function mergeRegistryAgents(access, catalog) {
   if (!Array.isArray(access) || !Array.isArray(catalog)) return [];
   const catalogByAgent = new Map(catalog.map((entry) => [
-    `${entry?.creator_id}:${entry?.agent_id}`,
+    `${entry?.creator_id}:${entry?.product_id ?? entry?.agent_id}`,
     entry
   ]));
   return access.flatMap((grant) => {
-    const entry = catalogByAgent.get(`${grant?.creator_id}:${grant?.agent_id}`);
+    const entry = catalogByAgent.get(`${grant?.creator_id}:${grant?.product_id ?? grant?.agent_id}`);
     if (!entry) return [];
+    const {
+      agent_id: _agentId,
+      creator_slug: _creatorSlug,
+      product_slug: _productSlug,
+      creator_slug_aliases: _creatorAliases,
+      product_slug_aliases: _productAliases,
+      ...publicGrant
+    } = grant;
     return [{
-      ...grant,
+      ...publicGrant,
+      product_id: grant.product_id ?? grant.agent_id,
       creator: { id: entry.creator_id, name: entry.creator_name },
       product: {
         id: entry.product_id,
@@ -2593,7 +2570,9 @@ function checkoutCommerceInput(session, authentication, payment) {
     buyer_display_name: authentication.profile.display_name,
     creator_id: product.creator_id,
     creator_display_name: product.creator_name,
-    agent_id: product.agent_id,
+    // `agent_id` is an internal Commerce compatibility alias only. It never
+    // crosses the public product response boundary.
+    agent_id: product.agent_id ?? product.product_id,
     product_id: product.product_id,
     product_name: product.product_name,
     creator_snapshot: session.creator,
@@ -2637,12 +2616,12 @@ function pendingPaymentOutcome(session, payment) {
   };
 }
 
-function stablePaymentId(checkoutSessionId) {
-  return `payment_${createHash("sha256").update(`checkout-payment\0${checkoutSessionId}`).digest("hex").slice(0, 24)}`;
-}
-
 function stableFactoryDraftId(creatorId, commandKey) {
   return `draft_${createHash("sha256").update(`${creatorId}\0${commandKey}`).digest("hex").slice(0, 24)}`;
+}
+
+function stablePaymentId(checkoutSessionId) {
+  return stableAuthorityUuid(`payment:${checkoutSessionId}`);
 }
 
 function creatorPayoutView(commerce, creatorId, currency, provider, payoutSchedule) {
@@ -2802,11 +2781,12 @@ async function provisionCheckoutAccess({ session, order, entitlement, registryUr
   const purchasedCorpusDigest = session.release?.corpus_digest ?? entitlement.corpus_digest ?? order.corpus_digest;
   const grant = await registryRequest(
     registryUrl,
-    `/v1/user/agents/${encodeURIComponent(product.creator_id)}/${encodeURIComponent(product.agent_id)}/access`,
+    `/v1/user/products/${encodeURIComponent(product.product_id)}/access`,
     {
       method: "POST",
       body: JSON.stringify({
         user_id: session.buyer_id,
+        creator_id: product.creator_id,
         order_id: order.order_id,
         entitlement_id: entitlement.entitlement_id,
         purchased_corpus_digest: purchasedCorpusDigest,
@@ -3110,10 +3090,11 @@ function checkoutOutcomeBody(session, order, entitlement, payment) {
 }
 
 async function authoritativeCatalog(registryUrl, fetchImpl, portalState) {
-  const registryCatalog = await registryRequest(registryUrl, "/v1/catalog/agents", { fetchImpl });
-  const byProduct = new Map((Array.isArray(registryCatalog) ? registryCatalog : []).map((agent) => (
-    [`${agent.creator_id}:${agent.product_id}`, agent]
-  )));
+  const registryCatalog = await registryRequest(registryUrl, "/v1/public/products", { fetchImpl });
+  const byProduct = new Map((Array.isArray(registryCatalog) ? registryCatalog : []).map((product) => {
+    const agent = { ...product, agent_id: product.product_id };
+    return [`${agent.creator_id}:${agent.product_id}`, agent];
+  }));
   // Portal only changes its stable release after both Commerce and Registry
   // have acknowledged the same deployment operation. A captured immutable
   // snapshot therefore prevents a pending or repaired Registry pointer from
@@ -3130,7 +3111,6 @@ function publicAgentSnapshot(product) {
   return {
     creator_id: product.creator_id,
     creator_name: product.creator_name ?? product.creator_display_name ?? product.creator_id,
-    agent_id: product.agent_id,
     product_id: product.product_id,
     product_name: product.product_name ?? product.name,
     product_description: product.product_description ?? product.description ?? "",
@@ -3145,8 +3125,8 @@ function publicAgentSnapshot(product) {
 
 function canonicalPublicUrl(value) {
   const text = String(value ?? "");
-  const match = text.match(/^\/agents\/([^/]+)\/([^/]+)$/);
-  return match ? `/creators/${match[1]}/${match[2]}` : (text || undefined);
+  const match = text.match(/^\/products\/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i);
+  return match ? `/products/${match[1].toLowerCase()}` : (text || undefined);
 }
 
 function publicCatalogAgent(agent, creatorState, paymentMode = "disabled", commerceOffer) {
@@ -3160,20 +3140,27 @@ function publicCatalogAgent(agent, creatorState, paymentMode = "disabled", comme
     ?? (creatorState ? normalizeOffer(creatorState.offer_active, deployedAgent) : normalizeOffer(deployedAgent.product_offer, deployedAgent));
   const withdrawn = creatorState?.status === "withdrawn";
   const checkoutAvailable = Boolean(!withdrawn && offer && (offer.amount_minor === 0 || isPaidMode(paymentMode)));
+  const {
+    agent_id: _agentId,
+    creator_slug: _creatorSlug,
+    product_slug: _productSlug,
+    creator_slug_aliases: _creatorAliases,
+    product_slug_aliases: _productAliases,
+    ...authorityAgent
+  } = deployedAgent;
   return {
-    ...deployedAgent,
+    ...authorityAgent,
+    creator: { id: authorityAgent.creator_id, name: authorityAgent.creator_name ?? authorityAgent.creator_display_name ?? authorityAgent.creator_id },
+    product: { id: authorityAgent.product_id, name: authorityAgent.product_name ?? authorityAgent.name ?? authorityAgent.product_id },
     promise: deployedAgent.product_promise ?? deployedAgent.product_description ?? "",
     description: deployedAgent.product_description ?? "",
     boundaries: deployedAgent.product_boundaries ?? [],
-    creator_slug: deployedAgent.creator_slug ?? deployedAgent.creator_id,
-    product_slug: deployedAgent.product_slug ?? deployedAgent.product_id,
     availability: withdrawn ? "withdrawn" : checkoutAvailable ? "published" : "not_for_sale",
     available: checkoutAvailable,
     offer,
     ...(offer ? { product_offer: offer } : {}),
     release_id: creatorState?.release?.release_id ?? deployedAgent.corpus_digest,
-    public_url: `/creators/${encodeURIComponent(deployedAgent.creator_slug ?? deployedAgent.creator_id)}/${encodeURIComponent(deployedAgent.product_slug ?? deployedAgent.product_id)}`,
-    legacy_public_url: `/agents/${encodeURIComponent(deployedAgent.creator_id)}/${encodeURIComponent(deployedAgent.product_id)}`
+    public_url: `/products/${encodeURIComponent(deployedAgent.product_id)}`
   };
 }
 
@@ -3208,7 +3195,7 @@ function normalizeOffer(value, agent = {}) {
   }
   const model = value.purchase_model ?? value.model ?? "per_delivery";
   return {
-    offer_id: value.offer_id ?? `offer_${agent.creator_id ?? "creator"}_${agent.product_id ?? "product"}`,
+    offer_id: value.offer_id ?? stableOfferId(agent.creator_id ?? "creator", agent.product_id ?? "product"),
     revision: Number.isSafeInteger(Number(value.revision)) ? Number(value.revision) : 1,
     purchase_model: model,
     model,
@@ -3224,8 +3211,8 @@ function normalizeOffer(value, agent = {}) {
 
 function findCatalogAgent(catalog, creatorSelector, productSelector) {
   return (Array.isArray(catalog) ? catalog : []).find((entry) => (
-    selectorMatches(creatorSelector, selectorValues(entry, "creator"))
-    && selectorMatches(productSelector, selectorValues(entry, "product"))
+    (!creatorSelector || String(entry.creator_id) === String(creatorSelector))
+    && (!productSelector || String(entry.product_id) === String(productSelector))
   ));
 }
 
@@ -3234,19 +3221,11 @@ function selectorMatches(value, candidates) {
 }
 
 function selectorValues(entry, kind) {
-  const aliases = kind === "creator"
-    ? [entry?.creator_slug_aliases, entry?.creator?.slug_aliases, entry?.slug_aliases?.creator]
-    : [entry?.product_slug_aliases, entry?.product?.slug_aliases, entry?.slug_aliases?.product];
-  const values = kind === "creator"
-    ? [entry?.creator_id, entry?.creator_slug]
-    : [entry?.product_id, entry?.product_slug, entry?.agent_id];
-  return [...new Set([...values, ...aliases.flatMap((value) => Array.isArray(value) ? value : [])].filter(Boolean).map(String))];
+  return [kind === "creator" ? entry?.creator_id : entry?.product_id].filter(Boolean).map(String);
 }
 
 function publicProductPath(agent) {
-  const creator = agent?.creator_slug ?? agent?.creator_id;
-  const product = agent?.product_slug ?? agent?.product_id;
-  return `/creators/${encodeURIComponent(creator)}/${encodeURIComponent(product)}`;
+  return `/products/${encodeURIComponent(agent?.product_id)}`;
 }
 
 function creatorProductViews(agents, runs, states, creatorId) {
@@ -3263,7 +3242,8 @@ function creatorProductViews(agents, runs, states, creatorId) {
     if (!run?.product?.id || existing.has(run.product.id)) continue;
     products.push(creatorProductView({
       creator_id: creatorId,
-      agent_id: run.agent_id,
+      // Internal Registry/Portal alias; public URLs and response identity use product_id.
+      agent_id: run.product.id,
       product_id: run.product.id,
       product_name: run.product.name,
       product_description: run.product.description,
@@ -3314,7 +3294,7 @@ function creatorProductView(agent, state, run) {
     offer_active: state?.offer_active ?? normalizeOffer(agent.product_offer, agent),
     release: state?.release ?? null,
     releases: state?.releases ?? (state?.release ? [state.release] : []),
-    public_url: canonicalPublicUrl(state?.public_url) ?? (base.status === "published" ? `/creators/${encodeURIComponent(base.creator_slug ?? base.creator_id)}/${encodeURIComponent(base.product_slug ?? base.product_id)}` : null),
+    public_url: canonicalPublicUrl(state?.public_url) ?? (base.status === "published" ? `/products/${encodeURIComponent(base.product_id)}` : null),
     readiness: {
       candidate_approved: candidateApproved,
       offer_valid: Boolean(state?.offer_draft ?? normalizeOffer(agent.product_offer, agent)),
@@ -3374,8 +3354,9 @@ function candidateFromFactoryRun(run, expectedProductId) {
   })).digest("hex")}`;
   return {
     candidate_id: run.id,
+    // Internal deployment seam only; public candidate identity is product_id.
+    agent_id: expectedProductId,
     product_id: expectedProductId,
-    agent_id: run.agent_id,
     version: run.candidate.version,
     digest,
     system_digest: run.candidate.system_digest,
@@ -3408,7 +3389,7 @@ function storefrontPreview(product, profile, state, paymentMode = "disabled") {
     candidate: presentedCandidate,
     offer,
     resource_version: state?.version ?? product.resource_version ?? 0,
-    public_url: `/creators/${encodeURIComponent(profile.slug ?? profile.id)}/${encodeURIComponent(product.product_slug ?? product.product_id)}`,
+    public_url: `/products/${encodeURIComponent(product.product_id)}`,
     readiness: publishReadiness({ ...product, offer }, state, paymentMode),
     preview: true
   };
@@ -3484,20 +3465,26 @@ function enrichEntitlements(entitlements, catalog, deliveries = []) {
   }
   return entitlements.map((entitlement) => {
     const agent = byProduct.get(`${entitlement.creator_id}:${entitlement.product_id}`);
+    const {
+      agent_id: _agentId,
+      creator_slug: _creatorSlug,
+      product_slug: _productSlug,
+      creator_slug_aliases: _creatorAliases,
+      product_slug_aliases: _productAliases,
+      ...publicEntitlement
+    } = entitlement;
     return {
-      ...entitlement,
+      ...publicEntitlement,
+      product_id: entitlement.product_id ?? entitlement.agent_id,
       status: entitlement.status === "active" && entitlement.reserved_units > 0 ? "reserved" : entitlement.status,
       product: agent ? {
         id: agent.product_id,
         product_id: agent.product_id,
-        slug: agent.product_slug ?? agent.product_id,
         name: agent.product_name,
         description: agent.product_description,
         promise: agent.product_promise
       } : { id: entitlement.product_id, product_id: entitlement.product_id, name: entitlement.product_id },
-      creator: agent ? { id: agent.creator_id, slug: agent.creator_slug ?? agent.creator_id, name: agent.creator_name } : { id: entitlement.creator_id, slug: entitlement.creator_id },
-      creator_slug: agent?.creator_slug ?? entitlement.creator_id,
-      product_slug: agent?.product_slug ?? entitlement.product_id,
+      creator: agent ? { id: agent.creator_id, name: agent.creator_name } : { id: entitlement.creator_id },
       granted_units: entitlement.granted_units ?? 1,
       remaining_units: entitlement.remaining_units ?? 1,
       unit: entitlement.unit ?? "delivery",
@@ -3534,8 +3521,17 @@ function orderDetail(order, events = []) {
   const revenueRecognized = Array.isArray(order.revenue)
     ? order.revenue.some((entry) => entry.status === "recognized")
     : events.some((event) => event.order_id === order.order_id && event.event_type === "revenue.recognized");
+  const {
+    agent_id: _agentId,
+    creator_slug: _creatorSlug,
+    product_slug: _productSlug,
+    creator_slug_aliases: _creatorAliases,
+    product_slug_aliases: _productAliases,
+    ...publicOrder
+  } = order;
   return {
-    ...order,
+    ...publicOrder,
+    product_id: order.product_id ?? order.agent_id,
     order_number: order.order_number ?? stableOrderNumber(order),
     creator: order.creator_snapshot ?? { id: order.creator_id, name: order.creator_display_name ?? order.creator_id },
     status: refunded
@@ -3595,7 +3591,15 @@ function isPaidMode(mode) {
 }
 
 function stableOfferId(creatorId, productId) {
-  return `offer_${createHash("sha256").update(`${creatorId}\0${productId}`).digest("hex").slice(0, 24)}`;
+  return stableAuthorityUuid(`offer:${creatorId}:${productId}`);
+}
+
+function stableAuthorityUuid(seed) {
+  const digest = createHash("sha256").update(String(seed)).digest("hex").slice(0, 32).split("");
+  digest[12] = "4";
+  digest[16] = ["8", "9", "a", "b"][parseInt(digest[16], 16) % 4];
+  const hex = digest.join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 function catalogAgentToProduct(agent) {
@@ -4077,10 +4081,10 @@ function isPublicPortalRoute(pathname) {
   return pathname === "/"
     || pathname === "/explore"
     || pathname.startsWith("/explore/")
-    || pathname === "/agents"
-    || pathname.startsWith("/agents/")
     || pathname === "/creators"
     || pathname.startsWith("/creators/")
+    || pathname === "/products"
+    || pathname.startsWith("/products/")
     || pathname === "/library"
     || pathname.startsWith("/library/")
     || pathname === "/orders"
@@ -4091,67 +4095,18 @@ function isPublicPortalRoute(pathname) {
     || pathname.startsWith("/studio/")
     || pathname === "/account"
     || pathname.startsWith("/account/")
-    || pathname === "/portal"
-    || pathname.startsWith("/portal/")
     || pathname === "/sign-in"
     || pathname === "/sign-up"
     || pathname === "/download";
 }
 
-async function resolveLegacyRouteLocation({ pathname, search = "", request, registryUrl, fetchImpl, portalState, commerce }) {
-  const libraryMatch = pathname.match(/^\/portal\/(?:library|my-agents)\/([^/]+)$/);
-  const orderMatch = pathname.match(/^\/portal\/orders\/([^/]+)$/);
-  if (libraryMatch || orderMatch) {
-    const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
-    if (!authentication.error) {
-      if (libraryMatch) {
-        const identifier = decodeURIComponent(libraryMatch[1]);
-        const entitlement = commerce.listBuyerEntitlements(authentication.profile.id)
-          .find((item) => item.entitlement_id === identifier || item.id === identifier);
-        if (entitlement) {
-          try {
-            const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
-            const agent = catalog.find((item) => item.creator_id === entitlement.creator_id && item.product_id === entitlement.product_id);
-            if (agent) {
-              const creator = agent.creator_slug ?? agent.creator_id;
-              const product = agent.product_slug ?? agent.product_id;
-              return `/library/${encodeURIComponent(creator)}/${encodeURIComponent(product)}${search}`;
-            }
-          } catch {
-            // Fall back to the stable entitlement route when the catalog is unavailable.
-          }
-        }
-      } else {
-        const order = resolveOrderIdentifier(commerce, decodeURIComponent(orderMatch[1]), authentication.profile.id);
-        if (order) return `/orders/${encodeURIComponent(orderNumberFor(order))}${search}`;
-      }
-    }
-  }
-  return legacyRouteLocation(pathname, search);
-}
-
-function legacyRouteLocation(pathname, search = "") {
-  const suffix = String(search || "");
-  if (pathname === "/portal" || pathname === "/portal/") return `/explore${suffix}`;
-  if (pathname === "/portal/agents" || pathname === "/portal/agents/") return `/explore${suffix}`;
-  const publicAgent = pathname.match(/^\/portal\/agents\/([^/]+)\/([^/]+)$/);
-  if (publicAgent) return `/creators/${publicAgent[1]}/${publicAgent[2]}${suffix}`;
-  if (pathname === "/portal/library" || pathname === "/portal/my-agents") return `/library${suffix}`;
-  if (pathname.startsWith("/portal/library/")) return `/library/${pathname.slice("/portal/library/".length)}${suffix}`;
-  if (pathname === "/portal/orders") return `/orders${suffix}`;
-  if (pathname.startsWith("/portal/orders/")) return `/orders/${pathname.slice("/portal/orders/".length)}${suffix}`;
-  if (pathname === "/portal/subscriptions" || pathname === "/portal/subscriptions/") return `/explore${suffix}`;
-  if (pathname === "/portal/settings" || pathname === "/portal/settings/") return `/account${suffix}`;
-  if (pathname.startsWith("/portal/checkout/")) return `/checkout/${pathname.slice("/portal/checkout/".length)}${suffix}`;
-  if (pathname === "/portal/creator" || pathname === "/portal/creator/") return `/studio${suffix}`;
-  if (pathname.startsWith("/portal/creator/")) return `/studio/${pathname.slice("/portal/creator/".length)}${suffix}`;
-  return undefined;
-}
-
-async function servePortalIndex(response, metadata, status = 200) {
+async function servePortalIndex(response, metadata, status = 200, noScriptFallback) {
   try {
     const source = await readFile(path.join(currentDirectory, "dist", "index.html"), "utf8");
-    const body = metadata ? injectProductMetadata(source, metadata) : source;
+    const withMetadata = metadata ? injectProductMetadata(source, metadata) : source;
+    const body = noScriptFallback
+      ? injectProductNoScriptFallback(withMetadata, noScriptFallback)
+      : withMetadata;
     response.writeHead(status, { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache" });
     response.end(body);
   } catch {
@@ -4167,14 +4122,12 @@ async function servePortalIndex(response, metadata, status = 200) {
 async function servePortalAsset(requestPath, response) {
   let relativePath;
   try {
-    if (requestPath === "/portal" || requestPath === "/portal/" || requestPath === "/assets" || !path.extname(requestPath)) {
+    if (requestPath === "/assets" || !path.extname(requestPath)) {
       relativePath = "index.html";
     } else if (requestPath.startsWith("/assets/")) {
       relativePath = decodeURIComponent(requestPath.slice("/".length));
-    } else if (requestPath.startsWith("/portal/")) {
-      relativePath = decodeURIComponent(requestPath.slice("/portal/".length));
     } else {
-      relativePath = decodeURIComponent(requestPath.slice("/".length));
+      return send(response, 404, { error: { code: "asset_not_found", message: "Asset not found." } });
     }
   } catch {
     return send(response, 400, { error: { code: "invalid_path", message: "Invalid portal asset path." } });
@@ -4196,7 +4149,8 @@ async function servePortalAsset(requestPath, response) {
     if (error?.code !== "ENOENT" || path.extname(relativePath)) {
       return send(response, error?.code === "ENOENT" ? 404 : 500, { error: { code: "portal_asset_not_found", message: "Portal asset not found." } });
     }
-    // Client-side routes under /portal/ resolve through the SPA entrypoint.
+    // Client-side routes under the canonical public/private paths resolve
+    // through the SPA entrypoint.
     try {
       const body = await readFile(path.join(assetRoot, "index.html"));
       response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-cache" });

@@ -12,16 +12,16 @@ test("the root URL is the public Explore home, not a role-specific workspace red
 });
 
 test("canonical public product is readable without auth at every acceptance viewport", async ({ page }, testInfo) => {
-  const response = await page.goto("/creators/creator-e2e/signal-resume-review");
+  const response = await page.goto("/products/f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42");
   expect(response).not.toBeNull();
-  const canonicalUrl = `${new URL(page.url()).origin}/creators/creator-e2e/signal-resume-review`;
+  const canonicalUrl = `${new URL(page.url()).origin}/products/f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42`;
   const serverHtml = await response.text();
   expect(serverHtml).toContain("<title>Signal Resume Review by Maya Creator · Hatch</title>");
   expect(serverHtml).toContain(`<link rel="canonical" href="${canonicalUrl}" />`);
   expect(serverHtml).toContain('<meta name="description" content="Find the strongest credible signal without inventing evidence." />');
   expect(serverHtml).toContain('<meta property="og:title" content="Signal Resume Review by Maya Creator · Hatch" />');
   expect(serverHtml).toContain(`<meta property="og:url" content="${canonicalUrl}" />`);
-  const unavailableUrl = `${new URL(page.url()).origin}/creators/creator-e2e/not-published`;
+  const unavailableUrl = `${new URL(page.url()).origin}/products/b7c1d2e3-4f56-4789-a012-3456789abcde`;
   const unavailableResponse = await page.request.get(unavailableUrl);
   expect(unavailableResponse.status()).toBe(404);
   const unavailableHtml = await unavailableResponse.text();

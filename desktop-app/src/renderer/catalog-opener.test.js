@@ -5,7 +5,7 @@ describe("Creator Agent catalog opener", () => {
   it("does not fall back to a WebView when the packaged native opener fails", async () => {
     const open = vi.fn();
     const error = await openCreatorAgentCatalog({
-      catalogUrl: "https://hatch.tokenquadrant.cn/agents",
+      catalogUrl: "https://hatch.tokenquadrant.cn/explore",
       invokeImpl: vi.fn(async () => { throw new Error("native open failed"); }),
       windowObject: { __TAURI_INTERNALS__: {}, open },
       packaged: true
@@ -19,7 +19,7 @@ describe("Creator Agent catalog opener", () => {
 
   it("labels a blocked web-preview popup without changing the existing message", async () => {
     const error = await openCreatorAgentCatalog({
-      catalogUrl: "https://hatch.tokenquadrant.cn/agents",
+      catalogUrl: "https://hatch.tokenquadrant.cn/explore",
       invokeImpl: vi.fn(async () => { throw new Error("no Tauri bridge"); }),
       windowObject: { open: vi.fn(() => null) },
       packaged: false
@@ -34,13 +34,13 @@ describe("Creator Agent catalog opener", () => {
   it("uses a browser tab only in the web preview", async () => {
     const open = vi.fn(() => ({}));
     await expect(openCreatorAgentCatalog({
-      catalogUrl: "https://hatch.tokenquadrant.cn/agents",
+      catalogUrl: "https://hatch.tokenquadrant.cn/explore",
       invokeImpl: vi.fn(async () => { throw new Error("no Tauri bridge"); }),
       windowObject: { open },
       packaged: false
     })).resolves.toBe("web-preview");
     expect(open).toHaveBeenCalledWith(
-      "https://hatch.tokenquadrant.cn/agents",
+      "https://hatch.tokenquadrant.cn/explore",
       "_blank",
       "noopener,noreferrer"
     );

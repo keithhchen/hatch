@@ -163,10 +163,12 @@ export function conversationIdFromLocation(locationLike = globalThis.location) {
 export function normalizeConversationBinding(value = {}) {
   const entitlementId = normalizeConversationId(value?.entitlementId ?? value?.entitlement_id);
   const creatorId = normalizeConversationId(value?.creatorId ?? value?.creator_id);
-  const agentId = normalizeConversationId(value?.agentId ?? value?.agent_id);
-  if (!entitlementId && !creatorId && !agentId) return null;
-  if (!entitlementId || !creatorId || !agentId) return null;
-  return Object.freeze({ entitlementId, creatorId, agentId });
+  const productId = normalizeConversationId(value?.productId ?? value?.product_id);
+  if (!entitlementId && !creatorId && !productId) return null;
+  if (!entitlementId || !creatorId || !productId) return null;
+  // `agentId` is an internal renderer variable retained only so existing
+  // window state can be rehydrated; the wire/deep-link field is product_id.
+  return Object.freeze({ entitlementId, creatorId, productId, agentId: productId });
 }
 
 export function conversationBindingFromLocation(locationLike = globalThis.location) {
@@ -175,7 +177,7 @@ export function conversationBindingFromLocation(locationLike = globalThis.locati
   return normalizeConversationBinding({
     entitlementId: params.get("entitlement_id"),
     creatorId: params.get("creator_id"),
-    agentId: params.get("agent_id")
+    productId: params.get("product_id")
   });
 }
 

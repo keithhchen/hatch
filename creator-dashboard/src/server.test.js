@@ -7,10 +7,10 @@ import test from "node:test";
 import { createDashboardApp } from "../server.mjs";
 
 const catalogAgent = {
-  creator_id: "maya-chen",
+  creator_id: "6f6a3d24-48af-4f27-9c50-0d4f7e4e8a21",
   creator_name: "Maya Chen",
-  agent_id: "signal-resume-reviewer",
-  product_id: "signal-resume-review",
+  agent_id: "f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42",
+  product_id: "f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42",
   product_name: "Signal Resume Review",
   product_description: "Resume review",
   product_promise: "Turn a resume into a concise signal map.",
@@ -212,10 +212,10 @@ test("Creator can approve a verified candidate, set an offer, preview, publish, 
   const published = await publishResponse.json();
   assert.equal(publishResponse.status, 201);
   assert.equal(published.product.status, "published");
-  assert.equal(published.public_url, `/agents/maya-chen/${productId}`);
+  assert.equal(published.public_url, `/products/${productId}`);
   assert.equal(publishCalls.length, 1);
-  const publicResponse = await fetch(`${serverUrl(api)}/v1/catalog/agents/${catalogAgent.creator_id}/${productId}`);
-  const publicProduct = (await publicResponse.json()).agent;
+  const publicResponse = await fetch(`${serverUrl(api)}/v1/public/products/${productId}`);
+  const publicProduct = (await publicResponse.json()).product;
   assert.equal(publicResponse.status, 200);
   assert.equal(publicProduct.offer.offer_id, offered.offer_draft.offer_id);
   assert.equal(publicProduct.offer.revision, offered.offer_draft.revision);
@@ -233,7 +233,7 @@ test("Creator can approve a verified candidate, set an offer, preview, publish, 
   assert.equal(dashboard.ledger.listEvents().filter((event) => event.event_type === "offer.activated").length, 2);
 });
 
-test("public slug aliases resolve in the API and redirect browsers to the canonical product URL", async (context) => {
+test("non-UUID product paths are rejected without redirects", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-slug-alias-"));
   const aliasedAgent = {
     ...catalogAgent,
@@ -254,13 +254,10 @@ test("public slug aliases resolve in the API and redirect browsers to the canoni
   context.after(() => api.close());
 
   const browserResponse = await fetch(`${serverUrl(api)}/creators/maya-old/resume-review-old`, { redirect: "manual" });
-  assert.equal(browserResponse.status, 308);
-  assert.equal(browserResponse.headers.get("location"), "/creators/maya-chen/signal-resume-review");
+  assert.equal(browserResponse.status, 404);
 
   const apiResponse = await fetch(`${serverUrl(api)}/v1/public/products/maya-old/resume-review-old`);
-  const body = await apiResponse.json();
-  assert.equal(apiResponse.status, 200, JSON.stringify(body));
-  assert.equal(body.agent.public_url, "/creators/maya-chen/signal-resume-review");
+  assert.equal(apiResponse.status, 404);
 });
 
 test("Factory-only first publish does not seed a fake legacy deployment", async (context) => {
@@ -440,8 +437,8 @@ test("legacy live storefront remains stable until its replacement deployment com
   assert.ok(pending.publish_operation.offer_activated_at);
   assert.equal(pending.publish_operation.registry_activated_at, undefined);
 
-  const duringResponse = await fetch(`${serverUrl(api)}/v1/catalog/agents/${catalogAgent.creator_id}/${productId}`);
-  const during = (await duringResponse.json()).agent;
+  const duringResponse = await fetch(`${serverUrl(api)}/v1/public/products/${productId}`);
+  const during = (await duringResponse.json()).product;
   assert.equal(duringResponse.status, 200);
   assert.equal(during.corpus_digest, catalogAgent.corpus_digest);
   assert.equal(during.offer.offer_id, seeded.offer_active.offer_id);
@@ -456,8 +453,8 @@ test("legacy live storefront remains stable until its replacement deployment com
   assert.equal(activationCalls.length, 2);
   assert.equal(activationCalls[0].body.expected_current_digest, catalogAgent.corpus_digest);
 
-  const afterResponse = await fetch(`${serverUrl(api)}/v1/catalog/agents/${catalogAgent.creator_id}/${productId}`);
-  const after = (await afterResponse.json()).agent;
+  const afterResponse = await fetch(`${serverUrl(api)}/v1/public/products/${productId}`);
+  const after = (await afterResponse.json()).product;
   assert.equal(afterResponse.status, 200);
   assert.equal(after.corpus_digest, readyFactoryRun.candidate.corpus_digest);
   assert.equal(after.offer.offer_id, offered.offer_draft.offer_id);
@@ -523,8 +520,8 @@ test("deployment reconciler resumes after Registry activation failure without ex
   assert.equal(state.publish_operation.attempts, 1);
   assert.equal(dashboard.commerce.getActiveOffer(catalogAgent.creator_id, catalogAgent.product_id).operation_id, pending.publish_operation.operation_id);
 
-  const duringFailure = await fetch(`${serverUrl(api)}/v1/catalog/agents/${catalogAgent.creator_id}/${catalogAgent.product_id}`);
-  const duringProduct = (await duringFailure.json()).agent;
+  const duringFailure = await fetch(`${serverUrl(api)}/v1/public/products/${catalogAgent.product_id}`);
+  const duringProduct = (await duringFailure.json()).product;
   assert.equal(duringFailure.status, 200);
   assert.equal(duringProduct.offer, null);
   assert.equal(duringProduct.availability, "not_for_sale");
@@ -539,8 +536,8 @@ test("deployment reconciler resumes after Registry activation failure without ex
   assert.equal(deploymentCalls.filter((call) => call.type === "activate").length, 2);
   assert.equal(dashboard.ledger.listEvents().filter((event) => event.event_type === "offer.activated").length, 1);
 
-  const afterRecovery = await fetch(`${serverUrl(api)}/v1/catalog/agents/${catalogAgent.creator_id}/${catalogAgent.product_id}`);
-  const recoveredProduct = (await afterRecovery.json()).agent;
+  const afterRecovery = await fetch(`${serverUrl(api)}/v1/public/products/${catalogAgent.product_id}`);
+  const recoveredProduct = (await afterRecovery.json()).product;
   assert.equal(recoveredProduct.corpus_digest, readyFactoryRun.candidate.corpus_digest);
   assert.equal(recoveredProduct.offer.revision, offered.offer_draft.revision);
 });
@@ -578,7 +575,7 @@ test("zero-value checkout creates an idempotent Agent Corpus order and entitleme
   assert.equal(firstBody.order.agent_id, catalogAgent.agent_id);
   assert.equal(firstBody.order.corpus_digest, catalogAgent.corpus_digest);
   assert.equal(firstBody.order.gross_minor, 0);
-  assert.match(firstBody.entitlement.entitlement_id, /^entitlement_[a-f0-9]{24}$/);
+  assert.match(firstBody.entitlement.entitlement_id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   assert.equal(accessBodies[0].order_id, firstBody.order.order_id);
   assert.equal(accessBodies[0].entitlement_id, firstBody.entitlement.entitlement_id);
   assert.deepEqual(dashboard.ledger.listEvents().map((event) => event.event_type), [
@@ -624,15 +621,15 @@ test("V2 checkout session persists a free receipt and entitlement detail", async
   const token = await login(api);
   const headers = { authorization: `Bearer ${token}`, "content-type": "application/json", "idempotency-key": "checkout-session-free" };
 
-  const detailResponse = await fetch(`${serverUrl(api)}/v1/catalog/agents/${catalogAgent.creator_id}/${catalogAgent.product_id}`);
+  const detailResponse = await fetch(`${serverUrl(api)}/v1/public/products/${catalogAgent.product_id}`);
   const detail = await detailResponse.json();
   assert.equal(detailResponse.status, 200);
-  assert.equal(detail.agent.available, true);
-  assert.equal(detail.agent.offer.amount_minor, 0);
-  const canonicalDetailResponse = await fetch(`${serverUrl(api)}/v1/public/products/${catalogAgent.creator_id}/${catalogAgent.product_id}`);
+  assert.equal(detail.product.available, true);
+  assert.equal(detail.product.offer.amount_minor, 0);
+  const canonicalDetailResponse = await fetch(`${serverUrl(api)}/v1/public/products/${catalogAgent.product_id}`);
   const canonicalDetail = await canonicalDetailResponse.json();
   assert.equal(canonicalDetailResponse.status, 200);
-  assert.equal(canonicalDetail.agent.offer.amount_minor, 0);
+  assert.equal(canonicalDetail.product.offer.amount_minor, 0);
 
   const createSession = () => fetch(`${serverUrl(api)}/v1/checkout-sessions`, {
     method: "POST",
@@ -640,7 +637,7 @@ test("V2 checkout session persists a free receipt and entitlement detail", async
     body: JSON.stringify({
       creator_id: catalogAgent.creator_id,
       product_id: catalogAgent.product_id,
-      offer_id: detail.agent.offer.offer_id
+      offer_id: detail.product.offer.offer_id
     })
   });
   const firstSessionResponse = await createSession();
@@ -741,8 +738,8 @@ test("a free order can remove access before delivery", async (context) => {
   context.after(() => api.close());
   const token = await login(api);
   const headers = { authorization: `Bearer ${token}`, "content-type": "application/json", "idempotency-key": "free-cancel" };
-  const detailResponse = await fetch(`${serverUrl(api)}/v1/catalog/agents/${catalogAgent.creator_id}/${catalogAgent.product_id}`);
-  const offer = (await detailResponse.json()).agent.offer;
+  const detailResponse = await fetch(`${serverUrl(api)}/v1/public/products/${catalogAgent.product_id}`);
+  const offer = (await detailResponse.json()).product.offer;
   const sessionResponse = await fetch(`${serverUrl(api)}/v1/checkout-sessions`, {
     method: "POST",
     headers,
@@ -872,8 +869,8 @@ test("paid test checkout can be fully refunded and revokes Registry access", asy
   context.after(() => api.close());
   const token = await login(api);
   const headers = { authorization: `Bearer ${token}`, "content-type": "application/json", "idempotency-key": "paid-flow" };
-  const detailResponse = await fetch(`${serverUrl(api)}/v1/catalog/agents/${paidAgent.creator_id}/${paidAgent.product_id}`);
-  const offer = (await detailResponse.json()).agent.offer;
+  const detailResponse = await fetch(`${serverUrl(api)}/v1/public/products/${paidAgent.product_id}`);
+  const offer = (await detailResponse.json()).product.offer;
 
   const sessionResponse = await fetch(`${serverUrl(api)}/v1/checkout-sessions`, {
     method: "POST",
@@ -967,7 +964,7 @@ function registryFixture({
     for await (const chunk of request) content += chunk;
     response.setHeader("content-type", "application/json");
     const account = role === "creator"
-      ? { id: "maya-chen", role: "creator", email: "creator@example.test", display_name: "Maya Chen" }
+      ? { id: catalogAgent.creator_id, role: "creator", email: "creator@example.test", display_name: "Maya Chen" }
       : { id: "buyer-zero", role: "user", email: "buyer@example.test", display_name: "Zero Buyer" };
     if (requestUrl.pathname === "/health" || requestUrl.pathname === "/readyz") {
       response.end(JSON.stringify({ ok: true }));
@@ -981,11 +978,11 @@ function registryFixture({
       response.end(JSON.stringify(account));
       return;
     }
-    if (requestUrl.pathname === "/v1/catalog/agents") {
+    if (requestUrl.pathname === "/v1/public/products") {
       response.end(JSON.stringify(publishedCatalogAgents));
       return;
     }
-    if (requestUrl.pathname === "/v1/creator/agents") {
+    if (requestUrl.pathname === "/v1/creator/products") {
       response.end(JSON.stringify(publishedCreatorAgents));
       return;
     }
@@ -1035,11 +1032,11 @@ function registryFixture({
       }));
       return;
     }
-    if (requestUrl.pathname === "/v1/user/agent-access" && request.method === "GET") {
+    if (requestUrl.pathname === "/v1/user/product-access" && request.method === "GET") {
       response.end(JSON.stringify([]));
       return;
     }
-    if (requestUrl.pathname === `/v1/user/agents/${agent.creator_id}/${agent.agent_id}/access`) {
+    if (requestUrl.pathname === `/v1/user/products/${agent.product_id}/access`) {
       const accessBody = content ? JSON.parse(content) : {};
       accessBodies.push(accessBody);
       response.end(JSON.stringify({
@@ -1054,7 +1051,7 @@ function registryFixture({
       }));
       return;
     }
-    const revokeMatch = requestUrl.pathname.match(/^\/v1\/user\/agent-access\/([^/]+)$/);
+    const revokeMatch = requestUrl.pathname.match(/^\/v1\/user\/product-access\/([^/]+)$/);
     if (request.method === "DELETE" && revokeMatch) {
       revokedEntitlements.push(decodeURIComponent(revokeMatch[1]));
       response.end(JSON.stringify({ entitlement_id: decodeURIComponent(revokeMatch[1]), status: "revoked" }));

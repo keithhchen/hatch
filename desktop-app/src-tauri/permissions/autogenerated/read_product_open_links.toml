@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-read-product-open-links"
+description = "Enables the read_product_open_links command without any pre-configured scope."
+commands.allow = ["read_product_open_links"]
+
+[[permission]]
+identifier = "deny-read-product-open-links"
+description = "Denies the read_product_open_links command without any pre-configured scope."
+commands.deny = ["read_product_open_links"]

@@ -33,7 +33,7 @@ export class RegistryAgentKnowledgeSearch implements AgentKnowledgeSearchResolve
       search: async ({ query, max_num_results = 6 }) => {
         const base = this.options.registryUrl.replace(/\/$/, "");
         const response = await fetch(
-          `${base}/v1/runtime/tenants/${encodeURIComponent(tenantId)}/agents/${encodeURIComponent(agentId)}/knowledge/search`,
+          `${base}/v1/runtime/tenants/${encodeURIComponent(tenantId)}/products/${encodeURIComponent(agentId)}/knowledge/search`,
           {
             method: "POST",
             headers: {

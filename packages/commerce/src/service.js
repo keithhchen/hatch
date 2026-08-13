@@ -1272,8 +1272,11 @@ function dateValue(value, field) {
 }
 
 function stableId(prefix, idempotencyKey) {
-  const digest = createHash("sha256").update(`${prefix}:${idempotencyKey}`).digest("hex").slice(0, 24);
-  return `${prefix}_${digest}`;
+  const digest = createHash("sha256").update(`${prefix}:${idempotencyKey}`).digest("hex").slice(0, 32).split("");
+  digest[12] = "4";
+  digest[16] = ["8", "9", "a", "b"][parseInt(digest[16], 16) % 4];
+  const hex = digest.join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 function findReservationEvent(events, reservationId) {

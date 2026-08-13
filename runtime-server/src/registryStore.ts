@@ -20,6 +20,7 @@ import {
   QdrantKnowledgeIndexer,
   type AgentKnowledgeIndexer,
 } from "./qdrantIndexer.js";
+import { isUuidV4, requireUuidV4 } from "./identity.js";
 
 export type PublishedAgentCorpus = {
   creator_id: string;
@@ -98,7 +99,7 @@ export type CreatorToolConnection = {
 };
 
 type RegistryState = {
-  schema_version: 1;
+  schema_version: 2;
   agent_corpora: PublishedAgentCorpus[];
   agent_access: AgentAccessGrant[];
   tool_connections?: CreatorToolConnection[];
@@ -396,10 +397,13 @@ export class RegistryStoreTs {
   }
 
   async listAgentCorpora(creatorId: string): Promise<PublishedAgentCorpus[]> {
+    requireUuidV4(creatorId, "creator_id");
     return [...this.corpora.values()].filter((item) => item.creator_id === creatorId).sort(byPublishedAt);
   }
 
   getAgentCorpus(creatorId: string, agentId: string): PublishedAgentCorpus | undefined {
+    requireUuidV4(creatorId, "creator_id");
+    requireUuidV4(agentId, "product_id");
     return this.corpora.get(key(creatorId, agentId));
   }
 
@@ -491,6 +495,8 @@ export class RegistryStoreTs {
     purchasedCorpusDigest?: string,
     versionPolicy: "pinned" | "track_current_compatible" = "pinned"
   ): Promise<AgentAccessGrant> {
+    requireUuidV4(creatorId, "creator_id");
+    requireUuidV4(agentId, "product_id");
     const normalizedOrderId = orderId.trim();
     if (!normalizedOrderId) throw new Error("order_id_required");
     const binding = accessBindingKey(userId, creatorId, agentId);
@@ -543,7 +549,7 @@ export class RegistryStoreTs {
           status='active',
           granted_at=CASE WHEN agent_access.status='active' THEN agent_access.granted_at ELSE EXCLUDED.granted_at END
         RETURNING entitlement_id, user_id, creator_id, agent_id, product_id, order_id, purchased_corpus_digest, version_policy, status, granted_at`, [
-        entitlementId ?? `ent_${randomUUID().replaceAll("-", "")}`,
+        entitlementId ?? randomUUID(),
         userId,
         creatorId,
         agentId,
@@ -588,7 +594,7 @@ export class RegistryStoreTs {
       return existing;
     }
     const grant: AgentAccessGrant = {
-      entitlement_id: entitlementId ?? `ent_${randomUUID().replaceAll("-", "")}`,
+      entitlement_id: entitlementId ?? randomUUID(),
       user_id: userId,
       creator_id: creatorId,
       agent_id: agentId,
@@ -782,12 +788,25 @@ export class RegistryStoreTs {
 
   private async ensureSchema(): Promise<void> {
     await this.pool!.query(`
+      CREATE TABLE IF NOT EXISTS creators (
+        id UUID PRIMARY KEY,
+        display_name TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS products (
+        id UUID PRIMARY KEY,
+        creator_id UUID NOT NULL REFERENCES creators(id),
+        name TEXT NOT NULL,
+        description TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
       CREATE TABLE IF NOT EXISTS agent_corpora (
-        creator_id TEXT NOT NULL,
-        agent_id TEXT NOT NULL,
+        creator_id UUID NOT NULL REFERENCES creators(id),
+        agent_id UUID NOT NULL REFERENCES products(id),
         corpus_digest TEXT NOT NULL,
         creator_name TEXT NOT NULL,
-        product_id TEXT NOT NULL,
+        product_id UUID NOT NULL REFERENCES products(id),
         product_name TEXT NOT NULL,
         product_description TEXT,
         product_json TEXT,
@@ -799,9 +818,9 @@ export class RegistryStoreTs {
       CREATE TABLE IF NOT EXISTS agent_access (
         entitlement_id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
-        creator_id TEXT NOT NULL,
-        agent_id TEXT NOT NULL,
-        product_id TEXT NOT NULL,
+        creator_id UUID NOT NULL REFERENCES creators(id),
+        agent_id UUID NOT NULL REFERENCES products(id),
+        product_id UUID NOT NULL REFERENCES products(id),
         order_id TEXT,
         purchased_corpus_digest TEXT,
         version_policy TEXT NOT NULL DEFAULT 'pinned',
@@ -825,7 +844,7 @@ export class RegistryStoreTs {
       ALTER TABLE agent_access ADD COLUMN IF NOT EXISTS version_policy TEXT NOT NULL DEFAULT 'pinned';
       CREATE TABLE IF NOT EXISTS agent_tool_bindings (
         tenant_id TEXT NOT NULL,
-        agent_id TEXT NOT NULL,
+        agent_id UUID NOT NULL REFERENCES products(id),
         tool_id TEXT NOT NULL,
         connection_id TEXT NOT NULL REFERENCES tool_connections(id),
         PRIMARY KEY (tenant_id, agent_id, tool_id)
@@ -836,10 +855,22 @@ export class RegistryStoreTs {
   private async load(): Promise<void> {
     if (this.pool) {
       try {
-        const corpora = await this.pool.query("SELECT creator_id, agent_id, corpus_digest, creator_name, product_id, product_name, product_description, product_json, knowledge_namespace, status, published_at FROM agent_corpora");
-        for (const row of corpora.rows) this.corpora.set(key(row.creator_id, row.agent_id), rowToCorpus(row));
-        const access = await this.pool.query("SELECT entitlement_id, user_id, creator_id, agent_id, product_id, order_id, purchased_corpus_digest, version_policy, status, granted_at FROM agent_access");
-        for (const row of access.rows) this.access.set(row.entitlement_id, rowToAccess(row));
+      const corpora = await this.pool.query("SELECT creator_id, agent_id, corpus_digest, creator_name, product_id, product_name, product_description, product_json, knowledge_namespace, status, published_at FROM agent_corpora");
+      for (const row of corpora.rows) {
+        requireUuidV4(row.creator_id, "creator_id");
+        requireUuidV4(row.agent_id, "product_id");
+        requireUuidV4(row.product_id, "product_id");
+        assertCanonicalProductIdentity(row.agent_id, row.product_id);
+        this.corpora.set(key(row.creator_id, row.agent_id), rowToCorpus(row));
+      }
+      const access = await this.pool.query("SELECT entitlement_id, user_id, creator_id, agent_id, product_id, order_id, purchased_corpus_digest, version_policy, status, granted_at FROM agent_access");
+        for (const row of access.rows) {
+          requireUuidV4(row.creator_id, "creator_id");
+          requireUuidV4(row.agent_id, "product_id");
+          requireUuidV4(row.product_id, "product_id");
+          assertCanonicalProductIdentity(row.agent_id, row.product_id);
+          this.access.set(row.entitlement_id, rowToAccess(row));
+        }
         const connections = await this.pool.query("SELECT id, tenant_id, kind, secret_ref, secret_value, config_json, status FROM tool_connections");
         for (const row of connections.rows) this.toolConnections.set(row.id, rowToToolConnection(row));
         const bindings = await this.pool.query("SELECT tenant_id, agent_id, tool_id, connection_id FROM agent_tool_bindings");
@@ -852,12 +883,25 @@ export class RegistryStoreTs {
     if (!this.statePath) return;
     try {
       const state = JSON.parse(await readFile(this.statePath, "utf8")) as RegistryState;
-      for (const corpus of state.agent_corpora ?? []) this.corpora.set(key(corpus.creator_id, corpus.agent_id), {
+      if (state.schema_version !== 2) throw new Error("Registry state schema_version 2 is required after UUID identity cutover");
+      for (const corpus of state.agent_corpora ?? []) {
+        requireUuidV4(corpus.creator_id, "creator_id");
+        requireUuidV4(corpus.agent_id, "product_id");
+        requireUuidV4(corpus.product_id, "product_id");
+        assertCanonicalProductIdentity(corpus.agent_id, corpus.product_id);
+        this.corpora.set(key(corpus.creator_id, corpus.agent_id), {
         ...corpus,
         product_boundaries: corpus.product_boundaries ?? [],
         presentation: corpus.presentation ?? {}
-      });
-      for (const grant of state.agent_access ?? []) this.access.set(grant.entitlement_id, grant);
+        });
+      }
+      for (const grant of state.agent_access ?? []) {
+        requireUuidV4(grant.creator_id, "creator_id");
+        requireUuidV4(grant.agent_id, "product_id");
+        requireUuidV4(grant.product_id, "product_id");
+        assertCanonicalProductIdentity(grant.agent_id, grant.product_id);
+        this.access.set(grant.entitlement_id, grant);
+      }
       for (const connection of state.tool_connections ?? []) this.toolConnections.set(connection.id, { ...connection, secret: connection.secret ?? null });
       for (const binding of state.agent_tool_bindings ?? []) this.toolBindings.set(toolBindingKey(binding.tenant_id, binding.agent_id, binding.tool_id), binding.connection_id);
     } catch (error) {
@@ -988,8 +1032,8 @@ export class RegistryStoreTs {
       || typeof parsed.current_path !== "string"
       || typeof parsed.prepared_path !== "string"
       || typeof parsed.backup_path !== "string"
-      || !/^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/.test(parsed.creator_id)
-      || !/^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/.test(parsed.agent_id)
+      || !isUuidV4(parsed.creator_id)
+      || !isUuidV4(parsed.agent_id)
       || !/^sha256:[a-f0-9]{64}$/.test(parsed.new_digest)
       || (parsed.previous_digest !== undefined && !/^sha256:[a-f0-9]{64}$/.test(parsed.previous_digest))
     ) throw new Error(`Agent Corpus install journal is invalid: ${journalPath}`);
@@ -1042,8 +1086,8 @@ export class RegistryStoreTs {
         if (metadata.size > 4_096) throw new Error("cleanup marker is oversized");
         marker = JSON.parse(await readFile(markerPath, "utf8")) as typeof marker;
         if (
-          !/^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/.test(marker.creator_id)
-          || !/^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/.test(marker.agent_id)
+          !isUuidV4(marker.creator_id)
+          || !isUuidV4(marker.agent_id)
           || !/^sha256:[a-f0-9]{64}$/.test(marker.corpus_digest)
         ) throw new Error("cleanup marker is invalid");
       } catch {
@@ -1093,7 +1137,21 @@ export class RegistryStoreTs {
 
   private async persistCorpus(corpus: PublishedAgentCorpus, deadline: PublishDeadline): Promise<void> {
     const corpusKey = key(corpus.creator_id, corpus.agent_id);
+    requireUuidV4(corpus.creator_id, "creator_id");
+    requireUuidV4(corpus.product_id, "product_id");
+    requireUuidV4(corpus.agent_id, "product_id");
     if (this.pool) {
+      await this.pool.query(
+        `INSERT INTO creators (id, display_name) VALUES ($1,$2)
+         ON CONFLICT (id) DO UPDATE SET display_name=EXCLUDED.display_name`,
+        [corpus.creator_id, corpus.creator_name],
+      );
+      await this.pool.query(
+        `INSERT INTO products (id, creator_id, name, description, status)
+         VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT (id) DO UPDATE SET creator_id=EXCLUDED.creator_id, name=EXCLUDED.name, description=EXCLUDED.description, status=EXCLUDED.status`,
+        [corpus.product_id, corpus.creator_id, corpus.product_name, corpus.product_description ?? corpus.product_name, corpus.status],
+      );
       const query: QueryConfig & { query_timeout: number } = {
         text: `INSERT INTO agent_corpora (creator_id, agent_id, corpus_digest, creator_name, product_id, product_name, product_description, product_json, knowledge_namespace, status, published_at)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
@@ -1122,7 +1180,7 @@ export class RegistryStoreTs {
     await mkdir(path.dirname(this.statePath), { recursive: true });
     const temporary = `${this.statePath}.${randomUUID()}.tmp`;
     const state = {
-      schema_version: 1,
+      schema_version: 2,
       agent_corpora: [...(options.corpora ?? this.corpora.values())],
       agent_access: [...this.access.values()],
       tool_connections: [...this.toolConnections.values()],
@@ -1298,6 +1356,7 @@ function accessBindingKey(userId: string, creatorId: string, agentId: string): s
 function byPublishedAt(a: PublishedAgentCorpus, b: PublishedAgentCorpus): number { return Date.parse(b.published_at) - Date.parse(a.published_at); }
 function rowToCorpus(row: Record<string, any>): PublishedAgentCorpus {
   const product = typeof row.product_json === "string" ? JSON.parse(row.product_json) : row.product_json ?? {};
+  assertCanonicalProductIdentity(String(row.agent_id), String(row.product_id));
   return {
     creator_id: String(row.creator_id),
     agent_id: String(row.agent_id),
@@ -1316,6 +1375,7 @@ function rowToCorpus(row: Record<string, any>): PublishedAgentCorpus {
   };
 }
 function rowToAccess(row: Record<string, any>): AgentAccessGrant {
+  assertCanonicalProductIdentity(String(row.agent_id), String(row.product_id));
   return {
     entitlement_id: String(row.entitlement_id),
     user_id: String(row.user_id),
@@ -1332,6 +1392,7 @@ function rowToAccess(row: Record<string, any>): AgentAccessGrant {
 
 function rowToAccessPresentation(row: Record<string, any>): AgentAccessPresentation {
   const product = typeof row.product_json === "string" ? JSON.parse(row.product_json) : row.product_json ?? {};
+  assertCanonicalProductIdentity(String(row.agent_id), String(row.product_id));
   return {
     entitlement_id: String(row.entitlement_id),
     user_id: String(row.user_id),
@@ -1355,6 +1416,18 @@ function rowToAccessPresentation(row: Record<string, any>): AgentAccessPresentat
       ? product.presentation
       : {},
   };
+}
+
+/**
+ * UUID cutover collapses the old Agent key into the Product authority. Keep
+ * the internal `agent_id` column only as a storage alias, never as a second
+ * identity. A mismatch means the persisted state was not migrated and must
+ * fail closed instead of creating two resources for one public Product URL.
+ */
+function assertCanonicalProductIdentity(agentId: unknown, productId: unknown): void {
+  if (String(agentId) !== String(productId)) {
+    throw new Error("Registry state is not migrated: agent_id must equal product_id");
+  }
 }
 
 function rowToToolConnection(row: Record<string, any>): CreatorToolConnection {

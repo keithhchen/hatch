@@ -398,7 +398,7 @@ test("Corpus completeness prompt audits all candidate assets, metadata, paths, a
 
 test("Evidence and evaluation prompts make layer routing directional and keep eval artifacts out of prompts", () => {
   const evidence = evidencePrompt({
-    creator: { id: "creator-1", name: "Creator" },
+    creator: { id: "33333333-3333-4333-8333-333333333333", name: "Creator" },
     taskName: "Task",
     taskBrief: "Brief"
   }, "S1: source");
@@ -461,7 +461,7 @@ test("QA Markdown round-trips answers and generated tasks with nested headings",
     id: "I.Q1",
     question: "Review this draft:\n## Draft\nA generic offer.",
     intent: "Reveal the decisive tradeoff.",
-    leakageGroup: "offer-review",
+    leakageGroup: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
     answer: "# Final copy\n## Promise\nOne sharp outcome."
   }];
   const markdown = renderQaSet("Development QA", qa);

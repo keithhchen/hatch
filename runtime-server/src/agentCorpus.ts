@@ -4,9 +4,11 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { readBoundedJsonObject } from "./boundedResponse.js";
+import { requireUuidV4, UUID_V4_RE } from "./identity.js";
 
 const DigestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const IdentifierSchema = z.string().min(1).max(128).regex(/^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/);
+const AuthorityIdSchema = z.string().regex(UUID_V4_RE);
 const ToolIdentifierSchema = z.string().min(1).max(256).regex(/^(?:hatch|creator)\.[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/);
 const NameSchema = z.string().min(1).max(256);
 const DescriptionSchema = z.string().min(1).max(4_096);
@@ -42,11 +44,10 @@ const ToolSchema = z.object({
 
 export const AgentCorpusSchema = z.object({
   contract_version: z.literal("1"),
-  agent_id: IdentifierSchema,
-  creator: z.object({ id: IdentifierSchema, name: NameSchema }).strict(),
+  creator: z.object({ id: AuthorityIdSchema, name: NameSchema }).strict(),
   release: z.object({ backward_compatible_with: DigestSchema }).strict().optional(),
   product: z.object({
-    id: IdentifierSchema,
+    id: AuthorityIdSchema,
     name: NameSchema,
     description: DescriptionSchema.optional(),
     promise: DescriptionSchema.optional(),
@@ -79,7 +80,7 @@ export const AgentCorpusSchema = z.object({
     synthetic_qa: z.array(AssetSchema).min(1).max(128),
     held_out: z.array(AssetSchema).min(1).max(128)
   }).strict()
-}).strict();
+}).strict().transform((value) => ({ ...value, agent_id: value.product.id }));
 
 export type AgentCorpus = z.infer<typeof AgentCorpusSchema>;
 
@@ -113,6 +114,8 @@ export class AgentCorpusResolver {
     digestOrSignal?: string | AbortSignal,
     explicitSignal?: AbortSignal
   ): Promise<ResolvedAgentCorpus> {
+    requireUuidV4(creatorId, "creator_id");
+    requireUuidV4(agentId, "product_id");
     const selectedDigest = typeof digestOrSignal === "string" ? digestOrSignal : undefined;
     const signal = typeof digestOrSignal === "string" ? explicitSignal : digestOrSignal;
     signal?.throwIfAborted();
@@ -148,6 +151,7 @@ export class AgentCorpusResolver {
   }
 
   async list(creatorId: string, signal?: AbortSignal): Promise<ResolvedAgentCorpus[]> {
+    requireUuidV4(creatorId, "creator_id");
     signal?.throwIfAborted();
     const creatorRoot = await containedPath(this.root, creatorId);
     const legacyEntries = await (async () => {

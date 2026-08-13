@@ -8,18 +8,18 @@ import {
 
 describe("Desktop runtime entitlement binding", () => {
   it("forces A → B reconnect when refresh revokes the connected entitlement", () => {
-    const connectedToA = { entitlementId: "ent_A", agentId: "agent_A", creatorId: "creator_A" };
-    const selectedB = { entitlement_id: "ent_B", agent_id: "agent_B", creator_id: "creator_B" };
+    const connectedToA = { entitlementId: "ent_A", productId: "product_A", creatorId: "creator_A" };
+    const selectedB = { entitlement_id: "ent_B", product_id: "product_B", creator_id: "creator_B" };
 
     expect(entitlementRefreshNeedsReconnect(connectedToA, selectedB)).toBe(true);
     expect(runtimeBindingMatches(connectedToA, runtimeBindingForEntitlement(selectedB))).toBe(false);
   });
 
   it("keeps an exact entitlement, agent, and creator binding connected", () => {
-    const selected = { entitlement_id: "ent_A", agent_id: "agent_A", creator_id: "creator_A" };
+    const selected = { entitlement_id: "ent_A", product_id: "product_A", creator_id: "creator_A" };
     expect(entitlementRefreshNeedsReconnect({
       entitlementId: "ent_A",
-      agentId: "agent_A",
+      productId: "product_A",
       creatorId: "creator_A"
     }, selected)).toBe(false);
   });
@@ -27,8 +27,8 @@ describe("Desktop runtime entitlement binding", () => {
   it("detects product rebinding even when entitlement id is unchanged", () => {
     expect(entitlementRefreshNeedsReconnect({
       entitlementId: "ent_A",
-      agentId: "old_agent",
+      productId: "old_product",
       creatorId: "creator_A"
-    }, { entitlement_id: "ent_A", agent_id: "new_agent", creator_id: "creator_A" })).toBe(true);
+    }, { entitlement_id: "ent_A", product_id: "new_product", creator_id: "creator_A" })).toBe(true);
   });
 });

@@ -3,12 +3,12 @@ import { pathToFileURL } from "node:url";
 
 export async function runCommerceV2Smoke(options = {}) {
   const origin = requiredUrl(options.origin ?? process.env.HATCH_SMOKE_ORIGIN, "HATCH_SMOKE_ORIGIN");
-  const creatorId = options.creatorId ?? process.env.HATCH_SMOKE_CREATOR_ID ?? "maya-chen";
-  const productId = options.productId ?? process.env.HATCH_SMOKE_PRODUCT_ID ?? "signal-resume-review";
+  const creatorId = options.creatorId ?? process.env.HATCH_SMOKE_CREATOR_ID ?? "6f6a3d24-48af-4f27-9c50-0d4f7e4e8a21";
+  const productId = options.productId ?? process.env.HATCH_SMOKE_PRODUCT_ID ?? "f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42";
   const email = options.email ?? process.env.HATCH_SMOKE_EMAIL;
   const password = options.password ?? process.env.HATCH_SMOKE_PASSWORD;
   const fetchImpl = options.fetchImpl ?? fetch;
-  const canonicalPath = `/agents/${encodeURIComponent(creatorId)}/${encodeURIComponent(productId)}`;
+  const canonicalPath = `/products/${encodeURIComponent(productId)}`;
 
   const publicPage = await smokeRequest(fetchImpl, origin, canonicalPath);
   assertStatus(publicPage, 200, "canonical product page");
@@ -17,10 +17,10 @@ export async function runCommerceV2Smoke(options = {}) {
   const productResponse = await smokeRequest(
     fetchImpl,
     origin,
-    `/v1/catalog/agents/${encodeURIComponent(creatorId)}/${encodeURIComponent(productId)}`
+    `/v1/public/products/${encodeURIComponent(productId)}`
   );
   assertStatus(productResponse, 200, "public product API");
-  const product = productResponse.json?.agent ?? productResponse.json;
+  const product = productResponse.json?.product ?? productResponse.json?.agent ?? productResponse.json;
   if (!product?.available || product.availability !== "published") {
     throw new Error("Commerce smoke requires a published product with an active Commerce offer.");
   }
@@ -63,7 +63,7 @@ export async function runCommerceV2Smoke(options = {}) {
   const checkout = await smokeRequest(fetchImpl, origin, "/v1/checkout-sessions", {
     method: "POST",
     headers: { ...authenticatedHeaders, "idempotency-key": `${intentKey}:create` },
-    body: { creator_id: creatorId, product_id: productId, offer_id: product.offer.offer_id }
+    body: { product_id: productId, offer_id: product.offer.offer_id }
   });
   assertOneOf(checkout, [200, 201], "checkout session");
   const session = checkout.json?.checkout_session;
@@ -127,7 +127,7 @@ export async function runCommerceV2Smoke(options = {}) {
     throw new Error("Entitlement detail did not preserve active release-pinned access.");
   }
 
-  const success = await smokeRequest(fetchImpl, origin, `/portal/orders/${encodeURIComponent(orderId)}/success`, {
+  const success = await smokeRequest(fetchImpl, origin, `/orders/${encodeURIComponent(orderId)}/success`, {
     headers: { cookie }
   });
   assertStatus(success, 200, "durable success route");

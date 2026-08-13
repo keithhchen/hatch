@@ -6,24 +6,23 @@ describe("buyer Creator Agent library", () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify([{
       entitlement_id: "ent_jordan_signal",
       user_id: "jordan",
-      creator_id: "maya",
-      agent_id: "signal",
-      product_id: "signal",
+      creator_id: "8bb7b10c-4db0-4d8a-8c2f-2e2c8cba1002",
+      product_id: "9cc7b10c-4db0-4d8a-8c2f-2e2c8cba1003",
       status: "active",
       granted_at: "2026-08-03T00:00:00.000Z",
-      creator: { id: "maya", name: "Maya Chen" },
-      product: { id: "signal", name: "Signal Review", description: "Review work" },
+      creator: { id: "8bb7b10c-4db0-4d8a-8c2f-2e2c8cba1002", name: "Maya Chen" },
+      product: { id: "9cc7b10c-4db0-4d8a-8c2f-2e2c8cba1003", name: "Signal Review", description: "Review work" },
       presentation: { accent: "orange" }
     }]), { status: 200, headers: { "content-type": "application/json" } }));
     const result = await fetchPurchasedCreatorAgents("https://hatch.example", "opaque-jordan-token", fetchImpl);
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({
       entitlement_id: "ent_jordan_signal",
-      creator: { id: "maya", name: "Maya Chen" },
-      product: { id: "signal", name: "Signal Review" }
+      creator: { id: "8bb7b10c-4db0-4d8a-8c2f-2e2c8cba1002", name: "Maya Chen" },
+      product: { id: "9cc7b10c-4db0-4d8a-8c2f-2e2c8cba1003", name: "Signal Review" }
     });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
-    expect(fetchImpl).toHaveBeenCalledWith("https://hatch.example/v1/user/agent-access", {
+    expect(fetchImpl).toHaveBeenCalledWith("https://hatch.example/v1/user/product-access", {
       headers: { authorization: "Bearer opaque-jordan-token", accept: "application/json" }
     });
   });

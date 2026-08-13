@@ -378,10 +378,11 @@ export function validateSignupCredentials(email: string, password: string, role:
 }
 
 function accountId(role: AccountRole, displayName: string): string {
-  const slug = displayName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-  const boundedSlug = slug.slice(0, 115).replace(/-+$/g, "");
-  const suffix = randomUUID().replaceAll("-", "").slice(0, 12);
-  return `${boundedSlug || role}_${suffix}`;
+  // Account identity is an authority key, not a display-name handle. Names
+  // remain presentation data and may change without changing creator URLs.
+  void role;
+  void displayName;
+  return randomUUID();
 }
 function derivePasswordAsync(password: string, salt: Buffer): Promise<string> {
   return new Promise((resolve, reject) => {

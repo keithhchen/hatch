@@ -330,7 +330,7 @@ function factoryMetadata(purpose: "evidence.extract" | "eval.judge_result" | "co
 function sampleInput(runId: string): FactoryStartInput {
   return {
     runId,
-    creator: { id: "creator-timing", name: "Creator Timing" },
+    creator: { id: "11111111-1111-4111-8111-111111111111", name: "Creator Timing" },
     taskName: "One bounded deliverable",
     taskBrief: "Make one material choice and return a usable result.",
     sources: [{

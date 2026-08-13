@@ -1,12 +1,25 @@
 # Hatch Web Dashboard & Commerce Flow v2
 
-> Web 信息架构、public Browse、Library、Orders、Studio、Account、URL 与 Caddy 的最新规范见 [Hatch Public Browse, Library & Studio v1](./spec-public-browse-library-studio-v1.md)。若路径或命名冲突，以该规范为准。
+> **UUID/free-only cutover：** 本文早期诊断段落中的 slug、`/agents` 与 `/portal` 示例仅保留作历史背景，不是可实现的 route。当前唯一 normative identity/URL 规则见 [UUID Product Identity v1](./spec-uuid-product-identity-v1.md)；若本文任何旧示例冲突，以该文为准。
 
-状态：Product / UX / Commerce contract draft
+状态：已实现（free-only cutover；paid provider deliberately disabled）
 
 日期：2026-08-12
 
 范围：公开 Creator Agent storefront、Web Buyer Portal、Creator Dashboard、Dashboard BFF、Registry catalog/access projection、Commerce、Desktop activation 与 Runtime delivery accounting。
+
+## 0A. 当前 canonical surface
+
+| 用户目标 | Canonical URL | 登录要求 |
+| --- | --- | --- |
+| Browse | `/explore` | 不需要 |
+| Creator storefront | `/creators/{creator_uuid}` | 不需要 |
+| Product storefront | `/products/{product_uuid}` | 不需要 |
+| Library / entitlement | `/library`、`/library/{entitlement_uuid}` | 需要 |
+| Orders / receipt | `/orders`、`/orders/{order_uuid}`、`/orders/{order_uuid}/success` | 需要 |
+| Creator Studio | `/studio`、`/studio/products/...` | Creator 需要 |
+
+所有 UUID 是数据库生成的标准 UUID v4；本轮只开放免费 per-delivery。旧 path 不 redirect，直接 404。Desktop activation 使用 `hatch://products/open?entitlement_id={uuid}&product_id={uuid}`。
 
 本文不重写 Agent Runtime、Creator-learning 数据策略或 Desktop workspace 权限模型；相关边界继续遵守 [Creator Coactive Learning v1](./spec-creator-coactive-learning-v1.md) 与 [Desktop Auth & Agent Access v1](./spec-desktop-auth-and-agent-access-v1.md)。
 
@@ -57,7 +70,7 @@ V2 必须同时满足以下结果：
 7. Commerce 只有一个事务性事实源。Dashboard 与 Runtime 不再各自打开同一个 JSONL 并持有彼此不可见的内存事件。
 8. Entitlement 只能由订单、subscription 或显式审计的运营补偿产生；普通用户不能直接调用 grant endpoint 绕过 checkout。
 9. 每一笔 entitlement 都绑定明确的 product、offer version、release / Corpus digest、范围、有效期和剩余 delivery units；Runtime 不使用模糊的“当前 Agent”替代已购买版本。
-10. V2 launch 先完整支持 `free per-delivery` 与 `paid per-delivery`。Subscription 只有在续费、取消、失败、宽限期、退款和 entitlement 状态全部实现后才可在 UI 中出现。
+10. 本次 cutover 只开放 `free per-delivery`。Paid per-delivery 仍是后续 Phase 2；subscription 只有在续费、取消、失败、宽限期、退款和 entitlement 状态全部实现后才可在 UI 中出现。
 
 ## 2. 设计原则与非目标
 
@@ -119,15 +132,16 @@ V2 的 normative 决策是：Commerce 使用 Postgres 作为单一事务性事�
 
 | Route | Audience | 页面任务 | Primary CTA |
 | --- | --- | --- | --- |
-| `/agents` | anonymous / signed-in | 浏览已发布 Creator Agents | `View details` |
-| `/agents/:creatorSlug/:productSlug` | anonymous / signed-in | 理解一个 Agent 的价值、边界、要求和 offer | `Get for free` / `Buy for …`；subscription CTA 延后到 Phase 3 |
+| `/explore` | anonymous / signed-in | 浏览已发布 Products | `View details` |
+| `/products/:productId` | anonymous / signed-in | 理解一个 Product 的价值、边界、要求和 free offer | `Get for free` |
+| `/creators/:creatorId` | anonymous / signed-in | 浏览一个 Creator 的公开 Products | `View details` |
 | `/sign-in?returnTo=…` | anonymous | 登录并回到原任务 | `Sign in` |
 | `/sign-up?returnTo=…` | anonymous | 创建 Buyer account 并回到原任务 | `Create account` |
 | `/account/help` | all | 密码、session 与账号帮助 | 情境化 |
 
 规则：
 
-- Public product URL 是 canonical share URL；Creator 分享的不是 `/portal/` 首页。
+- Public product URL 是 `/products/{product_uuid}` canonical share URL；Creator 分享的不是 Studio 首页。
 - `returnTo` 只允许站内 allowlisted path，不接受完整外部 URL。
 - Product page 的 title、description、Open Graph metadata 和 unavailable 状态可在未执行 Buyer JavaScript 前确定；若暂不做 SSR，至少由服务器为 route 返回 canonical metadata。
 - Signed-in user 已拥有该 Agent 时，主 CTA 变为 `View your access`，次 CTA 为 `Open Hatch Desktop`。
@@ -137,16 +151,15 @@ V2 的 normative 决策是：Commerce 使用 Postgres 作为单一事务性事�
 
 | Route | 页面任务 | Primary CTA |
 | --- | --- | --- |
-| `/portal/library` | 查看 active / pending / consumed entitlement | `Open Hatch Desktop` 或 `View access` |
-| `/portal/library/:entitlementId` | 查看 entitlement 范围、release、剩余 units、有效期与使用方式 | `Open Hatch Desktop` |
-| `/portal/checkout/:checkoutSessionId` | 确认 immutable offer snapshot、条款和支付状态 | `Add to my account` / `Pay …` |
-| `/portal/orders` | 查看完整订单历史 | `View order` |
-| `/portal/orders/:orderId` | Receipt、payment、entitlement、delivery 与 refund timeline | 依状态变化 |
-| `/portal/orders/:orderId/success` | authoritative purchase success 与激活下一步 | `Open Hatch Desktop` |
-| `/portal/subscriptions` | 查看 active / past-due / cancelled subscription | `Manage subscription` |
-| `/portal/settings` | Account、session、sign out | 情境化 |
+| `/library` | 查看 active / pending / consumed entitlement | `Open Hatch Desktop` 或 `View access` |
+| `/library/:entitlementId` | 查看 entitlement 范围、release、剩余 units、有效期与使用方式 | `Open Hatch Desktop` |
+| `/checkout/:checkoutSessionId` | 确认 immutable free offer snapshot 与条款 | `Add to my account` |
+| `/orders` | 查看完整订单历史 | `View order` |
+| `/orders/:orderId` | Receipt、entitlement、delivery 与 refund timeline | 依状态变化 |
+| `/orders/:orderId/success` | authoritative purchase success 与激活下一步 | `Open Hatch Desktop` |
+| `/account` | Account、session、sign out | 情境化 |
 
-`/portal/orders/:orderId/success` 可刷新，也可稍后从 order detail 再次进入。它不是一次性 toast。
+`/orders/:orderId/success` 可刷新，也可稍后从 order detail 再次进入。它不是一次性 toast。
 
 ### 4.3 Creator Dashboard
 
@@ -154,19 +167,19 @@ Creator primary navigation 保持 `Home`、`Products`、`Orders`、`Payouts`。F
 
 | Route | 页面任务 | Primary CTA |
 | --- | --- | --- |
-| `/portal/creator` | 当前 products、待处理 candidate、orders、delivery 与 payout 摘要 | 状态化 `Continue …` |
-| `/portal/creator/products` | 全部 product 与 release 状态 | `Create product` |
-| `/portal/creator/products/new/factory` | 定义第一个 Task 与 authorized sources | `Start distillation` |
-| `/portal/creator/products/:productId` | Product overview 与当前 release health | `Continue setup` / `View storefront` |
-| `/portal/creator/products/:productId/factory/:runId` | Factory progress、Creator questions、autosave 与 retry | 状态化 |
-| `/portal/creator/products/:productId/candidates/:candidateId` | Candidate report、行为 diff、gates 与 review | `Approve candidate` |
-| `/portal/creator/products/:productId/offer` | Offer model、金额、currency、unit、policy | `Save offer` |
-| `/portal/creator/products/:productId/preview` | 精确预览 public storefront + active candidate + offer | `Publish` |
-| `/portal/creator/products/:productId/releases/:releaseId` | Immutable release、digest、lineage 与 rollback | `Make current`（仅旧 release） |
-| `/portal/creator/orders` | 完整 orders、delivery/revenue 状态与 filters | `View order` |
-| `/portal/creator/orders/:orderId` | 不含 Buyer private content 的 commerce timeline | 情境化 |
-| `/portal/creator/payouts` | Available、pending、in-transit、paid、adjustments | `Connect payouts` / `View payout` |
-| `/portal/creator/settings/payouts` | Payout onboarding 与 provider status | `Continue setup` |
+| `/studio` | 当前 products、待处理 candidate、orders、delivery 与 payout 摘要 | 状态化 `Continue …` |
+| `/studio/products` | 全部 product 与 release 状态 | `Create product` |
+| `/studio/products/new/factory` | 定义第一个 Task 与 authorized sources | `Start distillation` |
+| `/studio/products/:productId` | Product overview 与当前 release health | `Continue setup` / `View storefront` |
+| `/studio/factory/:runId` | Factory progress、Creator questions、autosave 与 retry | 状态化 |
+| `/studio/products/:productId/candidates/:candidateId` | Candidate report、行为 diff、gates 与 review | `Approve candidate` |
+| `/studio/products/:productId/offer` | Free delivery unit 与 policy | `Save offer` |
+| `/studio/products/:productId/preview` | 精确预览 public storefront + active candidate + offer | `Publish` |
+| `/studio/products/:productId/releases/:releaseId` | Immutable release、digest、lineage 与 rollback | `Make current`（仅旧 release） |
+| `/studio/orders` | 完整 orders、delivery/revenue 状态与 filters | `View order` |
+| `/studio/orders/:orderId` | 不含 Buyer private content 的 commerce timeline | 情境化 |
+| `/studio/payouts` | Honest unavailable/setup 状态；不伪造余额 | `Setup payouts` |
+| `/studio/payouts/:payoutId` | Payout detail（provider 开放后） | `View payout` |
 
 Product detail 继续采用既有五个 tab：`Overview`、`Test & improve`、`Examples`、`Versions`、`Data controls`。Candidate review 位于 `Versions`；initial Factory 从 `Create product` 进入，避免一个与产品无关的 top-level Factory inbox。
 
@@ -215,7 +228,7 @@ V2 launch 不要求 marketplace 搜索，但 route 和 card schema 不应假设 
 | 状态 | CTA | 行为 |
 | --- | --- | --- |
 | anonymous + free | `Get for free` | sign-in/sign-up，returnTo product，再创建 checkout session |
-| anonymous + paid | `Buy for $…` | sign-in/sign-up，returnTo product，再创建 checkout session |
+| anonymous + paid (future) | unavailable | 本次 cutover 对非零 offer fail closed |
 | signed-in + not owned | 同上 | `POST /checkout-sessions` 后进入 route |
 | entitlement pending | `Setting up access…` | disabled + live status；可进入 order detail |
 | entitlement active | `Open Hatch Desktop` | allowlisted deep link；不携带 Web token |
@@ -478,7 +491,7 @@ Success 页面：
 
 ```text
 Your product is live
-https://hatch.tokenquadrant.cn/agents/maya-chen/signal-resume-review
+https://hatch.tokenquadrant.cn/products/026651b1-8a8a-4484-aac5-ace6bd662157
 
 [ Copy link ] [ View storefront ]
 ```
@@ -885,8 +898,8 @@ Browser redirect 不能直接标记 paid；只显示 `Confirming payment…` 并
 ### 10.1 Public / Buyer
 
 ```text
-GET    /v1/catalog/agents
-GET    /v1/catalog/agents/:creatorId/:productId
+GET    /v1/public/products
+GET    /v1/public/products/:productId
 
 POST   /v1/checkout-sessions
 GET    /v1/checkout-sessions/:checkoutSessionId
@@ -900,7 +913,7 @@ GET    /v1/user/entitlements?cursor=&status=
 GET    /v1/user/entitlements/:entitlementId
 ```
 
-`POST /v1/user/checkout` 可在迁移期兼容，但最终应变成 checkout-session commands；普通 Buyer 不能访问 `POST /v1/user/agents/:creator/:agent/access`。
+`POST /v1/checkout-sessions` 是唯一 Buyer checkout command；普通 Buyer 不能访问 Registry access mutation。旧 `/v1/user/checkout`、`/v1/user/agents/*` 直接 404。
 
 ### 10.2 Creator
 
@@ -1117,7 +1130,7 @@ Subscription 字段可提前存在 schema，但 Phase 3 前 API 必须拒绝 act
 | `runtime-server/src/index.ts` | Commerce internal client、authorize/reserve/release/complete、durable accounting outbox；delivery success不依赖 revenue同步成功 |
 | `runtime-server/src/registryStore.ts` | Immutable releases、deployment pointer、由 Commerce 同步的 access projection；保存 entitlement/order/digest/status |
 | `packages/protocol/schemas/agent-corpus.schema.json` | Offer presentation migration；明确 model/unit，不再用缺失 offer默认免费 |
-| `Caddyfile` | Public `/agents/*` 与 auth routes；internal grant/commerce routes不公开 |
+| `Caddyfile` | Public `/products/*`、`/creators/*`、`/explore` 与 auth routes；internal grant/commerce routes 不公开 |
 | `compose.app.yml` | 移除 Dashboard/Runtime 共享 Commerce JSONL volume；连接单一 Commerce DB/service |
 | tests | Browser E2E、contract/integration、payment webhook、cross-process、responsive/visual、accessibility smoke |
 
@@ -1127,7 +1140,7 @@ Subscription 字段可提前存在 schema，但 Phase 3 前 API 必须拒绝 act
 
 以下不是 future polish，而是进入 Phase 0/1 前必须关闭的 contract gap：
 
-1. UI 只有 `/portal/` + component state，没有真实 product/order/entitlement/factory routes（[creator-dashboard/src/main.jsx](../creator-dashboard/src/main.jsx)）。
+1. 旧 UI 只有 `/portal/` + component state，没有真实 product/order/entitlement/factory routes（历史诊断；当前实现已切换到 `/explore`、`/products`、`/library`、`/orders`、`/studio`）。
 2. Buyer card/detail/order 硬编码 `Free for now` / `Free`，Creator card却展示真实 offer。
 3. Checkout 固定 `gross_minor=0`、伪 `paid`，成功与后续 refetch 在同一个 try 中（[creator-dashboard/server.mjs](../creator-dashboard/server.mjs)）。
 4. Dashboard 与 Runtime 启动时各自读取共享 JSONL，事件不会互相 refresh（[packages/commerce/src/ledger.js](../packages/commerce/src/ledger.js)）。

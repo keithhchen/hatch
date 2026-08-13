@@ -123,11 +123,11 @@ describe("native renderer commands", () => {
     expect(conversationIdFromLocation({ search: "?conversation_id=conversation_123" })).toBe("conversation_123");
     expect(conversationIdFromLocation({ search: "?conversation_id=bad%0Avalue" })).toBe("");
     expect(conversationBindingFromLocation({
-      search: "?entitlement_id=ent_A&creator_id=creator_A&agent_id=agent_A"
-    })).toEqual({ entitlementId: "ent_A", creatorId: "creator_A", agentId: "agent_A" });
+      search: "?entitlement_id=7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001&creator_id=8bb7b10c-4db0-4d8a-8c2f-2e2c8cba1002&product_id=9cc7b10c-4db0-4d8a-8c2f-2e2c8cba1003"
+    })).toEqual({ entitlementId: "7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001", creatorId: "8bb7b10c-4db0-4d8a-8c2f-2e2c8cba1002", productId: "9cc7b10c-4db0-4d8a-8c2f-2e2c8cba1003", agentId: "9cc7b10c-4db0-4d8a-8c2f-2e2c8cba1003" });
     expect(conversationBindingFromLocation({
-      search: "?entitlement_id=ent_A&creator_id=creator_A"
+      search: "?entitlement_id=7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001&creator_id=8bb7b10c-4db0-4d8a-8c2f-2e2c8cba1002"
     })).toBeNull();
-    expect(normalizeConversationBinding({ entitlement_id: "bad\nvalue", creator_id: "c", agent_id: "a" })).toBeNull();
+    expect(normalizeConversationBinding({ entitlement_id: "bad\nvalue", creator_id: "c", product_id: "a" })).toBeNull();
   });
 });

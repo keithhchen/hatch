@@ -197,7 +197,7 @@ export class RegistryCreatorToolControlPlane implements CreatorToolControlPlane 
 
   private async connectionFor(request: CreatorToolResolutionRequest): Promise<ResolvedConnection> {
     const base = this.options.registryUrl.replace(/\/$/, "");
-    const response = await fetch(`${base}/v1/runtime/tenants/${encodeURIComponent(request.tenantId)}/agents/${encodeURIComponent(request.agentId)}/tools/${encodeURIComponent(request.tool.id)}`, {
+    const response = await fetch(`${base}/v1/runtime/tenants/${encodeURIComponent(request.tenantId)}/products/${encodeURIComponent(request.agentId)}/tools/${encodeURIComponent(request.tool.id)}`, {
       headers: {
         authorization: `Bearer ${this.options.serviceToken}`,
         "x-hatch-tenant-id": request.tenantId,

@@ -1,5 +1,6 @@
 import path from "node:path";
 import { AgentCorpusSchema, type AgentCorpus } from "../agentCorpus.js";
+import { requireUuidV4 } from "../identity.js";
 import { verifyAgentCorpus } from "../registryCorpus.js";
 import { FactoryFileStore } from "./fileStore.js";
 import type { ArtifactRef, FactoryAgentTool } from "./types.js";
@@ -183,11 +184,14 @@ export async function materializeAgentCorpusBundle(
 function validateBundleInput(input: AgentCorpusBundleInput): BundlePlan {
   const candidateRoot = safeCandidateRoot(input.candidateRoot);
   const creator = {
-    id: canonicalIdentifier(input.creator?.id, "creator id"),
+    id: requireUuidV4(input.creator?.id, "creator.id"),
     name: requiredText(input.creator?.name, "creator name")
   };
-  const agentId = canonicalIdentifier(input.agentId, "agent id");
   const product = validateProduct(input.product);
+  const agentId = requireUuidV4(input.agentId || product.id, "product.id");
+  if (agentId !== product.id) {
+    throw new Error("agentId and product.id must identify the same Product UUID");
+  }
   const systemInstructions = markdown(input.systemInstructions, "system instructions");
   const tools = validateTools(input.tools);
   const toolIds = new Set(tools.map((tool) => tool.id));
@@ -287,7 +291,7 @@ function validateProduct(value: AgentCorpusBundleProduct): ValidatedProduct {
     requiredText(boundary, `product.boundaries[${index}]`)
   ));
   const product: ValidatedProduct = {
-    id: canonicalIdentifier(record.id, "product.id"),
+    id: requireUuidV4(record.id, "product.id"),
     name: requiredText(record.name, "product.name"),
     ...(record.description === undefined ? {} : { description: requiredText(record.description, "product.description") }),
     ...(record.promise === undefined ? {} : { promise: requiredText(record.promise, "product.promise") }),
@@ -405,7 +409,7 @@ function buildPlannedAssets(plan: BundlePlan): PlannedAsset[] {
   return [
     { relativePath: SYSTEM_PATH, content: plan.systemInstructions },
     ...plan.skills.flatMap((skill): PlannedAsset[] => [
-      { relativePath: skillInstructionPath(skill.id), content: skill.instruction },
+      { relativePath: skillInstructionPath(skill.id), content: skillDocument(skill) },
       ...skill.references.map((reference) => ({
         relativePath: skillReferencePath(skill.id, reference.id),
         content: reference.content
@@ -420,10 +424,26 @@ function buildPlannedAssets(plan: BundlePlan): PlannedAsset[] {
   ];
 }
 
+/**
+ * Agent Corpus owns Skill identity and triggering metadata. The LLM supplies
+ * only the instruction body; this host boundary emits the canonical Agent
+ * Skills frontmatter so every `SKILL.md` is loadable by the same parser used
+ * by Hatch Runtime.
+ */
+function skillDocument(skill: ValidatedSkill): string {
+  return [
+    "---",
+    `name: ${JSON.stringify(skill.id)}`,
+    `description: ${JSON.stringify(skill.whenToUse)}`,
+    "---",
+    "",
+    skill.instruction
+  ].join("\n");
+}
+
 function buildManifest(plan: BundlePlan, digestFor: (relativePath: string) => string) {
   return {
     contract_version: "1" as const,
-    agent_id: plan.agentId,
     creator: { id: plan.creator.id, name: plan.creator.name },
     product: {
       id: plan.product.id,

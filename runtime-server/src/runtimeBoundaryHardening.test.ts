@@ -330,7 +330,7 @@ test("per-user hello capacity is acquired after identity but before Agent Corpus
       ...hello("same-user-session-one", "same-user-install-one"),
       entitlement_id: entitlement.entitlement_id,
       creator_id: entitlement.creator_id,
-      agent_id: entitlement.agent_id
+      product_id: entitlement.product_id
     }));
     await corpusStarted;
 
@@ -339,7 +339,7 @@ test("per-user hello capacity is acquired after identity but before Agent Corpus
       ...hello("same-user-session-two", "same-user-install-two"),
       entitlement_id: entitlement.entitlement_id,
       creator_id: entitlement.creator_id,
-      agent_id: entitlement.agent_id
+      product_id: entitlement.product_id
     }));
     assert.equal(((await rejected).error as { code?: string }).code, "user_authentication_busy");
     assert.equal(corpusCalls, 1);
@@ -388,7 +388,7 @@ test("hello setup keeps its admission lease and aborts Creator tool resolution o
       ...hello("creator-setup-one", "creator-setup-install-one"),
       entitlement_id: entitlement.entitlement_id,
       creator_id: entitlement.creator_id,
-      agent_id: entitlement.agent_id
+      product_id: entitlement.product_id
     }));
     await setupStarted;
 
@@ -398,7 +398,7 @@ test("hello setup keeps its admission lease and aborts Creator tool resolution o
       ...hello("creator-setup-two", "creator-setup-install-two"),
       entitlement_id: entitlement.entitlement_id,
       creator_id: entitlement.creator_id,
-      agent_id: entitlement.agent_id
+      product_id: entitlement.product_id
     }));
     assert.equal(((await rejected).error as { code?: string }).code, "authentication_busy");
 
@@ -1597,12 +1597,12 @@ function clientMessage(runId: string, conversationId: string): Record<string, un
 
 function fixtureEntitlement(): EntitlementBinding {
   return {
-    entitlement_id: "ent-boundary",
-    order_id: "order-boundary",
-    user_id: "user-boundary",
-    creator_id: "creator-boundary",
-    agent_id: "agent-boundary",
-    product_id: "product-boundary",
+    entitlement_id: "44444444-4444-4444-8444-444444444444",
+    order_id: "55555555-5555-4555-8555-555555555555",
+    user_id: "66666666-6666-4666-8666-666666666666",
+    creator_id: "11111111-1111-4111-8111-111111111111",
+    agent_id: "22222222-2222-4222-8222-222222222222",
+    product_id: "22222222-2222-4222-8222-222222222222",
     status: "active"
   };
 }
@@ -1665,7 +1665,6 @@ async function writeCreatorCorpusFixture(entitlement: EntitlementBinding): Promi
   await writeFile(path.join(corpusRoot, "evals/evals.json"), evaluations, "utf8");
   await writeFile(path.join(corpusRoot, "agent.json"), JSON.stringify({
     contract_version: "1",
-    agent_id: entitlement.agent_id,
     creator: { id: entitlement.creator_id, name: "Boundary Creator" },
     product: { id: entitlement.product_id, name: "Boundary Product" },
     instructions: { system: corpusAsset("system", "instructions/system.md", system) },
@@ -1719,7 +1718,7 @@ async function connectEntitledSocket(
     ...hello(token, installationId),
     entitlement_id: entitlement.entitlement_id,
     creator_id: entitlement.creator_id,
-    agent_id: entitlement.agent_id
+    product_id: entitlement.product_id
   }));
   assert.equal((await ready).type, "session.ready");
   return socket;

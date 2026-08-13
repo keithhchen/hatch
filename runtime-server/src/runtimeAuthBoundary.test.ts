@@ -14,10 +14,17 @@ import {
 } from "./entitlements.js";
 import { createRuntimeServer, type RuntimeServer } from "./index.js";
 
+const USER_ID = "11111111-1111-4111-8111-111111111111";
+const OTHER_USER_ID = "22222222-2222-4222-8222-222222222222";
+const CREATOR_ID = "33333333-3333-4333-8333-333333333333";
+const PRODUCT_ID = "44444444-4444-4444-8444-444444444444";
+const ENTITLEMENT_ID = "55555555-5555-4555-8555-555555555555";
+const ORDER_ID = "66666666-6666-4666-8666-666666666666";
+
 test("Runtime delegates opaque session identity to the configured Registry verifier", async () => {
   const identityResolver = {
     resolveIdentity: async (token?: string) => token === "opaque-user"
-      ? { sub: "user_jordan", role: "user" as const, exp: Math.floor(Date.now() / 1000) + 3600 }
+      ? { sub: USER_ID, role: "user" as const, exp: Math.floor(Date.now() / 1000) + 3600 }
       : undefined
   };
   const entitlementResolver = {
@@ -46,17 +53,17 @@ test("Runtime delegates opaque session identity to the configured Registry verif
 
 test("Runtime rejects another user's entitlement for an introspected session", async () => {
   const entitlement = {
-    entitlement_id: "ent_jordan_resume",
-    order_id: "order_jordan_resume",
-    user_id: "user_jordan",
-    creator_id: "creator_maya",
-    product_id: "product_resume",
-    agent_id: "agent_resume",
+    entitlement_id: ENTITLEMENT_ID,
+    order_id: ORDER_ID,
+    user_id: USER_ID,
+    creator_id: CREATOR_ID,
+    product_id: PRODUCT_ID,
+    agent_id: PRODUCT_ID,
     status: "active" as const
   };
   const identityResolver = {
     resolveIdentity: async (token?: string) => token === "opaque-mallory"
-      ? { sub: "user_mallory", role: "user" as const, exp: Math.floor(Date.now() / 1000) + 3600 }
+      ? { sub: OTHER_USER_ID, role: "user" as const, exp: Math.floor(Date.now() / 1000) + 3600 }
       : undefined
   };
   // Simulate a Registry authorization regression: both lookups return an
@@ -106,7 +113,7 @@ test("Runtime rejects another user's entitlement for an introspected session", a
         auth_token: "opaque-mallory",
         entitlement_id: entitlement.entitlement_id,
         creator_id: entitlement.creator_id,
-        agent_id: entitlement.agent_id,
+        product_id: entitlement.product_id,
         local_tools: []
       })));
     });
@@ -188,16 +195,16 @@ test("Runtime re-introspects a Creator session per turn without requiring a buye
     resolveIdentity: async (token?: string) => {
       identityCalls += 1;
       return token === "opaque-creator-session"
-        ? { sub: "creator_maya", role: "creator" as const, exp: Math.floor(Date.now() / 1000) + 3_600 }
+        ? { sub: CREATOR_ID, role: "creator" as const, exp: Math.floor(Date.now() / 1000) + 3_600 }
         : undefined;
     }
   };
   const entitlement = {
-    entitlement_id: "unused-creator-entitlement",
-    user_id: "creator_maya",
-    creator_id: "creator_maya",
-    product_id: "product_resume",
-    agent_id: "agent_resume",
+    entitlement_id: ENTITLEMENT_ID,
+    user_id: CREATOR_ID,
+    creator_id: CREATOR_ID,
+    product_id: PRODUCT_ID,
+    agent_id: PRODUCT_ID,
     status: "active" as const
   };
   const corpus = revocableTestCorpus(entitlement);
@@ -238,8 +245,8 @@ test("Runtime re-introspects a Creator session per turn without requiring a buye
       protocol_version: "0.7",
       installation_id: "desktop-creator-maya",
       auth_token: "opaque-creator-session",
-      creator_id: "creator_maya",
-      agent_id: "agent_resume",
+      creator_id: CREATOR_ID,
+      product_id: PRODUCT_ID,
       local_tools: []
     }));
     assert.equal((await readyResponse).type, "session.ready");
@@ -331,7 +338,7 @@ test("Runtime admits only one client hello while Registry authorization is pendi
       auth_token: "opaque-user-session",
       entitlement_id: entitlement.entitlement_id,
       creator_id: entitlement.creator_id,
-      agent_id: entitlement.agent_id,
+      product_id: entitlement.product_id,
       local_tools: []
     };
     socket.send(JSON.stringify(hello));
@@ -508,12 +515,12 @@ test("closing a Runtime socket aborts its pending Registry authorization request
 
 function testEntitlement(): EntitlementBinding {
   return {
-    entitlement_id: "ent_jordan_resume",
-    order_id: "order_jordan_resume",
-    user_id: "user_jordan",
-    creator_id: "creator_maya",
-    product_id: "product_resume",
-    agent_id: "agent_resume",
+    entitlement_id: ENTITLEMENT_ID,
+    order_id: ORDER_ID,
+    user_id: USER_ID,
+    creator_id: CREATOR_ID,
+    product_id: PRODUCT_ID,
+    agent_id: PRODUCT_ID,
     status: "active"
   };
 }
@@ -567,12 +574,12 @@ async function createRevocableRuntimeScenario(): Promise<{
   close: () => Promise<void>;
 }> {
   const entitlement: EntitlementBinding = {
-    entitlement_id: "ent_jordan_resume",
-    order_id: "order_jordan_resume",
-    user_id: "user_jordan",
-    creator_id: "creator_maya",
-    product_id: "product_resume",
-    agent_id: "agent_resume",
+    entitlement_id: ENTITLEMENT_ID,
+    order_id: ORDER_ID,
+    user_id: USER_ID,
+    creator_id: CREATOR_ID,
+    product_id: PRODUCT_ID,
+    agent_id: PRODUCT_ID,
     status: "active"
   };
   const registryState: RevocableRegistryState = {
@@ -698,7 +705,7 @@ async function connectAuthorizedSocket(runtimePort: number, entitlement: Entitle
     auth_token: "opaque-user-session",
     entitlement_id: entitlement.entitlement_id,
     creator_id: entitlement.creator_id,
-    agent_id: entitlement.agent_id,
+    product_id: entitlement.product_id,
     local_tools: []
   }));
   const ready = await response;

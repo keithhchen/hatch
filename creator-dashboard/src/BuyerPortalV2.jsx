@@ -35,7 +35,7 @@ const PUBLIC_ROUTE_NAMES = new Set(["catalog", "creator", "product", "sign-in", 
  *
  * Response shapes are intentionally tolerant during migration:
  *   GET  /v1/public/products -> Product[] | { products: Product[] }
- *   GET  /v1/public/products/:creator/:product -> Product | { product: Product, agent?: Product }
+ *   GET  /v1/public/products/:product_id -> Product | { product: Product, agent?: Product }
  *   POST /v1/checkout-sessions -> Checkout | { checkout_session: Checkout }
  *   GET  /v1/checkout-sessions/:id -> same as above
  *   POST /v1/checkout-sessions/:id/confirm
@@ -83,15 +83,13 @@ export function BuyerPortalV2({
   if (route.name === "catalog") {
     page = <CatalogPage request={request} navigate={navigate} session={session} />;
   } else if (route.name === "creator") {
-    page = <CreatorPublicPage creatorSlug={route.params.creatorSlug} request={request} navigate={navigate} session={session} />;
+    page = <CreatorPublicPage creatorId={route.params.creatorId} request={request} navigate={navigate} session={session} />;
   } else if (route.name === "product") {
     page = <ProductPage route={route} request={request} navigate={navigate} session={session} downloadUrl={downloadUrl} />;
   } else if (route.name === "sign-in" || route.name === "sign-up") {
     return <AuthPage mode={route.name} search={location.search} request={request} navigate={navigate} session={session} />;
   } else if (route.name === "library") {
     page = <LibraryPage search={location.search} request={request} navigate={navigate} />;
-  } else if (route.name === "entitlement-slug") {
-    page = <EntitlementSlugPage creatorSlug={route.params.creatorSlug} productSlug={route.params.productSlug} request={request} navigate={navigate} session={session} downloadUrl={downloadUrl} />;
   } else if (route.name === "entitlement") {
     page = <EntitlementPage id={route.params.entitlementId} request={request} navigate={navigate} session={session} downloadUrl={downloadUrl} />;
   } else if (route.name === "checkout") {
@@ -119,38 +117,21 @@ export function matchBuyerRoute(inputPathname) {
   const pathname = normalizePathname(inputPathname);
   const segments = pathname.split("/").filter(Boolean).map(safeDecode);
 
-  if (segments.length === 0 || (segments.length === 1 && ["explore", "agents"].includes(segments[0]))) return { name: "catalog", params: {} };
-  if (segments.length === 3 && ["creators", "agents"].includes(segments[0])) {
-    return { name: "product", params: { creatorSlug: segments[1], productSlug: segments[2] } };
+  if (segments.length === 0 || (segments.length === 1 && segments[0] === "explore")) return { name: "catalog", params: {} };
+  if (segments.length === 2 && segments[0] === "products") {
+    return { name: "product", params: { productId: segments[1] } };
   }
-  if (segments.length === 2 && segments[0] === "creators") return { name: "creator", params: { creatorSlug: segments[1] } };
+  if (segments.length === 2 && segments[0] === "creators") return { name: "creator", params: { creatorId: segments[1] } };
   if (segments.length === 1 && segments[0] === "sign-in") return { name: "sign-in", params: {} };
   if (segments.length === 1 && segments[0] === "sign-up") return { name: "sign-up", params: {} };
   if (segments.length === 2 && segments[0] === "account" && segments[1] === "help") return { name: "account-help", params: {} };
   if (segments.length === 1 && segments[0] === "library") return { name: "library", params: {} };
   if (segments.length === 2 && segments[0] === "library") return { name: "entitlement", params: { entitlementId: segments[1] } };
-  if (segments.length === 3 && segments[0] === "library") return { name: "entitlement-slug", params: { creatorSlug: segments[1], productSlug: segments[2] } };
   if (segments.length === 1 && segments[0] === "orders") return { name: "orders", params: {} };
   if (segments.length === 3 && segments[0] === "orders" && segments[2] === "success") return { name: "success", params: { orderId: segments[1], orderNumber: segments[1] } };
   if (segments.length === 2 && segments[0] === "orders") return { name: "order", params: { orderId: segments[1], orderNumber: segments[1] } };
   if (segments.length === 2 && segments[0] === "checkout") return { name: "checkout", params: { checkoutSessionId: segments[1] } };
   if (segments.length === 1 && segments[0] === "account") return { name: "settings", params: {} };
-  if (segments.length === 2 && segments[0] === "portal" && segments[1] === "library") return { name: "library", params: {} };
-  if (segments.length === 2 && segments[0] === "portal" && segments[1] === "settings") return { name: "settings", params: {} };
-  if (segments.length === 2 && segments[0] === "portal" && segments[1] === "subscriptions") return { name: "subscriptions", params: {} };
-  if (segments.length === 3 && segments[0] === "portal" && segments[1] === "library") {
-    return { name: "entitlement", params: { entitlementId: segments[2] } };
-  }
-  if (segments.length === 3 && segments[0] === "portal" && segments[1] === "checkout") {
-    return { name: "checkout", params: { checkoutSessionId: segments[2] } };
-  }
-  if (segments.length === 2 && segments[0] === "portal" && segments[1] === "orders") return { name: "orders", params: {} };
-  if (segments.length === 4 && segments[0] === "portal" && segments[1] === "orders" && segments[3] === "success") {
-    return { name: "success", params: { orderId: segments[2] } };
-  }
-  if (segments.length === 3 && segments[0] === "portal" && segments[1] === "orders") {
-    return { name: "order", params: { orderId: segments[2] } };
-  }
   return { name: "not-found", params: {} };
 }
 
@@ -160,7 +141,7 @@ function BuyerShell({ route, navigate, session, downloadUrl, children }) {
   const authenticated = session.status === "authenticated";
   const active = route.name === "catalog" || route.name === "creator" || route.name === "product"
     ? "explore"
-    : route.name === "library" || route.name === "entitlement" || route.name === "entitlement-slug"
+    : route.name === "library" || route.name === "entitlement"
       ? "library"
       : route.name === "orders" || route.name === "order" || route.name === "success"
         ? "orders"
@@ -215,7 +196,7 @@ function BuyerShell({ route, navigate, session, downloadUrl, children }) {
 }
 
 function CatalogPage({ request, navigate, session }) {
-  usePageTitle("Creator Agents");
+  usePageTitle("Products");
   const resource = useRemote(async (signal) => {
     const response = await callRequest(request, BUYER_PORTAL_V2_ENDPOINTS.catalog, { signal });
     return collectionFrom(response, ["agents", "items"]);
@@ -224,30 +205,30 @@ function CatalogPage({ request, navigate, session }) {
   return (
     <div className="buyer-v2__container buyer-v2__page">
       <header className="buyer-v2__page-heading buyer-v2__catalog-heading">
-        <span className="buyer-v2__eyebrow">Creator Agents</span>
+        <span className="buyer-v2__eyebrow">Products</span>
         <h1>Methods you can put to work.</h1>
-        <p>Understand the promise and boundaries first. Add an Agent to your account only when it fits the job.</p>
+        <p>Understand the promise and boundaries first. Add a Product to your account only when it fits the job.</p>
       </header>
-      {resource.status === "loading" ? <CardSkeleton count={3} label="Loading Creator Agents" /> : null}
-      {resource.status === "error" ? <RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} returnTo="/agents" /> : null}
+      {resource.status === "loading" ? <CardSkeleton count={3} label="Loading products" /> : null}
+      {resource.status === "error" ? <RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} returnTo={EXPLORE_ROOT} /> : null}
       {resource.status === "ready" && resource.data.length ? (
-        <section className="buyer-v2__catalog-grid" aria-label="Available Creator Agents">
+        <section className="buyer-v2__catalog-grid" aria-label="Available products">
           {resource.data.map((product) => <CatalogCard key={productKey(product)} product={product} navigate={navigate} authenticated={session.status === "authenticated"} />)}
         </section>
       ) : null}
       {resource.status === "ready" && resource.data.length === 0 ? (
-        <EmptyState title="No Agents are public yet" body="Published Creator Agents will appear here. Try again later." />
+        <EmptyState title="No products are public yet" body="Published products will appear here. Try again later." />
       ) : null}
     </div>
   );
 }
 
-function CreatorPublicPage({ creatorSlug, request, navigate, session }) {
-  const endpoint = `/v1/public/creators/${encodeURIComponent(creatorSlug)}`;
+function CreatorPublicPage({ creatorId, request, navigate, session }) {
+  const endpoint = `/v1/public/creators/${encodeURIComponent(creatorId)}`;
   const resource = useRemote(async (signal) => unwrap(await callRequest(request, endpoint, { signal }), ["creator"]), endpoint);
   usePageTitle(resource.data?.creator?.name ? `${resource.data.creator.name} · Hatch` : "Creator · Hatch");
   if (resource.status === "loading") return <div className="buyer-v2__container buyer-v2__page"><PageSkeleton label="Loading creator" /></div>;
-  if (resource.status === "error") return <div className="buyer-v2__container buyer-v2__page"><RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} returnTo={`/creators/${encodeURIComponent(creatorSlug)}`} /></div>;
+  if (resource.status === "error") return <div className="buyer-v2__container buyer-v2__page"><RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} returnTo={`/creators/${encodeURIComponent(creatorId)}`} /></div>;
   const creator = resource.data?.creator ?? resource.data;
   const products = collectionFrom(resource.data, ["products", "agents", "items"]);
   return (
@@ -255,10 +236,10 @@ function CreatorPublicPage({ creatorSlug, request, navigate, session }) {
       <RouterLink className="buyer-v2__back-link" to={EXPLORE_ROOT} navigate={navigate}>← Explore</RouterLink>
       <header className="buyer-v2__page-heading">
         <span className="buyer-v2__eyebrow">Creator</span>
-        <h1>{creator?.name ?? creator?.display_name ?? creatorSlug}</h1>
+        <h1>{creator?.name ?? creator?.display_name ?? creatorId}</h1>
         <p>{creator?.bio ?? creator?.description ?? "Published methods for work in your own Workspace."}</p>
       </header>
-      {products.length ? <section className="buyer-v2__catalog-grid" aria-label={`${creator?.name ?? creatorSlug} products`}>{products.map((product) => <CatalogCard key={productKey(product)} product={product} navigate={navigate} authenticated={session.status === "authenticated"} />)}</section> : <EmptyState title="No public products yet" body="This Creator has not published a product that can be browsed." action={<RouterLink className="buyer-v2__button buyer-v2__button--primary" to={EXPLORE_ROOT} navigate={navigate}>Explore all products</RouterLink>} />}
+      {products.length ? <section className="buyer-v2__catalog-grid" aria-label={`${creator?.name ?? creatorId} products`}>{products.map((product) => <CatalogCard key={productKey(product)} product={product} navigate={navigate} authenticated={session.status === "authenticated"} />)}</section> : <EmptyState title="No public products yet" body="This Creator has not published a product that can be browsed." action={<RouterLink className="buyer-v2__button buyer-v2__button--primary" to={EXPLORE_ROOT} navigate={navigate}>Explore all products</RouterLink>} />}
     </div>
   );
 }
@@ -284,9 +265,9 @@ function CatalogCard({ product, navigate }) {
 }
 
 function ProductPage({ route, request, navigate, session, downloadUrl }) {
-  const { creatorSlug, productSlug } = route.params;
-  const path = `/creators/${encodeURIComponent(creatorSlug)}/${encodeURIComponent(productSlug)}`;
-  const endpoint = `${BUYER_PORTAL_V2_ENDPOINTS.catalog}/${encodeURIComponent(creatorSlug)}/${encodeURIComponent(productSlug)}`;
+  const { productId } = route.params;
+  const path = `/products/${encodeURIComponent(productId)}`;
+  const endpoint = `${BUYER_PORTAL_V2_ENDPOINTS.catalog}/${encodeURIComponent(productId)}`;
   const resource = useRemote(async (signal) => unwrap(await callRequest(request, endpoint, { signal }), ["agent", "product"]), endpoint);
   const product = resource.data;
   usePageTitle(product ? productName(product) : "Agent details");
@@ -417,7 +398,7 @@ function SettingsPage({ session, navigate }) {
     setError(null);
     try {
       await session.signOut();
-      navigateTo(navigate, "/agents", { replace: true });
+      navigateTo(navigate, EXPLORE_ROOT, { replace: true });
     } catch (caught) {
       setStatus("idle");
       setError(caught);
@@ -442,24 +423,24 @@ function AccountHelpPage({ session, navigate }) {
   return <div className="buyer-v2__container buyer-v2__page">
     <header className="buyer-v2__page-heading"><span className="buyer-v2__eyebrow">Account help</span><h1>Get back to the right account.</h1><p>Orders and Agent access belong to the account that confirmed checkout. Use that same account in Hatch Desktop.</p></header>
     <section className="buyer-v2__decision-grid">
-      <article className="buyer-v2__info-card"><span className="buyer-v2__eyebrow">Session</span><h2>{session.status === "authenticated" ? "You are signed in." : "Sign in to continue."}</h2><p>If a receipt or Agent is missing, confirm that Web and Desktop use the same account.</p>{session.status === "authenticated" ? <RouterLink className="buyer-v2__button buyer-v2__button--secondary" to="/portal/settings" navigate={navigate}>View settings</RouterLink> : <RouterLink className="buyer-v2__button buyer-v2__button--primary" to="/sign-in?returnTo=%2Faccount%2Fhelp" navigate={navigate}>Sign in</RouterLink>}</article>
-      <article className="buyer-v2__info-card"><span className="buyer-v2__eyebrow">Purchase support</span><h2>Keep the support reference.</h2><p>Open the order or entitlement detail and include its support reference when reporting a payment, refund, or access problem.</p><RouterLink className="buyer-v2__button buyer-v2__button--secondary" to={session.status === "authenticated" ? "/portal/orders" : "/agents"} navigate={navigate}>{session.status === "authenticated" ? "View orders" : "Browse Agents"}</RouterLink></article>
+      <article className="buyer-v2__info-card"><span className="buyer-v2__eyebrow">Session</span><h2>{session.status === "authenticated" ? "You are signed in." : "Sign in to continue."}</h2><p>If a receipt or Product access is missing, confirm that Web and Desktop use the same account.</p>{session.status === "authenticated" ? <RouterLink className="buyer-v2__button buyer-v2__button--secondary" to={ACCOUNT_ROOT} navigate={navigate}>View settings</RouterLink> : <RouterLink className="buyer-v2__button buyer-v2__button--primary" to="/sign-in?returnTo=%2Faccount%2Fhelp" navigate={navigate}>Sign in</RouterLink>}</article>
+      <article className="buyer-v2__info-card"><span className="buyer-v2__eyebrow">Purchase support</span><h2>Keep the support reference.</h2><p>Open the order or entitlement detail and include its support reference when reporting a payment, refund, or access problem.</p><RouterLink className="buyer-v2__button buyer-v2__button--secondary" to={session.status === "authenticated" ? ORDERS_ROOT : EXPLORE_ROOT} navigate={navigate}>{session.status === "authenticated" ? "View orders" : "Explore products"}</RouterLink></article>
     </section>
   </div>;
 }
 
 function SubscriptionsPage({ navigate }) {
   usePageTitle("Subscriptions");
-  return <div className="buyer-v2__container buyer-v2__page"><StatePanel eyebrow="Subscriptions" title="No subscription products are enabled." body="Hatch V2 supports one-time per-delivery offers. Subscription billing remains unavailable until its renewal, grace, proration and cancellation policy is complete."><RouterLink className="buyer-v2__button buyer-v2__button--primary" to="/agents" navigate={navigate}>Browse per-delivery Agents</RouterLink></StatePanel></div>;
+  return <div className="buyer-v2__container buyer-v2__page"><StatePanel eyebrow="Subscriptions" title="No subscription products are enabled." body="Hatch V2 supports one-time per-delivery offers. Subscription billing remains unavailable until its renewal, grace, proration and cancellation policy is complete."><RouterLink className="buyer-v2__button buyer-v2__button--primary" to={EXPLORE_ROOT} navigate={navigate}>Explore products</RouterLink></StatePanel></div>;
 }
 
 function AuthPage({ mode, search, request, navigate, session }) {
   const signingUp = mode === "sign-up";
   const params = new URLSearchParams(search);
-  const returnTo = safeReturnTo(params.get("returnTo") || "/portal/library");
+  const returnTo = safeReturnTo(params.get("returnTo") || LIBRARY_ROOT);
   const intentRoute = matchBuyerRoute(returnTo.split("?")[0]);
   const productIntent = intentRoute.name === "product";
-  const intentEndpoint = productIntent ? `${BUYER_PORTAL_V2_ENDPOINTS.catalog}/${encodeURIComponent(intentRoute.params.creatorSlug)}/${encodeURIComponent(intentRoute.params.productSlug)}` : "";
+  const intentEndpoint = productIntent ? `${BUYER_PORTAL_V2_ENDPOINTS.catalog}/${encodeURIComponent(intentRoute.params.productId)}` : "";
   const intent = useRemote(async (signal) => unwrap(await callRequest(request, intentEndpoint, { signal }), ["agent", "product"]), intentEndpoint || "no-intent", productIntent);
   const [form, setForm] = useState({ display_name: "", email: "", password: "", terms: false });
   const [submission, setSubmission] = useState({ status: "idle", error: null });
@@ -488,7 +469,7 @@ function AuthPage({ mode, search, request, navigate, session }) {
   return (
     <main className="buyer-v2 buyer-v2__auth-page">
       <section className="buyer-v2__auth-context">
-        <RouterLink className="buyer-v2__brand buyer-v2__brand--inverse" to="/agents" navigate={navigate}><span aria-hidden="true" className="buyer-v2__brand-mark">H</span><span>Hatch.</span></RouterLink>
+        <RouterLink className="buyer-v2__brand buyer-v2__brand--inverse" to={EXPLORE_ROOT} navigate={navigate}><span aria-hidden="true" className="buyer-v2__brand-mark">H</span><span>Hatch.</span></RouterLink>
         <div>
           <span className="buyer-v2__eyebrow">Continue your task</span>
           {productIntent && intent.status === "loading" ? <div className="buyer-v2__auth-intent-skeleton" aria-label="Loading offer" /> : null}
@@ -571,7 +552,7 @@ function CheckoutPage({ id, request, navigate, session, openPayment }) {
   }
 
   if (resource.status === "loading") return <div className="buyer-v2__container buyer-v2__page"><DetailSkeleton /></div>;
-  if (resource.status === "error") return <div className="buyer-v2__container buyer-v2__page"><RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} returnTo={`/portal/checkout/${id}`} /></div>;
+  if (resource.status === "error") return <div className="buyer-v2__container buyer-v2__page"><RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} returnTo={`${CHECKOUT_ROOT}/${id}`} /></div>;
 
   const product = checkout.product_snapshot || checkout.product || checkout;
   const offer = checkout.offer_snapshot || checkout.offer || offerFor(checkout);
@@ -586,7 +567,7 @@ function CheckoutPage({ id, request, navigate, session, openPayment }) {
       <span className="buyer-v2__spinner" aria-hidden="true" />
       {mutation.error ? <InlineError error={mutation.error} /> : null}
       <button type="button" className="buyer-v2__button buyer-v2__button--primary" disabled={mutation.status === "pending"} onClick={confirm} aria-busy={mutation.status === "pending"}>{mutation.status === "pending" ? "Retrying setup…" : "Retry setup"}</button>
-      {orderId ? <RouterLink className="buyer-v2__button buyer-v2__button--secondary" to={`/portal/orders/${encodeURIComponent(orderId)}`} navigate={navigate}>View confirmed order</RouterLink> : null}
+      {orderId ? <RouterLink className="buyer-v2__button buyer-v2__button--secondary" to={`${ORDERS_ROOT}/${encodeURIComponent(orderId)}`} navigate={navigate}>View confirmed order</RouterLink> : null}
     </StatePanel></div>;
   }
 
@@ -606,7 +587,7 @@ function CheckoutPage({ id, request, navigate, session, openPayment }) {
   }
 
   if (checkout.status === "refunded") {
-    return <div className="buyer-v2__container buyer-v2__page"><StatePanel tone="warning" eyebrow="Access setup refunded" title="Your payment was refunded." body="Hatch could not finish access setup within the recovery window, so the original payment was refunded instead of leaving the purchase pending.">{checkout.order_id ? <RouterLink className="buyer-v2__button buyer-v2__button--primary" to={`/portal/orders/${encodeURIComponent(checkout.order_id)}`} navigate={navigate}>View refund receipt</RouterLink> : null}<RouterLink className="buyer-v2__button buyer-v2__button--secondary" to={productPath(product)} navigate={navigate}>Return to product</RouterLink></StatePanel></div>;
+    return <div className="buyer-v2__container buyer-v2__page"><StatePanel tone="warning" eyebrow="Access setup refunded" title="Your payment was refunded." body="Hatch could not finish access setup within the recovery window, so the original payment was refunded instead of leaving the purchase pending.">{checkout.order_id ? <RouterLink className="buyer-v2__button buyer-v2__button--primary" to={`${ORDERS_ROOT}/${encodeURIComponent(checkout.order_id)}`} navigate={navigate}>View refund receipt</RouterLink> : null}<RouterLink className="buyer-v2__button buyer-v2__button--secondary" to={productPath(product)} navigate={navigate}>Return to product</RouterLink></StatePanel></div>;
   }
 
   return (
@@ -671,7 +652,7 @@ function SuccessPage({ id, request, navigate, downloadUrl, session }) {
 
   if (resource.status === "loading") return <div className="buyer-v2__container buyer-v2__page"><PageSkeleton label="Confirming your order" /></div>;
   if (resource.status === "error" && resource.error?.status >= 500) return <div className="buyer-v2__container buyer-v2__page"><StatePanel tone="warning" eyebrow="Receipt syncing" title="Purchase completed; receipt temporarily unavailable." body="Do not place another order. Hatch is retaining the confirmed purchase and will reload the receipt when the service recovers."><button type="button" className="buyer-v2__button buyer-v2__button--primary" onClick={resource.reload}>Try receipt again</button></StatePanel></div>;
-  if (resource.status === "error") return <div className="buyer-v2__container buyer-v2__page"><RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} returnTo={`/portal/orders/${id}/success`} /></div>;
+  if (resource.status === "error") return <div className="buyer-v2__container buyer-v2__page"><RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} returnTo={`${ORDERS_ROOT}/${id}/success`} /></div>;
 
   const { order, entitlement, entitlementError } = data;
   const product = order.product_snapshot || order.product || order;
@@ -679,11 +660,11 @@ function SuccessPage({ id, request, navigate, downloadUrl, session }) {
   const entitlementId = order.entitlement_id || entitlement?.entitlement_id || entitlement?.id;
 
   if (failed) {
-    return <div className="buyer-v2__container buyer-v2__page"><StatePanel tone="error" eyebrow="Payment not completed" title="Your account was not charged successfully." body="No access was granted. Return to the order to review the payment status and available recovery action."><RouterLink className="buyer-v2__button buyer-v2__button--primary" to={`/portal/orders/${encodeURIComponent(id)}`} navigate={navigate}>View order</RouterLink></StatePanel></div>;
+    return <div className="buyer-v2__container buyer-v2__page"><StatePanel tone="error" eyebrow="Payment not completed" title="Your account was not charged successfully." body="No access was granted. Return to the order to review the payment status and available recovery action."><RouterLink className="buyer-v2__button buyer-v2__button--primary" to={`${ORDERS_ROOT}/${encodeURIComponent(id)}`} navigate={navigate}>View order</RouterLink></StatePanel></div>;
   }
 
   if (!ready) {
-    return <div className="buyer-v2__container buyer-v2__page"><StatePanel eyebrow="Confirming payment" title="We’re confirming your order…" body="Do not submit another order. This page reads the authoritative payment and access status and updates automatically."><span className="buyer-v2__spinner" aria-hidden="true" /><RouterLink className="buyer-v2__button buyer-v2__button--secondary" to={`/portal/orders/${encodeURIComponent(id)}`} navigate={navigate}>View order status</RouterLink></StatePanel></div>;
+    return <div className="buyer-v2__container buyer-v2__page"><StatePanel eyebrow="Confirming payment" title="We’re confirming your order…" body="Do not submit another order. This page reads the authoritative payment and access status and updates automatically."><span className="buyer-v2__spinner" aria-hidden="true" /><RouterLink className="buyer-v2__button buyer-v2__button--secondary" to={`${ORDERS_ROOT}/${encodeURIComponent(id)}`} navigate={navigate}>View order status</RouterLink></StatePanel></div>;
   }
 
   return (
@@ -724,7 +705,7 @@ function LibraryPage({ search, request, navigate }) {
   usePageTitle("Your Agent library");
 
   function setFilter(next) {
-    navigateTo(navigate, next === "all" ? "/portal/library" : `/portal/library?status=${next}`);
+    navigateTo(navigate, next === "all" ? LIBRARY_ROOT : `${LIBRARY_ROOT}?status=${next}`);
   }
 
   return (
@@ -732,9 +713,9 @@ function LibraryPage({ search, request, navigate }) {
       <header className="buyer-v2__page-heading"><span className="buyer-v2__eyebrow">Your library</span><h1>Agents your account can use.</h1><p>Access, release policy and remaining delivery units stay visible here.</p></header>
       <div className="buyer-v2__filters" role="group" aria-label="Library filter">{[["all", "All"], ["active", "Active"], ["past", "Past access"]].map(([value, label]) => <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>)}</div>
       {resource.status === "loading" ? <CardSkeleton count={2} label="Loading your library" /> : null}
-      {resource.status === "error" ? <RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} returnTo="/portal/library" /> : null}
+      {resource.status === "error" ? <RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} returnTo={LIBRARY_ROOT} /> : null}
       {resource.status === "ready" && resource.items.length ? <section className="buyer-v2__list-grid" aria-label="Your entitlements">{resource.items.map((item) => <EntitlementCard key={entitlementIdFor(item)} entitlement={item} navigate={navigate} />)}</section> : null}
-      {resource.status === "ready" && !resource.items.length ? <EmptyState title={filter === "all" ? "Your library is empty" : "No access in this view"} body={filter === "all" ? "Explore Creator Agents and choose a method that fits your task." : "Choose another filter or explore available Creator Agents."} action={<RouterLink className="buyer-v2__button buyer-v2__button--primary" to="/agents" navigate={navigate}>Explore Agents</RouterLink>} /> : null}
+      {resource.status === "ready" && !resource.items.length ? <EmptyState title={filter === "all" ? "Your library is empty" : "No access in this view"} body={filter === "all" ? "Explore products and choose a method that fits your task." : "Choose another filter or explore available products."} action={<RouterLink className="buyer-v2__button buyer-v2__button--primary" to={EXPLORE_ROOT} navigate={navigate}>Explore products</RouterLink>} /> : null}
       {resource.nextCursor ? <LoadMore resource={resource} /> : null}
     </div>
   );
@@ -749,19 +730,9 @@ function EntitlementCard({ entitlement, navigate }) {
       <div className="buyer-v2__card-topline"><StatusChip status={status} label={entitlementStatusLabel(status)} /><span>{creatorName(entitlement.creator || product)}</span></div>
       <h2>{productName(product)}</h2>
       <p>{entitlementSummary(entitlement)}</p>
-      <div className="buyer-v2__card-footer"><span>{unitsLabel(entitlement)}</span><RouterLink className="buyer-v2__button buyer-v2__button--secondary" to={`/portal/library/${encodeURIComponent(id)}`} navigate={navigate}>View access</RouterLink></div>
+      <div className="buyer-v2__card-footer"><span>{unitsLabel(entitlement)}</span><RouterLink className="buyer-v2__button buyer-v2__button--secondary" to={`${LIBRARY_ROOT}/${encodeURIComponent(id)}`} navigate={navigate}>View access</RouterLink></div>
     </article>
   );
-}
-
-function EntitlementSlugPage({ creatorSlug, productSlug, request, navigate, session, downloadUrl }) {
-  const endpoint = `/v1/library/${encodeURIComponent(creatorSlug)}/${encodeURIComponent(productSlug)}`;
-  const resource = useRemote(async (signal) => unwrap(await callRequest(request, endpoint, { signal }), ["entitlement"]), endpoint);
-  useUnauthorized(resource.error, session);
-  if (resource.status === "loading") return <div className="buyer-v2__container buyer-v2__page"><DetailSkeleton /></div>;
-  if (resource.status === "error") return <div className="buyer-v2__container buyer-v2__page"><RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} returnTo={`/library/${encodeURIComponent(creatorSlug)}/${encodeURIComponent(productSlug)}`} /></div>;
-  const entitlementId = entitlementIdFor(resource.data);
-  return <EntitlementPage id={entitlementId} request={request} navigate={navigate} session={session} downloadUrl={downloadUrl} />;
 }
 
 function EntitlementPage({ id, request, navigate, session, downloadUrl }) {
@@ -770,7 +741,7 @@ function EntitlementPage({ id, request, navigate, session, downloadUrl }) {
   usePageTitle(resource.data ? `${productName(resource.data.product || resource.data)} access` : "Access details");
   useUnauthorized(resource.error, session);
   if (resource.status === "loading") return <div className="buyer-v2__container buyer-v2__page"><DetailSkeleton /></div>;
-  if (resource.status === "error") return <div className="buyer-v2__container buyer-v2__page"><RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} returnTo={`/portal/library/${id}`} /></div>;
+  if (resource.status === "error") return <div className="buyer-v2__container buyer-v2__page"><RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} returnTo={`${LIBRARY_ROOT}/${id}`} /></div>;
 
   const entitlement = resource.data;
   const product = entitlement.product || entitlement.product_snapshot || entitlement;
@@ -780,7 +751,7 @@ function EntitlementPage({ id, request, navigate, session, downloadUrl }) {
   const canOpen = ["active", "reserved"].includes(status);
   return (
     <div className="buyer-v2__container buyer-v2__page">
-      <RouterLink className="buyer-v2__back-link" to="/portal/library" navigate={navigate}>← Back to Library</RouterLink>
+      <RouterLink className="buyer-v2__back-link" to={LIBRARY_ROOT} navigate={navigate}>← Back to Library</RouterLink>
       <header className="buyer-v2__detail-heading"><div><span className="buyer-v2__eyebrow">Access details</span><h1>{productName(product)}</h1><p>by {creatorName(entitlement.creator || product)}</p></div><StatusChip status={status} label={entitlementStatusLabel(status)} /></header>
       <div className="buyer-v2__detail-grid">
         <section className="buyer-v2__detail-card"><h2>Your entitlement</h2><DefinitionList rows={[
@@ -794,7 +765,7 @@ function EntitlementPage({ id, request, navigate, session, downloadUrl }) {
           ["Expires", entitlement.expires_at ? dateTime(entitlement.expires_at) : "No scheduled expiry"],
           ["Refund / cancellation", entitlement.refund_status || entitlement.cancellation_status || (status === "revoked" ? "Access revoked" : "None")],
           ["Support reference", entitlement.entitlement_id || entitlement.id]
-        ]} />{orderId ? <RouterLink className="buyer-v2__text-link" to={`/portal/orders/${encodeURIComponent(orderId)}`} navigate={navigate}>View originating order →</RouterLink> : null}</section>
+        ]} />{orderId ? <RouterLink className="buyer-v2__text-link" to={`${ORDERS_ROOT}/${encodeURIComponent(orderId)}`} navigate={navigate}>View originating order →</RouterLink> : null}</section>
         <aside className="buyer-v2__activation-card"><span className="buyer-v2__eyebrow">Desktop activation</span><h2>{canOpen ? "Continue in your Workspace." : entitlementRecoveryTitle(status)}</h2><p>{entitlementRecoveryCopy(status)}</p>{canOpen ? <a className="buyer-v2__button buyer-v2__button--primary" href={desktopUrl(entitlement, product)} onClick={() => trackPortalEvent(request, "desktop_open_clicked", productTelemetry(product))}>Open Hatch Desktop</a> : null}<a className="buyer-v2__secondary-download" href={downloadUrl} target="_blank" rel="noreferrer" onClick={() => trackPortalEvent(request, "desktop_download_clicked", productTelemetry(product))}>Download Hatch Desktop</a></aside>
       </div>
       <section className="buyer-v2__timeline-section"><div><span className="buyer-v2__eyebrow">Delivery history</span><h2>Activity, without your private content.</h2><p>Only delivery metadata and artifact type appear on Web. Workspace paths, source files and conversations stay private.</p></div>{deliveries.length ? <Timeline entries={deliveries.map(deliveryTimelineEntry)} /> : <EmptyState compact title="No deliveries yet" body="Open Hatch Desktop when you are ready to use this access." />}</section>
@@ -818,11 +789,11 @@ function OrdersPage({ search, request, navigate, session }) {
   return (
     <div className="buyer-v2__container buyer-v2__page">
       <header className="buyer-v2__page-heading"><span className="buyer-v2__eyebrow">Order history</span><h1>Your complete receipts.</h1><p>Amounts, payment, access, delivery and refund remain separate and traceable.</p></header>
-      <label className="buyer-v2__select-label">Order status<select value={filter} onChange={(event) => navigateTo(navigate, event.target.value === "all" ? "/portal/orders" : `/portal/orders?status=${encodeURIComponent(event.target.value)}`)}><option value="all">All orders</option><option value="fulfilled">Fulfilled</option><option value="pending">Pending</option><option value="refunded">Refunded</option></select></label>
+      <label className="buyer-v2__select-label">Order status<select value={filter} onChange={(event) => navigateTo(navigate, event.target.value === "all" ? ORDERS_ROOT : `${ORDERS_ROOT}?status=${encodeURIComponent(event.target.value)}`)}><option value="all">All orders</option><option value="fulfilled">Fulfilled</option><option value="pending">Pending</option><option value="refunded">Refunded</option></select></label>
       {resource.status === "loading" ? <ListSkeleton label="Loading orders" /> : null}
-      {resource.status === "error" ? <RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} returnTo="/portal/orders" /> : null}
+      {resource.status === "error" ? <RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} returnTo={ORDERS_ROOT} /> : null}
       {resource.status === "ready" && resource.items.length ? <section className="buyer-v2__order-list" aria-label="Orders">{resource.items.map((order) => <OrderRow key={orderIdFor(order)} order={order} navigate={navigate} />)}</section> : null}
-      {resource.status === "ready" && !resource.items.length ? <EmptyState title="No orders in this view" body="Orders appear after you confirm a free or paid offer." action={<RouterLink className="buyer-v2__button buyer-v2__button--primary" to="/agents" navigate={navigate}>Explore Agents</RouterLink>} /> : null}
+      {resource.status === "ready" && !resource.items.length ? <EmptyState title="No orders in this view" body="Orders appear after you confirm a free offer." action={<RouterLink className="buyer-v2__button buyer-v2__button--primary" to={EXPLORE_ROOT} navigate={navigate}>Explore products</RouterLink>} /> : null}
       {resource.nextCursor ? <LoadMore resource={resource} /> : null}
     </div>
   );
@@ -862,7 +833,7 @@ function OrderPage({ id, request, navigate, session }) {
   }
 
   if (resource.status === "loading") return <div className="buyer-v2__container buyer-v2__page"><DetailSkeleton /></div>;
-  if (resource.status === "error") return <div className="buyer-v2__container buyer-v2__page"><RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} returnTo={`/portal/orders/${id}`} /></div>;
+  if (resource.status === "error") return <div className="buyer-v2__container buyer-v2__page"><RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} returnTo={`${ORDERS_ROOT}/${id}`} /></div>;
   const order = resource.data;
   const product = order.product_snapshot || order.product || order;
   const entitlementId = order.entitlement_id || order.entitlement?.entitlement_id || order.entitlement?.id;
@@ -892,7 +863,7 @@ function OrderPage({ id, request, navigate, session }) {
           ["Access", entitlementStatusLabel(accessStatus(order.entitlement || { status: order.entitlement_status }))],
           ["Offer", order.offer_snapshot ? `${offerLabel(order.offer_snapshot)} · ${offerUnitLabel(order.offer_snapshot)}` : order.offer_label || "Purchase-time offer snapshot"],
           ["Release", order.release_snapshot?.label || order.release_snapshot?.release_id || order.release_label || order.release_id || "Purchase-time release"]
-        ]} />{entitlementId ? <RouterLink className="buyer-v2__text-link" to={`/portal/library/${encodeURIComponent(entitlementId)}`} navigate={navigate}>View access details →</RouterLink> : null}</section>
+        ]} />{entitlementId ? <RouterLink className="buyer-v2__text-link" to={`${LIBRARY_ROOT}/${encodeURIComponent(entitlementId)}`} navigate={navigate}>View access details →</RouterLink> : null}</section>
         <aside className="buyer-v2__order-actions"><span className="buyer-v2__eyebrow">Order actions</span><h2>{orderActionTitle(order)}</h2><p>{orderActionCopy(order)}</p>{successReady(order, order.entitlement) ? <RouterLink className="buyer-v2__button buyer-v2__button--primary" to={`/orders/${encodeURIComponent(orderReference(order))}/success`} navigate={navigate}>Open activation steps</RouterLink> : null}{canReverseOrder ? <button className="buyer-v2__button buyer-v2__button--secondary" type="button" disabled={refundState.status === "pending"} onClick={requestRefund}>{refundState.status === "pending" ? "Submitting request…" : reversalLabel}</button> : null}{refundState.error ? <InlineError error={refundState.error} /> : null}{refundState.status === "succeeded" ? <div className="buyer-v2__inline-notice" role="status">{reversalSuccess}</div> : null}</aside>
       </div>
       <section className="buyer-v2__timeline-section"><div><span className="buyer-v2__eyebrow">Commerce timeline</span><h2>What happened, in order.</h2></div><Timeline entries={entries} /></section>
@@ -902,7 +873,7 @@ function OrderPage({ id, request, navigate, session }) {
 
 function NotFoundPage({ navigate }) {
   usePageTitle("Page not found");
-  return <div className="buyer-v2__container buyer-v2__page"><StatePanel eyebrow="404" title="This page is not available." body="The link may be incomplete, or this public product may have been removed."><RouterLink className="buyer-v2__button buyer-v2__button--primary" to="/agents" navigate={navigate}>Browse Creator Agents</RouterLink></StatePanel></div>;
+  return <div className="buyer-v2__container buyer-v2__page"><StatePanel eyebrow="404" title="This page is not available." body="The link may be incomplete, or this public product may have been removed."><RouterLink className="buyer-v2__button buyer-v2__button--primary" to={EXPLORE_ROOT} navigate={navigate}>Explore products</RouterLink></StatePanel></div>;
 }
 
 function RedirectPage({ to, navigate }) {
@@ -941,8 +912,8 @@ function EmptyState({ title, body, action, compact = false }) {
 function RouteError({ error, onRetry, navigate, returnTo }) {
   const status = error?.status;
   if (status === 401) return <StatePanel tone="error" eyebrow="Session expired" title="Sign in to continue." body="Your task is safe. After signing in, you’ll return to this page."><RouterLink className="buyer-v2__button buyer-v2__button--primary" to={`/sign-in?returnTo=${encodeURIComponent(safeReturnTo(returnTo))}`} navigate={navigate}>Sign in</RouterLink></StatePanel>;
-  if (status === 403) return <StatePanel tone="error" eyebrow="Access denied" title="This account cannot view that resource." body="Return to a page available to this account."><RouterLink className="buyer-v2__button buyer-v2__button--primary" to="/agents" navigate={navigate}>Browse Agents</RouterLink></StatePanel>;
-  if (status === 404) return <StatePanel tone="error" eyebrow="Not found" title="That resource is no longer available." body="A previous receipt may still be available from your Orders."><RouterLink className="buyer-v2__button buyer-v2__button--primary" to="/portal/orders" navigate={navigate}>View Orders</RouterLink></StatePanel>;
+  if (status === 403) return <StatePanel tone="error" eyebrow="Access denied" title="This account cannot view that resource." body="Return to a page available to this account."><RouterLink className="buyer-v2__button buyer-v2__button--primary" to={EXPLORE_ROOT} navigate={navigate}>Explore products</RouterLink></StatePanel>;
+  if (status === 404) return <StatePanel tone="error" eyebrow="Not found" title="That resource is no longer available." body="A previous receipt may still be available from your Orders."><RouterLink className="buyer-v2__button buyer-v2__button--primary" to={ORDERS_ROOT} navigate={navigate}>View Orders</RouterLink></StatePanel>;
   if (status === 409) return <StatePanel tone="error" eyebrow="Details changed" title="Review the latest version before continuing." body={friendlyError(error)}><button type="button" className="buyer-v2__button buyer-v2__button--primary" onClick={onRetry}>Refresh details</button></StatePanel>;
   return <StatePanel tone="error" eyebrow="Couldn’t load this page" title="Your task is still here." body={friendlyError(error)}><button type="button" className="buyer-v2__button buyer-v2__button--primary" onClick={onRetry}>Try again</button></StatePanel>;
 }
@@ -1135,6 +1106,7 @@ function safeReturnTo(value) {
   const allowed = pathname === "/"
     || pathname === EXPLORE_ROOT
     || pathname.startsWith("/creators/")
+    || pathname.startsWith("/products/")
     || pathname.startsWith("/library")
     || pathname.startsWith("/orders")
     || pathname.startsWith("/checkout/")
@@ -1157,25 +1129,6 @@ function navigateTo(navigate, to, options) {
 
 function canonicalWebPath(value) {
   if (typeof value !== "string" || !value.startsWith("/")) return value;
-  const hashIndex = value.indexOf("#");
-  const hash = hashIndex >= 0 ? value.slice(hashIndex) : "";
-  const withoutHash = hashIndex >= 0 ? value.slice(0, hashIndex) : value;
-  const queryIndex = withoutHash.indexOf("?");
-  const pathname = queryIndex >= 0 ? withoutHash.slice(0, queryIndex) : withoutHash;
-  const suffix = queryIndex >= 0 ? withoutHash.slice(queryIndex) : "";
-  const segments = pathname.split("/").filter(Boolean);
-  const encodedSegments = (items) => items.map((segment) => encodeURIComponent(safeDecode(segment))).join("/");
-  if (segments[0] === "agents") {
-    return segments.length >= 3
-      ? `/creators/${encodedSegments(segments.slice(1))}${suffix}${hash}`
-      : `${EXPLORE_ROOT}${suffix}${hash}`;
-  }
-  if (segments[0] !== "portal") return value;
-  if (segments[1] === "creator") return `/studio${segments.slice(2).length ? `/${encodedSegments(segments.slice(2))}` : ""}${suffix}${hash}`;
-  if (segments[1] === "library") return `/library${segments.slice(2).length ? `/${encodedSegments(segments.slice(2))}` : ""}${suffix}${hash}`;
-  if (segments[1] === "orders") return `/orders${segments.slice(2).length ? `/${encodedSegments(segments.slice(2))}` : ""}${suffix}${hash}`;
-  if (segments[1] === "checkout") return `/checkout${segments.slice(2).length ? `/${encodedSegments(segments.slice(2))}` : ""}${suffix}${hash}`;
-  if (segments[1] === "settings") return `${ACCOUNT_ROOT}${suffix}${hash}`;
   return value;
 }
 
@@ -1229,25 +1182,21 @@ function offerId(value) { return value?.offer_id || value?.id || value?.revision
 function productName(value) { return value?.product_name || value?.name || value?.product?.name || "Creator Agent"; }
 function productPromise(value) { return value?.promise || value?.product_description || value?.description || value?.product?.promise || value?.product?.description || "A practical Creator method for work in your own Workspace."; }
 function creatorName(value) { return value?.creator_name || value?.creator_display_name || value?.display_name || value?.name || value?.creator?.display_name || value?.creator?.name || value?.creator?.handle || "Hatch Creator"; }
-function creatorId(value) { return value?.creator_id || value?.creator_slug || value?.creator?.id || value?.creator?.slug || ""; }
-function entitlementIdFor(value) { return value?.entitlement_id || value?.id || `${value?.creator_id || "creator"}:${value?.agent_id || productId(value)}`; }
+function creatorId(value) { return value?.creator_id || value?.creator?.id || ""; }
+function entitlementIdFor(value) { return value?.entitlement_id || value?.id || ""; }
 function orderIdFor(value) { return value?.order_id || value?.id; }
 
 function productPath(value) {
-  const creator = value?.creator_slug || value?.creator?.slug || value?.creator_id || value?.creator?.id || "creator";
-  const product = value?.product_slug || value?.slug || productId(value) || value?.agent_id || "agent";
-  return `/creators/${encodeURIComponent(creator)}/${encodeURIComponent(product)}`;
+  const product = productId(value);
+  return product ? `/products/${encodeURIComponent(product)}` : EXPLORE_ROOT;
 }
 
 function libraryPathFor(product, entitlement) {
-  const creator = product?.creator_slug || product?.creator?.slug || entitlement?.creator_slug || entitlement?.creator?.slug || product?.creator_id || entitlement?.creator_id;
-  const slug = product?.product_slug || product?.slug || productId(product) || entitlement?.product_slug || entitlement?.product?.slug;
-  if (creator && slug) return `/library/${encodeURIComponent(creator)}/${encodeURIComponent(slug)}`;
   const id = entitlement?.entitlement_id || entitlement?.id;
   return id ? `/library/${encodeURIComponent(id)}` : LIBRARY_ROOT;
 }
 
-function productKey(value) { return `${value?.creator_id || value?.creator_slug || value?.creator?.id || "creator"}:${productId(value) || value?.agent_id || value?.product_slug || "product"}`; }
+function productKey(value) { return productId(value) || "product"; }
 
 function offerAmount(offer) {
   if (!offer) return null;
@@ -1391,10 +1340,12 @@ function entitlementRecoveryCopy(status) {
 function desktopUrl(entitlement, product) {
   const params = new URLSearchParams();
   const entitlementId = entitlement?.entitlement_id || entitlement?.id;
-  if (entitlementId) params.set("entitlement", entitlementId);
+  if (entitlementId) params.set("entitlement_id", entitlementId);
   const id = productId(product);
-  if (id) params.set("product", id);
-  return `hatch://agents/open${params.toString() ? `?${params}` : ""}`;
+  if (id) params.set("product_id", id);
+  const creator = creatorId(product) || entitlement?.creator_id;
+  if (creator) params.set("creator_id", creator);
+  return `hatch://products/open${params.toString() ? `?${params}` : ""}`;
 }
 
 function refundCopy(product) {

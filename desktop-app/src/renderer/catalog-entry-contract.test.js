@@ -2,13 +2,11 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 describe("Desktop buyer catalog entrypoint", () => {
-  it("redirects the legacy /agents allowlist path to the public Explore catalog", async () => {
+  it("uses the canonical public Explore entrypoint without legacy aliases", async () => {
     const caddyfile = await readFile(new URL("../../../Caddyfile", import.meta.url), "utf8");
-    const redirect = "redir @legacy_agents /explore 308";
-
-    expect(caddyfile).toContain("@legacy_agents path /agents /agents/*");
-    expect(caddyfile).toContain(redirect);
-    expect(caddyfile.indexOf(redirect)).toBeLessThan(caddyfile.indexOf("handle /portal*"));
-    expect(caddyfile.indexOf(redirect)).toBeLessThan(caddyfile.indexOf("handle {"));
+    expect(caddyfile).toContain("handle /assets/*");
+    expect(caddyfile).toContain("handle {");
+    expect(caddyfile).not.toContain("/agents");
+    expect(caddyfile).not.toContain("/portal");
   });
 });
