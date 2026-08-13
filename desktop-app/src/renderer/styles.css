@@ -1675,6 +1675,7 @@ button.composer-control:focus-visible {
 
 .permission-composer-control {
   max-width: min(180px, 42cqw);
+  min-width: min(158px, 42cqw);
   position: relative;
   flex-shrink: 0;
 }
@@ -1698,8 +1699,9 @@ button.composer-control:focus-visible {
   width: 13px !important;
 }
 
-.send-button {
-  border-radius: 9px;
+.send-button,
+.stop-button {
+  border-radius: 50%;
   flex: 0 0 34px;
   height: 34px;
   min-height: 34px;
