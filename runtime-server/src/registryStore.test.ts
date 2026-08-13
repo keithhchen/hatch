@@ -72,6 +72,30 @@ test("Registry database timeout is bounded", () => {
   assert.throws(() => registryPublishTimeoutMs({ HATCH_REGISTRY_PUBLISH_TIMEOUT_MS: "99" }), /HATCH_REGISTRY_PUBLISH_TIMEOUT_MS/);
 });
 
+test("Registry control-plane connections accept canonical UUID tenant identities", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-registry-uuid-tenant-"));
+  const store = await RegistryStoreTs.open({
+    corpusRoot: path.join(root, "corpora"),
+    statePath: path.join(root, "registry.json"),
+    environment: {},
+  });
+  try {
+    const connection = await store.upsertCreatorToolConnection({
+      tenantId: "32ffccf7-893d-4ef3-bdbc-c82fc8fcb90b",
+      connectionId: "seth-alpha-lite-search",
+      kind: "http",
+      secretRef: null,
+      secret: "test-secret",
+      config: { url: "https://tools.example.test/search" },
+      status: "active",
+    });
+    assert.equal(connection.tenant_id, "32ffccf7-893d-4ef3-bdbc-c82fc8fcb90b");
+  } finally {
+    await store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("staged releases stay immutable until CAS activation and Commerce grants preserve the purchased digest", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-registry-deployment-"));
   const corpusRoot = path.join(root, "corpora");

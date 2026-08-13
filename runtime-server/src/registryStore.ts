@@ -1681,7 +1681,9 @@ function toolBindingKey(tenantId: string, agentId: string, toolId: string): stri
 }
 
 function validateIdentifier(value: string, field: string): void {
-  if (!/^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/.test(value)) throw new Error(`${field} must be a valid identifier`);
+  if (!isUuidV4(value) && !/^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/.test(value)) {
+    throw new Error(`${field} must be a valid identifier`);
+  }
 }
 
 function validateToolIdentifier(value: string, field: string): void {
