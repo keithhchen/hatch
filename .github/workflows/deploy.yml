@@ -154,6 +154,22 @@ jobs:
             echo "HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN must be 64 lowercase hexadecimal characters" >&2
             exit 1
           }
+      - name: Ensure Runtime-to-Commerce service token
+        run: |
+          set -euo pipefail
+          cd /opt/hatch
+          test -f .env
+          token="$(sed -n 's/^HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN=//p' .env | tail -n 1)"
+          if test -z "$token"; then
+            token="$(openssl rand -hex 32)"
+            sed -i '/^HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN=/d' .env
+            printf 'HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN=%s\n' "$token" >> .env
+            chmod 600 .env
+          fi
+          printf '%s' "$token" | grep -Eq '^[a-f0-9]{64}$' || {
+            echo "HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN must be 64 lowercase hexadecimal characters" >&2
+            exit 1
+          }
       - name: Ensure shared Postgres is ready
         run: |
           set -euo pipefail
