@@ -138,6 +138,22 @@ jobs:
           sed -i '/^DEEPSEEK_API_KEY=/d' /opt/hatch/.env
           printf 'DEEPSEEK_API_KEY=%s\n' "$DEEPSEEK_API_KEY" >> /opt/hatch/.env
           chmod 600 /opt/hatch/.env
+      - name: Ensure deployment service token
+        run: |
+          set -euo pipefail
+          cd /opt/hatch
+          test -f .env
+          token="$(sed -n 's/^HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN=//p' .env | tail -n 1)"
+          if test -z "$token"; then
+            token="$(openssl rand -hex 32)"
+            sed -i '/^HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN=/d' .env
+            printf 'HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN=%s\n' "$token" >> .env
+            chmod 600 .env
+          fi
+          printf '%s' "$token" | grep -Eq '^[a-f0-9]{64}$' || {
+            echo "HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN must be 64 lowercase hexadecimal characters" >&2
+            exit 1
+          }
       - name: Ensure shared Postgres is ready
         run: |
           set -euo pipefail

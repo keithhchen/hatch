@@ -24,6 +24,9 @@ or separate production Runtime exists. The server uses two Compose projects:
    It must also contain `HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN`,
    `HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN`,
    and `HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN`.
+   CD creates `HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN` once when it is
+   missing, stores it in the server-only `.env` with mode 600, and never
+   prints it. Later deploys reuse the same value.
    The commerce token is shared only by Dashboard and Registry: checkout writes
    the order ledger first, then this authenticated service boundary creates the
    entitlement. A user bearer cannot grant Agent access directly.
