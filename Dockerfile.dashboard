@@ -17,6 +17,9 @@ COPY creator-dashboard/package.json creator-dashboard/package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=build /workspace/creator-dashboard/server.mjs ./server.mjs
 COPY --from=build /workspace/creator-dashboard/portalState.mjs ./portalState.mjs
+COPY --from=build /workspace/creator-dashboard/providerAdapters.mjs ./providerAdapters.mjs
+COPY --from=build /workspace/creator-dashboard/publicMetadata.mjs ./publicMetadata.mjs
+COPY --from=build /workspace/creator-dashboard/telemetry.mjs ./telemetry.mjs
 COPY --from=build /workspace/creator-dashboard/src ./src
 COPY --from=build /workspace/creator-dashboard/dist ./dist
 COPY --from=build /workspace/creator-dashboard/public ./public

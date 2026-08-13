@@ -787,7 +787,241 @@ export class RegistryStoreTs {
   }
 
   private async ensureSchema(): Promise<void> {
-    await this.pool!.query(`
+    await this.migrateLegacyIdentitySchema();
+    await this.ensureCurrentSchema();
+  }
+
+  /**
+   * Perform the one-way UUID cutover for the original text-key Registry
+   * tables. This runs before the typed schema is created, in the same
+   * transaction as the data copy, so a failed deployment leaves the old
+   * database untouched and a successful deployment leaves no slug authority
+   * behind. Unknown real records receive a fresh UUID v4; the canonical
+   * shipped Seth/Maya records retain their published UUIDs.
+   */
+  private async migrateLegacyIdentitySchema(): Promise<void> {
+    const pool = this.pool!;
+    const columns = await pool.query(`
+      SELECT table_name, column_name, data_type
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name IN ('agent_corpora', 'agent_access', 'agent_tool_bindings')
+    `);
+    const identityColumns = new Set(["creator_id", "agent_id", "product_id"]);
+    const legacy = columns.rows.some((row) =>
+      identityColumns.has(String(row.column_name)) && String(row.data_type) !== "uuid"
+    );
+    if (!legacy) return;
+
+    const tableNames = {
+      corpora: "agent_corpora",
+      access: "agent_access",
+      bindings: "agent_tool_bindings",
+    } as const;
+    const suffix = `legacy_uuid_cutover_${Date.now()}_${randomUUID().replaceAll("-", "")}`;
+    const quoted = (value: string) => `"${value.replaceAll('"', '""')}"`;
+    const existing = await pool.query(`
+      SELECT tablename
+      FROM pg_catalog.pg_tables
+      WHERE schemaname = current_schema() AND tablename = ANY($1::text[])
+    `, [Object.values(tableNames)]);
+    const existingNames = new Set(existing.rows.map((row) => String(row.tablename)));
+    const legacyTables = new Map<keyof typeof tableNames, string>();
+    for (const [kind, table] of Object.entries(tableNames) as Array<[keyof typeof tableNames, string]>) {
+      if (existingNames.has(table)) {
+        legacyTables.set(kind, `${table}_${suffix}`);
+      }
+    }
+
+    const knownCreators = new Map([
+      ["seth", "32ffccf7-893d-4ef3-bdbc-c82fc8fcb90b"],
+      ["maya-chen", "6f6a3d24-48af-4f27-9c50-0d4f7e4e8a21"],
+    ]);
+    const knownProducts = new Map([
+      ["seth\u0000alpha-lite", "026651b1-8a8a-4484-aac5-ace6bd662157"],
+      ["maya-chen\u0000signal-resume-review", "f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42"],
+      ["maya-chen\u0000maya-chen-resume-review", "f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42"],
+    ]);
+    const creatorIds = new Map<string, string>();
+    const productIds = new Map<string, string>();
+    const creatorIdFor = (value: unknown): string => {
+      const legacyId = String(value ?? "").trim();
+      if (!legacyId) throw new Error("Registry UUID cutover found an empty creator identity");
+      const existingId = creatorIds.get(legacyId);
+      if (existingId) return existingId;
+      const id = knownCreators.get(legacyId) ?? (isUuidV4(legacyId) ? legacyId.toLowerCase() : randomUUID());
+      creatorIds.set(legacyId, id);
+      return id;
+    };
+    const productIdFor = (creatorLegacy: unknown, value: unknown): string => {
+      const creatorKey = String(creatorLegacy ?? "").trim();
+      const productKey = String(value ?? "").trim();
+      if (!productKey) throw new Error("Registry UUID cutover found an empty product identity");
+      const composite = `${creatorKey}\u0000${productKey}`;
+      const existingId = productIds.get(composite);
+      if (existingId) return existingId;
+      const id = knownProducts.get(composite) ?? (isUuidV4(productKey) ? productKey.toLowerCase() : randomUUID());
+      productIds.set(composite, id);
+      return id;
+    };
+    const text = (value: unknown, fallback: string): string => {
+      const normalized = String(value ?? "").trim();
+      return normalized || fallback;
+    };
+    const timestamp = (value: unknown): string => {
+      const parsed = new Date(String(value ?? ""));
+      return Number.isNaN(parsed.valueOf()) ? new Date().toISOString() : parsed.toISOString();
+    };
+
+    const client = typeof (pool as any).connect === "function" ? await (pool as any).connect() : undefined;
+    const executor = client ?? pool;
+    try {
+      if (client) await client.query("BEGIN");
+      for (const table of Object.values(tableNames)) {
+        if (existingNames.has(table)) {
+          await executor.query(`ALTER TABLE ${quoted(table)} RENAME TO ${quoted(`${table}_${suffix}`)}`);
+        }
+      }
+      await this.ensureCurrentSchema(executor);
+
+      const oldRows = async (kind: keyof typeof tableNames): Promise<Record<string, any>[]> => {
+        const table = legacyTables.get(kind);
+        if (!table) return [];
+        return (await executor.query(`SELECT * FROM ${quoted(table)}`) as { rows: Record<string, any>[] }).rows;
+      };
+      const corpora = await oldRows("corpora");
+      const access = await oldRows("access");
+      const bindings = await oldRows("bindings");
+      const legacyTenants = new Set<string>([
+        ...corpora.map((row) => String(row.creator_id ?? "").trim()).filter(Boolean),
+        ...access.map((row) => String(row.creator_id ?? "").trim()).filter(Boolean),
+        ...bindings.map((row) => String(row.tenant_id ?? "").trim()).filter(Boolean),
+      ]);
+      for (const legacyTenant of legacyTenants) {
+        await executor.query(
+          "UPDATE tool_connections SET tenant_id=$1 WHERE tenant_id=$2",
+          [creatorIdFor(legacyTenant), legacyTenant],
+        );
+      }
+      const products = new Set<string>();
+      const ensureProduct = async (creatorLegacy: unknown, productLegacy: unknown, row: Record<string, any>): Promise<{ creatorId: string; productId: string }> => {
+        const creatorId = creatorIdFor(creatorLegacy);
+        const productId = productIdFor(creatorLegacy, productLegacy);
+        const productKey = `${creatorId}\u0000${productId}`;
+        if (!products.has(productKey)) {
+          const creatorName = text(row.creator_name, String(creatorLegacy ?? "Creator"));
+          const productName = text(row.product_name, String(productLegacy ?? "Creator Agent"));
+          await executor.query(
+            `INSERT INTO creators (id, display_name) VALUES ($1,$2)
+             ON CONFLICT (id) DO UPDATE SET display_name=EXCLUDED.display_name`,
+            [creatorId, creatorName],
+          );
+          await executor.query(
+            `INSERT INTO products (id, creator_id, name, description, status) VALUES ($1,$2,$3,$4,$5)
+             ON CONFLICT (id) DO UPDATE SET creator_id=EXCLUDED.creator_id, name=EXCLUDED.name, description=EXCLUDED.description, status=EXCLUDED.status`,
+            [productId, creatorId, productName, text(row.product_description, productName), text(row.status, "published")],
+          );
+          products.add(productKey);
+        }
+        return { creatorId, productId };
+      };
+
+      for (const row of corpora) {
+        const creatorLegacy = row.creator_id;
+        const productLegacy = row.product_id ?? row.agent_id;
+        const { creatorId, productId } = await ensureProduct(creatorLegacy, productLegacy, row);
+        const productJson = row.product_json
+          ? String(row.product_json)
+          : JSON.stringify({ boundaries: [], presentation: {} });
+        await executor.query(
+          `INSERT INTO agent_corpora
+             (creator_id, agent_id, corpus_digest, creator_name, product_id, product_name,
+              product_description, product_json, knowledge_namespace, status, published_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+           ON CONFLICT (creator_id, agent_id) DO UPDATE SET
+             corpus_digest=EXCLUDED.corpus_digest, creator_name=EXCLUDED.creator_name,
+             product_id=EXCLUDED.product_id, product_name=EXCLUDED.product_name,
+             product_description=EXCLUDED.product_description, product_json=EXCLUDED.product_json,
+             knowledge_namespace=EXCLUDED.knowledge_namespace, status=EXCLUDED.status,
+             published_at=EXCLUDED.published_at`,
+          [
+            creatorId,
+            productId,
+            (() => {
+              const digest = String(row.corpus_digest ?? "").trim();
+              if (!digest) throw new Error(`Registry UUID cutover found an empty corpus digest for ${creatorLegacy}/${productLegacy}`);
+              return digest;
+            })(),
+            text(row.creator_name, String(creatorLegacy)),
+            productId,
+            text(row.product_name, String(productLegacy)),
+            row.product_description ?? null,
+            productJson,
+            `${creatorId}:${productId}`,
+            text(row.status, "published"),
+            timestamp(row.published_at),
+          ],
+        );
+      }
+      for (const row of access) {
+        const creatorLegacy = row.creator_id;
+        const productLegacy = row.product_id ?? row.agent_id;
+        const { creatorId, productId } = await ensureProduct(creatorLegacy, productLegacy, row);
+        await executor.query(
+          `INSERT INTO agent_access
+             (entitlement_id, user_id, creator_id, agent_id, product_id, order_id,
+              purchased_corpus_digest, version_policy, status, granted_at)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+           ON CONFLICT (user_id, creator_id, agent_id) DO UPDATE SET
+             product_id=EXCLUDED.product_id, order_id=COALESCE(agent_access.order_id, EXCLUDED.order_id),
+             purchased_corpus_digest=COALESCE(agent_access.purchased_corpus_digest, EXCLUDED.purchased_corpus_digest),
+             version_policy=EXCLUDED.version_policy, status=EXCLUDED.status`,
+          [
+            (() => {
+              const value = String(row.entitlement_id ?? "").trim();
+              if (!value) throw new Error("Registry UUID cutover found an empty entitlement identity");
+              return value;
+            })(),
+            (() => {
+              const value = String(row.user_id ?? "").trim();
+              if (!value) throw new Error("Registry UUID cutover found an empty user identity");
+              return value;
+            })(),
+            creatorId,
+            productId,
+            productId,
+            row.order_id ?? null,
+            row.purchased_corpus_digest ?? null,
+            row.version_policy === "track_current_compatible" ? "track_current_compatible" : "pinned",
+            row.status === "revoked" ? "revoked" : row.status === "disabled" ? "disabled" : "active",
+            timestamp(row.granted_at),
+          ],
+        );
+      }
+      for (const row of bindings) {
+        const creatorLegacy = row.tenant_id;
+        const productLegacy = row.agent_id;
+        const creatorId = creatorIdFor(creatorLegacy);
+        const productId = productIdFor(creatorLegacy, productLegacy);
+        await executor.query(
+          `INSERT INTO agent_tool_bindings (tenant_id, agent_id, tool_id, connection_id)
+           VALUES ($1,$2,$3,$4)
+           ON CONFLICT (tenant_id, agent_id, tool_id) DO UPDATE SET connection_id=EXCLUDED.connection_id`,
+          [creatorId, productId, String(row.tool_id), String(row.connection_id)],
+        );
+      }
+      for (const table of legacyTables.values()) await executor.query(`DROP TABLE IF EXISTS ${quoted(table)}`);
+      if (client) await client.query("COMMIT");
+    } catch (error) {
+      if (client) await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client?.release();
+    }
+  }
+
+  private async ensureCurrentSchema(executor: { query: (text: string) => Promise<unknown> } = this.pool!): Promise<void> {
+    await executor.query(`
       CREATE TABLE IF NOT EXISTS creators (
         id UUID PRIMARY KEY,
         display_name TEXT NOT NULL,
