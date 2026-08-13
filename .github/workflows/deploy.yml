@@ -286,7 +286,10 @@ jobs:
           registry_token="$(grep '^HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN=' /opt/hatch/.env | cut -d= -f2-)"
           compose=(docker compose --env-file /opt/hatch/.env --env-file /opt/hatch/.release.env -f "$GITHUB_WORKSPACE/compose.app.yml")
           registry_request_once() {
-            local method="$1" path="$2" token="$3" body="${4:-}" extra_headers="${5:-{}}"
+            # Keep the optional header argument empty when omitted; the Node
+            # helper supplies the JSON empty object.  `${5:-{}}` is parsed by
+            # bash with an extra closing brace and produces invalid JSON.
+            local method="$1" path="$2" token="$3" body="${4:-}" extra_headers="${5:-}"
             "${compose[@]}" exec -T \
               -e HATCH_REQUEST_METHOD="$method" \
               -e HATCH_REQUEST_PATH="$path" \
