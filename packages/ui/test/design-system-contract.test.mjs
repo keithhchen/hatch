@@ -108,6 +108,8 @@ test("Theme Lab edits the same token knobs used by the shared CSS", () => {
     "--hatch-font-display",
     "--hatch-font-ui",
     "--hatch-font-pill",
+    "--hatch-display-tracking",
+    "--hatch-display-leading",
     "--hatch-radius-control",
     "--hatch-radius-dialog",
     "--hatch-shadow-control",
@@ -120,6 +122,8 @@ test("Theme Lab edits the same token knobs used by the shared CSS", () => {
 
   assert.match(sharedCss, /background: var\(--hatch-atmosphere-warm-field\)/);
   assert.match(sharedCss, /background: var\(--hatch-atmosphere-cool-field\)/);
+  assert.match(sharedCss, /\.hatch-brand__wordmark[^}]*letter-spacing:\s*var\(--hatch-display-tracking\)/s);
+  assert.match(sharedCss, /\.hui-page-header h1[^}]*line-height:\s*var\(--hatch-display-leading\)/s);
   assert.doesNotMatch(sharedCss, /\.hui-drawer\.is-(?:right|bottom)[^{]*\{[^}]*border-radius:[^;]*\b0\b/s);
 });
 

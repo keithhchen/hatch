@@ -20,6 +20,9 @@
   --hatch-type-body: 14px;
   --hatch-type-emphasis: 16px;
   --hatch-type-title: 28px;
+  /* The first Hatch studies used a tighter, taller editorial cadence. */
+  --hatch-display-tracking: -.045em;
+  --hatch-display-leading: .92;
 
   --hatch-ui-paper: #f1ebe1;
   --hatch-ui-paper-deep: #e5dccf;
@@ -119,8 +122,8 @@
   font-family: var(--hatch-font-display);
   font-size: 28px;
   font-weight: 400;
-  letter-spacing: -0.02em;
-  line-height: 1;
+  letter-spacing: var(--hatch-display-tracking);
+  line-height: var(--hatch-display-leading);
 }
 
 .hatch-wordmark-period {
