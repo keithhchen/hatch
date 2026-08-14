@@ -104,10 +104,11 @@ function normalizeFactoryLlmPayload(payload: unknown): unknown {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
   const normalized = { ...(payload as Record<string, unknown>) };
   normalized.reasoning_effort = FACTORY_LLM_PROFILE.thinkingLevel;
-  // Every Factory node has exactly one valid handoff channel: its local
-  // submission tools. `auto` previously allowed a long prose-only response
-  // that the host necessarily discarded as stopped_without_finalize.
-  normalized.tool_choice = "required";
+  // Kimi K2.6 rejects `required` (and named tool choices) when thinking is
+  // enabled. Keep the provider-compatible `auto` choice and enforce the
+  // handoff contract in the host-owned submission FSM below: prose-only or
+  // incomplete turns are never accepted as Factory output.
+  normalized.tool_choice = "auto";
   delete normalized.thinking;
   delete normalized.temperature;
   delete normalized.top_p;
