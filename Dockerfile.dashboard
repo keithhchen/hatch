@@ -6,7 +6,11 @@ RUN npm ci
 COPY creator-dashboard ./
 COPY packages/commerce /workspace/packages/commerce
 COPY packages/brand /workspace/packages/brand
-RUN npm run build
+ARG RELEASE_TAG=dev
+# Keep the generated browser bundle tied to the release image. Without this
+# input BuildKit can reuse an older Vite dist layer even when the source tree
+# copied into the final image is current.
+RUN echo "Dashboard release ${RELEASE_TAG}" && npm run build
 
 FROM node:22-slim AS production
 
