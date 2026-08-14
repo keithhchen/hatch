@@ -60,6 +60,7 @@ test("Web and Storybook consume the shared package and its canonical tokens", ()
   assert.match(creatorPortal, /<Checkbox key=\{lossId\}/);
   assert.doesNotMatch(creatorPortal, /<(?:input|textarea|select)\b/);
   assert.doesNotMatch(creatorCss, /\.cpv2-factory-draft\s+(?:input|select|textarea)/);
+  assert.match(creatorCss, /\.cpv2-panel\s*\{[^}]*border:\s*0;[^}]*border-radius:\s*0;[^}]*background:\s*transparent;/s);
 });
 
 test("Theme Lab edits the same token knobs used by the shared CSS", () => {

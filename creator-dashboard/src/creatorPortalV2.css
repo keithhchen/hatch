@@ -82,7 +82,13 @@
 .cpv2-tabs button { min-height: 44px; flex: 0 0 auto; padding: 0 13px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--hatch-text-secondary, #74675e); font-size: 12px; }
 .cpv2-tabs button.is-active { border-color: var(--hatch-accent, #d65f3b); color: var(--hatch-ink, #201813); }
 .cpv2-detail-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, .75fr); gap: 17px; }
-.cpv2-panel { padding: clamp(25px, 3vw, 37px); }
+.cpv2-panel {
+  padding: clamp(25px, 3vw, 37px) clamp(4px, 1.4vw, 18px);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.62), inset 0 -1px 0 var(--hatch-border-subtle, rgba(54,41,31,.1));
+}
 .cpv2-panel > .cpv2-section-heading:first-child { margin-top: 0; }
 .cpv2-panel > p { color: var(--hatch-text-secondary, #74675e); line-height: 1.65; }
 .cpv2-workflow { padding: 35px; }
@@ -294,7 +300,8 @@
   .cpv2-page-header h1 { font-size: 43px; }
   .cpv2-page-header > button { justify-self: start; }
   .cpv2-detail-grid { grid-template-columns: minmax(0, 1fr); }
-  .cpv2-workflow, .cpv2-facts, .cpv2-panel { padding: 23px; }
+  .cpv2-workflow, .cpv2-facts { padding: 23px; }
+  .cpv2-panel { padding: 23px 4px; }
   .cpv2-workflow li { grid-template-columns: 28px minmax(0, 1fr); }
   .cpv2-workflow li button, .cpv2-workflow li a, .cpv2-workflow li small { grid-column: 2; justify-self: start; }
   .cpv2-fact-grid, .cpv2-form-grid, .cpv2-segment, .cpv2-filters, .cpv2-payout-stats { grid-template-columns: 1fr; }
