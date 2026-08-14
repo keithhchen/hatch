@@ -197,6 +197,35 @@ test("a legacy access row without an order is rebound to the next real Commerce 
   }
 });
 
+test("a Commerce grant repairs an access row that kept the old entitlement id for the same order", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-registry-stale-entitlement-"));
+  const statePath = path.join(root, "registry.json");
+  const creatorId = "11111111-1111-4111-8111-111111111111";
+  const productId = "22222222-2222-4222-8222-222222222222";
+  const userId = "33333333-3333-4333-8333-333333333333";
+  const orderId = "77777777-7777-4777-8777-777777777777";
+  const indexer = { stageAgentDocuments: async () => undefined, deleteAgentDocuments: async () => undefined };
+  const store = await RegistryStoreTs.open({
+    corpusRoot: path.join(root, "corpora"),
+    statePath,
+    indexer: indexer as never,
+    environment: {}
+  });
+  try {
+    const published = await store.publishAgentCorpusBundle(creatorId, productId, bundle());
+    const staleEntitlement = "44444444-4444-4444-8444-444444444444";
+    const authoritativeEntitlement = "66666666-6666-4666-8666-666666666666";
+    await store.grantAgentAccess(userId, creatorId, productId, orderId, staleEntitlement, published.corpus_digest, "pinned");
+    const repaired = await store.grantAgentAccess(userId, creatorId, productId, orderId, authoritativeEntitlement, published.corpus_digest, "pinned");
+    assert.equal(repaired.entitlement_id, authoritativeEntitlement);
+    assert.equal(repaired.order_id, orderId);
+    assert.deepEqual((await store.listAgentAccess(userId)).map((access) => access.entitlement_id), [authoritativeEntitlement]);
+  } finally {
+    await store.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("TypeScript Registry publishes a clean Corpus and indexes knowledge only", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-ts-registry-"));
   const statePath = path.join(root, "registry.json");

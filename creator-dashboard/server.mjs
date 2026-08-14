@@ -323,6 +323,59 @@ export async function createDashboardApp(options = {}) {
     });
   };
 
+  // Rebuild the Registry access projection from the authoritative Commerce
+  // entitlement. This is deliberately a narrow repair path: only the latest
+  // grant for each buyer/creator/product binding is replayed, and revoked
+  // Commerce entitlements are never granted again. It repairs deployments
+  // where the old Registry worker persisted an order with the wrong
+  // entitlement id while leaving Commerce correct.
+  const reconcileCommerceAccessProjections = async () => {
+    if (!registryAccessServiceToken) return { checked: 0, repaired: 0, errors: [] };
+    await ledger.refresh?.();
+    const latestByBinding = new Map();
+    for (const event of ledger.listEvents()) {
+      if (event.event_type !== "entitlement.granted") continue;
+      const agentId = event.agent_id ?? event.product_id;
+      if (!event.buyer_id || !event.creator_id || !agentId || !event.order_id || !event.entitlement_id) continue;
+      latestByBinding.set(`${event.buyer_id}:${event.creator_id}:${agentId}`, { ...event, agent_id: agentId });
+    }
+    const errors = [];
+    let repaired = 0;
+    for (const event of latestByBinding.values()) {
+      const entitlement = commerce.getEntitlement(event.entitlement_id);
+      if (!entitlement || ["revoked", "expired"].includes(entitlement.status)) continue;
+      try {
+        const grant = await registryRequest(
+          registryUrl,
+          `/v1/user/products/${encodeURIComponent(event.agent_id)}/access`,
+          {
+            method: "POST",
+            body: JSON.stringify({
+              user_id: event.buyer_id,
+              creator_id: event.creator_id,
+              order_id: event.order_id,
+              entitlement_id: event.entitlement_id,
+              purchased_corpus_digest: event.purchased_corpus_digest ?? event.corpus_digest,
+              version_policy: event.version_policy ?? "pinned"
+            }),
+            fetchImpl,
+            headers: { authorization: `Bearer ${registryAccessServiceToken}` }
+          }
+        );
+        if (grant.entitlement_id !== event.entitlement_id) {
+          throw new Error("Registry returned a different entitlement projection");
+        }
+        repaired += 1;
+      } catch (error) {
+        errors.push({
+          entitlement_id: event.entitlement_id,
+          code: error?.code ?? "registry_reconcile_failed"
+        });
+      }
+    }
+    return { checked: latestByBinding.size, repaired, errors };
+  };
+
   const reconcileCreatorPayout = async (creatorId, currency) => {
     if (!paymentProvider.configured || payoutSchedule !== "immediate") return null;
     await ledger.refresh?.();
@@ -2028,6 +2081,7 @@ export async function createDashboardApp(options = {}) {
     telemetry,
     reconcilePendingCheckouts,
     dispatchCommerceOutbox,
+    reconcileCommerceAccessProjections,
     reconcilePayouts,
     reconcileFinance,
     reconcileDeployments
@@ -2048,6 +2102,10 @@ export async function startDashboardServer(options = {}) {
     app.dispatchCommerceOutbox().catch(() => undefined);
   }, 2_000);
   outboxTimer.unref?.();
+  const accessReconcileTimer = setInterval(() => {
+    app.reconcileCommerceAccessProjections().catch(() => undefined);
+  }, 30_000);
+  accessReconcileTimer.unref?.();
   const financeTimer = setInterval(() => {
     app.reconcileFinance().catch(() => undefined);
   }, 30_000);
@@ -2059,6 +2117,7 @@ export async function startDashboardServer(options = {}) {
   server.once("close", () => {
     clearInterval(reconcileTimer);
     clearInterval(outboxTimer);
+    clearInterval(accessReconcileTimer);
     clearInterval(financeTimer);
     clearInterval(deploymentTimer);
     app.ledger.close?.().catch(() => undefined);
@@ -2067,6 +2126,7 @@ export async function startDashboardServer(options = {}) {
   });
   app.reconcilePendingCheckouts().catch(() => undefined);
   app.dispatchCommerceOutbox().catch(() => undefined);
+  app.reconcileCommerceAccessProjections().catch(() => undefined);
   app.reconcileFinance().catch(() => undefined);
   app.reconcileDeployments().catch(() => undefined);
   return { ...app, server, port, host };

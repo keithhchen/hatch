@@ -20,6 +20,6 @@ Agent 标识：
 
 | 用户名 | 密码 | 角色 | Entitlement / Agent access |
 |---|---|---|---|
-| `seth-uat@example.com` | `hatch-seth-uat` | user | `ent_e5d2091763244b0490b7ecf0903c443e` → `seth / alpha-lite` |
+| `seth-uat@example.com` | `hatch-seth-uat` | user | `10359024-d812-407a-b277-c8b878d3690a` (`order a1c753a7-1187-417d-9733-67c9e26b9ef3`) → `seth / alpha-lite` |
 
 该账号已完成生产 zero-value checkout，当前 access 状态为 `active`，并已通过 Runtime 查询 NVIDIA（NVDA）。
