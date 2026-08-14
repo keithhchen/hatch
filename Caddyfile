@@ -61,6 +61,16 @@
     handle @desktop_registry_signin {
         reverse_proxy registry:8100
     }
+    # A WebView CORS preflight never carries the bearer itself. Route the
+    # narrow Desktop endpoint preflights to the same Registry owner so the
+    # browser can subsequently send the authenticated request.
+    @desktop_registry_preflight {
+        method OPTIONS
+        path /v1/auth/me /v1/auth/logout /v1/user/product-access
+    }
+    handle @desktop_registry_preflight {
+        reverse_proxy registry:8100
+    }
     @desktop_registry_bearer {
         path /v1/auth/me /v1/auth/logout /v1/user/product-access
         header Authorization *

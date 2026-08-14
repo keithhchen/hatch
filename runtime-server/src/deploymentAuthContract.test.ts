@@ -16,6 +16,13 @@ test("production keeps browser APIs on the Dashboard BFF and disables legacy HMA
     "public routing must not expose Registry command routes");
   assert.match(caddyfile, /@desktop_registry_signin path \/v1\/auth\/signin[\s\S]*?handle @desktop_registry_signin \{[\s\S]*?reverse_proxy registry:8100/,
     "Desktop sign-in must reach the Registry session endpoint");
+  const desktopPreflightBlock = caddyfile.match(/@desktop_registry_preflight \{([\s\S]*?)\n    \}/)?.[1] ?? "";
+  assert.match(desktopPreflightBlock, /method OPTIONS/,
+    "Desktop Registry routes must handle the bearer-free WebView CORS preflight");
+  assert.match(desktopPreflightBlock, /path \/v1\/auth\/me \/v1\/auth\/logout \/v1\/user\/product-access/,
+    "Desktop preflights must cover the same narrow Registry-owned endpoints");
+  assert.match(caddyfile, /handle @desktop_registry_preflight \{[\s\S]*?reverse_proxy registry:8100/,
+    "Desktop preflights must reach Registry rather than the browser BFF");
   const desktopBearerBlock = caddyfile.match(/@desktop_registry_bearer \{([\s\S]*?)\n    \}/)?.[1] ?? "";
   assert.match(desktopBearerBlock, /path \/v1\/auth\/me \/v1\/auth\/logout \/v1\/user\/product-access/,
     "Desktop bearer routes must cover identity, logout, and UUID product access");
