@@ -492,8 +492,10 @@ function AuthPage({ mode, search, request, navigate, session }) {
           <Field label="Password"><Input required minLength={8} type="password" autoComplete={signingUp ? "new-password" : "current-password"} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></Field>
           {signingUp ? <HatchCheckbox required checked={form.terms} onCheckedChange={(checked) => setForm({ ...form, terms: checked === true })} label="I agree to the Hatch Terms and Privacy Policy." /> : null}
           {submission.error ? <InlineError error={submission.error} /> : null}
-          <Button className="buyer-v2__button--wide" loading={submission.status === "pending"}>{signingUp ? "Create account" : "Sign in"}</Button>
-          <p className="buyer-v2__auth-switch">{signingUp ? "Already have an account?" : "New to Hatch?"} <RouterLink to={`${signingUp ? "/sign-in" : "/sign-up"}?returnTo=${encodeURIComponent(returnTo)}`} navigate={navigate}>{signingUp ? "Sign in" : "Create account"}</RouterLink></p>
+          <div className="buyer-v2__auth-actions">
+            <Button className="buyer-v2__button--wide" loading={submission.status === "pending"}>{signingUp ? "Create account" : "Sign in"}</Button>
+            <p className="buyer-v2__auth-switch">{signingUp ? "Already have an account?" : "New to Hatch?"} <RouterLink to={`${signingUp ? "/sign-in" : "/sign-up"}?returnTo=${encodeURIComponent(returnTo)}`} navigate={navigate}>{signingUp ? "Sign in" : "Create account"}</RouterLink></p>
+          </div>
         </form>
       </section>
     </main>

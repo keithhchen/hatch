@@ -281,8 +281,9 @@
 .buyer-v2__field input:focus, .buyer-v2__select-label select:focus { border-color: var(--buyer-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--buyer-accent) 16%, transparent); }
 .buyer-v2__checkbox { display: flex; align-items: flex-start; gap: 10px; margin: 20px 0; color: var(--buyer-muted); font-size: 12px; line-height: 1.5; }
 .buyer-v2__checkbox input { width: 18px; height: 18px; flex: 0 0 auto; accent-color: var(--buyer-accent); }
-.buyer-v2__auth-form > .hui-button { width: 100%; margin-top: 22px; }
-.buyer-v2__auth-switch { margin: 18px 0 0; line-height: 1.5; text-align: center; }
+.buyer-v2__auth-actions { display: grid; gap: 20px; margin-top: 24px; }
+.buyer-v2__auth-actions > .hui-button { width: 100%; }
+.buyer-v2__auth-switch { margin: 0; line-height: 1.5; text-align: center; }
 .buyer-v2__auth-switch a { color: var(--buyer-accent); }
 .buyer-v2__auth-intent-skeleton { width: 75%; height: 190px; margin-top: 25px; border-radius: 16px; background: rgba(255, 255, 255, 0.08); animation: buyer-pulse 1.5s ease-in-out infinite; }
 
