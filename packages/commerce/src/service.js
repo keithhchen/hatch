@@ -1,12 +1,10 @@
 import { createHash } from "node:crypto";
 import {
   CommerceInvariantError,
-  projectActiveOffer,
   projectBuyerOrders,
   projectCreatorDashboard,
   projectDeliveries,
   projectEntitlement,
-  projectOfferRevision,
   projectOrder,
   projectRefunds
 } from "./ledger.js";
@@ -193,10 +191,7 @@ export class CommerceService {
           creator_snapshot: checkoutInput.creator_snapshot,
           product_snapshot: checkoutInput.product_snapshot,
           release_snapshot: checkoutInput.release_snapshot,
-          offer_snapshot: checkoutInput.offer_snapshot,
           release_id: checkoutInput.release_id,
-          offer_id: checkoutInput.offer_id,
-          offer_revision: checkoutInput.offer_revision,
           ...quote,
           gross_minor: grossMinor,
           currency,
@@ -335,10 +330,7 @@ export class CommerceService {
       creator_snapshot: input.creator_snapshot,
       product_snapshot: input.product_snapshot,
       release_snapshot: input.release_snapshot,
-      offer_snapshot: input.offer_snapshot,
       release_id: input.release_id,
-      offer_id: input.offer_id,
-      offer_revision: input.offer_revision,
       ...quote,
       gross_minor: grossMinor,
       currency,
@@ -378,49 +370,6 @@ export class CommerceService {
       order: projectOrder(events, orderId),
       entitlement: projectEntitlement(events, entitlementId, { now: clockDate(this.clock) })
     };
-  }
-
-  async createOfferRevision(input, options = {}) {
-    const idempotencyKey = requireIdempotencyKey(input, options);
-    requireFields(input, ["offer_id", "creator_id", "product_id", "currency"]);
-    const revision = Number(input.revision);
-    const amountMinor = Number(input.amount_minor);
-    const includedUnits = Number(input.included_units ?? 1);
-    requirePositiveInteger(revision, "revision");
-    requireNonNegativeInteger(amountMinor, "amount_minor");
-    requirePositiveInteger(includedUnits, "included_units");
-    await this.ledger.append("offer.revision_created", compact({
-      offer_id: input.offer_id,
-      revision,
-      creator_id: input.creator_id,
-      product_id: input.product_id,
-      purchase_model: input.purchase_model ?? input.model ?? "per_delivery",
-      amount_minor: amountMinor,
-      currency: input.currency,
-      unit: input.unit ?? "delivery",
-      included_units: includedUnits,
-      refund_policy_version: input.refund_policy_version ?? "v1",
-      version_policy: input.version_policy ?? "pinned"
-    }), { idempotencyKey: `${idempotencyKey}:offer-revision` });
-    return projectOfferRevision(this.ledger.listEvents(), input.offer_id, revision);
-  }
-
-  async activateOfferRevision(input, options = {}) {
-    const idempotencyKey = requireIdempotencyKey(input, options);
-    requireFields(input, ["offer_id", "creator_id", "product_id"]);
-    const revision = Number(input.revision);
-    requirePositiveInteger(revision, "revision");
-    await this.ledger.append("offer.activated", compact({
-      offer_id: input.offer_id,
-      revision,
-      creator_id: input.creator_id,
-      product_id: input.product_id,
-      release_id: input.release_id ?? null,
-      corpus_digest: input.corpus_digest ?? null,
-      operation_id: input.operation_id ?? null,
-      expected_previous_operation_id: input.expected_previous_operation_id
-    }), { idempotencyKey: `${idempotencyKey}:offer-activate` });
-    return projectOfferRevision(this.ledger.listEvents(), input.offer_id, revision);
   }
 
   async advanceEntitlementVersion(input, options = {}) {
@@ -1041,20 +990,6 @@ export class CommerceService {
       return this.ledger.readCreatorPayouts(creatorId, currency);
     }
     return projectCreatorPayouts(this.ledger.listEvents(), creatorId, currency);
-  }
-
-  getOfferRevision(offerId, revision) {
-    if (typeof this.ledger.readOfferRevision === "function") {
-      return this.ledger.readOfferRevision(offerId, revision);
-    }
-    return projectOfferRevision(this.ledger.listEvents(), offerId, revision);
-  }
-
-  getActiveOffer(creatorId, productId) {
-    if (typeof this.ledger.readActiveOffer === "function") {
-      return this.ledger.readActiveOffer(creatorId, productId);
-    }
-    return projectActiveOffer(this.ledger.listEvents(), creatorId, productId);
   }
 
   getEntitlement(entitlementId) {

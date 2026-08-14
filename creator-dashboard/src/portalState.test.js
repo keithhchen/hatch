@@ -1,9 +1,38 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { PortalStateStore } from "../portalState.mjs";
+
+test("Portal state permanently removes pre-cutover Offer fields when opened", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-portal-offer-cutover-"));
+  const filePath = path.join(directory, "portal.json");
+  await writeFile(filePath, JSON.stringify({
+    contract_version: "1",
+    checkout_sessions: {
+      checkout_legacy: {
+        checkout_session_id: "checkout_legacy",
+        offer_snapshot: { offer_id: "offer_legacy", revision: 3 },
+        quote_change: { previous: 0, current: 4900 }
+      }
+    },
+    creator_products: {
+      "creator:product": {
+        status: "offer_required",
+        offer_draft: { revision: 3 },
+        offer_active: { revision: 2 },
+        publish_operation: { operation_id: "publish_legacy", offer_revision: 3, offer_activated_at: "2026-01-01T00:00:00.000Z" }
+      }
+    }
+  }), "utf8");
+
+  const store = await PortalStateStore.open({ filePath });
+  assert.equal(store.getCheckoutSession("checkout_legacy").offer_snapshot, undefined);
+  const persisted = await readFile(filePath, "utf8");
+  assert.doesNotMatch(persisted, /offer_snapshot|quote_change|offer_draft|offer_active|offer_revision|offer_activated_at|offer_required/);
+  assert.match(persisted, /ready_to_preview/);
+});
 
 test("Portal state persists checkout sessions and replays request keys", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-portal-state-"));
@@ -13,7 +42,7 @@ test("Portal state persists checkout sessions and replays request keys", async (
     buyer_id: "buyer-1",
     request_key: "request-1",
     product: { product_id: "product-1" },
-    offer_snapshot: { amount_minor: 0, currency: "USD" }
+    totals: { total_minor: 0, currency: "USD" }
   });
   const replay = await store.createCheckoutSession({
     buyer_id: "buyer-1",
@@ -29,7 +58,7 @@ test("Portal state persists checkout sessions and replays request keys", async (
     buyer_id: "buyer-concurrent",
     request_key: "request-concurrent",
     product: { product_id: "product-concurrent" },
-    offer_snapshot: { amount_minor: 0, currency: "USD" }
+    totals: { total_minor: 0, currency: "USD" }
   })));
   assert.equal(new Set(concurrent.map((session) => session.checkout_session_id)).size, 1);
 });
@@ -41,7 +70,7 @@ test("Expired checkout sessions are rejected before any Commerce mutation can be
     buyer_id: "buyer-expired",
     request_key: "expired-request",
     product: { product_id: "product-expired" },
-    offer_snapshot: { amount_minor: 0, currency: "USD" }
+    totals: { total_minor: 0, currency: "USD" }
   });
   now = new Date("2026-08-01T00:31:00.000Z");
   assert.equal(store.getCheckoutSession(session.checkout_session_id).status, "expired");
@@ -81,34 +110,23 @@ test("Factory draft saves replay lost responses and reject changed payloads unde
   );
 });
 
-test("Creator approval, offer, and publish form one versioned workflow", async () => {
+test("Creator approval and publish form one versioned workflow", async () => {
   const store = await PortalStateStore.open();
   const approved = await store.approveCandidate("creator-1", "product-1", {
     candidate_id: "candidate-1",
     digest: "sha256:candidate"
   }, 0);
-  assert.equal(approved.status, "offer_required");
-
-  const offered = await store.saveOffer("creator-1", "product-1", {
-    purchase_model: "per_delivery",
-    amount_minor: 0,
-    currency: "USD",
-    unit: "delivery",
-    included_units: 1
-  }, approved.version);
-  assert.equal(offered.status, "ready_to_preview");
+  assert.equal(approved.status, "ready_to_preview");
 
   await assert.rejects(
-    store.publishProduct("creator-1", "product-1", { expected_version: approved.version }),
-    (error) => error.code === "stale_version"
+    store.publishProduct("creator-1", "product-1", { candidate_id: "candidate-other", expected_version: approved.version }),
+    (error) => error.code === "candidate_changed"
   );
   const published = await store.publishProduct("creator-1", "product-1", {
     candidate_id: "candidate-1",
-    offer_revision: offered.offer_draft.revision,
-    expected_version: offered.version
+    expected_version: approved.version
   });
   assert.equal(published.status, "published");
-  assert.equal(published.offer_active.amount_minor, 0);
   assert.match(published.public_url, /^\/products\//);
   const withdrawn = await store.withdrawProduct("creator-1", "product-1", published.version, {
     reason: "Pause the listing for review.",
@@ -157,24 +175,16 @@ test("Candidate decisions replay the same durable command and reject changed int
   );
 });
 
-test("Publish intent locks candidate and offer and resumes one durable release", async () => {
+test("Publish intent locks the candidate and resumes one durable release", async () => {
   const store = await PortalStateStore.open();
   const approved = await store.approveCandidate("creator-saga", "product-saga", {
     candidate_id: "candidate-saga",
     digest: "sha256:candidate-saga",
     report_digest: "sha256:report-saga"
   }, 0);
-  const offered = await store.saveOffer("creator-saga", "product-saga", {
-    purchase_model: "per_delivery",
-    amount_minor: 0,
-    currency: "USD",
-    unit: "delivery",
-    included_units: 1
-  }, approved.version);
   const input = {
     candidate_id: "candidate-saga",
-    offer_revision: offered.offer_draft.revision,
-    expected_version: offered.version,
+    expected_version: approved.version,
     reason: "publish_reviewed_candidate",
     command_key: "publish-command-1"
   };
@@ -189,17 +199,6 @@ test("Publish intent locks candidate and offer and resumes one durable release",
     (error) => error.code === "idempotency_conflict"
   );
 
-  await assert.rejects(
-    store.saveOffer("creator-saga", "product-saga", {
-      purchase_model: "per_delivery",
-      amount_minor: 0,
-      currency: "USD",
-      unit: "delivery",
-      included_units: 2
-    }, pending.version),
-    (error) => error.code === "deployment_in_progress"
-  );
-
   const published = await store.completePublishProduct(
     "creator-saga",
     "product-saga",
@@ -210,10 +209,6 @@ test("Publish intent locks candidate and offer and resumes one durable release",
   assert.equal(published.release.corpus_digest, "sha256:candidate-saga");
   assert.equal(published.release.report_digest, "sha256:report-saga");
   assert.doesNotThrow(() => store.validatePublishCommand("creator-saga", "product-saga", input));
-  assert.throws(
-    () => store.validatePublishCommand("creator-saga", "product-saga", { ...input, offer_revision: input.offer_revision + 1 }),
-    (error) => error.code === "idempotency_conflict"
-  );
 });
 
 test("Rollback switches immutable release history without rewriting either release", async () => {
@@ -223,11 +218,8 @@ test("Rollback switches immutable release history without rewriting either relea
     digest: "sha256:one",
     report_digest: "sha256:report-one"
   }, 0);
-  state = await store.saveOffer("creator-history", "product-history", {
-    purchase_model: "per_delivery", amount_minor: 0, currency: "USD", unit: "delivery", included_units: 1
-  }, state.version);
   state = await store.publishProduct("creator-history", "product-history", {
-    candidate_id: "candidate-one", offer_revision: state.offer_draft.revision, expected_version: state.version
+    candidate_id: "candidate-one", expected_version: state.version
   });
   const firstRelease = structuredClone(state.release);
 
@@ -236,24 +228,19 @@ test("Rollback switches immutable release history without rewriting either relea
     digest: "sha256:two",
     report_digest: "sha256:report-two"
   }, state.version);
-  state = await store.saveOffer("creator-history", "product-history", {
-    purchase_model: "per_delivery", amount_minor: 0, currency: "USD", unit: "delivery", included_units: 2
-  }, state.version);
   state = await store.publishProduct("creator-history", "product-history", {
-    candidate_id: "candidate-two", offer_revision: state.offer_draft.revision, expected_version: state.version
+    candidate_id: "candidate-two", expected_version: state.version
   });
   assert.equal(state.releases.length, 2);
   assert.equal(state.release.corpus_digest, "sha256:two");
 
-  const selectedOfferRevision = state.offer_active.revision;
   const pending = await store.beginRollbackProduct(
     "creator-history",
     "product-history",
     firstRelease.release_id,
     state.version,
     {
-      offer_revision: selectedOfferRevision,
-      reason: "Restore the stable Corpus while retaining the reviewed offer.",
+      reason: "Restore the stable Corpus after review.",
       command_key: "rollback-command-1"
     }
   );
@@ -264,8 +251,6 @@ test("Rollback switches immutable release history without rewriting either relea
   );
   assert.equal(rolledBack.release.release_id, firstRelease.release_id);
   assert.equal(rolledBack.release.corpus_digest, "sha256:one");
-  assert.equal(rolledBack.offer_active.revision, selectedOfferRevision);
-  assert.equal(rolledBack.offer_active.included_units, 2);
   assert.deepEqual(rolledBack.releases.map((release) => release.corpus_digest), ["sha256:one", "sha256:two"]);
   assert.equal(rolledBack.releases.filter((release) => release.current).length, 1);
   assert.throws(
@@ -275,7 +260,6 @@ test("Rollback switches immutable release history without rewriting either relea
       firstRelease.release_id,
       state.version,
       {
-        offer_revision: selectedOfferRevision,
         reason: "Changed reason",
         command_key: "rollback-command-1"
       }

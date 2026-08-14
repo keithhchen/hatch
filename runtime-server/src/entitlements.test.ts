@@ -93,6 +93,47 @@ test("Registry entitlement resolution requests only the selected binding", async
   assert.equal(new URL(requestedUrl).searchParams.get("entitlement_id"), ENTITLEMENT_ID);
 });
 
+test("Runtime reads the same authoritative entitlement boundary as Web and never asks Registry for ownership", async () => {
+  const requested: string[] = [];
+  const binding = {
+    entitlement_id: ENTITLEMENT_ID,
+    order_id: ORDER_ID,
+    user_id: USER_ID,
+    creator_id: CREATOR_ID,
+    agent_id: PRODUCT_ID,
+    product_id: PRODUCT_ID,
+    status: "active",
+    purchased_corpus_digest: `sha256:${"a".repeat(64)}`,
+    effective_corpus_digest: `sha256:${"a".repeat(64)}`,
+    version_policy: "pinned",
+    version_history: []
+  };
+  const fetchImpl = async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(String(input));
+    requested.push(url.toString());
+    if (url.origin === "https://registry.example.test" && url.pathname === "/v1/auth/me") {
+      return new Response(JSON.stringify({ id: USER_ID, role: "user" }), { status: 200 });
+    }
+    assert.equal(new Headers(init?.headers).get("authorization"), "Bearer access-service-token");
+    if (url.pathname === `/v1/internal/access/users/${USER_ID}/entitlements`) {
+      return new Response(JSON.stringify({ entitlements: [binding] }), { status: 200 });
+    }
+    if (url.pathname === `/v1/internal/access/entitlements/${ENTITLEMENT_ID}`) {
+      assert.equal(url.searchParams.get("user_id"), USER_ID);
+      return new Response(JSON.stringify({ entitlement: binding }), { status: 200 });
+    }
+    return new Response("{}", { status: 404 });
+  };
+  const resolver = new RegistryEntitlementResolver("https://registry.example.test", fetchImpl, {
+    commerceUrl: "https://access.example.test",
+    commerceServiceToken: "access-service-token"
+  });
+
+  assert.deepEqual(await resolver.list({ authToken: "opaque-user-token" }), [binding]);
+  assert.deepEqual(await resolver.resolve({ authToken: "opaque-user-token", entitlementId: ENTITLEMENT_ID }), binding);
+  assert.equal(requested.some((url) => new URL(url).pathname === "/v1/user/product-access"), false);
+});
+
 test("Registry entitlement resolver rejects pre-cutover text identities and split product aliases", async () => {
   const resolver = new RegistryEntitlementResolver(
     "https://registry.example.test",

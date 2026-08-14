@@ -12,13 +12,9 @@ test("Creator Factory run routes preserve the selected run across refresh", () =
   assert.equal(creatorRouteTitle(parseCreatorRoute("/studio/factory/runs/factory_123")), "Factory run");
 });
 
-test("Creator payout settings and transfer details have distinct durable routes", () => {
-  assert.deepEqual(parseCreatorRoute("/studio/settings/payouts"), {
-    kind: "payout-settings", section: "payouts"
-  });
-  assert.deepEqual(parseCreatorRoute("/studio/payouts/payout_9"), {
-    kind: "payout", section: "payouts", payoutId: "payout_9"
-  });
+test("paid payout routes stay outside the free Creator product", () => {
+  assert.equal(parseCreatorRoute("/studio/settings/payouts").kind, "not-found");
+  assert.equal(parseCreatorRoute("/studio/payouts/payout_9").kind, "not-found");
 });
 
 test("unknown nested Creator routes do not silently fall back to a parent task", () => {

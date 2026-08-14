@@ -161,8 +161,6 @@ function checkout(suffix) {
   return {
     ...identity(suffix),
     release_id: `release_${suffix}`,
-    offer_id: `offer_${suffix}`,
-    offer_revision: 1,
     gross_minor: 0,
     currency: "USD",
     included_units: 1,

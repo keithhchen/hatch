@@ -46,21 +46,25 @@ const AgentCorpusEntitlementBindingSchema = EntitlementCommonSchema.extend({
   }).strip()).optional(),
 }).strict();
 
-// Registry is the production authority after the UUID cutover. Keep the
-// explicit file/HMAC adapter above usable for local migration fixtures, but
-// never allow a Registry response to reintroduce text identities.
-const CanonicalRegistryEntitlementBindingSchema = AgentCorpusEntitlementBindingSchema.extend({
+// UUID bindings are strict at every authority boundary. Registry verifies the
+// account identity; the Access service owns production entitlements.
+const CanonicalRegistryEntitlementBindingBaseSchema = AgentCorpusEntitlementBindingSchema.extend({
   entitlement_id: z.string().regex(UUID_V4_RE),
   order_id: z.string().regex(UUID_V4_RE).optional(),
   user_id: z.string().regex(UUID_V4_RE),
   creator_id: z.string().regex(UUID_V4_RE),
   agent_id: z.string().regex(UUID_V4_RE),
   product_id: z.string().regex(UUID_V4_RE)
-}).strict().superRefine((binding, context) => {
+}).strict();
+
+const matchingProductBinding = (binding: { agent_id: string; product_id: string }, context: z.RefinementCtx) => {
   if (binding.agent_id !== binding.product_id) {
     context.addIssue({ code: "custom", path: ["product_id"], message: "agent_id must equal product_id after the UUID cutover" });
   }
-});
+};
+
+const CanonicalRegistryEntitlementBindingSchema = CanonicalRegistryEntitlementBindingBaseSchema
+  .superRefine(matchingProductBinding);
 
 export const EntitlementBindingSchema = AgentCorpusEntitlementBindingSchema;
 
@@ -101,7 +105,6 @@ export type EntitlementLookup = {
   /** Development-only opaque token used by local fixtures. */
   licenseToken?: string;
   entitlementId?: string;
-  installationId?: string;
   signal?: AbortSignal;
 };
 
@@ -157,17 +160,29 @@ export class FileEntitlementResolver implements EntitlementResolver {
   }
 }
 
-/** Production adapter: access grants are owned by the Registry, not a local file. */
+/** Production adapter: Registry verifies identity; Access owns entitlements. */
 export class RegistryEntitlementResolver implements EntitlementResolver, AuthIdentityResolver {
   private readonly timeoutMs: number;
+  private readonly commerceUrl?: string;
+  private readonly commerceServiceToken?: string;
 
   constructor(
     private readonly registryUrl: string,
     private readonly fetchImpl: typeof fetch = fetch,
-    options: { timeoutMs?: number; serviceToken?: string } = {}
+    options: {
+      timeoutMs?: number;
+      serviceToken?: string;
+      commerceUrl?: string;
+      commerceServiceToken?: string;
+    } = {}
   ) {
     this.timeoutMs = options.timeoutMs ?? 5_000;
     this.serviceToken = options.serviceToken?.trim() || undefined;
+    this.commerceUrl = options.commerceUrl?.trim() || undefined;
+    this.commerceServiceToken = options.commerceServiceToken?.trim() || undefined;
+    if (Boolean(this.commerceUrl) !== Boolean(this.commerceServiceToken)) {
+      throw new Error("Commerce access URL and service token must be configured together");
+    }
     if (!Number.isSafeInteger(this.timeoutMs) || this.timeoutMs <= 0 || this.timeoutMs > 60_000) {
       throw new Error("Registry authorization timeout must be an integer between 1 and 60000 milliseconds");
     }
@@ -177,6 +192,22 @@ export class RegistryEntitlementResolver implements EntitlementResolver, AuthIde
 
   async list(input: EntitlementLookup): Promise<EntitlementBinding[]> {
     if (!input.authToken) return [];
+    if (this.commerceUrl && this.commerceServiceToken) {
+      const identity = await this.resolveIdentity(input.authToken, { signal: input.signal });
+      if (!identity || identity.role !== "user") return [];
+      const { response, body } = await this.requestCommerce(
+        `/v1/internal/access/users/${encodeURIComponent(identity.sub)}/entitlements`,
+        input.signal
+      );
+      if (!response.ok) throw new EntitlementError("access_service_unavailable", "Creator Agent access is temporarily unavailable.");
+      try {
+        const payload = JSON.parse(body) as { entitlements?: unknown };
+        return parseCommerceEntitlements(payload.entitlements);
+      } catch (error) {
+        if (error instanceof EntitlementError) throw error;
+        throw new EntitlementError("access_service_invalid", "The access service returned invalid entitlement data.");
+      }
+    }
     const { response, body } = await this.request(
       "/v1/user/product-access",
       { headers: { authorization: `Bearer ${input.authToken}`, accept: "application/json" } },
@@ -196,6 +227,31 @@ export class RegistryEntitlementResolver implements EntitlementResolver, AuthIde
 
   async resolve(input: EntitlementLookup & { entitlementId: string }): Promise<EntitlementBinding> {
     if (!input.authToken) throw new EntitlementError("auth_invalid", "Your Hatch session is no longer valid.");
+    if (this.commerceUrl && this.commerceServiceToken) {
+      const identity = await this.resolveIdentity(input.authToken, { signal: input.signal });
+      if (!identity || identity.role !== "user") {
+        throw new EntitlementError("auth_invalid", "Your Hatch session is no longer valid.");
+      }
+      const { response, body } = await this.requestCommerce(
+        `/v1/internal/access/entitlements/${encodeURIComponent(input.entitlementId)}?user_id=${encodeURIComponent(identity.sub)}`,
+        input.signal
+      );
+      if (response.status === 404) {
+        throw new EntitlementError("entitlement_not_found", "This Creator Agent is not available for the signed-in account.");
+      }
+      if (!response.ok) throw new EntitlementError("access_service_unavailable", "Creator Agent access is temporarily unavailable.");
+      try {
+        const payload = JSON.parse(body) as { entitlement?: unknown };
+        const [binding] = parseCommerceEntitlements([payload.entitlement]);
+        if (!binding || binding.entitlement_id !== input.entitlementId || binding.user_id !== identity.sub) {
+          throw new EntitlementError("entitlement_not_found", "This Creator Agent is not available for the signed-in account.");
+        }
+        return binding;
+      } catch (error) {
+        if (error instanceof EntitlementError) throw error;
+        throw new EntitlementError("access_service_invalid", "The access service returned invalid entitlement data.");
+      }
+    }
     const { response, body } = await this.request(
       `/v1/user/product-access?entitlement_id=${encodeURIComponent(input.entitlementId)}`,
       { headers: { authorization: `Bearer ${input.authToken}`, accept: "application/json" } },
@@ -285,12 +341,46 @@ export class RegistryEntitlementResolver implements EntitlementResolver, AuthIde
     if (this.serviceToken) headers.set("x-hatch-runtime-service-token", this.serviceToken);
     return headers;
   }
+
+  private async requestCommerce(path: string, externalSignal?: AbortSignal): Promise<{ response: Response; body: string }> {
+    const controller = new AbortController();
+    const abortFromCaller = () => controller.abort(externalSignal?.reason);
+    if (externalSignal?.aborted) abortFromCaller();
+    else externalSignal?.addEventListener("abort", abortFromCaller, { once: true });
+    const timer = setTimeout(() => controller.abort(new Error("Access authorization request timed out")), this.timeoutMs);
+    try {
+      const response = await this.fetchImpl(new URL(path, this.commerceUrl).toString(), {
+        headers: {
+          authorization: `Bearer ${this.commerceServiceToken}`,
+          accept: "application/json"
+        },
+        signal: controller.signal
+      });
+      return { response, body: await readBoundedResponseBody(response, 2 * 1024 * 1024) };
+    } catch {
+      if (externalSignal?.aborted) {
+        throw new EntitlementError("authorization_cancelled", "Authorization verification was cancelled.");
+      }
+      throw new EntitlementError("access_service_unavailable", "Creator Agent access is temporarily unavailable.");
+    } finally {
+      clearTimeout(timer);
+      externalSignal?.removeEventListener("abort", abortFromCaller);
+    }
+  }
 }
 
 function parseRegistryEntitlements(payload: unknown): EntitlementBinding[] {
   // Registry grants carry bookkeeping/presentation fields that are not part of
   // the runtime authority. Parse only the binding contract and strip the rest.
   return z.array(CanonicalRegistryEntitlementBindingSchema.strip()).max(50).parse(payload);
+}
+
+function parseCommerceEntitlements(payload: unknown): EntitlementBinding[] {
+  return z.array(CanonicalRegistryEntitlementBindingBaseSchema.extend({
+    order_id: z.string().regex(UUID_V4_RE),
+    purchased_corpus_digest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    effective_corpus_digest: z.string().regex(/^sha256:[a-f0-9]{64}$/)
+  }).strict().superRefine(matchingProductBinding)).max(50).parse(payload);
 }
 
 async function readBoundedResponseBody(response: Response, maximumBytes: number): Promise<string> {

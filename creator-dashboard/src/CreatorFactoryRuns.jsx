@@ -195,7 +195,7 @@ function CreateFactoryRun({ draft, setDraft, busy, onSubmit }) {
       <span className="eyebrow">New run</span>
       <h2>Define one Task</h2>
       <p>The unit is one Creator × one deliverable—not a general digital twin.</p>
-      <label>Task name<input required value={draft.taskName} onChange={update("taskName")} placeholder="e.g. Publishable offer critique" /></label>
+      <label>Task name<input required value={draft.taskName} onChange={update("taskName")} placeholder="e.g. Publishable product-page critique" /></label>
       <label>Task promise<textarea required value={draft.taskBrief} onChange={update("taskBrief")} placeholder="What does the customer submit, what finished result do they receive, and what tradeoff matters?" /></label>
       <div className="factory-source-heading"><h3>Authorized sources</h3><button type="button" onClick={addSource}>+ Add source</button></div>
       {draft.sources.map((source, index) => <fieldset className="factory-source" key={source.id}>

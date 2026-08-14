@@ -97,7 +97,6 @@ export type VisibleConversationSkillEvent = {
 export type StoreEvent =
   | {
       type: "session.started";
-      installation_id: string;
       creator_id?: string;
       user_id?: string;
       agent_id?: string;

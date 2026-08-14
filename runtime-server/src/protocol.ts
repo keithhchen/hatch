@@ -39,7 +39,6 @@ export type ClientToolName = z.infer<typeof ClientToolNameSchema>;
 export const ClientHelloSchema = z.object({
   type: z.literal("client.hello"),
   protocol_version: ProtocolVersionSchema,
-  installation_id: ProtocolIdSchema,
   auth_token: z.string().min(1).max(MAX_AUTH_TOKEN_CHARS).optional(),
   // Kept only for old local fixtures during the migration. Production clients
   // send auth_token issued by Registry.
@@ -242,7 +241,6 @@ export type RuntimeReady = {
       description: string;
       promise?: string;
       boundaries?: string[];
-      offer?: { model?: "per_delivery" | "subscription"; amount_minor?: number; currency?: string; unit?: string };
     };
     presentation: Record<string, unknown>;
   };

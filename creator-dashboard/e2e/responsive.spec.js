@@ -33,11 +33,11 @@ test("canonical public product is readable without auth at every acceptance view
   await expect(page.locator('meta[property="og:title"]')).toHaveAttribute("content", "Signal Resume Review by Maya Creator · Hatch");
   await expect(page.locator('meta[property="og:url"]')).toHaveAttribute("content", canonicalUrl);
   await expect(page.getByRole("heading", { level: 1, name: "Signal Resume Review" })).toBeVisible();
-  await expect(page.getByText("By Maya Creator", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Maya Creator", exact: true }).first()).toHaveAttribute("href", "/creators/6f6a3d24-48af-4f27-9c50-0d4f7e4e8a21");
   await expect(page.getByText("Find the strongest credible signal without inventing evidence.", { exact: true })).toBeVisible();
   await expect(page.getByText("A resume and target role", { exact: true })).toBeVisible();
   await expect(page.getByText("Evidence-backed rewrite plan", { exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Get for free" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Get access" })).toBeVisible();
   await expect(page.getByText("Does not invent employers, metrics, or outcomes.")).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
@@ -50,7 +50,7 @@ test("canonical public product is readable without auth at every acceptance view
   });
 
   if (testInfo.project.name.startsWith("mobile-")) {
-    const primaryAction = page.locator(".storefront-shared__offer").getByRole("link", { name: "Get for free" });
+    const primaryAction = page.locator(".storefront-shared__access").getByRole("link", { name: "Get access" });
     await primaryAction.scrollIntoViewIfNeeded();
     const hitTest = await primaryAction.evaluate((element) => {
       const rect = element.getBoundingClientRect();

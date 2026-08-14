@@ -19,13 +19,17 @@ test("production keeps browser APIs on the Dashboard BFF and disables legacy HMA
   const desktopPreflightBlock = caddyfile.match(/@desktop_registry_preflight \{([\s\S]*?)\n    \}/)?.[1] ?? "";
   assert.match(desktopPreflightBlock, /method OPTIONS/,
     "Desktop Registry routes must handle the bearer-free WebView CORS preflight");
-  assert.match(desktopPreflightBlock, /path \/v1\/auth\/me \/v1\/auth\/logout \/v1\/user\/product-access/,
-    "Desktop preflights must cover the same narrow Registry-owned endpoints");
+  assert.match(desktopPreflightBlock, /path \/v1\/auth\/me \/v1\/auth\/logout/,
+    "Desktop Registry preflights must cover the narrow identity endpoints");
+  assert.doesNotMatch(desktopPreflightBlock, /\/v1\/user\/product-access/,
+    "Desktop access must use the Dashboard's authoritative entitlement view");
   assert.match(caddyfile, /handle @desktop_registry_preflight \{[\s\S]*?reverse_proxy registry:8100/,
     "Desktop preflights must reach Registry rather than the browser BFF");
   const desktopBearerBlock = caddyfile.match(/@desktop_registry_bearer \{([\s\S]*?)\n    \}/)?.[1] ?? "";
-  assert.match(desktopBearerBlock, /path \/v1\/auth\/me \/v1\/auth\/logout \/v1\/user\/product-access/,
-    "Desktop bearer routes must cover identity, logout, and UUID product access");
+  assert.match(desktopBearerBlock, /path \/v1\/auth\/me \/v1\/auth\/logout/,
+    "Desktop Registry bearer routes must cover identity and logout only");
+  assert.doesNotMatch(desktopBearerBlock, /\/v1\/user\/product-access/,
+    "Registry must not project Desktop ownership");
   assert.match(desktopBearerBlock, /header Authorization \*/,
     "Desktop Registry routes must require an Authorization bearer");
   assert.match(caddyfile, /handle @desktop_registry_bearer \{[\s\S]*?reverse_proxy registry:8100/,
@@ -42,7 +46,7 @@ test("production keeps browser APIs on the Dashboard BFF and disables legacy HMA
   const requiredKeys = deployWorkflow.match(/for key in ([^;\n]+); do/)?.[1];
   assert.ok(requiredKeys, "deploy workflow must validate production secrets");
   assert.doesNotMatch(requiredKeys, /HATCH_AUTH_SIGNING_SECRET/);
-  assert.match(requiredKeys, /HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN/);
+  assert.match(requiredKeys, /HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN/);
   assert.doesNotMatch(requiredKeys, /HATCH_RUNTIME_DB_PASSWORD/);
   assert.match(deployWorkflow, /^  verify-server:\n/m);
   assert.match(
@@ -71,8 +75,8 @@ test("production trusts forwarded client IP only on the private Registry network
   );
   const dashboardService = compose.match(/^  dashboard:\n([\s\S]*?)(?=^  [a-z][a-z0-9_-]*:\n)/m)?.[1];
   assert.ok(dashboardService, "compose.app.yml must declare the Dashboard service");
-  assert.match(registryService, /HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN:/);
-  assert.match(dashboardService, /HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN:/);
+  assert.doesNotMatch(registryService, /HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN:/);
+  assert.match(dashboardService, /HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN:/);
 });
 
 test("production Compose gives every service only its required secrets", async () => {
@@ -93,7 +97,7 @@ test("production Compose gives every service only its required secrets", async (
   assert.match(registry, /HATCH_REGISTRY_DATABASE_URL:/);
   assert.match(registry, /HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN:/);
   assert.match(registry, /HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN:/);
-  assert.match(registry, /HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN:/);
+  assert.doesNotMatch(registry, /HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN:/);
 
   assert.match(runtime, /HATCH_RUNTIME_DATABASE_URL:/);
   assert.match(runtime, /HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN:/);
@@ -102,7 +106,7 @@ test("production Compose gives every service only its required secrets", async (
   assert.doesNotMatch(runtime, /HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN:/);
   assert.doesNotMatch(runtime, /POSTGRES_PASSWORD:/);
 
-  assert.match(dashboard, /HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN:/);
+  assert.match(dashboard, /HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN:/);
   assert.doesNotMatch(dashboard, /HATCH_REGISTRY_DATABASE_URL:/);
   assert.doesNotMatch(dashboard, /HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN:/);
   assert.doesNotMatch(dashboard, /HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN:/);

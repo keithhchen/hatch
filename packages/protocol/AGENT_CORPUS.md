@@ -53,7 +53,7 @@ agent-corpus/
 |---|---|
 | `contract_version`, `creator.id`, `agent_id` | Corpus 身份；无 release/version。`tenant_id` 只属于 Registry 的发布与授权 scope，绝不写入 Corpus。 |
 | `creator` | Creator 的 `id` 与显示名 |
-| `product` | 最小 required 是 `id`、`name`；`description`、`promise`、inputs、outputs、boundaries、offer 按产品需要声明，且不保证外部现实结果 |
+| `product` | 最小 required 是 `id`、`name`；`description`、`promise`、inputs、outputs、boundaries 按产品需要声明，且不保证外部现实结果 |
 | `instructions.system` | 固定为 `instructions/system.md`，每次运行加载 |
 | `skills` | 可省略或 `[]`；每项有 local instruction、可选 references、和 scoped `allowed_tool_ids` |
 | `knowledge.documents` | 每个 Agent 都有独立 namespace；可为 `[]`，每项必须是 `knowledge/*.md` 且 `retrieval_only: true` |

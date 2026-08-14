@@ -26,7 +26,6 @@ export type AgentCorpusBundleProduct = {
   description?: string;
   promise?: string;
   boundaries?: string[];
-  offer?: AgentCorpus["product"]["offer"];
   presentation?: Record<string, unknown>;
 };
 
@@ -286,7 +285,7 @@ function validateBundleInput(input: AgentCorpusBundleInput): BundlePlan {
 }
 
 function validateProduct(value: AgentCorpusBundleProduct): ValidatedProduct {
-  const record = strictRecord(value, "product", ["id", "name", "description", "promise", "boundaries", "offer", "presentation"]);
+  const record = strictRecord(value, "product", ["id", "name", "description", "promise", "boundaries", "presentation"]);
   const boundaries = validateArray(record.boundaries, "product.boundaries").map((boundary, index) => (
     requiredText(boundary, `product.boundaries[${index}]`)
   ));
@@ -296,32 +295,12 @@ function validateProduct(value: AgentCorpusBundleProduct): ValidatedProduct {
     ...(record.description === undefined ? {} : { description: requiredText(record.description, "product.description") }),
     ...(record.promise === undefined ? {} : { promise: requiredText(record.promise, "product.promise") }),
     ...(record.boundaries === undefined ? {} : { boundaries }),
-    ...(record.offer === undefined ? {} : { offer: validateOffer(record.offer) }),
     ...(record.presentation === undefined ? {} : {
       presentation: cloneJsonRecord(record.presentation, "product.presentation")
     })
   };
   assertNoForbiddenFields(product, "product");
   return product;
-}
-
-function validateOffer(value: unknown): NonNullable<AgentCorpusBundleProduct["offer"]> {
-  const record = strictRecord(value, "product.offer", ["model", "amount_minor", "currency", "unit"]);
-  if (record.model !== undefined && record.model !== "per_delivery" && record.model !== "subscription") {
-    throw new Error("Agent Corpus product.offer.model must be per_delivery or subscription");
-  }
-  if (typeof record.amount_minor !== "number" || !Number.isInteger(record.amount_minor) || record.amount_minor < 0) {
-    throw new Error("Agent Corpus product.offer.amount_minor must be a non-negative integer");
-  }
-  if (typeof record.currency !== "string" || !/^[A-Z]{3}$/.test(record.currency)) {
-    throw new Error("Agent Corpus product.offer.currency must be a three-letter uppercase currency code");
-  }
-  return {
-    ...(record.model === undefined ? {} : { model: record.model }),
-    amount_minor: record.amount_minor,
-    currency: record.currency,
-    ...(record.unit === undefined ? {} : { unit: requiredText(record.unit, "product.offer.unit") })
-  };
 }
 
 function validateTools(value: FactoryAgentTool[] | undefined): FactoryAgentTool[] {
@@ -451,7 +430,6 @@ function buildManifest(plan: BundlePlan, digestFor: (relativePath: string) => st
       ...(plan.product.description === undefined ? {} : { description: plan.product.description }),
       ...(plan.product.promise === undefined ? {} : { promise: plan.product.promise }),
       ...(plan.product.boundaries === undefined ? {} : { boundaries: [...plan.product.boundaries] }),
-      ...(plan.product.offer === undefined ? {} : { offer: { ...plan.product.offer } }),
       ...(plan.product.presentation === undefined ? {} : { presentation: plan.product.presentation })
     },
     instructions: {

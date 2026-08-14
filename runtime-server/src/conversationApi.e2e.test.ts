@@ -192,7 +192,6 @@ test("WebSocket retries use client_message_id without creating a second run or r
   socket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
-    installation_id: "retry-installation",
     license_token: "retry-license",
     local_tools: ["file_search"]
   }));
@@ -387,7 +386,7 @@ async function waitForSocket(
   throw new Error("Timed out waiting for WebSocket message");
 }
 
-async function openRuntimeSocket(base: string, installationId: string, messages: OutboundMessage[]): Promise<WebSocket> {
+async function openRuntimeSocket(base: string, _testLabel: string, messages: OutboundMessage[]): Promise<WebSocket> {
   const socket = new WebSocket(base.replace("http:", "ws:") + "/runtime");
   socket.on("message", (value) => messages.push(JSON.parse(String(value)) as OutboundMessage));
   await new Promise<void>((resolve, reject) => {
@@ -397,7 +396,6 @@ async function openRuntimeSocket(base: string, installationId: string, messages:
   socket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
-    installation_id: installationId,
     license_token: "recovery-license",
     local_tools: ["file_search"]
   }));

@@ -273,7 +273,6 @@ test("Runtime Commerce API is service-authenticated, idempotent, and privacy-saf
     request_key: "checkout-operational-stale",
     buyer_id: "buyer-operational",
     product: { creator_id: "creator-internal", product_id: "product-internal" },
-    offer_snapshot: { offer_id: "offer-operational", revision: 1 },
     totals: { total_minor: 0, currency: "USD" }
   });
   await dashboard.portalState.markCheckoutFulfillmentPending(pendingCheckout.checkout_session_id, {

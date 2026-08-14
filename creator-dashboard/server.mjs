@@ -121,10 +121,6 @@ export async function createDashboardApp(options = {}) {
     allowLegacyPaymentConfirmation: false
   });
   const exposeBearerTokens = options.exposeBearerTokens === true;
-  const registryAccessServiceToken = options.registryAccessServiceToken
-    ?? process.env.HATCH_REGISTRY_ACCESS_SERVICE_TOKEN
-    ?? process.env.HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN
-    ?? "";
   const registryDeploymentServiceToken = options.registryDeploymentServiceToken
     ?? process.env.HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN
     ?? "";
@@ -142,7 +138,7 @@ export async function createDashboardApp(options = {}) {
     ?? 60_000));
 
   const compensateFailedCheckout = async (session) => {
-    const amountMinor = Number(session.totals?.total_minor ?? session.offer_snapshot?.amount_minor ?? 0);
+    const amountMinor = Number(session.totals?.total_minor ?? 0);
     const startedAt = Date.parse(session.fulfillment_started_at ?? session.created_at ?? "");
     const ageMs = Number.isFinite(startedAt) ? Math.max(0, Date.now() - startedAt) : 0;
     if (session.status !== "fulfillment_pending"
@@ -166,25 +162,11 @@ export async function createDashboardApp(options = {}) {
       ...providerRefund
     }, { idempotencyKey });
     const entitlementId = refunded.entitlement?.entitlement_id ?? session.entitlement_id;
-    if (registryAccessServiceToken && entitlementId) {
-      try {
-        await registryRequest(registryUrl, `/v1/user/product-access/${encodeURIComponent(entitlementId)}`, {
-          method: "DELETE",
-          body: JSON.stringify({ user_id: order.buyer_id }),
-          fetchImpl,
-          headers: { authorization: `Bearer ${registryAccessServiceToken}` }
-        });
-      } catch {
-        // The refund is already authoritative. Its transactional outbox keeps
-        // the Registry revocation retryable without undoing compensation.
-      }
-    }
     const compensated = await portalState.markCheckoutCompensated(session.checkout_session_id, {
       order_id: refunded.order_id,
       entitlement_id: entitlementId,
       refund_id: refunded.refunds.at(-1)?.refund_id ?? null
     });
-    dispatchCommerceOutbox().catch(() => undefined);
     return {
       checkout_session_id: session.checkout_session_id,
       order_id: refunded.order_id,
@@ -195,7 +177,6 @@ export async function createDashboardApp(options = {}) {
   };
 
   const reconcilePendingCheckouts = async () => {
-    if (!registryAccessServiceToken) return [];
     await portalState.refresh?.();
     const results = [];
     for (const original of portalState.listCheckoutSessions()) {
@@ -214,46 +195,11 @@ export async function createDashboardApp(options = {}) {
             payment_status: orderEvent.payment_status
           });
         }
-        if (session.status !== "fulfillment_pending"
-          && Number(session.totals?.total_minor ?? 0) > 0) {
-          const payment = commerce.getPayment(session.payment_id ?? stablePaymentId(session.checkout_session_id));
-          if (payment?.status === "succeeded") {
-            const outcome = await finalizeCheckoutOrder({
-              session,
-              authentication: {
-                profile: session.buyer ?? {
-                  id: session.buyer_id,
-                  display_name: session.buyer_display_name ?? "Hatch buyer"
-                }
-              },
-              registryUrl,
-              fetchImpl,
-              commerce,
-              portalState,
-              registryAccessServiceToken,
-              payment
-            });
-            results.push({
-              checkout_session_id: session.checkout_session_id,
-              status: outcome.body.status,
-              payment_status: payment.status
-            });
-            continue;
-          }
-        }
         if (session.status !== "fulfillment_pending") continue;
         const order = commerce.getOrder(session.order_id);
         const entitlement = commerce.getEntitlement(session.entitlement_id);
         if (!order || !entitlement) continue;
-        await provisionCheckoutAccess({
-          session,
-          order,
-          entitlement,
-          registryUrl,
-          fetchImpl,
-          portalState,
-          registryAccessServiceToken
-        });
+        await completeCheckoutAccess({ session, order, entitlement, portalState });
         results.push({ checkout_session_id: session.checkout_session_id, status: "completed" });
       } catch (error) {
         const failedSession = await portalState.noteCheckoutReconcileFailure?.(session.checkout_session_id, error).catch(() => null);
@@ -283,97 +229,10 @@ export async function createDashboardApp(options = {}) {
 
   const dispatchCommerceOutbox = async () => {
     if (typeof ledger.dispatchOutbox !== "function") return { claimed: 0, dispatched: 0, failed: 0, errors: [] };
-    return ledger.dispatchOutbox(async (event) => {
-      if (event.event_type === "entitlement.granted") {
-        if (!registryAccessServiceToken) throw new Error("Registry access service token is not configured");
-        const grant = await registryRequest(
-          registryUrl,
-          `/v1/user/products/${encodeURIComponent(event.agent_id)}/access`,
-          {
-            method: "POST",
-            body: JSON.stringify({
-              user_id: event.buyer_id,
-              creator_id: event.creator_id,
-              order_id: event.order_id,
-              entitlement_id: event.entitlement_id,
-              purchased_corpus_digest: event.purchased_corpus_digest ?? event.corpus_digest,
-              version_policy: event.version_policy ?? "pinned"
-            }),
-            fetchImpl,
-            headers: { authorization: `Bearer ${registryAccessServiceToken}` }
-          }
-        );
-        if (grant.entitlement_id !== event.entitlement_id) {
-          throw new Error("Registry returned a different entitlement projection");
-        }
-      }
-      if (event.event_type === "entitlement.revoked") {
-        if (!registryAccessServiceToken) throw new Error("Registry access service token is not configured");
-        await registryRequest(
-          registryUrl,
-          `/v1/user/product-access/${encodeURIComponent(event.entitlement_id)}`,
-          {
-            method: "DELETE",
-            body: JSON.stringify({ user_id: event.buyer_id }),
-            fetchImpl,
-            headers: { authorization: `Bearer ${registryAccessServiceToken}` }
-          }
-        );
-      }
-    });
-  };
-
-  // Rebuild the Registry access projection from the authoritative Commerce
-  // entitlement. This is deliberately a narrow repair path: only the latest
-  // grant for each buyer/creator/product binding is replayed, and revoked
-  // Commerce entitlements are never granted again. It repairs deployments
-  // where the old Registry worker persisted an order with the wrong
-  // entitlement id while leaving Commerce correct.
-  const reconcileCommerceAccessProjections = async () => {
-    if (!registryAccessServiceToken) return { checked: 0, repaired: 0, errors: [] };
-    await ledger.refresh?.();
-    const latestByBinding = new Map();
-    for (const event of ledger.listEvents()) {
-      if (event.event_type !== "entitlement.granted") continue;
-      const agentId = event.agent_id ?? event.product_id;
-      if (!event.buyer_id || !event.creator_id || !agentId || !event.order_id || !event.entitlement_id) continue;
-      latestByBinding.set(`${event.buyer_id}:${event.creator_id}:${agentId}`, { ...event, agent_id: agentId });
-    }
-    const errors = [];
-    let repaired = 0;
-    for (const event of latestByBinding.values()) {
-      const entitlement = commerce.getEntitlement(event.entitlement_id);
-      if (!entitlement || ["revoked", "expired"].includes(entitlement.status)) continue;
-      try {
-        const grant = await registryRequest(
-          registryUrl,
-          `/v1/user/products/${encodeURIComponent(event.agent_id)}/access`,
-          {
-            method: "POST",
-            body: JSON.stringify({
-              user_id: event.buyer_id,
-              creator_id: event.creator_id,
-              order_id: event.order_id,
-              entitlement_id: event.entitlement_id,
-              purchased_corpus_digest: event.purchased_corpus_digest ?? event.corpus_digest,
-              version_policy: event.version_policy ?? "pinned"
-            }),
-            fetchImpl,
-            headers: { authorization: `Bearer ${registryAccessServiceToken}` }
-          }
-        );
-        if (grant.entitlement_id !== event.entitlement_id) {
-          throw new Error("Registry returned a different entitlement projection");
-        }
-        repaired += 1;
-      } catch (error) {
-        errors.push({
-          entitlement_id: event.entitlement_id,
-          code: error?.code ?? "registry_reconcile_failed"
-        });
-      }
-    }
-    return { checked: latestByBinding.size, repaired, errors };
+    // Access is read directly from the authoritative ledger. The outbox still
+    // drains audit notifications, but no longer copies entitlement state into
+    // Registry.
+    return ledger.dispatchOutbox(async () => undefined);
   };
 
   const reconcileCreatorPayout = async (creatorId, currency) => {
@@ -538,6 +397,9 @@ export async function createDashboardApp(options = {}) {
   const handler = async (request, response) => {
     const url = new URL(request.url ?? "/", "http://dashboard.local");
     const requestId = normalizedRequestId(request.headers["x-request-id"]);
+    if (url.pathname === "/v1/user/product-access") {
+      response.__hatchCorsOrigin = "*";
+    }
     try {
       if (request.method === "OPTIONS") return send(response, 204, undefined);
       response.__hatchRequestId = requestId;
@@ -549,7 +411,7 @@ export async function createDashboardApp(options = {}) {
       if (request.method === "GET" && url.pathname === "/readyz") {
         try {
           if (process.env.NODE_ENV === "production"
-            && (!registryAccessServiceToken || !registryDeploymentServiceToken || !commerceRuntimeServiceToken)) {
+            && (!registryDeploymentServiceToken || !commerceRuntimeServiceToken)) {
             throw new Error("Dashboard service credentials are not configured");
           }
           await ledger.refresh?.();
@@ -642,7 +504,6 @@ export async function createDashboardApp(options = {}) {
                 fetchImpl,
                 commerce,
                 portalState,
-                registryAccessServiceToken,
                 payment: recorded.payment,
                 transaction
               });
@@ -678,13 +539,30 @@ export async function createDashboardApp(options = {}) {
         });
         return send(response, 200, { received: true, payout });
       }
-      if (url.pathname.startsWith("/v1/internal/commerce/")) {
+      if (url.pathname.startsWith("/v1/internal/commerce/") || url.pathname.startsWith("/v1/internal/access/")) {
         if (!commerceRuntimeServiceToken) {
           return send(response, 503, { error: { code: "commerce_service_unavailable", message: "Internal Commerce commands are not configured." } });
         }
         const serviceToken = bearerTokenFromAuthorization(request);
         if (!serviceToken || !safeEqual(serviceToken, commerceRuntimeServiceToken)) {
           return send(response, 403, { error: { code: "forbidden", message: "A Commerce Runtime service credential is required." } });
+        }
+        const userAccessMatch = url.pathname.match(/^\/v1\/internal\/access\/users\/([^/]+)\/entitlements$/);
+        if (request.method === "GET" && userAccessMatch) {
+          const userId = decodeURIComponent(userAccessMatch[1]);
+          const entitlements = commerce.listBuyerEntitlements(userId)
+            .filter((entitlement) => entitlement.status === "active")
+            .map(runtimeEntitlementBinding);
+          return send(response, 200, { entitlements });
+        }
+        const entitlementAccessMatch = url.pathname.match(/^\/v1\/internal\/access\/entitlements\/([^/]+)$/);
+        if (request.method === "GET" && entitlementAccessMatch) {
+          const entitlement = commerce.getEntitlement(decodeURIComponent(entitlementAccessMatch[1]));
+          const userId = url.searchParams.get("user_id");
+          if (!entitlement || entitlement.status !== "active" || !userId || entitlement.buyer_id !== userId) {
+            return send(response, 404, { error: { code: "entitlement_not_found", message: "Entitlement was not found." } });
+          }
+          return send(response, 200, { entitlement: runtimeEntitlementBinding(entitlement) });
         }
         const idempotencyMatch = url.pathname.match(/^\/v1\/internal\/commerce\/idempotency\/(.+)$/);
         if (request.method === "GET" && idempotencyMatch) {
@@ -841,13 +719,7 @@ export async function createDashboardApp(options = {}) {
               if (canonicalPath !== url.pathname) {
                 return send(response, 404, { error: { code: "product_not_found", message: "Product URL must use its canonical UUID v4." } });
               }
-              const activeOffer = await authoritativeProductOffer(commerce, agent, state);
-              const product = publicCatalogAgent(
-                agent,
-                state,
-                paymentMode,
-                activeOffer
-              );
+              const product = publicCatalogAgent(agent, state);
               metadata = createProductMetadata({
                 origin: publicOrigin,
                 creatorId: agent.creator_id,
@@ -863,8 +735,7 @@ export async function createDashboardApp(options = {}) {
                 creatorName: product.creator_name ?? product.creator_display_name,
                 productId: product.product_id,
                 productName: product.product_name ?? product.name,
-                description: product.promise ?? product.description,
-                amountMinor: product.offer?.amount_minor
+                description: product.promise ?? product.description
               });
             } else {
               metadata = createUnavailableProductMetadata(publicOrigin, productSelector, productSelector, "/products");
@@ -943,12 +814,7 @@ export async function createDashboardApp(options = {}) {
         const products = await Promise.all(visible.map(async (agent) => {
           const state = portalState.getCreatorProduct(agent.creator_id, agent.product_id);
           return withBuyerAccess(
-            publicCatalogAgent(
-              agent,
-              state,
-              paymentMode,
-              await authoritativeProductOffer(commerce, agent, state)
-            ),
+            publicCatalogAgent(agent, state),
             entitlements
           );
         }));
@@ -972,7 +838,7 @@ export async function createDashboardApp(options = {}) {
         if (!creatorProducts.length) return send(response, 404, { error: { code: "creator_not_found", message: "Creator was not found." } });
         const products = await Promise.all(creatorProducts.map(async (entry) => {
           const state = portalState.getCreatorProduct(entry.creator_id, entry.product_id);
-          return publicCatalogAgent(entry, state, paymentMode, await authoritativeProductOffer(commerce, entry, state));
+          return publicCatalogAgent(entry, state);
         }));
         const first = products[0];
         return send(response, 200, {
@@ -995,22 +861,15 @@ export async function createDashboardApp(options = {}) {
         if (!agent || creatorState?.status === "withdrawn") return send(response, 404, { error: { code: "agent_unavailable", message: "The published Agent could not be found." } });
         const buyer = await optionalBuyer(request, registryUrl, fetchImpl, portalState);
         const entitlements = buyer ? commerce.listBuyerEntitlements(buyer.id) : [];
-        const activeOffer = await authoritativeProductOffer(commerce, agent, creatorState);
         await recordTelemetry("product_viewed", {
           creator_id: agent.creator_id,
           product_id: agent.product_id,
-          offer_id: activeOffer?.offer_id,
           release_id: creatorState?.release?.release_id ?? agent.corpus_digest,
           request_id: requestId
         }, `product-viewed:${requestId}`);
         return send(response, 200, {
           product: withBuyerAccess(
-            publicCatalogAgent(
-              agent,
-              creatorState,
-              paymentMode,
-              activeOffer
-            ),
+            publicCatalogAgent(agent, creatorState),
             entitlements
           )
         });
@@ -1033,26 +892,9 @@ export async function createDashboardApp(options = {}) {
         const agent = candidates[0];
         if (!agent) return send(response, 404, { error: { code: "agent_unavailable", message: "The published Agent could not be found." } });
         const creatorState = portalState.getCreatorProduct(agent.creator_id, agent.product_id);
-        const product = publicCatalogAgent(
-          agent,
-          creatorState,
-          paymentMode,
-          await authoritativeProductOffer(commerce, agent, creatorState)
-        );
-        if (!product.offer || product.availability !== "published") {
-          return send(response, 409, { error: { code: "not_for_sale", message: "This Agent does not have an active offer." } });
-        }
-        if (product.offer.purchase_model === "subscription" || product.offer.model === "subscription") {
-          return send(response, 409, { error: { code: "subscription_unavailable", message: "Subscriptions are not available yet." } });
-        }
-        if (String(body.offer_id ?? "") !== String(product.offer.offer_id ?? "")) {
-          return send(response, 409, {
-            error: {
-              code: "offer_changed",
-              message: "The selected offer is no longer active.",
-              details: { requested_offer_id: body.offer_id ?? null, current_offer: product.offer }
-            }
-          });
+        const product = publicCatalogAgent(agent, creatorState);
+        if (product.availability !== "published") {
+          return send(response, 409, { error: { code: "product_unavailable", message: "This Product is not available." } });
         }
         const requestKey = commandKey;
         const existing = portalState.findCheckoutSessionByRequest(authentication.profile.id, requestKey);
@@ -1066,25 +908,22 @@ export async function createDashboardApp(options = {}) {
             release_id: product.release_id ?? product.corpus_digest,
             corpus_digest: product.corpus_digest
           },
-          offer_snapshot: product.offer,
           totals: {
-            subtotal_minor: product.offer.amount_minor,
+            subtotal_minor: 0,
             discount_minor: 0,
             tax_minor: null,
-            total_minor: product.offer.amount_minor,
-            currency: product.offer.currency
+            total_minor: 0,
+            currency: "USD"
           },
           entitlement_scope: {
-            unit: product.offer.unit ?? "delivery",
-            included_units: product.offer.included_units ?? 1,
-            version_policy: product.offer.version_policy ?? "pinned"
+            unit: "delivery",
+            included_units: 1,
+            version_policy: "pinned"
           }
         });
         await recordTelemetry("checkout_started", {
           creator_id: product.creator_id,
           product_id: product.product_id,
-          offer_id: product.offer.offer_id,
-          offer_revision: product.offer.revision,
           release_id: product.release_id,
           request_id: requestId
         }, `checkout-started:${session.checkout_session_id}`);
@@ -1123,8 +962,7 @@ export async function createDashboardApp(options = {}) {
           paymentMode,
           paymentProvider,
           commandKey,
-          paymentScenario: body.sandbox_scenario,
-          registryAccessServiceToken
+          paymentScenario: body.sandbox_scenario
         });
         await recordCheckoutTelemetry(recordTelemetry, outcome.body, session, requestId);
         return send(response, outcome.replayed ? 200 : 201, outcome.body);
@@ -1133,14 +971,22 @@ export async function createDashboardApp(options = {}) {
       if (request.method === "GET" && url.pathname === "/v1/user/product-access") {
         const authentication = await authenticate(request, registryUrl, "user", fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
-        const [access, catalog] = await Promise.all([
-          registryRequest(registryUrl, "/v1/user/product-access", {
-            fetchImpl,
-            headers: { authorization: `Bearer ${bearerToken(request)}` }
-          }),
-          authoritativeCatalog(registryUrl, fetchImpl, portalState)
-        ]);
-        return send(response, 200, { creator_agents: mergeRegistryAgents(access, catalog) });
+        const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
+        const entitlements = enrichEntitlements(
+          commerce.listBuyerEntitlements(authentication.profile.id).filter((entry) => entry.status === "active"),
+          catalog
+        );
+        const creatorAgents = entitlements.map((entry) => ({
+          ...entry,
+          user_id: entry.buyer_id,
+          agent_id: entry.product_id,
+          creator: entry.creator,
+          product: entry.product,
+          presentation: catalog.find((product) => (
+            product.creator_id === entry.creator_id && product.product_id === entry.product_id
+          ))?.presentation ?? {}
+        }));
+        return send(response, 200, { creator_agents: creatorAgents });
       }
 
       if (request.method === "GET" && ["/v1/user/orders", "/v1/orders"].includes(url.pathname)) {
@@ -1207,25 +1053,7 @@ export async function createDashboardApp(options = {}) {
           reason: String(body.reason ?? "buyer_request"),
           ...providerRefund
         }, { idempotencyKey: commandKey });
-        let accessStatus = "not_applicable";
-        if (order.entitlement?.entitlement_id) {
-          if (!registryAccessServiceToken) throw stateError("access_service_unavailable", "Registry access provisioning is not configured.", 503);
-          try {
-            await registryRequest(registryUrl, `/v1/user/product-access/${encodeURIComponent(order.entitlement.entitlement_id)}`, {
-              method: "DELETE",
-              body: JSON.stringify({ user_id: authentication.profile.id }),
-              fetchImpl,
-              headers: { authorization: `Bearer ${registryAccessServiceToken}` }
-            });
-            accessStatus = "revoked";
-          } catch {
-            // Commerce is authoritative; its durable outbox will retry the
-            // Registry projection without making a successful refund look lost.
-            accessStatus = "syncing";
-            dispatchCommerceOutbox().catch(() => undefined);
-          }
-        }
-        return send(response, 201, { refund: order.refunds.at(-1), order: orderDetail(order), access_status: accessStatus });
+        return send(response, 201, { refund: order.refunds.at(-1), order: orderDetail(order), access_status: "revoked" });
       }
 
       if (request.method === "POST" && url.pathname === "/v1/user/checkout") {
@@ -1238,8 +1066,8 @@ export async function createDashboardApp(options = {}) {
         if (!creatorId || !productId) {
           return send(response, 400, { error: { code: "invalid_checkout", message: "creator_id and product_id are required." } });
         }
-        // A completed legacy intent must remain replayable even if its offer
-        // is later changed or withdrawn. Resolve the durable intent before
+        // A completed intent must remain replayable even if the Product is
+        // later withdrawn. Resolve the durable intent before
         // consulting today's catalog; only a fresh intent is quoted anew.
         const requestKey = `legacy-checkout:${commandKey}`;
         const existing = portalState.findCheckoutSessionByRequest(authentication.profile.id, requestKey);
@@ -1256,7 +1084,6 @@ export async function createDashboardApp(options = {}) {
             portalState,
             paymentMode,
             paymentProvider,
-            registryAccessServiceToken,
             commandKey
           });
           return send(response, outcome.replayed ? 200 : 201, outcome.body);
@@ -1268,19 +1095,10 @@ export async function createDashboardApp(options = {}) {
         }
         const product = publicCatalogAgent(
           agent,
-          portalState.getCreatorProduct(agent.creator_id, agent.product_id),
-          paymentMode,
-          await authoritativeProductOffer(
-            commerce,
-            agent,
-            portalState.getCreatorProduct(agent.creator_id, agent.product_id)
-          )
+          portalState.getCreatorProduct(agent.creator_id, agent.product_id)
         );
-        if (!product.offer || product.availability !== "published") {
-          return send(response, 409, { error: { code: "not_for_sale", message: "This Agent does not have an active offer." } });
-        }
-        if (product.offer.purchase_model === "subscription" || product.offer.model === "subscription") {
-          return send(response, 409, { error: { code: "subscription_unavailable", message: "Subscriptions are not available yet." } });
+        if (product.availability !== "published") {
+          return send(response, 409, { error: { code: "product_unavailable", message: "This Product is not available." } });
         }
         // The key identifies one Buyer intent, not a permanent
         // Buyer/product pair. Replaying the same intent is idempotent while a
@@ -1293,18 +1111,17 @@ export async function createDashboardApp(options = {}) {
           product,
           creator: { id: product.creator_id, name: product.creator_name },
           release: { release_id: product.release_id ?? product.corpus_digest, corpus_digest: product.corpus_digest },
-          offer_snapshot: product.offer,
           totals: {
-            subtotal_minor: product.offer.amount_minor,
+            subtotal_minor: 0,
             discount_minor: 0,
             tax_minor: null,
-            total_minor: product.offer.amount_minor,
-            currency: product.offer.currency
+            total_minor: 0,
+            currency: "USD"
           },
           entitlement_scope: {
-            unit: product.offer.unit ?? "delivery",
-            included_units: product.offer.included_units ?? 1,
-            version_policy: product.offer.version_policy ?? "pinned"
+            unit: "delivery",
+            included_units: 1,
+            version_policy: "pinned"
           }
         });
         if (!checkoutSessionMatchesSelector(session, creatorId, productId)) {
@@ -1319,7 +1136,6 @@ export async function createDashboardApp(options = {}) {
           portalState,
           paymentMode,
           paymentProvider,
-          registryAccessServiceToken,
           commandKey
         });
         return send(response, outcome.replayed ? 200 : 201, outcome.body);
@@ -1481,13 +1297,8 @@ export async function createDashboardApp(options = {}) {
             const state = portalState.getCreatorProduct(profile.id, product.product_id);
             return {
               ...product,
-              readiness: publishReadiness(product, state, paymentMode),
-              paid_offers_enabled: isPaidMode(paymentMode),
-              commerce_capabilities: {
-                free_per_delivery: true,
-                paid_per_delivery: isPaidMode(paymentMode),
-                subscription: false
-              }
+              readiness: publishReadiness(product, state),
+              access: { mode: "free", included_deliveries: 1 }
             };
           });
         };
@@ -1574,21 +1385,11 @@ export async function createDashboardApp(options = {}) {
             entry.creator_id === profile.id && entry.product_id === productId
           ));
           if (existingPublishedAgent?.corpus_digest) {
-            const seeded = await portalState.seedPublishedProduct(
+            await portalState.seedPublishedProduct(
               profile.id,
               productId,
-              publicAgentSnapshot(existingPublishedAgent),
-              normalizeOffer(existingPublishedAgent.product_offer, existingPublishedAgent)
+              publicAgentSnapshot(existingPublishedAgent)
             );
-            if (seeded?.offer_active && !commerce.getActiveOffer(profile.id, productId)) {
-              await activatePublishedOffer(
-                commerce,
-                seeded,
-                profile.id,
-                productId,
-                seeded.active_deployment_id
-              );
-            }
           }
           if (candidateActionMatch[3] === "reject") {
             const product = await portalState.rejectCandidate(profile.id, productId, candidateId, body.expected_version, {
@@ -1639,58 +1440,6 @@ export async function createDashboardApp(options = {}) {
           });
         }
 
-        const offerMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/offer-draft$/);
-        if (request.method === "PUT" && offerMatch) {
-          const body = await readJson(request);
-          requireCapability(profile, "product:edit");
-          const productId = decodeURIComponent(offerMatch[1]);
-          if (Number(body.amount_minor) > 0 && !isPaidMode(paymentMode)) {
-            return send(response, 409, { error: { code: "paid_offers_unavailable", message: "Paid offers stay disabled until an authoritative payment provider is configured." } });
-          }
-          const commandKey = requireCommandKey(request, body);
-          const eventKey = `${commandKey}:offer-revision`;
-          const existingEvent = ledger.findByIdempotencyKey(eventKey);
-          const current = portalState.getCreatorProduct(profile.id, productId);
-          const revision = existingEvent?.revision ?? ((current?.offer_revision ?? 0) + 1);
-          const offerId = existingEvent?.offer_id ?? current?.offer_draft?.offer_id ?? stableOfferId(profile.id, productId);
-          // Always pass the command through Commerce. The ledger returns the
-          // original result for an exact replay and rejects the same key with
-          // changed amount/policy instead of silently returning the old offer.
-          const offer = await commerce.createOfferRevision({
-            ...body,
-            offer_id: offerId,
-            revision,
-            creator_id: profile.id,
-            product_id: productId,
-            idempotency_key: commandKey
-          });
-          if (current?.offer_draft?.offer_id === offer.offer_id && current.offer_draft.revision === offer.revision) {
-            const product = (await creatorProducts()).find((entry) => entry.product_id === productId);
-            await recordTelemetry("offer_saved", {
-              creator_id: profile.id,
-              product_id: productId,
-              offer_id: offer.offer_id,
-              offer_revision: offer.revision
-            }, `offer-saved:${offer.offer_id}:${offer.revision}`);
-            return send(response, 200, { product });
-          }
-          const savedProduct = await portalState.saveOffer(profile.id, productId, {
-            ...body,
-            offer_id: offer.offer_id,
-            revision: offer.revision
-          }, body.expected_version);
-          await recordTelemetry("offer_saved", {
-            creator_id: profile.id,
-            product_id: productId,
-            offer_id: offer.offer_id,
-            offer_revision: offer.revision,
-            request_id: requestId
-          }, `offer-saved:${offer.offer_id}:${offer.revision}`);
-          return send(response, 200, {
-            product: savedProduct
-          });
-        }
-
         const previewMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/storefront-preview$/);
         if (request.method === "GET" && previewMatch) {
           requireCapability(profile, "product:read");
@@ -1701,8 +1450,6 @@ export async function createDashboardApp(options = {}) {
           await recordTelemetry("preview_viewed", {
             creator_id: profile.id,
             product_id: productId,
-            offer_id: state?.offer_draft?.offer_id,
-            offer_revision: state?.offer_draft?.revision,
             release_id: state?.release?.release_id,
             request_id: requestId
           }, `preview-viewed:${requestId}`);
@@ -1719,17 +1466,8 @@ export async function createDashboardApp(options = {}) {
           if (current) portalState.validatePublishCommand(profile.id, productId, { ...body, command_key: commandKey });
           const replay = !current?.publish_operation
             && current?.status === "published"
-            && current.release?.candidate_id === (body.candidate_id ?? current.release?.candidate_id)
-            && Number(current.offer_active?.revision) === Number(body.offer_revision ?? current.offer_active?.revision);
+            && current.release?.candidate_id === (body.candidate_id ?? current.release?.candidate_id);
           if (replay) {
-            await activatePublishedOffer(
-              commerce,
-              current,
-              profile.id,
-              productId,
-              current.active_deployment_id,
-              current.last_publish_operation?.previous_deployment_id ?? null
-            );
             if (registryDeploymentServiceToken && current.release?.catalog_snapshot?.agent_id) {
               await activateRegistryDeployment({
                 registryUrl,
@@ -1749,8 +1487,6 @@ export async function createDashboardApp(options = {}) {
             await recordTelemetry("publish_succeeded", {
               creator_id: profile.id,
               product_id: productId,
-              offer_id: current.offer_active?.offer_id,
-              offer_revision: current.offer_active?.revision,
               release_id: current.release?.release_id
             }, `publish-succeeded:${current.release?.release_id}`);
             return send(response, 200, { product, release: current.release, public_url: current.public_url, canonical_url: canonicalPublicUrl(current.public_url) });
@@ -1780,7 +1516,7 @@ export async function createDashboardApp(options = {}) {
             });
           }
           // Persist a publish intent before the external Registry side effect.
-          // The intent locks candidate/offer revisions and makes a retry resume
+          // The intent locks the approved candidate and makes a retry resume
           // the same operation instead of creating another release.
           const pending = await portalState.beginPublishProduct(profile.id, productId, {
             ...body,
@@ -1796,8 +1532,6 @@ export async function createDashboardApp(options = {}) {
           await recordTelemetry("publish_started", {
             creator_id: profile.id,
             product_id: productId,
-            offer_id: operation.offer_id,
-            offer_revision: operation.offer_revision,
             request_id: requestId
           }, `publish-started:${operation.operation_id}`);
           const state = await resumePublishDeployment({
@@ -1805,7 +1539,6 @@ export async function createDashboardApp(options = {}) {
             productId,
             state: pending,
             portalState,
-            commerce,
             registryUrl,
             fetchImpl,
             registryDeploymentServiceToken,
@@ -1814,8 +1547,6 @@ export async function createDashboardApp(options = {}) {
           await recordTelemetry("publish_succeeded", {
             creator_id: profile.id,
             product_id: productId,
-            offer_id: state.offer_active?.offer_id,
-            offer_revision: state.offer_active?.revision,
             release_id: state.release?.release_id,
             request_id: requestId
           }, `publish-succeeded:${state.release?.release_id}`);
@@ -1848,16 +1579,6 @@ export async function createDashboardApp(options = {}) {
             );
           }
           if (!current?.rollback_operation && current?.release?.release_id === releaseId) {
-            await activatePublishedOffer(
-              commerce,
-              current,
-              profile.id,
-              productId,
-              current.active_deployment_id,
-              current.last_rollback_operation?.previous_deployment_id
-                ?? current.last_publish_operation?.previous_deployment_id
-                ?? null
-            );
             const product = (await creatorProducts()).find((entry) => entry.product_id === productId);
             if (registryDeploymentServiceToken && product?.agent_id) {
               await activateRegistryDeployment({
@@ -1890,7 +1611,6 @@ export async function createDashboardApp(options = {}) {
             productId,
             state: pending,
             portalState,
-            commerce,
             registryUrl,
             fetchImpl,
             registryDeploymentServiceToken,
@@ -2081,7 +1801,6 @@ export async function createDashboardApp(options = {}) {
     telemetry,
     reconcilePendingCheckouts,
     dispatchCommerceOutbox,
-    reconcileCommerceAccessProjections,
     reconcilePayouts,
     reconcileFinance,
     reconcileDeployments
@@ -2102,10 +1821,6 @@ export async function startDashboardServer(options = {}) {
     app.dispatchCommerceOutbox().catch(() => undefined);
   }, 2_000);
   outboxTimer.unref?.();
-  const accessReconcileTimer = setInterval(() => {
-    app.reconcileCommerceAccessProjections().catch(() => undefined);
-  }, 30_000);
-  accessReconcileTimer.unref?.();
   const financeTimer = setInterval(() => {
     app.reconcileFinance().catch(() => undefined);
   }, 30_000);
@@ -2117,7 +1832,6 @@ export async function startDashboardServer(options = {}) {
   server.once("close", () => {
     clearInterval(reconcileTimer);
     clearInterval(outboxTimer);
-    clearInterval(accessReconcileTimer);
     clearInterval(financeTimer);
     clearInterval(deploymentTimer);
     app.ledger.close?.().catch(() => undefined);
@@ -2126,7 +1840,6 @@ export async function startDashboardServer(options = {}) {
   });
   app.reconcilePendingCheckouts().catch(() => undefined);
   app.dispatchCommerceOutbox().catch(() => undefined);
-  app.reconcileCommerceAccessProjections().catch(() => undefined);
   app.reconcileFinance().catch(() => undefined);
   app.reconcileDeployments().catch(() => undefined);
   return { ...app, server, port, host };
@@ -2390,13 +2103,10 @@ function mergeRegistryAgents(access, catalog) {
 
 async function recordCheckoutTelemetry(recordTelemetry, outcome, session, requestId) {
   const product = session?.product ?? {};
-  const offer = session?.offer_snapshot ?? {};
   const release = session?.release ?? {};
   const attributes = {
     creator_id: product.creator_id,
     product_id: product.product_id,
-    offer_id: offer.offer_id,
-    offer_revision: offer.revision,
     release_id: release.release_id,
     request_id: requestId
   };
@@ -2434,7 +2144,7 @@ async function recordCheckoutTelemetry(recordTelemetry, outcome, session, reques
   await Promise.all(tasks);
 }
 
-async function confirmCheckoutSession({ session, authentication, registryUrl, fetchImpl, commerce, portalState, paymentMode, paymentProvider, registryAccessServiceToken, commandKey, paymentScenario }) {
+async function confirmCheckoutSession({ session, authentication, registryUrl, fetchImpl, commerce, portalState }) {
   if (session.status === "completed" && session.order_id) {
     const order = commerce.getOrder(session.order_id);
     return { replayed: true, body: checkoutOutcomeBody(session, order, order?.entitlement) };
@@ -2445,41 +2155,14 @@ async function confirmCheckoutSession({ session, authentication, registryUrl, fe
     if (!order || !entitlement) {
       throw stateError("checkout_recovery_failed", "The confirmed order could not be recovered.", 503);
     }
-    const completed = await provisionCheckoutAccess({
-      session,
-      order,
-      entitlement,
-      registryUrl,
-      fetchImpl,
-      portalState,
-      registryAccessServiceToken
-    });
+    const completed = await completeCheckoutAccess({ session, order, entitlement, portalState });
     return { replayed: true, body: checkoutOutcomeBody(completed, order, entitlement) };
   }
-  const amountMinor = Number(session.totals?.total_minor ?? session.offer_snapshot?.amount_minor ?? 0);
-  if (["payment_pending", "requires_action", "payment_failed"].includes(session.status) && session.payment_id) {
-    const payment = commerce.getPayment(session.payment_id);
-    if (!payment) throw stateError("payment_recovery_failed", "The payment record could not be recovered.", 503);
-    if (payment.status === "succeeded") {
-      return finalizeCheckoutOrder({ session, authentication, registryUrl, fetchImpl, commerce, portalState, registryAccessServiceToken, payment });
-    }
-    return { replayed: true, body: pendingPaymentOutcome(session, payment) };
-  }
-  if (session.status === "expired" || session.status === "offer_changed" || Date.parse(session.expires_at) <= Date.now()) {
-    throw stateError("checkout_expired", "Checkout session has expired. Review the current offer again.", 409);
+  if (session.status === "expired" || session.status === "release_changed" || Date.parse(session.expires_at) <= Date.now()) {
+    throw stateError("checkout_expired", "This access request expired. Return to the Product and try again.", 409);
   }
   if (session.status !== "open") {
     throw stateError("checkout_not_confirmable", "Checkout session cannot be confirmed in its current state.", 409);
-  }
-  if (!registryAccessServiceToken) {
-    throw stateError("access_service_unavailable", "Registry access provisioning is not configured.", 503);
-  }
-  if (amountMinor > 0 && !isPaidMode(paymentMode)) {
-    throw stateError(
-      "payment_provider_unavailable",
-      "Paid checkout is not enabled. Choose a free offer or configure a payment provider.",
-      409
-    );
   }
   const catalog = await authoritativeCatalog(registryUrl, fetchImpl, portalState);
   const currentAgent = findCatalogAgent(catalog, session.product.creator_id, session.product.product_id);
@@ -2487,143 +2170,45 @@ async function confirmCheckoutSession({ session, authentication, registryUrl, fe
     ? portalState.getCreatorProduct(currentAgent.creator_id, currentAgent.product_id)
     : undefined;
   const currentProduct = currentAgent
-    ? publicCatalogAgent(
-      currentAgent,
-      currentState,
-      paymentMode,
-      await authoritativeProductOffer(commerce, currentAgent, currentState)
-    )
+    ? publicCatalogAgent(currentAgent, currentState)
     : null;
-  if (!checkoutQuoteIsCurrent(session, currentProduct)) {
-    const changed = await portalState.markCheckoutQuoteChanged(session.checkout_session_id, currentProduct);
+  if (!checkoutReleaseIsCurrent(session, currentProduct)) {
+    const changed = await portalState.markCheckoutReleaseChanged(session.checkout_session_id, currentProduct);
     throw stateError(
-      "offer_changed",
-      "The active offer or release changed. Review the latest product before confirming.",
+      "release_changed",
+      "The Product release changed. Review the current Product before confirming access.",
       409,
-      changed.quote_change
+      changed.release_change
     );
   }
-  if (amountMinor > 0) {
-    const paymentId = stablePaymentId(session.checkout_session_id);
-    const providerResult = await paymentProvider.createPayment({
-      payment_id: paymentId,
-      checkout_session_id: session.checkout_session_id,
-      buyer_id: authentication.profile.id,
-      creator_id: session.product.creator_id,
-      product_id: session.product.product_id,
-      amount_minor: amountMinor,
-      currency: session.totals?.currency ?? session.offer_snapshot.currency,
-      return_url: `/checkout/${encodeURIComponent(session.checkout_session_id)}`,
-      idempotency_key: `checkout:${session.checkout_session_id}:provider-payment`,
-      ...(paymentMode === "sandbox" && paymentScenario ? { scenario: paymentScenario } : {})
-    });
-    const provider = String(providerResult.provider ?? paymentProvider.provider ?? "configured_provider");
-    const createdPayment = await commerce.createPayment({
-      payment_id: paymentId,
-      checkout_session_id: session.checkout_session_id,
-      buyer_id: authentication.profile.id,
-      creator_id: session.product.creator_id,
-      product_id: session.product.product_id,
-      amount_minor: amountMinor,
-      currency: session.totals?.currency ?? session.offer_snapshot.currency,
-      provider,
-      provider_payment_id: providerResult.provider_payment_id,
-      actor_id: authentication.profile.id,
-      service_name: "dashboard-bff",
-      request_id: commandKey,
-      idempotency_key: `checkout:${session.checkout_session_id}:payment`
-    });
-    // A provider's create-intent response is not settlement authority. In
-    // production provider mode, a synchronous `succeeded` response remains
-    // pending until the separately signed webhook is durably ingested. The
-    // sandbox keeps its direct-success path for deterministic local UAT.
-    const recorded = paymentMode === "provider" && providerResult.status === "succeeded"
-      ? { payment: createdPayment, applied: false }
-      : await commerce.recordPaymentProviderEvent({
-        payment_id: paymentId,
-        provider,
-        provider_event_id: String(providerResult.provider_event_id),
-        provider_payment_id: providerResult.provider_payment_id,
-        provider_sequence: providerResult.provider_sequence,
-        provider_occurred_at: providerResult.provider_occurred_at,
-        status: providerResult.status,
-        next_action: providerResult.redirect_url ? { redirect_url: providerResult.redirect_url } : providerResult.next_action,
-        failure_code: providerResult.failure_code,
-        failure_message: providerFailureMessage(providerResult.failure_code, providerResult.status, "payment"),
-        actor_id: provider,
-        service_name: "payment-provider"
-      });
-    const paymentSession = await portalState.markCheckoutPayment(session.checkout_session_id, {
-      payment_id: paymentId,
-      provider,
-      status: recorded.payment.status,
-      redirect_url: providerResult.redirect_url ?? recorded.payment.next_action?.redirect_url
-    });
-    if (recorded.payment.status !== "succeeded") {
-      return { replayed: false, body: pendingPaymentOutcome(paymentSession, recorded.payment) };
-    }
-    return finalizeCheckoutOrder({
-      session: paymentSession,
-      authentication,
-      registryUrl,
-      fetchImpl,
-      commerce,
-      portalState,
-      registryAccessServiceToken,
-      payment: recorded.payment
-    });
-  }
-  return finalizeCheckoutOrder({
-    session,
-    authentication,
-    registryUrl,
-    fetchImpl,
-    commerce,
-    portalState,
-    registryAccessServiceToken,
-    payment: null
-  });
+  return finalizeCheckoutOrder({ session, authentication, commerce, portalState });
 }
 
-async function finalizeCheckoutOrder({ session, authentication, registryUrl, fetchImpl, commerce, portalState, registryAccessServiceToken, payment, transaction: committedTransaction }) {
-  const amountMinor = Number(session.totals?.total_minor ?? session.offer_snapshot?.amount_minor ?? 0);
-  const paymentStatus = amountMinor === 0 ? "not_required" : "paid";
-  const paymentId = payment?.payment_id ?? null;
+async function finalizeCheckoutOrder({ session, authentication, commerce, portalState, transaction: committedTransaction }) {
   const transaction = committedTransaction ?? await commerce.confirmCheckout(
-    checkoutCommerceInput(session, authentication, payment)
+    checkoutCommerceInput(session, authentication)
   );
   const { order, entitlement } = transaction;
   const pending = await portalState.markCheckoutFulfillmentPending(session.checkout_session_id, {
     order_id: order.order_id,
     entitlement_id: entitlement.entitlement_id,
-    payment_status: paymentStatus
+    payment_status: "not_required"
   });
-  const completed = await provisionCheckoutAccess({
-    session: pending,
-    order,
-    entitlement,
-    registryUrl,
-    fetchImpl,
-    portalState,
-    registryAccessServiceToken
-  });
+  const completed = await completeCheckoutAccess({ session: pending, order, entitlement, portalState });
   return {
     replayed: false,
     body: checkoutOutcomeBody(completed, order, entitlement, {
-      payment_id: paymentId,
-      status: amountMinor === 0 ? "not_required" : "succeeded",
-      amount_minor: amountMinor,
-      currency: order.currency,
-      mode: amountMinor > 0 ? payment?.provider ?? "provider" : "not_required",
-      provider_payment_id: payment?.provider_payment_id ?? null
+      payment_id: null,
+      status: "not_required",
+      amount_minor: 0,
+      currency: "USD",
+      mode: "not_required",
+      provider_payment_id: null
     })
   };
 }
 
-function checkoutCommerceInput(session, authentication, payment) {
-  const amountMinor = Number(session.totals?.total_minor ?? session.offer_snapshot?.amount_minor ?? 0);
-  const paymentStatus = amountMinor === 0 ? "not_required" : "paid";
-  const paymentId = payment?.payment_id ?? null;
+function checkoutCommerceInput(session, authentication) {
   const product = session.product;
   return {
     buyer_id: authentication.profile.id,
@@ -2643,23 +2228,17 @@ function checkoutCommerceInput(session, authentication, payment) {
       description: product.description
     },
     release_snapshot: session.release,
-    offer_snapshot: session.offer_snapshot,
     corpus_digest: session.release?.corpus_digest ?? product.corpus_digest,
     release_id: session.release?.release_id ?? product.corpus_digest,
-    offer_id: session.offer_snapshot.offer_id,
-    offer_revision: session.offer_snapshot.revision ?? 1,
-    subtotal_minor: Number(session.totals?.subtotal_minor ?? amountMinor),
-    discount_minor: Number(session.totals?.discount_minor ?? 0),
-    tax_minor: session.totals?.tax_minor == null ? null : Number(session.totals.tax_minor),
-    total_minor: Number(session.totals?.total_minor ?? amountMinor),
-    purchase_model: session.offer_snapshot.purchase_model ?? session.offer_snapshot.model ?? "per_delivery",
-    included_units: session.entitlement_scope?.included_units ?? 1,
-    gross_minor: amountMinor,
-    currency: session.totals?.currency ?? session.offer_snapshot.currency,
-    payment_status: paymentStatus,
-    ...(paymentId ? { payment_id: paymentId } : {}),
-    refund_policy_version: session.offer_snapshot.refund_policy_version,
-    version_policy: session.entitlement_scope?.version_policy ?? "pinned",
+    subtotal_minor: 0,
+    discount_minor: 0,
+    tax_minor: null,
+    total_minor: 0,
+    included_units: 1,
+    gross_minor: 0,
+    currency: "USD",
+    payment_status: "not_required",
+    version_policy: "pinned",
     idempotency_key: `checkout:${session.checkout_session_id}:confirm`
   };
 }
@@ -2809,6 +2388,32 @@ function entitlementAuthorization(entitlement) {
   };
 }
 
+function runtimeEntitlementBinding(entitlement) {
+  const productId = entitlement.product_id ?? entitlement.agent_id;
+  const purchasedCorpusDigest = entitlement.purchased_corpus_digest ?? entitlement.corpus_digest;
+  const effectiveCorpusDigest = entitlement.effective_corpus_digest ?? purchasedCorpusDigest;
+  if (!productId || !purchasedCorpusDigest || !effectiveCorpusDigest) {
+    throw stateError(
+      "entitlement_migration_required",
+      "This entitlement is missing its purchase-time Product release binding.",
+      409
+    );
+  }
+  return {
+    entitlement_id: entitlement.entitlement_id,
+    order_id: entitlement.order_id,
+    user_id: entitlement.buyer_id,
+    creator_id: entitlement.creator_id,
+    agent_id: productId,
+    product_id: productId,
+    status: "active",
+    purchased_corpus_digest: purchasedCorpusDigest,
+    effective_corpus_digest: effectiveCorpusDigest,
+    version_policy: entitlement.version_policy ?? "pinned",
+    version_history: entitlement.version_history ?? []
+  };
+}
+
 async function confirmedProviderRefund(paymentProvider, order, input) {
   if (Number(order.gross_minor) === 0) return {};
   const refundId = `refund_${createHash("sha256").update(`provider-refund\0${order.order_id}\0${input.idempotency_key}`).digest("hex").slice(0, 24)}`;
@@ -2833,33 +2438,7 @@ async function confirmedProviderRefund(paymentProvider, order, input) {
   };
 }
 
-async function provisionCheckoutAccess({ session, order, entitlement, registryUrl, fetchImpl, portalState, registryAccessServiceToken }) {
-  if (!registryAccessServiceToken) {
-    throw stateError("access_service_unavailable", "Registry access provisioning is not configured.", 503);
-  }
-  const product = session.product;
-  const purchasedCorpusDigest = session.release?.corpus_digest ?? entitlement.corpus_digest ?? order.corpus_digest;
-  const grant = await registryRequest(
-    registryUrl,
-    `/v1/user/products/${encodeURIComponent(product.product_id)}/access`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        user_id: session.buyer_id,
-        creator_id: product.creator_id,
-        order_id: order.order_id,
-        entitlement_id: entitlement.entitlement_id,
-        purchased_corpus_digest: purchasedCorpusDigest,
-        version_policy: entitlement.version_policy ?? session.entitlement_scope?.version_policy ?? "pinned"
-      }),
-      fetchImpl,
-      headers: { authorization: `Bearer ${registryAccessServiceToken}` }
-    }
-  );
-  if (grant.entitlement_id !== entitlement.entitlement_id
-    || (grant.purchased_corpus_digest && grant.purchased_corpus_digest !== purchasedCorpusDigest)) {
-    throw stateError("entitlement_provisioning_mismatch", "Registry access did not bind the confirmed entitlement and release.", 502);
-  }
+async function completeCheckoutAccess({ session, order, entitlement, portalState }) {
   return portalState.completeCheckout(session.checkout_session_id, {
     order_id: order.order_id,
     entitlement_id: entitlement.entitlement_id,
@@ -2872,7 +2451,6 @@ async function resumePublishDeployment({
   productId,
   state,
   portalState,
-  commerce,
   registryUrl,
   fetchImpl,
   registryDeploymentServiceToken,
@@ -2936,22 +2514,6 @@ async function resumePublishDeployment({
       operation = current.publish_operation;
     }
   }
-  if (!operation.offer_activated_at) {
-    const activeOffer = await activatePublishedOffer(commerce, {
-      offer_active: operation.offer_snapshot,
-      release: {
-        release_id: operation.release_id,
-        corpus_digest: operation.candidate_digest
-      }
-    }, creatorId, productId, operation.operation_id, operation.previous_deployment_id ?? null);
-    if (activeOffer.operation_id !== operation.operation_id
-      || activeOffer.release_id !== operation.release_id
-      || activeOffer.corpus_digest !== operation.candidate_digest) {
-      throw stateError("deployment_target_mismatch", "Commerce activated a different deployment tuple.", 409);
-    }
-    current = await portalState.markPublishOfferActivated(creatorId, productId, operation.operation_id);
-    operation = current.publish_operation;
-  }
   if (!operation.registry_activated_at) {
     await activateRegistryDeployment({
       registryUrl,
@@ -2973,7 +2535,6 @@ async function resumeRollbackDeployment({
   productId,
   state,
   portalState,
-  commerce,
   registryUrl,
   fetchImpl,
   registryDeploymentServiceToken,
@@ -2982,22 +2543,6 @@ async function resumeRollbackDeployment({
   let current = state;
   let operation = current?.rollback_operation;
   if (!operation) return current;
-  if (!operation.offer_activated_at) {
-    const activeOffer = await activatePublishedOffer(commerce, {
-      offer_active: operation.offer_snapshot,
-      release: {
-        release_id: operation.release_id,
-        corpus_digest: operation.corpus_digest
-      }
-    }, creatorId, productId, operation.operation_id, operation.previous_deployment_id ?? null);
-    if (activeOffer.operation_id !== operation.operation_id
-      || activeOffer.release_id !== operation.release_id
-      || activeOffer.corpus_digest !== operation.corpus_digest) {
-      throw stateError("deployment_target_mismatch", "Commerce activated a different rollback tuple.", 409);
-    }
-    current = await portalState.markRollbackOfferActivated(creatorId, productId, operation.operation_id);
-    operation = current.rollback_operation;
-  }
   if (!operation.registry_activated_at) {
     await activateRegistryDeployment({
       registryUrl,
@@ -3058,79 +2603,6 @@ async function activateRegistryDeployment({
   return activated;
 }
 
-async function activatePublishedOffer(
-  commerce,
-  state,
-  creatorId,
-  productId,
-  operationId = state?.active_deployment_id,
-  expectedPreviousOperationId
-) {
-  const offer = state?.offer_active;
-  if (!offer?.offer_id || !Number.isSafeInteger(Number(offer.revision))) {
-    throw stateError("offer_required", "A versioned offer is required before publication.", 409);
-  }
-  const revision = Number(offer.revision);
-  const revisionKey = `offer:${creatorId}:${productId}:${revision}`;
-  if (!commerce.getOfferRevision(offer.offer_id, revision)) {
-    await commerce.createOfferRevision({
-      ...offer,
-      creator_id: creatorId,
-      product_id: productId,
-      idempotency_key: `${revisionKey}:migration`
-    });
-  }
-  return commerce.activateOfferRevision({
-    offer_id: offer.offer_id,
-    revision,
-    creator_id: creatorId,
-    product_id: productId,
-    release_id: state.release?.release_id,
-    corpus_digest: state.release?.corpus_digest,
-    operation_id: operationId ?? `migration:${state.release?.release_id ?? revision}`,
-    ...(expectedPreviousOperationId === undefined
-      ? {}
-      : { expected_previous_operation_id: expectedPreviousOperationId }),
-    idempotency_key: `deployment:${operationId ?? `migration:${state.release?.release_id ?? revision}`}`
-  });
-}
-
-async function authoritativeProductOffer(commerce, agent, creatorState) {
-  const active = commerce.getActiveOffer(agent.creator_id, agent.product_id);
-  if (creatorState) {
-    const committedReleaseId = creatorState.release?.release_id ?? creatorState.release?.corpus_digest;
-    // A product that is still in a pending first publish has no committed
-    // public tuple. Do not leak an offer that Commerce activated before the
-    // Registry pointer/Portal state commit.
-    if (!committedReleaseId) return null;
-    const activeReleaseId = active?.release_id ?? active?.corpus_digest;
-    if (active && String(activeReleaseId ?? "") === String(committedReleaseId)) return active;
-    // During a deployment retry Commerce may briefly contain the next offer
-    // while the public pointer still serves the previous immutable release.
-    // Keep the last committed snapshot visible until the saga converges.
-    return normalizeOffer(creatorState.offer_active, agent);
-  }
-  if (active) return active;
-
-  // Registry manifests predating Commerce V2 carried the initial offer next
-  // to the Corpus. Migrate that tuple exactly once before it is shown or
-  // quoted. From this point on Registry changes cannot silently replace the
-  // Commerce-owned revision; a Creator must publish a new deployment.
-  const legacy = normalizeOffer(agent.product_offer, agent);
-  const corpusDigest = String(agent.corpus_digest ?? "").trim();
-  if (!legacy || legacy.status !== "active" || !corpusDigest) return null;
-  const operationId = `legacy-registry:${corpusDigest}:${legacy.offer_id}:${legacy.revision}`;
-  await activatePublishedOffer(commerce, {
-    offer_active: legacy,
-    release: {
-      release_id: corpusDigest,
-      corpus_digest: corpusDigest
-    },
-    active_deployment_id: operationId
-  }, agent.creator_id, agent.product_id, operationId);
-  return commerce.getActiveOffer(agent.creator_id, agent.product_id);
-}
-
 function checkoutOutcomeBody(session, order, entitlement, payment) {
   const entitlementId = entitlement?.entitlement_id ?? session.entitlement_id ?? order?.entitlement_id ?? null;
   return {
@@ -3158,7 +2630,7 @@ async function authoritativeCatalog(registryUrl, fetchImpl, portalState) {
   // Portal only changes its stable release after both Commerce and Registry
   // have acknowledged the same deployment operation. A captured immutable
   // snapshot therefore prevents a pending or repaired Registry pointer from
-  // being mixed with the previous Portal/Offer tuple.
+  // being mixed with the previous Portal release snapshot.
   for (const state of portalState.listCreatorProducts()) {
     const snapshot = state?.release?.catalog_snapshot;
     if (!snapshot?.creator_id || !snapshot?.product_id) continue;
@@ -3189,17 +2661,9 @@ function canonicalPublicUrl(value) {
   return match ? `/products/${match[1].toLowerCase()}` : (text || undefined);
 }
 
-function publicCatalogAgent(agent, creatorState, paymentMode = "disabled", commerceOffer) {
-  // Once a product enters the V2 workflow, only the Commerce activation is
-  // authoritative. Registry product_offer remains a legacy migration seed.
+function publicCatalogAgent(agent, creatorState) {
   const deployedAgent = creatorState?.release?.catalog_snapshot ?? agent;
-  // A published Portal state carries the workflow snapshot, but Commerce is
-  // the authority for the active offer revision. Only fall back to the state
-  // or legacy Registry offer while migrating an unpublished/legacy tuple.
-  const offer = commerceOffer
-    ?? (creatorState ? normalizeOffer(creatorState.offer_active, deployedAgent) : normalizeOffer(deployedAgent.product_offer, deployedAgent));
   const withdrawn = creatorState?.status === "withdrawn";
-  const checkoutAvailable = Boolean(!withdrawn && offer && (offer.amount_minor === 0 || isPaidMode(paymentMode)));
   const {
     agent_id: _agentId,
     creator_slug: _creatorSlug,
@@ -3215,23 +2679,17 @@ function publicCatalogAgent(agent, creatorState, paymentMode = "disabled", comme
     promise: deployedAgent.product_promise ?? deployedAgent.product_description ?? "",
     description: deployedAgent.product_description ?? "",
     boundaries: deployedAgent.product_boundaries ?? [],
-    availability: withdrawn ? "withdrawn" : checkoutAvailable ? "published" : "not_for_sale",
-    available: checkoutAvailable,
-    offer,
-    ...(offer ? { product_offer: offer } : {}),
+    availability: withdrawn ? "withdrawn" : "published",
+    available: !withdrawn,
     release_id: creatorState?.release?.release_id ?? deployedAgent.corpus_digest,
     public_url: `/products/${encodeURIComponent(deployedAgent.product_id)}`
   };
 }
 
-function checkoutQuoteIsCurrent(session, product) {
-  if (!product || product.availability !== "published" || !product.offer) return false;
-  const quoted = session.offer_snapshot ?? {};
-  return String(product.offer.offer_id) === String(quoted.offer_id)
-    && Number(product.offer.revision ?? 1) === Number(quoted.revision ?? 1)
-    && Number(product.offer.amount_minor) === Number(quoted.amount_minor)
-    && String(product.offer.currency) === String(quoted.currency)
-    && String(product.release_id ?? product.corpus_digest) === String(session.release?.release_id ?? session.release?.corpus_digest);
+function checkoutReleaseIsCurrent(session, product) {
+  if (!product || product.availability !== "published") return false;
+  return String(product.release_id ?? product.corpus_digest)
+    === String(session.release?.release_id ?? session.release?.corpus_digest);
 }
 
 function checkoutSessionMatchesSelector(session, creatorId, productId) {
@@ -3247,26 +2705,6 @@ function withBuyerAccess(product, entitlements) {
     && (entry.remaining_units > 0 || entry.reserved_units > 0)
   ));
   return entitlement ? { ...product, entitlement } : product;
-}
-
-function normalizeOffer(value, agent = {}) {
-  if (!value || typeof value !== "object" || !Number.isSafeInteger(Number(value.amount_minor)) || Number(value.amount_minor) < 0) {
-    return null;
-  }
-  const model = value.purchase_model ?? value.model ?? "per_delivery";
-  return {
-    offer_id: value.offer_id ?? stableOfferId(agent.creator_id ?? "creator", agent.product_id ?? "product"),
-    revision: Number.isSafeInteger(Number(value.revision)) ? Number(value.revision) : 1,
-    purchase_model: model,
-    model,
-    amount_minor: Number(value.amount_minor),
-    currency: String(value.currency ?? "USD").toUpperCase(),
-    unit: value.unit ?? "delivery",
-    included_units: Number.isSafeInteger(Number(value.included_units)) ? Number(value.included_units) : 1,
-    refund_policy_version: value.refund_policy_version ?? "v1",
-    version_policy: value.version_policy === "track_current_compatible" ? "track_current_compatible" : "pinned",
-    status: value.status ?? "active"
-  };
 }
 
 function findCatalogAgent(catalog, creatorSelector, productSelector) {
@@ -3319,11 +2757,6 @@ function creatorProductViews(agents, runs, states, creatorId) {
 function creatorProductView(agent, state, run) {
   if (!agent) return null;
   const base = agent.name ? agent : catalogAgentToProduct(agent);
-  const offer = state?.offer_draft ?? normalizeOffer(agent.product_offer, agent) ?? (base.price_minor !== null ? normalizeOffer({
-    model: base.pricing_model,
-    amount_minor: base.price_minor,
-    currency: base.currency
-  }, base) : null);
   let runCandidate;
   if (run?.candidate && run.status === "ready") {
     try {
@@ -3349,17 +2782,13 @@ function creatorProductView(agent, state, run) {
     status,
     candidate: presentedCandidate,
     approval: presentedApproval,
-    offer,
-    offer_draft: state?.offer_draft ?? null,
-    offer_active: state?.offer_active ?? normalizeOffer(agent.product_offer, agent),
     release: state?.release ?? null,
     releases: state?.releases ?? (state?.release ? [state.release] : []),
     public_url: canonicalPublicUrl(state?.public_url) ?? (base.status === "published" ? `/products/${encodeURIComponent(base.product_id)}` : null),
     readiness: {
       candidate_approved: candidateApproved,
-      offer_valid: Boolean(state?.offer_draft ?? normalizeOffer(agent.product_offer, agent)),
       publishable_corpus: Boolean(runCandidate?.corpus_verified || base.corpus_digest),
-      ready: Boolean(candidateApproved && state?.offer_draft)
+      ready: Boolean(candidateApproved && (runCandidate?.corpus_verified || base.corpus_digest))
     },
     updated_at: state?.updated_at ?? run?.updated_at ?? base.published_at
   };
@@ -3437,39 +2866,30 @@ function candidateFromFactoryRun(run, expectedProductId) {
   };
 }
 
-function storefrontPreview(product, profile, state, paymentMode = "disabled") {
-  const offer = state?.offer_draft ?? product.offer_draft ?? product.offer;
+function storefrontPreview(product, profile, state) {
   const candidate = product.candidate ?? state?.candidate;
   const presentedCandidate = approvalMatchesCandidate(state?.approval, candidate)
     ? { ...candidate, status: "approved", approval_status: "approved", approved: true }
     : candidate;
   return {
-    product: { ...product, offer },
+    product,
     creator: profile,
     candidate: presentedCandidate,
-    offer,
     resource_version: state?.version ?? product.resource_version ?? 0,
     public_url: `/products/${encodeURIComponent(product.product_id)}`,
-    readiness: publishReadiness({ ...product, offer }, state, paymentMode),
+    readiness: publishReadiness(product, state),
     preview: true
   };
 }
 
-function publishReadiness(product, state, paymentMode = "disabled") {
+function publishReadiness(product, state) {
   const candidate = product?.candidate ?? state?.candidate;
   const approval = state?.approval ?? product?.approval;
-  const offer = state?.offer_draft ?? product?.offer_draft ?? product?.offer;
   const gates = Array.isArray(candidate?.critical_gates) ? candidate.critical_gates : [];
   const candidateApproved = approvalMatchesCandidate(approval, candidate);
   const noCriticalFailures = Boolean(candidate?.corpus_verified)
     && gates.length > 0
     && gates.every((gate) => gate.passed !== false);
-  const offerValid = Boolean(offer)
-    && (offer.purchase_model ?? offer.model) === "per_delivery"
-    && Number.isSafeInteger(Number(offer.amount_minor))
-    && Number(offer.amount_minor) >= 0
-    && Number(offer.included_units ?? 1) > 0
-    && (Number(offer.amount_minor) === 0 || isPaidMode(paymentMode));
   const copyComplete = Boolean(
     String(product?.promise ?? product?.product_promise ?? "").trim()
     && String(product?.description ?? product?.product_description ?? "").trim()
@@ -3478,24 +2898,22 @@ function publishReadiness(product, state, paymentMode = "disabled") {
   );
   const ownershipValid = Boolean(product?.creator_id);
   const materializationReady = Boolean(candidate?.digest && candidate?.corpus_verified);
-  const slugAvailable = Boolean(product?.product_id && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(product.product_id));
+  const productIdentityValid = Boolean(product?.product_id && UUID_V4_PATTERN.test(product.product_id));
   const checks = [
     [candidateApproved, "candidate approval is stale"],
     [noCriticalFailures, "critical candidate gates are incomplete"],
-    [offerValid, "offer is unsupported or invalid"],
     [copyComplete, "public promise, description, or boundaries are incomplete"],
     [ownershipValid, "Creator ownership is missing"],
     [materializationReady, "Registry materialization is not ready"],
-    [slugAvailable, "canonical product slug is invalid"]
+    [productIdentityValid, "canonical Product UUID is invalid"]
   ];
   return {
     candidate_approved: candidateApproved,
     no_critical_failures: noCriticalFailures,
-    offer_valid: offerValid,
     public_copy_complete: copyComplete,
     ownership_valid: ownershipValid,
     materialization_ready: materializationReady,
-    canonical_slug_available: slugAvailable,
+    product_identity_valid: productIdentityValid,
     blockers: checks.filter(([ready]) => !ready).map(([, message]) => message),
     ready: checks.every(([ready]) => ready)
   };
@@ -3646,14 +3064,6 @@ function randomId() {
   return randomUUID().replaceAll("-", "");
 }
 
-function isPaidMode(mode) {
-  return ["test", "sandbox", "provider"].includes(mode);
-}
-
-function stableOfferId(creatorId, productId) {
-  return stableAuthorityUuid(`offer:${creatorId}:${productId}`);
-}
-
 function stableAuthorityUuid(seed) {
   const digest = createHash("sha256").update(String(seed)).digest("hex").slice(0, 32).split("");
   digest[12] = "4";
@@ -3663,7 +3073,6 @@ function stableAuthorityUuid(seed) {
 }
 
 function catalogAgentToProduct(agent) {
-  const offer = agent?.product_offer ?? {};
   return {
     product_id: agent.product_id,
     creator_id: agent.creator_id,
@@ -3674,9 +3083,6 @@ function catalogAgentToProduct(agent) {
     promise: agent.product_promise ?? agent.product_description ?? "",
     boundaries: agent.product_boundaries ?? [],
     status: agent.status ?? "published",
-    price_minor: Number.isInteger(offer.amount_minor) ? offer.amount_minor : null,
-    currency: offer.currency ?? "USD",
-    pricing_model: offer.model ?? null,
     published_at: agent.published_at ?? null,
     presentation: agent.presentation ?? {}
   };
@@ -3916,8 +3322,6 @@ function creatorOrderExportRow(order) {
     buyer_display_name: order.buyer_display_name ?? "Hatch buyer",
     product_id: order.product_id,
     product_name: order.product_name ?? order.product_snapshot?.name ?? "",
-    offer_id: order.offer_id ?? "",
-    offer_revision: order.offer_revision ?? "",
     order_status: order.status,
     payment_status: order.payment_status,
     entitlement_status: order.entitlement_status,
@@ -3945,8 +3349,9 @@ function decodeCursor(value) {
 
 function send(response, status, body) {
   response.statusCode = status;
-  response.setHeader("access-control-allow-origin", "http://127.0.0.1:8510");
-  response.setHeader("access-control-allow-credentials", "true");
+  const corsOrigin = response.__hatchCorsOrigin ?? "http://127.0.0.1:8510";
+  response.setHeader("access-control-allow-origin", corsOrigin);
+  if (corsOrigin !== "*") response.setHeader("access-control-allow-credentials", "true");
   response.setHeader("access-control-allow-headers", "authorization, content-type, idempotency-key, x-csrf-token, x-request-id");
   response.setHeader("access-control-expose-headers", "x-request-id");
   response.setHeader("access-control-allow-methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");

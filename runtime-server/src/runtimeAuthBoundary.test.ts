@@ -109,7 +109,6 @@ test("Runtime rejects another user's entitlement for an introspected session", a
       socket!.once("open", () => socket!.send(JSON.stringify({
         type: "client.hello",
         protocol_version: "0.7",
-        installation_id: "desktop-mallory",
         auth_token: "opaque-mallory",
         entitlement_id: entitlement.entitlement_id,
         creator_id: entitlement.creator_id,
@@ -243,7 +242,6 @@ test("Runtime re-introspects a Creator session per turn without requiring a buye
     socket.send(JSON.stringify({
       type: "client.hello",
       protocol_version: "0.7",
-      installation_id: "desktop-creator-maya",
       auth_token: "opaque-creator-session",
       creator_id: CREATOR_ID,
       product_id: PRODUCT_ID,
@@ -334,7 +332,6 @@ test("Runtime admits only one client hello while Registry authorization is pendi
     const hello = {
       type: "client.hello",
       protocol_version: "0.7",
-      installation_id: "desktop-concurrent-hello",
       auth_token: "opaque-user-session",
       entitlement_id: entitlement.entitlement_id,
       creator_id: entitlement.creator_id,
@@ -348,7 +345,7 @@ test("Runtime admits only one client hello while Registry authorization is pendi
       socket,
       (message) => (message.error as { code?: string } | undefined)?.code === "duplicate_hello"
     );
-    socket.send(JSON.stringify({ ...hello, installation_id: "desktop-concurrent-hello-2" }));
+    socket.send(JSON.stringify(hello));
     assert.equal((await duplicateFailure).type, "turn.failed");
     assert.equal(identityCalls, 1);
 
@@ -701,7 +698,6 @@ async function connectAuthorizedSocket(runtimePort: number, entitlement: Entitle
   socket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: "0.7",
-    installation_id: "desktop-jordan",
     auth_token: "opaque-user-session",
     entitlement_id: entitlement.entitlement_id,
     creator_id: entitlement.creator_id,

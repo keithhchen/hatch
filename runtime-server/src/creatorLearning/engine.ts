@@ -1969,10 +1969,6 @@ function normalizeFactoryIdentity(input: FactoryStartInput): {
       ...(description ? { description } : {}),
       ...(promise ? { promise } : {}),
       ...(boundaries && boundaries.length > 0 ? { boundaries: [...new Set(boundaries)] } : {}),
-      ...(input.product?.offer ? { offer: {
-        ...input.product.offer,
-        ...(input.product.offer.unit ? { unit: input.product.offer.unit.trim() } : {})
-      } } : {}),
       ...(input.product?.presentation ? { presentation: structuredClone(input.product.presentation) } : {})
     }
   };

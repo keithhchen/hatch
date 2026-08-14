@@ -52,8 +52,8 @@ Run without an executor window that can answer local-tool and approval work.
 
 The live executor is only `/runtime`: `client.message.client_message_id` is a
 stable user-intent key, while legacy clients fall back to `run_id`. The Runtime
-generates an opaque executor ID for each WebSocket; it never treats a
-client-supplied `installation_id` as a window or executor identity. The durable
+generates an opaque executor ID for each WebSocket; it does not accept a
+client-supplied device identifier as a window or executor identity. The durable
 repository permits one active Run per Conversation, so separate Desktop windows
 may observe one Conversation but only the owning connection executes it.
 

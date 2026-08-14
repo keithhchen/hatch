@@ -15,7 +15,6 @@ const catalogAgent = {
   product_description: "Resume review",
   product_promise: "Turn a resume into a concise signal map.",
   product_boundaries: ["Does not submit applications."],
-  product_offer: { model: "per_delivery", amount_minor: 0, currency: "USD" },
   presentation: { accent: "fern" },
   corpus_digest: "sha256:current-corpus",
   published_at: "2026-08-02T00:00:00.000Z"
@@ -102,7 +101,7 @@ test("creator products are projected directly from the Agent Corpus Registry", a
   assert.equal(overview.metrics.orders, 0);
 });
 
-test("Creator can approve a verified candidate, set an offer, preview, publish, and receive a share URL", async (context) => {
+test("Creator can approve a verified candidate, preview, publish, and receive a share URL", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-publish-"));
   const publishCalls = [];
   const registry = registryFixture({ role: "creator", factoryRun: readyFactoryRun, publishCalls });
@@ -138,7 +137,7 @@ test("Creator can approve a verified candidate, set an offer, preview, publish, 
   });
   const approved = (await approvalResponse.json()).product;
   assert.equal(approvalResponse.status, 200);
-  assert.equal(approved.status, "offer_required");
+  assert.equal(approved.status, "ready_to_preview");
   const approvalReplay = await fetch(`${serverUrl(api)}/v1/creator/products/${productId}/candidates/${candidateId}/approve`, {
     method: "POST",
     headers: { ...headers, "idempotency-key": "approve-signal-resume-v1" },
@@ -151,49 +150,18 @@ test("Creator can approve a verified candidate, set an offer, preview, publish, 
   assert.equal(approvalReplay.status, 200);
   assert.equal((await approvalReplay.json()).product.version, approved.version);
 
-  const offerResponse = await fetch(`${serverUrl(api)}/v1/creator/products/${productId}/offer-draft`, {
-    method: "PUT",
-    headers: { ...headers, "idempotency-key": "offer-signal-resume-v1" },
-    body: JSON.stringify({
-      purchase_model: "per_delivery",
-      amount_minor: 0,
-      currency: "USD",
-      unit: "delivery",
-      included_units: 1,
-      expected_version: approved.version
-    })
-  });
-  const offered = (await offerResponse.json()).product;
-  assert.equal(offerResponse.status, 200);
-  assert.equal(offered.status, "ready_to_preview");
-  const changedOfferReplay = await fetch(`${serverUrl(api)}/v1/creator/products/${productId}/offer-draft`, {
-    method: "PUT",
-    headers: { ...headers, "idempotency-key": "offer-signal-resume-v1" },
-    body: JSON.stringify({
-      purchase_model: "per_delivery",
-      amount_minor: 0,
-      currency: "USD",
-      unit: "delivery",
-      included_units: 2,
-      expected_version: approved.version
-    })
-  });
-  assert.equal(changedOfferReplay.status, 409);
-  assert.equal((await changedOfferReplay.json()).error.code, "idempotency_conflict");
-
   const previewResponse = await fetch(`${serverUrl(api)}/v1/creator/products/${productId}/storefront-preview`, { headers });
   const preview = await previewResponse.json();
   assert.equal(previewResponse.status, 200);
   assert.equal(preview.readiness.ready, true);
-  assert.equal(preview.offer.amount_minor, 0);
+  assert.equal(preview.product.product_id, productId);
 
   const stalePublishResponse = await fetch(`${serverUrl(api)}/v1/creator/products/${productId}/publish`, {
     method: "POST",
     headers: { ...headers, "idempotency-key": "publish-signal-resume-stale" },
     body: JSON.stringify({
       candidate_id: candidateId,
-      offer_revision: offered.offer_draft.revision,
-      expected_version: approved.version
+      expected_version: approved.version - 1
     })
   });
   assert.equal(stalePublishResponse.status, 409);
@@ -201,8 +169,7 @@ test("Creator can approve a verified candidate, set an offer, preview, publish, 
 
   const publishBody = {
     candidate_id: candidateId,
-    offer_revision: offered.offer_draft.revision,
-    expected_version: offered.version
+    expected_version: approved.version
   };
   const publishResponse = await fetch(`${serverUrl(api)}/v1/creator/products/${productId}/publish`, {
     method: "POST",
@@ -217,12 +184,7 @@ test("Creator can approve a verified candidate, set an offer, preview, publish, 
   const publicResponse = await fetch(`${serverUrl(api)}/v1/public/products/${productId}`);
   const publicProduct = (await publicResponse.json()).product;
   assert.equal(publicResponse.status, 200);
-  assert.equal(publicProduct.offer.offer_id, offered.offer_draft.offer_id);
-  assert.equal(publicProduct.offer.revision, offered.offer_draft.revision);
-  assert.deepEqual(
-    dashboard.ledger.listEvents().filter((event) => event.event_type.startsWith("offer.")).map((event) => event.event_type),
-    ["offer.revision_created", "offer.activated", "offer.revision_created", "offer.activated"]
-  );
+  assert.equal(publicProduct.available, true);
   const replayResponse = await fetch(`${serverUrl(api)}/v1/creator/products/${productId}/publish`, {
     method: "POST",
     headers: { ...headers, "idempotency-key": "publish-signal-resume-v1" },
@@ -230,7 +192,7 @@ test("Creator can approve a verified candidate, set an offer, preview, publish, 
   });
   assert.equal(replayResponse.status, 200);
   assert.equal(publishCalls.length, 1);
-  assert.equal(dashboard.ledger.listEvents().filter((event) => event.event_type === "offer.activated").length, 2);
+  assert.equal(dashboard.ledger.listEvents().length, 0);
 });
 
 test("non-UUID product paths are rejected without redirects", async (context) => {
@@ -319,30 +281,13 @@ test("Factory-only first publish does not seed a fake legacy deployment", async 
   const unseeded = dashboard.portalState.getCreatorProduct(catalogAgent.creator_id, productId);
   assert.equal(unseeded.release, undefined);
   assert.equal(unseeded.active_deployment_id, undefined);
-  assert.equal(dashboard.commerce.getActiveOffer(catalogAgent.creator_id, productId), undefined);
-
-  const offerResponse = await fetch(`${serverUrl(api)}/v1/creator/products/${productId}/offer-draft`, {
-    method: "PUT",
-    headers: { ...headers, "idempotency-key": "offer-first-publish" },
-    body: JSON.stringify({
-      purchase_model: "per_delivery",
-      amount_minor: 0,
-      currency: "USD",
-      unit: "delivery",
-      included_units: 1,
-      expected_version: approved.version
-    })
-  });
-  const offered = (await offerResponse.json()).product;
-  assert.equal(offerResponse.status, 200);
 
   const publishResponse = await fetch(`${serverUrl(api)}/v1/creator/products/${productId}/publish`, {
     method: "POST",
     headers: { ...headers, "idempotency-key": "publish-first-deployment" },
     body: JSON.stringify({
       candidate_id: candidateId,
-      offer_revision: offered.offer_draft.revision,
-      expected_version: offered.version
+      expected_version: approved.version
     })
   });
   const published = await publishResponse.json();
@@ -352,10 +297,7 @@ test("Factory-only first publish does not seed a fake legacy deployment", async 
   assert.equal(deploymentCalls.filter((call) => call.type === "stage").length, 1);
   const activation = deploymentCalls.find((call) => call.type === "activate");
   assert.equal(activation.body.expected_current_digest, null);
-  assert.equal(
-    dashboard.commerce.getActiveOffer(catalogAgent.creator_id, productId).operation_id,
-    dashboard.portalState.getCreatorProduct(catalogAgent.creator_id, productId).active_deployment_id
-  );
+  assert.equal(dashboard.portalState.getCreatorProduct(catalogAgent.creator_id, productId).active_deployment_id, activation.body.operation_id);
 });
 
 test("legacy live storefront remains stable until its replacement deployment commits", async (context) => {
@@ -402,47 +344,25 @@ test("legacy live storefront remains stable until its replacement deployment com
   const seeded = dashboard.portalState.getCreatorProduct(catalogAgent.creator_id, productId);
   assert.equal(seeded.release.corpus_digest, catalogAgent.corpus_digest);
   assert.match(seeded.active_deployment_id, /^migration:/);
-  assert.equal(
-    dashboard.commerce.getActiveOffer(catalogAgent.creator_id, productId).operation_id,
-    seeded.active_deployment_id
-  );
-
-  const offerResponse = await fetch(`${serverUrl(api)}/v1/creator/products/${productId}/offer-draft`, {
-    method: "PUT",
-    headers: { ...headers, "idempotency-key": "offer-legacy-replacement" },
-    body: JSON.stringify({
-      purchase_model: "per_delivery",
-      amount_minor: 0,
-      currency: "USD",
-      unit: "delivery",
-      included_units: 1,
-      expected_version: approved.version
-    })
-  });
-  const offered = (await offerResponse.json()).product;
-  assert.equal(offerResponse.status, 200);
 
   const interruptedResponse = await fetch(`${serverUrl(api)}/v1/creator/products/${productId}/publish`, {
     method: "POST",
     headers: { ...headers, "idempotency-key": "publish-legacy-replacement" },
     body: JSON.stringify({
       candidate_id: candidateId,
-      offer_revision: offered.offer_draft.revision,
-      expected_version: offered.version
+      expected_version: approved.version
     })
   });
   assert.equal(interruptedResponse.status, 503);
   const pending = dashboard.portalState.getCreatorProduct(catalogAgent.creator_id, productId);
   assert.equal(pending.release.corpus_digest, catalogAgent.corpus_digest);
-  assert.ok(pending.publish_operation.offer_activated_at);
   assert.equal(pending.publish_operation.registry_activated_at, undefined);
 
   const duringResponse = await fetch(`${serverUrl(api)}/v1/public/products/${productId}`);
   const during = (await duringResponse.json()).product;
   assert.equal(duringResponse.status, 200);
   assert.equal(during.corpus_digest, catalogAgent.corpus_digest);
-  assert.equal(during.offer.offer_id, seeded.offer_active.offer_id);
-  assert.equal(during.offer.revision, seeded.offer_active.revision);
+  assert.equal(during.available, true);
 
   const reconciled = await dashboard.reconcileDeployments();
   assert.equal(reconciled[0].status, "published");
@@ -457,8 +377,7 @@ test("legacy live storefront remains stable until its replacement deployment com
   const after = (await afterResponse.json()).product;
   assert.equal(afterResponse.status, 200);
   assert.equal(after.corpus_digest, readyFactoryRun.candidate.corpus_digest);
-  assert.equal(after.offer.offer_id, offered.offer_draft.offer_id);
-  assert.equal(after.offer.revision, offered.offer_draft.revision);
+  assert.equal(after.available, true);
 });
 
 test("deployment reconciler resumes after Registry activation failure without exposing a mixed storefront tuple", async (context) => {
@@ -495,17 +414,9 @@ test("deployment reconciler resumes after Registry activation failure without ex
     candidate,
     0
   );
-  const offered = await dashboard.portalState.saveOffer(catalogAgent.creator_id, catalogAgent.product_id, {
-    purchase_model: "per_delivery",
-    amount_minor: 0,
-    currency: "USD",
-    unit: "delivery",
-    included_units: 1
-  }, approved.version);
   const pending = await dashboard.portalState.beginPublishProduct(catalogAgent.creator_id, catalogAgent.product_id, {
     candidate_id: candidate.candidate_id,
-    offer_revision: offered.offer_draft.revision,
-    expected_version: offered.version,
+    expected_version: approved.version,
     agent_id: catalogAgent.agent_id,
     command_key: "deployment-reconcile"
   });
@@ -515,16 +426,14 @@ test("deployment reconciler resumes after Registry activation failure without ex
   let state = dashboard.portalState.getCreatorProduct(catalogAgent.creator_id, catalogAgent.product_id);
   assert.equal(state.release, undefined);
   assert.ok(state.publish_operation.materialized_at);
-  assert.ok(state.publish_operation.offer_activated_at);
   assert.equal(state.publish_operation.registry_activated_at, undefined);
   assert.equal(state.publish_operation.attempts, 1);
-  assert.equal(dashboard.commerce.getActiveOffer(catalogAgent.creator_id, catalogAgent.product_id).operation_id, pending.publish_operation.operation_id);
 
   const duringFailure = await fetch(`${serverUrl(api)}/v1/public/products/${catalogAgent.product_id}`);
   const duringProduct = (await duringFailure.json()).product;
   assert.equal(duringFailure.status, 200);
-  assert.equal(duringProduct.offer, null);
-  assert.equal(duringProduct.availability, "not_for_sale");
+  assert.equal(duringProduct.corpus_digest, catalogAgent.corpus_digest);
+  assert.equal(duringProduct.available, true);
 
   const recovered = await dashboard.reconcileDeployments();
   assert.equal(recovered[0].status, "published");
@@ -534,12 +443,12 @@ test("deployment reconciler resumes after Registry activation failure without ex
   assert.equal(state.active_deployment_id, pending.publish_operation.operation_id);
   assert.equal(deploymentCalls.filter((call) => call.type === "stage").length, 1);
   assert.equal(deploymentCalls.filter((call) => call.type === "activate").length, 2);
-  assert.equal(dashboard.ledger.listEvents().filter((event) => event.event_type === "offer.activated").length, 1);
+  assert.equal(dashboard.ledger.listEvents().length, 0);
 
   const afterRecovery = await fetch(`${serverUrl(api)}/v1/public/products/${catalogAgent.product_id}`);
   const recoveredProduct = (await afterRecovery.json()).product;
   assert.equal(recoveredProduct.corpus_digest, readyFactoryRun.candidate.corpus_digest);
-  assert.equal(recoveredProduct.offer.revision, offered.offer_draft.revision);
+  assert.equal(recoveredProduct.available, true);
 });
 
 test("zero-value checkout creates an idempotent Agent Corpus order and entitlement", async (context) => {
@@ -576,22 +485,15 @@ test("zero-value checkout creates an idempotent Agent Corpus order and entitleme
   assert.equal(firstBody.order.corpus_digest, catalogAgent.corpus_digest);
   assert.equal(firstBody.order.gross_minor, 0);
   assert.match(firstBody.entitlement.entitlement_id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
-  assert.equal(accessBodies[0].order_id, firstBody.order.order_id);
-  assert.equal(accessBodies[0].entitlement_id, firstBody.entitlement.entitlement_id);
+  assert.equal(accessBodies.length, 0);
   assert.deepEqual(dashboard.ledger.listEvents().map((event) => event.event_type), [
-    "offer.revision_created",
-    "offer.activated",
     "order.placed",
     "entitlement.granted"
   ]);
-  const activeOffer = dashboard.commerce.getActiveOffer(catalogAgent.creator_id, catalogAgent.product_id);
-  assert.equal(activeOffer.offer_id, firstBody.order.offer_id);
-  assert.equal(activeOffer.revision, firstBody.order.offer_revision);
-  assert.equal(activeOffer.corpus_digest, catalogAgent.corpus_digest);
 
   const replay = await checkout();
   assert.equal(replay.status, 200);
-  assert.equal(dashboard.ledger.listEvents().length, 4);
+  assert.equal(dashboard.ledger.listEvents().length, 2);
 
   const secondPurchase = await checkout("legacy-free-checkout-two");
   const secondBody = await secondPurchase.json();
@@ -625,19 +527,19 @@ test("V2 checkout session persists a free receipt and entitlement detail", async
   const detail = await detailResponse.json();
   assert.equal(detailResponse.status, 200);
   assert.equal(detail.product.available, true);
-  assert.equal(detail.product.offer.amount_minor, 0);
+  assert.equal(detail.product.availability, "published");
+  assert.equal("offer" in detail.product, false);
   const canonicalDetailResponse = await fetch(`${serverUrl(api)}/v1/public/products/${catalogAgent.product_id}`);
   const canonicalDetail = await canonicalDetailResponse.json();
   assert.equal(canonicalDetailResponse.status, 200);
-  assert.equal(canonicalDetail.product.offer.amount_minor, 0);
+  assert.equal(canonicalDetail.product.availability, "published");
+  assert.equal("offer" in canonicalDetail.product, false);
 
   const createSession = () => fetch(`${serverUrl(api)}/v1/checkout-sessions`, {
     method: "POST",
     headers,
     body: JSON.stringify({
-      creator_id: catalogAgent.creator_id,
-      product_id: catalogAgent.product_id,
-      offer_id: detail.product.offer.offer_id
+      product_id: catalogAgent.product_id
     })
   });
   const firstSessionResponse = await createSession();
@@ -659,7 +561,7 @@ test("V2 checkout session persists a free receipt and entitlement detail", async
   assert.equal(confirmed.payment.status, "not_required");
   assert.equal(confirmed.order.status, "fulfilled");
   assert.equal(confirmed.entitlement.remaining_units, 1);
-  assert.equal(accessBodies[0].entitlement_id, confirmed.entitlement_id);
+  assert.equal(accessBodies.length, 0);
 
   const replayConfirmResponse = await confirm();
   assert.equal(replayConfirmResponse.status, 200);
@@ -697,6 +599,22 @@ test("V2 checkout session persists a free receipt and entitlement detail", async
   const canonicalEntitlementResponse = await fetch(`${serverUrl(api)}/v1/library/${confirmed.entitlement_id}`, { headers });
   assert.equal(canonicalEntitlementResponse.status, 200);
   assert.equal((await canonicalEntitlementResponse.json()).entitlement.entitlement_id, confirmed.entitlement_id);
+
+  const desktopPreflight = await fetch(`${serverUrl(api)}/v1/user/product-access`, {
+    method: "OPTIONS",
+    headers: { origin: "tauri://localhost", "access-control-request-headers": "authorization" }
+  });
+  assert.equal(desktopPreflight.status, 204);
+  assert.equal(desktopPreflight.headers.get("access-control-allow-origin"), "*");
+  assert.match(desktopPreflight.headers.get("access-control-allow-headers"), /authorization/);
+  const desktopAccessResponse = await fetch(`${serverUrl(api)}/v1/user/product-access`, { headers });
+  const desktopAccess = await desktopAccessResponse.json();
+  assert.equal(desktopAccessResponse.status, 200);
+  assert.equal(desktopAccessResponse.headers.get("access-control-allow-origin"), "*");
+  assert.equal(desktopAccess.creator_agents.length, 1);
+  assert.equal(desktopAccess.creator_agents[0].entitlement_id, confirmed.entitlement_id);
+  assert.equal(desktopAccess.creator_agents[0].user_id, "buyer-zero");
+  assert.equal(desktopAccess.creator_agents[0].product.id, catalogAgent.product_id);
 
   await recordDelivery(dashboard, { order: confirmed.order, entitlement: confirmed.entitlement }, {
     prefix: "buyer-entitlement-history",
@@ -739,11 +657,10 @@ test("a free order can remove access before delivery", async (context) => {
   const token = await login(api);
   const headers = { authorization: `Bearer ${token}`, "content-type": "application/json", "idempotency-key": "free-cancel" };
   const detailResponse = await fetch(`${serverUrl(api)}/v1/public/products/${catalogAgent.product_id}`);
-  const offer = (await detailResponse.json()).product.offer;
   const sessionResponse = await fetch(`${serverUrl(api)}/v1/checkout-sessions`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ product_id: catalogAgent.product_id, offer_id: offer.offer_id })
+    body: JSON.stringify({ product_id: catalogAgent.product_id })
   });
   const session = (await sessionResponse.json()).checkout_session;
   const confirmationResponse = await fetch(`${serverUrl(api)}/v1/checkout-sessions/${session.checkout_session_id}/confirm`, {
@@ -764,7 +681,7 @@ test("a free order can remove access before delivery", async (context) => {
   assert.equal(cancellation.order.status, "cancelled");
   assert.equal(cancellation.order.entitlement_status, "revoked");
   assert.equal(cancellation.refund.gross_minor, 0);
-  assert.deepEqual(revokedEntitlements, [confirmation.entitlement_id]);
+  assert.deepEqual(revokedEntitlements, []);
 });
 
 test("Creator fulfilled filter includes delivered orders and disconnected payouts do not invent balances", async (context) => {
@@ -804,8 +721,6 @@ test("Creator fulfilled filter includes delivered orders and disconnected payout
     product_name: catalogAgent.product_name,
     corpus_digest: catalogAgent.corpus_digest,
     release_id: catalogAgent.corpus_digest,
-    offer_id: "offer-paid-filter",
-    offer_revision: 1,
     gross_minor: 3900,
     currency: "USD",
     payment_status: "paid",
@@ -848,60 +763,6 @@ test("Creator fulfilled filter includes delivered orders and disconnected payout
   assert.equal(payouts.available_minor, null);
   assert.equal(payouts.pending_minor, null);
   assert.deepEqual(payouts.payouts, []);
-});
-
-test("paid test checkout can be fully refunded and revokes Registry access", async (context) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-v2-refund-"));
-  const paidAgent = { ...catalogAgent, product_offer: { model: "per_delivery", amount_minor: 3900, currency: "USD", included_units: 1 } };
-  const revokedEntitlements = [];
-  const registry = registryFixture({ role: "user", agent: paidAgent, revokedEntitlements });
-  await listen(registry);
-  context.after(() => registry.close());
-  const dashboard = await createDashboardApp({
-    ledgerPath: path.join(directory, "ledger.jsonl"),
-    registryAccessServiceToken: "test-access-service",
-    registryUrl: serverUrl(registry),
-    paymentMode: "test",
-    exposeBearerTokens: true
-  });
-  const api = createServer(dashboard.handler);
-  await listen(api);
-  context.after(() => api.close());
-  const token = await login(api);
-  const headers = { authorization: `Bearer ${token}`, "content-type": "application/json", "idempotency-key": "paid-flow" };
-  const detailResponse = await fetch(`${serverUrl(api)}/v1/public/products/${paidAgent.product_id}`);
-  const offer = (await detailResponse.json()).product.offer;
-
-  const sessionResponse = await fetch(`${serverUrl(api)}/v1/checkout-sessions`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ product_id: paidAgent.product_id, offer_id: offer.offer_id })
-  });
-  const session = (await sessionResponse.json()).checkout_session;
-  assert.equal(sessionResponse.status, 201);
-  assert.equal(session.totals.total_minor, 3900);
-  const confirmationResponse = await fetch(`${serverUrl(api)}/v1/checkout-sessions/${session.checkout_session_id}/confirm`, {
-    method: "POST",
-    headers,
-    body: "{}"
-  });
-  const confirmation = await confirmationResponse.json();
-  assert.equal(confirmationResponse.status, 201, JSON.stringify(confirmation));
-  assert.equal(confirmation.payment.status, "succeeded");
-
-  const beforeRefund = await fetch(`${serverUrl(api)}/v1/user/orders/${confirmation.order_id}`, { headers });
-  assert.equal((await beforeRefund.json()).order.actions.can_request_refund, true);
-  const refundResponse = await fetch(`${serverUrl(api)}/v1/user/orders/${confirmation.order_id}/refund-requests`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ reason: "buyer_requested" })
-  });
-  const refunded = await refundResponse.json();
-  assert.equal(refundResponse.status, 201);
-  assert.equal(refunded.order.status, "refunded");
-  assert.equal(refunded.order.entitlement_status, "revoked");
-  assert.equal(refunded.refund.gross_minor, 3900);
-  assert.deepEqual(revokedEntitlements, [confirmation.entitlement_id]);
 });
 
 async function recordDelivery(app, checkout, { prefix, artifactType }) {

@@ -33,12 +33,6 @@ export type PublishedAgentCorpus = {
   product_description?: string;
   product_promise?: string;
   product_boundaries: string[];
-  product_offer?: {
-    model?: "per_delivery" | "subscription";
-    amount_minor: number;
-    currency: string;
-    unit?: string;
-  };
   presentation: Record<string, unknown>;
   knowledge_namespace: string;
   status: "published";
@@ -305,7 +299,6 @@ export class RegistryStoreTs {
         ...(verified.product.description ? { product_description: verified.product.description } : {}),
         ...(verified.product.promise ? { product_promise: verified.product.promise } : {}),
         product_boundaries: verified.product.boundaries,
-        ...(verified.product.offer ? { product_offer: verified.product.offer } : {}),
         presentation: verified.product.presentation,
         knowledge_namespace: `${verified.creator.id}:${verified.agentId}`,
         status: "published",
@@ -1413,7 +1406,7 @@ export class RegistryStoreTs {
         text: `INSERT INTO agent_corpora (creator_id, agent_id, corpus_digest, creator_name, product_id, product_name, product_description, product_json, knowledge_namespace, status, published_at)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
         ON CONFLICT (creator_id, agent_id) DO UPDATE SET corpus_digest=EXCLUDED.corpus_digest, creator_name=EXCLUDED.creator_name, product_id=EXCLUDED.product_id, product_name=EXCLUDED.product_name, product_description=EXCLUDED.product_description, product_json=EXCLUDED.product_json, knowledge_namespace=EXCLUDED.knowledge_namespace, status=EXCLUDED.status, published_at=EXCLUDED.published_at`,
-        values: [corpus.creator_id, corpus.agent_id, corpus.corpus_digest, corpus.creator_name, corpus.product_id, corpus.product_name, corpus.product_description ?? null, JSON.stringify({ promise: corpus.product_promise, boundaries: corpus.product_boundaries, offer: corpus.product_offer, presentation: corpus.presentation }), corpus.knowledge_namespace, corpus.status, corpus.published_at],
+        values: [corpus.creator_id, corpus.agent_id, corpus.corpus_digest, corpus.creator_name, corpus.product_id, corpus.product_name, corpus.product_description ?? null, JSON.stringify({ promise: corpus.product_promise, boundaries: corpus.product_boundaries, presentation: corpus.presentation }), corpus.knowledge_namespace, corpus.status, corpus.published_at],
         query_timeout: deadline.remainingMs(),
       };
       await this.pool.query(query);
@@ -1572,7 +1565,6 @@ function publishedCorpusFromVerified(verified: VerifiedAgentCorpus): PublishedAg
     ...(verified.product.description ? { product_description: verified.product.description } : {}),
     ...(verified.product.promise ? { product_promise: verified.product.promise } : {}),
     product_boundaries: verified.product.boundaries,
-    ...(verified.product.offer ? { product_offer: verified.product.offer } : {}),
     presentation: verified.product.presentation,
     knowledge_namespace: `${verified.creator.id}:${verified.agentId}:${verified.digest}`,
     status: "published",
@@ -1624,7 +1616,6 @@ function rowToCorpus(row: Record<string, any>): PublishedAgentCorpus {
     ...(row.product_description ? { product_description: String(row.product_description) } : {}),
     ...(product.promise ? { product_promise: String(product.promise) } : {}),
     product_boundaries: Array.isArray(product.boundaries) ? product.boundaries.map(String) : [],
-    ...(product.offer && typeof product.offer === "object" ? { product_offer: product.offer } : {}),
     presentation: product.presentation && typeof product.presentation === "object" ? product.presentation : {},
     knowledge_namespace: String(row.knowledge_namespace),
     status: "published",

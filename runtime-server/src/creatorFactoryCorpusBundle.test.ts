@@ -105,7 +105,6 @@ test("Creator Factory materializes every Agent Corpus layer with exact bytes and
       description: "Review a claim against supplied evidence.",
       promise: "Return an evidence-ranked verdict.",
       boundaries: ["Never invent evidence."],
-      offer: { model: "per_delivery", amount_minor: 2500, currency: "USD", unit: "review" },
       presentation: { accent: "indigo", layout: { density: "compact" } }
     },
     systemInstructions,

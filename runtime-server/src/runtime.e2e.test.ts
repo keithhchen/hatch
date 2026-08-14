@@ -89,7 +89,6 @@ test("legacy dotted JSONL local-tool names normalize to canonical underscore nam
   const events = [
     {
       type: "session.started",
-      installation_id: "legacy-desktop",
       local_tools: legacyToolCallNames,
       timestamp: new Date(0).toISOString()
     },
@@ -172,7 +171,6 @@ test("current wire and parser reject old dotted Desktop capability names", () =>
   const legacyHello = {
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
-    installation_id: "legacy-desktop",
     auth_token: "legacy-token",
     local_tools: ["fs.list", "fs.read", "shell.exec", "git.diff", "file_read"]
   };
@@ -436,7 +434,6 @@ test("visible history preserves guarded text and tool interleave order", async (
   socket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
-    installation_id: "ordered-history-test",
     license_token: "ordered-history-test",
     local_tools: []
   }));
@@ -510,7 +507,6 @@ test("Output Guard releases passed segments but commits only a blocked terminal 
   socket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
-    installation_id: "guard-test",
     license_token: "guard-test",
     local_tools: []
   }));
@@ -598,7 +594,6 @@ test("Output Guard provider errors degrade to a normal committed response", asyn
   socket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
-    installation_id: "guard-error-test",
     license_token: "guard-error-test",
     local_tools: []
   }));
@@ -687,7 +682,6 @@ test("client hello does not accept explicit skill selection", () => {
   assert.throws(() => parseInboundMessage({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
-    installation_id: "install_x",
     license_token: "license_x",
     local_tools: [],
     skill_id: "repo-assistant"
@@ -762,7 +756,6 @@ test("client hello declares local tool capability and rejects server tools", () 
   assert.doesNotThrow(() => parseInboundMessage({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
-    installation_id: "install_x",
     license_token: "license_x",
     local_tools: ["file_read", "file_search", "git_diff"]
   }));
@@ -770,7 +763,6 @@ test("client hello declares local tool capability and rejects server tools", () 
   assert.throws(() => parseInboundMessage({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
-    installation_id: "install_x",
     license_token: "license_x",
     local_tools: ["web.search"]
   }), /Invalid option/);
@@ -778,7 +770,6 @@ test("client hello declares local tool capability and rejects server tools", () 
   assert.throws(() => parseInboundMessage({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
-    installation_id: "install_x",
     license_token: "license_x",
     workspace_root: "/private/consumer/workspace",
     local_tools: ["file_read"]
@@ -789,14 +780,12 @@ test("client hello requires an explicit local tool capability list", () => {
   assert.throws(() => parseInboundMessage({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
-    installation_id: "install_x",
     license_token: "license_x"
   }));
 
   assert.doesNotThrow(() => parseInboundMessage({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
-    installation_id: "install_x",
     license_token: "license_x",
     local_tools: []
   }));
@@ -804,7 +793,6 @@ test("client hello requires an explicit local tool capability list", () => {
   assert.doesNotThrow(() => parseInboundMessage({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
-    installation_id: "install_x",
     license_token: "license_x",
     local_tools: ["file_read"]
   }));
@@ -2028,7 +2016,6 @@ test("server rejects protocol 0.6 hello explicitly before accepting protocol 0.7
   socket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: "0.5",
-    installation_id: "install_protocol_05",
     license_token: "license_protocol_05",
     local_tools: ["file_read"]
   }));
@@ -2040,7 +2027,6 @@ test("server rejects protocol 0.6 hello explicitly before accepting protocol 0.7
   socket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: LEGACY_PROTOCOL_VERSION,
-    installation_id: "install_protocol_legacy",
     license_token: "license_protocol_legacy",
     local_tools: ["file_read"]
   }));
@@ -2061,7 +2047,6 @@ test("server rejects protocol 0.6 hello explicitly before accepting protocol 0.7
   currentSocket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
-    installation_id: "install_protocol_current",
     license_token: "license_protocol_current",
     local_tools: ["file_read"]
   }));
@@ -2073,10 +2058,6 @@ test("server rejects protocol 0.6 hello explicitly before accepting protocol 0.7
   const sessions = (await new RuntimeStore(dataDir).readEvents())
     .filter((event) => event.type === "session.started");
   assert.equal(sessions.length, 2);
-  assert.deepEqual(
-    sessions.map((session) => session.installation_id),
-    ["install_protocol_legacy", "install_protocol_current"]
-  );
 });
 
 
@@ -2105,7 +2086,6 @@ test("server rejects duplicate client hello on the same connection", async () =>
   socket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
-    installation_id: "install_once",
     license_token: "license_once",
     local_tools: ["file_read"]
   }));
@@ -2114,7 +2094,6 @@ test("server rejects duplicate client hello on the same connection", async () =>
   socket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
-    installation_id: "install_twice",
     license_token: "license_twice",
     local_tools: ["file_write"]
   }));
@@ -2127,7 +2106,6 @@ test("server rejects duplicate client hello on the same connection", async () =>
   const sessions = events.filter((event) => event.type === "session.started");
   assert.equal(sessions.length, 1);
   assert.ok(sessions[0]?.type === "session.started");
-  assert.equal(sessions[0].installation_id, "install_once");
   assert.deepEqual(sessions[0].local_tools, ["file_read"]);
 });
 
@@ -2185,7 +2163,6 @@ test("server rejects concurrent runs for the same conversation across WebSocket 
   firstSocket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
-    installation_id: "install_busy",
     license_token: "license_busy",
     local_tools: ["file_list", "file_search", "file_read", "file_write", "file_patch", "git_diff"]
   }));
@@ -2211,7 +2188,6 @@ test("server rejects concurrent runs for the same conversation across WebSocket 
   secondSocket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
-    installation_id: "install_busy_2",
     license_token: "license_busy",
     local_tools: ["file_list", "file_search", "file_read", "file_write", "file_patch", "git_diff"]
   }));
@@ -2258,7 +2234,6 @@ test("server releases a conversation lock when the client disconnects mid-run", 
   firstSocket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
-    installation_id: "install_disconnect_lock_1",
     license_token: "license_disconnect_lock",
     local_tools: ["file_list", "file_search", "file_read", "file_write", "file_patch", "git_diff"]
   }));
@@ -2297,7 +2272,6 @@ test("server releases a conversation lock when the client disconnects mid-run", 
   secondSocket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
-    installation_id: "install_disconnect_lock_2",
     license_token: "license_disconnect_lock",
     local_tools: ["file_list", "file_search", "file_read", "file_write", "file_patch", "git_diff"]
   }));
@@ -2355,7 +2329,6 @@ test("run cancel for an unknown run does not cancel the active run", async () =>
   socket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
-    installation_id: "install_cancel_targeted",
     license_token: "license_cancel_targeted",
     local_tools: ["file_list", "file_search", "file_read", "file_write", "file_patch", "git_diff"]
   }));

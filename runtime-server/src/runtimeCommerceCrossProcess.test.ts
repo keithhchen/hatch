@@ -28,7 +28,6 @@ const PRODUCT_ID = "f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42";
 const AGENT_ID = PRODUCT_ID;
 const BUYER_ID = "8e2b6f7a-3d6c-4f1b-9a2e-5c7d8f901234";
 const BUYER_TOKEN = "buyer-cross-process-token";
-const ACCESS_SERVICE_TOKEN = "registry-access-cross-process";
 const DEPLOYMENT_SERVICE_TOKEN = "registry-deployment-cross-process";
 const COMMERCE_SERVICE_TOKEN = "runtime-commerce-cross-process";
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -93,11 +92,10 @@ test("real Dashboard process and Runtime HTTP client preserve delivery, recovery
   // R05/R27: the already-running Runtime learns the entitlement created by a
   // later checkout. Publishing V2 changes the Registry current pointer, but a
   // pinned V1 purchase must continue resolving and delivering with V1.
-  registry.setOffer({ amountMinor: 0, includedUnits: 4, versionPolicy: "pinned" });
   const freePurchase = await checkout(dashboard.url, "free-v1");
   assert.equal(freePurchase.payment.status, "not_required");
   assert.equal(freePurchase.entitlement.purchased_corpus_digest, corpus.v1Digest);
-  assert.equal(freePurchase.entitlement.remaining_units, 4);
+  assert.equal(freePurchase.entitlement.remaining_units, 1);
 
   await activateCurrentCorpus(CREATOR_ID, AGENT_ID, corpus.v2Digest, corpus.root);
   registry.publishDigest(corpus.v2Digest);
@@ -121,47 +119,52 @@ test("real Dashboard process and Runtime HTTP client preserve delivery, recovery
   assert.equal(successReceipt.artifact_type, "file");
   await freeSession.waitFor((message) => message.type === "turn.completed" && message.run_id === "run-success");
   await waitForEntitlement(dashboard.url, freePurchase.entitlement_id, (entitlement) => (
-    entitlement.remaining_units === 3 && entitlement.reserved_units === 0
+    entitlement.remaining_units === 0 && entitlement.reserved_units === 0
   ));
+
+  const resiliencePurchase = await checkout(dashboard.url, "resilience-v2");
+  const resilienceSession = await connectRuntime(firstRuntime.url, resiliencePurchase.entitlement_id);
+  sockets.push(resilienceSession.socket);
+  assert.equal((await resilienceSession.ready).corpus_digest, corpus.v2Digest);
 
   // R08: failure and cancellation both release their reservations. The unit
   // count remains reusable and no delivery or revenue is synthesized.
-  freeSession.send(runMessage("run-failed"));
-  await freeSession.waitFor((message) => message.type === "turn.failed" && message.run_id === "run-failed");
+  resilienceSession.send(runMessage("run-failed"));
+  await resilienceSession.waitFor((message) => message.type === "turn.failed" && message.run_id === "run-failed");
   await waitForAsync(async () => {
     const events = await readLedger(ledgerPath);
     return events.some((event) => event.event_type === "entitlement.units_released" && event.reason === "run_failed") ? true : undefined;
   });
-  await waitForEntitlement(dashboard.url, freePurchase.entitlement_id, (entitlement) => (
-    entitlement.remaining_units === 3 && entitlement.reserved_units === 0
+  await waitForEntitlement(dashboard.url, resiliencePurchase.entitlement_id, (entitlement) => (
+    entitlement.remaining_units === 1 && entitlement.reserved_units === 0
   ));
 
-  freeSession.send(runMessage("run-cancelled"));
-  await freeSession.waitFor((message) => (
+  resilienceSession.send(runMessage("run-cancelled"));
+  await resilienceSession.waitFor((message) => (
     message.type === "assistant.delta"
     && message.run_id === "run-cancelled"
     && message.delta?.kind === "status"
   ));
-  freeSession.send({ type: "turn.cancel", run_id: "run-cancelled", reason: "buyer cancelled" });
-  await freeSession.waitFor((message) => message.type === "turn.failed" && message.run_id === "run-cancelled");
-  await waitForEntitlement(dashboard.url, freePurchase.entitlement_id, (entitlement) => (
-    entitlement.remaining_units === 3 && entitlement.reserved_units === 0
+  resilienceSession.send({ type: "turn.cancel", run_id: "run-cancelled", reason: "buyer cancelled" });
+  await resilienceSession.waitFor((message) => message.type === "turn.failed" && message.run_id === "run-cancelled");
+  await waitForEntitlement(dashboard.url, resiliencePurchase.entitlement_id, (entitlement) => (
+    entitlement.remaining_units === 1 && entitlement.reserved_units === 0
   ));
 
   // R07: let the Runtime observe a completed local artifact, then terminate
   // the actual Dashboard OS process before accounting begins. The Buyer-facing
   // turn still completes with a durable syncing receipt.
-  freeSession.send(runMessage("run-outage"));
+  resilienceSession.send(runMessage("run-outage"));
   await outage.promise;
   await dashboard.stop();
   dashboardProcesses.splice(dashboardProcesses.indexOf(dashboard), 1);
   continueAfterOutage.resolve();
-  await freeSession.waitFor((message) => (
+  await resilienceSession.waitFor((message) => (
     message.type === "delivery.ready"
     && message.run_id === "run-outage"
     && message.receipt_status === "syncing"
   ));
-  const syncingTurn = await freeSession.waitFor((message) => (
+  const syncingTurn = await resilienceSession.waitFor((message) => (
     message.type === "turn.completed"
     && message.run_id === "run-outage"
   ));
@@ -173,6 +176,8 @@ test("real Dashboard process and Runtime HTTP client preserve delivery, recovery
 
   freeSession.socket.close();
   sockets.splice(sockets.indexOf(freeSession.socket), 1);
+  resilienceSession.socket.close();
+  sockets.splice(sockets.indexOf(resilienceSession.socket), 1);
   await firstRuntime.runtime.close();
   runtimes.splice(runtimes.indexOf(firstRuntime.runtime), 1);
 
@@ -197,17 +202,19 @@ test("real Dashboard process and Runtime HTTP client preserve delivery, recovery
   await waitForAsync(async () => (await new DeliveryAccountingOutbox(outboxPath).list()).length === 0 ? true : undefined, 8_000);
   const recoveredEntitlement = await waitForEntitlement(
     dashboard.url,
-    freePurchase.entitlement_id,
-    (entitlement) => entitlement.remaining_units === 2 && entitlement.reserved_units === 0
+    resiliencePurchase.entitlement_id,
+    (entitlement) => entitlement.remaining_units === 0 && entitlement.reserved_units === 0
   );
-  assert.equal(recoveredEntitlement.deliveries.length, 2);
+  assert.equal(recoveredEntitlement.deliveries.length, 1);
 
   const durableEvents = await readLedger(ledgerPath);
   const freeEvents = durableEvents.filter((event) => event.order_id === freePurchase.order_id);
-  assert.equal(freeEvents.filter((event) => event.event_type === "delivery.completed").length, 2);
-  assert.equal(freeEvents.filter((event) => event.event_type === "revenue.recognized").length, 0);
+  const resilienceEvents = durableEvents.filter((event) => event.order_id === resiliencePurchase.order_id);
+  assert.equal(freeEvents.filter((event) => event.event_type === "delivery.completed").length, 1);
+  assert.equal(resilienceEvents.filter((event) => event.event_type === "delivery.completed").length, 1);
+  assert.equal([...freeEvents, ...resilienceEvents].filter((event) => event.event_type === "revenue.recognized").length, 0);
   assert.deepEqual(
-    freeEvents
+    resilienceEvents
       .filter((event) => event.event_type === "entitlement.units_released")
       .map((event) => event.reason)
       .sort(),
@@ -217,6 +224,9 @@ test("real Dashboard process and Runtime HTTP client preserve delivery, recovery
     assert.equal(delivery.corpus_digest, corpus.v1Digest);
     assert.equal(delivery.purchased_corpus_digest, corpus.v1Digest);
     assert.equal(delivery.effective_corpus_digest, corpus.v1Digest);
+  }
+  for (const delivery of resilienceEvents.filter((event) => event.event_type === "delivery.completed")) {
+    assert.equal(delivery.corpus_digest, corpus.v2Digest);
   }
   // R22: establish a second Runtime session, cancel its free order before any
   // delivery, then prove both that already-connected session and a fresh
@@ -329,11 +339,6 @@ type RegistryFixture = {
   server: Server;
   url: string;
   publishDigest: (digest: string) => void;
-  setOffer: (input: {
-    amountMinor: number;
-    includedUnits: number;
-    versionPolicy: "pinned" | "track_current_compatible";
-  }) => void;
 };
 
 async function startRegistryFixture(corpus: CorpusReleases): Promise<RegistryFixture> {
@@ -343,12 +348,6 @@ async function startRegistryFixture(corpus: CorpusReleases): Promise<RegistryFix
     [corpus.v2Digest, { corpus_digest: corpus.v2Digest, backward_compatible_with: corpus.v1Digest }],
     [corpus.v3Digest, { corpus_digest: corpus.v3Digest }]
   ]);
-  let offer: {
-    amountMinor: number;
-    includedUnits: number;
-    versionPolicy: "pinned" | "track_current_compatible";
-  } = { amountMinor: 0, includedUnits: 4, versionPolicy: "pinned" };
-  const access = new Map<string, JsonRecord>();
   const server = createServer(async (request, response) => {
     try {
       const url = new URL(request.url ?? "/", "http://registry.cross-process");
@@ -374,19 +373,6 @@ async function startRegistryFixture(corpus: CorpusReleases): Promise<RegistryFix
           corpus_digest: currentDigest,
           status: "published",
           published_at: new Date().toISOString(),
-          product_offer: {
-            offer_id: `offer-${currentDigest.slice(-12)}-${offer.amountMinor}-${offer.versionPolicy}`,
-            revision: offer.versionPolicy === "track_current_compatible" ? 2 : offer.amountMinor === 0 ? 1 : 3,
-            model: "per_delivery",
-            purchase_model: "per_delivery",
-            amount_minor: offer.amountMinor,
-            currency: "USD",
-            unit: "delivery",
-            included_units: offer.includedUnits,
-            refund_policy_version: "cross-process-v1",
-            version_policy: offer.versionPolicy,
-            status: "active"
-          },
           presentation: { inputs: ["A local request"], outputs: ["A local file"] }
         }]);
       }
@@ -401,19 +387,6 @@ async function startRegistryFixture(corpus: CorpusReleases): Promise<RegistryFix
           product_boundaries: ["Does not upload private Workspace content."],
           corpus_digest: currentDigest,
           status: "published",
-          product_offer: {
-            offer_id: `offer-${currentDigest.slice(-12)}-${offer.amountMinor}-${offer.versionPolicy}`,
-            revision: offer.versionPolicy === "track_current_compatible" ? 2 : offer.amountMinor === 0 ? 1 : 3,
-            model: "per_delivery",
-            purchase_model: "per_delivery",
-            amount_minor: offer.amountMinor,
-            currency: "USD",
-            unit: "delivery",
-            included_units: offer.includedUnits,
-            refund_policy_version: "cross-process-v1",
-            version_policy: offer.versionPolicy,
-            status: "active"
-          },
           presentation: { inputs: ["A local request"], outputs: ["A local file"] }
         });
       }
@@ -439,54 +412,6 @@ async function startRegistryFixture(corpus: CorpusReleases): Promise<RegistryFix
           status: "published"
         });
       }
-      if (request.method === "GET" && ["/v1/user/agent-access", "/v1/user/product-access"].includes(url.pathname)) {
-        if (bearer(request.headers.authorization) !== BUYER_TOKEN) {
-          return json(response, 401, { detail: "A valid account token is required." });
-        }
-        return json(response, 200, [...access.values()].filter((item) => item.status === "active"));
-      }
-      const grantMatch = url.pathname.match(/^\/v1\/user\/agents\/([^/]+)\/([^/]+)\/access$/);
-      const productGrantMatch = url.pathname.match(/^\/v1\/user\/products\/([^/]+)\/access$/);
-      if (request.method === "POST" && (grantMatch || productGrantMatch)) {
-        if (bearer(request.headers.authorization) !== ACCESS_SERVICE_TOKEN) {
-          return json(response, 403, { detail: "A valid access service token is required." });
-        }
-        const body = await readJson(request);
-        const entitlementId = String(body.entitlement_id ?? "");
-        const existing = access.get(entitlementId);
-        if (existing) return json(response, 201, existing);
-        const purchasedDigest = String(body.purchased_corpus_digest ?? "");
-        const record = {
-          entitlement_id: entitlementId,
-          order_id: String(body.order_id),
-          user_id: String(body.user_id),
-          creator_id: grantMatch ? decodeURIComponent(grantMatch[1]!) : String(body.creator_id),
-          agent_id: grantMatch ? decodeURIComponent(grantMatch[2]!) : decodeURIComponent(productGrantMatch![1]!),
-          product_id: PRODUCT_ID,
-          purchased_corpus_digest: purchasedDigest,
-          effective_corpus_digest: purchasedDigest,
-          version_policy: body.version_policy === "track_current_compatible" ? "track_current_compatible" : "pinned",
-          version_history: [],
-          status: "active"
-        };
-        access.set(entitlementId, record);
-        return json(response, 201, record);
-      }
-      const revokeMatch = url.pathname.match(/^\/v1\/user\/(?:agent-access|product-access)\/([^/]+)$/);
-      if (request.method === "DELETE" && revokeMatch) {
-        if (bearer(request.headers.authorization) !== ACCESS_SERVICE_TOKEN) {
-          return json(response, 403, { detail: "A valid access service token is required." });
-        }
-        const body = await readJson(request);
-        const entitlementId = decodeURIComponent(revokeMatch[1]!);
-        const existing = access.get(entitlementId);
-        if (!existing || existing.user_id !== body.user_id) {
-          return json(response, 404, { detail: "Entitlement not found." });
-        }
-        const revoked = { ...existing, status: "revoked" };
-        access.set(entitlementId, revoked);
-        return json(response, 200, revoked);
-      }
       return json(response, 404, { detail: `Unhandled Registry fixture route: ${request.method} ${url.pathname}` });
     } catch (error) {
       return json(response, 500, { detail: error instanceof Error ? error.message : String(error) });
@@ -496,8 +421,7 @@ async function startRegistryFixture(corpus: CorpusReleases): Promise<RegistryFix
   return {
     server,
     url: serverUrl(server),
-    publishDigest: (digestValue) => { currentDigest = digestValue; },
-    setOffer: (input) => { offer = input; }
+    publishDigest: (digestValue) => { currentDigest = digestValue; }
   };
 }
 
@@ -530,7 +454,6 @@ async function startDashboardProcess(input: {
     HATCH_COMMERCE_LEDGER_PATH: input.ledgerPath,
     HATCH_PORTAL_STATE_PATH: input.portalStatePath,
     HATCH_PORTAL_TELEMETRY_PATH: input.telemetryPath,
-    HATCH_REGISTRY_ACCESS_SERVICE_TOKEN: ACCESS_SERVICE_TOKEN,
     HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN: DEPLOYMENT_SERVICE_TOKEN,
     HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN: COMMERCE_SERVICE_TOKEN,
     HATCH_COMMERCE_PAYMENT_MODE: "sandbox"
@@ -575,7 +498,10 @@ async function startRuntime(input: {
   const runtime = createRuntimeServer({
     createRuntime: input.createRuntime,
     conversationStore: new RuntimeStore(input.dataRoot),
-    entitlementResolver: new RegistryEntitlementResolver(input.registryUrl),
+    entitlementResolver: new RegistryEntitlementResolver(input.registryUrl, fetch, {
+      commerceUrl: input.dashboardUrl,
+      commerceServiceToken: COMMERCE_SERVICE_TOKEN
+    }),
     agentCorpusResolver: new AgentCorpusResolver(input.corpusRoot),
     commerceEventSink: new HttpCommerceEventSink(input.dashboardUrl, COMMERCE_SERVICE_TOKEN),
     deliveryAccountingOutbox: new DeliveryAccountingOutbox(input.outboxPath),
@@ -640,8 +566,7 @@ async function checkout(dashboardUrl: string, key: string): Promise<JsonRecord> 
     method: "POST",
     headers: buyerMutationHeaders(`${key}:session`),
     body: JSON.stringify({
-      product_id: PRODUCT_ID,
-      offer_id: detail.product.offer.offer_id
+      product_id: PRODUCT_ID
     })
   });
   const sessionBody = await sessionResponse.json() as JsonRecord;
@@ -709,7 +634,6 @@ function hello(entitlementId: string): JsonRecord {
   return {
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
-    installation_id: "desktop-cross-process",
     auth_token: BUYER_TOKEN,
     entitlement_id: entitlementId,
     creator_id: CREATOR_ID,

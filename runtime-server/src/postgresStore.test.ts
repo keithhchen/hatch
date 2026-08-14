@@ -292,12 +292,10 @@ test("Postgres Runtime caps global session events that cannot be bypassed with c
   });
   await append(store, {
     type: "session.started",
-    installation_id: "desktop-one",
     local_tools: []
   });
   await assert.rejects(append(store, {
     type: "session.started",
-    installation_id: "desktop-two",
     local_tools: []
   }), /global event storage quota exceeded/);
 });
@@ -463,7 +461,6 @@ test("Postgres store normalizes legacy dotted persisted tool names", async () =>
       event_type: "session.started",
       payload: {
         type: "session.started",
-        installation_id: "legacy-desktop",
         local_tools: legacyToolCallNames,
         timestamp: "2026-08-05T00:00:00.000Z"
       }

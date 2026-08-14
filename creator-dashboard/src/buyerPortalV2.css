@@ -13,7 +13,7 @@
   --buyer-border-subtle: var(--hatch-border-subtle, rgba(54, 41, 31, 0.1));
   min-width: 320px;
   min-height: 100vh;
-  background: var(--buyer-canvas);
+  background: transparent;
   color: var(--buyer-ink);
   font-family: var(--hatch-font-ui, "Inter Variable", "PingFang SC", sans-serif);
   font-synthesis: none;

@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { HatchBrand } from "./HatchBrand.jsx";
 import { StorefrontDetails } from "./StorefrontDetails.jsx";
+import { CheckoutSummary } from "./components/product/index.js";
+import { Checkbox as HatchCheckbox, InlineAlert as HatchInlineAlert } from "./components/ui/index.js";
 import { creatorPublicModel } from "./storefrontModel.js";
 import "./buyerPortalV2.css";
 
@@ -247,7 +249,6 @@ function CreatorPublicPage({ creatorId, request, navigate, session }) {
 
 function CatalogCard({ product, navigate }) {
   const path = productPath(product);
-  const offer = offerFor(product);
   const access = accessFor(product);
   return (
     <article className="buyer-v2__catalog-card">
@@ -258,7 +259,7 @@ function CatalogCard({ product, navigate }) {
       <h2>{productName(product)}</h2>
       <p>{productPromise(product)}</p>
       <div className="buyer-v2__card-footer">
-        <div><strong>{accessStatus(access) === "active" ? "In your library" : product.availability === "published" ? offerLabel(offer) : "Coming soon"}</strong><span>{product.availability === "published" ? offerUnitLabel(offer) : "Not available yet"}</span></div>
+        <div><strong>{accessStatus(access) === "active" ? "In your library" : product.availability === "published" ? "Free" : "Unavailable"}</strong><span>{product.availability === "published" ? "1 delivery" : "Not available"}</span></div>
         <RouterLink className="buyer-v2__button buyer-v2__button--secondary" to={path} navigate={navigate}>View details</RouterLink>
       </div>
     </article>
@@ -290,10 +291,7 @@ function ProductPage({ route, request, navigate, session, downloadUrl }) {
       <StorefrontDetails
         product={product}
         creatorName={productCreatorByline}
-        offer={offerFor(product)}
-        offerText={product.availability === "published" ? offerLabel(offerFor(product)) : "Unavailable in this release"}
         desktopRequirement={desktopRequirement}
-        refundPolicy={refundCopy(product)}
         releaseLabel={product.release_label || product.release?.label}
         action={<ProductAction embedded product={product} currentPath={path} request={request} navigate={navigate} session={session} downloadUrl={downloadUrl} />}
       />
@@ -302,7 +300,7 @@ function ProductPage({ route, request, navigate, session, downloadUrl }) {
         <span className="buyer-v2__eyebrow">How it works</span>
         <h2>From access to a reviewed delivery.</h2>
         <ol className="buyer-v2__steps">
-          <li><span>1</span><div><strong>Add the Agent</strong><p>Confirm the current offer and receive account access.</p></div></li>
+          <li><span>1</span><div><strong>Add the Agent</strong><p>Confirm free access for this Product.</p></div></li>
           <li><span>2</span><div><strong>Open Hatch Desktop</strong><p>Sign in with the same account and choose a local Workspace.</p></div></li>
           <li><span>3</span><div><strong>Review and deliver</strong><p>Approve permissions and save the finished artifact where you control it.</p></div></li>
         </ol>
@@ -314,17 +312,11 @@ function ProductPage({ route, request, navigate, session, downloadUrl }) {
 }
 
 function ProductAction({ product, currentPath, request, navigate, session, downloadUrl, embedded = false }) {
-  const offer = offerFor(product);
   const access = accessFor(product);
   const status = accessStatus(access);
   const [mutation, setMutation] = useState({ status: "idle", error: null });
   const checkoutIntentKey = useRef(requestId());
-  const amount = offerAmount(offer);
-  // This release only exposes the real free acquisition path. Paid offers
-  // remain visible as unavailable until a provider-backed checkout is
-  // explicitly enabled; never render a Buy CTA that will only fail later.
-  const purchasable = Boolean(offer && offerId(offer) && productId(product))
-    && offerAmount(offer) === 0
+  const purchasable = Boolean(productId(product))
     && product.availability === "published"
     && product.available !== false
     && product.status !== "withdrawn";
@@ -337,8 +329,7 @@ function ProductAction({ product, currentPath, request, navigate, session, downl
     setMutation({ status: "pending", error: null });
     try {
       const response = await callRequest(request, BUYER_PORTAL_V2_ENDPOINTS.checkoutSessions, jsonMutation("POST", {
-        product_id: productId(product),
-        offer_id: offerId(offer)
+        product_id: productId(product)
       }, checkoutIntentKey.current));
       const checkout = unwrap(response, ["checkout_session", "checkout"]);
       const id = checkout.checkout_session_id || checkout.id;
@@ -349,13 +340,13 @@ function ProductAction({ product, currentPath, request, navigate, session, downl
     }
   }
 
-  let title = amount === 0 ? "Add this Agent to your account." : "Confirm the offer before you pay.";
-  let body = amount === 0 ? "No payment is required. The order and delivery access are still recorded." : `${offerLabel(offer)} for the delivery scope shown at checkout.`;
+  let title = "Add this Agent to your account.";
+  let body = "No payment is required. Your access and receipt are still recorded.";
   let action = null;
 
   if (isOwnerCreator) {
     title = "This is your published storefront.";
-    body = "Buyers see the same promise, boundaries and active offer shown here.";
+    body = "Buyers see the same Product promise and boundaries shown here.";
     action = <RouterLink className="buyer-v2__button buyer-v2__button--secondary" to={`/studio/products/${encodeURIComponent(productId(product))}`} navigate={navigate}>Manage product</RouterLink>;
   } else if (status === "active" || status === "reserved") {
     title = status === "reserved" ? "A delivery is in progress." : "This Agent is ready.";
@@ -366,13 +357,13 @@ function ProductAction({ product, currentPath, request, navigate, session, downl
     body = "Your order is confirmed. Access will appear as soon as fulfillment finishes.";
     action = <button type="button" className="buyer-v2__button buyer-v2__button--primary" disabled aria-busy="true">Setting up access…</button>;
   } else if (!purchasable) {
-    title = "This Agent is not currently for sale.";
-    body = "The Creator may publish a new offer later. Existing receipts remain available to buyers.";
+    title = "This Product is unavailable.";
+    body = "The Creator has withdrawn this Product. Existing receipts remain available.";
   } else if (isAnonymous) {
     const authPath = `/sign-in?returnTo=${encodeURIComponent(currentPath)}`;
-    action = <RouterLink className="buyer-v2__button buyer-v2__button--primary" to={authPath} navigate={navigate}>{amount === 0 ? "Get for free" : `Buy for ${money(amount, offer.currency)}`}</RouterLink>;
+    action = <RouterLink className="buyer-v2__button buyer-v2__button--primary" to={authPath} navigate={navigate}>Get access</RouterLink>;
   } else {
-    action = <button type="button" className="buyer-v2__button buyer-v2__button--primary" disabled={mutation.status === "pending"} onClick={startCheckout} aria-busy={mutation.status === "pending"}>{mutation.status === "pending" ? "Opening checkout…" : amount === 0 ? "Get for free" : `Buy for ${money(amount, offer.currency)}`}</button>;
+    action = <button type="button" className="buyer-v2__button buyer-v2__button--primary" disabled={mutation.status === "pending"} onClick={startCheckout} aria-busy={mutation.status === "pending"}>{mutation.status === "pending" ? "Adding…" : "Get access"}</button>;
   }
 
   const contents = (
@@ -386,9 +377,9 @@ function ProductAction({ product, currentPath, request, navigate, session, downl
   );
   if (embedded) return <div className="buyer-v2__storefront-action">{contents}</div>;
   return (
-    <aside className="buyer-v2__action-card" aria-label="Offer">
-      <span className="buyer-v2__eyebrow">Current offer</span>
-      <div className="buyer-v2__price"><strong>{offerLabel(offer)}</strong><span>{offerUnitLabel(offer)}</span></div>
+    <aside className="buyer-v2__action-card" aria-label="Product access">
+      <span className="buyer-v2__eyebrow">Access</span>
+      <div className="buyer-v2__price"><strong>Free</strong><span>1 delivery</span></div>
       {contents}
     </aside>
   );
@@ -437,7 +428,7 @@ function AccountHelpPage({ session, navigate }) {
 
 function SubscriptionsPage({ navigate }) {
   usePageTitle("Subscriptions");
-  return <div className="buyer-v2__container buyer-v2__page"><StatePanel eyebrow="Subscriptions" title="No subscription products are enabled." body="Hatch V2 supports one-time per-delivery offers. Subscription billing remains unavailable until its renewal, grace, proration and cancellation policy is complete."><RouterLink className="buyer-v2__button buyer-v2__button--primary" to={EXPLORE_ROOT} navigate={navigate}>Explore products</RouterLink></StatePanel></div>;
+  return <div className="buyer-v2__container buyer-v2__page"><StatePanel eyebrow="Subscriptions" title="No subscription products are enabled." body="Every published Product currently grants one free delivery. Paid access and subscriptions are not available."><RouterLink className="buyer-v2__button buyer-v2__button--primary" to={EXPLORE_ROOT} navigate={navigate}>Explore products</RouterLink></StatePanel></div>;
 }
 
 function AuthPage({ mode, search, request, navigate, session }) {
@@ -478,8 +469,8 @@ function AuthPage({ mode, search, request, navigate, session }) {
         <HatchBrand as={RouterLink} className="buyer-v2__brand buyer-v2__brand--inverse" to={EXPLORE_ROOT} navigate={navigate} aria-label="Hatch home" />
         <div>
           <span className="buyer-v2__eyebrow">Continue your task</span>
-          {productIntent && intent.status === "loading" ? <div className="buyer-v2__auth-intent-skeleton" aria-label="Loading offer" /> : null}
-          {productIntent && intent.status === "ready" ? <><h1>{productName(intent.data)}</h1><p>{productPromise(intent.data)}</p><strong>{offerLabel(offerFor(intent.data))}</strong><small>by {creatorName(intent.data)}</small></> : null}
+          {productIntent && intent.status === "loading" ? <div className="buyer-v2__auth-intent-skeleton" aria-label="Loading Product" /> : null}
+          {productIntent && intent.status === "ready" ? <><h1>{productName(intent.data)}</h1><p>{productPromise(intent.data)}</p><strong>Free access</strong><small>by {creatorName(intent.data)}</small></> : null}
           {!productIntent ? <><h1>Your Agents, orders and access in one place.</h1><p>Use the same Hatch account on Web and Desktop.</p></> : null}
         </div>
       </section>
@@ -487,7 +478,7 @@ function AuthPage({ mode, search, request, navigate, session }) {
         <form className="buyer-v2__auth-form" onSubmit={submit}>
           <span className="buyer-v2__eyebrow">Hatch account</span>
           <h2>{signingUp ? "Create your account" : "Sign in to Hatch"}</h2>
-          <p>{signingUp ? "Create an account, then return to the offer you selected." : "Sign in, then continue exactly where you left off."}</p>
+          <p>{signingUp ? "Create an account, then return to the Product you selected." : "Sign in, then continue exactly where you left off."}</p>
           {signingUp ? <Field label="Name"><input required autoComplete="name" value={form.display_name} onChange={(event) => setForm({ ...form, display_name: event.target.value })} /></Field> : null}
           <Field label="Email"><input required type="email" autoComplete="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></Field>
           <Field label="Password"><input required minLength={8} type="password" autoComplete={signingUp ? "new-password" : "current-password"} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></Field>
@@ -501,7 +492,7 @@ function AuthPage({ mode, search, request, navigate, session }) {
   );
 }
 
-function CheckoutPage({ id, request, navigate, session, openPayment }) {
+function CheckoutPage({ id, request, navigate, session }) {
   const endpoint = `${BUYER_PORTAL_V2_ENDPOINTS.checkoutSessions}/${encodeURIComponent(id)}`;
   const resource = useRemote(async (signal) => unwrap(await callRequest(request, endpoint, { signal }), ["checkout_session", "checkout"]), endpoint);
   const [accepted, setAccepted] = useState(false);
@@ -509,15 +500,14 @@ function CheckoutPage({ id, request, navigate, session, openPayment }) {
   const confirmationIntentKey = useRef(requestId());
   const checkout = resource.data;
   const fulfillmentPending = checkout?.status === "fulfillment_pending";
-  const paymentPending = checkout?.status === "payment_pending";
   usePageTitle(checkout ? `Confirm ${productName(checkout.product || checkout.product_snapshot || checkout)}` : "Confirm order");
   useUnauthorized(resource.error, session);
 
   useEffect(() => {
-    if ((!fulfillmentPending && !paymentPending) || mutation.status === "pending") return undefined;
+    if (!fulfillmentPending || mutation.status === "pending") return undefined;
     const timer = window.setTimeout(resource.reload, 3000);
     return () => window.clearTimeout(timer);
-  }, [fulfillmentPending, paymentPending, mutation.status, resource.reload]);
+  }, [fulfillmentPending, mutation.status, resource.reload]);
 
   async function confirm() {
     if ((!accepted && !fulfillmentPending) || mutation.status === "pending") return;
@@ -531,24 +521,7 @@ function CheckoutPage({ id, request, navigate, session, openPayment }) {
         resource.reload();
         return;
       }
-      const paymentRedirectUrl = result.payment_url || response.payment_url || response.payment?.redirect_url;
       const orderId = result.order_id || result.id || response.order_id;
-      if (paymentRedirectUrl) {
-        openPayment(paymentRedirectUrl);
-        return;
-      }
-      if (["pending", "processing", "payment_pending", "requires_action"].includes(confirmationStatus)) {
-        setMutation({ status: "idle", error: null });
-        resource.reload();
-        return;
-      }
-      if (["failed", "cancelled", "payment_failed"].includes(confirmationStatus)) {
-        const paymentError = new Error("Payment was not completed. No access was granted.");
-        paymentError.code = `payment_${confirmationStatus}`;
-        setMutation({ status: "error", error: paymentError });
-        resource.reload();
-        return;
-      }
       if (!orderId) throw clientContractError("Checkout confirmation did not include order_id.");
       navigateTo(navigate, result.redirect_url || response.redirect_url || `/orders/${encodeURIComponent(orderId)}/success`, { replace: true });
     } catch (error) {
@@ -561,15 +534,11 @@ function CheckoutPage({ id, request, navigate, session, openPayment }) {
   if (resource.status === "error") return <div className="buyer-v2__container buyer-v2__page"><RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} returnTo={`${CHECKOUT_ROOT}/${id}`} /></div>;
 
   const product = checkout.product_snapshot || checkout.product || checkout;
-  const offer = checkout.offer_snapshot || checkout.offer || offerFor(checkout);
-  const totals = checkout.totals || checkout;
-  const total = numberOr(totals.total_minor, offerAmount(offer));
-  const expired = ["expired", "offer_changed", "cancelled"].includes(checkout.status) || (checkout.status === "open" && checkout.expires_at && Date.parse(checkout.expires_at) <= Date.now());
-  const quoteChange = checkout.quote_change || mutation.error?.details;
+  const expired = ["expired", "release_changed", "cancelled"].includes(checkout.status) || (checkout.status === "open" && checkout.expires_at && Date.parse(checkout.expires_at) <= Date.now());
 
   if (fulfillmentPending) {
     const orderId = checkout.order_id || checkout.order?.order_id;
-    return <div className="buyer-v2__container buyer-v2__page"><StatePanel eyebrow="Access setup" title="Order confirmed; setting up access" body="Your order is already recorded. Hatch is retrying the access projection, so do not place another order.">
+    return <div className="buyer-v2__container buyer-v2__page"><StatePanel eyebrow="Access setup" title="Access confirmed" body="Your access is already recorded. Hatch is finishing the receipt, so do not submit again.">
       <span className="buyer-v2__spinner" aria-hidden="true" />
       {mutation.error ? <InlineError error={mutation.error} /> : null}
       <button type="button" className="buyer-v2__button buyer-v2__button--primary" disabled={mutation.status === "pending"} onClick={confirm} aria-busy={mutation.status === "pending"}>{mutation.status === "pending" ? "Retrying setup…" : "Retry setup"}</button>
@@ -577,52 +546,36 @@ function CheckoutPage({ id, request, navigate, session, openPayment }) {
     </StatePanel></div>;
   }
 
-  if (checkout.status === "requires_action") {
-    return <div className="buyer-v2__container buyer-v2__page"><StatePanel eyebrow="Payment verification" title="One more payment step is required." body="Your order has not been granted yet. Complete the provider verification, then Hatch will read the authoritative payment status.">
-      {checkout.payment_redirect_url ? <button type="button" className="buyer-v2__button buyer-v2__button--primary" onClick={() => openPayment(checkout.payment_redirect_url)}>Continue verification</button> : null}
-      <button type="button" className="buyer-v2__button buyer-v2__button--secondary" onClick={resource.reload}>Check payment status</button>
-    </StatePanel></div>;
-  }
-
-  if (paymentPending) {
-    return <div className="buyer-v2__container buyer-v2__page"><StatePanel eyebrow="Payment processing" title="We’re confirming your payment…" body="Do not submit another order. Hatch is polling the provider-backed payment record."><span className="buyer-v2__spinner" aria-hidden="true" /><button type="button" className="buyer-v2__button buyer-v2__button--secondary" onClick={resource.reload}>Check now</button></StatePanel></div>;
-  }
-
-  if (checkout.status === "payment_failed") {
-    return <div className="buyer-v2__container buyer-v2__page"><StatePanel tone="error" eyebrow="Payment not completed" title="No access was granted." body="The payment failed or was cancelled. Return to the current product offer to start a fresh checkout."><RouterLink className="buyer-v2__button buyer-v2__button--primary" to={productPath(product)} navigate={navigate}>Review current offer</RouterLink></StatePanel></div>;
-  }
-
   if (checkout.status === "refunded") {
-    return <div className="buyer-v2__container buyer-v2__page"><StatePanel tone="warning" eyebrow="Access setup refunded" title="Your payment was refunded." body="Hatch could not finish access setup within the recovery window, so the original payment was refunded instead of leaving the purchase pending.">{checkout.order_id ? <RouterLink className="buyer-v2__button buyer-v2__button--primary" to={`${ORDERS_ROOT}/${encodeURIComponent(checkout.order_id)}`} navigate={navigate}>View refund receipt</RouterLink> : null}<RouterLink className="buyer-v2__button buyer-v2__button--secondary" to={productPath(product)} navigate={navigate}>Return to product</RouterLink></StatePanel></div>;
+    return <div className="buyer-v2__container buyer-v2__page"><StatePanel tone="warning" eyebrow="Access removed" title="This access is no longer active." body="The receipt remains available for your records.">{checkout.order_id ? <RouterLink className="buyer-v2__button buyer-v2__button--primary" to={`${ORDERS_ROOT}/${encodeURIComponent(checkout.order_id)}`} navigate={navigate}>View receipt</RouterLink> : null}<RouterLink className="buyer-v2__button buyer-v2__button--secondary" to={productPath(product)} navigate={navigate}>Return to Product</RouterLink></StatePanel></div>;
   }
 
   return (
     <div className="buyer-v2__container buyer-v2__page buyer-v2__checkout-page">
       <RouterLink className="buyer-v2__back-link" to={productPath(product)} navigate={navigate}>← Back to product</RouterLink>
-      <header className="buyer-v2__page-heading"><span className="buyer-v2__eyebrow">Order confirmation</span><h1>Review the real offer.</h1><p>This order is pinned to the product, release and price shown here.</p></header>
+      <header className="buyer-v2__page-heading"><span className="buyer-v2__eyebrow">Free access</span><h1>Confirm this Product.</h1><p>Your access is pinned to the Product release shown here.</p></header>
       <div className="buyer-v2__checkout-grid">
         <section className="buyer-v2__receipt-card">
           <div className="buyer-v2__receipt-product"><span>{creatorName(checkout.creator || product)}</span><h2>{productName(product)}</h2><p>{productPromise(product)}</p></div>
           <DefinitionList rows={[
             ["Release", checkout.release_label || checkout.release_snapshot?.label || product.release_label || "Current approved release"],
-            ["Delivery units", String(offer.included_units ?? checkout.entitlement_scope?.included_units ?? 1)],
-            ["Access", checkout.entitlement_scope?.label || offerUnitLabel(offer) || "Per delivery"],
-            ["Payment", total === 0 ? "No payment required" : checkout.payment_method_summary || "Secure payment"],
-            ["Terms", checkout.refund_policy?.summary || checkout.refund_policy_summary || "The offer policy shown at checkout applies"]
+            ["Delivery units", "1"],
+            ["Access", "One delivery"],
+            ["Payment", "Not required"]
           ]} />
         </section>
-        <aside className="buyer-v2__order-summary">
-          <span className="buyer-v2__eyebrow">Order summary</span>
-          <PriceRow label="Subtotal" value={money(numberOr(totals.subtotal_minor, total), offer.currency)} />
-          {totals.discount_minor ? <PriceRow label="Discount" value={`−${money(totals.discount_minor, offer.currency)}`} /> : null}
-          <PriceRow label="Tax" value={totals.tax_minor == null ? "Not calculated" : money(totals.tax_minor, offer.currency)} />
-          <PriceRow label="Total" value={money(total, offer.currency)} total />
-          <label className="buyer-v2__checkbox"><input type="checkbox" checked={accepted} onChange={(event) => setAccepted(event.target.checked)} disabled={expired} /><span>I confirm this offer and its refund terms.</span></label>
-          {expired ? <div className="buyer-v2__inline-notice" role="status">This checkout is no longer current. Return to the product to review the latest offer.{quoteChange?.previous_offer || quoteChange?.current_offer ? <dl className="buyer-v2__quote-change"><div><dt>Previously quoted</dt><dd>{quoteChange.previous_offer ? offerLabel(quoteChange.previous_offer) : "Unavailable"}</dd></div><div><dt>Current offer</dt><dd>{quoteChange.current_offer ? offerLabel(quoteChange.current_offer) : "No longer for sale"}</dd></div></dl> : null}</div> : null}
-          {mutation.error ? <InlineError error={mutation.error} /> : null}
-          <button type="button" className="buyer-v2__button buyer-v2__button--primary buyer-v2__button--wide" disabled={!accepted || expired || mutation.status === "pending"} onClick={confirm} aria-busy={mutation.status === "pending"}>{mutation.status === "pending" ? total === 0 ? "Adding to your account…" : "Opening payment…" : total === 0 ? "Add to my account" : `Pay ${money(total, offer.currency)}`}</button>
-          <small>Amount, Creator and release are resolved by the server. This page never submits its displayed price as authority.</small>
-        </aside>
+        <CheckoutSummary
+          product={{ ...product, name: productName(product), currency: "USD" }}
+          lineItems={[{ label: "One delivery", detail: checkout.release_label || checkout.release_snapshot?.label || product.release_label || "Current approved release", amount_minor: 0 }]}
+          totals={{ subtotal_minor: 0, total_minor: 0, subtotal_label: "Free", total_label: "Free", currency: "USD" }}
+          busy={mutation.status === "pending"}
+          error={mutation.error ? friendlyError(mutation.error) : undefined}
+          action={{ label: mutation.status === "pending" ? "Adding to your account…" : "Add to my account", disabled: !accepted || expired, onClick: confirm }}
+          legal="The Product and release are resolved by the server."
+        >
+          <HatchCheckbox checked={accepted} onCheckedChange={(checked) => setAccepted(checked === true)} disabled={expired} label="Add this Product to my account." />
+          {expired ? <HatchInlineAlert tone="warning">This access request is no longer current. Return to the Product and try again.</HatchInlineAlert> : null}
+        </CheckoutSummary>
       </div>
     </div>
   );
@@ -714,7 +667,7 @@ function LibraryPage({ search, request, navigate }) {
       {resource.status === "loading" ? <CardSkeleton count={2} label="Loading your library" /> : null}
       {resource.status === "error" ? <RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} returnTo={LIBRARY_ROOT} /> : null}
       {resource.status === "ready" && resource.items.length ? <section className="buyer-v2__list-grid" aria-label="Your entitlements">{resource.items.map((item) => <EntitlementCard key={entitlementIdFor(item)} entitlement={item} navigate={navigate} />)}</section> : null}
-      {resource.status === "ready" && !resource.items.length ? <EmptyState title={filter === "all" ? "Your library is empty" : "No access in this view"} body={filter === "all" ? "Explore products and choose a method that fits your task." : "Choose another filter or explore available products."} action={<RouterLink className="buyer-v2__button buyer-v2__button--primary" to={EXPLORE_ROOT} navigate={navigate}>Explore products</RouterLink>} /> : null}
+      {resource.status === "ready" && !resource.items.length ? <EmptyState title="Your library is empty" body="Explore products and choose a method that fits your task." action={<RouterLink className="buyer-v2__button buyer-v2__button--primary" to={EXPLORE_ROOT} navigate={navigate}>Explore products</RouterLink>} /> : null}
       {resource.nextCursor ? <LoadMore resource={resource} /> : null}
     </div>
   );
@@ -792,7 +745,7 @@ function OrdersPage({ search, request, navigate, session }) {
       {resource.status === "loading" ? <ListSkeleton label="Loading orders" /> : null}
       {resource.status === "error" ? <RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} returnTo={ORDERS_ROOT} /> : null}
       {resource.status === "ready" && resource.items.length ? <section className="buyer-v2__order-list" aria-label="Orders">{resource.items.map((order) => <OrderRow key={orderIdFor(order)} order={order} navigate={navigate} />)}</section> : null}
-      {resource.status === "ready" && !resource.items.length ? <EmptyState title="No orders in this view" body="Orders appear after you confirm a free offer." action={<RouterLink className="buyer-v2__button buyer-v2__button--primary" to={EXPLORE_ROOT} navigate={navigate}>Explore products</RouterLink>} /> : null}
+      {resource.status === "ready" && !resource.items.length ? <EmptyState title="No orders in this view" body="Orders appear after you add a Product." action={<RouterLink className="buyer-v2__button buyer-v2__button--primary" to={EXPLORE_ROOT} navigate={navigate}>Explore products</RouterLink>} /> : null}
       {resource.nextCursor ? <LoadMore resource={resource} /> : null}
     </div>
   );
@@ -860,12 +813,11 @@ function OrderPage({ id, request, navigate, session }) {
           ["Total", totalMinor === 0 ? "Free" : money(totalMinor, order.currency)],
           ["Payment", paymentStatusLabel(order.payment_status || order.payment?.status, totalMinor)],
           ["Access", entitlementStatusLabel(accessStatus(order.entitlement || { status: order.entitlement_status }))],
-          ["Offer", order.offer_snapshot ? `${offerLabel(order.offer_snapshot)} · ${offerUnitLabel(order.offer_snapshot)}` : order.offer_label || "Purchase-time offer snapshot"],
           ["Release", order.release_snapshot?.label || order.release_snapshot?.release_id || order.release_label || order.release_id || "Purchase-time release"]
         ]} />{entitlementId ? <RouterLink className="buyer-v2__text-link" to={`${LIBRARY_ROOT}/${encodeURIComponent(entitlementId)}`} navigate={navigate}>View access details →</RouterLink> : null}</section>
         <aside className="buyer-v2__order-actions"><span className="buyer-v2__eyebrow">Order actions</span><h2>{orderActionTitle(order)}</h2><p>{orderActionCopy(order)}</p>{successReady(order, order.entitlement) ? <RouterLink className="buyer-v2__button buyer-v2__button--primary" to={`/orders/${encodeURIComponent(orderReference(order))}/success`} navigate={navigate}>Open activation steps</RouterLink> : null}{canReverseOrder ? <button className="buyer-v2__button buyer-v2__button--secondary" type="button" disabled={refundState.status === "pending"} onClick={requestRefund}>{refundState.status === "pending" ? "Submitting request…" : reversalLabel}</button> : null}{refundState.error ? <InlineError error={refundState.error} /> : null}{refundState.status === "succeeded" ? <div className="buyer-v2__inline-notice" role="status">{reversalSuccess}</div> : null}</aside>
       </div>
-      <section className="buyer-v2__timeline-section"><div><span className="buyer-v2__eyebrow">Commerce timeline</span><h2>What happened, in order.</h2></div><Timeline entries={entries} /></section>
+      <section className="buyer-v2__timeline-section"><div><span className="buyer-v2__eyebrow">Access history</span><h2>What happened, in order.</h2></div><Timeline entries={entries} /></section>
     </div>
   );
 }
@@ -1062,12 +1014,9 @@ function trackPortalEvent(request, eventName, attributes = {}) {
 }
 
 function productTelemetry(product) {
-  const offer = offerFor(product);
   return {
     creator_id: product?.creator_id ?? product?.creator?.id,
     product_id: productId(product),
-    offer_id: offerId(offer),
-    offer_revision: offer?.revision,
     release_id: product?.release_id ?? product?.release?.release_id,
     platform: typeof navigator === "undefined" ? "web" : /Mac/i.test(navigator.platform) ? "macos" : "web"
   };
@@ -1164,20 +1113,11 @@ function dedupeItems(items) {
   });
 }
 
-function offerFor(value) {
-  if (!value) return null;
-  const nested = value.active_offer || value.offer || value.offer_snapshot;
-  if (nested) return nested;
-  if (value.price_minor != null || value.amount_minor != null) return { offer_id: value.offer_id, amount_minor: value.amount_minor ?? value.price_minor, currency: value.currency, model: value.pricing_model || value.purchase_model, unit: value.unit, included_units: value.included_units };
-  return null;
-}
-
 function accessFor(value) {
   return value?.entitlement || value?.access || (value?.entitlement_status ? { status: value.entitlement_status } : null);
 }
 
 function productId(value) { return value?.product_id || value?.product?.id || value?.product?.product_id || value?.id; }
-function offerId(value) { return value?.offer_id || value?.id || value?.revision_id; }
 function productName(value) { return value?.product_name || value?.name || value?.product?.name || "Creator Agent"; }
 function productPromise(value) { return value?.promise || value?.product_description || value?.description || value?.product?.promise || value?.product?.description || "A practical Creator method for work in your own Workspace."; }
 function creatorName(value) { return value?.creator_name || value?.creator_display_name || value?.display_name || value?.name || value?.creator?.display_name || value?.creator?.name || value?.creator?.handle || "Hatch Creator"; }
@@ -1196,27 +1136,6 @@ function libraryPathFor(product, entitlement) {
 }
 
 function productKey(value) { return productId(value) || "product"; }
-
-function offerAmount(offer) {
-  if (!offer) return null;
-  return numberOr(offer.amount_minor, numberOr(offer.price_minor, null));
-}
-
-function offerLabel(offer) {
-  const amount = offerAmount(offer);
-  if (amount == null) return "Not for sale";
-  if (amount === 0) return "Free";
-  return money(amount, offer.currency);
-}
-
-function offerUnitLabel(offer) {
-  if (!offer) return "No active offer";
-  const model = offer.purchase_model || offer.model || offer.pricing_model;
-  const unit = offer.unit || offer.billing_unit;
-  if (model === "subscription") return offer.interval ? `per ${offer.interval}` : "subscription";
-  if (unit === "delivery" || model === "per_delivery") return "per delivery";
-  return unit ? `per ${String(unit).replaceAll("_", " ")}` : "account access";
-}
 
 function money(minor, currency = "USD") {
   const amount = Number(minor);
@@ -1240,7 +1159,7 @@ function entitlementSummary(value) {
   const status = accessStatus(value);
   if (status === "reserved") return "A delivery unit is reserved for work already in progress.";
   if (status === "consumed") return "The included delivery has been used. Your receipt remains available.";
-  if (status === "expired") return "This access has expired. Review the current offer to renew.";
+  if (status === "expired") return "This access has expired. Return to the Product to get access again.";
   if (["suspended", "revoked"].includes(status)) return value.status_reason_label || "Access is unavailable. Review the recovery details.";
   return value.summary || "Open Hatch Desktop with this account and choose a Workspace.";
 }
@@ -1331,7 +1250,7 @@ function entitlementRecoveryTitle(status) {
 }
 
 function entitlementRecoveryCopy(status) {
-  if (["consumed", "expired"].includes(status)) return "Return to the public product to review the current offer before purchasing another delivery.";
+  if (["consumed", "expired"].includes(status)) return "Return to the public Product to get another delivery.";
   if (status === "pending") return "Keep this page and order receipt; fulfillment will update without another checkout.";
   return "Review the originating order for a reason and available support action.";
 }
@@ -1345,10 +1264,6 @@ function desktopUrl(entitlement, product) {
   const creator = creatorId(product) || entitlement?.creator_id;
   if (creator) params.set("creator_id", creator);
   return `hatch://products/open${params.toString() ? `?${params}` : ""}`;
-}
-
-function refundCopy(product) {
-  return product.refund_policy?.summary || product.refund_policy_summary || "The purchase-time refund policy is shown again before final confirmation and stays attached to your receipt.";
 }
 
 function arrayValue(value, fallback = []) {
@@ -1374,7 +1289,7 @@ function initialsFor(user) {
 
 function friendlyError(error) {
   if (!error) return "Something went wrong. Try again.";
-  if (error.code === "offer_changed") return "The offer changed after this checkout began. Refresh and confirm the latest amount and scope.";
+  if (error.code === "release_changed") return "The Product changed after this request began. Refresh and confirm the current release.";
   if (error.status === 429) return "Too many requests. Wait a moment, then try again.";
   if (error.status >= 500) return "Hatch is temporarily unavailable. Your current task has not been discarded.";
   return error.message || "Something went wrong. Try again.";

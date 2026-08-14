@@ -39,7 +39,6 @@ function bundle(
       description: "Evidence-first review.",
       promise: "Turn a resume into a signal map.",
       boundaries: ["Does not invent evidence."],
-      offer: { model: "per_delivery", amount_minor: 0, currency: "USD", unit: "review" },
       presentation: { accent: "fern" }
     },
     instructions: { system: asset("system", systemPath, system) },
@@ -246,7 +245,6 @@ test("TypeScript Registry publishes a clean Corpus and indexes knowledge only", 
   assert.equal(restoredCorpus?.corpus_digest, published.corpus_digest);
   assert.equal(restoredCorpus?.product_promise, "Turn a resume into a signal map.");
   assert.deepEqual(restoredCorpus?.product_boundaries, ["Does not invent evidence."]);
-  assert.deepEqual(restoredCorpus?.product_offer, { model: "per_delivery", amount_minor: 0, currency: "USD", unit: "review" });
   assert.deepEqual(restoredCorpus?.presentation, { accent: "fern" });
   const grant = await restored.grantAgentAccess("33333333-3333-4333-8333-333333333333", "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", "55555555-5555-4555-8555-555555555555");
   assert.equal(grant.order_id, "55555555-5555-4555-8555-555555555555");

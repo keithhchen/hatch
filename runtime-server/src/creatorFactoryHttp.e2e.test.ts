@@ -38,7 +38,6 @@ test("Registry Creator Factory API authenticates ownership and creates idempoten
       description: "One finished customer response.",
       promise: "A decisive reply grounded in Creator evidence.",
       boundaries: ["No unsupported claims."],
-      offer: { model: "per_delivery", amount_minor: 2500, currency: "USD", unit: "reply" },
       presentation: { accent: "cobalt", card: { density: "compact" } }
     },
     tools: [
@@ -161,7 +160,7 @@ test("Registry Creator Factory API authenticates ownership and creates idempoten
     })
   });
   assert.equal(invalidProduct.status, 422);
-  assert.match((await invalidProduct.json() as { detail: string }).detail, /uppercase currency/);
+  assert.match((await invalidProduct.json() as { detail: string }).detail, /unsupported field: offer/);
 
   const list = await fetch(`${base}/v1/creator/factory-runs`, {
     headers: { authorization: `Bearer ${creatorA}` }

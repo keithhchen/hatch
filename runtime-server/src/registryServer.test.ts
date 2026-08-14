@@ -16,7 +16,6 @@ test("TypeScript Registry exposes auth and Corpus catalog endpoints", async () =
     REGISTRY_PORT: "0",
     HATCH_AGENT_CORPUS_ROOT: path.join(root, "corpora"),
     HATCH_REGISTRY_STATE_PATH: path.join(root, "state.json"),
-    HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN: "commerce-test-token",
     HATCH_AUTH_SIGNING_SECRET: "test-secret",
     HATCH_QDRANT_URL: "",
     DASHSCOPE_API_KEY: ""
@@ -50,31 +49,28 @@ test("TypeScript Registry exposes auth and Corpus catalog endpoints", async () =
     const access = await fetch(`${base}/v1/user/product-access`, {
       headers: { authorization: `Bearer ${auth.session.token}` }
     });
-    assert.equal(access.status, 200);
-    assert.deepEqual(await access.json(), []);
+    assert.equal(access.status, 404);
 
     const selfGrant = await fetch(`${base}/v1/user/products/${PRODUCT_ID}/access`, {
       method: "POST",
       headers: { authorization: `Bearer ${auth.session.token}`, "content-type": "application/json" },
       body: JSON.stringify({ order_id: "order_forged" })
     });
-    // The route exists only for the private Commerce principal; an ordinary
-    // account can discover no mutation authority from possessing a session.
-    assert.equal(selfGrant.status, 401);
+    assert.equal(selfGrant.status, 404);
 
     const userTokenOnCommerceRoute = await fetch(`${base}/v1/commerce/product-access`, {
       method: "POST",
       headers: { authorization: `Bearer ${auth.session.token}`, "content-type": "application/json" },
       body: JSON.stringify({ user_id: auth.account.id, creator_id: CREATOR_ID, product_id: PRODUCT_ID, order_id: "order_forged" })
     });
-    assert.equal(userTokenOnCommerceRoute.status, 401);
+    assert.equal(userTokenOnCommerceRoute.status, 404);
 
     const missingOrder = await fetch(`${base}/v1/commerce/product-access`, {
       method: "POST",
       headers: { authorization: "Bearer commerce-test-token", "content-type": "application/json" },
       body: JSON.stringify({ user_id: auth.account.id, creator_id: CREATOR_ID, product_id: PRODUCT_ID })
     });
-    assert.equal(missingOrder.status, 400);
+    assert.equal(missingOrder.status, 404);
 
     const commerceOnly = await fetch(`${base}/v1/commerce/product-access`, {
       method: "POST",

@@ -337,7 +337,6 @@ async function startRuntime(
   socket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
-    installation_id: "desktop-commerce",
     license_token: "license-commerce",
     entitlement_id: fixture.entitlement.entitlement_id,
     creator_id: fixture.entitlement.creator_id,

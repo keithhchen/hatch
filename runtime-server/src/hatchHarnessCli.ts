@@ -151,7 +151,6 @@ async function executeOneTurn(
   const socket = new WebSocket(endpoint);
   const runId = `factory_eval_${randomUUID().replaceAll("-", "")}`;
   const conversationId = `factory_eval_conversation_${randomUUID().replaceAll("-", "")}`;
-  const installationId = `factory_eval_installation_${randomUUID().replaceAll("-", "")}`;
   const chunks: string[] = [];
   const protocolEvents: HatchHarnessCliResult["protocolEvents"] = [];
   let protocolTraceTruncated = false;
@@ -222,7 +221,6 @@ async function executeOneTurn(
       const hello = {
         type: "client.hello",
         protocol_version: PROTOCOL_VERSION,
-        installation_id: installationId,
         license_token: "factory-harness-local",
         entitlement_id: FACTORY_HARNESS_ENTITLEMENT_ID,
         creator_id: input.creatorId,

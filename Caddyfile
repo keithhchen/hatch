@@ -51,12 +51,12 @@
 
     # Runtime accounting is an internal service-to-service API. Runtime calls
     # Dashboard on hatch_internal; never expose these commands at the edge.
-    @internal_service_api path /v1/internal/commerce* /v1/internal/deployments*
+    @internal_service_api path /v1/internal/access* /v1/internal/commerce* /v1/internal/deployments*
     respond @internal_service_api 404
 
     # Packaged Desktop uses an opaque Registry bearer, while the browser uses
-    # the Dashboard's HttpOnly cookie session. Keep the Desktop surface narrow
-    # so bearer requests never fall through to the browser BFF envelope.
+    # the Dashboard's HttpOnly cookie session. Registry owns sign-in and
+    # identity; the Dashboard owns the shared Web/Desktop entitlement view.
     @desktop_registry_signin path /v1/auth/signin
     handle @desktop_registry_signin {
         reverse_proxy registry:8100
@@ -66,13 +66,13 @@
     # browser can subsequently send the authenticated request.
     @desktop_registry_preflight {
         method OPTIONS
-        path /v1/auth/me /v1/auth/logout /v1/user/product-access
+        path /v1/auth/me /v1/auth/logout
     }
     handle @desktop_registry_preflight {
         reverse_proxy registry:8100
     }
     @desktop_registry_bearer {
-        path /v1/auth/me /v1/auth/logout /v1/user/product-access
+        path /v1/auth/me /v1/auth/logout
         header Authorization *
     }
     handle @desktop_registry_bearer {

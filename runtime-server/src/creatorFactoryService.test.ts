@@ -28,12 +28,6 @@ test("Creator Factory service persists complete product metadata and canonical d
     description: "A sourced executive brief.",
     promise: "One decision-ready recommendation.",
     boundaries: ["No unsupported claims."],
-    offer: {
-      model: "per_delivery" as const,
-      amount_minor: 4900,
-      currency: "USD",
-      unit: "brief"
-    },
     presentation: { accent: "fern", layout: { density: "compact" } }
   };
   const tools = [
@@ -167,16 +161,13 @@ test("Creator Factory service rejects non-canonical or secret-bearing tool decla
   }
 });
 
-test("Creator Factory service strictly validates offer and presentation metadata", async (t) => {
+test("Creator Factory service strictly validates Product and presentation metadata", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-factory-invalid-product-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const service = new CreatorFactoryService(new InMemoryCreatorFactoryRepository(), root);
   const invalid: Array<{ product: unknown; error: RegExp }> = [
     { product: { id: "brief", name: "Brief", unknown: true }, error: /product contains unsupported field: unknown/ },
-    { product: { id: "brief", name: "Brief", offer: { amount_minor: -1, currency: "USD" } }, error: /amount_minor/ },
-    { product: { id: "brief", name: "Brief", offer: { amount_minor: 100, currency: "usd" } }, error: /uppercase currency/ },
-    { product: { id: "brief", name: "Brief", offer: { amount_minor: 100, currency: "USD", endpoint: "x" } }, error: /product\.offer contains unsupported field: endpoint/ },
-    { product: { id: "brief", name: "Brief", offer: { amount_minor: 100, currency: "USD", model: "lifetime" } }, error: /per_delivery or subscription/ },
+    { product: { id: "brief", name: "Brief", offer: { amount_minor: 0 } }, error: /product contains unsupported field: offer/ },
     { product: { id: "brief", name: "Brief", presentation: [] }, error: /presentation must be a plain object/ }
   ];
   for (const [index, item] of invalid.entries()) {

@@ -27,17 +27,6 @@
         "description": { "type": "string", "minLength": 1, "maxLength": 4096 },
         "promise": { "type": "string", "minLength": 1, "maxLength": 4096 },
         "boundaries": { "type": "array", "maxItems": 32, "items": { "type": "string", "minLength": 1, "maxLength": 512 } },
-        "offer": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["amount_minor", "currency"],
-          "properties": {
-            "model": { "type": "string", "enum": ["per_delivery", "subscription"] },
-            "amount_minor": { "type": "integer", "minimum": 0 },
-            "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
-            "unit": { "type": "string", "minLength": 1, "maxLength": 128 }
-          }
-        },
         "presentation": { "type": "object", "maxProperties": 128, "additionalProperties": true }
       }
     },

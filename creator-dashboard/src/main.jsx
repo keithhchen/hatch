@@ -8,6 +8,7 @@ import "@fontsource/dm-mono/400.css";
 import { BuyerPortalV2 } from "./BuyerPortalV2.jsx";
 import { CreatorPortalV2 } from "./CreatorPortalV2.jsx";
 import { HatchBrand } from "./HatchBrand.jsx";
+import { AtmosphericPaper, ToastViewport, TooltipProvider } from "./components/ui/index.js";
 import { dashboardRequest } from "./data.js";
 import "../../packages/brand/tokens.css";
 import "./styles.css";
@@ -180,4 +181,11 @@ function RoleBoundary({ navigate }) {
   );
 }
 
-createRoot(document.getElementById("root")).render(<App />);
+createRoot(document.getElementById("root")).render(
+  <TooltipProvider>
+    <AtmosphericPaper className="hatch-app-paper">
+      <App />
+      <ToastViewport />
+    </AtmosphericPaper>
+  </TooltipProvider>
+);

@@ -10,8 +10,6 @@ import {
 } from "./finance.js";
 
 const EVENT_TYPES = new Set([
-  "offer.revision_created",
-  "offer.activated",
   "payment.created",
   "payment.status_changed",
   "payment.refunded",
@@ -225,63 +223,6 @@ export function projectBuyerEntitlements(events, buyerId) {
     }));
 }
 
-export function projectOfferRevision(events, offerId, revision) {
-  const created = events.find((event) => (
-    event.event_type === "offer.revision_created"
-    && event.offer_id === offerId
-    && Number(event.revision) === Number(revision)
-  ));
-  if (!created) return undefined;
-  const activation = events.findLast((event) => (
-    event.event_type === "offer.activated"
-    && event.offer_id === offerId
-    && Number(event.revision) === Number(revision)
-  ));
-  const currentActivation = events.findLast((event) => (
-    event.event_type === "offer.activated"
-    && event.creator_id === created.creator_id
-    && event.product_id === created.product_id
-  ));
-  const active = currentActivation?.offer_id === offerId
-    && Number(currentActivation?.revision) === Number(revision);
-  return {
-    offer_id: created.offer_id,
-    revision: created.revision,
-    creator_id: created.creator_id,
-    product_id: created.product_id,
-    purchase_model: created.purchase_model,
-    model: created.purchase_model,
-    amount_minor: created.amount_minor,
-    currency: created.currency,
-    unit: created.unit,
-    included_units: created.included_units,
-    refund_policy_version: created.refund_policy_version,
-    version_policy: created.version_policy,
-    status: active ? "active" : "draft",
-    created_at: created.occurred_at,
-    activated_at: activation?.occurred_at ?? null,
-    operation_id: active ? currentActivation.operation_id ?? null : null,
-    release_id: active ? currentActivation.release_id ?? null : null,
-    corpus_digest: active ? currentActivation.corpus_digest ?? null : null
-  };
-}
-
-export function projectActiveOffer(events, creatorId, productId) {
-  const activation = events.findLast((event) => (
-    event.event_type === "offer.activated"
-    && event.creator_id === creatorId
-    && event.product_id === productId
-  ));
-  if (!activation) return undefined;
-  const offer = projectOfferRevision(events, activation.offer_id, activation.revision);
-  return offer ? {
-    ...offer,
-    operation_id: activation.operation_id ?? null,
-    release_id: activation.release_id ?? null,
-    corpus_digest: activation.corpus_digest ?? null
-  } : undefined;
-}
-
 export function projectBuyerOrders(events, buyerId) {
   const refundedMinorByOrder = new Map();
   const refundedOrders = new Set();
@@ -469,9 +410,6 @@ export function projectOrder(events, orderId, options = {}) {
     corpus_digest: order.corpus_digest,
     release_id: order.release_id ?? null,
     release_snapshot: order.release_snapshot ?? null,
-    offer_id: order.offer_id ?? null,
-    offer_revision: order.offer_revision ?? null,
-    offer_snapshot: order.offer_snapshot ?? null,
     gross_minor: order.gross_minor,
     subtotal_minor: order.subtotal_minor ?? order.gross_minor,
     discount_minor: order.discount_minor ?? 0,
@@ -786,17 +724,6 @@ function normalizePayload(type, payload, idempotencyKey) {
     normalized.aggregate_type ??= "revenue";
     normalized.aggregate_id ??= normalized.recognition_id;
   }
-  if (type === "offer.revision_created") {
-    normalized.purchase_model ??= normalized.model ?? "per_delivery";
-    delete normalized.model;
-    normalized.currency = String(normalized.currency ?? "USD").toUpperCase();
-    normalized.unit ??= "delivery";
-    normalized.included_units ??= 1;
-    normalized.refund_policy_version ??= "v1";
-    normalized.version_policy = normalized.version_policy === "track_current_compatible"
-      ? "track_current_compatible"
-      : "pinned";
-  }
   if (type === "order.placed") {
     normalized.included_units ??= 1;
     normalized.subtotal_minor ??= normalized.gross_minor;
@@ -846,7 +773,6 @@ function normalizeAuditEnvelope(type, payload, idempotencyKey) {
 }
 
 function commerceAggregate(type, payload) {
-  if (type.startsWith("offer.")) return { type: "offer", id: payload.offer_id };
   if (type.startsWith("payment.")) return { type: "payment", id: payload.payment_id };
   if (type.startsWith("order.")) return { type: "order", id: payload.order_id };
   if (type.startsWith("entitlement.")) return { type: "entitlement", id: payload.entitlement_id };
@@ -882,42 +808,6 @@ function validateEvent(event, events) {
   for (const key of ["event_id", "event_type", "occurred_at", "idempotency_key"]) {
     if (typeof event[key] !== "string" || !event[key]) {
       throw new CommerceInvariantError("invalid_event", `${key} is required`);
-    }
-  }
-  if (event.event_type === "offer.revision_created") {
-    requireFields(event, ["offer_id", "creator_id", "product_id", "purchase_model", "currency", "unit", "refund_policy_version", "version_policy"]);
-    if (event.purchase_model !== "per_delivery") {
-      throw new CommerceInvariantError("unsupported_offer", "Only per_delivery offers are supported before subscription lifecycle exists");
-    }
-    requirePositiveInteger(event.revision, "revision");
-    requireNonNegativeInteger(event.amount_minor, "amount_minor");
-    requirePositiveInteger(event.included_units, "included_units");
-    if (!/^[A-Z]{3}$/.test(event.currency)) {
-      throw new CommerceInvariantError("invalid_currency", "Offer currency must be a three-letter ISO code");
-    }
-    if (events.some((item) => item.event_type === "offer.revision_created"
-      && item.offer_id === event.offer_id && item.revision === event.revision)) {
-      throw new CommerceInvariantError("offer_revision_exists", `Offer ${event.offer_id} revision ${event.revision} already exists`);
-    }
-  }
-  if (event.event_type === "offer.activated") {
-    requireFields(event, ["offer_id", "creator_id", "product_id"]);
-    requirePositiveInteger(event.revision, "revision");
-    const revision = events.find((item) => item.event_type === "offer.revision_created"
-      && item.offer_id === event.offer_id && item.revision === event.revision);
-    if (!revision) throw new CommerceInvariantError("offer_revision_not_found", "Offer revision must exist before activation");
-    requireIdentityMatch(revision, event, ["creator_id", "product_id"]);
-    if (Object.hasOwn(event, "expected_previous_operation_id")) {
-      const current = events.findLast((item) => item.event_type === "offer.activated"
-        && item.creator_id === event.creator_id
-        && item.product_id === event.product_id);
-      const currentOperationId = current?.operation_id ?? null;
-      if (currentOperationId !== event.expected_previous_operation_id) {
-        throw new CommerceInvariantError(
-          "stale_deployment",
-          `Active offer deployment changed from ${event.expected_previous_operation_id ?? "none"} to ${currentOperationId ?? "none"}`
-        );
-      }
     }
   }
   if (event.event_type === "payment.created") {

@@ -15,7 +15,7 @@ test("public Creator and Product pages stay connected by UUID", async ({ page })
   await expect(page.getByRole("heading", { level: 1, name: "Maya Creator" })).toBeVisible();
   await expect(page.getByRole("heading", { level: 2, name: "Signal Resume Review" })).toBeVisible();
 
-  await page.getByRole("link", { name: "View details" }).click();
+  await page.locator(".buyer-v2__catalog-card").filter({ has: page.getByRole("heading", { level: 2, name: "Signal Resume Review" }) }).getByRole("link", { name: "View details" }).click();
   await expect(page).toHaveURL(/\/products\/f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42$/);
   const creatorLink = page.getByRole("link", { name: "Maya Creator", exact: true }).first();
   await expect(creatorLink).toHaveAttribute("href", "/creators/6f6a3d24-48af-4f27-9c50-0d4f7e4e8a21");
@@ -28,7 +28,7 @@ test("anonymous Buyer completes free checkout and can recover every durable rout
   await page.goto("/products/f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42");
   await expectNoSeriousAccessibilityViolations(page);
 
-  await page.getByRole("link", { name: "Get for free" }).click();
+  await page.getByRole("link", { name: "Get access" }).click();
   await expect(page).toHaveURL(/\/sign-in\?returnTo=/);
   await expect(page.getByText("Signal Resume Review").first()).toBeVisible();
   await page.getByLabel("Email").fill("buyer@example.test");
@@ -36,10 +36,10 @@ test("anonymous Buyer completes free checkout and can recover every durable rout
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
 
   await expect(page).toHaveURL(/\/products\/f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42$/);
-  await page.getByRole("button", { name: "Get for free" }).click();
+  await page.getByRole("button", { name: "Get access" }).click();
   await expect(page).toHaveURL(/\/checkout\//);
-  await expect(page.getByRole("heading", { level: 1, name: "Review the real offer." })).toBeVisible();
-  await page.getByLabel("I confirm this offer and its refund terms.").check();
+  await expect(page.getByRole("heading", { level: 1, name: "Confirm this Product." })).toBeVisible();
+  await page.getByLabel("Add this Product to my account.").check();
   await page.getByRole("button", { name: "Add to my account" }).click();
 
   await expect(page).toHaveURL(/\/orders\/[^/]+\/success$/);
@@ -70,9 +70,9 @@ test("anonymous Buyer completes free checkout and can recover every durable rout
   await expect(page.getByRole("heading", { level: 1, name: "Signal Resume Review" })).toBeVisible();
   await page.getByRole("link", { name: "Back to Library" }).click();
   await expect(page).toHaveURL(/\/library$/);
-  await expect(page.getByRole("heading", { level: 1, name: "Agents your account can use." })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Agents linked to your account." })).toBeVisible();
   await page.reload();
-  await expect(page.getByRole("heading", { level: 1, name: "Agents your account can use." })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Agents linked to your account." })).toBeVisible();
 
   await context.clearCookies();
   const protectedPath = new URL(successUrl).pathname;
@@ -94,7 +94,7 @@ test("anonymous Buyer completes free checkout and can recover every durable rout
   await expect(page).toHaveURL(/\/explore$/);
 });
 
-test("Creator can recover Home, Products, Orders and honest Payouts routes", async ({ page }) => {
+test("Creator can recover Home, Products and free Access routes", async ({ page }) => {
   await signIn(page, "creator", "/studio");
   await expect(page.getByRole("heading", { level: 1, name: /Maya, here’s the next useful step/ })).toBeVisible();
   await expectNoHorizontalOverflow(page);
@@ -106,10 +106,7 @@ test("Creator can recover Home, Products, Orders and honest Payouts routes", asy
   await expect(page.getByRole("button", { name: "Open product" }).first()).toBeVisible();
 
   await page.getByRole("button", { name: "Orders", exact: true }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "Sales, delivery, and revenue—together." })).toBeVisible();
-  await page.getByRole("button", { name: "Payouts", exact: true }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "Connect payouts before showing a balance." })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Setup unavailable" })).toBeDisabled();
+  await expect(page.getByRole("heading", { level: 1, name: "See who can use each product." })).toBeVisible();
   await expectNoSeriousAccessibilityViolations(page);
 });
 

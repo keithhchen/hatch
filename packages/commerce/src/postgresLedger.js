@@ -2,11 +2,9 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   CommerceInvariantError,
   CommerceLedger,
-  projectActiveOffer,
   projectCreatorDashboard,
   projectDeliveries,
   projectEntitlement,
-  projectOfferRevision,
   projectOrder,
   projectRefunds
 } from "./ledger.js";
@@ -220,14 +218,6 @@ export class PostgresCommerceLedger {
       .filter((payout) => payout.creator_id === creatorId)
       .filter((payout) => !normalizedCurrency || payout.currency === normalizedCurrency)
       .sort((left, right) => right.created_at.localeCompare(left.created_at));
-  }
-
-  readOfferRevision(offerId, revision) {
-    return this.#readModel("offer_revision", compoundModelId(offerId, Number(revision)));
-  }
-
-  readActiveOffer(creatorId, productId) {
-    return this.#readModel("active_offer", compoundModelId(creatorId, productId));
   }
 
   readEntitlement(entitlementId, options = {}) {
@@ -880,22 +870,6 @@ function buildReadModels(events, now) {
 
   for (const payoutId of eventIds(events, "payout.reserved", "payout_id")) {
     add("payout", payoutId, projectPayout(events, payoutId));
-  }
-
-  for (const event of events.filter((item) => item.event_type === "offer.revision_created")) {
-    add(
-      "offer_revision",
-      compoundModelId(event.offer_id, event.revision),
-      projectOfferRevision(events, event.offer_id, event.revision)
-    );
-  }
-  const activeOfferPairs = uniquePairs(
-    events.filter((event) => event.event_type === "offer.activated"),
-    "creator_id",
-    "product_id"
-  );
-  for (const [creatorId, productId] of activeOfferPairs) {
-    add("active_offer", compoundModelId(creatorId, productId), projectActiveOffer(events, creatorId, productId));
   }
 
   for (const creatorId of uniqueStrings(events.map((event) => event.creator_id))) {

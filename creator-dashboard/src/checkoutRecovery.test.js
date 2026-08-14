@@ -15,11 +15,10 @@ const agent = {
   product_description: "A recoverable free delivery.",
   product_promise: "Recover access without creating another order.",
   product_boundaries: ["One delivery."],
-  product_offer: { model: "per_delivery", amount_minor: 0, currency: "USD", included_units: 1 },
   corpus_digest: "sha256:recovery-corpus"
 };
 
-test("confirmed checkout survives Registry outage and reconciles access idempotently", async (context) => {
+test("confirmed checkout commits access without a Registry ownership projection", async (context) => {
   let grantAttempts = 0;
   const grants = [];
   const registry = createServer(async (request, response) => {
@@ -93,7 +92,7 @@ test("confirmed checkout survives Registry outage and reconciles access idempote
   const created = await fetch(`${serverUrl(api)}/v1/checkout-sessions`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ product_id: agent.product_id, offer_id: detail.offer.offer_id })
+    body: JSON.stringify({ product_id: agent.product_id })
   });
   const session = (await created.json()).checkout_session;
 
@@ -102,20 +101,17 @@ test("confirmed checkout survives Registry outage and reconciles access idempote
     headers,
     body: "{}"
   });
-  assert.equal(firstConfirm.status, 503);
-  assert.equal(dashboard.portalState.getCheckoutSession(session.checkout_session_id).status, "fulfillment_pending");
+  assert.equal(firstConfirm.status, 201);
+  assert.equal(dashboard.portalState.getCheckoutSession(session.checkout_session_id).status, "completed");
   assert.deepEqual(dashboard.ledger.listEvents().map((event) => event.event_type), [
-    "offer.revision_created",
-    "offer.activated",
     "order.placed",
     "entitlement.granted"
   ]);
 
   const reconciled = await dashboard.reconcilePendingCheckouts();
-  assert.equal(reconciled[0].status, "completed");
+  assert.deepEqual(reconciled, []);
   assert.equal(dashboard.portalState.getCheckoutSession(session.checkout_session_id).status, "completed");
-  assert.equal(grants.length, 1);
-  assert.equal(grants[0].purchased_corpus_digest, agent.corpus_digest);
+  assert.equal(grants.length, 0);
 
   const replay = await fetch(`${serverUrl(api)}/v1/checkout-sessions/${session.checkout_session_id}/confirm`, {
     method: "POST",
@@ -124,7 +120,7 @@ test("confirmed checkout survives Registry outage and reconciles access idempote
   });
   assert.equal(replay.status, 200);
   assert.ok((await replay.json()).order_id);
-  assert.equal(dashboard.ledger.listEvents().length, 4);
+  assert.equal(dashboard.ledger.listEvents().length, 2);
 });
 
 function listen(server) {

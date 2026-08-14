@@ -20,8 +20,6 @@ const identity = {
   product_name: "Product V2",
   corpus_digest: `sha256:${"d".repeat(64)}`,
   release_id: "release_v2",
-  offer_id: "offer_v2",
-  offer_revision: 1,
   currency: "USD"
 };
 
@@ -74,106 +72,6 @@ test("appendMany rolls back the whole transaction when a later invariant fails",
     (error) => error.code === "identity_chain_mismatch"
   );
   assert.equal(ledger.listEvents().length, 0);
-});
-
-test("Commerce owns immutable offer revisions and the active storefront pointer", async () => {
-  const ledger = await CommerceLedger.open();
-  const commerce = new CommerceService(ledger);
-  const draft = await commerce.createOfferRevision({
-    offer_id: "offer_authority",
-    revision: 1,
-    creator_id: identity.creator_id,
-    product_id: identity.product_id,
-    purchase_model: "per_delivery",
-    amount_minor: 0,
-    currency: "usd",
-    unit: "delivery",
-    included_units: 1,
-    refund_policy_version: "v1",
-    idempotency_key: "offer-authority-v1"
-  });
-  assert.equal(draft.status, "draft");
-  assert.equal(draft.currency, "USD");
-  assert.equal(commerce.getActiveOffer(identity.creator_id, identity.product_id), undefined);
-
-  const active = await commerce.activateOfferRevision({
-    offer_id: draft.offer_id,
-    revision: draft.revision,
-    creator_id: identity.creator_id,
-    product_id: identity.product_id,
-    release_id: identity.release_id,
-    idempotency_key: "offer-authority-activate-v1"
-  });
-  assert.equal(active.status, "active");
-  assert.equal(commerce.getActiveOffer(identity.creator_id, identity.product_id).offer_id, draft.offer_id);
-
-  await assert.rejects(
-    commerce.createOfferRevision({
-      ...draft,
-      amount_minor: 100,
-      idempotency_key: "offer-authority-v1"
-    }),
-    (error) => error.code === "idempotency_conflict"
-  );
-});
-
-test("each deployment operation can reactivate an old offer or reuse a revision for a new release", async () => {
-  const ledger = await CommerceLedger.open();
-  const commerce = new CommerceService(ledger);
-  for (const [revision, amountMinor] of [[1, 0], [2, 100]]) {
-    await commerce.createOfferRevision({
-      offer_id: "offer_deployment_pointer",
-      revision,
-      creator_id: identity.creator_id,
-      product_id: identity.product_id,
-      purchase_model: "per_delivery",
-      amount_minor: amountMinor,
-      currency: "USD",
-      unit: "delivery",
-      included_units: 1,
-      refund_policy_version: "v1",
-      idempotency_key: `offer-deployment-revision-${revision}`
-    });
-  }
-  const activate = (operationId, revision, releaseId, corpusDigest, expectedPreviousOperationId) => commerce.activateOfferRevision({
-    offer_id: "offer_deployment_pointer",
-    revision,
-    creator_id: identity.creator_id,
-    product_id: identity.product_id,
-    release_id: releaseId,
-    corpus_digest: corpusDigest,
-    operation_id: operationId,
-    expected_previous_operation_id: expectedPreviousOperationId,
-    idempotency_key: `deployment:${operationId}`
-  });
-
-  await activate("publish-one", 1, "release-one", "sha256:one", null);
-  await activate("publish-two", 2, "release-two", "sha256:two", "publish-one");
-  await activate("rollback-one", 1, "release-one", "sha256:one", "publish-two");
-  assert.deepEqual(
-    { revision: commerce.getActiveOffer(identity.creator_id, identity.product_id).revision,
-      operation_id: commerce.getActiveOffer(identity.creator_id, identity.product_id).operation_id },
-    { revision: 1, operation_id: "rollback-one" }
-  );
-
-  await activate("publish-three", 1, "release-three", "sha256:three", "rollback-one");
-  const latest = commerce.getActiveOffer(identity.creator_id, identity.product_id);
-  assert.equal(latest.revision, 1);
-  assert.equal(latest.release_id, "release-three");
-  assert.equal(latest.corpus_digest, "sha256:three");
-  assert.equal(latest.operation_id, "publish-three");
-  assert.equal(ledger.listEvents().filter((event) => event.event_type === "offer.activated").length, 4);
-
-  await activate("publish-three", 1, "release-three", "sha256:three", "rollback-one");
-  assert.equal(ledger.listEvents().filter((event) => event.event_type === "offer.activated").length, 4);
-  await assert.rejects(
-    activate("publish-three", 1, "release-changed", "sha256:changed", "rollback-one"),
-    (error) => error.code === "idempotency_conflict"
-  );
-  await assert.rejects(
-    activate("stale-delayed-operation", 2, "release-stale", "sha256:stale", "publish-one"),
-    (error) => error.code === "stale_deployment"
-  );
 });
 
 test("free checkout atomically creates one real order and one unit entitlement", async () => {

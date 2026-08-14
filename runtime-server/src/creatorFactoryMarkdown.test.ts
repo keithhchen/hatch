@@ -260,7 +260,7 @@ test("Corpus prompt compiles lossless full-layer replacements with concrete dest
     creatorName: "Creator",
     taskName: "Task",
     taskBrief: "Produce a decisive deliverable.",
-    productContract: "Promise: a directly usable review. Boundary: no guaranteed revenue. Offer: Creator explicitly set USD 99.",
+    productContract: "Promise: a directly usable review. Boundary: no guaranteed revenue.",
     evidence: "Explicit decision rule [S1:L1].",
     developmentQa: [{ id: "D.Q1", question: "Choose.", answer: "Choose A." }],
     evaluationFeedback: "Route the global decision rule to System.",
@@ -282,7 +282,6 @@ test("Corpus prompt compiles lossless full-layer replacements with concrete dest
   assert.match(call.systemPrompt, /Never generate an `agent\.json`, manifest, SHA\/digest/i);
   assert.match(call.systemPrompt, /only tool-related output permitted is a Skill's `allowed_tool_ids`/i);
   assert.match(call.systemPrompt, /must exactly match one of the externally supplied Available tool IDs/i);
-  assert.match(call.systemPrompt, /price\/offer fields remain explicit Creator-owned metadata/i);
   assert.match(call.systemPrompt, /active sealed held-out set[—-].*never visible/is);
   assert.match(call.systemPrompt, /old and new asset ID\/path\/layer/i);
   assert.match(call.systemPrompt, /use only the available local submission tools/i);
@@ -294,7 +293,7 @@ test("Corpus prompt compiles lossless full-layer replacements with concrete dest
   assert.match(call.prompt, /PREVIOUS_SYSTEM_BOUNDARY/);
   assert.match(call.prompt, /PREVIOUS_KNOWLEDGE_ITEM/);
   assert.match(call.prompt, /hatch\.web_search/);
-  assert.match(call.prompt, /Creator explicitly set USD 99/);
+  assert.match(call.prompt, /Boundary: no guaranteed revenue/);
 
   assert.throws(() => corpusPrompt({
     creatorName: "Creator",

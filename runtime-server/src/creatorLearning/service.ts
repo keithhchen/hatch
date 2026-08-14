@@ -418,8 +418,7 @@ const BUILTIN_TOOLS = [
   { id: "hatch.file_search", kind: "hatch_builtin", capability: "file_search" }
 ] as const satisfies readonly FactoryAgentTool[];
 
-const PRODUCT_KEYS = new Set(["id", "name", "description", "promise", "boundaries", "offer", "presentation"]);
-const OFFER_KEYS = new Set(["model", "amount_minor", "currency", "unit"]);
+const PRODUCT_KEYS = new Set(["id", "name", "description", "promise", "boundaries", "presentation"]);
 const BUILTIN_TOOL_KEYS = new Set(["id", "kind", "capability", "description"]);
 const CREATOR_HTTP_TOOL_KEYS = new Set(["id", "kind", "connection_ref", "operation", "description", "input_schema"]);
 const CREATOR_MCP_TOOL_KEYS = new Set(["id", "kind", "connection_ref", "tool_name", "description", "input_schema"]);
@@ -444,31 +443,9 @@ function validateProduct(value: Partial<FactoryAgentProduct>): Partial<FactoryAg
     ...(boundaries === undefined ? {} : {
       boundaries: boundaries.map((boundary, index) => requireText(boundary, `product.boundaries[${index}]`))
     }),
-    ...(product.offer === undefined ? {} : { offer: validateOffer(product.offer) }),
     ...(product.presentation === undefined ? {} : {
       presentation: { ...requirePlainObject(product.presentation, "product.presentation") }
     })
-  };
-}
-
-function validateOffer(value: unknown): NonNullable<FactoryAgentProduct["offer"]> {
-  const offer = requirePlainObject(value, "product.offer");
-  assertOnlyKeys(offer, OFFER_KEYS, "product.offer");
-  if (!Number.isSafeInteger(offer.amount_minor) || (offer.amount_minor as number) < 0) {
-    throw new Error("product.offer.amount_minor must be a non-negative integer");
-  }
-  const currency = requireText(offer.currency, "product.offer.currency");
-  if (!/^[A-Z]{3}$/.test(currency)) {
-    throw new Error("product.offer.currency must be a three-letter uppercase currency code");
-  }
-  if (offer.model !== undefined && offer.model !== "per_delivery" && offer.model !== "subscription") {
-    throw new Error("product.offer.model must be per_delivery or subscription");
-  }
-  return {
-    ...(offer.model === undefined ? {} : { model: offer.model }),
-    amount_minor: offer.amount_minor as number,
-    currency,
-    ...(offer.unit === undefined ? {} : { unit: requireText(offer.unit, "product.offer.unit") })
   };
 }
 

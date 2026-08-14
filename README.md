@@ -1,7 +1,7 @@
 # Hatch
 
-Hatch turns an expert creator's courses, methods, data, and tools into a paid
-Creator Agent that can work against a buyer's real local context.
+Hatch turns an expert Creator's courses, methods, data, and tools into a
+published Agent that can work against a user's real local context.
 
 This repository contains two connected flows:
 
@@ -28,8 +28,8 @@ test fixtures:
 
 - Creator [Maya Chen](fixtures/profiles/maya-chen.md)
   distills and publishes Signal Resume Review from her existing materials.
-- Buyer [Jordan Lee](fixtures/profiles/jordan-lee.md) purchases
-  that product, grants a job-search workspace, and receives a local artifact.
+- User [Jordan Lee](fixtures/profiles/jordan-lee.md) adds
+  that Product to their account, grants a job-search Workspace, and receives a local artifact.
 
 Their identities exist only in demonstration inputs and proof orchestration;
 Factory, Runtime, Desktop, Registry, Commerce, and Dashboard product code remain
@@ -91,16 +91,17 @@ source data. Credentials and vector contents do not enter Factory artifacts.
 The old `platform-registry/` Python service is migration-only and is not the
 production entrypoint.
 
-`packages/commerce/` provides the order, offer-revision, entitlement,
-delivery-unit, refund, revenue, and payout contracts. Production uses its
+`packages/commerce/` retains its historical package name but is the
+authoritative Access ledger for order, entitlement, delivery-unit, and receipt
+contracts. Production uses its
 PostgreSQL event repository with transactional outbox/inbox and a single
 Dashboard-hosted command API; the file ledger remains a local-test fallback.
-Production Compose gives Registry, Factory, Runtime, and Commerce distinct
-database login roles, and exposes only the credentials each service needs.
+Production currently uses one application database credential; service
+authorization is enforced at the HTTP boundary.
 
 `creator-dashboard/` is the Creator-facing SaaS surface for starting and
-resuming Factory runs, and for viewing published Agent products, orders,
-deliveries, and the 90/10 revenue projection from that same Ledger. Publication
+resuming Factory runs, and for viewing published Agent Products, access records,
+and deliveries from that same ledger. Publication
 remains an explicit action after a candidate reaches `ready`.
 
 ## Repository map
@@ -112,7 +113,7 @@ local-runner/            Rust local tool boundary
 runtime-server/          TypeScript Runtime + Registry + Creator Factory Graph/worker
 platform-registry/       legacy Registry migration source
 packages/protocol/       canonical wire and Agent Corpus schemas
-packages/commerce/       entitlement, Delivery, and revenue Ledger
+packages/commerce/       historical package name for Access, Entitlement, Delivery, and receipts
 privacyd/                optional local privacy transformation experiments
 archive/landing-skill-app/ historical website (not deployed)
 docs/                    product contracts and proof artifacts
@@ -160,5 +161,5 @@ still requires Apple Developer signing and notarization credentials.
 
 Passing component tests is not sufficient proof of v1. Completion requires one
 Agent Corpus to be distilled and published, consumed from the installed Desktop,
-delivered through local tools, and reflected in the same Commerce Ledger and
+delivered through local tools, and reflected in the same Access ledger and
 Creator Dashboard.

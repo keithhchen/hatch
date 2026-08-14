@@ -1,13 +1,11 @@
 export {
   CommerceLedger,
   CommerceInvariantError,
-  projectActiveOffer,
   projectBuyerEntitlements,
   projectBuyerOrders,
   projectCreatorDashboard,
   projectDeliveries,
   projectEntitlement,
-  projectOfferRevision,
   projectOrder,
   projectRefunds
 } from "./ledger.js";

@@ -77,7 +77,10 @@ test("legacy HMAC auth is inert by default and uses only an explicit Runtime env
     disabledSocket = await openSocket(disabledPort);
     const disabledReady = waitForMessage(disabledSocket, (message) => message.type === "session.ready");
     disabledSocket.send(JSON.stringify(hello(token, "legacy-install-disabled")));
-    assert.equal((await disabledReady).user_id, "legacy-install-disabled");
+    assert.equal(
+      (await disabledReady).user_id,
+      `local-${createHash("sha256").update(token).digest("hex").slice(0, 24)}`
+    );
 
     enabled = await createRuntimeServerFromEnvironment({
       HATCH_ENABLE_LEGACY_HMAC_AUTH: "true",
@@ -722,7 +725,10 @@ test("per-user active-run capacity preserves room for another account", async ()
       [otherUser, "fair-run-token-three", "fair-run-other-user"]
     ] as const) {
       const ready = waitForMessage(socket, (message) => message.type === "session.ready");
-      socket.send(JSON.stringify(hello(token, installation)));
+      socket.send(JSON.stringify({
+        ...hello(token, installation),
+        user_id: testAuthorityId(installation)
+      }));
       await ready;
     }
 
@@ -954,25 +960,37 @@ test("ready connection caps release on close and distinguish per-user from globa
     const first = await openSocket(port);
     sockets.push(first);
     const firstReady = waitForMessage(first, (message) => message.type === "session.ready");
-    first.send(JSON.stringify(hello("connection-token-one", "connection-user-one")));
+    first.send(JSON.stringify({
+      ...hello("connection-token-one", "connection-user-one"),
+      user_id: testAuthorityId("connection-user-one")
+    }));
     await firstReady;
 
     const sameUser = await openSocket(port);
     sockets.push(sameUser);
     const userRejected = waitForMessage(sameUser, (message) => (message.error as { code?: string } | undefined)?.code === "user_connection_capacity");
-    sameUser.send(JSON.stringify(hello("connection-token-two", "connection-user-one")));
+    sameUser.send(JSON.stringify({
+      ...hello("connection-token-two", "connection-user-one"),
+      user_id: testAuthorityId("connection-user-one")
+    }));
     assert.equal(((await userRejected).error as { code?: string }).code, "user_connection_capacity");
 
     const secondUser = await openSocket(port);
     sockets.push(secondUser);
     const secondReady = waitForMessage(secondUser, (message) => message.type === "session.ready");
-    secondUser.send(JSON.stringify(hello("connection-token-three", "connection-user-two")));
+    secondUser.send(JSON.stringify({
+      ...hello("connection-token-three", "connection-user-two"),
+      user_id: testAuthorityId("connection-user-two")
+    }));
     await secondReady;
 
     const globalOverflow = await openSocket(port);
     sockets.push(globalOverflow);
     const globalRejected = waitForMessage(globalOverflow, (message) => (message.error as { code?: string } | undefined)?.code === "connection_capacity");
-    globalOverflow.send(JSON.stringify(hello("connection-token-four", "connection-user-three")));
+    globalOverflow.send(JSON.stringify({
+      ...hello("connection-token-four", "connection-user-three"),
+      user_id: testAuthorityId("connection-user-three")
+    }));
     assert.equal(((await globalRejected).error as { code?: string }).code, "connection_capacity");
 
     const firstClosed = new Promise<void>((resolve) => first.once("close", () => resolve()));
@@ -981,7 +999,10 @@ test("ready connection caps release on close and distinguish per-user from globa
     const admitted = await openSocket(port);
     sockets.push(admitted);
     const admittedReady = waitForMessage(admitted, (message) => message.type === "session.ready");
-    admitted.send(JSON.stringify(hello("connection-token-five", "connection-user-one")));
+    admitted.send(JSON.stringify({
+      ...hello("connection-token-five", "connection-user-one"),
+      user_id: testAuthorityId("connection-user-one")
+    }));
     await admittedReady;
   } finally {
     for (const socket of sockets) socket.close();
@@ -1228,7 +1249,10 @@ test("oversized protocol fields fail as controlled messages without consuming he
   const socket = await openSocket(port);
   try {
     const rejected = waitForMessage(socket, (message) => (message.error as { code?: string } | undefined)?.code === "protocol_error");
-    socket.send(JSON.stringify(hello("fixture-token", "x".repeat(257))));
+    socket.send(JSON.stringify({
+      ...hello("fixture-token", "oversized-user"),
+      user_id: "x".repeat(257)
+    }));
     assert.equal(((await rejected).error as { code?: string }).code, "protocol_error");
 
     const ready = waitForMessage(socket, (message) => message.type === "session.ready");
@@ -1576,14 +1600,19 @@ function signLegacyToken(secret: string, subject: string): string {
   return `${header}.${payload}.${signature}`;
 }
 
-function hello(token: string, installationId: string): Record<string, unknown> {
+function hello(token: string, testUserId: string): Record<string, unknown> {
+  void testUserId;
   return {
     type: "client.hello",
     protocol_version: "0.7",
-    installation_id: installationId,
     auth_token: token,
     local_tools: []
   };
+}
+
+function testAuthorityId(label: string): string {
+  const hex = createHash("sha256").update(label).digest("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
 
 function clientMessage(runId: string, conversationId: string): Record<string, unknown> {
@@ -1710,12 +1739,12 @@ async function connectEntitledSocket(
   port: number,
   entitlement: EntitlementBinding,
   token: string,
-  installationId: string
+  testLabel: string
 ): Promise<WebSocket> {
   const socket = await openSocket(port);
   const ready = waitForMessage(socket, (message) => message.type === "session.ready");
   socket.send(JSON.stringify({
-    ...hello(token, installationId),
+    ...hello(token, testLabel),
     entitlement_id: entitlement.entitlement_id,
     creator_id: entitlement.creator_id,
     product_id: entitlement.product_id

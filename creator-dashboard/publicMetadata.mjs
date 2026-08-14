@@ -109,11 +109,7 @@ export function createProductNoScriptFallback(input = {}) {
   const description = cleanText(input.description, DEFAULT_DESCRIPTION, 300);
   const productPath = `/products/${productId}`;
   const creatorPath = `/creators/${creatorId}`;
-  const amountMinor = Number(input.amountMinor);
-  const isFree = Number.isSafeInteger(amountMinor) && amountMinor === 0;
-  const action = isFree
-    ? `<a href="/sign-in?returnTo=${escapeAttribute(encodeURIComponent(productPath))}">Get for free</a>`
-    : `<span>Not available yet</span>`;
+  const action = `<a href="/sign-in?returnTo=${escapeAttribute(encodeURIComponent(productPath))}">Get access</a>`;
   return `<noscript data-hatch-product-fallback="true"><main><p><a href="${creatorPath}">${escapeHtml(creatorName)}</a></p><h1>${escapeHtml(productName)}</h1><p>${escapeHtml(description)}</p><p>${action}</p></main></noscript>`;
 }
 

@@ -55,9 +55,9 @@ CREATE TABLE products (
 );
 ```
 
-Commerce 相关表和事件使用 UUID：
+Access 相关表和事件使用 UUID：
 
-- `product_id`、`creator_id`、`offer_id`；
+- `product_id`、`creator_id`；
 - `order_id`、`entitlement_id`；
 - 其他数据库生成的 aggregate identity。
 
@@ -110,12 +110,11 @@ Public product response 至少包含：
   "creator_id": "<uuid>",
   "name": "Alpha Lite",
   "creator": { "id": "<uuid>", "name": "Seth" },
-  "public_url": "/products/<uuid>",
-  "offer": {}
+  "public_url": "/products/<uuid>"
 }
 ```
 
-订单、Entitlement、Checkout session、Factory、Offer 和 Release response 只传 UUID authority 字段，不传 slug 作为查询条件。
+订单、Entitlement、Checkout session、Factory 和 Release response 只传 UUID authority 字段，不传 slug 作为查询条件。
 
 ## 5. Desktop contract
 

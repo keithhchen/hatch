@@ -52,12 +52,6 @@ export const AgentCorpusSchema = z.object({
     description: DescriptionSchema.optional(),
     promise: DescriptionSchema.optional(),
     boundaries: z.array(z.string().min(1).max(512)).max(32).default([]),
-    offer: z.object({
-      model: z.enum(["per_delivery", "subscription"]).optional(),
-      amount_minor: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
-      currency: z.string().regex(/^[A-Z]{3}$/),
-      unit: z.string().min(1).max(128).optional()
-    }).strict().optional(),
     presentation: BoundedJsonObjectSchema.default({})
   }).strict(),
   instructions: z.object({ system: AssetSchema }).strict(),
@@ -540,7 +534,7 @@ export async function loadAgentCorpus(root: string, signal?: AbortSignal): Promi
   if (manifest.byteLength > AGENT_CORPUS_MANIFEST_MAX_BYTES) {
     throw new Error("Agent Corpus manifest is too large");
   }
-  const corpus = AgentCorpusSchema.parse(JSON.parse(manifest.toString("utf8")));
+  const corpus = AgentCorpusSchema.parse(stripRemovedProductMetadata(JSON.parse(manifest.toString("utf8"))));
   const forbidden = new Set(["provider", "api_key", "credential", "credentials", "endpoint", "vector_store_id", "raw_material", "factory_trace"]);
   const leaked = findForbiddenKeys(corpus, forbidden);
   if (leaked.length) throw new Error(`Agent Corpus contains runtime or Factory fields: ${leaked.join(", ")}`);
@@ -578,6 +572,18 @@ export async function loadAgentCorpus(root: string, signal?: AbortSignal): Promi
     if (digest !== asset.sha256) throw new Error(`Agent Corpus asset digest mismatch: ${asset.path}`);
   }
   return corpus;
+}
+
+function stripRemovedProductMetadata(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const manifest = structuredClone(value) as Record<string, unknown>;
+  if (!manifest.product || typeof manifest.product !== "object" || Array.isArray(manifest.product)) return manifest;
+  // Immutable releases published before the free-Product cutover retain their
+  // original bytes and digest. Discard the removed storefront pricing field at
+  // the read boundary without exposing it to Runtime or accepting any other
+  // unknown Product metadata.
+  delete (manifest.product as Record<string, unknown>).offer;
+  return manifest;
 }
 
 function embeddedJsonLimitFailure(value: Record<string, unknown>): string | undefined {

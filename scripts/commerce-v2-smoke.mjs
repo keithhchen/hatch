@@ -22,22 +22,15 @@ export async function runCommerceV2Smoke(options = {}) {
   assertStatus(productResponse, 200, "public product API");
   const product = productResponse.json?.product ?? productResponse.json?.agent ?? productResponse.json;
   if (!product?.available || product.availability !== "published") {
-    throw new Error("Commerce smoke requires a published product with an active Commerce offer.");
-  }
-  if (!product.offer?.offer_id || !Number.isSafeInteger(Number(product.offer.revision))) {
-    throw new Error("Commerce smoke product is missing a versioned offer snapshot.");
+    throw new Error("Access smoke requires a published Product.");
   }
   if (!product.release_id || !product.corpus_digest) {
     throw new Error("Commerce smoke product is missing an immutable release binding.");
   }
   if (!email && !password) {
-    return { mode: "public", creator_id: creatorId, product_id: productId, offer_id: product.offer.offer_id };
+    return { mode: "public", creator_id: creatorId, product_id: productId };
   }
   if (!email || !password) throw new Error("HATCH_SMOKE_EMAIL and HATCH_SMOKE_PASSWORD must be configured together.");
-  if (Number(product.offer.amount_minor) !== 0) {
-    throw new Error("Authenticated production smoke only confirms a zero-value offer; use provider sandbox for paid capture.");
-  }
-
   const login = await smokeRequest(fetchImpl, origin, "/v1/auth/login", {
     method: "POST",
     headers: sameOriginHeaders(origin),
@@ -58,12 +51,12 @@ export async function runCommerceV2Smoke(options = {}) {
   if (me.json?.role !== "user") throw new Error("Commerce smoke account must have the Buyer user role.");
 
   // Application redeploys must replay the same smoke purchase. A new order is
-  // justified only when the immutable product release or active offer changes.
+  // justified only when the immutable Product release changes.
   const intentKey = smokeIntentKey({ creatorId, productId, product });
   const checkout = await smokeRequest(fetchImpl, origin, "/v1/checkout-sessions", {
     method: "POST",
     headers: { ...authenticatedHeaders, "idempotency-key": `${intentKey}:create` },
-    body: { product_id: productId, offer_id: product.offer.offer_id }
+    body: { product_id: productId }
   });
   assertOneOf(checkout, [200, 201], "checkout session");
   const session = checkout.json?.checkout_session;
@@ -94,11 +87,9 @@ export async function runCommerceV2Smoke(options = {}) {
   });
   assertStatus(order, 200, "durable order detail");
   const receipt = order.json?.order ?? order.json;
-  if (receipt.offer_id !== product.offer.offer_id
-    || Number(receipt.offer_revision) !== Number(product.offer.revision)
-    || receipt.release_id !== product.release_id
+  if (receipt.release_id !== product.release_id
     || receipt.corpus_digest !== product.corpus_digest) {
-    throw new Error("Order detail did not preserve the public offer snapshot.");
+    throw new Error("Order detail did not preserve the published Product release snapshot.");
   }
   if (Number(receipt.gross_minor) !== 0
     || Number(receipt.subtotal_minor) !== 0
@@ -107,7 +98,7 @@ export async function runCommerceV2Smoke(options = {}) {
     || Number(receipt.total_minor) !== 0
     || receipt.payment_status !== "not_required"
     || receipt.payment_id !== null
-    || receipt.currency !== product.offer.currency) {
+    || receipt.currency !== "USD") {
     throw new Error("Order detail did not preserve zero-value Payment Not required semantics.");
   }
   const entitlement = await smokeRequest(fetchImpl, origin, `/v1/user/entitlements/${encodeURIComponent(entitlementId)}`, {
@@ -188,9 +179,7 @@ function smokeIntentKey({ creatorId, productId, product }) {
     creator_id: creatorId,
     product_id: productId,
     release_id: product.release_id,
-    corpus_digest: product.corpus_digest,
-    offer_id: product.offer.offer_id,
-    offer_revision: Number(product.offer.revision)
+    corpus_digest: product.corpus_digest
   })).digest("hex");
   return `production-smoke:${digest}`;
 }

@@ -21,15 +21,13 @@ or separate production Runtime exists. The server uses two Compose projects:
    Never commit this file or put these values in GitHub Actions.
    The file must also contain the non-empty `HATCH_DATABASE_URL`.
    This simple deployment uses one database login for all four services.
-   It must also contain `HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN`,
-   `HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN`,
-   and `HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN`.
+   It must also contain `HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN` and
+   `HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN`.
    CD creates `HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN` once when it is
    missing, stores it in the server-only `.env` with mode 600, and never
    prints it. Later deploys reuse the same value.
-   The commerce token is shared only by Dashboard and Registry: checkout writes
-   the order ledger first, then this authenticated service boundary creates the
-   entitlement. A user bearer cannot grant Agent access directly.
+   Dashboard owns the entitlement ledger. Registry owns account identity and
+   published Product/Corpus metadata; it does not keep a second ownership copy.
    Registry applies a hard request budget to the client IP and separate
    signup/signin failure budgets to the normalized identity. Correct
    credentials may clear that route's identity-failure bucket, but never the
@@ -81,7 +79,7 @@ or separate production Runtime exists. The server uses two Compose projects:
    Configure `HATCH_SMOKE_EMAIL` and `HATCH_SMOKE_PASSWORD` with a dedicated
    Buyer UAT account. CD never passes these values to application containers;
    after health checks it uses them to verify the canonical public product,
-   cookie/CSRF login, a product-release-and-offer-keyed idempotent free checkout,
+   cookie/CSRF login, a product-release-keyed idempotent free access confirmation,
    production cookie attributes, immutable order/access snapshots, durable receipt,
    Order/Entitlement detail, success URL, and Desktop download route. Set
    `HATCH_SMOKE_CREATOR_ID` / `HATCH_SMOKE_PRODUCT_ID` only when the canonical

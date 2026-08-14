@@ -5,14 +5,6 @@ import path from "node:path";
 import test from "node:test";
 import { PortalStateStore } from "../portalState.mjs";
 
-const FREE_OFFER = Object.freeze({
-  purchase_model: "per_delivery",
-  amount_minor: 0,
-  currency: "USD",
-  unit: "delivery",
-  included_units: 1
-});
-
 test("R14 concurrent Factory autosaves reject the stale tab and never overwrite the winner", async () => {
   const store = await PortalStateStore.open();
   const creatorId = "creator-r14";
@@ -74,13 +66,8 @@ test("R17 changed candidate digest or report stales the old approval and require
   let state = await store.approveCandidate(creatorId, productId, candidateV1, 0, {
     reason: "Review the first candidate assets"
   });
-  state = await store.saveOffer(creatorId, productId, {
-    ...FREE_OFFER,
-    reason: "Reviewed offer"
-  }, state.version);
   const stalePublish = await store.beginPublishProduct(creatorId, productId, {
     candidate_id: candidateV1.candidate_id,
-    offer_revision: state.offer_draft.revision,
     expected_version: state.version,
     reason: "Publish V1"
   });
@@ -109,7 +96,6 @@ test("R17 changed candidate digest or report stales the old approval and require
   await assert.rejects(
     store.beginPublishProduct(creatorId, productId, {
       candidate_id: candidateReportV2.candidate_id,
-      offer_revision: state.offer_draft.revision,
       expected_version: state.version
     }),
     (error) => error.code === "candidate_not_approved" && error.status === 409
@@ -126,7 +112,6 @@ test("R17 changed candidate digest or report stales the old approval and require
 
   const reportV2Publish = await store.beginPublishProduct(creatorId, productId, {
     candidate_id: candidateReportV2.candidate_id,
-    offer_revision: state.offer_draft.revision,
     expected_version: state.version,
     reason: "Publish the freshly reviewed report"
   });
@@ -151,7 +136,6 @@ test("R17 changed candidate digest or report stales the old approval and require
   assert.equal(state.approval.report_digest, candidateV2.report_digest);
   const pending = await store.beginPublishProduct(creatorId, productId, {
     candidate_id: candidateV2.candidate_id,
-    offer_revision: state.offer_draft.revision,
     expected_version: state.version,
     reason: "Publish freshly reviewed V2"
   });
@@ -173,7 +157,7 @@ test("R18 interrupted publish and rollback resume their durable intent without m
   const productId = "durable-deployment";
   let store = await PortalStateStore.open({ filePath });
 
-  let state = await reviewOfferAndPublish(store, creatorId, productId, {
+  let state = await reviewAndPublish(store, creatorId, productId, {
     candidate_id: "candidate-v1",
     digest: "sha256:corpus-v1",
     report_digest: "sha256:report-v1"
@@ -185,14 +169,8 @@ test("R18 interrupted publish and rollback resume their durable intent without m
     digest: "sha256:corpus-v2",
     report_digest: "sha256:report-v2"
   }, state.version);
-  state = await store.saveOffer(creatorId, productId, {
-    ...FREE_OFFER,
-    included_units: 2,
-    reason: "Reviewed V2 offer"
-  }, state.version);
   const publishInput = {
     candidate_id: "candidate-v2",
-    offer_revision: state.offer_draft.revision,
     expected_version: state.version,
     reason: "Publish reviewed V2"
   };
@@ -216,7 +194,6 @@ test("R18 interrupted publish and rollback resume their durable intent without m
   const secondRelease = structuredClone(state.release);
 
   const rollbackInput = {
-    offer_revision: state.offer_active.revision,
     reason: "Return to the verified V1 corpus after an external incident."
   };
   const pendingRollback = await store.beginRollbackProduct(
@@ -253,44 +230,35 @@ test("R20 rollback rejects incomplete review, records actor and reason, and pres
   const store = await PortalStateStore.open();
   const creatorId = "creator-r20";
   const productId = "audited-rollback";
-  let state = await reviewOfferAndPublish(store, creatorId, productId, {
+  let state = await reviewAndPublish(store, creatorId, productId, {
     candidate_id: "candidate-r20-v1",
     digest: "sha256:r20-corpus-v1",
     report_digest: "sha256:r20-report-v1"
   }, 0);
   const firstReleaseId = state.release.release_id;
-  state = await reviewOfferAndPublish(store, creatorId, productId, {
+  state = await reviewAndPublish(store, creatorId, productId, {
     candidate_id: "candidate-r20-v2",
     digest: "sha256:r20-corpus-v2",
     report_digest: "sha256:r20-report-v2"
-  }, state.version, 2);
+  }, state.version);
 
   const beforeNegativeChecks = structuredClone(state);
   await assert.rejects(
     store.beginRollbackProduct(creatorId, productId, firstReleaseId, state.version, {
-      offer_revision: state.offer_active.revision,
       reason: "   "
     }),
     (error) => error.code === "audit_reason_required" && error.status === 422
   );
   assert.deepEqual(store.getCreatorProduct(creatorId, productId), beforeNegativeChecks);
 
-  await assert.rejects(
-    store.beginRollbackProduct(creatorId, productId, firstReleaseId, state.version, {
-      reason: "The incident review selected the earlier corpus."
-    }),
-    (error) => error.code === "offer_selection_required" && error.status === 422
-  );
-  assert.deepEqual(store.getCreatorProduct(creatorId, productId), beforeNegativeChecks);
-
   const immutableBefore = releaseContents(state.releases);
-  const reason = "Restore the incident-reviewed V1 corpus; retain the explicitly selected V2 offer.";
+  const reason = "Restore the incident-reviewed V1 corpus.";
   const pending = await store.beginRollbackProduct(
     creatorId,
     productId,
     firstReleaseId,
     state.version,
-    { offer_revision: state.offer_active.revision, reason }
+    { reason }
   );
   const started = pending.audit_log.at(-1);
   assertAuditEnvelope(started, {
@@ -300,7 +268,6 @@ test("R20 rollback rejects incomplete review, records actor and reason, and pres
   });
   assert.equal(started.details.operation_id, pending.rollback_operation.operation_id);
   assert.equal(started.details.release_id, firstReleaseId);
-  assert.equal(started.details.offer_revision, state.offer_active.revision);
 
   const completed = await store.completeRollbackProduct(
     creatorId,
@@ -320,18 +287,12 @@ test("R20 rollback rejects incomplete review, records actor and reason, and pres
   assert.equal(completed.releases.filter((release) => release.current).length, 1);
 });
 
-async function reviewOfferAndPublish(store, creatorId, productId, candidate, expectedVersion, includedUnits = 1) {
+async function reviewAndPublish(store, creatorId, productId, candidate, expectedVersion) {
   let state = await store.approveCandidate(creatorId, productId, candidate, expectedVersion, {
     reason: `Review ${candidate.candidate_id}`
   });
-  state = await store.saveOffer(creatorId, productId, {
-    ...FREE_OFFER,
-    included_units: includedUnits,
-    reason: `Offer for ${candidate.candidate_id}`
-  }, state.version);
   return store.publishProduct(creatorId, productId, {
     candidate_id: candidate.candidate_id,
-    offer_revision: state.offer_draft.revision,
     expected_version: state.version
   });
 }

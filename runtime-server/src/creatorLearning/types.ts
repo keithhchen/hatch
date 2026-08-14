@@ -56,12 +56,6 @@ export type FactoryAgentProduct = {
   description?: string;
   promise?: string;
   boundaries?: string[];
-  offer?: {
-    model?: "per_delivery" | "subscription";
-    amount_minor: number;
-    currency: string;
-    unit?: string;
-  };
   presentation?: Record<string, unknown>;
 };
 

@@ -13,7 +13,7 @@ export const PORTAL_FUNNEL_EVENTS = Object.freeze(new Set([
 ]));
 
 const ALLOWED_ATTRIBUTES = new Set([
-  "product_id", "creator_id", "offer_id", "offer_revision", "release_id",
+  "product_id", "creator_id", "release_id",
   "release_version", "anonymous_session_id", "request_id", "correlation_id",
   "platform", "duration_ms", "error_category"
 ]);

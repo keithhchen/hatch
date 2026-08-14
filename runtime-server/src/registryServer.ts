@@ -54,7 +54,6 @@ type RegistryContext = {
   trustedProxies: TrustedProxyPolicy;
   publishToken: string;
   runtimeServiceToken: string;
-  commerceServiceToken: string;
   deploymentServiceToken: string;
   factoryService: CreatorFactoryService;
   authSecret: string;
@@ -75,7 +74,6 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   );
   const publishToken = environment.HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN?.trim() || "";
   const runtimeServiceToken = environment.HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN?.trim() || "";
-  const commerceServiceToken = environment.HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN?.trim() || "";
   const deploymentServiceToken = environment.HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN?.trim() || "";
   const legacyHmacEnabled = environment.HATCH_ENABLE_LEGACY_HMAC_AUTH?.trim().toLowerCase() === "true";
   const authSecret = legacyHmacEnabled ? environment.HATCH_AUTH_SIGNING_SECRET?.trim() || "" : "";
@@ -89,7 +87,6 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     const internalRuntime = Boolean(
       (runtimeServiceToken && request.headers["x-hatch-runtime-service-token"] === runtimeServiceToken)
       || (runtimeServiceToken && suppliedBearer === runtimeServiceToken)
-      || (commerceServiceToken && suppliedBearer === commerceServiceToken)
       || (publishToken && suppliedBearer === publishToken)
     );
     const admission = httpRequestGate.begin(
@@ -104,7 +101,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       }, { "retry-after": String(admission.retryAfterSeconds), connection: "close" });
       return;
     }
-    const routeTask = route(request, response, { store, accounts, authRateLimiter, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, commerceServiceToken, deploymentServiceToken, factoryService, authSecret })
+    const routeTask = route(request, response, { store, accounts, authRateLimiter, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, authSecret })
       .catch((error) => {
         const status = errorStatus(error);
         if (status >= 500) console.error("Registry request failed", error);
@@ -274,9 +271,9 @@ async function route(
   if (internalFactoryStageMatch && request.method === "POST") {
     requireDeploymentServiceAuth(request, context.deploymentServiceToken);
     const body = await readJson(request);
-    const creatorId = requiredCommerceField(body, "creator_id");
-    const operationId = requiredCommerceField(body, "operation_id");
-    const corpusDigest = requiredCommerceField(body, "corpus_digest");
+    const creatorId = requiredDeploymentField(body, "creator_id");
+    const operationId = requiredDeploymentField(body, "operation_id");
+    const corpusDigest = requiredDeploymentField(body, "corpus_digest");
     const runId = decodeURIComponent(internalFactoryStageMatch[1]!);
     const candidate = await context.factoryService.publishableCorpus(creatorId, runId);
     if (candidate.corpusDigest !== corpusDigest) {
@@ -302,12 +299,12 @@ async function route(
   if (internalActivationMatch && request.method === "POST") {
     requireDeploymentServiceAuth(request, context.deploymentServiceToken);
     const body = await readJson(request);
-    const creatorId = requiredCommerceField(body, "creator_id");
-    const operationId = requiredCommerceField(body, "operation_id");
+    const creatorId = requiredDeploymentField(body, "creator_id");
+    const operationId = requiredDeploymentField(body, "operation_id");
     if (!Object.hasOwn(body, "expected_current_digest")) throw new Error("expected_current_digest is required");
     const expectedCurrentDigest = body.expected_current_digest === null
       ? null
-      : requiredCommerceField(body, "expected_current_digest");
+      : requiredDeploymentField(body, "expected_current_digest");
     const agentId = decodeURIComponent(internalActivationMatch[1]!);
     const corpusDigest = decodeURIComponent(internalActivationMatch[2]!);
     try {
@@ -473,93 +470,6 @@ async function route(
     sendJson(response, 200, await context.store.listAgentCorpora(account.id));
     return;
   }
-  if (url.pathname === "/v1/user/product-access" && request.method === "GET") {
-    const account = await authenticate(request, response, context, "user");
-    if (account === SESSION_QUERY_REJECTED) return;
-    if (!account) { sendJson(response, 401, { detail: "A valid user account token is required." }); return; }
-    const requestedEntitlement = url.searchParams.get("entitlement_id");
-    if (requestedEntitlement !== null) {
-      if (!isUuidV4(requestedEntitlement)) {
-        const error = new Error("entitlement_id must be a canonical UUID v4.");
-        (error as Error & { status?: number }).status = 400;
-        throw error;
-      }
-      sendJson(
-        response,
-        200,
-        (await context.store.listAgentAccessPresentation(account.id, { entitlementId: requestedEntitlement })).map(publicAccessRow),
-      );
-      return;
-    }
-    const limit = boundedQueryInteger(url, "limit", 20, 1, 20);
-    const offset = boundedQueryInteger(url, "offset", 0, 0, 100_000);
-    const rows = await context.store.listAgentAccessPresentation(account.id, { limit: limit + 1, offset });
-    const page = rows.slice(0, limit).map(publicAccessRow);
-    sendJson(response, 200, page, {
-      "x-hatch-page-limit": String(limit),
-      "x-hatch-page-offset": String(offset),
-      ...(rows.length > limit ? { "x-hatch-next-offset": String(offset + limit) } : {}),
-    });
-    return;
-  }
-
-  if (url.pathname === "/v1/commerce/product-access" && request.method === "POST") {
-    requireCommerceServiceAuth(request, context.commerceServiceToken);
-    const body = await readJson(request);
-    const userId = requiredCommerceField(body, "user_id");
-    const creatorId = requiredCommerceField(body, "creator_id");
-    const agentId = requiredCommerceField(body, "product_id");
-    const orderId = requiredCommerceField(body, "order_id");
-    try { sendJson(response, 201, await context.store.grantAgentAccess(userId, creatorId, agentId, orderId)); }
-    catch (error) { sendError(response, error, { agent_not_found: [404, "Agent not found."], order_id_required: [400, "order_id is required."] }); }
-    return;
-  }
-
-  const commerceAccessMatch = url.pathname.match(/^\/v1\/user\/products\/([^/]+)\/access$/);
-  if (commerceAccessMatch && request.method === "POST") {
-    requireCommerceServiceAuth(request, context.commerceServiceToken);
-    const body = await readJson(request);
-    const agentId = decodeURIComponent(commerceAccessMatch[1]!);
-    const creatorId = requiredCommerceField(body, "creator_id");
-    const userId = requiredCommerceField(body, "user_id");
-    const orderId = requiredCommerceField(body, "order_id");
-    const entitlementId = requiredCommerceField(body, "entitlement_id");
-    const purchasedCorpusDigest = requiredCommerceField(body, "purchased_corpus_digest");
-    const versionPolicy = body.version_policy === "track_current_compatible" ? "track_current_compatible" : "pinned";
-    try {
-      sendJson(response, 201, await context.store.grantAgentAccess(
-        userId,
-        creatorId,
-        agentId,
-        orderId,
-        entitlementId,
-        purchasedCorpusDigest,
-        versionPolicy
-      ));
-    } catch (error) {
-      sendError(response, error, {
-        agent_not_found: [404, "Agent not found."],
-        order_id_required: [400, "order_id is required."],
-        corpus_digest_mismatch: [409, "The purchased Corpus release is not the current published release."]
-      });
-    }
-    return;
-  }
-
-  const commerceRevokeMatch = url.pathname.match(/^\/v1\/user\/product-access\/([^/]+)$/);
-  if (commerceRevokeMatch && request.method === "DELETE") {
-    requireCommerceServiceAuth(request, context.commerceServiceToken);
-    const body = await readJson(request);
-    const userId = requiredCommerceField(body, "user_id");
-    const revoked = await context.store.revokeAgentAccess(decodeURIComponent(commerceRevokeMatch[1]!), userId);
-    if (!revoked) {
-      sendJson(response, 404, { detail: "Agent access was not found." });
-      return;
-    }
-    sendJson(response, 200, revoked);
-    return;
-  }
-
   if (url.pathname === "/v1/product-corpora" && request.method === "POST") {
     if (!context.publishToken || bearer(request) !== context.publishToken) { sendJson(response, 403, { detail: "A valid Registry publish token is required." }); return; }
     const creatorId = url.searchParams.get("creator_id") ?? "";
@@ -658,14 +568,6 @@ function requireRuntimeServiceAuth(request: http.IncomingMessage, configuredToke
   }
 }
 
-function requireCommerceServiceAuth(request: http.IncomingMessage, configuredToken: string): void {
-  if (!configuredToken || bearer(request) !== configuredToken) {
-    const error = new Error("A valid Registry commerce service token is required.");
-    (error as Error & { status?: number }).status = 401;
-    throw error;
-  }
-}
-
 function requireDeploymentServiceAuth(request: http.IncomingMessage, configuredToken: string): void {
   if (!configuredToken || bearer(request) !== configuredToken) {
     const error = new Error("A valid Registry deployment service token is required.");
@@ -674,7 +576,7 @@ function requireDeploymentServiceAuth(request: http.IncomingMessage, configuredT
   }
 }
 
-function requiredCommerceField(body: Record<string, unknown>, field: string): string {
+function requiredDeploymentField(body: Record<string, unknown>, field: string): string {
   const value = typeof body[field] === "string" ? body[field].trim() : "";
   if (!value || value.length > 256) {
     const error = new Error(`${field} is required and must not exceed 256 characters.`);
@@ -691,19 +593,6 @@ function publicProductRow(row: Record<string, unknown>): Record<string, unknown>
     creator: { id: publicRow.creator_id, name: publicRow.creator_name },
     product: { id: publicRow.product_id, name: publicRow.product_name },
     public_url: `/products/${encodeURIComponent(String(publicRow.product_id ?? ""))}`
-  };
-}
-
-function publicAccessRow(row: Record<string, unknown>): Record<string, unknown> {
-  const {
-    agent_id: _internalProductAlias,
-    creator_slug: _creatorSlug,
-    product_slug: _productSlug,
-    ...publicRow
-  } = row;
-  return {
-    ...publicRow,
-    product_id: publicRow.product_id,
   };
 }
 

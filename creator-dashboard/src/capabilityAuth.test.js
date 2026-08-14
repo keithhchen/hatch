@@ -14,7 +14,6 @@ const DENIED_CASES = [
   ["product:edit", "POST", "/v1/creator/factory-drafts"],
   ["product:edit", "PATCH", "/v1/creator/factory-drafts/draft-1"],
   ["product:edit", "POST", "/v1/creator/factory-runs/run-1/retry"],
-  ["product:edit", "PUT", "/v1/creator/products/product-1/offer-draft"],
   ["release:approve", "POST", "/v1/creator/products/product-1/candidates/run-1/approve"],
   ["release:publish", "POST", "/v1/creator/products/product-1/publish"],
   ["release:rollback", "POST", "/v1/creator/products/product-1/releases/release-1/rollback"],

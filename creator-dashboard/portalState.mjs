@@ -12,7 +12,7 @@ const EMPTY_STATE = Object.freeze({
 
 /**
  * Small durable workflow store for Portal state that is not a Commerce fact:
- * checkout quotes, Creator approvals/offers/listings, and Factory form drafts.
+ * checkout release snapshots, Creator approvals/listings, and Factory form drafts.
  * Orders, entitlements, deliveries, revenue, refunds, and payouts stay in the
  * Commerce ledger/repository.
  */
@@ -51,11 +51,16 @@ export class PortalStateStore {
           [JSON.stringify(EMPTY_STATE)]
         );
         const result = await pool.query("SELECT state FROM portal_workflow_state WHERE singleton = TRUE");
+        const state = normalizeState(result.rows[0]?.state);
+        await pool.query(
+          "UPDATE portal_workflow_state SET state = $1::jsonb, updated_at = NOW() WHERE singleton = TRUE",
+          [JSON.stringify(state)]
+        );
         return new PortalStateStore({
           ...options,
           pool,
           ownsPool,
-          state: normalizeState(result.rows[0]?.state)
+          state
         });
       } catch (error) {
         if (ownsPool) await pool.end?.().catch(() => undefined);
@@ -66,6 +71,7 @@ export class PortalStateStore {
     if (options.filePath) {
       try {
         state = normalizeState(JSON.parse(await readFile(options.filePath, "utf8")));
+        await atomicWriteJson(options.filePath, state);
       } catch (error) {
         if (error?.code !== "ENOENT") throw error;
       }
@@ -224,15 +230,13 @@ export class PortalStateStore {
     });
   }
 
-  async markCheckoutQuoteChanged(sessionId, currentProduct) {
+  async markCheckoutReleaseChanged(sessionId, currentProduct) {
     return this.#mutate((state) => {
       const session = requireRecord(state.checkout_sessions[sessionId], "checkout_not_found", "Checkout session was not found.");
       if (["completed", "fulfillment_pending"].includes(session.status)) return session;
-      session.status = "offer_changed";
-      session.quote_change = {
-        previous_offer: clone(session.offer_snapshot ?? null),
+      session.status = "release_changed";
+      session.release_change = {
         previous_release: clone(session.release ?? null),
-        current_offer: clone(currentProduct?.offer ?? null),
         current_release: currentProduct ? {
           release_id: currentProduct.release_id ?? currentProduct.corpus_digest,
           corpus_digest: currentProduct.corpus_digest
@@ -397,7 +401,7 @@ export class PortalStateStore {
     return clone(this.#state.creator_products[creatorProductKey(creatorId, productId)]);
   }
 
-  async seedPublishedProduct(creatorId, productId, catalogSnapshot, offerSnapshot) {
+  async seedPublishedProduct(creatorId, productId, catalogSnapshot) {
     if (!catalogSnapshot?.corpus_digest) return this.getCreatorProduct(creatorId, productId);
     return this.#mutate((state) => {
       const record = creatorProductRecord(state, creatorId, productId);
@@ -408,17 +412,12 @@ export class PortalStateStore {
         release_id: releaseId,
         revision: 0,
         corpus_digest: catalogSnapshot.corpus_digest,
-        offer_id: offerSnapshot?.offer_id ?? null,
-        offer_revision: offerSnapshot?.revision ?? null,
-        offer_snapshot: clone(offerSnapshot ?? null),
         catalog_snapshot: clone(catalogSnapshot),
         deployment_operation_id: `migration:${releaseId}`,
         current: true,
         published_at: catalogSnapshot.published_at ?? now
       };
       record.releases = [clone(record.release)];
-      record.offer_active = offerSnapshot ? { ...clone(offerSnapshot), status: "active" } : null;
-      record.offer_revision = Number(offerSnapshot?.revision ?? 0);
       record.active_deployment_id = record.release.deployment_operation_id;
       record.public_url = `/products/${encodeURIComponent(productId)}`;
       record.status = "published";
@@ -426,8 +425,7 @@ export class PortalStateStore {
       appendAudit(record, "release.migrated", creatorId, "registry_release_migration", {
         operation_id: record.active_deployment_id,
         release_id: releaseId,
-        corpus_digest: record.release.corpus_digest,
-        offer_revision: record.offer_active?.revision ?? null
+        corpus_digest: record.release.corpus_digest
       }, this.clock());
       return record;
     });
@@ -456,7 +454,7 @@ export class PortalStateStore {
         status: "approved",
         approved_at: this.clock().toISOString()
       };
-      record.status = record.offer_draft ? "ready_to_preview" : "offer_required";
+      record.status = "ready_to_preview";
       record.updated_at = this.clock().toISOString();
       appendAudit(record, "candidate.approved", creatorId, audit.reason ?? "creator_approval", {
         candidate_id: candidate.candidate_id,
@@ -524,35 +522,6 @@ export class PortalStateStore {
     });
   }
 
-  async saveOffer(creatorId, productId, input, expectedVersion) {
-    const offer = validateOffer(input);
-    return this.#mutate((state) => {
-      const record = creatorProductRecord(state, creatorId, productId);
-      assertNoDeploymentInProgress(record);
-      assertExpectedVersion(record, expectedVersion);
-      record.version += 1;
-      const nextRevision = (record.offer_revision ?? 0) + 1;
-      if (input.revision !== undefined && Number(input.revision) !== nextRevision) {
-        throw stateError("offer_revision_conflict", "Offer revision changed. Refresh and try again.", 409);
-      }
-      record.offer_revision = nextRevision;
-      record.offer_draft = {
-        ...offer,
-        offer_id: String(input.offer_id ?? record.offer_draft?.offer_id ?? this.idFactory("offer")),
-        revision: record.offer_revision,
-        status: "draft",
-        updated_at: this.clock().toISOString()
-      };
-      record.status = record.approval?.status === "approved" ? "ready_to_preview" : "candidate_required";
-      record.updated_at = this.clock().toISOString();
-      appendAudit(record, "offer.draft_saved", creatorId, input.reason ?? "creator_offer_update", {
-        offer_id: record.offer_draft.offer_id,
-        offer_revision: record.offer_draft.revision
-      }, this.clock());
-      return record;
-    });
-  }
-
   validatePublishProduct(creatorId, productId, input = {}) {
     const record = requireRecord(
       this.#state.creator_products[creatorProductKey(creatorId, productId)],
@@ -584,8 +553,7 @@ export class PortalStateStore {
       const existing = record.publish_operation;
       if (existing) {
         validateDeploymentCommand(existing, "release.publish", input.command_key, publishCommandPayload(input));
-        const sameIntent = existing.candidate_id === (input.candidate_id ?? existing.candidate_id)
-          && Number(existing.offer_revision) === Number(input.offer_revision ?? existing.offer_revision);
+        const sameIntent = existing.candidate_id === (input.candidate_id ?? existing.candidate_id);
         if (!sameIntent) {
           throw stateError("publish_in_progress", "Another publish is already in progress for this product.", 409);
         }
@@ -606,19 +574,15 @@ export class PortalStateStore {
         previous_corpus_digest: input.previous_corpus_digest ?? record.release?.corpus_digest ?? null,
         previous_release_id: input.previous_release_id ?? record.release?.release_id ?? null,
         previous_deployment_id: record.active_deployment_id ?? null,
-        previous_offer_snapshot: clone(record.offer_active ?? null),
         candidate_id: record.approval.candidate_id,
         candidate_digest: record.approval.candidate_digest,
         report_digest: record.approval.report_digest,
-        offer_revision: record.offer_draft.revision,
-        offer_snapshot: clone(record.offer_draft),
         started_at: now
       };
       appendAudit(record, "release.publish_started", creatorId, input.reason ?? "creator_publish", {
         operation_id: record.publish_operation.operation_id,
         candidate_id: record.publish_operation.candidate_id,
-        candidate_digest: record.publish_operation.candidate_digest,
-        offer_revision: record.publish_operation.offer_revision
+        candidate_digest: record.publish_operation.candidate_digest
       }, this.clock());
       record.updated_at = now;
       return record;
@@ -653,7 +617,7 @@ export class PortalStateStore {
       if (operation.operation_id !== operationId) {
         throw stateError("publish_operation_changed", "The publish operation changed. Refresh and try again.", 409);
       }
-      if (operation.materialized_at || operation.offer_activated_at || operation.registry_activated_at) {
+      if (operation.materialized_at || operation.registry_activated_at) {
         throw stateError("deployment_in_progress", "A materialized deployment must be resumed rather than abandoned.", 409);
       }
       const now = this.clock().toISOString();
@@ -670,10 +634,6 @@ export class PortalStateStore {
     });
   }
 
-  async markPublishOfferActivated(creatorId, productId, operationId) {
-    return this.#markDeploymentPhase(creatorId, productId, "publish_operation", operationId, "offer_activated_at");
-  }
-
   async markPublishRegistryActivated(creatorId, productId, operationId) {
     return this.#markDeploymentPhase(creatorId, productId, "publish_operation", operationId, "registry_activated_at");
   }
@@ -685,7 +645,7 @@ export class PortalStateStore {
       if (operation.operation_id !== operationId) {
         throw stateError("publish_operation_changed", "The publish operation changed. Refresh and try again.", 409);
       }
-      if (!operation.offer_activated_at || !operation.registry_activated_at) {
+      if (!operation.registry_activated_at) {
         throw stateError("deployment_not_ready", "The release is not fully activated yet.", 409);
       }
       const now = this.clock().toISOString();
@@ -696,9 +656,6 @@ export class PortalStateStore {
         candidate_id: operation.candidate_id,
         corpus_digest: operation.candidate_digest,
         report_digest: operation.report_digest,
-        offer_id: operation.offer_snapshot.offer_id,
-        offer_revision: operation.offer_snapshot.revision,
-        offer_snapshot: clone(operation.offer_snapshot),
         catalog_snapshot: clone(operation.catalog_snapshot ?? null),
         deployment_operation_id: operation.operation_id,
         current: true,
@@ -706,7 +663,6 @@ export class PortalStateStore {
       };
       record.releases = (record.releases ?? []).map((release) => ({ ...release, current: false }));
       record.releases.push(clone(record.release));
-      record.offer_active = { ...operation.offer_snapshot, status: "active" };
       record.active_deployment_id = operation.operation_id;
       record.status = "published";
       record.public_url = `/products/${encodeURIComponent(productId)}`;
@@ -717,15 +673,13 @@ export class PortalStateStore {
       appendAudit(record, "release.published", creatorId, "publish_completed", {
         operation_id: operation.operation_id,
         release_id: record.release.release_id,
-        corpus_digest: record.release.corpus_digest,
-        offer_revision: record.offer_active.revision
+        corpus_digest: record.release.corpus_digest
       }, this.clock());
       return record;
     });
   }
 
   async completePublishProduct(creatorId, productId, operationId) {
-    await this.markPublishOfferActivated(creatorId, productId, operationId);
     await this.markPublishRegistryActivated(creatorId, productId, operationId);
     return this.commitPublishProduct(creatorId, productId, operationId);
   }
@@ -752,12 +706,6 @@ export class PortalStateStore {
       if (!release) throw stateError("release_not_found", "Historical release was not found.", 404);
       const reason = String(input.reason ?? "").trim();
       if (!reason) throw stateError("audit_reason_required", "Explain why this release is being activated.", 422);
-      const offerRevision = Number(input.offer_revision);
-      if (!Number.isSafeInteger(offerRevision) || offerRevision < 1) {
-        throw stateError("offer_selection_required", "Select and preview an offer revision before rollback.", 422);
-      }
-      const offerSnapshot = knownOfferSnapshots(record).find((offer) => Number(offer.revision) === offerRevision);
-      if (!offerSnapshot) throw stateError("offer_revision_not_found", "The selected offer revision was not found.", 404);
       record.version += 1;
       record.status = "rolling_back";
       record.rollback_operation = {
@@ -770,11 +718,8 @@ export class PortalStateStore {
         previous_corpus_digest: record.release?.corpus_digest ?? null,
         previous_release_id: record.release?.release_id ?? null,
         previous_deployment_id: record.active_deployment_id ?? null,
-        previous_offer_snapshot: clone(record.offer_active ?? null),
         release_id: release.release_id,
         corpus_digest: release.corpus_digest,
-        offer_revision: offerRevision,
-        offer_snapshot: clone(offerSnapshot),
         reason,
         actor_id: creatorId,
         started_at: this.clock().toISOString()
@@ -782,8 +727,7 @@ export class PortalStateStore {
       appendAudit(record, "release.rollback_started", creatorId, reason, {
         operation_id: record.rollback_operation.operation_id,
         release_id: release.release_id,
-        corpus_digest: release.corpus_digest,
-        offer_revision: offerRevision
+        corpus_digest: release.corpus_digest
       }, this.clock());
       record.updated_at = this.clock().toISOString();
       return record;
@@ -803,10 +747,6 @@ export class PortalStateStore {
       rollbackCommandPayload(releaseId, expectedVersion, input)
     );
     return clone(record);
-  }
-
-  async markRollbackOfferActivated(creatorId, productId, operationId) {
-    return this.#markDeploymentPhase(creatorId, productId, "rollback_operation", operationId, "offer_activated_at");
   }
 
   async markRollbackRegistryActivated(creatorId, productId, operationId) {
@@ -836,7 +776,7 @@ export class PortalStateStore {
       if (operation.operation_id !== operationId) {
         throw stateError("rollback_operation_changed", "The rollback operation changed.", 409);
       }
-      if (!operation.offer_activated_at || !operation.registry_activated_at) {
+      if (!operation.registry_activated_at) {
         throw stateError("deployment_not_ready", "The rollback is not fully activated yet.", 409);
       }
       const release = (record.releases ?? []).find((item) => item.release_id === operation.release_id);
@@ -847,11 +787,8 @@ export class PortalStateStore {
         ...release,
         current: true,
         deployment_operation_id: operation.operation_id,
-        rolled_back_at: now,
-        active_offer_id: operation.offer_snapshot.offer_id,
-        active_offer_revision: operation.offer_snapshot.revision
+        rolled_back_at: now
       };
-      record.offer_active = { ...operation.offer_snapshot, status: "active" };
       record.active_deployment_id = operation.operation_id;
       record.status = "published";
       record.updated_at = now;
@@ -860,15 +797,13 @@ export class PortalStateStore {
       appendAudit(record, "release.rolled_back", operation.actor_id ?? creatorId, operation.reason, {
         operation_id: operation.operation_id,
         release_id: record.release.release_id,
-        corpus_digest: record.release.corpus_digest,
-        offer_revision: record.offer_active.revision
+        corpus_digest: record.release.corpus_digest
       }, this.clock());
       return record;
     });
   }
 
   async completeRollbackProduct(creatorId, productId, operationId) {
-    await this.markRollbackOfferActivated(creatorId, productId, operationId);
     await this.markRollbackRegistryActivated(creatorId, productId, operationId);
     return this.commitRollbackProduct(creatorId, productId, operationId);
   }
@@ -911,15 +846,11 @@ export class PortalStateStore {
         candidate_id: record.approval.candidate_id,
         corpus_digest: record.approval.candidate_digest,
         report_digest: record.approval.report_digest,
-        offer_id: record.offer_draft.offer_id,
-        offer_revision: record.offer_draft.revision,
-        offer_snapshot: clone(record.offer_draft),
         current: true,
         published_at: this.clock().toISOString()
       };
       record.releases = (record.releases ?? []).map((release) => ({ ...release, current: false }));
       record.releases.push(clone(record.release));
-      record.offer_active = { ...record.offer_draft, status: "active" };
       record.status = "published";
       record.public_url = `/products/${encodeURIComponent(productId)}`;
       record.published_at = record.release.published_at;
@@ -993,11 +924,35 @@ export function stateError(code, message, status = 422, details) {
 function normalizeState(value) {
   return {
     contract_version: "1",
-    checkout_sessions: objectValue(value?.checkout_sessions),
-    creator_products: objectValue(value?.creator_products),
+    checkout_sessions: mapObjectValues(value?.checkout_sessions, stripRemovedCheckoutFields),
+    creator_products: mapObjectValues(value?.creator_products, stripRemovedCreatorProductFields),
     factory_drafts: objectValue(value?.factory_drafts),
     web_sessions: objectValue(value?.web_sessions)
   };
+}
+
+function mapObjectValues(value, transform) {
+  return Object.fromEntries(Object.entries(objectValue(value)).map(([key, item]) => [key, transform(item)]));
+}
+
+function stripRemovedCheckoutFields(value) {
+  const session = clone(value) ?? {};
+  delete session.offer_snapshot;
+  delete session.quote_change;
+  return session;
+}
+
+function stripRemovedCreatorProductFields(value) {
+  const product = clone(value) ?? {};
+  delete product.offer_draft;
+  delete product.offer_active;
+  for (const key of ["publish_operation", "last_publish_operation", "rollback_operation", "last_rollback_operation"]) {
+    if (!product[key] || typeof product[key] !== "object") continue;
+    delete product[key].offer_revision;
+    delete product[key].offer_activated_at;
+  }
+  if (product.status === "offer_required") product.status = "ready_to_preview";
+  return product;
 }
 
 function objectValue(value) {
@@ -1035,17 +990,6 @@ function creatorProductKey(creatorId, productId) {
 
 function factoryDraftKey(creatorId, draftId) {
   return `${creatorId}:${draftId}`;
-}
-
-function knownOfferSnapshots(record) {
-  const values = [
-    record.offer_active,
-    record.offer_draft,
-    ...(record.releases ?? []).map((release) => release.offer_snapshot)
-  ].filter((offer) => offer?.offer_id && Number.isSafeInteger(Number(offer.revision)));
-  const unique = new Map();
-  for (const offer of values) unique.set(`${offer.offer_id}:${Number(offer.revision)}`, clone(offer));
-  return [...unique.values()];
 }
 
 function appendAudit(record, action, actorId, reason, details, occurredAt) {
@@ -1120,7 +1064,6 @@ function validateDeploymentCommand(operation, action, commandKey, payload) {
 function publishCommandPayload(input) {
   return {
     candidate_id: input.candidate_id ?? null,
-    offer_revision: Number(input.offer_revision),
     expected_version: Number(input.expected_version),
     reason: String(input.reason ?? "creator_publish")
   };
@@ -1129,7 +1072,6 @@ function publishCommandPayload(input) {
 function rollbackCommandPayload(releaseId, expectedVersion, input) {
   return {
     release_id: releaseId,
-    offer_revision: Number(input.offer_revision),
     expected_version: Number(expectedVersion),
     reason: String(input.reason ?? "")
   };
@@ -1165,7 +1107,7 @@ function assertExpectedVersion(record, expectedVersion) {
 
 function assertNoDeploymentInProgress(record) {
   if (record.publish_operation || record.rollback_operation) {
-    throw stateError("deployment_in_progress", "Finish the pending publish or rollback before changing its candidate or offer.", 409);
+    throw stateError("deployment_in_progress", "Finish the pending publish or rollback before changing its candidate.", 409);
   }
 }
 
@@ -1174,12 +1116,8 @@ function assertPublishable(record, input) {
   if (record.approval?.status !== "approved") {
     throw stateError("candidate_not_approved", "Approve the current candidate before publishing.", 409);
   }
-  if (!record.offer_draft) throw stateError("offer_required", "Save an offer before publishing.", 409);
   if (input.candidate_id && input.candidate_id !== record.approval.candidate_id) {
     throw stateError("candidate_changed", "The approved candidate changed. Review it again.", 409);
-  }
-  if (input.offer_revision && Number(input.offer_revision) !== record.offer_draft.revision) {
-    throw stateError("offer_changed", "The offer changed. Preview it again.", 409);
   }
 }
 
@@ -1191,31 +1129,6 @@ function approvalMatchesCandidate(approval, candidate) {
     && approval.candidate_digest === candidate.digest
     && approval.report_digest === candidate.report_digest
   );
-}
-
-function validateOffer(input) {
-  const purchaseModel = String(input.purchase_model ?? input.model ?? "");
-  if (purchaseModel !== "per_delivery") {
-    throw stateError("unsupported_offer", "V2 currently supports per-delivery offers only.");
-  }
-  const amountMinor = Number(input.amount_minor);
-  const includedUnits = Number(input.included_units ?? 1);
-  const currency = String(input.currency ?? "USD").trim().toUpperCase();
-  const unit = String(input.unit ?? "delivery").trim();
-  if (!Number.isSafeInteger(amountMinor) || amountMinor < 0) throw stateError("invalid_amount", "Amount must be a non-negative integer in minor units.");
-  if (!Number.isSafeInteger(includedUnits) || includedUnits < 1) throw stateError("invalid_units", "Included units must be a positive integer.");
-  if (!/^[A-Z]{3}$/.test(currency)) throw stateError("invalid_currency", "Currency must be a three-letter ISO code.");
-  if (!unit) throw stateError("invalid_unit", "A delivery unit is required.");
-  return {
-    purchase_model: purchaseModel,
-    model: purchaseModel,
-    amount_minor: amountMinor,
-    currency,
-    unit,
-    included_units: includedUnits,
-    refund_policy_version: String(input.refund_policy_version ?? "v1"),
-    version_policy: input.version_policy === "track_current_compatible" ? "track_current_compatible" : "pinned"
-  };
 }
 
 async function atomicWriteJson(destination, value) {

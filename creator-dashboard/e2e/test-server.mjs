@@ -9,7 +9,6 @@ import { CommerceService } from "../../packages/commerce/src/service.js";
 
 const dashboardPort = Number(process.env.HATCH_E2E_PORT ?? 18_500);
 const registryPort = Number(process.env.HATCH_E2E_REGISTRY_PORT ?? dashboardPort + 1);
-const accessServiceToken = "e2e-registry-access-secret";
 const commerceServiceToken = "e2e-runtime-commerce-secret";
 const controlToken = "hatch-commerce-v2-e2e-control";
 const CREATOR_ID = "6f6a3d24-48af-4f27-9c50-0d4f7e4e8a21";
@@ -27,12 +26,10 @@ const accounts = new Map([
   ["creator@example.test", { id: CREATOR_ID, role: "creator", display_name: "Maya Creator", password: "creator-password", token: "creator-e2e-token" }]
 ]);
 const accountsByToken = new Map([...accounts.values()].map((account) => [account.token, account]));
-const access = new Map();
 const factoryAnswerSubmissions = [];
 let dashboard;
 let lastReleaseActivation = null;
 let failNextReleaseActivation = false;
-let offerControlSequence = 0;
 
 const baseAgent = {
   creator_id: CREATOR_ID,
@@ -47,19 +44,6 @@ const baseAgent = {
   corpus_digest: corpusDigest,
   status: "published",
   published_at: "2026-08-12T08:00:00.000Z",
-  product_offer: {
-    offer_id: "e4f5a6b7-8c90-4d12-a345-6789abcdef01",
-    revision: 1,
-    model: "per_delivery",
-    purchase_model: "per_delivery",
-    amount_minor: 0,
-    currency: "USD",
-    unit: "delivery",
-    included_units: 1,
-    refund_policy_version: "free-v1",
-    version_policy: "pinned",
-    status: "active"
-  },
   presentation: {
     inputs: ["A resume and target role"],
     outputs: ["Evidence-backed rewrite plan"],
@@ -91,36 +75,12 @@ const registry = createServer(async (request, response) => {
       if (request.headers["x-hatch-e2e-control"] !== controlToken) {
         return json(response, 404, { detail: "Not found." });
       }
-      if (request.method === "POST" && url.pathname === "/__e2e/offer") {
+      if (request.method === "POST" && url.pathname === "/__e2e/release") {
         const body = await readJson(request);
         const current = agents.get(String(body.product_id));
         if (!current) return json(response, 404, { detail: "Product not found." });
-        current.product_offer = { ...current.product_offer, ...body.offer };
-        const offer = current.product_offer;
-        const existingOffer = dashboard.commerce.getOfferRevision(offer.offer_id, offer.revision);
-        if (!existingOffer) {
-          await dashboard.commerce.createOfferRevision({
-            ...offer,
-            creator_id: current.creator_id,
-            product_id: current.product_id,
-            idempotency_key: `e2e-offer:${current.product_id}:${offer.revision}`
-          });
-        } else if (Number(existingOffer.amount_minor) !== Number(offer.amount_minor)
-          || existingOffer.currency !== offer.currency) {
-          return json(response, 409, { detail: "Control offer revision conflicts with the immutable Commerce revision." });
-        }
-        const operationId = `e2e-offer-activation:${current.product_id}:${offer.revision}:${++offerControlSequence}`;
-        const active_offer = await dashboard.commerce.activateOfferRevision({
-          offer_id: offer.offer_id,
-          revision: offer.revision,
-          creator_id: current.creator_id,
-          product_id: current.product_id,
-          release_id: current.corpus_digest,
-          corpus_digest: current.corpus_digest,
-          operation_id: operationId,
-          idempotency_key: operationId
-        });
-        return json(response, 200, { agent: current, active_offer });
+        current.corpus_digest = String(body.corpus_digest);
+        return json(response, 200, { agent: current });
       }
       if (request.method === "GET" && url.pathname === "/__e2e/commerce") {
         const buyerId = String(url.searchParams.get("buyer_id") ?? "");
@@ -134,7 +94,8 @@ const registry = createServer(async (request, response) => {
             entitlement_id: event.entitlement_id,
             idempotency_key: event.idempotency_key
           })),
-          access: [...access.values()].filter((entry) => !buyerId || entry.user_id === buyerId)
+          access: dashboard?.commerce.listBuyerEntitlements(buyerId)
+            .filter((entry) => entry.status === "active") ?? []
         });
       }
       if (request.method === "GET" && url.pathname === "/__e2e/product-state") {
@@ -324,39 +285,6 @@ const registry = createServer(async (request, response) => {
       };
       return json(response, 200, { ...lastReleaseActivation, status: "active" });
     }
-    if (request.method === "GET" && url.pathname === "/v1/user/product-access") {
-      const account = authenticatedAccount(request);
-      if (!account) return json(response, 401, { detail: "Account token required." });
-      return json(response, 200, [...access.values()].filter((entry) => entry.user_id === account.id && entry.status === "active"));
-    }
-    const grant = url.pathname.match(/^\/v1\/user\/products\/([^/]+)\/access$/);
-    if (request.method === "POST" && grant) {
-      if (bearer(request) !== accessServiceToken) return json(response, 403, { detail: "Access service token required." });
-      const body = await readJson(request);
-      const record = {
-        user_id: String(body.user_id),
-        creator_id: String(body.creator_id),
-        agent_id: decodeURIComponent(grant[1]),
-        product_id: decodeURIComponent(grant[1]),
-        order_id: String(body.order_id),
-        entitlement_id: String(body.entitlement_id),
-        purchased_corpus_digest: String(body.purchased_corpus_digest),
-        status: "active"
-      };
-      access.set(record.entitlement_id, record);
-      return json(response, 201, record);
-    }
-    const revoke = url.pathname.match(/^\/v1\/user\/product-access\/([^/]+)$/);
-    if (request.method === "DELETE" && revoke) {
-      if (bearer(request) !== accessServiceToken) return json(response, 403, { detail: "Access service token required." });
-      const body = await readJson(request);
-      const entitlementId = decodeURIComponent(revoke[1]);
-      const existing = access.get(entitlementId);
-      if (!existing || existing.user_id !== body.user_id) return json(response, 404, { detail: "Entitlement not found." });
-      const revoked = { ...existing, status: "revoked" };
-      access.set(entitlementId, revoked);
-      return json(response, 200, revoked);
-    }
     return json(response, 404, { detail: `Registry E2E route not found: ${request.method} ${url.pathname}` });
   } catch (error) {
     return json(response, 500, { detail: error instanceof Error ? error.message : String(error) });
@@ -378,7 +306,6 @@ dashboard = await startDashboardServer({
   ledger,
   ledgerPath,
   portalStatePath: path.join(temporaryDirectory, "portal-state.json"),
-  registryAccessServiceToken: accessServiceToken,
   commerceRuntimeServiceToken: commerceServiceToken,
   paymentMode: "disabled"
 });
@@ -523,17 +450,6 @@ async function seedCreatorOrders(commerce) {
       product_name: "Pagination Product",
       corpus_digest: `sha256:${"d".repeat(64)}`,
       release_id: `sha256:${"d".repeat(64)}`,
-      offer_id: "e9f0a1b2-c3d4-4567-8901-23456789abcd",
-      offer_revision: 1,
-      offer_snapshot: {
-        offer_id: "e9f0a1b2-c3d4-4567-8901-23456789abcd",
-        revision: 1,
-        purchase_model: "per_delivery",
-        amount_minor: 0,
-        currency: "USD",
-        included_units: 1,
-        unit: "delivery"
-      },
       gross_minor: 0,
       currency: "USD",
       included_units: 1,

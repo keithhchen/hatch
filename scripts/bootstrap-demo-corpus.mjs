@@ -85,7 +85,6 @@ const manifest = {
     description: "An evidence-first resume review for a chosen target role.",
     promise: "Turn resume claims into a clear, defensible signal map and revision plan.",
     boundaries: ["Does not invent evidence or guarantee hiring outcomes.", "Does not submit applications or impersonate the user."],
-    offer: { model: "per_delivery", amount_minor: 0, currency: "USD", unit: "review" },
     presentation: { accent: "fern" }
   },
   instructions: { system },

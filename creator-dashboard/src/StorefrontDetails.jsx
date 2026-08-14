@@ -5,8 +5,6 @@ import "./storefrontDetails.css";
 export function StorefrontDetails({
   product,
   creatorName,
-  offer,
-  offerText,
   action,
   mode = "public",
   headingLevel = 1,
@@ -26,9 +24,9 @@ export function StorefrontDetails({
           <p>{model.promise || empty}</p>
           {releaseLabel ? <small>{releaseLabel}</small> : null}
         </div>
-        <aside className="storefront-shared__offer" aria-label={mode === "preview" ? "Preview offer" : "Current offer"}>
-          <span>{mode === "preview" ? "Proposed offer" : "Current offer"}</span>
-          <strong>{offerText || "Offer not configured"}</strong>
+        <aside className="storefront-shared__access" aria-label={mode === "preview" ? "Preview access" : "Product access"}>
+          <span>{mode === "preview" ? "Preview" : "Access"}</span>
+          <strong>Free</strong>
           {action}
         </aside>
       </header>

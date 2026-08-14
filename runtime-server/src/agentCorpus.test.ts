@@ -74,6 +74,9 @@ test("Agent Corpus loads clean assets and scopes knowledge by creator and agent"
     product: {
       id: PRODUCT_ID,
       name: "Signal Resume Review",
+      // Pre-cutover immutable Corpus bytes may still contain this removed
+      // metadata. The loader must ignore it without changing the release.
+      offer: { model: "per_delivery", amount_minor: 0, currency: "USD" }
     },
     instructions: { system: asset("instructions/system.md", system, "instructions-system") },
     skills: [],
@@ -90,6 +93,7 @@ test("Agent Corpus loads clean assets and scopes knowledge by creator and agent"
   await writeFile(path.join(root, "agent.json"), JSON.stringify(corpus), "utf8");
 
   const loaded = await loadAgentCorpus(root);
+  assert.equal("offer" in loaded.product, false);
   const provider = new CorpusKnowledgeProvider(root, loaded);
   const hits = await provider.search({ creatorId: CREATOR_ID, agentId: PRODUCT_ID, corpusDigest: `sha256:${"1".repeat(64)}`, query: "strongest evidence", limit: 4 });
   assert.equal(hits.length, 1);
@@ -285,7 +289,6 @@ test("current Agent Corpus entitlements are discoverable and bind the Desktop se
       socket.once("open", () => socket.send(JSON.stringify({
         type: "client.hello",
         protocol_version: "0.7",
-        installation_id: "desktop-jordan",
         license_token: "license-jordan",
         entitlement_id: entitlement.entitlement_id,
         creator_id: entitlement.creator_id,
