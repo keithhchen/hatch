@@ -111,6 +111,14 @@ test("a new revision clears stale gates and an immutable release is revision-sco
   assert.equal((await graph.derive("task_1")).status, "released");
 });
 
+test("re-ensuring a stable Run identity preserves its original timestamp", async () => {
+  const graph = new InMemoryDistillationGraphStore();
+  const first = await graph.ensureRun({ id: "distill_1", taskId: "task_1", creatorId: "creator_1", createdAt: "2026-08-15T00:00:00.000Z" });
+  const reused = await graph.ensureRun({ id: "distill_1", taskId: "task_1", creatorId: "creator_1", createdAt: "2026-08-15T00:01:00.000Z" });
+  assert.equal(reused.createdAt, first.createdAt);
+  await graph.createRevision({ id: "factory_2", runId: "distill_1", taskId: "task_1", revision: 2, sourceSnapshotId: "snapshot_2", createdAt: "2026-08-15T00:01:00.000Z" });
+});
+
 test("revision context is n-1 plus current feedback plus cumulative regression", () => {
   const revisions = [
     { id: "r1", runId: "distill_1", taskId: "task_1", revision: 1, sourceSnapshotId: "snapshot_1", createdAt: "2026-08-15T00:00:00.000Z" },
