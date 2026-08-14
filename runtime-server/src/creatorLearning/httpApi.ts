@@ -1,10 +1,12 @@
 import type { Account } from "../registryAuth.js";
 import { CreatorFactoryRepositoryError } from "./repository.js";
+import { CreatorSourceLibraryError, SOURCE_DOCUMENT_MAX_BYTES } from "./sourceLibrary.js";
 import { CreatorFactoryInputTooLargeError, type CreateFactoryRunRequest, type CreatorFactoryRunView, type CreatorFactoryService } from "./service.js";
 
 export type CreatorFactoryHttpRequest = {
   method: string;
   pathname: string;
+  query?: Record<string, string | undefined>;
   headers: Record<string, string | undefined>;
   body?: Record<string, unknown>;
   creator: Pick<Account, "id" | "display_name">;
@@ -19,8 +21,73 @@ export async function handleCreatorFactoryHttp(
   request: CreatorFactoryHttpRequest,
   service: CreatorFactoryService
 ): Promise<CreatorFactoryHttpResponse | undefined> {
-  if (!request.pathname.startsWith("/v1/creator/factory-runs")) return undefined;
+  if (!request.pathname.startsWith("/v1/creator/factory-runs")
+    && !request.pathname.startsWith("/v1/creator/tasks")
+    && !request.pathname.startsWith("/v1/creator/source-documents")
+    && !request.pathname.startsWith("/v1/creator/source-snapshots")) return undefined;
   try {
+    if (request.pathname === "/v1/creator/tasks" && request.method === "GET") {
+      return { status: 200, body: { tasks: (await service.listTasks(request.creator.id)).map(taskView) } };
+    }
+    if (request.pathname === "/v1/creator/tasks" && request.method === "POST") {
+      const body = request.body ?? {};
+      const task = await service.createTask(request.creator.id, {
+        name: String(body.name ?? body.task_name ?? ""),
+        brief: String(body.brief ?? body.task_brief ?? "")
+      });
+      return { status: 201, body: taskView(task) };
+    }
+    const taskMatch = request.pathname.match(/^\/v1\/creator\/tasks\/([^/]+)$/);
+    const taskGraphMatch = request.pathname.match(/^\/v1\/creator\/tasks\/([^/]+)\/graph$/);
+    if (taskGraphMatch && request.method === "GET") {
+      return { status: 200, body: { graph: await service.getTaskGraph(request.creator.id, decodeURIComponent(taskGraphMatch[1]!)) } };
+    }
+    if (taskMatch && request.method === "GET") {
+      return { status: 200, body: taskView(await service.getTask(request.creator.id, decodeURIComponent(taskMatch[1]!))) };
+    }
+    if (taskMatch && request.method === "DELETE") {
+      return { status: 200, body: taskView(await service.deleteTask(request.creator.id, decodeURIComponent(taskMatch[1]!))) };
+    }
+    if (request.pathname === "/v1/creator/source-documents" && request.method === "GET") {
+      const taskId = typeof request.query?.task_id === "string" ? request.query.task_id : undefined;
+      return { status: 200, body: { documents: (await service.listSourceDocuments(request.creator.id, taskId)).map((document) => sourceDocumentView(document)) } };
+    }
+    if (request.pathname === "/v1/creator/source-documents" && request.method === "POST") {
+      const body = request.body ?? {};
+      const encoded = typeof body.content_base64 === "string" ? body.content_base64 : "";
+      if (!encoded) throw new Error("content_base64 is required for local uploads");
+      if (typeof body.task_id !== "string" || !body.task_id.trim()) {
+        throw new CreatorSourceLibraryError("invalid_source", "task_id is required for Source Library uploads");
+      }
+      const bytes = decodeBase64(encoded);
+      const document = await service.createSourceDocument(request.creator.id, {
+        displayName: String(body.display_name ?? body.file_name ?? ""),
+        taskId: body.task_id,
+        mediaType: typeof body.media_type === "string" ? body.media_type : undefined,
+        bytes
+      });
+      return { status: 201, body: sourceDocumentView(document, true) };
+    }
+    const sourceDocumentMatch = request.pathname.match(/^\/v1\/creator\/source-documents\/([^/]+)$/);
+    if (sourceDocumentMatch && request.method === "GET") {
+      return { status: 200, body: sourceDocumentView(await service.getSourceDocument(request.creator.id, decodeURIComponent(sourceDocumentMatch[1]!)), true) };
+    }
+    if (request.pathname === "/v1/creator/source-snapshots" && request.method === "POST") {
+      const body = request.body ?? {};
+      const documentIds = Array.isArray(body.document_ids) ? body.document_ids.map((id) => String(id)) : [];
+      if (typeof body.task_id !== "string" || !body.task_id.trim()) {
+        throw new CreatorSourceLibraryError("invalid_snapshot", "task_id is required to lock a Source Snapshot");
+      }
+      const snapshot = await service.createSourceSnapshot(request.creator.id, {
+        documentIds,
+        taskId: body.task_id
+      });
+      return { status: 201, body: sourceSnapshotView(snapshot) };
+    }
+    const sourceSnapshotMatch = request.pathname.match(/^\/v1\/creator\/source-snapshots\/([^/]+)$/);
+    if (sourceSnapshotMatch && request.method === "GET") {
+      return { status: 200, body: sourceSnapshotView(await service.getSourceSnapshot(request.creator.id, decodeURIComponent(sourceSnapshotMatch[1]!))) };
+    }
     if (request.pathname === "/v1/creator/factory-runs" && request.method === "GET") {
       return { status: 200, body: { runs: (await service.list(request.creator.id)).map(publicView) } };
     }
@@ -65,6 +132,19 @@ export async function handleCreatorFactoryHttp(
       return { status: 202, body: publicView(view) };
     }
 
+    const releaseMatch = request.pathname.match(/^\/v1\/creator\/factory-runs\/([^/]+)\/release$/);
+    if (releaseMatch && request.method === "POST") {
+      const body = request.body ?? {};
+      const productId = typeof body.product_id === "string" ? body.product_id.trim() : "";
+      if (!productId) throw new Error("product_id is required for Release");
+      const release = await service.recordRelease(
+        request.creator.id,
+        decodeURIComponent(releaseMatch[1]!),
+        productId
+      );
+      return { status: 201, body: { release } };
+    }
+
     const runMatch = request.pathname.match(/^\/v1\/creator\/factory-runs\/([^/]+)$/);
     if (runMatch && request.method === "GET") {
       return {
@@ -79,12 +159,13 @@ export async function handleCreatorFactoryHttp(
 }
 
 function createRequest(body: Record<string, unknown>): CreateFactoryRunRequest {
+  const hasSources = Object.prototype.hasOwnProperty.call(body, "sources");
   const sources = Array.isArray(body.sources) ? body.sources.map((item) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("Each source must be an object");
     const source = item as Record<string, unknown>;
     return {
       id: String(source.id ?? ""),
-      authority: String(source.authority ?? "") as CreateFactoryRunRequest["sources"][number]["authority"],
+      authority: String(source.authority ?? "") as NonNullable<CreateFactoryRunRequest["sources"]>[number]["authority"],
       title: String(source.title ?? ""),
       content: String(source.content ?? "")
     };
@@ -100,6 +181,7 @@ function createRequest(body: Record<string, unknown>): CreateFactoryRunRequest {
     ? undefined
     : toolRequests(body.tools);
   return {
+    ...(typeof body.task_id === "string" ? { taskId: body.task_id } : {}),
     ...(productId ? { agentId: productId } : {}),
     ...(product === undefined && !productId ? {} : {
       product: product ?? { id: productId }
@@ -107,13 +189,75 @@ function createRequest(body: Record<string, unknown>): CreateFactoryRunRequest {
     ...(tools === undefined ? {} : { tools }),
     taskName: String(body.task_name ?? ""),
     taskBrief: String(body.task_brief ?? ""),
-    sources,
+    ...(body.source_snapshot_id === undefined
+      ? (hasSources ? { sources } : {})
+      : { sourceSnapshotId: String(body.source_snapshot_id) }),
+    ...(body.source_document_ids === undefined ? {} : {
+      sourceDocumentIds: Array.isArray(body.source_document_ids) ? body.source_document_ids.map((id) => String(id)) : []
+    }),
     ...(config ? { config: {
       ...(numberField(config.development_questions) === undefined ? {} : { developmentQuestions: numberField(config.development_questions)! }),
       ...(numberField(config.heldout_questions) === undefined ? {} : { heldoutQuestions: numberField(config.heldout_questions)! }),
       ...(numberField(config.max_corpus_revisions) === undefined ? {} : { maxCorpusRevisions: numberField(config.max_corpus_revisions)! })
     } } : {})
   };
+}
+
+function sourceDocumentView(document: Awaited<ReturnType<CreatorFactoryService["getSourceDocument"]>>, includeProjection = false): Record<string, unknown> {
+  return {
+    id: document.id,
+    task_id: document.taskId,
+    display_name: document.displayName,
+    media_type: document.mediaType,
+    projection: {
+      kind: document.projection.kind,
+      media_type: document.projection.mediaType,
+      content_ref: document.projection.contentRef,
+      sha256: document.projection.sha256,
+      bytes: document.projection.bytes,
+      ...(includeProjection && document.projectionContent !== undefined ? { content: document.projectionContent } : {}),
+      ...(includeProjection && document.projectionBase64 !== undefined ? { base64: document.projectionBase64 } : {})
+    },
+    created_at: document.createdAt,
+    updated_at: document.updatedAt
+  };
+}
+
+function sourceSnapshotView(snapshot: Awaited<ReturnType<CreatorFactoryService["getSourceSnapshot"]>>): Record<string, unknown> {
+  return {
+    id: snapshot.id,
+    task_id: snapshot.taskId,
+    version: snapshot.version,
+    document_ids: snapshot.documentIds,
+    manifest_sha256: snapshot.manifestSha256,
+    locked_at: snapshot.lockedAt,
+    created_at: snapshot.createdAt,
+    documents: snapshot.documents.map((document) => sourceDocumentView(document))
+  };
+}
+
+function taskView(task: Awaited<ReturnType<CreatorFactoryService["getTask"]>>): Record<string, unknown> {
+  return {
+    id: task.id,
+    name: task.name,
+    brief: task.brief,
+    status: task.status,
+    ...(task.productId ? { product_id: task.productId } : {}),
+    ...(task.runId ? { run_id: task.runId } : {}),
+    ...(task.latestRevisionId ? { latest_revision_id: task.latestRevisionId } : {}),
+    created_at: task.createdAt,
+    updated_at: task.updatedAt,
+    ...(task.deletedAt ? { deleted_at: task.deletedAt } : {})
+  };
+}
+
+function decodeBase64(value: string): Buffer {
+  if (value.length > Math.ceil(SOURCE_DOCUMENT_MAX_BYTES * 4 / 3) + 1024 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value) || value.length % 4 === 1) {
+    throw new Error("content_base64 is invalid or too large");
+  }
+  const bytes = Buffer.from(value, "base64");
+  if (bytes.length === 0 || bytes.length > SOURCE_DOCUMENT_MAX_BYTES) throw new Error("Uploaded source is empty or too large");
+  return bytes;
 }
 
 function productRequest(body: Record<string, unknown>): NonNullable<CreateFactoryRunRequest["product"]> {
@@ -139,6 +283,14 @@ function publicView(view: CreatorFactoryRunView): Record<string, unknown> {
     id: view.id,
     ...(view.agentId ? { product_id: view.agentId } : {}),
     ...(view.product ? { product: view.product } : {}),
+    ...(view.taskId ? { task_id: view.taskId } : {}),
+    ...(view.distillationRunId ? { distillation_run_id: view.distillationRunId } : {}),
+    ...(view.revisionId ? { revision_id: view.revisionId } : {}),
+    ...(view.revisionNumber === undefined ? {} : { revision_number: view.revisionNumber }),
+    ...(view.parentRevisionId ? { parent_revision_id: view.parentRevisionId } : {}),
+    ...(view.sourceSnapshotId ? { source_snapshot_id: view.sourceSnapshotId } : {}),
+    ...(view.derivedStatus ? { derived_status: view.derivedStatus } : {}),
+    ...(view.qualityGates ? { quality_gates: view.qualityGates } : {}),
     ...(view.declaredToolIds ? { declared_tool_ids: view.declaredToolIds } : {}),
     task_name: view.taskName,
     status: view.status,
@@ -176,6 +328,12 @@ function factoryHttpError(error: unknown): CreatorFactoryHttpResponse {
       : error.code === "creator_mismatch" ? 403
         : ["idempotency_conflict", "version_conflict", "invalid_status", "invalid_stage"].includes(error.code) ? 409
           : 422;
+    return { status, body: { detail: error.message, code: error.code } };
+  }
+  if (error instanceof CreatorSourceLibraryError) {
+    const status = error.code === "source_not_found" || error.code === "snapshot_not_found" ? 404
+      : error.code === "creator_mismatch" ? 403
+        : 422;
     return { status, body: { detail: error.message, code: error.code } };
   }
   return { status: 422, body: { detail: error instanceof Error ? error.message : String(error) } };

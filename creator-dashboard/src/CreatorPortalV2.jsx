@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CreatorFactoryRuns } from "./CreatorFactoryRuns.jsx";
+import { CreatorSourceLibrary } from "./CreatorSourceLibrary.jsx";
 import { HatchBrand } from "./HatchBrand.jsx";
 import { StorefrontDetails } from "./StorefrontDetails.jsx";
 import { AutosaveStatus } from "./components/product/index.js";
-import { Breadcrumbs as HatchBreadcrumbs, EmptyState as HatchEmptyState, StatusTag as HatchStatusTag } from "./components/ui/index.js";
+import { Breadcrumbs as HatchBreadcrumbs, Button as HatchButton, EmptyState as HatchEmptyState, StatusTag as HatchStatusTag } from "./components/ui/index.js";
 import { creatorOrderQuery } from "./storefrontModel.js";
 import { creatorRouteTitle, parseCreatorRoute } from "./creatorRoutes.js";
 import "./creatorPortalV2.css";
@@ -66,6 +67,7 @@ export function CreatorPortalV2({
         <nav aria-label="Creator dashboard">
           <NavButton active={route.section === "home"} onClick={() => go(ROOT)}>Home</NavButton>
           <NavButton active={route.section === "products"} onClick={() => go(`${ROOT}/products`)}>Products</NavButton>
+          <NavButton active={route.kind === "sources"} onClick={() => go(`${ROOT}/sources`)}>Source Library</NavButton>
           <NavButton active={route.section === "orders"} onClick={() => go(`${ROOT}/orders`)}>Orders</NavButton>
         </nav>
         <div className="cpv2-account">
@@ -100,6 +102,7 @@ function CreatorRoute({ route, token, request, navigate, profile, registerNaviga
   }
   if (route.kind === "home") return <CreatorHome token={token} request={request} navigate={navigate} profile={profile} />;
   if (route.kind === "products") return <ProductsPage token={token} request={request} navigate={navigate} />;
+  if (route.kind === "sources") return <CreatorSourceLibrary token={token} taskId={route.taskId} navigate={navigate} />;
   if (route.kind === "factory") return <FactoryPage token={token} request={request} productId={route.productId} runId={route.runId} navigate={navigate} registerNavigationGuard={registerNavigationGuard} />;
   if (route.kind === "product") return <ProductPage token={token} request={request} navigate={navigate} productId={route.productId} tab={route.tab} />;
   if (route.kind === "candidate") return <CandidatePage token={token} request={request} navigate={navigate} productId={route.productId} candidateId={route.candidateId} />;
@@ -164,11 +167,11 @@ function ProductsPage({ token, request, navigate }) {
       {(payload) => {
         const products = arrayOf(unwrap(payload, "products"));
         return <>
-          <PageHeader eyebrow="Products" title="From a method to a product people can use." body="Factory creates a candidate. You approve its behavior, preview the storefront, and publish explicitly." action="Create product" onAction={() => navigate(`${ROOT}/factory`)} />
+          <PageHeader eyebrow="Products" title="From a method to a product people can use." body="A Task owns its private Source Library. Factory then evaluates a candidate, and Release makes the approved result available." action="Create product" onAction={() => navigate(`${ROOT}/sources`)} />
           {pendingRuns.length ? <PendingFactoryRuns runs={pendingRuns} navigate={navigate} /> : null}
           {products.length ? <section className="cpv2-product-grid" aria-label="Products">
             {products.map((product) => <ProductCard key={idOf(product, "product")} product={product} onOpen={() => navigate(`${ROOT}/products/${encodeURIComponent(idOf(product, "product"))}`)} />)}
-          </section> : pendingRuns.length ? null : <EmptyState title="Create your first product" body="Start with one narrow task, authorized sources, and a deliverable you would stand behind." action="Open Factory" onAction={() => navigate(`${ROOT}/factory`)} />}
+          </section> : pendingRuns.length ? null : <EmptyState title="Create your first product" body="Start with one narrow Task, upload local source files, and let Factory turn the method into a verified candidate." action="Open Source Library" onAction={() => navigate(`${ROOT}/sources`)} />}
         </>;
       }}
     </PageBoundary>
@@ -278,10 +281,11 @@ function FactoryPage({ token, request, productId, runId, navigate, registerNavig
     ? `${ROOT}/products/${encodeURIComponent(productId)}/factory/runs`
     : `${ROOT}/factory`;
   if (productId === undefined) return <>
-    <div className="cpv2-factory-bar"><button type="button" onClick={() => navigate(`${ROOT}/products`)}>← Back to products</button><span role="status">Open a saved run to continue questions, retry a checkpoint, or inspect progress.</span></div>
+    <div className="cpv2-factory-bar"><button type="button" onClick={() => navigate(`${ROOT}/products`)}>← Back to products</button><span role="status">Source files are managed in Source Library. Open a saved run here to continue questions, retry a checkpoint, or inspect progress.</span></div>
     <CreatorFactoryRuns
       token={token}
       initialRunId={runId}
+      onOpenSources={() => navigate(`${ROOT}/sources`)}
       onNavigateRun={(id) => navigate(id ? `${runBase}/${encodeURIComponent(id)}` : `${ROOT}/factory`)}
       onReviewCandidate={(run) => {
         const candidateProductId = run?.product?.product_id ?? run?.product?.id ?? run?.product_id;
@@ -295,7 +299,7 @@ function FactoryPage({ token, request, productId, runId, navigate, registerNavig
   return <>
     <div className="cpv2-factory-bar"><button type="button" onClick={() => navigate(productId ? `${ROOT}/products/${encodeURIComponent(productId)}` : `${ROOT}/products`)}>← {productId ? "Back to product" : "Back to products"}</button><span role="status">Factory run checkpoints are saved on the server when submitted.</span></div>
     <FactoryReviewLink token={token} request={request} productId={productId} navigate={navigate} />
-    <CreatorFactoryRuns token={token} initialRunId={runId} onNavigateRun={(id) => navigate(id ? `${runBase}/${encodeURIComponent(id)}` : `${ROOT}/products/${encodeURIComponent(productId)}/factory`)} onReviewCandidate={(run) => navigate(`${ROOT}/products/${encodeURIComponent(productId)}/candidates/${encodeURIComponent(run.id)}`)} />
+    <CreatorFactoryRuns token={token} initialRunId={runId} onOpenSources={() => navigate(`${ROOT}/sources`)} onNavigateRun={(id) => navigate(id ? `${runBase}/${encodeURIComponent(id)}` : `${ROOT}/products/${encodeURIComponent(productId)}/factory`)} onReviewCandidate={(run) => navigate(`${ROOT}/products/${encodeURIComponent(productId)}/candidates/${encodeURIComponent(run.id)}`)} />
   </>;
 }
 
@@ -444,17 +448,21 @@ function CandidatePage({ token, request, navigate, productId, candidateId }) {
   async function decide(action, candidate, expectedVersion) {
     setMutation({ state: action, error: "" });
     try {
-      await request(`/v1/creator/products/${encodeURIComponent(productId)}/candidates/${encodeURIComponent(candidateId)}/${action}`, {
+      const endpoint = action === "release"
+        ? `/v1/creator/products/${encodeURIComponent(productId)}/release`
+        : `/v1/creator/products/${encodeURIComponent(productId)}/candidates/${encodeURIComponent(candidateId)}/${action}`;
+      await request(endpoint, {
         method: "POST", token, headers: { "idempotency-key": mutationKey() },
         body: JSON.stringify({
           expected_version: expectedVersion,
-          ...(action === "approve" ? {
+          ...(action === "release" || action === "approve" ? {
+            candidate_id: candidateId,
             report_digest: candidate?.report_digest,
             acknowledgements: acknowledged
           } : {})
         })
       });
-      navigate(action === "approve" ? `${ROOT}/products/${encodeURIComponent(productId)}/preview` : `${ROOT}/products/${encodeURIComponent(productId)}/versions`);
+      navigate(action === "release" ? `${ROOT}/products/${encodeURIComponent(productId)}` : `${ROOT}/products/${encodeURIComponent(productId)}/versions`);
     } catch (error) {
       setMutation({ state: "idle", error: friendlyError(error) });
     }
@@ -477,15 +485,17 @@ function CandidatePage({ token, request, navigate, productId, candidateId }) {
       && product.approval.candidate_id === candidateId
       && product.approval.candidate_digest === candidate?.digest
       && product.approval.report_digest === candidate?.report_digest;
+    const alreadyReleased = product?.status === "published"
+      && product?.release?.candidate_id === candidateId;
     const expectedVersion = product?.resource_version ?? product?.version ?? 0;
     const busy = mutation.state !== "idle";
     return <>
       <Breadcrumb onClick={() => navigate(`${ROOT}/products/${encodeURIComponent(productId)}/versions`)}>Versions</Breadcrumb>
-      <PageHeader eyebrow="Candidate review" title={`Candidate v${candidate?.version ?? "—"}`} body="Approval binds this exact Corpus digest and evaluation report. It does not publish the product." />
+      <PageHeader eyebrow="Candidate review" title={`Candidate v${candidate?.version ?? "—"}`} body="Release binds this exact Corpus digest, records your approval, and makes the Product available in one command." />
       {mutation.error ? <InlineError>{mutation.error}</InlineError> : null}
       <div className="cpv2-detail-grid cpv2-review-grid">
         <article className="cpv2-card cpv2-panel"><SectionHeading eyebrow="Provenance" title="What was evaluated" /><dl className="cpv2-fact-grid"><Fact label="Candidate digest" value={candidate?.digest ?? "Not provided"} /><Fact label="Base release" value={candidate?.base_release?.label ?? candidate?.base_release_id ?? "Not provided"} /><Fact label="Dataset / eval set" value={candidate?.eval_set?.name ?? candidate?.eval_set_id ?? candidate?.dataset_id ?? "Not provided"} /><Fact label="Regression digest" value={candidate?.regression_digest ?? candidate?.eval_set?.digest ?? "Not provided"} /><Fact label="Held-out digest" value={candidate?.held_out_digest ?? "Not provided"} /><Fact label="Held-out samples" value={candidate?.held_out_sample_count ?? candidate?.evaluation?.sample_count ?? "Not provided"} /><Fact label="Critical gates" value={candidate?.critical_case_count ?? candidate?.evaluation?.critical_case_count ?? gates.filter((gate) => gate?.critical || gate?.severity === "critical").length} /><Fact label="Failed critical cases" value={candidate?.failed_critical_cases ?? "Not provided"} /><Fact label="Built" value={candidate?.built_at || candidate?.created_at ? dateTime(candidate?.built_at ?? candidate?.created_at) : "Not provided"} /><Fact label="Factory version" value={candidate?.factory_version ?? "Not provided"} /><Fact label="Provider / model" value={candidate?.provider_model ?? ([candidate?.provider, candidate?.model].filter(Boolean).join(" / ") || "Not provided")} /><Fact label="Report digest" value={candidate?.report_digest ?? candidate?.evaluation_digest ?? "Not provided"} /></dl></article>
-        <article className="cpv2-card cpv2-panel"><SectionHeading eyebrow="Decision" title={criticalFailed ? "Critical gates block approval" : "Candidate can be approved"} /><p>{criticalFailed ? "Resolve every failed critical case in a new Factory candidate." : losses.length ? "Acknowledge each known non-critical loss before approval." : "All required gates passed. Approval remains separate from publishing."}</p><StatusChip status={criticalFailed ? "failed" : "passed"}>{criticalFailed ? "Blocked" : "Ready for decision"}</StatusChip></article>
+        <article className="cpv2-card cpv2-panel"><SectionHeading eyebrow="Decision" title={criticalFailed ? "Critical gates block Release" : "Candidate can be Released"} /><p>{criticalFailed ? "Resolve every failed critical case in a new Factory candidate." : losses.length ? "Acknowledge each known non-critical loss before Release." : "All required gates passed. Release combines approval and Product publication."}</p><StatusChip status={criticalFailed ? "failed" : "passed"}>{criticalFailed ? "Blocked" : "Ready for Release"}</StatusChip></article>
       </div>
       <article className="cpv2-card cpv2-panel cpv2-review-report"><SectionHeading eyebrow="Deterministic gates" title="Evaluation report" />{gates.length ? <ul className="cpv2-gates">{gates.map((gate, index) => <li key={gate.id ?? index}><StatusChip status={gate.passed === false ? "failed" : "passed"}>{gate.passed === false ? "Failed" : "Passed"}</StatusChip><span><strong>{gate.name ?? gate.label ?? `Gate ${index + 1}`}</strong><small>{gate.detail ?? gate.message ?? (gate.critical ? "Critical gate" : "Evaluation gate")}</small></span></li>)}</ul> : <EmptyInline>The report has no individual gate rows.</EmptyInline>}
         <h3>Blinded current / candidate comparison</h3>{comparisons.length ? <ul className="cpv2-comparisons">{comparisons.map((item, index) => <li key={item?.id ?? index}><strong>{item?.label ?? item?.case ?? `Case ${index + 1}`}</strong><span>Current: {item?.current ?? item?.baseline ?? "Not provided"}</span><span>Candidate: {item?.candidate ?? item?.proposed ?? "Not provided"}</span><small>{item?.verdict ?? item?.result ?? "Blinded result"}</small></li>)}</ul> : <EmptyInline>No blinded comparison was included in this report.</EmptyInline>}
@@ -493,7 +503,7 @@ function CandidatePage({ token, request, navigate, productId, candidateId }) {
         <h3>Product boundaries</h3>{boundaries.length ? <ul className="cpv2-bullets">{boundaries.map((item, index) => <li key={index}>{typeof item === "string" ? item : item.description ?? item.label}</li>)}</ul> : <EmptyInline>No product boundaries were included in this report.</EmptyInline>}
         {losses.length ? <fieldset className="cpv2-losses"><legend>Known non-critical losses</legend>{losses.map((loss, index) => { const lossId = loss?.id ?? String(index); return <label key={lossId}><input type="checkbox" checked={acknowledged.includes(lossId)} onChange={(event) => setAcknowledged((current) => event.target.checked ? [...current, lossId] : current.filter((id) => id !== lossId))} /><span><strong>{loss?.title ?? loss?.label ?? `Loss ${index + 1}`}</strong><small>{loss?.description ?? loss?.detail ?? String(loss)}</small></span></label>; })}</fieldset> : null}
       </article>
-      <div className="cpv2-action-bar"><div><strong>Approval is immutable for this digest.</strong><small>Any candidate or report change invalidates it.</small></div>{confirmReject ? <><span>Archive this candidate?</span><button className="cpv2-danger" type="button" disabled={busy} onClick={() => decide("reject", candidate, expectedVersion)}>{mutation.state === "reject" ? "Rejecting…" : "Yes, reject"}</button><button className="cpv2-secondary" type="button" onClick={() => setConfirmReject(false)}>Cancel</button></> : <button className="cpv2-secondary" type="button" disabled={busy || alreadyApproved} onClick={() => setConfirmReject(true)}>Reject candidate</button>}<button className="cpv2-primary" type="button" disabled={busy || criticalFailed || !allAcknowledged || alreadyApproved} aria-busy={mutation.state === "approve"} onClick={() => decide("approve", candidate, expectedVersion)}>{alreadyApproved ? "Approved" : mutation.state === "approve" ? "Approving…" : "Approve candidate"}</button></div>
+      <div className="cpv2-action-bar"><div><strong>Release is immutable for this digest.</strong><small>Any candidate or report change requires a new review.</small></div>{confirmReject ? <><span>Archive this candidate?</span><HatchButton variant="danger" type="button" disabled={busy} onClick={() => decide("reject", candidate, expectedVersion)} loading={mutation.state === "reject"}>Yes, reject</HatchButton><HatchButton variant="secondary" type="button" onClick={() => setConfirmReject(false)}>Cancel</HatchButton></> : <HatchButton variant="secondary" type="button" disabled={busy || alreadyReleased} onClick={() => setConfirmReject(true)}>Reject candidate</HatchButton>}<HatchButton type="button" disabled={criticalFailed || !allAcknowledged || alreadyReleased} loading={mutation.state === "release"} onClick={() => decide("release", candidate, expectedVersion)}>{alreadyReleased ? "Released" : "Release Product"}</HatchButton></div>
     </>;
   }}</PageBoundary>;
 }
@@ -756,7 +766,7 @@ function defaultNavigate(path) {
 }
 
 function nextCreatorAction(products) {
-  if (!products.length) return { label: "Start here", tone: "draft", title: "Create one focused product", body: "Define the task and authorized sources in Factory.", action: "Open Factory", href: `${ROOT}/factory` };
+  if (!products.length) return { label: "Start here", tone: "draft", title: "Create one focused product", body: "Create a Task and upload its authorized sources in Source Library.", action: "Open Source Library", href: `${ROOT}/sources` };
   for (const product of products) {
     const candidate = candidateOf(product);
     const next = productNextAction(product, candidate);

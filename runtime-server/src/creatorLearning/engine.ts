@@ -26,7 +26,9 @@ import {
 import type { CorpusReleaseGuardViolation } from "./corpusReleaseGuards.js";
 import { materializeAgentCorpusBundle } from "./corpusBundle.js";
 import { FactoryFileStore } from "./fileStore.js";
-import { classifyFactoryProviderFailure } from "./factoryKimiK3.js";
+import type { ArtifactObjectStore } from "./objectStore.js";
+import type { DistillationGraphStore } from "./distillationGraph.js";
+import { classifyFactoryProviderFailure } from "./factoryLlm.js";
 import { issueQuestionBatch, requireQuestionBatchId } from "./questionBatch.js";
 import { requireUuidV4 } from "../identity.js";
 import { validateFactorySourceManifest } from "./sourceScope.js";
@@ -41,6 +43,7 @@ import type {
   FactoryExecutionControl,
   FactoryAgentTool,
   FactorySourceManifest,
+  FactorySourceImageArtifact,
   HatchCandidateExecutor,
   HatchCandidateResult,
   FactoryRunState,
@@ -50,7 +53,7 @@ import type {
 
 const PROMPT_VERSION = "creator-factory-v6-planned-incremental-corpus";
 const SEALED_FAILURE_MESSAGE = "Sealed Factory operation failed; sensitive diagnostics were not persisted";
-// Conservative character ceiling leaves ample room inside K3's 1M-token
+// Conservative character ceiling leaves ample room inside Kimi K2.6's context
 // context for instructions, multilingual tokenization, reasoning, and output.
 const EVIDENCE_CHUNK_CHARACTERS = 600_000;
 const INITIAL_EVIDENCE_SECTIONS = [
@@ -69,6 +72,10 @@ const CONSOLIDATED_EVIDENCE_SECTIONS = [
 
 export type CreatorFactoryOptions = {
   model?: { provider: string; model: string };
+  /** Production artifacts are authoritative in the configured Object Store. */
+  objectStore?: ArtifactObjectStore;
+  /** Postgres-backed append-only graph and quality-gate authority. */
+  graphStore?: DistillationGraphStore;
   /** Injectable only for deterministic timing tests. */
   timingClock?: {
     wallNow: () => Date;
@@ -96,7 +103,11 @@ export class CreatorFactory {
     const sourceManifestText = startInput.sourceManifest
       ? `${JSON.stringify(startInput.sourceManifest, null, 2)}\n`
       : undefined;
-    const store = new FactoryFileStore(this.root, startInput.runId, control.beforeCommit, control.signal);
+    const store = this.fileStore(startInput.runId, control, {
+      ...(startInput.taskId ? { taskId: startInput.taskId } : {}),
+      ...(startInput.distillationRunId ? { runId: startInput.distillationRunId } : {}),
+      ...(startInput.revisionId ? { revisionId: startInput.revisionId } : {})
+    });
     await store.initialize();
     const taskBrief = await store.writeArtifact("input/task-brief.md", startInput.taskBrief);
     const sourceManifest = sourceManifestText
@@ -106,6 +117,12 @@ export class CreatorFactory {
         )
       : undefined;
     const sourcePacket = await store.writeArtifact("input/source-packet.md", sourcePacketText);
+    const sourceImages: FactorySourceImageArtifact[] = [];
+    for (const source of startInput.sources) {
+      if (!source.image) continue;
+      const artifact = await store.writeArtifact(`input/images/${source.id}.base64`, source.image.base64);
+      sourceImages.push({ sourceId: source.id, mediaType: source.image.mediaType, artifact });
+    }
     const now = new Date().toISOString();
     let state: FactoryRunState = {
       contractVersion: "1",
@@ -115,6 +132,12 @@ export class CreatorFactory {
       product: identity.product,
       tools: normalizeFactoryTools(startInput.tools),
       taskName: startInput.taskName,
+      ...(startInput.taskId ? { taskId: startInput.taskId } : {}),
+      ...(startInput.distillationRunId ? { distillationRunId: startInput.distillationRunId } : {}),
+      ...(startInput.revisionId ? { revisionId: startInput.revisionId } : {}),
+      ...(startInput.revisionNumber === undefined ? {} : { revisionNumber: startInput.revisionNumber }),
+      ...(startInput.parentRevisionId ? { parentRevisionId: startInput.parentRevisionId } : {}),
+      ...(startInput.sourceSnapshotId ? { sourceSnapshotId: startInput.sourceSnapshotId } : {}),
       stage: "extracting_evidence",
       config: {
         developmentQuestions: startInput.config?.developmentQuestions ?? 6,
@@ -125,6 +148,7 @@ export class CreatorFactory {
         taskBrief,
         sourcePacket,
         ...(sourceManifest ? { sourceManifest } : {}),
+        ...(sourceImages.length ? { sourceImages } : {}),
         corpusCandidates: [],
         evaluationRounds: [],
         heldoutRounds: []
@@ -154,7 +178,7 @@ export class CreatorFactory {
     questionBatchId: string,
     control: FactoryExecutionControl = {}
   ): Promise<FactoryRunState> {
-    const store = new FactoryFileStore(this.root, runId, control.beforeCommit, control.signal);
+    const store = this.fileStore(runId, control);
     let state = await store.loadState();
     await this.verifyDurableSourceSnapshot(store, state);
     if (state.stage !== "awaiting_creator_answers" || !state.pendingQuestionBatch || !state.artifacts.currentQuestionBatch) {
@@ -216,7 +240,7 @@ export class CreatorFactory {
   }
 
   async resume(runId: string, control: FactoryExecutionControl = {}): Promise<FactoryRunState> {
-    const store = new FactoryFileStore(this.root, runId, control.beforeCommit, control.signal);
+    const store = this.fileStore(runId, control);
     let state = await store.loadState();
 
     try {
@@ -246,14 +270,14 @@ export class CreatorFactory {
   }
 
   async status(runId: string): Promise<FactoryRunState> {
-    const store = new FactoryFileStore(this.root, runId);
+    const store = this.fileStore(runId);
     const state = await store.loadState();
     await this.verifyDurableSourceSnapshot(store, state);
     return state;
   }
 
   async retry(runId: string, control: FactoryExecutionControl = {}): Promise<FactoryRunState> {
-    const store = new FactoryFileStore(this.root, runId, control.beforeCommit, control.signal);
+    const store = this.fileStore(runId, control);
     const state = await store.loadState();
     await this.verifyDurableSourceSnapshot(store, state);
     if (state.stage !== "needs_attention" || !state.retryStage) {
@@ -271,6 +295,7 @@ export class CreatorFactory {
   ): Promise<FactoryRunState> {
     const taskBrief = await store.readArtifact(state.artifacts.taskBrief);
     const sourcePacket = await store.readArtifact(state.artifacts.sourcePacket);
+    const sourceImages = await readSourceImages(store, state);
     const evidenceInput = {
       creator: state.creator,
       taskName: state.taskName,
@@ -296,6 +321,7 @@ export class CreatorFactory {
               kind: "evidence_ledger",
               requiredSections: INITIAL_EVIDENCE_SECTIONS
             },
+            ...(sourceImages.length ? { images: sourceImages } : {}),
             ...evidenceCall
           },
           chunks.length === 1 ? "evidence" : `evidence-${id}`,
@@ -405,7 +431,7 @@ export class CreatorFactory {
       ? await store.readArtifact(rejectedRepairTarget.failureReport)
       : undefined;
     const evaluationFeedback = (await Promise.all(
-      state.artifacts.evaluationRounds.map((reference) => store.readArtifact(reference))
+      (state.calibrationFeedback ?? []).map((reference) => store.readArtifact(reference))
     )).join("\n\n---\n\n");
     const regression = state.artifacts.regressionSet
       ? parseQaSet(await store.readArtifact(state.artifacts.regressionSet))
@@ -548,10 +574,12 @@ export class CreatorFactory {
     state.artifacts.evaluationRounds.push(completenessReport);
     if (!completeness.pass) {
       candidate.completeness = "FAIL";
+      state.calibrationFeedback = [completenessReport];
       state.compileReason = "completeness_failure";
       state.stage = "compiling_corpus";
       await store.recordEvent("corpus_completeness_failed", {
         version: candidate.version,
+        report: completenessReport,
         diagnosis: completeness.diagnosis,
         nextStage: state.stage
       });
@@ -559,6 +587,7 @@ export class CreatorFactory {
     }
 
     candidate.completeness = "PASS";
+    state.calibrationFeedback = undefined;
     state.compileReason = undefined;
     state.stage = regression.length > 0
       ? "evaluating_regression"
@@ -614,6 +643,7 @@ export class CreatorFactory {
       ].join("\n")
     );
     state.artifacts.evaluationRounds.push(report);
+    state.calibrationFeedback = [report];
     state.artifacts.pendingGuardCandidate = undefined;
     state.artifacts.rejectedCorpusRepairTarget = {
       attempt,
@@ -626,6 +656,7 @@ export class CreatorFactory {
     state.stage = "compiling_corpus";
     await store.recordEvent("corpus_release_guard_failed", {
       version,
+      report,
       violations: violations.map(({ code, assetPath, sourceId }) => ({
         code,
         assetPath,
@@ -669,6 +700,7 @@ export class CreatorFactory {
     state.lastError = "Corpus release guard analysis was inconclusive; retry will re-audit the same compilation without calling the Corpus LLM";
     await store.recordEvent("corpus_release_guard_inconclusive", {
       version,
+      report,
       violations: violations.map(({ code, assetPath, sourceId }) => ({
         code,
         assetPath,
@@ -761,6 +793,7 @@ export class CreatorFactory {
       renderEvaluationReport("Development evaluation", evaluations)
     );
     state.artifacts.evaluationRounds.push(report);
+    state.calibrationFeedback = [report];
     state.developmentEvaluated = true;
     const failures = evaluations.filter((item) => !item.verdict.pass).map((item) => item.qa);
     // Development is calibration data, not a release gate by itself. Give its
@@ -770,7 +803,12 @@ export class CreatorFactory {
     state.artifacts.regressionSet = await this.mergeRegression(store, state.artifacts.regressionSet, qa);
     state.compileReason = failures.length > 0 ? "development_failure" : "development_calibration";
     state.stage = "compiling_corpus";
-    await store.recordEvent("development_evaluated", { failures: failures.length, nextStage: state.stage });
+    await store.recordEvent("development_evaluated", {
+      failures: failures.length,
+      report,
+      latestRegressionEvaluation: state.artifacts.latestRegressionEvaluation,
+      nextStage: state.stage
+    });
     state.activeQaEvaluation = undefined;
     await store.saveState(state);
     return state;
@@ -790,6 +828,7 @@ export class CreatorFactory {
       renderEvaluationReport("Full Regression evaluation", evaluations)
     );
     state.artifacts.evaluationRounds.push(report);
+    if (state.replacementHeldoutNeeded === 0) state.calibrationFeedback = [report];
     state.artifacts.latestRegressionEvaluation = await store.writeArtifact(
       `evaluations/regression-latest-${shortId()}.json`,
       renderEvaluationAsset("synthetic_qa", evaluations)
@@ -803,7 +842,12 @@ export class CreatorFactory {
     } else {
       state.stage = "evaluating_heldout";
     }
-    await store.recordEvent("regression_evaluated", { failures: failures.length, nextStage: state.stage });
+    await store.recordEvent("regression_evaluated", {
+      failures: failures.length,
+      report,
+      latestRegressionEvaluation: state.artifacts.latestRegressionEvaluation,
+      nextStage: state.stage
+    });
     state.activeQaEvaluation = undefined;
     await store.saveState(state);
     return state;
@@ -834,6 +878,7 @@ export class CreatorFactory {
         )
       );
       state.artifacts.evaluationRounds.push(promotedReport);
+      state.calibrationFeedback = [promotedReport];
       state.artifacts.regressionSet = await this.mergeRegression(store, state.artifacts.regressionSet, failures);
       state.replacementHeldoutNeeded = state.config.heldoutQuestions;
       state.compileReason = "heldout_failure";
@@ -880,13 +925,14 @@ export class CreatorFactory {
         `Bundle root: ${latest.agentCorpus.rootPath}`,
         `Held-out round: ${round}`,
         "",
-        "This is a candidate, not a published Agent Corpus. Creator approval and Registry publication remain separate."
+        "This revision is Release-ready. Release combines Creator approval and Registry publication."
       ].join("\n"));
     }
     await store.recordEvent("heldout_evaluated", {
       round,
       failures: failures.length,
-      sealedReport: sealedReport.path,
+      sealedReport,
+      latestHeldoutEvaluation: state.artifacts.latestHeldoutEvaluation,
       nextStage: state.stage
     });
     state.activeQaEvaluation = undefined;
@@ -1379,6 +1425,14 @@ export class CreatorFactory {
     };
   }
 
+  private fileStore(runId: string | undefined, control: FactoryExecutionControl = {}, graphContext?: { taskId?: string; runId?: string; revisionId?: string }): FactoryFileStore {
+    return new FactoryFileStore(this.root, runId, control.beforeCommit, control.signal, {
+      objectStore: this.options.objectStore,
+      graphStore: this.options.graphStore,
+      ...(graphContext ? { graphContext } : {})
+    });
+  }
+
   private async settleFailedExecution(
     store: FactoryFileStore,
     timing: Awaited<ReturnType<FactoryFileStore["beginExecution"]>>,
@@ -1800,10 +1854,23 @@ function renderSourcePacket(sources: FactoryStartInput["sources"]): string {
       "",
       `Authority: ${source.authority}`,
       "",
-      withLineNumbers(source.content),
+      source.image
+        ? `[Native image attached: ${source.image.mediaType}; sha256=${source.image.sha256}]`
+        : withLineNumbers(source.content),
       ""
     ])
   ].join("\n");
+}
+
+async function readSourceImages(
+  store: FactoryFileStore,
+  state: FactoryRunState
+): Promise<Array<{ mediaType: "image/jpeg" | "image/png" | "image/webp"; base64: string }>> {
+  const refs = state.artifacts.sourceImages ?? [];
+  return Promise.all(refs.map(async (ref) => ({
+    mediaType: ref.mediaType,
+    base64: (await store.readArtifact(ref.artifact)).trim()
+  })));
 }
 
 function renderQuestionBatch(title: string, questions: CreatorQuestion[]): string {
@@ -2166,6 +2233,17 @@ function validateStartInput(input: FactoryStartInput): void {
     }
     if (ids.has(source.id)) throw new Error(`Duplicate source id: ${source.id}`);
     ids.add(source.id);
+    if (source.image) {
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(source.image.mediaType)) {
+        throw new Error(`Unsupported native image media type for source ${source.id}`);
+      }
+      if (!/^[A-Za-z0-9+/]+={0,2}$/.test(source.image.base64) || source.image.base64.length === 0) {
+        throw new Error(`Native image source ${source.id} has invalid base64 bytes`);
+      }
+      if (!/^sha256:[a-f0-9]{64}$/.test(source.image.sha256)) {
+        throw new Error(`Native image source ${source.id} has invalid sha256`);
+      }
+    }
   }
   if (input.sourceManifest) validateFactorySourceManifest(input.sourceManifest, input.sources);
 }

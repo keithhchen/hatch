@@ -3,6 +3,8 @@ import { Pool, type QueryResultRow } from "pg";
 import type { PostgresQueryExecutor } from "../postgresStore.js";
 import { requireQuestionBatchId } from "./questionBatch.js";
 import type { FactoryRunState, FactoryStage, FactoryStartInput } from "./types.js";
+import type { CreateDistillationTaskInput, DistillationTaskRecord, DistillationTaskRepository } from "./tasks.js";
+import { validateTaskText } from "./tasks.js";
 
 /**
  * Durable control-plane state for Creator Factory work.
@@ -145,8 +147,9 @@ export interface CreatorFactoryRepository {
 
 const DEFAULT_LEASE_MS = 60_000;
 
-export class InMemoryCreatorFactoryRepository implements CreatorFactoryRepository {
+export class InMemoryCreatorFactoryRepository implements CreatorFactoryRepository, DistillationTaskRepository {
   private readonly runs = new Map<string, FactoryRunRecord>();
+  private readonly tasks = new Map<string, DistillationTaskRecord>();
   private readonly idempotency = new Map<string, { runId: string; inputDigest: string }>();
   private readonly inputDigests = new Map<string, string>();
   private readonly answerSubmissions = new Map<string, Map<string, AnswerSubmissionReceipt>>();
@@ -156,6 +159,67 @@ export class InMemoryCreatorFactoryRepository implements CreatorFactoryRepositor
 
   async close(): Promise<void> {
     await this.writeChain;
+  }
+
+  async createTask(input: CreateDistillationTaskInput): Promise<DistillationTaskRecord> {
+    return this.write(async () => {
+      const id = requireNonEmpty(input.id, "task.id");
+      if (this.tasks.has(id)) throw new CreatorFactoryRepositoryError("run_id_conflict", `Distillation Task ${id} already exists`);
+      const now = new Date().toISOString();
+      const task: DistillationTaskRecord = {
+        id,
+        creatorId: requireNonEmpty(input.creatorId, "task.creatorId"),
+        name: validateTaskText(input.name, "task.name", 240),
+        brief: validateTaskText(input.brief, "task.brief"),
+        status: "active",
+        productId: requireNonEmpty(input.productId, "task.productId"),
+        createdAt: now,
+        updatedAt: now
+      };
+      this.tasks.set(id, task);
+      return cloneJson(task);
+    });
+  }
+
+  async getTask(creatorId: string, taskId: string): Promise<DistillationTaskRecord | undefined> {
+    await this.writeChain;
+    const task = this.tasks.get(taskId);
+    return task?.creatorId === creatorId ? cloneJson(task) : undefined;
+  }
+
+  async listTasks(creatorId: string): Promise<DistillationTaskRecord[]> {
+    await this.writeChain;
+    return [...this.tasks.values()]
+      .filter((task) => task.creatorId === creatorId && task.status !== "deleted")
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id))
+      .map(cloneJson);
+  }
+
+  async softDeleteTask(creatorId: string, taskId: string): Promise<DistillationTaskRecord> {
+    return this.write(async () => {
+      const task = this.tasks.get(taskId);
+      if (!task || task.creatorId !== creatorId) throw new CreatorFactoryRepositoryError("run_not_found", `Distillation Task ${taskId} was not found`);
+      const now = new Date().toISOString();
+      task.status = "deleted";
+      task.deletedAt = now;
+      task.updatedAt = now;
+      return cloneJson(task);
+    });
+  }
+
+  async setTaskRevision(creatorId: string, taskId: string, input: { runId: string; revisionId: string; productId: string }): Promise<DistillationTaskRecord> {
+    return this.write(async () => {
+      const task = this.tasks.get(taskId);
+      if (!task || task.creatorId !== creatorId) throw new CreatorFactoryRepositoryError("run_not_found", `Distillation Task ${taskId} was not found`);
+      if (task.status !== "active") throw new CreatorFactoryRepositoryError("invalid_status", `Distillation Task ${taskId} is deleted`);
+      if (task.runId && task.runId !== input.runId) throw new CreatorFactoryRepositoryError("version_conflict", `Distillation Task ${taskId} already belongs to another Run`);
+      if (task.productId && task.productId !== input.productId) throw new CreatorFactoryRepositoryError("version_conflict", `Distillation Task ${taskId} already belongs to another Product`);
+      task.runId = requireNonEmpty(input.runId, "task.runId");
+      task.latestRevisionId = requireNonEmpty(input.revisionId, "task.latestRevisionId");
+      task.productId = requireNonEmpty(input.productId, "task.productId");
+      task.updatedAt = new Date().toISOString();
+      return cloneJson(task);
+    });
   }
 
   async create(input: CreateFactoryRunInput): Promise<{ run: FactoryRunRecord; created: boolean }> {
@@ -390,6 +454,21 @@ export class InMemoryCreatorFactoryRepository implements CreatorFactoryRepositor
 }
 
 export const POSTGRES_CREATOR_FACTORY_REPOSITORY_SCHEMA = `
+CREATE TABLE IF NOT EXISTS hatch_creator_distillation_tasks (
+  id TEXT PRIMARY KEY,
+  creator_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  brief TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('active', 'deleted')) DEFAULT 'active',
+  product_id TEXT,
+  run_id TEXT,
+  latest_revision_id TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  deleted_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS hatch_creator_distillation_tasks_creator_idx
+  ON hatch_creator_distillation_tasks (creator_id, updated_at DESC);
 CREATE TABLE IF NOT EXISTS hatch_creator_factory_runs (
   id TEXT PRIMARY KEY,
   creator_id TEXT NOT NULL,
@@ -416,6 +495,10 @@ ALTER TABLE hatch_creator_factory_runs
   ADD COLUMN IF NOT EXISTS input_digest TEXT;
 ALTER TABLE hatch_creator_factory_runs
   ADD COLUMN IF NOT EXISTS answer_submissions JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE hatch_creator_distillation_tasks
+  ADD COLUMN IF NOT EXISTS latest_revision_id TEXT;
+ALTER TABLE hatch_creator_distillation_tasks
+  ADD COLUMN IF NOT EXISTS product_id TEXT;
 CREATE INDEX IF NOT EXISTS hatch_creator_factory_claim_idx
   ON hatch_creator_factory_runs (next_attempt_at, created_at, id)
   WHERE status IN ('queued', 'running');
@@ -477,6 +560,64 @@ export class PostgresCreatorFactoryRepository implements CreatorFactoryRepositor
 
   async close(): Promise<void> {
     if (this.ownsPool) await this.pool.end?.();
+  }
+
+  async createTask(input: CreateDistillationTaskInput): Promise<DistillationTaskRecord> {
+    await this.initialize();
+    const id = requireNonEmpty(input.id, "task.id");
+    const creatorId = requireNonEmpty(input.creatorId, "task.creatorId");
+    const name = validateTaskText(input.name, "task.name", 240);
+    const brief = validateTaskText(input.brief, "task.brief");
+    const result = await this.pool.query<TaskRow>(`
+      INSERT INTO hatch_creator_distillation_tasks (id, creator_id, name, brief, product_id)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING *
+    `, [id, creatorId, name, brief, requireNonEmpty(input.productId, "task.productId")]);
+    return taskFromRow(requireRow(result.rows[0], "Distillation Task insert returned no row"));
+  }
+
+  async getTask(creatorId: string, taskId: string): Promise<DistillationTaskRecord | undefined> {
+    await this.initialize();
+    const result = await this.pool.query<TaskRow>(`
+      SELECT * FROM hatch_creator_distillation_tasks WHERE id = $1 AND creator_id = $2
+    `, [taskId, creatorId]);
+    return result.rows[0] ? taskFromRow(result.rows[0]) : undefined;
+  }
+
+  async listTasks(creatorId: string): Promise<DistillationTaskRecord[]> {
+    await this.initialize();
+    const result = await this.pool.query<TaskRow>(`
+      SELECT * FROM hatch_creator_distillation_tasks
+      WHERE creator_id = $1 AND status = 'active'
+      ORDER BY updated_at DESC, id ASC
+    `, [creatorId]);
+    return result.rows.map(taskFromRow);
+  }
+
+  async softDeleteTask(creatorId: string, taskId: string): Promise<DistillationTaskRecord> {
+    await this.initialize();
+    const result = await this.pool.query<TaskRow>(`
+      UPDATE hatch_creator_distillation_tasks
+      SET status = 'deleted', deleted_at = clock_timestamp(), updated_at = clock_timestamp()
+      WHERE id = $1 AND creator_id = $2
+      RETURNING *
+    `, [taskId, creatorId]);
+    if (!result.rows[0]) throw new CreatorFactoryRepositoryError("run_not_found", `Distillation Task ${taskId} was not found`);
+    return taskFromRow(result.rows[0]);
+  }
+
+  async setTaskRevision(creatorId: string, taskId: string, input: { runId: string; revisionId: string; productId: string }): Promise<DistillationTaskRecord> {
+    await this.initialize();
+    const result = await this.pool.query<TaskRow>(`
+      UPDATE hatch_creator_distillation_tasks
+      SET run_id = COALESCE(run_id, $3), latest_revision_id = $4, product_id = COALESCE(product_id, $5), updated_at = clock_timestamp()
+      WHERE id = $1 AND creator_id = $2 AND status = 'active'
+        AND (run_id IS NULL OR run_id = $3)
+        AND (product_id IS NULL OR product_id = $5)
+      RETURNING *
+    `, [taskId, creatorId, requireNonEmpty(input.runId, "task.runId"), requireNonEmpty(input.revisionId, "task.latestRevisionId"), requireNonEmpty(input.productId, "task.productId")]);
+    if (!result.rows[0]) throw new CreatorFactoryRepositoryError("version_conflict", `Distillation Task ${taskId} cannot advance its Revision`);
+    return taskFromRow(result.rows[0]);
   }
 
   async create(input: CreateFactoryRunInput): Promise<{ run: FactoryRunRecord; created: boolean }> {
@@ -832,6 +973,36 @@ type FactoryRunRow = QueryResultRow & {
   created_at: string | Date;
   updated_at: string | Date;
 };
+
+type TaskRow = QueryResultRow & {
+  id: string;
+  creator_id: string;
+  name: string;
+  brief: string;
+  status: "active" | "deleted";
+  product_id: string | null;
+  run_id: string | null;
+  latest_revision_id: string | null;
+  created_at: string | Date;
+  updated_at: string | Date;
+  deleted_at: string | Date | null;
+};
+
+function taskFromRow(row: TaskRow): DistillationTaskRecord {
+  return {
+    id: row.id,
+    creatorId: row.creator_id,
+    name: row.name,
+    brief: row.brief,
+    status: row.status,
+    ...(row.product_id ? { productId: row.product_id } : {}),
+    ...(row.run_id ? { runId: row.run_id } : {}),
+    ...(row.latest_revision_id ? { latestRevisionId: row.latest_revision_id } : {}),
+    createdAt: iso(row.created_at),
+    updatedAt: iso(row.updated_at),
+    ...(row.deleted_at ? { deletedAt: iso(row.deleted_at) } : {})
+  };
+}
 
 function runFromRow(row: FactoryRunRow): FactoryRunRecord {
   return {

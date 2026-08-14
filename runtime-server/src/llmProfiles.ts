@@ -1,8 +1,8 @@
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 
 export const RUNTIME_LLM_PROFILE_NAMES = ["kimi-k2.6", "kimi-k2.6-no-thinking", "deepseek-v4-flash"] as const;
-export const FACTORY_LLM_PROFILE_NAME = "kimi-k3" as const;
-export const LLM_PROFILE_NAMES = [...RUNTIME_LLM_PROFILE_NAMES, FACTORY_LLM_PROFILE_NAME] as const;
+export const FACTORY_LLM_PROFILE_NAME = "kimi-k2.6" as const;
+export const LLM_PROFILE_NAMES = RUNTIME_LLM_PROFILE_NAMES;
 export type LlmProfileName = (typeof LLM_PROFILE_NAMES)[number];
 export type RuntimeLlmProfileName = (typeof RUNTIME_LLM_PROFILE_NAMES)[number];
 
@@ -23,19 +23,6 @@ export type LlmProfile = {
 };
 
 const PROFILES: Record<LlmProfileName, LlmProfile> = {
-  "kimi-k3": {
-    name: "kimi-k3",
-    provider: "moonshotai-cn",
-    providerName: "Moonshot Kimi",
-    model: "kimi-k3",
-    baseUrl: "https://api.moonshot.cn/v1",
-    apiKeyEnv: "LLM_API_KEY",
-    contextWindow: 1_048_576,
-    maxTokens: 131_072,
-    reasoning: true,
-    thinkingLevel: "high",
-    normalizeEmptyToolCallContent: true
-  },
   "kimi-k2.6": {
     name: "kimi-k2.6",
     provider: "moonshotai-cn",
@@ -88,7 +75,7 @@ export function resolveLlmProfile(env: NodeJS.ProcessEnv = process.env): LlmProf
   return { ...profile };
 }
 
-/** Creator Factory is intentionally pinned to its own K3 profile. */
+/** Creator Factory is pinned to the same provider-neutral Kimi K2.6 profile. */
 export function resolveFactoryLlmProfile(): LlmProfile {
   return { ...PROFILES[FACTORY_LLM_PROFILE_NAME] };
 }

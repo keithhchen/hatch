@@ -1,0 +1,24 @@
+{
+  "Version": "1",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "oss:PutObject",
+        "oss:GetObject"
+      ],
+      "Resource": [
+        "acs:oss:*:*:hatch-creator-distillation-1771409462189426/*"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "oss:ListObjects"
+      ],
+      "Resource": [
+        "acs:oss:*:*:hatch-creator-distillation-1771409462189426"
+      ]
+    }
+  ]
+}
