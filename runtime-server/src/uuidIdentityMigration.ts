@@ -132,10 +132,13 @@ export async function migrateUuidAuthorityIds(executor: IdentityMigrationExecuto
       }
     }
 
+    // The old schema may have text columns, while a previous interrupted
+    // attempt can leave one side already UUID. Drop the FK unconditionally
+    // before either column is converted; PostgreSQL otherwise tries to
+    // maintain it during ALTER COLUMN TYPE and rejects the mixed types.
+    await dropAccountSessionForeignKeys(db, tables);
+
     if (tables.has("accounts") && mappings.size) {
-      if (tables.has("account_sessions")) {
-        await db.query("ALTER TABLE account_sessions DROP CONSTRAINT IF EXISTS account_sessions_account_id_fkey");
-      }
       for (const [key, uuid] of mappings) {
         const [kind, legacyId] = key.split("\u0000");
         if (kind !== "account") continue;
@@ -146,9 +149,6 @@ export async function migrateUuidAuthorityIds(executor: IdentityMigrationExecuto
         if (tables.has("hatch_conversations")) {
           await db.query("UPDATE hatch_conversations SET owner_account_id=$1 WHERE owner_account_id=$2", [uuid, legacyId]);
         }
-      }
-      if (tables.has("account_sessions")) {
-        await db.query("ALTER TABLE account_sessions ADD CONSTRAINT account_sessions_account_id_fkey FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE");
       }
     }
 
@@ -194,12 +194,49 @@ export async function migrateUuidAuthorityIds(executor: IdentityMigrationExecuto
 
     await rewriteJsonTables(db, tables, mappings);
     await convertUuidColumns(db, tables);
+    await ensureAccountSessionForeignKey(db, tables);
     if (client) await db.query("COMMIT");
   } catch (error) {
     if (client) await db.query("ROLLBACK").catch(() => undefined);
     throw error;
   } finally {
     client?.release?.();
+  }
+}
+
+async function dropAccountSessionForeignKeys(db: IdentityMigrationExecutor, tables: Set<string>): Promise<void> {
+  if (!tables.has("accounts") || !tables.has("account_sessions")) return;
+  const result = await db.query(`
+    SELECT c.conname
+    FROM pg_constraint c
+    JOIN pg_class child ON child.oid = c.conrelid
+    JOIN pg_class parent ON parent.oid = c.confrelid
+    JOIN pg_namespace n ON n.oid = child.relnamespace
+    WHERE c.contype='f'
+      AND n.nspname=current_schema()
+      AND child.relname='account_sessions'
+      AND parent.relname='accounts'`);
+  for (const row of result.rows ?? []) {
+    const name = String(row.conname).replaceAll('"', '""');
+    await db.query(`ALTER TABLE account_sessions DROP CONSTRAINT IF EXISTS "${name}"`);
+  }
+}
+
+async function ensureAccountSessionForeignKey(db: IdentityMigrationExecutor, tables: Set<string>): Promise<void> {
+  if (!tables.has("accounts") || !tables.has("account_sessions")) return;
+  const result = await db.query(`
+    SELECT 1
+    FROM pg_constraint c
+    JOIN pg_class child ON child.oid = c.conrelid
+    JOIN pg_class parent ON parent.oid = c.confrelid
+    JOIN pg_namespace n ON n.oid = child.relnamespace
+    WHERE c.contype='f'
+      AND n.nspname=current_schema()
+      AND child.relname='account_sessions'
+      AND parent.relname='accounts'
+      AND c.conname='account_sessions_account_id_fkey'`);
+  if (!result.rows?.length) {
+    await db.query("ALTER TABLE account_sessions ADD CONSTRAINT account_sessions_account_id_fkey FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE");
   }
 }
 
