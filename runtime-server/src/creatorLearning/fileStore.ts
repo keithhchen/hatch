@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, writeFile, appendFile } from "node:fs/promises";
 import path from "node:path";
-import type { ArtifactObjectStore } from "./objectStore.js";
+import { isObjectStoreNotFound, type ArtifactObjectStore } from "./objectStore.js";
 import { graphEventKey, newGraphEventId, type DistillationGraphStore, type DistillationEventType, type DistillationNodeKind } from "./distillationGraph.js";
 import type {
   ArtifactRef,
@@ -312,7 +312,18 @@ export class FactoryFileStore {
       return await readFile(local);
     } catch (error) {
       if (!this.objectStore || !isMissingPath(error)) throw error;
-      const bytes = await this.objectStore.get(this.objectKey(relativePath));
+      let bytes: Buffer;
+      try {
+        bytes = await this.objectStore.get(this.objectKey(relativePath));
+      } catch (error) {
+        // A brand-new run has no remote state yet. OSS reports that absence
+        // as NoSuchKey/404 rather than Node's ENOENT; normalize it so the
+        // worker can take the create path instead of retrying forever.
+        if (!isObjectStoreNotFound(error)) throw error;
+        const missing = new Error(`Factory artifact is missing: ${relativePath}`);
+        Object.assign(missing, { code: "ENOENT" });
+        throw missing;
+      }
       await mkdir(path.dirname(local), { recursive: true });
       await atomicWrite(local, bytes);
       return bytes;
