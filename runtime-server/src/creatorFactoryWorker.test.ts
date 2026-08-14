@@ -13,6 +13,7 @@ import {
   parseQuestions
 } from "./creatorLearning/markdown.js";
 import { InMemoryCreatorFactoryRepository } from "./creatorLearning/repository.js";
+import type { ArtifactObjectStore } from "./creatorLearning/objectStore.js";
 import { issueQuestionBatch } from "./creatorLearning/questionBatch.js";
 import type { CreatorFactoryRepository, FactoryRunRecord } from "./creatorLearning/repository.js";
 import type { FactoryPromptCall, FactoryStartInput } from "./creatorLearning/types.js";
@@ -79,6 +80,58 @@ test("durable worker claims a run, pauses for Creator answers, and resumes the s
   assert.equal(ready?.state?.stage, "ready");
   assert.equal(ready?.state?.artifacts.corpusCandidates.length, 2);
   assert.equal(await worker.workOnce(), undefined);
+});
+
+test("worker treats a missing OSS state object as a new run", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-factory-worker-oss-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const objects = new Map<string, Buffer>();
+  const objectStore: ArtifactObjectStore = {
+    async put(key, content) {
+      const bytes = Buffer.isBuffer(content) ? content : Buffer.from(content, "utf8");
+      objects.set(key, Buffer.from(bytes));
+      return { key, sha256: "sha256:test", bytes: bytes.byteLength };
+    },
+    async get(key) {
+      const bytes = objects.get(key);
+      if (bytes) return Buffer.from(bytes);
+      const error = Object.assign(new Error("The specified key does not exist."), { code: "NoSuchKey", status: 404 });
+      throw error;
+    },
+    async list(prefix) {
+      return [...objects.keys()].filter((key) => key.startsWith(prefix));
+    }
+  };
+  const creatorId = "11111111-1111-4111-8111-111111111111";
+  const repository = new InMemoryCreatorFactoryRepository();
+  await repository.create({
+    id: "worker-oss-run",
+    creatorId,
+    idempotencyKey: "create-worker-oss-run",
+    input: {
+      runId: "worker-oss-run",
+      creator: { id: creatorId, name: "Worker Creator" },
+      taskName: "Ready-to-publish reply",
+      taskBrief: "Return one decisive reply that can be published directly.",
+      sources: [{ id: "S1", authority: "creator_current", title: "Current method", content: "Choose one answer and make it usable." }],
+      config: { developmentQuestions: 2, heldoutQuestions: 1, maxCorpusRevisions: 2 }
+    }
+  });
+  const factory = new CreatorFactory(
+    root,
+    passingPromptRunner,
+    async (execution) => `Publishable: ${execution.question}`,
+    { model: { provider: "test", model: "worker-script" }, objectStore }
+  );
+  const worker = new CreatorFactoryWorker(repository, factory, {
+    workerId: "worker-oss",
+    leaseMs: 60_000,
+    heartbeatMs: 0
+  });
+
+  const waiting = await worker.workOnce();
+  assert.equal(waiting?.status, "waiting_for_creator");
+  assert.equal(waiting?.state?.stage, "awaiting_creator_answers");
 });
 
 test("worker never replays an old pending submission into a fresh replacement Question batch", async (t) => {

@@ -112,7 +112,7 @@ export class AliyunArtifactObjectStore implements ArtifactObjectStore {
           ...(options.contentType ? { contentType: options.contentType } : {})
         };
       } catch (error) {
-        if (!isNotFound(error)) throw error;
+        if (!isObjectStoreNotFound(error)) throw error;
       }
     }
     try {
@@ -293,7 +293,7 @@ function isFileAlreadyExists(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && (error as { code?: string }).code === "EEXIST");
 }
 
-function isNotFound(error: unknown): boolean {
+export function isObjectStoreNotFound(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && ["NoSuchKey", "NoSuchObject", "NotFound", "404"].includes(String((error as { code?: string; status?: number }).code ?? (error as { status?: number }).status)));
 }
 
