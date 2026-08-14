@@ -13,3 +13,11 @@ export function meaningfulReversalStatus(...values) {
   }
   return null;
 }
+
+export function humanizeIdentifier(value) {
+  const text = String(value || "")
+    .replace(/[._-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text ? `${text[0].toUpperCase()}${text.slice(1)}` : "Unknown";
+}

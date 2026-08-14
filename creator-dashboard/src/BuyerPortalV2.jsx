@@ -14,7 +14,7 @@ import {
 } from "@hatch/ui";
 import { CheckoutSummary } from "@hatch/ui/product";
 import { StorefrontDetails } from "./StorefrontDetails.jsx";
-import { meaningfulReversalStatus } from "./buyerPresentation.js";
+import { humanizeIdentifier, meaningfulReversalStatus } from "./buyerPresentation.js";
 import { creatorPublicModel } from "./storefrontModel.js";
 import "./buyerPortalV2.css";
 
@@ -1355,8 +1355,7 @@ function safeDecode(value) {
 }
 
 function sentenceCase(value) {
-  const text = String(value || "").replaceAll("_", " ");
-  return text ? `${text[0].toUpperCase()}${text.slice(1)}` : "Unknown";
+  return humanizeIdentifier(value);
 }
 
 function cssToken(value) { return String(value || "unknown").toLowerCase().replace(/[^a-z0-9-]/g, "-"); }
