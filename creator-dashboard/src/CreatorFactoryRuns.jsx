@@ -4,6 +4,7 @@ import {
   FormField,
   InlineAlert,
   Input,
+  NavigationItem,
   PageHeader,
   Select,
   Spinner,
@@ -143,13 +144,13 @@ export function CreatorFactoryRuns({ token, initialRunId, onNavigateRun, onRevie
           <div className="factory-panel-title"><h2>Runs</h2><Button type="button" variant="link" size="small" onClick={refreshList}>Refresh</Button></div>
           <div className="factory-run-list">
             {runs.map((run) => (
-              <button key={run.id} className={selected?.id === run.id ? "selected" : ""} aria-current={selected?.id === run.id ? "page" : undefined} onClick={() => {
+              <NavigationItem key={run.id} active={selected?.id === run.id} className={selected?.id === run.id ? "selected" : ""} onClick={() => {
                 if (typeof onNavigateRun === "function") onNavigateRun(run.id);
                 else openRun(run.id).catch((nextError) => setError(nextError.message));
               }}>
                 <strong>{run.task_name}</strong>
                 <span>{factoryStageLabel(run)}</span>
-              </button>
+              </NavigationItem>
             ))}
             {!runs.length ? <p>No Factory runs yet.</p> : null}
           </div>
