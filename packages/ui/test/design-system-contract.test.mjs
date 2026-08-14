@@ -23,6 +23,7 @@ test("@hatch/ui owns the shared Button, Dialog, Select and CSS entrypoint", () =
   const packageJson = json("packages/ui/package.json");
   const index = read("packages/ui/src/index.js");
   const button = read("packages/ui/src/Button.jsx");
+  const navigation = read("packages/ui/src/Navigation.jsx");
   const overlays = read("packages/ui/src/Overlays.jsx");
 
   assert.equal(packageJson.name, "@hatch/ui");
@@ -32,6 +33,8 @@ test("@hatch/ui owns the shared Button, Dialog, Select and CSS entrypoint", () =
   assert.match(index, /export \* from "\.\/Button\.jsx"/);
   assert.match(index, /export \* from "\.\/Overlays\.jsx"/);
   assert.match(button, /export function Button/);
+  assert.match(navigation, /export function NavigationItem/);
+  assert.match(navigation, /trailing/);
   assert.match(overlays, /export const Dialog = DialogPrimitive\.Root/);
   assert.match(overlays, /export function Select/);
 
