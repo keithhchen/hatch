@@ -14,6 +14,7 @@ import {
 } from "@hatch/ui";
 import { CheckoutSummary } from "@hatch/ui/product";
 import { StorefrontDetails } from "./StorefrontDetails.jsx";
+import { meaningfulReversalStatus } from "./buyerPresentation.js";
 import { creatorPublicModel } from "./storefrontModel.js";
 import "./buyerPortalV2.css";
 
@@ -710,10 +711,12 @@ function EntitlementPage({ id, request, navigate, session, downloadUrl }) {
   const deliveries = arrayValue(entitlement.deliveries || entitlement.delivery_history, []);
   const orderId = entitlement.order_id || entitlement.order?.order_id || entitlement.order?.id;
   const canOpen = ["active", "reserved"].includes(status);
+  const creator = entitlement.creator || product;
+  const reversalStatus = meaningfulReversalStatus(entitlement.refund_status, entitlement.cancellation_status);
   return (
     <div className="buyer-v2__container buyer-v2__page">
       <RouterLink className="buyer-v2__back-link" to={LIBRARY_ROOT} navigate={navigate}>← Back to Library</RouterLink>
-      <header className="buyer-v2__detail-heading"><div><span className="buyer-v2__eyebrow">Access details</span><h1>{productName(product)}</h1><p>by {creatorName(entitlement.creator || product)}</p></div><StatusChip status={status} label={entitlementStatusLabel(status)} /></header>
+      <header className="buyer-v2__detail-heading"><div><span className="buyer-v2__eyebrow">Access details</span><h1>{productName(product)}</h1><CreatorIdentity value={creator} /></div><StatusChip status={status} label={entitlementStatusLabel(status)} /></header>
       <div className="buyer-v2__detail-grid">
         <section className="buyer-v2__detail-card"><h2>Your entitlement</h2><DefinitionList rows={[
           ["Status", entitlementStatusLabel(status)],
@@ -724,7 +727,7 @@ function EntitlementPage({ id, request, navigate, session, downloadUrl }) {
           ["Version policy", versionPolicyLabel(entitlement.version_policy)],
           ["Valid from", dateTime(entitlement.valid_from || entitlement.granted_at || entitlement.created_at)],
           ["Expires", entitlement.expires_at ? dateTime(entitlement.expires_at) : "No scheduled expiry"],
-          ["Refund / cancellation", entitlement.refund_status || entitlement.cancellation_status || (status === "revoked" ? "Access revoked" : "None")],
+          ["Refund / cancellation", reversalStatus ? sentenceCase(reversalStatus) : (status === "revoked" ? "Access revoked" : null)],
           ["Support reference", entitlement.entitlement_id || entitlement.id]
         ]} />{orderId ? <RouterLink className="buyer-v2__text-link" to={`${ORDERS_ROOT}/${encodeURIComponent(orderId)}`} navigate={navigate}>View originating order →</RouterLink> : null}</section>
         <aside className="buyer-v2__activation-card"><span className="buyer-v2__eyebrow">Desktop activation</span><h2>{canOpen ? "Continue in your Workspace." : entitlementRecoveryTitle(status)}</h2><p>{entitlementRecoveryCopy(status)}</p>{canOpen ? <Button asChild><a href={desktopUrl(entitlement, product)} onClick={() => trackPortalEvent(request, "desktop_open_clicked", productTelemetry(product))}>Open Hatch Desktop</a></Button> : null}<a className="buyer-v2__secondary-download" href={downloadUrl} target="_blank" rel="noreferrer" onClick={() => trackPortalEvent(request, "desktop_download_clicked", productTelemetry(product))}>Download Hatch Desktop</a></aside>
@@ -852,6 +855,11 @@ function Field({ label, children }) {
 
 function DefinitionList({ rows }) {
   return <dl className="buyer-v2__definition-list">{rows.filter(([, value]) => value !== undefined && value !== null && value !== "").map(([term, value]) => <div key={term}><dt>{term}</dt><dd>{value}</dd></div>)}</dl>;
+}
+
+function CreatorIdentity({ value }) {
+  const name = creatorName(value);
+  return <span className="buyer-v2__creator-identity"><Avatar className="buyer-v2__creator-avatar" size="medium" src={creatorAvatarUrl(value)} name={name} /><span>{name}</span></span>;
 }
 
 function PriceRow({ label, value, total = false }) {
@@ -1145,6 +1153,7 @@ function productId(value) { return value?.product_id || value?.product?.id || va
 function productName(value) { return value?.product_name || value?.name || value?.product?.name || "Creator Agent"; }
 function productPromise(value) { return value?.promise || value?.product_description || value?.description || value?.product?.promise || value?.product?.description || "A practical Creator method for work in your own Workspace."; }
 function creatorName(value) { return value?.creator_name || value?.creator_display_name || value?.display_name || value?.name || value?.creator?.display_name || value?.creator?.name || value?.creator?.handle || "Hatch Creator"; }
+function creatorAvatarUrl(value) { return value?.creator_avatar_url || value?.avatar_url || value?.image_url || value?.creator?.avatar_url || value?.creator?.image_url; }
 function creatorId(value) { return value?.creator_id || value?.creator?.id || ""; }
 function entitlementIdFor(value) { return value?.entitlement_id || value?.id || ""; }
 function orderIdFor(value) { return value?.order_id || value?.id; }
@@ -1253,7 +1262,8 @@ function orderTimeline(order) {
   else if (paymentStatus) entries.push({ label: `Payment ${sentenceCase(paymentStatus)}`, time: order.payment?.updated_at, tone: paymentFailed(order) ? "error" : "" });
   if (order.entitlement_id || order.entitlement) entries.push({ label: "Access granted", time: order.entitlement?.granted_at || order.fulfilled_at });
   for (const delivery of arrayValue(order.deliveries, [])) entries.push(deliveryTimelineEntry(delivery));
-  if (order.refund || order.refund_status) entries.push({ label: `Refund ${sentenceCase(order.refund?.status || order.refund_status)}`, time: order.refund?.updated_at || order.refunded_at });
+  const refundStatus = meaningfulReversalStatus(order.refund?.status, order.refund_status, orderStatus(order) === "refunded" ? "refunded" : null);
+  if (refundStatus) entries.push({ label: `Refund ${sentenceCase(refundStatus)}`, time: order.refund?.updated_at || order.refunded_at });
   return entries;
 }
 
