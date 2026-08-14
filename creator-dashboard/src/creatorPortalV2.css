@@ -30,7 +30,7 @@
 .cpv2-sidebar { position: sticky; z-index: 5; top: 0; display: flex; height: 100vh; min-width: 0; flex-direction: column; padding: 27px 19px 19px; border-right: 1px solid var(--hatch-border-subtle, rgba(54,41,31,.1)); background: color-mix(in srgb, var(--hatch-panel, #fbf7f0) 85%, transparent); backdrop-filter: blur(20px); }
 .cpv2-brand { display: flex; min-height: 44px; align-items: center; gap: 7px; padding: 0 7px; border: 0; background: transparent; color: inherit; }
 .cpv2-brand .hatch-brand__mark { width: 22px; height: 22px; }
-.cpv2-brand .hatch-brand__wordmark { font-size: 22px; letter-spacing: -.035em; }
+.cpv2-brand .hatch-brand__wordmark { font-size: 22px; letter-spacing: var(--hatch-display-tracking, -.045em); }
 .cpv2-sidebar > nav:not(.cpv2-global-nav) { display: grid; gap: 4px; margin-top: 28px; }
 .cpv2-sidebar > nav:not(.cpv2-global-nav) button { min-height: 44px; padding: 10px 13px; border: 0; border-radius: 10px; background: transparent; color: var(--hatch-text-secondary, #74675e); text-align: left; }
 .cpv2-sidebar > nav:not(.cpv2-global-nav) button:hover, .cpv2-sidebar > nav:not(.cpv2-global-nav) button.is-active { background: transparent; color: var(--hatch-ink, #201813); box-shadow: none; }

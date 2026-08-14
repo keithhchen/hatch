@@ -53,6 +53,7 @@ test("Web and Storybook consume the shared package and its canonical tokens", ()
   const buyerPortal = read("creator-dashboard/src/BuyerPortalV2.jsx");
   const creatorCss = read("creator-dashboard/src/creatorPortalV2.css");
   const storefrontCss = read("creator-dashboard/src/storefrontDetails.css");
+  const desktopCss = read("desktop-app/src/renderer/styles.css");
   const storybookPreview = read("creator-dashboard/.storybook/preview.jsx");
   const sharedCss = read("packages/ui/src/hatch-ui.css");
 
@@ -79,6 +80,11 @@ test("Web and Storybook consume the shared package and its canonical tokens", ()
   assert.doesNotMatch(creatorCss, /\.cpv2-factory-draft\s+(?:input|select|textarea)/);
   assert.match(creatorCss, /\.cpv2-panel\s*\{[^}]*border:\s*0;[^}]*border-radius:\s*0;[^}]*background:\s*transparent;/s);
   assert.match(storefrontCss, /\.storefront-shared__hero\s*\{[^}]*padding:\s*clamp\([^;]+\)\s+4px\s+clamp\(/s);
+  assert.match(storefrontCss, /\.storefront-shared__access\s*\{[^}]*background:\s*color-mix\([^;]+var\(--hatch-ui-surface-raised/s);
+  assert.doesNotMatch(storefrontCss, /\.storefront-shared__access\s*\{[^}]*background:\s*linear-gradient/s);
+  assert.match(desktopCss, /\.desktop-window-shell\s*\{[^}]*--surface-window:\s*var\(--hatch-atmosphere-base\)/s);
+  assert.match(desktopCss, /\.desktop-window-shell::before\s*\{[^}]*background:\s*var\(--hatch-atmosphere-warm-field\)/s);
+  assert.match(desktopCss, /\.desktop-sidebar-heading \.hatch-wordmark\s*\{[^}]*letter-spacing:\s*var\(--hatch-display-tracking\)/s);
   assert.match(buyerPortal, /className="buyer-v2__settings-surface"/);
   assert.doesNotMatch(buyerPortal, /<div><dt>Role<\/dt>/);
 });

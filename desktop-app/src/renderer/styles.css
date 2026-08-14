@@ -2054,7 +2054,7 @@ button.composer-control:focus-visible {
   font-family: var(--hatch-font-display);
   font-size: 14px;
   font-weight: 400;
-  letter-spacing: -0.02em;
+  letter-spacing: var(--hatch-display-tracking);
 }
 
 .sidebar-new-task {
@@ -2714,13 +2714,12 @@ button.composer-control:focus-visible {
  * translucent enough to inherit the local colour temperature.
  */
 .desktop-window-shell {
-  --surface-window: #f5f0e8;
-  --surface-sidebar: rgba(249, 245, 238, .68);
-  --surface-inspector: rgba(250, 247, 241, .76);
-  --surface-toolbar: rgba(250, 247, 241, .72);
-  --border-separator: rgba(66, 53, 41, .105);
-  background:
-    linear-gradient(145deg, rgba(255, 252, 246, .86), rgba(243, 238, 229, .9));
+  --surface-window: var(--hatch-atmosphere-base);
+  --surface-sidebar: color-mix(in srgb, var(--hatch-ui-surface-raised) 68%, transparent);
+  --surface-inspector: color-mix(in srgb, var(--hatch-ui-surface-raised) 76%, transparent);
+  --surface-toolbar: color-mix(in srgb, var(--hatch-ui-surface-raised) 72%, transparent);
+  --border-separator: var(--hatch-ui-border-soft);
+  background: var(--hatch-atmosphere-base);
   isolation: isolate;
   grid-template-rows: 56px minmax(0, 1fr);
 }
@@ -2735,25 +2734,23 @@ button.composer-control:focus-visible {
 }
 
 .desktop-window-shell::before {
-  animation: desktop-atmosphere-warm 18s ease-in-out infinite alternate;
-  background:
-    radial-gradient(circle at 52% 48%, rgba(231, 133, 96, .38), rgba(237, 166, 126, .18) 38%, transparent 72%);
-  filter: blur(42px);
+  animation: desktop-atmosphere-warm var(--hatch-atmosphere-warm-duration) ease-in-out infinite alternate;
+  background: var(--hatch-atmosphere-warm-field);
+  filter: blur(var(--hatch-atmosphere-warm-blur));
   height: 72%;
   left: -13%;
-  opacity: .76;
+  opacity: calc(var(--hatch-atmosphere-strength) * .76);
   top: -20%;
   width: 62%;
 }
 
 .desktop-window-shell::after {
-  animation: desktop-atmosphere-cool 22s ease-in-out infinite alternate;
-  background:
-    radial-gradient(circle at 48% 50%, rgba(115, 158, 151, .28), rgba(177, 183, 148, .16) 42%, transparent 72%);
+  animation: desktop-atmosphere-cool var(--hatch-atmosphere-cool-duration) ease-in-out infinite alternate;
+  background: var(--hatch-atmosphere-cool-field);
   bottom: -28%;
-  filter: blur(52px);
+  filter: blur(var(--hatch-atmosphere-cool-blur));
   height: 76%;
-  opacity: .72;
+  opacity: calc(var(--hatch-atmosphere-strength) * .68);
   right: -16%;
   width: 66%;
 }
