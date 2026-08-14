@@ -42,14 +42,9 @@
 .cpv2-page-header > button { flex: 0 0 auto; }
 .cpv2-breadcrumb { min-height: 44px; margin: -10px 0 16px; padding: 0; border: 0; background: transparent; color: var(--hatch-accent, #d65f3b); font-size: 12px; }
 
-.cpv2-primary, .cpv2-secondary, .cpv2-danger, .cpv2-published a { display: inline-flex; min-height: 40px; align-items: center; justify-content: center; gap: 12px; padding: 0 17px; border: 0; border-radius: 999px; text-decoration: none; transition: color 150ms cubic-bezier(.4,0,.2,1), background 150ms cubic-bezier(.4,0,.2,1), box-shadow 150ms cubic-bezier(.4,0,.2,1); }
-.cpv2-primary { background: #a64227; color: #fff; }
-.cpv2-primary:not(:disabled):hover { background: #8f351f; }
-.cpv2-secondary { background: var(--hatch-panel-muted, #ece4d8); color: var(--hatch-ink, #201813); }
-.cpv2-secondary:hover { background: #e2d8ca; }
-.cpv2-danger { background: #a7422d; color: #fff; }
 .cpv2 button:disabled { cursor: not-allowed; opacity: .55; }
-.cpv2-inverse { background: rgba(255,255,255,.12); color: #fff; }
+.cpv2-inverse { background: rgba(255,255,255,.12); color: #fff; box-shadow: inset 0 0 0 1px rgba(255,255,255,.18); }
+.cpv2-inverse:not(:disabled):hover { background: rgba(255,255,255,.18); color: #fff; }
 
 .cpv2-card { border: 1px solid var(--hatch-border-subtle, rgba(54,41,31,.1)); border-radius: 20px; background: color-mix(in srgb, var(--hatch-panel, #fbf7f0) 86%, transparent); box-shadow: 0 18px 50px rgba(54,41,31,.035); }
 .cpv2-grid { display: grid; gap: 17px; }
@@ -57,7 +52,7 @@
 .cpv2-next-card { display: flex; min-height: 380px; flex-direction: column; align-items: flex-start; padding: clamp(28px, 4vw, 42px); }
 .cpv2-next-card h2 { max-width: 620px; margin: 0 0 12px; font-size: clamp(36px, 4.2vw, 54px); line-height: 1; }
 .cpv2-next-card p { max-width: 610px; color: var(--hatch-text-secondary, #74675e); line-height: 1.65; }
-.cpv2-next-card .cpv2-primary { margin-top: auto; }
+.cpv2-next-card > .hui-button { margin-top: auto; }
 .cpv2-balance-card { display: flex; min-height: 380px; flex-direction: column; padding: 31px; background: var(--hatch-inverse, #202522); color: var(--hatch-inverse-text, #f4f1e9); }
 .cpv2-balance-card .cpv2-kicker { color: rgba(255,255,255,.58); }
 .cpv2-balance-card > strong { margin: 0 0 8px; font-family: var(--hatch-font-display, Georgia, serif); font-size: clamp(48px, 5vw, 72px); font-weight: 400; letter-spacing: -.05em; }
@@ -262,7 +257,7 @@
 .cpv2-empty > span { color: #b9ab9a; font-size: 44px; }
 .cpv2-empty h2 { margin: 14px 0 7px; font-size: 30px; }
 .cpv2-empty p, .cpv2-empty-inline, .cpv2-muted { color: var(--hatch-text-secondary, #74675e); font-size: 11px; line-height: 1.6; }
-.cpv2-empty .cpv2-primary { margin-top: 10px; }
+.cpv2-empty .hui-button { margin-top: 10px; }
 .cpv2-problem { display: grid; min-height: 70vh; place-content: center; justify-items: start; max-width: 650px; }
 .cpv2-problem h1 { margin: 12px 0; font-size: clamp(46px, 7vw, 76px); }
 .cpv2-problem p { color: var(--hatch-text-secondary, #74675e); line-height: 1.65; }

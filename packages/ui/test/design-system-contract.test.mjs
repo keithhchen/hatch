@@ -36,6 +36,8 @@ test("@hatch/ui owns the shared Button, Dialog, Select and CSS entrypoint", () =
 test("Web and Storybook consume the shared package and its canonical tokens", () => {
   const webPackage = json("creator-dashboard/package.json");
   const webEntry = read("creator-dashboard/src/main.jsx");
+  const creatorPortal = read("creator-dashboard/src/CreatorPortalV2.jsx");
+  const creatorCss = read("creator-dashboard/src/creatorPortalV2.css");
   const storybookPreview = read("creator-dashboard/.storybook/preview.jsx");
   const sharedCss = read("packages/ui/src/hatch-ui.css");
 
@@ -50,6 +52,9 @@ test("Web and Storybook consume the shared package and its canonical tokens", ()
     assert.doesNotMatch(consumer, /packages\/brand\/tokens\.css/);
     assert.doesNotMatch(consumer, /components\/ui\//);
   }
+
+  assert.doesNotMatch(creatorPortal, /className="cpv2-(?:primary|secondary|danger)"/);
+  assert.doesNotMatch(creatorCss, /\.cpv2-(?:primary|secondary|danger)(?:\b|,)/);
 });
 
 test("Theme Lab edits the same token knobs used by the shared CSS", () => {
