@@ -17,9 +17,11 @@ describe("desktop system appearance contract", () => {
     expect(stylesheet).not.toMatch(/(?:^|\n)input\s*\{/);
   });
 
-  it("keeps Atmospheric Paper at the window level without dark navigation blocks", () => {
-    expect(stylesheet).toMatch(/\.desktop-window-shell::before,[\s\S]*?\.desktop-window-shell::after/);
-    expect(stylesheet).toMatch(/@keyframes desktop-atmosphere-warm/);
+  it("keeps Atmospheric Paper at the shared root without dark navigation blocks", () => {
+    expect(stylesheet).toMatch(/\.desktop-ui-root\s*\{[\s\S]*?height:\s*100%;/);
+    expect(stylesheet).toMatch(/\.desktop-window-shell\s*\{[\s\S]*?background:\s*transparent;/);
+    expect(stylesheet).not.toMatch(/\.desktop-window-shell::before/);
+    expect(stylesheet).not.toMatch(/@keyframes desktop-atmosphere-warm/);
     expect(stylesheet).toMatch(/\.desktop-source-row\.selected\s*\{[\s\S]*?radial-gradient/);
     expect(stylesheet).not.toMatch(/\.desktop-source-row\.selected\s*\{[^}]*background:\s*var\(--hatch-inverse\)/);
   });

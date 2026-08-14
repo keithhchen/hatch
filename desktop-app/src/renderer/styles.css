@@ -98,6 +98,12 @@ h2 {
   line-height: var(--hatch-display-leading);
 }
 
+/* The shared AtmosphericPaper owns the only desktop environment field. */
+.desktop-ui-root {
+  height: 100%;
+  min-height: 100%;
+}
+
 .app-shell {
   display: grid;
   grid-template-columns: 292px minmax(0, 1fr);
@@ -471,7 +477,7 @@ h2 {
 }
 
 .welcome-screen {
-  background: radial-gradient(circle at 20% 15%, rgba(214, 95, 59, 0.11), transparent 35%), var(--hatch-canvas);
+  background: transparent;
   height: 100%;
   min-height: 0;
   overflow: hidden;
@@ -650,9 +656,7 @@ h2 {
 
 .workspace-onboarding {
   align-items: center;
-  background:
-    radial-gradient(circle at 50% 18%, color-mix(in srgb, var(--hatch-accent) 8%, transparent), transparent 38%),
-    var(--hatch-canvas);
+  background: transparent;
   display: flex;
   justify-content: center;
   min-height: 0;
@@ -2629,7 +2633,7 @@ button.composer-control:focus-visible {
   min-block-size: 100vh;
   padding: 72px 64px 64px;
   color: var(--hatch-ink);
-  background: var(--surface-window);
+  background: transparent;
 }
 
 .desktop-auxiliary-header {
@@ -2711,8 +2715,8 @@ button.composer-control:focus-visible {
 /* Desktop art direction -------------------------------------------------- */
 /*
  * Atmospheric Paper is an environment, not a rectangular hero treatment.
- * The window owns the light fields; product surfaces remain quiet and
- * translucent enough to inherit the local colour temperature.
+ * The shared provider owns the light fields; product surfaces remain quiet
+ * and translucent enough to inherit the local colour temperature.
  */
 .desktop-window-shell {
   --surface-window: var(--hatch-ui-surface-window);
@@ -2720,50 +2724,9 @@ button.composer-control:focus-visible {
   --surface-inspector: var(--hatch-ui-surface-inspector);
   --surface-toolbar: var(--hatch-ui-surface-toolbar);
   --border-separator: var(--hatch-ui-separator);
-  background: var(--hatch-ui-surface-window);
+  background: transparent;
   isolation: isolate;
   grid-template-rows: 56px minmax(0, 1fr);
-}
-
-.desktop-window-shell::before,
-.desktop-window-shell::after {
-  border-radius: 50%;
-  content: "";
-  pointer-events: none;
-  position: absolute;
-  z-index: -2;
-}
-
-.desktop-window-shell::before {
-  animation: desktop-atmosphere-warm var(--hatch-atmosphere-warm-duration) ease-in-out infinite alternate;
-  background: var(--hatch-atmosphere-warm-field);
-  filter: blur(var(--hatch-atmosphere-warm-blur));
-  height: 72%;
-  left: -13%;
-  opacity: calc(var(--hatch-atmosphere-strength) * .76);
-  top: -20%;
-  width: 62%;
-}
-
-.desktop-window-shell::after {
-  animation: desktop-atmosphere-cool var(--hatch-atmosphere-cool-duration) ease-in-out infinite alternate;
-  background: var(--hatch-atmosphere-cool-field);
-  bottom: -28%;
-  filter: blur(var(--hatch-atmosphere-cool-blur));
-  height: 76%;
-  opacity: calc(var(--hatch-atmosphere-strength) * .68);
-  right: -16%;
-  width: 66%;
-}
-
-@keyframes desktop-atmosphere-warm {
-  from { transform: translate3d(-2%, -1%, 0) scale(1); }
-  to { transform: translate3d(8%, 7%, 0) scale(1.12); }
-}
-
-@keyframes desktop-atmosphere-cool {
-  from { transform: translate3d(3%, 1%, 0) scale(1.04); }
-  to { transform: translate3d(-8%, -6%, 0) scale(.94); }
 }
 
 .desktop-toolbar,
@@ -3095,11 +3058,6 @@ button.composer-control:focus-visible {
 }
 
 .profile-menu-item { border-radius: 9px; }
-
-@media (prefers-reduced-motion: reduce) {
-  .desktop-window-shell::before,
-  .desktop-window-shell::after { animation: none; }
-}
 
 .desktop-auxiliary-facts dt,
 .desktop-auxiliary-row span {

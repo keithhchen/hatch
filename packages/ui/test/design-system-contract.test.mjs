@@ -54,6 +54,7 @@ test("Web and Storybook consume the shared package and its canonical tokens", ()
   const creatorCss = read("creator-dashboard/src/creatorPortalV2.css");
   const storefrontCss = read("creator-dashboard/src/storefrontDetails.css");
   const desktopCss = read("desktop-app/src/renderer/styles.css");
+  const desktopStory = read("creator-dashboard/src/components/DesktopSystem.stories.jsx");
   const storybookPreview = read("creator-dashboard/.storybook/preview.jsx");
   const sharedCss = read("packages/ui/src/hatch-ui.css");
 
@@ -83,8 +84,11 @@ test("Web and Storybook consume the shared package and its canonical tokens", ()
   assert.match(storefrontCss, /\.storefront-shared__access\s*\{[^}]*background:\s*color-mix\([^;]+var\(--hatch-ui-surface-raised/s);
   assert.doesNotMatch(storefrontCss, /\.storefront-shared__access\s*\{[^}]*background:\s*linear-gradient/s);
   assert.match(desktopCss, /\.desktop-window-shell\s*\{[^}]*--surface-window:\s*var\(--hatch-ui-surface-window\)/s);
-  assert.match(desktopCss, /\.desktop-window-shell::before\s*\{[^}]*background:\s*var\(--hatch-atmosphere-warm-field\)/s);
+  assert.match(desktopCss, /\.desktop-ui-root\s*\{[^}]*height:\s*100%;/s);
+  assert.doesNotMatch(desktopCss, /\.desktop-window-shell::before/);
   assert.match(desktopCss, /\.desktop-sidebar-heading \.hatch-wordmark\s*\{[^}]*letter-spacing:\s*var\(--hatch-display-tracking\)/s);
+  assert.match(desktopStory, /title:\s*["']Hatch\/Desktop visual system["']/);
+  assert.match(desktopStory, /atmosphereStrength/);
   assert.doesNotMatch(desktopCss, /\.welcome-brand \.hatch-brand__wordmark\s*\{[^}]*letter-spacing:\s*-\.035em/s);
   assert.doesNotMatch(desktopCss, /\.desktop-sidebar-heading \.hatch-wordmark\s*\{[^}]*letter-spacing:\s*-\.035em/s);
   assert.match(buyerPortal, /className="buyer-v2__settings-surface"/);

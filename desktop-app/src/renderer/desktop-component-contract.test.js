@@ -12,6 +12,7 @@ describe("desktop component presentation contract", () => {
     expect(source).toContain('import "@hatch/ui/fonts"');
     expect(source).toContain('import "@hatch/ui/theme.css"');
     expect(source).toContain("HatchUIProvider");
+    expect(source).toMatch(/<HatchUIProvider\s+atmosphere\s+className="desktop-ui-root"/);
     expect(source).not.toMatch(/@fontsource|packages\/brand/);
   });
 

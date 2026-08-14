@@ -4983,4 +4983,8 @@ async function invokeTauri(command, args) {
   });
 }
 
-createRoot(document.getElementById("root")).render(<HatchUIProvider><App /></HatchUIProvider>);
+createRoot(document.getElementById("root")).render(
+  <HatchUIProvider atmosphere className="desktop-ui-root">
+    <App />
+  </HatchUIProvider>
+);
