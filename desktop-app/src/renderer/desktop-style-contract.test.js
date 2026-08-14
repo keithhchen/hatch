@@ -11,10 +11,17 @@ describe("desktop system appearance contract", () => {
   });
 
   it("does not let legacy desktop resets override shared Hatch controls", () => {
-    expect(stylesheet).toMatch(/button:not\(\.hui-button\)\s*\{/);
-    expect(stylesheet).toMatch(/input:not\(\.hui-input\)\s*\{/);
+    expect(stylesheet).toMatch(/:where\(button:not\(\.hui-button\)\)\s*\{/);
+    expect(stylesheet).toMatch(/:where\(input:not\(\.hui-input\)\)\s*\{/);
     expect(stylesheet).not.toMatch(/(?:^|\n)button\s*\{/);
     expect(stylesheet).not.toMatch(/(?:^|\n)input\s*\{/);
+  });
+
+  it("keeps Atmospheric Paper at the window level without dark navigation blocks", () => {
+    expect(stylesheet).toMatch(/\.desktop-window-shell::before,[\s\S]*?\.desktop-window-shell::after/);
+    expect(stylesheet).toMatch(/@keyframes desktop-atmosphere-warm/);
+    expect(stylesheet).toMatch(/\.desktop-source-row\.selected\s*\{[\s\S]*?radial-gradient/);
+    expect(stylesheet).not.toMatch(/\.desktop-source-row\.selected\s*\{[^}]*background:\s*var\(--hatch-inverse\)/);
   });
 
   it("keeps desktop layout state in the shell and localizes structured overflow", () => {

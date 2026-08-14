@@ -3559,7 +3559,6 @@ function DesktopSidebar({
                 <span className="creator-avatar">{agent.creatorInitials}</span>
                 <span className="desktop-source-row-copy">
                   <strong title={agent.name}>{agent.name}</strong>
-                  <small>{t("common.byCreator", { creator: agent.creator })}</small>
                 </span>
                 {selected
                   ? <ChevronDown className="desktop-agent-disclosure" aria-hidden="true" />
