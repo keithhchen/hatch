@@ -245,10 +245,12 @@ function CreatorPublicPage({ creatorId, request, navigate, session }) {
   return (
     <div className="buyer-v2__container buyer-v2__page">
       <RouterLink className="buyer-v2__back-link" to={EXPLORE_ROOT} navigate={navigate}>← Explore</RouterLink>
-      <header className="buyer-v2__page-heading">
-        <span className="buyer-v2__eyebrow">Creator</span>
-        <h1>{creator?.name ?? creator?.display_name ?? creatorId}</h1>
-        <p>{creator?.bio ?? creator?.description ?? "Published methods for work in your own Workspace."}</p>
+      <header className="buyer-v2__page-heading buyer-v2__creator-heading">
+        <Avatar className="buyer-v2__creator-profile-avatar" size="large" src={creatorAvatarUrl(creator)} name={creator?.name ?? creator?.display_name ?? creatorId} />
+        <div>
+          <h1>{creator?.name ?? creator?.display_name ?? creatorId}</h1>
+          <p>{creator?.bio ?? creator?.description ?? "Published methods for work in your own Workspace."}</p>
+        </div>
       </header>
       {products.length ? <section className="buyer-v2__catalog-grid" aria-label={`${creator?.name ?? creatorId} products`}>{products.map((product) => <CatalogCard key={productKey(product)} product={product} navigate={navigate} authenticated={session.status === "authenticated"} />)}</section> : <EmptyState title="No public products yet" body="This Creator has not published a product that can be browsed." action={<LinkButton to={EXPLORE_ROOT} navigate={navigate}>Explore all products</LinkButton>} />}
     </div>

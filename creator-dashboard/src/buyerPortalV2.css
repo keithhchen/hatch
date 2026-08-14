@@ -150,6 +150,9 @@
   letter-spacing: -0.035em;
 }
 .buyer-v2__page-heading p { max-width: 650px; margin-bottom: 0; color: var(--buyer-muted); font-size: 16px; line-height: 1.65; }
+.buyer-v2__creator-heading { display: grid; max-width: none; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 18px; }
+.buyer-v2__creator-profile-avatar { width: 56px; height: 56px; margin-top: 5px; border: 2px solid rgba(255,255,255,.96); border-radius: 50%; box-shadow: 0 5px 20px rgba(69,49,35,.16); font-family: var(--hatch-font-pill, Inter, sans-serif); font-size: 16px; font-weight: 750; }
+.buyer-v2__creator-heading h1 { margin-bottom: 8px; }
 .buyer-v2__catalog-heading { padding-top: clamp(10px, 3vw, 32px); }
 .buyer-v2__eyebrow {
   display: none;
