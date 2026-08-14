@@ -379,8 +379,12 @@ async function convertUuidColumns(db: IdentityMigrationExecutor, tables: Set<str
     await db.query(`ALTER TABLE ${table} ALTER COLUMN ${column} TYPE uuid USING ${column}::uuid`);
     if (nullable) return;
   };
-  await alter("accounts", "id");
+  // Convert referencing columns before their UUID primary keys. Existing
+  // production databases may still have text account ids; PostgreSQL will not
+  // let us recreate the account_sessions foreign key while the two columns
+  // have different types.
   await alter("account_sessions", "account_id");
+  await alter("accounts", "id");
   await alter("agent_access", "entitlement_id");
   await alter("agent_access", "user_id");
   await alter("agent_access", "order_id", true);
