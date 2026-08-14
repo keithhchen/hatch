@@ -203,7 +203,12 @@ function validateBundleInput(input: AgentCorpusBundleInput): BundlePlan {
   const skills = validateArray(input.skills, "skills").map((rawSkill, skillIndex): ValidatedSkill => {
     const label = `skills[${skillIndex}]`;
     const record = strictRecord(rawSkill, label, ["id", "name", "whenToUse", "instruction", "allowedToolIds", "references"]);
-    const id = canonicalIdentifier(record.id, `${label}.id`);
+    // Factory-facing asset identifiers permit underscores for compatibility
+    // with model-authored Corpus drafts, while Hatch Runtime skill manifests
+    // require the stricter lowercase-and-hyphen name grammar. Normalize only
+    // this host-owned runtime identity before it becomes a path/frontmatter
+    // field, and detect collisions after normalization.
+    const id = runtimeSkillIdentifier(record.id, `${label}.id`);
     claimUnique(logicalAssetIds, id, `Skill ${id}`);
     const references = validateArray(record.references, `${label}.references`).map((rawReference, referenceIndex) => {
       const referenceLabel = `${label}.references[${referenceIndex}]`;
@@ -492,6 +497,15 @@ function canonicalIdentifier(value: unknown, label: string): string {
     throw new Error(`Agent Corpus ${label} must be a canonical identifier`);
   }
   return value;
+}
+
+function runtimeSkillIdentifier(value: unknown, label: string): string {
+  const canonical = canonicalIdentifier(value, label);
+  const normalized = canonical.replaceAll("_", "-");
+  if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(normalized)) {
+    throw new Error(`Agent Corpus ${label} must normalize to a Runtime-safe skill identifier`);
+  }
+  return normalized;
 }
 
 function canonicalToolIdentifier(value: unknown, label: string): string {
