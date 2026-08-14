@@ -212,10 +212,10 @@ export class PostgresDistillationGraphStore implements DistillationGraphStore {
     try {
       const result = await this.pool.query<ArtifactRow>(`
         INSERT INTO hatch_creator_distillation_artifacts
-          (artifact_id, task_id, run_id, revision_id, kind, object_key, sha256, bytes, media_type)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          (artifact_id, task_id, run_id, revision_id, kind, object_key, sha256, bytes, media_type, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::timestamptz)
         RETURNING *
-      `, [record.artifactId, record.taskId, record.runId ?? null, record.revisionId ?? null, record.kind, record.objectKey, record.sha256, record.bytes, record.mediaType]);
+      `, [record.artifactId, record.taskId, record.runId ?? null, record.revisionId ?? null, record.kind, record.objectKey, record.sha256, record.bytes, record.mediaType, record.createdAt]);
       return artifactFromRow(result.rows[0]!);
     } catch (error) {
       if (!isUniqueViolation(error)) throw error;
