@@ -3094,6 +3094,61 @@ button.composer-control:focus-visible {
 
 .desktop-settings-save-error { color: #a64232; }
 
+/* Sidebar rows and the workspace chooser consume the shared navigation/button
+ * primitives. Keep their product-specific geometry here, while the shared
+ * component owns focus, disabled, and typography behavior. */
+.desktop-source-row.hui-navigation-item {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  justify-content: flex-start;
+  min-height: 48px;
+  padding: 7px 9px;
+  text-align: left;
+  width: 100%;
+}
+
+.desktop-source-row.hui-navigation-item > span:not(.creator-avatar) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.desktop-source-row.hui-navigation-item > .desktop-agent-disclosure {
+  flex: 0 0 auto;
+}
+
+.desktop-agent-conversation-group .desktop-source-row.hui-navigation-item {
+  min-height: 32px;
+  padding-block: 4px;
+}
+
+.workspace-picker.hui-button {
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 66px;
+  padding: 10px 12px;
+  text-align: left;
+  width: 100%;
+}
+
+.workspace-picker.hui-button > span {
+  align-items: center;
+  display: flex;
+  min-width: 0;
+  width: 100%;
+}
+
+.workspace-picker.hui-button .workspace-picker-copy {
+  display: block;
+  min-width: 0;
+}
+
+.workspace-picker.hui-button .workspace-picker-action {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
 @media (prefers-contrast: more) {
   .desktop-window-shell {
     --border-separator: color-mix(in srgb, var(--hatch-ink) 45%, transparent);

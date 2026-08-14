@@ -27,6 +27,14 @@ describe("desktop component presentation contract", () => {
     expect(shellSource).not.toMatch(/<button\s+[^>]*className="chrome-icon-button"/);
   });
 
+  it("uses shared navigation and button primitives for high-frequency sidebar actions", () => {
+    expect(source).toContain('NavigationItem,');
+    expect(source).toMatch(/<NavigationItem[\s\S]*className=\{`desktop-source-row agent/);
+    expect(source).toMatch(/<NavigationItem[\s\S]*className="desktop-source-row sidebar-new-task"/);
+    expect(source).toMatch(/<Button className=\{`workspace-picker/);
+    expect(source).not.toMatch(/<button className=\{`workspace-picker/);
+  });
+
   it("uses the shared icon library instead of character carets", () => {
     expect(source).toContain('from "lucide-react"');
     expect(source).not.toMatch(/[⌄›]/);

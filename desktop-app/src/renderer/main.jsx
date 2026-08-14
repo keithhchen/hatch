@@ -11,6 +11,7 @@ import {
   InlineAlert,
   IconButton,
   Input,
+  NavigationItem,
   Select
 } from "@hatch/ui";
 import { invoke } from "@tauri-apps/api/core";
@@ -3545,33 +3546,32 @@ function DesktopSidebar({
           const selected = entitlement.entitlement_id === selectedEntitlementId;
           return (
             <React.Fragment key={entitlement.entitlement_id}>
-              <button
-                aria-current={selected ? "page" : undefined}
+              <NavigationItem
+                active={selected}
                 aria-expanded={selected}
                 className={`desktop-source-row agent ${selected ? "selected" : ""}`}
-                type="button"
+                icon={<span className="creator-avatar">{agent.creatorInitials}</span>}
+                trailing={selected
+                  ? <ChevronDown className="desktop-agent-disclosure" aria-hidden="true" />
+                  : <ChevronRight className="desktop-agent-disclosure" aria-hidden="true" />}
                 onClick={() => onSelectAgent(entitlement)}
               >
-                <span className="creator-avatar">{agent.creatorInitials}</span>
                 <span className="desktop-source-row-copy">
                   <strong title={agent.name}>{agent.name}</strong>
                 </span>
-                {selected
-                  ? <ChevronDown className="desktop-agent-disclosure" aria-hidden="true" />
-                  : <ChevronRight className="desktop-agent-disclosure" aria-hidden="true" />}
-              </button>
+              </NavigationItem>
               {selected ? (
                 <div className="desktop-agent-conversation-group" role="group" aria-label={`${agent.name} ${t("sidebar.tasks")}`}>
-                  <button
+                  <NavigationItem
                     aria-label={t("sidebar.newTask")}
                     className="desktop-source-row sidebar-new-task"
                     disabled={!conversationLibraryReady}
                     title={t("sidebar.newTask")}
-                    type="button"
+                    icon={<Plus aria-hidden="true" />}
                     onClick={onNewConversation}
                   >
-                    <Plus aria-hidden="true" /><span>{t("sidebar.newTask")}</span>
-                  </button>
+                    {t("sidebar.newTask")}
+                  </NavigationItem>
                   {conversationLibraryStatus === "loading" || conversationLibraryStatus === "idle" ? (
                     <div className="desktop-source-empty compact">
                       <DesktopConnectionStatus state="connecting" compact />
@@ -3674,10 +3674,9 @@ function ConversationSourceRow({
     );
   }
   return (
-    <button
+    <NavigationItem
       className={`desktop-source-row conversation ${selected ? "selected" : ""}`}
-      type="button"
-      aria-current={selected ? "page" : undefined}
+      active={selected}
       title={conversation.title || conversation.id}
       onClick={() => onSelect?.(conversation)}
       onContextMenu={contextMenu}
@@ -3685,7 +3684,7 @@ function ConversationSourceRow({
       <span className="desktop-source-row-copy">
         <strong>{conversation.title || conversationTitle(conversation.id)}</strong>
       </span>
-    </button>
+    </NavigationItem>
   );
 }
 
@@ -4278,13 +4277,12 @@ function WorkspaceOnboarding({ creatorName, draft, onChoose, onGrant, status }) 
         <h2>{t("workspace.requiredTitle")}</h2>
         <p>{t("workspace.creatorScope", { creator: creatorName })}</p>
 
-        <button className={`workspace-picker ${draft ? "selected" : ""}`} type="button" onClick={onChoose}>
-          <WorkspaceIcon />
+        <Button className={`workspace-picker ${draft ? "selected" : ""}`} variant="secondary" type="button" leading={<WorkspaceIcon />} onClick={onChoose}>
           <span className="workspace-picker-copy">
             <strong>{draft ? workspaceGrantLabel(draft) : t("workspace.chooseComputerFolder")}</strong>
           </span>
           <span className="workspace-picker-action">{draft ? t("common.change") : t("common.choose")}</span>
-        </button>
+        </Button>
 
         <Button className="workspace-grant-button" type="button" onClick={onGrant} disabled={!draft.trim()}>
           {t("common.start")}
