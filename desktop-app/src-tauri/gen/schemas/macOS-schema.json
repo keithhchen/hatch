@@ -315,6 +315,12 @@
           "markdownDescription": "Enables the read_product_open_links command without any pre-configured scope."
         },
         {
+          "description": "Enables the read_task_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-read-task-settings",
+          "markdownDescription": "Enables the read_task_settings command without any pre-configured scope."
+        },
+        {
           "description": "Enables the read_window_settings command without any pre-configured scope.",
           "type": "string",
           "const": "allow-read-window-settings",
@@ -511,6 +517,12 @@
           "type": "string",
           "const": "deny-read-product-open-links",
           "markdownDescription": "Denies the read_product_open_links command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the read_task_settings command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-read-task-settings",
+          "markdownDescription": "Denies the read_task_settings command without any pre-configured scope."
         },
         {
           "description": "Denies the read_window_settings command without any pre-configured scope.",

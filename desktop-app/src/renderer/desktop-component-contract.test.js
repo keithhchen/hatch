@@ -55,4 +55,9 @@ describe("desktop component presentation contract", () => {
     expect(source).toContain('settingsStoreRef.current.setApp("language", next)');
     expect(source).toContain('className="desktop-auxiliary-language"');
   });
+
+  it("keeps the login and startup surfaces draggable under the overlay title bar", () => {
+    expect(source).toContain("function WelcomeTitlebarDragRegion()");
+    expect(source).toContain('className="welcome-titlebar-drag-region" data-tauri-drag-region');
+  });
 });

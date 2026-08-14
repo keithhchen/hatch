@@ -37,6 +37,15 @@ const EVENT_TYPES = new Set([
   "payout.retried"
 ]);
 
+// Offer events are no longer part of the Commerce write model. They remain in
+// append-only ledgers created by older releases, so the explicit persisted
+// replay path below preserves them for audit/history without allowing new
+// offer mutations or projecting them as current access state.
+const RETIRED_EVENT_TYPES = new Set([
+  "offer.revision_created",
+  "offer.activated"
+]);
+
 export class CommerceInvariantError extends Error {
   constructor(code, message) {
     super(message);
@@ -161,6 +170,47 @@ export class CommerceLedger {
         await releaseLock();
       }
     });
+  }
+
+  /**
+   * Rehydrates one event already persisted by an older Commerce release.
+   *
+   * This is intentionally separate from append()/appendMany(): retired Offer
+   * events can cross the read-time migration boundary, but can never be
+   * created by the current write API. Current events still go through the
+   * normal domain validator while retired events are envelope/digest checked
+   * and retained only for audit ordering.
+   */
+  async replayPersistedEvent(event) {
+    assertPersistedEnvelope(event);
+    const type = event.event_type;
+    if (RETIRED_EVENT_TYPES.has(type)) {
+      const payload = eventPayload(event);
+      const expectedDigest = payloadDigest(type, payload);
+      if (event.payload_digest !== expectedDigest) {
+        throw new CommerceInvariantError(
+          "corrupt_ledger",
+          `Persisted payload digest does not match event ${event.event_id}`
+        );
+      }
+      this.#ingest(event, { replay: true });
+      return structuredClone(event);
+    }
+
+    const replayed = await this.append(type, eventPayload(event), {
+      eventId: event.event_id,
+      idempotencyKey: event.idempotency_key
+    });
+    if (
+      replayed.occurred_at !== event.occurred_at
+      || replayed.payload_digest !== event.payload_digest
+    ) {
+      throw new CommerceInvariantError(
+        "corrupt_ledger",
+        `Persisted event envelope does not match event ${event.event_id}`
+      );
+    }
+    return replayed;
   }
 
   #ingest(event, { replay }) {
@@ -703,6 +753,20 @@ function assertPayloadEnvelope(payload) {
     if (Object.hasOwn(payload, field)) {
       throw new CommerceInvariantError("invalid_event", `${field} is reserved for the commerce event envelope`);
     }
+  }
+}
+
+function assertPersistedEnvelope(event) {
+  if (!event || typeof event !== "object" || Array.isArray(event)) {
+    throw new CommerceInvariantError("corrupt_ledger", "Persisted commerce event must be an object");
+  }
+  for (const field of ["event_id", "event_type", "occurred_at", "idempotency_key", "payload_digest"]) {
+    if (typeof event[field] !== "string" || !event[field].trim()) {
+      throw new CommerceInvariantError("corrupt_ledger", `Persisted commerce event ${field} is required`);
+    }
+  }
+  if (Number.isNaN(new Date(event.occurred_at).getTime())) {
+    throw new CommerceInvariantError("corrupt_ledger", `Invalid occurred_at for event ${event.event_id}`);
   }
 }
 

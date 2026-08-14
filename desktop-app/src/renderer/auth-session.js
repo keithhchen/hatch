@@ -100,7 +100,7 @@ export async function loadSavedAuthSession(storage) {
     const accessToken = await storage.readToken();
     return accessToken ? Object.freeze({ accessToken }) : null;
   } catch {
-    // A missing, locked, or unreadable secure-store item is equivalent to no
+    // A missing or unreadable native state item is equivalent to no
     // usable saved session in the desktop UX. Let the user sign in normally;
     // do not strand the app behind a recovery screen or repeat the prompt.
     return null;
@@ -115,7 +115,7 @@ export async function saveAuthSession(session, storage) {
     throw localizedError(englishMessage("error.auth.secureStorageUnavailable"), "error.auth.secureStorageUnavailable");
   }
   try {
-    await storage.writeToken(session.accessToken);
+    await storage.writeToken(session.accessToken, session.expiresAt);
   } catch (error) {
     throw annotateError(error, "error.auth.secureSessionWriteFailed");
   }
@@ -170,7 +170,7 @@ export function startAuthSessionSignOut(
   fetchImpl = fetch,
   options = {}
 ) {
-  // Start the bounded server revoke first, but never make local Keychain
+  // Start the bounded server revoke first, but never make local state cleanup
   // deletion wait for a slow or offline network.
   const serverRevoke = revokeAuthSession(registryUrl, session?.accessToken, fetchImpl, options);
   const localClear = clearAuthSession(session, storage);
@@ -185,14 +185,14 @@ export function createTauriAuthStorage(invokeImpl, { strict = false } = {}) {
         const token = await invokeImpl("read_auth_token");
         fallbackToken = typeof token === "string" && token.trim() ? token.trim() : null;
       } catch (error) {
-        // Web-only renderer tests and Vite preview have no native Keychain.
+        // Web-only renderer tests and Vite preview have no native state bridge.
         if (strict) throw annotateError(error, "error.auth.secureSessionReadFailed");
       }
       return fallbackToken;
     },
-    async writeToken(token) {
+    async writeToken(token, expiresAt) {
       try {
-        await invokeImpl("write_auth_token", { token });
+        await invokeImpl("write_auth_token", { token, expiresAt: expiresAt || null });
         fallbackToken = token;
       } catch (error) {
         // Keep the in-memory fallback for the current renderer lifetime.

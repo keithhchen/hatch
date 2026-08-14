@@ -233,7 +233,7 @@ function DesktopAuxiliaryWindow({ kind }) {
           <p className="desktop-auxiliary-lede">Creator agents, on your terms.</p>
           <p>Hatch keeps the desktop boundary native while React renders the conversation work surface.</p>
           <dl className="desktop-auxiliary-facts">
-            <div><dt>Version</dt><dd>0.1.4</dd></div>
+            <div><dt>Version</dt><dd>0.1.5</dd></div>
             <div><dt>Architecture</dt><dd>Tauri Hybrid</dd></div>
           </dl>
         </section>
@@ -498,19 +498,28 @@ function App() {
   selectedEntitlementIdRef.current = selectedEntitlementId;
 
   function getProfileSetting(key, fallback = undefined, profileId = buyerProfile.id) {
-    return settingsStoreRef.current?.getProfile(profileId, key, fallback) ?? fallback;
+    const context = windowContextRef.current || {};
+    if (key === "workspace_grant") return context.workspaceGrant ?? fallback;
+    if (key === "permission_mode") return context.permissionMode ?? fallback;
+    if (key === "last_selected_entitlement_id") return context.entitlementId ?? fallback;
+    if (key === "conversation_id") return context.conversationId ?? fallback;
+    if (key === "conversation_id_by_entitlement") {
+      return context.entitlementId && context.conversationId
+        ? { [context.entitlementId]: context.conversationId }
+        : fallback;
+    }
+    return fallback;
   }
 
   function setProfileSetting(key, value, profileId = buyerProfile.id) {
-    settingsStoreRef.current?.setProfile(profileId, key, value);
+    if (key === "workspace_grant") patchWindowContext({ workspaceGrant: value || null });
+    else if (key === "permission_mode") patchWindowContext({ permissionMode: value || null });
+    else if (key === "last_selected_entitlement_id") patchWindowContext({ entitlementId: value || null });
+    else if (key === "conversation_id") patchWindowContext({ conversationId: value || null });
   }
 
   function persistWorkspaceGrant(grant, profileId = buyerProfile.id) {
-    if (!shouldPersistWorkspaceToProfile(conversationWindowRef.current)) {
-      patchWindowContext({ workspaceGrant: grant });
-      return;
-    }
-    setProfileSetting("workspace_grant", grant, profileId);
+    patchWindowContext({ workspaceGrant: grant });
   }
 
   // Conversation windows are independent native contexts. Only the original
@@ -518,9 +527,7 @@ function App() {
   // fallback; otherwise two windows can overwrite one another's recovery
   // projection even though their native contexts are separate.
   function setLegacyProfileActiveRun(value) {
-    if (usesLegacyProfileRunFallback(requestedConversationIdRef.current)) {
-      setProfileSetting("active_run", value);
-    }
+    // Runs are recovered from the Runtime Conversation snapshot, never local state.
   }
 
   function patchWindowContext(patch = {}) {
@@ -535,7 +542,19 @@ function App() {
     if (buyerProfile.id) next.accountId = buyerProfile.id;
     windowContextRef.current = next;
     if (!window.__TAURI_INTERNALS__) return;
-    void invokeTauri("patch_window_settings", { patch: { context: next } }).catch(() => {});
+    const persistedContext = {};
+    if (Object.hasOwn(patch, "conversationId")) persistedContext.conversationId = next.conversationId || null;
+    if (Object.hasOwn(patch, "entitlementId")) persistedContext.entitlementId = next.entitlementId || null;
+    if (Object.hasOwn(patch, "creatorId")) persistedContext.creatorId = next.creatorId || null;
+    if (Object.hasOwn(patch, "productId") || Object.hasOwn(patch, "agentId")) {
+      persistedContext.productId = next.productId || next.agentId || null;
+    }
+    if (Object.hasOwn(patch, "workspaceGrant")) {
+      persistedContext.workspaceGrant = normalizeWorkspaceGrant(next.workspaceGrant);
+    }
+    if (Object.hasOwn(patch, "permissionMode")) persistedContext.permissionMode = next.permissionMode || null;
+    if (Object.keys(persistedContext).length === 0) return;
+    void invokeTauri("patch_window_settings", { patch: { context: persistedContext } }).catch(() => {});
   }
 
   function setComposerDraftValue(value) {
@@ -568,11 +587,7 @@ function App() {
 
   function setConversationIdForEntitlement(profileId, entitlementId, value) {
     if (!entitlementId || !value) return;
-    const current = getProfileSetting("conversation_id_by_entitlement", {}, profileId);
-    setProfileSetting("conversation_id_by_entitlement", {
-      ...(current && typeof current === "object" ? current : {}),
-      [entitlementId]: value
-    }, profileId);
+    patchWindowContext({ entitlementId, conversationId: value });
   }
 
   function chooseEntitlement(entitlements, profileId, currentId = "", preferredBinding = null) {
@@ -746,10 +761,11 @@ function App() {
     };
   }, [buyerSession?.accessToken]);
 
-  async function synchronizeNativeToolContext(accessSnapshot) {
+  async function synchronizeNativeToolContext(accessSnapshot, taskId) {
     const workspaceGrantId = String(accessSnapshot?.workspaceGrantId || "").trim();
     if (!workspaceGrantId) throw new Error("Choose a workspace folder before starting a task.");
     return invokeTauri("set_window_tool_context", {
+      taskId,
       workspaceGrantId,
       permissionPolicy: accessSnapshot.permissionMode
     });
@@ -1063,6 +1079,7 @@ function App() {
         disconnectRuntime();
         conversationCursorRef.current = 0;
         setMessages([]);
+        await restoreTaskLocalSettings(nextId);
         setConversationId(nextId);
         setConversationIdForEntitlement(buyerProfile.id, selectedEntitlementId, nextId);
       }
@@ -1201,7 +1218,7 @@ function App() {
     // an `approved_by_user` flag to authorize the tool itself.
     const accessSnapshot = createTurnAccessSnapshot(workspaceGrant?.grant_id, workspace, permissionMode);
     try {
-      await synchronizeNativeToolContext(accessSnapshot);
+      await synchronizeNativeToolContext(accessSnapshot, activeConversationId);
     } catch (error) {
       setStatus(`Couldn't prepare native workspace access: ${errorMessage(error)}`);
       return;
@@ -1347,7 +1364,9 @@ function App() {
       // Context written by older builds had no account binding. Discard it
       // once rather than risking a cross-account draft or Conversation
       // projection; pane/frame preferences remain available independently.
-      const accountBoundContext = accountScopedWindowContext(context, buyerSession.profile.id);
+      const accountBoundContext = saved?.canonicalState
+        ? context
+        : accountScopedWindowContext(context, buyerSession.profile.id);
       windowContextRef.current = {
         ...accountBoundContext,
         accountId: buyerSession.profile.id,
@@ -1561,24 +1580,6 @@ function App() {
       patchWindowContext({ scrollTop: viewportScrollTopRef.current });
     }
   }, [signedIn, windowContextReady]);
-
-  // Composer text is user data, but unlike the workspace onboarding draft it
-  // belongs to the active window session. Debounce app-data writes so normal
-  // typing does not turn into one synchronous native file write per keypress;
-  // flush on teardown/beforeunload so a quick close still keeps the draft.
-  useEffect(() => {
-    if (!windowContextReady || !windowStateRestored || !signedIn) return undefined;
-    const timer = window.setTimeout(() => {
-      patchWindowContext({ composerDraft: composerDraftRef.current });
-    }, 180);
-    const flush = () => patchWindowContext({ composerDraft: composerDraftRef.current });
-    window.addEventListener("beforeunload", flush);
-    return () => {
-      window.clearTimeout(timer);
-      window.removeEventListener("beforeunload", flush);
-      flush();
-    };
-  }, [composerDraft, signedIn, windowContextReady, windowStateRestored]);
 
   // Window geometry is machine-local and intentionally separate from the
   // cloud Conversation. Rust namespaces this state by the invoking native
@@ -2044,12 +2045,11 @@ function App() {
       socket.send(JSON.stringify({
         type: "client.hello",
         protocol_version: PROTOCOL_VERSION,
-        installation_id: "desktop-local-install",
         auth_token: buyerSession.accessToken,
         entitlement_id: targetEntitlementId,
         ...(targetProductId ? { product_id: targetProductId } : {}),
         ...(targetCreatorId ? { creator_id: targetCreatorId } : {}),
-        client_version: "0.1.4",
+        client_version: "0.1.5",
         local_tools: [...PLATFORM_LOCAL_TOOLS],
       }));
     });
@@ -3009,7 +3009,35 @@ function App() {
     }
   }
 
-  function selectConversation(conversation) {
+  async function restoreTaskLocalSettings(taskId) {
+    if (!window.__TAURI_INTERNALS__) return;
+    const saved = await invokeTauri("read_task_settings", { taskId }).catch(() => null);
+    if (!saved) return;
+    const savedGrant = normalizeWorkspaceGrant(saved.workspaceGrant);
+    const restoredGrant = savedGrant
+      ? normalizeWorkspaceGrant(await invokeTauri("ensure_workspace", { workspaceGrantId: savedGrant.grant_id }).catch(() => null))
+      : null;
+    setPermissionMode(normalizePermissionPolicy(saved.permissionMode));
+    permissionRef.current = normalizePermissionPolicy(saved.permissionMode);
+    setWorkspace(restoredGrant?.display_path || "");
+    workspaceRef.current = restoredGrant?.display_path || "";
+    setWorkspaceDraft(restoredGrant?.display_path || "");
+    setWorkspaceGrant(restoredGrant);
+    setWorkspaceDraftGrant(restoredGrant);
+    workspaceGrantRef.current = restoredGrant;
+    setWorkspaceGranted(Boolean(restoredGrant));
+    windowContextRef.current = {
+      ...windowContextRef.current,
+      conversationId: taskId,
+      entitlementId: saved.entitlementId || windowContextRef.current.entitlementId,
+      creatorId: saved.creatorId || windowContextRef.current.creatorId,
+      productId: saved.productId || windowContextRef.current.productId,
+      workspaceGrant: restoredGrant,
+      permissionMode: normalizePermissionPolicy(saved.permissionMode)
+    };
+  }
+
+  async function selectConversation(conversation) {
     const nextId = String(conversation?.id || "").trim();
     if (!isServerConversationId(nextId)) {
       setStatus("That Conversation is not a server record.");
@@ -3024,6 +3052,7 @@ function App() {
     setChatLoading(true);
     conversationCursorRef.current = 0;
     setMessages([]);
+    await restoreTaskLocalSettings(nextId);
     setConversationId(nextId);
     setConversationIdForEntitlement(buyerProfile.id, selectedEntitlementId, nextId);
     setStatus("Conversation selected");
@@ -4324,6 +4353,7 @@ function LaunchScreen() {
   const t = useI18n();
   return (
     <main className="welcome-screen status-screen">
+      <WelcomeTitlebarDragRegion />
       <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch<span className="hatch-wordmark-period" aria-hidden="true">.</span></strong></div>
       <section className="status-card">
         <span className="eyebrow">{t("app.name")}</span>
@@ -4338,6 +4368,7 @@ function NetworkErrorScreen({ message, onRetry, onSignOut }) {
   const t = useI18n();
   return (
     <main className="welcome-screen status-screen">
+      <WelcomeTitlebarDragRegion />
       <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch<span className="hatch-wordmark-period" aria-hidden="true">.</span></strong></div>
       <section className="status-card">
         <span className="eyebrow">{t("connection.eyebrow")}</span>
@@ -4355,6 +4386,7 @@ function UnsupportedRoleScreen({ profile, onSignOut }) {
   const t = useI18n();
   return (
     <main className="welcome-screen status-screen">
+      <WelcomeTitlebarDragRegion />
       <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch<span className="hatch-wordmark-period" aria-hidden="true">.</span></strong></div>
       <section className="status-card">
         <span className="eyebrow">{t("auth.consumerDesktopEyebrow")}</span>
@@ -4371,6 +4403,7 @@ function EmptyAgentsScreen({ profile, onBrowse, onRefresh, onSignOut, refreshing
   const t = useI18n();
   return (
     <main className="welcome-screen status-screen empty-agents-screen">
+      <WelcomeTitlebarDragRegion />
       <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch<span className="hatch-wordmark-period" aria-hidden="true">.</span></strong></div>
       <section className="status-card empty-agents-card">
         <div className="empty-agents-header">
@@ -4405,6 +4438,7 @@ function SignInScreen({ onSignIn, status, error }) {
 
   return (
     <main className="welcome-screen">
+      <WelcomeTitlebarDragRegion />
       <section className="sign-in-card">
         <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch<span className="hatch-wordmark-period" aria-hidden="true">.</span></strong></div>
         <h1>{t("auth.signInTitle")}</h1>
@@ -4425,6 +4459,10 @@ function SignInScreen({ onSignIn, status, error }) {
       </section>
     </main>
   );
+}
+
+function WelcomeTitlebarDragRegion() {
+  return <div className="welcome-titlebar-drag-region" data-tauri-drag-region aria-hidden="true" />;
 }
 
 function HatchMessage() {

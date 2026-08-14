@@ -21,6 +21,7 @@ use tauri::{
 };
 use tauri_plugin_deep_link::DeepLinkExt;
 
+mod desktop_state;
 mod window_commands;
 
 #[cfg(target_os = "windows")]
@@ -41,30 +42,8 @@ use objc2_foundation::{
 use objc2_quick_look_ui::QLPreviewPanel;
 #[cfg(target_os = "macos")]
 use quicklook::{PreviewItem, QuickLookPanel};
-#[cfg(target_os = "macos")]
-use security_framework::os::macos::code_signing::{
-    Flags as CodeSigningFlags, SecCode, SecRequirement,
-};
-#[cfg(target_os = "macos")]
-use security_framework::passwords::{
-    delete_generic_password_options, generic_password, set_generic_password_options,
-    PasswordOptions,
-};
-
 const LOCAL_TOOL_RESULT_TTL: Duration = Duration::from_secs(60);
 const PENDING_TOOL_APPROVAL_TTL: Duration = Duration::from_secs(5 * 60);
-// This service intentionally does not reuse the old development/UAT item.
-// Every debug or ad-hoc Hatch bundle used `dev.hatch.local.desktop-session.v2`,
-// which caused different temporary code identities to compete for one Login
-// Keychain ACL and trigger an unlock prompt at startup.
-const PRODUCTION_CREDENTIAL_SERVICE: &str = "cn.tokenquadrant.hatch.desktop-session.v1";
-const KEYCHAIN_ACCOUNT: &str = "active-session";
-const DESKTOP_BUNDLE_IDENTIFIER: &str = "dev.hatch.local";
-const ERR_SEC_ITEM_NOT_FOUND: i32 = -25_300;
-const SETTINGS_FILE: &str = "settings.json";
-const WINDOW_SETTINGS_NAMESPACE: &str = "window_settings";
-const WORKSPACE_GRANTS_FILE: &str = "workspace-grants.json";
-const WORKSPACE_GRANTS_SCHEMA_VERSION: u32 = 1;
 const NATIVE_DROP_CONTEXT_TTL: Duration = Duration::from_secs(10 * 60);
 const MAX_NATIVE_DROP_CONTEXTS: usize = 8;
 const MAX_NATIVE_DROP_CONTEXT_SOURCE_BYTES: u64 = 1024 * 1024;
@@ -769,21 +748,6 @@ struct WorkspaceGrantRecord {
     canonical_path_utf16: Vec<u16>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-struct WorkspaceGrantStore {
-    schema_version: u32,
-    grants: HashMap<String, WorkspaceGrantRecord>,
-}
-
-impl Default for WorkspaceGrantStore {
-    fn default() -> Self {
-        Self {
-            schema_version: WORKSPACE_GRANTS_SCHEMA_VERSION,
-            grants: HashMap::new(),
-        }
-    }
-}
-
 struct ScopedWorkspaceGrant {
     grant_id: String,
     path: PathBuf,
@@ -1023,11 +987,6 @@ fn cancel_active_tool_calls(keys: &[WindowToolCallKey]) {
     }
 }
 
-fn workspace_grants_lock() -> &'static Mutex<()> {
-    static GRANTS: OnceLock<Mutex<()>> = OnceLock::new();
-    GRANTS.get_or_init(|| Mutex::new(()))
-}
-
 #[tauri::command]
 fn default_workspace() -> String {
     // A workspace is a user grant. Never infer Documents, $HOME, or cwd as consent.
@@ -1044,6 +1003,41 @@ fn ensure_workspace(
         grant_id: scoped.grant_id.clone(),
         display_path: scoped.path.to_string_lossy().to_string(),
     })
+}
+
+#[tauri::command]
+fn read_task_settings(app: AppHandle, task_id: String) -> Result<Option<Value>, String> {
+    let task_id = task_id.trim();
+    if task_id.is_empty() {
+        return Ok(None);
+    }
+    let state = desktop_state::read(&app)?;
+    let Some(task) = state.tasks.get(task_id) else {
+        return Ok(None);
+    };
+    let workspace_grant = task
+        .workspace_grant_id
+        .as_deref()
+        .and_then(|grant_id| {
+            state
+                .workspace_grants
+                .iter()
+                .find(|grant| grant.grant_id == grant_id)
+        })
+        .map(|grant| {
+            serde_json::json!({
+                "grant_id": grant.grant_id,
+                "display_path": grant.display_path
+            })
+        });
+    Ok(Some(serde_json::json!({
+        "taskId": task_id,
+        "entitlementId": task.entitlement_id,
+        "creatorId": task.creator_id,
+        "productId": task.product_id,
+        "workspaceGrant": workspace_grant,
+        "permissionMode": task.permission_mode
+    })))
 }
 
 #[tauri::command]
@@ -1338,10 +1332,15 @@ fn validate_artifact_relative_path(relative_path: &str) -> Result<&std::path::Pa
 fn set_window_tool_context(
     app: AppHandle,
     window: WebviewWindow,
+    task_id: String,
     workspace_grant_id: String,
     permission_policy: ChangePermissionPolicy,
     authority: State<'_, NativeToolAuthority>,
 ) -> Result<WorkspaceGrantInfo, String> {
+    let task_id = task_id.trim().to_string();
+    if task_id.is_empty() {
+        return Err("window_tool_context_missing: A Task/Conversation ID is required".into());
+    }
     // Resolve and probe the grant before installing it as a window authority.
     // A renderer can display a path, but it cannot turn that path into a grant.
     let scoped = resolve_scoped_workspace_grant(&app, &workspace_grant_id)?;
@@ -1353,9 +1352,33 @@ fn set_window_tool_context(
         window.label(),
         WindowToolContext {
             workspace_grant_id,
-            permission_policy,
+            permission_policy: permission_policy.clone(),
         },
     )?;
+    let persisted_permission = match permission_policy {
+        ChangePermissionPolicy::AskBeforeChanges => "ask-before-changes",
+        ChangePermissionPolicy::AllowChanges => "allow-changes",
+    }
+    .to_string();
+    let persisted_grant_id = info.grant_id.clone();
+    desktop_state::update(&app, |state| {
+        let task =
+            state
+                .tasks
+                .entry(task_id.clone())
+                .or_insert_with(|| desktop_state::DesktopTaskState {
+                    entitlement_id: String::new(),
+                    creator_id: None,
+                    product_id: None,
+                    workspace_grant_id: None,
+                    permission_mode: "ask-before-changes".into(),
+                });
+        task.workspace_grant_id = Some(persisted_grant_id);
+        task.permission_mode = persisted_permission;
+        let window_state = state.windows.entry(window.label().to_string()).or_default();
+        window_state.conversation_id = Some(task_id);
+        Ok(())
+    })?;
     record_pending_outcomes(
         invalidated,
         "tool_context_changed",
@@ -1511,45 +1534,37 @@ fn poll_tool_call(
 }
 
 #[tauri::command]
-fn read_auth_token() -> Result<Option<String>, String> {
-    match secure_session_storage()? {
-        SecureSessionStorage::Ephemeral => read_ephemeral_auth_token(),
-        #[cfg(target_os = "macos")]
-        SecureSessionStorage::Persistent => read_keychain_secret(PRODUCTION_CREDENTIAL_SERVICE)
-            .and_then(|secret| secret.map(decode_keychain_token).transpose()),
-        #[cfg(target_os = "windows")]
-        SecureSessionStorage::Persistent => Err(windows_persistent_session_error()),
-    }
+fn read_auth_token(app: AppHandle) -> Result<Option<String>, String> {
+    Ok(desktop_state::read(&app)?
+        .session
+        .map(|session| session.token))
 }
 
 #[tauri::command]
-fn write_auth_token(token: String) -> Result<(), String> {
+fn write_auth_token(
+    app: AppHandle,
+    token: String,
+    expires_at: Option<String>,
+) -> Result<(), String> {
     if token.trim().is_empty() {
         return Err("A non-empty session token is required".into());
     }
-    match secure_session_storage()? {
-        SecureSessionStorage::Ephemeral => write_ephemeral_auth_token(token.trim()),
-        #[cfg(target_os = "macos")]
-        SecureSessionStorage::Persistent => {
-            write_keychain_secret(PRODUCTION_CREDENTIAL_SERVICE, token.trim().as_bytes())
-        }
-        #[cfg(target_os = "windows")]
-        SecureSessionStorage::Persistent => Err(windows_persistent_session_error()),
+    if token.len() > 4096 || expires_at.as_deref().is_some_and(|value| value.len() > 128) {
+        return Err("The saved session is too large".into());
     }
+    let token = token.trim().to_string();
+    desktop_state::update(&app, |state| {
+        state.session = Some(desktop_state::DesktopSessionState { token, expires_at });
+        Ok(())
+    })
 }
 
 #[tauri::command]
 fn clear_auth_token(window: WebviewWindow) -> Result<(), String> {
-    let result = match secure_session_storage() {
-        Err(error) => Err(error),
-        Ok(SecureSessionStorage::Ephemeral) => clear_ephemeral_auth_token(),
-        #[cfg(target_os = "macos")]
-        Ok(SecureSessionStorage::Persistent) => {
-            delete_keychain_secret_if_present(PRODUCTION_CREDENTIAL_SERVICE)
-        }
-        #[cfg(target_os = "windows")]
-        Ok(SecureSessionStorage::Persistent) => Err(windows_persistent_session_error()),
-    };
+    let result = desktop_state::update(window.app_handle(), |state| {
+        state.session = None;
+        Ok(())
+    });
     // The token itself never crosses this event. Other conversation windows
     // must drop their in-memory session after logout/401, even when clearing
     // the native store reports an error in a signed release build.
@@ -1563,225 +1578,15 @@ fn clear_auth_token(window: WebviewWindow) -> Result<(), String> {
     result
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SecureSessionStorage {
-    // This is intentionally process-only. It is the safe default for `tauri
-    // dev` and every unsigned/ad-hoc UAT app: no Keychain item is read,
-    // migrated, updated, or deleted by a transient code identity.
-    Ephemeral,
-    Persistent,
-}
-
-fn secure_session_storage() -> Result<SecureSessionStorage, String> {
-    static STORAGE: OnceLock<Result<SecureSessionStorage, String>> = OnceLock::new();
-    STORAGE.get_or_init(resolve_secure_session_storage).clone()
-}
-
-fn resolve_secure_session_storage() -> Result<SecureSessionStorage, String> {
-    if !persistent_session_build_requested() {
-        return Ok(SecureSessionStorage::Ephemeral);
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        verify_persistent_session_signer()?;
-        return Ok(SecureSessionStorage::Persistent);
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        // `keyring`'s windows-native backend uses Win32 Generic Credentials.
-        // Microsoft documents those as readable and writable by user
-        // processes, not by a signed-app ACL. Authenticode verifies a binary
-        // but does not turn that user-wide vault entry into an app-only secret.
-        // PasswordVault/AppContainer package identity is not an app-only secret
-        // boundary for a regular desktop process: another full-trust process
-        // under the same user can read the locker. Until Hatch has a
-        // device-bound/session challenge backend, a release switch must fail
-        // closed instead of silently persisting an opaque bearer token there.
-        debug_assert!(!windows_backend_can_persist_opaque_session(
-            WindowsOpaqueTokenBackend::GenericCredentialManager
-        ));
-        return Err(windows_persistent_session_error());
-    }
-
-    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
-    Err("Persistent secure session storage is only available on macOS or Windows".into())
-}
-
-fn persistent_session_build_requested() -> bool {
-    persistent_session_build_requested_from(option_env!("HATCH_PERSISTENT_SESSION"))
-}
-
-fn persistent_session_build_requested_from(value: Option<&str>) -> bool {
-    value == Some("1")
-}
-
-#[cfg(any(target_os = "windows", test))]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum WindowsOpaqueTokenBackend {
-    // Win32 Credential Manager generic credentials are scoped to the current
-    // user, not to Hatch's package/signing identity.
-    GenericCredentialManager,
-    // MSIX/AppContainer PasswordVault is intentionally not approved as an
-    // opaque-token backend: it does not provide an app-only secret boundary
-    // against another same-user full-trust process.
-    AppContainerCredentialLockerUnapproved,
-}
-
-#[cfg(any(target_os = "windows", test))]
-fn windows_backend_can_persist_opaque_session(backend: WindowsOpaqueTokenBackend) -> bool {
-    let _ = backend;
-    false
-}
-
-#[cfg(target_os = "windows")]
-fn windows_persistent_session_error() -> String {
-    "Windows persistent sessions are not enabled: Win32 Credential Manager and PasswordVault are not app-only secret boundaries for same-user desktop processes. Hatch will not persist an opaque session token until a device-bound session backend is verified."
-        .into()
-}
-
-fn ephemeral_auth_token() -> &'static Mutex<Option<String>> {
-    static TOKEN: OnceLock<Mutex<Option<String>>> = OnceLock::new();
-    TOKEN.get_or_init(|| Mutex::new(None))
-}
-
-fn read_ephemeral_auth_token() -> Result<Option<String>, String> {
-    ephemeral_auth_token()
-        .lock()
-        .map(|token| token.clone())
-        .map_err(|_| "Hatch's in-memory session is unavailable".into())
-}
-
-fn write_ephemeral_auth_token(token: &str) -> Result<(), String> {
-    let mut current = ephemeral_auth_token()
-        .lock()
-        .map_err(|_| "Hatch's in-memory session is unavailable")?;
-    *current = Some(token.to_owned());
-    Ok(())
-}
-
-fn clear_ephemeral_auth_token() -> Result<(), String> {
-    let mut current = ephemeral_auth_token()
-        .lock()
-        .map_err(|_| "Hatch's in-memory session is unavailable")?;
-    *current = None;
-    Ok(())
-}
-
-#[cfg(target_os = "macos")]
-fn verify_persistent_session_signer() -> Result<(), String> {
-    let team_id = option_env!("HATCH_APPLE_TEAM_ID").ok_or_else(|| {
-        "Persistent secure session storage is missing its expected Apple Developer Team ID"
-            .to_string()
-    })?;
-    let requirement = developer_id_application_requirement(DESKTOP_BUNDLE_IDENTIFIER, team_id)?;
-    let code = SecCode::for_self(CodeSigningFlags::NONE).map_err(|error| {
-        format!(
-            "Hatch could not verify its distribution signature before using Keychain (status {})",
-            error.code()
-        )
-    })?;
-    code.check_validity(CodeSigningFlags::NONE, &requirement)
-        .map_err(|error| {
-            format!(
-                "Hatch's distribution signature is not the configured Developer ID application; secure session persistence is disabled (status {})",
-                error.code()
-            )
-        })
-}
-
-#[cfg(target_os = "macos")]
-fn developer_id_application_requirement(
-    bundle_identifier: &str,
-    team_id: &str,
-) -> Result<SecRequirement, String> {
-    if !is_apple_team_id(team_id) {
-        return Err("Hatch's configured Apple Developer Team ID is invalid".into());
-    }
-    // This is Apple's documented Developer ID Application shape: an Apple
-    // anchor, exact bundle identifier, Developer ID issuer/leaf OIDs, and the
-    // expected Team ID in the leaf certificate's OU. It rejects ad-hoc and
-    // Apple Development identities even if they share a product name.
-    let source = format!(
-        "anchor apple generic and identifier \"{bundle_identifier}\" and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = \"{team_id}\""
-    );
-    source.parse::<SecRequirement>().map_err(|error| {
-        format!(
-            "Hatch could not construct its Developer ID signature requirement (status {})",
-            error.code()
-        )
-    })
-}
-
-fn is_apple_team_id(value: &str) -> bool {
-    value.len() == 10
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit())
-}
-
-#[cfg(target_os = "macos")]
-fn keychain_options(service: &str) -> PasswordOptions {
-    let mut options = PasswordOptions::new_generic_password(service, KEYCHAIN_ACCOUNT);
-    // Keep the opaque token local to this device; do not make it an iCloud
-    // Keychain item. The default app-specific Keychain ACL is intentionally
-    // preserved — widening it would trade this prompt for an authorization
-    // regression.
-    options.set_access_synchronized(Some(false));
-    options
-}
-
-#[cfg(target_os = "macos")]
-fn read_keychain_secret(service: &str) -> Result<Option<Vec<u8>>, String> {
-    match generic_password(keychain_options(service)) {
-        Ok(secret) => Ok(Some(secret)),
-        Err(error) if error.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(None),
-        Err(error) => Err(keychain_error("read", error.code())),
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn write_keychain_secret(service: &str, secret: &[u8]) -> Result<(), String> {
-    set_generic_password_options(secret, keychain_options(service))
-        .map_err(|error| keychain_error("save", error.code()))
-}
-
-#[cfg(target_os = "macos")]
-fn delete_keychain_secret_if_present(service: &str) -> Result<(), String> {
-    match delete_generic_password_options(keychain_options(service)) {
-        Ok(()) => Ok(()),
-        Err(error) if error.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(()),
-        Err(error) => Err(keychain_error("remove", error.code())),
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn decode_keychain_token(secret: Vec<u8>) -> Result<String, String> {
-    let token = String::from_utf8(secret)
-        .map_err(|_| "Hatch found an invalid secure session in macOS Keychain".to_string())?;
-    let token = token.trim().to_string();
-    (!token.is_empty())
-        .then_some(token)
-        .ok_or_else(|| "Hatch found an empty secure session in macOS Keychain".to_string())
-}
-
-#[cfg(target_os = "macos")]
-fn keychain_error(action: &str, status: i32) -> String {
-    format!("Hatch could not {action} the secure session (macOS Keychain status {status})")
-}
-
 #[tauri::command]
 fn read_app_settings(app: AppHandle) -> Result<String, String> {
-    let _guard = app_settings_lock()
-        .lock()
-        .map_err(|_| "Desktop settings lock is unavailable")?;
-    let path = settings_path(&app)?;
-    match std::fs::read_to_string(path) {
-        Ok(value) => Ok(value),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok("{}".into()),
-        Err(error) => Err(error.to_string()),
-    }
+    let state = desktop_state::read(&app)?;
+    serde_json::to_string(&serde_json::json!({
+        "schema_version": 1,
+        "app": { "language": state.preferences.language },
+        "accounts": {}
+    }))
+    .map_err(to_string)
 }
 
 #[tauri::command]
@@ -1790,11 +1595,15 @@ fn write_app_settings(app: AppHandle, settings: String) -> Result<(), String> {
     if !parsed.is_object() {
         return Err("Desktop settings must be a JSON object".into());
     }
-    let _guard = app_settings_lock()
-        .lock()
-        .map_err(|_| "Desktop settings lock is unavailable")?;
-    let path = settings_path(&app)?;
-    write_app_settings_value(&path, &parsed)
+    let language = parsed
+        .pointer("/app/language")
+        .and_then(Value::as_str)
+        .unwrap_or("system")
+        .to_string();
+    desktop_state::update(&app, |state| {
+        state.preferences.language = language;
+        Ok(())
+    })
 }
 
 /// Atomically patch one account's non-secret preferences without replacing
@@ -1804,118 +1613,85 @@ fn write_app_settings(app: AppHandle, settings: String) -> Result<(), String> {
 /// namespace) with a last-writer-wins race.
 #[tauri::command]
 fn patch_app_settings(app: AppHandle, patch: Value) -> Result<(), String> {
-    let _guard = app_settings_lock()
-        .lock()
-        .map_err(|_| "Desktop settings lock is unavailable")?;
-    let path = settings_path(&app)?;
-    let mut settings = read_app_settings_value(&path)?;
     let object = patch
         .as_object()
         .ok_or_else(|| "Desktop settings patch must be a JSON object".to_string())?;
-    let mut applied = false;
-    if object.get("app").is_some() {
-        apply_app_settings_patch(&mut settings, object.get("app").unwrap())?;
-        applied = true;
+    if let Some(app_patch) = object.get("app").and_then(Value::as_object) {
+        let language = app_patch
+            .get("set")
+            .and_then(Value::as_object)
+            .and_then(|set| set.get("language"))
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let remove_language = app_patch
+            .get("remove")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .any(|value| value.as_str() == Some("language"));
+        desktop_state::update(&app, |state| {
+            if let Some(language) = language {
+                state.preferences.language = language;
+            } else if remove_language {
+                state.preferences.language = "system".into();
+            }
+            Ok(())
+        })?;
+        return Ok(());
     }
-    if object.get("profileId").is_some() {
-        apply_profile_settings_patch(&mut settings, &patch)?;
-        applied = true;
-    }
-    if !applied {
+    if object.get("profileId").is_none() {
         return Err("Desktop settings patch requires app or profileId".into());
     }
-    write_app_settings_value(&path, &settings)
-}
-
-fn apply_app_settings_patch(settings: &mut Value, patch: &Value) -> Result<(), String> {
-    let object = patch
-        .as_object()
-        .ok_or_else(|| "Desktop app settings patch must be a JSON object".to_string())?;
-    let set = object.get("set").and_then(Value::as_object);
-    let remove = object.get("remove").and_then(Value::as_array);
-    if set.is_none() && remove.is_none() {
-        return Err("Desktop app settings patch requires set or remove".into());
-    }
-    let root = settings
-        .as_object_mut()
-        .ok_or_else(|| "Desktop settings must be a JSON object".to_string())?;
-    let app = root
-        .entry("app".to_string())
-        .or_insert_with(|| Value::Object(serde_json::Map::new()))
-        .as_object_mut()
-        .ok_or_else(|| "Desktop app settings must be an object".to_string())?;
-    if let Some(values) = set {
-        for (key, value) in values {
-            app.insert(key.clone(), value.clone());
-        }
-    }
-    if let Some(keys) = remove {
-        for key in keys {
-            let key = key
-                .as_str()
-                .ok_or_else(|| "Desktop app settings remove entries must be strings".to_string())?;
-            app.remove(key);
-        }
-    }
-    Ok(())
-}
-
-fn apply_profile_settings_patch(settings: &mut Value, patch: &Value) -> Result<(), String> {
-    let object = patch
-        .as_object()
-        .ok_or_else(|| "Desktop settings patch must be a JSON object".to_string())?;
-    let profile_id = object
-        .get("profileId")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| "Desktop settings patch requires profileId".to_string())?;
-    let set = object.get("set").and_then(Value::as_object);
-    let remove = object.get("remove").and_then(Value::as_array);
-    if set.is_none() && remove.is_none() {
-        return Err("Desktop settings patch requires set or remove".into());
-    }
-    let root = settings
-        .as_object_mut()
-        .ok_or_else(|| "Desktop settings must be a JSON object".to_string())?;
-    let accounts = root
-        .entry("accounts".to_string())
-        .or_insert_with(|| Value::Object(serde_json::Map::new()))
-        .as_object_mut()
-        .ok_or_else(|| "Desktop settings accounts must be an object".to_string())?;
-    let profile = accounts
-        .entry(profile_id.to_string())
-        .or_insert_with(|| Value::Object(serde_json::Map::new()))
-        .as_object_mut()
-        .ok_or_else(|| "Desktop settings profile must be an object".to_string())?;
-    if let Some(values) = set {
-        for (key, value) in values {
-            profile.insert(key.clone(), value.clone());
-        }
-    }
-    if let Some(keys) = remove {
-        for key in keys {
-            let key = key
-                .as_str()
-                .ok_or_else(|| "Desktop settings remove entries must be strings".to_string())?;
-            profile.remove(key);
-        }
-    }
+    // Profile identity and values are intentionally not stored on the device.
+    // Task/workspace preferences are persisted by `patch_window_settings`.
     Ok(())
 }
 
 #[tauri::command]
 fn read_window_settings(app: AppHandle, window: WebviewWindow) -> Result<Value, String> {
-    let _guard = app_settings_lock()
-        .lock()
-        .map_err(|_| "Desktop settings lock is unavailable")?;
-    let settings = read_app_settings_value(&settings_path(&app)?)?;
-    Ok(settings
-        .get(WINDOW_SETTINGS_NAMESPACE)
-        .and_then(Value::as_object)
-        .and_then(|windows| windows.get(window.label()))
+    let state = desktop_state::read(&app)?;
+    let saved_window = state
+        .windows
+        .get(window.label())
         .cloned()
-        .unwrap_or_else(|| Value::Object(serde_json::Map::new())))
+        .unwrap_or_default();
+    let task = saved_window
+        .conversation_id
+        .as_ref()
+        .and_then(|conversation_id| state.tasks.get(conversation_id));
+    let workspace_grant = task
+        .and_then(|task| task.workspace_grant_id.as_deref())
+        .and_then(|grant_id| {
+            state
+                .workspace_grants
+                .iter()
+                .find(|grant| grant.grant_id == grant_id)
+        })
+        .map(|grant| {
+            serde_json::json!({
+                "grant_id": grant.grant_id,
+                "display_path": grant.display_path
+            })
+        });
+    Ok(serde_json::json!({
+        "canonicalState": true,
+        "context": {
+            "conversationId": saved_window.conversation_id,
+            "entitlementId": task.map(|task| task.entitlement_id.clone()).or(saved_window.entitlement_id),
+            "creatorId": task.and_then(|task| task.creator_id.clone()),
+            "productId": task.and_then(|task| task.product_id.clone()),
+            "workspaceGrant": workspace_grant,
+            "permissionMode": task.map(|task| task.permission_mode.clone()).unwrap_or_else(|| "ask-before-changes".into())
+        },
+        "frame": saved_window.frame,
+        "layout": {
+            "sidebarPreference": if saved_window.layout.sidebar_open { "open" } else { "closed" },
+            "inspectorPreference": if saved_window.layout.inspector_open { "open" } else { "closed" },
+            "sidebarWidth": saved_window.layout.sidebar_width,
+            "inspectorWidth": saved_window.layout.inspector_width,
+            "zoom": saved_window.layout.zoom
+        }
+    }))
 }
 
 #[tauri::command]
@@ -1928,159 +1704,81 @@ fn patch_window_settings(
         .as_object()
         .ok_or_else(|| "Window settings patch must be a JSON object".to_string())?
         .clone();
-    let _guard = app_settings_lock()
-        .lock()
-        .map_err(|_| "Desktop settings lock is unavailable")?;
-    let path = settings_path(&app)?;
-    let mut settings = read_app_settings_value(&path)?;
-    let root = settings
-        .as_object_mut()
-        .ok_or_else(|| "Desktop settings must be a JSON object".to_string())?;
-    let windows = root
-        .entry(WINDOW_SETTINGS_NAMESPACE.to_string())
-        .or_insert_with(|| Value::Object(serde_json::Map::new()))
-        .as_object_mut()
-        .ok_or_else(|| "Desktop window settings namespace must be a JSON object".to_string())?;
-    let window_settings = windows
-        .entry(window.label().to_string())
-        .or_insert_with(|| Value::Object(serde_json::Map::new()))
-        .as_object_mut()
-        .ok_or_else(|| "Desktop window settings entry must be a JSON object".to_string())?;
-    merge_json_object(window_settings, &patch);
-    let updated = Value::Object(window_settings.clone());
-    write_app_settings_value(&path, &settings)?;
-    Ok(updated)
-}
-
-fn app_settings_lock() -> &'static Mutex<()> {
-    static SETTINGS: OnceLock<Mutex<()>> = OnceLock::new();
-    SETTINGS.get_or_init(|| Mutex::new(()))
-}
-
-fn read_app_settings_value(path: &std::path::Path) -> Result<Value, String> {
-    match std::fs::read(path) {
-        Ok(bytes) => {
-            let value: Value = serde_json::from_slice(&bytes)
-                .map_err(|error| format!("desktop_settings_invalid: {error}"))?;
-            value
-                .is_object()
-                .then_some(value)
-                .ok_or_else(|| "Desktop settings must be a JSON object".to_string())
+    desktop_state::update(&app, |state| {
+        let saved_window = state.windows.entry(window.label().to_string()).or_default();
+        if let Some(frame) = patch.get("frame") {
+            saved_window.frame = (!frame.is_null()).then(|| frame.clone());
         }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            Ok(Value::Object(serde_json::Map::new()))
-        }
-        Err(error) => Err(error.to_string()),
-    }
-}
-
-fn write_app_settings_value(path: &std::path::Path, settings: &Value) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(to_string)?;
-    }
-    let serialized = serde_json::to_vec(settings).map_err(to_string)?;
-    write_settings_file(path, &serialized).map_err(to_string)
-}
-
-/// Persist settings through an independently named temporary file. The
-/// renderer may have more than one native window, and a fixed `.tmp` sibling
-/// would let concurrent writes overwrite one another before the final rename.
-fn write_settings_file(path: &std::path::Path, settings: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
-
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("settings.json");
-    let temporary =
-        path.with_file_name(format!("{file_name}.{}.tmp", uuid::Uuid::new_v4().simple()));
-    let result = (|| {
-        let mut file = std::fs::OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temporary)?;
-        file.write_all(settings)?;
-        file.sync_all()?;
-        drop(file);
-        replace_file(&temporary, path)
-    })();
-    if result.is_err() {
-        let _ = std::fs::remove_file(&temporary);
-    }
-    result
-}
-
-#[cfg(not(target_os = "windows"))]
-fn replace_file(source: &std::path::Path, destination: &std::path::Path) -> std::io::Result<()> {
-    std::fs::rename(source, destination)
-}
-
-#[cfg(target_os = "windows")]
-fn replace_file(source: &std::path::Path, destination: &std::path::Path) -> std::io::Result<()> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Storage::FileSystem::{
-        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
-    };
-
-    let source = source
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect::<Vec<_>>();
-    let destination = destination
-        .as_os_str()
-        .encode_wide()
-        .chain(Some(0))
-        .collect::<Vec<_>>();
-    for attempt in 0..8 {
-        let moved = unsafe {
-            MoveFileExW(
-                source.as_ptr(),
-                destination.as_ptr(),
-                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-            )
-        };
-        if moved != 0 {
-            return Ok(());
-        }
-        let error = std::io::Error::last_os_error();
-        if error.kind() != std::io::ErrorKind::PermissionDenied || attempt == 7 {
-            return Err(error);
-        }
-        std::thread::sleep(std::time::Duration::from_millis(5));
-    }
-    unreachable!()
-}
-
-// RFC 7396-style merge semantics scoped to one window namespace. `null`
-// removes a property, so a window can clear an individual persisted pane size
-// without replacing another window's settings.
-fn merge_json_object(
-    target: &mut serde_json::Map<String, Value>,
-    patch: &serde_json::Map<String, Value>,
-) {
-    for (key, value) in patch {
-        match value {
-            Value::Null => {
-                target.remove(key);
+        if let Some(layout) = patch.get("layout").and_then(Value::as_object) {
+            if let Some(value) = layout.get("sidebarPreference").and_then(Value::as_str) {
+                saved_window.layout.sidebar_open = value == "open";
             }
-            Value::Object(patch_object) => {
-                let target_value = target
-                    .entry(key.clone())
-                    .or_insert_with(|| Value::Object(serde_json::Map::new()));
-                if !target_value.is_object() {
-                    *target_value = Value::Object(serde_json::Map::new());
+            if let Some(value) = layout.get("inspectorPreference").and_then(Value::as_str) {
+                saved_window.layout.inspector_open = value == "open";
+            }
+            if let Some(value) = layout.get("sidebarWidth") {
+                saved_window.layout.sidebar_width = value.as_f64();
+            }
+            if let Some(value) = layout.get("inspectorWidth") {
+                saved_window.layout.inspector_width = value.as_f64();
+            }
+            if let Some(value) = layout.get("zoom") {
+                saved_window.layout.zoom = value.as_f64();
+            }
+        }
+        if let Some(context) = patch.get("context").and_then(Value::as_object) {
+            if let Some(value) = context.get("conversationId") {
+                saved_window.conversation_id = value
+                    .as_str()
+                    .map(str::to_string)
+                    .filter(|value| !value.is_empty());
+            }
+            if let Some(value) = context.get("entitlementId") {
+                saved_window.entitlement_id = value
+                    .as_str()
+                    .map(str::to_string)
+                    .filter(|value| !value.is_empty());
+            }
+            if let Some(conversation_id) = saved_window.conversation_id.clone() {
+                let task = state.tasks.entry(conversation_id).or_insert_with(|| {
+                    desktop_state::DesktopTaskState {
+                        entitlement_id: String::new(),
+                        creator_id: None,
+                        product_id: None,
+                        workspace_grant_id: None,
+                        permission_mode: "ask-before-changes".into(),
+                    }
+                });
+                if let Some(value) = context.get("entitlementId").and_then(Value::as_str) {
+                    task.entitlement_id = value.to_string();
                 }
-                let target_object = target_value
-                    .as_object_mut()
-                    .expect("JSON object was assigned immediately above");
-                merge_json_object(target_object, patch_object);
-            }
-            value => {
-                target.insert(key.clone(), value.clone());
+                if let Some(value) = context.get("creatorId") {
+                    task.creator_id = value
+                        .as_str()
+                        .map(str::to_string)
+                        .filter(|value| !value.is_empty());
+                }
+                if let Some(value) = context.get("productId").or_else(|| context.get("agentId")) {
+                    task.product_id = value
+                        .as_str()
+                        .map(str::to_string)
+                        .filter(|value| !value.is_empty());
+                }
+                if let Some(value) = context.get("permissionMode").and_then(Value::as_str) {
+                    task.permission_mode = value.to_string();
+                }
+                if let Some(value) = context.get("workspaceGrant") {
+                    task.workspace_grant_id = value
+                        .get("grant_id")
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                        .filter(|value| !value.is_empty());
+                }
             }
         }
-    }
+        Ok(())
+    })?;
+    read_window_settings(app, window)
 }
 
 #[tauri::command]
@@ -2133,14 +1831,6 @@ fn open_external_url_windows(url: &str) -> Result<(), String> {
     ((result as usize) > 32)
         .then_some(())
         .ok_or_else(|| "The system browser could not be opened".into())
-}
-
-fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(app
-        .path()
-        .app_data_dir()
-        .map_err(to_string)?
-        .join(SETTINGS_FILE))
 }
 
 fn is_allowed_browse_url(url: &str) -> bool {
@@ -2205,71 +1895,23 @@ fn read_product_open_links(app: AppHandle) -> Result<Vec<String>, String> {
     Ok(urls.iter().filter_map(normalize_product_open_url).collect())
 }
 
-fn workspace_grants_path(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(app
-        .path()
-        .app_data_dir()
-        .map_err(to_string)?
-        .join(WORKSPACE_GRANTS_FILE))
-}
-
-fn read_workspace_grants(path: &std::path::Path) -> Result<WorkspaceGrantStore, String> {
-    match std::fs::read(path) {
-        Ok(bytes) => {
-            let store: WorkspaceGrantStore = serde_json::from_slice(&bytes).map_err(|error| {
-                format!("workspace_grant_store_invalid: Hatch could not read its native workspace grants: {error}")
-            })?;
-            if store.schema_version != WORKSPACE_GRANTS_SCHEMA_VERSION {
-                return Err("workspace_grant_store_invalid: Unsupported native workspace grant version".into());
-            }
-            Ok(store)
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            Ok(WorkspaceGrantStore::default())
-        }
-        Err(error) => Err(format!(
-            "workspace_grant_store_unavailable: Hatch could not read its native workspace grants: {error}"
-        )),
-    }
-}
-
-fn write_workspace_grants(
-    path: &std::path::Path,
-    store: &WorkspaceGrantStore,
-) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(to_string)?;
-    }
-    let serialized = serde_json::to_vec(store).map_err(to_string)?;
-    let temporary = path.with_extension("json.tmp");
-    let mut options = std::fs::OpenOptions::new();
-    options.create(true).truncate(true).write(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    use std::io::Write;
-    let mut file = options.open(&temporary).map_err(to_string)?;
-    file.write_all(&serialized).map_err(to_string)?;
-    file.sync_all().map_err(to_string)?;
-    std::fs::rename(&temporary, path).map_err(to_string)
-}
-
 fn workspace_grant_record(app: &AppHandle, grant_id: &str) -> Result<WorkspaceGrantRecord, String> {
     if grant_id.trim().is_empty() {
         return Err(
             "workspace_grant_missing: Choose a workspace folder before granting access".into(),
         );
     }
-    let _guard = workspace_grants_lock()
-        .lock()
-        .map_err(|_| "workspace_grant_store_unavailable: Native workspace grant lock failed")?;
-    let path = workspace_grants_path(app)?;
-    read_workspace_grants(&path)?
-        .grants
-        .get(grant_id)
-        .cloned()
+    desktop_state::read(app)?
+        .workspace_grants
+        .into_iter()
+        .find(|grant| grant.grant_id == grant_id)
+        .map(|grant| WorkspaceGrantRecord {
+            display_path: grant.display_path,
+            bookmark: grant.bookmark,
+            security_scoped: grant.security_scoped,
+            native_platform: grant.native_platform,
+            canonical_path_utf16: grant.canonical_path_utf16,
+        })
         .ok_or_else(|| {
             "workspace_grant_stale: The saved workspace permission is missing or was revoked"
                 .to_string()
@@ -2281,25 +1923,36 @@ fn save_workspace_grant(
     grant_id: String,
     record: WorkspaceGrantRecord,
 ) -> Result<(), String> {
-    let _guard = workspace_grants_lock()
-        .lock()
-        .map_err(|_| "workspace_grant_store_unavailable: Native workspace grant lock failed")?;
-    let path = workspace_grants_path(app)?;
-    let mut store = read_workspace_grants(&path)?;
-    store.grants.insert(grant_id, record);
-    write_workspace_grants(&path, &store)
+    desktop_state::update(app, |state| {
+        state
+            .workspace_grants
+            .retain(|grant| grant.grant_id != grant_id);
+        state
+            .workspace_grants
+            .push(desktop_state::DesktopWorkspaceState {
+                grant_id,
+                display_path: record.display_path,
+                native_platform: record.native_platform,
+                bookmark: record.bookmark,
+                security_scoped: record.security_scoped,
+                canonical_path_utf16: record.canonical_path_utf16,
+            });
+        Ok(())
+    })
 }
 
 fn remove_workspace_grant(app: &AppHandle, grant_id: &str) -> Result<(), String> {
-    let _guard = workspace_grants_lock()
-        .lock()
-        .map_err(|_| "workspace_grant_store_unavailable: Native workspace grant lock failed")?;
-    let path = workspace_grants_path(app)?;
-    let mut store = read_workspace_grants(&path)?;
-    if store.grants.remove(grant_id).is_some() {
-        write_workspace_grants(&path, &store)?;
-    }
-    Ok(())
+    desktop_state::update(app, |state| {
+        state
+            .workspace_grants
+            .retain(|grant| grant.grant_id != grant_id);
+        for task in state.tasks.values_mut() {
+            if task.workspace_grant_id.as_deref() == Some(grant_id) {
+                task.workspace_grant_id = None;
+            }
+        }
+        Ok(())
+    })
 }
 
 #[cfg(target_os = "macos")]
@@ -2580,6 +2233,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             default_workspace,
             ensure_workspace,
+            read_task_settings,
             read_native_drop_contexts,
             pick_native_drop_files,
             discard_native_drop_contexts,
@@ -2698,13 +2352,10 @@ fn to_string(error: impl std::fmt::Display) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        clear_ephemeral_auth_token, default_workspace, is_allowed_browse_url, is_apple_team_id,
-        merge_json_object, persistent_session_build_requested_from, read_ephemeral_auth_token,
-        replace_file, validate_artifact_relative_path, validate_workspace_path,
-        windows_backend_can_persist_opaque_session, write_ephemeral_auth_token,
-        write_settings_file, ChangePermissionPolicy, NativeDropContextStore, NativeToolAuthority,
-        NativeToolCall, ToolCallDisposition, WindowToolCallKey, WindowToolContext,
-        WindowsOpaqueTokenBackend, PRODUCTION_CREDENTIAL_SERVICE,
+        default_workspace, is_allowed_browse_url, validate_artifact_relative_path,
+        validate_workspace_path, ChangePermissionPolicy, NativeDropContextStore,
+        NativeToolAuthority, NativeToolCall, ToolCallDisposition, WindowToolCallKey,
+        WindowToolContext,
     };
     use serde_json::json;
     use std::sync::{atomic::AtomicBool, Arc};
@@ -2756,47 +2407,6 @@ mod tests {
         assert_eq!(output["type"], "tool_call.result");
         assert_eq!(output["status"], "ok");
         assert_eq!(output["result"]["content"], "Hatch desktop local harness");
-    }
-
-    #[test]
-    fn settings_file_replacement_overwrites_an_existing_destination() {
-        let temp = tempdir().unwrap();
-        let source = temp.path().join("settings.json.tmp");
-        let destination = temp.path().join("settings.json");
-        std::fs::write(&source, br#"{"language":"ja"}"#).unwrap();
-        std::fs::write(&destination, br#"{"language":"en"}"#).unwrap();
-
-        replace_file(&source, &destination).unwrap();
-
-        assert_eq!(
-            std::fs::read_to_string(destination).unwrap(),
-            r#"{"language":"ja"}"#
-        );
-        assert!(!source.exists());
-    }
-
-    #[test]
-    fn concurrent_settings_writes_use_independent_temporary_files() {
-        let temp = tempdir().unwrap();
-        let destination = temp.path().join("settings.json");
-        std::fs::write(&destination, br#"{"language":"system"}"#).unwrap();
-        let payloads =
-            ["en", "zh-CN", "ja"].map(|language| format!(r#"{{"language":"{language}"}}"#));
-        let handles = payloads.clone().map(|payload| {
-            let destination = destination.clone();
-            std::thread::spawn(move || write_settings_file(&destination, payload.as_bytes()))
-        });
-
-        for handle in handles {
-            handle.join().unwrap().unwrap();
-        }
-
-        let stored = std::fs::read_to_string(&destination).unwrap();
-        assert!(payloads.contains(&stored));
-        assert!(std::fs::read_dir(temp.path())
-            .unwrap()
-            .filter_map(Result::ok)
-            .all(|entry| !entry.file_name().to_string_lossy().ends_with(".tmp")));
     }
 
     #[test]
@@ -2935,88 +2545,6 @@ mod tests {
         )
         .unwrap();
         assert!(super::normalize_product_open_url(&malformed).is_none());
-    }
-
-    #[test]
-    fn keychain_backend_never_delegates_session_secrets_to_the_security_cli() {
-        let source = include_str!("lib.rs");
-        assert!(!source.contains(concat!("/usr/bin/", "security")));
-        assert!(!source.contains(concat!("add-generic-", "password")));
-    }
-
-    #[test]
-    fn development_and_ad_hoc_build_switches_never_enable_persistent_sessions() {
-        assert!(!persistent_session_build_requested_from(None));
-        assert!(!persistent_session_build_requested_from(Some("")));
-        assert!(!persistent_session_build_requested_from(Some("0")));
-        assert!(!persistent_session_build_requested_from(Some("true")));
-        assert!(persistent_session_build_requested_from(Some("1")));
-    }
-
-    #[test]
-    fn ephemeral_sessions_remain_process_local_and_can_be_cleared() {
-        clear_ephemeral_auth_token().unwrap();
-        assert_eq!(read_ephemeral_auth_token().unwrap(), None);
-        write_ephemeral_auth_token("memory-only-token").unwrap();
-        assert_eq!(
-            read_ephemeral_auth_token().unwrap().as_deref(),
-            Some("memory-only-token")
-        );
-        clear_ephemeral_auth_token().unwrap();
-        assert_eq!(read_ephemeral_auth_token().unwrap(), None);
-    }
-
-    #[test]
-    fn production_credential_namespace_does_not_reuse_the_dev_uat_item() {
-        assert_ne!(
-            PRODUCTION_CREDENTIAL_SERVICE,
-            "dev.hatch.local.desktop-session.v2"
-        );
-    }
-
-    #[test]
-    fn generic_windows_credentials_are_not_approved_for_opaque_session_persistence() {
-        assert!(!windows_backend_can_persist_opaque_session(
-            WindowsOpaqueTokenBackend::GenericCredentialManager
-        ));
-        assert!(!windows_backend_can_persist_opaque_session(
-            WindowsOpaqueTokenBackend::AppContainerCredentialLockerUnapproved
-        ));
-    }
-
-    #[test]
-    fn apple_team_id_is_fixed_width_and_non_injectable() {
-        assert!(is_apple_team_id("AB12CD34EF"));
-        assert!(!is_apple_team_id("AB12CD34E"));
-        assert!(!is_apple_team_id("AB12CD34EF; anchor trusted"));
-        assert!(!is_apple_team_id("ab12cd34ef"));
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn persistent_keychain_requires_the_exact_developer_id_requirement_shape() {
-        use super::developer_id_application_requirement;
-
-        assert!(developer_id_application_requirement("dev.hatch.local", "AB12CD34EF").is_ok());
-        assert!(developer_id_application_requirement("dev.hatch.local", "not-a-team").is_err());
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    #[ignore = "isolated Login Keychain smoke; run explicitly on an unlocked macOS account"]
-    fn security_framework_keychain_round_trip_smoke() {
-        use super::{
-            delete_keychain_secret_if_present, read_keychain_secret, write_keychain_secret,
-        };
-        let service = format!("dev.hatch.test.desktop-session.{}", std::process::id());
-        delete_keychain_secret_if_present(&service).unwrap();
-        write_keychain_secret(&service, b"isolated-smoke-token").unwrap();
-        assert_eq!(
-            read_keychain_secret(&service).unwrap(),
-            Some(b"isolated-smoke-token".to_vec())
-        );
-        delete_keychain_secret_if_present(&service).unwrap();
-        assert_eq!(read_keychain_secret(&service).unwrap(), None);
     }
 
     #[test]
@@ -3288,74 +2816,6 @@ mod tests {
             .approve(&key)
             .unwrap_err()
             .contains("tool_approval_missing"));
-    }
-
-    #[test]
-    fn window_settings_merge_patch_keeps_other_window_state() {
-        let mut settings = serde_json::Map::from_iter([
-            (
-                "window-a".to_string(),
-                json!({ "sidebar": { "width": 260 }, "draft": "keep" }),
-            ),
-            (
-                "window-b".to_string(),
-                json!({ "inspector": { "visible": true } }),
-            ),
-        ]);
-        let patch = serde_json::Map::from_iter([
-            ("sidebar".to_string(), json!({ "hidden": true })),
-            ("draft".to_string(), serde_json::Value::Null),
-        ]);
-        let window_a = settings
-            .get_mut("window-a")
-            .unwrap()
-            .as_object_mut()
-            .unwrap();
-        merge_json_object(window_a, &patch);
-        assert_eq!(settings["window-a"]["sidebar"]["width"], 260);
-        assert_eq!(settings["window-a"]["sidebar"]["hidden"], true);
-        assert!(settings["window-a"].get("draft").is_none());
-        assert_eq!(settings["window-b"]["inspector"]["visible"], true);
-    }
-
-    #[test]
-    fn profile_settings_patch_keeps_other_accounts_and_window_namespace() {
-        let mut settings = json!({
-            "schema_version": 1,
-            "accounts": {
-                "user-a": { "theme": "dark", "workspace_grant": { "grant_id": "old" } },
-                "user-b": { "permission_mode": "read-only" }
-            },
-            "window_settings": {
-                "conversation-a": { "context": { "conversationId": "conv_a" } }
-            }
-        });
-        super::apply_profile_settings_patch(
-            &mut settings,
-            &json!({
-                "profileId": "user-a",
-                "set": { "workspace_grant": { "grant_id": "new" }, "permission_mode": "allow-changes" },
-                "remove": ["theme"]
-            }),
-        )
-        .unwrap();
-        assert_eq!(
-            settings["accounts"]["user-a"]["workspace_grant"]["grant_id"],
-            "new"
-        );
-        assert_eq!(
-            settings["accounts"]["user-a"]["permission_mode"],
-            "allow-changes"
-        );
-        assert!(settings["accounts"]["user-a"].get("theme").is_none());
-        assert_eq!(
-            settings["accounts"]["user-b"]["permission_mode"],
-            "read-only"
-        );
-        assert_eq!(
-            settings["window_settings"]["conversation-a"]["context"]["conversationId"],
-            "conv_a"
-        );
     }
 
     #[cfg(unix)]

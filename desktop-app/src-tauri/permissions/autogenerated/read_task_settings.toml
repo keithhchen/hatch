@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-read-task-settings"
+description = "Enables the read_task_settings command without any pre-configured scope."
+commands.allow = ["read_task_settings"]
+
+[[permission]]
+identifier = "deny-read-task-settings"
+description = "Denies the read_task_settings command without any pre-configured scope."
+commands.deny = ["read_task_settings"]

@@ -1122,10 +1122,7 @@ async function validatorFromEvents(events, options) {
     replayClock = new Date(event.occurred_at);
     let replayed;
     try {
-      replayed = await validator.append(event.event_type, eventPayload(event), {
-        eventId: event.event_id,
-        idempotencyKey: event.idempotency_key
-      });
+      replayed = await validator.replayPersistedEvent(event);
     } catch (error) {
       throw corruptLedgerError(error);
     }

@@ -127,6 +127,9 @@ jobs:
           RELEASE_TAG: ${{ env.RELEASE_TAG }}
         run: |
           set -euo pipefail
+          if test -f /opt/hatch/compose.app.yml; then
+            cp -f /opt/hatch/compose.app.yml /opt/hatch/compose.app.yml.previous
+          fi
           install -m 640 compose.app.yml /opt/hatch/
           install -m 640 compose.infra.yml /opt/hatch/
       - name: Install LLM provider credentials
@@ -418,6 +421,9 @@ jobs:
           set -euo pipefail
           cd /opt/hatch
           if test -f .release.env.previous; then
+            if test -f compose.app.yml.previous; then
+              cp -f compose.app.yml.previous compose.app.yml
+            fi
             cp .release.env.previous .release.env
             docker compose --env-file .env --env-file .release.env -f compose.app.yml up -d --no-deps registry factory-worker runtime dashboard caddy
             docker compose --env-file .env --env-file .release.env -f compose.app.yml ps --status running --services | grep -Fxq factory-worker

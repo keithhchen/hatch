@@ -123,7 +123,7 @@ describe("account sessions", () => {
     await expect(revokeAuthSession("https://hatch.example", "opaque-token", fetchImpl)).resolves.toBeUndefined();
   });
 
-  it("does not make local Keychain deletion wait for a hung server revoke", async () => {
+  it("does not make local session deletion wait for a hung server revoke", async () => {
     const events = [];
     const storage = {
       async clearToken() { events.push("local-clear"); }
@@ -153,28 +153,28 @@ describe("account sessions", () => {
     await expect(storage.readToken()).resolves.toBe("native-token");
     await storage.writeToken("next-token");
     await storage.clearToken();
-    expect(invoke).toHaveBeenCalledWith("write_auth_token", { token: "next-token" });
+    expect(invoke).toHaveBeenCalledWith("write_auth_token", { token: "next-token", expiresAt: null });
     expect(invoke).toHaveBeenCalledWith("clear_auth_token");
   });
 
-  it("surfaces a packaged Keychain clear failure instead of claiming local sign-out", async () => {
+  it("surfaces a packaged session clear failure instead of claiming local sign-out", async () => {
     const invoke = vi.fn(async (command) => {
-      if (command === "clear_auth_token") throw new Error("Keychain is locked");
+      if (command === "clear_auth_token") throw new Error("Desktop state is locked");
       return command === "read_auth_token" ? "native-token" : undefined;
     });
     const storage = createTauriAuthStorage(invoke, { strict: true });
 
     const error = await storage.clearToken().catch((caught) => caught);
     expect(error).toMatchObject({
-      message: "Keychain is locked",
+      message: "Desktop state is locked",
       i18nKey: "error.auth.secureSessionClearFailed"
     });
     expect(invoke).toHaveBeenCalledWith("clear_auth_token");
   });
 
-  it("treats packaged Keychain read or ACL failures as signed out", async () => {
+  it("treats packaged session read failures as signed out", async () => {
     const storage = createTauriAuthStorage(async (command) => {
-      if (command === "read_auth_token") throw new Error("Keychain ACL denied access");
+      if (command === "read_auth_token") throw new Error("Desktop state denied access");
     }, { strict: true });
 
     await expect(loadSavedAuthSession(storage)).resolves.toBeNull();
@@ -188,7 +188,7 @@ describe("account sessions", () => {
   });
 
   it("annotates secure storage write failures without replacing their native message", async () => {
-    const nativeError = new Error("Keychain write denied");
+    const nativeError = new Error("Desktop state write denied");
     nativeError.code = "native_acl_denied";
     const error = await saveAuthSession(
       { accessToken: "opaque-token" },
@@ -197,7 +197,7 @@ describe("account sessions", () => {
 
     expect(error).toBe(nativeError);
     expect(error).toMatchObject({
-      message: "Keychain write denied",
+      message: "Desktop state write denied",
       code: "native_acl_denied",
       i18nKey: "error.auth.secureSessionWriteFailed"
     });

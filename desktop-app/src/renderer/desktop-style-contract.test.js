@@ -108,4 +108,10 @@ describe("desktop system appearance contract", () => {
       /\.desktop-connection-retry-button\s*\{[\s\S]*?flex:\s*0 0 auto;[\s\S]*?width:\s*auto;/
     );
   });
+
+  it("keeps the welcome titlebar drag region above the login surface", () => {
+    expect(stylesheet).toMatch(
+      /\.welcome-titlebar-drag-region\s*\{[\s\S]*?-webkit-app-region:\s*drag;[\s\S]*?height:\s*62px;[\s\S]*?position:\s*absolute;/
+    );
+  });
 });

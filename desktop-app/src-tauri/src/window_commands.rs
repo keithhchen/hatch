@@ -9,8 +9,6 @@
 
 use std::{
     collections::HashMap,
-    fs,
-    io::Write,
     path::PathBuf,
     sync::{Arc, Mutex, OnceLock},
 };
@@ -59,10 +57,8 @@ const CONTEXT_TOOL_COPY_OUTPUT: &str = "hatch.context.tool.copy-output";
 
 const MAX_CONVERSATION_ID_BYTES: usize = 256;
 const MAX_CONTEXT_TARGET_BYTES: usize = 1_024;
-const CONVERSATION_WINDOW_MANIFEST_FILE: &str = "conversation-windows.json";
 const CONVERSATION_WINDOW_MANIFEST_SCHEMA_VERSION: u32 = 1;
 const MAX_RESTORED_CONVERSATION_WINDOWS: usize = 16;
-const MAX_CONVERSATION_WINDOW_MANIFEST_BYTES: usize = 64 * 1024;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -96,60 +92,25 @@ fn normalize_manifest_conversation_ids(ids: impl IntoIterator<Item = String>) ->
     normalized
 }
 
-fn conversation_window_manifest_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
-    Ok(app
-        .path()
-        .app_data_dir()
-        .map_err(|error| format!("conversation_window_manifest_path_failed: {error}"))?
-        .join(CONVERSATION_WINDOW_MANIFEST_FILE))
-}
-
 fn read_conversation_window_manifest<R: Runtime>(
     app: &AppHandle<R>,
 ) -> Result<ConversationWindowManifest, String> {
-    let path = conversation_window_manifest_path(app)?;
-    let bytes = match fs::read(path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(ConversationWindowManifest::default())
-        }
-        Err(error) => return Err(format!("conversation_window_manifest_read_failed: {error}")),
-    };
-    if bytes.len() > MAX_CONVERSATION_WINDOW_MANIFEST_BYTES {
-        return Err("conversation_window_manifest_invalid: Manifest is too large".into());
-    }
-    let mut manifest: ConversationWindowManifest = serde_json::from_slice(&bytes)
-        .map_err(|error| format!("conversation_window_manifest_invalid: {error}"))?;
-    if manifest.schema_version != CONVERSATION_WINDOW_MANIFEST_SCHEMA_VERSION {
-        return Err("conversation_window_manifest_invalid: Unsupported schema version".into());
-    }
-    manifest.conversation_ids = normalize_manifest_conversation_ids(manifest.conversation_ids);
-    Ok(manifest)
+    let state = crate::desktop_state::read(app)?;
+    Ok(ConversationWindowManifest {
+        schema_version: CONVERSATION_WINDOW_MANIFEST_SCHEMA_VERSION,
+        conversation_ids: normalize_manifest_conversation_ids(state.open_conversation_ids),
+    })
 }
 
 fn write_conversation_window_manifest<R: Runtime>(
     app: &AppHandle<R>,
     manifest: &ConversationWindowManifest,
 ) -> Result<(), String> {
-    let path = conversation_window_manifest_path(app)?;
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("conversation_window_manifest_write_failed: {error}"))?;
-    }
-    let temporary = path.with_extension("json.tmp");
-    let bytes = serde_json::to_vec(manifest)
-        .map_err(|error| format!("conversation_window_manifest_encode_failed: {error}"))?;
-    let mut file = fs::OpenOptions::new();
-    file.create(true).truncate(true).write(true);
-    let mut file = file
-        .open(&temporary)
-        .map_err(|error| format!("conversation_window_manifest_write_failed: {error}"))?;
-    file.write_all(&bytes)
-        .map_err(|error| format!("conversation_window_manifest_write_failed: {error}"))?;
-    file.sync_all()
-        .map_err(|error| format!("conversation_window_manifest_sync_failed: {error}"))?;
-    fs::rename(&temporary, &path)
-        .map_err(|error| format!("conversation_window_manifest_commit_failed: {error}"))
+    let conversation_ids = normalize_manifest_conversation_ids(manifest.conversation_ids.clone());
+    crate::desktop_state::update(app, |state| {
+        state.open_conversation_ids = conversation_ids;
+        Ok(())
+    })
 }
 
 /// The renderer projects only presentational command state into this value.

@@ -19,7 +19,6 @@ const outputDirectory = path.join(root, "src-tauri/target/release/bundle/dmg");
 const outputPath = path.join(outputDirectory, `${productName}_${version}_${architecture}.dmg`);
 const staging = await mkdtemp(path.join(os.tmpdir(), "hatch-dmg-"));
 const distributionBuild = process.env.HATCH_DISTRIBUTION_BUILD === "1";
-const persistentSession = process.env.HATCH_PERSISTENT_SESSION === "1";
 const expectedAppleTeamId = String(process.env.HATCH_APPLE_TEAM_ID ?? "").trim();
 const signingIdentity = String(process.env.APPLE_SIGNING_IDENTITY ?? "-").trim() || "-";
 const runtimeUrl = String(
@@ -40,9 +39,6 @@ if (distributionBuild) {
   if (signingIdentity === "-") {
     throw new Error("Distribution Desktop builds require APPLE_SIGNING_IDENTITY; ad-hoc signing is UAT-only for native workspace grants.");
   }
-  if (!persistentSession) {
-    throw new Error("Distribution Desktop builds require HATCH_PERSISTENT_SESSION=1; development and ad-hoc UAT builds intentionally keep sessions in memory only.");
-  }
   if (!/^[A-Z0-9]{10}$/.test(expectedAppleTeamId)) {
     throw new Error("Distribution Desktop builds require HATCH_APPLE_TEAM_ID to be the 10-character Apple Developer Team ID.");
   }
@@ -51,14 +47,9 @@ if (distributionBuild) {
 try {
   await execFileAsync(path.join(root, "node_modules/.bin/tauri"), ["build", "--bundles", "app"], {
     cwd: root,
-    // Never let a stale shell variable make a normal local/UAT bundle touch
-    // Login Keychain. The distribution branch passes an explicit compile-time
-    // capability and Team ID; Rust verifies the final app's Developer ID
-    // identity again before it opens the production credential item.
     env: {
       ...process.env,
       CI: "true",
-      HATCH_PERSISTENT_SESSION: distributionBuild ? "1" : "0",
       HATCH_APPLE_TEAM_ID: distributionBuild ? expectedAppleTeamId : "",
       ...(runtimeUrl ? { VITE_HATCH_RUNTIME_URL: runtimeUrl } : {})
     },
@@ -100,9 +91,7 @@ try {
     app_signature: signingIdentity === "-"
       ? "ad-hoc UAT signature, strict verification passed"
       : "Developer ID signature, strict verification passed",
-    secure_session_storage: distributionBuild
-      ? "Developer ID + Team ID gated Keychain persistence"
-      : "process memory only; this build never touches Login Keychain",
+    session_storage: "opaque token in app-local state.json with owner-only file permissions",
     runtime_endpoint: distributionBuild ? runtimeUrl : "localhost development default or caller-supplied VITE_HATCH_RUNTIME_URL",
     note: distributionBuild
       ? "Distribution endpoint is embedded. This Developer ID-signed DMG must be notarized and stapled before publication."

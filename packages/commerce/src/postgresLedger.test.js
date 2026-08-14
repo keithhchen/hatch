@@ -1,8 +1,28 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import { CommerceInvariantError, CommerceService, PostgresCommerceLedger } from "./index.js";
 
 const FIXED_TIME = "2026-08-12T08:00:00.000Z";
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function persistedEvent(eventType, payload, eventId, idempotencyKey) {
+  return {
+    event_id: eventId,
+    event_type: eventType,
+    occurred_at: FIXED_TIME,
+    idempotency_key: idempotencyKey,
+    payload_digest: `sha256:${createHash("sha256").update(canonicalJson({ type: eventType, payload })).digest("hex")}`,
+    payload: structuredClone(payload)
+  };
+}
 
 test("Postgres ledger hydrates and atomically writes events with their outbox records", async () => {
   const pool = new FakePool();
@@ -33,6 +53,39 @@ test("Postgres ledger hydrates and atomically writes events with their outbox re
   assert.equal(pool.createdTables.has("commerce_inbox"), true);
   assert.equal(pool.createdTables.has("commerce_read_models"), true);
   assert.equal(pool.createdTables.has("commerce_read_model_state"), true);
+});
+
+test("read-time migration preserves retired Offer history without reopening Offer writes", async () => {
+  const pool = new FakePool();
+  const offerPayload = {
+    schema_version: 1,
+    offer_id: "offer_legacy",
+    product_id: "product_fixture",
+    creator_id: "creator_fixture",
+    amount_minor: 1900,
+    currency: "USD"
+  };
+  pool.database.events.push({
+    sequence: 1,
+    ...persistedEvent("offer.revision_created", offerPayload, "offer_event_1", "offer:legacy:revision")
+  });
+  pool.database.nextEventSequence = 2;
+
+  const ledger = await deterministicLedger(pool);
+  assert.equal(ledger.listEvents().length, 1);
+  assert.equal(ledger.listEvents()[0].event_type, "offer.revision_created");
+  await assert.rejects(
+    ledger.append("offer.revision_created", offerPayload, { idempotencyKey: "offer:new:revision" }),
+    (error) => error instanceof CommerceInvariantError && error.code === "unknown_event_type"
+  );
+
+  await ledger.appendMany(checkoutMutations());
+  assert.deepEqual(ledger.listEvents().map((event) => event.event_type), [
+    "offer.revision_created",
+    "order.placed",
+    "entitlement.granted"
+  ]);
+  assert.equal(ledger.readOrder("order_fixture").status, "fulfilled");
 });
 
 test("CommerceService query APIs use Postgres read models without replaying the audit stream", async () => {
