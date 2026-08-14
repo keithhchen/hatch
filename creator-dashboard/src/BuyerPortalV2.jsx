@@ -479,7 +479,7 @@ function AuthPage({ mode, search, request, navigate, session }) {
         <div>
           <span className="buyer-v2__eyebrow">Continue your task</span>
           {productIntent && intent.status === "loading" ? <div className="buyer-v2__auth-intent-skeleton" aria-label="Loading Product" /> : null}
-          {productIntent && intent.status === "ready" ? <><h1>{productName(intent.data)}</h1><p>{productPromise(intent.data)}</p><strong>Permanent access</strong><small>by {creatorName(intent.data)}</small></> : null}
+          {productIntent && intent.status === "ready" ? <><h1>{productName(intent.data)}</h1><p>{productPromise(intent.data)}</p><strong>Permanent access</strong><small>{creatorName(intent.data)}</small></> : null}
           {!productIntent ? <><h1>Your Agents, orders and access in one place.</h1><p>Use the same Hatch account on Web and Desktop.</p></> : null}
         </div>
       </section>
