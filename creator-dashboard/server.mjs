@@ -767,7 +767,8 @@ export async function createDashboardApp(options = {}) {
           profile
         });
       }
-      if (request.method === "POST" && ["/v1/auth/signup", "/v1/auth/sign-up"].includes(url.pathname)) {
+      const creatorSignup = ["/v1/auth/creator-signup", "/v1/auth/creator-sign-up"].includes(url.pathname);
+      if (request.method === "POST" && (creatorSignup || ["/v1/auth/signup", "/v1/auth/sign-up"].includes(url.pathname))) {
         const originError = crossSiteMutationError(request);
         if (originError) return send(response, originError.status, originError.body);
         const body = await readJson(request);
@@ -778,7 +779,7 @@ export async function createDashboardApp(options = {}) {
             email: body.email,
             password: body.password,
             display_name: body.display_name,
-            role: "user"
+            role: creatorSignup ? "creator" : "user"
           }),
           fetchImpl
         });

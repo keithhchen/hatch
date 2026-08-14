@@ -205,7 +205,7 @@
 .cpv2-storefront-frame h2 { max-width: 750px; margin: 15px 0 12px; font-size: clamp(42px, 6vw, 75px); line-height: var(--hatch-display-leading, .92); }
 .cpv2-storefront-frame > article > p { max-width: 650px; color: var(--hatch-text-secondary, #74675e); font-size: 15px; line-height: 1.65; }
 .cpv2-storefront-price { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin: 36px 0; padding: 22px; border: 1px solid var(--cpv2-seam); border-radius: var(--hatch-radius-control, 12px); background: var(--cpv2-moss-surface); color: var(--hatch-ui-ink, var(--hatch-ink, #201813)); box-shadow: inset 0 1px 0 var(--hatch-ui-light-edge, rgba(255,255,255,.76)); }
-.cpv2-storefront-price strong { font-family: var(--hatch-font-display, Georgia, serif); font-size: 26px; font-weight: 400; }
+.cpv2-storefront-price strong { font-family: var(--hatch-font-display, Georgia, serif); font-size: 26px; font-weight: 400; letter-spacing: var(--hatch-display-tracking, -.055em); line-height: var(--hatch-display-leading, .90); }
 .cpv2-storefront-price button { min-height: 44px; padding: 0 14px; border: 0; border-radius: 8px; }
 .cpv2-storefront-frame section { padding: 20px 0; border-top: 1px solid var(--hatch-border-subtle, rgba(54,41,31,.1)); }
 .cpv2-storefront-frame section h3 { margin: 0 0 6px; font-size: 13px; }
@@ -263,7 +263,7 @@
 .cpv2-payout-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .cpv2-payout-stats article { display: flex; min-height: 175px; flex-direction: column; padding: 23px; }
 .cpv2-payout-stats span { color: var(--hatch-text-secondary, #74675e); font-size: 11px; }
-.cpv2-payout-stats strong { margin: auto 0 5px; font-family: var(--hatch-font-display, Georgia, serif); font-size: clamp(30px, 4vw, 46px); font-weight: 400; }
+.cpv2-payout-stats strong { margin: auto 0 5px; font-family: var(--hatch-font-display, Georgia, serif); font-size: clamp(30px, 4vw, 46px); font-weight: 400; letter-spacing: var(--hatch-display-tracking, -.055em); line-height: var(--hatch-display-leading, .90); }
 .cpv2-payout-stats small { color: var(--hatch-text-secondary, #74675e); font-size: 9px; }
 
 .cpv2-rollback { display: grid; gap: 17px; margin-top: 17px; }

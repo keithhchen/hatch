@@ -82,9 +82,11 @@ test("Web and Storybook consume the shared package and its canonical tokens", ()
   assert.match(storefrontCss, /\.storefront-shared__hero\s*\{[^}]*padding:\s*clamp\([^;]+\)\s+4px\s+clamp\(/s);
   assert.match(storefrontCss, /\.storefront-shared__access\s*\{[^}]*background:\s*color-mix\([^;]+var\(--hatch-ui-surface-raised/s);
   assert.doesNotMatch(storefrontCss, /\.storefront-shared__access\s*\{[^}]*background:\s*linear-gradient/s);
-  assert.match(desktopCss, /\.desktop-window-shell\s*\{[^}]*--surface-window:\s*var\(--hatch-atmosphere-base\)/s);
+  assert.match(desktopCss, /\.desktop-window-shell\s*\{[^}]*--surface-window:\s*var\(--hatch-ui-surface-window\)/s);
   assert.match(desktopCss, /\.desktop-window-shell::before\s*\{[^}]*background:\s*var\(--hatch-atmosphere-warm-field\)/s);
   assert.match(desktopCss, /\.desktop-sidebar-heading \.hatch-wordmark\s*\{[^}]*letter-spacing:\s*var\(--hatch-display-tracking\)/s);
+  assert.doesNotMatch(desktopCss, /\.welcome-brand \.hatch-brand__wordmark\s*\{[^}]*letter-spacing:\s*-\.035em/s);
+  assert.doesNotMatch(desktopCss, /\.desktop-sidebar-heading \.hatch-wordmark\s*\{[^}]*letter-spacing:\s*-\.035em/s);
   assert.match(buyerPortal, /className="buyer-v2__settings-surface"/);
   assert.doesNotMatch(buyerPortal, /<div><dt>Role<\/dt>/);
 });
@@ -125,10 +127,17 @@ test("Theme Lab edits the same token knobs used by the shared CSS", () => {
     "--hatch-shadow-control",
     "--hatch-shadow-dialog",
     "--hatch-ui-status-progress-bg",
+    "--hatch-ui-surface-window",
+    "--hatch-ui-surface-sidebar",
+    "--hatch-ui-surface-toolbar",
+    "--hatch-ui-surface-inspector",
+    "--hatch-ui-primary-hover",
     "--hatch-atmosphere-base",
     "--hatch-atmosphere-warm-field",
     "--hatch-atmosphere-cool-field"
   ]) assert.match(tokens, new RegExp(token));
+
+  assert.match(tokens, /--hatch-ui-surface-window:\s*var\(--hatch-atmosphere-base\)/);
 
   assert.match(sharedCss, /background: var\(--hatch-atmosphere-warm-field\)/);
   assert.match(sharedCss, /background: var\(--hatch-atmosphere-cool-field\)/);

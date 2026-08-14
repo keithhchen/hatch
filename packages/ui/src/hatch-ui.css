@@ -63,7 +63,7 @@
 .hui-story-canvas, .hui-story-canvas * { box-sizing: border-box; }
 .hui-story-section { width: min(1040px, 100%); margin: 0 auto; padding: 24px; border: 1px solid var(--hui-border-soft); border-radius: 26px; background: rgba(251,247,240,.88); box-shadow: 0 18px 54px rgba(56,40,25,.07); }
 .hui-story-section + .hui-story-section { margin-top: 22px; }
-.hui-story-section > h1, .hui-story-section > h2 { margin: 0 0 20px; color: var(--hui-ink); font-family: var(--hui-font-display); font-weight: 400; }
+.hui-story-section > h1, .hui-story-section > h2 { margin: 0 0 20px; color: var(--hui-ink); font-family: var(--hui-font-display); font-weight: 400; letter-spacing: var(--hatch-display-tracking); line-height: var(--hatch-display-leading); }
 .hui-story-section > h1 { font-size: 38px; }
 .hui-story-section > h2 { font-size: 29px; }
 .hui-story-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 18px; }
@@ -101,8 +101,8 @@
 .hui-button--medium { min-height: 36px; padding: 0 15px; font-size: 12px; }
 .hui-button--large { min-height: 44px; padding: 0 19px; font-size: 13px; }
 .hui-button--primary { color: var(--hatch-ui-on-primary); background: var(--hatch-ui-primary); box-shadow: 0 1px 1px rgba(34, 25, 18, .18), 0 2px 6px rgba(34, 25, 18, .10); }
-.hui-button--primary:not(:disabled):hover { background: #474038; }
-.hui-button--primary:not(:disabled):active { background: #1c1916; box-shadow: 0 1px 1px rgba(34, 25, 18, .12); }
+.hui-button--primary:not(:disabled):hover { background: var(--hatch-ui-primary-hover); }
+.hui-button--primary:not(:disabled):active { background: var(--hatch-ui-primary-active); box-shadow: 0 1px 1px rgba(34, 25, 18, .12); }
 .hui-button--secondary { color: #4c463f; background: rgba(255, 252, 247, .80); box-shadow: inset 0 0 0 1px var(--hui-border); }
 .hui-button--secondary:not(:disabled):hover { color: var(--hui-ink); background: #fffdf9; }
 .hui-button--ghost { color: var(--hui-ink-soft); background: transparent; }
@@ -293,7 +293,7 @@
 .hui-progress > div { width: 100%; height: 100%; border-radius: inherit; background: var(--hui-accent); transition: transform var(--hui-motion-layout); }
 .hui-state { min-height: 250px; display: grid; place-content: center; place-items: center; padding: 30px; border: 1px solid var(--hui-border-soft); border-radius: 24px; color: var(--hui-ink-soft); background: rgba(251,247,240,.72); text-align: center; }
 .hui-state > svg { width: 25px; height: 25px; color: var(--hui-ink-faint); }
-.hui-state h2 { margin: 15px 0 7px; color: var(--hui-ink); font-family: var(--hui-font-display); font-size: 27px; font-weight: 400; }
+.hui-state h2 { margin: 15px 0 7px; color: var(--hui-ink); font-family: var(--hui-font-display); font-size: 27px; font-weight: 400; letter-spacing: var(--hatch-display-tracking); line-height: var(--hatch-display-leading); }
 .hui-state p { max-width: 420px; margin: 0 0 18px; font-size: 12px; line-height: 1.55; }
 .hui-state.is-error > svg { color: var(--hui-danger); }
 
@@ -394,7 +394,7 @@
 .hatch-checkout-summary > dl div { display: flex; justify-content: space-between; }
 .hatch-checkout-summary > dl dd { margin: 0; font-size: 12px; font-variant-numeric: tabular-nums; }
 .hatch-checkout-summary > dl .is-total { margin-top: 5px; padding-top: 12px; border-top: 1px solid var(--hui-border); }
-.hatch-checkout-summary > dl .is-total dt, .hatch-checkout-summary > dl .is-total dd { color: var(--hui-ink); font-family: var(--hui-font-display); font-size: 20px; }
+.hatch-checkout-summary > dl .is-total dt, .hatch-checkout-summary > dl .is-total dd { color: var(--hui-ink); font-family: var(--hui-font-display); font-size: 20px; letter-spacing: var(--hatch-display-tracking); line-height: var(--hatch-display-leading); }
 .hatch-checkout-summary > .hui-button { width: 100%; margin-top: 8px; }
 .hatch-checkout-summary > .hui-choice, .hatch-checkout-summary > .hui-alert { margin-top: 13px; }
 .hatch-checkout-summary__legal { margin: 11px 0 0; color: var(--hui-ink-faint); text-align: center; font-size: 10px; line-height: 1.45; }

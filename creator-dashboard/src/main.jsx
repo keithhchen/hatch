@@ -93,6 +93,18 @@ function App() {
     return acceptSession(result);
   }, [acceptSession]);
 
+  const creatorSignUp = useCallback(async (details) => {
+    const result = await dashboardRequest("/v1/auth/creator-signup", {
+      method: "POST",
+      body: JSON.stringify({
+        email: details.email,
+        password: details.password,
+        display_name: details.display_name
+      })
+    });
+    return acceptSession(result);
+  }, [acceptSession]);
+
   const signOut = useCallback(async () => {
     try {
       await dashboardRequest("/v1/auth/logout", { method: "POST" });
@@ -110,6 +122,7 @@ function App() {
     user: profile,
     signIn,
     signUp,
+    creatorSignUp,
     signOut,
     invalidate
   };
@@ -129,7 +142,10 @@ function App() {
       return <RouteRedirect to={`/sign-in?returnTo=${encodeURIComponent(location.href)}`} navigate={location.navigate} />;
     }
     if (profile?.role !== "creator") {
-      return <RoleBoundary navigate={location.navigate} />;
+      return <RoleBoundary navigate={location.navigate} onCreateCreator={async () => {
+        await signOut();
+        location.navigate(`/sign-up?returnTo=${encodeURIComponent(location.href)}`, { replace: true });
+      }} />;
     }
     return (
       <CreatorPortalV2
@@ -193,12 +209,13 @@ function AppLoading() {
   return <main className="loading-page" aria-busy="true"><HatchBrand className="loading-brand" /><p>Opening your workspace…</p></main>;
 }
 
-function RoleBoundary({ navigate }) {
+function RoleBoundary({ navigate, onCreateCreator }) {
   return (
     <main className="loading-page">
       <HatchBrand className="loading-brand" />
       <h1>Creator access is required.</h1>
       <p>This account can use purchased Agents, but it cannot edit Creator products.</p>
+      {onCreateCreator ? <Button type="button" onClick={() => void onCreateCreator()}>Create a Creator account</Button> : null}
       <Button type="button" onClick={() => navigate("/library", { replace: true })}>Open your library</Button>
     </main>
   );

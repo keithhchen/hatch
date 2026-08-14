@@ -503,7 +503,7 @@ h2 {
 
 .welcome-brand .hatch-brand__wordmark {
   font-size: 22px;
-  letter-spacing: -.035em;
+  letter-spacing: var(--hatch-display-tracking);
 }
 
 .sign-in-card,
@@ -1084,7 +1084,8 @@ h2 {
   color: inherit;
   font-family: var(--hatch-font-display);
   font-weight: 400;
-  letter-spacing: normal;
+  letter-spacing: var(--hatch-display-tracking);
+  line-height: var(--hatch-display-leading);
 }
 
 .markdown-body h3,
@@ -2714,12 +2715,12 @@ button.composer-control:focus-visible {
  * translucent enough to inherit the local colour temperature.
  */
 .desktop-window-shell {
-  --surface-window: var(--hatch-atmosphere-base);
-  --surface-sidebar: color-mix(in srgb, var(--hatch-ui-surface-raised) 68%, transparent);
-  --surface-inspector: color-mix(in srgb, var(--hatch-ui-surface-raised) 76%, transparent);
-  --surface-toolbar: color-mix(in srgb, var(--hatch-ui-surface-raised) 72%, transparent);
-  --border-separator: var(--hatch-ui-border-soft);
-  background: var(--hatch-atmosphere-base);
+  --surface-window: var(--hatch-ui-surface-window);
+  --surface-sidebar: var(--hatch-ui-surface-sidebar);
+  --surface-inspector: var(--hatch-ui-surface-inspector);
+  --surface-toolbar: var(--hatch-ui-surface-toolbar);
+  --border-separator: var(--hatch-ui-separator);
+  background: var(--hatch-ui-surface-window);
   isolation: isolate;
   grid-template-rows: 56px minmax(0, 1fr);
 }
@@ -2777,7 +2778,7 @@ button.composer-control:focus-visible {
   -webkit-backdrop-filter: blur(26px) saturate(112%);
   backdrop-filter: blur(26px) saturate(112%);
   background: var(--surface-toolbar);
-  border-bottom-color: rgba(66, 53, 41, .09);
+  border-bottom-color: var(--hatch-ui-separator);
   gap: 8px;
   padding-inline: 12px;
 }
@@ -2830,7 +2831,7 @@ button.composer-control:focus-visible {
 
 .desktop-sidebar-heading .hatch-wordmark {
   font-size: 17px;
-  letter-spacing: -.035em;
+  letter-spacing: var(--hatch-display-tracking);
 }
 
 .hatch-wordmark-period { color: var(--hatch-accent); }
@@ -2867,9 +2868,9 @@ button.composer-control:focus-visible {
 
 .desktop-source-row.selected {
   background:
-    radial-gradient(120% 160% at 0% 0%, rgba(226, 129, 91, .15), transparent 54%),
-    rgba(255, 253, 249, .74);
-  box-shadow: 0 1px 2px rgba(58, 43, 31, .07), inset 0 0 0 1px rgba(76, 57, 42, .09);
+    radial-gradient(120% 160% at 0% 0%, var(--hatch-ui-pigment-clay), transparent 54%),
+    var(--hatch-ui-surface-raised);
+  box-shadow: 0 1px 2px rgba(58, 43, 31, .07), inset 0 0 0 1px var(--hatch-ui-border-soft);
 }
 
 .desktop-source-row .creator-avatar {
@@ -2932,7 +2933,7 @@ button.composer-control:focus-visible {
 }
 
 .desktop-main {
-  background: rgba(250, 247, 241, .34);
+  background: var(--hatch-ui-surface-content);
 }
 
 .desktop-chat-shell .thread-viewport {
@@ -3004,9 +3005,9 @@ button.composer-control:focus-visible {
   -webkit-backdrop-filter: blur(24px) saturate(112%);
   backdrop-filter: blur(24px) saturate(112%);
   background:
-    radial-gradient(130% 120% at 12% 0%, rgba(255,255,255,.58), transparent 48%),
-    rgba(253, 250, 245, .78);
-  border: 1px solid rgba(71, 54, 40, .13);
+    radial-gradient(130% 120% at 12% 0%, var(--hatch-ui-light-edge), transparent 48%),
+    var(--hatch-ui-surface-raised);
+  border: 1px solid var(--hatch-ui-border-soft);
   border-radius: 20px;
   box-shadow: 0 16px 40px rgba(62, 45, 32, .11), inset 0 1px rgba(255,255,255,.74);
   max-width: 900px;
@@ -3041,9 +3042,9 @@ button.composer-control:focus-visible {
 }
 
 .send-button:not(:disabled) {
-  background: #302c27;
-  border-color: #302c27;
-  box-shadow: 0 5px 14px rgba(43, 31, 23, .18), inset 0 1px rgba(255,255,255,.10);
+  background: var(--hatch-ui-primary);
+  border-color: var(--hatch-ui-primary);
+  box-shadow: var(--hatch-shadow-control);
 }
 
 .desktop-inspector {

@@ -44,6 +44,7 @@ const PUBLIC_ROUTE_NAMES = new Set(["catalog", "creator", "product", "sign-in", 
  *     user?: { display_name?, email?, initials? },
  *     signIn?(credentials): Promise<unknown>,
  *     signUp?(profile): Promise<unknown>,
+ *     creatorSignUp?(profile): Promise<unknown>,
  *     onAuthenticated?(authResponse): void | Promise<void>,
  *     signOut?(): void | Promise<void>,
  *     invalidate?(error): void
@@ -446,17 +447,21 @@ function AuthPage({ mode, search, request, navigate, session }) {
   const signingUp = mode === "sign-up";
   const params = new URLSearchParams(search);
   const returnTo = safeReturnTo(params.get("returnTo") || LIBRARY_ROOT);
+  const creatorIntent = returnTo === "/studio" || returnTo.startsWith("/studio/");
   const intentRoute = matchBuyerRoute(returnTo.split("?")[0]);
   const productIntent = intentRoute.name === "product";
   const intentEndpoint = productIntent ? `${BUYER_PORTAL_V2_ENDPOINTS.catalog}/${encodeURIComponent(intentRoute.params.productId)}` : "";
   const intent = useRemote(async (signal) => unwrap(await callRequest(request, intentEndpoint, { signal }), ["agent", "product"]), intentEndpoint || "no-intent", productIntent);
   const [form, setForm] = useState({ display_name: "", email: "", password: "", terms: false });
   const [submission, setSubmission] = useState({ status: "idle", error: null });
-  usePageTitle(signingUp ? "Create your Hatch account" : "Sign in to Hatch");
+  usePageTitle(signingUp
+    ? (creatorIntent ? "Create your Creator account" : "Create your Hatch account")
+    : "Sign in to Hatch");
 
   useEffect(() => {
-    if (session.status === "authenticated") navigateTo(navigate, returnTo, { replace: true });
-  }, [session.status, navigate, returnTo]);
+    const canSwitchIntoCreatorSignup = signingUp && creatorIntent && session.user?.role !== "creator";
+    if (session.status === "authenticated" && !canSwitchIntoCreatorSignup) navigateTo(navigate, returnTo, { replace: true });
+  }, [creatorIntent, navigate, returnTo, session.status, session.user?.role, signingUp]);
 
   async function submit(event) {
     event.preventDefault();
@@ -464,9 +469,12 @@ function AuthPage({ mode, search, request, navigate, session }) {
     setSubmission({ status: "pending", error: null });
     try {
       let response;
-      if (signingUp && session.signUp) response = await session.signUp(form);
+      if (signingUp && creatorIntent && session.creatorSignUp) response = await session.creatorSignUp(form);
+      else if (signingUp && session.signUp) response = await session.signUp(form);
       else if (!signingUp && session.signIn) response = await session.signIn({ email: form.email, password: form.password });
-      else response = await callRequest(request, signingUp ? "/v1/auth/signup" : "/v1/auth/login", jsonMutation("POST", signingUp ? form : { email: form.email, password: form.password }));
+      else response = await callRequest(request, signingUp
+        ? (creatorIntent ? "/v1/auth/creator-signup" : "/v1/auth/signup")
+        : "/v1/auth/login", jsonMutation("POST", signingUp ? form : { email: form.email, password: form.password }));
       await session.onAuthenticated?.(response);
       navigateTo(navigate, returnTo, { replace: true });
     } catch (error) {
@@ -487,17 +495,23 @@ function AuthPage({ mode, search, request, navigate, session }) {
       </section>
       <section className="buyer-v2__auth-form-panel">
         <form className="buyer-v2__auth-form" onSubmit={submit}>
-          <span className="buyer-v2__eyebrow">Hatch account</span>
-          <h2>{signingUp ? "Create your account" : "Sign in to Hatch"}</h2>
-          <p>{signingUp ? "Create an account, then return to the Product you selected." : "Sign in, then continue exactly where you left off."}</p>
+          <span className="buyer-v2__eyebrow">{creatorIntent ? "Creator account" : "Hatch account"}</span>
+          <h2>{signingUp ? (creatorIntent ? "Create your Creator account" : "Create your account") : "Sign in to Hatch"}</h2>
+          <p>{signingUp
+            ? creatorIntent
+              ? "Create a Creator account, then open Creator Studio to publish your work."
+              : "Create an account, then return to the Product you selected."
+            : creatorIntent
+              ? "Sign in with your Creator account to open Creator Studio."
+              : "Sign in, then continue exactly where you left off."}</p>
           {signingUp ? <Field label="Name"><Input required autoComplete="name" value={form.display_name} onChange={(event) => setForm({ ...form, display_name: event.target.value })} /></Field> : null}
           <Field label="Email"><Input required type="email" autoComplete="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></Field>
           <Field label="Password"><Input required minLength={8} type="password" autoComplete={signingUp ? "new-password" : "current-password"} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></Field>
           {signingUp ? <HatchCheckbox required checked={form.terms} onCheckedChange={(checked) => setForm({ ...form, terms: checked === true })} label="I agree to the Hatch Terms and Privacy Policy." /> : null}
           {submission.error ? <InlineError error={submission.error} /> : null}
           <div className="buyer-v2__auth-actions">
-            <Button className="buyer-v2__button--wide" loading={submission.status === "pending"}>{signingUp ? "Create account" : "Sign in"}</Button>
-            <p className="buyer-v2__auth-switch">{signingUp ? "Already have an account?" : "New to Hatch?"} <RouterLink to={`${signingUp ? "/sign-in" : "/sign-up"}?returnTo=${encodeURIComponent(returnTo)}`} navigate={navigate}>{signingUp ? "Sign in" : "Create account"}</RouterLink></p>
+            <Button className="buyer-v2__button--wide" loading={submission.status === "pending"}>{signingUp ? (creatorIntent ? "Create Creator account" : "Create account") : "Sign in"}</Button>
+            <p className="buyer-v2__auth-switch">{signingUp ? "Already have an account?" : (creatorIntent ? "New to Creator Studio?" : "New to Hatch?")} <RouterLink to={`${signingUp ? "/sign-in" : "/sign-up"}?returnTo=${encodeURIComponent(returnTo)}`} navigate={navigate}>{signingUp ? "Sign in" : (creatorIntent ? "Create Creator account" : "Create account")}</RouterLink></p>
           </div>
         </form>
       </section>
