@@ -2,8 +2,19 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const source = readFileSync(new URL("./main.jsx", import.meta.url), "utf8");
+const packageJson = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
 
 describe("desktop component presentation contract", () => {
+  it("consumes shared components, fonts, and theme without a second brand source", () => {
+    expect(packageJson.dependencies["@hatch/ui"]).toBe("file:../packages/ui");
+    expect(Object.keys(packageJson.dependencies)).not.toContain("@fontsource/dm-mono");
+    expect(Object.keys(packageJson.dependencies).some((dependency) => dependency.startsWith("@fontsource"))).toBe(false);
+    expect(source).toContain('import "@hatch/ui/fonts"');
+    expect(source).toContain('import "@hatch/ui/theme.css"');
+    expect(source).toContain("HatchUIProvider");
+    expect(source).not.toMatch(/@fontsource|packages\/brand/);
+  });
+
   it("uses the shared icon library instead of character carets", () => {
     expect(source).toContain('from "lucide-react"');
     expect(source).not.toMatch(/[⌄›]/);
