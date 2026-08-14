@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Avatar,
   Button,
   Checkbox as HatchCheckbox,
   EmptyState as HatchEmptyState,
@@ -410,15 +411,14 @@ function SettingsPage({ session, navigate }) {
     }
   }
   return <div className="buyer-v2__container buyer-v2__page">
-    <header className="buyer-v2__page-heading"><span className="buyer-v2__eyebrow">Account</span><h1>Settings and session.</h1><p>Use the same Hatch account on Web and Desktop. Signing out here does not delete your orders or receipts.</p></header>
-    <section className="buyer-v2__detail-card">
-      <dl className="buyer-v2__detail-list">
-        <div><dt>Name</dt><dd>{session.user?.display_name || "Hatch account"}</dd></div>
-        <div><dt>Role</dt><dd>{session.user?.role || "user"}</dd></div>
-        <div><dt>Session</dt><dd>Signed in</dd></div>
-      </dl>
+    <header className="buyer-v2__page-heading"><span className="buyer-v2__eyebrow">Account</span><h1>Your Hatch account.</h1><p>Use the same account on Web and Desktop. Signing out keeps your access records intact.</p></header>
+    <section className="buyer-v2__settings-surface" aria-label="Signed-in account">
+      <div className="buyer-v2__settings-identity">
+        <Avatar className="buyer-v2__settings-avatar" size="large" name={session.user?.display_name || "Hatch account"} fallback={session.user?.initials} />
+        <div><h2>{session.user?.display_name || "Hatch account"}</h2><p>Signed in to Hatch</p></div>
+      </div>
       {error ? <InlineError error={error} /> : null}
-      <div className="buyer-v2__detail-links"><Button type="button" variant="secondary" loading={status === "pending"} onClick={signOut}>Sign out</Button><RouterLink to="/account/help" navigate={navigate}>Account help</RouterLink></div>
+      <div className="buyer-v2__settings-actions"><Button type="button" variant="secondary" loading={status === "pending"} onClick={signOut}>Sign out</Button><RouterLink to="/account/help" navigate={navigate}>Account help</RouterLink></div>
     </section>
   </div>;
 }

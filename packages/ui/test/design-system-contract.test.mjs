@@ -50,6 +50,7 @@ test("Web and Storybook consume the shared package and its canonical tokens", ()
   const webEntry = read("creator-dashboard/src/main.jsx");
   const creatorPortal = read("creator-dashboard/src/CreatorPortalV2.jsx");
   const creatorFactory = read("creator-dashboard/src/CreatorFactoryRuns.jsx");
+  const buyerPortal = read("creator-dashboard/src/BuyerPortalV2.jsx");
   const creatorCss = read("creator-dashboard/src/creatorPortalV2.css");
   const storefrontCss = read("creator-dashboard/src/storefrontDetails.css");
   const storybookPreview = read("creator-dashboard/.storybook/preview.jsx");
@@ -78,6 +79,8 @@ test("Web and Storybook consume the shared package and its canonical tokens", ()
   assert.doesNotMatch(creatorCss, /\.cpv2-factory-draft\s+(?:input|select|textarea)/);
   assert.match(creatorCss, /\.cpv2-panel\s*\{[^}]*border:\s*0;[^}]*border-radius:\s*0;[^}]*background:\s*transparent;/s);
   assert.match(storefrontCss, /\.storefront-shared__hero\s*\{[^}]*padding:\s*clamp\([^;]+\)\s+4px\s+clamp\(/s);
+  assert.match(buyerPortal, /className="buyer-v2__settings-surface"/);
+  assert.doesNotMatch(buyerPortal, /<div><dt>Role<\/dt>/);
 });
 
 test("Theme Lab edits the same token knobs used by the shared CSS", () => {

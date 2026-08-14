@@ -341,6 +341,14 @@
 .buyer-v2__detail-card { padding: 32px; }
 .buyer-v2__detail-card h2 { margin: 0 0 22px; font-size: 31px; }
 .buyer-v2__detail-card .buyer-v2__text-link { display: inline-block; margin-top: 24px; }
+.buyer-v2__settings-surface { padding: 30px 4px 24px; border-top: 1px solid var(--buyer-border-subtle); border-bottom: 1px solid var(--buyer-border-subtle); }
+.buyer-v2__settings-identity { display: flex; min-height: 76px; align-items: center; gap: 16px; }
+.buyer-v2__settings-avatar { border: 2px solid rgba(255,255,255,.96); border-radius: 50%; box-shadow: 0 3px 12px rgba(69,49,35,.14); }
+.buyer-v2__settings-identity h2 { margin: 0 0 5px; font-size: 31px; line-height: 1; }
+.buyer-v2__settings-identity p { margin: 0; color: var(--buyer-muted); font-size: 12px; }
+.buyer-v2__settings-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--buyer-border-subtle); }
+.buyer-v2__settings-actions a { color: var(--buyer-accent); font-size: 12px; }
+.buyer-v2__settings-actions a:hover { text-decoration: underline; }
 .buyer-v2__activation-card, .buyer-v2__order-actions { min-height: 350px; }
 .buyer-v2__order-actions > .buyer-v2__button + .buyer-v2__button { margin-top: 8px; }
 .buyer-v2__timeline-section { display: grid; grid-template-columns: minmax(240px, 0.7fr) minmax(0, 1.3fr); gap: 55px; margin-top: 56px; padding-top: 44px; border-top: 1px solid var(--buyer-border); }
