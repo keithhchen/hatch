@@ -415,6 +415,7 @@
 .hui-theme-material.hui-atmospheric-paper::before { opacity: calc(var(--hatch-atmosphere-strength) * .82); filter: blur(var(--hatch-atmosphere-warm-blur)); }
 .hui-theme-material.hui-atmospheric-paper::after { opacity: calc(var(--hatch-atmosphere-strength) * .72); filter: blur(var(--hatch-atmosphere-cool-blur)); }
 
+.hui-theme-material {
 .hui-story-section {
   padding: 30px;
   border: 0;
@@ -627,6 +628,7 @@
 .hatch-checkout-summary > header > svg { color: #8a513e; background: rgba(226,171,146,.37); box-shadow: inset 0 1px 0 rgba(255,255,255,.58); }
 .hatch-order-summary dl, .hatch-checkout-summary > ul li, .hatch-checkout-summary > dl .is-total { border-color: rgba(64,49,36,.075); }
 .hui-toaster [data-sonner-toast] { border: 0 !important; border-radius: 18px !important; background: #faf7f1 !important; box-shadow: var(--hui-shadow-menu) !important; }
+}
 
 /* Origin Return ------------------------------------------------------------
    A separate, opt-in theme derived from the first Atmospheric Paper study.
@@ -650,10 +652,28 @@
 }
 
 .hui-theme-origin .hui-button {
+  position: relative;
+  isolation: isolate;
+  flex: 0 0 auto;
+  overflow: visible;
   font-family: var(--hui-font-pill);
   font-weight: 600;
   letter-spacing: -.018em;
 }
+.hui-theme-origin .hui-button:not(.hui-icon-button) { min-width: max-content; }
+.hui-theme-origin .hui-button > span,
+.hui-theme-origin .hui-button svg { position: relative; z-index: 1; }
+.hui-theme-origin .hui-button::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(255,255,255,.18), transparent 58%);
+  opacity: .3;
+  transition: opacity var(--hui-motion-control), transform var(--hui-motion-control);
+}
+.hui-theme-origin .hui-button:not(:disabled):active::before { opacity: .12; transform: scaleY(.9); }
 .hui-theme-origin .hui-button--medium { font-size: var(--hatch-type-control); }
 .hui-theme-origin .hui-field__hint,
 .hui-theme-origin .hui-field__error,
@@ -661,7 +681,6 @@
 .hui-theme-origin .hui-switch-row label span { font-size: 12px; }
 .hui-theme-origin .hui-choice label strong,
 .hui-theme-origin .hui-switch-row label strong { font-size: 13px; }
-.hui-theme-origin .hui-button::before { opacity: .3; }
 .hui-theme-origin .hui-button--primary {
   color: var(--hatch-ui-on-primary);
   background: var(--hatch-ui-primary);
@@ -722,8 +741,11 @@
 .hui-theme-origin .hui-tabs [role="tab"],
 .hui-theme-origin .hui-segmented [role="tab"] { font-family: var(--hui-font-pill); font-weight: 600; letter-spacing: -.015em; }
 .hui-theme-origin .hui-tabs [role="tab"]::after { background: var(--hatch-ui-primary); }
-.hui-theme-origin .hui-navigation-item.is-active { color: var(--hui-ink); background: var(--hatch-ui-surface-bright); box-shadow: 0 1px 3px rgba(45,34,26,.09), inset 0 0 0 1px rgba(54,43,33,.06); }
-.hui-theme-origin .hui-navigation-item:hover { background: color-mix(in srgb, var(--hatch-ui-surface-bright) 70%, transparent); }
+.hui-theme-origin .hui-navigation-item { position: relative; font-family: var(--hui-font-pill); font-weight: 540; letter-spacing: -.012em; }
+.hui-theme-origin .hui-navigation-item::before { content: ""; width: 4px; height: 4px; flex: 0 0 auto; border-radius: 50%; background: var(--hatch-ui-accent); opacity: 0; transform: scale(.45); transition: opacity var(--hui-motion-control), transform var(--hui-motion-control); }
+.hui-theme-origin .hui-navigation-item.is-active { color: var(--hui-ink); background: transparent; box-shadow: none; font-weight: 680; }
+.hui-theme-origin .hui-navigation-item.is-active::before { opacity: 1; transform: scale(1); }
+.hui-theme-origin .hui-navigation-item:hover { color: var(--hui-ink); background: transparent; }
 
 .hui-theme-origin .hui-status {
   color: var(--hatch-ui-status-neutral-ink);

@@ -20,10 +20,11 @@
 .cpv2-brand .hatch-brand__mark { width: 22px; height: 22px; }
 .cpv2-sidebar > nav:not(.cpv2-global-nav) { display: grid; gap: 4px; margin-top: 28px; }
 .cpv2-sidebar > nav:not(.cpv2-global-nav) button { min-height: 44px; padding: 10px 13px; border: 0; border-radius: 10px; background: transparent; color: var(--hatch-text-secondary, #74675e); text-align: left; }
-.cpv2-sidebar > nav:not(.cpv2-global-nav) button:hover, .cpv2-sidebar > nav:not(.cpv2-global-nav) button.is-active { background: var(--hatch-panel-muted, #ece4d8); color: var(--hatch-ink, #201813); }
+.cpv2-sidebar > nav:not(.cpv2-global-nav) button:hover, .cpv2-sidebar > nav:not(.cpv2-global-nav) button.is-active { background: transparent; color: var(--hatch-ink, #201813); }
 .cpv2-global-nav { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; }
 .cpv2-global-nav a { display: inline-flex; min-height: 44px; align-items: center; padding: 10px 7px; color: var(--hatch-text-secondary, #74675e); font-size: 11px; text-decoration: none; }
 .cpv2-global-nav a:hover { color: var(--hatch-ink, #201813); }
+.cpv2-global-nav a[aria-current="page"] { color: var(--hatch-ink, #201813); font-family: var(--hatch-font-pill, Inter, sans-serif); font-weight: 680; }
 .cpv2-account { display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 10px; align-items: center; margin-top: auto; padding-top: 18px; border-top: 1px solid var(--hatch-border-subtle, rgba(54,41,31,.1)); }
 .cpv2-avatar { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 50%; background: var(--hatch-inverse, #202522); color: var(--hatch-inverse-text, #f4f1e9); font-size: 12px; }
 .cpv2-account strong, .cpv2-account small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

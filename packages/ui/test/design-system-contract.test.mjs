@@ -91,3 +91,14 @@ test("Theme Lab edits the same token knobs used by the shared CSS", () => {
   assert.match(sharedCss, /background: var\(--hatch-atmosphere-cool-field\)/);
   assert.doesNotMatch(sharedCss, /\.hui-drawer\.is-(?:right|bottom)[^{]*\{[^}]*border-radius:[^;]*\b0\b/s);
 });
+
+test("the archived material comparison cannot leak into the confirmed origin theme", () => {
+  const sharedCss = read("packages/ui/src/hatch-ui.css");
+  const materialStart = sharedCss.indexOf(".hui-theme-material {");
+  const originStart = sharedCss.indexOf("/* Origin Return");
+
+  assert.ok(materialStart > 0, "material comparison must have an explicit theme scope");
+  assert.ok(originStart > materialStart, "origin theme must remain separate from material comparison");
+  assert.match(sharedCss.slice(materialStart, originStart), /\.hui-theme-material\s*\{[\s\S]*\.hui-button/);
+  assert.match(sharedCss, /\.hui-theme-origin \.hui-navigation-item\.is-active\s*\{[^}]*background:\s*transparent;[^}]*box-shadow:\s*none;/s);
+});
