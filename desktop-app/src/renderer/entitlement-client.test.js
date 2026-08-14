@@ -14,6 +14,7 @@ describe("buyer Creator Agent library", () => {
       creator_id: creatorId,
       product_id: productId,
       status: "active",
+      access_mode: "unmetered",
       granted_at: "2026-08-03T00:00:00.000Z",
       creator: { id: creatorId, name: "Maya Chen" },
       product: { id: productId, name: "Signal Review", description: "Review work" },
@@ -23,6 +24,7 @@ describe("buyer Creator Agent library", () => {
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({
       entitlement_id: entitlementId,
+      access_mode: "unmetered",
       creator: { id: creatorId, name: "Maya Chen" },
       product: { id: productId, name: "Signal Review" }
     });

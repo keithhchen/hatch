@@ -290,6 +290,7 @@ async function productFixture(): Promise<ProductFixture> {
     agent_id: productId,
     product_id: productId,
     purchased_corpus_digest: purchasedCorpus.digest,
+    access_mode: "metered",
     status: "active"
   };
   const entitlementResolver: EntitlementResolver = {

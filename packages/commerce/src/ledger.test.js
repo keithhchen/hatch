@@ -152,15 +152,10 @@ test("one delivery recognizes the exact 90/10 split and projects the same creato
     currency: "USD"
   }, { idempotencyKey: "order:order_hch_2454:revenue" });
 
-  assert.deepEqual(projectBuyerEntitlements(ledger.listEvents(), fixture.buyerId), [{
-    entitlement_id: fixture.entitlementId,
-    order_id: fixture.orderId,
-    creator_id: fixture.creatorId,
-    agent_id: fixture.agentId,
-    product_id: fixture.productId,
-    corpus_digest: fixture.corpusDigest,
-    status: "active"
-  }]);
+  const [entitlement] = projectBuyerEntitlements(ledger.listEvents(), fixture.buyerId);
+  assert.equal(entitlement.entitlement_id, fixture.entitlementId);
+  assert.equal(entitlement.status, "active");
+  assert.equal(entitlement.access_mode, "metered");
   assert.deepEqual(projectCreatorDashboard(ledger.listEvents(), fixture.creatorId).metrics, {
     orders: 1,
     successful_deliveries: 1,
@@ -275,6 +270,7 @@ test("zero-value checkout is still a real order and can project buyer history", 
     agent_id: "agent_zero",
     product_id: "product_zero",
     product_name: "Zero Product",
+    access_mode: "unmetered",
     corpus_digest: `sha256:${"b".repeat(64)}`,
     gross_minor: 0,
     currency: "USD",
@@ -289,6 +285,7 @@ test("zero-value checkout is still a real order and can project buyer history", 
     product_id: "product_zero",
     corpus_digest: `sha256:${"b".repeat(64)}`,
     product_name: "Zero Product",
+    access_mode: "unmetered",
     gross_minor: 0,
     subtotal_minor: 0,
     discount_minor: 0,

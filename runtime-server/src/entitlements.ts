@@ -31,6 +31,7 @@ const EntitlementCommonSchema = z.object({
 const AgentCorpusEntitlementBindingSchema = EntitlementCommonSchema.extend({
   creator_id: z.string().min(1),
   agent_id: z.string().min(1),
+  access_mode: z.enum(["unmetered", "metered"]).optional(),
   purchased_corpus_digest: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(),
   effective_corpus_digest: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(),
   version_policy: z.enum(["pinned", "track_current_compatible"]).optional(),
@@ -79,6 +80,7 @@ export type EntitlementBinding = {
   product_id: string;
   status: "active";
   agent_id: string;
+  access_mode?: "unmetered" | "metered";
   /** Immutable purchase snapshot. Required for Commerce-backed grants. */
   purchased_corpus_digest?: string;
   effective_corpus_digest?: string;

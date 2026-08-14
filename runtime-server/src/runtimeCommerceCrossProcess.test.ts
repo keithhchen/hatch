@@ -37,7 +37,7 @@ const dashboardEntry = path.join(repositoryRoot, "creator-dashboard", "server.mj
 
 type JsonRecord = Record<string, any>;
 
-test("real Dashboard process and Runtime HTTP client preserve delivery, recovery, revocation, and release-version invariants", {
+test("real Dashboard process and Runtime HTTP client preserve permanent access, buyer non-reversal, and release-version invariants", {
   timeout: 60_000
 }, async (context) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-commerce-cross-process-"));
@@ -69,14 +69,8 @@ test("real Dashboard process and Runtime HTTP client preserve delivery, recovery
   });
   dashboardProcesses.push(dashboard);
 
-  const outage = deferred<void>();
-  const continueAfterOutage = deferred<void>();
   const invokedRuns = new Set<string>();
-  const createScenarioRuntime = scenarioRuntimeFactory({
-    invokedRuns,
-    outageArtifactObserved: outage.resolve,
-    continueAfterOutage: continueAfterOutage.promise
-  });
+  const createScenarioRuntime = scenarioRuntimeFactory({ invokedRuns });
   const firstRuntime = await startRuntime({
     dashboardUrl: dashboard.url,
     registryUrl: registry.url,
@@ -91,11 +85,12 @@ test("real Dashboard process and Runtime HTTP client preserve delivery, recovery
 
   // R05/R27: the already-running Runtime learns the entitlement created by a
   // later checkout. Publishing V2 changes the Registry current pointer, but a
-  // pinned V1 purchase must continue resolving and delivering with V1.
+  // pinned V1 purchase must continue resolving with V1.
   const freePurchase = await checkout(dashboard.url, "free-v1");
   assert.equal(freePurchase.payment.status, "not_required");
   assert.equal(freePurchase.entitlement.purchased_corpus_digest, corpus.v1Digest);
-  assert.equal(freePurchase.entitlement.remaining_units, 1);
+  assert.equal(freePurchase.entitlement.access_mode, "unmetered");
+  assert.equal("remaining_units" in freePurchase.entitlement, false);
 
   await activateCurrentCorpus(CREATOR_ID, AGENT_ID, corpus.v2Digest, corpus.root);
   registry.publishDigest(corpus.v2Digest);
@@ -108,35 +103,38 @@ test("real Dashboard process and Runtime HTTP client preserve delivery, recovery
   assert.equal(ready.effective_corpus_digest, corpus.v1Digest);
   assert.equal(ready.version_policy, "pinned");
 
-  // R06: a free delivery crosses real Runtime -> Dashboard HTTP, consumes one
-  // unit, records task/artifact/delivery, and creates no revenue fact.
+  // A zero-price purchase is still a real purchase, but it has permanent
+  // access. Repeated turns do not reserve, consume, or create delivery facts.
   freeSession.send(runMessage("run-success"));
-  const successReceipt = await freeSession.waitFor((message) => (
-    message.type === "delivery.ready"
-    && message.run_id === "run-success"
-    && message.receipt_status === "recorded"
-  ));
-  assert.equal(successReceipt.artifact_type, "file");
   await freeSession.waitFor((message) => message.type === "turn.completed" && message.run_id === "run-success");
+  await freeSession.waitFor((message) => (
+    message.type === "turn.state" && message.run_id === "run-success" && message.status === "completed"
+  ));
+  freeSession.send(runMessage("run-repeat"));
+  await freeSession.waitFor((message) => message.type === "turn.completed" && message.run_id === "run-repeat");
   await waitForEntitlement(dashboard.url, freePurchase.entitlement_id, (entitlement) => (
-    entitlement.remaining_units === 0 && entitlement.reserved_units === 0
+    entitlement.access_mode === "unmetered"
+    && !Object.hasOwn(entitlement, "remaining_units")
+    && !Object.hasOwn(entitlement, "reserved_units")
+    && !Object.hasOwn(entitlement, "deliveries")
   ));
 
   const resiliencePurchase = await checkout(dashboard.url, "resilience-v2");
+  assert.equal(resiliencePurchase.entitlement.access_mode, "unmetered");
   const resilienceSession = await connectRuntime(firstRuntime.url, resiliencePurchase.entitlement_id);
   sockets.push(resilienceSession.socket);
   assert.equal((await resilienceSession.ready).corpus_digest, corpus.v2Digest);
 
-  // R08: failure and cancellation both release their reservations. The unit
-  // count remains reusable and no delivery or revenue is synthesized.
+  // A model failure or cancellation also leaves permanent access unchanged.
   resilienceSession.send(runMessage("run-failed"));
   await resilienceSession.waitFor((message) => message.type === "turn.failed" && message.run_id === "run-failed");
-  await waitForAsync(async () => {
-    const events = await readLedger(ledgerPath);
-    return events.some((event) => event.event_type === "entitlement.units_released" && event.reason === "run_failed") ? true : undefined;
-  });
+  await resilienceSession.waitFor((message) => (
+    message.type === "turn.state" && message.run_id === "run-failed" && message.status === "failed"
+  ));
   await waitForEntitlement(dashboard.url, resiliencePurchase.entitlement_id, (entitlement) => (
-    entitlement.remaining_units === 1 && entitlement.reserved_units === 0
+    entitlement.access_mode === "unmetered"
+    && !Object.hasOwn(entitlement, "remaining_units")
+    && !Object.hasOwn(entitlement, "reserved_units")
   ));
 
   resilienceSession.send(runMessage("run-cancelled"));
@@ -147,32 +145,14 @@ test("real Dashboard process and Runtime HTTP client preserve delivery, recovery
   ));
   resilienceSession.send({ type: "turn.cancel", run_id: "run-cancelled", reason: "buyer cancelled" });
   await resilienceSession.waitFor((message) => message.type === "turn.failed" && message.run_id === "run-cancelled");
-  await waitForEntitlement(dashboard.url, resiliencePurchase.entitlement_id, (entitlement) => (
-    entitlement.remaining_units === 1 && entitlement.reserved_units === 0
-  ));
-
-  // R07: let the Runtime observe a completed local artifact, then terminate
-  // the actual Dashboard OS process before accounting begins. The Buyer-facing
-  // turn still completes with a durable syncing receipt.
-  resilienceSession.send(runMessage("run-outage"));
-  await outage.promise;
-  await dashboard.stop();
-  dashboardProcesses.splice(dashboardProcesses.indexOf(dashboard), 1);
-  continueAfterOutage.resolve();
   await resilienceSession.waitFor((message) => (
-    message.type === "delivery.ready"
-    && message.run_id === "run-outage"
-    && message.receipt_status === "syncing"
+    message.type === "turn.state" && message.run_id === "run-cancelled" && message.status === "cancelled"
   ));
-  const syncingTurn = await resilienceSession.waitFor((message) => (
-    message.type === "turn.completed"
-    && message.run_id === "run-outage"
+  await waitForEntitlement(dashboard.url, resiliencePurchase.entitlement_id, (entitlement) => (
+    entitlement.access_mode === "unmetered"
+    && !Object.hasOwn(entitlement, "remaining_units")
+    && !Object.hasOwn(entitlement, "reserved_units")
   ));
-  assert.equal(syncingTurn.receipt_status, "syncing");
-  const pendingOutbox = new DeliveryAccountingOutbox(outboxPath);
-  await waitForAsync(async () => (await pendingOutbox.list()).length === 1 ? true : undefined);
-  const serializedOutbox = await readFile(outboxPath, "utf8");
-  assert.doesNotMatch(serializedOutbox, /Private Workspace|private artifact body|artifact_path|"content"/);
 
   freeSession.socket.close();
   sockets.splice(sockets.indexOf(freeSession.socket), 1);
@@ -181,14 +161,6 @@ test("real Dashboard process and Runtime HTTP client preserve delivery, recovery
   await firstRuntime.runtime.close();
   runtimes.splice(runtimes.indexOf(firstRuntime.runtime), 1);
 
-  dashboard = await startDashboardProcess({
-    port: dashboardPort,
-    registryUrl: registry.url,
-    ledgerPath,
-    portalStatePath,
-    telemetryPath
-  });
-  dashboardProcesses.push(dashboard);
   const restartedRuntime = await startRuntime({
     dashboardUrl: dashboard.url,
     registryUrl: registry.url,
@@ -199,79 +171,68 @@ test("real Dashboard process and Runtime HTTP client preserve delivery, recovery
     reconcileIntervalMs: 20
   });
   runtimes.push(restartedRuntime.runtime);
-  await waitForAsync(async () => (await new DeliveryAccountingOutbox(outboxPath).list()).length === 0 ? true : undefined, 8_000);
+  const restartedFreeSession = await connectRuntime(restartedRuntime.url, freePurchase.entitlement_id);
+  sockets.push(restartedFreeSession.socket);
+  assert.equal((await restartedFreeSession.ready).corpus_digest, corpus.v1Digest);
+  restartedFreeSession.send(runMessage("run-after-restart"));
+  await restartedFreeSession.waitFor((message) => message.type === "turn.completed" && message.run_id === "run-after-restart");
   const recoveredEntitlement = await waitForEntitlement(
     dashboard.url,
     resiliencePurchase.entitlement_id,
-    (entitlement) => entitlement.remaining_units === 0 && entitlement.reserved_units === 0
+    (entitlement) => entitlement.access_mode === "unmetered" && !Object.hasOwn(entitlement, "remaining_units")
   );
-  assert.equal(recoveredEntitlement.deliveries.length, 1);
+  assert.equal(recoveredEntitlement.access_mode, "unmetered");
 
   const durableEvents = await readLedger(ledgerPath);
   const freeEvents = durableEvents.filter((event) => event.order_id === freePurchase.order_id);
   const resilienceEvents = durableEvents.filter((event) => event.order_id === resiliencePurchase.order_id);
-  assert.equal(freeEvents.filter((event) => event.event_type === "delivery.completed").length, 1);
-  assert.equal(resilienceEvents.filter((event) => event.event_type === "delivery.completed").length, 1);
-  assert.equal([...freeEvents, ...resilienceEvents].filter((event) => event.event_type === "revenue.recognized").length, 0);
-  assert.deepEqual(
-    resilienceEvents
-      .filter((event) => event.event_type === "entitlement.units_released")
-      .map((event) => event.reason)
-      .sort(),
-    ["run_cancelled", "run_failed"]
-  );
-  for (const delivery of freeEvents.filter((event) => event.event_type === "delivery.completed")) {
-    assert.equal(delivery.corpus_digest, corpus.v1Digest);
-    assert.equal(delivery.purchased_corpus_digest, corpus.v1Digest);
-    assert.equal(delivery.effective_corpus_digest, corpus.v1Digest);
+  for (const events of [freeEvents, resilienceEvents]) {
+    assert.equal(events.some((event) => event.event_type.startsWith("delivery.")), false);
+    assert.equal(events.some((event) => event.event_type.startsWith("revenue.")), false);
+    assert.equal(events.some((event) => event.event_type.startsWith("entitlement.units_")), false);
   }
-  for (const delivery of resilienceEvents.filter((event) => event.event_type === "delivery.completed")) {
-    assert.equal(delivery.corpus_digest, corpus.v2Digest);
-  }
-  // R22: establish a second Runtime session, cancel its free order before any
-  // delivery, then prove both that already-connected session and a fresh
-  // connection are denied without restarting Runtime.
-  const revokedPurchase = await checkout(dashboard.url, "revoked-free-v2");
-  assert.equal(revokedPurchase.payment.status, "not_required");
-  assert.equal(revokedPurchase.entitlement.purchased_corpus_digest, corpus.v2Digest);
-  const revokedSession = await connectRuntime(restartedRuntime.url, revokedPurchase.entitlement_id);
-  sockets.push(revokedSession.socket);
-  assert.equal((await revokedSession.ready).corpus_digest, corpus.v2Digest);
+  // A zero-price purchase is permanent. The buyer surface has no cancel or
+  // refund action; an old client attempting either route must not change the
+  // entitlement, and both existing and fresh sessions remain usable.
+  const permanentPurchase = await checkout(dashboard.url, "permanent-free-v2");
+  assert.equal(permanentPurchase.payment.status, "not_required");
+  assert.equal(permanentPurchase.entitlement.purchased_corpus_digest, corpus.v2Digest);
+  const permanentSession = await connectRuntime(restartedRuntime.url, permanentPurchase.entitlement_id);
+  sockets.push(permanentSession.socket);
+  assert.equal((await permanentSession.ready).corpus_digest, corpus.v2Digest);
 
   const refundResponse = await fetch(
-    `${dashboard.url}/v1/user/orders/${encodeURIComponent(revokedPurchase.order_id)}/refund-requests`,
+    `${dashboard.url}/v1/user/orders/${encodeURIComponent(permanentPurchase.order_id)}/refund-requests`,
     {
       method: "POST",
-      headers: buyerMutationHeaders("cancel-free-v2"),
-      body: JSON.stringify({ reason: "buyer_requested_before_delivery" })
+      headers: buyerMutationHeaders("legacy-free-refund-attempt"),
+      body: JSON.stringify({ reason: "buyer_requested" })
     }
   );
-  const refunded = await refundResponse.json() as JsonRecord;
-  assert.equal(refundResponse.status, 201, JSON.stringify(refunded));
-  assert.equal(refunded.order.status, "cancelled");
-  assert.equal(refunded.order.entitlement_status, "revoked");
-  assert.equal(refunded.access_status, "revoked");
+  const refundRejected = await refundResponse.json() as JsonRecord;
+  assert.equal(refundResponse.status, 409, JSON.stringify(refundRejected));
+  assert.equal(refundRejected.error?.code, "unmetered_purchase_not_reversible");
 
-  revokedSession.send(runMessage("run-after-refund"));
-  const deniedRun = await revokedSession.waitFor((message) => (
-    message.type === "turn.failed" && message.run_id === "run-after-refund"
+  permanentSession.send(runMessage("run-after-refund"));
+  const stillUsableRun = await permanentSession.waitFor((message) => (
+    message.type === "turn.completed" && message.run_id === "run-after-refund"
   ));
-  assert.match(String(deniedRun.error?.message), /revoked|not active|no longer available/i);
-  assert.equal(invokedRuns.has("run-after-refund"), false, "revoked work is denied before model execution");
+  assert.equal(stillUsableRun.run_id, "run-after-refund");
+  assert.equal(invokedRuns.has("run-after-refund"), true, "permanent access remains usable after a rejected buyer refund");
 
-  const deniedConnection = await connectRuntimeExpectFailure(restartedRuntime.url, revokedPurchase.entitlement_id);
-  sockets.push(deniedConnection.socket);
-  assert.equal(deniedConnection.failure.error?.code, "entitlement_not_found");
+  const freshPermanentSession = await connectRuntime(restartedRuntime.url, permanentPurchase.entitlement_id);
+  sockets.push(freshPermanentSession.socket);
+  assert.equal((await freshPermanentSession.ready).corpus_digest, corpus.v2Digest);
 
   const revokedOrderResponse = await fetch(
-    `${dashboard.url}/v1/user/orders/${encodeURIComponent(revokedPurchase.order_id)}`,
+    `${dashboard.url}/v1/user/orders/${encodeURIComponent(permanentPurchase.order_id)}`,
     { headers: buyerHeaders() }
   );
-  const revokedOrder = (await revokedOrderResponse.json() as JsonRecord).order;
+  const permanentOrder = (await revokedOrderResponse.json() as JsonRecord).order;
   assert.equal(revokedOrderResponse.status, 200);
-  assert.equal(revokedOrder.refund_status, "refunded");
-  assert.equal(revokedOrder.delivery_status, "not_started");
-  assert.equal(revokedOrder.access.status, "revoked");
+  assert.equal(permanentOrder.refund_status, "none");
+  assert.equal("delivery_status" in permanentOrder, false);
+  assert.equal(permanentOrder.access.status, "active");
 
 });
 
@@ -518,8 +479,6 @@ async function startRuntime(input: {
 
 function scenarioRuntimeFactory(input: {
   invokedRuns: Set<string>;
-  outageArtifactObserved: () => void;
-  continueAfterOutage: Promise<void>;
 }): () => AgentRuntime {
   return () => ({
     async *run(run, context): AsyncIterable<OutboundMessage> {
@@ -549,10 +508,6 @@ function scenarioRuntimeFactory(input: {
           content: "private artifact body"
         }
       };
-      if (run.run_id === "run-outage") {
-        input.outageArtifactObserved();
-        await input.continueAfterOutage;
-      }
       yield { type: "turn.completed", run_id: run.run_id, finish_reason: "stop" };
     }
   });
@@ -732,16 +687,6 @@ async function terminate(child: ChildProcessWithoutNullStreams): Promise<void> {
     child.kill("SIGKILL");
     await once(child, "exit");
   }
-}
-
-function deferred<T>() {
-  let resolve!: (value: T | PromiseLike<T>) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
-    resolve = resolvePromise;
-    reject = rejectPromise;
-  });
-  return { promise, resolve, reject };
 }
 
 async function waitFor<T>(read: () => T | undefined, timeoutMs = 8_000): Promise<T> {

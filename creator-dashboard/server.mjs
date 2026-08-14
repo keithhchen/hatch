@@ -916,8 +916,7 @@ export async function createDashboardApp(options = {}) {
             currency: "USD"
           },
           entitlement_scope: {
-            unit: "delivery",
-            included_units: 1,
+            access_mode: "unmetered",
             version_policy: "pinned"
           }
         });
@@ -1023,19 +1022,20 @@ export async function createDashboardApp(options = {}) {
         }
         const orderId = current.order_id;
         const isCancel = buyerRefundMatch[2] === "cancel";
+        const unmetered = current.access_mode === "unmetered" || Number(current.gross_minor ?? 0) === 0;
+        if (unmetered) {
+          return send(response, 409, {
+            error: {
+              code: "unmetered_purchase_not_reversible",
+              message: "A zero-price purchase is permanent and cannot be cancelled or refunded from the buyer portal."
+            }
+          });
+        }
         if (isCancel && current.gross_minor !== 0) {
           return send(response, 409, {
             error: {
               code: "paid_cancel_not_supported",
               message: "Paid cancellation is not available yet."
-            }
-          });
-        }
-        if (current.gross_minor === 0 && current.deliveries.length > 0) {
-          return send(response, 409, {
-            error: {
-              code: "free_access_already_consumed",
-              message: "Free access cannot be removed after its delivery has completed."
             }
           });
         }
@@ -1102,8 +1102,7 @@ export async function createDashboardApp(options = {}) {
         }
         // The key identifies one Buyer intent, not a permanent
         // Buyer/product pair. Replaying the same intent is idempotent while a
-        // fresh key creates a fresh checkout and can legitimately buy another
-        // delivery unit for the same product.
+        // fresh key creates a fresh checkout and a separate purchase record.
         const session = await portalState.createCheckoutSession({
           request_key: requestKey,
           buyer_id: authentication.profile.id,
@@ -1119,8 +1118,7 @@ export async function createDashboardApp(options = {}) {
             currency: "USD"
           },
           entitlement_scope: {
-            unit: "delivery",
-            included_units: 1,
+            access_mode: "unmetered",
             version_policy: "pinned"
           }
         });
@@ -2234,7 +2232,7 @@ function checkoutCommerceInput(session, authentication) {
     discount_minor: 0,
     tax_minor: null,
     total_minor: 0,
-    included_units: 1,
+    access_mode: "unmetered",
     gross_minor: 0,
     currency: "USD",
     payment_status: "not_required",
@@ -2362,12 +2360,13 @@ function normalizedCurrency(value) {
 }
 
 function entitlementAuthorization(entitlement) {
-  const authorized = entitlement.status === "active" && Number(entitlement.remaining_units ?? 0) > 0;
+  const unmetered = entitlement.access_mode === "unmetered" || Number(entitlement.gross_minor ?? 0) === 0;
+  const authorized = entitlement.status === "active" && (unmetered || Number(entitlement.remaining_units ?? 0) > 0);
   return {
     authorized,
     reason: authorized
       ? "authorized"
-      : entitlement.status === "active"
+      : entitlement.status === "active" && !unmetered
         ? "units_exhausted"
         : `entitlement_${entitlement.status}`,
     entitlement_id: entitlement.entitlement_id,
@@ -2383,7 +2382,8 @@ function entitlementAuthorization(entitlement) {
     version_policy: entitlement.version_policy,
     valid_from: entitlement.valid_from,
     valid_until: entitlement.valid_until ?? null,
-    remaining_units: entitlement.remaining_units,
+    ...(unmetered ? {} : { remaining_units: entitlement.remaining_units }),
+    access_mode: unmetered ? "unmetered" : "metered",
     status: entitlement.status
   };
 }
@@ -2407,6 +2407,9 @@ function runtimeEntitlementBinding(entitlement) {
     agent_id: productId,
     product_id: productId,
     status: "active",
+    access_mode: entitlement.access_mode === "unmetered" || Number(entitlement.gross_minor ?? 0) === 0
+      ? "unmetered"
+      : "metered",
     purchased_corpus_digest: purchasedCorpusDigest,
     effective_corpus_digest: effectiveCorpusDigest,
     version_policy: entitlement.version_policy ?? "pinned",
@@ -2942,6 +2945,7 @@ function enrichEntitlements(entitlements, catalog, deliveries = []) {
     deliveriesByEntitlement.set(delivery.entitlement_id, history);
   }
   return entitlements.map((entitlement) => {
+    const unmetered = entitlement.access_mode === "unmetered" || Number(entitlement.gross_minor ?? 0) === 0;
     const agent = byProduct.get(`${entitlement.creator_id}:${entitlement.product_id}`);
     const {
       agent_id: _agentId,
@@ -2954,7 +2958,8 @@ function enrichEntitlements(entitlements, catalog, deliveries = []) {
     return {
       ...publicEntitlement,
       product_id: entitlement.product_id ?? entitlement.agent_id,
-      status: entitlement.status === "active" && entitlement.reserved_units > 0 ? "reserved" : entitlement.status,
+      access_mode: unmetered ? "unmetered" : "metered",
+      status: entitlement.status === "active" && !unmetered && entitlement.reserved_units > 0 ? "reserved" : entitlement.status,
       product: agent ? {
         id: agent.product_id,
         product_id: agent.product_id,
@@ -2963,11 +2968,12 @@ function enrichEntitlements(entitlements, catalog, deliveries = []) {
         promise: agent.product_promise
       } : { id: entitlement.product_id, product_id: entitlement.product_id, name: entitlement.product_id },
       creator: agent ? { id: agent.creator_id, name: agent.creator_name } : { id: entitlement.creator_id },
-      granted_units: entitlement.granted_units ?? 1,
-      remaining_units: entitlement.remaining_units ?? 1,
-      unit: entitlement.unit ?? "delivery",
       version_policy: entitlement.version_policy ?? "pinned",
-      deliveries: deliveriesByEntitlement.get(entitlement.entitlement_id) ?? []
+      ...(unmetered ? {} : {
+        granted_units: entitlement.granted_units,
+        remaining_units: entitlement.remaining_units,
+        deliveries: deliveriesByEntitlement.get(entitlement.entitlement_id) ?? []
+      })
     };
   });
 }
@@ -2981,11 +2987,14 @@ function entitlementMatchesStatus(entitlement, status) {
 
 function orderDetail(order, events = []) {
   const paymentStatus = order.payment_status ?? (order.gross_minor === 0 ? "not_required" : "paid");
+  const unmetered = order.access_mode === "unmetered" || Number(order.gross_minor ?? 0) === 0;
   const entitlement = order.entitlement ?? (order.entitlement_id ? { entitlement_id: order.entitlement_id, status: order.status === "refunded" ? "revoked" : "active" } : null);
   const entitlementId = entitlement?.entitlement_id ?? null;
-  const deliveries = Array.isArray(order.deliveries)
-    ? order.deliveries
-    : events.filter((event) => event.order_id === order.order_id && event.event_type === "delivery.completed");
+  const deliveries = unmetered
+    ? []
+    : Array.isArray(order.deliveries)
+      ? order.deliveries
+      : events.filter((event) => event.order_id === order.order_id && event.event_type === "delivery.completed");
   const refunds = Array.isArray(order.refunds)
     ? order.refunds
     : events.filter((event) => event.order_id === order.order_id && event.event_type === "order.refunded");
@@ -2994,6 +3003,7 @@ function orderDetail(order, events = []) {
     ? order.timeline
     : events
       .filter((event) => event.order_id === order.order_id)
+      .filter((event) => !unmetered || !new Set(["task.started", "artifact.created", "delivery.completed", "entitlement.units_reserved", "entitlement.units_consumed", "entitlement.units_released"]).has(event.event_type))
       .map((event) => ({ event_id: event.event_id, type: event.event_type, occurred_at: event.occurred_at }))
       .sort((left, right) => left.occurred_at.localeCompare(right.occurred_at));
   const revenueRecognized = Array.isArray(order.revenue)
@@ -3010,6 +3020,7 @@ function orderDetail(order, events = []) {
   return {
     ...publicOrder,
     product_id: order.product_id ?? order.agent_id,
+    access_mode: unmetered ? "unmetered" : "metered",
     order_number: order.order_number ?? stableOrderNumber(order),
     creator: order.creator_snapshot ?? { id: order.creator_id, name: order.creator_display_name ?? order.creator_id },
     status: refunded
@@ -3026,17 +3037,19 @@ function orderDetail(order, events = []) {
     total_minor: order.total_minor ?? order.gross_minor,
     payment_status: paymentStatus,
     entitlement_status: refunded ? "revoked" : entitlement?.status ?? (entitlementId ? "active" : "pending"),
-    delivery_status: deliveries.length ? "completed" : "not_started",
     revenue_status: revenueRecognized ? "recognized" : order.gross_minor === 0 ? "not_applicable" : "pending",
     refund_status: refunded ? "refunded" : "none",
     payment: { status: paymentStatus, payment_id: order.payment_id ?? null },
     access: { status: refunded ? "revoked" : entitlement?.status ?? (entitlementId ? "active" : "pending"), entitlement_id: entitlementId },
-    deliveries,
+    ...(unmetered ? {} : {
+      delivery_status: deliveries.length ? "completed" : "not_started",
+      deliveries
+    }),
     refund: refunds.at(-1) ?? null,
     actions: {
       can_request_refund: order.gross_minor > 0 && !refunded,
       can_creator_refund: !refunded,
-      can_cancel_access: order.gross_minor === 0 && !refunded && deliveries.length === 0
+      can_cancel_access: false
     },
     timeline
   };
@@ -3244,6 +3257,7 @@ function commerceErrorStatus(code) {
     || code.startsWith("refund_")
     || code.startsWith("payment_")
     || code.startsWith("entitlement_")
+    || code.startsWith("access_")
     || code.startsWith("insufficient_")
   )) return 409;
   return 500;
