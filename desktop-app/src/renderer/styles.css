@@ -1608,7 +1608,7 @@ h2 {
 
 .composer-settings {
   flex: 1 1 auto;
-  gap: 4px;
+  gap: 8px;
   overflow: visible;
 }
 
@@ -1653,7 +1653,7 @@ button.composer-control:focus-visible {
 }
 
 .workspace-composer-control {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   justify-content: flex-start;
   min-width: 0;
   max-width: none;
@@ -2442,7 +2442,7 @@ button.composer-control:focus-visible {
 .composer-controls .composer-settings {
   align-items: center;
   display: flex;
-  gap: 4px;
+  gap: 8px;
   min-width: 0;
   width: 100%;
 }
@@ -2779,14 +2779,12 @@ button.composer-control:focus-visible {
   transform: translateY(-50%);
 }
 
-.desktop-settings-save-status,
 .desktop-settings-save-error {
   display: block;
   margin-block-start: 8px;
   font-size: 11px;
 }
 
-.desktop-settings-save-status { color: #3f7656; }
 .desktop-settings-save-error { color: #a64232; }
 
 @media (prefers-contrast: more) {

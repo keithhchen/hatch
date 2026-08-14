@@ -259,7 +259,6 @@ function AuxiliaryLanguageSettings({ onLanguageChange }) {
   const [ready, setReady] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
-  const [saved, setSaved] = useState(false);
   const language = resolveLanguage(preference, browserPreferredLocales());
   const t = useMemo(() => createTranslator(language), [language]);
 
@@ -279,7 +278,6 @@ function AuxiliaryLanguageSettings({ onLanguageChange }) {
     const next = normalizeLanguagePreference(event.target.value);
     setPreference(next);
     onLanguageChange?.(next);
-    setSaved(false);
     setSaveError("");
     setSaving(true);
     try {
@@ -288,7 +286,6 @@ function AuxiliaryLanguageSettings({ onLanguageChange }) {
       if (window.__TAURI_INTERNALS__) {
         void emit("hatch://language-preference", { language: next }).catch(() => {});
       }
-      setSaved(true);
     } catch {
       setSaveError(t("settings.language.saveFailed"));
     } finally {
@@ -318,7 +315,6 @@ function AuxiliaryLanguageSettings({ onLanguageChange }) {
           <ChevronDown aria-hidden="true" />
         </div>
       </div>
-      {saved ? <small className="desktop-settings-save-status" role="status">{t("settings.language.saved")}</small> : null}
       {saveError ? <small className="desktop-settings-save-error" role="alert">{saveError}</small> : null}
     </div>
   );
@@ -3343,7 +3339,6 @@ function App() {
           selectedEntitlementId={selectedEntitlementId}
           conversationId={conversationId}
           conversations={conversations}
-          conversationLibraryError={conversationLibraryError}
           conversationLibraryStatus={conversationLibraryStatus}
           conversationLibraryReady={conversationLibraryStatus === "ready"}
           onSelectAgent={selectCreatorAgent}
@@ -3423,7 +3418,9 @@ function App() {
                       onKeyDownCapture={stopImeEnterSubmit}
                       placeholder={conversationReady
                         ? t("conversation.messageAgent", { name: creatorAgent.name })
-                        : t("conversation.restoringPlaceholder")}
+                        : chatLoading
+                          ? t("conversation.restoringPlaceholder")
+                          : t("conversation.offlineTitle")}
                       submitMode="enter"
                       rows={1}
                     />
@@ -3487,7 +3484,6 @@ function DesktopSidebar({
   selectedEntitlementId,
   conversationId,
   conversations,
-  conversationLibraryError,
   conversationLibraryStatus,
   conversationLibraryReady,
   onSelectAgent,
@@ -3574,13 +3570,6 @@ function DesktopSidebar({
                   {conversationLibraryStatus === "loading" || conversationLibraryStatus === "idle" ? (
                     <div className="desktop-source-empty compact">
                       <DesktopConnectionStatus state="connecting" compact />
-                    </div>
-                  ) : conversationLibraryStatus === "unavailable" ? (
-                    <div
-                      className="desktop-source-empty compact"
-                      title={conversationLibraryError || undefined}
-                    >
-                      <DesktopConnectionStatus state="offline" compact />
                     </div>
                   ) : visibleConversations.length > 0 ? visibleConversations.map((conversation) => {
                     const conversationSelected = conversation.id === conversationId;
@@ -4291,11 +4280,7 @@ function EmptyThread({ connected, creatorAgent, chatLoading }) {
           ? t("conversation.emptyTitle")
           : t("conversation.offlineTitle")}
       </h2>
-      <p>
-        {connected
-          ? creatorAgent.description
-          : t("conversation.offlineBody")}
-      </p>
+      {connected ? <p>{creatorAgent.description}</p> : null}
       {creatorAgent.boundary ? <small className="boundary-copy">{creatorAgent.boundary}</small> : null}
     </div>
   );
@@ -4420,11 +4405,9 @@ function SignInScreen({ onSignIn, status, error }) {
 
   return (
     <main className="welcome-screen">
-      <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch<span className="hatch-wordmark-period" aria-hidden="true">.</span></strong></div>
       <section className="sign-in-card">
-        <span className="eyebrow">{t("auth.welcome")}</span>
+        <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch<span className="hatch-wordmark-period" aria-hidden="true">.</span></strong></div>
         <h1>{t("auth.signInTitle")}</h1>
-        <p>{t("auth.signInDescription")}</p>
         <form className="sign-in-form" onSubmit={submit}>
           <label className="field">
             <span>{t("auth.email")}</span>
@@ -4439,7 +4422,6 @@ function SignInScreen({ onSignIn, status, error }) {
           </button>
         </form>
         {error ? <small className="sign-in-error" role="alert">{error}</small> : null}
-        <small>{t("auth.sessionStoredNotice")}</small>
       </section>
     </main>
   );
