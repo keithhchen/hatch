@@ -225,15 +225,15 @@ jobs:
           dmg_path="$(find release/macos -type f -name '*.dmg' -print -quit)"
           exe_path="$(find release/windows -type f -name '*.exe' -print -quit)"
           test -n "$dmg_path" && test -n "$exe_path"
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" "$dmg_path" "$exe_path" --clobber
-            gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease=false --latest --title "$GITHUB_REF_NAME" --notes "Hatch $GITHUB_REF_NAME"
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$dmg_path" "$exe_path" --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease=false --latest --title "$GITHUB_REF_NAME" --notes "Hatch $GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY"
           else
             # This job only downloads artifacts and has no checkout.  Do not
             # use --verify-tag here: gh implements that flag by invoking git,
             # which fails in the artifact-only workspace.  The workflow is
             # already restricted to refs/tags/v* and GitHub owns the ref.
-            gh release create "$GITHUB_REF_NAME" "$dmg_path" "$exe_path" --latest --title "$GITHUB_REF_NAME" --notes "Hatch $GITHUB_REF_NAME"
+            gh release create "$GITHUB_REF_NAME" "$dmg_path" "$exe_path" --latest --title "$GITHUB_REF_NAME" --notes "Hatch $GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY"
           fi
 
   containers:
