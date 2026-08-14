@@ -126,7 +126,10 @@ test("Factory Evidence/Eval/Corpus prompt gateway uses dedicated Kimi K2.6 high-
   const body = JSON.parse(String(request.init.body)) as Record<string, unknown>;
   assert.equal(body.model, FACTORY_LLM_MODEL);
   assert.equal(body.reasoning_effort, "high");
-  assert.equal(body.tool_choice, "required");
+  // Kimi K2.6 only accepts the provider-compatible automatic choice while
+  // thinking is enabled; the host submission FSM still requires a complete
+  // tool batch and finalizer before accepting output.
+  assert.equal(body.tool_choice, "auto");
   // Pi reserves the prompt/context tokens before sending the request, so the
   // provider budget is bounded by (and may be slightly below) the profile cap.
   const sentMaxCompletionTokens = body.max_completion_tokens;
