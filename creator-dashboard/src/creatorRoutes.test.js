@@ -12,6 +12,19 @@ test("Creator Factory run routes preserve the selected run across refresh", () =
   assert.equal(creatorRouteTitle(parseCreatorRoute("/studio/factory/runs/factory_123")), "Factory run");
 });
 
+test("Source Library is a separate Task-owned route", () => {
+  assert.deepEqual(parseCreatorRoute("/studio/sources"), {
+    kind: "sources",
+    section: "products"
+  });
+  assert.deepEqual(parseCreatorRoute("/studio/tasks/task_123/sources"), {
+    kind: "sources",
+    section: "products",
+    taskId: "task_123"
+  });
+  assert.equal(creatorRouteTitle(parseCreatorRoute("/studio/sources")), "Source Library");
+});
+
 test("paid payout routes stay outside the free Creator product", () => {
   assert.equal(parseCreatorRoute("/studio/settings/payouts").kind, "not-found");
   assert.equal(parseCreatorRoute("/studio/payouts/payout_9").kind, "not-found");

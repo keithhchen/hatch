@@ -1,6 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import { FactoryFileStore } from "./fileStore.js";
+import { CreatorSourceLibrary, CreatorSourceLibraryError } from "./sourceLibrary.js";
+import type { ArtifactObjectStore } from "./objectStore.js";
+import type { DistillationGraphStore, DistillationRelease } from "./distillationGraph.js";
+import { isDistillationTaskRepository, validateTaskText, type DistillationTaskRecord } from "./tasks.js";
 import { parseQuestions } from "./markdown.js";
 import { requireQuestionBatchId } from "./questionBatch.js";
 import {
@@ -11,12 +15,15 @@ import {
 import type { ArtifactRef, CreatorQuestion, FactoryAgentProduct, FactoryAgentTool, FactoryStartInput } from "./types.js";
 
 export type CreateFactoryRunRequest = {
+  taskId?: string;
   agentId?: string;
   product?: Partial<FactoryAgentProduct>;
   tools?: FactoryAgentTool[];
   taskName: string;
   taskBrief: string;
-  sources: FactoryStartInput["sources"];
+  sources?: FactoryStartInput["sources"];
+  sourceDocumentIds?: string[];
+  sourceSnapshotId?: string;
   config?: FactoryStartInput["config"];
 };
 
@@ -36,6 +43,14 @@ export class CreatorFactoryInputTooLargeError extends Error {
 
 export type CreatorFactoryRunView = {
   id: string;
+  taskId?: string;
+  distillationRunId?: string;
+  revisionId?: string;
+  revisionNumber?: number;
+  parentRevisionId?: string;
+  sourceSnapshotId?: string;
+  derivedStatus?: string;
+  qualityGates?: Array<{ name: string; critical: boolean; status: string; reason?: string }>;
   agentId?: string;
   product?: FactoryAgentProduct;
   declaredToolIds?: string[];
@@ -74,10 +89,99 @@ export type PublishableFactoryCorpus = {
 };
 
 export class CreatorFactoryService {
+  private readonly sourceLibrary: CreatorSourceLibrary;
+
   constructor(
     private readonly repository: CreatorFactoryRepository,
-    private readonly factoryRoot: string
-  ) {}
+    private readonly factoryRoot: string,
+    sourceLibrary?: CreatorSourceLibrary,
+    private readonly objectStore?: ArtifactObjectStore,
+    private readonly graphStore?: DistillationGraphStore
+  ) {
+    this.sourceLibrary = sourceLibrary ?? new CreatorSourceLibrary(path.join(factoryRoot, "source-library"), objectStore, graphStore);
+  }
+
+  async createSourceDocument(creatorId: string, input: Parameters<CreatorSourceLibrary["createFromUpload"]>[1]) {
+    const taskId = requireText(input.taskId, "taskId");
+    await this.requireActiveTask(creatorId, taskId);
+    await this.sourceLibrary.initialize();
+    return this.sourceLibrary.createFromUpload(creatorId, input);
+  }
+
+  async listSourceDocuments(creatorId: string, taskId?: string) {
+    if (taskId) await this.requireActiveTask(creatorId, taskId);
+    await this.sourceLibrary.initialize();
+    return this.sourceLibrary.listDocuments(creatorId, taskId);
+  }
+
+  async getSourceDocument(creatorId: string, documentId: string) {
+    await this.sourceLibrary.initialize();
+    return this.sourceLibrary.getDocument(creatorId, documentId);
+  }
+
+  async createSourceSnapshot(creatorId: string, input: { documentIds: string[]; taskId?: string }) {
+    const taskId = requireText(input.taskId, "taskId");
+    await this.requireActiveTask(creatorId, taskId);
+    await this.sourceLibrary.initialize();
+    return this.sourceLibrary.createSnapshot(creatorId, input);
+  }
+
+  async getSourceSnapshot(creatorId: string, snapshotId: string) {
+    await this.sourceLibrary.initialize();
+    return this.sourceLibrary.getSnapshot(creatorId, snapshotId);
+  }
+
+  async createTask(creatorId: string, input: { name: string; brief: string }): Promise<DistillationTaskRecord> {
+    const repository = this.taskRepository();
+    const task = await repository.createTask({
+      id: `task_${randomUUID().replaceAll("-", "")}`,
+      creatorId: requireText(creatorId, "creatorId"),
+      name: validateTaskText(input.name, "task.name", 240),
+      brief: validateTaskText(input.brief, "task.brief"),
+      // A Task is the product boundary. Generate its Product identity once;
+      // presentation/configuration remains outside this control-plane record.
+      productId: randomUUID()
+    });
+    if (this.graphStore) {
+      await this.graphStore.initialize();
+      await this.graphStore.appendEvent({
+        id: `evt_${randomUUID().replaceAll("-", "")}`,
+        eventKey: `${task.id}:created`,
+        taskId: task.id,
+        runId: task.runId ?? task.id,
+        type: "task_created",
+        node: "intake",
+        actor: "creator",
+        parentEventIds: [],
+        artifactIds: [],
+        payload: { nameLength: task.name.length }
+      });
+    }
+    return task;
+  }
+
+  async listTasks(creatorId: string): Promise<DistillationTaskRecord[]> {
+    return this.taskRepository().listTasks(requireText(creatorId, "creatorId"));
+  }
+
+  async getTask(creatorId: string, taskId: string): Promise<DistillationTaskRecord> {
+    const task = await this.taskRepository().getTask(requireText(creatorId, "creatorId"), requireText(taskId, "taskId"));
+    if (!task) throw new CreatorFactoryRepositoryError("run_not_found", `Distillation Task ${taskId} was not found`);
+    return task;
+  }
+
+  async deleteTask(creatorId: string, taskId: string): Promise<DistillationTaskRecord> {
+    return this.taskRepository().softDeleteTask(requireText(creatorId, "creatorId"), requireText(taskId, "taskId"));
+  }
+
+  async getTaskGraph(creatorId: string, taskId: string) {
+    const task = await this.getTask(creatorId, taskId);
+    if (!this.graphStore) {
+      return { taskId: task.id, status: "not_started" as const, nodeStatus: {}, gates: [], criticalGateFailures: [], correctionRequired: false };
+    }
+    await this.graphStore.initialize();
+    return this.graphStore.derive(task.id);
+  }
 
   async create(
     creator: { id: string; name: string },
@@ -85,16 +189,67 @@ export class CreatorFactoryService {
     idempotencyKey: string
   ): Promise<{ run: CreatorFactoryRunView; created: boolean }> {
     const normalized = validateCreateRequest(request);
+    let task: DistillationTaskRecord | undefined;
+    if (normalized.taskId) {
+      task = await this.getTask(creator.id, normalized.taskId);
+      if (task.status !== "active") throw new CreatorFactoryRepositoryError("invalid_status", `Distillation Task ${normalized.taskId} is deleted`);
+    }
+    const taskProductId = task ? (task.productId ?? deterministicTaskProductId(task.id)) : undefined;
+    if (task && normalized.agentId && normalized.agentId !== taskProductId) {
+      throw new CreatorFactoryRepositoryError("invalid_status", `Distillation Task ${task.id} is bound to another Product`);
+    }
+    if (task && normalized.product?.id && normalized.product.id !== taskProductId) {
+      throw new CreatorFactoryRepositoryError("invalid_status", `Distillation Task ${task.id} is bound to another Product`);
+    }
+    const taskProduct = task
+      ? {
+          ...(normalized.product ?? {}),
+          id: taskProductId!,
+          name: normalized.product?.name ?? task.name,
+          description: normalized.product?.description ?? task.brief
+        }
+      : normalized.product;
+    const autoSnapshot = !normalized.sourceSnapshotId && normalized.sourceDocumentIds?.length
+      ? await this.sourceLibrary.createSnapshot(creator.id, { documentIds: normalized.sourceDocumentIds, taskId: normalized.taskId })
+      : undefined;
+    const snapshotId = normalized.sourceSnapshotId ?? autoSnapshot?.id;
+    // A Task revision is a graph revision, not an inline ad-hoc Factory run.
+    // Enforce the immutable Source Snapshot boundary before creating the
+    // repository record so an invalid request cannot leave an orphan run.
+    if (task && !snapshotId) {
+      throw new CreatorFactoryRepositoryError("invalid_status", "A Task revision must be pinned to a Source Snapshot");
+    }
+    if (task && snapshotId) {
+      const snapshot = await this.sourceLibrary.getSnapshot(creator.id, snapshotId);
+      if (snapshot.taskId !== task.id) {
+        throw new CreatorFactoryRepositoryError("invalid_status", "Source Snapshot belongs to another Distillation Task");
+      }
+    }
+    const sources = snapshotId
+      ? await this.sourceLibrary.resolveSnapshotSources(creator.id, snapshotId)
+      : normalized.sources ?? [];
     const runId = `factory_${randomUUID().replaceAll("-", "")}`;
+    const distillationRunId = task?.runId ?? `distill_${randomUUID().replaceAll("-", "")}`;
+    const revisionNumber = task?.latestRevisionId ? await this.nextRevisionNumber(creator.id, normalized.taskId!) : 1;
+    const taskName = task?.name ?? normalized.taskName;
+    const taskBrief = task?.brief ?? normalized.taskBrief;
     const input: FactoryStartInput = {
       runId,
       creator: { id: requireText(creator.id, "creator.id"), name: requireText(creator.name, "creator.name") },
-      ...(normalized.agentId ? { agentId: normalized.agentId } : {}),
-      ...(normalized.product ? { product: normalized.product } : {}),
+      ...(normalized.taskId ? { taskId: normalized.taskId } : {}),
+      ...(task ? {
+        distillationRunId,
+        revisionId: runId,
+        revisionNumber,
+        ...(task.latestRevisionId ? { parentRevisionId: task.latestRevisionId } : {})
+      } : {}),
+      ...((taskProductId ?? normalized.agentId) ? { agentId: taskProductId ?? normalized.agentId } : {}),
+      ...(taskProduct ? { product: taskProduct } : {}),
       tools: normalized.tools,
-      taskName: normalized.taskName,
-      taskBrief: normalized.taskBrief,
-      sources: normalized.sources,
+      taskName,
+      taskBrief,
+      sources,
+      ...(snapshotId ? { sourceSnapshotId: snapshotId } : {}),
       ...(normalized.config ? { config: normalized.config } : {})
     };
     const result = await this.repository.create({
@@ -103,6 +258,39 @@ export class CreatorFactoryService {
       idempotencyKey: requireText(idempotencyKey, "Idempotency-Key"),
       input
     });
+    if (task) {
+      await this.taskRepository().setTaskRevision(creator.id, task.id, { runId: distillationRunId, revisionId: runId, productId: taskProductId! });
+      await this.graphStore?.initialize();
+      await this.graphStore?.ensureRun({
+        id: distillationRunId,
+        taskId: task.id,
+        creatorId: creator.id,
+        productId: taskProductId,
+        createdAt: result.run.createdAt
+      });
+      await this.graphStore?.createRevision({
+        id: runId,
+        runId: distillationRunId,
+        taskId: task.id,
+        revision: revisionNumber,
+        sourceSnapshotId: snapshotId!,
+        ...(task.latestRevisionId ? { parentRevisionId: task.latestRevisionId } : {}),
+        createdAt: result.run.createdAt
+      });
+      await this.graphStore?.appendEvent({
+        id: `evt_${randomUUID().replaceAll("-", "")}`,
+        eventKey: `${runId}:revision_created`,
+        taskId: task.id,
+        runId: distillationRunId,
+        revisionId: runId,
+        type: "revision_created",
+        node: "intake",
+        actor: "creator",
+        parentEventIds: [],
+        artifactIds: [],
+        payload: { revision: revisionNumber, sourceSnapshotId: snapshotId ?? null }
+      });
+    }
     return { run: await this.project(result.run, false), created: result.created };
   }
 
@@ -197,7 +385,7 @@ export class CreatorFactoryService {
     if (run.status !== "ready" || run.state?.stage !== "ready" || !latest?.agentCorpus) {
       throw notPublishable(runId);
     }
-    const store = new FactoryFileStore(this.factoryRoot, run.id);
+    const store = this.fileStore(run.id);
     try {
       await assertCanonicalPassingHeldout(store, run.state, latest.agentCorpus.heldOut);
     } catch (error) {
@@ -213,10 +401,83 @@ export class CreatorFactoryService {
     };
   }
 
+  /**
+   * Commit the control-plane Release after Registry CAS activation succeeds.
+   * Approval and publication are one product command, but the graph records
+   * the immutable fact only after the live pointer is known to be active.
+   */
+  async recordRelease(creatorId: string, runId: string, productId: string): Promise<DistillationRelease> {
+    const run = await this.requireRun(creatorId, runId);
+    if (!this.graphStore || !run.input.taskId) {
+      throw new CreatorFactoryRepositoryError("invalid_status", "Distillation graph is unavailable for Release");
+    }
+    const latest = run.state?.artifacts.corpusCandidates.at(-1);
+    const corpusArtifactId = latest?.agentCorpus?.manifest.artifactId;
+    const revisionId = run.input.revisionId ?? run.id;
+    const distillationRunId = run.input.distillationRunId ?? run.id;
+    if (run.status !== "ready" || run.state?.stage !== "ready" || !latest?.agentCorpus || !corpusArtifactId) {
+      throw new CreatorFactoryRepositoryError("invalid_status", `Factory run ${runId} is not Release-ready`);
+    }
+    if (run.input.product?.id && run.input.product.id !== productId) {
+      throw new CreatorFactoryRepositoryError("invalid_status", `Factory run ${runId} is bound to another Product`);
+    }
+    const task = await this.getTask(creatorId, run.input.taskId);
+    if (task.productId && task.productId !== productId) {
+      throw new CreatorFactoryRepositoryError("invalid_status", `Distillation Task ${task.id} is bound to another Product`);
+    }
+    await this.graphStore.initialize();
+    const graph = await this.graphStore.derive(run.input.taskId);
+    if (graph.currentRevisionId && graph.currentRevisionId !== revisionId) {
+      throw new CreatorFactoryRepositoryError("invalid_status", `Factory run ${runId} is not the current Task revision`);
+    }
+    if (!["ready", "released"].includes(graph.status)) {
+      throw new CreatorFactoryRepositoryError("invalid_status", `Task ${run.input.taskId} has not passed its current quality gates`);
+    }
+    const release: DistillationRelease = {
+      id: `release_${createHash("sha256").update(`${run.input.taskId}\u0000${revisionId}\u0000${productId}\u0000${corpusArtifactId}`).digest("hex").slice(0, 32)}`,
+      taskId: run.input.taskId,
+      runId: distillationRunId,
+      revisionId,
+      productId,
+      corpusArtifactId,
+      createdAt: latest.agentCorpus.verifiedAt
+    };
+    const recorded = await this.graphStore.recordRelease(release);
+    const parents = (await this.graphStore.listEvents(run.input.taskId))
+      .filter((event) => event.runId === distillationRunId && event.revisionId === revisionId)
+      .at(-1);
+    await this.graphStore.appendEvent({
+      id: `evt_${randomUUID().replaceAll("-", "")}`,
+      eventKey: `${revisionId}:release_created:${productId}:${corpusArtifactId}`,
+      taskId: run.input.taskId,
+      runId: distillationRunId,
+      revisionId,
+      type: "release_created",
+      node: "release",
+      actor: "system",
+      parentEventIds: parents ? [parents.id] : [],
+      artifactIds: [corpusArtifactId],
+      payload: { productId, corpusDigest: latest.agentCorpus.digest }
+    });
+    return recorded;
+  }
+
   private async requireRun(creatorId: string, runId: string): Promise<FactoryRunRecord> {
     const run = await this.repository.getForCreator(creatorId, runId);
     if (!run) throw new CreatorFactoryRepositoryError("run_not_found", `Factory run ${runId} was not found`);
     return run;
+  }
+
+  private async requireActiveTask(creatorId: string, taskId: string): Promise<void> {
+    try {
+      const task = await this.getTask(creatorId, taskId);
+      if (task.status !== "active") throw new CreatorSourceLibraryError("invalid_source", `Distillation Task ${taskId} is deleted`);
+    } catch (error) {
+      if (error instanceof CreatorFactoryRepositoryError && error.code === "run_not_found") {
+        throw new CreatorSourceLibraryError("invalid_source", `Distillation Task ${taskId} was not found`);
+      }
+      throw error;
+    }
   }
 
   private async project(run: FactoryRunRecord, includeQuestions: boolean): Promise<CreatorFactoryRunView> {
@@ -225,16 +486,26 @@ export class CreatorFactoryService {
       ? latest?.agentCorpus
       : undefined;
     const evidence = readyAgentCorpus && run.state && latest
-      ? await candidateEvidence(new FactoryFileStore(this.factoryRoot, run.id), run.state, latest)
+      ? await candidateEvidence(this.fileStore(run.id), run.state, latest)
       : undefined;
     const inputProduct = run.input.product?.id && run.input.product.name
       ? run.input.product as FactoryAgentProduct
       : undefined;
     const projectedProduct = run.state?.product ?? inputProduct;
     const declaredTools = run.state?.tools ?? run.input.tools;
+    const graph = run.input.taskId && this.graphStore
+      ? await this.graphStore.derive(run.input.taskId)
+      : undefined;
     return {
       id: run.id,
       ...(run.state?.agentId || run.input.agentId ? { agentId: run.state?.agentId ?? run.input.agentId } : {}),
+      ...(run.input.taskId ? { taskId: run.input.taskId } : {}),
+      ...(run.input.distillationRunId ? { distillationRunId: run.input.distillationRunId } : {}),
+      ...(run.input.revisionId ? { revisionId: run.input.revisionId } : {}),
+      ...(run.input.revisionNumber === undefined ? {} : { revisionNumber: run.input.revisionNumber }),
+      ...(run.input.parentRevisionId ? { parentRevisionId: run.input.parentRevisionId } : {}),
+      ...(run.input.sourceSnapshotId ? { sourceSnapshotId: run.input.sourceSnapshotId } : {}),
+      ...(graph ? { derivedStatus: graph.status, qualityGates: graph.gates.map((gate) => ({ name: gate.name, critical: gate.critical, status: gate.status, ...(gate.reason ? { reason: gate.reason } : {}) })) } : {}),
       // Partial product hints remain private until Factory has normalized them;
       // an already-complete request can be projected while the run is queued.
       ...(projectedProduct ? { product: projectedProduct } : {}),
@@ -268,7 +539,27 @@ export class CreatorFactoryService {
   private async pendingQuestions(run: FactoryRunRecord): Promise<CreatorQuestion[]> {
     const reference = run.state?.artifacts.currentQuestionBatch;
     if (!reference?.sealed) throw new Error(`Factory run ${run.id} has no sealed pending Question batch`);
-    return parseQuestions(await new FactoryFileStore(this.factoryRoot, run.id).readArtifact(reference));
+    return parseQuestions(await this.fileStore(run.id).readArtifact(reference));
+  }
+
+  private fileStore(runId: string): FactoryFileStore {
+    return new FactoryFileStore(this.factoryRoot, runId, undefined, undefined, {
+      objectStore: this.objectStore
+    });
+  }
+
+  private taskRepository() {
+    if (!isDistillationTaskRepository(this.repository)) {
+      throw new CreatorFactoryRepositoryError("invalid_status", "Distillation Task storage is unavailable");
+    }
+    return this.repository;
+  }
+
+  private async nextRevisionNumber(creatorId: string, taskId: string): Promise<number> {
+    const runs = await this.repository.listForCreator(creatorId);
+    return Math.max(0, ...runs
+      .filter((run) => run.input.taskId === taskId)
+      .map((run) => run.input.revisionNumber ?? 0)) + 1;
   }
 }
 
@@ -369,11 +660,19 @@ function validateCreateRequest(
   const agentId = request.agentId === undefined ? undefined : requireCorpusIdentifier(request.agentId, "agentId");
   const taskName = requireText(request.taskName, "taskName");
   const taskBrief = requireText(request.taskBrief, "taskBrief");
-  if (!Array.isArray(request.sources) || request.sources.length === 0) throw new Error("sources must contain authorized material");
-  if (request.sources.length > 100) throw new Error("A Factory run supports at most 100 source items");
+  const sourceSnapshotId = request.sourceSnapshotId === undefined
+    ? undefined
+    : requireText(request.sourceSnapshotId, "sourceSnapshotId");
+  const taskId = request.taskId === undefined ? undefined : requireText(request.taskId, "taskId");
+  const sourceDocumentIds = request.sourceDocumentIds === undefined
+    ? undefined
+    : [...new Set(request.sourceDocumentIds.map((id) => requireText(id, "sourceDocumentId")))];
+  if (sourceSnapshotId && (request.sources !== undefined || sourceDocumentIds !== undefined)) throw new Error("Use sourceSnapshotId, sourceDocumentIds, or inline sources, not multiple source authorities");
+  if (!sourceSnapshotId && !sourceDocumentIds?.length && (!Array.isArray(request.sources) || request.sources.length === 0)) throw new Error("sources, sourceDocumentIds, or sourceSnapshotId is required");
+  if (request.sources && request.sources.length > 100) throw new Error("A Factory run supports at most 100 source items");
   let total = Buffer.byteLength(taskBrief, "utf8");
   const seen = new Set<string>();
-  const sources = request.sources.map((source) => {
+  const sources = (request.sources ?? []).map((source) => {
     const id = requireText(source.id, "source.id");
     if (seen.has(id)) throw new Error(`Duplicate source id: ${id}`);
     seen.add(id);
@@ -403,12 +702,15 @@ function validateCreateRequest(
   const product = request.product === undefined ? undefined : validateProduct(request.product);
   const tools = validateTools(request.tools);
   return {
+    ...(taskId ? { taskId } : {}),
     ...(agentId ? { agentId } : {}),
     ...(product ? { product } : {}),
     tools,
     taskName,
     taskBrief,
-    sources,
+    ...(request.sources === undefined ? {} : { sources }),
+    ...(sourceDocumentIds ? { sourceDocumentIds } : {}),
+    ...(sourceSnapshotId ? { sourceSnapshotId } : {}),
     ...(config ? { config } : {})
   };
 }
@@ -579,4 +881,18 @@ function boundedInteger(value: number, field: string, minimum: number, maximum: 
     throw new Error(`${field} must be an integer between ${minimum} and ${maximum}`);
   }
   return value;
+}
+
+/**
+ * Read-time migration for Tasks created before product_id was persisted.
+ * The value is deterministic so two concurrent first revisions cannot invent
+ * different Product identities. New Tasks always receive a random UUID at
+ * creation time.
+ */
+function deterministicTaskProductId(taskId: string): string {
+  const bytes = createHash("sha256").update(`hatch-task-product:${taskId}`).digest().subarray(0, 16);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }

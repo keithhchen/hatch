@@ -7,6 +7,14 @@ export function parseCreatorRoute(pathname) {
   if (normalized !== ROOT && !normalized.startsWith(`${ROOT}/`)) return { kind: "not-found", section: "" };
   const segments = normalized.slice(ROOT.length).split("/").filter(Boolean).map(safeDecode);
   if (!segments.length) return { kind: "home", section: "home" };
+  if (segments[0] === "sources") {
+    return segments.length === 1
+      ? { kind: "sources", section: "products" }
+      : { kind: "not-found", section: "products" };
+  }
+  if (segments[0] === "tasks" && segments.length === 3 && segments[2] === "sources" && segments[1]) {
+    return { kind: "sources", section: "products", taskId: segments[1] };
+  }
   if (segments[0] === "factory") {
     if (segments.length === 3 && segments[1] === "runs" && segments[2]) return { kind: "factory", section: "products", runId: segments[2] };
     if (segments.length === 2 && segments[1]) return { kind: "factory", section: "products", runId: segments[1] };
@@ -34,6 +42,7 @@ export function parseCreatorRoute(pathname) {
 export function creatorRouteTitle(route) {
   if (route.kind === "home") return "Creator home";
   if (route.kind === "products") return "Products";
+  if (route.kind === "sources") return "Source Library";
   if (route.kind === "factory") return route.runId ? "Factory run" : "Creator Factory";
   if (route.kind === "candidate") return "Candidate review";
   if (route.kind === "preview") return "Storefront preview";

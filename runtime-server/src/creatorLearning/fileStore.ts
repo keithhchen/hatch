@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, writeFile, appendFile } from "node:fs/promises";
 import path from "node:path";
+import type { ArtifactObjectStore } from "./objectStore.js";
+import { graphEventKey, newGraphEventId, type DistillationGraphStore, type DistillationEventType, type DistillationNodeKind } from "./distillationGraph.js";
 import type {
   ArtifactRef,
   FactoryExecutionMetadata,
@@ -13,15 +15,29 @@ import type {
 export class FactoryFileStore {
   readonly runId: string;
   private readonly runDirectory: string;
+  private readonly objectStore?: ArtifactObjectStore;
+  private readonly objectPrefix: string;
+  private readonly graphStore?: DistillationGraphStore;
+  private readonly graphContext?: { taskId?: string; runId?: string; revisionId?: string };
 
   constructor(
     private readonly root: string,
     runId?: string,
     private readonly beforeCommit?: () => Promise<void>,
-    readonly signal?: AbortSignal
+    readonly signal?: AbortSignal,
+    options: {
+      objectStore?: ArtifactObjectStore;
+      objectPrefix?: string;
+      graphStore?: DistillationGraphStore;
+      graphContext?: { taskId?: string; runId?: string; revisionId?: string };
+    } = {}
   ) {
     this.runId = runId ?? randomUUID();
     this.runDirectory = containedPath(root, this.runId);
+    this.objectStore = options.objectStore;
+    this.objectPrefix = options.objectPrefix ?? `factory-runs/${this.runId}`;
+    this.graphStore = options.graphStore;
+    this.graphContext = options.graphContext;
   }
 
   get directory(): string {
@@ -146,27 +162,35 @@ export class FactoryFileStore {
     const relative = path.posix.join(namespace, safeRelative(relativePath));
     const destination = containedPath(this.runDirectory, relative);
     await this.guardCommit();
+    const bytes = Buffer.from(content, "utf8");
+    await this.persistObject(relative, bytes, "text/plain; charset=utf-8");
     await mkdir(path.dirname(destination), { recursive: true });
     await atomicWrite(destination, content);
-    return {
+    const reference: ArtifactRef = {
       path: relative,
       sha256: sha256(content),
       createdAt: new Date().toISOString(),
       ...(sealed ? { sealed: true as const } : {})
     };
+    await this.registerGraphArtifact(reference, "text/plain; charset=utf-8");
+    return reference;
   }
 
   async writeCandidate(relativePath: string, content: string): Promise<ArtifactRef> {
     const relative = path.posix.join("candidate", safeRelative(relativePath));
     const destination = containedPath(this.runDirectory, relative);
     await this.guardCommit();
+    const bytes = Buffer.from(content, "utf8");
+    await this.persistObject(relative, bytes, "text/plain; charset=utf-8");
     await mkdir(path.dirname(destination), { recursive: true });
     await atomicWrite(destination, content);
-    return { path: relative, sha256: sha256(content), createdAt: new Date().toISOString() };
+    const reference: ArtifactRef = { path: relative, sha256: sha256(content), createdAt: new Date().toISOString() };
+    await this.registerGraphArtifact(reference, "text/plain; charset=utf-8");
+    return reference;
   }
 
   async readArtifact(reference: ArtifactRef): Promise<string> {
-    const content = await readFile(containedPath(this.runDirectory, reference.path), "utf8");
+    const content = (await this.readLocalOrObject(reference.path)).toString("utf8");
     if (sha256(content) !== reference.sha256) throw new Error(`Artifact digest mismatch: ${reference.path}`);
     return content;
   }
@@ -174,11 +198,14 @@ export class FactoryFileStore {
   async saveState(state: FactoryRunState): Promise<void> {
     const updated = { ...state, updatedAt: new Date().toISOString() };
     await this.guardCommit();
-    await atomicWrite(this.statePath, `${JSON.stringify(updated, null, 2)}\n`);
+    const content = `${JSON.stringify(updated, null, 2)}\n`;
+    await this.persistObject("state.json", Buffer.from(content, "utf8"), "application/json; charset=utf-8", true);
+    await mkdir(this.runDirectory, { recursive: true });
+    await atomicWrite(this.statePath, content);
   }
 
   async loadState(): Promise<FactoryRunState> {
-    const state = JSON.parse(await readFile(this.statePath, "utf8")) as FactoryRunState;
+    const state = JSON.parse((await this.readLocalOrObject("state.json")).toString("utf8")) as FactoryRunState;
     // Runs created before canonical Agent Corpus packaging did not persist an
     // agent/product identity. Upgrade them deterministically at the storage
     // boundary so resume/retry can still reach the same verified ready gate.
@@ -196,18 +223,24 @@ export class FactoryFileStore {
 
   async recordEvent(event: string, details: Record<string, unknown> = {}): Promise<void> {
     await this.guardCommit();
+    const line = `${JSON.stringify({
+      at: new Date().toISOString(),
+      event,
+      ...details
+    })}\n`;
     try {
       await mkdir(this.runDirectory, { recursive: true });
-      await appendFile(path.join(this.runDirectory, "events.jsonl"), `${JSON.stringify({
-        at: new Date().toISOString(),
-        event,
-        ...details
-      })}\n`, "utf8");
+      await appendFile(path.join(this.runDirectory, "events.jsonl"), line, "utf8");
+      if (this.objectStore) {
+        const current = await this.readObjectText("events.jsonl").catch(() => "");
+        await this.persistObject("events.jsonl", Buffer.from(`${current}${line}`, "utf8"), "application/x-ndjson", true);
+      }
     } catch {
       // state.json and content-addressed artifacts are the recovery truth.
       // A diagnostic journal append must never turn an already valid
       // waiting/ready checkpoint into an unrecoverable workflow failure.
     }
+    await this.recordGraphEvent(event, details);
   }
 
   private async guardCommit(): Promise<void> {
@@ -226,7 +259,9 @@ export class FactoryFileStore {
     }
     const destination = this.executionTimingPath(timing.executionId, timing.sealed);
     await mkdir(path.dirname(destination), { recursive: true });
-    await atomicWrite(destination, `${JSON.stringify(timing, null, 2)}\n`);
+    const content = `${JSON.stringify(timing, null, 2)}\n`;
+    await this.persistObject(path.relative(this.runDirectory, destination), Buffer.from(content, "utf8"), "application/json; charset=utf-8", true);
+    await atomicWrite(destination, content);
   }
 
   private async readExecutionTiming(executionId: string, sealed: boolean): Promise<FactoryExecutionTiming> {
@@ -264,13 +299,213 @@ export class FactoryFileStore {
       path.posix.join(sealed ? "sealed" : "artifacts", "executions", `${executionId}.json`)
     );
   }
+
+  /** Hydrate an object-store-backed artifact into the local execution cache. */
+  async hydrate(relativePath: string): Promise<string> {
+    const bytes = await this.readLocalOrObject(relativePath);
+    return containedPath(this.runDirectory, relativePath);
+  }
+
+  private async readLocalOrObject(relativePath: string): Promise<Buffer> {
+    const local = containedPath(this.runDirectory, relativePath);
+    try {
+      return await readFile(local);
+    } catch (error) {
+      if (!this.objectStore || !isMissingPath(error)) throw error;
+      const bytes = await this.objectStore.get(this.objectKey(relativePath));
+      await mkdir(path.dirname(local), { recursive: true });
+      await atomicWrite(local, bytes);
+      return bytes;
+    }
+  }
+
+  private async persistObject(
+    relativePath: string,
+    bytes: Buffer,
+    contentType: string,
+    mutable = false
+  ): Promise<void> {
+    if (!this.objectStore) return;
+    // State/timing files are mutable projections. Content artifacts use stable
+    // paths and the object-store adapter enforces same-bytes idempotency.
+    await this.objectStore.put(this.objectKey(relativePath), bytes, {
+      contentType,
+      immutable: !mutable,
+      metadata: { "hatch-mutable": mutable ? "true" : "false" }
+    });
+  }
+
+  private async registerGraphArtifact(reference: ArtifactRef, mediaType: string): Promise<void> {
+    const context = await this.resolveGraphContext();
+    if (!this.graphStore || !context?.taskId || !context.runId) return;
+    const artifactId = artifactIdentity(this.runId, reference.path, reference.sha256);
+    reference.artifactId = artifactId;
+    await this.graphStore.registerArtifact({
+      artifactId,
+      taskId: context.taskId,
+      runId: context.runId,
+      ...(context.revisionId ? { revisionId: context.revisionId } : {}),
+      kind: artifactKind(reference.path),
+      objectKey: this.objectKey(reference.path),
+      sha256: reference.sha256,
+      bytes: Buffer.byteLength(await this.readLocalOrObject(reference.path)),
+      mediaType,
+      createdAt: reference.createdAt
+    });
+    const parents = (await this.graphStore.listEvents(context.taskId)).filter((event) => event.runId === context.runId).at(-1);
+    await this.graphStore.appendEvent({
+      id: newGraphEventId(),
+      eventKey: `artifact:${artifactId}`,
+      taskId: context.taskId,
+      runId: context.runId,
+      ...(context.revisionId ? { revisionId: context.revisionId } : {}),
+      type: "artifact_emitted",
+      node: nodeForArtifact(reference.path),
+      actor: "worker",
+      parentEventIds: parents ? [parents.id] : [],
+      artifactIds: [artifactId],
+      payload: { path: reference.path, sealed: Boolean(reference.sealed) }
+    });
+  }
+
+  private async recordGraphEvent(event: string, details: Record<string, unknown>): Promise<void> {
+    const context = await this.resolveGraphContext();
+    if (!this.graphStore || !context?.taskId || !context.runId) return;
+    const mapped = mapGraphEvent(event, details);
+    if (!mapped) return;
+    const parents = (await this.graphStore.listEvents(context.taskId)).filter((row) => row.runId === context.runId).at(-1);
+    const payload = sanitizeGraphPayload(details);
+    const eventKey = graphEventKey(mapped.type, context.runId, context.revisionId, { event, payload });
+    const graphEvent = await this.graphStore.appendEvent({
+      id: newGraphEventId(),
+      eventKey,
+      taskId: context.taskId,
+      runId: context.runId,
+      ...(context.revisionId ? { revisionId: context.revisionId } : {}),
+      type: mapped.type,
+      ...(mapped.node ? { node: mapped.node } : {}),
+      actor: event.startsWith("creator_") ? "creator" : "worker",
+      parentEventIds: parents ? [parents.id] : [],
+      artifactIds: collectArtifactIds(details),
+      payload
+    });
+    if (mapped.node && ["node_started", "node_completed", "node_failed"].includes(mapped.type) && context.revisionId) {
+      const status = mapped.type === "node_started"
+        ? "running"
+        : mapped.type === "node_completed" ? "completed" : "failed";
+      const startedAt = typeof details.startedAt === "string"
+        ? details.startedAt
+        : status === "running" ? graphEvent.occurredAt : undefined;
+      const completedAt = typeof details.completedAt === "string"
+        ? details.completedAt
+        : status === "running" ? undefined : graphEvent.occurredAt;
+      await this.graphStore.recordNodeExecution({
+        id: `node_exec_${graphEvent.id}`,
+        taskId: context.taskId,
+        runId: context.runId,
+        revisionId: context.revisionId,
+        node: mapped.node,
+        attempt: positiveInteger(details.attempt) ?? 1,
+        status,
+        inputArtifactIds: stringList(details.inputArtifactIds ?? details.input_artifact_ids),
+        outputArtifactIds: collectArtifactIds(details),
+        ...(startedAt ? { startedAt } : {}),
+        ...(completedAt ? { completedAt } : {}),
+        ...(typeof details.errorCode === "string" ? { errorCode: details.errorCode } : {})
+      });
+    }
+    const gate = gateForGraphEvent(event, mapped.type, mapped.node, details);
+    if (gate) {
+      const evidenceArtifactIds = collectArtifactIds(details);
+      await this.graphStore.recordGate({
+        ...gate,
+        id: `gate_${graphEvent.id}`,
+        gateKey: `${context.revisionId ?? this.runId}:${gate.name}`,
+        taskId: context.taskId,
+        runId: context.runId,
+        revisionId: context.revisionId ?? this.runId,
+        evidenceArtifactIds,
+        assessedAt: graphEvent.occurredAt
+      });
+      await this.graphStore.appendEvent({
+        id: newGraphEventId(),
+        eventKey: `${eventKey}:gate:${gate.name}`,
+        taskId: context.taskId,
+        runId: context.runId,
+        ...(context.revisionId ? { revisionId: context.revisionId } : {}),
+        type: "gate_assessed",
+        ...(mapped.node ? { node: mapped.node } : {}),
+        actor: "system",
+        parentEventIds: [graphEvent.id],
+        artifactIds: evidenceArtifactIds,
+        payload: { name: gate.name, critical: gate.critical, status: gate.status }
+      });
+    }
+    if (event === "creator_answers_submitted" || event === "factory_retry_requested") {
+      const rows = (await this.graphStore.listEvents(context.taskId))
+        .filter((row) => row.runId === context.runId && (!context.revisionId || row.revisionId === context.revisionId));
+      const requested = rows.filter((row) => row.type === "correction_requested").at(-1);
+      const submitted = rows.filter((row) => row.type === "correction_submitted").at(-1);
+      if (requested && (!submitted || requested.sequence > submitted.sequence)) {
+        await this.graphStore.appendEvent({
+          id: newGraphEventId(),
+          eventKey: `${context.runId}:${context.revisionId ?? "legacy"}:correction_submitted:${requested.id}`,
+          taskId: context.taskId,
+          runId: context.runId,
+          ...(context.revisionId ? { revisionId: context.revisionId } : {}),
+          type: "correction_submitted",
+          node: "calibration",
+          actor: event === "creator_answers_submitted" ? "creator" : "worker",
+          parentEventIds: [graphEvent.id],
+          artifactIds: collectArtifactIds(details),
+          payload: { correctionRequestEventId: requested.id }
+        });
+      }
+    }
+    if (event === "heldout_evaluated" && details.nextStage === "ready") {
+      await this.graphStore.appendEvent({
+        id: newGraphEventId(),
+        eventKey: `${eventKey}:revision_ready`,
+        taskId: context.taskId,
+        runId: context.runId,
+        ...(context.revisionId ? { revisionId: context.revisionId } : {}),
+        type: "revision_ready",
+        node: "release",
+        actor: "worker",
+        parentEventIds: [graphEvent.id],
+        artifactIds: collectArtifactIds(details),
+        payload: { reason: "heldout_passed" }
+      });
+    }
+  }
+
+  private async resolveGraphContext(): Promise<{ taskId?: string; runId?: string; revisionId?: string } | undefined> {
+    if (this.graphContext?.taskId && this.graphContext.runId) return this.graphContext;
+    if (!this.graphStore) return undefined;
+    try {
+      const state = JSON.parse((await this.readLocalOrObject("state.json")).toString("utf8")) as FactoryRunState;
+      if (!state.taskId) return undefined;
+      return { taskId: state.taskId, runId: state.distillationRunId ?? state.runId, ...(state.revisionId ? { revisionId: state.revisionId } : {}) };
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async readObjectText(relativePath: string): Promise<string> {
+    if (!this.objectStore) return "";
+    return (await this.objectStore.get(this.objectKey(relativePath))).toString("utf8");
+  }
+
+  private objectKey(relativePath: string): string {
+    return path.posix.join(this.objectPrefix, safeRelative(relativePath));
+  }
 }
 
 function abortError(signal: AbortSignal): Error {
   return signal.reason instanceof Error ? signal.reason : new Error("Creator Factory execution was aborted");
 }
 
-async function atomicWrite(destination: string, content: string): Promise<void> {
+async function atomicWrite(destination: string, content: string | Buffer): Promise<void> {
   const temporary = `${destination}.${process.pid}.${randomUUID()}.tmp`;
   await writeFile(temporary, content, "utf8");
   await rename(temporary, destination);
@@ -294,6 +529,109 @@ function containedPath(root: string, relative: string): string {
 
 function sha256(content: string): string {
   return `sha256:${createHash("sha256").update(content).digest("hex")}`;
+}
+
+function artifactIdentity(runId: string, relativePath: string, digest: string): string {
+  return `art_${createHash("sha256").update(`${runId}\u0000${relativePath}\u0000${digest}`).digest("hex").slice(0, 32)}`;
+}
+
+function artifactKind(relativePath: string): import("./distillationGraph.js").ArtifactKind {
+  if (relativePath.startsWith("input/")) return relativePath.includes("source") || relativePath.includes("images") ? "source_projection" : "source_snapshot";
+  if (relativePath.includes("evaluations/")) return "evaluation_report";
+  if (relativePath.includes("corpus") || relativePath.includes("agent-corpus")) return "corpus_bundle";
+  if (relativePath.includes("creator/")) return "correction";
+  if (relativePath.includes("trace") || relativePath.includes("executions/")) return "trace";
+  return "llm_output";
+}
+
+function nodeForArtifact(relativePath: string): DistillationNodeKind {
+  if (relativePath.includes("evidence")) return "evidence";
+  if (relativePath.includes("question") || relativePath.includes("qa/")) return "questions";
+  if (relativePath.includes("evaluation") || relativePath.includes("heldout") || relativePath.includes("regression")) return "heldout_eval";
+  if (relativePath.includes("corpus") || relativePath.includes("candidate")) return "corpus";
+  if (relativePath.startsWith("input/")) return "intake";
+  return "corpus";
+}
+
+function mapGraphEvent(event: string, details: Record<string, unknown>): { type: DistillationEventType; node?: DistillationNodeKind } | undefined {
+  if (event === "factory_started") return { type: "run_created", node: "intake" };
+  if (event === "creator_answers_requested") return { type: "creator_answers_requested", node: "questions" };
+  if (event === "creator_answers_submitted") return { type: "creator_answers_submitted", node: "calibration" };
+  if (event === "factory_retry_requested") return { type: "node_started", node: nodeForStage(details.stage) };
+  if (event === "corpus_compiled") return { type: "node_completed", node: "corpus" };
+  if (event === "corpus_completeness_failed") return { type: "node_failed", node: "corpus" };
+  if (event === "corpus_release_guard_failed" || event === "corpus_release_guard_inconclusive") return { type: "node_failed", node: "corpus" };
+  if (event === "development_evaluated") return { type: "node_completed", node: "development_eval" };
+  if (event === "regression_evaluated") return { type: "node_completed", node: "regression_eval" };
+  if (event === "heldout_evaluated") return { type: "node_completed", node: "heldout_eval" };
+  if (event === "factory_needs_attention") return { type: "correction_requested", node: "calibration" };
+  if (event === "llm_call_completed") return { type: "node_completed", node: nodeForPurpose(details.purpose) };
+  return undefined;
+}
+
+function nodeForStage(value: unknown): DistillationNodeKind {
+  if (value === "extracting_evidence") return "evidence";
+  if (value === "awaiting_creator_answers") return "questions";
+  if (value === "evaluating_development") return "development_eval";
+  if (value === "evaluating_regression") return "regression_eval";
+  if (value === "evaluating_heldout") return "heldout_eval";
+  return "corpus";
+}
+
+function nodeForPurpose(value: unknown): DistillationNodeKind {
+  if (String(value).startsWith("evidence")) return "evidence";
+  if (String(value).includes("question")) return "questions";
+  if (String(value).includes("eval")) return "development_eval";
+  return "corpus";
+}
+
+function gateForGraphEvent(event: string, type: DistillationEventType, node: DistillationNodeKind | undefined, details: Record<string, unknown>): { name: import("./distillationGraph.js").QualityGateAssessment["name"]; critical: boolean; status: "passed" | "failed" | "blocked"; reason?: string } | undefined {
+  const name = node === "development_eval" ? "development"
+    : node === "regression_eval" ? "regression"
+      : node === "heldout_eval" ? "heldout"
+        : event === "corpus_completeness_failed" ? "completeness"
+          : undefined;
+  if (!name) return undefined;
+  const failures = Number(details.failures ?? 0);
+  const failed = type === "node_failed" || type === "correction_requested" || failures > 0;
+  return {
+    name,
+    critical: true,
+    status: failed ? "failed" : "passed",
+    ...(failed ? { reason: typeof details.diagnosis === "string" ? details.diagnosis : `${name} gate failed` } : {})
+  };
+}
+
+function collectArtifactIds(value: unknown): string[] {
+  const found = new Set<string>();
+  const visit = (item: unknown): void => {
+    if (!item || typeof item !== "object") return;
+    if (Array.isArray(item)) { item.forEach(visit); return; }
+    const row = item as Record<string, unknown>;
+    if (typeof row.artifactId === "string") found.add(row.artifactId);
+    Object.values(row).forEach(visit);
+  };
+  visit(value);
+  return [...found];
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function positiveInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined;
+}
+
+function sanitizeGraphPayload(details: Record<string, unknown>): Record<string, unknown> {
+  const blocked = new Set(["error", "raw", "content", "answer", "answers", "prompt", "result", "diagnosis"]);
+  const copy: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(details)) {
+    if (blocked.has(key)) continue;
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean" || value === null) copy[key] = value;
+    else if (Array.isArray(value) && value.every((item) => typeof item === "string" || typeof item === "number" || typeof item === "boolean" || item === null)) copy[key] = value;
+  }
+  return copy;
 }
 
 function validateExecutionTiming(value: unknown): FactoryExecutionTiming {

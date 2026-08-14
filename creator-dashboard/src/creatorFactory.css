@@ -6,6 +6,8 @@
 .factory-panel-title button, .factory-new-run { border: 0; background: transparent; color: var(--hatch-accent); cursor: pointer; }
 .factory-run-list { display: grid; padding: 8px; }
 .factory-run-list > button { display: grid; gap: 5px; padding: 14px; border: 0; border-radius: 11px; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.factory-run-list > .hui-button { justify-content: start; justify-items: start; text-align: left; }
+.factory-run-list > .hui-button > span { display: grid; gap: 5px; justify-items: start; }
 .factory-run-list > button:hover, .factory-run-list > button.selected { background: #eee8de; }
 .factory-run-list strong { font-size: 13px; }
 .factory-run-list span, .factory-run-list p { color: var(--hatch-text-secondary); font-size: 11px; }
@@ -49,5 +51,6 @@
 .factory-ready small { display: block; margin-top: 9px; }
 .factory-attention { padding: 22px; border-radius: 14px; background: #f7e8e1; color: #7f4938; }
 .factory-new-run { justify-self: start; padding: 0; }
+.factory-run-list .hui-state { min-height: 150px; padding: 18px 12px; }
 @keyframes factory-spin { to { transform: rotate(360deg); } }
 @media(max-width: 920px) { .factory-layout { grid-template-columns: 1fr; } .factory-runs-panel { max-height: 260px; overflow-y: auto; } }

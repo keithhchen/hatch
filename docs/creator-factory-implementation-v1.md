@@ -10,7 +10,7 @@ One run handles one Creator × one Task and produces a numbered candidate lineag
 - Eval LLM generates questions for the Creator, then later judges Hatch results against Creator answers.
 - Corpus LLM builds and revises the complete layered cognitive asset set: always-on System plus every evidence-justified Skill, Skill-local reference, and retrieval-only knowledge document.
 
-These three Factory roles use the Factory-owned Kimi K3 profile: 1,048,576-token context, maximum reasoning effort, and K3's native sampling contract. Hatch candidate execution is not a fourth Factory LLM. A one-shot CLI starts the existing product Runtime, binds a verified candidate Agent Corpus through the production WebSocket session, and lets Runtime retain its own model and behavior. No Factory model option is passed across this boundary. There is no end-user workspace at build time, so the eval session advertises no buyer-local tools; the canonical bundle still declares Hatch's built-ins and the full Runtime owns Corpus materialization, server tools, output guard, turn state, and trace events.
+These three Factory roles use the provider-neutral Factory model seam backed by Kimi K2.6 and its native sampling contract. Hatch candidate execution is not a fourth Factory LLM. A one-shot CLI starts the existing product Runtime, binds a verified candidate Agent Corpus through the production WebSocket session, and lets Runtime retain its own model and behavior. No Factory model option is passed across this boundary. There is no end-user workspace at build time, so the eval session advertises no buyer-local tools; the canonical bundle still declares Hatch's built-ins and the full Runtime owns Corpus materialization, server tools, output guard, turn state, and trace events.
 
 This is prompt-and-corpus compilation with generated evaluation, not model training, fine-tuning, or an ML data pipeline.
 
@@ -63,7 +63,7 @@ Good prose is not the acceptance criterion. Development, Regression, and sealed 
 
 ## Run the vertical slice
 
-The CLI uses the dedicated Factory Kimi K3 prompt gateway and requires `LLM_API_KEY` plus the configured Moonshot-compatible `OPENAI_BASE_URL`. Candidate tests spawn the existing Hatch Runtime in a child process, whose model remains Runtime-owned.
+The CLI uses the provider-neutral Factory prompt gateway backed by Kimi K2.6 and requires `LLM_API_KEY` plus the configured Moonshot-compatible `OPENAI_BASE_URL`. Candidate tests spawn the existing Hatch Runtime in a child process, whose model remains Runtime-owned.
 
 ```bash
 cd runtime-server
@@ -83,7 +83,7 @@ npm run factory -- resume \
   --root ../artifacts/creator-factory-runs
 ```
 
-CLI, Engine, Service, Repository, and Worker all require that digest to equal the current sealed Question artifact before parsing or persisting answers. A missing marker, an old template from another run, or a delayed answer for a replaced batch fails closed. If held-out fails, the command again exits at `awaiting_creator_answers` with a newly bound replacement template. `ready` means the candidate passed all quality gates and a complete canonical Agent Corpus has been materialized and verified; Creator approval and Registry publication remain separate operations. Before `ready`, the CLI withholds the provisional bundle root and whole-Corpus digest. At `ready`, it includes the System digest, final whole-Corpus digest, and local bundle root.
+CLI, Engine, Service, Repository, and Worker all require that digest to equal the current sealed Question artifact before parsing or persisting answers. A missing marker, an old template from another run, or a delayed answer for a replaced batch fails closed. If held-out fails, the command again exits at `awaiting_creator_answers` with a newly bound replacement template. `ready` means the candidate passed all quality gates and a complete canonical Agent Corpus has been materialized and verified; it is not auto-published. The explicit unified `Release` command records Creator approval and performs Registry activation as one product action. Before `ready`, the CLI withholds the provisional bundle root and whole-Corpus digest. At `ready`, it includes the System digest, final whole-Corpus digest, and local bundle root.
 
 Inspect progress without invoking an LLM:
 
@@ -135,7 +135,7 @@ HATCH_REGISTRY_DATABASE_URL=postgresql://... \
 docker compose -f compose.app.yml up -d
 ```
 
-The worker uses the same provider credential but a Factory-specific Kimi K3 model profile; the Hatch child keeps Runtime's own model profile. Relevant optional settings are `HATCH_CREATOR_FACTORY_ROOT`, `HATCH_CREATOR_FACTORY_WORKER_ID`, `HATCH_CREATOR_FACTORY_LEASE_MS`, `HATCH_CREATOR_FACTORY_HEARTBEAT_MS`, `HATCH_CREATOR_FACTORY_POLL_MS`, and `HATCH_CREATOR_FACTORY_HATCH_TIMEOUT_MS`. Production must use Postgres and a volume mounted at the same Factory root in Registry and worker. The in-memory repository is only a local/test fallback and cannot coordinate a separate worker.
+The worker uses the same provider credential and Kimi K2.6 model profile; the Hatch child keeps Runtime's own model profile. Relevant optional settings are `HATCH_CREATOR_FACTORY_ROOT`, `HATCH_CREATOR_FACTORY_WORKER_ID`, `HATCH_CREATOR_FACTORY_LEASE_MS`, `HATCH_CREATOR_FACTORY_HEARTBEAT_MS`, `HATCH_CREATOR_FACTORY_POLL_MS`, and `HATCH_CREATOR_FACTORY_HATCH_TIMEOUT_MS`. Production must use Postgres and a volume mounted at the same Factory root in Registry and worker. The in-memory repository is only a local/test fallback and cannot coordinate a separate worker.
 
 V1 deploys one `factory-worker` replica. Postgres claiming, heartbeat, retry scheduling, and fencing use the database clock and survive process restart, but the private file artifact commit is not a database transaction. Do not horizontally scale this worker until artifact commits use lease-token staging or transactional object storage.
 
@@ -151,7 +151,7 @@ Authorized source contents are private application data. They live in the durabl
 
 `ready` means all of the following are true: Development calibration completed; the latest candidate passed the complete Regression Set (including all Development cases and promoted failures); the active sealed Held-out round passed; the clean canonical Agent Corpus directory was materialized; creator/agent binding and every asset digest passed the Registry verifier; and the verified whole-Corpus digest was persisted. The bundle contains only manifest/runtime/eval assets—never source packets, evidence ledgers, Factory prompts, compile records, traces, credentials, or runtime configuration.
 
-Optional does not mean ignored. A simple one-Task Agent may validly have `skills: []` and `knowledge.documents: []` only when the evidence justifies no local reusable unit or retrieval-only long tail. When evidence routes a requirement to Skill, reference, or knowledge, the complete asset must exist in the candidate, survive revision accounting, enter `agent.json`, and pass whole-bundle verification. Both `hatch.web_search` and `hatch.file_search` are always declared; additional local/HTTP/MCP capabilities must be explicitly supplied by the Creator/operator and never inferred by an LLM. `ready` does not publish or replace the Registry's current Corpus. Creator approval and an explicit Registry promotion remain a separate release action, so retries can never change a live product by themselves.
+Optional does not mean ignored. A simple one-Task Agent may validly have `skills: []` and `knowledge.documents: []` only when the evidence justifies no local reusable unit or retrieval-only long tail. When evidence routes a requirement to Skill, reference, or knowledge, the complete asset must exist in the candidate, survive revision accounting, enter `agent.json`, and pass whole-bundle verification. Both `hatch.web_search` and `hatch.file_search` are always declared; additional local/HTTP/MCP capabilities must be explicitly supplied by the Creator/operator and never inferred by an LLM. `ready` does not publish or replace the Registry's current Corpus. Only the explicit unified `Release` action can approve and promote that immutable candidate, so retries can never change a live product by themselves.
 
 ## Verification
 

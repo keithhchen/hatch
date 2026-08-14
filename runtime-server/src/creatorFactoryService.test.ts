@@ -291,6 +291,42 @@ test("Creator Factory service exposes only owned questions and candidate metadat
   assert.equal([...development, ...heldout].some((row) => row.answer.includes("## Final post")), true);
 });
 
+test("a Distillation Task keeps one Product identity across revisions", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-factory-task-product-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const repository = new InMemoryCreatorFactoryRepository();
+  const service = new CreatorFactoryService(repository, root);
+  const creator = { id: "11111111-1111-4111-8111-111111111111", name: "Task Creator" };
+  const task = await service.createTask(creator.id, { name: "Stable product task", brief: "A single product identity across revisions." });
+  assert.match(task.productId ?? "", /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  const document = await service.createSourceDocument(creator.id, {
+    taskId: task.id,
+    displayName: "method.md",
+    mediaType: "text/markdown",
+    bytes: Buffer.from("# Method\nChoose one supported answer.\n", "utf8")
+  });
+  const request = createRequest({
+    taskId: task.id,
+    taskName: task.name,
+    taskBrief: task.brief,
+    sources: undefined,
+    sourceDocumentIds: [document.id]
+  });
+  const first = await service.create(creator, request, "stable-task-product-1");
+  const second = await service.create(creator, request, "stable-task-product-2");
+  assert.equal(first.run.agentId, task.productId);
+  assert.equal(first.run.product?.id, task.productId);
+  assert.equal(second.run.agentId, task.productId);
+  assert.equal(second.run.product?.id, task.productId);
+  const currentTask = await service.getTask(creator.id, task.id);
+  assert.equal(currentTask.productId, task.productId);
+  assert.notEqual(first.run.revisionId, second.run.revisionId);
+  await assert.rejects(
+    () => service.create(creator, { ...request, product: { id: "another-product" } }, "stable-task-product-mismatch"),
+    /bound to another Product/
+  );
+});
+
 function createRequest(overrides: Partial<CreateFactoryRunRequest> = {}): CreateFactoryRunRequest {
   return {
     taskName: "Decision-ready research brief",

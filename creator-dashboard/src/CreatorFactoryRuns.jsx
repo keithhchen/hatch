@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  createFactoryRun,
   factoryPollInterval,
   factoryShouldPoll,
   factoryStageLabel,
@@ -10,18 +9,12 @@ import {
   retryFactoryRun,
   submitFactoryAnswers
 } from "./creatorFactory.js";
+import { Button, EmptyState, InlineAlert, Textarea } from "./components/ui/index.js";
 import "./creatorFactory.css";
 
-const EMPTY_DRAFT = {
-  taskName: "",
-  taskBrief: "",
-  sources: [{ id: "S1", title: "", authority: "private_material", content: "" }]
-};
-
-export function CreatorFactoryRuns({ token, initialRunId, onNavigateRun, onReviewCandidate }) {
+export function CreatorFactoryRuns({ token, initialRunId, onNavigateRun, onReviewCandidate, onOpenSources }) {
   const [runs, setRuns] = useState([]);
   const [selected, setSelected] = useState(null);
-  const [draft, setDraft] = useState(EMPTY_DRAFT);
   const [answerDraft, setAnswerDraft] = useState({
     runId: "",
     batchId: "",
@@ -74,26 +67,6 @@ export function CreatorFactoryRuns({ token, initialRunId, onNavigateRun, onRevie
     && selected.pending_questions.every((question) => answerDraft.answers[question.id]?.trim())
   ), [selected, answerDraft.answers]);
 
-  async function create(event) {
-    event.preventDefault();
-    setBusy(true);
-    setError("");
-    try {
-      const run = await createFactoryRun(token, {
-        task_name: draft.taskName,
-        task_brief: draft.taskBrief,
-        sources: draft.sources
-      });
-      setDraft(EMPTY_DRAFT);
-      if (typeof onNavigateRun === "function") onNavigateRun(run.id);
-      else await openRun(run.id);
-    } catch (nextError) {
-      setError(nextError.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function submitAnswers(event) {
     event.preventDefault();
     setBusy(true);
@@ -130,21 +103,21 @@ export function CreatorFactoryRuns({ token, initialRunId, onNavigateRun, onRevie
         <h1>Turn one method into one working task.</h1>
         <p>Hatch builds a candidate, asks for your reference answers, and keeps sealed answers out of every model-visible Corpus context.</p>
       </header>
-      {error ? <div className="notice" role="alert">{error}</div> : null}
+      {error ? <InlineAlert tone="error" title="Factory unavailable">{error}</InlineAlert> : null}
       <div className="factory-layout">
         <aside className="factory-runs-panel">
-          <div className="factory-panel-title"><h2>Runs</h2><button onClick={refreshList}>Refresh</button></div>
+          <div className="factory-panel-title"><h2>Runs</h2><Button type="button" variant="ghost" size="small" onClick={refreshList}>Refresh</Button></div>
           <div className="factory-run-list">
             {runs.map((run) => (
-              <button key={run.id} className={selected?.id === run.id ? "selected" : ""} aria-current={selected?.id === run.id ? "page" : undefined} onClick={() => {
+              <Button type="button" variant="ghost" key={run.id} className={selected?.id === run.id ? "selected" : ""} aria-current={selected?.id === run.id ? "page" : undefined} onClick={() => {
                 if (typeof onNavigateRun === "function") onNavigateRun(run.id);
                 else openRun(run.id).catch((nextError) => setError(nextError.message));
               }}>
                 <strong>{run.task_name}</strong>
                 <span>{factoryStageLabel(run)}</span>
-              </button>
+              </Button>
             ))}
-            {!runs.length ? <p>No Factory runs yet.</p> : null}
+            {!runs.length ? <EmptyState title="No Factory runs yet" body="Start from the Source Library to create a Task-owned revision." /> : null}
           </div>
         </aside>
         <div className="factory-work-panel">
@@ -169,44 +142,21 @@ export function CreatorFactoryRuns({ token, initialRunId, onNavigateRun, onRevie
                 onNavigateRun?.(null);
               }}
             />
-          ) : <CreateFactoryRun draft={draft} setDraft={setDraft} busy={busy} onSubmit={create} />}
+          ) : <CreateFactoryRun onOpenSources={onOpenSources} />}
         </div>
       </div>
     </section>
   );
 }
 
-function CreateFactoryRun({ draft, setDraft, busy, onSubmit }) {
-  const update = (field) => (event) => setDraft((current) => ({ ...current, [field]: event.target.value }));
-  const updateSource = (index, field) => (event) => setDraft((current) => ({
-    ...current,
-    sources: current.sources.map((source, sourceIndex) => sourceIndex === index ? { ...source, [field]: event.target.value } : source)
-  }));
-  const addSource = () => setDraft((current) => ({
-    ...current,
-    sources: [...current.sources, { id: `S${current.sources.length + 1}`, title: "", authority: "private_material", content: "" }]
-  }));
-  const removeSource = (index) => setDraft((current) => ({
-    ...current,
-    sources: current.sources.filter((_, sourceIndex) => sourceIndex !== index).map((source, sourceIndex) => ({ ...source, id: `S${sourceIndex + 1}` }))
-  }));
+function CreateFactoryRun({ onOpenSources }) {
   return (
-    <form className="factory-create" onSubmit={onSubmit}>
-      <span className="eyebrow">New run</span>
-      <h2>Define one Task</h2>
-      <p>The unit is one Creator × one deliverable—not a general digital twin.</p>
-      <label>Task name<input required value={draft.taskName} onChange={update("taskName")} placeholder="e.g. Publishable product-page critique" /></label>
-      <label>Task promise<textarea required value={draft.taskBrief} onChange={update("taskBrief")} placeholder="What does the customer submit, what finished result do they receive, and what tradeoff matters?" /></label>
-      <div className="factory-source-heading"><h3>Authorized sources</h3><button type="button" onClick={addSource}>+ Add source</button></div>
-      {draft.sources.map((source, index) => <fieldset className="factory-source" key={source.id}>
-        <legend>{source.id}</legend>
-        {draft.sources.length > 1 ? <button className="factory-remove-source" type="button" onClick={() => removeSource(index)}>Remove</button> : null}
-        <label>Source title<input required value={source.title} onChange={updateSource(index, "title")} /></label>
-        <label>Authority<select value={source.authority} onChange={updateSource(index, "authority")}><option value="creator_current">Current correction or demonstration</option><option value="creator_example">Canonical example</option><option value="private_material">Private course or document</option><option value="public_context">Public context</option></select></label>
-        <label>Source content<textarea className="source-content" required value={source.content} onChange={updateSource(index, "content")} /></label>
-      </fieldset>)}
-      <button className="primary" disabled={busy}>{busy ? "Creating…" : "Start distillation"}</button>
-    </form>
+    <div className="factory-create factory-source-redirect">
+      <span className="eyebrow">New distillation</span>
+      <h2>Start in Source Library</h2>
+      <p>Create a Task there, upload local files as many times as needed, then start a Factory revision from a locked Snapshot. Source files never belong in an inline run form.</p>
+      <Button type="button" onClick={onOpenSources}>Open Source Library</Button>
+    </div>
   );
 }
 
@@ -238,16 +188,16 @@ function FactoryRunDetail({ run, answers, setAnswers, answerRecovery, onDismissR
                   <h4 id="factory-answer-recovery-title">The question batch changed</h4>
                   <p>Your earlier answers were not submitted to the new batch. Copy anything useful; Hatch will never apply it automatically.</p>
                 </div>
-                <button type="button" onClick={onDismissRecovery}>Dismiss</button>
+                <Button type="button" variant="ghost" size="small" onClick={onDismissRecovery}>Dismiss</Button>
               </div>
               <div className="factory-answer-recovery-list">
                 {answerRecovery.entries.map((entry, index) => (
                   <div key={`${entry.question_id}-${index}`}>
                     <strong>{entry.question}</strong>
-                    <textarea readOnly value={entry.answer} aria-label={`Earlier answer ${index + 1}`} />
-                    <button type="button" onClick={() => copyRecoveredAnswer(entry)}>
+                    <Textarea readOnly value={entry.answer} aria-label={`Earlier answer ${index + 1}`} />
+                    <Button type="button" variant="link" size="small" onClick={() => copyRecoveredAnswer(entry)}>
                       {copiedAnswerId === entry.question_id ? "Copied" : "Copy answer"}
-                    </button>
+                    </Button>
                   </div>
                 ))}
               </div>
@@ -257,16 +207,16 @@ function FactoryRunDetail({ run, answers, setAnswers, answerRecovery, onDismissR
           {run.pending_questions.map((question, index) => (
             <label key={question.id}>
               <span>{index + 1}. {question.question}</span>
-              <textarea value={answers[question.id] ?? ""} onChange={(event) => setAnswers((current) => ({ ...current, [question.id]: event.target.value }))} placeholder="Give the finished deliverable or decisive recommendation you would stand behind." />
-            </label>
-          ))}
-          <button className="primary" disabled={busy || !allAnswered}>{busy ? "Submitting…" : "Submit all answers"}</button>
+            <Textarea value={answers[question.id] ?? ""} onChange={(event) => setAnswers((current) => ({ ...current, [question.id]: event.target.value }))} placeholder="Give the finished deliverable or decisive recommendation you would stand behind." />
+          </label>
+        ))}
+          <Button type="submit" loading={busy} disabled={!allAnswered}>Submit all answers</Button>
         </form>
       ) : null}
       {factoryShouldPoll(run) ? <div className="factory-progress"><span className="factory-spinner" /><div><h3>Hatch is advancing the graph</h3><p>No monitoring agent is required. The worker will pause here automatically when it needs your answers.</p></div></div> : null}
-      {run.status === "ready" ? <div className="factory-ready"><span>✓</span><div><h3>Candidate v{run.candidate?.version} passed</h3><p>Verified Agent Corpus: <code>{run.candidate?.corpus_digest}</code></p><p>System asset: <code>{run.candidate?.system_digest}</code></p><small>The complete bundle passed the Registry verifier. It has not been published; Creator approval remains separate.</small>{onReview ? <button className="primary" type="button" onClick={onReview}>Review candidate</button> : null}</div></div> : null}
-      {run.status === "needs_attention" ? <div className="factory-attention"><h3>The run needs attention</h3><p>{run.last_error}</p>{run.retryable ? <button className="primary" disabled={busy} onClick={onRetry}>Retry the failed stage</button> : <small>This checkpoint cannot be retried safely. Start a new run after correcting the source or configuration.</small>}</div> : null}
-      <button className="factory-new-run" onClick={onNew}>Start another run</button>
+      {run.status === "ready" ? <div className="factory-ready"><span>✓</span><div><h3>Candidate v{run.candidate?.version} passed</h3><p>Verified Agent Corpus: <code>{run.candidate?.corpus_digest}</code></p><p>System asset: <code>{run.candidate?.system_digest}</code></p><small>The complete bundle passed the Registry verifier. Review and Release will approve and publish it as one action.</small>{onReview ? <Button type="button" onClick={onReview}>Review candidate</Button> : null}</div></div> : null}
+      {run.status === "needs_attention" ? <div className="factory-attention"><h3>The run needs attention</h3><p>{run.last_error}</p>{run.retryable ? <Button type="button" disabled={busy} onClick={onRetry}>Retry the failed stage</Button> : <small>This checkpoint cannot be retried safely. Start a new run after correcting the source or configuration.</small>}</div> : null}
+      <Button type="button" variant="link" className="factory-new-run" onClick={onNew}>Start another run</Button>
     </div>
   );
 }
