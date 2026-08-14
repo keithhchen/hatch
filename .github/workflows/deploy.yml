@@ -405,7 +405,7 @@ jobs:
             .product.product_id == "026651b1-8a8a-4484-aac5-ace6bd662157"
             and .product.availability == "published"
             and .product.available == true
-            and .product.offer.amount_minor == 0
+            and ((.product.offer // null) == null)
           ' >/dev/null
           logout_status="$(curl -4 --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' -X POST "https://$domain/v1/auth/logout")"
           test "$logout_status" = 204
