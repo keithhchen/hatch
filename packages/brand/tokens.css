@@ -24,6 +24,10 @@
   line-height: 1;
 }
 
+.hatch-wordmark-period {
+  color: var(--hatch-accent);
+}
+
 .hatch-mark {
   display: block;
   flex: 0 0 auto;

@@ -397,6 +397,13 @@ jobs:
           curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/health/runtime" >/dev/null
           curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/health/registry" >/dev/null
           curl -4 --noproxy '*' --fail --location --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/explore" >/dev/null
+          product_json="$(curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/v1/public/products/026651b1-8a8a-4484-aac5-ace6bd662157")"
+          printf '%s' "$product_json" | jq -e '
+            .product.product_id == "026651b1-8a8a-4484-aac5-ace6bd662157"
+            and .product.availability == "published"
+            and .product.available == true
+            and .product.offer.amount_minor == 0
+          ' >/dev/null
           logout_status="$(curl -4 --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' -X POST "https://$domain/v1/auth/logout")"
           test "$logout_status" = 204
           me_status="$(curl -4 --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' "https://$domain/v1/auth/me")"

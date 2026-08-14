@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { HatchBrand } from "./HatchBrand.jsx";
 import { StorefrontDetails } from "./StorefrontDetails.jsx";
 import "./buyerPortalV2.css";
 
@@ -168,9 +169,7 @@ function BuyerShell({ route, navigate, session, downloadUrl, children }) {
       <a className="buyer-v2__skip" href="#buyer-main">Skip to content</a>
       <header className="buyer-v2__header">
         <div className="buyer-v2__header-inner">
-          <RouterLink className="buyer-v2__brand" to={EXPLORE_ROOT} navigate={navigate} aria-label="Hatch home">
-            <span aria-hidden="true" className="buyer-v2__brand-mark">H</span><span>Hatch.</span>
-          </RouterLink>
+          <HatchBrand as={RouterLink} className="buyer-v2__brand" to={EXPLORE_ROOT} navigate={navigate} aria-label="Hatch home" />
           <nav className="buyer-v2__nav" aria-label="Buyer navigation">
             <RouterLink to={EXPLORE_ROOT} navigate={navigate} aria-current={active === "explore" ? "page" : undefined}>Explore</RouterLink>
             {authenticated ? <RouterLink to={LIBRARY_ROOT} navigate={navigate} aria-current={active === "library" ? "page" : undefined}>Library</RouterLink> : null}
@@ -469,7 +468,7 @@ function AuthPage({ mode, search, request, navigate, session }) {
   return (
     <main className="buyer-v2 buyer-v2__auth-page">
       <section className="buyer-v2__auth-context">
-        <RouterLink className="buyer-v2__brand buyer-v2__brand--inverse" to={EXPLORE_ROOT} navigate={navigate}><span aria-hidden="true" className="buyer-v2__brand-mark">H</span><span>Hatch.</span></RouterLink>
+        <HatchBrand as={RouterLink} className="buyer-v2__brand buyer-v2__brand--inverse" to={EXPLORE_ROOT} navigate={navigate} aria-label="Hatch home" />
         <div>
           <span className="buyer-v2__eyebrow">Continue your task</span>
           {productIntent && intent.status === "loading" ? <div className="buyer-v2__auth-intent-skeleton" aria-label="Loading offer" /> : null}

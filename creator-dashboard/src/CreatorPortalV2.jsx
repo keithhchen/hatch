@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CreatorFactoryRuns } from "./CreatorFactoryRuns.jsx";
+import { HatchBrand } from "./HatchBrand.jsx";
 import { StorefrontDetails } from "./StorefrontDetails.jsx";
 import { creatorOrderQuery, payoutActionLabel, payoutCanRetry } from "./storefrontModel.js";
 import { creatorRouteTitle, parseCreatorRoute } from "./creatorRoutes.js";
@@ -52,9 +53,7 @@ export function CreatorPortalV2({
     <div className="cpv2">
       <a className="cpv2-skip" href="#creator-main">Skip to content</a>
       <aside className="cpv2-sidebar">
-        <button className="cpv2-brand" type="button" onClick={() => go(ROOT)} aria-label="Hatch creator home">
-          <span aria-hidden="true">◒</span> Hatch.
-        </button>
+        <HatchBrand as="button" className="cpv2-brand" type="button" onClick={() => go(ROOT)} aria-label="Hatch creator home" />
         <nav className="cpv2-global-nav" aria-label="Hatch spaces">
           <SpaceLink href="/explore" navigate={go}>Explore</SpaceLink>
           <SpaceLink href="/library" navigate={go}>Library</SpaceLink>

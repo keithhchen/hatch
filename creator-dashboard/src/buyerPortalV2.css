@@ -75,17 +75,6 @@
   line-height: 1;
   text-decoration: none;
 }
-.buyer-v2__brand-mark {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  place-items: center;
-  border-radius: 9px 9px 9px 3px;
-  background: var(--buyer-accent);
-  color: white;
-  font-family: var(--hatch-font-display, Georgia, serif);
-  font-size: 17px;
-}
 .buyer-v2__brand--inverse { color: var(--buyer-inverse-text); }
 .buyer-v2__nav { display: flex; align-items: center; gap: 4px; }
 .buyer-v2__nav a {
@@ -414,7 +403,6 @@
   .buyer-v2__header { position: static; }
   .buyer-v2__header-inner { grid-template-columns: 1fr auto; width: min(100% - 28px, 1160px); min-height: 64px; gap: 10px; }
   .buyer-v2__brand { font-size: 24px; }
-  .buyer-v2__brand-mark { width: 27px; height: 27px; }
   .buyer-v2__nav { grid-column: 1 / -1; grid-row: 2; justify-content: stretch; padding: 4px 0 10px; }
   .buyer-v2__nav a { flex: 1; justify-content: center; }
   .buyer-v2__avatar { display: none; }
@@ -447,7 +435,7 @@
 
 @media (max-width: 390px) {
   .buyer-v2__header-inner { width: calc(100% - 20px); }
-  .buyer-v2__brand span:last-child { display: none; }
+  .hatch-brand__wordmark { display: none; }
   .buyer-v2__account { gap: 2px; }
   .buyer-v2__container, .buyer-v2__success-page { width: calc(100% - 24px); }
   .buyer-v2__catalog-card, .buyer-v2__access-card, .buyer-v2__info-card, .buyer-v2__wide-section, .buyer-v2__receipt-card, .buyer-v2__detail-card, .buyer-v2__action-card, .buyer-v2__activation-card, .buyer-v2__order-summary, .buyer-v2__order-actions { padding: 22px; border-radius: 17px; }

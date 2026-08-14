@@ -7,7 +7,13 @@
   "product": {
     "id": "026651b1-8a8a-4484-aac5-ace6bd662157",
     "name": "Seth Database Alpha Lite",
-    "description": "A public-evidence and research-lead interface for listed-company and relationship research."
+    "description": "A public-evidence and research-lead interface for listed-company and relationship research.",
+    "offer": {
+      "model": "per_delivery",
+      "amount_minor": 0,
+      "currency": "USD",
+      "unit": "research review"
+    }
   },
   "instructions": {
     "system": {

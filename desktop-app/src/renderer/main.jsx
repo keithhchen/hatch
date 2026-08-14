@@ -3534,7 +3534,7 @@ function DesktopSidebar({
   return (
     <div className="desktop-sidebar-content">
       <div className="desktop-sidebar-heading">
-        <span className="hatch-wordmark">Hatch</span>
+        <span className="hatch-wordmark">Hatch<span className="hatch-wordmark-period" aria-hidden="true">.</span></span>
       </div>
       <nav className="desktop-source-list" aria-label={t("sidebar.creatorAgents")}>
         <div className="desktop-source-list-label">{t("sidebar.yourExperts")}</div>
@@ -4339,7 +4339,7 @@ function LaunchScreen() {
   const t = useI18n();
   return (
     <main className="welcome-screen status-screen">
-      <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch.</strong></div>
+      <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch<span className="hatch-wordmark-period" aria-hidden="true">.</span></strong></div>
       <section className="status-card">
         <span className="eyebrow">{t("app.name")}</span>
         <h1>{t("startup.openingWorkspace")}</h1>
@@ -4353,7 +4353,7 @@ function NetworkErrorScreen({ message, onRetry, onSignOut }) {
   const t = useI18n();
   return (
     <main className="welcome-screen status-screen">
-      <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch.</strong></div>
+      <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch<span className="hatch-wordmark-period" aria-hidden="true">.</span></strong></div>
       <section className="status-card">
         <span className="eyebrow">{t("connection.eyebrow")}</span>
         <h1>{t("connection.cannotReachTitle")}</h1>
@@ -4370,7 +4370,7 @@ function UnsupportedRoleScreen({ profile, onSignOut }) {
   const t = useI18n();
   return (
     <main className="welcome-screen status-screen">
-      <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch.</strong></div>
+      <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch<span className="hatch-wordmark-period" aria-hidden="true">.</span></strong></div>
       <section className="status-card">
         <span className="eyebrow">{t("auth.consumerDesktopEyebrow")}</span>
         <h1>{t("auth.buyerAccountTitle")}</h1>
@@ -4386,7 +4386,7 @@ function EmptyAgentsScreen({ profile, onBrowse, onRefresh, onSignOut, refreshing
   const t = useI18n();
   return (
     <main className="welcome-screen status-screen empty-agents-screen">
-      <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch.</strong></div>
+      <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch<span className="hatch-wordmark-period" aria-hidden="true">.</span></strong></div>
       <section className="status-card empty-agents-card">
         <div className="empty-agents-header">
           <span className="avatar">{profile.initials}</span>
@@ -4420,7 +4420,7 @@ function SignInScreen({ onSignIn, status, error }) {
 
   return (
     <main className="welcome-screen">
-      <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch.</strong></div>
+      <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch<span className="hatch-wordmark-period" aria-hidden="true">.</span></strong></div>
       <section className="sign-in-card">
         <span className="eyebrow">{t("auth.welcome")}</span>
         <h1>{t("auth.signInTitle")}</h1>

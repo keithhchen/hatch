@@ -7,6 +7,7 @@ import "@fontsource/instrument-serif/400.css";
 import "@fontsource/dm-mono/400.css";
 import { BuyerPortalV2 } from "./BuyerPortalV2.jsx";
 import { CreatorPortalV2 } from "./CreatorPortalV2.jsx";
+import { HatchBrand } from "./HatchBrand.jsx";
 import { dashboardRequest } from "./data.js";
 import "../../packages/brand/tokens.css";
 import "./styles.css";
@@ -165,13 +166,13 @@ function RouteRedirect({ to, navigate }) {
 }
 
 function AppLoading() {
-  return <main className="loading-page" aria-busy="true"><span className="hatch-wordmark">Hatch.</span><p>Opening your workspace…</p></main>;
+  return <main className="loading-page" aria-busy="true"><HatchBrand className="loading-brand" /><p>Opening your workspace…</p></main>;
 }
 
 function RoleBoundary({ navigate }) {
   return (
     <main className="loading-page">
-      <span className="hatch-wordmark">Hatch.</span>
+      <HatchBrand className="loading-brand" />
       <h1>Creator access is required.</h1>
       <p>This account can use purchased Agents, but it cannot edit Creator products.</p>
       <button className="primary" type="button" onClick={() => navigate("/library", { replace: true })}>Open your library</button>
