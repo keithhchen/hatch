@@ -342,7 +342,7 @@
 .buyer-v2__detail-card h2 { margin: 0 0 22px; font-size: 31px; }
 .buyer-v2__detail-card .buyer-v2__text-link { display: inline-block; margin-top: 24px; }
 .buyer-v2__creator-identity { display: inline-flex; min-width: 0; align-items: center; gap: 9px; color: var(--buyer-ink); font-family: var(--hatch-font-pill, Inter, sans-serif); font-size: 12px; font-weight: 680; }
-.buyer-v2__creator-avatar { flex: 0 0 auto; border: 2px solid rgba(255,255,255,.96); box-shadow: 0 2px 9px rgba(69,49,35,.16); }
+.buyer-v2__creator-avatar { flex: 0 0 auto; border: 2px solid rgba(255,255,255,.96); border-radius: 50%; box-shadow: 0 2px 9px rgba(69,49,35,.16); }
 .buyer-v2__settings-surface { padding: 30px 4px 24px; border-top: 1px solid var(--buyer-border-subtle); border-bottom: 1px solid var(--buyer-border-subtle); }
 .buyer-v2__settings-identity { display: flex; min-height: 76px; align-items: center; gap: 16px; }
 .buyer-v2__settings-avatar { border: 2px solid rgba(255,255,255,.96); border-radius: 50%; box-shadow: 0 3px 12px rgba(69,49,35,.14); }
