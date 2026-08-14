@@ -230,7 +230,16 @@ export class CreatorFactoryService {
       : normalized.sources ?? [];
     const runId = `factory_${randomUUID().replaceAll("-", "")}`;
     const distillationRunId = task?.runId ?? `distill_${randomUUID().replaceAll("-", "")}`;
-    const revisionNumber = task?.latestRevisionId ? await this.nextRevisionNumber(creator.id, normalized.taskId!) : 1;
+    const revisionContext = task && this.graphStore
+      ? await this.resolveTaskRevisionContext(task)
+      : undefined;
+    const parentRevisionId = task
+      ? (revisionContext ? revisionContext.parentRevisionId : task.latestRevisionId)
+      : undefined;
+    const revisionNumber = task
+      ? (revisionContext?.nextRevisionNumber
+        ?? (task.latestRevisionId ? await this.nextRevisionNumber(creator.id, normalized.taskId!) : 1))
+      : 1;
     const taskName = task?.name ?? normalized.taskName;
     const taskBrief = task?.brief ?? normalized.taskBrief;
     const input: FactoryStartInput = {
@@ -241,7 +250,7 @@ export class CreatorFactoryService {
         distillationRunId,
         revisionId: runId,
         revisionNumber,
-        ...(task.latestRevisionId ? { parentRevisionId: task.latestRevisionId } : {})
+        ...(parentRevisionId ? { parentRevisionId } : {})
       } : {}),
       ...((taskProductId ?? normalized.agentId) ? { agentId: taskProductId ?? normalized.agentId } : {}),
       ...(taskProduct ? { product: taskProduct } : {}),
@@ -259,7 +268,6 @@ export class CreatorFactoryService {
       input
     });
     if (task) {
-      await this.taskRepository().setTaskRevision(creator.id, task.id, { runId: distillationRunId, revisionId: runId, productId: taskProductId! });
       await this.graphStore?.initialize();
       await this.graphStore?.ensureRun({
         id: distillationRunId,
@@ -274,7 +282,7 @@ export class CreatorFactoryService {
         taskId: task.id,
         revision: revisionNumber,
         sourceSnapshotId: snapshotId!,
-        ...(task.latestRevisionId ? { parentRevisionId: task.latestRevisionId } : {}),
+        ...(parentRevisionId ? { parentRevisionId } : {}),
         createdAt: result.run.createdAt
       });
       await this.graphStore?.appendEvent({
@@ -290,6 +298,10 @@ export class CreatorFactoryService {
         artifactIds: [],
         payload: { revision: revisionNumber, sourceSnapshotId: snapshotId ?? null }
       });
+      // Advance the Task pointer only after the immutable graph revision and
+      // its event edge exist. A failed graph write must not leave a dangling
+      // latestRevisionId that can poison the next retry.
+      await this.taskRepository().setTaskRevision(creator.id, task.id, { runId: distillationRunId, revisionId: runId, productId: taskProductId! });
     }
     return { run: await this.project(result.run, false), created: result.created };
   }
@@ -560,6 +572,20 @@ export class CreatorFactoryService {
     return Math.max(0, ...runs
       .filter((run) => run.input.taskId === taskId)
       .map((run) => run.input.revisionNumber ?? 0)) + 1;
+  }
+
+  private async resolveTaskRevisionContext(task: DistillationTaskRecord): Promise<{ parentRevisionId?: string; nextRevisionNumber: number }> {
+    const revisionEvents = (await this.graphStore!.listEvents(task.id))
+      .filter((event) => event.type === "revision_created" && !!event.revisionId)
+      .sort((left, right) => left.sequence - right.sequence);
+    const latest = revisionEvents.at(-1);
+    const revisionNumbers = revisionEvents
+      .map((event) => typeof event.payload.revision === "number" ? event.payload.revision : Number(event.payload.revision))
+      .filter((revision): revision is number => Number.isInteger(revision) && revision > 0);
+    return {
+      ...(latest?.revisionId ? { parentRevisionId: latest.revisionId } : {}),
+      nextRevisionNumber: Math.max(0, ...revisionNumbers) + 1
+    };
   }
 }
 
