@@ -132,18 +132,18 @@ test("staged releases stay immutable until CAS activation and Commerce grants pr
     );
 
     const grant = await store.grantAgentAccess(
-      "buyer-1",
+      "33333333-3333-4333-8333-333333333333",
       "11111111-1111-4111-8111-111111111111",
       "22222222-2222-4222-8222-222222222222",
-      "order-1",
-      "entitlement-1",
+      "55555555-5555-4555-8555-555555555555",
+      "44444444-4444-4444-8444-444444444444",
       verified.digest,
       "pinned"
     );
-    assert.equal(grant.entitlement_id, "entitlement-1");
+    assert.equal(grant.entitlement_id, "44444444-4444-4444-8444-444444444444");
     assert.equal(grant.purchased_corpus_digest, verified.digest);
     assert.equal(grant.version_policy, "pinned");
-    assert.equal((await store.revokeAgentAccess("entitlement-1", "buyer-1"))?.status, "revoked");
+    assert.equal((await store.revokeAgentAccess("44444444-4444-4444-8444-444444444444", "33333333-3333-4333-8333-333333333333"))?.status, "revoked");
   } finally {
     await store.close();
     await rm(root, { recursive: true, force: true });
@@ -172,20 +172,20 @@ test("TypeScript Registry publishes a clean Corpus and indexes knowledge only", 
   assert.deepEqual(restoredCorpus?.product_boundaries, ["Does not invent evidence."]);
   assert.deepEqual(restoredCorpus?.product_offer, { model: "per_delivery", amount_minor: 0, currency: "USD", unit: "review" });
   assert.deepEqual(restoredCorpus?.presentation, { accent: "fern" });
-  const grant = await restored.grantAgentAccess("buyer-one", "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", "order-one");
-  assert.equal(grant.order_id, "order-one");
+  const grant = await restored.grantAgentAccess("33333333-3333-4333-8333-333333333333", "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", "55555555-5555-4555-8555-555555555555");
+  assert.equal(grant.order_id, "55555555-5555-4555-8555-555555555555");
   await assert.rejects(
-    restored.grantAgentAccess("buyer-missing-order", "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", ""),
+    restored.grantAgentAccess("66666666-6666-4666-8666-666666666666", "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", ""),
     /order_id_required/
   );
   const concurrent = await Promise.all([
-    restored.grantAgentAccess("buyer-concurrent", "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", "order-concurrent"),
-    restored.grantAgentAccess("buyer-concurrent", "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", "order-concurrent")
+    restored.grantAgentAccess("77777777-7777-4777-8777-777777777777", "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", "88888888-8888-4888-8888-888888888888"),
+    restored.grantAgentAccess("77777777-7777-4777-8777-777777777777", "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", "88888888-8888-4888-8888-888888888888")
   ]);
   assert.equal(concurrent[0].entitlement_id, concurrent[1].entitlement_id);
   const reopened = await RegistryStoreTs.open({ corpusRoot: path.join(root, "corpora"), statePath, indexer: indexer as never, environment: {} });
-  assert.equal((await reopened.listAgentAccess("buyer-one"))[0]?.order_id, "order-one");
-  assert.equal((await reopened.listAgentAccess("buyer-concurrent"))[0]?.entitlement_id, concurrent[0].entitlement_id);
+  assert.equal((await reopened.listAgentAccess("33333333-3333-4333-8333-333333333333"))[0]?.order_id, "55555555-5555-4555-8555-555555555555");
+  assert.equal((await reopened.listAgentAccess("77777777-7777-4777-8777-777777777777"))[0]?.entitlement_id, concurrent[0].entitlement_id);
   const installed = await readFile(path.join(root, "corpora/11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222/knowledge/cases.md"), "utf8");
   assert.match(installed, /Long reference material/);
 });

@@ -12,6 +12,11 @@ export function newIdentityId(): string {
 }
 
 export function requireUuidV4(value: unknown, field: string): string {
-  if (!isUuidV4(value)) throw new Error(`${field} must be a canonical UUID v4`);
+  if (!isUuidV4(value)) {
+    const error = new Error(`${field} must be a canonical UUID v4`) as Error & { status?: number; code?: string };
+    error.status = 400;
+    error.code = "invalid_uuid";
+    throw error;
+  }
   return value;
 }

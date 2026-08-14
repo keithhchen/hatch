@@ -1,4 +1,5 @@
 import { englishMessage } from "./i18n.js";
+import { isUuidV4 } from "./identity.js";
 
 export async function signInAuthSession({ email, password }, registryUrl, fetchImpl = fetch) {
   const normalizedEmail = String(email ?? "").trim().toLowerCase();
@@ -34,7 +35,7 @@ export async function signInAuthSession({ email, password }, registryUrl, fetchI
     );
   }
   const token = payload?.session?.token || payload?.token;
-  if (!payload?.account?.role || !payload?.account?.id || !token) {
+  if (!payload?.account?.role || !isUuidV4(payload?.account?.id) || !token) {
     throw clientError(
       englishMessage("error.auth.invalidAccount"),
       "auth_request_failed",
@@ -81,7 +82,7 @@ export async function fetchAuthAccount(registryUrl, accessToken, fetchImpl = fet
       response.status === 401 ? "error.auth.invalidSession" : "error.auth.verifyFailed"
     );
   }
-  if (!payload?.id || !payload?.role || !["user", "creator"].includes(payload.role)) {
+  if (!isUuidV4(payload?.id) || !payload?.role || !["user", "creator"].includes(payload.role)) {
     throw clientError(
       englishMessage("error.auth.invalidAccount"),
       "auth_request_failed",

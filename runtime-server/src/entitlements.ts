@@ -178,7 +178,7 @@ export class RegistryEntitlementResolver implements EntitlementResolver, AuthIde
   async list(input: EntitlementLookup): Promise<EntitlementBinding[]> {
     if (!input.authToken) return [];
     const { response, body } = await this.request(
-      "/v1/user/agent-access",
+      "/v1/user/product-access",
       { headers: { authorization: `Bearer ${input.authToken}`, accept: "application/json" } },
       input.signal,
       "entitlement"
@@ -197,7 +197,7 @@ export class RegistryEntitlementResolver implements EntitlementResolver, AuthIde
   async resolve(input: EntitlementLookup & { entitlementId: string }): Promise<EntitlementBinding> {
     if (!input.authToken) throw new EntitlementError("auth_invalid", "Your Hatch session is no longer valid.");
     const { response, body } = await this.request(
-      `/v1/user/agent-access?entitlement_id=${encodeURIComponent(input.entitlementId)}`,
+      `/v1/user/product-access?entitlement_id=${encodeURIComponent(input.entitlementId)}`,
       { headers: { authorization: `Bearer ${input.authToken}`, accept: "application/json" } },
       input.signal,
       "entitlement",

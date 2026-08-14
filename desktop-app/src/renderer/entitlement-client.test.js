@@ -1,30 +1,52 @@
 import { describe, expect, it, vi } from "vitest";
 import { fetchPurchasedCreatorAgents, runtimeHttpUrl } from "./entitlement-client.js";
 
+const entitlementId = "7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001";
+const userId = "6aa7b10c-4db0-4d8a-8c2f-2e2c8cba1000";
+const creatorId = "8bb7b10c-4db0-4d8a-8c2f-2e2c8cba1002";
+const productId = "9cc7b10c-4db0-4d8a-8c2f-2e2c8cba1003";
+
 describe("buyer Creator Agent library", () => {
   it("uses one canonical Registry response for the signed-in library", async () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify([{
-      entitlement_id: "ent_jordan_signal",
-      user_id: "jordan",
-      creator_id: "8bb7b10c-4db0-4d8a-8c2f-2e2c8cba1002",
-      product_id: "9cc7b10c-4db0-4d8a-8c2f-2e2c8cba1003",
+      entitlement_id: entitlementId,
+      user_id: userId,
+      creator_id: creatorId,
+      product_id: productId,
       status: "active",
       granted_at: "2026-08-03T00:00:00.000Z",
-      creator: { id: "8bb7b10c-4db0-4d8a-8c2f-2e2c8cba1002", name: "Maya Chen" },
-      product: { id: "9cc7b10c-4db0-4d8a-8c2f-2e2c8cba1003", name: "Signal Review", description: "Review work" },
+      creator: { id: creatorId, name: "Maya Chen" },
+      product: { id: productId, name: "Signal Review", description: "Review work" },
       presentation: { accent: "orange" }
     }]), { status: 200, headers: { "content-type": "application/json" } }));
     const result = await fetchPurchasedCreatorAgents("https://hatch.example", "opaque-jordan-token", fetchImpl);
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({
-      entitlement_id: "ent_jordan_signal",
-      creator: { id: "8bb7b10c-4db0-4d8a-8c2f-2e2c8cba1002", name: "Maya Chen" },
-      product: { id: "9cc7b10c-4db0-4d8a-8c2f-2e2c8cba1003", name: "Signal Review" }
+      entitlement_id: entitlementId,
+      creator: { id: creatorId, name: "Maya Chen" },
+      product: { id: productId, name: "Signal Review" }
     });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     expect(fetchImpl).toHaveBeenCalledWith("https://hatch.example/v1/user/product-access", {
       headers: { authorization: "Bearer opaque-jordan-token", accept: "application/json" }
     });
+  });
+
+  it("drops access rows that still use pre-cutover text identities", async () => {
+    const result = await fetchPurchasedCreatorAgents(
+      "https://hatch.example",
+      "opaque-jordan-token",
+      async () => new Response(JSON.stringify([{
+        entitlement_id: "ent_legacy",
+        user_id: "jordan",
+        creator_id: creatorId,
+        product_id: productId,
+        status: "active",
+        creator: { id: creatorId, name: "Maya Chen" },
+        product: { id: productId, name: "Signal Review" }
+      }]), { status: 200 })
+    );
+    expect(result).toEqual([]);
   });
 
   it("treats an empty access list as a valid signed-in result", async () => {

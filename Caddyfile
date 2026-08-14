@@ -54,6 +54,21 @@
     @internal_service_api path /v1/internal/commerce* /v1/internal/deployments*
     respond @internal_service_api 404
 
+    # Packaged Desktop uses an opaque Registry bearer, while the browser uses
+    # the Dashboard's HttpOnly cookie session. Keep the Desktop surface narrow
+    # so bearer requests never fall through to the browser BFF envelope.
+    @desktop_registry_signin path /v1/auth/signin
+    handle @desktop_registry_signin {
+        reverse_proxy registry:8100
+    }
+    @desktop_registry_bearer {
+        path /v1/auth/me /v1/auth/logout /v1/user/product-access
+        header Authorization *
+    }
+    handle @desktop_registry_bearer {
+        reverse_proxy registry:8100
+    }
+
     # All browser APIs belong to the cookie-backed Dashboard BFF. In
     # particular, /v1/auth/me must not be shadowed by Registry.
     handle /v1/* {

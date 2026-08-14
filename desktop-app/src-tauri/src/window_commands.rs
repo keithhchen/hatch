@@ -1539,19 +1539,6 @@ fn validate_conversation_id(value: &str) -> Result<String, String> {
     Ok(value.to_string())
 }
 
-fn validate_binding_id(value: &str, field: &str) -> Result<String, String> {
-    let value = value.trim();
-    if value.is_empty()
-        || value.len() > MAX_CONVERSATION_ID_BYTES
-        || value.chars().any(char::is_control)
-    {
-        return Err(format!(
-            "conversation_window_binding_invalid: {field} must be bounded non-control text"
-        ));
-    }
-    Ok(value.to_string())
-}
-
 fn validate_uuid_v4(value: &str, field: &str) -> Result<String, String> {
     let value = value.trim().to_ascii_lowercase();
     let bytes = value.as_bytes();
@@ -1580,11 +1567,11 @@ fn validate_conversation_window_binding(
     if !provided {
         return Ok(None);
     }
-    let entitlement_id = validate_binding_id(
+    let entitlement_id = validate_uuid_v4(
         request.entitlement_id.as_deref().unwrap_or_default(),
         "entitlement_id",
     )?;
-    let creator_id = validate_binding_id(
+    let creator_id = validate_uuid_v4(
         request.creator_id.as_deref().unwrap_or_default(),
         "creator_id",
     )?;
@@ -1728,8 +1715,8 @@ mod tests {
     fn conversation_window_route_carries_optional_product_binding() {
         let request = OpenConversationWindowRequest {
             conversation_id: "conv_123".into(),
-            entitlement_id: Some("ent_A".into()),
-            creator_id: Some("creator_A".into()),
+            entitlement_id: Some("7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001".into()),
+            creator_id: Some("8bb7b10c-4db0-4d8a-8c2f-2e2c8cba1002".into()),
             product_id: Some("550e8400-e29b-41d4-a716-446655440000".into()),
         };
         let binding = validate_conversation_window_binding(&request).unwrap();
@@ -1737,8 +1724,8 @@ mod tests {
         let path = conversation_window_path("conv_123", Some(binding));
         let path = path.to_string_lossy();
         assert!(path.contains("conversation_id=conv_123"));
-        assert!(path.contains("entitlement_id=ent_A"));
-        assert!(path.contains("creator_id=creator_A"));
+        assert!(path.contains("entitlement_id=7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001"));
+        assert!(path.contains("creator_id=8bb7b10c-4db0-4d8a-8c2f-2e2c8cba1002"));
         assert!(path.contains("product_id=550e8400-e29b-41d4-a716-446655440000"));
     }
 
@@ -1746,7 +1733,7 @@ mod tests {
     fn conversation_window_binding_rejects_partial_or_controlled_input() {
         let partial = OpenConversationWindowRequest {
             conversation_id: "conv_123".into(),
-            entitlement_id: Some("ent_A".into()),
+            entitlement_id: Some("7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001".into()),
             creator_id: None,
             product_id: Some("550e8400-e29b-41d4-a716-446655440000".into()),
         };
@@ -1754,8 +1741,8 @@ mod tests {
 
         let controlled = OpenConversationWindowRequest {
             conversation_id: "conv_123".into(),
-            entitlement_id: Some("ent_A\nx".into()),
-            creator_id: Some("creator_A".into()),
+            entitlement_id: Some("7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001\nx".into()),
+            creator_id: Some("8bb7b10c-4db0-4d8a-8c2f-2e2c8cba1002".into()),
             product_id: Some("550e8400-e29b-41d4-a716-446655440000".into()),
         };
         assert!(validate_conversation_window_binding(&controlled).is_err());

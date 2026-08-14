@@ -15,7 +15,7 @@
 3. Desktop 不做 browser login、SSO、OAuth/PKCE 或 embedded web login。V1 使用 Hatch 自己的 HTTPS email/password endpoint；如果未来采用 OAuth/SSO，再切换到 external browser + PKCE。
 4. Session token 是 server-managed opaque token：原文只在登录响应中返回一次，Desktop 只放 macOS Keychain；服务器只存 hash，并支持 idle/absolute expiry 和 revoke。
 5. Web Storage 不保存 token，也不保存持久化的 Desktop application state。token 进 Keychain，非敏感设置进 Tauri native app-data store。
-6. Auth 与 entitlement 完全分离。`/v1/auth/me` 证明是谁，`/v1/user/agent-access` 决定当前能使用哪些 Agent；`[]` 是有效响应。
+6. Auth 与 entitlement 完全分离。`/v1/auth/me` 证明是谁，`/v1/user/product-access` 决定当前能使用哪些 Product；`[]` 是有效响应。
 7. 多个 Agent 时恢复该账号上一次使用的 Agent；没有可恢复的 Agent 时选最新 active Agent；完全没有 Agent 时进入 empty state。
 8. Registry 是账号和 access 的权威源。Runtime 在建立 WebSocket、读取 history，
    以及每个 `client.message` 创建 run 之前都重新验证 opaque session 与
@@ -41,7 +41,7 @@
 flowchart LR
   Website[官网 Catalog / Purchase] --> Commerce[Commerce Ledger]
   Commerce --> Registry[Registry\nAccount + Session + Agent Access]
-  Desktop[Hatch Desktop] -->|HTTPS auth/me + agent-access| Registry
+  Desktop[Hatch Desktop] -->|HTTPS auth/me + product-access| Registry
   Desktop -->|WebSocket hello + opaque token + entitlement_id| Runtime[Cloud Runtime]
   Runtime -->|server-side recheck| Registry
   Runtime --> Postgres[(Conversation / Run Postgres)]
@@ -84,7 +84,7 @@ flowchart LR
 1. Desktop 从 Keychain 读取 active session token。
 2. 没有 token：直接显示 `Signed out`。
 3. 有 token：显示极短的 launch loading，并请求 `GET /v1/auth/me`。
-4. `200`：账号已确认，再请求 `GET /v1/user/agent-access`。
+4. `200`：账号已确认，再请求 `GET /v1/user/product-access`。
 5. `401`：session 已失效或被撤销；删除本机 token，显示 `Signed out`。
 6. 网络超时、DNS/TLS 失败或 `5xx`：显示独立的 `Network Error` page，保留本机 token；不能把用户强制变成 signed out。
 7. `agent-access` 返回 `200 []`：仍显示 `Signed in`，进入 empty state。
@@ -213,7 +213,7 @@ Response：
 
 携带 Bearer token，将对应 `account_sessions.revoked_at` 写入当前时间。Desktop 在请求成功或失败后都删除本机 Keychain item；失败只影响 server revoke 的即时性，不阻塞用户退出。
 
-#### `GET /v1/user/agent-access`
+#### `GET /v1/user/product-access`
 
 携带 Bearer token，返回该账号当前可用的完整 Agent presentation：
 
@@ -435,7 +435,7 @@ CREATE INDEX account_sessions_account_active_idx
 1. Empty state 的 `Browse Creator Agents` 只打开固定官网 URL；不携带 session token，不尝试把 Desktop 身份传给浏览器。
 2. Catalog 浏览可以匿名；购买和网站账号由官网自己处理。
 3. V1 假设官网购买使用同一个 Hatch account。没有 SSO/自动 account linking；如果用户在官网购买了另一个账号，Desktop refresh 不会显示该 Agent，这是身份一致性的预期结果。
-4. Desktop 获得 focus 后 refresh `/v1/user/agent-access`。
+4. Desktop 获得 focus 后 refresh `/v1/user/product-access`。
 5. 新 Agent 出现后按第 6.3 节选择；没有新 Agent 仍停留在 empty state，不显示 error。
 
 这是“browse on website”，不是“登录 gate”。Desktop 不嵌入支付页，也不需要等待浏览器 callback。
@@ -526,7 +526,7 @@ CREATE INDEX account_sessions_account_active_idx
 
 - Registry 新增 `account_sessions`，raw opaque token 只回传给 Desktop；服务端存 SHA-256 hash，按 30 天 idle / 90 天 absolute 过期并支持 revoke。
 - Runtime production path 通过 Registry `/v1/auth/me` 验证 opaque session；旧 HMAC 只留给 resolver-free/local fixture path。
-- Registry `/v1/user/agent-access` 直接返回 presentation；`200 []` 保持为空状态，revoked/disabled grant 不会出现在结果中。
+- Registry `/v1/user/product-access` 直接返回 presentation；`200 []` 保持为空状态，revoked/disabled grant 不会出现在结果中。
 - Desktop token 在正式稳定签名 macOS 包走 Developer-ID-gated Keychain command；dev/ad-hoc UAT 只走进程内 token，非敏感设置走 Tauri app-data JSON；renderer 不再使用 Web Storage 或 Preview User。
 - Desktop 页面只有 Signed out、Signed in（有 Agent / empty state）和传输态 Network Error；Browse CTA 走系统浏览器 allowlist。
 

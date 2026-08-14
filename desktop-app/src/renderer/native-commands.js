@@ -1,3 +1,5 @@
+import { isUuidV4 } from "./identity.js";
+
 /**
  * Renderer half of Hatch's native command bridge.
  *
@@ -166,6 +168,7 @@ export function normalizeConversationBinding(value = {}) {
   const productId = normalizeConversationId(value?.productId ?? value?.product_id);
   if (!entitlementId && !creatorId && !productId) return null;
   if (!entitlementId || !creatorId || !productId) return null;
+  if (!isUuidV4(entitlementId) || !isUuidV4(creatorId) || !isUuidV4(productId)) return null;
   // `agentId` is an internal renderer variable retained only so existing
   // window state can be rehydrated; the wire/deep-link field is product_id.
   return Object.freeze({ entitlementId, creatorId, productId, agentId: productId });

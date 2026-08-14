@@ -14,6 +14,8 @@ import {
   startAuthSessionSignOut
 } from "./auth-session.js";
 
+const userId = "6aa7b10c-4db0-4d8a-8c2f-2e2c8cba1000";
+
 describe("account sessions", () => {
   it("adds stable localization metadata to local credential validation errors", async () => {
     const missingEmail = await signInAuthSession({ email: "", password: "secret" }, "https://hatch.example")
@@ -33,7 +35,7 @@ describe("account sessions", () => {
 
   it("signs in against the Registry and accepts an empty Agent library", async () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
-      account: { id: "user_123", role: "user", email: "jordan@example.com", display_name: "Jordan Lee" },
+      account: { id: userId, role: "user", email: "jordan@example.com", display_name: "Jordan Lee" },
       session: { token: "opaque-token", expires_at: "2026-11-08T00:00:00.000Z" }
     }), { status: 200, headers: { "content-type": "application/json" } }));
     const signedIn = await signInAuthSession(
@@ -42,7 +44,7 @@ describe("account sessions", () => {
       fetchImpl
     );
     expect(signedIn).toEqual({
-      profile: { id: "user_123", name: "Jordan Lee", role: "user", initials: "JL" },
+      profile: { id: userId, name: "Jordan Lee", role: "user", initials: "JL" },
       accessToken: "opaque-token",
       expiresAt: "2026-11-08T00:00:00.000Z"
     });
@@ -64,7 +66,7 @@ describe("account sessions", () => {
 
   it("hydrates the identity only after Registry /auth/me confirms the session", async () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
-      id: "user_123",
+      id: userId,
       role: "user",
       email: "jordan@example.com",
       display_name: "Jordan Lee",
@@ -72,7 +74,7 @@ describe("account sessions", () => {
     }), { status: 200 }));
     const account = await fetchAuthAccount("https://hatch.example", "opaque-token", fetchImpl);
     expect(hydrateAuthSession({ accessToken: "opaque-token" }, account)).toMatchObject({
-      profile: { id: "user_123", role: "user" },
+      profile: { id: userId, role: "user" },
       accessToken: "opaque-token",
       expiresAt: "2026-11-08T00:00:00.000Z"
     });

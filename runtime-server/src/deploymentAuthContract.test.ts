@@ -14,6 +14,15 @@ test("production keeps browser APIs on the Dashboard BFF and disables legacy HMA
   const registryHealthBlock = caddyfile.match(/handle @registry_health \{([\s\S]*?)\n    \}/)?.[1] ?? "";
   assert.doesNotMatch(registryHealthBlock, /\/v1\//,
     "public routing must not expose Registry command routes");
+  assert.match(caddyfile, /@desktop_registry_signin path \/v1\/auth\/signin[\s\S]*?handle @desktop_registry_signin \{[\s\S]*?reverse_proxy registry:8100/,
+    "Desktop sign-in must reach the Registry session endpoint");
+  const desktopBearerBlock = caddyfile.match(/@desktop_registry_bearer \{([\s\S]*?)\n    \}/)?.[1] ?? "";
+  assert.match(desktopBearerBlock, /path \/v1\/auth\/me \/v1\/auth\/logout \/v1\/user\/product-access/,
+    "Desktop bearer routes must cover identity, logout, and UUID product access");
+  assert.match(desktopBearerBlock, /header Authorization \*/,
+    "Desktop Registry routes must require an Authorization bearer");
+  assert.match(caddyfile, /handle @desktop_registry_bearer \{[\s\S]*?reverse_proxy registry:8100/,
+    "Desktop bearer routes must reach the Registry, not the browser BFF");
   const runtimeMatcher = caddyfile.match(/^\s*@runtime_api path ([^\n]+)$/m)?.[1];
   assert.ok(runtimeMatcher, "Caddyfile must declare the Runtime HTTP API matcher");
   assert.match(runtimeMatcher, /(?:^|\s)\/v1\/conversations\*(?:\s|$)/,

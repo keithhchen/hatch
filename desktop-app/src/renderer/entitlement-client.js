@@ -1,4 +1,5 @@
 import { englishMessage } from "./i18n.js";
+import { isUuidV4 } from "./identity.js";
 
 export async function fetchPurchasedCreatorAgents(registryUrl, authToken, fetchImpl = fetch) {
   let accessResponse;
@@ -27,13 +28,21 @@ export async function fetchPurchasedCreatorAgents(registryUrl, authToken, fetchI
       accessResponse.status === 401 ? "error.auth.invalidSession" : "error.entitlement.requestFailed"
     );
   }
-  if (!Array.isArray(accessPayload)) {
+  // Registry returns a bare array. The Dashboard BFF may wrap the same real
+  // access projection while a request is routed through the browser surface;
+  // accept that envelope without changing the UUID authority fields.
+  const accessRows = Array.isArray(accessPayload)
+    ? accessPayload
+    : Array.isArray(accessPayload?.creator_agents)
+      ? accessPayload.creator_agents
+      : null;
+  if (!accessRows) {
     throw localizedError(
       englishMessage("error.entitlement.invalidLibrary"),
       "error.entitlement.invalidLibrary"
     );
   }
-  return accessPayload
+  return accessRows
     .filter(isCreatorAgentEntitlement)
     .sort((left, right) => Date.parse(right.granted_at || "") - Date.parse(left.granted_at || ""));
 }
@@ -54,13 +63,19 @@ export function runtimeHttpUrl(runtimeUrl, pathname) {
 }
 
 function isCreatorAgentEntitlement(value) {
+  const productId = value?.product_id;
+  const agentId = value?.agent_id;
   return Boolean(
     value?.status === "active"
-    && value?.entitlement_id
-    && value?.creator?.id
+    && isUuidV4(value?.entitlement_id)
+    && isUuidV4(value?.user_id)
+    && isUuidV4(value?.creator_id)
+    && isUuidV4(productId)
+    && (!value?.order_id || isUuidV4(value.order_id))
+    && (!agentId || agentId === productId)
+    && value?.creator?.id === value.creator_id
     && value?.creator?.name
-    && value?.product?.id
-    && value?.product_id
+    && value?.product?.id === productId
     && value?.product?.name
   );
 }

@@ -77,7 +77,7 @@ describe("Consumer Desktop authentication flow", () => {
 
     expect(result).toMatchObject({
       state: "unsupported-role",
-      session: { profile: { id: "creator_maya", role: "creator" }, accessToken: "opaque-creator" },
+      session: { profile: { id: "8bb7b10c-4db0-4d8a-8c2f-2e2c8cba1002", role: "creator" }, accessToken: "opaque-creator" },
       entitlements: [],
       messageKey: "error.auth.unsupportedCreatorRole"
     });
@@ -117,11 +117,11 @@ function memoryStorage(events = []) {
 }
 
 function userAccount() {
-  return { id: "user_jordan", role: "user", email: "jordan@example.com", display_name: "Jordan Lee" };
+  return { id: "6aa7b10c-4db0-4d8a-8c2f-2e2c8cba1000", role: "user", email: "jordan@example.com", display_name: "Jordan Lee" };
 }
 
 function creatorAccount() {
-  return { id: "creator_maya", role: "creator", email: "maya@example.com", display_name: "Maya Chen" };
+  return { id: "8bb7b10c-4db0-4d8a-8c2f-2e2c8cba1002", role: "creator", email: "maya@example.com", display_name: "Maya Chen" };
 }
 
 function response(payload, status = 200) {

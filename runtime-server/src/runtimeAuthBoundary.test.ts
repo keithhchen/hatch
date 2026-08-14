@@ -603,7 +603,7 @@ async function createRevocableRuntimeScenario(): Promise<{
       }));
       return;
     }
-    if (new URL(request.url ?? "/", "http://registry.test").pathname === "/v1/user/agent-access") {
+    if (new URL(request.url ?? "/", "http://registry.test").pathname === "/v1/user/product-access") {
       registryCalls.access += 1;
       if (!registryState.sessionActive) {
         response.writeHead(401);

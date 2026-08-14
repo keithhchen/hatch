@@ -479,8 +479,8 @@ async function route(
     if (!account) { sendJson(response, 401, { detail: "A valid user account token is required." }); return; }
     const requestedEntitlement = url.searchParams.get("entitlement_id");
     if (requestedEntitlement !== null) {
-      if (!requestedEntitlement || requestedEntitlement.length > 256) {
-        const error = new Error("entitlement_id must contain at most 256 characters.");
+      if (!isUuidV4(requestedEntitlement)) {
+        const error = new Error("entitlement_id must be a canonical UUID v4.");
         (error as Error & { status?: number }).status = 400;
         throw error;
       }
@@ -703,7 +703,7 @@ function publicAccessRow(row: Record<string, unknown>): Record<string, unknown> 
   } = row;
   return {
     ...publicRow,
-    product_id: publicRow.product_id ?? _internalProductAlias,
+    product_id: publicRow.product_id,
   };
 }
 

@@ -21,6 +21,7 @@ import {
   type AgentKnowledgeIndexer,
 } from "./qdrantIndexer.js";
 import { isUuidV4, requireUuidV4 } from "./identity.js";
+import { mapLegacyAuthorityId, migrateUuidAuthorityIds } from "./uuidIdentityMigration.js";
 
 export type PublishedAgentCorpus = {
   creator_id: string;
@@ -495,10 +496,13 @@ export class RegistryStoreTs {
     purchasedCorpusDigest?: string,
     versionPolicy: "pinned" | "track_current_compatible" = "pinned"
   ): Promise<AgentAccessGrant> {
+    requireUuidV4(userId, "user_id");
     requireUuidV4(creatorId, "creator_id");
     requireUuidV4(agentId, "product_id");
     const normalizedOrderId = orderId.trim();
     if (!normalizedOrderId) throw new Error("order_id_required");
+    requireUuidV4(normalizedOrderId, "order_id");
+    if (entitlementId !== undefined) requireUuidV4(entitlementId, "entitlement_id");
     const binding = accessBindingKey(userId, creatorId, agentId);
     const previous = this.accessMutations.get(binding);
     const mutation = (previous ? previous.catch(() => undefined) : Promise.resolve(undefined))
@@ -789,6 +793,7 @@ export class RegistryStoreTs {
   private async ensureSchema(): Promise<void> {
     await this.migrateLegacyIdentitySchema();
     await this.ensureCurrentSchema();
+    await migrateUuidAuthorityIds(this.pool!);
   }
 
   /**
@@ -836,11 +841,13 @@ export class RegistryStoreTs {
     const knownCreators = new Map([
       ["seth", "32ffccf7-893d-4ef3-bdbc-c82fc8fcb90b"],
       ["maya-chen", "6f6a3d24-48af-4f27-9c50-0d4f7e4e8a21"],
+      ["madeline-mann", "90e72cbf-c474-4897-baab-ae7261b0a89f"],
     ]);
     const knownProducts = new Map([
       ["seth\u0000alpha-lite", "026651b1-8a8a-4484-aac5-ace6bd662157"],
       ["maya-chen\u0000signal-resume-review", "f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42"],
       ["maya-chen\u0000maya-chen-resume-review", "f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42"],
+      ["madeline-mann\u0000interview-answer-rewriter", "4f357cee-ea68-45cf-a364-bc771aea850e"],
     ]);
     const creatorIds = new Map<string, string>();
     const productIds = new Map<string, string>();
@@ -967,6 +974,14 @@ export class RegistryStoreTs {
         const creatorLegacy = row.creator_id;
         const productLegacy = row.product_id ?? row.agent_id;
         const { creatorId, productId } = await ensureProduct(creatorLegacy, productLegacy, row);
+        const entitlementLegacy = String(row.entitlement_id ?? "").trim();
+        const userLegacy = String(row.user_id ?? "").trim();
+        if (!entitlementLegacy) throw new Error("Registry UUID cutover found an empty entitlement identity");
+        if (!userLegacy) throw new Error("Registry UUID cutover found an empty user identity");
+        const entitlementId = await mapLegacyAuthorityId(executor, "entitlement", entitlementLegacy);
+        const userId = await mapLegacyAuthorityId(executor, "account", userLegacy);
+        const orderLegacy = String(row.order_id ?? "").trim();
+        const orderId = orderLegacy ? await mapLegacyAuthorityId(executor, "order", orderLegacy) : null;
         await executor.query(
           `INSERT INTO agent_access
              (entitlement_id, user_id, creator_id, agent_id, product_id, order_id,
@@ -977,20 +992,12 @@ export class RegistryStoreTs {
              purchased_corpus_digest=COALESCE(agent_access.purchased_corpus_digest, EXCLUDED.purchased_corpus_digest),
              version_policy=EXCLUDED.version_policy, status=EXCLUDED.status`,
           [
-            (() => {
-              const value = String(row.entitlement_id ?? "").trim();
-              if (!value) throw new Error("Registry UUID cutover found an empty entitlement identity");
-              return value;
-            })(),
-            (() => {
-              const value = String(row.user_id ?? "").trim();
-              if (!value) throw new Error("Registry UUID cutover found an empty user identity");
-              return value;
-            })(),
+            entitlementId,
+            userId,
             creatorId,
             productId,
             productId,
-            row.order_id ?? null,
+            orderId,
             row.purchased_corpus_digest ?? null,
             row.version_policy === "track_current_compatible" ? "track_current_compatible" : "pinned",
             row.status === "revoked" ? "revoked" : row.status === "disabled" ? "disabled" : "active",
@@ -1050,12 +1057,12 @@ export class RegistryStoreTs {
         PRIMARY KEY (creator_id, agent_id)
       );
       CREATE TABLE IF NOT EXISTS agent_access (
-        entitlement_id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL,
+        entitlement_id UUID PRIMARY KEY,
+        user_id UUID NOT NULL,
         creator_id UUID NOT NULL REFERENCES creators(id),
         agent_id UUID NOT NULL REFERENCES products(id),
         product_id UUID NOT NULL REFERENCES products(id),
-        order_id TEXT,
+        order_id UUID,
         purchased_corpus_digest TEXT,
         version_policy TEXT NOT NULL DEFAULT 'pinned',
         status TEXT NOT NULL,
@@ -1609,7 +1616,10 @@ function rowToCorpus(row: Record<string, any>): PublishedAgentCorpus {
   };
 }
 function rowToAccess(row: Record<string, any>): AgentAccessGrant {
+  requireUuidV4(String(row.entitlement_id), "entitlement_id");
+  requireUuidV4(String(row.user_id), "user_id");
   assertCanonicalProductIdentity(String(row.agent_id), String(row.product_id));
+  if (row.order_id) requireUuidV4(String(row.order_id), "order_id");
   return {
     entitlement_id: String(row.entitlement_id),
     user_id: String(row.user_id),
@@ -1626,7 +1636,13 @@ function rowToAccess(row: Record<string, any>): AgentAccessGrant {
 
 function rowToAccessPresentation(row: Record<string, any>): AgentAccessPresentation {
   const product = typeof row.product_json === "string" ? JSON.parse(row.product_json) : row.product_json ?? {};
+  requireUuidV4(String(row.entitlement_id), "entitlement_id");
+  requireUuidV4(String(row.user_id), "user_id");
+  requireUuidV4(String(row.creator_id), "creator_id");
+  requireUuidV4(String(row.agent_id), "product_id");
+  requireUuidV4(String(row.product_id), "product_id");
   assertCanonicalProductIdentity(String(row.agent_id), String(row.product_id));
+  if (row.order_id) requireUuidV4(String(row.order_id), "order_id");
   return {
     entitlement_id: String(row.entitlement_id),
     user_id: String(row.user_id),

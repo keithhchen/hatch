@@ -110,7 +110,7 @@ export class AccountStoreTs {
   async ensureSchema(): Promise<void> {
     if (!this.pool) return;
     await this.pool.query(`CREATE TABLE IF NOT EXISTS accounts (
-      id TEXT PRIMARY KEY,
+      id UUID PRIMARY KEY,
       role TEXT NOT NULL CHECK (role IN ('user', 'creator')),
       email TEXT NOT NULL UNIQUE,
       display_name TEXT NOT NULL,
@@ -120,7 +120,7 @@ export class AccountStoreTs {
     );
     CREATE TABLE IF NOT EXISTS account_sessions (
       id UUID PRIMARY KEY,
-      account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      account_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
       token_hash TEXT NOT NULL UNIQUE,
       client_type TEXT NOT NULL DEFAULT 'desktop' CHECK (client_type = 'desktop'),
       created_at TIMESTAMPTZ NOT NULL,

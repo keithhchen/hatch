@@ -79,7 +79,7 @@ test("TypeScript Registry exposes auth and Corpus catalog endpoints", async () =
     const commerceOnly = await fetch(`${base}/v1/commerce/product-access`, {
       method: "POST",
       headers: { authorization: "Bearer commerce-test-token", "content-type": "application/json" },
-      body: JSON.stringify({ user_id: auth.account.id, creator_id: CREATOR_ID, product_id: PRODUCT_ID, order_id: "order_real" })
+      body: JSON.stringify({ user_id: auth.account.id, creator_id: CREATOR_ID, product_id: PRODUCT_ID, order_id: "55555555-5555-4555-8555-555555555555" })
     });
     assert.equal(commerceOnly.status, 404);
 

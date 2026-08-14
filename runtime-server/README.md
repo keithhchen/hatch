@@ -264,7 +264,7 @@ HATCH_RUNTIME_DATABASE_URL=<dedicated-runtime-postgres-url>
 
 Configure `HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN` only on Registry and
 Dashboard, never Runtime. Public user
-sessions can read `GET /v1/user/agent-access`; only the checkout service may
+sessions can read `GET /v1/user/product-access`; only the checkout service may
 call the private entitlement mutation after it has committed a matching order.
 
 Spec v1 uses Kimi K2.6 exclusively for Creator execution, delivery review, and context compaction. Thinking is always enabled through Pi's normal thinking-level option; temperature follows the provider contract. Pi owns the model profile, context estimate, compaction policy, retries, and output behavior. There is no alternate-model fallback. Use Kimi's official `LLM_API_KEY` variable for credentials.
