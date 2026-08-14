@@ -218,10 +218,21 @@ export function objectStoreFromEnvironment(
   return localRoot ? new LocalArtifactObjectStore(localRoot) : undefined;
 }
 
-function defaultCredential(): { getCredential(): Promise<{ accessKeyId?: string; accessKeySecret?: string; securityToken?: string }> } {
-  const Constructor = (CredentialPackage as unknown as { default?: new () => { getCredential(): Promise<{ accessKeyId?: string; accessKeySecret?: string; securityToken?: string }> } }).default
-    ?? (CredentialPackage as unknown as new () => { getCredential(): Promise<{ accessKeyId?: string; accessKeySecret?: string; securityToken?: string }> });
-  return new Constructor();
+export function defaultCredential(): { getCredential(): Promise<{ accessKeyId?: string; accessKeySecret?: string; securityToken?: string }> } {
+  // `@alicloud/credentials` is CommonJS. TypeScript's native ESM transform
+  // exposes its CommonJS namespace as `default.default`, while a CJS
+  // `require()` exposes the constructor as `default`. Resolve both shapes so
+  // production does not fail only when the first OSS-backed request arrives.
+  type CredentialConstructor = new () => { getCredential(): Promise<{ accessKeyId?: string; accessKeySecret?: string; securityToken?: string }> };
+  const namespace = CredentialPackage as unknown as { default?: unknown };
+  const nested = namespace.default as { default?: unknown } | undefined;
+  const candidate = typeof namespace.default === "function"
+    ? namespace.default
+    : nested && typeof nested.default === "function"
+      ? nested.default
+      : undefined;
+  if (typeof candidate !== "function") throw new Error("Alibaba credentials package did not expose a default provider constructor");
+  return new (candidate as CredentialConstructor)();
 }
 
 function requireAliOss(): AliOssConstructor {
