@@ -1,6 +1,6 @@
 :root {
   /* Let native form controls and WebKit surfaces follow the system appearance. */
-  color-scheme: light dark;
+  color-scheme: light;
   font-family: var(--hatch-font-ui);
   font-synthesis: none;
   background: var(--hatch-canvas);
@@ -34,7 +34,7 @@ select {
   font: inherit;
 }
 
-button {
+button:not(.hui-button) {
   align-items: center;
   background: var(--hatch-inverse);
   border: 1px solid var(--hatch-inverse);
@@ -50,23 +50,23 @@ button {
   -webkit-user-select: none;
 }
 
-button.secondary {
+button.secondary:not(.hui-button) {
   background: var(--hatch-panel);
   border-color: var(--hatch-border);
   color: var(--hatch-ink);
 }
 
-button.compact {
+button.compact:not(.hui-button) {
   min-height: 34px;
   padding: 0 12px;
 }
 
-button:disabled {
+button:not(.hui-button):disabled {
   cursor: default;
   opacity: 0.45;
 }
 
-input {
+input:not(.hui-input) {
   background: var(--hatch-panel);
   border: 1px solid var(--hatch-border);
   border-radius: 7px;
@@ -124,7 +124,8 @@ h2 {
 }
 
 .brand .hatch-mark,
-.welcome-brand .hatch-mark {
+.welcome-brand .hatch-mark,
+.welcome-brand .hatch-brand__mark {
   height: 22px;
   width: 22px;
 }
@@ -501,10 +502,12 @@ h2 {
 .sign-in-card,
 .status-card,
 .workspace-card {
-  background: color-mix(in srgb, var(--hatch-panel) 96%, transparent);
-  border: 1px solid var(--hatch-border-subtle);
-  border-radius: 16px;
-  box-shadow: 0 22px 60px rgba(54, 41, 31, 0.09);
+  background:
+    radial-gradient(115% 90% at 12% 0%, rgba(255,255,255,.72), transparent 54%),
+    color-mix(in srgb, var(--hatch-ui-surface-raised) 94%, transparent);
+  border: 1px solid var(--hatch-ui-border-soft);
+  border-radius: var(--hatch-radius-surface);
+  box-shadow: var(--hatch-shadow-dialog);
 }
 
 .status-screen {
@@ -517,9 +520,9 @@ h2 {
   display: grid;
   gap: 16px;
   margin: 16vh auto 0;
-  max-width: 520px;
+  max-width: 560px;
   padding: 38px;
-  width: min(100%, 520px);
+  width: min(100%, 560px);
 }
 
 .status-card h1 {
@@ -1696,17 +1699,7 @@ button.composer-control:focus-visible {
   flex-shrink: 0;
 }
 
-.permission-composer-control select {
-  appearance: none;
-  background: transparent;
-  border: 0;
-  color: inherit;
-  cursor: pointer;
-  font: inherit;
-  min-width: 0;
-  outline: 0;
-  padding: 0;
-}
+.permission-composer-control .hui-select-trigger { width: 100%; min-width: 0; min-height: 32px; padding-inline: 10px; background: var(--hatch-ui-surface-bright); }
 
 .composer-control-caret {
   color: color-mix(in srgb, currentColor 65%, transparent);
@@ -2362,17 +2355,7 @@ button.composer-control:focus-visible {
   width: 15px;
 }
 
-.inspector-select-control select {
-  appearance: none;
-  background: transparent;
-  border: 0;
-  color: inherit;
-  font: inherit;
-  font-size: 11px;
-  min-width: 0;
-  outline: 0;
-  width: 100%;
-}
+.inspector-select-control .hui-select-trigger { width: 100%; min-width: 0; min-height: 30px; border: 0; padding-inline: 2px; background: transparent; box-shadow: none; font-size: 11px; }
 
 .desktop-pane-overlay {
   inset: 0;
@@ -2746,53 +2729,7 @@ button.composer-control:focus-visible {
 }
 
 .desktop-language-select {
-  min-inline-size: 170px;
-  position: relative;
-}
-
-.desktop-language-select select {
-  appearance: none;
-  -webkit-appearance: none;
-  display: block;
-  inline-size: 100%;
-  min-inline-size: 170px;
-  min-block-size: 36px;
-  padding: 0 34px 0 12px;
-  border: 1px solid color-mix(in srgb, var(--hatch-ink) 14%, transparent);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--hatch-panel) 86%, var(--hatch-canvas));
-  color: var(--hatch-ink);
-  font: 13px/1.2 var(--hatch-font-ui);
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--hatch-ink) 7%, transparent);
-  cursor: pointer;
-  transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
-}
-
-.desktop-language-select select:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--hatch-ink) 24%, transparent);
-  background: var(--hatch-panel);
-}
-
-.desktop-language-select select:focus-visible {
-  outline: none;
-  border-color: var(--hatch-accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--hatch-accent) 18%, transparent);
-}
-
-.desktop-language-select select:disabled {
-  cursor: default;
-  opacity: 0.55;
-}
-
-.desktop-language-select > svg {
-  position: absolute;
-  inset-inline-end: 11px;
-  inset-block-start: 50%;
-  inline-size: 15px;
-  block-size: 15px;
-  color: var(--hatch-text-secondary);
-  pointer-events: none;
-  transform: translateY(-50%);
+  min-inline-size: 190px;
 }
 
 .desktop-settings-save-error {
@@ -2813,22 +2750,4 @@ button.composer-control:focus-visible {
   .chrome-icon-button:focus-visible {
     box-shadow: inset 0 0 0 1px var(--hatch-ink);
   }
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-    --hatch-canvas: #1c1c1a;
-    --hatch-ink: #f1ece5;
-    --hatch-text-secondary: #b9afa5;
-    --hatch-panel: #252421;
-    --hatch-panel-muted: #34322e;
-    --hatch-border: rgba(241, 236, 229, .25);
-    --hatch-border-subtle: rgba(241, 236, 229, .15);
-    --hatch-inverse: #ede9e2;
-    --hatch-inverse-text: #1f1e1b;
-  }
-
-  .desktop-connection-action { color: #dfd0a6; }
-  .desktop-overlay-scrim { background: rgba(0, 0, 0, .42); }
 }

@@ -52,6 +52,22 @@ test("Web and Storybook consume the shared package and its canonical tokens", ()
   }
 });
 
+test("Desktop consumes shared components, fonts, and theme without a second brand source", () => {
+  const desktopPackage = json("desktop-app/package.json");
+  const desktopEntry = read("desktop-app/src/renderer/main.jsx");
+
+  assert.equal(desktopPackage.dependencies["@hatch/ui"], "file:../packages/ui");
+  assert.match(desktopEntry, /import "@hatch\/ui\/fonts"/);
+  assert.match(desktopEntry, /import "@hatch\/ui\/theme\.css"/);
+  assert.match(desktopEntry, /HatchUIProvider/);
+  assert.doesNotMatch(desktopEntry, /@fontsource/);
+  assert.doesNotMatch(desktopEntry, /packages\/brand/);
+
+  for (const dependency of Object.keys(desktopPackage.dependencies)) {
+    assert.doesNotMatch(dependency, /^@fontsource(?:-variable)?\//);
+  }
+});
+
 test("Theme Lab edits the same token knobs used by the shared CSS", () => {
   const story = read("packages/ui/src/DesignSystemGui.stories.jsx");
   const tokens = read("packages/brand/tokens.css");

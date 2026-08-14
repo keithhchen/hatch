@@ -1,9 +1,19 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import "@fontsource-variable/noto-sans-sc";
-import "@fontsource-variable/noto-serif-sc";
-import "@fontsource/instrument-serif/400.css";
-import "@fontsource/dm-mono/400.css";
+import "@hatch/ui/fonts";
+import "@hatch/ui/theme.css";
+import {
+  Button,
+  DropdownMenu,
+  FormField,
+  HatchBrand,
+  HatchUIProvider,
+  InlineAlert,
+  IconButton,
+  Input,
+  Select,
+  hatchMarkUrl
+} from "@hatch/ui";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
@@ -46,8 +56,6 @@ import {
   Wrench
 } from "lucide-react";
 import "streamdown/styles.css";
-import "../../../packages/brand/tokens.css";
-import hatchMarkUrl from "../../../packages/brand/hatch-mark.svg";
 import "./styles.css";
 import {
   DEFAULT_CREATOR_AGENT,
@@ -274,8 +282,8 @@ function AuxiliaryLanguageSettings({ onLanguageChange }) {
     return () => { cancelled = true; };
   }, [onLanguageChange]);
 
-  async function updateLanguage(event) {
-    const next = normalizeLanguagePreference(event.target.value);
+  async function updateLanguage(value) {
+    const next = normalizeLanguagePreference(value);
     setPreference(next);
     onLanguageChange?.(next);
     setSaveError("");
@@ -297,23 +305,19 @@ function AuxiliaryLanguageSettings({ onLanguageChange }) {
     <div className="desktop-auxiliary-language" aria-busy={!ready || saving}>
       <div className="desktop-auxiliary-row">
         <span>{t("settings.language.label")}</span>
-        <div className="desktop-language-select">
-          <select
-            aria-label={t("settings.language.label")}
-            disabled={!ready || saving}
-            value={preference}
-            onChange={(event) => void updateLanguage(event)}
-          >
-            {LANGUAGE_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.value === SYSTEM_LANGUAGE
-                  ? `${t(option.labelKey)} (${languageNativeName(systemLanguage)})`
-                  : option.nativeLabel}
-              </option>
-            ))}
-          </select>
-          <ChevronDown aria-hidden="true" />
-        </div>
+        <Select
+          className="desktop-language-select"
+          label={t("settings.language.label")}
+          disabled={!ready || saving}
+          value={preference}
+          onValueChange={(value) => void updateLanguage(value)}
+          options={LANGUAGE_OPTIONS.map((option) => ({
+            value: option.value,
+            label: option.value === SYSTEM_LANGUAGE
+              ? `${t(option.labelKey)} (${languageNativeName(systemLanguage)})`
+              : option.nativeLabel
+          }))}
+        />
       </div>
       {saveError ? <small className="desktop-settings-save-error" role="alert">{saveError}</small> : null}
     </div>
@@ -3470,15 +3474,15 @@ function App() {
                       />
                       {/* Contract labels: aria-label="Stop response" and aria-label="Send message" */}
                       {running ? (
-                        <button
-                          aria-label={t("accessibility.stopStreaming")}
+                        <IconButton
+                          label={t("accessibility.stopStreaming")}
                           className="send-button stop-button"
                           title={t("common.stop")}
                           type="button"
                           onClick={() => void cancelRun()}
                         >
                           <Square aria-hidden="true" fill="currentColor" strokeWidth={0} />
-                        </button>
+                        </IconButton>
                       ) : (
                         <ComposerPrimitive.Send
                           aria-label={t("common.send")}
@@ -3499,7 +3503,7 @@ function App() {
         {interruptedRun ? (
           <div className="recovery-banner" role="alert">
             <div><strong>{t("conversation.taskSafeTitle")}</strong><span>{t("conversation.taskSafeBody")}</span></div>
-            <button className="secondary compact" type="button" onClick={clearInterruptedRun}>{t("conversation.closeTask")}</button>
+            <Button variant="secondary" size="small" type="button" onClick={clearInterruptedRun}>{t("conversation.closeTask")}</Button>
           </div>
         ) : null}
       </section>
@@ -3528,34 +3532,11 @@ function DesktopSidebar({
   onSignOut
 }) {
   const t = useI18n();
-  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
-  const profileMenuRef = useRef(null);
-  const profileSettingsButtonRef = useRef(null);
   const listedConversations = Array.isArray(conversations) ? conversations : [];
   // The server-issued Library is the only list authority. Never synthesize a
   // row for a URL/profile ID that the selected Agent's Library did not return.
   const visibleConversations = listedConversations;
 
-  useEffect(() => {
-    if (!profileMenuOpen) return undefined;
-    const closeOnPointerDown = (event) => {
-      if (!profileMenuRef.current?.contains(event.target)) setProfileMenuOpen(false);
-    };
-    const closeOnEscape = (event) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      setProfileMenuOpen(false);
-      profileSettingsButtonRef.current?.focus();
-    };
-    document.addEventListener("pointerdown", closeOnPointerDown, true);
-    document.addEventListener("keydown", closeOnEscape, true);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnPointerDown, true);
-      document.removeEventListener("keydown", closeOnEscape, true);
-    };
-  }, [profileMenuOpen]);
-
-  const closeProfileMenu = () => setProfileMenuOpen(false);
   return (
     <div className="desktop-sidebar-content">
       <div className="desktop-sidebar-heading">
@@ -3638,46 +3619,15 @@ function DesktopSidebar({
       <div className="desktop-sidebar-footer">
         <span className="avatar">{profile.initials}</span>
         <span className="desktop-sidebar-account"><strong>{profile.name}</strong></span>
-        <div className="profile-menu" ref={profileMenuRef}>
-          <button
-            ref={profileSettingsButtonRef}
-            aria-expanded={profileMenuOpen}
-            aria-haspopup="menu"
-            aria-label={t("settings.open")}
-            className="profile-settings-button"
-            title={t("settings.open")}
-            type="button"
-            onClick={() => setProfileMenuOpen((open) => !open)}
-          >
-            <Settings aria-hidden="true" />
-          </button>
-          {profileMenuOpen ? (
-            <div className="profile-menu-popover" role="menu" aria-label={t("account.menu")}>
-              <button
-                className="profile-menu-item"
-                role="menuitem"
-                type="button"
-                onClick={() => {
-                  closeProfileMenu();
-                  onOpenSettings?.();
-                }}
-              >
-                {t("settings.title")}
-              </button>
-              <button
-                className="profile-menu-item"
-                role="menuitem"
-                type="button"
-                onClick={() => {
-                  closeProfileMenu();
-                  onSignOut?.();
-                }}
-              >
-                {t("auth.signOut")}
-              </button>
-            </div>
-          ) : null}
-        </div>
+        <DropdownMenu
+          label={t("account.menu")}
+          trigger={<IconButton className="profile-settings-button" label={t("settings.open")} size="small"><Settings aria-hidden="true" /></IconButton>}
+          items={[
+            { value: "settings", label: t("settings.title"), onSelect: () => onOpenSettings?.() },
+            { type: "separator" },
+            { value: "sign-out", label: t("auth.signOut"), destructive: true, onSelect: () => onSignOut?.() }
+          ]}
+        />
       </div>
     </div>
   );
@@ -3707,7 +3657,7 @@ function ConversationSourceRow({
         onContextMenu={contextMenu}
       >
         <span className="desktop-source-row-copy">
-          <input
+          <Input
             aria-label={t("conversation.renameTask")}
             className="conversation-rename-input"
             data-conversation-rename={conversation.id}
@@ -3789,16 +3739,18 @@ function DesktopConversationToolbar({ creatorAgent, connected, conversationLibra
       {showRetry ? (
         <>
           {/* Contract marker: aria-label="Retry connection" */}
-        <button
+        <Button
           aria-label={t("connection.retry")}
           className="chrome-icon-button desktop-connection-action desktop-connection-retry-button"
+          variant="ghost"
+          size="small"
+          leading={<RefreshCw aria-hidden="true" />}
           title={t("connection.retry")}
           type="button"
           onClick={onRetry}
         >
-          <RefreshCw aria-hidden="true" />
-          <span>{t("common.retry")}</span>
-        </button>
+          {t("common.retry")}
+        </Button>
         </>
       ) : null}
     </>
@@ -3824,18 +3776,16 @@ function DesktopInspector({
         <strong className="inspector-workspace-path" title={workspace || t("workspace.noFolderSelected")}>
           {workspaceGranted ? workspaceGrantLabel(workspace) : t("workspace.noWorkspaceSelected")}
         </strong>
-        <button className="secondary compact inspector-action" type="button" onClick={onChooseWorkspace}>
+        <Button className="inspector-action" variant="secondary" size="small" type="button" onClick={onChooseWorkspace}>
           {workspaceGranted ? t("common.changeFolder") : t("workspace.chooseFolderShort")}
-        </button>
+        </Button>
       </section>
       <section className="inspector-section">
         <span className="inspector-kicker">{t("permission.label")}</span>
-        <label className="inspector-select-control">
+        <div className="inspector-select-control">
           <ShieldIcon />
-          <select aria-label={t("accessibility.workspacePermissions")} value={permissionMode} onChange={(event) => onPermissionChange(event.target.value)}>
-            {PERMISSION_OPTIONS.map((mode) => <option key={mode.value} value={mode.value}>{permissionLabel(mode)}</option>)}
-          </select>
-        </label>
+          <Select aria-label={t("accessibility.workspacePermissions")} value={permissionMode} onValueChange={onPermissionChange} options={PERMISSION_OPTIONS.map((mode) => ({ value: mode.value, label: permissionLabel(mode) }))} />
+        </div>
         <p>{permissionMode === "allow-changes" ? t("permission.allowChangesDetail") : t("permission.askBeforeChangesDetail")}</p>
       </section>
       <section className="inspector-section agent-boundary-section">
@@ -3853,16 +3803,18 @@ function ComposerControls({ droppedFiles = [], workspace, workspaceGranted, perm
     ? t("permission.allowChanges")
     : t("permission.askBeforeChanges");
   const attachmentControl = (
-    <button
+    <Button
       aria-label={t("composer.attachContextFiles")}
       className="composer-control attachment-composer-control"
+      variant="ghost"
+      size="small"
+      leading={<Paperclip aria-hidden="true" />}
       title={t("composer.attachContextFiles")}
       type="button"
       onClick={onChooseFiles}
     >
-      <Paperclip aria-hidden="true" />
-      <span className="composer-control-label">{t("composer.attachFiles")}</span>
-    </button>
+      {t("composer.attachFiles")}
+    </Button>
   );
   return (
     <div className="composer-controls">
@@ -3871,7 +3823,7 @@ function ComposerControls({ droppedFiles = [], workspace, workspaceGranted, perm
           {droppedFiles.map((file) => (
             <span className="composer-attachment" key={file.contextId} title={file.displayName}>
               <span className="composer-attachment-name">{file.displayName}</span>
-              <button type="button" aria-label={t("composer.removeAttachment", { name: file.displayName })} onClick={() => onRemoveDroppedFile?.(file.contextId)}>×</button>
+              <IconButton size="small" variant="ghost" label={t("composer.removeAttachment", { name: file.displayName })} onClick={() => onRemoveDroppedFile?.(file.contextId)}>×</IconButton>
             </span>
           ))}
         </div>
@@ -3880,24 +3832,23 @@ function ComposerControls({ droppedFiles = [], workspace, workspaceGranted, perm
         {/* Native drag/drop still projects bounded file context into the
             composer. Keep the picker implementation available, but withhold
             its button until that UX is ready. */}
-        <button
+        <Button
           aria-label={t("accessibility.chooseWorkspaceFolder")}
           className="composer-control workspace-composer-control"
+          variant="secondary"
+          size="small"
+          leading={<WorkspaceIcon />}
+          trailing={<ChevronDown className="composer-control-caret" aria-hidden="true" />}
           title={workspace || t("workspace.chooseFolder")}
           type="button"
           onClick={onChooseWorkspace}
         >
-          <WorkspaceIcon />
-          <span className="composer-control-label">{workspaceGranted ? workspaceGrantLabel(workspace) : t("workspace.chooseWorkspace")}</span>
-          <ChevronDown className="composer-control-caret" aria-hidden="true" />
-        </button>
-        <label className="composer-control permission-composer-control" title={permissionMode === "allow-changes" ? t("permission.allowChangesDetail") : t("permission.askBeforeChangesDetail")}>
+          {workspaceGranted ? workspaceGrantLabel(workspace) : t("workspace.chooseWorkspace")}
+        </Button>
+        <div className="permission-composer-control" title={permissionMode === "allow-changes" ? t("permission.allowChangesDetail") : t("permission.askBeforeChangesDetail")}>
           <ShieldIcon />
-          <select aria-label={t("accessibility.workspacePermissions")} value={permissionMode} onChange={(event) => onPermissionChange(event.target.value)}>
-            {PERMISSION_OPTIONS.map((mode) => <option key={mode.value} value={mode.value}>{permissionLabel(mode, t)}</option>)}
-          </select>
-          <ChevronDown className="composer-control-caret" aria-hidden="true" />
-        </label>
+          <Select aria-label={t("accessibility.workspacePermissions")} value={permissionMode} onValueChange={onPermissionChange} options={PERMISSION_OPTIONS.map((mode) => ({ value: mode.value, label: permissionLabel(mode, t) }))} />
+        </div>
       </div>
     </div>
   );
@@ -4340,9 +4291,9 @@ function WorkspaceOnboarding({ creatorName, draft, onChoose, onGrant, status }) 
           <span className="workspace-picker-action">{draft ? t("common.change") : t("common.choose")}</span>
         </button>
 
-        <button className="workspace-grant-button" type="button" onClick={onGrant} disabled={!draft.trim()}>
+        <Button className="workspace-grant-button" type="button" onClick={onGrant} disabled={!draft.trim()}>
           {t("common.start")}
-        </button>
+        </Button>
         {status && status !== "Offline" ? <small className="workspace-onboarding-status">{status}</small> : null}
       </section>
     </div>
@@ -4354,7 +4305,7 @@ function LaunchScreen() {
   return (
     <main className="welcome-screen status-screen">
       <WelcomeTitlebarDragRegion />
-      <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch<span className="hatch-wordmark-period" aria-hidden="true">.</span></strong></div>
+      <HatchBrand className="welcome-brand" aria-label="Hatch" />
       <section className="status-card">
         <span className="eyebrow">{t("app.name")}</span>
         <h1>{t("startup.openingWorkspace")}</h1>
@@ -4369,14 +4320,14 @@ function NetworkErrorScreen({ message, onRetry, onSignOut }) {
   return (
     <main className="welcome-screen status-screen">
       <WelcomeTitlebarDragRegion />
-      <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch<span className="hatch-wordmark-period" aria-hidden="true">.</span></strong></div>
+      <HatchBrand className="welcome-brand" aria-label="Hatch" />
       <section className="status-card">
         <span className="eyebrow">{t("connection.eyebrow")}</span>
         <h1>{t("connection.cannotReachTitle")}</h1>
         <p>{message || t("connection.checkAndRetry")}</p>
         <small>{t("connection.savedAccessLocal")}</small>
-        <button type="button" onClick={onRetry}>{t("common.retry")}</button>
-        {onSignOut ? <button className="secondary" type="button" onClick={onSignOut}>{t("auth.signOutOrAnotherAccount")}</button> : null}
+        <Button type="button" onClick={onRetry}>{t("common.retry")}</Button>
+        {onSignOut ? <Button variant="secondary" type="button" onClick={onSignOut}>{t("auth.signOutOrAnotherAccount")}</Button> : null}
       </section>
     </main>
   );
@@ -4387,13 +4338,13 @@ function UnsupportedRoleScreen({ profile, onSignOut }) {
   return (
     <main className="welcome-screen status-screen">
       <WelcomeTitlebarDragRegion />
-      <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch<span className="hatch-wordmark-period" aria-hidden="true">.</span></strong></div>
+      <HatchBrand className="welcome-brand" aria-label="Hatch" />
       <section className="status-card">
         <span className="eyebrow">{t("auth.consumerDesktopEyebrow")}</span>
         <h1>{t("auth.buyerAccountTitle")}</h1>
         <p>{CONSUMER_DESKTOP_ROLE_MESSAGE}</p>
         <small>{t("auth.creatorSignedIn", { name: profile.name })}</small>
-        <button type="button" onClick={onSignOut}>{t("auth.signOut")}</button>
+        <Button type="button" onClick={onSignOut}>{t("auth.signOut")}</Button>
       </section>
     </main>
   );
@@ -4404,22 +4355,22 @@ function EmptyAgentsScreen({ profile, onBrowse, onRefresh, onSignOut, refreshing
   return (
     <main className="welcome-screen status-screen empty-agents-screen">
       <WelcomeTitlebarDragRegion />
-      <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch<span className="hatch-wordmark-period" aria-hidden="true">.</span></strong></div>
+      <HatchBrand className="welcome-brand" aria-label="Hatch" />
       <section className="status-card empty-agents-card">
         <div className="empty-agents-header">
           <span className="avatar">{profile.initials}</span>
           <span><strong>{profile.name}</strong></span>
-          <button className="profile-sign-out" type="button" onClick={onSignOut}>{t("auth.signOut")}</button>
+          <Button className="profile-sign-out" variant="ghost" size="small" type="button" onClick={onSignOut}>{t("auth.signOut")}</Button>
         </div>
         <span className="eyebrow">{t("account.yourCreatorAgents")}</span>
         <h1>{t("account.findAgentTitle")}</h1>
         <p>{t("account.readyBrowse")}</p>
-        {notice ? <p className="status-inline-notice" role="status">{notice}</p> : null}
-        {error ? <p className="status-inline-error" role="status">{error}</p> : null}
-        <button type="button" onClick={onBrowse}>{t("account.browseAgents")}</button>
-        <button className="secondary status-refresh" type="button" onClick={onRefresh} disabled={refreshing}>
-          {refreshing ? t("common.refreshing") : t("common.refresh")}
-        </button>
+        {notice ? <InlineAlert tone="info">{notice}</InlineAlert> : null}
+        {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
+        <Button type="button" size="large" onClick={onBrowse}>{t("account.browseAgents")}</Button>
+        <Button className="status-refresh" variant="secondary" type="button" onClick={onRefresh} loading={refreshing}>
+          {t("common.refresh")}
+        </Button>
       </section>
     </main>
   );
@@ -4440,20 +4391,16 @@ function SignInScreen({ onSignIn, status, error }) {
     <main className="welcome-screen">
       <WelcomeTitlebarDragRegion />
       <section className="sign-in-card">
-        <div className="welcome-brand"><img className="hatch-mark" src={hatchMarkUrl} alt="" /><strong className="hatch-wordmark">Hatch<span className="hatch-wordmark-period" aria-hidden="true">.</span></strong></div>
+        <HatchBrand className="welcome-brand" aria-label="Hatch" />
         <h1>{t("auth.signInTitle")}</h1>
         <form className="sign-in-form" onSubmit={submit}>
-          <label className="field">
-            <span>{t("auth.email")}</span>
-            <input autoCapitalize="none" autoComplete="email" spellCheck="false" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder={t("auth.emailPlaceholder")} disabled={loading} />
-          </label>
-          <label className="field">
-            <span>{t("auth.password")}</span>
-            <input autoComplete="current-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={t("auth.passwordPlaceholder")} disabled={loading} />
-          </label>
-          <button type="submit" disabled={loading || (!email.trim() || !password.trim())}>
-            {loading ? t("auth.signingIn") : t("auth.signIn")}
-          </button>
+          <FormField className="field" label={t("auth.email")}>
+            <Input autoCapitalize="none" autoComplete="email" spellCheck="false" type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder={t("auth.emailPlaceholder")} disabled={loading} />
+          </FormField>
+          <FormField className="field" label={t("auth.password")}>
+            <Input autoComplete="current-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={t("auth.passwordPlaceholder")} disabled={loading} />
+          </FormField>
+          <Button type="submit" size="large" loading={loading} disabled={!email.trim() || !password.trim()}>{t("auth.signIn")}</Button>
         </form>
         {error ? <small className="sign-in-error" role="alert">{error}</small> : null}
       </section>
@@ -4800,12 +4747,12 @@ function HatchToolCall(props) {
               ) : null}
             </div>
             <div className="approval-actions">
-              <button type="button" onClick={() => approvals.resolveToolApproval(props.toolCallId, true)}>
+              <Button type="button" onClick={() => approvals.resolveToolApproval(props.toolCallId, true)}>
                 Allow
-              </button>
-              <button type="button" className="secondary" onClick={() => approvals.resolveToolApproval(props.toolCallId, false)}>
+              </Button>
+              <Button type="button" variant="secondary" onClick={() => approvals.resolveToolApproval(props.toolCallId, false)}>
                 Deny
-              </button>
+              </Button>
             </div>
           </div>
         ) : approvalRequest?.status ? (
@@ -5037,4 +4984,4 @@ async function invokeTauri(command, args) {
   });
 }
 
-createRoot(document.getElementById("root")).render(<App />);
+createRoot(document.getElementById("root")).render(<HatchUIProvider><App /></HatchUIProvider>);

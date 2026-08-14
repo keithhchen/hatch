@@ -14,7 +14,8 @@ describe("desktop component presentation contract", () => {
   it("keeps every composer action permanently mounted", () => {
     expect(source).toContain('className="composer-control attachment-composer-control"');
     expect(source).toContain('className="composer-control workspace-composer-control"');
-    expect(source).toContain('className="composer-control permission-composer-control"');
+    expect(source).toContain('className="permission-composer-control"');
+    expect(source).toMatch(/className="permission-composer-control"[\s\S]*?<Select/);
     expect(source).not.toContain('className="composer-overflow"');
     expect(source).not.toContain("More composer options");
   });
