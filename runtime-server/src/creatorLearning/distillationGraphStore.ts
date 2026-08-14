@@ -367,7 +367,18 @@ function releaseFromRow(row: ReleaseRow): DistillationRelease { return { id: row
 function jsonArray(value: unknown): string[] { return Array.isArray(value) ? value.map(String) : []; }
 function jsonObject(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 function iso(value: string | Date): string { return value instanceof Date ? value.toISOString() : new Date(value).toISOString(); }
-function assertSameJson(left: unknown, right: unknown, message: string): void { if (JSON.stringify(left) !== JSON.stringify(right)) throw new Error(message); }
+function assertSameJson(left: unknown, right: unknown, message: string): void { if (canonicalJson(left) !== canonicalJson(right)) throw new Error(message); }
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .filter((key) => record[key] !== undefined)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
+    .join(",")}}`;
+}
 
 function artifactIdentity(record: ImmutableArtifactRecord): Omit<ImmutableArtifactRecord, "createdAt"> {
   const { createdAt: _createdAt, ...identity } = record;

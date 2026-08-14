@@ -541,7 +541,23 @@ function assertArtifactRefs(
 }
 
 function assertSameJson(left: unknown, right: unknown, message: string): void {
-  if (JSON.stringify(left) !== JSON.stringify(right)) throw new Error(message);
+  if (canonicalJson(left) !== canonicalJson(right)) throw new Error(message);
+}
+
+/**
+ * Compare immutable records by value rather than by object insertion order.
+ * Postgres row mappers and retry paths can materialize the same record with a
+ * different property order; that is not a mutation of the record.
+ */
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .filter((key) => record[key] !== undefined)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
+    .join(",")}}`;
 }
 
 function artifactIdentity(record: ImmutableArtifactRecord): Omit<ImmutableArtifactRecord, "createdAt"> {
