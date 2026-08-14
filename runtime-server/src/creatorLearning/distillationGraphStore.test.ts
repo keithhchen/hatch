@@ -19,7 +19,7 @@ test("Postgres graph artifact registration preserves the caller-owned immutable 
   };
 
   const first = await graph.registerArtifact(artifact);
-  const second = await graph.registerArtifact(artifact);
+  const second = await graph.registerArtifact({ ...artifact, createdAt: "2026-08-14T22:13:00.123Z" });
 
   assert.equal(first.createdAt, artifact.createdAt);
   assert.deepEqual(second, first);
