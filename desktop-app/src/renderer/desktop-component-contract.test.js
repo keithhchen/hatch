@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const source = readFileSync(new URL("./main.jsx", import.meta.url), "utf8");
+const shellSource = readFileSync(new URL("./desktop-shell.jsx", import.meta.url), "utf8");
 const packageJson = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
 
 describe("desktop component presentation contract", () => {
@@ -13,7 +14,17 @@ describe("desktop component presentation contract", () => {
     expect(source).toContain('import "@hatch/ui/theme.css"');
     expect(source).toContain("HatchUIProvider");
     expect(source).toMatch(/<HatchUIProvider\s+atmosphere\s+className="desktop-ui-root"/);
+    expect(source).toContain('<HatchBrand className="desktop-sidebar-brand"');
+    expect(source).toContain('<HatchBrand className="desktop-auxiliary-brand"');
     expect(source).not.toMatch(/@fontsource|packages\/brand/);
+  });
+
+  it("uses shared IconButton controls for toolbar and overlay chrome", () => {
+    expect(shellSource).toContain('import { IconButton } from "@hatch/ui"');
+    expect(shellSource).toMatch(/<IconButton[\s\S]*className="chrome-icon-button sidebar-toggle"/);
+    expect(shellSource).toMatch(/<IconButton[\s\S]*className="chrome-icon-button toolbar-overflow-toggle"/);
+    expect(shellSource).toMatch(/<IconButton[\s\S]*className="chrome-icon-button inspector-toggle"/);
+    expect(shellSource).not.toMatch(/<button\s+[^>]*className="chrome-icon-button"/);
   });
 
   it("uses the shared icon library instead of character carets", () => {

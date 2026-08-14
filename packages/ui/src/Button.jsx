@@ -13,6 +13,7 @@ export function Button({
   className,
   children,
   disabled,
+  ref,
   ...props
 }) {
   const classes = cn("hui-button", `hui-button--${variant}`, `hui-button--${size}`, className);
@@ -25,10 +26,11 @@ export function Button({
         {trailing}
       </>
     );
-    return <Slot className={classes} aria-busy={Boolean(loading)} aria-disabled={disabled || loading || undefined} {...props}>{content}</Slot>;
+    return <Slot ref={ref} className={classes} aria-busy={Boolean(loading)} aria-disabled={disabled || loading || undefined} {...props}>{content}</Slot>;
   }
   return (
     <button
+      ref={ref}
       className={classes}
       disabled={disabled || loading}
       aria-busy={Boolean(loading)}

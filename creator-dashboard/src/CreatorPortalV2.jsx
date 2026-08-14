@@ -15,6 +15,7 @@ import {
   Select,
   Skeleton,
   StatusTag as HatchStatusTag,
+  Tabs as HatchTabs,
   Textarea,
   UnavailableState
 } from "@hatch/ui";
@@ -236,9 +237,13 @@ function ProductPage({ token, request, navigate, productId, tab }) {
 }
 
 function ProductTabs({ productId, active, navigate }) {
-  return <nav className="cpv2-tabs" aria-label="Product sections">
-    {PRODUCT_TABS.map(([slug, label]) => <button key={slug} type="button" className={active === slug ? "is-active" : ""} aria-current={active === slug ? "page" : undefined} onClick={() => navigate(`${ROOT}/products/${encodeURIComponent(productId)}/${slug}`)}>{label}</button>)}
-  </nav>;
+  return <HatchTabs
+    className="cpv2-tabs"
+    value={active}
+    ariaLabel="Product sections"
+    onValueChange={(value) => navigate(`${ROOT}/products/${encodeURIComponent(productId)}/${value}`)}
+    items={PRODUCT_TABS.map(([value, label]) => ({ value, label }))}
+  />;
 }
 
 function ProductOverview({ product, candidate, navigate, token, request, onChanged }) {

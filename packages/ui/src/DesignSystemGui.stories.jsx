@@ -75,8 +75,8 @@ export const ThemeLab = {
     primaryColor: "#25221f",
     canvasColor: "#f3efe8",
     radius: 12,
-    displayTracking: -0.055,
-    displayLeading: 0.90,
+    displayTracking: -0.06,
+    displayLeading: 0.86,
     atmosphereStrength: 0.72,
     motion: "normal"
   },

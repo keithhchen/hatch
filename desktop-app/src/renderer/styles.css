@@ -2055,10 +2055,10 @@ button.composer-control:focus-visible {
   padding: 10px 12px 8px;
 }
 
-.desktop-sidebar-heading .hatch-wordmark {
-  font-family: var(--hatch-font-display);
-  font-size: 14px;
-  font-weight: 400;
+.desktop-sidebar-heading .desktop-sidebar-brand { gap: 7px; }
+.desktop-sidebar-heading .desktop-sidebar-brand .hatch-brand__mark { width: 19px; height: 19px; }
+.desktop-sidebar-heading .desktop-sidebar-brand .hatch-brand__wordmark {
+  font-size: 17px;
   letter-spacing: var(--hatch-display-tracking);
 }
 
@@ -2644,27 +2644,23 @@ button.composer-control:focus-visible {
   user-select: none;
 }
 
-.desktop-auxiliary-mark {
-  display: grid;
-  place-items: center;
-  inline-size: 42px;
-  block-size: 42px;
-  object-fit: contain;
-  color: var(--hatch-accent);
+.desktop-auxiliary-brand {
+  color: var(--hatch-ink);
+  align-items: center;
+  gap: 10px;
+}
+
+.desktop-auxiliary-brand .hatch-brand__mark {
+  width: 30px;
+  height: 30px;
   border-radius: 10px;
   background: var(--hatch-panel-muted);
   box-shadow: inset 0 0 0 1px var(--border-separator);
 }
 
-.desktop-auxiliary-brand {
-  margin: 0 0 3px;
-  color: var(--hatch-ink);
-  font: 400 34px/var(--hatch-display-leading) var(--hatch-font-display);
+.desktop-auxiliary-brand .hatch-brand__wordmark {
+  font-size: 28px;
   letter-spacing: var(--hatch-display-tracking);
-}
-
-.desktop-auxiliary-brand-dot {
-  color: var(--hatch-accent);
 }
 
 .desktop-auxiliary-header h1 {
@@ -2792,12 +2788,10 @@ button.composer-control:focus-visible {
   padding: 15px 17px 9px;
 }
 
-.desktop-sidebar-heading .hatch-wordmark {
+.desktop-sidebar-heading .desktop-sidebar-brand .hatch-brand__wordmark {
   font-size: 17px;
   letter-spacing: var(--hatch-display-tracking);
 }
-
-.hatch-wordmark-period { color: var(--hatch-accent); }
 
 .desktop-source-list {
   gap: 3px;

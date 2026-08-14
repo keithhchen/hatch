@@ -20,10 +20,10 @@
   --hatch-type-body: 14px;
   --hatch-type-emphasis: 16px;
   --hatch-type-title: 28px;
-  /* The first Hatch studies used a tighter, taller editorial cadence. Keep
-   * this shared instead of letting each surface invent its own Serif width. */
-  --hatch-display-tracking: -.055em;
-  --hatch-display-leading: .90;
+  /* The first Hatch studies used a narrow, tall editorial cadence. Keep this
+   * shared instead of letting each surface invent its own Serif width. */
+  --hatch-display-tracking: -.06em;
+  --hatch-display-leading: .86;
 
   --hatch-ui-paper: #f1ebe1;
   --hatch-ui-paper-deep: #e5dccf;

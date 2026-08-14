@@ -11,8 +11,7 @@ import {
   InlineAlert,
   IconButton,
   Input,
-  Select,
-  hatchMarkUrl
+  Select
 } from "@hatch/ui";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
@@ -228,11 +227,8 @@ function DesktopAuxiliaryWindow({ kind }) {
   return (
     <main className="desktop-auxiliary-window" aria-labelledby="auxiliary-window-title">
       <header className="desktop-auxiliary-header" data-tauri-drag-region>
-        <img className="desktop-auxiliary-mark" src={hatchMarkUrl} alt="" />
+        <HatchBrand className="desktop-auxiliary-brand" aria-label="Hatch." />
         <div>
-          <p className="desktop-auxiliary-brand" aria-label="Hatch.">
-            Hatch<span className="desktop-auxiliary-brand-dot" aria-hidden="true">.</span>
-          </p>
           <h1 id="auxiliary-window-title">{about ? "About Hatch" : t("settings.title")}</h1>
         </div>
       </header>
@@ -3540,7 +3536,7 @@ function DesktopSidebar({
   return (
     <div className="desktop-sidebar-content">
       <div className="desktop-sidebar-heading">
-        <span className="hatch-wordmark">Hatch<span className="hatch-wordmark-period" aria-hidden="true">.</span></span>
+        <HatchBrand className="desktop-sidebar-brand" aria-label="Hatch." />
       </div>
       <nav className="desktop-source-list" aria-label={t("sidebar.creatorAgents")}>
         <div className="desktop-source-list-label">{t("sidebar.yourExperts")}</div>

@@ -98,8 +98,8 @@ export const Shell = {
     layout: "regular",
     density: "regular",
     primaryColor: "#25221f",
-    displayTracking: -0.055,
-    displayLeading: 0.90,
+    displayTracking: -0.06,
+    displayLeading: 0.86,
     atmosphereStrength: 0.72
   },
   argTypes: {
