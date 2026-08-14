@@ -11,7 +11,7 @@
 .factory-run-list span, .factory-run-list p { color: var(--hatch-text-secondary); font-size: 11px; }
 .factory-work-panel { min-height: 560px; padding: clamp(24px,4vw,44px); }
 .factory-create { display: grid; gap: 17px; max-width: 720px; }
-.factory-create h2, .factory-detail h2 { margin: 7px 0 4px; font-size: 34px; }
+.factory-create h2, .factory-detail h2 { margin: 0 0 4px; font-size: 34px; }
 .factory-create > p, .factory-questions p, .factory-progress p, .factory-ready p, .factory-ready small { color: var(--hatch-text-secondary); line-height: 1.55; }
 .factory-create label, .factory-questions label { display: grid; gap: 8px; color: #615b53; font-size: 12px; }
 .factory-create input, .factory-create select, .factory-create textarea, .factory-questions textarea { width: 100%; padding: 13px 14px; border: 1px solid rgba(55,49,40,.15); border-radius: 10px; background: rgba(255,255,255,.72); color: inherit; font: inherit; outline: none; }
@@ -21,7 +21,7 @@
 .factory-source-heading h3 { margin: 0; font-size: 16px; }
 .factory-source-heading button, .factory-remove-source { border: 0; background: transparent; color: var(--hatch-accent); cursor: pointer; font-size: 11px; }
 .factory-source { position: relative; display: grid; gap: 14px; margin: 0; padding: 18px; border: 1px solid var(--hatch-border-subtle); border-radius: 13px; }
-.factory-source legend { padding: 0 7px; color: var(--hatch-text-secondary); font-family: var(--hatch-font-mono); font-size: 10px; }
+.factory-source legend { padding: 0 7px; color: var(--hatch-text-secondary); font-size: 12px; }
 .factory-remove-source { position: absolute; top: 12px; right: 12px; }
 .factory-detail { display: grid; gap: 28px; }
 .factory-detail-heading { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; }

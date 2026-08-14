@@ -29,7 +29,6 @@ export function StorefrontDetails({
         <aside className="storefront-shared__offer" aria-label={mode === "preview" ? "Preview offer" : "Current offer"}>
           <span>{mode === "preview" ? "Proposed offer" : "Current offer"}</span>
           <strong>{offerText || "Offer not configured"}</strong>
-          {offer?.included_units ? <small>{offer.included_units} {offer.unit || "delivery"} unit{Number(offer.included_units) === 1 ? "" : "s"}</small> : null}
           {action}
         </aside>
       </header>
@@ -47,7 +46,6 @@ export function StorefrontDetails({
 
       <footer className="storefront-shared__policies">
         <section><strong>Desktop requirement</strong><p className={!model.desktopRequirement ? "is-missing" : ""}>{model.desktopRequirement || empty}</p></section>
-        <section><strong>Refund policy</strong><p className={!model.refundPolicy ? "is-missing" : ""}>{model.refundPolicy || empty}</p></section>
       </footer>
     </article>
   );
