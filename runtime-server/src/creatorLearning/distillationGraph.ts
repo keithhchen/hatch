@@ -198,7 +198,13 @@ export class InMemoryDistillationGraphStore implements DistillationGraphStore {
 
   async ensureRun(run: DistillationRun): Promise<DistillationRun> {
     const existing = this.runs.get(run.id);
-    if (existing) { assertSameJson(existing, run, `Distillation Run ${run.id} is immutable`); return structuredClone(existing); }
+    if (existing) {
+      // `createdAt` is an immutable fact owned by the first insertion. Later
+      // revisions re-ensure the same lineage with a fresh request timestamp;
+      // compare only the stable identity and return the stored record.
+      assertSameJson(runIdentity(existing), runIdentity(run), `Distillation Run ${run.id} is immutable`);
+      return structuredClone(existing);
+    }
     const taskRun = [...this.runs.values()].find((item) => item.taskId === run.taskId);
     if (taskRun) throw new Error(`Task ${run.taskId} is already attached to another Distillation Run`);
     this.runs.set(run.id, structuredClone(run));
@@ -533,4 +539,9 @@ function assertArtifactRefs(
 
 function assertSameJson(left: unknown, right: unknown, message: string): void {
   if (JSON.stringify(left) !== JSON.stringify(right)) throw new Error(message);
+}
+
+function runIdentity(run: DistillationRun): Omit<DistillationRun, "createdAt"> {
+  const { createdAt: _createdAt, ...identity } = run;
+  return identity;
 }

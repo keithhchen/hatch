@@ -128,7 +128,14 @@ export class PostgresDistillationGraphStore implements DistillationGraphStore {
   async ensureRun(run: DistillationRun): Promise<DistillationRun> {
     await this.initialize();
     const existing = await this.pool.query<RunRow>(`SELECT * FROM hatch_creator_distillation_runs WHERE id = $1`, [run.id]);
-    if (existing.rows[0]) { const current = runFromRow(existing.rows[0]); assertSameJson(current, run, `Distillation Run ${run.id} is immutable`); return current; }
+    if (existing.rows[0]) {
+      const current = runFromRow(existing.rows[0]);
+      // The lineage timestamp belongs to the first insertion. A later
+      // revision may call ensureRun with a new request timestamp, but must
+      // reuse the stored immutable Run record.
+      assertSameJson(runIdentity(current), runIdentity(run), `Distillation Run ${run.id} is immutable`);
+      return current;
+    }
     const result = await this.pool.query<RunRow>(`
       INSERT INTO hatch_creator_distillation_runs (id, task_id, creator_id, product_id, created_at)
       VALUES ($1, $2, $3, $4, COALESCE($5::timestamptz, clock_timestamp()))
@@ -359,6 +366,11 @@ function jsonArray(value: unknown): string[] { return Array.isArray(value) ? val
 function jsonObject(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 function iso(value: string | Date): string { return value instanceof Date ? value.toISOString() : new Date(value).toISOString(); }
 function assertSameJson(left: unknown, right: unknown, message: string): void { if (JSON.stringify(left) !== JSON.stringify(right)) throw new Error(message); }
+
+function runIdentity(run: DistillationRun): Omit<DistillationRun, "createdAt"> {
+  const { createdAt: _createdAt, ...identity } = run;
+  return identity;
+}
 function isUniqueViolation(error: unknown): boolean { return !!error && typeof error === "object" && (error as { code?: string }).code === "23505"; }
 
 async function assertPostgresRunTaskRef(
