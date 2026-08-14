@@ -20,6 +20,7 @@ test("creator identity stays circular and never falls back to a byline", () => {
 test("a non-Creator account is sent to the real Creator signup intent", () => {
   assert.match(appSource, /profile\?\.role !== "creator"/);
   assert.match(appSource, /Create a Creator account/);
+  assert.match(appSource, /if \(sessionStatus !== "authenticated"\) \{\s+return <RouteRedirect to=\{`\/sign-up\?returnTo=/);
   assert.match(appSource, /location\.navigate\(`\/sign-up\?returnTo=/);
   assert.match(source, /const creatorIntent = returnTo === "\/studio" \|\| returnTo\.startsWith\("\/studio\/"\)/);
   assert.match(source, /creatorIntent \? "\/v1\/auth\/creator-signup" : "\/v1\/auth\/signup"/);

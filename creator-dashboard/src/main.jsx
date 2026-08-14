@@ -139,7 +139,7 @@ function App() {
     || location.pathname.startsWith(`${CREATOR_ROOT}/`)) {
     if (sessionStatus === "loading") return <AppLoading />;
     if (sessionStatus !== "authenticated") {
-      return <RouteRedirect to={`/sign-in?returnTo=${encodeURIComponent(location.href)}`} navigate={location.navigate} />;
+      return <RouteRedirect to={`/sign-up?returnTo=${encodeURIComponent(location.href)}`} navigate={location.navigate} />;
     }
     if (profile?.role !== "creator") {
       return <RoleBoundary navigate={location.navigate} onCreateCreator={async () => {
