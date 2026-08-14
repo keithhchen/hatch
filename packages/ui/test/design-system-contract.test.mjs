@@ -37,6 +37,7 @@ test("Web and Storybook consume the shared package and its canonical tokens", ()
   const webPackage = json("creator-dashboard/package.json");
   const webEntry = read("creator-dashboard/src/main.jsx");
   const creatorPortal = read("creator-dashboard/src/CreatorPortalV2.jsx");
+  const creatorFactory = read("creator-dashboard/src/CreatorFactoryRuns.jsx");
   const creatorCss = read("creator-dashboard/src/creatorPortalV2.css");
   const storybookPreview = read("creator-dashboard/.storybook/preview.jsx");
   const sharedCss = read("packages/ui/src/hatch-ui.css");
@@ -59,6 +60,8 @@ test("Web and Storybook consume the shared package and its canonical tokens", ()
   assert.match(creatorPortal, /<FormField label="Authority"><Select/);
   assert.match(creatorPortal, /<Checkbox key=\{lossId\}/);
   assert.doesNotMatch(creatorPortal, /<(?:input|textarea|select)\b/);
+  assert.match(creatorFactory, /from\s+["']@hatch\/ui["']/);
+  assert.doesNotMatch(creatorFactory, /<(?:input|textarea|select)\b/);
   assert.doesNotMatch(creatorCss, /\.cpv2-factory-draft\s+(?:input|select|textarea)/);
   assert.match(creatorCss, /\.cpv2-panel\s*\{[^}]*border:\s*0;[^}]*border-radius:\s*0;[^}]*background:\s*transparent;/s);
 });
