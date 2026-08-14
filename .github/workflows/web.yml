@@ -43,6 +43,7 @@ jobs:
           npm ci
           npm test
           npm run build
+          npm run build-storybook
       - uses: docker/setup-buildx-action@v3
       - name: Build Dashboard container
         uses: docker/build-push-action@v6

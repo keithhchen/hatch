@@ -2,8 +2,8 @@
   --hatch-canvas: #f3ede3;
   --hatch-ink: #201813;
   --hatch-text-secondary: #74675e;
-  --hatch-accent: #d65f3b;
-  --hatch-accent-hover: #bf4f30;
+  --hatch-accent: #a64e35;
+  --hatch-accent-hover: #8f402d;
   --hatch-border: rgba(54, 41, 31, 0.2);
   --hatch-border-subtle: rgba(54, 41, 31, 0.1);
   --hatch-panel: #fbf7f0;
@@ -29,8 +29,8 @@
   --hatch-ui-ink: #25211e;
   --hatch-ui-ink-soft: #554e47;
   --hatch-ui-ink-faint: #675e55;
-  --hatch-ui-accent: #c66d4d;
-  --hatch-ui-accent-hover: #ad583d;
+  --hatch-ui-accent: #a64e35;
+  --hatch-ui-accent-hover: #8f402d;
   --hatch-ui-primary: #1f1c19;
   --hatch-ui-on-primary: #fffaf4;
   --hatch-ui-moss: #4f715f;

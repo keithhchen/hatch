@@ -6,6 +6,18 @@ import test from "node:test";
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const read = (path) => readFileSync(`${repoRoot}/${path}`, "utf8");
 const json = (path) => JSON.parse(read(path));
+const tokenHex = (css, name) => css.match(new RegExp(`${name}:\\s*(#[0-9a-f]{6})`, "i"))?.[1];
+const luminance = (hex) => {
+  const channels = hex.match(/[0-9a-f]{2}/gi).map((value) => parseInt(value, 16) / 255).map((value) => (
+    value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
+  ));
+  return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+};
+const contrast = (foreground, background) => {
+  const foregroundLuminance = luminance(foreground);
+  const backgroundLuminance = luminance(background);
+  return (Math.max(foregroundLuminance, backgroundLuminance) + 0.05) / (Math.min(foregroundLuminance, backgroundLuminance) + 0.05);
+};
 
 test("@hatch/ui owns the shared Button, Dialog, Select and CSS entrypoint", () => {
   const packageJson = json("packages/ui/package.json");
@@ -104,6 +116,17 @@ test("Theme Lab edits the same token knobs used by the shared CSS", () => {
   assert.match(sharedCss, /background: var\(--hatch-atmosphere-warm-field\)/);
   assert.match(sharedCss, /background: var\(--hatch-atmosphere-cool-field\)/);
   assert.doesNotMatch(sharedCss, /\.hui-drawer\.is-(?:right|bottom)[^{]*\{[^}]*border-radius:[^;]*\b0\b/s);
+});
+
+test("confirmed text tokens remain legible without relying on the background artwork", () => {
+  const tokens = read("packages/brand/tokens.css");
+  const canvas = tokenHex(tokens, "--hatch-atmosphere-base");
+
+  for (const token of ["--hatch-ui-ink", "--hatch-ui-ink-soft", "--hatch-ui-ink-faint", "--hatch-ui-accent", "--hatch-ui-accent-hover"]) {
+    const foreground = tokenHex(tokens, token);
+    assert.ok(foreground, `${token} must remain a fixed hex token`);
+    assert.ok(contrast(foreground, canvas) >= 4.5, `${token} must meet WCAG AA against the Atmospheric Paper canvas`);
+  }
 });
 
 test("the archived material comparison cannot leak into the confirmed origin theme", () => {
