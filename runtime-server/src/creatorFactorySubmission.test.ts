@@ -494,6 +494,27 @@ test("evaluation and corpus audit tools canonical-render the existing evaluation
   assert.equal(parsedAudit.fewShot, "None — this audit does not create a runtime few-shot.");
 });
 
+test("Corpus audit accepts a provider split submit and finalize turn", async () => {
+  const { output, requests } = await run({
+    purpose: "eval.audit_corpus",
+    systemPrompt: "audit system",
+    prompt: "input",
+    outputContract: { kind: "corpus_audit" }
+  }, [
+    toolTurn([{
+      id: "audit-submit-only",
+      name: "submit_corpus_audit",
+      arguments: { pass: true, diagnosis: "complete", corpus_reflection: "No changes required." }
+    }]),
+    toolTurn([{ id: "audit-finalize-only", name: "finalize_corpus_audit", arguments: {} }])
+  ]);
+
+  assert.equal(parseEvaluation(output).pass, true);
+  assert.equal(requests.length, 2);
+  assert.match(JSON.stringify(requests[0]), /submit_corpus_audit/);
+  assert.match(JSON.stringify(requests[1]), /STAGED status=ACCEPTED evaluation/);
+});
+
 test("Corpus finalization returns precise safe repair codes for audit and relationship failures", async () => {
   const missingSection = [
     "## Retained\nNone.",
