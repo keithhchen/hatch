@@ -124,16 +124,17 @@
 .cpv2-factory-ready small { margin-top: 4px; color: var(--hatch-text-secondary, #74675e); font-family: var(--hatch-font-mono, monospace); font-size: 9px; }
 .cpv2-factory-draft { position: relative; display: grid; max-width: 860px; gap: 18px; padding: clamp(25px, 4vw, 42px); }
 .cpv2-save-state { min-height: 26px; justify-self: end; }
-.cpv2-factory-draft > label, .cpv2-source label { display: grid; gap: 7px; color: var(--hatch-text-secondary, #74675e); font-size: 11px; }
-.cpv2-factory-draft input, .cpv2-factory-draft select, .cpv2-factory-draft textarea { width: 100%; min-height: 44px; padding: 11px 13px; border: 1px solid var(--hatch-border-subtle, rgba(54,41,31,.15)); border-radius: 9px; background: rgba(255,255,255,.63); color: inherit; }
-.cpv2-factory-draft textarea { min-height: 110px; resize: vertical; line-height: 1.55; }
+.cpv2-factory-draft > .hui-field, .cpv2-source .hui-field { width: 100%; }
+.cpv2-factory-draft > .hui-field .hui-input { min-height: 44px; }
+.cpv2-factory-draft > .hui-field .hui-textarea { min-height: 110px; }
+.cpv2-source .hui-select-trigger { width: 100%; min-height: 44px; }
 .cpv2-source-heading { display: flex; align-items: end; justify-content: space-between; gap: 20px; margin-top: 13px; padding-top: 22px; border-top: 1px solid var(--hatch-border-subtle, rgba(54,41,31,.1)); }
 .cpv2-source-heading h2 { margin: 5px 0 0; font-size: 27px; }
 .cpv2-source-heading button, .cpv2-source > button { min-height: 44px; padding: 0; border: 0; background: transparent; color: var(--hatch-accent, #d65f3b); font-size: 11px; }
 .cpv2-source { position: relative; display: grid; gap: 14px; margin: 0; padding: 19px; border: 1px solid var(--hatch-border-subtle, rgba(54,41,31,.1)); border-radius: 13px; }
 .cpv2-source legend { padding: 0 7px; color: var(--hatch-text-secondary, #74675e); font-size: 12px; }
 .cpv2-source > button { position: absolute; top: 3px; right: 13px; }
-.cpv2-source textarea { min-height: 210px; font-family: var(--hatch-font-mono, monospace); font-size: 11px; }
+.cpv2-source .hui-textarea { min-height: 210px; font-family: var(--hatch-font-ui); font-size: 12px; }
 .cpv2-draft-actions { display: flex; align-items: center; gap: 22px; justify-content: space-between; }
 .cpv2-draft-actions p { max-width: 540px; margin: 0; color: var(--hatch-text-secondary, #74675e); font-size: 10px; line-height: 1.55; }
 .cpv2-draft-actions button { flex: 0 0 auto; }
@@ -147,11 +148,7 @@
 .cpv2-comparisons small { color: var(--hatch-accent, #d65f3b); font-size: 9px; }
 .cpv2-losses { display: grid; gap: 9px; margin: 30px 0 0; padding: 20px; border: 1px solid var(--hatch-border-subtle, rgba(54,41,31,.1)); border-radius: 13px; }
 .cpv2-losses legend { padding: 0 8px; font-size: 12px; font-weight: 650; }
-.cpv2-losses label { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 10px; padding: 11px; border-radius: 9px; background: #f0e9df; }
-.cpv2-losses input { width: 18px; height: 18px; accent-color: var(--hatch-accent, #d65f3b); }
-.cpv2-losses strong, .cpv2-losses small { display: block; }
-.cpv2-losses strong { font-size: 12px; }
-.cpv2-losses small { margin-top: 4px; color: var(--hatch-text-secondary, #74675e); font-size: 10px; line-height: 1.55; }
+.cpv2-losses .hui-choice { padding: 11px; border-radius: var(--hatch-radius-control); background: var(--hatch-ui-surface-quiet); }
 .cpv2-action-bar { position: sticky; z-index: 4; bottom: 16px; display: flex; align-items: center; gap: 10px; padding: 15px; border: 1px solid var(--hatch-border-subtle, rgba(54,41,31,.1)); border-radius: 15px; background: rgba(251,247,240,.94); box-shadow: 0 18px 60px rgba(54,41,31,.14); backdrop-filter: blur(16px); }
 .cpv2-action-bar > div { min-width: 0; margin-right: auto; }
 .cpv2-action-bar strong, .cpv2-action-bar small { display: block; }
@@ -169,7 +166,7 @@
 .cpv2-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .cpv2-form-grid label { display: grid; gap: 7px; color: var(--hatch-text-secondary, #74675e); font-size: 11px; }
 .cpv2-form-grid .cpv2-wide { grid-column: 1 / -1; }
-.cpv2-form-grid input, .cpv2-form-grid select, .cpv2-published input, .cpv2-filters input, .cpv2-filters select { width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--hatch-border-subtle, rgba(54,41,31,.15)); border-radius: 9px; background: rgba(255,255,255,.62); color: inherit; }
+.cpv2-form-grid input, .cpv2-form-grid select { width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--hatch-border-subtle, rgba(54,41,31,.15)); border-radius: 9px; background: rgba(255,255,255,.62); color: inherit; }
 .cpv2-policy-note { margin: 24px 0; padding: 14px; border-radius: 10px; background: #f0e9df; }
 .cpv2-policy-note strong { font-size: 11px; }
 .cpv2-policy-note p { margin: 4px 0 0; color: var(--hatch-text-secondary, #74675e); font-size: 10px; line-height: 1.5; }
@@ -212,7 +209,8 @@
 .cpv2-published > div { display: flex; flex-wrap: wrap; justify-content: center; gap: 9px; }
 
 .cpv2-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); gap: 12px; margin-bottom: 20px; padding: 17px; border-radius: 14px; background: #eae2d7; }
-.cpv2-filters label { display: grid; gap: 6px; color: #5f554d; font-size: 10px; }
+.cpv2-filters .hui-field { min-width: 0; }
+.cpv2-filters .hui-input, .cpv2-filters .hui-select-trigger { width: 100%; min-height: 44px; }
 .cpv2-filters > button { align-self: end; }
 .cpv2-pagination-status { margin: 0 0 12px; color: var(--hatch-text-secondary, #74675e); font-size: 10px; }
 .cpv2-order-list { display: grid; gap: 10px; }
@@ -246,9 +244,8 @@
 .cpv2-payout-stats small { color: var(--hatch-text-secondary, #74675e); font-size: 9px; }
 
 .cpv2-rollback { display: grid; gap: 17px; margin-top: 17px; }
-.cpv2-rollback label, .cpv2-refund-action label, .cpv2-withdraw label { display: grid; gap: 7px; margin-top: 14px; color: var(--hatch-text-secondary, #74675e); font-size: 11px; }
-.cpv2-rollback input, .cpv2-rollback select, .cpv2-rollback textarea, .cpv2-refund-action textarea, .cpv2-withdraw textarea { width: 100%; min-height: 44px; padding: 11px 13px; border: 1px solid var(--hatch-border-subtle, rgba(54,41,31,.15)); border-radius: 9px; background: rgba(255,255,255,.68); color: inherit; }
-.cpv2-rollback textarea, .cpv2-refund-action textarea, .cpv2-withdraw textarea { min-height: 100px; resize: vertical; line-height: 1.55; }
+.cpv2-rollback .hui-field, .cpv2-refund-action .hui-field, .cpv2-withdraw .hui-field { margin-top: 14px; }
+.cpv2-rollback .hui-textarea, .cpv2-refund-action .hui-textarea, .cpv2-withdraw .hui-textarea { min-height: 100px; }
 .cpv2-rollback-preview { display: grid; gap: 10px; }
 .cpv2-rollback-preview > .cpv2-private-badge { width: fit-content; }
 .cpv2-withdraw, .cpv2-refund-action { margin-top: 17px; }
