@@ -120,6 +120,37 @@ test("re-ensuring a stable Run identity preserves its original timestamp", async
   await graph.createRevision({ id: "factory_2", runId: "distill_1", taskId: "task_1", revision: 2, sourceSnapshotId: "snapshot_2", createdAt: "2026-08-15T00:01:00.000Z" });
 });
 
+test("gate retries are idempotent across persistence property order", async () => {
+  const graph = new InMemoryDistillationGraphStore();
+  await graph.ensureRun({ id: "distill_1", taskId: "task_1", creatorId: "creator_1", createdAt: "2026-08-15T00:00:00.000Z" });
+  await graph.createRevision({ id: "factory_1", runId: "distill_1", taskId: "task_1", revision: 1, sourceSnapshotId: "snapshot_1", createdAt: "2026-08-15T00:00:00.000Z" });
+  const first = await graph.recordGate({
+    id: "gate_1",
+    gateKey: "factory_1:development",
+    taskId: "task_1",
+    runId: "distill_1",
+    revisionId: "factory_1",
+    name: "development",
+    critical: true,
+    status: "passed",
+    evidenceArtifactIds: [],
+    assessedAt: "2026-08-15T00:01:00.000Z"
+  });
+  const retried = await graph.recordGate({
+    id: first.id,
+    status: first.status,
+    evidenceArtifactIds: first.evidenceArtifactIds,
+    critical: first.critical,
+    name: first.name,
+    revisionId: first.revisionId,
+    runId: first.runId,
+    taskId: first.taskId,
+    gateKey: first.gateKey,
+    assessedAt: first.assessedAt
+  });
+  assert.deepEqual(retried, first);
+});
+
 test("revision context is n-1 plus current feedback plus cumulative regression", () => {
   const revisions = [
     { id: "r1", runId: "distill_1", taskId: "task_1", revision: 1, sourceSnapshotId: "snapshot_1", createdAt: "2026-08-15T00:00:00.000Z" },
