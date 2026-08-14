@@ -85,6 +85,8 @@ jobs:
           tags: ${{ steps.image.outputs.prefix }}/dashboard:${{ env.RELEASE_TAG }}
           cache-from: type=gha,scope=dashboard
           cache-to: type=gha,scope=dashboard,mode=max
+          build-args: |
+            RELEASE_TAG=${{ env.RELEASE_TAG }}
       - name: Build and push Caddy image
         uses: docker/build-push-action@v6
         with:
@@ -268,6 +270,11 @@ jobs:
             done
             exit 1
           fi
+          dashboard_bundle="$("${compose[@]}" exec -T dashboard sh -lc 'grep -Rl "Source Library" dist/assets/*.js | head -n 1 || true')"
+          test -n "$dashboard_bundle" || {
+            echo "Dashboard bundle does not contain the Creator Source Library" >&2
+            exit 1
+          }
           if ! "${compose[@]}" ps --status running --services | grep -Fxq factory-worker; then
             "${compose[@]}" ps -a
             for service in registry dashboard runtime factory-worker; do
