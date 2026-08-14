@@ -546,6 +546,11 @@ export class RegistryStoreTs {
         (entitlement_id, user_id, creator_id, agent_id, product_id, order_id, purchased_corpus_digest, version_policy, status, granted_at)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'active',$9)
         ON CONFLICT (user_id, creator_id, agent_id) DO UPDATE SET
+          -- A legacy access row without an order is an orphan projection from
+          -- before Commerce became authoritative. A real Commerce checkout
+          -- may rebind that row once; rows with an order keep their stable
+          -- entitlement identity.
+          entitlement_id=CASE WHEN agent_access.order_id IS NULL THEN EXCLUDED.entitlement_id ELSE agent_access.entitlement_id END,
           product_id=EXCLUDED.product_id,
           order_id=EXCLUDED.order_id,
           purchased_corpus_digest=EXCLUDED.purchased_corpus_digest,
@@ -576,9 +581,13 @@ export class RegistryStoreTs {
     const existing = [...this.access.values()].find((item) => item.user_id === userId && item.creator_id === creatorId && item.agent_id === agentId);
     if (existing) {
       const orderChanged = orderId !== existing.order_id;
+      const rebindLegacyIdentity = !existing.order_id
+        && typeof entitlementId === "string"
+        && entitlementId !== existing.entitlement_id;
       if (existing.status !== "active" || orderChanged || existing.product_id !== corpus.product_id) {
         const updated = {
           ...existing,
+          ...(rebindLegacyIdentity ? { entitlement_id: entitlementId } : {}),
           product_id: corpus.product_id,
           status: "active" as const,
           order_id: orderId,
@@ -586,10 +595,12 @@ export class RegistryStoreTs {
           version_policy: versionPolicy,
           ...(existing.status !== "active" ? { granted_at: grantedAt } : {})
         };
+        if (rebindLegacyIdentity) this.access.delete(existing.entitlement_id);
         this.access.set(updated.entitlement_id, updated);
         try {
           await this.persistState();
         } catch (error) {
+          this.access.delete(updated.entitlement_id);
           this.access.set(existing.entitlement_id, existing);
           throw error;
         }

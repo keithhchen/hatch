@@ -699,25 +699,18 @@ function SuccessPage({ id, request, navigate, downloadUrl, session }) {
 }
 
 function LibraryPage({ search, request, navigate }) {
-  const params = new URLSearchParams(search);
-  const filter = ["active", "past"].includes(params.get("status")) ? params.get("status") : "all";
   const resource = useCursorCollection(async (cursor, signal) => {
     const query = new URLSearchParams();
-    if (filter !== "all") query.set("status", filter);
+    query.set("status", "active");
     if (cursor) query.set("cursor", cursor);
     const response = await callRequest(request, `${BUYER_PORTAL_V2_ENDPOINTS.entitlements}?${query}`, { signal });
     return pageFrom(response, ["entitlements", "creator_agents", "items"]);
-  }, `entitlements:${filter}`);
+  }, "entitlements");
   usePageTitle("Your Agent library");
-
-  function setFilter(next) {
-    navigateTo(navigate, next === "all" ? LIBRARY_ROOT : `${LIBRARY_ROOT}?status=${next}`);
-  }
 
   return (
     <div className="buyer-v2__container buyer-v2__page">
-      <header className="buyer-v2__page-heading"><span className="buyer-v2__eyebrow">Your library</span><h1>Agents your account can use.</h1><p>Access, release policy and remaining delivery units stay visible here.</p></header>
-      <div className="buyer-v2__filters" role="group" aria-label="Library filter">{[["all", "All"], ["active", "Active"], ["past", "Past access"]].map(([value, label]) => <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>)}</div>
+      <header className="buyer-v2__page-heading"><span className="buyer-v2__eyebrow">Your library</span><h1>Agents linked to your account.</h1><p>Access, release policy and remaining delivery units stay visible here.</p></header>
       {resource.status === "loading" ? <CardSkeleton count={2} label="Loading your library" /> : null}
       {resource.status === "error" ? <RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} returnTo={LIBRARY_ROOT} /> : null}
       {resource.status === "ready" && resource.items.length ? <section className="buyer-v2__list-grid" aria-label="Your entitlements">{resource.items.map((item) => <EntitlementCard key={entitlementIdFor(item)} entitlement={item} navigate={navigate} />)}</section> : null}
@@ -1240,7 +1233,7 @@ function accessStatus(value) {
 }
 
 function entitlementStatusLabel(status) {
-  return ({ active: "Active", reserved: "In progress", pending: "Setting up", consumed: "Consumed", expired: "Expired", suspended: "Suspended", revoked: "Revoked", none: "No access" })[status] || sentenceCase(status);
+  return ({ active: "Available", reserved: "In progress", pending: "Setting up", consumed: "Used", expired: "Expired", suspended: "Paused", revoked: "Access ended", none: "No access" })[status] || sentenceCase(status);
 }
 
 function entitlementSummary(value) {

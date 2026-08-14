@@ -150,6 +150,53 @@ test("staged releases stay immutable until CAS activation and Commerce grants pr
   }
 });
 
+test("a legacy access row without an order is rebound to the next real Commerce entitlement", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-registry-orphan-access-"));
+  const statePath = path.join(root, "registry.json");
+  const creatorId = "11111111-1111-4111-8111-111111111111";
+  const productId = "22222222-2222-4222-8222-222222222222";
+  const userId = "33333333-3333-4333-8333-333333333333";
+  const indexer = { stageAgentDocuments: async () => undefined, deleteAgentDocuments: async () => undefined };
+  const store = await RegistryStoreTs.open({
+    corpusRoot: path.join(root, "corpora"),
+    statePath,
+    indexer: indexer as never,
+    environment: {}
+  });
+  try {
+    const published = await store.publishAgentCorpusBundle(creatorId, productId, bundle());
+    const oldEntitlement = "44444444-4444-4444-8444-444444444444";
+    const oldOrder = "55555555-5555-4555-8555-555555555555";
+    await store.grantAgentAccess(userId, creatorId, productId, oldOrder, oldEntitlement, published.corpus_digest, "pinned");
+    await store.close();
+
+    const state = JSON.parse(await readFile(statePath, "utf8"));
+    state.agent_access[0].order_id = null;
+    await writeFile(statePath, JSON.stringify(state));
+
+    const reopened = await RegistryStoreTs.open({
+      corpusRoot: path.join(root, "corpora"),
+      statePath,
+      indexer: indexer as never,
+      environment: {}
+    });
+    try {
+      const newEntitlement = "66666666-6666-4666-8666-666666666666";
+      const newOrder = "77777777-7777-4777-8777-777777777777";
+      const rebound = await reopened.grantAgentAccess(userId, creatorId, productId, newOrder, newEntitlement, published.corpus_digest, "pinned");
+      assert.equal(rebound.entitlement_id, newEntitlement);
+      assert.equal(rebound.order_id, newOrder);
+      assert.equal((await reopened.listAgentAccess(userId))[0]?.entitlement_id, newEntitlement);
+      assert.equal((await reopened.listAgentAccess(userId))[0]?.order_id, newOrder);
+    } finally {
+      await reopened.close();
+    }
+  } finally {
+    await store.close().catch(() => undefined);
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("TypeScript Registry publishes a clean Corpus and indexes knowledge only", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-ts-registry-"));
   const statePath = path.join(root, "registry.json");
