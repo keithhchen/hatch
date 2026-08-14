@@ -297,12 +297,14 @@ function ProductPage({ route, request, navigate, session, downloadUrl }) {
       <StorefrontDetails
         product={product}
         creatorName={productCreatorByline}
+        creatorInitial={productCreatorName.trim().charAt(0)}
+        creatorAvatarUrl={product.creator_avatar_url || product.creator?.avatar_url || product.creator?.image_url}
         desktopRequirement={desktopRequirement}
         releaseLabel={product.release_label || product.release?.label}
         action={<ProductAction embedded product={product} currentPath={path} request={request} navigate={navigate} session={session} downloadUrl={downloadUrl} />}
       />
 
-      <section className="buyer-v2__wide-section">
+      <section className="buyer-v2__wide-section buyer-v2__process-section">
         <span className="buyer-v2__eyebrow">How it works</span>
         <h2>From access to useful work.</h2>
         <ol className="buyer-v2__steps">
@@ -346,8 +348,8 @@ function ProductAction({ product, currentPath, request, navigate, session, downl
     }
   }
 
-  let title = "Add this Agent to your account.";
-  let body = "No payment is required. Your access and receipt are still recorded.";
+  let title = "";
+  let body = "";
   let action = null;
 
   if (isOwnerCreator) {
@@ -374,8 +376,8 @@ function ProductAction({ product, currentPath, request, navigate, session, downl
 
   const contents = (
     <>
-      <h2>{title}</h2>
-      <p>{body}</p>
+      {title ? <h2>{title}</h2> : null}
+      {body ? <p>{body}</p> : null}
       {mutation.error ? <InlineError error={mutation.error} /> : null}
       {action}
       <a className="buyer-v2__secondary-download" href={downloadUrl} target="_blank" rel="noreferrer" onClick={() => trackPortalEvent(request, "desktop_download_clicked", productTelemetry(product))}>Download Desktop</a>
