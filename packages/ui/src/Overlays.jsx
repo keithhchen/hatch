@@ -52,7 +52,7 @@ export function Select({ value, defaultValue, onValueChange, options, placeholde
       <SelectPrimitive.Portal>
         <SelectPrimitive.Content className="hui-select-content" position="popper" sideOffset={6}>
           <SelectPrimitive.Viewport>
-            {options.map((option) => <SelectPrimitive.Item className="hui-select-item" value={option.value} disabled={option.disabled} key={option.value}><SelectPrimitive.ItemText>{option.label}</SelectPrimitive.ItemText><SelectPrimitive.ItemIndicator><Check aria-hidden="true" /></SelectPrimitive.ItemIndicator></SelectPrimitive.Item>)}
+            {options.map((option) => <SelectPrimitive.Item className="hui-select-item" value={option.value} disabled={option.disabled} key={option.value}><SelectPrimitive.ItemText className="hui-select-item__text">{option.label}</SelectPrimitive.ItemText><SelectPrimitive.ItemIndicator className="hui-select-item__indicator"><Check aria-hidden="true" /></SelectPrimitive.ItemIndicator></SelectPrimitive.Item>)}
           </SelectPrimitive.Viewport>
         </SelectPrimitive.Content>
       </SelectPrimitive.Portal>
@@ -127,13 +127,13 @@ export function CommandMenu({ open, onOpenChange, groups, placeholder = "Search 
   );
 }
 
-export function Drawer({ open, onOpenChange, trigger, title, description, children, footer, direction = "right" }) {
+export function Drawer({ open, onOpenChange, trigger, title, description, children, footer, direction = "bottom" }) {
   return (
     <DrawerPrimitive.Root open={open} onOpenChange={onOpenChange} direction={direction}>
       {trigger ? <DrawerPrimitive.Trigger asChild>{trigger}</DrawerPrimitive.Trigger> : null}
       <DrawerPrimitive.Portal>
         <DrawerPrimitive.Overlay className="hui-overlay" />
-        <DrawerPrimitive.Content className={cn("hui-drawer", `is-${direction}`)} aria-describedby={description ? undefined : undefined}>
+        <DrawerPrimitive.Content className={cn("hui-drawer", `is-${direction}`)}>
           <header className="hui-dialog__header"><div><DrawerPrimitive.Title>{title}</DrawerPrimitive.Title>{description ? <DrawerPrimitive.Description>{description}</DrawerPrimitive.Description> : null}</div><DrawerPrimitive.Close asChild><IconButton label="Close" size="small"><X aria-hidden="true" /></IconButton></DrawerPrimitive.Close></header>
           <div className="hui-drawer__body">{children}</div>
           {footer ? <footer className="hui-dialog__footer">{footer}</footer> : null}
@@ -144,5 +144,18 @@ export function Drawer({ open, onOpenChange, trigger, title, description, childr
 }
 
 export function Sheet(props) {
-  return <Drawer direction="right" {...props} />;
+  const { open, onOpenChange, trigger, title, description, children, footer } = props;
+  return (
+    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
+      {trigger ? <DialogPrimitive.Trigger asChild>{trigger}</DialogPrimitive.Trigger> : null}
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="hui-overlay" />
+        <DialogPrimitive.Content className="hui-drawer is-right">
+          <header className="hui-dialog__header"><div><DialogPrimitive.Title>{title}</DialogPrimitive.Title>{description ? <DialogPrimitive.Description>{description}</DialogPrimitive.Description> : null}</div><DialogPrimitive.Close asChild><IconButton label="Close" size="small"><X aria-hidden="true" /></IconButton></DialogPrimitive.Close></header>
+          <div className="hui-drawer__body">{children}</div>
+          {footer ? <footer className="hui-dialog__footer">{footer}</footer> : null}
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
+  );
 }

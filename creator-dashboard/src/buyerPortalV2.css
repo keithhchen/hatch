@@ -32,6 +32,7 @@
   outline: 3px solid color-mix(in srgb, var(--buyer-accent) 55%, white);
   outline-offset: 3px;
 }
+.buyer-v2 h1:focus { outline: none; }
 
 .buyer-v2 a.buyer-v2__skip {
   position: fixed;
@@ -166,26 +167,6 @@
 .buyer-v2__card-footer > div strong { font-family: var(--hatch-font-display, Georgia, serif); font-size: 22px; font-weight: 400; }
 .buyer-v2__card-footer > div span, .buyer-v2__card-footer > span { margin-top: 3px; color: var(--buyer-muted); font-size: 11px; }
 
-.buyer-v2__button {
-  display: inline-flex;
-  min-height: 46px;
-  align-items: center;
-  justify-content: center;
-  padding: 0 18px;
-  border: 0;
-  border-radius: 10px;
-  font-size: 13px;
-  font-weight: 550;
-  line-height: 1.2;
-  text-decoration: none;
-  transition: background 150ms ease, transform 150ms ease, color 150ms ease;
-}
-.buyer-v2__button--primary { background: var(--buyer-accent); color: white; }
-.buyer-v2 a.buyer-v2__button--primary { color: #fff; }
-.buyer-v2__button--primary:not(:disabled):hover { transform: translateY(-1px); background: var(--buyer-accent-hover); }
-.buyer-v2__button--secondary { background: var(--buyer-panel-muted); color: var(--buyer-ink); }
-.buyer-v2__button--secondary:not(:disabled):hover { background: color-mix(in srgb, var(--buyer-panel-muted) 76%, var(--buyer-ink)); }
-.buyer-v2__button:disabled { opacity: 0.58; }
 .buyer-v2__button--wide { width: 100%; }
 
 .buyer-v2__product-hero {
@@ -216,7 +197,7 @@
 .buyer-v2__price span { margin-top: 3px; color: rgba(255, 255, 255, 0.58); font-size: 11px; }
 .buyer-v2__action-card h2, .buyer-v2__storefront-action h2, .buyer-v2__activation-card h2, .buyer-v2__order-actions h2 { margin: 0 0 10px; font-size: 18px; line-height: 1.25; }
 .buyer-v2__action-card > p, .buyer-v2__activation-card > p, .buyer-v2__order-actions > p { color: rgba(255, 255, 255, 0.66); font-size: 13px; line-height: 1.65; }
-.buyer-v2__action-card > .buyer-v2__button, .buyer-v2__activation-card > .buyer-v2__button, .buyer-v2__order-actions > .buyer-v2__button { margin-top: auto; }
+.buyer-v2__action-card > .hui-button, .buyer-v2__activation-card > .hui-button, .buyer-v2__order-actions > .hui-button { margin-top: auto; }
 .buyer-v2__secondary-download { display: inline-flex; min-height: 44px; align-items: center; justify-content: center; margin-top: 8px; color: rgba(255, 255, 255, 0.62); font-size: 11px; text-decoration: none; }
 .buyer-v2__secondary-download:hover { color: white; }
 

@@ -27,6 +27,7 @@ Thumbs.db
 node_modules/
 dist/
 build/
+storybook-static/
 .vite/
 coverage/
 *.tsbuildinfo

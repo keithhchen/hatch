@@ -15,18 +15,29 @@ export function Button({
   disabled,
   ...props
 }) {
-  const Component = asChild ? Slot : "button";
+  const classes = cn("hui-button", `hui-button--${variant}`, `hui-button--${size}`, className);
+  if (asChild) {
+    const child = React.Children.only(children);
+    const content = React.cloneElement(child, undefined,
+      <>
+        {loading ? <LoaderCircle className="hui-spin" aria-hidden="true" /> : leading}
+        <span>{child.props.children}</span>
+        {trailing}
+      </>
+    );
+    return <Slot className={classes} aria-busy={Boolean(loading)} aria-disabled={disabled || loading || undefined} {...props}>{content}</Slot>;
+  }
   return (
-    <Component
-      className={cn("hui-button", `hui-button--${variant}`, `hui-button--${size}`, className)}
-      disabled={asChild ? undefined : disabled || loading}
+    <button
+      className={classes}
+      disabled={disabled || loading}
       aria-busy={Boolean(loading)}
       {...props}
     >
       {loading ? <LoaderCircle className="hui-spin" aria-hidden="true" /> : leading}
       <span>{children}</span>
       {trailing}
-    </Component>
+    </button>
   );
 }
 export function IconButton({ label, size = "medium", variant = "ghost", className, children, ...props }) {

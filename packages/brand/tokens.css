@@ -12,7 +12,106 @@
   --hatch-inverse-text: #f4f1e9;
   --hatch-font-display: "Instrument Serif", "Noto Serif SC Variable", "Noto Serif SC", "Songti SC", STSong, Georgia, serif;
   --hatch-font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "PingFang SC", "Hiragino Sans GB", "Segoe UI", "Noto Sans SC", "Helvetica Neue", Arial, sans-serif;
-  --hatch-font-mono: "DM Mono", "SFMono-Regular", Consolas, monospace;
+  --hatch-font-pill: "Inter Variable", Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+  --hatch-font-mono: var(--hatch-font-pill);
+
+  --hatch-type-label: 12px;
+  --hatch-type-control: 13px;
+  --hatch-type-body: 14px;
+  --hatch-type-emphasis: 16px;
+  --hatch-type-title: 28px;
+
+  --hatch-ui-paper: #f1ebe1;
+  --hatch-ui-paper-deep: #e5dccf;
+  --hatch-ui-panel: #fbf8f2;
+  --hatch-ui-panel-muted: #eee7dc;
+  --hatch-ui-panel-strong: #e4dbce;
+  --hatch-ui-ink: #25211e;
+  --hatch-ui-ink-soft: #554e47;
+  --hatch-ui-ink-faint: #675e55;
+  --hatch-ui-accent: #c66d4d;
+  --hatch-ui-accent-hover: #ad583d;
+  --hatch-ui-primary: #1f1c19;
+  --hatch-ui-on-primary: #fffaf4;
+  --hatch-ui-moss: #4f715f;
+  --hatch-ui-amber: #896b31;
+  --hatch-ui-danger: #a94835;
+  --hatch-ui-border: rgba(54, 43, 33, .17);
+  --hatch-ui-border-soft: rgba(54, 43, 33, .10);
+  --hatch-ui-focus: rgba(177, 72, 42, .30);
+  --hatch-ui-surface-quiet: rgba(255, 253, 249, .62);
+  --hatch-ui-surface-resting: rgba(252, 249, 243, .78);
+  --hatch-ui-surface-raised: rgba(253, 250, 245, .96);
+  --hatch-ui-surface-solid: #fbf8f2;
+  --hatch-ui-surface-bright: #fffdf9;
+  --hatch-ui-selection: #eee7dc;
+  --hatch-ui-pigment-clay: rgba(197, 104, 73, .14);
+  --hatch-ui-pigment-moss: rgba(85, 117, 94, .12);
+  --hatch-ui-pigment-ochre: rgba(174, 137, 65, .12);
+  --hatch-ui-light-edge: rgba(255, 255, 255, .76);
+  --hatch-ui-dark-edge: rgba(65, 48, 34, .145);
+  --hatch-ui-on-danger: #fff9f5;
+  --hatch-ui-danger-solid: #a84a36;
+  --hatch-ui-status-neutral-ink: #5b544d;
+  --hatch-ui-status-neutral-bg: #ebe5dc;
+  --hatch-ui-status-success-ink: #315d46;
+  --hatch-ui-status-success-bg: #dce8df;
+  --hatch-ui-status-warning-ink: #70591f;
+  --hatch-ui-status-warning-bg: #eee4c8;
+  --hatch-ui-status-error-ink: #8d3525;
+  --hatch-ui-status-error-bg: #efd6cd;
+  --hatch-ui-status-progress-ink: #87432e;
+  --hatch-ui-status-progress-bg: #f0ddd3;
+
+  --hatch-radius-control: 12px;
+  --hatch-radius-menu: 15px;
+  --hatch-radius-dialog: 22px;
+  --hatch-radius-surface: 22px;
+  --hatch-radius-pill: 999px;
+  --hatch-overlay-inset: 12px;
+  --hatch-shadow-menu: 0 14px 38px rgba(43,33,25,.14), 0 2px 8px rgba(43,33,25,.08);
+  --hatch-shadow-dialog: 0 28px 76px rgba(42,32,25,.20), 0 8px 24px rgba(42,32,25,.11), 0 1px 2px rgba(42,32,25,.08);
+  --hatch-shadow-control: inset 0 1px 0 rgba(255,255,255,.12), 0 4px 12px rgba(31,26,22,.20), 0 1px 2px rgba(31,26,22,.16);
+  --hatch-shadow-control-hover: inset 0 1px 0 rgba(255,255,255,.14), 0 6px 16px rgba(31,26,22,.23);
+  --hatch-shadow-surface: 0 10px 30px rgba(47,35,26,.075), 0 1px 2px rgba(47,35,26,.055);
+  --hatch-shadow-feedback: 0 2px 8px rgba(45,34,26,.04);
+  --hatch-motion-control: 150ms cubic-bezier(.4, 0, .2, 1);
+  --hatch-motion-popover: 180ms cubic-bezier(.455, .03, .515, .955);
+  --hatch-motion-layout: 260ms cubic-bezier(.43, .07, .59, .94);
+
+  --hatch-atmosphere-strength: .72;
+  --hatch-atmosphere-grain: .045;
+  --hatch-atmosphere-warm-blur: 30px;
+  --hatch-atmosphere-cool-blur: 38px;
+  --hatch-atmosphere-warm-duration: 30s;
+  --hatch-atmosphere-cool-duration: 36s;
+  --hatch-atmosphere-base: #f3efe8;
+  --hatch-atmosphere-warm-field: radial-gradient(ellipse at 38% 42%, rgba(219,111,76,.56) 0%, rgba(219,111,76,.34) 31%, rgba(221,177,98,.20) 53%, transparent 74%);
+  --hatch-atmosphere-cool-field: radial-gradient(ellipse at 54% 46%, rgba(84,124,105,.44) 0%, rgba(84,124,105,.27) 36%, rgba(214,170,91,.13) 57%, transparent 76%);
+}
+
+.hui-theme-material {
+  --hatch-ui-paper: #f3efe8;
+  --hatch-ui-paper-deep: #e9e2d7;
+  --hatch-ui-panel: #faf7f1;
+  --hatch-ui-panel-muted: #eee8de;
+  --hatch-ui-panel-strong: #e7ded2;
+  --hatch-ui-ink: #29241f;
+  --hatch-ui-ink-soft: #5f574f;
+  --hatch-ui-ink-faint: #6f665d;
+  --hatch-ui-accent: #b85f43;
+  --hatch-ui-accent-hover: #9f4e36;
+  --hatch-ui-primary: #a95036;
+  --hatch-ui-on-primary: #fffaf5;
+  --hatch-ui-border: rgba(64, 49, 36, .17);
+  --hatch-ui-border-soft: rgba(64, 49, 36, .105);
+  --hatch-ui-focus: rgba(190, 101, 70, .22);
+  --hatch-radius-control: 15px;
+  --hatch-radius-menu: 19px;
+  --hatch-radius-dialog: 28px;
+  --hatch-radius-surface: 30px;
+  --hatch-shadow-menu: 0 18px 46px rgba(59, 43, 29, .12), 0 3px 12px rgba(59, 43, 29, .07), inset 0 1px 0 rgba(255,255,255,.74);
+  --hatch-shadow-dialog: 0 34px 90px rgba(61, 45, 31, .16), 0 10px 30px rgba(61, 45, 31, .09), inset 0 1px 0 rgba(255,255,255,.86);
 }
 
 .hatch-wordmark {

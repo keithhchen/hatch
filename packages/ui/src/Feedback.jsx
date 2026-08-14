@@ -39,9 +39,9 @@ export function Progress({ value, label, className }) {
 
 const stateIcons = { empty: CircleSlash2, error: AlertCircle, unavailable: TriangleAlert };
 
-export function StateMessage({ state = "empty", title, body, action, className }) {
+export function StateMessage({ state = "empty", title, body, action, children, className }) {
   const Icon = stateIcons[state] || CircleSlash2;
-  return <section className={cn("hui-state", `is-${state}`, className)} role={state === "error" ? "alert" : "status"}><Icon aria-hidden="true" /><h2>{title}</h2>{body ? <p>{body}</p> : null}{action ? <Button variant={state === "error" ? "secondary" : "primary"} onClick={action.onClick}>{action.label}</Button> : null}</section>;
+  return <section className={cn("hui-state", `is-${state}`, className)} role={state === "error" ? "alert" : "status"}><Icon aria-hidden="true" /><h2>{title}</h2>{body ? <p>{body}</p> : null}{React.isValidElement(action) ? action : action ? <Button variant={state === "error" ? "secondary" : "primary"} onClick={action.onClick}>{action.label}</Button> : null}{children}</section>;
 }
 
 export const EmptyState = (props) => <StateMessage state="empty" {...props} />;

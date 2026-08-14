@@ -1,19 +1,42 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import "@fontsource-variable/inter";
-import "@fontsource-variable/noto-sans-sc";
-import "@fontsource-variable/noto-serif-sc";
-import "@fontsource/instrument-serif/400.css";
-import "@fontsource/dm-mono/400.css";
+import "@hatch/ui/fonts";
+import "@hatch/ui/theme.css";
+import { Button, HatchBrand, HatchUIProvider, UnavailableState } from "@hatch/ui";
 import { BuyerPortalV2 } from "./BuyerPortalV2.jsx";
 import { CreatorPortalV2 } from "./CreatorPortalV2.jsx";
-import { HatchBrand } from "./HatchBrand.jsx";
-import { AtmosphericPaper, ToastViewport, TooltipProvider } from "./components/ui/index.js";
 import { dashboardRequest } from "./data.js";
-import "../../packages/brand/tokens.css";
 import "./styles.css";
 
 const CREATOR_ROOT = "/studio";
+
+class AppErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { failed: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(error, details) {
+    console.error("Hatch Web failed to render", error, details);
+  }
+
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <main className="loading-page">
+        <UnavailableState
+          title="Hatch could not open this page."
+          body="Reload to try again. Your account and product data have not been changed."
+          action={{ label: "Reload", onClick: () => window.location.reload() }}
+        />
+      </main>
+    );
+  }
+}
 
 function App() {
   const location = useBrowserLocation();
@@ -176,16 +199,15 @@ function RoleBoundary({ navigate }) {
       <HatchBrand className="loading-brand" />
       <h1>Creator access is required.</h1>
       <p>This account can use purchased Agents, but it cannot edit Creator products.</p>
-      <button className="primary" type="button" onClick={() => navigate("/library", { replace: true })}>Open your library</button>
+      <Button type="button" onClick={() => navigate("/library", { replace: true })}>Open your library</Button>
     </main>
   );
 }
 
 createRoot(document.getElementById("root")).render(
-  <TooltipProvider>
-    <AtmosphericPaper className="hatch-app-paper">
+  <AppErrorBoundary>
+    <HatchUIProvider atmosphere toasts className="hatch-app-paper">
       <App />
-      <ToastViewport />
-    </AtmosphericPaper>
-  </TooltipProvider>
+    </HatchUIProvider>
+  </AppErrorBoundary>
 );

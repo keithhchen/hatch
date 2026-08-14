@@ -3,9 +3,7 @@ import * as LabelPrimitive from "@radix-ui/react-label";
 import * as CheckboxPrimitive from "@radix-ui/react-checkbox";
 import * as RadioGroupPrimitive from "@radix-ui/react-radio-group";
 import * as SwitchPrimitive from "@radix-ui/react-switch";
-import { CalendarDays, Check, FileUp, Search, X } from "lucide-react";
-import { DayPicker } from "react-day-picker";
-import { Popover, PopoverContent, PopoverTrigger } from "./Overlays.jsx";
+import { Check, FileUp, Search, X } from "lucide-react";
 import { Button } from "./Button.jsx";
 import { cn } from "./utils.js";
 
@@ -41,7 +39,7 @@ export const SearchInput = React.forwardRef(function SearchInput({ className, on
   return (
     <div className={cn("hui-search", className)}>
       <Search aria-hidden="true" />
-      <input ref={ref} value={value} {...props} />
+      <input ref={ref} value={value} {...props} aria-label={props["aria-label"] ?? "Search"} />
       {onClear && value ? <button type="button" aria-label="Clear search" onClick={onClear}><X aria-hidden="true" /></button> : null}
     </div>
   );
@@ -100,18 +98,25 @@ export function FileUploader({ accept, multiple = false, disabled = false, onFil
       <strong>{label}</strong>
       {hint ? <span>{hint}</span> : null}
       <Button type="button" variant="secondary" size="small" disabled={disabled} onClick={() => inputRef.current?.click()}>Browse</Button>
-      <input ref={inputRef} className="hui-visually-hidden" type="file" accept={accept} multiple={multiple} disabled={disabled} onChange={(event) => commit(event.target.files)} />
+      <input ref={inputRef} className="hui-visually-hidden" type="file" accept={accept} multiple={multiple} disabled={disabled} aria-label={label} onChange={(event) => commit(event.target.files)} />
     </div>
   );
 }
 
-export function DatePicker({ value, onChange, placeholder = "Choose a date", disabled, className }) {
-  return (
-    <Popover>
-      <PopoverTrigger asChild><Button className={cn("hui-date-trigger", className)} variant="secondary" disabled={disabled} leading={<CalendarDays aria-hidden="true" />}>{value ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(value) : placeholder}</Button></PopoverTrigger>
-      <PopoverContent className="hui-calendar" align="start">
-        <DayPicker mode="single" selected={value} onSelect={onChange} />
-      </PopoverContent>
-    </Popover>
-  );
+export function DatePicker({ value, onChange, label = "Choose a date", disabled, className, ...props }) {
+  const normalized = value instanceof Date && !Number.isNaN(value.valueOf())
+    ? `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`
+    : typeof value === "string" ? value.slice(0, 10) : "";
+  return <input
+    {...props}
+    className={cn("hui-input hui-date-input", className)}
+    type="date"
+    aria-label={props["aria-label"] ?? label}
+    value={normalized}
+    disabled={disabled}
+    onChange={(event) => {
+      const [year, month, day] = event.target.value.split("-").map(Number);
+      onChange?.(event.target.value ? new Date(year, month - 1, day) : undefined, event);
+    }}
+  />;
 }

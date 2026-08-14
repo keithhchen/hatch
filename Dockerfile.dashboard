@@ -1,11 +1,12 @@
 FROM node:22-slim AS build
 
 WORKDIR /workspace/creator-dashboard
+COPY packages/ui /workspace/packages/ui
+COPY packages/brand /workspace/packages/brand
 COPY creator-dashboard/package.json creator-dashboard/package-lock.json ./
 RUN npm ci
 COPY creator-dashboard ./
 COPY packages/commerce /workspace/packages/commerce
-COPY packages/brand /workspace/packages/brand
 RUN npm run build
 
 FROM node:22-slim AS production
