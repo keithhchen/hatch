@@ -240,7 +240,10 @@ export class InMemoryDistillationGraphStore implements DistillationGraphStore {
     validateArtifact(record);
     const existing = this.artifacts.get(record.artifactId);
     if (existing) {
-      assertSameJson(existing, record, `Artifact ${record.artifactId} is immutable`);
+      // `createdAt` is owned by the first graph insertion. A retry may rebuild
+      // the same content-addressed ArtifactRef with a fresh local timestamp;
+      // that must remain an idempotent read, not a false immutability conflict.
+      assertSameJson(artifactIdentity(existing), artifactIdentity(record), `Artifact ${record.artifactId} is immutable`);
       return structuredClone(existing);
     }
     if (record.runId) {
@@ -539,6 +542,11 @@ function assertArtifactRefs(
 
 function assertSameJson(left: unknown, right: unknown, message: string): void {
   if (JSON.stringify(left) !== JSON.stringify(right)) throw new Error(message);
+}
+
+function artifactIdentity(record: ImmutableArtifactRecord): Omit<ImmutableArtifactRecord, "createdAt"> {
+  const { createdAt: _createdAt, ...identity } = record;
+  return identity;
 }
 
 function runIdentity(run: DistillationRun): Omit<DistillationRun, "createdAt"> {

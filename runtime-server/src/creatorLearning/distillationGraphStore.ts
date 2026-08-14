@@ -206,7 +206,9 @@ export class PostgresDistillationGraphStore implements DistillationGraphStore {
     `, [record.artifactId]);
     if (existing.rows[0]) {
       const current = artifactFromRow(existing.rows[0]);
-      assertSameJson(current, record, `Artifact ${record.artifactId} is immutable`);
+      // The first graph insertion owns `createdAt`; retries may reconstruct
+      // the same content-addressed ArtifactRef with a fresh local timestamp.
+      assertSameJson(artifactIdentity(current), artifactIdentity(record), `Artifact ${record.artifactId} is immutable`);
       return current;
     }
     try {
@@ -222,7 +224,7 @@ export class PostgresDistillationGraphStore implements DistillationGraphStore {
       const duplicate = await this.pool.query<ArtifactRow>(`SELECT * FROM hatch_creator_distillation_artifacts WHERE artifact_id = $1`, [record.artifactId]);
       const current = duplicate.rows[0] ? artifactFromRow(duplicate.rows[0]) : undefined;
       if (!current) throw error;
-      assertSameJson(current, record, `Artifact ${record.artifactId} is immutable`);
+      assertSameJson(artifactIdentity(current), artifactIdentity(record), `Artifact ${record.artifactId} is immutable`);
       return current;
     }
   }
@@ -366,6 +368,11 @@ function jsonArray(value: unknown): string[] { return Array.isArray(value) ? val
 function jsonObject(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 function iso(value: string | Date): string { return value instanceof Date ? value.toISOString() : new Date(value).toISOString(); }
 function assertSameJson(left: unknown, right: unknown, message: string): void { if (JSON.stringify(left) !== JSON.stringify(right)) throw new Error(message); }
+
+function artifactIdentity(record: ImmutableArtifactRecord): Omit<ImmutableArtifactRecord, "createdAt"> {
+  const { createdAt: _createdAt, ...identity } = record;
+  return identity;
+}
 
 function runIdentity(run: DistillationRun): Omit<DistillationRun, "createdAt"> {
   const { createdAt: _createdAt, ...identity } = run;

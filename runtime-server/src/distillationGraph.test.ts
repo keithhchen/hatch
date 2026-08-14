@@ -40,7 +40,8 @@ test("immutable artifacts and event edges are enforced", async () => {
   await graph.ensureRun({ id: "distill_1", taskId: "task_1", creatorId: "creator_1", createdAt: "2026-08-15T00:00:00.000Z" });
   await graph.createRevision({ id: "factory_1", runId: "distill_1", taskId: "task_1", revision: 1, sourceSnapshotId: "snapshot_1", createdAt: "2026-08-15T00:00:00.000Z" });
   await graph.registerArtifact(artifact);
-  await graph.registerArtifact(artifact);
+  const retried = await graph.registerArtifact({ ...artifact, createdAt: "2026-08-15T00:00:01.000Z" });
+  assert.equal(retried.createdAt, artifact.createdAt);
   await assert.rejects(() => graph.registerArtifact({ ...artifact, sha256: "sha256:" + "b".repeat(64) }), /immutable/);
   await assert.rejects(() => graph.appendEvent({
     ...event({ id: "evt_bad", eventKey: "bad", type: "artifact_emitted", artifactIds: ["missing"] }),
