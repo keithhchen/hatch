@@ -213,6 +213,16 @@ const registry = createServer(async (request, response) => {
     if (request.method === "GET" && url.pathname === "/v1/public/products") {
       return json(response, 200, [...agents.values()].filter((entry) => entry.status === "published"));
     }
+    const publicCreatorMatch = url.pathname.match(/^\/v1\/public\/creators\/([^/]+)$/);
+    if (request.method === "GET" && publicCreatorMatch) {
+      const creatorId = decodeURIComponent(publicCreatorMatch[1]);
+      const products = [...agents.values()].filter((entry) => entry.status === "published" && entry.creator_id === creatorId);
+      if (!products.length) return json(response, 404, { detail: "Creator not found." });
+      return json(response, 200, {
+        creator: { id: creatorId, name: products[0].creator_name },
+        products
+      });
+    }
     if (request.method === "GET" && url.pathname === "/v1/creator/products") {
       const account = authenticatedAccount(request);
       return account?.role === "creator" ? json(response, 200, [...agents.values()]) : json(response, 401, { detail: "Creator token required." });

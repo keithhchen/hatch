@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { HatchBrand } from "./HatchBrand.jsx";
 import { StorefrontDetails } from "./StorefrontDetails.jsx";
+import { creatorPublicModel } from "./storefrontModel.js";
 import "./buyerPortalV2.css";
 
 const DEFAULT_DOWNLOAD_URL = "https://github.com/keithhchen/hatch/releases/latest";
@@ -224,12 +225,13 @@ function CatalogPage({ request, navigate, session }) {
 
 function CreatorPublicPage({ creatorId, request, navigate, session }) {
   const endpoint = `/v1/public/creators/${encodeURIComponent(creatorId)}`;
-  const resource = useRemote(async (signal) => unwrap(await callRequest(request, endpoint, { signal }), ["creator"]), endpoint);
-  usePageTitle(resource.data?.creator?.name ? `${resource.data.creator.name} · Hatch` : "Creator · Hatch");
+  const resource = useRemote(async (signal) => callRequest(request, endpoint, { signal }), endpoint);
+  const publicModel = creatorPublicModel(resource.data);
+  usePageTitle(publicModel.creator?.name ? `${publicModel.creator.name} · Hatch` : "Creator · Hatch");
   if (resource.status === "loading") return <div className="buyer-v2__container buyer-v2__page"><PageSkeleton label="Loading creator" /></div>;
   if (resource.status === "error") return <div className="buyer-v2__container buyer-v2__page"><RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} returnTo={`/creators/${encodeURIComponent(creatorId)}`} /></div>;
-  const creator = resource.data?.creator ?? resource.data;
-  const products = collectionFrom(resource.data, ["products", "agents", "items"]);
+  const creator = publicModel.creator;
+  const products = publicModel.products;
   return (
     <div className="buyer-v2__container buyer-v2__page">
       <RouterLink className="buyer-v2__back-link" to={EXPLORE_ROOT} navigate={navigate}>← Explore</RouterLink>
@@ -276,13 +278,18 @@ function ProductPage({ route, request, navigate, session, downloadUrl }) {
 
   const examples = arrayValue(product.examples || product.proof, []);
   const desktopRequirement = product.desktop_requirement || "macOS app and a Hatch account. You select the Workspace before the Agent can work with local files.";
+  const productCreatorId = product?.creator_id ?? product?.creator?.id;
+  const productCreatorName = creatorName(product);
+  const productCreatorByline = productCreatorId
+    ? <RouterLink className="storefront-shared__creator-link" to={`/creators/${encodeURIComponent(productCreatorId)}`} navigate={navigate}>{productCreatorName}</RouterLink>
+    : productCreatorName;
 
   return (
     <div className="buyer-v2__container buyer-v2__page">
       <RouterLink className="buyer-v2__back-link" to={EXPLORE_ROOT} navigate={navigate}>← Explore</RouterLink>
       <StorefrontDetails
         product={product}
-        creatorName={creatorName(product)}
+        creatorName={productCreatorByline}
         offer={offerFor(product)}
         offerText={product.availability === "published" ? offerLabel(offerFor(product)) : "Unavailable in this release"}
         desktopRequirement={desktopRequirement}

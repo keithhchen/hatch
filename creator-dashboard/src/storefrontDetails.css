@@ -1,6 +1,7 @@
 .storefront-shared { overflow: hidden; border: 1px solid var(--hatch-border-subtle, rgba(54,41,31,.1)); border-radius: 20px; background: #f9f5ee; color: var(--hatch-text-primary, #352d27); }
 .storefront-shared__hero { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(260px, .6fr); gap: clamp(24px, 5vw, 70px); align-items: end; padding: clamp(26px, 5vw, 64px); }
-.storefront-shared__eyebrow { display: block; color: var(--hatch-text-secondary, #74675e); font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.storefront-shared__eyebrow { position: relative; z-index: 1; display: block; color: var(--hatch-text-secondary, #74675e); font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.storefront-shared__creator-link { color: inherit; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
 .storefront-shared__hero h1, .storefront-shared__hero h2 { max-width: 760px; margin: 15px 0 12px; font-family: var(--hatch-font-display, Georgia, serif); font-size: clamp(42px, 6vw, 75px); font-weight: 400; line-height: .96; letter-spacing: -.045em; }
 .storefront-shared__hero > div > p { max-width: 680px; color: var(--hatch-text-secondary, #74675e); font-size: 15px; line-height: 1.65; }
 .storefront-shared__hero > div > small { color: var(--hatch-text-secondary, #74675e); }

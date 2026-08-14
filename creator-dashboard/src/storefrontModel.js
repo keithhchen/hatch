@@ -31,6 +31,22 @@ export function storefrontModel(product = {}, options = {}) {
   };
 }
 
+// The public creator endpoint returns an envelope: { creator, products }.
+// Keep the envelope intact so the page can render the creator and its products
+// from the same Registry-backed response.
+export function creatorPublicModel(payload = {}) {
+  const value = payload && typeof payload === "object" ? payload : {};
+  const creator = value.creator && typeof value.creator === "object" ? value.creator : value;
+  const products = Array.isArray(value.products)
+    ? value.products
+    : Array.isArray(value.agents)
+      ? value.agents
+      : Array.isArray(value.items)
+        ? value.items
+        : [];
+  return { creator, products };
+}
+
 export function payoutActionLabel(status) {
   if (status === "not_connected") return "Connect payouts";
   if (["onboarding_incomplete", "under_review", "restricted"].includes(status)) return "Continue setup";

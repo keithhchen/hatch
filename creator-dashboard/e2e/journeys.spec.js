@@ -10,6 +10,20 @@ test.beforeEach(async ({}, testInfo) => {
   test.skip(testInfo.project.name !== "desktop-1280", "Full journeys run once; responsive coverage is a separate matrix.");
 });
 
+test("public Creator and Product pages stay connected by UUID", async ({ page }) => {
+  await page.goto("/creators/6f6a3d24-48af-4f27-9c50-0d4f7e4e8a21");
+  await expect(page.getByRole("heading", { level: 1, name: "Maya Creator" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 2, name: "Signal Resume Review" })).toBeVisible();
+
+  await page.getByRole("link", { name: "View details" }).click();
+  await expect(page).toHaveURL(/\/products\/f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42$/);
+  const creatorLink = page.getByRole("link", { name: "Maya Creator", exact: true }).first();
+  await expect(creatorLink).toHaveAttribute("href", "/creators/6f6a3d24-48af-4f27-9c50-0d4f7e4e8a21");
+  await creatorLink.click();
+  await expect(page).toHaveURL(/\/creators\/6f6a3d24-48af-4f27-9c50-0d4f7e4e8a21$/);
+  await expect(page.getByRole("heading", { level: 2, name: "Signal Resume Review" })).toBeVisible();
+});
+
 test("anonymous Buyer completes free checkout and can recover every durable route", async ({ page, context }) => {
   await page.goto("/products/f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42");
   await expectNoSeriousAccessibilityViolations(page);

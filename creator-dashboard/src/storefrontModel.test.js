@@ -1,11 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  creatorPublicModel,
   creatorOrderQuery,
   payoutActionLabel,
   payoutCanRetry,
   storefrontModel
 } from "./storefrontModel.js";
+
+test("creator public model preserves the creator/products envelope", () => {
+  const model = creatorPublicModel({
+    creator: { id: "creator-1", name: "Seth" },
+    products: [{ product_id: "product-1", product_name: "Alpha Lite" }]
+  });
+  assert.equal(model.creator.name, "Seth");
+  assert.deepEqual(model.products, [{ product_id: "product-1", product_name: "Alpha Lite" }]);
+});
 
 test("shared storefront model preserves client-safe content and never invents missing evidence", () => {
   const model = storefrontModel({
