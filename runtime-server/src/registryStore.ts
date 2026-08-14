@@ -46,6 +46,8 @@ export type AgentAccessGrant = {
   agent_id: string;
   product_id: string;
   order_id?: string;
+  /** Current launch contract: every free purchase is permanent access. */
+  access_mode?: "unmetered" | "metered";
   purchased_corpus_digest?: string;
   version_policy?: "pinned" | "track_current_compatible";
   status: "active" | "revoked" | "disabled";
@@ -587,6 +589,7 @@ export class RegistryStoreTs {
           ...existing,
           ...(rebindCanonicalIdentity ? { entitlement_id: entitlementId } : {}),
           product_id: corpus.product_id,
+          access_mode: "unmetered" as const,
           status: "active" as const,
           order_id: orderId,
           purchased_corpus_digest: boundDigest,
@@ -612,6 +615,7 @@ export class RegistryStoreTs {
       creator_id: creatorId,
       agent_id: agentId,
       product_id: corpus.product_id,
+      access_mode: "unmetered" as const,
       order_id: orderId,
       purchased_corpus_digest: boundDigest,
       version_policy: versionPolicy,
@@ -1633,6 +1637,7 @@ function rowToAccess(row: Record<string, any>): AgentAccessGrant {
     creator_id: String(row.creator_id),
     agent_id: String(row.agent_id),
     product_id: String(row.product_id),
+    access_mode: "unmetered",
     ...(row.order_id ? { order_id: String(row.order_id) } : {}),
     ...(row.purchased_corpus_digest ? { purchased_corpus_digest: String(row.purchased_corpus_digest) } : {}),
     version_policy: row.version_policy === "track_current_compatible" ? "track_current_compatible" : "pinned",
@@ -1656,6 +1661,7 @@ function rowToAccessPresentation(row: Record<string, any>): AgentAccessPresentat
     creator_id: String(row.creator_id),
     agent_id: String(row.agent_id),
     product_id: String(row.product_id),
+    access_mode: "unmetered",
     ...(row.order_id ? { order_id: String(row.order_id) } : {}),
     ...(row.purchased_corpus_digest ? { purchased_corpus_digest: String(row.purchased_corpus_digest) } : {}),
     version_policy: row.version_policy === "track_current_compatible" ? "track_current_compatible" : "pinned",

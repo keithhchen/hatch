@@ -534,6 +534,8 @@ type SessionBinding = {
   productId: string;
   corpusDigest: string;
   purchasedCorpusDigest?: string;
+  /** Free purchases are permanent access; metered accounting is opt-in. */
+  accessMode?: "unmetered" | "metered";
   versionPolicy?: "pinned" | "track_current_compatible";
   versionHistory?: import("./entitlements.js").EntitlementVersionHistory[];
   agentCorpus?: AgentCorpus;
@@ -1898,6 +1900,7 @@ async function handleRuntimeSocket(
                 version_policy: binding.versionPolicy ?? "pinned",
                 version_history: binding.versionHistory ?? []
               } : {}),
+              ...(binding.entitlementId ? { access_mode: binding.accessMode ?? "unmetered" } : {}),
               ...(binding.entitlementId ? { entitlement_id: binding.entitlementId } : {}),
               client_version: message.client_version,
               local_tools: message.local_tools
@@ -1922,6 +1925,7 @@ async function handleRuntimeSocket(
                 version_policy: binding.versionPolicy ?? "pinned",
                 version_history: binding.versionHistory ?? []
               } : {}),
+              ...(binding.entitlementId ? { access_mode: binding.accessMode ?? "unmetered" } : {}),
               ...(binding.entitlementId ? { entitlement_id: binding.entitlementId } : {}),
               ...(binding.agentCorpus ? {
                 creator_agent: {
@@ -3006,7 +3010,11 @@ async function resolveSessionBinding(
         : {}),
       agentCorpus: resolved.corpus,
       agentCorpusRoot: resolved.root,
-      ...(corpusEntitlement ? { entitlementId: corpusEntitlement.entitlement_id, orderId: corpusEntitlement.order_id } : {}),
+      ...(corpusEntitlement ? {
+        entitlementId: corpusEntitlement.entitlement_id,
+        orderId: corpusEntitlement.order_id,
+        accessMode: corpusEntitlement.access_mode ?? "unmetered"
+      } : {}),
       explicit: true
     };
   }
@@ -3048,6 +3056,7 @@ async function resolveSessionBinding(
       ...(entitlement.purchased_corpus_digest
         ? { purchasedCorpusDigest: entitlement.purchased_corpus_digest }
         : {}),
+      accessMode: entitlement.access_mode ?? "unmetered",
       entitlementId: entitlement.entitlement_id,
       orderId: entitlement.order_id,
       agentCorpus: resolved.corpus,
@@ -3315,7 +3324,9 @@ function bearerToken(req: http.IncomingMessage): string | undefined {
 }
 
 function deliveryBindingFromSession(binding: SessionBinding): DeliveryBinding | undefined {
-  if (!binding.entitlementId || !binding.orderId) return undefined;
+  // Permanent free purchases do not reserve, consume, or produce delivery
+  // events. Metering is an explicit future paid-product capability.
+  if (binding.accessMode !== "metered" || !binding.entitlementId || !binding.orderId) return undefined;
   return {
     entitlementId: binding.entitlementId,
     orderId: binding.orderId,

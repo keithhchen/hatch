@@ -59,7 +59,7 @@ export function payoutCanRetry(status) {
 
 export function creatorOrderQuery(filters = {}) {
   const params = new URLSearchParams();
-  for (const key of ["order", "payment", "delivery", "product", "from", "to", "refund", "limit"]) {
+  for (const key of ["order", "payment", "product", "from", "to", "refund", "limit"]) {
     const value = filters[key];
     if (value !== undefined && value !== null && String(value).trim()) params.set(key, String(value).trim());
   }

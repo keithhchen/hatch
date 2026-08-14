@@ -196,6 +196,7 @@ export class CommerceService {
           gross_minor: grossMinor,
           currency,
           included_units: includedUnits,
+          access_mode: "metered",
           payment_status: "succeeded",
           payment_id: checkoutInput.payment_id,
           refund_policy_version: checkoutInput.refund_policy_version
@@ -247,11 +248,11 @@ export class CommerceService {
     const grossMinor = input.gross_minor ?? input.amount_minor;
     requireNonNegativeInteger(grossMinor, "gross_minor");
     const quote = normalizedCheckoutQuote(input, grossMinor);
-    const includedUnits = input.included_units ?? 1;
-    requirePositiveInteger(includedUnits, "included_units");
     requireFields(input, ["buyer_id", "creator_id", "agent_id", "product_id", "corpus_digest", "currency"]);
 
     const isFree = grossMinor === 0;
+    const includedUnits = isFree ? undefined : input.included_units ?? 1;
+    if (includedUnits !== undefined) requirePositiveInteger(includedUnits, "included_units");
     if (!isFree && (typeof input.payment_id !== "string" || !input.payment_id)) {
       throw new CommerceInvariantError("payment_required", "Paid checkout requires a payment_id");
     }
@@ -334,7 +335,8 @@ export class CommerceService {
       ...quote,
       gross_minor: grossMinor,
       currency,
-      included_units: includedUnits,
+      ...(isFree ? {} : { included_units: includedUnits }),
+      access_mode: isFree ? "unmetered" : "metered",
       payment_status: isFree ? "not_required" : "succeeded",
       payment_id: isFree ? null : input.payment_id,
       refund_policy_version: input.refund_policy_version
@@ -347,7 +349,8 @@ export class CommerceService {
       purchased_release_id: input.release_id,
       version_policy: input.version_policy ?? "pinned",
       valid_from: input.valid_from,
-      granted_units: includedUnits,
+      access_mode: isFree ? "unmetered" : "metered",
+      ...(isFree ? {} : { granted_units: includedUnits }),
       expires_at: input.valid_until ?? input.expires_at
     });
 
@@ -455,6 +458,15 @@ export class CommerceService {
     const entitlement = projectEntitlement(this.ledger.listEvents(), input.entitlement_id, { now });
     if (!entitlement) {
       throw new CommerceInvariantError("entitlement_not_found", `Entitlement ${input.entitlement_id} was not found`);
+    }
+    if (entitlement.access_mode === "unmetered") {
+      if (entitlement.status !== "active") {
+        throw new CommerceInvariantError("entitlement_not_active", `Entitlement ${input.entitlement_id} is ${entitlement.status}`);
+      }
+      throw new CommerceInvariantError(
+        "access_unmetered",
+        "This purchase grants permanent access and does not use reservations or delivery units."
+      );
     }
     const reservationId = input.reservation_id ?? stableId("reservation", idempotencyKey);
     const event = await this.ledger.append("entitlement.units_reserved", compact({

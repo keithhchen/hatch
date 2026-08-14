@@ -124,7 +124,7 @@ function CreatorHome({ token, request, navigate, profile }) {
         const next = nextCreatorAction(products);
         const metrics = overview?.metrics ?? {};
         return <>
-          <PageHeader eyebrow="Creator home" title={`${firstName(profile?.display_name)}, here’s the next useful step.`} body="Move one approved method from Factory to a shareable product, then follow access through delivery." />
+          <PageHeader eyebrow="Creator home" title={`${firstName(profile?.display_name)}, here’s the next useful step.`} body="Move one approved method from Factory to a shareable product, then follow who has access." />
           <section className="cpv2-grid cpv2-home-grid" aria-label="Creator overview">
             <article className="cpv2-card cpv2-next-card">
               <StatusChip status={next.tone}>{next.label}</StatusChip>
@@ -133,14 +133,14 @@ function CreatorHome({ token, request, navigate, profile }) {
               <button className="cpv2-primary" type="button" onClick={() => navigate(next.href)}>{next.action} <span aria-hidden="true">→</span></button>
             </article>
             <article className="cpv2-card cpv2-balance-card">
-              <span className="cpv2-kicker">Free access</span>
+              <span className="cpv2-kicker">Permanent access</span>
               <strong>{metrics.order_count ?? orders.length}</strong>
               <p>People who added one of your published products to their Hatch account.</p>
               <dl><div><dt>Products</dt><dd>{products.length}</dd></div><div><dt>Orders</dt><dd>{metrics.order_count ?? orders.length}</dd></div></dl>
               <button className="cpv2-secondary cpv2-inverse" type="button" onClick={() => navigate(`${ROOT}/orders`)}>View access records</button>
             </article>
           </section>
-          <SectionHeading eyebrow="Recent activity" title="Orders and delivery" action="View all orders" onAction={() => navigate(`${ROOT}/orders`)} />
+          <SectionHeading eyebrow="Recent activity" title="Orders and access" action="View all orders" onAction={() => navigate(`${ROOT}/orders`)} />
           {orders.length ? <OrderList orders={orders} onOpen={(order) => navigate(`${ROOT}/orders/${encodeURIComponent(idOf(order, "order"))}`)} /> : <EmptyState title="No access records yet" body="Records appear here after someone adds a published product to their account." />}
         </>;
       }}
@@ -192,7 +192,7 @@ function PendingFactoryRuns({ runs, navigate }) {
 
 function ProductCard({ product, onOpen }) {
   return <article className="cpv2-card cpv2-product-card">
-    <div className="cpv2-card-top"><StatusChip status={product.status}>{productStatus(product.status)}</StatusChip><span>{product.status === "published" ? "Free access" : "Not published"}</span></div>
+    <div className="cpv2-card-top"><StatusChip status={product.status}>{productStatus(product.status)}</StatusChip><span>{product.status === "published" ? "Permanent access" : "Not published"}</span></div>
     <h2>{product.name ?? product.product_name ?? "Untitled product"}</h2>
     <p>{product.promise ?? product.description ?? "Add a clear Buyer-facing promise."}</p>
     <div className="cpv2-card-foot"><small>{shortDigest(product.corpus_digest ?? product.active_release?.corpus_digest)}</small><button className="cpv2-secondary" type="button" onClick={onOpen}>Open product</button></div>
@@ -252,7 +252,7 @@ function ProductOverview({ product, candidate, navigate, token, request, onChang
       <span className="cpv2-kicker">Publishing workflow</span><h2>One deliberate gate at a time.</h2>
       <ol>{steps.map((step, index) => <li key={step.label} className={step.done ? "is-done" : ""}><span>{step.done ? "✓" : index + 1}</span><strong>{step.label}</strong>{step.href ? step.external ? <a href={safePublicUrl(step.href)} target="_blank" rel="noreferrer">{step.action}</a> : <button type="button" onClick={() => navigate(step.href)}>{step.action}</button> : <small>Complete the previous step</small>}</li>)}</ol>
     </article>
-    <article className="cpv2-card cpv2-facts"><span className="cpv2-kicker">Current Product</span><dl><Fact label="Candidate" value={candidate ? `v${candidate.version ?? "—"} · ${approvalLabel(candidate)}` : "Not ready"} /><Fact label="Access" value="Free · 1 delivery" /><Fact label="Release" value={product.active_release?.label ?? product.release?.label ?? product.release_label ?? "Not published"} /><Fact label="Public URL" value={product.public_url ?? "Not public"} /></dl></article>
+    <article className="cpv2-card cpv2-facts"><span className="cpv2-kicker">Current Product</span><dl><Fact label="Candidate" value={candidate ? `v${candidate.version ?? "—"} · ${approvalLabel(candidate)}` : "Not ready"} /><Fact label="Access" value="Free · Permanent access" /><Fact label="Release" value={product.active_release?.label ?? product.release?.label ?? product.release_label ?? "Not published"} /><Fact label="Public URL" value={product.public_url ?? "Not public"} /></dl></article>
   </div>{withdraw.error ? <InlineError>{withdraw.error}</InlineError> : null}{withdraw.done ? <SuccessNotice>The Product was withdrawn. Existing receipts and access remain available.</SuccessNotice> : null}{alreadyPublished ? <article className="cpv2-card cpv2-panel cpv2-withdraw"><SectionHeading eyebrow="Product lifecycle" title="Withdraw this Product" /><p>Withdrawal stops new access. It does not erase immutable releases, receipts, or existing access.</p><label>Audit reason<textarea value={withdraw.reason} onChange={(event) => setWithdraw((current) => ({ ...current, reason: event.target.value, confirming: false }))} placeholder="Why should new access stop?" /></label>{withdraw.confirming ? <div className="cpv2-confirm"><p><strong>Withdraw the public Product?</strong><br />People with existing access keep their records.</p><button className="cpv2-secondary" type="button" onClick={() => setWithdraw((current) => ({ ...current, confirming: false }))}>Cancel</button><button className="cpv2-danger" type="button" disabled={withdraw.busy || !withdraw.reason.trim()} onClick={withdrawProduct}>{withdraw.busy ? "Withdrawing…" : "Confirm withdrawal"}</button></div> : <button className="cpv2-danger" type="button" disabled={!withdraw.reason.trim()} onClick={() => setWithdraw((current) => ({ ...current, confirming: true }))}>Review withdrawal</button>}</article> : null}</>;
 }
 
@@ -273,7 +273,7 @@ function VersionsPanel({ product, candidate, productId, navigate }) {
 
 function DataControlsPanel({ product }) {
   const boundaries = arrayOf(product.boundaries ?? product.product_boundaries);
-  return <div className="cpv2-detail-grid"><article className="cpv2-card cpv2-panel"><SectionHeading eyebrow="Product boundaries" title="What this product will not do" />{boundaries.length ? <ul className="cpv2-bullets">{boundaries.map((item, index) => <li key={index}>{typeof item === "string" ? item : item.label ?? item.description}</li>)}</ul> : <EmptyInline>Add explicit boundaries before publishing.</EmptyInline>}</article><article className="cpv2-card cpv2-panel"><SectionHeading eyebrow="Privacy" title="Buyer work stays private" /><p>Access and delivery records never include Workspace paths, conversations, tool arguments, file content, or artifacts.</p><dl><Fact label="Corpus digest" value={shortDigest(product.corpus_digest ?? product.active_release?.corpus_digest)} /><Fact label="Version policy" value={product.version_policy ?? "Pinned to purchased release"} /></dl></article></div>;
+  return <div className="cpv2-detail-grid"><article className="cpv2-card cpv2-panel"><SectionHeading eyebrow="Product boundaries" title="What this product will not do" />{boundaries.length ? <ul className="cpv2-bullets">{boundaries.map((item, index) => <li key={index}>{typeof item === "string" ? item : item.label ?? item.description}</li>)}</ul> : <EmptyInline>Add explicit boundaries before publishing.</EmptyInline>}</article><article className="cpv2-card cpv2-panel"><SectionHeading eyebrow="Privacy" title="Buyer work stays private" /><p>Access records never include Workspace paths, conversations, tool arguments, file content, or artifacts.</p><dl><Fact label="Corpus digest" value={shortDigest(product.corpus_digest ?? product.active_release?.corpus_digest)} /><Fact label="Version policy" value={product.version_policy ?? "Pinned to purchased release"} /></dl></article></div>;
 }
 
 function FactoryPage({ token, request, productId, runId, navigate, registerNavigationGuard }) {
@@ -550,7 +550,7 @@ function PreviewPage({ token, request, navigate, productId }) {
   if (published) {
     const publicUrl = canonicalPublicUrl(published.canonical_url ?? published.public_url ?? published.product?.canonical_url ?? published.product?.public_url)
       ?? (isUuidV4(productId) ? `/products/${productId}` : undefined);
-    return <section className="cpv2-published" aria-live="polite"><span aria-hidden="true">✓</span><h1>Your Product is live</h1><p>People can now get free access to this immutable release.</p><label>Share link<input readOnly value={publicUrl ?? "Publication completed"} onFocus={(event) => event.target.select()} /></label><div>{publicUrl ? <button className="cpv2-primary" type="button" onClick={() => copy(publicUrl)}>{copied ? "Copied" : "Copy link"}</button> : null}{publicUrl ? <a className="cpv2-secondary" href={safePublicUrl(publicUrl)} target="_blank" rel="noreferrer">View storefront</a> : null}<button className="cpv2-secondary" type="button" onClick={() => navigate(`${ROOT}/products/${encodeURIComponent(productId)}`)}>Back to Product</button></div>{error ? <InlineError>{error}</InlineError> : null}</section>;
+    return <section className="cpv2-published" aria-live="polite"><span aria-hidden="true">✓</span><h1>Your Product is live</h1><p>People can now purchase this immutable release at no charge and keep permanent access.</p><label>Share link<input readOnly value={publicUrl ?? "Publication completed"} onFocus={(event) => event.target.select()} /></label><div>{publicUrl ? <button className="cpv2-primary" type="button" onClick={() => copy(publicUrl)}>{copied ? "Copied" : "Copy link"}</button> : null}{publicUrl ? <a className="cpv2-secondary" href={safePublicUrl(publicUrl)} target="_blank" rel="noreferrer">View storefront</a> : null}<button className="cpv2-secondary" type="button" onClick={() => navigate(`${ROOT}/products/${encodeURIComponent(productId)}`)}>Back to Product</button></div>{error ? <InlineError>{error}</InlineError> : null}</section>;
   }
 
   return <PageBoundary resource={resource} title="We couldn't build the storefront preview">{(payload) => {
@@ -563,11 +563,11 @@ function PreviewPage({ token, request, navigate, productId }) {
     const ready = readiness.every((item) => item.ready);
     return <>
       <Breadcrumb onClick={() => navigate(`${ROOT}/products/${encodeURIComponent(productId)}`)}>Product</Breadcrumb>
-      <PageHeader eyebrow="Storefront preview" title="See exactly what people will see." body="This preview is pinned to the approved candidate. Access is free after you publish." />
+      <PageHeader eyebrow="Storefront preview" title="See exactly what people will see." body="This preview is pinned to the approved candidate. Access is free and permanent after you publish." />
       {error ? <InlineError>{error}</InlineError> : null}
       <div className="cpv2-preview-tools"><span className="cpv2-private-badge">Not public</span><div role="group" aria-label="Preview viewport"><button type="button" className={viewport === "desktop" ? "is-active" : ""} aria-pressed={viewport === "desktop"} onClick={() => setViewport("desktop")}>Desktop</button><button type="button" className={viewport === "mobile" ? "is-active" : ""} aria-pressed={viewport === "mobile"} onClick={() => setViewport("mobile")}>Mobile</button></div></div>
       <div className={`cpv2-storefront-frame is-${viewport}`}><StorefrontDetails product={product} creatorName={preview.creator?.display_name ?? preview.creator_name} mode="preview" headingLevel={2} desktopRequirement={preview.desktop_requirement ?? product.desktop_requirement} releaseLabel={candidate ? `Candidate v${candidate.version ?? "—"} · ${candidate.digest ?? "digest not provided"}` : "Candidate not provided"} action={<button type="button" disabled>Get access</button>} /></div>
-      <article className="cpv2-card cpv2-readiness"><SectionHeading eyebrow="Publish readiness" title="Final checks" /><ul>{readiness.map((item) => <li key={item.label} className={item.ready ? "is-ready" : ""}><span>{item.ready ? "✓" : "!"}</span><strong>{item.label}</strong><small>{item.detail}</small></li>)}</ul>{confirming ? <div className="cpv2-confirm cpv2-confirm-publish"><div><p><strong>Publish this immutable candidate?</strong><br />The public current pointer changes only after materialization succeeds.</p><dl className="cpv2-confirm-facts"><Fact label="Product" value={product.name ?? product.product_name ?? productId} /><Fact label="Candidate" value={`v${candidate?.version ?? "—"} · ${candidate?.digest ?? "Not provided"}`} /><Fact label="Access" value="Free · 1 delivery" /><Fact label="Public URL" value={preview.public_url ?? (isUuidV4(productId) ? `/products/${productId}` : "Assigned after publish")} /></dl><small>Publishing creates an immutable release. Future changes require another release or an audited rollback.</small></div><button className="cpv2-secondary" type="button" onClick={() => setConfirming(false)}>Cancel</button><button className="cpv2-primary" type="button" disabled={!ready || publishing} aria-busy={publishing} onClick={() => publish({ ...preview, product, candidate })}>{publishing ? "Publishing…" : "Confirm publish"}</button></div> : <button className="cpv2-primary" type="button" disabled={!ready} onClick={() => setConfirming(true)}>Publish</button>}</article>
+      <article className="cpv2-card cpv2-readiness"><SectionHeading eyebrow="Publish readiness" title="Final checks" /><ul>{readiness.map((item) => <li key={item.label} className={item.ready ? "is-ready" : ""}><span>{item.ready ? "✓" : "!"}</span><strong>{item.label}</strong><small>{item.detail}</small></li>)}</ul>{confirming ? <div className="cpv2-confirm cpv2-confirm-publish"><div><p><strong>Publish this immutable candidate?</strong><br />The public current pointer changes only after materialization succeeds.</p><dl className="cpv2-confirm-facts"><Fact label="Product" value={product.name ?? product.product_name ?? productId} /><Fact label="Candidate" value={`v${candidate?.version ?? "—"} · ${candidate?.digest ?? "Not provided"}`} /><Fact label="Access" value="Free · Permanent access" /><Fact label="Public URL" value={preview.public_url ?? (isUuidV4(productId) ? `/products/${productId}` : "Assigned after publish")} /></dl><small>Publishing creates an immutable release. Future changes require another release or an audited rollback.</small></div><button className="cpv2-secondary" type="button" onClick={() => setConfirming(false)}>Cancel</button><button className="cpv2-primary" type="button" disabled={!ready || publishing} aria-busy={publishing} onClick={() => publish({ ...preview, product, candidate })}>{publishing ? "Publishing…" : "Confirm publish"}</button></div> : <button className="cpv2-primary" type="button" disabled={!ready} onClick={() => setConfirming(true)}>Publish</button>}</article>
     </>;
   }}</PageBoundary>;
 }
@@ -593,25 +593,24 @@ function ReleasePage({ token, request, navigate, productId, releaseId }) {
         resource.retry();
       } catch (error) { setState((current) => ({ ...current, busy: false, error: friendlyError(error), done: false })); }
     }
-    return <><Breadcrumb onClick={() => navigate(`${ROOT}/products/${encodeURIComponent(productId)}/versions`)}>Versions</Breadcrumb><PageHeader eyebrow="Immutable release" title={release.label ?? `Release ${release.version ?? ""}`} body="Existing access remains pinned to the release it received." />{state.error ? <InlineError>{state.error}</InlineError> : null}{state.done ? <SuccessNotice>Current release updated. Existing access was not changed.</SuccessNotice> : null}<article className="cpv2-card cpv2-panel"><dl className="cpv2-fact-grid"><Fact label="Release ID" value={idOf(release, "release")} /><Fact label="Corpus digest" value={release.corpus_digest ?? release.digest} /><Fact label="Published" value={dateTime(release.published_at ?? release.created_at)} /><Fact label="Access" value="Free · 1 delivery" /><Fact label="Status" value={release.current ? "Current" : "Previous"} /><Fact label="Materialization" value={release.materialization_status ?? "Not reported"} /></dl></article>{release.current ? <p className="cpv2-muted">This is already the public current release.</p> : <section className="cpv2-rollback"><article className="cpv2-card cpv2-panel"><SectionHeading eyebrow="Rollback" title="Make this exact release current" /><p>The release is fixed by this page. Existing access stays pinned to its original release.</p><label>Release<input readOnly value={`${release.label ?? releaseId} · ${release.corpus_digest ?? release.digest ?? "digest not provided"}`} /></label><label>Audit reason<textarea required value={state.reason} onChange={(event) => setState((current) => ({ ...current, reason: event.target.value, confirming: false }))} placeholder="Why should this release become current?" /></label></article><div className="cpv2-rollback-preview"><span className="cpv2-private-badge">Rollback preview · Not public</span><StorefrontDetails product={product} creatorName={product.creator_name} mode="preview" headingLevel={2} desktopRequirement={product.desktop_requirement} releaseLabel={`${release.label ?? releaseId} · ${release.corpus_digest ?? release.digest ?? "digest not provided"}`} action={<button type="button" disabled>Get access</button>} /></div>{state.confirming ? <div className="cpv2-card cpv2-confirm cpv2-confirm-publish" role="alert"><div><strong>Make this exact release current?</strong><p>{state.reason}</p><small>This writes an authenticated rollback audit. Existing access keeps its original release.</small></div><button className="cpv2-secondary" type="button" onClick={() => setState((current) => ({ ...current, confirming: false }))}>Cancel</button><button className="cpv2-primary" type="button" disabled={state.busy || !state.reason.trim()} onClick={rollback}>{state.busy ? "Switching…" : "Confirm rollback"}</button></div> : <button className="cpv2-primary" type="button" disabled={!state.reason.trim()} onClick={() => setState((current) => ({ ...current, confirming: true }))}>Review rollback</button>}</section>}</>;
+    return <><Breadcrumb onClick={() => navigate(`${ROOT}/products/${encodeURIComponent(productId)}/versions`)}>Versions</Breadcrumb><PageHeader eyebrow="Immutable release" title={release.label ?? `Release ${release.version ?? ""}`} body="Existing access remains pinned to the release it received." />{state.error ? <InlineError>{state.error}</InlineError> : null}{state.done ? <SuccessNotice>Current release updated. Existing access was not changed.</SuccessNotice> : null}<article className="cpv2-card cpv2-panel"><dl className="cpv2-fact-grid"><Fact label="Release ID" value={idOf(release, "release")} /><Fact label="Corpus digest" value={release.corpus_digest ?? release.digest} /><Fact label="Published" value={dateTime(release.published_at ?? release.created_at)} /><Fact label="Access" value="Free · Permanent access" /><Fact label="Status" value={release.current ? "Current" : "Previous"} /><Fact label="Materialization" value={release.materialization_status ?? "Not reported"} /></dl></article>{release.current ? <p className="cpv2-muted">This is already the public current release.</p> : <section className="cpv2-rollback"><article className="cpv2-card cpv2-panel"><SectionHeading eyebrow="Rollback" title="Make this exact release current" /><p>The release is fixed by this page. Existing access stays pinned to its original release.</p><label>Release<input readOnly value={`${release.label ?? releaseId} · ${release.corpus_digest ?? release.digest ?? "digest not provided"}`} /></label><label>Audit reason<textarea required value={state.reason} onChange={(event) => setState((current) => ({ ...current, reason: event.target.value, confirming: false }))} placeholder="Why should this release become current?" /></label></article><div className="cpv2-rollback-preview"><span className="cpv2-private-badge">Rollback preview · Not public</span><StorefrontDetails product={product} creatorName={product.creator_name} mode="preview" headingLevel={2} desktopRequirement={product.desktop_requirement} releaseLabel={`${release.label ?? releaseId} · ${release.corpus_digest ?? release.digest ?? "digest not provided"}`} action={<button type="button" disabled>Get access</button>} /></div>{state.confirming ? <div className="cpv2-card cpv2-confirm cpv2-confirm-publish" role="alert"><div><strong>Make this exact release current?</strong><p>{state.reason}</p><small>This writes an authenticated rollback audit. Existing access keeps its original release.</small></div><button className="cpv2-secondary" type="button" onClick={() => setState((current) => ({ ...current, confirming: false }))}>Cancel</button><button className="cpv2-primary" type="button" disabled={state.busy || !state.reason.trim()} onClick={rollback}>{state.busy ? "Switching…" : "Confirm rollback"}</button></div> : <button className="cpv2-primary" type="button" disabled={!state.reason.trim()} onClick={() => setState((current) => ({ ...current, confirming: true }))}>Review rollback</button>}</section>}</>;
   }}</PageBoundary>;
 }
 
 function OrdersPage({ token, request, navigate }) {
-  const [filters, setFilters] = useState({ order: "", delivery: "", product: "", from: "", to: "", limit: "25" });
+  const [filters, setFilters] = useState({ order: "", product: "", from: "", to: "", limit: "25" });
   const query = useMemo(() => creatorOrderQuery(filters), [filters]);
   const resource = useRemote(request, `/v1/creator/orders${query ? `?${query}` : ""}`, token);
   return <PageBoundary resource={resource} title="We couldn't load orders">{(payload) => {
     return <>
-      <PageHeader eyebrow="Access records" title="See who can use each product." body="Follow access and delivery without exposing anyone’s private Workspace content." />
+      <PageHeader eyebrow="Access records" title="See who can use each product." body="Follow access without exposing anyone’s private Workspace content." />
       <form className="cpv2-filters" onSubmit={(event) => event.preventDefault()}>
         <label>Order status<select value={filters.order} onChange={(event) => setFilters((current) => ({ ...current, order: event.target.value }))}><option value="">All</option><option value="fulfilled">Fulfilled</option><option value="refund_pending">Refund pending</option><option value="refunded">Refunded</option><option value="failed">Failed</option></select></label>
-        <label>Delivery status<select value={filters.delivery} onChange={(event) => setFilters((current) => ({ ...current, delivery: event.target.value }))}><option value="">All</option><option value="not_started">Not started</option><option value="reserved">Reserved</option><option value="completed">Completed</option><option value="failed">Failed</option></select></label>
         <label>Product ID<input value={filters.product} onChange={(event) => setFilters((current) => ({ ...current, product: event.target.value }))} placeholder="All products" /></label>
         <label>From date<input type="date" value={filters.from} max={filters.to || undefined} onChange={(event) => setFilters((current) => ({ ...current, from: event.target.value }))} /></label>
         <label>To date<input type="date" value={filters.to} min={filters.from || undefined} onChange={(event) => setFilters((current) => ({ ...current, to: event.target.value }))} /></label>
         <label>Rows per page<select value={filters.limit} onChange={(event) => setFilters((current) => ({ ...current, limit: event.target.value }))}><option value="12">12</option><option value="25">25</option><option value="50">50</option><option value="100">100</option></select></label>
-        <button className="cpv2-secondary" type="button" onClick={() => setFilters({ order: "", delivery: "", product: "", from: "", to: "", limit: "25" })}>Clear filters</button>
+        <button className="cpv2-secondary" type="button" onClick={() => setFilters({ order: "", product: "", from: "", to: "", limit: "25" })}>Clear filters</button>
       </form>
       <PaginatedOrders initialPayload={payload} query={query} token={token} request={request} navigate={navigate} />
     </>;
@@ -647,7 +646,7 @@ function PaginatedOrders({ initialPayload, query, token, request, navigate }) {
 }
 
 function OrderList({ orders, onOpen, detailed = false }) {
-  return <div className="cpv2-order-list" role="list">{orders.map((order) => { const reference = order.order_number ?? order.order_reference ?? idOf(order, "order"); return <article className="cpv2-order" role="listitem" key={idOf(order, "order")}><div><span className="cpv2-kicker">{reference}</span><h2>{order.product_name ?? order.product?.name ?? "Product access"}</h2><p>{order.buyer_display_name ?? "Buyer"} · {dateTime(order.created_at ?? order.placed_at)}</p></div><dl><Fact label="Access" value={humanStatus(order.entitlement_status ?? order.status ?? order.order_status)} />{detailed ? <Fact label="Delivery" value={humanStatus(order.delivery_status ?? "not_started")} /> : null}</dl><button className="cpv2-secondary" type="button" onClick={() => onOpen(order)} aria-label={`View access record ${reference}`}>View record</button></article>; })}</div>;
+  return <div className="cpv2-order-list" role="list">{orders.map((order) => { const reference = order.order_number ?? order.order_reference ?? idOf(order, "order"); return <article className="cpv2-order" role="listitem" key={idOf(order, "order")}><div><span className="cpv2-kicker">{reference}</span><h2>{order.product_name ?? order.product?.name ?? "Product access"}</h2><p>{order.buyer_display_name ?? "Buyer"} · {dateTime(order.created_at ?? order.placed_at)}</p></div><dl><Fact label="Access" value={humanStatus(order.entitlement_status ?? order.status ?? order.order_status)} />{detailed ? <Fact label="Access status" value={humanStatus(order.access_status ?? order.entitlement_status ?? order.status ?? "active")} /> : null}</dl><button className="cpv2-secondary" type="button" onClick={() => onOpen(order)} aria-label={`View access record ${reference}`}>View record</button></article>; })}</div>;
 }
 
 function OrderPage({ token, request, navigate, orderId }) {
@@ -691,17 +690,17 @@ function OrderPage({ token, request, navigate, orderId }) {
           </dl>
         </article>
         <article className="cpv2-card cpv2-panel">
-          <SectionHeading eyebrow="Delivery metadata" title="Private by design" />
+          <SectionHeading eyebrow="Access metadata" title="Private by design" />
           <dl>
-            <Fact label="Status" value={humanStatus(order.delivery_status ?? order.deliveries?.at(-1)?.status ?? (order.deliveries?.length ? "completed" : "not_started"))} />
-            <Fact label="Artifact type" value={order.artifact_type ?? order.deliveries?.at(-1)?.artifact_type ?? "Not delivered"} />
-            <Fact label="Completed" value={dateTime(order.delivery_completed_at ?? order.deliveries?.at(-1)?.occurred_at)} />
+            <Fact label="Status" value={humanStatus(order.access_status ?? order.entitlement_status ?? order.status ?? "active")} />
+            <Fact label="Access mode" value={order.access_mode === "unmetered" ? "Permanent" : "Metered"} />
+            <Fact label="Release" value={order.release_id ?? order.release_label ?? order.corpus_digest ?? "Not provided"} />
           </dl>
           <p className="cpv2-muted">Workspace paths, conversations, file content, tool arguments, and artifacts are never shown here.</p>
         </article>
       </div>
       <article className="cpv2-card cpv2-panel cpv2-timeline">
-        <SectionHeading eyebrow="Timeline" title="Access to delivery" />
+        <SectionHeading eyebrow="Timeline" title="Access history" />
         <ol>{safeEvents.map((event, index) => <li key={event.id ?? event.event_id ?? index}><span aria-hidden="true" /><div><strong>{event.label ?? humanStatus(event.type ?? event.event_type)}</strong><small>{dateTime(event.at ?? event.created_at ?? event.occurred_at)}</small>{event.detail ? <p>{event.detail}</p> : null}</div></li>)}</ol>
       </article>
       <article className="cpv2-card cpv2-panel cpv2-refund-action">
@@ -794,12 +793,12 @@ function normalizeReadiness(preview, candidate) {
   if (provided.length) return provided.map((item) => typeof item === "string" ? { label: item, detail: "Ready", ready: true } : { label: item.label ?? item.name, detail: item.detail ?? item.message ?? (item.ready === false ? "Needs attention" : "Ready"), ready: item.ready ?? item.passed ?? item.status === "ready" });
   if (preview?.readiness && !Array.isArray(preview.readiness)) return [
     { label: "Candidate approval is current", detail: preview.readiness.candidate_approved ? "Bound to this candidate digest" : "Approve the candidate first", ready: Boolean(preview.readiness.candidate_approved) },
-    { label: "Free access is configured", detail: "1 delivery", ready: true },
+    { label: "Permanent access is configured", detail: "No charge", ready: true },
     { label: "Registry materialization", detail: preview.readiness.ready ? "Ready to materialize on publish" : "Complete the required checks", ready: Boolean(preview.readiness.ready) }
   ];
   return [
     { label: "Candidate approval is current", detail: isApproved(candidate) ? "Bound to this candidate digest" : "Approve the candidate first", ready: isApproved(candidate) },
-    { label: "Free access is configured", detail: "1 delivery", ready: true },
+    { label: "Permanent access is configured", detail: "No charge", ready: true },
     { label: "Public copy and boundaries", detail: preview?.product?.promise || preview?.promise ? "Buyer-facing copy present" : "Add a product promise", ready: Boolean(preview?.product?.promise || preview?.promise || preview?.product?.description) },
     { label: "Registry materialization", detail: preview?.materialization_status === "failed" ? "Materialization failed" : "Ready to materialize on publish", ready: preview?.materialization_status !== "failed" }
   ];
@@ -807,9 +806,9 @@ function normalizeReadiness(preview, candidate) {
 
 function inferredTimeline(order) {
   const events = [{ label: "Order created", at: order.created_at ?? order.placed_at }];
-  if (order.created_at || order.placed_at) events.push({ label: "Free access requested", at: order.created_at ?? order.placed_at });
+  if (order.created_at || order.placed_at) events.push({ label: "Purchase recorded", at: order.created_at ?? order.placed_at });
   if (order.entitlement_status) events.push({ label: `Access ${humanStatus(order.entitlement_status)}`, at: order.entitlement_at });
-  if (order.delivery_status && order.delivery_status !== "not_started") events.push({ label: `Delivery ${humanStatus(order.delivery_status)}`, at: order.delivery_completed_at ?? order.delivery_started_at });
+  if (order.access_mode !== "unmetered" && order.delivery_status && !["not_started", "not_applicable"].includes(order.delivery_status)) events.push({ label: `Access ${humanStatus(order.delivery_status)}`, at: order.delivery_completed_at ?? order.delivery_started_at });
   if (order.refund_status && order.refund_status !== "none") events.push({ label: `Refund ${humanStatus(order.refund_status)}`, at: order.refunded_at });
   return events;
 }

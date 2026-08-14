@@ -74,7 +74,7 @@ test("appendMany rolls back the whole transaction when a later invariant fails",
   assert.equal(ledger.listEvents().length, 0);
 });
 
-test("free checkout atomically creates one real order and one unit entitlement", async () => {
+test("free checkout atomically creates one real order and permanent entitlement", async () => {
   const ledger = await CommerceLedger.open();
   const commerce = new CommerceService(ledger);
   const command = {
@@ -92,7 +92,9 @@ test("free checkout atomically creates one real order and one unit entitlement",
   assert.equal(first.order.order_line_id, first.entitlement.order_line_id);
   assert.equal(first.entitlement.valid_from, first.entitlement.granted_at);
   assert.equal(first.entitlement.valid_until, null);
-  assert.equal(first.entitlement.remaining_units, 1);
+  assert.equal(first.order.access_mode, "unmetered");
+  assert.equal(first.entitlement.access_mode, "unmetered");
+  assert.equal(Object.hasOwn(first.entitlement, "remaining_units"), false);
   assert.equal(ledger.listEvents().length, 2);
 
   await assert.rejects(
@@ -101,13 +103,39 @@ test("free checkout atomically creates one real order and one unit entitlement",
   );
 });
 
-test("a delivery unit can be reserved, released, reserved again and consumed exactly once", async () => {
+test("a free purchase stays usable after repeated runs and never creates delivery accounting", async () => {
+  const ledger = await CommerceLedger.open();
+  const commerce = new CommerceService(ledger);
+  const purchase = await commerce.confirmCheckout({
+    ...identity,
+    product_id: "product_free_unlimited",
+    gross_minor: 0,
+    idempotency_key: "checkout:free:unlimited"
+  });
+  assert.equal(purchase.entitlement.access_mode, "unmetered");
+  assert.equal(purchase.entitlement.status, "active");
+  assert.deepEqual(purchase.entitlement.reservations, []);
+  assert.deepEqual(commerce.getEntitlement(purchase.entitlement.entitlement_id).reservations, []);
+  await assert.rejects(
+    commerce.authorizeAndReserve({
+      entitlement_id: purchase.entitlement.entitlement_id,
+      run_id: "run_free_should_not_reserve",
+      idempotency_key: "reserve:free:should-not-reserve"
+    }),
+    (error) => error.code === "access_unmetered"
+  );
+  assert.equal(ledger.listEvents().filter((event) => event.event_type.startsWith("delivery.") || event.event_type.includes("units_")).length, 0);
+});
+
+test("metered access still supports the future reservation path", async () => {
   const ledger = await CommerceLedger.open();
   const commerce = new CommerceService(ledger);
   const checkout = await commerce.confirmCheckout({
     ...identity,
-    gross_minor: 0,
-    idempotency_key: "checkout:free:delivery"
+    gross_minor: 100,
+    payment_status: "paid",
+    payment_id: "pay:metered:delivery",
+    idempotency_key: "checkout:metered:delivery"
   });
   const entitlementId = checkout.entitlement.entitlement_id;
   const firstReservation = await commerce.authorizeAndReserve({
@@ -157,11 +185,11 @@ test("a delivery unit can be reserved, released, reserved again and consumed exa
 
   assert.equal(completed.entitlement.status, "consumed");
   assert.equal(completed.entitlement.consumed_units, 1);
-  assert.equal(completed.revenue, null);
-  assert.equal(completed.revenue_status, "not_applicable");
+  assert.equal(completed.revenue.gross_minor, 100);
+  assert.equal(completed.revenue_status, "recognized");
   assert.equal(replay.delivery.delivery_id, "delivery_free");
   assert.equal(ledger.listEvents().filter((event) => event.event_type === "delivery.completed").length, 1);
-  assert.equal(ledger.listEvents().filter((event) => event.event_type === "revenue.recognized").length, 0);
+  assert.equal(ledger.listEvents().filter((event) => event.event_type === "revenue.recognized").length, 1);
 });
 
 test("paid delivery recognizes revenue and a full refund revokes further authorization", async () => {
@@ -310,7 +338,9 @@ test("reservation leases expire in projection and a new reserve reconciles the a
   const commerce = new CommerceService(ledger, { clock, reservationTtlMs: 60_000 });
   const checkout = await commerce.confirmCheckout({
     ...identity,
-    gross_minor: 0,
+    gross_minor: 100,
+    payment_status: "paid",
+    payment_id: "pay:lease:auto",
     idempotency_key: "checkout:lease:auto"
   });
   const first = await commerce.authorizeAndReserve({
@@ -383,7 +413,9 @@ test("explicit reservation expiry is idempotent and cannot be consumed after the
   const commerce = new CommerceService(ledger, { clock });
   const checkout = await commerce.confirmCheckout({
     ...identity,
-    gross_minor: 0,
+    gross_minor: 100,
+    payment_status: "paid",
+    payment_id: "pay:lease:explicit",
     idempotency_key: "checkout:lease:explicit"
   });
   const command = {
@@ -421,7 +453,9 @@ test("reservation lease commands reject ambiguous or already-expired deadlines",
   const commerce = new CommerceService(ledger, { clock });
   const checkout = await commerce.confirmCheckout({
     ...identity,
-    gross_minor: 0,
+    gross_minor: 100,
+    payment_status: "paid",
+    payment_id: "pay:lease:invalid",
     idempotency_key: "checkout:lease:invalid"
   });
   const base = {
@@ -468,7 +502,9 @@ test("file-backed reconcilers release one expired reservation exactly once", asy
   const second = new CommerceService(secondLedger, { clock });
   const checkout = await first.confirmCheckout({
     ...identity,
-    gross_minor: 0,
+    gross_minor: 100,
+    payment_status: "paid",
+    payment_id: "pay:lease:cross-instance",
     idempotency_key: "checkout:lease:cross-instance"
   });
   await first.authorizeAndReserve({
@@ -526,11 +562,6 @@ test("paid refunds fail closed without provider confirmation and free orders rem
     gross_minor: 0,
     idempotency_key: "checkout:free:cancel"
   });
-  const reservation = await commerce.authorizeAndReserve({
-    entitlement_id: free.entitlement.entitlement_id,
-    run_id: "run_free_cancel",
-    idempotency_key: "reserve:free:cancel"
-  });
   const cancelled = await commerce.refundOrder({
     order_id: free.order.order_id,
     reason: "buyer_request",
@@ -547,10 +578,7 @@ test("paid refunds fail closed without provider confirmation and free orders rem
   assert.equal(cancelled.refunds[0].gross_minor, 0);
   assert.equal(cancelled.refunds[0].provider_refund_status, "not_required");
   assert.equal(replay.refunds.length, 1);
-  assert.equal(
-    commerce.getEntitlement(free.entitlement.entitlement_id).reservations.find((item) => item.reservation_id === reservation.reservation.reservation_id).status,
-    "released"
-  );
+  assert.deepEqual(commerce.getEntitlement(free.entitlement.entitlement_id).reservations, []);
 });
 
 test("multi-unit paid orders recognize each delivery once without exceeding order gross", async () => {

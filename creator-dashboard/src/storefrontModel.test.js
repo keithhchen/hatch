@@ -48,7 +48,6 @@ test("Creator order query carries complete server-side filters and page size", (
   const query = new URLSearchParams(creatorOrderQuery({
     order: "fulfilled",
     payment: "paid",
-    delivery: "completed",
     product: "product-a",
     from: "2026-08-01",
     to: "2026-08-12",
@@ -59,7 +58,6 @@ test("Creator order query carries complete server-side filters and page size", (
   assert.deepEqual(Object.fromEntries(query), {
     order: "fulfilled",
     payment: "paid",
-    delivery: "completed",
     product: "product-a",
     from: "2026-08-01",
     to: "2026-08-12",

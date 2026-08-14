@@ -596,7 +596,8 @@ test("V2 checkout session persists a free receipt and entitlement detail", async
   assert.equal(confirmedResponse.status, 201);
   assert.equal(confirmed.payment.status, "not_required");
   assert.equal(confirmed.order.status, "fulfilled");
-  assert.equal(confirmed.entitlement.remaining_units, 1);
+  assert.equal(confirmed.entitlement.access_mode, "unmetered");
+  assert.equal("remaining_units" in confirmed.entitlement, false);
   assert.equal(accessBodies.length, 0);
 
   const replayConfirmResponse = await confirm();
@@ -612,8 +613,10 @@ test("V2 checkout session persists a free receipt and entitlement detail", async
   assert.equal(order.tax_minor, null);
   assert.equal(order.total_minor, 0);
   assert.equal(order.entitlement_status, "active");
+  assert.equal(order.access_mode, "unmetered");
+  assert.equal("delivery_status" in order, false);
   assert.equal(order.actions.can_request_refund, false);
-  assert.equal(order.actions.can_cancel_access, true);
+  assert.equal(order.actions.can_cancel_access, false);
 
   const canonicalOrdersResponse = await fetch(`${serverUrl(api)}/v1/orders`, { headers });
   const canonicalOrders = await canonicalOrdersResponse.json();
@@ -631,7 +634,9 @@ test("V2 checkout session persists a free receipt and entitlement detail", async
   const entitlement = (await entitlementResponse.json()).entitlement;
   assert.equal(entitlementResponse.status, 200);
   assert.equal(entitlement.product.name, catalogAgent.product_name);
-  assert.equal(entitlement.remaining_units, 1);
+  assert.equal(entitlement.access_mode, "unmetered");
+  assert.equal("remaining_units" in entitlement, false);
+  assert.equal("deliveries" in entitlement, false);
   const canonicalEntitlementResponse = await fetch(`${serverUrl(api)}/v1/library/${confirmed.entitlement_id}`, { headers });
   assert.equal(canonicalEntitlementResponse.status, 200);
   assert.equal((await canonicalEntitlementResponse.json()).entitlement.entitlement_id, confirmed.entitlement_id);
@@ -651,31 +656,16 @@ test("V2 checkout session persists a free receipt and entitlement detail", async
   assert.equal(desktopAccess.creator_agents[0].entitlement_id, confirmed.entitlement_id);
   assert.equal(desktopAccess.creator_agents[0].user_id, "buyer-zero");
   assert.equal(desktopAccess.creator_agents[0].product.id, catalogAgent.product_id);
+  assert.equal(desktopAccess.creator_agents[0].access_mode, "unmetered");
+  assert.equal("remaining_units" in desktopAccess.creator_agents[0], false);
 
-  await recordDelivery(dashboard, { order: confirmed.order, entitlement: confirmed.entitlement }, {
-    prefix: "buyer-entitlement-history",
-    artifactType: "markdown"
-  });
-  const deliveredEntitlementResponse = await fetch(`${serverUrl(api)}/v1/user/entitlements/${confirmed.entitlement_id}`, { headers });
-  const deliveredEntitlement = (await deliveredEntitlementResponse.json()).entitlement;
-  assert.equal(deliveredEntitlementResponse.status, 200);
-  assert.equal(deliveredEntitlement.status, "consumed");
-  assert.equal(deliveredEntitlement.deliveries.length, 1);
-  assert.equal(deliveredEntitlement.deliveries[0].artifact_type, "markdown");
-  assert.equal(deliveredEntitlement.deliveries[0].status, "completed");
-  const deliveredOrderResponse = await fetch(`${serverUrl(api)}/v1/user/orders/${confirmed.order_id}`, { headers });
-  const deliveredOrder = (await deliveredOrderResponse.json()).order;
-  assert.equal(deliveredOrder.actions.can_cancel_access, false);
-  const lateCancellation = await fetch(`${serverUrl(api)}/v1/user/orders/${confirmed.order_id}/refund-requests`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ reason: "too_late" })
-  });
-  assert.equal(lateCancellation.status, 409);
+  const secondTurnAuthorization = dashboard.commerce.getEntitlement(confirmed.entitlement_id);
+  assert.equal(secondTurnAuthorization.access_mode, "unmetered");
+  assert.equal(secondTurnAuthorization.status, "active");
   assert.deepEqual(revokedEntitlements, []);
 });
 
-test("a free order can remove access before delivery", async (context) => {
+test("a zero-price purchase is permanent and has no buyer cancellation action", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-free-cancel-"));
   const revokedEntitlements = [];
   const registry = registryFixture({ role: "user", revokedEntitlements });
@@ -713,11 +703,24 @@ test("a free order can remove access before delivery", async (context) => {
     body: JSON.stringify({ reason: "buyer_removed_free_access" })
   });
   const cancellation = await cancellationResponse.json();
-  assert.equal(cancellationResponse.status, 201);
-  assert.equal(cancellation.order.status, "cancelled");
-  assert.equal(cancellation.order.entitlement_status, "revoked");
-  assert.equal(cancellation.refund.gross_minor, 0);
+  assert.equal(cancellationResponse.status, 409);
+  assert.equal(cancellation.error.code, "unmetered_purchase_not_reversible");
   assert.deepEqual(revokedEntitlements, []);
+
+  const refundRequestResponse = await fetch(`${serverUrl(api)}/v1/orders/${confirmation.order_id}/refund-requests`, {
+    method: "POST",
+    headers: { ...headers, "idempotency-key": "free-refund-request" },
+    body: JSON.stringify({ reason: "buyer_requested" })
+  });
+  const refundRequest = await refundRequestResponse.json();
+  assert.equal(refundRequestResponse.status, 409);
+  assert.equal(refundRequest.error.code, "unmetered_purchase_not_reversible");
+  assert.deepEqual(revokedEntitlements, []);
+
+  const orderResponse = await fetch(`${serverUrl(api)}/v1/orders/${confirmation.order_id}`, { headers });
+  const order = (await orderResponse.json()).order;
+  assert.equal(order.entitlement_status, "active");
+  assert.equal(order.actions.can_cancel_access, false);
 });
 
 test("Creator fulfilled filter includes delivered orders and disconnected payouts do not invent balances", async (context) => {

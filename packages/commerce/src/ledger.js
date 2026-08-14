@@ -261,16 +261,8 @@ export class CommerceLedger {
 export function projectBuyerEntitlements(events, buyerId) {
   return events
     .filter((event) => event.event_type === "entitlement.granted" && event.buyer_id === buyerId)
-    .filter((event) => projectEntitlement(events, event.entitlement_id)?.status !== "revoked")
-    .map((event) => ({
-      entitlement_id: event.entitlement_id,
-      order_id: event.order_id,
-      creator_id: event.creator_id,
-      agent_id: event.agent_id,
-      product_id: event.product_id,
-      corpus_digest: event.corpus_digest,
-      status: "active"
-    }));
+    .map((event) => projectEntitlement(events, event.entitlement_id))
+    .filter((entitlement) => entitlement && entitlement.status !== "revoked");
 }
 
 export function projectBuyerOrders(events, buyerId) {
@@ -288,6 +280,7 @@ export function projectBuyerOrders(events, buyerId) {
       const entitlement = events.find((candidate) => (
         candidate.event_type === "entitlement.granted" && candidate.order_id === event.order_id
       ));
+      const unmetered = event.access_mode === "unmetered" || event.gross_minor === 0;
       return ({
         order_id: event.order_id,
         creator_id: event.creator_id,
@@ -296,6 +289,7 @@ export function projectBuyerOrders(events, buyerId) {
         product_id: event.product_id,
         corpus_digest: event.corpus_digest,
         product_name: event.product_name ?? null,
+        access_mode: unmetered ? "unmetered" : "metered",
         gross_minor: event.gross_minor,
         subtotal_minor: event.subtotal_minor ?? event.gross_minor,
         discount_minor: event.discount_minor ?? 0,
@@ -352,6 +346,7 @@ export function projectCreatorDashboard(events, creatorId) {
     const artifact = artifacts.get(order.order_id)?.at(-1);
     const deliveryEvents = deliveries.get(order.order_id) ?? [];
     const delivery = deliveryEvents.at(-1);
+    const unmetered = order.access_mode === "unmetered" || order.gross_minor === 0;
     const creatorShareMinor = revenueEvents.reduce((sum, event) => sum + event.creator_share_minor, 0)
       - reversalEvents.reduce((sum, event) => sum + event.creator_share_minor, 0);
     const hatchShareMinor = revenueEvents.reduce((sum, event) => sum + event.hatch_share_minor, 0)
@@ -363,7 +358,8 @@ export function projectCreatorDashboard(events, creatorId) {
       product_name: order.product_name ?? null,
       gross_minor: order.gross_minor,
       currency: order.currency,
-      status: refundedOrders.has(order.order_id) ? "refunded" : delivery ? "delivered" : "paid",
+      access_mode: unmetered ? "unmetered" : "metered",
+      status: refundedOrders.has(order.order_id) ? "refunded" : unmetered ? "fulfilled" : delivery ? "delivered" : "paid",
       creator_share_minor: creatorShareMinor,
       hatch_share_minor: hatchShareMinor,
       occurred_at: order.occurred_at,
@@ -373,8 +369,8 @@ export function projectCreatorDashboard(events, creatorId) {
       task_id: task?.task_id ?? null,
       artifact_id: artifact?.artifact_id ?? null,
       artifact_digest: artifact?.artifact_digest ?? null,
-      delivery_id: delivery?.delivery_id ?? null,
-      delivery_count: deliveryEvents.length,
+      delivery_id: unmetered ? null : delivery?.delivery_id ?? null,
+      delivery_count: unmetered ? 0 : deliveryEvents.length,
       recognition_id: revenue?.recognition_id ?? null
     };
   });
@@ -383,7 +379,7 @@ export function projectCreatorDashboard(events, creatorId) {
     metrics: {
       orders: visibleOrders.length,
       successful_deliveries: [...deliveries.entries()]
-        .filter(([orderId]) => !refundedOrders.has(orderId))
+        .filter(([orderId]) => !refundedOrders.has(orderId) && orders.get(orderId)?.gross_minor > 0)
         .reduce((sum, [, orderDeliveries]) => sum + orderDeliveries.length, 0),
       gross_minor: visibleOrders
         .filter((order) => order.status !== "refunded")
@@ -405,7 +401,11 @@ export function projectOrder(events, orderId, options = {}) {
   const entitlement = entitlementGrant
     ? projectEntitlement(events, entitlementGrant.entitlement_id, options)
     : null;
-  const deliveries = projectDeliveries(events, { orderId });
+  const unmetered = order.access_mode === "unmetered" || order.gross_minor === 0;
+  // Historical free runs may contain the old delivery events. They are not
+  // part of the current purchase contract and must never make free access look
+  // consumed or block revocation.
+  const deliveries = unmetered ? [] : projectDeliveries(events, { orderId });
   const refunds = projectRefunds(events, { orderId });
   const revenue = events
     .filter((event) => event.event_type === "revenue.recognized" && event.order_id === orderId)
@@ -428,6 +428,7 @@ export function projectOrder(events, orderId, options = {}) {
     .map((event) => structuredClone(event));
   const timeline = events
     .filter((event) => event.order_id === orderId)
+    .filter((event) => !unmetered || !new Set(["task.started", "artifact.created", "delivery.completed", "entitlement.units_reserved", "entitlement.units_consumed", "entitlement.units_released"]).has(event.event_type))
     .map((event) => ({
       event_id: event.event_id,
       type: event.event_type,
@@ -466,7 +467,8 @@ export function projectOrder(events, orderId, options = {}) {
     tax_minor: order.tax_minor ?? null,
     total_minor: order.total_minor ?? order.gross_minor,
     currency: order.currency,
-    included_units: order.included_units ?? 1,
+    ...(unmetered ? {} : { included_units: order.included_units ?? 1 }),
+    access_mode: unmetered ? "unmetered" : "metered",
     refund_policy_version: order.refund_policy_version ?? null,
     payment_status: order.gross_minor === 0
       ? "not_required"
@@ -515,6 +517,8 @@ export function projectEntitlement(events, entitlementId, options = {}) {
       advanced_at: event.occurred_at
     }));
   const effectiveCorpusDigest = versionHistory.at(-1)?.to_digest ?? purchasedCorpusDigest;
+  const order = events.find((event) => event.event_type === "order.placed" && event.order_id === grant.order_id);
+  const unmetered = grant.access_mode === "unmetered" || order?.gross_minor === 0;
 
   const reservationEvents = events.filter((event) => (
     event.entitlement_id === entitlementId && (
@@ -579,7 +583,6 @@ export function projectEntitlement(events, entitlementId, options = {}) {
     .reduce((sum, reservation) => sum + reservation.reserved_units, 0);
   const grantedUnits = grant.granted_units ?? 1;
   const remainingUnits = Math.max(0, grantedUnits - reservedUnits - consumedUnits);
-  const order = events.find((event) => event.event_type === "order.placed" && event.order_id === grant.order_id);
   const refundedMinor = events
     .filter((event) => event.order_id === grant.order_id && isConfirmedRefundEvent(events, event))
     .reduce((sum, event) => sum + event.gross_minor, 0);
@@ -589,11 +592,36 @@ export function projectEntitlement(events, entitlementId, options = {}) {
   const expired = Boolean(grant.expires_at && Date.parse(grant.expires_at) <= projectionNow);
   const status = revoked
     ? "revoked"
-    : consumedUnits >= grantedUnits
+    : !unmetered && consumedUnits >= grantedUnits
       ? "consumed"
       : expired
         ? "expired"
         : "active";
+
+  if (unmetered) {
+    return {
+      entitlement_id: grant.entitlement_id,
+      order_id: grant.order_id,
+      order_line_id: grant.order_line_id ?? `${grant.order_id}:line:1`,
+      buyer_id: grant.buyer_id,
+      creator_id: grant.creator_id,
+      agent_id: grant.agent_id,
+      product_id: grant.product_id,
+      corpus_digest: purchasedCorpusDigest,
+      purchased_corpus_digest: purchasedCorpusDigest,
+      effective_corpus_digest: effectiveCorpusDigest,
+      purchased_release_id: grant.purchased_release_id ?? grant.release_id ?? null,
+      version_policy: grant.version_policy ?? "pinned",
+      access_mode: "unmetered",
+      status: revoked ? "revoked" : expired ? "expired" : "active",
+      granted_at: grant.occurred_at,
+      valid_from: grant.valid_from ?? grant.occurred_at,
+      valid_until: grant.expires_at ?? null,
+      expires_at: grant.expires_at ?? null,
+      version_history: versionHistory,
+      reservations: []
+    };
+  }
 
   return {
     entitlement_id: grant.entitlement_id,
@@ -608,6 +636,7 @@ export function projectEntitlement(events, entitlementId, options = {}) {
     effective_corpus_digest: effectiveCorpusDigest,
     purchased_release_id: grant.purchased_release_id ?? grant.release_id ?? null,
     version_policy: grant.version_policy ?? "pinned",
+    access_mode: "metered",
     granted_units: grantedUnits,
     reserved_units: reservedUnits,
     consumed_units: consumedUnits,
@@ -789,7 +818,7 @@ function normalizePayload(type, payload, idempotencyKey) {
     normalized.aggregate_id ??= normalized.recognition_id;
   }
   if (type === "order.placed") {
-    normalized.included_units ??= 1;
+    if (normalized.gross_minor !== 0) normalized.included_units ??= 1;
     normalized.subtotal_minor ??= normalized.gross_minor;
     normalized.discount_minor ??= 0;
     if (!Object.hasOwn(normalized, "tax_minor")) normalized.tax_minor = null;
@@ -802,7 +831,7 @@ function normalizePayload(type, payload, idempotencyKey) {
     }
   }
   if (type === "entitlement.granted") {
-    normalized.granted_units ??= 1;
+    if (normalized.access_mode !== "unmetered") normalized.granted_units ??= 1;
     normalized.version_policy ??= "pinned";
   }
   if (idempotencyKey) normalizeAuditEnvelope(type, normalized, idempotencyKey);
@@ -937,7 +966,7 @@ function validateEvent(event, events) {
         "Order quote components must reconcile to gross_minor"
       );
     }
-    requirePositiveInteger(event.included_units, "included_units");
+    if (event.gross_minor > 0) requirePositiveInteger(event.included_units, "included_units");
     if (!new Set(["paid", "succeeded", "not_required"]).has(event.payment_status)) {
       throw new CommerceInvariantError("invalid_payment_status", "Confirmed orders must be succeeded or not_required");
     }
@@ -977,9 +1006,14 @@ function validateEvent(event, events) {
     requireFields(event, ["entitlement_id", "order_id", "buyer_id", "creator_id", "agent_id", "product_id", "corpus_digest"]);
     const order = requirePrior(events, "order.placed", "order_id", event.order_id);
     requireIdentityMatch(order, event, ["buyer_id", "creator_id", "agent_id", "product_id", "corpus_digest"]);
-    requirePositiveInteger(event.granted_units, "granted_units");
-    if (event.granted_units !== (order.included_units ?? 1)) {
-      throw new CommerceInvariantError("identity_chain_mismatch", "Entitlement units must match the order snapshot");
+    const unmetered = event.access_mode === "unmetered" || order.access_mode === "unmetered" || order.gross_minor === 0;
+    if (!unmetered) {
+      requirePositiveInteger(event.granted_units, "granted_units");
+      if (event.granted_units !== (order.included_units ?? 1)) {
+        throw new CommerceInvariantError("identity_chain_mismatch", "Entitlement units must match the order snapshot");
+      }
+    } else if (event.access_mode === "unmetered" && event.granted_units !== undefined) {
+      throw new CommerceInvariantError("invalid_access_mode", "Unmetered access must not carry delivery units");
     }
     if (events.some((item) => item.event_type === "entitlement.granted" && item.order_id === event.order_id)) {
       throw new CommerceInvariantError("entitlement_already_granted", `Order ${event.order_id} already granted an entitlement`);

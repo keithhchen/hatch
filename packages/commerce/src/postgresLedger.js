@@ -28,7 +28,9 @@ const ENVELOPE_FIELDS = [
 const DEFAULT_ADVISORY_LOCK_KEY = 1_849_721_043;
 const DEFAULT_OUTBOX_LEASE_MS = 60_000;
 const READ_MODEL_PROJECTION = "commerce-v2";
-const READ_MODEL_VERSION = 1;
+// Bump when the event projector's public shape changes. This rebuilds old
+// snapshots so legacy free orders with consumed units become unmetered access.
+const READ_MODEL_VERSION = 2;
 
 const MIGRATIONS = [
   `CREATE TABLE IF NOT EXISTS commerce_events (
@@ -1056,6 +1058,19 @@ function materializeReservationAt(reservation, now) {
 }
 
 function materializeEntitlementAt(entitlement, now) {
+  if (entitlement.access_mode === "unmetered") {
+    const status = entitlement.status === "revoked"
+      ? "revoked"
+      : entitlement.valid_until && Date.parse(entitlement.valid_until) <= Date.parse(now)
+        ? "expired"
+        : "active";
+    return {
+      ...entitlement,
+      access_mode: "unmetered",
+      status,
+      reservations: []
+    };
+  }
   const reservations = (entitlement.reservations ?? [])
     .map((reservation) => materializeReservationAt(reservation, now));
   const reservedUnits = reservations

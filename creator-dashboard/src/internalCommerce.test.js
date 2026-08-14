@@ -49,7 +49,6 @@ test("Runtime Commerce API is service-authenticated, idempotent, and privacy-saf
     release_id: sourceDigest,
     gross_minor: 0,
     currency: "USD",
-    included_units: 1,
     version_policy: "track_current_compatible",
     idempotency_key: "checkout-internal"
   });
@@ -191,9 +190,9 @@ test("Runtime Commerce API is service-authenticated, idempotent, and privacy-saf
       task_id: "task-internal"
     })
   });
-  const reservation = (await reserve.json()).reservation;
-  assert.equal(reserve.status, 201);
-  assert.ok(reservation.reservation_id);
+  const rejectedReservation = await reserve.json();
+  assert.equal(reserve.status, 409);
+  assert.equal(rejectedReservation.error.code, "access_unmetered");
 
   const rejectedPrivateArtifact = await fetch(`${base}/v1/internal/commerce/events`, {
     method: "POST",
@@ -206,46 +205,12 @@ test("Runtime Commerce API is service-authenticated, idempotent, and privacy-saf
   assert.equal(rejectedPrivateArtifact.status, 400);
   assert.equal((await rejectedPrivateArtifact.json()).error.code, "private_commerce_field");
 
-  const identity = {
-    order_id: checkout.order.order_id,
-    buyer_id: checkout.order.buyer_id,
-    creator_id: checkout.order.creator_id,
-    agent_id: checkout.order.agent_id,
-    product_id: checkout.order.product_id,
-    corpus_digest: checkout.order.corpus_digest
-  };
-  await appendEvent(base, headers, "task-internal", "task.started", {
-    ...identity,
-    entitlement_id: checkout.entitlement.entitlement_id,
-    task_id: "task-internal"
-  });
-  await appendEvent(base, headers, "artifact-internal", "artifact.created", {
-    ...identity,
-    task_id: "task-internal",
-    artifact_id: "artifact-internal",
-    artifact_digest: "sha256:artifact-internal",
-    artifact_type: "file"
-  });
-  const completed = await fetch(`${base}/v1/internal/commerce/deliveries`, {
-    method: "POST",
-    headers: { ...headers, "idempotency-key": "delivery-internal" },
-    body: JSON.stringify({
-      reservation_id: reservation.reservation_id,
-      task_id: "task-internal",
-      artifact_id: "artifact-internal",
-      delivery_id: "delivery-internal",
-      artifact_type: "file",
-      effective_corpus_digest: compatibleDigest
-    })
-  });
-  assert.equal(completed.status, 201);
-  const consumedAuthorization = await fetch(authorizationUrl, { headers });
-  const consumedAuthorizationBody = (await consumedAuthorization.json()).authorization;
-  assert.equal(consumedAuthorization.status, 200);
-  assert.equal(consumedAuthorizationBody.authorized, false);
-  assert.equal(consumedAuthorizationBody.reason, "entitlement_consumed");
-  assert.equal((await completed.json()).delivery.delivery_id, "delivery-internal");
-  assert.equal(dashboard.commerce.getEntitlement(checkout.entitlement.entitlement_id).remaining_units, 0);
+  const stillAuthorized = await fetch(authorizationUrl, { headers });
+  const stillAuthorizedBody = (await stillAuthorized.json()).authorization;
+  assert.equal(stillAuthorized.status, 200);
+  assert.equal(stillAuthorizedBody.authorized, true);
+  assert.equal(stillAuthorizedBody.reason, "authorized");
+  assert.equal(stillAuthorizedBody.access_mode, "unmetered");
   assert.equal(dashboard.ledger.listEvents().some((event) => event.conversation_id), false);
   assert.equal(dashboard.ledger.listEvents().some((event) => event.artifact_path), false);
   const persistedCommerce = JSON.stringify(dashboard.ledger.listEvents());

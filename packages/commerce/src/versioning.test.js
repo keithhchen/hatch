@@ -114,12 +114,14 @@ test("R28 compatible tracking advances only the effective digest and keeps an id
   assert.equal(second.effective_corpus_digest, NEXT_COMPATIBLE_DIGEST);
   assert.equal(second.version_history.length, 2);
 
-  const reserved = await commerce.authorizeAndReserve({
-    entitlement_id: checkout.entitlement.entitlement_id,
-    run_id: "run_tracking_version",
-    idempotency_key: "reserve:tracking-version"
-  });
-  assert.equal(reserved.reservation.effective_corpus_digest, NEXT_COMPATIBLE_DIGEST);
+  await assert.rejects(
+    commerce.authorizeAndReserve({
+      entitlement_id: checkout.entitlement.entitlement_id,
+      run_id: "run_tracking_version",
+      idempotency_key: "reserve:tracking-version"
+    }),
+    (error) => error instanceof CommerceInvariantError && error.code === "access_unmetered"
+  );
 });
 
 test("R28 rejects pinned entitlements and no-op target digests", async () => {
