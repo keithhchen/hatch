@@ -118,7 +118,7 @@ h1, h2 { font-family: var(--hatch-font-display); font-weight: 400; letter-spacin
 .product-card h2 { margin: 0 0 12px; font-size: clamp(30px, 3.4vw, 44px); line-height: var(--hatch-display-leading); letter-spacing: var(--hatch-display-tracking); }
 .product-card p { max-width: 590px; min-height: 50px; margin-bottom: 28px; color: #6d675f; line-height: 1.65; }
 .product-price { display: flex; align-items: baseline; gap: 8px; margin-bottom: 26px; }
-.product-price strong { font-family: var(--hatch-font-display); font-size: 34px; font-weight: 400; letter-spacing: -.025em; }
+.product-price strong { font-family: var(--hatch-font-display); font-size: 34px; font-weight: 400; letter-spacing: var(--hatch-display-tracking); line-height: var(--hatch-display-leading); }
 .product-price span { color: #91897f; font-size: 12px; }
 .primary, .secondary {
   display: inline-flex;
@@ -140,7 +140,7 @@ h1, h2 { font-family: var(--hatch-font-display); font-weight: 400; letter-spacin
 
 .earnings-card { display: flex; min-height: 405px; flex-direction: column; padding: 32px; background: var(--hatch-inverse); color: var(--hatch-inverse-text); }
 .earnings-card .eyebrow { color: rgba(255,255,255,.58); }
-.earnings-card > strong { margin: 0 0 7px; font-family: var(--hatch-font-display); font-size: clamp(54px, 5.4vw, 76px); font-weight: 400; letter-spacing: -.045em; }
+.earnings-card > strong { margin: 0 0 7px; font-family: var(--hatch-font-display); font-size: clamp(54px, 5.4vw, 76px); font-weight: 400; letter-spacing: var(--hatch-display-tracking); line-height: var(--hatch-display-leading); }
 .earnings-card > p { color: rgba(255,255,255,.63); font-size: 13px; line-height: 1.55; }
 .earnings-split { display: flex; justify-content: space-between; margin-top: auto; padding-top: 18px; border-top: 1px solid rgba(255,255,255,.13); color: rgba(255,255,255,.62); font-size: 12px; }
 .earnings-split b { color: #fff; font-weight: 500; }
@@ -162,7 +162,7 @@ h1, h2 { font-family: var(--hatch-font-display); font-weight: 400; letter-spacin
 
 .payout-card { display: flex; max-width: 800px; min-height: 440px; flex-direction: column; align-items: start; justify-content: center; padding: 48px; background: var(--hatch-inverse); color: var(--hatch-inverse-text); }
 .payout-card .eyebrow { color: rgba(255,255,255,.55); }
-.payout-card > strong { margin: 20px 0 8px; font-family: var(--hatch-font-display); font-size: 78px; font-weight: 400; letter-spacing: -.045em; }
+.payout-card > strong { margin: 20px 0 8px; font-family: var(--hatch-font-display); font-size: 78px; font-weight: 400; letter-spacing: var(--hatch-display-tracking); line-height: var(--hatch-display-leading); }
 .payout-card > p { color: rgba(255,255,255,.68); }
 .payout-facts { display: grid; width: 100%; max-width: 390px; gap: 12px; margin: 25px 0; padding: 20px 0; border-block: 1px solid rgba(255,255,255,.12); }
 .payout-facts div { display: flex; justify-content: space-between; color: rgba(255,255,255,.65); font-size: 13px; }

@@ -80,7 +80,7 @@ describe("desktop system appearance contract", () => {
       /\.markdown-body\s*\{[\s\S]*?font-size:\s*16px;[\s\S]*?line-height:\s*26px;/
     );
     expect(stylesheet).toMatch(
-      /\.markdown-body h1\s*\{[\s\S]*?font-size:\s*24px;[\s\S]*?line-height:\s*32px;/
+      /\.markdown-body h1\s*\{[\s\S]*?font-size:\s*24px;[\s\S]*?line-height:\s*var\(--hatch-display-leading\);/
     );
     expect(stylesheet).toMatch(
       /\.markdown-body h1,\s*\.markdown-body h2\s*\{[\s\S]*?font-family:\s*var\(--hatch-font-display\);[\s\S]*?font-weight:\s*400;/

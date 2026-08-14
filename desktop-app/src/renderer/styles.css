@@ -1098,13 +1098,13 @@ h2 {
 
 .markdown-body h1 {
   font-size: 24px;
-  line-height: 32px;
+  line-height: var(--hatch-display-leading);
   margin: 0 0 8px;
 }
 
 .markdown-body h2 {
   font-size: 20px;
-  line-height: 28px;
+  line-height: var(--hatch-display-leading);
   margin: 16px 0 4px;
 }
 
@@ -2655,7 +2655,7 @@ button.composer-control:focus-visible {
 .desktop-auxiliary-brand {
   margin: 0 0 3px;
   color: var(--hatch-ink);
-  font: 400 34px/1 var(--hatch-font-display);
+  font: 400 34px/var(--hatch-display-leading) var(--hatch-font-display);
   letter-spacing: var(--hatch-display-tracking);
 }
 
