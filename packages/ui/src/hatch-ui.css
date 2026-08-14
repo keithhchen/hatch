@@ -80,8 +80,9 @@
   border-radius: var(--hatch-radius-pill);
   white-space: nowrap;
   cursor: pointer;
-  font-family: var(--hui-font-ui);
-  font-weight: 500;
+  font-family: var(--hui-font-pill);
+  font-weight: 600;
+  letter-spacing: -.012em;
   line-height: 1;
   text-decoration: none;
   transition: color var(--hui-motion-control), background var(--hui-motion-control), box-shadow var(--hui-motion-control), opacity var(--hui-motion-control);
@@ -115,7 +116,7 @@
 .hui-button svg { width: 15px; height: 15px; flex: 0 0 auto; }
 
 .hui-field { display: grid; gap: 7px; font-family: var(--hui-font-ui); }
-.hui-field__label { color: #514b44; font-size: 12px; font-weight: 500; }
+.hui-field__label { color: #514b44; font-family: var(--hui-font-pill); font-size: 12px; font-weight: 600; letter-spacing: -.012em; }
 .hui-field__label span { color: var(--hui-danger); }
 .hui-field__hint, .hui-field__error { margin: 0; font-size: 11px; line-height: 1.45; }
 .hui-field__hint { color: var(--hui-ink-faint); }

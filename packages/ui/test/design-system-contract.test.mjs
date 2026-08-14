@@ -95,6 +95,8 @@ test("Theme Lab edits the same token knobs used by the shared CSS", () => {
     "primaryColor",
     "canvasColor",
     "radius",
+    "displayTracking",
+    "displayLeading",
     "atmosphereStrength",
     "motion"
   ]) assert.match(story, new RegExp(`${control}:`));
@@ -102,6 +104,8 @@ test("Theme Lab edits the same token knobs used by the shared CSS", () => {
   assert.match(story, /"--hatch-ui-primary": args\.primaryColor/);
   assert.match(story, /"--hatch-atmosphere-base": args\.canvasColor/);
   assert.match(story, /"--hatch-atmosphere-strength": args\.atmosphereStrength/);
+  assert.match(story, /"--hatch-display-tracking": `\$\{args\.displayTracking\}em`/);
+  assert.match(story, /"--hatch-display-leading": args\.displayLeading/);
   assert.doesNotMatch(story, /"--hatch-atmosphere-canvas": args\.canvasColor/);
 
   for (const token of [
@@ -124,6 +128,8 @@ test("Theme Lab edits the same token knobs used by the shared CSS", () => {
   assert.match(sharedCss, /background: var\(--hatch-atmosphere-cool-field\)/);
   assert.match(sharedCss, /\.hatch-brand__wordmark[^}]*letter-spacing:\s*var\(--hatch-display-tracking\)/s);
   assert.match(sharedCss, /\.hui-page-header h1[^}]*line-height:\s*var\(--hatch-display-leading\)/s);
+  assert.match(sharedCss, /\.hui-button\s*\{[^}]*font-family:\s*var\(--hui-font-pill\)/s);
+  assert.match(sharedCss, /\.hui-field__label\s*\{[^}]*font-family:\s*var\(--hui-font-pill\)/s);
   assert.doesNotMatch(sharedCss, /\.hui-drawer\.is-(?:right|bottom)[^{]*\{[^}]*border-radius:[^;]*\b0\b/s);
 });
 

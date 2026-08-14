@@ -32,6 +32,8 @@ function ThemeLabCanvas(args) {
     "--hatch-radius-menu": `${args.radius + 3}px`,
     "--hatch-radius-dialog": `${args.radius + 10}px`,
     "--hatch-radius-surface": `${args.radius + 10}px`,
+    "--hatch-display-tracking": `${args.displayTracking}em`,
+    "--hatch-display-leading": args.displayLeading,
     "--hatch-atmosphere-warm-duration": `${30 * durationScale}s`,
     "--hatch-atmosphere-cool-duration": `${36 * durationScale}s`
   };
@@ -73,6 +75,8 @@ export const ThemeLab = {
     primaryColor: "#25221f",
     canvasColor: "#f3efe8",
     radius: 12,
+    displayTracking: -0.045,
+    displayLeading: 0.92,
     atmosphereStrength: 0.72,
     motion: "normal"
   },
@@ -84,6 +88,8 @@ export const ThemeLab = {
     primaryColor: { control: "color" },
     canvasColor: { control: "color" },
     radius: { control: { type: "range", min: 6, max: 24, step: 1 } },
+    displayTracking: { control: { type: "range", min: -0.08, max: 0, step: 0.005 } },
+    displayLeading: { control: { type: "range", min: 0.78, max: 1.08, step: 0.01 } },
     atmosphereStrength: { control: { type: "range", min: 0, max: 1, step: 0.05 } },
     motion: { control: "inline-radio", options: ["normal", "slow", "paused"] }
   },
