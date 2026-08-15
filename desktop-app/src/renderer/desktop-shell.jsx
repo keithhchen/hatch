@@ -1,5 +1,6 @@
 import React, { useEffect, useId, useRef, useState } from "react";
 import { Ellipsis, PanelLeft, PanelRight, X } from "lucide-react";
+import { IconButton } from "@hatch/ui";
 import {
   DESKTOP_LAYOUT,
   LAYOUT_TIERS,
@@ -204,42 +205,39 @@ export function DesktopToolbar({
   return (
     <header className="desktop-toolbar" inert={inert} aria-hidden={inert ? true : undefined}>
       <div className="desktop-titlebar-safe-area" data-tauri-drag-region />
-      <button
+      <IconButton
         ref={sidebarToggleRef}
         className="chrome-icon-button sidebar-toggle"
-        type="button"
         aria-controls={sidebarControls}
         aria-expanded={sidebarExpanded}
-        aria-label={sidebarExpanded ? "Hide sidebar" : "Show sidebar"}
+        label={sidebarExpanded ? "Hide sidebar" : "Show sidebar"}
         title={sidebarExpanded ? "Hide Sidebar" : "Show Sidebar"}
         onClick={onToggleSidebar}
       >
         <PanelLeft aria-hidden="true" />
-      </button>
+      </IconButton>
       <div className="desktop-toolbar-content">{children}</div>
       <div className="desktop-toolbar-drag-region" data-tauri-drag-region />
-      <button
+      <IconButton
         className="chrome-icon-button toolbar-overflow-toggle"
-        type="button"
         aria-haspopup="menu"
-        aria-label="More commands"
+        label="More commands"
         title="More commands"
         onClick={onShowOverflow}
       >
         <Ellipsis aria-hidden="true" />
-      </button>
-      <button
+      </IconButton>
+      <IconButton
         ref={inspectorToggleRef}
         className="chrome-icon-button inspector-toggle"
-        type="button"
         aria-controls={inspectorControls}
         aria-expanded={inspectorExpanded}
-        aria-label={inspectorExpanded ? "Hide inspector" : "Show inspector"}
+        label={inspectorExpanded ? "Hide inspector" : "Show inspector"}
         title={inspectorExpanded ? "Hide Inspector" : "Show Inspector"}
         onClick={onToggleInspector}
       >
         <PanelRight aria-hidden="true" />
-      </button>
+      </IconButton>
     </header>
   );
 }
@@ -392,9 +390,9 @@ function PaneOverlay({ id, kind, label, onClose, returnFocusRef, children }) {
       >
         <div className="desktop-overlay-heading">
           <strong>{label}</strong>
-          <button className="chrome-icon-button" type="button" onClick={onClose} aria-label={`Close ${label}`}>
+          <IconButton className="chrome-icon-button" size="small" onClick={onClose} label={`Close ${label}`}>
             <X aria-hidden="true" />
-          </button>
+          </IconButton>
         </div>
         {children}
       </aside>

@@ -1,5 +1,7 @@
 import React from "react";
-import hatchMarkUrl from "../../packages/brand/hatch-mark.svg";
+import hatchMarkUrl from "../../brand/hatch-mark.svg";
+
+export { hatchMarkUrl };
 
 /**
  * The product mark is shared by the public storefront and Creator Studio.

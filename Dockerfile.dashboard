@@ -1,22 +1,22 @@
 FROM node:22-slim AS build
 
 WORKDIR /workspace/creator-dashboard
+COPY packages/ui /workspace/packages/ui
+COPY packages/brand /workspace/packages/brand
+RUN cd /workspace/packages/ui && npm ci
 COPY creator-dashboard/package.json creator-dashboard/package-lock.json ./
 RUN npm ci
 COPY creator-dashboard ./
 COPY packages/commerce /workspace/packages/commerce
-COPY packages/brand /workspace/packages/brand
-ARG RELEASE_TAG=dev
-# Keep the generated browser bundle tied to the release image. Without this
-# input BuildKit can reuse an older Vite dist layer even when the source tree
-# copied into the final image is current.
-RUN echo "Dashboard release ${RELEASE_TAG}" && npm run build
+RUN npm run build
 
 FROM node:22-slim AS production
 
 ENV NODE_ENV=production
 WORKDIR /app/creator-dashboard
 
+COPY packages/ui /app/packages/ui
+COPY packages/brand /app/packages/brand
 COPY creator-dashboard/package.json creator-dashboard/package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=build /workspace/creator-dashboard/server.mjs ./server.mjs

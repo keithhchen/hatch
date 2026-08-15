@@ -1,10 +1,10 @@
 import React from "react";
 import { Check, Clock3, Cloud, CloudOff, ExternalLink, PackageCheck, ReceiptText, RefreshCw, ShieldCheck } from "lucide-react";
-import { Button } from "../ui/Button.jsx";
-import { ConfirmDialog } from "../ui/Overlays.jsx";
-import { Checkbox } from "../ui/Forms.jsx";
-import { InlineAlert, Progress, StatusTag } from "../ui/Feedback.jsx";
-import { cn } from "../ui/utils.js";
+import { Button } from "../Button.jsx";
+import { ConfirmDialog } from "../Overlays.jsx";
+import { Checkbox } from "../Forms.jsx";
+import { InlineAlert, Progress, StatusTag } from "../Feedback.jsx";
+import { cn } from "../utils.js";
 
 function humanize(value) {
   return String(value ?? "not reported").replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());

@@ -5,6 +5,8 @@ import "./storefrontDetails.css";
 export function StorefrontDetails({
   product,
   creatorName,
+  creatorAvatarUrl,
+  creatorInitial,
   action,
   mode = "public",
   headingLevel = 1,
@@ -14,14 +16,19 @@ export function StorefrontDetails({
 }) {
   const model = storefrontModel(product, { desktopRequirement, refundPolicy });
   const Heading = headingLevel === 1 ? "h1" : "h2";
-  const empty = "Not provided yet";
+  const hasDetails = model.inputs.length || model.outputs.length || model.boundaries.length || model.privacy;
   return (
     <article className={`storefront-shared is-${mode}`}>
       <header className="storefront-shared__hero">
         <div>
-          <span className="storefront-shared__eyebrow">By {creatorName || "Creator"}</span>
+          <span className="storefront-shared__creator">
+            <span className="storefront-shared__creator-avatar" aria-hidden="true">
+              {creatorAvatarUrl ? <img src={creatorAvatarUrl} alt="" /> : (creatorInitial || (typeof creatorName === "string" ? creatorName.trim().charAt(0) : ""))}
+            </span>
+            <span className="storefront-shared__creator-name">{creatorName || "Creator"}</span>
+          </span>
           <Heading>{model.name}</Heading>
-          <p>{model.promise || empty}</p>
+          {model.promise ? <p>{model.promise}</p> : null}
           {releaseLabel ? <small>{releaseLabel}</small> : null}
         </div>
         <aside className="storefront-shared__access" aria-label={mode === "preview" ? "Preview access" : "Product access"}>
@@ -31,24 +38,24 @@ export function StorefrontDetails({
         </aside>
       </header>
 
-      <div className="storefront-shared__grid">
-        <StorefrontList title="What you provide" values={model.inputs} empty={empty} />
-        <StorefrontList title="What you receive" values={model.outputs} empty={empty} />
-        <StorefrontList title="Boundaries" values={model.boundaries} empty={empty} />
-        <section>
-          <span className="storefront-shared__eyebrow">Privacy</span>
-          <h3>Your work stays under your control.</h3>
-          <p className={!model.privacy ? "is-missing" : ""}>{model.privacy || empty}</p>
-        </section>
-      </div>
+      {hasDetails ? (
+        <div className="storefront-shared__grid">
+          {model.inputs.length ? <StorefrontList title="What you provide" values={model.inputs} /> : null}
+          {model.outputs.length ? <StorefrontList title="What you receive" values={model.outputs} /> : null}
+          {model.boundaries.length ? <StorefrontList title="Boundaries" values={model.boundaries} /> : null}
+          {model.privacy ? <section><span className="storefront-shared__eyebrow">Privacy</span><h3>Your work stays under your control.</h3><p>{model.privacy}</p></section> : null}
+        </div>
+      ) : null}
 
-      <footer className="storefront-shared__policies">
-        <section><strong>Desktop requirement</strong><p className={!model.desktopRequirement ? "is-missing" : ""}>{model.desktopRequirement || empty}</p></section>
-      </footer>
+      {model.desktopRequirement ? (
+        <footer className="storefront-shared__policies">
+          <section><strong>Desktop requirement</strong><p>{model.desktopRequirement}</p></section>
+        </footer>
+      ) : null}
     </article>
   );
 }
 
-function StorefrontList({ title, values, empty }) {
-  return <section><span className="storefront-shared__eyebrow">{title}</span>{values.length ? <ul>{values.map((value, index) => <li key={`${title}-${index}`}>{value}</li>)}</ul> : <p className="is-missing">{empty}</p>}</section>;
+function StorefrontList({ title, values }) {
+  return <section><span className="storefront-shared__eyebrow">{title}</span><ul>{values.map((value, index) => <li key={`${title}-${index}`}>{value}</li>)}</ul></section>;
 }

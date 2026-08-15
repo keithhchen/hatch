@@ -1,12 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  createDistillationTask,
-  getDistillationTask,
-  listSourceDocuments,
-  startFactoryRunFromSources,
-  uploadSourceDocument
-} from "./creatorFactory.js";
-import {
   Breadcrumbs,
   Button,
   EmptyState,
@@ -15,8 +8,16 @@ import {
   InlineAlert,
   Input,
   List,
+  PageHeader,
   Textarea
-} from "./components/ui/index.js";
+} from "@hatch/ui";
+import {
+  createDistillationTask,
+  getDistillationTask,
+  listSourceDocuments,
+  startFactoryRunFromSources,
+  uploadSourceDocument
+} from "./creatorFactory.js";
 
 export function CreatorSourceLibrary({ token, taskId, navigate }) {
   const [task, setTask] = useState(null);
@@ -77,7 +78,7 @@ export function CreatorSourceLibrary({ token, taskId, navigate }) {
   if (!taskId) {
     return <section className="cpv2-card cpv2-panel cpv2-source-library">
       <BackToProducts navigate={navigate} />
-      <PageHeader eyebrow="Source Library" title="Create one Distillation Task." body="The Task owns its upload area and keeps every original file and Snapshot revision available to the Factory." />
+      <PageHeader label="Source Library" title="Create one Distillation Task." body="The Task owns its upload area and keeps every original file and Snapshot revision available to the Factory." />
       {error ? <InlineAlert tone="error" title="Task could not be created">{error}</InlineAlert> : null}
       <form onSubmit={createTask} className="cpv2-source-task-form">
         <FormField label="Task name" required hint="This name is immutable after creation."><Input required value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} placeholder="e.g. Signal Resume Review" /></FormField>
@@ -89,7 +90,7 @@ export function CreatorSourceLibrary({ token, taskId, navigate }) {
 
   return <section className="cpv2-source-library">
     <BackToProducts navigate={navigate} />
-    <PageHeader eyebrow="Source Library" title={task?.name ?? "Task sources"} body="Upload here as many times as needed. A locked Snapshot is created automatically when you start a Factory revision." />
+    <PageHeader label="Source Library" title={task?.name ?? "Task sources"} body="Upload here as many times as needed. A locked Snapshot is created automatically when you start a Factory revision." />
     {error ? <InlineAlert tone="error" title="Source Library unavailable">{error}</InlineAlert> : null}
     {notice ? <InlineAlert tone="success" title="Upload complete">{notice}</InlineAlert> : null}
     <article className="cpv2-card cpv2-panel">
@@ -100,10 +101,6 @@ export function CreatorSourceLibrary({ token, taskId, navigate }) {
       <div className="cpv2-source-library-actions"><Button type="button" loading={busy} disabled={!documents.length} onClick={startRun}>Start distillation</Button><Button type="button" variant="secondary" onClick={() => navigate("/studio/factory")}>Open Factory runs</Button></div>
     </article>
   </section>;
-}
-
-function PageHeader({ eyebrow, title, body }) {
-  return <header className="cpv2-page-header"><span className="cpv2-kicker">{eyebrow}</span><h1>{title}</h1><p>{body}</p></header>;
 }
 
 function BackToProducts({ navigate }) {

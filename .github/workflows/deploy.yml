@@ -76,17 +76,9 @@ jobs:
           tags: ${{ steps.image.outputs.prefix }}/runtime:${{ env.RELEASE_TAG }}
           cache-from: type=gha,scope=runtime
           cache-to: type=gha,scope=runtime,mode=max
-      - name: Build and push Dashboard image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile.dashboard
-          push: true
-          tags: ${{ steps.image.outputs.prefix }}/dashboard:${{ env.RELEASE_TAG }}
-          cache-from: type=gha,scope=dashboard
-          cache-to: type=gha,scope=dashboard,mode=max
-          build-args: |
-            RELEASE_TAG=${{ env.RELEASE_TAG }}
+      # Dashboard publishing and rollout live in web.yml. Keeping the image
+      # out of this application CD prevents a backend release from silently
+      # replacing the separately verified Web surface.
       - name: Build and push Caddy image
         uses: docker/build-push-action@v6
         with:
@@ -262,7 +254,7 @@ jobs:
           # Always pull and recreate the release-tagged services. A self-hosted
           # runner can retain a container created from an older tag; reusing it
           # would silently leave one production surface behind the release.
-          if ! "${compose[@]}" up -d --no-deps --pull always --force-recreate registry factory-worker runtime dashboard caddy; then
+          if ! "${compose[@]}" up -d --no-deps --pull always --force-recreate registry factory-worker runtime caddy; then
             "${compose[@]}" ps -a
             for service in registry dashboard runtime factory-worker; do
               echo "--- $service container logs (last 80 lines) ---" >&2
@@ -270,11 +262,6 @@ jobs:
             done
             exit 1
           fi
-          dashboard_bundle="$("${compose[@]}" exec -T dashboard sh -lc 'grep -Rl "Source Library" dist/assets/*.js | head -n 1 || true')"
-          test -n "$dashboard_bundle" || {
-            echo "Dashboard bundle does not contain the Creator Source Library" >&2
-            exit 1
-          }
           if ! "${compose[@]}" ps --status running --services | grep -Fxq factory-worker; then
             "${compose[@]}" ps -a
             for service in registry dashboard runtime factory-worker; do
@@ -435,7 +422,7 @@ jobs:
               cp -f compose.app.yml.previous compose.app.yml
             fi
             cp .release.env.previous .release.env
-            docker compose --env-file .env --env-file .release.env -f compose.app.yml up -d --no-deps registry factory-worker runtime dashboard caddy
+            docker compose --env-file .env --env-file .release.env -f compose.app.yml up -d --no-deps registry factory-worker runtime caddy
             docker compose --env-file .env --env-file .release.env -f compose.app.yml ps --status running --services | grep -Fxq factory-worker
             domain="$(grep '^HATCH_DOMAIN=' .env | cut -d= -f2-)"
             test -n "$domain"
@@ -446,6 +433,6 @@ jobs:
             # A first release has no known-good image to restore. Do not leave
             # an unverified stack serving traffic or let its tag become the
             # previous release on the next attempt.
-            docker compose --env-file .env --env-file .release.env -f compose.app.yml stop caddy dashboard runtime factory-worker registry
+            docker compose --env-file .env --env-file .release.env -f compose.app.yml stop caddy runtime factory-worker registry
             rm -f .release.env
           fi

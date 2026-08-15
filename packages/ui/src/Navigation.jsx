@@ -25,9 +25,9 @@ export function Breadcrumbs({ items, className }) {
   );
 }
 
-export function NavigationItem({ active = false, icon, count, children, className, ...props }) {
+export function NavigationItem({ active = false, icon, trailing, count, children, className, ...props }) {
   const Component = props.href ? "a" : "button";
-  return <Component className={cn("hui-navigation-item", active && "is-active", className)} aria-current={active ? "page" : undefined} type={Component === "button" ? "button" : undefined} {...props}>{icon}<span>{children}</span>{count !== undefined ? <b>{count}</b> : null}</Component>;
+  return <Component className={cn("hui-navigation-item", active && "is-active", className)} aria-current={active ? "page" : undefined} type={Component === "button" ? "button" : undefined} {...props}>{icon}<span>{children}</span>{trailing}{count !== undefined ? <b>{count}</b> : null}</Component>;
 }
 
 export function Sidebar({ brand, primary, secondary, account, className }) {

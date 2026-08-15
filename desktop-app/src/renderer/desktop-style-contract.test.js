@@ -4,12 +4,26 @@ import { describe, expect, it } from "vitest";
 const stylesheet = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 
 describe("desktop system appearance contract", () => {
-  it("lets native controls follow light or dark system appearance", () => {
-    expect(stylesheet).toMatch(/:root\s*\{[\s\S]*?color-scheme:\s*light dark;/);
-    expect(stylesheet).toMatch(
-      /@media\s*\(prefers-color-scheme:\s*dark\)[\s\S]*?:root\s*\{[\s\S]*?color-scheme:\s*dark;/
-    );
-    expect(stylesheet).not.toMatch(/color-scheme:\s*light\s*;/);
+  it("keeps the current Hatch product explicitly light-only", () => {
+    expect(stylesheet).toMatch(/:root\s*\{[\s\S]*?color-scheme:\s*light;/);
+    expect(stylesheet).not.toMatch(/prefers-color-scheme:\s*dark/);
+    expect(stylesheet).not.toMatch(/color-scheme:\s*light dark/);
+  });
+
+  it("does not let legacy desktop resets override shared Hatch controls", () => {
+    expect(stylesheet).toMatch(/:where\(button:not\(\.hui-button\)\)\s*\{/);
+    expect(stylesheet).toMatch(/:where\(input:not\(\.hui-input\)\)\s*\{/);
+    expect(stylesheet).not.toMatch(/(?:^|\n)button\s*\{/);
+    expect(stylesheet).not.toMatch(/(?:^|\n)input\s*\{/);
+  });
+
+  it("keeps Atmospheric Paper at the shared root without dark navigation blocks", () => {
+    expect(stylesheet).toMatch(/\.desktop-ui-root\s*\{[\s\S]*?height:\s*100%;/);
+    expect(stylesheet).toMatch(/\.desktop-window-shell\s*\{[\s\S]*?background:\s*transparent;/);
+    expect(stylesheet).not.toMatch(/\.desktop-window-shell::before/);
+    expect(stylesheet).not.toMatch(/@keyframes desktop-atmosphere-warm/);
+    expect(stylesheet).toMatch(/\.desktop-source-row\.selected\s*\{[\s\S]*?radial-gradient/);
+    expect(stylesheet).not.toMatch(/\.desktop-source-row\.selected\s*\{[^}]*background:\s*var\(--hatch-inverse\)/);
   });
 
   it("keeps desktop layout state in the shell and localizes structured overflow", () => {
@@ -68,7 +82,7 @@ describe("desktop system appearance contract", () => {
       /\.markdown-body\s*\{[\s\S]*?font-size:\s*16px;[\s\S]*?line-height:\s*26px;/
     );
     expect(stylesheet).toMatch(
-      /\.markdown-body h1\s*\{[\s\S]*?font-size:\s*24px;[\s\S]*?line-height:\s*32px;/
+      /\.markdown-body h1\s*\{[\s\S]*?font-size:\s*24px;[\s\S]*?line-height:\s*var\(--hatch-display-leading\);/
     );
     expect(stylesheet).toMatch(
       /\.markdown-body h1,\s*\.markdown-body h2\s*\{[\s\S]*?font-family:\s*var\(--hatch-font-display\);[\s\S]*?font-weight:\s*400;/

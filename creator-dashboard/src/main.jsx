@@ -1,19 +1,42 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import "@fontsource-variable/inter";
-import "@fontsource-variable/noto-sans-sc";
-import "@fontsource-variable/noto-serif-sc";
-import "@fontsource/instrument-serif/400.css";
-import "@fontsource/dm-mono/400.css";
+import "@hatch/ui/fonts";
+import "@hatch/ui/theme.css";
+import { Button, HatchBrand, HatchUIProvider, UnavailableState } from "@hatch/ui";
 import { BuyerPortalV2 } from "./BuyerPortalV2.jsx";
 import { CreatorPortalV2 } from "./CreatorPortalV2.jsx";
-import { HatchBrand } from "./HatchBrand.jsx";
-import { AtmosphericPaper, ToastViewport, TooltipProvider } from "./components/ui/index.js";
 import { dashboardRequest } from "./data.js";
-import "../../packages/brand/tokens.css";
 import "./styles.css";
 
 const CREATOR_ROOT = "/studio";
+
+class AppErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { failed: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(error, details) {
+    console.error("Hatch Web failed to render", error, details);
+  }
+
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <main className="loading-page">
+        <UnavailableState
+          title="Hatch could not open this page."
+          body="Reload to try again. Your account and product data have not been changed."
+          action={{ label: "Reload", onClick: () => window.location.reload() }}
+        />
+      </main>
+    );
+  }
+}
 
 function App() {
   const location = useBrowserLocation();
@@ -70,6 +93,18 @@ function App() {
     return acceptSession(result);
   }, [acceptSession]);
 
+  const creatorSignUp = useCallback(async (details) => {
+    const result = await dashboardRequest("/v1/auth/creator-signup", {
+      method: "POST",
+      body: JSON.stringify({
+        email: details.email,
+        password: details.password,
+        display_name: details.display_name
+      })
+    });
+    return acceptSession(result);
+  }, [acceptSession]);
+
   const signOut = useCallback(async () => {
     try {
       await dashboardRequest("/v1/auth/logout", { method: "POST" });
@@ -87,6 +122,7 @@ function App() {
     user: profile,
     signIn,
     signUp,
+    creatorSignUp,
     signOut,
     invalidate
   };
@@ -103,10 +139,13 @@ function App() {
     || location.pathname.startsWith(`${CREATOR_ROOT}/`)) {
     if (sessionStatus === "loading") return <AppLoading />;
     if (sessionStatus !== "authenticated") {
-      return <RouteRedirect to={`/sign-in?returnTo=${encodeURIComponent(location.href)}`} navigate={location.navigate} />;
+      return <RouteRedirect to={`/sign-up?returnTo=${encodeURIComponent(location.href)}`} navigate={location.navigate} />;
     }
     if (profile?.role !== "creator") {
-      return <RoleBoundary navigate={location.navigate} />;
+      return <RoleBoundary navigate={location.navigate} onCreateCreator={async () => {
+        await signOut();
+        location.navigate(`/sign-up?returnTo=${encodeURIComponent(location.href)}`, { replace: true });
+      }} />;
     }
     return (
       <CreatorPortalV2
@@ -170,22 +209,22 @@ function AppLoading() {
   return <main className="loading-page" aria-busy="true"><HatchBrand className="loading-brand" /><p>Opening your workspace…</p></main>;
 }
 
-function RoleBoundary({ navigate }) {
+function RoleBoundary({ navigate, onCreateCreator }) {
   return (
     <main className="loading-page">
       <HatchBrand className="loading-brand" />
       <h1>Creator access is required.</h1>
       <p>This account can use purchased Agents, but it cannot edit Creator products.</p>
-      <button className="primary" type="button" onClick={() => navigate("/library", { replace: true })}>Open your library</button>
+      {onCreateCreator ? <Button type="button" onClick={() => void onCreateCreator()}>Create a Creator account</Button> : null}
+      <Button type="button" onClick={() => navigate("/library", { replace: true })}>Open your library</Button>
     </main>
   );
 }
 
 createRoot(document.getElementById("root")).render(
-  <TooltipProvider>
-    <AtmosphericPaper className="hatch-app-paper">
+  <AppErrorBoundary>
+    <HatchUIProvider atmosphere toasts className="hatch-app-paper">
       <App />
-      <ToastViewport />
-    </AtmosphericPaper>
-  </TooltipProvider>
+    </HatchUIProvider>
+  </AppErrorBoundary>
 );
