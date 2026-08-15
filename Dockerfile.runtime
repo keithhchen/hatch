@@ -1,3 +1,13 @@
+# The server-side Factory evaluates staged Corpora through the same local-tool
+# protocol as Desktop. Keep the runner in the runtime image so production
+# evaluations do not silently depend on a host-installed binary.
+FROM rust:1.85-bookworm AS local-runner-build
+
+WORKDIR /workspace/local-runner
+COPY local-runner/Cargo.toml local-runner/Cargo.lock ./
+COPY local-runner/src ./src
+RUN cargo build --release --locked
+
 # One TypeScript image serves both the cloud Runtime and the TypeScript
 # Registry. Compose selects the command for each service; the code and
 # dependency graph stay identical.
@@ -20,6 +30,7 @@ WORKDIR /app/runtime-server
 COPY --from=dependencies /workspace/runtime-server/package.json ./package.json
 COPY --from=dependencies /workspace/runtime-server/node_modules ./node_modules
 COPY --from=build /workspace/runtime-server/dist ./dist
+COPY --from=local-runner-build /workspace/local-runner/target/release/hatch-local-runner /usr/local/bin/hatch-local-runner
 COPY runtime-server/skills ./skills
 COPY scripts/create-agent-zip.mjs ./scripts/create-agent-zip.mjs
 
@@ -27,5 +38,7 @@ COPY scripts/create-agent-zip.mjs ./scripts/create-agent-zip.mjs
 # separate service. The package is deliberately kept outside runtime-server
 # because the Dashboard reads the same module.
 COPY packages/commerce /app/packages/commerce
+
+ENV HATCH_LOCAL_RUNNER_BIN=/usr/local/bin/hatch-local-runner
 
 CMD ["node", "dist/index.js"]
