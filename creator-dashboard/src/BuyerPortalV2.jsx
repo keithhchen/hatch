@@ -1,10 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Menu } from "lucide-react";
 import {
   Avatar,
   Button,
+  DropdownMenu,
   Checkbox as HatchCheckbox,
   EmptyState as HatchEmptyState,
   HatchBrand,
+  IconButton,
   InlineAlert as HatchInlineAlert,
   Input,
   PageHeader,
@@ -191,6 +194,17 @@ function BuyerShell({ route, navigate, session, downloadUrl, children }) {
             {authenticated ? <RouterLink to={LIBRARY_ROOT} navigate={navigate} aria-current={active === "library" ? "page" : undefined}>Library</RouterLink> : null}
             {authenticated ? <RouterLink to={ORDERS_ROOT} navigate={navigate} aria-current={active === "orders" ? "page" : undefined}>Orders</RouterLink> : null}
           </nav>
+          <div className="buyer-v2__mobile-nav">
+            <DropdownMenu
+              label="Buyer navigation"
+              trigger={<IconButton label="Open navigation" variant="secondary" size="small"><Menu aria-hidden="true" /></IconButton>}
+              items={[
+                { value: "explore", label: "Explore", active: active === "explore", onSelect: () => navigateTo(navigate, EXPLORE_ROOT) },
+                ...(authenticated ? [{ value: "library", label: "Library", active: active === "library", onSelect: () => navigateTo(navigate, LIBRARY_ROOT) }] : []),
+                ...(authenticated ? [{ value: "orders", label: "Orders", active: active === "orders", onSelect: () => navigateTo(navigate, ORDERS_ROOT) }] : [])
+              ]}
+            />
+          </div>
           <div className="buyer-v2__account">
             <a className="buyer-v2__download-quiet" href={downloadUrl} target="_blank" rel="noreferrer">Download</a>
             {authenticated ? (

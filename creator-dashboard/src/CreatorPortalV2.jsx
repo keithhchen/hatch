@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Menu } from "lucide-react";
 import { CreatorFactoryRuns } from "./CreatorFactoryRuns.jsx";
 import { CreatorSourceLibrary } from "./CreatorSourceLibrary.jsx";
 import { CreatorReviewPage } from "./CreatorReviewPage.jsx";
@@ -6,9 +7,11 @@ import {
   Breadcrumbs as HatchBreadcrumbs,
   Button,
   Checkbox,
+  DropdownMenu,
   EmptyState as HatchEmptyState,
   FormField,
   HatchBrand,
+  IconButton,
   InlineAlert as HatchInlineAlert,
   Input,
   NavigationItem,
@@ -59,6 +62,21 @@ export function CreatorPortalV2({
     navigate(nextPath);
   }, [navigate]);
 
+  const mobileNavigationItems = [
+    { type: "label", label: "Hatch spaces" },
+    { value: "space-explore", label: "Explore", onSelect: () => void go("/explore") },
+    { value: "space-library", label: "Library", onSelect: () => void go("/library") },
+    { value: "space-studio", label: "Studio", active: route.section === "home" || route.section === "products", onSelect: () => void go(ROOT) },
+    { value: "space-orders", label: "Orders", active: route.section === "orders", onSelect: () => void go("/studio/orders") },
+    { value: "space-account", label: "Account", onSelect: () => void go("/account") },
+    { type: "separator" },
+    { type: "label", label: "Creator dashboard" },
+    { value: "home", label: "Home", active: route.section === "home", onSelect: () => void go(ROOT) },
+    { value: "products", label: "Products", active: route.section === "products", onSelect: () => void go(`${ROOT}/products`) },
+    { value: "sources", label: "Source Library", active: route.kind === "sources", onSelect: () => void go(`${ROOT}/sources`) },
+    { value: "creator-orders", label: "Orders", active: route.section === "orders", onSelect: () => void go(`${ROOT}/orders`) }
+  ];
+
   useEffect(() => {
     const heading = mainRef.current?.querySelector("h1");
     if (!heading) return;
@@ -75,6 +93,13 @@ export function CreatorPortalV2({
       <a className="cpv2-skip" href="#creator-main">Skip to content</a>
       <aside className="cpv2-sidebar">
         <HatchBrand as="button" className="cpv2-brand" type="button" onClick={() => go(ROOT)} aria-label="Hatch creator home" />
+        <div className="cpv2-mobile-nav">
+          <DropdownMenu
+            label="Creator navigation"
+            trigger={<IconButton label="Open navigation" variant="secondary" size="small"><Menu aria-hidden="true" /></IconButton>}
+            items={mobileNavigationItems}
+          />
+        </div>
         <nav className="cpv2-global-nav" aria-label="Hatch spaces">
           <SpaceLink href="/explore" navigate={go}>Explore</SpaceLink>
           <SpaceLink href="/library" navigate={go}>Library</SpaceLink>

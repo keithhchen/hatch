@@ -59,9 +59,11 @@ describe("desktop component presentation contract", () => {
 
   it("keeps real send and stop actions accessible while presenting icons", () => {
     expect(source).toMatch(/aria-label="Send message"[\s\S]*?<ArrowUp aria-hidden="true"/);
+    expect(source).toContain('<span className="send-button-icon">');
     expect(source).toMatch(/aria-label="Stop response"[\s\S]*?onClick=\{\(\) => void cancelRun\(\)\}[\s\S]*?<Square/);
     expect(source).not.toMatch(/>\s*Send\s*</);
     expect(source).not.toMatch(/>\s*Stop\s*</);
+    expect(source).not.toContain("<AssistantTurnTiming />");
   });
 
   it("keeps title-bar context compact and removes verbose status copy", () => {

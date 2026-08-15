@@ -1660,9 +1660,9 @@ button.composer-control {
   cursor: pointer;
 }
 
-.composer-control:hover,
-.composer-control:focus-within,
-button.composer-control:focus-visible {
+.composer-control:not(.hui-control--raised):hover,
+.composer-control:not(.hui-control--raised):focus-within,
+button.composer-control:not(.hui-control--raised):focus-visible {
   background: var(--hatch-panel-muted);
   border-color: var(--hatch-border-subtle);
   color: var(--hatch-ink);
@@ -1714,11 +1714,6 @@ button.composer-control:focus-visible {
   flex: 1 1 auto;
   width: auto;
   min-width: 0;
-  background: var(--hatch-ui-surface-bright);
-  font-family: var(--hatch-font-pill);
-  font-size: var(--hatch-type-control);
-  font-weight: 600;
-  letter-spacing: -.018em;
   white-space: nowrap;
 }
 
@@ -1750,6 +1745,24 @@ button.composer-control:focus-visible {
   margin: 0;
   stroke-linecap: round;
   stroke-linejoin: round;
+  width: 17px;
+}
+
+.send-button > span {
+  align-items: center;
+  display: grid;
+  flex: 0 0 18px;
+  height: 18px;
+  justify-content: center;
+  line-height: 0;
+  width: 18px;
+}
+
+.send-button > span > svg,
+.stop-button > span > svg {
+  display: block;
+  height: 17px;
+  margin: 0;
   width: 17px;
 }
 
@@ -3022,22 +3035,6 @@ button.composer-control:focus-visible {
 .composer-control {
   color: var(--hatch-ink);
   font-family: var(--hatch-font-pill);
-}
-
-.permission-composer-control .composer-control-select {
-  background: rgba(255, 253, 249, .56);
-  border-color: rgba(72, 57, 44, .10);
-}
-
-.permission-composer-control .hui-select-leading {
-  color: color-mix(in srgb, var(--hatch-ink) 68%, transparent);
-  flex: 0 0 16px;
-}
-
-.permission-composer-control .hui-select-leading svg {
-  height: 16px;
-  stroke-width: 1.65;
-  width: 16px;
 }
 
 .send-button,

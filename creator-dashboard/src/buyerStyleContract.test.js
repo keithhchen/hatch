@@ -26,8 +26,11 @@ test("a non-Creator account is sent to the real Creator signup intent", () => {
   assert.match(source, /creatorIntent \? "\/v1\/auth\/creator-signup" : "\/v1\/auth\/signup"/);
 });
 
-test("buyer navigation becomes a scrollable row before labels can be crushed", () => {
-  assert.match(stylesheet, /\.buyer-v2__nav\s*\{[^}]*min-width:\s*0;[^}]*justify-content:\s*center;/s);
-  assert.match(stylesheet, /@media\s*\(max-width:\s*560px\)[\s\S]*?\.buyer-v2__nav\s*\{[\s\S]*?flex-wrap:\s*nowrap;[\s\S]*?overflow-x:\s*auto;/s);
-  assert.match(stylesheet, /@media\s*\(max-width:\s*560px\)[\s\S]*?\.buyer-v2__nav a\s*\{[^}]*flex: 0 0 auto;/s);
+test("buyer navigation uses a standard hamburger menu on narrow screens", () => {
+  assert.match(source, /className="buyer-v2__mobile-nav"/);
+  assert.match(source, /<DropdownMenu[\s\S]*label="Buyer navigation"/);
+  assert.match(stylesheet, /\.buyer-v2__mobile-nav\s*\{\s*display:\s*none;\s*\}/);
+  assert.match(stylesheet, /@media\s*\(max-width:\s*840px\)[\s\S]*?\.buyer-v2__nav\s*\{\s*display:\s*none;\s*\}/s);
+  assert.match(stylesheet, /@media\s*\(max-width:\s*840px\)[\s\S]*?\.buyer-v2__mobile-nav\s*\{[\s\S]*?display:\s*block;/s);
+  assert.match(stylesheet, /\.buyer-v2__mobile-nav \.hui-icon-button\s*\{[\s\S]*?min-height:\s*40px;[\s\S]*?min-width:\s*40px;/s);
 });
