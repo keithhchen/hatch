@@ -24,7 +24,9 @@ COPY --from=build /workspace/creator-dashboard/portalState.mjs ./portalState.mjs
 COPY --from=build /workspace/creator-dashboard/providerAdapters.mjs ./providerAdapters.mjs
 COPY --from=build /workspace/creator-dashboard/publicMetadata.mjs ./publicMetadata.mjs
 COPY --from=build /workspace/creator-dashboard/telemetry.mjs ./telemetry.mjs
-COPY --from=build /workspace/creator-dashboard/src ./src
+# The production server imports its own .mjs modules and serves the bundled
+# browser output. Keep tests, stories, and client source out of the runtime
+# image; they are built and verified in the Web CI job above.
 COPY --from=build /workspace/creator-dashboard/dist ./dist
 COPY --from=build /workspace/creator-dashboard/public ./public
 COPY packages/commerce /app/packages/commerce
