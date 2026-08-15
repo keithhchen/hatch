@@ -240,7 +240,7 @@ function DesktopAuxiliaryWindow({ kind }) {
           <p className="desktop-auxiliary-lede">Creator agents, on your terms.</p>
           <p>Hatch keeps the desktop boundary native while React renders the conversation work surface.</p>
           <dl className="desktop-auxiliary-facts">
-            <div><dt>Version</dt><dd>0.1.6</dd></div>
+            <div><dt>Version</dt><dd>0.1.7</dd></div>
             <div><dt>Architecture</dt><dd>Tauri Hybrid</dd></div>
           </dl>
         </section>
@@ -2087,7 +2087,7 @@ function App() {
         entitlement_id: targetEntitlementId,
         ...(targetProductId ? { product_id: targetProductId } : {}),
         ...(targetCreatorId ? { creator_id: targetCreatorId } : {}),
-        client_version: "0.1.6",
+        client_version: "0.1.7",
         local_tools: [...PLATFORM_LOCAL_TOOLS],
       }));
     });
