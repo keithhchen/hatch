@@ -276,7 +276,7 @@
 .buyer-v2__auth-form { width: min(430px, 100%); padding: 34px; border: 1px solid rgba(70,56,45,.12); border-radius: 24px; background: rgba(255,253,249,.78); box-shadow: 0 24px 70px rgba(69,49,35,.10), inset 0 1px rgba(255,255,255,.92); backdrop-filter: blur(18px); }
 .buyer-v2__auth-form h2 { margin: 10px 0 9px; font-size: var(--hatch-type-display); }
 .buyer-v2__auth-form > p { color: var(--buyer-muted); font-size: var(--hatch-type-control); line-height: 1.6; }
-.buyer-v2__field { display: grid; gap: 8px; margin-top: 18px; color: #625b52; font-size: var(--hatch-type-label); }
+.buyer-v2__field { display: grid; gap: 8px; margin-top: 18px; color: var(--buyer-ink); font-size: var(--hatch-type-label); }
 .buyer-v2__field input, .buyer-v2__select-label select {
   width: 100%;
   min-height: 48px;
@@ -373,7 +373,7 @@
 .buyer-v2__timeline li.is-error > span { background: var(--buyer-accent); box-shadow: 0 0 0 1px var(--buyer-accent); }
 .buyer-v2__timeline strong { font-size: var(--hatch-type-control); }
 .buyer-v2__timeline p { margin: 5px 0 0; color: var(--buyer-muted); font-size: var(--hatch-type-caption); }
-.buyer-v2__timeline time { display: block; margin-top: 5px; color: #9a9186; font-size: var(--hatch-type-micro); }
+.buyer-v2__timeline time { display: block; margin-top: 5px; color: var(--buyer-ink); font-size: var(--hatch-type-micro); }
 
 .buyer-v2__select-label { display: grid; width: min(230px, 100%); gap: 7px; margin-bottom: 24px; color: var(--buyer-muted); font-size: var(--hatch-type-caption); }
 .buyer-v2__order-list { border-top: 1px solid var(--buyer-border); }

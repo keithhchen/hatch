@@ -100,7 +100,8 @@ test("Web and Storybook consume the shared package and its canonical tokens", ()
   assert.match(desktopCss, /\.desktop-window-shell\s*\{[^}]*--surface-window:\s*var\(--hatch-ui-surface-window\)/s);
   assert.match(desktopCss, /\.desktop-ui-root\s*\{[^}]*height:\s*100%;/s);
   assert.doesNotMatch(desktopCss, /\.desktop-window-shell::before/);
-  assert.match(desktopCss, /\.desktop-sidebar-heading \.desktop-sidebar-brand \.hatch-brand__wordmark\s*\{[^}]*letter-spacing:\s*var\(--hatch-display-tracking\)/s);
+  assert.doesNotMatch(desktopCss, /\.desktop-sidebar-heading \.desktop-sidebar-brand \.hatch-brand__wordmark/);
+  assert.match(sharedCss, /\.hatch-brand__wordmark\s*\{[^}]*font-size:\s*var\(--hatch-type-title\);/s);
   assert.match(desktopStory, /title:\s*["']Hatch\/Desktop visual system["']/);
   assert.match(desktopStory, /<Control kind="select"/);
   assert.match(desktopStory, /atmosphereStrength/);
@@ -174,6 +175,11 @@ test("Theme Lab edits the same token knobs used by the shared CSS", () => {
   assert.match(tokens, /--hatch-type-label:\s*0\.75rem/);
   assert.match(tokens, /--hatch-type-control:\s*0\.8125rem/);
   assert.match(tokens, /--hatch-type-body:\s*0\.875rem/);
+  assert.match(tokens, /--hatch-ink:\s*#000000/);
+  assert.match(tokens, /--hatch-text-secondary:\s*#000000/);
+  assert.match(tokens, /--hatch-ui-ink:\s*#000000/);
+  assert.match(tokens, /--hatch-ui-ink-soft:\s*#000000/);
+  assert.match(tokens, /--hatch-ui-ink-faint:\s*#000000/);
   assert.doesNotMatch(sharedCss, /font-size:\s*[0-9]+(?:\.[0-9]+)?(?:px|rem)/);
 
   assert.match(tokens, /--hatch-ui-surface-window:\s*var\(--hatch-atmosphere-base\)/);

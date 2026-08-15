@@ -1,7 +1,7 @@
 :root {
   --hatch-canvas: #f3ede3;
-  --hatch-ink: #201813;
-  --hatch-text-secondary: #74675e;
+  --hatch-ink: #000000;
+  --hatch-text-secondary: #000000;
   --hatch-accent: #a64e35;
   --hatch-accent-hover: #8f402d;
   --hatch-border: rgba(54, 41, 31, 0.2);
@@ -42,9 +42,9 @@
   --hatch-ui-panel: #fbf8f2;
   --hatch-ui-panel-muted: #eee7dc;
   --hatch-ui-panel-strong: #e4dbce;
-  --hatch-ui-ink: #25211e;
-  --hatch-ui-ink-soft: #554e47;
-  --hatch-ui-ink-faint: #675e55;
+  --hatch-ui-ink: #000000;
+  --hatch-ui-ink-soft: #000000;
+  --hatch-ui-ink-faint: #000000;
   --hatch-ui-accent: #a64e35;
   --hatch-ui-accent-hover: #8f402d;
   --hatch-ui-primary: #1f1c19;
@@ -79,7 +79,7 @@
   --hatch-ui-dark-edge: rgba(65, 48, 34, .145);
   --hatch-ui-on-danger: #fff9f5;
   --hatch-ui-danger-solid: #a84a36;
-  --hatch-ui-status-neutral-ink: #5b544d;
+  --hatch-ui-status-neutral-ink: #000000;
   --hatch-ui-status-neutral-bg: #ebe5dc;
   --hatch-ui-status-success-ink: #315d46;
   --hatch-ui-status-success-bg: #dce8df;
@@ -125,9 +125,9 @@
   --hatch-ui-panel: #faf7f1;
   --hatch-ui-panel-muted: #eee8de;
   --hatch-ui-panel-strong: #e7ded2;
-  --hatch-ui-ink: #29241f;
-  --hatch-ui-ink-soft: #5f574f;
-  --hatch-ui-ink-faint: #6f665d;
+  --hatch-ui-ink: #000000;
+  --hatch-ui-ink-soft: #000000;
+  --hatch-ui-ink-faint: #000000;
   --hatch-ui-accent: #b85f43;
   --hatch-ui-accent-hover: #9f4e36;
   --hatch-ui-primary: #a95036;

@@ -219,7 +219,7 @@ h2 {
 
 .profile-card div span,
 .agent-nav-item small {
-  color: #69736d;
+  color: var(--hatch-ink);
   font-size: var(--hatch-type-caption);
   margin-top: 2px;
 }
@@ -296,7 +296,7 @@ h2 {
 }
 
 .settings-panel summary {
-  color: #323936;
+  color: var(--hatch-ink);
   cursor: pointer;
   font-size: var(--hatch-type-control);
   font-weight: 750;
@@ -327,7 +327,7 @@ h2 {
   background: #fff;
   border: 1px solid #d7dcd5;
   border-radius: 6px;
-  color: #4b5550;
+  color: var(--hatch-ink);
   font-family: var(--hatch-font-pill);
   font-size: var(--hatch-type-caption);
   padding: 5px 7px;
@@ -419,7 +419,7 @@ h2 {
 
 .empty-thread {
   align-self: center;
-  color: #5e6862;
+  color: var(--hatch-ink);
   margin: auto;
   max-width: 560px;
   padding: 12vh 24px;
@@ -443,7 +443,7 @@ h2 {
 }
 
 .empty-kicker {
-  color: #7a837e;
+  color: var(--hatch-ink);
   font-size: var(--hatch-type-label);
   font-weight: 800;
   letter-spacing: 0.08em;
@@ -451,7 +451,7 @@ h2 {
 }
 
 .empty-thread h2 {
-  color: #202522;
+  color: var(--hatch-ink);
   font-size: var(--hatch-type-display-compact);
   letter-spacing: 0;
   line-height: 1.1;
@@ -471,7 +471,7 @@ h2 {
 }
 
 .boundary-copy {
-  color: #7a837e;
+  color: var(--hatch-ink);
   display: block;
   margin-top: 14px;
 }
@@ -549,7 +549,7 @@ h2 {
 
 .status-card p,
 .status-card small {
-  color: #5f6963;
+  color: var(--hatch-ink);
   line-height: 1.55;
 }
 
@@ -588,7 +588,7 @@ h2 {
 }
 
 .empty-agents-header small {
-  color: #69736d;
+  color: var(--hatch-ink);
   margin-top: 2px;
 }
 
@@ -636,12 +636,12 @@ h2 {
 }
 
 .sign-in-card p {
-  color: #5f6963;
+  color: var(--hatch-ink);
   line-height: 1.55;
 }
 
 .sign-in-card small {
-  color: #7a837e;
+  color: var(--hatch-ink);
   text-align: center;
 }
 
@@ -1516,14 +1516,14 @@ h2 {
 }
 
 .approval-gate strong {
-  color: #45391f;
+  color: var(--hatch-ink);
   display: block;
   font-size: var(--hatch-type-control);
   margin-bottom: 3px;
 }
 
 .approval-gate p {
-  color: #6d6148;
+  color: var(--hatch-ink);
   font-size: var(--hatch-type-label);
   line-height: 1.4;
 }
@@ -1562,7 +1562,7 @@ h2 {
 }
 
 .tool-detail-block span {
-  color: #69736d;
+  color: var(--hatch-ink);
   font-size: var(--hatch-type-caption);
   font-weight: 800;
   text-transform: uppercase;
@@ -2745,7 +2745,7 @@ button.composer-control:focus-visible {
   background: transparent;
   border: 0;
   border-radius: 10px;
-  color: rgba(54, 48, 42, .62);
+  color: var(--hatch-ink);
   flex-basis: 32px;
   height: 32px;
   min-height: 32px;
@@ -2772,8 +2772,8 @@ button.composer-control:focus-visible {
 }
 
 .desktop-toolbar-conversation { font-weight: 680; }
-.desktop-toolbar-context-divider { color: rgba(69, 57, 47, .24); }
-.desktop-toolbar-agent-name { color: rgba(65, 56, 49, .67); }
+.desktop-toolbar-context-divider { color: color-mix(in srgb, var(--hatch-ink) 24%, transparent); }
+.desktop-toolbar-agent-name { color: var(--hatch-ink); }
 
 .desktop-sidebar {
   -webkit-backdrop-filter: blur(30px) saturate(110%);
@@ -2838,7 +2838,7 @@ button.composer-control:focus-visible {
   letter-spacing: -.015em;
 }
 
-.desktop-source-row-copy small { color: rgba(74, 64, 56, .58); }
+.desktop-source-row-copy small { color: var(--hatch-ink); }
 
 .desktop-agent-conversation-group {
   border-left: 0;
@@ -2859,13 +2859,13 @@ button.composer-control:focus-visible {
 }
 
 .desktop-agent-conversation-group .sidebar-new-task {
-  color: #a54e36;
+  color: var(--hatch-ink);
   font-weight: 400;
 }
 
 .desktop-agent-conversation-group .sidebar-new-task:hover {
   background: rgba(222, 118, 81, .10);
-  color: #873c29;
+  color: var(--hatch-accent-hover);
 }
 
 .desktop-sidebar-footer {
@@ -2970,7 +2970,7 @@ button.composer-control:focus-visible {
 }
 
 .assistant-activity-summary {
-  color: rgba(68, 59, 52, .66);
+  color: var(--hatch-ink);
   font-family: var(--hatch-font-pill);
   font-size: var(--hatch-type-control);
   font-weight: 640;
@@ -2986,11 +2986,11 @@ button.composer-control:focus-visible {
 .activity-tool-group > summary,
 .tool-label,
 .tool-meta {
-  color: rgba(70, 62, 55, .62);
+  color: var(--hatch-ink);
 }
 
 .turn-timing {
-  color: rgba(70, 62, 55, .48);
+  color: var(--hatch-ink);
   margin-left: 0;
 }
 
@@ -3020,7 +3020,7 @@ button.composer-control:focus-visible {
 }
 
 .composer-control {
-  color: rgba(63, 55, 48, .68);
+  color: var(--hatch-ink);
   font-family: var(--hatch-font-pill);
 }
 
