@@ -9,6 +9,7 @@ import {
   historyTimelineEntries,
   prependTurnActivity,
   reconcileTimelineText,
+  shouldHideWorkedSummary,
   terminalTimelineParts,
   toolActionLabel,
   toolDisplay,
@@ -81,6 +82,13 @@ describe("activity accordion projection", () => {
     expect(activitySummary({ isRunning: false, filtered: true, elapsedMs: 40_000 }))
       .toBe("Blocked · 40s");
     expect(activitySummary({ isRunning: false })).toBe("Worked");
+  });
+
+  it("hides a completed Worked summary when no tool item was recorded", () => {
+    expect(shouldHideWorkedSummary({ isRunning: false, toolItemCount: 0 })).toBe(true);
+    expect(shouldHideWorkedSummary({ isRunning: false, toolItemCount: 1 })).toBe(false);
+    expect(shouldHideWorkedSummary({ isRunning: true, toolItemCount: 0 })).toBe(false);
+    expect(shouldHideWorkedSummary({ isRunning: false, failed: true, toolItemCount: 0 })).toBe(false);
   });
 
   it("uses natural verb tense instead of debug-style completion suffixes", () => {

@@ -87,6 +87,14 @@
   text-decoration: none;
   transition: color var(--hui-motion-control), background var(--hui-motion-control), box-shadow var(--hui-motion-control), opacity var(--hui-motion-control);
 }
+.hui-control {
+  box-sizing: border-box;
+  font-family: var(--hui-font-pill);
+  font-size: var(--hatch-type-control);
+  font-weight: 600;
+  letter-spacing: -.018em;
+  line-height: 1;
+}
 .hui-button:focus-visible,
 .hui-input:focus-visible,
 .hui-search:focus-within,
@@ -184,6 +192,7 @@
 .hui-menu { min-width: 190px; padding: 6px; border-radius: var(--hatch-radius-menu); }
 .hui-menu__item { min-height: 35px; display: flex; align-items: center; gap: 9px; padding: 0 9px; border-radius: 9px; outline: 0; color: var(--hui-ink); cursor: pointer; font-size: var(--hatch-type-label); }
 .hui-menu__item[data-highlighted] { color: var(--hui-ink); background: var(--hui-panel-muted); }
+.hui-menu__item.is-active { color: var(--hui-ink); background: var(--hui-panel-muted); font-weight: 650; }
 .hui-menu__item[data-disabled] { opacity: .42; pointer-events: none; }
 .hui-menu__item.is-destructive { color: var(--hui-danger); }
 .hui-menu__item svg { width: 14px; height: 14px; }
@@ -209,6 +218,33 @@
   padding-block: 0;
   padding-inline: var(--hatch-space-control-compact-inline);
   border-radius: var(--hatch-radius-control);
+}
+.hui-control--raised {
+  border: 1px solid var(--hatch-ui-border-soft);
+  border-radius: var(--hatch-radius-control);
+  color: var(--hui-ink);
+  background: var(--hatch-ui-surface-bright);
+  box-shadow: inset 0 1px 0 var(--hatch-ui-light-edge), inset 0 -1px 0 var(--hatch-ui-dark-edge), 0 2px 10px rgba(66,48,33,.035);
+}
+.hui-control--raised:hover,
+.hui-control--raised[data-state="open"] {
+  border-color: transparent;
+  color: var(--hui-ink);
+  background: rgba(255,254,251,.66);
+  box-shadow: inset 0 1px 0 #fff, inset 0 -1px 0 rgba(65,48,34,.15), 0 3px 12px rgba(66,48,33,.05);
+}
+.hui-control--raised:focus-visible {
+  border-color: transparent;
+  background: rgba(255,254,251,.84);
+  box-shadow: inset 0 1px 0 #fff, inset 0 -1px 0 rgba(184,95,67,.44), 0 0 0 3px var(--hui-focus), 0 5px 18px rgba(98,58,40,.06);
+}
+.hui-control--raised .hui-control-caret,
+.hui-control--raised .hui-select-caret {
+  color: var(--hui-ink-faint);
+  flex: 0 0 14px;
+  height: 14px;
+  stroke-width: 1.55;
+  width: 14px;
 }
 .hui-select-trigger--with-leading { justify-content: flex-start; }
 .hui-select-leading { display: inline-flex; align-items: center; flex: 0 0 auto; }
@@ -832,6 +868,52 @@
 .hui-theme-origin .hatch-checkout-summary { padding: 23px; }
 .hui-theme-origin .hatch-checkout-summary > header > svg { color: var(--hatch-ui-status-progress-ink); background: var(--hatch-ui-status-progress-bg); box-shadow: none; }
 .hui-theme-origin .hui-toaster [data-sonner-toast] { border: 1px solid var(--hui-border) !important; border-radius: var(--hatch-radius-menu) !important; background: var(--hatch-ui-surface-solid) !important; box-shadow: var(--hui-shadow-menu) !important; }
+
+/* A Control surface is one visual primitive in every closed state. The
+ * underlying Button and Radix Select semantics may differ, but their closed
+ * geometry, pigment, seam, and light behavior must not. */
+.hui-theme-origin .hui-control--raised,
+.hui-theme-material .hui-control--raised {
+  align-items: center;
+  border: 1px solid var(--hatch-ui-border-soft);
+  border-radius: var(--hatch-radius-control);
+  color: var(--hatch-ui-ink);
+  background: var(--hatch-ui-surface-bright);
+  box-shadow: inset 0 1px 0 var(--hatch-ui-light-edge), inset 0 -1px 0 var(--hatch-ui-dark-edge), 0 2px 10px rgba(66,48,33,.035);
+  font-family: var(--hatch-font-pill);
+  font-size: var(--hatch-type-control);
+  font-weight: 600;
+  gap: 8px;
+  letter-spacing: -.018em;
+  line-height: 1;
+  padding-block: 0;
+  padding-inline: var(--hatch-space-control-compact-inline);
+}
+.hui-theme-origin .hui-control--raised::before,
+.hui-theme-material .hui-control--raised::before { display: none; }
+.hui-theme-origin .hui-control--raised:hover,
+.hui-theme-origin .hui-control--raised[data-state="open"],
+.hui-theme-material .hui-control--raised:hover,
+.hui-theme-material .hui-control--raised[data-state="open"] {
+  border-color: transparent;
+  color: var(--hatch-ui-ink);
+  background: rgba(255,254,251,.66);
+  box-shadow: inset 0 1px 0 #fff, inset 0 -1px 0 rgba(65,48,34,.15), 0 3px 12px rgba(66,48,33,.05);
+}
+.hui-theme-origin .hui-control--raised:focus-visible,
+.hui-theme-material .hui-control--raised:focus-visible {
+  border-color: transparent;
+  background: rgba(255,254,251,.84);
+  box-shadow: inset 0 1px 0 #fff, inset 0 -1px 0 rgba(184,95,67,.44), 0 0 0 3px var(--hui-focus), 0 5px 18px rgba(98,58,40,.06);
+}
+.hui-theme-origin .hui-control--raised > .hui-control-caret,
+.hui-theme-origin .hui-control--raised > [data-radix-select-icon],
+.hui-theme-material .hui-control--raised > .hui-control-caret,
+.hui-theme-material .hui-control--raised > [data-radix-select-icon] {
+  margin-inline-start: auto;
+}
+.hui-theme-origin .hui-control--raised > [data-radix-select-icon],
+.hui-theme-material .hui-control--raised > [data-radix-select-icon] { display: inline-flex; }
 
 .hui-origin-studio {
   position: relative;

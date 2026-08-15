@@ -99,17 +99,24 @@ describe("desktop system appearance contract", () => {
     expect(sharedStylesheet).toMatch(
       /\.hui-control-caret,[\s\S]*?\.hui-select-trigger > \.hui-select-caret\s*\{[\s\S]*?color:\s*var\(--hui-ink-faint\);[\s\S]*?height:\s*14px;[\s\S]*?stroke-width:\s*1\.55;[\s\S]*?width:\s*14px;/
     );
+    expect(sharedStylesheet).toMatch(
+      /\.hui-theme-origin \.hui-control--raised,[\s\S]*?\.hui-theme-material \.hui-control--raised\s*\{[\s\S]*?border-radius:\s*var\(--hatch-radius-control\);[\s\S]*?box-shadow:/
+    );
     expect(stylesheet).toMatch(
       /\.composer-control\s*\{[\s\S]*?display:\s*inline-flex;[\s\S]*?gap:\s*6px;/
     );
     expect(stylesheet).toMatch(
-      /\.permission-composer-control \.composer-control-select\s*\{[\s\S]*?flex:\s*1 1 auto;[\s\S]*?background:\s*var\(--hatch-ui-surface-bright\);/
+      /\.permission-composer-control \.composer-control-select\s*\{[\s\S]*?flex:\s*1 1 auto;[\s\S]*?min-width:\s*0;/
+    );
+    expect(readFileSync(new URL("./main.jsx", import.meta.url), "utf8")).toMatch(
+      /className="composer-control workspace-composer-control"[\s\S]*?surface="raised"[\s\S]*?className="composer-control-select"[\s\S]*?surface="raised"/
     );
   });
 
   it("keeps composer actions circular and the activity divider at accordion width", () => {
     expect(stylesheet).toMatch(/\.send-button,\s*\.stop-button\s*\{[\s\S]*?align-items:\s*center;[\s\S]*?display:\s*inline-flex;[\s\S]*?justify-content:\s*center;[\s\S]*?line-height:\s*0;[\s\S]*?border-radius:\s*50%;/);
     expect(stylesheet).toMatch(/\.send-button svg\s*\{[\s\S]*?display:\s*block;[\s\S]*?margin:\s*0;/);
+    expect(stylesheet).toMatch(/\.send-button\s*>\s*span\s*\{[\s\S]*?display:\s*grid;[\s\S]*?flex:\s*0 0 18px;[\s\S]*?height:\s*18px;[\s\S]*?width:\s*18px;/);
     expect(stylesheet).toMatch(/\.send-button:not\(:disabled\),\s*\.stop-button:not\(:disabled\)\s*\{[\s\S]*?color:\s*var\(--hatch-ui-on-primary\);/);
     expect(stylesheet).toMatch(/\.assistant-activity-shell\s*\{[\s\S]*?width:\s*100%;/);
     expect(stylesheet).toMatch(/\.assistant-activity-divider\s*\{[\s\S]*?width:\s*100%;/);

@@ -101,6 +101,10 @@ export function activitySummary({ isRunning, failed = false, filtered = false, e
   return elapsedMs === undefined ? "Worked" : `Worked for ${formatDuration(elapsedMs)}`;
 }
 
+export function shouldHideWorkedSummary({ isRunning, failed = false, filtered = false, toolItemCount = 0 }) {
+  return !isRunning && !failed && !filtered && toolItemCount <= 0;
+}
+
 export function prependTurnActivity(parts, runId) {
   if (!runId || parts.some((part) => part?.type === "data" && part.name === TURN_ACTIVITY_PART)) {
     return parts;

@@ -39,6 +39,8 @@ test("@hatch/ui owns the shared Button, Dialog, Select and CSS entrypoint", () =
   assert.match(control, /export function Control/);
   assert.match(control, /kind === "select"/);
   assert.match(control, /size = "compact"/);
+  assert.match(control, /surface/);
+  assert.match(control, /hui-control--\$\{surface\}/);
   assert.match(navigation, /export function NavigationItem/);
   assert.match(navigation, /trailing/);
   assert.match(overlays, /export const Dialog = DialogPrimitive\.Root/);
@@ -190,6 +192,7 @@ test("Theme Lab edits the same token knobs used by the shared CSS", () => {
   assert.match(sharedCss, /\.hui-page-header h1[^}]*line-height:\s*var\(--hatch-display-leading\)/s);
   assert.match(sharedCss, /\.hui-button\s*\{[^}]*font-family:\s*var\(--hui-font-pill\)/s);
   assert.match(sharedCss, /\.hui-control--compact\s*\{/);
+  assert.match(sharedCss, /\.hui-control--raised\s*\{/);
   assert.match(sharedCss, /\.hui-field__label\s*\{[^}]*font-family:\s*var\(--hui-font-pill\)/s);
   assert.doesNotMatch(sharedCss, /\.hui-drawer\.is-(?:right|bottom)[^{]*\{[^}]*border-radius:[^;]*\b0\b/s);
 });

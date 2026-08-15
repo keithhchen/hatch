@@ -83,6 +83,7 @@
 .buyer-v2__brand .hatch-brand__wordmark { font-size: var(--hatch-type-title); letter-spacing: var(--hatch-display-tracking, -.06em); line-height: var(--hatch-display-leading, .86); }
 .buyer-v2__brand--inverse { color: var(--buyer-inverse-text); }
 .buyer-v2__nav { display: flex; min-width: 0; align-items: center; justify-content: center; gap: 4px; }
+.buyer-v2__mobile-nav { display: none; }
 .buyer-v2__nav a {
   position: relative;
   display: inline-flex;
@@ -439,10 +440,9 @@
 @media (max-width: 840px) {
   .buyer-v2__header { position: static; padding: 10px 12px; }
   .buyer-v2__header-inner {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     grid-template-areas:
-      "brand account"
-      "nav nav";
+      "brand account mobile-nav";
     width: 100%;
     min-height: 0;
     gap: 8px 12px;
@@ -450,19 +450,20 @@
   }
   .buyer-v2__brand { grid-area: brand; min-width: 0; font-size: var(--hatch-type-heading); }
   .buyer-v2__nav {
-    grid-area: nav;
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
-    width: 100%;
-    gap: 3px;
-    padding: 2px 0 2px;
+    display: none;
   }
-  .buyer-v2__nav a {
-    min-width: 0;
+  .buyer-v2__mobile-nav {
+    display: block;
+    grid-area: mobile-nav;
+  }
+  .buyer-v2__mobile-nav .hui-icon-button {
     min-height: 40px;
-    justify-content: center;
-    padding-inline: 8px;
-    border-radius: 10px;
+    min-width: 40px;
+    padding: 0;
+  }
+  .buyer-v2__mobile-nav .hui-icon-button svg {
+    height: 17px;
+    width: 17px;
   }
   .buyer-v2__account { grid-area: account; min-width: 0; }
   .buyer-v2__plain-button { min-height: 38px; padding-inline: 6px; white-space: nowrap; }
@@ -500,16 +501,7 @@
     gap: 6px 8px;
     padding: 8px 8px 6px 10px;
   }
-  .buyer-v2__nav {
-    justify-content: flex-start;
-    flex-wrap: nowrap;
-    margin-inline: -2px;
-    overflow-x: auto;
-    padding: 2px;
-    scrollbar-width: none;
-  }
-  .buyer-v2__nav::-webkit-scrollbar { display: none; }
-  .buyer-v2__nav a { flex: 0 0 auto; min-height: 38px; padding-inline: 10px; }
+  .buyer-v2__download-quiet { display: none; }
   .buyer-v2__account { gap: 4px; }
   .buyer-v2__account .hui-button { min-height: 38px; padding-inline: 8px; }
 }

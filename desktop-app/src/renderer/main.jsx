@@ -185,6 +185,7 @@ import {
   appendTimelineText,
   historyTimelineEntries,
   prependTurnActivity,
+  shouldHideWorkedSummary,
   terminalTimelineParts,
   toolActionLabel,
   toolDisplay,
@@ -3523,7 +3524,9 @@ function App() {
                           className="send-button"
                           title={t("common.send")}
                         >
-                          <ArrowUp aria-hidden="true" />
+                          <span className="send-button-icon">
+                            <ArrowUp aria-hidden="true" />
+                          </span>
                         </ComposerPrimitive.Send>
                       )}
                     </div>
@@ -3872,6 +3875,7 @@ function ComposerControls({ droppedFiles = [], workspace, workspaceGranted, perm
           kind="button"
           aria-label={t("accessibility.chooseWorkspaceFolder")}
           className="composer-control workspace-composer-control"
+          surface="raised"
           variant="secondary"
           leading={<WorkspaceIcon />}
           trailing={<ChevronDown className="hui-control-caret" aria-hidden="true" />}
@@ -3885,6 +3889,7 @@ function ComposerControls({ droppedFiles = [], workspace, workspaceGranted, perm
           <Control
             kind="select"
             className="composer-control-select"
+            surface="raised"
             aria-label={t("accessibility.workspacePermissions")}
             leading={<ShieldIcon />}
             value={permissionMode}
@@ -4470,7 +4475,6 @@ function HatchMessage() {
       <MessagePrimitive.GroupedParts groupBy={activityGroupPath} indicator="never">
         {renderAssistantTimelinePart}
       </MessagePrimitive.GroupedParts>
-      <AssistantTurnTiming />
     </MessagePrimitive.Root>
   );
 }
@@ -4532,6 +4536,7 @@ function AssistantActivityBlock({ indices, children }) {
   const hasAnswerText = Array.isArray(parts) && parts.some((part) => part.type === "text" && part.text);
   const failed = status?.type === "incomplete" || custom.status === "failed";
   const filtered = custom.status === "content_filter";
+  const toolItemCount = activityParts.filter((part) => part.type === "tool-call").length;
   const summary = activitySummary({
     isRunning,
     failed,
@@ -4539,6 +4544,11 @@ function AssistantActivityBlock({ indices, children }) {
     elapsedMs,
     activeLabel: active?.label ?? (isRunning && hasAnswerText ? "Answering" : "")
   });
+  if (shouldHideWorkedSummary({ isRunning, failed, filtered, toolItemCount })) {
+    return visibleActivityParts.length > 0
+      ? <div className="assistant-activity-items">{children}</div>
+      : null;
+  }
   const icon = filtered ? "⊘" : failed ? "!" : isRunning ? active?.icon ?? "✦" : "✓";
   const tone = filtered || failed ? "failed" : isRunning ? "running" : "completed";
   const summaryContent = (
@@ -4572,17 +4582,6 @@ function AssistantActivityBlock({ indices, children }) {
       </details>
       <div className="assistant-activity-divider" aria-hidden="true" />
     </div>
-  );
-}
-
-function AssistantTurnTiming() {
-  const custom = useMessage((message) => message.metadata?.custom ?? {});
-  if (!custom.turnTiming) return null;
-  return (
-    <details className="turn-timing">
-      <summary>Timing</summary>
-      <pre>{JSON.stringify(custom.turnTiming, null, 2)}</pre>
-    </details>
   );
 }
 
