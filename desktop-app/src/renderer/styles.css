@@ -2915,6 +2915,10 @@ button.composer-control:focus-visible {
   background: rgba(255, 252, 247, .72);
   border: 1px solid rgba(255,255,255,.82);
   box-shadow: 0 1px 3px rgba(60,43,31,.08);
+  color: #ad5138;
+  font-family: var(--hatch-font-pill);
+  font-size: 11px;
+  font-weight: 700;
   flex: 0 0 30px;
   height: 30px;
   width: 30px;
@@ -3164,6 +3168,8 @@ button.composer-control:focus-visible {
   gap: 8px;
   justify-content: flex-start;
   min-height: 48px;
+  min-width: 0;
+  overflow: hidden;
   padding: 7px 9px;
   text-align: left;
   width: 100%;
@@ -3172,6 +3178,13 @@ button.composer-control:focus-visible {
 .desktop-source-row.hui-navigation-item > span:not(.creator-avatar) {
   flex: 1 1 auto;
   min-width: 0;
+  overflow: hidden;
+}
+
+.desktop-source-row-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .desktop-source-row.hui-navigation-item > .desktop-agent-disclosure {

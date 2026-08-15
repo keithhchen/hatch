@@ -32,10 +32,11 @@
 .cpv2-brand .hatch-brand__mark { width: 22px; height: 22px; }
 .cpv2-brand .hatch-brand__wordmark { font-size: 22px; letter-spacing: var(--hatch-display-tracking, -.06em); }
 .cpv2-sidebar > nav:not(.cpv2-global-nav) { display: grid; gap: 4px; margin-top: 28px; }
-.cpv2-sidebar > nav:not(.cpv2-global-nav) button { min-height: 44px; padding: 10px 13px; border: 0; border-radius: 10px; background: transparent; color: var(--hatch-text-secondary, #74675e); text-align: left; }
+.cpv2-sidebar > nav:not(.cpv2-global-nav) button { display: flex; min-height: 40px; align-items: center; padding: 8px 13px; border: 0; border-radius: 10px; background: transparent; color: var(--hatch-text-secondary, #74675e); font-family: var(--hatch-font-pill, Inter, sans-serif); font-size: 12px; font-weight: 540; letter-spacing: -.012em; line-height: 1.2; text-align: left; }
+.cpv2-sidebar > nav:not(.cpv2-global-nav) button > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cpv2-sidebar > nav:not(.cpv2-global-nav) button:hover, .cpv2-sidebar > nav:not(.cpv2-global-nav) button.is-active { background: transparent; color: var(--hatch-ink, #201813); box-shadow: none; }
 .cpv2-global-nav { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; }
-.cpv2-global-nav a { position: relative; display: inline-flex; min-height: 44px; align-items: center; gap: 7px; padding: 10px 7px; color: var(--hatch-text-secondary, #74675e); font-family: var(--hatch-font-pill, Inter, sans-serif); font-size: 11px; font-weight: 540; letter-spacing: -.012em; text-decoration: none; }
+.cpv2-global-nav a { position: relative; display: inline-flex; min-height: 40px; align-items: center; gap: 7px; padding: 8px 7px; color: var(--hatch-text-secondary, #74675e); font-family: var(--hatch-font-pill, Inter, sans-serif); font-size: 12px; font-weight: 540; letter-spacing: -.012em; line-height: 1.2; text-decoration: none; }
 .cpv2-global-nav a:hover { color: var(--hatch-ink, #201813); }
 .cpv2-global-nav a::before { width: 4px; height: 4px; flex: 0 0 auto; border-radius: 50%; background: var(--hatch-accent, #d65f3b); content: ""; opacity: 0; transform: scale(.45); transition: opacity var(--hatch-motion-control, 150ms ease), transform var(--hatch-motion-control, 150ms ease); }
 .cpv2-global-nav a[aria-current="page"] { color: var(--hatch-ink, #201813); font-weight: 680; }
@@ -332,9 +333,10 @@
   .cpv2 { grid-template-columns: 1fr; }
   .cpv2-sidebar { position: static; height: auto; padding: 14px 16px; }
   .cpv2-brand { font-size: 24px; }
-  .cpv2-sidebar > nav:not(.cpv2-global-nav) { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 10px; overflow-x: auto; }
-  .cpv2-sidebar > nav:not(.cpv2-global-nav) button { padding: 8px 6px; text-align: center; font-size: 11px; }
+  .cpv2-sidebar > nav:not(.cpv2-global-nav) { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 12px; overflow-x: auto; }
+  .cpv2-sidebar > nav:not(.cpv2-global-nav) button { min-height: 38px; padding: 8px 6px; font-size: 11px; text-align: center; }
   .cpv2-global-nav { margin-top: 4px; }
+  .cpv2-global-nav a { min-height: 34px; padding: 6px 4px; font-size: 11px; }
   .cpv2-account { grid-template-columns: 34px minmax(0, 1fr) auto; margin-top: 12px; padding-top: 12px; }
   .cpv2-account button { grid-column: auto; min-width: 72px; padding: 0; text-align: right; }
   .cpv2-avatar { width: 34px; height: 34px; }
