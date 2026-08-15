@@ -95,7 +95,12 @@
   text-decoration: none;
 }
 .buyer-v2__nav a:hover { color: var(--buyer-ink); }
-.buyer-v2__nav a[aria-current="page"] { color: var(--buyer-ink); font-weight: 680; }
+.buyer-v2__nav a[aria-current="page"] {
+  background: transparent;
+  color: var(--buyer-ink);
+  font-weight: 680;
+  box-shadow: none;
+}
 .buyer-v2__nav a[aria-current="page"]::after {
   position: absolute;
   bottom: 6px;
@@ -429,14 +434,36 @@
   .buyer-v2__auth-context h1 { font-size: 52px; }
 }
 
-@media (max-width: 720px) {
-  .buyer-v2__header { position: static; padding: 10px; }
-  .buyer-v2__header-inner { grid-template-columns: 1fr auto; width: 100%; min-height: 64px; gap: 10px; }
-  .buyer-v2__brand { font-size: 24px; }
-  .buyer-v2__nav { grid-column: 1 / -1; grid-row: 2; justify-content: stretch; padding: 4px 0 10px; }
-  .buyer-v2__nav a { flex: 1; justify-content: center; }
-  .buyer-v2__avatar { display: none; }
-  .buyer-v2__plain-button { padding-inline: 6px; }
+@media (max-width: 840px) {
+  .buyer-v2__header { position: static; padding: 10px 12px; }
+  .buyer-v2__header-inner {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "brand account"
+      "nav nav";
+    width: 100%;
+    min-height: 0;
+    gap: 8px 12px;
+    padding: 10px 12px 8px 14px;
+  }
+  .buyer-v2__brand { grid-area: brand; min-width: 0; font-size: 24px; }
+  .buyer-v2__nav {
+    grid-area: nav;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+    width: 100%;
+    gap: 3px;
+    padding: 2px 0 2px;
+  }
+  .buyer-v2__nav a {
+    min-width: 0;
+    min-height: 40px;
+    justify-content: center;
+    padding-inline: 8px;
+    border-radius: 10px;
+  }
+  .buyer-v2__account { grid-area: account; min-width: 0; }
+  .buyer-v2__plain-button { min-height: 38px; padding-inline: 6px; white-space: nowrap; }
   .buyer-v2__container, .buyer-v2__success-page { width: min(100% - 28px, 1160px); }
   .buyer-v2__page { padding-top: 38px; padding-bottom: calc(70px + env(safe-area-inset-bottom)); }
   .buyer-v2__page-heading { margin-bottom: 30px; }
