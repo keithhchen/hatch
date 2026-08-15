@@ -502,7 +502,11 @@ function CandidatePage({ token, request, navigate, productId, candidateId }) {
       && product.approval.candidate_id === candidateId
       && product.approval.candidate_digest === candidate?.digest
       && product.approval.report_digest === candidate?.report_digest;
-    const expectedVersion = product?.resource_version ?? product?.version ?? 0;
+    // The candidate endpoint returns the version that was read together with
+    // this immutable candidate/report snapshot. Prefer it over the separate
+    // Product request: those two reads can complete in either order while a
+    // deployment reconciler is updating the same workflow record.
+    const expectedVersion = candidate?.resource_version ?? product?.resource_version ?? product?.version ?? 0;
     const busy = mutation.state !== "idle";
     return <>
       <Breadcrumb onClick={() => navigate(`${ROOT}/products/${encodeURIComponent(productId)}/versions`)}>Versions</Breadcrumb>
