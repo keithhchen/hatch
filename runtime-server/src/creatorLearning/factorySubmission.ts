@@ -450,8 +450,13 @@ function renderQuestions(rows: QuestionSubmission[]): string {
   return [
     "# Generated Creator questions",
     "",
-    ...rows.flatMap((row) => [
-      `## ${row.id}`,
+    ...rows.flatMap((row, index) => [
+      // The question body is untrusted Markdown and may itself contain a
+      // `## Q...` heading. Keep the internal handoff lossless by giving the
+      // host-rendered blocks an out-of-band delimiter and host-owned IDs;
+      // Creator-facing artifacts are rendered later from parsed objects.
+      "<!-- HATCH_FACTORY_QUESTION_BEGIN -->",
+      `## Q${index + 1}`,
       "",
       "### Question",
       "",

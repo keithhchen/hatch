@@ -185,6 +185,39 @@ test("invalid finalize clears the draft and requires a complete replacement", as
   assert.match(JSON.stringify(requests[1]), /REJECTED code=QUESTION_COUNT_MISMATCH; draft cleared/);
 });
 
+test("question handoff preserves Markdown headings inside an authored question", async () => {
+  const nestedHeading = [
+    "Review this candidate packet:",
+    "",
+    "## Q99 — Candidate facts",
+    "",
+    "The candidate has five years of experience.",
+    "",
+    "## Draft answer",
+    "",
+    "Return one spoken rewrite."
+  ].join("\n");
+  const { output } = await run({
+    purpose: "eval.generate_questions",
+    systemPrompt: "question system",
+    prompt: "input",
+    outputContract: { kind: "question_set", expectedCount: 1 }
+  }, [
+    toolTurn([
+      {
+        id: "nested-heading-question",
+        name: "submit_question",
+        arguments: { id: "provider-made-id", question: nestedHeading, intent: "Tests the full packet.", leakage_group: "nested-heading" }
+      },
+      { id: "finalize", name: "finalize_questions", arguments: {} }
+    ])
+  ]);
+
+  const [question] = parseQuestions(output);
+  assert.equal(question?.id, "Q1", "the host owns the canonical handoff ID");
+  assert.equal(question?.question, nestedHeading);
+});
+
 test("strict raw JSON gate rejects a malformed later call with zero batch mutation", async () => {
   const preservedEvidence = "  NEW COMPLETE EVIDENCE\n    indented code-like line\ntrailing spaces stay  ";
   const { output, requests } = await run({

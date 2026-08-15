@@ -1,6 +1,7 @@
 import type { CreatorQa, CreatorQuestion, EvaluationVerdict } from "./types.js";
 
 const QUESTION_HEADING = /^##\s+((?:[A-Za-z][\w-]*\.)?Q\d+)(?:\s*[-—:]\s*(.*))?\s*$/gim;
+const FACTORY_QUESTION_BLOCK = /^<!-- HATCH_FACTORY_QUESTION_BEGIN -->\r?\n/gm;
 const CREATOR_QUESTION_BATCH_MARKER = /<!-- HATCH_CREATOR_QUESTION_BATCH_ID: (qbatch_v1_[a-f0-9]{64}) -->/g;
 
 export const CORPUS_COMPILATION_END_MARKER = "HATCH_CORPUS_COMPILATION_COMPLETE";
@@ -73,24 +74,38 @@ export type ParseCorpusCompilationOptions = {
 };
 
 export function parseQuestions(markdown: string): CreatorQuestion[] {
+  const factoryBlocks = [...markdown.matchAll(FACTORY_QUESTION_BLOCK)];
+  if (factoryBlocks.length > 0) {
+    return factoryBlocks.map((marker, index) => {
+      const blockStart = (marker.index ?? 0) + marker[0].length;
+      const blockEnd = factoryBlocks[index + 1]?.index ?? markdown.length;
+      const block = markdown.slice(blockStart, blockEnd);
+      const heading = block.match(/^##\s+((?:[A-Za-z][\w-]*\.)?Q\d+)(?:\s*[-—:]\s*(.*))?\s*$/im);
+      if (!heading) throw new Error(`Factory question block ${index + 1} has no canonical heading`);
+      return parseQuestionBlock(heading[1]!, block.slice((heading.index ?? 0) + heading[0].length));
+    });
+  }
   const matches = [...markdown.matchAll(QUESTION_HEADING)];
   return matches.map((match, index) => {
     const bodyStart = (match.index ?? 0) + match[0].length;
     const bodyEnd = matches[index + 1]?.index ?? markdown.length;
-    const body = markdown.slice(bodyStart, bodyEnd);
+    return parseQuestionBlock(match[1]!, markdown.slice(bodyStart, bodyEnd));
+  });
+}
+
+function parseQuestionBlock(id: string, body: string): CreatorQuestion {
     const question = namedSection(body, "Question", ["Why this question", "Intent", "Creator Answer", "Leakage group"])
       || firstContentBlock(body);
     const intent = namedSection(body, "Why this question", ["Intent", "Creator Answer", "Leakage group"])
       || namedSection(body, "Intent", ["Creator Answer", "Leakage group"]);
     const leakageGroup = namedSection(body, "Leakage group", ["Creator Answer"]);
-    if (!question.trim()) throw new Error(`Question ${match[1]} has no question body`);
+    if (!question.trim()) throw new Error(`Question ${id} has no question body`);
     return {
-      id: match[1]!,
+      id,
       question: question.trim(),
       ...(intent.trim() ? { intent: intent.trim() } : {}),
       ...(leakageGroup.trim() ? { leakageGroup: leakageGroup.trim() } : {})
     };
-  });
 }
 
 export function renderCreatorAnswerTemplate(questions: CreatorQuestion[], questionBatchId: string): string {
