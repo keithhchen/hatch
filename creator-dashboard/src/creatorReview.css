@@ -16,4 +16,17 @@
 .creator-review-correction { display: grid; gap: 12px; padding-top: 6px; }
 .creator-review-blind { grid-template-columns: 1fr auto; align-items: center; background: color-mix(in srgb, var(--hatch-ui-selection, #eee7dc) 54%, transparent); }
 .creator-review-blind .creator-review-eyebrow { display: block; }
+.creator-review-corpus { display: grid; gap: 18px; padding: 24px; border: 1px solid var(--hatch-ui-border-soft, var(--hatch-border-subtle)); border-radius: 20px; background: var(--hatch-ui-surface-resting, var(--hatch-panel)); }
+.creator-review-corpus-unavailable { background: color-mix(in srgb, var(--hatch-ui-selection, #eee7dc) 54%, transparent); }
+.creator-review-corpus-heading { display: flex; justify-content: space-between; gap: 18px; align-items: flex-start; }
+.creator-review-corpus-heading h2 { margin: 6px 0 0; font-size: var(--hatch-type-heading); line-height: 1.25; }
+.creator-review-corpus-heading p { max-width: 720px; margin: 8px 0 0; color: var(--hatch-text-secondary); line-height: 1.6; }
+.creator-review-corpus-meta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; color: var(--hatch-text-secondary); font-size: var(--hatch-type-caption); }
+.creator-review-corpus-meta code, .creator-review-corpus-asset-heading code { overflow-wrap: anywhere; }
+.creator-review-corpus-assets { display: grid; gap: 12px; }
+.creator-review-corpus-asset { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--hatch-ui-border-soft, var(--hatch-border-subtle)); border-radius: 14px; background: color-mix(in srgb, var(--hatch-ui-selection, #eee7dc) 42%, transparent); }
+.creator-review-corpus-asset-heading { display: flex; justify-content: space-between; gap: 14px; align-items: baseline; }
+.creator-review-corpus-asset-heading h3 { margin: 5px 0 0; font-size: var(--hatch-type-control); }
+.creator-review-corpus-asset pre { max-height: 520px; overflow: auto; margin: 0; padding: 14px; border-radius: 10px; background: var(--hatch-panel, #fff); color: var(--hatch-text-primary); white-space: pre-wrap; overflow-wrap: anywhere; font: var(--hatch-type-label)/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.creator-review-corpus-note { margin: 0; color: var(--hatch-text-secondary); font-size: var(--hatch-type-caption); line-height: 1.5; }
 @media (max-width: 760px) { .creator-review-summary, .creator-review-columns { grid-template-columns: 1fr; } .creator-review-blind { grid-template-columns: 1fr; } }

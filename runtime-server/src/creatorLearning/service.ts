@@ -12,7 +12,99 @@ import {
   type CreatorFactoryRepository,
   type FactoryRunRecord
 } from "./repository.js";
-import type { ArtifactRef, CreatorQuestion, FactoryAgentProduct, FactoryAgentTool, FactoryStartInput } from "./types.js";
+import type { ArtifactRef, CreatorQuestion, FactoryAgentProduct, FactoryAgentTool, FactoryStartInput, MaterializedAgentCorpus } from "./types.js";
+
+export type CreatorCorpusAssetLayer = "manifest" | "system" | "skill" | "reference" | "knowledge";
+
+export type CreatorCorpusAsset = {
+  id: string;
+  layer: CreatorCorpusAssetLayer;
+  path: string;
+  sha256: string;
+  content: string;
+  parentSkillId?: string;
+  kind?: string;
+};
+
+export type CreatorCorpusProjection = {
+  /** True only when the immutable Agent Corpus was materialized and verified. */
+  available: boolean;
+  version: number;
+  digest?: string;
+  verifiedAt?: string;
+  assets: CreatorCorpusAsset[];
+  /** Evaluation files are deliberately not part of the Creator-visible runtime Corpus. */
+  evaluationAssets: {
+    included: false;
+    sealed: true;
+    note: string;
+  };
+  reason?: string;
+};
+
+type CreatorCorpusAssetRefs = {
+  system: ArtifactRef;
+  skills: Array<{
+    id: string;
+    instruction: ArtifactRef;
+    references: Array<{ id: string; kind: "method" | "style" | "example" | "few_shots"; asset: ArtifactRef }>;
+  }>;
+  knowledge: Array<{ id: string; asset: ArtifactRef }>;
+};
+
+async function recoverCorpusAssetRefs(store: FactoryFileStore, corpus: MaterializedAgentCorpus): Promise<CreatorCorpusAssetRefs> {
+  const raw = JSON.parse(await store.readArtifact(corpus.manifest)) as unknown;
+  const manifest = requirePlainObject(raw, "Agent Corpus manifest");
+  const instructions = requirePlainObject(manifest.instructions, "Agent Corpus manifest.instructions");
+  const system = requirePlainObject(instructions.system, "Agent Corpus manifest.instructions.system");
+  const refFor = (value: unknown, label: string): ArtifactRef => {
+    const record = requirePlainObject(value, label);
+    const relativePath = requireText(record.path, `${label}.path`).replaceAll("\\", "/");
+    if (path.isAbsolute(relativePath) || relativePath.split("/").some((segment) => segment === ".." || segment === ".")) {
+      throw new Error(`${label}.path is not a safe relative Corpus path`);
+    }
+    const sha256 = requireText(record.sha256, `${label}.sha256`);
+    if (!/^sha256:[a-f0-9]{64}$/.test(sha256)) throw new Error(`${label}.sha256 is invalid`);
+    return {
+      path: path.posix.join(corpus.rootPath, relativePath),
+      sha256,
+      createdAt: corpus.verifiedAt
+    };
+  };
+  const skills = Array.isArray(manifest.skills) ? manifest.skills.map((value, index) => {
+    const skill = requirePlainObject(value, `Agent Corpus manifest.skills[${index}]`);
+    const instruction = requirePlainObject(skill.instruction, `Agent Corpus manifest.skills[${index}].instruction`);
+    const references = Array.isArray(skill.references) ? skill.references.map((value, referenceIndex) => {
+      const reference = requirePlainObject(value, `Agent Corpus manifest.skills[${index}].references[${referenceIndex}]`);
+      const asset = requirePlainObject(reference.asset, `Agent Corpus manifest.skills[${index}].references[${referenceIndex}].asset`);
+      const kind = requireText(reference.kind, `Agent Corpus manifest.skills[${index}].references[${referenceIndex}].kind`);
+      if (!["method", "style", "example", "few_shots"].includes(kind)) throw new Error(`Unknown Corpus reference kind: ${kind}`);
+      return {
+        id: requireText(asset.id, "Corpus reference id"),
+        kind: kind as "method" | "style" | "example" | "few_shots",
+        asset: refFor(asset, `Agent Corpus manifest.skills[${index}].references[${referenceIndex}].asset`)
+      };
+    }) : [];
+    return {
+      id: requireText(skill.id, `Agent Corpus manifest.skills[${index}].id`),
+      instruction: refFor(instruction, `Agent Corpus manifest.skills[${index}].instruction`),
+      references
+    };
+  }) : [];
+  const knowledge = requirePlainObject(manifest.knowledge, "Agent Corpus manifest.knowledge");
+  const documents = Array.isArray(knowledge.documents) ? knowledge.documents.map((value, index) => {
+    const document = requirePlainObject(value, `Agent Corpus manifest.knowledge.documents[${index}]`);
+    return {
+      id: requireText(document.id, `Agent Corpus knowledge id ${index}`),
+      asset: refFor(document, `Agent Corpus manifest.knowledge.documents[${index}]`)
+    };
+  }) : [];
+  return {
+    system: refFor(system, "Agent Corpus manifest.instructions.system"),
+    skills,
+    knowledge: documents
+  };
+}
 
 export type CreateFactoryRunRequest = {
   taskId?: string;
@@ -57,6 +149,7 @@ export type CreatorReviewProjection = {
   version: number;
   candidateDigest: string;
   candidateVersion: number;
+  corpus: CreatorCorpusProjection;
   cases: CreatorReviewCase[];
   blind: {
     sealed: true;
@@ -103,7 +196,7 @@ export type CreatorFactoryRunView = {
   status: FactoryRunRecord["status"];
   stage?: FactoryRunRecord["factoryStage"];
   version: number;
-  pendingQuestions: Array<{ id: string; question: string }>;
+  pendingQuestions: Array<{ id: string; question: string; intent?: string; kind?: "behavior" | "provenance_confirmation" }>;
   questionBatchId?: string;
   candidate?: {
     version: number;
@@ -416,7 +509,7 @@ export class CreatorFactoryService {
           sealed_report_digest: run.state.pendingReview.report.sha256
         }, null, 2)}\n`
       );
-      const next = await this.createRevisionFromReview(creatorId, run, request, key, review, undefined, true);
+      const next = await this.createRevisionFromReview(creatorId, run, request, key, review, undefined, true, confirmationArtifact);
       const parent = events.filter((event) => event.revisionId === revisionId).at(-1);
       await this.graphStore.appendEvent({
         id: newGraphEventId(),
@@ -742,7 +835,12 @@ export class CreatorFactoryService {
       ...(run.factoryStage ? { stage: run.factoryStage } : {}),
       version: run.version,
       pendingQuestions: includeQuestions && awaitingAnswers
-        ? (await this.pendingQuestions(run)).map(({ id, question }) => ({ id, question }))
+        ? (await this.pendingQuestions(run)).map(({ id, question, intent, kind }) => ({
+          id,
+          question,
+          ...(intent ? { intent } : {}),
+          ...(kind ? { kind } : {})
+        }))
         : [],
       ...(includeQuestions && awaitingAnswers && run.state?.artifacts.currentQuestionBatch
         ? { questionBatchId: requireQuestionBatchId(run.id, run.state.artifacts.currentQuestionBatch) }
@@ -768,6 +866,7 @@ export class CreatorFactoryService {
     if (!latest) throw new CreatorFactoryRepositoryError("invalid_status", `Factory run ${run.id} has no Candidate to review`);
     const candidateDigest = latest.agentCorpus?.digest ?? latest.systemInstructions.sha256;
     const revisionId = run.input.revisionId ?? run.id;
+    const corpus = await this.projectCorpus(run.id, latest);
     let parsedCases: unknown[] = [];
     const regressionRef = run.state?.artifacts.latestRegressionEvaluation ?? latest.agentCorpus?.syntheticQa;
     if (regressionRef) {
@@ -849,11 +948,97 @@ export class CreatorFactoryService {
       version: run.version,
       candidateDigest,
       candidateVersion: latest.version,
+      corpus,
       cases,
       blind: { sealed: true, total: blindTotal, passed: blindPassed, failed: blindFailed, needsCreatorAction: blindFailed > 0 || run.state?.stage === "review_required" },
       unresolvedCount,
       releaseReady: run.status === "ready" && run.state?.stage === "ready" && blindFailed === 0 && unresolvedCount === 0
     };
+  }
+
+  /**
+   * Expose the complete verified runtime Corpus to its Creator. This is a
+   * read-only projection over immutable candidate assets, not a second copy
+   * of the Corpus and not a view of the worker's prompts or traces.
+   *
+   * Synthetic/held-out evaluation files stay sealed and separate from the
+   * model-visible Corpus. Returning their digests would also make the sealed
+   * set observable, so the projection only states that they are excluded.
+   */
+  private async projectCorpus(
+    runId: string,
+    candidate: NonNullable<FactoryRunRecord["state"]>["artifacts"]["corpusCandidates"][number]
+  ): Promise<CreatorCorpusProjection> {
+    const evaluationAssets = {
+      included: false as const,
+      sealed: true as const,
+      note: "Evaluation assets are sealed quality gates, not runtime Corpus content; their questions, answers, and outputs stay hidden."
+    };
+    if (!candidate.agentCorpus) {
+      return {
+        available: false,
+        version: candidate.version,
+        assets: [],
+        evaluationAssets,
+        reason: "This Candidate has not produced a verified Agent Corpus yet."
+      };
+    }
+    const store = this.fileStore(runId);
+    try {
+      // Older verified Candidates predate the asset-ref projection in state.
+      // Reconstruct the same immutable refs from their verified manifest so a
+      // historical Candidate does not lose its complete Corpus view.
+      const assetRefs = candidate.agentCorpus.assets ?? await recoverCorpusAssetRefs(store, candidate.agentCorpus);
+      const assets: CreatorCorpusAsset[] = [];
+      const push = async (
+        id: string,
+        layer: CreatorCorpusAssetLayer,
+        reference: ArtifactRef,
+        extra: Pick<CreatorCorpusAsset, "parentSkillId" | "kind"> = {}
+      ) => {
+        assets.push({
+          id,
+          layer,
+          path: reference.path.replace(/^candidate\//, ""),
+          sha256: reference.sha256,
+          content: await store.readArtifact(reference),
+          ...extra
+        });
+      };
+      await push("system", "system", assetRefs.system);
+      for (const skill of assetRefs.skills) {
+        await push(skill.id, "skill", skill.instruction);
+        for (const reference of skill.references) {
+          await push(
+            reference.id,
+            "reference",
+            reference.asset,
+            { parentSkillId: skill.id, kind: reference.kind }
+          );
+        }
+      }
+      for (const document of assetRefs.knowledge) {
+        await push(document.id, "knowledge", document.asset);
+      }
+      return {
+        available: true,
+        version: candidate.version,
+        digest: candidate.agentCorpus.digest,
+        verifiedAt: candidate.agentCorpus.verifiedAt,
+        assets,
+        evaluationAssets
+      };
+    } catch {
+      // A missing or corrupt immutable asset is unavailable, never a false
+      // success. The API remains useful for an honest recovery message.
+      return {
+        available: false,
+        version: candidate.version,
+        assets: [],
+        evaluationAssets,
+        reason: "A verified Corpus asset is unavailable; refresh or retry this Candidate."
+      };
+    }
   }
 
   private async createRevisionFromReview(
@@ -863,7 +1048,8 @@ export class CreatorFactoryService {
     idempotencyKey: string,
     review: CreatorReviewProjection,
     artifact: ArtifactRef | undefined,
-    heldout: boolean
+    heldout: boolean,
+    calibrationArtifact?: ArtifactRef
   ): Promise<{ review: CreatorReviewProjection; nextRun?: CreatorFactoryRunView }> {
     const contextArtifact = artifact ?? run.state?.pendingReview?.report;
     if (!contextArtifact || !run.input.taskId || !run.input.sourceSnapshotId) {
@@ -883,6 +1069,7 @@ export class CreatorFactoryService {
         reviewContext: {
           sourceRunId: run.id,
           artifact: contextArtifact,
+          ...(calibrationArtifact ? { calibrationArtifact } : {}),
           mode: heldout ? "heldout_correction" : request.action === "reject_question" ? "question_replacement" : "correction"
         }
       },
@@ -1100,6 +1287,14 @@ function validateCreateRequest(
       ...(request.reviewContext.artifact.artifactId ? { artifactId: requireText(request.reviewContext.artifact.artifactId, "reviewContext.artifact.artifactId") } : {}),
       ...(request.reviewContext.artifact.sealed ? { sealed: true as const } : {})
     },
+    ...(request.reviewContext.calibrationArtifact ? {
+      calibrationArtifact: {
+        path: requireText(request.reviewContext.calibrationArtifact.path, "reviewContext.calibrationArtifact.path"),
+        sha256: requireText(request.reviewContext.calibrationArtifact.sha256, "reviewContext.calibrationArtifact.sha256"),
+        createdAt: requireText(request.reviewContext.calibrationArtifact.createdAt, "reviewContext.calibrationArtifact.createdAt"),
+        ...(request.reviewContext.calibrationArtifact.artifactId ? { artifactId: requireText(request.reviewContext.calibrationArtifact.artifactId, "reviewContext.calibrationArtifact.artifactId") } : {})
+      }
+    } : {}),
     mode: request.reviewContext.mode
   } satisfies NonNullable<CreateFactoryRunRequest["reviewContext"]>;
   return {

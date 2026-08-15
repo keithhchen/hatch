@@ -210,8 +210,8 @@ function FactoryRunDetail({ run, answers, setAnswers, answerRecovery, onDismissR
             </aside>
           ) : null}
           {run.pending_questions.map((question, index) => (
-            <FormField key={question.id} label={`${index + 1}. ${question.question}`}>
-              <Textarea value={answers[question.id] ?? ""} onChange={(event) => setAnswers((current) => ({ ...current, [question.id]: event.target.value }))} placeholder="Give the finished deliverable or decisive recommendation you would stand behind." />
+            <FormField key={question.id} label={`${index + 1}. ${question.kind === "provenance_confirmation" ? "Confirm a source hypothesis · " : ""}${question.question}`}>
+              <Textarea value={answers[question.id] ?? ""} onChange={(event) => setAnswers((current) => ({ ...current, [question.id]: event.target.value }))} placeholder={question.kind === "provenance_confirmation" ? "Confirm, correct, refine, or reject this hypothesis; add the source if you know it." : "Give the finished deliverable or decisive recommendation you would stand behind."} />
             </FormField>
           ))}
           <Button type="submit" loading={busy} disabled={!allAnswered}>Submit all answers</Button>

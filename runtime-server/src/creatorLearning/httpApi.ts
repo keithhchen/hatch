@@ -325,7 +325,12 @@ function publicView(view: CreatorFactoryRunView): Record<string, unknown> {
     status: view.status,
     ...(view.stage ? { stage: view.stage } : {}),
     version: view.version,
-    pending_questions: view.pendingQuestions.map((item) => ({ id: item.id, question: item.question })),
+    pending_questions: view.pendingQuestions.map((item) => ({
+      id: item.id,
+      question: item.question,
+      ...(item.intent ? { intent: item.intent } : {}),
+      ...(item.kind ? { kind: item.kind } : {})
+    })),
     ...(view.questionBatchId ? { question_batch_id: view.questionBatchId } : {}),
     retryable: view.retryable,
     ...(view.candidate ? { candidate: {
@@ -355,6 +360,27 @@ function reviewView(value: Awaited<ReturnType<CreatorFactoryService["getReview"]
     version: value.version,
     candidate_digest: value.candidateDigest,
     candidate_version: value.candidateVersion,
+    corpus: {
+      available: value.corpus.available,
+      version: value.corpus.version,
+      ...(value.corpus.digest ? { digest: value.corpus.digest } : {}),
+      ...(value.corpus.verifiedAt ? { verified_at: value.corpus.verifiedAt } : {}),
+      assets: value.corpus.assets.map((asset) => ({
+        id: asset.id,
+        layer: asset.layer,
+        path: asset.path,
+        sha256: asset.sha256,
+        content: asset.content,
+        ...(asset.parentSkillId ? { parent_skill_id: asset.parentSkillId } : {}),
+        ...(asset.kind ? { kind: asset.kind } : {})
+      })),
+      evaluation_assets: {
+        included: value.corpus.evaluationAssets.included,
+        sealed: value.corpus.evaluationAssets.sealed,
+        note: value.corpus.evaluationAssets.note
+      },
+      ...(value.corpus.reason ? { reason: value.corpus.reason } : {})
+    },
     cases: value.cases.map((item) => ({
       id: item.id,
       set: item.set,

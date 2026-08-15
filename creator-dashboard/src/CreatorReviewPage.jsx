@@ -81,8 +81,26 @@ export function CreatorReviewPage({ token, request, runId, onBack, onRevision, o
       <Summary label="Needs your review" value={String(review.unresolved_count)} />
       <Summary label="Blind cases" value={`${review.blind.passed} / ${review.blind.total} passed`} detail="Questions and answers stay sealed." />
     </div>
+    <CorpusPanel corpus={review.corpus} />
     {cases.length ? <div className="creator-review-cases">{cases.map((item) => <ReviewCase key={item.id} item={item} draft={drafts[item.id] ?? {}} setDraft={(next) => setDrafts((current) => ({ ...current, [item.id]: { ...(current[item.id] ?? {}), ...next } }))} busy={state.busy} onAction={act} />)}</div> : <article className="creator-review-empty"><h2>No unresolved known cases</h2><p>All evaluated cases are accepted. The sealed blind summary remains visible without revealing its contents.</p></article>}
     <article className="creator-review-blind"><div><span className="creator-review-eyebrow">Sealed held-out</span><h2>{review.blind.failed ? "Creator confirmation required" : "Generalization check"}</h2><p>{review.blind.failed ? `${review.blind.failed} sealed case(s) failed. The case text, answer, and candidate output stay hidden until you confirm the correction loop.` : `${review.blind.passed} / ${review.blind.total} sealed cases passed. Held-out content is not included in the Corpus.`}</p></div><div className="creator-review-actions">{review.blind.needs_creator_action ? <Button type="button" loading={state.busy === "heldout_correction"} disabled={Boolean(state.busy)} onClick={confirmHeldout}>Confirm and start correction</Button> : null}{review.release_ready && onRelease ? <Button type="button" onClick={onRelease}>Open Release preview</Button> : null}</div></article>
+  </section>;
+}
+
+function CorpusPanel({ corpus }) {
+  if (!corpus?.available) {
+    return <article className="creator-review-corpus creator-review-corpus-unavailable">
+      <div><span className="creator-review-eyebrow">Full Corpus</span><h2>Corpus unavailable</h2><p>{corpus?.reason ?? "The verified runtime Corpus is not available for this Candidate yet."}</p></div>
+    </article>;
+  }
+  return <section className="creator-review-corpus">
+    <div className="creator-review-corpus-heading"><div><span className="creator-review-eyebrow">Full Corpus · Candidate v{corpus.version}</span><h2>What the Agent will receive</h2><p>These are the complete immutable runtime assets bound to this Candidate. You can inspect every layer before release.</p></div><StatusTag tone="success">Verified</StatusTag></div>
+    <div className="creator-review-corpus-meta"><code>{corpus.digest}</code><span>Verified {corpus.verifiedAt ? new Date(corpus.verifiedAt).toLocaleString() : "—"}</span></div>
+    <div className="creator-review-corpus-assets">{corpus.assets.map((asset) => <article className="creator-review-corpus-asset" key={`${asset.layer}:${asset.path}`}>
+      <div className="creator-review-corpus-asset-heading"><div><span className="creator-review-eyebrow">{asset.layer}{asset.kind ? ` · ${asset.kind}` : ""}</span><h3>{asset.id}</h3></div><code>{asset.path}</code></div>
+      <pre>{asset.content}</pre>
+    </article>)}</div>
+    <p className="creator-review-corpus-note">{corpus.evaluation_assets?.note ?? "Evaluation assets remain sealed and are not runtime Corpus content."}</p>
   </section>;
 }
 

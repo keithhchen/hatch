@@ -287,6 +287,13 @@ test("Creator Factory service exposes only owned questions and candidate metadat
   assert.equal(ready.candidate?.corpusVerified, true);
   assert.equal(ready.pendingQuestions.length, 0);
   assert.equal(JSON.stringify(ready).includes("systemInstructions"), false);
+  const review = await service.getReview("11111111-1111-4111-8111-111111111111", created.run.id);
+  assert.equal(review.corpus.available, true);
+  assert.ok(review.corpus.assets.some((asset) => asset.layer === "system" && asset.content.length > 0));
+  assert.ok(review.corpus.assets.length >= 1);
+  assert.ok(review.corpus.assets.every((asset) => asset.content.length > 0 && asset.sha256.startsWith("sha256:")));
+  assert.equal(review.corpus.evaluationAssets.included, false);
+  assert.equal(review.corpus.evaluationAssets.sealed, true);
   const completed = await repository.getForCreator("11111111-1111-4111-8111-111111111111", created.run.id);
   const development = parseQaSet(await new FactoryFileStore(root, created.run.id).readArtifact(completed!.state!.artifacts.developmentQa!));
   const heldout = parseQaSet(await new FactoryFileStore(root, created.run.id).readArtifact(completed!.state!.artifacts.heldoutRounds[0]!));
@@ -400,11 +407,13 @@ test("held-out review confirmation promotes the sealed case without restarting C
     taskBrief: task.brief,
     sources: undefined,
     sourceDocumentIds: [document.id],
-    config: { developmentQuestions: 2, heldoutQuestions: 1, maxCorpusRevisions: 3 }
+    config: { developmentQuestions: 2, heldoutQuestions: 2, maxCorpusRevisions: 3 }
   }), "heldout-review-run-1");
   let questionRound = 0;
   let heldoutFailureEmitted = false;
+  const promptCalls: FactoryPromptCall[] = [];
   const promptRunner = async (call: FactoryPromptCall): Promise<string> => {
+    promptCalls.push(call);
     if (call.purpose === "eval.generate_questions") {
       questionRound += 1;
       const count = Number(/Question count:\s*(\d+)/.exec(call.prompt)?.[1]);
@@ -428,16 +437,20 @@ test("held-out review confirmation promotes the sealed case without restarting C
   const worker = new CreatorFactoryWorker(repository, factory, { workerId: "heldout-review-worker", leaseMs: 60_000, heartbeatMs: 0 });
   await worker.workOnce();
   const waiting = await service.get(creator.id, created.run.id);
-  const heldoutId = [...waiting.pendingQuestions]
+  const heldoutIds = [...waiting.pendingQuestions]
     .map((question, index) => ({ question, index }))
     .sort((left, right) => createHash("sha256").update(`${created.run.id}:review-group-1-${left.index + 1}`).digest("hex").localeCompare(createHash("sha256").update(`${created.run.id}:review-group-1-${right.index + 1}`).digest("hex")))
-    .at(2)?.question.id;
-  assert.ok(heldoutId);
+    .slice(2)
+    .map(({ question }) => question.id);
+  assert.equal(heldoutIds.length, 2);
   await service.submitAnswers(creator.id, created.run.id, {
     expectedVersion: waiting.version,
     submissionId: "heldout-review-answer-1",
     questionBatchId: waiting.questionBatchId!,
-    answers: waiting.pendingQuestions.map((question) => ({ questionId: question.id, answer: question.id === heldoutId ? "HELDOUT_FAIL" : `Reference ${question.id}` }))
+    answers: waiting.pendingQuestions.map((question) => ({
+      questionId: question.id,
+      answer: question.id === heldoutIds[0] ? "HELDOUT_FAIL" : question.id === heldoutIds[1] ? "SEALED_PASS" : `Reference ${question.id}`
+    }))
   });
   await worker.workOnce();
   const paused = await service.get(creator.id, created.run.id);
@@ -458,9 +471,22 @@ test("held-out review confirmation promotes the sealed case without restarting C
   const nextStored = await repository.getForCreator(creator.id, next.nextRun!.id);
   assert.equal(nextStored?.state?.stage, "awaiting_creator_answers");
   assert.equal(nextStored?.state?.pendingQuestionBatch?.purpose, "replacement_heldout");
-  assert.equal(nextStored?.state?.replacementHeldoutNeeded, 1);
-  const promoted = parseQaSet(await new FactoryFileStore(root, next.nextRun!.id).readArtifact(nextStored!.state!.artifacts.regressionSet!));
+  assert.equal(nextStored?.state?.replacementHeldoutNeeded, 2);
+  assert.ok(nextStored?.input.reviewContext?.calibrationArtifact);
+  const nextStore = new FactoryFileStore(root, next.nextRun!.id);
+  const promoted = parseQaSet(await nextStore.readArtifact(nextStored!.state!.artifacts.regressionSet!));
   assert.equal(promoted.some((row) => row.answer.includes("HELDOUT_FAIL")), true);
+  const replacement = await service.get(creator.id, next.nextRun!.id);
+  await service.submitAnswers(creator.id, next.nextRun!.id, {
+    expectedVersion: replacement.version,
+    submissionId: "heldout-review-replacement-answers-1",
+    questionBatchId: replacement.questionBatchId!,
+    answers: replacement.pendingQuestions.map((question) => ({ questionId: question.id, answer: `Replacement reference ${question.id}` }))
+  });
+  await worker.workOnce();
+  const replacementCompile = promptCalls.filter((call) => call.purpose === "corpus.compile").at(-1);
+  assert.ok(replacementCompile);
+  assert.equal(replacementCompile!.prompt.includes("SEALED_PASS"), false);
 });
 
 test("a Distillation Task keeps one Product identity across revisions", async (t) => {

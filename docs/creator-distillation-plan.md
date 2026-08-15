@@ -53,6 +53,41 @@ Release
 
 Creator 只感知“材料 → 教方法 → 审结果 → 发布”，不需要监控后台节点、prompt 或模型调用。
 
+Evidence 与 Corpus Compile 的职责刻意分开：Evidence 只回答“材料里有什么、哪些观察有来源、哪里存在冲突或缺口”，产出可追溯的事实与例子；Compile 才回答“哪些已确认的行为要被编码进 Agent”，把 Evidence、Creator reference、correction 和 Corpus `n-1` 合成为分层 runtime assets。LLM 可以提出抽取或编译草稿，但 host 负责 provenance、preservation、schema、digest 和 sealed boundary；因此它不是一个无法审计的“一次生成 Corpus”黑盒。
+
+Evidence 还可以提出“源头的源头”假设：例如材料中的原则可能来自某位导师、某本书或某种方法传统。此类内容必须标成 `Inferred / provenance hypothesis`，记录支持线索、置信度、替代解释和待确认问题；下一环节把它变成 `provenance_confirmation` question。Creator 的 reference answer 才能把假设提升为可用标准，否定或修正则只留下溯源记录，不进入 Corpus。
+
+### LLM system-instruction contract
+
+每个 LLM 节点的 system instruction 都包含四层，而不是一句泛化的“请分析”：
+
+1. **Role and authority**：它负责什么、不负责什么，以及 Creator answer、canonical example、source、model inference 的优先级；
+2. **Reasoning protocol**：要求显式产出可审计的中间结构（Evidence 的 Observation → Interpretation → Hypothesis，Question 的 information gain，Compile 的 requirement → asset matrix，Eval 的 behavior gap），不要求或保存私有 chain-of-thought；
+3. **Quality bar**：高信息密度、完整语境、保留例外与冲突、面向可交付结果，而不是流畅的通用答案；
+4. **Submission and boundary**：严格的 host tool/schema、immutable artifact、sealed held-out、不能把 Factory/eval 原料复制进 runtime Corpus。
+
+LLM 可以提出内容和判断建议，但不能拥有状态、digest、工具配置、sealed 数据或最终发布 authority；这些由 host 的 event graph、quality gates 和 Creator command 决定。
+
+### Creator-facing node projection
+
+每个后台节点只向 Creator 暴露可行动的结果，不暴露 LLM graph、prompt、provider 或 worker checkpoint：
+
+| Node | Creator sees | Sealed / internal |
+|---|---|---|
+| Source Intake | 文件、格式、Markdown projection、Snapshot 状态 | parser 与模型细节 |
+| Evidence | 材料理解状态、缺失信息摘要、带出处链的 provenance hypotheses | 抽取 prompt 与中间链 |
+| Question Generation | 行为题，以及明确标记为 `provenance confirmation` 的源头推断确认题 | 生成过程 |
+| Creator Reference | 自己填写的标准答案；对 hypothesis 可确认、修正、否定或补充来源 | — |
+| Corpus Compile | Building candidate、真实错误；Candidate Review 中可读完整 runtime Corpus（System、Skills、References、Knowledge） | LLM 草稿与资产图 |
+| Candidate Runtime | Candidate 版本与是否生成；完整 Corpus 的 immutable digest 与逐资产内容 | worker checkpoint |
+| Eval | Known 通过/失败数量、诊断、低置信度提示 | Judge prompt；Blind 内容 |
+| Creator Review | reference、candidate output、Eval verdict/diagnosis、Accept / Correct / Reject / Eval dispute | 原始文件与 sealed case |
+| Correction | correction、why、新 revision 提示 | 覆盖旧版本 |
+| Held-out | 仅通过/失败数量与确认提示 | 题目、答案、Candidate output |
+| Release | Promise、Examples、Boundaries、quality gates、Release command | 内部实现细节 |
+
+Review 页面中的 **Full Corpus** 是 Candidate 的只读 projection，不是重新生成的预览：每个资产直接从已验证的 immutable artifact 读取，并显示 layer、canonical path、sha256 与全文。Synthetic QA / held-out 属于 sealed quality gates，不是 Agent runtime Corpus；页面只显示它们保持封闭的说明，不泄露题目、答案、输出或 sealed artifact 内容。
+
 ## 1. Source Library
 
 一个 Task 对应一个独立的上传与文件储存区域：

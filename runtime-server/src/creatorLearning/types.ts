@@ -34,6 +34,8 @@ export type CreatorQuestion = {
   question: string;
   intent?: string;
   leakageGroup?: string;
+  /** A provenance hypothesis needs explicit Creator confirmation before compilation. */
+  kind?: "behavior" | "provenance_confirmation";
 };
 
 export type CreatorQa = CreatorQuestion & {
@@ -192,6 +194,16 @@ export type MaterializedAgentCorpus = {
   /** Candidate-relative path whose root contains agent.json. */
   rootPath: string;
   manifest: ArtifactRef;
+  /** Model-visible runtime assets, retained as immutable refs for Creator review. */
+  assets?: {
+    system: ArtifactRef;
+    skills: Array<{
+      id: string;
+      instruction: ArtifactRef;
+      references: Array<{ id: string; kind: "method" | "style" | "example" | "few_shots"; asset: ArtifactRef }>;
+    }>;
+    knowledge: Array<{ id: string; asset: ArtifactRef }>;
+  };
   syntheticQa: ArtifactRef;
   heldOut: ArtifactRef;
   /** Whole-corpus digest returned by the Registry verifier, not an asset digest. */
@@ -359,6 +371,8 @@ export type FactoryStartInput = {
   reviewContext?: {
     sourceRunId: string;
     artifact: ArtifactRef;
+    /** Safe Creator-authored correction feedback; never contains sealed cases. */
+    calibrationArtifact?: ArtifactRef;
     mode: "correction" | "heldout_correction" | "question_replacement";
   };
   config?: Partial<FactoryRunState["config"]>;
