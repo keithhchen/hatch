@@ -52,6 +52,16 @@ describe("desktop system appearance contract", () => {
     );
   });
 
+  it("keeps the creator label regular and lets the sidebar use the shared brand scale", () => {
+    expect(stylesheet).toMatch(
+      /\.desktop-source-list-label\s*\{[\s\S]*?font-family:\s*var\(--hatch-font-pill\);[\s\S]*?font-weight:\s*400;/
+    );
+    expect(stylesheet).not.toMatch(/\.desktop-sidebar-heading \.desktop-sidebar-brand \.hatch-brand__mark/);
+    expect(stylesheet).not.toMatch(/\.desktop-sidebar-heading \.desktop-sidebar-brand \.hatch-brand__wordmark/);
+    expect(sharedStylesheet).toMatch(/\.hatch-brand__mark\s*\{[^}]*width:\s*30px;[^}]*height:\s*30px;/);
+    expect(sharedStylesheet).toMatch(/\.hatch-brand__wordmark\s*\{[^}]*font-size:\s*var\(--hatch-type-title\);/);
+  });
+
   it("keeps accessibility appearance and motion preferences in the stylesheet contract", () => {
     expect(stylesheet).toMatch(/\.desktop-window-shell\s+select\s*\{[^}]*accent-color:\s*var\(--hatch-accent\)/);
     expect(stylesheet).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*?transition-duration:\s*0\.01ms\s*!important/);

@@ -2059,13 +2059,6 @@ button.composer-control:focus-visible {
   padding: 10px 12px 8px;
 }
 
-.desktop-sidebar-heading .desktop-sidebar-brand { gap: 7px; }
-.desktop-sidebar-heading .desktop-sidebar-brand .hatch-brand__mark { width: 19px; height: 19px; }
-.desktop-sidebar-heading .desktop-sidebar-brand .hatch-brand__wordmark {
-  font-size: var(--hatch-type-subheading);
-  letter-spacing: var(--hatch-display-tracking);
-}
-
 .sidebar-new-task {
   background: transparent;
   border-color: transparent;
@@ -2794,11 +2787,6 @@ button.composer-control:focus-visible {
   padding: 15px 17px 9px;
 }
 
-.desktop-sidebar-heading .desktop-sidebar-brand .hatch-brand__wordmark {
-  font-size: var(--hatch-type-subheading);
-  letter-spacing: var(--hatch-display-tracking);
-}
-
 .desktop-source-list {
   gap: 3px;
   padding: 3px 10px 14px;
@@ -2807,7 +2795,7 @@ button.composer-control:focus-visible {
 .desktop-source-list-label {
   font-family: var(--hatch-font-pill);
   font-size: var(--hatch-type-caption);
-  font-weight: 650;
+  font-weight: 400;
   letter-spacing: -.01em;
   padding: 10px 9px 7px;
   text-transform: none;
