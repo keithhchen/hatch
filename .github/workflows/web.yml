@@ -107,14 +107,17 @@ jobs:
           override="$(mktemp)"
           printf 'services:\n  dashboard:\n    image: ${HATCH_DASHBOARD_IMAGE}\n' > "$override"
           compose=(docker compose --env-file /opt/hatch/.env --env-file /opt/hatch/.release.env -f /opt/hatch/compose.app.yml -f "$override")
-          docker pull "$DASHBOARD_IMAGE"
-          if ! HATCH_DASHBOARD_IMAGE="$DASHBOARD_IMAGE" "${compose[@]}" up -d --no-deps dashboard; then
+          if ! timeout 180s docker pull "$DASHBOARD_IMAGE"; then
+            echo "Dashboard image pull timed out or failed; leaving the current container in place." >&2
+            exit 1
+          fi
+          if ! timeout 120s env HATCH_DASHBOARD_IMAGE="$DASHBOARD_IMAGE" "${compose[@]}" up -d --no-deps dashboard; then
             HATCH_DASHBOARD_IMAGE="$previous_image" "${compose[@]}" up -d --no-deps dashboard
             exit 1
           fi
           domain="$(sed -n 's/^HATCH_DOMAIN=//p' /opt/hatch/.env | tail -n 1)"
-          if ! curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/health/dashboard" >/dev/null \
-            || ! curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/explore" | grep -q 'src="/assets/'; then
+          if ! curl -4 --noproxy '*' --connect-timeout 10 --max-time 30 --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/health/dashboard" >/dev/null \
+            || ! curl -4 --noproxy '*' --connect-timeout 10 --max-time 30 --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/explore" | grep -q 'src="/assets/'; then
             HATCH_DASHBOARD_IMAGE="$previous_image" "${compose[@]}" up -d --no-deps dashboard
             exit 1
           fi
