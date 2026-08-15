@@ -29,6 +29,7 @@ describe("desktop component presentation contract", () => {
 
   it("uses shared navigation and button primitives for high-frequency sidebar actions", () => {
     expect(source).toContain('NavigationItem,');
+    expect(source).toContain('Control,');
     expect(source).toMatch(/<NavigationItem[\s\S]*className=\{`desktop-source-row agent/);
     expect(source).toMatch(/<NavigationItem[\s\S]*className="desktop-source-row sidebar-new-task"/);
     expect(source).toMatch(/<Button className=\{`workspace-picker/);
@@ -38,7 +39,9 @@ describe("desktop component presentation contract", () => {
   it("uses the shared icon library instead of character carets", () => {
     expect(source).toContain('from "lucide-react"');
     expect(source).not.toMatch(/[⌄›]/);
-    expect(source).toContain('<ChevronDown className="composer-control-caret"');
+    expect(source).toContain('<ChevronDown className="hui-control-caret"');
+    expect(source).toMatch(/<Control\s+kind="button"[\s\S]*?className="composer-control workspace-composer-control"/);
+    expect(source).toMatch(/className="permission-composer-control"[\s\S]*?<Control\s+kind="select"[\s\S]*?className="composer-control-select"/);
     expect(source).toContain('className="desktop-agent-disclosure"');
   });
 
@@ -46,7 +49,7 @@ describe("desktop component presentation contract", () => {
     expect(source).toContain('className="composer-control attachment-composer-control"');
     expect(source).toContain('className="composer-control workspace-composer-control"');
     expect(source).toContain('className="permission-composer-control"');
-    expect(source).toMatch(/className="permission-composer-control"[\s\S]*?<Select/);
+    expect(source).toMatch(/className="permission-composer-control"[\s\S]*?<Control\s+kind="select"/);
     expect(source).not.toContain('className="composer-overflow"');
     expect(source).not.toContain("More composer options");
     expect(source).toMatch(/className="send-button stop-button"[\s\S]*?variant="primary"/);

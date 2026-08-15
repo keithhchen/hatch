@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { AtmosphericPaper } from "./AtmosphericPaper.jsx";
 import { Button } from "./Button.jsx";
+import { Control } from "./Control.jsx";
 import { StatusTag } from "./Feedback.jsx";
 import { Input } from "./Forms.jsx";
 import { HatchBrand } from "./HatchBrand.jsx";
@@ -56,6 +57,10 @@ function ThemeLabCanvas(args) {
             {args.buttonLabel}
           </Button>
           <Button variant="secondary" size={args.buttonSize}>Buyer view</Button>
+        </div>
+        <div className="hui-story-row">
+          <Control kind="button" variant="secondary">Workspace</Control>
+          <Control kind="select" value={status} onValueChange={setStatus} options={statusOptions} label="Permission preview" />
         </div>
         <div className="hui-token-lab__controls">
           <Input aria-label="Product name" defaultValue="A field guide to creative recovery" />

@@ -4,6 +4,7 @@ import "@hatch/ui/fonts";
 import "@hatch/ui/theme.css";
 import {
   Button,
+  Control,
   DropdownMenu,
   FormField,
   HatchBrand,
@@ -3867,21 +3868,23 @@ function ComposerControls({ droppedFiles = [], workspace, workspaceGranted, perm
         {/* Native drag/drop still projects bounded file context into the
             composer. Keep the picker implementation available, but withhold
             its button until that UX is ready. */}
-        <Button
+        <Control
+          kind="button"
           aria-label={t("accessibility.chooseWorkspaceFolder")}
           className="composer-control workspace-composer-control"
           variant="secondary"
-          size="small"
           leading={<WorkspaceIcon />}
-          trailing={<ChevronDown className="composer-control-caret" aria-hidden="true" />}
+          trailing={<ChevronDown className="hui-control-caret" aria-hidden="true" />}
           title={workspace || t("workspace.chooseFolder")}
           type="button"
           onClick={onChooseWorkspace}
         >
           {workspaceGranted ? workspaceGrantLabel(workspace) : t("workspace.chooseWorkspace")}
-        </Button>
+        </Control>
         <div className="permission-composer-control" title={permissionMode === "allow-changes" ? t("permission.allowChangesDetail") : t("permission.askBeforeChangesDetail")}>
-          <Select
+          <Control
+            kind="select"
+            className="composer-control-select"
             aria-label={t("accessibility.workspacePermissions")}
             leading={<ShieldIcon />}
             value={permissionMode}

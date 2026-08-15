@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const stylesheet = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+const brandTokens = readFileSync(new URL("../../../packages/brand/tokens.css", import.meta.url), "utf8");
+const sharedStylesheet = readFileSync(new URL("../../../packages/ui/src/hatch-ui.css", import.meta.url), "utf8");
 
 describe("desktop system appearance contract", () => {
   it("keeps the current Hatch product explicitly light-only", () => {
@@ -67,6 +69,23 @@ describe("desktop system appearance contract", () => {
     expect(stylesheet).not.toMatch(/\.composer-overflow/);
     expect(stylesheet).not.toMatch(/\.attachment-composer-control\s*\{[^}]*display:\s*none/);
     expect(stylesheet).not.toMatch(/\.composer-settings\s*\{[^}]*display:\s*none/);
+  });
+
+  it("keeps workspace and permission controls on one shared geometry", () => {
+    expect(brandTokens).toMatch(/--hatch-size-control-compact:\s*2rem/);
+    expect(brandTokens).toMatch(/--hatch-space-control-compact-inline:\s*0\.625rem/);
+    expect(sharedStylesheet).toMatch(
+      /\.hui-control--compact\s*\{[\s\S]*?height:\s*var\(--hatch-size-control-compact\);[\s\S]*?min-height:\s*var\(--hatch-size-control-compact\);[\s\S]*?padding-block:\s*0;[\s\S]*?padding-inline:\s*var\(--hatch-space-control-compact-inline\);[\s\S]*?border-radius:\s*var\(--hatch-radius-control\);/
+    );
+    expect(sharedStylesheet).toMatch(
+      /\.hui-control-caret,[\s\S]*?\.hui-select-trigger > \.hui-select-caret\s*\{[\s\S]*?color:\s*var\(--hui-ink-faint\);[\s\S]*?height:\s*14px;[\s\S]*?stroke-width:\s*1\.55;[\s\S]*?width:\s*14px;/
+    );
+    expect(stylesheet).toMatch(
+      /\.composer-control\s*\{[\s\S]*?display:\s*inline-flex;[\s\S]*?gap:\s*6px;/
+    );
+    expect(stylesheet).toMatch(
+      /\.permission-composer-control \.composer-control-select\s*\{[\s\S]*?flex:\s*1 1 auto;[\s\S]*?background:\s*var\(--hatch-ui-surface-bright\);/
+    );
   });
 
   it("keeps composer actions circular and the activity divider at accordion width", () => {

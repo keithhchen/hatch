@@ -1646,17 +1646,13 @@ h2 {
 .composer-control {
   align-items: center;
   background: transparent;
-  border: 1px solid transparent;
-  border-radius: 7px;
   color: var(--hatch-text-secondary);
   display: inline-flex;
   flex: 0 1 auto;
   font-family: var(--hatch-font-ui);
   font-size: var(--hatch-type-label);
   gap: 6px;
-  min-height: 30px;
   min-width: 0;
-  padding: 5px 7px;
   transition: background .12s, border-color .12s, color .12s;
 }
 
@@ -1672,7 +1668,7 @@ button.composer-control:focus-visible {
   color: var(--hatch-ink);
 }
 
-.composer-control svg {
+.composer-control svg:not(.hui-control-caret) {
   fill: none;
   flex: 0 0 16px;
   height: 16px;
@@ -1714,12 +1710,10 @@ button.composer-control:focus-visible {
   flex-shrink: 0;
 }
 
-.permission-composer-control .hui-select-trigger {
+.permission-composer-control .composer-control-select {
   flex: 1 1 auto;
   width: auto;
   min-width: 0;
-  min-height: 32px;
-  padding-inline: 10px;
   background: var(--hatch-ui-surface-bright);
   font-family: var(--hatch-font-pill);
   font-size: var(--hatch-type-control);
@@ -1733,13 +1727,6 @@ button.composer-control:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.composer-control-caret {
-  color: color-mix(in srgb, currentColor 65%, transparent);
-  flex: 0 0 auto;
-  height: 13px !important;
-  width: 13px !important;
 }
 
 .send-button,
@@ -3039,15 +3026,13 @@ button.composer-control:focus-visible {
 }
 
 .composer-control {
-  border-radius: 10px;
   color: rgba(63, 55, 48, .68);
   font-family: var(--hatch-font-pill);
 }
 
-.permission-composer-control .hui-select-trigger {
+.permission-composer-control .composer-control-select {
   background: rgba(255, 253, 249, .56);
   border-color: rgba(72, 57, 44, .10);
-  border-radius: 10px;
 }
 
 .permission-composer-control .hui-select-leading {

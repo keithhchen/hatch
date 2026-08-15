@@ -1,6 +1,7 @@
 import "./hatch-ui.css";
 
 export * from "./Button.jsx";
+export * from "./Control.jsx";
 export * from "./AtmosphericPaper.jsx";
 export * from "./DataDisplay.jsx";
 export * from "./Feedback.jsx";

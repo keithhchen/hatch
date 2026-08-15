@@ -16,7 +16,13 @@ export function Button({
   ref,
   ...props
 }) {
-  const classes = cn("hui-button", `hui-button--${variant}`, `hui-button--${size}`, className);
+  const classes = cn(
+    "hui-button",
+    `hui-button--${variant}`,
+    `hui-button--${size}`,
+    size === "compact" && "hui-control--compact",
+    className
+  );
   if (asChild) {
     const child = React.Children.only(children);
     const content = React.cloneElement(child, undefined,

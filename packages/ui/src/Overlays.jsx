@@ -45,13 +45,13 @@ export function DropdownMenu({ trigger, items, align = "end", label = "Actions" 
   );
 }
 
-export function Select({ value, defaultValue, onValueChange, options, placeholder = "Select…", label, disabled, className, leading, ...triggerProps }) {
+export function Select({ value, defaultValue, onValueChange, options, placeholder = "Select…", label, disabled, className, leading, size = "medium", ...triggerProps }) {
   return (
     <SelectPrimitive.Root value={value} defaultValue={defaultValue} onValueChange={onValueChange} disabled={disabled}>
-      <SelectPrimitive.Trigger {...triggerProps} className={cn("hui-select-trigger", leading && "hui-select-trigger--with-leading", className)} aria-label={label || triggerProps["aria-label"]}>
+      <SelectPrimitive.Trigger {...triggerProps} className={cn("hui-select-trigger", leading && "hui-select-trigger--with-leading", size === "compact" && "hui-control--compact", className)} aria-label={label || triggerProps["aria-label"]}>
         {leading ? <span className="hui-select-leading">{leading}</span> : null}
         <SelectPrimitive.Value className="hui-select-value" placeholder={placeholder} />
-        <SelectPrimitive.Icon><ChevronDown aria-hidden="true" /></SelectPrimitive.Icon>
+        <SelectPrimitive.Icon><ChevronDown className="hui-select-caret" aria-hidden="true" /></SelectPrimitive.Icon>
       </SelectPrimitive.Trigger>
       <SelectPrimitive.Portal>
         <SelectPrimitive.Content className="hui-select-content" position="popper" sideOffset={6}>

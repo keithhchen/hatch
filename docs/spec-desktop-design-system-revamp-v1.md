@@ -128,6 +128,7 @@ Web 页面自己的 layout CSS 也只能消费这些 semantic tokens；它可以
 ### Shape、material 与 contrast
 
 - 所有圆角对称；取消单个角不同 radius 的造型。
+- Composer 的 workspace 与 permission control 使用 HUI 的同一个 `Control` component（分别保留真实 `button` / Radix Select 语义）；几何由它统一消费 `size="compact"` variant，以及 `packages/brand/tokens.css` 的 `--hatch-size-control-compact` 与 `--hatch-space-control-compact-inline`，不能因为一个是 Button、一个是 Select 就各自调出一套 geometry。
 - 少做 card：Sidebar、Transcript、Inspector 主要通过 surface 明度、间距和分隔建立层级。
 - 不模仿收据、订单、书页或其他商业物件；只模拟吸光、遮挡、色温、柔和 seam 与层级。
 - Primary button 必须保持明确的 ink-level contrast，不用浅 terracotta 作为默认主操作。

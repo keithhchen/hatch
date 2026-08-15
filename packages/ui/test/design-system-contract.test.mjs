@@ -23,6 +23,7 @@ test("@hatch/ui owns the shared Button, Dialog, Select and CSS entrypoint", () =
   const packageJson = json("packages/ui/package.json");
   const index = read("packages/ui/src/index.js");
   const button = read("packages/ui/src/Button.jsx");
+  const control = read("packages/ui/src/Control.jsx");
   const navigation = read("packages/ui/src/Navigation.jsx");
   const overlays = read("packages/ui/src/Overlays.jsx");
 
@@ -31,14 +32,21 @@ test("@hatch/ui owns the shared Button, Dialog, Select and CSS entrypoint", () =
   assert.equal(packageJson.exports["./theme.css"], "./src/hatch-ui.css");
   assert.match(index, /import "\.\/hatch-ui\.css"/);
   assert.match(index, /export \* from "\.\/Button\.jsx"/);
+  assert.match(index, /export \* from "\.\/Control\.jsx"/);
   assert.match(index, /export \* from "\.\/Overlays\.jsx"/);
   assert.match(button, /export function Button/);
+  assert.match(button, /size === "compact" && "hui-control--compact"/);
+  assert.match(control, /export function Control/);
+  assert.match(control, /kind === "select"/);
+  assert.match(control, /size = "compact"/);
   assert.match(navigation, /export function NavigationItem/);
   assert.match(navigation, /trailing/);
   assert.match(overlays, /export const Dialog = DialogPrimitive\.Root/);
   assert.match(overlays, /export function Select/);
   assert.match(overlays, /leading/);
   assert.match(overlays, /hui-select-trigger--with-leading/);
+  assert.match(overlays, /size === "compact" && "hui-control--compact"/);
+  assert.match(overlays, /className="hui-select-caret"/);
 
   for (const duplicate of [
     "creator-dashboard/src/components/ui/Button.jsx",
@@ -94,6 +102,7 @@ test("Web and Storybook consume the shared package and its canonical tokens", ()
   assert.doesNotMatch(desktopCss, /\.desktop-window-shell::before/);
   assert.match(desktopCss, /\.desktop-sidebar-heading \.desktop-sidebar-brand \.hatch-brand__wordmark\s*\{[^}]*letter-spacing:\s*var\(--hatch-display-tracking\)/s);
   assert.match(desktopStory, /title:\s*["']Hatch\/Desktop visual system["']/);
+  assert.match(desktopStory, /<Control kind="select"/);
   assert.match(desktopStory, /atmosphereStrength/);
   assert.doesNotMatch(desktopCss, /\.welcome-brand \.hatch-brand__wordmark\s*\{[^}]*letter-spacing:\s*-\.035em/s);
   assert.doesNotMatch(desktopCss, /\.desktop-sidebar-heading \.desktop-sidebar-brand \.hatch-brand__wordmark\s*\{[^}]*letter-spacing:\s*-\.035em/s);
@@ -125,6 +134,8 @@ test("Theme Lab edits the same token knobs used by the shared CSS", () => {
   assert.match(story, /"--hatch-display-tracking": `\$\{args\.displayTracking\}em`/);
   assert.match(story, /"--hatch-display-leading": args\.displayLeading/);
   assert.doesNotMatch(story, /"--hatch-atmosphere-canvas": args\.canvasColor/);
+  assert.match(story, /<Control kind="button"/);
+  assert.match(story, /<Control kind="select"/);
 
   for (const token of [
     "--hatch-font-display",
@@ -142,6 +153,8 @@ test("Theme Lab edits the same token knobs used by the shared CSS", () => {
     "--hatch-display-tracking",
     "--hatch-display-leading",
     "--hatch-radius-control",
+    "--hatch-size-control-compact",
+    "--hatch-space-control-compact-inline",
     "--hatch-radius-dialog",
     "--hatch-shadow-control",
     "--hatch-shadow-dialog",
@@ -170,6 +183,7 @@ test("Theme Lab edits the same token knobs used by the shared CSS", () => {
   assert.match(sharedCss, /\.hatch-brand__wordmark[^}]*letter-spacing:\s*var\(--hatch-display-tracking\)/s);
   assert.match(sharedCss, /\.hui-page-header h1[^}]*line-height:\s*var\(--hatch-display-leading\)/s);
   assert.match(sharedCss, /\.hui-button\s*\{[^}]*font-family:\s*var\(--hui-font-pill\)/s);
+  assert.match(sharedCss, /\.hui-control--compact\s*\{/);
   assert.match(sharedCss, /\.hui-field__label\s*\{[^}]*font-family:\s*var\(--hui-font-pill\)/s);
   assert.doesNotMatch(sharedCss, /\.hui-drawer\.is-(?:right|bottom)[^{]*\{[^}]*border-radius:[^;]*\b0\b/s);
 });

@@ -91,6 +91,8 @@
   --hatch-ui-status-progress-bg: #f0ddd3;
 
   --hatch-radius-control: 12px;
+  --hatch-size-control-compact: 2rem;
+  --hatch-space-control-compact-inline: 0.625rem;
   --hatch-radius-menu: 15px;
   --hatch-radius-dialog: 22px;
   --hatch-radius-surface: 22px;
