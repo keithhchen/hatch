@@ -1,5 +1,5 @@
 import { Agent } from "@earendil-works/pi-agent-core";
-import type { Model } from "@earendil-works/pi-ai";
+import type { ImageContent, Model } from "@earendil-works/pi-ai";
 import {
   KIMI_DEFAULT_BASE_URL,
   createKimiStreamFn,
@@ -10,12 +10,12 @@ import { resolveFactoryLlmProfile } from "../llmProfiles.js";
 import { createFactorySubmissionProtocol } from "./factorySubmission.js";
 import type { FactoryPromptFailureTelemetry, FactoryPromptRunner } from "./types.js";
 
-export const FACTORY_KIMI_K3_MODEL = "kimi-k3" as const;
-const FACTORY_KIMI_K3_PROFILE = resolveFactoryLlmProfile();
+export const FACTORY_LLM_MODEL = "kimi-k2.6" as const;
+const FACTORY_LLM_PROFILE = resolveFactoryLlmProfile();
 /** Total input + preserved multi-turn history + output capacity. */
-export const FACTORY_KIMI_K3_CONTEXT_WINDOW = FACTORY_KIMI_K3_PROFILE.contextWindow;
-/** Moonshot's documented Kimi K3 default maximum for one completion. */
-export const FACTORY_KIMI_K3_MAX_COMPLETION_TOKENS = FACTORY_KIMI_K3_PROFILE.maxTokens;
+export const FACTORY_LLM_CONTEXT_WINDOW = FACTORY_LLM_PROFILE.contextWindow;
+/** Moonshot's documented Kimi K2.6 default maximum for one completion. */
+export const FACTORY_LLM_MAX_COMPLETION_TOKENS = FACTORY_LLM_PROFILE.maxTokens;
 export const FACTORY_PROVIDER_QUOTA_MESSAGE =
   "Factory LLM provider quota is unavailable; recharge or increase the provider quota, then retry this stage";
 export const FACTORY_PROVIDER_TRANSIENT_MESSAGE =
@@ -29,7 +29,7 @@ export type FactoryProviderFailure = {
   message: string;
 };
 
-type FactoryKimiK3AdapterOptions = Pick<
+type FactoryLlmAdapterOptions = Pick<
   KimiAdapterOptions,
   | "apiKey"
   | "baseUrl"
@@ -42,9 +42,9 @@ type FactoryKimiK3AdapterOptions = Pick<
   | "maxRetryDelayMs"
 >;
 
-export type FactoryKimiK3Model = Model<"openai-completions">;
+export type FactoryLlmModel = Model<"openai-completions">;
 
-function factoryBaseUrl(options: FactoryKimiK3AdapterOptions): string {
+function factoryBaseUrl(options: FactoryLlmAdapterOptions): string {
   const env = options.env ?? process.env;
   return normalizeKimiBaseUrl(
     options.baseUrl
@@ -55,20 +55,20 @@ function factoryBaseUrl(options: FactoryKimiK3AdapterOptions): string {
 }
 
 /**
- * Creator Factory's dedicated K3 profile. This is intentionally separate from
- * createKimiModel(), whose K2.6 profile is owned by Hatch Runtime.
+ * Provider-neutral Factory model seam. Provider selection stays inside this
+ * adapter; Factory workflow code uses only the prompt-runner contract.
  */
-export function createFactoryKimiK3Model(
-  options: FactoryKimiK3AdapterOptions = {}
-): FactoryKimiK3Model {
+export function createFactoryLlmModel(
+  options: FactoryLlmAdapterOptions = {}
+): FactoryLlmModel {
   const baseUrl = factoryBaseUrl(options);
   return {
-    id: FACTORY_KIMI_K3_MODEL,
-    name: "Kimi K3",
+    id: FACTORY_LLM_MODEL,
+    name: "Kimi K2.6",
     api: "openai-completions",
     provider: new URL(baseUrl).hostname === "api.moonshot.ai" ? "moonshotai" : "moonshotai-cn",
     baseUrl,
-    reasoning: FACTORY_KIMI_K3_PROFILE.reasoning,
+    reasoning: FACTORY_LLM_PROFILE.reasoning,
     thinkingLevelMap: {
       off: null,
       minimal: null,
@@ -85,8 +85,8 @@ export function createFactoryKimiK3Model(
       cacheRead: 0.3,
       cacheWrite: 0
     },
-    contextWindow: FACTORY_KIMI_K3_PROFILE.contextWindow,
-    maxTokens: FACTORY_KIMI_K3_PROFILE.maxTokens,
+    contextWindow: FACTORY_LLM_PROFILE.contextWindow,
+    maxTokens: FACTORY_LLM_PROFILE.maxTokens,
     compat: {
       supportsStore: false,
       supportsDeveloperRole: false,
@@ -99,15 +99,16 @@ export function createFactoryKimiK3Model(
   };
 }
 
-/** K3 fixes these sampling values server-side, so the request must omit them. */
-function normalizeFactoryKimiK3Payload(payload: unknown): unknown {
+/** Kimi K2.6 fixes these sampling values server-side, so the request omits them. */
+function normalizeFactoryLlmPayload(payload: unknown): unknown {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
   const normalized = { ...(payload as Record<string, unknown>) };
-  normalized.reasoning_effort = FACTORY_KIMI_K3_PROFILE.thinkingLevel;
-  // Every Factory node has exactly one valid handoff channel: its local
-  // submission tools. `auto` previously allowed a long prose-only response
-  // that the host necessarily discarded as stopped_without_finalize.
-  normalized.tool_choice = "required";
+  normalized.reasoning_effort = FACTORY_LLM_PROFILE.thinkingLevel;
+  // Kimi K2.6 rejects `required` (and named tool choices) when thinking is
+  // enabled. Keep the provider-compatible `auto` choice and enforce the
+  // handoff contract in the host-owned submission FSM below: prose-only or
+  // incomplete turns are never accepted as Factory output.
+  normalized.tool_choice = "auto";
   delete normalized.thinking;
   delete normalized.temperature;
   delete normalized.top_p;
@@ -188,10 +189,10 @@ function failureCode(
 
 /**
  * Build a one-shot Factory prompt runner on the same Pi Agent/stream primitive
- * as Hatch, but with the Factory-owned K3 profile and no global model mutation.
+ * as Hatch, without leaking provider selection into Factory workflow code.
  */
-export function createFactoryKimiK3PromptRunner(
-  adapterOptions: FactoryKimiK3AdapterOptions = {}
+export function createFactoryLlmPromptRunner(
+  adapterOptions: FactoryLlmAdapterOptions = {}
 ): FactoryPromptRunner {
   return async (options): Promise<string> => {
     const submission = createFactorySubmissionProtocol(options.purpose, options.outputContract);
@@ -200,11 +201,11 @@ export function createFactoryKimiK3PromptRunner(
         systemPrompt: `${options.systemPrompt}\n\n# Local Factory submission protocol\n${submission.systemInstructions}`,
         messages: [],
         tools: submission.tools,
-        model: createFactoryKimiK3Model(adapterOptions),
-        thinkingLevel: FACTORY_KIMI_K3_PROFILE.thinkingLevel
+        model: createFactoryLlmModel(adapterOptions),
+        thinkingLevel: FACTORY_LLM_PROFILE.thinkingLevel
       },
-      streamFn: createKimiStreamFn({ ...adapterOptions, thinkingLevel: FACTORY_KIMI_K3_PROFILE.thinkingLevel }),
-      onPayload: async (payload) => normalizeFactoryKimiK3Payload(payload),
+      streamFn: createKimiStreamFn({ ...adapterOptions, thinkingLevel: FACTORY_LLM_PROFILE.thinkingLevel }),
+      onPayload: async (payload) => normalizeFactoryLlmPayload(payload),
       transformContext: async (messages) => submission.sanitizeContext(messages),
       toolExecution: "sequential",
       beforeToolCall: (context) => submission.beforeToolCall(context),
@@ -247,33 +248,38 @@ export function createFactoryKimiK3PromptRunner(
     const abort = (): void => agent.abort();
     options.signal?.addEventListener("abort", abort, { once: true });
     // Recheck after registration so a lease-loss abort cannot land between an
-    // earlier precheck and listener installation during a very long K3 call.
+    // earlier precheck and listener installation during a very long model call.
     if (options.signal?.aborted) abort();
 
     try {
       try {
-        await agent.prompt(options.prompt);
+        const images: ImageContent[] = (options.images ?? []).map((image) => ({
+          type: "image",
+          data: image.base64,
+          mimeType: image.mediaType
+        }));
+        await agent.prompt(options.prompt, images);
       } catch (error) {
         if (rejectedStop) {
-          throw new Error(rejectedStop.message ?? `Factory Kimi K3 prompt did not complete: ${rejectedStop.reason}`);
+          throw new Error(rejectedStop.message ?? `Factory Kimi K2.6 prompt did not complete: ${rejectedStop.reason}`);
         }
         throw error;
       }
       if (rejectedStop) {
-        throw new Error(rejectedStop.message ?? `Factory Kimi K3 prompt did not complete: ${rejectedStop.reason}`);
+        throw new Error(rejectedStop.message ?? `Factory Kimi K2.6 prompt did not complete: ${rejectedStop.reason}`);
       }
-      if (options.signal?.aborted) throw new Error("Factory Kimi K3 prompt aborted");
+      if (options.signal?.aborted) throw new Error("Factory Kimi K2.6 prompt aborted");
       const message = [...agent.state.messages]
         .reverse()
         .find((candidate) => candidate.role === "assistant");
       if (!message || message.role !== "assistant") {
-        throw new Error("Factory Kimi K3 prompt ended without an assistant response");
+        throw new Error("Factory Kimi K2.6 prompt ended without an assistant response");
       }
       // A finalize-only tool turn can legitimately terminate with toolUse.
       // Every other terminal reason still fails closed unless the side-effect-
       // free host FSM had already atomically committed FINALIZED output.
       if (message.stopReason !== "stop" && message.stopReason !== "toolUse") {
-        throw new Error(message.errorMessage ?? `Factory Kimi K3 prompt did not complete: ${message.stopReason}`);
+        throw new Error(message.errorMessage ?? `Factory Kimi K2.6 prompt did not complete: ${message.stopReason}`);
       }
       return submission.finalizedOutput();
     } catch (error) {
@@ -299,4 +305,4 @@ export function createFactoryKimiK3PromptRunner(
   };
 }
 
-export const runFactoryKimiK3Prompt = createFactoryKimiK3PromptRunner();
+export const runFactoryLlmPrompt = createFactoryLlmPromptRunner();

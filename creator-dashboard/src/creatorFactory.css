@@ -12,6 +12,8 @@
 .factory-run-list span, .factory-run-list p { color: var(--hatch-text-secondary); font-size: 11px; }
 .factory-work-panel { min-height: 560px; padding: clamp(24px,4vw,44px); }
 .factory-create { display: grid; gap: 17px; max-width: 720px; }
+.factory-source-redirect { max-width: 620px; }
+.factory-source-redirect p { max-width: 540px; line-height: 1.65; }
 .factory-create h2, .factory-detail h2 { margin: 0 0 4px; font-size: 34px; }
 .factory-create > p, .factory-questions p, .factory-progress p, .factory-ready p, .factory-ready small { color: var(--hatch-text-secondary); line-height: 1.55; }
 .factory-create > .hui-field, .factory-source .hui-field, .factory-questions > .hui-field { width: 100%; }

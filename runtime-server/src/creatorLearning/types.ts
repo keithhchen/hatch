@@ -12,6 +12,8 @@ export type ArtifactRef = {
   path: string;
   sha256: string;
   createdAt: string;
+  /** Control-plane identity when the Postgres graph is enabled. */
+  artifactId?: string;
   sealed?: true;
 };
 
@@ -100,6 +102,51 @@ export type FactorySource = {
   authority: "creator_current" | "creator_example" | "private_material" | "public_context";
   title: string;
   content: string;
+  /** Native image bytes are passed to multimodal Factory nodes, never flattened into text. */
+  image?: {
+    mediaType: "image/jpeg" | "image/png" | "image/webp";
+    base64: string;
+    sha256: string;
+  };
+};
+
+export type SourceProjection =
+  | {
+      kind: "markdown";
+      mediaType: "text/markdown";
+      contentRef: string;
+      sha256: string;
+      bytes: number;
+    }
+  | {
+      kind: "image";
+      mediaType: "image/jpeg" | "image/png" | "image/webp";
+      contentRef: string;
+      sha256: string;
+      bytes: number;
+    };
+
+export type SourceDocumentRecord = {
+  id: string;
+  creatorId: string;
+  taskId: string;
+  displayName: string;
+  mediaType: string;
+  originalObjectRef?: string;
+  projection: SourceProjection;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SourceSnapshotRecord = {
+  id: string;
+  creatorId: string;
+  taskId?: string;
+  version: number;
+  documentIds: string[];
+  manifestSha256: string;
+  lockedAt: string;
+  createdAt: string;
 };
 
 /**
@@ -211,6 +258,12 @@ export type ActiveQaEvaluationScope = {
   cases: QaCaseCheckpoint[];
 };
 
+export type FactorySourceImageArtifact = {
+  sourceId: string;
+  mediaType: "image/jpeg" | "image/png" | "image/webp";
+  artifact: ArtifactRef;
+};
+
 export type FactoryRunState = {
   contractVersion: "1";
   runId: string;
@@ -220,6 +273,13 @@ export type FactoryRunState = {
   /** Optional only so durable states written before tool declarations remain readable. */
   tools?: FactoryAgentTool[];
   taskName: string;
+  taskId?: string;
+  /** Stable Task Run lineage; `runId` remains the executable revision id. */
+  distillationRunId?: string;
+  revisionId?: string;
+  revisionNumber?: number;
+  parentRevisionId?: string;
+  sourceSnapshotId?: string;
   stage: FactoryStage;
   config: {
     developmentQuestions: number;
@@ -231,6 +291,7 @@ export type FactoryRunState = {
     sourcePacket: ArtifactRef;
     /** Present for CLI runs created from an exhaustive local source_scope. */
     sourceManifest?: ArtifactRef;
+    sourceImages?: FactorySourceImageArtifact[];
     evidence?: ArtifactRef;
     developmentQa?: ArtifactRef;
     currentQuestionBatch?: QuestionBatchArtifactRef;
@@ -251,6 +312,8 @@ export type FactoryRunState = {
     count: number;
   };
   compileReason?: CorpusCandidate["reason"];
+  /** Current calibration loop only; historical rounds remain append-only audit artifacts. */
+  calibrationFeedback?: ArtifactRef[];
   replacementHeldoutNeeded: number;
   corpusRevisionCount: number;
   developmentEvaluated: boolean;
@@ -271,8 +334,16 @@ export type FactoryStartInput = {
   /** Declarative Agent Corpus requirements; Factory never asks an LLM to invent tools. */
   tools?: FactoryAgentTool[];
   taskName: string;
+  /** Stable Distillation Task identity; a run lineage can receive revisions. */
+  taskId?: string;
+  distillationRunId?: string;
+  revisionId?: string;
+  revisionNumber?: number;
+  parentRevisionId?: string;
   taskBrief: string;
   sources: FactorySource[];
+  /** Immutable Source Library snapshot resolved before the worker starts. */
+  sourceSnapshotId?: string;
   /** Frozen source-scope proof. Legacy inline-source callers omit this. */
   sourceManifest?: FactorySourceManifest;
   config?: Partial<FactoryRunState["config"]>;
@@ -399,6 +470,11 @@ export type FactoryPromptCall = {
   systemPrompt: string;
   prompt: string;
   outputContract?: FactoryOutputContract;
+  /** Optional native images for multimodal Factory models; never serialized into text packets. */
+  images?: Array<{
+    mediaType: "image/jpeg" | "image/png" | "image/webp";
+    base64: string;
+  }>;
   /** Host-only synchronous observation; never serialized into an LLM request. */
   reportFailureTelemetry?: (telemetry: FactoryPromptFailureTelemetry) => void;
   /** Execution cancellation only; never part of a persisted prompt contract. */

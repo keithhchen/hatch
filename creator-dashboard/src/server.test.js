@@ -195,6 +195,42 @@ test("Creator can approve a verified candidate, preview, publish, and receive a 
   assert.equal(dashboard.ledger.listEvents().length, 0);
 });
 
+test("unified Release approves the current Factory candidate and publishes once", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-release-command-"));
+  const publishCalls = [];
+  const registry = registryFixture({ role: "creator", factoryRun: readyFactoryRun, publishCalls });
+  await listen(registry);
+  context.after(() => registry.close());
+  const dashboard = await createDashboardApp({
+    ledgerPath: path.join(directory, "ledger.jsonl"),
+    portalStatePath: path.join(directory, "portal-state.json"),
+    registryUrl: serverUrl(registry),
+    exposeBearerTokens: true
+  });
+  const api = createServer(dashboard.handler);
+  await listen(api);
+  context.after(() => api.close());
+  const token = await login(api);
+  const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+  const candidateResponse = await fetch(`${serverUrl(api)}/v1/creator/products/${catalogAgent.product_id}/candidates/${readyFactoryRun.id}`, { headers });
+  const candidate = (await candidateResponse.json()).candidate;
+  const response = await fetch(`${serverUrl(api)}/v1/creator/products/${catalogAgent.product_id}/release`, {
+    method: "POST",
+    headers: { ...headers, "idempotency-key": "release-command-v1" },
+    body: JSON.stringify({
+      candidate_id: readyFactoryRun.id,
+      expected_version: candidate.resource_version,
+      report_digest: candidate.report_digest,
+      acknowledgements: candidate.known_losses.map((loss) => loss.id)
+    })
+  });
+  const body = await response.json();
+  assert.equal(response.status, 201, JSON.stringify(body));
+  assert.equal(body.product.status, "published");
+  assert.equal(publishCalls.length, 1);
+  assert.equal(dashboard.portalState.getCreatorProduct(catalogAgent.creator_id, catalogAgent.product_id).status, "published");
+});
+
 test("non-UUID product paths are rejected without redirects", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-slug-alias-"));
   const aliasedAgent = {

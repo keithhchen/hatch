@@ -450,8 +450,13 @@ function renderQuestions(rows: QuestionSubmission[]): string {
   return [
     "# Generated Creator questions",
     "",
-    ...rows.flatMap((row) => [
-      `## ${row.id}`,
+    ...rows.flatMap((row, index) => [
+      // The question body is untrusted Markdown and may itself contain a
+      // `## Q...` heading. Keep the internal handoff lossless by giving the
+      // host-rendered blocks an out-of-band delimiter and host-owned IDs;
+      // Creator-facing artifacts are rendered later from parsed objects.
+      "<!-- HATCH_FACTORY_QUESTION_BEGIN -->",
+      `## Q${index + 1}`,
       "",
       "### Question",
       "",
@@ -578,6 +583,12 @@ function instructionsFor(contract: FactoryOutputContract): string {
   if (contract.kind === "evidence_ledger") {
     return `${shared}\nSubmit every Evidence section separately, then finalize_evidence. Required sections, in host-rendered order: ${contract.requiredSections.join("; ")}.`;
   }
+  if (contract.kind === "evaluation_verdict") {
+    return "Your output is accepted only through the local Evaluation submission tools supplied with this call. Do not print the verdict as assistant prose. Submit one complete verdict with submit_evaluation in one tool turn. The host retains that draft; then call finalize_evaluation in a subsequent tool-calling turn as the only call. If the finalizer is rejected, correct the verdict and resubmit the complete replacement before finalizing. A provider may also submit and finalize in one turn, but finalize_evaluation must be the last call. FINALIZED means the complete verdict passed host validation; stop immediately.";
+  }
+  if (contract.kind === "corpus_audit") {
+    return "Your output is accepted only through the local Corpus audit submission tools supplied with this call. Do not print the verdict as assistant prose. Submit one complete verdict with submit_corpus_audit. A submit-only turn is allowed and its receipt commits the staged verdict; then call finalize_corpus_audit in a subsequent tool turn. The finalizer must be the only call in that turn and is accepted only when the complete verdict is present. If the finalizer is rejected, correct the verdict and submit it again before finalizing. After FINALIZED, stop immediately.";
+  }
   if (contract.kind === "corpus_compilation") {
     return `Your output is accepted only through the local Corpus submission tools supplied with this call. Use only the available local submission tools; tool calls are a typed handoff to the host, not external actions. Do not print the Corpus as assistant prose and do not wrap tool arguments in code fences. First reason through the complete requirement inventory, layer boundaries, asset IDs, dependencies, and preservation obligations. Do not privately draft every asset before the first tool turn. Build one host-retained draft over multiple bounded turns: author and submit the System first, then coherent tranches of roughly one to four related assets, then the audit sections. A successful submit-only turn commits its submitted assets to that draft; receipts report the retained inventory. Re-submitting the same asset ID replaces that asset in the retained draft; use this for precise corrections. An optional restart_submission discards the whole retained draft and must be first if used. Any tool error rolls back only that turn and preserves the prior retained draft. Call finalize_corpus as the last call only when the retained draft is complete. A rejected finalizer preserves the draft: correct only the reported problem, then finalize again. FINALIZED means the complete Corpus passed host validation; stop immediately after it. Paths, manifests, and digests are host-derived: never submit them. The final draft must contain the complete System and every retained Skill/reference/knowledge asset plus all three audit sections. Allowed runtime tool IDs are exactly: ${contract.availableToolIds.length > 0 ? contract.availableToolIds.join(", ") : "none"}.`;
   }
@@ -604,6 +615,13 @@ export function createFactorySubmissionProtocol(
       : contract.kind === "corpus_audit"
           ? "finalize_corpus_audit"
           : "finalize_corpus";
+  // Kimi may split a compact evaluation into a submit turn followed by a
+  // finalize-only turn. Evaluations are host-retained drafts with no external
+  // side effects, so accepting that split keeps the protocol fail-closed
+  // without turning a valid provider handoff into a false cycle failure.
+  const retainsDraftAcrossTurns = contract.kind === "evaluation_verdict"
+    || contract.kind === "corpus_audit"
+    || contract.kind === "corpus_compilation";
   let committed = emptyDraft();
   let turn: TurnState | undefined;
   const seenTransitions = new Set<string>();
@@ -646,7 +664,7 @@ export function createFactorySubmissionProtocol(
   ): ToolReceipt => receipt(
     tool,
     status,
-    `STAGED status=${status.toUpperCase()} ${label}; ${inventory(draft)}; pending atomic batch commit`
+    `STAGED status=${status.toUpperCase()} ${label}; ${inventory(draft)}; ${retainsDraftAcrossTurns ? "pending finalize" : "pending atomic batch commit"}`
   );
 
   const knownToolName = (value: string): value is FactorySubmissionToolName => (
@@ -658,7 +676,7 @@ export function createFactorySubmissionProtocol(
     const finalizers = names.reduce<number[]>((rows, name, index) => (
       name === finalizerName ? [...rows, index] : rows
     ), []);
-    if (finalizers.length === 0 && contract.kind !== "corpus_compilation") return "BATCH_FINALIZER_REQUIRED";
+    if (finalizers.length === 0 && !retainsDraftAcrossTurns) return "BATCH_FINALIZER_REQUIRED";
     if (finalizers.length > 1) return "BATCH_FINALIZER_DUPLICATE";
     if (finalizers.length === 1 && finalizers[0] !== names.length - 1) return "BATCH_FINALIZER_MUST_BE_LAST";
     const restarts = names.reduce<number[]>((rows, name, index) => (
@@ -732,7 +750,7 @@ export function createFactorySubmissionProtocol(
       // Corpus repair keeps the validated-so-far draft so a small structural
       // correction does not regenerate every large cognitive asset. Other
       // compact contracts retain their full-replacement behavior.
-      const preserveDraft = contract.kind === "corpus_compilation";
+      const preserveDraft = contract.kind === "corpus_compilation" || contract.kind === "corpus_audit";
       if (!preserveDraft) turn!.working = emptyDraft();
       return receipt(
         tool,
@@ -1138,7 +1156,7 @@ export function createFactorySubmissionProtocol(
               : candidate.finalized
                 ? "finalized"
               : activeTurn.working
-                  ? contract.kind === "corpus_compilation" ? "retained" : "cleared"
+                  ? retainsDraftAcrossTurns ? "retained" : "cleared"
                   : "no_draft"
           };
           telemetry.lastToolTurn = lastToolTurn;

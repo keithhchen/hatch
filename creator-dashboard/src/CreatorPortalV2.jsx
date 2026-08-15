@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CreatorFactoryRuns } from "./CreatorFactoryRuns.jsx";
+import { CreatorSourceLibrary } from "./CreatorSourceLibrary.jsx";
 import {
   Breadcrumbs as HatchBreadcrumbs,
   Button,
@@ -83,6 +84,7 @@ export function CreatorPortalV2({
         <nav aria-label="Creator dashboard">
           <NavButton active={route.section === "home"} onClick={() => go(ROOT)}>Home</NavButton>
           <NavButton active={route.section === "products"} onClick={() => go(`${ROOT}/products`)}>Products</NavButton>
+          <NavButton active={route.kind === "sources"} onClick={() => go(`${ROOT}/sources`)}>Source Library</NavButton>
           <NavButton active={route.section === "orders"} onClick={() => go(`${ROOT}/orders`)}>Orders</NavButton>
         </nav>
         <div className="cpv2-account">
@@ -117,6 +119,7 @@ function CreatorRoute({ route, token, request, navigate, profile, registerNaviga
   }
   if (route.kind === "home") return <CreatorHome token={token} request={request} navigate={navigate} profile={profile} />;
   if (route.kind === "products") return <ProductsPage token={token} request={request} navigate={navigate} />;
+  if (route.kind === "sources") return <CreatorSourceLibrary token={token} taskId={route.taskId} navigate={navigate} />;
   if (route.kind === "factory") return <FactoryPage token={token} request={request} productId={route.productId} runId={route.runId} navigate={navigate} registerNavigationGuard={registerNavigationGuard} />;
   if (route.kind === "product") return <ProductPage token={token} request={request} navigate={navigate} productId={route.productId} tab={route.tab} />;
   if (route.kind === "candidate") return <CandidatePage token={token} request={request} navigate={navigate} productId={route.productId} candidateId={route.candidateId} />;
@@ -181,11 +184,11 @@ function ProductsPage({ token, request, navigate }) {
       {(payload) => {
         const products = arrayOf(unwrap(payload, "products"));
         return <>
-          <PageHeader eyebrow="Products" title="From a method to a product people can use." body="Factory creates a candidate. You approve its behavior, preview the storefront, and publish explicitly." action="Create product" onAction={() => navigate(`${ROOT}/factory`)} />
+          <PageHeader eyebrow="Products" title="From a method to a product people can use." body="A Task owns its private Source Library. Factory then evaluates a candidate, and Release makes the approved result available." action="Create product" onAction={() => navigate(`${ROOT}/sources`)} />
           {pendingRuns.length ? <PendingFactoryRuns runs={pendingRuns} navigate={navigate} /> : null}
           {products.length ? <section className="cpv2-product-grid" aria-label="Products">
             {products.map((product) => <ProductCard key={idOf(product, "product")} product={product} onOpen={() => navigate(`${ROOT}/products/${encodeURIComponent(idOf(product, "product"))}`)} />)}
-          </section> : pendingRuns.length ? null : <EmptyState title="Create your first product" body="Start with one narrow task, authorized sources, and a deliverable you would stand behind." action="Open Factory" onAction={() => navigate(`${ROOT}/factory`)} />}
+          </section> : pendingRuns.length ? null : <EmptyState title="Create your first product" body="Start with one narrow Task, upload local source files, and let Factory turn the method into a verified candidate." action="Open Source Library" onAction={() => navigate(`${ROOT}/sources`)} />}
         </>;
       }}
     </PageBoundary>
@@ -304,6 +307,7 @@ function FactoryPage({ token, request, productId, runId, navigate, registerNavig
       token={token}
       initialRunId={runId}
       onNavigateRun={(id) => navigate(id ? `${runBase}/${encodeURIComponent(id)}` : `${ROOT}/factory`)}
+      onOpenSources={() => navigate(`${ROOT}/sources`)}
       onReviewCandidate={(run) => {
         const candidateProductId = run?.product?.product_id ?? run?.product?.id ?? run?.product_id;
         if (candidateProductId) {
@@ -316,7 +320,7 @@ function FactoryPage({ token, request, productId, runId, navigate, registerNavig
   return <>
     <div className="cpv2-factory-bar"><Button variant="link" size="small" type="button" onClick={() => navigate(productId ? `${ROOT}/products/${encodeURIComponent(productId)}` : `${ROOT}/products`)}>← {productId ? "Back to product" : "Back to products"}</Button><span role="status">Factory run checkpoints are saved on the server when submitted.</span></div>
     <FactoryReviewLink token={token} request={request} productId={productId} navigate={navigate} />
-    <CreatorFactoryRuns token={token} initialRunId={runId} onNavigateRun={(id) => navigate(id ? `${runBase}/${encodeURIComponent(id)}` : `${ROOT}/products/${encodeURIComponent(productId)}/factory`)} onReviewCandidate={(run) => navigate(`${ROOT}/products/${encodeURIComponent(productId)}/candidates/${encodeURIComponent(run.id)}`)} />
+    <CreatorFactoryRuns token={token} initialRunId={runId} onOpenSources={() => navigate(`${ROOT}/sources`)} onNavigateRun={(id) => navigate(id ? `${runBase}/${encodeURIComponent(id)}` : `${ROOT}/products/${encodeURIComponent(productId)}/factory`)} onReviewCandidate={(run) => navigate(`${ROOT}/products/${encodeURIComponent(productId)}/candidates/${encodeURIComponent(run.id)}`)} />
   </>;
 }
 

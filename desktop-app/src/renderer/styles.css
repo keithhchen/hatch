@@ -1705,13 +1705,43 @@ button.composer-control:focus-visible {
 }
 
 .permission-composer-control {
+  align-items: center;
+  display: flex;
+  gap: 7px;
   max-width: min(180px, 42cqw);
   min-width: min(158px, 42cqw);
   position: relative;
   flex-shrink: 0;
 }
 
-.permission-composer-control .hui-select-trigger { width: 100%; min-width: 0; min-height: 32px; padding-inline: 10px; background: var(--hatch-ui-surface-bright); }
+.permission-composer-control > svg {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  color: color-mix(in srgb, var(--hatch-ink) 68%, transparent);
+  stroke-width: 1.65;
+}
+
+.permission-composer-control .hui-select-trigger {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  min-height: 32px;
+  padding-inline: 10px;
+  background: var(--hatch-ui-surface-bright);
+  font-family: var(--hatch-font-pill);
+  font-size: var(--hatch-type-control);
+  font-weight: 600;
+  letter-spacing: -.018em;
+  white-space: nowrap;
+}
+
+.permission-composer-control .hui-select-trigger > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .composer-control-caret {
   color: color-mix(in srgb, currentColor 65%, transparent);
@@ -2824,9 +2854,7 @@ button.composer-control:focus-visible {
 }
 
 .desktop-source-row.selected {
-  background:
-    radial-gradient(120% 160% at 0% 0%, var(--hatch-ui-pigment-clay), transparent 54%),
-    var(--hatch-ui-surface-raised);
+  background: color-mix(in srgb, var(--hatch-ui-pigment-clay) 72%, var(--hatch-ui-surface-raised));
   box-shadow: 0 1px 2px rgba(58, 43, 31, .07), inset 0 0 0 1px var(--hatch-ui-border-soft);
 }
 
@@ -2879,14 +2907,46 @@ button.composer-control:focus-visible {
 .desktop-sidebar-footer {
   background: rgba(250, 247, 241, .28);
   border-top-color: rgba(66, 53, 41, .08);
-  min-height: 60px;
-  padding: 10px 14px;
+  min-height: 64px;
+  padding: 11px 14px;
 }
 
 .desktop-sidebar-footer .avatar {
   background: rgba(255, 252, 247, .72);
   border: 1px solid rgba(255,255,255,.82);
   box-shadow: 0 1px 3px rgba(60,43,31,.08);
+  flex: 0 0 30px;
+  height: 30px;
+  width: 30px;
+}
+
+.desktop-sidebar-account {
+  min-width: 0;
+  font-family: var(--hatch-font-pill);
+}
+
+.desktop-sidebar-account strong {
+  color: var(--hatch-ink);
+  font-size: 12px;
+  font-weight: 680;
+  letter-spacing: -.015em;
+}
+
+.profile-menu { margin-left: auto; }
+
+.profile-settings-button {
+  border-radius: 50%;
+  height: 32px;
+  min-height: 32px;
+  min-width: 32px;
+  padding: 0;
+  width: 32px;
+}
+
+.profile-settings-button > svg {
+  height: 17px;
+  width: 17px;
+  stroke-width: 1.7;
 }
 
 .desktop-main {

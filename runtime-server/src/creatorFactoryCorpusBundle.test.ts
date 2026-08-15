@@ -9,6 +9,7 @@ import {
   type AgentCorpusBundleInput
 } from "./creatorLearning/corpusBundle.js";
 import { FactoryFileStore } from "./creatorLearning/fileStore.js";
+import { LocalArtifactObjectStore } from "./creatorLearning/objectStore.js";
 import { verifyAgentCorpus } from "./registryCorpus.js";
 import { loadSkillByPath } from "./skills.js";
 
@@ -300,6 +301,67 @@ test("Creator Factory keeps empty optional layers valid and injects both canonic
     "evals/synthetic-qa.json",
     "instructions/system.md"
   ]);
+});
+
+test("Creator Factory normalizes underscore skill ids before Runtime packaging", async () => {
+  const root = await temporaryRoot("hatch-factory-runtime-skill-id-");
+  const store = new FactoryFileStore(root, "factory-runtime-skill-id-run");
+  await store.initialize();
+
+  const materialized = await materializeAgentCorpusBundle(store, {
+    ...baseInput("v1-runtime-safe-skill/agent-corpus"),
+    skills: [{
+      id: "interview_answer_rewrite",
+      name: "Interview Answer Rewrite",
+      whenToUse: "Rewrite an interview answer without inventing facts.",
+      instruction: "# Interview answer rewrite\n\nKeep every claim grounded.\n"
+    }]
+  });
+  const bundlePath = path.join(store.directory, ...materialized.bundleRoot.split("/"));
+  const verified = await verifyAgentCorpus(bundlePath, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "cccccccc-cccc-4ccc-8ccc-cccccccccccc");
+
+  assert.equal(verified.corpus.skills[0]?.id, "interview-answer-rewrite");
+  assert.equal(verified.corpus.skills[0]?.instruction.path, "skills/interview-answer-rewrite/SKILL.md");
+  const skill = await loadSkillByPath(
+    path.join(bundlePath, "skills/interview-answer-rewrite/SKILL.md"),
+    [bundlePath]
+  );
+  assert.equal(skill.name, "interview-answer-rewrite");
+});
+
+test("Creator Factory preserves an old immutable bundle when derived bytes change", async () => {
+  const root = await temporaryRoot("hatch-factory-corpus-collision-");
+  const objectRoot = await temporaryRoot("hatch-factory-corpus-collision-objects-");
+  const objectStore = new LocalArtifactObjectStore(objectRoot);
+  const store = new FactoryFileStore(root, "factory-corpus-collision-run", undefined, undefined, { objectStore });
+  await store.initialize();
+
+  const first = await materializeAgentCorpusBundle(store, {
+    ...baseInput("v1-collision/agent-corpus"),
+    skills: [{ id: "answer", name: "Answer", whenToUse: "Use for answers.", instruction: "# Answer\n" }]
+  });
+  const second = await materializeAgentCorpusBundle(store, {
+    ...baseInput("v1-collision/agent-corpus"),
+    skills: [{ id: "answer", name: "Answer", whenToUse: "Use for answers.", instruction: "# Revised answer\n" }]
+  });
+
+  assert.notEqual(second.bundleRoot, first.bundleRoot);
+  assert.equal(await readFile(path.join(store.directory, ...first.bundleRoot.split("/"), "skills/answer/SKILL.md"), "utf8"), [
+    "---",
+    'name: "answer"',
+    'description: "Use for answers."',
+    "---",
+    "",
+    "# Answer\n"
+  ].join("\n"));
+  assert.equal(await readFile(path.join(store.directory, ...second.bundleRoot.split("/"), "skills/answer/SKILL.md"), "utf8"), [
+    "---",
+    'name: "answer"',
+    'description: "Use for answers."',
+    "---",
+    "",
+    "# Revised answer\n"
+  ].join("\n"));
 });
 
 test("Creator Factory rejects unknown, duplicate, unsafe, and path-controlling layer input before writing", async () => {

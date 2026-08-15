@@ -76,15 +76,9 @@ jobs:
           tags: ${{ steps.image.outputs.prefix }}/runtime:${{ env.RELEASE_TAG }}
           cache-from: type=gha,scope=runtime
           cache-to: type=gha,scope=runtime,mode=max
-      - name: Build and push Dashboard image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile.dashboard
-          push: true
-          tags: ${{ steps.image.outputs.prefix }}/dashboard:${{ env.RELEASE_TAG }}
-          cache-from: type=gha,scope=dashboard
-          cache-to: type=gha,scope=dashboard,mode=max
+      # Dashboard publishing and rollout live in web.yml. Keeping the image
+      # out of this application CD prevents a backend release from silently
+      # replacing the separately verified Web surface.
       - name: Build and push Caddy image
         uses: docker/build-push-action@v6
         with:
@@ -257,7 +251,10 @@ jobs:
           fi
           printf 'HATCH_IMAGE_PREFIX=%s\nHATCH_RELEASE_TAG=%s\n' "$IMAGE_PREFIX" "$RELEASE_TAG" > .release.env
           compose=(docker compose --env-file .env --env-file .release.env -f compose.app.yml)
-          if ! "${compose[@]}" up -d --no-deps registry factory-worker runtime dashboard caddy; then
+          # Always pull and recreate the release-tagged services. A self-hosted
+          # runner can retain a container created from an older tag; reusing it
+          # would silently leave one production surface behind the release.
+          if ! "${compose[@]}" up -d --no-deps --pull always --force-recreate registry factory-worker runtime caddy; then
             "${compose[@]}" ps -a
             for service in registry dashboard runtime factory-worker; do
               echo "--- $service container logs (last 80 lines) ---" >&2
@@ -425,7 +422,7 @@ jobs:
               cp -f compose.app.yml.previous compose.app.yml
             fi
             cp .release.env.previous .release.env
-            docker compose --env-file .env --env-file .release.env -f compose.app.yml up -d --no-deps registry factory-worker runtime dashboard caddy
+            docker compose --env-file .env --env-file .release.env -f compose.app.yml up -d --no-deps registry factory-worker runtime caddy
             docker compose --env-file .env --env-file .release.env -f compose.app.yml ps --status running --services | grep -Fxq factory-worker
             domain="$(grep '^HATCH_DOMAIN=' .env | cut -d= -f2-)"
             test -n "$domain"
@@ -436,6 +433,6 @@ jobs:
             # A first release has no known-good image to restore. Do not leave
             # an unverified stack serving traffic or let its tag become the
             # previous release on the next attempt.
-            docker compose --env-file .env --env-file .release.env -f compose.app.yml stop caddy dashboard runtime factory-worker registry
+            docker compose --env-file .env --env-file .release.env -f compose.app.yml stop caddy runtime factory-worker registry
             rm -f .release.env
           fi

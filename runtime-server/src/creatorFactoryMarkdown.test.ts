@@ -289,6 +289,9 @@ test("Corpus prompt compiles lossless full-layer replacements with concrete dest
   assert.match(call.systemPrompt, /Change rationale, Requirements traceability, and Preservation audit/i);
   assert.match(call.systemPrompt, /Never submit a path: the host derives every canonical path/i);
   assert.match(call.systemPrompt, /rejected finalizer also preserves the complete draft/i);
+  assert.match(call.systemPrompt, /Creator answer is the authority for the task's decisive judgment/i);
+  assert.match(call.systemPrompt, /Candidate facts are a pool, not a checklist/i);
+  assert.match(call.systemPrompt, /Keep the final answer in the requested output language/i);
   assert.match(call.prompt, /Previous accepted complete compilation/);
   assert.match(call.prompt, /PREVIOUS_SYSTEM_BOUNDARY/);
   assert.match(call.prompt, /PREVIOUS_KNOWLEDGE_ITEM/);

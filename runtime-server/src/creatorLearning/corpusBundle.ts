@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { AgentCorpusSchema, type AgentCorpus } from "../agentCorpus.js";
 import { requireUuidV4 } from "../identity.js";
@@ -135,49 +136,81 @@ export async function materializeAgentCorpusBundle(
 
   // Every asset must commit and yield its exact byte digest before agent.json
   // is constructed. Artifact timestamps are never copied into the manifest.
-  const written = await Promise.all(plannedAssets.map(async (asset) => ({
-    relativePath: asset.relativePath,
-    ref: await store.writeCandidate(candidatePath(asset.relativePath), asset.content)
-  })));
-  const refsByPath = new Map(written.map((item) => [item.relativePath, item.ref]));
-  const assetRef = (relativePath: string): ArtifactRef => {
-    const ref = refsByPath.get(relativePath);
-    if (!ref) throw new Error(`Agent Corpus asset was not materialized: ${relativePath}`);
-    return ref;
+  const materializeAt = async (candidateRoot: string): Promise<MaterializedAgentCorpusBundle> => {
+    const candidatePath = (relative: string) => path.posix.join(candidateRoot, relative);
+    const written = await Promise.all(plannedAssets.map(async (asset) => ({
+      relativePath: asset.relativePath,
+      ref: await store.writeCandidate(candidatePath(asset.relativePath), asset.content)
+    })));
+    const refsByPath = new Map(written.map((item) => [item.relativePath, item.ref]));
+    const assetRef = (relativePath: string): ArtifactRef => {
+      const ref = refsByPath.get(relativePath);
+      if (!ref) throw new Error(`Agent Corpus asset was not materialized: ${relativePath}`);
+      return ref;
+    };
+
+    const manifest = buildManifest(plan, (relativePath) => assetRef(relativePath).sha256);
+    const manifestRef = await store.writeCandidate(candidatePath("agent.json"), jsonDocument(manifest, "manifest"));
+
+    const bundleRoot = path.posix.join("candidate", candidateRoot);
+    const verified = await verifyAgentCorpus(
+      path.join(store.directory, ...bundleRoot.split("/")),
+      plan.creator.id,
+      plan.agentId
+    );
+    return {
+      bundleRoot,
+      manifestRef,
+      assets: {
+        system: assetRef(SYSTEM_PATH),
+        skills: plan.skills.map((skill) => ({
+          id: skill.id,
+          instruction: assetRef(skillInstructionPath(skill.id)),
+          references: skill.references.map((reference) => ({
+            id: reference.id,
+            kind: reference.kind,
+            asset: assetRef(skillReferencePath(skill.id, reference.id))
+          }))
+        })),
+        knowledge: plan.knowledge.map((document) => ({
+          id: document.id,
+          asset: assetRef(knowledgePath(document.id))
+        })),
+        syntheticQa: assetRef(SYNTHETIC_QA_PATH),
+        heldOut: assetRef(HELD_OUT_PATH)
+      },
+      digest: verified.digest
+    };
   };
 
-  const manifest = buildManifest(plan, (relativePath) => assetRef(relativePath).sha256);
-  const manifestRef = await store.writeCandidate(candidatePath("agent.json"), jsonDocument(manifest, "manifest"));
+  try {
+    return await materializeAt(plan.candidateRoot);
+  } catch (error) {
+    // A prior implementation may have already committed this candidate root
+    // with different derived bytes. Immutable object storage must preserve
+    // that historical record; move this new materialization to a stable,
+    // content-derived root instead of overwriting it.
+    if (!isImmutableObjectCollision(error)) throw error;
+    return materializeAt(collisionSafeCandidateRoot(plan.candidateRoot, plan));
+  }
+}
 
-  const bundleRoot = path.posix.join("candidate", plan.candidateRoot);
-  const verified = await verifyAgentCorpus(
-    path.join(store.directory, ...bundleRoot.split("/")),
-    plan.creator.id,
-    plan.agentId
-  );
-  return {
-    bundleRoot,
-    manifestRef,
-    assets: {
-      system: assetRef(SYSTEM_PATH),
-      skills: plan.skills.map((skill) => ({
-        id: skill.id,
-        instruction: assetRef(skillInstructionPath(skill.id)),
-        references: skill.references.map((reference) => ({
-          id: reference.id,
-          kind: reference.kind,
-          asset: assetRef(skillReferencePath(skill.id, reference.id))
-        }))
-      })),
-      knowledge: plan.knowledge.map((document) => ({
-        id: document.id,
-        asset: assetRef(knowledgePath(document.id))
-      })),
-      syntheticQa: assetRef(SYNTHETIC_QA_PATH),
-      heldOut: assetRef(HELD_OUT_PATH)
-    },
-    digest: verified.digest
-  };
+function collisionSafeCandidateRoot(candidateRoot: string, plan: Omit<BundlePlan, "candidateRoot"> & { candidateRoot: string }): string {
+  const segments = candidateRoot.split("/");
+  const corpusIndex = segments.length - 1;
+  const versionIndex = corpusIndex - 1;
+  if (segments[corpusIndex] !== "agent-corpus" || versionIndex < 0) {
+    throw new Error(`Agent Corpus candidate root cannot be rematerialized safely: ${candidateRoot}`);
+  }
+  const identity = { ...plan, candidateRoot: undefined };
+  const fingerprint = createHash("sha256").update(JSON.stringify(identity)).digest("hex").slice(0, 12);
+  const baseVersion = segments[versionIndex]!.replace(/-r[0-9a-f]{12}$/, "");
+  segments[versionIndex] = `${baseVersion}-r${fingerprint}`;
+  return segments.join("/");
+}
+
+function isImmutableObjectCollision(error: unknown): boolean {
+  return error instanceof Error && error.message.includes("Immutable object key already contains different bytes:");
 }
 
 function validateBundleInput(input: AgentCorpusBundleInput): BundlePlan {
@@ -203,7 +236,12 @@ function validateBundleInput(input: AgentCorpusBundleInput): BundlePlan {
   const skills = validateArray(input.skills, "skills").map((rawSkill, skillIndex): ValidatedSkill => {
     const label = `skills[${skillIndex}]`;
     const record = strictRecord(rawSkill, label, ["id", "name", "whenToUse", "instruction", "allowedToolIds", "references"]);
-    const id = canonicalIdentifier(record.id, `${label}.id`);
+    // Factory-facing asset identifiers permit underscores for compatibility
+    // with model-authored Corpus drafts, while Hatch Runtime skill manifests
+    // require the stricter lowercase-and-hyphen name grammar. Normalize only
+    // this host-owned runtime identity before it becomes a path/frontmatter
+    // field, and detect collisions after normalization.
+    const id = runtimeSkillIdentifier(record.id, `${label}.id`);
     claimUnique(logicalAssetIds, id, `Skill ${id}`);
     const references = validateArray(record.references, `${label}.references`).map((rawReference, referenceIndex) => {
       const referenceLabel = `${label}.references[${referenceIndex}]`;
@@ -492,6 +530,15 @@ function canonicalIdentifier(value: unknown, label: string): string {
     throw new Error(`Agent Corpus ${label} must be a canonical identifier`);
   }
   return value;
+}
+
+function runtimeSkillIdentifier(value: unknown, label: string): string {
+  const canonical = canonicalIdentifier(value, label);
+  const normalized = canonical.replaceAll("_", "-");
+  if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(normalized)) {
+    throw new Error(`Agent Corpus ${label} must normalize to a Runtime-safe skill identifier`);
+  }
+  return normalized;
 }
 
 function canonicalToolIdentifier(value: unknown, label: string): string {

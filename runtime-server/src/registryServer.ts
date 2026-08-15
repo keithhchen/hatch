@@ -33,6 +33,8 @@ import {
   type CreatorFactoryRepository
 } from "./creatorLearning/repository.js";
 import { CreatorFactoryService } from "./creatorLearning/service.js";
+import { objectStoreFromEnvironment } from "./creatorLearning/objectStore.js";
+import { PostgresDistillationGraphStore } from "./creatorLearning/distillationGraphStore.js";
 import {
   HttpRequestGate,
   PublishWorkGate,
@@ -68,9 +70,17 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   await accounts.ensureSchema();
   const factoryRepository = creatorFactoryRepositoryForRegistry(environment, store.databasePool());
   await factoryRepository.initialize();
+  const factoryRoot = path.resolve(environment.HATCH_CREATOR_FACTORY_ROOT ?? "creator-factory-runs");
+  const objectStore = objectStoreFromEnvironment(environment);
+  const graphPool = store.databasePool();
+  const graphStore = graphPool ? new PostgresDistillationGraphStore(graphPool) : undefined;
+  await graphStore?.initialize();
   const factoryService = new CreatorFactoryService(
     factoryRepository,
-    path.resolve(environment.HATCH_CREATOR_FACTORY_ROOT ?? "creator-factory-runs")
+    factoryRoot,
+    undefined,
+    objectStore,
+    graphStore
   );
   const publishToken = environment.HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN?.trim() || "";
   const runtimeServiceToken = environment.HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN?.trim() || "";
@@ -314,7 +324,10 @@ async function route(
         corpusDigest,
         { operationId, expectedCurrentDigest }
       );
-      sendJson(response, 200, { agent_corpus: activated, current: true, operation_id: operationId });
+      const release = typeof body.factory_run_id === "string" && typeof body.product_id === "string"
+        ? await context.factoryService.recordRelease(creatorId, body.factory_run_id, body.product_id)
+        : undefined;
+      sendJson(response, 200, { agent_corpus: activated, current: true, operation_id: operationId, ...(release ? { release } : {}) });
     } catch (error) {
       if (error instanceof RegistryDeploymentConflictError) {
         sendJson(response, 409, {
@@ -331,13 +344,17 @@ async function route(
     return;
   }
 
-  if (url.pathname.startsWith("/v1/creator/factory-runs")) {
+  if (url.pathname.startsWith("/v1/creator/factory-runs")
+    || url.pathname.startsWith("/v1/creator/tasks")
+    || url.pathname.startsWith("/v1/creator/source-documents")
+    || url.pathname.startsWith("/v1/creator/source-snapshots")) {
     const account = await authenticate(request, response, context, "creator");
     if (account === SESSION_QUERY_REJECTED) return;
     if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
     const result = await handleCreatorFactoryHttp({
       method: request.method ?? "GET",
       pathname: url.pathname,
+      query: Object.fromEntries(url.searchParams.entries()),
       headers: { "idempotency-key": request.headers["idempotency-key"]?.toString() },
       ...(request.method === "GET" ? {} : { body: await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES) }),
       creator: account

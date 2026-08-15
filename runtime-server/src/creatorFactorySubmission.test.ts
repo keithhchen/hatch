@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseCorpusCompilation, parseEvaluation, parseQuestions } from "./creatorLearning/markdown.js";
-import { createFactoryKimiK3PromptRunner } from "./creatorLearning/factoryKimiK3.js";
+import { createFactoryLlmPromptRunner } from "./creatorLearning/factoryLlm.js";
 import type { FactoryPromptCall } from "./creatorLearning/types.js";
 
 type SubmittedToolCall = {
@@ -28,7 +28,7 @@ function toolTurnWithFinish(calls: SubmittedToolCall[], finishReason: "tool_call
       id: `chatcmpl-${calls[0]?.id ?? "tools"}`,
       object: "chat.completion.chunk",
       created: 1,
-      model: "kimi-k3",
+      model: "kimi-k2.6",
       choices: [{
         index: 0,
         delta: {
@@ -50,7 +50,7 @@ function toolTurnWithFinish(calls: SubmittedToolCall[], finishReason: "tool_call
       id: `chatcmpl-${calls[0]?.id ?? "tools"}`,
       object: "chat.completion.chunk",
       created: 1,
-      model: "kimi-k3",
+      model: "kimi-k2.6",
       choices: [{ index: 0, delta: {}, finish_reason: finishReason }],
       usage: { prompt_tokens: 20, completion_tokens: 10, total_tokens: 30 }
     }
@@ -63,14 +63,14 @@ function textTurn(text = "done", finishReason: "stop" | "length" = "stop"): Resp
       id: "chatcmpl-text",
       object: "chat.completion.chunk",
       created: 1,
-      model: "kimi-k3",
+      model: "kimi-k2.6",
       choices: [{ index: 0, delta: { role: "assistant", content: text }, finish_reason: null }]
     },
     {
       id: "chatcmpl-text",
       object: "chat.completion.chunk",
       created: 1,
-      model: "kimi-k3",
+      model: "kimi-k2.6",
       choices: [{ index: 0, delta: {}, finish_reason: finishReason }],
       usage: { prompt_tokens: 20, completion_tokens: 10, total_tokens: 30 }
     }
@@ -82,7 +82,7 @@ async function run(
   responses: Response[]
 ): Promise<{ output: string; requests: Array<Record<string, unknown>> }> {
   const requests: Array<Record<string, unknown>> = [];
-  const runner = createFactoryKimiK3PromptRunner({
+  const runner = createFactoryLlmPromptRunner({
     apiKey: "submission-test-key",
     baseUrl: "https://api.moonshot.ai/v1",
     fetch: async (_input, init) => {
@@ -185,6 +185,39 @@ test("invalid finalize clears the draft and requires a complete replacement", as
   assert.match(JSON.stringify(requests[1]), /REJECTED code=QUESTION_COUNT_MISMATCH; draft cleared/);
 });
 
+test("question handoff preserves Markdown headings inside an authored question", async () => {
+  const nestedHeading = [
+    "Review this candidate packet:",
+    "",
+    "## Q99 — Candidate facts",
+    "",
+    "The candidate has five years of experience.",
+    "",
+    "## Draft answer",
+    "",
+    "Return one spoken rewrite."
+  ].join("\n");
+  const { output } = await run({
+    purpose: "eval.generate_questions",
+    systemPrompt: "question system",
+    prompt: "input",
+    outputContract: { kind: "question_set", expectedCount: 1 }
+  }, [
+    toolTurn([
+      {
+        id: "nested-heading-question",
+        name: "submit_question",
+        arguments: { id: "provider-made-id", question: nestedHeading, intent: "Tests the full packet.", leakage_group: "nested-heading" }
+      },
+      { id: "finalize", name: "finalize_questions", arguments: {} }
+    ])
+  ]);
+
+  const [question] = parseQuestions(output);
+  assert.equal(question?.id, "Q1", "the host owns the canonical handoff ID");
+  assert.equal(question?.question, nestedHeading);
+});
+
 test("strict raw JSON gate rejects a malformed later call with zero batch mutation", async () => {
   const preservedEvidence = "  NEW COMPLETE EVIDENCE\n    indented code-like line\ntrailing spaces stay  ";
   const { output, requests } = await run({
@@ -235,7 +268,7 @@ test("strict raw JSON gate rejects a malformed later call with zero batch mutati
 
 test("a length-terminated batch carrying complete-looking tool args never finalizes", async () => {
   let telemetry: Parameters<NonNullable<FactoryPromptCall["reportFailureTelemetry"]>>[0] | undefined;
-  const runner = createFactoryKimiK3PromptRunner({
+  const runner = createFactoryLlmPromptRunner({
     apiKey: "submission-test-key",
     baseUrl: "https://api.moonshot.ai/v1",
     fetch: async () => toolTurnWithFinish([
@@ -385,7 +418,7 @@ test("a repeated finalizer validation code stops semantic repair loops even when
   ];
   let providerTurns = 0;
   let telemetry: Parameters<NonNullable<FactoryPromptCall["reportFailureTelemetry"]>>[0] | undefined;
-  const runner = createFactoryKimiK3PromptRunner({
+  const runner = createFactoryLlmPromptRunner({
     apiKey: "submission-test-key",
     baseUrl: "https://api.moonshot.ai/v1",
     fetch: async () => {
@@ -420,7 +453,7 @@ test("a repeated batch without its required finalizer is classified without weak
     toolTurn([{ id: "missing-finalizer-one", name: "submit_question", arguments: { id: "Q1", question: "one", intent: "one", leakage_group: "one" } }]),
     toolTurn([{ id: "missing-finalizer-two", name: "submit_question", arguments: { id: "Q1", question: "one", intent: "one", leakage_group: "one" } }])
   ];
-  const runner = createFactoryKimiK3PromptRunner({
+  const runner = createFactoryLlmPromptRunner({
     apiKey: "submission-test-key",
     baseUrl: "https://api.moonshot.ai/v1",
     fetch: async () => responses.shift() ?? (() => { throw new Error("cycle not stopped"); })()
@@ -438,7 +471,7 @@ test("a repeated batch without its required finalizer is classified without weak
 
 test("runner refuses normal prose completion without an accepted finalize", async () => {
   let telemetry: Parameters<NonNullable<FactoryPromptCall["reportFailureTelemetry"]>>[0] | undefined;
-  const runner = createFactoryKimiK3PromptRunner({
+  const runner = createFactoryLlmPromptRunner({
     apiKey: "submission-test-key",
     baseUrl: "https://api.moonshot.ai/v1",
     fetch: async () => textTurn("I wrote the artifact in prose but did not submit it.")
@@ -492,6 +525,48 @@ test("evaluation and corpus audit tools canonical-render the existing evaluation
   const parsedAudit = parseEvaluation(audit.output);
   assert.equal(parsedAudit.pass, true);
   assert.equal(parsedAudit.fewShot, "None — this audit does not create a runtime few-shot.");
+});
+
+test("Corpus audit accepts a provider split submit and finalize turn", async () => {
+  const { output, requests } = await run({
+    purpose: "eval.audit_corpus",
+    systemPrompt: "audit system",
+    prompt: "input",
+    outputContract: { kind: "corpus_audit" }
+  }, [
+    toolTurn([{
+      id: "audit-submit-only",
+      name: "submit_corpus_audit",
+      arguments: { pass: true, diagnosis: "complete", corpus_reflection: "No changes required." }
+    }]),
+    toolTurn([{ id: "audit-finalize-only", name: "finalize_corpus_audit", arguments: {} }])
+  ]);
+
+  assert.equal(parseEvaluation(output).pass, true);
+  assert.equal(requests.length, 2);
+  assert.match(JSON.stringify(requests[0]), /submit_corpus_audit/);
+  assert.match(JSON.stringify(requests[1]), /STAGED status=ACCEPTED evaluation/);
+});
+
+test("Evaluation accepts a provider split submit and finalize turn", async () => {
+  const { output, requests } = await run({
+    purpose: "eval.judge_result",
+    systemPrompt: "eval system",
+    prompt: "input",
+    outputContract: { kind: "evaluation_verdict" }
+  }, [
+    toolTurn([{
+      id: "evaluation-submit-only",
+      name: "submit_evaluation",
+      arguments: { pass: true, diagnosis: "complete", few_shot: "None", corpus_reflection: "None" }
+    }]),
+    toolTurn([{ id: "evaluation-finalize-only", name: "finalize_evaluation", arguments: {} }])
+  ]);
+
+  assert.equal(parseEvaluation(output).pass, true);
+  assert.equal(requests.length, 2);
+  assert.match(JSON.stringify(requests[0]), /submit_evaluation/);
+  assert.match(JSON.stringify(requests[1]), /STAGED status=ACCEPTED evaluation/);
 });
 
 test("Corpus finalization returns precise safe repair codes for audit and relationship failures", async () => {

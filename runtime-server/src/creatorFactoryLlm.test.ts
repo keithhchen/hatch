@@ -2,15 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { KIMI_MODEL as PROVIDER_KIMI_MODEL } from "./kimiProvider.js";
 import {
-  FACTORY_KIMI_K3_MODEL,
-  FACTORY_KIMI_K3_CONTEXT_WINDOW,
-  FACTORY_KIMI_K3_MAX_COMPLETION_TOKENS,
+  FACTORY_LLM_MODEL,
+  FACTORY_LLM_CONTEXT_WINDOW,
+  FACTORY_LLM_MAX_COMPLETION_TOKENS,
   FACTORY_PROVIDER_CONFIGURATION_MESSAGE,
   FACTORY_PROVIDER_QUOTA_MESSAGE,
   FACTORY_PROVIDER_TRANSIENT_MESSAGE,
-  createFactoryKimiK3Model,
-  createFactoryKimiK3PromptRunner
-} from "./creatorLearning/factoryKimiK3.js";
+  createFactoryLlmModel,
+  createFactoryLlmPromptRunner
+} from "./creatorLearning/factoryLlm.js";
 import type { FactoryPromptFailureTelemetry } from "./creatorLearning/types.js";
 import { PI_FACTORY_MODEL, runFactoryPromptWithPi } from "./creatorLearning/piGateway.js";
 import { KIMI_MODEL, createKimiModel } from "./piModel.js";
@@ -21,14 +21,14 @@ function streamResponse(text: string, finishReason: "stop" | "length" = "stop"):
       id: "chatcmpl-factory-k3",
       object: "chat.completion.chunk",
       created: 1,
-      model: FACTORY_KIMI_K3_MODEL,
+      model: FACTORY_LLM_MODEL,
       choices: [{ index: 0, delta: { role: "assistant", content: text }, finish_reason: null }]
     },
     {
       id: "chatcmpl-factory-k3",
       object: "chat.completion.chunk",
       created: 1,
-      model: FACTORY_KIMI_K3_MODEL,
+      model: FACTORY_LLM_MODEL,
       choices: [{ index: 0, delta: {}, finish_reason: finishReason }],
       usage: { prompt_tokens: 8, completion_tokens: 2, total_tokens: 10 }
     }
@@ -47,7 +47,7 @@ function toolStreamResponse(
       id: "chatcmpl-factory-k3-tools",
       object: "chat.completion.chunk",
       created: 1,
-      model: FACTORY_KIMI_K3_MODEL,
+      model: FACTORY_LLM_MODEL,
       choices: [{
         index: 0,
         delta: {
@@ -66,7 +66,7 @@ function toolStreamResponse(
       id: "chatcmpl-factory-k3-tools",
       object: "chat.completion.chunk",
       created: 1,
-      model: FACTORY_KIMI_K3_MODEL,
+      model: FACTORY_LLM_MODEL,
       choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
       usage: { prompt_tokens: 8, completion_tokens: 2, total_tokens: 10 }
     }
@@ -77,7 +77,7 @@ function toolStreamResponse(
   });
 }
 
-test("Factory Evidence/Eval/Corpus prompt gateway uses dedicated Kimi K3 high-reasoning profile", async (t) => {
+test("Factory Evidence/Eval/Corpus prompt gateway uses dedicated Kimi K2.6 high-reasoning profile", async (t) => {
   const previousKey = process.env.LLM_API_KEY;
   const previousBaseUrl = process.env.OPENAI_BASE_URL;
   const previousFetch = globalThis.fetch;
@@ -97,7 +97,7 @@ test("Factory Evidence/Eval/Corpus prompt gateway uses dedicated Kimi K3 high-re
       {
         id: "submit-evidence",
         name: "submit_evidence_section",
-        arguments: { section: "Task evidence", markdown: "FACTORY_K3_RESULT" }
+        arguments: { section: "Task evidence", markdown: "FACTORY_LLM_RESULT" }
       },
       { id: "finalize-evidence", name: "finalize_evidence", arguments: {} }
     ])
@@ -112,22 +112,30 @@ test("Factory Evidence/Eval/Corpus prompt gateway uses dedicated Kimi K3 high-re
 
   const output = await runFactoryPromptWithPi({
     purpose: "evidence.extract",
-    systemPrompt: "FACTORY_K3_SYSTEM_MARKER",
-    prompt: "FACTORY_K3_PROMPT_MARKER",
+    systemPrompt: "FACTORY_LLM_SYSTEM_MARKER",
+    prompt: "FACTORY_LLM_PROMPT_MARKER",
     outputContract: { kind: "evidence_ledger", requiredSections: ["Task evidence"] }
   });
 
-  assert.match(output, /## Task evidence\n\nFACTORY_K3_RESULT/);
+  assert.match(output, /## Task evidence\n\nFACTORY_LLM_RESULT/);
   assert.equal(calls.length, 1);
   const request = calls[0]!;
   assert.equal(request.url, "https://api.moonshot.ai/v1/chat/completions");
   assert.equal(new Headers(request.init.headers).get("authorization"), "Bearer factory-k3-test-key");
 
   const body = JSON.parse(String(request.init.body)) as Record<string, unknown>;
-  assert.equal(body.model, FACTORY_KIMI_K3_MODEL);
+  assert.equal(body.model, FACTORY_LLM_MODEL);
   assert.equal(body.reasoning_effort, "high");
-  assert.equal(body.tool_choice, "required");
-  assert.equal(body.max_completion_tokens, FACTORY_KIMI_K3_MAX_COMPLETION_TOKENS);
+  // Kimi K2.6 only accepts the provider-compatible automatic choice while
+  // thinking is enabled; the host submission FSM still requires a complete
+  // tool batch and finalizer before accepting output.
+  assert.equal(body.tool_choice, "auto");
+  // Pi reserves the prompt/context tokens before sending the request, so the
+  // provider budget is bounded by (and may be slightly below) the profile cap.
+  const sentMaxCompletionTokens = body.max_completion_tokens;
+  assert.equal(typeof sentMaxCompletionTokens, "number");
+  assert.ok((sentMaxCompletionTokens as number) > 0);
+  assert.ok((sentMaxCompletionTokens as number) <= FACTORY_LLM_MAX_COMPLETION_TOKENS);
   assert.equal(
     (body.tools as Array<{ function: { strict?: boolean } }>).every((tool) => tool.function.strict === true),
     true
@@ -136,19 +144,19 @@ test("Factory Evidence/Eval/Corpus prompt gateway uses dedicated Kimi K3 high-re
   assert.equal("thinking" in body, false);
   assert.equal("temperature" in body, false);
   assert.equal("top_p" in body, false);
-  assert.match(JSON.stringify(body.messages), /FACTORY_K3_SYSTEM_MARKER/);
-  assert.match(JSON.stringify(body.messages), /FACTORY_K3_PROMPT_MARKER/);
+  assert.match(JSON.stringify(body.messages), /FACTORY_LLM_SYSTEM_MARKER/);
+  assert.match(JSON.stringify(body.messages), /FACTORY_LLM_PROMPT_MARKER/);
 
-  const factoryModel = createFactoryKimiK3Model({ env: { OPENAI_BASE_URL: process.env.OPENAI_BASE_URL } });
-  assert.equal(factoryModel.id, FACTORY_KIMI_K3_MODEL);
-  assert.equal(factoryModel.contextWindow, FACTORY_KIMI_K3_CONTEXT_WINDOW);
-  assert.equal(factoryModel.maxTokens, FACTORY_KIMI_K3_MAX_COMPLETION_TOKENS);
+  const factoryModel = createFactoryLlmModel({ env: { OPENAI_BASE_URL: process.env.OPENAI_BASE_URL } });
+  assert.equal(factoryModel.id, FACTORY_LLM_MODEL);
+  assert.equal(factoryModel.contextWindow, FACTORY_LLM_CONTEXT_WINDOW);
+  assert.equal(factoryModel.maxTokens, FACTORY_LLM_MAX_COMPLETION_TOKENS);
   assert.equal(factoryModel.reasoning, true);
   assert.equal(factoryModel.compat?.supportsReasoningEffort, true);
   assert.equal(factoryModel.compat?.supportsStrictMode, true);
   assert.equal(factoryModel.compat?.maxTokensField, "max_completion_tokens");
   assert.equal(factoryModel.compat?.thinkingFormat, "openai");
-  assert.deepEqual(PI_FACTORY_MODEL, { provider: "moonshot", model: FACTORY_KIMI_K3_MODEL });
+  assert.deepEqual(PI_FACTORY_MODEL, { provider: "moonshot", model: FACTORY_LLM_MODEL });
 
   assert.equal(KIMI_MODEL, "kimi-k2.6");
   assert.equal(PROVIDER_KIMI_MODEL, "kimi-k2.6");
@@ -158,8 +166,8 @@ test("Factory Evidence/Eval/Corpus prompt gateway uses dedicated Kimi K3 high-re
   );
 });
 
-test("Factory Kimi K3 rejects a length-truncated response even when it contains text", async () => {
-  const runner = createFactoryKimiK3PromptRunner({
+test("Factory Kimi K2.6 rejects a length-truncated response even when it contains text", async () => {
+  const runner = createFactoryLlmPromptRunner({
     apiKey: "factory-k3-length-test-key",
     baseUrl: "https://api.moonshot.ai/v1",
     fetch: async () => streamResponse("PARTIAL_OUTPUT_MUST_NOT_BE_ACCEPTED", "length")
@@ -176,11 +184,11 @@ test("Factory Kimi K3 rejects a length-truncated response even when it contains 
   );
 });
 
-test("Factory Kimi K3 classifies quota exhaustion and never rethrows provider account JSON", async () => {
+test("Factory Kimi K2.6 classifies quota exhaustion and never rethrows provider account JSON", async () => {
   const organizationId = "org-fefa47391cab4497943886467d066f97";
   const keyId = "ak-fbauirzdz8n111dq1iu1";
   const telemetry: FactoryPromptFailureTelemetry[] = [];
-  const runner = createFactoryKimiK3PromptRunner({
+  const runner = createFactoryLlmPromptRunner({
     apiKey: "factory-k3-quota-test-key",
     baseUrl: "https://api.moonshot.ai/v1",
     maxRetries: 0,
@@ -217,7 +225,7 @@ test("Factory Kimi K3 classifies quota exhaustion and never rethrows provider ac
   assert.equal(telemetry[0]!.code, "provider_quota");
 });
 
-test("Factory Kimi K3 sanitizes transient and configuration provider errors while preserving retry guidance", async () => {
+test("Factory Kimi K2.6 sanitizes transient and configuration provider errors while preserving retry guidance", async () => {
   const cases = [
     {
       status: 503,
@@ -233,7 +241,7 @@ test("Factory Kimi K3 sanitizes transient and configuration provider errors whil
 
   for (const row of cases) {
     const telemetry: FactoryPromptFailureTelemetry[] = [];
-    const runner = createFactoryKimiK3PromptRunner({
+    const runner = createFactoryLlmPromptRunner({
       apiKey: "factory-k3-provider-error-test-key",
       baseUrl: "https://api.moonshot.ai/v1",
       maxRetries: 0,

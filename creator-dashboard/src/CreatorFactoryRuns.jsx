@@ -1,18 +1,14 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   Button,
-  FormField,
   InlineAlert,
-  Input,
   NavigationItem,
   PageHeader,
-  Select,
   Spinner,
   StatusTag,
   Textarea
 } from "@hatch/ui";
 import {
-  createFactoryRun,
   factoryPollInterval,
   factoryShouldPoll,
   factoryStageLabel,
@@ -24,16 +20,9 @@ import {
 } from "./creatorFactory.js";
 import "./creatorFactory.css";
 
-const EMPTY_DRAFT = {
-  taskName: "",
-  taskBrief: "",
-  sources: [{ id: "S1", title: "", authority: "private_material", content: "" }]
-};
-
-export function CreatorFactoryRuns({ token, initialRunId, onNavigateRun, onReviewCandidate }) {
+export function CreatorFactoryRuns({ token, initialRunId, onNavigateRun, onReviewCandidate, onOpenSources }) {
   const [runs, setRuns] = useState([]);
   const [selected, setSelected] = useState(null);
-  const [draft, setDraft] = useState(EMPTY_DRAFT);
   const [answerDraft, setAnswerDraft] = useState({
     runId: "",
     batchId: "",
@@ -85,26 +74,6 @@ export function CreatorFactoryRuns({ token, initialRunId, onNavigateRun, onRevie
     (selected?.pending_questions?.length ?? 0) > 0
     && selected.pending_questions.every((question) => answerDraft.answers[question.id]?.trim())
   ), [selected, answerDraft.answers]);
-
-  async function create(event) {
-    event.preventDefault();
-    setBusy(true);
-    setError("");
-    try {
-      const run = await createFactoryRun(token, {
-        task_name: draft.taskName,
-        task_brief: draft.taskBrief,
-        sources: draft.sources
-      });
-      setDraft(EMPTY_DRAFT);
-      if (typeof onNavigateRun === "function") onNavigateRun(run.id);
-      else await openRun(run.id);
-    } catch (nextError) {
-      setError(nextError.message);
-    } finally {
-      setBusy(false);
-    }
-  }
 
   async function submitAnswers(event) {
     event.preventDefault();
@@ -177,47 +146,21 @@ export function CreatorFactoryRuns({ token, initialRunId, onNavigateRun, onRevie
                 onNavigateRun?.(null);
               }}
             />
-          ) : <CreateFactoryRun draft={draft} setDraft={setDraft} busy={busy} onSubmit={create} />}
+          ) : <CreateFactoryRun onOpenSources={onOpenSources} />}
         </div>
       </div>
     </section>
   );
 }
 
-function CreateFactoryRun({ draft, setDraft, busy, onSubmit }) {
-  const update = (field) => (event) => setDraft((current) => ({ ...current, [field]: event.target.value }));
-  const updateSource = (index, field) => (event) => setDraft((current) => ({
-    ...current,
-    sources: current.sources.map((source, sourceIndex) => sourceIndex === index ? { ...source, [field]: event.target.value } : source)
-  }));
-  const updateSourceValue = (index, field, value) => setDraft((current) => ({
-    ...current,
-    sources: current.sources.map((source, sourceIndex) => sourceIndex === index ? { ...source, [field]: value } : source)
-  }));
-  const addSource = () => setDraft((current) => ({
-    ...current,
-    sources: [...current.sources, { id: `S${current.sources.length + 1}`, title: "", authority: "private_material", content: "" }]
-  }));
-  const removeSource = (index) => setDraft((current) => ({
-    ...current,
-    sources: current.sources.filter((_, sourceIndex) => sourceIndex !== index).map((source, sourceIndex) => ({ ...source, id: `S${sourceIndex + 1}` }))
-  }));
+function CreateFactoryRun({ onOpenSources }) {
   return (
-    <form className="factory-create" onSubmit={onSubmit}>
-      <h2>Define one Task</h2>
-      <p>The unit is one Creator × one deliverable—not a general digital twin.</p>
-      <FormField label="Task name" required><Input required value={draft.taskName} onChange={update("taskName")} placeholder="e.g. Publishable product-page critique" /></FormField>
-      <FormField label="Task promise" required><Textarea required value={draft.taskBrief} onChange={update("taskBrief")} placeholder="What does the customer submit, what finished result do they receive, and what tradeoff matters?" /></FormField>
-      <div className="factory-source-heading"><h3>Authorized sources</h3><Button type="button" variant="link" size="small" onClick={addSource}>Add source</Button></div>
-      {draft.sources.map((source, index) => <fieldset className="factory-source" key={source.id}>
-        <legend>{source.id}</legend>
-        {draft.sources.length > 1 ? <Button className="factory-remove-source" variant="link" size="small" type="button" onClick={() => removeSource(index)}>Remove</Button> : null}
-        <FormField label="Source title" required><Input required value={source.title} onChange={updateSource(index, "title")} /></FormField>
-        <FormField label="Authority"><Select label="Authority" value={source.authority} onValueChange={(value) => updateSourceValue(index, "authority", value)} options={AUTHORITY_OPTIONS} /></FormField>
-        <FormField label="Source content" required><Textarea className="source-content" required value={source.content} onChange={updateSource(index, "content")} /></FormField>
-      </fieldset>)}
-      <Button type="submit" loading={busy}>Start distillation</Button>
-    </form>
+    <div className="factory-create factory-source-redirect">
+      <span className="cpv2-kicker">New distillation</span>
+      <h2>Start in Source Library</h2>
+      <p>Create a Task there, upload local files as many times as needed, then start a Factory revision from a locked Snapshot. Source files never belong in an inline run form.</p>
+      <Button type="button" onClick={onOpenSources}>Open Source Library</Button>
+    </div>
   );
 }
 
@@ -280,10 +223,3 @@ function FactoryRunDetail({ run, answers, setAnswers, answerRecovery, onDismissR
     </div>
   );
 }
-
-const AUTHORITY_OPTIONS = [
-  { value: "creator_current", label: "Current correction or demonstration" },
-  { value: "creator_example", label: "Canonical example" },
-  { value: "private_material", label: "Private course or document" },
-  { value: "public_context", label: "Public context" }
-];

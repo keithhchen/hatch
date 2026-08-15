@@ -85,6 +85,7 @@ export function FileUploader({ accept, multiple = false, disabled = false, onFil
   function commit(files) {
     const list = Array.from(files || []);
     if (list.length) onFiles?.(list);
+    if (inputRef.current) inputRef.current.value = "";
   }
   return (
     <div

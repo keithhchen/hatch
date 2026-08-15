@@ -106,3 +106,76 @@ export function retryFactoryRun(token, run) {
     body: JSON.stringify({ expected_version: run.version })
   });
 }
+
+export function listDistillationTasks(token) {
+  return dashboardRequest("/v1/creator/tasks", { token });
+}
+
+export function createDistillationTask(token, input) {
+  return dashboardRequest("/v1/creator/tasks", {
+    method: "POST",
+    token,
+    headers: { "idempotency-key": crypto.randomUUID() },
+    body: JSON.stringify({ name: input.name, brief: input.brief })
+  });
+}
+
+export function getDistillationTask(token, taskId) {
+  return dashboardRequest(`/v1/creator/tasks/${encodeURIComponent(taskId)}`, { token });
+}
+
+export function listSourceDocuments(token, taskId) {
+  const query = taskId ? `?task_id=${encodeURIComponent(taskId)}` : "";
+  return dashboardRequest(`/v1/creator/source-documents${query}`, { token });
+}
+
+export function uploadSourceDocument(token, taskId, file) {
+  return file.arrayBuffer().then((bytes) => {
+    return dashboardRequest("/v1/creator/source-documents", {
+      method: "POST",
+      token,
+      headers: { "idempotency-key": crypto.randomUUID() },
+      body: JSON.stringify({
+        task_id: taskId,
+        display_name: file.name,
+        media_type: file.type || undefined,
+        content_base64: bytesToBase64(bytes)
+      })
+    });
+  });
+}
+
+function bytesToBase64(arrayBuffer) {
+  const bytes = new Uint8Array(arrayBuffer);
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(binary);
+}
+
+export function startFactoryRunFromSources(token, task, documentIds) {
+  return dashboardRequest("/v1/creator/factory-runs", {
+    method: "POST",
+    token,
+    headers: { "idempotency-key": crypto.randomUUID() },
+    body: JSON.stringify({
+      task_id: task.id,
+      task_name: task.name,
+      task_brief: task.brief,
+      // The Source Library is the simple Creator entry point, so carry the
+      // Task promise into the Product contract and make the default safety
+      // boundary explicit. Presentation and voice configuration stay out of
+      // this workflow; a Creator can still provide a richer Product contract
+      // through the provider-neutral Factory API.
+      product: {
+        name: task.name,
+        description: task.brief,
+        promise: task.brief,
+        boundaries: ["Stay within the Task promise and authorized Source Library; do not invent unsupported facts."]
+      },
+      source_document_ids: documentIds
+    })
+  });
+}

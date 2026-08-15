@@ -1238,7 +1238,10 @@ export async function createDashboardApp(options = {}) {
         }
       }
 
-      if (url.pathname.startsWith("/v1/creator/factory-runs")) {
+      if (url.pathname.startsWith("/v1/creator/factory-runs")
+        || url.pathname.startsWith("/v1/creator/tasks")
+        || url.pathname.startsWith("/v1/creator/source-documents")
+        || url.pathname.startsWith("/v1/creator/source-snapshots")) {
         const authentication = await authenticate(request, registryUrl, "creator", fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         requireCapability(authentication.profile, request.method === "GET" ? "product:read" : "product:edit");
@@ -1455,14 +1458,16 @@ export async function createDashboardApp(options = {}) {
           return send(response, 200, storefrontPreview(product, profile, state, paymentMode));
         }
 
-        const publishMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/publish$/);
+        const publishMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/(publish|release)$/);
         if (request.method === "POST" && publishMatch) {
           const body = await readJson(request);
+          const unifiedRelease = publishMatch[2] === "release";
           requireCapability(profile, "release:publish");
+          if (unifiedRelease) requireCapability(profile, "release:approve");
           const commandKey = requireCommandKey(request, body);
           const productId = decodeURIComponent(publishMatch[1]);
-          const current = portalState.getCreatorProduct(profile.id, productId);
-          if (current) portalState.validatePublishCommand(profile.id, productId, { ...body, command_key: commandKey });
+          let current = portalState.getCreatorProduct(profile.id, productId);
+          if (current?.publish_operation) portalState.validatePublishCommand(profile.id, productId, { ...body, command_key: commandKey });
           const replay = !current?.publish_operation
             && current?.status === "published"
             && current.release?.candidate_id === (body.candidate_id ?? current.release?.candidate_id);
@@ -1490,8 +1495,38 @@ export async function createDashboardApp(options = {}) {
             }, `publish-succeeded:${current.release?.release_id}`);
             return send(response, 200, { product, release: current.release, public_url: current.public_url, canonical_url: canonicalPublicUrl(current.public_url) });
           }
-          const product = (await creatorProducts()).find((entry) => entry.product_id === productId);
+          let product = (await creatorProducts()).find((entry) => entry.product_id === productId);
           if (!product) return send(response, 404, { error: { code: "product_not_found", message: "Product was not found." } });
+          if (unifiedRelease && !current?.publish_operation && !approvalMatchesCandidate(current?.approval, product.candidate)) {
+            const candidateId = typeof body.candidate_id === "string" && body.candidate_id.trim()
+              ? body.candidate_id.trim()
+              : undefined;
+            if (!candidateId) return send(response, 409, { error: { code: "candidate_required", message: "Release requires a current Factory candidate." } });
+            const run = await registryRequest(registryUrl, `/v1/creator/factory-runs/${encodeURIComponent(candidateId)}`, {
+              fetchImpl,
+              headers: { authorization: `Bearer ${bearerToken(request)}` }
+            });
+            const candidate = candidateFromFactoryRun(run, productId);
+            const failedCritical = candidate.critical_gates.filter((gate) => gate.passed === false);
+            if (!candidate.corpus_verified || failedCritical.length) {
+              return send(response, 409, { error: { code: "candidate_incomplete", message: "Candidate has a failed critical gate." } });
+            }
+            if (String(body.report_digest ?? "") !== candidate.report_digest) {
+              return send(response, 409, { error: { code: "candidate_report_changed", message: "The evaluation report changed. Review it again before Release." } });
+            }
+            const acknowledgements = new Set(Array.isArray(body.acknowledgements) ? body.acknowledgements.map(String) : []);
+            const missingAcknowledgement = candidate.known_losses.find((loss) => !acknowledgements.has(String(loss.id)));
+            if (missingAcknowledgement) {
+              return send(response, 409, { error: { code: "candidate_loss_unacknowledged", message: "Acknowledge every known non-critical loss before Release." } });
+            }
+            await portalState.approveCandidate(profile.id, productId, candidate, body.expected_version ?? current?.version ?? product.resource_version ?? 0, {
+              reason: body.reason ?? "creator_release",
+              command_key: commandKey,
+              acknowledgements: [...acknowledgements].sort()
+            });
+            current = portalState.getCreatorProduct(profile.id, productId);
+            product = (await creatorProducts()).find((entry) => entry.product_id === productId) ?? product;
+          }
           if (!current?.publish_operation
             && current?.approval?.status === "approved"
             && !approvalMatchesCandidate(current.approval, product.candidate)) {
@@ -1517,8 +1552,12 @@ export async function createDashboardApp(options = {}) {
           // Persist a publish intent before the external Registry side effect.
           // The intent locks the approved candidate and makes a retry resume
           // the same operation instead of creating another release.
+          const publishExpectedVersion = unifiedRelease && !current?.publish_operation
+            ? current?.version ?? body.expected_version
+            : body.expected_version;
           const pending = await portalState.beginPublishProduct(profile.id, productId, {
             ...body,
+            expected_version: publishExpectedVersion,
             command_key: commandKey,
             agent_id: product.agent_id ?? product.candidate?.agent_id,
             // The merged Factory view exposes the candidate digest as
@@ -2525,6 +2564,7 @@ async function resumePublishDeployment({
       registryDeploymentServiceToken,
       creatorBearer,
       creatorId,
+      productId,
       operation,
       corpusDigest: operation.candidate_digest
     });
@@ -2569,6 +2609,7 @@ async function activateRegistryDeployment({
   registryDeploymentServiceToken,
   creatorBearer,
   creatorId,
+  productId,
   operation,
   corpusDigest
 }) {
@@ -2577,7 +2618,11 @@ async function activateRegistryDeployment({
     creator_id: creatorId,
     operation_id: operation.operation_id,
     expected_current_digest: operation.previous_corpus_digest ?? null,
-    release_id: operation.release_id
+    release_id: operation.release_id,
+    ...(productId && operation.candidate_id ? {
+      product_id: productId,
+      factory_run_id: operation.candidate_id
+    } : {})
   });
   const response = registryDeploymentServiceToken
     ? await registryRequest(

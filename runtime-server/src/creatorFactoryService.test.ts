@@ -16,6 +16,7 @@ import { CreatorFactoryRepositoryError, InMemoryCreatorFactoryRepository } from 
 import { CreatorFactoryService, type CreateFactoryRunRequest } from "./creatorLearning/service.js";
 import type { FactoryPromptCall } from "./creatorLearning/types.js";
 import { CreatorFactoryWorker } from "./creatorLearning/worker.js";
+import { InMemoryDistillationGraphStore } from "./creatorLearning/distillationGraph.js";
 
 test("Creator Factory service persists complete product metadata and canonical declared tools", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-factory-release-input-"));
@@ -289,6 +290,77 @@ test("Creator Factory service exposes only owned questions and candidate metadat
   const development = parseQaSet(await new FactoryFileStore(root, created.run.id).readArtifact(completed!.state!.artifacts.developmentQa!));
   const heldout = parseQaSet(await new FactoryFileStore(root, created.run.id).readArtifact(completed!.state!.artifacts.heldoutRounds[0]!));
   assert.equal([...development, ...heldout].some((row) => row.answer.includes("## Final post")), true);
+});
+
+test("a Distillation Task keeps one Product identity across revisions", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-factory-task-product-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const repository = new InMemoryCreatorFactoryRepository();
+  const service = new CreatorFactoryService(repository, root);
+  const creator = { id: "11111111-1111-4111-8111-111111111111", name: "Task Creator" };
+  const task = await service.createTask(creator.id, { name: "Stable product task", brief: "A single product identity across revisions." });
+  assert.match(task.productId ?? "", /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  const document = await service.createSourceDocument(creator.id, {
+    taskId: task.id,
+    displayName: "method.md",
+    mediaType: "text/markdown",
+    bytes: Buffer.from("# Method\nChoose one supported answer.\n", "utf8")
+  });
+  const request = createRequest({
+    taskId: task.id,
+    taskName: task.name,
+    taskBrief: task.brief,
+    sources: undefined,
+    sourceDocumentIds: [document.id]
+  });
+  const first = await service.create(creator, request, "stable-task-product-1");
+  const second = await service.create(creator, request, "stable-task-product-2");
+  assert.equal(first.run.agentId, task.productId);
+  assert.equal(first.run.product?.id, task.productId);
+  assert.equal(second.run.agentId, task.productId);
+  assert.equal(second.run.product?.id, task.productId);
+  const currentTask = await service.getTask(creator.id, task.id);
+  assert.equal(currentTask.productId, task.productId);
+  assert.notEqual(first.run.revisionId, second.run.revisionId);
+  await assert.rejects(
+    () => service.create(creator, { ...request, product: { id: "another-product" } }, "stable-task-product-mismatch"),
+    /bound to another Product/
+  );
+});
+
+test("a failed graph write does not poison the next Task revision parent", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-factory-task-revision-retry-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const repository = new InMemoryCreatorFactoryRepository();
+  const graph = new InMemoryDistillationGraphStore();
+  const service = new CreatorFactoryService(repository, root, undefined, undefined, graph);
+  const creator = { id: "11111111-1111-4111-8111-111111111111", name: "Retry Creator" };
+  const task = await service.createTask(creator.id, { name: "Retryable task", brief: "A stable revision lineage." });
+  const document = await service.createSourceDocument(creator.id, {
+    taskId: task.id,
+    displayName: "method.md",
+    mediaType: "text/markdown",
+    bytes: Buffer.from("# Method\nChoose one supported answer.\n", "utf8")
+  });
+  const request = createRequest({ taskId: task.id, taskName: task.name, taskBrief: task.brief, sources: undefined, sourceDocumentIds: [document.id] });
+
+  const first = await service.create(creator, request, "revision-retry-first");
+  const firstTask = await service.getTask(creator.id, task.id);
+  assert.equal(firstTask.latestRevisionId, first.run.revisionId);
+
+  // Simulate a pre-fix failed attempt that advanced only the Task pointer.
+  await repository.setTaskRevision(creator.id, task.id, {
+    runId: firstTask.runId!,
+    revisionId: "factory_stale_revision",
+    productId: firstTask.productId!
+  });
+
+  const second = await service.create(creator, request, "revision-retry-second");
+  const finalTask = await service.getTask(creator.id, task.id);
+  assert.equal(second.run.revisionNumber, 2);
+  assert.equal(second.run.parentRevisionId, first.run.revisionId);
+  assert.equal(finalTask.latestRevisionId, second.run.revisionId);
+  assert.equal((await graph.derive(task.id)).currentRevisionId, second.run.revisionId);
 });
 
 function createRequest(overrides: Partial<CreateFactoryRunRequest> = {}): CreateFactoryRunRequest {

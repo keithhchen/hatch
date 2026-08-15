@@ -9,7 +9,7 @@ import { FactoryFileStore } from "./creatorLearning/fileStore.js";
 import {
   FACTORY_PROVIDER_QUOTA_MESSAGE,
   FACTORY_PROVIDER_TRANSIENT_MESSAGE
-} from "./creatorLearning/factoryKimiK3.js";
+} from "./creatorLearning/factoryLlm.js";
 import {
   CORPUS_ASSET_BEGIN_MARKER,
   CORPUS_ASSET_CONTENT_MARKER,
