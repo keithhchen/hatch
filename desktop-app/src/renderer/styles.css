@@ -1714,14 +1714,6 @@ button.composer-control:focus-visible {
   flex-shrink: 0;
 }
 
-.permission-composer-control > svg {
-  flex: 0 0 16px;
-  width: 16px;
-  height: 16px;
-  color: color-mix(in srgb, var(--hatch-ink) 68%, transparent);
-  stroke-width: 1.65;
-}
-
 .permission-composer-control .hui-select-trigger {
   flex: 1 1 auto;
   width: auto;
@@ -1736,7 +1728,7 @@ button.composer-control:focus-visible {
   white-space: nowrap;
 }
 
-.permission-composer-control .hui-select-trigger > span:first-child {
+.permission-composer-control .hui-select-value {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1766,17 +1758,6 @@ button.composer-control:focus-visible {
   stroke-linecap: round;
   stroke-linejoin: round;
   width: 17px;
-}
-
-.stop-button {
-  background: #f4e1df;
-  border-color: #d9a19a;
-  color: #88362f;
-}
-
-.stop-button:hover {
-  background: #ecd0cc;
-  border-color: #c98279;
 }
 
 /* Desktop Shell ---------------------------------------------------------- */
@@ -2398,6 +2379,8 @@ button.composer-control:focus-visible {
 }
 
 .inspector-select-control .hui-select-trigger { width: 100%; min-width: 0; min-height: 30px; border: 0; padding-inline: 2px; background: transparent; box-shadow: none; font-size: 11px; }
+.inspector-select-control .hui-select-trigger--with-leading { gap: 7px; justify-content: flex-start; }
+.inspector-select-control .hui-select-leading { color: var(--hatch-text-secondary); }
 
 .desktop-pane-overlay {
   inset: 0;
@@ -2986,9 +2969,23 @@ button.composer-control:focus-visible {
 }
 
 .assistant-activity-block {
-  border-bottom: 1px solid rgba(67, 53, 42, .08);
-  margin-bottom: 20px;
+  border-bottom: 0;
+  margin: 0;
+  max-width: none;
   padding-bottom: 14px;
+  width: 100%;
+}
+
+.assistant-activity-shell {
+  margin: 0 0 20px;
+  max-width: min(820px, 100%);
+  min-width: 0;
+  width: 100%;
+}
+
+.assistant-activity-divider {
+  border-top: 1px solid rgba(67, 53, 42, .08);
+  width: 100%;
 }
 
 .assistant-activity-summary {
@@ -3053,18 +3050,31 @@ button.composer-control:focus-visible {
   border-radius: 10px;
 }
 
+.permission-composer-control .hui-select-leading {
+  color: color-mix(in srgb, var(--hatch-ink) 68%, transparent);
+  flex: 0 0 16px;
+}
+
+.permission-composer-control .hui-select-leading svg {
+  height: 16px;
+  stroke-width: 1.65;
+  width: 16px;
+}
+
 .send-button,
 .stop-button {
-  border-radius: 12px;
+  border-radius: 50%;
   height: 36px;
   min-height: 36px;
   min-width: 36px;
   width: 36px;
 }
 
-.send-button:not(:disabled) {
+.send-button:not(:disabled),
+.stop-button:not(:disabled) {
   background: var(--hatch-ui-primary);
   border-color: var(--hatch-ui-primary);
+  color: var(--hatch-ui-on-primary);
   box-shadow: var(--hatch-shadow-control);
 }
 

@@ -3509,6 +3509,7 @@ function App() {
                         <IconButton
                           label={t("accessibility.stopStreaming")}
                           className="send-button stop-button"
+                          variant="primary"
                           title={t("common.stop")}
                           type="button"
                           onClick={() => void cancelRun()}
@@ -3812,8 +3813,13 @@ function DesktopInspector({
       <section className="inspector-section">
         <span className="inspector-kicker">{t("permission.label")}</span>
         <div className="inspector-select-control">
-          <ShieldIcon />
-          <Select aria-label={t("accessibility.workspacePermissions")} value={permissionMode} onValueChange={onPermissionChange} options={PERMISSION_OPTIONS.map((mode) => ({ value: mode.value, label: permissionLabel(mode) }))} />
+          <Select
+            aria-label={t("accessibility.workspacePermissions")}
+            leading={<ShieldIcon />}
+            value={permissionMode}
+            onValueChange={onPermissionChange}
+            options={PERMISSION_OPTIONS.map((mode) => ({ value: mode.value, label: permissionLabel(mode) }))}
+          />
         </div>
         <p>{permissionMode === "allow-changes" ? t("permission.allowChangesDetail") : t("permission.askBeforeChangesDetail")}</p>
       </section>
@@ -3875,8 +3881,13 @@ function ComposerControls({ droppedFiles = [], workspace, workspaceGranted, perm
           {workspaceGranted ? workspaceGrantLabel(workspace) : t("workspace.chooseWorkspace")}
         </Button>
         <div className="permission-composer-control" title={permissionMode === "allow-changes" ? t("permission.allowChangesDetail") : t("permission.askBeforeChangesDetail")}>
-          <ShieldIcon />
-          <Select aria-label={t("accessibility.workspacePermissions")} value={permissionMode} onValueChange={onPermissionChange} options={PERMISSION_OPTIONS.map((mode) => ({ value: mode.value, label: permissionLabel(mode, t) }))} />
+          <Select
+            aria-label={t("accessibility.workspacePermissions")}
+            leading={<ShieldIcon />}
+            value={permissionMode}
+            onValueChange={onPermissionChange}
+            options={PERMISSION_OPTIONS.map((mode) => ({ value: mode.value, label: permissionLabel(mode, t) }))}
+          />
         </div>
       </div>
     </div>
@@ -4547,14 +4558,17 @@ function AssistantActivityBlock({ indices, children }) {
   }
 
   return (
-    <details
-      className={`assistant-activity-block ${tone}`}
-      open={open}
-      onToggle={(event) => setOpen(event.currentTarget.open)}
-    >
-      <summary className="assistant-activity-summary expandable">{summaryContent}</summary>
-      <div className="assistant-activity-items">{children}</div>
-    </details>
+    <div className={`assistant-activity-shell ${tone}`}>
+      <details
+        className="assistant-activity-block"
+        open={open}
+        onToggle={(event) => setOpen(event.currentTarget.open)}
+      >
+        <summary className="assistant-activity-summary expandable">{summaryContent}</summary>
+        <div className="assistant-activity-items">{children}</div>
+      </details>
+      <div className="assistant-activity-divider" aria-hidden="true" />
+    </div>
   );
 }
 

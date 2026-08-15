@@ -69,6 +69,13 @@ describe("desktop system appearance contract", () => {
     expect(stylesheet).not.toMatch(/\.composer-settings\s*\{[^}]*display:\s*none/);
   });
 
+  it("keeps composer actions circular and the activity divider at accordion width", () => {
+    expect(stylesheet).toMatch(/\.send-button,\s*\.stop-button\s*\{[\s\S]*?border-radius:\s*50%;/);
+    expect(stylesheet).toMatch(/\.send-button:not\(:disabled\),\s*\.stop-button:not\(:disabled\)\s*\{[\s\S]*?color:\s*var\(--hatch-ui-on-primary\);/);
+    expect(stylesheet).toMatch(/\.assistant-activity-shell\s*\{[\s\S]*?width:\s*100%;/);
+    expect(stylesheet).toMatch(/\.assistant-activity-divider\s*\{[\s\S]*?width:\s*100%;/);
+  });
+
   it("keeps the workspace control left aligned without clipping its label", () => {
     expect(stylesheet).toMatch(
       /\.workspace-composer-control\s*\{[\s\S]*?justify-content:\s*flex-start;[\s\S]*?min-width:\s*0;/

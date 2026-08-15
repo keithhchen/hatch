@@ -37,6 +37,8 @@ test("@hatch/ui owns the shared Button, Dialog, Select and CSS entrypoint", () =
   assert.match(navigation, /trailing/);
   assert.match(overlays, /export const Dialog = DialogPrimitive\.Root/);
   assert.match(overlays, /export function Select/);
+  assert.match(overlays, /leading/);
+  assert.match(overlays, /hui-select-trigger--with-leading/);
 
   for (const duplicate of [
     "creator-dashboard/src/components/ui/Button.jsx",

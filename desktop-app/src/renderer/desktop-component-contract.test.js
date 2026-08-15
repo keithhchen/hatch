@@ -49,6 +49,9 @@ describe("desktop component presentation contract", () => {
     expect(source).toMatch(/className="permission-composer-control"[\s\S]*?<Select/);
     expect(source).not.toContain('className="composer-overflow"');
     expect(source).not.toContain("More composer options");
+    expect(source).toMatch(/className="send-button stop-button"[\s\S]*?variant="primary"/);
+    expect(source).toMatch(/className="permission-composer-control"[\s\S]*?leading=\{<ShieldIcon \/>\}/);
+    expect(source).toContain("assistant-activity-divider");
   });
 
   it("keeps real send and stop actions accessible while presenting icons", () => {

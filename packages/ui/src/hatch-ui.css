@@ -192,6 +192,11 @@
 .hui-menu__separator { height: 1px; margin: 5px 4px; background: var(--hui-border-soft); }
 .hui-select-trigger { min-width: 180px; min-height: 40px; display: inline-flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 12px; border: 1px solid var(--hui-border); border-radius: 12px; color: var(--hui-ink); background: rgba(255,253,249,.84); cursor: pointer; font-size: 13px; }
 .hui-select-trigger svg { width: 14px; height: 14px; color: var(--hui-ink-faint); }
+.hui-select-trigger--with-leading { justify-content: flex-start; }
+.hui-select-leading { display: inline-flex; align-items: center; flex: 0 0 auto; }
+.hui-select-leading svg { width: 15px; height: 15px; }
+.hui-select-value { min-width: 0; }
+.hui-select-trigger--with-leading .hui-select-value { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hui-select-content { min-width: var(--radix-select-trigger-width); padding: 6px; border-radius: var(--hatch-radius-menu); }
 .hui-select-item { position: relative; min-height: 35px; display: flex; align-items: center; padding: 0 34px 0 9px; border-radius: 9px; outline: 0; color: #4f4941; cursor: pointer; font-size: 12px; }
 .hui-select-item[data-highlighted] { color: var(--hui-ink); background: var(--hui-panel-muted); }
