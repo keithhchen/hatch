@@ -107,7 +107,7 @@ jobs:
           override="$(mktemp)"
           printf 'services:\n  dashboard:\n    image: ${HATCH_DASHBOARD_IMAGE}\n' > "$override"
           compose=(docker compose --env-file /opt/hatch/.env --env-file /opt/hatch/.release.env -f /opt/hatch/compose.app.yml -f "$override")
-          if ! timeout 180s docker pull "$DASHBOARD_IMAGE"; then
+          if ! timeout 600s docker pull "$DASHBOARD_IMAGE"; then
             echo "Dashboard image pull timed out or failed; leaving the current container in place." >&2
             exit 1
           fi
