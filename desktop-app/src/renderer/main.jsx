@@ -446,6 +446,41 @@ function App() {
   useEffect(() => {
     if (typeof document !== "undefined") document.documentElement.lang = language;
   }, [language]);
+
+  // Settings is a separate Tauri WebView. Persisting the preference there is
+  // not enough to update this main window: browser events stay inside their
+  // source WebView, so subscribe to the app-wide event as well. This keeps a
+  // language change live without requiring a restart (or a second bootstrap).
+  useEffect(() => {
+    const applyLanguagePreference = (value) => {
+      const next = typeof value === "string" ? value : value?.language;
+      if (typeof next !== "string") return;
+      setLanguagePreference(normalizeLanguagePreference(next));
+    };
+    const handleBrowserEvent = (event) => applyLanguagePreference(event?.detail);
+    window.addEventListener("hatch-language-preference", handleBrowserEvent);
+
+    if (!window.__TAURI_INTERNALS__) {
+      return () => window.removeEventListener("hatch-language-preference", handleBrowserEvent);
+    }
+
+    let disposed = false;
+    let unlisten;
+    void listen("hatch://language-preference", ({ payload }) => {
+      if (disposed) return;
+      applyLanguagePreference(payload);
+    }).then((dispose) => {
+      unlisten = dispose;
+      if (disposed) unlisten?.();
+    }).catch(() => {});
+
+    return () => {
+      disposed = true;
+      window.removeEventListener("hatch-language-preference", handleBrowserEvent);
+      unlisten?.();
+    };
+  }, []);
+
   // A live socket is not enough to make the current thread usable. The
   // Conversation Library must have selected a server-issued Conversation;
   // every user-facing surface derives its state from this same readiness bit.
