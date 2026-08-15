@@ -226,6 +226,51 @@ test("R18 interrupted publish and rollback resume their durable intent without m
   assert.equal(state.releases.filter((release) => release.current).length, 1);
 });
 
+test("stale materialized publish is reconciled only when the existing live release matches", async () => {
+  const store = await PortalStateStore.open();
+  const creatorId = "creator-stale-materialized";
+  const productId = "stale-materialized-product";
+  const digest = "sha256:stale-materialized-release";
+  await store.seedPublishedProduct(creatorId, productId, {
+    creator_id: creatorId,
+    product_id: productId,
+    agent_id: productId,
+    corpus_digest: digest,
+    product_name: "Existing release",
+    product_description: "Existing release"
+  });
+  let state = await store.approveCandidate(creatorId, productId, {
+    candidate_id: "factory-stale-revision",
+    digest,
+    report_digest: "sha256:stale-report"
+  }, 0);
+  state = await store.beginPublishProduct(creatorId, productId, {
+    candidate_id: "factory-stale-revision",
+    expected_version: state.version,
+    command_key: "stale-materialized-publish"
+  });
+  const operationId = state.publish_operation.operation_id;
+  await store.markPublishMaterialized(creatorId, productId, operationId, {
+    creator_id: creatorId,
+    product_id: productId,
+    agent_id: productId,
+    corpus_digest: digest
+  });
+
+  const reconciled = await store.reconcileStaleMaterializedPublish(
+    creatorId,
+    productId,
+    operationId,
+    "registry_rejected_stale_factory_revision"
+  );
+  assert.equal(reconciled.status, "published");
+  assert.equal(reconciled.release.corpus_digest, digest);
+  assert.equal(reconciled.publish_operation, undefined);
+  assert.equal(reconciled.last_publish_operation.reconciled_at !== undefined, true);
+  assert.equal(reconciled.audit_log.at(-1).action, "release.publish_reconciled");
+  assert.equal(reconciled.audit_log.at(-1).details.operation_id, operationId);
+});
+
 test("R20 rollback rejects incomplete review, records actor and reason, and preserves immutable release snapshots", async () => {
   const store = await PortalStateStore.open();
   const creatorId = "creator-r20";

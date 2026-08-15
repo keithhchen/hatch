@@ -2558,16 +2558,32 @@ async function resumePublishDeployment({
     }
   }
   if (!operation.registry_activated_at) {
-    await activateRegistryDeployment({
-      registryUrl,
-      fetchImpl,
-      registryDeploymentServiceToken,
-      creatorBearer,
-      creatorId,
-      productId,
-      operation,
-      corpusDigest: operation.candidate_digest
-    });
+    try {
+      await activateRegistryDeployment({
+        registryUrl,
+        fetchImpl,
+        registryDeploymentServiceToken,
+        creatorBearer,
+        creatorId,
+        productId,
+        operation,
+        corpusDigest: operation.candidate_digest
+      });
+    } catch (error) {
+      const liveRelease = current?.release;
+      if (operation.materialized_at
+        && !operation.registry_activated_at
+        && error?.code === "invalid_status"
+        && liveRelease?.corpus_digest === operation.candidate_digest) {
+        return portalState.reconcileStaleMaterializedPublish(
+          creatorId,
+          productId,
+          operation.operation_id,
+          "registry_rejected_stale_factory_revision"
+        );
+      }
+      throw error;
+    }
     current = await portalState.markPublishRegistryActivated(creatorId, productId, operation.operation_id);
     operation = current.publish_operation;
   }

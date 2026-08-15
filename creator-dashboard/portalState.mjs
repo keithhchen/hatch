@@ -634,6 +634,37 @@ export class PortalStateStore {
     });
   }
 
+  async reconcileStaleMaterializedPublish(creatorId, productId, operationId, reason = "stale_factory_revision") {
+    return this.#mutate((state) => {
+      const record = creatorProductRecord(state, creatorId, productId);
+      const operation = requireRecord(record.publish_operation, "publish_not_pending", "No publish operation is pending.");
+      if (operation.operation_id !== operationId) {
+        throw stateError("publish_operation_changed", "The publish operation changed. Refresh and try again.", 409);
+      }
+      if (!operation.materialized_at || operation.registry_activated_at) {
+        throw stateError("deployment_not_stale", "Only a materialized, inactive deployment can be reconciled as stale.", 409);
+      }
+      if (record.release?.corpus_digest !== operation.candidate_digest) {
+        throw stateError("deployment_release_mismatch", "The existing release does not match the stale deployment.", 409);
+      }
+      const now = this.clock().toISOString();
+      record.last_publish_operation = {
+        ...clone(operation),
+        reconciled_at: now,
+        reconciliation_reason: reason
+      };
+      delete record.publish_operation;
+      record.status = record.release?.current ? "published" : record.status;
+      record.updated_at = now;
+      appendAudit(record, "release.publish_reconciled", creatorId, reason, {
+        operation_id: operation.operation_id,
+        candidate_id: operation.candidate_id,
+        candidate_digest: operation.candidate_digest
+      }, this.clock());
+      return record;
+    });
+  }
+
   async markPublishRegistryActivated(creatorId, productId, operationId) {
     return this.#markDeploymentPhase(creatorId, productId, "publish_operation", operationId, "registry_activated_at");
   }
