@@ -227,6 +227,8 @@
 .buyer-v2__action-card > .hui-button, .buyer-v2__activation-card > .hui-button, .buyer-v2__order-actions > .hui-button { margin-top: auto; }
 .buyer-v2__secondary-download { display: inline-flex; min-height: 44px; align-items: center; justify-content: center; margin-top: 8px; color: rgba(255, 255, 255, 0.62); font-size: 11px; text-decoration: none; }
 .buyer-v2__secondary-download:hover { color: white; }
+.storefront-shared__access .buyer-v2__secondary-download { color: var(--buyer-muted); }
+.storefront-shared__access .buyer-v2__secondary-download:hover { color: var(--buyer-accent); }
 .buyer-v2__activation-card {
   border: 1px solid var(--buyer-border-subtle);
   background: color-mix(in srgb, var(--buyer-panel) 92%, transparent);
