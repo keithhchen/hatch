@@ -265,7 +265,7 @@
 
 .buyer-v2__auth-page { display: grid; min-height: 100vh; grid-template-columns: minmax(0, 1.08fr) minmax(440px, .92fr); background: transparent; }
 .buyer-v2__auth-context { display: flex; min-height: 100vh; flex-direction: column; justify-content: space-between; padding: 42px clamp(34px, 7vw, 100px) 76px; background: transparent; color: var(--buyer-ink); }
-.buyer-v2__auth-context > div { max-width: 620px; }
+.buyer-v2__auth-context > div { max-width: 620px; margin-block: auto; }
 .buyer-v2__auth-context .buyer-v2__eyebrow { color: var(--buyer-accent); }
 .buyer-v2__auth-context h1 { margin: 0 0 17px; font-size: clamp(52px, 7vw, 82px); line-height: var(--hatch-display-leading, .86); letter-spacing: var(--hatch-display-tracking, -.06em); }
 .buyer-v2__auth-context p { max-width: 560px; color: var(--buyer-muted); line-height: 1.7; }
@@ -478,6 +478,7 @@
   .buyer-v2__offer-details { padding-inline: 0; }
   .buyer-v2__auth-page { grid-template-columns: 1fr; }
   .buyer-v2__auth-context { min-height: 290px; padding: 28px 24px 36px; }
+  .buyer-v2__auth-context > div { margin-block: 0; }
   .buyer-v2__auth-context > .buyer-v2__brand { margin-bottom: 68px; }
   .buyer-v2__auth-context h1 { font-size: 43px; }
   .buyer-v2__auth-form-panel { min-height: 0; padding: 44px 24px 70px; }
