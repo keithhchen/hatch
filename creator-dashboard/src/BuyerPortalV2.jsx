@@ -185,7 +185,6 @@ function BuyerShell({ route, navigate, session, downloadUrl, children }) {
 
   return (
     <div className="buyer-v2">
-      <a className="buyer-v2__skip" href="#buyer-main">Skip to content</a>
       <header className="buyer-v2__header">
         <div className="buyer-v2__header-inner">
           <HatchBrand as={RouterLink} className="buyer-v2__brand" to={EXPLORE_ROOT} navigate={navigate} aria-label="Hatch home" />
