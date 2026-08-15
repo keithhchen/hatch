@@ -95,6 +95,15 @@ jobs:
       contents: read
       packages: read
     steps:
+      - name: Inspect production Docker host
+        run: |
+          set -u
+          uname -a
+          df -h / /var/lib/docker || true
+          df -i / /var/lib/docker || true
+          docker version || true
+          docker info --format 'server={{.ServerVersion}} storage={{.Driver}} root={{.DockerRootDir}}' || true
+          docker system df || true
       - name: Replace only the Dashboard container
         env:
           DASHBOARD_IMAGE: ${{ needs.publish.outputs.image }}
@@ -102,16 +111,30 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          export DOCKER_DEFAULT_PLATFORM=linux/amd64
           printf '%s\n' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
           previous_image="$(docker inspect --format '{{.Config.Image}}' hatch-app-dashboard-1)"
           override="$(mktemp)"
           printf 'services:\n  dashboard:\n    image: ${HATCH_DASHBOARD_IMAGE}\n' > "$override"
           compose=(docker compose --env-file /opt/hatch/.env --env-file /opt/hatch/.release.env -f /opt/hatch/compose.app.yml -f "$override")
-          if ! timeout 600s docker pull "$DASHBOARD_IMAGE"; then
+          # Remove only dangling layers. Tagged release images remain available
+          # for rollback, while interrupted pulls cannot accumulate forever.
+          docker image prune -f >/dev/null 2>&1 || true
+          pulled=0
+          for attempt in 1 2 3; do
+            echo "Pulling dashboard image (attempt $attempt/3)"
+            if timeout 300s docker pull --platform linux/amd64 "$DASHBOARD_IMAGE"; then
+              pulled=1
+              break
+            fi
+            docker system df || true
+            sleep $((attempt * 10))
+          done
+          if test "$pulled" != 1; then
             echo "Dashboard image pull timed out or failed; leaving the current container in place." >&2
             exit 1
           fi
-          if ! timeout 120s env HATCH_DASHBOARD_IMAGE="$DASHBOARD_IMAGE" "${compose[@]}" up -d --no-deps dashboard; then
+          if ! timeout 180s env HATCH_DASHBOARD_IMAGE="$DASHBOARD_IMAGE" "${compose[@]}" up -d --no-deps --pull never dashboard; then
             HATCH_DASHBOARD_IMAGE="$previous_image" "${compose[@]}" up -d --no-deps dashboard
             exit 1
           fi

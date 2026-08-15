@@ -32,6 +32,9 @@ jobs:
       - name: Verify cross-process Commerce ledger
         working-directory: packages/commerce
         run: npm test
+      - name: Install shared UI dependencies
+        working-directory: packages/ui
+        run: npm ci
       - name: Verify Creator Dashboard
         working-directory: creator-dashboard
         run: |
@@ -208,6 +211,7 @@ jobs:
           RELEASE_TAG: ${{ env.RELEASE_TAG }}
         run: |
           set -euo pipefail
+          export DOCKER_DEFAULT_PLATFORM=linux/amd64
           printf '%s\n' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
           cd /opt/hatch
           test -f .env
@@ -246,15 +250,34 @@ jobs:
               ;;
           esac
           docker network inspect hatch_internal >/dev/null
+          df -h / /var/lib/docker || true
+          df -i / /var/lib/docker || true
+          docker info --format 'server={{.ServerVersion}} storage={{.Driver}} root={{.DockerRootDir}}' || true
+          docker system df || true
+          docker image prune -f >/dev/null 2>&1 || true
           if test -f .release.env; then
             cp -f .release.env .release.env.previous
           fi
           printf 'HATCH_IMAGE_PREFIX=%s\nHATCH_RELEASE_TAG=%s\n' "$IMAGE_PREFIX" "$RELEASE_TAG" > .release.env
           compose=(docker compose --env-file .env --env-file .release.env -f compose.app.yml)
-          # Always pull and recreate the release-tagged services. A self-hosted
-          # runner can retain a container created from an older tag; reusing it
-          # would silently leave one production surface behind the release.
-          if ! "${compose[@]}" up -d --no-deps --pull always --force-recreate registry factory-worker runtime caddy; then
+          pulled=0
+          for attempt in 1 2 3; do
+            echo "Pulling application images (attempt $attempt/3)"
+            if timeout 300s "${compose[@]}" pull --quiet registry factory-worker runtime caddy; then
+              pulled=1
+              break
+            fi
+            docker system df || true
+            sleep $((attempt * 10))
+          done
+          if test "$pulled" != 1; then
+            echo "Application image pull timed out or failed; leaving the current containers in place." >&2
+            exit 1
+          fi
+          # Always recreate the release-tagged services. A self-hosted runner
+          # can retain a container created from an older tag; reusing it would
+          # silently leave one production surface behind the release.
+          if ! timeout 180s "${compose[@]}" up -d --no-deps --pull never --force-recreate registry factory-worker runtime caddy; then
             "${compose[@]}" ps -a
             for service in registry dashboard runtime factory-worker; do
               echo "--- $service container logs (last 80 lines) ---" >&2
