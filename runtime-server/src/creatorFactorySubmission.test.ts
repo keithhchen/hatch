@@ -515,6 +515,27 @@ test("Corpus audit accepts a provider split submit and finalize turn", async () 
   assert.match(JSON.stringify(requests[1]), /STAGED status=ACCEPTED evaluation/);
 });
 
+test("Evaluation accepts a provider split submit and finalize turn", async () => {
+  const { output, requests } = await run({
+    purpose: "eval.judge_result",
+    systemPrompt: "eval system",
+    prompt: "input",
+    outputContract: { kind: "evaluation_verdict" }
+  }, [
+    toolTurn([{
+      id: "evaluation-submit-only",
+      name: "submit_evaluation",
+      arguments: { pass: true, diagnosis: "complete", few_shot: "None", corpus_reflection: "None" }
+    }]),
+    toolTurn([{ id: "evaluation-finalize-only", name: "finalize_evaluation", arguments: {} }])
+  ]);
+
+  assert.equal(parseEvaluation(output).pass, true);
+  assert.equal(requests.length, 2);
+  assert.match(JSON.stringify(requests[0]), /submit_evaluation/);
+  assert.match(JSON.stringify(requests[1]), /STAGED status=ACCEPTED evaluation/);
+});
+
 test("Corpus finalization returns precise safe repair codes for audit and relationship failures", async () => {
   const missingSection = [
     "## Retained\nNone.",
