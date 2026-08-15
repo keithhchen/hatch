@@ -392,7 +392,7 @@ function ProductAction({ product, currentPath, request, navigate, session, downl
   return (
     <aside className="buyer-v2__action-card" aria-label="Product access">
       <span className="buyer-v2__eyebrow">Access</span>
-      <div className="buyer-v2__price"><strong>Free</strong><span>Permanent access</span></div>
+      <div className="buyer-v2__price"><strong>Free</strong></div>
       {contents}
     </aside>
   );

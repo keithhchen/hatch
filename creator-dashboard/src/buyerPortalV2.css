@@ -219,9 +219,8 @@
 }
 .buyer-v2__action-card .buyer-v2__eyebrow, .buyer-v2__activation-card .buyer-v2__eyebrow, .buyer-v2__order-summary .buyer-v2__eyebrow, .buyer-v2__order-actions .buyer-v2__eyebrow { color: rgba(255, 255, 255, 0.55); }
 .buyer-v2__price { margin: 28px 0 30px; }
-.buyer-v2__price strong, .buyer-v2__price span { display: block; }
+.buyer-v2__price strong { display: block; }
 .buyer-v2__price strong { font-family: var(--hatch-font-display, Georgia, serif); font-size: 45px; font-weight: 400; letter-spacing: var(--hatch-display-tracking, -.06em); line-height: var(--hatch-display-leading, .86); }
-.buyer-v2__price span { margin-top: 3px; color: rgba(255, 255, 255, 0.58); font-size: 11px; }
 .buyer-v2__action-card h2, .buyer-v2__storefront-action h2, .buyer-v2__activation-card h2, .buyer-v2__order-actions h2 { margin: 0 0 10px; font-size: 18px; line-height: 1.25; }
 .buyer-v2__action-card > p, .buyer-v2__activation-card > p, .buyer-v2__order-actions > p { color: rgba(255, 255, 255, 0.66); font-size: 13px; line-height: 1.65; }
 .buyer-v2__action-card > .hui-button, .buyer-v2__activation-card > .hui-button, .buyer-v2__order-actions > .hui-button { margin-top: auto; }
