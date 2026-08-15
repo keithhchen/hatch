@@ -24,9 +24,6 @@
 .cpv2 button:focus-visible, .cpv2 a:focus-visible, .cpv2 input:focus-visible, .cpv2 select:focus-visible, .cpv2 textarea:focus-visible { outline: 3px solid color-mix(in srgb, var(--hatch-accent, #d65f3b) 35%, transparent); outline-offset: 2px; }
 .cpv2 h1, .cpv2 h2 { font-family: var(--hatch-font-display, Georgia, serif); font-weight: 400; letter-spacing: var(--hatch-display-tracking, -.06em); line-height: var(--hatch-display-leading, .86); }
 .cpv2 h1:focus { outline: none; }
-.cpv2-skip { position: fixed; z-index: 100; top: 8px; left: 8px; padding: 10px 14px; border-radius: var(--hatch-radius-control, 12px); background: var(--hatch-ui-surface-bright, #fffdf9); color: var(--hatch-ui-ink, #201813); box-shadow: var(--hatch-shadow-menu, 0 14px 38px rgba(43,33,25,.14)); transform: translateY(-150%); }
-.cpv2-skip:focus { transform: none; }
-
 .cpv2-sidebar { position: sticky; z-index: 5; top: 0; display: flex; height: 100vh; min-width: 0; flex-direction: column; padding: 27px 19px 19px; border-right: 1px solid var(--hatch-border-subtle, rgba(54,41,31,.1)); background: color-mix(in srgb, var(--hatch-panel, #fbf7f0) 85%, transparent); backdrop-filter: blur(20px); }
 .cpv2-brand { display: flex; min-height: 44px; align-items: center; gap: 7px; padding: 0 7px; border: 0; background: transparent; color: inherit; }
 .cpv2-mobile-nav { display: none; }

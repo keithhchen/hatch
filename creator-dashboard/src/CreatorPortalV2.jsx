@@ -90,7 +90,6 @@ export function CreatorPortalV2({
 
   return (
     <div className="cpv2">
-      <a className="cpv2-skip" href="#creator-main">Skip to content</a>
       <aside className="cpv2-sidebar">
         <HatchBrand as="button" className="cpv2-brand" type="button" onClick={() => go(ROOT)} aria-label="Hatch creator home" />
         <div className="cpv2-mobile-nav">

@@ -34,20 +34,6 @@
 }
 .buyer-v2 h1:focus { outline: none; }
 
-.buyer-v2 a.buyer-v2__skip {
-  position: fixed;
-  z-index: 100;
-  top: 8px;
-  left: 8px;
-  transform: translateY(-150%);
-  padding: 11px 14px;
-  border-radius: 8px;
-  background: var(--buyer-inverse);
-  color: var(--buyer-inverse-text);
-  text-decoration: none;
-}
-.buyer-v2 a.buyer-v2__skip:focus { transform: translateY(0); }
-
 .buyer-v2__header {
   position: sticky;
   z-index: 20;
@@ -128,6 +114,7 @@
   color: var(--buyer-muted);
   font-size: var(--hatch-type-label);
   text-decoration: none;
+  white-space: nowrap;
 }
 .buyer-v2__plain-button:hover, .buyer-v2__download-quiet:hover { color: var(--buyer-accent); }
 .buyer-v2__header-cta {
@@ -427,7 +414,6 @@
 
 @media (max-width: 940px) {
   .buyer-v2__header-inner { grid-template-columns: auto 1fr auto; }
-  .buyer-v2__download-quiet { display: none; }
   .buyer-v2__catalog-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .buyer-v2__product-hero, .buyer-v2__checkout-grid, .buyer-v2__detail-grid { grid-template-columns: 1fr; }
   .buyer-v2__action-card, .buyer-v2__activation-card, .buyer-v2__order-actions { min-height: 320px; }
@@ -501,7 +487,6 @@
     gap: 6px 8px;
     padding: 8px 8px 6px 10px;
   }
-  .buyer-v2__download-quiet { display: none; }
   .buyer-v2__account { gap: 4px; }
   .buyer-v2__account .hui-button { min-height: 38px; padding-inline: 8px; }
 }
