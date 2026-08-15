@@ -44,6 +44,12 @@ describe("desktop system appearance contract", () => {
     expect(stylesheet).not.toMatch(/@media\s*\([^)]*width\s*:/);
   });
 
+  it("keeps agent avatars circular when the navigation label grows", () => {
+    expect(stylesheet).toMatch(
+      /\.desktop-source-row\.hui-navigation-item\s*>\s*\.creator-avatar\s*\{[\s\S]*?flex:\s*0 0 29px;[\s\S]*?height:\s*29px;[\s\S]*?min-width:\s*29px;[\s\S]*?width:\s*29px;[\s\S]*?aspect-ratio:\s*1;/
+    );
+  });
+
   it("keeps accessibility appearance and motion preferences in the stylesheet contract", () => {
     expect(stylesheet).toMatch(/\.desktop-window-shell\s+select\s*\{[^}]*accent-color:\s*var\(--hatch-accent\)/);
     expect(stylesheet).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*?transition-duration:\s*0\.01ms\s*!important/);

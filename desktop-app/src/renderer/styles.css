@@ -3181,6 +3181,17 @@ button.composer-control:focus-visible {
   overflow: hidden;
 }
 
+/* NavigationItem gives its label span the flexible column. The creator
+ * avatar is also a span, so lock its flex basis and aspect ratio explicitly
+ * or a long agent name can compress the circle into an ellipse. */
+.desktop-source-row.hui-navigation-item > .creator-avatar {
+  flex: 0 0 29px;
+  height: 29px;
+  min-width: 29px;
+  width: 29px;
+  aspect-ratio: 1;
+}
+
 .desktop-source-row-copy {
   flex: 1 1 auto;
   min-width: 0;
