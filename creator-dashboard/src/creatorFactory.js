@@ -164,6 +164,17 @@ export function startFactoryRunFromSources(token, task, documentIds) {
       task_id: task.id,
       task_name: task.name,
       task_brief: task.brief,
+      // The Source Library is the simple Creator entry point, so carry the
+      // Task promise into the Product contract and make the default safety
+      // boundary explicit. Presentation and voice configuration stay out of
+      // this workflow; a Creator can still provide a richer Product contract
+      // through the provider-neutral Factory API.
+      product: {
+        name: task.name,
+        description: task.brief,
+        promise: task.brief,
+        boundaries: ["Stay within the Task promise and authorized Source Library; do not invent unsupported facts."]
+      },
       source_document_ids: documentIds
     })
   });
