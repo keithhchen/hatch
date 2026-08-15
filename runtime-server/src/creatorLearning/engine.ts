@@ -142,7 +142,11 @@ export class CreatorFactory {
       config: {
         developmentQuestions: startInput.config?.developmentQuestions ?? 6,
         heldoutQuestions: startInput.config?.heldoutQuestions ?? 3,
-        maxCorpusRevisions: startInput.config?.maxCorpusRevisions ?? 4
+        // A production run can need one revision for deterministic repair and
+        // several more for Creator-reference calibration. Keep the explicit
+        // per-run override authoritative, but give new runs enough bounded
+        // room to converge before requiring a new source/correction revision.
+        maxCorpusRevisions: startInput.config?.maxCorpusRevisions ?? 6
       },
       artifacts: {
         taskBrief,
@@ -2217,7 +2221,7 @@ function validateStartInput(input: FactoryStartInput): void {
   const heldout = input.config?.heldoutQuestions ?? 3;
   if (!Number.isInteger(development) || development < 1) throw new Error("developmentQuestions must be a positive integer");
   if (!Number.isInteger(heldout) || heldout < 1) throw new Error("heldoutQuestions must be a positive integer");
-  const revisions = input.config?.maxCorpusRevisions ?? 4;
+  const revisions = input.config?.maxCorpusRevisions ?? 6;
   if (!Number.isInteger(revisions) || revisions < 1) throw new Error("maxCorpusRevisions must be a positive integer");
   const ids = new Set<string>();
   for (const source of input.sources) {
