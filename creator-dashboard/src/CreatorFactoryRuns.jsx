@@ -182,7 +182,7 @@ function FactoryRunDetail({ run, answers, setAnswers, answerRecovery, onDismissR
         <div><h2>{run.task_name}</h2></div>
         <StatusTag tone={run.status === "ready" ? "success" : run.status === "needs_attention" ? "error" : "neutral"}>{factoryStageLabel(run)}</StatusTag>
       </div>
-      {run.status === "waiting_for_creator" ? (
+      {run.status === "waiting_for_creator" && run.stage !== "review_required" ? (
         <form className="factory-questions" onSubmit={onSubmit}>
           <div><h3>Your reference answers</h3><p>Answer each generated task directly. Hatch—not another synthetic answer—will be judged against these answers.</p></div>
           {answerRecovery ? (
@@ -218,6 +218,7 @@ function FactoryRunDetail({ run, answers, setAnswers, answerRecovery, onDismissR
       ) : null}
       {factoryShouldPoll(run) ? <div className="factory-progress"><Spinner label="Factory run in progress" /><div><h3>Hatch is advancing the graph</h3><p>No monitoring agent is required. The worker will pause here automatically when it needs your answers.</p></div></div> : null}
       {run.status === "ready" ? <div className="factory-ready"><StatusTag tone="success">Passed</StatusTag><div><h3>Candidate v{run.candidate?.version} passed</h3><p>Verified Agent Corpus: <code>{run.candidate?.corpus_digest}</code></p><p>System asset: <code>{run.candidate?.system_digest}</code></p><small>The complete bundle passed the Registry verifier. It has not been published; Creator approval remains separate.</small>{onReview ? <Button type="button" onClick={onReview}>Review candidate</Button> : null}</div></div> : null}
+      {run.stage === "review_required" ? <div className="factory-attention"><h3>Creator correction is required</h3><p>The sealed evaluation found a boundary case. Review the known cases and confirm the correction loop; held-out content stays sealed.</p>{onReview ? <Button type="button" onClick={onReview}>Open review</Button> : null}</div> : null}
       {run.status === "needs_attention" ? <div className="factory-attention"><h3>The run needs attention</h3><p>{run.last_error}</p>{run.retryable ? <Button type="button" loading={busy} onClick={onRetry}>Retry the failed stage</Button> : <small>This checkpoint cannot be retried safely. Start a new run after correcting the source or configuration.</small>}</div> : null}
       <Button className="factory-new-run" type="button" variant="link" onClick={onNew}>Start another run</Button>
     </div>

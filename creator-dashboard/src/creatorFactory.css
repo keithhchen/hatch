@@ -3,48 +3,48 @@
 .factory-runs-panel, .factory-work-panel { border: 1px solid var(--hatch-ui-border-soft, var(--hatch-border-subtle)); border-radius: var(--hatch-radius-surface, 22px); background: var(--hatch-ui-surface-resting, var(--hatch-panel)); box-shadow: var(--hatch-shadow-surface, 0 10px 30px rgba(47,35,26,.075)); }
 .factory-runs-panel { overflow: hidden; }
 .factory-panel-title { display: flex; align-items: center; justify-content: space-between; padding: 20px; border-bottom: 1px solid var(--hatch-ui-border-soft, var(--hatch-border-subtle)); }
-.factory-panel-title h2 { margin: 0; font-size: 19px; }
+.factory-panel-title h2 { margin: 0; font-size: var(--hatch-type-subtitle); }
 .factory-panel-title .hui-button, .factory-new-run { padding-inline: 0; }
 .factory-run-list { display: grid; padding: 8px; }
 .factory-run-list > button { display: grid; gap: 5px; padding: 14px; border: 0; border-radius: 11px; background: transparent; color: inherit; text-align: left; cursor: pointer; }
 .factory-run-list > button:hover, .factory-run-list > button.selected { background: var(--hatch-ui-selection, #eee7dc); }
-.factory-run-list strong { font-size: 13px; }
-.factory-run-list span, .factory-run-list p { color: var(--hatch-text-secondary); font-size: 11px; }
+.factory-run-list strong { font-size: var(--hatch-type-control); }
+.factory-run-list span, .factory-run-list p { color: var(--hatch-text-secondary); font-size: var(--hatch-type-caption); }
 .factory-work-panel { min-height: 560px; padding: clamp(24px,4vw,44px); }
 .factory-create { display: grid; gap: 17px; max-width: 720px; }
 .factory-source-redirect { max-width: 620px; }
 .factory-source-redirect p { max-width: 540px; line-height: 1.65; }
-.factory-create h2, .factory-detail h2 { margin: 0 0 4px; font-size: 34px; }
+.factory-create h2, .factory-detail h2 { margin: 0 0 4px; font-size: var(--hatch-type-display); }
 .factory-create > p, .factory-questions p, .factory-progress p, .factory-ready p, .factory-ready small { color: var(--hatch-text-secondary); line-height: 1.55; }
 .factory-create > .hui-field, .factory-source .hui-field, .factory-questions > .hui-field { width: 100%; }
 .factory-create .hui-textarea { min-height: 100px; }
 .factory-create .hui-select-trigger { width: 100%; }
-.factory-create .hui-textarea.source-content { min-height: 220px; font-family: var(--hatch-font-ui); font-size: 12px; line-height: 1.55; }
+.factory-create .hui-textarea.source-content { min-height: 220px; font-family: var(--hatch-font-ui); font-size: var(--hatch-type-label); line-height: 1.55; }
 .factory-source-heading { display: flex; align-items: baseline; justify-content: space-between; margin-top: 7px; padding-top: 20px; border-top: 1px solid var(--hatch-ui-border-soft, var(--hatch-border-subtle)); }
-.factory-source-heading h3 { margin: 0; font-size: 16px; }
+.factory-source-heading h3 { margin: 0; font-size: var(--hatch-type-emphasis); }
 .factory-source-heading .hui-button, .factory-remove-source { padding-inline: 0; }
 .factory-source { position: relative; display: grid; gap: 14px; margin: 0; padding: 18px; border: 1px solid var(--hatch-ui-border-soft, var(--hatch-border-subtle)); border-radius: var(--hatch-radius-control, 12px); background: color-mix(in srgb, var(--hatch-ui-selection, #eee7dc) 24%, transparent); }
-.factory-source legend { padding: 0 7px; color: var(--hatch-text-secondary); font-size: 12px; }
+.factory-source legend { padding: 0 7px; color: var(--hatch-text-secondary); font-size: var(--hatch-type-label); }
 .factory-remove-source { position: absolute; top: 12px; right: 12px; }
 .factory-detail { display: grid; gap: 28px; }
 .factory-detail-heading { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; }
 .factory-questions { display: grid; gap: 22px; }
-.factory-questions h3, .factory-progress h3, .factory-ready h3, .factory-attention h3 { margin: 0 0 5px; font-size: 19px; }
-.factory-questions .hui-field__label { color: var(--hatch-ink); font-size: 13px; font-weight: 600; line-height: 1.55; }
+.factory-questions h3, .factory-progress h3, .factory-ready h3, .factory-attention h3 { margin: 0 0 5px; font-size: var(--hatch-type-subtitle); }
+.factory-questions .hui-field__label { color: var(--hatch-ink); font-size: var(--hatch-type-control); font-weight: 600; line-height: 1.55; }
 .factory-questions .hui-textarea { min-height: 150px; line-height: 1.55; }
 .factory-answer-recovery { display: grid; gap: 16px; padding: 18px; border: 1px solid color-mix(in srgb, var(--hatch-ui-status-warning-ink) 28%, var(--hatch-ui-border-soft)); border-radius: var(--hatch-radius-control, 12px); background: var(--hatch-ui-status-warning-bg, #eee4c8); }
 .factory-answer-recovery-heading { display: flex; justify-content: space-between; gap: 18px; align-items: flex-start; }
-.factory-answer-recovery h4 { margin: 0 0 5px; font-size: 15px; }
+.factory-answer-recovery h4 { margin: 0 0 5px; font-size: var(--hatch-type-reading); }
 .factory-answer-recovery p { margin: 0; }
 .factory-answer-recovery .hui-button { color: var(--hatch-ui-status-warning-ink, #70591f); }
 .factory-answer-recovery-list { display: grid; gap: 14px; }
 .factory-answer-recovery-list > div { display: grid; gap: 8px; padding-top: 14px; border-top: 1px solid color-mix(in srgb, var(--hatch-ui-status-warning-ink) 22%, transparent); }
-.factory-answer-recovery-list strong { font-size: 12px; line-height: 1.45; }
+.factory-answer-recovery-list strong { font-size: var(--hatch-type-label); line-height: 1.45; }
 .factory-answer-recovery-list .hui-textarea { min-height: 92px; background: rgba(255,255,255,.65); color: var(--hatch-ink); }
 .factory-answer-recovery-list .hui-button { justify-self: start; padding-inline: 0; }
 .factory-progress, .factory-ready { display: flex; gap: 15px; align-items: flex-start; padding: 22px; border: 1px solid var(--hatch-ui-border-soft, var(--hatch-border-subtle)); border-radius: var(--hatch-radius-control, 12px); background: var(--hatch-ui-selection, #eee7dc); }
 .factory-progress > .hui-spinner, .factory-ready > .hui-status { flex: 0 0 auto; }
-.factory-ready code { overflow-wrap: anywhere; font-size: 10px; }
+.factory-ready code { overflow-wrap: anywhere; font-size: var(--hatch-type-micro); }
 .factory-ready small { display: block; margin-top: 9px; }
 .factory-attention { padding: 22px; border: 1px solid color-mix(in srgb, var(--hatch-ui-status-error-ink) 22%, var(--hatch-ui-border-soft)); border-radius: var(--hatch-radius-control, 12px); background: var(--hatch-ui-status-error-bg, #efd6cd); color: var(--hatch-ui-status-error-ink, #8d3525); }
 .factory-new-run { justify-self: start; }

@@ -1078,7 +1078,7 @@ function normalizeAnswers(answers: PendingCreatorAnswers, now: Date): PendingCre
 }
 
 function completedStatus(stage: FactoryStage): "waiting_for_creator" | "ready" | "needs_attention" {
-  if (stage === "awaiting_creator_answers") return "waiting_for_creator";
+  if (stage === "awaiting_creator_answers" || stage === "review_required") return "waiting_for_creator";
   if (stage === "ready") return "ready";
   if (stage === "needs_attention") return "needs_attention";
   throw new CreatorFactoryRepositoryError("invalid_stage", `Worker cannot complete Factory at intermediate stage ${stage}`);

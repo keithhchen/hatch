@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -290,6 +291,176 @@ test("Creator Factory service exposes only owned questions and candidate metadat
   const development = parseQaSet(await new FactoryFileStore(root, created.run.id).readArtifact(completed!.state!.artifacts.developmentQa!));
   const heldout = parseQaSet(await new FactoryFileStore(root, created.run.id).readArtifact(completed!.state!.artifacts.heldoutRounds[0]!));
   assert.equal([...development, ...heldout].some((row) => row.answer.includes("## Final post")), true);
+});
+
+test("Creator Review is an immutable, idempotent projection over candidate cases", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-factory-review-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const repository = new InMemoryCreatorFactoryRepository();
+  const graph = new InMemoryDistillationGraphStore();
+  const service = new CreatorFactoryService(repository, root, undefined, undefined, graph);
+  const creator = { id: "11111111-1111-4111-8111-111111111111", name: "Review Creator" };
+  const task = await service.createTask(creator.id, { name: "Reviewable method", brief: "Return one finished recommendation." });
+  const document = await service.createSourceDocument(creator.id, {
+    taskId: task.id,
+    displayName: "method.md",
+    mediaType: "text/markdown",
+    bytes: Buffer.from("# Method\nChoose one supported recommendation.\n", "utf8")
+  });
+  const created = await service.create(creator, createRequest({
+    taskId: task.id,
+    taskName: task.name,
+    taskBrief: task.brief,
+    sources: undefined,
+    sourceDocumentIds: [document.id],
+    config: { developmentQuestions: 2, heldoutQuestions: 1, maxCorpusRevisions: 2 }
+  }), "review-run-1");
+  const factory = new CreatorFactory(root, passingPromptRunner, async (execution) => `Customer-ready result for ${execution.question}`, { model: { provider: "test", model: "service-script" }, graphStore: graph });
+  const worker = new CreatorFactoryWorker(repository, factory, { workerId: "review-worker", leaseMs: 60_000, heartbeatMs: 0 });
+  await worker.workOnce();
+  const waiting = await service.get(creator.id, created.run.id);
+  await service.submitAnswers(creator.id, created.run.id, {
+    expectedVersion: waiting.version,
+    submissionId: "review-answer-1",
+    questionBatchId: waiting.questionBatchId!,
+    answers: waiting.pendingQuestions.map((question) => ({ questionId: question.id, answer: `Reference ${question.id}` }))
+  });
+  await worker.workOnce();
+  const ready = await service.get(creator.id, created.run.id);
+  assert.equal(ready.status, "ready", ready.lastError);
+  const projection = await service.getReview(creator.id, created.run.id);
+  assert.equal(projection.blind.sealed, true);
+  assert.equal(projection.blind.total, 1);
+  assert.equal(projection.cases.length, 2);
+  const target = projection.cases[0]!;
+  const accepted = await service.review(creator.id, created.run.id, {
+    action: "accept",
+    caseId: target.id,
+    caseDigest: target.caseDigest,
+    candidateDigest: projection.candidateDigest,
+    expectedVersion: projection.version
+  }, "review-accept-1");
+  assert.equal(accepted.review.cases.find((item) => item.id === target.id)?.status, "accepted");
+  const replay = await service.review(creator.id, created.run.id, {
+    action: "accept",
+    caseId: target.id,
+    caseDigest: target.caseDigest,
+    candidateDigest: projection.candidateDigest,
+    expectedVersion: projection.version
+  }, "review-accept-1");
+  assert.equal(replay.review.cases.find((item) => item.id === target.id)?.status, "accepted");
+  const correctionTarget = projection.cases.find((item) => item.id !== target.id)!;
+  const corrected = await service.review(creator.id, created.run.id, {
+    action: "correct",
+    caseId: correctionTarget.id,
+    caseDigest: correctionTarget.caseDigest,
+    candidateDigest: projection.candidateDigest,
+    expectedVersion: projection.version,
+    correction: "Return one finished recommendation.",
+    why: "The result must be decisive and directly usable."
+  }, "review-correction-1");
+  assert.ok(corrected.nextRun?.id);
+  assert.notEqual(corrected.nextRun?.revisionId, ready.revisionId);
+  const nextStored = await repository.getForCreator(creator.id, corrected.nextRun!.id);
+  assert.equal(nextStored?.input.reviewContext?.mode, "correction");
+  assert.equal(nextStored?.input.reviewContext?.sourceRunId, created.run.id);
+  await worker.workOnce();
+  const correctedReady = await service.get(creator.id, corrected.nextRun!.id);
+  assert.equal(correctedReady.status, "ready", correctedReady.lastError);
+  assert.equal(correctedReady.candidate?.version, (ready.candidate?.version ?? 0) + 1);
+  await assert.rejects(
+    () => service.review(creator.id, created.run.id, {
+      action: "accept",
+      caseId: target.id,
+      caseDigest: target.caseDigest,
+      candidateDigest: "sha256:" + "0".repeat(64),
+      expectedVersion: projection.version
+    }, "review-stale-1"),
+    (error: unknown) => error instanceof CreatorFactoryRepositoryError && error.code === "version_conflict"
+  );
+});
+
+test("held-out review confirmation promotes the sealed case without restarting Creator intake", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-factory-heldout-review-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const repository = new InMemoryCreatorFactoryRepository();
+  const graph = new InMemoryDistillationGraphStore();
+  const service = new CreatorFactoryService(repository, root, undefined, undefined, graph);
+  const creator = { id: "11111111-1111-4111-8111-111111111111", name: "Blind Review Creator" };
+  const task = await service.createTask(creator.id, { name: "Blind review method", brief: "Return one finished recommendation." });
+  const document = await service.createSourceDocument(creator.id, {
+    taskId: task.id,
+    displayName: "method.md",
+    mediaType: "text/markdown",
+    bytes: Buffer.from("# Method\nChoose one supported recommendation.\n", "utf8")
+  });
+  const created = await service.create(creator, createRequest({
+    taskId: task.id,
+    taskName: task.name,
+    taskBrief: task.brief,
+    sources: undefined,
+    sourceDocumentIds: [document.id],
+    config: { developmentQuestions: 2, heldoutQuestions: 1, maxCorpusRevisions: 3 }
+  }), "heldout-review-run-1");
+  let questionRound = 0;
+  let heldoutFailureEmitted = false;
+  const promptRunner = async (call: FactoryPromptCall): Promise<string> => {
+    if (call.purpose === "eval.generate_questions") {
+      questionRound += 1;
+      const count = Number(/Question count:\s*(\d+)/.exec(call.prompt)?.[1]);
+      return Array.from({ length: count }, (_, index) => [
+        `## Q${index + 1}`,
+        "### Question",
+        `Write customer result ${questionRound}-${index + 1}.`,
+        "### Why this question",
+        "It requires a concrete choice.",
+        "### Leakage group",
+        `review-group-${questionRound}-${index + 1}`
+      ].join("\n")).join("\n\n");
+    }
+    if (call.purpose === "eval.judge_result" && call.prompt.includes("HELDOUT_FAIL") && !heldoutFailureEmitted) {
+      heldoutFailureEmitted = true;
+      return "## Verdict\nFAIL\n## Diagnosis\nThe sealed case exposed a missing boundary.\n## Few-shot candidate\nNone\n## Corpus reflection\nMake the boundary explicit.";
+    }
+    return passingPromptRunner(call);
+  };
+  const factory = new CreatorFactory(root, promptRunner, async (execution) => `Customer-ready result for ${execution.question}`, { model: { provider: "test", model: "heldout-review" }, graphStore: graph });
+  const worker = new CreatorFactoryWorker(repository, factory, { workerId: "heldout-review-worker", leaseMs: 60_000, heartbeatMs: 0 });
+  await worker.workOnce();
+  const waiting = await service.get(creator.id, created.run.id);
+  const heldoutId = [...waiting.pendingQuestions]
+    .map((question, index) => ({ question, index }))
+    .sort((left, right) => createHash("sha256").update(`${created.run.id}:review-group-1-${left.index + 1}`).digest("hex").localeCompare(createHash("sha256").update(`${created.run.id}:review-group-1-${right.index + 1}`).digest("hex")))
+    .at(2)?.question.id;
+  assert.ok(heldoutId);
+  await service.submitAnswers(creator.id, created.run.id, {
+    expectedVersion: waiting.version,
+    submissionId: "heldout-review-answer-1",
+    questionBatchId: waiting.questionBatchId!,
+    answers: waiting.pendingQuestions.map((question) => ({ questionId: question.id, answer: question.id === heldoutId ? "HELDOUT_FAIL" : `Reference ${question.id}` }))
+  });
+  await worker.workOnce();
+  const paused = await service.get(creator.id, created.run.id);
+  assert.equal(paused.stage, "review_required");
+  const review = await service.getReview(creator.id, created.run.id);
+  assert.equal(review.blind.failed, 1);
+  assert.equal(review.blind.needsCreatorAction, true);
+  assert.equal(JSON.stringify(review).includes("HELDOUT_FAIL"), false);
+  const next = await service.review(creator.id, created.run.id, {
+    action: "heldout_correction",
+    candidateDigest: review.candidateDigest,
+    expectedVersion: review.version,
+    correction: "Confirmed the sealed failure and promoted its original Creator reference.",
+    why: "A sealed failure must become a known case before it can influence the next Corpus."
+  }, "heldout-review-confirm-1");
+  assert.ok(next.nextRun?.id);
+  await worker.workOnce();
+  const nextStored = await repository.getForCreator(creator.id, next.nextRun!.id);
+  assert.equal(nextStored?.state?.stage, "awaiting_creator_answers");
+  assert.equal(nextStored?.state?.pendingQuestionBatch?.purpose, "replacement_heldout");
+  assert.equal(nextStored?.state?.replacementHeldoutNeeded, 1);
+  const promoted = parseQaSet(await new FactoryFileStore(root, next.nextRun!.id).readArtifact(nextStored!.state!.artifacts.regressionSet!));
+  assert.equal(promoted.some((row) => row.answer.includes("HELDOUT_FAIL")), true);
 });
 
 test("a Distillation Task keeps one Product identity across revisions", async (t) => {

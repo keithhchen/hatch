@@ -130,6 +130,15 @@ test("Theme Lab edits the same token knobs used by the shared CSS", () => {
     "--hatch-font-display",
     "--hatch-font-ui",
     "--hatch-font-pill",
+    "--hatch-type-micro",
+    "--hatch-type-caption",
+    "--hatch-type-label",
+    "--hatch-type-control",
+    "--hatch-type-body",
+    "--hatch-type-reading",
+    "--hatch-type-emphasis",
+    "--hatch-type-title",
+    "--hatch-type-display",
     "--hatch-display-tracking",
     "--hatch-display-leading",
     "--hatch-radius-control",
@@ -149,6 +158,10 @@ test("Theme Lab edits the same token knobs used by the shared CSS", () => {
 
   assert.match(tokens, /--hatch-display-tracking:\s*-.06em/);
   assert.match(tokens, /--hatch-display-leading:\s*\.86/);
+  assert.match(tokens, /--hatch-type-label:\s*0\.75rem/);
+  assert.match(tokens, /--hatch-type-control:\s*0\.8125rem/);
+  assert.match(tokens, /--hatch-type-body:\s*0\.875rem/);
+  assert.doesNotMatch(sharedCss, /font-size:\s*[0-9]+(?:\.[0-9]+)?(?:px|rem)/);
 
   assert.match(tokens, /--hatch-ui-surface-window:\s*var\(--hatch-atmosphere-base\)/);
 

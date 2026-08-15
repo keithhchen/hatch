@@ -132,6 +132,35 @@ export async function handleCreatorFactoryHttp(
       return { status: 202, body: publicView(view) };
     }
 
+    const reviewMatch = request.pathname.match(/^\/v1\/creator\/factory-runs\/([^/]+)\/review$/);
+    if (reviewMatch && request.method === "GET") {
+      return { status: 200, body: reviewView(await service.getReview(request.creator.id, decodeURIComponent(reviewMatch[1]!))) };
+    }
+    if (reviewMatch && (request.method === "POST" || request.method === "PUT")) {
+      const body = request.body ?? {};
+      const action = typeof body.action === "string" ? body.action : "";
+      if (!action) throw new Error("action is required for Creator Review");
+      const idempotencyKey = request.headers["idempotency-key"] ?? "";
+      const result = await service.review(
+        request.creator.id,
+        decodeURIComponent(reviewMatch[1]!),
+        {
+          action: action as import("./service.js").CreatorReviewAction,
+          ...(typeof body.case_id === "string" ? { caseId: body.case_id } : {}),
+          candidateDigest: typeof body.candidate_digest === "string" ? body.candidate_digest : "",
+          ...(typeof body.case_digest === "string" ? { caseDigest: body.case_digest } : {}),
+          ...(numberField(body.expected_version) === undefined ? {} : { expectedVersion: numberField(body.expected_version)! }),
+          ...(typeof body.correction === "string" ? { correction: body.correction } : {}),
+          ...(typeof body.why === "string" ? { why: body.why } : {})
+        },
+        idempotencyKey
+      );
+      return { status: result.nextRun ? 202 : 200, body: {
+        review: reviewView(result.review),
+        ...(result.nextRun ? { next_run: publicView(result.nextRun) } : {})
+      } };
+    }
+
     const releaseMatch = request.pathname.match(/^\/v1\/creator\/factory-runs\/([^/]+)\/release$/);
     if (releaseMatch && request.method === "POST") {
       const body = request.body ?? {};
@@ -316,6 +345,38 @@ function publicView(view: CreatorFactoryRunView): Record<string, unknown> {
     ...(view.lastError ? { last_error: view.lastError } : {}),
     created_at: view.createdAt,
     updated_at: view.updatedAt
+  };
+}
+
+function reviewView(value: Awaited<ReturnType<CreatorFactoryService["getReview"]>>): Record<string, unknown> {
+  return {
+    run_id: value.runId,
+    revision_id: value.revisionId,
+    version: value.version,
+    candidate_digest: value.candidateDigest,
+    candidate_version: value.candidateVersion,
+    cases: value.cases.map((item) => ({
+      id: item.id,
+      set: item.set,
+      question: item.question,
+      creator_reference: item.creatorReference,
+      candidate_output: item.candidateOutput,
+      verdict: item.verdict,
+      diagnosis: item.diagnosis,
+      case_digest: item.caseDigest,
+      candidate_digest: item.candidateDigest,
+      status: item.status,
+      ...(item.reviewAction ? { review_action: item.reviewAction } : {})
+    })),
+    blind: {
+      sealed: true,
+      total: value.blind.total,
+      passed: value.blind.passed,
+      failed: value.blind.failed,
+      needs_creator_action: value.blind.needsCreatorAction
+    },
+    unresolved_count: value.unresolvedCount,
+    release_ready: value.releaseReady
   };
 }
 

@@ -92,11 +92,12 @@ describe("desktop system appearance contract", () => {
 
   it("keeps long-form Markdown on the measured reading rhythm", () => {
     expect(stylesheet).toMatch(
-      /\.markdown-body\s*\{[\s\S]*?font-size:\s*16px;[\s\S]*?line-height:\s*26px;/
+      /\.markdown-body\s*\{[\s\S]*?font-size:\s*var\(--hatch-type-reading\);[\s\S]*?line-height:\s*1\.72;/
     );
     expect(stylesheet).toMatch(
-      /\.markdown-body h1\s*\{[\s\S]*?font-size:\s*24px;[\s\S]*?line-height:\s*var\(--hatch-display-leading\);/
+      /\.markdown-body h1\s*\{[\s\S]*?font-size:\s*var\(--hatch-type-heading\);[\s\S]*?line-height:\s*var\(--hatch-display-leading\);/
     );
+    expect(stylesheet).not.toMatch(/line-height:\s*[0-9]+(?:\.[0-9]+)?px/);
     expect(stylesheet).toMatch(
       /\.markdown-body h1,\s*\.markdown-body h2\s*\{[\s\S]*?font-family:\s*var\(--hatch-font-display\);[\s\S]*?font-weight:\s*400;/
     );
@@ -110,6 +111,12 @@ describe("desktop system appearance contract", () => {
       /\.markdown-body hr\s*\{[\s\S]*?border-top:\s*1px solid[^;]*15%[^;]*;[\s\S]*?margin:\s*28px 0;/
     );
     expect(stylesheet).not.toMatch(/\.markdown-table-scroll\s*\{[^}]*border:\s*1px/);
+  });
+
+  it("consumes the approved shared typography tokens", () => {
+    expect(stylesheet).not.toMatch(/font-size:\s*[0-9]+(?:\.[0-9]+)?(?:px|rem)/);
+    expect(stylesheet).not.toMatch(/font:\s*\d+\s+[0-9]+(?:\.[0-9]+)?px/);
+    expect(stylesheet).toMatch(/var\(--hatch-type-(?:label|control|body|reading|title)\)/);
   });
 
   it("softens only newly mounted streaming Markdown blocks", () => {

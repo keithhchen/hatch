@@ -5,6 +5,7 @@ export type FactoryStage =
   | "evaluating_development"
   | "evaluating_regression"
   | "evaluating_heldout"
+  | "review_required"
   | "ready"
   | "needs_attention";
 
@@ -306,6 +307,8 @@ export type FactoryRunState = {
     regressionSet?: ArtifactRef;
     heldoutRounds: ArtifactRef[];
     latestHeldoutEvaluation?: ArtifactRef;
+    /** Immutable Creator review/correction context carried into a revision. */
+    reviewContext?: ArtifactRef;
   };
   pendingQuestionBatch?: {
     purpose: "initial" | "replacement_heldout";
@@ -320,6 +323,12 @@ export type FactoryRunState = {
   /** Optional for durable states created before per-QA checkpointing. */
   activeQaEvaluation?: ActiveQaEvaluationScope;
   retryStage?: Exclude<FactoryStage, "ready" | "needs_attention" | "awaiting_creator_answers">;
+  /** Sealed held-out failures pause here until the Creator supplies a correction. */
+  pendingReview?: {
+    kind: "heldout_failure";
+    report: ArtifactRef;
+    failedCount: number;
+  };
   lastError?: string;
   createdAt: string;
   updatedAt: string;
@@ -346,6 +355,12 @@ export type FactoryStartInput = {
   sourceSnapshotId?: string;
   /** Frozen source-scope proof. Legacy inline-source callers omit this. */
   sourceManifest?: FactorySourceManifest;
+  /** Identity-only input for a correction/review-created revision. */
+  reviewContext?: {
+    sourceRunId: string;
+    artifact: ArtifactRef;
+    mode: "correction" | "heldout_correction" | "question_replacement";
+  };
   config?: Partial<FactoryRunState["config"]>;
 };
 

@@ -1,0 +1,19 @@
+.creator-review-page { display: grid; gap: 24px; max-width: 1100px; }
+.creator-review-topbar { display: flex; justify-content: space-between; align-items: center; }
+.creator-review-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.creator-review-summary > div { display: grid; gap: 5px; padding: 18px; border: 1px solid var(--hatch-ui-border-soft, var(--hatch-border-subtle)); border-radius: 16px; background: var(--hatch-ui-surface-resting, var(--hatch-panel)); }
+.creator-review-summary span, .creator-review-summary small, .creator-review-eyebrow, .creator-review-case label, .creator-review-diagnosis label { color: var(--hatch-text-secondary); font-size: var(--hatch-type-caption); text-transform: uppercase; letter-spacing: .08em; }
+.creator-review-summary strong { font-size: var(--hatch-type-heading); }
+.creator-review-summary small { text-transform: none; letter-spacing: 0; }
+.creator-review-cases { display: grid; gap: 16px; }
+.creator-review-case, .creator-review-blind, .creator-review-empty { display: grid; gap: 18px; padding: 24px; border: 1px solid var(--hatch-ui-border-soft, var(--hatch-border-subtle)); border-radius: 20px; background: var(--hatch-ui-surface-resting, var(--hatch-panel)); }
+.creator-review-case-heading { display: flex; justify-content: space-between; gap: 18px; align-items: flex-start; }
+.creator-review-case h2, .creator-review-blind h2, .creator-review-empty h2 { margin: 6px 0 0; font-size: var(--hatch-type-heading); line-height: 1.25; }
+.creator-review-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.creator-review-columns > div, .creator-review-diagnosis { padding: 16px; border-radius: 13px; background: var(--hatch-ui-selection, #eee7dc); }
+.creator-review-columns p, .creator-review-diagnosis p, .creator-review-blind p, .creator-review-empty p { margin: 8px 0 0; color: var(--hatch-text-secondary); white-space: pre-wrap; line-height: 1.6; }
+.creator-review-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.creator-review-correction { display: grid; gap: 12px; padding-top: 6px; }
+.creator-review-blind { grid-template-columns: 1fr auto; align-items: center; background: color-mix(in srgb, var(--hatch-ui-selection, #eee7dc) 54%, transparent); }
+.creator-review-blind .creator-review-eyebrow { display: block; }
+@media (max-width: 760px) { .creator-review-summary, .creator-review-columns { grid-template-columns: 1fr; } .creator-review-blind { grid-template-columns: 1fr; } }

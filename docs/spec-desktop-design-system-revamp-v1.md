@@ -89,6 +89,36 @@ Date picker 不纳入共享自绘组件；若 Desktop 未来需要日期输入�
 
 ### Typography
 
+Typography 的唯一实现链路是：
+
+`设计规范（语义） → packages/brand/tokens.css（数值） → @hatch/ui（组件实现） → Web / Desktop / Storybook（消费者）`
+
+设计规范是人的契约，不是运行时变量；`@hatch/ui` 是组件 reference implementation，不能把它的 CSS 复制到产品里。新增字号角色时，必须先更新规范和 brand token，再由 HUI 与产品消费者使用；不得为了兼容旧 CSS 保留未批准的局部字号。
+
+Web 页面自己的 layout CSS 也只能消费这些 semantic tokens；它可以定义页面组合和响应式关系，但不能再建立第二套局部字号数值。Storybook 的 fixture 可以调节 token，但不能复制 HUI primitive 的实现。
+
+共享字号使用 `rem`：
+
+| Token | Value | 用途 |
+| --- | ---: | --- |
+| `--hatch-type-micro` | 0.625rem | 仅键盘提示、密集计数等刻意压缩的元信息 |
+| `--hatch-type-caption` | 0.6875rem | 次要元信息、脚注、时间戳 |
+| `--hatch-type-label` | 0.75rem | label、pill、status、导航、表头、头像 initials |
+| `--hatch-type-control` | 0.8125rem | button、select、form control |
+| `--hatch-type-body` | 0.875rem | 普通 UI 正文 |
+| `--hatch-type-reading` | 0.9375rem | Desktop transcript/editorial reading |
+| `--hatch-type-emphasis` | 1rem | 强调正文 |
+| `--hatch-type-subheading` | 1.125rem | 内容小标题 |
+| `--hatch-type-subtitle` | 1.25rem | 次级标题 |
+| `--hatch-type-heading` | 1.5rem | 内容标题 |
+| `--hatch-type-title` | 1.75rem | 页面和组件标题 |
+| `--hatch-type-display-compact` | 2rem | 紧凑 display |
+| `--hatch-type-display` | 2.25rem | 主 display |
+| `--hatch-type-display-hero` | 4rem | 欢迎页/hero display 上限 |
+| `--hatch-type-code` | 0.8125rem | code 内容 |
+
+`em` 只用于组件内部需要相对父级的局部关系；`line-height` 使用无单位数字；边框、icon 和窗口几何才使用 `px`。
+
 - Instrument Serif 只用于真正的 display title、欢迎语、内容标题和有意义的 editorial heading。
 - UI 操作与正文使用 macOS system sans；Windows 使用对应 system sans fallback。
 - Pill、badge、status label 使用 Inter，字重与字面宽度由共享 token 控制。

@@ -15,11 +15,23 @@
   --hatch-font-pill: "Inter Variable", Inter, -apple-system, BlinkMacSystemFont, sans-serif;
   --hatch-font-mono: var(--hatch-font-pill);
 
-  --hatch-type-label: 12px;
-  --hatch-type-control: 13px;
-  --hatch-type-body: 14px;
-  --hatch-type-emphasis: 16px;
-  --hatch-type-title: 28px;
+  /* Canonical typography scale. Product CSS consumes semantic roles, never
+   * local pixel values. rem keeps the scale responsive to root text sizing. */
+  --hatch-type-micro: 0.625rem;
+  --hatch-type-caption: 0.6875rem;
+  --hatch-type-label: 0.75rem;
+  --hatch-type-control: 0.8125rem;
+  --hatch-type-body: 0.875rem;
+  --hatch-type-reading: 0.9375rem;
+  --hatch-type-emphasis: 1rem;
+  --hatch-type-subheading: 1.125rem;
+  --hatch-type-subtitle: 1.25rem;
+  --hatch-type-heading: 1.5rem;
+  --hatch-type-title: 1.75rem;
+  --hatch-type-display-compact: 2rem;
+  --hatch-type-display: 2.25rem;
+  --hatch-type-display-hero: 4rem;
+  --hatch-type-code: 0.8125rem;
   /* The first Hatch studies used a narrow, tall editorial cadence. Keep this
    * shared instead of letting each surface invent its own Serif width. */
   --hatch-display-tracking: -.06em;

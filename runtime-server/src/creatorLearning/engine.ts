@@ -35,6 +35,7 @@ import { validateFactorySourceManifest } from "./sourceScope.js";
 import type {
   ActiveQaEvaluationScope,
   ArtifactRef,
+  CorpusCandidate,
   CreatorAnswerInput,
   CreatorQa,
   CreatorQuestion,
@@ -109,6 +110,68 @@ export class CreatorFactory {
       ...(startInput.revisionId ? { revisionId: startInput.revisionId } : {})
     });
     await store.initialize();
+    let reviewContextArtifact: ArtifactRef | undefined;
+    let promotedHeldoutQa: CreatorQa[] = [];
+    let seededReviewState: FactoryRunState | undefined;
+    let seededEvidence: ArtifactRef | undefined;
+    let seededDevelopmentQa: ArtifactRef | undefined;
+    let seededRegressionSet: ArtifactRef | undefined;
+    let seededHeldoutRounds: ArtifactRef[] = [];
+    let seededCorpusCandidates: CorpusCandidate[] = [];
+    if (startInput.reviewContext) {
+      const sourceRun = startInput.reviewContext.sourceRunId.trim();
+      if (!sourceRun || sourceRun === store.runId) throw new Error("Review context must reference a previous Factory run");
+      const sourceStore = this.fileStore(sourceRun, control);
+      const reviewText = await sourceStore.readArtifact(startInput.reviewContext.artifact);
+      // Held-out context stays sealed until the Creator explicitly confirms
+      // the failure through a new revision command.
+      reviewContextArtifact = await store.writeArtifact(
+        `review/context-${shortId()}.json`,
+        reviewText,
+        startInput.reviewContext.mode === "heldout_correction"
+      );
+      if (startInput.reviewContext.mode === "heldout_correction") {
+        promotedHeldoutQa = parsePromotedHeldoutCases(reviewText);
+      }
+      // A correction is already a Creator decision. Re-asking the entire
+      // reference questionnaire would make the Review command look like a
+      // new intake and would lose the Corpus n-1 continuity promised by the
+      // workflow. Seed only the prior, non-secret checkpoints; every copied
+      // artifact gets a new immutable identity in this revision.
+      if (startInput.reviewContext.mode !== "question_replacement") {
+        seededReviewState = await sourceStore.loadState();
+        const copy = async (reference: ArtifactRef, relativePath: string, sealed = Boolean(reference.sealed)): Promise<ArtifactRef> => (
+          store.writeArtifact(relativePath, await sourceStore.readArtifact(reference), sealed)
+        );
+        if (seededReviewState.artifacts.evidence) {
+          seededEvidence = await copy(seededReviewState.artifacts.evidence, "evidence/reused-from-parent.md");
+        }
+        if (seededReviewState.artifacts.developmentQa) {
+          seededDevelopmentQa = await copy(seededReviewState.artifacts.developmentQa, "qa/development-reused-from-parent.md");
+        }
+        if (seededReviewState.artifacts.regressionSet) {
+          seededRegressionSet = await copy(seededReviewState.artifacts.regressionSet, "qa/regression-reused-from-parent.md");
+        }
+        seededHeldoutRounds = await Promise.all(seededReviewState.artifacts.heldoutRounds.map((reference, index) => (
+          copy(reference, `qa/heldout-reused-round-${index + 1}.md`, true)
+        )));
+        seededCorpusCandidates = await Promise.all(seededReviewState.artifacts.corpusCandidates.map(async (candidate) => ({
+          version: candidate.version,
+          systemInstructions: await store.writeCandidate(
+            `parent-v${candidate.version}/agent-corpus/instructions/system.md`,
+            await sourceStore.readArtifact(candidate.systemInstructions)
+          ),
+          compileRecord: await store.writeCandidate(
+            `parent-v${candidate.version}/compile-record.md`,
+            await sourceStore.readArtifact(candidate.compileRecord)
+          ),
+          reason: candidate.reason,
+          ...(candidate.completeness === undefined
+            ? (candidate.agentCorpus ? { completeness: "PASS" as const } : {})
+            : { completeness: candidate.completeness })
+        })));
+      }
+    }
     const taskBrief = await store.writeArtifact("input/task-brief.md", startInput.taskBrief);
     const sourceManifest = sourceManifestText
       ? await store.writeArtifact(
@@ -124,6 +187,17 @@ export class CreatorFactory {
       sourceImages.push({ sourceId: source.id, mediaType: source.image.mediaType, artifact });
     }
     const now = new Date().toISOString();
+    const config = {
+      developmentQuestions: startInput.config?.developmentQuestions ?? 6,
+      heldoutQuestions: startInput.config?.heldoutQuestions ?? 3,
+      // A production run can need one revision for deterministic repair and
+      // several more for Creator-reference calibration. Keep the explicit
+      // per-run override authoritative, but give new runs enough bounded
+      // room to converge before requiring a new source/correction revision.
+      maxCorpusRevisions: startInput.config?.maxCorpusRevisions ?? 6
+    };
+    const directReviewRevision = Boolean(seededReviewState && seededEvidence && seededDevelopmentQa);
+    const heldoutCorrection = startInput.reviewContext?.mode === "heldout_correction";
     let state: FactoryRunState = {
       contractVersion: "1",
       runId: store.runId,
@@ -138,31 +212,32 @@ export class CreatorFactory {
       ...(startInput.revisionNumber === undefined ? {} : { revisionNumber: startInput.revisionNumber }),
       ...(startInput.parentRevisionId ? { parentRevisionId: startInput.parentRevisionId } : {}),
       ...(startInput.sourceSnapshotId ? { sourceSnapshotId: startInput.sourceSnapshotId } : {}),
-      stage: "extracting_evidence",
-      config: {
-        developmentQuestions: startInput.config?.developmentQuestions ?? 6,
-        heldoutQuestions: startInput.config?.heldoutQuestions ?? 3,
-        // A production run can need one revision for deterministic repair and
-        // several more for Creator-reference calibration. Keep the explicit
-        // per-run override authoritative, but give new runs enough bounded
-        // room to converge before requiring a new source/correction revision.
-        maxCorpusRevisions: startInput.config?.maxCorpusRevisions ?? 6
-      },
+      stage: directReviewRevision ? "compiling_corpus" : "extracting_evidence",
+      config,
       artifacts: {
         taskBrief,
         sourcePacket,
         ...(sourceManifest ? { sourceManifest } : {}),
         ...(sourceImages.length ? { sourceImages } : {}),
-        corpusCandidates: [],
+        ...(seededEvidence ? { evidence: seededEvidence } : {}),
+        ...(seededDevelopmentQa ? { developmentQa: seededDevelopmentQa } : {}),
+        ...(reviewContextArtifact ? { reviewContext: reviewContextArtifact } : {}),
+        corpusCandidates: seededCorpusCandidates,
         evaluationRounds: [],
-        heldoutRounds: []
+        heldoutRounds: seededHeldoutRounds,
+        ...(seededRegressionSet ? { regressionSet: seededRegressionSet } : {})
       },
-      replacementHeldoutNeeded: 0,
+      replacementHeldoutNeeded: heldoutCorrection ? config.heldoutQuestions : 0,
       corpusRevisionCount: 0,
-      developmentEvaluated: false,
+      developmentEvaluated: directReviewRevision,
+      ...(directReviewRevision ? { compileReason: heldoutCorrection ? "heldout_failure" : "development_failure" } : {}),
+      ...(reviewContextArtifact ? { calibrationFeedback: [reviewContextArtifact] } : {}),
       createdAt: now,
       updatedAt: now
     };
+    if (promotedHeldoutQa.length) {
+      state.artifacts.regressionSet = await this.mergeRegression(store, state.artifacts.regressionSet, promotedHeldoutQa);
+    }
     await store.saveState(state);
     await store.recordEvent("factory_started", {
       stage: state.stage,
@@ -218,7 +293,7 @@ export class CreatorFactory {
         true
       );
       state.artifacts.heldoutRounds.push(heldout);
-      state.compileReason = "initial";
+      state.compileReason = state.artifacts.reviewContext ? "development_failure" : "initial";
       state.stage = "compiling_corpus";
     } else {
       const heldout = await store.writeArtifact(
@@ -249,7 +324,7 @@ export class CreatorFactory {
 
     try {
       await this.verifyDurableSourceSnapshot(store, state);
-      if (state.stage === "awaiting_creator_answers" || state.stage === "ready" || state.stage === "needs_attention") {
+      if (state.stage === "awaiting_creator_answers" || state.stage === "review_required" || state.stage === "ready" || state.stage === "needs_attention") {
         return state;
       }
       for (let step = 0; step < 100; step += 1) {
@@ -260,7 +335,7 @@ export class CreatorFactory {
         else if (state.stage === "evaluating_heldout") state = await this.evaluateHeldout(store, state);
         else return state;
         await store.saveState(state);
-        if (state.stage === "awaiting_creator_answers" || state.stage === "ready" || state.stage === "needs_attention") {
+        if (state.stage === "awaiting_creator_answers" || state.stage === "review_required" || state.stage === "ready" || state.stage === "needs_attention") {
           const checkpoint = await store.loadState();
           await this.verifyDurableSourceSnapshot(store, checkpoint);
           return checkpoint;
@@ -874,19 +949,18 @@ export class CreatorFactory {
     );
     const failures = evaluations.filter((item) => !item.verdict.pass).map((item) => item.qa);
     if (failures.length > 0) {
-      const promotedReport = await store.writeArtifact(
-        `evaluations/promoted-heldout-failures-round-${round}-${shortId()}.md`,
-        renderEvaluationReport(
-          `Held-out failures promoted to Regression — round ${round}`,
-          evaluations.filter((item) => !item.verdict.pass)
-        )
-      );
-      state.artifacts.evaluationRounds.push(promotedReport);
-      state.calibrationFeedback = [promotedReport];
-      state.artifacts.regressionSet = await this.mergeRegression(store, state.artifacts.regressionSet, failures);
-      state.replacementHeldoutNeeded = state.config.heldoutQuestions;
-      state.compileReason = "heldout_failure";
-      state.stage = "compiling_corpus";
+      // Held-out is sealed evaluation data. A blind failure must pause for an
+      // explicit Creator correction before it can enter the Known/Regression
+      // set; silently promoting it would turn the blind set into development.
+      state.artifacts.evaluationRounds.push(sealedReport);
+      state.pendingReview = {
+        kind: "heldout_failure",
+        // Review promotion consumes the sealed machine-readable evaluation
+        // asset; the human report remains in evaluationRounds for audit.
+        report: state.artifacts.latestHeldoutEvaluation!,
+        failedCount: failures.length
+      };
+      state.stage = "review_required";
     } else {
       const latest = state.artifacts.corpusCandidates.at(-1);
       if (!latest) throw new Error("Held-out passed without a Corpus candidate");
@@ -2177,6 +2251,31 @@ function renderEvaluationAsset(kind: "synthetic_qa" | "held_out", rows: QaEvalua
   }, null, 2)}\n`;
 }
 
+function parsePromotedHeldoutCases(raw: string): CreatorQa[] {
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); } catch { throw new Error("Held-out review context is not valid JSON"); }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Held-out review context is invalid");
+  const row = parsed as Record<string, unknown>;
+  if (row.contract_version !== "1" || row.evaluation_type !== "held_out" || !Array.isArray(row.cases)) {
+    throw new Error("Held-out review context does not match the evaluation contract");
+  }
+  return row.cases.flatMap((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const item = value as Record<string, unknown>;
+    if (item.verdict !== "FAIL") return [];
+    if (typeof item.id !== "string" || typeof item.question !== "string" || typeof item.creator_reference_answer !== "string") {
+      throw new Error("Held-out review context contains an invalid failure case");
+    }
+    return [{
+      id: item.id,
+      question: item.question,
+      ...(typeof item.intent === "string" ? { intent: item.intent } : {}),
+      ...(typeof item.leakage_group === "string" ? { leakageGroup: item.leakage_group } : {}),
+      answer: item.creator_reference_answer
+    }];
+  });
+}
+
 function referenceEvaluationAsset(kind: "synthetic_qa", rows: CreatorQa[]): unknown {
   if (rows.length === 0) throw new Error(`Agent Corpus ${kind} reference evaluation cannot be empty`);
   return {
@@ -2250,4 +2349,15 @@ function validateStartInput(input: FactoryStartInput): void {
     }
   }
   if (input.sourceManifest) validateFactorySourceManifest(input.sourceManifest, input.sources);
+  if (input.reviewContext) {
+    if (!input.reviewContext.sourceRunId.trim() || input.reviewContext.sourceRunId === input.runId) {
+      throw new Error("reviewContext.sourceRunId must reference a previous run");
+    }
+    if (!["correction", "heldout_correction", "question_replacement"].includes(input.reviewContext.mode)) {
+      throw new Error("reviewContext.mode is invalid");
+    }
+    if (!input.reviewContext.artifact.path || !/^sha256:[a-f0-9]{64}$/.test(input.reviewContext.artifact.sha256)) {
+      throw new Error("reviewContext.artifact must be an immutable artifact reference");
+    }
+  }
 }

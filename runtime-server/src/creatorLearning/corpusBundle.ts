@@ -210,7 +210,10 @@ function collisionSafeCandidateRoot(candidateRoot: string, plan: Omit<BundlePlan
 }
 
 function isImmutableObjectCollision(error: unknown): boolean {
-  return error instanceof Error && error.message.includes("Immutable object key already contains different bytes:");
+  return error instanceof Error && (
+    error.message.includes("Immutable object key already contains different bytes:")
+    || error.message.includes("Object key ") && error.message.includes("is already bound to another immutable Artifact")
+  );
 }
 
 function validateBundleInput(input: AgentCorpusBundleInput): BundlePlan {

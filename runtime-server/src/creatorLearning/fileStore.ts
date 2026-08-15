@@ -473,6 +473,21 @@ export class FactoryFileStore {
         });
       }
     }
+    if (event === "heldout_evaluated" && details.nextStage === "review_required") {
+      await this.graphStore.appendEvent({
+        id: newGraphEventId(),
+        eventKey: `${eventKey}:correction_requested`,
+        taskId: context.taskId,
+        runId: context.runId,
+        ...(context.revisionId ? { revisionId: context.revisionId } : {}),
+        type: "correction_requested",
+        node: "calibration",
+        actor: "system",
+        parentEventIds: [graphEvent.id],
+        artifactIds: collectArtifactIds(details),
+        payload: { kind: "heldout_failure", failedCount: details.failures ?? 0 }
+      });
+    }
     if (event === "heldout_evaluated" && details.nextStage === "ready") {
       await this.graphStore.appendEvent({
         id: newGraphEventId(),
@@ -550,12 +565,13 @@ function artifactKind(relativePath: string): import("./distillationGraph.js").Ar
   if (relativePath.startsWith("input/")) return relativePath.includes("source") || relativePath.includes("images") ? "source_projection" : "source_snapshot";
   if (relativePath.includes("evaluations/")) return "evaluation_report";
   if (relativePath.includes("corpus") || relativePath.includes("agent-corpus")) return "corpus_bundle";
-  if (relativePath.includes("creator/")) return "correction";
+  if (relativePath.includes("creator/") || relativePath.includes("review/")) return "correction";
   if (relativePath.includes("trace") || relativePath.includes("executions/")) return "trace";
   return "llm_output";
 }
 
 function nodeForArtifact(relativePath: string): DistillationNodeKind {
+  if (relativePath.includes("review/") || relativePath.includes("correction")) return "calibration";
   if (relativePath.includes("evidence")) return "evidence";
   if (relativePath.includes("question") || relativePath.includes("qa/")) return "questions";
   if (relativePath.includes("evaluation") || relativePath.includes("heldout") || relativePath.includes("regression")) return "heldout_eval";
@@ -575,6 +591,10 @@ function mapGraphEvent(event: string, details: Record<string, unknown>): { type:
   if (event === "development_evaluated") return { type: "node_completed", node: "development_eval" };
   if (event === "regression_evaluated") return { type: "node_completed", node: "regression_eval" };
   if (event === "heldout_evaluated") return { type: "node_completed", node: "heldout_eval" };
+  if (event === "review_recorded") return { type: "review_recorded", node: "calibration" };
+  if (event === "question_rejected") return { type: "question_rejected", node: "questions" };
+  if (event === "judge_disputed") return { type: "judge_disputed", node: "calibration" };
+  if (event === "heldout_failure_confirmed") return { type: "heldout_failure_confirmed", node: "calibration" };
   if (event === "factory_needs_attention") return { type: "correction_requested", node: "calibration" };
   if (event === "llm_call_completed") return { type: "node_completed", node: nodeForPurpose(details.purpose) };
   return undefined;
@@ -586,6 +606,7 @@ function nodeForStage(value: unknown): DistillationNodeKind {
   if (value === "evaluating_development") return "development_eval";
   if (value === "evaluating_regression") return "regression_eval";
   if (value === "evaluating_heldout") return "heldout_eval";
+  if (value === "review_required") return "calibration";
   return "corpus";
 }
 

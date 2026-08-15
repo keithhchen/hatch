@@ -152,7 +152,7 @@ export class CreatorFactoryWorker {
     if (local.stage === "needs_attention" && local.retryStage) {
       return this.factory.retry(record.id, control);
     }
-    if (local.stage === "awaiting_creator_answers" || local.stage === "ready" || local.stage === "needs_attention") {
+    if (local.stage === "awaiting_creator_answers" || local.stage === "review_required" || local.stage === "ready" || local.stage === "needs_attention") {
       return local;
     }
     return this.factory.resume(record.id, control);

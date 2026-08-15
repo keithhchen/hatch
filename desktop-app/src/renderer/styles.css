@@ -140,7 +140,7 @@ h2 {
 
 .brand h1 {
   font-family: var(--hatch-font-display);
-  font-size: 28px;
+  font-size: var(--hatch-type-title);
   font-weight: 400;
   letter-spacing: var(--hatch-display-tracking);
   line-height: var(--hatch-display-leading);
@@ -151,7 +151,7 @@ h2 {
 .field span,
 .connection-status span {
   color: var(--hatch-text-secondary);
-  font-size: 12px;
+  font-size: var(--hatch-type-label);
 }
 
 .connection-card,
@@ -185,7 +185,7 @@ h2 {
   background: transparent;
   border: 0;
   color: var(--hatch-text-secondary);
-  font-size: 11px;
+  font-size: var(--hatch-type-caption);
   min-height: auto;
   padding: 5px;
   white-space: nowrap;
@@ -203,7 +203,7 @@ h2 {
   color: var(--hatch-accent);
   display: inline-flex;
   flex: 0 0 auto;
-  font-size: 12px;
+  font-size: var(--hatch-type-label);
   font-weight: 800;
   height: 34px;
   justify-content: center;
@@ -220,7 +220,7 @@ h2 {
 .profile-card div span,
 .agent-nav-item small {
   color: #69736d;
-  font-size: 11px;
+  font-size: var(--hatch-type-caption);
   margin-top: 2px;
 }
 
@@ -264,7 +264,7 @@ h2 {
 
 .connection-status strong {
   display: block;
-  font-size: 13px;
+  font-size: var(--hatch-type-control);
   margin-top: 2px;
   overflow-wrap: break-word;
 }
@@ -298,7 +298,7 @@ h2 {
 .settings-panel summary {
   color: #323936;
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--hatch-type-control);
   font-weight: 750;
 }
 
@@ -314,7 +314,7 @@ h2 {
 }
 
 .side-section h2 {
-  font-size: 13px;
+  font-size: var(--hatch-type-control);
 }
 
 .tool-list {
@@ -329,7 +329,7 @@ h2 {
   border-radius: 6px;
   color: #4b5550;
   font-family: var(--hatch-font-pill);
-  font-size: 11px;
+  font-size: var(--hatch-type-caption);
   padding: 5px 7px;
 }
 
@@ -352,7 +352,7 @@ h2 {
 
 .chat-header strong {
   display: block;
-  font-size: 13px;
+  font-size: var(--hatch-type-control);
   margin-top: 3px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -385,7 +385,7 @@ h2 {
 
 .chat-header .connection-recovery strong {
   color: #705628;
-  font-size: 11px;
+  font-size: var(--hatch-type-caption);
   margin: 0;
 }
 
@@ -444,7 +444,7 @@ h2 {
 
 .empty-kicker {
   color: #7a837e;
-  font-size: 12px;
+  font-size: var(--hatch-type-label);
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -452,19 +452,19 @@ h2 {
 
 .empty-thread h2 {
   color: #202522;
-  font-size: 32px;
+  font-size: var(--hatch-type-display-compact);
   letter-spacing: 0;
   line-height: 1.1;
   margin: 9px 0 10px;
 }
 
 .empty-thread p {
-  font-size: 15px;
+  font-size: var(--hatch-type-reading);
   line-height: 1.55;
 }
 
 .creator-avatar.large {
-  font-size: 16px;
+  font-size: var(--hatch-type-emphasis);
   height: 54px;
   margin-bottom: 12px;
   width: 54px;
@@ -503,12 +503,12 @@ h2 {
 .welcome-brand {
   align-items: center;
   display: flex;
-  font-size: 20px;
+  font-size: var(--hatch-type-subtitle);
   gap: 10px;
 }
 
 .welcome-brand .hatch-brand__wordmark {
-  font-size: 22px;
+  font-size: var(--hatch-type-heading);
   letter-spacing: var(--hatch-display-tracking);
 }
 
@@ -540,7 +540,7 @@ h2 {
 
 .status-card h1 {
   font-family: var(--hatch-font-display);
-  font-size: 36px;
+  font-size: var(--hatch-type-display);
   font-weight: 400;
   letter-spacing: var(--hatch-display-tracking);
   line-height: var(--hatch-display-leading);
@@ -558,7 +558,7 @@ h2 {
   border: 1px solid rgba(180, 71, 61, 0.18);
   border-radius: 8px;
   color: #9b4137 !important;
-  font-size: 13px;
+  font-size: var(--hatch-type-control);
   padding: 9px 11px;
 }
 
@@ -567,7 +567,7 @@ h2 {
   border: 1px solid #e2ca8d;
   border-radius: 9px;
   color: #705628;
-  font-size: 12px;
+  font-size: var(--hatch-type-label);
   padding: 9px 10px;
 }
 
@@ -622,14 +622,14 @@ h2 {
 
 .sign-in-form .field span {
   color: var(--hatch-ink);
-  font-size: 13px;
+  font-size: var(--hatch-type-control);
   font-weight: 650;
 }
 
 .sign-in-card h1 {
   font-family: var(--hatch-font-display);
   font-weight: 400;
-  font-size: 36px;
+  font-size: var(--hatch-type-display);
   letter-spacing: var(--hatch-display-tracking);
   line-height: var(--hatch-display-leading);
   margin: 0;
@@ -648,7 +648,7 @@ h2 {
 .eyebrow {
   color: var(--hatch-accent);
   font-family: var(--hatch-font-pill);
-  font-size: 12px;
+  font-size: var(--hatch-type-label);
   font-weight: 800;
   letter-spacing: .08em;
   text-transform: uppercase;
@@ -701,7 +701,7 @@ h2 {
 }
 
 .workspace-onboarding-card h2 {
-  font-size: 32px;
+  font-size: var(--hatch-type-display-compact);
   letter-spacing: var(--hatch-display-tracking);
   line-height: var(--hatch-display-leading);
 }
@@ -745,7 +745,7 @@ h2 {
 
 .workspace-picker-action {
   color: var(--hatch-accent);
-  font-size: 12px;
+  font-size: var(--hatch-type-label);
   margin-left: auto;
 }
 
@@ -756,7 +756,7 @@ h2 {
 
 .workspace-onboarding-status {
   color: var(--hatch-text-secondary);
-  font-size: 11px;
+  font-size: var(--hatch-type-caption);
   text-align: center;
 }
 
@@ -780,7 +780,7 @@ h2 {
 .recovery-banner div {
   display: grid;
   flex: 1;
-  font-size: 12px;
+  font-size: var(--hatch-type-label);
   gap: 2px;
 }
 
@@ -871,14 +871,14 @@ h2 {
 
 .delivery-receipt small {
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--hatch-type-label);
 }
 
 .assistant-activity-summary {
   align-items: center;
   color: var(--hatch-text-secondary);
   display: grid;
-  font-size: 14px;
+  font-size: var(--hatch-type-body);
   font-weight: 600;
   gap: 9px;
   grid-template-columns: 20px minmax(0, 1fr);
@@ -990,7 +990,7 @@ h2 {
 
 .turn-timing {
   color: var(--hatch-text-secondary);
-  font-size: 12px;
+  font-size: var(--hatch-type-label);
   margin: 2px 0 8px 18px;
 }
 
@@ -1045,8 +1045,8 @@ h2 {
 .markdown-body {
   color: var(--hatch-ink);
   font-family: inherit;
-  font-size: 16px;
-  line-height: 26px;
+  font-size: var(--hatch-type-reading);
+  line-height: 1.72;
   max-width: 100%;
   min-width: 0;
   overflow-wrap: break-word;
@@ -1101,26 +1101,26 @@ h2 {
 }
 
 .markdown-body h1 {
-  font-size: 24px;
+  font-size: var(--hatch-type-heading);
   line-height: var(--hatch-display-leading);
   margin: 0 0 8px;
 }
 
 .markdown-body h2 {
-  font-size: 20px;
+  font-size: var(--hatch-type-subtitle);
   line-height: var(--hatch-display-leading);
   margin: 16px 0 4px;
 }
 
 .markdown-body h3 {
-  font-size: 18px;
-  line-height: 28px;
+  font-size: var(--hatch-type-subheading);
+  line-height: 1.55;
   margin: 16px 0 4px;
 }
 
 .markdown-body h4 {
-  font-size: 16px;
-  line-height: 24px;
+  font-size: var(--hatch-type-emphasis);
+  line-height: 1.5;
   margin: 16px 0 0;
 }
 
@@ -1140,7 +1140,7 @@ h2 {
 .markdown-body blockquote {
   color: inherit;
   font-style: normal;
-  line-height: 24px;
+  line-height: 1.6;
   margin: 0 0 8px;
   padding: 8px 0 8px 24px;
   position: relative;
@@ -1158,7 +1158,7 @@ h2 {
 }
 
 .markdown-body blockquote p {
-  line-height: 24px;
+  line-height: 1.6;
   margin: 0 0 4px;
 }
 
@@ -1247,7 +1247,7 @@ h2 {
   background: var(--hatch-panel-muted);
   border-radius: 5px;
   font-family: var(--hatch-font-mono);
-  font-size: 0.92em;
+  font-size: var(--hatch-type-code);
   padding: 2px 5px;
   overflow-wrap: normal;
   white-space: nowrap;
@@ -1280,9 +1280,9 @@ h2 {
   border-collapse: collapse;
   color: inherit;
   display: table;
-  font-size: 14px;
+  font-size: var(--hatch-type-body);
   inline-size: max-content;
-  line-height: 24px;
+  line-height: 1.6;
   max-width: none;
   min-inline-size: 100%;
   overflow: visible;
@@ -1302,7 +1302,7 @@ h2 {
 .markdown-body th {
   border-bottom-color: color-mix(in srgb, var(--hatch-ink) 15%, transparent);
   font-weight: 600;
-  line-height: 16px;
+  line-height: 1.25;
   padding-bottom: 8px;
   padding-top: 8px;
   vertical-align: bottom;
@@ -1336,7 +1336,7 @@ h2 {
 
 .activity-tool-group > summary {
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--hatch-type-control);
   font-weight: 600;
   grid-template-columns: 20px minmax(0, 1fr) 14px;
   list-style: none;
@@ -1370,13 +1370,13 @@ h2 {
 .skill-icon {
   color: var(--hatch-text-secondary);
   font-family: var(--hatch-font-pill);
-  font-size: 12px;
+  font-size: var(--hatch-type-label);
   text-align: center;
 }
 
 .skill-label {
   color: var(--hatch-text-secondary);
-  font-size: 13px;
+  font-size: var(--hatch-type-control);
   font-weight: 760;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1385,7 +1385,7 @@ h2 {
 
 .skill-meta {
   color: color-mix(in srgb, var(--hatch-text-secondary) 72%, transparent);
-  font-size: 12px;
+  font-size: var(--hatch-type-label);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1411,7 +1411,7 @@ h2 {
 
 .skill-detail-row span {
   color: var(--hatch-text-secondary);
-  font-size: 11px;
+  font-size: var(--hatch-type-caption);
   font-weight: 760;
   text-transform: uppercase;
 }
@@ -1419,7 +1419,7 @@ h2 {
 .skill-detail-row code {
   color: var(--hatch-ink);
   font-family: var(--hatch-font-mono);
-  font-size: 12px;
+  font-size: var(--hatch-type-label);
   overflow: hidden;
   min-width: 0;
   text-overflow: ellipsis;
@@ -1428,7 +1428,7 @@ h2 {
 
 .skill-explanation {
   color: var(--hatch-text-secondary);
-  font-size: 12px;
+  font-size: var(--hatch-type-label);
   line-height: 1.5;
 }
 
@@ -1466,7 +1466,7 @@ h2 {
 
 .tool-label {
   color: var(--hatch-text-secondary);
-  font-size: 13px;
+  font-size: var(--hatch-type-control);
   font-weight: 540;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1475,7 +1475,7 @@ h2 {
 
 .tool-meta {
   color: var(--hatch-text-secondary);
-  font-size: 12px;
+  font-size: var(--hatch-type-label);
   max-width: min(360px, 34vw);
   min-width: 0;
   overflow: hidden;
@@ -1518,13 +1518,13 @@ h2 {
 .approval-gate strong {
   color: #45391f;
   display: block;
-  font-size: 13px;
+  font-size: var(--hatch-type-control);
   margin-bottom: 3px;
 }
 
 .approval-gate p {
   color: #6d6148;
-  font-size: 12px;
+  font-size: var(--hatch-type-label);
   line-height: 1.4;
 }
 
@@ -1540,7 +1540,7 @@ h2 {
 
 .approval-resolution {
   border-radius: 7px;
-  font-size: 12px;
+  font-size: var(--hatch-type-label);
   font-weight: 720;
   padding: 8px 10px;
 }
@@ -1563,7 +1563,7 @@ h2 {
 
 .tool-detail-block span {
   color: #69736d;
-  font-size: 11px;
+  font-size: var(--hatch-type-caption);
   font-weight: 800;
   text-transform: uppercase;
 }
@@ -1574,7 +1574,7 @@ h2 {
   border-radius: 7px;
   color: var(--hatch-ink);
   font-family: var(--hatch-font-mono);
-  font-size: 12px;
+  font-size: var(--hatch-type-label);
   line-height: 1.45;
   margin: 0;
   max-height: 280px;
@@ -1652,7 +1652,7 @@ h2 {
   display: inline-flex;
   flex: 0 1 auto;
   font-family: var(--hatch-font-ui);
-  font-size: 12px;
+  font-size: var(--hatch-type-label);
   gap: 6px;
   min-height: 30px;
   min-width: 0;
@@ -1894,7 +1894,7 @@ button.composer-control:focus-visible {
 .toolbar-overflow-toggle {
   color: var(--text-secondary);
   font-family: var(--hatch-font-pill);
-  font-size: 13px;
+  font-size: var(--hatch-type-control);
   letter-spacing: 1px;
   line-height: 1;
 }
@@ -1903,7 +1903,7 @@ button.composer-control:focus-visible {
   align-items: center;
   display: flex;
   flex: 0 1 auto;
-  font-size: 12px;
+  font-size: var(--hatch-type-label);
   gap: 5px;
   max-width: min(54vw, 480px);
   min-width: 0;
@@ -1956,7 +1956,7 @@ button.composer-control:focus-visible {
   color: var(--text-secondary);
   display: inline-flex;
   flex: 0 0 auto;
-  font-size: 10px;
+  font-size: var(--hatch-type-caption);
   gap: 5px;
   letter-spacing: .01em;
   line-height: 1;
@@ -1966,7 +1966,7 @@ button.composer-control:focus-visible {
 }
 
 .desktop-connection-status.compact {
-  font-size: 11px;
+  font-size: var(--hatch-type-caption);
   gap: 6px;
 }
 
@@ -2069,7 +2069,7 @@ button.composer-control:focus-visible {
 .desktop-sidebar-heading .desktop-sidebar-brand { gap: 7px; }
 .desktop-sidebar-heading .desktop-sidebar-brand .hatch-brand__mark { width: 19px; height: 19px; }
 .desktop-sidebar-heading .desktop-sidebar-brand .hatch-brand__wordmark {
-  font-size: 17px;
+  font-size: var(--hatch-type-subheading);
   letter-spacing: var(--hatch-display-tracking);
 }
 
@@ -2077,7 +2077,7 @@ button.composer-control:focus-visible {
   background: transparent;
   border-color: transparent;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--hatch-type-label);
   font-weight: 600;
   gap: 6px;
 }
@@ -2105,7 +2105,7 @@ button.composer-control:focus-visible {
 .desktop-source-list-label {
   color: var(--text-secondary);
   flex: 0 0 auto;
-  font-size: 10px;
+  font-size: var(--hatch-type-label);
   font-weight: 700;
   letter-spacing: .04em;
   padding: 9px 7px 4px;
@@ -2114,12 +2114,12 @@ button.composer-control:focus-visible {
 
 .desktop-source-empty {
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--hatch-type-label);
   padding: 10px 12px 14px;
 }
 
 .desktop-source-empty.compact {
-  font-size: 11px;
+  font-size: var(--hatch-type-caption);
   padding: 7px 12px 9px 35px;
 }
 
@@ -2162,7 +2162,7 @@ button.composer-control:focus-visible {
 }
 
 .desktop-source-row .creator-avatar {
-  font-size: 10px;
+  font-size: var(--hatch-type-label);
   height: 25px;
   width: 25px;
 }
@@ -2181,8 +2181,8 @@ button.composer-control:focus-visible {
   white-space: nowrap;
 }
 
-.desktop-source-row-copy strong { font-size: 12px; font-weight: 600; }
-.desktop-source-row-copy small { color: var(--text-secondary); font-size: 10px; }
+.desktop-source-row-copy strong { font-size: var(--hatch-type-label); font-weight: 600; }
+.desktop-source-row-copy small { color: var(--text-secondary); font-size: var(--hatch-type-caption); }
 
 .desktop-agent-disclosure {
   color: var(--text-secondary);
@@ -2239,8 +2239,8 @@ button.composer-control:focus-visible {
   white-space: nowrap;
 }
 
-.desktop-sidebar-account strong { font-size: 11px; }
-.desktop-sidebar-account small { color: var(--text-secondary); font-size: 10px; }
+.desktop-sidebar-account strong { font-size: var(--hatch-type-caption); }
+.desktop-sidebar-account small { color: var(--text-secondary); font-size: var(--hatch-type-caption); }
 
 .profile-menu {
   flex: 0 0 auto;
@@ -2292,7 +2292,7 @@ button.composer-control:focus-visible {
   border-radius: 5px;
   color: var(--hatch-ink);
   display: flex;
-  font-size: 12px;
+  font-size: var(--hatch-type-label);
   font-weight: 550;
   justify-content: flex-start;
   min-height: 32px;
@@ -2326,22 +2326,22 @@ button.composer-control:focus-visible {
 
 .inspector-kicker {
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: var(--hatch-type-label);
   font-weight: 700;
   letter-spacing: .05em;
   text-transform: uppercase;
 }
 
-.inspector-section strong { font-size: 12px; line-height: 1.4; }
+.inspector-section strong { font-size: var(--hatch-type-label); line-height: 1.4; }
 
 .inspector-section p {
   color: var(--text-secondary);
-  font-size: 11px;
+  font-size: var(--hatch-type-caption);
   line-height: 1.45;
 }
 
 .inspector-section .inspector-workspace-path {
-  font-size: 11px;
+  font-size: var(--hatch-type-caption);
   font-weight: 550;
   line-height: 1.35;
   overflow: hidden;
@@ -2350,7 +2350,7 @@ button.composer-control:focus-visible {
 }
 
 .inspector-action {
-  font-size: 11px;
+  font-size: var(--hatch-type-caption);
   font-weight: 550;
   justify-self: start;
   min-height: 30px;
@@ -2378,7 +2378,7 @@ button.composer-control:focus-visible {
   width: 15px;
 }
 
-.inspector-select-control .hui-select-trigger { width: 100%; min-width: 0; min-height: 30px; border: 0; padding-inline: 2px; background: transparent; box-shadow: none; font-size: 11px; }
+.inspector-select-control .hui-select-trigger { width: 100%; min-width: 0; min-height: 30px; border: 0; padding-inline: 2px; background: transparent; box-shadow: none; font-size: var(--hatch-type-caption); }
 .inspector-select-control .hui-select-trigger--with-leading { gap: 7px; justify-content: flex-start; }
 .inspector-select-control .hui-select-leading { color: var(--hatch-text-secondary); }
 
@@ -2421,7 +2421,7 @@ button.composer-control:focus-visible {
   border-bottom: 1px solid var(--border-separator);
   display: flex;
   flex: 0 0 auto;
-  font-size: 12px;
+  font-size: var(--hatch-type-label);
   justify-content: space-between;
   min-height: 45px;
   padding: 0 9px 0 13px;
@@ -2487,7 +2487,7 @@ button.composer-control:focus-visible {
   border-radius: 6px;
   color: var(--hatch-ink);
   display: inline-flex;
-  font-size: 11px;
+  font-size: var(--hatch-type-caption);
   gap: 5px;
   max-inline-size: min(260px, 100%);
   padding: 3px 5px 3px 8px;
@@ -2504,7 +2504,7 @@ button.composer-control:focus-visible {
   border: 0;
   color: var(--hatch-text-secondary);
   cursor: pointer;
-  font-size: 15px;
+  font-size: var(--hatch-type-reading);
   line-height: 1;
   padding: 0 1px;
 }
@@ -2528,7 +2528,7 @@ button.composer-control:focus-visible {
   border: 1px solid var(--border-separator);
   border-radius: 6px;
   font-family: var(--hatch-font-mono);
-  font-size: 11px;
+  font-size: var(--hatch-type-caption);
   line-height: 1.45;
   margin: 8px 0 0;
   max-height: 130px;
@@ -2672,13 +2672,13 @@ button.composer-control:focus-visible {
 }
 
 .desktop-auxiliary-brand .hatch-brand__wordmark {
-  font-size: 28px;
+  font-size: var(--hatch-type-title);
   letter-spacing: var(--hatch-display-tracking);
 }
 
 .desktop-auxiliary-header h1 {
   margin: 0;
-  font: 600 27px/1.15 var(--hatch-font-ui);
+  font: 600 var(--hatch-type-title)/1.15 var(--hatch-font-ui);
   letter-spacing: -.02em;
 }
 
@@ -2694,13 +2694,13 @@ button.composer-control:focus-visible {
 .desktop-auxiliary-content p {
   margin: 0;
   color: var(--text-secondary);
-  font: 14px/1.55 var(--hatch-font-ui);
+  font: var(--hatch-type-body)/1.55 var(--hatch-font-ui);
 }
 
 .desktop-auxiliary-content .desktop-auxiliary-lede {
   margin-block-end: 10px;
   color: var(--hatch-ink);
-  font: 500 19px/var(--hatch-display-leading) var(--hatch-font-display);
+  font: 500 var(--hatch-type-subtitle)/var(--hatch-display-leading) var(--hatch-font-display);
   letter-spacing: var(--hatch-display-tracking);
 }
 
@@ -2718,7 +2718,7 @@ button.composer-control:focus-visible {
   gap: 24px;
   padding-block: 9px;
   border-block-end: 1px solid var(--border-separator);
-  font: 14px/1.4 var(--hatch-font-ui);
+  font: var(--hatch-type-body)/1.4 var(--hatch-font-ui);
 }
 
 /* Desktop art direction -------------------------------------------------- */
@@ -2781,7 +2781,7 @@ button.composer-control:focus-visible {
 
 .desktop-toolbar-context {
   font-family: var(--hatch-font-pill);
-  font-size: 12px;
+  font-size: var(--hatch-type-label);
   gap: 7px;
 }
 
@@ -2802,7 +2802,7 @@ button.composer-control:focus-visible {
 }
 
 .desktop-sidebar-heading .desktop-sidebar-brand .hatch-brand__wordmark {
-  font-size: 17px;
+  font-size: var(--hatch-type-subheading);
   letter-spacing: var(--hatch-display-tracking);
 }
 
@@ -2813,7 +2813,7 @@ button.composer-control:focus-visible {
 
 .desktop-source-list-label {
   font-family: var(--hatch-font-pill);
-  font-size: 11px;
+  font-size: var(--hatch-type-caption);
   font-weight: 650;
   letter-spacing: -.01em;
   padding: 10px 9px 7px;
@@ -2852,7 +2852,7 @@ button.composer-control:focus-visible {
 
 .desktop-source-row-copy strong {
   font-family: var(--hatch-font-pill);
-  font-size: 12.5px;
+  font-size: var(--hatch-type-label);
   font-weight: 680;
   letter-spacing: -.015em;
 }
@@ -2900,7 +2900,7 @@ button.composer-control:focus-visible {
   box-shadow: 0 1px 3px rgba(60,43,31,.08);
   color: #ad5138;
   font-family: var(--hatch-font-pill);
-  font-size: 11px;
+  font-size: var(--hatch-type-caption);
   font-weight: 700;
   flex: 0 0 30px;
   height: 30px;
@@ -2914,7 +2914,7 @@ button.composer-control:focus-visible {
 
 .desktop-sidebar-account strong {
   color: var(--hatch-ink);
-  font-size: 12px;
+  font-size: var(--hatch-type-label);
   font-weight: 680;
   letter-spacing: -.015em;
 }
@@ -2959,7 +2959,7 @@ button.composer-control:focus-visible {
 .message-surface.assistant { max-width: min(820px, 100%); }
 
 .markdown-body {
-  font-size: 15.5px;
+  font-size: var(--hatch-type-reading);
   line-height: 1.72;
 }
 
@@ -2991,7 +2991,7 @@ button.composer-control:focus-visible {
 .assistant-activity-summary {
   color: rgba(68, 59, 52, .66);
   font-family: var(--hatch-font-pill);
-  font-size: 13px;
+  font-size: var(--hatch-type-control);
   font-weight: 640;
 }
 
@@ -3033,7 +3033,7 @@ button.composer-control:focus-visible {
 }
 
 .composer-input {
-  font-size: 14px;
+  font-size: var(--hatch-type-body);
   min-height: 58px;
   padding: 9px 10px;
 }
@@ -3093,7 +3093,7 @@ button.composer-control:focus-visible {
 
 .inspector-kicker {
   font-family: var(--hatch-font-pill);
-  font-size: 11px;
+  font-size: var(--hatch-type-caption);
   letter-spacing: -.01em;
   text-transform: none;
 }
@@ -3142,7 +3142,7 @@ button.composer-control:focus-visible {
 .desktop-auxiliary-note {
   margin-block-start: 22px !important;
   color: var(--hatch-text-secondary) !important;
-  font-size: 13px !important;
+  font-size: var(--hatch-type-control) !important;
 }
 
 .desktop-auxiliary-language {
@@ -3163,7 +3163,7 @@ button.composer-control:focus-visible {
 .desktop-settings-save-error {
   display: block;
   margin-block-start: 8px;
-  font-size: 11px;
+  font-size: var(--hatch-type-caption);
 }
 
 .desktop-settings-save-error { color: #a64232; }

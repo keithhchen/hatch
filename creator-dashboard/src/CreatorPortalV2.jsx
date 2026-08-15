@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CreatorFactoryRuns } from "./CreatorFactoryRuns.jsx";
 import { CreatorSourceLibrary } from "./CreatorSourceLibrary.jsx";
+import { CreatorReviewPage } from "./CreatorReviewPage.jsx";
 import {
   Breadcrumbs as HatchBreadcrumbs,
   Button,
@@ -122,7 +123,7 @@ function CreatorRoute({ route, token, request, navigate, profile, registerNaviga
   if (route.kind === "sources") return <CreatorSourceLibrary token={token} taskId={route.taskId} navigate={navigate} />;
   if (route.kind === "factory") return <FactoryPage token={token} request={request} productId={route.productId} runId={route.runId} navigate={navigate} registerNavigationGuard={registerNavigationGuard} />;
   if (route.kind === "product") return <ProductPage token={token} request={request} navigate={navigate} productId={route.productId} tab={route.tab} />;
-  if (route.kind === "candidate") return <CandidatePage token={token} request={request} navigate={navigate} productId={route.productId} candidateId={route.candidateId} />;
+  if (route.kind === "candidate") return <CreatorReviewPage token={token} request={request} runId={route.candidateId} onBack={() => navigate(`${ROOT}/products/${encodeURIComponent(route.productId)}/factory/${encodeURIComponent(route.candidateId)}`)} onRevision={(run) => navigate(`${ROOT}/products/${encodeURIComponent(route.productId)}/candidates/${encodeURIComponent(run.id)}`)} onRelease={() => navigate(`${ROOT}/products/${encodeURIComponent(route.productId)}/preview`)} />;
   if (route.kind === "preview") return <PreviewPage token={token} request={request} navigate={navigate} productId={route.productId} />;
   if (route.kind === "release") return <ReleasePage token={token} request={request} navigate={navigate} productId={route.productId} releaseId={route.releaseId} />;
   if (route.kind === "orders") return <OrdersPage token={token} request={request} navigate={navigate} />;
@@ -169,7 +170,7 @@ function ProductsPage({ token, request, navigate }) {
   const resource = useRemote(request, "/v1/creator/products", token);
   const runsResource = useRemote(request, "/v1/creator/factory-runs", token);
   const pendingRuns = useMemo(() => runsResource.state === "ready"
-    ? arrayOf(unwrap(runsResource.data, "runs")).filter((run) => ["queued", "running", "waiting_for_creator", "awaiting_answers", "needs_attention"].includes(run.status))
+    ? arrayOf(unwrap(runsResource.data, "runs")).filter((run) => ["queued", "running", "waiting_for_creator", "awaiting_answers", "needs_attention"].includes(run.status) || run.stage === "review_required")
     : [], [runsResource.state, runsResource.data]);
   useEffect(() => {
     if (!pendingRuns.some((run) => ["queued", "running"].includes(run.status))) return undefined;
@@ -201,7 +202,7 @@ function PendingFactoryRuns({ runs, navigate }) {
     <div className="cpv2-product-grid">{runs.map((run) => <article className="cpv2-card cpv2-product-card" key={run.id}>
       <div className="cpv2-card-top"><StatusChip status={run.status}>{productStatus(run.status)}</StatusChip><span>Candidate pending</span></div>
       <h2>{run.task_name ?? "Untitled Factory run"}</h2>
-      <p>{["waiting_for_creator", "awaiting_answers"].includes(run.status) ? "Answer the pending Factory questions to continue." : run.status === "needs_attention" ? "Review the failed checkpoint and retry when it is safe." : "Distillation is running. Candidate review will appear as soon as the verified Corpus is ready."}</p>
+      <p>{run.stage === "review_required" ? "Review the candidate and confirm the correction loop before a new revision is built." : ["waiting_for_creator", "awaiting_answers"].includes(run.status) ? "Answer the pending Factory questions to continue." : run.status === "needs_attention" ? "Review the failed checkpoint and retry when it is safe." : "Distillation is running. Candidate review will appear as soon as the verified Corpus is ready."}</p>
       <div className="cpv2-card-foot"><small>{run.updated_at ? `Updated ${dateTime(run.updated_at)}` : "Saved on server"}</small><Button variant="secondary" type="button" onClick={() => navigate(`${ROOT}/factory/${encodeURIComponent(run.id)}`)}>Open Factory</Button></div>
     </article>)}</div>
   </section>;
@@ -539,7 +540,7 @@ function PreviewPage({ token, request, navigate, productId }) {
   async function publish(preview) {
     setPublishing(true); setError("");
     try {
-      const result = await request(`/v1/creator/products/${encodeURIComponent(productId)}/publish`, { method: "POST", token, headers: { "idempotency-key": mutationKey() }, body: JSON.stringify({ candidate_id: idOf(preview.candidate, "candidate"), expected_version: preview.resource_version ?? preview.product?.resource_version ?? preview.product?.version }) });
+      const result = await request(`/v1/creator/products/${encodeURIComponent(productId)}/release`, { method: "POST", token, headers: { "idempotency-key": mutationKey() }, body: JSON.stringify({ candidate_id: idOf(preview.candidate, "candidate"), report_digest: preview.candidate?.report_digest ?? preview.candidate?.evaluation_digest, expected_version: preview.resource_version ?? preview.product?.resource_version ?? preview.product?.version }) });
       setPublished(result);
     } catch (nextError) { setError(friendlyError(nextError)); }
     finally { setPublishing(false); }

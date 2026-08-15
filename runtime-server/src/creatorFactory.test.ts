@@ -92,7 +92,7 @@ test("Creator Factory pauses for Creator answers, revises on Development failure
   assert.ok(scripted.calls.some((call) => call.purpose === "eval.judge_result"));
 });
 
-test("a failed held-out becomes Regression, triggers Corpus revision, and requires fresh Creator-answered held-out", async (t) => {
+test("a failed held-out pauses for Creator confirmation without leaking the sealed case", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-factory-heldout-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const runId = "run-heldout-loop";
@@ -112,30 +112,22 @@ test("a failed held-out becomes Regression, triggers Corpus revision, and requir
     initialAnswers,
     waiting.artifacts.currentQuestionBatch!.batchId
   );
-  assert.equal(replacementWaiting.stage, "awaiting_creator_answers");
-  assert.equal(replacementWaiting.pendingQuestionBatch?.purpose, "replacement_heldout");
-  assert.equal(replacementWaiting.artifacts.corpusCandidates.length, 3);
+  assert.equal(replacementWaiting.stage, "review_required");
+  assert.equal(replacementWaiting.pendingReview?.kind, "heldout_failure");
+  assert.equal(replacementWaiting.artifacts.corpusCandidates.length, 2);
   assert.ok(replacementWaiting.artifacts.regressionSet);
 
   const corpusCalls = scripted.calls.filter((call) => call.purpose === "corpus.compile");
   assert.equal(corpusCalls[0]!.prompt.includes("HELDOUT_FAIL"), false);
   assert.equal(corpusCalls[1]!.prompt.includes("HELDOUT_FAIL"), false);
-  assert.equal(corpusCalls[2]!.prompt.includes("HELDOUT_FAIL"), true);
+  assert.equal(corpusCalls[2], undefined);
   const regression = parseQaSet(await store.readArtifact(replacementWaiting.artifacts.regressionSet!));
-  assert.equal(regression.some((row) => row.answer.includes("HELDOUT_FAIL")), true);
-
-  const replacementQuestions = parseQuestions(
-    await store.readArtifact(replacementWaiting.artifacts.currentQuestionBatch!)
-  );
-  assert.equal(replacementQuestions.length, 1);
-  assert.equal(questions.some((old) => old.question === replacementQuestions[0]!.question), false);
-  const ready = await factory.submitCreatorAnswers(
-    runId,
-    answerMarkdown(replacementQuestions, (question) => `FRESH_HELDOUT_${question.id}`),
-    replacementWaiting.artifacts.currentQuestionBatch!.batchId
-  );
-  assert.equal(ready.stage, "ready");
-  assert.equal(ready.artifacts.heldoutRounds.length, 2);
+  assert.equal(regression.some((row) => row.answer.includes("HELDOUT_FAIL")), false);
+  const sealed = await store.readArtifact(replacementWaiting.pendingReview!.report);
+  assert.equal(sealed.includes("HELDOUT_FAIL"), true);
+  for (const file of await filesUnder(path.join(store.directory, "artifacts"))) {
+    assert.equal((await readFile(file, "utf8")).includes("HELDOUT_FAIL"), false, `held-out leaked to ${file}`);
+  }
 });
 
 test("Development and held-out never split questions from the same leakage group", async (t) => {

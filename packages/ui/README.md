@@ -25,6 +25,14 @@ import {
 - Gradient recipe：唯一配方在 `AtmosphericPaper`；base、warm/cool fields、strength、blur 与 duration 都来自品牌 tokens。
 - Display serif：Instrument Serif；UI：system sans；pill/label：Inter。
 
+## Typography source of truth
+
+`packages/brand/tokens.css` owns the shared `rem` typography values. `@hatch/ui`
+is the reference implementation that consumes those semantic variables. Web,
+Desktop and Storybook import the shared package; they do not copy component CSS
+or preserve unapproved local font sizes. A missing role is a spec/token change
+first, followed by the HUI component and its product consumers.
+
 ## GUI
 
 在 `creator-dashboard` 运行：

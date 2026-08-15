@@ -3,7 +3,7 @@ import path from "node:path";
 import { FactoryFileStore } from "./fileStore.js";
 import { CreatorSourceLibrary, CreatorSourceLibraryError } from "./sourceLibrary.js";
 import type { ArtifactObjectStore } from "./objectStore.js";
-import type { DistillationGraphStore, DistillationRelease } from "./distillationGraph.js";
+import { newGraphEventId, type DistillationEvent, type DistillationGraphStore, type DistillationRelease } from "./distillationGraph.js";
 import { isDistillationTaskRepository, validateTaskText, type DistillationTaskRecord } from "./tasks.js";
 import { parseQuestions } from "./markdown.js";
 import { requireQuestionBatchId } from "./questionBatch.js";
@@ -25,6 +25,7 @@ export type CreateFactoryRunRequest = {
   sourceDocumentIds?: string[];
   sourceSnapshotId?: string;
   config?: FactoryStartInput["config"];
+  reviewContext?: FactoryStartInput["reviewContext"];
 };
 
 export type SubmitFactoryAnswersRequest = {
@@ -32,6 +33,50 @@ export type SubmitFactoryAnswersRequest = {
   expectedVersion?: number;
   submissionId?: string;
   questionBatchId: string;
+};
+
+export type CreatorReviewAction = "accept" | "correct" | "reject_question" | "judge_dispute" | "heldout_correction";
+
+export type CreatorReviewCase = {
+  id: string;
+  set: "known";
+  question: string;
+  creatorReference: string;
+  candidateOutput: string;
+  verdict: "PASS" | "FAIL";
+  diagnosis: string;
+  caseDigest: string;
+  candidateDigest: string;
+  status: "accepted" | "needs_review" | "corrected" | "question_rejected" | "judge_disputed";
+  reviewAction?: CreatorReviewAction;
+};
+
+export type CreatorReviewProjection = {
+  runId: string;
+  revisionId: string;
+  version: number;
+  candidateDigest: string;
+  candidateVersion: number;
+  cases: CreatorReviewCase[];
+  blind: {
+    sealed: true;
+    total: number;
+    passed: number;
+    failed: number;
+    needsCreatorAction: boolean;
+  };
+  unresolvedCount: number;
+  releaseReady: boolean;
+};
+
+export type CreatorReviewRequest = {
+  action: CreatorReviewAction;
+  caseId?: string;
+  candidateDigest: string;
+  caseDigest?: string;
+  expectedVersion?: number;
+  correction?: string;
+  why?: string;
 };
 
 export class CreatorFactoryInputTooLargeError extends Error {
@@ -259,6 +304,7 @@ export class CreatorFactoryService {
       taskBrief,
       sources,
       ...(snapshotId ? { sourceSnapshotId: snapshotId } : {}),
+      ...(normalized.reviewContext ? { reviewContext: normalized.reviewContext } : {}),
       ...(normalized.config ? { config: normalized.config } : {})
     };
     const result = await this.repository.create({
@@ -314,12 +360,157 @@ export class CreatorFactoryService {
     return this.project(await this.requireRun(creatorId, runId), true);
   }
 
+  async getReview(creatorId: string, runId: string): Promise<CreatorReviewProjection> {
+    const run = await this.requireRun(creatorId, runId);
+    return this.projectReview(run);
+  }
+
+  async review(
+    creatorId: string,
+    runId: string,
+    request: CreatorReviewRequest,
+    idempotencyKey: string
+  ): Promise<{ review: CreatorReviewProjection; nextRun?: CreatorFactoryRunView }> {
+    const run = await this.requireRun(creatorId, runId);
+    const key = requireText(idempotencyKey, "Idempotency-Key");
+    const review = await this.projectReview(run);
+    if (request.candidateDigest !== review.candidateDigest) {
+      throw new CreatorFactoryRepositoryError("version_conflict", "Review targets a stale Candidate digest");
+    }
+    if (request.expectedVersion !== undefined && request.expectedVersion !== run.version) {
+      throw new CreatorFactoryRepositoryError("version_conflict", `Factory run ${run.id} is at version ${run.version}`);
+    }
+    if (!this.graphStore || !run.input.taskId) {
+      throw new CreatorFactoryRepositoryError("invalid_status", "Distillation graph is unavailable for Creator Review");
+    }
+    await this.graphStore.initialize();
+    const revisionId = run.input.revisionId ?? run.id;
+    const events = await this.graphStore.listEvents(run.input.taskId);
+    if (request.action === "heldout_correction") {
+      if (!run.state?.pendingReview || run.state.stage !== "review_required") {
+        throw new CreatorFactoryRepositoryError("invalid_status", `Factory run ${run.id} has no sealed held-out failure awaiting correction`);
+      }
+      const existing = events.find((event) => event.revisionId === revisionId
+        && event.type === "heldout_failure_confirmed"
+        && event.payload.idempotencyKey === key);
+      if (existing) {
+        const nextRunId = typeof existing.payload.nextRunId === "string" ? existing.payload.nextRunId : undefined;
+        return { review: await this.projectReview(run), ...(nextRunId ? { nextRun: await this.get(creatorId, nextRunId) } : {}) };
+      }
+      const next = await this.createRevisionFromReview(creatorId, run, request, key, review, undefined, true);
+      const parent = events.filter((event) => event.revisionId === revisionId).at(-1);
+      await this.graphStore.appendEvent({
+        id: newGraphEventId(),
+        eventKey: `${run.id}:review:${key}`,
+        taskId: run.input.taskId,
+        runId: run.input.distillationRunId ?? run.id,
+        revisionId,
+        type: "heldout_failure_confirmed",
+        node: "calibration",
+        actor: "creator",
+        parentEventIds: parent ? [parent.id] : [],
+        artifactIds: [run.state.pendingReview.report.artifactId!],
+        payload: { idempotencyKey: key, action: request.action, candidateDigest: review.candidateDigest, ...(next.nextRun ? { nextRunId: next.nextRun.id } : {}) }
+      });
+      return next;
+    }
+    const caseId = requireText(request.caseId, "caseId");
+    const target = review.cases.find((item) => item.id === caseId);
+    if (!target) throw new CreatorFactoryRepositoryError("run_not_found", `Review case ${caseId} was not found`);
+    if (request.caseDigest && request.caseDigest !== target.caseDigest) {
+      throw new CreatorFactoryRepositoryError("version_conflict", "Review targets a stale case digest");
+    }
+    if (request.action === "accept" && target.verdict !== "PASS") {
+      throw new CreatorFactoryRepositoryError("invalid_status", "A failed case needs a correction or question rejection");
+    }
+    if (request.action === "correct" && !requireOptionalText(request.correction, "correction")) {
+      throw new Error("correction is required for Correct this answer");
+    }
+    if (request.action === "correct" && !requireOptionalText(request.why, "why")) {
+      throw new Error("why is required for Correct this answer");
+    }
+    const existing = events.find((event) => event.revisionId === revisionId
+      && ["review_recorded", "question_rejected", "judge_disputed"].includes(event.type)
+      && event.payload.idempotencyKey === key);
+    if (existing) {
+      const payloadAction = existing.payload.action;
+      if (payloadAction !== request.action || existing.payload.caseId !== caseId || existing.payload.candidateDigest !== review.candidateDigest) {
+        throw new CreatorFactoryRepositoryError("idempotency_conflict", "Idempotency-Key was already used for another review command");
+      }
+      const nextRunId = typeof existing.payload.nextRunId === "string" ? existing.payload.nextRunId : undefined;
+      return {
+        review: await this.projectReview(run),
+        ...(nextRunId ? { nextRun: await this.get(creatorId, nextRunId) } : {})
+      };
+    }
+    if (target.status !== "needs_review") {
+      throw new CreatorFactoryRepositoryError("invalid_status", `Review case ${caseId} has already been adjudicated`);
+    }
+    const artifactPayload = {
+      contract_version: "1",
+      review_type: request.action === "correct" ? "correction" : "case_review",
+      run_id: run.id,
+      revision_id: run.input.revisionId ?? run.id,
+      case_id: caseId,
+      case_digest: target.caseDigest,
+      candidate_digest: review.candidateDigest,
+      action: request.action,
+      question: target.question,
+      creator_reference_answer: target.creatorReference,
+      candidate_output: target.candidateOutput,
+      eval_verdict: target.verdict,
+      eval_diagnosis: target.diagnosis,
+      ...(request.correction ? { correction: request.correction } : {}),
+      ...(request.why ? { why: request.why } : {})
+    };
+    const artifact = await this.fileStore(run.id).writeArtifact(
+      `review/case-${safeReviewKey(caseId)}-${safeReviewKey(key)}.json`,
+      `${JSON.stringify(artifactPayload, null, 2)}\n`
+    );
+    const next = request.action === "correct" || request.action === "reject_question"
+      ? await this.createRevisionFromReview(creatorId, run, request, key, review, artifact, false)
+      : undefined;
+    const parent = events.filter((event) => event.runId === (run.input.distillationRunId ?? run.id)
+      && event.revisionId === revisionId).at(-1);
+    const eventType = request.action === "reject_question" ? "question_rejected"
+      : request.action === "judge_dispute" ? "judge_disputed"
+        : "review_recorded";
+    const payload: Record<string, unknown> = {
+      idempotencyKey: key,
+      action: request.action,
+      caseId,
+      caseDigest: target.caseDigest,
+      candidateDigest: review.candidateDigest,
+      ...(next?.nextRun ? { nextRunId: next.nextRun.id } : {})
+    };
+    await this.graphStore.appendEvent({
+      id: newGraphEventId(),
+      eventKey: `${run.id}:review:${key}`,
+      taskId: run.input.taskId,
+      runId: run.input.distillationRunId ?? run.id,
+      revisionId,
+      type: eventType,
+      node: "calibration",
+      actor: "creator",
+      parentEventIds: parent ? [parent.id] : [],
+      artifactIds: [artifact.artifactId!],
+      payload
+    });
+    return {
+      review: await this.projectReview(run),
+      ...(next?.nextRun ? { nextRun: next.nextRun } : {})
+    };
+  }
+
   async submitAnswers(
     creatorId: string,
     runId: string,
     request: SubmitFactoryAnswersRequest
   ): Promise<CreatorFactoryRunView> {
     const run = await this.requireRun(creatorId, runId);
+    if (run.state?.stage !== "awaiting_creator_answers") {
+      throw new CreatorFactoryRepositoryError("invalid_status", `Factory run ${runId} is not waiting for Creator answers`);
+    }
     if (!Array.isArray(request.answers)) throw new Error("answers must be an array");
     const answers = new Map<string, string>();
     for (const item of request.answers) {
@@ -430,6 +621,10 @@ export class CreatorFactoryService {
     if (run.status !== "ready" || run.state?.stage !== "ready" || !latest?.agentCorpus || !corpusArtifactId) {
       throw new CreatorFactoryRepositoryError("invalid_status", `Factory run ${runId} is not Release-ready`);
     }
+    const reviewProjection = await this.projectReview(run);
+    if (!reviewProjection.releaseReady) {
+      throw new CreatorFactoryRepositoryError("invalid_status", `Factory run ${runId} still has unresolved Creator Review or sealed evaluation failures`);
+    }
     if (run.input.product?.id && run.input.product.id !== productId) {
       throw new CreatorFactoryRepositoryError("invalid_status", `Factory run ${runId} is bound to another Product`);
     }
@@ -508,6 +703,7 @@ export class CreatorFactoryService {
     const graph = run.input.taskId && this.graphStore
       ? await this.graphStore.derive(run.input.taskId)
       : undefined;
+    const awaitingAnswers = run.state?.stage === "awaiting_creator_answers";
     return {
       id: run.id,
       ...(run.state?.agentId || run.input.agentId ? { agentId: run.state?.agentId ?? run.input.agentId } : {}),
@@ -526,10 +722,10 @@ export class CreatorFactoryService {
       status: run.status,
       ...(run.factoryStage ? { stage: run.factoryStage } : {}),
       version: run.version,
-      pendingQuestions: includeQuestions && run.status === "waiting_for_creator"
+      pendingQuestions: includeQuestions && awaitingAnswers
         ? (await this.pendingQuestions(run)).map(({ id, question }) => ({ id, question }))
         : [],
-      ...(includeQuestions && run.status === "waiting_for_creator" && run.state?.artifacts.currentQuestionBatch
+      ...(includeQuestions && awaitingAnswers && run.state?.artifacts.currentQuestionBatch
         ? { questionBatchId: requireQuestionBatchId(run.id, run.state.artifacts.currentQuestionBatch) }
         : {}),
       retryable: run.status === "needs_attention" && !!run.state?.retryStage,
@@ -548,6 +744,134 @@ export class CreatorFactoryService {
     };
   }
 
+  private async projectReview(run: FactoryRunRecord): Promise<CreatorReviewProjection> {
+    const latest = run.state?.artifacts.corpusCandidates.at(-1);
+    if (!latest) throw new CreatorFactoryRepositoryError("invalid_status", `Factory run ${run.id} has no Candidate to review`);
+    const candidateDigest = latest.agentCorpus?.digest ?? latest.systemInstructions.sha256;
+    const revisionId = run.input.revisionId ?? run.id;
+    let parsedCases: unknown[] = [];
+    const regressionRef = run.state?.artifacts.latestRegressionEvaluation ?? latest.agentCorpus?.syntheticQa;
+    if (regressionRef) {
+      try {
+        const parsed = JSON.parse(await this.fileStore(run.id).readArtifact(regressionRef)) as Record<string, unknown>;
+        parsedCases = Array.isArray(parsed.cases) ? parsed.cases : [];
+      } catch {
+        parsedCases = [];
+      }
+    }
+    const events = this.graphStore && run.input.taskId
+      ? (await this.graphStore.listEvents(run.input.taskId)).filter((event) => event.revisionId === revisionId)
+      : [];
+    const adjudications = new Map<string, { action: CreatorReviewAction; sequence: number }>();
+    for (const event of events
+      .filter((event) => ["review_recorded", "question_rejected", "judge_disputed"].includes(event.type))
+      .sort((left, right) => left.sequence - right.sequence)) {
+      const caseId = typeof event.payload.caseId === "string" ? event.payload.caseId : undefined;
+      const action = event.payload.action;
+      if (caseId && isCreatorReviewAction(action)) adjudications.set(caseId, { action, sequence: event.sequence });
+    }
+    const cases: CreatorReviewCase[] = parsedCases.flatMap((value) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+      const row = value as Record<string, unknown>;
+      if (typeof row.id !== "string" || typeof row.question !== "string" || typeof row.creator_reference_answer !== "string"
+        || typeof row.hatch_result !== "string" || (row.verdict !== "PASS" && row.verdict !== "FAIL")
+        || typeof row.diagnosis !== "string") return [];
+      const caseDigest = digestJson({
+        id: row.id,
+        question: row.question,
+        creator_reference_answer: row.creator_reference_answer,
+        hatch_result: row.hatch_result,
+        verdict: row.verdict,
+        diagnosis: row.diagnosis
+      });
+      const adjudication = adjudications.get(row.id);
+      const status = adjudication
+        ? reviewActionStatus(adjudication.action)
+        : "needs_review";
+      return [{
+        id: row.id,
+        set: "known",
+        question: row.question,
+        creatorReference: row.creator_reference_answer,
+        candidateOutput: row.hatch_result,
+        verdict: row.verdict,
+        diagnosis: row.diagnosis,
+        caseDigest,
+        candidateDigest,
+        status,
+        ...(adjudication ? { reviewAction: adjudication.action } : {})
+      }];
+    });
+    let blindTotal = 0;
+    let blindPassed = 0;
+    let blindFailed = 0;
+    const heldoutRef = run.state?.artifacts.latestHeldoutEvaluation ?? latest.agentCorpus?.heldOut;
+    if (heldoutRef) {
+      try {
+        const parsed = JSON.parse(await this.fileStore(run.id).readArtifact(heldoutRef)) as Record<string, unknown>;
+        const rows = Array.isArray(parsed.cases) ? parsed.cases : [];
+        blindTotal = rows.length;
+        blindPassed = rows.filter((item) => item && typeof item === "object" && (item as Record<string, unknown>).verdict === "PASS").length;
+        blindFailed = rows.filter((item) => item && typeof item === "object" && (item as Record<string, unknown>).verdict === "FAIL").length;
+      } catch {
+        // A missing sealed report is an unavailable gate, never a false pass.
+      }
+    }
+    // A failed Eval remains unresolved until the Creator supplies a correction
+    // or rejects the question. A judge dispute is also blocking: it routes to
+    // calibration and must never make Release look ready by itself.
+    const unresolvedCount = cases.filter((item) => (
+      item.status === "needs_review"
+      || item.status === "judge_disputed"
+    ) && (item.verdict === "FAIL" || item.status === "judge_disputed")).length;
+    return {
+      runId: run.id,
+      revisionId,
+      version: run.version,
+      candidateDigest,
+      candidateVersion: latest.version,
+      cases,
+      blind: { sealed: true, total: blindTotal, passed: blindPassed, failed: blindFailed, needsCreatorAction: blindFailed > 0 || run.state?.stage === "review_required" },
+      unresolvedCount,
+      releaseReady: run.status === "ready" && run.state?.stage === "ready" && blindFailed === 0 && unresolvedCount === 0
+    };
+  }
+
+  private async createRevisionFromReview(
+    creatorId: string,
+    run: FactoryRunRecord,
+    request: CreatorReviewRequest,
+    idempotencyKey: string,
+    review: CreatorReviewProjection,
+    artifact: ArtifactRef | undefined,
+    heldout: boolean
+  ): Promise<{ review: CreatorReviewProjection; nextRun?: CreatorFactoryRunView }> {
+    const contextArtifact = artifact ?? run.state?.pendingReview?.report;
+    if (!contextArtifact || !run.input.taskId || !run.input.sourceSnapshotId) {
+      throw new CreatorFactoryRepositoryError("invalid_status", "Review correction has no immutable Task Snapshot context");
+    }
+    const result = await this.create(
+      { id: creatorId, name: run.input.creator.name },
+      {
+        taskId: run.input.taskId,
+        agentId: run.state?.agentId ?? run.input.agentId,
+        product: run.state?.product ?? run.input.product,
+        tools: run.input.tools,
+        taskName: run.input.taskName,
+        taskBrief: run.input.taskBrief,
+        sourceSnapshotId: run.input.sourceSnapshotId,
+        ...(run.input.config ? { config: run.input.config } : {}),
+        reviewContext: {
+          sourceRunId: run.id,
+          artifact: contextArtifact,
+          mode: heldout ? "heldout_correction" : request.action === "reject_question" ? "question_replacement" : "correction"
+        }
+      },
+      `review:${run.id}:${idempotencyKey}`
+    );
+    return { review, nextRun: result.run };
+  }
+
   private async pendingQuestions(run: FactoryRunRecord): Promise<CreatorQuestion[]> {
     const reference = run.state?.artifacts.currentQuestionBatch;
     if (!reference?.sealed) throw new Error(`Factory run ${run.id} has no sealed pending Question batch`);
@@ -556,7 +880,8 @@ export class CreatorFactoryService {
 
   private fileStore(runId: string): FactoryFileStore {
     return new FactoryFileStore(this.factoryRoot, runId, undefined, undefined, {
-      objectStore: this.objectStore
+      objectStore: this.objectStore,
+      graphStore: this.graphStore
     });
   }
 
@@ -594,6 +919,26 @@ function notPublishable(runId: string): CreatorFactoryRepositoryError {
     "invalid_status",
     `Factory run ${runId} has no verified publishable Agent Corpus`
   );
+}
+
+function isCreatorReviewAction(value: unknown): value is CreatorReviewAction {
+  return ["accept", "correct", "reject_question", "judge_dispute", "heldout_correction"].includes(String(value));
+}
+
+function reviewActionStatus(action: CreatorReviewAction): CreatorReviewCase["status"] {
+  if (action === "correct") return "corrected";
+  if (action === "reject_question") return "question_rejected";
+  if (action === "judge_dispute") return "judge_disputed";
+  return "accepted";
+}
+
+function digestJson(value: unknown): string {
+  return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
+}
+
+function safeReviewKey(value: string): string {
+  const normalized = value.trim().replace(/[^A-Za-z0-9._-]+/g, "-");
+  return normalized ? normalized.slice(0, 64) : createHash("sha256").update(value).digest("hex").slice(0, 24);
 }
 
 /**
@@ -727,6 +1072,17 @@ function validateCreateRequest(
   } : undefined;
   const product = request.product === undefined ? undefined : validateProduct(request.product);
   const tools = validateTools(request.tools);
+  const reviewContext = request.reviewContext === undefined ? undefined : {
+    sourceRunId: requireText(request.reviewContext.sourceRunId, "reviewContext.sourceRunId"),
+    artifact: {
+      path: requireText(request.reviewContext.artifact.path, "reviewContext.artifact.path"),
+      sha256: requireText(request.reviewContext.artifact.sha256, "reviewContext.artifact.sha256"),
+      createdAt: requireText(request.reviewContext.artifact.createdAt, "reviewContext.artifact.createdAt"),
+      ...(request.reviewContext.artifact.artifactId ? { artifactId: requireText(request.reviewContext.artifact.artifactId, "reviewContext.artifact.artifactId") } : {}),
+      ...(request.reviewContext.artifact.sealed ? { sealed: true as const } : {})
+    },
+    mode: request.reviewContext.mode
+  } satisfies NonNullable<CreateFactoryRunRequest["reviewContext"]>;
   return {
     ...(taskId ? { taskId } : {}),
     ...(agentId ? { agentId } : {}),
@@ -737,7 +1093,8 @@ function validateCreateRequest(
     ...(request.sources === undefined ? {} : { sources }),
     ...(sourceDocumentIds ? { sourceDocumentIds } : {}),
     ...(sourceSnapshotId ? { sourceSnapshotId } : {}),
-    ...(config ? { config } : {})
+    ...(config ? { config } : {}),
+    ...(reviewContext ? { reviewContext } : {})
   };
 }
 
@@ -890,7 +1247,10 @@ function requireToolOperation(value: unknown, field: string): string {
 
 function requireCorpusIdentifier(value: unknown, field: string): string {
   const normalized = requireText(value, field);
-  if (normalized.length > 128 || !/^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/.test(normalized)) {
+  // Task-owned Product/Agent IDs may be UUIDs, including UUIDs whose first
+  // nibble is numeric. Keep the identifier lowercase and URL-free while
+  // allowing that durable identity to survive every new revision.
+  if (normalized.length > 128 || !/^[a-z0-9][a-z0-9]*(?:[-_][a-z0-9]+)*$/.test(normalized)) {
     throw new Error(`${field} must be a lowercase Agent Corpus identifier`);
   }
   return normalized;
@@ -900,6 +1260,11 @@ function requireText(value: unknown, field: string): string {
   const normalized = typeof value === "string" ? value.trim() : "";
   if (!normalized) throw new Error(`${field} must not be empty`);
   return normalized;
+}
+
+function requireOptionalText(value: unknown, field: string): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  return requireText(value, field);
 }
 
 function boundedInteger(value: number, field: string, minimum: number, maximum: number): number {

@@ -7,6 +7,7 @@ export const FACTORY_STAGE_LABELS = {
   evaluating_development: "Checking development cases",
   evaluating_regression: "Running regression",
   evaluating_heldout: "Running sealed held-out cases",
+  review_required: "Needs your correction",
   ready: "Candidate ready",
   needs_attention: "Needs attention"
 };
@@ -22,6 +23,7 @@ export function factoryShouldPoll(run) {
 }
 
 export function factoryPollInterval(run) {
+  if (run?.stage === "review_required") return undefined;
   if (factoryShouldPoll(run)) return 3000;
   if (run?.status === "waiting_for_creator") return 5000;
   return undefined;
@@ -104,6 +106,27 @@ export function retryFactoryRun(token, run) {
     method: "POST",
     token,
     body: JSON.stringify({ expected_version: run.version })
+  });
+}
+
+export function getFactoryReview(token, runId, request = dashboardRequest) {
+  return request(`/v1/creator/factory-runs/${encodeURIComponent(runId)}/review`, { token });
+}
+
+export function submitFactoryReview(token, run, input, idempotencyKey = crypto.randomUUID(), request = dashboardRequest) {
+  return request(`/v1/creator/factory-runs/${encodeURIComponent(run.id)}/review`, {
+    method: "POST",
+    token,
+    headers: { "idempotency-key": idempotencyKey },
+    body: JSON.stringify({
+      action: input.action,
+      candidate_digest: input.candidateDigest,
+      ...(input.caseId ? { case_id: input.caseId } : {}),
+      ...(input.caseDigest ? { case_digest: input.caseDigest } : {}),
+      ...(run.version === undefined ? {} : { expected_version: run.version }),
+      ...(input.correction ? { correction: input.correction } : {}),
+      ...(input.why ? { why: input.why } : {})
+    })
   });
 }
 
