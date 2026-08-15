@@ -89,7 +89,8 @@ describe("desktop system appearance contract", () => {
   });
 
   it("keeps composer actions circular and the activity divider at accordion width", () => {
-    expect(stylesheet).toMatch(/\.send-button,\s*\.stop-button\s*\{[\s\S]*?border-radius:\s*50%;/);
+    expect(stylesheet).toMatch(/\.send-button,\s*\.stop-button\s*\{[\s\S]*?align-items:\s*center;[\s\S]*?display:\s*inline-flex;[\s\S]*?justify-content:\s*center;[\s\S]*?line-height:\s*0;[\s\S]*?border-radius:\s*50%;/);
+    expect(stylesheet).toMatch(/\.send-button svg\s*\{[\s\S]*?display:\s*block;[\s\S]*?margin:\s*0;/);
     expect(stylesheet).toMatch(/\.send-button:not\(:disabled\),\s*\.stop-button:not\(:disabled\)\s*\{[\s\S]*?color:\s*var\(--hatch-ui-on-primary\);/);
     expect(stylesheet).toMatch(/\.assistant-activity-shell\s*\{[\s\S]*?width:\s*100%;/);
     expect(stylesheet).toMatch(/\.assistant-activity-divider\s*\{[\s\S]*?width:\s*100%;/);

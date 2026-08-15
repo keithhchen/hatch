@@ -1731,9 +1731,13 @@ button.composer-control:focus-visible {
 
 .send-button,
 .stop-button {
+  align-items: center;
   border-radius: 50%;
+  display: inline-flex;
   flex: 0 0 34px;
   height: 34px;
+  justify-content: center;
+  line-height: 0;
   min-height: 34px;
   min-width: 34px;
   padding: 0;
@@ -1741,7 +1745,9 @@ button.composer-control:focus-visible {
 }
 
 .send-button svg {
+  display: block;
   height: 17px;
+  margin: 0;
   stroke-linecap: round;
   stroke-linejoin: round;
   width: 17px;
