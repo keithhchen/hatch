@@ -62,6 +62,15 @@ describe("desktop system appearance contract", () => {
     expect(sharedStylesheet).toMatch(/\.hatch-brand__wordmark\s*\{[^}]*font-size:\s*var\(--hatch-type-title\);/);
   });
 
+  it("keeps the new task action regular in every sidebar state", () => {
+    expect(stylesheet).toMatch(
+      /\.sidebar-new-task\s*\{[\s\S]*?font-size:\s*var\(--hatch-type-label\);[\s\S]*?font-weight:\s*400;/
+    );
+    expect(stylesheet).toMatch(
+      /\.desktop-agent-conversation-group \.sidebar-new-task\s*\{[\s\S]*?font-weight:\s*400;/
+    );
+  });
+
   it("keeps accessibility appearance and motion preferences in the stylesheet contract", () => {
     expect(stylesheet).toMatch(/\.desktop-window-shell\s+select\s*\{[^}]*accent-color:\s*var\(--hatch-accent\)/);
     expect(stylesheet).toMatch(/@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*?transition-duration:\s*0\.01ms\s*!important/);

@@ -2064,7 +2064,7 @@ button.composer-control:focus-visible {
   border-color: transparent;
   color: var(--text-secondary);
   font-size: var(--hatch-type-label);
-  font-weight: 600;
+  font-weight: 400;
   gap: 6px;
 }
 
@@ -2860,7 +2860,7 @@ button.composer-control:focus-visible {
 
 .desktop-agent-conversation-group .sidebar-new-task {
   color: #a54e36;
-  font-weight: 650;
+  font-weight: 400;
 }
 
 .desktop-agent-conversation-group .sidebar-new-task:hover {
