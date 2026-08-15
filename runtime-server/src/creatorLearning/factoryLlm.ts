@@ -12,6 +12,8 @@ import type { FactoryPromptFailureTelemetry, FactoryPromptRunner } from "./types
 
 export const FACTORY_LLM_MODEL = "kimi-k2.6" as const;
 const FACTORY_LLM_PROFILE = resolveFactoryLlmProfile();
+/** A single Factory turn must not hold a worker lease indefinitely. */
+export const FACTORY_LLM_WALL_CLOCK_TIMEOUT_MS = 15 * 60_000;
 /** Total input + preserved multi-turn history + output capacity. */
 export const FACTORY_LLM_CONTEXT_WINDOW = FACTORY_LLM_PROFILE.contextWindow;
 /** Moonshot's documented Kimi K2.6 default maximum for one completion. */
@@ -40,7 +42,10 @@ type FactoryLlmAdapterOptions = Pick<
   | "timeoutMs"
   | "maxRetries"
   | "maxRetryDelayMs"
->;
+> & {
+  /** Hard deadline for one prompt, in addition to the HTTP idle timeout. */
+  wallClockTimeoutMs?: number;
+};
 
 export type FactoryLlmModel = Model<"openai-completions">;
 
@@ -212,6 +217,15 @@ export function createFactoryLlmPromptRunner(
       afterToolCall: (context) => submission.afterToolCall(context)
     });
     let rejectedStop: { reason: string; message?: string } | undefined;
+    let wallClockTimedOut = false;
+    const wallClockTimeoutMs = adapterOptions.wallClockTimeoutMs ?? FACTORY_LLM_WALL_CLOCK_TIMEOUT_MS;
+    if (!Number.isInteger(wallClockTimeoutMs) || wallClockTimeoutMs < 1) {
+      throw new Error("Factory LLM wallClockTimeoutMs must be a positive integer");
+    }
+    const wallClockTimer = setTimeout(() => {
+      wallClockTimedOut = true;
+      agent.abort();
+    }, wallClockTimeoutMs);
     const unsubscribe = agent.subscribe((event) => {
       submission.observeAgentEvent(event);
       if (
@@ -260,10 +274,16 @@ export function createFactoryLlmPromptRunner(
         }));
         await agent.prompt(options.prompt, images);
       } catch (error) {
+        if (wallClockTimedOut) {
+          throw new Error(`Factory Kimi K2.6 prompt timed out after ${wallClockTimeoutMs}ms`);
+        }
         if (rejectedStop) {
           throw new Error(rejectedStop.message ?? `Factory Kimi K2.6 prompt did not complete: ${rejectedStop.reason}`);
         }
         throw error;
+      }
+      if (wallClockTimedOut) {
+        throw new Error(`Factory Kimi K2.6 prompt timed out after ${wallClockTimeoutMs}ms`);
       }
       if (rejectedStop) {
         throw new Error(rejectedStop.message ?? `Factory Kimi K2.6 prompt did not complete: ${rejectedStop.reason}`);
@@ -298,6 +318,7 @@ export function createFactoryLlmPromptRunner(
       }
       throw error;
     } finally {
+      clearTimeout(wallClockTimer);
       options.signal?.removeEventListener("abort", abort);
       unsubscribe();
       agent.abort();

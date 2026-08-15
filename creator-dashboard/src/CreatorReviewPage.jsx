@@ -20,12 +20,16 @@ export function CreatorReviewPage({ token, request, runId, onBack, onRevision, o
 
   useEffect(() => { refresh(); }, [token, runId]);
 
-  const cases = useMemo(() => (review?.cases ?? []).filter((item) => item.status === "needs_review"), [review]);
+  const cases = useMemo(() => (review?.cases ?? []).filter((item) => item.status === "needs_review" || item.status === "judge_disputed"), [review]);
 
   async function act(item, action) {
     const draft = drafts[item.id] ?? {};
     if (action === "correct" && (!draft.correction?.trim() || !draft.why?.trim())) {
       setState((current) => ({ ...current, error: "Correction and why are required." }));
+      return;
+    }
+    if (action === "judge_dispute" && !draft.why?.trim()) {
+      setState((current) => ({ ...current, error: "Explain why the evaluation is wrong." }));
       return;
     }
     setState({ loading: false, busy: `${action}:${item.id}`, error: "" });
@@ -73,7 +77,7 @@ export function CreatorReviewPage({ token, request, runId, onBack, onRevision, o
     <PageHeader eyebrow="Candidate review" title={`Candidate v${review.candidate_version}`} body="Review the behavior against your reference. Evaluation is an assistant; your correction is the authority for this revision." />
     {state.error ? <InlineAlert tone="error">{state.error}</InlineAlert> : null}
     <div className="creator-review-summary">
-      <Summary label="Known cases" value={`${review.cases.filter((item) => item.status !== "needs_review").length} / ${review.cases.length}`} />
+      <Summary label="Known cases" value={`${review.cases.filter((item) => item.status === "accepted" || item.status === "question_rejected").length} / ${review.cases.length}`} />
       <Summary label="Needs your review" value={String(review.unresolved_count)} />
       <Summary label="Blind cases" value={`${review.blind.passed} / ${review.blind.total} passed`} detail="Questions and answers stay sealed." />
     </div>
@@ -84,12 +88,14 @@ export function CreatorReviewPage({ token, request, runId, onBack, onRevision, o
 
 function ReviewCase({ item, draft, setDraft, busy, onAction }) {
   const correcting = Boolean(draft.open);
+  const disputing = Boolean(draft.disputeOpen);
   const actionBusy = busy?.endsWith(`:${item.id}`);
+  const verdictLabel = item.status === "judge_disputed" ? "Eval disputed" : item.verdict;
   return <article className="creator-review-case">
-    <div className="creator-review-case-heading"><div><span className="creator-review-eyebrow">Known case · {item.verdict === "FAIL" ? "Eval failed" : "Eval passed"}</span><h2>{item.question}</h2></div><StatusTag tone={item.verdict === "FAIL" ? "error" : "success"}>{item.verdict}</StatusTag></div>
+    <div className="creator-review-case-heading"><div><span className="creator-review-eyebrow">Known case · {item.verdict === "FAIL" ? "Eval failed" : "Eval passed"}</span><h2>{item.question}</h2></div><StatusTag tone={item.status === "judge_disputed" ? "neutral" : item.verdict === "FAIL" ? "error" : "success"}>{verdictLabel}</StatusTag></div>
     <div className="creator-review-columns"><div><label>Your reference</label><p>{item.creator_reference}</p></div><div><label>Candidate output</label><p>{item.candidate_output}</p></div></div>
     <div className="creator-review-diagnosis"><label>Eval diagnosis</label><p>{item.diagnosis}</p></div>
-    {correcting ? <div className="creator-review-correction"><FormField label="What should the Agent have done?" required><Textarea value={draft.correction ?? ""} onChange={(event) => setDraft({ correction: event.target.value })} /></FormField><FormField label="Why is this the correct behavior?" required><Textarea value={draft.why ?? ""} onChange={(event) => setDraft({ why: event.target.value })} /></FormField><div className="creator-review-actions"><Button type="button" loading={actionBusy} disabled={Boolean(busy)} onClick={() => onAction(item, "correct")}>Submit correction</Button><Button variant="link" type="button" disabled={Boolean(busy)} onClick={() => setDraft({ open: false })}>Cancel</Button></div></div> : <div className="creator-review-actions"><Button type="button" disabled={Boolean(busy) || item.verdict === "FAIL"} onClick={() => onAction(item, "accept")}>Accept</Button><Button variant="secondary" type="button" disabled={Boolean(busy)} onClick={() => setDraft({ open: true })}>Correct this answer</Button><Button variant="link" type="button" disabled={Boolean(busy)} onClick={() => onAction(item, "reject_question")}>Reject this question</Button></div>}
+    {item.status === "judge_disputed" ? <div className="creator-review-correction"><p>Eval dispute recorded. This case is waiting for calibration; it does not change the Agent or count as passed.</p></div> : correcting ? <div className="creator-review-correction"><FormField label="What should the Agent have done?" required><Textarea value={draft.correction ?? ""} onChange={(event) => setDraft({ correction: event.target.value })} /></FormField><FormField label="Why is this the correct behavior?" required><Textarea value={draft.why ?? ""} onChange={(event) => setDraft({ why: event.target.value })} /></FormField><div className="creator-review-actions"><Button type="button" loading={actionBusy} disabled={Boolean(busy)} onClick={() => onAction(item, "correct")}>Submit correction</Button><Button variant="link" type="button" disabled={Boolean(busy)} onClick={() => setDraft({ open: false })}>Cancel</Button></div></div> : disputing ? <div className="creator-review-correction"><FormField label="Why is the evaluation wrong?" required><Textarea value={draft.why ?? ""} onChange={(event) => setDraft({ why: event.target.value })} /></FormField><div className="creator-review-actions"><Button type="button" loading={actionBusy} disabled={Boolean(busy)} onClick={() => onAction(item, "judge_dispute")}>Submit Eval dispute</Button><Button variant="link" type="button" disabled={Boolean(busy)} onClick={() => setDraft({ disputeOpen: false })}>Cancel</Button></div></div> : <div className="creator-review-actions"><Button type="button" disabled={Boolean(busy) || item.verdict === "FAIL"} onClick={() => onAction(item, "accept")}>Accept</Button><Button variant="secondary" type="button" disabled={Boolean(busy)} onClick={() => setDraft({ open: true })}>Correct this answer</Button><Button variant="link" type="button" disabled={Boolean(busy)} onClick={() => setDraft({ disputeOpen: true })}>Eval is wrong</Button><Button variant="link" type="button" disabled={Boolean(busy)} onClick={() => onAction(item, "reject_question")}>Reject this question</Button></div>}
   </article>;
 }
 
