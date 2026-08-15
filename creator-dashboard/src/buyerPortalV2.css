@@ -82,10 +82,11 @@
 }
 .buyer-v2__brand .hatch-brand__wordmark { font-size: var(--hatch-type-title); letter-spacing: var(--hatch-display-tracking, -.06em); line-height: var(--hatch-display-leading, .86); }
 .buyer-v2__brand--inverse { color: var(--buyer-inverse-text); }
-.buyer-v2__nav { display: flex; align-items: center; gap: 4px; }
+.buyer-v2__nav { display: flex; min-width: 0; align-items: center; justify-content: center; gap: 4px; }
 .buyer-v2__nav a {
   position: relative;
   display: inline-flex;
+  flex: 0 0 auto;
   min-height: 44px;
   align-items: center;
   padding: 0 15px;
@@ -492,8 +493,29 @@
   .buyer-v2__definition-list dd { text-align: left; }
 }
 
+@media (max-width: 560px) {
+  .buyer-v2__header { padding-inline: 8px; }
+  .buyer-v2__header-inner {
+    width: 100%;
+    gap: 6px 8px;
+    padding: 8px 8px 6px 10px;
+  }
+  .buyer-v2__nav {
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    margin-inline: -2px;
+    overflow-x: auto;
+    padding: 2px;
+    scrollbar-width: none;
+  }
+  .buyer-v2__nav::-webkit-scrollbar { display: none; }
+  .buyer-v2__nav a { flex: 0 0 auto; min-height: 38px; padding-inline: 10px; }
+  .buyer-v2__account { gap: 4px; }
+  .buyer-v2__account .hui-button { min-height: 38px; padding-inline: 8px; }
+}
+
 @media (max-width: 390px) {
-  .buyer-v2__header-inner { width: calc(100% - 20px); }
+  .buyer-v2__header-inner { width: 100%; }
   .hatch-brand__wordmark { display: none; }
   .buyer-v2__account { gap: 2px; }
   .buyer-v2__container, .buyer-v2__success-page { width: calc(100% - 24px); }

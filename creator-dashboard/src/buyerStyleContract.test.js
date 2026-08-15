@@ -25,3 +25,9 @@ test("a non-Creator account is sent to the real Creator signup intent", () => {
   assert.match(source, /const creatorIntent = returnTo === "\/studio" \|\| returnTo\.startsWith\("\/studio\/"\)/);
   assert.match(source, /creatorIntent \? "\/v1\/auth\/creator-signup" : "\/v1\/auth\/signup"/);
 });
+
+test("buyer navigation becomes a scrollable row before labels can be crushed", () => {
+  assert.match(stylesheet, /\.buyer-v2__nav\s*\{[^}]*min-width:\s*0;[^}]*justify-content:\s*center;/s);
+  assert.match(stylesheet, /@media\s*\(max-width:\s*560px\)[\s\S]*?\.buyer-v2__nav\s*\{[\s\S]*?flex-wrap:\s*nowrap;[\s\S]*?overflow-x:\s*auto;/s);
+  assert.match(stylesheet, /@media\s*\(max-width:\s*560px\)[\s\S]*?\.buyer-v2__nav a\s*\{[^}]*flex: 0 0 auto;/s);
+});

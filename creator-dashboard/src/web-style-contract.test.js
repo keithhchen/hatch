@@ -32,3 +32,11 @@ test("Web entrypoint consumes HUI instead of a second component stylesheet", () 
   assert.match(entry, /import "@hatch\/ui\/theme\.css"/);
   assert.doesNotMatch(entry, /components\/ui\//);
 });
+
+test("creator navigation preserves complete labels on narrow screens", () => {
+  const styles = read("creator-dashboard/src/creatorPortalV2.css");
+
+  assert.match(styles, /@media\s*\(max-width:\s*720px\)[\s\S]*?\.cpv2-sidebar > nav:not\(\.cpv2-global-nav\)\s*\{[\s\S]*?flex-wrap:\s*nowrap;[\s\S]*?overflow-x:\s*auto;/s);
+  assert.match(styles, /@media\s*\(max-width:\s*720px\)[\s\S]*?\.cpv2-global-nav\s*\{[\s\S]*?flex-wrap:\s*nowrap;[\s\S]*?overflow-x:\s*auto;/s);
+  assert.match(styles, /@media\s*\(max-width:\s*720px\)[\s\S]*?\.cpv2-global-nav a\s*\{[\s\S]*?flex:\s*0 0 auto;[\s\S]*?white-space:\s*nowrap;/s);
+});
