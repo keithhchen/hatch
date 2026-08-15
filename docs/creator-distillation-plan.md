@@ -1,8 +1,41 @@
-# Creator Distillation Plan
+# Creator Distillation Implementation Plan
 
-> 实现状态：这是 Creator Distillation 的 implementation contract；后端 authority、Review API 和 @hatch/ui 页面按此文件落地。仍未接入独立 Judge 训练、SFT、RFT 或权重更新。
+> 这是一份设计阶段冻结的 implementation contract：先定义产品表面、authority、状态转换和恢复语义，再实现后端、Review API 与 @hatch/ui 页面。它不是静态 demo，也不把 fixture 或假状态当作产品行为。
+
+## Goal
+
+把创作者的一套方法转成一个可验证、可发布的 Agent Product。复杂的 LLM graph、prompt、provider 和 worker checkpoint 留在后台；Creator 只在三个真正需要判断的时刻介入：
+
+```text
+教它（reference） → 审它（review） → 纠正它（correction）
+```
+
+本版本不做 Creator presentation / voice 配置，不做 Brief / Complete 服务项目，不做独立 Judge 训练、SFT、RFT 或权重更新。
 
 `:codex-annotation{index="1"}`
+
+## Implementation contract
+
+```text
+Task
+ ├─ Source Library artifacts
+ ├─ Immutable Snapshots
+ ├─ Runs / Revisions
+ │   ├─ Working cases
+ │   ├─ Known cases
+ │   ├─ Blind cases
+ │   ├─ Candidate / Eval artifacts
+ │   └─ Review / Correction artifacts
+ ├─ Append-only event graph
+ └─ Derived quality gates / UI projection
+```
+
+```text
+Postgres    = Task、Run、Revision、Case、Event、Gate、Release 的状态真相
+Object Store = 原始文件、projection、LLM 输出、Eval、Correction、Corpus 的 immutable 内容真相
+Worker state = 可恢复 checkpoint，不是业务 authority
+UI          = derived projection，不直接写业务状态
+```
 
 ## 产品表面
 
