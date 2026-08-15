@@ -373,6 +373,9 @@ export class CreatorFactoryService {
   ): Promise<{ review: CreatorReviewProjection; nextRun?: CreatorFactoryRunView }> {
     const run = await this.requireRun(creatorId, runId);
     const key = requireText(idempotencyKey, "Idempotency-Key");
+    if (!isCreatorReviewAction(request.action)) {
+      throw new CreatorFactoryRepositoryError("invalid_status", `Unsupported Creator Review action: ${String(request.action)}`);
+    }
     const review = await this.projectReview(run);
     if (request.candidateDigest !== review.candidateDigest) {
       throw new CreatorFactoryRepositoryError("version_conflict", "Review targets a stale Candidate digest");
@@ -390,6 +393,8 @@ export class CreatorFactoryService {
       if (!run.state?.pendingReview || run.state.stage !== "review_required") {
         throw new CreatorFactoryRepositoryError("invalid_status", `Factory run ${run.id} has no sealed held-out failure awaiting correction`);
       }
+      requireText(request.correction, "correction");
+      requireText(request.why, "why");
       const existing = events.find((event) => event.revisionId === revisionId
         && event.type === "heldout_failure_confirmed"
         && event.payload.idempotencyKey === key);
@@ -397,6 +402,20 @@ export class CreatorFactoryService {
         const nextRunId = typeof existing.payload.nextRunId === "string" ? existing.payload.nextRunId : undefined;
         return { review: await this.projectReview(run), ...(nextRunId ? { nextRun: await this.get(creatorId, nextRunId) } : {}) };
       }
+      const confirmationArtifact = await this.fileStore(run.id).writeArtifact(
+        `review/heldout-confirmation-${safeReviewKey(key)}.json`,
+        `${JSON.stringify({
+          contract_version: "1",
+          review_type: "heldout_confirmation",
+          run_id: run.id,
+          revision_id: revisionId,
+          action: request.action,
+          candidate_digest: review.candidateDigest,
+          correction: request.correction,
+          why: request.why,
+          sealed_report_digest: run.state.pendingReview.report.sha256
+        }, null, 2)}\n`
+      );
       const next = await this.createRevisionFromReview(creatorId, run, request, key, review, undefined, true);
       const parent = events.filter((event) => event.revisionId === revisionId).at(-1);
       await this.graphStore.appendEvent({
@@ -409,7 +428,7 @@ export class CreatorFactoryService {
         node: "calibration",
         actor: "creator",
         parentEventIds: parent ? [parent.id] : [],
-        artifactIds: [run.state.pendingReview.report.artifactId!],
+        artifactIds: [run.state.pendingReview.report.artifactId!, ...(confirmationArtifact.artifactId ? [confirmationArtifact.artifactId] : [])],
         payload: { idempotencyKey: key, action: request.action, candidateDigest: review.candidateDigest, ...(next.nextRun ? { nextRunId: next.nextRun.id } : {}) }
       });
       return next;
@@ -417,7 +436,7 @@ export class CreatorFactoryService {
     const caseId = requireText(request.caseId, "caseId");
     const target = review.cases.find((item) => item.id === caseId);
     if (!target) throw new CreatorFactoryRepositoryError("run_not_found", `Review case ${caseId} was not found`);
-    if (request.caseDigest && request.caseDigest !== target.caseDigest) {
+    if (request.caseDigest !== target.caseDigest) {
       throw new CreatorFactoryRepositoryError("version_conflict", "Review targets a stale case digest");
     }
     if (request.action === "accept" && target.verdict !== "PASS") {
