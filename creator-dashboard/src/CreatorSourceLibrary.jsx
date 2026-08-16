@@ -51,7 +51,7 @@ export function CreatorProductFiles({ token, productId, navigate, locale = "en" 
     try {
       const created = await createProduct(token, draft);
       const id = created?.product?.id ?? created?.product?.product_id ?? created?.id ?? created?.product_id;
-      if (!id) throw new Error("Product was created without an id.");
+      if (!id) throw new Error(t("productCreatedWithoutId"));
       navigate(`/studio/products/${encodeURIComponent(id)}/files`);
     } catch (nextError) { setError(nextError.message); }
     finally { setBusy(false); }
@@ -65,7 +65,7 @@ export function CreatorProductFiles({ token, productId, navigate, locale = "en" 
       const uploaded = [];
       for (const file of selectedFiles) uploaded.push(await uploadProductFile(token, product.id ?? product.product_id, file));
       setFiles((current) => [...uploaded, ...current]);
-      setNotice(`${uploaded.length} file${uploaded.length === 1 ? "" : "s"} added to this Product.`);
+      setNotice(t("filesAdded", uploaded.length));
     } catch (nextError) { setError(nextError.message); }
     finally { setBusy(false); }
   }
@@ -83,11 +83,11 @@ export function CreatorProductFiles({ token, productId, navigate, locale = "en" 
 
   if (!productId) {
     return <section className="cpv2-card cpv2-panel cpv2-source-library">
-      <BackToProducts navigate={navigate} />
+      <BackToProducts navigate={navigate} t={t} />
       <PageHeader label={t("createProduct")} title={t("startProductTitle")} body={t("startProductBody")} />
       {error ? <InlineAlert tone="error" title={t("productCouldNotBeCreated")}>{error}</InlineAlert> : null}
       <form onSubmit={create} className="cpv2-source-product-form">
-        <FormField label={t("productName")} required hint={t("productNameHint")}><Input required value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} placeholder="e.g. Interview Answer Rewriter" /></FormField>
+        <FormField label={t("productName")} required hint={t("productNameHint")}><Input required value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} placeholder={t("productNameExample")} /></FormField>
         <FormField label={t("whatProductDelivers")} required><Textarea required value={draft.promise} onChange={(event) => setDraft((current) => ({ ...current, promise: event.target.value }))} placeholder={t("describeResult")} /></FormField>
         <Button type="submit" loading={busy}>{t("createProduct")}</Button>
       </form>
@@ -95,7 +95,7 @@ export function CreatorProductFiles({ token, productId, navigate, locale = "en" 
   }
 
   return <section className="cpv2-source-library">
-    <BackToProducts navigate={navigate} />
+    <BackToProducts navigate={navigate} t={t} />
     <PageHeader label={t("files")} title={product?.name ?? t("productFiles")} body={t("addFilesBody")} />
     {error ? <InlineAlert tone="error" title={t("filesUnavailable")}>{error}</InlineAlert> : null}
     {notice ? <InlineAlert tone="success" title={t("filesAddedTitle")}>{notice}</InlineAlert> : null}
@@ -103,12 +103,12 @@ export function CreatorProductFiles({ token, productId, navigate, locale = "en" 
       <div className="cpv2-source-library-toolbar"><div><span className="cpv2-kicker">{t("productFiles")}</span><h2>{t("filesCount", selectedCount)}</h2></div></div>
       <FileUploader multiple accept=".pdf,.docx,.xlsx,.xls,.xlsm,.csv,.tsv,.txt,.md,.json,.html,.htm,.png,.jpg,.jpeg,.webp" onFiles={upload} disabled={busy} label={t("uploadFiles")} hint={t("localFilesOnly")} className="cpv2-source-uploader" />
       <p className="cpv2-muted">{t("sourceNote")}</p>
-      {files.length ? <List items={files} className="cpv2-source-list" ariaLabel={t("productFiles")} renderItem={(file) => <><div><strong>{file.display_name}</strong><small>{file.media_type} · {file.projection?.kind === "image" ? t("imageNative") : t("markdownProjection")}</small></div><span>{file.projection?.sha256?.slice(0, 18) ?? "digest pending"}</span></>} /> : <EmptyState title={t("noFilesYet")} body={t("firstFileForProduct")} />}
+      {files.length ? <List items={files} className="cpv2-source-list" ariaLabel={t("productFiles")} renderItem={(file) => <><div><strong>{file.display_name}</strong><small>{file.media_type} · {file.projection?.kind === "image" ? t("imageNative") : t("markdownProjection")}</small></div><span>{file.projection?.sha256?.slice(0, 18) ?? t("preparingFile")}</span></>} /> : <EmptyState title={t("noFilesYet")} body={t("firstFileForProduct")} />}
       <div className="cpv2-source-library-actions"><Button type="button" loading={busy} disabled={!files.length} onClick={() => void startRun()}>{t("generateVersion")}</Button></div>
     </article>
   </section>;
 }
 
-function BackToProducts({ navigate }) {
-  return <Breadcrumbs className="cpv2-breadcrumbs" items={[{ label: "Products", href: "/studio/products", onClick: (event) => { event.preventDefault(); navigate("/studio/products"); } }]} />;
+function BackToProducts({ navigate, t }) {
+  return <Breadcrumbs className="cpv2-breadcrumbs" items={[{ label: t("products"), href: "/studio/products", onClick: (event) => { event.preventDefault(); navigate("/studio/products"); } }]} />;
 }

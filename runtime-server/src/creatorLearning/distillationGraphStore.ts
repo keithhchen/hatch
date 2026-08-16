@@ -46,8 +46,6 @@ CREATE TABLE IF NOT EXISTS hatch_creator_distillation_revisions (
   created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
   UNIQUE (run_id, revision)
 );
-CREATE INDEX IF NOT EXISTS hatch_creator_distillation_revisions_product_idx
-  ON hatch_creator_distillation_revisions (product_id, revision DESC);
 CREATE TABLE IF NOT EXISTS hatch_creator_distillation_node_executions (
   id TEXT PRIMARY KEY,
   product_id TEXT NOT NULL,
@@ -64,8 +62,6 @@ CREATE TABLE IF NOT EXISTS hatch_creator_distillation_node_executions (
 );
 CREATE INDEX IF NOT EXISTS hatch_creator_distillation_node_exec_revision_idx
   ON hatch_creator_distillation_node_executions (revision_id, node, attempt);
-CREATE INDEX IF NOT EXISTS hatch_creator_distillation_artifacts_product_idx
-  ON hatch_creator_distillation_artifacts (product_id, created_at DESC);
 CREATE TABLE IF NOT EXISTS hatch_creator_distillation_events (
   id TEXT PRIMARY KEY,
   event_key TEXT NOT NULL,
@@ -82,8 +78,6 @@ CREATE TABLE IF NOT EXISTS hatch_creator_distillation_events (
   occurred_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
   UNIQUE (product_id, event_key)
 );
-CREATE INDEX IF NOT EXISTS hatch_creator_distillation_events_product_seq_idx
-  ON hatch_creator_distillation_events (product_id, sequence);
 CREATE TABLE IF NOT EXISTS hatch_creator_quality_gate_assessments (
   id TEXT PRIMARY KEY,
   gate_key TEXT NOT NULL,
@@ -107,10 +101,145 @@ CREATE TABLE IF NOT EXISTS hatch_creator_distillation_releases (
   corpus_artifact_id TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
 );
+
+-- Legacy graph rows used task_id. Add the Product key before creating any
+-- Product indexes, then fill it from the immutable Run/Task lineage. This is
+-- additive and idempotent: task_id remains only as historical provenance, and
+-- no row is dropped or silently assigned a new authority.
+ALTER TABLE hatch_creator_distillation_artifacts
+  ADD COLUMN IF NOT EXISTS product_id TEXT;
+ALTER TABLE hatch_creator_distillation_runs
+  ADD COLUMN IF NOT EXISTS product_id TEXT;
+ALTER TABLE hatch_creator_distillation_revisions
+  ADD COLUMN IF NOT EXISTS product_id TEXT;
+ALTER TABLE hatch_creator_distillation_node_executions
+  ADD COLUMN IF NOT EXISTS product_id TEXT;
+ALTER TABLE hatch_creator_distillation_events
+  ADD COLUMN IF NOT EXISTS product_id TEXT;
+ALTER TABLE hatch_creator_quality_gate_assessments
+  ADD COLUMN IF NOT EXISTS product_id TEXT;
+ALTER TABLE hatch_creator_distillation_releases
+  ADD COLUMN IF NOT EXISTS product_id TEXT;
+
+DO $$
+DECLARE
+  graph_table_name TEXT;
+  unresolved BIGINT;
+  has_legacy_tasks BOOLEAN := to_regclass('hatch_creator_distillation_tasks') IS NOT NULL;
+  has_task_product BOOLEAN := false;
+  task_product_expr TEXT;
+BEGIN
+  -- The repository migration runs before this schema and owns Product rows.
+  -- Refuse to mutate graph rows when that authority is unavailable; assigning a
+  -- historical task key as a Product would make the migration silently fork
+  -- identity.
+  IF to_regclass('hatch_creator_products') IS NULL THEN
+    RAISE EXCEPTION 'Cannot migrate Creator graph: hatch_creator_products is missing';
+  END IF;
+
+  IF has_legacy_tasks THEN
+    has_task_product := EXISTS (
+      SELECT 1
+      FROM information_schema.columns AS c
+      WHERE c.table_name = 'hatch_creator_distillation_tasks'
+        AND c.column_name = 'product_id'
+    );
+  END IF;
+
+  -- This expression is deliberately a lookup into the Product authority. If
+  -- there is no matching Product, the post-update audit below aborts startup.
+  -- It is not a fallback that invents a Product from task_id.
+  IF has_legacy_tasks AND has_task_product THEN
+    task_product_expr := '(SELECT product.id FROM hatch_creator_products AS product JOIN hatch_creator_distillation_tasks AS task ON product.id = COALESCE(NULLIF(task.product_id, ''''), task.id) WHERE task.id = %s.task_id)';
+  ELSIF has_legacy_tasks THEN
+    task_product_expr := '(SELECT product.id FROM hatch_creator_products AS product JOIN hatch_creator_distillation_tasks AS task ON product.id = task.id WHERE task.id = %s.task_id)';
+  ELSE
+    -- A database that no longer has the legacy Task table can still be
+    -- migrated when the old key was already the stable Product id.
+    task_product_expr := '(SELECT product.id FROM hatch_creator_products AS product WHERE product.id = %s.task_id)';
+  END IF;
+
+  -- Runs are the primary mapping boundary. Existing non-empty product_id values
+  -- are preserved; only legacy rows with task_id need a Product lookup.
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_name = 'hatch_creator_distillation_runs'
+      AND column_name = 'task_id'
+  ) THEN
+    EXECUTE format(
+      'UPDATE hatch_creator_distillation_runs AS run SET product_id = COALESCE(NULLIF(run.product_id, ''''), %s) WHERE run.product_id IS NULL OR run.product_id = ''''',
+      format(task_product_expr, 'run')
+    );
+  END IF;
+
+  -- Child rows inherit the Product identity from their Run. The task lookup is
+  -- only used for rows whose Run reference is absent or was not migrated.
+  FOREACH graph_table_name IN ARRAY ARRAY[
+    'hatch_creator_distillation_artifacts',
+    'hatch_creator_distillation_revisions',
+    'hatch_creator_distillation_node_executions',
+    'hatch_creator_distillation_events',
+    'hatch_creator_quality_gate_assessments',
+    'hatch_creator_distillation_releases'
+  ] LOOP
+    IF EXISTS (
+      SELECT 1
+      FROM information_schema.columns AS c
+      WHERE c.table_name = graph_table_name
+        AND c.column_name = 'task_id'
+    ) THEN
+      EXECUTE format(
+        'UPDATE %I AS item SET product_id = COALESCE(NULLIF(item.product_id, ''''), (SELECT run.product_id FROM hatch_creator_distillation_runs AS run WHERE run.id = item.run_id), %s) WHERE item.product_id IS NULL OR item.product_id = ''''',
+        graph_table_name,
+        format(task_product_expr, 'item')
+      );
+    END IF;
+
+    EXECUTE format(
+      'SELECT count(*) FROM %I AS item LEFT JOIN hatch_creator_products AS product ON product.id = item.product_id WHERE item.product_id IS NULL OR item.product_id = '''' OR product.id IS NULL',
+      graph_table_name
+    ) INTO unresolved;
+    IF unresolved > 0 THEN
+      RAISE EXCEPTION 'Cannot migrate Creator graph: % unmapped rows remain in %; task_id must resolve to an existing Product', unresolved, graph_table_name;
+    END IF;
+  END LOOP;
+
+  EXECUTE 'SELECT count(*) FROM hatch_creator_distillation_runs AS run LEFT JOIN hatch_creator_products AS product ON product.id = run.product_id WHERE run.product_id IS NULL OR run.product_id = '''' OR product.id IS NULL' INTO unresolved;
+  IF unresolved > 0 THEN
+    RAISE EXCEPTION 'Cannot migrate Creator graph: % unmapped rows remain in hatch_creator_distillation_runs; task_id must resolve to an existing Product', unresolved;
+  END IF;
+END $$;
+
+ALTER TABLE hatch_creator_distillation_artifacts
+  ALTER COLUMN product_id SET NOT NULL;
+ALTER TABLE hatch_creator_distillation_runs
+  ALTER COLUMN product_id SET NOT NULL;
+ALTER TABLE hatch_creator_distillation_revisions
+  ALTER COLUMN product_id SET NOT NULL;
+ALTER TABLE hatch_creator_distillation_node_executions
+  ALTER COLUMN product_id SET NOT NULL;
+ALTER TABLE hatch_creator_distillation_events
+  ALTER COLUMN product_id SET NOT NULL;
+ALTER TABLE hatch_creator_quality_gate_assessments
+  ALTER COLUMN product_id SET NOT NULL;
+ALTER TABLE hatch_creator_distillation_releases
+  ALTER COLUMN product_id SET NOT NULL;
+
+CREATE INDEX IF NOT EXISTS hatch_creator_distillation_revisions_product_idx
+  ON hatch_creator_distillation_revisions (product_id, revision DESC);
+CREATE INDEX IF NOT EXISTS hatch_creator_distillation_artifacts_product_idx
+  ON hatch_creator_distillation_artifacts (product_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS hatch_creator_distillation_events_product_seq_idx
+  ON hatch_creator_distillation_events (product_id, sequence);
 CREATE UNIQUE INDEX IF NOT EXISTS hatch_creator_distillation_releases_revision_product_uq
   ON hatch_creator_distillation_releases (product_id, revision_id);
 CREATE INDEX IF NOT EXISTS hatch_creator_distillation_releases_product_idx
   ON hatch_creator_distillation_releases (product_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS hatch_creator_distillation_runs_product_uq
+  ON hatch_creator_distillation_runs (product_id);
+CREATE UNIQUE INDEX IF NOT EXISTS hatch_creator_distillation_events_product_event_uq
+  ON hatch_creator_distillation_events (product_id, event_key);
 `;
 
 export class PostgresDistillationGraphStore implements DistillationGraphStore {

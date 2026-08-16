@@ -36,6 +36,7 @@ import {
   type CreatorFactoryRepository
 } from "./creatorLearning/repository.js";
 import { CreatorFactoryService } from "./creatorLearning/service.js";
+import type { CreatorProductRecord } from "./creatorLearning/products.js";
 import { objectStoreFromEnvironment } from "./creatorLearning/objectStore.js";
 import { ProductFileStore, ProductFilesError, type ProductFileView, type ProductSnapshotView } from "./creatorLearning/productFiles.js";
 import { PostgresDistillationGraphStore } from "./creatorLearning/distillationGraphStore.js";
@@ -423,38 +424,12 @@ async function route(
     if (account === SESSION_QUERY_REJECTED) return;
     if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
     if (request.method === "GET") {
-      const products = new Map<string, Record<string, unknown>>();
-      for (const row of await context.store.listAgentCorpora(account.id)) {
-        const productId = String(row.product_id ?? row.agent_id ?? "");
-        if (!productId) continue;
-        products.set(productId, {
-          product_id: productId,
-          creator_id: account.id,
-          name: row.product_name ?? (row as Record<string, unknown>).name ?? productId,
-          promise: row.product_promise ?? row.product_description ?? "",
-          description: row.product_description ?? row.product_promise ?? "",
-          status: row.status ?? "published",
-          corpus_digest: row.corpus_digest ?? null,
-          published_at: row.published_at ?? null,
-          ...(row.brief_spec ? { brief_spec: row.brief_spec } : {})
-        });
-      }
-      for (const product of await context.factoryService.listProducts(account.id)) {
-        const productId = publicProductId(product);
-        if (!productId || products.has(productId)) continue;
-        products.set(productId, {
-          product_id: productId,
-          creator_id: account.id,
-          name: product.name,
-          promise: publicProductPromise(product),
-          description: publicProductPromise(product),
-          status: product.runId ? "working" : "draft",
-          ...(product.briefSpec ? { brief_spec: product.briefSpec } : {}),
-          created_at: product.createdAt,
-          updated_at: product.updatedAt
-        });
-      }
-      sendJson(response, 200, { products: [...products.values()] });
+      const products = mergeCreatorProductListings(
+        await context.store.listAgentCorpora(account.id),
+        await context.factoryService.listProducts(account.id),
+        account.id
+      );
+      sendJson(response, 200, { products });
       return;
     }
     const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
@@ -984,6 +959,78 @@ type CreatorProductBoundary = {
   /** Internal repository row key; never serialized in a public response. */
   repositoryId?: string;
 };
+
+type PublishedProductListingRow = {
+  product_id?: string;
+  agent_id?: string;
+  product_name?: string;
+  name?: string;
+  product_description?: string;
+  product_promise?: string;
+  status?: string;
+  corpus_digest?: string;
+  published_at?: string;
+  brief_spec?: unknown;
+};
+
+/**
+ * Build the Creator product list from both authorities without allowing the
+ * published corpus snapshot to overwrite current authoring fields. Published
+ * rows contribute release projection only; Product records own identity,
+ * name, promise, and brief_spec.
+ */
+export function mergeCreatorProductListings(
+  publishedRows: readonly PublishedProductListingRow[],
+  authoringProducts: readonly CreatorProductRecord[],
+  creatorId: string
+): Record<string, unknown>[] {
+  const products = new Map<string, Record<string, unknown>>();
+  for (const row of publishedRows) {
+    const productId = String(row.product_id ?? row.agent_id ?? "");
+    if (!productId) continue;
+    products.set(productId, {
+      product_id: productId,
+      creator_id: creatorId,
+      name: row.product_name ?? row.name ?? productId,
+      promise: row.product_promise ?? row.product_description ?? "",
+      description: row.product_description ?? row.product_promise ?? "",
+      status: row.status ?? "published",
+      corpus_digest: row.corpus_digest ?? null,
+      published_at: row.published_at ?? null,
+      ...(row.brief_spec ? { brief_spec: row.brief_spec } : {})
+    });
+  }
+  for (const product of authoringProducts) {
+    const productId = publicProductId(product);
+    if (!productId) continue;
+    const authoringProduct: Record<string, unknown> = {
+      product_id: productId,
+      creator_id: creatorId,
+      name: product.name,
+      promise: publicProductPromise(product),
+      description: publicProductPromise(product),
+      status: product.runId ? "working" : "draft",
+      created_at: product.createdAt,
+      updated_at: product.updatedAt
+    };
+    if (product.briefSpec) authoringProduct.brief_spec = product.briefSpec;
+    const publishedProduct = products.get(productId);
+    if (!publishedProduct) {
+      products.set(productId, authoringProduct);
+      continue;
+    }
+    const mergedProduct: Record<string, unknown> = {
+      ...publishedProduct,
+      ...authoringProduct,
+      // Keep the published status/digest/timestamps as release projection.
+      status: publishedProduct.status ?? authoringProduct.status
+    };
+    // An absent authoring BriefSpec must clear a stale published projection.
+    if (!product.briefSpec) delete mergedProduct.brief_spec;
+    products.set(productId, mergedProduct);
+  }
+  return [...products.values()];
+}
 
 async function productForCreator(
   context: RegistryContext,
