@@ -93,6 +93,9 @@ test("Creator Factory schema persists scheduling, ownership, state summary, and 
   assert.match(POSTGRES_CREATOR_FACTORY_REPOSITORY_SCHEMA, /attempts INTEGER NOT NULL DEFAULT 0/);
   assert.match(POSTGRES_CREATOR_FACTORY_REPOSITORY_SCHEMA, /last_error TEXT/);
   assert.match(POSTGRES_CREATOR_FACTORY_REPOSITORY_SCHEMA, /UNIQUE \(creator_id, idempotency_key\)/);
+  assert.match(POSTGRES_CREATOR_FACTORY_REPOSITORY_SCHEMA, /INSERT INTO hatch_creator_products/);
+  assert.match(POSTGRES_CREATOR_FACTORY_REPOSITORY_SCHEMA, /FROM hatch_creator_distillation_tasks AS legacy/);
+  assert.match(POSTGRES_CREATOR_FACTORY_REPOSITORY_SCHEMA, /ON CONFLICT \(id\) DO NOTHING/);
 });
 
 test("In-memory repository scopes reads to the Creator and creates idempotently", async () => {

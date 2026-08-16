@@ -551,6 +551,35 @@ ALTER TABLE hatch_creator_products ADD COLUMN IF NOT EXISTS idempotency_key TEXT
 ALTER TABLE hatch_creator_products ADD COLUMN IF NOT EXISTS input_digest TEXT;
 CREATE UNIQUE INDEX IF NOT EXISTS hatch_creator_products_idempotency_idx
   ON hatch_creator_products (creator_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+
+-- One-time read-time cutover for databases created before Product-only. The
+-- legacy table is historical input only; Product rows are the sole authority
+-- after this idempotent INSERT. No Task route or second write path is kept.
+DO $$
+BEGIN
+  IF to_regclass('hatch_creator_distillation_tasks') IS NOT NULL THEN
+    EXECUTE $migration$
+      INSERT INTO hatch_creator_products
+        (id, creator_id, name, promise, brief, status, run_id, latest_revision_id, created_at, updated_at, deleted_at)
+      SELECT
+        COALESCE(NULLIF(legacy.product_id, ''), legacy.id),
+        legacy.creator_id,
+        legacy.name,
+        COALESCE(NULLIF(legacy.brief, ''), NULLIF(legacy.name, '')),
+        legacy.brief,
+        CASE WHEN legacy.deleted_at IS NOT NULL THEN 'deleted' ELSE 'active' END,
+        legacy.run_id,
+        legacy.latest_revision_id,
+        COALESCE(legacy.created_at, clock_timestamp()),
+        COALESCE(legacy.updated_at, legacy.created_at, clock_timestamp()),
+        legacy.deleted_at
+      FROM hatch_creator_distillation_tasks AS legacy
+      WHERE COALESCE(NULLIF(legacy.product_id, ''), legacy.id) IS NOT NULL
+      ON CONFLICT (id) DO NOTHING
+    $migration$;
+  END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS hatch_creator_factory_runs (
   id TEXT PRIMARY KEY,
   creator_id TEXT NOT NULL,
