@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   briefSnapshotPromptBlock,
   createBriefSnapshot,
+  draftBriefSpecForProduct,
   normalizeBriefSnapshot,
   normalizeBriefSpec
 } from "./brief.js";
@@ -37,4 +38,12 @@ test("BriefSnapshot rejects missing required answers and digest tampering", () =
     () => normalizeBriefSnapshot({ ...snapshot, spec_digest: "sha256:" + "0".repeat(64) }),
     (error: unknown) => (error as { code?: string }).code === "brief_answer_invalid"
   );
+});
+
+test("Product Brief draft is deterministic, text-only, and derived from Product content", () => {
+  const draft = draftBriefSpecForProduct("Decision Coach", "Turn messy evidence into one clear recommendation.");
+  assert.deepEqual(draft.fields.map((field) => field.id), ["goal", "context"]);
+  assert.equal(draft.fields[0]?.required, true);
+  assert.match(draft.fields[0]?.label ?? "", /Decision Coach/);
+  assert.match(draft.fields[1]?.label ?? "", /messy evidence/);
 });

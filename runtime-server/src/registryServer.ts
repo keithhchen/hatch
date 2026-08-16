@@ -459,6 +459,7 @@ async function route(
         name: product.name,
         promise: publicProductPromise(product),
         status: "draft",
+        ...(product.briefSpec ? { brief_spec: product.briefSpec } : {}),
         created_at: product.createdAt,
         updated_at: product.updatedAt
       }
@@ -845,8 +846,9 @@ async function route(
     const product = await productForCreator(context, account.id, agentId);
     if (!product) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
     if (!product.brief_spec) {
-      sendJson(response, 422, { error: { code: "brief_spec_required", message: "Publish a Brief before publishing this Product." } });
-      return;
+      const error = new Error("brief_spec_required");
+      (error as Error & { status?: number }).status = 422;
+      throw error;
     }
     const lease = beginPublishWork(response, context, `creator:${account.id}`);
     if (!lease) return;

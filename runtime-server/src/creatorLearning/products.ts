@@ -27,6 +27,7 @@ export type CreateCreatorProductInput = {
   creatorId: string;
   name: string;
   promise: string;
+  briefSpec: BriefSpec;
 };
 
 export type CreatorProductRepository = {

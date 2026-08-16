@@ -955,13 +955,31 @@ function App() {
 
   function briefSpecForSelectedEntitlement(entitlementId = selectedEntitlementId) {
     const entitlement = creatorAgentEntitlements.find((item) => item.entitlement_id === entitlementId);
-    return entitlement?.brief_spec ?? entitlement?.product?.brief_spec ?? null;
+    const entitlementSpec = entitlement?.brief_spec ?? entitlement?.product?.brief_spec;
+    if (entitlementSpec) return entitlementSpec;
+    // The entitlement projection and the authenticated Runtime session are
+    // normally identical. During a rollout the entitlement may omit the
+    // optional projection, so use the already verified session product only
+    // when it belongs to the selected Product.
+    return creatorAgent?.id === (entitlement?.product_id || entitlement?.agent_id)
+      ? creatorAgent?.briefSpec ?? null
+      : null;
   }
 
   function newBriefTask({ openInNewWindow = false } = {}) {
     const spec = briefSpecForSelectedEntitlement();
     const answers = Object.fromEntries((Array.isArray(spec?.fields) ? spec.fields : []).map((field) => [field.id, ""]));
-    return { spec, answers, openInNewWindow, status: "editing", error: "" };
+    // A form is one user action. Give it its own idempotency scope so a
+    // network retry can safely reuse its key, while a later New Task can
+    // never replay the abandoned form's request.
+    return {
+      spec,
+      answers,
+      openInNewWindow,
+      creationPurpose: `brief:${stableRandomId()}`,
+      status: "editing",
+      error: ""
+    };
   }
 
   function launchConversationBinding() {
@@ -2255,11 +2273,22 @@ function App() {
       const selectedEntitlement = creatorAgentEntitlements.find(
         (entitlement) => entitlement.entitlement_id === selectedEntitlementId
       );
-      setCreatorAgent((current) => creatorAgentFromBoundSession(
+      const nextAgent = creatorAgentFromBoundSession(
         message,
         selectedEntitlement,
-        current
-      ));
+        creatorAgent
+      );
+      setCreatorAgent(nextAgent);
+      if (nextAgent.briefSpec) {
+        setBriefTask((current) => {
+          if (!current || current.status !== "editing") return current;
+          const answers = Object.fromEntries(nextAgent.briefSpec.fields.map((field) => [
+            field.id,
+            current.answers?.[field.id] ?? ""
+          ]));
+          return { ...current, spec: nextAgent.briefSpec, answers, error: "" };
+        });
+      }
       connectedRef.current = true;
       reconnectAttemptRef.current = 0;
       setRuntimeRetryExhausted(false);
@@ -2757,7 +2786,7 @@ function App() {
     setStatus(`Permission updated for the next turn: ${permissionPolicyLabel(nextMode)}`);
   }
 
-  async function createLibraryConversation({ allowActiveRun = false, briefAnswers = undefined } = {}) {
+  async function createLibraryConversation({ allowActiveRun = false, briefAnswers = undefined, purpose = "create" } = {}) {
     if (activeRunRef.current && !allowActiveRun) {
       setStatus("Stop or close the active task before starting another conversation.");
       return "";
@@ -2767,7 +2796,7 @@ function App() {
       setStatus("Choose a Creator Agent before starting a conversation.");
       return "";
     }
-    const creation = conversationCreationRequest(binding, "create");
+    const creation = conversationCreationRequest(binding, purpose);
     try {
       const result = await createConversation(serverUrl, buyerSession.accessToken, binding, {
         title: `New ${creatorAgent.name} task`,
@@ -2859,6 +2888,7 @@ function App() {
     }));
     const created = await createLibraryConversation({
       allowActiveRun: Boolean(draft?.openInNewWindow),
+      purpose: draft?.creationPurpose || "create",
       briefAnswers
     });
     if (!created) {
@@ -3588,6 +3618,7 @@ function App() {
         ) : briefTask ? (
           <TaskBriefForm
             spec={briefTask.spec ?? briefSpecForSelectedEntitlement()}
+            productName={creatorAgent.name}
             answers={briefTask.answers}
             status={briefTask.status}
             error={briefTask.error}
@@ -4467,16 +4498,20 @@ function EmptyThread({ connected, creatorAgent, chatLoading }) {
   );
 }
 
-function TaskBriefForm({ spec, answers, status, error, onChange, onCancel, onSubmit }) {
+function TaskBriefForm({ spec, productName, answers, status, error, onChange, onCancel, onSubmit }) {
   const t = useI18n();
   const fields = Array.isArray(spec?.fields) ? spec.fields : [];
   const submitting = status === "submitting";
+  const complete = fields.length > 0 && fields.every((field) => (
+    !field.required || String(answers?.[field.id] ?? "").trim().length > 0
+  ));
   return (
     <div className="task-brief-stage">
       <section className="task-brief-form" aria-labelledby="task-brief-title">
         <div className="task-brief-heading">
           <span className="eyebrow">{t("brief.title")}</span>
           <h2 id="task-brief-title">{t("brief.title")}</h2>
+          {productName ? <strong className="task-brief-product">{productName}</strong> : null}
           <p>{t("brief.subtitle")}</p>
         </div>
         {fields.length === 0 ? (
@@ -4492,6 +4527,7 @@ function TaskBriefForm({ spec, answers, status, error, onChange, onCancel, onSub
                 <textarea
                   rows={4}
                   value={answers?.[field.id] ?? ""}
+                  aria-required={field.required ? "true" : "false"}
                   disabled={submitting}
                   onChange={(event) => onChange(field.id, event.target.value)}
                 />
@@ -4504,7 +4540,7 @@ function TaskBriefForm({ spec, answers, status, error, onChange, onCancel, onSub
           <Button variant="secondary" type="button" onClick={onCancel} disabled={submitting}>
             {t("brief.cancel")}
           </Button>
-          <Button type="button" onClick={onSubmit} disabled={submitting || fields.length === 0}>
+          <Button type="button" onClick={onSubmit} disabled={submitting || !complete}>
             {submitting ? t("brief.submitting") : t("brief.submit")}
           </Button>
         </div>
@@ -4518,11 +4554,11 @@ function TaskBriefCard({ snapshot }) {
   const fields = Array.isArray(snapshot?.fields) ? snapshot.fields : [];
   if (!snapshot || fields.length === 0) return null;
   return (
-    <section className="task-brief-card" aria-label={t("brief.cardTitle")}>
-      <div className="task-brief-card-heading">
+    <details className="task-brief-card">
+      <summary className="task-brief-card-heading">
         <strong>{t("brief.cardTitle")}</strong>
         <span>{t("brief.readOnly")}</span>
-      </div>
+      </summary>
       <dl>
         {fields.map((field) => (
           <div className="task-brief-card-row" key={field.id}>
@@ -4531,7 +4567,7 @@ function TaskBriefCard({ snapshot }) {
           </div>
         ))}
       </dl>
-    </section>
+    </details>
   );
 }
 

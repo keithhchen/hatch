@@ -5,7 +5,7 @@ import { requireQuestionBatchId } from "./questionBatch.js";
 import type { FactoryRunState, FactoryStage, FactoryStartInput } from "./types.js";
 import type { CreateCreatorProductInput, CreatorProductRecord, CreatorProductRepository } from "./products.js";
 import { validateProductText } from "./products.js";
-import { normalizeBriefSpec, type BriefSpec } from "../brief.js";
+import { draftBriefSpecForProduct, normalizeBriefSpec, type BriefSpec } from "../brief.js";
 
 /**
  * Durable control-plane state for Creator Factory work.
@@ -184,6 +184,7 @@ export class InMemoryCreatorFactoryRepository implements CreatorFactoryRepositor
         name: validateProductText(input.name, "product.name", 240),
         promise: validateProductText(input.promise, "product.promise"),
         brief: validateProductText(input.promise, "product.promise"),
+        briefSpec: normalizeBriefSpec(input.briefSpec),
         status: "active",
         createdAt: now,
         updatedAt: now
@@ -645,11 +646,12 @@ export class PostgresCreatorFactoryRepository implements CreatorFactoryRepositor
     const creatorId = requireNonEmpty(input.creatorId, "product.creatorId");
     const name = validateProductText(input.name, "product.name", 240);
     const promise = validateProductText(input.promise, "product.promise");
+    const briefSpec = normalizeBriefSpec(input.briefSpec);
     const result = await this.pool.query<ProductRow>(`
-      INSERT INTO hatch_creator_products (id, creator_id, name, promise)
-      VALUES ($1, $2, $3, $4)
+      INSERT INTO hatch_creator_products (id, creator_id, name, promise, brief_spec)
+      VALUES ($1, $2, $3, $4, $5::jsonb)
       RETURNING *
-    `, [id, creatorId, name, promise]);
+    `, [id, creatorId, name, promise, JSON.stringify(briefSpec)]);
     return productFromRow(requireRow(result.rows[0], "Product insert returned no row"));
   }
 
@@ -1147,6 +1149,13 @@ type ProductRow = QueryResultRow & {
 
 function productFromRow(row: ProductRow): CreatorProductRecord {
   const promise = validateProductText(row.promise ?? row.brief ?? "", "product.promise");
+  // Existing rows from before the Brief contract are upgraded at the read
+  // boundary with the same deterministic Factory draft used for new Products.
+  // New writes always persist brief_spec JSONB, so this is a one-time legacy
+  // migration path rather than a second source of authority.
+  const briefSpec = row.brief_spec
+    ? normalizeBriefSpec(typeof row.brief_spec === "string" ? JSON.parse(row.brief_spec) : row.brief_spec)
+    : draftBriefSpecForProduct(row.name, promise);
   return {
     id: row.id,
     creatorId: row.creator_id,
@@ -1154,7 +1163,7 @@ function productFromRow(row: ProductRow): CreatorProductRecord {
     promise,
     // Keep legacy workers readable while Product.id remains the only identity.
     brief: promise,
-    ...(row.brief_spec ? { briefSpec: normalizeBriefSpec(typeof row.brief_spec === "string" ? JSON.parse(row.brief_spec) : row.brief_spec) } : {}),
+    briefSpec,
     status: row.status,
     ...(row.run_id ? { runId: row.run_id } : {}),
     ...(row.latest_revision_id ? { latestRevisionId: row.latest_revision_id } : {}),

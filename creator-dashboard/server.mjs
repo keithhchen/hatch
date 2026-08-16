@@ -1275,12 +1275,12 @@ export async function createDashboardApp(options = {}) {
         return send(response, 404, { error: { code: "not_found", message: "Route not found." } });
       }
 
-      const productContractPath = url.pathname.match(/^\/v1\/creator\/products(?:\/[^/]+(?:\/(?:files|snapshots|runs|versions|brief-spec)(?:\/[^/]+)?)?)?$/);
+      const productContractPath = url.pathname.match(/^\/v1\/creator\/products(?:\/[^/]+(?:\/(?:files|snapshots|runs|versions)(?:\/[^/]+)?)?)?$/);
       const productContractWrite = productContractPath && (
         request.method === "POST" || request.method === "PATCH" || request.method === "PUT"
       ) && (
         url.pathname === "/v1/creator/products"
-        || /\/(files|snapshots|runs|brief-spec)$/.test(url.pathname)
+        || /\/(files|snapshots|runs)$/.test(url.pathname)
         || /^\/v1\/creator\/products\/[^/]+$/.test(url.pathname)
       );
       const productContractRead = productContractPath && request.method === "GET" && (
@@ -3270,13 +3270,15 @@ function publishReadiness(product, state) {
   const ownershipValid = Boolean(product?.creator_id);
   const materializationReady = Boolean(candidate?.digest && candidate?.corpus_verified);
   const productIdentityValid = Boolean(product?.product_id && UUID_V4_PATTERN.test(product.product_id));
+  const briefSpecValid = isPublishableBriefSpec(product?.brief_spec);
   const checks = [
     [candidateApproved, "candidate approval is stale"],
     [noCriticalFailures, "critical candidate gates are incomplete"],
     [copyComplete, "public promise, description, or boundaries are incomplete"],
     [ownershipValid, "Creator ownership is missing"],
     [materializationReady, "Registry materialization is not ready"],
-    [productIdentityValid, "canonical Product UUID is invalid"]
+    [productIdentityValid, "canonical Product UUID is invalid"],
+    [briefSpecValid, "Creator Brief is missing or invalid"]
   ];
   return {
     candidate_approved: candidateApproved,
@@ -3285,6 +3287,7 @@ function publishReadiness(product, state) {
     ownership_valid: ownershipValid,
     materialization_ready: materializationReady,
     product_identity_valid: productIdentityValid,
+    brief_spec_valid: briefSpecValid,
     blockers: checks.filter(([ready]) => !ready).map(([, message]) => message),
     ready: checks.every(([ready]) => ready)
   };
@@ -3296,6 +3299,7 @@ function isPublishableBriefSpec(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)
     || value.contract_version !== "1" || !Array.isArray(value.fields)
     || value.fields.length < 1 || value.fields.length > 16) return false;
+  if (Object.keys(value).some((key) => key !== "contract_version" && key !== "fields")) return false;
   const ids = new Set();
   return value.fields.every((field) => {
     if (!field || typeof field !== "object" || Array.isArray(field)) return false;

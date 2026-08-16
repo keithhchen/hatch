@@ -15,7 +15,7 @@ import {
   type FactoryRunRecord
 } from "./repository.js";
 import type { ArtifactRef, CreatorQuestion, FactoryAgentProduct, FactoryAgentTool, FactoryStartInput, MaterializedAgentCorpus } from "./types.js";
-import { normalizeBriefSpec, type BriefSpec } from "../brief.js";
+import { draftBriefSpecForProduct, normalizeBriefSpec, type BriefSpec } from "../brief.js";
 
 export type CreatorCorpusAssetLayer = "manifest" | "system" | "skill" | "reference" | "knowledge";
 
@@ -279,11 +279,14 @@ export class CreatorFactoryService {
 
   async createProduct(creatorId: string, input: { name: string; promise?: string; brief?: string }): Promise<CreatorProductRecord> {
     const repository = this.productRepository();
+    const name = validateProductText(input.name, "product.name", 240);
+    const promise = validateProductText(input.promise ?? input.brief ?? "", "product.promise");
     const product = await repository.createProduct({
       id: randomUUID(),
       creatorId: requireText(creatorId, "creatorId"),
-      name: validateProductText(input.name, "product.name", 240),
-      promise: validateProductText(input.promise ?? input.brief ?? "", "product.promise")
+      name,
+      promise,
+      briefSpec: draftBriefSpecForProduct(name, promise)
     });
     if (this.graphStore) {
       await this.graphStore.initialize();

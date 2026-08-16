@@ -218,15 +218,13 @@ function bytesToBase64(arrayBuffer) {
 }
 
 export function startFactoryRunFromSources(token, product, documentIds) {
-  return dashboardRequest("/v1/creator/factory-runs", {
+  const productId = product.id ?? product.product_id;
+  return dashboardRequest(`/v1/creator/products/${encodeURIComponent(productId)}/runs`, {
     method: "POST",
     token,
     headers: { "idempotency-key": crypto.randomUUID() },
     body: JSON.stringify({
-      product_id: product.id ?? product.product_id,
-      product_name: product.name ?? product.product_name,
-      product_promise: product.promise ?? product.description ?? "",
-      source_document_ids: documentIds
+      file_ids: documentIds
     })
   });
 }

@@ -1030,7 +1030,14 @@ pub async fn open_conversation_window(
     };
     let conversation_id = validate_conversation_id(&request.conversation_id)?;
     let binding = validate_conversation_window_binding(&request)?;
-    open_conversation_window_impl(&app, conversation_id, binding, router.inner(), true, request.start_task)
+    open_conversation_window_impl(
+        &app,
+        conversation_id,
+        binding,
+        router.inner(),
+        true,
+        request.start_task,
+    )
 }
 
 fn open_conversation_window_impl<R: Runtime>(
@@ -1093,7 +1100,11 @@ fn open_conversation_window_impl<R: Runtime>(
                 let builder = WebviewWindowBuilder::new(
                     app,
                     label.clone(),
-                    WebviewUrl::App(conversation_window_path(&conversation_id, binding.as_ref(), start_task)),
+                    WebviewUrl::App(conversation_window_path(
+                        &conversation_id,
+                        binding.as_ref(),
+                        start_task,
+                    )),
                 )
                 .title("Hatch — Conversation")
                 .inner_size(1180.0, 780.0)

@@ -19,6 +19,29 @@ export type BriefSpec = {
   fields: BriefFieldSpec[];
 };
 
+/**
+ * Generate the initial Creator-facing Brief draft from the Product's own
+ * promise. This is deliberately deterministic: Brief is a normal form, not
+ * an AI conversation. The Creator must still review and confirm the draft
+ * before the Product can be published.
+ */
+export function draftBriefSpecForProduct(productNameValue: unknown, productPromiseValue: unknown): BriefSpec {
+  const productName = typeof productNameValue === "string" ? productNameValue.trim() : "";
+  const productPromise = typeof productPromiseValue === "string" ? productPromiseValue.trim() : "";
+  if (!productName || !productPromise) {
+    throw new BriefValidationError("brief_spec_invalid", "A Product Brief draft requires a Product name and promise");
+  }
+  const name = productName.length > 180 ? `${productName.slice(0, 177)}...` : productName;
+  const promise = productPromise.length > 220 ? `${productPromise.slice(0, 217)}...` : productPromise;
+  return normalizeBriefSpec({
+    contract_version: BRIEF_SPEC_CONTRACT_VERSION,
+    fields: [
+      { id: "goal", label: `What should ${name} help you accomplish?`, required: true },
+      { id: "context", label: `What context should Hatch know to apply this promise: ${promise}`, required: false }
+    ]
+  });
+}
+
 export type BriefAnswerInput = {
   field_id: string;
   value: string;
