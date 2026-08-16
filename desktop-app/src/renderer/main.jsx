@@ -241,7 +241,7 @@ function DesktopAuxiliaryWindow({ kind }) {
           <p className="desktop-auxiliary-lede">Creator agents, on your terms.</p>
           <p>Hatch keeps the desktop boundary native while React renders the conversation work surface.</p>
           <dl className="desktop-auxiliary-facts">
-            <div><dt>Version</dt><dd>0.1.8</dd></div>
+            <div><dt>Version</dt><dd>0.1.9</dd></div>
             <div><dt>Architecture</dt><dd>Tauri Hybrid</dd></div>
           </dl>
         </section>
@@ -2088,7 +2088,7 @@ function App() {
         entitlement_id: targetEntitlementId,
         ...(targetProductId ? { product_id: targetProductId } : {}),
         ...(targetCreatorId ? { creator_id: targetCreatorId } : {}),
-        client_version: "0.1.8",
+        client_version: "0.1.9",
         local_tools: [...PLATFORM_LOCAL_TOOLS],
       }));
     });
@@ -5021,6 +5021,46 @@ async function discardNativeDropContexts(contextIds) {
   }
 }
 
+class RendererErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  componentDidCatch(error, info) {
+    console.error("[hatch:renderer-error]", error, info);
+  }
+
+  render() {
+    const error = this.state.error;
+    if (!error) return this.props.children;
+    const message = error instanceof Error ? error.message : String(error);
+    return (
+      <main
+        role="alert"
+        style={{
+          boxSizing: "border-box",
+          minHeight: "100%",
+          padding: "96px 48px",
+          color: "#221c17",
+          background: "#f3ede3",
+          fontFamily: "-apple-system, BlinkMacSystemFont, sans-serif"
+        }}
+      >
+        <h1 style={{ margin: 0, fontSize: "28px", fontWeight: 600 }}>Hatch could not open</h1>
+        <p style={{ margin: "16px 0 0", maxWidth: "720px", lineHeight: 1.5 }}>
+          The desktop renderer stopped during startup. Reopen Hatch after updating to the latest build.
+        </p>
+        <pre style={{ marginTop: "24px", whiteSpace: "pre-wrap", fontSize: "13px", lineHeight: 1.5 }}>{message}</pre>
+      </main>
+    );
+  }
+}
+
 async function invokeTauri(command, args) {
   return invokeDesktopCommand(command, args, {
     invokeImpl: invoke,
@@ -5029,7 +5069,9 @@ async function invokeTauri(command, args) {
 }
 
 createRoot(document.getElementById("root")).render(
-  <HatchUIProvider atmosphere className="desktop-ui-root">
-    <App />
-  </HatchUIProvider>
+  <RendererErrorBoundary>
+    <HatchUIProvider atmosphere className="desktop-ui-root">
+      <App />
+    </HatchUIProvider>
+  </RendererErrorBoundary>
 );

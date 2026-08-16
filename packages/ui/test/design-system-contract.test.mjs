@@ -36,6 +36,7 @@ test("@hatch/ui owns the shared Button, Dialog, Select and CSS entrypoint", () =
   assert.match(index, /export \* from "\.\/Control\.jsx"/);
   assert.match(index, /export \* from "\.\/Overlays\.jsx"/);
   assert.match(button, /export function Button/);
+  assert.match(control, /^import React from "react";/);
   assert.match(button, /size === "compact" && "hui-control--compact"/);
   assert.match(control, /export function ButtonControl/);
   assert.match(control, /export function SelectControl/);
