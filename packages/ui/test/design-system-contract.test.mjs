@@ -94,7 +94,7 @@ test("Web and Storybook consume the shared package and its canonical tokens", ()
   assert.doesNotMatch(creatorPortal, /className="cpv2-(?:primary|secondary|danger)"/);
   assert.doesNotMatch(creatorCss, /\.cpv2-(?:primary|secondary|danger)(?:\b|,)/);
   assert.match(creatorPortal, /<CreatorProductWorkspace/);
-  assert.match(creatorPortal, /<HatchTabs[\s\S]*ariaLabel="Product sections"/);
+  assert.match(creatorPortal, /<HatchTabs[\s\S]*ariaLabel=(?:"Product sections"|\{t\("productSections"\)\})/);
   assert.match(creatorPortal, /<Checkbox key=\{lossId\}/);
   assert.doesNotMatch(creatorPortal, /<(?:input|textarea|select)\b/);
   assert.match(creatorWorkspace, /<FormField label=\{t\("whatProductDelivers"\)\}/);
