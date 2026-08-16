@@ -94,17 +94,22 @@ export function parseQuestions(markdown: string): CreatorQuestion[] {
 }
 
 function parseQuestionBlock(id: string, body: string): CreatorQuestion {
-    const question = namedSection(body, "Question", ["Why this question", "Intent", "Creator Answer", "Leakage group"])
+    const question = namedSection(body, "Question", ["Question kind", "Why this question", "Intent", "Creator Answer", "Leakage group"])
       || firstContentBlock(body);
-    const intent = namedSection(body, "Why this question", ["Intent", "Creator Answer", "Leakage group"])
-      || namedSection(body, "Intent", ["Creator Answer", "Leakage group"]);
-    const leakageGroup = namedSection(body, "Leakage group", ["Creator Answer"]);
+    const kindText = namedSection(body, "Question kind", ["Question", "Why this question", "Intent", "Creator Answer", "Leakage group"]).trim().toLowerCase();
+    const kind = kindText === "provenance_confirmation" || kindText === "provenance confirmation"
+      ? "provenance_confirmation" as const
+      : kindText === "behavior" ? "behavior" as const : undefined;
+    const intent = namedSection(body, "Why this question", ["Question kind", "Intent", "Creator Answer", "Leakage group"])
+      || namedSection(body, "Intent", ["Question kind", "Creator Answer", "Leakage group"]);
+    const leakageGroup = namedSection(body, "Leakage group", ["Question kind", "Creator Answer"]);
     if (!question.trim()) throw new Error(`Question ${id} has no question body`);
     return {
       id,
       question: question.trim(),
       ...(intent.trim() ? { intent: intent.trim() } : {}),
-      ...(leakageGroup.trim() ? { leakageGroup: leakageGroup.trim() } : {})
+      ...(leakageGroup.trim() ? { leakageGroup: leakageGroup.trim() } : {}),
+      ...(kind ? { kind } : {})
     };
 }
 
@@ -122,6 +127,7 @@ export function renderCreatorAnswerTemplate(questions: CreatorQuestion[], questi
     ...questions.flatMap((item) => [
       `## ${item.id}`,
       "",
+      ...(item.kind === "provenance_confirmation" ? ["### Question kind", "", "provenance_confirmation", ""] : []),
       "### Question",
       "",
       item.question,
@@ -173,6 +179,7 @@ export function renderQaSet(title: string, rows: CreatorQa[]): string {
     ...rows.flatMap((item) => [
       `## ${item.id}`,
       "",
+      ...(item.kind === "provenance_confirmation" ? ["### Question kind", "", "provenance_confirmation", ""] : []),
       "### Question",
       "",
       item.question,

@@ -5,6 +5,7 @@ import {
   FACTORY_LLM_MODEL,
   FACTORY_LLM_CONTEXT_WINDOW,
   FACTORY_LLM_MAX_COMPLETION_TOKENS,
+  FACTORY_LLM_WALL_CLOCK_TIMEOUT_MS,
   FACTORY_PROVIDER_CONFIGURATION_MESSAGE,
   FACTORY_PROVIDER_QUOTA_MESSAGE,
   FACTORY_PROVIDER_TRANSIENT_MESSAGE,
@@ -182,6 +183,37 @@ test("Factory Kimi K2.6 rejects a length-truncated response even when it contain
     }),
     /did not complete: length/
   );
+});
+
+test("Factory Kimi K2.6 has a hard wall-clock deadline in addition to HTTP idle timeout", async () => {
+  const controller = new AbortController();
+  const telemetry: FactoryPromptFailureTelemetry[] = [];
+  const runner = createFactoryLlmPromptRunner({
+    apiKey: "factory-k3-wall-clock-test-key",
+    baseUrl: "https://api.moonshot.ai/v1",
+    maxRetries: 0,
+    wallClockTimeoutMs: 25,
+    fetch: async (_input, init) => await new Promise<Response>((_resolve, reject) => {
+      const abort = () => reject(new DOMException("Request aborted", "AbortError"));
+      if (init?.signal?.aborted) abort();
+      else init?.signal?.addEventListener("abort", abort, { once: true });
+    })
+  });
+
+  await assert.rejects(
+    () => runner({
+      purpose: "evidence.extract",
+      systemPrompt: "system",
+      prompt: "prompt",
+      outputContract: { kind: "evidence_ledger", requiredSections: ["Task evidence"] },
+      signal: controller.signal,
+      reportFailureTelemetry: (item) => telemetry.push(item)
+    }),
+    new RegExp(FACTORY_PROVIDER_TRANSIENT_MESSAGE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+  );
+  assert.equal(telemetry.length, 1);
+  assert.equal(telemetry[0]!.code, "provider_error");
+  assert.ok(FACTORY_LLM_WALL_CLOCK_TIMEOUT_MS > 0);
 });
 
 test("Factory Kimi K2.6 classifies quota exhaustion and never rethrows provider account JSON", async () => {

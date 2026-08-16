@@ -52,7 +52,7 @@ import type {
   QaEvaluation
 } from "./types.js";
 
-const PROMPT_VERSION = "creator-factory-v6-planned-incremental-corpus";
+const PROMPT_VERSION = "creator-factory-v7-provenance-and-reasoning-contract";
 const SEALED_FAILURE_MESSAGE = "Sealed Factory operation failed; sensitive diagnostics were not persisted";
 // Conservative character ceiling leaves ample room inside Kimi K2.6's context
 // context for instructions, multilingual tokenization, reasoning, and output.
@@ -63,6 +63,7 @@ const INITIAL_EVIDENCE_SECTIONS = [
   "Cases",
   "Boundaries",
   "Intellectual genealogy",
+  "Provenance hypotheses",
   "Layer routing candidates",
   "Unknowns and contradictions"
 ];
@@ -111,6 +112,7 @@ export class CreatorFactory {
     });
     await store.initialize();
     let reviewContextArtifact: ArtifactRef | undefined;
+    let calibrationArtifact: ArtifactRef | undefined;
     let promotedHeldoutQa: CreatorQa[] = [];
     let seededReviewState: FactoryRunState | undefined;
     let seededEvidence: ArtifactRef | undefined;
@@ -130,6 +132,12 @@ export class CreatorFactory {
         reviewText,
         startInput.reviewContext.mode === "heldout_correction"
       );
+      if (startInput.reviewContext.calibrationArtifact) {
+        calibrationArtifact = await store.writeArtifact(
+          `review/calibration-${shortId()}.json`,
+          await sourceStore.readArtifact(startInput.reviewContext.calibrationArtifact)
+        );
+      }
       if (startInput.reviewContext.mode === "heldout_correction") {
         promotedHeldoutQa = parsePromotedHeldoutCases(reviewText);
       }
@@ -231,7 +239,15 @@ export class CreatorFactory {
       corpusRevisionCount: 0,
       developmentEvaluated: directReviewRevision,
       ...(directReviewRevision ? { compileReason: heldoutCorrection ? "heldout_failure" : "development_failure" } : {}),
-      ...(reviewContextArtifact ? { calibrationFeedback: [reviewContextArtifact] } : {}),
+      ...((startInput.reviewContext?.mode === "heldout_correction"
+        ? calibrationArtifact
+        : reviewContextArtifact)
+        ? {
+          calibrationFeedback: [
+            (startInput.reviewContext?.mode === "heldout_correction" ? calibrationArtifact : reviewContextArtifact)!
+          ]
+        }
+        : {}),
       createdAt: now,
       updatedAt: now
     };
@@ -509,8 +525,14 @@ export class CreatorFactory {
     const rejectedRepairFailure = rejectedRepairTarget
       ? await store.readArtifact(rejectedRepairTarget.failureReport)
       : undefined;
+    // Sealed held-out reports are durable audit artifacts, but they are never
+    // compiler input. Older revisions may have persisted a sealed report in
+    // calibrationFeedback before the correction boundary was enforced, so
+    // fail closed here as well as at revision creation time.
     const evaluationFeedback = (await Promise.all(
-      (state.calibrationFeedback ?? []).map((reference) => store.readArtifact(reference))
+      (state.calibrationFeedback ?? [])
+        .filter((reference) => !reference.sealed)
+        .map((reference) => store.readArtifact(reference))
     )).join("\n\n---\n\n");
     const regression = state.artifacts.regressionSet
       ? parseQaSet(await store.readArtifact(state.artifacts.regressionSet))
@@ -983,6 +1005,11 @@ export class CreatorFactory {
       latest.agentCorpus = {
         rootPath: materialized.bundleRoot,
         manifest: materialized.manifestRef,
+        assets: {
+          system: materialized.assets.system,
+          skills: materialized.assets.skills,
+          knowledge: materialized.assets.knowledge
+        },
         syntheticQa: materialized.assets.syntheticQa,
         heldOut: materialized.assets.heldOut,
         digest: materialized.digest,
@@ -1087,7 +1114,7 @@ export class CreatorFactory {
           throw new Error(`Eval LLM reused excluded leakage group ${leakageGroup}`);
         }
         seen.add(normalized);
-        return { ...question, leakageGroup, id: `${idPrefix}.Q${index + 1}` };
+        return { ...question, kind: question.kind ?? "behavior", leakageGroup, id: `${idPrefix}.Q${index + 1}` };
       });
     } catch (error) {
       throw sealedFactoryFailure(error);
@@ -1253,6 +1280,11 @@ export class CreatorFactory {
     candidate.agentCorpus = {
       rootPath: materialized.bundleRoot,
       manifest: materialized.manifestRef,
+      assets: {
+        system: materialized.assets.system,
+        skills: materialized.assets.skills,
+        knowledge: materialized.assets.knowledge
+      },
       syntheticQa: materialized.assets.syntheticQa,
       heldOut: materialized.assets.heldOut,
       digest: materialized.digest,
@@ -1317,11 +1349,12 @@ export class CreatorFactory {
     const rows: CreatorQuestion[] = [];
     if (state.artifacts.developmentQa) rows.push(...parseQaSet(await store.readArtifact(state.artifacts.developmentQa)));
     for (const reference of state.artifacts.heldoutRounds) rows.push(...parseQaSet(await store.readArtifact(reference)));
-    return rows.map(({ id, question, intent, leakageGroup }) => ({
+    return rows.map(({ id, question, intent, leakageGroup, kind }) => ({
       id,
       question,
       ...(intent ? { intent } : {}),
-      ...(leakageGroup ? { leakageGroup } : {})
+      ...(leakageGroup ? { leakageGroup } : {}),
+      ...(kind ? { kind } : {})
     }));
   }
 
@@ -2358,6 +2391,10 @@ function validateStartInput(input: FactoryStartInput): void {
     }
     if (!input.reviewContext.artifact.path || !/^sha256:[a-f0-9]{64}$/.test(input.reviewContext.artifact.sha256)) {
       throw new Error("reviewContext.artifact must be an immutable artifact reference");
+    }
+    if (input.reviewContext.calibrationArtifact
+      && (!input.reviewContext.calibrationArtifact.path || !/^sha256:[a-f0-9]{64}$/.test(input.reviewContext.calibrationArtifact.sha256))) {
+      throw new Error("reviewContext.calibrationArtifact must be an immutable artifact reference");
     }
   }
 }

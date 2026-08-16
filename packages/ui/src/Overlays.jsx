@@ -9,6 +9,7 @@ import { Command as CommandPrimitive } from "cmdk";
 import { Drawer as DrawerPrimitive } from "vaul";
 import { Check, ChevronDown, ChevronRight, Search, X } from "lucide-react";
 import { Button, IconButton } from "./Button.jsx";
+import { ControlContent, controlClassName } from "./ControlAppearance.jsx";
 import { cn } from "./utils.js";
 
 export const Popover = PopoverPrimitive.Root;
@@ -45,13 +46,20 @@ export function DropdownMenu({ trigger, items, align = "end", label = "Actions" 
   );
 }
 
-export function Select({ value, defaultValue, onValueChange, options, placeholder = "Select…", label, disabled, className, leading, size = "medium", ...triggerProps }) {
+export function Select({ value, defaultValue, onValueChange, options, placeholder = "Select…", label, disabled, className, leading, size = "medium", surface, ...triggerProps }) {
   return (
     <SelectPrimitive.Root value={value} defaultValue={defaultValue} onValueChange={onValueChange} disabled={disabled}>
-      <SelectPrimitive.Trigger {...triggerProps} className={cn("hui-select-trigger", leading && "hui-select-trigger--with-leading", size === "compact" && "hui-control--compact", className)} aria-label={label || triggerProps["aria-label"]}>
-        {leading ? <span className="hui-select-leading">{leading}</span> : null}
-        <SelectPrimitive.Value className="hui-select-value" placeholder={placeholder} />
-        <SelectPrimitive.Icon><ChevronDown className="hui-select-caret" aria-hidden="true" /></SelectPrimitive.Icon>
+      <SelectPrimitive.Trigger {...triggerProps} className={cn("hui-select-trigger", leading && "hui-select-trigger--with-leading", surface ? controlClassName({ size, surface }) : size === "compact" && "hui-control--compact", className)} aria-label={label || triggerProps["aria-label"]}>
+        <ControlContent
+          leading={leading}
+          trailing={(
+            <SelectPrimitive.Icon asChild>
+              <ChevronDown className="hui-select-caret" aria-hidden="true" />
+            </SelectPrimitive.Icon>
+          )}
+        >
+          <SelectPrimitive.Value className="hui-select-value" placeholder={placeholder} />
+        </ControlContent>
       </SelectPrimitive.Trigger>
       <SelectPrimitive.Portal>
         <SelectPrimitive.Content className="hui-select-content" position="popper" sideOffset={6}>

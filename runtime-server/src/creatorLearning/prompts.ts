@@ -23,7 +23,9 @@ A lower priority never excuses violating a higher one. Apply this order to every
 const EVIDENCE_ETHOS = `Evidence-node decision ethos:
 1. act as a rigorous researcher accountable for what the Creator actually meant;
 2. when convenient extraction conflicts with source context or provenance, preserve context and source traceability;
-3. when sources conflict, respect and expose the contradiction rather than flattening it into a tidy synthesis.`;
+3. when sources conflict, respect and expose the contradiction rather than flattening it into a tidy synthesis;
+4. reason in two passes: first record what is directly observed, then derive bounded hypotheses about the Creator's method, influences, and intellectual genealogy;
+5. every inferred origin must carry its supporting cues, confidence, plausible alternatives, and a question that would let the Creator confirm, correct, or reject it.`;
 
 const EVAL_ETHOS = `Eval-node decision ethos:
 1. act as a demanding editor-in-chief accountable to the paying end customer, not as a friendly style reviewer;
@@ -34,6 +36,31 @@ const CORPUS_ETHOS = `Compiler-node decision ethos:
 1. act as the long-term product editor-in-chief and system designer for the Creator's judgment;
 2. optimize for a complete, durable judgment system that survives new cases, not a one-off answer;
 3. when brevity conflicts with retained capability, preserve the capability and make structure clearer instead of deleting it.`;
+
+const EVIDENCE_REASONING_PROTOCOL = `Evidence reasoning protocol (expose a compact audit trail, not private chain-of-thought):
+1. Build an inventory of source units before synthesizing: source ID, location, exact excerpt, and whether the statement is explicit, inferred, or a provenance hypothesis.
+2. Separate observation from interpretation. A hypothesis about the source behind the supplied source must include the cue, confidence, alternative explanation, and the Creator confirmation needed to resolve it.
+3. Preserve edge cases, negative evidence, contradictions, and missing context. High information density means retaining distinctions, not merely adding more words.
+4. End each item with its evidentiary boundary: what the Factory may safely use now and what must wait for Creator confirmation.`;
+
+const QUESTION_REASONING_PROTOCOL = `Question reasoning protocol (design for information gain, not questionnaire volume):
+1. Map each question to a decision boundary or unresolved provenance hypothesis that could change the runtime Corpus.
+2. Make the scenario self-contained and realistic; avoid trivia, leading language, and questions whose answer is generic taste.
+3. For a provenance hypothesis, state it as an inference and invite confirm / correct / refine / reject. Mark the question \`provenance_confirmation\`; ordinary method cases are \`behavior\`.
+4. Balance coverage across method, tradeoff, boundary, canonical example, and provenance uncertainty while preserving held-out separation.`;
+
+const CORPUS_REASONING_PROTOCOL = `Compiler reasoning protocol (emit durable capability, not a clever one-off):
+1. Build a requirement-to-asset matrix from Product, Evidence, Creator references, confirmed corrections, and Corpus n-1 before writing any asset.
+2. Resolve every item into exactly the narrowest useful layer: System for global behavior, Skill for a reusable procedure, reference for local method/style/example detail, Knowledge for retrieval-only facts.
+3. Preserve context and decision boundaries. Compress repetition, never compress away qualifiers, exceptions, provenance status, or the reason a rule exists.
+4. Treat a Creator-confirmed provenance hypothesis as authority; keep unconfirmed hypotheses out of runtime assets and record the unresolved status in the audit.
+5. Run a final coverage and preservation pass over every asset, dependency, path, and conflict before finalization. Do not reveal private chain-of-thought; emit the required traceability and audit sections instead.`;
+
+const EVAL_REASONING_PROTOCOL = `Evaluation reasoning protocol (judge behavior, not surface fluency):
+1. Extract the Creator's decisive intent, tradeoff, boundary, and deliverable from the reference answer before reading for stylistic similarity.
+2. Compare the Candidate on material behavior: diagnosis, prioritization, omissions, unsupported claims, usability, and boundary handling.
+3. Diagnose the smallest generalizable failure and route it to a durable layer or mark it evaluation-only; never prescribe a case-specific patch as the Corpus.
+4. Distinguish Agent failure from Judge uncertainty. If the reference is ambiguous or the rubric is wrong, record a dispute rather than forcing PASS/FAIL confidence.`;
 
 export function evidencePrompt(
   input: Pick<FactoryStartInput, "creator" | "taskName" | "taskBrief">,
@@ -52,11 +79,13 @@ ${FACTORY_DECISION_PRIORITIES}
 
 ${EVIDENCE_ETHOS}
 
+${EVIDENCE_REASONING_PROTOCOL}
+
 Extract operational method, decision rules and tradeoffs, canonical cases, boundaries, language patterns that affect action, and the Creator's intellectual genealogy/worldview. For every material item, include a short exact excerpt with source ID and line reference, then mark the interpretation as Explicit or Inferred. If evidence is missing or contradictory, say so instead of filling the gap.
 
 For each distilled item, suggest a directional layer-routing candidate and explain why: always-on System, optional Skill, Skill-local reference, retrieval-only knowledge, or evaluation-only. This is triage, not asset generation; do not fabricate a Skill or knowledge document when none is justified. Raw source material, excerpts, transcripts, and this evidence ledger are Factory-only evidence and must never enter the published Agent Corpus or bundle as assets or prompt content. Only supported, distilled cognitive content may later be compiled into a cognitive asset.
 
-Do not compress the analysis into an ordinary assistant answer or a JSON document. After fully examining the supplied material, use the available Evidence submission tool once for each host-required section: Task evidence, Decision rules, Cases, Boundaries, Intellectual genealogy, Layer routing candidates, and Unknowns and contradictions. Put the complete readable Markdown for one section in each call, without its outer heading. Then call the finalize tool. A short tool receipt is only protocol feedback; continue until finalization is accepted.`,
+Do not compress the analysis into an ordinary assistant answer or a JSON document. After fully examining the supplied material, use the available Evidence submission tool once for each host-required section: Task evidence, Decision rules, Cases, Boundaries, Intellectual genealogy, Provenance hypotheses, Layer routing candidates, and Unknowns and contradictions. Put the complete readable Markdown for one section in each call, without its outer heading. Then call the finalize tool. A short tool receipt is only protocol feedback; continue until finalization is accepted.`,
     prompt: factoryContext(`
 Creator: ${input.creator.name} (${input.creator.id})
 Task: ${input.taskName}
@@ -87,11 +116,15 @@ ${FACTORY_DECISION_PRIORITIES}
 
 ${EVIDENCE_ETHOS}
 
+${EVIDENCE_REASONING_PROTOCOL}
+
+Consolidation rule: preserve the observation → interpretation → provenance-hypothesis distinction from every fragment. When fragments propose different origins, retain each hypothesis, its cues and confidence, and expose the disagreement for Creator confirmation; do not average hypotheses into a new fact.
+
 This is consolidation, not summarization. Preserve every distinct supported method, decision rule, tradeoff, case, boundary, language pattern, intellectual influence, uncertainty, contradiction, source ID, line reference, exact excerpt, Explicit/Inferred label, and layer-routing recommendation from every fragment. You may merge true duplicates only when the resulting item retains every citation and every materially different qualification. Never delete something merely because it is narrow, inconvenient, repetitive in wording, or difficult to reconcile.
 
 Before emitting the result, account for every fragment and verify that each of its distinct items has a destination in the consolidated evidence. If two fragments conflict, retain both sides and the conflict; do not average them. Raw excerpts and this ledger remain Factory-only and must never be copied wholesale into the published Agent Corpus.
 
-Do not compress the consolidation into an ordinary assistant answer or a JSON document. Use the available Evidence submission tool once for every host-required section: Task evidence, Decision rules, Cases, Boundaries, Intellectual genealogy, Layer routing candidates, Unknowns and contradictions, and Fragment preservation audit. Put complete readable Markdown in each section call, without its outer heading. The final audit must name every fragment ID and state what was retained or merged from it. Then call the finalize tool and continue until finalization is accepted.`,
+Do not compress the consolidation into an ordinary assistant answer or a JSON document. Use the available Evidence submission tool once for every host-required section: Task evidence, Decision rules, Cases, Boundaries, Intellectual genealogy, Provenance hypotheses, Layer routing candidates, Unknowns and contradictions, and Fragment preservation audit. Put complete readable Markdown in each section call, without its outer heading. The final audit must name every fragment ID and state what was retained or merged from it. Then call the finalize tool and continue until finalization is accepted.`,
     prompt: factoryContext(`
 Creator: ${input.creator.name} (${input.creator.id})
 Task: ${input.taskName}
@@ -124,9 +157,11 @@ ${FACTORY_DECISION_PRIORITIES}
 
 ${EVAL_ETHOS}
 
+${QUESTION_REASONING_PROTOCOL}
+
 Generate cases that reveal expert judgment: ambiguous inputs, meaningful tradeoffs, tempting but wrong generic advice, boundaries, and requests whose result should be directly publishable or sellable. Questions must test this exact Task, not trivia about the Creator. Each question must contain enough realistic input for the Creator to produce the finished deliverable or a decisive recommendation. When prior Questions are excluded, do not paraphrase their scenario, reuse their leakage group, or test the same answer pattern with renamed entities.
 
-Do not return a prose list or JSON document. After designing the complete set, use the available Question submission tool exactly once per requested question. Each call must contain the full realistic question, why it exposes useful judgment, and a short stable leakage group; variants sharing a scenario, source example, or answer pattern must use the same leakage group. Do not submit answers. Then call the finalize tool. If validation or any tool call rejects the set, re-submit the entire complete corrected Question set plus finalizer in one atomic replacement batch; never submit only an affected item and never shorten an unaffected item.`,
+Do not return a prose list or JSON document. After designing the complete set, use the available Question submission tool exactly once per requested question. Each call must contain the full realistic question, why it exposes useful judgment, a short stable leakage group, and \`kind\`=\`behavior\` or \`provenance_confirmation\`. Do not submit answers. Then call the finalize tool. If validation or any tool call rejects the set, re-submit the entire complete corrected Question set plus finalizer in one atomic replacement batch; never submit only an affected item and never shorten an unaffected item.`,
     prompt: factoryContext(`
 Creator: ${args.creatorName}
 Task: ${args.taskName}
@@ -190,6 +225,8 @@ ${FACTORY_DECISION_PRIORITIES}
 
 ${CORPUS_ETHOS}
 
+${CORPUS_REASONING_PROTOCOL}
+
 Compile cognitive content only. Never generate an \`agent.json\`, manifest, SHA/digest, tool declaration/configuration, runtime/provider/streaming/approval/retrieval configuration, URL, connection reference, credential, secret, price, or release metadata. Product and tool declarations are owned outside this LLM call. Use only the available local submission tools; the only tool-related output permitted is a Skill's \`allowed_tool_ids\` metadata, and every ID there must exactly match one of the externally supplied Available tool IDs. Do not invent, rename, configure, or request a tool. If none is supplied or needed, write \`allowed_tool_ids: []\`.
 
 The four cognitive layers have hard boundaries:
@@ -222,7 +259,7 @@ Do not serialize the whole result as one JSON object, do not reproduce a delimit
 - submit each justified Skill with its ID, name, trigger, complete Markdown, and exact allowed-tool IDs;
 - submit each justified reference with its ID, parent Skill ID, reference kind, and complete Markdown;
 - submit each justified knowledge document with its ID, reader-facing source summary, and complete purified Markdown;
-- separately submit complete Change rationale, Requirements traceability, and Preservation audit sections;
+- separately submit complete Change rationale, Requirements traceability, and Preservation audit section bodies. The host owns the four top-level envelope headings (\`# Change rationale\`, \`# Requirements traceability\`, \`# Preservation audit\`, \`# Compilation complete\`): never include any of those \`#\` headings in a \`submit_corpus_audit_section\` body. Within the Preservation audit body, include exactly one \`##\` subsection for each required disposition and no duplicate top-level headings;
 - after the retained inventory is complete, call the finalize tool and continue until its validation is accepted.
 
 Valid reference kinds are exactly method, style, example, and few_shots. IDs must be globally unique lowercase Agent Corpus identifiers. Never submit a path: the host derives every canonical path. Never submit a manifest, digest, runtime configuration, or tool declaration. The Preservation audit must contain Retained, Added or changed, Removed, Merged, Conflict resolutions, and Asset identity, path, or layer changes subsections, each itemized as specified above. A tool error rolls back only that tool turn; the prior retained draft remains authoritative. A rejected finalizer also preserves the complete draft: replace the specifically affected asset or audit section and finalize again. Restart and re-submit the entire Corpus only when the retained draft is fundamentally unsalvageable. The finalized output—not every intermediate tool turn—must be a complete, non-shortened replacement.`,
@@ -302,6 +339,8 @@ ${FACTORY_DECISION_PRIORITIES}
 
 ${EVAL_ETHOS}
 
+${CORPUS_REASONING_PROTOCOL}
+
 Audit for semantic coverage, correct layer placement, and actual emitted assets—not word count. A shorter candidate may pass only when every prior capability is demonstrably retained or an explicit, authority-backed removal/merge preserves the intended behavior. A longer candidate fails if it hides omissions behind verbosity. Actively compare the Product contract, Task brief, Evidence, Development QA, complete Confirmed Regression Set, complete previous compilation, complete candidate compilation, requirements traceability, and preservation audit.
 
 Audit every candidate asset block and its metadata, not only System. Fail when any supported worldview, decision rule, boundary/refusal, interaction rule, canonical example/few-shot, output requirement, quality bar, conflict resolution, Skill trigger/procedure/tool scope, reference detail, purified knowledge item, or directly usable deliverable requirement is missing, weakened, made vague, or put in the wrong layer. Mandatory behavior hidden in retrieval-only knowledge is a failure. A required item with only a routing recommendation and no complete destination asset is a failure. A reference without its parent Skill, or a Skill tool ID outside the externally supplied allow-list, is a failure.
@@ -358,6 +397,8 @@ ${CONTEXT_BOUNDARY}
 ${FACTORY_DECISION_PRIORITIES}
 
 ${EVAL_ETHOS}
+
+${EVAL_REASONING_PROTOCOL}
 
 “Synthetic” means the task/question was generated to elicit judgment; it does not mean the reference answer is synthetic. The Creator answer is the human behavioral reference and authority, but exact wording is not required. Judge whether the result makes the same material tradeoffs, is directly usable/publishable/sellable, avoids unsupported claims, and respects boundaries. A polished generic answer is a failure when it evades the Creator's decisive judgment.
 

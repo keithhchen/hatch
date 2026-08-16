@@ -29,7 +29,8 @@ describe("desktop component presentation contract", () => {
 
   it("uses shared navigation and button primitives for high-frequency sidebar actions", () => {
     expect(source).toContain('NavigationItem,');
-    expect(source).toContain('Control,');
+    expect(source).toContain('ButtonControl,');
+    expect(source).toContain('SelectControl');
     expect(source).toMatch(/<NavigationItem[\s\S]*className=\{`desktop-source-row agent/);
     expect(source).toMatch(/<NavigationItem[\s\S]*className="desktop-source-row sidebar-new-task"/);
     expect(source).toMatch(/<Button className=\{`workspace-picker/);
@@ -40,20 +41,22 @@ describe("desktop component presentation contract", () => {
     expect(source).toContain('from "lucide-react"');
     expect(source).not.toMatch(/[⌄›]/);
     expect(source).toContain('<ChevronDown className="hui-control-caret"');
-    expect(source).toMatch(/<Control\s+kind="button"[\s\S]*?className="composer-control workspace-composer-control"/);
-    expect(source).toMatch(/className="permission-composer-control"[\s\S]*?<Control\s+kind="select"[\s\S]*?className="composer-control-select"/);
+    expect(source).toMatch(/<ButtonControl[\s\S]*?className="composer-control"/);
+    expect(source).toMatch(/<SelectControl[\s\S]*?className="composer-control"/);
     expect(source).toContain('className="desktop-agent-disclosure"');
   });
 
   it("keeps every composer action permanently mounted", () => {
     expect(source).toContain('className="composer-control attachment-composer-control"');
-    expect(source).toContain('className="composer-control workspace-composer-control"');
-    expect(source).toContain('className="permission-composer-control"');
-    expect(source).toMatch(/className="permission-composer-control"[\s\S]*?<Control\s+kind="select"/);
+    expect(source).toContain('<ButtonControl');
+    expect(source).toContain('<SelectControl');
+    expect(source).not.toContain('workspace-composer-control');
+    expect(source).not.toContain('permission-composer-control');
+    expect(source).not.toContain('composer-control-select');
     expect(source).not.toContain('className="composer-overflow"');
     expect(source).not.toContain("More composer options");
     expect(source).toMatch(/className="send-button stop-button"[\s\S]*?variant="primary"/);
-    expect(source).toMatch(/className="permission-composer-control"[\s\S]*?leading=\{<ShieldIcon \/>\}/);
+    expect(source).toMatch(/<SelectControl[\s\S]*?leading=\{<ShieldIcon \/>\}/);
     expect(source).toContain("assistant-activity-divider");
   });
 

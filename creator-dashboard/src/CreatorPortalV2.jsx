@@ -63,18 +63,12 @@ export function CreatorPortalV2({
   }, [navigate]);
 
   const mobileNavigationItems = [
-    { type: "label", label: "Hatch spaces" },
     { value: "space-explore", label: "Explore", onSelect: () => void go("/explore") },
     { value: "space-library", label: "Library", onSelect: () => void go("/library") },
-    { value: "space-studio", label: "Studio", active: route.section === "home" || route.section === "products", onSelect: () => void go(ROOT) },
+    { value: "space-studio", label: "Studio", active: route.kind === "home", onSelect: () => void go(ROOT) },
+    { value: "products", label: "Products", active: route.section === "products" && route.kind !== "files", onSelect: () => void go(`${ROOT}/products`) },
     { value: "space-orders", label: "Orders", active: route.section === "orders", onSelect: () => void go("/studio/orders") },
-    { value: "space-account", label: "Account", onSelect: () => void go("/account") },
-    { type: "separator" },
-    { type: "label", label: "Creator dashboard" },
-    { value: "home", label: "Home", active: route.section === "home", onSelect: () => void go(ROOT) },
-    { value: "products", label: "Products", active: route.section === "products", onSelect: () => void go(`${ROOT}/products`) },
-    { value: "sources", label: "Source Library", active: route.kind === "sources", onSelect: () => void go(`${ROOT}/sources`) },
-    { value: "creator-orders", label: "Orders", active: route.section === "orders", onSelect: () => void go(`${ROOT}/orders`) }
+    { value: "space-account", label: "Account", onSelect: () => void go("/account") }
   ];
 
   useEffect(() => {
@@ -99,18 +93,13 @@ export function CreatorPortalV2({
             items={mobileNavigationItems}
           />
         </div>
-        <nav className="cpv2-global-nav" aria-label="Hatch spaces">
+        <nav className="cpv2-global-nav" aria-label="Hatch navigation">
           <SpaceLink href="/explore" navigate={go}>Explore</SpaceLink>
           <SpaceLink href="/library" navigate={go}>Library</SpaceLink>
-          <SpaceLink href="/studio" navigate={go} active={route.section === "home"}>Studio</SpaceLink>
+          <SpaceLink href="/studio" navigate={go} active={route.kind === "home"}>Studio</SpaceLink>
+          <NavButton active={route.section === "products" && route.kind !== "files"} onClick={() => go(`${ROOT}/products`)}>Products</NavButton>
           <SpaceLink href="/studio/orders" navigate={go} active={route.section === "orders"}>Orders</SpaceLink>
           <SpaceLink href="/account" navigate={go}>Account</SpaceLink>
-        </nav>
-        <nav aria-label="Creator dashboard">
-          <NavButton active={route.section === "home"} onClick={() => go(ROOT)}>Home</NavButton>
-          <NavButton active={route.section === "products"} onClick={() => go(`${ROOT}/products`)}>Products</NavButton>
-          <NavButton active={route.kind === "sources"} onClick={() => go(`${ROOT}/sources`)}>Source Library</NavButton>
-          <NavButton active={route.section === "orders"} onClick={() => go(`${ROOT}/orders`)}>Orders</NavButton>
         </nav>
         <div className="cpv2-account">
           <span className="cpv2-avatar" aria-hidden="true">{profile?.initials || initials(profile?.display_name)}</span>
@@ -144,10 +133,10 @@ function CreatorRoute({ route, token, request, navigate, profile, registerNaviga
   }
   if (route.kind === "home") return <CreatorHome token={token} request={request} navigate={navigate} profile={profile} />;
   if (route.kind === "products") return <ProductsPage token={token} request={request} navigate={navigate} />;
-  if (route.kind === "sources") return <CreatorSourceLibrary token={token} taskId={route.taskId} navigate={navigate} />;
+  if (route.kind === "task-create" || route.kind === "files") return <CreatorSourceLibrary token={token} taskId={route.taskId} navigate={navigate} />;
   if (route.kind === "factory") return <FactoryPage token={token} request={request} productId={route.productId} runId={route.runId} navigate={navigate} registerNavigationGuard={registerNavigationGuard} />;
   if (route.kind === "product") return <ProductPage token={token} request={request} navigate={navigate} productId={route.productId} tab={route.tab} />;
-  if (route.kind === "candidate") return <CreatorReviewPage token={token} request={request} runId={route.candidateId} onBack={() => navigate(`${ROOT}/products/${encodeURIComponent(route.productId)}/factory/${encodeURIComponent(route.candidateId)}`)} onRevision={(run) => navigate(`${ROOT}/products/${encodeURIComponent(route.productId)}/candidates/${encodeURIComponent(run.id)}`)} onRelease={() => navigate(`${ROOT}/products/${encodeURIComponent(route.productId)}/preview`)} />;
+  if (route.kind === "candidate") return <CreatorReviewPage token={token} request={request} runId={route.candidateId} onBack={() => navigate(`${ROOT}/products/${encodeURIComponent(route.productId)}/factory/${encodeURIComponent(route.candidateId)}`)} onRevision={(run) => navigate(`${ROOT}/products/${encodeURIComponent(route.productId)}/factory/${encodeURIComponent(run.id)}`)} onRelease={() => navigate(`${ROOT}/products/${encodeURIComponent(route.productId)}/preview`)} />;
   if (route.kind === "preview") return <PreviewPage token={token} request={request} navigate={navigate} productId={route.productId} />;
   if (route.kind === "release") return <ReleasePage token={token} request={request} navigate={navigate} productId={route.productId} releaseId={route.releaseId} />;
   if (route.kind === "orders") return <OrdersPage token={token} request={request} navigate={navigate} />;
@@ -209,11 +198,11 @@ function ProductsPage({ token, request, navigate }) {
       {(payload) => {
         const products = arrayOf(unwrap(payload, "products"));
         return <>
-          <PageHeader eyebrow="Products" title="From a method to a product people can use." body="A Task owns its private Source Library. Factory then evaluates a candidate, and Release makes the approved result available." action="Create product" onAction={() => navigate(`${ROOT}/sources`)} />
+          <PageHeader eyebrow="Products" title="From a method to a product people can use." body="A Task owns its private files. Factory then evaluates a candidate, and Release makes the approved result available." action="Create a Task" onAction={() => navigate(`${ROOT}/tasks/new`)} />
           {pendingRuns.length ? <PendingFactoryRuns runs={pendingRuns} navigate={navigate} /> : null}
           {products.length ? <section className="cpv2-product-grid" aria-label="Products">
             {products.map((product) => <ProductCard key={idOf(product, "product")} product={product} onOpen={() => navigate(`${ROOT}/products/${encodeURIComponent(idOf(product, "product"))}`)} />)}
-          </section> : pendingRuns.length ? null : <EmptyState title="Create your first product" body="Start with one narrow Task, upload local source files, and let Factory turn the method into a verified candidate." action="Open Source Library" onAction={() => navigate(`${ROOT}/sources`)} />}
+          </section> : pendingRuns.length ? null : <EmptyState title="Create your first Task" body="Start with one narrow Task, upload local files, and let Factory turn the method into a verified candidate." action="Create a Task" onAction={() => navigate(`${ROOT}/tasks/new`)} />}
         </>;
       }}
     </PageBoundary>
@@ -279,6 +268,7 @@ function ProductOverview({ product, candidate, navigate, token, request, onChang
   const alreadyPublished = product.status === "published" || product.status === "live";
   const [withdraw, setWithdraw] = useState({ reason: "", confirming: false, busy: false, error: "", done: false });
   const steps = [
+    { label: "Task files", done: Boolean(product.task_id), action: "Open files", href: product.task_id ? `${ROOT}/tasks/${encodeURIComponent(product.task_id)}/files` : null },
     { label: "Factory candidate", done: Boolean(candidate || alreadyPublished || product.corpus_digest), action: "Open Factory", href: `${ROOT}/products/${encodeURIComponent(productId)}/factory` },
     { label: "Candidate approval", done: isApproved(candidate) || alreadyPublished, action: "Review candidate", href: candidate ? `${ROOT}/products/${encodeURIComponent(productId)}/candidates/${encodeURIComponent(idOf(candidate, "candidate"))}` : null },
     { label: "Storefront preview", done: Boolean(product.previewed_at || product.preview_ready), action: "Preview", href: `${ROOT}/products/${encodeURIComponent(productId)}/preview` },
@@ -332,7 +322,7 @@ function FactoryPage({ token, request, productId, runId, navigate, registerNavig
       token={token}
       initialRunId={runId}
       onNavigateRun={(id) => navigate(id ? `${runBase}/${encodeURIComponent(id)}` : `${ROOT}/factory`)}
-      onOpenSources={() => navigate(`${ROOT}/sources`)}
+      onCreateTask={() => navigate(`${ROOT}/tasks/new`)}
       onReviewCandidate={(run) => {
         const candidateProductId = run?.product?.product_id ?? run?.product?.id ?? run?.product_id;
         if (candidateProductId) {
@@ -345,7 +335,7 @@ function FactoryPage({ token, request, productId, runId, navigate, registerNavig
   return <>
     <div className="cpv2-factory-bar"><Button variant="link" size="small" type="button" onClick={() => navigate(productId ? `${ROOT}/products/${encodeURIComponent(productId)}` : `${ROOT}/products`)}>← {productId ? "Back to product" : "Back to products"}</Button><span role="status">Factory run checkpoints are saved on the server when submitted.</span></div>
     <FactoryReviewLink token={token} request={request} productId={productId} navigate={navigate} />
-    <CreatorFactoryRuns token={token} initialRunId={runId} onOpenSources={() => navigate(`${ROOT}/sources`)} onNavigateRun={(id) => navigate(id ? `${runBase}/${encodeURIComponent(id)}` : `${ROOT}/products/${encodeURIComponent(productId)}/factory`)} onReviewCandidate={(run) => navigate(`${ROOT}/products/${encodeURIComponent(productId)}/candidates/${encodeURIComponent(run.id)}`)} />
+    <CreatorFactoryRuns token={token} initialRunId={runId} onCreateTask={() => navigate(`${ROOT}/tasks/new`)} onNavigateRun={(id) => navigate(id ? `${runBase}/${encodeURIComponent(id)}` : `${ROOT}/products/${encodeURIComponent(productId)}/factory`)} onReviewCandidate={(run) => navigate(`${ROOT}/products/${encodeURIComponent(productId)}/candidates/${encodeURIComponent(run.id)}`)} />
   </>;
 }
 

@@ -275,6 +275,9 @@ test("Corpus prompt compiles lossless full-layer replacements with concrete dest
   assert.match(call.systemPrompt, /Re-emit every retained System, Skill, reference, and knowledge asset in full/i);
   assert.match(call.systemPrompt, /long-term product editor-in-chief and system designer/i);
   assert.match(call.systemPrompt, /when brevity conflicts with retained capability, preserve the capability/i);
+  assert.match(call.systemPrompt, /requirement-to-asset matrix/i);
+  assert.match(call.systemPrompt, /host owns the four top-level envelope headings/i);
+  assert.match(call.systemPrompt, /never include any of those `#` headings/i);
   assert.match(call.systemPrompt, /Every supported runtime requirement must have a real destination in an asset emitted/i);
   assert.match(call.systemPrompt, /routing suggestion without the destination asset's complete content.*failure/i);
   assert.match(call.systemPrompt, /Knowledge is not an archive of inputs/i);
@@ -407,6 +410,9 @@ test("Evidence and evaluation prompts make layer routing directional and keep ev
   assert.match(evidence.systemPrompt, /Factory worldview, values, and vision are operational conflict rules/i);
   assert.match(evidence.systemPrompt, /rigorous researcher accountable for what the Creator actually meant/i);
   assert.match(evidence.systemPrompt, /when sources conflict, respect and expose the contradiction/i);
+  assert.match(evidence.systemPrompt, /provenance hypothesis/i);
+  assert.match(evidence.systemPrompt, /cue, confidence, alternative explanation/i);
+  assert.match(evidence.systemPrompt, /what must wait for Creator confirmation/i);
   assert.match(evidence.systemPrompt, /always-on System, optional Skill, Skill-local reference, retrieval-only knowledge, or evaluation-only/i);
   assert.match(evidence.systemPrompt, /Raw source material.*must never enter the published Agent Corpus or bundle/is);
 
@@ -422,6 +428,8 @@ test("Evidence and evaluation prompts make layer routing directional and keep ev
   assert.match(question.systemPrompt, /finished, paid-worthy result that an end customer could directly use, publish, sell, or reasonably pay for/i);
   assert.match(question.systemPrompt, /prefer completeness and durable capability over being shorter or faster/i);
   assert.match(question.systemPrompt, /demanding editor-in-chief accountable to the paying end customer/i);
+  assert.match(question.systemPrompt, /information gain/i);
+  assert.match(question.systemPrompt, /provenance_confirmation/i);
 
   const evaluation = evaluationPrompt({
     creatorName: "Creator",
@@ -435,6 +443,7 @@ test("Evidence and evaluation prompts make layer routing directional and keep ev
   assert.match(evaluation.systemPrompt, /Synthetic.*task\/question was generated/is);
   assert.match(evaluation.systemPrompt, /Creator answer is the human behavioral reference/i);
   assert.match(evaluation.systemPrompt, /evaluation-only artifacts, not live prompt text/i);
+  assert.match(evaluation.systemPrompt, /Judge behavior, not surface fluency/i);
   assert.match(evaluation.systemPrompt, /System, optional Skill, Skill-local reference, retrieval-only knowledge, or evaluation-only/i);
   assert.match(evaluation.prompt, /Creator answer \(human reference\)/);
 });
@@ -456,6 +465,28 @@ test("Creator answers preserve publishable Markdown headings", () => {
     "## Final post",
     "Ship the focused offer today."
   ].join("\n"));
+});
+
+test("provenance confirmation questions remain explicit through Markdown", () => {
+  const questions = parseQuestions([
+    "# Questions",
+    "",
+    "## I.Q1",
+    "",
+    "### Question kind",
+    "provenance_confirmation",
+    "",
+    "### Question",
+    "The Evidence ledger inferred that this principle came from your mentor. Confirm, correct, or reject.",
+    "",
+    "### Why this question",
+    "Resolve an origin hypothesis before compilation.",
+    "",
+    "### Leakage group",
+    "origin-1",
+    ""
+  ].join("\n"));
+  assert.equal(questions[0]?.kind, "provenance_confirmation");
 });
 
 test("QA Markdown round-trips answers and generated tasks with nested headings", () => {

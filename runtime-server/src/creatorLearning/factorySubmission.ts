@@ -35,6 +35,7 @@ type QuestionSubmission = {
   question: string;
   intent: string;
   leakageGroup: string;
+  kind?: "behavior" | "provenance_confirmation";
 };
 
 type EvaluationSubmission = {
@@ -458,6 +459,7 @@ function renderQuestions(rows: QuestionSubmission[]): string {
       "<!-- HATCH_FACTORY_QUESTION_BEGIN -->",
       `## Q${index + 1}`,
       "",
+      ...(row.kind === "provenance_confirmation" ? ["### Question kind", "", "provenance_confirmation", ""] : []),
       "### Question",
       "",
       row.question,
@@ -812,14 +814,18 @@ export function createFactorySubmissionProtocol(
         id: text,
         question: text,
         intent: text,
-        leakage_group: text
+        leakage_group: text,
+        kind: Type.Optional(Type.Union([Type.Literal("behavior"), Type.Literal("provenance_confirmation")]))
       }, { additionalProperties: false }),
       (draft, params) => {
         const candidate: QuestionSubmission = {
           id: metadata(params.id, "id"),
           question: body(params.question, "question"),
           intent: body(params.intent, "intent"),
-          leakageGroup: metadata(params.leakage_group, "leakage_group")
+          leakageGroup: metadata(params.leakage_group, "leakage_group"),
+          ...(params.kind === "behavior" || params.kind === "provenance_confirmation"
+            ? { kind: params.kind as QuestionSubmission["kind"] }
+            : {})
         };
         const status = addUnique(draft.questions, candidate, (item) => item.id, "Question");
         return staged("submit_question", status, "question", draft);
@@ -994,7 +1000,7 @@ export function createFactorySubmissionProtocol(
     ));
     tools.push(makeTool(
       "submit_corpus_audit_section",
-      "Submit one complete compiler audit section. Submit all three sections before finalizing.",
+      "Submit one complete compiler audit section body without its host-owned # heading. The host owns all four top-level envelope headings; submit all three bodies before finalizing.",
       Type.Object({
         section: Type.Union([
           Type.Literal("change_rationale"),

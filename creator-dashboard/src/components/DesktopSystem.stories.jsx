@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { ArrowUp, Ellipsis, FolderOpen, PanelLeft, PanelRight, Paperclip, Plus, Settings, Square } from "lucide-react";
 import {
   Button,
-  Control,
+  SelectControl,
   DropdownMenu,
   FormField,
   HatchBrand,
@@ -75,7 +75,7 @@ function DesktopStoryFrame({ args }) {
           <footer className="hui-desktop-story__composer">
             <Textarea aria-label="Message" placeholder="Send a message to Interview Answer Rewriter…" />
             <div className="hui-desktop-story__composer-actions">
-              <Control kind="select" value={permission} onValueChange={setPermission} options={[{ value: "workspace", label: "Documents" }, { value: "none", label: "No workspace" }]} label="Workspace" />
+              <SelectControl value={permission} onValueChange={setPermission} options={[{ value: "workspace", label: "Documents" }, { value: "none", label: "No workspace" }]} label="Workspace" />
               <DropdownMenu trigger={<IconButton label="More composer actions"><Ellipsis aria-hidden="true" /></IconButton>} items={[{ label: "Attach files", icon: <Paperclip aria-hidden="true" /> }]} />
               <Button aria-label={running ? "Stop response" : "Send message"} onClick={() => setRunning((value) => !value)}>{running ? <Square aria-hidden="true" /> : <ArrowUp aria-hidden="true" />}</Button>
             </div>

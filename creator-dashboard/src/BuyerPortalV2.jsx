@@ -503,7 +503,7 @@ function AuthPage({ mode, search, request, navigate, session }) {
           <span className="buyer-v2__eyebrow">Continue your task</span>
           {productIntent && intent.status === "loading" ? <div className="buyer-v2__auth-intent-skeleton" aria-label="Loading Product" /> : null}
           {productIntent && intent.status === "ready" ? <><h1>{productName(intent.data)}</h1><p>{productPromise(intent.data)}</p><strong>Permanent access</strong><small>{creatorName(intent.data)}</small></> : null}
-          {!productIntent ? <><h1>Your Agents, orders and access in one place.</h1><p>Use the same Hatch account on Web and Desktop.</p></> : null}
+          {!productIntent ? <><h1>Your method, made useful.</h1><p>Turn the way you think into an agent people can use.</p></> : null}
         </div>
       </section>
       <section className="buyer-v2__auth-form-panel">
@@ -520,7 +520,7 @@ function AuthPage({ mode, search, request, navigate, session }) {
           {signingUp ? <Field label="Name"><Input required autoComplete="name" value={form.display_name} onChange={(event) => setForm({ ...form, display_name: event.target.value })} /></Field> : null}
           <Field label="Email"><Input required type="email" autoComplete="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></Field>
           <Field label="Password"><Input required minLength={8} type="password" autoComplete={signingUp ? "new-password" : "current-password"} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></Field>
-          {signingUp ? <HatchCheckbox required checked={form.terms} onCheckedChange={(checked) => setForm({ ...form, terms: checked === true })} label="I agree to the Hatch Terms and Privacy Policy." /> : null}
+          {signingUp ? <HatchCheckbox className="buyer-v2__checkbox" required checked={form.terms} onCheckedChange={(checked) => setForm({ ...form, terms: checked === true })} label="I agree to the Hatch Terms and Privacy Policy." /> : null}
           {submission.error ? <InlineError error={submission.error} /> : null}
           <div className="buyer-v2__auth-actions">
             <Button className="buyer-v2__button--wide" loading={submission.status === "pending"}>{signingUp ? (creatorIntent ? "Create Creator account" : "Create account") : "Sign in"}</Button>

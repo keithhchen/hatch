@@ -64,7 +64,7 @@ describe("desktop system appearance contract", () => {
 
   it("keeps the new task action regular in every sidebar state", () => {
     expect(stylesheet).toMatch(
-      /\.sidebar-new-task\s*\{[\s\S]*?font-size:\s*var\(--hatch-type-label\);[\s\S]*?font-weight:\s*400;/
+      /\.sidebar-new-task\s*\{[\s\S]*?font-size:\s*var\(--hatch-type-ui\);[\s\S]*?font-weight:\s*400;/
     );
     expect(stylesheet).toMatch(
       /\.desktop-agent-conversation-group \.sidebar-new-task\s*\{[\s\S]*?font-weight:\s*400;/
@@ -100,16 +100,18 @@ describe("desktop system appearance contract", () => {
       /\.hui-control-caret,[\s\S]*?\.hui-select-trigger > \.hui-select-caret\s*\{[\s\S]*?color:\s*var\(--hui-ink-faint\);[\s\S]*?height:\s*14px;[\s\S]*?stroke-width:\s*1\.55;[\s\S]*?width:\s*14px;/
     );
     expect(sharedStylesheet).toMatch(
+      /\.hui-control-leading,[\s\S]*?\.hui-control-trailing\s*\{[\s\S]*?display:\s*inline-flex;[\s\S]*?align-items:\s*center;[\s\S]*?flex:\s*0 0 auto;/
+    );
+    expect(sharedStylesheet).toMatch(/\.hui-control-trailing\s*\{\s*margin-inline-start:\s*auto;\s*\}/);
+    expect(sharedStylesheet).toMatch(
       /\.hui-theme-origin \.hui-control--raised,[\s\S]*?\.hui-theme-material \.hui-control--raised\s*\{[\s\S]*?border-radius:\s*var\(--hatch-radius-control\);[\s\S]*?box-shadow:/
     );
     expect(stylesheet).toMatch(
-      /\.composer-control\s*\{[\s\S]*?display:\s*inline-flex;[\s\S]*?gap:\s*6px;/
+      /\.composer-control:not\(\.hui-control\)\s*\{[\s\S]*?display:\s*inline-flex;[\s\S]*?gap:\s*6px;/
     );
-    expect(stylesheet).toMatch(
-      /\.permission-composer-control \.composer-control-select\s*\{[\s\S]*?flex:\s*1 1 auto;[\s\S]*?min-width:\s*0;/
-    );
+    expect(stylesheet).not.toMatch(/\.permission-composer-control|\.workspace-composer-control|\.composer-control-select/);
     expect(readFileSync(new URL("./main.jsx", import.meta.url), "utf8")).toMatch(
-      /className="composer-control workspace-composer-control"[\s\S]*?surface="raised"[\s\S]*?className="composer-control-select"[\s\S]*?surface="raised"/
+      /<ButtonControl[\s\S]*?className="composer-control"[\s\S]*?<SelectControl[\s\S]*?className="composer-control"/
     );
   });
 
@@ -122,13 +124,10 @@ describe("desktop system appearance contract", () => {
     expect(stylesheet).toMatch(/\.assistant-activity-divider\s*\{[\s\S]*?width:\s*100%;/);
   });
 
-  it("keeps the workspace control left aligned without clipping its label", () => {
-    expect(stylesheet).toMatch(
-      /\.workspace-composer-control\s*\{[\s\S]*?justify-content:\s*flex-start;[\s\S]*?min-width:\s*0;/
-    );
-    expect(stylesheet).toMatch(
-      /\.workspace-composer-control \.composer-control-label\s*\{[\s\S]*?overflow:\s*visible;[\s\S]*?text-overflow:\s*clip;/
-    );
+  it("keeps composer labels and carets in the shared HUI control slots", () => {
+    expect(sharedStylesheet).toMatch(/\.hui-control-value\s*\{[\s\S]*?overflow:\s*hidden;[\s\S]*?text-overflow:\s*ellipsis;/);
+    expect(sharedStylesheet).toMatch(/\.hui-control-trailing\s*\{\s*margin-inline-start:\s*auto;\s*\}/);
+    expect(stylesheet).not.toMatch(/\.workspace-composer-control|\.composer-control-label/);
   });
 
   it("uses only the insertion caret for composer text focus", () => {
@@ -138,7 +137,7 @@ describe("desktop system appearance contract", () => {
 
   it("keeps long-form Markdown on the measured reading rhythm", () => {
     expect(stylesheet).toMatch(
-      /\.markdown-body\s*\{[\s\S]*?font-size:\s*var\(--hatch-type-reading\);[\s\S]*?line-height:\s*1\.72;/
+      /\.markdown-body\s*\{[\s\S]*?font-size:\s*var\(--hatch-type-body\);[\s\S]*?line-height:\s*1\.72;/
     );
     expect(stylesheet).toMatch(
       /\.markdown-body h1\s*\{[\s\S]*?font-size:\s*var\(--hatch-type-heading\);[\s\S]*?line-height:\s*var\(--hatch-display-leading\);/

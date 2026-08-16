@@ -20,12 +20,19 @@ export function CreatorReviewPage({ token, request, runId, onBack, onRevision, o
 
   useEffect(() => { refresh(); }, [token, runId]);
 
-  const cases = useMemo(() => (review?.cases ?? []).filter((item) => item.status === "needs_review"), [review]);
+  const cases = useMemo(() => [...(review?.cases ?? [])].sort((left, right) => {
+    const priority = (item) => item.status === "needs_review" ? 0 : item.status === "judge_disputed" ? 1 : 2;
+    return priority(left) - priority(right);
+  }), [review]);
 
   async function act(item, action) {
     const draft = drafts[item.id] ?? {};
     if (action === "correct" && (!draft.correction?.trim() || !draft.why?.trim())) {
-      setState((current) => ({ ...current, error: "Correction and why are required." }));
+      setState((current) => ({ ...current, error: "Add the corrected answer and why it is the right behavior." }));
+      return;
+    }
+    if (action === "judge_dispute" && !draft.why?.trim()) {
+      setState((current) => ({ ...current, error: "Explain what the evaluation got wrong." }));
       return;
     }
     setState({ loading: false, busy: `${action}:${item.id}`, error: "" });
@@ -73,23 +80,51 @@ export function CreatorReviewPage({ token, request, runId, onBack, onRevision, o
     <PageHeader eyebrow="Candidate review" title={`Candidate v${review.candidate_version}`} body="Review the behavior against your reference. Evaluation is an assistant; your correction is the authority for this revision." />
     {state.error ? <InlineAlert tone="error">{state.error}</InlineAlert> : null}
     <div className="creator-review-summary">
-      <Summary label="Known cases" value={`${review.cases.filter((item) => item.status !== "needs_review").length} / ${review.cases.length}`} />
+      <Summary label="Known cases reviewed" value={`${review.cases.filter((item) => item.status !== "needs_review" && item.status !== "judge_disputed").length} / ${review.cases.length}`} />
       <Summary label="Needs your review" value={String(review.unresolved_count)} />
       <Summary label="Blind cases" value={`${review.blind.passed} / ${review.blind.total} passed`} detail="Questions and answers stay sealed." />
     </div>
-    {cases.length ? <div className="creator-review-cases">{cases.map((item) => <ReviewCase key={item.id} item={item} draft={drafts[item.id] ?? {}} setDraft={(next) => setDrafts((current) => ({ ...current, [item.id]: { ...(current[item.id] ?? {}), ...next } }))} busy={state.busy} onAction={act} />)}</div> : <article className="creator-review-empty"><h2>No unresolved known cases</h2><p>All evaluated cases are accepted. The sealed blind summary remains visible without revealing its contents.</p></article>}
+    <CorpusPanel corpus={review.corpus} />
+    {cases.length ? <div className="creator-review-cases">{cases.map((item) => <ReviewCase key={item.id} item={item} draft={drafts[item.id] ?? {}} setDraft={(next) => setDrafts((current) => ({ ...current, [item.id]: { ...(current[item.id] ?? {}), ...next } }))} busy={state.busy} onAction={act} />)}</div> : <article className="creator-review-empty"><h2>No known cases yet</h2><p>Known cases will appear here after the candidate has been evaluated.</p></article>}
     <article className="creator-review-blind"><div><span className="creator-review-eyebrow">Sealed held-out</span><h2>{review.blind.failed ? "Creator confirmation required" : "Generalization check"}</h2><p>{review.blind.failed ? `${review.blind.failed} sealed case(s) failed. The case text, answer, and candidate output stay hidden until you confirm the correction loop.` : `${review.blind.passed} / ${review.blind.total} sealed cases passed. Held-out content is not included in the Corpus.`}</p></div><div className="creator-review-actions">{review.blind.needs_creator_action ? <Button type="button" loading={state.busy === "heldout_correction"} disabled={Boolean(state.busy)} onClick={confirmHeldout}>Confirm and start correction</Button> : null}{review.release_ready && onRelease ? <Button type="button" onClick={onRelease}>Open Release preview</Button> : null}</div></article>
+  </section>;
+}
+
+function CorpusPanel({ corpus }) {
+  if (!corpus?.available) {
+    return <article className="creator-review-corpus creator-review-corpus-unavailable">
+      <div><span className="creator-review-eyebrow">Full Corpus</span><h2>Corpus unavailable</h2><p>{corpus?.reason ?? "The verified runtime Corpus is not available for this Candidate yet."}</p></div>
+    </article>;
+  }
+  return <section className="creator-review-corpus">
+    <div className="creator-review-corpus-heading"><div><span className="creator-review-eyebrow">Full Corpus · Candidate v{corpus.version}</span><h2>What the Agent will receive</h2><p>These are the complete immutable runtime assets bound to this Candidate. You can inspect every layer before release.</p></div><StatusTag tone="success">Verified</StatusTag></div>
+    <div className="creator-review-corpus-meta"><code>{corpus.digest}</code><span>Verified {corpus.verifiedAt ? new Date(corpus.verifiedAt).toLocaleString() : "—"}</span></div>
+    <div className="creator-review-corpus-assets">{corpus.assets.map((asset) => <article className="creator-review-corpus-asset" key={`${asset.layer}:${asset.path}`}>
+      <div className="creator-review-corpus-asset-heading"><div><span className="creator-review-eyebrow">{asset.layer}{asset.kind ? ` · ${asset.kind}` : ""}</span><h3>{asset.id}</h3></div><code>{asset.path}</code></div>
+      <pre>{asset.content}</pre>
+    </article>)}</div>
+    <p className="creator-review-corpus-note">{corpus.evaluation_assets?.note ?? "Evaluation assets remain sealed and are not runtime Corpus content."}</p>
   </section>;
 }
 
 function ReviewCase({ item, draft, setDraft, busy, onAction }) {
   const correcting = Boolean(draft.open);
+  const disputing = Boolean(draft.disputeOpen);
   const actionBusy = busy?.endsWith(`:${item.id}`);
+  const actionable = item.status === "needs_review";
+  const verdictLabel = item.status === "judge_disputed" ? "Evaluation reported" : item.verdict === "PASS" ? "Evaluation passed" : "Evaluation failed";
+  const decisionLabel = item.status === "accepted"
+    ? "Accepted"
+    : item.status === "corrected"
+      ? "Correction submitted"
+      : item.status === "question_rejected"
+        ? "Question replaced"
+        : "Waiting for evaluation review";
   return <article className="creator-review-case">
-    <div className="creator-review-case-heading"><div><span className="creator-review-eyebrow">Known case · {item.verdict === "FAIL" ? "Eval failed" : "Eval passed"}</span><h2>{item.question}</h2></div><StatusTag tone={item.verdict === "FAIL" ? "error" : "success"}>{item.verdict}</StatusTag></div>
-    <div className="creator-review-columns"><div><label>Your reference</label><p>{item.creator_reference}</p></div><div><label>Candidate output</label><p>{item.candidate_output}</p></div></div>
-    <div className="creator-review-diagnosis"><label>Eval diagnosis</label><p>{item.diagnosis}</p></div>
-    {correcting ? <div className="creator-review-correction"><FormField label="What should the Agent have done?" required><Textarea value={draft.correction ?? ""} onChange={(event) => setDraft({ correction: event.target.value })} /></FormField><FormField label="Why is this the correct behavior?" required><Textarea value={draft.why ?? ""} onChange={(event) => setDraft({ why: event.target.value })} /></FormField><div className="creator-review-actions"><Button type="button" loading={actionBusy} disabled={Boolean(busy)} onClick={() => onAction(item, "correct")}>Submit correction</Button><Button variant="link" type="button" disabled={Boolean(busy)} onClick={() => setDraft({ open: false })}>Cancel</Button></div></div> : <div className="creator-review-actions"><Button type="button" disabled={Boolean(busy) || item.verdict === "FAIL"} onClick={() => onAction(item, "accept")}>Accept</Button><Button variant="secondary" type="button" disabled={Boolean(busy)} onClick={() => setDraft({ open: true })}>Correct this answer</Button><Button variant="link" type="button" disabled={Boolean(busy)} onClick={() => onAction(item, "reject_question")}>Reject this question</Button></div>}
+    <div className="creator-review-case-heading"><div><span className="creator-review-eyebrow">Known case · {item.verdict === "FAIL" ? "Evaluation failed" : "Evaluation passed"}</span><h2>{item.question}</h2></div><StatusTag tone={item.status === "judge_disputed" ? "neutral" : item.verdict === "FAIL" ? "error" : "success"}>{verdictLabel}</StatusTag></div>
+    <div className="creator-review-columns"><div><label>Your reference</label><p>{item.creator_reference}</p></div><div><label>Candidate output</label><div className="creator-review-output-scroll" tabIndex="0" aria-label="Candidate output">{item.candidate_output}</div></div></div>
+    <div className="creator-review-diagnosis"><label>Why Hatch made this call</label><p>{item.diagnosis}</p></div>
+    {item.status === "judge_disputed" ? <div className="creator-review-resolution"><StatusTag tone="neutral">Waiting for evaluation review</StatusTag><p>You reported that the evaluation—not the Agent—may be wrong. This case is paused for evaluator calibration; it does not change the Agent or count as passed.</p></div> : !actionable ? <div className="creator-review-resolution"><StatusTag tone="success">{decisionLabel}</StatusTag><p>This case has already been handled. Its decision is preserved in the revision history.</p></div> : correcting ? <div className="creator-review-correction"><FormField label="What should the Agent have done?" required><Textarea value={draft.correction ?? ""} onChange={(event) => setDraft({ correction: event.target.value })} /></FormField><FormField label="Why is this the correct behavior?" required><Textarea value={draft.why ?? ""} onChange={(event) => setDraft({ why: event.target.value })} /></FormField><div className="creator-review-actions"><Button type="button" loading={actionBusy} disabled={Boolean(busy)} onClick={() => onAction(item, "correct")}>Submit correction</Button><Button variant="link" type="button" disabled={Boolean(busy)} onClick={() => setDraft({ open: false })}>Cancel</Button></div></div> : disputing ? <div className="creator-review-correction"><FormField label="What did the evaluation get wrong?" required><Textarea value={draft.why ?? ""} onChange={(event) => setDraft({ why: event.target.value })} /></FormField><div className="creator-review-actions"><Button type="button" loading={actionBusy} disabled={Boolean(busy)} onClick={() => onAction(item, "judge_dispute")}>Report evaluation issue</Button><Button variant="link" type="button" disabled={Boolean(busy)} onClick={() => setDraft({ disputeOpen: false })}>Cancel</Button></div></div> : <div className="creator-review-actions"><p className="creator-review-action-hint">{item.verdict === "FAIL" ? "This case failed. Correct the behavior or tell us the question is invalid." : "Confirm the behavior, correct it, or tell us the evaluation is wrong."}</p>{item.verdict === "PASS" ? <Button type="button" disabled={Boolean(busy)} onClick={() => onAction(item, "accept")}>Accept</Button> : null}<Button variant={item.verdict === "FAIL" ? "primary" : "secondary"} type="button" disabled={Boolean(busy)} onClick={() => setDraft({ open: true })}>Correct this answer</Button><Button variant="link" type="button" disabled={Boolean(busy)} onClick={() => setDraft({ disputeOpen: true })}>Evaluation is wrong</Button><Button variant="link" type="button" disabled={Boolean(busy)} onClick={() => onAction(item, "reject_question")}>Question is invalid</Button></div>}
   </article>;
 }
 

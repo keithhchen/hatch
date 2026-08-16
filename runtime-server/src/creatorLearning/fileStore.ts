@@ -385,8 +385,15 @@ export class FactoryFileStore {
     const mapped = mapGraphEvent(event, details);
     if (!mapped) return;
     const parents = (await this.graphStore.listEvents(context.taskId)).filter((row) => row.runId === context.runId).at(-1);
+    // Content-addressed outputs are part of the event identity. Without them,
+    // a retry that emits a new immutable report can collide with the prior
+    // event (the sanitized payload intentionally omits nested artifact refs),
+    // then try to mutate the prior node execution and fail the recovery path.
+    // Replaying the same output remains idempotent because its artifact IDs
+    // are identical; a genuinely new attempt gets its own graph event/node.
+    const artifactIds = collectArtifactIds(details);
     const payload = sanitizeGraphPayload(details);
-    const eventKey = graphEventKey(mapped.type, context.runId, context.revisionId, { event, payload });
+    const eventKey = graphEventKey(mapped.type, context.runId, context.revisionId, { event, payload, artifactIds });
     const graphEvent = await this.graphStore.appendEvent({
       id: newGraphEventId(),
       eventKey,
@@ -397,7 +404,7 @@ export class FactoryFileStore {
       ...(mapped.node ? { node: mapped.node } : {}),
       actor: event.startsWith("creator_") ? "creator" : "worker",
       parentEventIds: parents ? [parents.id] : [],
-      artifactIds: collectArtifactIds(details),
+      artifactIds,
       payload
     });
     if (mapped.node && ["node_started", "node_completed", "node_failed"].includes(mapped.type) && context.revisionId) {
@@ -419,7 +426,7 @@ export class FactoryFileStore {
         attempt: positiveInteger(details.attempt) ?? 1,
         status,
         inputArtifactIds: stringList(details.inputArtifactIds ?? details.input_artifact_ids),
-        outputArtifactIds: collectArtifactIds(details),
+        outputArtifactIds: artifactIds,
         ...(startedAt ? { startedAt } : {}),
         ...(completedAt ? { completedAt } : {}),
         ...(typeof details.errorCode === "string" ? { errorCode: details.errorCode } : {})
@@ -427,7 +434,7 @@ export class FactoryFileStore {
     }
     const gate = gateForGraphEvent(event, mapped.type, mapped.node, details);
     if (gate) {
-      const evidenceArtifactIds = collectArtifactIds(details);
+      const evidenceArtifactIds = artifactIds;
       await this.graphStore.recordGate({
         ...gate,
         id: `gate_${graphEvent.id}`,

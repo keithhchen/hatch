@@ -1,6 +1,7 @@
 import React from "react";
 import { Slot } from "@radix-ui/react-slot";
 import { LoaderCircle } from "lucide-react";
+import { ControlContent, controlClassName } from "./ControlAppearance.jsx";
 import { cn } from "./utils.js";
 
 export function Button({
@@ -10,6 +11,7 @@ export function Button({
   loading = false,
   leading,
   trailing,
+  surface,
   className,
   children,
   disabled,
@@ -20,17 +22,19 @@ export function Button({
     "hui-button",
     `hui-button--${variant}`,
     `hui-button--${size}`,
-    size === "compact" && "hui-control--compact",
+    surface ? controlClassName({ size, surface }) : size === "compact" && "hui-control--compact",
     className
   );
   if (asChild) {
     const child = React.Children.only(children);
     const content = React.cloneElement(child, undefined,
-      <>
-        {loading ? <LoaderCircle className="hui-spin" aria-hidden="true" /> : leading}
-        <span>{child.props.children}</span>
-        {trailing}
-      </>
+      surface
+        ? <ControlContent leading={loading ? <LoaderCircle className="hui-spin" aria-hidden="true" /> : leading} trailing={trailing}>{child.props.children}</ControlContent>
+        : <>
+            {loading ? <LoaderCircle className="hui-spin" aria-hidden="true" /> : leading}
+            <span>{child.props.children}</span>
+            {trailing}
+          </>
     );
     return <Slot ref={ref} className={classes} aria-busy={Boolean(loading)} aria-disabled={disabled || loading || undefined} {...props}>{content}</Slot>;
   }
@@ -42,9 +46,13 @@ export function Button({
       aria-busy={Boolean(loading)}
       {...props}
     >
-      {loading ? <LoaderCircle className="hui-spin" aria-hidden="true" /> : leading}
-      <span>{children}</span>
-      {trailing}
+      {surface
+        ? <ControlContent leading={loading ? <LoaderCircle className="hui-spin" aria-hidden="true" /> : leading} trailing={trailing}>{children}</ControlContent>
+        : <>
+            {loading ? <LoaderCircle className="hui-spin" aria-hidden="true" /> : leading}
+            <span>{children}</span>
+            {trailing}
+          </>}
     </button>
   );
 }

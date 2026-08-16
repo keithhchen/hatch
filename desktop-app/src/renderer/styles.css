@@ -151,7 +151,7 @@ h2 {
 .field span,
 .connection-status span {
   color: var(--hatch-text-secondary);
-  font-size: var(--hatch-type-label);
+  font-size: var(--hatch-type-ui);
 }
 
 .connection-card,
@@ -185,7 +185,7 @@ h2 {
   background: transparent;
   border: 0;
   color: var(--hatch-text-secondary);
-  font-size: var(--hatch-type-caption);
+  font-size: var(--hatch-type-meta);
   min-height: auto;
   padding: 5px;
   white-space: nowrap;
@@ -203,7 +203,7 @@ h2 {
   color: var(--hatch-accent);
   display: inline-flex;
   flex: 0 0 auto;
-  font-size: var(--hatch-type-label);
+  font-size: var(--hatch-type-ui);
   font-weight: 800;
   height: 34px;
   justify-content: center;
@@ -220,7 +220,7 @@ h2 {
 .profile-card div span,
 .agent-nav-item small {
   color: var(--hatch-ink);
-  font-size: var(--hatch-type-caption);
+  font-size: var(--hatch-type-meta);
   margin-top: 2px;
 }
 
@@ -264,7 +264,7 @@ h2 {
 
 .connection-status strong {
   display: block;
-  font-size: var(--hatch-type-control);
+  font-size: var(--hatch-type-ui);
   margin-top: 2px;
   overflow-wrap: break-word;
 }
@@ -298,7 +298,7 @@ h2 {
 .settings-panel summary {
   color: var(--hatch-ink);
   cursor: pointer;
-  font-size: var(--hatch-type-control);
+  font-size: var(--hatch-type-ui);
   font-weight: 750;
 }
 
@@ -314,7 +314,7 @@ h2 {
 }
 
 .side-section h2 {
-  font-size: var(--hatch-type-control);
+  font-size: var(--hatch-type-ui);
 }
 
 .tool-list {
@@ -329,7 +329,7 @@ h2 {
   border-radius: 6px;
   color: var(--hatch-ink);
   font-family: var(--hatch-font-pill);
-  font-size: var(--hatch-type-caption);
+  font-size: var(--hatch-type-meta);
   padding: 5px 7px;
 }
 
@@ -352,7 +352,7 @@ h2 {
 
 .chat-header strong {
   display: block;
-  font-size: var(--hatch-type-control);
+  font-size: var(--hatch-type-ui);
   margin-top: 3px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -385,7 +385,7 @@ h2 {
 
 .chat-header .connection-recovery strong {
   color: #705628;
-  font-size: var(--hatch-type-caption);
+  font-size: var(--hatch-type-meta);
   margin: 0;
 }
 
@@ -444,7 +444,7 @@ h2 {
 
 .empty-kicker {
   color: var(--hatch-ink);
-  font-size: var(--hatch-type-label);
+  font-size: var(--hatch-type-ui);
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -452,19 +452,19 @@ h2 {
 
 .empty-thread h2 {
   color: var(--hatch-ink);
-  font-size: var(--hatch-type-display-compact);
+  font-size: var(--hatch-type-display);
   letter-spacing: 0;
   line-height: 1.1;
   margin: 9px 0 10px;
 }
 
 .empty-thread p {
-  font-size: var(--hatch-type-reading);
+  font-size: var(--hatch-type-body);
   line-height: 1.55;
 }
 
 .creator-avatar.large {
-  font-size: var(--hatch-type-emphasis);
+  font-size: var(--hatch-type-body);
   height: 54px;
   margin-bottom: 12px;
   width: 54px;
@@ -503,7 +503,7 @@ h2 {
 .welcome-brand {
   align-items: center;
   display: flex;
-  font-size: var(--hatch-type-subtitle);
+  font-size: var(--hatch-type-subheading);
   gap: 10px;
 }
 
@@ -558,7 +558,7 @@ h2 {
   border: 1px solid rgba(180, 71, 61, 0.18);
   border-radius: 8px;
   color: #9b4137 !important;
-  font-size: var(--hatch-type-control);
+  font-size: var(--hatch-type-ui);
   padding: 9px 11px;
 }
 
@@ -567,7 +567,7 @@ h2 {
   border: 1px solid #e2ca8d;
   border-radius: 9px;
   color: #705628;
-  font-size: var(--hatch-type-label);
+  font-size: var(--hatch-type-ui);
   padding: 9px 10px;
 }
 
@@ -622,7 +622,7 @@ h2 {
 
 .sign-in-form .field span {
   color: var(--hatch-ink);
-  font-size: var(--hatch-type-control);
+  font-size: var(--hatch-type-ui);
   font-weight: 650;
 }
 
@@ -648,7 +648,7 @@ h2 {
 .eyebrow {
   color: var(--hatch-accent);
   font-family: var(--hatch-font-pill);
-  font-size: var(--hatch-type-label);
+  font-size: var(--hatch-type-ui);
   font-weight: 800;
   letter-spacing: .08em;
   text-transform: uppercase;
@@ -701,7 +701,7 @@ h2 {
 }
 
 .workspace-onboarding-card h2 {
-  font-size: var(--hatch-type-display-compact);
+  font-size: var(--hatch-type-display);
   letter-spacing: var(--hatch-display-tracking);
   line-height: var(--hatch-display-leading);
 }
@@ -745,7 +745,7 @@ h2 {
 
 .workspace-picker-action {
   color: var(--hatch-accent);
-  font-size: var(--hatch-type-label);
+  font-size: var(--hatch-type-ui);
   margin-left: auto;
 }
 
@@ -756,7 +756,7 @@ h2 {
 
 .workspace-onboarding-status {
   color: var(--hatch-text-secondary);
-  font-size: var(--hatch-type-caption);
+  font-size: var(--hatch-type-meta);
   text-align: center;
 }
 
@@ -780,7 +780,7 @@ h2 {
 .recovery-banner div {
   display: grid;
   flex: 1;
-  font-size: var(--hatch-type-label);
+  font-size: var(--hatch-type-ui);
   gap: 2px;
 }
 
@@ -871,7 +871,7 @@ h2 {
 
 .delivery-receipt small {
   color: var(--muted);
-  font-size: var(--hatch-type-label);
+  font-size: var(--hatch-type-ui);
 }
 
 .assistant-activity-summary {
@@ -990,7 +990,7 @@ h2 {
 
 .turn-timing {
   color: var(--hatch-text-secondary);
-  font-size: var(--hatch-type-label);
+  font-size: var(--hatch-type-ui);
   margin: 2px 0 8px 18px;
 }
 
@@ -1045,7 +1045,7 @@ h2 {
 .markdown-body {
   color: var(--hatch-ink);
   font-family: inherit;
-  font-size: var(--hatch-type-reading);
+  font-size: var(--hatch-type-body);
   line-height: 1.72;
   max-width: 100%;
   min-width: 0;
@@ -1107,7 +1107,7 @@ h2 {
 }
 
 .markdown-body h2 {
-  font-size: var(--hatch-type-subtitle);
+  font-size: var(--hatch-type-subheading);
   line-height: var(--hatch-display-leading);
   margin: 16px 0 4px;
 }
@@ -1119,7 +1119,7 @@ h2 {
 }
 
 .markdown-body h4 {
-  font-size: var(--hatch-type-emphasis);
+  font-size: var(--hatch-type-body);
   line-height: 1.5;
   margin: 16px 0 0;
 }
@@ -1336,7 +1336,7 @@ h2 {
 
 .activity-tool-group > summary {
   cursor: pointer;
-  font-size: var(--hatch-type-control);
+  font-size: var(--hatch-type-ui);
   font-weight: 600;
   grid-template-columns: 20px minmax(0, 1fr) 14px;
   list-style: none;
@@ -1370,13 +1370,13 @@ h2 {
 .skill-icon {
   color: var(--hatch-text-secondary);
   font-family: var(--hatch-font-pill);
-  font-size: var(--hatch-type-label);
+  font-size: var(--hatch-type-ui);
   text-align: center;
 }
 
 .skill-label {
   color: var(--hatch-text-secondary);
-  font-size: var(--hatch-type-control);
+  font-size: var(--hatch-type-ui);
   font-weight: 760;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1385,7 +1385,7 @@ h2 {
 
 .skill-meta {
   color: color-mix(in srgb, var(--hatch-text-secondary) 72%, transparent);
-  font-size: var(--hatch-type-label);
+  font-size: var(--hatch-type-ui);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1411,7 +1411,7 @@ h2 {
 
 .skill-detail-row span {
   color: var(--hatch-text-secondary);
-  font-size: var(--hatch-type-caption);
+  font-size: var(--hatch-type-meta);
   font-weight: 760;
   text-transform: uppercase;
 }
@@ -1419,7 +1419,7 @@ h2 {
 .skill-detail-row code {
   color: var(--hatch-ink);
   font-family: var(--hatch-font-mono);
-  font-size: var(--hatch-type-label);
+  font-size: var(--hatch-type-ui);
   overflow: hidden;
   min-width: 0;
   text-overflow: ellipsis;
@@ -1428,7 +1428,7 @@ h2 {
 
 .skill-explanation {
   color: var(--hatch-text-secondary);
-  font-size: var(--hatch-type-label);
+  font-size: var(--hatch-type-ui);
   line-height: 1.5;
 }
 
@@ -1466,7 +1466,7 @@ h2 {
 
 .tool-label {
   color: var(--hatch-text-secondary);
-  font-size: var(--hatch-type-control);
+  font-size: var(--hatch-type-ui);
   font-weight: 540;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1475,7 +1475,7 @@ h2 {
 
 .tool-meta {
   color: var(--hatch-text-secondary);
-  font-size: var(--hatch-type-label);
+  font-size: var(--hatch-type-ui);
   max-width: min(360px, 34vw);
   min-width: 0;
   overflow: hidden;
@@ -1518,13 +1518,13 @@ h2 {
 .approval-gate strong {
   color: var(--hatch-ink);
   display: block;
-  font-size: var(--hatch-type-control);
+  font-size: var(--hatch-type-ui);
   margin-bottom: 3px;
 }
 
 .approval-gate p {
   color: var(--hatch-ink);
-  font-size: var(--hatch-type-label);
+  font-size: var(--hatch-type-ui);
   line-height: 1.4;
 }
 
@@ -1540,7 +1540,7 @@ h2 {
 
 .approval-resolution {
   border-radius: 7px;
-  font-size: var(--hatch-type-label);
+  font-size: var(--hatch-type-ui);
   font-weight: 720;
   padding: 8px 10px;
 }
@@ -1563,7 +1563,7 @@ h2 {
 
 .tool-detail-block span {
   color: var(--hatch-ink);
-  font-size: var(--hatch-type-caption);
+  font-size: var(--hatch-type-meta);
   font-weight: 800;
   text-transform: uppercase;
 }
@@ -1574,7 +1574,7 @@ h2 {
   border-radius: 7px;
   color: var(--hatch-ink);
   font-family: var(--hatch-font-mono);
-  font-size: var(--hatch-type-label);
+  font-size: var(--hatch-type-ui);
   line-height: 1.45;
   margin: 0;
   max-height: 280px;
@@ -1643,14 +1643,14 @@ h2 {
   overflow: visible;
 }
 
-.composer-control {
+.composer-control:not(.hui-control) {
   align-items: center;
   background: transparent;
   color: var(--hatch-text-secondary);
   display: inline-flex;
   flex: 0 1 auto;
   font-family: var(--hatch-font-ui);
-  font-size: var(--hatch-type-label);
+  font-size: var(--hatch-type-ui);
   gap: 6px;
   min-width: 0;
   transition: background .12s, border-color .12s, color .12s;
@@ -1660,15 +1660,15 @@ button.composer-control {
   cursor: pointer;
 }
 
-.composer-control:not(.hui-control--raised):hover,
-.composer-control:not(.hui-control--raised):focus-within,
-button.composer-control:not(.hui-control--raised):focus-visible {
+.composer-control:not(.hui-control):hover,
+.composer-control:not(.hui-control):focus-within,
+button.composer-control:not(.hui-control):focus-visible {
   background: var(--hatch-panel-muted);
   border-color: var(--hatch-border-subtle);
   color: var(--hatch-ink);
 }
 
-.composer-control svg:not(.hui-control-caret) {
+.composer-control:not(.hui-control) svg:not(.hui-control-caret) {
   fill: none;
   flex: 0 0 16px;
   height: 16px;
@@ -1677,51 +1677,6 @@ button.composer-control:not(.hui-control--raised):focus-visible {
   stroke-linejoin: round;
   stroke-width: 1.55;
   width: 16px;
-}
-
-.workspace-composer-control {
-  flex: 0 1 auto;
-  justify-content: flex-start;
-  min-width: 0;
-  max-width: none;
-}
-
-.workspace-composer-control .composer-control-label {
-  flex: 0 1 auto;
-  min-width: max-content;
-  overflow: visible;
-  text-align: left;
-  text-overflow: clip;
-}
-
-.composer-control-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.permission-composer-control {
-  align-items: center;
-  display: flex;
-  gap: 7px;
-  max-width: min(180px, 42cqw);
-  min-width: min(158px, 42cqw);
-  position: relative;
-  flex-shrink: 0;
-}
-
-.permission-composer-control .composer-control-select {
-  flex: 1 1 auto;
-  width: auto;
-  min-width: 0;
-  white-space: nowrap;
-}
-
-.permission-composer-control .hui-select-value {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .send-button,
@@ -1900,7 +1855,7 @@ button.composer-control:not(.hui-control--raised):focus-visible {
 .toolbar-overflow-toggle {
   color: var(--text-secondary);
   font-family: var(--hatch-font-pill);
-  font-size: var(--hatch-type-control);
+  font-size: var(--hatch-type-ui);
   letter-spacing: 1px;
   line-height: 1;
 }
@@ -1909,7 +1864,7 @@ button.composer-control:not(.hui-control--raised):focus-visible {
   align-items: center;
   display: flex;
   flex: 0 1 auto;
-  font-size: var(--hatch-type-label);
+  font-size: var(--hatch-type-ui);
   gap: 5px;
   max-width: min(54vw, 480px);
   min-width: 0;
@@ -1962,7 +1917,7 @@ button.composer-control:not(.hui-control--raised):focus-visible {
   color: var(--text-secondary);
   display: inline-flex;
   flex: 0 0 auto;
-  font-size: var(--hatch-type-caption);
+  font-size: var(--hatch-type-meta);
   gap: 5px;
   letter-spacing: .01em;
   line-height: 1;
@@ -1972,7 +1927,7 @@ button.composer-control:not(.hui-control--raised):focus-visible {
 }
 
 .desktop-connection-status.compact {
-  font-size: var(--hatch-type-caption);
+  font-size: var(--hatch-type-meta);
   gap: 6px;
 }
 
@@ -2076,7 +2031,7 @@ button.composer-control:not(.hui-control--raised):focus-visible {
   background: transparent;
   border-color: transparent;
   color: var(--text-secondary);
-  font-size: var(--hatch-type-label);
+  font-size: var(--hatch-type-ui);
   font-weight: 400;
   gap: 6px;
 }
@@ -2104,7 +2059,7 @@ button.composer-control:not(.hui-control--raised):focus-visible {
 .desktop-source-list-label {
   color: var(--text-secondary);
   flex: 0 0 auto;
-  font-size: var(--hatch-type-label);
+  font-size: var(--hatch-type-ui);
   font-weight: 700;
   letter-spacing: .04em;
   padding: 9px 7px 4px;
@@ -2113,12 +2068,12 @@ button.composer-control:not(.hui-control--raised):focus-visible {
 
 .desktop-source-empty {
   color: var(--text-secondary);
-  font-size: var(--hatch-type-label);
+  font-size: var(--hatch-type-ui);
   padding: 10px 12px 14px;
 }
 
 .desktop-source-empty.compact {
-  font-size: var(--hatch-type-caption);
+  font-size: var(--hatch-type-meta);
   padding: 7px 12px 9px 35px;
 }
 
@@ -2161,7 +2116,7 @@ button.composer-control:not(.hui-control--raised):focus-visible {
 }
 
 .desktop-source-row .creator-avatar {
-  font-size: var(--hatch-type-label);
+  font-size: var(--hatch-type-ui);
   height: 25px;
   width: 25px;
 }
@@ -2180,8 +2135,8 @@ button.composer-control:not(.hui-control--raised):focus-visible {
   white-space: nowrap;
 }
 
-.desktop-source-row-copy strong { font-size: var(--hatch-type-label); font-weight: 600; }
-.desktop-source-row-copy small { color: var(--text-secondary); font-size: var(--hatch-type-caption); }
+.desktop-source-row-copy strong { font-size: var(--hatch-type-ui); font-weight: 600; }
+.desktop-source-row-copy small { color: var(--text-secondary); font-size: var(--hatch-type-meta); }
 
 .desktop-agent-disclosure {
   color: var(--text-secondary);
@@ -2217,9 +2172,16 @@ button.composer-control:not(.hui-control--raised):focus-visible {
   border-top: 1px solid var(--border-separator);
   display: flex;
   flex: 0 0 auto;
-  gap: 8px;
+  justify-content: space-between;
   min-height: 54px;
   padding: 9px 12px;
+}
+
+.desktop-sidebar-footer__identity {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
 }
 
 .desktop-sidebar-footer .avatar { height: 26px; width: 26px; }
@@ -2238,14 +2200,10 @@ button.composer-control:not(.hui-control--raised):focus-visible {
   white-space: nowrap;
 }
 
-.desktop-sidebar-account strong { font-size: var(--hatch-type-caption); }
-.desktop-sidebar-account small { color: var(--text-secondary); font-size: var(--hatch-type-caption); }
+.desktop-sidebar-account strong { font-size: var(--hatch-type-meta); }
+.desktop-sidebar-account small { color: var(--text-secondary); font-size: var(--hatch-type-meta); }
 
-.profile-menu {
-  flex: 0 0 auto;
-  margin-left: auto;
-  position: relative;
-}
+.profile-menu { flex: 0 0 auto; margin-left: auto; position: relative; }
 
 .profile-settings-button {
   background: transparent;
@@ -2291,7 +2249,7 @@ button.composer-control:not(.hui-control--raised):focus-visible {
   border-radius: 5px;
   color: var(--hatch-ink);
   display: flex;
-  font-size: var(--hatch-type-label);
+  font-size: var(--hatch-type-ui);
   font-weight: 550;
   justify-content: flex-start;
   min-height: 32px;
@@ -2325,22 +2283,22 @@ button.composer-control:not(.hui-control--raised):focus-visible {
 
 .inspector-kicker {
   color: var(--text-secondary);
-  font-size: var(--hatch-type-label);
+  font-size: var(--hatch-type-ui);
   font-weight: 700;
   letter-spacing: .05em;
   text-transform: uppercase;
 }
 
-.inspector-section strong { font-size: var(--hatch-type-label); line-height: 1.4; }
+.inspector-section strong { font-size: var(--hatch-type-ui); line-height: 1.4; }
 
 .inspector-section p {
   color: var(--text-secondary);
-  font-size: var(--hatch-type-caption);
+  font-size: var(--hatch-type-meta);
   line-height: 1.45;
 }
 
 .inspector-section .inspector-workspace-path {
-  font-size: var(--hatch-type-caption);
+  font-size: var(--hatch-type-meta);
   font-weight: 550;
   line-height: 1.35;
   overflow: hidden;
@@ -2349,7 +2307,7 @@ button.composer-control:not(.hui-control--raised):focus-visible {
 }
 
 .inspector-action {
-  font-size: var(--hatch-type-caption);
+  font-size: var(--hatch-type-meta);
   font-weight: 550;
   justify-self: start;
   min-height: 30px;
@@ -2377,7 +2335,7 @@ button.composer-control:not(.hui-control--raised):focus-visible {
   width: 15px;
 }
 
-.inspector-select-control .hui-select-trigger { width: 100%; min-width: 0; min-height: 30px; border: 0; padding-inline: 2px; background: transparent; box-shadow: none; font-size: var(--hatch-type-caption); }
+.inspector-select-control .hui-select-trigger { width: 100%; min-width: 0; min-height: 30px; border: 0; padding-inline: 2px; background: transparent; box-shadow: none; font-size: var(--hatch-type-meta); }
 .inspector-select-control .hui-select-trigger--with-leading { gap: 7px; justify-content: flex-start; }
 .inspector-select-control .hui-select-leading { color: var(--hatch-text-secondary); }
 
@@ -2420,7 +2378,7 @@ button.composer-control:not(.hui-control--raised):focus-visible {
   border-bottom: 1px solid var(--border-separator);
   display: flex;
   flex: 0 0 auto;
-  font-size: var(--hatch-type-label);
+  font-size: var(--hatch-type-ui);
   justify-content: space-between;
   min-height: 45px;
   padding: 0 9px 0 13px;
@@ -2486,7 +2444,7 @@ button.composer-control:not(.hui-control--raised):focus-visible {
   border-radius: 6px;
   color: var(--hatch-ink);
   display: inline-flex;
-  font-size: var(--hatch-type-caption);
+  font-size: var(--hatch-type-meta);
   gap: 5px;
   max-inline-size: min(260px, 100%);
   padding: 3px 5px 3px 8px;
@@ -2503,7 +2461,7 @@ button.composer-control:not(.hui-control--raised):focus-visible {
   border: 0;
   color: var(--hatch-text-secondary);
   cursor: pointer;
-  font-size: var(--hatch-type-reading);
+  font-size: var(--hatch-type-body);
   line-height: 1;
   padding: 0 1px;
 }
@@ -2527,7 +2485,7 @@ button.composer-control:not(.hui-control--raised):focus-visible {
   border: 1px solid var(--border-separator);
   border-radius: 6px;
   font-family: var(--hatch-font-mono);
-  font-size: var(--hatch-type-caption);
+  font-size: var(--hatch-type-meta);
   line-height: 1.45;
   margin: 8px 0 0;
   max-height: 130px;
@@ -2678,7 +2636,7 @@ button.composer-control:not(.hui-control--raised):focus-visible {
 .desktop-auxiliary-header h1 {
   margin: 0;
   font: 600 var(--hatch-type-title)/1.15 var(--hatch-font-ui);
-  letter-spacing: -.02em;
+  letter-spacing: normal;
 }
 
 .desktop-auxiliary-content {
@@ -2699,7 +2657,7 @@ button.composer-control:not(.hui-control--raised):focus-visible {
 .desktop-auxiliary-content .desktop-auxiliary-lede {
   margin-block-end: 10px;
   color: var(--hatch-ink);
-  font: 500 var(--hatch-type-subtitle)/var(--hatch-display-leading) var(--hatch-font-display);
+  font: 500 var(--hatch-type-subheading)/var(--hatch-display-leading) var(--hatch-font-display);
   letter-spacing: var(--hatch-display-tracking);
 }
 
@@ -2780,7 +2738,7 @@ button.composer-control:not(.hui-control--raised):focus-visible {
 
 .desktop-toolbar-context {
   font-family: var(--hatch-font-pill);
-  font-size: var(--hatch-type-label);
+  font-size: var(--hatch-type-ui);
   gap: 7px;
 }
 
@@ -2807,9 +2765,9 @@ button.composer-control:not(.hui-control--raised):focus-visible {
 
 .desktop-source-list-label {
   font-family: var(--hatch-font-pill);
-  font-size: var(--hatch-type-caption);
+  font-size: var(--hatch-type-meta);
   font-weight: 400;
-  letter-spacing: -.01em;
+  letter-spacing: normal;
   padding: 10px 9px 7px;
   text-transform: none;
 }
@@ -2846,9 +2804,9 @@ button.composer-control:not(.hui-control--raised):focus-visible {
 
 .desktop-source-row-copy strong {
   font-family: var(--hatch-font-pill);
-  font-size: var(--hatch-type-label);
+  font-size: var(--hatch-type-ui);
   font-weight: 680;
-  letter-spacing: -.015em;
+  letter-spacing: normal;
 }
 
 .desktop-source-row-copy small { color: var(--hatch-ink); }
@@ -2894,7 +2852,7 @@ button.composer-control:not(.hui-control--raised):focus-visible {
   box-shadow: 0 1px 3px rgba(60,43,31,.08);
   color: #ad5138;
   font-family: var(--hatch-font-pill);
-  font-size: var(--hatch-type-caption);
+  font-size: var(--hatch-type-meta);
   font-weight: 700;
   flex: 0 0 30px;
   height: 30px;
@@ -2908,9 +2866,9 @@ button.composer-control:not(.hui-control--raised):focus-visible {
 
 .desktop-sidebar-account strong {
   color: var(--hatch-ink);
-  font-size: var(--hatch-type-label);
+  font-size: var(--hatch-type-ui);
   font-weight: 680;
-  letter-spacing: -.015em;
+  letter-spacing: normal;
 }
 
 .profile-menu { margin-left: auto; }
@@ -2953,7 +2911,7 @@ button.composer-control:not(.hui-control--raised):focus-visible {
 .message-surface.assistant { max-width: min(820px, 100%); }
 
 .markdown-body {
-  font-size: var(--hatch-type-reading);
+  font-size: var(--hatch-type-body);
   line-height: 1.72;
 }
 
@@ -2985,7 +2943,7 @@ button.composer-control:not(.hui-control--raised):focus-visible {
 .assistant-activity-summary {
   color: var(--hatch-ink);
   font-family: var(--hatch-font-pill);
-  font-size: var(--hatch-type-control);
+  font-size: var(--hatch-type-ui);
   font-weight: 640;
 }
 
@@ -3069,8 +3027,8 @@ button.composer-control:not(.hui-control--raised):focus-visible {
 
 .inspector-kicker {
   font-family: var(--hatch-font-pill);
-  font-size: var(--hatch-type-caption);
-  letter-spacing: -.01em;
+  font-size: var(--hatch-type-meta);
+  letter-spacing: normal;
   text-transform: none;
 }
 
@@ -3118,7 +3076,7 @@ button.composer-control:not(.hui-control--raised):focus-visible {
 .desktop-auxiliary-note {
   margin-block-start: 22px !important;
   color: var(--hatch-text-secondary) !important;
-  font-size: var(--hatch-type-control) !important;
+  font-size: var(--hatch-type-ui) !important;
 }
 
 .desktop-auxiliary-language {
@@ -3139,7 +3097,7 @@ button.composer-control:not(.hui-control--raised):focus-visible {
 .desktop-settings-save-error {
   display: block;
   margin-block-start: 8px;
-  font-size: var(--hatch-type-caption);
+  font-size: var(--hatch-type-meta);
 }
 
 .desktop-settings-save-error { color: #a64232; }
