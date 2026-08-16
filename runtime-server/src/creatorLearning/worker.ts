@@ -104,7 +104,14 @@ export class CreatorFactoryWorker {
     } catch (error) {
       if (heartbeat) clearInterval(heartbeat);
       const message = error instanceof Error ? error.message : String(error);
-      const delay = Math.min(5 * 60_000, this.retryBaseMs * (2 ** Math.min(claimed.attempts - 1, 6)));
+      // A process shutdown is an expected hand-off to the durable recovery
+      // consumer, not a provider failure. Requeue it immediately so a deploy
+      // or graceful restart does not turn a direct run into a multi-minute
+      // user-visible queue delay. Real provider/lease failures retain the
+      // bounded exponential backoff.
+      const delay = stopSignal?.aborted
+        ? 0
+        : Math.min(5 * 60_000, this.retryBaseMs * (2 ** Math.min(claimed.attempts - 1, 6)));
       try {
         return await this.repository.fail({
           runId: claimed.id,
