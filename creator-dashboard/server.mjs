@@ -1,5 +1,12 @@
 import { createServer } from "node:http";
-import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  randomBytes,
+  randomUUID,
+  timingSafeEqual
+} from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,13 +34,10 @@ const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}
 export const CREATOR_FACTORY_JSON_BODY_MAX_BYTES = 32 * 1024 * 1024;
 
 // Browser OAuth is deliberately an authorization-code + PKCE bridge to the
-// existing Hatch web session. The browser never receives the Registry session
-// token; the short-lived access token below resolves to it only inside this
-// BFF process.
-const OAUTH_AUTHORIZATION_TRANSACTIONS = new Map();
-const OAUTH_AUTHORIZATION_CODES = new Map();
-const OAUTH_ACCESS_TOKENS = new Map();
-const OAUTH_REFRESH_TOKENS = new Map();
+// existing Hatch web session. OAuth records live in PortalStateStore, which is
+// backed by Postgres in production (or the local durable state file in dev).
+// Bearer values are never written there in plaintext; the dashboard encrypts
+// the Registry session token and stores only SHA-256 digests for lookups.
 const DEFAULT_OAUTH_CLIENT_ID = "hatch-context-intake";
 const DEFAULT_OAUTH_SCOPES = Object.freeze([
   "creator:products:read",
@@ -82,6 +86,10 @@ export async function createDashboardApp(options = {}) {
         poolOptions: { max: Math.max(2, Math.min(5, Number(options.commercePoolSize ?? process.env.HATCH_COMMERCE_POOL_SIZE ?? 10))) }
       }
     : { filePath: portalStatePath });
+  const oauthStateKey = resolveOAuthStateKey(
+    options.oauthStateKey ?? process.env.HATCH_OAUTH_STATE_KEY ?? process.env.HATCH_SESSION_SECRET,
+    portalStatePath
+  );
   const telemetry = options.telemetry ?? await PortalTelemetryStore.open(commerceDatabaseUrl
     ? {
         Pool: PostgresPool,
@@ -420,6 +428,7 @@ export async function createDashboardApp(options = {}) {
       if (request.method === "OPTIONS") return send(response, 204, undefined);
       response.__hatchRequestId = requestId;
       response.__includeRequestId = url.pathname.startsWith("/v1/");
+      request.__oauthStateKey = oauthStateKey;
       response.setHeader("x-request-id", requestId);
       if (request.method === "GET" && url.pathname === "/healthz") {
         return send(response, 200, { ok: true });
@@ -775,7 +784,9 @@ export async function createDashboardApp(options = {}) {
           fetchImpl
         });
         const profile = publicProfile(auth.account);
-        const webSession = await portalState.createWebSession(auth.token, profile);
+        const webSession = await portalState.createWebSession(auth.token, profile, {
+          registryTokenCiphertext: encryptOAuthSecret(auth.token, oauthStateKey)
+        });
         await recordTelemetry("auth_completed", { request_id: requestId }, `auth-completed:${webSession.session_id}`);
         setWebSessionCookies(request, response, webSession.session_id);
         return send(response, 200, {
@@ -800,7 +811,9 @@ export async function createDashboardApp(options = {}) {
           fetchImpl
         });
         const profile = publicProfile(auth.account);
-        const webSession = await portalState.createWebSession(auth.token, profile);
+        const webSession = await portalState.createWebSession(auth.token, profile, {
+          registryTokenCiphertext: encryptOAuthSecret(auth.token, oauthStateKey)
+        });
         await recordTelemetry("auth_completed", { request_id: requestId }, `auth-completed:${webSession.session_id}`);
         setWebSessionCookies(request, response, webSession.session_id);
         return send(response, 201, {
@@ -838,14 +851,14 @@ export async function createDashboardApp(options = {}) {
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const transactionId = `oauth_tx_${randomId()}`;
         const csrfToken = requestCookies(request).hatch_web_csrf ?? "";
-        OAUTH_AUTHORIZATION_TRANSACTIONS.set(transactionId, {
+        await portalState.saveOAuthAuthorizationTransaction({
           id: transactionId,
           clientId,
           redirectUri,
           state,
           codeChallenge,
           scopes: requestedScopes,
-          registryToken: authentication.token,
+          registryTokenCiphertext: encryptOAuthSecret(authentication.token, oauthStateKey),
           profile: authentication.profile,
           webSessionId: requestCookies(request).hatch_web_session,
           csrfToken,
@@ -863,9 +876,9 @@ export async function createDashboardApp(options = {}) {
       if (request.method === "POST" && url.pathname === "/v1/auth/authorize/consent") {
         const form = await readForm(request, 64 * 1024);
         const transactionId = String(form.transaction_id ?? "").trim();
-        const transaction = OAUTH_AUTHORIZATION_TRANSACTIONS.get(transactionId);
+        const transaction = portalState.getOAuthAuthorizationTransaction(transactionId);
         if (!transaction || transaction.expiresAt <= Date.now()) {
-          OAUTH_AUTHORIZATION_TRANSACTIONS.delete(transactionId);
+          await portalState.deleteOAuthAuthorizationTransaction(transactionId);
           return send(response, 400, { error: { code: "oauth_transaction_expired", message: "This authorization request expired. Start again." } });
         }
         const cookies = requestCookies(request);
@@ -874,7 +887,7 @@ export async function createDashboardApp(options = {}) {
           || !safeEqual(cookies.hatch_web_csrf ?? "", transaction.csrfToken)) {
           return send(response, 403, { error: { code: "csrf_rejected", message: "Refresh the page and try again." } });
         }
-        OAUTH_AUTHORIZATION_TRANSACTIONS.delete(transactionId);
+        await portalState.deleteOAuthAuthorizationTransaction(transactionId);
         const redirect = new URL(transaction.redirectUri);
         // OAuth clients use state to bind the browser callback to the pending
         // login. Preserve it on both approval and denial responses.
@@ -885,14 +898,14 @@ export async function createDashboardApp(options = {}) {
           redirect.searchParams.set("error_description", "The Creator did not approve access.");
         } else {
           const code = `oauth_code_${randomId()}`;
-          OAUTH_AUTHORIZATION_CODES.set(code, {
+          await portalState.saveOAuthAuthorizationCode(oauthTokenDigest(code), {
             code,
             clientId: transaction.clientId,
             redirectUri: transaction.redirectUri,
             state: transaction.state,
             codeChallenge: transaction.codeChallenge,
             scopes: transaction.scopes,
-            registryToken: transaction.registryToken,
+            registryTokenCiphertext: transaction.registryTokenCiphertext,
             profile: transaction.profile,
             expiresAt: Date.now() + 60_000,
             used: false
@@ -913,7 +926,7 @@ export async function createDashboardApp(options = {}) {
         if (!oauthClientAllowed(clientId)) return send(response, 400, { error: "invalid_client", error_description: "Unknown OAuth client." });
         if (grantType === "authorization_code") {
           const codeValue = String(form.code ?? "").trim();
-          const code = OAUTH_AUTHORIZATION_CODES.get(codeValue);
+          const code = portalState.getOAuthAuthorizationCode(oauthTokenDigest(codeValue));
           const redirectUri = String(form.redirect_uri ?? "").trim();
           const verifier = String(form.code_verifier ?? "").trim();
           if (!code || code.used || code.expiresAt <= Date.now() || code.clientId !== clientId
@@ -921,17 +934,21 @@ export async function createDashboardApp(options = {}) {
             || !safeEqual(pkceChallenge(verifier), code.codeChallenge)) {
             return send(response, 400, { error: "invalid_grant", error_description: "Authorization code or PKCE verifier is invalid." });
           }
-          code.used = true;
-          OAUTH_AUTHORIZATION_CODES.delete(codeValue);
-          return send(response, 200, issueOAuthTokens(code));
+          const consumed = await portalState.consumeOAuthAuthorizationCode(oauthTokenDigest(codeValue));
+          if (!consumed) {
+            return send(response, 400, { error: "invalid_grant", error_description: "Authorization code or PKCE verifier is invalid." });
+          }
+          return send(response, 200, await issueOAuthTokens(consumed, portalState, oauthStateKey));
         }
         if (grantType === "refresh_token") {
           const refreshToken = String(form.refresh_token ?? "").trim();
-          const record = OAUTH_REFRESH_TOKENS.get(refreshToken);
+          const refreshDigest = oauthTokenDigest(refreshToken);
+          const record = portalState.getOAuthRefreshToken(refreshDigest);
           if (!record || record.expiresAt <= Date.now() || record.clientId !== clientId) {
             return send(response, 400, { error: "invalid_grant", error_description: "Refresh token is invalid or expired." });
           }
-          return send(response, 200, issueOAuthTokens(record));
+          await portalState.deleteOAuthRefreshToken(refreshDigest);
+          return send(response, 200, await issueOAuthTokens(record, portalState, oauthStateKey));
         }
         return send(response, 400, { error: "unsupported_grant_type", error_description: "Use authorization_code or refresh_token." });
       }
@@ -1275,16 +1292,17 @@ export async function createDashboardApp(options = {}) {
         return send(response, 404, { error: { code: "not_found", message: "Route not found." } });
       }
 
-      const productContractPath = url.pathname.match(/^\/v1\/creator\/products(?:\/[^/]+(?:\/(?:files|snapshots|runs|versions|brief-spec)(?:\/[^/]+)?)?)?$/);
+      const productContractPath = url.pathname.match(/^\/v1\/creator\/products(?:\/[^/]+(?:\/(?:files|snapshots|runs|versions)(?:\/[^/]+)?)?)?$/);
       const productContractWrite = productContractPath && (
         request.method === "POST" || request.method === "PATCH" || request.method === "PUT"
       ) && (
         url.pathname === "/v1/creator/products"
-        || /\/(files|snapshots|runs|brief-spec)$/.test(url.pathname)
+        || /\/(files|snapshots|runs)$/.test(url.pathname)
         || /^\/v1\/creator\/products\/[^/]+$/.test(url.pathname)
       );
       const productContractRead = productContractPath && request.method === "GET" && (
-        /\/(files|snapshots|runs|versions)(?:\/[^/]+)?$/.test(url.pathname)
+        url.pathname === "/v1/creator/products"
+        || /\/(files|snapshots|runs|versions)(?:\/[^/]+)?$/.test(url.pathname)
       );
       if (productContractWrite || productContractRead) {
         const authentication = await authenticate(request, registryUrl, "creator", fetchImpl, portalState);
@@ -1292,7 +1310,9 @@ export async function createDashboardApp(options = {}) {
         const isProductRoot = url.pathname === "/v1/creator/products" || /^\/v1\/creator\/products\/[^/]+$/.test(url.pathname);
         const requiredScope = isProductRoot
           ? (request.method === "GET" ? "creator:products:read" : "creator:products:write")
-          : (request.method === "GET" ? (url.pathname.includes("/files") ? "creator:files:read" : "creator:versions:read") : "creator:products:write");
+          : (url.pathname.includes("/files")
+            ? (request.method === "GET" ? "creator:files:read" : "creator:files:write")
+            : "creator:products:write");
         requireOAuthScope(request, requiredScope, url.pathname);
         requireCapability(authentication.profile, request.method === "GET" ? "product:read" : "product:edit");
         const body = request.method === "GET" ? undefined : JSON.stringify(await readJson(request, factoryRequestMaxBytes));
@@ -1314,6 +1334,7 @@ export async function createDashboardApp(options = {}) {
       if (request.method === "GET" && url.pathname === "/v1/creator/products") {
         const authentication = await authenticate(request, registryUrl, "creator", fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
+        requireOAuthScope(request, "creator:products:read", url.pathname);
         requireCapability(authentication.profile, "product:read");
         return send(response, 200, await registryRequest(registryUrl, "/v1/creator/products", {
           fetchImpl,
@@ -2273,22 +2294,25 @@ function pkceChallenge(verifier) {
   return createHash("sha256").update(verifier).digest("base64url");
 }
 
-function issueOAuthTokens(record) {
+async function issueOAuthTokens(record, portalState, oauthStateKey) {
   const accessToken = `hatch_at_${randomId()}${randomId()}`;
   const refreshToken = `hatch_rt_${randomId()}${randomId()}`;
   const now = Date.now();
-  OAUTH_ACCESS_TOKENS.set(accessToken, {
-    registryToken: record.registryToken,
+  decryptOAuthSecret(record.registryTokenCiphertext, oauthStateKey);
+  const accessRecord = {
+    registryTokenCiphertext: record.registryTokenCiphertext,
     clientId: record.clientId,
     scopes: [...record.scopes],
     expiresAt: now + 15 * 60_000
-  });
-  OAUTH_REFRESH_TOKENS.set(refreshToken, {
-    registryToken: record.registryToken,
+  };
+  const refreshRecord = {
+    registryTokenCiphertext: record.registryTokenCiphertext,
     clientId: record.clientId,
     scopes: [...record.scopes],
     expiresAt: now + 30 * 24 * 60 * 60_000
-  });
+  };
+  await portalState.saveOAuthAccessToken(oauthTokenDigest(accessToken), accessRecord);
+  await portalState.saveOAuthRefreshToken(oauthTokenDigest(refreshToken), refreshRecord);
   return {
     access_token: accessToken,
     token_type: "Bearer",
@@ -2298,14 +2322,81 @@ function issueOAuthTokens(record) {
   };
 }
 
-function activeOAuthAccessToken(token) {
-  const record = OAUTH_ACCESS_TOKENS.get(token);
+async function activeOAuthAccessToken(token, portalState, oauthStateKey) {
+  const tokenDigest = oauthTokenDigest(token);
+  const record = portalState.getOAuthAccessToken(tokenDigest);
   if (!record) return undefined;
   if (record.expiresAt <= Date.now()) {
-    OAUTH_ACCESS_TOKENS.delete(token);
+    await portalState.deleteOAuthAccessToken(tokenDigest);
     return undefined;
   }
-  return record;
+  return {
+    ...record,
+    registryToken: decryptOAuthSecret(record.registryTokenCiphertext, oauthStateKey)
+  };
+}
+
+function oauthTokenDigest(token) {
+  return createHash("sha256").update(String(token)).digest("hex");
+}
+
+function resolveOAuthStateKey(configured, portalStatePath) {
+  const secret = String(configured ?? "").trim();
+  if (!secret && process.env.NODE_ENV === "production") {
+    throw new Error("HATCH_OAUTH_STATE_KEY (or HATCH_SESSION_SECRET) is required in production.");
+  }
+  return createHash("sha256")
+    .update(secret || `development-only:${portalStatePath}`)
+    .digest();
+}
+
+function encryptOAuthSecret(value, key) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  const ciphertext = Buffer.concat([cipher.update(String(value), "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `v1.${iv.toString("base64url")}.${tag.toString("base64url")}.${ciphertext.toString("base64url")}`;
+}
+
+function decryptOAuthSecret(value, key) {
+  const [version, ivValue, tagValue, ciphertextValue] = String(value ?? "").split(".");
+  if (version !== "v1" || !ivValue || !tagValue || !ciphertextValue) {
+    throw new Error("OAuth secret is not a valid encrypted value.");
+  }
+  const decipher = createDecipheriv(
+    "aes-256-gcm",
+    key,
+    Buffer.from(ivValue, "base64url")
+  );
+  decipher.setAuthTag(Buffer.from(tagValue, "base64url"));
+  return Buffer.concat([
+    decipher.update(Buffer.from(ciphertextValue, "base64url")),
+    decipher.final()
+  ]).toString("utf8");
+}
+
+function oauthEndpointScope(request) {
+  const method = String(request.method ?? "GET").toUpperCase();
+  const pathname = new URL(request.url ?? "/", "http://dashboard.local").pathname;
+  if (method === "GET" && pathname === "/v1/auth/me") return "creator:products:read";
+  if (pathname === "/v1/creator/products") {
+    if (method === "GET") return "creator:products:read";
+    if (method === "POST") return "creator:products:write";
+    return undefined;
+  }
+  const productMatch = pathname.match(/^\/v1\/creator\/products\/[^/]+$/);
+  if (productMatch) {
+    if (method === "GET") return "creator:products:read";
+    if (method === "PATCH") return "creator:products:write";
+    return undefined;
+  }
+  const fileMatch = pathname.match(/^\/v1\/creator\/products\/[^/]+\/files(?:\/[^/]+)?$/);
+  if (fileMatch) {
+    if (method === "GET") return "creator:files:read";
+    if (method === "POST" && !pathname.endsWith("/files")) return undefined;
+    if (method === "POST") return "creator:files:write";
+  }
+  return undefined;
 }
 
 function oauthConsentPage({ transactionId, csrfToken, profile, clientId, scopes }) {
@@ -2329,13 +2420,39 @@ function escapeHtml(value) {
 
 async function authenticate(request, registryUrl, expectedRole, fetchImpl, portalState) {
   const explicitToken = bearerTokenFromAuthorization(request);
-  const oauthToken = explicitToken ? activeOAuthAccessToken(explicitToken) : undefined;
+  const oauthToken = explicitToken
+    ? await activeOAuthAccessToken(explicitToken, portalState, request.__oauthStateKey)
+    : undefined;
   if (explicitToken && explicitToken.startsWith("hatch_at_") && !oauthToken) {
     return { error: { status: 401, body: { error: { code: "unauthorized", message: "The access token is expired or invalid." } } } };
   }
+  if (oauthToken) {
+    const requiredScope = oauthEndpointScope(request);
+    if (!requiredScope || !oauthToken.scopes.includes(requiredScope)) {
+      return {
+        error: {
+          status: 403,
+          body: {
+            error: {
+              code: requiredScope ? "oauth_scope_required" : "oauth_endpoint_not_allowed",
+              message: requiredScope
+                ? `OAuth scope ${requiredScope} is required for this endpoint.`
+                : "This OAuth token is limited to the Product and Product Files API."
+            }
+          }
+        }
+      };
+    }
+    request.__isOAuthAccessToken = true;
+    request.__oauthRequiredScope = requiredScope;
+  }
   const webSessionId = requestCookies(request).hatch_web_session;
   const webSession = !explicitToken && webSessionId ? portalState?.getWebSession(webSessionId) : undefined;
-  const token = oauthToken?.registryToken ?? explicitToken ?? webSession?.registry_token;
+  const token = oauthToken?.registryToken
+    ?? explicitToken
+    ?? (webSession?.registry_token_ciphertext
+      ? decryptOAuthSecret(webSession.registry_token_ciphertext, request.__oauthStateKey)
+      : webSession?.registry_token);
   if (!token) {
     return { error: { status: 401, body: { error: { code: "unauthorized", message: "Sign in to continue." } } } };
   }
@@ -2400,9 +2517,9 @@ function requireCapability(profile, capability) {
 }
 
 function requireOAuthScope(request, scope, path) {
+  if (!request.__isOAuthAccessToken) return;
   const scopes = request.__oauthScopes;
-  if (!scopes) return;
-  if (!scopes.includes(scope)) {
+  if (!Array.isArray(scopes) || !scopes.includes(scope)) {
     throw stateError("oauth_scope_required", `OAuth scope ${scope} is required for ${path}.`, 403);
   }
 }
@@ -3146,7 +3263,6 @@ function creatorProductView(agent, state, run) {
   const presentedApproval = state?.approval?.status === "approved" && !candidateApproved
     ? { ...state.approval, status: "stale" }
     : state?.approval ?? null;
-  const briefSpecValid = isPublishableBriefSpec(base.brief_spec);
   return {
     ...base,
     version: state?.version ?? 0,
@@ -3160,8 +3276,7 @@ function creatorProductView(agent, state, run) {
     readiness: {
       candidate_approved: candidateApproved,
       publishable_corpus: Boolean(runCandidate?.corpus_verified || base.corpus_digest),
-      brief_spec_valid: briefSpecValid,
-      ready: Boolean(candidateApproved && (runCandidate?.corpus_verified || base.corpus_digest) && briefSpecValid)
+      ready: Boolean(candidateApproved && (runCandidate?.corpus_verified || base.corpus_digest))
     },
     updated_at: state?.updated_at ?? base.updated_at ?? run?.updated_at ?? base.published_at
   };
@@ -3272,15 +3387,13 @@ function publishReadiness(product, state) {
   const ownershipValid = Boolean(product?.creator_id);
   const materializationReady = Boolean(candidate?.digest && candidate?.corpus_verified);
   const productIdentityValid = Boolean(product?.product_id && UUID_V4_PATTERN.test(product.product_id));
-  const briefSpecValid = isPublishableBriefSpec(product?.brief_spec);
   const checks = [
     [candidateApproved, "candidate approval is stale"],
     [noCriticalFailures, "critical candidate gates are incomplete"],
     [copyComplete, "public promise, description, or boundaries are incomplete"],
     [ownershipValid, "Creator ownership is missing"],
     [materializationReady, "Registry materialization is not ready"],
-    [productIdentityValid, "canonical Product UUID is invalid"],
-    [briefSpecValid, "Creator Brief is missing or invalid"]
+    [productIdentityValid, "canonical Product UUID is invalid"]
   ];
   return {
     candidate_approved: candidateApproved,
@@ -3289,7 +3402,6 @@ function publishReadiness(product, state) {
     ownership_valid: ownershipValid,
     materialization_ready: materializationReady,
     product_identity_valid: productIdentityValid,
-    brief_spec_valid: briefSpecValid,
     blockers: checks.filter(([ready]) => !ready).map(([, message]) => message),
     ready: checks.every(([ready]) => ready)
   };

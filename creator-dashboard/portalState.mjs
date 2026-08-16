@@ -7,7 +7,11 @@ const EMPTY_STATE = Object.freeze({
   checkout_sessions: {},
   creator_products: {},
   factory_drafts: {},
-  web_sessions: {}
+  web_sessions: {},
+  oauth_authorization_transactions: {},
+  oauth_authorization_codes: {},
+  oauth_access_tokens: {},
+  oauth_refresh_tokens: {}
 });
 
 /**
@@ -105,7 +109,9 @@ export class PortalStateStore {
     const now = this.clock();
     const session = {
       session_id: this.idFactory("web_session"),
-      registry_token: String(registryToken),
+      ...(options.registryTokenCiphertext
+        ? { registry_token_ciphertext: String(options.registryTokenCiphertext) }
+        : { registry_token: String(registryToken) }),
       account_id: String(profile?.id ?? ""),
       role: profile?.role ?? null,
       created_at: now.toISOString(),
@@ -124,6 +130,85 @@ export class PortalStateStore {
   async deleteWebSession(sessionId) {
     await this.#mutate((state) => {
       delete state.web_sessions[sessionId];
+    });
+  }
+
+  // OAuth records are part of the durable portal authority, not process-local
+  // caches. Secret values are encrypted by the dashboard before they reach
+  // this store; keys here are SHA-256 digests of the bearer/code values.
+  getOAuthAuthorizationTransaction(transactionId) {
+    return clone(this.#state.oauth_authorization_transactions[transactionId]);
+  }
+
+  async saveOAuthAuthorizationTransaction(transaction) {
+    return this.#mutate((state) => {
+      pruneExpiredOAuthRecords(state, this.clock());
+      state.oauth_authorization_transactions[transaction.id] = clone(transaction);
+      return transaction;
+    });
+  }
+
+  async deleteOAuthAuthorizationTransaction(transactionId) {
+    await this.#mutate((state) => {
+      delete state.oauth_authorization_transactions[transactionId];
+    });
+  }
+
+  getOAuthAuthorizationCode(codeDigest) {
+    return clone(this.#state.oauth_authorization_codes[codeDigest]);
+  }
+
+  async saveOAuthAuthorizationCode(codeDigest, record) {
+    return this.#mutate((state) => {
+      pruneExpiredOAuthRecords(state, this.clock());
+      state.oauth_authorization_codes[codeDigest] = clone(record);
+      return record;
+    });
+  }
+
+  async consumeOAuthAuthorizationCode(codeDigest) {
+    return this.#mutate((state) => {
+      pruneExpiredOAuthRecords(state, this.clock());
+      const record = state.oauth_authorization_codes[codeDigest];
+      if (!record) return undefined;
+      delete state.oauth_authorization_codes[codeDigest];
+      return record;
+    });
+  }
+
+  getOAuthAccessToken(tokenDigest) {
+    return clone(this.#state.oauth_access_tokens[tokenDigest]);
+  }
+
+  async saveOAuthAccessToken(tokenDigest, record) {
+    return this.#mutate((state) => {
+      pruneExpiredOAuthRecords(state, this.clock());
+      state.oauth_access_tokens[tokenDigest] = clone(record);
+      return record;
+    });
+  }
+
+  async deleteOAuthAccessToken(tokenDigest) {
+    await this.#mutate((state) => {
+      delete state.oauth_access_tokens[tokenDigest];
+    });
+  }
+
+  getOAuthRefreshToken(tokenDigest) {
+    return clone(this.#state.oauth_refresh_tokens[tokenDigest]);
+  }
+
+  async saveOAuthRefreshToken(tokenDigest, record) {
+    return this.#mutate((state) => {
+      pruneExpiredOAuthRecords(state, this.clock());
+      state.oauth_refresh_tokens[tokenDigest] = clone(record);
+      return record;
+    });
+  }
+
+  async deleteOAuthRefreshToken(tokenDigest) {
+    await this.#mutate((state) => {
+      delete state.oauth_refresh_tokens[tokenDigest];
     });
   }
 
@@ -958,8 +1043,29 @@ function normalizeState(value) {
     checkout_sessions: mapObjectValues(value?.checkout_sessions, stripRemovedCheckoutFields),
     creator_products: mapObjectValues(value?.creator_products, stripRemovedCreatorProductFields),
     factory_drafts: objectValue(value?.factory_drafts),
-    web_sessions: objectValue(value?.web_sessions)
+    web_sessions: objectValue(value?.web_sessions),
+    oauth_authorization_transactions: objectValue(value?.oauth_authorization_transactions),
+    oauth_authorization_codes: objectValue(value?.oauth_authorization_codes),
+    oauth_access_tokens: objectValue(value?.oauth_access_tokens),
+    oauth_refresh_tokens: objectValue(value?.oauth_refresh_tokens)
   };
+}
+
+function pruneExpiredOAuthRecords(state, now) {
+  const maps = [
+    state.oauth_authorization_transactions,
+    state.oauth_authorization_codes,
+    state.oauth_access_tokens,
+    state.oauth_refresh_tokens
+  ];
+  const nowMs = now.getTime();
+  for (const records of maps) {
+    for (const [key, record] of Object.entries(records)) {
+      const rawExpiry = record?.expiresAt ?? record?.expires_at;
+      const expiresAt = typeof rawExpiry === "number" ? rawExpiry : Date.parse(String(rawExpiry ?? ""));
+      if (Number.isFinite(expiresAt) && expiresAt <= nowMs) delete records[key];
+    }
+  }
 }
 
 function mapObjectValues(value, transform) {

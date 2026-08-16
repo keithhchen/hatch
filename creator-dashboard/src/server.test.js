@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -84,7 +84,6 @@ test("browser OAuth PKCE keeps state and authorizes Product Files without Versio
     email: "creator@example.test",
     display_name: "Maya Chen"
   };
-  const briefSpecRequests = [];
   const registry = createServer(async (request, response) => {
     const requestUrl = new URL(request.url ?? "/", "http://registry.test");
     let body = "";
@@ -104,11 +103,6 @@ test("browser OAuth PKCE keeps state and authorizes Product Files without Versio
     }
     if (requestUrl.pathname === "/v1/creator/products/product-1/files" && request.method === "GET") {
       response.end(JSON.stringify({ product_id: "product-1", files: [{ id: "file-1", product_id: "product-1" }] }));
-      return;
-    }
-    if (requestUrl.pathname === "/v1/creator/products/product-1/brief-spec" && request.method === "PUT") {
-      briefSpecRequests.push({ body: JSON.parse(body), authorization: request.headers.authorization });
-      response.end(JSON.stringify({ product: { product_id: "product-1", brief_spec: JSON.parse(body).brief_spec } }));
       return;
     }
     response.statusCode = 404;
@@ -197,21 +191,92 @@ test("browser OAuth PKCE keeps state and authorizes Product Files without Versio
   assert.deepEqual(filesBody.files, [{ id: "file-1", product_id: "product-1" }]);
   assert.match(filesBody.request_id, /^req_/);
 
-  const briefSpec = {
-    contract_version: "1",
-    fields: [{ id: "goal", label: "What outcome should this task produce?", required: true }]
-  };
-  const briefResponse = await fetch(`${serverUrl(api)}/v1/creator/products/product-1/brief-spec`, {
+  const forbiddenBriefResponse = await fetch(`${serverUrl(api)}/v1/creator/products/product-1/brief-spec`, {
     method: "PUT",
     headers: { authorization: `Bearer ${token.access_token}`, "content-type": "application/json" },
-    body: JSON.stringify({ brief_spec: briefSpec })
+    body: JSON.stringify({ brief_spec: { contract_version: "1", fields: [] } })
   });
-  assert.equal(briefResponse.status, 200);
-  assert.deepEqual((await briefResponse.json()).product.brief_spec, briefSpec);
-  assert.deepEqual(briefSpecRequests, [{
-    body: { brief_spec: briefSpec },
-    authorization: "Bearer signed-creator-token"
-  }]);
+  assert.equal(forbiddenBriefResponse.status, 403);
+  assert.equal((await forbiddenBriefResponse.json()).error.code, "oauth_endpoint_not_allowed");
+
+  const forbiddenPublish = await fetch(`${serverUrl(api)}/v1/creator/products/product-1/publish`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token.access_token}`, "content-type": "application/json" },
+    body: JSON.stringify({ candidate_id: "candidate-1" })
+  });
+  assert.equal(forbiddenPublish.status, 403);
+  assert.equal((await forbiddenPublish.json()).error.code, "oauth_endpoint_not_allowed");
+
+  const limitedVerifier = "limited_verifier_abcdefghijklmnopqrstuvwxyz_0123456789-._~";
+  const limitedChallenge = createHash("sha256").update(limitedVerifier).digest("base64url");
+  const limitedAuthorize = await fetch(`${serverUrl(api)}/v1/auth/authorize?${new URLSearchParams({
+    client_id: "hatch-context-intake",
+    redirect_uri: redirectUri,
+    response_type: "code",
+    scope: "creator:products:read",
+    state: "limited-scope-state",
+    code_challenge: limitedChallenge,
+    code_challenge_method: "S256"
+  })}`, { headers: { cookie } });
+  assert.equal(limitedAuthorize.status, 200);
+  const limitedHtml = await limitedAuthorize.text();
+  const limitedTransactionId = limitedHtml.match(/name="transaction_id" value="([^"]+)"/)?.[1];
+  const limitedConsent = await fetch(`${serverUrl(api)}/v1/auth/authorize/consent`, {
+    method: "POST",
+    redirect: "manual",
+    headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ transaction_id: limitedTransactionId, csrf_token: csrf, decision: "approve" })
+  });
+  const limitedCode = new URL(limitedConsent.headers.get("location")).searchParams.get("code");
+  const limitedTokenResponse = await fetch(`${serverUrl(api)}/v1/auth/token`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      client_id: "hatch-context-intake",
+      code: limitedCode,
+      redirect_uri: redirectUri,
+      code_verifier: limitedVerifier
+    })
+  });
+  const limitedToken = await limitedTokenResponse.json();
+  const limitedFilesWrite = await fetch(`${serverUrl(api)}/v1/creator/products/product-1/files`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${limitedToken.access_token}`, "content-type": "application/json" },
+    body: JSON.stringify({ display_name: "not-authorized.md", content_base64: "bm8=" })
+  });
+  assert.equal(limitedFilesWrite.status, 403);
+  assert.equal((await limitedFilesWrite.json()).error.code, "oauth_scope_required");
+
+  const persistedState = await readFile(path.join(directory, "portal-state.json"), "utf8");
+  assert.doesNotMatch(persistedState, /signed-creator-token/);
+  assert.doesNotMatch(persistedState, new RegExp(token.access_token));
+  assert.doesNotMatch(persistedState, new RegExp(token.refresh_token));
+
+  const restartedDashboard = await createDashboardApp({
+    ledgerPath: path.join(directory, "restarted-ledger.jsonl"),
+    portalStatePath: path.join(directory, "portal-state.json"),
+    registryUrl: serverUrl(registry)
+  });
+  const restartedApi = createServer(restartedDashboard.handler);
+  await listen(restartedApi);
+  context.after(() => restartedApi.close());
+  const filesAfterRestart = await fetch(`${serverUrl(restartedApi)}/v1/creator/products/product-1/files`, {
+    headers: { authorization: `Bearer ${token.access_token}` }
+  });
+  assert.equal(filesAfterRestart.status, 200);
+  const refreshedAfterRestart = await fetch(`${serverUrl(restartedApi)}/v1/auth/token`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      client_id: "hatch-context-intake",
+      refresh_token: token.refresh_token
+    })
+  });
+  assert.equal(refreshedAfterRestart.status, 200);
+  const refreshedToken = await refreshedAfterRestart.json();
+  assert.notEqual(refreshedToken.access_token, token.access_token);
 });
 
 test("creator products are projected directly from the Agent Corpus Registry", async (context) => {
