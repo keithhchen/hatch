@@ -21,9 +21,9 @@ type InputManifest = {
   agentId?: string;
   product?: FactoryStartInput["product"];
   tools?: FactoryStartInput["tools"];
-  taskName: string;
-  taskBrief?: string;
-  taskBriefPath?: string;
+  productName: string;
+  productPromise?: string;
+  productPromisePath?: string;
   sources?: Array<{
     id: string;
     authority: FactoryStartInput["sources"][number]["authority"];
@@ -111,8 +111,8 @@ export async function loadInputManifest(manifestPath: string): Promise<FactorySt
   if (hasSources === hasSourceScope) {
     throw usage("input manifest requires exactly one of legacy sources or source_scope; they are mutually exclusive");
   }
-  const taskBrief = manifest.taskBrief
-    ?? (manifest.taskBriefPath ? await readFile(path.resolve(base, manifest.taskBriefPath), "utf8") : "");
+  const productPromise = manifest.productPromise
+    ?? (manifest.productPromisePath ? await readFile(path.resolve(base, manifest.productPromisePath), "utf8") : "");
   let sources: FactoryStartInput["sources"];
   let sourceManifest: FactoryStartInput["sourceManifest"];
   if (hasSourceScope) {
@@ -141,8 +141,8 @@ export async function loadInputManifest(manifestPath: string): Promise<FactorySt
     ...(manifest.agentId ? { agentId: manifest.agentId } : {}),
     ...(manifest.product ? { product: manifest.product } : {}),
     ...(manifest.tools ? { tools: manifest.tools } : {}),
-    taskName: manifest.taskName,
-    taskBrief,
+    productName: manifest.productName,
+    productPromise,
     sources,
     ...(sourceManifest ? { sourceManifest } : {}),
     ...(manifest.config ? { config: manifest.config } : {})

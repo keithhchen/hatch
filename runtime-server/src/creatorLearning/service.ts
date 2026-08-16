@@ -3,8 +3,9 @@ import path from "node:path";
 import { FactoryFileStore } from "./fileStore.js";
 import { CreatorSourceLibrary, CreatorSourceLibraryError } from "./sourceLibrary.js";
 import type { ArtifactObjectStore } from "./objectStore.js";
+import type { ProductFileStore, ProductSnapshotView } from "./productFiles.js";
 import { newGraphEventId, type DistillationEvent, type DistillationGraphStore, type DistillationRelease } from "./distillationGraph.js";
-import { isDistillationTaskRepository, validateTaskText, type DistillationTaskRecord } from "./tasks.js";
+import { isCreatorProductRepository, validateProductText, type CreatorProductRecord } from "./products.js";
 import { parseQuestions } from "./markdown.js";
 import { requireQuestionBatchId } from "./questionBatch.js";
 import {
@@ -14,6 +15,7 @@ import {
   type FactoryRunRecord
 } from "./repository.js";
 import type { ArtifactRef, CreatorQuestion, FactoryAgentProduct, FactoryAgentTool, FactoryStartInput, MaterializedAgentCorpus } from "./types.js";
+import { draftBriefSpecForProduct, normalizeBriefSpec, type BriefSpec } from "../brief.js";
 
 export type CreatorCorpusAssetLayer = "manifest" | "system" | "skill" | "reference" | "knowledge";
 
@@ -108,12 +110,14 @@ async function recoverCorpusAssetRefs(store: FactoryFileStore, corpus: Materiali
 }
 
 export type CreateFactoryRunRequest = {
-  taskId?: string;
+  /** Optional caller-stable run id used to make Product run retries replayable. */
+  runId?: string;
+  productId?: string;
   agentId?: string;
   product?: Partial<FactoryAgentProduct>;
   tools?: FactoryAgentTool[];
-  taskName: string;
-  taskBrief: string;
+  productName: string;
+  productPromise: string;
   sources?: FactoryStartInput["sources"];
   sourceDocumentIds?: string[];
   sourceSnapshotId?: string;
@@ -184,7 +188,7 @@ export class CreatorFactoryInputTooLargeError extends Error {
 
 export type CreatorFactoryRunView = {
   id: string;
-  taskId?: string;
+  productId?: string;
   distillationRunId?: string;
   revisionId?: string;
   revisionNumber?: number;
@@ -195,7 +199,8 @@ export type CreatorFactoryRunView = {
   agentId?: string;
   product?: FactoryAgentProduct;
   declaredToolIds?: string[];
-  taskName: string;
+  productName: string;
+  productPromise: string;
   status: FactoryRunRecord["status"];
   stage?: FactoryRunRecord["factoryStage"];
   version: number;
@@ -238,22 +243,23 @@ export class CreatorFactoryService {
     private readonly factoryRoot: string,
     sourceLibrary?: CreatorSourceLibrary,
     private readonly objectStore?: ArtifactObjectStore,
-    private readonly graphStore?: DistillationGraphStore
+    private readonly graphStore?: DistillationGraphStore,
+    private readonly productFileStore?: ProductFileStore
   ) {
     this.sourceLibrary = sourceLibrary ?? new CreatorSourceLibrary(path.join(factoryRoot, "source-library"), objectStore, graphStore);
   }
 
   async createSourceDocument(creatorId: string, input: Parameters<CreatorSourceLibrary["createFromUpload"]>[1]) {
-    const taskId = requireText(input.taskId, "taskId");
-    await this.requireActiveTask(creatorId, taskId);
+    const productId = requireText(input.productId, "productId");
+    await this.requireActiveProduct(creatorId, productId);
     await this.sourceLibrary.initialize();
     return this.sourceLibrary.createFromUpload(creatorId, input);
   }
 
-  async listSourceDocuments(creatorId: string, taskId?: string) {
-    if (taskId) await this.requireActiveTask(creatorId, taskId);
+  async listSourceDocuments(creatorId: string, productId?: string) {
+    if (productId) await this.requireActiveProduct(creatorId, productId);
     await this.sourceLibrary.initialize();
-    return this.sourceLibrary.listDocuments(creatorId, taskId);
+    return this.sourceLibrary.listDocuments(creatorId, productId);
   }
 
   async getSourceDocument(creatorId: string, documentId: string) {
@@ -261,9 +267,9 @@ export class CreatorFactoryService {
     return this.sourceLibrary.getDocument(creatorId, documentId);
   }
 
-  async createSourceSnapshot(creatorId: string, input: { documentIds: string[]; taskId?: string }) {
-    const taskId = requireText(input.taskId, "taskId");
-    await this.requireActiveTask(creatorId, taskId);
+  async createSourceSnapshot(creatorId: string, input: { documentIds: string[]; productId?: string }) {
+    const productId = requireText(input.productId, "productId");
+    await this.requireActiveProduct(creatorId, productId);
     await this.sourceLibrary.initialize();
     return this.sourceLibrary.createSnapshot(creatorId, input);
   }
@@ -273,65 +279,82 @@ export class CreatorFactoryService {
     return this.sourceLibrary.getSnapshot(creatorId, snapshotId);
   }
 
-  async createTask(creatorId: string, input: { name: string; brief: string }): Promise<DistillationTaskRecord> {
-    const repository = this.taskRepository();
-    const task = await repository.createTask({
-      id: `task_${randomUUID().replaceAll("-", "")}`,
+  async createProduct(creatorId: string, input: { name: string; promise?: string; brief?: string; idempotencyKey?: string }): Promise<CreatorProductRecord> {
+    const repository = this.productRepository();
+    const name = validateProductText(input.name, "product.name", 240);
+    const promise = validateProductText(input.promise ?? input.brief ?? "", "product.promise");
+    const product = await repository.createProduct({
+      id: randomUUID(),
       creatorId: requireText(creatorId, "creatorId"),
-      name: validateTaskText(input.name, "task.name", 240),
-      brief: validateTaskText(input.brief, "task.brief"),
-      // A Task is the product boundary. Generate its Product identity once;
-      // presentation/configuration remains outside this control-plane record.
-      productId: randomUUID()
+      name,
+      promise,
+      briefSpec: draftBriefSpecForProduct(name, promise),
+      idempotencyKey: input.idempotencyKey
     });
     if (this.graphStore) {
       await this.graphStore.initialize();
       await this.graphStore.appendEvent({
         id: `evt_${randomUUID().replaceAll("-", "")}`,
-        eventKey: `${task.id}:created`,
-        taskId: task.id,
-        runId: task.runId ?? task.id,
-        type: "task_created",
+        eventKey: `${product.id}:created`,
+        productId: product.id,
+        runId: product.runId ?? product.id,
+        type: "product_created",
         node: "intake",
         actor: "creator",
         parentEventIds: [],
         artifactIds: [],
-        payload: { nameLength: task.name.length }
+        payload: { nameLength: product.name.length }
       });
     }
-    return task;
+    return product;
   }
 
-  async listTasks(creatorId: string): Promise<DistillationTaskRecord[]> {
-    return this.taskRepository().listTasks(requireText(creatorId, "creatorId"));
+  async listProducts(creatorId: string): Promise<CreatorProductRecord[]> {
+    return this.productRepository().listProducts(requireText(creatorId, "creatorId"));
   }
 
-  async getTask(creatorId: string, taskId: string): Promise<DistillationTaskRecord> {
-    const task = await this.taskRepository().getTask(requireText(creatorId, "creatorId"), requireText(taskId, "taskId"));
-    if (!task) throw new CreatorFactoryRepositoryError("run_not_found", `Distillation Task ${taskId} was not found`);
-    return task;
+  async getProduct(creatorId: string, productId: string): Promise<CreatorProductRecord> {
+    const product = await this.productRepository().getProduct(requireText(creatorId, "creatorId"), requireText(productId, "productId"));
+    if (!product) throw new CreatorFactoryRepositoryError("run_not_found", `Distillation Product ${productId} was not found`);
+    return product;
   }
 
-  async updateTaskBrief(creatorId: string, taskId: string, brief: string, expectedUpdatedAt?: string): Promise<DistillationTaskRecord> {
-    const task = await this.getTask(creatorId, taskId);
-    if (task.status !== "active") throw new CreatorFactoryRepositoryError("invalid_status", `Distillation Task ${taskId} is deleted`);
-    return this.taskRepository().updateTaskBrief(creatorId, taskId, {
-      brief: validateTaskText(brief, "task.brief"),
+  async updateProductPromise(
+    creatorId: string,
+    productId: string,
+    input: string | { promise: string; expectedUpdatedAt?: string },
+    expectedUpdatedAt?: string
+  ): Promise<CreatorProductRecord> {
+    const product = await this.getProduct(creatorId, productId);
+    if (product.status !== "active") throw new CreatorFactoryRepositoryError("invalid_status", `Distillation Product ${productId} is deleted`);
+    const promise = typeof input === "string" ? input : input.promise;
+    const expected = typeof input === "string" ? expectedUpdatedAt : input.expectedUpdatedAt;
+    return this.productRepository().updateProductPromise(creatorId, productId, {
+      promise: validateProductText(promise, "product.promise"),
+      ...(expected ? { expectedUpdatedAt: expected } : {})
+    });
+  }
+
+  async saveProductBriefSpec(creatorId: string, productId: string, briefSpec: BriefSpec, expectedUpdatedAt?: string): Promise<CreatorProductRecord> {
+    const product = await this.getProduct(creatorId, productId);
+    if (product.status !== "active") throw new CreatorFactoryRepositoryError("invalid_status", `Distillation Product ${productId} is deleted`);
+    return this.productRepository().saveBriefSpec(creatorId, productId, {
+      briefSpec: normalizeBriefSpec(briefSpec),
       ...(expectedUpdatedAt ? { expectedUpdatedAt } : {})
     });
   }
 
-  async deleteTask(creatorId: string, taskId: string): Promise<DistillationTaskRecord> {
-    return this.taskRepository().softDeleteTask(requireText(creatorId, "creatorId"), requireText(taskId, "taskId"));
+  async deleteProduct(creatorId: string, productId: string): Promise<CreatorProductRecord> {
+    return this.productRepository().softDeleteProduct(requireText(creatorId, "creatorId"), requireText(productId, "productId"));
   }
 
-  async getTaskGraph(creatorId: string, taskId: string) {
-    const task = await this.getTask(creatorId, taskId);
+  async getProductGraph(creatorId: string, productId: string) {
+    const product = await this.getProduct(creatorId, productId);
     if (!this.graphStore) {
-      return { taskId: task.id, status: "not_started" as const, nodeStatus: {}, gates: [], criticalGateFailures: [], correctionRequired: false };
+      return { productId: product.id, status: "not_started" as const, nodeStatus: {}, gates: [], criticalGateFailures: [], correctionRequired: false };
     }
     await this.graphStore.initialize();
-    return this.graphStore.derive(task.id);
+    return this.graphStore.derive(product.id);
   }
 
   async create(
@@ -340,74 +363,101 @@ export class CreatorFactoryService {
     idempotencyKey: string
   ): Promise<{ run: CreatorFactoryRunView; created: boolean }> {
     const normalized = validateCreateRequest(request);
-    let task: DistillationTaskRecord | undefined;
-    if (normalized.taskId) {
-      task = await this.getTask(creator.id, normalized.taskId);
-      if (task.status !== "active") throw new CreatorFactoryRepositoryError("invalid_status", `Distillation Task ${normalized.taskId} is deleted`);
+    const existingRun = normalized.runId
+      ? await this.repository.getForCreator(creator.id, normalized.runId)
+      : undefined;
+    let product: CreatorProductRecord | undefined;
+    if (normalized.productId) {
+      product = await this.getProduct(creator.id, normalized.productId);
+      if (product.status !== "active") throw new CreatorFactoryRepositoryError("invalid_status", `Distillation Product ${normalized.productId} is deleted`);
     }
-    const taskProductId = task ? (task.productId ?? deterministicTaskProductId(task.id)) : undefined;
-    if (task && normalized.agentId && normalized.agentId !== taskProductId) {
-      throw new CreatorFactoryRepositoryError("invalid_status", `Distillation Task ${task.id} is bound to another Product`);
+    const productIdentity = product?.id;
+    if (product && normalized.agentId && normalized.agentId !== productIdentity) {
+      throw new CreatorFactoryRepositoryError("invalid_status", `Distillation Product ${product.id} is bound to another Product`);
     }
-    if (task && normalized.product?.id && normalized.product.id !== taskProductId) {
-      throw new CreatorFactoryRepositoryError("invalid_status", `Distillation Task ${task.id} is bound to another Product`);
+    if (product && normalized.product?.id && normalized.product.id !== productIdentity) {
+      throw new CreatorFactoryRepositoryError("invalid_status", `Distillation Product ${product.id} is bound to another Product`);
     }
-    const taskProduct = task
+    const productDefinition = product
       ? {
           ...(normalized.product ?? {}),
-          id: taskProductId!,
-          name: normalized.product?.name ?? task.name,
-          description: normalized.product?.description ?? task.brief
+          id: productIdentity!,
+          name: normalized.product?.name ?? product.name,
+          description: normalized.product?.description ?? product.promise
         }
       : normalized.product;
     const autoSnapshot = !normalized.sourceSnapshotId && normalized.sourceDocumentIds?.length
-      ? await this.sourceLibrary.createSnapshot(creator.id, { documentIds: normalized.sourceDocumentIds, taskId: normalized.taskId })
+      ? await this.sourceLibrary.createSnapshot(creator.id, { documentIds: normalized.sourceDocumentIds, productId: normalized.productId })
       : undefined;
     const snapshotId = normalized.sourceSnapshotId ?? autoSnapshot?.id;
-    // A Task revision is a graph revision, not an inline ad-hoc Factory run.
+    // A Product revision is a graph revision, not an inline ad-hoc Factory run.
     // Enforce the immutable Source Snapshot boundary before creating the
     // repository record so an invalid request cannot leave an orphan run.
-    if (task && !snapshotId) {
-      throw new CreatorFactoryRepositoryError("invalid_status", "A Task revision must be pinned to a Source Snapshot");
+    if (product && !snapshotId) {
+      throw new CreatorFactoryRepositoryError("invalid_status", "A Product revision must be pinned to a Source Snapshot");
     }
-    if (task && snapshotId) {
+    let productSnapshot: ProductSnapshotView | undefined;
+    if (product && snapshotId && this.productFileStore && productIdentity) {
+      try {
+        productSnapshot = await this.productFileStore.getSnapshot(creator.id, productIdentity, snapshotId);
+      } catch (error) {
+        // A legacy Source Snapshot may still be referenced by an historical
+        // run. Only fall back to that read-time migration boundary; new
+        // Product routes always create Product Snapshots.
+        if (!(error instanceof Error) || !["product_snapshot_not_found", "product_mismatch"].includes((error as { code?: string }).code ?? "")) {
+          throw error;
+        }
+      }
+    }
+    if (product && snapshotId && !productSnapshot) {
       const snapshot = await this.sourceLibrary.getSnapshot(creator.id, snapshotId);
-      if (snapshot.taskId !== task.id) {
-        throw new CreatorFactoryRepositoryError("invalid_status", "Source Snapshot belongs to another Distillation Task");
+      if (snapshot.productId !== product.id) {
+        throw new CreatorFactoryRepositoryError("invalid_status", "Source Snapshot belongs to another Product");
       }
     }
     const sources = snapshotId
-      ? await this.sourceLibrary.resolveSnapshotSources(creator.id, snapshotId)
+      ? productSnapshot
+        ? await this.productFileStore!.resolveSnapshotSources(creator.id, productIdentity!, snapshotId)
+        : await this.sourceLibrary.resolveSnapshotSources(creator.id, snapshotId)
       : normalized.sources ?? [];
-    const runId = `factory_${randomUUID().replaceAll("-", "")}`;
-    const distillationRunId = task?.runId ?? `distill_${randomUUID().replaceAll("-", "")}`;
-    const revisionContext = task && this.graphStore
-      ? await this.resolveTaskRevisionContext(task)
+    const runId = normalized.runId ?? `factory_${randomUUID().replaceAll("-", "")}`;
+    // Product run retries carry a caller-stable runId. Reuse it for the
+    // distillation identity too; generating a fresh nested id would make the
+    // same idempotency key look like a different payload on replay.
+    const existingProductRun = existingRun?.input.productId === normalized.productId ? existingRun : undefined;
+    const distillationRunId = existingProductRun?.input.distillationRunId
+      ?? normalized.runId
+      ?? product?.runId
+      ?? `distill_${randomUUID().replaceAll("-", "")}`;
+    const revisionContext = product && !existingProductRun && this.graphStore
+      ? await this.resolveProductRevisionContext(product)
       : undefined;
-    const parentRevisionId = task
-      ? (revisionContext ? revisionContext.parentRevisionId : task.latestRevisionId)
+    const parentRevisionId = product
+      ? (existingProductRun?.input.parentRevisionId
+        ?? (revisionContext ? revisionContext.parentRevisionId : product.latestRevisionId))
       : undefined;
-    const revisionNumber = task
-      ? (revisionContext?.nextRevisionNumber
-        ?? (task.latestRevisionId ? await this.nextRevisionNumber(creator.id, normalized.taskId!) : 1))
+    const revisionNumber = product
+      ? (existingProductRun?.input.revisionNumber
+        ?? revisionContext?.nextRevisionNumber
+        ?? (product.latestRevisionId ? await this.nextRevisionNumber(creator.id, normalized.productId!) : 1))
       : 1;
-    const taskName = task?.name ?? normalized.taskName;
-    const taskBrief = task?.brief ?? normalized.taskBrief;
+    const productName = product?.name ?? normalized.productName;
+    const productPromise = product?.promise ?? normalized.productPromise;
     const input: FactoryStartInput = {
       runId,
       creator: { id: requireText(creator.id, "creator.id"), name: requireText(creator.name, "creator.name") },
-      ...(normalized.taskId ? { taskId: normalized.taskId } : {}),
-      ...(task ? {
+      ...(normalized.productId ? { productId: normalized.productId } : {}),
+      ...(product ? {
         distillationRunId,
         revisionId: runId,
         revisionNumber,
         ...(parentRevisionId ? { parentRevisionId } : {})
       } : {}),
-      ...((taskProductId ?? normalized.agentId) ? { agentId: taskProductId ?? normalized.agentId } : {}),
-      ...(taskProduct ? { product: taskProduct } : {}),
+      ...((productIdentity ?? normalized.agentId) ? { agentId: productIdentity ?? normalized.agentId } : {}),
+      ...(productDefinition ? { product: productDefinition } : {}),
       tools: normalized.tools,
-      taskName,
-      taskBrief,
+      productName,
+      productPromise,
       sources,
       ...(snapshotId ? { sourceSnapshotId: snapshotId } : {}),
       ...(normalized.reviewContext ? { reviewContext: normalized.reviewContext } : {}),
@@ -419,19 +469,20 @@ export class CreatorFactoryService {
       idempotencyKey: requireText(idempotencyKey, "Idempotency-Key"),
       input
     });
-    if (task) {
+    if (product) {
       await this.graphStore?.initialize();
       await this.graphStore?.ensureRun({
         id: distillationRunId,
-        taskId: task.id,
         creatorId: creator.id,
-        productId: taskProductId,
+        // The graph stores the same stable Product id used by the public API;
+        // no second repository/product identity is introduced here.
+        productId: product.id,
         createdAt: result.run.createdAt
       });
       await this.graphStore?.createRevision({
         id: runId,
         runId: distillationRunId,
-        taskId: task.id,
+        productId: product.id,
         revision: revisionNumber,
         sourceSnapshotId: snapshotId!,
         ...(parentRevisionId ? { parentRevisionId } : {}),
@@ -440,7 +491,7 @@ export class CreatorFactoryService {
       await this.graphStore?.appendEvent({
         id: `evt_${randomUUID().replaceAll("-", "")}`,
         eventKey: `${runId}:revision_created`,
-        taskId: task.id,
+        productId: product.id,
         runId: distillationRunId,
         revisionId: runId,
         type: "revision_created",
@@ -450,10 +501,10 @@ export class CreatorFactoryService {
         artifactIds: [],
         payload: { revision: revisionNumber, sourceSnapshotId: snapshotId ?? null }
       });
-      // Advance the Task pointer only after the immutable graph revision and
+      // Advance the Product pointer only after the immutable graph revision and
       // its event edge exist. A failed graph write must not leave a dangling
       // latestRevisionId that can poison the next retry.
-      await this.taskRepository().setTaskRevision(creator.id, task.id, { runId: distillationRunId, revisionId: runId, productId: taskProductId! });
+      await this.productRepository().setProductRevision(creator.id, product.id, { runId: distillationRunId, revisionId: runId });
     }
     return { run: await this.project(result.run, false), created: result.created };
   }
@@ -489,12 +540,12 @@ export class CreatorFactoryService {
     if (request.expectedVersion !== undefined && request.expectedVersion !== run.version) {
       throw new CreatorFactoryRepositoryError("version_conflict", `Factory run ${run.id} is at version ${run.version}`);
     }
-    if (!this.graphStore || !run.input.taskId) {
+    if (!this.graphStore || !run.input.productId) {
       throw new CreatorFactoryRepositoryError("invalid_status", "Distillation graph is unavailable for Creator Review");
     }
     await this.graphStore.initialize();
     const revisionId = run.input.revisionId ?? run.id;
-    const events = await this.graphStore.listEvents(run.input.taskId);
+    const events = await this.graphStore.listEvents(run.input.productId);
     if (request.action === "heldout_correction") {
       if (!run.state?.pendingReview || run.state.stage !== "review_required") {
         throw new CreatorFactoryRepositoryError("invalid_status", `Factory run ${run.id} has no sealed held-out failure awaiting correction`);
@@ -527,7 +578,7 @@ export class CreatorFactoryService {
       await this.graphStore.appendEvent({
         id: newGraphEventId(),
         eventKey: `${run.id}:review:${key}`,
-        taskId: run.input.taskId,
+        productId: run.input.productId,
         runId: run.input.distillationRunId ?? run.id,
         revisionId,
         type: "heldout_failure_confirmed",
@@ -591,7 +642,7 @@ export class CreatorFactoryService {
       await this.graphStore.appendEvent({
         id: newGraphEventId(),
         eventKey: `${run.id}:revision-generation:${key}`,
-        taskId: run.input.taskId,
+        productId: run.input.productId,
         runId: run.input.distillationRunId ?? run.id,
         revisionId,
         type: "revision_generation_requested",
@@ -675,7 +726,7 @@ export class CreatorFactoryService {
     await this.graphStore.appendEvent({
       id: newGraphEventId(),
       eventKey: `${run.id}:review:${key}`,
-      taskId: run.input.taskId,
+      productId: run.input.productId,
       runId: run.input.distillationRunId ?? run.id,
       revisionId,
       type: eventType,
@@ -828,7 +879,7 @@ export class CreatorFactoryService {
    */
   async recordRelease(creatorId: string, runId: string, productId: string): Promise<DistillationRelease> {
     const run = await this.requireRun(creatorId, runId);
-    if (!this.graphStore || !run.input.taskId) {
+    if (!this.graphStore || !run.input.productId) {
       throw new CreatorFactoryRepositoryError("invalid_status", "Distillation graph is unavailable for Release");
     }
     const latest = run.state?.artifacts.corpusCandidates.at(-1);
@@ -845,35 +896,35 @@ export class CreatorFactoryService {
     if (run.input.product?.id && run.input.product.id !== productId) {
       throw new CreatorFactoryRepositoryError("invalid_status", `Factory run ${runId} is bound to another Product`);
     }
-    const task = await this.getTask(creatorId, run.input.taskId);
-    if (task.productId && task.productId !== productId) {
-      throw new CreatorFactoryRepositoryError("invalid_status", `Distillation Task ${task.id} is bound to another Product`);
+    const product = await this.getProduct(creatorId, run.input.productId);
+    if (product.id !== productId) {
+      throw new CreatorFactoryRepositoryError("invalid_status", `Distillation Product ${product.id} is bound to another Product`);
     }
     await this.graphStore.initialize();
-    const graph = await this.graphStore.derive(run.input.taskId);
+    const graphProductId = product.id;
+    const graph = await this.graphStore.derive(graphProductId);
     if (graph.currentRevisionId && graph.currentRevisionId !== revisionId) {
-      throw new CreatorFactoryRepositoryError("invalid_status", `Factory run ${runId} is not the current Task revision`);
+      throw new CreatorFactoryRepositoryError("invalid_status", `Factory run ${runId} is not the current Product revision`);
     }
     if (!["ready", "released"].includes(graph.status)) {
-      throw new CreatorFactoryRepositoryError("invalid_status", `Task ${run.input.taskId} has not passed its current quality gates`);
+      throw new CreatorFactoryRepositoryError("invalid_status", `Product ${run.input.productId} has not passed its current quality gates`);
     }
-    const release: DistillationRelease = {
-      id: `release_${createHash("sha256").update(`${run.input.taskId}\u0000${revisionId}\u0000${productId}\u0000${corpusArtifactId}`).digest("hex").slice(0, 32)}`,
-      taskId: run.input.taskId,
+      const release: DistillationRelease = {
+        id: `release_${createHash("sha256").update(`${run.input.productId}\u0000${revisionId}\u0000${productId}\u0000${corpusArtifactId}`).digest("hex").slice(0, 32)}`,
+      productId: graphProductId,
       runId: distillationRunId,
       revisionId,
-      productId,
       corpusArtifactId,
       createdAt: latest.agentCorpus.verifiedAt
     };
     const recorded = await this.graphStore.recordRelease(release);
-    const parents = (await this.graphStore.listEvents(run.input.taskId))
+    const parents = (await this.graphStore.listEvents(graphProductId))
       .filter((event) => event.runId === distillationRunId && event.revisionId === revisionId)
       .at(-1);
     await this.graphStore.appendEvent({
       id: `evt_${randomUUID().replaceAll("-", "")}`,
       eventKey: `${revisionId}:release_created:${productId}:${corpusArtifactId}`,
-      taskId: run.input.taskId,
+      productId: graphProductId,
       runId: distillationRunId,
       revisionId,
       type: "release_created",
@@ -892,13 +943,13 @@ export class CreatorFactoryService {
     return run;
   }
 
-  private async requireActiveTask(creatorId: string, taskId: string): Promise<void> {
+  private async requireActiveProduct(creatorId: string, productId: string): Promise<void> {
     try {
-      const task = await this.getTask(creatorId, taskId);
-      if (task.status !== "active") throw new CreatorSourceLibraryError("invalid_source", `Distillation Task ${taskId} is deleted`);
+      const product = await this.getProduct(creatorId, productId);
+      if (product.status !== "active") throw new CreatorSourceLibraryError("invalid_source", `Distillation Product ${productId} is deleted`);
     } catch (error) {
       if (error instanceof CreatorFactoryRepositoryError && error.code === "run_not_found") {
-        throw new CreatorSourceLibraryError("invalid_source", `Distillation Task ${taskId} was not found`);
+        throw new CreatorSourceLibraryError("invalid_source", `Distillation Product ${productId} was not found`);
       }
       throw error;
     }
@@ -917,14 +968,14 @@ export class CreatorFactoryService {
       : undefined;
     const projectedProduct = run.state?.product ?? inputProduct;
     const declaredTools = run.state?.tools ?? run.input.tools;
-    const graph = run.input.taskId && this.graphStore
-      ? await this.graphStore.derive(run.input.taskId)
+    const graph = run.input.productId && this.graphStore
+      ? await this.graphStore.derive(run.input.productId)
       : undefined;
     const awaitingAnswers = run.state?.stage === "awaiting_creator_answers";
     return {
       id: run.id,
       ...(run.state?.agentId || run.input.agentId ? { agentId: run.state?.agentId ?? run.input.agentId } : {}),
-      ...(run.input.taskId ? { taskId: run.input.taskId } : {}),
+      ...(run.input.productId ? { productId: run.input.productId } : {}),
       ...(run.input.distillationRunId ? { distillationRunId: run.input.distillationRunId } : {}),
       ...(run.input.revisionId ? { revisionId: run.input.revisionId } : {}),
       ...(run.input.revisionNumber === undefined ? {} : { revisionNumber: run.input.revisionNumber }),
@@ -935,7 +986,8 @@ export class CreatorFactoryService {
       // an already-complete request can be projected while the run is queued.
       ...(projectedProduct ? { product: projectedProduct } : {}),
       ...(declaredTools ? { declaredToolIds: declaredTools.map((tool) => tool.id) } : {}),
-      taskName: run.input.taskName,
+      productName: run.input.productName,
+      productPromise: run.input.productPromise,
       status: run.status,
       ...(run.factoryStage ? { stage: run.factoryStage } : {}),
       version: run.version,
@@ -983,8 +1035,8 @@ export class CreatorFactoryService {
         parsedCases = [];
       }
     }
-    const events = this.graphStore && run.input.taskId
-      ? (await this.graphStore.listEvents(run.input.taskId)).filter((event) => event.revisionId === revisionId)
+    const events = this.graphStore && run.input.productId
+      ? (await this.graphStore.listEvents(run.input.productId)).filter((event) => event.revisionId === revisionId)
       : [];
     const adjudications = new Map<string, { action: CreatorReviewAction; sequence: number }>();
     for (const event of events
@@ -1164,18 +1216,18 @@ export class CreatorFactoryService {
     calibrationArtifact?: ArtifactRef
   ): Promise<{ review: CreatorReviewProjection; nextRun?: CreatorFactoryRunView }> {
     const contextArtifact = artifact ?? run.state?.pendingReview?.report;
-    if (!contextArtifact || !run.input.taskId || !run.input.sourceSnapshotId) {
-      throw new CreatorFactoryRepositoryError("invalid_status", "Review correction has no immutable Task Snapshot context");
+    if (!contextArtifact || !run.input.productId || !run.input.sourceSnapshotId) {
+      throw new CreatorFactoryRepositoryError("invalid_status", "Review correction has no immutable Product Snapshot context");
     }
     const result = await this.create(
       { id: creatorId, name: run.input.creator.name },
       {
-        taskId: run.input.taskId,
+        productId: run.input.productId,
         agentId: run.state?.agentId ?? run.input.agentId,
         product: run.state?.product ?? run.input.product,
         tools: run.input.tools,
-        taskName: run.input.taskName,
-        taskBrief: run.input.taskBrief,
+        productName: run.input.productName,
+        productPromise: run.input.productPromise,
         sourceSnapshotId: run.input.sourceSnapshotId,
         ...(run.input.config ? { config: run.input.config } : {}),
         reviewContext: {
@@ -1203,22 +1255,22 @@ export class CreatorFactoryService {
     });
   }
 
-  private taskRepository() {
-    if (!isDistillationTaskRepository(this.repository)) {
-      throw new CreatorFactoryRepositoryError("invalid_status", "Distillation Task storage is unavailable");
+  private productRepository() {
+    if (!isCreatorProductRepository(this.repository)) {
+      throw new CreatorFactoryRepositoryError("invalid_status", "Distillation Product storage is unavailable");
     }
     return this.repository;
   }
 
-  private async nextRevisionNumber(creatorId: string, taskId: string): Promise<number> {
+  private async nextRevisionNumber(creatorId: string, productId: string): Promise<number> {
     const runs = await this.repository.listForCreator(creatorId);
     return Math.max(0, ...runs
-      .filter((run) => run.input.taskId === taskId)
+      .filter((run) => run.input.productId === productId)
       .map((run) => run.input.revisionNumber ?? 0)) + 1;
   }
 
-  private async resolveTaskRevisionContext(task: DistillationTaskRecord): Promise<{ parentRevisionId?: string; nextRevisionNumber: number }> {
-    const revisionEvents = (await this.graphStore!.listEvents(task.id))
+  private async resolveProductRevisionContext(product: CreatorProductRecord): Promise<{ parentRevisionId?: string; nextRevisionNumber: number }> {
+    const revisionEvents = (await this.graphStore!.listEvents(product.id))
       .filter((event) => event.type === "revision_created" && !!event.revisionId)
       .sort((left, right) => left.sequence - right.sequence);
     const latest = revisionEvents.at(-1);
@@ -1346,20 +1398,21 @@ async function candidateEvidence(
 function validateCreateRequest(
   request: CreateFactoryRunRequest
 ): CreateFactoryRunRequest & { tools: FactoryAgentTool[] } {
+  const runId = request.runId === undefined ? undefined : requireCorpusIdentifier(request.runId, "runId");
   const agentId = request.agentId === undefined ? undefined : requireCorpusIdentifier(request.agentId, "agentId");
-  const taskName = requireText(request.taskName, "taskName");
-  const taskBrief = requireText(request.taskBrief, "taskBrief");
+  const productName = requireText(request.productName, "productName");
+  const productPromise = requireText(request.productPromise, "productPromise");
   const sourceSnapshotId = request.sourceSnapshotId === undefined
     ? undefined
     : requireText(request.sourceSnapshotId, "sourceSnapshotId");
-  const taskId = request.taskId === undefined ? undefined : requireText(request.taskId, "taskId");
+  const productId = request.productId === undefined ? undefined : requireText(request.productId, "productId");
   const sourceDocumentIds = request.sourceDocumentIds === undefined
     ? undefined
     : [...new Set(request.sourceDocumentIds.map((id) => requireText(id, "sourceDocumentId")))];
   if (sourceSnapshotId && (request.sources !== undefined || sourceDocumentIds !== undefined)) throw new Error("Use sourceSnapshotId, sourceDocumentIds, or inline sources, not multiple source authorities");
   if (!sourceSnapshotId && !sourceDocumentIds?.length && (!Array.isArray(request.sources) || request.sources.length === 0)) throw new Error("sources, sourceDocumentIds, or sourceSnapshotId is required");
   if (request.sources && request.sources.length > 100) throw new Error("A Factory run supports at most 100 source items");
-  let total = Buffer.byteLength(taskBrief, "utf8");
+  let total = Buffer.byteLength(productPromise, "utf8");
   const seen = new Set<string>();
   const sources = (request.sources ?? []).map((source) => {
     const id = requireText(source.id, "source.id");
@@ -1410,12 +1463,13 @@ function validateCreateRequest(
     mode: request.reviewContext.mode
   } satisfies NonNullable<CreateFactoryRunRequest["reviewContext"]>;
   return {
-    ...(taskId ? { taskId } : {}),
+    ...(runId ? { runId } : {}),
+    ...(productId ? { productId } : {}),
     ...(agentId ? { agentId } : {}),
     ...(product ? { product } : {}),
     tools,
-    taskName,
-    taskBrief,
+    productName,
+    productPromise,
     ...(request.sources === undefined ? {} : { sources }),
     ...(sourceDocumentIds ? { sourceDocumentIds } : {}),
     ...(sourceSnapshotId ? { sourceSnapshotId } : {}),
@@ -1573,7 +1627,7 @@ function requireToolOperation(value: unknown, field: string): string {
 
 function requireCorpusIdentifier(value: unknown, field: string): string {
   const normalized = requireText(value, field);
-  // Task-owned Product/Agent IDs may be UUIDs, including UUIDs whose first
+  // Product-owned Product/Agent IDs may be UUIDs, including UUIDs whose first
   // nibble is numeric. Keep the identifier lowercase and URL-free while
   // allowing that durable identity to survive every new revision.
   if (normalized.length > 128 || !/^[a-z0-9][a-z0-9]*(?:[-_][a-z0-9]+)*$/.test(normalized)) {
@@ -1598,18 +1652,4 @@ function boundedInteger(value: number, field: string, minimum: number, maximum: 
     throw new Error(`${field} must be an integer between ${minimum} and ${maximum}`);
   }
   return value;
-}
-
-/**
- * Read-time migration for Tasks created before product_id was persisted.
- * The value is deterministic so two concurrent first revisions cannot invent
- * different Product identities. New Tasks always receive a random UUID at
- * creation time.
- */
-function deterministicTaskProductId(taskId: string): string {
-  const bytes = createHash("sha256").update(`hatch-task-product:${taskId}`).digest().subarray(0, 16);
-  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
-  const hex = bytes.toString("hex");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }

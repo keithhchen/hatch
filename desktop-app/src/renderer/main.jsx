@@ -166,7 +166,8 @@ import {
   nativeContextRequest,
   requestNativeContextMenu,
   routeNativeCommand,
-  subscribeNativeCommands
+  subscribeNativeCommands,
+  taskStartFromLocation
 } from "./native-commands.js";
 import {
   normalizeProductOpenPayload,
@@ -366,6 +367,7 @@ function App() {
   const nativeContextTargetsRef = useRef(new Map());
   const nativeContextTargetSequenceRef = useRef(0);
   const requestedConversationIdRef = useRef(conversationIdFromLocation());
+  const requestedTaskStartRef = useRef(taskStartFromLocation());
   const requestedConversationBindingRef = useRef(conversationBindingFromLocation());
   const pendingProductOpenBindingRef = useRef(null);
   // Preserve the launch role even after Conversation Library hydration clears
@@ -386,6 +388,9 @@ function App() {
     conversationCreationTrackerRef.current = createConversationCreationTracker();
   }
   const conversationCursorRef = useRef(0);
+  const pendingTaskStartRef = useRef("");
+  const taskStartSentRef = useRef(new Set());
+  const taskBriefRef = useRef(null);
   const viewportRef = useRef(null);
   const viewportScrollTopRef = useRef(0);
   const viewportScrollPersistTimerRef = useRef(null);
@@ -430,6 +435,8 @@ function App() {
   const [chatLoading, setChatLoading] = useState(false);
   const [running, setRunning] = useState(false);
   const [messages, setMessages] = useState([]);
+  const [briefTask, setBriefTask] = useState(null);
+  const [taskBrief, setTaskBrief] = useState(null);
   const [composerDraft, setComposerDraft] = useState("");
   const [approvalRequests, setApprovalRequests] = useState({});
   const [creatorAgent, setCreatorAgent] = useState(DEFAULT_CREATOR_AGENT);
@@ -446,6 +453,9 @@ function App() {
   const signedIn = authState === "signed-in";
   const language = resolveLanguage(languagePreference, browserPreferredLocales());
   const t = useMemo(() => createTranslator(language), [language]);
+  useEffect(() => {
+    taskBriefRef.current = taskBrief;
+  }, [taskBrief]);
   useEffect(() => {
     if (typeof document !== "undefined") document.documentElement.lang = language;
   }, [language]);
@@ -943,6 +953,35 @@ function App() {
     } : null;
   }
 
+  function briefSpecForSelectedEntitlement(entitlementId = selectedEntitlementId) {
+    const entitlement = creatorAgentEntitlements.find((item) => item.entitlement_id === entitlementId);
+    const entitlementSpec = entitlement?.brief_spec ?? entitlement?.product?.brief_spec;
+    if (entitlementSpec) return entitlementSpec;
+    // The entitlement projection and the authenticated Runtime session are
+    // normally identical. During a rollout the entitlement may omit the
+    // optional projection, so use the already verified session product only
+    // when it belongs to the selected Product.
+    return creatorAgent?.id === (entitlement?.product_id || entitlement?.agent_id)
+      ? creatorAgent?.briefSpec ?? null
+      : null;
+  }
+
+  function newBriefTask({ openInNewWindow = false } = {}) {
+    const spec = briefSpecForSelectedEntitlement();
+    const answers = Object.fromEntries((Array.isArray(spec?.fields) ? spec.fields : []).map((field) => [field.id, ""]));
+    // A form is one user action. Give it its own idempotency scope so a
+    // network retry can safely reuse its key, while a later New Task can
+    // never replay the abandoned form's request.
+    return {
+      spec,
+      answers,
+      openInNewWindow,
+      creationPurpose: `brief:${stableRandomId()}`,
+      status: "editing",
+      error: ""
+    };
+  }
+
   function launchConversationBinding() {
     return requestedConversationBindingRef.current
       || (conversationWindowRef.current ? normalizeConversationBinding(windowContextRef.current) : null);
@@ -1092,27 +1131,6 @@ function App() {
         ? requested
         : "";
       let nextId = requestedServerConversation || savedServerConversation || nextConversations[0]?.id || "";
-
-      if (!nextId && !requestedServerConversation) {
-        if (requestId !== conversationLibraryRequestRef.current) return;
-        const creation = conversationCreationRequest(binding, "bootstrap");
-        try {
-          const created = await createConversation(serverUrl, buyerSession.accessToken, binding, {
-            title: `New ${creatorAgent.name} task`,
-            clientRequestId: creation.clientRequestId
-          });
-          const conversation = created?.conversation;
-          if (!isServerConversationId(conversation?.id)) {
-            throw new Error("Runtime returned an invalid server Conversation ID.");
-          }
-          settleConversationCreation(creation.scope);
-          nextId = conversation.id;
-          nextConversations = [conversation, ...nextConversations];
-        } catch (error) {
-          settleConversationCreation(creation.scope, error);
-          throw error;
-        }
-      }
       if (requestId !== conversationLibraryRequestRef.current) return;
       if (nextId && nextId !== conversationId) {
         disconnectRuntime();
@@ -1122,10 +1140,24 @@ function App() {
         setConversationId(nextId);
         setConversationIdForEntitlement(buyerProfile.id, selectedEntitlementId, nextId);
       }
+      if (!nextId && !requestedServerConversation) {
+        setBriefTask(newBriefTask());
+        setTaskBrief(null);
+        pendingTaskStartRef.current = "";
+      } else if (nextId) {
+        setBriefTask(null);
+        const selectedConversation = nextConversations.find((item) => item.id === nextId);
+        setTaskBrief(selectedConversation?.brief_snapshot ?? null);
+        taskBriefRef.current = selectedConversation?.brief_snapshot ?? null;
+        pendingTaskStartRef.current = requestedTaskStartRef.current && nextId === requestedServerConversation
+          ? nextId
+          : "";
+      }
       if (requested && isServerConversationId(requested) && !requestedServerConversation) {
         setConversationLibraryError("That Conversation is not available for the selected Creator Agent.");
       }
       requestedConversationIdRef.current = "";
+      requestedTaskStartRef.current = false;
       setConversations(nextConversations);
       setConversationLibraryStatus("ready");
       conversationLibraryLoadingRef.current = false;
@@ -1345,6 +1377,65 @@ function App() {
     ]);
 
   }, [buyerProfile.id, conversationId, conversationLibraryStatus, conversationReady, droppedFiles, permissionMode, send, workspace, workspaceGrant]);
+
+  async function sendTaskStartIfNeeded(sourceSocket = socketRef.current, sourceToken = connectionTokenRef.current) {
+    const targetConversationId = pendingTaskStartRef.current;
+    const snapshot = taskBriefRef.current;
+    if (!targetConversationId || !isServerConversationId(targetConversationId) || !snapshot) return false;
+    if (taskStartSentRef.current.has(targetConversationId) || activeRunRef.current) return false;
+    if (!isCurrentRuntimeTransport(sourceSocket, sourceToken) || sourceSocket?.readyState !== WebSocket.OPEN) return false;
+    const accessSnapshot = createTurnAccessSnapshot(workspaceGrantRef.current?.grant_id, workspaceRef.current, permissionRef.current);
+    try {
+      await synchronizeNativeToolContext(accessSnapshot, targetConversationId);
+    } catch (error) {
+      setStatus(`Couldn't prepare native workspace access: ${errorMessage(error)}`);
+      return false;
+    }
+    const runId = `run_${stableRandomId()}`;
+    const clientMessageId = `message_${stableRandomId()}`;
+    const outboundMessage = {
+      type: "client.message",
+      run_id: runId,
+      client_message_id: clientMessageId,
+      conversation_id: targetConversationId,
+      task_start: true,
+      message: { role: "user", content: "" }
+    };
+    const assistantId = `${runId}_assistant`;
+    const startedAt = Date.now();
+    activeRunRef.current = {
+      runId,
+      clientMessageId,
+      assistantId,
+      text: "",
+      startedAt,
+      accessSnapshot,
+      timing: { questionSentAt: startedAt }
+    };
+    setLegacyProfileActiveRun({
+      runId,
+      clientMessageId,
+      assistantId,
+      startedAt,
+      conversationId: targetConversationId,
+      accessSnapshot,
+      timing: { questionSentAt: startedAt }
+    });
+    patchWindowContext({ activeRun: activeRunRef.current, dismissedRunId: null });
+    setRunning(true);
+    setStatus("Starting your task…");
+    if (!sendRuntimeMessage(sourceSocket, sourceToken, outboundMessage)) {
+      activeRunRef.current = null;
+      setLegacyProfileActiveRun(undefined);
+      patchWindowContext({ activeRun: null });
+      setRunning(false);
+      return false;
+    }
+    taskStartSentRef.current.add(targetConversationId);
+    pendingTaskStartRef.current = "";
+    setMessages((current) => [...current, makeAssistantPlaceholder(assistantId, runId, startedAt)]);
+    return true;
+  }
 
   const runtime = useExternalStoreRuntime({
     messages,
@@ -1911,6 +2002,9 @@ function App() {
       // for an after_cursor request. Replacing the local projection removes
       // optimistic duplicates without replaying tools or assistant effects.
       setMessages(reconciled.messages.map(historyMessageToThreadMessage));
+      const briefSnapshot = reconciled.brief_snapshot ?? snapshot.conversation?.brief_snapshot ?? null;
+      setTaskBrief(briefSnapshot);
+      taskBriefRef.current = briefSnapshot;
       projectDurableSnapshotRun(snapshot, config.workspaceGrant);
       if (reconciled.cursor > conversationCursorRef.current) {
         conversationCursorRef.current = reconciled.cursor;
@@ -2008,6 +2102,9 @@ function App() {
           afterCursor: conversationCursorRef.current
         });
         history = reconciledSnapshot.messages;
+        const briefSnapshot = reconciledSnapshot.brief_snapshot ?? snapshot.conversation?.brief_snapshot ?? null;
+        setTaskBrief(briefSnapshot);
+        taskBriefRef.current = briefSnapshot;
         snapshotCursor = reconciledSnapshot.cursor;
         projectDurableSnapshotRun(snapshot, targetWorkspaceGrant);
         snapshotLoaded = true;
@@ -2176,11 +2273,22 @@ function App() {
       const selectedEntitlement = creatorAgentEntitlements.find(
         (entitlement) => entitlement.entitlement_id === selectedEntitlementId
       );
-      setCreatorAgent((current) => creatorAgentFromBoundSession(
+      const nextAgent = creatorAgentFromBoundSession(
         message,
         selectedEntitlement,
-        current
-      ));
+        creatorAgent
+      );
+      setCreatorAgent(nextAgent);
+      if (nextAgent.briefSpec) {
+        setBriefTask((current) => {
+          if (!current || current.status !== "editing") return current;
+          const answers = Object.fromEntries(nextAgent.briefSpec.fields.map((field) => [
+            field.id,
+            current.answers?.[field.id] ?? ""
+          ]));
+          return { ...current, spec: nextAgent.briefSpec, answers, error: "" };
+        });
+      }
       connectedRef.current = true;
       reconnectAttemptRef.current = 0;
       setRuntimeRetryExhausted(false);
@@ -2190,6 +2298,7 @@ function App() {
       const socket = socketRef.current;
       if (socket) {
         await reconcileLiveSnapshot(socket, sourceToken);
+        await sendTaskStartIfNeeded(socket, sourceToken);
       }
       return;
     }
@@ -2677,7 +2786,7 @@ function App() {
     setStatus(`Permission updated for the next turn: ${permissionPolicyLabel(nextMode)}`);
   }
 
-  async function createLibraryConversation({ allowActiveRun = false } = {}) {
+  async function createLibraryConversation({ allowActiveRun = false, briefAnswers = undefined, purpose = "create" } = {}) {
     if (activeRunRef.current && !allowActiveRun) {
       setStatus("Stop or close the active task before starting another conversation.");
       return "";
@@ -2687,11 +2796,12 @@ function App() {
       setStatus("Choose a Creator Agent before starting a conversation.");
       return "";
     }
-    const creation = conversationCreationRequest(binding, "create");
+    const creation = conversationCreationRequest(binding, purpose);
     try {
       const result = await createConversation(serverUrl, buyerSession.accessToken, binding, {
         title: `New ${creatorAgent.name} task`,
-        clientRequestId: creation.clientRequestId
+        clientRequestId: creation.clientRequestId,
+        briefAnswers
       });
       const conversation = result?.conversation;
       if (!isServerConversationId(conversation?.id)) {
@@ -2702,33 +2812,31 @@ function App() {
         conversation,
         ...current.filter((item) => item.id !== conversation.id)
       ]);
-      return conversation.id;
+      return conversation;
     } catch (error) {
       settleConversationCreation(creation.scope, error);
       setConversationLibraryError(errorMessage(error));
-      setStatus("Conversation Library unavailable. Try again when you're online.");
+      if (String(error?.code || "").startsWith("brief_")) {
+        setBriefTask((current) => current ? { ...current, error: errorMessage(error) } : current);
+        setStatus(errorMessage(error));
+      } else {
+        setStatus("Conversation Library unavailable. Try again when you're online.");
+      }
       return "";
     }
   }
 
   async function startNewConversation() {
     if (shouldOpenNewConversationInWindow(activeRunRef.current)) {
-      return startNewConversationInWindow();
+      setBriefTask(newBriefTask({ openInNewWindow: true }));
+      return "";
     }
     textRevealRef.current?.discard();
-    const nextId = await createLibraryConversation();
-    if (!nextId) return "";
-    disconnectRuntime();
-    setChatLoading(true);
-    conversationCursorRef.current = 0;
-    setConversationId(nextId);
-    setMessages([]);
-    setConversationIdForEntitlement(buyerProfile.id, selectedEntitlementId, nextId);
-    setStatus("New task ready");
-    return nextId;
+    setBriefTask(newBriefTask());
+    return "";
   }
 
-  async function openConversationInNewWindow(nextConversationId, { announce = true } = {}) {
+  async function openConversationInNewWindow(nextConversationId, { announce = true, startTask = false } = {}) {
     const target = String(nextConversationId || "").trim();
     if (!isServerConversationId(target)) {
       setStatus("Only a server Conversation can be opened in a new window.");
@@ -2744,7 +2852,8 @@ function App() {
         conversationId: target,
         entitlementId: binding.entitlementId,
         creatorId: binding.creatorId,
-        agentId: binding.agentId
+        agentId: binding.agentId,
+        startTask
       });
       if (announce) setStatus("Conversation opened in a new window");
       return true;
@@ -2755,11 +2864,57 @@ function App() {
   }
 
   async function startNewConversationInWindow() {
-    // The current window intentionally keeps its existing conversation. The
-    // receiving window reads this ID from its native URL before restoring its
-    // own scoped workspace and layout state.
-    const nextId = await createLibraryConversation({ allowActiveRun: true });
-    return nextId ? openConversationInNewWindow(nextId) : false;
+    setBriefTask(newBriefTask({ openInNewWindow: true }));
+    return true;
+  }
+
+  async function submitBriefTask() {
+    const draft = briefTask;
+    const spec = draft?.spec ?? briefSpecForSelectedEntitlement();
+    if (!Array.isArray(spec?.fields) || spec.fields.length === 0) {
+      setBriefTask((current) => current ? { ...current, error: "This Creator Agent has not published a Brief yet." } : current);
+      return false;
+    }
+    const answers = draft?.answers ?? {};
+    const missing = spec.fields.find((field) => field.required && !String(answers[field.id] ?? "").trim());
+    if (missing) {
+      setBriefTask((current) => current ? { ...current, error: `Please answer: ${missing.label}` } : current);
+      return false;
+    }
+    setBriefTask((current) => current ? { ...current, status: "submitting", error: "" } : current);
+    const briefAnswers = spec.fields.map((field) => ({
+      field_id: field.id,
+      value: String(answers[field.id] ?? "")
+    }));
+    const created = await createLibraryConversation({
+      allowActiveRun: Boolean(draft?.openInNewWindow),
+      purpose: draft?.creationPurpose || "create",
+      briefAnswers
+    });
+    if (!created) {
+      setBriefTask((current) => current ? { ...current, status: "editing" } : current);
+      return false;
+    }
+    const nextId = created.id;
+    const snapshot = created.brief_snapshot ?? null;
+    if (draft?.openInNewWindow) {
+      setBriefTask(null);
+      return openConversationInNewWindow(nextId, { startTask: true });
+    }
+    textRevealRef.current?.discard();
+    disconnectRuntime();
+    conversationCursorRef.current = 0;
+    taskStartSentRef.current.delete(nextId);
+    pendingTaskStartRef.current = nextId;
+    setTaskBrief(snapshot);
+    taskBriefRef.current = snapshot;
+    setConversationId(nextId);
+    setMessages([]);
+    setConversationIdForEntitlement(buyerProfile.id, selectedEntitlementId, nextId);
+    setBriefTask(null);
+    setChatLoading(true);
+    setStatus("Starting your task…");
+    return true;
   }
 
   function rememberNativeContextTarget(value) {
@@ -3035,6 +3190,10 @@ function App() {
     }
     setSelectedEntitlementId(entitlement.entitlement_id);
     setCreatorAgent(creatorAgentFromEntitlement(entitlement));
+    pendingTaskStartRef.current = "";
+    setBriefTask(null);
+    setTaskBrief(null);
+    taskBriefRef.current = null;
     setProfileSetting("last_selected_entitlement_id", entitlement.entitlement_id);
     if (!sameEntitlement) {
       setMessages([]);
@@ -3088,6 +3247,10 @@ function App() {
       return;
     }
     disconnectRuntime();
+    pendingTaskStartRef.current = "";
+    setBriefTask(null);
+    setTaskBrief(conversation?.brief_snapshot ?? null);
+    taskBriefRef.current = conversation?.brief_snapshot ?? null;
     setChatLoading(true);
     conversationCursorRef.current = 0;
     setMessages([]);
@@ -3452,6 +3615,23 @@ function App() {
             onGrant={() => void grantWorkspace()}
             status={status}
           />
+        ) : briefTask ? (
+          <TaskBriefForm
+            spec={briefTask.spec ?? briefSpecForSelectedEntitlement()}
+            productName={creatorAgent.name}
+            answers={briefTask.answers}
+            status={briefTask.status}
+            error={briefTask.error}
+            onChange={(fieldId, value) => setBriefTask((current) => current
+              ? {
+                  ...current,
+                  answers: { ...current.answers, [fieldId]: value },
+                  error: ""
+                }
+              : current)}
+            onCancel={() => setBriefTask(null)}
+            onSubmit={() => void submitBriefTask()}
+          />
         ) : (
           <ApprovalContext.Provider value={{ requests: approvalRequests, resolveToolApproval }}>
             <NativeContextMenuContext.Provider value={showNativeContextMenu}>
@@ -3462,6 +3642,7 @@ function App() {
                   className="thread-viewport"
                   onScroll={handleViewportScroll}
                 >
+                  <TaskBriefCard snapshot={taskBrief} />
                   <ThreadPrimitive.Empty>
                     <EmptyThread
                       connected={conversationReady}
@@ -4314,6 +4495,79 @@ function EmptyThread({ connected, creatorAgent, chatLoading }) {
       {connected ? <p>{creatorAgent.description}</p> : null}
       {creatorAgent.boundary ? <small className="boundary-copy">{creatorAgent.boundary}</small> : null}
     </div>
+  );
+}
+
+function TaskBriefForm({ spec, productName, answers, status, error, onChange, onCancel, onSubmit }) {
+  const t = useI18n();
+  const fields = Array.isArray(spec?.fields) ? spec.fields : [];
+  const submitting = status === "submitting";
+  const complete = fields.length > 0 && fields.every((field) => (
+    !field.required || String(answers?.[field.id] ?? "").trim().length > 0
+  ));
+  return (
+    <div className="task-brief-stage">
+      <section className="task-brief-form" aria-labelledby="task-brief-title">
+        <div className="task-brief-heading">
+          <span className="eyebrow">{t("brief.title")}</span>
+          <h2 id="task-brief-title">{t("brief.title")}</h2>
+          {productName ? <strong className="task-brief-product">{productName}</strong> : null}
+          <p>{t("brief.subtitle")}</p>
+        </div>
+        {fields.length === 0 ? (
+          <div className="task-brief-error" role="alert">{error || t("brief.missingSpec")}</div>
+        ) : (
+          <div className="task-brief-fields">
+            {fields.map((field) => (
+              <label className="task-brief-field" key={field.id}>
+                <span className="task-brief-field-label">
+                  <strong>{field.label}</strong>
+                  <small>{field.required ? t("brief.required") : t("brief.optional")}</small>
+                </span>
+                <textarea
+                  rows={4}
+                  value={answers?.[field.id] ?? ""}
+                  aria-required={field.required ? "true" : "false"}
+                  disabled={submitting}
+                  onChange={(event) => onChange(field.id, event.target.value)}
+                />
+              </label>
+            ))}
+          </div>
+        )}
+        {error && fields.length > 0 ? <div className="task-brief-error" role="alert">{error}</div> : null}
+        <div className="task-brief-actions">
+          <Button variant="secondary" type="button" onClick={onCancel} disabled={submitting}>
+            {t("brief.cancel")}
+          </Button>
+          <Button type="button" onClick={onSubmit} disabled={submitting || !complete}>
+            {submitting ? t("brief.submitting") : t("brief.submit")}
+          </Button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function TaskBriefCard({ snapshot }) {
+  const t = useI18n();
+  const fields = Array.isArray(snapshot?.fields) ? snapshot.fields : [];
+  if (!snapshot || fields.length === 0) return null;
+  return (
+    <details className="task-brief-card">
+      <summary className="task-brief-card-heading">
+        <strong>{t("brief.cardTitle")}</strong>
+        <span>{t("brief.readOnly")}</span>
+      </summary>
+      <dl>
+        {fields.map((field) => (
+          <div className="task-brief-card-row" key={field.id}>
+            <dt>{field.label}</dt>
+            <dd>{field.value || <em>{t("brief.empty")}</em>}</dd>
+          </div>
+        ))}
+      </dl>
+    </details>
   );
 }
 

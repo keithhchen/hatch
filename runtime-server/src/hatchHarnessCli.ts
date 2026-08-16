@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { WebSocket } from "ws";
 import type { AgentRuntime } from "./agentRuntime.js";
 import { AgentCorpusResolver } from "./agentCorpus.js";
+import type { BriefSpec } from "./brief.js";
 import { FileConversationRepository } from "./conversationRepository.js";
 import type { EntitlementBinding, EntitlementLookup, EntitlementResolver } from "./entitlements.js";
 import { createRuntimeServer, type RuntimeServer } from "./index.js";
@@ -45,6 +46,10 @@ const LOCAL_TOOLS = [
 const FACTORY_HARNESS_ENTITLEMENT_ID = "77777777-7777-4777-8777-777777777777";
 const FACTORY_HARNESS_ORDER_ID = "88888888-8888-4888-8888-888888888888";
 const FACTORY_HARNESS_USER_ID = "99999999-9999-4999-8999-999999999999";
+const FACTORY_HARNESS_BRIEF_SPEC: BriefSpec = {
+  contract_version: "1",
+  fields: [{ id: "evaluation-question", label: "What candidate behavior should Hatch evaluate?", required: true }]
+};
 
 export type HatchHarnessCliInput = {
   corpusRoot: string;
@@ -148,9 +153,32 @@ async function executeOneTurn(
   localRunner: LocalToolSidecar,
   signal?: AbortSignal
 ): Promise<HatchHarnessCliResult> {
+  const conversationResponse = await fetch(
+    `${endpoint.replace(/^ws:/, "http:").replace(/\/runtime$/, "")}/v1/conversations?${new URLSearchParams({
+      entitlement_id: FACTORY_HARNESS_ENTITLEMENT_ID,
+      creator_id: input.creatorId,
+      product_id: input.agentId
+    })}`,
+    {
+      method: "POST",
+      headers: {
+        authorization: "Bearer factory-harness-local",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        client_request_id: `factory-harness-${randomUUID()}`,
+        brief_answers: [{ field_id: "evaluation-question", value: input.question }]
+      }),
+      signal
+    }
+  );
+  const conversationBody = await conversationResponse.json() as { conversation?: { id?: string }; error?: { message?: string } };
+  const conversationId = conversationBody.conversation?.id;
+  if (!conversationResponse.ok || !conversationId) {
+    throw new Error(`Hatch Runtime could not create the Factory evaluation task: ${conversationBody.error?.message ?? conversationResponse.status}`);
+  }
   const socket = new WebSocket(endpoint);
   const runId = `factory_eval_${randomUUID().replaceAll("-", "")}`;
-  const conversationId = `factory_eval_conversation_${randomUUID().replaceAll("-", "")}`;
   const chunks: string[] = [];
   const protocolEvents: HatchHarnessCliResult["protocolEvents"] = [];
   let protocolTraceTruncated = false;
@@ -340,7 +368,8 @@ function factoryHarnessEntitlementResolver(
     creator_id: input.creatorId,
     product_id: productId,
     status: "active",
-    agent_id: productId
+    agent_id: productId,
+    brief_spec: FACTORY_HARNESS_BRIEF_SPEC
   };
   const authorized = (lookup: EntitlementLookup): boolean => (
     lookup.licenseToken === "factory-harness-local"

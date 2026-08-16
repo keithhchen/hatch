@@ -28,7 +28,7 @@ test("active held-out stays sealed behind an empty host placeholder until PASS r
 
   const runner = async (call: FactoryPromptCall): Promise<string> => {
     if (call.purpose === "evidence.extract") {
-      return "# Task evidence\nChoose one supported tradeoff and finish the deliverable [S1:L1].";
+      return "# Product evidence\nChoose one supported tradeoff and finish the deliverable [S1:L1].";
     }
     if (call.purpose === "eval.generate_questions") return questionSet(2);
     if (call.purpose === "corpus.compile") return corpusFixture();
@@ -231,8 +231,8 @@ function sampleInput(runId: string): FactoryStartInput {
   return {
     runId,
     creator: { id: "11111111-1111-4111-8111-111111111111", name: "Creator Provisional" },
-    taskName: "One publishable decision",
-    taskBrief: "Make one supported tradeoff and return a complete usable result.",
+    productName: "One publishable decision",
+    productPromise: "Make one supported tradeoff and return a complete usable result.",
     sources: [{
       id: "S1",
       authority: "creator_current",

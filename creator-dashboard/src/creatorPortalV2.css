@@ -280,14 +280,14 @@
 .cpv2-empty p, .cpv2-empty-inline, .cpv2-muted { color: var(--hatch-text-secondary, #74675e); font-size: var(--hatch-type-meta); line-height: 1.6; }
 .cpv2-empty .hui-button { margin-top: 10px; }
 .cpv2-source-library { max-width: 1040px; }
-.cpv2-source-task-form { display: grid; max-width: 720px; gap: 17px; padding: clamp(25px, 4vw, 42px); }
-.cpv2-source-task-form label { display: grid; gap: 7px; color: var(--hatch-text-secondary, #74675e); font-size: var(--hatch-type-meta); }
-.cpv2-source-task-form input, .cpv2-source-task-form textarea { width: 100%; min-height: 44px; padding: 11px 13px; border: 1px solid var(--hatch-border-subtle, rgba(54,41,31,.15)); border-radius: var(--hatch-radius-control, 12px); background: var(--hatch-ui-surface-bright, rgba(255,255,255,.63)); color: inherit; }
-.cpv2-source-task-form textarea { min-height: 130px; resize: vertical; line-height: 1.55; }
+.cpv2-source-product-form { display: grid; max-width: 720px; gap: 17px; padding: clamp(25px, 4vw, 42px); }
+.cpv2-source-product-form label { display: grid; gap: 7px; color: var(--hatch-text-secondary, #74675e); font-size: var(--hatch-type-meta); }
+.cpv2-source-product-form input, .cpv2-source-product-form textarea { width: 100%; min-height: 44px; padding: 11px 13px; border: 1px solid var(--hatch-border-subtle, rgba(54,41,31,.15)); border-radius: var(--hatch-radius-control, 12px); background: var(--hatch-ui-surface-bright, rgba(255,255,255,.63)); color: inherit; }
+.cpv2-source-product-form textarea { min-height: 130px; resize: vertical; line-height: 1.55; }
 .cpv2-source-library-toolbar, .cpv2-source-library-actions { display: flex; align-items: center; justify-content: space-between; gap: 15px; }
 .cpv2-source-library-toolbar h2 { margin: 5px 0 0; font-size: var(--hatch-type-title); }
 .cpv2-breadcrumbs { margin-bottom: 18px; }
-.cpv2-source-task-form .hui-field__label { color: var(--hatch-text-secondary, #74675e); }
+.cpv2-source-product-form .hui-field__label { color: var(--hatch-text-secondary, #74675e); }
 .cpv2-source-uploader { margin-top: 20px; }
 .cpv2-source-library .hui-state { margin-top: 22px; padding: 28px; border: 1px solid var(--hatch-border-subtle, rgba(54,41,31,.1)); border-radius: var(--hatch-radius-control, 12px); background: var(--cpv2-selection); }
 .cpv2-source-library-actions { justify-content: flex-start; margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--hatch-border-subtle, rgba(54,41,31,.1)); }

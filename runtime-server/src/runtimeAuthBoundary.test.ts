@@ -5,6 +5,7 @@ import test from "node:test";
 import { WebSocket } from "ws";
 import type { AgentCorpus, AgentCorpusResolver } from "./agentCorpus.js";
 import type { AgentRuntime } from "./agentRuntime.js";
+import { InMemoryConversationRepository } from "./conversationRepository.js";
 import {
   EntitlementError,
   RegistryEntitlementResolver,
@@ -12,7 +13,7 @@ import {
   type EntitlementBinding,
   type EntitlementResolver
 } from "./entitlements.js";
-import { createRuntimeServer, type RuntimeServer } from "./index.js";
+import { createRuntimeServer, durableConversationId, type RuntimeServer } from "./index.js";
 
 const USER_ID = "11111111-1111-4111-8111-111111111111";
 const OTHER_USER_ID = "22222222-2222-4222-8222-222222222222";
@@ -79,7 +80,11 @@ test("Runtime rejects another user's entitlement for an introspected session", a
       id: entitlement.product_id,
       name: "Resume Review",
       boundaries: [],
-      presentation: {}
+      presentation: {},
+      brief_spec: {
+        contract_version: "1",
+        fields: [{ id: "review-goal", label: "What should the review focus on?", required: true }]
+      }
     },
     tools: [{ id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" }]
   };
@@ -206,15 +211,12 @@ test("Runtime re-introspects a Creator session per turn without requiring a buye
     agent_id: PRODUCT_ID,
     status: "active" as const
   };
+  const digest = `sha256:${"2".repeat(64)}`;
+  const repository = new InMemoryConversationRepository();
+  await seedAuthConversation(repository, entitlement, "conversation-revocable-access", digest);
   const corpus = revocableTestCorpus(entitlement);
   const agentCorpusResolver = {
-    resolve: async () => ({
-      // An empty root keeps this focused on auth compatibility; protected
-      // materialization has separate full-Corpus integration coverage.
-      root: "",
-      corpus,
-      digest: `sha256:${"2".repeat(64)}`
-    })
+    resolve: async () => ({ root: "", corpus, digest })
   } as unknown as AgentCorpusResolver;
   const agentRuntime: AgentRuntime = {
     async *run(input) {
@@ -225,7 +227,8 @@ test("Runtime re-introspects a Creator session per turn without requiring a buye
   const runtime = createRuntimeServer({
     createRuntime: () => agentRuntime,
     authIdentityResolver: identityResolver,
-    agentCorpusResolver
+    agentCorpusResolver,
+    conversationRepository: repository
   });
   await new Promise<void>((resolve) => runtime.server.listen(0, "127.0.0.1", resolve));
   const address = runtime.server.address();
@@ -529,13 +532,14 @@ async function startBoundaryRuntime(
     entitlementResolver: EntitlementResolver;
   }
 ): Promise<{ runtime: RuntimeServer; port: number; runCalls: () => number }> {
+  const digest = `sha256:${"3".repeat(64)}`;
+  const repository = new InMemoryConversationRepository();
+  for (const id of ["conversation-revocable-access", "conversation-shared", "conversation-other"]) {
+    await seedAuthConversation(repository, entitlement, id, digest);
+  }
   const corpus = revocableTestCorpus(entitlement);
   const agentCorpusResolver = {
-    resolve: async () => ({
-      root: "/tmp/hatch-runtime-pending-auth-boundary",
-      corpus,
-      digest: `sha256:${"3".repeat(64)}`
-    })
+    resolve: async () => ({ root: "/tmp/hatch-runtime-pending-auth-boundary", corpus, digest })
   } as unknown as AgentCorpusResolver;
   let calls = 0;
   const agentRuntime: AgentRuntime = {
@@ -548,7 +552,8 @@ async function startBoundaryRuntime(
     createRuntime: () => agentRuntime,
     authIdentityResolver: authorization.authIdentityResolver,
     entitlementResolver: authorization.entitlementResolver,
-    agentCorpusResolver
+    agentCorpusResolver,
+    conversationRepository: repository
   });
   await new Promise<void>((resolve) => runtime.server.listen(0, "127.0.0.1", resolve));
   const address = runtime.server.address();
@@ -618,13 +623,12 @@ async function createRevocableRuntimeScenario(): Promise<{
   assert.ok(registryAddress && typeof registryAddress !== "string");
 
   const registryResolver = new RegistryEntitlementResolver(`http://127.0.0.1:${registryAddress.port}`);
+  const digest = `sha256:${"1".repeat(64)}`;
+  const repository = new InMemoryConversationRepository();
+  await seedAuthConversation(repository, entitlement, "conversation-revocable-access", digest);
   const corpus = revocableTestCorpus(entitlement);
   const agentCorpusResolver = {
-    resolve: async () => ({
-      root: "/tmp/hatch-runtime-revocable-auth-boundary",
-      corpus,
-      digest: `sha256:${"1".repeat(64)}`
-    })
+    resolve: async () => ({ root: "/tmp/hatch-runtime-revocable-auth-boundary", corpus, digest })
   } as unknown as AgentCorpusResolver;
   let runtimeRunCalls = 0;
   const agentRuntime: AgentRuntime = {
@@ -641,7 +645,8 @@ async function createRevocableRuntimeScenario(): Promise<{
     createRuntime: () => agentRuntime,
     authIdentityResolver: registryResolver,
     entitlementResolver: registryResolver,
-    agentCorpusResolver
+    agentCorpusResolver,
+    conversationRepository: repository
   });
   await new Promise<void>((resolve) => runtime.server.listen(0, "127.0.0.1", resolve));
   const runtimeAddress = runtime.server.address();
@@ -686,6 +691,28 @@ function revocableTestCorpus(entitlement: EntitlementBinding): AgentCorpus {
     knowledge: { documents: [] },
     tools: [{ id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" }]
   } as unknown as AgentCorpus;
+}
+
+async function seedAuthConversation(
+  repository: InMemoryConversationRepository,
+  entitlement: EntitlementBinding,
+  publicId: string,
+  corpusDigest: string
+): Promise<void> {
+  await repository.createConversation({
+    id: durableConversationId({
+      creatorId: entitlement.creator_id,
+      userId: entitlement.user_id,
+      agentId: entitlement.agent_id,
+      productId: entitlement.product_id
+    }, publicId),
+    publicId,
+    ownerAccountId: entitlement.user_id,
+    creatorId: entitlement.creator_id,
+    agentId: entitlement.agent_id,
+    productId: entitlement.product_id,
+    corpusDigest
+  });
 }
 
 async function connectAuthorizedSocket(runtimePort: number, entitlement: EntitlementBinding): Promise<WebSocket> {

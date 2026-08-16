@@ -331,8 +331,8 @@ function sampleInput(runId: string): FactoryStartInput {
   return {
     runId,
     creator: { id: "11111111-1111-4111-8111-111111111111", name: "Creator Timing" },
-    taskName: "One bounded deliverable",
-    taskBrief: "Make one material choice and return a usable result.",
+    productName: "One bounded deliverable",
+    productPromise: "Make one material choice and return a usable result.",
     sources: [{
       id: "S1",
       authority: "creator_current",

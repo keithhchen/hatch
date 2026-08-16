@@ -125,7 +125,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     model: {
       name: "api_request",
       locality: "server",
-      description: "Call a creator-owned server API. Use only when the task needs a configured server-side API.",
+      description: "Call a creator-owned server API. Use only when the product needs a configured server-side API.",
       properties: {
         endpoint: stringSchema("Server API endpoint or identifier."),
         payload: objectSchema("JSON payload for the server API.")
@@ -146,7 +146,7 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     model: {
       name: "mcp_call",
       locality: "server",
-      description: "Call a server-configured MCP tool. Use only when the task requires a configured server-side MCP integration.",
+      description: "Call a server-configured MCP tool. Use only when the product requires a configured server-side MCP integration.",
       properties: {
         server: stringSchema("Configured MCP server name."),
         tool: stringSchema("MCP tool name."),
@@ -163,19 +163,19 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     description: "Run a server-owned protected skill in an isolated headless agent session.",
     schema: z.object({
       skill_id: z.string().min(1),
-      task: z.string().min(1),
+      product: z.string().min(1),
       context_refs: z.array(z.string()).default([])
     }).strict(),
     model: {
       name: "skill_run",
       locality: "server",
-      description: "Run a matching protected server skill in an isolated headless worker. Pass the task and exact local/API context references needed by the skill.",
+      description: "Run a matching protected server skill in an isolated headless worker. Pass the product and exact local/API context references needed by the skill.",
       properties: {
         skill_id: stringSchema("The public skill id from the server skill catalog."),
-        task: stringSchema("The task for the protected skill worker."),
+        product: stringSchema("The product for the protected skill worker."),
         context_refs: { type: "array", items: { type: "string" }, description: "References to user-provided local files or server context." }
       },
-      required: ["skill_id", "task"]
+      required: ["skill_id", "product"]
     }
   }],
   ["file_list", {

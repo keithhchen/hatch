@@ -73,6 +73,7 @@ import {
   visibleSkillsForSession
 } from "./skills.js";
 import { verifyHatchAuthToken } from "./authToken.js";
+import { BriefValidationError, createBriefSnapshot, type BriefSnapshot, type BriefSpec } from "./brief.js";
 import {
   authRequestSourceIp,
   authTrustedProxyPolicyFromEnvironment,
@@ -538,6 +539,7 @@ type SessionBinding = {
   accessMode?: "unmetered" | "metered";
   versionPolicy?: "pinned" | "track_current_compatible";
   versionHistory?: import("./entitlements.js").EntitlementVersionHistory[];
+  briefSpec?: BriefSpec;
   agentCorpus?: AgentCorpus;
   agentCorpusRoot?: string;
   entitlementId?: string;
@@ -714,7 +716,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   const scheduleDeliveryReconciliation = (): void => {
     if (!commerceEventSink || !deliveryAccountingOutbox || reconciliationInFlight) return;
     reconciliationInFlight = true;
-    const task = repositoryReady.then(async () => {
+    const product = repositoryReady.then(async () => {
       await deliveryAccountingOutbox.initialize();
       await commerceEventSink.checkReady?.();
       await reconcileDeliveryAccountingOutbox(deliveryAccountingOutbox, commerceEventSink);
@@ -723,10 +725,10 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       readiness.deliveryAccounting = "failed";
       writeOperationalError("commerce_delivery_reconciliation_failed", error);
     });
-    reconciliationTasks.add(task);
-    void task.finally(() => {
+    reconciliationTasks.add(product);
+    void product.finally(() => {
       reconciliationInFlight = false;
-      reconciliationTasks.delete(task);
+      reconciliationTasks.delete(product);
     });
   };
   scheduleDeliveryReconciliation();
@@ -856,7 +858,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       return;
     }
     socket.once("close", combineCapacityReleases(releaseOpenConnection, releaseSourceOpenConnection));
-    const task = handleRuntimeSocket(
+    const product = handleRuntimeSocket(
       socket,
       activeConversationRuns,
       helloAuthorizationGate,
@@ -889,10 +891,10 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       options.serverToolTimeoutMs ?? 120_000,
       maxSocketBufferedBytes
     );
-    connectionTasks.add(task);
-    void task.then(
-      () => connectionTasks.delete(task),
-      () => connectionTasks.delete(task)
+    connectionTasks.add(product);
+    void product.then(
+      () => connectionTasks.delete(product),
+      () => connectionTasks.delete(product)
     );
   });
 
@@ -999,6 +1001,7 @@ async function handleHttpRequest(
             id: corpus.product.id,
             name: corpus.product.name,
             description: corpus.product.description ?? "",
+            ...(corpus.product.brief_spec ? { brief_spec: corpus.product.brief_spec } : {}),
             ...(corpus.product.promise ? { promise: corpus.product.promise } : {}),
             ...(corpus.product.boundaries.length ? { boundaries: corpus.product.boundaries } : {})
           },
@@ -1197,16 +1200,23 @@ async function handleConversationHttpRequest(
     }
     if (req.method === "POST") {
       const body = await readJsonObject(req);
-      rejectUnknownFields(body, ["title", "client_request_id"]);
+      rejectUnknownFields(body, ["title", "client_request_id", "brief_answers"]);
       const title = optionalString(body, "title", 500);
       const clientRequestId = optionalString(body, "client_request_id", 256);
+      const briefSnapshot = binding.briefSpec
+        ? createBriefSnapshot(binding.briefSpec, body.brief_answers)
+        : undefined;
+      if (binding.agentCorpus && !briefSnapshot) {
+        throw new ConversationHttpError(409, "brief_required", "A Brief is required before starting a new task.");
+      }
       const publicId = `conv_${randomUUID().replaceAll("-", "")}`;
       const created = await repository.createConversation({
         ...repoBinding,
         id: durableConversationId(binding, publicId),
         publicId,
         ...(title ? { title } : {}),
-        ...(clientRequestId ? { clientRequestId } : {})
+        ...(clientRequestId ? { clientRequestId } : {}),
+        ...(briefSnapshot ? { briefSnapshot } : {})
       });
       writeResponse(created.created ? 201 : 200, { conversation: publicConversation(created.conversation), created: created.created });
       return;
@@ -1392,12 +1402,14 @@ function publicConversation(conversation: ConversationRecord): Record<string, un
   return {
     id: conversation.publicId,
     creator_id: conversation.creatorId,
+    agent_id: conversation.agentId,
     product_id_at_creation: conversation.productIdAtCreation,
     ...(conversation.title ? { title: conversation.title } : {}),
     status: conversation.status,
     created_at: conversation.createdAt,
     updated_at: conversation.updatedAt,
-    version: conversation.version
+    version: conversation.version,
+    ...(conversation.briefSnapshot ? { brief_snapshot: conversation.briefSnapshot } : {})
   };
 }
 
@@ -1509,6 +1521,10 @@ function rejectUnknownFields(body: Record<string, unknown>, allowed: string[]): 
 function writeConversationHttpError(res: http.ServerResponse, error: unknown): void {
   if (error instanceof ConversationHttpError) {
     writeJson(res, error.status, { error: { code: error.code, message: error.message } });
+    return;
+  }
+  if (error instanceof BriefValidationError) {
+    writeJson(res, 422, { error: { code: error.code, message: error.message } });
     return;
   }
   if (error instanceof ConversationRepositoryError) {
@@ -1934,6 +1950,7 @@ async function handleRuntimeSocket(
                     id: binding.agentCorpus.product.id,
                     name: binding.agentCorpus.product.name,
                     description: binding.agentCorpus.product.description ?? "",
+                    ...(binding.briefSpec ? { brief_spec: binding.briefSpec } : {}),
                     ...(binding.agentCorpus.product.promise ? { promise: binding.agentCorpus.product.promise } : {}),
                     ...(binding.agentCorpus.product.boundaries.length ? { boundaries: binding.agentCorpus.product.boundaries } : {})
                   },
@@ -2051,7 +2068,7 @@ async function handleRuntimeSocket(
             ? durableConversationId(binding, message.conversation_id)
             : message.conversation_id;
           const clientMessageId = message.client_message_id ?? message.run_id;
-          const inputDigest = clientMessageInputDigest(message.message);
+          const inputDigest = clientMessageInputDigest({ ...message.message, ...(message.task_start ? { task_start: true } : {}) });
           if (reservedRunIds.has(message.run_id) || activeConversationRuns.has(storageConversationId)) {
             await repositoryReady;
             const existing = await conversationRepository.getRunByClientMessageId(storageConversationId, clientMessageId);
@@ -2281,11 +2298,24 @@ async function handleRuntimeSocket(
           let durableRun: { run: ConversationRunRecord; created: boolean };
           try {
             await repositoryReady;
-            await conversationRepository.createConversation({
-              ...conversationBinding(binding),
-              id: storageConversationId,
-              publicId: message.conversation_id
-            });
+            let conversation = await conversationRepository.getConversation(storageConversationId);
+            if (!conversation && !binding.agentCorpus) {
+              conversation = (await conversationRepository.createConversation({
+                ...conversationBinding(binding),
+                id: storageConversationId,
+                publicId: message.conversation_id
+              })).conversation;
+            }
+            if (!conversation) {
+              const error = new ConversationRepositoryError("conversation_not_found", `Conversation ${message.conversation_id} was not found`);
+              throw error;
+            }
+            assertConversationBinding(conversation, conversationBinding(binding));
+            if (message.task_start && binding.agentCorpus && !conversation.briefSnapshot) {
+              const error = new Error("conversation_brief_required");
+              (error as Error & { code?: string }).code = "conversation_brief_required";
+              throw error;
+            }
             durableRun = await conversationRepository.createRun({
               id: message.run_id,
               conversationId: storageConversationId,
@@ -2316,6 +2346,22 @@ async function handleRuntimeSocket(
                   code: "client_message_conflict",
                   message: "This client_message_id was already used with different message or attachment content."
                 }
+              });
+              return;
+            }
+            if (error instanceof ConversationRepositoryError && error.code === "conversation_not_found") {
+              await send({
+                type: "turn.failed",
+                run_id: message.run_id,
+                error: { code: "conversation_not_found", message: "Create the task before starting a run." }
+              });
+              return;
+            }
+            if (error instanceof Error && (error as Error & { code?: string }).code === "conversation_brief_required") {
+              await send({
+                type: "turn.failed",
+                run_id: message.run_id,
+                error: { code: "conversation_brief_required", message: "A Brief is required before starting this task." }
               });
               return;
             }
@@ -2401,7 +2447,7 @@ async function handleRuntimeSocket(
             });
             return;
           }
-          const task = runOneTurn(
+          const product = runOneTurn(
             boundMessage,
             hello,
             sessionSkills,
@@ -2422,9 +2468,9 @@ async function handleRuntimeSocket(
             deliveryAccountingOutbox,
             scheduleDeliveryReconciliation
           );
-          activeRuns.add(task);
+          activeRuns.add(product);
           const releaseActiveRun = () => {
-            activeRuns.delete(task);
+            activeRuns.delete(product);
             connectionAbortController.signal.removeEventListener("abort", interruptFromConnectionClose);
             activeRunStates.delete(message.run_id);
             activeRunAbortControllers.delete(message.run_id);
@@ -2433,7 +2479,7 @@ async function handleRuntimeSocket(
             releaseConversationRun(activeConversationRuns, storageConversationId, message.run_id);
             pendingAuthorization.releaseActiveRunCapacity();
           };
-          void task.then(releaseActiveRun, releaseActiveRun);
+          void product.then(releaseActiveRun, releaseActiveRun);
         }
       } catch (error) {
         await send({
@@ -2545,6 +2591,7 @@ async function runOneTurn(
       )
       : undefined;
     const persistUserMessage = async (): Promise<void> => {
+      if (input.task_start) return;
       await store.append({
         type: "conversation.model_message",
         conversation_id: input.conversation_id,
@@ -2803,7 +2850,7 @@ async function runOneTurn(
       createWorkerRuntime: () => createRuntime()
     });
     activeSkillRuntimes.set(input.run_id, skillRuntime);
-    const messages = [...runtimeMessages, input.message];
+    const messages = input.task_start ? runtimeMessages : [...runtimeMessages, input.message];
 
     // Store/materialization work may race with a disconnect. Never start a
     // provider request after the owning run has already been aborted.
@@ -2838,6 +2885,7 @@ async function runOneTurn(
       skillRuntime,
       toolScope: "main",
       agentSystemPrompt: materializedAgent?.systemPrompt,
+      briefSnapshot: (await conversationRepository.getConversation(input.conversation_id))?.briefSnapshot,
       deliveryAuditContext: materializedAgent?.deliveryAuditContext,
       knowledgeAvailable: Boolean(
         binding.agentCorpus?.knowledge.documents.length
@@ -3001,6 +3049,9 @@ async function resolveSessionBinding(
       agentId: resolved.corpus.agent_id,
       productId: resolved.corpus.product.id,
       corpusDigest: resolved.digest,
+      ...((corpusEntitlement?.brief_spec ?? resolved.corpus.product.brief_spec)
+        ? { briefSpec: (corpusEntitlement?.brief_spec ?? resolved.corpus.product.brief_spec) as BriefSpec }
+        : {}),
       ...(corpusEntitlement?.purchased_corpus_digest
         ? {
             purchasedCorpusDigest: corpusEntitlement.purchased_corpus_digest,
@@ -3047,14 +3098,20 @@ async function resolveSessionBinding(
     if (resolved.corpus.product.id !== entitlement.product_id || resolved.corpus.creator.id !== entitlement.creator_id) {
       throw new Error("Entitlement does not match its current Agent Corpus");
     }
+    const briefSpec = entitlement.brief_spec ?? resolved.corpus.product.brief_spec;
     return {
       creatorId: entitlement.creator_id,
       userId: entitlement.user_id,
       agentId: entitlement.agent_id,
       productId: entitlement.product_id,
       corpusDigest: resolved.digest,
+      ...(briefSpec ? { briefSpec: briefSpec as BriefSpec } : {}),
       ...(entitlement.purchased_corpus_digest
-        ? { purchasedCorpusDigest: entitlement.purchased_corpus_digest }
+        ? {
+            purchasedCorpusDigest: entitlement.purchased_corpus_digest,
+            versionPolicy: entitlement.version_policy ?? "pinned",
+            versionHistory: entitlement.version_history ?? []
+          }
         : {}),
       accessMode: entitlement.access_mode ?? "unmetered",
       entitlementId: entitlement.entitlement_id,
@@ -3292,12 +3349,14 @@ async function bindingFromHistoryRequest(
     if (resolved.corpus.product.id !== entitlement.product_id || resolved.corpus.creator.id !== entitlement.creator_id) {
       throw new Error("Entitlement does not match its current Agent Corpus");
     }
+    const briefSpec = entitlement.brief_spec ?? resolved.corpus.product.brief_spec;
     return {
       creatorId: entitlement.creator_id,
       userId: entitlement.user_id,
       agentId: entitlement.agent_id,
       productId: entitlement.product_id,
       corpusDigest: resolved.digest,
+      ...(briefSpec ? { briefSpec: briefSpec as BriefSpec } : {}),
       purchasedCorpusDigest: entitlement.purchased_corpus_digest ?? resolved.digest,
       entitlementId: entitlement.entitlement_id,
       orderId: entitlement.order_id,

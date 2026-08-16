@@ -8,6 +8,7 @@ import test from "node:test";
 import { WebSocket } from "ws";
 import { AgentCorpusResolver, type AgentCorpus } from "./agentCorpus.js";
 import type { AgentRuntime, RunContext } from "./agentRuntime.js";
+import { InMemoryConversationRepository } from "./conversationRepository.js";
 import { authTrustedProxyPolicyFromEnvironment } from "./authRateLimit.js";
 import { creatorModelToolName, type CreatorToolControlPlane } from "./creatorTools.js";
 import {
@@ -20,6 +21,7 @@ import {
   MAX_RUNTIME_WEBSOCKET_PAYLOAD_BYTES,
   createRuntimeServer,
   createRuntimeServerFromEnvironment,
+  durableConversationId,
   type RuntimeServer
 } from "./index.js";
 import { RuntimeStore } from "./store.js";
@@ -491,6 +493,7 @@ test("an existing session uses a rotated Creator tool binding on its next turn",
     }
   };
   let observedVersion: unknown;
+  const conversationRepository = await authBoundaryConversations(entitlement, ["creator-rotation-conversation"]);
   const agentRuntime: AgentRuntime = {
     async *run(input, context) {
       const result = await context.serverTools.executeCreatorTool({ id: "creator.boundary.lookup" }, {}, context.abortSignal);
@@ -504,7 +507,8 @@ test("an existing session uses a rotated Creator tool binding on its next turn",
     authIdentityResolver: { resolveIdentity: async () => ({ sub: entitlement.user_id, role: "user" }) },
     entitlementResolver: fixtureEntitlementResolver(entitlement),
     agentCorpusResolver: new AgentCorpusResolver(fixture.baseRoot),
-    creatorToolControlPlane: controlPlane
+    creatorToolControlPlane: controlPlane,
+    conversationRepository
   });
   const port = await listen(runtime);
   const socket = await connectEntitledSocket(port, entitlement, "creator-rotation-session", "creator-rotation-install");
@@ -534,6 +538,7 @@ test("global per-turn authorization capacity rejects N+1 without another Registr
     }
   };
   let runCalls = 0;
+  const conversationRepository = await authBoundaryConversations(entitlement, ["turn-conversation-one", "turn-conversation-two", "turn-conversation-three"]);
   const runtime = createRuntimeServer({
     createRuntime: () => completingRuntime(() => { runCalls += 1; }),
     conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-turn-auth-capacity-"))),
@@ -542,7 +547,8 @@ test("global per-turn authorization capacity rejects N+1 without another Registr
     agentCorpusResolver: fixtureCorpusResolver(entitlement),
     maxPendingTurnAuthorizations: 2,
     maxActiveRunsGlobal: 10,
-    maxActiveRunsPerUser: 10
+    maxActiveRunsPerUser: 10,
+    conversationRepository
   });
   const port = await listen(runtime);
   const sockets: WebSocket[] = [];
@@ -599,6 +605,7 @@ test("per-user turn authorization capacity prevents one account from occupying t
     }
   };
   let runCalls = 0;
+  const conversationRepository = await authBoundaryConversations(entitlement, ["fair-auth-conversation-first", "fair-auth-conversation-overflow", "fair-auth-conversation-admitted"]);
   const runtime = createRuntimeServer({
     createRuntime: () => completingRuntime(() => { runCalls += 1; }),
     conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-user-auth-capacity-"))),
@@ -607,7 +614,8 @@ test("per-user turn authorization capacity prevents one account from occupying t
     agentCorpusResolver: fixtureCorpusResolver(entitlement),
     maxPendingTurnAuthorizations: 4,
     maxPendingTurnAuthorizationsPerUser: 1,
-    maxActiveRunsPerUser: 4
+    maxActiveRunsPerUser: 4,
+    conversationRepository
   });
   const port = await listen(runtime);
   let first: WebSocket | undefined;
@@ -1057,12 +1065,14 @@ test("turn.cancel tombstones pending authorization and an abort-ignoring resolve
     }
   };
   let runCalls = 0;
+  const conversationRepository = await authBoundaryConversations(entitlement, ["shared-conversation", "different-conversation", "after-late-conversation"]);
   const runtime = createRuntimeServer({
     createRuntime: () => completingRuntime(() => { runCalls += 1; }),
     conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-pending-cancel-"))),
     authIdentityResolver: identityResolver,
     entitlementResolver: fixtureEntitlementResolver(entitlement),
-    agentCorpusResolver: fixtureCorpusResolver(entitlement)
+    agentCorpusResolver: fixtureCorpusResolver(entitlement),
+    conversationRepository
   });
   const port = await listen(runtime);
   let first: WebSocket | undefined;
@@ -1620,7 +1630,7 @@ function clientMessage(runId: string, conversationId: string): Record<string, un
     type: "client.message",
     run_id: runId,
     conversation_id: conversationId,
-    message: { role: "user", content: "Run the authorized task." }
+    message: { role: "user", content: "Run the authorized product." }
   };
 }
 
@@ -1724,6 +1734,30 @@ function corpusAsset(id: string, assetPath: string, content: string): { id: stri
     path: assetPath,
     sha256: `sha256:${createHash("sha256").update(content).digest("hex")}`
   };
+}
+
+async function authBoundaryConversations(
+  entitlement: EntitlementBinding,
+  publicIds: string[]
+): Promise<InMemoryConversationRepository> {
+  const repository = new InMemoryConversationRepository();
+  for (const publicId of publicIds) {
+    await repository.createConversation({
+      id: durableConversationId({
+        creatorId: entitlement.creator_id,
+        userId: entitlement.user_id,
+        agentId: entitlement.agent_id,
+        productId: entitlement.product_id
+      }, publicId),
+      publicId,
+      ownerAccountId: entitlement.user_id,
+      creatorId: entitlement.creator_id,
+      agentId: entitlement.agent_id,
+      productId: entitlement.product_id,
+      corpusDigest: `sha256:${"0".repeat(64)}`
+    });
+  }
+  return repository;
 }
 
 function completingRuntime(onRun: () => void): AgentRuntime {

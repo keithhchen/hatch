@@ -70,6 +70,7 @@ test("Web and Storybook consume the shared package and its canonical tokens", ()
   const webEntry = read("creator-dashboard/src/main.jsx");
   const creatorPortal = read("creator-dashboard/src/CreatorPortalV2.jsx");
   const creatorFactory = read("creator-dashboard/src/CreatorFactoryRuns.jsx");
+  const creatorWorkspace = read("creator-dashboard/src/CreatorProductWorkspace.jsx");
   const buyerPortal = read("creator-dashboard/src/BuyerPortalV2.jsx");
   const creatorCss = read("creator-dashboard/src/creatorPortalV2.css");
   const storefrontCss = read("creator-dashboard/src/storefrontDetails.css");
@@ -92,11 +93,13 @@ test("Web and Storybook consume the shared package and its canonical tokens", ()
 
   assert.doesNotMatch(creatorPortal, /className="cpv2-(?:primary|secondary|danger)"/);
   assert.doesNotMatch(creatorCss, /\.cpv2-(?:primary|secondary|danger)(?:\b|,)/);
-  assert.match(creatorPortal, /<FormField label="Task name" required><Input/);
-  assert.match(creatorPortal, /<FormField label="Authority"><Select/);
+  assert.match(creatorPortal, /<CreatorProductWorkspace/);
   assert.match(creatorPortal, /<HatchTabs[\s\S]*ariaLabel="Product sections"/);
   assert.match(creatorPortal, /<Checkbox key=\{lossId\}/);
   assert.doesNotMatch(creatorPortal, /<(?:input|textarea|select)\b/);
+  assert.match(creatorWorkspace, /<FormField label=\{t\("whatProductDelivers"\)\}/);
+  assert.match(creatorWorkspace, /<FormField label=\{t\("yourContext"\)\}/);
+  assert.match(creatorWorkspace, /<FormField label=\{t\("whatShouldHatchHaveDone"\)\}/);
   assert.match(creatorFactory, /from\s+["']@hatch\/ui["']/);
   assert.doesNotMatch(creatorFactory, /<(?:input|textarea|select)\b/);
   assert.doesNotMatch(creatorCss, /\.cpv2-factory-draft\s+(?:input|select|textarea)/);

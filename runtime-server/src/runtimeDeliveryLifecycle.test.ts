@@ -6,11 +6,12 @@ import path from "node:path";
 import { afterEach, test } from "node:test";
 import { WebSocket } from "ws";
 import type { AgentRuntime } from "./agentRuntime.js";
+import { InMemoryConversationRepository } from "./conversationRepository.js";
 import { AgentCorpusResolver } from "./agentCorpus.js";
 import type { CommerceEventSink, CommerceEventType } from "./delivery.js";
 import { DeliveryAccountingOutbox } from "./deliveryOutbox.js";
 import type { EntitlementBinding, EntitlementResolver } from "./entitlements.js";
-import { createRuntimeServer, type RuntimeServer } from "./index.js";
+import { createRuntimeServer, durableConversationId, type RuntimeServer } from "./index.js";
 import { PROTOCOL_VERSION, type OutboundMessage } from "./protocol.js";
 import { RuntimeStore } from "./store.js";
 
@@ -47,7 +48,7 @@ test("entitlement runs reserve, consume, release, and replay idempotently", asyn
   await waitForMessage(successful.messages, (message) => message.type === "turn.completed" && message.run_id === "run_success");
   assert.deepEqual(successfulSink.calls.map((call) => call.kind), [
     "reserve",
-    "append:task.started",
+    "append:product.started",
     "append:artifact.created",
     "complete"
   ]);
@@ -315,6 +316,19 @@ async function startRuntime(
 ): Promise<{ socket: WebSocket; messages: OutboundMessage[]; runtime: RuntimeServer }> {
   const dataRoot = await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-delivery-state-"));
   temporaryDirectories.push(dataRoot);
+  const conversationRepository = new InMemoryConversationRepository();
+  for (const runId of ["run_success", "run_failed", "run_cancelled", "run_outage"]) {
+    const publicId = `conversation-${runId}`;
+    await conversationRepository.createConversation({
+      id: durableConversationId({ creatorId: fixture.entitlement.creator_id, userId: fixture.entitlement.user_id, agentId: fixture.entitlement.agent_id, productId: fixture.entitlement.product_id }, publicId),
+      publicId,
+      ownerAccountId: fixture.entitlement.user_id,
+      creatorId: fixture.entitlement.creator_id,
+      agentId: fixture.entitlement.agent_id,
+      productId: fixture.entitlement.product_id,
+      corpusDigest: `sha256:${"0".repeat(64)}`
+    });
+  }
   const runtime = createRuntimeServer({
     createRuntime,
     conversationStore: new RuntimeStore(dataRoot),
@@ -322,7 +336,8 @@ async function startRuntime(
     entitlementResolver: fixture.entitlementResolver,
     commerceEventSink,
     deliveryAccountingOutbox,
-    deliveryReconcileIntervalMs: 60_000
+    deliveryReconcileIntervalMs: 60_000,
+    conversationRepository
   });
   activeServers.push(runtime);
   await new Promise<void>((resolve) => runtime.server.listen(0, "127.0.0.1", resolve));

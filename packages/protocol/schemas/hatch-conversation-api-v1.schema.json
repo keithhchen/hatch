@@ -21,6 +21,47 @@
       "type": "string",
       "enum": ["queued", "running", "waiting_for_tool", "compacting", "completed", "failed", "cancelled", "interrupted"]
     },
+    "briefField": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "required"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$", "maxLength": 128 },
+        "label": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "required": { "type": "boolean" }
+      }
+    },
+    "briefAnswer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field_id", "value"],
+      "properties": {
+        "field_id": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$", "maxLength": 128 },
+        "value": { "type": "string", "maxLength": 32000 }
+      }
+    },
+    "briefSnapshotField": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "required", "value"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$", "maxLength": 128 },
+        "label": { "type": "string", "minLength": 1, "maxLength": 500 },
+        "required": { "type": "boolean" },
+        "value": { "type": ["string", "null"], "maxLength": 32000 }
+      }
+    },
+    "briefSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "spec_digest", "fields", "submitted_at"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "spec_digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "fields": { "type": "array", "items": { "$ref": "#/$defs/briefSnapshotField" }, "minItems": 1, "maxItems": 16 },
+        "submitted_at": { "type": "string", "format": "date-time" }
+      }
+    },
     "conversation": {
       "type": "object",
       "additionalProperties": false,
@@ -34,7 +75,8 @@
         "status": { "$ref": "#/$defs/conversationStatus" },
         "created_at": { "type": "string", "format": "date-time" },
         "updated_at": { "type": "string", "format": "date-time" },
-        "version": { "type": "integer", "minimum": 1 }
+        "version": { "type": "integer", "minimum": 1 },
+        "brief_snapshot": { "$ref": "#/$defs/briefSnapshot" }
       }
     },
     "run": {
@@ -70,7 +112,8 @@
       "additionalProperties": false,
       "properties": {
         "title": { "type": "string", "minLength": 1, "maxLength": 500 },
-        "client_request_id": { "$ref": "#/$defs/id", "description": "Optional stable idempotency key for Conversation creation." }
+        "client_request_id": { "$ref": "#/$defs/id", "description": "Optional stable idempotency key for Conversation creation." },
+        "brief_answers": { "type": "array", "items": { "$ref": "#/$defs/briefAnswer" }, "maxItems": 16 }
       }
     },
     "updateConversationRequest": {

@@ -1,8 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Menu } from "lucide-react";
-import { CreatorFactoryRuns } from "./CreatorFactoryRuns.jsx";
-import { CreatorSourceLibrary } from "./CreatorSourceLibrary.jsx";
-import { CreatorReviewPage } from "./CreatorReviewPage.jsx";
+import { CreatorProductFiles } from "./CreatorSourceLibrary.jsx";
 import {
   Breadcrumbs as HatchBreadcrumbs,
   Button,
@@ -155,11 +153,11 @@ function CreatorRoute({ route, token, request, navigate, profile, locale, regist
   }
   if (route.kind === "home") return <CreatorHome token={token} request={request} navigate={navigate} profile={profile} />;
   if (route.kind === "products") return <ProductsPage token={token} request={request} navigate={navigate} />;
-  if (route.kind === "task-create" || route.kind === "files") return <CreatorSourceLibrary token={token} taskId={route.taskId} navigate={navigate} />;
-  if (route.kind === "factory") return <FactoryPage token={token} request={request} productId={route.productId} runId={route.runId} navigate={navigate} registerNavigationGuard={registerNavigationGuard} />;
-  if (route.kind === "product" && ["files", "about-you", "review", "complete"].includes(route.tab)) return <CreatorProductWorkspace token={token} request={request} navigate={navigate} productId={route.productId} tab={route.tab} locale={locale} profile={profile} />;
+  if (route.kind === "product-create") return <CreatorProductFiles token={token} navigate={navigate} locale={locale} />;
+  if (route.kind === "factory") return <FactoryPage token={token} request={request} productId={route.productId} runId={route.runId} navigate={navigate} locale={locale} profile={profile} />;
+  if (route.kind === "product" && ["files", "about-you", "review", "brief", "complete"].includes(route.tab)) return <CreatorProductWorkspace token={token} request={request} navigate={navigate} productId={route.productId} tab={route.tab} locale={locale} profile={profile} />;
   if (route.kind === "product") return <ProductPage token={token} request={request} navigate={navigate} productId={route.productId} tab={route.tab} />;
-  if (route.kind === "candidate") return <CreatorReviewPage token={token} request={request} runId={route.candidateId} onBack={() => navigate(`${ROOT}/products/${encodeURIComponent(route.productId)}/factory/${encodeURIComponent(route.candidateId)}`)} onRevision={(run) => navigate(`${ROOT}/products/${encodeURIComponent(route.productId)}/factory/${encodeURIComponent(run.id)}`)} onRelease={() => navigate(`${ROOT}/products/${encodeURIComponent(route.productId)}/preview`)} />;
+  if (route.kind === "candidate") return <CreatorProductWorkspace token={token} request={request} navigate={navigate} productId={route.productId} runId={route.candidateId} tab="review" locale={locale} profile={profile} />;
   if (route.kind === "preview") return <PreviewPage token={token} request={request} navigate={navigate} productId={route.productId} />;
   if (route.kind === "release") return <ReleasePage token={token} request={request} navigate={navigate} productId={route.productId} releaseId={route.releaseId} />;
   if (route.kind === "orders") return <OrdersPage token={token} request={request} navigate={navigate} />;
@@ -221,11 +219,11 @@ function ProductsPage({ token, request, navigate }) {
       {(payload) => {
         const products = arrayOf(unwrap(payload, "products"));
         return <>
-          <PageHeader eyebrow="Products" title="From a method to a product people can use." body="A Task owns its private files. Factory then evaluates a candidate, and Release makes the approved result available." action="Create a Task" onAction={() => navigate(`${ROOT}/tasks/new`)} />
+          <PageHeader eyebrow="Products" title="From a method to a product people can use." body="Each Product keeps its files, versions, review, and release together." action="Create product" onAction={() => navigate(`${ROOT}/products/new`)} />
           {pendingRuns.length ? <PendingFactoryRuns runs={pendingRuns} navigate={navigate} /> : null}
           {products.length ? <section className="cpv2-product-grid" aria-label="Products">
             {products.map((product) => <ProductCard key={idOf(product, "product")} product={product} onOpen={() => navigate(`${ROOT}/products/${encodeURIComponent(idOf(product, "product"))}`)} />)}
-          </section> : pendingRuns.length ? null : <EmptyState title="Create your first Task" body="Start with one narrow Task, upload local files, and let Factory turn the method into a verified candidate." action="Create a Task" onAction={() => navigate(`${ROOT}/tasks/new`)} />}
+          </section> : pendingRuns.length ? null : <EmptyState title="Create your first product" body="Start with one focused result, add the material behind it, and generate your first version." action="Create product" onAction={() => navigate(`${ROOT}/products/new`)} />}
         </>;
       }}
     </PageBoundary>
@@ -237,9 +235,9 @@ function PendingFactoryRuns({ runs, navigate }) {
     <SectionHeading eyebrow="Factory in progress" title="Your draft is safely on the server." />
     <div className="cpv2-product-grid">{runs.map((run) => <article className="cpv2-card cpv2-product-card" key={run.id}>
       <div className="cpv2-card-top"><StatusChip status={run.status}>{productStatus(run.status)}</StatusChip><span>Candidate pending</span></div>
-      <h2>{run.task_name ?? "Untitled Factory run"}</h2>
+      <h2>{run.product_name ?? run.product?.name ?? "Untitled product version"}</h2>
       <p>{run.stage === "review_required" ? "Review the candidate and confirm the correction loop before a new revision is built." : ["waiting_for_creator", "awaiting_answers"].includes(run.status) ? "Answer the pending Factory questions to continue." : run.status === "needs_attention" ? "Review the failed checkpoint and retry when it is safe." : "Distillation is running. Candidate review will appear as soon as the verified Corpus is ready."}</p>
-      <div className="cpv2-card-foot"><small>{run.updated_at ? `Updated ${dateTime(run.updated_at)}` : "Saved on server"}</small><Button variant="secondary" type="button" onClick={() => navigate(`${ROOT}/factory/${encodeURIComponent(run.id)}`)}>Open Factory</Button></div>
+      <div className="cpv2-card-foot"><small>{run.updated_at ? `Updated ${dateTime(run.updated_at)}` : "Saved on server"}</small><Button variant="secondary" type="button" onClick={() => navigate(`${ROOT}/products/${encodeURIComponent(run.product_id ?? run.product?.id ?? "")}/${run.stage === "review_required" || run.status === "ready" ? "review" : "about-you"}`)}>Continue</Button></div>
     </article>)}</div>
   </section>;
 }
@@ -291,8 +289,8 @@ function ProductOverview({ product, candidate, navigate, token, request, onChang
   const alreadyPublished = product.status === "published" || product.status === "live";
   const [withdraw, setWithdraw] = useState({ reason: "", confirming: false, busy: false, error: "", done: false });
   const steps = [
-    { label: "Task files", done: Boolean(product.task_id), action: "Open files", href: product.task_id ? `${ROOT}/tasks/${encodeURIComponent(product.task_id)}/files` : null },
-    { label: "Factory candidate", done: Boolean(candidate || alreadyPublished || product.corpus_digest), action: "Open Factory", href: `${ROOT}/products/${encodeURIComponent(productId)}/factory` },
+    { label: "Product files", done: Boolean(product.files_count || product.source_count || product.source_snapshot_id), action: "Open files", href: `${ROOT}/products/${encodeURIComponent(productId)}/files` },
+    { label: "Version candidate", done: Boolean(candidate || alreadyPublished || product.corpus_digest), action: "Continue", href: `${ROOT}/products/${encodeURIComponent(productId)}/about-you` },
     { label: "Candidate approval", done: isApproved(candidate) || alreadyPublished, action: "Review candidate", href: candidate ? `${ROOT}/products/${encodeURIComponent(productId)}/candidates/${encodeURIComponent(idOf(candidate, "candidate"))}` : null },
     { label: "Storefront preview", done: Boolean(product.previewed_at || product.preview_ready), action: "Preview", href: `${ROOT}/products/${encodeURIComponent(productId)}/preview` },
     { label: "Published", done: product.status === "published" || product.status === "live", action: "View storefront", href: product.public_url, external: true }
@@ -335,166 +333,12 @@ function DataControlsPanel({ product }) {
   return <div className="cpv2-detail-grid"><article className="cpv2-card cpv2-panel"><SectionHeading eyebrow="Product boundaries" title="What this product will not do" />{boundaries.length ? <ul className="cpv2-bullets">{boundaries.map((item, index) => <li key={index}>{typeof item === "string" ? item : item.label ?? item.description}</li>)}</ul> : <EmptyInline>Add explicit boundaries before publishing.</EmptyInline>}</article><article className="cpv2-card cpv2-panel"><SectionHeading eyebrow="Privacy" title="Buyer work stays private" /><p>Access records never include Workspace paths, conversations, tool arguments, file content, or artifacts.</p><dl><Fact label="Corpus digest" value={shortDigest(product.corpus_digest ?? product.active_release?.corpus_digest)} /><Fact label="Version policy" value={product.version_policy ?? "Pinned to purchased release"} /></dl></article></div>;
 }
 
-function FactoryPage({ token, request, productId, runId, navigate, registerNavigationGuard }) {
-  const runBase = productId
-    ? `${ROOT}/products/${encodeURIComponent(productId)}/factory/runs`
-    : `${ROOT}/factory`;
-  if (productId === undefined) return <>
-    <div className="cpv2-factory-bar"><Button variant="link" size="small" type="button" onClick={() => navigate(`${ROOT}/products`)}>← Back to products</Button><span role="status">Open a saved run to continue questions, retry a checkpoint, or inspect progress.</span></div>
-    <CreatorFactoryRuns
-      token={token}
-      initialRunId={runId}
-      onNavigateRun={(id) => navigate(id ? `${runBase}/${encodeURIComponent(id)}` : `${ROOT}/factory`)}
-      onCreateTask={() => navigate(`${ROOT}/tasks/new`)}
-      onReviewCandidate={(run) => {
-        const candidateProductId = run?.product?.product_id ?? run?.product?.id ?? run?.product_id;
-        if (candidateProductId) {
-          navigate(`${ROOT}/products/${encodeURIComponent(candidateProductId)}/candidates/${encodeURIComponent(run.id)}`);
-        }
-      }}
-    />
-  </>;
-  if (!productId) return <FactoryDraftPage token={token} request={request} navigate={navigate} registerNavigationGuard={registerNavigationGuard} />;
-  return <>
-    <div className="cpv2-factory-bar"><Button variant="link" size="small" type="button" onClick={() => navigate(productId ? `${ROOT}/products/${encodeURIComponent(productId)}` : `${ROOT}/products`)}>← {productId ? "Back to product" : "Back to products"}</Button><span role="status">Factory run checkpoints are saved on the server when submitted.</span></div>
-    <FactoryReviewLink token={token} request={request} productId={productId} navigate={navigate} />
-    <CreatorFactoryRuns token={token} initialRunId={runId} onCreateTask={() => navigate(`${ROOT}/tasks/new`)} onNavigateRun={(id) => navigate(id ? `${runBase}/${encodeURIComponent(id)}` : `${ROOT}/products/${encodeURIComponent(productId)}/factory`)} onReviewCandidate={(run) => navigate(`${ROOT}/products/${encodeURIComponent(productId)}/candidates/${encodeURIComponent(run.id)}`)} />
-  </>;
-}
-
-function FactoryReviewLink({ token, request, productId, navigate }) {
-  const resource = useRemote(request, `/v1/creator/products/${encodeURIComponent(productId)}`, token);
-  const product = resource.data ? (unwrap(resource.data, "product") ?? resource.data) : null;
-  const candidate = candidateOf(product);
-  const reviewReady = Boolean(candidate && !isApproved(candidate) && ["ready", "ready_for_review", "review_ready"].includes(candidate.status));
-  useEffect(() => {
-    if (resource.state !== "ready" || reviewReady) return undefined;
-    const timer = setInterval(resource.retry, 5000);
-    return () => clearInterval(timer);
-  }, [resource.state, reviewReady]);
-  if (resource.state === "loading" || resource.state === "error") return null;
-  if (!reviewReady) return <aside className="cpv2-factory-ready is-waiting" role="status"><div><strong>Factory is tracking this product.</strong><small>The review action appears as soon as a verified candidate is ready.</small></div><Button variant="secondary" type="button" onClick={resource.retry}>Refresh status</Button></aside>;
-  return <aside className="cpv2-factory-ready" role="status"><div><strong>Candidate v{candidate.version ?? "—"} is ready for review.</strong><small>{shortDigest(candidate.digest)}</small></div><Button type="button" onClick={() => navigate(`${ROOT}/products/${encodeURIComponent(productId)}/candidates/${encodeURIComponent(idOf(candidate, "candidate"))}`)}>Review candidate</Button><Button variant="secondary" type="button" onClick={resource.retry}>Refresh status</Button></aside>;
-}
-
-function FactoryDraftPage({ token, request, navigate, registerNavigationGuard }) {
-  const resource = useRemote(request, "/v1/creator/factory-drafts/default", token);
-  return <PageBoundary resource={resource} title="We couldn't load your Factory draft">{(payload) => <FactoryDraftForm initial={unwrap(payload, "draft") ?? payload} token={token} request={request} navigate={navigate} registerNavigationGuard={registerNavigationGuard} />}</PageBoundary>;
-}
-
-function FactoryDraftForm({ initial, token, request, navigate, registerNavigationGuard }) {
-  const [draft, setDraft] = useState(() => ({ task_name: initial?.task_name ?? "", task_brief: initial?.task_brief ?? "", sources: arrayOf(initial?.sources).length ? initial.sources : [{ id: "S1", title: "", authority: "private_material", content: "" }] }));
-  const [dirty, setDirty] = useState(false);
-  const [saveState, setSaveState] = useState(initial?.saved_at ? `Saved ${dateTime(initial.saved_at)}` : "Start typing to autosave");
-  const [error, setError] = useState("");
-  const [starting, setStarting] = useState(false);
-  const versionRef = useRef(initial?.version ?? 0);
-  const changeRef = useRef(0);
-  const savedChangeRef = useRef(0);
-  const writeChainRef = useRef(Promise.resolve());
-  const draftRef = useRef(draft);
-  const dirtyRef = useRef(false);
-
-  const changeDraft = useCallback((update) => {
-    setDraft((current) => {
-      const next = typeof update === "function" ? update(current) : { ...current, ...update };
-      draftRef.current = next;
-      return next;
-    });
-    changeRef.current += 1;
-    dirtyRef.current = true;
-    setDirty(true);
-    setSaveState("Unsaved changes");
-  }, []);
-
-  const persist = useCallback((snapshot) => {
-    const change = changeRef.current;
-    if (savedChangeRef.current >= change) return writeChainRef.current;
-    setSaveState("Saving…");
-    setError("");
-    const operation = writeChainRef.current.catch(() => undefined).then(async () => {
-      if (savedChangeRef.current >= change) return undefined;
-      const result = await request("/v1/creator/factory-drafts/default", { method: "PUT", token, headers: { "idempotency-key": mutationKey() }, body: JSON.stringify({ ...snapshot, expected_version: versionRef.current }) });
-      const saved = unwrap(result, "draft") ?? result;
-      versionRef.current = saved.version ?? versionRef.current + 1;
-      savedChangeRef.current = change;
-      if (changeRef.current === change) { dirtyRef.current = false; setDirty(false); setSaveState(`Saved ${dateTime(saved.saved_at ?? new Date())}`); }
-      return saved;
-    }).catch((nextError) => { setSaveState("Couldn't save"); setError(friendlyError(nextError)); throw nextError; });
-    writeChainRef.current = operation;
-    return operation;
-  }, [request, token]);
-
-  useEffect(() => {
-    if (!dirty) return undefined;
-    const timer = setTimeout(() => { persist(draft).catch(() => undefined); }, 900);
-    return () => clearTimeout(timer);
-  }, [dirty, draft, persist]);
-
-  useEffect(() => {
-    if (typeof registerNavigationGuard !== "function") return undefined;
-    return registerNavigationGuard(async () => {
-      if (!dirtyRef.current) return true;
-      try {
-        await persist(draftRef.current);
-        return !dirtyRef.current;
-      } catch {
-        setError("We couldn't save these changes, so Hatch kept you on this page. Retry the save before leaving.");
-        return false;
-      }
-    });
-  }, [persist, registerNavigationGuard]);
-
-  useEffect(() => {
-    const protectUnsaved = (event) => {
-      if (!dirtyRef.current) return;
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", protectUnsaved);
-    return () => window.removeEventListener("beforeunload", protectUnsaved);
-  }, []);
-
-  function updateSource(index, field, value) {
-    changeDraft((current) => ({ ...current, sources: current.sources.map((source, sourceIndex) => sourceIndex === index ? { ...source, [field]: value } : source) }));
-  }
-
-  async function start(event) {
-    event.preventDefault();
-    setStarting(true); setError("");
-    try {
-      await persist(draft);
-      const run = await request("/v1/creator/factory-drafts/default/start", {
-        method: "POST",
-        token,
-        headers: { "idempotency-key": mutationKey() },
-        body: JSON.stringify({ expected_version: versionRef.current })
-      });
-      const created = unwrap(run, "run") ?? run;
-      const runId = idOf(created, "run");
-      navigate(runId ? `${ROOT}/factory/${encodeURIComponent(runId)}` : `${ROOT}/factory`);
-    } catch (nextError) { setError(friendlyError(nextError)); }
-    finally { setStarting(false); }
-  }
-
-  return <>
-    <Breadcrumb onClick={() => navigate(`${ROOT}/products`)}>Products</Breadcrumb>
-    <PageHeader eyebrow="Creator Factory" title="Define one task worth delivering." body="This server draft autosaves after a short pause. Starting distillation remains an explicit action." />
-    {error ? <InlineError>{error}</InlineError> : null}
-    <form className="cpv2-card cpv2-factory-draft" onSubmit={start} onBlur={() => { if (dirty) persist(draft).catch(() => undefined); }}>
-      <AutosaveStatus
-        className="cpv2-save-state"
-        state={saveState === "Saving…" ? "saving" : saveState === "Couldn't save" ? "error" : saveState.startsWith("Saved") ? "saved" : dirty ? "dirty" : "ready"}
-        detail={saveState.startsWith("Saved") ? saveState.slice(6) : undefined}
-        onRetry={() => persist(draft).catch(() => undefined)}
-      />
-      <FormField label="Task name" required><Input required value={draft.task_name} onChange={(event) => changeDraft({ task_name: event.target.value })} placeholder="e.g. Signal Resume Review" /></FormField>
-      <FormField label="Task promise" required><Textarea required value={draft.task_brief} onChange={(event) => changeDraft({ task_brief: event.target.value })} placeholder="What does the Buyer provide, and what finished result do they receive?" /></FormField>
-      <div className="cpv2-source-heading"><div><span className="cpv2-kicker">Authorized sources</span><h2>Source material</h2></div><Button variant="link" size="small" type="button" onClick={() => changeDraft((current) => ({ ...current, sources: [...current.sources, { id: `S${current.sources.length + 1}`, title: "", authority: "private_material", content: "" }] }))}>+ Add source</Button></div>
-      {draft.sources.map((source, index) => <fieldset className="cpv2-source" key={source.id ?? index}><legend>{source.id ?? `S${index + 1}`}</legend>{draft.sources.length > 1 ? <Button className="cpv2-source-remove" variant="link" size="small" type="button" onClick={() => changeDraft((current) => ({ ...current, sources: current.sources.filter((_, sourceIndex) => sourceIndex !== index).map((item, sourceIndex) => ({ ...item, id: `S${sourceIndex + 1}` })) }))}>Remove</Button> : null}<FormField label="Source title" required><Input required value={source.title ?? ""} onChange={(event) => updateSource(index, "title", event.target.value)} /></FormField><FormField label="Authority"><Select label="Authority" value={source.authority ?? "private_material"} onValueChange={(value) => updateSource(index, "authority", value)} options={[{ value: "creator_current", label: "Current correction or demonstration" }, { value: "creator_example", label: "Canonical example" }, { value: "private_material", label: "Private course or document" }, { value: "public_context", label: "Public context" }]} /></FormField><FormField label="Source content" required><Textarea required value={source.content ?? ""} onChange={(event) => updateSource(index, "content", event.target.value)} /></FormField></fieldset>)}
-      <div className="cpv2-draft-actions"><p>Private source text is stored only in the authenticated server draft; this page does not put it in localStorage.</p><Button type="submit" loading={starting}>Start distillation</Button></div>
-    </form>
-  </>;
+function FactoryPage({ token, request, productId, runId, navigate, locale, profile }) {
+  // Factory is a Product view, never a standalone area. A legacy bookmark
+  // to /studio/factory lands on the Product index instead of exposing a second
+  // workflow or another source authority.
+  if (productId === undefined) return <ProductsPage token={token} request={request} navigate={navigate} />;
+  return <CreatorProductWorkspace token={token} request={request} productId={productId} runId={runId} tab={runId ? "review" : "about-you"} navigate={navigate} locale={locale} profile={profile} />;
 }
 
 function CandidatePage({ token, request, navigate, productId, candidateId }) {
@@ -823,7 +667,7 @@ function defaultNavigate(path) {
 }
 
 function nextCreatorAction(products) {
-  if (!products.length) return { label: "Start here", tone: "draft", title: "Create one focused product", body: "Define the task and authorized sources in Factory.", action: "Open Factory", href: `${ROOT}/factory` };
+  if (!products.length) return { label: "Start here", tone: "draft", title: "Create one focused product", body: "Name the result, add your material, and generate the first version.", action: "Create product", href: `${ROOT}/products/new` };
   for (const product of products) {
     const candidate = candidateOf(product);
     const next = productNextAction(product, candidate);

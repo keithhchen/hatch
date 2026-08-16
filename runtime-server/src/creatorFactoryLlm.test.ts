@@ -98,7 +98,7 @@ test("Factory Evidence/Eval/Corpus prompt gateway uses dedicated Kimi K2.6 high-
       {
         id: "submit-evidence",
         name: "submit_evidence_section",
-        arguments: { section: "Task evidence", markdown: "FACTORY_LLM_RESULT" }
+        arguments: { section: "Product evidence", markdown: "FACTORY_LLM_RESULT" }
       },
       { id: "finalize-evidence", name: "finalize_evidence", arguments: {} }
     ])
@@ -115,10 +115,10 @@ test("Factory Evidence/Eval/Corpus prompt gateway uses dedicated Kimi K2.6 high-
     purpose: "evidence.extract",
     systemPrompt: "FACTORY_LLM_SYSTEM_MARKER",
     prompt: "FACTORY_LLM_PROMPT_MARKER",
-    outputContract: { kind: "evidence_ledger", requiredSections: ["Task evidence"] }
+    outputContract: { kind: "evidence_ledger", requiredSections: ["Product evidence"] }
   });
 
-  assert.match(output, /## Task evidence\n\nFACTORY_LLM_RESULT/);
+  assert.match(output, /## Product evidence\n\nFACTORY_LLM_RESULT/);
   assert.equal(calls.length, 1);
   const request = calls[0]!;
   assert.equal(request.url, "https://api.moonshot.ai/v1/chat/completions");
@@ -179,7 +179,7 @@ test("Factory Kimi K2.6 rejects a length-truncated response even when it contain
       purpose: "evidence.extract",
       systemPrompt: "system",
       prompt: "prompt",
-      outputContract: { kind: "evidence_ledger", requiredSections: ["Task evidence"] }
+      outputContract: { kind: "evidence_ledger", requiredSections: ["Product evidence"] }
     }),
     /did not complete: length/
   );
@@ -205,7 +205,7 @@ test("Factory Kimi K2.6 has a hard wall-clock deadline in addition to HTTP idle 
       purpose: "evidence.extract",
       systemPrompt: "system",
       prompt: "prompt",
-      outputContract: { kind: "evidence_ledger", requiredSections: ["Task evidence"] },
+      outputContract: { kind: "evidence_ledger", requiredSections: ["Product evidence"] },
       signal: controller.signal,
       reportFailureTelemetry: (item) => telemetry.push(item)
     }),
@@ -240,7 +240,7 @@ test("Factory Kimi K2.6 classifies quota exhaustion and never rethrows provider 
       purpose: "evidence.extract",
       systemPrompt: "system",
       prompt: "prompt",
-      outputContract: { kind: "evidence_ledger", requiredSections: ["Task evidence"] },
+      outputContract: { kind: "evidence_ledger", requiredSections: ["Product evidence"] },
       reportFailureTelemetry: (row) => telemetry.push(row)
     }),
     (error: unknown) => {
@@ -287,7 +287,7 @@ test("Factory Kimi K2.6 sanitizes transient and configuration provider errors wh
         purpose: "evidence.extract",
         systemPrompt: "system",
         prompt: "prompt",
-        outputContract: { kind: "evidence_ledger", requiredSections: ["Task evidence"] },
+        outputContract: { kind: "evidence_ledger", requiredSections: ["Product evidence"] },
         reportFailureTelemetry: (item) => telemetry.push(item)
       }),
       (error: unknown) => {

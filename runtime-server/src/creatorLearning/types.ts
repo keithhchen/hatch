@@ -132,7 +132,7 @@ export type SourceProjection =
 export type SourceDocumentRecord = {
   id: string;
   creatorId: string;
-  taskId: string;
+  productId: string;
   displayName: string;
   mediaType: string;
   originalObjectRef?: string;
@@ -144,7 +144,7 @@ export type SourceDocumentRecord = {
 export type SourceSnapshotRecord = {
   id: string;
   creatorId: string;
-  taskId?: string;
+  productId?: string;
   version: number;
   documentIds: string[];
   manifestSha256: string;
@@ -285,9 +285,9 @@ export type FactoryRunState = {
   product: FactoryAgentProduct;
   /** Optional only so durable states written before tool declarations remain readable. */
   tools?: FactoryAgentTool[];
-  taskName: string;
-  taskId?: string;
-  /** Stable Task Run lineage; `runId` remains the executable revision id. */
+  productName: string;
+  productId?: string;
+  /** Stable Product Run lineage; `runId` remains the executable revision id. */
   distillationRunId?: string;
   revisionId?: string;
   revisionNumber?: number;
@@ -300,7 +300,7 @@ export type FactoryRunState = {
     maxCorpusRevisions: number;
   };
   artifacts: {
-    taskBrief: ArtifactRef;
+    productPromise: ArtifactRef;
     sourcePacket: ArtifactRef;
     /** Present for CLI runs created from an exhaustive local source_scope. */
     sourceManifest?: ArtifactRef;
@@ -354,14 +354,14 @@ export type FactoryStartInput = {
   product?: Partial<FactoryAgentProduct>;
   /** Declarative Agent Corpus requirements; Factory never asks an LLM to invent tools. */
   tools?: FactoryAgentTool[];
-  taskName: string;
-  /** Stable Distillation Task identity; a run lineage can receive revisions. */
-  taskId?: string;
+  productName: string;
+  /** Stable Distillation Product identity; a run lineage can receive revisions. */
+  productId?: string;
   distillationRunId?: string;
   revisionId?: string;
   revisionNumber?: number;
   parentRevisionId?: string;
-  taskBrief: string;
+  productPromise: string;
   sources: FactorySource[];
   /** Immutable Source Library snapshot resolved before the worker starts. */
   sourceSnapshotId?: string;

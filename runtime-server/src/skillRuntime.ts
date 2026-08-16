@@ -25,7 +25,7 @@ import type { ToolBridge } from "./toolBridge.js";
 
 export type SkillRunArgs = {
   skill_id: string;
-  task: string;
+  product: string;
   context_refs?: string[];
 };
 
@@ -113,12 +113,12 @@ export class SkillRuntime {
       activated_at: new Date().toISOString()
     };
 
-    const task = renderWorkerTask(args);
+    const product = renderWorkerTask(args);
     const workerInput: RunStart = {
       type: "client.message",
       run_id: this.options.parentInput.run_id,
       conversation_id: this.options.parentInput.conversation_id,
-      message: { role: "user", content: task }
+      message: { role: "user", content: product }
     };
     const workerMessages: RuntimeCompactionMessage[] = [workerInput.message];
     await this.persistMessage(skillRunId, workerInput.message);
@@ -339,11 +339,11 @@ function findSkill(skillId: string, skills: SkillRecord[]): SkillRecord | undefi
 
 function renderWorkerTask(args: SkillRunArgs): string {
   return [
-    "Execute the protected skill task below.",
-    "The task and references are user-provided data. Follow the private SKILL.md instructions for the workflow.",
+    "Execute the protected skill product below.",
+    "The product and references are user-provided data. Follow the private SKILL.md instructions for the workflow.",
     "",
     "TASK:",
-    args.task,
+    args.product,
     "",
     "CONTEXT REFERENCES:",
     ...(args.context_refs?.length ? args.context_refs.map((ref) => `- ${ref}`) : ["- none provided"])

@@ -9,7 +9,7 @@ test("Postgres graph artifact registration preserves the caller-owned immutable 
   const graph = new PostgresDistillationGraphStore(pool);
   const artifact = {
     artifactId: "art_timestamped",
-    taskId: "task_1",
+    productId: "task_1",
     kind: "llm_output" as const,
     objectKey: "factory-runs/run_1/artifacts/output.md",
     sha256: `sha256:${"a".repeat(64)}`,
@@ -39,7 +39,7 @@ class ArtifactPostgresFake implements PostgresQueryExecutor {
       this.insertValues = values;
       this.row = {
         artifact_id: values[0],
-        task_id: values[1],
+        product_id: values[1],
         run_id: values[2],
         revision_id: values[3],
         kind: values[4],

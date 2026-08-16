@@ -14,24 +14,24 @@ test("Source Library keeps originals, projects non-images to Markdown, and prese
   const library = new CreatorSourceLibrary(root, new LocalArtifactObjectStore(objectRoot), graph);
   await library.initialize();
   const csv = await library.createFromUpload("creator_1", {
-    taskId: "task_1",
+    productId: "product_1",
     displayName: "rules.csv",
     bytes: Buffer.from("Rule,Decision\nA,Keep\n", "utf8")
   });
   assert.equal(csv.projection.kind, "markdown");
   assert.match(csv.projectionContent ?? "", /\| Rule \| Decision \|/);
   const png = await library.createFromUpload("creator_1", {
-    taskId: "task_1",
+    productId: "product_1",
     displayName: "diagram.png",
     mediaType: "image/png",
     bytes: Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3])
   });
   assert.equal(png.projection.kind, "image");
   assert.equal(png.projectionBase64, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3]).toString("base64"));
-  const snapshot = await library.createSnapshot("creator_1", { taskId: "task_1", documentIds: [csv.id, png.id] });
+  const snapshot = await library.createSnapshot("creator_1", { productId: "product_1", documentIds: [csv.id, png.id] });
   assert.equal(snapshot.lockedAt, snapshot.createdAt);
   assert.deepEqual((await library.resolveSnapshotSources("creator_1", snapshot.id)).map((source) => Boolean(source.image)), [false, true]);
-  const graphState = await graph.derive("task_1");
+  const graphState = await graph.derive("product_1");
   assert.equal(graphState.status, "running");
 });
 

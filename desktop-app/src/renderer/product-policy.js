@@ -18,12 +18,19 @@ export function creatorAgentFromSession(message) {
     name: agent.product.name,
     description: agent.product.description || "Work with this Creator Agent in your own files and context.",
     boundary: "",
-    presentation: agent.presentation || {}
+    presentation: agent.presentation || {},
+    ...(agent.product.brief_spec ? { briefSpec: agent.product.brief_spec } : {})
   });
 }
 
 export function creatorAgentFromEntitlement(entitlement) {
-  return creatorAgentFromSession({ creator_agent: entitlement });
+  return creatorAgentFromSession({
+    creator_agent: {
+      creator: entitlement?.creator,
+      product: entitlement?.product,
+      presentation: entitlement?.presentation
+    }
+  });
 }
 
 /**

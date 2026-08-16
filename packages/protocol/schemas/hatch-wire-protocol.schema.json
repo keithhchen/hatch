@@ -44,6 +44,29 @@
         "interrupted"
       ]
     },
+    "briefSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "fields"],
+      "properties": {
+        "contract_version": { "const": "1" },
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "label", "required"],
+            "properties": {
+              "id": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$", "maxLength": 128 },
+              "label": { "type": "string", "minLength": 1, "maxLength": 500 },
+              "required": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
     "jsonObject": {
       "type": "object",
       "additionalProperties": true
@@ -187,7 +210,8 @@
               "items": { "$ref": "#/$defs/contextAttachment" }
             }
           }
-        }
+        },
+        "task_start": { "const": true }
       }
     },
     "toolCallResultOk": {
@@ -245,6 +269,11 @@
         "product_id": { "type": "string", "minLength": 1 },
         "agent_id": { "type": "string", "minLength": 1 },
         "corpus_digest": { "$ref": "#/$defs/digest" },
+        "purchased_corpus_digest": { "$ref": "#/$defs/digest" },
+        "effective_corpus_digest": { "$ref": "#/$defs/digest" },
+        "version_policy": { "type": "string", "enum": ["pinned", "track_current_compatible"] },
+        "version_history": { "type": "array", "items": { "type": "object", "additionalProperties": true } },
+        "access_mode": { "type": "string", "enum": ["unmetered", "metered"] },
         "entitlement_id": { "type": "string", "minLength": 1 },
         "creator_agent": {
           "type": "object",
@@ -269,7 +298,8 @@
                 "name": { "type": "string", "minLength": 1 },
                 "description": { "type": "string", "minLength": 1 },
                 "promise": { "type": "string", "minLength": 1 },
-                "boundaries": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+                "boundaries": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+                "brief_spec": { "$ref": "#/$defs/briefSpec" }
               }
             },
             "presentation": { "type": "object" }
@@ -533,11 +563,11 @@
     "deliveryReady": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "run_id", "task_id", "artifact_id", "artifact_digest", "delivery_id"],
+      "required": ["type", "run_id", "product_id", "artifact_id", "artifact_digest", "delivery_id"],
       "properties": {
         "type": { "const": "delivery.ready" },
         "run_id": { "type": "string", "minLength": 1 },
-        "task_id": { "type": "string", "minLength": 1 },
+        "product_id": { "type": "string", "minLength": 1 },
         "artifact_id": { "type": "string", "minLength": 1 },
         "artifact_digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
         "delivery_id": { "type": "string", "minLength": 1 },

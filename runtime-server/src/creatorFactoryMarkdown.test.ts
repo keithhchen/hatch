@@ -258,8 +258,8 @@ test("Corpus prompt compiles lossless full-layer replacements with concrete dest
   ]);
   const call = corpusPrompt({
     creatorName: "Creator",
-    taskName: "Task",
-    taskBrief: "Produce a decisive deliverable.",
+    productName: "Product",
+    productPromise: "Produce a decisive deliverable.",
     productContract: "Promise: a directly usable review. Boundary: no guaranteed revenue.",
     evidence: "Explicit decision rule [S1:L1].",
     developmentQa: [{ id: "D.Q1", question: "Choose.", answer: "Choose A." }],
@@ -292,7 +292,7 @@ test("Corpus prompt compiles lossless full-layer replacements with concrete dest
   assert.match(call.systemPrompt, /Change rationale, Requirements traceability, and Preservation audit/i);
   assert.match(call.systemPrompt, /Never submit a path: the host derives every canonical path/i);
   assert.match(call.systemPrompt, /rejected finalizer also preserves the complete draft/i);
-  assert.match(call.systemPrompt, /Creator answer is the authority for the task's decisive judgment/i);
+  assert.match(call.systemPrompt, /Creator answer is the authority for the product's decisive judgment/i);
   assert.match(call.systemPrompt, /Candidate facts are a pool, not a checklist/i);
   assert.match(call.systemPrompt, /Keep the final answer in the requested output language/i);
   assert.match(call.prompt, /Previous accepted complete compilation/);
@@ -303,8 +303,8 @@ test("Corpus prompt compiles lossless full-layer replacements with concrete dest
 
   assert.throws(() => corpusPrompt({
     creatorName: "Creator",
-    taskName: "Task",
-    taskBrief: "Brief",
+    productName: "Product",
+    productPromise: "Brief",
     evidence: "Evidence",
     developmentQa: [],
     evaluationFeedback: "",
@@ -315,8 +315,8 @@ test("Corpus prompt compiles lossless full-layer replacements with concrete dest
 
   const repair = corpusPrompt({
     creatorName: "Creator",
-    taskName: "Task",
-    taskBrief: "Brief",
+    productName: "Product",
+    productPromise: "Brief",
     evidence: "Evidence",
     developmentQa: [],
     evaluationFeedback: "[raw_source_overlap] instructions/system.md",
@@ -332,8 +332,8 @@ test("Corpus prompt compiles lossless full-layer replacements with concrete dest
 
   assert.throws(() => corpusPrompt({
     creatorName: "Creator",
-    taskName: "Task",
-    taskBrief: "Brief",
+    productName: "Product",
+    productPromise: "Brief",
     evidence: "Evidence",
     developmentQa: [],
     evaluationFeedback: "",
@@ -378,8 +378,8 @@ test("Corpus completeness prompt audits all candidate assets, metadata, paths, a
   ]);
   const call = corpusCompletenessPrompt({
     creatorName: "Creator",
-    taskName: "Task",
-    taskBrief: "Produce the deliverable.",
+    productName: "Product",
+    productPromise: "Produce the deliverable.",
     productContract: "Boundary: never guarantee outcomes.",
     evidence: "Supported rules.",
     developmentQa: [],
@@ -404,8 +404,8 @@ test("Corpus completeness prompt audits all candidate assets, metadata, paths, a
 test("Evidence and evaluation prompts make layer routing directional and keep eval artifacts out of prompts", () => {
   const evidence = evidencePrompt({
     creator: { id: "33333333-3333-4333-8333-333333333333", name: "Creator" },
-    taskName: "Task",
-    taskBrief: "Brief"
+    productName: "Product",
+    productPromise: "Brief"
   }, "S1: source");
   assert.match(evidence.systemPrompt, /Factory worldview, values, and vision are operational conflict rules/i);
   assert.match(evidence.systemPrompt, /rigorous researcher accountable for what the Creator actually meant/i);
@@ -418,8 +418,8 @@ test("Evidence and evaluation prompts make layer routing directional and keep ev
 
   const question = questionPrompt({
     creatorName: "Creator",
-    taskName: "Task",
-    taskBrief: "Brief",
+    productName: "Product",
+    productPromise: "Brief",
     evidence: "Evidence",
     count: 1
   });
@@ -433,14 +433,14 @@ test("Evidence and evaluation prompts make layer routing directional and keep ev
 
   const evaluation = evaluationPrompt({
     creatorName: "Creator",
-    taskName: "Task",
+    productName: "Product",
     qa: { id: "D.Q1", question: "Generated question", answer: "Human reference" },
     hatchResult: "Candidate"
   });
   assert.match(evaluation.systemPrompt, /demanding editor-in-chief accountable to the paying end customer/i);
   assert.match(evaluation.systemPrompt, /actively search for omissions/i);
   assert.match(evaluation.systemPrompt, /generic fluency.*never counts as success/i);
-  assert.match(evaluation.systemPrompt, /Synthetic.*task\/question was generated/is);
+  assert.match(evaluation.systemPrompt, /Synthetic.*product\/question was generated/is);
   assert.match(evaluation.systemPrompt, /Creator answer is the human behavioral reference/i);
   assert.match(evaluation.systemPrompt, /evaluation-only artifacts, not live prompt text/i);
   assert.match(evaluation.systemPrompt, /Judge behavior, not surface fluency/i);
@@ -537,7 +537,7 @@ function corpusCompilation(assets: string[]): string {
     "# Change rationale",
     "- Every supported requirement has a concrete emitted destination.",
     "# Requirements traceability",
-    "- R1 [Task brief] -> system -> instructions/system.md (system).",
+    "- R1 [Product brief] -> system -> instructions/system.md (system).",
     "# Preservation audit",
     completePreservationAudit(),
     "# Compilation complete",

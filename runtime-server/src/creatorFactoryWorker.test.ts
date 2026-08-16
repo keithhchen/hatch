@@ -36,8 +36,8 @@ test("durable worker claims a run, pauses for Creator answers, and resumes the s
     input: {
       runId: "worker-run",
       creator: { id: "11111111-1111-4111-8111-111111111111", name: "Worker Creator" },
-      taskName: "Ready-to-publish reply",
-      taskBrief: "Return one decisive reply that can be published directly.",
+      productName: "Ready-to-publish reply",
+      productPromise: "Return one decisive reply that can be published directly.",
       sources: [{
         id: "S1",
         authority: "creator_current",
@@ -111,8 +111,8 @@ test("worker treats a missing OSS state object as a new run", async (t) => {
     input: {
       runId: "worker-oss-run",
       creator: { id: creatorId, name: "Worker Creator" },
-      taskName: "Ready-to-publish reply",
-      taskBrief: "Return one decisive reply that can be published directly.",
+      productName: "Ready-to-publish reply",
+      productPromise: "Return one decisive reply that can be published directly.",
       sources: [{ id: "S1", authority: "creator_current", title: "Current method", content: "Choose one answer and make it usable." }],
       config: { developmentQuestions: 2, heldoutQuestions: 1, maxCorpusRevisions: 2 }
     }
@@ -145,8 +145,8 @@ test("worker never replays an old pending submission into a fresh replacement Qu
     input: {
       runId: "worker-stale-run",
       creator: { id: "11111111-1111-4111-8111-111111111111", name: "Worker Creator" },
-      taskName: "Ready-to-publish reply",
-      taskBrief: "Return one decisive reply that can be published directly.",
+      productName: "Ready-to-publish reply",
+      productPromise: "Return one decisive reply that can be published directly.",
       sources: [{ id: "S1", authority: "creator_current", title: "Current method", content: "Choose one usable answer." }],
       config: { developmentQuestions: 2, heldoutQuestions: 1, maxCorpusRevisions: 2 }
     }
@@ -207,8 +207,8 @@ test("worker fails closed on legacy pending Creator answers without a run-scoped
   const input: FactoryStartInput = {
     runId: "worker-unbound-answers",
     creator: { id: "11111111-1111-4111-8111-111111111111", name: "Worker Creator" },
-    taskName: "Ready-to-publish reply",
-    taskBrief: "Return one decisive reply that can be published directly.",
+    productName: "Ready-to-publish reply",
+    productPromise: "Return one decisive reply that can be published directly.",
     sources: [{ id: "S1", authority: "creator_current", title: "Current method", content: "Choose one usable answer." }],
     config: { developmentQuestions: 2, heldoutQuestions: 1, maxCorpusRevisions: 2 }
   };
@@ -264,7 +264,7 @@ test("worker fails closed on legacy pending Creator answers without a run-scoped
 });
 
 async function passingPromptRunner(call: FactoryPromptCall): Promise<string> {
-  if (call.purpose === "evidence.extract") return "# Task evidence\nExplicit [S1:L1].";
+  if (call.purpose === "evidence.extract") return "# Product evidence\nExplicit [S1:L1].";
   if (call.purpose === "eval.generate_questions") {
     return [1, 2, 3].map((number) => [
       `## Q${number}`,

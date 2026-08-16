@@ -5,6 +5,7 @@ import path from "node:path";
 import { z } from "zod";
 import { readBoundedJsonObject } from "./boundedResponse.js";
 import { requireUuidV4, UUID_V4_RE } from "./identity.js";
+import { normalizeBriefSpec, type BriefSpec } from "./brief.js";
 
 const DigestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const IdentifierSchema = z.string().min(1).max(128).regex(/^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/);
@@ -16,6 +17,14 @@ const PathSchema = z.string().min(1).max(1_024);
 const BoundedJsonObjectSchema = z.record(z.string().min(1).max(128), z.unknown()).superRefine((value, context) => {
   const failure = embeddedJsonLimitFailure(value);
   if (failure) context.addIssue({ code: "custom", message: failure });
+});
+const BriefSpecSchema = z.unknown().transform((value, context): BriefSpec | typeof z.NEVER => {
+  try {
+    return normalizeBriefSpec(value);
+  } catch (error) {
+    context.addIssue({ code: "custom", message: error instanceof Error ? error.message : "BriefSpec is invalid" });
+    return z.NEVER;
+  }
 });
 const IMMUTABLE_CORPORA_DIRECTORY = ".immutable-corpora";
 const CURRENT_CORPORA_DIRECTORY = ".current-corpora";
@@ -52,6 +61,7 @@ export const AgentCorpusSchema = z.object({
     description: DescriptionSchema.optional(),
     promise: DescriptionSchema.optional(),
     boundaries: z.array(z.string().min(1).max(512)).max(32).default([]),
+    brief_spec: BriefSpecSchema.optional(),
     presentation: BoundedJsonObjectSchema.default({})
   }).strict(),
   instructions: z.object({ system: AssetSchema }).strict(),

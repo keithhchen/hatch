@@ -22,57 +22,59 @@ export async function handleCreatorFactoryHttp(
   service: CreatorFactoryService
 ): Promise<CreatorFactoryHttpResponse | undefined> {
   if (!request.pathname.startsWith("/v1/creator/factory-runs")
-    && !request.pathname.startsWith("/v1/creator/tasks")
+    && !request.pathname.startsWith("/v1/creator/products")
     && !request.pathname.startsWith("/v1/creator/source-documents")
     && !request.pathname.startsWith("/v1/creator/source-snapshots")) return undefined;
   try {
-    if (request.pathname === "/v1/creator/tasks" && request.method === "GET") {
-      return { status: 200, body: { tasks: (await service.listTasks(request.creator.id)).map(taskView) } };
+    if (request.pathname === "/v1/creator/products" && request.method === "GET") {
+      return { status: 200, body: { products: (await service.listProducts(request.creator.id)).map(productView) } };
     }
-    if (request.pathname === "/v1/creator/tasks" && request.method === "POST") {
+    if (request.pathname === "/v1/creator/products" && request.method === "POST") {
       const body = request.body ?? {};
-      const task = await service.createTask(request.creator.id, {
-        name: String(body.name ?? body.task_name ?? ""),
-        brief: String(body.brief ?? body.task_brief ?? "")
+      const product = await service.createProduct(request.creator.id, {
+        name: String(body.name ?? body.product_name ?? ""),
+        promise: String(body.promise ?? body.product_promise ?? body.description ?? ""),
+        idempotencyKey: request.headers["idempotency-key"]
       });
-      return { status: 201, body: taskView(task) };
+      return { status: 201, body: productView(product) };
     }
-    const taskMatch = request.pathname.match(/^\/v1\/creator\/tasks\/([^/]+)$/);
-    const taskGraphMatch = request.pathname.match(/^\/v1\/creator\/tasks\/([^/]+)\/graph$/);
-    if (taskGraphMatch && request.method === "GET") {
-      return { status: 200, body: { graph: await service.getTaskGraph(request.creator.id, decodeURIComponent(taskGraphMatch[1]!)) } };
+    const productMatch = request.pathname.match(/^\/v1\/creator\/products\/([^/]+)$/);
+    const productGraphMatch = request.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/graph$/);
+    if (productGraphMatch && request.method === "GET") {
+      return { status: 200, body: { graph: await service.getProductGraph(request.creator.id, decodeURIComponent(productGraphMatch[1]!)) } };
     }
-    if (taskMatch && request.method === "GET") {
-      return { status: 200, body: taskView(await service.getTask(request.creator.id, decodeURIComponent(taskMatch[1]!))) };
+    if (productMatch && request.method === "GET") {
+      return { status: 200, body: productView(await service.getProduct(request.creator.id, decodeURIComponent(productMatch[1]!))) };
     }
-    if (taskMatch && (request.method === "PATCH" || request.method === "PUT")) {
+    if (productMatch && (request.method === "PATCH" || request.method === "PUT")) {
       const body = request.body ?? {};
-      if (typeof body.brief !== "string" || !body.brief.trim()) throw new Error("brief is required");
-      return { status: 200, body: taskView(await service.updateTaskBrief(
+      const promise = typeof body.promise === "string" ? body.promise : body.product_promise;
+      if (typeof promise !== "string" || !promise.trim()) throw new Error("promise is required");
+      return { status: 200, body: productView(await service.updateProductPromise(
         request.creator.id,
-        decodeURIComponent(taskMatch[1]!),
-        body.brief,
+        decodeURIComponent(productMatch[1]!),
+        promise,
         typeof body.expected_updated_at === "string" ? body.expected_updated_at : undefined
       )) };
     }
-    if (taskMatch && request.method === "DELETE") {
-      return { status: 200, body: taskView(await service.deleteTask(request.creator.id, decodeURIComponent(taskMatch[1]!))) };
+    if (productMatch && request.method === "DELETE") {
+      return { status: 200, body: productView(await service.deleteProduct(request.creator.id, decodeURIComponent(productMatch[1]!))) };
     }
     if (request.pathname === "/v1/creator/source-documents" && request.method === "GET") {
-      const taskId = typeof request.query?.task_id === "string" ? request.query.task_id : undefined;
-      return { status: 200, body: { documents: (await service.listSourceDocuments(request.creator.id, taskId)).map((document) => sourceDocumentView(document)) } };
+      const productId = typeof request.query?.product_id === "string" ? request.query.product_id : undefined;
+      return { status: 200, body: { documents: (await service.listSourceDocuments(request.creator.id, productId)).map((document) => sourceDocumentView(document)) } };
     }
     if (request.pathname === "/v1/creator/source-documents" && request.method === "POST") {
       const body = request.body ?? {};
       const encoded = typeof body.content_base64 === "string" ? body.content_base64 : "";
       if (!encoded) throw new Error("content_base64 is required for local uploads");
-      if (typeof body.task_id !== "string" || !body.task_id.trim()) {
-        throw new CreatorSourceLibraryError("invalid_source", "task_id is required for Source Library uploads");
+      if (typeof body.product_id !== "string" || !body.product_id.trim()) {
+        throw new CreatorSourceLibraryError("invalid_source", "product_id is required for Source Library uploads");
       }
       const bytes = decodeBase64(encoded);
       const document = await service.createSourceDocument(request.creator.id, {
         displayName: String(body.display_name ?? body.file_name ?? ""),
-        taskId: body.task_id,
+        productId: body.product_id,
         mediaType: typeof body.media_type === "string" ? body.media_type : undefined,
         bytes
       });
@@ -85,12 +87,12 @@ export async function handleCreatorFactoryHttp(
     if (request.pathname === "/v1/creator/source-snapshots" && request.method === "POST") {
       const body = request.body ?? {};
       const documentIds = Array.isArray(body.document_ids) ? body.document_ids.map((id) => String(id)) : [];
-      if (typeof body.task_id !== "string" || !body.task_id.trim()) {
-        throw new CreatorSourceLibraryError("invalid_snapshot", "task_id is required to lock a Source Snapshot");
+      if (typeof body.product_id !== "string" || !body.product_id.trim()) {
+        throw new CreatorSourceLibraryError("invalid_snapshot", "product_id is required to lock a Source Snapshot");
       }
       const snapshot = await service.createSourceSnapshot(request.creator.id, {
         documentIds,
-        taskId: body.task_id
+        productId: body.product_id
       });
       return { status: 201, body: sourceSnapshotView(snapshot) };
     }
@@ -238,14 +240,14 @@ function createRequest(body: Record<string, unknown>): CreateFactoryRunRequest {
     ? undefined
     : toolRequests(body.tools);
   return {
-    ...(typeof body.task_id === "string" ? { taskId: body.task_id } : {}),
+    ...(typeof body.product_id === "string" ? { productId: body.product_id } : {}),
     ...(productId ? { agentId: productId } : {}),
     ...(product === undefined && !productId ? {} : {
       product: product ?? { id: productId }
     }),
     ...(tools === undefined ? {} : { tools }),
-    taskName: String(body.task_name ?? ""),
-    taskBrief: String(body.task_brief ?? ""),
+    productName: String(body.product_name ?? ""),
+    productPromise: String(body.product_promise ?? ""),
     ...(body.source_snapshot_id === undefined
       ? (hasSources ? { sources } : {})
       : { sourceSnapshotId: String(body.source_snapshot_id) }),
@@ -263,7 +265,7 @@ function createRequest(body: Record<string, unknown>): CreateFactoryRunRequest {
 function sourceDocumentView(document: Awaited<ReturnType<CreatorFactoryService["getSourceDocument"]>>, includeProjection = false): Record<string, unknown> {
   return {
     id: document.id,
-    task_id: document.taskId,
+    product_id: document.productId,
     display_name: document.displayName,
     media_type: document.mediaType,
     projection: {
@@ -283,7 +285,7 @@ function sourceDocumentView(document: Awaited<ReturnType<CreatorFactoryService["
 function sourceSnapshotView(snapshot: Awaited<ReturnType<CreatorFactoryService["getSourceSnapshot"]>>): Record<string, unknown> {
   return {
     id: snapshot.id,
-    task_id: snapshot.taskId,
+    product_id: snapshot.productId,
     version: snapshot.version,
     document_ids: snapshot.documentIds,
     manifest_sha256: snapshot.manifestSha256,
@@ -293,18 +295,19 @@ function sourceSnapshotView(snapshot: Awaited<ReturnType<CreatorFactoryService["
   };
 }
 
-function taskView(task: Awaited<ReturnType<CreatorFactoryService["getTask"]>>): Record<string, unknown> {
+function productView(product: Awaited<ReturnType<CreatorFactoryService["getProduct"]>>): Record<string, unknown> {
   return {
-    id: task.id,
-    name: task.name,
-    brief: task.brief,
-    status: task.status,
-    ...(task.productId ? { product_id: task.productId } : {}),
-    ...(task.runId ? { run_id: task.runId } : {}),
-    ...(task.latestRevisionId ? { latest_revision_id: task.latestRevisionId } : {}),
-    created_at: task.createdAt,
-    updated_at: task.updatedAt,
-    ...(task.deletedAt ? { deleted_at: task.deletedAt } : {})
+    id: product.id,
+    product_id: product.id,
+    name: product.name,
+    promise: product.promise,
+    ...(product.briefSpec ? { brief_spec: product.briefSpec } : {}),
+    status: product.status,
+    ...(product.runId ? { run_id: product.runId } : {}),
+    ...(product.latestRevisionId ? { latest_revision_id: product.latestRevisionId } : {}),
+    created_at: product.createdAt,
+    updated_at: product.updatedAt,
+    ...(product.deletedAt ? { deleted_at: product.deletedAt } : {})
   };
 }
 
@@ -336,11 +339,14 @@ function requireObject(value: unknown, field: string): Record<string, unknown> {
 }
 
 function publicView(view: CreatorFactoryRunView): Record<string, unknown> {
+  // Product.id is the sole public identity. `agentId` remains an internal
+  // runtime alias for old runs, so choose it only when the canonical field is
+  // absent and emit one stable product_id key at the HTTP boundary.
+  const productId = view.productId ?? view.agentId;
   return {
     id: view.id,
-    ...(view.agentId ? { product_id: view.agentId } : {}),
+    ...(productId ? { product_id: productId } : {}),
     ...(view.product ? { product: view.product } : {}),
-    ...(view.taskId ? { task_id: view.taskId } : {}),
     ...(view.distillationRunId ? { distillation_run_id: view.distillationRunId } : {}),
     ...(view.revisionId ? { revision_id: view.revisionId } : {}),
     ...(view.revisionNumber === undefined ? {} : { revision_number: view.revisionNumber }),
@@ -349,7 +355,8 @@ function publicView(view: CreatorFactoryRunView): Record<string, unknown> {
     ...(view.derivedStatus ? { derived_status: view.derivedStatus } : {}),
     ...(view.qualityGates ? { quality_gates: view.qualityGates } : {}),
     ...(view.declaredToolIds ? { declared_tool_ids: view.declaredToolIds } : {}),
-    task_name: view.taskName,
+    product_name: view.productName,
+    product_promise: view.productPromise,
     status: view.status,
     ...(view.stage ? { stage: view.stage } : {}),
     version: view.version,

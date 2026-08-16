@@ -235,7 +235,7 @@ test("Factory start owns a fresh run directory exclusively, including partial an
 
 async function passingRunner(call: FactoryPromptCall): Promise<string> {
   if (call.purpose === "evidence.extract") {
-    return "# Task evidence\nChoose one supported tradeoff and finish the deliverable [S1:L1].";
+    return "# Product evidence\nChoose one supported tradeoff and finish the deliverable [S1:L1].";
   }
   if (call.purpose === "eval.generate_questions") {
     const count = call.outputContract?.kind === "question_set" ? call.outputContract.expectedCount : 2;
@@ -257,8 +257,8 @@ function sampleInput(runId: string, flavor: string): FactoryStartInput {
   return {
     runId,
     creator: { id: "11111111-1111-4111-8111-111111111111", name: "Creator Binding" },
-    taskName: `One publishable decision ${flavor}`,
-    taskBrief: `${flavor}: make one supported tradeoff and return a complete usable result.`,
+    productName: `One publishable decision ${flavor}`,
+    productPromise: `${flavor}: make one supported tradeoff and return a complete usable result.`,
     sources: [{
       id: "S1",
       authority: "creator_current",

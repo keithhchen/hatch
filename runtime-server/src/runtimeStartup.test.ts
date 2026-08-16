@@ -35,17 +35,10 @@ test("normal Runtime startup attaches a durable commerce ledger when configured"
 
   const sink = await commerceEventSinkFromEnvironment({ HATCH_COMMERCE_LEDGER_FILE: ledgerFile });
   assert.ok(sink);
-  await sink.append("task.started", {
-    ...common,
-    entitlement_id: "entitlement_desktop_jordan",
-    task_id: "task_desktop_jordan"
-  }, { idempotencyKey: "task:task_desktop_jordan:started" });
-
   const reopened = await commerce.CommerceLedger.open({ filePath: ledgerFile });
   assert.deepEqual(reopened.listEvents().map((event: Record<string, unknown>) => event.event_type), [
     "order.placed",
-    "entitlement.granted",
-    "task.started"
+    "entitlement.granted"
   ]);
 });
 

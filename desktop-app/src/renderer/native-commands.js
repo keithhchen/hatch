@@ -156,6 +156,12 @@ export function conversationIdFromLocation(locationLike = globalThis.location) {
   return normalizeConversationId(value);
 }
 
+export function taskStartFromLocation(locationLike = globalThis.location) {
+  const search = typeof locationLike?.search === "string" ? locationLike.search : "";
+  const value = new URLSearchParams(search).get("task_start");
+  return value === "1" || value === "true";
+}
+
 /**
  * Normalize the non-secret account/Agent binding carried by a secondary
  * window URL or native window context. These values are routing hints only;

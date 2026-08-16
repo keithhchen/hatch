@@ -157,7 +157,7 @@ export class PiAgentRuntime implements AgentRuntime {
       // summary delimiters.
       convertToLlm,
       initialState: {
-        systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, ctx.deliveryWorkflow),
+        systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, ctx.deliveryWorkflow, ctx.briefSnapshot),
         model,
         thinkingLevel: "high",
         messages: [...contextMessages, ...storedMessages],
@@ -171,7 +171,7 @@ export class PiAgentRuntime implements AgentRuntime {
             toolName: toolCall.name,
             arguments: args as Record<string, unknown>,
             messages: auditMessagesForRun(ctx, transcriptMessages, undefined),
-            systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, deliveryWorkflow),
+            systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, deliveryWorkflow, ctx.briefSnapshot),
             auditContext: ctx.deliveryAuditContext,
             signal
           });
@@ -278,7 +278,7 @@ export class PiAgentRuntime implements AgentRuntime {
           workflow: deliveryWorkflow,
           draft: draftContent,
           messages: auditMessagesForRun(ctx, transcriptMessages, finalAssistant),
-          systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, deliveryWorkflow),
+          systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, deliveryWorkflow, ctx.briefSnapshot),
           auditContext: ctx.deliveryAuditContext,
           signal: ctx.abortSignal
         })
@@ -497,7 +497,7 @@ export class PiAgentRuntime implements AgentRuntime {
         queue.push({
           type: "assistant.delta",
           run_id: input.run_id,
-          delta: { kind: "status", content: "Thinking through the task." }
+          delta: { kind: "status", content: "Thinking through the product." }
         });
       }
       return;
@@ -662,7 +662,7 @@ function auditMessagesForRun(
     ? transcriptMessages.slice(0, -1)
     : transcriptMessages;
   return [
-    { role: "system", content: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, ctx.deliveryWorkflow) },
+    { role: "system", content: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, ctx.deliveryWorkflow, ctx.briefSnapshot) },
     ...buildRuntimeContextMessages(
       ctx.sessionSkills.rendered.section,
       ctx.activatedSkills ?? []

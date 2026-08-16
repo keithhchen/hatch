@@ -248,8 +248,8 @@ test("source_scope and manually listed sources are mutually exclusive", async (t
   const manifestPath = path.join(directory, "factory-input.json");
   await writeFile(manifestPath, `${JSON.stringify({
     creator: { id: "creator", name: "Creator" },
-    taskName: "Task",
-    taskBrief: "Brief",
+    productName: "Product",
+    productPromise: "Brief",
     sources: [{ id: "S1", authority: "public_context", title: "One", content: "One" }],
     source_scope: {
       pack_root: ".",
@@ -285,8 +285,8 @@ test("Factory persists the frozen source manifest and rejects post-verification 
   const input = {
     runId: "source-manifest-persistence",
     creator: { id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", name: "Madeline Mann" },
-    taskName: "Interview answer",
-    taskBrief: "Return one grounded interview answer.",
+    productName: "Interview answer",
+    productPromise: "Return one grounded interview answer.",
     ...resolved,
     config: { developmentQuestions: 1, heldoutQuestions: 1, maxCorpusRevisions: 1 }
   };
