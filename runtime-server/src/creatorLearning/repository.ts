@@ -547,8 +547,20 @@ CREATE TABLE IF NOT EXISTS hatch_creator_products (
 );
 CREATE INDEX IF NOT EXISTS hatch_creator_products_creator_idx
   ON hatch_creator_products (creator_id, updated_at DESC);
+-- Bring columns required by the Product authority into older schemas before
+-- the legacy Task import below. Existing rows must contain enough historical
+-- material to derive a real promise; otherwise startup fails explicitly.
+ALTER TABLE hatch_creator_products ADD COLUMN IF NOT EXISTS brief TEXT;
+ALTER TABLE hatch_creator_products ADD COLUMN IF NOT EXISTS brief_spec JSONB;
 ALTER TABLE hatch_creator_products ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
 ALTER TABLE hatch_creator_products ADD COLUMN IF NOT EXISTS input_digest TEXT;
+ALTER TABLE hatch_creator_products ADD COLUMN IF NOT EXISTS latest_revision_id TEXT;
+ALTER TABLE hatch_creator_products ADD COLUMN IF NOT EXISTS run_id TEXT;
+ALTER TABLE hatch_creator_products ADD COLUMN IF NOT EXISTS promise TEXT;
+UPDATE hatch_creator_products
+SET promise = COALESCE(NULLIF(promise, ''), NULLIF(brief, ''), NULLIF(name, ''))
+WHERE promise IS NULL OR promise = '';
+ALTER TABLE hatch_creator_products ALTER COLUMN promise SET NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS hatch_creator_products_idempotency_idx
   ON hatch_creator_products (creator_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
 
@@ -613,8 +625,6 @@ ALTER TABLE hatch_creator_products
   ADD COLUMN IF NOT EXISTS latest_revision_id TEXT;
 ALTER TABLE hatch_creator_products
   ADD COLUMN IF NOT EXISTS run_id TEXT;
-ALTER TABLE hatch_creator_products
-  ADD COLUMN IF NOT EXISTS promise TEXT;
 UPDATE hatch_creator_products
 SET promise = brief
 WHERE promise IS NULL AND brief IS NOT NULL;

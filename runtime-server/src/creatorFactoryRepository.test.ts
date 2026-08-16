@@ -96,6 +96,12 @@ test("Creator Factory schema persists scheduling, ownership, state summary, and 
   assert.match(POSTGRES_CREATOR_FACTORY_REPOSITORY_SCHEMA, /INSERT INTO hatch_creator_products/);
   assert.match(POSTGRES_CREATOR_FACTORY_REPOSITORY_SCHEMA, /FROM hatch_creator_distillation_tasks AS legacy/);
   assert.match(POSTGRES_CREATOR_FACTORY_REPOSITORY_SCHEMA, /legacy\.deleted_at IS NOT NULL OR legacy\.status = 'deleted'/);
+  assert.match(POSTGRES_CREATOR_FACTORY_REPOSITORY_SCHEMA, /SET promise = COALESCE\(NULLIF\(promise, ''\), NULLIF\(brief, ''\), NULLIF\(name, ''\)\)/);
+  assert.match(POSTGRES_CREATOR_FACTORY_REPOSITORY_SCHEMA, /ALTER TABLE hatch_creator_products ALTER COLUMN promise SET NOT NULL/);
+  assert.ok(
+    POSTGRES_CREATOR_FACTORY_REPOSITORY_SCHEMA.indexOf("ALTER TABLE hatch_creator_products ADD COLUMN IF NOT EXISTS promise TEXT;")
+      < POSTGRES_CREATOR_FACTORY_REPOSITORY_SCHEMA.indexOf("INSERT INTO hatch_creator_products")
+  );
   assert.match(POSTGRES_CREATOR_FACTORY_REPOSITORY_SCHEMA, /ON CONFLICT \(id\) DO NOTHING/);
 });
 
