@@ -39,6 +39,22 @@ test("Product Creator API owns files, snapshots, and idempotent runs", async (t)
   const productId = created.product.product_id;
   assert.match(productId, /^[0-9a-f-]{36}$/);
 
+  const productReplay = await fetch(`${base}/v1/creator/products`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${creatorA}`, "content-type": "application/json", "idempotency-key": "product-create-1" },
+    body: JSON.stringify({ name: "Publishable Reply", promise: "A decisive reply grounded in Creator evidence." })
+  });
+  assert.equal(productReplay.status, 201);
+  assert.equal((await productReplay.json() as { product: { product_id: string } }).product.product_id, productId);
+
+  const productConflict = await fetch(`${base}/v1/creator/products`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${creatorA}`, "content-type": "application/json", "idempotency-key": "product-create-1" },
+    body: JSON.stringify({ name: "Changed product", promise: "A different payload must not create another Product." })
+  });
+  assert.equal(productConflict.status, 409);
+  assert.equal((await productConflict.json() as { error: { code: string } }).error.code, "idempotency_conflict");
+
   const content = Buffer.from("Choose one recommendation and return final copy.");
   const upload = await fetch(`${base}/v1/creator/products/${productId}/files`, {
     method: "POST",

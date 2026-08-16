@@ -1120,10 +1120,10 @@ function assertSameConversationBinding(existing: ConversationRecord, expected: C
   }
   const expectedBrief = (expected as ConversationBinding & { briefSnapshot?: BriefSnapshot }).briefSnapshot;
   const existingBrief = existing.briefSnapshot;
-  if (expectedBrief || existingBrief) {
-    const sameBrief = Boolean(expectedBrief && existingBrief)
-      && expectedBrief!.spec_digest === existingBrief!.spec_digest
-      && JSON.stringify(expectedBrief!.fields) === JSON.stringify(existingBrief!.fields);
+  if (expectedBrief) {
+    const sameBrief = Boolean(existingBrief)
+      && expectedBrief.spec_digest === existingBrief!.spec_digest
+      && JSON.stringify(expectedBrief.fields) === JSON.stringify(existingBrief!.fields);
     if (!sameBrief) {
       throw new ConversationRepositoryError("conversation_binding_mismatch", "Conversation BriefSnapshot does not match the original task");
     }

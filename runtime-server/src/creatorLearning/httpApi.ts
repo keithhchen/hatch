@@ -33,7 +33,8 @@ export async function handleCreatorFactoryHttp(
       const body = request.body ?? {};
       const product = await service.createProduct(request.creator.id, {
         name: String(body.name ?? body.product_name ?? ""),
-        promise: String(body.promise ?? body.product_promise ?? body.description ?? "")
+        promise: String(body.promise ?? body.product_promise ?? body.description ?? ""),
+        idempotencyKey: request.headers["idempotency-key"]
       });
       return { status: 201, body: productView(product) };
     }

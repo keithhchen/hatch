@@ -248,11 +248,23 @@ test("Run HTTP API rejects a detached reservation instead of occupying an execut
 
 test("WebSocket retries use client_message_id without creating a second run or replaying tools", async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-ws-"));
+  const repository = new InMemoryConversationRepository();
   runtime = createRuntimeServer({
     conversationStore: new RuntimeStore(dataDir),
+    conversationRepository: repository,
     createRuntime: () => new DeterministicAgentRuntime()
   });
   const base = await listen(runtime.server);
+  const conversationId = "conversation_retry";
+  await repository.createConversation({
+    id: conversationId,
+    publicId: conversationId,
+    ownerAccountId: "local-development",
+    creatorId: "local-development",
+    agentId: "local-agent",
+    productId: "local-product",
+    corpusDigest: `sha256:${"0".repeat(64)}`
+  });
   const socket = new WebSocket(base.replace("http:", "ws:") + "/runtime");
   const messages: OutboundMessage[] = [];
   socket.on("message", (value) => messages.push(JSON.parse(String(value)) as OutboundMessage));
@@ -271,7 +283,7 @@ test("WebSocket retries use client_message_id without creating a second run or r
     type: "client.message",
     run_id: "run_transport_first",
     client_message_id: "message_stable_once",
-    conversation_id: "conversation_retry",
+    conversation_id: conversationId,
     message: { role: "user", content: "Find Hatch." }
   }));
   await waitForSocket(messages, (message) => message.type === "tool_call.request" && message.run_id === "run_transport_first");
@@ -280,7 +292,7 @@ test("WebSocket retries use client_message_id without creating a second run or r
     type: "client.message",
     run_id: "run_transport_retry",
     client_message_id: "message_stable_once",
-    conversation_id: "conversation_retry",
+    conversation_id: conversationId,
     message: { role: "user", content: "Find Hatch." }
   }));
   const replay = await waitForSocket(messages, (message) => (
@@ -343,6 +355,15 @@ test("two windows get distinct executor leases; disconnect is Interrupted and re
   // Resolver-free test mode stores the raw public ID; product mode uses the
   // same repository path after deriving its binding server-side.
   const durableId = conversationId;
+  await repository.createConversation({
+    id: durableId,
+    publicId: conversationId,
+    ownerAccountId: "local-development",
+    creatorId: "local-development",
+    agentId: "local-agent",
+    productId: "local-product",
+    corpusDigest: `sha256:${"0".repeat(64)}`
+  });
 
   const firstMessages: OutboundMessage[] = [];
   const firstSocket = await openRuntimeSocket(base, "same-installation", firstMessages);

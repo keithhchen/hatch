@@ -10,11 +10,12 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { WebSocket } from "ws";
 import type { AgentRuntime } from "./agentRuntime.js";
+import { InMemoryConversationRepository } from "./conversationRepository.js";
 import { AgentCorpusResolver } from "./agentCorpus.js";
 import { HttpCommerceEventSink } from "./commerceHttpSink.js";
 import { DeliveryAccountingOutbox } from "./deliveryOutbox.js";
 import { RegistryEntitlementResolver } from "./entitlements.js";
-import { createRuntimeServer, type RuntimeServer } from "./index.js";
+import { createRuntimeServer, durableConversationId, type RuntimeServer } from "./index.js";
 import { PROTOCOL_VERSION, type OutboundMessage } from "./protocol.js";
 import {
   activateCurrentCorpus,
@@ -456,6 +457,19 @@ async function startRuntime(input: {
   createRuntime: () => AgentRuntime;
   reconcileIntervalMs: number;
 }): Promise<{ runtime: RuntimeServer; url: string }> {
+  const conversationRepository = new InMemoryConversationRepository();
+  for (const runId of ["run-success", "run-repeat", "run-failed", "run-cancelled", "run-after-restart", "run-after-refund"]) {
+    const publicId = `conversation-${runId}`;
+    await conversationRepository.createConversation({
+      id: durableConversationId({ creatorId: CREATOR_ID, userId: BUYER_ID, agentId: AGENT_ID, productId: PRODUCT_ID }, publicId),
+      publicId,
+      ownerAccountId: BUYER_ID,
+      creatorId: CREATOR_ID,
+      agentId: AGENT_ID,
+      productId: PRODUCT_ID,
+      corpusDigest: `sha256:${"0".repeat(64)}`
+    });
+  }
   const runtime = createRuntimeServer({
     createRuntime: input.createRuntime,
     conversationStore: new RuntimeStore(input.dataRoot),
@@ -466,7 +480,8 @@ async function startRuntime(input: {
     agentCorpusResolver: new AgentCorpusResolver(input.corpusRoot),
     commerceEventSink: new HttpCommerceEventSink(input.dashboardUrl, COMMERCE_SERVICE_TOKEN),
     deliveryAccountingOutbox: new DeliveryAccountingOutbox(input.outboxPath),
-    deliveryReconcileIntervalMs: input.reconcileIntervalMs
+    deliveryReconcileIntervalMs: input.reconcileIntervalMs,
+    conversationRepository
   });
   await listen(runtime.server);
   const url = serverUrl(runtime.server);

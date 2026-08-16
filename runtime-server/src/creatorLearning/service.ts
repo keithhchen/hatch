@@ -279,7 +279,7 @@ export class CreatorFactoryService {
     return this.sourceLibrary.getSnapshot(creatorId, snapshotId);
   }
 
-  async createProduct(creatorId: string, input: { name: string; promise?: string; brief?: string }): Promise<CreatorProductRecord> {
+  async createProduct(creatorId: string, input: { name: string; promise?: string; brief?: string; idempotencyKey?: string }): Promise<CreatorProductRecord> {
     const repository = this.productRepository();
     const name = validateProductText(input.name, "product.name", 240);
     const promise = validateProductText(input.promise ?? input.brief ?? "", "product.promise");
@@ -288,7 +288,8 @@ export class CreatorFactoryService {
       creatorId: requireText(creatorId, "creatorId"),
       name,
       promise,
-      briefSpec: draftBriefSpecForProduct(name, promise)
+      briefSpec: draftBriefSpecForProduct(name, promise),
+      idempotencyKey: input.idempotencyKey
     });
     if (this.graphStore) {
       await this.graphStore.initialize();

@@ -28,6 +28,7 @@ export type CreateCreatorProductInput = {
   name: string;
   promise: string;
   briefSpec: BriefSpec;
+  idempotencyKey?: string;
 };
 
 export type CreatorProductRepository = {

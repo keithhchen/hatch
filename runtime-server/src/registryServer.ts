@@ -460,7 +460,11 @@ async function route(
     const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
     const name = requiredProductText(body.name ?? body.product_name, "name", 240);
     const promise = requiredProductText(body.promise ?? body.product_promise ?? body.description ?? body.brief, "promise", 100_000);
-    const product = await context.factoryService.createProduct(account.id, { name, brief: promise });
+    const product = await context.factoryService.createProduct(account.id, {
+      name,
+      brief: promise,
+      idempotencyKey: request.headers["idempotency-key"]?.toString()
+    });
     sendJson(response, 201, {
       product: {
         product_id: publicProductId(product),

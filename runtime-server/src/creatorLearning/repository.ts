@@ -162,6 +162,7 @@ const DEFAULT_LEASE_MS = 60_000;
 export class InMemoryCreatorFactoryRepository implements CreatorFactoryRepository, CreatorProductRepository {
   private readonly runs = new Map<string, FactoryRunRecord>();
   private readonly products = new Map<string, CreatorProductRecord>();
+  private readonly productRequests = new Map<string, { productId: string; inputDigest: string }>();
   private readonly idempotency = new Map<string, { runId: string; inputDigest: string }>();
   private readonly inputDigests = new Map<string, string>();
   private readonly answerSubmissions = new Map<string, Map<string, AnswerSubmissionReceipt>>();
@@ -176,11 +177,19 @@ export class InMemoryCreatorFactoryRepository implements CreatorFactoryRepositor
   async createProduct(input: CreateCreatorProductInput): Promise<CreatorProductRecord> {
     return this.write(async () => {
       const id = requireNonEmpty(input.id, "product.id");
+      const creatorId = requireNonEmpty(input.creatorId, "product.creatorId");
+      const inputDigest = productInputDigest(input);
+      const requestKey = input.idempotencyKey?.trim() ? `${creatorId}\u0000${input.idempotencyKey.trim()}` : undefined;
+      const replay = requestKey ? this.productRequests.get(requestKey) : undefined;
+      if (replay) {
+        assertIdempotentDigest(replay.inputDigest, inputDigest, input.idempotencyKey!);
+        return cloneJson(this.products.get(replay.productId)!);
+      }
       if (this.products.has(id)) throw new CreatorFactoryRepositoryError("run_id_conflict", `Product ${id} already exists`);
       const now = new Date().toISOString();
       const product: CreatorProductRecord = {
         id,
-        creatorId: requireNonEmpty(input.creatorId, "product.creatorId"),
+        creatorId,
         name: validateProductText(input.name, "product.name", 240),
         promise: validateProductText(input.promise, "product.promise"),
         brief: validateProductText(input.promise, "product.promise"),
@@ -190,6 +199,7 @@ export class InMemoryCreatorFactoryRepository implements CreatorFactoryRepositor
         updatedAt: now
       };
       this.products.set(id, product);
+      if (requestKey) this.productRequests.set(requestKey, { productId: id, inputDigest });
       return cloneJson(product);
     });
   }
@@ -526,6 +536,8 @@ CREATE TABLE IF NOT EXISTS hatch_creator_products (
   -- Read-only migration column for databases created before Product-only.
   brief TEXT,
   brief_spec JSONB,
+  idempotency_key TEXT,
+  input_digest TEXT,
   status TEXT NOT NULL CHECK (status IN ('active', 'deleted')) DEFAULT 'active',
   run_id TEXT,
   latest_revision_id TEXT,
@@ -535,6 +547,10 @@ CREATE TABLE IF NOT EXISTS hatch_creator_products (
 );
 CREATE INDEX IF NOT EXISTS hatch_creator_products_creator_idx
   ON hatch_creator_products (creator_id, updated_at DESC);
+ALTER TABLE hatch_creator_products ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+ALTER TABLE hatch_creator_products ADD COLUMN IF NOT EXISTS input_digest TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS hatch_creator_products_idempotency_idx
+  ON hatch_creator_products (creator_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
 CREATE TABLE IF NOT EXISTS hatch_creator_factory_runs (
   id TEXT PRIMARY KEY,
   creator_id TEXT NOT NULL,
@@ -647,11 +663,22 @@ export class PostgresCreatorFactoryRepository implements CreatorFactoryRepositor
     const name = validateProductText(input.name, "product.name", 240);
     const promise = validateProductText(input.promise, "product.promise");
     const briefSpec = normalizeBriefSpec(input.briefSpec);
+    const idempotencyKey = input.idempotencyKey?.trim() || null;
+    const inputDigest = productInputDigest(input);
+    if (idempotencyKey) {
+      const replay = await this.pool.query<ProductRow>(`
+        SELECT * FROM hatch_creator_products WHERE creator_id = $1 AND idempotency_key = $2
+      `, [creatorId, idempotencyKey]);
+      if (replay.rows[0]) {
+        assertIdempotentDigest(replay.rows[0].input_digest ?? "", inputDigest, idempotencyKey);
+        return productFromRow(replay.rows[0]);
+      }
+    }
     const result = await this.pool.query<ProductRow>(`
-      INSERT INTO hatch_creator_products (id, creator_id, name, promise, brief_spec)
-      VALUES ($1, $2, $3, $4, $5::jsonb)
+      INSERT INTO hatch_creator_products (id, creator_id, name, promise, brief_spec, idempotency_key, input_digest)
+      VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
       RETURNING *
-    `, [id, creatorId, name, promise, JSON.stringify(briefSpec)]);
+    `, [id, creatorId, name, promise, JSON.stringify(briefSpec), idempotencyKey, inputDigest]);
     return productFromRow(requireRow(result.rows[0], "Product insert returned no row"));
   }
 
@@ -1107,6 +1134,14 @@ export class PostgresCreatorFactoryRepository implements CreatorFactoryRepositor
     `, [creatorId, idempotencyKey]);
     return result.rows[0];
   }
+}
+
+function productInputDigest(input: CreateCreatorProductInput): string {
+  return createHash("sha256").update(JSON.stringify({
+    name: validateProductText(input.name, "product.name", 240),
+    promise: validateProductText(input.promise, "product.promise"),
+    briefSpec: normalizeBriefSpec(input.briefSpec)
+  })).digest("hex");
 }
 
 type FactoryRunRow = QueryResultRow & {

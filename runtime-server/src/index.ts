@@ -1206,7 +1206,7 @@ async function handleConversationHttpRequest(
       const briefSnapshot = binding.briefSpec
         ? createBriefSnapshot(binding.briefSpec, body.brief_answers)
         : undefined;
-      if (binding.explicit && !briefSnapshot) {
+      if (binding.agentCorpus && !briefSnapshot) {
         throw new ConversationHttpError(409, "brief_required", "A Brief is required before starting a new task.");
       }
       const publicId = `conv_${randomUUID().replaceAll("-", "")}`;
@@ -2298,13 +2298,20 @@ async function handleRuntimeSocket(
           let durableRun: { run: ConversationRunRecord; created: boolean };
           try {
             await repositoryReady;
-            const conversation = await conversationRepository.getConversation(storageConversationId);
+            let conversation = await conversationRepository.getConversation(storageConversationId);
+            if (!conversation && !binding.agentCorpus) {
+              conversation = (await conversationRepository.createConversation({
+                ...conversationBinding(binding),
+                id: storageConversationId,
+                publicId: message.conversation_id
+              })).conversation;
+            }
             if (!conversation) {
               const error = new ConversationRepositoryError("conversation_not_found", `Conversation ${message.conversation_id} was not found`);
               throw error;
             }
             assertConversationBinding(conversation, conversationBinding(binding));
-            if (message.task_start && !conversation.briefSnapshot) {
+            if (message.task_start && binding.agentCorpus && !conversation.briefSnapshot) {
               const error = new Error("conversation_brief_required");
               (error as Error & { code?: string }).code = "conversation_brief_required";
               throw error;
