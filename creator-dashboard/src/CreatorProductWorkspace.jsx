@@ -11,6 +11,7 @@ import {
   startFactoryRunFromSources,
   submitFactoryAnswers,
   submitFactoryReview,
+  retryFactoryRun,
   updateProductPromise,
   uploadProductFile
 } from "./creatorFactory.js";
@@ -21,6 +22,11 @@ import {
   productFileState,
   shouldPollProductFiles
 } from "./creatorProductFilesUi.js";
+import {
+  runAttentionAction,
+  runAttentionError,
+  runNeedsAttention
+} from "./creatorRunAttentionUi.js";
 import "./creatorProductWorkspace.css";
 
 const TAB_KEYS = ["files", "about-you", "review", "brief", "complete"];
@@ -171,6 +177,22 @@ export function CreatorProductWorkspace({ token, request, productId, runId = "",
     finally { setState((current) => ({ ...current, busy: "" })); }
   }
 
+  async function retryRun() {
+    if (!run?.retryable || state.busy) return;
+    setState((current) => ({ ...current, busy: "retry-run", error: "", notice: "" }));
+    try {
+      const nextRun = await retryFactoryRun(token, run);
+      setRun(nextRun);
+      setReview(null);
+      setRuns((current) => current.map((item) => item.id === nextRun.id ? nextRun : item));
+      setState((current) => ({ ...current, notice: t("retryStarted") }));
+    } catch (error) {
+      setState((current) => ({ ...current, error: error.message }));
+    } finally {
+      setState((current) => ({ ...current, busy: "" }));
+    }
+  }
+
   if (state.loading && !product) return <section className="cpv2-loading" aria-busy="true"><Skeleton lines={5} /></section>;
   if (state.error && !product) return <section className="cpv2-workspace-error"><InlineAlert tone="error">{state.error}</InlineAlert><Button type="button" onClick={() => void refresh()}>{t("retry")}</Button></section>;
 
@@ -182,8 +204,8 @@ export function CreatorProductWorkspace({ token, request, productId, runId = "",
     {state.error ? <InlineAlert tone="error">{state.error}</InlineAlert> : null}
     {state.notice ? <InlineAlert tone="success">{state.notice}</InlineAlert> : null}
     {selectedTab === "files" ? <FilesPanel t={t} product={product} documents={documents} busy={state.busy} onUpload={upload} onStart={startRun} hasRun={Boolean(run)} /> : null}
-    {selectedTab === "about-you" ? <AboutYouPanel t={t} token={token} run={run} busy={state.busy} onSaved={(nextRun) => { setRun(nextRun); if (nextRun.status === "queued") setState((current) => ({ ...current, notice: t("waiting") })); }} onFinish={(nextRun) => { setRun(nextRun); goTab("review"); }} onError={(error) => setState((current) => ({ ...current, error: error.message }))} /> : null}
-    {selectedTab === "review" ? <ReviewPanel t={t} token={token} profile={profile} run={run} review={review} busy={state.busy} setBusy={(busy) => setState((current) => ({ ...current, busy }))} onReviewChanged={setReview} onRerun={(nextRun) => { setRun(nextRun); setReview(null); setSelectedRunId(nextRun.id); goTab("about-you"); }} onComplete={() => goTab("brief")} onError={(error) => setState((current) => ({ ...current, error: error.message }))} /> : null}
+    {selectedTab === "about-you" ? <AboutYouPanel t={t} token={token} run={run} busy={state.busy} onRetry={retryRun} onFiles={() => goTab("files")} onSaved={(nextRun) => { setRun(nextRun); if (nextRun.status === "queued") setState((current) => ({ ...current, notice: t("waiting") })); }} onFinish={(nextRun) => { setRun(nextRun); goTab("review"); }} onError={(error) => setState((current) => ({ ...current, error: error.message }))} /> : null}
+    {selectedTab === "review" ? <ReviewPanel t={t} token={token} profile={profile} run={run} review={review} busy={state.busy} setBusy={(busy) => setState((current) => ({ ...current, busy }))} onRetry={retryRun} onFiles={() => goTab("files")} onReviewChanged={setReview} onRerun={(nextRun) => { setRun(nextRun); setReview(null); setSelectedRunId(nextRun.id); goTab("about-you"); }} onComplete={() => goTab("brief")} onError={(error) => setState((current) => ({ ...current, error: error.message }))} /> : null}
     {selectedTab === "brief" ? <BriefPanel t={t} token={token} product={product} briefSpec={briefSpec} busy={state.busy} onSaved={(nextProduct) => { const saved = nextProduct?.product ?? nextProduct; setProduct((current) => ({ ...current, ...saved })); setBriefSpec(saved?.brief_spec ?? null); setState((current) => ({ ...current, notice: t("briefSaved") })); goTab("complete"); }} onError={(error) => setState((current) => ({ ...current, error: error.message }))} /> : null}
     {selectedTab === "complete" ? <CompletePanel t={t} product={product} briefSpec={briefSpec} run={run} review={review} busy={state.busy} setBusy={(busy) => setState((current) => ({ ...current, busy }))} onRerun={(nextRun) => { setRun(nextRun); setReview(null); setSelectedRunId(nextRun.id); goTab("about-you"); }} onPublished={() => void refresh()} onReview={() => goTab("review")} onBrief={() => goTab("brief")} onFiles={() => goTab("files")} request={request} token={token} productId={productId} /> : null}
   </section>;
@@ -216,7 +238,7 @@ function ProductPromiseForm({ t, token, product, value, onChange, onSaved, onErr
   return <form className="cpv2-product-promise" onSubmit={save}><FormField label={t("whatProductDelivers")}><Textarea value={value} onChange={(event) => onChange(event.target.value)} /></FormField><Button type="submit" loading={busy} disabled={!value.trim() || value.trim() === String(product.promise ?? product.description ?? "").trim()}>{t("saveProductPromise")}</Button></form>;
 }
 
-function AboutYouPanel({ t, token, run, busy, onSaved, onFinish, onError }) {
+function AboutYouPanel({ t, token, run, busy, onRetry, onFiles, onSaved, onFinish, onError }) {
   const questions = run?.pending_questions ?? [];
   const [index, setIndex] = useState(0);
   const [answers, setAnswers] = useState({});
@@ -246,7 +268,7 @@ function AboutYouPanel({ t, token, run, busy, onSaved, onFinish, onError }) {
   }
 
   if (!run) return <section className="cpv2-workspace-panel"><h2>{t("aboutYou")}</h2><p>{t("noRun")}</p></section>;
-  if (run.status === "needs_attention") return <section className="cpv2-workspace-panel"><h2>{t("aboutYou")}</h2><p>{run.last_error}</p></section>;
+  if (runNeedsAttention(run)) return <RunAttentionPanel t={t} run={run} busy={busy} onRetry={onRetry} onFiles={onFiles} />;
   if (!questions.length) return <section className="cpv2-workspace-panel"><h2>{t("aboutYou")}</h2><p>{["queued", "running"].includes(run.status) ? t("waiting") : t("noQuestions")}</p></section>;
   const question = questions[index];
   const answer = answers[question.id] ?? "";
@@ -343,12 +365,13 @@ function nextBriefFieldId(fields) {
   return `question-${index}`;
 }
 
-function ReviewPanel({ t, token, profile, run, review, busy, setBusy, onReviewChanged, onRerun, onComplete, onError }) {
+function ReviewPanel({ t, token, profile, run, review, busy, setBusy, onRetry, onFiles, onReviewChanged, onRerun, onComplete, onError }) {
   const [index, setIndex] = useState(0);
   const [draft, setDraft] = useState({});
   const cases = review?.cases ?? [];
   useEffect(() => setIndex((current) => Math.min(current, Math.max(cases.length - 1, 0))), [cases.length]);
-  if (!run || !review) return <section className="cpv2-workspace-panel"><h2>{t("review")}</h2><p>{run?.status === "needs_attention" ? run.last_error : t("waiting")}</p></section>;
+  if (runNeedsAttention(run)) return <RunAttentionPanel t={t} run={run} busy={busy} onRetry={onRetry} onFiles={onFiles} />;
+  if (!run || !review) return <section className="cpv2-workspace-panel"><h2>{t("review")}</h2><p>{t("waiting")}</p></section>;
   const item = cases[index];
   if (!item) return <section className="cpv2-workspace-panel"><h2>{t("review")}</h2><p>{t("noQuestions")}</p></section>;
   const currentDraft = draft[item.id] ?? {};
@@ -398,6 +421,19 @@ function ReviewPanel({ t, token, profile, run, review, busy, setBusy, onReviewCh
     </div>
     <CorpusPreview t={t} corpus={review.corpus} />
     <div className="cpv2-workspace-actions">{review.rerun_ready ? <Button type="button" loading={busy === "rerun"} onClick={() => void rerun()}>{t("generateAnotherVersion")}</Button> : review.release_ready ? <Button type="button" onClick={onComplete}>{t("complete")}</Button> : null}</div>
+  </section>;
+}
+
+function RunAttentionPanel({ t, run, busy, onRetry, onFiles }) {
+  const action = runAttentionAction(run);
+  const error = runAttentionError(run);
+  return <section className="cpv2-workspace-panel cpv2-attention-panel">
+    <StatusTag tone="error">{t("versionNeedsAttention")}</StatusTag>
+    <h2>{t("versionGenerationPaused")}</h2>
+    <p>{error ?? t("failureDetailsUnavailable")}</p>
+    <div className="cpv2-workspace-actions">
+      {action === "retry" ? <Button type="button" loading={busy === "retry-run"} disabled={Boolean(busy)} onClick={() => void onRetry()}>{t("retryFailedStage")}</Button> : <Button type="button" variant="secondary" disabled={Boolean(busy)} onClick={onFiles}>{t("addSourceFiles")}</Button>}
+    </div>
   </section>;
 }
 

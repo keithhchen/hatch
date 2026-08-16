@@ -82,6 +82,11 @@ const MESSAGES = {
     why: "Why?",
     evaluationUnavailable: "Evaluation unavailable",
     corpusUnavailable: "Corpus unavailable"
+    ,versionNeedsAttention: "Needs attention"
+    ,versionGenerationPaused: "This version could not be completed."
+    ,failureDetailsUnavailable: "Hatch did not return failure details for this version."
+    ,retryFailedStage: "Retry this step"
+    ,retryStarted: "Hatch is retrying the failed step."
     ,reviewStatus_accepted: "Used in this version"
     ,reviewStatus_corrected: "Correction saved"
     ,reviewStatus_rejected_question: "Removed from review"
@@ -256,6 +261,11 @@ const MESSAGES = {
     why: "为什么？",
     evaluationUnavailable: "评估不可用",
     corpusUnavailable: "Corpus 不可用"
+    ,versionNeedsAttention: "需要处理"
+    ,versionGenerationPaused: "这个版本未能完成。"
+    ,failureDetailsUnavailable: "Hatch 没有返回这个版本的失败详情。"
+    ,retryFailedStage: "重试这一步"
+    ,retryStarted: "Hatch 正在重试失败的步骤。"
     ,reviewStatus_accepted: "已纳入此版本"
     ,reviewStatus_corrected: "修正已保存"
     ,reviewStatus_rejected_question: "已从审核中移除"
@@ -430,6 +440,11 @@ const MESSAGES = {
     why: "理由",
     evaluationUnavailable: "評価を利用できません",
     corpusUnavailable: "Corpus を利用できません"
+    ,versionNeedsAttention: "対応が必要"
+    ,versionGenerationPaused: "このバージョンを完了できませんでした。"
+    ,failureDetailsUnavailable: "Hatch はこのバージョンの失敗詳細を返しませんでした。"
+    ,retryFailedStage: "このステップを再試行"
+    ,retryStarted: "Hatch が失敗したステップを再試行しています。"
     ,reviewStatus_accepted: "このバージョンに採用"
     ,reviewStatus_corrected: "修正を保存しました"
     ,reviewStatus_rejected_question: "レビューから削除"
