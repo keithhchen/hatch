@@ -29,6 +29,22 @@ test("Product Creator API owns files, snapshots, and idempotent runs", async (t)
   const unauthenticated = await fetch(`${base}/v1/creator/products`);
   assert.equal(unauthenticated.status, 401);
 
+  // Product-only cutover: the old global Source Library and Factory run entry
+  // points are no longer user concepts. Files and Versions must be addressed
+  // below one authenticated Product.
+  const legacySources = await fetch(`${base}/v1/creator/source-documents?product_id=ignored`, {
+    headers: { authorization: `Bearer ${creatorA}` }
+  });
+  assert.equal(legacySources.status, 404);
+  const legacySnapshots = await fetch(`${base}/v1/creator/source-snapshots`, {
+    headers: { authorization: `Bearer ${creatorA}` }
+  });
+  assert.equal(legacySnapshots.status, 404);
+  const globalRuns = await fetch(`${base}/v1/creator/factory-runs`, {
+    headers: { authorization: `Bearer ${creatorA}` }
+  });
+  assert.equal(globalRuns.status, 404);
+
   const createdResponse = await fetch(`${base}/v1/creator/products`, {
     method: "POST",
     headers: { authorization: `Bearer ${creatorA}`, "content-type": "application/json", "idempotency-key": "product-create-1" },

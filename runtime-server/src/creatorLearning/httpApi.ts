@@ -1,7 +1,6 @@
 import type { Account } from "../registryAuth.js";
 import { CreatorFactoryRepositoryError } from "./repository.js";
-import { CreatorSourceLibraryError, SOURCE_DOCUMENT_MAX_BYTES } from "./sourceLibrary.js";
-import { CreatorFactoryInputTooLargeError, type CreateFactoryRunRequest, type CreatorFactoryRunView, type CreatorFactoryService } from "./service.js";
+import { CreatorFactoryInputTooLargeError, type CreatorFactoryRunView, type CreatorFactoryService } from "./service.js";
 
 export type CreatorFactoryHttpRequest = {
   method: string;
@@ -21,10 +20,28 @@ export async function handleCreatorFactoryHttp(
   request: CreatorFactoryHttpRequest,
   service: CreatorFactoryService
 ): Promise<CreatorFactoryHttpResponse | undefined> {
+  // Product is the only user-facing authoring boundary. The former global
+  // Source Library routes are deliberately not aliases for Product Files:
+  // keeping them reachable would let callers create an unowned, generic file
+  // authority beside the Product-scoped store.
+  if (request.pathname.startsWith("/v1/creator/source-documents")
+    || request.pathname.startsWith("/v1/creator/source-snapshots")) {
+    return {
+      status: 404,
+      body: { detail: "Product-scoped Files and Snapshots must be addressed below /v1/creator/products/:product_id." }
+    };
+  }
+  // A run is a Product Version execution, not a user-owned global resource.
+  // Keep the existing child action transport (answers/review/retry) for the
+  // current workspace, but do not expose a global list/create entry point.
+  if (request.pathname === "/v1/creator/factory-runs") {
+    return {
+      status: 404,
+      body: { detail: "Factory Versions must be created and listed below /v1/creator/products/:product_id." }
+    };
+  }
   if (!request.pathname.startsWith("/v1/creator/factory-runs")
-    && !request.pathname.startsWith("/v1/creator/products")
-    && !request.pathname.startsWith("/v1/creator/source-documents")
-    && !request.pathname.startsWith("/v1/creator/source-snapshots")) return undefined;
+    && !request.pathname.startsWith("/v1/creator/products")) return undefined;
   try {
     if (request.pathname === "/v1/creator/products" && request.method === "GET") {
       return { status: 200, body: { products: (await service.listProducts(request.creator.id)).map(productView) } };
@@ -60,59 +77,6 @@ export async function handleCreatorFactoryHttp(
     if (productMatch && request.method === "DELETE") {
       return { status: 200, body: productView(await service.deleteProduct(request.creator.id, decodeURIComponent(productMatch[1]!))) };
     }
-    if (request.pathname === "/v1/creator/source-documents" && request.method === "GET") {
-      const productId = typeof request.query?.product_id === "string" ? request.query.product_id : undefined;
-      return { status: 200, body: { documents: (await service.listSourceDocuments(request.creator.id, productId)).map((document) => sourceDocumentView(document)) } };
-    }
-    if (request.pathname === "/v1/creator/source-documents" && request.method === "POST") {
-      const body = request.body ?? {};
-      const encoded = typeof body.content_base64 === "string" ? body.content_base64 : "";
-      if (!encoded) throw new Error("content_base64 is required for local uploads");
-      if (typeof body.product_id !== "string" || !body.product_id.trim()) {
-        throw new CreatorSourceLibraryError("invalid_source", "product_id is required for Source Library uploads");
-      }
-      const bytes = decodeBase64(encoded);
-      const document = await service.createSourceDocument(request.creator.id, {
-        displayName: String(body.display_name ?? body.file_name ?? ""),
-        productId: body.product_id,
-        mediaType: typeof body.media_type === "string" ? body.media_type : undefined,
-        bytes
-      });
-      return { status: 201, body: sourceDocumentView(document, true) };
-    }
-    const sourceDocumentMatch = request.pathname.match(/^\/v1\/creator\/source-documents\/([^/]+)$/);
-    if (sourceDocumentMatch && request.method === "GET") {
-      return { status: 200, body: sourceDocumentView(await service.getSourceDocument(request.creator.id, decodeURIComponent(sourceDocumentMatch[1]!)), true) };
-    }
-    if (request.pathname === "/v1/creator/source-snapshots" && request.method === "POST") {
-      const body = request.body ?? {};
-      const documentIds = Array.isArray(body.document_ids) ? body.document_ids.map((id) => String(id)) : [];
-      if (typeof body.product_id !== "string" || !body.product_id.trim()) {
-        throw new CreatorSourceLibraryError("invalid_snapshot", "product_id is required to lock a Source Snapshot");
-      }
-      const snapshot = await service.createSourceSnapshot(request.creator.id, {
-        documentIds,
-        productId: body.product_id
-      });
-      return { status: 201, body: sourceSnapshotView(snapshot) };
-    }
-    const sourceSnapshotMatch = request.pathname.match(/^\/v1\/creator\/source-snapshots\/([^/]+)$/);
-    if (sourceSnapshotMatch && request.method === "GET") {
-      return { status: 200, body: sourceSnapshotView(await service.getSourceSnapshot(request.creator.id, decodeURIComponent(sourceSnapshotMatch[1]!))) };
-    }
-    if (request.pathname === "/v1/creator/factory-runs" && request.method === "GET") {
-      return { status: 200, body: { runs: (await service.list(request.creator.id)).map(publicView) } };
-    }
-    if (request.pathname === "/v1/creator/factory-runs" && request.method === "POST") {
-      const body = request.body ?? {};
-      const result = await service.create(
-        { id: request.creator.id, name: request.creator.display_name },
-        createRequest(body),
-        request.headers["idempotency-key"] ?? ""
-      );
-      return { status: result.created ? 202 : 200, body: publicView(result.run) };
-    }
-
     const answerDraftMatch = request.pathname.match(/^\/v1\/creator\/factory-runs\/([^/]+)\/answer-draft$/);
     if (answerDraftMatch && (request.method === "PUT" || request.method === "PATCH")) {
       const body = request.body ?? {};
@@ -217,84 +181,6 @@ export async function handleCreatorFactoryHttp(
   }
 }
 
-function createRequest(body: Record<string, unknown>): CreateFactoryRunRequest {
-  const hasSources = Object.prototype.hasOwnProperty.call(body, "sources");
-  const sources = Array.isArray(body.sources) ? body.sources.map((item) => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("Each source must be an object");
-    const source = item as Record<string, unknown>;
-    return {
-      id: String(source.id ?? ""),
-      authority: String(source.authority ?? "") as NonNullable<CreateFactoryRunRequest["sources"]>[number]["authority"],
-      title: String(source.title ?? ""),
-      content: String(source.content ?? "")
-    };
-  }) : [];
-  const config = body.config && typeof body.config === "object" && !Array.isArray(body.config)
-    ? body.config as Record<string, unknown>
-    : undefined;
-  const product = body.product === undefined
-    ? undefined
-    : productRequest(requireObject(body.product, "product"));
-  const productId = typeof body.product_id === "string" ? body.product_id : undefined;
-  const tools = body.tools === undefined
-    ? undefined
-    : toolRequests(body.tools);
-  return {
-    ...(typeof body.product_id === "string" ? { productId: body.product_id } : {}),
-    ...(productId ? { agentId: productId } : {}),
-    ...(product === undefined && !productId ? {} : {
-      product: product ?? { id: productId }
-    }),
-    ...(tools === undefined ? {} : { tools }),
-    productName: String(body.product_name ?? ""),
-    productPromise: String(body.product_promise ?? ""),
-    ...(body.source_snapshot_id === undefined
-      ? (hasSources ? { sources } : {})
-      : { sourceSnapshotId: String(body.source_snapshot_id) }),
-    ...(body.source_document_ids === undefined ? {} : {
-      sourceDocumentIds: Array.isArray(body.source_document_ids) ? body.source_document_ids.map((id) => String(id)) : []
-    }),
-    ...(config ? { config: {
-      ...(numberField(config.development_questions) === undefined ? {} : { developmentQuestions: numberField(config.development_questions)! }),
-      ...(numberField(config.heldout_questions) === undefined ? {} : { heldoutQuestions: numberField(config.heldout_questions)! }),
-      ...(numberField(config.max_corpus_revisions) === undefined ? {} : { maxCorpusRevisions: numberField(config.max_corpus_revisions)! })
-    } } : {})
-  };
-}
-
-function sourceDocumentView(document: Awaited<ReturnType<CreatorFactoryService["getSourceDocument"]>>, includeProjection = false): Record<string, unknown> {
-  return {
-    id: document.id,
-    product_id: document.productId,
-    display_name: document.displayName,
-    media_type: document.mediaType,
-    projection: {
-      kind: document.projection.kind,
-      media_type: document.projection.mediaType,
-      content_ref: document.projection.contentRef,
-      sha256: document.projection.sha256,
-      bytes: document.projection.bytes,
-      ...(includeProjection && document.projectionContent !== undefined ? { content: document.projectionContent } : {}),
-      ...(includeProjection && document.projectionBase64 !== undefined ? { base64: document.projectionBase64 } : {})
-    },
-    created_at: document.createdAt,
-    updated_at: document.updatedAt
-  };
-}
-
-function sourceSnapshotView(snapshot: Awaited<ReturnType<CreatorFactoryService["getSourceSnapshot"]>>): Record<string, unknown> {
-  return {
-    id: snapshot.id,
-    product_id: snapshot.productId,
-    version: snapshot.version,
-    document_ids: snapshot.documentIds,
-    manifest_sha256: snapshot.manifestSha256,
-    locked_at: snapshot.lockedAt,
-    created_at: snapshot.createdAt,
-    documents: snapshot.documents.map((document) => sourceDocumentView(document))
-  };
-}
-
 function productView(product: Awaited<ReturnType<CreatorFactoryService["getProduct"]>>): Record<string, unknown> {
   return {
     id: product.id,
@@ -309,33 +195,6 @@ function productView(product: Awaited<ReturnType<CreatorFactoryService["getProdu
     updated_at: product.updatedAt,
     ...(product.deletedAt ? { deleted_at: product.deletedAt } : {})
   };
-}
-
-function decodeBase64(value: string): Buffer {
-  if (value.length > Math.ceil(SOURCE_DOCUMENT_MAX_BYTES * 4 / 3) + 1024 || !/^[A-Za-z0-9+/]*={0,2}$/.test(value) || value.length % 4 === 1) {
-    throw new Error("content_base64 is invalid or too large");
-  }
-  const bytes = Buffer.from(value, "base64");
-  if (bytes.length === 0 || bytes.length > SOURCE_DOCUMENT_MAX_BYTES) throw new Error("Uploaded source is empty or too large");
-  return bytes;
-}
-
-function productRequest(body: Record<string, unknown>): NonNullable<CreateFactoryRunRequest["product"]> {
-  // Preserve every supplied key so the strict service validator can reject
-  // unknown release metadata instead of silently dropping it at the HTTP seam.
-  return { ...body } as NonNullable<CreateFactoryRunRequest["product"]>;
-}
-
-function toolRequests(value: unknown): NonNullable<CreateFactoryRunRequest["tools"]> {
-  if (!Array.isArray(value)) throw new Error("tools must be an array");
-  return value.map((item, index) => ({
-    ...requireObject(item, `tools[${index}]`)
-  }) as NonNullable<CreateFactoryRunRequest["tools"]>[number]);
-}
-
-function requireObject(value: unknown, field: string): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${field} must be an object`);
-  return value as Record<string, unknown>;
 }
 
 function publicView(view: CreatorFactoryRunView): Record<string, unknown> {
@@ -453,12 +312,6 @@ function factoryHttpError(error: unknown): CreatorFactoryHttpResponse {
       : error.code === "creator_mismatch" ? 403
         : ["idempotency_conflict", "version_conflict", "invalid_status", "invalid_stage"].includes(error.code) ? 409
           : 422;
-    return { status, body: { detail: error.message, code: error.code } };
-  }
-  if (error instanceof CreatorSourceLibraryError) {
-    const status = error.code === "source_not_found" || error.code === "snapshot_not_found" ? 404
-      : error.code === "creator_mismatch" ? 403
-        : 422;
     return { status, body: { detail: error.message, code: error.code } };
   }
   return { status: 422, body: { detail: error instanceof Error ? error.message : String(error) } };

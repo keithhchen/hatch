@@ -76,6 +76,34 @@ test("Creator Factory HTTP answers require question_batch_id before service disp
   assert.match(String((response?.body as { detail?: unknown }).detail), /question_batch_id is required/);
 });
 
+test("Creator Factory HTTP blocks legacy Source Library and global run entry points", async () => {
+  const request = {
+    method: "GET",
+    headers: {},
+    creator: { id: "33333333-3333-4333-8333-333333333333", display_name: "Creator One" }
+  } as const;
+  const sourceResponse = await handleCreatorFactoryHttp({
+    ...request,
+    pathname: "/v1/creator/source-documents"
+  }, {} as CreatorFactoryService);
+  assert.equal(sourceResponse?.status, 404);
+  assert.match(String((sourceResponse?.body as { detail?: unknown }).detail), /Product-scoped Files/);
+
+  const snapshotResponse = await handleCreatorFactoryHttp({
+    ...request,
+    pathname: "/v1/creator/source-snapshots"
+  }, {} as CreatorFactoryService);
+  assert.equal(snapshotResponse?.status, 404);
+  assert.match(String((snapshotResponse?.body as { detail?: unknown }).detail), /Product-scoped Files/);
+
+  const runResponse = await handleCreatorFactoryHttp({
+    ...request,
+    pathname: "/v1/creator/factory-runs"
+  }, {} as CreatorFactoryService);
+  assert.equal(runResponse?.status, 404);
+  assert.match(String((runResponse?.body as { detail?: unknown }).detail), /Factory Versions/);
+});
+
 test("identical Questions across runs still reject cross-run answers before any write or LLM call", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-factory-answer-binding-"));
   t.after(() => rm(root, { recursive: true, force: true }));

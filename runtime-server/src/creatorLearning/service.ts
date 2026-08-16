@@ -3,7 +3,7 @@ import path from "node:path";
 import { FactoryFileStore } from "./fileStore.js";
 import { CreatorSourceLibrary, CreatorSourceLibraryError } from "./sourceLibrary.js";
 import type { ArtifactObjectStore } from "./objectStore.js";
-import type { ProductFileStore, ProductSnapshotView } from "./productFiles.js";
+import type { ProductFileStore, ProductFileView, ProductSnapshotView } from "./productFiles.js";
 import { newGraphEventId, type DistillationEvent, type DistillationGraphStore, type DistillationRelease } from "./distillationGraph.js";
 import { isCreatorProductRepository, validateProductText, type CreatorProductRecord } from "./products.js";
 import { parseQuestions } from "./markdown.js";
@@ -260,31 +260,52 @@ export class CreatorFactoryService {
   async createSourceDocument(creatorId: string, input: Parameters<CreatorSourceLibrary["createFromUpload"]>[1]) {
     const productId = requireText(input.productId, "productId");
     await this.requireActiveProduct(creatorId, productId);
-    await this.sourceLibrary.initialize();
-    return this.sourceLibrary.createFromUpload(creatorId, input);
+    if (!this.productFileStore) {
+      throw new CreatorFactoryRepositoryError("invalid_status", "Product File storage is unavailable");
+    }
+    return this.productFileStore.createFromUpload({
+      creatorId,
+      productId,
+      displayName: input.displayName,
+      mediaType: input.mediaType,
+      bytes: input.bytes
+    });
   }
 
   async listSourceDocuments(creatorId: string, productId?: string) {
-    if (productId) await this.requireActiveProduct(creatorId, productId);
-    await this.sourceLibrary.initialize();
-    return this.sourceLibrary.listDocuments(creatorId, productId);
+    const normalizedProductId = requireText(productId, "productId");
+    await this.requireActiveProduct(creatorId, normalizedProductId);
+    if (!this.productFileStore) {
+      throw new CreatorFactoryRepositoryError("invalid_status", "Product File storage is unavailable");
+    }
+    return this.productFileStore.listFiles(creatorId, normalizedProductId);
   }
 
-  async getSourceDocument(creatorId: string, documentId: string) {
-    await this.sourceLibrary.initialize();
-    return this.sourceLibrary.getDocument(creatorId, documentId);
+  async getSourceDocument(creatorId: string, documentId: string, productId?: string): Promise<ProductFileView> {
+    const normalizedProductId = requireText(productId, "productId");
+    await this.requireActiveProduct(creatorId, normalizedProductId);
+    if (!this.productFileStore) {
+      throw new CreatorFactoryRepositoryError("invalid_status", "Product File storage is unavailable");
+    }
+    return this.productFileStore.getFile(creatorId, normalizedProductId, documentId);
   }
 
-  async createSourceSnapshot(creatorId: string, input: { documentIds: string[]; productId?: string }) {
+  async createSourceSnapshot(creatorId: string, input: { documentIds: string[]; productId?: string }): Promise<ProductSnapshotView> {
     const productId = requireText(input.productId, "productId");
     await this.requireActiveProduct(creatorId, productId);
-    await this.sourceLibrary.initialize();
-    return this.sourceLibrary.createSnapshot(creatorId, input);
+    if (!this.productFileStore) {
+      throw new CreatorFactoryRepositoryError("invalid_status", "Product File storage is unavailable");
+    }
+    return this.productFileStore.createSnapshot(creatorId, productId, input.documentIds);
   }
 
-  async getSourceSnapshot(creatorId: string, snapshotId: string) {
-    await this.sourceLibrary.initialize();
-    return this.sourceLibrary.getSnapshot(creatorId, snapshotId);
+  async getSourceSnapshot(creatorId: string, snapshotId: string, productId?: string): Promise<ProductSnapshotView> {
+    const normalizedProductId = requireText(productId, "productId");
+    await this.requireActiveProduct(creatorId, normalizedProductId);
+    if (!this.productFileStore) {
+      throw new CreatorFactoryRepositoryError("invalid_status", "Product File storage is unavailable");
+    }
+    return this.productFileStore.getSnapshot(creatorId, normalizedProductId, snapshotId);
   }
 
   async createProduct(creatorId: string, input: { name: string; promise?: string; brief?: string; idempotencyKey?: string }): Promise<CreatorProductRecord> {
@@ -384,6 +405,9 @@ export class CreatorFactoryService {
     idempotencyKey: string
   ): Promise<{ run: CreatorFactoryRunView; created: boolean }> {
     const normalized = validateCreateRequest(request);
+    // Validate the run command before creating any Product Snapshot. This
+    // keeps an invalid request from leaving an unreferenced immutable object.
+    const requestIdempotencyKey = requireText(idempotencyKey, "Idempotency-Key");
     const existingRun = normalized.runId
       ? await this.repository.getForCreator(creator.id, normalized.runId)
       : undefined;
@@ -408,36 +432,31 @@ export class CreatorFactoryService {
         }
       : normalized.product;
     const autoSnapshot = !normalized.sourceSnapshotId && normalized.sourceDocumentIds?.length
-      ? await this.sourceLibrary.createSnapshot(creator.id, { documentIds: normalized.sourceDocumentIds, productId: normalized.productId })
+      ? product
+        ? this.productFileStore
+          ? await this.productFileStore.createSnapshot(creator.id, product.id, normalized.sourceDocumentIds, `${requestIdempotencyKey}:snapshot`)
+          : (() => { throw new CreatorFactoryRepositoryError("invalid_status", "Product File storage is unavailable"); })()
+        : undefined
       : undefined;
     const snapshotId = normalized.sourceSnapshotId ?? autoSnapshot?.id;
     // A Product revision is a graph revision, not an inline ad-hoc Factory run.
-    // Enforce the immutable Source Snapshot boundary before creating the
+    // Enforce the immutable Product Snapshot boundary before creating the
     // repository record so an invalid request cannot leave an orphan run.
     if (product && !snapshotId) {
-      throw new CreatorFactoryRepositoryError("invalid_status", "A Product revision must be pinned to a Source Snapshot");
+      throw new CreatorFactoryRepositoryError("invalid_status", "A Product revision must be pinned to a Product Snapshot");
     }
-    let productSnapshot: ProductSnapshotView | undefined;
-    if (product && snapshotId && this.productFileStore && productIdentity) {
-      try {
-        productSnapshot = await this.productFileStore.getSnapshot(creator.id, productIdentity, snapshotId);
-      } catch (error) {
-        // A legacy Source Snapshot may still be referenced by an historical
-        // run. Only fall back to that read-time migration boundary; new
-        // Product routes always create Product Snapshots.
-        if (!(error instanceof Error) || !["product_snapshot_not_found", "product_mismatch"].includes((error as { code?: string }).code ?? "")) {
-          throw error;
-        }
+    if (product && snapshotId) {
+      if (!this.productFileStore || !productIdentity) {
+        throw new CreatorFactoryRepositoryError("invalid_status", "Product File storage is unavailable");
       }
-    }
-    if (product && snapshotId && !productSnapshot) {
-      const snapshot = await this.sourceLibrary.getSnapshot(creator.id, snapshotId);
-      if (snapshot.productId !== product.id) {
-        throw new CreatorFactoryRepositoryError("invalid_status", "Source Snapshot belongs to another Product");
-      }
+      // Product revisions may consume only an immutable Product Snapshot.
+      // A missing/mismatched Product Snapshot is a hard error; resolving a
+      // same-named legacy Source Snapshot would create a second authority and
+      // break Product -> Snapshot -> Revision lineage.
+      await this.productFileStore.getSnapshot(creator.id, productIdentity, snapshotId);
     }
     const sources = snapshotId
-      ? productSnapshot
+      ? product
         ? await this.productFileStore!.resolveSnapshotSources(creator.id, productIdentity!, snapshotId)
         : await this.sourceLibrary.resolveSnapshotSources(creator.id, snapshotId)
       : normalized.sources ?? [];
@@ -493,7 +512,7 @@ export class CreatorFactoryService {
     const result = await this.repository.create({
       id: runId,
       creatorId: creator.id,
-      idempotencyKey: requireText(idempotencyKey, "Idempotency-Key"),
+      idempotencyKey: requestIdempotencyKey,
       input
     });
     if (product) {

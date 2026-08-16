@@ -184,3 +184,33 @@ test("Product File and Snapshot idempotency keys replay the same immutable resou
     (error: unknown) => error instanceof ProductFilesError && error.code === "idempotency_conflict"
   );
 });
+
+test("Product Files and Snapshots survive a store re-open without losing Product binding", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-product-files-reopen-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const creatorId = "creator-reopen";
+  const productId = "product-reopen";
+  const firstStore = new ProductFileStore(new LocalArtifactObjectStore(root));
+  const file = await firstStore.createFromUpload({
+    creatorId,
+    productId,
+    displayName: "method.md",
+    bytes: Buffer.from("Choose one supported recommendation.", "utf8"),
+    idempotencyKey: "reopen-file"
+  });
+  const snapshot = await firstStore.createSnapshot(creatorId, productId, [file.id], "reopen-snapshot");
+
+  // A new ProductFileStore instance reads the same immutable object keys; no
+  // in-memory index or generic Source Library is allowed to be the authority.
+  const reopened = new ProductFileStore(new LocalArtifactObjectStore(root));
+  const files = await reopened.listFiles(creatorId, productId);
+  assert.equal(files.length, 1);
+  assert.equal(files[0]?.id, file.id);
+  const loaded = await reopened.getSnapshot(creatorId, productId, snapshot.id);
+  assert.equal(loaded.manifestSha256, snapshot.manifestSha256);
+  assert.deepEqual(loaded.fileIds, [file.id]);
+  await assert.rejects(
+    () => reopened.getSnapshot(creatorId, "another-product", snapshot.id),
+    (error: unknown) => error instanceof ProductFilesError && error.code === "product_snapshot_not_found"
+  );
+});

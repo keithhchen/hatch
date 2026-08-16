@@ -363,7 +363,7 @@ export type FactoryStartInput = {
   parentRevisionId?: string;
   productPromise: string;
   sources: FactorySource[];
-  /** Immutable Source Library snapshot resolved before the worker starts. */
+  /** Immutable Product Snapshot resolved before the worker starts. */
   sourceSnapshotId?: string;
   /** Frozen source-scope proof. Legacy inline-source callers omit this. */
   sourceManifest?: FactorySourceManifest;

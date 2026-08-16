@@ -6,6 +6,8 @@ import path from "node:path";
 import test from "node:test";
 import { CreatorFactory } from "./creatorLearning/engine.js";
 import { FactoryFileStore } from "./creatorLearning/fileStore.js";
+import { LocalArtifactObjectStore } from "./creatorLearning/objectStore.js";
+import { ProductFileStore } from "./creatorLearning/productFiles.js";
 import {
   CORPUS_ASSET_BEGIN_MARKER,
   CORPUS_ASSET_CONTENT_MARKER,
@@ -320,7 +322,7 @@ test("Creator Review is an immutable, idempotent projection over candidate cases
   t.after(() => rm(root, { recursive: true, force: true }));
   const repository = new InMemoryCreatorFactoryRepository();
   const graph = new InMemoryDistillationGraphStore();
-  const service = new CreatorFactoryService(repository, root, undefined, undefined, graph);
+  const service = productService(repository, root, graph);
   const creator = { id: "11111111-1111-4111-8111-111111111111", name: "Review Creator" };
   const product = await service.createProduct(creator.id, { name: "Reviewable method", promise: "Return one finished recommendation." });
   const document = await service.createSourceDocument(creator.id, {
@@ -419,7 +421,7 @@ test("held-out review confirmation promotes the sealed case without restarting C
   t.after(() => rm(root, { recursive: true, force: true }));
   const repository = new InMemoryCreatorFactoryRepository();
   const graph = new InMemoryDistillationGraphStore();
-  const service = new CreatorFactoryService(repository, root, undefined, undefined, graph);
+  const service = productService(repository, root, graph);
   const creator = { id: "11111111-1111-4111-8111-111111111111", name: "Blind Review Creator" };
   const product = await service.createProduct(creator.id, { name: "Blind review method", promise: "Return one finished recommendation." });
   const document = await service.createSourceDocument(creator.id, {
@@ -521,7 +523,7 @@ test("a Distillation Product keeps one Product identity across revisions", async
   t.after(() => rm(root, { recursive: true, force: true }));
   const repository = new InMemoryCreatorFactoryRepository();
   const graph = new InMemoryDistillationGraphStore();
-  const service = new CreatorFactoryService(repository, root, undefined, undefined, graph);
+  const service = productService(repository, root, graph);
   const creator = { id: "11111111-1111-4111-8111-111111111111", name: "Product Creator" };
   const product = await service.createProduct(creator.id, { name: "Stable product product", promise: "A single product identity across revisions." });
   assert.match(product.id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
@@ -572,7 +574,7 @@ test("a failed graph write does not poison the next Product revision parent", as
   t.after(() => rm(root, { recursive: true, force: true }));
   const repository = new InMemoryCreatorFactoryRepository();
   const graph = new InMemoryDistillationGraphStore();
-  const service = new CreatorFactoryService(repository, root, undefined, undefined, graph);
+  const service = productService(repository, root, graph);
   const creator = { id: "11111111-1111-4111-8111-111111111111", name: "Retry Creator" };
   const product = await service.createProduct(creator.id, { name: "Retryable product", promise: "A stable revision lineage." });
   const document = await service.createSourceDocument(creator.id, {
@@ -600,6 +602,82 @@ test("a failed graph write does not poison the next Product revision parent", as
   assert.equal(finalProduct.latestRevisionId, second.run.revisionId);
   assert.equal((await graph.derive(product.id)).currentRevisionId, second.run.revisionId);
 });
+
+test("Product run replay reuses the durable auto-created Snapshot", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-factory-product-snapshot-replay-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const repository = new InMemoryCreatorFactoryRepository();
+  const graph = new InMemoryDistillationGraphStore();
+  const service = productService(repository, root, graph);
+  const creator = { id: "11111111-1111-4111-8111-111111111111", name: "Snapshot Replay Creator" };
+  const product = await service.createProduct(creator.id, { name: "Snapshot replay product", promise: "Keep one Product lineage." });
+  const file = await service.createSourceDocument(creator.id, {
+    productId: product.id,
+    displayName: "method.md",
+    mediaType: "text/markdown",
+    bytes: Buffer.from("Use one durable Product Snapshot.\n", "utf8")
+  });
+  const request = createRequest({
+    runId: "factory_product_snapshot_replay",
+    productId: product.id,
+    productName: product.name,
+    productPromise: product.promise,
+    sources: undefined,
+    sourceDocumentIds: [file.id]
+  });
+  const first = await service.create(creator, request, "product-snapshot-replay");
+  const replay = await service.create(creator, request, "product-snapshot-replay");
+  assert.equal(replay.created, false);
+  assert.equal(replay.run.id, first.run.id);
+  assert.equal(replay.run.sourceSnapshotId, first.run.sourceSnapshotId);
+
+  const productFiles = new ProductFileStore(new LocalArtifactObjectStore(path.join(root, "product-files")));
+  const snapshots = await productFiles.listSnapshots(creator.id, product.id);
+  assert.equal(snapshots.length, 1, "retrying a run must not create a second Product Snapshot");
+  assert.equal(snapshots[0]?.id, first.run.sourceSnapshotId);
+});
+
+test("Product revision creation fails closed without Product File storage", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-factory-product-files-required-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const repository = new InMemoryCreatorFactoryRepository();
+  const graph = new InMemoryDistillationGraphStore();
+  const service = new CreatorFactoryService(repository, root, undefined, undefined, graph);
+  const creator = { id: "11111111-1111-4111-8111-111111111111", name: "Product Creator" };
+  const product = await service.createProduct(creator.id, { name: "Storage-bound product", promise: "A durable Product revision." });
+
+  await assert.rejects(
+    () => service.create(creator, createRequest({
+      productId: product.id,
+      productName: product.name,
+      productPromise: product.promise,
+      sources: undefined,
+      sourceSnapshotId: "legacy-source-snapshot"
+    }), "product-files-required"),
+    (error: unknown) => error instanceof CreatorFactoryRepositoryError
+      && error.code === "invalid_status"
+      && /Product File storage is unavailable/.test(error.message)
+  );
+  assert.equal((await repository.listForCreator(creator.id)).length, 0, "an unavailable Product File authority must not leave an orphan run");
+});
+
+function productService(
+  repository: InMemoryCreatorFactoryRepository,
+  root: string,
+  graph: InMemoryDistillationGraphStore
+): CreatorFactoryService {
+  // Product tests exercise the same durable Product File authority used by
+  // Registry. The legacy Source Library is intentionally not a revision input.
+  const objectStore = new LocalArtifactObjectStore(path.join(root, "product-files"));
+  return new CreatorFactoryService(
+    repository,
+    root,
+    undefined,
+    objectStore,
+    graph,
+    new ProductFileStore(objectStore)
+  );
+}
 
 function createRequest(overrides: Partial<CreateFactoryRunRequest> = {}): CreateFactoryRunRequest {
   return {
