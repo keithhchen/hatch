@@ -123,7 +123,7 @@ ALTER TABLE hatch_creator_distillation_releases
 
 DO $$
 DECLARE
-  table_name TEXT;
+  graph_table_name TEXT;
   unresolved BIGINT;
   has_legacy_tasks BOOLEAN := to_regclass('hatch_creator_distillation_tasks') IS NOT NULL;
   has_task_product BOOLEAN := false;
@@ -140,9 +140,9 @@ BEGIN
   IF has_legacy_tasks THEN
     has_task_product := EXISTS (
       SELECT 1
-      FROM information_schema.columns
-      WHERE table_name = 'hatch_creator_distillation_tasks'
-        AND column_name = 'product_id'
+      FROM information_schema.columns AS c
+      WHERE c.table_name = 'hatch_creator_distillation_tasks'
+        AND c.column_name = 'product_id'
     );
   END IF;
 
@@ -175,7 +175,7 @@ BEGIN
 
   -- Child rows inherit the Product identity from their Run. The task lookup is
   -- only used for rows whose Run reference is absent or was not migrated.
-  FOREACH table_name IN ARRAY ARRAY[
+  FOREACH graph_table_name IN ARRAY ARRAY[
     'hatch_creator_distillation_artifacts',
     'hatch_creator_distillation_revisions',
     'hatch_creator_distillation_node_executions',
@@ -185,23 +185,23 @@ BEGIN
   ] LOOP
     IF EXISTS (
       SELECT 1
-      FROM information_schema.columns
-      WHERE information_schema.columns.table_name = table_name
-        AND information_schema.columns.column_name = 'task_id'
+      FROM information_schema.columns AS c
+      WHERE c.table_name = graph_table_name
+        AND c.column_name = 'task_id'
     ) THEN
       EXECUTE format(
         'UPDATE %I AS item SET product_id = COALESCE(NULLIF(item.product_id, ''''), (SELECT run.product_id FROM hatch_creator_distillation_runs AS run WHERE run.id = item.run_id), %s) WHERE item.product_id IS NULL OR item.product_id = ''''',
-        table_name,
+        graph_table_name,
         format(task_product_expr, 'item')
       );
     END IF;
 
     EXECUTE format(
       'SELECT count(*) FROM %I AS item LEFT JOIN hatch_creator_products AS product ON product.id = item.product_id WHERE item.product_id IS NULL OR item.product_id = '''' OR product.id IS NULL',
-      table_name
+      graph_table_name
     ) INTO unresolved;
     IF unresolved > 0 THEN
-      RAISE EXCEPTION 'Cannot migrate Creator graph: % unmapped rows remain in %; task_id must resolve to an existing Product', unresolved, table_name;
+      RAISE EXCEPTION 'Cannot migrate Creator graph: % unmapped rows remain in %; task_id must resolve to an existing Product', unresolved, graph_table_name;
     END IF;
   END LOOP;
 
