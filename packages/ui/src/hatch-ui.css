@@ -119,6 +119,17 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.hui-icon-button .hui-control-value {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  overflow: visible;
+  text-overflow: clip;
+}
+.hui-icon-button .hui-control-value > svg {
+  display: block;
+}
 .hui-control-trailing { margin-inline-start: auto; }
 .hui-button:focus-visible,
 .hui-input:focus-visible,

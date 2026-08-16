@@ -203,6 +203,8 @@ test("Theme Lab edits the same token knobs used by the shared CSS", () => {
   assert.match(sharedCss, /\.hui-control--raised\s*\{/);
   assert.match(sharedCss, /\.hui-control--raised\s*\{[^}]*display:\s*inline-flex;[^}]*justify-content:\s*flex-start;[^}]*transition:\s*color var\(--hui-motion-control\)/s);
   assert.match(sharedCss, /\.hui-control--raised\.hui-icon-button\s*\{\s*justify-content:\s*center;\s*\}/);
+  assert.match(sharedCss, /\.hui-icon-button \.hui-control-value\s*\{[\s\S]*?display:\s*inline-flex;[\s\S]*?flex:\s*0 0 auto;[\s\S]*?overflow:\s*visible;/);
+  assert.match(sharedCss, /\.hui-icon-button \.hui-control-value > svg\s*\{\s*display:\s*block;\s*\}/);
   assert.match(sharedCss, /\.hui-control--raised\s*\{[^}]*gap:\s*8px;/s);
   assert.match(sharedCss, /\.hui-select-trigger:not\(\.hui-control--raised\):hover/);
   assert.match(sharedCss, /\.hui-select-trigger:not\(\.hui-control--raised\):focus-visible/);

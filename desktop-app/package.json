@@ -1,6 +1,6 @@
 {
   "name": "hatch-desktop-app",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "private": true,
   "description": "Minimal Hatch Tauri desktop local runner UI",
   "type": "module",
