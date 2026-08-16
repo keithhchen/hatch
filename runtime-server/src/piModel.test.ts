@@ -239,7 +239,7 @@ test("active DeepSeek profile uses its own model, endpoint, and credential", asy
   const body = JSON.parse(String(calls[0]!.init.body)) as Record<string, unknown>;
   assert.equal(body.model, "deepseek-v4-flash");
   assert.equal(body.stream, true);
-  assert.equal(body.thinking, undefined);
+  assert.deepEqual(body.thinking, { type: "disabled" });
 });
 
 test("Kimi no-thinking profile sends the official disabled payload without temperature", async () => {

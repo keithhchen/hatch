@@ -63,6 +63,7 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     maxTokens: 65_536,
     reasoning: false,
     thinkingLevel: "minimal",
+    thinkingType: "disabled",
     normalizeEmptyToolCallContent: false
   }
 };
