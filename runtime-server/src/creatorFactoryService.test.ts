@@ -251,8 +251,23 @@ test("Creator Factory service exposes only owned questions and candidate metadat
     /missing=/
   );
 
-  const queued = await service.submitAnswers("11111111-1111-4111-8111-111111111111", created.run.id, {
+  const draft = await service.saveAnswerDraft("11111111-1111-4111-8111-111111111111", created.run.id, {
     expectedVersion: waiting.version,
+    answers: {
+      questionBatchId: waiting.questionBatchId!,
+      answers: waiting.pendingQuestions.map((question, index) => ({
+        questionId: question.id,
+        answer: index === 0 ? "A partial answer saved before the next question." : ""
+      }))
+    }
+  });
+  assert.deepEqual(draft.answerDrafts, [{
+    questionId: waiting.pendingQuestions[0]!.id,
+    answer: "A partial answer saved before the next question."
+  }]);
+
+  const queued = await service.submitAnswers("11111111-1111-4111-8111-111111111111", created.run.id, {
+    expectedVersion: draft.version,
     submissionId: "answer-submit-1",
     questionBatchId: waiting.questionBatchId!,
     answers: waiting.pendingQuestions.map((question, index) => ({
@@ -265,7 +280,7 @@ test("Creator Factory service exposes only owned questions and candidate metadat
   assert.equal(queued.status, "queued");
   assert.equal(queued.pendingQuestions.length, 0);
   const replayed = await service.submitAnswers("11111111-1111-4111-8111-111111111111", created.run.id, {
-    expectedVersion: waiting.version,
+    expectedVersion: draft.version,
     submissionId: "answer-submit-1",
     questionBatchId: waiting.questionBatchId!,
     answers: waiting.pendingQuestions.map((question, index) => ({

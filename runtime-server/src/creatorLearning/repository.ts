@@ -427,7 +427,7 @@ export class InMemoryCreatorFactoryRepository implements CreatorFactoryRepositor
       }
       const questionBatchId = requireNonEmpty(input.answers.questionBatchId ?? "", "question_batch_id");
       assertQuestionBatchMatch(run, questionBatchId);
-      const normalized = normalizeAnswers(input.answers, parsedNow(input.now));
+      const normalized = normalizeAnswers(input.answers, parsedNow(input.now), { allowSparse: true });
       run.answerDrafts = normalized;
       run.version += 1;
       run.updatedAt = iso(parsedNow(input.now));
@@ -1021,7 +1021,7 @@ export class PostgresCreatorFactoryRepository implements CreatorFactoryRepositor
   async saveAnswerDraft(input: SaveFactoryAnswerDraftInput): Promise<FactoryRunRecord> {
     await this.initialize();
     const now = parsedNow(input.now);
-    const drafts = normalizeAnswers(input.answers, now);
+    const drafts = normalizeAnswers(input.answers, now, { allowSparse: true });
     const batchId = requireNonEmpty(drafts.questionBatchId ?? "", "question_batch_id");
     const result = await this.pool.query<FactoryRunRow>(`
       WITH timing AS (
@@ -1299,15 +1299,25 @@ function normalizeCreateInput(input: CreateFactoryRunInput): CreateFactoryRunInp
   };
 }
 
-function normalizeAnswers(answers: PendingCreatorAnswers, now: Date): PendingCreatorAnswers {
+function normalizeAnswers(
+  answers: PendingCreatorAnswers,
+  now: Date,
+  options: { allowSparse?: boolean } = {}
+): PendingCreatorAnswers {
+  const allowSparse = options.allowSparse === true;
   const answerMarkdown = answers.answerMarkdown === undefined
     ? undefined
-    : requireNonEmpty(answers.answerMarkdown, "answerMarkdown");
-  const structuredAnswers = answers.answers?.map((item) => ({
-    questionId: requireNonEmpty(item.questionId, "answers.questionId"),
-    answer: requireNonEmpty(item.answer, `answer for ${item.questionId}`)
-  }));
-  if (!answerMarkdown && (!structuredAnswers || structuredAnswers.length === 0)) {
+    : allowSparse
+      ? (typeof answers.answerMarkdown === "string" && answers.answerMarkdown.trim() ? answers.answerMarkdown.trim() : undefined)
+      : requireNonEmpty(answers.answerMarkdown, "answerMarkdown");
+  const structuredAnswers = answers.answers?.map((item) => {
+    const questionId = requireNonEmpty(item.questionId, "answers.questionId");
+    if (typeof item.answer !== "string") throw new Error(`Answer for ${questionId} must be text`);
+    const answer = item.answer.trim();
+    if (!allowSparse && !answer) throw new Error(`answer for ${questionId} must not be empty`);
+    return { questionId, answer };
+  }).filter((item) => !allowSparse || item.answer.length > 0);
+  if (!allowSparse && !answerMarkdown && (!structuredAnswers || structuredAnswers.length === 0)) {
     throw new Error("Creator answer submission must contain answerMarkdown or structured answers");
   }
   if (structuredAnswers) {
