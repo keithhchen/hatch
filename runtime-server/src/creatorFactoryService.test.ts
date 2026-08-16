@@ -339,6 +339,8 @@ test("Creator Review is an immutable, idempotent projection over candidate cases
   assert.equal(projection.blind.sealed, true);
   assert.equal(projection.blind.total, 1);
   assert.equal(projection.cases.length, 2);
+  assert.equal(projection.unresolvedCount, projection.cases.length);
+  assert.equal(projection.releaseReady, false);
   const target = projection.cases[0]!;
   const accepted = await service.review(creator.id, created.run.id, {
     action: "accept",
@@ -348,6 +350,7 @@ test("Creator Review is an immutable, idempotent projection over candidate cases
     expectedVersion: projection.version
   }, "review-accept-1");
   assert.equal(accepted.review.cases.find((item) => item.id === target.id)?.status, "accepted");
+  assert.equal(accepted.review.unresolvedCount, projection.cases.length - 1);
   const replay = await service.review(creator.id, created.run.id, {
     action: "accept",
     caseId: target.id,

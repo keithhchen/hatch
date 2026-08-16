@@ -101,25 +101,19 @@ Web 页面自己的 layout CSS 也只能消费这些 semantic tokens；它可以
 
 | Token | Value | 用途 |
 | --- | ---: | --- |
-| `--hatch-type-micro` | 0.625rem | 仅键盘提示、密集计数等刻意压缩的元信息 |
-| `--hatch-type-caption` | 0.6875rem | 次要元信息、脚注、时间戳 |
-| `--hatch-type-label` | 0.75rem | label、pill、status、导航、表头、头像 initials |
-| `--hatch-type-control` | 0.8125rem | button、select、form control |
-| `--hatch-type-body` | 0.875rem | 普通 UI 正文 |
-| `--hatch-type-reading` | 0.9375rem | Desktop transcript/editorial reading |
-| `--hatch-type-emphasis` | 1rem | 强调正文 |
-| `--hatch-type-subheading` | 1.125rem | 内容小标题 |
-| `--hatch-type-subtitle` | 1.25rem | 次级标题 |
+| `--hatch-type-meta` | 0.75rem | 键盘提示、状态、次要元信息、脚注、时间戳 |
+| `--hatch-type-ui` | 0.875rem | label、pill、导航、表头、button、select、form control |
+| `--hatch-type-body` | 1rem | 普通 UI 正文、transcript、reading、强调正文 |
+| `--hatch-type-subheading` | 1.25rem | 内容小标题、次级标题 |
 | `--hatch-type-heading` | 1.5rem | 内容标题 |
 | `--hatch-type-title` | 1.75rem | 页面和组件标题 |
-| `--hatch-type-display-compact` | 2rem | 紧凑 display |
 | `--hatch-type-display` | 2.25rem | 主 display |
 | `--hatch-type-display-hero` | 4rem | 欢迎页/hero display 上限 |
-| `--hatch-type-code` | 0.8125rem | code 内容 |
+| `--hatch-type-code` | 0.875rem | code 内容 |
 
 `em` 只用于组件内部需要相对父级的局部关系；`line-height` 使用无单位数字；边框、icon 和窗口几何才使用 `px`。
 
-- Instrument Serif 只用于真正的 display title、欢迎语、内容标题和有意义的 editorial heading。
+- Instrument Serif 只用于真正的 display title、欢迎语、内容标题和有意义的 editorial heading；只有这些 branding title 使用 `--hatch-display-tracking`，UI sans 与 CJK fallback 保持 normal spacing。
 - UI 操作与正文使用 macOS system sans；Windows 使用对应 system sans fallback。
 - Pill、badge、status label 使用 Inter，字重与字面宽度由共享 token 控制。
 - Label 可以存在；不为了“品牌感”添加解释性 mini-heading。
@@ -128,7 +122,7 @@ Web 页面自己的 layout CSS 也只能消费这些 semantic tokens；它可以
 ### Shape、material 与 contrast
 
 - 所有圆角对称；取消单个角不同 radius 的造型。
-- Composer 的 workspace 与 permission control 使用 HUI 的同一个 `Control` component（分别保留真实 `button` / Radix Select 语义）；几何由它统一消费 `size="compact"` variant，以及 `packages/brand/tokens.css` 的 `--hatch-size-control-compact` 与 `--hatch-space-control-compact-inline`，不能因为一个是 Button、一个是 Select 就各自调出一套 geometry。
+- Composer 的 workspace 与 permission control 使用同一套 HUI appearance contract（`ControlContent` 与 control recipe），同时分别保留 `ButtonControl` 的真实 button 语义和 `SelectControl` 的 Radix Select 语义。几何由共享 appearance contract 消费 `size="compact"` 与 `packages/brand/tokens.css` 的 `--hatch-size-control-compact`、`--hatch-space-control-compact-inline`；页面层不能因为一个是 Button、一个是 Select 就各自调出一套 geometry。
 - 少做 card：Sidebar、Transcript、Inspector 主要通过 surface 明度、间距和分隔建立层级。
 - 不模仿收据、订单、书页或其他商业物件；只模拟吸光、遮挡、色温、柔和 seam 与层级。
 - Primary button 必须保持明确的 ink-level contrast，不用浅 terracotta 作为默认主操作。

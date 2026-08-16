@@ -21,7 +21,7 @@ import {
 } from "./creatorFactory.js";
 import "./creatorFactory.css";
 
-export function CreatorFactoryRuns({ token, initialRunId, onNavigateRun, onReviewCandidate, onOpenSources }) {
+export function CreatorFactoryRuns({ token, initialRunId, onNavigateRun, onReviewCandidate, onCreateTask }) {
   const [runs, setRuns] = useState([]);
   const [selected, setSelected] = useState(null);
   const [answerDraft, setAnswerDraft] = useState({
@@ -147,20 +147,20 @@ export function CreatorFactoryRuns({ token, initialRunId, onNavigateRun, onRevie
                 onNavigateRun?.(null);
               }}
             />
-          ) : <CreateFactoryRun onOpenSources={onOpenSources} />}
+          ) : <CreateFactoryRun onCreateTask={onCreateTask} />}
         </div>
       </div>
     </section>
   );
 }
 
-function CreateFactoryRun({ onOpenSources }) {
+function CreateFactoryRun({ onCreateTask }) {
   return (
     <div className="factory-create factory-source-redirect">
       <span className="cpv2-kicker">New distillation</span>
-      <h2>Start in Source Library</h2>
-      <p>Create a Task there, upload local files as many times as needed, then start a Factory revision from a locked Snapshot. Source files never belong in an inline run form.</p>
-      <Button type="button" onClick={onOpenSources}>Open Source Library</Button>
+      <h2>Create a Task first</h2>
+      <p>Each Task has its own files. Create the Task, upload its local files, then start a Factory revision from that Task.</p>
+      <Button type="button" onClick={onCreateTask}>Create a Task</Button>
     </div>
   );
 }

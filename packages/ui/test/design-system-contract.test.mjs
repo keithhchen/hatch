@@ -24,6 +24,7 @@ test("@hatch/ui owns the shared Button, Dialog, Select and CSS entrypoint", () =
   const index = read("packages/ui/src/index.js");
   const button = read("packages/ui/src/Button.jsx");
   const control = read("packages/ui/src/Control.jsx");
+  const controlAppearance = read("packages/ui/src/ControlAppearance.jsx");
   const navigation = read("packages/ui/src/Navigation.jsx");
   const overlays = read("packages/ui/src/Overlays.jsx");
 
@@ -36,11 +37,12 @@ test("@hatch/ui owns the shared Button, Dialog, Select and CSS entrypoint", () =
   assert.match(index, /export \* from "\.\/Overlays\.jsx"/);
   assert.match(button, /export function Button/);
   assert.match(button, /size === "compact" && "hui-control--compact"/);
-  assert.match(control, /export function Control/);
-  assert.match(control, /kind === "select"/);
-  assert.match(control, /size = "compact"/);
-  assert.match(control, /surface/);
-  assert.match(control, /hui-control--\$\{surface\}/);
+  assert.match(control, /export function ButtonControl/);
+  assert.match(control, /export function SelectControl/);
+  assert.doesNotMatch(control, /kind\s*===/);
+  assert.match(controlAppearance, /export function controlClassName/);
+  assert.match(controlAppearance, /export function ControlContent/);
+  assert.doesNotMatch(controlAppearance, /@radix|from "\.\/Button|from "\.\/Overlays/);
   assert.match(navigation, /export function NavigationItem/);
   assert.match(navigation, /trailing/);
   assert.match(overlays, /export const Dialog = DialogPrimitive\.Root/);
@@ -105,7 +107,7 @@ test("Web and Storybook consume the shared package and its canonical tokens", ()
   assert.doesNotMatch(desktopCss, /\.desktop-sidebar-heading \.desktop-sidebar-brand \.hatch-brand__wordmark/);
   assert.match(sharedCss, /\.hatch-brand__wordmark\s*\{[^}]*font-size:\s*var\(--hatch-type-title\);/s);
   assert.match(desktopStory, /title:\s*["']Hatch\/Desktop visual system["']/);
-  assert.match(desktopStory, /<Control kind="select"/);
+  assert.match(desktopStory, /<SelectControl/);
   assert.match(desktopStory, /atmosphereStrength/);
   assert.doesNotMatch(desktopCss, /\.welcome-brand \.hatch-brand__wordmark\s*\{[^}]*letter-spacing:\s*-\.035em/s);
   assert.doesNotMatch(desktopCss, /\.desktop-sidebar-heading \.desktop-sidebar-brand \.hatch-brand__wordmark\s*\{[^}]*letter-spacing:\s*-\.035em/s);
@@ -125,7 +127,6 @@ test("Theme Lab edits the same token knobs used by the shared CSS", () => {
     "primaryColor",
     "canvasColor",
     "radius",
-    "displayTracking",
     "displayLeading",
     "atmosphereStrength",
     "motion"
@@ -134,25 +135,24 @@ test("Theme Lab edits the same token knobs used by the shared CSS", () => {
   assert.match(story, /"--hatch-ui-primary": args\.primaryColor/);
   assert.match(story, /"--hatch-atmosphere-base": args\.canvasColor/);
   assert.match(story, /"--hatch-atmosphere-strength": args\.atmosphereStrength/);
-  assert.match(story, /"--hatch-display-tracking": `\$\{args\.displayTracking\}em`/);
   assert.match(story, /"--hatch-display-leading": args\.displayLeading/);
   assert.doesNotMatch(story, /"--hatch-atmosphere-canvas": args\.canvasColor/);
-  assert.match(story, /<Control kind="button"/);
-  assert.match(story, /<Control kind="select"/);
+  assert.match(story, /<ButtonControl/);
+  assert.match(story, /<SelectControl/);
 
   for (const token of [
     "--hatch-font-display",
     "--hatch-font-ui",
     "--hatch-font-pill",
-    "--hatch-type-micro",
-    "--hatch-type-caption",
-    "--hatch-type-label",
-    "--hatch-type-control",
+    "--hatch-type-meta",
+    "--hatch-type-ui",
     "--hatch-type-body",
-    "--hatch-type-reading",
-    "--hatch-type-emphasis",
+    "--hatch-type-subheading",
+    "--hatch-type-heading",
     "--hatch-type-title",
     "--hatch-type-display",
+    "--hatch-type-display-hero",
+    "--hatch-type-code",
     "--hatch-display-tracking",
     "--hatch-display-leading",
     "--hatch-radius-control",
@@ -173,10 +173,15 @@ test("Theme Lab edits the same token knobs used by the shared CSS", () => {
   ]) assert.match(tokens, new RegExp(token));
 
   assert.match(tokens, /--hatch-display-tracking:\s*-.06em/);
+  assert.doesNotMatch(sharedCss, /letter-spacing:\s*-/);
+  assert.match(tokens, /--hatch-weight-regular:\s*400/);
+  assert.match(tokens, /--hatch-weight-medium:\s*500/);
+  assert.match(tokens, /--hatch-weight-strong:\s*600/);
   assert.match(tokens, /--hatch-display-leading:\s*\.86/);
-  assert.match(tokens, /--hatch-type-label:\s*0\.75rem/);
-  assert.match(tokens, /--hatch-type-control:\s*0\.8125rem/);
-  assert.match(tokens, /--hatch-type-body:\s*0\.875rem/);
+  assert.match(tokens, /--hatch-type-meta:\s*0\.75rem/);
+  assert.match(tokens, /--hatch-type-ui:\s*0\.875rem/);
+  assert.match(tokens, /--hatch-type-body:\s*1rem/);
+  assert.match(tokens, /--hatch-type-subheading:\s*1\.25rem/);
   assert.match(tokens, /--hatch-ink:\s*#000000/);
   assert.match(tokens, /--hatch-text-secondary:\s*#000000/);
   assert.match(tokens, /--hatch-ui-ink:\s*#000000/);

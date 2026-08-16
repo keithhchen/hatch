@@ -2842,6 +2842,7 @@ function creatorProductView(agent, state, run) {
     : state?.approval ?? null;
   return {
     ...base,
+    ...(run?.task_id || base.task_id ? { task_id: run?.task_id ?? base.task_id } : {}),
     version: state?.version ?? 0,
     resource_version: state?.version ?? 0,
     status,

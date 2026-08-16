@@ -935,13 +935,15 @@ export class CreatorFactoryService {
         // A missing sealed report is an unavailable gate, never a false pass.
       }
     }
-    // A failed Eval remains unresolved until the Creator supplies a correction
-    // or rejects the question. A judge dispute is also blocking: it routes to
-    // calibration and must never make Release look ready by itself.
+    // Every known case needs an explicit Creator decision. A passing case is
+    // not silently accepted: the Creator must confirm it. A failed case needs
+    // a correction or question rejection, while a judge dispute is blocked
+    // until calibration resolves the evaluation. None of these may make
+    // Release look ready by themselves.
     const unresolvedCount = cases.filter((item) => (
       item.status === "needs_review"
       || item.status === "judge_disputed"
-    ) && (item.verdict === "FAIL" || item.status === "judge_disputed")).length;
+    )).length;
     return {
       runId: run.id,
       revisionId,

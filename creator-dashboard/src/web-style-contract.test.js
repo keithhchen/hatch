@@ -40,7 +40,7 @@ test("creator navigation uses a standard hamburger menu on narrow screens", () =
   assert.match(source, /className="cpv2-mobile-nav"/);
   assert.match(source, /<DropdownMenu[\s\S]*label="Creator navigation"/);
   assert.match(styles, /\.cpv2-mobile-nav\s*\{\s*display:\s*none;\s*\}/);
-  assert.match(styles, /@media\s*\(max-width:\s*720px\)[\s\S]*?\.cpv2-global-nav, \.cpv2-sidebar > nav:not\(\.cpv2-global-nav\)\s*\{\s*display:\s*none;\s*\}/s);
+  assert.match(styles, /@media\s*\(max-width:\s*720px\)[\s\S]*?\.cpv2-global-nav\s*\{\s*display:\s*none;\s*\}/s);
   assert.match(styles, /@media\s*\(max-width:\s*720px\)[\s\S]*?\.cpv2-mobile-nav\s*\{[\s\S]*?display:\s*block;/s);
   assert.match(styles, /\.cpv2-mobile-nav \.hui-icon-button\s*\{[\s\S]*?min-height:\s*40px;[\s\S]*?min-width:\s*40px;/s);
   assert.doesNotMatch(source, /Skip to content/);

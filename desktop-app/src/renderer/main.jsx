@@ -4,7 +4,7 @@ import "@hatch/ui/fonts";
 import "@hatch/ui/theme.css";
 import {
   Button,
-  Control,
+  ButtonControl,
   DropdownMenu,
   FormField,
   HatchBrand,
@@ -13,7 +13,8 @@ import {
   IconButton,
   Input,
   NavigationItem,
-  Select
+  Select,
+  SelectControl
 } from "@hatch/ui";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
@@ -240,7 +241,7 @@ function DesktopAuxiliaryWindow({ kind }) {
           <p className="desktop-auxiliary-lede">Creator agents, on your terms.</p>
           <p>Hatch keeps the desktop boundary native while React renders the conversation work surface.</p>
           <dl className="desktop-auxiliary-facts">
-            <div><dt>Version</dt><dd>0.1.6</dd></div>
+            <div><dt>Version</dt><dd>0.1.8</dd></div>
             <div><dt>Architecture</dt><dd>Tauri Hybrid</dd></div>
           </dl>
         </section>
@@ -2087,7 +2088,7 @@ function App() {
         entitlement_id: targetEntitlementId,
         ...(targetProductId ? { product_id: targetProductId } : {}),
         ...(targetCreatorId ? { creator_id: targetCreatorId } : {}),
-        client_version: "0.1.6",
+        client_version: "0.1.8",
         local_tools: [...PLATFORM_LOCAL_TOOLS],
       }));
     });
@@ -3652,17 +3653,21 @@ function DesktopSidebar({
         })}
       </nav>
       <div className="desktop-sidebar-footer">
-        <span className="avatar">{profile.initials}</span>
-        <span className="desktop-sidebar-account"><strong>{profile.name}</strong></span>
-        <DropdownMenu
-          label={t("account.menu")}
-          trigger={<IconButton className="profile-settings-button" label={t("settings.open")} size="small"><Settings aria-hidden="true" /></IconButton>}
-          items={[
-            { value: "settings", label: t("settings.title"), onSelect: () => onOpenSettings?.() },
-            { type: "separator" },
-            { value: "sign-out", label: t("auth.signOut"), destructive: true, onSelect: () => onSignOut?.() }
-          ]}
-        />
+        <div className="desktop-sidebar-footer__identity">
+          <span className="avatar">{profile.initials}</span>
+          <span className="desktop-sidebar-account"><strong>{profile.name}</strong></span>
+        </div>
+        <div className="profile-menu">
+          <DropdownMenu
+            label={t("account.menu")}
+            trigger={<IconButton className="profile-settings-button" label={t("settings.open")} size="small"><Settings aria-hidden="true" /></IconButton>}
+            items={[
+              { value: "settings", label: t("settings.title"), onSelect: () => onOpenSettings?.() },
+              { type: "separator" },
+              { value: "sign-out", label: t("auth.signOut"), destructive: true, onSelect: () => onSignOut?.() }
+            ]}
+          />
+        </div>
       </div>
     </div>
   );
@@ -3871,11 +3876,9 @@ function ComposerControls({ droppedFiles = [], workspace, workspaceGranted, perm
         {/* Native drag/drop still projects bounded file context into the
             composer. Keep the picker implementation available, but withhold
             its button until that UX is ready. */}
-        <Control
-          kind="button"
+        <ButtonControl
           aria-label={t("accessibility.chooseWorkspaceFolder")}
-          className="composer-control workspace-composer-control"
-          surface="raised"
+          className="composer-control"
           variant="secondary"
           leading={<WorkspaceIcon />}
           trailing={<ChevronDown className="hui-control-caret" aria-hidden="true" />}
@@ -3884,19 +3887,16 @@ function ComposerControls({ droppedFiles = [], workspace, workspaceGranted, perm
           onClick={onChooseWorkspace}
         >
           {workspaceGranted ? workspaceGrantLabel(workspace) : t("workspace.chooseWorkspace")}
-        </Control>
-        <div className="permission-composer-control" title={permissionMode === "allow-changes" ? t("permission.allowChangesDetail") : t("permission.askBeforeChangesDetail")}>
-          <Control
-            kind="select"
-            className="composer-control-select"
-            surface="raised"
-            aria-label={t("accessibility.workspacePermissions")}
-            leading={<ShieldIcon />}
-            value={permissionMode}
-            onValueChange={onPermissionChange}
-            options={PERMISSION_OPTIONS.map((mode) => ({ value: mode.value, label: permissionLabel(mode, t) }))}
-          />
-        </div>
+        </ButtonControl>
+        <SelectControl
+          className="composer-control"
+          title={permissionMode === "allow-changes" ? t("permission.allowChangesDetail") : t("permission.askBeforeChangesDetail")}
+          aria-label={t("accessibility.workspacePermissions")}
+          leading={<ShieldIcon />}
+          value={permissionMode}
+          onValueChange={onPermissionChange}
+          options={PERMISSION_OPTIONS.map((mode) => ({ value: mode.value, label: permissionLabel(mode, t) }))}
+        />
       </div>
     </div>
   );

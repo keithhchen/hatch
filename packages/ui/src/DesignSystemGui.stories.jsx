@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { AtmosphericPaper } from "./AtmosphericPaper.jsx";
 import { Button } from "./Button.jsx";
-import { Control } from "./Control.jsx";
+import { ButtonControl, SelectControl } from "./Control.jsx";
 import { StatusTag } from "./Feedback.jsx";
 import { Input } from "./Forms.jsx";
 import { HatchBrand } from "./HatchBrand.jsx";
@@ -33,7 +33,6 @@ function ThemeLabCanvas(args) {
     "--hatch-radius-menu": `${args.radius + 3}px`,
     "--hatch-radius-dialog": `${args.radius + 10}px`,
     "--hatch-radius-surface": `${args.radius + 10}px`,
-    "--hatch-display-tracking": `${args.displayTracking}em`,
     "--hatch-display-leading": args.displayLeading,
     "--hatch-atmosphere-warm-duration": `${30 * durationScale}s`,
     "--hatch-atmosphere-cool-duration": `${36 * durationScale}s`
@@ -59,8 +58,8 @@ function ThemeLabCanvas(args) {
           <Button variant="secondary" size={args.buttonSize}>Buyer view</Button>
         </div>
         <div className="hui-story-row">
-          <Control kind="button" variant="secondary">Workspace</Control>
-          <Control kind="select" value={status} onValueChange={setStatus} options={statusOptions} label="Permission preview" />
+          <ButtonControl variant="secondary">Workspace</ButtonControl>
+          <SelectControl value={status} onValueChange={setStatus} options={statusOptions} label="Permission preview" />
         </div>
         <div className="hui-token-lab__controls">
           <Input aria-label="Product name" defaultValue="A field guide to creative recovery" />
@@ -80,7 +79,6 @@ export const ThemeLab = {
     primaryColor: "#25221f",
     canvasColor: "#f3efe8",
     radius: 12,
-    displayTracking: -0.06,
     displayLeading: 0.86,
     atmosphereStrength: 0.72,
     motion: "normal"
@@ -93,7 +91,6 @@ export const ThemeLab = {
     primaryColor: { control: "color" },
     canvasColor: { control: "color" },
     radius: { control: { type: "range", min: 6, max: 24, step: 1 } },
-    displayTracking: { control: { type: "range", min: -0.08, max: 0, step: 0.005 } },
     displayLeading: { control: { type: "range", min: 0.78, max: 1.08, step: 0.01 } },
     atmosphereStrength: { control: { type: "range", min: 0, max: 1, step: 0.05 } },
     motion: { control: "inline-radio", options: ["normal", "slow", "paused"] }
