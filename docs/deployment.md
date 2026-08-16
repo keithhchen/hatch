@@ -26,6 +26,10 @@ or separate production Runtime exists. The server uses two Compose projects:
    CD creates `HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN` once when it is
    missing, stores it in the server-only `.env` with mode 600, and never
    prints it. Later deploys reuse the same value.
+   CD also creates `HATCH_OAUTH_STATE_KEY` once when it is missing, stores it
+   in the server-only `.env` with mode 600, and never prints it. This stable
+   key encrypts the Dashboard's OAuth-backed Registry session references;
+   rotating it invalidates existing OAuth records.
    Dashboard owns the entitlement ledger. Registry owns account identity and
    published Product/Corpus metadata; it does not keep a second ownership copy.
    Registry applies a hard request budget to the client IP and separate
