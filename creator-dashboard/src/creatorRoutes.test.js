@@ -9,7 +9,7 @@ test("Creator Factory run routes preserve the selected run across refresh", () =
   assert.deepEqual(parseCreatorRoute("/studio/products/product-a/factory/runs/factory%2Fencoded"), {
     kind: "factory", section: "products", productId: "product-a", runId: "factory/encoded"
   });
-  assert.equal(creatorRouteTitle(parseCreatorRoute("/studio/factory/runs/factory_123")), "Factory run");
+  assert.equal(creatorRouteTitle(parseCreatorRoute("/studio/factory/runs/factory_123")), "Version");
 });
 
 test("Product files are nested under one Product", () => {

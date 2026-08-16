@@ -65,3 +65,12 @@ test("legacy Portal surfaces do not reintroduce hardcoded English labels", async
     ">No matching orders<"
   ]) assert.doesNotMatch(source, new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), phrase);
 });
+
+test("Product navigation does not expose retired Factory or task language", async () => {
+  const portal = await readFile(new URL("./CreatorPortalV2.jsx", import.meta.url), "utf8");
+  const routes = await readFile(new URL("./creatorRoutes.js", import.meta.url), "utf8");
+  const messages = await readFile(new URL("./creatorI18n.js", import.meta.url), "utf8");
+  assert.doesNotMatch(portal, /\/products\/\$\{encodeURIComponent\(id\)\}\/factory/);
+  assert.doesNotMatch(routes, /return route\.runId \? "Factory run" : "Creator Factory"/);
+  assert.doesNotMatch(messages, /Define the task brief|Continue in Factory/);
+});

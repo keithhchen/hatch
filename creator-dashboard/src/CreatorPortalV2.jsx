@@ -673,7 +673,7 @@ function localizedProductStatus(status, t) {
 
 function productNextAction(product, candidate, t) {
   if ((product.status === "published" || product.status === "live") && !candidate) return { action: t("previewStorefront"), href: (id) => `${ROOT}/products/${encodeURIComponent(id)}/preview` };
-  if (!candidate) return { action: t("continueInFactory"), href: (id) => `${ROOT}/products/${encodeURIComponent(id)}/factory` };
+  if (!candidate) return { action: t("continueInFactory"), href: (id) => `${ROOT}/products/${encodeURIComponent(id)}/about-you` };
   if (!isApproved(candidate)) return { action: t("reviewCandidate"), href: (id, value) => `${ROOT}/products/${encodeURIComponent(id)}/candidates/${encodeURIComponent(idOf(value, "candidate"))}` };
   return { action: t("previewStorefront"), href: (id) => `${ROOT}/products/${encodeURIComponent(id)}/preview` };
 }

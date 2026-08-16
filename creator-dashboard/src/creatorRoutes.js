@@ -35,7 +35,7 @@ export function creatorRouteTitle(route) {
   if (route.kind === "home") return "Creator home";
   if (route.kind === "products") return "Products";
   if (route.kind === "product-create") return "Create product";
-  if (route.kind === "factory") return route.runId ? "Factory run" : "Creator Factory";
+  if (route.kind === "factory") return route.runId ? "Version" : "Product workflow";
   if (route.kind === "candidate") return "Candidate review";
   if (route.kind === "preview") return "Storefront preview";
   if (route.kind === "release") return "Release";
