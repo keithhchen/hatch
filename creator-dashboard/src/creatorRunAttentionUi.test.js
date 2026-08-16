@@ -25,3 +25,14 @@ test("stage-only attention state cannot fall through to an empty About You or Re
   assert.equal(runAttentionError(run), "Source material is incomplete");
   assert.equal(runNeedsAttention({ status: "queued", stage: "extracting_evidence" }), false);
 });
+
+test("a retry in progress is not rendered as the previous attention state", () => {
+  const run = {
+    status: "running",
+    stage: "needs_attention",
+    retryable: false,
+    last_error: "The previous attempt failed"
+  };
+  assert.equal(runNeedsAttention(run), false);
+  assert.equal(runAttentionAction(run), null);
+});

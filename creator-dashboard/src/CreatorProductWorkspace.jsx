@@ -372,6 +372,7 @@ function ReviewPanel({ t, token, profile, run, review, busy, setBusy, onRetry, o
   useEffect(() => setIndex((current) => Math.min(current, Math.max(cases.length - 1, 0))), [cases.length]);
   if (runNeedsAttention(run)) return <RunAttentionPanel t={t} run={run} busy={busy} onRetry={onRetry} onFiles={onFiles} />;
   if (!run || !review) return <section className="cpv2-workspace-panel"><h2>{t("review")}</h2><p>{t("waiting")}</p></section>;
+  if (["queued", "running"].includes(run.status)) return <section className="cpv2-workspace-panel"><h2>{t("review")}</h2><p>{t("waiting")}</p></section>;
   const item = cases[index];
   if (!item) return <section className="cpv2-workspace-panel"><h2>{t("review")}</h2><p>{t("noQuestions")}</p></section>;
   const currentDraft = draft[item.id] ?? {};
