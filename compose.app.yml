@@ -20,6 +20,25 @@ services:
       HATCH_CREATOR_OBJECT_STORE_REGION: ${HATCH_CREATOR_OBJECT_STORE_REGION:-oss-cn-shanghai}
       HATCH_CREATOR_OBJECT_STORE_INTERNAL: ${HATCH_CREATOR_OBJECT_STORE_INTERNAL:-true}
       HATCH_CREATOR_OBJECT_STORE_PREFIX: ${HATCH_CREATOR_OBJECT_STORE_PREFIX:-hatch}
+      # Registry handles the synchronous Creator Factory start path. Keep its
+      # provider/runtime inputs identical to the durable factory-worker so a
+      # user-triggered run cannot fail merely because it was claimed in this
+      # process instead of by the recovery consumer.
+      HATCH_CREATOR_FACTORY_HATCH_TIMEOUT_MS: ${HATCH_CREATOR_FACTORY_HATCH_TIMEOUT_MS:-900000}
+      HATCH_LOCAL_RUNNER_BIN: ${HATCH_LOCAL_RUNNER_BIN:-/usr/local/bin/hatch-local-runner}
+      HATCH_CREATOR_FACTORY_LEASE_MS: ${HATCH_CREATOR_FACTORY_LEASE_MS:-600000}
+      HATCH_CREATOR_FACTORY_HEARTBEAT_MS: ${HATCH_CREATOR_FACTORY_HEARTBEAT_MS:-60000}
+      LLM_API_KEY: ${LLM_API_KEY:?set LLM_API_KEY in /opt/hatch/.env}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.moonshot.cn/v1}
+      HATCH_WEB_SEARCH_URL: ${HATCH_WEB_SEARCH_URL:-}
+      HATCH_WEB_SEARCH_PROVIDER: ${HATCH_WEB_SEARCH_PROVIDER:-}
+      HATCH_WEB_SEARCH_API_KEY: ${HATCH_WEB_SEARCH_API_KEY:-}
+      HATCH_OUTPUT_GUARD: ${HATCH_OUTPUT_GUARD:-enforce}
+      HATCH_OUTPUT_GUARD_REGION: ${HATCH_OUTPUT_GUARD_REGION:-cn-shanghai}
+      HATCH_OUTPUT_GUARD_ENDPOINT: ${HATCH_OUTPUT_GUARD_ENDPOINT:-green-cip-vpc.cn-shanghai.aliyuncs.com}
+      HATCH_OUTPUT_GUARD_SERVICE: ${HATCH_OUTPUT_GUARD_SERVICE:-response_security_check_pro}
+      ALIBABA_CLOUD_ECS_METADATA: ${ALIBABA_CLOUD_ECS_METADATA:-HatchRuntimeRole}
+      ALIBABA_CLOUD_IMDSV1_DISABLE: ${ALIBABA_CLOUD_IMDSV1_DISABLE:-true}
       HATCH_QDRANT_URL: http://qdrant:6333
       HATCH_QDRANT_API_KEY: ${HATCH_QDRANT_API_KEY:-}
       HATCH_QDRANT_COLLECTION: ${HATCH_QDRANT_COLLECTION:-hatch_knowledge_text_v4_1024}
