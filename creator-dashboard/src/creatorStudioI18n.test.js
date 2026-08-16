@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { createCreatorTranslator, CREATOR_LOCALES } from "./creatorI18n.js";
+import { createCreatorTranslator, CREATOR_LOCALES, CREATOR_PORTAL_KEYS } from "./creatorI18n.js";
 
 const CREATOR_STUDIO_KEYS = [
   "explore",
@@ -35,8 +35,33 @@ test("Creator Studio entry paths have English, Chinese, and Japanese copy", () =
   }
 });
 
+test("legacy Product, preview, release, and order surfaces have complete locale copy", () => {
+  for (const locale of CREATOR_LOCALES) {
+    const t = createCreatorTranslator(locale);
+    for (const key of CREATOR_PORTAL_KEYS) {
+      const raw = t(key);
+      const value = typeof raw === "function" ? raw("value") : raw;
+      assert.notEqual(value, key, `${locale}.${key}`);
+      assert.notEqual(value, undefined, `${locale}.${key} is undefined`);
+    }
+  }
+});
+
 test("Products entry does not read a global Factory run list", async () => {
   const source = await readFile(new URL("./CreatorPortalV2.jsx", import.meta.url), "utf8");
   assert.doesNotMatch(source, /\/v1\/creator\/factory-runs/);
   assert.doesNotMatch(source, /PendingFactoryRuns|Factory in progress/);
+});
+
+test("legacy Portal surfaces do not reintroduce hardcoded English labels", async () => {
+  const source = await readFile(new URL("./CreatorPortalV2.jsx", import.meta.url), "utf8");
+  for (const phrase of [
+    ">Overview<",
+    ">Test & improve<",
+    ">Representative examples<",
+    ">Candidates and releases<",
+    ">Storefront preview<",
+    ">Release not found<",
+    ">No matching orders<"
+  ]) assert.doesNotMatch(source, new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), phrase);
 });

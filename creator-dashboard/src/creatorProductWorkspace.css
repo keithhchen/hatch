@@ -315,11 +315,44 @@
 
 .cpv2-review-actions {
   border-top: 1px solid var(--hatch-border, rgba(24, 22, 20, .12));
+  display: grid;
+  gap: 14px;
+  margin-top: 22px;
+  padding-top: 22px;
+}
+
+.cpv2-review-action-row {
+  align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
-  margin-top: 22px;
-  padding-top: 22px;
+}
+
+.cpv2-review-remove {
+  position: relative;
+}
+
+.cpv2-remove-popover {
+  background: var(--hatch-surface, #fffdf9);
+  border: 1px solid var(--hatch-border, rgba(24, 22, 20, .16));
+  border-radius: 12px;
+  box-shadow: 0 12px 28px rgba(42, 33, 24, .12);
+  margin-top: 8px;
+  max-width: 420px;
+  padding: 14px 16px;
+}
+
+.cpv2-remove-popover p {
+  color: var(--hatch-text-muted, #766f67);
+  line-height: 1.45;
+  margin: 0;
+}
+
+.cpv2-remove-popover-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
 }
 
 .cpv2-review-actions .is-success {

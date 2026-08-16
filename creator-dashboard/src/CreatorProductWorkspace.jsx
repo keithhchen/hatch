@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, FormField, InlineAlert, PageHeader, Select, Skeleton, StatusTag, Textarea } from "@hatch/ui";
+import { UserRound } from "lucide-react";
 import {
   getProduct,
   getFactoryRun,
@@ -383,6 +384,7 @@ function nextBriefFieldId(fields) {
 function ReviewPanel({ t, token, profile, run, review, busy, setBusy, onRetry, onFiles, onReviewChanged, onRerun, onComplete, onError }) {
   const [index, setIndex] = useState(0);
   const [draft, setDraft] = useState({});
+  const [removeOpen, setRemoveOpen] = useState({});
   const cases = review?.cases ?? [];
   useEffect(() => setIndex((current) => Math.min(current, Math.max(cases.length - 1, 0))), [cases.length]);
   if (runNeedsAttention(run)) return <RunAttentionPanel t={t} run={run} busy={busy} onRetry={onRetry} onFiles={onFiles} />;
@@ -406,6 +408,7 @@ function ReviewPanel({ t, token, profile, run, review, busy, setBusy, onRetry, o
       });
       onReviewChanged(result.review ?? review);
       setDraft((current) => ({ ...current, [item.id]: {} }));
+      setRemoveOpen((current) => ({ ...current, [item.id]: false }));
       if (index < cases.length - 1) setIndex((current) => current + 1);
     } catch (error) {
       onError?.(error instanceof Error ? error : new Error("Unable to save this review"));
@@ -428,12 +431,12 @@ function ReviewPanel({ t, token, profile, run, review, busy, setBusy, onRetry, o
     <div className="cpv2-panel-heading"><div><h2>{t("reviewResult")}</h2><p>{index + 1} / {cases.length}</p></div><div className="cpv2-carousel-nav"><button type="button" disabled={index === 0} onClick={() => setIndex((current) => current - 1)}>←</button><button type="button" disabled={index === cases.length - 1} onClick={() => setIndex((current) => current + 1)}>→</button></div></div>
     <div className="cpv2-review-case">
       <div className="cpv2-review-columns">
-        <article className="cpv2-user-situation"><span className="cpv2-review-label"><span className="cpv2-review-avatar cpv2-review-avatar-user" aria-hidden="true">U</span>{t("userSituation")}</span><p>{item.question}</p></article>
+        <article className="cpv2-user-situation"><span className="cpv2-review-label"><span className="cpv2-review-avatar cpv2-review-avatar-user" aria-hidden="true"><UserRound size={14} strokeWidth={2} /></span>{t("userSituation")}</span><p>{item.question}</p></article>
         <article className="cpv2-your-method"><span className="cpv2-review-label"><span className="cpv2-review-avatar cpv2-review-avatar-creator" aria-hidden="true">{profile?.initials || "C"}</span>{t("yourMethod")}</span><p>{item.creator_reference}</p></article>
       </div>
       <article className="cpv2-current-response"><span>{t("currentResponse")}</span><div>{item.candidate_output}</div></article>
       <div className={`cpv2-eval-note ${item.verdict === "PASS" ? "is-pass" : "is-fail"}`}><strong>{item.verdict === "PASS" ? t("evaluationPassed") : t("evaluationFailed")}</strong><p>{item.diagnosis}</p></div>
-      {handled ? <StatusTag tone={reviewStatusTone(item.status)}>{reviewStatusLabel(item.status, t)}</StatusTag> : currentDraft.open ? <div className="cpv2-correction-form"><FormField label={t("whatShouldHatchHaveDone")} required><Textarea value={currentDraft.correction ?? ""} onChange={(event) => setDraft((current) => ({ ...current, [item.id]: { ...current[item.id], correction: event.target.value } }))} /></FormField><FormField label={t("why")} required><Textarea value={currentDraft.why ?? ""} onChange={(event) => setDraft((current) => ({ ...current, [item.id]: { ...current[item.id], correction: current[item.id]?.correction, why: event.target.value } }))} /></FormField><Button type="button" loading={busy === `review:${item.id}`} onClick={() => void action("correct")}>{t("saveAndNext")}</Button></div> : <div className="cpv2-review-actions">{canAcceptReviewCase(item) ? <Button type="button" className="is-success" disabled={Boolean(busy)} onClick={() => void action("accept")}>{t("useResult")}</Button> : null}<Button type="button" variant="secondary" disabled={Boolean(busy)} onClick={() => setDraft((current) => ({ ...current, [item.id]: { ...current[item.id], open: true } }))}>{t("correctResult")}</Button><Button type="button" variant="link" disabled={Boolean(busy)} onClick={() => void action("reject_question")}>{t("removeQuestion")}</Button></div>}
+      {handled ? <StatusTag tone={reviewStatusTone(item.status)}>{reviewStatusLabel(item.status, t)}</StatusTag> : currentDraft.open ? <div className="cpv2-correction-form"><FormField label={t("whatShouldHatchHaveDone")} required><Textarea value={currentDraft.correction ?? ""} onChange={(event) => setDraft((current) => ({ ...current, [item.id]: { ...current[item.id], correction: event.target.value } }))} /></FormField><FormField label={t("why")} required><Textarea value={currentDraft.why ?? ""} onChange={(event) => setDraft((current) => ({ ...current, [item.id]: { ...current[item.id], correction: current[item.id]?.correction, why: event.target.value } }))} /></FormField><Button type="button" loading={busy === `review:${item.id}`} onClick={() => void action("correct")}>{t("saveAndNext")}</Button></div> : <div className="cpv2-review-actions"><div className="cpv2-review-action-row">{canAcceptReviewCase(item) ? <Button type="button" className="is-success" disabled={Boolean(busy)} onClick={() => void action("accept")}>{t("useResult")}</Button> : null}<Button type="button" variant="secondary" disabled={Boolean(busy)} onClick={() => setDraft((current) => ({ ...current, [item.id]: { ...current[item.id], open: true } }))}>{t("correctResult")}</Button></div><div className="cpv2-review-remove"><Button type="button" variant="link" disabled={Boolean(busy)} onClick={() => setRemoveOpen((current) => ({ ...current, [item.id]: !current[item.id] }))}>{t("removeQuestion")}</Button>{removeOpen[item.id] ? <div className="cpv2-remove-popover" role="dialog" aria-label={t("removeQuestion")}><p>{t("removeQuestionHelp")}</p><div className="cpv2-remove-popover-actions"><Button type="button" loading={busy === `review:${item.id}`} onClick={() => void action("reject_question")}>{t("confirmRemoveQuestion")}</Button><Button type="button" variant="secondary" disabled={Boolean(busy)} onClick={() => setRemoveOpen((current) => ({ ...current, [item.id]: false }))}>{t("cancel")}</Button></div></div> : null}</div></div>}
     </div>
     <CorpusPreview t={t} corpus={review.corpus} />
     <div className="cpv2-workspace-actions">{review.rerun_ready ? <Button type="button" loading={busy === "rerun"} onClick={() => void rerun()}>{t("generateAnotherVersion")}</Button> : review.release_ready ? <Button type="button" onClick={onComplete}>{t("complete")}</Button> : null}</div>
