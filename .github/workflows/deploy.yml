@@ -236,6 +236,12 @@ jobs:
           for key in LLM_API_KEY DEEPSEEK_API_KEY HATCH_DATABASE_URL HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN HATCH_OAUTH_STATE_KEY DASHSCOPE_API_KEY POSTGRES_PASSWORD; do
             grep -Eq "^${key}=[^[:space:]]+" .env || { echo "Missing non-empty $key in /opt/hatch/.env"; exit 1; }
           done
+          factory_profile="$(sed -n 's/^HATCH_FACTORY_LLM_PROFILE=//p' .env | tail -n 1)"
+          factory_profile="${factory_profile:-kimi-k2.6}"
+          case "$factory_profile" in
+            kimi-k2.6|deepseek-v4-flash) ;;
+            *) echo "Unsupported HATCH_FACTORY_LLM_PROFILE=$factory_profile" >&2; exit 1 ;;
+          esac
           payment_mode="$(sed -n 's/^HATCH_COMMERCE_PAYMENT_MODE=//p' .env | tail -n 1)"
           payment_mode="${payment_mode:-disabled}"
           case "$payment_mode" in

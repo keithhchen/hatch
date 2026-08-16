@@ -7,7 +7,7 @@ import { createHatchCliCandidateExecutor } from "./creatorLearning/cliCandidateE
 import { CreatorFactory } from "./creatorLearning/engine.js";
 import { FactoryFileStore } from "./creatorLearning/fileStore.js";
 import { parseCreatorAnswerQuestionBatchId } from "./creatorLearning/markdown.js";
-import { PI_FACTORY_MODEL, runFactoryPromptWithPi } from "./creatorLearning/piGateway.js";
+import { factoryModelForEnvironment, runFactoryPromptWithPi } from "./creatorLearning/piGateway.js";
 import { requireQuestionBatchId } from "./creatorLearning/questionBatch.js";
 import {
   resolveCreatorSourceScope,
@@ -49,7 +49,7 @@ export async function runCreatorFactoryCli(argv = process.argv.slice(2)): Promis
   });
   const command = parsed.positionals[0];
   const root = path.resolve(parsed.values.root ?? ".hatch/creator-factory-runs");
-  const factory = new CreatorFactory(root, runFactoryPromptWithPi, createHatchCliCandidateExecutor(), { model: PI_FACTORY_MODEL });
+  const factory = new CreatorFactory(root, runFactoryPromptWithPi, createHatchCliCandidateExecutor(), { model: factoryModelForEnvironment() });
 
   if (command === "start") {
     if (!parsed.values.input) throw usage("start requires --input <factory-input.json>");

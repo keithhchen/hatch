@@ -267,7 +267,14 @@ Dashboard, never Runtime. Public user
 sessions can read `GET /v1/user/product-access`; only the checkout service may
 call the private entitlement mutation after it has committed a matching order.
 
-Spec v1 uses Kimi K2.6 exclusively for Creator execution, delivery review, and context compaction. Thinking is always enabled through Pi's normal thinking-level option; temperature follows the provider contract. Pi owns the model profile, context estimate, compaction policy, retries, and output behavior. There is no alternate-model fallback. Use Kimi's official `LLM_API_KEY` variable for credentials.
+Spec v1 defaults Creator execution and delivery review to Kimi K2.6. A
+deployment may explicitly set `HATCH_FACTORY_LLM_PROFILE=deepseek-v4-flash`
+when its provider credentials are available; this is a deliberate profile
+selection, never a silent fallback. Kimi thinking is always enabled through
+Pi's normal thinking-level option; provider-specific sampling follows the
+selected contract. Pi owns the model profile, context estimate, compaction
+policy, retries, and output behavior. Use `LLM_API_KEY` for Kimi or
+`DEEPSEEK_API_KEY` for the explicit DeepSeek Factory profile.
 Corpus Evals are the default Creator quality gate. Ordinary Creator products stream Kimi's actual response to the Consumer Desktop. `HATCH_RUNTIME_DELIVERY_AUDIT=enforce` is an optional regulated-deployment override: it performs a second Kimi claim audit before delivery and intentionally withholds text streaming until that audit finishes.
 `OPENAI_BASE_URL` falls back to `https://api.moonshot.cn/v1` and is restricted to official Moonshot endpoints (plus loopback test doubles). Use the `.ai` endpoint only with a matching international Kimi key. If any model override is present, it must be exactly `kimi-k2.6` or startup fails closed.
 `HATCH_MCP_SERVERS` is optional. When set, the model can call `mcp_call`; the server sends MCP `tools/call` JSON-RPC requests and the client never sees MCP credentials.

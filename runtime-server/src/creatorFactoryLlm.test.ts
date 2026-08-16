@@ -168,6 +168,48 @@ test("Factory Evidence/Eval/Corpus prompt gateway uses dedicated Kimi K2.6 high-
   );
 });
 
+test("Factory can use an explicitly selected DeepSeek profile without Kimi payload fields", async () => {
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  const runner = createFactoryLlmPromptRunner({
+    env: {
+      HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash",
+      DEEPSEEK_API_KEY: "factory-deepseek-test-key"
+    },
+    fetch: async (input, init) => {
+      calls.push({ url: input instanceof Request ? input.url : String(input), init: init ?? {} });
+      return toolStreamResponse([
+        {
+          id: "submit-evidence",
+          name: "submit_evidence_section",
+          arguments: { section: "Product evidence", markdown: "DEEPSEEK_FACTORY_RESULT" }
+        },
+        { id: "finalize-evidence", name: "finalize_evidence", arguments: {} }
+      ]);
+    }
+  });
+
+  const output = await runner({
+    purpose: "evidence.extract",
+    systemPrompt: "system",
+    prompt: "prompt",
+    outputContract: { kind: "evidence_ledger", requiredSections: ["Product evidence"] }
+  });
+
+  assert.match(output, /DEEPSEEK_FACTORY_RESULT/);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]!.url, "https://api.deepseek.com/chat/completions");
+  const body = JSON.parse(String(calls[0]!.init.body)) as Record<string, unknown>;
+  assert.equal(body.model, "deepseek-v4-flash");
+  assert.equal("thinking" in body, false);
+  assert.equal("reasoning_effort" in body, false);
+  assert.equal(body.max_tokens !== undefined, true);
+  assert.equal(new Headers(calls[0]!.init.headers).get("authorization"), "Bearer factory-deepseek-test-key");
+  const deepseekModel = createFactoryLlmModel({ env: { HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash", DEEPSEEK_API_KEY: "test" } });
+  assert.equal(deepseekModel.id, "deepseek-v4-flash");
+  assert.equal(deepseekModel.provider, "deepseek");
+  assert.equal(deepseekModel.baseUrl, "https://api.deepseek.com");
+});
+
 test("Factory Kimi K2.6 rejects a length-truncated response even when it contains text", async () => {
   const runner = createFactoryLlmPromptRunner({
     apiKey: "factory-k3-length-test-key",

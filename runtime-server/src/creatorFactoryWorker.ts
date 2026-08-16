@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { createHatchCliCandidateExecutor } from "./creatorLearning/cliCandidateExecutor.js";
 import { CreatorFactory } from "./creatorLearning/engine.js";
-import { PI_FACTORY_MODEL, runFactoryPromptWithPi } from "./creatorLearning/piGateway.js";
+import { factoryModelForEnvironment, runFactoryPromptWithPi } from "./creatorLearning/piGateway.js";
 import { PostgresCreatorFactoryRepository } from "./creatorLearning/repository.js";
 import { CreatorFactoryWorker } from "./creatorLearning/worker.js";
 import { objectStoreFromEnvironment } from "./creatorLearning/objectStore.js";
@@ -24,7 +24,7 @@ export async function runCreatorFactoryWorker(environment: NodeJS.ProcessEnv = p
       timeoutMs: integerEnvironment(environment.HATCH_CREATOR_FACTORY_HATCH_TIMEOUT_MS, 15 * 60_000),
       environment
     }),
-    { model: PI_FACTORY_MODEL, objectStore, graphStore }
+    { model: factoryModelForEnvironment(environment), objectStore, graphStore }
   );
   const worker = new CreatorFactoryWorker(repository, factory, {
     workerId: environment.HATCH_CREATOR_FACTORY_WORKER_ID?.trim() || `factory-${process.pid}-${randomUUID()}`,

@@ -37,7 +37,7 @@ import {
 } from "./creatorLearning/repository.js";
 import { CreatorFactoryService } from "./creatorLearning/service.js";
 import { CreatorFactory } from "./creatorLearning/engine.js";
-import { PI_FACTORY_MODEL, runFactoryPromptWithPi } from "./creatorLearning/piGateway.js";
+import { factoryModelForEnvironment, runFactoryPromptWithPi } from "./creatorLearning/piGateway.js";
 import { createHatchCliCandidateExecutor } from "./creatorLearning/cliCandidateExecutor.js";
 import { CreatorFactoryWorker } from "./creatorLearning/worker.js";
 import type { CreatorProductRecord } from "./creatorLearning/products.js";
@@ -103,7 +103,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
         timeoutMs: integerEnvironment(environment.HATCH_CREATOR_FACTORY_HATCH_TIMEOUT_MS, 15 * 60_000),
         environment
       }),
-      { model: PI_FACTORY_MODEL, objectStore, graphStore }
+      { model: factoryModelForEnvironment(environment), objectStore, graphStore }
     ),
     {
       workerId: `factory-http-${process.pid}-${randomUUID()}`,

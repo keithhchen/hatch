@@ -1,7 +1,8 @@
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 
 export const RUNTIME_LLM_PROFILE_NAMES = ["kimi-k2.6", "kimi-k2.6-no-thinking", "deepseek-v4-flash"] as const;
-export const FACTORY_LLM_PROFILE_NAME = "kimi-k2.6" as const;
+export const FACTORY_LLM_PROFILE_NAMES = ["kimi-k2.6", "deepseek-v4-flash"] as const;
+export type FactoryLlmProfileName = (typeof FACTORY_LLM_PROFILE_NAMES)[number];
 export const LLM_PROFILE_NAMES = RUNTIME_LLM_PROFILE_NAMES;
 export type LlmProfileName = (typeof LLM_PROFILE_NAMES)[number];
 export type RuntimeLlmProfileName = (typeof RUNTIME_LLM_PROFILE_NAMES)[number];
@@ -76,8 +77,19 @@ export function resolveLlmProfile(env: NodeJS.ProcessEnv = process.env): LlmProf
 }
 
 /** Creator Factory is pinned to the same provider-neutral Kimi K2.6 profile. */
-export function resolveFactoryLlmProfile(): LlmProfile {
-  return { ...PROFILES[FACTORY_LLM_PROFILE_NAME] };
+/**
+ * Resolve the provider used by Creator Factory. Kimi remains the default and
+ * the profile is an explicit deployment choice, never an implicit fallback.
+ * This lets production switch to a configured provider when an account is
+ * paused for quota/billing without changing the Product/Factory contract.
+ */
+export function resolveFactoryLlmProfile(env: NodeJS.ProcessEnv = process.env): LlmProfile {
+  const configured = (env.HATCH_FACTORY_LLM_PROFILE?.trim() || "kimi-k2.6") as FactoryLlmProfileName;
+  const profile = PROFILES[configured];
+  if (!profile || !FACTORY_LLM_PROFILE_NAMES.includes(configured)) {
+    throw new Error(`Unknown Factory HATCH_FACTORY_LLM_PROFILE: ${configured}. Expected one of: ${FACTORY_LLM_PROFILE_NAMES.join(", ")}`);
+  }
+  return { ...profile };
 }
 
 export function requireLlmApiKey(profile: LlmProfile, env: NodeJS.ProcessEnv = process.env): string {

@@ -3,15 +3,17 @@ import type { ImageContent, Model } from "@earendil-works/pi-ai";
 import {
   KIMI_DEFAULT_BASE_URL,
   createKimiStreamFn,
+  createPiModel,
+  createPiStreamFn,
   normalizeKimiBaseUrl,
   type KimiAdapterOptions
 } from "../piModel.js";
-import { resolveFactoryLlmProfile } from "../llmProfiles.js";
+import { resolveFactoryLlmProfile, type FactoryLlmProfileName, type LlmProfile } from "../llmProfiles.js";
 import { createFactorySubmissionProtocol } from "./factorySubmission.js";
 import type { FactoryPromptFailureTelemetry, FactoryPromptRunner } from "./types.js";
 
 export const FACTORY_LLM_MODEL = "kimi-k2.6" as const;
-const FACTORY_LLM_PROFILE = resolveFactoryLlmProfile();
+const FACTORY_LLM_PROFILE = resolveFactoryLlmProfile({ HATCH_FACTORY_LLM_PROFILE: "kimi-k2.6" });
 /** A single Factory turn must not hold a worker lease indefinitely. */
 export const FACTORY_LLM_WALL_CLOCK_TIMEOUT_MS = 15 * 60_000;
 /** Total input + preserved multi-turn history + output capacity. */
@@ -49,6 +51,23 @@ type FactoryLlmAdapterOptions = Pick<
 
 export type FactoryLlmModel = Model<"openai-completions">;
 
+type ResolvedFactoryProfile = {
+  profile: LlmProfile & { name: FactoryLlmProfileName };
+  env: NodeJS.ProcessEnv;
+};
+
+function resolveFactoryProfile(env: NodeJS.ProcessEnv | undefined): ResolvedFactoryProfile {
+  const source = env ?? process.env;
+  const profile = resolveFactoryLlmProfile(source);
+  // Reuse the already-implemented provider adapter for non-Kimi profiles by
+  // presenting the selected profile through the Runtime profile seam. This is
+  // an explicit deployment choice, not a provider fallback.
+  return {
+    profile: profile as LlmProfile & { name: FactoryLlmProfileName },
+    env: { ...source, HATCH_LLM_PROFILE: profile.name }
+  };
+}
+
 function factoryBaseUrl(options: FactoryLlmAdapterOptions): string {
   const env = options.env ?? process.env;
   return normalizeKimiBaseUrl(
@@ -66,7 +85,20 @@ function factoryBaseUrl(options: FactoryLlmAdapterOptions): string {
 export function createFactoryLlmModel(
   options: FactoryLlmAdapterOptions = {}
 ): FactoryLlmModel {
-  const baseUrl = factoryBaseUrl(options);
+  const selected = resolveFactoryProfile(options.env);
+  if (selected.profile.name !== "kimi-k2.6") {
+    const model = createPiModel({ env: selected.env });
+    // DeepSeek's current v4-flash endpoint accepts the same strict function
+    // schema contract required by the host-owned Factory submission FSM.
+    return {
+      ...model,
+      compat: {
+        ...model.compat,
+        supportsStrictMode: true
+      }
+    };
+  }
+  const baseUrl = factoryBaseUrl({ ...options, env: selected.env });
   return {
     id: FACTORY_LLM_MODEL,
     name: "Kimi K2.6",
@@ -108,8 +140,9 @@ export function createFactoryLlmModel(
 }
 
 /** Kimi K2.6 fixes these sampling values server-side, so the request omits them. */
-function normalizeFactoryLlmPayload(payload: unknown): unknown {
+function normalizeFactoryLlmPayload(payload: unknown, profileName: FactoryLlmProfileName): unknown {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+  if (profileName !== "kimi-k2.6") return payload;
   const normalized = { ...(payload as Record<string, unknown>) };
   // Keep the provider-native K2.6 thinking contract explicit. This also
   // protects the boundary if a future pi-ai version changes its inferred
@@ -210,17 +243,21 @@ export function createFactoryLlmPromptRunner(
   adapterOptions: FactoryLlmAdapterOptions = {}
 ): FactoryPromptRunner {
   return async (options): Promise<string> => {
+    const selected = resolveFactoryProfile(adapterOptions.env);
     const submission = createFactorySubmissionProtocol(options.purpose, options.outputContract);
+    const streamFn = selected.profile.name === "kimi-k2.6"
+      ? createKimiStreamFn({ ...adapterOptions, env: selected.env, thinkingLevel: selected.profile.thinkingLevel })
+      : createPiStreamFn({ ...adapterOptions, env: selected.env, thinkingLevel: selected.profile.thinkingLevel });
     const agent = new Agent({
       initialState: {
         systemPrompt: `${options.systemPrompt}\n\n# Local Factory submission protocol\n${submission.systemInstructions}`,
         messages: [],
         tools: submission.tools,
-        model: createFactoryLlmModel(adapterOptions),
-        thinkingLevel: FACTORY_LLM_PROFILE.thinkingLevel
+        model: createFactoryLlmModel({ ...adapterOptions, env: selected.env }),
+        thinkingLevel: selected.profile.thinkingLevel
       },
-      streamFn: createKimiStreamFn({ ...adapterOptions, thinkingLevel: FACTORY_LLM_PROFILE.thinkingLevel }),
-      onPayload: async (payload) => normalizeFactoryLlmPayload(payload),
+      streamFn,
+      onPayload: async (payload) => normalizeFactoryLlmPayload(payload, selected.profile.name),
       transformContext: async (messages) => submission.sanitizeContext(messages),
       toolExecution: "sequential",
       beforeToolCall: (context) => submission.beforeToolCall(context),
