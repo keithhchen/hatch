@@ -867,7 +867,7 @@ export class PostgresCreatorFactoryRepository implements CreatorFactoryRepositor
         SELECT run.id, timing.now_at
         FROM hatch_creator_factory_runs AS run
         CROSS JOIN timing
-      WHERE ($5::text IS NULL OR run.id = $5::text)
+        WHERE ($5::text IS NULL OR run.id = $5::text)
         AND (
           (run.status = 'queued'
             AND (run.next_attempt_at <= timing.now_at OR run.last_error = 'Request was aborted'))
