@@ -514,6 +514,7 @@ export class CreatorFactory {
       return this.auditPendingCorpusCompleteness(store, state, availableToolIds);
     }
     await this.restoreLegacyInconclusiveGuardCandidate(store, state);
+    await this.restoreLegacyCompletenessRepairTarget(store, state);
     const pendingGuardCandidate = state.artifacts.pendingGuardCandidate;
     if (!pendingGuardCandidate
       && state.compileReason !== "initial"
@@ -684,6 +685,14 @@ export class CreatorFactory {
     state.artifacts.evaluationRounds.push(completenessReport);
     if (!completeness.pass) {
       candidate.completeness = "FAIL";
+      const priorTarget = state.artifacts.rejectedCorpusRepairTarget;
+      state.artifacts.rejectedCorpusRepairTarget = {
+        attempt: priorTarget?.candidateVersion === candidate.version ? priorTarget.attempt + 1 : 1,
+        candidateVersion: candidate.version,
+        compilation: candidate.compileRecord,
+        failureReport: completenessReport,
+        reason: "completeness_failure"
+      };
       state.calibrationFeedback = [completenessReport];
       state.compileReason = "completeness_failure";
       state.stage = "compiling_corpus";
@@ -851,6 +860,51 @@ export class CreatorFactory {
     await store.recordEvent("legacy_inconclusive_guard_candidate_restored", {
       version: nextVersion,
       compilationSha256: target.compilation.sha256
+    });
+  }
+
+  /**
+   * States written before completeness failures became explicit repair
+   * targets can contain a failed candidate and its audit report, but no
+   * rejectedCorpusRepairTarget. Reconstruct that pointer from the immutable
+   * candidate/report pair before asking the Corpus compiler to continue.
+   */
+  private async restoreLegacyCompletenessRepairTarget(
+    store: FactoryFileStore,
+    state: FactoryRunState
+  ): Promise<void> {
+    const candidate = state.artifacts.corpusCandidates.at(-1);
+    if (!candidate || candidate.completeness !== "FAIL") return;
+    const existing = state.artifacts.rejectedCorpusRepairTarget;
+    if (existing
+      && existing.candidateVersion === candidate.version
+      && sameArtifact(existing.compilation, candidate.compileRecord)
+      && existing.reason === "completeness_failure") {
+      return;
+    }
+    const reportReference = [...state.artifacts.evaluationRounds].reverse().find((reference) => (
+      new RegExp(`(?:^|/)corpus-completeness-v${candidate.version}-[^/]+\\.md$`).test(reference.path)
+    ));
+    if (!reportReference) {
+      throw new Error(`Failed Corpus candidate v${candidate.version} is missing its completeness report`);
+    }
+    const report = parseEvaluation(await store.readArtifact(reportReference));
+    if (report.pass) {
+      throw new Error(`Failed Corpus candidate v${candidate.version} has a passing completeness report`);
+    }
+    await store.readArtifact(candidate.compileRecord);
+    state.artifacts.rejectedCorpusRepairTarget = {
+      attempt: existing?.candidateVersion === candidate.version ? existing.attempt : 1,
+      candidateVersion: candidate.version,
+      compilation: candidate.compileRecord,
+      failureReport: reportReference,
+      reason: "completeness_failure"
+    };
+    await store.saveState(state);
+    await store.recordEvent("legacy_completeness_repair_target_restored", {
+      version: candidate.version,
+      compilationSha256: candidate.compileRecord.sha256,
+      reportSha256: reportReference.sha256
     });
   }
 

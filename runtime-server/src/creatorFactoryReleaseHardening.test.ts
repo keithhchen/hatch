@@ -65,8 +65,16 @@ test("continuity uses the accepted per-path high-water mark and never a complete
   assert.equal(failed.stage, "needs_attention");
   assert.equal(corpusCalls.length, 3);
   assert.deepEqual(failed.artifacts.corpusCandidates.map((candidate) => candidate.completeness), ["PASS", "FAIL"]);
-  assert.equal(corpusCalls[2]!.prompt.includes(highWater), true, "retry must receive the last accepted predecessor");
-  assert.equal(corpusCalls[2]!.prompt.includes(failedAttempt), false, "failed candidate must not become previousCompilation");
+  assert.match(
+    corpusCalls[2]!.prompt,
+    new RegExp(`Previous accepted complete compilation[\\s\\S]*${highWater}`),
+    "retry must receive the last accepted predecessor"
+  );
+  assert.match(
+    corpusCalls[2]!.prompt,
+    new RegExp(`Rejected compilation repair target[\\s\\S]*${failedAttempt}`),
+    "failed candidate is repair feedback, not the accepted previousCompilation"
+  );
   const reports = await Promise.all(failed.artifacts.evaluationRounds.map((reference) => store.readArtifact(reference)));
   assert.equal(reports.some((report) => (
     report.includes("[asset_materially_shortened]")

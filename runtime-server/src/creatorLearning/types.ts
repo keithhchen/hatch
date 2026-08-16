@@ -232,7 +232,7 @@ export type RejectedCorpusRepairTarget = {
   candidateVersion: number;
   compilation: ArtifactRef;
   failureReport: ArtifactRef;
-  reason: "release_guard";
+  reason: "release_guard" | "completeness_failure";
 };
 
 /**

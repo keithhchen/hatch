@@ -444,6 +444,126 @@ test("an initial raw-copy rejection can recover through a completeness_failure r
   assert.equal(reports.filter((report) => report.includes("[raw_source_overlap]")).length, 1);
 });
 
+test("an initial completeness failure preserves its candidate as the next repair target", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-factory-completeness-repair-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  let corpusCalls = 0;
+  let completenessCalls = 0;
+  const corpusPrompts: string[] = [];
+  const run = async (call: FactoryPromptCall): Promise<string> => {
+    if (call.purpose === "evidence.extract") return "# Product evidence\nPreserve the Creator's decisive method [S1:L1].";
+    if (call.purpose === "eval.generate_questions") {
+      const count = Number(/Question count:\s*(\d+)/.exec(call.prompt)?.[1]);
+      return Array.from({ length: count }, (_, index) => questionFixture(
+        `Q${index + 1}`,
+        `Test the Creator's decision boundary ${index + 1}.`,
+        `completeness-repair-${index + 1}`
+      )).join("\n\n");
+    }
+    if (call.purpose === "corpus.compile") {
+      corpusCalls += 1;
+      corpusPrompts.push(call.prompt);
+      return layeredCorpusFixture(
+        corpusCalls === 1
+          ? "The first complete candidate omits a supported decision boundary."
+          : `Repaired complete candidate ${corpusCalls}.`
+      );
+    }
+    if (call.purpose === "eval.audit_corpus") {
+      completenessCalls += 1;
+      return completenessCalls === 1
+        ? failedCompletenessEvaluation()
+        : passingEvaluation();
+    }
+    if (call.purpose === "eval.judge_result") return passingEvaluation();
+    throw new Error(`Unexpected prompt purpose: ${call.purpose}`);
+  };
+  const input = sampleInput("run-completeness-repair");
+  input.config = { developmentQuestions: 2, heldoutQuestions: 1, maxCorpusRevisions: 4 };
+  const factory = new CreatorFactory(root, run, async (execution) => `Finished ${execution.question}`);
+  const waiting = await factory.start(input);
+  const store = new FactoryFileStore(root, waiting.runId);
+  const questions = parseQuestions(await store.readArtifact(waiting.artifacts.currentQuestionBatch!));
+  const ready = await factory.submitCreatorAnswers(
+    waiting.runId,
+    answerMarkdown(questions, (question) => `ANSWER_${question.id}`),
+    waiting.artifacts.currentQuestionBatch!.batchId
+  );
+
+  assert.equal(ready.stage, "ready");
+  assert.equal(corpusCalls, 3);
+  assert.equal(completenessCalls, 3);
+  assert.deepEqual(ready.artifacts.corpusCandidates.map((candidate) => candidate.reason), [
+    "initial",
+    "completeness_failure",
+    "development_calibration"
+  ]);
+  assert.match(corpusPrompts[1]!, /Compile reason: completeness_failure/);
+  assert.match(corpusPrompts[1]!, /Rejected compilation repair target \(complete but unaccepted/);
+  assert.equal(ready.artifacts.rejectedCorpusRepairTarget, undefined);
+});
+
+test("a legacy completeness failure without a repair target is recovered before the next compile", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-factory-completeness-legacy-repair-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  let corpusCalls = 0;
+  let completenessCalls = 0;
+  let pauseAfterFirstFailure = true;
+  const corpusPrompts: string[] = [];
+  const run = async (call: FactoryPromptCall): Promise<string> => {
+    if (call.purpose === "evidence.extract") return "# Product evidence\nPreserve the Creator's decisive method [S1:L1].";
+    if (call.purpose === "eval.generate_questions") {
+      const count = Number(/Question count:\s*(\d+)/.exec(call.prompt)?.[1]);
+      return Array.from({ length: count }, (_, index) => questionFixture(
+        `Q${index + 1}`,
+        `Test the Creator's decision boundary ${index + 1}.`,
+        `legacy-completeness-${index + 1}`
+      )).join("\n\n");
+    }
+    if (call.purpose === "corpus.compile") {
+      corpusCalls += 1;
+      corpusPrompts.push(call.prompt);
+      if (corpusCalls === 2 && pauseAfterFirstFailure) throw new Error("pause after legacy completeness failure");
+      return layeredCorpusFixture(`Complete candidate ${corpusCalls}.`);
+    }
+    if (call.purpose === "eval.audit_corpus") {
+      completenessCalls += 1;
+      return completenessCalls === 1
+        ? failedCompletenessEvaluation()
+        : passingEvaluation();
+    }
+    if (call.purpose === "eval.judge_result") return passingEvaluation();
+    throw new Error(`Unexpected prompt purpose: ${call.purpose}`);
+  };
+  const input = sampleInput("run-completeness-legacy-repair");
+  input.config = { developmentQuestions: 2, heldoutQuestions: 1, maxCorpusRevisions: 4 };
+  const factory = new CreatorFactory(root, run, async (execution) => `Finished ${execution.question}`);
+  const waiting = await factory.start(input);
+  const store = new FactoryFileStore(root, waiting.runId);
+  const questions = parseQuestions(await store.readArtifact(waiting.artifacts.currentQuestionBatch!));
+  const failed = await factory.submitCreatorAnswers(
+    waiting.runId,
+    answerMarkdown(questions, (question) => `ANSWER_${question.id}`),
+    waiting.artifacts.currentQuestionBatch!.batchId
+  );
+  assert.equal(failed.stage, "needs_attention");
+  assert.equal(failed.artifacts.corpusCandidates[0]?.completeness, "FAIL");
+  assert.equal(failed.artifacts.rejectedCorpusRepairTarget?.reason, "completeness_failure");
+
+  // Emulate a pre-fix durable state: candidate and report survived, but the
+  // repair pointer was not written by the old completeness-failure branch.
+  const legacy = await store.loadState();
+  legacy.artifacts.rejectedCorpusRepairTarget = undefined;
+  await store.saveState(legacy);
+  pauseAfterFirstFailure = false;
+  const recovered = await factory.retry(waiting.runId);
+
+  assert.equal(recovered.stage, "ready");
+  assert.match(corpusPrompts[2]!, /Compile reason: completeness_failure/);
+  assert.match(corpusPrompts[2]!, /Rejected compilation repair target \(complete but unaccepted/);
+  assert.equal(recovered.artifacts.rejectedCorpusRepairTarget, undefined);
+});
+
 test("short framework names and genuinely synthesized private evidence pass release guards", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-factory-private-synthesis-"));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -815,6 +935,19 @@ function passingEvaluation(): string {
     "None.",
     "## Corpus reflection",
     "No change."
+  ].join("\n");
+}
+
+function failedCompletenessEvaluation(): string {
+  return [
+    "## Verdict",
+    "FAIL",
+    "## Diagnosis",
+    "The candidate omits a supported decision boundary from the complete Corpus.",
+    "## Few-shot candidate",
+    "Repair the missing boundary without copying source prose.",
+    "## Corpus reflection",
+    "Re-emit the complete asset set and preserve the omitted behavior."
   ].join("\n");
 }
 
