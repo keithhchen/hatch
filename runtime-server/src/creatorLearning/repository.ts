@@ -567,7 +567,7 @@ BEGIN
         legacy.name,
         COALESCE(NULLIF(legacy.brief, ''), NULLIF(legacy.name, '')),
         legacy.brief,
-        CASE WHEN legacy.deleted_at IS NOT NULL THEN 'deleted' ELSE 'active' END,
+        CASE WHEN legacy.deleted_at IS NOT NULL OR legacy.status = 'deleted' THEN 'deleted' ELSE 'active' END,
         legacy.run_id,
         legacy.latest_revision_id,
         COALESCE(legacy.created_at, clock_timestamp()),
