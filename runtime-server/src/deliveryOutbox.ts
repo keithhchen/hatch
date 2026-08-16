@@ -20,7 +20,7 @@ const DeliveryBindingSchema = z.object({
 
 const DeliveryUnitReservationSchema = z.object({
   reservationId: safeIdentifier,
-  taskId: safeIdentifier,
+  productId: safeIdentifier,
   deliveryId: safeIdentifier
 }).strict() satisfies z.ZodType<DeliveryUnitReservation>;
 

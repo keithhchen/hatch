@@ -224,13 +224,13 @@ test("strict raw JSON gate rejects a malformed later call with zero batch mutati
     purpose: "evidence.extract",
     systemPrompt: "evidence system",
     prompt: "all source files",
-    outputContract: { kind: "evidence_ledger", requiredSections: ["Task evidence", "Boundaries"] }
+    outputContract: { kind: "evidence_ledger", requiredSections: ["Product evidence", "Boundaries"] }
   }, [
     toolTurn([
       {
         id: "apparently-valid-first",
         name: "submit_evidence_section",
-        arguments: { section: "Task evidence", markdown: "OLD MUST BE ROLLED BACK" }
+        arguments: { section: "Product evidence", markdown: "OLD MUST BE ROLLED BACK" }
       },
       {
         id: "truncated-second",
@@ -243,7 +243,7 @@ test("strict raw JSON gate rejects a malformed later call with zero batch mutati
       {
         id: "clean-one",
         name: "submit_evidence_section",
-        arguments: { section: "Task evidence", markdown: preservedEvidence }
+        arguments: { section: "Product evidence", markdown: preservedEvidence }
       },
       {
         id: "clean-two",
@@ -254,7 +254,7 @@ test("strict raw JSON gate rejects a malformed later call with zero batch mutati
     ])
   ]);
 
-  assert.ok(output.includes(`## Task evidence\n\n${preservedEvidence}\n`), "long Markdown body must not be trimmed or normalized");
+  assert.ok(output.includes(`## Product evidence\n\n${preservedEvidence}\n`), "long Markdown body must not be trimmed or normalized");
   assert.doesNotMatch(output, /OLD MUST BE ROLLED BACK/);
   assert.equal(requests.length, 2, "an error in a mixed batch must keep the repair turn available");
   const errorReceipts = ((requests[1]!.messages as Array<Record<string, unknown>>) ?? [])
@@ -275,7 +275,7 @@ test("a length-terminated batch carrying complete-looking tool args never finali
       {
         id: "length-submit",
         name: "submit_evidence_section",
-        arguments: { section: "Task evidence", markdown: "must not commit" }
+        arguments: { section: "Product evidence", markdown: "must not commit" }
       },
       { id: "length-finalize", name: "finalize_evidence", arguments: {} }
     ], "length")
@@ -285,7 +285,7 @@ test("a length-terminated batch carrying complete-looking tool args never finali
       purpose: "evidence.extract",
       systemPrompt: "evidence system",
       prompt: "input",
-      outputContract: { kind: "evidence_ledger", requiredSections: ["Task evidence"] },
+      outputContract: { kind: "evidence_ledger", requiredSections: ["Product evidence"] },
       reportFailureTelemetry: (value) => { telemetry = value; }
     }),
     /did not complete: length/

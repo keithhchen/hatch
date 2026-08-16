@@ -58,7 +58,7 @@ const SEALED_FAILURE_MESSAGE = "Sealed Factory operation failed; sensitive diagn
 // context for instructions, multilingual tokenization, reasoning, and output.
 const EVIDENCE_CHUNK_CHARACTERS = 600_000;
 const INITIAL_EVIDENCE_SECTIONS = [
-  "Task evidence",
+  "Product evidence",
   "Decision rules",
   "Cases",
   "Boundaries",
@@ -106,7 +106,7 @@ export class CreatorFactory {
       ? `${JSON.stringify(startInput.sourceManifest, null, 2)}\n`
       : undefined;
     const store = this.fileStore(startInput.runId, control, {
-      ...(startInput.taskId ? { taskId: startInput.taskId } : {}),
+      ...(startInput.productId ? { productId: startInput.productId } : {}),
       ...(startInput.distillationRunId ? { runId: startInput.distillationRunId } : {}),
       ...(startInput.revisionId ? { revisionId: startInput.revisionId } : {})
     });
@@ -180,7 +180,7 @@ export class CreatorFactory {
         })));
       }
     }
-    const taskBrief = await store.writeArtifact("input/task-brief.md", startInput.taskBrief);
+    const productPromise = await store.writeArtifact("input/product-brief.md", startInput.productPromise);
     const sourceManifest = sourceManifestText
       ? await store.writeArtifact(
           "input/source-manifest.json",
@@ -213,8 +213,8 @@ export class CreatorFactory {
       agentId: identity.agentId,
       product: identity.product,
       tools: normalizeFactoryTools(startInput.tools),
-      taskName: startInput.taskName,
-      ...(startInput.taskId ? { taskId: startInput.taskId } : {}),
+      productName: startInput.productName,
+      ...(startInput.productId ? { productId: startInput.productId } : {}),
       ...(startInput.distillationRunId ? { distillationRunId: startInput.distillationRunId } : {}),
       ...(startInput.revisionId ? { revisionId: startInput.revisionId } : {}),
       ...(startInput.revisionNumber === undefined ? {} : { revisionNumber: startInput.revisionNumber }),
@@ -223,7 +223,7 @@ export class CreatorFactory {
       stage: directReviewRevision ? "compiling_corpus" : "extracting_evidence",
       config,
       artifacts: {
-        taskBrief,
+        productPromise,
         sourcePacket,
         ...(sourceManifest ? { sourceManifest } : {}),
         ...(sourceImages.length ? { sourceImages } : {}),
@@ -388,13 +388,13 @@ export class CreatorFactory {
     store: FactoryFileStore,
     state: FactoryRunState
   ): Promise<FactoryRunState> {
-    const taskBrief = await store.readArtifact(state.artifacts.taskBrief);
+    const productPromise = await store.readArtifact(state.artifacts.productPromise);
     const sourcePacket = await store.readArtifact(state.artifacts.sourcePacket);
     const sourceImages = await readSourceImages(store, state);
     const evidenceInput = {
       creator: state.creator,
-      taskName: state.taskName,
-      taskBrief
+      productName: state.productName,
+      productPromise
     };
     const chunks = chunkEvidenceSourcePacket(sourcePacket, EVIDENCE_CHUNK_CHARACTERS);
     const fragmentOutputs: Array<{ id: string; evidence: string }> = [];
@@ -547,8 +547,8 @@ export class CreatorFactory {
     } else {
       const call = corpusPrompt({
         creatorName: state.creator.name,
-        taskName: state.taskName,
-        taskBrief: await store.readArtifact(state.artifacts.taskBrief),
+        productName: state.productName,
+        productPromise: await store.readArtifact(state.artifacts.productPromise),
         productContract: renderProductContract(state.product),
         evidence: await store.readArtifact(state.artifacts.evidence),
         developmentQa: parseQaSet(await store.readArtifact(state.artifacts.developmentQa)),
@@ -647,8 +647,8 @@ export class CreatorFactory {
       : [];
     const completenessCall = corpusCompletenessPrompt({
       creatorName: state.creator.name,
-      taskName: state.taskName,
-      taskBrief: await store.readArtifact(state.artifacts.taskBrief),
+      productName: state.productName,
+      productPromise: await store.readArtifact(state.artifacts.productPromise),
       productContract: renderProductContract(state.product),
       evidence: await store.readArtifact(evidence),
       developmentQa: parseQaSet(await store.readArtifact(developmentQa)),
@@ -1023,7 +1023,7 @@ export class CreatorFactory {
         `Creator: ${state.creator.name}`,
         `Agent: ${state.agentId}`,
         `Product: ${state.product.name}`,
-        `Task: ${state.taskName}`,
+        `Product: ${state.productName}`,
         `Corpus version: ${latest.version}`,
         `System instructions digest: ${latest.systemInstructions.sha256}`,
         `Verified Agent Corpus digest: ${latest.agentCorpus.digest}`,
@@ -1072,7 +1072,7 @@ export class CreatorFactory {
 
   private async generateQuestions(
     store: FactoryFileStore,
-    state: Pick<FactoryRunState, "creator" | "taskName" | "artifacts">,
+    state: Pick<FactoryRunState, "creator" | "productName" | "artifacts">,
     count: number,
     idPrefix: string,
     excludedQuestions: CreatorQuestion[] = []
@@ -1081,8 +1081,8 @@ export class CreatorFactory {
       if (!state.artifacts.evidence) throw new Error("Question generation requires Evidence");
       const call = questionPrompt({
         creatorName: state.creator.name,
-        taskName: state.taskName,
-        taskBrief: await store.readArtifact(state.artifacts.taskBrief),
+        productName: state.productName,
+        productPromise: await store.readArtifact(state.artifacts.productPromise),
         evidence: await store.readArtifact(state.artifacts.evidence),
         count,
         excludedQuestions
@@ -1213,7 +1213,7 @@ export class CreatorFactory {
       if (!verdict) {
         const judge = evaluationPrompt({
           creatorName: state.creator.name,
-          taskName: state.taskName,
+          productName: state.productName,
           qa: item,
           hatchResult
         });
@@ -1536,7 +1536,7 @@ export class CreatorFactory {
     };
   }
 
-  private fileStore(runId: string | undefined, control: FactoryExecutionControl = {}, graphContext?: { taskId?: string; runId?: string; revisionId?: string }): FactoryFileStore {
+  private fileStore(runId: string | undefined, control: FactoryExecutionControl = {}, graphContext?: { productId?: string; runId?: string; revisionId?: string }): FactoryFileStore {
     return new FactoryFileStore(this.root, runId, control.beforeCommit, control.signal, {
       objectStore: this.options.objectStore,
       graphStore: this.options.graphStore,
@@ -2133,8 +2133,8 @@ function normalizeFactoryIdentity(input: FactoryStartInput): {
   const agentId = requireUuidV4(suppliedAgentId || suppliedProductId || randomUUID(), "product.id");
   const productId = requireUuidV4(suppliedProductId || agentId, "product.id");
   if (agentId !== productId) throw new Error("agentId and product.id must identify the same Product UUID");
-  const productName = input.product?.name?.trim() || input.taskName.trim();
-  const description = input.product?.description?.trim() || input.taskBrief.trim();
+  const productName = input.product?.name?.trim() || input.productName.trim();
+  const description = input.product?.description?.trim() || input.productPromise.trim();
   const promise = input.product?.promise?.trim();
   const boundaries = input.product?.boundaries
     ?.map((boundary) => boundary.trim())
@@ -2346,7 +2346,7 @@ function provisionalHeldoutEvaluationAsset(): unknown {
 
 function validateStartInput(input: FactoryStartInput): void {
   if (!input.creator.id.trim() || !input.creator.name.trim()) throw new Error("Creator id and name are required");
-  if (!input.taskName.trim() || !input.taskBrief.trim()) throw new Error("One concrete Task name and brief are required");
+  if (!input.productName.trim() || !input.productPromise.trim()) throw new Error("One concrete Product name and brief are required");
   normalizeFactoryIdentity(input);
   if (input.sources.length === 0) throw new Error("At least one authorized source is required");
   const development = input.config?.developmentQuestions ?? 6;

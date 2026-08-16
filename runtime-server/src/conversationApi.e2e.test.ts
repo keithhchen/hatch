@@ -296,7 +296,7 @@ test("two windows get distinct executor leases; disconnect is Interrupted and re
     run_id: "run_recovery_parallel",
     client_message_id: "message_recovery_parallel",
     conversation_id: conversationId,
-    message: { role: "user", content: "Start another task." }
+    message: { role: "user", content: "Start another product." }
   }));
   const busy = await waitForSocket(secondMessages, (message) => (
     message.type === "turn.failed" && message.run_id === "run_recovery_parallel"

@@ -57,8 +57,8 @@ test("Registry Creator Factory API authenticates ownership and creates idempoten
         input_schema: { type: "object", properties: { id: { type: "string" } } }
       }
     ],
-    task_name: "Publishable reply",
-    task_brief: "Choose one recommendation and return final copy.",
+    product_name: "Publishable reply",
+    product_promise: "Choose one recommendation and return final copy.",
     sources: [{
       id: "S1",
       authority: "creator_current",
@@ -121,7 +121,7 @@ test("Registry Creator Factory API authenticates ownership and creates idempoten
       "content-type": "application/json",
       "idempotency-key": "create-factory-1"
     },
-    body: JSON.stringify({ ...body, task_name: "A different task" })
+    body: JSON.stringify({ ...body, product_name: "A different product" })
   });
   assert.equal(conflictingReplay.status, 409);
 

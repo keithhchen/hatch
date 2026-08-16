@@ -1,5 +1,5 @@
 const ROOT = "/studio";
-const PRODUCT_TABS = new Set(["files", "about-you", "review", "complete", "overview", "test", "examples", "versions", "data-controls"]);
+const PRODUCT_TABS = new Set(["files", "about-you", "review", "brief", "complete"]);
 
 export function parseCreatorRoute(pathname) {
   const clean = `/${String(pathname ?? "").split(/[?#]/)[0].split("/").filter(Boolean).join("/")}`;
@@ -7,13 +7,7 @@ export function parseCreatorRoute(pathname) {
   if (normalized !== ROOT && !normalized.startsWith(`${ROOT}/`)) return { kind: "not-found", section: "" };
   const segments = normalized.slice(ROOT.length).split("/").filter(Boolean).map(safeDecode);
   if (!segments.length) return { kind: "home", section: "home" };
-  if (segments[0] === "tasks") {
-    if (segments.length === 2 && segments[1] === "new") return { kind: "task-create", section: "products" };
-    if (segments.length === 3 && segments[2] === "files" && segments[1]) {
-      return { kind: "files", section: "products", taskId: segments[1] };
-    }
-    return { kind: "not-found", section: "products" };
-  }
+  if (segments[0] === "products" && segments.length === 2 && segments[1] === "new") return { kind: "product-create", section: "products" };
   if (segments[0] === "factory") {
     if (segments.length === 3 && segments[1] === "runs" && segments[2]) return { kind: "factory", section: "products", runId: segments[2] };
     if (segments.length === 2 && segments[1]) return { kind: "factory", section: "products", runId: segments[1] };
@@ -21,7 +15,6 @@ export function parseCreatorRoute(pathname) {
   }
   if (segments[0] === "products") {
     if (segments.length === 1) return { kind: "products", section: "products" };
-    if (segments[1] === "new") return { kind: "factory", section: "products", productId: "" };
     const productId = segments[1];
     if (segments.length === 2) return { kind: "product", section: "products", productId, tab: "files" };
     if (PRODUCT_TABS.has(segments[2])) return { kind: "product", section: "products", productId, tab: segments[2] };
@@ -41,8 +34,7 @@ export function parseCreatorRoute(pathname) {
 export function creatorRouteTitle(route) {
   if (route.kind === "home") return "Creator home";
   if (route.kind === "products") return "Products";
-  if (route.kind === "task-create") return "Create Task";
-  if (route.kind === "files") return "Task files";
+  if (route.kind === "product-create") return "Create product";
   if (route.kind === "factory") return route.runId ? "Factory run" : "Creator Factory";
   if (route.kind === "candidate") return "Candidate review";
   if (route.kind === "preview") return "Storefront preview";

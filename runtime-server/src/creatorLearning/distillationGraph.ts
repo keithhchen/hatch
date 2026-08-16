@@ -8,7 +8,7 @@ import { createHash, randomUUID } from "node:crypto";
  *   immutable artifacts -> append-only graph events -> gate assessments
  *   -> derived state
  *
- * A Run is a stable Task lineage. Every material change creates a Revision
+ * A Run is a stable Product lineage. Every material change creates a Revision
  * under that Run and pins exactly one immutable Source Snapshot.
  */
 
@@ -26,7 +26,7 @@ export type DistillationNodeKind =
 export type DistillationActor = "creator" | "worker" | "system";
 
 export type DistillationEventType =
-  | "task_created"
+  | "product_created"
   | "source_uploaded"
   | "snapshot_locked"
   | "run_created"
@@ -66,7 +66,7 @@ export type ArtifactKind =
 
 export type ImmutableArtifactRecord = {
   artifactId: string;
-  taskId: string;
+  productId: string;
   runId?: string;
   revisionId?: string;
   kind: ArtifactKind;
@@ -81,7 +81,7 @@ export type DistillationEvent = {
   id: string;
   eventKey: string;
   sequence: number;
-  taskId: string;
+  productId: string;
   runId: string;
   revisionId?: string;
   type: DistillationEventType;
@@ -95,16 +95,15 @@ export type DistillationEvent = {
 
 export type DistillationRun = {
   id: string;
-  taskId: string;
+  productId: string;
   creatorId: string;
-  productId?: string;
   createdAt: string;
 };
 
 export type DistillationRunRevision = {
   id: string;
   runId: string;
-  taskId: string;
+  productId: string;
   revision: number;
   sourceSnapshotId: string;
   parentRevisionId?: string;
@@ -115,7 +114,7 @@ export type NodeExecutionStatus = "queued" | "running" | "completed" | "failed" 
 
 export type DistillationNodeExecution = {
   id: string;
-  taskId: string;
+  productId: string;
   runId: string;
   revisionId: string;
   node: DistillationNodeKind;
@@ -133,7 +132,7 @@ export type QualityGateStatus = "pending" | "passed" | "failed" | "blocked";
 export type QualityGateAssessment = {
   id: string;
   gateKey: string;
-  taskId: string;
+  productId: string;
   runId: string;
   revisionId: string;
   name: "schema" | "development" | "regression" | "heldout" | "completeness" | "release";
@@ -146,16 +145,15 @@ export type QualityGateAssessment = {
 
 export type DistillationRelease = {
   id: string;
-  taskId: string;
+  productId: string;
   runId: string;
   revisionId: string;
-  productId: string;
   corpusArtifactId: string;
   createdAt: string;
 };
 
 export type DistillationGraphState = {
-  taskId: string;
+  productId: string;
   runId?: string;
   currentRevisionId?: string;
   currentNode?: DistillationNodeKind;
@@ -182,11 +180,11 @@ export type DistillationGraphStore = {
   registerArtifact(record: ImmutableArtifactRecord): Promise<ImmutableArtifactRecord>;
   getArtifact(artifactId: string): Promise<ImmutableArtifactRecord | undefined>;
   appendEvent(input: Omit<DistillationEvent, "sequence" | "occurredAt"> & { occurredAt?: string }): Promise<DistillationEvent>;
-  listEvents(taskId: string): Promise<DistillationEvent[]>;
+  listEvents(productId: string): Promise<DistillationEvent[]>;
   recordGate(input: Omit<QualityGateAssessment, "assessedAt"> & { assessedAt?: string }): Promise<QualityGateAssessment>;
   listGates(revisionId: string): Promise<QualityGateAssessment[]>;
   recordRelease(release: DistillationRelease): Promise<DistillationRelease>;
-  derive(taskId: string): Promise<DistillationGraphState>;
+  derive(productId: string): Promise<DistillationGraphState>;
 };
 
 /** A small real in-memory implementation for deterministic unit tests. */
@@ -212,8 +210,8 @@ export class InMemoryDistillationGraphStore implements DistillationGraphStore {
       assertSameJson(runIdentity(existing), runIdentity(run), `Distillation Run ${run.id} is immutable`);
       return structuredClone(existing);
     }
-    const taskRun = [...this.runs.values()].find((item) => item.taskId === run.taskId);
-    if (taskRun) throw new Error(`Task ${run.taskId} is already attached to another Distillation Run`);
+    const existingProductRun = [...this.runs.values()].find((item) => item.productId === run.productId);
+    if (existingProductRun) throw new Error(`Product ${run.productId} is already attached to another Distillation Run`);
     this.runs.set(run.id, structuredClone(run));
     return structuredClone(run);
   }
@@ -222,9 +220,9 @@ export class InMemoryDistillationGraphStore implements DistillationGraphStore {
     const existing = this.revisions.get(revision.id);
     if (existing) { assertSameJson(existing, revision, `RunRevision ${revision.id} is immutable`); return structuredClone(existing); }
     const run = this.runs.get(revision.runId);
-    if (!run || run.taskId !== revision.taskId) throw new Error(`RunRevision references an unknown Distillation Run ${revision.runId}`);
+    if (!run || run.productId !== revision.productId) throw new Error(`RunRevision references an unknown Distillation Run ${revision.runId}`);
     const parent = revision.parentRevisionId ? this.revisions.get(revision.parentRevisionId) : undefined;
-    if (revision.parentRevisionId && (!parent || parent.runId !== revision.runId || parent.taskId !== revision.taskId || parent.revision >= revision.revision)) {
+    if (revision.parentRevisionId && (!parent || parent.runId !== revision.runId || parent.productId !== revision.productId || parent.revision >= revision.revision)) {
       throw new Error(`RunRevision parent ${revision.parentRevisionId} is invalid`);
     }
     if (![...this.revisions.values()].every((item) => item.runId !== revision.runId || item.revision !== revision.revision)) throw new Error(`RunRevision ${revision.runId}/${revision.revision} already exists`);
@@ -237,8 +235,8 @@ export class InMemoryDistillationGraphStore implements DistillationGraphStore {
     if (existing) { assertSameJson(existing, execution, `Node execution ${execution.id} is immutable`); return structuredClone(existing); }
     const revision = this.revisions.get(execution.revisionId);
     if (!revision) throw new Error(`Node execution references unknown RunRevision ${execution.revisionId}`);
-    if (revision.taskId !== execution.taskId || revision.runId !== execution.runId) throw new Error(`Node execution ${execution.id} is not attached to its RunRevision`);
-    assertArtifactRefs(this.artifacts, execution.taskId, execution.revisionId, [...execution.inputArtifactIds, ...execution.outputArtifactIds]);
+    if (revision.productId !== execution.productId || revision.runId !== execution.runId) throw new Error(`Node execution ${execution.id} is not attached to its RunRevision`);
+    assertArtifactRefs(this.artifacts, execution.productId, execution.revisionId, [...execution.inputArtifactIds, ...execution.outputArtifactIds]);
     this.executions.set(execution.id, structuredClone(execution));
     return structuredClone(execution);
   }
@@ -255,11 +253,11 @@ export class InMemoryDistillationGraphStore implements DistillationGraphStore {
     }
     if (record.runId) {
       const run = this.runs.get(record.runId);
-      if (run && run.taskId !== record.taskId) throw new Error(`Artifact ${record.artifactId} belongs to another Task Run`);
+      if (run && run.productId !== record.productId) throw new Error(`Artifact ${record.artifactId} belongs to another Product Run`);
     }
     if (record.revisionId) {
       const revision = this.revisions.get(record.revisionId);
-      if (!revision || revision.taskId !== record.taskId || (record.runId && revision.runId !== record.runId)) {
+      if (!revision || revision.productId !== record.productId || (record.runId && revision.runId !== record.runId)) {
         throw new Error(`Artifact ${record.artifactId} references an invalid RunRevision ${record.revisionId}`);
       }
     }
@@ -283,34 +281,34 @@ export class InMemoryDistillationGraphStore implements DistillationGraphStore {
       assertSameJson(existingInput, requestedInput, `Event ${input.id} is immutable`);
       return structuredClone(sameId);
     }
-    const existingId = this.eventKeys.get(`${input.taskId}:${input.eventKey}`);
+    const existingId = this.eventKeys.get(`${input.productId}:${input.eventKey}`);
     if (existingId) return structuredClone(this.events.get(existingId)!);
     const run = this.runs.get(input.runId);
-    if (run && run.taskId !== input.taskId) throw new Error(`Event ${input.id} belongs to another Task Run`);
+    if (run && run.productId !== input.productId) throw new Error(`Event ${input.id} belongs to another Product Run`);
     if (input.revisionId) {
       const revision = this.revisions.get(input.revisionId);
-      if (!revision || revision.taskId !== input.taskId || revision.runId !== input.runId) {
+      if (!revision || revision.productId !== input.productId || revision.runId !== input.runId) {
         throw new Error(`Event ${input.id} references an invalid RunRevision ${input.revisionId}`);
       }
     }
     for (const parentId of input.parentEventIds) {
       const parent = this.events.get(parentId);
-      if (!parent || parent.taskId !== input.taskId) throw new Error(`Event parent ${parentId} is not in this Task graph`);
+      if (!parent || parent.productId !== input.productId) throw new Error(`Event parent ${parentId} is not in this Product graph`);
     }
-    assertArtifactRefs(this.artifacts, input.taskId, input.revisionId, input.artifactIds);
+    assertArtifactRefs(this.artifacts, input.productId, input.revisionId, input.artifactIds);
     const event: DistillationEvent = {
       ...structuredClone(input),
       sequence: ++this.sequence,
       occurredAt: input.occurredAt ?? new Date().toISOString()
     };
     this.events.set(event.id, event);
-    this.eventKeys.set(`${event.taskId}:${event.eventKey}`, event.id);
+    this.eventKeys.set(`${event.productId}:${event.eventKey}`, event.id);
     return structuredClone(event);
   }
 
-  async listEvents(taskId: string): Promise<DistillationEvent[]> {
+  async listEvents(productId: string): Promise<DistillationEvent[]> {
     return [...this.events.values()]
-      .filter((event) => event.taskId === taskId)
+      .filter((event) => event.productId === productId)
       .sort(compareEvents)
       .map((event) => structuredClone(event));
   }
@@ -323,12 +321,12 @@ export class InMemoryDistillationGraphStore implements DistillationGraphStore {
       return structuredClone(existing);
     }
     const revision = this.revisions.get(input.revisionId);
-    if (!revision || revision.taskId !== input.taskId || revision.runId !== input.runId) throw new Error(`Gate assessment ${input.id} references an invalid RunRevision ${input.revisionId}`);
+    if (!revision || revision.productId !== input.productId || revision.runId !== input.runId) throw new Error(`Gate assessment ${input.id} references an invalid RunRevision ${input.revisionId}`);
     const assessment: QualityGateAssessment = {
       ...structuredClone(input),
       assessedAt: input.assessedAt ?? new Date().toISOString()
     };
-    assertArtifactRefs(this.artifacts, assessment.taskId, assessment.revisionId, assessment.evidenceArtifactIds);
+    assertArtifactRefs(this.artifacts, assessment.productId, assessment.revisionId, assessment.evidenceArtifactIds);
     this.gates.set(assessment.id, assessment);
     return structuredClone(assessment);
   }
@@ -341,7 +339,7 @@ export class InMemoryDistillationGraphStore implements DistillationGraphStore {
   }
 
   async recordRelease(release: DistillationRelease): Promise<DistillationRelease> {
-    if (!release.id || !release.taskId || !release.runId || !release.revisionId || !release.productId || !release.corpusArtifactId) {
+    if (!release.id || !release.productId || !release.runId || !release.revisionId || !release.corpusArtifactId) {
       throw new Error("Invalid Distillation Release");
     }
     const existing = this.releases.get(release.id);
@@ -350,32 +348,32 @@ export class InMemoryDistillationGraphStore implements DistillationGraphStore {
       return structuredClone(existing);
     }
     const revision = this.revisions.get(release.revisionId);
-    if (!revision || revision.taskId !== release.taskId || revision.runId !== release.runId) {
+    if (!revision || revision.productId !== release.productId || revision.runId !== release.runId) {
       throw new Error(`Release references unknown RunRevision ${release.revisionId}`);
     }
-    assertArtifactRefs(this.artifacts, release.taskId, release.revisionId, [release.corpusArtifactId]);
+    assertArtifactRefs(this.artifacts, release.productId, release.revisionId, [release.corpusArtifactId]);
     const corpus = this.artifacts.get(release.corpusArtifactId);
     if (!corpus || corpus.kind !== "corpus_bundle") throw new Error(`Release references a non-corpus Artifact ${release.corpusArtifactId}`);
     this.releases.set(release.id, structuredClone(release));
     return structuredClone(release);
   }
 
-  async derive(taskId: string): Promise<DistillationGraphState> {
-    const events = await this.listEvents(taskId);
-    const gates = [...this.gates.values()].filter((gate) => gate.taskId === taskId).sort(compareGates);
-    const releases = [...this.releases.values()].filter((release) => release.taskId === taskId).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    return deriveDistillationState(taskId, events, gates, releases.at(-1));
+  async derive(productId: string): Promise<DistillationGraphState> {
+    const events = await this.listEvents(productId);
+    const gates = [...this.gates.values()].filter((gate) => gate.productId === productId).sort(compareGates);
+    const releases = [...this.releases.values()].filter((release) => release.productId === productId).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return deriveDistillationState(productId, events, gates, releases.at(-1));
   }
 }
 
 export function deriveDistillationState(
-  taskId: string,
+  productId: string,
   events: DistillationEvent[],
   assessments: QualityGateAssessment[],
   latestRelease?: DistillationRelease
 ): DistillationGraphState {
-  const orderedEvents = events.filter((event) => event.taskId === taskId).sort(compareEvents);
-  // A Task is a stable lineage, while every correction/recompile creates a
+  const orderedEvents = events.filter((event) => event.productId === productId).sort(compareEvents);
+  // A Product is a stable lineage, while every correction/recompile creates a
   // new Revision. Derived state must never let a failed gate or a stale node
   // from revision N-1 block revision N.
   const latestRevisionMarker = [...orderedEvents].reverse().find((event) => event.type === "revision_created" && event.revisionId);
@@ -413,7 +411,7 @@ export function deriveDistillationState(
   }
   const latestByGate = new Map<string, QualityGateAssessment>();
   for (const gate of assessments
-    .filter((gate) => gate.taskId === taskId && (!currentRevisionId || gate.revisionId === currentRevisionId))
+    .filter((gate) => gate.productId === productId && (!currentRevisionId || gate.revisionId === currentRevisionId))
     .sort(compareGates)) latestByGate.set(gate.gateKey, gate);
   const gates = [...latestByGate.values()];
   const criticalGateFailures = gates.filter((gate) => gate.critical && ["failed", "blocked"].includes(gate.status)).map((gate) => gate.name);
@@ -435,7 +433,7 @@ export function deriveDistillationState(
             ? "running"
             : "not_started";
   return {
-    taskId,
+    productId,
     ...(runId ? { runId } : {}),
     ...(currentRevisionId ? { currentRevisionId } : {}),
     ...(currentNode ? { currentNode } : {}),
@@ -459,7 +457,7 @@ export function deriveRevisionContext(
   artifacts: ImmutableArtifactRecord[]
 ): RevisionContext {
   const revisionsById = new Map(revisions
-    .filter((item) => item.taskId === revision.taskId && item.runId === revision.runId)
+    .filter((item) => item.productId === revision.productId && item.runId === revision.runId)
     .map((item) => [item.id, item]));
   const lineage: DistillationRunRevision[] = [];
   const seen = new Set<string>();
@@ -472,17 +470,17 @@ export function deriveRevisionContext(
   lineage.reverse();
   const parent = revision.parentRevisionId ? revisionsById.get(revision.parentRevisionId) : undefined;
   const currentEvents = events
-    .filter((event) => event.taskId === revision.taskId && event.runId === revision.runId && event.revisionId === revision.id)
+    .filter((event) => event.productId === revision.productId && event.runId === revision.runId && event.revisionId === revision.id)
     .sort(compareEvents);
   const parentEvents = parent
-    ? events.filter((event) => event.taskId === revision.taskId && event.runId === revision.runId && event.revisionId === parent.id).sort(compareEvents)
+    ? events.filter((event) => event.productId === revision.productId && event.runId === revision.runId && event.revisionId === parent.id).sort(compareEvents)
     : [];
   const currentLoopFeedbackArtifactIds = currentEvents
     .filter((event) => event.type === "correction_submitted" || event.type === "node_failed")
     .flatMap((event) => event.artifactIds);
   const lineageIndex = new Map(lineage.map((item, index) => [item.id, index]));
   const regressionArtifactIds = events
-    .filter((event) => event.taskId === revision.taskId && event.runId === revision.runId && event.type === "gate_assessed" && event.node === "regression_eval" && lineageIndex.has(event.revisionId ?? ""))
+    .filter((event) => event.productId === revision.productId && event.runId === revision.runId && event.type === "gate_assessed" && event.node === "regression_eval" && lineageIndex.has(event.revisionId ?? ""))
     .sort((left, right) => (lineageIndex.get(left.revisionId ?? "") ?? 0) - (lineageIndex.get(right.revisionId ?? "") ?? 0) || compareEvents(left, right))
     .flatMap((event) => event.artifactIds)
     .filter((artifactId, index, values) => values.indexOf(artifactId) === index);
@@ -514,33 +512,33 @@ function compareGates(left: QualityGateAssessment, right: QualityGateAssessment)
 }
 
 export function validateArtifact(record: ImmutableArtifactRecord): void {
-  if (!record.artifactId || !record.taskId || !record.objectKey || !/^sha256:[a-f0-9]{64}$/.test(record.sha256) || !Number.isSafeInteger(record.bytes) || record.bytes < 0 || !record.mediaType) {
+  if (!record.artifactId || !record.productId || !record.objectKey || !/^sha256:[a-f0-9]{64}$/.test(record.sha256) || !Number.isSafeInteger(record.bytes) || record.bytes < 0 || !record.mediaType) {
     throw new Error("Invalid immutable Artifact record");
   }
 }
 
 function validateEventInput(input: Omit<DistillationEvent, "sequence" | "occurredAt"> & { occurredAt?: string }): void {
-  if (!input.id || !input.eventKey || !input.taskId || !input.runId || !input.type || !input.actor || !Array.isArray(input.parentEventIds) || !Array.isArray(input.artifactIds)) {
+  if (!input.id || !input.eventKey || !input.productId || !input.runId || !input.type || !input.actor || !Array.isArray(input.parentEventIds) || !Array.isArray(input.artifactIds)) {
     throw new Error("Invalid Distillation graph event");
   }
 }
 
 function validateGate(input: Omit<QualityGateAssessment, "assessedAt"> & { assessedAt?: string }): void {
-  if (!input.id || !input.gateKey || !input.taskId || !input.runId || !input.revisionId || !input.name || !input.status || !Array.isArray(input.evidenceArtifactIds)) {
+  if (!input.id || !input.gateKey || !input.productId || !input.runId || !input.revisionId || !input.name || !input.status || !Array.isArray(input.evidenceArtifactIds)) {
     throw new Error("Invalid Quality Gate assessment");
   }
 }
 
 function assertArtifactRefs(
   artifacts: Map<string, ImmutableArtifactRecord>,
-  taskId: string,
+  productId: string,
   revisionId: string | undefined,
   artifactIds: string[]
 ): void {
   for (const artifactId of artifactIds) {
     const artifact = artifacts.get(artifactId);
     if (!artifact) throw new Error(`Event or gate references unknown Artifact ${artifactId}`);
-    if (artifact.taskId !== taskId) throw new Error(`Artifact ${artifactId} belongs to another Task`);
+    if (artifact.productId !== productId) throw new Error(`Artifact ${artifactId} belongs to another Product`);
     if (revisionId && artifact.revisionId && artifact.revisionId !== revisionId) {
       throw new Error(`Artifact ${artifactId} belongs to another RunRevision`);
     }

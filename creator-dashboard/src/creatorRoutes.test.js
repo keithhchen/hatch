@@ -12,18 +12,26 @@ test("Creator Factory run routes preserve the selected run across refresh", () =
   assert.equal(creatorRouteTitle(parseCreatorRoute("/studio/factory/runs/factory_123")), "Factory run");
 });
 
-test("Source Library is only reachable through a Task", () => {
+test("Product files are nested under one Product", () => {
   assert.equal(parseCreatorRoute("/studio/sources").kind, "not-found");
-  assert.deepEqual(parseCreatorRoute("/studio/tasks/new"), {
-    kind: "task-create",
+  assert.deepEqual(parseCreatorRoute("/studio/products/new"), {
+    kind: "product-create",
     section: "products"
   });
-  assert.deepEqual(parseCreatorRoute("/studio/tasks/task_123/files"), {
-    kind: "files",
+  assert.deepEqual(parseCreatorRoute("/studio/products/product_123/files"), {
+    kind: "product",
     section: "products",
-    taskId: "task_123"
+    productId: "product_123",
+    tab: "files"
   });
-  assert.equal(creatorRouteTitle(parseCreatorRoute("/studio/tasks/new")), "Create Task");
+  assert.equal(creatorRouteTitle(parseCreatorRoute("/studio/products/new")), "Create product");
+  assert.equal(parseCreatorRoute("/studio/tasks/new").kind, "not-found");
+  assert.deepEqual(parseCreatorRoute("/studio/products/product_123/brief"), {
+    kind: "product",
+    section: "products",
+    productId: "product_123",
+    tab: "brief"
+  });
 });
 
 test("paid payout routes stay outside the free Creator product", () => {
@@ -31,7 +39,7 @@ test("paid payout routes stay outside the free Creator product", () => {
   assert.equal(parseCreatorRoute("/studio/payouts/payout_9").kind, "not-found");
 });
 
-test("unknown nested Creator routes do not silently fall back to a parent task", () => {
+test("unknown nested Creator routes do not silently fall back to a parent Product", () => {
   assert.equal(parseCreatorRoute("/studio/factory/unknown/extra").kind, "not-found");
   assert.equal(parseCreatorRoute("/studio/nope").kind, "not-found");
 });

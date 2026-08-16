@@ -11,97 +11,100 @@ import {
   PageHeader,
   Textarea
 } from "@hatch/ui";
+import { createCreatorTranslator } from "./creatorI18n.js";
 import {
-  createDistillationTask,
-  getDistillationTask,
-  listSourceDocuments,
+  createProduct,
+  getProduct,
+  listProductFiles,
   startFactoryRunFromSources,
-  uploadSourceDocument
+  uploadProductFile
 } from "./creatorFactory.js";
 
-export function CreatorSourceLibrary({ token, taskId, navigate }) {
-  const [task, setTask] = useState(null);
-  const [documents, setDocuments] = useState([]);
-  const [draft, setDraft] = useState({ name: "", brief: "" });
+/** Product-owned file area. Files are never global and never attached to a run. */
+export function CreatorProductFiles({ token, productId, navigate, locale = "en" }) {
+  const t = useMemo(() => createCreatorTranslator(locale), [locale]);
+  const [product, setProduct] = useState(null);
+  const [files, setFiles] = useState([]);
+  const [draft, setDraft] = useState({ name: "", promise: "" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
   useEffect(() => {
-    if (!taskId) return undefined;
+    if (!productId) return undefined;
     let active = true;
-    Promise.all([getDistillationTask(token, taskId), listSourceDocuments(token, taskId)])
-      .then(([nextTask, nextDocuments]) => {
+    Promise.all([getProduct(token, productId), listProductFiles(token, productId)])
+      .then(([nextProduct, nextFiles]) => {
         if (!active) return;
-        setTask(nextTask);
-        setDocuments(nextDocuments.documents ?? []);
+        setProduct(nextProduct?.product ?? nextProduct);
+        setFiles(nextFiles.files ?? nextFiles.documents ?? []);
       })
       .catch((nextError) => active && setError(nextError.message));
     return () => { active = false; };
-  }, [token, taskId]);
+  }, [token, productId]);
 
-  const selectedCount = useMemo(() => documents.length, [documents]);
+  const selectedCount = useMemo(() => files.length, [files]);
 
-  async function createTask(event) {
+  async function create(event) {
     event.preventDefault();
     setBusy(true); setError("");
     try {
-      const created = await createDistillationTask(token, draft);
-      navigate(`/studio/tasks/${encodeURIComponent(created.id)}/files`);
+      const created = await createProduct(token, draft);
+      const id = created?.product?.id ?? created?.product?.product_id ?? created?.id ?? created?.product_id;
+      if (!id) throw new Error("Product was created without an id.");
+      navigate(`/studio/products/${encodeURIComponent(id)}/files`);
     } catch (nextError) { setError(nextError.message); }
     finally { setBusy(false); }
   }
 
-  async function upload(files) {
-    const selectedFiles = [...(files ?? [])];
-    if (!selectedFiles.length || !task) return;
+  async function upload(selected) {
+    const selectedFiles = [...(selected ?? [])];
+    if (!selectedFiles.length || !product) return;
     setBusy(true); setError(""); setNotice("");
     try {
       const uploaded = [];
-      for (const file of selectedFiles) uploaded.push(await uploadSourceDocument(token, task.id, file));
-      setDocuments((current) => [...uploaded, ...current]);
-      setNotice(`${uploaded.length} file${uploaded.length === 1 ? "" : "s"} uploaded. Original files and projections are retained in this Task's private store.`);
+      for (const file of selectedFiles) uploaded.push(await uploadProductFile(token, product.id ?? product.product_id, file));
+      setFiles((current) => [...uploaded, ...current]);
+      setNotice(`${uploaded.length} file${uploaded.length === 1 ? "" : "s"} added to this Product.`);
     } catch (nextError) { setError(nextError.message); }
     finally { setBusy(false); }
   }
 
   async function startRun() {
-    if (!task || documents.length === 0 || busy) return;
+    if (!product || !files.length || busy) return;
     setBusy(true); setError("");
     try {
-      const run = await startFactoryRunFromSources(token, task, documents.map((document) => document.id));
-      const productId = run.product_id ?? run.product?.id ?? task.product_id;
-      navigate(productId
-        ? `/studio/products/${encodeURIComponent(productId)}/about-you`
-        : `/studio/factory/runs/${encodeURIComponent(run.id)}`);
+      const run = await startFactoryRunFromSources(token, product, files.map((file) => file.id));
+      navigate(`/studio/products/${encodeURIComponent(product.id ?? product.product_id)}/about-you`);
+      return run;
     } catch (nextError) { setError(nextError.message); }
     finally { setBusy(false); }
   }
 
-  if (!taskId) {
+  if (!productId) {
     return <section className="cpv2-card cpv2-panel cpv2-source-library">
       <BackToProducts navigate={navigate} />
-      <PageHeader label="Create Task" title="Create one focused Task." body="Every Task gets its own files. After creation, all uploaded files and revisions stay attached to that Task." />
-      {error ? <InlineAlert tone="error" title="Task could not be created">{error}</InlineAlert> : null}
-      <form onSubmit={createTask} className="cpv2-source-task-form">
-        <FormField label="Task name" required hint="This name is immutable after creation."><Input required value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} placeholder="e.g. Signal Resume Review" /></FormField>
-        <FormField label="Task promise" required hint="What does the Buyer provide, and what finished result do they receive?"><Textarea required value={draft.brief} onChange={(event) => setDraft((current) => ({ ...current, brief: event.target.value }))} placeholder="Describe the finished result." /></FormField>
-        <Button type="submit" loading={busy}>Create Task</Button>
+      <PageHeader label={t("createProduct")} title={t("startProductTitle")} body={t("startProductBody")} />
+      {error ? <InlineAlert tone="error" title={t("productCouldNotBeCreated")}>{error}</InlineAlert> : null}
+      <form onSubmit={create} className="cpv2-source-product-form">
+        <FormField label={t("productName")} required hint={t("productNameHint")}><Input required value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} placeholder="e.g. Interview Answer Rewriter" /></FormField>
+        <FormField label={t("whatProductDelivers")} required><Textarea required value={draft.promise} onChange={(event) => setDraft((current) => ({ ...current, promise: event.target.value }))} placeholder={t("describeResult")} /></FormField>
+        <Button type="submit" loading={busy}>{t("createProduct")}</Button>
       </form>
     </section>;
   }
 
   return <section className="cpv2-source-library">
     <BackToProducts navigate={navigate} />
-    <PageHeader label="Task files" title={task?.name ?? "Task files"} body="Upload files for this Task. When you continue, Hatch prepares a private revision from these files." />
-    {error ? <InlineAlert tone="error" title="Task files unavailable">{error}</InlineAlert> : null}
-    {notice ? <InlineAlert tone="success" title="Upload complete">{notice}</InlineAlert> : null}
+    <PageHeader label={t("files")} title={product?.name ?? t("productFiles")} body={t("addFilesBody")} />
+    {error ? <InlineAlert tone="error" title={t("filesUnavailable")}>{error}</InlineAlert> : null}
+    {notice ? <InlineAlert tone="success" title={t("filesAddedTitle")}>{notice}</InlineAlert> : null}
     <article className="cpv2-card cpv2-panel">
-      <div className="cpv2-source-library-toolbar"><div><span className="cpv2-kicker">Private Task storage</span><h2>{selectedCount} file{selectedCount === 1 ? "" : "s"}</h2></div></div>
-      <FileUploader multiple accept=".pdf,.docx,.xlsx,.xls,.xlsm,.csv,.tsv,.txt,.md,.json,.html,.htm,.png,.jpg,.jpeg,.webp" onFiles={upload} disabled={busy} label="Upload files" hint="Local files only; repeat uploads are allowed." className="cpv2-source-uploader" />
-      <p className="cpv2-muted">PDF, DOCX, XLSX, CSV, TXT, Markdown, JSON, HTML are projected to Markdown. Images stay native for Kimi K2.6.</p>
-      {documents.length ? <List items={documents} className="cpv2-source-list" ariaLabel="Task files" renderItem={(document) => <><div><strong>{document.display_name}</strong><small>{document.media_type} · {document.projection?.kind === "image" ? "native image" : "Markdown projection"}</small></div><span>{document.projection?.sha256?.slice(0, 18) ?? "digest pending"}</span></>} /> : <EmptyState title="No files yet" body="Upload the first file to create this Task's private file area." />}
-      <div className="cpv2-source-library-actions"><Button type="button" loading={busy} disabled={!documents.length} onClick={startRun}>Start distillation</Button><Button type="button" variant="secondary" onClick={() => navigate("/studio/factory")}>Open Factory runs</Button></div>
+      <div className="cpv2-source-library-toolbar"><div><span className="cpv2-kicker">{t("productFiles")}</span><h2>{t("filesCount", selectedCount)}</h2></div></div>
+      <FileUploader multiple accept=".pdf,.docx,.xlsx,.xls,.xlsm,.csv,.tsv,.txt,.md,.json,.html,.htm,.png,.jpg,.jpeg,.webp" onFiles={upload} disabled={busy} label={t("uploadFiles")} hint={t("localFilesOnly")} className="cpv2-source-uploader" />
+      <p className="cpv2-muted">{t("sourceNote")}</p>
+      {files.length ? <List items={files} className="cpv2-source-list" ariaLabel={t("productFiles")} renderItem={(file) => <><div><strong>{file.display_name}</strong><small>{file.media_type} · {file.projection?.kind === "image" ? t("imageNative") : t("markdownProjection")}</small></div><span>{file.projection?.sha256?.slice(0, 18) ?? "digest pending"}</span></>} /> : <EmptyState title={t("noFilesYet")} body={t("firstFileForProduct")} />}
+      <div className="cpv2-source-library-actions"><Button type="button" loading={busy} disabled={!files.length} onClick={() => void startRun()}>{t("generateVersion")}</Button></div>
     </article>
   </section>;
 }

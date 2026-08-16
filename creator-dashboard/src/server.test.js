@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { mkdtemp } from "node:fs/promises";
 import os from "node:os";
@@ -15,6 +16,10 @@ const catalogAgent = {
   product_description: "Resume review",
   product_promise: "Turn a resume into a concise signal map.",
   product_boundaries: ["Does not submit applications."],
+  brief_spec: {
+    contract_version: "1",
+    fields: [{ id: "goal", label: "What outcome should this task produce?", required: true }]
+  },
   presentation: { accent: "fern" },
   corpus_digest: "sha256:current-corpus",
   published_at: "2026-08-02T00:00:00.000Z"
@@ -31,7 +36,8 @@ const readyFactoryRun = {
     name: catalogAgent.product_name,
     description: catalogAgent.product_description,
     promise: catalogAgent.product_promise,
-    boundaries: catalogAgent.product_boundaries
+    boundaries: catalogAgent.product_boundaries,
+    brief_spec: catalogAgent.brief_spec
   },
   candidate: {
     version: 1,
@@ -69,6 +75,119 @@ test("Dashboard readiness fails closed when Registry is unavailable", async (con
   assert.equal((await unhealthy.json()).error.code, "dashboard_not_ready");
   const live = await fetch(`${serverUrl(api)}/healthz`);
   assert.equal(live.status, 200);
+});
+
+test("browser OAuth PKCE keeps state and authorizes Product Files without Version scope", async (context) => {
+  const account = {
+    id: catalogAgent.creator_id,
+    role: "creator",
+    email: "creator@example.test",
+    display_name: "Maya Chen"
+  };
+  const registry = createServer(async (request, response) => {
+    const requestUrl = new URL(request.url ?? "/", "http://registry.test");
+    response.setHeader("content-type", "application/json");
+    if (requestUrl.pathname === "/readyz") {
+      response.end(JSON.stringify({ ok: true }));
+      return;
+    }
+    if (requestUrl.pathname === "/v1/auth/signin") {
+      response.end(JSON.stringify({ token: "signed-creator-token", account }));
+      return;
+    }
+    if (requestUrl.pathname === "/v1/auth/me" && request.headers.authorization === "Bearer signed-creator-token") {
+      response.end(JSON.stringify(account));
+      return;
+    }
+    if (requestUrl.pathname === "/v1/creator/products/product-1/files" && request.method === "GET") {
+      response.end(JSON.stringify({ product_id: "product-1", files: [{ id: "file-1", product_id: "product-1" }] }));
+      return;
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ detail: "not found" }));
+  });
+  await listen(registry);
+  context.after(() => registry.close());
+
+  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-oauth-"));
+  const dashboard = await createDashboardApp({
+    ledgerPath: path.join(directory, "ledger.jsonl"),
+    portalStatePath: path.join(directory, "portal-state.json"),
+    registryUrl: serverUrl(registry)
+  });
+  const api = createServer(dashboard.handler);
+  await listen(api);
+  context.after(() => api.close());
+
+  const login = await fetch(`${serverUrl(api)}/v1/auth/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "creator@example.test", password: "test-only" })
+  });
+  assert.equal(login.status, 200);
+  const setCookies = login.headers.getSetCookie();
+  const cookie = setCookies.map((value) => value.split(";", 1)[0]).join("; ");
+  const csrfCookie = setCookies.find((value) => value.startsWith("hatch_web_csrf="));
+  assert.ok(csrfCookie);
+  const csrf = decodeURIComponent(csrfCookie.split(";", 1)[0].slice("hatch_web_csrf=".length));
+
+  const verifier = "verifier_abcdefghijklmnopqrstuvwxyz_0123456789-._~";
+  const challenge = createHash("sha256").update(verifier).digest("base64url");
+  const state = "oauth-state-for-callback";
+  const redirectUri = "http://127.0.0.1:43210/oauth/callback";
+  const authorize = await fetch(`${serverUrl(api)}/v1/auth/authorize?${new URLSearchParams({
+    client_id: "hatch-context-intake",
+    redirect_uri: redirectUri,
+    response_type: "code",
+    scope: "creator:products:read creator:products:write creator:files:read creator:files:write",
+    state,
+    code_challenge: challenge,
+    code_challenge_method: "S256"
+  })}`, { headers: { cookie } });
+  assert.equal(authorize.status, 200);
+  const consentHtml = await authorize.text();
+  assert.match(consentHtml, /Create and update your Creator Products/);
+  assert.doesNotMatch(consentHtml, /Version/);
+  const transactionId = consentHtml.match(/name="transaction_id" value="([^"]+)"/)?.[1];
+  const formCsrf = consentHtml.match(/name="csrf_token" value="([^"]+)"/)?.[1];
+  assert.ok(transactionId);
+  assert.equal(formCsrf, csrf);
+
+  const consent = await fetch(`${serverUrl(api)}/v1/auth/authorize/consent`, {
+    method: "POST",
+    redirect: "manual",
+    headers: { cookie, "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ transaction_id: transactionId, csrf_token: csrf, decision: "approve" })
+  });
+  assert.equal(consent.status, 302);
+  const callback = new URL(consent.headers.get("location"));
+  assert.equal(callback.searchParams.get("state"), state);
+  const code = callback.searchParams.get("code");
+  assert.ok(code);
+
+  const tokenResponse = await fetch(`${serverUrl(api)}/v1/auth/token`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      client_id: "hatch-context-intake",
+      code,
+      redirect_uri: redirectUri,
+      code_verifier: verifier
+    })
+  });
+  assert.equal(tokenResponse.status, 200);
+  const token = await tokenResponse.json();
+  assert.doesNotMatch(token.scope, /creator:versions:read/);
+
+  const files = await fetch(`${serverUrl(api)}/v1/creator/products/product-1/files`, {
+    headers: { authorization: `Bearer ${token.access_token}` }
+  });
+  assert.equal(files.status, 200);
+  const filesBody = await files.json();
+  assert.deepEqual(filesBody.product_id, "product-1");
+  assert.deepEqual(filesBody.files, [{ id: "file-1", product_id: "product-1" }]);
+  assert.match(filesBody.request_id, /^req_/);
 });
 
 test("creator products are projected directly from the Agent Corpus Registry", async (context) => {

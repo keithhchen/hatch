@@ -3,6 +3,32 @@ import { z } from "zod";
 import { verifyHatchAuthToken } from "./authToken.js";
 import { UUID_V4_RE, isUuidV4 } from "./identity.js";
 
+const BRIEF_FIELD_ID = /^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/;
+const BriefSpecSchema = z.object({
+  contract_version: z.literal("1"),
+  fields: z.array(z.object({
+    id: z.string().min(1).max(128).regex(BRIEF_FIELD_ID),
+    label: z.string().min(1).max(500)
+      .refine((value) => value.trim().length > 0, "Brief field labels cannot be blank")
+      .refine((value) => !value.includes("\u0000")),
+    required: z.boolean()
+  }).strict()).min(1).max(16)
+    .superRefine((fields, context) => {
+      const seen = new Set<string>();
+      fields.forEach((field, index) => {
+        if (seen.has(field.id)) context.addIssue({ code: "custom", path: [index, "id"], message: "Brief field ids must be unique" });
+        seen.add(field.id);
+      });
+    })
+}).strict().transform((value) => ({
+  contract_version: "1" as const,
+  fields: value.fields.map((field) => ({
+    id: field.id,
+    label: field.label.trim(),
+    required: field.required
+  }))
+}));
+
 export type AuthIdentity = {
   sub: string;
   role: "user" | "creator";
@@ -45,6 +71,7 @@ const AgentCorpusEntitlementBindingSchema = EntitlementCommonSchema.extend({
     actor_id: z.string().nullable().optional(),
     advanced_at: z.string().optional()
   }).strip()).optional(),
+  brief_spec: BriefSpecSchema.optional(),
 }).strict();
 
 // UUID bindings are strict at every authority boundary. Registry verifies the
@@ -86,6 +113,10 @@ export type EntitlementBinding = {
   effective_corpus_digest?: string;
   version_policy?: "pinned" | "track_current_compatible";
   version_history?: EntitlementVersionHistory[];
+  brief_spec?: {
+    contract_version: "1";
+    fields: Array<{ id: string; label: string; required: boolean }>;
+  };
 };
 
 export type EntitlementVersionHistory = {

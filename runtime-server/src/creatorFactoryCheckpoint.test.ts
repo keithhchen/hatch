@@ -274,8 +274,8 @@ function sampleInput(runId: string, developmentQuestions: number, heldoutQuestio
   return {
     runId,
     creator: { id: "11111111-1111-4111-8111-111111111111", name: "Creator Checkpoint" },
-    taskName: "Checkpointed bounded deliverable",
-    taskBrief: "Choose the material tradeoff and return a finished result.",
+    productName: "Checkpointed bounded deliverable",
+    productPromise: "Choose the material tradeoff and return a finished result.",
     sources: [{
       id: "S1",
       authority: "creator_current",

@@ -286,12 +286,12 @@ test("Factory candidate adapter uses a child CLI contract and propagates cancell
     agentId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
     corpusDigest: `sha256:${"a".repeat(64)}`,
     systemInstructions: "Not sent as an alternative prompt path.",
-    question: "One generated task"
+    question: "One generated product"
   };
   const execute = createHatchCliCandidateExecutor({ cliPath: successCli });
   const cliResult = await execute(execution);
   assert.notEqual(typeof cliResult, "string");
-  assert.equal(typeof cliResult === "string" ? cliResult : cliResult.output, "CLI:One generated task");
+  assert.equal(typeof cliResult === "string" ? cliResult : cliResult.output, "CLI:One generated product");
 
   const waitingCli = path.join(root, "waiting.mjs");
   await writeFile(waitingCli, "process.stdin.resume(); setInterval(() => {}, 1000);\n", "utf8");
@@ -406,7 +406,7 @@ test("Factory candidate child cannot inherit or dotenv-load deployment control-p
     agentId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
     corpusDigest: `sha256:${"b".repeat(64)}`,
     systemInstructions: "Not sent as an alternative prompt path.",
-    question: "One isolated generated task"
+    question: "One isolated generated product"
   };
   const originalCwd = process.cwd();
   let result: Awaited<ReturnType<ReturnType<typeof createHatchCliCandidateExecutor>>>;

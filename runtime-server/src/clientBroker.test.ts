@@ -55,11 +55,11 @@ test("cancel owns an unreturned tool promise and ignores late results", async ()
     await requestSeen;
 
     let cancelSettled = false;
-    const cancelPromise = broker.cancelRun("parent-run", "user cancelled protected task").then((count) => {
+    const cancelPromise = broker.cancelRun("parent-run", "user cancelled protected product").then((count) => {
       cancelSettled = true;
       return count;
     });
-    await assert.rejects(executePromise, (error: Error) => error.message === "user cancelled protected task");
+    await assert.rejects(executePromise, (error: Error) => error.message === "user cancelled protected product");
     assert.equal(cancelSettled, false);
     assert.equal(await broker.cancelRun("parent-run", "duplicate cancellation"), 0);
     assert.equal(stored.filter((event) => event.type === "tool.call" && event.status === "cancelled").length, 1);

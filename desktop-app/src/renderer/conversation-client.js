@@ -72,7 +72,8 @@ export async function createConversation(serverUrl, accessToken, binding, input 
     search: params,
     body: {
       ...(input.title ? { title: input.title } : {}),
-      ...(input.clientRequestId ? { client_request_id: input.clientRequestId } : {})
+      ...(input.clientRequestId ? { client_request_id: input.clientRequestId } : {}),
+      ...(Array.isArray(input.briefAnswers) ? { brief_answers: input.briefAnswers } : {})
     }
   });
 }
@@ -206,7 +207,8 @@ export function reconcileConversationSnapshot(snapshot, { afterCursor = 0 } = {}
     messages: snapshot.messages,
     runs,
     events: reconciledEvents,
-    cursor: reportedCursor
+    cursor: reportedCursor,
+    ...(snapshot.conversation?.brief_snapshot ? { brief_snapshot: snapshot.conversation.brief_snapshot } : {})
   };
 }
 

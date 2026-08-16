@@ -18,7 +18,7 @@ export class FactoryFileStore {
   private readonly objectStore?: ArtifactObjectStore;
   private readonly objectPrefix: string;
   private readonly graphStore?: DistillationGraphStore;
-  private readonly graphContext?: { taskId?: string; runId?: string; revisionId?: string };
+  private readonly graphContext?: { productId?: string; runId?: string; revisionId?: string };
 
   constructor(
     private readonly root: string,
@@ -29,7 +29,7 @@ export class FactoryFileStore {
       objectStore?: ArtifactObjectStore;
       objectPrefix?: string;
       graphStore?: DistillationGraphStore;
-      graphContext?: { taskId?: string; runId?: string; revisionId?: string };
+      graphContext?: { productId?: string; runId?: string; revisionId?: string };
     } = {}
   ) {
     this.runId = runId ?? randomUUID();
@@ -211,12 +211,12 @@ export class FactoryFileStore {
     // boundary so resume/retry can still reach the same verified ready gate.
     if (!state.agentId) {
       state.agentId = `agent-${createHash("sha256")
-        .update(`${state.creator.id}\u0000${state.taskName.trim()}`)
+        .update(`${state.creator.id}\u0000${state.productName.trim()}`)
         .digest("hex")
         .slice(0, 16)}`;
     }
     if (!state.product) {
-      state.product = { id: state.agentId, name: state.taskName };
+      state.product = { id: state.agentId, name: state.productName };
     }
     return state;
   }
@@ -348,12 +348,12 @@ export class FactoryFileStore {
 
   private async registerGraphArtifact(reference: ArtifactRef, mediaType: string): Promise<void> {
     const context = await this.resolveGraphContext();
-    if (!this.graphStore || !context?.taskId || !context.runId) return;
+    if (!this.graphStore || !context?.productId || !context.runId) return;
     const artifactId = artifactIdentity(this.runId, reference.path, reference.sha256);
     reference.artifactId = artifactId;
     await this.graphStore.registerArtifact({
       artifactId,
-      taskId: context.taskId,
+      productId: context.productId,
       runId: context.runId,
       ...(context.revisionId ? { revisionId: context.revisionId } : {}),
       kind: artifactKind(reference.path),
@@ -363,11 +363,11 @@ export class FactoryFileStore {
       mediaType,
       createdAt: reference.createdAt
     });
-    const parents = (await this.graphStore.listEvents(context.taskId)).filter((event) => event.runId === context.runId).at(-1);
+    const parents = (await this.graphStore.listEvents(context.productId)).filter((event) => event.runId === context.runId).at(-1);
     await this.graphStore.appendEvent({
       id: newGraphEventId(),
       eventKey: `artifact:${artifactId}`,
-      taskId: context.taskId,
+      productId: context.productId,
       runId: context.runId,
       ...(context.revisionId ? { revisionId: context.revisionId } : {}),
       type: "artifact_emitted",
@@ -381,10 +381,10 @@ export class FactoryFileStore {
 
   private async recordGraphEvent(event: string, details: Record<string, unknown>): Promise<void> {
     const context = await this.resolveGraphContext();
-    if (!this.graphStore || !context?.taskId || !context.runId) return;
+    if (!this.graphStore || !context?.productId || !context.runId) return;
     const mapped = mapGraphEvent(event, details);
     if (!mapped) return;
-    const parents = (await this.graphStore.listEvents(context.taskId)).filter((row) => row.runId === context.runId).at(-1);
+    const parents = (await this.graphStore.listEvents(context.productId)).filter((row) => row.runId === context.runId).at(-1);
     // Content-addressed outputs are part of the event identity. Without them,
     // a retry that emits a new immutable report can collide with the prior
     // event (the sanitized payload intentionally omits nested artifact refs),
@@ -397,7 +397,7 @@ export class FactoryFileStore {
     const graphEvent = await this.graphStore.appendEvent({
       id: newGraphEventId(),
       eventKey,
-      taskId: context.taskId,
+      productId: context.productId,
       runId: context.runId,
       ...(context.revisionId ? { revisionId: context.revisionId } : {}),
       type: mapped.type,
@@ -419,7 +419,7 @@ export class FactoryFileStore {
         : status === "running" ? undefined : graphEvent.occurredAt;
       await this.graphStore.recordNodeExecution({
         id: `node_exec_${graphEvent.id}`,
-        taskId: context.taskId,
+        productId: context.productId,
         runId: context.runId,
         revisionId: context.revisionId,
         node: mapped.node,
@@ -439,7 +439,7 @@ export class FactoryFileStore {
         ...gate,
         id: `gate_${graphEvent.id}`,
         gateKey: `${context.revisionId ?? this.runId}:${gate.name}`,
-        taskId: context.taskId,
+        productId: context.productId,
         runId: context.runId,
         revisionId: context.revisionId ?? this.runId,
         evidenceArtifactIds,
@@ -448,7 +448,7 @@ export class FactoryFileStore {
       await this.graphStore.appendEvent({
         id: newGraphEventId(),
         eventKey: `${eventKey}:gate:${gate.name}`,
-        taskId: context.taskId,
+        productId: context.productId,
         runId: context.runId,
         ...(context.revisionId ? { revisionId: context.revisionId } : {}),
         type: "gate_assessed",
@@ -460,7 +460,7 @@ export class FactoryFileStore {
       });
     }
     if (event === "creator_answers_submitted" || event === "factory_retry_requested") {
-      const rows = (await this.graphStore.listEvents(context.taskId))
+      const rows = (await this.graphStore.listEvents(context.productId))
         .filter((row) => row.runId === context.runId && (!context.revisionId || row.revisionId === context.revisionId));
       const requested = rows.filter((row) => row.type === "correction_requested").at(-1);
       const submitted = rows.filter((row) => row.type === "correction_submitted").at(-1);
@@ -468,7 +468,7 @@ export class FactoryFileStore {
         await this.graphStore.appendEvent({
           id: newGraphEventId(),
           eventKey: `${context.runId}:${context.revisionId ?? "legacy"}:correction_submitted:${requested.id}`,
-          taskId: context.taskId,
+          productId: context.productId,
           runId: context.runId,
           ...(context.revisionId ? { revisionId: context.revisionId } : {}),
           type: "correction_submitted",
@@ -484,7 +484,7 @@ export class FactoryFileStore {
       await this.graphStore.appendEvent({
         id: newGraphEventId(),
         eventKey: `${eventKey}:correction_requested`,
-        taskId: context.taskId,
+        productId: context.productId,
         runId: context.runId,
         ...(context.revisionId ? { revisionId: context.revisionId } : {}),
         type: "correction_requested",
@@ -499,7 +499,7 @@ export class FactoryFileStore {
       await this.graphStore.appendEvent({
         id: newGraphEventId(),
         eventKey: `${eventKey}:revision_ready`,
-        taskId: context.taskId,
+        productId: context.productId,
         runId: context.runId,
         ...(context.revisionId ? { revisionId: context.revisionId } : {}),
         type: "revision_ready",
@@ -512,13 +512,13 @@ export class FactoryFileStore {
     }
   }
 
-  private async resolveGraphContext(): Promise<{ taskId?: string; runId?: string; revisionId?: string } | undefined> {
-    if (this.graphContext?.taskId && this.graphContext.runId) return this.graphContext;
+  private async resolveGraphContext(): Promise<{ productId?: string; runId?: string; revisionId?: string } | undefined> {
+    if (this.graphContext?.productId && this.graphContext.runId) return this.graphContext;
     if (!this.graphStore) return undefined;
     try {
       const state = JSON.parse((await this.readLocalOrObject("state.json")).toString("utf8")) as FactoryRunState;
-      if (!state.taskId) return undefined;
-      return { taskId: state.taskId, runId: state.distillationRunId ?? state.runId, ...(state.revisionId ? { revisionId: state.revisionId } : {}) };
+      if (!state.productId) return undefined;
+      return { productId: state.productId, runId: state.distillationRunId ?? state.runId, ...(state.revisionId ? { revisionId: state.revisionId } : {}) };
     } catch {
       return undefined;
     }

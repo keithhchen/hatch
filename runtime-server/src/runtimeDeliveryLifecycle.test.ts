@@ -47,7 +47,7 @@ test("entitlement runs reserve, consume, release, and replay idempotently", asyn
   await waitForMessage(successful.messages, (message) => message.type === "turn.completed" && message.run_id === "run_success");
   assert.deepEqual(successfulSink.calls.map((call) => call.kind), [
     "reserve",
-    "append:task.started",
+    "append:product.started",
     "append:artifact.created",
     "complete"
   ]);

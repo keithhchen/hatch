@@ -23,8 +23,8 @@ function factoryInput(creatorId = "11111111-1111-4111-8111-111111111111", runId 
   return {
     runId,
     creator: { id: creatorId, name: "Creator A" },
-    taskName: "Publish-ready launch post",
-    taskBrief: "Turn a product insight into a post that can be published directly.",
+    productName: "Publish-ready launch post",
+    productPromise: "Turn a product insight into a post that can be published directly.",
     sources: [{
       id: "source_1",
       authority: "creator_current",
@@ -46,11 +46,11 @@ function state(
     creator: { id: "11111111-1111-4111-8111-111111111111", name: "Creator A" },
     agentId: "launch-post",
     product: { id: "launch-post", name: "Publish-ready launch post" },
-    taskName: "Publish-ready launch post",
+    productName: "Publish-ready launch post",
     stage,
     config: { developmentQuestions: 2, heldoutQuestions: 1, maxCorpusRevisions: 2 },
     artifacts: {
-      taskBrief: { path: "artifacts/input/task.md", sha256: "sha256:task", createdAt: timestamp },
+      productPromise: { path: "artifacts/input/product.md", sha256: "sha256:product", createdAt: timestamp },
       sourcePacket: { path: "artifacts/input/sources.md", sha256: "sha256:sources", createdAt: timestamp },
       ...(stage === "awaiting_creator_answers" ? {
         currentQuestionBatch: {
@@ -122,7 +122,7 @@ test("In-memory repository scopes reads to the Creator and creates idempotently"
       id: "factory_conflicting_retry",
       creatorId: "11111111-1111-4111-8111-111111111111",
       idempotencyKey: "request_1",
-      input: { ...factoryInput("11111111-1111-4111-8111-111111111111", "factory_conflicting_retry"), taskBrief: "A different request payload." }
+      input: { ...factoryInput("11111111-1111-4111-8111-111111111111", "factory_conflicting_retry"), productPromise: "A different request payload." }
     }),
     (error: unknown) => error instanceof CreatorFactoryRepositoryError && error.code === "idempotency_conflict"
   );
@@ -444,7 +444,7 @@ test("Postgres create binds an idempotency key to the canonical semantic input",
       id: "factory_changed",
       creatorId: "11111111-1111-4111-8111-111111111111",
       idempotencyKey: "request_1",
-      input: { ...factoryInput("11111111-1111-4111-8111-111111111111", "factory_changed"), taskName: "Changed task" }
+      input: { ...factoryInput("11111111-1111-4111-8111-111111111111", "factory_changed"), productName: "Changed product" }
     }),
     (error: unknown) => error instanceof CreatorFactoryRepositoryError && error.code === "idempotency_conflict"
   );

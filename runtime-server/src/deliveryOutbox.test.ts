@@ -150,7 +150,7 @@ function accountingCommand(suffix: string): DeliveryAccountingCommand {
     artifact: { type: "file", digest: digest(`artifact-${suffix}`) },
     reservation: {
       reservationId: `reservation-${suffix}`,
-      taskId: `task-${suffix}`,
+      productId: `product-${suffix}`,
       deliveryId: `delivery-${suffix}`
     }
   };

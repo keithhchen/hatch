@@ -33,7 +33,7 @@ test("continuity uses the accepted per-path high-water mark and never a complete
   const corpusCalls: FactoryPromptCall[] = [];
   let completenessCalls = 0;
   const run = async (call: FactoryPromptCall): Promise<string> => {
-    if (call.purpose === "evidence.extract") return "# Task evidence\nUse the Creator's complete decision method [S1:L1].";
+    if (call.purpose === "evidence.extract") return "# Product evidence\nUse the Creator's complete decision method [S1:L1].";
     if (call.purpose === "eval.generate_questions") return [
       question("Q1", "Case one", "group-one"),
       question("Q2", "Case two", "group-two"),
@@ -81,7 +81,7 @@ test("a sealed LLM exception is persistently redacted and its timing is failed i
   t.after(() => rm(root, { recursive: true, force: true }));
   const sentinel = "HELDOUT_SENTINEL_PROVIDER_ERROR_72f9";
   const run = async (call: FactoryPromptCall): Promise<string> => {
-    if (call.purpose === "evidence.extract") return "# Task evidence\nVisible evidence.";
+    if (call.purpose === "evidence.extract") return "# Product evidence\nVisible evidence.";
     if (call.purpose === "eval.generate_questions") throw new Error(`provider echoed ${sentinel}`);
     throw new Error(`Unexpected prompt purpose: ${call.purpose}`);
   };
@@ -112,7 +112,7 @@ test("an inconclusive overlap audit pauses and retries the same durable draft wi
   let corpusCalls = 0;
   let completenessCalls = 0;
   const run = async (call: FactoryPromptCall): Promise<string> => {
-    if (call.purpose === "evidence.extract") return "# Task evidence\nUse the authorized method without copying it [S1:L1].";
+    if (call.purpose === "evidence.extract") return "# Product evidence\nUse the authorized method without copying it [S1:L1].";
     if (call.purpose === "eval.generate_questions") return [
       question("Q1", "Case one", "group-one"),
       question("Q2", "Case two", "group-two"),
@@ -175,7 +175,7 @@ test("a completeness provider failure resumes the one guarded candidate without 
     "Choose one evidence-backed direction, identify the material tradeoff, and return a complete result."
   );
   const run = async (call: FactoryPromptCall): Promise<string> => {
-    if (call.purpose === "evidence.extract") return "# Task evidence\nUse a bounded decision method [S1:L1].";
+    if (call.purpose === "evidence.extract") return "# Product evidence\nUse a bounded decision method [S1:L1].";
     if (call.purpose === "eval.generate_questions") return [
       question("Q1", "Case one", "group-one"),
       question("Q2", "Case two", "group-two"),
@@ -234,7 +234,7 @@ test("a legacy mixed overlap report restores its exact draft and trusts only the
   let corpusCalls = 0;
   let completenessCalls = 0;
   const run = async (call: FactoryPromptCall): Promise<string> => {
-    if (call.purpose === "evidence.extract") return "# Task evidence\nSynthesize the authorized method [S1:L1].";
+    if (call.purpose === "evidence.extract") return "# Product evidence\nSynthesize the authorized method [S1:L1].";
     if (call.purpose === "eval.generate_questions") return [
       question("Q1", "Case one", "group-one"),
       question("Q2", "Case two", "group-two"),
@@ -345,17 +345,17 @@ test("post-call sealed question validation keeps a sensitive leakage group behin
   const factory = new CreatorFactory(root, run, async () => "unused");
   const store = new FactoryFileStore(root, "run-sealed-validation");
   await store.initialize();
-  const taskBrief = await store.writeArtifact("input/task-brief.md", "Produce a complete result.");
-  const evidence = await store.writeArtifact("evidence/evidence.md", "# Task evidence\nVisible evidence.");
+  const productPromise = await store.writeArtifact("input/product-brief.md", "Produce a complete result.");
+  const evidence = await store.writeArtifact("evidence/evidence.md", "# Product evidence\nVisible evidence.");
   const state = {
     creator: { id: "11111111-1111-4111-8111-111111111111", name: "Creator One" },
-    taskName: "One task",
-    artifacts: { taskBrief, evidence }
-  } as Pick<FactoryRunState, "creator" | "taskName" | "artifacts">;
+    productName: "One product",
+    artifacts: { productPromise, evidence }
+  } as Pick<FactoryRunState, "creator" | "productName" | "artifacts">;
   const internal = factory as unknown as {
     generateQuestions: (
       store: FactoryFileStore,
-      state: Pick<FactoryRunState, "creator" | "taskName" | "artifacts">,
+      state: Pick<FactoryRunState, "creator" | "productName" | "artifacts">,
       count: number,
       prefix: string,
       excluded: CreatorQuestion[]
@@ -389,8 +389,8 @@ function sampleInput(runId: string): FactoryStartInput {
   return {
     runId,
     creator: { id: "11111111-1111-4111-8111-111111111111", name: "Creator One" },
-    taskName: "Publishable offer critique",
-    taskBrief: "Choose one material change and return usable copy.",
+    productName: "Publishable offer critique",
+    productPromise: "Choose one material change and return usable copy.",
     sources: [{
       id: "S1",
       authority: "creator_current",

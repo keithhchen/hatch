@@ -21,7 +21,7 @@ import {
 } from "./creatorFactory.js";
 import "./creatorFactory.css";
 
-export function CreatorFactoryRuns({ token, initialRunId, onNavigateRun, onReviewCandidate, onCreateTask }) {
+export function CreatorFactoryRuns({ token, initialRunId, onNavigateRun, onReviewCandidate, onCreateProduct }) {
   const [runs, setRuns] = useState([]);
   const [selected, setSelected] = useState(null);
   const [answerDraft, setAnswerDraft] = useState({
@@ -107,7 +107,7 @@ export function CreatorFactoryRuns({ token, initialRunId, onNavigateRun, onRevie
 
   return (
     <section className="factory-page">
-      <PageHeader className="factory-page-heading" label="Creator Factory" title="Turn one method into one working task." body="Hatch builds a candidate, asks for your reference answers, and keeps sealed answers out of every model-visible Corpus context." />
+      <PageHeader className="factory-page-heading" label="Creator Factory" title="Turn one method into one useful product." body="Hatch builds a candidate, asks for your reference answers, and keeps sealed answers out of every model-visible Corpus context." />
       {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
       <div className="factory-layout">
         <aside className="factory-runs-panel">
@@ -118,7 +118,7 @@ export function CreatorFactoryRuns({ token, initialRunId, onNavigateRun, onRevie
                 if (typeof onNavigateRun === "function") onNavigateRun(run.id);
                 else openRun(run.id).catch((nextError) => setError(nextError.message));
               }}>
-                <strong>{run.task_name}</strong>
+                <strong>{run.product_name ?? run.product?.name}</strong>
                 <span>{factoryStageLabel(run)}</span>
               </NavigationItem>
             ))}
@@ -147,20 +147,20 @@ export function CreatorFactoryRuns({ token, initialRunId, onNavigateRun, onRevie
                 onNavigateRun?.(null);
               }}
             />
-          ) : <CreateFactoryRun onCreateTask={onCreateTask} />}
+          ) : <CreateFactoryRun onCreateProduct={onCreateProduct} />}
         </div>
       </div>
     </section>
   );
 }
 
-function CreateFactoryRun({ onCreateTask }) {
+function CreateFactoryRun({ onCreateProduct }) {
   return (
     <div className="factory-create factory-source-redirect">
       <span className="cpv2-kicker">New distillation</span>
-      <h2>Create a Task first</h2>
-      <p>Each Task has its own files. Create the Task, upload its local files, then start a Factory revision from that Task.</p>
-      <Button type="button" onClick={onCreateTask}>Create a Task</Button>
+      <h2>Create a product first</h2>
+      <p>Each Product has its own files. Create the Product, upload local files, then generate a version from that Product.</p>
+      <Button type="button" onClick={onCreateProduct}>Create a product</Button>
     </div>
   );
 }
@@ -180,12 +180,12 @@ function FactoryRunDetail({ run, answers, setAnswers, answerRecovery, onDismissR
   return (
     <div className="factory-detail">
       <div className="factory-detail-heading">
-        <div><h2>{run.task_name}</h2></div>
+        <div><h2>{run.product_name ?? run.product?.name}</h2></div>
         <StatusTag tone={run.status === "ready" ? "success" : run.status === "needs_attention" ? "error" : "neutral"}>{factoryStageLabel(run)}</StatusTag>
       </div>
       {run.status === "waiting_for_creator" && run.stage !== "review_required" ? (
         <form className="factory-questions" onSubmit={onSubmit}>
-          <div><h3>Your reference answers</h3><p>Answer each generated task directly. Hatch—not another synthetic answer—will be judged against these answers.</p></div>
+          <div><h3>Your reference answers</h3><p>Answer each generated question directly. Hatch—not another synthetic answer—will be judged against these answers.</p></div>
           {answerRecovery ? (
             <aside className="factory-answer-recovery" aria-labelledby="factory-answer-recovery-title">
               <div className="factory-answer-recovery-heading">

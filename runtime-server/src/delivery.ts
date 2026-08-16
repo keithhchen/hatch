@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-export type CommerceEventType = "task.started" | "artifact.created" | "delivery.completed";
+export type CommerceEventType = "product.started" | "artifact.created" | "delivery.completed";
 
 /** Structurally compatible with packages/commerce CommerceLedger. */
 export interface CommerceEventSink {
@@ -31,7 +31,7 @@ export interface CommerceEventSink {
       entitlement_id: string;
       reservation_id: string;
       run_id: string;
-      task_id: string;
+      product_id: string;
       units: number;
     },
     options: { idempotencyKey: string }
@@ -43,7 +43,7 @@ export interface CommerceEventSink {
   completeDelivery?(
     input: {
       reservation_id: string;
-      task_id: string;
+      product_id: string;
       artifact_id: string;
       delivery_id: string;
       artifact_type: "file" | "message";
@@ -66,7 +66,7 @@ export type DeliveryBinding = {
 };
 
 export type DeliveryReceipt = {
-  task_id: string;
+  product_id: string;
   artifact_id: string;
   artifact_digest: string;
   delivery_id: string;
@@ -80,7 +80,7 @@ export type DeliveryArtifact = {
 
 export type DeliveryUnitReservation = {
   reservationId: string;
-  taskId: string;
+  productId: string;
   deliveryId: string;
 };
 
@@ -106,12 +106,12 @@ export function deliveryReceiptFromMetadata(
   runId: string,
   artifact: { type: "file" | "message"; digest: string }
 ): DeliveryReceipt {
-  const taskId = stableTaskId(binding, conversationId, runId);
+  const productId = stableTaskId(binding, conversationId, runId);
   return {
-    task_id: taskId,
-    artifact_id: `artifact_${shortHash(taskId)}`,
+    product_id: productId,
+    artifact_id: `artifact_${shortHash(productId)}`,
     artifact_digest: artifact.digest,
-    delivery_id: `delivery_${shortHash(taskId)}`,
+    delivery_id: `delivery_${shortHash(productId)}`,
     artifact_type: artifact.type
   };
 }
@@ -123,9 +123,9 @@ export async function findCompletedDelivery(
   runId: string
 ): Promise<DeliveryReceipt | undefined> {
   if (!sink.findByIdempotencyKey) return undefined;
-  const taskId = stableTaskId(binding, conversationId, runId);
-  const artifactId = `artifact_${shortHash(taskId)}`;
-  const deliveryId = `delivery_${shortHash(taskId)}`;
+  const productId = stableTaskId(binding, conversationId, runId);
+  const artifactId = `artifact_${shortHash(productId)}`;
+  const deliveryId = `delivery_${shortHash(productId)}`;
   const deliveryIdempotencyKey = `delivery:${deliveryId}:completed`;
   // CommerceService appends the atomic delivery mutation with a `:delivery`
   // suffix. Keep reading the legacy sink key too so old ledgers remain valid.
@@ -137,7 +137,7 @@ export async function findCompletedDelivery(
   if (typeof recordedDigest !== "string") throw new Error(`Recorded artifact ${artifactId} has no digest`);
   const recordedType = existingArtifact.artifact_type;
   return {
-    task_id: taskId,
+    product_id: productId,
     artifact_id: artifactId,
     artifact_digest: recordedDigest,
     delivery_id: deliveryId,
@@ -157,17 +157,17 @@ export async function reserveDeliveryUnit(
   runId: string
 ): Promise<DeliveryUnitReservation | undefined> {
   if (!hasDeliveryUnitLifecycle(sink)) return undefined;
-  const taskId = stableTaskId(binding, conversationId, runId);
-  const deliveryId = `delivery_${shortHash(taskId)}`;
-  const reservationId = `reservation_${shortHash(taskId)}`;
+  const productId = stableTaskId(binding, conversationId, runId);
+  const deliveryId = `delivery_${shortHash(productId)}`;
+  const reservationId = `reservation_${shortHash(productId)}`;
   await sink.authorizeAndReserve({
     entitlement_id: binding.entitlementId,
     reservation_id: reservationId,
     run_id: runId,
-    task_id: taskId,
+    product_id: productId,
     units: 1
   }, { idempotencyKey: `delivery:${deliveryId}:authorize` });
-  return { reservationId, taskId, deliveryId };
+  return { reservationId, productId, deliveryId };
 }
 
 export async function releaseDeliveryUnit(
@@ -209,10 +209,10 @@ export async function recordPreparedDelivery(
   receipt: DeliveryReceipt,
   reservation?: DeliveryUnitReservation
 ): Promise<DeliveryReceipt> {
-  const taskId = stableTaskId(binding, conversationId, runId);
-  const artifactId = `artifact_${shortHash(taskId)}`;
-  const deliveryId = `delivery_${shortHash(taskId)}`;
-  if (receipt.task_id !== taskId
+  const productId = stableTaskId(binding, conversationId, runId);
+  const artifactId = `artifact_${shortHash(productId)}`;
+  const deliveryId = `delivery_${shortHash(productId)}`;
+  if (receipt.product_id !== productId
     || receipt.artifact_id !== artifactId
     || receipt.delivery_id !== deliveryId
     || !/^sha256:[a-f0-9]{64}$/.test(receipt.artifact_digest)) {
@@ -231,25 +231,23 @@ export async function recordPreparedDelivery(
     effective_corpus_digest: binding.corpusDigest
   };
 
-  await sink.append("task.started", {
-    task_id: taskId,
+  await sink.append("product.started", {
     entitlement_id: binding.entitlementId,
     ...common
-  }, { idempotencyKey: `task:${taskId}:started` });
+  }, { idempotencyKey: `product:${productId}:started` });
   await sink.append("artifact.created", {
     artifact_id: artifactId,
-    task_id: taskId,
     artifact_digest: receipt.artifact_digest,
     artifact_type: receipt.artifact_type,
     ...common
   }, { idempotencyKey: `artifact:${artifactId}:created` });
   if (reservation && hasDeliveryUnitLifecycle(sink)) {
-    if (reservation.taskId !== taskId || reservation.deliveryId !== deliveryId) {
-      throw new Error("Delivery reservation does not match the Runtime task");
+    if (reservation.productId !== productId || reservation.deliveryId !== deliveryId) {
+      throw new Error("Delivery reservation does not match the Runtime product");
     }
     await sink.completeDelivery({
       reservation_id: reservation.reservationId,
-      task_id: taskId,
+      product_id: productId,
       artifact_id: artifactId,
       delivery_id: deliveryId,
       artifact_type: receipt.artifact_type,
@@ -259,7 +257,6 @@ export async function recordPreparedDelivery(
     await sink.append("delivery.completed", {
       delivery_id: deliveryId,
       artifact_id: artifactId,
-      task_id: taskId,
       entitlement_id: binding.entitlementId,
       ...common
     }, { idempotencyKey: `delivery:${deliveryId}:completed` });

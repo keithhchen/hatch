@@ -18,7 +18,7 @@ const SAFE_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 export type SourceUploadInput = {
   displayName: string;
-  taskId?: string;
+  productId?: string;
   mediaType?: string;
   bytes: Buffer;
 };
@@ -69,7 +69,7 @@ export class CreatorSourceLibrary {
   async createFromUpload(creatorId: string, input: SourceUploadInput): Promise<SourceDocumentView> {
     return this.write(async () => {
       const normalizedCreator = requireText(creatorId, "creatorId");
-      const taskId = safeTaskId(input.taskId ?? "default");
+      const productId = safeProductId(input.productId ?? "default");
       const displayName = safeDisplayName(input.displayName);
       if (!Buffer.isBuffer(input.bytes) || input.bytes.length === 0) {
         throw invalidSource("Source bytes are required");
@@ -91,13 +91,13 @@ export class CreatorSourceLibrary {
             bytes: projection.bytes
           };
       if (this.objectStore) {
-        const base = this.objectBase(normalizedCreator, taskId, id);
+        const base = this.objectBase(normalizedCreator, productId, id);
         const originalObjectRef = `${base}/original.bin`;
         const projectionObjectRef = `${base}/projection.${projection.kind === "image" ? projection.mediaType.split("/", 2)[1] : "md"}`;
         const record: SourceDocumentRecord = {
           id,
           creatorId: normalizedCreator,
-          taskId,
+          productId,
           displayName,
           mediaType,
           originalObjectRef,
@@ -131,7 +131,7 @@ export class CreatorSourceLibrary {
       const record: SourceDocumentRecord = {
         id,
         creatorId: normalizedCreator,
-        taskId,
+        productId,
         displayName,
         mediaType,
         originalObjectRef: this.relativeRef(originalPath, creatorDirectory),
@@ -145,15 +145,15 @@ export class CreatorSourceLibrary {
     });
   }
 
-  async listDocuments(creatorId: string, taskId?: string): Promise<SourceDocumentView[]> {
+  async listDocuments(creatorId: string, productId?: string): Promise<SourceDocumentView[]> {
     await this.writeChain;
     if (this.objectStore) {
       const normalizedCreator = requireText(creatorId, "creatorId");
-      const prefix = this.sourcePrefix(normalizedCreator, taskId === undefined ? undefined : safeTaskId(taskId));
+      const prefix = this.sourcePrefix(normalizedCreator, productId === undefined ? undefined : safeProductId(productId));
       const names = (await this.objectStore.list(prefix)).filter((name) => name.endsWith("/document.json"));
       const records = await Promise.all(names.map(async (name) => this.readDocumentObject(name)));
       return Promise.all(records
-        .filter((record) => taskId === undefined || record.taskId === safeTaskId(taskId))
+        .filter((record) => productId === undefined || record.productId === safeProductId(productId))
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
         .map((record) => this.withProjectionContent(record)));
     }
@@ -166,7 +166,7 @@ export class CreatorSourceLibrary {
       throw error;
     }
     const records = await Promise.all(names.map(async (name) => this.readDocumentFile(path.join(directory, name))));
-    const filtered = taskId === undefined ? records : records.filter((record) => record.taskId === safeTaskId(taskId));
+    const filtered = productId === undefined ? records : records.filter((record) => record.productId === safeProductId(productId));
     return Promise.all(filtered.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((record) => this.withProjectionContent(record)));
   }
 
@@ -176,22 +176,22 @@ export class CreatorSourceLibrary {
     return this.withProjectionContent(record);
   }
 
-  async createSnapshot(creatorId: string, input: { documentIds: string[]; taskId?: string }): Promise<SourceSnapshotView> {
+  async createSnapshot(creatorId: string, input: { documentIds: string[]; productId?: string }): Promise<SourceSnapshotView> {
     return this.write(async () => {
       const normalizedCreator = requireText(creatorId, "creatorId");
       const documentIds = [...new Set(input.documentIds.map((id) => requireText(id, "documentId")))];
       if (documentIds.length === 0) throw new CreatorSourceLibraryError("invalid_snapshot", "A Snapshot needs at least one source");
       const documents = await Promise.all(documentIds.map((id) => this.requireDocument(normalizedCreator, id)));
-      const taskId = input.taskId === undefined ? documents[0]!.taskId : safeTaskId(input.taskId);
-      if (documents.some((document) => document.taskId !== taskId)) {
-        throw new CreatorSourceLibraryError("invalid_snapshot", "A Snapshot can contain sources from only one Task");
+      const productId = input.productId === undefined ? documents[0]!.productId : safeProductId(input.productId);
+      if (documents.some((document) => document.productId !== productId)) {
+        throw new CreatorSourceLibraryError("invalid_snapshot", "Select files attached to this Product to create the Snapshot.");
       }
       const createdAt = new Date().toISOString();
-      const version = await this.nextSnapshotVersion(normalizedCreator);
+      const version = await this.nextSnapshotVersion(normalizedCreator, productId);
       const manifestSha256 = digestJson({
         contractVersion: "source-snapshot-v1",
         creatorId: normalizedCreator,
-        taskId: input.taskId ?? null,
+        productId: input.productId ?? null,
         version,
         documents: documents.map((document) => ({
           id: document.id,
@@ -201,7 +201,7 @@ export class CreatorSourceLibrary {
       const record: SourceSnapshotRecord = {
         id: `snapshot_${randomUUID().replaceAll("-", "")}`,
         creatorId: normalizedCreator,
-        taskId,
+        productId,
         version,
         documentIds,
         manifestSha256,
@@ -210,7 +210,7 @@ export class CreatorSourceLibrary {
       };
       const content = Buffer.from(`${JSON.stringify(record, null, 2)}\n`, "utf8");
       if (this.objectStore) {
-        const objectKey = `${this.sourcePrefix(normalizedCreator, taskId)}/snapshots/${record.id}.json`;
+        const objectKey = `${this.sourcePrefix(normalizedCreator, productId)}/snapshots/${record.id}.json`;
         await this.objectStore.put(objectKey, content, {
           contentType: "application/json; charset=utf-8",
           immutable: true
@@ -279,9 +279,9 @@ export class CreatorSourceLibrary {
     }));
   }
 
-  private async nextSnapshotVersion(creatorId: string): Promise<number> {
+  private async nextSnapshotVersion(creatorId: string, productId: string): Promise<number> {
     if (this.objectStore) {
-      const names = (await this.objectStore.list(this.sourcePrefix(requireText(creatorId, "creatorId")))).filter((name) => name.includes("/snapshots/") && name.endsWith(".json"));
+      const names = (await this.objectStore.list(this.sourcePrefix(requireText(creatorId, "creatorId"), safeProductId(productId)))).filter((name) => name.includes("/snapshots/") && name.endsWith(".json"));
       const versions = await Promise.all(names.map(async (name) => {
         try {
           const value = JSON.parse((await this.objectStore!.get(name)).toString("utf8")) as { version?: unknown };
@@ -358,14 +358,14 @@ export class CreatorSourceLibrary {
     await this.graphStore.initialize();
     const originalArtifactId = sourceArtifactId(record.id, "original", digestBytes(original));
     const projectionArtifactId = sourceArtifactId(record.id, "projection", projection.sha256);
-    await this.graphStore.registerArtifact({ artifactId: originalArtifactId, taskId: record.taskId, kind: "source_original", objectKey: originalObjectRef, sha256: digestBytes(original), bytes: original.length, mediaType: record.mediaType, createdAt: record.createdAt });
-    await this.graphStore.registerArtifact({ artifactId: projectionArtifactId, taskId: record.taskId, kind: "source_projection", objectKey: projectionObjectRef, sha256: projection.sha256, bytes: projection.bytes, mediaType: projection.mediaType, createdAt: record.createdAt });
-    const parents = (await this.graphStore.listEvents(record.taskId)).at(-1);
+    await this.graphStore.registerArtifact({ artifactId: originalArtifactId, productId: record.productId, kind: "source_original", objectKey: originalObjectRef, sha256: digestBytes(original), bytes: original.length, mediaType: record.mediaType, createdAt: record.createdAt });
+    await this.graphStore.registerArtifact({ artifactId: projectionArtifactId, productId: record.productId, kind: "source_projection", objectKey: projectionObjectRef, sha256: projection.sha256, bytes: projection.bytes, mediaType: projection.mediaType, createdAt: record.createdAt });
+    const parents = (await this.graphStore.listEvents(record.productId)).at(-1);
     await this.graphStore.appendEvent({
       id: `evt_${randomUUID().replaceAll("-", "")}`,
-      eventKey: `${record.taskId}:source:${record.id}`,
-      taskId: record.taskId,
-      runId: record.taskId,
+      eventKey: `${record.productId}:source:${record.id}`,
+      productId: record.productId,
+      runId: record.productId,
       type: "source_uploaded",
       node: "intake",
       actor: "creator",
@@ -379,14 +379,14 @@ export class CreatorSourceLibrary {
     if (!this.graphStore) return;
     await this.graphStore.initialize();
     const artifactId = sourceArtifactId(record.id, "snapshot", digestBytes(content));
-    await this.graphStore.registerArtifact({ artifactId, taskId: record.taskId ?? creatorId, kind: "source_snapshot", objectKey, sha256: digestBytes(content), bytes: content.length, mediaType: "application/json", createdAt: record.createdAt });
-    const taskId = record.taskId ?? creatorId;
-    const parents = (await this.graphStore.listEvents(taskId)).at(-1);
+    await this.graphStore.registerArtifact({ artifactId, productId: record.productId ?? creatorId, kind: "source_snapshot", objectKey, sha256: digestBytes(content), bytes: content.length, mediaType: "application/json", createdAt: record.createdAt });
+    const productId = record.productId ?? creatorId;
+    const parents = (await this.graphStore.listEvents(productId)).at(-1);
     await this.graphStore.appendEvent({
       id: `evt_${randomUUID().replaceAll("-", "")}`,
-      eventKey: `${taskId}:snapshot:${record.id}`,
-      taskId,
-      runId: taskId,
+      eventKey: `${productId}:snapshot:${record.id}`,
+      productId,
+      runId: productId,
       type: "snapshot_locked",
       node: "intake",
       actor: "system",
@@ -419,13 +419,13 @@ export class CreatorSourceLibrary {
     return path.relative(creatorDirectory, file).replaceAll("\\", "/").replace(/^\.\//, "");
   }
 
-  private sourcePrefix(creatorId: string, taskId?: string): string {
+  private sourcePrefix(creatorId: string, productId?: string): string {
     const creator = hashId(requireText(creatorId, "creatorId"));
-    return `source-library/${creator}/tasks${taskId ? `/${safeTaskId(taskId)}` : ""}`;
+    return `source-library/${creator}/products${productId ? `/${safeProductId(productId)}` : ""}`;
   }
 
-  private objectBase(creatorId: string, taskId: string, documentId: string): string {
-    return `${this.sourcePrefix(creatorId, taskId)}/documents/${safeId(documentId)}`;
+  private objectBase(creatorId: string, productId: string, documentId: string): string {
+    return `${this.sourcePrefix(creatorId, productId)}/documents/${safeId(documentId)}`;
   }
 
   private write<T>(operation: () => Promise<T>): Promise<T> {
@@ -435,7 +435,7 @@ export class CreatorSourceLibrary {
   }
 }
 
-async function projectSource(displayName: string, mediaType: string, bytes: Buffer): Promise<SourceProjection> {
+export async function projectSource(displayName: string, mediaType: string, bytes: Buffer): Promise<SourceProjection> {
   if (SAFE_IMAGE_TYPES.has(mediaType)) {
     assertImageMagic(mediaType, bytes);
     return { kind: "image", mediaType: mediaType as "image/jpeg" | "image/png" | "image/webp", contentRef: "", sha256: digestBytes(bytes), bytes: bytes.length };
@@ -569,7 +569,7 @@ function decodeHtml(value: string): string {
   return value.replace(/&(?:amp|lt|gt|quot|apos|nbsp);/gi, (entity) => ({ "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&apos;": "'", "&nbsp;": " " }[entity.toLowerCase()] ?? entity));
 }
 
-function detectMediaType(displayName: string, supplied: string | undefined, bytes: Buffer): string {
+export function detectMediaType(displayName: string, supplied: string | undefined, bytes: Buffer): string {
   if (supplied?.trim()) return supplied.split(";", 1)[0]!.trim().toLowerCase();
   const extension = path.extname(displayName).toLowerCase();
   const byExtension: Record<string, string> = {
@@ -616,12 +616,12 @@ function safeDisplayName(value: string): string {
 }
 
 function safeId(value: string): string {
-  if (!/^[A-Za-z0-9_-]{1,160}$/.test(value)) throw invalidSource("Invalid Source Library id");
+  if (!/^[A-Za-z0-9_-]{1,160}$/.test(value)) throw invalidSource("Invalid file identifier");
   return value;
 }
 
-function safeTaskId(value: string): string {
-  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value)) throw invalidSource("Invalid taskId");
+function safeProductId(value: string): string {
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(value)) throw invalidSource("Invalid productId");
   return value;
 }
 

@@ -79,7 +79,7 @@ test("Creator Factory service persists complete product metadata and canonical d
 
   const defaulted = await service.create(
     { id: "11111111-1111-4111-8111-111111111111", name: "Release Creator" },
-    createRequest({ taskName: "Default tool run" }),
+    createRequest({ productName: "Default tool run" }),
     "release-input-default-tools"
   );
   assert.deepEqual(
@@ -197,8 +197,8 @@ test("Creator Factory service exposes only owned questions and candidate metadat
   );
   const worker = new CreatorFactoryWorker(repository, factory, { workerId: "service-worker", leaseMs: 60_000, heartbeatMs: 0 });
   const request = {
-    taskName: "Publishable sales reply",
-    taskBrief: "Choose one tradeoff and return copy ready to publish.",
+    productName: "Publishable sales reply",
+    productPromise: "Choose one tradeoff and return copy ready to publish.",
     sources: [{
       id: "S1",
       authority: "creator_current" as const,
@@ -307,17 +307,17 @@ test("Creator Review is an immutable, idempotent projection over candidate cases
   const graph = new InMemoryDistillationGraphStore();
   const service = new CreatorFactoryService(repository, root, undefined, undefined, graph);
   const creator = { id: "11111111-1111-4111-8111-111111111111", name: "Review Creator" };
-  const task = await service.createTask(creator.id, { name: "Reviewable method", brief: "Return one finished recommendation." });
+  const product = await service.createProduct(creator.id, { name: "Reviewable method", promise: "Return one finished recommendation." });
   const document = await service.createSourceDocument(creator.id, {
-    taskId: task.id,
+    productId: product.id,
     displayName: "method.md",
     mediaType: "text/markdown",
     bytes: Buffer.from("# Method\nChoose one supported recommendation.\n", "utf8")
   });
   const created = await service.create(creator, createRequest({
-    taskId: task.id,
-    taskName: task.name,
-    taskBrief: task.brief,
+    productId: product.id,
+    productName: product.name,
+    productPromise: product.promise,
     sources: undefined,
     sourceDocumentIds: [document.id],
     config: { developmentQuestions: 2, heldoutQuestions: 1, maxCorpusRevisions: 2 }
@@ -406,17 +406,17 @@ test("held-out review confirmation promotes the sealed case without restarting C
   const graph = new InMemoryDistillationGraphStore();
   const service = new CreatorFactoryService(repository, root, undefined, undefined, graph);
   const creator = { id: "11111111-1111-4111-8111-111111111111", name: "Blind Review Creator" };
-  const task = await service.createTask(creator.id, { name: "Blind review method", brief: "Return one finished recommendation." });
+  const product = await service.createProduct(creator.id, { name: "Blind review method", promise: "Return one finished recommendation." });
   const document = await service.createSourceDocument(creator.id, {
-    taskId: task.id,
+    productId: product.id,
     displayName: "method.md",
     mediaType: "text/markdown",
     bytes: Buffer.from("# Method\nChoose one supported recommendation.\n", "utf8")
   });
   const created = await service.create(creator, createRequest({
-    taskId: task.id,
-    taskName: task.name,
-    taskBrief: task.brief,
+    productId: product.id,
+    productName: product.name,
+    productPromise: product.promise,
     sources: undefined,
     sourceDocumentIds: [document.id],
     config: { developmentQuestions: 2, heldoutQuestions: 2, maxCorpusRevisions: 3 }
@@ -501,81 +501,80 @@ test("held-out review confirmation promotes the sealed case without restarting C
   assert.equal(replacementCompile!.prompt.includes("SEALED_PASS"), false);
 });
 
-test("a Distillation Task keeps one Product identity across revisions", async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-factory-task-product-"));
+test("a Distillation Product keeps one Product identity across revisions", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-factory-product-product-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const repository = new InMemoryCreatorFactoryRepository();
   const service = new CreatorFactoryService(repository, root);
-  const creator = { id: "11111111-1111-4111-8111-111111111111", name: "Task Creator" };
-  const task = await service.createTask(creator.id, { name: "Stable product task", brief: "A single product identity across revisions." });
-  assert.match(task.productId ?? "", /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  const creator = { id: "11111111-1111-4111-8111-111111111111", name: "Product Creator" };
+  const product = await service.createProduct(creator.id, { name: "Stable product product", promise: "A single product identity across revisions." });
+  assert.match(product.id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   const document = await service.createSourceDocument(creator.id, {
-    taskId: task.id,
+    productId: product.id,
     displayName: "method.md",
     mediaType: "text/markdown",
     bytes: Buffer.from("# Method\nChoose one supported answer.\n", "utf8")
   });
   const request = createRequest({
-    taskId: task.id,
-    taskName: task.name,
-    taskBrief: task.brief,
+    productId: product.id,
+    productName: product.name,
+    productPromise: product.promise,
     sources: undefined,
     sourceDocumentIds: [document.id]
   });
-  const first = await service.create(creator, request, "stable-task-product-1");
-  const second = await service.create(creator, request, "stable-task-product-2");
-  assert.equal(first.run.agentId, task.productId);
-  assert.equal(first.run.product?.id, task.productId);
-  assert.equal(second.run.agentId, task.productId);
-  assert.equal(second.run.product?.id, task.productId);
-  const currentTask = await service.getTask(creator.id, task.id);
-  assert.equal(currentTask.productId, task.productId);
+  const first = await service.create(creator, request, "stable-product-product-1");
+  const second = await service.create(creator, request, "stable-product-product-2");
+  assert.equal(first.run.agentId, product.id);
+  assert.equal(first.run.product?.id, product.id);
+  assert.equal(second.run.agentId, product.id);
+  assert.equal(second.run.product?.id, product.id);
+  const currentProduct = await service.getProduct(creator.id, product.id);
+  assert.equal(currentProduct.id, product.id);
   assert.notEqual(first.run.revisionId, second.run.revisionId);
   await assert.rejects(
-    () => service.create(creator, { ...request, product: { id: "another-product" } }, "stable-task-product-mismatch"),
+    () => service.create(creator, { ...request, product: { id: "another-product" } }, "stable-product-product-mismatch"),
     /bound to another Product/
   );
 });
 
-test("a failed graph write does not poison the next Task revision parent", async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-factory-task-revision-retry-"));
+test("a failed graph write does not poison the next Product revision parent", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-factory-product-revision-retry-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const repository = new InMemoryCreatorFactoryRepository();
   const graph = new InMemoryDistillationGraphStore();
   const service = new CreatorFactoryService(repository, root, undefined, undefined, graph);
   const creator = { id: "11111111-1111-4111-8111-111111111111", name: "Retry Creator" };
-  const task = await service.createTask(creator.id, { name: "Retryable task", brief: "A stable revision lineage." });
+  const product = await service.createProduct(creator.id, { name: "Retryable product", promise: "A stable revision lineage." });
   const document = await service.createSourceDocument(creator.id, {
-    taskId: task.id,
+    productId: product.id,
     displayName: "method.md",
     mediaType: "text/markdown",
     bytes: Buffer.from("# Method\nChoose one supported answer.\n", "utf8")
   });
-  const request = createRequest({ taskId: task.id, taskName: task.name, taskBrief: task.brief, sources: undefined, sourceDocumentIds: [document.id] });
+  const request = createRequest({ productId: product.id, productName: product.name, productPromise: product.promise, sources: undefined, sourceDocumentIds: [document.id] });
 
   const first = await service.create(creator, request, "revision-retry-first");
-  const firstTask = await service.getTask(creator.id, task.id);
-  assert.equal(firstTask.latestRevisionId, first.run.revisionId);
+  const currentProduct = await service.getProduct(creator.id, product.id);
+  assert.equal(currentProduct.latestRevisionId, first.run.revisionId);
 
-  // Simulate a pre-fix failed attempt that advanced only the Task pointer.
-  await repository.setTaskRevision(creator.id, task.id, {
-    runId: firstTask.runId!,
-    revisionId: "factory_stale_revision",
-    productId: firstTask.productId!
+  // Simulate a pre-fix failed attempt that advanced only the Product pointer.
+  await repository.setProductRevision(creator.id, product.id, {
+    runId: currentProduct.runId!,
+    revisionId: "factory_stale_revision"
   });
 
   const second = await service.create(creator, request, "revision-retry-second");
-  const finalTask = await service.getTask(creator.id, task.id);
+  const finalProduct = await service.getProduct(creator.id, product.id);
   assert.equal(second.run.revisionNumber, 2);
   assert.equal(second.run.parentRevisionId, first.run.revisionId);
-  assert.equal(finalTask.latestRevisionId, second.run.revisionId);
-  assert.equal((await graph.derive(task.id)).currentRevisionId, second.run.revisionId);
+  assert.equal(finalProduct.latestRevisionId, second.run.revisionId);
+  assert.equal((await graph.derive(product.id)).currentRevisionId, second.run.revisionId);
 });
 
 function createRequest(overrides: Partial<CreateFactoryRunRequest> = {}): CreateFactoryRunRequest {
   return {
-    taskName: "Decision-ready research brief",
-    taskBrief: "Choose one supported recommendation and return a finished brief.",
+    productName: "Decision-ready research brief",
+    productPromise: "Choose one supported recommendation and return a finished brief.",
     sources: [{
       id: "S1",
       authority: "creator_current",
@@ -587,7 +586,7 @@ function createRequest(overrides: Partial<CreateFactoryRunRequest> = {}): Create
 }
 
 async function passingPromptRunner(call: FactoryPromptCall): Promise<string> {
-  if (call.purpose === "evidence.extract") return "# Task evidence\nExplicit [S1:L1].";
+  if (call.purpose === "evidence.extract") return "# Product evidence\nExplicit [S1:L1].";
   if (call.purpose === "eval.generate_questions") {
     const count = Number(/Question count:\s*(\d+)/.exec(call.prompt)?.[1]);
     return Array.from({ length: count }, (_, index) => [

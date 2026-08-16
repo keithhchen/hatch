@@ -4,6 +4,7 @@ import path from "node:path";
 import { Pool, type QueryResultRow } from "pg";
 import type { PostgresQueryExecutor } from "./postgresStore.js";
 import type { RunStatus } from "./store.js";
+import { normalizeBriefSnapshot, type BriefSnapshot } from "./brief.js";
 
 /**
  * This module is deliberately separate from RuntimeStore. RuntimeStore is an
@@ -39,6 +40,8 @@ export type ConversationRecord = ConversationBinding & {
   createdAt: string;
   updatedAt: string;
   version: number;
+  /** Immutable consumer answers captured when this Task was created. */
+  briefSnapshot?: BriefSnapshot;
 };
 
 export type ConversationRunRecord = {
@@ -86,6 +89,7 @@ export type CreateConversationInput = ConversationBinding & {
   publicId: string;
   title?: string;
   clientRequestId?: string;
+  briefSnapshot?: BriefSnapshot;
 };
 
 export type CreateRunInput = {
@@ -174,7 +178,8 @@ function publicConversationEvent(conversation: ConversationRecord): Record<strin
     product_id_at_creation: conversation.productIdAtCreation,
     title: conversation.title,
     status: conversation.status,
-    version: conversation.version
+    version: conversation.version,
+    ...(conversation.briefSnapshot ? { brief_snapshot: conversation.briefSnapshot } : {})
   };
 }
 
@@ -214,18 +219,23 @@ export class InMemoryConversationRepository implements ConversationRepository {
 
   async createConversation(input: CreateConversationInput): Promise<{ conversation: ConversationRecord; created: boolean }> {
     return this.write(async () => {
+      const briefSnapshot = input.briefSnapshot ? normalizeBriefSnapshot(input.briefSnapshot) : undefined;
+      const normalizedInput = briefSnapshot ? { ...input, briefSnapshot } : input;
       const requestKey = input.clientRequestId ? conversationRequestKey(input, input.clientRequestId) : undefined;
       if (requestKey) {
         const existingId = this.conversationRequests.get(requestKey);
         if (existingId) {
           const existing = this.conversations.get(existingId);
-          if (existing) return { conversation: cloneConversation(existing), created: false };
+          if (existing) {
+            assertSameConversationBinding(existing, normalizedInput);
+            return { conversation: cloneConversation(existing), created: false };
+          }
         }
       }
 
       const existing = this.conversations.get(input.id);
       if (existing) {
-        assertSameConversationBinding(existing, input);
+        assertSameConversationBinding(existing, normalizedInput);
         return { conversation: cloneConversation(existing), created: false };
       }
 
@@ -243,7 +253,8 @@ export class InMemoryConversationRepository implements ConversationRepository {
         status: "active",
         createdAt,
         updatedAt: createdAt,
-        version: 1
+        version: 1,
+        ...(briefSnapshot ? { briefSnapshot: structuredClone(briefSnapshot) } : {})
       };
       this.conversations.set(conversation.id, conversation);
       if (requestKey) this.conversationRequests.set(requestKey, conversation.id);
@@ -597,10 +608,12 @@ CREATE TABLE IF NOT EXISTS hatch_conversations (
   status TEXT NOT NULL CHECK (status IN ('active', 'archived')),
   version INTEGER NOT NULL,
   client_request_id TEXT,
+  brief_snapshot JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (owner_account_id, creator_id, agent_id, client_request_id)
 );
+ALTER TABLE hatch_conversations ADD COLUMN IF NOT EXISTS brief_snapshot JSONB;
 CREATE INDEX IF NOT EXISTS hatch_conversations_library_idx
   ON hatch_conversations (owner_account_id, creator_id, agent_id, updated_at DESC, id DESC);
 
@@ -700,28 +713,35 @@ export class PostgresConversationRepository implements ConversationRepository {
 
   async createConversation(input: CreateConversationInput): Promise<{ conversation: ConversationRecord; created: boolean }> {
     await this.initialize();
+    const briefSnapshot = input.briefSnapshot ? normalizeBriefSnapshot(input.briefSnapshot) : undefined;
+    const normalizedInput = briefSnapshot ? { ...input, briefSnapshot } : input;
     if (input.clientRequestId) {
       const existing = await this.pool.query<ConversationRow>(`
         SELECT * FROM hatch_conversations
         WHERE owner_account_id = $1 AND creator_id = $2 AND agent_id = $3 AND client_request_id = $4
       `, [input.ownerAccountId, input.creatorId, input.agentId, input.clientRequestId]);
-      if (existing.rows[0]) return { conversation: conversationFromRow(existing.rows[0]), created: false };
+      if (existing.rows[0]) {
+        const conversation = conversationFromRow(existing.rows[0]);
+        assertSameConversationBinding(conversation, normalizedInput);
+        return { conversation, created: false };
+      }
     }
     const alreadyById = await this.getConversation(input.id);
     if (alreadyById) {
-      assertSameConversationBinding(alreadyById, input);
+      assertSameConversationBinding(alreadyById, normalizedInput);
       return { conversation: alreadyById, created: false };
     }
     try {
       const result = await this.pool.query<ConversationRow>(`
         INSERT INTO hatch_conversations (
           id, public_id, owner_account_id, creator_id, agent_id, product_id, corpus_digest,
-          product_id_at_creation, title, status, version, client_request_id
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'active', 1, $10)
+          product_id_at_creation, title, status, version, client_request_id, brief_snapshot
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'active', 1, $10, $11::jsonb)
         RETURNING *
       `, [
         input.id, input.publicId, input.ownerAccountId, input.creatorId, input.agentId, input.productId,
-        input.corpusDigest, input.productId, input.title?.trim() || null, input.clientRequestId ?? null
+        input.corpusDigest, input.productId, input.title?.trim() || null, input.clientRequestId ?? null,
+        briefSnapshot ? JSON.stringify(briefSnapshot) : null
       ]);
       const conversation = conversationFromRow(requireRow(result.rows[0], "Conversation insert returned no row"));
       await this.appendEvent({
@@ -737,10 +757,17 @@ export class PostgresConversationRepository implements ConversationRepository {
           SELECT * FROM hatch_conversations
           WHERE owner_account_id = $1 AND creator_id = $2 AND agent_id = $3 AND client_request_id = $4
         `, [input.ownerAccountId, input.creatorId, input.agentId, input.clientRequestId]);
-        if (existing.rows[0]) return { conversation: conversationFromRow(existing.rows[0]), created: false };
+        if (existing.rows[0]) {
+          const conversation = conversationFromRow(existing.rows[0]);
+          assertSameConversationBinding(conversation, normalizedInput);
+          return { conversation, created: false };
+        }
       }
       const byId = await this.getConversation(input.id);
-      if (byId) return { conversation: byId, created: false };
+      if (byId) {
+        assertSameConversationBinding(byId, normalizedInput);
+        return { conversation: byId, created: false };
+      }
       throw error;
     }
   }
@@ -979,6 +1006,7 @@ type ConversationRow = QueryResultRow & {
   version: number;
   created_at: string | Date;
   updated_at: string | Date;
+  brief_snapshot: BriefSnapshot | string | null;
 };
 
 type RunRow = QueryResultRow & {
@@ -1019,7 +1047,8 @@ function conversationFromRow(row: ConversationRow): ConversationRecord {
     status: row.status,
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
-    version: Number(row.version)
+    version: Number(row.version),
+    ...(row.brief_snapshot ? { briefSnapshot: parseBriefSnapshot(row.brief_snapshot) } : {})
   };
 }
 
@@ -1060,6 +1089,11 @@ function iso(value: string | Date): string {
   return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
 
+function parseBriefSnapshot(value: BriefSnapshot | string): BriefSnapshot {
+  const parsed = typeof value === "string" ? JSON.parse(value) as unknown : value;
+  return normalizeBriefSnapshot(parsed);
+}
+
 function isQueryExecutor(value: unknown): value is PostgresQueryExecutor {
   return typeof value === "object" && value !== null && "query" in value && typeof (value as { query?: unknown }).query === "function";
 }
@@ -1084,6 +1118,16 @@ function assertSameConversationBinding(existing: ConversationRecord, expected: C
   ) {
     throw new ConversationRepositoryError("conversation_binding_mismatch", "Conversation is outside the authenticated Creator Agent binding");
   }
+  const expectedBrief = (expected as ConversationBinding & { briefSnapshot?: BriefSnapshot }).briefSnapshot;
+  const existingBrief = existing.briefSnapshot;
+  if (expectedBrief || existingBrief) {
+    const sameBrief = Boolean(expectedBrief && existingBrief)
+      && expectedBrief!.spec_digest === existingBrief!.spec_digest
+      && JSON.stringify(expectedBrief!.fields) === JSON.stringify(existingBrief!.fields);
+    if (!sameBrief) {
+      throw new ConversationRepositoryError("conversation_binding_mismatch", "Conversation BriefSnapshot does not match the original task");
+    }
+  }
 }
 
 function assertSameRunInput(existing: ConversationRunRecord, input: CreateRunInput): void {
@@ -1107,7 +1151,7 @@ export function assertConversationBinding(
 }
 
 function cloneConversation(conversation: ConversationRecord): ConversationRecord {
-  return { ...conversation };
+  return { ...conversation, ...(conversation.briefSnapshot ? { briefSnapshot: structuredClone(conversation.briefSnapshot) } : {}) };
 }
 
 function cloneRun(run: ConversationRunRecord): ConversationRunRecord {

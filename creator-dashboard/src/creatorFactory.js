@@ -72,6 +72,13 @@ export function listFactoryRuns(token) {
   return dashboardRequest("/v1/creator/factory-runs", { token });
 }
 
+// Product is the only public owner. A version is a read projection of a
+// Product-scoped run; callers should not need a global Factory listing to
+// render the Product workflow.
+export function listProductVersions(token, productId) {
+  return dashboardRequest(`/v1/creator/products/${encodeURIComponent(productId)}/versions`, { token });
+}
+
 export function getFactoryRun(token, runId) {
   return dashboardRequest(`/v1/creator/factory-runs/${encodeURIComponent(runId)}`, { token });
 }
@@ -146,45 +153,52 @@ export function submitFactoryReview(token, run, input, idempotencyKey = crypto.r
   });
 }
 
-export function listDistillationTasks(token) {
-  return dashboardRequest("/v1/creator/tasks", { token });
+export function listProducts(token) {
+  return dashboardRequest("/v1/creator/products", { token });
 }
 
-export function createDistillationTask(token, input) {
-  return dashboardRequest("/v1/creator/tasks", {
+export function createProduct(token, input) {
+  return dashboardRequest("/v1/creator/products", {
     method: "POST",
     token,
     headers: { "idempotency-key": crypto.randomUUID() },
-    body: JSON.stringify({ name: input.name, brief: input.brief })
+    body: JSON.stringify({ name: input.name, promise: input.promise })
   });
 }
 
-export function getDistillationTask(token, taskId) {
-  return dashboardRequest(`/v1/creator/tasks/${encodeURIComponent(taskId)}`, { token });
+export function getProduct(token, productId) {
+  return dashboardRequest(`/v1/creator/products/${encodeURIComponent(productId)}`, { token });
 }
 
-export function updateTaskBrief(token, task, brief) {
-  return dashboardRequest(`/v1/creator/tasks/${encodeURIComponent(task.id)}`, {
+export function updateProductPromise(token, product, promise) {
+  return dashboardRequest(`/v1/creator/products/${encodeURIComponent(product.id ?? product.product_id)}`, {
     method: "PATCH",
     token,
     headers: { "idempotency-key": crypto.randomUUID() },
-    body: JSON.stringify({ brief, expected_updated_at: task.updated_at })
+    body: JSON.stringify({ promise, expected_updated_at: product.updated_at })
   });
 }
 
-export function listSourceDocuments(token, taskId) {
-  const query = taskId ? `?task_id=${encodeURIComponent(taskId)}` : "";
-  return dashboardRequest(`/v1/creator/source-documents${query}`, { token });
+export function saveProductBriefSpec(token, product, briefSpec) {
+  return dashboardRequest(`/v1/creator/products/${encodeURIComponent(product.id ?? product.product_id)}/brief-spec`, {
+    method: "PUT",
+    token,
+    headers: { "idempotency-key": crypto.randomUUID() },
+    body: JSON.stringify({ brief_spec: briefSpec, expected_updated_at: product.updated_at })
+  });
 }
 
-export function uploadSourceDocument(token, taskId, file) {
+export function listProductFiles(token, productId) {
+  return dashboardRequest(`/v1/creator/products/${encodeURIComponent(productId)}/files`, { token });
+}
+
+export function uploadProductFile(token, productId, file) {
   return file.arrayBuffer().then((bytes) => {
-    return dashboardRequest("/v1/creator/source-documents", {
+    return dashboardRequest(`/v1/creator/products/${encodeURIComponent(productId)}/files`, {
       method: "POST",
       token,
       headers: { "idempotency-key": crypto.randomUUID() },
       body: JSON.stringify({
-        task_id: taskId,
         display_name: file.name,
         media_type: file.type || undefined,
         content_base64: bytesToBase64(bytes)
@@ -203,25 +217,15 @@ function bytesToBase64(arrayBuffer) {
   return btoa(binary);
 }
 
-export function startFactoryRunFromSources(token, task, documentIds) {
+export function startFactoryRunFromSources(token, product, documentIds) {
   return dashboardRequest("/v1/creator/factory-runs", {
     method: "POST",
     token,
     headers: { "idempotency-key": crypto.randomUUID() },
     body: JSON.stringify({
-      task_id: task.id,
-      task_name: task.name,
-      task_brief: task.brief,
-      // Carry the Task promise into the Product contract and make the
-      // default safety boundary explicit. Presentation and voice
-      // configuration stay out of this workflow; a Creator can still provide
-      // a richer Product contract through the provider-neutral Factory API.
-      product: {
-        name: task.name,
-        description: task.brief,
-        promise: task.brief,
-        boundaries: ["Stay within the Task promise and the files attached to this Task; do not invent unsupported facts."]
-      },
+      product_id: product.id ?? product.product_id,
+      product_name: product.name ?? product.product_name,
+      product_promise: product.promise ?? product.description ?? "",
       source_document_ids: documentIds
     })
   });

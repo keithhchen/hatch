@@ -1,5 +1,6 @@
 import "dotenv/config";
 import http from "node:http";
+import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import { URL } from "node:url";
 import {
@@ -25,6 +26,7 @@ import {
 import { RegistryStoreTs } from "./registryStore.js";
 import { RegistryDeploymentConflictError } from "./registryStore.js";
 import { MAX_AGENT_CORPUS_BUNDLE_BYTES } from "./registryCorpus.js";
+import { BriefValidationError, normalizeBriefSpec, type BriefSpec } from "./brief.js";
 import { handleCreatorFactoryHttp } from "./creatorLearning/httpApi.js";
 import { isUuidV4 } from "./identity.js";
 import {
@@ -34,6 +36,7 @@ import {
 } from "./creatorLearning/repository.js";
 import { CreatorFactoryService } from "./creatorLearning/service.js";
 import { objectStoreFromEnvironment } from "./creatorLearning/objectStore.js";
+import { ProductFileStore, ProductFilesError, type ProductFileView, type ProductSnapshotView } from "./creatorLearning/productFiles.js";
 import { PostgresDistillationGraphStore } from "./creatorLearning/distillationGraphStore.js";
 import {
   HttpRequestGate,
@@ -58,6 +61,7 @@ type RegistryContext = {
   runtimeServiceToken: string;
   deploymentServiceToken: string;
   factoryService: CreatorFactoryService;
+  productFileStore: ProductFileStore;
   authSecret: string;
 };
 
@@ -72,6 +76,12 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   await factoryRepository.initialize();
   const factoryRoot = path.resolve(environment.HATCH_CREATOR_FACTORY_ROOT ?? "creator-factory-runs");
   const objectStore = objectStoreFromEnvironment(environment);
+  const productObjectStore = objectStoreFromEnvironment(environment, path.join(factoryRoot, "product-files"));
+  if (!productObjectStore) throw new Error("Product File object storage is not configured");
+  const productFileStore = new ProductFileStore(
+    productObjectStore,
+    environment.HATCH_CREATOR_PRODUCT_FILES_PREFIX?.trim() || "creator-products"
+  );
   const graphPool = store.databasePool();
   const graphStore = graphPool ? new PostgresDistillationGraphStore(graphPool) : undefined;
   await graphStore?.initialize();
@@ -80,7 +90,8 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     factoryRoot,
     undefined,
     objectStore,
-    graphStore
+    graphStore,
+    productFileStore
   );
   const publishToken = environment.HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN?.trim() || "";
   const runtimeServiceToken = environment.HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN?.trim() || "";
@@ -111,10 +122,24 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       }, { "retry-after": String(admission.retryAfterSeconds), connection: "close" });
       return;
     }
-    const routeTask = route(request, response, { store, accounts, authRateLimiter, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, authSecret })
+    const routePromise = route(request, response, { store, accounts, authRateLimiter, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, productFileStore, authSecret })
       .catch((error) => {
         const status = errorStatus(error);
         if (status >= 500) console.error("Registry request failed", error);
+        if (error instanceof ProductFilesError) {
+          sendJson(response, status, {
+            error: { code: error.code, message: error.message },
+            detail: error.message
+          });
+          return;
+        }
+        if (error instanceof BriefValidationError) {
+          sendJson(response, status, {
+            error: { code: error.code, message: error.message },
+            detail: error.message
+          });
+          return;
+        }
         sendJson(response, status, {
           detail: status >= 500
             ? "Registry request failed."
@@ -123,7 +148,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
               : error instanceof Error ? error.message : String(error)
         });
       });
-    holdAdmissionUntilRequestAndRouteSettle(request, response, routeTask, admission);
+    holdAdmissionUntilRequestAndRouteSettle(request, response, routePromise, admission);
   });
   server.maxConnections = httpLimits.maxConnections;
   server.headersTimeout = httpLimits.headersTimeoutMs;
@@ -284,6 +309,7 @@ async function route(
     const creatorId = requiredDeploymentField(body, "creator_id");
     const operationId = requiredDeploymentField(body, "operation_id");
     const corpusDigest = requiredDeploymentField(body, "corpus_digest");
+    const productId = requiredDeploymentField(body, "product_id");
     const runId = decodeURIComponent(internalFactoryStageMatch[1]!);
     const candidate = await context.factoryService.publishableCorpus(creatorId, runId);
     if (candidate.corpusDigest !== corpusDigest) {
@@ -295,11 +321,20 @@ async function route(
       });
       return;
     }
+    if (candidate.agentId !== productId) throw new Error("product_id does not match the Factory candidate");
+    const product = await productForCreator(context, creatorId, productId);
+    const briefSpec = product?.brief_spec ? normalizeBriefSpec(product.brief_spec) : undefined;
+    if (!briefSpec) {
+      const error = new Error("brief_spec_required");
+      (error as Error & { status?: number }).status = 422;
+      throw error;
+    }
     const staged = await context.store.stageAgentCorpusDirectory(
       creatorId,
       candidate.agentId,
       candidate.corpusRoot,
-      candidate.corpusDigest
+      candidate.corpusDigest,
+      briefSpec
     );
     sendJson(response, 201, { ...staged, factory_run_id: runId, operation_id: operationId, current: false });
     return;
@@ -318,11 +353,21 @@ async function route(
     const agentId = decodeURIComponent(internalActivationMatch[1]!);
     const corpusDigest = decodeURIComponent(internalActivationMatch[2]!);
     try {
+      const productId = typeof body.product_id === "string" ? body.product_id.trim() : agentId;
+      const product = await productForCreator(context, creatorId, productId);
+      const briefSpec = body.brief_spec && typeof body.brief_spec === "object"
+        ? normalizeBriefSpec(body.brief_spec as BriefSpec)
+        : product?.brief_spec;
+      if (!briefSpec) {
+        const error = new Error("brief_spec_required");
+        (error as Error & { status?: number }).status = 422;
+        throw error;
+      }
       const activated = await context.store.activateAgentCorpusRelease(
         creatorId,
         agentId,
         corpusDigest,
-        { operationId, expectedCurrentDigest }
+        { operationId, expectedCurrentDigest, ...(briefSpec ? { briefSpec } : {}) }
       );
       const release = typeof body.factory_run_id === "string" && typeof body.product_id === "string"
         ? await context.factoryService.recordRelease(creatorId, body.factory_run_id, body.product_id)
@@ -345,7 +390,6 @@ async function route(
   }
 
   if (url.pathname.startsWith("/v1/creator/factory-runs")
-    || url.pathname.startsWith("/v1/creator/tasks")
     || url.pathname.startsWith("/v1/creator/source-documents")
     || url.pathname.startsWith("/v1/creator/source-snapshots")) {
     const account = await authenticate(request, response, context, "creator");
@@ -360,6 +404,304 @@ async function route(
       creator: account
     }, context.factoryService);
     if (result) { sendJson(response, result.status, result.body); return; }
+  }
+
+  // Product is the only user-facing authoring boundary. Files and Snapshots
+  // live below Product; a Version/Run only records the immutable Snapshot it
+  // used. The legacy product repository remains an internal read-time migration
+  // boundary for existing Factory rows and is never returned by these routes.
+  if (url.pathname === "/v1/creator/products" && (request.method === "GET" || request.method === "POST")) {
+    const account = await authenticate(request, response, context, "creator");
+    if (account === SESSION_QUERY_REJECTED) return;
+    if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
+    if (request.method === "GET") {
+      const products = new Map<string, Record<string, unknown>>();
+      for (const row of await context.store.listAgentCorpora(account.id)) {
+        const productId = String(row.product_id ?? row.agent_id ?? "");
+        if (!productId) continue;
+        products.set(productId, {
+          product_id: productId,
+          creator_id: account.id,
+          name: row.product_name ?? (row as Record<string, unknown>).name ?? productId,
+          promise: row.product_promise ?? row.product_description ?? "",
+          description: row.product_description ?? row.product_promise ?? "",
+          status: row.status ?? "published",
+          corpus_digest: row.corpus_digest ?? null,
+          published_at: row.published_at ?? null,
+          ...(row.brief_spec ? { brief_spec: row.brief_spec } : {})
+        });
+      }
+      for (const product of await context.factoryService.listProducts(account.id)) {
+        const productId = publicProductId(product);
+        if (!productId || products.has(productId)) continue;
+        products.set(productId, {
+          product_id: productId,
+          creator_id: account.id,
+          name: product.name,
+          promise: publicProductPromise(product),
+          description: publicProductPromise(product),
+          status: product.runId ? "working" : "draft",
+          ...(product.briefSpec ? { brief_spec: product.briefSpec } : {}),
+          created_at: product.createdAt,
+          updated_at: product.updatedAt
+        });
+      }
+      sendJson(response, 200, { products: [...products.values()] });
+      return;
+    }
+    const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
+    const name = requiredProductText(body.name ?? body.product_name, "name", 240);
+    const promise = requiredProductText(body.promise ?? body.product_promise ?? body.description ?? body.brief, "promise", 100_000);
+    const product = await context.factoryService.createProduct(account.id, { name, brief: promise });
+    sendJson(response, 201, {
+      product: {
+        product_id: publicProductId(product),
+        name: product.name,
+        promise: publicProductPromise(product),
+        status: "draft",
+        created_at: product.createdAt,
+        updated_at: product.updatedAt
+      }
+    });
+    return;
+  }
+
+  const productRootMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)$/);
+  if (productRootMatch && (request.method === "GET" || request.method === "PATCH" || request.method === "DELETE")) {
+    const account = await authenticate(request, response, context, "creator");
+    if (account === SESSION_QUERY_REJECTED) return;
+    if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
+    const productId = decodeURIComponent(productRootMatch[1]!);
+    const product = await productForCreator(context, account.id, productId);
+    if (!product) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
+    if (request.method === "PATCH") {
+      if (!product.repositoryId) {
+        sendJson(response, 409, { error: { code: "product_not_editable", message: "Published Products are edited by creating a new Version." } });
+        return;
+      }
+      const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
+      const promise = body.promise ?? body.description ?? body.brief;
+      const updated = await context.factoryService.updateProductPromise(
+        account.id,
+        product.repositoryId,
+        {
+          promise: requiredProductText(promise, "promise", 100_000),
+          ...(typeof body.expected_updated_at === "string" ? { expectedUpdatedAt: body.expected_updated_at } : {})
+        }
+      );
+      sendJson(response, 200, publicCreatorProduct(updated));
+      return;
+    }
+    if (request.method === "DELETE") {
+      if (!product.repositoryId) {
+        sendJson(response, 409, { error: { code: "product_not_editable", message: "Published Products cannot be deleted from the authoring workspace." } });
+        return;
+      }
+      const deleteProduct = (context.factoryService as unknown as {
+        deleteProduct?: (creatorId: string, productId: string) => Promise<unknown>;
+      }).deleteProduct;
+      if (!deleteProduct) throw new Error("Product deletion is not configured");
+      await deleteProduct(account.id, product.repositoryId);
+      response.writeHead(204, { ...corsHeaders(), "cache-control": "no-store" });
+      response.end();
+      return;
+    }
+    sendJson(response, 200, {
+      product: {
+        product_id: product.productId,
+        name: product.name,
+        promise: product.promise,
+        status: product.status,
+        ...(product.brief_spec ? { brief_spec: product.brief_spec } : {}),
+        ...(product.createdAt ? { created_at: product.createdAt } : {}),
+        ...(product.updatedAt ? { updated_at: product.updatedAt } : {})
+      }
+    });
+    return;
+  }
+
+  const productBriefSpecMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/brief-spec$/);
+  if (productBriefSpecMatch && request.method === "PUT") {
+    const account = await authenticate(request, response, context, "creator");
+    if (account === SESSION_QUERY_REJECTED) return;
+    if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
+    const productId = decodeURIComponent(productBriefSpecMatch[1]!);
+    const product = await productForCreator(context, account.id, productId);
+    if (!product?.repositoryId) {
+      sendJson(response, 409, { error: { code: "product_not_editable", message: "Published Products are changed by creating a new Version." } });
+      return;
+    }
+    const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
+    const updated = await context.factoryService.saveProductBriefSpec(
+      account.id,
+      product.repositoryId,
+      normalizeBriefSpec(body.brief_spec as BriefSpec),
+      typeof body.expected_updated_at === "string" ? body.expected_updated_at : undefined
+    );
+    sendJson(response, 200, publicCreatorProduct(updated));
+    return;
+  }
+
+  const productFilesMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/files(?:\/([^/]+))?$/);
+  const productSnapshotsMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/snapshots(?:\/([^/]+))?$/);
+  const productRunsMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/runs(?:\/([^/]+))?$/);
+  const productVersionsMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/versions$/);
+  if (productFilesMatch || productSnapshotsMatch || productRunsMatch || productVersionsMatch) {
+    const account = await authenticate(request, response, context, "creator");
+    if (account === SESSION_QUERY_REJECTED) return;
+    if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
+    const productId = decodeURIComponent((productFilesMatch ?? productSnapshotsMatch ?? productRunsMatch ?? productVersionsMatch)![1]!);
+    const product = await productForCreator(context, account.id, productId);
+    if (!product) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
+
+    if (productFilesMatch) {
+      const fileId = productFilesMatch[2] ? decodeURIComponent(productFilesMatch[2]) : undefined;
+      if (request.method === "GET" && !fileId) {
+        const files = await context.productFileStore.listFiles(account.id, productId);
+        sendJson(response, 200, { product_id: productId, files: files.map((file) => publicProductFile(file)) });
+        return;
+      }
+      if (request.method === "GET" && fileId) {
+        const file = await context.productFileStore.getFile(account.id, productId, fileId);
+        sendJson(response, 200, publicProductFile(file, url.searchParams.get("include_content") === "true"));
+        return;
+      }
+      if (request.method === "POST" && !fileId) {
+        const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
+        const encoded = typeof body.content_base64 === "string" ? body.content_base64 : "";
+        if (!encoded) throw new ProductFilesError("invalid_product_file", "content_base64 is required");
+        const bytes = decodeProductBase64(encoded);
+        const suppliedDigest = typeof body.sha256 === "string" ? body.sha256.trim().toLowerCase() : undefined;
+        const actualDigest = sha256Bytes(bytes);
+        if (suppliedDigest && suppliedDigest.replace(/^sha256:/, "") !== actualDigest) {
+          sendJson(response, 422, { error: { code: "digest_mismatch", message: "Uploaded content does not match sha256." } });
+          return;
+        }
+        const metadata = body.metadata && typeof body.metadata === "object" && !Array.isArray(body.metadata)
+          ? body.metadata as Record<string, unknown>
+          : {};
+        const file = await context.productFileStore.createFromUpload({
+          creatorId: account.id,
+          productId,
+          displayName: String(body.display_name ?? body.file_name ?? ""),
+          mediaType: typeof body.media_type === "string" ? body.media_type : undefined,
+          bytes,
+          idempotencyKey: request.headers["idempotency-key"]?.toString(),
+          metadata: {
+            ...metadata,
+            ...(body.source_kind !== undefined ? { source_kind: body.source_kind } : {}),
+            ...(body.source_ref !== undefined ? { source_ref: body.source_ref } : {}),
+            ...(body.source_url !== undefined ? { source_url: body.source_url } : {}),
+            ...(body.provenance !== undefined ? { provenance: body.provenance } : {}),
+            ...(body.selection_reason !== undefined ? { selection_reason: body.selection_reason } : {}),
+            ...(body.creator_approved !== undefined ? { creator_approved: body.creator_approved } : {})
+          }
+        });
+        sendJson(response, 201, publicProductFile(file), {
+          "idempotency-key": request.headers["idempotency-key"]?.toString() ?? ""
+        });
+        return;
+      }
+    }
+
+    if (productSnapshotsMatch) {
+      const snapshotId = productSnapshotsMatch[2] ? decodeURIComponent(productSnapshotsMatch[2]) : undefined;
+      if (request.method === "GET" && !snapshotId) {
+        sendJson(response, 200, {
+          product_id: productId,
+          snapshots: (await context.productFileStore.listSnapshots(account.id, productId)).map((snapshot) => publicProductSnapshot(snapshot))
+        });
+        return;
+      }
+      if (request.method === "GET" && snapshotId) {
+        sendJson(response, 200, publicProductSnapshot(await context.productFileStore.getSnapshot(account.id, productId, snapshotId)));
+        return;
+      }
+      if (request.method === "POST" && !snapshotId) {
+        const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
+        const fileIds = Array.isArray(body.file_ids) ? body.file_ids.map((id) => String(id)) : undefined;
+        const snapshot = await context.productFileStore.createSnapshot(
+          account.id,
+          productId,
+          fileIds,
+          request.headers["idempotency-key"]?.toString()
+        );
+        sendJson(response, 201, publicProductSnapshot(snapshot));
+        return;
+      }
+    }
+
+    if (productRunsMatch || productVersionsMatch) {
+      if (request.method === "POST" && !product.repositoryId) {
+        sendJson(response, 409, {
+          error: {
+            code: "product_revision_unavailable",
+            message: "This published Product is read-only in the current workspace; create a new Product to iterate it."
+          }
+        });
+        return;
+      }
+      const runId = productRunsMatch?.[2] ? decodeURIComponent(productRunsMatch[2]) : undefined;
+      if (request.method === "GET" && !runId) {
+        const runs = (await context.factoryService.list(account.id))
+          .filter((run) => run.agentId === productId || run.product?.id === productId)
+          .map(publicProductRun);
+        sendJson(response, 200, productVersionsMatch ? { product_id: productId, versions: runs } : { product_id: productId, runs });
+        return;
+      }
+      if (request.method === "GET" && runId && productRunsMatch) {
+        const run = await context.factoryService.get(account.id, runId);
+        if (run.agentId !== productId && run.product?.id !== productId) {
+          sendJson(response, 404, { error: { code: "run_not_found", message: "Run was not found for this Product." } });
+          return;
+        }
+        sendJson(response, 200, publicProductRun(run));
+        return;
+      }
+      if (request.method === "POST" && !runId && productRunsMatch) {
+        const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
+        // A caller-provided key makes retries safe. If omitted, use a fresh
+        // request identity; a deterministic Product-only fallback would make
+        // every later “new version” replay the very first run forever.
+        const runIdempotencyKey = request.headers["idempotency-key"]?.toString().trim()
+          || `product-run:${productId}:${randomUUID()}`;
+        const snapshotId = typeof body.source_snapshot_id === "string" && body.source_snapshot_id.trim()
+          ? body.source_snapshot_id.trim()
+          : (await context.productFileStore.createSnapshot(
+            account.id,
+            productId,
+            Array.isArray(body.file_ids) ? body.file_ids.map((id) => String(id)) : undefined,
+            `${runIdempotencyKey}:snapshot`
+          )).id;
+        const config = body.config && typeof body.config === "object" && !Array.isArray(body.config)
+          ? body.config as Record<string, unknown>
+          : undefined;
+        const result = await context.factoryService.create(
+          { id: account.id, name: account.display_name },
+          {
+            // The repository still uses the internal row id as a migration
+            // boundary. The external contract uses the stable Product id.
+            // The current repository implementation accepts its internal row
+            // key at this service boundary. Core Product canonicalization will
+            // make this equal to productId; it is never exposed to callers.
+            productId: product.repositoryId,
+            agentId: productId,
+            product: { id: productId, name: product.name, description: product.promise, promise: product.promise },
+            productName: product.name,
+            productPromise: product.promise,
+            sourceSnapshotId: snapshotId,
+            ...(config ? { config: {
+              ...(typeof config.development_questions === "number" ? { developmentQuestions: config.development_questions } : {}),
+              ...(typeof config.heldout_questions === "number" ? { heldoutQuestions: config.heldout_questions } : {}),
+              ...(typeof config.max_corpus_revisions === "number" ? { maxCorpusRevisions: config.max_corpus_revisions } : {})
+            } } : {})
+          },
+          runIdempotencyKey
+        );
+        sendJson(response, result.created ? 202 : 200, publicProductRun(result.run));
+        return;
+      }
+    }
   }
 
   if (url.pathname === "/v1/public/products" && request.method === "GET") {
@@ -480,13 +822,6 @@ async function route(
     }
     return;
   }
-  if (url.pathname === "/v1/creator/products" && request.method === "GET") {
-    const account = await authenticate(request, response, context, "creator");
-    if (account === SESSION_QUERY_REJECTED) return;
-    if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
-    sendJson(response, 200, await context.store.listAgentCorpora(account.id));
-    return;
-  }
   if (url.pathname === "/v1/product-corpora" && request.method === "POST") {
     if (!context.publishToken || bearer(request) !== context.publishToken) { sendJson(response, 403, { detail: "A valid Registry publish token is required." }); return; }
     const creatorId = url.searchParams.get("creator_id") ?? "";
@@ -507,6 +842,12 @@ async function route(
     if (account === SESSION_QUERY_REJECTED) return;
     if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
     const agentId = url.searchParams.get("product_id") ?? "";
+    const product = await productForCreator(context, account.id, agentId);
+    if (!product) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
+    if (!product.brief_spec) {
+      sendJson(response, 422, { error: { code: "brief_spec_required", message: "Publish a Brief before publishing this Product." } });
+      return;
+    }
     const lease = beginPublishWork(response, context, `creator:${account.id}`);
     if (!lease) return;
     try {
@@ -613,6 +954,163 @@ function publicProductRow(row: Record<string, unknown>): Record<string, unknown>
   };
 }
 
+type CreatorProductBoundary = {
+  productId: string;
+  name: string;
+  promise: string;
+  status: string;
+  brief_spec?: import("./brief.js").BriefSpec;
+  createdAt?: string;
+  updatedAt?: string;
+  /** Internal repository row key; never serialized in a public response. */
+  repositoryId?: string;
+};
+
+async function productForCreator(
+  context: RegistryContext,
+  creatorId: string,
+  productId: string
+): Promise<CreatorProductBoundary | undefined> {
+  const products = await context.factoryService.listProducts(creatorId);
+  const product = products.find((entry) => publicProductId(entry) === productId);
+  if (product) {
+    return {
+      productId,
+      name: product.name,
+      promise: publicProductPromise(product),
+      status: product.runId ? "working" : "draft",
+      ...(product.briefSpec ? { brief_spec: product.briefSpec } : {}),
+      createdAt: product.createdAt,
+      updatedAt: product.updatedAt,
+      repositoryId: product.id
+    };
+  }
+  const published = (await context.store.listAgentCorpora(creatorId)).find((entry) => String(entry.product_id ?? entry.agent_id ?? "") === productId);
+  if (!published) return undefined;
+  return {
+    productId,
+    name: String(published.product_name ?? (published as Record<string, unknown>).name ?? productId),
+    promise: String(published.product_promise ?? published.product_description ?? ""),
+    status: String(published.status ?? "published"),
+    ...(published.brief_spec ? { brief_spec: published.brief_spec } : {}),
+    ...(published.published_at ? { createdAt: String(published.published_at) } : {})
+  };
+}
+
+function publicCreatorProduct(product: {
+  id: string;
+  productId?: string;
+  name: string;
+  brief?: string;
+  promise?: string;
+  status?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  briefSpec?: import("./brief.js").BriefSpec;
+}): Record<string, unknown> {
+  return {
+    product_id: publicProductId(product),
+    name: product.name,
+    promise: publicProductPromise(product),
+    status: product.status === "active" ? "draft" : product.status ?? "draft",
+    ...(product.briefSpec ? { brief_spec: product.briefSpec } : {}),
+    ...(product.createdAt ? { created_at: product.createdAt } : {}),
+    ...(product.updatedAt ? { updated_at: product.updatedAt } : {})
+  };
+}
+
+function publicProductId(product: { id: string }): string {
+  return product.id;
+}
+
+function publicProductPromise(product: { brief?: string; promise?: string }): string {
+  return product.promise ?? product.brief ?? "";
+}
+
+function publicProductFile(file: ProductFileView, includeContent = false): Record<string, unknown> {
+  const projection = {
+    kind: file.projection.kind,
+    media_type: file.projection.mediaType,
+    sha256: file.projection.sha256,
+    bytes: file.projection.bytes,
+    ...(includeContent && file.projectionContent !== undefined ? { content: file.projectionContent } : {}),
+    ...(includeContent && file.projectionBase64 !== undefined ? { base64: file.projectionBase64 } : {})
+  };
+  return {
+    id: file.id,
+    artifact_id: file.artifactId,
+    product_id: file.productId,
+    display_name: file.displayName,
+    media_type: file.mediaType,
+    sha256: file.originalSha256,
+    bytes: file.originalBytes,
+    projection,
+    metadata: file.metadata,
+    created_at: file.createdAt,
+    updated_at: file.updatedAt
+  };
+}
+
+function publicProductSnapshot(snapshot: ProductSnapshotView | Awaited<ReturnType<ProductFileStore["listSnapshots"]>>[number]): Record<string, unknown> {
+  return {
+    id: snapshot.id,
+    product_id: snapshot.productId,
+    version: snapshot.version,
+    file_ids: snapshot.fileIds,
+    manifest_sha256: snapshot.manifestSha256,
+    locked_at: snapshot.lockedAt,
+    created_at: snapshot.createdAt,
+    ...(Array.isArray((snapshot as ProductSnapshotView).documents)
+      ? { files: (snapshot as ProductSnapshotView).documents.map((file) => publicProductFile(file)) }
+      : {})
+  };
+}
+
+function publicProductRun(run: Awaited<ReturnType<CreatorFactoryService["get"]>>): Record<string, unknown> {
+  return {
+    id: run.id,
+    product_id: run.agentId ?? run.product?.id,
+    version: run.revisionNumber ?? run.version,
+    revision_id: run.revisionId ?? run.id,
+    parent_revision_id: run.parentRevisionId ?? null,
+    source_snapshot_id: run.sourceSnapshotId ?? null,
+    status: run.status,
+    stage: run.stage ?? null,
+    derived_status: run.derivedStatus ?? null,
+    quality_gates: run.qualityGates ?? [],
+    pending_questions: run.pendingQuestions,
+    answer_drafts: run.answerDrafts ?? [],
+    question_batch_id: run.questionBatchId ?? null,
+    retryable: run.retryable,
+    candidate: run.candidate ?? null,
+    last_error: run.lastError ?? null,
+    created_at: run.createdAt,
+    updated_at: run.updatedAt
+  };
+}
+
+function requiredProductText(value: unknown, field: string, max: number): string {
+  if (typeof value !== "string" || !value.trim()) throw new Error(`${field} is required`);
+  const normalized = value.trim();
+  if (normalized.length > max) throw new Error(`${field} is too long`);
+  return normalized;
+}
+
+function decodeProductBase64(value: string): Buffer {
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(value) || value.length % 4 === 1) {
+    throw new ProductFilesError("invalid_product_file", "content_base64 is invalid");
+  }
+  const bytes = Buffer.from(value, "base64");
+  if (!bytes.length || bytes.length > 20 * 1024 * 1024) {
+    throw new ProductFilesError("invalid_product_file", "Uploaded file is empty or too large");
+  }
+  return bytes;
+}
+
+function sha256Bytes(bytes: Buffer): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
 function boundedQueryInteger(
   url: URL,
   name: string,
@@ -634,7 +1132,7 @@ function boundedQueryInteger(
 function holdAdmissionUntilRequestAndRouteSettle(
   request: http.IncomingMessage,
   response: http.ServerResponse,
-  routeTask: Promise<void>,
+  routePromise: Promise<void>,
   lease: GateLease,
 ): void {
   let routeSettled = false;
@@ -661,7 +1159,7 @@ function holdAdmissionUntilRequestAndRouteSettle(
     routeSettled = true;
     releaseIfDone();
   };
-  void routeTask.then(settleRoute, settleRoute);
+  void routePromise.then(settleRoute, settleRoute);
 }
 
 function beginSessionQuery(
@@ -712,6 +1210,11 @@ function errorStatus(error: unknown): number {
   }
   if (error instanceof SyntaxError) return 400;
   if (error instanceof Error && error.message === "Request body is too large") return 413;
+  if (error instanceof BriefValidationError) return 422;
+  if (error instanceof ProductFilesError) {
+    if (error.code === "idempotency_conflict") return 409;
+    return error.code === "product_file_not_found" || error.code === "product_snapshot_not_found" || error.code === "product_mismatch" ? 404 : 422;
+  }
   return 500;
 }
 
@@ -809,7 +1312,7 @@ function sendError(response: http.ServerResponse, error: unknown, known: Record<
   }
   throw error;
 }
-function corsHeaders(): Record<string, string> { return { "access-control-allow-origin": "*", "access-control-allow-methods": "GET,POST,OPTIONS", "access-control-allow-headers": "authorization,content-type,x-hatch-creator-id", "access-control-expose-headers": "retry-after,x-hatch-page-limit,x-hatch-page-offset,x-hatch-next-offset" }; }
+function corsHeaders(): Record<string, string> { return { "access-control-allow-origin": "*", "access-control-allow-methods": "GET,POST,PUT,PATCH,OPTIONS", "access-control-allow-headers": "authorization,content-type,idempotency-key,x-hatch-creator-id,x-csrf-token", "access-control-expose-headers": "retry-after,x-hatch-page-limit,x-hatch-page-offset,x-hatch-next-offset" }; }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   createRegistryServerFromEnvironment().then(({ server }) => {

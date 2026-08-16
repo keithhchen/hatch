@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { Usage } from "@earendil-works/pi-ai";
 import { UUID_V4_RE } from "./identity.js";
+import type { BriefSpec } from "./brief.js";
 
 export const LEGACY_PROTOCOL_VERSION = "0.6";
 export const PROTOCOL_VERSION = "0.7";
@@ -155,8 +156,14 @@ export const ClientMessageSchema = z.object({
   */
   client_message_id: ProtocolIdSchema.optional(),
   conversation_id: ProtocolIdSchema,
-  message: UserMessageSchema
-}).strict();
+  message: UserMessageSchema,
+  /** Creates the first Agent run for a Brief-backed Task without a fake chat message. */
+  task_start: z.literal(true).optional()
+}).strict().superRefine((message, ctx) => {
+  if (message.task_start && (message.message.content.trim() || message.message.attachments?.length)) {
+    ctx.addIssue({ code: "custom", path: ["message"], message: "task_start must not include user-authored message content" });
+  }
+});
 
 export const ToolCallResultSchema = z.discriminatedUnion("status", [
   z.object({
@@ -232,6 +239,7 @@ export type RuntimeReady = {
   effective_corpus_digest?: string;
   version_policy?: "pinned" | "track_current_compatible";
   version_history?: Array<Record<string, unknown>>;
+  access_mode?: "unmetered" | "metered";
   entitlement_id?: string;
   creator_agent?: {
     creator: { id: string; name: string };
@@ -241,6 +249,7 @@ export type RuntimeReady = {
       description: string;
       promise?: string;
       boundaries?: string[];
+      brief_spec?: BriefSpec;
     };
     presentation: Record<string, unknown>;
   };
@@ -249,7 +258,7 @@ export type RuntimeReady = {
 export type DeliveryReady = {
   type: "delivery.ready";
   run_id: string;
-  task_id: string;
+  product_id: string;
   artifact_id: string;
   artifact_digest: string;
   delivery_id: string;
@@ -433,8 +442,10 @@ export function contextAttachmentTextSha256(text: string): string {
 export function clientMessageInputDigest(message: {
   content: string;
   attachments?: ContextAttachment[];
+  task_start?: boolean;
 }): string {
   const canonical = JSON.stringify({
+    task_start: message.task_start === true,
     content: message.content,
     attachments: (message.attachments ?? []).map((attachment) => ({
       attachment_id: attachment.attachment_id,

@@ -1620,7 +1620,7 @@ function clientMessage(runId: string, conversationId: string): Record<string, un
     type: "client.message",
     run_id: runId,
     conversation_id: conversationId,
-    message: { role: "user", content: "Run the authorized task." }
+    message: { role: "user", content: "Run the authorized product." }
   };
 }
 

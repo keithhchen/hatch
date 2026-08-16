@@ -9,7 +9,8 @@ import {
   normalizeConversationBinding,
   requestNativeContextMenu,
   routeNativeCommand,
-  subscribeNativeCommands
+  subscribeNativeCommands,
+  taskStartFromLocation
 } from "./native-commands.js";
 
 describe("native renderer commands", () => {
@@ -121,6 +122,8 @@ describe("native renderer commands", () => {
     expect(isEditableContextTarget({ closest: () => ({}) })).toBe(true);
     expect(isEditableContextTarget({ closest: () => null })).toBe(false);
     expect(conversationIdFromLocation({ search: "?conversation_id=conversation_123" })).toBe("conversation_123");
+    expect(taskStartFromLocation({ search: "?conversation_id=conversation_123&task_start=1" })).toBe(true);
+    expect(taskStartFromLocation({ search: "?conversation_id=conversation_123&task_start=0" })).toBe(false);
     expect(conversationIdFromLocation({ search: "?conversation_id=bad%0Avalue" })).toBe("");
     expect(conversationBindingFromLocation({
       search: "?entitlement_id=7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001&creator_id=8bb7b10c-4db0-4d8a-8c2f-2e2c8cba1002&product_id=9cc7b10c-4db0-4d8a-8c2f-2e2c8cba1003"

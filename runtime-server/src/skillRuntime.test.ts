@@ -128,7 +128,7 @@ test("SkillRuntime converts a missing SKILL.md into a failed run and clears it",
 
     const result = await harness.runtime.execute({
       skill_id: skill.id,
-      task: "Run the invalid protected workflow."
+      product: "Run the invalid protected workflow."
     });
 
     assert.equal(result.status, "failed");
@@ -208,7 +208,7 @@ test("SkillRuntime cancellation is terminal and ignores a late protected-tool re
 
     const runPromise = harness.runtime.execute({
       skill_id: skill.id,
-      task: "Read notes.txt and wait."
+      product: "Read notes.txt and wait."
     });
     await waitUntil(() => harness.outbound.some((event) => event.type === "tool_call.request"));
     await harness.state.cancel("user stopped protected workflow");
@@ -299,7 +299,7 @@ test("SkillRuntime contains MCP timeout as a failed terminal without reviving th
     const started = Date.now();
     const result = await harness.runtime.execute({
       skill_id: skill.id,
-      task: "Call the slow upstream."
+      product: "Call the slow upstream."
     });
     assert.ok(Date.now() - started < 500, "MCP timeout should be bounded");
     assert.equal(result.status, "failed");

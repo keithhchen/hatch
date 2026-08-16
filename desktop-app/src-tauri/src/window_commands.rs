@@ -391,6 +391,8 @@ pub struct OpenConversationWindowRequest {
     pub creator_id: Option<String>,
     #[serde(default)]
     pub product_id: Option<String>,
+    #[serde(default)]
+    pub start_task: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -870,7 +872,7 @@ pub fn restore_conversation_windows<R: Runtime>(
 
     let mut restored = 0;
     for conversation_id in manifest.conversation_ids {
-        if open_conversation_window_impl(app, conversation_id, None, router, false).is_ok() {
+        if open_conversation_window_impl(app, conversation_id, None, router, false, false).is_ok() {
             restored += 1;
         }
     }
@@ -1016,6 +1018,7 @@ pub async fn open_conversation_window(
     entitlement_id: Option<String>,
     creator_id: Option<String>,
     product_id: Option<String>,
+    start_task: Option<bool>,
     router: State<'_, NativeCommandRouter>,
 ) -> Result<OpenConversationWindowResult, String> {
     let request = OpenConversationWindowRequest {
@@ -1023,10 +1026,11 @@ pub async fn open_conversation_window(
         entitlement_id,
         creator_id,
         product_id,
+        start_task: start_task.unwrap_or(false),
     };
     let conversation_id = validate_conversation_id(&request.conversation_id)?;
     let binding = validate_conversation_window_binding(&request)?;
-    open_conversation_window_impl(&app, conversation_id, binding, router.inner(), true)
+    open_conversation_window_impl(&app, conversation_id, binding, router.inner(), true, request.start_task)
 }
 
 fn open_conversation_window_impl<R: Runtime>(
@@ -1035,6 +1039,7 @@ fn open_conversation_window_impl<R: Runtime>(
     binding: Option<ConversationWindowBinding>,
     router: &NativeCommandRouter,
     persist_manifest: bool,
+    start_task: bool,
 ) -> Result<OpenConversationWindowResult, String> {
     // A previous ready entry can become stale if a platform destroys a window
     // before its Destroyed event reaches our registry. Recover once instead of
@@ -1088,7 +1093,7 @@ fn open_conversation_window_impl<R: Runtime>(
                 let builder = WebviewWindowBuilder::new(
                     app,
                     label.clone(),
-                    WebviewUrl::App(conversation_window_path(&conversation_id, binding.as_ref())),
+                    WebviewUrl::App(conversation_window_path(&conversation_id, binding.as_ref(), start_task)),
                 )
                 .title("Hatch — Conversation")
                 .inner_size(1180.0, 780.0)
@@ -1576,6 +1581,7 @@ fn validate_context_position(
 fn conversation_window_path(
     conversation_id: &str,
     binding: Option<&ConversationWindowBinding>,
+    start_task: bool,
 ) -> PathBuf {
     let encoded =
         url::form_urlencoded::byte_serialize(conversation_id.as_bytes()).collect::<String>();
@@ -1593,6 +1599,9 @@ fn conversation_window_path(
             path.push('=');
             path.push_str(&encoded);
         }
+    }
+    if start_task {
+        path.push_str("&task_start=1");
     }
     PathBuf::from(path)
 }
@@ -1679,10 +1688,11 @@ mod tests {
             entitlement_id: Some("7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001".into()),
             creator_id: Some("8bb7b10c-4db0-4d8a-8c2f-2e2c8cba1002".into()),
             product_id: Some("550e8400-e29b-41d4-a716-446655440000".into()),
+            start_task: false,
         };
         let binding = validate_conversation_window_binding(&request).unwrap();
         let binding = binding.as_ref().unwrap();
-        let path = conversation_window_path("conv_123", Some(binding));
+        let path = conversation_window_path("conv_123", Some(binding), false);
         let path = path.to_string_lossy();
         assert!(path.contains("conversation_id=conv_123"));
         assert!(path.contains("entitlement_id=7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001"));
@@ -1697,6 +1707,7 @@ mod tests {
             entitlement_id: Some("7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001".into()),
             creator_id: None,
             product_id: Some("550e8400-e29b-41d4-a716-446655440000".into()),
+            start_task: false,
         };
         assert!(validate_conversation_window_binding(&partial).is_err());
 
@@ -1705,6 +1716,7 @@ mod tests {
             entitlement_id: Some("7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001\nx".into()),
             creator_id: Some("8bb7b10c-4db0-4d8a-8c2f-2e2c8cba1002".into()),
             product_id: Some("550e8400-e29b-41d4-a716-446655440000".into()),
+            start_task: false,
         };
         assert!(validate_conversation_window_binding(&controlled).is_err());
     }

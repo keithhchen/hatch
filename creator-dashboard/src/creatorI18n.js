@@ -7,11 +7,25 @@ const MESSAGES = {
     files: "Files",
     aboutYou: "About you",
     review: "Review",
+    brief: "Brief",
     complete: "Complete",
+    briefTitle: "Define the task brief",
+    briefBody: "Write the questions a buyer must answer before work begins. This is a plain text form.",
+    addBriefQuestion: "Add question",
+    briefQuestion: "Question",
+    briefQuestionPlaceholder: "What should the buyer tell you before you start?",
+    requiredQuestion: "Required",
+    moveQuestionUp: "Move question up",
+    moveQuestionDown: "Move question down",
+    saveBriefAndContinue: "Save brief and continue to publish",
+    briefSaved: "Brief saved.",
+    optional: "optional",
+    briefRequiredBeforePublish: "Add and save at least one Brief question before publishing.",
+    backToBrief: "Back to Brief",
     giveMaterial: "Give Hatch the material behind your method.",
     uploadFiles: "Upload files",
     localFilesOnly: "Local files only; repeat uploads are allowed.",
-    startDistillation: "Start distillation",
+    startDistillation: "Generate version",
     continueWithFiles: "Continue with these files",
     helpUnderstand: "Help Hatch understand you.",
     questionOf: (current, total) => `Question ${current} of ${total}`,
@@ -43,7 +57,11 @@ const MESSAGES = {
     productPublished: "Your product is published.",
     filesReady: (count) => `${count} file${count === 1 ? "" : "s"} ready`,
     product: "Product",
+    unnamedFile: "Unnamed file",
     ready: "Ready",
+    fileStatus_ready: "Ready",
+    fileStatus_processing: "Preparing",
+    fileStatus_error: "Could not prepare",
     imageNative: "Image · native",
     markdownProjection: "Markdown projection",
     uploadForProduct: "Upload local files for this Product.",
@@ -61,6 +79,26 @@ const MESSAGES = {
     why: "Why?",
     evaluationUnavailable: "Evaluation unavailable",
     corpusUnavailable: "Corpus unavailable"
+    ,reviewStatus_accepted: "Used in this version"
+    ,reviewStatus_corrected: "Correction saved"
+    ,reviewStatus_rejected_question: "Removed from review"
+    ,reviewStatus_judge_disputed: "Quality check disputed"
+    ,createProduct: "Create product"
+    ,startProductTitle: "Start with one useful product."
+    ,startProductBody: "Name the result people will receive, then add the material behind your method."
+    ,productName: "Product name"
+    ,productNameHint: "This name identifies the product in your studio."
+    ,describeResult: "Describe the result someone will receive."
+    ,filesCount: (count) => `${count} file${count === 1 ? "" : "s"}`
+    ,filesAdded: (count) => `${count} file${count === 1 ? "" : "s"} added to this Product.`
+    ,filesUnavailable: "Files unavailable"
+    ,filesAddedTitle: "Files added"
+    ,productFiles: "Product files"
+    ,addFilesBody: "Add as many local files as you need. They stay with this Product and are versioned when you generate."
+    ,generateVersion: "Generate version"
+    ,noFilesYet: "No files yet"
+    ,firstFileForProduct: "Upload the first file for this Product."
+    ,productCouldNotBeCreated: "Product could not be created"
   },
   zh: {
     language: "语言",
@@ -70,11 +108,25 @@ const MESSAGES = {
     files: "文件",
     aboutYou: "关于你",
     review: "审核",
+    brief: "Brief",
     complete: "完成",
+    briefTitle: "定义任务 Brief",
+    briefBody: "写下用户开工前必须回答的问题。这是普通文字表单，不涉及 AI。",
+    addBriefQuestion: "添加问题",
+    briefQuestion: "问题",
+    briefQuestionPlaceholder: "开始工作前，你希望用户告诉你什么？",
+    requiredQuestion: "必填",
+    moveQuestionUp: "问题上移",
+    moveQuestionDown: "问题下移",
+    saveBriefAndContinue: "保存 Brief，继续发布",
+    briefSaved: "Brief 已保存。",
+    optional: "选填",
+    briefRequiredBeforePublish: "发布前请至少添加并保存一个 Brief 问题。",
+    backToBrief: "返回 Brief",
     giveMaterial: "把支撑你方法的材料交给 Hatch。",
     uploadFiles: "上传文件",
     localFilesOnly: "仅支持本地文件，可以分批上传。",
-    startDistillation: "开始提炼",
+    startDistillation: "生成版本",
     continueWithFiles: "使用这些文件继续",
     helpUnderstand: "帮助 Hatch 更了解你。",
     questionOf: (current, total) => `问题 ${current} / ${total}`,
@@ -106,7 +158,11 @@ const MESSAGES = {
     productPublished: "你的产品已发布。",
     filesReady: (count) => `${count} 个文件已准备好`,
     product: "产品",
+    unnamedFile: "未命名文件",
     ready: "已准备好",
+    fileStatus_ready: "已准备好",
+    fileStatus_processing: "准备中",
+    fileStatus_error: "无法处理",
     imageNative: "图片 · 原生读取",
     markdownProjection: "Markdown 投影",
     uploadForProduct: "为这个产品上传本地文件。",
@@ -124,6 +180,26 @@ const MESSAGES = {
     why: "为什么？",
     evaluationUnavailable: "评估不可用",
     corpusUnavailable: "Corpus 不可用"
+    ,reviewStatus_accepted: "已纳入此版本"
+    ,reviewStatus_corrected: "修正已保存"
+    ,reviewStatus_rejected_question: "已从审核中移除"
+    ,reviewStatus_judge_disputed: "质量检查有争议"
+    ,createProduct: "创建产品"
+    ,startProductTitle: "从一个有用的产品开始。"
+    ,startProductBody: "先写下用户将获得的结果，再添加支撑你方法的材料。"
+    ,productName: "产品名称"
+    ,productNameHint: "这个名称用于在 Studio 中识别产品。"
+    ,describeResult: "描述用户将获得的结果。"
+    ,filesCount: (count) => `${count} 个文件`
+    ,filesAdded: (count) => `已向该产品添加 ${count} 个文件。`
+    ,filesUnavailable: "文件不可用"
+    ,filesAddedTitle: "文件已添加"
+    ,productFiles: "产品文件"
+    ,addFilesBody: "可以多次添加本地文件。它们会跟随这个产品，并在生成版本时被锁定。"
+    ,generateVersion: "生成版本"
+    ,noFilesYet: "还没有文件"
+    ,firstFileForProduct: "为这个产品上传第一个文件。"
+    ,productCouldNotBeCreated: "产品无法创建"
   },
   ja: {
     language: "言語",
@@ -133,11 +209,25 @@ const MESSAGES = {
     files: "ファイル",
     aboutYou: "あなたについて",
     review: "レビュー",
+    brief: "Brief",
     complete: "完了",
+    briefTitle: "タスク Brief を定義",
+    briefBody: "作業開始前に購入者が答える質問を書きます。通常のテキストフォームです。",
+    addBriefQuestion: "質問を追加",
+    briefQuestion: "質問",
+    briefQuestionPlaceholder: "開始前に購入者から何を聞きたいですか？",
+    requiredQuestion: "必須",
+    moveQuestionUp: "質問を上へ",
+    moveQuestionDown: "質問を下へ",
+    saveBriefAndContinue: "Brief を保存して公開へ進む",
+    briefSaved: "Brief を保存しました。",
+    optional: "任意",
+    briefRequiredBeforePublish: "公開前に Brief の質問を1つ以上保存してください。",
+    backToBrief: "Brief に戻る",
     giveMaterial: "あなたの方法を支える資料を Hatch に渡します。",
     uploadFiles: "ファイルをアップロード",
     localFilesOnly: "ローカルファイルのみ。何度でも追加できます。",
-    startDistillation: "抽出を開始",
+    startDistillation: "バージョンを生成",
     continueWithFiles: "このファイルで続ける",
     helpUnderstand: "Hatch があなたを理解できるようにします。",
     questionOf: (current, total) => `質問 ${current} / ${total}`,
@@ -169,7 +259,11 @@ const MESSAGES = {
     productPublished: "プロダクトを公開しました。",
     filesReady: (count) => `${count} ファイル準備完了`,
     product: "プロダクト",
+    unnamedFile: "名前のないファイル",
     ready: "準備完了",
+    fileStatus_ready: "準備完了",
+    fileStatus_processing: "準備中",
+    fileStatus_error: "処理できません",
     imageNative: "画像 · ネイティブ",
     markdownProjection: "Markdown 投影",
     uploadForProduct: "このプロダクト用のローカルファイルをアップロードします。",
@@ -187,6 +281,26 @@ const MESSAGES = {
     why: "理由",
     evaluationUnavailable: "評価を利用できません",
     corpusUnavailable: "Corpus を利用できません"
+    ,reviewStatus_accepted: "このバージョンに採用"
+    ,reviewStatus_corrected: "修正を保存しました"
+    ,reviewStatus_rejected_question: "レビューから削除"
+    ,reviewStatus_judge_disputed: "品質チェックに異議あり"
+    ,createProduct: "プロダクトを作成"
+    ,startProductTitle: "役に立つプロダクトから始めます。"
+    ,startProductBody: "受け取る結果に名前を付け、方法を支える資料を追加します。"
+    ,productName: "プロダクト名"
+    ,productNameHint: "Studio でプロダクトを識別する名前です。"
+    ,describeResult: "受け取る結果を説明してください。"
+    ,filesCount: (count) => `${count} ファイル`
+    ,filesAdded: (count) => `${count} ファイルをこのプロダクトに追加しました。`
+    ,filesUnavailable: "ファイルを利用できません"
+    ,filesAddedTitle: "ファイルを追加しました"
+    ,productFiles: "プロダクトファイル"
+    ,addFilesBody: "ローカルファイルは何度でも追加できます。生成時にこのプロダクトと一緒にバージョン化されます。"
+    ,generateVersion: "バージョンを生成"
+    ,noFilesYet: "ファイルはまだありません"
+    ,firstFileForProduct: "このプロダクトに最初のファイルをアップロードします。"
+    ,productCouldNotBeCreated: "プロダクトを作成できませんでした"
   }
 };
 

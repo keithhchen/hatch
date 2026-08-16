@@ -22,6 +22,7 @@ import {
 } from "./qdrantIndexer.js";
 import { isUuidV4, requireUuidV4 } from "./identity.js";
 import { mapLegacyAuthorityId, migrateUuidAuthorityIds } from "./uuidIdentityMigration.js";
+import { normalizeBriefSpec, type BriefSpec } from "./brief.js";
 
 export type PublishedAgentCorpus = {
   creator_id: string;
@@ -33,6 +34,8 @@ export type PublishedAgentCorpus = {
   product_description?: string;
   product_promise?: string;
   product_boundaries: string[];
+  /** Creator-confirmed buyer intake contract for this published release. */
+  brief_spec?: BriefSpec;
   presentation: Record<string, unknown>;
   knowledge_namespace: string;
   status: "published";
@@ -56,7 +59,7 @@ export type AgentAccessGrant = {
 
 export type AgentAccessPresentation = AgentAccessGrant & {
   creator: { id: string; name: string };
-  product: { id: string; name: string; description: string };
+  product: { id: string; name: string; description: string; brief_spec?: BriefSpec };
   presentation: Record<string, unknown>;
 };
 
@@ -98,6 +101,8 @@ export type CreatorToolConnection = {
 type RegistryState = {
   schema_version: 2;
   agent_corpora: PublishedAgentCorpus[];
+  /** Historical release metadata is kept separately from the Corpus manifest. */
+  agent_corpus_release_briefs?: Array<{ creator_id: string; agent_id: string; corpus_digest: string; brief_spec: BriefSpec }>;
   agent_access: AgentAccessGrant[];
   tool_connections?: CreatorToolConnection[];
   agent_tool_bindings?: Array<{ tenant_id: string; agent_id: string; tool_id: string; connection_id: string }>;
@@ -119,6 +124,7 @@ export class RegistryStoreTs {
   private readonly corpusFiles = new Map<string, number>();
   private readonly access = new Map<string, AgentAccessGrant>();
   private readonly accessMutations = new Map<string, Promise<AgentAccessGrant>>();
+  private readonly releaseBriefSpecs = new Map<string, BriefSpec>();
   private readonly publishMutations = new Map<string, Promise<void>>();
   private readonly toolConnections = new Map<string, CreatorToolConnection>();
   private readonly toolBindings = new Map<string, string>();
@@ -424,8 +430,10 @@ export class RegistryStoreTs {
     creatorId: string,
     agentId: string,
     corpusRoot: string,
-    expectedDigest: string
+    expectedDigest: string,
+    briefSpec?: BriefSpec
   ): Promise<PublishedAgentCorpus> {
+    const normalizedBriefSpec = briefSpec ? normalizeBriefSpec(briefSpec) : undefined;
     const verified = await verifyAgentCorpus(corpusRoot, creatorId, agentId);
     if (verified.digest !== expectedDigest) throw new Error("candidate_changed");
     const immutableRoot = await materializeAgentCorpusRelease(verified, this.corpusRoot);
@@ -436,7 +444,11 @@ export class RegistryStoreTs {
         digest: verified.digest
       });
     }
-    return publishedCorpusFromVerified(verified);
+    const staged = publishedCorpusFromVerified(verified);
+    if (normalizedBriefSpec) {
+      staged.brief_spec = normalizedBriefSpec;
+    }
+    return staged;
   }
 
   async getAgentCorpusRelease(
@@ -448,7 +460,10 @@ export class RegistryStoreTs {
       const releaseRoot = immutableReleasePath(this.corpusRoot, creatorId, agentId, corpusDigest);
       const verified = await verifyAgentCorpus(releaseRoot, creatorId, agentId);
       if (verified.digest !== corpusDigest) return undefined;
-      return publishedCorpusFromVerified(verified);
+      const release = publishedCorpusFromVerified(verified);
+      const briefSpec = this.releaseBriefSpecs.get(releaseMetadataKey(creatorId, agentId, corpusDigest));
+      if (briefSpec) release.brief_spec = briefSpec;
+      return release;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
       throw error;
@@ -459,13 +474,32 @@ export class RegistryStoreTs {
     creatorId: string,
     agentId: string,
     corpusDigest: string,
-    options: { operationId: string; expectedCurrentDigest: string | null }
+    options: { operationId: string; expectedCurrentDigest: string | null; briefSpec?: BriefSpec }
   ): Promise<PublishedAgentCorpus> {
     if (!options.operationId.trim()) throw new Error("invalid_deployment_operation_id");
     const release = await this.getAgentCorpusRelease(creatorId, agentId, corpusDigest);
     if (!release) throw new Error("agent_corpus_release_not_found");
+    const briefSpec = options.briefSpec
+      ? normalizeBriefSpec(options.briefSpec)
+      : release.brief_spec ?? this.releaseBriefSpecs.get(releaseMetadataKey(creatorId, agentId, corpusDigest));
+    if (briefSpec) {
+      release.brief_spec = briefSpec;
+    }
     const current = this.getAgentCorpus(creatorId, agentId)?.corpus_digest ?? null;
     if (current === corpusDigest) {
+      // An idempotent activation may still be the first attempt to persist
+      // release metadata. Commit it through the same durable path instead of
+      // mutating the in-memory sidecar before the CAS/persistence boundary.
+      const releaseKey = releaseMetadataKey(creatorId, agentId, corpusDigest);
+      const persistedBrief = this.releaseBriefSpecs.get(releaseKey);
+      if (briefSpec && JSON.stringify(persistedBrief) !== JSON.stringify(briefSpec)) {
+        const deadline = new PublishDeadline(this.publishTimeoutMs);
+        try {
+          await this.persistCorpus(release, deadline);
+        } finally {
+          deadline.dispose();
+        }
+      }
       await activateCurrentCorpus(creatorId, agentId, corpusDigest, this.corpusRoot);
       return release;
     }
@@ -707,7 +741,8 @@ export class RegistryStoreTs {
         product: {
           id: corpus.product_id,
           name: corpus.product_name,
-          description: corpus.product_description ?? "Work with this Creator Agent in your own files and context."
+          description: corpus.product_description ?? "Work with this Creator Agent in your own files and context.",
+          ...(corpus.brief_spec ? { brief_spec: corpus.brief_spec } : {})
         },
         presentation: corpus.presentation
       }];
@@ -1069,6 +1104,13 @@ export class RegistryStoreTs {
         published_at TIMESTAMPTZ NOT NULL,
         PRIMARY KEY (creator_id, agent_id)
       );
+      CREATE TABLE IF NOT EXISTS agent_corpus_release_briefs (
+        creator_id UUID NOT NULL REFERENCES creators(id),
+        agent_id UUID NOT NULL REFERENCES products(id),
+        corpus_digest TEXT NOT NULL,
+        brief_spec JSONB NOT NULL,
+        PRIMARY KEY (creator_id, agent_id, corpus_digest)
+      );
       CREATE TABLE IF NOT EXISTS agent_access (
         entitlement_id UUID PRIMARY KEY,
         user_id UUID NOT NULL,
@@ -1117,6 +1159,18 @@ export class RegistryStoreTs {
         assertCanonicalProductIdentity(row.agent_id, row.product_id);
         this.corpora.set(key(row.creator_id, row.agent_id), rowToCorpus(row));
       }
+      const releaseBriefs = await this.pool.query("SELECT creator_id, agent_id, corpus_digest, brief_spec FROM agent_corpus_release_briefs");
+      for (const row of releaseBriefs.rows) {
+        // Older Registry databases (and read-only migration adapters) may not
+        // have release metadata yet. The Product/Corpus JSON remains the
+        // canonical source in that case; do not turn an absent optional row
+        // into a startup failure.
+        if (!row.brief_spec) continue;
+        this.releaseBriefSpecs.set(
+          releaseMetadataKey(String(row.creator_id), String(row.agent_id), String(row.corpus_digest)),
+          normalizeBriefSpec(typeof row.brief_spec === "string" ? JSON.parse(row.brief_spec) : row.brief_spec)
+        );
+      }
       const access = await this.pool.query("SELECT entitlement_id, user_id, creator_id, agent_id, product_id, order_id, purchased_corpus_digest, version_policy, status, granted_at FROM agent_access");
         for (const row of access.rows) {
           requireUuidV4(row.creator_id, "creator_id");
@@ -1148,6 +1202,12 @@ export class RegistryStoreTs {
         product_boundaries: corpus.product_boundaries ?? [],
         presentation: corpus.presentation ?? {}
         });
+      }
+      for (const release of state.agent_corpus_release_briefs ?? []) {
+        this.releaseBriefSpecs.set(
+          releaseMetadataKey(release.creator_id, release.agent_id, release.corpus_digest),
+          normalizeBriefSpec(release.brief_spec)
+        );
       }
       for (const grant of state.agent_access ?? []) {
         requireUuidV4(grant.creator_id, "creator_id");
@@ -1410,10 +1470,19 @@ export class RegistryStoreTs {
         text: `INSERT INTO agent_corpora (creator_id, agent_id, corpus_digest, creator_name, product_id, product_name, product_description, product_json, knowledge_namespace, status, published_at)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
         ON CONFLICT (creator_id, agent_id) DO UPDATE SET corpus_digest=EXCLUDED.corpus_digest, creator_name=EXCLUDED.creator_name, product_id=EXCLUDED.product_id, product_name=EXCLUDED.product_name, product_description=EXCLUDED.product_description, product_json=EXCLUDED.product_json, knowledge_namespace=EXCLUDED.knowledge_namespace, status=EXCLUDED.status, published_at=EXCLUDED.published_at`,
-        values: [corpus.creator_id, corpus.agent_id, corpus.corpus_digest, corpus.creator_name, corpus.product_id, corpus.product_name, corpus.product_description ?? null, JSON.stringify({ promise: corpus.product_promise, boundaries: corpus.product_boundaries, presentation: corpus.presentation }), corpus.knowledge_namespace, corpus.status, corpus.published_at],
+        values: [corpus.creator_id, corpus.agent_id, corpus.corpus_digest, corpus.creator_name, corpus.product_id, corpus.product_name, corpus.product_description ?? null, JSON.stringify({ promise: corpus.product_promise, boundaries: corpus.product_boundaries, ...(corpus.brief_spec ? { brief_spec: corpus.brief_spec } : {}), presentation: corpus.presentation }), corpus.knowledge_namespace, corpus.status, corpus.published_at],
         query_timeout: deadline.remainingMs(),
       };
       await this.pool.query(query);
+      if (corpus.brief_spec) {
+        await this.pool.query(
+          `INSERT INTO agent_corpus_release_briefs (creator_id, agent_id, corpus_digest, brief_spec)
+           VALUES ($1,$2,$3,$4)
+           ON CONFLICT (creator_id, agent_id, corpus_digest) DO UPDATE SET brief_spec=EXCLUDED.brief_spec`,
+          [corpus.creator_id, corpus.agent_id, corpus.corpus_digest, JSON.stringify(corpus.brief_spec)],
+        );
+        this.releaseBriefSpecs.set(releaseMetadataKey(corpus.creator_id, corpus.agent_id, corpus.corpus_digest), corpus.brief_spec);
+      }
       // The database row is authoritative. Do not expose the new metadata in
       // this process until the upsert has actually committed.
       this.corpora.set(corpusKey, corpus);
@@ -1422,6 +1491,9 @@ export class RegistryStoreTs {
     const nextCorpora = new Map(this.corpora);
     nextCorpora.set(corpusKey, corpus);
     await this.persistState({ corpora: nextCorpora.values(), signal: deadline.signal });
+    if (corpus.brief_spec) {
+      this.releaseBriefSpecs.set(releaseMetadataKey(corpus.creator_id, corpus.agent_id, corpus.corpus_digest), corpus.brief_spec);
+    }
     this.corpora.set(corpusKey, corpus);
   }
 
@@ -1436,6 +1508,10 @@ export class RegistryStoreTs {
     const state = {
       schema_version: 2,
       agent_corpora: [...(options.corpora ?? this.corpora.values())],
+      agent_corpus_release_briefs: [...this.releaseBriefSpecs.entries()].map(([metadataKey, brief_spec]) => {
+        const [creator_id, agent_id, ...digestParts] = metadataKey.split(":");
+        return { creator_id, agent_id, corpus_digest: digestParts.join(":"), brief_spec };
+      }),
       agent_access: [...this.access.values()],
       tool_connections: [...this.toolConnections.values()],
       agent_tool_bindings: [...this.toolBindings.entries()].map(([binding, connection_id]) => {
@@ -1558,6 +1634,9 @@ class PublishDeadline {
 }
 
 function key(creatorId: string, agentId: string): string { return `${creatorId}:${agentId}`; }
+function releaseMetadataKey(creatorId: string, agentId: string, corpusDigest: string): string {
+  return `${creatorId}:${agentId}:${corpusDigest}`;
+}
 function publishedCorpusFromVerified(verified: VerifiedAgentCorpus): PublishedAgentCorpus {
   return {
     creator_id: verified.creator.id,
@@ -1569,6 +1648,7 @@ function publishedCorpusFromVerified(verified: VerifiedAgentCorpus): PublishedAg
     ...(verified.product.description ? { product_description: verified.product.description } : {}),
     ...(verified.product.promise ? { product_promise: verified.product.promise } : {}),
     product_boundaries: verified.product.boundaries,
+    ...(verified.product.brief_spec ? { brief_spec: normalizeBriefSpec(verified.product.brief_spec) } : {}),
     presentation: verified.product.presentation,
     knowledge_namespace: `${verified.creator.id}:${verified.agentId}:${verified.digest}`,
     status: "published",
@@ -1620,6 +1700,7 @@ function rowToCorpus(row: Record<string, any>): PublishedAgentCorpus {
     ...(row.product_description ? { product_description: String(row.product_description) } : {}),
     ...(product.promise ? { product_promise: String(product.promise) } : {}),
     product_boundaries: Array.isArray(product.boundaries) ? product.boundaries.map(String) : [],
+    ...(product.brief_spec ? { brief_spec: normalizeBriefSpec(product.brief_spec) } : {}),
     presentation: product.presentation && typeof product.presentation === "object" ? product.presentation : {},
     knowledge_namespace: String(row.knowledge_namespace),
     status: "published",
@@ -1674,6 +1755,7 @@ function rowToAccessPresentation(row: Record<string, any>): AgentAccessPresentat
       description: row.product_description
         ? String(row.product_description)
         : "Work with this Creator Agent in your own files and context.",
+      ...(product.brief_spec ? { brief_spec: normalizeBriefSpec(product.brief_spec) } : {}),
     },
     presentation: product.presentation && typeof product.presentation === "object"
       ? product.presentation
