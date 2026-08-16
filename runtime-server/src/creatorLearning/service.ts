@@ -876,6 +876,7 @@ export class CreatorFactoryService {
     const updated = await this.repository.retry({
       creatorId,
       runId,
+      stage: current.state.retryStage,
       ...(expectedVersion === undefined ? {} : { expectedVersion })
     });
     const started = await this.startImmediately(runId);

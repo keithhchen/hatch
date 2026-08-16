@@ -108,6 +108,8 @@ export type SubmitFactoryAnswersInput = {
 export type RetryFactoryRunInput = {
   creatorId: string;
   runId: string;
+  /** The durable stage the worker will resume after this retry. */
+  stage?: Exclude<FactoryStage, "ready" | "needs_attention" | "awaiting_creator_answers">;
   expectedVersion?: number;
   now?: string;
 };
@@ -450,6 +452,7 @@ export class InMemoryCreatorFactoryRepository implements CreatorFactoryRepositor
       }
       const now = parsedNow(input.now);
       run.status = "queued";
+      run.factoryStage = input.stage;
       run.nextAttemptAt = iso(now);
       run.lastError = undefined;
       run.version += 1;
@@ -1070,6 +1073,7 @@ export class PostgresCreatorFactoryRepository implements CreatorFactoryRepositor
       )
       UPDATE hatch_creator_factory_runs
       SET status = 'queued',
+          factory_stage = $5,
           next_attempt_at = timing.now_at,
           last_error = NULL,
           version = version + 1,
@@ -1080,7 +1084,13 @@ export class PostgresCreatorFactoryRepository implements CreatorFactoryRepositor
         AND status = 'needs_attention'
         AND ($4::bigint IS NULL OR version = $4::bigint)
       RETURNING *
-    `, [input.runId, input.creatorId, input.now ? iso(input.now) : null, input.expectedVersion ?? null]);
+    `, [
+      input.runId,
+      input.creatorId,
+      input.now ? iso(input.now) : null,
+      input.expectedVersion ?? null,
+      input.stage ?? null
+    ]);
     if (result.rows[0]) return runFromRow(result.rows[0]);
     const current = await this.getForCreator(input.creatorId, input.runId);
     if (!current) throw new CreatorFactoryRepositoryError("run_not_found", `Factory run ${input.runId} was not found`);
