@@ -1651,17 +1651,28 @@ export class CreatorFactory {
       ? SEALED_FAILURE_MESSAGE
       : providerFailure?.message ?? rawMessage;
     const terminal = /did not converge after|workflow step limit/i.test(rawMessage);
+    // A bounded regression loop is a Creator calibration checkpoint when a
+    // candidate and its unsealed regression report are already durable. Do
+    // not turn that recoverable review path into a dead-end error panel: the
+    // Creator can adjudicate each case and request the next immutable
+    // revision. Hard guard failures, provider failures, and incomplete
+    // candidates still use needs_attention below.
+    const regressionReviewable = /did not converge after/i.test(rawMessage)
+      && !!state.artifacts.latestRegressionEvaluation
+      && !state.artifacts.latestRegressionEvaluation.sealed
+      && !!state.artifacts.corpusCandidates.at(-1)?.agentCorpus;
+    const nextStage: FactoryRunState["stage"] = regressionReviewable ? "review_required" : "needs_attention";
     const retryStage = terminal || state.stage === "ready" || state.stage === "needs_attention" || state.stage === "awaiting_creator_answers"
       ? undefined
       : state.stage;
     const next = {
       ...state,
-      stage: "needs_attention" as const,
-      ...(retryStage ? { retryStage } : {}),
+      stage: nextStage,
+      ...(regressionReviewable || !retryStage ? { retryStage: undefined } : { retryStage }),
       lastError: message
     };
     await store.saveState(next);
-    await store.recordEvent("factory_needs_attention", { error: message });
+    await store.recordEvent("factory_needs_attention", { error: message, nextStage });
     return store.loadState();
   }
 }

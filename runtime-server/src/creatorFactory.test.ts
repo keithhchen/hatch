@@ -92,6 +92,50 @@ test("Creator Factory pauses for Creator answers, revises on Development failure
   assert.ok(scripted.calls.some((call) => call.purpose === "eval.judge_result"));
 });
 
+test("a non-converging Regression candidate opens Creator Review instead of a dead-end error", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-factory-regression-review-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  let judgeCalls = 0;
+  const run = async (call: FactoryPromptCall): Promise<string> => {
+    if (call.purpose === "evidence.extract") return "# Product evidence\nEvidence [S1:L1].";
+    if (call.purpose === "eval.generate_questions") {
+      const count = Number(/Question count:\s*(\d+)/.exec(call.prompt)?.[1]);
+      return Array.from({ length: count }, (_, index) => questionFixture(
+        `Q${index + 1}`,
+        `Apply the bounded method for case ${index + 1}.`,
+        `regression-review-${index + 1}`
+      )).join("\n\n");
+    }
+    if (call.purpose === "corpus.compile") return layeredCorpusFixture("Return one bounded, customer-ready result.");
+    if (call.purpose === "eval.audit_corpus") return passingEvaluation();
+    if (call.purpose === "eval.judge_result") {
+      judgeCalls += 1;
+      // Development is the odd call and passes; Regression is the even call
+      // and fails on every candidate, exercising the bounded review boundary.
+      return judgeCalls % 2 === 1 ? passingEvaluation() : failedCompletenessEvaluation();
+    }
+    throw new Error(`Unexpected prompt purpose: ${call.purpose}`);
+  };
+  const input = sampleInput("run-regression-review");
+  input.config = { developmentQuestions: 1, heldoutQuestions: 1, maxCorpusRevisions: 1 };
+  const factory = new CreatorFactory(root, run, async (execution) => `Result for ${execution.question}`);
+  const waiting = await factory.start(input);
+  const store = new FactoryFileStore(root, waiting.runId);
+  const questions = parseQuestions(await store.readArtifact(waiting.artifacts.currentQuestionBatch!));
+  const paused = await factory.submitCreatorAnswers(
+    waiting.runId,
+    answerMarkdown(questions, () => "Creator reference answer"),
+    waiting.artifacts.currentQuestionBatch!.batchId
+  );
+
+  assert.equal(paused.stage, "review_required");
+  assert.equal(paused.retryStage, undefined);
+  assert.ok(paused.artifacts.latestRegressionEvaluation);
+  assert.ok(paused.artifacts.corpusCandidates.at(-1)?.agentCorpus);
+  assert.equal(judgeCalls, 2);
+  assert.equal(await store.loadState().then((state) => state.stage), "review_required");
+});
+
 test("a failed held-out pauses for Creator confirmation without leaking the sealed case", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-factory-heldout-"));
   t.after(() => rm(root, { recursive: true, force: true }));
