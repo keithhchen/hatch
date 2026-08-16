@@ -154,7 +154,11 @@ export function classifyFactoryProviderFailure(error: unknown): FactoryProviderF
   const carriesCredentialOrAccountIdentifier = /(?:\borg-[a-z0-9][a-z0-9_-]*\b|<?\bak-[a-z0-9][a-z0-9_-]*\b>?|\bsk-[a-z0-9][a-z0-9_-]*\b)/i.test(message);
   const providerShaped = status !== undefined
     || carriesCredentialOrAccountIdentifier
-    || /(?:provider|moonshot|openai|api[\s_-]*key|network|fetch|request|response|rate[\s_-]*limit|too many requests|timeout|timed out|socket|connection|econn[a-z]*|eai_again)/i.test(message);
+    // Keep this allow-list narrow. Generic words such as "request" and
+    // "response" also occur in the private Factory harness/runtime boundary;
+    // classifying those as provider failures hides the actionable local error
+    // behind a misleading credentials message.
+    || /(?:provider|moonshot|openai|api[\s_-]*key|network|fetch|rate[\s_-]*limit|too many requests|timeout|timed out|socket|connection|econn[a-z]*|eai_again)/i.test(message);
   if (!providerShaped) return undefined;
 
   const transient = status === 408

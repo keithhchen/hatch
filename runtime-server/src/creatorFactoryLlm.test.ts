@@ -9,6 +9,7 @@ import {
   FACTORY_PROVIDER_CONFIGURATION_MESSAGE,
   FACTORY_PROVIDER_QUOTA_MESSAGE,
   FACTORY_PROVIDER_TRANSIENT_MESSAGE,
+  classifyFactoryProviderFailure,
   createFactoryLlmModel,
   createFactoryLlmPromptRunner
 } from "./creatorLearning/factoryLlm.js";
@@ -303,4 +304,11 @@ test("Factory Kimi K2.6 sanitizes transient and configuration provider errors wh
     assert.equal(telemetry.length, 1);
     assert.equal(telemetry[0]!.code, "provider_error");
   }
+});
+
+test("Factory provider classification does not mask private harness response errors", () => {
+  assert.equal(
+    classifyFactoryProviderFailure(new Error("Factory Hatch harness rejected the Runtime response: turn failed during candidate execution")),
+    undefined
+  );
 });
