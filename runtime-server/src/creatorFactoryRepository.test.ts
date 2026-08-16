@@ -432,6 +432,31 @@ test("expired work can be reclaimed, while failure keeps it durably retryable", 
   assert.equal(retryClaim?.lastError, undefined, "a new attempt clears the previous transient error");
 });
 
+test("a process-handoff abort is recovered immediately instead of waiting for backoff", async () => {
+  const repository = new InMemoryCreatorFactoryRepository();
+  await repository.create({
+    id: "factory_handoff",
+    creatorId: "11111111-1111-4111-8111-111111111111",
+    idempotencyKey: "request_handoff",
+    input: { ...factoryInput(), runId: "factory_handoff" },
+    nextAttemptAt: "2026-08-12T00:00:00.000Z"
+  });
+  const claimed = await repository.claim({ workerId: "worker_a", now: "2026-08-12T00:00:01.000Z" });
+  assert.ok(claimed?.leaseToken);
+  const failed = await repository.fail({
+    runId: claimed.id,
+    workerId: "worker_a",
+    leaseToken: claimed.leaseToken,
+    error: "Request was aborted",
+    retryDelayMs: 5 * 60_000,
+    now: "2026-08-12T00:00:02.000Z"
+  });
+  assert.equal(failed.status, "queued");
+  assert.equal(failed.nextAttemptAt, "2026-08-12T00:05:02.000Z");
+  const recovered = await repository.claim({ workerId: "worker_b", now: "2026-08-12T00:00:03.000Z" });
+  assert.equal(recovered?.status, "running");
+});
+
 test("Postgres create binds an idempotency key to the canonical semantic input", async () => {
   const database = new StatefulFactoryPostgres();
   const repository = new PostgresCreatorFactoryRepository(database);

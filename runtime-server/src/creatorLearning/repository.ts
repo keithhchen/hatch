@@ -867,12 +867,12 @@ export class PostgresCreatorFactoryRepository implements CreatorFactoryRepositor
         SELECT run.id, timing.now_at
         FROM hatch_creator_factory_runs AS run
         CROSS JOIN timing
-        WHERE run.next_attempt_at <= timing.now_at
-          AND ($5::text IS NULL OR run.id = $5::text)
-          AND (
-            run.status = 'queued'
-            OR (run.status = 'running' AND run.lease_expires_at <= timing.now_at)
-          )
+      WHERE ($5::text IS NULL OR run.id = $5::text)
+        AND (
+          (run.status = 'queued'
+            AND (run.next_attempt_at <= timing.now_at OR run.last_error = 'Request was aborted'))
+          OR (run.status = 'running' AND run.lease_expires_at <= timing.now_at)
+        )
         ORDER BY run.next_attempt_at ASC, run.created_at ASC, run.id ASC
         FOR UPDATE OF run SKIP LOCKED
         LIMIT 1
@@ -1347,8 +1347,12 @@ function completedStatus(stage: FactoryStage): "waiting_for_creator" | "ready" |
 }
 
 function isClaimable(run: FactoryRunRecord, now: Date): boolean {
+  if (run.status === "queued") {
+    if (run.lastError === "Request was aborted") return true;
+    if (!run.nextAttemptAt || Date.parse(run.nextAttemptAt) > now.getTime()) return false;
+    return true;
+  }
   if (!run.nextAttemptAt || Date.parse(run.nextAttemptAt) > now.getTime()) return false;
-  if (run.status === "queued") return true;
   return run.status === "running" && !!run.leaseExpiresAt && Date.parse(run.leaseExpiresAt) <= now.getTime();
 }
 
