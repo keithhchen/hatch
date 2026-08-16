@@ -9,7 +9,9 @@ export function productFileState(file) {
   if (READY_STATUSES.has(status)) return "ready";
 
   const projection = file?.projection;
-  return projection?.kind && projection?.sha256 && (projection?.content_ref || projection?.contentRef)
+  const hasStoredProjection = Boolean(projection?.content_ref || projection?.contentRef);
+  const hasPublicProjection = Number.isFinite(projection?.bytes) && projection.bytes > 0;
+  return projection?.kind && projection?.sha256 && (hasStoredProjection || hasPublicProjection)
     ? "ready"
     : "processing";
 }
