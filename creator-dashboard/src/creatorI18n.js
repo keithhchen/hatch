@@ -51,7 +51,16 @@ const MESSAGES = {
     evaluationFailed: "Evaluation failed",
     whatProductDelivers: "What does your product deliver?",
     saveProductPromise: "Save product promise",
-    productPromiseSaved: "Product promise saved."
+    productPromiseSaved: "Product promise saved.",
+    products: "Products",
+    browse: "Browse",
+    currentVersion: "Current version",
+    version: (number, status) => `Version ${number} · ${status}`,
+    sourceNote: "PDF, DOCX, XLSX, CSV, TXT, Markdown, JSON and HTML become Markdown. Images stay native for Kimi K2.6.",
+    whatShouldHatchHaveDone: "What should Hatch have done?",
+    why: "Why?",
+    evaluationUnavailable: "Evaluation unavailable",
+    corpusUnavailable: "Corpus unavailable"
   },
   zh: {
     language: "语言",
@@ -105,7 +114,16 @@ const MESSAGES = {
     evaluationFailed: "评估未通过",
     whatProductDelivers: "你的产品交付什么？",
     saveProductPromise: "保存产品承诺",
-    productPromiseSaved: "产品承诺已保存。"
+    productPromiseSaved: "产品承诺已保存。",
+    products: "产品",
+    browse: "浏览",
+    currentVersion: "当前版本",
+    version: (number, status) => `版本 ${number} · ${status}`,
+    sourceNote: "PDF、DOCX、XLSX、CSV、TXT、Markdown、JSON 和 HTML 会转换为 Markdown。图片由 Kimi K2.6 原生读取。",
+    whatShouldHatchHaveDone: "Hatch 应该怎么做？",
+    why: "为什么？",
+    evaluationUnavailable: "评估不可用",
+    corpusUnavailable: "Corpus 不可用"
   },
   ja: {
     language: "言語",
@@ -159,7 +177,16 @@ const MESSAGES = {
     evaluationFailed: "評価に不合格",
     whatProductDelivers: "プロダクトは何を届けますか？",
     saveProductPromise: "プロダクトの約束を保存",
-    productPromiseSaved: "プロダクトの約束を保存しました。"
+    productPromiseSaved: "プロダクトの約束を保存しました。",
+    products: "プロダクト",
+    browse: "参照",
+    currentVersion: "現在のバージョン",
+    version: (number, status) => `バージョン ${number} · ${status}`,
+    sourceNote: "PDF、DOCX、XLSX、CSV、TXT、Markdown、JSON、HTML は Markdown に変換されます。画像は Kimi K2.6 がネイティブに読み取ります。",
+    whatShouldHatchHaveDone: "Hatch はどうすべきでしたか？",
+    why: "理由",
+    evaluationUnavailable: "評価を利用できません",
+    corpusUnavailable: "Corpus を利用できません"
   }
 };
 

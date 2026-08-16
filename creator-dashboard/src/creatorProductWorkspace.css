@@ -36,19 +36,13 @@
   margin-left: auto;
 }
 
-.cpv2-version-browser label {
+.cpv2-version-label {
   color: var(--hatch-text-muted, #766f67);
   font-size: .86rem;
 }
 
-.cpv2-version-browser select {
-  background: var(--hatch-surface, #fffdf9);
-  border: 1px solid var(--hatch-border, rgba(24, 22, 20, .16));
-  border-radius: 10px;
-  color: var(--hatch-text, #161412);
-  font: inherit;
+.cpv2-version-select {
   min-width: 180px;
-  padding: 10px 12px;
 }
 
 .cpv2-workspace-header {
@@ -243,6 +237,34 @@
   text-transform: uppercase;
 }
 
+.cpv2-review-label {
+  align-items: center;
+  display: inline-flex !important;
+  gap: 8px;
+}
+
+.cpv2-review-avatar {
+  align-items: center;
+  border-radius: 50%;
+  display: inline-flex;
+  font-size: .67rem;
+  font-weight: 700;
+  height: 24px;
+  justify-content: center;
+  letter-spacing: 0;
+  width: 24px;
+}
+
+.cpv2-review-avatar-user {
+  background: #e2ddd4;
+  color: #71695f;
+}
+
+.cpv2-review-avatar-creator {
+  background: #bd6545;
+  color: #fffaf4;
+}
+
 .cpv2-about-columns h4 {
   margin: 10px 0 0;
 }
@@ -394,7 +416,7 @@
     width: 100%;
   }
 
-  .cpv2-version-browser select {
+  .cpv2-version-select {
     flex: 1;
   }
 
