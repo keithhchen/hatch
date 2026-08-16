@@ -138,7 +138,7 @@ test("submission tools retain full-batch recovery, Unicode, idempotency, and ter
   assert.equal(requests.length, 2, "an accepted mixed submit+finalize batch must end without another provider turn");
   const initialPayload = JSON.stringify(requests[0]);
   assert.match(initialPayload, /complete your private reasoning and the entire artifact/i);
-  assert.match(initialPayload, /every tool-calling assistant turn is one atomic batch/i);
+  assert.match(initialPayload, /contract-specific finalization rule/i);
   assert.match(initialPayload, /do not wait for receipts between parts/i);
 
   const receiptTexts = ((requests[1]!.messages as Array<Record<string, unknown>>) ?? [])
@@ -264,6 +264,26 @@ test("strict raw JSON gate rejects a malformed later call with zero batch mutati
   assert.ok(errorReceipts.some((value) => value.includes("BATCH_REJECTED code=BATCH_PRIOR_TOOL_ERROR")));
   assert.ok(errorReceipts.every((value) => !value.includes("partial but salvageable")), "framework error receipt must not echo malformed args");
   assert.ok(errorReceipts.every((value) => value !== "FINALIZED" && !value.startsWith("FINALIZED;")));
+});
+
+test("Evidence accepts a complete submit turn followed by a finalize-only turn", async () => {
+  const { output, requests } = await run({
+    purpose: "evidence.extract",
+    systemPrompt: "evidence system",
+    prompt: "input",
+    outputContract: { kind: "evidence_ledger", requiredSections: ["Product evidence", "Boundaries"] }
+  }, [
+    toolTurn([
+      { id: "evidence-product", name: "submit_evidence_section", arguments: { section: "Product evidence", markdown: "Observed product evidence." } },
+      { id: "evidence-boundaries", name: "submit_evidence_section", arguments: { section: "Boundaries", markdown: "Known boundary." } }
+    ]),
+    toolTurn([{ id: "evidence-finalize", name: "finalize_evidence", arguments: {} }])
+  ]);
+
+  assert.match(output, /## Product evidence\n\nObserved product evidence\./);
+  assert.match(output, /## Boundaries\n\nKnown boundary\./);
+  assert.equal(requests.length, 2, "a provider may split Evidence submission and finalization across turns");
+  assert.match(JSON.stringify(requests[1]), /pending finalize/);
 });
 
 test("a length-terminated batch carrying complete-looking tool args never finalizes", async () => {

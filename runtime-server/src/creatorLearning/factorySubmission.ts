@@ -580,10 +580,10 @@ function normalizeContract(
 }
 
 function instructionsFor(contract: FactoryOutputContract): string {
-  const shared = `Your output is accepted only through the local submission tools supplied with this call. Tool calls are a typed handoff to the host, not external actions. Do not print the requested artifact as assistant prose and do not wrap tool arguments in code fences. First complete your private reasoning and the entire artifact before emitting any tool call. Every tool-calling assistant turn is one atomic batch and must contain exactly one matching finalize call as its last call; do not wait for receipts between parts. An optional restart_submission may appear at most once and only as the first call. Submit/restart receipts are STAGED, not committed: FINALIZED means the complete batch committed; any tool error means the whole batch rolled back and the previous committed draft was preserved; a rejected finalizer means the whole replacement was rejected and the draft was cleared. Use another tool-calling turn only after rejected or error feedback, and then resubmit the complete replacement plus finalizer in that same batch, never an affected-item patch. After FINALIZED, stop immediately without prose or another tool call.`;
+  const shared = `Your output is accepted only through the local submission tools supplied with this call. Tool calls are a typed handoff to the host, not external actions. Do not print the requested artifact as assistant prose and do not wrap tool arguments in code fences. First complete your private reasoning and the entire artifact before emitting any tool call. Every tool-calling assistant turn must follow the contract-specific finalization rule: when submit-only turns are allowed, submit a complete retained draft and finalize it in a later tool-calling turn; otherwise the turn is one atomic batch with exactly one matching finalize call as its last call. Do not wait for receipts between parts of an atomic batch. An optional restart_submission may appear at most once and only as the first call. Submit/restart receipts are STAGED, not committed: FINALIZED means the complete batch committed; any tool error rolls back that turn; a rejected finalizer follows the contract's draft-retention rule. Use another tool-calling turn only after rejected or error feedback, and resubmit the complete replacement when the contract requires it, never an affected-item patch. After FINALIZED, stop immediately without prose or another tool call.`;
   if (contract.kind === "question_set") return `${shared}\nSubmit exactly ${contract.expectedCount} complete questions, then finalize_questions.`;
   if (contract.kind === "evidence_ledger") {
-    return `${shared}\nSubmit every Evidence section separately, then finalize_evidence. Required sections, in host-rendered order: ${contract.requiredSections.join("; ")}.`;
+    return `${shared}\nSubmit every Evidence section separately. A complete submit-only turn is allowed because the host retains the draft; after all required sections have receipts, call finalize_evidence as the only call in a later turn. Required sections, in host-rendered order: ${contract.requiredSections.join("; ")}.`;
   }
   if (contract.kind === "evaluation_verdict") {
     return "Your output is accepted only through the local Evaluation submission tools supplied with this call. Do not print the verdict as assistant prose. Submit one complete verdict with submit_evaluation in one tool turn. The host retains that draft; then call finalize_evaluation in a subsequent tool-calling turn as the only call. If the finalizer is rejected, correct the verdict and resubmit the complete replacement before finalizing. A provider may also submit and finalize in one turn, but finalize_evaluation must be the last call. FINALIZED means the complete verdict passed host validation; stop immediately.";
@@ -621,7 +621,8 @@ export function createFactorySubmissionProtocol(
   // finalize-only turn. Evaluations are host-retained drafts with no external
   // side effects, so accepting that split keeps the protocol fail-closed
   // without turning a valid provider handoff into a false cycle failure.
-  const retainsDraftAcrossTurns = contract.kind === "evaluation_verdict"
+  const retainsDraftAcrossTurns = contract.kind === "evidence_ledger"
+    || contract.kind === "evaluation_verdict"
     || contract.kind === "corpus_audit"
     || contract.kind === "corpus_compilation";
   let committed = emptyDraft();
