@@ -186,7 +186,7 @@ test("identical Questions across runs still reject cross-run answers before any 
     answerMarkdown(questionsB, (question) => `Current answer for ${question.id}`),
     waitingB.artifacts.currentQuestionBatch!.batchId
   );
-  assert.equal(ready.stage, "ready", JSON.stringify({ stage: ready.stage, lastError: ready.lastError, retryStage: ready.retryStage }));
+  assert.equal(ready.stage, "ready", ready.lastError);
 });
 
 test("Factory start owns a fresh run directory exclusively, including partial and concurrent starts", async (t) => {

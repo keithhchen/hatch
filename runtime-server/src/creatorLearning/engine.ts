@@ -111,6 +111,7 @@ export class CreatorFactory {
       ...(startInput.revisionId ? { revisionId: startInput.revisionId } : {})
     });
     await store.initialize();
+    try {
     let reviewContextArtifact: ArtifactRef | undefined;
     let calibrationArtifact: ArtifactRef | undefined;
     let promotedHeldoutQa: CreatorQa[] = [];
@@ -265,6 +266,14 @@ export class CreatorFactory {
     });
 
     return this.resume(state.runId, control);
+    } catch (error) {
+      // Before the first state checkpoint, a failed intake can leave a
+      // directory containing immutable inputs but no authority checkpoint.
+      // Release only the operational lease so a same-process retry can reuse
+      // those bytes; complete runs remain protected by state.json.
+      await store.abortInitialization().catch(() => undefined);
+      throw error;
+    }
   }
 
   async submitCreatorAnswers(

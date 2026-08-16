@@ -219,6 +219,11 @@ export class FactoryFileStore {
     await this.releaseInitializationLease();
   }
 
+  /** Release the pre-checkpoint initialization lease after a failed start. */
+  async abortInitialization(): Promise<void> {
+    await this.releaseInitializationLease();
+  }
+
   private async acquireInitializationLease(): Promise<void> {
     const active = FactoryFileStore.activeInitializationLeases.get(this.runDirectory);
     if (active) throw new Error(`Factory run ${this.runId} already exists; refusing to overwrite its directory`);
