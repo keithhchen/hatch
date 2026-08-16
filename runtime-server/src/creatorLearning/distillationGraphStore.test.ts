@@ -34,6 +34,7 @@ test("Postgres graph schema migrates legacy task rows before Product indexes", (
   assert.ok(productIndex > migration, "Product indexes must be created after Product identity migration");
   assert.match(POSTGRES_DISTILLATION_GRAPH_SCHEMA, /hatch_creator_distillation_tasks/);
   assert.match(POSTGRES_DISTILLATION_GRAPH_SCHEMA, /Cannot migrate Creator graph: % unmapped rows remain/);
+  assert.match(POSTGRES_DISTILLATION_GRAPH_SCHEMA, /ALTER COLUMN task_id DROP NOT NULL/);
   assert.match(POSTGRES_DISTILLATION_GRAPH_SCHEMA, /hatch_creator_distillation_events_product_event_uq/);
   assert.match(POSTGRES_DISTILLATION_GRAPH_SCHEMA, /hatch_creator_distillation_runs_product_uq/);
 });

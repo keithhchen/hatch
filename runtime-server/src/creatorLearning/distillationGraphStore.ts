@@ -211,6 +211,33 @@ BEGIN
   END IF;
 END $$;
 
+-- The historical control-plane tables used task_id as a required write key.
+-- Product is now the sole write authority; keep task_id only as nullable
+-- provenance so new Product-owned graph rows do not need a second identity.
+DO $$
+DECLARE
+  graph_table_name TEXT;
+BEGIN
+  FOREACH graph_table_name IN ARRAY ARRAY[
+    'hatch_creator_distillation_artifacts',
+    'hatch_creator_distillation_runs',
+    'hatch_creator_distillation_revisions',
+    'hatch_creator_distillation_node_executions',
+    'hatch_creator_distillation_events',
+    'hatch_creator_quality_gate_assessments',
+    'hatch_creator_distillation_releases'
+  ] LOOP
+    IF EXISTS (
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_name = graph_table_name
+        AND column_name = 'task_id'
+    ) THEN
+      EXECUTE format('ALTER TABLE %I ALTER COLUMN task_id DROP NOT NULL', graph_table_name);
+    END IF;
+  END LOOP;
+END $$;
+
 ALTER TABLE hatch_creator_distillation_artifacts
   ALTER COLUMN product_id SET NOT NULL;
 ALTER TABLE hatch_creator_distillation_runs
