@@ -26,11 +26,12 @@ test("Product files are nested under one Product", () => {
   });
   assert.equal(creatorRouteTitle(parseCreatorRoute("/studio/products/new")), "Create product");
   assert.equal(parseCreatorRoute("/studio/tasks/new").kind, "not-found");
-  assert.deepEqual(parseCreatorRoute("/studio/products/product_123/brief"), {
+  assert.equal(parseCreatorRoute("/studio/products/product_123/brief").kind, "not-found");
+  assert.deepEqual(parseCreatorRoute("/studio/products/product_123/complete"), {
     kind: "product",
     section: "products",
     productId: "product_123",
-    tab: "brief"
+    tab: "complete"
   });
 });
 

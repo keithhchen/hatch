@@ -6,7 +6,6 @@ import {
   getFactoryReview,
   listProductFiles,
   listProductVersions,
-  saveProductBriefSpec,
   saveFactoryAnswerDraft,
   startFactoryRunFromSources,
   submitFactoryAnswers,
@@ -17,7 +16,7 @@ import {
 import { createCreatorTranslator } from "./creatorI18n.js";
 import "./creatorProductWorkspace.css";
 
-const TAB_KEYS = ["files", "about-you", "review", "brief", "complete"];
+const TAB_KEYS = ["files", "about-you", "review", "complete"];
 
 export function CreatorProductWorkspace({ token, request, productId, runId = "", tab = "files", navigate, locale = "en", profile }) {
   const t = useMemo(() => createCreatorTranslator(locale), [locale]);
@@ -26,7 +25,6 @@ export function CreatorProductWorkspace({ token, request, productId, runId = "",
   const [documents, setDocuments] = useState([]);
   const [run, setRun] = useState(null);
   const [review, setReview] = useState(null);
-  const [briefSpec, setBriefSpec] = useState(null);
   const [state, setState] = useState({ loading: true, busy: "", error: "", notice: "" });
   const [selectedTab, setSelectedTab] = useState(TAB_KEYS.includes(tab) ? tab : "files");
   const [selectedRunId, setSelectedRunId] = useState(runId);
@@ -54,7 +52,6 @@ export function CreatorProductWorkspace({ token, request, productId, runId = "",
         }
       }
       setProduct(nextProduct);
-      setBriefSpec(nextProduct?.brief_spec ?? null);
       setPromiseDraft(nextProduct?.promise ?? nextProduct?.description ?? "");
       setRuns(sortedRuns);
       setSelectedRunId(nextRunId);
@@ -138,9 +135,8 @@ export function CreatorProductWorkspace({ token, request, productId, runId = "",
     {state.notice ? <InlineAlert tone="success">{state.notice}</InlineAlert> : null}
     {selectedTab === "files" ? <FilesPanel t={t} product={product} documents={documents} busy={state.busy} onUpload={upload} onStart={startRun} hasRun={Boolean(run)} /> : null}
     {selectedTab === "about-you" ? <AboutYouPanel t={t} token={token} run={run} busy={state.busy} onSaved={(nextRun) => { setRun(nextRun); if (nextRun.status === "queued") setState((current) => ({ ...current, notice: t("waiting") })); }} onFinish={(nextRun) => { setRun(nextRun); goTab("review"); }} onError={(error) => setState((current) => ({ ...current, error: error.message }))} /> : null}
-    {selectedTab === "review" ? <ReviewPanel t={t} token={token} profile={profile} run={run} review={review} busy={state.busy} setBusy={(busy) => setState((current) => ({ ...current, busy }))} onReviewChanged={setReview} onRerun={(nextRun) => { setRun(nextRun); setReview(null); setSelectedRunId(nextRun.id); goTab("about-you"); }} onComplete={() => goTab("brief")} onError={(error) => setState((current) => ({ ...current, error: error.message }))} /> : null}
-    {selectedTab === "brief" ? <BriefPanel t={t} token={token} product={product} briefSpec={briefSpec} busy={state.busy} onSaved={(nextProduct) => { const saved = nextProduct?.product ?? nextProduct; setProduct((current) => ({ ...current, ...saved })); setBriefSpec(saved?.brief_spec ?? null); setState((current) => ({ ...current, notice: t("briefSaved") })); goTab("complete"); }} onError={(error) => setState((current) => ({ ...current, error: error.message }))} /> : null}
-    {selectedTab === "complete" ? <CompletePanel t={t} product={product} briefSpec={briefSpec} run={run} review={review} busy={state.busy} setBusy={(busy) => setState((current) => ({ ...current, busy }))} onRerun={(nextRun) => { setRun(nextRun); setReview(null); setSelectedRunId(nextRun.id); goTab("about-you"); }} onPublished={() => void refresh()} onReview={() => goTab("review")} onBrief={() => goTab("brief")} request={request} token={token} productId={productId} /> : null}
+    {selectedTab === "review" ? <ReviewPanel t={t} token={token} profile={profile} run={run} review={review} busy={state.busy} setBusy={(busy) => setState((current) => ({ ...current, busy }))} onReviewChanged={setReview} onRerun={(nextRun) => { setRun(nextRun); setReview(null); setSelectedRunId(nextRun.id); goTab("about-you"); }} onComplete={() => goTab("complete")} onError={(error) => setState((current) => ({ ...current, error: error.message }))} /> : null}
+    {selectedTab === "complete" ? <CompletePanel t={t} product={product} run={run} review={review} busy={state.busy} setBusy={(busy) => setState((current) => ({ ...current, busy }))} onRerun={(nextRun) => { setRun(nextRun); setReview(null); setSelectedRunId(nextRun.id); goTab("about-you"); }} onPublished={() => void refresh()} onReview={() => goTab("review")} request={request} token={token} productId={productId} /> : null}
   </section>;
 }
 
@@ -209,95 +205,6 @@ function AboutYouPanel({ t, token, run, busy, onSaved, onFinish, onError }) {
   return <section className="cpv2-workspace-panel cpv2-about-panel"><div className="cpv2-panel-heading"><div><h2>{t("helpUnderstand")}</h2><p>{t("questionOf", index + 1, questions.length)}</p></div><div className="cpv2-carousel-nav"><button type="button" disabled={index === 0} onClick={() => setIndex((current) => current - 1)}>←</button><button type="button" disabled={index === questions.length - 1} onClick={() => setIndex((current) => current + 1)}>→</button></div></div><div className="cpv2-about-question"><h3>{question.question}</h3><div className="cpv2-about-columns"><article><span>{t("sourceEvidence")}</span><h4>{t("whatHatchFound")}</h4><p>{question.intent ?? ""}</p></article><article className="is-answer"><FormField label={t("yourContext")}><Textarea value={answer} onChange={(event) => setAnswers((current) => ({ ...current, [question.id]: event.target.value }))} placeholder={t("addContext")} /></FormField></article></div><div className="cpv2-workspace-actions"><Button type="button" loading={saveState === "saving" || busy === "answer"} disabled={!canAdvance || Boolean(busy)} onClick={() => { void save(index + 1); }}>{index === questions.length - 1 ? t("finishAndReview") : t("saveAndNext")}</Button>{saveState === "saved" ? <span className="cpv2-save-status">{t("saved")}</span> : null}</div></div></section>;
 }
 
-function BriefPanel({ t, token, product, briefSpec, busy, onSaved, onError }) {
-  const [fields, setFields] = useState(() => (Array.isArray(briefSpec?.fields) ? briefSpec.fields.map((field, index) => ({
-    id: String(field.id || `question-${index + 1}`),
-    label: String(field.label || ""),
-    required: field.required === true
-  })) : []));
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    setFields(Array.isArray(briefSpec?.fields) ? briefSpec.fields.map((field, index) => ({
-      id: String(field.id || `question-${index + 1}`),
-      label: String(field.label || ""),
-      required: field.required === true
-    })) : []);
-  }, [briefSpec]);
-
-  function addQuestion() {
-    if (fields.length >= 16) return;
-    setFields((current) => [...current, { id: nextBriefFieldId(current), label: "", required: true }]);
-    setError("");
-  }
-
-  function updateField(id, patch) {
-    setFields((current) => current.map((field) => field.id === id ? { ...field, ...patch } : field));
-    setError("");
-  }
-
-  function moveField(index, direction) {
-    const target = index + direction;
-    if (target < 0 || target >= fields.length) return;
-    setFields((current) => {
-      const next = [...current];
-      [next[index], next[target]] = [next[target], next[index]];
-      return next;
-    });
-  }
-
-  async function save(event) {
-    event.preventDefault();
-    if (saving || busy) return;
-    const normalized = fields.map((field) => ({ ...field, label: field.label.trim() }));
-    const ids = new Set();
-    const invalid = normalized.length === 0 || normalized.length > 16 || normalized.some((field) => {
-      if (!/^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/.test(field.id) || field.id.length > 128 || ids.has(field.id)) return true;
-      ids.add(field.id);
-      return !field.label || field.label.length > 500 || field.label.includes("\u0000") || typeof field.required !== "boolean";
-    });
-    if (invalid) {
-      setError(t("briefRequiredBeforePublish"));
-      return;
-    }
-    setSaving(true);
-    setError("");
-    try {
-      const saved = await saveProductBriefSpec(token, product, { contract_version: "1", fields: normalized });
-      onSaved(saved);
-    } catch (nextError) {
-      const errorValue = nextError instanceof Error ? nextError : new Error("Unable to save the Brief");
-      setError(errorValue.message);
-      onError?.(errorValue);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return <form className="cpv2-workspace-panel cpv2-brief-panel" onSubmit={save}>
-    <div className="cpv2-panel-heading"><div><h2>{t("briefTitle")}</h2><p>{t("briefBody")}</p></div><Button type="button" variant="secondary" onClick={addQuestion} disabled={fields.length >= 16 || saving}>{t("addBriefQuestion")}</Button></div>
-    {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
-    <div className="cpv2-brief-fields">
-      {fields.map((field, index) => <div className="cpv2-brief-field" key={field.id}>
-        <span className="cpv2-brief-field-number">{index + 1}</span>
-        <FormField label={t("briefQuestion")} required><Textarea value={field.label} placeholder={t("briefQuestionPlaceholder")} onChange={(event) => updateField(field.id, { label: event.target.value })} disabled={saving} /></FormField>
-        <label className="cpv2-brief-required"><input type="checkbox" checked={field.required} onChange={(event) => updateField(field.id, { required: event.target.checked })} disabled={saving} />{t("requiredQuestion")}</label>
-        <div className="cpv2-brief-field-actions"><button type="button" onClick={() => moveField(index, -1)} disabled={index === 0 || saving} aria-label={t("moveQuestionUp")}>↑</button><button type="button" onClick={() => moveField(index, 1)} disabled={index === fields.length - 1 || saving} aria-label={t("moveQuestionDown")}>↓</button><button type="button" onClick={() => { setFields((current) => current.filter((item) => item.id !== field.id)); setError(""); }} disabled={saving}>{t("removeQuestion")}</button></div>
-      </div>)}
-    </div>
-    {!fields.length ? <p className="cpv2-empty-inline">{t("briefRequiredBeforePublish")}</p> : null}
-    <div className="cpv2-brief-summary"><strong>{t("brief")}</strong><ol>{fields.map((field) => <li key={field.id}>{field.label || t("briefQuestionPlaceholder")} · {field.required ? t("requiredQuestion") : t("optional")}</li>)}</ol></div>
-    <div className="cpv2-workspace-actions"><Button type="submit" loading={saving} disabled={saving || Boolean(busy) || fields.length === 0}>{t("saveBriefAndContinue")}</Button></div>
-  </form>;
-}
-
-function nextBriefFieldId(fields) {
-  let index = fields.length + 1;
-  while (fields.some((field) => field.id === `question-${index}`)) index += 1;
-  return `question-${index}`;
-}
-
 function ReviewPanel({ t, token, profile, run, review, busy, setBusy, onReviewChanged, onRerun, onComplete, onError }) {
   const [index, setIndex] = useState(0);
   const [draft, setDraft] = useState({});
@@ -361,11 +268,11 @@ function CorpusPreview({ t, corpus }) {
   return <article className="cpv2-corpus-preview"><div className="cpv2-panel-heading"><h3>{t("fullCorpus")}</h3><code>{corpus.digest}</code></div>{corpus.assets.map((asset) => <details key={`${asset.layer}:${asset.path}`}><summary>{asset.id} · {asset.layer}</summary><pre>{asset.content}</pre></details>)}</article>;
 }
 
-function CompletePanel({ t, product, briefSpec, run, review, busy, setBusy, onRerun, onPublished, onReview, onBrief, request, token, productId }) {
+function CompletePanel({ t, product, run, review, busy, setBusy, onRerun, onPublished, onReview, request, token, productId }) {
   const [error, setError] = useState("");
   const [showDetails, setShowDetails] = useState(false);
   async function publish() {
-    if (!briefSpec?.fields?.length || !review?.release_ready || !run?.candidate) return;
+    if (!review?.release_ready || !run?.candidate) return;
     setBusy("publish"); setError("");
     try {
       await request(`/v1/creator/products/${encodeURIComponent(productId)}/release`, { method: "POST", token, headers: { "idempotency-key": crypto.randomUUID() }, body: JSON.stringify({ candidate_id: run.id, report_digest: run.candidate.report_digest, expected_version: run.version }) });
@@ -377,7 +284,7 @@ function CompletePanel({ t, product, briefSpec, run, review, busy, setBusy, onRe
     <h2>{t("complete")}</h2>
     <div className="cpv2-product-detail-preview"><h3>{product?.name ?? t("product")}</h3><p>{product?.promise ?? product?.description ?? ""}</p><Button type="button" variant="link" onClick={() => setShowDetails((current) => !current)}>{t("viewProductDetails")}</Button>{showDetails ? <CorpusPreview t={t} corpus={review?.corpus} /> : null}</div>
     {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
-    {!briefSpec?.fields?.length ? <div className="cpv2-complete-brief-required"><p>{t("briefRequiredBeforePublish")}</p><Button type="button" variant="secondary" onClick={onBrief}>{t("brief")}</Button></div> : review?.release_ready ? <div className="cpv2-complete-actions"><Button type="button" loading={busy === "publish"} onClick={() => void publish()}>{t("publishProduct")}</Button><Button type="button" variant="secondary" onClick={onReview}>{t("generateAnotherVersion")}</Button></div> : <div className="cpv2-complete-actions"><p>{review?.rerun_ready ? t("correctionSaved") : t("noRun")}</p>{review?.rerun_ready ? <Button type="button" variant="secondary" onClick={async () => { setBusy("rerun"); try { const result = await submitFactoryReview(token, { id: run.id, version: review.version }, { action: "rerun", candidateDigest: review.candidate_digest }); if (result.next_run) onRerun(result.next_run); } catch (nextError) { setError(nextError.message); } finally { setBusy(""); } }}>{t("generateAnotherVersion")}</Button> : <Button type="button" variant="secondary" onClick={onReview}>{t("review")}</Button>}</div>}
+    {review?.release_ready ? <div className="cpv2-complete-actions"><Button type="button" loading={busy === "publish"} onClick={() => void publish()}>{t("publishProduct")}</Button><Button type="button" variant="secondary" onClick={onReview}>{t("generateAnotherVersion")}</Button></div> : <div className="cpv2-complete-actions"><p>{review?.rerun_ready ? t("correctionSaved") : t("noRun")}</p>{review?.rerun_ready ? <Button type="button" variant="secondary" onClick={async () => { setBusy("rerun"); try { const result = await submitFactoryReview(token, { id: run.id, version: review.version }, { action: "rerun", candidateDigest: review.candidate_digest }); if (result.next_run) onRerun(result.next_run); } catch (nextError) { setError(nextError.message); } finally { setBusy(""); } }}>{t("generateAnotherVersion")}</Button> : <Button type="button" variant="secondary" onClick={onReview}>{t("review")}</Button>}</div>}
   </section>;
 }
 

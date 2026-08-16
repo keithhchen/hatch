@@ -1315,7 +1315,17 @@ function idempotencyMapKey(creatorId: string, idempotencyKey: string): string {
 }
 
 function factoryInputDigest(input: FactoryStartInput): string {
-  const { runId: _transportRunId, ...semanticInput } = input;
+  // These fields are assigned by the Product revision coordinator. They may
+  // change when the same client command is retried after the Product pointer
+  // has advanced, but they are not part of the caller's idempotency payload.
+  const {
+    runId: _transportRunId,
+    revisionId: _revisionId,
+    revisionNumber: _revisionNumber,
+    distillationRunId: _distillationRunId,
+    parentRevisionId: _parentRevisionId,
+    ...semanticInput
+  } = input;
   return sha256(stableJson(semanticInput));
 }
 

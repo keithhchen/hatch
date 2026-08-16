@@ -26,10 +26,11 @@ import {
 import { RegistryStoreTs } from "./registryStore.js";
 import { RegistryDeploymentConflictError } from "./registryStore.js";
 import { MAX_AGENT_CORPUS_BUNDLE_BYTES } from "./registryCorpus.js";
-import { BriefValidationError, normalizeBriefSpec, type BriefSpec } from "./brief.js";
+import { BriefValidationError } from "./brief.js";
 import { handleCreatorFactoryHttp } from "./creatorLearning/httpApi.js";
 import { isUuidV4 } from "./identity.js";
 import {
+  CreatorFactoryRepositoryError,
   InMemoryCreatorFactoryRepository,
   PostgresCreatorFactoryRepository,
   type CreatorFactoryRepository
@@ -134,6 +135,13 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
           return;
         }
         if (error instanceof BriefValidationError) {
+          sendJson(response, status, {
+            error: { code: error.code, message: error.message },
+            detail: error.message
+          });
+          return;
+        }
+        if (error instanceof CreatorFactoryRepositoryError) {
           sendJson(response, status, {
             error: { code: error.code, message: error.message },
             detail: error.message
@@ -323,18 +331,13 @@ async function route(
     }
     if (candidate.agentId !== productId) throw new Error("product_id does not match the Factory candidate");
     const product = await productForCreator(context, creatorId, productId);
-    const briefSpec = product?.brief_spec ? normalizeBriefSpec(product.brief_spec) : undefined;
-    if (!briefSpec) {
-      const error = new Error("brief_spec_required");
-      (error as Error & { status?: number }).status = 422;
-      throw error;
-    }
+    if (!product) throw new Error("product_not_found");
     const staged = await context.store.stageAgentCorpusDirectory(
       creatorId,
       candidate.agentId,
       candidate.corpusRoot,
       candidate.corpusDigest,
-      briefSpec
+      undefined
     );
     sendJson(response, 201, { ...staged, factory_run_id: runId, operation_id: operationId, current: false });
     return;
@@ -355,19 +358,12 @@ async function route(
     try {
       const productId = typeof body.product_id === "string" ? body.product_id.trim() : agentId;
       const product = await productForCreator(context, creatorId, productId);
-      const briefSpec = body.brief_spec && typeof body.brief_spec === "object"
-        ? normalizeBriefSpec(body.brief_spec as BriefSpec)
-        : product?.brief_spec;
-      if (!briefSpec) {
-        const error = new Error("brief_spec_required");
-        (error as Error & { status?: number }).status = 422;
-        throw error;
-      }
+      if (!product) throw new Error("product_not_found");
       const activated = await context.store.activateAgentCorpusRelease(
         creatorId,
         agentId,
         corpusDigest,
-        { operationId, expectedCurrentDigest, ...(briefSpec ? { briefSpec } : {}) }
+        { operationId, expectedCurrentDigest }
       );
       const release = typeof body.factory_run_id === "string" && typeof body.product_id === "string"
         ? await context.factoryService.recordRelease(creatorId, body.factory_run_id, body.product_id)
@@ -521,28 +517,6 @@ async function route(
     return;
   }
 
-  const productBriefSpecMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/brief-spec$/);
-  if (productBriefSpecMatch && request.method === "PUT") {
-    const account = await authenticate(request, response, context, "creator");
-    if (account === SESSION_QUERY_REJECTED) return;
-    if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
-    const productId = decodeURIComponent(productBriefSpecMatch[1]!);
-    const product = await productForCreator(context, account.id, productId);
-    if (!product?.repositoryId) {
-      sendJson(response, 409, { error: { code: "product_not_editable", message: "Published Products are changed by creating a new Version." } });
-      return;
-    }
-    const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
-    const updated = await context.factoryService.saveProductBriefSpec(
-      account.id,
-      product.repositoryId,
-      normalizeBriefSpec(body.brief_spec as BriefSpec),
-      typeof body.expected_updated_at === "string" ? body.expected_updated_at : undefined
-    );
-    sendJson(response, 200, publicCreatorProduct(updated));
-    return;
-  }
-
   const productFilesMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/files(?:\/([^/]+))?$/);
   const productSnapshotsMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/snapshots(?:\/([^/]+))?$/);
   const productRunsMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/runs(?:\/([^/]+))?$/);
@@ -666,6 +640,10 @@ async function route(
         // every later “new version” replay the very first run forever.
         const runIdempotencyKey = request.headers["idempotency-key"]?.toString().trim()
           || `product-run:${productId}:${randomUUID()}`;
+        const runId = `factory_${createHash("sha256")
+          .update(`${account.id}\u0000${productId}\u0000${runIdempotencyKey}`)
+          .digest("hex")
+          .slice(0, 32)}`;
         const snapshotId = typeof body.source_snapshot_id === "string" && body.source_snapshot_id.trim()
           ? body.source_snapshot_id.trim()
           : (await context.productFileStore.createSnapshot(
@@ -680,6 +658,7 @@ async function route(
         const result = await context.factoryService.create(
           { id: account.id, name: account.display_name },
           {
+            runId,
             // The repository still uses the internal row id as a migration
             // boundary. The external contract uses the stable Product id.
             // The current repository implementation accepts its internal row
@@ -845,11 +824,6 @@ async function route(
     const agentId = url.searchParams.get("product_id") ?? "";
     const product = await productForCreator(context, account.id, agentId);
     if (!product) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
-    if (!product.brief_spec) {
-      const error = new Error("brief_spec_required");
-      (error as Error & { status?: number }).status = 422;
-      throw error;
-    }
     const lease = beginPublishWork(response, context, `creator:${account.id}`);
     if (!lease) return;
     try {
@@ -1216,6 +1190,11 @@ function errorStatus(error: unknown): number {
   if (error instanceof ProductFilesError) {
     if (error.code === "idempotency_conflict") return 409;
     return error.code === "product_file_not_found" || error.code === "product_snapshot_not_found" || error.code === "product_mismatch" ? 404 : 422;
+  }
+  if (error instanceof CreatorFactoryRepositoryError) {
+    if (["idempotency_conflict", "run_id_conflict", "version_conflict"].includes(error.code)) return 409;
+    if (error.code === "run_not_found") return 404;
+    return 422;
   }
   return 500;
 }

@@ -110,6 +110,8 @@ async function recoverCorpusAssetRefs(store: FactoryFileStore, corpus: Materiali
 }
 
 export type CreateFactoryRunRequest = {
+  /** Optional caller-stable run id used to make Product run retries replayable. */
+  runId?: string;
   productId?: string;
   agentId?: string;
   product?: Partial<FactoryAgentProduct>;
@@ -360,6 +362,9 @@ export class CreatorFactoryService {
     idempotencyKey: string
   ): Promise<{ run: CreatorFactoryRunView; created: boolean }> {
     const normalized = validateCreateRequest(request);
+    const existingRun = normalized.runId
+      ? await this.repository.getForCreator(creator.id, normalized.runId)
+      : undefined;
     let product: CreatorProductRecord | undefined;
     if (normalized.productId) {
       product = await this.getProduct(creator.id, normalized.productId);
@@ -414,16 +419,25 @@ export class CreatorFactoryService {
         ? await this.productFileStore!.resolveSnapshotSources(creator.id, productIdentity!, snapshotId)
         : await this.sourceLibrary.resolveSnapshotSources(creator.id, snapshotId)
       : normalized.sources ?? [];
-    const runId = `factory_${randomUUID().replaceAll("-", "")}`;
-    const distillationRunId = product?.runId ?? `distill_${randomUUID().replaceAll("-", "")}`;
-    const revisionContext = product && this.graphStore
+    const runId = normalized.runId ?? `factory_${randomUUID().replaceAll("-", "")}`;
+    // Product run retries carry a caller-stable runId. Reuse it for the
+    // distillation identity too; generating a fresh nested id would make the
+    // same idempotency key look like a different payload on replay.
+    const existingProductRun = existingRun?.input.productId === normalized.productId ? existingRun : undefined;
+    const distillationRunId = existingProductRun?.input.distillationRunId
+      ?? normalized.runId
+      ?? product?.runId
+      ?? `distill_${randomUUID().replaceAll("-", "")}`;
+    const revisionContext = product && !existingProductRun && this.graphStore
       ? await this.resolveProductRevisionContext(product)
       : undefined;
     const parentRevisionId = product
-      ? (revisionContext ? revisionContext.parentRevisionId : product.latestRevisionId)
+      ? (existingProductRun?.input.parentRevisionId
+        ?? (revisionContext ? revisionContext.parentRevisionId : product.latestRevisionId))
       : undefined;
     const revisionNumber = product
-      ? (revisionContext?.nextRevisionNumber
+      ? (existingProductRun?.input.revisionNumber
+        ?? revisionContext?.nextRevisionNumber
         ?? (product.latestRevisionId ? await this.nextRevisionNumber(creator.id, normalized.productId!) : 1))
       : 1;
     const productName = product?.name ?? normalized.productName;
@@ -1383,6 +1397,7 @@ async function candidateEvidence(
 function validateCreateRequest(
   request: CreateFactoryRunRequest
 ): CreateFactoryRunRequest & { tools: FactoryAgentTool[] } {
+  const runId = request.runId === undefined ? undefined : requireCorpusIdentifier(request.runId, "runId");
   const agentId = request.agentId === undefined ? undefined : requireCorpusIdentifier(request.agentId, "agentId");
   const productName = requireText(request.productName, "productName");
   const productPromise = requireText(request.productPromise, "productPromise");
@@ -1447,6 +1462,7 @@ function validateCreateRequest(
     mode: request.reviewContext.mode
   } satisfies NonNullable<CreateFactoryRunRequest["reviewContext"]>;
   return {
+    ...(runId ? { runId } : {}),
     ...(productId ? { productId } : {}),
     ...(agentId ? { agentId } : {}),
     ...(product ? { product } : {}),

@@ -1,5 +1,5 @@
 const ROOT = "/studio";
-const PRODUCT_TABS = new Set(["files", "about-you", "review", "brief", "complete"]);
+const PRODUCT_TABS = new Set(["files", "about-you", "review", "complete"]);
 
 export function parseCreatorRoute(pathname) {
   const clean = `/${String(pathname ?? "").split(/[?#]/)[0].split("/").filter(Boolean).join("/")}`;
