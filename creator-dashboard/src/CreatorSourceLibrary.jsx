@@ -9,6 +9,7 @@ import {
   Input,
   List,
   PageHeader,
+  StatusTag,
   Textarea
 } from "@hatch/ui";
 import { createCreatorTranslator } from "./creatorI18n.js";
@@ -19,6 +20,11 @@ import {
   startFactoryRunFromSources,
   uploadProductFile
 } from "./creatorFactory.js";
+import {
+  canGenerateProductVersion,
+  productFileState,
+  shouldPollProductFiles
+} from "./creatorProductFilesUi.js";
 
 /** Product-owned file area. Files are never global and never attached to a run. */
 export function CreatorProductFiles({ token, productId, navigate, locale = "en" }) {
@@ -29,6 +35,7 @@ export function CreatorProductFiles({ token, productId, navigate, locale = "en" 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const filesNeedPolling = useMemo(() => shouldPollProductFiles(files), [files]);
 
   useEffect(() => {
     if (!productId) return undefined;
@@ -42,6 +49,30 @@ export function CreatorProductFiles({ token, productId, navigate, locale = "en" 
       .catch((nextError) => active && setError(nextError.message));
     return () => { active = false; };
   }, [token, productId]);
+
+  useEffect(() => {
+    if (!productId || !filesNeedPolling) return undefined;
+    let cancelled = false;
+    let polling = false;
+    const poll = async () => {
+      if (polling) return;
+      polling = true;
+      try {
+        const response = await listProductFiles(token, productId);
+        if (!cancelled) setFiles(response.files ?? response.documents ?? []);
+      } catch (nextError) {
+        if (!cancelled) setError(nextError.message);
+      } finally {
+        polling = false;
+      }
+    };
+    void poll();
+    const timer = setInterval(() => { void poll(); }, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [filesNeedPolling, productId, token]);
 
   const selectedCount = useMemo(() => files.length, [files]);
 
@@ -103,8 +134,8 @@ export function CreatorProductFiles({ token, productId, navigate, locale = "en" 
       <div className="cpv2-source-library-toolbar"><div><span className="cpv2-kicker">{t("productFiles")}</span><h2>{t("filesCount", selectedCount)}</h2></div></div>
       <FileUploader multiple accept=".pdf,.docx,.xlsx,.xls,.xlsm,.csv,.tsv,.txt,.md,.json,.html,.htm,.png,.jpg,.jpeg,.webp" onFiles={upload} disabled={busy} label={t("uploadFiles")} hint={t("localFilesOnly")} className="cpv2-source-uploader" />
       <p className="cpv2-muted">{t("sourceNote")}</p>
-      {files.length ? <List items={files} className="cpv2-source-list" ariaLabel={t("productFiles")} renderItem={(file) => <><div><strong>{file.display_name}</strong><small>{file.media_type} · {file.projection?.kind === "image" ? t("imageNative") : t("markdownProjection")}</small></div><span>{file.projection?.sha256?.slice(0, 18) ?? t("preparingFile")}</span></>} /> : <EmptyState title={t("noFilesYet")} body={t("firstFileForProduct")} />}
-      <div className="cpv2-source-library-actions"><Button type="button" loading={busy} disabled={!files.length} onClick={() => void startRun()}>{t("generateVersion")}</Button></div>
+      {files.length ? <List items={files} className="cpv2-source-list" ariaLabel={t("productFiles")} renderItem={(file) => { const status = productFileState(file); return <><div><strong>{file.display_name}</strong><small>{file.media_type} · {file.projection?.kind === "image" ? t("imageNative") : t("markdownProjection")}</small></div><StatusTag tone={status === "ready" ? "success" : status === "error" ? "error" : "neutral"}>{t(`fileStatus_${status}`)}</StatusTag></>; }} /> : <EmptyState title={t("noFilesYet")} body={t("firstFileForProduct")} />}
+      <div className="cpv2-source-library-actions"><Button type="button" loading={busy} disabled={!canGenerateProductVersion(files) || busy} onClick={() => void startRun()}>{t("generateVersion")}</Button></div>
     </article>
   </section>;
 }

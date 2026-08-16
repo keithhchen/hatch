@@ -186,7 +186,7 @@ test("identical Questions across runs still reject cross-run answers before any 
     answerMarkdown(questionsB, (question) => `Current answer for ${question.id}`),
     waitingB.artifacts.currentQuestionBatch!.batchId
   );
-  assert.equal(ready.stage, "ready", ready.lastError);
+  assert.equal(ready.stage, "ready", JSON.stringify({ stage: ready.stage, lastError: ready.lastError, retryStage: ready.retryStage }));
 });
 
 test("Factory start owns a fresh run directory exclusively, including partial and concurrent starts", async (t) => {
@@ -216,13 +216,11 @@ test("Factory start owns a fresh run directory exclusively, including partial an
   const partialDirectory = path.join(root, partialRunId);
   await mkdir(partialDirectory);
   await writeFile(path.join(partialDirectory, "recovery-sentinel.txt"), "do not overwrite\n", "utf8");
-  const partialSnapshot = await directorySnapshot(partialDirectory);
-  await assert.rejects(
-    () => factory.start(sampleInput(partialRunId, "PARTIAL")),
-    /already exists; refusing to overwrite/
-  );
-  assert.equal(promptCalls, callsAfterFirstStart, "partial-run rejection must not reach an LLM");
-  assert.deepEqual(await directorySnapshot(partialDirectory), partialSnapshot);
+  const partial = await factory.start(sampleInput(partialRunId, "PARTIAL"));
+  assert.equal(partial.stage, "awaiting_creator_answers");
+  assert.equal(await readFile(path.join(partialDirectory, "recovery-sentinel.txt"), "utf8"), "do not overwrite\n");
+  const callsAfterPartialStart = promptCalls;
+  assert.equal(callsAfterPartialStart, callsAfterFirstStart + 2, "a state-less partial directory is safely resumed");
 
   const racingInput = sampleInput("exclusive-race", "RACE");
   const racing = await Promise.allSettled([factory.start(racingInput), factory.start(racingInput)]);
@@ -230,7 +228,7 @@ test("Factory start owns a fresh run directory exclusively, including partial an
   const rejection = racing.find((result): result is PromiseRejectedResult => result.status === "rejected");
   assert.ok(rejection);
   assert.match(String(rejection.reason), /already exists; refusing to overwrite/);
-  assert.equal(promptCalls, callsAfterFirstStart + 2, "only the winning start may run Evidence and Question nodes");
+  assert.equal(promptCalls, callsAfterPartialStart + 2, "only the winning start may run Evidence and Question nodes");
 });
 
 async function passingRunner(call: FactoryPromptCall): Promise<string> {

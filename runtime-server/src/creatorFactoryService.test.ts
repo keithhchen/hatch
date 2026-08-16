@@ -505,10 +505,13 @@ test("a Distillation Product keeps one Product identity across revisions", async
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-factory-product-product-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const repository = new InMemoryCreatorFactoryRepository();
-  const service = new CreatorFactoryService(repository, root);
+  const graph = new InMemoryDistillationGraphStore();
+  const service = new CreatorFactoryService(repository, root, undefined, undefined, graph);
   const creator = { id: "11111111-1111-4111-8111-111111111111", name: "Product Creator" };
   const product = await service.createProduct(creator.id, { name: "Stable product product", promise: "A single product identity across revisions." });
   assert.match(product.id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.equal(product.runId, product.id);
+  assert.equal((await graph.derive(product.id)).runId, product.id);
   assert.deepEqual(product.briefSpec?.fields.map((field) => field.id), ["goal", "context"]);
   assert.equal(product.briefSpec?.fields[0]?.required, true);
   const document = await service.createSourceDocument(creator.id, {

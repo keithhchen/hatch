@@ -28,6 +28,8 @@ export type CreateCreatorProductInput = {
   name: string;
   promise: string;
   briefSpec: BriefSpec;
+  /** Stable Product-owned Distillation Run lineage. */
+  runId?: string;
   idempotencyKey?: string;
 };
 

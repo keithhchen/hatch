@@ -16,6 +16,11 @@ import {
 } from "./creatorFactory.js";
 import { createCreatorTranslator } from "./creatorI18n.js";
 import { canAcceptReviewCase, completeReviewMode } from "./creatorReviewUi.js";
+import {
+  canGenerateProductVersion,
+  productFileState,
+  shouldPollProductFiles
+} from "./creatorProductFilesUi.js";
 import "./creatorProductWorkspace.css";
 
 const TAB_KEYS = ["files", "about-you", "review", "brief", "complete"];
@@ -32,6 +37,7 @@ export function CreatorProductWorkspace({ token, request, productId, runId = "",
   const [selectedTab, setSelectedTab] = useState(TAB_KEYS.includes(tab) ? tab : "files");
   const [selectedRunId, setSelectedRunId] = useState(runId);
   const [promiseDraft, setPromiseDraft] = useState("");
+  const filesNeedPolling = useMemo(() => shouldPollProductFiles(documents), [documents]);
 
   const refresh = useCallback(async () => {
     setState((current) => ({ ...current, loading: true, error: "" }));
@@ -73,6 +79,30 @@ export function CreatorProductWorkspace({ token, request, productId, runId = "",
   useEffect(() => {
     if (runId) setSelectedRunId(runId);
   }, [runId]);
+
+  useEffect(() => {
+    if (!filesNeedPolling) return undefined;
+    let cancelled = false;
+    let polling = false;
+    const poll = async () => {
+      if (polling) return;
+      polling = true;
+      try {
+        const response = await listProductFiles(token, productId);
+        if (!cancelled) setDocuments(response.files ?? response.documents ?? []);
+      } catch (error) {
+        if (!cancelled) setState((current) => ({ ...current, error: error.message }));
+      } finally {
+        polling = false;
+      }
+    };
+    void poll();
+    const timer = setInterval(() => { void poll(); }, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [filesNeedPolling, productId, token]);
 
   useEffect(() => {
     if (!run || !["queued", "running"].includes(run.status)) return undefined;
@@ -162,10 +192,10 @@ export function CreatorProductWorkspace({ token, request, productId, runId = "",
 function FilesPanel({ t, product, documents, busy, onUpload, onStart, hasRun }) {
   return <section className="cpv2-workspace-panel">
     <div className="cpv2-panel-heading"><div><h2>{t("giveMaterial")}</h2><p>{t("localFilesOnly")}</p></div><label className="cpv2-upload-button">{t("uploadFiles")}<input type="file" multiple accept=".pdf,.docx,.xlsx,.xls,.xlsm,.csv,.tsv,.txt,.md,.json,.html,.htm,.png,.jpg,.jpeg,.webp" onChange={(event) => { void onUpload([...event.target.files]); event.target.value = ""; }} disabled={Boolean(busy)} /></label></div>
-    <div className="cpv2-file-list">{documents.map((document) => { const status = fileStatus(document); return <div className="cpv2-file-row" key={documentId(document)}><div><strong>{document.display_name ?? document.file_name ?? t("unnamedFile")}</strong><small>{document.projection?.kind === "image" ? t("imageNative") : t("markdownProjection")}</small></div><StatusTag tone={statusTone(status)}>{t(`fileStatus_${status}`)}</StatusTag></div>; })}</div>
+    <div className="cpv2-file-list">{documents.map((document) => { const status = productFileState(document); return <div className="cpv2-file-row" key={documentId(document)}><div><strong>{document.display_name ?? document.file_name ?? t("unnamedFile")}</strong><small>{document.projection?.kind === "image" ? t("imageNative") : t("markdownProjection")}</small></div><StatusTag tone={statusTone(status)}>{t(`fileStatus_${status}`)}</StatusTag></div>; })}</div>
     {!documents.length ? <p className="cpv2-empty-inline">{t("uploadForProduct")}</p> : null}
     <p className="cpv2-source-note">{t("sourceNote")}</p>
-    <div className="cpv2-workspace-actions"><Button type="button" loading={busy === "start"} disabled={!documents.length || documents.some((document) => !isDocumentReady(document)) || Boolean(busy)} onClick={onStart}>{hasRun ? t("continueWithFiles") : t("startDistillation")}</Button></div>
+    <div className="cpv2-workspace-actions"><Button type="button" loading={busy === "start"} disabled={!canGenerateProductVersion(documents) || Boolean(busy)} onClick={onStart}>{hasRun ? t("continueWithFiles") : t("startDistillation")}</Button></div>
   </section>;
 }
 
@@ -406,19 +436,6 @@ function versionStatus(run, t) {
 
 function documentId(document) {
   return document?.id ?? document?.file_id ?? document?.document_id ?? document?.artifact_id ?? "";
-}
-
-function isDocumentReady(document) {
-  const status = String(document?.status ?? "").toLowerCase();
-  if (["error", "failed", "rejected", "processing", "projecting", "queued", "uploading"].includes(status)) return false;
-  return status === "" ? Boolean(document?.projection?.sha256 || document?.projection?.content_ref || document?.artifact_id) : ["ready", "available", "complete", "completed"].includes(status);
-}
-
-function fileStatus(document) {
-  const status = String(document?.status ?? "").toLowerCase();
-  if (["error", "failed", "rejected"].includes(status)) return "error";
-  if (["processing", "projecting", "queued", "uploading"].includes(status)) return "processing";
-  return isDocumentReady(document) ? "ready" : "processing";
 }
 
 function statusTone(status) {

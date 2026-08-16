@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, rename, writeFile, appendFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, writeFile, appendFile, stat, unlink } from "node:fs/promises";
 import path from "node:path";
 import { isObjectStoreNotFound, type ArtifactObjectStore } from "./objectStore.js";
 import { graphEventKey, newGraphEventId, type DistillationGraphStore, type DistillationEventType, type DistillationNodeKind } from "./distillationGraph.js";
@@ -13,8 +13,11 @@ import type {
 } from "./types.js";
 
 export class FactoryFileStore {
+  private static readonly activeInitializationLeases = new Map<string, string>();
   readonly runId: string;
   private readonly runDirectory: string;
+  private readonly initializationLeasePath: string;
+  private readonly initializationToken = randomUUID();
   private readonly objectStore?: ArtifactObjectStore;
   private readonly objectPrefix: string;
   private readonly graphStore?: DistillationGraphStore;
@@ -34,6 +37,7 @@ export class FactoryFileStore {
   ) {
     this.runId = runId ?? randomUUID();
     this.runDirectory = containedPath(root, this.runId);
+    this.initializationLeasePath = path.join(this.runDirectory, ".initializing");
     this.objectStore = options.objectStore;
     this.objectPrefix = options.objectPrefix ?? `factory-runs/${this.runId}`;
     this.graphStore = options.graphStore;
@@ -57,14 +61,24 @@ export class FactoryFileStore {
       // mkdir would silently reuse and overwrite an existing or partial run.
       await mkdir(this.runDirectory);
     } catch (error) {
-      if (isAlreadyExists(error)) {
+      if (!isAlreadyExists(error)) throw error;
+      if (!(await isDirectory(this.runDirectory)) || await this.hasDurableState()) {
         throw new Error(`Factory run ${this.runId} already exists; refusing to overwrite its directory`);
       }
+      // A process can die after creating the run directory but before the
+      // first durable state checkpoint. Reusing that directory is safe: all
+      // immutable writes below are content-checked and the state checkpoint
+      // remains the authority that distinguishes a complete run.
+    }
+    await this.acquireInitializationLease();
+    try {
+      await mkdir(path.join(this.runDirectory, "artifacts"), { recursive: true });
+      await mkdir(path.join(this.runDirectory, "sealed"), { recursive: true });
+      await mkdir(path.join(this.runDirectory, "candidate"), { recursive: true });
+    } catch (error) {
+      await this.releaseInitializationLease();
       throw error;
     }
-    await mkdir(path.join(this.runDirectory, "artifacts"), { recursive: true });
-    await mkdir(path.join(this.runDirectory, "sealed"), { recursive: true });
-    await mkdir(path.join(this.runDirectory, "candidate"), { recursive: true });
   }
 
   /**
@@ -165,7 +179,7 @@ export class FactoryFileStore {
     const bytes = Buffer.from(content, "utf8");
     await this.persistObject(relative, bytes, "text/plain; charset=utf-8");
     await mkdir(path.dirname(destination), { recursive: true });
-    await atomicWrite(destination, content);
+    await atomicWriteImmutable(destination, content);
     const reference: ArtifactRef = {
       path: relative,
       sha256: sha256(content),
@@ -183,7 +197,7 @@ export class FactoryFileStore {
     const bytes = Buffer.from(content, "utf8");
     await this.persistObject(relative, bytes, "text/plain; charset=utf-8");
     await mkdir(path.dirname(destination), { recursive: true });
-    await atomicWrite(destination, content);
+    await atomicWriteImmutable(destination, content);
     const reference: ArtifactRef = { path: relative, sha256: sha256(content), createdAt: new Date().toISOString() };
     await this.registerGraphArtifact(reference, "text/plain; charset=utf-8");
     return reference;
@@ -202,6 +216,56 @@ export class FactoryFileStore {
     await this.persistObject("state.json", Buffer.from(content, "utf8"), "application/json; charset=utf-8", true);
     await mkdir(this.runDirectory, { recursive: true });
     await atomicWrite(this.statePath, content);
+    await this.releaseInitializationLease();
+  }
+
+  private async acquireInitializationLease(): Promise<void> {
+    const active = FactoryFileStore.activeInitializationLeases.get(this.runDirectory);
+    if (active) throw new Error(`Factory run ${this.runId} already exists; refusing to overwrite its directory`);
+    const lease = JSON.stringify({ pid: process.pid, token: this.initializationToken, createdAt: new Date().toISOString() });
+    try {
+      await writeFile(this.initializationLeasePath, `${lease}\n`, { encoding: "utf8", flag: "wx" });
+    } catch (error) {
+      if (!isAlreadyExists(error)) throw error;
+      const existing = await readInitializationLease(this.initializationLeasePath);
+      if (existing && isProcessAlive(existing.pid)) {
+        throw new Error(`Factory run ${this.runId} already exists; refusing to overwrite its directory`);
+      }
+      // A dead initializer left only an operational lease behind. It is not
+      // an artifact or checkpoint, so removing that stale lease is safe.
+      await unlink(this.initializationLeasePath).catch((unlinkError) => {
+        if (!isMissingPath(unlinkError)) throw unlinkError;
+      });
+      await writeFile(this.initializationLeasePath, `${lease}\n`, { encoding: "utf8", flag: "wx" });
+    }
+    FactoryFileStore.activeInitializationLeases.set(this.runDirectory, this.initializationToken);
+  }
+
+  private async releaseInitializationLease(): Promise<void> {
+    if (FactoryFileStore.activeInitializationLeases.get(this.runDirectory) !== this.initializationToken) return;
+    FactoryFileStore.activeInitializationLeases.delete(this.runDirectory);
+    const existing = await readInitializationLease(this.initializationLeasePath).catch(() => undefined);
+    if (existing?.token !== this.initializationToken) return;
+    await unlink(this.initializationLeasePath).catch((error) => {
+      if (!isMissingPath(error)) throw error;
+    });
+  }
+
+  private async hasDurableState(): Promise<boolean> {
+    try {
+      await readFile(this.statePath);
+      return true;
+    } catch (error) {
+      if (!isMissingPath(error)) throw error;
+    }
+    if (!this.objectStore) return false;
+    try {
+      await this.objectStore.get(this.objectKey("state.json"));
+      return true;
+    } catch (error) {
+      if (!isObjectStoreNotFound(error)) throw error;
+      return false;
+    }
   }
 
   async loadState(): Promise<FactoryRunState> {
@@ -542,6 +606,71 @@ async function atomicWrite(destination: string, content: string | Buffer): Promi
   const temporary = `${destination}.${process.pid}.${randomUUID()}.tmp`;
   await writeFile(temporary, content, "utf8");
   await rename(temporary, destination);
+}
+
+async function atomicWriteImmutable(destination: string, content: string | Buffer): Promise<void> {
+  const bytes = Buffer.isBuffer(content) ? content : Buffer.from(content, "utf8");
+  try {
+    await writeFile(destination, bytes, { flag: "wx" });
+  } catch (error) {
+    if (!isAlreadyExists(error)) throw error;
+    const existing = await readFile(destination);
+    if (!existing.equals(bytes)) {
+      // Corpus materialization treats this as a content-addressed collision
+      // and moves the new bundle to a deterministic collision-safe root. Keep
+      // the error contract aligned with that recovery boundary; do not log
+      // the absolute run path or leak artifact details into service logs.
+      throw new Error(`Immutable object key already contains different bytes: ${destination}`);
+    }
+  }
+}
+
+async function isDirectory(candidate: string): Promise<boolean> {
+  try {
+    return (await stat(candidate)).isDirectory();
+  } catch (error) {
+    if (isMissingPath(error)) return false;
+    throw error;
+  }
+}
+
+type InitializationLease = { pid: number; token: string; createdAt: string };
+
+async function readInitializationLease(file: string): Promise<InitializationLease | undefined> {
+  let content: string;
+  try {
+    content = await readFile(file, "utf8");
+  } catch (error) {
+    if (isMissingPath(error)) return undefined;
+    throw error;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    throw new Error(`Factory initialization lease is invalid: ${file}`);
+  }
+  if (
+    !parsed
+    || typeof parsed !== "object"
+    || Array.isArray(parsed)
+    || !Number.isSafeInteger((parsed as Record<string, unknown>).pid)
+    || Number((parsed as Record<string, unknown>).pid) <= 0
+    || typeof (parsed as Record<string, unknown>).token !== "string"
+    || typeof (parsed as Record<string, unknown>).createdAt !== "string"
+  ) {
+    throw new Error(`Factory initialization lease is invalid: ${file}`);
+  }
+  return parsed as InitializationLease;
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return !!error && typeof error === "object" && "code" in error && error.code === "EPERM";
+  }
 }
 
 function safeRelative(value: string): string {

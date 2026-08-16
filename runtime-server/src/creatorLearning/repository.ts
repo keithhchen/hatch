@@ -195,6 +195,7 @@ export class InMemoryCreatorFactoryRepository implements CreatorFactoryRepositor
         brief: validateProductText(input.promise, "product.promise"),
         briefSpec: normalizeBriefSpec(input.briefSpec),
         status: "active",
+        ...(input.runId ? { runId: requireNonEmpty(input.runId, "product.runId") } : {}),
         createdAt: now,
         updatedAt: now
       };
@@ -713,11 +714,12 @@ export class PostgresCreatorFactoryRepository implements CreatorFactoryRepositor
         return productFromRow(replay.rows[0]);
       }
     }
+    const runId = input.runId?.trim() || null;
     const result = await this.pool.query<ProductRow>(`
-      INSERT INTO hatch_creator_products (id, creator_id, name, promise, brief_spec, idempotency_key, input_digest)
-      VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
+      INSERT INTO hatch_creator_products (id, creator_id, name, promise, brief_spec, run_id, idempotency_key, input_digest)
+      VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8)
       RETURNING *
-    `, [id, creatorId, name, promise, JSON.stringify(briefSpec), idempotencyKey, inputDigest]);
+    `, [id, creatorId, name, promise, JSON.stringify(briefSpec), runId, idempotencyKey, inputDigest]);
     return productFromRow(requireRow(result.rows[0], "Product insert returned no row"));
   }
 

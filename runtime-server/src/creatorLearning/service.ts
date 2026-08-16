@@ -283,21 +283,34 @@ export class CreatorFactoryService {
     const repository = this.productRepository();
     const name = validateProductText(input.name, "product.name", 240);
     const promise = validateProductText(input.promise ?? input.brief ?? "", "product.promise");
+    // Product.id is the sole stable identity. Its graph Run is created at the
+    // same boundary so Product Files/Snapshots/Revisions can all append to a
+    // valid Product-owned lineage, including an idempotent retry after a
+    // process died between the repository insert and graph event.
+    const productId = randomUUID();
     const product = await repository.createProduct({
-      id: randomUUID(),
+      id: productId,
       creatorId: requireText(creatorId, "creatorId"),
       name,
       promise,
       briefSpec: draftBriefSpecForProduct(name, promise),
+      runId: productId,
       idempotencyKey: input.idempotencyKey
     });
     if (this.graphStore) {
       await this.graphStore.initialize();
+      const distillationRunId = product.runId ?? product.id;
+      await this.graphStore.ensureRun({
+        id: distillationRunId,
+        creatorId: product.creatorId,
+        productId: product.id,
+        createdAt: product.createdAt
+      });
       await this.graphStore.appendEvent({
         id: `evt_${randomUUID().replaceAll("-", "")}`,
         eventKey: `${product.id}:created`,
         productId: product.id,
-        runId: product.runId ?? product.id,
+        runId: distillationRunId,
         type: "product_created",
         node: "intake",
         actor: "creator",
@@ -426,8 +439,8 @@ export class CreatorFactoryService {
     // same idempotency key look like a different payload on replay.
     const existingProductRun = existingRun?.input.productId === normalized.productId ? existingRun : undefined;
     const distillationRunId = existingProductRun?.input.distillationRunId
-      ?? normalized.runId
       ?? product?.runId
+      ?? normalized.runId
       ?? `distill_${randomUUID().replaceAll("-", "")}`;
     const revisionContext = product && !existingProductRun && this.graphStore
       ? await this.resolveProductRevisionContext(product)
