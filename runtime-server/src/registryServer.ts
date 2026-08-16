@@ -26,7 +26,7 @@ import {
 import { RegistryStoreTs } from "./registryStore.js";
 import { RegistryDeploymentConflictError } from "./registryStore.js";
 import { MAX_AGENT_CORPUS_BUNDLE_BYTES } from "./registryCorpus.js";
-import { BriefValidationError } from "./brief.js";
+import { BriefValidationError, normalizeBriefSpec, type BriefSpec } from "./brief.js";
 import { handleCreatorFactoryHttp } from "./creatorLearning/httpApi.js";
 import { isUuidV4 } from "./identity.js";
 import {
@@ -331,13 +331,18 @@ async function route(
     }
     if (candidate.agentId !== productId) throw new Error("product_id does not match the Factory candidate");
     const product = await productForCreator(context, creatorId, productId);
-    if (!product) throw new Error("product_not_found");
+    const briefSpec = product?.brief_spec ? normalizeBriefSpec(product.brief_spec) : undefined;
+    if (!briefSpec) {
+      const error = new Error("brief_spec_required");
+      (error as Error & { status?: number }).status = 422;
+      throw error;
+    }
     const staged = await context.store.stageAgentCorpusDirectory(
       creatorId,
       candidate.agentId,
       candidate.corpusRoot,
       candidate.corpusDigest,
-      undefined
+      briefSpec
     );
     sendJson(response, 201, { ...staged, factory_run_id: runId, operation_id: operationId, current: false });
     return;
@@ -358,12 +363,19 @@ async function route(
     try {
       const productId = typeof body.product_id === "string" ? body.product_id.trim() : agentId;
       const product = await productForCreator(context, creatorId, productId);
-      if (!product) throw new Error("product_not_found");
+      const briefSpec = body.brief_spec && typeof body.brief_spec === "object"
+        ? normalizeBriefSpec(body.brief_spec as BriefSpec)
+        : product?.brief_spec;
+      if (!briefSpec) {
+        const error = new Error("brief_spec_required");
+        (error as Error & { status?: number }).status = 422;
+        throw error;
+      }
       const activated = await context.store.activateAgentCorpusRelease(
         creatorId,
         agentId,
         corpusDigest,
-        { operationId, expectedCurrentDigest }
+        { operationId, expectedCurrentDigest, briefSpec }
       );
       const release = typeof body.factory_run_id === "string" && typeof body.product_id === "string"
         ? await context.factoryService.recordRelease(creatorId, body.factory_run_id, body.product_id)
@@ -514,6 +526,28 @@ async function route(
         ...(product.updatedAt ? { updated_at: product.updatedAt } : {})
       }
     });
+    return;
+  }
+
+  const productBriefSpecMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/brief-spec$/);
+  if (productBriefSpecMatch && request.method === "PUT") {
+    const account = await authenticate(request, response, context, "creator");
+    if (account === SESSION_QUERY_REJECTED) return;
+    if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
+    const productId = decodeURIComponent(productBriefSpecMatch[1]!);
+    const product = await productForCreator(context, account.id, productId);
+    if (!product?.repositoryId) {
+      sendJson(response, 409, { error: { code: "product_not_editable", message: "Published Products are changed by creating a new Version." } });
+      return;
+    }
+    const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
+    const updated = await context.factoryService.saveProductBriefSpec(
+      account.id,
+      product.repositoryId,
+      normalizeBriefSpec(body.brief_spec as BriefSpec),
+      typeof body.expected_updated_at === "string" ? body.expected_updated_at : undefined
+    );
+    sendJson(response, 200, publicCreatorProduct(updated));
     return;
   }
 
@@ -824,6 +858,11 @@ async function route(
     const agentId = url.searchParams.get("product_id") ?? "";
     const product = await productForCreator(context, account.id, agentId);
     if (!product) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
+    if (!product.brief_spec) {
+      const error = new Error("brief_spec_required");
+      (error as Error & { status?: number }).status = 422;
+      throw error;
+    }
     const lease = beginPublishWork(response, context, `creator:${account.id}`);
     if (!lease) return;
     try {
