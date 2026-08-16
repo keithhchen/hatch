@@ -4,10 +4,52 @@ import { mkdtemp } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { createRegistryServerFromEnvironment } from "./registryServer.js";
+import { createRegistryServerFromEnvironment, mergeCreatorProductListings } from "./registryServer.js";
 
 const CREATOR_ID = "11111111-1111-4111-8111-111111111111";
 const PRODUCT_ID = "22222222-2222-4222-8222-222222222222";
+
+test("Creator product listing keeps authoring fields when a published corpus has the same Product id", () => {
+  const products = mergeCreatorProductListings(
+    [{
+      product_id: PRODUCT_ID,
+      agent_id: PRODUCT_ID,
+      product_name: "Published name",
+      product_promise: "Published promise",
+      product_description: "Published description",
+      status: "published",
+      corpus_digest: "sha256:published",
+      published_at: "2026-08-16T00:00:00.000Z",
+      brief_spec: { audience: "published" }
+    }],
+    [{
+      id: PRODUCT_ID,
+      creatorId: CREATOR_ID,
+      name: "Current name",
+      promise: "Current promise",
+      brief: "Current promise",
+      briefSpec: { contract_version: "1", fields: [{ id: "goal", label: "Goal", required: true }] },
+      status: "active",
+      createdAt: "2026-08-15T00:00:00.000Z",
+      updatedAt: "2026-08-16T01:00:00.000Z"
+    }],
+    CREATOR_ID
+  );
+  assert.equal(products.length, 1);
+  assert.deepEqual(products[0], {
+    product_id: PRODUCT_ID,
+    creator_id: CREATOR_ID,
+    name: "Current name",
+    promise: "Current promise",
+    description: "Current promise",
+    status: "published",
+    corpus_digest: "sha256:published",
+    published_at: "2026-08-16T00:00:00.000Z",
+    created_at: "2026-08-15T00:00:00.000Z",
+    updated_at: "2026-08-16T01:00:00.000Z",
+    brief_spec: { contract_version: "1", fields: [{ id: "goal", label: "Goal", required: true }] }
+  });
+});
 
 test("TypeScript Registry exposes auth and Corpus catalog endpoints", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-ts-registry-server-"));

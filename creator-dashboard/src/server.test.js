@@ -77,6 +77,54 @@ test("Dashboard readiness fails closed when Registry is unavailable", async (con
   assert.equal(live.status, 200);
 });
 
+test("Creator browser session proxies Product BriefSpec writes to Registry", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-brief-spec-"));
+  const briefCalls = [];
+  const registry = registryFixture({ role: "creator", briefCalls });
+  await listen(registry);
+  context.after(() => registry.close());
+  const dashboard = await createDashboardApp({
+    ledgerPath: path.join(directory, "ledger.jsonl"),
+    registryUrl: serverUrl(registry)
+  });
+  const api = createServer(dashboard.handler);
+  await listen(api);
+  context.after(() => api.close());
+  const loginResponse = await fetch(`${serverUrl(api)}/v1/auth/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "creator@example.test", password: "test-only" })
+  });
+  assert.equal(loginResponse.status, 200);
+  const setCookies = loginResponse.headers.getSetCookie();
+  const cookie = setCookies.map((value) => value.split(";", 1)[0]).join("; ");
+  const csrfCookie = setCookies.find((value) => value.startsWith("hatch_web_csrf="));
+  assert.ok(csrfCookie);
+  const csrf = decodeURIComponent(csrfCookie.split(";", 1)[0].slice("hatch_web_csrf=".length));
+  const briefSpec = {
+    contract_version: "1",
+    fields: [{ id: "goal", label: "What should this Product accomplish?", required: true }]
+  };
+
+  const response = await fetch(`${serverUrl(api)}/v1/creator/products/${catalogAgent.product_id}/brief-spec`, {
+    method: "PUT",
+    headers: {
+      cookie,
+      "x-csrf-token": csrf,
+      "content-type": "application/json",
+      "idempotency-key": "brief-spec-v1"
+    },
+    body: JSON.stringify({ brief_spec: briefSpec, expected_updated_at: "2026-08-16T00:00:00.000Z" })
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).brief_spec, briefSpec);
+  assert.deepEqual(briefCalls, [{
+    body: { brief_spec: briefSpec, expected_updated_at: "2026-08-16T00:00:00.000Z" },
+    idempotencyKey: "brief-spec-v1"
+  }]);
+});
+
 test("browser OAuth PKCE keeps state and authorizes Product Files without Version scope", async (context) => {
   const account = {
     id: catalogAgent.creator_id,
@@ -1059,6 +1107,7 @@ function registryFixture({
   creatorAgents,
   catalogAgents,
   factoryRun = null,
+  briefCalls = [],
   publishCalls = [],
   deploymentCalls = [],
   activationFailures = 0
@@ -1092,6 +1141,19 @@ function registryFixture({
     }
     if (requestUrl.pathname === "/v1/creator/products") {
       response.end(JSON.stringify(publishedCreatorAgents));
+      return;
+    }
+    if (requestUrl.pathname === `/v1/creator/products/${agent.product_id}/brief-spec` && request.method === "PUT") {
+      const body = content ? JSON.parse(content) : {};
+      briefCalls.push({ body, idempotencyKey: request.headers["idempotency-key"] });
+      response.end(JSON.stringify({
+        product_id: agent.product_id,
+        name: agent.product_name,
+        promise: agent.product_promise,
+        status: "draft",
+        brief_spec: body.brief_spec,
+        updated_at: "2026-08-16T00:00:01.000Z"
+      }));
       return;
     }
     if (requestUrl.pathname === "/v1/creator/factory-runs" && request.method === "GET") {

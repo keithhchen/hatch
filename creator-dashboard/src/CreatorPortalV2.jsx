@@ -65,12 +65,12 @@ export function CreatorPortalV2({
   }, [navigate]);
 
   const mobileNavigationItems = [
-    { value: "space-explore", label: "Explore", onSelect: () => void go("/explore") },
-    { value: "space-library", label: "Library", onSelect: () => void go("/library") },
-    { value: "space-studio", label: "Studio", active: route.kind === "home", onSelect: () => void go(ROOT) },
-    { value: "products", label: "Products", active: route.section === "products" && route.kind !== "files", onSelect: () => void go(`${ROOT}/products`) },
-    { value: "space-orders", label: "Orders", active: route.section === "orders", onSelect: () => void go("/studio/orders") },
-    { value: "space-account", label: "Account", onSelect: () => void go("/account") }
+    { value: "space-explore", label: t("explore"), onSelect: () => void go("/explore") },
+    { value: "space-library", label: t("library"), onSelect: () => void go("/library") },
+    { value: "space-studio", label: t("studio"), active: route.kind === "home", onSelect: () => void go(ROOT) },
+    { value: "products", label: t("products"), active: route.section === "products" && route.kind !== "files", onSelect: () => void go(`${ROOT}/products`) },
+    { value: "space-orders", label: t("orders"), active: route.section === "orders", onSelect: () => void go("/studio/orders") },
+    { value: "space-account", label: t("account"), onSelect: () => void go("/account") }
   ];
 
   useEffect(() => {
@@ -91,25 +91,25 @@ export function CreatorPortalV2({
   return (
     <div className="cpv2">
       <aside className="cpv2-sidebar">
-        <HatchBrand as="button" className="cpv2-brand" type="button" onClick={() => go(ROOT)} aria-label="Hatch creator home" />
+        <HatchBrand as="button" className="cpv2-brand" type="button" onClick={() => go(ROOT)} aria-label={t("hatchCreatorHome")} />
         <div className="cpv2-mobile-nav">
           <DropdownMenu
-            label="Creator navigation"
-            trigger={<IconButton label="Open navigation" variant="secondary" size="small"><Menu aria-hidden="true" /></IconButton>}
+            label={t("creatorNavigation")}
+            trigger={<IconButton label={t("openNavigation")} variant="secondary" size="small"><Menu aria-hidden="true" /></IconButton>}
             items={mobileNavigationItems}
           />
         </div>
-        <nav className="cpv2-global-nav" aria-label="Hatch navigation">
-          <SpaceLink href="/explore" navigate={go}>Explore</SpaceLink>
-          <SpaceLink href="/library" navigate={go}>Library</SpaceLink>
-          <SpaceLink href="/studio" navigate={go} active={route.kind === "home"}>Studio</SpaceLink>
-          <NavButton active={route.section === "products" && route.kind !== "files"} onClick={() => go(`${ROOT}/products`)}>Products</NavButton>
-          <SpaceLink href="/studio/orders" navigate={go} active={route.section === "orders"}>Orders</SpaceLink>
-          <SpaceLink href="/account" navigate={go}>Account</SpaceLink>
+        <nav className="cpv2-global-nav" aria-label={t("hatchNavigation")}>
+          <SpaceLink href="/explore" navigate={go}>{t("explore")}</SpaceLink>
+          <SpaceLink href="/library" navigate={go}>{t("library")}</SpaceLink>
+          <SpaceLink href="/studio" navigate={go} active={route.kind === "home"}>{t("studio")}</SpaceLink>
+          <NavButton active={route.section === "products" && route.kind !== "files"} onClick={() => go(`${ROOT}/products`)}>{t("products")}</NavButton>
+          <SpaceLink href="/studio/orders" navigate={go} active={route.section === "orders"}>{t("orders")}</SpaceLink>
+          <SpaceLink href="/account" navigate={go}>{t("account")}</SpaceLink>
         </nav>
         <div className="cpv2-account">
           <span className="cpv2-avatar" aria-hidden="true">{profile?.initials || initials(profile?.display_name)}</span>
-          <span><strong>{profile?.display_name || "Creator"}</strong><small>{profile?.handle || "Creator account"}</small></span>
+          <span><strong>{profile?.display_name || t("creator")}</strong><small>{profile?.handle || t("creatorAccount")}</small></span>
           <div className="cpv2-language-picker">
             <Select
               className="cpv2-language-select"
@@ -124,11 +124,11 @@ export function CreatorPortalV2({
               surface="raised"
             />
           </div>
-          {onLogout ? <Button type="button" variant="ghost" size="small" onClick={onLogout}>Sign out</Button> : null}
+          {onLogout ? <Button type="button" variant="ghost" size="small" onClick={onLogout}>{t("signOut")}</Button> : null}
         </div>
       </aside>
       <main id="creator-main" className="cpv2-main" ref={mainRef}>
-        <CreatorRoute route={route} token={token} request={request} navigate={go} profile={profile} locale={locale} registerNavigationGuard={registerNavigationGuard} />
+        <CreatorRoute route={route} token={token} request={request} navigate={go} profile={profile} locale={locale} t={t} registerNavigationGuard={registerNavigationGuard} />
       </main>
     </div>
   );
@@ -147,14 +147,14 @@ function NavButton({ active, children, onClick }) {
   return <NavigationItem active={active} aria-current={active ? "page" : undefined} onClick={onClick}>{children}</NavigationItem>;
 }
 
-function CreatorRoute({ route, token, request, navigate, profile, locale, registerNavigationGuard }) {
+function CreatorRoute({ route, token, request, navigate, profile, locale, t, registerNavigationGuard }) {
   if (typeof request !== "function") {
-    return <RouteProblem title="Creator portal is unavailable" body="A request function is required to load this workspace." />;
+    return <RouteProblem title={t("creatorPortalUnavailable")} body={t("creatorPortalUnavailableBody")} />;
   }
-  if (route.kind === "home") return <CreatorHome token={token} request={request} navigate={navigate} profile={profile} />;
-  if (route.kind === "products") return <ProductsPage token={token} request={request} navigate={navigate} />;
+  if (route.kind === "home") return <CreatorHome token={token} request={request} navigate={navigate} profile={profile} t={t} />;
+  if (route.kind === "products") return <ProductsPage token={token} request={request} navigate={navigate} t={t} />;
   if (route.kind === "product-create") return <CreatorProductFiles token={token} navigate={navigate} locale={locale} />;
-  if (route.kind === "factory") return <FactoryPage token={token} request={request} productId={route.productId} runId={route.runId} navigate={navigate} locale={locale} profile={profile} />;
+  if (route.kind === "factory") return <FactoryPage token={token} request={request} productId={route.productId} runId={route.runId} navigate={navigate} locale={locale} profile={profile} t={t} />;
   if (route.kind === "product" && ["files", "about-you", "review", "brief", "complete"].includes(route.tab)) return <CreatorProductWorkspace token={token} request={request} navigate={navigate} productId={route.productId} tab={route.tab} locale={locale} profile={profile} />;
   if (route.kind === "product") return <ProductPage token={token} request={request} navigate={navigate} productId={route.productId} tab={route.tab} />;
   if (route.kind === "candidate") return <CreatorProductWorkspace token={token} request={request} navigate={navigate} productId={route.productId} runId={route.candidateId} tab="review" locale={locale} profile={profile} />;
@@ -162,22 +162,22 @@ function CreatorRoute({ route, token, request, navigate, profile, locale, regist
   if (route.kind === "release") return <ReleasePage token={token} request={request} navigate={navigate} productId={route.productId} releaseId={route.releaseId} />;
   if (route.kind === "orders") return <OrdersPage token={token} request={request} navigate={navigate} />;
   if (route.kind === "order") return <OrderPage token={token} request={request} navigate={navigate} orderId={route.orderId} />;
-  return <RouteProblem title="Page not found" body="This Creator page does not exist or has moved." action="Back to products" onAction={() => navigate(`${ROOT}/products`)} />;
+  return <RouteProblem title={t("pageNotFound")} body={t("pageNotFoundBody")} action={t("backToProducts")} onAction={() => navigate(`${ROOT}/products`)} />;
 }
 
-function CreatorHome({ token, request, navigate, profile }) {
+function CreatorHome({ token, request, navigate, profile, t }) {
   const resource = useRemote(request, "/v1/creator/overview", token);
   return (
-    <PageBoundary resource={resource} title="We couldn't open your workspace">
+    <PageBoundary resource={resource} title={t("workspaceLoadError")} retryLabel={t("retry")}>
       {(payload) => {
         const overview = unwrap(payload, "overview");
         const products = arrayOf(overview?.products);
         const orders = arrayOf(overview?.recent_orders ?? overview?.orders);
-        const next = nextCreatorAction(products);
+        const next = nextCreatorAction(products, t);
         const metrics = overview?.metrics ?? {};
         return <>
-          <PageHeader eyebrow="Creator home" title={`${firstName(profile?.display_name)}, here’s the next useful step.`} body="Move one approved method from Factory to a shareable product, then follow who has access." />
-          <section className="cpv2-grid cpv2-home-grid" aria-label="Creator overview">
+          <PageHeader eyebrow={t("creatorHome")} title={t("homeTitle", firstName(profile?.display_name) || t("creator"))} body={t("homeBody")} />
+          <section className="cpv2-grid cpv2-home-grid" aria-label={t("creatorOverview")}>
             <article className="cpv2-card cpv2-next-card">
               <StatusChip status={next.tone}>{next.label}</StatusChip>
               <h2>{next.title}</h2>
@@ -185,69 +185,45 @@ function CreatorHome({ token, request, navigate, profile }) {
               <Button type="button" trailing={<span aria-hidden="true">→</span>} onClick={() => navigate(next.href)}>{next.action}</Button>
             </article>
             <article className="cpv2-card cpv2-balance-card">
-              <span className="cpv2-kicker">Permanent access</span>
+              <span className="cpv2-kicker">{t("permanentAccess")}</span>
               <strong>{metrics.order_count ?? orders.length}</strong>
-              <p>People who added one of your published products to their Hatch account.</p>
-              <dl><div><dt>Products</dt><dd>{products.length}</dd></div><div><dt>Orders</dt><dd>{metrics.order_count ?? orders.length}</dd></div></dl>
-              <Button className="cpv2-inverse" variant="secondary" type="button" onClick={() => navigate(`${ROOT}/orders`)}>View access records</Button>
+              <p>{t("peopleWithAccess")}</p>
+              <dl><div><dt>{t("products")}</dt><dd>{products.length}</dd></div><div><dt>{t("orders")}</dt><dd>{metrics.order_count ?? orders.length}</dd></div></dl>
+              <Button className="cpv2-inverse" variant="secondary" type="button" onClick={() => navigate(`${ROOT}/orders`)}>{t("viewAccessRecords")}</Button>
             </article>
           </section>
-          <SectionHeading eyebrow="Recent activity" title="Orders and access" action="View all orders" onAction={() => navigate(`${ROOT}/orders`)} />
-          {orders.length ? <OrderList orders={orders} onOpen={(order) => navigate(`${ROOT}/orders/${encodeURIComponent(idOf(order, "order"))}`)} /> : <EmptyState title="No access records yet" body="Records appear here after someone adds a published product to their account." />}
+          <SectionHeading eyebrow={t("recentActivity")} title={t("ordersAndAccess")} action={t("viewAllOrders")} onAction={() => navigate(`${ROOT}/orders`)} />
+          {orders.length ? <OrderList orders={orders} onOpen={(order) => navigate(`${ROOT}/orders/${encodeURIComponent(idOf(order, "order"))}`)} t={t} /> : <EmptyState title={t("noAccessRecords")} body={t("noAccessRecordsBody")} />}
         </>;
       }}
     </PageBoundary>
   );
 }
 
-function ProductsPage({ token, request, navigate }) {
+function ProductsPage({ token, request, navigate, t }) {
   const resource = useRemote(request, "/v1/creator/products", token);
-  const runsResource = useRemote(request, "/v1/creator/factory-runs", token);
-  const pendingRuns = useMemo(() => runsResource.state === "ready"
-    ? arrayOf(unwrap(runsResource.data, "runs")).filter((run) => ["queued", "running", "waiting_for_creator", "awaiting_answers", "needs_attention"].includes(run.status) || run.stage === "review_required")
-    : [], [runsResource.state, runsResource.data]);
-  useEffect(() => {
-    if (!pendingRuns.some((run) => ["queued", "running"].includes(run.status))) return undefined;
-    const timer = setInterval(() => {
-      runsResource.retry();
-      resource.retry();
-    }, 5000);
-    return () => clearInterval(timer);
-  }, [pendingRuns, runsResource.retry, resource.retry]);
   return (
-    <PageBoundary resource={resource} title="We couldn't load your products">
+    <PageBoundary resource={resource} title={t("productsLoadError")} retryLabel={t("retry")}>
       {(payload) => {
         const products = arrayOf(unwrap(payload, "products"));
         return <>
-          <PageHeader eyebrow="Products" title="From a method to a product people can use." body="Each Product keeps its files, versions, review, and release together." action="Create product" onAction={() => navigate(`${ROOT}/products/new`)} />
-          {pendingRuns.length ? <PendingFactoryRuns runs={pendingRuns} navigate={navigate} /> : null}
-          {products.length ? <section className="cpv2-product-grid" aria-label="Products">
-            {products.map((product) => <ProductCard key={idOf(product, "product")} product={product} onOpen={() => navigate(`${ROOT}/products/${encodeURIComponent(idOf(product, "product"))}`)} />)}
-          </section> : pendingRuns.length ? null : <EmptyState title="Create your first product" body="Start with one focused result, add the material behind it, and generate your first version." action="Create product" onAction={() => navigate(`${ROOT}/products/new`)} />}
+          <PageHeader eyebrow={t("products")} title={t("productsPageTitle")} body={t("productsPageBody")} action={t("createProduct")} onAction={() => navigate(`${ROOT}/products/new`)} />
+          {products.length ? <section className="cpv2-product-grid" aria-label={t("products")}>
+            {products.map((product) => <ProductCard key={idOf(product, "product")} product={product} t={t} onOpen={() => navigate(`${ROOT}/products/${encodeURIComponent(idOf(product, "product"))}`)} />)}
+          </section> : <EmptyState title={t("createFirstProduct")} body={t("createFirstProductBody")} action={t("createProduct")} onAction={() => navigate(`${ROOT}/products/new`)} />}
         </>;
       }}
     </PageBoundary>
   );
 }
 
-function PendingFactoryRuns({ runs, navigate }) {
-  return <section className="cpv2-card cpv2-panel" aria-label="Factory runs in progress">
-    <SectionHeading eyebrow="Factory in progress" title="Your draft is safely on the server." />
-    <div className="cpv2-product-grid">{runs.map((run) => <article className="cpv2-card cpv2-product-card" key={run.id}>
-      <div className="cpv2-card-top"><StatusChip status={run.status}>{productStatus(run.status)}</StatusChip><span>Candidate pending</span></div>
-      <h2>{run.product_name ?? run.product?.name ?? "Untitled product version"}</h2>
-      <p>{run.stage === "review_required" ? "Review the candidate and confirm the correction loop before a new revision is built." : ["waiting_for_creator", "awaiting_answers"].includes(run.status) ? "Answer the pending Factory questions to continue." : run.status === "needs_attention" ? "Review the failed checkpoint and retry when it is safe." : "Distillation is running. Candidate review will appear as soon as the verified Corpus is ready."}</p>
-      <div className="cpv2-card-foot"><small>{run.updated_at ? `Updated ${dateTime(run.updated_at)}` : "Saved on server"}</small><Button variant="secondary" type="button" onClick={() => navigate(`${ROOT}/products/${encodeURIComponent(run.product_id ?? run.product?.id ?? "")}/${run.stage === "review_required" || run.status === "ready" ? "review" : "about-you"}`)}>Continue</Button></div>
-    </article>)}</div>
-  </section>;
-}
-
-function ProductCard({ product, onOpen }) {
+function ProductCard({ product, onOpen, t }) {
+  const published = product.status === "published" || product.status === "live";
   return <article className="cpv2-card cpv2-product-card">
-    <div className="cpv2-card-top"><StatusChip status={product.status}>{productStatus(product.status)}</StatusChip><span>{product.status === "published" ? "Permanent access" : "Not published"}</span></div>
-    <h2>{product.name ?? product.product_name ?? "Untitled product"}</h2>
-    <p>{product.promise ?? product.description ?? "Add a clear Buyer-facing promise."}</p>
-    <div className="cpv2-card-foot"><small>{shortDigest(product.corpus_digest ?? product.active_release?.corpus_digest)}</small><Button variant="secondary" type="button" onClick={onOpen}>Open product</Button></div>
+    <div className="cpv2-card-top"><StatusChip status={product.status}>{localizedProductStatus(product.status, t)}</StatusChip><span>{published ? t("permanentAccess") : t("notPublished")}</span></div>
+    <h2>{product.name ?? product.product_name ?? t("untitledProduct")}</h2>
+    <p>{product.promise ?? product.description ?? t("addProductPromise")}</p>
+    <div className="cpv2-card-foot"><small>{shortDigest(product.corpus_digest ?? product.active_release?.corpus_digest)}</small><Button variant="secondary" type="button" onClick={onOpen}>{t("openProduct")}</Button></div>
   </article>;
 }
 
@@ -333,11 +309,11 @@ function DataControlsPanel({ product }) {
   return <div className="cpv2-detail-grid"><article className="cpv2-card cpv2-panel"><SectionHeading eyebrow="Product boundaries" title="What this product will not do" />{boundaries.length ? <ul className="cpv2-bullets">{boundaries.map((item, index) => <li key={index}>{typeof item === "string" ? item : item.label ?? item.description}</li>)}</ul> : <EmptyInline>Add explicit boundaries before publishing.</EmptyInline>}</article><article className="cpv2-card cpv2-panel"><SectionHeading eyebrow="Privacy" title="Buyer work stays private" /><p>Access records never include Workspace paths, conversations, tool arguments, file content, or artifacts.</p><dl><Fact label="Corpus digest" value={shortDigest(product.corpus_digest ?? product.active_release?.corpus_digest)} /><Fact label="Version policy" value={product.version_policy ?? "Pinned to purchased release"} /></dl></article></div>;
 }
 
-function FactoryPage({ token, request, productId, runId, navigate, locale, profile }) {
+function FactoryPage({ token, request, productId, runId, navigate, locale, profile, t }) {
   // Factory is a Product view, never a standalone area. A legacy bookmark
   // to /studio/factory lands on the Product index instead of exposing a second
   // workflow or another source authority.
-  if (productId === undefined) return <ProductsPage token={token} request={request} navigate={navigate} />;
+  if (productId === undefined) return <ProductsPage token={token} request={request} navigate={navigate} t={t} />;
   return <CreatorProductWorkspace token={token} request={request} productId={productId} runId={runId} tab={runId ? "review" : "about-you"} navigate={navigate} locale={locale} profile={profile} />;
 }
 
@@ -546,8 +522,8 @@ function PaginatedOrders({ initialPayload, query, token, request, navigate }) {
   return <><div className="cpv2-pagination-status" role="status">Loaded {page.orders.length} order{page.orders.length === 1 ? "" : "s"}{page.cursor ? "; more are available" : "; end of results"}.</div><OrderList orders={page.orders} onOpen={(order) => navigate(`${ROOT}/orders/${encodeURIComponent(order.order_number ?? order.order_reference ?? idOf(order, "order"))}`)} detailed />{error ? <InlineError>{error}</InlineError> : null}{page.cursor ? <Button className="cpv2-load-more" variant="secondary" type="button" loading={loadingMore} onClick={loadMore}>Load next page</Button> : null}</>;
 }
 
-function OrderList({ orders, onOpen, detailed = false }) {
-  return <div className="cpv2-order-list" role="list">{orders.map((order) => { const reference = order.order_number ?? order.order_reference ?? idOf(order, "order"); return <article className="cpv2-order" role="listitem" key={idOf(order, "order")}><div><span className="cpv2-kicker">{reference}</span><h2>{order.product_name ?? order.product?.name ?? "Product access"}</h2><p>{order.buyer_display_name ?? "Buyer"} · {dateTime(order.created_at ?? order.placed_at)}</p></div><dl><Fact label="Access" value={humanStatus(order.entitlement_status ?? order.status ?? order.order_status)} />{detailed ? <Fact label="Access status" value={humanStatus(order.access_status ?? order.entitlement_status ?? order.status ?? "active")} /> : null}</dl><Button variant="secondary" type="button" onClick={() => onOpen(order)} aria-label={`View access record ${reference}`}>View record</Button></article>; })}</div>;
+function OrderList({ orders, onOpen, detailed = false, t }) {
+  return <div className="cpv2-order-list" role="list">{orders.map((order) => { const reference = order.order_number ?? order.order_reference ?? idOf(order, "order"); return <article className="cpv2-order" role="listitem" key={idOf(order, "order")}><div><span className="cpv2-kicker">{reference}</span><h2>{order.product_name ?? order.product?.name ?? (t ? t("productAccess") : "Product access")}</h2><p>{order.buyer_display_name ?? (t ? t("buyer") : "Buyer")} · {dateTime(order.created_at ?? order.placed_at)}</p></div><dl><Fact label={t ? t("access") : "Access"} value={humanStatus(order.entitlement_status ?? order.status ?? order.order_status)} />{detailed ? <Fact label={t ? t("accessStatus") : "Access status"} value={humanStatus(order.access_status ?? order.entitlement_status ?? order.status ?? "active")} /> : null}</dl><Button variant="secondary" type="button" onClick={() => onOpen(order)} aria-label={t ? t("viewAccessRecord", reference) : `View access record ${reference}`}>{t ? t("viewRecord") : "View record"}</Button></article>; })}</div>;
 }
 
 function OrderPage({ token, request, navigate, orderId }) {
@@ -612,9 +588,9 @@ function OrderPage({ token, request, navigate, orderId }) {
   }}</PageBoundary>;
 }
 
-function PageBoundary({ resource, title, children }) {
+function PageBoundary({ resource, title, retryLabel = "Retry", children }) {
   if (resource.state === "loading") return <LoadingState />;
-  if (resource.state === "error") return <RouteProblem title={title} body={friendlyError(resource.error)} action="Retry" onAction={resource.retry} />;
+  if (resource.state === "error") return <RouteProblem title={title} body={friendlyError(resource.error)} action={retryLabel} onAction={resource.retry} />;
   return <>{children(resource.data)}</>;
 }
 
@@ -666,15 +642,19 @@ function defaultNavigate(path) {
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
-function nextCreatorAction(products) {
-  if (!products.length) return { label: "Start here", tone: "draft", title: "Create one focused product", body: "Name the result, add your material, and generate the first version.", action: "Create product", href: `${ROOT}/products/new` };
+function nextCreatorAction(products, t) {
+  if (!products.length) return { label: t("startHere"), tone: "draft", title: t("createFocusedProduct"), body: t("createFocusedProductBody"), action: t("createProduct"), href: `${ROOT}/products/new` };
   for (const product of products) {
-    const candidate = candidateOf(product);
-    const next = productNextAction(product, candidate);
-    if (product.status !== "published" && product.status !== "live") return { label: productStatus(product.status), tone: product.status, title: product.name ?? product.product_name, body: product.promise ?? product.description ?? "Continue the publishing workflow.", action: next.action, href: next.href(idOf(product, "product"), candidate) };
+    if (product.status !== "published" && product.status !== "live") return { label: localizedProductStatus(product.status, t), tone: product.status, title: product.name ?? product.product_name ?? t("untitledProduct"), body: product.promise ?? product.description ?? t("continueProductWorkflow"), action: t("continueProduct"), href: `${ROOT}/products/${encodeURIComponent(idOf(product, "product"))}` };
   }
   const product = products[0];
-  return { label: "Live", tone: "published", title: product.name ?? product.product_name, body: "Your storefront is live. Share it or inspect the latest orders.", action: "View product", href: `${ROOT}/products/${encodeURIComponent(idOf(product, "product"))}` };
+  return { label: t("live"), tone: "published", title: product.name ?? product.product_name ?? t("untitledProduct"), body: t("storefrontLiveBody"), action: t("viewProduct"), href: `${ROOT}/products/${encodeURIComponent(idOf(product, "product"))}` };
+}
+
+function localizedProductStatus(status, t) {
+  const key = `productStatus_${String(status ?? "draft").toLowerCase()}`;
+  const translated = t(key);
+  return translated === key ? t("productStatus_draft") : translated;
 }
 
 function productNextAction(product, candidate) {

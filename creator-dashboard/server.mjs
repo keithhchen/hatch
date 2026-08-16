@@ -1292,12 +1292,12 @@ export async function createDashboardApp(options = {}) {
         return send(response, 404, { error: { code: "not_found", message: "Route not found." } });
       }
 
-      const productContractPath = url.pathname.match(/^\/v1\/creator\/products(?:\/[^/]+(?:\/(?:files|snapshots|runs|versions)(?:\/[^/]+)?)?)?$/);
+      const productContractPath = url.pathname.match(/^\/v1\/creator\/products(?:\/[^/]+(?:\/(?:files|snapshots|runs|versions)(?:\/[^/]+)?|\/brief-spec)?)?$/);
       const productContractWrite = productContractPath && (
         request.method === "POST" || request.method === "PATCH" || request.method === "PUT"
       ) && (
         url.pathname === "/v1/creator/products"
-        || /\/(files|snapshots|runs)$/.test(url.pathname)
+        || /\/(files|snapshots|runs|brief-spec)$/.test(url.pathname)
         || /^\/v1\/creator\/products\/[^/]+$/.test(url.pathname)
       );
       const productContractRead = productContractPath && request.method === "GET" && (
