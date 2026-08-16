@@ -235,6 +235,13 @@ export type PublishableFactoryCorpus = {
   corpusRoot: string;
 };
 
+/**
+ * The HTTP command path can claim a run immediately in the same process. The
+ * durable repository/worker remains the restart recovery boundary, not the
+ * user-visible trigger.
+ */
+export type CreatorFactoryImmediateStarter = (runId: string) => Promise<FactoryRunRecord | undefined>;
+
 export class CreatorFactoryService {
   private readonly sourceLibrary: CreatorSourceLibrary;
 
@@ -244,7 +251,8 @@ export class CreatorFactoryService {
     sourceLibrary?: CreatorSourceLibrary,
     private readonly objectStore?: ArtifactObjectStore,
     private readonly graphStore?: DistillationGraphStore,
-    private readonly productFileStore?: ProductFileStore
+    private readonly productFileStore?: ProductFileStore,
+    private readonly startRun?: CreatorFactoryImmediateStarter
   ) {
     this.sourceLibrary = sourceLibrary ?? new CreatorSourceLibrary(path.join(factoryRoot, "source-library"), objectStore, graphStore);
   }
@@ -445,14 +453,20 @@ export class CreatorFactoryService {
     const revisionContext = product && !existingProductRun && this.graphStore
       ? await this.resolveProductRevisionContext(product)
       : undefined;
+    // A replay must reconstruct the exact immutable input that was stored on
+    // the first request. In particular, an initial revision intentionally has
+    // no parent; falling back to the now-advanced Product pointer would make
+    // the same Idempotency-Key look like a different graph revision.
     const parentRevisionId = product
-      ? (existingProductRun?.input.parentRevisionId
-        ?? (revisionContext ? revisionContext.parentRevisionId : product.latestRevisionId))
+      ? (existingProductRun
+        ? existingProductRun.input.parentRevisionId
+        : (revisionContext ? revisionContext.parentRevisionId : product.latestRevisionId))
       : undefined;
     const revisionNumber = product
-      ? (existingProductRun?.input.revisionNumber
-        ?? revisionContext?.nextRevisionNumber
-        ?? (product.latestRevisionId ? await this.nextRevisionNumber(creator.id, normalized.productId!) : 1))
+      ? (existingProductRun
+        ? (existingProductRun.input.revisionNumber ?? 1)
+        : (revisionContext?.nextRevisionNumber
+          ?? (product.latestRevisionId ? await this.nextRevisionNumber(creator.id, normalized.productId!) : 1)))
       : 1;
     const productName = product?.name ?? normalized.productName;
     const productPromise = product?.promise ?? normalized.productPromise;
@@ -519,7 +533,10 @@ export class CreatorFactoryService {
       // latestRevisionId that can poison the next retry.
       await this.productRepository().setProductRevision(creator.id, product.id, { runId: distillationRunId, revisionId: runId });
     }
-    return { run: await this.project(result.run, false), created: result.created };
+    // A replay is also a useful recovery nudge when the original HTTP
+    // process died after persisting the row but before it could claim it.
+    const started = await this.startImmediately(result.run.id);
+    return { run: await this.project(started ?? result.run, false), created: result.created };
   }
 
   async list(creatorId: string): Promise<CreatorFactoryRunView[]> {
@@ -818,7 +835,8 @@ export class CreatorFactoryService {
       },
       ...(request.expectedVersion === undefined ? {} : { expectedVersion: request.expectedVersion })
     });
-    return this.project(updated, false);
+    const started = await this.startImmediately(runId);
+    return this.project(started ?? updated, false);
   }
 
   async saveAnswerDraft(
@@ -860,7 +878,8 @@ export class CreatorFactoryService {
       runId,
       ...(expectedVersion === undefined ? {} : { expectedVersion })
     });
-    return this.project(updated, false);
+    const started = await this.startImmediately(runId);
+    return this.project(started ?? updated, false);
   }
 
   async publishableCorpus(creatorId: string, runId: string): Promise<PublishableFactoryCorpus> {
@@ -954,6 +973,22 @@ export class CreatorFactoryService {
     const run = await this.repository.getForCreator(creatorId, runId);
     if (!run) throw new CreatorFactoryRepositoryError("run_not_found", `Factory run ${runId} was not found`);
     return run;
+  }
+
+  private async startImmediately(runId: string): Promise<FactoryRunRecord | undefined> {
+    if (!this.startRun) return undefined;
+    try {
+      return await this.startRun(runId);
+    } catch (error) {
+      // The durable queued row is intentionally retained as a recovery
+      // fallback if the in-process direct starter is temporarily unavailable.
+      // Do not turn a successfully-created command into a generic 500.
+      console.error("Creator Factory immediate start failed", {
+        runId,
+        error: error instanceof Error ? error.message : String(error)
+      });
+      return undefined;
+    }
   }
 
   private async requireActiveProduct(creatorId: string, productId: string): Promise<void> {

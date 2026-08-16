@@ -36,6 +36,10 @@ import {
   type CreatorFactoryRepository
 } from "./creatorLearning/repository.js";
 import { CreatorFactoryService } from "./creatorLearning/service.js";
+import { CreatorFactory } from "./creatorLearning/engine.js";
+import { PI_FACTORY_MODEL, runFactoryPromptWithPi } from "./creatorLearning/piGateway.js";
+import { createHatchCliCandidateExecutor } from "./creatorLearning/cliCandidateExecutor.js";
+import { CreatorFactoryWorker } from "./creatorLearning/worker.js";
 import type { CreatorProductRecord } from "./creatorLearning/products.js";
 import { objectStoreFromEnvironment } from "./creatorLearning/objectStore.js";
 import { ProductFileStore, ProductFilesError, type ProductFileView, type ProductSnapshotView } from "./creatorLearning/productFiles.js";
@@ -87,13 +91,35 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const graphPool = store.databasePool();
   const graphStore = graphPool ? new PostgresDistillationGraphStore(graphPool) : undefined;
   await graphStore?.initialize();
+  // User commands start the Factory directly in the registry process. The
+  // standalone worker remains a durable restart/recovery consumer, but a new
+  // Product revision no longer waits for its polling loop to notice a row.
+  const immediateFactoryWorker = new CreatorFactoryWorker(
+    factoryRepository,
+    new CreatorFactory(
+      factoryRoot,
+      runFactoryPromptWithPi,
+      createHatchCliCandidateExecutor({
+        timeoutMs: integerEnvironment(environment.HATCH_CREATOR_FACTORY_HATCH_TIMEOUT_MS, 15 * 60_000),
+        environment
+      }),
+      { model: PI_FACTORY_MODEL, objectStore, graphStore }
+    ),
+    {
+      workerId: `factory-http-${process.pid}-${randomUUID()}`,
+      leaseMs: integerEnvironment(environment.HATCH_CREATOR_FACTORY_LEASE_MS, 10 * 60_000),
+      heartbeatMs: integerEnvironment(environment.HATCH_CREATOR_FACTORY_HEARTBEAT_MS, 60_000)
+    }
+  );
+  const immediateFactoryStop = new AbortController();
   const factoryService = new CreatorFactoryService(
     factoryRepository,
     factoryRoot,
     undefined,
     objectStore,
     graphStore,
-    productFileStore
+    productFileStore,
+    (runId) => immediateFactoryWorker.startRun(runId, immediateFactoryStop.signal)
   );
   const publishToken = environment.HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN?.trim() || "";
   const runtimeServiceToken = environment.HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN?.trim() || "";
@@ -168,10 +194,18 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const host = environment.REGISTRY_HOST ?? "127.0.0.1";
   await new Promise<void>((resolve) => server.listen(port, host, resolve));
   return { server, close: async () => {
+    immediateFactoryStop.abort();
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await factoryRepository.close();
     await store.close();
   } };
+}
+
+function integerEnvironment(raw: string | undefined, fallback: number): number {
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1) throw new Error(`Expected a positive integer, received ${raw}`);
+  return value;
 }
 
 export function creatorFactoryRepositoryForRegistry(

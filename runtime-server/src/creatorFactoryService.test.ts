@@ -520,15 +520,25 @@ test("a Distillation Product keeps one Product identity across revisions", async
     mediaType: "text/markdown",
     bytes: Buffer.from("# Method\nChoose one supported answer.\n", "utf8")
   });
+  const sourceSnapshot = await service.createSourceSnapshot(creator.id, {
+    productId: product.id,
+    documentIds: [document.id]
+  });
   const request = createRequest({
+    runId: "factory_stable_product_replay",
     productId: product.id,
     productName: product.name,
     productPromise: product.promise,
     sources: undefined,
-    sourceDocumentIds: [document.id]
+    sourceDocumentIds: undefined,
+    sourceSnapshotId: sourceSnapshot.id
   });
   const first = await service.create(creator, request, "stable-product-product-1");
-  const second = await service.create(creator, request, "stable-product-product-2");
+  const replay = await service.create(creator, request, "stable-product-product-1");
+  assert.equal(replay.created, false);
+  assert.equal(replay.run.id, first.run.id);
+  assert.equal(replay.run.revisionId, first.run.revisionId);
+  const second = await service.create(creator, { ...request, runId: "factory_stable_product_revision_2" }, "stable-product-product-2");
   assert.equal(first.run.agentId, product.id);
   assert.equal(first.run.product?.id, product.id);
   assert.equal(second.run.agentId, product.id);

@@ -19,6 +19,40 @@ import type { CreatorFactoryRepository, FactoryRunRecord } from "./creatorLearni
 import type { FactoryPromptCall, FactoryStartInput } from "./creatorLearning/types.js";
 import { CreatorFactoryWorker } from "./creatorLearning/worker.js";
 
+test("direct start claims the requested run instead of waiting for the polling order", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-factory-worker-direct-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const repository = new InMemoryCreatorFactoryRepository();
+  const creatorId = "11111111-1111-4111-8111-111111111111";
+  const input = (runId: string): FactoryStartInput => ({
+    runId,
+    creator: { id: creatorId, name: "Direct Creator" },
+    productName: "Direct start",
+    productPromise: "Start this run now.",
+    sources: [{ id: "S1", authority: "creator_current", title: "Method", content: "Start immediately." }],
+    config: { developmentQuestions: 2, heldoutQuestions: 1, maxCorpusRevisions: 1 }
+  });
+  await repository.create({ id: "older-run", creatorId, idempotencyKey: "older", input: input("older-run") });
+  await repository.create({ id: "target-run", creatorId, idempotencyKey: "target", input: input("target-run") });
+  const factory = new CreatorFactory(root, passingPromptRunner, async (execution) => `Direct: ${execution.question}`);
+  const worker = new CreatorFactoryWorker(repository, factory, {
+    workerId: "direct-worker",
+    leaseMs: 60_000,
+    heartbeatMs: 0
+  });
+
+  const claimed = await worker.startRun("target-run");
+  assert.equal(claimed?.id, "target-run");
+  assert.equal((await repository.getForCreator(creatorId, "older-run"))?.status, "queued");
+
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const current = await repository.getForCreator(creatorId, "target-run");
+    if (current?.status === "waiting_for_creator") return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  assert.equal((await repository.getForCreator(creatorId, "target-run"))?.status, "waiting_for_creator");
+});
+
 test("durable worker claims a run, pauses for Creator answers, and resumes the same Factory state", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-factory-worker-"));
   t.after(() => rm(root, { recursive: true, force: true }));

@@ -29,6 +29,30 @@ export class CreatorFactoryWorker {
   async workOnce(stopSignal?: AbortSignal): Promise<FactoryRunRecord | undefined> {
     const claimed = await this.repository.claim({ workerId: this.options.workerId, leaseMs: this.leaseMs });
     if (!claimed) return undefined;
+    return this.executeClaimed(claimed, stopSignal);
+  }
+
+  /**
+   * Start one newly-created run immediately. The durable repository row is
+   * still the recovery boundary, but a user command no longer waits for the
+   * polling worker to notice it. Claiming is targeted so an older queued run
+   * cannot steal the direct-start slot.
+   */
+  async startRun(runId: string, stopSignal?: AbortSignal): Promise<FactoryRunRecord | undefined> {
+    const claimed = await this.repository.claim({
+      workerId: this.options.workerId,
+      leaseMs: this.leaseMs,
+      runId
+    });
+    if (!claimed) return undefined;
+    void this.executeClaimed(claimed, stopSignal).catch(() => {
+      // executeClaimed persists the failure state. Keep this fire-and-forget
+      // boundary from becoming an unhandled rejection in the HTTP process.
+    });
+    return claimed;
+  }
+
+  private async executeClaimed(claimed: FactoryRunRecord, stopSignal?: AbortSignal): Promise<FactoryRunRecord> {
     if (!claimed.leaseToken) throw new Error(`Claimed Factory run ${claimed.id} has no lease token`);
 
     let heartbeatError: unknown;

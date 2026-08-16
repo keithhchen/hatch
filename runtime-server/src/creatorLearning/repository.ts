@@ -79,6 +79,8 @@ export type CreateFactoryRunInput = {
 
 export type ClaimFactoryRunInput = {
   workerId: string;
+  /** Optional direct-start fence. When present, only this run may be claimed. */
+  runId?: string;
   leaseMs?: number;
   /** Injectable clock boundary for deterministic workers and tests. */
   now?: string;
@@ -335,7 +337,7 @@ export class InMemoryCreatorFactoryRepository implements CreatorFactoryRepositor
       const now = parsedNow(input.now);
       const leaseExpiresAt = addMilliseconds(now, boundedLeaseMs(input.leaseMs));
       const candidate = [...this.runs.values()]
-        .filter((run) => isClaimable(run, now))
+        .filter((run) => isClaimable(run, now) && (!input.runId || run.id === input.runId))
         .sort(compareClaimOrder)[0];
       if (!candidate) return undefined;
       candidate.status = "running";
@@ -865,6 +867,7 @@ export class PostgresCreatorFactoryRepository implements CreatorFactoryRepositor
         FROM hatch_creator_factory_runs AS run
         CROSS JOIN timing
         WHERE run.next_attempt_at <= timing.now_at
+          AND ($5::text IS NULL OR run.id = $5::text)
           AND (
             run.status = 'queued'
             OR (run.status = 'running' AND run.lease_expires_at <= timing.now_at)
@@ -888,7 +891,8 @@ export class PostgresCreatorFactoryRepository implements CreatorFactoryRepositor
       input.now ? iso(input.now) : null,
       requireNonEmpty(input.workerId, "workerId"),
       randomUUID(),
-      boundedLeaseMs(input.leaseMs)
+      boundedLeaseMs(input.leaseMs),
+      input.runId ?? null
     ]);
     return result.rows[0] ? runFromRow(result.rows[0]) : undefined;
   }
