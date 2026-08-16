@@ -118,12 +118,27 @@ export function CreatorProductWorkspace({ token, request, productId, runId = "",
         if (cancelled) return;
         setRun(nextRun);
         setRuns((current) => current.map((item) => item.id === nextRun.id ? nextRun : item));
+        // A polling blip must not turn a live Factory run into a user-facing
+        // "Failed to fetch" error. The next authoritative run response is
+        // the recovery signal; command failures (answer/retry/review writes)
+        // still surface through their own handlers.
+        setState((current) => ({
+          ...current,
+          ...(nextRun.status === "queued" || nextRun.status === "running" ? { error: "" } : {})
+        }));
         if (nextRun.candidate || nextRun.status === "ready" || nextRun.stage === "review_required") {
           const nextReview = await getFactoryReview(token, nextRun.id, request);
           if (!cancelled) setReview(nextReview);
         }
       }).catch((error) => {
-        if (!cancelled) setState((current) => ({ ...current, error: error.message }));
+        if (!cancelled) {
+          setState((current) => ({
+            ...current,
+            // Keep the prior live status visible while a read-only poll is
+            // retrying; do not overwrite it with a transient fetch error.
+            ...(run.status === "queued" || run.status === "running" ? {} : { error: error.message })
+          }));
+        }
       });
     }, 3000);
     return () => {
