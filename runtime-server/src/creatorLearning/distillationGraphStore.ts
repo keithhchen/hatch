@@ -232,7 +232,7 @@ CREATE INDEX IF NOT EXISTS hatch_creator_distillation_artifacts_product_idx
   ON hatch_creator_distillation_artifacts (product_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS hatch_creator_distillation_events_product_seq_idx
   ON hatch_creator_distillation_events (product_id, sequence);
-CREATE UNIQUE INDEX IF NOT EXISTS hatch_creator_distillation_releases_revision_product_uq
+CREATE UNIQUE INDEX IF NOT EXISTS hatch_creator_distillation_releases_product_revision_uq
   ON hatch_creator_distillation_releases (product_id, revision_id);
 CREATE INDEX IF NOT EXISTS hatch_creator_distillation_releases_product_idx
   ON hatch_creator_distillation_releases (product_id, created_at DESC);

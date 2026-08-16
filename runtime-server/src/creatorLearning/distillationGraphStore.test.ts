@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { QueryResultRow } from "pg";
-import { PostgresDistillationGraphStore } from "./distillationGraphStore.js";
+import { POSTGRES_DISTILLATION_GRAPH_SCHEMA, PostgresDistillationGraphStore } from "./distillationGraphStore.js";
 import type { PostgresQueryExecutor } from "../postgresStore.js";
 
 test("Postgres graph artifact registration preserves the caller-owned immutable timestamp", async () => {
@@ -24,6 +24,18 @@ test("Postgres graph artifact registration preserves the caller-owned immutable 
   assert.equal(first.createdAt, artifact.createdAt);
   assert.deepEqual(second, first);
   assert.equal(pool.insertValues?.[9], artifact.createdAt);
+});
+
+test("Postgres graph schema migrates legacy task rows before Product indexes", () => {
+  const migration = POSTGRES_DISTILLATION_GRAPH_SCHEMA.indexOf("ALTER TABLE hatch_creator_distillation_artifacts\n  ADD COLUMN IF NOT EXISTS product_id TEXT;");
+  const productIndex = POSTGRES_DISTILLATION_GRAPH_SCHEMA.indexOf("CREATE INDEX IF NOT EXISTS hatch_creator_distillation_revisions_product_idx");
+
+  assert.ok(migration >= 0, "legacy graph migration must add Product columns additively");
+  assert.ok(productIndex > migration, "Product indexes must be created after Product identity migration");
+  assert.match(POSTGRES_DISTILLATION_GRAPH_SCHEMA, /hatch_creator_distillation_tasks/);
+  assert.match(POSTGRES_DISTILLATION_GRAPH_SCHEMA, /Cannot migrate Creator graph: % unmapped rows remain/);
+  assert.match(POSTGRES_DISTILLATION_GRAPH_SCHEMA, /hatch_creator_distillation_events_product_event_uq/);
+  assert.match(POSTGRES_DISTILLATION_GRAPH_SCHEMA, /hatch_creator_distillation_runs_product_uq/);
 });
 
 class ArtifactPostgresFake implements PostgresQueryExecutor {
