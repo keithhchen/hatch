@@ -95,10 +95,13 @@ export function createFactoryLlmModel(
     compat: {
       supportsStore: false,
       supportsDeveloperRole: false,
-      supportsReasoningEffort: true,
+      // Kimi K2.6 uses the DeepSeek-compatible `thinking` object. The
+      // top-level `reasoning_effort` contract belongs to Kimi K3 and can be
+      // rejected by K2.6 even though both models share the OpenAI endpoint.
+      supportsReasoningEffort: false,
       maxTokensField: "max_completion_tokens",
       supportsStrictMode: true,
-      thinkingFormat: "openai",
+      thinkingFormat: "deepseek",
       requiresReasoningContentOnAssistantMessages: true
     }
   };
@@ -108,13 +111,16 @@ export function createFactoryLlmModel(
 function normalizeFactoryLlmPayload(payload: unknown): unknown {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
   const normalized = { ...(payload as Record<string, unknown>) };
-  normalized.reasoning_effort = FACTORY_LLM_PROFILE.thinkingLevel;
+  // Keep the provider-native K2.6 thinking contract explicit. This also
+  // protects the boundary if a future pi-ai version changes its inferred
+  // compatibility defaults for the Moonshot endpoint.
+  normalized.thinking = { type: "enabled" };
   // Kimi K2.6 rejects `required` (and named tool choices) when thinking is
   // enabled. Keep the provider-compatible `auto` choice and enforce the
   // handoff contract in the host-owned submission FSM below: prose-only or
   // incomplete turns are never accepted as Factory output.
   normalized.tool_choice = "auto";
-  delete normalized.thinking;
+  delete normalized.reasoning_effort;
   delete normalized.temperature;
   delete normalized.top_p;
   delete normalized.n;

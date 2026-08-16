@@ -127,7 +127,8 @@ test("Factory Evidence/Eval/Corpus prompt gateway uses dedicated Kimi K2.6 high-
 
   const body = JSON.parse(String(request.init.body)) as Record<string, unknown>;
   assert.equal(body.model, FACTORY_LLM_MODEL);
-  assert.equal(body.reasoning_effort, "high");
+  assert.deepEqual(body.thinking, { type: "enabled" });
+  assert.equal("reasoning_effort" in body, false);
   // Kimi K2.6 only accepts the provider-compatible automatic choice while
   // thinking is enabled; the host submission FSM still requires a complete
   // tool batch and finalizer before accepting output.
@@ -143,7 +144,6 @@ test("Factory Evidence/Eval/Corpus prompt gateway uses dedicated Kimi K2.6 high-
     true
   );
   assert.equal("max_tokens" in body, false);
-  assert.equal("thinking" in body, false);
   assert.equal("temperature" in body, false);
   assert.equal("top_p" in body, false);
   assert.match(JSON.stringify(body.messages), /FACTORY_LLM_SYSTEM_MARKER/);
@@ -154,10 +154,10 @@ test("Factory Evidence/Eval/Corpus prompt gateway uses dedicated Kimi K2.6 high-
   assert.equal(factoryModel.contextWindow, FACTORY_LLM_CONTEXT_WINDOW);
   assert.equal(factoryModel.maxTokens, FACTORY_LLM_MAX_COMPLETION_TOKENS);
   assert.equal(factoryModel.reasoning, true);
-  assert.equal(factoryModel.compat?.supportsReasoningEffort, true);
+  assert.equal(factoryModel.compat?.supportsReasoningEffort, false);
   assert.equal(factoryModel.compat?.supportsStrictMode, true);
   assert.equal(factoryModel.compat?.maxTokensField, "max_completion_tokens");
-  assert.equal(factoryModel.compat?.thinkingFormat, "openai");
+  assert.equal(factoryModel.compat?.thinkingFormat, "deepseek");
   assert.deepEqual(PI_FACTORY_MODEL, { provider: "moonshot", model: FACTORY_LLM_MODEL });
 
   assert.equal(KIMI_MODEL, "kimi-k2.6");
