@@ -5,8 +5,10 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, test } from "node:test";
 import { WebSocket } from "ws";
+import type { AgentCorpus, AgentCorpusResolver } from "./agentCorpus.js";
 import { DeterministicAgentRuntime } from "./agentRuntime.js";
 import { InMemoryConversationRepository } from "./conversationRepository.js";
+import type { AuthIdentityResolver, EntitlementBinding, EntitlementResolver } from "./entitlements.js";
 import { createRuntimeServer, type RuntimeServer } from "./index.js";
 import { PROTOCOL_VERSION, type OutboundMessage } from "./protocol.js";
 import { RuntimeStore } from "./store.js";
@@ -100,6 +102,75 @@ test("Conversation HTTP API owns metadata, pagination, versions, and cursor snap
   const afterAgentUpdate = await json(base, `/v1/conversations/${encodeURIComponent(first.conversation.id)}?${upgradedCorpusScope}`);
   assert.equal(afterAgentUpdate.response.status, 200);
   assert.equal((afterAgentUpdate.body as { conversation: { id: string } }).conversation.id, first.conversation.id);
+});
+
+test("Conversation HTTP creation carries the published corpus BriefSpec into an immutable snapshot", async () => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-api-brief-"));
+  const entitlement: EntitlementBinding = {
+    entitlement_id: "44444444-4444-4444-8444-444444444444",
+    order_id: "55555555-5555-4555-8555-555555555555",
+    user_id: "11111111-1111-4111-8111-111111111111",
+    creator_id: "22222222-2222-4222-8222-222222222222",
+    agent_id: "33333333-3333-4333-8333-333333333333",
+    product_id: "33333333-3333-4333-8333-333333333333",
+    status: "active"
+  };
+  const briefSpec = {
+    contract_version: "1" as const,
+    fields: [{ id: "goal", label: "What should Hatch help you accomplish?", required: true }]
+  };
+  const entitlementResolver: EntitlementResolver = {
+    list: async () => [entitlement],
+    resolve: async () => entitlement
+  };
+  const authIdentityResolver: AuthIdentityResolver = {
+    resolveIdentity: async () => ({ sub: entitlement.user_id, role: "user" })
+  };
+  const agentCorpusResolver = {
+    resolve: async () => ({
+      root: "",
+      digest: `sha256:${"b".repeat(64)}`,
+      corpus: {
+        agent_id: entitlement.agent_id,
+        creator: { id: entitlement.creator_id, name: "Brief Creator" },
+        product: {
+          id: entitlement.product_id,
+          name: "Brief Product",
+          boundaries: [],
+          brief_spec: briefSpec,
+          presentation: {}
+        },
+        knowledge: { documents: [] },
+        tools: []
+      } as unknown as AgentCorpus
+    })
+  } as unknown as AgentCorpusResolver;
+  runtime = createRuntimeServer({
+    conversationStore: new RuntimeStore(dataDir),
+    entitlementResolver,
+    authIdentityResolver,
+    agentCorpusResolver
+  });
+  const base = await listen(runtime.server);
+  const query = new URLSearchParams({
+    entitlement_id: entitlement.entitlement_id,
+    creator_id: entitlement.creator_id,
+    product_id: entitlement.product_id
+  }).toString();
+  const created = await json(base, `/v1/conversations?${query}`, {
+    method: "POST",
+    headers: { authorization: "Bearer brief-session" },
+    body: {
+      title: "Brief task",
+      client_request_id: "brief_task_create",
+      brief_answers: [{ field_id: "goal", value: "Ship the first release" }]
+    }
+  });
+  assert.equal(created.response.status, 201);
+  const conversation = (created.body as { conversation: { brief_snapshot?: { spec_digest: string; fields: Array<{ id: string; value: string | null }> } } }).conversation;
+  assert.equal(conversation.brief_snapshot?.fields[0]?.id, "goal");
+  assert.equal(conversation.brief_snapshot?.fields[0]?.value, "Ship the first release");
+  assert.match(conversation.brief_snapshot?.spec_digest ?? "", /^sha256:[a-f0-9]{64}$/);
 });
 
 test("Conversation Library keeps three Agent A and two Agent B conversations in separate scopes", async () => {
@@ -363,10 +434,13 @@ async function listen(server: http.Server): Promise<string> {
   return `http://127.0.0.1:${address.port}`;
 }
 
-async function json(base: string, pathname: string, init: { method?: string; body?: Record<string, unknown> } = {}) {
+async function json(base: string, pathname: string, init: { method?: string; headers?: Record<string, string>; body?: Record<string, unknown> } = {}) {
   const response = await fetch(`${base}${pathname}`, {
     method: init.method,
-    headers: init.body ? { "content-type": "application/json" } : undefined,
+    headers: {
+      ...(init.body ? { "content-type": "application/json" } : {}),
+      ...(init.headers ?? {})
+    },
     body: init.body ? JSON.stringify(init.body) : undefined
   });
   return { response, body: await response.json() as unknown };

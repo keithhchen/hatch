@@ -3342,12 +3342,14 @@ async function bindingFromHistoryRequest(
     if (resolved.corpus.product.id !== entitlement.product_id || resolved.corpus.creator.id !== entitlement.creator_id) {
       throw new Error("Entitlement does not match its current Agent Corpus");
     }
+    const briefSpec = entitlement.brief_spec ?? resolved.corpus.product.brief_spec;
     return {
       creatorId: entitlement.creator_id,
       userId: entitlement.user_id,
       agentId: entitlement.agent_id,
       productId: entitlement.product_id,
       corpusDigest: resolved.digest,
+      ...(briefSpec ? { briefSpec: briefSpec as BriefSpec } : {}),
       purchasedCorpusDigest: entitlement.purchased_corpus_digest ?? resolved.digest,
       entitlementId: entitlement.entitlement_id,
       orderId: entitlement.order_id,
