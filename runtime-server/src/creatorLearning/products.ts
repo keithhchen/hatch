@@ -11,8 +11,8 @@ export type CreatorProductRecord = {
   promise: string;
   /** @deprecated Worker compatibility alias; never serialized by HTTP. */
   brief: string;
-  /** Creator-confirmed buyer intake contract. Draft Products may be pending confirmation. */
-  briefSpec?: BriefSpec;
+  /** Creator-confirmed buyer intake contract. Every Product has one. */
+  briefSpec: BriefSpec;
   status: CreatorProductStatus;
   /** Stable DistillationRun lineage. A Product has one; revisions live below it. */
   runId?: string;

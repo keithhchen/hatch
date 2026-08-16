@@ -84,8 +84,11 @@ test("browser OAuth PKCE keeps state and authorizes Product Files without Versio
     email: "creator@example.test",
     display_name: "Maya Chen"
   };
+  const briefSpecRequests = [];
   const registry = createServer(async (request, response) => {
     const requestUrl = new URL(request.url ?? "/", "http://registry.test");
+    let body = "";
+    for await (const chunk of request) body += chunk;
     response.setHeader("content-type", "application/json");
     if (requestUrl.pathname === "/readyz") {
       response.end(JSON.stringify({ ok: true }));
@@ -101,6 +104,11 @@ test("browser OAuth PKCE keeps state and authorizes Product Files without Versio
     }
     if (requestUrl.pathname === "/v1/creator/products/product-1/files" && request.method === "GET") {
       response.end(JSON.stringify({ product_id: "product-1", files: [{ id: "file-1", product_id: "product-1" }] }));
+      return;
+    }
+    if (requestUrl.pathname === "/v1/creator/products/product-1/brief-spec" && request.method === "PUT") {
+      briefSpecRequests.push({ body: JSON.parse(body), authorization: request.headers.authorization });
+      response.end(JSON.stringify({ product: { product_id: "product-1", brief_spec: JSON.parse(body).brief_spec } }));
       return;
     }
     response.statusCode = 404;
@@ -188,6 +196,22 @@ test("browser OAuth PKCE keeps state and authorizes Product Files without Versio
   assert.deepEqual(filesBody.product_id, "product-1");
   assert.deepEqual(filesBody.files, [{ id: "file-1", product_id: "product-1" }]);
   assert.match(filesBody.request_id, /^req_/);
+
+  const briefSpec = {
+    contract_version: "1",
+    fields: [{ id: "goal", label: "What outcome should this task produce?", required: true }]
+  };
+  const briefResponse = await fetch(`${serverUrl(api)}/v1/creator/products/product-1/brief-spec`, {
+    method: "PUT",
+    headers: { authorization: `Bearer ${token.access_token}`, "content-type": "application/json" },
+    body: JSON.stringify({ brief_spec: briefSpec })
+  });
+  assert.equal(briefResponse.status, 200);
+  assert.deepEqual((await briefResponse.json()).product.brief_spec, briefSpec);
+  assert.deepEqual(briefSpecRequests, [{
+    body: { brief_spec: briefSpec },
+    authorization: "Bearer signed-creator-token"
+  }]);
 });
 
 test("creator products are projected directly from the Agent Corpus Registry", async (context) => {

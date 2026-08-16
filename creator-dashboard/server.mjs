@@ -1275,12 +1275,12 @@ export async function createDashboardApp(options = {}) {
         return send(response, 404, { error: { code: "not_found", message: "Route not found." } });
       }
 
-      const productContractPath = url.pathname.match(/^\/v1\/creator\/products(?:\/[^/]+(?:\/(?:files|snapshots|runs|versions)(?:\/[^/]+)?)?)?$/);
+      const productContractPath = url.pathname.match(/^\/v1\/creator\/products(?:\/[^/]+(?:\/(?:files|snapshots|runs|versions|brief-spec)(?:\/[^/]+)?)?)?$/);
       const productContractWrite = productContractPath && (
         request.method === "POST" || request.method === "PATCH" || request.method === "PUT"
       ) && (
         url.pathname === "/v1/creator/products"
-        || /\/(files|snapshots|runs)$/.test(url.pathname)
+        || /\/(files|snapshots|runs|brief-spec)$/.test(url.pathname)
         || /^\/v1\/creator\/products\/[^/]+$/.test(url.pathname)
       );
       const productContractRead = productContractPath && request.method === "GET" && (
@@ -3146,6 +3146,7 @@ function creatorProductView(agent, state, run) {
   const presentedApproval = state?.approval?.status === "approved" && !candidateApproved
     ? { ...state.approval, status: "stale" }
     : state?.approval ?? null;
+  const briefSpecValid = isPublishableBriefSpec(base.brief_spec);
   return {
     ...base,
     version: state?.version ?? 0,
@@ -3159,7 +3160,8 @@ function creatorProductView(agent, state, run) {
     readiness: {
       candidate_approved: candidateApproved,
       publishable_corpus: Boolean(runCandidate?.corpus_verified || base.corpus_digest),
-      ready: Boolean(candidateApproved && (runCandidate?.corpus_verified || base.corpus_digest))
+      brief_spec_valid: briefSpecValid,
+      ready: Boolean(candidateApproved && (runCandidate?.corpus_verified || base.corpus_digest) && briefSpecValid)
     },
     updated_at: state?.updated_at ?? base.updated_at ?? run?.updated_at ?? base.published_at
   };

@@ -1001,6 +1001,7 @@ async function handleHttpRequest(
             id: corpus.product.id,
             name: corpus.product.name,
             description: corpus.product.description ?? "",
+            ...(corpus.product.brief_spec ? { brief_spec: corpus.product.brief_spec } : {}),
             ...(corpus.product.promise ? { promise: corpus.product.promise } : {}),
             ...(corpus.product.boundaries.length ? { boundaries: corpus.product.boundaries } : {})
           },
