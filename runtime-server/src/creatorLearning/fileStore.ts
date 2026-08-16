@@ -599,6 +599,9 @@ function mapGraphEvent(event: string, details: Record<string, unknown>): { type:
   if (event === "regression_evaluated") return { type: "node_completed", node: "regression_eval" };
   if (event === "heldout_evaluated") return { type: "node_completed", node: "heldout_eval" };
   if (event === "review_recorded") return { type: "review_recorded", node: "calibration" };
+  if (event === "correction_saved") return { type: "correction_saved", node: "calibration" };
+  if (event === "question_removed") return { type: "question_removed", node: "questions" };
+  if (event === "revision_generation_requested") return { type: "revision_generation_requested", node: "calibration" };
   if (event === "question_rejected") return { type: "question_rejected", node: "questions" };
   if (event === "judge_disputed") return { type: "judge_disputed", node: "calibration" };
   if (event === "heldout_failure_confirmed") return { type: "heldout_failure_confirmed", node: "calibration" };

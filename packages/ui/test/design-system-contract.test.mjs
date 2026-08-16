@@ -36,6 +36,8 @@ test("@hatch/ui owns the shared Button, Dialog, Select and CSS entrypoint", () =
   assert.match(index, /export \* from "\.\/Control\.jsx"/);
   assert.match(index, /export \* from "\.\/Overlays\.jsx"/);
   assert.match(button, /export function Button/);
+  assert.match(button, /const variantClass = surface \? null : `hui-button--\$\{variant\}`/);
+  assert.match(button, /surface \? controlClassName\(\{ size, surface \}\)/);
   assert.match(control, /^import React from "react";/);
   assert.match(button, /size === "compact" && "hui-control--compact"/);
   assert.match(control, /export function ButtonControl/);
@@ -199,6 +201,11 @@ test("Theme Lab edits the same token knobs used by the shared CSS", () => {
   assert.match(sharedCss, /\.hui-button\s*\{[^}]*font-family:\s*var\(--hui-font-pill\)/s);
   assert.match(sharedCss, /\.hui-control--compact\s*\{/);
   assert.match(sharedCss, /\.hui-control--raised\s*\{/);
+  assert.match(sharedCss, /\.hui-control--raised\s*\{[^}]*display:\s*inline-flex;[^}]*justify-content:\s*flex-start;[^}]*transition:\s*color var\(--hui-motion-control\)/s);
+  assert.match(sharedCss, /\.hui-control--raised\.hui-icon-button\s*\{\s*justify-content:\s*center;\s*\}/);
+  assert.match(sharedCss, /\.hui-control--raised\s*\{[^}]*gap:\s*8px;/s);
+  assert.match(sharedCss, /\.hui-select-trigger:not\(\.hui-control--raised\):hover/);
+  assert.match(sharedCss, /\.hui-select-trigger:not\(\.hui-control--raised\):focus-visible/);
   assert.match(sharedCss, /\.hui-field__label\s*\{[^}]*font-family:\s*var\(--hui-font-pill\)/s);
   assert.doesNotMatch(sharedCss, /\.hui-drawer\.is-(?:right|bottom)[^{]*\{[^}]*border-radius:[^;]*\b0\b/s);
 });

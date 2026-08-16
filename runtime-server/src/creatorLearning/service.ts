@@ -9,6 +9,7 @@ import { parseQuestions } from "./markdown.js";
 import { requireQuestionBatchId } from "./questionBatch.js";
 import {
   CreatorFactoryRepositoryError,
+  type SaveFactoryAnswerDraftInput,
   type CreatorFactoryRepository,
   type FactoryRunRecord
 } from "./repository.js";
@@ -127,7 +128,7 @@ export type SubmitFactoryAnswersRequest = {
   questionBatchId: string;
 };
 
-export type CreatorReviewAction = "accept" | "correct" | "reject_question" | "judge_dispute" | "heldout_correction";
+export type CreatorReviewAction = "accept" | "correct" | "reject_question" | "judge_dispute" | "heldout_correction" | "rerun";
 
 export type CreatorReviewCase = {
   id: string;
@@ -139,7 +140,7 @@ export type CreatorReviewCase = {
   diagnosis: string;
   caseDigest: string;
   candidateDigest: string;
-  status: "accepted" | "needs_review" | "corrected" | "question_rejected" | "judge_disputed";
+  status: "accepted" | "needs_review" | "correction_saved" | "question_removed" | "judge_disputed";
   reviewAction?: CreatorReviewAction;
 };
 
@@ -160,6 +161,8 @@ export type CreatorReviewProjection = {
   };
   unresolvedCount: number;
   releaseReady: boolean;
+  correctionCount: number;
+  rerunReady: boolean;
 };
 
 export type CreatorReviewRequest = {
@@ -197,6 +200,7 @@ export type CreatorFactoryRunView = {
   stage?: FactoryRunRecord["factoryStage"];
   version: number;
   pendingQuestions: Array<{ id: string; question: string; intent?: string; kind?: "behavior" | "provenance_confirmation" }>;
+  answerDrafts?: Array<{ questionId: string; answer: string }>;
   questionBatchId?: string;
   candidate?: {
     version: number;
@@ -306,6 +310,15 @@ export class CreatorFactoryService {
     const task = await this.taskRepository().getTask(requireText(creatorId, "creatorId"), requireText(taskId, "taskId"));
     if (!task) throw new CreatorFactoryRepositoryError("run_not_found", `Distillation Task ${taskId} was not found`);
     return task;
+  }
+
+  async updateTaskBrief(creatorId: string, taskId: string, brief: string, expectedUpdatedAt?: string): Promise<DistillationTaskRecord> {
+    const task = await this.getTask(creatorId, taskId);
+    if (task.status !== "active") throw new CreatorFactoryRepositoryError("invalid_status", `Distillation Task ${taskId} is deleted`);
+    return this.taskRepository().updateTaskBrief(creatorId, taskId, {
+      brief: validateTaskText(brief, "task.brief"),
+      ...(expectedUpdatedAt ? { expectedUpdatedAt } : {})
+    });
   }
 
   async deleteTask(creatorId: string, taskId: string): Promise<DistillationTaskRecord> {
@@ -526,6 +539,71 @@ export class CreatorFactoryService {
       });
       return next;
     }
+    if (request.action === "rerun") {
+      const correctionEvents = events
+        .filter((event) => event.revisionId === revisionId && ["correction_saved", "question_removed"].includes(event.type))
+        .sort((left, right) => left.sequence - right.sequence);
+      if (!correctionEvents.length) {
+        throw new CreatorFactoryRepositoryError("invalid_status", "Save at least one correction or remove a question before generating another version");
+      }
+      if (review.cases.some((item) => item.status === "needs_review" || item.status === "judge_disputed")) {
+        throw new CreatorFactoryRepositoryError("invalid_status", "Finish reviewing every case before generating another version");
+      }
+      const existing = correctionEvents
+        .concat(events.filter((event) => event.revisionId === revisionId && event.type === "revision_generation_requested"))
+        .find((event) => event.type === "revision_generation_requested" && event.payload.idempotencyKey === key);
+      if (existing) {
+        const nextRunId = typeof existing.payload.nextRunId === "string" ? existing.payload.nextRunId : undefined;
+        return { review: await this.projectReview(run), ...(nextRunId ? { nextRun: await this.get(creatorId, nextRunId) } : {}) };
+      }
+      const correctionEntries = [];
+      const correctionArtifactIds: string[] = [];
+      for (const event of correctionEvents) {
+        const artifactPath = typeof event.payload.artifactPath === "string" ? event.payload.artifactPath : undefined;
+        const artifactSha256 = typeof event.payload.artifactSha256 === "string" ? event.payload.artifactSha256 : undefined;
+        if (artifactPath && artifactSha256) {
+          correctionEntries.push({
+            event_id: event.id,
+            event_type: event.type,
+            artifact_path: artifactPath,
+            artifact_sha256: artifactSha256,
+            case_id: typeof event.payload.caseId === "string" ? event.payload.caseId : undefined
+          });
+        }
+        correctionArtifactIds.push(...event.artifactIds);
+      }
+      if (!correctionEntries.length) {
+        throw new CreatorFactoryRepositoryError("invalid_status", "Saved corrections are unavailable; refresh the review before generating another version");
+      }
+      const bundle = await this.fileStore(run.id).writeArtifact(
+        `review/correction-bundle-${safeReviewKey(key)}.json`,
+        `${JSON.stringify({
+          contract_version: "1",
+          review_type: "correction_bundle",
+          run_id: run.id,
+          revision_id: revisionId,
+          candidate_digest: review.candidateDigest,
+          corrections: correctionEntries
+        }, null, 2)}\n`
+      );
+      const next = await this.createRevisionFromReview(creatorId, run, request, key, review, bundle, false);
+      const parent = events.filter((event) => event.runId === (run.input.distillationRunId ?? run.id) && event.revisionId === revisionId).at(-1);
+      await this.graphStore.appendEvent({
+        id: newGraphEventId(),
+        eventKey: `${run.id}:revision-generation:${key}`,
+        taskId: run.input.taskId,
+        runId: run.input.distillationRunId ?? run.id,
+        revisionId,
+        type: "revision_generation_requested",
+        node: "calibration",
+        actor: "creator",
+        parentEventIds: parent ? [parent.id] : [],
+        artifactIds: [...new Set([...correctionArtifactIds, ...(bundle.artifactId ? [bundle.artifactId] : [])])],
+        payload: { idempotencyKey: key, action: request.action, candidateDigest: review.candidateDigest, ...(next.nextRun ? { nextRunId: next.nextRun.id } : {}) }
+      });
+      return next;
+    }
+
     const caseId = requireText(request.caseId, "caseId");
     const target = review.cases.find((item) => item.id === caseId);
     if (!target) throw new CreatorFactoryRepositoryError("run_not_found", `Review case ${caseId} was not found`);
@@ -542,7 +620,7 @@ export class CreatorFactoryService {
       throw new Error("why is required for Correct this answer");
     }
     const existing = events.find((event) => event.revisionId === revisionId
-      && ["review_recorded", "question_rejected", "judge_disputed"].includes(event.type)
+      && ["review_recorded", "correction_saved", "question_removed", "judge_disputed"].includes(event.type)
       && event.payload.idempotencyKey === key);
     if (existing) {
       const payloadAction = existing.payload.action;
@@ -579,12 +657,10 @@ export class CreatorFactoryService {
       `review/case-${safeReviewKey(caseId)}-${safeReviewKey(key)}.json`,
       `${JSON.stringify(artifactPayload, null, 2)}\n`
     );
-    const next = request.action === "correct" || request.action === "reject_question"
-      ? await this.createRevisionFromReview(creatorId, run, request, key, review, artifact, false)
-      : undefined;
     const parent = events.filter((event) => event.runId === (run.input.distillationRunId ?? run.id)
       && event.revisionId === revisionId).at(-1);
-    const eventType = request.action === "reject_question" ? "question_rejected"
+    const eventType = request.action === "reject_question" ? "question_removed"
+      : request.action === "correct" ? "correction_saved"
       : request.action === "judge_dispute" ? "judge_disputed"
         : "review_recorded";
     const payload: Record<string, unknown> = {
@@ -593,7 +669,8 @@ export class CreatorFactoryService {
       caseId,
       caseDigest: target.caseDigest,
       candidateDigest: review.candidateDigest,
-      ...(next?.nextRun ? { nextRunId: next.nextRun.id } : {})
+      artifactPath: artifact.path,
+      artifactSha256: artifact.sha256
     };
     await this.graphStore.appendEvent({
       id: newGraphEventId(),
@@ -609,8 +686,7 @@ export class CreatorFactoryService {
       payload
     });
     return {
-      review: await this.projectReview(run),
-      ...(next?.nextRun ? { nextRun: next.nextRun } : {})
+      review: await this.projectReview(run)
     };
   }
 
@@ -679,6 +755,35 @@ export class CreatorFactoryService {
       ...(request.expectedVersion === undefined ? {} : { expectedVersion: request.expectedVersion })
     });
     return this.project(updated, false);
+  }
+
+  async saveAnswerDraft(
+    creatorId: string,
+    runId: string,
+    request: Omit<SaveFactoryAnswerDraftInput, "creatorId" | "runId">
+  ): Promise<CreatorFactoryRunView> {
+    const run = await this.requireRun(creatorId, runId);
+    if (run.state?.stage !== "awaiting_creator_answers" || run.status !== "waiting_for_creator") {
+      throw new CreatorFactoryRepositoryError("invalid_status", `Factory run ${runId} is not waiting for Creator answers`);
+    }
+    const questionBatchId = requireText(request.answers.questionBatchId, "question_batch_id");
+    const questions = await this.pendingQuestions(run);
+    const known = new Set(questions.map((question) => question.id));
+    const answers = request.answers.answers ?? [];
+    for (const answer of answers) {
+      if (!known.has(answer.questionId)) throw new Error(`Unknown Creator answer question: ${answer.questionId}`);
+      if (typeof answer.answer !== "string") throw new Error(`Answer for ${answer.questionId} must be text`);
+    }
+    const updated = await this.repository.saveAnswerDraft({
+      creatorId,
+      runId,
+      answers: {
+        questionBatchId,
+        answers: answers.map((answer) => ({ questionId: answer.questionId, answer: answer.answer }))
+      },
+      ...(request.expectedVersion === undefined ? {} : { expectedVersion: request.expectedVersion })
+    });
+    return this.project(updated, true);
   }
 
   async retry(creatorId: string, runId: string, expectedVersion?: number): Promise<CreatorFactoryRunView> {
@@ -842,6 +947,7 @@ export class CreatorFactoryService {
           ...(kind ? { kind } : {})
         }))
         : [],
+      ...(includeQuestions && awaitingAnswers && run.answerDrafts?.answers ? { answerDrafts: run.answerDrafts.answers } : {}),
       ...(includeQuestions && awaitingAnswers && run.state?.artifacts.currentQuestionBatch
         ? { questionBatchId: requireQuestionBatchId(run.id, run.state.artifacts.currentQuestionBatch) }
         : {}),
@@ -882,7 +988,7 @@ export class CreatorFactoryService {
       : [];
     const adjudications = new Map<string, { action: CreatorReviewAction; sequence: number }>();
     for (const event of events
-      .filter((event) => ["review_recorded", "question_rejected", "judge_disputed"].includes(event.type))
+      .filter((event) => ["review_recorded", "correction_saved", "question_removed", "judge_disputed"].includes(event.type))
       .sort((left, right) => left.sequence - right.sequence)) {
       const caseId = typeof event.payload.caseId === "string" ? event.payload.caseId : undefined;
       const action = event.payload.action;
@@ -940,10 +1046,12 @@ export class CreatorFactoryService {
     // a correction or question rejection, while a judge dispute is blocked
     // until calibration resolves the evaluation. None of these may make
     // Release look ready by themselves.
+    const correctionCount = cases.filter((item) => item.status === "correction_saved" || item.status === "question_removed").length;
     const unresolvedCount = cases.filter((item) => (
       item.status === "needs_review"
       || item.status === "judge_disputed"
     )).length;
+    const rerunReady = correctionCount > 0 && unresolvedCount === 0 && blindFailed === 0;
     return {
       runId: run.id,
       revisionId,
@@ -954,7 +1062,9 @@ export class CreatorFactoryService {
       cases,
       blind: { sealed: true, total: blindTotal, passed: blindPassed, failed: blindFailed, needsCreatorAction: blindFailed > 0 || run.state?.stage === "review_required" },
       unresolvedCount,
-      releaseReady: run.status === "ready" && run.state?.stage === "ready" && blindFailed === 0 && unresolvedCount === 0
+      releaseReady: run.status === "ready" && run.state?.stage === "ready" && blindFailed === 0 && unresolvedCount === 0 && correctionCount === 0,
+      correctionCount,
+      rerunReady
     };
   }
 
@@ -1130,12 +1240,12 @@ function notPublishable(runId: string): CreatorFactoryRepositoryError {
 }
 
 function isCreatorReviewAction(value: unknown): value is CreatorReviewAction {
-  return ["accept", "correct", "reject_question", "judge_dispute", "heldout_correction"].includes(String(value));
+  return ["accept", "correct", "reject_question", "judge_dispute", "heldout_correction", "rerun"].includes(String(value));
 }
 
 function reviewActionStatus(action: CreatorReviewAction): CreatorReviewCase["status"] {
-  if (action === "correct") return "corrected";
-  if (action === "reject_question") return "question_rejected";
+  if (action === "correct") return "correction_saved";
+  if (action === "reject_question") return "question_removed";
   if (action === "judge_dispute") return "judge_disputed";
   return "accepted";
 }

@@ -369,13 +369,22 @@ test("Creator Review is an immutable, idempotent projection over candidate cases
     correction: "Return one finished recommendation.",
     why: "The result must be decisive and directly usable."
   }, "review-correction-1");
-  assert.ok(corrected.nextRun?.id);
-  assert.notEqual(corrected.nextRun?.revisionId, ready.revisionId);
-  const nextStored = await repository.getForCreator(creator.id, corrected.nextRun!.id);
+  assert.equal(corrected.nextRun, undefined);
+  assert.equal(corrected.review.correctionCount, 1);
+  assert.equal(corrected.review.rerunReady, true);
+  assert.equal(corrected.review.cases.find((item) => item.id === correctionTarget.id)?.status, "correction_saved");
+  const rerun = await service.review(creator.id, created.run.id, {
+    action: "rerun",
+    candidateDigest: projection.candidateDigest,
+    expectedVersion: projection.version
+  }, "review-rerun-1");
+  assert.ok(rerun.nextRun?.id);
+  assert.notEqual(rerun.nextRun?.revisionId, ready.revisionId);
+  const nextStored = await repository.getForCreator(creator.id, rerun.nextRun!.id);
   assert.equal(nextStored?.input.reviewContext?.mode, "correction");
   assert.equal(nextStored?.input.reviewContext?.sourceRunId, created.run.id);
   await worker.workOnce();
-  const correctedReady = await service.get(creator.id, corrected.nextRun!.id);
+  const correctedReady = await service.get(creator.id, rerun.nextRun!.id);
   assert.equal(correctedReady.status, "ready", correctedReady.lastError);
   assert.equal(correctedReady.candidate?.version, (ready.candidate?.version ?? 0) + 1);
   await assert.rejects(

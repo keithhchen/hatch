@@ -18,9 +18,14 @@ export function Button({
   ref,
   ...props
 }) {
+  // A surfaced button participates in the shared Control appearance contract.
+  // Do not also attach the semantic variant class: its primitive-specific
+  // hover/active rules would otherwise fork the closed control surface from
+  // Radix Select while both controls are meant to look identical.
+  const variantClass = surface ? null : `hui-button--${variant}`;
   const classes = cn(
     "hui-button",
-    `hui-button--${variant}`,
+    variantClass,
     `hui-button--${size}`,
     surface ? controlClassName({ size, surface }) : size === "compact" && "hui-control--compact",
     className

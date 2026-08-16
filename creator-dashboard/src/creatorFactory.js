@@ -101,6 +101,22 @@ export function submitFactoryAnswers(token, run, answers, submissionId = crypto.
   });
 }
 
+export function saveFactoryAnswerDraft(token, run, answers) {
+  return dashboardRequest(`/v1/creator/factory-runs/${encodeURIComponent(run.id)}/answer-draft`, {
+    method: "PUT",
+    token,
+    headers: { "idempotency-key": crypto.randomUUID() },
+    body: JSON.stringify({
+      expected_version: run.version,
+      question_batch_id: run.question_batch_id,
+      answers: run.pending_questions.map((question) => ({
+        question_id: question.id,
+        answer: answers[question.id] ?? ""
+      }))
+    })
+  });
+}
+
 export function retryFactoryRun(token, run) {
   return dashboardRequest(`/v1/creator/factory-runs/${encodeURIComponent(run.id)}/retry`, {
     method: "POST",
@@ -145,6 +161,15 @@ export function createDistillationTask(token, input) {
 
 export function getDistillationTask(token, taskId) {
   return dashboardRequest(`/v1/creator/tasks/${encodeURIComponent(taskId)}`, { token });
+}
+
+export function updateTaskBrief(token, task, brief) {
+  return dashboardRequest(`/v1/creator/tasks/${encodeURIComponent(task.id)}`, {
+    method: "PATCH",
+    token,
+    headers: { "idempotency-key": crypto.randomUUID() },
+    body: JSON.stringify({ brief, expected_updated_at: task.updated_at })
+  });
 }
 
 export function listSourceDocuments(token, taskId) {

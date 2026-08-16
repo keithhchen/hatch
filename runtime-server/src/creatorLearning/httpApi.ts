@@ -45,6 +45,16 @@ export async function handleCreatorFactoryHttp(
     if (taskMatch && request.method === "GET") {
       return { status: 200, body: taskView(await service.getTask(request.creator.id, decodeURIComponent(taskMatch[1]!))) };
     }
+    if (taskMatch && (request.method === "PATCH" || request.method === "PUT")) {
+      const body = request.body ?? {};
+      if (typeof body.brief !== "string" || !body.brief.trim()) throw new Error("brief is required");
+      return { status: 200, body: taskView(await service.updateTaskBrief(
+        request.creator.id,
+        decodeURIComponent(taskMatch[1]!),
+        body.brief,
+        typeof body.expected_updated_at === "string" ? body.expected_updated_at : undefined
+      )) };
+    }
     if (taskMatch && request.method === "DELETE") {
       return { status: 200, body: taskView(await service.deleteTask(request.creator.id, decodeURIComponent(taskMatch[1]!))) };
     }
@@ -99,6 +109,24 @@ export async function handleCreatorFactoryHttp(
         request.headers["idempotency-key"] ?? ""
       );
       return { status: result.created ? 202 : 200, body: publicView(result.run) };
+    }
+
+    const answerDraftMatch = request.pathname.match(/^\/v1\/creator\/factory-runs\/([^/]+)\/answer-draft$/);
+    if (answerDraftMatch && (request.method === "PUT" || request.method === "PATCH")) {
+      const body = request.body ?? {};
+      if (typeof body.question_batch_id !== "string" || !body.question_batch_id.trim()) {
+        throw new Error("question_batch_id is required for Creator answer drafts");
+      }
+      const answers = Array.isArray(body.answers) ? body.answers.map((item) => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("Each Creator answer draft must be an object");
+        const row = item as Record<string, unknown>;
+        return { questionId: String(row.question_id ?? ""), answer: String(row.answer ?? "") };
+      }) : [];
+      const view = await service.saveAnswerDraft(request.creator.id, decodeURIComponent(answerDraftMatch[1]!), {
+        answers: { answers, questionBatchId: body.question_batch_id },
+        ...(numberField(body.expected_version) === undefined ? {} : { expectedVersion: numberField(body.expected_version)! })
+      });
+      return { status: 200, body: publicView(view) };
     }
 
     const answersMatch = request.pathname.match(/^\/v1\/creator\/factory-runs\/([^/]+)\/answers$/);
@@ -331,7 +359,8 @@ function publicView(view: CreatorFactoryRunView): Record<string, unknown> {
       ...(item.intent ? { intent: item.intent } : {}),
       ...(item.kind ? { kind: item.kind } : {})
     })),
-    ...(view.questionBatchId ? { question_batch_id: view.questionBatchId } : {}),
+      ...(view.questionBatchId ? { question_batch_id: view.questionBatchId } : {}),
+    ...(view.answerDrafts ? { answer_drafts: view.answerDrafts.map((item) => ({ question_id: item.questionId, answer: item.answer })) } : {}),
     retryable: view.retryable,
     ...(view.candidate ? { candidate: {
       version: view.candidate.version,
@@ -402,6 +431,8 @@ function reviewView(value: Awaited<ReturnType<CreatorFactoryService["getReview"]
       needs_creator_action: value.blind.needsCreatorAction
     },
     unresolved_count: value.unresolvedCount,
+    correction_count: value.correctionCount,
+    rerun_ready: value.rerunReady,
     release_ready: value.releaseReady
   };
 }

@@ -28,6 +28,8 @@ import { AutosaveStatus } from "@hatch/ui/product";
 import { StorefrontDetails } from "./StorefrontDetails.jsx";
 import { creatorOrderQuery } from "./storefrontModel.js";
 import { creatorRouteTitle, parseCreatorRoute } from "./creatorRoutes.js";
+import { createCreatorTranslator, CREATOR_LOCALES, detectCreatorLocale } from "./creatorI18n.js";
+import { CreatorProductWorkspace } from "./CreatorProductWorkspace.jsx";
 import "./creatorPortalV2.css";
 
 const ROOT = "/studio";
@@ -48,6 +50,8 @@ export function CreatorPortalV2({
   onLogout
 }) {
   const route = useMemo(() => parseCreatorRoute(pathname), [pathname]);
+  const [locale, setLocale] = useState(() => detectCreatorLocale());
+  const t = useMemo(() => createCreatorTranslator(locale), [locale]);
   const mainRef = useRef(null);
   const navigationGuardRef = useRef(null);
   const registerNavigationGuard = useCallback((guard) => {
@@ -82,6 +86,10 @@ export function CreatorPortalV2({
     if (typeof document !== "undefined") document.title = `${creatorRouteTitle(route)} · Hatch`;
   }, [route]);
 
+  useEffect(() => {
+    if (typeof document !== "undefined") document.documentElement.lang = locale === "zh" ? "zh-CN" : locale === "ja" ? "ja-JP" : "en";
+  }, [locale]);
+
   return (
     <div className="cpv2">
       <aside className="cpv2-sidebar">
@@ -104,11 +112,25 @@ export function CreatorPortalV2({
         <div className="cpv2-account">
           <span className="cpv2-avatar" aria-hidden="true">{profile?.initials || initials(profile?.display_name)}</span>
           <span><strong>{profile?.display_name || "Creator"}</strong><small>{profile?.handle || "Creator account"}</small></span>
+          <div className="cpv2-language-picker">
+            <Select
+              className="cpv2-language-select"
+              aria-label={t("language")}
+              value={locale}
+              onValueChange={setLocale}
+              options={CREATOR_LOCALES.map((value) => ({
+                value,
+                label: t(value === "zh" ? "chinese" : value === "ja" ? "japanese" : "english")
+              }))}
+              size="compact"
+              surface="raised"
+            />
+          </div>
           {onLogout ? <Button type="button" variant="ghost" size="small" onClick={onLogout}>Sign out</Button> : null}
         </div>
       </aside>
       <main id="creator-main" className="cpv2-main" ref={mainRef}>
-        <CreatorRoute route={route} token={token} request={request} navigate={go} profile={profile} registerNavigationGuard={registerNavigationGuard} />
+        <CreatorRoute route={route} token={token} request={request} navigate={go} profile={profile} locale={locale} registerNavigationGuard={registerNavigationGuard} />
       </main>
     </div>
   );
@@ -127,7 +149,7 @@ function NavButton({ active, children, onClick }) {
   return <NavigationItem active={active} aria-current={active ? "page" : undefined} onClick={onClick}>{children}</NavigationItem>;
 }
 
-function CreatorRoute({ route, token, request, navigate, profile, registerNavigationGuard }) {
+function CreatorRoute({ route, token, request, navigate, profile, locale, registerNavigationGuard }) {
   if (typeof request !== "function") {
     return <RouteProblem title="Creator portal is unavailable" body="A request function is required to load this workspace." />;
   }
@@ -135,6 +157,7 @@ function CreatorRoute({ route, token, request, navigate, profile, registerNaviga
   if (route.kind === "products") return <ProductsPage token={token} request={request} navigate={navigate} />;
   if (route.kind === "task-create" || route.kind === "files") return <CreatorSourceLibrary token={token} taskId={route.taskId} navigate={navigate} />;
   if (route.kind === "factory") return <FactoryPage token={token} request={request} productId={route.productId} runId={route.runId} navigate={navigate} registerNavigationGuard={registerNavigationGuard} />;
+  if (route.kind === "product" && ["files", "about-you", "review", "complete"].includes(route.tab)) return <CreatorProductWorkspace token={token} request={request} navigate={navigate} productId={route.productId} tab={route.tab} locale={locale} />;
   if (route.kind === "product") return <ProductPage token={token} request={request} navigate={navigate} productId={route.productId} tab={route.tab} />;
   if (route.kind === "candidate") return <CreatorReviewPage token={token} request={request} runId={route.candidateId} onBack={() => navigate(`${ROOT}/products/${encodeURIComponent(route.productId)}/factory/${encodeURIComponent(route.candidateId)}`)} onRevision={(run) => navigate(`${ROOT}/products/${encodeURIComponent(route.productId)}/factory/${encodeURIComponent(run.id)}`)} onRelease={() => navigate(`${ROOT}/products/${encodeURIComponent(route.productId)}/preview`)} />;
   if (route.kind === "preview") return <PreviewPage token={token} request={request} navigate={navigate} productId={route.productId} />;

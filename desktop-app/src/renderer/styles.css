@@ -1643,42 +1643,6 @@ h2 {
   overflow: visible;
 }
 
-.composer-control:not(.hui-control) {
-  align-items: center;
-  background: transparent;
-  color: var(--hatch-text-secondary);
-  display: inline-flex;
-  flex: 0 1 auto;
-  font-family: var(--hatch-font-ui);
-  font-size: var(--hatch-type-ui);
-  gap: 6px;
-  min-width: 0;
-  transition: background .12s, border-color .12s, color .12s;
-}
-
-button.composer-control {
-  cursor: pointer;
-}
-
-.composer-control:not(.hui-control):hover,
-.composer-control:not(.hui-control):focus-within,
-button.composer-control:not(.hui-control):focus-visible {
-  background: var(--hatch-panel-muted);
-  border-color: var(--hatch-border-subtle);
-  color: var(--hatch-ink);
-}
-
-.composer-control:not(.hui-control) svg:not(.hui-control-caret) {
-  fill: none;
-  flex: 0 0 16px;
-  height: 16px;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.55;
-  width: 16px;
-}
-
 .send-button,
 .stop-button {
   align-items: center;
@@ -2206,20 +2170,7 @@ button.composer-control:not(.hui-control):focus-visible {
 .profile-menu { flex: 0 0 auto; margin-left: auto; position: relative; }
 
 .profile-settings-button {
-  background: transparent;
-  border: 0;
-  border-radius: 6px;
-  color: var(--text-secondary);
-  min-height: 30px;
-  min-width: 30px;
-  padding: 5px;
-}
-
-.profile-settings-button:hover,
-.profile-settings-button:focus-visible {
-  background: color-mix(in srgb, var(--hatch-ink) 7%, transparent);
-  border-color: transparent;
-  color: var(--hatch-ink);
+  -webkit-app-region: no-drag;
 }
 
 .profile-settings-button > svg {
@@ -2988,11 +2939,6 @@ button.composer-control:not(.hui-control):focus-visible {
   font-size: var(--hatch-type-body);
   min-height: 58px;
   padding: 9px 10px;
-}
-
-.composer-control {
-  color: var(--hatch-ink);
-  font-family: var(--hatch-font-pill);
 }
 
 .send-button,

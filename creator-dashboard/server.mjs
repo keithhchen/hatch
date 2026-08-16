@@ -1248,7 +1248,12 @@ export async function createDashboardApp(options = {}) {
         const body = request.method === "GET"
           ? undefined
           : JSON.stringify(await readJson(request, factoryRequestMaxBytes));
-        const payload = await registryRequest(registryUrl, url.pathname, {
+        // Preserve the Task-scoped query when proxying Source Library reads.
+        // Dropping `?task_id=...` makes the registry return documents from
+        // multiple Tasks, after which Snapshot creation correctly rejects the
+        // mixed set. The user should never see that implementation detail.
+        const registryPath = `${url.pathname}${url.search}`;
+        const payload = await registryRequest(registryUrl, registryPath, {
           method: request.method,
           ...(body === undefined ? {} : { body }),
           fetchImpl,

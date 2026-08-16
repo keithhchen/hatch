@@ -28,6 +28,7 @@ export type DistillationTaskRepository = {
   createTask(input: CreateDistillationTaskInput): Promise<DistillationTaskRecord>;
   getTask(creatorId: string, taskId: string): Promise<DistillationTaskRecord | undefined>;
   listTasks(creatorId: string): Promise<DistillationTaskRecord[]>;
+  updateTaskBrief(creatorId: string, taskId: string, input: { brief: string; expectedUpdatedAt?: string }): Promise<DistillationTaskRecord>;
   softDeleteTask(creatorId: string, taskId: string): Promise<DistillationTaskRecord>;
   setTaskRevision(creatorId: string, taskId: string, input: { runId: string; revisionId: string; productId: string }): Promise<DistillationTaskRecord>;
 };
@@ -37,6 +38,7 @@ export function isDistillationTaskRepository(value: unknown): value is Distillat
     && typeof (value as { createTask?: unknown }).createTask === "function"
     && typeof (value as { getTask?: unknown }).getTask === "function"
     && typeof (value as { listTasks?: unknown }).listTasks === "function"
+    && typeof (value as { updateTaskBrief?: unknown }).updateTaskBrief === "function"
     && typeof (value as { softDeleteTask?: unknown }).softDeleteTask === "function"
     && typeof (value as { setTaskRevision?: unknown }).setTaskRevision === "function");
 }

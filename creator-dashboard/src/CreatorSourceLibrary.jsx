@@ -70,7 +70,10 @@ export function CreatorSourceLibrary({ token, taskId, navigate }) {
     setBusy(true); setError("");
     try {
       const run = await startFactoryRunFromSources(token, task, documents.map((document) => document.id));
-      navigate(`/studio/factory/runs/${encodeURIComponent(run.id)}`);
+      const productId = run.product_id ?? run.product?.id ?? task.product_id;
+      navigate(productId
+        ? `/studio/products/${encodeURIComponent(productId)}/about-you`
+        : `/studio/factory/runs/${encodeURIComponent(run.id)}`);
     } catch (nextError) { setError(nextError.message); }
     finally { setBusy(false); }
   }

@@ -44,6 +44,9 @@
 .cpv2-account small { margin-top: 2px; color: var(--hatch-text-secondary, #74675e); font-size: var(--hatch-type-meta); }
 .cpv2-account button { grid-column: 1 / -1; min-height: 44px; border: 0; border-radius: 9px; background: transparent; color: var(--hatch-text-secondary, #74675e); text-align: left; }
 .cpv2-account button:hover { color: var(--hatch-accent, #d65f3b); }
+.cpv2-language-picker { grid-column: 1 / -1; display: block; min-width: 0; }
+.cpv2-language-select { width: 100%; min-width: 0; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 .cpv2-main { width: min(1260px, 100%); min-width: 0; padding: 55px clamp(26px, 5vw, 72px) 90px; }
 .cpv2-kicker { display: none; }

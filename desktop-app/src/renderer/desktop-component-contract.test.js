@@ -25,6 +25,7 @@ describe("desktop component presentation contract", () => {
     expect(shellSource).toMatch(/<IconButton[\s\S]*className="chrome-icon-button toolbar-overflow-toggle"/);
     expect(shellSource).toMatch(/<IconButton[\s\S]*className="chrome-icon-button inspector-toggle"/);
     expect(shellSource).not.toMatch(/<button\s+[^>]*className="chrome-icon-button"/);
+    expect(source).toMatch(/<IconButton[\s\S]*className="profile-settings-button"[\s\S]*surface="raised"/);
   });
 
   it("uses shared navigation and button primitives for high-frequency sidebar actions", () => {

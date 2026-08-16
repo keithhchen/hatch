@@ -241,7 +241,7 @@ function DesktopAuxiliaryWindow({ kind }) {
           <p className="desktop-auxiliary-lede">Creator agents, on your terms.</p>
           <p>Hatch keeps the desktop boundary native while React renders the conversation work surface.</p>
           <dl className="desktop-auxiliary-facts">
-            <div><dt>Version</dt><dd>0.1.9</dd></div>
+            <div><dt>Version</dt><dd>0.1.10</dd></div>
             <div><dt>Architecture</dt><dd>Tauri Hybrid</dd></div>
           </dl>
         </section>
@@ -2088,7 +2088,7 @@ function App() {
         entitlement_id: targetEntitlementId,
         ...(targetProductId ? { product_id: targetProductId } : {}),
         ...(targetCreatorId ? { creator_id: targetCreatorId } : {}),
-        client_version: "0.1.9",
+        client_version: "0.1.10",
         local_tools: [...PLATFORM_LOCAL_TOOLS],
       }));
     });
@@ -3660,7 +3660,7 @@ function DesktopSidebar({
         <div className="profile-menu">
           <DropdownMenu
             label={t("account.menu")}
-            trigger={<IconButton className="profile-settings-button" label={t("settings.open")} size="small"><Settings aria-hidden="true" /></IconButton>}
+            trigger={<IconButton className="profile-settings-button" label={t("settings.open")} size="small" surface="raised"><Settings aria-hidden="true" /></IconButton>}
             items={[
               { value: "settings", label: t("settings.title"), onSelect: () => onOpenSettings?.() },
               { type: "separator" },
@@ -3879,7 +3879,8 @@ function ComposerControls({ droppedFiles = [], workspace, workspaceGranted, perm
         <ButtonControl
           aria-label={t("accessibility.chooseWorkspaceFolder")}
           className="composer-control"
-          variant="secondary"
+          size="compact"
+          surface="raised"
           leading={<WorkspaceIcon />}
           trailing={<ChevronDown className="hui-control-caret" aria-hidden="true" />}
           title={workspace || t("workspace.chooseFolder")}
@@ -3890,6 +3891,8 @@ function ComposerControls({ droppedFiles = [], workspace, workspaceGranted, perm
         </ButtonControl>
         <SelectControl
           className="composer-control"
+          size="compact"
+          surface="raised"
           title={permissionMode === "allow-changes" ? t("permission.allowChangesDetail") : t("permission.askBeforeChangesDetail")}
           aria-label={t("accessibility.workspacePermissions")}
           leading={<ShieldIcon />}

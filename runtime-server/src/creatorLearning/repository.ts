@@ -32,6 +32,14 @@ export type PendingCreatorAnswers = {
   submittedAt?: string;
 };
 
+export type SaveFactoryAnswerDraftInput = {
+  creatorId: string;
+  runId: string;
+  answers: PendingCreatorAnswers;
+  expectedVersion?: number;
+  now?: string;
+};
+
 type AnswerSubmissionReceipt = {
   answerDigest: string;
   questionBatchId?: string;
@@ -47,6 +55,8 @@ export type FactoryRunRecord = {
   factoryStage?: FactoryStage;
   state?: FactoryRunState;
   pendingAnswers?: PendingCreatorAnswers;
+  /** Durable, partial Creator answers kept while the UI advances a carousel. */
+  answerDrafts?: PendingCreatorAnswers;
   version: number;
   nextAttemptAt?: string;
   leaseOwner?: string;
@@ -140,6 +150,7 @@ export interface CreatorFactoryRepository {
   assertLease(input: FactoryLeaseInput): Promise<void>;
   heartbeat(input: HeartbeatFactoryRunInput): Promise<FactoryRunRecord>;
   submitAnswers(input: SubmitFactoryAnswersInput): Promise<FactoryRunRecord>;
+  saveAnswerDraft(input: SaveFactoryAnswerDraftInput): Promise<FactoryRunRecord>;
   retry(input: RetryFactoryRunInput): Promise<FactoryRunRecord>;
   complete(input: CompleteFactoryRunInput): Promise<FactoryRunRecord>;
   fail(input: FailFactoryRunInput): Promise<FactoryRunRecord>;
@@ -193,6 +204,20 @@ export class InMemoryCreatorFactoryRepository implements CreatorFactoryRepositor
       .filter((task) => task.creatorId === creatorId && task.status !== "deleted")
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id))
       .map(cloneJson);
+  }
+
+  async updateTaskBrief(creatorId: string, taskId: string, input: { brief: string; expectedUpdatedAt?: string }): Promise<DistillationTaskRecord> {
+    return this.write(async () => {
+      const task = this.tasks.get(taskId);
+      if (!task || task.creatorId !== creatorId) throw new CreatorFactoryRepositoryError("run_not_found", `Distillation Task ${taskId} was not found`);
+      if (task.status !== "active") throw new CreatorFactoryRepositoryError("invalid_status", `Distillation Task ${taskId} is deleted`);
+      if (input.expectedUpdatedAt && task.updatedAt !== input.expectedUpdatedAt) {
+        throw new CreatorFactoryRepositoryError("version_conflict", `Distillation Task ${taskId} changed; refresh before saving`);
+      }
+      task.brief = validateTaskText(input.brief, "task.brief");
+      task.updatedAt = new Date().toISOString();
+      return cloneJson(task);
+    });
   }
 
   async softDeleteTask(creatorId: string, taskId: string): Promise<DistillationTaskRecord> {
@@ -359,6 +384,28 @@ export class InMemoryCreatorFactoryRepository implements CreatorFactoryRepositor
     });
   }
 
+  async saveAnswerDraft(input: SaveFactoryAnswerDraftInput): Promise<FactoryRunRecord> {
+    return this.write(async () => {
+      const run = this.runs.get(input.runId);
+      if (!run || run.creatorId !== input.creatorId) {
+        throw new CreatorFactoryRepositoryError("run_not_found", `Factory run ${input.runId} was not found`);
+      }
+      if (input.expectedVersion !== undefined && input.expectedVersion !== run.version) {
+        throw new CreatorFactoryRepositoryError("version_conflict", `Factory run ${run.id} is at version ${run.version}`);
+      }
+      if (run.status !== "waiting_for_creator" || run.state?.stage !== "awaiting_creator_answers") {
+        throw new CreatorFactoryRepositoryError("invalid_status", `Factory run ${run.id} is not waiting for Creator answers`);
+      }
+      const questionBatchId = requireNonEmpty(input.answers.questionBatchId ?? "", "question_batch_id");
+      assertQuestionBatchMatch(run, questionBatchId);
+      const normalized = normalizeAnswers(input.answers, parsedNow(input.now));
+      run.answerDrafts = normalized;
+      run.version += 1;
+      run.updatedAt = iso(parsedNow(input.now));
+      return cloneRun(run);
+    });
+  }
+
   async retry(input: RetryFactoryRunInput): Promise<FactoryRunRecord> {
     return this.write(async () => {
       const run = this.runs.get(input.runId);
@@ -390,6 +437,7 @@ export class InMemoryCreatorFactoryRepository implements CreatorFactoryRepositor
       run.factoryStage = input.state.stage;
       run.state = cloneJson(input.state);
       run.pendingAnswers = undefined;
+      run.answerDrafts = undefined;
       run.nextAttemptAt = undefined;
       run.leaseOwner = undefined;
       run.leaseToken = undefined;
@@ -479,6 +527,7 @@ CREATE TABLE IF NOT EXISTS hatch_creator_factory_runs (
   factory_stage TEXT,
   state_summary JSONB,
   pending_answers JSONB,
+  answer_drafts JSONB,
   answer_submissions JSONB NOT NULL DEFAULT '{}'::jsonb,
   version BIGINT NOT NULL DEFAULT 1,
   next_attempt_at TIMESTAMPTZ,
@@ -495,6 +544,8 @@ ALTER TABLE hatch_creator_factory_runs
   ADD COLUMN IF NOT EXISTS input_digest TEXT;
 ALTER TABLE hatch_creator_factory_runs
   ADD COLUMN IF NOT EXISTS answer_submissions JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE hatch_creator_factory_runs
+  ADD COLUMN IF NOT EXISTS answer_drafts JSONB;
 ALTER TABLE hatch_creator_distillation_tasks
   ADD COLUMN IF NOT EXISTS latest_revision_id TEXT;
 ALTER TABLE hatch_creator_distillation_tasks
@@ -592,6 +643,24 @@ export class PostgresCreatorFactoryRepository implements CreatorFactoryRepositor
       ORDER BY updated_at DESC, id ASC
     `, [creatorId]);
     return result.rows.map(taskFromRow);
+  }
+
+  async updateTaskBrief(creatorId: string, taskId: string, input: { brief: string; expectedUpdatedAt?: string }): Promise<DistillationTaskRecord> {
+    await this.initialize();
+    const brief = validateTaskText(input.brief, "task.brief");
+    const result = await this.pool.query<TaskRow>(`
+      UPDATE hatch_creator_distillation_tasks
+      SET brief = $3, updated_at = clock_timestamp()
+      WHERE id = $1 AND creator_id = $2 AND status = 'active'
+        AND ($4::timestamptz IS NULL OR updated_at = $4::timestamptz)
+      RETURNING *
+    `, [taskId, creatorId, brief, input.expectedUpdatedAt ?? null]);
+    if (!result.rows[0]) {
+      const current = await this.getTask(creatorId, taskId);
+      if (!current) throw new CreatorFactoryRepositoryError("run_not_found", `Distillation Task ${taskId} was not found`);
+      throw new CreatorFactoryRepositoryError("version_conflict", `Distillation Task ${taskId} changed; refresh before saving`);
+    }
+    return taskFromRow(result.rows[0]);
   }
 
   async softDeleteTask(creatorId: string, taskId: string): Promise<DistillationTaskRecord> {
@@ -832,6 +901,48 @@ export class PostgresCreatorFactoryRepository implements CreatorFactoryRepositor
     throw new CreatorFactoryRepositoryError("invalid_status", `Factory run ${current.id} is not waiting for Creator answers`);
   }
 
+  async saveAnswerDraft(input: SaveFactoryAnswerDraftInput): Promise<FactoryRunRecord> {
+    await this.initialize();
+    const now = parsedNow(input.now);
+    const drafts = normalizeAnswers(input.answers, now);
+    const batchId = requireNonEmpty(drafts.questionBatchId ?? "", "question_batch_id");
+    const result = await this.pool.query<FactoryRunRow>(`
+      WITH timing AS (
+        SELECT COALESCE($4::timestamptz, clock_timestamp()) AS now_at
+      )
+      UPDATE hatch_creator_factory_runs
+      SET answer_drafts = $3::jsonb,
+          version = version + 1,
+          updated_at = timing.now_at
+      FROM timing
+      WHERE id = $1
+        AND creator_id = $2
+        AND status = 'waiting_for_creator'
+        AND factory_stage = 'awaiting_creator_answers'
+        AND ($5::bigint IS NULL OR version = $5::bigint)
+        AND state_summary #>> '{artifacts,currentQuestionBatch,batchId}' = $6::text
+      RETURNING *
+    `, [
+      input.runId,
+      input.creatorId,
+      JSON.stringify(drafts),
+      input.now ? iso(input.now) : null,
+      input.expectedVersion ?? null,
+      batchId
+    ]);
+    if (result.rows[0]) return runFromRow(result.rows[0]);
+    const currentRow = await this.findRowForCreator(input.creatorId, input.runId);
+    if (!currentRow) throw new CreatorFactoryRepositoryError("run_not_found", `Factory run ${input.runId} was not found`);
+    const current = runFromRow(currentRow);
+    if (input.expectedVersion !== undefined && current.version !== input.expectedVersion) {
+      throw new CreatorFactoryRepositoryError("version_conflict", `Factory run ${current.id} is at version ${current.version}`);
+    }
+    if (current.status !== "waiting_for_creator") {
+      throw new CreatorFactoryRepositoryError("invalid_status", `Factory run ${current.id} is not waiting for Creator answers`);
+    }
+    throw new CreatorFactoryRepositoryError("version_conflict", `Creator answer draft targets a stale Question batch`);
+  }
+
   async retry(input: RetryFactoryRunInput): Promise<FactoryRunRecord> {
     await this.initialize();
     const result = await this.pool.query<FactoryRunRow>(`
@@ -872,6 +983,7 @@ export class PostgresCreatorFactoryRepository implements CreatorFactoryRepositor
           factory_stage = $5,
           state_summary = $6::jsonb,
           pending_answers = NULL,
+          answer_drafts = NULL,
           next_attempt_at = NULL,
           lease_owner = NULL,
           lease_token = NULL,
@@ -962,6 +1074,7 @@ type FactoryRunRow = QueryResultRow & {
   factory_stage: FactoryStage | null;
   state_summary: FactoryRunState | string | null;
   pending_answers: PendingCreatorAnswers | string | null;
+  answer_drafts?: PendingCreatorAnswers | string | null;
   answer_submissions?: Record<string, AnswerSubmissionReceipt> | string | null;
   version: string | number;
   next_attempt_at: string | Date | null;
@@ -1014,6 +1127,7 @@ function runFromRow(row: FactoryRunRow): FactoryRunRecord {
     ...(row.factory_stage ? { factoryStage: row.factory_stage } : {}),
     ...(row.state_summary ? { state: parseJson<FactoryRunState>(row.state_summary) } : {}),
     ...(row.pending_answers ? { pendingAnswers: parseJson<PendingCreatorAnswers>(row.pending_answers) } : {}),
+    ...(row.answer_drafts ? { answerDrafts: parseJson<PendingCreatorAnswers>(row.answer_drafts) } : {}),
     version: Number(row.version),
     ...(row.next_attempt_at ? { nextAttemptAt: iso(row.next_attempt_at) } : {}),
     ...(row.lease_owner ? { leaseOwner: row.lease_owner } : {}),

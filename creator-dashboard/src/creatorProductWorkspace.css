@@ -1,0 +1,419 @@
+.cpv2-product-workspace {
+  width: min(100%, 1080px);
+  margin: 0 auto;
+  padding: 36px 40px 72px;
+}
+
+.cpv2-workspace-topline,
+.cpv2-workspace-tabs,
+.cpv2-panel-heading,
+.cpv2-workspace-actions,
+.cpv2-complete-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.cpv2-workspace-topline {
+  border-bottom: 1px solid var(--hatch-border, rgba(24, 22, 20, .12));
+  padding-bottom: 18px;
+}
+
+.cpv2-back-link {
+  border: 0;
+  background: transparent;
+  color: var(--hatch-text-muted, #766f67);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+
+.cpv2-version-browser {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.cpv2-version-browser label {
+  color: var(--hatch-text-muted, #766f67);
+  font-size: .86rem;
+}
+
+.cpv2-version-browser select {
+  background: var(--hatch-surface, #fffdf9);
+  border: 1px solid var(--hatch-border, rgba(24, 22, 20, .16));
+  border-radius: 10px;
+  color: var(--hatch-text, #161412);
+  font: inherit;
+  min-width: 180px;
+  padding: 10px 12px;
+}
+
+.cpv2-workspace-header {
+  margin: 34px 0 28px;
+}
+
+.cpv2-workspace-header p {
+  max-width: 760px;
+}
+
+.cpv2-product-promise {
+  background: var(--hatch-surface, #fffdf9);
+  border: 1px solid var(--hatch-border, rgba(24, 22, 20, .12));
+  border-radius: 14px;
+  margin: 0 0 28px;
+  padding: 20px;
+}
+
+.cpv2-product-promise .hui-button {
+  margin-top: 12px;
+}
+
+.cpv2-workspace-tabs {
+  border-bottom: 1px solid var(--hatch-border, rgba(24, 22, 20, .12));
+  justify-content: flex-start;
+  margin-bottom: 28px;
+}
+
+.cpv2-workspace-tabs button {
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--hatch-text-muted, #766f67);
+  cursor: pointer;
+  font: inherit;
+  padding: 0 2px 13px;
+  margin-right: 28px;
+}
+
+.cpv2-workspace-tabs button.is-active {
+  border-bottom-color: var(--hatch-accent, #df5e36);
+  color: var(--hatch-text, #161412);
+}
+
+.cpv2-workspace-panel {
+  background: var(--hatch-surface, #fffdf9);
+  border: 1px solid var(--hatch-border, rgba(24, 22, 20, .12));
+  border-radius: 18px;
+  box-shadow: 0 12px 35px rgba(42, 33, 24, .06);
+  padding: 28px;
+}
+
+.cpv2-panel-heading {
+  align-items: flex-start;
+  margin-bottom: 24px;
+}
+
+.cpv2-panel-heading h2,
+.cpv2-panel-heading h3 {
+  margin: 0;
+}
+
+.cpv2-panel-heading p {
+  color: var(--hatch-text-muted, #766f67);
+  margin: 8px 0 0;
+}
+
+.cpv2-upload-button {
+  align-items: center;
+  background: var(--hatch-surface, #fffdf9);
+  border: 1px solid var(--hatch-border, rgba(24, 22, 20, .16));
+  border-radius: 9px;
+  cursor: pointer;
+  display: inline-flex;
+  font-weight: 600;
+  padding: 10px 14px;
+  white-space: nowrap;
+}
+
+.cpv2-upload-button input {
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+  position: absolute;
+  width: 1px;
+}
+
+.cpv2-file-list {
+  border-top: 1px solid var(--hatch-border, rgba(24, 22, 20, .1));
+}
+
+.cpv2-file-row {
+  align-items: center;
+  border-bottom: 1px solid var(--hatch-border, rgba(24, 22, 20, .1));
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 0;
+}
+
+.cpv2-file-row strong,
+.cpv2-file-row small {
+  display: block;
+}
+
+.cpv2-file-row small,
+.cpv2-source-note,
+.cpv2-empty-inline,
+.cpv2-save-status {
+  color: var(--hatch-text-muted, #766f67);
+  font-size: .9rem;
+}
+
+.cpv2-file-row small {
+  margin-top: 4px;
+}
+
+.cpv2-source-note {
+  margin: 18px 0 0;
+}
+
+.cpv2-workspace-actions {
+  justify-content: flex-start;
+  margin-top: 24px;
+}
+
+.cpv2-carousel-nav {
+  display: flex;
+  gap: 8px;
+}
+
+.cpv2-carousel-nav button {
+  align-items: center;
+  background: var(--hatch-surface, #fffdf9);
+  border: 1px solid var(--hatch-border, rgba(24, 22, 20, .16));
+  border-radius: 50%;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 1.2rem;
+  height: 36px;
+  justify-content: center;
+  width: 36px;
+}
+
+.cpv2-carousel-nav button:disabled {
+  cursor: not-allowed;
+  opacity: .35;
+}
+
+.cpv2-about-question,
+.cpv2-review-case {
+  border-top: 1px solid var(--hatch-border, rgba(24, 22, 20, .12));
+  padding-top: 26px;
+}
+
+.cpv2-about-question h3 {
+  font-size: clamp(1.3rem, 2.4vw, 2rem);
+  line-height: 1.16;
+  margin: 0 0 24px;
+  max-width: 760px;
+}
+
+.cpv2-about-columns,
+.cpv2-review-columns {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.cpv2-about-columns article,
+.cpv2-review-columns article,
+.cpv2-current-response,
+.cpv2-correction-form {
+  background: var(--hatch-soft-surface, #f3eee7);
+  border-radius: 14px;
+  padding: 20px;
+}
+
+.cpv2-about-columns article.is-answer {
+  background: #fff7f0;
+  border: 1px solid rgba(223, 94, 54, .35);
+}
+
+.cpv2-about-columns article > span,
+.cpv2-review-columns article > span,
+.cpv2-current-response > span {
+  color: var(--hatch-text-muted, #766f67);
+  display: block;
+  font-size: .75rem;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.cpv2-about-columns h4 {
+  margin: 10px 0 0;
+}
+
+.cpv2-about-columns p,
+.cpv2-review-columns p {
+  line-height: 1.55;
+  margin: 14px 0 0;
+  white-space: pre-wrap;
+}
+
+.cpv2-review-columns {
+  grid-template-columns: minmax(0, 1.6fr) minmax(220px, .8fr);
+}
+
+.cpv2-current-response {
+  margin-top: 16px;
+  max-height: 360px;
+  overflow: auto;
+}
+
+.cpv2-current-response > div {
+  line-height: 1.6;
+  margin-top: 12px;
+  white-space: pre-wrap;
+}
+
+.cpv2-eval-note {
+  border: 1px solid rgba(24, 22, 20, .1);
+  border-radius: 12px;
+  margin-top: 16px;
+  padding: 15px 18px;
+}
+
+.cpv2-eval-note.is-pass {
+  background: #edf5ee;
+  border-color: #9db8a0;
+}
+
+.cpv2-eval-note.is-fail {
+  background: #fff1eb;
+  border-color: #df9a7f;
+}
+
+.cpv2-eval-note p {
+  margin: 6px 0 0;
+}
+
+.cpv2-review-actions {
+  border-top: 1px solid var(--hatch-border, rgba(24, 22, 20, .12));
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 22px;
+  padding-top: 22px;
+}
+
+.cpv2-review-actions .is-success {
+  background: #3f805d;
+  border-color: #3f805d;
+  color: #fff;
+}
+
+.cpv2-correction-form {
+  margin-top: 22px;
+}
+
+.cpv2-correction-form .hui-form-field + .hui-form-field {
+  margin-top: 16px;
+}
+
+.cpv2-corpus-preview {
+  border-top: 1px solid var(--hatch-border, rgba(24, 22, 20, .12));
+  margin-top: 28px;
+  padding-top: 24px;
+}
+
+.cpv2-corpus-preview .cpv2-panel-heading {
+  margin-bottom: 12px;
+}
+
+.cpv2-corpus-preview code {
+  color: var(--hatch-text-muted, #766f67);
+  font-size: .75rem;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cpv2-corpus-preview details {
+  border-top: 1px solid var(--hatch-border, rgba(24, 22, 20, .1));
+  padding: 12px 0;
+}
+
+.cpv2-corpus-preview pre {
+  background: #f6f2ed;
+  border-radius: 8px;
+  max-height: 280px;
+  overflow: auto;
+  padding: 14px;
+  white-space: pre-wrap;
+}
+
+.cpv2-product-detail-preview {
+  background: var(--hatch-soft-surface, #f3eee7);
+  border-radius: 14px;
+  padding: 24px;
+}
+
+.cpv2-product-detail-preview h3 {
+  font-size: clamp(1.5rem, 3vw, 2.4rem);
+  margin: 0;
+}
+
+.cpv2-product-detail-preview p {
+  color: var(--hatch-text-muted, #766f67);
+  line-height: 1.55;
+  max-width: 680px;
+}
+
+.cpv2-complete-actions {
+  border-top: 1px solid var(--hatch-border, rgba(24, 22, 20, .12));
+  justify-content: flex-start;
+  margin-top: 24px;
+  padding-top: 24px;
+}
+
+.cpv2-loading,
+.cpv2-workspace-error {
+  margin: 48px auto;
+  max-width: 720px;
+  padding: 32px;
+}
+
+@media (max-width: 760px) {
+  .cpv2-product-workspace {
+    padding: 24px 18px 48px;
+  }
+
+  .cpv2-workspace-topline,
+  .cpv2-panel-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .cpv2-version-browser {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .cpv2-version-browser select {
+    flex: 1;
+  }
+
+  .cpv2-workspace-panel {
+    padding: 20px;
+  }
+
+  .cpv2-about-columns,
+  .cpv2-review-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .cpv2-workspace-tabs {
+    gap: 20px;
+    overflow-x: auto;
+  }
+
+  .cpv2-workspace-tabs button {
+    margin-right: 0;
+    white-space: nowrap;
+  }
+}

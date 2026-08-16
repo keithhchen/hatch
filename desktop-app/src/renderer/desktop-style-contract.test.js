@@ -90,6 +90,12 @@ describe("desktop system appearance contract", () => {
     expect(stylesheet).not.toMatch(/\.composer-settings\s*\{[^}]*display:\s*none/);
   });
 
+  it("keeps profile settings on the shared raised control surface", () => {
+    expect(stylesheet).toMatch(/\.profile-settings-button\s*\{[\s\S]*?-webkit-app-region:\s*no-drag;/);
+    expect(stylesheet).not.toMatch(/\.profile-settings-button\s*\{[^}]*background:\s*transparent/);
+    expect(stylesheet).not.toMatch(/\.profile-settings-button:hover[\s\S]*?background:\s*color-mix/);
+  });
+
   it("keeps workspace and permission controls on one shared geometry", () => {
     expect(brandTokens).toMatch(/--hatch-size-control-compact:\s*2rem/);
     expect(brandTokens).toMatch(/--hatch-space-control-compact-inline:\s*0\.625rem/);
@@ -106,12 +112,14 @@ describe("desktop system appearance contract", () => {
     expect(sharedStylesheet).toMatch(
       /\.hui-theme-origin \.hui-control--raised,[\s\S]*?\.hui-theme-material \.hui-control--raised\s*\{[\s\S]*?border-radius:\s*var\(--hatch-radius-control\);[\s\S]*?box-shadow:/
     );
-    expect(stylesheet).toMatch(
-      /\.composer-control:not\(\.hui-control\)\s*\{[\s\S]*?display:\s*inline-flex;[\s\S]*?gap:\s*6px;/
+    expect(sharedStylesheet).toMatch(
+      /\.hui-control--raised\s*\{[\s\S]*?display:\s*inline-flex;[\s\S]*?justify-content:\s*flex-start;[\s\S]*?transition:\s*color var\(--hui-motion-control\)/
     );
+    expect(sharedStylesheet).toMatch(/\.hui-control--raised\.hui-icon-button\s*\{\s*justify-content:\s*center;\s*\}/);
+    expect(stylesheet).not.toMatch(/\.composer-control:not\(\.hui-control\)/);
     expect(stylesheet).not.toMatch(/\.permission-composer-control|\.workspace-composer-control|\.composer-control-select/);
     expect(readFileSync(new URL("./main.jsx", import.meta.url), "utf8")).toMatch(
-      /<ButtonControl[\s\S]*?className="composer-control"[\s\S]*?<SelectControl[\s\S]*?className="composer-control"/
+      /<ButtonControl[\s\S]*?className="composer-control"[\s\S]*?size="compact"[\s\S]*?surface="raised"[\s\S]*?<SelectControl[\s\S]*?className="composer-control"[\s\S]*?size="compact"[\s\S]*?surface="raised"/
     );
   });
 
