@@ -276,7 +276,13 @@ selected contract. Pi owns the model profile, context estimate, compaction
 policy, retries, and output behavior. Use `LLM_API_KEY` for Kimi or
 `DEEPSEEK_API_KEY` for the explicit DeepSeek Factory profile.
 Corpus Evals are the default Creator quality gate. Ordinary Creator products stream Kimi's actual response to the Consumer Desktop. `HATCH_RUNTIME_DELIVERY_AUDIT=enforce` is an optional regulated-deployment override: it performs a second Kimi claim audit before delivery and intentionally withholds text streaming until that audit finishes.
-`OPENAI_BASE_URL` falls back to `https://api.moonshot.cn/v1` and is restricted to official Moonshot endpoints (plus loopback test doubles). Use the `.ai` endpoint only with a matching international Kimi key. If any model override is present, it must be exactly `kimi-k2.6` or startup fails closed.
+`HATCH_LLM_PROFILE` defaults to `kimi-k2.6-no-thinking`; set it explicitly to
+`deepseek-v4-flash` only when the deployment has a valid `DEEPSEEK_API_KEY`.
+There is no implicit provider fallback. For the Kimi profile,
+`OPENAI_BASE_URL` falls back to `https://api.moonshot.cn/v1` and is restricted
+to official Moonshot endpoints (plus loopback test doubles). Use the `.ai`
+endpoint only with a matching international Kimi key. If any Kimi model
+override is present, it must be exactly `kimi-k2.6` or startup fails closed.
 `HATCH_MCP_SERVERS` is optional. When set, the model can call `mcp_call`; the server sends MCP `tools/call` JSON-RPC requests and the client never sees MCP credentials.
 `hatch.web_search` is a Hatch built-in tool. With `HATCH_WEB_SEARCH_PROVIDER=bocha`, Runtime uses the existing CWebSearch contract (`query`, `freshness`, `summary`, `count`) and normalizes Bocha's response to Hatch's stable `{ query, results }` shape. `HATCH_WEB_SEARCH_API_KEY` stays server-side and never enters the Agent Corpus or Desktop. Creator-owned HTTP/MCP tools are resolved exclusively through the Registry Control Plane using `HATCH_REGISTRY_URL` and `HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN`; the Runtime never reads connection URLs or credentials from the Corpus or local environment.
 
