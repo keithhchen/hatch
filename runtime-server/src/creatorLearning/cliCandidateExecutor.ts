@@ -167,8 +167,9 @@ function isolatedChildEnvironment(
   // The candidate receives its binding, Corpus snapshot, transcript store,
   // and conversation repository explicitly. Never let inherited deployment
   // state redirect an eval into Registry, shared databases, commerce, or a
-  // Creator tool/knowledge control plane. Runtime model, output guard, and
-  // ordinary Hatch server-tool credentials remain product-owned and intact.
+  // Creator tool/knowledge control plane. Runtime model and ordinary Hatch
+  // server-tool credentials remain product-owned and intact. The output guard
+  // is set below to off for this private, non-delivery evaluation boundary.
   const isolatedKeys = new Set([
     "HATCH_ENTITLEMENTS_FILE",
     "HATCH_AGENT_CORPUS_ROOT",
@@ -206,6 +207,14 @@ function isolatedChildEnvironment(
   child.PWD = ownedTempRoot;
   child.DOTENV_CONFIG_PATH = safeDotenvPath;
   child.DOTENV_CONFIG_QUIET = "true";
+  // Factory candidate execution is a private evaluation boundary: its output
+  // is never delivered to a buyer or persisted as a Runtime message. The
+  // Alibaba output-disclosure guard belongs at the real buyer delivery
+  // boundary; running it here turns a safe refusal/normal candidate response
+  // into a false Factory execution failure before Eval can judge behavior.
+  // Keep the full Runtime transport, model, state machine, and Corpus path,
+  // but do not let delivery-only filtering become a quality gate.
+  child.HATCH_OUTPUT_GUARD = "off";
   // Candidate knowledge has not been published or indexed yet. Exercise the
   // existing full Runtime against the verified staged Corpus through its
   // explicit corpus-backed knowledge adapter, without touching production

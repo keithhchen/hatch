@@ -394,7 +394,7 @@ test("Factory candidate child cannot inherit or dotenv-load deployment control-p
     "  }",
     "} catch (error) { registryError = error instanceof Error ? error.message : String(error); }",
     "const leaked = Object.fromEntries(isolatedNames.filter((name) => process.env[name] !== undefined).map((name) => [name, process.env[name]]));",
-    "const observation = {cwd:process.cwd(),pwd:process.env.PWD,dotenvConfigPath:process.env.DOTENV_CONFIG_PATH,dotenvCanary:process.env.HATCH_DOTENV_ATTACK_CANARY,registryConfigured,registryError,leaked,llmApiKey:process.env.LLM_API_KEY,openaiBaseUrl:process.env.OPENAI_BASE_URL,knowledgeMode:process.env.HATCH_KNOWLEDGE_MODE};",
+    "const observation = {cwd:process.cwd(),pwd:process.env.PWD,dotenvConfigPath:process.env.DOTENV_CONFIG_PATH,dotenvCanary:process.env.HATCH_DOTENV_ATTACK_CANARY,registryConfigured,registryError,leaked,llmApiKey:process.env.LLM_API_KEY,openaiBaseUrl:process.env.OPENAI_BASE_URL,knowledgeMode:process.env.HATCH_KNOWLEDGE_MODE,outputGuard:process.env.HATCH_OUTPUT_GUARD};",
     "process.stdout.write(JSON.stringify({ok:true,output:JSON.stringify(observation),runId:'isolated-child-run',corpusDigest:input.corpusDigest,finishReason:'stop',terminalStatus:'completed',protocolEvents:[{type:'turn.completed'},{type:'turn.state',status:'completed'}],protocolTraceTruncated:false}));"
   ].join("\n"), "utf8");
 
@@ -441,6 +441,7 @@ test("Factory candidate child cannot inherit or dotenv-load deployment control-p
     llmApiKey?: string;
     openaiBaseUrl?: string;
     knowledgeMode?: string;
+    outputGuard?: string;
   };
   assert.deepEqual(observation.leaked, {});
   assert.equal(observation.registryConfigured, false);
@@ -455,6 +456,7 @@ test("Factory candidate child cannot inherit or dotenv-load deployment control-p
   assert.equal(observation.llmApiKey, "runtime-llm-key");
   assert.equal(observation.openaiBaseUrl, "https://api.moonshot.cn/v1");
   assert.equal(observation.knowledgeMode, "corpus-test");
+  assert.equal(observation.outputGuard, "off");
 });
 
 async function createMinimalHarnessCorpus(root: string, runId: string) {
