@@ -344,6 +344,7 @@ export class InMemoryCreatorFactoryRepository implements CreatorFactoryRepositor
       candidate.leaseOwner = workerId;
       candidate.leaseToken = randomUUID();
       candidate.leaseExpiresAt = leaseExpiresAt;
+      candidate.lastError = undefined;
       candidate.attempts += 1;
       candidate.version += 1;
       candidate.updatedAt = iso(now);
@@ -881,6 +882,7 @@ export class PostgresCreatorFactoryRepository implements CreatorFactoryRepositor
           lease_owner = $2,
           lease_token = $3,
           lease_expires_at = claimable.now_at + ($4::bigint * interval '1 millisecond'),
+          last_error = NULL,
           attempts = run.attempts + 1,
           version = run.version + 1,
           updated_at = claimable.now_at

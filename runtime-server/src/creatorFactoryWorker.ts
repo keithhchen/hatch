@@ -28,7 +28,10 @@ export async function runCreatorFactoryWorker(environment: NodeJS.ProcessEnv = p
   );
   const worker = new CreatorFactoryWorker(repository, factory, {
     workerId: environment.HATCH_CREATOR_FACTORY_WORKER_ID?.trim() || `factory-${process.pid}-${randomUUID()}`,
-    leaseMs: integerEnvironment(environment.HATCH_CREATOR_FACTORY_LEASE_MS, 10 * 60_000),
+    // Keep the lease above the Factory LLM's 15-minute hard deadline. A
+    // recovery worker must not reclaim a live direct execution merely because
+    // one provider turn is slow.
+    leaseMs: integerEnvironment(environment.HATCH_CREATOR_FACTORY_LEASE_MS, 20 * 60_000),
     heartbeatMs: integerEnvironment(environment.HATCH_CREATOR_FACTORY_HEARTBEAT_MS, 60_000)
   });
   const controller = new AbortController();

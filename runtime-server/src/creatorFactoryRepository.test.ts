@@ -427,7 +427,9 @@ test("expired work can be reclaimed, while failure keeps it durably retryable", 
   assert.equal(failed.status, "queued");
   assert.equal(failed.lastError, "temporary provider failure");
   assert.equal(await repository.claim({ workerId: "early", now: "2026-08-12T00:04:59.000Z" }), undefined);
-  assert.equal((await repository.claim({ workerId: "retry", now: "2026-08-12T00:05:00.000Z" }))?.attempts, 3);
+  const retryClaim = await repository.claim({ workerId: "retry", now: "2026-08-12T00:05:00.000Z" });
+  assert.equal(retryClaim?.attempts, 3);
+  assert.equal(retryClaim?.lastError, undefined, "a new attempt clears the previous transient error");
 });
 
 test("Postgres create binds an idempotency key to the canonical semantic input", async () => {

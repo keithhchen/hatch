@@ -107,7 +107,10 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     ),
     {
       workerId: `factory-http-${process.pid}-${randomUUID()}`,
-      leaseMs: integerEnvironment(environment.HATCH_CREATOR_FACTORY_LEASE_MS, 10 * 60_000),
+      // The direct HTTP starter and the durable recovery worker share this
+      // lease. It must exceed the Factory LLM's 15-minute hard deadline so a
+      // slow prompt is not reclaimed while the request is still executing.
+      leaseMs: integerEnvironment(environment.HATCH_CREATOR_FACTORY_LEASE_MS, 20 * 60_000),
       heartbeatMs: integerEnvironment(environment.HATCH_CREATOR_FACTORY_HEARTBEAT_MS, 60_000)
     }
   );
