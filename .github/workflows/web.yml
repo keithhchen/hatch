@@ -139,9 +139,13 @@ jobs:
             exit 1
           fi
           domain="$(sed -n 's/^HATCH_DOMAIN=//p' /opt/hatch/.env | tail -n 1)"
+          explore_probe="$(mktemp)"
           if ! curl -4 --noproxy '*' --connect-timeout 10 --max-time 30 --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/health/dashboard" >/dev/null \
-            || ! curl -4 --noproxy '*' --connect-timeout 10 --max-time 30 --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/explore" | grep -q 'src="/assets/'; then
+            || ! curl -4 --noproxy '*' --connect-timeout 10 --max-time 30 --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/explore" -o "$explore_probe" \
+            || ! grep -F 'src="/assets/' "$explore_probe" >/dev/null; then
+            rm -f "$explore_probe"
             HATCH_DASHBOARD_IMAGE="$previous_image" "${compose[@]}" up -d --no-deps dashboard
             exit 1
           fi
+          rm -f "$explore_probe"
           rm -f "$override"
