@@ -149,3 +149,5 @@ Do not use a fixture, preview bundle, synthetic entitlement or fake success stat
 | Desktop OS UAT | Real Hatch Desktop build, entitlement, native bridge and Agent |
 
 Only the last two levels can close product UAT. Provider quota, signed browser OAuth, production Postgres/Object Storage and Desktop OS state must be reported separately from green unit tests.
+
+Implementation note: Product mutation CAS compares the Postgres timestamp at the API's millisecond precision; hidden database microseconds must not turn a freshly read Product into a false `version_conflict`.
