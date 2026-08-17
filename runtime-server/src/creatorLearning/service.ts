@@ -1373,34 +1373,38 @@ export class CreatorFactoryService {
  */
 function workflowStepForRun(run: FactoryRunRecord): CreatorWorkflowStep {
   const state = run.state;
-  const revision = Boolean(run.input.parentRevisionId || run.input.reviewContext);
+  // A Product version created from Files may have a parent revision, but it
+  // still follows the normal Files -> About You -> Review path.  Only a run
+  // carrying immutable reviewContext is a Review correction/rerun and should
+  // stay on the Review step while its provider turn is running.
+  const reviewRerun = Boolean(run.input.reviewContext);
   if (run.status === "needs_attention") {
-    return workflowStepForFactoryStage(state?.retryStage ?? run.factoryStage ?? state?.stage, revision, state);
+    return workflowStepForFactoryStage(state?.retryStage ?? run.factoryStage ?? state?.stage, reviewRerun, state);
   }
   if (run.status === "queued" || run.status === "running") {
-    if (run.pendingAnswers) return revision ? "review" : "about-you";
-    return workflowStepForFactoryStage(run.factoryStage ?? state?.stage, revision, state);
+    if (run.pendingAnswers) return reviewRerun ? "review" : "about-you";
+    return workflowStepForFactoryStage(run.factoryStage ?? state?.stage, reviewRerun, state);
   }
   if (state?.stage === "awaiting_creator_answers") return "about-you";
   if (state?.stage === "review_required" || state?.stage === "ready") return "review";
-  return workflowStepForFactoryStage(run.factoryStage ?? state?.stage, revision, state);
+  return workflowStepForFactoryStage(run.factoryStage ?? state?.stage, reviewRerun, state);
 }
 
 function workflowStepForFactoryStage(
   stage: FactoryStage | undefined,
-  revision: boolean,
+  reviewRerun: boolean,
   state: FactoryRunRecord["state"]
 ): CreatorWorkflowStep {
   if (stage === "extracting_evidence") return "files";
   if (stage === "awaiting_creator_answers") return "about-you";
   if (stage === "compiling_corpus" || stage === "evaluating_development" || stage === "evaluating_regression" || stage === "evaluating_heldout") {
-    return revision ? "review" : "about-you";
+    return reviewRerun ? "review" : "about-you";
   }
   if (stage === "review_required" || stage === "ready") return "review";
   if (stage === "needs_attention") {
-    return revision ? "review" : state?.artifacts.currentQuestionBatch ? "about-you" : "files";
+    return reviewRerun ? "review" : state?.artifacts.currentQuestionBatch ? "about-you" : "files";
   }
-  return revision ? "review" : "files";
+  return reviewRerun ? "review" : "files";
 }
 
 function notPublishable(runId: string): CreatorFactoryRepositoryError {

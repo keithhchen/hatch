@@ -79,15 +79,19 @@ function isNeedsAttention(run) {
 
 function workflowStepFallback(run) {
   if (!run) return "files";
+  // The public contract normally supplies workflow_step.  This fallback is
+  // only for older runtimes that do not, so prefer the normal Product path for
+  // generation stages; a review rerun is identified by the server's explicit
+  // retry_stage/workflow_step once the current contract is available.
   const revision = Boolean(run.parent_revision_id || run.revision_number > 1);
   if (run.status === "needs_attention") return stepForStage(run.retry_stage ?? run.stage, revision, run);
   if (isFactoryWorking(run)) {
-    if (run.pending_answers) return revision ? "review" : "about-you";
-    return stepForStage(run.stage, revision, run);
+    if (run.pending_answers) return "about-you";
+    return stepForStage(run.stage, false, run);
   }
   if (run.stage === "awaiting_creator_answers") return "about-you";
   if (run.stage === "review_required" || run.status === "ready") return "review";
-  return stepForStage(run.stage, revision, run);
+  return stepForStage(run.stage, false, run);
 }
 
 function stepForStage(stage, revision, run) {
