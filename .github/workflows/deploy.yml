@@ -137,6 +137,12 @@ jobs:
           test -n "$DEEPSEEK_API_KEY"
           sed -i '/^DEEPSEEK_API_KEY=/d' /opt/hatch/.env
           printf 'DEEPSEEK_API_KEY=%s\n' "$DEEPSEEK_API_KEY" >> /opt/hatch/.env
+          # Creator Factory is explicitly cut over to the verified DeepSeek
+          # profile while the previous Moonshot account is quota-blocked. This
+          # is a deployment choice, not an implicit runtime fallback; the
+          # consumer Runtime keeps its separately configured profile.
+          sed -i '/^HATCH_FACTORY_LLM_PROFILE=/d' /opt/hatch/.env
+          printf 'HATCH_FACTORY_LLM_PROFILE=deepseek-v4-flash\n' >> /opt/hatch/.env
           chmod 600 /opt/hatch/.env
       - name: Ensure deployment service token
         run: |

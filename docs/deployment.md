@@ -20,11 +20,14 @@ or separate production Runtime exists. The server uses two Compose projects:
    DashScope, Postgres, Web Search, and publish-token values.
    Never commit this file or put these values in GitHub Actions.
    The file must also contain the non-empty `HATCH_DATABASE_URL`.
-   Runtime and Creator Factory use Kimi by default. If the Kimi account is
-   unavailable, set both `HATCH_LLM_PROFILE=deepseek-v4-flash` and
-   `HATCH_FACTORY_LLM_PROFILE=deepseek-v4-flash` explicitly and provide a
-   valid `DEEPSEEK_API_KEY`; this is a deployment cutover, not an automatic
-   fallback.
+   Runtime and Creator Factory use Kimi by default in a fresh environment. The
+   current production CD explicitly sets
+   `HATCH_FACTORY_LLM_PROFILE=deepseek-v4-flash` because the previous Creator
+   Factory Moonshot account exhausted its quota; it also installs the
+   server-only `DEEPSEEK_API_KEY`. Runtime keeps its separately configured
+   `HATCH_LLM_PROFILE`. This is a deployment cutover, not an automatic
+   fallback; changing it back requires an explicit profile and a provider
+   quota check.
    This simple deployment uses one database login for all four services.
    It must also contain `HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN` and
    `HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN`.
