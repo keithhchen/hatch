@@ -252,7 +252,7 @@ export function CreatorProductWorkspace({ token, request, productId, runId = "",
     {state.notice ? <InlineAlert tone="success">{state.notice}</InlineAlert> : null}
     {selectedTab === "files" ? <FilesPanel t={t} product={product} documents={documents} busy={state.busy} loading={workflow.steps.files.loading} locked={workflow.working && workflow.current !== "files"} onUpload={upload} onStart={startRun} hasRun={Boolean(run)} /> : null}
     {selectedTab === "about-you" ? <AboutYouPanel t={t} token={token} run={run} busy={state.busy} loading={workflow.steps["about-you"].loading} setBusy={(busy) => setState((current) => ({ ...current, busy }))} onRetry={retryRun} onFiles={() => goTab("files")} onSaved={(nextRun) => { setRun(nextRun); if (nextRun.status === "queued") setState((current) => ({ ...current, notice: t("waiting") })); }} onFinish={(nextRun) => { setRun(nextRun); }} onError={(error) => setState((current) => ({ ...current, error: error.message }))} /> : null}
-    {selectedTab === "review" ? <ReviewPanel t={t} token={token} profile={profile} run={run} review={review} busy={state.busy} loading={workflow.steps.review.loading} setBusy={(busy) => setState((current) => ({ ...current, busy }))} onRetry={retryRun} onFiles={() => goTab("files")} onReviewChanged={setReview} onRerun={(nextRun) => { setRun(nextRun); setReview(null); setSelectedRunId(nextRun.id); }} onComplete={() => goTab("brief")} onError={(error) => setState((current) => ({ ...current, error: error.message }))} /> : null}
+    {selectedTab === "review" ? <ReviewPanel t={t} token={token} profile={profile} run={run} review={review} busy={state.busy} loading={workflow.steps.review.loading} setBusy={(busy) => setState((current) => ({ ...current, busy }))} onRetry={retryRun} onFiles={() => goTab("files")} onReviewChanged={setReview} onRerun={(nextRun) => { setRun(nextRun); setReview(null); setSelectedRunId(nextRun.id); }} onComplete={() => goTab("brief")} onRefresh={refresh} onError={(error) => setState((current) => ({ ...current, error: error.message }))} /> : null}
     {selectedTab === "brief" ? <BriefPanel t={t} token={token} product={product} briefSpec={briefSpec} busy={state.busy} onSaved={(nextProduct) => { const saved = nextProduct?.product ?? nextProduct; setProduct((current) => ({ ...current, ...saved })); setBriefSpec(saved?.brief_spec ?? null); setState((current) => ({ ...current, notice: t("briefSaved") })); }} onError={(error) => setState((current) => ({ ...current, error: error.message }))} /> : null}
     {selectedTab === "complete" ? <CompletePanel t={t} product={product} briefSpec={briefSpec} run={run} review={review} busy={state.busy} setBusy={(busy) => setState((current) => ({ ...current, busy }))} onRetry={retryRun} onRerun={(nextRun) => { setRun(nextRun); setReview(null); setSelectedRunId(nextRun.id); }} onPublished={() => void refresh()} onReview={() => goTab("review")} onBrief={() => goTab("brief")} onFiles={() => goTab("files")} request={request} token={token} productId={productId} /> : null}
   </section>;
@@ -429,7 +429,7 @@ function nextBriefFieldId(fields) {
   return `question-${index}`;
 }
 
-function ReviewPanel({ t, token, profile, run, review, busy, loading, setBusy, onRetry, onFiles, onReviewChanged, onRerun, onComplete, onError }) {
+function ReviewPanel({ t, token, profile, run, review, busy, loading, setBusy, onRetry, onFiles, onReviewChanged, onRerun, onComplete, onRefresh, onError }) {
   const [index, setIndex] = useState(0);
   const [draft, setDraft] = useState({});
   const [removeOpen, setRemoveOpen] = useState({});
@@ -460,6 +460,11 @@ function ReviewPanel({ t, token, profile, run, review, busy, loading, setBusy, o
       setRemoveOpen((current) => ({ ...current, [item.id]: false }));
       if (index < cases.length - 1) setIndex((current) => current + 1);
     } catch (error) {
+      // The provider may settle a candidate between the initial review GET and
+      // this write. Refresh the authoritative projection automatically while
+      // keeping the local correction draft, instead of forcing a manual page
+      // reload or dropping the creator's work.
+      if (error?.status === 409 || error?.code === "version_conflict") await onRefresh?.();
       onError?.(error instanceof Error ? error : new Error("Unable to save this review"));
     } finally {
       setBusy("");
