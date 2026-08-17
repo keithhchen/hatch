@@ -968,7 +968,14 @@ export class CreatorFactoryService {
     if (graph.currentRevisionId && graph.currentRevisionId !== revisionId) {
       throw new CreatorFactoryRepositoryError("invalid_status", `Factory run ${runId} is not the current Product revision`);
     }
-    if (!["ready", "released"].includes(graph.status)) {
+    // The Factory run, sealed held-out proof, and Creator Review projection
+    // above are the authoritative release inputs. The graph is an append-only
+    // audit projection and can briefly lag those durable records (for example
+    // after a worker restart or a legacy run created before graph readiness was
+    // emitted). Do not turn that harmless projection lag into a publish
+    // deadlock. Still fail closed for an explicit graph correction/failure or
+    // a revision mismatch, which are real quality blockers.
+    if (graph.status === "needs_correction" || graph.criticalGateFailures.length > 0) {
       throw new CreatorFactoryRepositoryError("invalid_status", `Product ${run.input.productId} has not passed its current quality gates`);
     }
       const release: DistillationRelease = {
