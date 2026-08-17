@@ -451,6 +451,58 @@ test("Creator can approve a verified candidate, preview, publish, and receive a 
   assert.equal(dashboard.ledger.listEvents().length, 0);
 });
 
+test("Creator release does not dead-end when optional Product boundaries are empty", async (context) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-publish-no-boundaries-"));
+  const publishCalls = [];
+  const registry = registryFixture({
+    role: "creator",
+    factoryRun: {
+      ...readyFactoryRun,
+      product: { ...readyFactoryRun.product, boundaries: [] }
+    },
+    publishCalls
+  });
+  await listen(registry);
+  context.after(() => registry.close());
+  const dashboard = await createDashboardApp({
+    ledgerPath: path.join(directory, "ledger.jsonl"),
+    portalStatePath: path.join(directory, "portal-state.json"),
+    registryUrl: serverUrl(registry),
+    exposeBearerTokens: true
+  });
+  const api = createServer(dashboard.handler);
+  await listen(api);
+  context.after(() => api.close());
+  const token = await login(api);
+  const headers = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+  const productId = catalogAgent.product_id;
+  const candidateId = readyFactoryRun.id;
+  const candidateResponse = await fetch(`${serverUrl(api)}/v1/creator/products/${productId}/candidates/${candidateId}`, { headers });
+  const candidate = (await candidateResponse.json()).candidate;
+  const approvalResponse = await fetch(`${serverUrl(api)}/v1/creator/products/${productId}/candidates/${candidateId}/approve`, {
+    method: "POST",
+    headers: { ...headers, "idempotency-key": "approve-no-boundaries-v1" },
+    body: JSON.stringify({
+      expected_version: candidate.resource_version,
+      report_digest: candidate.report_digest,
+      acknowledgements: candidate.known_losses.map((loss) => loss.id)
+    })
+  });
+  assert.equal(approvalResponse.status, 200);
+  const previewResponse = await fetch(`${serverUrl(api)}/v1/creator/products/${productId}/storefront-preview`, { headers });
+  const preview = await previewResponse.json();
+  assert.equal(preview.readiness.public_copy_complete, true);
+  assert.equal(preview.readiness.ready, true);
+  const publishResponse = await fetch(`${serverUrl(api)}/v1/creator/products/${productId}/publish`, {
+    method: "POST",
+    headers: { ...headers, "idempotency-key": "publish-no-boundaries-v1" },
+    body: JSON.stringify({ candidate_id: candidateId, expected_version: 1 })
+  });
+  assert.equal(publishResponse.status, 201);
+  assert.equal((await publishResponse.json()).product.status, "published");
+  assert.equal(publishCalls.length, 1);
+});
+
 test("unified Release approves the current Factory candidate and publishes once", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-release-command-"));
   const publishCalls = [];
