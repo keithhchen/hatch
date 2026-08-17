@@ -15,7 +15,15 @@ const FACTORY_GENERATION_STAGES = new Set([
  * optimistic hint before the server returns the durable run checkpoint.
  */
 export function deriveCreatorWorkflow({ run, review, briefSpec, busy = "" } = {}) {
-  const generationStep = run?.workflow_step ?? workflowStepFallback(run);
+  // A Files submission can briefly coexist with the previous immutable run
+  // while the POST is in flight.  Do not let that stale run move the spinner
+  // to Review: the action the creator just took is the durable boundary we
+  // are optimistically representing until the new run is returned.
+  const generationStep = busy === "start"
+    ? "files"
+    : busy === "answer"
+      ? "about-you"
+      : run?.workflow_step ?? workflowStepFallback(run);
   const serverWorking = FACTORY_WORKING_STATUSES.has(run?.status);
   const transientWorking = Boolean(busy && ["start", "answer", "retry-run", "rerun"].includes(busy));
   const working = serverWorking || transientWorking;

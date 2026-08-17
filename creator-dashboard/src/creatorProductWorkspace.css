@@ -423,6 +423,33 @@
   padding-top: 24px;
 }
 
+.cpv2-heldout-panel {
+  background: var(--hatch-soft-surface, #f3eee7);
+  border: 1px solid var(--hatch-border, rgba(24, 22, 20, .12));
+  border-radius: 14px;
+  margin-top: 24px;
+  padding: 18px;
+}
+
+.cpv2-heldout-panel .cpv2-panel-heading {
+  margin-bottom: 0;
+}
+
+.cpv2-heldout-panel h3 {
+  margin: 5px 0 0;
+}
+
+.cpv2-heldout-panel p {
+  line-height: 1.5;
+  margin: 8px 0 0;
+}
+
+.cpv2-heldout-form {
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+}
+
 .cpv2-brief-panel {
   display: grid;
   gap: 20px;

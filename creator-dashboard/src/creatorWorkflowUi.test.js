@@ -12,6 +12,17 @@ test("initial Files generation keeps every other step disabled", () => {
   for (const step of ["about-you", "review", "brief", "complete"]) assert.equal(workflow.steps[step].enabled, false);
 });
 
+test("Files submission overrides a stale previous run until the new run arrives", () => {
+  const workflow = deriveCreatorWorkflow({
+    busy: "start",
+    run: { status: "ready", workflow_step: "review", stage: "ready", candidate: {} },
+    review: { release_ready: true }
+  });
+  assert.equal(workflow.current, "files");
+  assert.equal(workflow.steps.files.loading, true);
+  for (const step of ["about-you", "review", "brief", "complete"]) assert.equal(workflow.steps[step].enabled, false);
+});
+
 test("persisted About You questions unlock only About You", () => {
   const workflow = deriveCreatorWorkflow({
     run: { status: "waiting_for_creator", workflow_step: "about-you", stage: "awaiting_creator_answers", pending_questions: [{ id: "q1" }] }
