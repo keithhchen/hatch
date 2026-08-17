@@ -30,7 +30,8 @@ import {
 } from "./creatorRunAttentionUi.js";
 import {
   CREATOR_WORKFLOW_STEPS,
-  deriveCreatorWorkflow
+  deriveCreatorWorkflow,
+  isValidBriefSpec
 } from "./creatorWorkflowUi.js";
 import "./creatorProductWorkspace.css";
 
