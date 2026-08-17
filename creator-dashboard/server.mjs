@@ -577,7 +577,7 @@ export async function createDashboardApp(options = {}) {
           const userId = decodeURIComponent(userAccessMatch[1]);
           const entitlements = commerce.listBuyerEntitlements(userId)
             .filter((entitlement) => entitlement.status === "active")
-            .map(runtimeEntitlementBinding);
+            .map((entitlement) => runtimeEntitlementBinding(entitlement, portalState));
           return send(response, 200, { entitlements });
         }
         const entitlementAccessMatch = url.pathname.match(/^\/v1\/internal\/access\/entitlements\/([^/]+)$/);
@@ -587,7 +587,7 @@ export async function createDashboardApp(options = {}) {
           if (!entitlement || entitlement.status !== "active" || !userId || entitlement.buyer_id !== userId) {
             return send(response, 404, { error: { code: "entitlement_not_found", message: "Entitlement was not found." } });
           }
-          return send(response, 200, { entitlement: runtimeEntitlementBinding(entitlement) });
+          return send(response, 200, { entitlement: runtimeEntitlementBinding(entitlement, portalState) });
         }
         const idempotencyMatch = url.pathname.match(/^\/v1\/internal\/commerce\/idempotency\/(.+)$/);
         if (request.method === "GET" && idempotencyMatch) {
@@ -2845,7 +2845,7 @@ function entitlementAuthorization(entitlement) {
   };
 }
 
-function runtimeEntitlementBinding(entitlement) {
+function runtimeEntitlementBinding(entitlement, portalState) {
   const productId = entitlement.product_id ?? entitlement.agent_id;
   const purchasedCorpusDigest = entitlement.purchased_corpus_digest ?? entitlement.corpus_digest;
   const effectiveCorpusDigest = entitlement.effective_corpus_digest ?? purchasedCorpusDigest;
@@ -2856,6 +2856,18 @@ function runtimeEntitlementBinding(entitlement) {
       409
     );
   }
+  const creatorProduct = portalState?.getCreatorProduct?.(entitlement.creator_id, productId);
+  const releaseCandidates = [
+    creatorProduct?.release,
+    ...(Array.isArray(creatorProduct?.releases) ? creatorProduct.releases : [])
+  ];
+  const releaseSnapshot = releaseCandidates
+    .map((release) => release?.catalog_snapshot)
+    .find((snapshot) => snapshot && (
+      String(snapshot.corpus_digest ?? "") === String(purchasedCorpusDigest)
+      || String(snapshot.release_id ?? "") === String(entitlement.purchased_release_id ?? "")
+    ));
+  const briefSpec = releaseSnapshot?.brief_spec;
   return {
     entitlement_id: entitlement.entitlement_id,
     order_id: entitlement.order_id,
@@ -2870,6 +2882,7 @@ function runtimeEntitlementBinding(entitlement) {
     purchased_corpus_digest: purchasedCorpusDigest,
     effective_corpus_digest: effectiveCorpusDigest,
     version_policy: entitlement.version_policy ?? "pinned",
+    ...(briefSpec ? { brief_spec: structuredClone(briefSpec) } : {}),
     version_history: entitlement.version_history ?? []
   };
 }

@@ -859,7 +859,13 @@ async function route(
     const lease = beginPublishWork(response, context, "registry-publish-service", false);
     if (!lease) return;
     try {
-      sendJson(response, 201, await context.store.publishAgentCorpusBundle(creatorId, agentId, await readBytes(request, MAX_AGENT_CORPUS_BUNDLE_BYTES)));
+      const product = await productForCreator(context, creatorId, agentId);
+      sendJson(response, 201, await context.store.publishAgentCorpusBundle(
+        creatorId,
+        agentId,
+        await readBytes(request, MAX_AGENT_CORPUS_BUNDLE_BYTES),
+        product?.brief_spec,
+      ));
     } catch (error) {
       sendError(response, error, { agent_not_found: [404, "Agent not found."] });
     } finally {
@@ -882,7 +888,12 @@ async function route(
     const lease = beginPublishWork(response, context, `creator:${account.id}`);
     if (!lease) return;
     try {
-      sendJson(response, 201, await context.store.publishAgentCorpusBundle(account.id, agentId, await readBytes(request, MAX_AGENT_CORPUS_BUNDLE_BYTES)));
+      sendJson(response, 201, await context.store.publishAgentCorpusBundle(
+        account.id,
+        agentId,
+        await readBytes(request, MAX_AGENT_CORPUS_BUNDLE_BYTES),
+        product.brief_spec,
+      ));
     } catch (error) {
       sendError(response, error);
     } finally {
