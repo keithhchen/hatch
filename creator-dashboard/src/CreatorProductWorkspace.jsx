@@ -244,7 +244,8 @@ function ProductPromiseForm({ t, token, product, value, onChange, onSaved, onErr
     if (!value.trim() || busy) return;
     setBusy(true);
     try {
-      onSaved(await updateProductPromise(token, product, value));
+      const currentProduct = await latestProductForMutation(token, product);
+      onSaved(await updateProductPromise(token, currentProduct, value));
     } catch (error) {
       onError?.(error instanceof Error ? error : new Error("Unable to save the product promise"));
     } finally {
@@ -252,6 +253,12 @@ function ProductPromiseForm({ t, token, product, value, onChange, onSaved, onErr
     }
   }
   return <form className="cpv2-product-promise" onSubmit={save}><FormField label={t("whatProductDelivers")}><Textarea value={value} onChange={(event) => onChange(event.target.value)} /></FormField><Button type="submit" loading={busy} disabled={!value.trim() || value.trim() === String(product.promise ?? product.description ?? "").trim()}>{t("saveProductPromise")}</Button></form>;
+}
+
+async function latestProductForMutation(token, product) {
+  const productId = product?.id ?? product?.product_id;
+  const response = await getProduct(token, productId);
+  return response?.product ?? response;
 }
 
 function AboutYouPanel({ t, token, run, busy, onRetry, onFiles, onSaved, onFinish, onError }) {
@@ -347,7 +354,12 @@ function BriefPanel({ t, token, product, briefSpec, busy, onSaved, onError }) {
     setSaving(true);
     setError("");
     try {
-      const saved = await saveProductBriefSpec(token, product, { contract_version: "1", fields: normalized });
+      // Review/rerun work can advance the Product updated_at while this form
+      // remains open. Refresh the Product revision immediately before the
+      // CAS write so a normal single-creator flow does not surface a stale
+      // "refresh before saving" error.
+      const currentProduct = await latestProductForMutation(token, product);
+      const saved = await saveProductBriefSpec(token, currentProduct, { contract_version: "1", fields: normalized });
       onSaved(saved);
     } catch (nextError) {
       const errorValue = nextError instanceof Error ? nextError : new Error("Unable to save the Brief");

@@ -3378,11 +3378,16 @@ function publishReadiness(product, state) {
   const noCriticalFailures = Boolean(candidate?.corpus_verified)
     && gates.length > 0
     && gates.every((gate) => gate.passed !== false);
+  // Product boundaries are an optional projection of the Creator's method.
+  // Older Product-only rows (and a newly created Product before its first
+  // corpus revision) legitimately have an empty boundary list because the
+  // authoring contract has no separate boundary editor. Do not make that
+  // optional field a dead-end release gate: the promise and description are
+  // the required public copy, while any supplied boundaries still flow to
+  // Registry and the buyer storefront.
   const copyComplete = Boolean(
     String(product?.promise ?? product?.product_promise ?? "").trim()
     && String(product?.description ?? product?.product_description ?? "").trim()
-    && Array.isArray(product?.boundaries ?? product?.product_boundaries)
-    && (product?.boundaries ?? product?.product_boundaries).length > 0
   );
   const ownershipValid = Boolean(product?.creator_id);
   const materializationReady = Boolean(candidate?.digest && candidate?.corpus_verified);
