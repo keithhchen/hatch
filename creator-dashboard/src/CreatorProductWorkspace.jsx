@@ -223,7 +223,7 @@ export function CreatorProductWorkspace({ token, request, productId, runId = "",
     {selectedTab === "about-you" ? <AboutYouPanel t={t} token={token} run={run} busy={state.busy} onRetry={retryRun} onFiles={() => goTab("files")} onSaved={(nextRun) => { setRun(nextRun); if (nextRun.status === "queued") setState((current) => ({ ...current, notice: t("waiting") })); }} onFinish={(nextRun) => { setRun(nextRun); goTab("review"); }} onError={(error) => setState((current) => ({ ...current, error: error.message }))} /> : null}
     {selectedTab === "review" ? <ReviewPanel t={t} token={token} profile={profile} run={run} review={review} busy={state.busy} setBusy={(busy) => setState((current) => ({ ...current, busy }))} onRetry={retryRun} onFiles={() => goTab("files")} onReviewChanged={setReview} onRerun={(nextRun) => { setRun(nextRun); setReview(null); setSelectedRunId(nextRun.id); goTab("about-you"); }} onComplete={() => goTab("brief")} onError={(error) => setState((current) => ({ ...current, error: error.message }))} /> : null}
     {selectedTab === "brief" ? <BriefPanel t={t} token={token} product={product} briefSpec={briefSpec} busy={state.busy} onSaved={(nextProduct) => { const saved = nextProduct?.product ?? nextProduct; setProduct((current) => ({ ...current, ...saved })); setBriefSpec(saved?.brief_spec ?? null); setState((current) => ({ ...current, notice: t("briefSaved") })); goTab("complete"); }} onError={(error) => setState((current) => ({ ...current, error: error.message }))} /> : null}
-    {selectedTab === "complete" ? <CompletePanel t={t} product={product} briefSpec={briefSpec} run={run} review={review} busy={state.busy} setBusy={(busy) => setState((current) => ({ ...current, busy }))} onRerun={(nextRun) => { setRun(nextRun); setReview(null); setSelectedRunId(nextRun.id); goTab("about-you"); }} onPublished={() => void refresh()} onReview={() => goTab("review")} onBrief={() => goTab("brief")} onFiles={() => goTab("files")} request={request} token={token} productId={productId} /> : null}
+    {selectedTab === "complete" ? <CompletePanel t={t} product={product} briefSpec={briefSpec} run={run} review={review} busy={state.busy} setBusy={(busy) => setState((current) => ({ ...current, busy }))} onRetry={retryRun} onRerun={(nextRun) => { setRun(nextRun); setReview(null); setSelectedRunId(nextRun.id); goTab("about-you"); }} onPublished={() => void refresh()} onReview={() => goTab("review")} onBrief={() => goTab("brief")} onFiles={() => goTab("files")} request={request} token={token} productId={productId} /> : null}
   </section>;
 }
 
@@ -461,7 +461,7 @@ function CorpusPreview({ t, corpus }) {
   return <article className="cpv2-corpus-preview"><div className="cpv2-panel-heading"><h3>{t("fullCorpus")}</h3><code>{corpus.digest}</code></div>{corpus.assets.map((asset) => <details key={`${asset.layer}:${asset.path}`}><summary>{asset.id} · {asset.layer}</summary><pre>{asset.content}</pre></details>)}</article>;
 }
 
-function CompletePanel({ t, product, briefSpec, run, review, busy, setBusy, onRerun, onPublished, onReview, onBrief, onFiles, request, token, productId }) {
+function CompletePanel({ t, product, briefSpec, run, review, busy, setBusy, onRetry, onRerun, onPublished, onReview, onBrief, onFiles, request, token, productId }) {
   const [error, setError] = useState("");
   const [showDetails, setShowDetails] = useState(false);
   const reviewMode = completeReviewMode(review);
@@ -474,6 +474,37 @@ function CompletePanel({ t, product, briefSpec, run, review, busy, setBusy, onRe
     } catch (nextError) { setError(nextError.message); }
     finally { setBusy(""); }
   }
+
+  // Complete is a release decision, not a second progress screen. Keep the
+  // creator on the authoritative run state until the server has produced a
+  // reviewable version; never show a preview that cannot yet be published.
+  if (!run) {
+    return <section className="cpv2-workspace-panel cpv2-complete-panel cpv2-complete-waiting">
+      <StatusTag tone="neutral">{t("waiting")}</StatusTag>
+      <h2>{t("complete")}</h2>
+      <p>{t("noRun")}</p>
+      <div className="cpv2-workspace-actions"><Button type="button" variant="secondary" onClick={onFiles}>{t("addSourceFiles")}</Button></div>
+    </section>;
+  }
+  if (["queued", "running"].includes(run.status)) {
+    return <section className="cpv2-workspace-panel cpv2-complete-panel cpv2-complete-waiting" aria-busy="true">
+      <StatusTag tone="neutral">{t("waiting")}</StatusTag>
+      <h2>{t("versionGenerated")}</h2>
+      <p>{t("waiting")}</p>
+    </section>;
+  }
+  if (runNeedsAttention(run)) {
+    return <RunAttentionPanel t={t} run={run} busy={busy} onRetry={onRetry} onFiles={onFiles} />;
+  }
+  if (!review || (!review.release_ready && !review.rerun_ready)) {
+    return <section className="cpv2-workspace-panel cpv2-complete-panel cpv2-complete-waiting" aria-busy="true">
+      <StatusTag tone="neutral">{t("waiting")}</StatusTag>
+      <h2>{t("versionGenerated")}</h2>
+      <p>{t("waiting")}</p>
+      <div className="cpv2-workspace-actions"><Button type="button" variant="secondary" onClick={onReview}>{t("review")}</Button></div>
+    </section>;
+  }
+
   return <section className="cpv2-workspace-panel cpv2-complete-panel">
     <h2>{t("complete")}</h2>
     <div className="cpv2-product-detail-preview"><h3>{product?.name ?? t("product")}</h3><p>{product?.promise ?? product?.description ?? ""}</p><Button type="button" variant="link" onClick={() => setShowDetails((current) => !current)}>{t("viewProductDetails")}</Button>{showDetails ? <CorpusPreview t={t} corpus={review?.corpus} /> : null}</div>
@@ -486,7 +517,8 @@ function versionStatus(run, t) {
   if (run.status === "ready") return t("complete");
   if (run.status === "waiting_for_creator") return t("aboutYou");
   if (run.stage === "review_required") return t("review");
-  return run.status ?? t("waiting");
+  if (run.status === "needs_attention") return t("versionNeedsAttention");
+  return t("waiting");
 }
 
 function documentId(document) {
