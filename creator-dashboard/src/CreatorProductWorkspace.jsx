@@ -215,8 +215,10 @@ export function CreatorProductWorkspace({ token, request, productId, runId = "",
     setState((current) => ({ ...current, busy: "start", error: "", notice: "" }));
     try {
       const created = await startFactoryRunFromSources(token, product, documents.map(documentId));
-      const createdRun = created?.run ?? created;
-      const nextRun = await getFactoryRun(token, createdRun.id);
+      // The POST response is already the durable queued/running checkpoint.
+      // Use it immediately so the current tab can show its server-backed
+      // loading state without waiting for a second GET round trip.
+      const nextRun = created?.run ?? created;
       setRun(nextRun);
       setSelectedRunId(nextRun.id);
       setRuns((current) => [nextRun, ...current.filter((item) => item.id !== nextRun.id)]);
