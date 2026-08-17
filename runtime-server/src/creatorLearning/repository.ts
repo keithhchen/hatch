@@ -754,7 +754,10 @@ export class PostgresCreatorFactoryRepository implements CreatorFactoryRepositor
       UPDATE hatch_creator_products
       SET promise = $3, updated_at = clock_timestamp()
       WHERE id = $1 AND creator_id = $2 AND status = 'active'
-        AND ($4::timestamptz IS NULL OR updated_at = $4::timestamptz)
+        -- HTTP timestamps are serialized to milliseconds while Postgres
+        -- stores microseconds. Compare at the public precision so a fresh
+        -- Product read is not rejected as stale solely by hidden precision.
+        AND ($4::timestamptz IS NULL OR date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', $4::timestamptz))
       RETURNING *
     `, [productId, creatorId, promise, input.expectedUpdatedAt ?? null]);
     if (!result.rows[0]) {
@@ -772,7 +775,9 @@ export class PostgresCreatorFactoryRepository implements CreatorFactoryRepositor
       UPDATE hatch_creator_products
       SET brief_spec = $3::jsonb, updated_at = clock_timestamp()
       WHERE id = $1 AND creator_id = $2 AND status = 'active'
-        AND ($4::timestamptz IS NULL OR updated_at = $4::timestamptz)
+        -- Keep the same millisecond-precision CAS contract as the Product
+        -- promise mutation; the browser cannot observe Postgres microseconds.
+        AND ($4::timestamptz IS NULL OR date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', $4::timestamptz))
       RETURNING *
     `, [productId, creatorId, JSON.stringify(briefSpec), input.expectedUpdatedAt ?? null]);
     if (!result.rows[0]) {
