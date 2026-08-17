@@ -188,7 +188,12 @@ export class RegistryStoreTs {
     return store;
   }
 
-  async publishAgentCorpusBundle(creatorId: string, agentId: string, bundle: Uint8Array): Promise<PublishedAgentCorpus> {
+  async publishAgentCorpusBundle(
+    creatorId: string,
+    agentId: string,
+    bundle: Uint8Array,
+    briefSpec?: BriefSpec,
+  ): Promise<PublishedAgentCorpus> {
     if (this.publishOutcomeUnknown) throw this.publishOutcomeUnknown;
     const deadline = new PublishDeadline(this.publishTimeoutMs);
     // Quotas, the state-file snapshot, and the filesystem current pointer are
@@ -207,7 +212,7 @@ export class RegistryStoreTs {
       await deadline.wait(previousMutation);
       if (this.publishOutcomeUnknown) throw this.publishOutcomeUnknown;
       deadline.throwIfExpired();
-      return await this.publishAgentCorpusBundleOnce(creatorId, agentId, bundle, deadline);
+      return await this.publishAgentCorpusBundleOnce(creatorId, agentId, bundle, deadline, briefSpec);
     } finally {
       deadline.dispose();
       const deferred = deadline.deferredCompletion();
@@ -221,6 +226,7 @@ export class RegistryStoreTs {
     agentId: string,
     bundle: Uint8Array,
     deadline: PublishDeadline,
+    briefSpec?: BriefSpec,
   ): Promise<PublishedAgentCorpus> {
     const staging = path.join(path.dirname(this.corpusRoot), `.agent-corpus-upload-${randomUUID()}`);
     await mkdir(staging, { recursive: true });
@@ -307,6 +313,11 @@ export class RegistryStoreTs {
         ...(verified.product.description ? { product_description: verified.product.description } : {}),
         ...(verified.product.promise ? { product_promise: verified.product.promise } : {}),
         product_boundaries: verified.product.boundaries,
+        ...(briefSpec
+          ? { brief_spec: normalizeBriefSpec(briefSpec) }
+          : verified.product.brief_spec
+            ? { brief_spec: normalizeBriefSpec(verified.product.brief_spec) }
+            : {}),
         presentation: verified.product.presentation,
         knowledge_namespace: `${verified.creator.id}:${verified.agentId}`,
         status: "published",
