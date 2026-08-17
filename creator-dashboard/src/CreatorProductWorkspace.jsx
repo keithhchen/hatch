@@ -240,7 +240,7 @@ export function CreatorProductWorkspace({ token, request, productId, runId = "",
   if (state.error && !product) return <section className="cpv2-workspace-error"><InlineAlert tone="error">{state.error}</InlineAlert><Button type="button" onClick={() => void refresh()}>{t("retry")}</Button></section>;
 
   return <section className="cpv2-product-workspace">
-    <div className="cpv2-workspace-topline"><button type="button" className="cpv2-back-link" onClick={() => navigate("/studio/products")}>{t("products")}</button><div className="cpv2-version-browser"><span className="cpv2-version-label">{t("browse")}</span><Select id="workspace-version" className="cpv2-version-select" label={t("browse")} value={selectedRunId || "current"} onValueChange={(value) => { if (value !== "current") void selectRun(value); }} disabled={!runs.length || state.busy === "select-run" || workflow.working} size="compact" surface="raised" options={[{ value: "current", label: t("currentVersion") }, ...runs.map((item) => ({ value: item.id, label: t("version", item.revision_number ?? item.version ?? "—", versionStatus(item, t)) }))]} /></div></div>
+    <div className="cpv2-workspace-topline"><button type="button" className="cpv2-back-link" onClick={() => navigate("/studio/products")}>{t("products")}</button><div className="cpv2-version-browser"><span className="cpv2-version-label">{t("browse")}</span><Select id="workspace-version" className="cpv2-version-select" label={t("browse")} value={selectedRunId || "current"} onValueChange={(value) => { if (value !== "current") void selectRun(value); }} disabled={!runs.length || state.busy === "select-run" || workflow.working} size="compact" surface="raised" options={[{ value: "current", label: t("currentVersion") }, ...runs.map((item) => ({ value: item.id, label: t("version", item.revision_number ?? item.version ?? "—", versionStatus(item, t, item.id === selectedRunId ? review : null, item.id === selectedRunId ? briefSpec : null)) }))]} /></div></div>
     <PageHeader className="cpv2-workspace-header" label={product?.status === "published" ? t("published") : t("product")} title={product?.name ?? product?.product_name ?? t("product")} body={product?.promise ?? product?.description ?? ""} />
     {product ? <ProductPromiseForm t={t} token={token} product={product} value={promiseDraft} locked={workflow.working} onChange={setPromiseDraft} onSaved={(nextProduct) => { setProduct(nextProduct?.product ?? nextProduct); setPromiseDraft((nextProduct?.product ?? nextProduct).promise ?? ""); setState((current) => ({ ...current, notice: t("productPromiseSaved") })); }} onError={(error) => setState((current) => ({ ...current, error: error.message }))} /> : null}
     <div className="cpv2-workspace-tabs" role="tablist" aria-label={t("productWorkflow")}>{TAB_KEYS.map((key) => {
@@ -600,10 +600,14 @@ function CompletePanel({ t, product, briefSpec, run, review, busy, setBusy, onRe
   </section>;
 }
 
-function versionStatus(run, t) {
+function versionStatus(run, t, review, briefSpec) {
   // Review is a later durable gate than the initial answer checkpoint.  Some
   // legacy projections retain waiting_for_creator while the sealed review is
   // already available, so workflow_step/stage must win for the selector.
+  if (review) {
+    if (review.release_ready !== true) return t("review");
+    return isValidBriefSpec(briefSpec) ? t("complete") : t("brief");
+  }
   if (run.stage === "review_required") return t("review");
   if (run.status === "ready") return t("complete");
   if (run.workflow_step === "review") return t("review");
