@@ -71,6 +71,16 @@
     handle @desktop_registry_preflight {
         reverse_proxy registry:8100
     }
+    # Context Intake OAuth access tokens are Dashboard-owned opaque grants,
+    # not Registry session bearers. Route only the hatch_at_ token form to the
+    # Dashboard BFF; raw Desktop session tokens continue to reach Registry.
+    @context_oauth_me {
+        path /v1/auth/me
+        header_regexp Authorization ^Bearer[[:space:]]+hatch_at_[A-Za-z0-9_-]+$
+    }
+    handle @context_oauth_me {
+        reverse_proxy dashboard:8500
+    }
     @desktop_registry_bearer {
         path /v1/auth/me /v1/auth/logout
         header Authorization *
