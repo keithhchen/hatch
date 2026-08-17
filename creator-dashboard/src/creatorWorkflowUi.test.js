@@ -66,6 +66,19 @@ test("Review rerun keeps Review loading and locks Brief and Complete", () => {
   assert.equal(workflow.steps.complete.enabled, false);
 });
 
+test("stage-only generation checkpoints restore the matching loading step", () => {
+  const aboutYou = deriveCreatorWorkflow({ run: { status: "running", stage: "about_you_generation" } });
+  assert.equal(aboutYou.current, "about-you");
+  assert.equal(aboutYou.steps["about-you"].loading, true);
+  for (const step of ["review", "brief", "complete"]) assert.equal(aboutYou.steps[step].enabled, false);
+
+  const review = deriveCreatorWorkflow({ run: { status: "running", stage: "review-generation", parent_revision_id: "revision-1" } });
+  assert.equal(review.current, "review");
+  assert.equal(review.steps.review.loading, true);
+  assert.equal(review.steps.brief.enabled, false);
+  assert.equal(review.steps.complete.enabled, false);
+});
+
 test("Review release unlocks Brief, then a valid Brief unlocks Complete", () => {
   const briefWorkflow = deriveCreatorWorkflow({
     run: { status: "ready", workflow_step: "review", stage: "ready", candidate: {} },

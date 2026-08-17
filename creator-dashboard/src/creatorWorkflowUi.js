@@ -95,10 +95,20 @@ function workflowStepFallback(run) {
 }
 
 function stepForStage(stage, revision, run) {
-  if (stage === "extracting_evidence") return "files";
-  if (stage === "awaiting_creator_answers") return "about-you";
-  if (FACTORY_GENERATION_STAGES.has(stage)) return revision ? "review" : "about-you";
-  if (stage === "review_required" || stage === "ready") return "review";
-  if (stage === "needs_attention") return revision ? "review" : (run?.pending_questions?.length ? "about-you" : "files");
+  const normalizedStage = String(stage ?? "").trim().toLowerCase();
+  const aliasedStep = {
+    files_generation: "files",
+    "files-generation": "files",
+    about_you_generation: "about-you",
+    "about-you-generation": "about-you",
+    review_generation: "review",
+    "review-generation": "review"
+  }[normalizedStage];
+  if (aliasedStep) return aliasedStep;
+  if (normalizedStage === "extracting_evidence") return "files";
+  if (normalizedStage === "awaiting_creator_answers") return "about-you";
+  if (FACTORY_GENERATION_STAGES.has(normalizedStage)) return revision ? "review" : "about-you";
+  if (normalizedStage === "review_required" || normalizedStage === "ready") return "review";
+  if (normalizedStage === "needs_attention") return revision ? "review" : (run?.pending_questions?.length ? "about-you" : "files");
   return revision ? "review" : "files";
 }
