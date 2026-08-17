@@ -12,13 +12,26 @@ test("initial Files generation keeps every other step disabled", () => {
   for (const step of ["about-you", "review", "brief", "complete"]) assert.equal(workflow.steps[step].enabled, false);
 });
 
-test("Files submission overrides a stale previous run until the new run arrives", () => {
+test("local command busy state never overrides the last durable run", () => {
   const workflow = deriveCreatorWorkflow({
     busy: "start",
     run: { status: "ready", workflow_step: "review", stage: "ready", candidate: {} },
     review: { release_ready: true }
   });
+  assert.equal(workflow.current, "brief");
+  assert.equal(workflow.working, false);
+  assert.equal(workflow.steps.files.loading, false);
+  assert.equal(workflow.steps.brief.enabled, true);
+  assert.equal(workflow.steps.complete.enabled, false);
+});
+
+test("the returned queued run becomes the persistent generation checkpoint", () => {
+  const workflow = deriveCreatorWorkflow({
+    run: { status: "queued", workflow_step: "files", stage: "extracting_evidence" },
+    review: { release_ready: true }
+  });
   assert.equal(workflow.current, "files");
+  assert.equal(workflow.working, true);
   assert.equal(workflow.steps.files.loading, true);
   for (const step of ["about-you", "review", "brief", "complete"]) assert.equal(workflow.steps[step].enabled, false);
 });

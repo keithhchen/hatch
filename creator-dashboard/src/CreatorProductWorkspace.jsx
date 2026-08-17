@@ -50,7 +50,10 @@ export function CreatorProductWorkspace({ token, request, productId, runId = "",
   const [selectedRunId, setSelectedRunId] = useState(runId);
   const [promiseDraft, setPromiseDraft] = useState("");
   const persistedWorkflowStep = useMemo(() => deriveCreatorWorkflow({ run, review, briefSpec }).current, [briefSpec, review, run]);
-  const workflow = useMemo(() => deriveCreatorWorkflow({ run, review, briefSpec, busy: state.busy }), [briefSpec, review, run, state.busy]);
+  // Workflow tabs and generation indicators are derived only from the
+  // persisted Product run/review/Brief projections. `state.busy` remains a
+  // short-lived command guard for buttons, never a source of workflow truth.
+  const workflow = useMemo(() => deriveCreatorWorkflow({ run, review, briefSpec }), [briefSpec, review, run]);
   const previousWorkflowStep = useRef(null);
   const filesNeedPolling = useMemo(() => shouldPollProductFiles(documents), [documents]);
 

@@ -11,22 +11,14 @@ const FACTORY_GENERATION_STAGES = new Set([
 
 /**
  * Derive the Creator-facing workflow from the durable Product run and
- * release artifacts. Local `busy` state is accepted only as a short-lived
- * optimistic hint before the server returns the durable run checkpoint.
+ * release artifacts. Generation state is intentionally server-only: a local
+ * button spinner must never decide which tab is current or enabled, because
+ * that state must survive refreshes and process restarts.
  */
-export function deriveCreatorWorkflow({ run, review, briefSpec, busy = "" } = {}) {
-  // A Files submission can briefly coexist with the previous immutable run
-  // while the POST is in flight.  Do not let that stale run move the spinner
-  // to Review: the action the creator just took is the durable boundary we
-  // are optimistically representing until the new run is returned.
-  const generationStep = busy === "start"
-    ? "files"
-    : busy === "answer"
-      ? "about-you"
-      : run?.workflow_step ?? workflowStepFallback(run);
+export function deriveCreatorWorkflow({ run, review, briefSpec } = {}) {
+  const generationStep = run?.workflow_step ?? workflowStepFallback(run);
   const serverWorking = FACTORY_WORKING_STATUSES.has(run?.status);
-  const transientWorking = Boolean(busy && ["start", "answer", "retry-run", "rerun"].includes(busy));
-  const working = serverWorking || transientWorking;
+  const working = serverWorking;
   const failed = isNeedsAttention(run);
   const releaseReady = review?.release_ready === true;
   const briefValid = isValidBriefSpec(briefSpec);
