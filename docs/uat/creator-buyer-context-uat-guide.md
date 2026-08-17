@@ -1,20 +1,29 @@
 # Hatch Product Workflow UAT Guide
 
-本文件是 Creator Product、Context Intake 和 Buyer Desktop 的真实产品 UAT 记录。自动化测试、生产浏览器行为、provider 阻塞分开记录；截图只来自真实生产页面。
+本文件是 Creator Product、Context Intake 和 Buyer Desktop 的真实产品 UAT 记录。自动化测试、生产浏览器行为、provider 阻塞分开记录；截图只来自真实生产页面或真实 Desktop 产品构建。
 
 ## 1. 工作流与锁定规则
 
 ```
-Files ──(Factory evidence generation)──> About You
-About You ──(Factory evaluation / Corpus generation)──> Review
-Review ──(Creator decisions / held-out gate)──> Brief
-Brief ──(Creator-authored buyer questions)──> Complete
-Complete ──(release command)──> Published Product
+Files ──(Continue: starts provider run)──> About You
+About You ──(final answers: provider run)──> Review
+Review ──(correction/rerun: provider run)──> Review
+Review ──(release-ready)──> Brief
+Brief ──(creator-authored save; no LLM)──> Complete
+Complete ──(release command; no LLM)──> Published Product
 ```
+
+只有三类动作会 lead to LLM/provider generation：
+
+1. **Files → About You**：上传文件本身只是持久化 Product File；点击 **Continue with these files** 才创建 Factory Run，开始 evidence extraction。此时 Files 是 current step/loading，About You、Review、Brief、Complete 都可见但 disabled。
+2. **About You → Review**：提交最后一个 About You answer 后，Factory Run 继续 corpus/evaluation；About You 是 current step/loading，Review 及其后续步骤 disabled。服务端进入 `review_required`/`ready` 后才解锁 Review。
+3. **Review correction/rerun**：Creator 修正 case 或 sealed held-out case 后创建新的 immutable Version，并重新执行 evaluation；Review 是 current step/loading，Brief、Complete disabled。只有新的 revision `release_ready=true` 且 BriefSpec 合法，才解锁 Brief。
+
+Files 上传、Review 的 accept/decision、Brief 保存和最终 Publish 都不是 LLM 生成步骤，但它们仍然受服务端 gate 约束。所有五个 tab 始终显示；锁定的是 `disabled`，不是把 tab 隐藏。
 
 所有五个步骤始终可见。服务端的 `workflow_step`、`status`、`stage` 和 immutable Product revision 是 source of truth：
 
-- 当前步骤在 provider turn、queued/running 或 retry 时显示 loading indicator。
+- 当前步骤在 provider turn、queued/running 或 retry 时显示 loading indicator；loading 绑定服务端 run，不绑定前端 click 的临时 `busy`。
 - 当前步骤之后的 tabs 保持可见但 disabled；不能通过路由直接跳过 gate。
 - 浏览器刷新后按服务端投影恢复当前步骤、loading 和 disabled 状态。
 - `needs_attention` 停留在失败的当前步骤，显示真实错误和 Retry；不会把后续步骤误标为可用。
@@ -74,7 +83,7 @@ candidate: { version, digest/reportDigest, verified Corpus references }
 retryStage, lastError, retryable
 ```
 
-The UI must not derive progress from a local spinner or from an old run after a new Files command. A Files submission optimistically points at `files` only until the new server run is returned; the returned run then becomes authoritative.
+The UI must not derive progress from a local spinner or from an old run after a new Files command. The server-issued run (`status`, `stage`, `workflow_step`) is authoritative; after refresh or process restart the same projection reconstructs the current/loading/disabled state.
 
 ### Review projection
 
@@ -93,6 +102,21 @@ Held-out case text, answers and candidate output remain sealed. A failed sealed 
 ### Brief / buyer Task
 
 `BriefSpec` is Product-owned and creator-authored. A buyer Task stores an immutable `BriefSnapshot` in the Conversation JSONB (spec digest + ordered answers). Runtime instructions remain authoritative; buyer answers are untrusted task material and cannot override Creator instructions.
+
+```text
+Conversation:
+  id, entitlementId, creatorId, productId, status, title
+  briefSnapshot: {
+    id, specDigest, fields: [{ id, label, required, value }], submittedAt
+  }
+  messages[], events[], runs[]
+
+Task/Run:
+  conversationId, runId, status: queued | running | completed | failed
+  startedAt, finishedAt, message/event references
+```
+
+`BriefSnapshot` 在创建 Conversation/Task 的同一请求中写入；同一 Task 后续不重复填写。Desktop refresh/reopen 只从 Conversation Library + Snapshot/Run projection 恢复，不从本地表单状态重建。
 
 ### Context Intake OAuth grant
 
@@ -127,7 +151,7 @@ Current evidence (2026-08-18, production): real Versions 2–5, About You answer
 
 Observed in this UAT: Maya Chen OAuth/PKCE succeeded; `context-intake-uat.md` was uploaded to the Product Files of the Product above and read back with the same artifact and digest. The response explicitly confirmed that no Version or Run was changed.
 
-## 5. Buyer Desktop UAT (pending)
+## 5. Buyer Desktop UAT
 
 Use a real buyer account with entitlement to the published Product:
 
@@ -137,7 +161,20 @@ Use a real buyer account with entitlement to the published Product:
 4. Confirm Conversation/Task creation, Agent start, and runtime instructions.
 5. Refresh/reopen Desktop and verify the same Task and BriefSnapshot remain available read-only.
 
-Do not use a fixture, preview bundle, synthetic entitlement or fake success state as evidence for this section.
+Observed in this UAT (2026-08-18, real production entitlement):
+
+- Buyer display name: `Hatch UAT Buyer`; Product `1650bef0-5eda-4eee-a18e-f359a25f0598`; entitlement `7bb4af13-7a17-4f3b-820a-4188820b4dfa`.
+- Desktop read the two-field published BriefSpec, accepted one required and one optional answer, and created Conversation `conv_70bcd77d0a4049358da1c4f3f19d563d` with immutable `BriefSnapshot` `brief_9f893ef2428346bfba8b1a51c90e8d94` and digest `sha256:44fcae87d90d05803b777577ed789b719551d1b7f3757798b4237fe7b1fa3fe9`.
+- The same submit immediately started Agent Run `run_0a23fc63ed704922a046d7154ace0771`; it reached `completed` after real file listing/reads, approval prompts, and a real workspace write to `Hatch HTTP UI Acceptance 20260718/UAT-findings-decision-first.md`.
+- After quitting and reopening the latest real `target/release` Hatch build, the Task Brief remained read-only and the Conversation/run history restored with status `Worked`.
+
+Screenshots:
+
+![Buyer Task Brief and Agent running](screenshots/buyer-task-brief-agent-running.jpg)
+
+![Buyer Task Brief persisted after Desktop restart](screenshots/buyer-task-brief-persisted-after-restart.jpg)
+
+This is Desktop OS UAT on a real local product build with production Registry/Runtime and a real entitlement; it is not a signed production Desktop release. Do not use a fixture, preview bundle, synthetic entitlement or fake success state as evidence for this section.
 
 ## 6. Evidence levels
 
