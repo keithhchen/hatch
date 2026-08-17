@@ -96,9 +96,10 @@ test("Product Creator API owns files, snapshots, and idempotent runs", async (t)
     body: JSON.stringify({ source_snapshot_id: snapshotBody.id, config: { development_questions: 2, heldout_questions: 1 } })
   });
   assert.equal(run.status, 202);
-  const runBody = await run.json() as { id: string; product_id: string; source_snapshot_id: string };
+  const runBody = await run.json() as { id: string; product_id: string; source_snapshot_id: string; workflow_step: string };
   assert.equal(runBody.product_id, productId);
   assert.equal(runBody.source_snapshot_id, snapshotBody.id);
+  assert.equal(runBody.workflow_step, "files");
 
   const replay = await fetch(`${base}/v1/creator/products/${productId}/runs`, {
     method: "POST",

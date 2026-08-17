@@ -14,7 +14,7 @@ import {
   type CreatorFactoryRepository,
   type FactoryRunRecord
 } from "./repository.js";
-import type { ArtifactRef, CreatorQuestion, FactoryAgentProduct, FactoryAgentTool, FactoryStartInput, MaterializedAgentCorpus } from "./types.js";
+import type { ArtifactRef, CreatorQuestion, FactoryAgentProduct, FactoryAgentTool, FactoryStage, FactoryStartInput, MaterializedAgentCorpus } from "./types.js";
 import { draftBriefSpecForProduct, normalizeBriefSpec, type BriefSpec } from "../brief.js";
 
 export type CreatorCorpusAssetLayer = "manifest" | "system" | "skill" | "reference" | "knowledge";
@@ -186,6 +186,14 @@ export class CreatorFactoryInputTooLargeError extends Error {
   }
 }
 
+/**
+ * The Creator workflow has three server-owned generation boundaries.  This is
+ * deliberately separate from the internal Factory node/stage names: the
+ * dashboard uses it to keep the current step loading and to lock the other
+ * steps after a refresh or a process restart.
+ */
+export type CreatorWorkflowStep = "files" | "about-you" | "review";
+
 export type CreatorFactoryRunView = {
   id: string;
   productId?: string;
@@ -203,6 +211,7 @@ export type CreatorFactoryRunView = {
   productPromise: string;
   status: FactoryRunRecord["status"];
   stage?: FactoryRunRecord["factoryStage"];
+  workflowStep: CreatorWorkflowStep;
   version: number;
   pendingQuestions: Array<{ id: string; question: string; intent?: string; kind?: "behavior" | "provenance_confirmation" }>;
   answerDrafts?: Array<{ questionId: string; answer: string }>;
@@ -222,6 +231,7 @@ export type CreatorFactoryRunView = {
     factoryVersion: "creator-factory-contract-1";
   };
   retryable: boolean;
+  retryStage?: Exclude<FactoryStage, "ready" | "needs_attention" | "awaiting_creator_answers">;
   lastError?: string;
   createdAt: string;
   updatedAt: string;
@@ -1040,6 +1050,7 @@ export class CreatorFactoryService {
       ? await this.graphStore.derive(run.input.productId)
       : undefined;
     const awaitingAnswers = run.state?.stage === "awaiting_creator_answers";
+    const workflowStep = workflowStepForRun(run);
     return {
       id: run.id,
       ...(run.state?.agentId || run.input.agentId ? { agentId: run.state?.agentId ?? run.input.agentId } : {}),
@@ -1058,6 +1069,7 @@ export class CreatorFactoryService {
       productPromise: run.input.productPromise,
       status: run.status,
       ...(run.factoryStage ? { stage: run.factoryStage } : {}),
+      workflowStep,
       version: run.version,
       pendingQuestions: includeQuestions && awaitingAnswers
         ? (await this.pendingQuestions(run)).map(({ id, question, intent, kind }) => ({
@@ -1072,6 +1084,7 @@ export class CreatorFactoryService {
         ? { questionBatchId: requireQuestionBatchId(run.id, run.state.artifacts.currentQuestionBatch) }
         : {}),
       retryable: run.status === "needs_attention" && !!run.state?.retryStage,
+      ...(run.state?.retryStage ? { retryStage: run.state.retryStage } : {}),
       ...(latest ? { candidate: {
         version: latest.version,
         reason: latest.reason,
@@ -1350,6 +1363,44 @@ export class CreatorFactoryService {
       nextRevisionNumber: Math.max(0, ...revisionNumbers) + 1
     };
   }
+}
+
+/**
+ * Map the durable Factory control state to the small set of Creator-facing
+ * generation boundaries.  `factoryStage` can intentionally lag while a
+ * queued answer submission is waiting for a worker, so pendingAnswers and the
+ * immutable revision lineage take precedence in that window.
+ */
+function workflowStepForRun(run: FactoryRunRecord): CreatorWorkflowStep {
+  const state = run.state;
+  const revision = Boolean(run.input.parentRevisionId || run.input.reviewContext);
+  if (run.status === "needs_attention") {
+    return workflowStepForFactoryStage(state?.retryStage ?? run.factoryStage ?? state?.stage, revision, state);
+  }
+  if (run.status === "queued" || run.status === "running") {
+    if (run.pendingAnswers) return revision ? "review" : "about-you";
+    return workflowStepForFactoryStage(run.factoryStage ?? state?.stage, revision, state);
+  }
+  if (state?.stage === "awaiting_creator_answers") return "about-you";
+  if (state?.stage === "review_required" || state?.stage === "ready") return "review";
+  return workflowStepForFactoryStage(run.factoryStage ?? state?.stage, revision, state);
+}
+
+function workflowStepForFactoryStage(
+  stage: FactoryStage | undefined,
+  revision: boolean,
+  state: FactoryRunRecord["state"]
+): CreatorWorkflowStep {
+  if (stage === "extracting_evidence") return "files";
+  if (stage === "awaiting_creator_answers") return "about-you";
+  if (stage === "compiling_corpus" || stage === "evaluating_development" || stage === "evaluating_regression" || stage === "evaluating_heldout") {
+    return revision ? "review" : "about-you";
+  }
+  if (stage === "review_required" || stage === "ready") return "review";
+  if (stage === "needs_attention") {
+    return revision ? "review" : state?.artifacts.currentQuestionBatch ? "about-you" : "files";
+  }
+  return revision ? "review" : "files";
 }
 
 function notPublishable(runId: string): CreatorFactoryRepositoryError {

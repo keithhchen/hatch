@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, FormField, InlineAlert, PageHeader, Select, Skeleton, StatusTag, Textarea } from "@hatch/ui";
 import { UserRound } from "lucide-react";
 import {
@@ -28,9 +28,13 @@ import {
   runAttentionError,
   runNeedsAttention
 } from "./creatorRunAttentionUi.js";
+import {
+  CREATOR_WORKFLOW_STEPS,
+  deriveCreatorWorkflow
+} from "./creatorWorkflowUi.js";
 import "./creatorProductWorkspace.css";
 
-const TAB_KEYS = ["files", "about-you", "review", "brief", "complete"];
+const TAB_KEYS = CREATOR_WORKFLOW_STEPS;
 
 export function CreatorProductWorkspace({ token, request, productId, runId = "", tab = "files", navigate, locale = "en", profile }) {
   const t = useMemo(() => createCreatorTranslator(locale), [locale]);
@@ -44,6 +48,9 @@ export function CreatorProductWorkspace({ token, request, productId, runId = "",
   const [selectedTab, setSelectedTab] = useState(TAB_KEYS.includes(tab) ? tab : "files");
   const [selectedRunId, setSelectedRunId] = useState(runId);
   const [promiseDraft, setPromiseDraft] = useState("");
+  const persistedWorkflowStep = useMemo(() => deriveCreatorWorkflow({ run, review, briefSpec }).current, [briefSpec, review, run]);
+  const workflow = useMemo(() => deriveCreatorWorkflow({ run, review, briefSpec, busy: state.busy }), [briefSpec, review, run, state.busy]);
+  const previousWorkflowStep = useRef(null);
   const filesNeedPolling = useMemo(() => shouldPollProductFiles(documents), [documents]);
 
   const refresh = useCallback(async () => {
@@ -82,7 +89,27 @@ export function CreatorProductWorkspace({ token, request, productId, runId = "",
   }, [productId, request, selectedRunId, token]);
 
   useEffect(() => { void refresh(); }, [refresh]);
-  useEffect(() => { setSelectedTab(TAB_KEYS.includes(tab) ? tab : "files"); }, [tab]);
+  useEffect(() => {
+    const requested = TAB_KEYS.includes(tab) ? tab : "files";
+    if (state.loading || !product) {
+      setSelectedTab(requested);
+      return;
+    }
+    if (workflow.steps[requested]?.enabled) {
+      setSelectedTab(requested);
+      return;
+    }
+    setSelectedTab(workflow.current);
+    navigate(`/studio/products/${encodeURIComponent(productId)}/${workflow.current}`);
+  }, [navigate, product, productId, state.loading, tab, workflow]);
+  useEffect(() => {
+    if (state.loading || !product) return;
+    const previous = previousWorkflowStep.current;
+    previousWorkflowStep.current = persistedWorkflowStep;
+    if (!previous || previous === persistedWorkflowStep || selectedTab !== previous) return;
+    setSelectedTab(persistedWorkflowStep);
+    navigate(`/studio/products/${encodeURIComponent(productId)}/${persistedWorkflowStep}`);
+  }, [navigate, persistedWorkflowStep, product, productId, selectedTab, state.loading]);
   useEffect(() => {
     if (runId) setSelectedRunId(runId);
   }, [runId]);
@@ -149,6 +176,7 @@ export function CreatorProductWorkspace({ token, request, productId, runId = "",
   }, [request, run?.id, run?.status, token]);
 
   function goTab(nextTab) {
+    if (!TAB_KEYS.includes(nextTab) || !workflow.steps[nextTab]?.enabled) return;
     setSelectedTab(nextTab);
     navigate(`/studio/products/${encodeURIComponent(productId)}/${nextTab}`);
   }
@@ -188,7 +216,6 @@ export function CreatorProductWorkspace({ token, request, productId, runId = "",
       setRun(nextRun);
       setSelectedRunId(nextRun.id);
       setRuns((current) => [nextRun, ...current.filter((item) => item.id !== nextRun.id)]);
-      goTab("about-you");
     } catch (error) { setState((current) => ({ ...current, error: error.message })); }
     finally { setState((current) => ({ ...current, busy: "" })); }
   }
@@ -213,31 +240,36 @@ export function CreatorProductWorkspace({ token, request, productId, runId = "",
   if (state.error && !product) return <section className="cpv2-workspace-error"><InlineAlert tone="error">{state.error}</InlineAlert><Button type="button" onClick={() => void refresh()}>{t("retry")}</Button></section>;
 
   return <section className="cpv2-product-workspace">
-    <div className="cpv2-workspace-topline"><button type="button" className="cpv2-back-link" onClick={() => navigate("/studio/products")}>{t("products")}</button><div className="cpv2-version-browser"><span className="cpv2-version-label">{t("browse")}</span><Select id="workspace-version" className="cpv2-version-select" label={t("browse")} value={selectedRunId || "current"} onValueChange={(value) => { if (value !== "current") void selectRun(value); }} disabled={!runs.length || state.busy === "select-run"} size="compact" surface="raised" options={[{ value: "current", label: t("currentVersion") }, ...runs.map((item) => ({ value: item.id, label: t("version", item.revision_number ?? item.version ?? "—", versionStatus(item, t)) }))]} /></div></div>
+    <div className="cpv2-workspace-topline"><button type="button" className="cpv2-back-link" onClick={() => navigate("/studio/products")}>{t("products")}</button><div className="cpv2-version-browser"><span className="cpv2-version-label">{t("browse")}</span><Select id="workspace-version" className="cpv2-version-select" label={t("browse")} value={selectedRunId || "current"} onValueChange={(value) => { if (value !== "current") void selectRun(value); }} disabled={!runs.length || state.busy === "select-run" || workflow.working} size="compact" surface="raised" options={[{ value: "current", label: t("currentVersion") }, ...runs.map((item) => ({ value: item.id, label: t("version", item.revision_number ?? item.version ?? "—", versionStatus(item, t)) }))]} /></div></div>
     <PageHeader className="cpv2-workspace-header" label={product?.status === "published" ? t("published") : t("product")} title={product?.name ?? product?.product_name ?? t("product")} body={product?.promise ?? product?.description ?? ""} />
-    {product ? <ProductPromiseForm t={t} token={token} product={product} value={promiseDraft} onChange={setPromiseDraft} onSaved={(nextProduct) => { setProduct(nextProduct?.product ?? nextProduct); setPromiseDraft((nextProduct?.product ?? nextProduct).promise ?? ""); setState((current) => ({ ...current, notice: t("productPromiseSaved") })); }} onError={(error) => setState((current) => ({ ...current, error: error.message }))} /> : null}
-    <div className="cpv2-workspace-tabs" role="tablist" aria-label={t("productWorkflow")}>{TAB_KEYS.map((key) => <button key={key} type="button" role="tab" aria-selected={selectedTab === key} className={selectedTab === key ? "is-active" : ""} onClick={() => goTab(key)}>{t(key === "about-you" ? "aboutYou" : key)}</button>)}</div>
+    {product ? <ProductPromiseForm t={t} token={token} product={product} value={promiseDraft} locked={workflow.working} onChange={setPromiseDraft} onSaved={(nextProduct) => { setProduct(nextProduct?.product ?? nextProduct); setPromiseDraft((nextProduct?.product ?? nextProduct).promise ?? ""); setState((current) => ({ ...current, notice: t("productPromiseSaved") })); }} onError={(error) => setState((current) => ({ ...current, error: error.message }))} /> : null}
+    <div className="cpv2-workspace-tabs" role="tablist" aria-label={t("productWorkflow")}>{TAB_KEYS.map((key) => {
+      const step = workflow.steps[key];
+      const label = t(key === "about-you" ? "aboutYou" : key);
+      return <button key={key} type="button" role="tab" aria-selected={selectedTab === key} aria-disabled={!step.enabled} aria-busy={step.loading} className={`${selectedTab === key ? "is-active" : ""}${!step.enabled ? " is-disabled" : ""}`} disabled={!step.enabled} onClick={() => goTab(key)}><span>{label}</span>{step.loading ? <span className="cpv2-tab-spinner" aria-label={t("waiting")} /> : null}</button>;
+    })}</div>
     {state.error ? <InlineAlert tone="error">{state.error}</InlineAlert> : null}
     {state.notice ? <InlineAlert tone="success">{state.notice}</InlineAlert> : null}
-    {selectedTab === "files" ? <FilesPanel t={t} product={product} documents={documents} busy={state.busy} onUpload={upload} onStart={startRun} hasRun={Boolean(run)} /> : null}
-    {selectedTab === "about-you" ? <AboutYouPanel t={t} token={token} run={run} busy={state.busy} onRetry={retryRun} onFiles={() => goTab("files")} onSaved={(nextRun) => { setRun(nextRun); if (nextRun.status === "queued") setState((current) => ({ ...current, notice: t("waiting") })); }} onFinish={(nextRun) => { setRun(nextRun); goTab("review"); }} onError={(error) => setState((current) => ({ ...current, error: error.message }))} /> : null}
-    {selectedTab === "review" ? <ReviewPanel t={t} token={token} profile={profile} run={run} review={review} busy={state.busy} setBusy={(busy) => setState((current) => ({ ...current, busy }))} onRetry={retryRun} onFiles={() => goTab("files")} onReviewChanged={setReview} onRerun={(nextRun) => { setRun(nextRun); setReview(null); setSelectedRunId(nextRun.id); goTab("about-you"); }} onComplete={() => goTab("brief")} onError={(error) => setState((current) => ({ ...current, error: error.message }))} /> : null}
-    {selectedTab === "brief" ? <BriefPanel t={t} token={token} product={product} briefSpec={briefSpec} busy={state.busy} onSaved={(nextProduct) => { const saved = nextProduct?.product ?? nextProduct; setProduct((current) => ({ ...current, ...saved })); setBriefSpec(saved?.brief_spec ?? null); setState((current) => ({ ...current, notice: t("briefSaved") })); goTab("complete"); }} onError={(error) => setState((current) => ({ ...current, error: error.message }))} /> : null}
-    {selectedTab === "complete" ? <CompletePanel t={t} product={product} briefSpec={briefSpec} run={run} review={review} busy={state.busy} setBusy={(busy) => setState((current) => ({ ...current, busy }))} onRetry={retryRun} onRerun={(nextRun) => { setRun(nextRun); setReview(null); setSelectedRunId(nextRun.id); goTab("about-you"); }} onPublished={() => void refresh()} onReview={() => goTab("review")} onBrief={() => goTab("brief")} onFiles={() => goTab("files")} request={request} token={token} productId={productId} /> : null}
+    {selectedTab === "files" ? <FilesPanel t={t} product={product} documents={documents} busy={state.busy} loading={workflow.steps.files.loading} locked={workflow.working && workflow.current !== "files"} onUpload={upload} onStart={startRun} hasRun={Boolean(run)} /> : null}
+    {selectedTab === "about-you" ? <AboutYouPanel t={t} token={token} run={run} busy={state.busy} loading={workflow.steps["about-you"].loading} setBusy={(busy) => setState((current) => ({ ...current, busy }))} onRetry={retryRun} onFiles={() => goTab("files")} onSaved={(nextRun) => { setRun(nextRun); if (nextRun.status === "queued") setState((current) => ({ ...current, notice: t("waiting") })); }} onFinish={(nextRun) => { setRun(nextRun); }} onError={(error) => setState((current) => ({ ...current, error: error.message }))} /> : null}
+    {selectedTab === "review" ? <ReviewPanel t={t} token={token} profile={profile} run={run} review={review} busy={state.busy} loading={workflow.steps.review.loading} setBusy={(busy) => setState((current) => ({ ...current, busy }))} onRetry={retryRun} onFiles={() => goTab("files")} onReviewChanged={setReview} onRerun={(nextRun) => { setRun(nextRun); setReview(null); setSelectedRunId(nextRun.id); }} onComplete={() => goTab("brief")} onError={(error) => setState((current) => ({ ...current, error: error.message }))} /> : null}
+    {selectedTab === "brief" ? <BriefPanel t={t} token={token} product={product} briefSpec={briefSpec} busy={state.busy} onSaved={(nextProduct) => { const saved = nextProduct?.product ?? nextProduct; setProduct((current) => ({ ...current, ...saved })); setBriefSpec(saved?.brief_spec ?? null); setState((current) => ({ ...current, notice: t("briefSaved") })); }} onError={(error) => setState((current) => ({ ...current, error: error.message }))} /> : null}
+    {selectedTab === "complete" ? <CompletePanel t={t} product={product} briefSpec={briefSpec} run={run} review={review} busy={state.busy} setBusy={(busy) => setState((current) => ({ ...current, busy }))} onRetry={retryRun} onRerun={(nextRun) => { setRun(nextRun); setReview(null); setSelectedRunId(nextRun.id); }} onPublished={() => void refresh()} onReview={() => goTab("review")} onBrief={() => goTab("brief")} onFiles={() => goTab("files")} request={request} token={token} productId={productId} /> : null}
   </section>;
 }
 
-function FilesPanel({ t, product, documents, busy, onUpload, onStart, hasRun }) {
+function FilesPanel({ t, product, documents, busy, loading, locked, onUpload, onStart, hasRun }) {
   return <section className="cpv2-workspace-panel">
-    <div className="cpv2-panel-heading"><div><h2>{t("giveMaterial")}</h2><p>{t("localFilesOnly")}</p></div><label className="cpv2-upload-button">{t("uploadFiles")}<input type="file" multiple accept=".pdf,.docx,.xlsx,.xls,.xlsm,.csv,.tsv,.txt,.md,.json,.html,.htm,.png,.jpg,.jpeg,.webp" onChange={(event) => { void onUpload([...event.target.files]); event.target.value = ""; }} disabled={Boolean(busy)} /></label></div>
+    <div className="cpv2-panel-heading"><div><h2>{t("giveMaterial")}</h2><p>{t("localFilesOnly")}</p></div><label className={`cpv2-upload-button${locked || loading ? " is-disabled" : ""}`}>{t("uploadFiles")}<input type="file" multiple accept=".pdf,.docx,.xlsx,.xls,.xlsm,.csv,.tsv,.txt,.md,.json,.html,.htm,.png,.jpg,.jpeg,.webp" onChange={(event) => { void onUpload([...event.target.files]); event.target.value = ""; }} disabled={Boolean(busy) || locked || loading} /></label></div>
     <div className="cpv2-file-list">{documents.map((document) => { const status = productFileState(document); return <div className="cpv2-file-row" key={documentId(document)}><div><strong>{document.display_name ?? document.file_name ?? t("unnamedFile")}</strong><small>{document.projection?.kind === "image" ? t("imageNative") : t("markdownProjection")}</small></div><StatusTag tone={statusTone(status)}>{t(`fileStatus_${status}`)}</StatusTag></div>; })}</div>
     {!documents.length ? <p className="cpv2-empty-inline">{t("uploadForProduct")}</p> : null}
     <p className="cpv2-source-note">{t("sourceNote")}</p>
-    <div className="cpv2-workspace-actions"><Button type="button" loading={busy === "start"} disabled={!canGenerateProductVersion(documents) || Boolean(busy)} onClick={onStart}>{hasRun ? t("continueWithFiles") : t("startDistillation")}</Button></div>
+    {loading ? <GenerationStatus t={t} label={t("versionGenerated")} /> : null}
+    <div className="cpv2-workspace-actions"><Button type="button" loading={loading || busy === "start"} disabled={!canGenerateProductVersion(documents) || Boolean(busy) || locked || loading} onClick={onStart}>{hasRun ? t("continueWithFiles") : t("startDistillation")}</Button></div>
   </section>;
 }
 
-function ProductPromiseForm({ t, token, product, value, onChange, onSaved, onError }) {
+function ProductPromiseForm({ t, token, product, value, locked, onChange, onSaved, onError }) {
   const [busy, setBusy] = useState(false);
   async function save(event) {
     event.preventDefault();
@@ -252,7 +284,7 @@ function ProductPromiseForm({ t, token, product, value, onChange, onSaved, onErr
       setBusy(false);
     }
   }
-  return <form className="cpv2-product-promise" onSubmit={save}><FormField label={t("whatProductDelivers")}><Textarea value={value} onChange={(event) => onChange(event.target.value)} /></FormField><Button type="submit" loading={busy} disabled={!value.trim() || value.trim() === String(product.promise ?? product.description ?? "").trim()}>{t("saveProductPromise")}</Button></form>;
+  return <form className="cpv2-product-promise" onSubmit={save}><FormField label={t("whatProductDelivers")}><Textarea value={value} onChange={(event) => onChange(event.target.value)} disabled={locked || busy} /></FormField><Button type="submit" loading={busy} disabled={locked || !value.trim() || value.trim() === String(product.promise ?? product.description ?? "").trim()}>{t("saveProductPromise")}</Button></form>;
 }
 
 async function latestProductForMutation(token, product) {
@@ -261,7 +293,7 @@ async function latestProductForMutation(token, product) {
   return response?.product ?? response;
 }
 
-function AboutYouPanel({ t, token, run, busy, onRetry, onFiles, onSaved, onFinish, onError }) {
+function AboutYouPanel({ t, token, run, busy, loading, setBusy, onRetry, onFiles, onSaved, onFinish, onError }) {
   const questions = run?.pending_questions ?? [];
   const [index, setIndex] = useState(0);
   const [answers, setAnswers] = useState({});
@@ -274,7 +306,8 @@ function AboutYouPanel({ t, token, run, busy, onRetry, onFiles, onSaved, onFinis
   }, [run?.id, run?.question_batch_id]);
 
   async function save(nextIndex) {
-    if (!run || !questions.length) return;
+    if (!run || !questions.length || loading || busy) return;
+    setBusy("answer");
     setSaveState("saving");
     try {
       const saved = await saveFactoryAnswerDraft(token, run, answers);
@@ -287,16 +320,19 @@ function AboutYouPanel({ t, token, run, busy, onRetry, onFiles, onSaved, onFinis
     } catch (error) {
       setSaveState("");
       onError?.(error instanceof Error ? error : new Error("Unable to save this answer"));
+    } finally {
+      setBusy("");
     }
   }
 
   if (!run) return <section className="cpv2-workspace-panel"><h2>{t("aboutYou")}</h2><p>{t("noRun")}</p></section>;
   if (runNeedsAttention(run)) return <RunAttentionPanel t={t} run={run} busy={busy} onRetry={onRetry} onFiles={onFiles} />;
+  if (loading && !questions.length) return <section className="cpv2-workspace-panel" aria-busy="true"><h2>{t("aboutYou")}</h2><GenerationStatus t={t} label={t("versionGenerated")} /></section>;
   if (!questions.length) return <section className="cpv2-workspace-panel"><h2>{t("aboutYou")}</h2><p>{["queued", "running"].includes(run.status) ? t("waiting") : t("noQuestions")}</p></section>;
   const question = questions[index];
   const answer = answers[question.id] ?? "";
   const canAdvance = answer.trim().length > 0;
-  return <section className="cpv2-workspace-panel cpv2-about-panel"><div className="cpv2-panel-heading"><div><h2>{t("helpUnderstand")}</h2><p>{t("questionOf", index + 1, questions.length)}</p></div><div className="cpv2-carousel-nav"><button type="button" disabled={index === 0} onClick={() => setIndex((current) => current - 1)}>←</button><button type="button" disabled={index === questions.length - 1} onClick={() => setIndex((current) => current + 1)}>→</button></div></div><div className="cpv2-about-question"><h3>{question.question}</h3><div className="cpv2-about-columns"><article><span>{t("sourceEvidence")}</span><h4>{t("whatHatchFound")}</h4><p>{question.intent ?? ""}</p></article><article className="is-answer"><FormField label={t("yourContext")}><Textarea value={answer} onChange={(event) => setAnswers((current) => ({ ...current, [question.id]: event.target.value }))} placeholder={t("addContext")} /></FormField></article></div><div className="cpv2-workspace-actions"><Button type="button" loading={saveState === "saving" || busy === "answer"} disabled={!canAdvance || Boolean(busy)} onClick={() => { void save(index + 1); }}>{index === questions.length - 1 ? t("finishAndReview") : t("saveAndNext")}</Button>{saveState === "saved" ? <span className="cpv2-save-status">{t("saved")}</span> : null}</div></div></section>;
+  return <section className="cpv2-workspace-panel cpv2-about-panel" aria-busy={loading}><div className="cpv2-panel-heading"><div><h2>{t("helpUnderstand")}</h2><p>{t("questionOf", index + 1, questions.length)}</p></div><div className="cpv2-carousel-nav"><button type="button" disabled={index === 0 || loading} onClick={() => setIndex((current) => current - 1)}>←</button><button type="button" disabled={index === questions.length - 1 || loading} onClick={() => setIndex((current) => current + 1)}>→</button></div></div>{loading ? <GenerationStatus t={t} label={t("versionGenerated")} /> : null}<div className="cpv2-about-question"><h3>{question.question}</h3><div className="cpv2-about-columns"><article><span>{t("sourceEvidence")}</span><h4>{t("whatHatchFound")}</h4><p>{question.intent ?? ""}</p></article><article className="is-answer"><FormField label={t("yourContext")}><Textarea value={answer} onChange={(event) => setAnswers((current) => ({ ...current, [question.id]: event.target.value }))} placeholder={t("addContext")} disabled={loading} /></FormField></article></div><div className="cpv2-workspace-actions"><Button type="button" loading={saveState === "saving" || busy === "answer" || loading} disabled={!canAdvance || Boolean(busy) || loading} onClick={() => { void save(index + 1); }}>{index === questions.length - 1 ? t("finishAndReview") : t("saveAndNext")}</Button>{saveState === "saved" ? <span className="cpv2-save-status">{t("saved")}</span> : null}</div></div></section>;
 }
 
 function BriefPanel({ t, token, product, briefSpec, busy, onSaved, onError }) {
@@ -393,13 +429,14 @@ function nextBriefFieldId(fields) {
   return `question-${index}`;
 }
 
-function ReviewPanel({ t, token, profile, run, review, busy, setBusy, onRetry, onFiles, onReviewChanged, onRerun, onComplete, onError }) {
+function ReviewPanel({ t, token, profile, run, review, busy, loading, setBusy, onRetry, onFiles, onReviewChanged, onRerun, onComplete, onError }) {
   const [index, setIndex] = useState(0);
   const [draft, setDraft] = useState({});
   const [removeOpen, setRemoveOpen] = useState({});
   const cases = review?.cases ?? [];
   useEffect(() => setIndex((current) => Math.min(current, Math.max(cases.length - 1, 0))), [cases.length]);
   if (runNeedsAttention(run)) return <RunAttentionPanel t={t} run={run} busy={busy} onRetry={onRetry} onFiles={onFiles} />;
+  if (loading) return <section className="cpv2-workspace-panel" aria-busy="true"><h2>{t("review")}</h2><GenerationStatus t={t} label={t("versionGenerated")} /></section>;
   if (!run || !review) return <section className="cpv2-workspace-panel"><h2>{t("review")}</h2><p>{t("waiting")}</p></section>;
   if (["queued", "running"].includes(run.status)) return <section className="cpv2-workspace-panel"><h2>{t("review")}</h2><p>{t("waiting")}</p></section>;
   const item = cases[index];
@@ -455,10 +492,14 @@ function ReviewPanel({ t, token, profile, run, review, busy, setBusy, onRetry, o
   </section>;
 }
 
+function GenerationStatus({ t, label }) {
+  return <div className="cpv2-generation-status" role="status" aria-live="polite"><span className="cpv2-loading-spinner" aria-hidden="true" /><span>{label ?? t("waiting")}</span></div>;
+}
+
 function RunAttentionPanel({ t, run, busy, onRetry, onFiles }) {
   const action = runAttentionAction(run);
   const error = runAttentionError(run);
-  return <section className="cpv2-workspace-panel cpv2-attention-panel">
+  return <section className="cpv2-workspace-panel cpv2-attention-panel" aria-busy={busy === "retry-run"}>
     <StatusTag tone="error">{t("versionNeedsAttention")}</StatusTag>
     <h2>{t("versionGenerationPaused")}</h2>
     <p>{error ?? t("failureDetailsUnavailable")}</p>

@@ -218,6 +218,7 @@ function publicView(view: CreatorFactoryRunView): Record<string, unknown> {
     product_promise: view.productPromise,
     status: view.status,
     ...(view.stage ? { stage: view.stage } : {}),
+    workflow_step: view.workflowStep,
     version: view.version,
     pending_questions: view.pendingQuestions.map((item) => ({
       id: item.id,
@@ -228,6 +229,7 @@ function publicView(view: CreatorFactoryRunView): Record<string, unknown> {
       ...(view.questionBatchId ? { question_batch_id: view.questionBatchId } : {}),
     ...(view.answerDrafts ? { answer_drafts: view.answerDrafts.map((item) => ({ question_id: item.questionId, answer: item.answer })) } : {}),
     retryable: view.retryable,
+    ...(view.retryStage ? { retry_stage: view.retryStage } : {}),
     ...(view.candidate ? { candidate: {
       version: view.candidate.version,
       reason: view.candidate.reason,
