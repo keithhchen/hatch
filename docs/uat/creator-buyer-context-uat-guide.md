@@ -115,7 +115,7 @@ creator:files:write
 6. When Review is release-ready, open Brief, save at least one required question, then open Complete.
 7. Before the final **Publish product** command, verify the candidate digest, BriefSpec and Product identity. Publish only as an explicit release decision.
 
-Current evidence: real Versions 2–5, About You answers, Review accept/correction, sealed held-out correction, and refresh persistence were exercised on Product `1650bef0-5eda-4eee-a18e-f359a25f0598`. Version 5 provider execution remains in progress at the time of this record; final Publish is therefore not yet claimed.
+Current evidence (2026-08-18, production): real Versions 2–5, About You answers, Review accept/correction, sealed held-out correction, Brief save, and refresh persistence were exercised on Product `1650bef0-5eda-4eee-a18e-f359a25f0598`. Version 5 reached Review `8/8` known cases and `3/3` sealed held-out cases, the Brief remained persisted after reload, and the final Complete/Publish path was exercised after the graph recovery deployment (`3972bec`). The canonical public storefront then loaded in the signed-in browser at [the Product URL](https://hatch.tokenquadrant.cn/products/1650bef0-5eda-4eee-a18e-f359a25f0598) and displayed “This is your published storefront.” This is production browser evidence for the Creator Product path; it is not Desktop OS UAT evidence.
 
 ## 4. Context Intake UAT checklist
 
