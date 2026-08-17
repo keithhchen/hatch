@@ -414,13 +414,33 @@ export function deriveDistillationState(
     .filter((gate) => gate.productId === productId && (!currentRevisionId || gate.revisionId === currentRevisionId))
     .sort(compareGates)) latestByGate.set(gate.gateKey, gate);
   const gates = [...latestByGate.values()];
-  const criticalGateFailures = gates.filter((gate) => gate.critical && ["failed", "blocked"].includes(gate.status)).map((gate) => gate.name);
+  const readyEvent = revisionEvents.find((event) => event.type === "revision_ready");
+  const isHistoricalFailure = (gate: QualityGateAssessment): boolean => {
+    if (!readyEvent || !["failed", "blocked"].includes(gate.status)) return false;
+    const assessmentEvent = [...revisionEvents].reverse().find((event) => (
+      event.type === "gate_assessed"
+      && event.payload.name === gate.name
+      && event.payload.status === gate.status
+    ));
+    return Boolean(assessmentEvent && assessmentEvent.sequence <= readyEvent.sequence);
+  };
+  // A revision may fail a deterministic guard once and then recover on a
+  // later retry. The worker emits `revision_ready` only after the recovered
+  // candidate has passed the complete release path, so failures assessed
+  // before that marker are historical attempts, not blockers for this ready
+  // revision. Keep failures assessed after the marker blocking.
+  const criticalGateFailures = gates
+    .filter((gate) => gate.critical && ["failed", "blocked"].includes(gate.status))
+    .filter((gate) => !isHistoricalFailure(gate))
+    .map((gate) => gate.name);
   const correctionRequired = correctionRequestedAt > correctionSubmittedAt;
   const activeRelease = latestRelease && (!currentRevisionId || latestRelease.revisionId === currentRevisionId)
     ? latestRelease
     : undefined;
-  const criticalGates = gates.filter((gate) => gate.critical);
-  const allCriticalGatesPassed = criticalGates.length > 0 && criticalGates.every((gate) => gate.status === "passed");
+  const criticalGates = gates.filter((gate) => gate.critical && !isHistoricalFailure(gate));
+  const allCriticalGatesPassed = readyAt >= 0
+    ? criticalGateFailures.length === 0
+    : criticalGates.length > 0 && criticalGates.every((gate) => gate.status === "passed");
   const status: DistillationGraphState["status"] = correctionRequired || criticalGateFailures.length > 0
       ? "needs_correction"
         : waitingAt >= 0

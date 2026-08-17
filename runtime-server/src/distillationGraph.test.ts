@@ -112,6 +112,31 @@ test("a new revision clears stale gates and an immutable release is revision-sco
   assert.equal((await graph.derive("task_1")).status, "released");
 });
 
+test("a recovered revision ignores a failed guard assessed before revision_ready", async () => {
+  const graph = new InMemoryDistillationGraphStore();
+  await graph.ensureRun({ id: "distill_1", productId: "task_1", creatorId: "creator_1", createdAt: "2026-08-15T00:00:00.000Z" });
+  await graph.createRevision({ id: "factory_1", runId: "distill_1", productId: "task_1", revision: 1, sourceSnapshotId: "snapshot_1", createdAt: "2026-08-15T00:00:00.000Z" });
+  await graph.registerArtifact(artifact);
+  await graph.appendEvent({ ...event({ id: "recover-revision", eventKey: "recover-revision", type: "revision_created", revisionId: "factory_1" }) });
+  await graph.recordGate({
+    id: "recover-failed",
+    gateKey: "factory_1:completeness",
+    productId: "task_1",
+    runId: "distill_1",
+    revisionId: "factory_1",
+    name: "completeness",
+    critical: true,
+    status: "failed",
+    evidenceArtifactIds: [],
+    assessedAt: "2026-08-15T00:00:10.000Z"
+  });
+  await graph.appendEvent({ ...event({ id: "recover-gate", eventKey: "recover-gate", type: "gate_assessed", revisionId: "factory_1", node: "corpus", payload: { name: "completeness", status: "failed" } }) });
+  await graph.appendEvent({ ...event({ id: "recover-ready", eventKey: "recover-ready", type: "revision_ready", revisionId: "factory_1", node: "release" }) });
+  const recovered = await graph.derive("task_1");
+  assert.equal(recovered.status, "ready");
+  assert.deepEqual(recovered.criticalGateFailures, []);
+});
+
 test("re-ensuring a stable Run identity preserves its original timestamp", async () => {
   const graph = new InMemoryDistillationGraphStore();
   const first = await graph.ensureRun({ id: "distill_1", productId: "task_1", creatorId: "creator_1", createdAt: "2026-08-15T00:00:00.000Z" });
