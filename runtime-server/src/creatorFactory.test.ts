@@ -425,6 +425,8 @@ test("raw private prose copied into Corpus is deterministically revised and exha
   assert.equal(corpusCalls, 2);
   assert.equal(completenessCalls, 0);
   assert.match(failed.lastError ?? "", /did not converge after 1 revisions/i);
+  assert.match(failed.lastError ?? "", /last gate: release_guard/i);
+  assert.match(failed.lastError ?? "", /repair attempt: 2/i);
   const guardReports = await Promise.all(failed.artifacts.evaluationRounds.map((ref) => store.readArtifact(ref)));
   assert.equal(guardReports.filter((report) => report.includes("[raw_source_overlap]")).length, 2);
   assert.equal(guardReports.some((report) => report.includes(privateSentence)), false);

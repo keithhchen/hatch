@@ -519,7 +519,18 @@ export class CreatorFactory {
     if (!pendingGuardCandidate
       && state.compileReason !== "initial"
       && state.corpusRevisionCount >= state.config.maxCorpusRevisions) {
-      throw new Error(`Corpus did not converge after ${state.config.maxCorpusRevisions} revisions`);
+      const repairTarget = state.artifacts.rejectedCorpusRepairTarget;
+      const gate = repairTarget?.reason ?? state.compileReason ?? "unknown";
+      const attempt = repairTarget?.attempt ?? state.corpusRevisionCount;
+      // Keep the cap fail-closed, but retain the host-owned gate and attempt
+      // metadata in the durable error. The old generic message made a real
+      // completeness/release-guard loop indistinguishable from a parser or
+      // provider failure in the Creator UI, so operators could not decide
+      // whether to repair the prompt/source or retry infrastructure.
+      throw new Error(
+        `Corpus did not converge after ${state.config.maxCorpusRevisions} revisions `
+        + `(last gate: ${gate}; repair attempt: ${attempt})`
+      );
     }
     const version = pendingGuardCandidate?.candidateVersion
       ?? state.artifacts.corpusCandidates.length + 1;
