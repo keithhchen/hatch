@@ -437,7 +437,12 @@ async function route(
 
   if (url.pathname.startsWith("/v1/creator/factory-runs")
     || url.pathname.startsWith("/v1/creator/source-documents")
-    || url.pathname.startsWith("/v1/creator/source-snapshots")) {
+    || url.pathname.startsWith("/v1/creator/source-snapshots")
+    // Product Graph is implemented by the Factory service and must use the
+    // same authenticated Product-scoped boundary as the other Factory views.
+    // Keep the route explicit here so it is not swallowed by the Registry's
+    // Product/File/Snapshot compatibility handlers below.
+    || /^\/v1\/creator\/products\/[^/]+\/graph$/.test(url.pathname)) {
     const account = await authenticate(request, response, context, "creator");
     if (account === SESSION_QUERY_REJECTED) return;
     if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
