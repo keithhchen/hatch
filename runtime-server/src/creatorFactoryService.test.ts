@@ -303,6 +303,35 @@ test("Creator Factory service exposes only owned questions and candidate metadat
   assert.ok(ready.candidate?.corpusDigest?.startsWith("sha256:"));
   assert.equal(ready.candidate?.corpusVerified, true);
   assert.equal(ready.pendingQuestions.length, 0);
+
+  // The HTTP answer command can time out while the worker continues through
+  // corpus/evaluation. A transport retry with the same submission id must
+  // replay the accepted command even after the durable run has advanced past
+  // awaiting_creator_answers; it must not be mistaken for a new submission.
+  const postCompletionReplay = await service.submitAnswers("11111111-1111-4111-8111-111111111111", created.run.id, {
+    expectedVersion: draft.version,
+    submissionId: "answer-submit-1",
+    questionBatchId: waiting.questionBatchId!,
+    answers: waiting.pendingQuestions.map((question, index) => ({
+      questionId: question.id,
+      answer: index === 0
+        ? "# Launch plan\n## Final post\nShip one decisive answer."
+        : `Creator reference for ${question.id}`
+    }))
+  });
+  assert.equal(postCompletionReplay.status, "ready");
+  assert.equal(postCompletionReplay.version, ready.version);
+
+  await assert.rejects(
+    () => service.submitAnswers("11111111-1111-4111-8111-111111111111", created.run.id, {
+      expectedVersion: draft.version,
+      submissionId: "answer-submit-1",
+      questionBatchId: waiting.questionBatchId!,
+      answers: waiting.pendingQuestions.map((question) => ({ questionId: question.id, answer: "Changed after completion" }))
+    }),
+    (error: unknown) => error instanceof CreatorFactoryRepositoryError && error.code === "idempotency_conflict"
+  );
+
   assert.equal(JSON.stringify(ready).includes("systemInstructions"), false);
   const review = await service.getReview("11111111-1111-4111-8111-111111111111", created.run.id);
   assert.equal(review.corpus.available, true);

@@ -806,9 +806,6 @@ export class CreatorFactoryService {
     request: SubmitFactoryAnswersRequest
   ): Promise<CreatorFactoryRunView> {
     const run = await this.requireRun(creatorId, runId);
-    if (run.state?.stage !== "awaiting_creator_answers") {
-      throw new CreatorFactoryRepositoryError("invalid_status", `Factory run ${runId} is not waiting for Creator answers`);
-    }
     if (!Array.isArray(request.answers)) throw new Error("answers must be an array");
     const answers = new Map<string, string>();
     for (const item of request.answers) {
@@ -818,6 +815,29 @@ export class CreatorFactoryService {
     }
     let orderedAnswers = [...answers].map(([questionId, answer]) => ({ questionId, answer }));
     const questionBatchId = requireText(request.questionBatchId, "question_batch_id");
+
+    // A client can time out after the repository accepted the submission while
+    // the worker is still generating (or has already completed the review).
+    // The submission id is the idempotency authority for that transport retry;
+    // let the repository replay receipt run before applying the current-stage
+    // gate. Without this, a legitimate retry is rejected as `invalid_status`
+    // as soon as the worker advances past awaiting_creator_answers.
+    if (run.state?.stage !== "awaiting_creator_answers") {
+      if (!request.submissionId?.trim()) {
+        throw new CreatorFactoryRepositoryError("invalid_status", `Factory run ${runId} is not waiting for Creator answers`);
+      }
+      const replay = await this.repository.submitAnswers({
+        creatorId,
+        runId,
+        answers: {
+          answers: orderedAnswers,
+          questionBatchId,
+          submissionId: request.submissionId.trim()
+        },
+        ...(request.expectedVersion === undefined ? {} : { expectedVersion: request.expectedVersion })
+      });
+      return this.project(replay, false);
+    }
     const currentBatchId = run.state?.artifacts.currentQuestionBatch
       ? requireQuestionBatchId(run.id, run.state.artifacts.currentQuestionBatch)
       : undefined;
