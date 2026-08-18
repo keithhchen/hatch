@@ -33,6 +33,18 @@ Files 上传、Review 的 accept/decision、Brief 保存和最终 Publish 都不
 
 ![Version 4 Review loading with future steps disabled](screenshots/creator-version4-review-loading.jpg)
 
+本次新建 Creator 的真实生产浏览器截图：
+
+![Creator Files with Product File](screenshots/creator-files-real-uat.png)
+
+![Creator Files loading with later steps disabled](screenshots/creator-files-loading-real-uat.png)
+
+![Creator About You ready](screenshots/creator-about-you-real-uat.png)
+
+![Creator About You loading with later steps disabled](screenshots/creator-about-you-loading-real-uat.png)
+
+![Creator About You needs attention with retry](screenshots/creator-about-you-needs-attention-real-uat.png)
+
 ## 2. Data Structure / Source of Truth
 
 ### Product
