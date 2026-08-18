@@ -256,7 +256,7 @@ export function CreatorProductWorkspace({ token, request, productId, runId = "",
     })}</div>
     {state.error ? <InlineAlert tone="error">{state.error}</InlineAlert> : null}
     {state.notice ? <InlineAlert tone="success">{state.notice}</InlineAlert> : null}
-    {selectedTab === "files" ? <FilesPanel t={t} product={product} documents={documents} busy={state.busy} loading={workflow.steps.files.loading} locked={workflow.working && workflow.current !== "files"} onUpload={upload} onStart={startRun} hasRun={Boolean(run)} /> : null}
+    {selectedTab === "files" ? <FilesPanel t={t} product={product} documents={documents} run={run} busy={state.busy} loading={workflow.steps.files.loading} locked={workflow.working && workflow.current !== "files"} onUpload={upload} onStart={startRun} onRetry={retryRun} hasRun={Boolean(run)} /> : null}
     {selectedTab === "about-you" ? <AboutYouPanel t={t} token={token} run={run} busy={state.busy} loading={workflow.steps["about-you"].loading} setBusy={(busy) => setState((current) => ({ ...current, busy }))} onRetry={retryRun} onFiles={() => goTab("files")} onSaved={(nextRun) => { setRun(nextRun); if (nextRun.status === "queued") setState((current) => ({ ...current, notice: t("waiting") })); }} onFinish={(nextRun) => { setRun(nextRun); }} onError={(error) => setState((current) => ({ ...current, error: error.message }))} /> : null}
     {selectedTab === "review" ? <ReviewPanel t={t} token={token} profile={profile} run={run} review={review} busy={state.busy} loading={workflow.steps.review.loading} setBusy={(busy) => setState((current) => ({ ...current, busy }))} onRetry={retryRun} onFiles={() => goTab("files")} onReviewChanged={setReview} onRerun={(nextRun) => { setRun(nextRun); setReview(null); setSelectedRunId(nextRun.id); }} onComplete={() => goTab("brief")} onRefresh={refresh} onError={(error) => setState((current) => ({ ...current, error: error.message }))} /> : null}
     {selectedTab === "brief" ? <BriefPanel t={t} token={token} product={product} briefSpec={briefSpec} busy={state.busy} onSaved={(nextProduct) => { const saved = nextProduct?.product ?? nextProduct; setProduct((current) => ({ ...current, ...saved })); setBriefSpec(saved?.brief_spec ?? null); setState((current) => ({ ...current, notice: t("briefSaved") })); }} onError={(error) => setState((current) => ({ ...current, error: error.message }))} /> : null}
@@ -264,8 +264,15 @@ export function CreatorProductWorkspace({ token, request, productId, runId = "",
   </section>;
 }
 
-function FilesPanel({ t, product, documents, busy, loading, locked, onUpload, onStart, hasRun }) {
+function FilesPanel({ t, product, documents, run, busy, loading, locked, onUpload, onStart, onRetry, hasRun }) {
+  // A Files-stage provider failure is still a durable run state. Keep the
+  // retry action visible instead of silently falling back to the upload/start
+  // controls and making a failed run look like a clean slate.
+  if (runNeedsAttention(run) && runAttentionAction(run) === "retry") {
+    return <RunAttentionPanel t={t} run={run} busy={busy} onRetry={onRetry} onFiles={() => {}} />;
+  }
   return <section className="cpv2-workspace-panel">
+    {runNeedsAttention(run) ? <div className="cpv2-files-attention" role="alert"><StatusTag tone="error">{t("versionNeedsAttention")}</StatusTag><p>{runAttentionError(run) ?? t("failureDetailsUnavailable")}</p></div> : null}
     <div className="cpv2-panel-heading"><div><h2>{t("giveMaterial")}</h2><p>{t("localFilesOnly")}</p></div><label className={`cpv2-upload-button${locked || loading ? " is-disabled" : ""}`}>{t("uploadFiles")}<input type="file" multiple accept=".pdf,.docx,.xlsx,.xls,.xlsm,.csv,.tsv,.txt,.md,.json,.html,.htm,.png,.jpg,.jpeg,.webp" onChange={(event) => { void onUpload([...event.target.files]); event.target.value = ""; }} disabled={Boolean(busy) || locked || loading} /></label></div>
     <div className="cpv2-file-list">{documents.map((document) => { const status = productFileState(document); return <div className="cpv2-file-row" key={documentId(document)}><div><strong>{document.display_name ?? document.file_name ?? t("unnamedFile")}</strong><small>{document.projection?.kind === "image" ? t("imageNative") : t("markdownProjection")}</small></div><StatusTag tone={statusTone(status)}>{t(`fileStatus_${status}`)}</StatusTag></div>; })}</div>
     {!documents.length ? <p className="cpv2-empty-inline">{t("uploadForProduct")}</p> : null}
