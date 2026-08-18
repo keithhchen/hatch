@@ -46,6 +46,21 @@ Files 上传、Review 的 accept/decision、Brief 保存和最终 Publish 都不
 
 ![Creator About You needs attention with retry](screenshots/creator-about-you-needs-attention-real-uat.png)
 
+### Latest server-authoritative workflow regression (2026-08-19)
+
+为复验新的持久状态机，我创建了真实 Creator `Hatch UAT Creator 1787080150751`（Creator id `0fddeb55-9cc0-4c59-9280-2ed6923b7b15`）和 Product `Hatch UAT UX Flow 1787080150751`（Product id `b3e32ee4-5779-4c07-91c6-942933cbdceb`）。使用已批准的本地 UAT guide 作为真实 Product File，通过同源 Product Files endpoint 写入后，页面成功回显 Markdown projection；随后生成了 immutable Snapshot `snapshot_76649e21266d4137ba589331bf588152` 和 Factory Run `factory_64196d4f92dd3383659df1459511f920`。
+
+- 点击 **生成版本** 后，服务端 run 真实进入 `running` + `workflow_step=files`；Files 显示 loading，About You、Review、Brief、Complete 仍可见但 disabled。
+- 刷新页面后，仍从同一个服务端 run 恢复 Files loading 和后续 disabled；没有依赖 local `busy` 或旧 run。
+- About You provider turn 完成后，真实生成了 9 个问题。提交最终答案后，About You 重新显示服务端 loading，所有后续 tab 继续 disabled；持久截图见下方。
+- 该新 run 在本记录时仍处于真实 provider 处理状态，尚未把 Review/Brief/Complete/Publish 伪造为成功。已有 Product `1650bef0-...` 的独立真实 UAT 已完成 Review→Brief→Complete→Publish；本次 run 专门验证新状态机的 loading/锁定/刷新行为。
+
+![New Product Files loading with future tabs disabled](screenshots/creator-files-loading-20260819.png)
+
+![New Product About You loading immediately after answer submission](screenshots/creator-about-you-loading-20260819.png)
+
+![New Product About You loading after refresh](screenshots/creator-about-you-loading-persistent-20260819.png)
+
 ## 2. Data Structure / Source of Truth
 
 ### Product
