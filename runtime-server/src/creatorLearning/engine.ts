@@ -584,11 +584,34 @@ export class CreatorFactory {
       );
       const compilerEvaluationFeedback = projectFactoryTextForCorpus(evaluationFeedback, sources);
       const compilerRegression = projectCreatorQaForCorpus(regression, sources);
+      // Every compiler-visible dynamic text field gets the same source
+      // boundary. Product briefs/contracts are authoritative requirements but
+      // can still contain source prose; accepted or rejected prior drafts can
+      // also predate this boundary. Keep their durable artifacts unchanged and
+      // project only this prompt view so a repair cannot copy the failed draft
+      // back into a publishable asset.
+      const compilerProductPromise = projectFactoryTextForCorpus(
+        await store.readArtifact(state.artifacts.productPromise),
+        sources
+      );
+      const compilerProductContract = projectFactoryTextForCorpus(
+        renderProductContract(state.product),
+        sources
+      );
+      const compilerPreviousCompilation = previousCompilation
+        ? projectFactoryTextForCorpus(previousCompilation, sources)
+        : undefined;
+      const compilerRejectedRepairCompilation = rejectedRepairCompilation
+        ? projectFactoryTextForCorpus(rejectedRepairCompilation, sources)
+        : undefined;
+      const compilerRejectedRepairFailure = rejectedRepairFailure
+        ? projectFactoryTextForCorpus(rejectedRepairFailure, sources)
+        : undefined;
       const call = corpusPrompt({
         creatorName: state.creator.name,
         productName: state.productName,
-        productPromise: await store.readArtifact(state.artifacts.productPromise),
-        productContract: renderProductContract(state.product),
+        productPromise: compilerProductPromise,
+        productContract: compilerProductContract,
         evidence: projectEvidenceForCorpus(
           await store.readArtifact(state.artifacts.evidence),
           sources
@@ -597,9 +620,9 @@ export class CreatorFactory {
         evaluationFeedback: compilerEvaluationFeedback,
         regression: compilerRegression,
         availableToolIds: factoryTools(state).map((tool) => tool.id),
-        previousCompilation,
-        rejectedRepairCompilation,
-        rejectedRepairFailure,
+        previousCompilation: compilerPreviousCompilation,
+        rejectedRepairCompilation: compilerRejectedRepairCompilation,
+        rejectedRepairFailure: compilerRejectedRepairFailure,
         reason: compileReason
       });
       raw = await this.call(store, {

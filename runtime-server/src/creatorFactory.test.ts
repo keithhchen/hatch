@@ -465,6 +465,11 @@ test("an initial raw-copy rejection can recover through a completeness_failure r
     return passingEvaluation();
   };
   const input = sampleInput("run-private-copy-repair");
+  // Exercise both the authoritative Product brief and the rejected draft as
+  // possible source-bearing compiler inputs. Durable artifacts must remain
+  // complete, while the compiler-only prompt view must not reintroduce this
+  // private sentence into the next publishable candidate.
+  input.productPromise = privateSentence;
   input.sources = [{
     id: "PRIVATE",
     authority: "private_material",
@@ -486,7 +491,9 @@ test("an initial raw-copy rejection can recover through a completeness_failure r
   assert.equal(corpusCalls, 3);
   assert.match(corpusPrompts[1]!, /Compile reason: completeness_failure/);
   assert.match(corpusPrompts[1]!, /Rejected compilation repair target \(complete but unaccepted/);
-  assert.equal(corpusPrompts[1]!.includes(privateSentence), true, "repair call must receive the complete rejected draft");
+  assert.equal(corpusPrompts[1]!.includes(privateSentence), false, "repair prompt must project the complete rejected draft");
+  assert.equal(corpusPrompts[0]!.includes(privateSentence), false, "initial prompt must project the Product brief");
+  assert.match(corpusPrompts[1]!, /REDACTED_SOURCE_TEXT/);
   assert.match(corpusPrompts[1]!, /\[raw_source_overlap\]/);
   assert.match(corpusPrompts[1]!, /Previous accepted complete compilation[\s\S]*None — initial compilation/);
   assert.equal(ready.artifacts.rejectedCorpusRepairTarget, undefined, "accepted guard pass clears the active repair target");
