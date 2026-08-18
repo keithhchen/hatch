@@ -87,6 +87,10 @@
   color: var(--hatch-text, #161412);
 }
 
+.cpv2-workspace-tabs button.is-failed {
+  color: var(--hatch-danger, #b94a3c);
+}
+
 .cpv2-workspace-tabs button.is-disabled,
 .cpv2-workspace-tabs button:disabled {
   color: var(--hatch-text-muted, #766f67);

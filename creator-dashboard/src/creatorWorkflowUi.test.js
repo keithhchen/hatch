@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { deriveCreatorWorkflow, isValidBriefSpec } from "./creatorWorkflowUi.js";
+import { deriveCreatorWorkflow, isReviewForRun, isValidBriefSpec } from "./creatorWorkflowUi.js";
 
 const brief = { contract_version: "1", fields: [{ id: "goal", label: "What is your goal?", required: true }] };
 
@@ -15,8 +15,8 @@ test("initial Files generation keeps every other step disabled", () => {
 test("local command busy state never overrides the last durable run", () => {
   const workflow = deriveCreatorWorkflow({
     busy: "start",
-    run: { status: "ready", workflow_step: "review", stage: "ready", candidate: {} },
-    review: { release_ready: true }
+    run: { id: "run-1", status: "ready", workflow_step: "review", stage: "ready", candidate: { system_digest: "sha256:candidate-1" } },
+    review: { run_id: "run-1", candidate_digest: "sha256:candidate-1", release_ready: true }
   });
   assert.equal(workflow.current, "brief");
   assert.equal(workflow.working, false);
@@ -79,10 +79,19 @@ test("stage-only generation checkpoints restore the matching loading step", () =
   assert.equal(review.steps.complete.enabled, false);
 });
 
+test("unknown server workflow steps fall back to the durable Factory stage", () => {
+  const workflow = deriveCreatorWorkflow({
+    run: { status: "running", workflow_step: "future-step", stage: "evaluating_heldout" }
+  });
+  assert.equal(workflow.current, "about-you");
+  assert.equal(workflow.steps["about-you"].loading, true);
+  for (const step of ["review", "brief", "complete"]) assert.equal(workflow.steps[step].enabled, false);
+});
+
 test("Review release unlocks Brief, then a valid Brief unlocks Complete", () => {
   const briefWorkflow = deriveCreatorWorkflow({
-    run: { status: "ready", workflow_step: "review", stage: "ready", candidate: {} },
-    review: { release_ready: true },
+    run: { id: "run-1", status: "ready", workflow_step: "review", stage: "ready", candidate: { system_digest: "sha256:candidate-1" } },
+    review: { run_id: "run-1", candidate_digest: "sha256:candidate-1", release_ready: true },
     briefSpec: null
   });
   assert.equal(briefWorkflow.current, "brief");
@@ -90,8 +99,8 @@ test("Review release unlocks Brief, then a valid Brief unlocks Complete", () => 
   assert.equal(briefWorkflow.steps.complete.enabled, false);
 
   const completeWorkflow = deriveCreatorWorkflow({
-    run: { status: "ready", workflow_step: "review", stage: "ready", candidate: {} },
-    review: { release_ready: true },
+    run: { id: "run-1", status: "ready", workflow_step: "review", stage: "ready", candidate: { system_digest: "sha256:candidate-1" } },
+    review: { run_id: "run-1", candidate_digest: "sha256:candidate-1", release_ready: true },
     briefSpec: brief
   });
   assert.equal(completeWorkflow.current, "complete");
@@ -122,4 +131,85 @@ test("brief validity is deterministic and rejects empty or duplicate fields", ()
     { id: "goal", label: "One", required: true },
     { id: "goal", label: "Two", required: false }
   ] }), false);
+});
+
+test("a stale review projection cannot unlock Brief or Complete for another run", () => {
+  const workflow = deriveCreatorWorkflow({
+    run: { id: "run-2", status: "ready", workflow_step: "review", stage: "ready", candidate: { system_digest: "sha256:new" } },
+    review: { run_id: "run-1", candidate_digest: "sha256:old", release_ready: true },
+    briefSpec: brief
+  });
+  assert.equal(workflow.reviewMatchesRun, false);
+  assert.equal(workflow.current, "review");
+  assert.equal(workflow.steps.brief.enabled, false);
+  assert.equal(workflow.steps.complete.enabled, false);
+});
+
+test("a changed candidate digest invalidates the old review projection", () => {
+  const run = { id: "run-1", status: "ready", workflow_step: "review", stage: "ready", candidate: { system_digest: "sha256:new" } };
+  const oldReview = { run_id: "run-1", candidate_digest: "sha256:old", release_ready: true };
+  assert.equal(isReviewForRun(run, oldReview), false);
+  assert.equal(isReviewForRun(run, { ...oldReview, candidate_digest: "sha256:new" }), true);
+});
+
+test("a waiting About You run wins over a stale terminal review in the UI state machine", () => {
+  const workflow = deriveCreatorWorkflow({
+    run: {
+      id: "run-1",
+      status: "waiting_for_creator",
+      stage: "awaiting_creator_answers",
+      workflow_step: "about-you",
+      pending_questions: [{ id: "q1" }],
+      candidate: { system_digest: "sha256:old" }
+    },
+    review: { run_id: "run-1", candidate_digest: "sha256:old", release_ready: true },
+    briefSpec: brief
+  });
+  assert.equal(workflow.current, "about-you");
+  assert.equal(workflow.steps.review.enabled, false);
+  assert.equal(workflow.steps.complete.enabled, false);
+});
+
+test("a durable publishing intent keeps Complete loading after refresh and locks the authoring tabs", () => {
+  const workflow = deriveCreatorWorkflow({
+    product: { status: "publishing" },
+    run: { id: "run-1", status: "ready", workflow_step: "review", stage: "ready" }
+  });
+  assert.equal(workflow.current, "complete");
+  assert.equal(workflow.publishing, true);
+  assert.equal(workflow.steps.complete.loading, true);
+  assert.equal(workflow.steps.complete.locked, true);
+  assert.equal(workflow.steps.complete.enabled, true);
+  for (const step of ["files", "about-you", "review", "brief"]) {
+    assert.equal(workflow.steps[step].enabled, false);
+    assert.equal(workflow.steps[step].loading, false);
+  }
+});
+
+test("published Product status is a durable Complete checkpoint even without a selected run", () => {
+  const workflow = deriveCreatorWorkflow({ product: { status: "published" } });
+  assert.equal(workflow.current, "complete");
+  assert.equal(workflow.published, true);
+  assert.equal(workflow.steps.complete.loading, false);
+  assert.equal(workflow.steps.complete.enabled, true);
+  assert.equal(workflow.steps.files.enabled, true);
+});
+
+test("an explicit publish failure keeps Complete actionable without pretending it is still loading", () => {
+  const workflow = deriveCreatorWorkflow({ product: { status: "publish_failed" } });
+  assert.equal(workflow.current, "complete");
+  assert.equal(workflow.publishFailed, true);
+  assert.equal(workflow.steps.complete.loading, false);
+  assert.equal(workflow.steps.complete.failed, true);
+  assert.equal(workflow.steps.complete.enabled, true);
+});
+
+test("a newly running version still wins over an older published Product projection", () => {
+  const workflow = deriveCreatorWorkflow({
+    product: { status: "published" },
+    run: { id: "run-2", status: "running", workflow_step: "files", stage: "extracting_evidence" }
+  });
+  assert.equal(workflow.current, "files");
+  assert.equal(workflow.steps.files.loading, true);
+  assert.equal(workflow.steps.complete.enabled, false);
 });
