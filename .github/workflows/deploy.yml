@@ -321,6 +321,26 @@ jobs:
             done
             exit 1
           fi
+          # The deployed Creator Factory profile must be usable from the
+          # actual worker network, not merely present in /opt/hatch/.env. A
+          # metadata-only probe catches missing/blocked provider credentials
+          # before a Creator can enqueue a Run that will fail opaquely later.
+          factory_profile="$(sed -n 's/^HATCH_FACTORY_LLM_PROFILE=//p' .env | tail -n 1)"
+          factory_profile="${factory_profile:-kimi-k2.6}"
+          if test "$factory_profile" = "deepseek-v4-flash"; then
+            "${compose[@]}" exec -T factory-worker node --input-type=module -e '
+              const key = process.env.DEEPSEEK_API_KEY?.trim();
+              if (!key) {
+                console.error("DeepSeek credential is missing inside factory-worker");
+                process.exit(1);
+              }
+              const response = await fetch("https://api.deepseek.com/models", {
+                headers: { authorization: `Bearer ${key}` }
+              });
+              console.log(`DeepSeek models probe: ${response.status}`);
+              if (!response.ok) process.exit(1);
+            '
+          fi
       - name: Seed canonical Agent Corpus and RAG index
         env:
           IMAGE_PREFIX: ${{ needs.build-and-push.outputs.image_prefix }}
