@@ -53,13 +53,15 @@ Files 上传、Review 的 accept/decision、Brief 保存和最终 Publish 都不
 - 点击 **生成版本** 后，服务端 run 真实进入 `running` + `workflow_step=files`；Files 显示 loading，About You、Review、Brief、Complete 仍可见但 disabled。
 - 刷新页面后，仍从同一个服务端 run 恢复 Files loading 和后续 disabled；没有依赖 local `busy` 或旧 run。
 - About You provider turn 完成后，真实生成了 9 个问题。提交最终答案后，About You 重新显示服务端 loading，所有后续 tab 继续 disabled；持久截图见下方。
-- 该新 run 在本记录时仍处于真实 provider 处理状态，尚未把 Review/Brief/Complete/Publish 伪造为成功。已有 Product `1650bef0-...` 的独立真实 UAT 已完成 Review→Brief→Complete→Publish；本次 run 专门验证新状态机的 loading/锁定/刷新行为。
+- 该新 run 随后真实进入 `needs_attention`：服务端返回 `Corpus did not converge after 6 revisions`，并明确诊断 `last gate: release_guard`、`repair attempt: 7`、`guard violations: raw_source_overlap`。页面回到 Files，显示真实错误；About You、Review、Brief、Complete 仍 disabled。没有把 Review/Brief/Complete/Publish 伪造为成功。这个失败来自输入文档中被模型复述的 source prose/guard，而不是 UI 状态机错误；它验证了错误也按当前步骤持久展示。已有 Product `1650bef0-...` 的独立真实 UAT 已完成 Review→Brief→Complete→Publish；本次 run 专门验证新状态机的 loading/锁定/刷新/needs_attention 行为。
 
 ![New Product Files loading with future tabs disabled](screenshots/creator-files-loading-20260819.png)
 
 ![New Product About You loading immediately after answer submission](screenshots/creator-about-you-loading-20260819.png)
 
 ![New Product About You loading after refresh](screenshots/creator-about-you-loading-persistent-20260819.png)
+
+![New Product real needs-attention error with future tabs disabled](screenshots/creator-files-needs-attention-20260819.png)
 
 ## 2. Data Structure / Source of Truth
 
