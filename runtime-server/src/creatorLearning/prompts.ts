@@ -65,6 +65,12 @@ const PRESERVATION_AUDIT_FORMAT = `Preservation audit formatting is a strict mec
 ## Asset identity, path, or layer changes
 Put the itemized audit under each heading. If a disposition has no entries, write None. beneath that heading; never omit the heading. Do not rename, duplicate, reorder, or nest these headings, add another level-2 heading, or include a top-level # Preservation audit heading. Keep these headings out of the Change rationale and Requirements traceability submissions.`;
 
+const CORPUS_SOURCE_SYNTHESIS_BOUNDARY = `Source-to-Corpus transformation is a hard release boundary:
+- Authorized source packets, transcripts, excerpts, evidence ledgers, QA/evaluation records, and Factory traces are Factory-only. They may guide meaning, but their prose may not appear copied in any publishable System, Skill, Skill reference, Knowledge asset, or asset metadata.
+- Publishable content must be an original synthesis: preserve supported decisions, constraints, qualifiers, and boundaries semantically, but rewrite in fresh wording and reorganize for the destination layer. Never quote, transcribe, lightly edit, sentence-by-sentence paraphrase, or split a source passage across assets. Do not move source text into another asset or into metadata.
+- If a deterministic report names raw_source_overlap, rewrite every affected publishable field from the supported meaning; do not merely delete a few words, shorten the asset, or move the text. Preserve the capability while removing the source wording. Raw excerpts and traceability belong only in Factory evidence or non-runtime audit artifacts.
+- Product names and necessary technical terms may remain, but no long source span or near-verbatim passage may remain in publishable content. A source passage that is useful as an example must be rebuilt as a new, reader-facing example rather than copied.`;
+
 const EVAL_REASONING_PROTOCOL = `Evaluation reasoning protocol (judge behavior, not surface fluency):
 1. Extract the Creator's decisive intent, tradeoff, boundary, and deliverable from the reference answer before reading for stylistic similarity.
 2. Compare the Candidate on material behavior: diagnosis, prioritization, omissions, unsupported claims, usability, and boundary handling.
@@ -235,6 +241,8 @@ ${FACTORY_DECISION_PRIORITIES}
 ${CORPUS_ETHOS}
 
 ${CORPUS_REASONING_PROTOCOL}
+
+${CORPUS_SOURCE_SYNTHESIS_BOUNDARY}
 
 Compile cognitive content only. Never generate an \`agent.json\`, manifest, SHA/digest, tool declaration/configuration, runtime/provider/streaming/approval/retrieval configuration, URL, connection reference, credential, secret, price, or release metadata. Product and tool declarations are owned outside this LLM call. Use only the available local submission tools; the only tool-related output permitted is a Skill's \`allowed_tool_ids\` metadata, and every ID there must exactly match one of the externally supplied Available tool IDs. Do not invent, rename, configure, or request a tool. If none is supplied or needed, write \`allowed_tool_ids: []\`.
 

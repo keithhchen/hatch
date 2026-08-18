@@ -282,6 +282,11 @@ test("Corpus prompt compiles lossless full-layer replacements with concrete dest
   assert.match(call.systemPrompt, /routing suggestion without the destination asset's complete content.*failure/i);
   assert.match(call.systemPrompt, /Knowledge is not an archive of inputs/i);
   assert.match(call.systemPrompt, /purified, self-contained, searchable long-tail content/i);
+  assert.match(call.systemPrompt, /Source-to-Corpus transformation is a hard release boundary/i);
+  assert.match(call.systemPrompt, /Publishable content must be an original synthesis/i);
+  assert.match(call.systemPrompt, /Never quote, transcribe, lightly edit, sentence-by-sentence paraphrase, or split a source passage across assets/i);
+  assert.match(call.systemPrompt, /If a deterministic report names raw_source_overlap, rewrite every affected publishable field/i);
+  assert.match(call.systemPrompt, /Raw excerpts and traceability belong only in Factory evidence or non-runtime audit artifacts/i);
   assert.match(call.systemPrompt, /Never generate an `agent\.json`, manifest, SHA\/digest/i);
   assert.match(call.systemPrompt, /only tool-related output permitted is a Skill's `allowed_tool_ids`/i);
   assert.match(call.systemPrompt, /must exactly match one of the externally supplied Available tool IDs/i);

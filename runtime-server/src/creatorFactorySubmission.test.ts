@@ -705,6 +705,8 @@ test("Corpus tools derive paths and canonical-render every layer in one accepted
   assert.doesNotMatch(offeredSchemas, /manifest|sha256/i);
   assert.match(offeredSchemas, /exactly one level-2 subsection/);
   assert.match(offeredSchemas, /## Retained; ## Added or changed; ## Removed; ## Merged; ## Conflict resolutions; ## Asset identity, path, or layer changes/);
+  assert.match(offeredSchemas, /original synthesis of supported meaning/);
+  assert.match(offeredSchemas, /Never quote, transcribe, lightly edit, sentence-by-sentence paraphrase, or split authorized source prose across assets/);
 });
 
 test("Corpus draft commits bounded partial turns and repairs a rejected finalizer in place", async () => {

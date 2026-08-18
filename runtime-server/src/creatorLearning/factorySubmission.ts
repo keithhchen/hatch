@@ -189,6 +189,12 @@ const PRESERVATION_AUDIT_TOOL_DESCRIPTION = [
   "Put itemized text under every subsection; write None. when a disposition has no entries. Do not omit, rename, duplicate, reorder, or add another level-2 subsection."
 ].join(" ");
 
+const PUBLISHABLE_CONTENT_TOOL_DESCRIPTION = [
+  "All submitted asset content and LLM-authored metadata must be an original synthesis of supported meaning.",
+  "Never quote, transcribe, lightly edit, sentence-by-sentence paraphrase, or split authorized source prose across assets.",
+  "Rewrite source-derived knowledge in fresh wording; raw excerpts belong only in Factory evidence or non-runtime audit artifacts."
+].join(" ");
+
 function safeCorpusParserFailure(error: unknown): SubmissionValidationError {
   const message = error instanceof Error ? error.message : String(error);
   const exactFailures = new Map<string, readonly [string, string]>([
@@ -919,7 +925,7 @@ export function createFactorySubmissionProtocol(
     const available = new Set(contract.availableToolIds);
     tools.push(makeTool(
       "submit_system_instructions",
-      "Submit the complete replacement for instructions/system.md. The host derives its path.",
+      `Submit the complete replacement for instructions/system.md. The host derives its path. ${PUBLISHABLE_CONTENT_TOOL_DESCRIPTION}`,
       Type.Object({ content: text }, { additionalProperties: false }),
       (draft, params) => {
         const content = body(params.content, "content");
@@ -932,7 +938,7 @@ export function createFactorySubmissionProtocol(
     ));
     tools.push(makeTool(
       "submit_skill",
-      "Submit one complete Skill. id determines skills/<id>/SKILL.md; never submit a path.",
+      `Submit one complete Skill. id determines skills/<id>/SKILL.md; never submit a path. ${PUBLISHABLE_CONTENT_TOOL_DESCRIPTION}`,
       Type.Object({
         id: text,
         name: text,
@@ -961,7 +967,7 @@ export function createFactorySubmissionProtocol(
     ));
     tools.push(makeTool(
       "submit_reference",
-      "Submit one complete Skill-local reference. The host derives its path from parent_skill_id and id.",
+      `Submit one complete Skill-local reference. The host derives its path from parent_skill_id and id. ${PUBLISHABLE_CONTENT_TOOL_DESCRIPTION}`,
       Type.Object({
         id: text,
         parent_skill_id: text,
@@ -992,7 +998,7 @@ export function createFactorySubmissionProtocol(
     ));
     tools.push(makeTool(
       "submit_knowledge",
-      "Submit one complete purified retrieval-only knowledge document. The host derives knowledge/<id>.md.",
+      `Submit one complete purified retrieval-only knowledge document. The host derives knowledge/<id>.md. ${PUBLISHABLE_CONTENT_TOOL_DESCRIPTION}`,
       Type.Object({ id: text, source_summary: text, content: text }, { additionalProperties: false }),
       (draft, params) => {
         const id = metadata(params.id, "id");
