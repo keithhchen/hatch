@@ -27,6 +27,7 @@ Files 上传、Review 的 accept/decision、Brief 保存和最终 Publish 都不
 - 当前步骤之后的 tabs 保持可见但 disabled；不能通过路由直接跳过 gate。
 - 浏览器刷新后按服务端投影恢复当前步骤、loading 和 disabled 状态。
 - `needs_attention` 停留在失败的当前步骤，显示真实错误和 Retry；不会把后续步骤误标为可用。
+- Complete 发布会先持久化 Product `status=publishing`；刷新期间 Complete 继续显示 spinner，Files/About You/Review/Brief 仍 disabled。只有服务端变为 `published` 才显示成功；显式 `publish_failed`/`publish_error` 才显示真实错误和 Retry。
 - Review correction 或 sealed held-out correction 创建新的 immutable Version；旧 Version 不被覆盖。
 
 已保存的真实截图：
@@ -163,6 +164,15 @@ Current evidence (2026-08-18, production): real Versions 2–5, About You answer
 
 Observed in this UAT: Maya Chen OAuth/PKCE succeeded; `context-intake-uat.md` was uploaded to the Product Files of the Product above and read back with the same artifact and digest. The response explicitly confirmed that no Version or Run was changed.
 
+Additional production evidence (2026-08-19, real Chrome session and real Creator account):
+
+- The Hatch consent page identified `Hatch UAT Creator 20260818` and listed exactly the four Product/Product Files scopes above. The authorization used a fresh `state`, Authorization Code, and S256 PKCE challenge; the token exchange returned the same Creator identity and stored the grant in macOS Keychain without exposing the token.
+- Chrome blocked the loopback callback page with `ERR_BLOCKED_BY_CLIENT`. The browser URL still contained the one-time callback parameters, so the exact state/code were delivered to the already-running local callback listener; the server accepted the state and PKCE verifier. This is a browser-extension callback limitation, not an OAuth endpoint failure. Evidence of the consent page: [context-intake-oauth-consent-20260819.png](screenshots/context-intake-oauth-consent-20260819.png).
+- The authenticated intake client listed Product `Hatch UAT Full Creator 20260818` and read its existing Product Files. It uploaded the creator-approved Markdown artifact `context-intake-uat-20260819.md` from this guide with `source_kind=codex_session`, `provenance=creator_confirmed`, and `creator_approved=true`. The returned artifact was `artifact_ba5e1a39778ca02f051e142e96c2978e39ef9108dc0007a7287e5766088a642d`, 12,411 bytes, SHA-256 `ba5e1a39778ca02f051e142e96c2978e39ef9108dc0007a7287e5766088a642d`; the Product File receipt was `file_8f7895c2ecc99b7a9fbcb3eb121959ad78e54bcd`.
+- A byte-identical replay returned the same file/artifact/digest and unchanged `updated_at`; a subsequent Product Files list contained exactly the original file plus this new file. Direct file verification returned the same metadata and projection digest. The upload response explicitly stated that no Version or Run was changed.
+
+![Context Intake OAuth consent](screenshots/context-intake-oauth-consent-20260819.png)
+
 ## 5. Buyer Desktop UAT
 
 Use a real buyer account with entitlement to the published Product:
@@ -188,6 +198,18 @@ Screenshots:
 
 This is Desktop OS UAT on a real local product build with production Registry/Runtime and a real entitlement; it is not a signed production Desktop release. Do not use a fixture, preview bundle, synthetic entitlement or fake success state as evidence for this section.
 
+### Latest Buyer evidence (2026-08-19)
+
+The follow-up run used a newly created real Buyer account, `Hatch UAT Buyer 20260819`, and the same published Product. The real Desktop build showed the published BriefSpec, accepted the required and optional answers, created one immutable BriefSnapshot, and started the Agent immediately. After the app was quit and reopened, the same Product, Task, Conversation and final Agent output were restored from the server projection.
+
+![Buyer entitlement and Product access](screenshots/buyer-entitlement-success-20260819.png)
+
+![Buyer Task with Agent running](screenshots/buyer-task-running-20260819.png)
+
+![Buyer Task and Agent completion](screenshots/buyer-task-complete-20260819.png)
+
+![Buyer Task restored after Desktop restart](screenshots/buyer-task-restarted-20260819.png)
+
 ## 6. Evidence levels
 
 | Evidence | Meaning |
@@ -198,5 +220,24 @@ This is Desktop OS UAT on a real local product build with production Registry/Ru
 | Desktop OS UAT | Real Hatch Desktop build, entitlement, native bridge and Agent |
 
 Only the last two levels can close product UAT. Provider quota, signed browser OAuth, production Postgres/Object Storage and Desktop OS state must be reported separately from green unit tests.
+
+## 7. End-to-end data flow
+
+```text
+Creator Files
+  └─ ProductFile (immutable source + projection)
+       └─ Continue → ProductSnapshot → FactoryRun (queued/running)
+            └─ About You answer draft/submission (CAS + question_batch_id)
+                 └─ immutable Version / Candidate / Corpus + sealed evaluations
+                      └─ Review adjudications or correction → new Version
+                           └─ BriefSpec (creator-owned, persisted on Product)
+                                └─ release intent (Product status = publishing)
+                                     └─ Registry activation → Product status = published
+                                          └─ Buyer entitlement → Desktop BriefSpec
+                                               └─ BriefSnapshot in Conversation JSONB
+                                                    └─ Conversation/Task → Agent Run
+```
+
+At every arrow the UI reads a server projection. `run.status`, `run.stage`, `workflow_step`, immutable artifact/revision identity and Product `status` determine the current step, loading indicator, disabled tabs and retry surface. The browser's local `busy` flag is only a command guard; it is never the source of truth. Product Files upload does not create a Version or Run, and the Context Intake upload replay proved that the same idempotency key returns the same file/artifact/digest without adding another file.
 
 Implementation note: Product mutation CAS compares the Postgres timestamp at the API's millisecond precision; hidden database microseconds must not turn a freshly read Product into a false `version_conflict`.
