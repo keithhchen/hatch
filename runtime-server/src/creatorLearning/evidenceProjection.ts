@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { auditRawSourceOverlap } from "./corpusReleaseGuards.js";
-import type { FactorySource } from "./types.js";
+import type { CreatorQa, FactorySource } from "./types.js";
 
 /**
  * The Evidence artifact is the Factory source of truth and intentionally keeps
@@ -38,7 +38,7 @@ export function projectEvidenceForCorpus(
   evidence: string,
   sources: readonly SourceLike[]
 ): string {
-  const projected = sanitizeEvidence(evidence, sources);
+  const projected = projectFactoryTextForCorpus(evidence, sources);
   const metadata = sources.length === 0
     ? ["- None supplied; retain any source/line references already present in Evidence."]
     : sources.map((source) => (
@@ -59,6 +59,38 @@ export function projectEvidenceForCorpus(
     projected.trim(),
     ""
   ].join("\n");
+}
+
+/**
+ * Build a compiler-only view of a Factory-owned text field. This is used for
+ * QA answers, evaluation feedback, and the confirmed regression set as well
+ * as Evidence. The caller retains the original artifact; only the value sent
+ * to the Corpus compiler is projected.
+ */
+export function projectFactoryTextForCorpus(
+  value: string,
+  sources: readonly SourceLike[]
+): string {
+  return sanitizeEvidence(value, sources);
+}
+
+/**
+ * Preserve QA identity and semantic metadata while protecting every
+ * creator-authored text field from source overlap in the compiler prompt.
+ * `CreatorQa` artifacts remain untouched; this returns a prompt-only view.
+ */
+export function projectCreatorQaForCorpus(
+  rows: readonly CreatorQa[],
+  sources: readonly SourceLike[]
+): CreatorQa[] {
+  return rows.map((row) => ({
+    ...row,
+    question: projectFactoryTextForCorpus(row.question, sources),
+    ...(row.intent === undefined
+      ? {}
+      : { intent: projectFactoryTextForCorpus(row.intent, sources) }),
+    answer: projectFactoryTextForCorpus(row.answer, sources)
+  }));
 }
 
 function sanitizeEvidence(

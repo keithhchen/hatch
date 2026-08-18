@@ -20,7 +20,11 @@ import {
   parseQuestions
 } from "./creatorLearning/markdown.js";
 import { auditRawSourceOverlap } from "./creatorLearning/corpusReleaseGuards.js";
-import { projectEvidenceForCorpus } from "./creatorLearning/evidenceProjection.js";
+import {
+  projectCreatorQaForCorpus,
+  projectEvidenceForCorpus,
+  projectFactoryTextForCorpus
+} from "./creatorLearning/evidenceProjection.js";
 import { evidencePrompt } from "./creatorLearning/prompts.js";
 import type { CreatorQuestion, FactoryPromptCall, FactoryStartInput } from "./creatorLearning/types.js";
 
@@ -429,6 +433,8 @@ test("raw private prose copied into Corpus is deterministically revised and exha
   assert.match(failed.lastError ?? "", /last gate: release_guard/i);
   assert.match(failed.lastError ?? "", /repair attempt: 2/i);
   assert.match(failed.lastError ?? "", /guard violations: raw_source_overlap/i);
+  assert.match(failed.lastError ?? "", /raw_source_overlap@instructions\/system\.md/i);
+  assert.doesNotMatch(failed.lastError ?? "", /source_id|source_range|candidate_range|silver markers/i);
   const guardReports = await Promise.all(failed.artifacts.evaluationRounds.map((ref) => store.readArtifact(ref)));
   assert.equal(guardReports.filter((report) => report.includes("[raw_source_overlap]")).length, 2);
   assert.equal(guardReports.some((report) => report.includes(privateSentence)), false);
@@ -750,6 +756,112 @@ test("Evidence projection removes near-verbatim source prose while retaining sem
   assert.deepEqual(violations, []);
   assert.match(projection, /Meaning: preserve the review boundary/);
   assert.match(projection, /Boundary: do not invent an unsupported commitment/);
+});
+
+test("QA and evaluation projections redact source prose while preserving semantic metadata", () => {
+  const sourceText = "Before publishing a recommendation, name the one irreversible tradeoff, identify its owner, and state the first observable signal that would justify reopening the decision for the customer.";
+  const sources = [{
+    id: "PRIVATE-QA",
+    authority: "private_material" as const,
+    title: "Private decision protocol",
+    content: sourceText
+  }];
+  const rows = [{
+    id: "Q-1",
+    question: "Which decision boundary should guide the response?",
+    intent: "Test the Creator's decisive judgment.",
+    leakageGroup: "tradeoff",
+    kind: "behavior" as const,
+    answer: `Preserve the governing tradeoff and apply this protocol: ${sourceText}`
+  }];
+
+  const projectedRows = projectCreatorQaForCorpus(rows, sources);
+  const projectedFeedback = projectFactoryTextForCorpus(
+    `## Diagnosis\nThe response needs a clearer boundary. ${sourceText}`,
+    sources
+  );
+
+  assert.equal(rows[0]!.answer.includes(sourceText), true, "the durable QA input remains unchanged");
+  assert.equal(projectedRows[0]!.answer.includes(sourceText), false);
+  assert.equal(projectedRows[0]!.id, rows[0]!.id);
+  assert.equal(projectedRows[0]!.leakageGroup, rows[0]!.leakageGroup);
+  assert.equal(projectedRows[0]!.kind, rows[0]!.kind);
+  assert.match(projectedRows[0]!.answer, /Preserve the governing tradeoff/);
+  assert.match(projectedRows[0]!.answer, /REDACTED_SOURCE_TEXT/);
+  assert.equal(projectedFeedback.includes(sourceText), false);
+  assert.match(projectedFeedback, /## Diagnosis/);
+  assert.match(projectedFeedback, /clearer boundary/);
+});
+
+test("Corpus compiler receives projected QA, evaluation feedback, and regression inputs", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-factory-compiler-input-projection-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const sourceText = "Before publishing a recommendation, name the one irreversible tradeoff, identify its owner, and state the first observable signal that would justify reopening the decision for the customer.";
+  const corpusPrompts: string[] = [];
+  const run = async (call: FactoryPromptCall): Promise<string> => {
+    if (call.purpose === "evidence.extract") {
+      return "# Product evidence\nMeaning: preserve the governing tradeoff and make the response actionable.";
+    }
+    if (call.purpose === "eval.generate_questions") {
+      const count = Number(/Question count:\s*(\d+)/.exec(call.prompt)?.[1]);
+      return Array.from({ length: count }, (_, index) => questionFixture(
+        `Q${index + 1}`,
+        `Test the Creator's decision boundary ${index + 1}.`,
+        `compiler-input-projection-${index + 1}`
+      )).join("\n\n");
+    }
+    if (call.purpose === "corpus.compile") {
+      corpusPrompts.push(call.prompt);
+      return layeredCorpusFixture("Preserve the supported tradeoff and produce a practical customer-ready result.");
+    }
+    if (call.purpose === "eval.judge_result") {
+      return [
+        "## Verdict",
+        "PASS",
+        "## Diagnosis",
+        `The Creator's answer needs one explicit boundary. ${sourceText}`,
+        "## Few-shot candidate",
+        `Use the supported tradeoff without copying source prose. ${sourceText}`,
+        "## Corpus reflection",
+        "Keep the response actionable."
+      ].join("\n");
+    }
+    if (call.purpose === "eval.audit_corpus") return passingEvaluation();
+    throw new Error(`Unexpected prompt purpose: ${call.purpose}`);
+  };
+  const input = sampleInput("run-compiler-input-projection");
+  input.sources = [{
+    id: "PRIVATE-QA",
+    authority: "private_material",
+    title: "Private decision protocol",
+    content: sourceText
+  }];
+  input.config = { developmentQuestions: 1, heldoutQuestions: 1, maxCorpusRevisions: 3 };
+  const factory = new CreatorFactory(root, run, async (execution) => `Finished ${execution.question}`);
+  const waiting = await factory.start(input);
+  const store = new FactoryFileStore(root, waiting.runId);
+  const questions = parseQuestions(await store.readArtifact(waiting.artifacts.currentQuestionBatch!));
+  const ready = await factory.submitCreatorAnswers(
+    waiting.runId,
+    answerMarkdown(questions, () => `Creator semantic judgment: ${sourceText}`),
+    waiting.artifacts.currentQuestionBatch!.batchId
+  );
+
+  assert.equal(ready.stage, "ready");
+  assert.ok(corpusPrompts.length >= 2, "initial and calibrated compiler calls should both run");
+  for (const prompt of corpusPrompts) {
+    assert.equal(prompt.includes(sourceText), false, "compiler prompt must not contain source prose");
+    assert.match(prompt, /Creator semantic judgment/);
+    assert.match(prompt, /REDACTED_SOURCE_TEXT/);
+    assert.match(prompt, /Evaluation-only feedback visible to the compiler/);
+    assert.match(prompt, /Confirmed Regression Set visible to the compiler/);
+  }
+  const development = await store.readArtifact(ready.artifacts.developmentQa!);
+  const regression = await store.readArtifact(ready.artifacts.regressionSet!);
+  const reports = await Promise.all(ready.artifacts.evaluationRounds.map((reference) => store.readArtifact(reference)));
+  assert.equal(development.includes(sourceText), true, "durable QA artifact keeps the Creator answer");
+  assert.equal(regression.includes(sourceText), true, "durable regression artifact keeps the Creator answer");
+  assert.equal(reports.some((report) => report.includes(sourceText)), true, "durable evaluation report keeps evidence");
 });
 
 test("ordered overlap catches near-verbatim edits without rejecting a 100KB same-topic English/Japanese rewrite", () => {

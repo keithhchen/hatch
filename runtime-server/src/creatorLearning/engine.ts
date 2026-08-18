@@ -32,7 +32,11 @@ import { classifyFactoryProviderFailure } from "./factoryLlm.js";
 import { issueQuestionBatch, requireQuestionBatchId } from "./questionBatch.js";
 import { requireUuidV4 } from "../identity.js";
 import { validateFactorySourceManifest } from "./sourceScope.js";
-import { projectEvidenceForCorpus } from "./evidenceProjection.js";
+import {
+  projectCreatorQaForCorpus,
+  projectEvidenceForCorpus,
+  projectFactoryTextForCorpus
+} from "./evidenceProjection.js";
 import type {
   ActiveQaEvaluationScope,
   ArtifactRef,
@@ -524,7 +528,7 @@ export class CreatorFactory {
       const gate = repairTarget?.reason ?? state.compileReason ?? "unknown";
       const attempt = repairTarget?.attempt ?? state.corpusRevisionCount;
       const guardViolations = repairTarget?.reason === "release_guard"
-        ? await readSafeGuardViolationCodes(store, repairTarget.failureReport)
+        ? await readSafeGuardViolationSummaries(store, repairTarget.failureReport)
         : [];
       // Keep the cap fail-closed, but retain the host-owned gate and attempt
       // metadata in the durable error. The old generic message made a real
@@ -574,6 +578,12 @@ export class CreatorFactory {
     } else {
       const sourcePacket = await store.readArtifact(state.artifacts.sourcePacket);
       const sources = parseRawSourcesFromPacket(sourcePacket);
+      const developmentQa = projectCreatorQaForCorpus(
+        parseQaSet(await store.readArtifact(state.artifacts.developmentQa)),
+        sources
+      );
+      const compilerEvaluationFeedback = projectFactoryTextForCorpus(evaluationFeedback, sources);
+      const compilerRegression = projectCreatorQaForCorpus(regression, sources);
       const call = corpusPrompt({
         creatorName: state.creator.name,
         productName: state.productName,
@@ -583,9 +593,9 @@ export class CreatorFactory {
           await store.readArtifact(state.artifacts.evidence),
           sources
         ),
-        developmentQa: parseQaSet(await store.readArtifact(state.artifacts.developmentQa)),
-        evaluationFeedback,
-        regression,
+        developmentQa,
+        evaluationFeedback: compilerEvaluationFeedback,
+        regression: compilerRegression,
         availableToolIds: factoryTools(state).map((tool) => tool.id),
         previousCompilation,
         rejectedRepairCompilation,
@@ -2350,25 +2360,46 @@ const SAFE_GUARD_VIOLATION_CODES = [
 ] as const;
 
 /**
- * Expose only deterministic guard code names in a terminal UI error. Guard
- * reports also contain source IDs and positional witnesses; those remain in
- * the operator artifact and must never be copied into Creator-visible state.
+ * Expose only deterministic guard codes plus host-owned asset paths in a
+ * terminal UI error. Guard reports also contain source IDs, source ranges,
+ * candidate ranges, and positional witnesses; those remain in the operator
+ * artifact and must never be copied into Creator-visible state.
  */
-async function readSafeGuardViolationCodes(
+async function readSafeGuardViolationSummaries(
   store: FactoryFileStore,
   reference: ArtifactRef
 ): Promise<string[]> {
   if (reference.sealed) return [];
   try {
     const report = await store.readArtifact(reference);
-    const codes = SAFE_GUARD_VIOLATION_CODES.filter((code) => (
-      new RegExp(`^- \\[${code}\\]`, "m").test(report)
-    ));
-    return [...codes];
+    const summaries = new Set<string>();
+    const entries = report.matchAll(/^- \[([^\]]+)\] ([^\n]*)$/gm);
+    for (const entry of entries) {
+      const code = entry[1];
+      if (!code || !SAFE_GUARD_VIOLATION_CODES.includes(code as typeof SAFE_GUARD_VIOLATION_CODES[number])) {
+        continue;
+      }
+      const paths = safeGuardAssetPaths(entry[2] ?? "");
+      summaries.add(paths.length > 0 ? `${code}@${paths.join(",")}` : code);
+    }
+    return [...summaries];
   } catch {
     // Diagnostics must never mask the original bounded convergence error.
     return [];
   }
+}
+
+/**
+ * Extract only derived asset paths from a guard detail. The report's source
+ * IDs, ranges, witnesses, and any source/body text are intentionally ignored.
+ */
+function safeGuardAssetPaths(detail: string): string[] {
+  const match = /(?:^|;\s*)(?:paths|inspected_paths):\s*([^;]+)/.exec(detail);
+  if (!match) return [];
+  return [...new Set(match[1]!
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => /^[A-Za-z0-9._/#,-]+$/.test(value)))];
 }
 
 function isLegacyGuardReportPath(reportPath: string, version: number): boolean {
