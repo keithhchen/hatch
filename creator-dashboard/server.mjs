@@ -1292,7 +1292,7 @@ export async function createDashboardApp(options = {}) {
         return send(response, 404, { error: { code: "not_found", message: "Route not found." } });
       }
 
-      const productContractPath = url.pathname.match(/^\/v1\/creator\/products(?:\/[^/]+(?:\/(?:files|snapshots|runs|versions)(?:\/[^/]+)?|\/brief-spec)?)?$/);
+      const productContractPath = url.pathname.match(/^\/v1\/creator\/products(?:\/[^/]+(?:\/(?:files|snapshots|runs|versions)(?:\/[^/]+)?|\/graph|\/brief-spec)?)?$/);
       const productContractWrite = productContractPath && (
         request.method === "POST" || request.method === "PATCH" || request.method === "PUT"
       ) && (
@@ -1303,6 +1303,7 @@ export async function createDashboardApp(options = {}) {
       const productContractRead = productContractPath && request.method === "GET" && (
         url.pathname === "/v1/creator/products"
         || /\/(files|snapshots|runs|versions)(?:\/[^/]+)?$/.test(url.pathname)
+        || /\/graph$/.test(url.pathname)
       );
       if (productContractWrite || productContractRead) {
         const authentication = await authenticate(request, registryUrl, "creator", fetchImpl, portalState);
@@ -1312,7 +1313,7 @@ export async function createDashboardApp(options = {}) {
           ? (request.method === "GET" ? "creator:products:read" : "creator:products:write")
           : (url.pathname.includes("/files")
             ? (request.method === "GET" ? "creator:files:read" : "creator:files:write")
-            : "creator:products:write");
+            : (request.method === "GET" ? "creator:products:read" : "creator:products:write"));
         requireOAuthScope(request, requiredScope, url.pathname);
         requireCapability(authentication.profile, request.method === "GET" ? "product:read" : "product:edit");
         const body = request.method === "GET" ? undefined : JSON.stringify(await readJson(request, factoryRequestMaxBytes));
