@@ -182,6 +182,13 @@ const PRESERVATION_SECTIONS = [
   "Asset identity, path, or layer changes"
 ] as const;
 
+const PRESERVATION_AUDIT_TOOL_DESCRIPTION = [
+  "Submit one complete compiler audit section body without its host-owned # heading.",
+  "For preservation_audit, include exactly one level-2 subsection for each required disposition, in this exact order:",
+  "## Retained; ## Added or changed; ## Removed; ## Merged; ## Conflict resolutions; ## Asset identity, path, or layer changes.",
+  "Put itemized text under every subsection; write None. when a disposition has no entries. Do not omit, rename, duplicate, reorder, or add another level-2 subsection."
+].join(" ");
+
 function safeCorpusParserFailure(error: unknown): SubmissionValidationError {
   const message = error instanceof Error ? error.message : String(error);
   const exactFailures = new Map<string, readonly [string, string]>([
@@ -1001,7 +1008,7 @@ export function createFactorySubmissionProtocol(
     ));
     tools.push(makeTool(
       "submit_corpus_audit_section",
-      "Submit one complete compiler audit section body without its host-owned # heading. The host owns all four top-level envelope headings; submit all three bodies before finalizing.",
+      `${PRESERVATION_AUDIT_TOOL_DESCRIPTION} The host owns all four top-level envelope headings; submit all three bodies before finalizing.`,
       Type.Object({
         section: Type.Union([
           Type.Literal("change_rationale"),

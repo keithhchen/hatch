@@ -56,6 +56,15 @@ const CORPUS_REASONING_PROTOCOL = `Compiler reasoning protocol (emit durable cap
 4. Treat a Creator-confirmed provenance hypothesis as authority; keep unconfirmed hypotheses out of runtime assets and record the unresolved status in the audit.
 5. Run a final coverage and preservation pass over every asset, dependency, path, and conflict before finalization. Do not reveal private chain-of-thought; emit the required traceability and audit sections instead.`;
 
+const PRESERVATION_AUDIT_FORMAT = `Preservation audit formatting is a strict mechanical contract. Submit this as the complete body for section=preservation_audit; the host supplies the top-level # Preservation audit heading. Copy these six level-2 headings exactly once each and in exactly this order:
+## Retained
+## Added or changed
+## Removed
+## Merged
+## Conflict resolutions
+## Asset identity, path, or layer changes
+Put the itemized audit under each heading. If a disposition has no entries, write None. beneath that heading; never omit the heading. Do not rename, duplicate, reorder, or nest these headings, add another level-2 heading, or include a top-level # Preservation audit heading. Keep these headings out of the Change rationale and Requirements traceability submissions.`;
+
 const EVAL_REASONING_PROTOCOL = `Evaluation reasoning protocol (judge behavior, not surface fluency):
 1. Extract the Creator's decisive intent, tradeoff, boundary, and deliverable from the reference answer before reading for stylistic similarity.
 2. Compare the Candidate on material behavior: diagnosis, prioritization, omissions, unsupported claims, usability, and boundary handling.
@@ -260,6 +269,7 @@ Do not serialize the whole result as one JSON object, do not reproduce a delimit
 - submit each justified reference with its ID, parent Skill ID, reference kind, and complete Markdown;
 - submit each justified knowledge document with its ID, reader-facing source summary, and complete purified Markdown;
 - separately submit complete Change rationale, Requirements traceability, and Preservation audit section bodies. The host owns the four top-level envelope headings (\`# Change rationale\`, \`# Requirements traceability\`, \`# Preservation audit\`, \`# Compilation complete\`): never include any of those \`#\` headings in a \`submit_corpus_audit_section\` body. Within the Preservation audit body, include exactly one \`##\` subsection for each required disposition and no duplicate top-level headings;
+- ${PRESERVATION_AUDIT_FORMAT}
 - after the retained inventory is complete, call the finalize tool and continue until its validation is accepted.
 
 Valid reference kinds are exactly method, style, example, and few_shots. IDs must be globally unique lowercase Agent Corpus identifiers. Never submit a path: the host derives every canonical path. Never submit a manifest, digest, runtime configuration, or tool declaration. The Preservation audit must contain Retained, Added or changed, Removed, Merged, Conflict resolutions, and Asset identity, path, or layer changes subsections, each itemized as specified above. A tool error rolls back only that tool turn; the prior retained draft remains authoritative. A rejected finalizer also preserves the complete draft: replace the specifically affected asset or audit section and finalize again. Restart and re-submit the entire Corpus only when the retained draft is fundamentally unsalvageable. The finalized output—not every intermediate tool turn—must be a complete, non-shortened replacement.`,

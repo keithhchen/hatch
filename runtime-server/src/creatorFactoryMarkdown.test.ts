@@ -290,6 +290,10 @@ test("Corpus prompt compiles lossless full-layer replacements with concrete dest
   assert.match(call.systemPrompt, /use only the available local submission tools/i);
   assert.match(call.systemPrompt, /submit exactly one complete System instruction asset/i);
   assert.match(call.systemPrompt, /Change rationale, Requirements traceability, and Preservation audit/i);
+  assert.match(call.systemPrompt, /Preservation audit formatting is a strict mechanical contract/i);
+  assert.match(call.systemPrompt, /## Retained[\s\S]*## Added or changed[\s\S]*## Removed[\s\S]*## Merged[\s\S]*## Conflict resolutions[\s\S]*## Asset identity, path, or layer changes/);
+  assert.match(call.systemPrompt, /If a disposition has no entries, write None\./i);
+  assert.match(call.systemPrompt, /Do not rename, duplicate, reorder, or nest these headings/i);
   assert.match(call.systemPrompt, /Never submit a path: the host derives every canonical path/i);
   assert.match(call.systemPrompt, /rejected finalizer also preserves the complete draft/i);
   assert.match(call.systemPrompt, /Creator answer is the authority for the product's decisive judgment/i);
