@@ -522,6 +522,9 @@ export class CreatorFactory {
       const repairTarget = state.artifacts.rejectedCorpusRepairTarget;
       const gate = repairTarget?.reason ?? state.compileReason ?? "unknown";
       const attempt = repairTarget?.attempt ?? state.corpusRevisionCount;
+      const guardViolations = repairTarget?.reason === "release_guard"
+        ? await readSafeGuardViolationCodes(store, repairTarget.failureReport)
+        : [];
       // Keep the cap fail-closed, but retain the host-owned gate and attempt
       // metadata in the durable error. The old generic message made a real
       // completeness/release-guard loop indistinguishable from a parser or
@@ -529,7 +532,9 @@ export class CreatorFactory {
       // whether to repair the prompt/source or retry infrastructure.
       throw new Error(
         `Corpus did not converge after ${state.config.maxCorpusRevisions} revisions `
-        + `(last gate: ${gate}; repair attempt: ${attempt})`
+        + `(last gate: ${gate}; repair attempt: ${attempt}`
+        + (guardViolations.length > 0 ? `; guard violations: ${guardViolations.join(", ")}` : "")
+        + ")"
       );
     }
     const version = pendingGuardCandidate?.candidateVersion
@@ -2328,6 +2333,36 @@ function sameArtifact(left: ArtifactRef, right: ArtifactRef): boolean {
   return left.path === right.path
     && left.sha256 === right.sha256
     && left.sealed === right.sealed;
+}
+
+const SAFE_GUARD_VIOLATION_CODES = [
+  "asset_removed",
+  "asset_materially_shortened",
+  "system_section_removed",
+  "raw_source_overlap",
+  "raw_source_overlap_inconclusive"
+] as const;
+
+/**
+ * Expose only deterministic guard code names in a terminal UI error. Guard
+ * reports also contain source IDs and positional witnesses; those remain in
+ * the operator artifact and must never be copied into Creator-visible state.
+ */
+async function readSafeGuardViolationCodes(
+  store: FactoryFileStore,
+  reference: ArtifactRef
+): Promise<string[]> {
+  if (reference.sealed) return [];
+  try {
+    const report = await store.readArtifact(reference);
+    const codes = SAFE_GUARD_VIOLATION_CODES.filter((code) => (
+      new RegExp(`^- \\[${code}\\]`, "m").test(report)
+    ));
+    return [...codes];
+  } catch {
+    // Diagnostics must never mask the original bounded convergence error.
+    return [];
+  }
 }
 
 function isLegacyGuardReportPath(reportPath: string, version: number): boolean {
