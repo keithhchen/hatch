@@ -35,6 +35,16 @@ test("Creator Studio entry paths have English, Chinese, and Japanese copy", () =
   }
 });
 
+test("file processing copy stays provider-neutral", () => {
+  for (const locale of CREATOR_LOCALES) {
+    const t = createCreatorTranslator(locale);
+    for (const key of ["sourceNote", "imageNative"]) {
+      const value = String(t(key)).toLowerCase();
+      assert.doesNotMatch(value, /kimi|moonshot|deepseek|k2\.6/);
+    }
+  }
+});
+
 test("legacy Product, preview, release, and order surfaces have complete locale copy", () => {
   for (const locale of CREATOR_LOCALES) {
     const t = createCreatorTranslator(locale);
