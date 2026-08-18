@@ -20,6 +20,7 @@ import {
   parseQuestions
 } from "./creatorLearning/markdown.js";
 import { auditRawSourceOverlap } from "./creatorLearning/corpusReleaseGuards.js";
+import { projectEvidenceForCorpus } from "./creatorLearning/evidenceProjection.js";
 import { evidencePrompt } from "./creatorLearning/prompts.js";
 import type { CreatorQuestion, FactoryPromptCall, FactoryStartInput } from "./creatorLearning/types.js";
 
@@ -650,6 +651,105 @@ test("short framework names and genuinely synthesized private evidence pass rele
   assert.equal(ready.artifacts.corpusCandidates.length, 2);
   const reports = await Promise.all(ready.artifacts.evaluationRounds.map((ref) => store.readArtifact(ref)));
   assert.equal(reports.some((report) => report.includes("[raw_source_overlap]")), false);
+});
+
+test("Corpus compiler receives a sanitized Evidence projection while the Factory artifact keeps excerpts", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-factory-evidence-projection-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const exactExcerpt = "Before revealing the recommendation, align twelve silver markers beneath the archived renewal chart, remove any marker supported only by hearsay, and write the remaining operational constraint in a sealed blue margin for the facilitator.";
+  let corpusPrompt = "";
+  const run = async (call: FactoryPromptCall): Promise<string> => {
+    if (call.purpose === "evidence.extract") {
+      return [
+        "# Product evidence",
+        "Meaning: preserve one bounded recommendation and state the governing constraint.",
+        `Exact excerpt: \"${exactExcerpt}\" [PRIVATE:L1]`,
+        "Decision boundary: refuse unsupported claims."
+      ].join("\n");
+    }
+    if (call.purpose === "eval.generate_questions") {
+      const count = Number(/Question count:\s*(\d+)/.exec(call.prompt)?.[1]);
+      return Array.from({ length: count }, (_, index) => questionFixture(
+        `Q${index + 1}`,
+        `Projection case ${index + 1}.`,
+        `projection-${index + 1}`
+      )).join("\n\n");
+    }
+    if (call.purpose === "corpus.compile") {
+      corpusPrompt = call.prompt;
+      return layeredCorpusFixture("Preserve the supported decision boundary and return a complete customer-ready result.");
+    }
+    return passingEvaluation();
+  };
+  const input = sampleInput("run-evidence-projection");
+  input.sources = [{
+    id: "PRIVATE",
+    authority: "private_material",
+    title: "Private workshop excerpt",
+    content: exactExcerpt
+  }];
+  input.config = { developmentQuestions: 1, heldoutQuestions: 1 };
+  const factory = new CreatorFactory(root, run, async (execution) => `Projection result for ${execution.question}`);
+  const waiting = await factory.start(input);
+  const store = new FactoryFileStore(root, waiting.runId);
+  const questions = parseQuestions(await store.readArtifact(waiting.artifacts.currentQuestionBatch!));
+  const ready = await factory.submitCreatorAnswers(
+    waiting.runId,
+    answerMarkdown(questions, (question) => `ANSWER_${question.id}`),
+    waiting.artifacts.currentQuestionBatch!.batchId
+  );
+
+  const evidenceArtifact = await store.readArtifact(ready.artifacts.evidence!);
+  assert.equal(evidenceArtifact.includes(exactExcerpt), true, "the durable Evidence artifact keeps the exact excerpt");
+  assert.equal(corpusPrompt.includes(exactExcerpt), false, "the Corpus compiler must not receive the exact excerpt");
+  assert.match(corpusPrompt, /source_id: PRIVATE/);
+  assert.match(corpusPrompt, /authority: private_material/);
+  assert.match(corpusPrompt, /sha256: sha256:[a-f0-9]{64}/);
+  assert.match(corpusPrompt, /Meaning: preserve one bounded recommendation/);
+  assert.match(corpusPrompt, /Decision boundary: refuse unsupported claims/);
+});
+
+test("Evidence projection removes near-verbatim source prose while retaining semantic sections", () => {
+  const sourceText = [
+    "Arrange the cobalt folders beside the eastern window before the weekly review begins and keep their labels facing inward.",
+    "Record each disputed assumption on the narrow ledger before discussing forecasts and circle only the assumption that changes the commitment.",
+    "Ask the quietest reviewer to challenge the preferred option before anyone drafts a recommendation and preserve that objection for the final rationale."
+  ].join(" ");
+  let normalizedCharacter = 0;
+  const nearCopy = [...sourceText].map((character) => {
+    if (!/[a-z0-9]/i.test(character)) return character;
+    normalizedCharacter += 1;
+    return normalizedCharacter % 55 === 0 ? (character.toLocaleLowerCase() === "x" ? "q" : "x") : character;
+  }).join("");
+  const projection = projectEvidenceForCorpus([
+    "# Product evidence",
+    "Meaning: preserve the review boundary and explain the governing tradeoff.",
+    nearCopy,
+    "Boundary: do not invent an unsupported commitment."
+  ].join("\n\n"), [{
+    id: "PRIVATE-ORDERED",
+    authority: "private_material",
+    title: "Private review protocol",
+    content: sourceText
+  }]);
+  const violations = auditRawSourceOverlap({
+    format: "layered-assets",
+    systemInstructions: projection,
+    skills: [],
+    references: [],
+    knowledge: [],
+    changeRationale: "projection",
+    requirementsTraceability: "projection",
+    preservationAudit: "projection"
+  }, [{
+    id: "PRIVATE-ORDERED",
+    authority: "private_material",
+    title: "Private review protocol",
+    content: sourceText
+  }]);
+  assert.deepEqual(violations, []);
+  assert.match(projection, /Meaning: preserve the review boundary/);
+  assert.match(projection, /Boundary: do not invent an unsupported commitment/);
 });
 
 test("ordered overlap catches near-verbatim edits without rejecting a 100KB same-topic English/Japanese rewrite", () => {

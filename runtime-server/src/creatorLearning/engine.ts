@@ -32,6 +32,7 @@ import { classifyFactoryProviderFailure } from "./factoryLlm.js";
 import { issueQuestionBatch, requireQuestionBatchId } from "./questionBatch.js";
 import { requireUuidV4 } from "../identity.js";
 import { validateFactorySourceManifest } from "./sourceScope.js";
+import { projectEvidenceForCorpus } from "./evidenceProjection.js";
 import type {
   ActiveQaEvaluationScope,
   ArtifactRef,
@@ -571,12 +572,17 @@ export class CreatorFactory {
       }
       raw = await store.readArtifact(pendingGuardCandidate.compilation);
     } else {
+      const sourcePacket = await store.readArtifact(state.artifacts.sourcePacket);
+      const sources = parseRawSourcesFromPacket(sourcePacket);
       const call = corpusPrompt({
         creatorName: state.creator.name,
         productName: state.productName,
         productPromise: await store.readArtifact(state.artifacts.productPromise),
         productContract: renderProductContract(state.product),
-        evidence: await store.readArtifact(state.artifacts.evidence),
+        evidence: projectEvidenceForCorpus(
+          await store.readArtifact(state.artifacts.evidence),
+          sources
+        ),
         developmentQa: parseQaSet(await store.readArtifact(state.artifacts.developmentQa)),
         evaluationFeedback,
         regression,
