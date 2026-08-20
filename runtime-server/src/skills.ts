@@ -65,15 +65,19 @@ export type Skill = SkillRecord & {
 };
 
 export type SkillCatalogEntry = {
-  id: string;
   name: string;
   description: string;
-  path: string;
 };
 
 export type SkillBundleResourceManifest = {
   paths: string[];
   truncated: boolean;
+};
+
+export type LoadedSkillBundle = {
+  record: SkillRecord;
+  skill: Skill;
+  resources: SkillBundleResourceManifest;
 };
 
 export type ImplicitSkillInvocation = {
@@ -130,8 +134,8 @@ const maxDescriptionChars = 1024;
 const skillDescriptionTruncationWarningThresholdChars = 100;
 const skillBundleResourceDirs = ["scripts", "references", "assets"];
 const pluginManifestPaths = [".codex-plugin/plugin.json", ".claude-plugin/plugin.json"];
-const skillsIntroWithAbsolutePaths = "A skill is a set of instructions provided through a `SKILL.md` source. Below is the list of skills that can be used. Each entry includes a name, description, and source locator. `file` locators are on the host filesystem, `environment resource` locators are owned by an execution environment, `orchestrator resource` locators are opaque non-filesystem resources, and `custom resource` locators use their provider's access mechanism.";
-const skillsIntroWithAliases = "A skill is a set of local instructions to follow that is stored in a `SKILL.md` file. Below is the list of skills that can be used. Each entry includes a name, description, and a short path that can be expanded into an absolute path using the skill roots table.";
+const skillsIntroWithAbsolutePaths = "A Skill is a bundle of instructions stored in `SKILL.md`. The catalog below intentionally contains only each Skill's name and description. Load a selected Skill with the registered `Skill` function tool.";
+const skillsIntroWithAliases = skillsIntroWithAbsolutePaths;
 
 type RenderableSkillLine = {
   skill: SkillRecord;
@@ -215,6 +219,30 @@ export async function loadSkillByPath(skillPath: string, resourceRoots?: string[
     diagnostics: [],
     instructions: parsed.instructions
   };
+}
+
+/**
+ * Load one Skill for the public `Skill(skill_name)` function tool.
+ * Discovery keeps only metadata in the model-visible catalog; this is the
+ * explicit boundary that reads the complete SKILL.md and enumerates its bundle.
+ */
+export async function loadSkillBundleByName(
+  skillName: string,
+  records: SkillRecord[]
+): Promise<LoadedSkillBundle> {
+  const requested = skillName.trim();
+  if (!requested) throw new Error("Skill name is required");
+  const matches = records.filter((record) => record.name === requested);
+  if (matches.length === 0) {
+    throw new Error(`Skill not found: ${requested}`);
+  }
+  if (matches.length > 1) {
+    throw new Error(`Skill name is ambiguous: ${requested}`);
+  }
+  const record = matches[0]!;
+  const skill = await loadSkillByPath(record.path, [record.directory]);
+  const resources = await listSkillBundleResourcePaths(record.directory);
+  return { record, skill, resources };
 }
 
 export async function readSkillResourceByPath(resourcePath: string, resourceRoots?: string[]): Promise<string> {
@@ -491,10 +519,8 @@ export function skillMetadataCharBudget(contextWindowChars?: number): number {
 
 export function toCatalogEntry(skill: SkillRecord): SkillCatalogEntry {
   return {
-    id: skill.id,
     name: skill.name,
-    description: skill.description,
-    path: skill.path
+    description: skill.description
   };
 }
 
@@ -1067,19 +1093,14 @@ async function canonicalSkillConfigPath(skillPath: string): Promise<string> {
 }
 
 function renderSkillsMetadata(skills: SkillRecord[], budgetChars: number): RenderedSkillsMetadata {
-  const absolute = {
-    ...renderSkillLines(skills.map((skill) => ({ skill, path: skill.path })), budgetChars),
+  // The model-visible catalog is intentionally only name + description. Paths,
+  // aliases, dependency declarations, and Skill bodies belong to the explicit
+  // `Skill` loading boundary, not discovery context.
+  return {
+    ...renderSkillLines(skills.map((skill) => ({ skill, path: "" })), budgetChars),
     rootLines: [],
     aliases: {}
   };
-  if (absolute.report.omitted_count === 0 && absolute.report.truncated_description_chars === 0) {
-    return absolute;
-  }
-
-  const aliased = renderAliasedSkillLines(skills, budgetChars);
-  if (!aliased) return absolute;
-
-  return aliasedRenderIsBetter(aliased, absolute) ? aliased : absolute;
 }
 
 function renderAliasedSkillLines(skills: SkillRecord[], budgetChars: number): RenderedSkillsMetadata | undefined {
@@ -1383,62 +1404,33 @@ function positiveInteger(value: unknown): number | undefined {
 }
 
 function renderSkillLine(line: RenderableSkillLine, description: string): string {
-  const locator = ["file: " + line.path.replaceAll("\\", "/"), ...skillToolDependencySummary(line.skill)];
   return description
-    ? `- ${line.skill.name}: ${description} (${locator.join("; ")})`
-    : `- ${line.skill.name}: (${locator.join("; ")})`;
-}
-
-function skillToolDependencySummary(skill: SkillRecord): string[] {
-  const tools = skill.openai.dependencies.tools;
-  if (tools.length === 0) return [];
-  const visible = tools.slice(0, 4).map((tool) => `${tool.type}:${tool.value}`);
-  const suffix = tools.length > visible.length ? `+${tools.length - visible.length} more` : "";
-  return [`tools: ${[...visible, suffix].filter(Boolean).join(", ")}`];
+    ? `- ${line.skill.name}: ${description}`
+    : `- ${line.skill.name}`;
 }
 
 function skillsHowToUse(usesAliases: boolean, protectedMode = false): string {
-  const discovery = usesAliases
-    ? "- Discovery: The list above is the skills available in this session (name + description + short path). Skill bodies live on disk at the listed paths after expanding the matching alias from `### Skill roots`."
-    : "- Discovery: The list above is the skills available in this session (name + description + source locator). `file` entries live on the host filesystem, `environment resource` entries are owned by their execution environment, `orchestrator resource` entries must be accessed through `skills.list` and `skills.read`, and `custom resource` entries use their provider's access mechanism.";
-  const missing = usesAliases
-    ? "- Missing/blocked: If a named skill isn't in the list or the expanded path can't be read, say so briefly and continue with the best fallback."
-    : "- Missing/blocked: If a named skill isn't in the list or its source can't be read, say so briefly and continue with the best fallback.";
-  const firstStep = protectedMode
-    ? "  1. The main agent must not read a protected skill's `SKILL.md`. Call the `skill_run` function tool with the public skill id, the user's product, and exact context references."
-    : usesAliases
-      ? "  1. After deciding to use a skill, the main agent must expand the listed short `path` with the matching alias from `### Skill roots`, then call `file_read` with the expanded `SKILL.md` path before taking product actions. If a read is truncated or paginated, continue until EOF."
-      : "  1. After deciding to use a skill, the main agent must read its `SKILL.md` completely before taking product actions. For a `file` entry, call `file_read` with the listed path. If a read is truncated or paginated, continue until EOF.";
-  const secondStep = protectedMode
-    ? "  2. The server creates a headless SkillRuntime session. That worker reads the private `SKILL.md` and follows its instructions."
-    : usesAliases
-      ? "  2. When `SKILL.md` references relative paths (e.g., `scripts/foo.py`), resolve them relative to the directory containing that expanded `SKILL.md` first, and only consider other paths if needed."
-      : "  2. When `SKILL.md` references another resource, use the same access mechanism. Resolve relative paths against a filesystem-backed skill directory.";
+  const discovery = "- Discovery: The list above is the complete model-visible catalog for this session, and each entry contains only a Skill name and description.";
+  const missing = "- Missing/blocked: If a named Skill isn't in the catalog or cannot be loaded, say so briefly and continue with the best fallback.";
 
   return [
     discovery,
-    "- Trigger rules: If the user explicitly mentions a skill with `$SkillName` or a linked skill mention, use that skill for this turn. Otherwise choose skills by matching the product to the descriptions above. Multiple explicit mentions mean use them all. Do not carry skill bodies across turns unless the skill is re-mentioned or read again.",
+    "- Trigger rules: If the user explicitly mentions a Skill with `$SkillName` or a linked Skill mention, use that Skill for this turn. Otherwise choose Skills by matching the product to the descriptions above. Multiple explicit mentions mean load each one. Do not carry Skill bodies across turns unless the Skill is re-mentioned or loaded again.",
     missing,
     "- How to use a skill (progressive disclosure):",
-    firstStep,
-    secondStep,
-    protectedMode
-      ? "  3. The worker may request the same app tools through the runtime ToolBridge; it must not execute tools directly or open a client connection."
-      : "  3. If `SKILL.md` points to extra folders such as `references/`, use its routing instructions to identify the resources required for the product. The main agent must read each required instruction or reference file itself before acting on it. Do not delegate reading, summarizing, or interpreting skill instructions to a subagent. Subagents may still perform product work when the selected skill allows it.",
-    protectedMode
-      ? "  4. Skill resources are loaded by the worker only when the private instructions require them."
-      : "  4. For filesystem-backed skills, prefer running or patching provided scripts instead of retyping large code blocks.",
-    protectedMode
-      ? "  5. The main agent receives the worker result and writes the user-facing response."
-      : "  5. Reuse provided assets or templates through the same access mechanism instead of recreating them.",
+    "  1. After deciding to use a Skill, call the registered `Skill` function tool with its exact catalog name. The tool loads the complete `SKILL.md` and the bundle resource manifest into this same Agent context.",
+    "  2. When the loaded instructions require a file under `references/`, `scripts/`, or `assets/`, use ordinary `file_read` or `file_list` with the resource path returned by `Skill`.",
+    "  3. `shell_exec` remains the ordinary workspace command tool; Skill loading does not grant it access outside the declared workspace or bypass containment.",
+    "  4. Read only the resources required by the loaded instructions, and follow their routing instructions before taking product actions. Do not delegate Skill loading or interpretation to another agent.",
+    "  5. Reuse provided scripts, assets, or templates through the ordinary tools instead of recreating them.",
     "- Coordination and sequencing:",
     "  - If multiple skills apply, choose the minimal set that covers the request and state the order you'll use them.",
-    "  - Announce which skill(s) you're using and why (one short line). If you skip an obvious skill, say why.",
+    "  - Announce which Skill(s) you're using and why (one short line). If you skip an obvious Skill, say why.",
     "- Context hygiene:",
     "  - Progressive disclosure applies to selecting relevant files, not partially reading a selected instruction file. Do not load unrelated references, scripts, or assets.",
     "  - Avoid deep reference-chasing: prefer opening only files directly linked from `SKILL.md` unless you're blocked.",
     "  - When variants exist (frameworks, providers, domains), pick only the relevant reference file(s) and note that choice.",
-    "- Safety and fallback: If a skill can't be applied cleanly, state the issue, pick the next-best approach, and continue."
+    "- Safety and fallback: If a Skill can't be applied cleanly, state the issue, pick the next-best approach, and continue."
   ].join("\n");
 }
 

@@ -335,9 +335,7 @@
         "tool_call_id": { "type": "string" },
         "name": { "$ref": "#/$defs/clientToolName" },
         "arguments": { "$ref": "#/$defs/jsonObject" },
-        "approval": { "$ref": "#/$defs/toolApproval" },
-        "scope": { "type": "string", "enum": ["main", "skill_run"] },
-        "skill_run_id": { "type": "string" }
+        "approval": { "$ref": "#/$defs/toolApproval" }
       }
     },
     "approvalRequest": {
@@ -391,22 +389,6 @@
         },
         "arguments": { "$ref": "#/$defs/jsonObject" },
         "result": { "$ref": "#/$defs/jsonObject" },
-        "error": { "$ref": "#/$defs/error" },
-        "scope": { "type": "string", "enum": ["main", "skill_run"] },
-        "skill_run_id": { "type": "string" }
-      }
-    },
-    "skillRun": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["type", "run_id", "skill_run_id", "skill_id", "name", "status"],
-      "properties": {
-        "type": { "const": "skill.run" },
-        "run_id": { "type": "string" },
-        "skill_run_id": { "type": "string" },
-        "skill_id": { "type": "string" },
-        "name": { "type": "string" },
-        "status": { "type": "string", "enum": ["requested", "running", "completed", "failed", "cancelled"] },
         "error": { "$ref": "#/$defs/error" }
       }
     },
@@ -421,80 +403,6 @@
         "path": { "type": "string" },
         "diff": { "type": "string" },
         "truncated": { "type": "boolean" }
-      }
-    },
-    "skillActivated": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "type",
-        "run_id",
-        "name",
-        "path",
-        "scope",
-        "status",
-        "invocation_type",
-        "reason",
-        "resource_paths",
-        "resource_manifest_truncated"
-      ],
-      "properties": {
-        "type": { "const": "skill.activated" },
-        "run_id": { "type": "string" },
-        "name": { "type": "string" },
-        "path": { "type": "string" },
-        "scope": { "type": "string" },
-        "status": { "const": "activated" },
-        "invocation_type": { "const": "explicit" },
-        "reason": { "const": "explicit_mention" },
-        "resource_paths": {
-          "type": "array",
-          "items": { "type": "string" }
-        },
-        "resource_manifest_truncated": { "type": "boolean" }
-      }
-    },
-    "skillInvoked": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "type",
-        "run_id",
-        "name",
-        "path",
-        "scope",
-        "status",
-        "invocation_type",
-        "source_tool_call_id",
-        "reason",
-        "trigger"
-      ],
-      "properties": {
-        "type": { "const": "skill.invoked" },
-        "run_id": { "type": "string" },
-        "name": { "type": "string" },
-        "path": { "type": "string" },
-        "scope": { "type": "string" },
-        "status": { "const": "invoked" },
-        "invocation_type": { "const": "implicit" },
-        "source_tool_call_id": { "type": "string" },
-        "reason": {
-          "type": "string",
-          "enum": ["script_run", "skill_doc_read"]
-        },
-        "trigger": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["tool"],
-          "properties": {
-            "tool": {
-              "type": "string",
-              "enum": ["shell_exec", "file_read"]
-            },
-            "command": { "type": "string" },
-            "path": { "type": "string" }
-          }
-        }
       }
     },
     "turnState": {
@@ -593,10 +501,7 @@
         { "$ref": "#/$defs/approvalRequest" },
         { "$ref": "#/$defs/approvalResult" },
         { "$ref": "#/$defs/toolCallDelta" },
-        { "$ref": "#/$defs/skillRun" },
         { "$ref": "#/$defs/workspaceDiff" },
-        { "$ref": "#/$defs/skillActivated" },
-        { "$ref": "#/$defs/skillInvoked" },
         { "$ref": "#/$defs/turnState" },
         { "$ref": "#/$defs/sessionCompacted" },
         { "$ref": "#/$defs/deliveryReady" },

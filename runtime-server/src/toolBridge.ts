@@ -1,15 +1,11 @@
-import type { ClientToolName, ToolRequest } from "./protocol.js";
+import type { ClientToolName } from "./protocol.js";
 import type { ClientToolBroker } from "./clientBroker.js";
 import type { ServerToolExecutor } from "./serverTools.js";
 import type { RunStateMachine } from "./runState.js";
 import { requireClientToolEnabled, requireTool } from "./tools.js";
 
-export type ToolRuntimeScope = "main" | "skill_run";
-
 export type ToolBridgeRequest = {
-  scope: ToolRuntimeScope;
   runId: string;
-  skillRunId?: string;
   toolCallId: string;
   name: string;
   arguments: Record<string, unknown>;
@@ -19,8 +15,8 @@ export type ToolBridgeRequest = {
 };
 
 /**
- * The single gateway shared by MainAgentRuntime and SkillRuntime. Scope is
- * correlation/routing metadata; both runtimes use the same app capability set.
+ * The single gateway shared by the Agent runtime and Skill loader. Both use
+ * the same app capability set and ordinary tool lifecycle.
  */
 export class ToolBridge {
   constructor(
@@ -37,18 +33,12 @@ export class ToolBridge {
     }
 
     requireClientToolEnabled(request.clientTools, request.name as ClientToolName);
-    const options: {
-      scope: ToolRequest["scope"];
-      skillRunId?: string;
-    } = { scope: request.scope };
-    if (request.skillRunId) options.skillRunId = request.skillRunId;
     return this.clientBroker.execute(
       request.runId,
       request.name,
       parsed,
       request.state,
-      request.toolCallId,
-      options
+      request.toolCallId
     );
   }
 }

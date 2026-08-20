@@ -465,24 +465,6 @@ test("Postgres store normalizes legacy dotted persisted tool names", async () =>
         timestamp: "2026-08-05T00:00:00.000Z"
       }
     },
-    {
-      conversation_id: "legacy-conversation",
-      run_id: "legacy-run",
-      event_type: "skill.invoked",
-      payload: {
-        type: "skill.invoked",
-        conversation_id: "legacy-conversation",
-        run_id: "legacy-run",
-        name: "legacy-skill",
-        path: "/skills/legacy-skill/SKILL.md",
-        scope: "server",
-        invocation_type: "implicit",
-        reason: "skill_doc_read",
-        source_tool_call_id: "legacy-call",
-        trigger: { tool: "fs.read", path: "/skills/legacy-skill/SKILL.md" },
-        timestamp: "2026-08-05T00:00:00.000Z"
-      }
-    },
     ...legacyToolCallNames.map((name, index) => ({
       conversation_id: "legacy-conversation",
       run_id: "legacy-run",
@@ -505,8 +487,6 @@ test("Postgres store normalizes legacy dotted persisted tool names", async () =>
     events.find((event) => event.type === "session.started")?.local_tools,
     ["file_list", "file_search", "file_read", "file_write", "file_patch", "shell_exec", "git_diff"]
   );
-  const skillEvent = events.find((event) => event.type === "skill.invoked");
-  assert.equal(skillEvent?.type === "skill.invoked" ? skillEvent.trigger.tool : undefined, "file_read");
   assert.deepEqual(
     events.filter((event) => event.type === "tool.call").map((event) => event.name),
     ["file_list", "file_search", "file_read", "file_write", "file_patch", "shell_exec", "git_diff"]
@@ -581,26 +561,6 @@ test("Postgres store projects visible tool state and replays the latest compacti
     timestamp: "2026-08-05T00:01:01.000Z"
   });
   await append(store, {
-    type: "skill.activated",
-    conversation_id: "visible-conversation",
-    run_id: "new-run",
-    name: "repo-assistant",
-    path: "/skills/repo-assistant/SKILL.md",
-    directory: "/skills/repo-assistant",
-    content: "private skill content",
-    timestamp: "2026-08-05T00:01:02.000Z"
-  });
-  await append(store, {
-    type: "skill.run",
-    conversation_id: "visible-conversation",
-    run_id: "new-run",
-    skill_run_id: "skill-run-1",
-    skill_id: "repo-assistant",
-    name: "repo-assistant",
-    status: "completed",
-    timestamp: "2026-08-05T00:01:03.000Z"
-  });
-  await append(store, {
     type: "message.created",
     conversation_id: "visible-conversation",
     run_id: "new-run",
@@ -655,8 +615,6 @@ test("Postgres store projects visible tool state and replays the latest compacti
   assert.equal(visible[2]?.tool_calls?.[0]?.status, "completed");
   assert.equal(visible[2]?.tool_calls?.[0]?.approval, "ask");
   assert.deepEqual(visible[2]?.tool_calls?.[0]?.result, { content: "file contents" });
-  assert.equal(visible[2]?.skill_events?.[0]?.name, "repo-assistant");
-  assert.equal(visible[2]?.skill_runs?.[0]?.status, "completed");
   assert.equal(visible[3]?.run_id, "new-run");
   assert.equal(visible[3]?.role, "assistant");
   assert.equal(visible[3]?.content, "after second compact");

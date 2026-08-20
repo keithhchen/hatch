@@ -283,8 +283,6 @@ export type ToolRequest = {
   name: string;
   arguments: Record<string, unknown>;
   approval: "none" | "auto" | "ask";
-  scope?: "main" | "skill_run";
-  skill_run_id?: string;
 };
 
 export type ApprovalRequest = {
@@ -319,21 +317,6 @@ export type ToolEvent = {
     code: string;
     message: string;
   };
-  scope?: "main" | "skill_run";
-  skill_run_id?: string;
-};
-
-export type SkillRunEvent = {
-  type: "skill.run";
-  run_id: string;
-  skill_run_id: string;
-  skill_id: string;
-  name: string;
-  status: "requested" | "running" | "completed" | "failed" | "cancelled";
-  error?: {
-    code: string;
-    message: string;
-  };
 };
 
 export type WorkspaceDiffEvent = {
@@ -343,36 +326,6 @@ export type WorkspaceDiffEvent = {
   path: string;
   diff: string;
   truncated?: boolean;
-};
-
-export type SkillEvent = {
-  type: "skill.invoked";
-  run_id: string;
-  name: string;
-  path: string;
-  scope: string;
-  status: "invoked";
-  invocation_type: "implicit";
-  source_tool_call_id: string;
-  reason: "script_run" | "skill_doc_read";
-  trigger: {
-    tool: "shell_exec" | "file_read";
-    command?: string;
-    path?: string;
-  };
-};
-
-export type SkillActivatedEvent = {
-  type: "skill.activated";
-  run_id: string;
-  name: string;
-  path: string;
-  scope: string;
-  status: "activated";
-  invocation_type: "explicit";
-  reason: "explicit_mention";
-  resource_paths: string[];
-  resource_manifest_truncated: boolean;
 };
 
 export type RunStateEvent = {
@@ -428,7 +381,7 @@ export type RunError = {
   };
 };
 
-export type OutboundMessage = RuntimeReady | DeliveryReady | AgentDelta | ToolRequest | ApprovalRequest | ApprovalResult | ToolEvent | SkillRunEvent | WorkspaceDiffEvent | SkillEvent | SkillActivatedEvent | RunStateEvent | CompactionEvent | RunFinal | RunError;
+export type OutboundMessage = RuntimeReady | DeliveryReady | AgentDelta | ToolRequest | ApprovalRequest | ApprovalResult | ToolEvent | WorkspaceDiffEvent | RunStateEvent | CompactionEvent | RunFinal | RunError;
 
 export function contextAttachmentTextSha256(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
