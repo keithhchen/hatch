@@ -1,5 +1,5 @@
 import { Agent, type AgentMessage, type AgentTool } from "@earendil-works/pi-agent-core";
-import { Type, type AssistantMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { createFactoryPiAgent } from "./creatorLearning/factoryPi.js";
@@ -56,8 +56,6 @@ type LiveAgent = {
   agent: Agent;
   sessionId: string;
   sessionRef: NodeSessionRef;
-  hasSubmittedOutput: () => boolean;
-  submittedOutput: () => unknown;
   flushPersistence: () => Promise<void>;
   unsubscribe: () => void;
 };
@@ -335,27 +333,8 @@ export class NodeRuntime {
     const storageTools = this.storage && config.storageAccess !== "none"
       ? createNodeStorageTools(this.storage, scope, input, config.storageAccess)
       : [];
-    let outputSubmitted = false;
-    let outputValue: unknown;
-    const outputTool: AgentTool = {
-      name: "submit_output",
-      label: "submit_output",
-      description: "Submit the complete Node result as one JSON object matching the output contract. This is the only accepted output channel. Do not print the result as prose.",
-      parameters: zodSchemaAsToolSchema(responseFormat),
-      executionMode: "sequential",
-      execute: async (_toolCallId, args, toolSignal) => {
-        toolSignal?.throwIfAborted();
-        outputValue = args;
-        outputSubmitted = true;
-        return {
-          content: [{ type: "text", text: "Output accepted. Stop now." }],
-          details: { accepted: true },
-          terminate: true
-        };
-      }
-    };
     const customTools = [...(config.tools ?? [])];
-    const allTools = [...storageTools, outputTool, ...customTools];
+    const allTools = [...storageTools, ...customTools];
     const names = new Set<string>();
     for (const tool of allTools) {
       if (names.has(tool.name)) throw new NodeRuntimeError("duplicate_tool", `Tool ${tool.name} is registered more than once`);
@@ -381,8 +360,6 @@ export class NodeRuntime {
       agent,
       sessionId: sessionIdValue,
       sessionRef,
-      hasSubmittedOutput: () => outputSubmitted,
-      submittedOutput: () => outputValue,
       flushPersistence: () => pendingPersistence,
       unsubscribe: () => {
         unsubscribe();
@@ -422,9 +399,6 @@ export class NodeRuntime {
     if (exceeded) {
       throw new NodeRuntimeError("max_agent_turns", `${label} exceeded ${this.maxAgentTurns} Pi turns in Node round ${round}`);
     }
-    if (live.hasSubmittedOutput()) {
-      return live.submittedOutput() as Output;
-    }
     const messages = live.agent.state.messages.slice(before);
     const assistant = [...messages]
       .reverse()
@@ -444,6 +418,7 @@ export class NodeRuntime {
 
 function defaultAgentFactory(options: Parameters<NodeAgentFactory>[0]): Agent {
   return createFactoryPiAgent({
+    responseFormat: options.responseFormat,
     initialState: {
       systemPrompt: options.systemPrompt,
       messages: options.messages,
@@ -461,7 +436,7 @@ function systemPromptWithOutputContract(
   responseFormat: Record<string, unknown>
 ): string {
   const schema = responseFormat.json_schema;
-  return `${systemPrompt.trim()}\n\n# Output contract\nThe only accepted final output is a call to the submit_output tool with one complete JSON object matching this JSON Schema. Do not print the result as prose or Markdown.\n${JSON.stringify(schema, null, 2)}`;
+  return `${systemPrompt.trim()}\n\n# Output contract\nThe only accepted final output is one complete JSON object matching this JSON Schema. Do not print prose, Markdown, or a code fence around it.\n${JSON.stringify(schema, null, 2)}`;
 }
 
 function structuredResponseFormat(name: string, schema: z.ZodTypeAny): Record<string, unknown> {
@@ -473,18 +448,6 @@ function structuredResponseFormat(name: string, schema: z.ZodTypeAny): Record<st
       schema: z.toJSONSchema(schema, { target: "openAi" })
     }
   };
-}
-
-function zodSchemaAsToolSchema(responseFormat: Record<string, unknown>): ReturnType<typeof Type.Unsafe> {
-  const jsonSchema = responseFormat.json_schema;
-  if (!jsonSchema || typeof jsonSchema !== "object" || Array.isArray(jsonSchema)) {
-    throw new Error("Node output schema did not produce a JSON schema");
-  }
-  const schema = (jsonSchema as Record<string, unknown>).schema;
-  if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
-    throw new Error("Node output schema did not produce an object schema");
-  }
-  return Type.Unsafe(schema);
 }
 
 function parseInput<Input>(schema: z.ZodType<Input>, rawInput: unknown, nodeId: string): Input {
@@ -502,8 +465,9 @@ function parseOutput<Output>(schema: z.ZodType<Output>, text: string, label: str
   } catch (error) {
     throw new NodeRuntimeError("invalid_agent_output", `${label} did not return JSON: ${error instanceof Error ? error.message : String(error)}`);
   }
-  // The schema is used by the submit_output handoff. Runtime does not turn it
-  // into a business-quality gate; Critic is the quality loop.
+  // The provider response_format is the structural contract. Runtime parses
+  // the returned JSON but does not turn this into a business-quality gate;
+  // Critic is the quality loop.
   void schema;
   return value as Output;
 }
