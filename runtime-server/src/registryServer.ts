@@ -44,6 +44,11 @@ import type { CreatorProductRecord } from "./creatorLearning/products.js";
 import { objectStoreFromEnvironment } from "./creatorLearning/objectStore.js";
 import { ProductFileStore, ProductFilesError, type ProductFileView, type ProductSnapshotView } from "./creatorLearning/productFiles.js";
 import { PostgresDistillationGraphStore } from "./creatorLearning/distillationGraphStore.js";
+import { handleNodeHttp } from "./creatorLearning/nodeHttpApi.js";
+import { NodeRuntime } from "./nodeRuntime.js";
+import { PostgresNodePersistence } from "./nodeExecution.js";
+import { NodeExecutionWorker } from "./nodeWorker.js";
+import type { NodeStorage } from "./nodeStorage.js";
 import {
   HttpRequestGate,
   PublishWorkGate,
@@ -68,6 +73,10 @@ type RegistryContext = {
   deploymentServiceToken: string;
   factoryService: CreatorFactoryService;
   productFileStore: ProductFileStore;
+  nodeRuntime?: NodeRuntime;
+  nodePersistence?: PostgresNodePersistence;
+  nodeStorage?: NodeStorage;
+  nodeWorker?: NodeExecutionWorker;
   authSecret: string;
 };
 
@@ -81,9 +90,29 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const factoryRepository = creatorFactoryRepositoryForRegistry(environment, store.databasePool());
   await factoryRepository.initialize();
   const factoryRoot = path.resolve(environment.HATCH_CREATOR_FACTORY_ROOT ?? "creator-factory-runs");
-  const objectStore = objectStoreFromEnvironment(environment);
   const productObjectStore = objectStoreFromEnvironment(environment, path.join(factoryRoot, "product-files"));
   if (!productObjectStore) throw new Error("Product File object storage is not configured");
+  const nodePool = store.databasePool();
+  const nodePersistence = nodePool ? new PostgresNodePersistence(nodePool) : undefined;
+  const nodeStorage = { objectStore: productObjectStore };
+  await nodePersistence?.initialize();
+  const nodeRuntime = nodePersistence && nodeStorage
+    ? new NodeRuntime({
+        persistence: nodePersistence,
+        storage: nodeStorage,
+        workerId: `node-http-${process.pid}-${randomUUID()}`,
+        leaseMs: integerEnvironment(environment.HATCH_FACTORY_NODE_LEASE_MS, 20 * 60_000),
+        heartbeatMs: integerEnvironment(environment.HATCH_FACTORY_NODE_HEARTBEAT_MS, 60_000)
+      })
+    : undefined;
+  const nodeWorker = nodePersistence && nodeRuntime
+    ? new NodeExecutionWorker(
+        nodePersistence.executions,
+        nodeRuntime,
+        integerEnvironment(environment.HATCH_FACTORY_NODE_POLL_MS, 1_000)
+      )
+    : undefined;
+  nodeWorker?.start();
   const productFileStore = new ProductFileStore(
     productObjectStore,
     environment.HATCH_CREATOR_PRODUCT_FILES_PREFIX?.trim() || "creator-products"
@@ -103,7 +132,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
         timeoutMs: integerEnvironment(environment.HATCH_CREATOR_FACTORY_HATCH_TIMEOUT_MS, 15 * 60_000),
         environment
       }),
-      { model: factoryModelForEnvironment(environment), objectStore, graphStore }
+      { model: factoryModelForEnvironment(environment), objectStore: productObjectStore, graphStore }
     ),
     {
       workerId: `factory-http-${process.pid}-${randomUUID()}`,
@@ -119,7 +148,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     factoryRepository,
     factoryRoot,
     undefined,
-    objectStore,
+    productObjectStore,
     graphStore,
     productFileStore,
     (runId) => immediateFactoryWorker.startRun(runId, immediateFactoryStop.signal)
@@ -153,7 +182,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       }, { "retry-after": String(admission.retryAfterSeconds), connection: "close" });
       return;
     }
-    const routePromise = route(request, response, { store, accounts, authRateLimiter, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, productFileStore, authSecret })
+    const routePromise = route(request, response, { store, accounts, authRateLimiter, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, productFileStore, nodeRuntime, nodePersistence, nodeStorage, nodeWorker, authSecret })
       .catch((error) => {
         const status = errorStatus(error);
         if (status >= 500) console.error("Registry request failed", error);
@@ -198,6 +227,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   await new Promise<void>((resolve) => server.listen(port, host, resolve));
   return { server, close: async () => {
     immediateFactoryStop.abort();
+    await nodeWorker?.stop();
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await factoryRepository.close();
     await store.close();
@@ -346,6 +376,25 @@ async function route(
       lease.release();
     }
     return;
+  }
+
+  if (/^\/v1\/creator\/products\/[^/]+\/nodes(?:\/.*)?$/.test(url.pathname)) {
+    const account = await authenticate(request, response, context, "creator");
+    if (account === SESSION_QUERY_REJECTED) return;
+    if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
+    const nodeProductMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/nodes/);
+    if (!nodeProductMatch) { sendJson(response, 404, { detail: "Node product route not found." }); return; }
+    await context.factoryService.getProduct(account.id, decodeURIComponent(nodeProductMatch[1]!));
+    const result = await handleNodeHttp({
+      method: request.method ?? "GET",
+      pathname: url.pathname,
+      ...(request.method === "GET" ? {} : { body: await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES) })
+    }, {
+      executions: context.nodePersistence?.executions,
+      storage: context.nodeStorage,
+      worker: context.nodeWorker
+    });
+    if (result) { sendJson(response, result.status, result.body); return; }
   }
 
   const internalFactoryStageMatch = url.pathname.match(/^\/v1\/internal\/deployments\/factory-runs\/([^/]+)\/stage$/);
