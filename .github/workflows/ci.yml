@@ -232,7 +232,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       actions: read
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -264,41 +264,89 @@ jobs:
             --report "$windows_report" \
             --artifact-dir release/windows \
             --expected-source-sha "$GITHUB_SHA"
-      - name: Publish installers to GitHub Release
+      - name: Ensure annotated tag exists in public releases repository
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.HATCH_RELEASES_TOKEN }}
+          GH_REPO: keithhchen/hatch-releases
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN" || { echo "Missing HATCH_RELEASES_TOKEN" >&2; exit 1; }
+          if tag_ref_json="$(gh api "repos/$GH_REPO/git/ref/tags/$GITHUB_REF_NAME" 2>/dev/null)"; then
+            test "$(jq -r '.object.type' <<<"$tag_ref_json")" = "tag" || {
+              echo "Public tag $GITHUB_REF_NAME exists but is not annotated" >&2
+              exit 1
+            }
+            tag_object_sha="$(jq -r '.object.sha' <<<"$tag_ref_json")"
+            tag_message="$(gh api "repos/$GH_REPO/git/tags/$tag_object_sha" --jq .message)"
+            grep -F "Private source commit: $GITHUB_SHA" <<<"$tag_message" >/dev/null || {
+              echo "Public tag $GITHUB_REF_NAME does not identify source commit $GITHUB_SHA" >&2
+              exit 1
+            }
+          else
+            target_sha="$(gh api "repos/$GH_REPO/commits/main" --jq .sha)"
+            printf -v public_tag_message 'Hatch %s public distribution tag\n\nPrivate source commit: %s' "$GITHUB_REF_NAME" "$GITHUB_SHA"
+            tag_object_sha="$(gh api --method POST "repos/$GH_REPO/git/tags" \
+              -f tag="$GITHUB_REF_NAME" \
+              -f message="$public_tag_message" \
+              -f object="$target_sha" \
+              -f type=commit \
+              --jq .sha)"
+            gh api --method POST "repos/$GH_REPO/git/refs" \
+              -f ref="refs/tags/$GITHUB_REF_NAME" \
+              -f sha="$tag_object_sha" >/dev/null
+          fi
+      - name: Publish installers and provenance to public GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.HATCH_RELEASES_TOKEN }}
+          GH_REPO: keithhchen/hatch-releases
         run: |
           set -euo pipefail
           dmg_path="$(find release/macos -type f -name '*.dmg' -print -quit)"
           exe_path="$(find release/windows -type f -name '*.exe' -print -quit)"
-          test -n "$dmg_path" && test -n "$exe_path"
-          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" "$dmg_path" "$exe_path" --clobber --repo "$GITHUB_REPOSITORY"
-            gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease=false --latest --title "$GITHUB_REF_NAME" --notes "Hatch $GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY"
+          mac_report="$(find release/macos -type f -name macos.json -print -quit)"
+          windows_report="$(find release/windows -type f -name windows.json -print -quit)"
+          test -n "$dmg_path" && test -n "$exe_path" && test -n "$mac_report" && test -n "$windows_report"
+          cat > release-notes.md <<EOF
+          Hatch $GITHUB_REF_NAME
+
+          Private source commit: \`$GITHUB_SHA\`
+
+          These are target-device UAT packages:
+          - macOS: ad-hoc UAT package; not Developer ID signed or notarized.
+          - Windows: unsigned UAT package.
+
+          These artifacts are not a signed production distribution. The attached manifests record the exact source SHA, filename, byte count, and SHA-256 for each installer.
+          EOF
+          if gh release view "$GITHUB_REF_NAME" --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$dmg_path" "$exe_path" "$mac_report" "$windows_report" --clobber --repo "$GH_REPO"
+            gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease=false --latest --title "$GITHUB_REF_NAME" --notes-file release-notes.md --repo "$GH_REPO"
           else
-            # This job only downloads artifacts and has no checkout.  Do not
-            # use --verify-tag here: gh implements that flag by invoking git,
-            # which fails in the artifact-only workspace.  The workflow is
-            # already restricted to refs/tags/v* and GitHub owns the ref.
-            gh release create "$GITHUB_REF_NAME" "$dmg_path" "$exe_path" --verify-tag --latest --title "$GITHUB_REF_NAME" --notes "Hatch $GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY"
+            gh release create "$GITHUB_REF_NAME" "$dmg_path" "$exe_path" "$mac_report" "$windows_report" --verify-tag --latest --title "$GITHUB_REF_NAME" --notes-file release-notes.md --repo "$GH_REPO"
           fi
       - name: Verify published Release is complete and latest
         env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.HATCH_RELEASES_TOKEN }}
+          GH_REPO: keithhchen/hatch-releases
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          release_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME")"
+          mac_report="$(find release/macos -type f -name macos.json -print -quit)"
+          windows_report="$(find release/windows -type f -name windows.json -print -quit)"
+          mac_digest="$(jq -r .package.sha256 "$mac_report")"
+          windows_digest="$(jq -r .package.sha256 "$windows_report")"
+          release_json="$(gh api "repos/$GH_REPO/releases/tags/$GITHUB_REF_NAME")"
           jq -e \
             --arg dmg "Hatch_${version}_aarch64.dmg" \
             --arg exe "Hatch_${version}_x64-setup.exe" \
+            --arg mac_digest "$mac_digest" \
+            --arg windows_digest "$windows_digest" \
             '.draft == false and .prerelease == false and
-             ([.assets[] | select(.name == $dmg and .size > 0)] | length) == 1 and
-             ([.assets[] | select(.name == $exe and .size > 0)] | length) == 1' \
+             ([.assets[] | select(.name == $dmg and .size > 0 and .digest == $mac_digest)] | length) == 1 and
+             ([.assets[] | select(.name == $exe and .size > 0 and .digest == $windows_digest)] | length) == 1 and
+             ([.assets[] | select(.name == "macos.json" and .size > 0)] | length) == 1 and
+             ([.assets[] | select(.name == "windows.json" and .size > 0)] | length) == 1' \
             <<<"$release_json" >/dev/null
-          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)" = "$GITHUB_REF_NAME"
+          test "$(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name)" = "$GITHUB_REF_NAME"
 
   containers:
     name: Build deployable containers
