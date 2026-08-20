@@ -46,6 +46,8 @@ export type FactoryPiAdapterOptions = {
 };
 
 export type FactoryPiAgentOptions = FactoryPiAdapterOptions & {
+  /** Optional provider-native structured-output contract for one Agent. */
+  responseFormat?: unknown;
   initialState?: AgentOptions["initialState"];
   agentOptions?: Omit<AgentOptions, "streamFn" | "getApiKey" | "initialState">;
 };
@@ -221,8 +223,14 @@ export function createFactoryPiStreamFn(options: FactoryPiAdapterOptions = {}): 
 export function createFactoryPiAgent(options: FactoryPiAgentOptions = {}): Agent {
   const config = resolveFactoryPi(options);
   const model = createFactoryLlmModel(options);
+  const agentOptions = options.responseFormat === undefined
+    ? options.agentOptions
+    : {
+        ...(options.agentOptions ?? {}),
+        onPayload: structuredOutputPayload(options.responseFormat, options.agentOptions?.onPayload)
+      };
   return new Agent({
-    ...(options.agentOptions ?? {}),
+    ...agentOptions,
     initialState: {
       ...(options.initialState ?? {}),
       model,
@@ -231,6 +239,20 @@ export function createFactoryPiAgent(options: FactoryPiAgentOptions = {}): Agent
     streamFn: createFactoryPiStreamFn(options),
     getApiKey: () => config.apiKey
   });
+}
+
+function structuredOutputPayload(
+  responseFormat: unknown,
+  existing?: NonNullable<AgentOptions["onPayload"]>
+): NonNullable<AgentOptions["onPayload"]> {
+  return async (payload, payloadModel) => {
+    const transformed = existing ? await existing(payload, payloadModel) : payload;
+    if (!transformed || typeof transformed !== "object" || Array.isArray(transformed)) return transformed;
+    return {
+      ...(transformed as Record<string, unknown>),
+      response_format: responseFormat
+    };
+  };
 }
 
 /** Factory provider payload rules live here, next to the Factory adapter. */
