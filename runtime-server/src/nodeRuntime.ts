@@ -513,7 +513,7 @@ export class NodeRuntime {
     const sessionRef: NodeSessionRef = { scope, sessionId: sessionIdValue };
     const responseFormat = structuredResponseFormat(config.outputSchemaName, config.outputSchema);
     const storageTools = this.storage && config.storageAccess !== "none"
-      ? createNodeStorageTools(this.storage, scope, input)
+      ? createNodeStorageTools(this.storage, input)
       : [];
     const customTools = [...(config.tools ?? [])];
     // Kimi's provider-native response_format is the cleanest contract for a

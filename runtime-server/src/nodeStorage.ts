@@ -6,7 +6,7 @@ import type { NodeScope } from "./node.js";
 const MAX_READ_BYTES = 1_000_000;
 const pathSchema = Type.String({ minLength: 1, maxLength: 512 });
 
-/** The runtime owns the backend. Agents only see logical read tools. */
+/** The runtime owns the backend. Agents only see declared read tools. */
 export type NodeStorage = {
   objectStore: ArtifactObjectStore;
 };
@@ -89,7 +89,6 @@ export class NodeOssStore {
  */
 export function createNodeStorageTools(
   storage: NodeStorage,
-  scope: NodeScope,
   input: NodeInput
 ): AgentTool[] {
   const nodeStore = new NodeOssStore(storage);
