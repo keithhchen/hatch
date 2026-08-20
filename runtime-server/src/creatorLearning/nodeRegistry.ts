@@ -1,10 +1,12 @@
 import { aboutYouNode } from "./aboutYouNode.js";
 import { corpusNode } from "./corpusNode.js";
+import { evalCasesNode } from "./evalCasesNode.js";
 
 /** The product-facing Factory nodes share one runtime and one persistence model. */
 export const factoryNodes = {
   "about-you": aboutYouNode,
-  corpus: corpusNode
+  corpus: corpusNode,
+  "eval-cases": evalCasesNode
 } as const;
 
 export type FactoryNodeName = keyof typeof factoryNodes;
