@@ -66,6 +66,20 @@ test("Review rerun keeps Review loading and locks Brief and Complete", () => {
   assert.equal(workflow.steps.complete.enabled, false);
 });
 
+test("Product Brief remains editable while Review generation continues", () => {
+  const workflow = deriveCreatorWorkflow({
+    product: { status: "draft" },
+    run: { status: "running", workflow_step: "review", stage: "compiling_corpus", parent_revision_id: "revision-1" },
+    review: { release_ready: false, rerun_ready: true },
+    briefSpec: brief
+  });
+  assert.equal(workflow.current, "review");
+  assert.equal(workflow.steps.review.loading, true);
+  assert.equal(workflow.steps.brief.enabled, true);
+  assert.equal(workflow.steps.brief.loading, false);
+  assert.equal(workflow.steps.complete.enabled, false);
+});
+
 test("stage-only generation checkpoints restore the matching loading step", () => {
   const aboutYou = deriveCreatorWorkflow({ run: { status: "running", stage: "about_you_generation" } });
   assert.equal(aboutYou.current, "about-you");

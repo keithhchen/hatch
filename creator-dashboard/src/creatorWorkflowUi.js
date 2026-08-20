@@ -54,6 +54,10 @@ export function deriveCreatorWorkflow({ run, review, briefSpec, product } = {}) 
   const publishing = productStatus === "publishing";
   const publishFailed = PRODUCT_PUBLISH_FAILURE_STATUSES.has(productStatus);
   const published = productStatus === "published";
+  // BriefSpec belongs to Product, not to a Factory candidate. Creators can
+  // author it while a version is being generated or reviewed; only Complete
+  // remains gated by a verified, release-ready candidate.
+  const briefAvailable = Boolean(product) && !publishing;
   const reviewMatchesRun = isReviewForRun(run, review);
   const releaseReady = reviewMatchesRun && review?.release_ready === true;
   const briefValid = isValidBriefSpec(briefSpec);
@@ -79,8 +83,8 @@ export function deriveCreatorWorkflow({ run, review, briefSpec, product } = {}) 
     const enabled = publishing
       ? isCurrent
       : working
-      ? isCurrent
-      : index <= currentIndex;
+      ? isCurrent || (step === "brief" && briefAvailable)
+      : (step === "brief" && briefAvailable) || index <= currentIndex;
     return [step, {
       enabled,
       current: isCurrent,
