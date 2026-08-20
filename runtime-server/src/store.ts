@@ -33,31 +33,11 @@ export type VisibleConversationMessage = {
   finish_reason?: OutputFinishReason;
   parts?: VisibleConversationPart[];
   tool_calls?: VisibleConversationToolCall[];
-  skill_events?: VisibleConversationSkillEvent[];
-  skill_runs?: VisibleConversationSkillRun[];
 };
 
 export type VisibleConversationPart =
   | { type: "text"; start: number; end: number }
-  | { type: "tool_call"; tool_call_id: string }
-  | {
-      type: "skill_event";
-      name: string;
-      status: "activated" | "invoked";
-      reason: "explicit_mention" | "script_run" | "skill_doc_read";
-      source_tool_call_id?: string;
-    }
-  | { type: "skill_run"; skill_run_id: string };
-
-export type VisibleConversationSkillRun = {
-  run_id: string;
-  skill_run_id: string;
-  skill_id: string;
-  name: string;
-  status: "requested" | "running" | "completed" | "failed" | "cancelled";
-  error?: { code: string; message: string };
-  timestamp: string;
-};
+  | { type: "tool_call"; tool_call_id: string };
 
 export type VisibleConversationToolCall = {
   run_id: string;
@@ -67,30 +47,9 @@ export type VisibleConversationToolCall = {
   status: "requested" | "completed" | "failed" | "cancelled";
   locality?: "server" | "client";
   approval?: "none" | "auto" | "ask";
-  scope?: "main" | "skill_run";
-  skill_run_id?: string;
   result?: unknown;
   error?: unknown;
   first_timestamp: string;
-  timestamp: string;
-};
-
-export type VisibleConversationSkillEvent = {
-  run_id: string;
-  name: string;
-  path: string;
-  scope?: string;
-  status: "activated" | "invoked";
-  invocation_type: "explicit" | "implicit";
-  reason: "explicit_mention" | "script_run" | "skill_doc_read";
-  source_tool_call_id?: string;
-  trigger?: {
-    tool: "shell_exec" | "file_read";
-    command?: string;
-    path?: string;
-  };
-  resource_paths?: string[];
-  resource_manifest_truncated?: boolean;
   timestamp: string;
 };
 
@@ -149,83 +108,8 @@ export type StoreEvent =
       status: "requested" | "completed" | "failed" | "cancelled";
       locality?: "server" | "client";
       approval?: "none" | "auto" | "ask";
-      scope?: "main" | "skill_run";
-      skill_run_id?: string;
       result?: unknown;
       error?: unknown;
-      timestamp: string;
-    }
-  | {
-      type: "skill.session";
-      conversation_id: string;
-      parent_run_id: string;
-      skill_run_id: string;
-      skill_id: string;
-      name: string;
-      status: "created" | "running" | "waiting_for_tool" | "completed" | "failed" | "cancelled";
-      error?: { code: string; message: string };
-      timestamp: string;
-    }
-  | {
-      type: "skill.session.message";
-      conversation_id: string;
-      parent_run_id: string;
-      skill_run_id: string;
-      message: ConversationMessage;
-      timestamp: string;
-    }
-  | {
-      type: "skill.session.compacted";
-      conversation_id: string;
-      parent_run_id: string;
-      skill_run_id: string;
-      replacement_history: ConversationMessage[];
-      window_number: number;
-      first_window_id: string;
-      previous_window_id?: string;
-      window_id: string;
-      timestamp: string;
-    }
-  | {
-      type: "skill.activated";
-      conversation_id: string;
-      run_id: string;
-      name: string;
-      path: string;
-      scope?: string;
-      directory: string;
-      content: string;
-      allowed_tools?: string;
-      resource_paths?: string[];
-      resource_manifest_truncated?: boolean;
-      timestamp: string;
-    }
-  | {
-      type: "skill.invoked";
-      conversation_id?: string;
-      run_id: string;
-      name: string;
-      path: string;
-      scope: string;
-      invocation_type: "implicit";
-      reason: "script_run" | "skill_doc_read";
-      source_tool_call_id: string;
-      trigger: {
-        tool: "shell_exec" | "file_read";
-        command?: string;
-        path?: string;
-      };
-      timestamp: string;
-    }
-  | {
-      type: "skill.run";
-      conversation_id: string;
-      run_id: string;
-      skill_run_id: string;
-      skill_id: string;
-      name: string;
-      status: "requested" | "running" | "completed" | "failed" | "cancelled";
-      error?: { code: string; message: string };
       timestamp: string;
     }
   | {
@@ -333,21 +217,6 @@ export class RuntimeStore {
   async readVisibleConversation(conversationId: string): Promise<VisibleConversationMessage[]> {
     const events = await this.readEvents();
     const toolCallsByRun = new Map<string, Map<string, VisibleConversationToolCall>>();
-    const skillEventsByRun = new Map<string, VisibleConversationSkillEvent[]>();
-    const skillRunsByRun = new Map<string, Map<string, VisibleConversationSkillRun>>();
-    const skillEventKeysByRun = new Map<string, Set<string>>();
-    const appendVisibleSkillEvent = (event: VisibleConversationSkillEvent): void => {
-      const runSkillEvents = skillEventsByRun.get(event.run_id) ?? [];
-      const runSkillKeys = skillEventKeysByRun.get(event.run_id) ?? new Set<string>();
-      const key = visibleSkillEventKey(event);
-      if (runSkillKeys.has(key)) {
-        return;
-      }
-      runSkillEvents.push(event);
-      runSkillKeys.add(key);
-      skillEventsByRun.set(event.run_id, runSkillEvents);
-      skillEventKeysByRun.set(event.run_id, runSkillKeys);
-    };
     for (const event of events) {
       if (event.type === "tool.call" && event.conversation_id === conversationId) {
         const runTools = toolCallsByRun.get(event.run_id) ?? new Map<string, VisibleConversationToolCall>();
@@ -360,55 +229,12 @@ export class RuntimeStore {
           status: event.status,
           locality: event.locality ?? existing?.locality,
           approval: event.approval ?? existing?.approval,
-          scope: event.scope ?? existing?.scope,
-          skill_run_id: event.skill_run_id ?? existing?.skill_run_id,
           result: event.result ?? existing?.result,
           error: event.error ?? existing?.error,
           first_timestamp: existing?.first_timestamp ?? event.timestamp,
           timestamp: event.timestamp
         });
         toolCallsByRun.set(event.run_id, runTools);
-      }
-      if (event.type === "skill.activated" && event.conversation_id === conversationId) {
-        appendVisibleSkillEvent({
-          run_id: event.run_id,
-          name: event.name,
-          path: event.path,
-          scope: event.scope,
-          status: "activated",
-          invocation_type: "explicit",
-          reason: "explicit_mention",
-          resource_paths: event.resource_paths,
-          resource_manifest_truncated: event.resource_manifest_truncated,
-          timestamp: event.timestamp
-        });
-      }
-      if (event.type === "skill.invoked" && event.conversation_id === conversationId) {
-        appendVisibleSkillEvent({
-          run_id: event.run_id,
-          name: event.name,
-          path: event.path,
-          scope: event.scope,
-          status: "invoked",
-          invocation_type: event.invocation_type,
-          reason: event.reason,
-          source_tool_call_id: event.source_tool_call_id,
-          trigger: event.trigger,
-          timestamp: event.timestamp
-        });
-      }
-      if (event.type === "skill.run" && event.conversation_id === conversationId) {
-        const runs = skillRunsByRun.get(event.run_id) ?? new Map<string, VisibleConversationSkillRun>();
-        runs.set(event.skill_run_id, {
-          run_id: event.run_id,
-          skill_run_id: event.skill_run_id,
-          skill_id: event.skill_id,
-          name: event.name,
-          status: event.status,
-          error: event.error,
-          timestamp: event.timestamp
-        });
-        skillRunsByRun.set(event.run_id, runs);
       }
     }
 
@@ -469,16 +295,6 @@ export class RuntimeStore {
           if (toolCalls.length > 0) {
             message.tool_calls = toolCalls;
           }
-          const skillEvents = [...(skillEventsByRun.get(event.run_id) ?? [])]
-            .sort((left, right) => left.timestamp.localeCompare(right.timestamp));
-          if (skillEvents.length > 0) {
-            message.skill_events = skillEvents;
-          }
-          const skillRuns = [...(skillRunsByRun.get(event.run_id)?.values() ?? [])]
-            .sort((left, right) => left.timestamp.localeCompare(right.timestamp));
-          if (skillRuns.length > 0) {
-            message.skill_runs = skillRuns;
-          }
         }
         return message;
       });
@@ -506,43 +322,6 @@ export class RuntimeStore {
     return state;
   }
 
-  async readSkillSession(skillRunId: string): Promise<{
-    skill_run_id: string;
-    skill_id: string;
-    name: string;
-    status: Extract<StoreEvent, { type: "skill.session" }>["status"];
-    messages: ConversationMessage[];
-  } | undefined> {
-    const events = await this.readEvents();
-    let session: {
-      skill_run_id: string;
-      skill_id: string;
-      name: string;
-      status: Extract<StoreEvent, { type: "skill.session" }>["status"];
-      messages: ConversationMessage[];
-    } | undefined;
-    for (const event of events) {
-      if (event.type === "skill.session" && event.skill_run_id === skillRunId) {
-        if (!session) {
-          session = {
-            skill_run_id: event.skill_run_id,
-            skill_id: event.skill_id,
-            name: event.name,
-            status: event.status,
-            messages: []
-          };
-        } else {
-          session.status = event.status;
-        }
-      } else if (event.type === "skill.session.message" && event.skill_run_id === skillRunId && session) {
-        session.messages.push(event.message);
-      } else if (event.type === "skill.session.compacted" && event.skill_run_id === skillRunId && session) {
-        session.messages = [...event.replacement_history];
-      }
-    }
-    return session;
-  }
-
 }
 
 export function normalizePersistedStoreEvent(event: StoreEvent): StoreEvent {
@@ -558,19 +337,7 @@ export function normalizePersistedStoreEvent(event: StoreEvent): StoreEvent {
     const name = normalizePersistedLocalToolName(event.name);
     return name === event.name ? event : { ...event, name };
   }
-  if (event.type !== "skill.invoked") return event;
-  const persistedTool = String(event.trigger.tool);
-  const tool = normalizePersistedLocalToolName(persistedTool);
-  if (tool !== "file_read" && tool !== "shell_exec") {
-    throw new Error(`Unsupported persisted skill trigger tool: ${persistedTool}`);
-  }
-  return {
-    ...event,
-    trigger: {
-      ...event.trigger,
-      tool
-    }
-  };
+  return event;
 }
 
 export function assertCanonicalPersistedToolNames(event: unknown): void {
@@ -589,16 +356,6 @@ export function assertCanonicalPersistedToolNames(event: unknown): void {
       assertNotLegacyLocalToolName(record.name, "tool.call.name");
     }
     return;
-  }
-  if (record.type === "skill.invoked") {
-    const trigger = record.trigger;
-    if (trigger && typeof trigger === "object" && !Array.isArray(trigger)) {
-      const tool = (trigger as Record<string, unknown>).tool;
-      assertNotLegacyLocalToolName(tool, "skill.invoked.trigger.tool");
-      if (tool !== "file_read" && tool !== "shell_exec") {
-        throw new Error("skill.invoked.trigger.tool must be file_read or shell_exec");
-      }
-    }
   }
 }
 
@@ -629,14 +386,4 @@ const persistedLocalToolNameMigrations = new Map<string, string>([
 
 function normalizePersistedLocalToolName(name: string): string {
   return persistedLocalToolNameMigrations.get(name) ?? name;
-}
-
-function visibleSkillEventKey(event: VisibleConversationSkillEvent): string {
-  return [
-    event.run_id,
-    event.status,
-    event.path,
-    event.reason,
-    event.source_tool_call_id ?? ""
-  ].join("\u0000");
 }

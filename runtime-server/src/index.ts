@@ -24,7 +24,6 @@ import {
 } from "./protocol.js";
 import { RunStateMachine } from "./runState.js";
 import { ServerToolExecutor } from "./serverTools.js";
-import { SkillRuntime } from "./skillRuntime.js";
 import { RuntimeStore, type VisibleConversationPart } from "./store.js";
 import { PostgresStore } from "./postgresStore.js";
 import {
@@ -1131,10 +1130,7 @@ async function handleHttpRequest(
       conversation_id: conversationId,
       product_id: binding.productId,
       creator_id: binding.creatorId,
-      messages: sanitizeBoundHistory(
-        messages,
-        binding.agentId
-      ),
+      messages: sanitizeBoundHistory(messages),
       history_truncated: historyTruncated
     }, maxHttpResponseBytes);
     return;
@@ -1262,7 +1258,7 @@ async function handleConversationHttpRequest(
       return;
     }
     const messages = store
-      ? sanitizeBoundHistory(await store.readVisibleConversation(conversation.id), binding.agentId)
+      ? sanitizeBoundHistory(await store.readVisibleConversation(conversation.id))
       : [];
     writeResponse(200, {
       conversation: publicConversation(snapshot.conversation),
@@ -1708,7 +1704,6 @@ async function handleRuntimeSocket(
   const activeRuns = new Set<Promise<void>>();
   const messageTasks = new Set<Promise<void>>();
   const activeRunStates = new Map<string, RunStateMachine>();
-  const activeSkillRuntimes = new Map<string, SkillRuntime>();
   const activeRunAbortControllers = new Map<string, AbortController>();
   const pendingTurnAuthorizations = new Map<string, PendingTurnAuthorization>();
   const reservedRunIds = new Set<string>();
@@ -1770,7 +1765,7 @@ async function handleRuntimeSocket(
   });
 
   const send = async (message: OutboundMessage): Promise<void> => {
-    const outbound = protectPrivateAgentBoundary(message, binding?.agentCorpusRoot, binding?.agentId);
+    const outbound = protectPrivateAgentBoundary(message, binding?.agentCorpusRoot);
     if (socket.readyState !== WebSocket.OPEN) return;
     const payload = JSON.stringify(outbound);
     const payloadBytes = Buffer.byteLength(payload, "utf8");
@@ -1901,7 +1896,7 @@ async function handleRuntimeSocket(
               ));
               connectionAbortController.signal.throwIfAborted();
             }
-            const nextSessionSkills = await buildSessionSkills(Boolean(binding.agentCorpusRoot));
+            const nextSessionSkills = await buildSessionSkills(binding.agentCorpusRoot);
             connectionAbortController.signal.throwIfAborted();
             await store.append({
               type: "session.started",
@@ -2039,7 +2034,6 @@ async function handleRuntimeSocket(
               // Defensive fallback for the tiny interval while a newly-created
               // run is being registered with the process-local control map.
               await state.cancel(reason).catch(() => undefined);
-              await activeSkillRuntimes.get(message.run_id)?.cancelParentRun(message.run_id);
               await broker.cancelRun(message.run_id, reason);
               await send({ type: "turn.failed", run_id: message.run_id, error: { code: "run_cancelled", message: reason } });
             }
@@ -2417,7 +2411,6 @@ async function handleRuntimeSocket(
           const cancelActiveRun = async (reason: string): Promise<void> => {
             runAbortController.abort(new Error(reason));
             await state.cancel(reason).catch(() => undefined);
-            await activeSkillRuntimes.get(message.run_id)?.cancelParentRun(message.run_id);
             await broker.cancelRun(message.run_id, reason);
             await send({
               type: "turn.failed",
@@ -2456,12 +2449,10 @@ async function handleRuntimeSocket(
             serverTools,
             toolBridge,
             runtime,
-            createRuntime,
             store,
             conversationRepository,
             state,
             send,
-            activeSkillRuntimes,
             outputGuard,
             runAbortController.signal,
             commerceEventSink,
@@ -2524,18 +2515,9 @@ async function handleRuntimeSocket(
 
 export function protectPrivateAgentBoundary(
   message: OutboundMessage,
-  agentCorpusRoot?: string,
-  agentId = "creator-agent"
+  agentCorpusRoot?: string
 ): OutboundMessage {
   if (!agentCorpusRoot) return message;
-  if (message.type === "skill.activated" || message.type === "skill.invoked") {
-    return {
-      ...message,
-      path: `agent://${encodeURIComponent(agentId)}/protected-skill/${encodeURIComponent(message.name)}`,
-      ...(message.type === "skill.activated" ? { resource_paths: [], resource_manifest_truncated: false } : {}),
-      ...(message.type === "skill.invoked" ? { trigger: { ...message.trigger, path: message.trigger.path ? "agent://private" : undefined } } : {})
-    } as OutboundMessage;
-  }
   if (message.type === "tool_call.delta" && message.locality === "server") {
     const serializedArguments = JSON.stringify(message.arguments ?? {});
     if (serializedArguments.includes(agentCorpusRoot)) {
@@ -2554,12 +2536,10 @@ async function runOneTurn(
   serverTools: ServerToolExecutor,
   toolBridge: ToolBridge,
   runtime: AgentRuntime,
-  createRuntime: () => AgentRuntime,
   store: RuntimeStore,
   conversationRepository: ConversationRepository,
   state: RunStateMachine,
   send: (message: OutboundMessage) => Promise<void>,
-  activeSkillRuntimes: Map<string, SkillRuntime>,
   outputGuard: OutputGuard,
   abortSignal: AbortSignal,
   commerceEventSink?: CommerceEventSink,
@@ -2571,7 +2551,6 @@ async function runOneTurn(
   let modelFirstText: number | undefined;
   let firstSafeSegment: number | undefined;
   const guardTiming: Array<import("./outputGuard.js").OutputGuardTiming & { released_ms?: number }> = [];
-  let skillRuntime: SkillRuntime | undefined;
   let deliveredArtifact: DeliveryArtifact | undefined;
   const deliveryBinding = deliveryBindingFromSession(binding);
   let deliveryReservation: DeliveryUnitReservation | undefined;
@@ -2644,33 +2623,6 @@ async function runOneTurn(
           visibleParts.push({ type: "tool_call", tool_call_id: message.tool_call_id });
         }
         return;
-      }
-      if (message.type === "skill.invoked" || message.type === "skill.activated") {
-        const key = [
-          "skill",
-          message.status,
-          message.name,
-          message.reason,
-          "source_tool_call_id" in message ? message.source_tool_call_id : ""
-        ].join(":");
-        if (!visibleActivityKeys.has(key)) {
-          visibleActivityKeys.add(key);
-          visibleParts.push({
-            type: "skill_event",
-            name: message.name,
-            status: message.status,
-            reason: message.reason,
-            ...(message.type === "skill.invoked" ? { source_tool_call_id: message.source_tool_call_id } : {})
-          });
-        }
-        return;
-      }
-      if (message.type === "skill.run") {
-        const key = `skill-run:${message.skill_run_id}`;
-        if (!visibleActivityKeys.has(key)) {
-          visibleActivityKeys.add(key);
-          visibleParts.push({ type: "skill_run", skill_run_id: message.skill_run_id });
-        }
       }
     };
     const emit = async (message: OutboundMessage): Promise<void> => {
@@ -2834,22 +2786,6 @@ async function runOneTurn(
     await persistUserMessage();
 
     setupCompleted = performance.now();
-    skillRuntime = new SkillRuntime({
-      parentInput: input,
-      parentState: state,
-      sessionSkills,
-      clientBroker: broker,
-      serverTools,
-      toolBridge,
-      clientTools: materializedAgent?.localTools ?? hello.local_tools,
-      allowedExternalTools: materializedAgent?.externalTools,
-      agentSystemPrompt: materializedAgent?.systemPrompt,
-      deliveryAuditContext: materializedAgent?.deliveryAuditContext,
-      store,
-      emit,
-      createWorkerRuntime: () => createRuntime()
-    });
-    activeSkillRuntimes.set(input.run_id, skillRuntime);
     const messages = input.task_start ? runtimeMessages : [...runtimeMessages, input.message];
 
     // Store/materialization work may race with a disconnect. Never start a
@@ -2865,10 +2801,6 @@ async function runOneTurn(
       clientTools: materializedAgent?.localTools ?? hello.local_tools,
       allowedExternalTools: materializedAgent?.externalTools,
       externalToolDefinitions: materializedAgent?.externalToolDefinitions,
-      // An Agent Corpus has already materialized matching protected Skills
-      // into the server-private prompt. Product execution remains one Agent
-      // session rather than a generic parent delegating to another worker.
-      allowSkillRun: !binding.agentCorpusRoot,
       persistModelMessage: async (message) => {
         await store.append({
           type: "conversation.model_message",
@@ -2882,8 +2814,6 @@ async function runOneTurn(
         return compacted?.replacement_history;
       },
       toolBridge,
-      skillRuntime,
-      toolScope: "main",
       agentSystemPrompt: materializedAgent?.systemPrompt,
       briefSnapshot: (await conversationRepository.getConversation(input.conversation_id))?.briefSnapshot,
       deliveryAuditContext: materializedAgent?.deliveryAuditContext,
@@ -2897,7 +2827,6 @@ async function runOneTurn(
         break;
       }
       await persistServerToolCallEvent(event, input, store);
-      await persistSkillEvent(event, input, store);
       if (event.type === "assistant.delta" && event.delta.kind === "text") {
         modelFirstText ??= performance.now();
         const result = await guardedOutput.push(event.delta.content);
@@ -2956,17 +2885,19 @@ async function runOneTurn(
         writeOperationalError("commerce_delivery_reservation_release_failed", error);
       });
     }
-    await skillRuntime?.cancelParentRun(input.run_id);
-    activeSkillRuntimes.delete(input.run_id);
   }
 }
 
-async function buildSessionSkills(protectedCorpus = false): Promise<RuntimeSessionSkills> {
-  // The Agent Corpus materializer loads matching protected SKILL.md files into the
-  // direct server Agent. Do not also expose it as a model-selectable catalog
-  // entry: that creates an unnecessary nested skill worker and lets the same
-  // method run through two different delivery paths.
-  const records = protectedCorpus ? [] : await discoverSkills();
+async function buildSessionSkills(corpusRoot?: string): Promise<RuntimeSessionSkills> {
+  // Both standalone Runtime Skills and published Agent Corpus Skills use the
+  // same metadata-only catalog and the same explicit Skill loader. A Corpus
+  // root is an explicit discovery scope, so it cannot accidentally mix in
+  // host/global Skills.
+  const records = corpusRoot
+    ? await discoverSkills({
+      roots: [{ path: path.join(corpusRoot, "skills"), scope: "custom", followSymlinks: false }]
+    })
+    : await discoverSkills();
   const visibleRecords = visibleSkillsForSession(records);
   const rendered = await includeSkillInstructions()
     ? renderSkillsSection(visibleRecords, { executionMode: "protected" })
@@ -3419,18 +3350,9 @@ async function reconcileDeliveryAccountingOutbox(
   });
 }
 
-function sanitizeBoundHistory(messages: Awaited<ReturnType<RuntimeStore["readVisibleConversation"]>>, agentId: string): Awaited<ReturnType<RuntimeStore["readVisibleConversation"]>> {
+function sanitizeBoundHistory(messages: Awaited<ReturnType<RuntimeStore["readVisibleConversation"]>>): Awaited<ReturnType<RuntimeStore["readVisibleConversation"]>> {
   return messages.map((message) => ({
     ...message,
-    ...(message.skill_events ? {
-      skill_events: message.skill_events.map((event) => ({
-        ...event,
-        path: `agent://${encodeURIComponent(agentId)}/protected-skill/${encodeURIComponent(event.name)}`,
-        resource_paths: event.resource_paths ? [] : undefined,
-        resource_manifest_truncated: event.resource_manifest_truncated === undefined ? undefined : false,
-        trigger: event.trigger ? { ...event.trigger, path: event.trigger.path ? "agent://private" : undefined } : undefined
-      }))
-    } : {}),
     ...(message.tool_calls ? {
       tool_calls: message.tool_calls.map((tool) => tool.locality === "server" && /^file[._]/.test(tool.name)
         ? { ...tool, arguments: {}, result: tool.result === undefined ? undefined : { private_result_redacted: true } }
@@ -3451,28 +3373,6 @@ function emptyRenderedSkills(): ReturnType<typeof renderSkillsSection> {
       truncated_description_count: 0
     }
   };
-}
-
-async function persistSkillEvent(
-  event: OutboundMessage,
-  input: RunStart,
-  store: RuntimeStore
-): Promise<void> {
-  if (event.type !== "skill.invoked") {
-    return;
-  }
-  await store.append({
-    type: "skill.invoked",
-    conversation_id: input.conversation_id,
-    run_id: input.run_id,
-    name: event.name,
-    path: event.path,
-    scope: event.scope,
-    invocation_type: event.invocation_type,
-    reason: event.reason,
-    source_tool_call_id: event.source_tool_call_id,
-    trigger: event.trigger
-  });
 }
 
 async function persistServerToolCallEvent(

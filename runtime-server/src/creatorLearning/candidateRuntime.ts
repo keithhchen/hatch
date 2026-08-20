@@ -79,7 +79,6 @@ export function createHatchCandidateRuntimeExecutor(): HatchCandidateExecutor {
           clientTools: [],
           allowedExternalTools: [],
           externalToolDefinitions: [],
-          allowSkillRun: false,
           knowledgeAvailable: false,
           agentSystemPrompt: execution.systemInstructions
         })) {

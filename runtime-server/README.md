@@ -85,7 +85,7 @@ as implicit skill sources.
 
 `agents/openai.yaml` is parsed for OpenAI Agent Skills metadata. `policy.allow_implicit_invocation: false` hides the skill from implicit model selection; explicit `$skill-name` mentions or linked `[$skill-name](/path/to/SKILL.md)` mentions still activate it for that turn. `policy.products` is enforced only when `HATCH_SKILL_PRODUCT` is set to `codex`, `chatgpt`, or `atlas`; by default product-restricted skills are not model-visible.
 
-The runtime tracks protected skill execution on the event stream. The main agent receives public metadata and invokes `skill_run`; the server creates a headless `SkillRuntime` session that reads the private `SKILL.md`. The client sees `skill.run` status and brokered tool correlation, but never receives the worker prompt or raw transcript.
+The runtime exposes one ordinary server function tool named `Skill` with `{ skill_name }`. The main Agent calls it after choosing from the metadata-only catalog. The tool reads the complete `SKILL.md`, mounts the bundle manifest into the same Agent transcript, and leaves ordinary `file_read` and `file_list` available for the selected bundle's resources. `shell_exec` remains workspace-scoped and is not elevated by Skill loading.
 
 The model-visible skills list follows Agent Skills progressive-disclosure budgeting: it uses at most 2% of a known model context window, or 8,000 characters when the context window is unknown. Set `HATCH_MODEL_CONTEXT_WINDOW_CHARS` when a provider exposes a known window. `HATCH_SKILL_METADATA_BUDGET_CHARS` can override the computed value for deterministic tests or constrained deployments.
 
@@ -110,15 +110,15 @@ enabled = false
 This package implements the Agent Skills protocol semantics over a Pi Core Agent using Kimi K2.6 through Pi AI:
 
 ```text
-startup context: skill name + description + public SKILL.md locator
-selection: main agent calls `skill_run` with the public skill id and task
-private execution: SkillRuntime loads the complete private SKILL.md inside a headless worker session
-resource loading: the worker loads private skill resources on demand
+startup context: Skill name + description only
+selection: main agent calls `Skill({ skill_name })`
+loading: Skill reads the complete SKILL.md and mounts the bundle manifest in the current Agent loop
+resource loading: ordinary file_read/file_list/shell_exec reads only the activated bundle resources
 tool execution: Pi tool calls mapped to server tools or brokered local tools
 tool events: requested/completed/failed status streams as `tool_call.delta`; local writes can also stream `workspace.diff`
 ```
 
-It does not expose `load_skill(skill_id)` as a model-visible tool. `skill_run` is the product runtime boundary: it is a normal Pi tool to the main agent, while the private skill body stays inside the server worker. The main agent cannot use `file_read` to load protected `SKILL.md` content.
+`Skill` is the only model-visible Skill loading boundary. The runtime and wire contract do not provide `load_skill`, `skill_run`, nested Agents, or worker transcripts. Ordinary `file_read` cannot bypass it by reading an unactivated `SKILL.md`.
 
 Hatch does not use the Responses API or OpenAI hosted/local `shellTool`. The Agent harness is Pi Core + Pi AI. Pi AI uses Moonshot's OpenAI-compatible Completions transport at the provider boundary; Hatch does not instantiate a second OpenAI SDK client or maintain a parallel model loop.
 
@@ -127,21 +127,20 @@ Hatch does not use the Responses API or OpenAI hosted/local `shellTool`. The Age
 The server builds base instructions for each model call from:
 
 ```text
-system: runtime identity, security rules, and tool execution boundaries
-user context: server-rendered per-session Agent Skills catalog
-worker context: private skill instructions inside SkillRuntime only
+system: runtime identity, Agent instructions, Skill catalog, and loaded Creator Skill instructions
 conversation: server-hydrated prior user/assistant messages
 conversation: current user message
+tool result: ordinary `Skill` loader result and bundle manifest for traceability
 ```
 
 `client.hello` initializes the session skill context once: the server discovers skills, renders the catalog, and stores that context on the WebSocket session. Later `client.message` turns reuse the same rendered catalog so the model-call prefix stays stable for prompt caching. New sessions discover again.
 
-The public skill catalog is injected as server-authored `user` context prefixed with `HATCH RUNTIME CONTEXT`; private skill instructions are injected only into the worker context. Context compaction excludes rebuilt server context messages because the server reconstructs them from fixed session state. The selected Workspace root, native grant, and project instruction files are not session fields and are never injected merely because a folder was selected. User-authorized local-tool output can naturally contain a path and becomes model context; literal path replacement is not a privacy or containment boundary.
+The server-rendered Skill catalog is part of the Runtime system prompt and contains only names and descriptions. A successful `Skill` call appends the complete `SKILL.md` and bundle manifest to the current Agent's Creator-authoritative system prompt before the next provider request; the ordinary tool result remains in the transcript for traceability. Within Creator-authored content, the loaded Skill is the highest-priority instruction layer and takes precedence over the base Agent prompt and Consumer request, while the Skill still uses the same Agent loop and ordinary tools. Context compaction does not rebuild user-role runtime context messages because the catalog and loaded Skill instructions are reconstructed from the current system-prompt state. The selected Workspace root, native grant, and project instruction files are not session fields and are never injected merely because a folder was selected. User-authorized local-tool output can naturally contain a path and becomes model context; literal path replacement is not a privacy or containment boundary.
 
 Model-visible function tools are generated from the canonical runtime tool spec registry in `tools.ts`. Server tools are always owned by the runtime server. Client tools are exposed only when the `client.hello.local_tools` session capability says the Desktop client can execute them. Local tools use one name at every current boundary—model, Runtime dispatch, wire, events, and persistence: `file_list`, `file_search`, `file_read`, `file_write`, `file_patch`, `shell_exec`, and `git_diff`. There is no provider-specific rename and no current `fs.*` family. Old dotted Desktop capability declarations fail protocol validation instead of creating a partially working session. Dotted names are recognized only while reading historical JSONL/Postgres events; Runtime never emits or newly stores them.
-`file_read` and `file_list` are hybrid functions: a protected Skill resource path is handled server-side inside SkillRuntime, while a Workspace-relative path dispatches the same canonical call to the Desktop. Protected skill resource paths are never sent to the client as server-hosted skill content. Creator knowledge retrieval remains a separate server tool: runtime name `hatch.file_search`, model name `hatch_file_search`; it is not the local `file_search` tool.
+`Skill` is a server tool. `file_read` and `file_list` are hybrid functions: a path under an activated Skill bundle is handled server-side, while a Workspace-relative path dispatches the same canonical call to the Desktop. An unactivated Skill `SKILL.md` is rejected and must be loaded through `Skill`. Creator knowledge retrieval remains a separate server tool: runtime name `hatch.file_search`, model name `hatch_file_search`; it is not the local `file_search` tool.
 `shell_exec` accepts an optional `justification` field as model-visible reasoning context for the command. Shell has no independent enable/disable toggle: a healthy supported Desktop always declares it. The Runtime transports declared local tools as `auto`; the Desktop still applies its user-selected `Ask before changes` or `Allow changes` policy to every file mutation and every Shell command. The Rust `local-runner` independently enforces a path-based Workspace sandbox, a clean environment, bounded output, and fail-closed network/IPC restrictions; an approval marker cannot disable those controls. A hardlink already present inside the Workspace still denotes its shared inode, so the product does not misrepresent path labels as separate file ownership.
-SkillRuntime loads the private `SKILL.md` and its resource manifest server-side. Relative paths under `references/`, `scripts/`, and `assets/` resolve against the worker's private skill directory. The main conversation receives only the worker result and redacted `skill.run` status.
+`Skill` loads the private `SKILL.md` and its resource manifest server-side. Relative paths under `references/`, `scripts/`, and `assets/` resolve against the activated Skill directory. The instructions are promoted into the current Agent's Creator-authoritative system prompt, and the loader result and manifest remain in the ordinary tool transcript for traceability.
 
 Activated Skill `allowed-tools` frontmatter is parsed and preserved for protocol fidelity and future policy tightening. In the current max-permission runtime, local tools already run as `auto`, so `allowed-tools` does not add permission beyond `client.hello.local_tools`, does not grant server tools, and never bypasses workspace containment. Current mappings remain intentionally small for when approval policies are reintroduced: `Read`/`List`/`Search` map to the read-only `file_*` tools, `Write` maps to `file_write`, `Edit` maps to `file_patch`, and `Bash(git:*)` matches only `shell_exec` commands whose first command token is `git`.
 
@@ -348,7 +347,6 @@ session.ready
 turn.state
 assistant.delta
 session.compacted
-skill.run
 tool_call.delta
 workspace.diff
 tool_call.request

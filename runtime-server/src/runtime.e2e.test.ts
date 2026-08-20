@@ -69,18 +69,12 @@ test("runtime protocol mirrors the canonical wire schema", async () => {
     $defs: {
       protocolVersion: { const: string };
       clientToolName: { enum: string[] };
-      skillInvoked: {
-        properties: {
-          trigger: { properties: { tool: { enum: string[] } } };
-        };
-      };
     };
   };
 
   assert.equal(schema.$id, "https://hatch.dev/protocol/hatch-wire-protocol-0.7.schema.json");
   assert.equal(schema.$defs.protocolVersion.const, PROTOCOL_VERSION);
   assert.deepEqual(schema.$defs.clientToolName.enum, [...ClientToolNameSchema.options]);
-  assert.deepEqual(schema.$defs.skillInvoked.properties.trigger.properties.tool.enum, ["shell_exec", "file_read"]);
 });
 
 test("legacy dotted JSONL local-tool names normalize to canonical underscore names", async () => {
@@ -91,32 +85,6 @@ test("legacy dotted JSONL local-tool names normalize to canonical underscore nam
       type: "session.started",
       local_tools: legacyToolCallNames,
       timestamp: new Date(0).toISOString()
-    },
-    {
-      type: "skill.invoked",
-      conversation_id: "conversation-legacy",
-      run_id: "run-legacy-read",
-      name: "legacy-read",
-      path: "/skills/legacy-read/SKILL.md",
-      scope: "server",
-      invocation_type: "implicit",
-      reason: "skill_doc_read",
-      source_tool_call_id: "call-legacy-read",
-      trigger: { tool: "fs.read", path: "/skills/legacy-read/SKILL.md" },
-      timestamp: new Date(0).toISOString()
-    },
-    {
-      type: "skill.invoked",
-      conversation_id: "conversation-legacy",
-      run_id: "run-legacy-shell",
-      name: "legacy-shell",
-      path: "/skills/legacy-shell/scripts/run.sh",
-      scope: "server",
-      invocation_type: "implicit",
-      reason: "script_run",
-      source_tool_call_id: "call-legacy-shell",
-      trigger: { tool: "shell.exec", command: "./scripts/run.sh" },
-      timestamp: new Date(1).toISOString()
     },
     ...legacyToolCallNames.map((name, index) => ({
       type: "tool.call",
@@ -139,12 +107,6 @@ test("legacy dotted JSONL local-tool names normalize to canonical underscore nam
   assert.deepEqual(
     stored.find((event) => event.type === "session.started")?.local_tools,
     ["file_list", "file_search", "file_read", "file_write", "file_patch", "shell_exec", "git_diff"]
-  );
-  assert.deepEqual(
-    stored
-      .filter((event) => event.type === "skill.invoked")
-      .map((event) => event.trigger.tool),
-    ["file_read", "shell_exec"]
   );
   assert.deepEqual(
     stored
@@ -254,33 +216,6 @@ test("runtime server exposes visible conversation history for client hydration",
     approval: "auto",
     result: { content: "birthday dinner rows" }
   });
-  await store.append({
-    type: "skill.activated",
-    conversation_id: storedConversationId,
-    run_id: "run_old_1",
-    name: "contract-review",
-    path: "/server/skills/contract-review/SKILL.md",
-    scope: "server",
-    directory: "/server/skills/contract-review",
-    content: "# Contract Review",
-    resource_paths: ["references/playbook.md"],
-    resource_manifest_truncated: false
-  });
-  await store.append({
-    type: "skill.invoked",
-    conversation_id: storedConversationId,
-    run_id: "run_old_1",
-    name: "contract-review",
-    path: "/server/skills/contract-review/SKILL.md",
-    scope: "server",
-    invocation_type: "implicit",
-    reason: "skill_doc_read",
-    source_tool_call_id: "call_file_read",
-    trigger: {
-      tool: "file_read",
-      path: "/server/skills/contract-review/SKILL.md"
-    }
-  });
   const beforeTool = "I need to read the sheet. ";
   const afterTool = "The rows are ready.";
   await store.append({
@@ -327,15 +262,6 @@ test("runtime server exposes visible conversation history for client hydration",
         approval?: string;
         result?: Record<string, unknown>;
       }>;
-      skill_events?: Array<{
-        name: string;
-        path: string;
-        status: string;
-        invocation_type: string;
-        reason: string;
-        source_tool_call_id?: string;
-        trigger?: { tool: string; path?: string; command?: string };
-      }>;
     }>;
   };
   assert.equal(payload.conversation_id, "desktop-chat");
@@ -344,7 +270,6 @@ test("runtime server exposes visible conversation history for client hydration",
     ["assistant", `${beforeTool}${afterTool}`]
   ]);
   assert.equal(payload.messages[0]?.tool_calls, undefined);
-  assert.equal(payload.messages[0]?.skill_events, undefined);
   assert.deepEqual(payload.messages[1]?.tool_calls?.map((toolCall) => [
     toolCall.tool_call_id,
     toolCall.name,
@@ -364,17 +289,6 @@ test("runtime server exposes visible conversation history for client hydration",
     { type: "text", start: 0, end: beforeTool.length },
     { type: "tool_call", tool_call_id: "call_file_read" },
     { type: "text", start: beforeTool.length, end: beforeTool.length + afterTool.length }
-  ]);
-  assert.deepEqual(payload.messages[1]?.skill_events?.map((skillEvent) => [
-    skillEvent.name,
-    skillEvent.status,
-    skillEvent.invocation_type,
-    skillEvent.reason,
-    skillEvent.source_tool_call_id,
-    skillEvent.trigger?.tool
-  ]), [
-    ["contract-review", "activated", "explicit", "explicit_mention", undefined, undefined],
-    ["contract-review", "invoked", "implicit", "skill_doc_read", "call_file_read", "file_read"]
   ]);
 });
 
@@ -834,7 +748,7 @@ test("skills expose official catalog metadata only", async () => {
   const catalog = await listSkills();
   const skill = catalog.find((item) => item.name === "repo-assistant");
   assert.ok(skill);
-  assert.equal(Object.keys(skill).sort().join(","), "description,id,name,path");
+  assert.equal(Object.keys(skill).sort().join(","), "description,name");
 });
 
 test("skills follow official SKILL.md frontmatter naming semantics", async () => {
@@ -1243,7 +1157,7 @@ test("system skill roots follow symlinked skill folders", async () => {
   assert.ok(discovered.some((skill) => skill.name === "system-symlink-skill"));
 });
 
-test("skills section renders declared tool dependencies from agents openai metadata", async () => {
+test("skills section renders only the catalog metadata required by the Skill loader", async () => {
   const root = await tempWorkspace();
   const skillDir = path.join(root, "dependency-skill");
   await mkdir(path.join(skillDir, "agents"), { recursive: true });
@@ -1271,7 +1185,9 @@ test("skills section renders declared tool dependencies from agents openai metad
   const skills = await discoverSkills(root);
   assert.equal(skills[0]?.openai.dependencies.tools.length, 2);
   const { section } = renderSkillsSection(skills, { prompt: "Use dependency-skill." });
-  assert.match(section, /- dependency-skill: .*tools: mcp:openaiDeveloperDocs, local:git/);
+  assert.match(section, /- dependency-skill: Use when testing Agent Skills dependency metadata\./);
+  assert.doesNotMatch(section, /tools: mcp:openaiDeveloperDocs/);
+  assert.doesNotMatch(section, /SKILL\.md\)/);
   assert.doesNotMatch(section, /# Dependency Skill/);
 });
 
@@ -1466,7 +1382,7 @@ test("skills section shortens descriptions or omits entries to fit the metadata 
   assert.doesNotMatch(section, /long description long description long description long description long description long description long description long description/);
 });
 
-test("skills section keeps absolute paths when there is no catalog budget pressure", async () => {
+test("skills section keeps a name-and-description catalog when there is no budget pressure", async () => {
   const root = await tempWorkspace();
   const skillDir = path.join(root, "absolute-skill");
   const skillPath = path.join(skillDir, "SKILL.md");
@@ -1482,16 +1398,14 @@ test("skills section keeps absolute paths when there is no catalog budget pressu
 
   const skills = await discoverSkills(root);
   const { section, report } = renderSkillsSection(skills, { budgetChars: 100_000 });
-  const discoveredPath = skills[0]?.path;
-  assert.ok(discoveredPath);
-
   assert.equal(report.included_count, 1);
   assert.equal(report.omitted_count, 0);
   assert.doesNotMatch(section, /### Skill roots/);
-  assert.match(section, new RegExp(`\\(file: ${escapeRegExp(discoveredPath.replaceAll("\\", "/"))}\\)`));
+  assert.match(section, /- absolute-skill: Absolute skill\./);
+  assert.doesNotMatch(section, /SKILL\.md\)/);
 });
 
-test("skills section uses Codex-style root aliases when they allow more skills to fit", async () => {
+test("skills catalog budgets descriptions without adding source locators", async () => {
   const parent = await tempWorkspace();
   const root = path.join(parent, ...Array.from({ length: 8 }, (_, index) => `long-shared-prefix-segment-${index}`));
   const skillCount = 40;
@@ -1510,20 +1424,15 @@ test("skills section uses Codex-style root aliases when they allow more skills t
   }
 
   const skills = await discoverSkills(root);
-  const absoluteMinimumCost = skills.reduce((sum, skill) => {
-    const line = `- ${skill.name}: (file: ${skill.path.replaceAll("\\", "/")})\n`;
-    return sum + Array.from(line).length;
-  }, 0);
-  const budget = Math.floor(absoluteMinimumCost / 2);
+  const budget = skills.reduce((sum, skill) => sum + Array.from(`- ${skill.name}\n`).length, 0);
   const rendered = renderSkillsSection(skills, { budgetChars: budget });
 
-  assert.ok(budget < absoluteMinimumCost);
+  assert.ok(budget > 0);
   assert.equal(rendered.report.omitted_count, 0);
   assert.equal(rendered.report.included_count, skillCount);
-  assert.match(rendered.section, /### Skill roots\n- `r0` = `/);
-  assert.match(rendered.section, /\(file: r0\/shared-root-skill-00\/SKILL\.md\)/);
-  assert.match(rendered.section, /\(file: r0\/shared-root-skill-39\/SKILL\.md\)/);
-  assert.match(rendered.section, /expand the listed short `path` with the matching alias/);
+  assert.doesNotMatch(rendered.section, /### Skill roots/);
+  assert.doesNotMatch(rendered.section, /\(file:/);
+  assert.match(rendered.section, /- shared-root-skill-00(?:\n|$)/);
 });
 
 test("skills metadata budget uses two percent of known context window or 8000 chars when unknown", () => {
@@ -1682,21 +1591,23 @@ test("skills section renders Codex-style progressive disclosure without SKILL.md
   const { section, report } = renderSkillsSection(catalog, { prompt: "Find Hatch." });
 
   assert.match(section, /## Skills/);
-  assert.match(section, /- repo-assistant: .* \(file: .*SKILL\.md\)/);
-  assert.match(section, /- review-contract: .* \(file: .*SKILL\.md\)/);
-  assert.match(section, /must read its `SKILL\.md` completely/);
+  assert.match(section, /- repo-assistant: /);
+  assert.match(section, /- review-contract: /);
+  assert.doesNotMatch(section, /\(file: .*SKILL\.md\)/);
+  assert.match(section, /call the registered `Skill` function tool/);
   assert.doesNotMatch(section, /# Repo Assistant/);
   assert.doesNotMatch(section, /# \/review-contract/);
   assert.ok(report.included_count >= 2);
 });
 
-test("Pi runtime uses canonical file_read for skill path loading", async () => {
+test("Pi runtime registers Skill as the canonical Skill bundle loader", async () => {
   const runtimeSource = await readFile(new URL("../src/agentRuntime.ts", import.meta.url), "utf8");
   const piRuntimeSource = await readFile(new URL("../src/piAgentRuntime.ts", import.meta.url), "utf8");
   const toolsSource = await readFile(new URL("../src/tools.ts", import.meta.url), "utf8");
   const specs = modelToolSpecsForRun(["file_read"], { hasMcpServers: false });
   const fileRead = specs.find((spec) => spec.name === "file_read");
   const fileList = specs.find((spec) => spec.name === "file_list");
+  const skill = specs.find((spec) => spec.name === "Skill");
 
   assert.match(piRuntimeSource, /new Agent\(/);
   assert.match(piRuntimeSource, /createPiStreamFn/);
@@ -1711,10 +1622,13 @@ test("Pi runtime uses canonical file_read for skill path loading", async () => {
   assert.equal(fileRead?.locality, "hybrid");
   assert.equal(fileList?.runtimeName, "file_list");
   assert.equal(fileList?.locality, "hybrid");
+  assert.equal(skill?.runtimeName, "Skill");
+  assert.equal(skill?.locality, "server");
+  assert.deepEqual(skill?.required, ["skill_name"]);
   assert.doesNotMatch(runtimeSource, /@openai\/agents/);
   assert.doesNotMatch(runtimeSource, /shellTool/);
   assert.doesNotMatch(runtimeSource, /read_skill_file/);
-  assert.doesNotMatch(runtimeSource, /load_skill/);
+  assert.match(runtimeSource, /loadSkillBundleByName/);
 });
 
 test("every client tool has one canonical name across the model and Runtime", () => {
@@ -1741,6 +1655,13 @@ test("tool registry owns model tool dispatch locality and event-name mapping", (
   assert.equal(web.runtimeName, "web.search");
   assert.equal(web.eventName, "web.search");
   assert.equal(web.approval, "none");
+
+  const skill = requireModelToolDispatch("Skill");
+  assert.equal(skill.target, "server");
+  assert.equal(skill.runtimeName, "Skill");
+  assert.equal(skill.eventName, "Skill");
+  const parsedSkillTool = requireTool("Skill").schema.parse({ skill_name: "repo-assistant" }) as { skill_name: string };
+  assert.equal(parsedSkillTool.skill_name, "repo-assistant");
 
   const fileSearch = requireModelToolDispatch("file_search");
   assert.equal(fileSearch.target, "client");
@@ -1987,9 +1908,9 @@ test("multiple compaction checkpoints replay from the latest replacement history
 
 
 
-test("skill resources can be read by catalog path and cannot escape the skills root", async () => {
-  const catalog = await listSkills();
-  const skill = catalog.find((item) => item.name === "repo-assistant");
+test("skill resources can be read by an internal Skill record path and cannot escape the skills root", async () => {
+  const records = await discoverSkills();
+  const skill = records.find((item) => item.name === "repo-assistant");
   assert.ok(skill);
 
   const content = await readSkillResourceByPath(skill.path);

@@ -8,7 +8,7 @@ import { ToolBridge } from "./toolBridge.js";
 
 const state = undefined as unknown as RunStateMachine;
 
-test("ToolBridge routes local tools with scope and correlation intact", async () => {
+test("ToolBridge routes local tools with correlation intact", async () => {
   const localCalls: unknown[] = [];
   const serverCalls: unknown[] = [];
   const broker = {
@@ -26,7 +26,6 @@ test("ToolBridge routes local tools with scope and correlation intact", async ()
   const bridge = new ToolBridge(broker, serverTools);
 
   assert.deepEqual(await bridge.execute({
-    scope: "main",
     runId: "run_main",
     toolCallId: "call_main",
     name: "file_read",
@@ -35,9 +34,7 @@ test("ToolBridge routes local tools with scope and correlation intact", async ()
     state
   }), { content: "local result" });
   assert.deepEqual(await bridge.execute({
-    scope: "skill_run",
     runId: "run_parent",
-    skillRunId: "skill_123",
     toolCallId: "call_skill",
     name: "file_read",
     arguments: { path: "notes.txt" },
@@ -46,8 +43,8 @@ test("ToolBridge routes local tools with scope and correlation intact", async ()
   }), { content: "local result" });
 
   assert.deepEqual(localCalls, [
-    ["run_main", "file_read", { path: "notes.txt" }, state, "call_main", { scope: "main" }],
-    ["run_parent", "file_read", { path: "notes.txt" }, state, "call_skill", { scope: "skill_run", skillRunId: "skill_123" }]
+    ["run_main", "file_read", { path: "notes.txt" }, state, "call_main"],
+    ["run_parent", "file_read", { path: "notes.txt" }, state, "call_skill"]
   ]);
   assert.deepEqual(serverCalls, []);
 });
@@ -69,9 +66,7 @@ test("ToolBridge routes server tools without sending them to the client broker",
   const controller = new AbortController();
 
   const result = await bridge.execute({
-    scope: "skill_run",
     runId: "run_server",
-    skillRunId: "skill_http",
     toolCallId: "call_http",
     name: "api.request",
     arguments: { endpoint: "policy.lookup", payload: { region: "us" } },
@@ -99,7 +94,6 @@ test("ToolBridge rejects invalid schemas and unavailable local capabilities befo
   const bridge = new ToolBridge(broker, serverTools);
 
   await assert.rejects(() => bridge.execute({
-    scope: "main",
     runId: "run_invalid",
     toolCallId: "call_invalid",
     name: "file_read",
@@ -108,7 +102,6 @@ test("ToolBridge rejects invalid schemas and unavailable local capabilities befo
     state
   }));
   await assert.rejects(() => bridge.execute({
-    scope: "main",
     runId: "run_disabled",
     toolCallId: "call_disabled",
     name: "file_read",
@@ -132,9 +125,7 @@ test("ToolBridge preserves cancellation ownership and ignores a late local resul
   }, store, 10_000);
   const bridge = new ToolBridge(broker, new ServerToolExecutor());
   const pending = bridge.execute({
-    scope: "skill_run",
     runId: "run_cancel",
-    skillRunId: "skill_cancel",
     toolCallId: "call_pending",
     name: "file_read",
     arguments: { path: "pending.txt" },
