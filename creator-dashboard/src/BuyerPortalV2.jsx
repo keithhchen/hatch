@@ -21,7 +21,7 @@ import { humanizeIdentifier, meaningfulReversalStatus } from "./buyerPresentatio
 import { creatorPublicModel } from "./storefrontModel.js";
 import "./buyerPortalV2.css";
 
-const DEFAULT_DOWNLOAD_URL = "https://github.com/keithhchen/hatch/releases/latest";
+const DEFAULT_DOWNLOAD_URL = "https://github.com/keithhchen/hatch-releases/releases/latest";
 const EXPLORE_ROOT = "/explore";
 const LIBRARY_ROOT = "/library";
 const ORDERS_ROOT = "/orders";
