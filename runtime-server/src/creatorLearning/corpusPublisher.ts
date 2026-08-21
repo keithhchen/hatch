@@ -105,7 +105,12 @@ export class CorpusPublisher {
       );
     } catch (error) {
       if (error instanceof AgentCorpusVerificationError) {
-        throw new CorpusPublishError("corpus_bundle_invalid", "Generated Runtime Corpus failed Registry validation.", 422, { cause: error });
+        throw new CorpusPublishError(
+          "corpus_bundle_invalid",
+          `Generated Runtime Corpus failed Registry validation: ${error.message}`,
+          422,
+          { cause: error },
+        );
       }
       throw new CorpusPublishError("runtime_storage_unavailable", "Registry could not write the Runtime Corpus to shared storage.", 503, { cause: error });
     }
