@@ -156,15 +156,25 @@ export class FactoryNodeService {
     const nodeScope = scope(input.productId, "about-you", input.executionId);
     const state = await this.executionStore.load({ scope: nodeScope });
     if (!state) throw new FactoryNodeServiceError("execution_not_found", `About You execution ${input.executionId} was not found`);
+    const pairs = aboutYouAnswersSchema.safeParse(input.answers);
+    if (!pairs.success) {
+      throw new FactoryNodeServiceError("invalid_answers", "Creator answers must be non-empty question/answer pairs");
+    }
+    // The answer request may have committed before its HTTP response was
+    // delivered. Replay the same semantic request from its immutable handoff
+    // instead of treating the already-saved state as a conflict.
+    if (state.status === "handoff_saved" && state.handoffRef) {
+      const existing = aboutYouAnswersSchema.safeParse(await this.nodeStore.readJson(nodeScope, state.handoffRef));
+      if (existing.success && JSON.stringify(existing.data) === JSON.stringify(pairs.data)) {
+        return { productId: input.productId, executionId: input.executionId, answersRef: state.handoffRef };
+      }
+      throw new FactoryNodeServiceError("execution_not_ready", `About You execution ${input.executionId} already has different answers`, 409);
+    }
     if (!["completed", "waiting_for_creator"].includes(state.status) || !state.outputRef) {
       throw new FactoryNodeServiceError("execution_not_ready", `About You execution ${input.executionId} has not produced questions yet`, 409);
     }
 
     const output = aboutYouOutputSchema.parse(await this.nodeStore.readJson(nodeScope, state.outputRef));
-    const pairs = aboutYouAnswersSchema.safeParse(input.answers);
-    if (!pairs.success) {
-      throw new FactoryNodeServiceError("invalid_answers", "Creator answers must be non-empty question/answer pairs");
-    }
     validateAnswerPairs(output, pairs.data);
     const digest = sha256Json(pairs.data);
     const artifact = await this.nodeStore.writeImmutable(

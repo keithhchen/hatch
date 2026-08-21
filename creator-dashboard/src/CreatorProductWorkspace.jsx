@@ -277,6 +277,7 @@ function BriefPanel({ t, token, product, briefSpec, busy, onRetryAction, onSaved
 
 function CompletePanel({ t, product, briefSpec, corpus, busy, setBusy, token, productId, onRetryAction, onPublished, onBrief, onError }) {
   const [showDetails, setShowDetails] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const publishIdempotencyKeyRef = useRef(crypto.randomUUID());
   async function publish() {
     if (!corpus?.output_ref || !isValidBriefSpec(briefSpec)) return;
@@ -288,7 +289,7 @@ function CompletePanel({ t, product, briefSpec, corpus, busy, setBusy, token, pr
   }
   if (product.status === "published" || product.status === "live") return <section className="cpv2-workspace-panel cpv2-complete-panel"><StatusTag tone="success">{t("published")}</StatusTag><h2>{t("complete")}</h2><p>{t("productPublished")}</p></section>;
   if (!corpus?.output_ref) return <EmptyNodePanel title={t("complete")} body={t("waiting")} />;
-  return <section className="cpv2-workspace-panel cpv2-complete-panel"><h2>{t("complete")}</h2><p>{product.promise ?? product.description ?? ""}</p>{showDetails && corpus.output ? <CorpusPanel t={t} execution={corpus} /> : null}{!isValidBriefSpec(briefSpec) ? <div className="cpv2-complete-brief-required"><p>{t("briefRequiredBeforePublish")}</p><Button type="button" variant="secondary" onClick={onBrief}>{t("brief")}</Button></div> : <div className="cpv2-workspace-actions"><Button type="button" variant="link" onClick={() => setShowDetails((current) => !current)}>{t("viewProductDetails")}</Button><Button type="button" loading={busy === "publish"} disabled={Boolean(busy)} onClick={() => void publish()}>{t("publishProduct")}</Button></div>}</section>;
+  return <section className="cpv2-workspace-panel cpv2-complete-panel"><h2>{t("complete")}</h2><p>{product.promise ?? product.description ?? ""}</p>{showDetails && corpus.output ? <CorpusPanel t={t} execution={corpus} /> : null}{!isValidBriefSpec(briefSpec) ? <div className="cpv2-complete-brief-required"><p>{t("briefRequiredBeforePublish")}</p><Button type="button" variant="secondary" onClick={onBrief}>{t("brief")}</Button></div> : confirming ? <div className="cpv2-confirm cpv2-confirm-publish" role="alert"><div><p><strong>{t("publishCandidateConfirm")}</strong></p><small>{t("productPublished")}</small></div><Button type="button" variant="secondary" onClick={() => setConfirming(false)}>{t("cancel")}</Button><Button type="button" loading={busy === "publish"} disabled={Boolean(busy)} onClick={() => void publish()}>{t("confirmPublish")}</Button></div> : <div className="cpv2-workspace-actions"><Button type="button" variant="link" onClick={() => setShowDetails((current) => !current)}>{t("viewProductDetails")}</Button><Button type="button" disabled={Boolean(busy)} onClick={() => setConfirming(true)}>{t("publishProduct")}</Button></div>}</section>;
 }
 
 function NodeProgressPanel({ t, title, execution, label }) {
