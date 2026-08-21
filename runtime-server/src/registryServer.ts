@@ -124,7 +124,23 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     )
     : undefined;
   const graphPool = store.databasePool();
-  const releaseStore = new CreatorRegistryReleaseStore(graphPool);
+  // Registry releases are the cross-process publish authority. Bind this
+  // store directly to the configured production Postgres URL so a release
+  // can never silently fall back to process memory.
+  const releaseDatabaseUrl = environment.HATCH_REGISTRY_DATABASE_URL?.trim();
+  const releaseDatabaseTimeoutMs = Math.max(250, Number(environment.HATCH_REGISTRY_DB_TIMEOUT_MS ?? 5_000));
+  const releasePool = releaseDatabaseUrl
+    ? new (await import("pg")).Pool({
+      connectionString: releaseDatabaseUrl,
+      max: 5,
+      connectionTimeoutMillis: releaseDatabaseTimeoutMs,
+      query_timeout: releaseDatabaseTimeoutMs,
+      statement_timeout: releaseDatabaseTimeoutMs,
+      idleTimeoutMillis: 30_000,
+    })
+    : graphPool;
+  const ownsReleasePool = Boolean(releaseDatabaseUrl);
+  const releaseStore = new CreatorRegistryReleaseStore(releasePool);
   await releaseStore.ensureSchema();
   const corpusPublisher = factoryNodeService && nodeObjectStore
     ? new CorpusPublisher(factoryNodeService, nodeObjectStore, store, releaseStore, environment.HATCH_RUNTIME_CORPUS_ROOT?.trim() || "runtime-corpora", knowledgeIndexer)
@@ -255,6 +271,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await factoryRepository.close();
     await store.close();
+    if (ownsReleasePool) await releasePool?.end();
   } };
 }
 
