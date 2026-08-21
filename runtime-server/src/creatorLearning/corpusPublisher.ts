@@ -6,7 +6,7 @@ import { zipSync } from "fflate";
 import type { ArtifactObjectStore } from "./objectStore.js";
 import type { FactoryNodeService } from "./nodeService.js";
 import type { RegistryStoreTs, PublishedAgentCorpus } from "../registryStore.js";
-import { extractAgentCorpusBundle, immutableReleasePath } from "../registryCorpus.js";
+import { AgentCorpusVerificationError, extractAgentCorpusBundle, immutableReleasePath } from "../registryCorpus.js";
 import { CreatorRegistryReleaseStore, type CreatorRegistryRelease } from "./creatorRegistryRelease.js";
 import type { AgentKnowledgeIndexer, KnowledgeDocument } from "../qdrantIndexer.js";
 
@@ -104,7 +104,10 @@ export class CorpusPublisher {
         { indexKnowledge: false },
       );
     } catch (error) {
-      throw new CorpusPublishError("registry_materialization_failed", "Registry could not materialize the Corpus.", 503, { cause: error });
+      if (error instanceof AgentCorpusVerificationError) {
+        throw new CorpusPublishError("corpus_bundle_invalid", "Generated Runtime Corpus failed Registry validation.", 422, { cause: error });
+      }
+      throw new CorpusPublishError("runtime_storage_unavailable", "Registry could not write the Runtime Corpus to shared storage.", 503, { cause: error });
     }
     const immutableRoot = immutableReleasePath(this.runtimeRoot, input.creatorId, input.productId, staged.corpus_digest);
     const releaseRoot = path.resolve(this.runtimeRoot, input.productId, staged.corpus_digest.slice("sha256:".length));
