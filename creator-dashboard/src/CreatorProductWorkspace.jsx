@@ -283,7 +283,7 @@ function CompletePanel({ t, product, briefSpec, corpus, busy, setBusy, token, pr
     if (!corpus?.output_ref || !isValidBriefSpec(briefSpec)) return;
     onRetryAction?.(() => publish());
     setBusy("publish");
-    try { await publishCorpusToRegistry(token, productId, { corpus_ref: corpus.output_ref, brief_spec: briefSpec }, publishIdempotencyKeyRef.current); onRetryAction?.(null); await onPublished(); }
+    try { await publishCorpusToRegistry(token, productId, { brief_spec: briefSpec }, publishIdempotencyKeyRef.current); onRetryAction?.(null); await onPublished(); }
     catch (nextError) { onError(nextError); }
     finally { setBusy(""); }
   }
