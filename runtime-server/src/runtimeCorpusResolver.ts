@@ -217,7 +217,8 @@ function runtimeManifestToAgentCorpus(manifest: RuntimeCorpusManifest): AgentCor
     },
     tools: [
       { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" },
-      ...(manifest.knowledge.length > 0 ? [{ id: "hatch.file_search", kind: "hatch_builtin", capability: "file_search" }] : [])
+      ...(manifest.knowledge.length > 0 ? [{ id: "hatch.file_search", kind: "hatch_builtin", capability: "file_search" }] : []),
+      ...manifest.tools
     ],
     evaluations: { synthetic_qa: [], held_out: [] }
   });

@@ -41,6 +41,7 @@ export const runtimeCorpusManifestSchema = z.object({
     }).strict(),
     source_summary: z.string().min(1)
   }).strict()),
+  tools: z.array(z.record(z.string(), z.unknown())).default([]),
   brief_spec: z.unknown()
 }).strict();
 
