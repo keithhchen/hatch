@@ -364,7 +364,13 @@ async function route(
   if (request.method === "GET" && (url.pathname === "/readyz" || url.pathname === "/health")) {
     try {
       await context.store.checkReady();
-      sendJson(response, 200, { status: "ok", checks: { registry_store: "ready" } });
+      sendJson(response, 200, {
+        status: "ok",
+        checks: {
+          registry_store: "ready",
+          release_store: context.releaseStore.persistenceMode(),
+        }
+      });
     } catch {
       sendJson(response, 503, { status: "unavailable", checks: { registry_store: "failed" } });
     }
@@ -685,6 +691,17 @@ async function route(
         await context.factoryService.listProducts(account.id),
         account.id
       );
+      // The new Registry release pointer is the publish authority. Project it
+      // into the Creator listing as well as the detail route; the legacy
+      // agent_corpora table is only a read-time migration source.
+      await Promise.all(products.map(async (product) => {
+        const productId = String(product.product_id ?? "");
+        if (!isUuidV4(productId)) return;
+        const release = await context.releaseStore.getLive(productId);
+        if (!release || String(product.creator_id ?? account.id) !== account.id) return;
+        product.status = "published";
+        product.release = release;
+      }));
       sendJson(response, 200, { products });
       return;
     }
