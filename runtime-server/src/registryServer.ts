@@ -878,7 +878,7 @@ async function route(
     const limit = boundedQueryInteger(url, "limit", 20, 1, 20);
     const offset = boundedQueryInteger(url, "offset", 0, 0, 100_000);
     const rows = await publicCatalogRows(context);
-    const page = rows.slice(0, limit);
+    const page = rows.slice(offset, offset + limit);
     sendJson(response, 200, page.map(publicProductRow), {
       "x-hatch-page-limit": String(limit),
       "x-hatch-page-offset": String(offset),
@@ -1207,16 +1207,7 @@ async function productForCreator(
       repositoryId: product.id
     };
   }
-  const published = (await context.store.listAgentCorpora(creatorId)).find((entry) => String(entry.product_id ?? entry.agent_id ?? "") === productId);
-  if (!published) return undefined;
-  return {
-    productId,
-    name: String(published.product_name ?? (published as Record<string, unknown>).name ?? productId),
-    promise: String(published.product_promise ?? published.product_description ?? ""),
-    status: String(published.status ?? "published"),
-    ...(published.brief_spec ? { brief_spec: published.brief_spec } : {}),
-    ...(published.published_at ? { createdAt: String(published.published_at) } : {})
-  };
+  return undefined;
 }
 
 function publicCreatorProduct(product: {
