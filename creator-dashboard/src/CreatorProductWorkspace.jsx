@@ -226,7 +226,7 @@ export function CreatorProductWorkspace({ token, productId, tab = "files", navig
     {error ? <InlineAlert tone="error"><div className="cpv2-error-bar"><span>{error}</span>{(isExecutionError(aboutYou) || isExecutionError(corpus) || state.error) ? <Button type="button" variant="secondary" loading={Boolean(state.busy)} onClick={() => void retryFailedNode()}>{t("retry")}</Button> : null}</div></InlineAlert> : null}
     {state.notice ? <InlineAlert className="cpv2-inline-feedback" tone="success">{state.notice}</InlineAlert> : null}
     {selectedTab === "files" ? <FilesPanel t={t} documents={documents} busy={state.busy} onUpload={upload} onStart={() => void startAboutYou()} onRetry={() => void retryFailedNode()} onDelete={removeFile} hasExecution={Boolean(aboutYou)} /> : null}
-    {selectedTab === "about-you" ? <AboutYouPanel t={t} execution={aboutYou} busy={state.busy} onSubmit={(answers) => void saveAnswers(answers, startCorpus, token, productId, aboutYou, setAboutYou, setState, t, retryActionRef)} onRetry={() => void retryFailedNode()} onFiles={() => goTab("files")} /> : null}
+    {selectedTab === "about-you" ? <AboutYouPanel t={t} execution={aboutYou} corpus={corpus} busy={state.busy} onSubmit={(answers) => void saveAnswers(answers, startCorpus, token, productId, aboutYou, setAboutYou, setState, t, retryActionRef)} onRetry={() => void retryFailedNode()} onFiles={() => goTab("files")} /> : null}
     {selectedTab === "corpus" ? <CorpusPanel t={t} execution={corpus} busy={state.busy} onRetry={() => void retryFailedNode()} /> : null}
     {selectedTab === "brief" ? <BriefPanel t={t} token={token} product={product} briefSpec={briefSpec} busy={state.busy} onRetryAction={(action) => { retryActionRef.current = action; }} onSaved={(nextProduct) => { retryActionRef.current = null; const saved = nextProduct?.product ?? nextProduct; setProduct((current) => ({ ...current, ...saved })); setBriefSpec(saved?.brief_spec ?? null); setState((current) => ({ ...current, notice: t("briefSaved") })); }} onError={(nextError) => setState((current) => ({ ...current, error: messageOf(nextError, t("failureDetailsUnavailable")) }))} /> : null}
     {selectedTab === "complete" ? <CompletePanel t={t} product={product} briefSpec={briefSpec} corpus={corpus} busy={state.busy} setBusy={(busy) => setState((current) => ({ ...current, busy }))} token={token} productId={productId} onRetryAction={(action) => { retryActionRef.current = action; }} onPublished={refresh} onBrief={() => goTab("brief")} onError={(nextError) => setState((current) => ({ ...current, error: messageOf(nextError, t("failureDetailsUnavailable")) }))} /> : null}
@@ -258,7 +258,7 @@ function FilesPanel({ t, documents, busy, onUpload, onStart, onDelete, hasExecut
   </section>;
 }
 
-function AboutYouPanel({ t, execution, busy, onSubmit, onRetry, onFiles }) {
+function AboutYouPanel({ t, execution, corpus, busy, onSubmit, onRetry, onFiles }) {
   const questions = execution?.output?.questions ?? [];
   const [answers, setAnswers] = useState({});
   const [activeIndex, setActiveIndex] = useState(0);
@@ -270,7 +270,13 @@ function AboutYouPanel({ t, execution, busy, onSubmit, onRetry, onFiles }) {
   if (isExecutionActive(execution)) return <NodeProgressPanel t={t} title={t("aboutYou")} execution={execution} />;
   if (isExecutionError(execution)) return <NodeErrorPanel t={t} title={t("aboutYou")} execution={execution} onRetry={onRetry} />;
   if (!questions.length) return <EmptyNodePanel title={t("aboutYou")} body={t("noQuestions")} onAction={onFiles} action={t("addSourceFiles")} />;
-  if (execution.status === "handoff_saved") return <NodeProgressPanel t={t} title={t("aboutYou")} execution={{ ...execution, status: "completed" }} label="Answers saved. Corpus is starting…" />;
+  if (execution.status === "handoff_saved") {
+    const corpusFinished = corpus?.status === "completed" && Boolean(corpus.output_ref);
+    if (corpusFinished) {
+      return <section className="cpv2-workspace-panel" role="status"><StatusTag tone="success">{t("saved")}</StatusTag><h2>{t("aboutYou")}</h2><p>{t("answersSaved")}</p></section>;
+    }
+    return <NodeProgressPanel t={t} title={t("aboutYou")} execution={{ ...execution, status: "completed" }} label={t("corpusStarting")} />;
+  }
   const question = questions[activeIndex];
   const answer = String(answers[question.question] ?? "");
   const selectedOption = question.options.includes(answer) ? answer : "";

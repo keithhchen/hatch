@@ -17,3 +17,10 @@ test("Node failures use the existing inline error bar and Retry action", async (
   assert.match(source, /retryFailedNode/);
   assert.match(source, /executionError/);
 });
+
+test("About You does not keep showing a Corpus-loading message after handoff is complete", async () => {
+  const source = await readFile(new URL("./CreatorProductWorkspace.jsx", import.meta.url), "utf8");
+  assert.match(source, /corpusFinished/);
+  assert.match(source, /answersSaved/);
+  assert.match(source, /corpusStarting/);
+});
