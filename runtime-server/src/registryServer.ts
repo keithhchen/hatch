@@ -55,6 +55,7 @@ import type { AboutYouAnswerPair } from "./creatorLearning/aboutYouNode.js";
 import { PostgresDistillationGraphStore } from "./creatorLearning/distillationGraphStore.js";
 import { CorpusPublisher } from "./creatorLearning/corpusPublisher.js";
 import { CreatorRegistryReleaseStore } from "./creatorLearning/creatorRegistryRelease.js";
+import { QdrantKnowledgeIndexer } from "./qdrantIndexer.js";
 import {
   HttpRequestGate,
   PublishWorkGate,
@@ -104,6 +105,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     environment.HATCH_CREATOR_PRODUCT_FILES_PREFIX?.trim() || "creator-products"
   );
   const nodeObjectStore = objectStore ?? productObjectStore;
+  const knowledgeIndexer = QdrantKnowledgeIndexer.fromEnvironment(environment);
   const nodePool = store.databasePool();
   const nodePersistence = nodePool ? new PostgresNodeStore({ pool: nodePool }) : undefined;
   const factoryNodeService = nodePersistence && nodeObjectStore
@@ -125,7 +127,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const releaseStore = new CreatorRegistryReleaseStore(graphPool);
   await releaseStore.ensureSchema();
   const corpusPublisher = factoryNodeService && nodeObjectStore
-    ? new CorpusPublisher(factoryNodeService, nodeObjectStore, store, releaseStore, environment.HATCH_RUNTIME_CORPUS_ROOT?.trim() || "runtime-corpora")
+    ? new CorpusPublisher(factoryNodeService, nodeObjectStore, store, releaseStore, environment.HATCH_RUNTIME_CORPUS_ROOT?.trim() || "runtime-corpora", knowledgeIndexer)
     : undefined;
   const graphStore = graphPool ? new PostgresDistillationGraphStore(graphPool) : undefined;
   await graphStore?.initialize();

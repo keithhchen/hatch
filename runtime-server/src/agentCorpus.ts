@@ -664,8 +664,6 @@ export async function agentCorpusDigest(
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
-  const manifestPath = await containedPath(root, "agent.json");
-  const manifestDigest = await fileSha256(manifestPath, signal);
   const assets = [
     corpus.instructions.system,
     ...corpus.skills.flatMap((skill) => [skill.instruction, ...skill.references.map((reference) => reference.asset)]),
@@ -673,10 +671,15 @@ export async function agentCorpusDigest(
     ...corpus.evaluations.synthetic_qa,
     ...corpus.evaluations.held_out
   ];
-  const rows: Array<[string, string]> = [
-    ["agent.json", manifestDigest],
-    ...assets.map((asset): [string, string] => [asset.path.replaceAll(path.sep, "/"), asset.sha256])
-  ];
+  const rows: Array<[string, string]> = assets.map((asset): [string, string] => [asset.path.replaceAll(path.sep, "/"), asset.sha256]);
+  try {
+    const manifestPath = await containedPath(root, "agent.json");
+    rows.push(["agent.json", await fileSha256(manifestPath, signal)]);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    // New Runtime releases are authoritative in runtime/manifest.json and
+    // deliberately do not require the legacy agent.json compatibility file.
+  }
   rows.sort((left, right) => left[0].localeCompare(right[0]));
   return `sha256:${createHash("sha256").update(JSON.stringify(rows)).digest("hex")}`;
 }

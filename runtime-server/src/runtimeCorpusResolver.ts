@@ -1,13 +1,17 @@
 import path from "node:path";
+import { readFile } from "node:fs/promises";
 import { z } from "zod";
 import { readBoundedJsonObject } from "./boundedResponse.js";
 import {
+  AgentCorpusSchema,
   agentCorpusDigest,
-  loadAgentCorpus,
+  readCorpusAsset,
+  type AgentCorpus,
   type AgentCorpusResolverLike,
   type ResolvedAgentCorpus
 } from "./agentCorpus.js";
 import { requireUuidV4 } from "./identity.js";
+import { runtimeCorpusManifestSchema, type RuntimeCorpusManifest } from "./runtimeReleaseContract.js";
 
 const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 
@@ -82,6 +86,9 @@ export class RuntimeReleaseAgentCorpusResolver implements AgentCorpusResolverLik
 
     const response = await this.readLiveRelease(agentId, signal);
     const release = response.release;
+    if (response.runtime_manifest_ref !== `${release.release_ref}/runtime/manifest.json`) {
+      throw new Error("Registry runtime manifest reference is not canonical");
+    }
     if (release.product_id !== agentId || release.creator_id !== creatorId) {
       throw new Error("Registry release binding does not match the requested Creator Agent");
     }
@@ -91,9 +98,16 @@ export class RuntimeReleaseAgentCorpusResolver implements AgentCorpusResolverLik
 
     const releaseDirectory = releaseDirectoryName(release.release_digest);
     const root = containedCorpusPath(this.corpusRoot, agentId, releaseDirectory);
-    let corpus;
+    let corpus: AgentCorpus;
     try {
-      corpus = await loadAgentCorpus(root, signal);
+      const manifestBytes = await readFile(path.join(root, "runtime", "manifest.json"), signal ? { signal } : undefined);
+      if (manifestBytes.byteLength > 1_048_576) throw new Error("Runtime Corpus manifest is too large");
+      const manifest = runtimeCorpusManifestSchema.parse(JSON.parse(manifestBytes.toString("utf8")));
+      if (manifest.creator.id !== creatorId || manifest.product.id !== agentId || manifest.corpus_digest !== release.corpus_digest) {
+        throw new Error("Runtime manifest binding does not match the Registry release");
+      }
+      corpus = runtimeManifestToAgentCorpus(manifest);
+      await verifyRuntimeManifestAssets(root, corpus, signal);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         throw new Error(`Published Runtime Corpus is not materialized: ${agentId}/${releaseDirectory}`);
@@ -149,6 +163,76 @@ function containedCorpusPath(root: string, productId: string, releaseDirectory: 
 function releaseDirectoryName(releaseDigest: string): string {
   if (!digestSchema.safeParse(releaseDigest).success) throw new Error("Registry release digest is invalid");
   return releaseDigest.slice("sha256:".length);
+}
+
+function runtimeManifestToAgentCorpus(manifest: RuntimeCorpusManifest): AgentCorpus {
+  return AgentCorpusSchema.parse({
+    contract_version: "1",
+    creator: { id: manifest.creator.id, name: "Creator" },
+    product: {
+      id: manifest.product.id,
+      name: manifest.product.name,
+      promise: manifest.product.promise,
+      boundaries: [],
+      brief_spec: manifest.brief_spec,
+      presentation: {}
+    },
+    instructions: {
+      system: {
+        id: "system",
+        path: manifest.system_ref.path,
+        sha256: manifest.system_ref.sha256,
+        description: "Creator system instructions"
+      }
+    },
+    skills: manifest.skills.map((skill) => ({
+      id: skill.id,
+      name: skill.name,
+      when_to_use: skill.description,
+      instruction: {
+        id: `skill-${skill.id}`,
+        path: skill.ref.path,
+        sha256: skill.ref.sha256,
+        description: skill.description
+      },
+      references: skill.references.map((reference) => ({
+        kind: reference.kind,
+        asset: {
+          id: `ref-${skill.id}-${reference.id}`,
+          path: reference.ref.path,
+          sha256: reference.ref.sha256,
+          description: `${skill.name} reference`
+        }
+      })),
+      allowed_tool_ids: []
+    })),
+    knowledge: {
+      documents: manifest.knowledge.map((document) => ({
+        id: document.id,
+        path: document.ref.path,
+        sha256: document.ref.sha256,
+        retrieval_only: true,
+        source_summary: document.source_summary
+      }))
+    },
+    tools: [
+      { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" },
+      ...(manifest.knowledge.length > 0 ? [{ id: "hatch.file_search", kind: "hatch_builtin", capability: "file_search" }] : [])
+    ],
+    evaluations: { synthetic_qa: [], held_out: [] }
+  });
+}
+
+async function verifyRuntimeManifestAssets(root: string, corpus: AgentCorpus, signal?: AbortSignal): Promise<void> {
+  const assets = [
+    corpus.instructions.system,
+    ...corpus.skills.flatMap((skill) => [skill.instruction, ...skill.references.map((reference) => reference.asset)]),
+    ...corpus.knowledge.documents
+  ];
+  for (const asset of assets) {
+    signal?.throwIfAborted();
+    await readCorpusAsset(root, asset, signal);
+  }
 }
 
 function positiveTimeout(value: number): number {

@@ -2,6 +2,7 @@ import "dotenv/config";
 
 import http from "node:http";
 import { createHash, randomUUID } from "node:crypto";
+import { stat } from "node:fs/promises";
 import path from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
 import { ZodError } from "zod";
@@ -2957,9 +2958,14 @@ async function buildSessionSkills(corpusRoot?: string): Promise<RuntimeSessionSk
   // same metadata-only catalog and the same explicit Skill loader. A Corpus
   // root is an explicit discovery scope, so it cannot accidentally mix in
   // host/global Skills.
-  const records = corpusRoot
+  const runtimeSkillsRoot = corpusRoot && await stat(path.join(corpusRoot, "runtime", "skills")).then(() => true, () => false)
+    ? path.join(corpusRoot, "runtime", "skills")
+    : corpusRoot
+      ? path.join(corpusRoot, "skills")
+      : undefined;
+  const records = runtimeSkillsRoot
     ? await discoverSkills({
-      roots: [{ path: path.join(corpusRoot, "skills"), scope: "custom", followSymlinks: false }]
+      roots: [{ path: runtimeSkillsRoot, scope: "custom", followSymlinks: false }]
     })
     : await discoverSkills();
   const visibleRecords = visibleSkillsForSession(records);
