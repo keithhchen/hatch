@@ -710,6 +710,32 @@ async function route(
     return;
   }
 
+  // Runtime's only read boundary for the new Creator Registry. The Runtime
+  // receives refs from this Postgres-backed live pointer; it never reads the
+  // Creator Registry tables directly and never reconstructs a release path.
+  const runtimeRegistryCurrentMatch = url.pathname.match(/^\/v1\/runtime\/products\/([^/]+)\/release$/);
+  if (runtimeRegistryCurrentMatch && request.method === "GET") {
+    if (!context.runtimeServiceToken || !isRuntimeServiceRequest(request, context.runtimeServiceToken)) {
+      sendJson(response, 403, { error: { code: "runtime_service_required", message: "A valid Runtime service token is required." } });
+      return;
+    }
+    if (!context.creatorRegistry) {
+      sendJson(response, 503, { error: { code: "registry_unavailable", message: "Creator Registry is unavailable." } });
+      return;
+    }
+    const productId = decodeURIComponent(runtimeRegistryCurrentMatch[1]!);
+    const release = await context.creatorRegistry.currentByProduct(productId);
+    if (!release) {
+      sendJson(response, 404, { error: { code: "release_not_found", message: "No live Registry release exists for this Product." } });
+      return;
+    }
+    sendJson(response, 200, {
+      release: publicCreatorRegistryRelease(release),
+      runtime_manifest_ref: release.runtimeManifestRef
+    });
+    return;
+  }
+
   const productFilesMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/files(?:\/([^/]+))?$/);
   const productSnapshotsMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/snapshots(?:\/([^/]+))?$/);
   const productRunsMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/runs(?:\/([^/]+))?$/);
@@ -1519,6 +1545,35 @@ function beginSessionQuery(
     });
   }
   return undefined;
+}
+
+function isRuntimeServiceRequest(request: http.IncomingMessage, token: string): boolean {
+  return request.headers["x-hatch-runtime-service-token"] === token || bearer(request) === token;
+}
+
+function publicCreatorRegistryRelease(release: {
+  productId: string;
+  creatorId: string;
+  releaseDigest: string;
+  corpusDigest: string;
+  corpusRef: string;
+  releaseRef: string;
+  runtimeManifestRef: string;
+  briefSpec: unknown;
+  status: string;
+  publishedAt: string;
+}): Record<string, unknown> {
+  return {
+    product_id: release.productId,
+    creator_id: release.creatorId,
+    release_digest: release.releaseDigest,
+    corpus_digest: release.corpusDigest,
+    corpus_ref: release.corpusRef,
+    release_ref: release.releaseRef,
+    brief_spec: release.briefSpec,
+    status: release.status,
+    published_at: release.publishedAt
+  };
 }
 
 function beginPublishWork(

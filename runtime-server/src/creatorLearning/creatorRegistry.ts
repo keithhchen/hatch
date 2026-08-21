@@ -7,13 +7,53 @@ import { corpusOutputSchema, type CorpusOutput } from "./corpusNode.js";
 import { isObjectStoreNotFound, type ArtifactObjectStore } from "./objectStore.js";
 
 const RELEASE_REF_SCHEMA = z.object({
+  contract_version: z.literal("1"),
   product_id: z.string().min(1),
+  creator_id: z.string().min(1),
+  release_digest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
   corpus_ref: z.string().min(1),
   corpus_digest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
   brief_spec: z.unknown(),
   status: z.literal("live"),
   published_at: z.string().datetime()
 }).strict();
+
+const RUNTIME_ASSET_REF_SCHEMA = z.object({
+  path: z.string().min(1),
+  sha256: z.string().regex(/^sha256:[a-f0-9]{64}$/)
+}).strict();
+
+/** The only manifest Runtime needs after it has read the live release pointer. */
+export const CREATOR_RUNTIME_MANIFEST_SCHEMA = z.object({
+  contract_version: z.literal("1"),
+  creator: z.object({ id: z.string().min(1) }).strict(),
+  product: z.object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    promise: z.string().min(1)
+  }).strict(),
+  corpus_digest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  system_ref: RUNTIME_ASSET_REF_SCHEMA,
+  skills: z.array(z.object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    description: z.string().min(1),
+    ref: RUNTIME_ASSET_REF_SCHEMA,
+    references: z.array(z.object({
+      id: z.string().min(1),
+      kind: z.enum(["method", "style", "example", "few_shots"]),
+      ref: RUNTIME_ASSET_REF_SCHEMA
+    }).strict())
+  }).strict()),
+  knowledge: z.array(z.object({
+    id: z.string().min(1),
+    ref: RUNTIME_ASSET_REF_SCHEMA,
+    source_summary: z.string().min(1)
+  }).strict()),
+  brief_spec: z.unknown()
+}).strict();
+
+export type CreatorRuntimeManifest = z.infer<typeof CREATOR_RUNTIME_MANIFEST_SCHEMA>;
 
 /**
  * The v1 Registry artifact is a deterministic, consumer-facing materialized
@@ -66,6 +106,7 @@ export type CreatorRegistryRelease = {
   corpusDigest: string;
   corpusRef: string;
   releaseRef: string;
+  runtimeManifestRef: string;
   briefSpec: BriefSpec;
   status: "live";
   publishedAt: string;
@@ -125,10 +166,21 @@ export class CreatorRegistry {
     const releaseRoot = `${safePart(this.prefix)}/${safePart(input.productId)}/releases/${releaseDigest.slice("sha256:".length)}`;
     const releaseCorpusRef = `${releaseRoot}/corpus.json`;
     const releaseRef = `${releaseRoot}/release.json`;
-    const existingManifest = await this.readExistingManifest(releaseRef, releaseCorpusRef, input.productId, corpusDigest, briefSpec);
+    const existingManifest = await this.readExistingManifest(
+      releaseRef,
+      releaseCorpusRef,
+      input.productId,
+      input.creatorId,
+      releaseDigest,
+      corpusDigest,
+      briefSpec
+    );
     const publishedAt = existingManifest?.published_at ?? new Date().toISOString();
     const manifest = existingManifest ?? {
+      contract_version: "1" as const,
       product_id: input.productId,
+      creator_id: input.creatorId,
+      release_digest: releaseDigest,
       corpus_ref: releaseCorpusRef,
       corpus_digest: corpusDigest,
       brief_spec: briefSpec,
@@ -145,6 +197,15 @@ export class CreatorRegistry {
         immutable: true
       });
     }
+    const runtimeManifestRef = await this.materializeRuntimeRelease({
+      releaseRoot,
+      creatorId: input.creatorId,
+      productId: input.productId,
+      corpusDigest,
+      briefSpec,
+      product: input.product,
+      corpus: materialized.corpus
+    });
     await this.pool.query(`
       INSERT INTO hatch_creator_registry_releases
         (product_id, creator_id, release_digest, corpus_digest, corpus_ref, release_ref, brief_spec, status, published_at)
@@ -176,16 +237,114 @@ export class CreatorRegistry {
       corpusDigest,
       corpusRef: releaseCorpusRef,
       releaseRef,
+      runtimeManifestRef,
       briefSpec,
       status: "live",
       publishedAt
     };
   }
 
+  private async materializeRuntimeRelease(input: {
+    releaseRoot: string;
+    creatorId: string;
+    productId: string;
+    corpusDigest: string;
+    briefSpec: BriefSpec;
+    product: { name: string; promise: string };
+    corpus: CorpusOutput;
+  }): Promise<string> {
+    const runtimeRoot = `${input.releaseRoot}/runtime`;
+    const systemPath = `${runtimeRoot}/instructions/system.md`;
+    const systemBytes = Buffer.from(input.corpus.system_instructions, "utf8");
+    await this.objects.put(systemPath, systemBytes, { contentType: "text/markdown; charset=utf-8", immutable: true });
+
+    const skills: CreatorRuntimeManifest["skills"] = [];
+    const seenSkillIds = new Set<string>();
+    for (const skill of input.corpus.skills) {
+      const id = runtimeIdentifier(skill.id, "Skill");
+      if (seenSkillIds.has(id)) throw new CreatorRegistryError("invalid_corpus", `Duplicate runtime Skill id: ${id}`);
+      seenSkillIds.add(id);
+      const instructionPath = `${runtimeRoot}/skills/${id}/SKILL.md`;
+      const instruction = [
+        "---",
+        `name: ${JSON.stringify(id)}`,
+        `description: ${JSON.stringify(skill.when_to_use)}`,
+        "---",
+        "",
+        skill.instruction
+      ].join("\n");
+      const instructionBytes = Buffer.from(instruction, "utf8");
+      await this.objects.put(instructionPath, instructionBytes, { contentType: "text/markdown; charset=utf-8", immutable: true });
+      const references: CreatorRuntimeManifest["skills"][number]["references"] = [];
+      const seenReferenceIds = new Set<string>();
+      for (const reference of skill.references) {
+        const referenceId = runtimeIdentifier(reference.id, `Skill ${id} reference`);
+        if (seenReferenceIds.has(referenceId)) {
+          throw new CreatorRegistryError("invalid_corpus", `Duplicate runtime reference id in Skill ${id}: ${referenceId}`);
+        }
+        seenReferenceIds.add(referenceId);
+        const referencePath = `${runtimeRoot}/skills/${id}/references/${referenceId}.md`;
+        const referenceBytes = Buffer.from(reference.content, "utf8");
+        await this.objects.put(referencePath, referenceBytes, { contentType: "text/markdown; charset=utf-8", immutable: true });
+        references.push({
+          id: referenceId,
+          kind: reference.kind,
+          ref: { path: referencePath, sha256: sha256(referenceBytes) }
+        });
+      }
+      skills.push({
+        id,
+        name: skill.title,
+        description: skill.when_to_use,
+        ref: { path: instructionPath, sha256: sha256(instructionBytes) },
+        references
+      });
+    }
+
+    const knowledge: CreatorRuntimeManifest["knowledge"] = [];
+    const seenKnowledgeIds = new Set<string>();
+    for (const document of input.corpus.knowledge) {
+      const id = runtimeIdentifier(document.id, "Knowledge document");
+      if (seenKnowledgeIds.has(id)) throw new CreatorRegistryError("invalid_corpus", `Duplicate runtime Knowledge id: ${id}`);
+      seenKnowledgeIds.add(id);
+      const assetPath = `${runtimeRoot}/knowledge/${id}.md`;
+      const bytes = Buffer.from(document.content, "utf8");
+      await this.objects.put(assetPath, bytes, { contentType: "text/markdown; charset=utf-8", immutable: true });
+      knowledge.push({
+        id,
+        ref: { path: assetPath, sha256: sha256(bytes) },
+        source_summary: document.source_summary
+      });
+    }
+
+    const manifest: CreatorRuntimeManifest = CREATOR_RUNTIME_MANIFEST_SCHEMA.parse({
+      contract_version: "1",
+      creator: { id: input.creatorId },
+      product: {
+        id: input.productId,
+        name: input.product.name.trim(),
+        promise: input.product.promise.trim()
+      },
+      corpus_digest: input.corpusDigest,
+      system_ref: { path: systemPath, sha256: sha256(systemBytes) },
+      skills,
+      knowledge,
+      brief_spec: input.briefSpec
+    });
+    const manifestPath = `${runtimeRoot}/manifest.json`;
+    await this.objects.put(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, {
+      contentType: "application/json; charset=utf-8",
+      immutable: true
+    });
+    return manifestPath;
+  }
+
   private async readExistingManifest(
     releaseRef: string,
     releaseCorpusRef: string,
     productId: string,
+    creatorId: string,
+    releaseDigest: string,
     corpusDigest: string,
     briefSpec: BriefSpec
   ): Promise<z.infer<typeof RELEASE_REF_SCHEMA> | undefined> {
@@ -203,6 +362,8 @@ export class CreatorRegistry {
       throw new CreatorRegistryError("invalid_corpus", `The existing Registry release is invalid: ${error instanceof Error ? error.message : String(error)}`);
     }
     if (manifest.product_id !== productId
+      || manifest.creator_id !== creatorId
+      || manifest.release_digest !== releaseDigest
       || manifest.corpus_ref !== releaseCorpusRef
       || manifest.corpus_digest !== corpusDigest
       || JSON.stringify(normalizeBriefSpec(manifest.brief_spec)) !== JSON.stringify(briefSpec)) {
@@ -241,6 +402,39 @@ export class CreatorRegistry {
     `, [creatorId, productId]);
     const row = result.rows[0];
     return row ? releaseFromRow(row) : undefined;
+  }
+
+  async currentByProduct(productId: string): Promise<CreatorRegistryRelease | undefined> {
+    await this.initialize();
+    const result = await this.pool.query<RegistryReleaseRow>(`
+      SELECT release.product_id, release.creator_id, release.release_digest,
+             release.corpus_digest, release.corpus_ref, release.release_ref,
+             release.brief_spec, release.status, release.published_at
+      FROM hatch_creator_registry_live AS live
+      JOIN hatch_creator_registry_releases AS release
+        ON release.product_id = live.product_id
+       AND release.release_digest = live.release_digest
+      WHERE live.product_id = $1 AND release.status = 'live'
+      LIMIT 1
+    `, [productId]);
+    const row = result.rows[0];
+    return row ? releaseFromRow(row) : undefined;
+  }
+
+  async listCurrent(creatorId: string): Promise<CreatorRegistryRelease[]> {
+    await this.initialize();
+    const result = await this.pool.query<RegistryReleaseRow>(`
+      SELECT release.product_id, release.creator_id, release.release_digest,
+             release.corpus_digest, release.corpus_ref, release.release_ref,
+             release.brief_spec, release.status, release.published_at
+      FROM hatch_creator_registry_live AS live
+      JOIN hatch_creator_registry_releases AS release
+        ON release.product_id = live.product_id
+       AND release.release_digest = live.release_digest
+      WHERE live.creator_id = $1 AND release.status = 'live'
+      ORDER BY release.published_at DESC, release.product_id ASC
+    `, [creatorId]);
+    return result.rows.map(releaseFromRow);
   }
 
   private validateCorpusRef(productId: string, value: string): string {
@@ -315,7 +509,10 @@ function materializeRegistryArtifact(input: {
 
 function releaseFromRow(row: RegistryReleaseRow): CreatorRegistryRelease {
   const manifest = RELEASE_REF_SCHEMA.parse({
+    contract_version: "1",
     product_id: row.product_id,
+    creator_id: row.creator_id,
+    release_digest: row.release_digest,
     corpus_ref: row.corpus_ref,
     corpus_digest: row.corpus_digest,
     brief_spec: typeof row.brief_spec === "string" ? JSON.parse(row.brief_spec) : row.brief_spec,
@@ -329,10 +526,26 @@ function releaseFromRow(row: RegistryReleaseRow): CreatorRegistryRelease {
     corpusDigest: manifest.corpus_digest,
     corpusRef: manifest.corpus_ref,
     releaseRef: row.release_ref,
+    runtimeManifestRef: runtimeManifestRef(row.release_ref),
     briefSpec: normalizeBriefSpec(manifest.brief_spec),
     status: "live",
     publishedAt: manifest.published_at
   };
+}
+
+function runtimeManifestRef(releaseRef: string): string {
+  if (!releaseRef.endsWith("/release.json")) {
+    throw new CreatorRegistryError("invalid_corpus", "Registry release_ref must point to release.json");
+  }
+  return `${releaseRef.slice(0, -"/release.json".length)}/runtime/manifest.json`;
+}
+
+function runtimeIdentifier(value: string, label: string): string {
+  const normalized = value.trim().toLowerCase().replaceAll("_", "-");
+  if (!/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(normalized) || normalized.length > 128) {
+    throw new CreatorRegistryError("invalid_corpus", `${label} id must be a runtime-safe identifier: ${value}`);
+  }
+  return normalized;
 }
 
 function sha256(bytes: Buffer): string {
