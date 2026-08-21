@@ -53,6 +53,7 @@ import {
 import type { AboutYouAnswerPair } from "./creatorLearning/aboutYouNode.js";
 import { PostgresDistillationGraphStore } from "./creatorLearning/distillationGraphStore.js";
 import { CorpusPublisher, CorpusPublishError } from "./creatorLearning/corpusPublisher.js";
+import { migrateSethToNodeCorpus } from "./creatorLearning/legacyCorpusMigration.js";
 import { CreatorRegistryReleaseStore, type CreatorRegistryRelease } from "./creatorLearning/creatorRegistryRelease.js";
 import { QdrantKnowledgeIndexer } from "./qdrantIndexer.js";
 import {
@@ -67,8 +68,6 @@ import {
 
 export type RegistryServer = { server: http.Server; close: () => Promise<void> };
 export const CREATOR_FACTORY_JSON_BODY_MAX_BYTES = 32 * 1024 * 1024;
-const SETH_CREATOR_ID = "32ffccf7-893d-4ef3-bdbc-c82fc8fcb90b";
-const SETH_PRODUCT_ID = "026651b1-8a8a-4484-aac5-ace6bd662157";
 type RegistryContext = {
   store: RegistryStoreTs;
   accounts: AccountStoreTs;
@@ -146,6 +145,15 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const corpusPublisher = factoryNodeService && nodeObjectStore
     ? new CorpusPublisher(factoryNodeService, nodeObjectStore, store, releaseStore, environment.HATCH_RUNTIME_CORPUS_ROOT?.trim() || "runtime-corpora", knowledgeIndexer)
     : undefined;
+  if (factoryNodeService && nodeObjectStore && corpusPublisher && nodePersistence) {
+    await migrateSethToNodeCorpus({
+      registry: store,
+      nodes: nodePersistence,
+      objects: nodeObjectStore,
+      publisher: corpusPublisher,
+      releases: releaseStore
+    });
+  }
   const graphStore = graphPool ? new PostgresDistillationGraphStore(graphPool) : undefined;
   await graphStore?.initialize();
   // User commands start the Factory directly in the registry process. The
@@ -870,7 +878,7 @@ async function route(
     const limit = boundedQueryInteger(url, "limit", 20, 1, 20);
     const offset = boundedQueryInteger(url, "offset", 0, 0, 100_000);
     const rows = await publicCatalogRows(context);
-    const page = rows.slice(0, limit);
+    const page = rows.slice(offset, offset + limit);
     sendJson(response, 200, page.map(publicProductRow), {
       "x-hatch-page-limit": String(limit),
       "x-hatch-page-offset": String(offset),
@@ -1061,27 +1069,12 @@ function requiredDeploymentField(body: Record<string, unknown>, field: string): 
   return value;
 }
 
-/**
- * Public catalog authority is the live Registry release projection. Seth is
- * the sole explicitly retained legacy Agent during the cutover, so it remains
- * visible until it receives a native release; every other legacy row is
- * intentionally absent and has already been pruned at Registry startup.
- */
+/** Public catalog authority is the live Registry release projection. */
 async function publicCatalogRows(context: RegistryContext): Promise<Record<string, unknown>[]> {
   const releases = await context.releaseStore.listPublic({ limit: 20_001, offset: 0 });
   const rows = new Map<string, Record<string, unknown>>(
     releases.map((release) => [release.product_id, release as unknown as Record<string, unknown>]),
   );
-  if (!rows.has(SETH_PRODUCT_ID)) {
-    const seth = context.store.getAgentCorpus(SETH_CREATOR_ID, SETH_PRODUCT_ID);
-    if (seth) {
-      rows.set(SETH_PRODUCT_ID, {
-        ...seth,
-        release_digest: seth.corpus_digest,
-        product_promise: seth.product_promise ?? seth.product_description ?? "",
-      });
-    }
-  }
   return [...rows.values()].sort((left, right) => {
     const time = Date.parse(String(right.published_at ?? "")) - Date.parse(String(left.published_at ?? ""));
     return time || String(left.product_id ?? "").localeCompare(String(right.product_id ?? ""));
@@ -1214,16 +1207,7 @@ async function productForCreator(
       repositoryId: product.id
     };
   }
-  const published = (await context.store.listAgentCorpora(creatorId)).find((entry) => String(entry.product_id ?? entry.agent_id ?? "") === productId);
-  if (!published) return undefined;
-  return {
-    productId,
-    name: String(published.product_name ?? (published as Record<string, unknown>).name ?? productId),
-    promise: String(published.product_promise ?? published.product_description ?? ""),
-    status: String(published.status ?? "published"),
-    ...(published.brief_spec ? { brief_spec: published.brief_spec } : {}),
-    ...(published.published_at ? { createdAt: String(published.published_at) } : {})
-  };
+  return undefined;
 }
 
 function publicCreatorProduct(product: {
