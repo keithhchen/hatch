@@ -22,6 +22,11 @@ export class CreatorRegistryReleaseStore {
 
   constructor(private readonly pool?: Pool) {}
 
+  /** Exposed only for readiness/diagnostic reporting; never includes a DSN. */
+  persistenceMode(): "postgres" | "memory" {
+    return this.pool ? "postgres" : "memory";
+  }
+
   async ensureSchema(): Promise<void> {
     if (!this.pool) return;
     await this.pool.query(`
