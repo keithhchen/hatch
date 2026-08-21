@@ -910,7 +910,8 @@ async function route(
   if (publicCreatorMatch && request.method === "GET") {
     const creatorId = decodeURIComponent(publicCreatorMatch[1]!);
     if (!isUuidV4(creatorId)) { sendJson(response, 404, { detail: "Creator not found." }); return; }
-    const rows = await context.store.listAgentCorpora(creatorId);
+    const rows = (await context.releaseStore.listPublic({ limit: 20_001, offset: 0 }))
+      .filter((row) => row.creator_id === creatorId);
     if (!rows.length) { sendJson(response, 404, { detail: "Creator not found." }); return; }
     sendJson(response, 200, { creator: { id: creatorId, name: rows[0]!.creator_name }, products: rows.map(publicProductRow) });
     return;

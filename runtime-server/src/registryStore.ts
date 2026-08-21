@@ -861,6 +861,40 @@ export class RegistryStoreTs {
     await this.migrateLegacyIdentitySchema();
     await this.ensureCurrentSchema();
     await migrateUuidAuthorityIds(this.pool!);
+    await this.pruneLegacyPublishedDataExceptSeth();
+  }
+
+  /**
+   * The old Registry catalog is no longer a Product authority. Keep the one
+   * explicitly retained shipped Agent (Seth) for the current desktop/runtime
+   * UAT, and remove every other legacy publication and entitlement. New
+   * Factory/Registry rows are protected by their own tables and are never
+   * touched by this cleanup.
+   */
+  private async pruneLegacyPublishedDataExceptSeth(): Promise<void> {
+    const sethProductId = "026651b1-8a8a-4484-aac5-ace6bd662157";
+    // A few storage-contract tests use a query-only Postgres double. The
+    // destructive cutover is a production Pool operation; the double has no
+    // transaction surface and must not be mistaken for a real database.
+    if (typeof (this.pool as Pool).connect !== "function") return;
+    const client = await this.pool!.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("DELETE FROM agent_tool_bindings WHERE agent_id <> $1", [sethProductId]);
+      await client.query("DELETE FROM agent_access WHERE product_id <> $1", [sethProductId]);
+      await client.query("DELETE FROM agent_corpus_release_briefs WHERE agent_id <> $1", [sethProductId]);
+      await client.query("DELETE FROM agent_corpora WHERE product_id <> $1", [sethProductId]);
+      await client.query(`
+        DELETE FROM products AS p
+        WHERE p.id <> $1
+      `, [sethProductId]);
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   /**
