@@ -53,7 +53,7 @@ import {
 } from "./creatorLearning/nodeService.js";
 import type { AboutYouAnswerPair } from "./creatorLearning/aboutYouNode.js";
 import { PostgresDistillationGraphStore } from "./creatorLearning/distillationGraphStore.js";
-import { CorpusPublisher } from "./creatorLearning/corpusPublisher.js";
+import { CorpusPublisher, CorpusPublishError } from "./creatorLearning/corpusPublisher.js";
 import { CreatorRegistryReleaseStore } from "./creatorLearning/creatorRegistryRelease.js";
 import { QdrantKnowledgeIndexer } from "./qdrantIndexer.js";
 import {
@@ -219,6 +219,13 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
           return;
         }
         if (error instanceof CreatorFactoryRepositoryError) {
+          sendJson(response, status, {
+            error: { code: error.code, message: error.message },
+            detail: error.message
+          });
+          return;
+        }
+        if (error instanceof CorpusPublishError) {
           sendJson(response, status, {
             error: { code: error.code, message: error.message },
             detail: error.message
