@@ -301,13 +301,25 @@ async function route(
     const product = await productForCreator(context, account.id, productId);
     if (!product) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
     const body = await readJson(request);
-    const result = await context.corpusPublisher.publishLatest({
-      creatorId: account.id,
-      productId,
-      productName: product.name,
-      productPromise: product.promise,
-      briefSpec: body.brief_spec ?? product.brief_spec
-    });
+    let result: Awaited<ReturnType<CorpusPublisher["publishLatest"]>>;
+    try {
+      result = await context.corpusPublisher.publishLatest({
+        creatorId: account.id,
+        productId,
+        productName: product.name,
+        productPromise: product.promise,
+        briefSpec: body.brief_spec ?? product.brief_spec
+      });
+    } catch (error) {
+      if (error instanceof CorpusPublishError) throw error;
+      const wrapped = new CorpusPublishError(
+        "publish_failed",
+        error instanceof Error ? `Registry publish failed: ${error.message}` : `Registry publish failed: ${String(error)}`,
+        500,
+        { cause: error instanceof Error ? error : undefined }
+      );
+      throw wrapped;
+    }
     sendJson(response, 201, {
       product_id: productId,
       execution_id: result.execution_id,
