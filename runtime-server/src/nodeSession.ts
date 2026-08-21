@@ -7,7 +7,7 @@ import type { PostgresQueryExecutor } from "./postgresStore.js";
 /**
  * Node persistence is deliberately split from OSS artifacts:
  * - session messages and execution state live in Postgres;
- * - source files, candidates, and final outputs live in OSS.
+ * - source files, candidates, feedback, and final outputs live in OSS.
  */
 export const POSTGRES_NODE_RUNTIME_SCHEMA = `
 CREATE TABLE IF NOT EXISTS hatch_node_sessions (
@@ -37,14 +37,22 @@ CREATE TABLE IF NOT EXISTS hatch_node_executions (
   execution_id TEXT NOT NULL,
   status TEXT NOT NULL,
   round INTEGER NOT NULL DEFAULT 0,
+  input_ref TEXT,
   candidate_ref TEXT,
+  feedback_ref TEXT,
   output_ref TEXT,
+  handoff_ref TEXT,
   decision TEXT,
+  last_error TEXT,
   state_jsonb JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (product_id, node_name, execution_id)
 );
+ALTER TABLE hatch_node_executions ADD COLUMN IF NOT EXISTS feedback_ref TEXT;
+ALTER TABLE hatch_node_executions ADD COLUMN IF NOT EXISTS input_ref TEXT;
+ALTER TABLE hatch_node_executions ADD COLUMN IF NOT EXISTS handoff_ref TEXT;
+ALTER TABLE hatch_node_executions ADD COLUMN IF NOT EXISTS last_error TEXT;
 `;
 
 export type NodeSessionRef = {
@@ -62,18 +70,26 @@ export type NodeExecutionRef = {
 };
 
 export type NodeExecutionState = {
-  status: "running" | "completed" | "failed";
+  status: "queued" | "running" | "completed" | "waiting_for_creator" | "handoff_saved" | "failed" | "max_rounds";
   round: number;
   phase?: "actor" | "critic";
+  /** Legacy read-time field. New executions persist only inputRef. */
+  input?: unknown;
+  inputRef?: string;
   candidateRef?: string;
+  feedbackRef?: string;
   outputRef?: string;
+  handoffRef?: string;
   decision?: "done" | "revise";
+  lastError?: string;
+  /** Small host checkpoint metadata only; content artifacts stay in OSS. */
   details?: unknown;
 };
 
 export type NodeExecutionStore = {
   load(ref: NodeExecutionRef): Promise<NodeExecutionState | undefined>;
   save(ref: NodeExecutionRef, state: NodeExecutionState): Promise<void>;
+  latest?(productId: string, nodeName: string): Promise<{ scope: NodeScope; state: NodeExecutionState } | undefined>;
 };
 
 export type PostgresNodeStoreOptions = {
@@ -95,9 +111,13 @@ type NodeMessageRow = {
 type NodeExecutionRow = {
   status: string;
   round: number;
+  input_ref: string | null;
   candidate_ref: string | null;
+  feedback_ref: string | null;
   output_ref: string | null;
+  handoff_ref: string | null;
   decision: string | null;
+  last_error: string | null;
   state_jsonb: unknown;
 };
 
@@ -209,7 +229,7 @@ export class PostgresNodeStore implements NodeSessionStore, NodeExecutionStore {
     await this.initialize();
     const scope = ref.scope;
     const result = await this.pool.query<NodeExecutionRow>(`
-      SELECT status, round, candidate_ref, output_ref, decision, state_jsonb
+      SELECT status, round, input_ref, candidate_ref, feedback_ref, output_ref, handoff_ref, decision, last_error, state_jsonb
       FROM hatch_node_executions
       WHERE product_id = $1 AND node_name = $2 AND execution_id = $3
     `, [scope.productId, scope.nodeName, scope.executionId]);
@@ -225,10 +245,15 @@ export class PostgresNodeStore implements NodeSessionStore, NodeExecutionStore {
     return {
       status: executionStatus(row.status),
       round: row.round,
+      ...(row.input_ref === null ? {} : { inputRef: row.input_ref }),
       ...(phase === undefined ? {} : { phase }),
+      ...(Object.prototype.hasOwnProperty.call(checkpoint, "input") ? { input: checkpoint.input } : {}),
       ...(row.candidate_ref === null ? {} : { candidateRef: row.candidate_ref }),
+      ...(row.feedback_ref === null ? {} : { feedbackRef: row.feedback_ref }),
       ...(row.output_ref === null ? {} : { outputRef: row.output_ref }),
+      ...(row.handoff_ref === null ? {} : { handoffRef: row.handoff_ref }),
       ...(row.decision === "done" || row.decision === "revise" ? { decision: row.decision } : {}),
+      ...(row.last_error === null ? {} : { lastError: row.last_error }),
       ...(details === undefined ? {} : { details })
     };
   }
@@ -238,18 +263,23 @@ export class PostgresNodeStore implements NodeSessionStore, NodeExecutionStore {
     const scope = ref.scope;
     const checkpoint = JSON.stringify({
       ...(state.phase === undefined ? {} : { phase: state.phase }),
+      ...(state.input === undefined ? {} : { input: state.input }),
       details: state.details ?? {}
     });
     await this.pool.query(`
       INSERT INTO hatch_node_executions
-        (product_id, node_name, execution_id, status, round, candidate_ref, output_ref, decision, state_jsonb)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+        (product_id, node_name, execution_id, status, round, input_ref, candidate_ref, feedback_ref, output_ref, handoff_ref, decision, last_error, state_jsonb)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb)
       ON CONFLICT (product_id, node_name, execution_id) DO UPDATE SET
         status = EXCLUDED.status,
         round = EXCLUDED.round,
+        input_ref = EXCLUDED.input_ref,
         candidate_ref = EXCLUDED.candidate_ref,
+        feedback_ref = EXCLUDED.feedback_ref,
         output_ref = EXCLUDED.output_ref,
+        handoff_ref = EXCLUDED.handoff_ref,
         decision = EXCLUDED.decision,
+        last_error = EXCLUDED.last_error,
         state_jsonb = EXCLUDED.state_jsonb,
         updated_at = clock_timestamp()
     `, [
@@ -258,11 +288,32 @@ export class PostgresNodeStore implements NodeSessionStore, NodeExecutionStore {
       scope.executionId,
       state.status,
       state.round,
+      state.inputRef ?? null,
       state.candidateRef ?? null,
+      state.feedbackRef ?? null,
       state.outputRef ?? null,
+      state.handoffRef ?? null,
       state.decision ?? null,
+      state.lastError ?? null,
       checkpoint
     ]);
+  }
+
+  async latest(productId: string, nodeName: string): Promise<{ scope: NodeScope; state: NodeExecutionState } | undefined> {
+    await this.initialize();
+    const result = await this.pool.query<NodeExecutionRow & { execution_id: string }>(`
+      SELECT execution_id, status, round, input_ref, candidate_ref, feedback_ref, output_ref, handoff_ref, decision, last_error, state_jsonb
+      FROM hatch_node_executions
+      WHERE product_id = $1 AND node_name = $2
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `, [productId, nodeName]);
+    const row = result.rows[0];
+    if (!row) return undefined;
+    const state = await this.load({ scope: { productId, nodeName, executionId: row.execution_id } });
+    return state
+      ? { scope: { productId, nodeName, executionId: row.execution_id }, state }
+      : undefined;
   }
 }
 
@@ -281,6 +332,6 @@ function asRecord(value: unknown): Record<string, any> {
 }
 
 function executionStatus(value: string): NodeExecutionState["status"] {
-  if (value === "running" || value === "completed" || value === "failed") return value;
+  if (value === "queued" || value === "running" || value === "completed" || value === "waiting_for_creator" || value === "handoff_saved" || value === "failed" || value === "max_rounds") return value;
   throw new Error(`Unknown Node execution status: ${value}`);
 }

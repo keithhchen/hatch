@@ -7,7 +7,7 @@ import { LocalArtifactObjectStore } from "./creatorLearning/objectStore.js";
 import { CreatorSourceLibrary } from "./creatorLearning/sourceLibrary.js";
 import { InMemoryDistillationGraphStore } from "./creatorLearning/distillationGraph.js";
 
-test("Source Library keeps originals, projects non-images to Markdown, and preserves native images", async () => {
+test("Source Library keeps originals, projects supported files to Markdown, and rejects images", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-source-library-"));
   const objectRoot = await mkdtemp(path.join(os.tmpdir(), "hatch-source-objects-"));
   const graph = new InMemoryDistillationGraphStore();
@@ -20,17 +20,18 @@ test("Source Library keeps originals, projects non-images to Markdown, and prese
   });
   assert.equal(csv.projection.kind, "markdown");
   assert.match(csv.projectionContent ?? "", /\| Rule \| Decision \|/);
-  const png = await library.createFromUpload("creator_1", {
-    productId: "product_1",
-    displayName: "diagram.png",
-    mediaType: "image/png",
-    bytes: Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3])
-  });
-  assert.equal(png.projection.kind, "image");
-  assert.equal(png.projectionBase64, Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3]).toString("base64"));
-  const snapshot = await library.createSnapshot("creator_1", { productId: "product_1", documentIds: [csv.id, png.id] });
+  await assert.rejects(
+    () => library.createFromUpload("creator_1", {
+      productId: "product_1",
+      displayName: "diagram.png",
+      mediaType: "image/png",
+      bytes: Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3])
+    }),
+    /Images are not supported in Files yet/
+  );
+  const snapshot = await library.createSnapshot("creator_1", { productId: "product_1", documentIds: [csv.id] });
   assert.equal(snapshot.lockedAt, snapshot.createdAt);
-  assert.deepEqual((await library.resolveSnapshotSources("creator_1", snapshot.id)).map((source) => Boolean(source.image)), [false, true]);
+  assert.deepEqual((await library.resolveSnapshotSources("creator_1", snapshot.id)).map((source) => Boolean(source.image)), [false]);
   const graphState = await graph.derive("product_1");
   assert.equal(graphState.status, "running");
 });

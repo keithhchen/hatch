@@ -17,7 +17,7 @@ import {
   createProduct,
   getProduct,
   listProductFiles,
-  startFactoryRunFromSources,
+  startAboutYouNode,
   uploadProductFile
 } from "./creatorFactory.js";
 import {
@@ -105,9 +105,8 @@ export function CreatorProductFiles({ token, productId, navigate, locale = "en" 
     if (!product || !files.length || busy) return;
     setBusy(true); setError("");
     try {
-      const run = await startFactoryRunFromSources(token, product, files.map((file) => file.id));
+      await startAboutYouNode(token, product.id ?? product.product_id, files.map((file) => file.id));
       navigate(`/studio/products/${encodeURIComponent(product.id ?? product.product_id)}/about-you`);
-      return run;
     } catch (nextError) { setError(nextError.message); }
     finally { setBusy(false); }
   }
@@ -129,10 +128,10 @@ export function CreatorProductFiles({ token, productId, navigate, locale = "en" 
     <BackToProducts navigate={navigate} t={t} />
     <PageHeader label={t("files")} title={product?.name ?? t("productFiles")} body={t("addFilesBody")} />
     {error ? <InlineAlert tone="error" title={t("filesUnavailable")}>{error}</InlineAlert> : null}
-    {notice ? <InlineAlert tone="success" title={t("filesAddedTitle")}>{notice}</InlineAlert> : null}
+    {notice ? <InlineAlert className="cpv2-inline-feedback" tone="success" title={t("filesAddedTitle")}>{notice}</InlineAlert> : null}
     <article className="cpv2-card cpv2-panel">
       <div className="cpv2-source-library-toolbar"><div><span className="cpv2-kicker">{t("productFiles")}</span><h2>{t("filesCount", selectedCount)}</h2></div></div>
-      <FileUploader multiple accept=".pdf,.docx,.xlsx,.xls,.xlsm,.csv,.tsv,.txt,.md,.json,.html,.htm,.png,.jpg,.jpeg,.webp" onFiles={upload} disabled={busy} label={t("uploadFiles")} hint={t("localFilesOnly")} className="cpv2-source-uploader" />
+      <FileUploader multiple accept=".pdf,.docx,.xlsx,.xls,.xlsm,.pptx,.csv,.tsv,.txt,.md,.json,.html,.htm" onFiles={upload} disabled={busy} label={t("uploadFiles")} hint={t("localFilesOnly")} className="cpv2-source-uploader" />
       <p className="cpv2-muted">{t("sourceNote")}</p>
       {files.length ? <List items={files} className="cpv2-source-list" ariaLabel={t("productFiles")} renderItem={(file) => { const status = productFileState(file); return <><div><strong>{file.display_name}</strong><small>{file.media_type} · {file.projection?.kind === "image" ? t("imageNative") : t("markdownProjection")}</small></div><StatusTag tone={status === "ready" ? "success" : status === "error" ? "error" : "neutral"}>{t(`fileStatus_${status}`)}</StatusTag></>; }} /> : <EmptyState title={t("noFilesYet")} body={t("firstFileForProduct")} />}
       <div className="cpv2-source-library-actions"><Button type="button" loading={busy} disabled={!canGenerateProductVersion(files) || busy} onClick={() => void startRun()}>{t("generateVersion")}</Button></div>

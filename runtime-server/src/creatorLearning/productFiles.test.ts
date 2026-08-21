@@ -7,7 +7,7 @@ import * as XLSX from "xlsx";
 import { LocalArtifactObjectStore } from "./objectStore.js";
 import { ProductFileStore, ProductFilesError } from "./productFiles.js";
 
-test("Product File Store projects non-images to Markdown and preserves images natively", async (t) => {
+test("Product File Store projects supported files to Markdown and rejects images", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-product-files-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const store = new ProductFileStore(new LocalArtifactObjectStore(root));
@@ -23,6 +23,7 @@ test("Product File Store projects non-images to Markdown and preserves images na
   assert.equal(text.projection.kind, "markdown");
   assert.match(text.projectionContent ?? "", /A judgment/);
   assert.equal(text.projection.mediaType, "text/markdown");
+  assert.equal(text.projection.contentRef, `creator-products/${creatorId}/${productId}/files/${text.id}/projection.md`);
   assert.match(text.artifactId, /^artifact_[a-f0-9]{64}$/);
 
   const csv = await store.createFromUpload({
@@ -55,35 +56,30 @@ test("Product File Store projects non-images to Markdown and preserves images na
   });
   assert.match(json.projectionContent ?? "", /diagnose first/);
 
-  // A tiny valid 1x1 PNG. The bytes stay unchanged and are returned as a
-  // native image projection rather than flattened into Markdown.
-  const png = await store.createFromUpload({
-    creatorId,
-    productId,
-    displayName: "example.png",
-    bytes: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64")
-  });
-  assert.equal(png.projection.kind, "image");
-  assert.equal(png.projection.mediaType, "image/png");
-  assert.ok(png.projectionBase64);
-  assert.ok(Buffer.from(png.projectionBase64!, "base64").toString("hex").startsWith("89504e470d0a1a0a"));
+  await assert.rejects(
+    () => store.createFromUpload({
+      creatorId,
+      productId,
+      displayName: "example.png",
+      bytes: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64")
+    }),
+    (error: unknown) => error instanceof ProductFilesError && error.code === "unsupported_media_type"
+  );
 
   const files = await store.listFiles(creatorId, productId);
-  assert.equal(files.length, 5);
+  assert.equal(files.length, 4);
   assert.ok(files.every((file) => file.productId === productId));
+  assert.deepEqual(await store.listProjectionPaths(creatorId, productId, [text.id, json.id]), [text.projection.contentRef, json.projection.contentRef]);
 
-  const snapshot = await store.createSnapshot(creatorId, productId, [text.id, csv.id, xlsx.id, json.id, png.id]);
+  const snapshot = await store.createSnapshot(creatorId, productId, [text.id, csv.id, xlsx.id, json.id]);
   assert.equal(snapshot.productId, productId);
-  assert.equal(snapshot.documents.length, 5);
+  assert.equal(snapshot.documents.length, 4);
   assert.match(snapshot.manifestSha256, /^[a-f0-9]{64}$/);
-  assert.deepEqual(snapshot.fileIds, [text.id, csv.id, xlsx.id, json.id, png.id]);
+  assert.deepEqual(snapshot.fileIds, [text.id, csv.id, xlsx.id, json.id]);
 
   const sources = await store.resolveSnapshotSources(creatorId, productId, snapshot.id);
-  assert.equal(sources.length, 5);
+  assert.equal(sources.length, 4);
   assert.equal(sources.find((source) => source.title === "notes.txt")?.content.includes("A judgment"), true);
-  const imageSource = sources.find((source) => source.title === "example.png");
-  assert.equal(imageSource?.image?.mediaType, "image/png");
-  assert.equal(imageSource?.content, "[Native image source: example.png]");
 });
 
 test("Product Snapshot is immutable and cannot mix Product files", async (t) => {

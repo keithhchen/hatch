@@ -125,6 +125,9 @@ export type FactorySubmissionProtocol = {
   afterToolCall(context: AfterToolCallContext): Promise<AfterToolCallResult | undefined>;
   sanitizeContext(messages: AgentMessage[]): AgentMessage[];
   failureTelemetry(code: FactoryPromptFailureTelemetry["code"]): FactoryPromptFailureTelemetry;
+  isFinalized(): boolean;
+  /** Exact submission cycles are terminal protocol failures, not repair turns. */
+  canRepair(): boolean;
   finalizedOutput(): string;
 };
 
@@ -1312,6 +1315,12 @@ export function createFactorySubmissionProtocol(
         ...(telemetry.exactCycleKind ? { exactCycleKind: telemetry.exactCycleKind } : {}),
         ...(telemetry.lastToolTurn ? { lastToolTurn: structuredClone(telemetry.lastToolTurn) } : {})
       };
+    },
+    isFinalized(): boolean {
+      return committed.finalized === true && typeof committed.output === "string" && committed.output.length > 0;
+    },
+    canRepair(): boolean {
+      return telemetry.exactCycleKind === undefined;
     },
     finalizedOutput(): string {
       if (!committed.finalized || !committed.output) {

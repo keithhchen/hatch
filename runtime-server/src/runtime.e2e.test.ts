@@ -1271,7 +1271,8 @@ test("skills section renders declared tool dependencies from agents openai metad
   const skills = await discoverSkills(root);
   assert.equal(skills[0]?.openai.dependencies.tools.length, 2);
   const { section } = renderSkillsSection(skills, { prompt: "Use dependency-skill." });
-  assert.match(section, /- dependency-skill: .*tools: mcp:openaiDeveloperDocs, local:git/);
+  assert.match(section, /- dependency-skill: Use when testing Agent Skills dependency metadata\./);
+  assert.doesNotMatch(section, /tools: mcp:openaiDeveloperDocs, local:git/);
   assert.doesNotMatch(section, /# Dependency Skill/);
 });
 
@@ -1488,7 +1489,8 @@ test("skills section keeps absolute paths when there is no catalog budget pressu
   assert.equal(report.included_count, 1);
   assert.equal(report.omitted_count, 0);
   assert.doesNotMatch(section, /### Skill roots/);
-  assert.match(section, new RegExp(`\\(file: ${escapeRegExp(discoveredPath.replaceAll("\\", "/"))}\\)`));
+  assert.match(section, /- absolute-skill: Absolute skill\. Use when testing unaliased skills catalog rendering\./);
+  assert.doesNotMatch(section, /\\(file: .*SKILL\\.md\\)/);
 });
 
 test("skills section uses Codex-style root aliases when they allow more skills to fit", async () => {
@@ -1520,10 +1522,10 @@ test("skills section uses Codex-style root aliases when they allow more skills t
   assert.ok(budget < absoluteMinimumCost);
   assert.equal(rendered.report.omitted_count, 0);
   assert.equal(rendered.report.included_count, skillCount);
-  assert.match(rendered.section, /### Skill roots\n- `r0` = `/);
-  assert.match(rendered.section, /\(file: r0\/shared-root-skill-00\/SKILL\.md\)/);
-  assert.match(rendered.section, /\(file: r0\/shared-root-skill-39\/SKILL\.md\)/);
-  assert.match(rendered.section, /expand the listed short `path` with the matching alias/);
+  assert.doesNotMatch(rendered.section, /### Skill roots/);
+  assert.doesNotMatch(rendered.section, /`r0`/);
+  assert.match(rendered.section, /- shared-root-skill-00: shared-root-skill-00 description\./);
+  assert.match(rendered.section, /- shared-root-skill-39: shared-root-skill-39 description\./);
 });
 
 test("skills metadata budget uses two percent of known context window or 8000 chars when unknown", () => {
@@ -1682,9 +1684,10 @@ test("skills section renders Codex-style progressive disclosure without SKILL.md
   const { section, report } = renderSkillsSection(catalog, { prompt: "Find Hatch." });
 
   assert.match(section, /## Skills/);
-  assert.match(section, /- repo-assistant: .* \(file: .*SKILL\.md\)/);
-  assert.match(section, /- review-contract: .* \(file: .*SKILL\.md\)/);
-  assert.match(section, /must read its `SKILL\.md` completely/);
+  assert.match(section, /- repo-assistant: Inspect a local workspace through brokered filesystem tools while all model reasoning runs on the server\./);
+  assert.match(section, /- review-contract: /);
+  assert.match(section, /call the registered `Skill` function tool/);
+  assert.doesNotMatch(section, /\(file: .*SKILL\.md\)/);
   assert.doesNotMatch(section, /# Repo Assistant/);
   assert.doesNotMatch(section, /# \/review-contract/);
   assert.ok(report.included_count >= 2);

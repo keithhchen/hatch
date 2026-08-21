@@ -294,7 +294,7 @@ function isFileAlreadyExists(error: unknown): boolean {
 }
 
 export function isObjectStoreNotFound(error: unknown): boolean {
-  return Boolean(error && typeof error === "object" && ["NoSuchKey", "NoSuchObject", "NotFound", "404"].includes(String((error as { code?: string; status?: number }).code ?? (error as { status?: number }).status)));
+  return Boolean(error && typeof error === "object" && ["ENOENT", "NoSuchKey", "NoSuchObject", "NotFound", "404"].includes(String((error as { code?: string; status?: number }).code ?? (error as { status?: number }).status)));
 }
 
 function isAlreadyExists(error: unknown): boolean {

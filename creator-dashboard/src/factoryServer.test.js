@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { createDashboardApp } from "../server.mjs";
 
-test("Dashboard BFF authenticates and forwards Creator Factory requests without adding creator_id", async (context) => {
+test("Dashboard BFF removes the legacy Factory API and forwards Product Node requests", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-factory-"));
   const forwarded = [];
   const registry = createServer(async (request, response) => {
@@ -25,12 +25,10 @@ test("Dashboard BFF authenticates and forwards Creator Factory requests without 
       response.end(JSON.stringify({ id: "creator-factory", role: "creator", email: "creator@example.test", display_name: "Factory Creator" }));
       return;
     }
-    if (url.pathname === "/v1/creator/factory-runs") {
+    if (url.pathname === "/v1/creator/products/product-1/nodes/about-you/executions") {
       forwarded.push({ method: request.method, headers: request.headers, body: content ? JSON.parse(content) : undefined });
-      response.statusCode = request.method === "POST" ? 202 : 200;
-      response.end(JSON.stringify(request.method === "POST"
-        ? { id: "factory_1", task_name: "Offer critique", status: "queued", version: 1, pending_questions: [] }
-        : { runs: [] }));
+      response.statusCode = 202;
+      response.end(JSON.stringify({ node: "about-you", product_id: "product-1", execution_id: "about_you_1", status: "queued", round: 1 }));
       return;
     }
     response.statusCode = 404;
@@ -48,109 +46,28 @@ test("Dashboard BFF authenticates and forwards Creator Factory requests without 
   await listen(api);
   context.after(() => api.close());
   const token = await login(api);
-  const payload = {
-    task_name: "Offer critique",
-    task_brief: "Return final copy.",
-    sources: [{ id: "S1", authority: "creator_current", title: "Correction", content: "Choose one." }]
-  };
-  const createDraft = () => fetch(`${serverUrl(api)}/v1/creator/factory-drafts`, {
+  const legacy = await fetch(`${serverUrl(api)}/v1/creator/factory-runs`, {
+    headers: { authorization: `Bearer ${token}` }
+  });
+  assert.equal(legacy.status, 404);
+  assert.equal(forwarded.length, 0);
+
+  const response = await fetch(`${serverUrl(api)}/v1/creator/products/product-1/nodes/about-you/executions`, {
     method: "POST",
     headers: {
       authorization: `Bearer ${token}`,
       "content-type": "application/json",
-      "idempotency-key": "factory-draft-create-1"
+      "idempotency-key": "node-request-1"
     },
-    body: JSON.stringify({ ...payload, expected_version: 0 })
+    body: JSON.stringify({ file_ids: ["file_1"] })
   });
-  const createdDraftResponse = await createDraft();
-  const createdDraft = (await createdDraftResponse.json()).draft;
-  assert.equal(createdDraftResponse.status, 201);
-  assert.match(createdDraft.draft_id, /^draft_[a-f0-9]{24}$/);
-  assert.equal(createdDraft.version, 1);
-  const createdDraftReplay = await createDraft();
-  assert.equal(createdDraftReplay.status, 201);
-  assert.equal((await createdDraftReplay.json()).draft.version, 1);
-
-  const saveDraft = () => fetch(`${serverUrl(api)}/v1/creator/factory-drafts/default`, {
-    method: "PUT",
-    headers: {
-      authorization: `Bearer ${token}`,
-      "content-type": "application/json",
-      "idempotency-key": "factory-draft-save-1"
-    },
-    body: JSON.stringify({ ...payload, expected_version: 0 })
-  });
-  const savedResponse = await saveDraft();
-  const saved = (await savedResponse.json()).draft;
-  assert.equal(savedResponse.status, 200);
-  assert.equal(saved.version, 1);
-  const saveReplay = await saveDraft();
-  assert.equal(saveReplay.status, 200);
-  assert.equal((await saveReplay.json()).draft.version, 1);
-  const changedReplay = await fetch(`${serverUrl(api)}/v1/creator/factory-drafts/default`, {
-    method: "PUT",
-    headers: {
-      authorization: `Bearer ${token}`,
-      "content-type": "application/json",
-      "idempotency-key": "factory-draft-save-1"
-    },
-    body: JSON.stringify({ ...payload, task_brief: "Changed", expected_version: 0 })
-  });
-  assert.equal(changedReplay.status, 409);
-  assert.equal((await changedReplay.json()).error.code, "idempotency_conflict");
-
-  const startDraft = (expectedVersion = 1) => fetch(`${serverUrl(api)}/v1/creator/factory-drafts/default/start`, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${token}`,
-        "content-type": "application/json",
-        "idempotency-key": "factory-draft-start-1"
-      },
-      body: JSON.stringify({ expected_version: expectedVersion })
-    });
-  const startedResponse = await startDraft();
-  const started = await startedResponse.json();
-  assert.equal(startedResponse.status, 202);
-  assert.equal(started.run.id, "factory_1");
-  assert.deepEqual(forwarded[0].body, payload);
-  const startReplay = await startDraft();
-  assert.equal(startReplay.status, 202);
-  assert.equal((await startReplay.json()).run.id, "factory_1");
-  assert.equal(forwarded.length, 1);
-  const changedStartReplay = await startDraft(2);
-  assert.equal(changedStartReplay.status, 409);
-  assert.equal((await changedStartReplay.json()).error.code, "idempotency_conflict");
-
-  const response = await fetch(`${serverUrl(api)}/v1/creator/factory-runs`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${token}`,
-      "content-type": "application/json",
-      "idempotency-key": "factory-request-1"
-    },
-    body: JSON.stringify(payload)
-  });
-
   assert.equal(response.status, 202);
-  assert.equal((await response.json()).id, "factory_1");
-  assert.equal(forwarded.length, 2);
-  assert.equal(forwarded[1].headers.authorization, "Bearer signed-creator-token");
-  assert.equal(forwarded[1].headers["idempotency-key"], "factory-request-1");
-  assert.deepEqual(forwarded[1].body, payload);
-  assert.equal("creator_id" in forwarded[1].body, false);
-
-  const oversized = await fetch(`${serverUrl(api)}/v1/creator/factory-runs`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${token}`,
-      "content-type": "application/json",
-      "idempotency-key": "factory-request-too-large"
-    },
-    body: JSON.stringify({ ...payload, task_brief: "x".repeat(600) })
-  });
-  assert.equal(oversized.status, 413);
-  assert.equal((await oversized.json()).error.code, "request_body_too_large");
-  assert.equal(forwarded.length, 2);
+  assert.equal((await response.json()).execution_id, "about_you_1");
+  assert.equal(forwarded.length, 1);
+  assert.equal(forwarded[0].headers.authorization, "Bearer signed-creator-token");
+  assert.equal(forwarded[0].headers["idempotency-key"], "node-request-1");
+  assert.deepEqual(forwarded[0].body, { file_ids: ["file_1"] });
+  assert.equal("creator_id" in forwarded[0].body, false);
 });
 
 async function login(server) {

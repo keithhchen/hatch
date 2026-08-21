@@ -1292,20 +1292,28 @@ export async function createDashboardApp(options = {}) {
         return send(response, 404, { error: { code: "not_found", message: "Route not found." } });
       }
 
-      const productContractPath = url.pathname.match(/^\/v1\/creator\/products(?:\/[^/]+(?:\/(?:files|snapshots|runs|versions)(?:\/[^/]+)?|\/graph|\/brief-spec)?)?$/);
+      const productContractPath = url.pathname.match(/^\/v1\/creator\/products(?:\/[^/]+(?:\/files(?:\/[^/]+)?|\/graph|\/brief-spec|\/registry|\/nodes\/(?:about-you|corpus)\/executions(?:\/[^/]+(?:\/answers)?)?)?)?$/);
+      const productNodeContract = /\/nodes\/(?:about-you|corpus)\/executions(?:\/[^/]+(?:\/answers)?)?$/.test(url.pathname);
+      const productRegistryContract = /\/registry$/.test(url.pathname);
       const productContractWrite = productContractPath && (
         request.method === "POST" || request.method === "PATCH" || request.method === "PUT"
       ) && (
         url.pathname === "/v1/creator/products"
-        || /\/(files|snapshots|runs|brief-spec)$/.test(url.pathname)
+        || /\/(files|brief-spec)$/.test(url.pathname)
+        || productNodeContract
+        || productRegistryContract
         || /^\/v1\/creator\/products\/[^/]+$/.test(url.pathname)
       );
+      const productContractDelete = productContractPath
+        && request.method === "DELETE"
+        && /\/files\/[^/]+$/.test(url.pathname);
       const productContractRead = productContractPath && request.method === "GET" && (
         url.pathname === "/v1/creator/products"
-        || /\/(files|snapshots|runs|versions)(?:\/[^/]+)?$/.test(url.pathname)
+        || /\/files(?:\/[^/]+)?$/.test(url.pathname)
         || /\/graph$/.test(url.pathname)
+        || productNodeContract
       );
-      if (productContractWrite || productContractRead) {
+      if (productContractWrite || productContractRead || productContractDelete) {
         const authentication = await authenticate(request, registryUrl, "creator", fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const isProductRoot = url.pathname === "/v1/creator/products" || /^\/v1\/creator\/products\/[^/]+$/.test(url.pathname);
@@ -1316,7 +1324,9 @@ export async function createDashboardApp(options = {}) {
             : (request.method === "GET" ? "creator:products:read" : "creator:products:write"));
         requireOAuthScope(request, requiredScope, url.pathname);
         requireCapability(authentication.profile, request.method === "GET" ? "product:read" : "product:edit");
-        const body = request.method === "GET" ? undefined : JSON.stringify(await readJson(request, factoryRequestMaxBytes));
+        const body = request.method === "GET" || request.method === "DELETE"
+          ? undefined
+          : JSON.stringify(await readJson(request, factoryRequestMaxBytes));
         const payload = await registryRequest(registryUrl, `${url.pathname}${url.search}`, {
           method: request.method,
           ...(body === undefined ? {} : { body }),
@@ -1327,7 +1337,7 @@ export async function createDashboardApp(options = {}) {
           }
         });
         const status = request.method === "POST"
-          ? (url.pathname.endsWith("/runs") ? 202 : 201)
+          ? (productNodeContract && url.pathname.endsWith("/executions") ? 202 : 201)
           : 200;
         return send(response, status, payload);
       }
@@ -1429,29 +1439,9 @@ export async function createDashboardApp(options = {}) {
       if (url.pathname.startsWith("/v1/creator/factory-runs")
         || url.pathname.startsWith("/v1/creator/source-documents")
         || url.pathname.startsWith("/v1/creator/source-snapshots")) {
-        const authentication = await authenticate(request, registryUrl, "creator", fetchImpl, portalState);
-        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
-        requireCapability(authentication.profile, request.method === "GET" ? "product:read" : "product:edit");
-        const body = request.method === "GET"
-          ? undefined
-          : JSON.stringify(await readJson(request, factoryRequestMaxBytes));
-        // Preserve scoped query parameters when proxying Product file reads.
-        // Product owns the file area; a run only references the immutable
-        // Snapshot created from it.
-        const registryPath = `${url.pathname}${url.search}`;
-        const payload = await registryRequest(registryUrl, registryPath, {
-          method: request.method,
-          ...(body === undefined ? {} : { body }),
-          fetchImpl,
-          headers: {
-            authorization: `Bearer ${bearerToken(request)}`,
-            ...(request.headers["idempotency-key"] ? { "idempotency-key": String(request.headers["idempotency-key"]) } : {})
-          }
+        return send(response, 404, {
+          error: { code: "route_not_found", message: "The legacy Factory API has been replaced by Product Nodes." }
         });
-        if (request.method === "POST" && url.pathname === "/v1/creator/factory-runs") {
-          await portalState.clearFactoryDraft(authentication.profile.id, "default");
-        }
-        return send(response, request.method === "GET" ? 200 : 202, payload);
       }
 
       if (url.pathname.startsWith("/v1/creator/")) {
@@ -2083,10 +2073,11 @@ async function registryRequest(registryUrl, pathname, options = {}) {
   });
   const payload = await response.json();
   if (!response.ok) {
-    const error = new Error(payload.detail ?? "Registry rejected the Agent request.");
+    const error = new Error(payload.error?.message ?? payload.detail ?? "Registry rejected the Agent request.");
     error.status = response.status;
-    error.code = payload.code ?? "registry_rejected_agent_request";
-    if (payload.details !== undefined) error.details = payload.details;
+    error.code = payload.error?.code ?? payload.code ?? "registry_rejected_agent_request";
+    if (payload.error?.details !== undefined) error.details = payload.error.details;
+    else if (payload.details !== undefined) error.details = payload.details;
     throw error;
   }
   return payload;
@@ -2396,6 +2387,8 @@ function oauthEndpointScope(request) {
     if (method === "GET") return "creator:files:read";
     if (method === "POST" && !pathname.endsWith("/files")) return undefined;
     if (method === "POST") return "creator:files:write";
+    if (method === "DELETE" && !pathname.endsWith("/files")) return "creator:files:write";
+    return undefined;
   }
   return undefined;
 }

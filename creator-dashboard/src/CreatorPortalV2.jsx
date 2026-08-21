@@ -155,9 +155,9 @@ function CreatorRoute({ route, token, request, navigate, profile, locale, t, reg
   if (route.kind === "products") return <ProductsPage token={token} request={request} navigate={navigate} t={t} />;
   if (route.kind === "product-create") return <CreatorProductFiles token={token} navigate={navigate} locale={locale} />;
   if (route.kind === "factory") return <FactoryPage token={token} request={request} productId={route.productId} runId={route.runId} navigate={navigate} locale={locale} profile={profile} t={t} />;
-  if (route.kind === "product" && ["files", "about-you", "review", "brief", "complete"].includes(route.tab)) return <CreatorProductWorkspace token={token} request={request} navigate={navigate} productId={route.productId} tab={route.tab} locale={locale} profile={profile} />;
+  if (route.kind === "product" && ["files", "about-you", "corpus", "brief", "complete"].includes(route.tab)) return <CreatorProductWorkspace token={token} request={request} navigate={navigate} productId={route.productId} tab={route.tab} locale={locale} profile={profile} />;
   if (route.kind === "product") return <ProductPage token={token} request={request} navigate={navigate} productId={route.productId} tab={route.tab} t={t} />;
-  if (route.kind === "candidate") return <CreatorProductWorkspace token={token} request={request} navigate={navigate} productId={route.productId} runId={route.candidateId} tab="review" locale={locale} profile={profile} />;
+  if (route.kind === "candidate") return <CreatorProductWorkspace token={token} request={request} navigate={navigate} productId={route.productId} tab="corpus" locale={locale} />;
   if (route.kind === "preview") return <PreviewPage token={token} request={request} navigate={navigate} productId={route.productId} t={t} />;
   if (route.kind === "release") return <ReleasePage token={token} request={request} navigate={navigate} productId={route.productId} releaseId={route.releaseId} t={t} locale={locale} />;
   if (route.kind === "orders") return <OrdersPage token={token} request={request} navigate={navigate} t={t} locale={locale} />;
@@ -310,11 +310,10 @@ function DataControlsPanel({ product, t }) {
 }
 
 function FactoryPage({ token, request, productId, runId, navigate, locale, profile, t }) {
-  // Factory is a Product view, never a standalone area. A legacy bookmark
-  // to /studio/factory lands on the Product index instead of exposing a second
-  // workflow or another source authority.
+  // Old Factory URLs are only bookmarks now. Always render the canonical
+  // Product-scoped Node workflow; there is no second run/review authority.
   if (productId === undefined) return <ProductsPage token={token} request={request} navigate={navigate} t={t} />;
-  return <CreatorProductWorkspace token={token} request={request} productId={productId} runId={runId} tab={runId ? "review" : "about-you"} navigate={navigate} locale={locale} profile={profile} />;
+  return <CreatorProductWorkspace token={token} request={request} productId={productId} tab="about-you" navigate={navigate} locale={locale} />;
 }
 
 function CandidatePage({ token, request, navigate, productId, candidateId, t, locale }) {

@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   canGenerateProductVersion,
@@ -42,12 +41,9 @@ test("Product version generation waits for every authoritative file state", () =
   assert.equal(canGenerateProductVersion([]), false);
 });
 
-test("both real Product Files entrypoints poll the authoritative file collection", () => {
-  for (const fileName of ["CreatorProductWorkspace.jsx", "CreatorSourceLibrary.jsx"]) {
-    const source = readFileSync(new URL(fileName, import.meta.url), "utf8");
-    assert.match(source, /shouldPollProductFiles/);
-    assert.match(source, /await listProductFiles\(token, productId\)/);
-    assert.match(source, /setInterval\(\(\) => \{ void poll\(\); \}, 2000\)/);
-    assert.match(source, /canGenerateProductVersion/);
-  }
+test("Creator Product workspace polls the active Node execution", async () => {
+  const source = await import("node:fs/promises").then(({ readFile }) => readFile(new URL("./CreatorProductWorkspace.jsx", import.meta.url), "utf8"));
+  assert.match(source, /getLatestNodeExecution/);
+  assert.match(source, /setInterval\(\(\) => \{ void poll\(\); \}, 2000\)/);
+  assert.match(source, /isExecutionActive/);
 });

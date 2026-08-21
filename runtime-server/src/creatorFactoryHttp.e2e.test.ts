@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { createRegistryServerFromEnvironment } from "./registryServer.js";
 
-test("Product Creator API owns files, snapshots, and idempotent runs", async (t) => {
+test("Product Creator API owns Files and routes Node workflow through the new boundary", async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-product-http-"));
   const registry = await createRegistryServerFromEnvironment({
     REGISTRY_HOST: "127.0.0.1",
@@ -26,6 +26,7 @@ test("Product Creator API owns files, snapshots, and idempotent runs", async (t)
   const base = `http://127.0.0.1:${address.port}`;
   const creatorA = await signup(base, "product-a@example.com", "Creator A");
   const creatorB = await signup(base, "product-b@example.com", "Creator B");
+  const creatorAAccount = await authMe(base, creatorA);
   const unauthenticated = await fetch(`${base}/v1/creator/products`);
   assert.equal(unauthenticated.status, 401);
 
@@ -78,44 +79,28 @@ test("Product Creator API owns files, snapshots, and idempotent runs", async (t)
     body: JSON.stringify({ display_name: "method.txt", media_type: "text/plain", content_base64: content.toString("base64") })
   });
   assert.equal(upload.status, 201);
-  const file = await upload.json() as { id: string; projection: { kind: string } };
+  const file = await upload.json() as { id: string; path: string; projection: { kind: string } };
   assert.equal(file.projection.kind, "markdown");
+  assert.equal(file.path, `creator-products/${creatorAAccount.id}/${productId}/files/${file.id}/projection.md`);
 
-  const snapshot = await fetch(`${base}/v1/creator/products/${productId}/snapshots`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${creatorA}`, "content-type": "application/json", "idempotency-key": "snapshot-1" },
-    body: JSON.stringify({ file_ids: [file.id] })
-  });
-  assert.equal(snapshot.status, 201);
-  const snapshotBody = await snapshot.json() as { id: string; product_id: string };
-  assert.equal(snapshotBody.product_id, productId);
+  for (const legacyPath of [
+    `/v1/creator/products/${productId}/snapshots`,
+    `/v1/creator/products/${productId}/runs`,
+    `/v1/creator/products/${productId}/versions`
+  ]) {
+    const legacy = await fetch(`${base}${legacyPath}`, {
+      headers: { authorization: `Bearer ${creatorA}` }
+    });
+    assert.equal(legacy.status, 404);
+  }
 
-  const run = await fetch(`${base}/v1/creator/products/${productId}/runs`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${creatorA}`, "content-type": "application/json", "idempotency-key": "run-1" },
-    body: JSON.stringify({ source_snapshot_id: snapshotBody.id, config: { development_questions: 2, heldout_questions: 1 } })
+  const nodeStatus = await fetch(`${base}/v1/creator/products/${productId}/nodes/about-you/executions`, {
+    headers: { authorization: `Bearer ${creatorA}` }
   });
-  assert.equal(run.status, 202);
-  const runBody = await run.json() as { id: string; product_id: string; source_snapshot_id: string; workflow_step: string };
-  assert.equal(runBody.product_id, productId);
-  assert.equal(runBody.source_snapshot_id, snapshotBody.id);
-  assert.equal(runBody.workflow_step, "files");
-
-  const replay = await fetch(`${base}/v1/creator/products/${productId}/runs`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${creatorA}`, "content-type": "application/json", "idempotency-key": "run-1" },
-    body: JSON.stringify({ source_snapshot_id: snapshotBody.id, config: { development_questions: 2, heldout_questions: 1 } })
-  });
-  assert.equal(replay.status, 200);
-  assert.equal((await replay.json() as { id: string }).id, runBody.id);
-
-  const conflictingReplay = await fetch(`${base}/v1/creator/products/${productId}/runs`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${creatorA}`, "content-type": "application/json", "idempotency-key": "run-1" },
-    body: JSON.stringify({ source_snapshot_id: snapshotBody.id, config: { development_questions: 3, heldout_questions: 1 } })
-  });
-  assert.equal(conflictingReplay.status, 409);
-  assert.equal((await conflictingReplay.json() as { error: { code: string } }).error.code, "idempotency_conflict");
+  // This fixture intentionally has no Postgres Node store. Production enables
+  // it through HATCH_DATABASE_URL; the route must fail honestly rather than
+  // silently falling back to the removed Factory run API.
+  assert.equal(nodeStatus.status, 503);
 
   const crossCreator = await fetch(`${base}/v1/creator/products/${productId}/files`, { headers: { authorization: `Bearer ${creatorB}` } });
   assert.equal(crossCreator.status, 404);
@@ -129,4 +114,10 @@ async function signup(base: string, email: string, displayName: string): Promise
   });
   assert.equal(response.status, 201);
   return (await response.json() as { token: string }).token;
+}
+
+async function authMe(base: string, token: string): Promise<{ id: string }> {
+  const response = await fetch(`${base}/v1/auth/me`, { headers: { authorization: `Bearer ${token}` } });
+  assert.equal(response.status, 200);
+  return await response.json() as { id: string };
 }

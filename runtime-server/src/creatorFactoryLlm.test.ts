@@ -201,6 +201,7 @@ test("Factory can use an explicitly selected DeepSeek profile without Kimi paylo
   const body = JSON.parse(String(calls[0]!.init.body)) as Record<string, unknown>;
   assert.equal(body.model, "deepseek-v4-flash");
   assert.deepEqual(body.thinking, { type: "disabled" });
+  assert.equal(body.tool_choice, "required");
   assert.equal("reasoning_effort" in body, false);
   assert.equal(body.max_tokens !== undefined, true);
   assert.equal(new Headers(calls[0]!.init.headers).get("authorization"), "Bearer factory-deepseek-test-key");

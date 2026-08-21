@@ -20,25 +20,14 @@ services:
       HATCH_CREATOR_OBJECT_STORE_REGION: ${HATCH_CREATOR_OBJECT_STORE_REGION:-oss-cn-shanghai}
       HATCH_CREATOR_OBJECT_STORE_INTERNAL: ${HATCH_CREATOR_OBJECT_STORE_INTERNAL:-true}
       HATCH_CREATOR_OBJECT_STORE_PREFIX: ${HATCH_CREATOR_OBJECT_STORE_PREFIX:-hatch}
-      # Registry handles the synchronous Creator Factory start path. Keep its
-      # provider/runtime inputs identical to the durable factory-worker so a
-      # user-triggered run cannot fail merely because it was claimed in this
-      # process instead of by the recovery consumer.
-      HATCH_CREATOR_FACTORY_HATCH_TIMEOUT_MS: ${HATCH_CREATOR_FACTORY_HATCH_TIMEOUT_MS:-900000}
-      HATCH_LOCAL_RUNNER_BIN: ${HATCH_LOCAL_RUNNER_BIN:-/usr/local/bin/hatch-local-runner}
-      # A single Factory LLM turn may run for 15 minutes. Keep the durable
-      # lease longer than that hard deadline so a slow prompt is not reclaimed
-      # by the recovery consumer while the direct Registry worker is still
-      # executing it.
-      HATCH_CREATOR_FACTORY_LEASE_MS: ${HATCH_CREATOR_FACTORY_LEASE_MS:-1200000}
-      HATCH_CREATOR_FACTORY_HEARTBEAT_MS: ${HATCH_CREATOR_FACTORY_HEARTBEAT_MS:-60000}
+      # Factory Nodes run in this Registry process. Their sessions and
+      # execution checkpoints use Postgres; their inputs and outputs use OSS.
       LLM_API_KEY: ${LLM_API_KEY:?set LLM_API_KEY in /opt/hatch/.env}
-      # The deployed Creator Factory profile is DeepSeek. Keep this required
-      # at Compose interpolation time so a missing credential cannot surface
-      # later as an opaque provider rejection from a user-triggered Run.
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY in /opt/hatch/.env}
+      # DeepSeek is optional; the active Factory provider is selected by
+      # HATCH_FACTORY_LLM_PROFILE and Kimi uses LLM_API_KEY.
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.moonshot.cn/v1}
-      HATCH_LLM_PROFILE: ${HATCH_LLM_PROFILE:-kimi-k2.6-no-thinking}
+      HATCH_LLM_PROFILE: ${HATCH_LLM_PROFILE:-kimi-k2.6}
       HATCH_FACTORY_LLM_PROFILE: ${HATCH_FACTORY_LLM_PROFILE:-kimi-k2.6}
       HATCH_WEB_SEARCH_URL: ${HATCH_WEB_SEARCH_URL:-https://api.bocha.cn/v1/web-search}
       HATCH_WEB_SEARCH_PROVIDER: ${HATCH_WEB_SEARCH_PROVIDER:-bocha}
@@ -95,46 +84,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
-
-  factory-worker:
-    image: ${HATCH_IMAGE_PREFIX:-ghcr.io/example/hatch}/runtime:${HATCH_RELEASE_TAG:-dev}
-    command: ["node", "dist/creatorFactoryWorker.js"]
-    restart: unless-stopped
-    stop_grace_period: 30s
-    environment:
-      HATCH_FACTORY_DATABASE_URL: ${HATCH_DATABASE_URL:?set HATCH_DATABASE_URL in /opt/hatch/.env}
-      HATCH_CREATOR_FACTORY_ROOT: /var/lib/hatch/creator-factory
-      HATCH_CREATOR_OBJECT_STORE_BUCKET: ${HATCH_CREATOR_OBJECT_STORE_BUCKET:?set HATCH_CREATOR_OBJECT_STORE_BUCKET in /opt/hatch/.env}
-      HATCH_CREATOR_OBJECT_STORE_REGION: ${HATCH_CREATOR_OBJECT_STORE_REGION:-oss-cn-shanghai}
-      HATCH_CREATOR_OBJECT_STORE_INTERNAL: ${HATCH_CREATOR_OBJECT_STORE_INTERNAL:-true}
-      HATCH_CREATOR_OBJECT_STORE_PREFIX: ${HATCH_CREATOR_OBJECT_STORE_PREFIX:-hatch}
-      HATCH_CREATOR_FACTORY_HATCH_TIMEOUT_MS: ${HATCH_CREATOR_FACTORY_HATCH_TIMEOUT_MS:-900000}
-      HATCH_LOCAL_RUNNER_BIN: ${HATCH_LOCAL_RUNNER_BIN:-/usr/local/bin/hatch-local-runner}
-      HATCH_CREATOR_FACTORY_WORKER_ID: ${HATCH_CREATOR_FACTORY_WORKER_ID:-}
-      HATCH_CREATOR_FACTORY_LEASE_MS: ${HATCH_CREATOR_FACTORY_LEASE_MS:-1200000}
-      HATCH_CREATOR_FACTORY_HEARTBEAT_MS: ${HATCH_CREATOR_FACTORY_HEARTBEAT_MS:-60000}
-      HATCH_CREATOR_FACTORY_POLL_MS: ${HATCH_CREATOR_FACTORY_POLL_MS:-1000}
-      LLM_API_KEY: ${LLM_API_KEY:?set LLM_API_KEY in /opt/hatch/.env}
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY in /opt/hatch/.env}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.moonshot.cn/v1}
-      HATCH_LLM_PROFILE: ${HATCH_LLM_PROFILE:-kimi-k2.6-no-thinking}
-      HATCH_FACTORY_LLM_PROFILE: ${HATCH_FACTORY_LLM_PROFILE:-kimi-k2.6}
-      HATCH_WEB_SEARCH_URL: ${HATCH_WEB_SEARCH_URL:-https://api.bocha.cn/v1/web-search}
-      HATCH_WEB_SEARCH_PROVIDER: ${HATCH_WEB_SEARCH_PROVIDER:-bocha}
-      HATCH_WEB_SEARCH_API_KEY: ${HATCH_WEB_SEARCH_API_KEY:-}
-      HATCH_OUTPUT_GUARD: ${HATCH_OUTPUT_GUARD:-enforce}
-      HATCH_OUTPUT_GUARD_REGION: ${HATCH_OUTPUT_GUARD_REGION:-cn-shanghai}
-      HATCH_OUTPUT_GUARD_ENDPOINT: ${HATCH_OUTPUT_GUARD_ENDPOINT:-green-cip-vpc.cn-shanghai.aliyuncs.com}
-      HATCH_OUTPUT_GUARD_SERVICE: ${HATCH_OUTPUT_GUARD_SERVICE:-response_security_check_pro}
-      ALIBABA_CLOUD_ECS_METADATA: ${ALIBABA_CLOUD_ECS_METADATA:-HatchRuntimeRole}
-      ALIBABA_CLOUD_IMDSV1_DISABLE: ${ALIBABA_CLOUD_IMDSV1_DISABLE:-true}
-    volumes:
-      - creator_factory_data:/var/lib/hatch/creator-factory
-    networks:
-      - hatch_internal
-    depends_on:
-      registry:
-        condition: service_healthy
 
   runtime:
     image: ${HATCH_IMAGE_PREFIX:-ghcr.io/example/hatch}/runtime:${HATCH_RELEASE_TAG:-dev}
@@ -199,7 +148,7 @@ services:
       LLM_API_KEY: ${LLM_API_KEY:?set LLM_API_KEY in /opt/hatch/.env}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.moonshot.cn/v1}
-      HATCH_LLM_PROFILE: ${HATCH_LLM_PROFILE:-kimi-k2.6-no-thinking}
+      HATCH_LLM_PROFILE: ${HATCH_LLM_PROFILE:-kimi-k2.6}
       HATCH_CREATOR_MODEL: ${HATCH_CREATOR_MODEL:-kimi-k2.6}
       HATCH_REVIEWER_MODEL: ${HATCH_REVIEWER_MODEL:-kimi-k2.6}
       HATCH_COMPACTION_MODEL: ${HATCH_COMPACTION_MODEL:-kimi-k2.6}

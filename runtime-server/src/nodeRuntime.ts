@@ -30,7 +30,6 @@ export type NodeAgentFactory = (options: {
   systemPrompt: string;
   messages: AgentMessage[];
   tools: AgentTool[];
-  responseFormat: unknown;
 }) => Agent;
 
 export type NodeRuntimeOptions = {
@@ -56,8 +55,16 @@ type LiveAgent = {
   agent: Agent;
   sessionId: string;
   sessionRef: NodeSessionRef;
+  finalizer: NodeFinalizer;
   flushPersistence: () => Promise<void>;
   unsubscribe: () => void;
+};
+
+type NodeFinalizer = {
+  tool: AgentTool;
+  reset: () => void;
+  hasSubmitted: () => boolean;
+  submittedOutput: () => unknown;
 };
 
 export class NodeRuntime {
@@ -77,7 +84,7 @@ export class NodeRuntime {
     this.sessionStore = options.sessionStore ?? getDefaultPersistence();
     this.executionStore = options.executionStore ?? getDefaultPersistence();
     this.storage = options.storage;
-    this.maxRounds = positiveInteger(options.maxRounds ?? 8, "maxRounds");
+    this.maxRounds = positiveInteger(options.maxRounds ?? 10, "maxRounds");
     this.maxAgentTurns = positiveInteger(options.maxAgentTurns ?? 16, "maxAgentTurns");
     this.agentFactory = options.agentFactory ?? defaultAgentFactory;
   }
@@ -105,12 +112,25 @@ export class NodeRuntime {
     const input = parseInput(node.inputSchema, rawInput, node.name);
     const executionRef: NodeExecutionRef = { scope: checkedScope };
     const existingExecution = await this.executionStore.load(executionRef);
-    if (existingExecution?.status === "completed") {
+    if (existingExecution?.inputRef) {
+      const persistedInput = await nodeStore.readJson(checkedScope, existingExecution.inputRef);
+      if (JSON.stringify(persistedInput) !== JSON.stringify(input)) {
+        throw new NodeRuntimeError("invalid_input", `Node ${node.name} execution ${checkedScope.executionId} already has a different input manifest`);
+      }
+    } else if (existingExecution?.input !== undefined && JSON.stringify(existingExecution.input) !== JSON.stringify(input)) {
+      throw new NodeRuntimeError("invalid_input", `Node ${node.name} execution ${checkedScope.executionId} already has a different input manifest`);
+    }
+    const inputObject = await nodeStore.writeInput(checkedScope, input);
+    const inputRef = inputObject.key;
+    if (existingExecution?.status === "completed"
+      || existingExecution?.status === "waiting_for_creator"
+      || existingExecution?.status === "handoff_saved") {
       if (!existingExecution.outputRef) {
         throw new NodeRuntimeError("agent_failed", `Completed Node ${node.name} has no output reference`);
       }
       return {
         status: "completed",
+        input,
         output: await nodeStore.readJson(checkedScope, existingExecution.outputRef) as Candidate,
         outputRef: existingExecution.outputRef,
         rounds: [],
@@ -118,23 +138,23 @@ export class NodeRuntime {
         criticSessionIds: []
       };
     }
-    // Register the full logical tool surface before the first Agent is
-    // created. Values are filled by Runtime as the loop advances; Agents only
-    // ever choose a slot name, never an OSS key.
+    // Register the input manifest before the first Agent is created. Values
+    // are filled by Runtime as the loop advances; Agents choose a declared
+    // absolute OSS path (or an unambiguous relative alias), never a backend.
     const actorToolInput: NodeInput = {
       ...(input as unknown as NodeInput),
-      previous_candidate: undefined
+      previous_candidate_ref: undefined
     };
     const criticToolInput: NodeInput = {
       ...(input as unknown as NodeInput),
-      candidate: undefined
+      candidate_ref: undefined
     };
     let persistentActor: LiveAgent | undefined;
     let persistentCritic: LiveAgent | undefined;
     const actorSessionIds: string[] = [];
     const criticSessionIds: string[] = [];
     let previousCandidateRef: string | undefined;
-    let feedback: Feedback | undefined;
+    let feedbackRef: string | undefined;
     let resumeCandidateRef: string | undefined;
     let resumeCandidate: unknown;
     let nextRound = 1;
@@ -149,15 +169,16 @@ export class NodeRuntime {
         nextRound = Math.max(1, existingExecution.round);
         resumeCandidateRef = existingExecution.candidateRef;
         resumeCandidate = await nodeStore.readJson(checkedScope, resumeCandidateRef);
-        criticToolInput.candidate = resumeCandidateRef;
+        criticToolInput.candidate_ref = resumeCandidateRef;
       } else {
         nextRound = Math.max(1, existingExecution.phase === "actor"
           ? existingExecution.round
           : existingExecution.round + 1);
         previousCandidateRef = details.previousCandidateRef
           ?? (existingExecution.decision === "revise" ? existingExecution.candidateRef : undefined);
-        feedback = details.feedback as Feedback | undefined;
-        if (previousCandidateRef) actorToolInput.previous_candidate = previousCandidateRef;
+        feedbackRef = existingExecution.feedbackRef;
+        if (previousCandidateRef) actorToolInput.previous_candidate_ref = previousCandidateRef;
+        if (feedbackRef) actorToolInput.feedback_ref = feedbackRef;
       }
     }
 
@@ -165,8 +186,10 @@ export class NodeRuntime {
       status: "running",
       round: nextRound,
       phase: resumedPhase,
+      inputRef,
       ...(resumeCandidateRef === undefined ? {} : { candidateRef: resumeCandidateRef }),
-      ...(feedback === undefined ? {} : { details: { previousCandidateRef, feedback } })
+      ...(feedbackRef === undefined ? {} : { feedbackRef }),
+      ...(previousCandidateRef === undefined ? {} : { details: { previousCandidateRef } })
     };
     const saveCheckpoint = async (state: NodeExecutionState): Promise<void> => {
       lastCheckpoint = state;
@@ -210,8 +233,10 @@ export class NodeRuntime {
             status: "running",
             round,
             phase: "actor",
+            inputRef,
             ...(previousCandidateRef === undefined ? {} : { candidateRef: previousCandidateRef }),
-            ...(feedback === undefined ? {} : { details: { previousCandidateRef, feedback } })
+            ...(feedbackRef === undefined ? {} : { feedbackRef }),
+            ...(previousCandidateRef === undefined ? {} : { details: { previousCandidateRef } })
           });
           const existingCandidate = await nodeStore.readCandidate(checkedScope, round);
           if (existingCandidate) {
@@ -222,7 +247,7 @@ export class NodeRuntime {
               input,
               round,
               ...(previousCandidateRef === undefined ? {} : { previousCandidateRef }),
-              ...(feedback === undefined ? {} : { feedback })
+              ...(feedbackRef === undefined ? {} : { feedbackRef })
             };
             const actor = persistentActor ?? await this.createAgent(
               node.actor,
@@ -241,14 +266,15 @@ export class NodeRuntime {
             candidateRef = candidateObject.key;
           }
         }
-        criticToolInput.candidate = candidateRef;
+        criticToolInput.candidate_ref = candidateRef;
         const criticInput: NodeCriticInput<Input, Candidate> = { input, round, candidateRef };
         await saveCheckpoint({
           status: "running",
           round,
           phase: "critic",
+          inputRef,
           candidateRef,
-          ...(feedback === undefined ? {} : { details: { previousCandidateRef, feedback } })
+          ...(feedbackRef === undefined ? {} : { feedbackRef })
         });
         const critic = persistentCritic ?? await this.createAgent(
           node.critic,
@@ -264,6 +290,12 @@ export class NodeRuntime {
         } finally {
           if (node.critic.sessionPolicy === "spawn") disposeAgent(critic);
         }
+        if (verdict.decision !== "done" && verdict.decision !== "revise") {
+          throw new NodeRuntimeError("invalid_agent_output", "Critic returned an unsupported decision");
+        }
+        if (verdict.decision === "revise" && verdict.feedback === undefined) {
+          throw new NodeRuntimeError("invalid_agent_output", "Critic chose revise without feedback");
+        }
         const currentRound: NodeRound<Candidate, Feedback> = { round, candidate, verdict };
         rounds.push(currentRound);
 
@@ -274,10 +306,12 @@ export class NodeRuntime {
             round,
             candidateRef,
             outputRef: outputObject.key,
-            decision: "done"
+            decision: "done",
+            inputRef
           });
           return {
             status: "completed",
+            input,
             output: candidate,
             outputRef: outputObject.key,
             rounds,
@@ -286,22 +320,27 @@ export class NodeRuntime {
           };
         }
         previousCandidateRef = candidateRef;
-        actorToolInput.previous_candidate = candidateRef;
-        feedback = verdict.feedback as Feedback;
+        actorToolInput.previous_candidate_ref = candidateRef;
+        const feedbackObject = await nodeStore.writeFeedback(checkedScope, round, verdict.feedback as Feedback);
+        feedbackRef = feedbackObject.key;
+        actorToolInput.feedback_ref = feedbackRef;
         await saveCheckpoint({
           status: "running",
           round: round + 1,
           phase: "actor",
+          inputRef,
           candidateRef,
+          feedbackRef,
           decision: "revise",
-          details: { previousCandidateRef: candidateRef, feedback: verdict.feedback }
+          details: { previousCandidateRef: candidateRef }
         });
       }
       throw new NodeRuntimeError("max_rounds", `Node ${node.name} exceeded ${this.maxRounds} rounds`);
     } catch (error) {
       await this.executionStore.save(executionRef, {
         ...lastCheckpoint,
-        status: "failed",
+        status: error instanceof NodeRuntimeError && error.code === "max_rounds" ? "max_rounds" : "failed",
+        lastError: error instanceof Error ? error.message : String(error),
         details: {
           ...checkpointDetails(lastCheckpoint.details),
           error: error instanceof Error ? error.message : String(error)
@@ -326,15 +365,15 @@ export class NodeRuntime {
     if (config.storageAccess !== "none" && !this.storage) {
       throw new NodeRuntimeError("storage_unavailable", `Node agent ${sessionIdValue} requires OSS storage`);
     }
-    const responseFormat = structuredResponseFormat(config.outputSchemaName, config.outputSchema);
-    const systemPrompt = systemPromptWithOutputContract(config.systemPrompt, responseFormat);
+    const finalizer = createNodeFinalizer(config.outputSchemaName, config.outputSchema);
+    const systemPrompt = systemPromptWithOutputContract(config.systemPrompt, config.outputSchemaName, config.outputSchema);
     const sessionRef: NodeSessionRef = { scope, sessionId: sessionIdValue };
     const messages = await this.sessionStore.open(sessionRef, systemPrompt);
     const storageTools = this.storage && config.storageAccess !== "none"
       ? createNodeStorageTools(this.storage, scope, input, config.storageAccess)
       : [];
     const customTools = [...(config.tools ?? [])];
-    const allTools = [...storageTools, ...customTools];
+    const allTools = [...storageTools, ...customTools, finalizer.tool];
     const names = new Set<string>();
     for (const tool of allTools) {
       if (names.has(tool.name)) throw new NodeRuntimeError("duplicate_tool", `Tool ${tool.name} is registered more than once`);
@@ -344,8 +383,7 @@ export class NodeRuntime {
       sessionId: sessionIdValue,
       systemPrompt,
       messages,
-      tools: allTools,
-      responseFormat
+      tools: allTools
     });
     const abortAgent = () => agent.abort();
     signal?.addEventListener("abort", abortAgent, { once: true });
@@ -360,6 +398,7 @@ export class NodeRuntime {
       agent,
       sessionId: sessionIdValue,
       sessionRef,
+      finalizer,
       flushPersistence: () => pendingPersistence,
       unsubscribe: () => {
         unsubscribe();
@@ -377,6 +416,7 @@ export class NodeRuntime {
     signal?: AbortSignal
   ): Promise<Output> {
     signal?.throwIfAborted();
+    live.finalizer.reset();
     const before = live.agent.state.messages.length;
     let turnCount = 0;
     let exceeded = false;
@@ -389,36 +429,35 @@ export class NodeRuntime {
       }
     });
     const prompt = (config.renderInput ?? defaultAgentInput)(input);
+    const repairPrompt = `The previous turn did not complete the Node execution. Continue from the current context and call submit_output with the complete ${config.outputSchemaName} result. The tool call is the completion of this turn.`;
     try {
-      await live.agent.prompt(prompt);
-      await live.flushPersistence();
-      signal?.throwIfAborted();
+      for (const currentPrompt of [prompt, repairPrompt]) {
+        await live.agent.prompt(currentPrompt);
+        await live.flushPersistence();
+        signal?.throwIfAborted();
+        if (live.finalizer.hasSubmitted()) break;
+      }
     } finally {
       guard();
     }
     if (exceeded) {
       throw new NodeRuntimeError("max_agent_turns", `${label} exceeded ${this.maxAgentTurns} Pi turns in Node round ${round}`);
     }
+    if (live.finalizer.hasSubmitted()) return live.finalizer.submittedOutput() as Output;
+
     const messages = live.agent.state.messages.slice(before);
     const assistant = [...messages]
       .reverse()
       .find((message): message is AssistantMessage => message.role === "assistant");
-    if (!assistant) throw new NodeRuntimeError("agent_failed", `${label} ended without an assistant message`);
-    if (assistant.stopReason === "error" || assistant.stopReason === "aborted") {
+    if (assistant?.stopReason === "error" || assistant?.stopReason === "aborted") {
       throw new NodeRuntimeError("agent_failed", `${label} failed: ${assistant.errorMessage ?? assistant.stopReason}`);
     }
-    if (assistant.content.some((block) => block.type === "toolCall")) {
-      throw new NodeRuntimeError("agent_failed", `${label} ended with a tool call instead of structured output`);
-    }
-    const text = assistantText(assistant);
-    if (!text.trim()) throw new NodeRuntimeError("agent_failed", `${label} returned empty structured output`);
-    return parseOutput(config.outputSchema, text, label);
+    throw new NodeRuntimeError("agent_failed", `${label} ended without calling submit_output`);
   }
 }
 
 function defaultAgentFactory(options: Parameters<NodeAgentFactory>[0]): Agent {
   return createFactoryPiAgent({
-    responseFormat: options.responseFormat,
     initialState: {
       systemPrompt: options.systemPrompt,
       messages: options.messages,
@@ -433,21 +472,10 @@ function defaultAgentFactory(options: Parameters<NodeAgentFactory>[0]): Agent {
 
 function systemPromptWithOutputContract(
   systemPrompt: string,
-  responseFormat: Record<string, unknown>
+  schemaName: string,
+  schema: z.ZodTypeAny
 ): string {
-  const schema = responseFormat.json_schema;
-  return `${systemPrompt.trim()}\n\n# Output contract\nThe only accepted final output is one complete JSON object matching this JSON Schema. Do not print prose, Markdown, or a code fence around it.\n${JSON.stringify(schema, null, 2)}`;
-}
-
-function structuredResponseFormat(name: string, schema: z.ZodTypeAny): Record<string, unknown> {
-  return {
-    type: "json_schema",
-    json_schema: {
-      name: safeSchemaName(name),
-      strict: true,
-      schema: z.toJSONSchema(schema, { target: "openAi" })
-    }
-  };
+  return `${systemPrompt.trim()}\n\n# Output contract\nComplete this Node by calling the submit_output tool with one complete JSON object matching the ${schemaName} schema. The submit_output tool call is the Node result.\n${JSON.stringify(z.toJSONSchema(schema, { target: "openAi" }), null, 2)}`;
 }
 
 function parseInput<Input>(schema: z.ZodType<Input>, rawInput: unknown, nodeId: string): Input {
@@ -458,31 +486,37 @@ function parseInput<Input>(schema: z.ZodType<Input>, rawInput: unknown, nodeId: 
   return result.data;
 }
 
-function parseOutput<Output>(schema: z.ZodType<Output>, text: string, label: string): Output {
-  let value: unknown;
-  try {
-    value = JSON.parse(stripCodeFence(text));
-  } catch (error) {
-    throw new NodeRuntimeError("invalid_agent_output", `${label} did not return JSON: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  // The provider response_format is the structural contract. Runtime parses
-  // the returned JSON but does not turn this into a business-quality gate;
-  // Critic is the quality loop.
-  void schema;
-  return value as Output;
-}
-
-function assistantText(message: AssistantMessage): string {
-  return message.content
-    .filter((block): block is Extract<AssistantMessage["content"][number], { type: "text" }> => block.type === "text")
-    .map((block) => block.text)
-    .join("");
-}
-
-function stripCodeFence(value: string): string {
-  const trimmed = value.trim();
-  const match = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-  return match?.[1]?.trim() ?? trimmed;
+function createNodeFinalizer(schemaName: string, schema: z.ZodTypeAny): NodeFinalizer {
+  let submitted = false;
+  let output: unknown;
+  const tool: AgentTool = {
+    name: "submit_output",
+    label: "submit_output",
+    description: `Submit the complete ${schemaName} result. This is the final step of the Node execution.`,
+    parameters: z.toJSONSchema(schema, { target: "openAi" }) as unknown as AgentTool["parameters"],
+    executionMode: "sequential",
+    execute: async (_toolCallId, args, signal) => {
+      signal?.throwIfAborted();
+      if (!submitted) {
+        output = args;
+        submitted = true;
+      }
+      return {
+        content: [{ type: "text", text: JSON.stringify({ status: "accepted" }) }],
+        details: { nodeFinalizer: true, status: "accepted" },
+        terminate: true
+      };
+    }
+  };
+  return {
+    tool,
+    reset: () => {
+      submitted = false;
+      output = undefined;
+    },
+    hasSubmitted: () => submitted,
+    submittedOutput: () => output
+  };
 }
 
 function sessionId(
@@ -503,22 +537,14 @@ function disposeAgent(agent: LiveAgent): void {
 
 function checkpointDetails(value: unknown): {
   previousCandidateRef?: string;
-  feedback?: unknown;
   error?: string;
 } {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const details = value as Record<string, unknown>;
   return {
     ...(typeof details.previousCandidateRef === "string" ? { previousCandidateRef: details.previousCandidateRef } : {}),
-    ...(Object.prototype.hasOwnProperty.call(details, "feedback") ? { feedback: details.feedback } : {}),
     ...(typeof details.error === "string" ? { error: details.error } : {})
   };
-}
-
-function safeSchemaName(value: string): string {
-  const normalized = value.trim();
-  if (!normalized || !/^[A-Za-z0-9_-]+$/.test(normalized)) throw new Error(`Invalid structured output schema name: ${value}`);
-  return normalized;
 }
 
 function positiveInteger(value: number, name: string): number {

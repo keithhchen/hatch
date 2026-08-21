@@ -192,6 +192,13 @@ export function listProductFiles(token, productId) {
   return dashboardRequest(`/v1/creator/products/${encodeURIComponent(productId)}/files`, { token });
 }
 
+export function deleteProductFile(token, productId, fileId) {
+  return dashboardRequest(`/v1/creator/products/${encodeURIComponent(productId)}/files/${encodeURIComponent(fileId)}`, {
+    method: "DELETE",
+    token
+  });
+}
+
 export function uploadProductFile(token, productId, file) {
   return file.arrayBuffer().then((bytes) => {
     return dashboardRequest(`/v1/creator/products/${encodeURIComponent(productId)}/files`, {
@@ -226,5 +233,56 @@ export function startFactoryRunFromSources(token, product, documentIds) {
     body: JSON.stringify({
       file_ids: documentIds
     })
+  });
+}
+
+export function startAboutYouNode(token, productId, fileIds, executionId, idempotencyKey = crypto.randomUUID()) {
+  return dashboardRequest(`/v1/creator/products/${encodeURIComponent(productId)}/nodes/about-you/executions`, {
+    method: "POST",
+    token,
+    headers: { "idempotency-key": idempotencyKey },
+    body: JSON.stringify({
+      file_ids: fileIds,
+      ...(executionId ? { execution_id: executionId } : {})
+    })
+  });
+}
+
+export function getNodeExecution(token, productId, node, executionId) {
+  return dashboardRequest(`/v1/creator/products/${encodeURIComponent(productId)}/nodes/${encodeURIComponent(node)}/executions/${encodeURIComponent(executionId)}`, { token });
+}
+
+export function getLatestNodeExecution(token, productId, node) {
+  return dashboardRequest(`/v1/creator/products/${encodeURIComponent(productId)}/nodes/${encodeURIComponent(node)}/executions`, { token });
+}
+
+export function saveAboutYouNodeAnswers(token, productId, executionId, answers, idempotencyKey = crypto.randomUUID()) {
+  return dashboardRequest(`/v1/creator/products/${encodeURIComponent(productId)}/nodes/about-you/executions/${encodeURIComponent(executionId)}/answers`, {
+    method: "POST",
+    token,
+    headers: { "idempotency-key": idempotencyKey },
+    body: JSON.stringify({ answers })
+  });
+}
+
+export function startCorpusNode(token, productId, fileIds, aboutYouRef, executionId, idempotencyKey = crypto.randomUUID()) {
+  return dashboardRequest(`/v1/creator/products/${encodeURIComponent(productId)}/nodes/corpus/executions`, {
+    method: "POST",
+    token,
+    headers: { "idempotency-key": idempotencyKey },
+    body: JSON.stringify({
+      file_ids: fileIds,
+      about_you_ref: aboutYouRef,
+      ...(executionId ? { execution_id: executionId } : {})
+    })
+  });
+}
+
+export function publishCorpusToRegistry(token, productId, input, idempotencyKey = crypto.randomUUID()) {
+  return dashboardRequest(`/v1/creator/products/${encodeURIComponent(productId)}/registry`, {
+    method: "POST",
+    token,
+    headers: { "idempotency-key": idempotencyKey },
+    body: JSON.stringify(input)
   });
 }
