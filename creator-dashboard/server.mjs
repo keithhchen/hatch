@@ -3277,8 +3277,13 @@ function creatorProductView(agent, state, run) {
     status,
     candidate: presentedCandidate,
     approval: presentedApproval,
-    release: state?.release ?? null,
-    releases: state?.releases ?? (state?.release ? [state.release] : []),
+    // The new Registry live release is authoritative. PortalState only keeps
+    // the legacy browser-side projection and must not erase a release that
+    // arrived from the Registry Product listing.
+    release: state?.release ?? base.release ?? null,
+    releases: state?.releases ?? (state?.release
+      ? [state.release]
+      : (base.release ? [base.release] : [])),
     public_url: canonicalPublicUrl(state?.public_url) ?? (base.status === "published" ? `/products/${encodeURIComponent(base.product_id)}` : null),
     readiness: {
       candidate_approved: candidateApproved,
