@@ -112,17 +112,21 @@ export class CorpusPublisher {
     }
     const releaseDigest = staged.corpus_digest;
     const releaseRef = `registry/${input.productId}/releases/${releaseDigest.slice("sha256:".length)}`;
+    const releaseCorpusRef = `${releaseRef}/corpus.json`;
+    await this.objectStore.put(releaseCorpusRef, bytes, { immutable: true, contentType: "application/json" });
+    const publishedAt = new Date().toISOString();
     const releaseInput = {
       product_id: input.productId,
       creator_id: input.creatorId,
       release_digest: releaseDigest,
       corpus_digest: sourceDigest,
-      corpus_ref: execution.outputRef,
+      corpus_ref: releaseCorpusRef,
       release_ref: releaseRef,
       runtime_manifest_ref: `${releaseRef}/runtime/manifest.json`,
       brief_spec: input.briefSpec ?? null,
+      published_at: publishedAt,
     } as const;
-    const releaseBytes = Buffer.from(JSON.stringify({ ...releaseInput, status: "published", published_at: new Date().toISOString() }, null, 2), "utf8");
+    const releaseBytes = Buffer.from(JSON.stringify({ ...releaseInput, status: "published" }, null, 2), "utf8");
     await this.objectStore.put(`${releaseRef}/release.json`, releaseBytes, { immutable: true, contentType: "application/json" });
     const release = await this.releases.publish(releaseInput);
     await rm(staging, { recursive: true, force: true });

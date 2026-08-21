@@ -14,7 +14,7 @@ export type CreatorRegistryRelease = {
   published_at: string;
 };
 
-type ReleaseInput = Omit<CreatorRegistryRelease, "status" | "published_at"> & { published_at?: string };
+export type ReleaseInput = Omit<CreatorRegistryRelease, "status" | "published_at"> & { published_at?: string };
 
 /** New Registry authority for Distill Factory releases. */
 export class CreatorRegistryReleaseStore {
