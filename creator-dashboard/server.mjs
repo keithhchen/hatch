@@ -3113,21 +3113,12 @@ function checkoutOutcomeBody(session, order, entitlement, payment) {
   };
 }
 
-async function authoritativeCatalog(registryUrl, fetchImpl, portalState) {
+async function authoritativeCatalog(registryUrl, fetchImpl, _portalState) {
   const registryCatalog = await registryRequest(registryUrl, "/v1/public/products", { fetchImpl });
   const byProduct = new Map((Array.isArray(registryCatalog) ? registryCatalog : []).map((product) => {
     const agent = { ...product, agent_id: product.product_id };
     return [`${agent.creator_id}:${agent.product_id}`, agent];
   }));
-  // Portal only changes its stable release after both Commerce and Registry
-  // have acknowledged the same deployment operation. A captured immutable
-  // snapshot therefore prevents a pending or repaired Registry pointer from
-  // being mixed with the previous Portal release snapshot.
-  for (const state of portalState.listCreatorProducts()) {
-    const snapshot = state?.release?.catalog_snapshot;
-    if (!snapshot?.creator_id || !snapshot?.product_id) continue;
-    byProduct.set(`${snapshot.creator_id}:${snapshot.product_id}`, snapshot);
-  }
   return [...byProduct.values()];
 }
 
