@@ -34,7 +34,7 @@ The Runtime serves the following authenticated, binding-scoped routes:
 
 ```text
 POST  /v1/conversations                         create (client_request_id idempotency)
-GET   /v1/conversations?agent_id&status&cursor  list a Creator Agent's library
+GET   /v1/conversations?entitlement_id&status&cursor  list the purchased Product's library
 GET   /v1/conversations/:id                      metadata
 PATCH /v1/conversations/:id                      metadata with version/CAS
 GET   /v1/conversations/:id/snapshot?after_cursor
@@ -47,6 +47,18 @@ POST  /v1/conversations/:id/runs/:runId/cancel
 `POST /v1/conversations/:id/runs` intentionally returns
 `409 executor_attach_required`: a REST request cannot safely create a queued
 Run without an executor window that can answer local-tool and approval work.
+
+### Product session binding
+
+For a purchased Product, Desktop sends `entitlement_id` in `client.hello`.
+That is the only Product selector crossing the Runtime WebSocket boundary.
+Runtime resolves the entitlement server-side and derives the authenticated
+`user_id`, `creator_id`, and `product_id`; Desktop must not send those fields
+alongside an entitlement. `agent_id` is not a client protocol field.
+
+The creator/local resolver-free path may still use explicit identity fields for
+local development and creator tooling. It is a separate server-side mode, not
+the buyer/Desktop contract.
 
 ### Executor lease and recovery V1
 

@@ -461,7 +461,7 @@ async function startRuntime(input: {
   for (const runId of ["run-success", "run-repeat", "run-failed", "run-cancelled", "run-after-restart", "run-after-refund"]) {
     const publicId = `conversation-${runId}`;
     await conversationRepository.createConversation({
-      id: durableConversationId({ creatorId: CREATOR_ID, userId: BUYER_ID, agentId: AGENT_ID, productId: PRODUCT_ID }, publicId),
+      id: durableConversationId({ creatorId: CREATOR_ID, userId: BUYER_ID, productId: PRODUCT_ID }, publicId),
       publicId,
       ownerAccountId: BUYER_ID,
       creatorId: CREATOR_ID,
@@ -606,8 +606,6 @@ function hello(entitlementId: string): JsonRecord {
     protocol_version: PROTOCOL_VERSION,
     auth_token: BUYER_TOKEN,
     entitlement_id: entitlementId,
-    creator_id: CREATOR_ID,
-    product_id: PRODUCT_ID,
     local_tools: []
   };
 }

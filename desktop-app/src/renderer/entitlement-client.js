@@ -64,7 +64,6 @@ export function runtimeHttpUrl(runtimeUrl, pathname) {
 
 function isCreatorAgentEntitlement(value) {
   const productId = value?.product_id;
-  const agentId = value?.agent_id;
   return Boolean(
     value?.status === "active"
     && isUuidV4(value?.entitlement_id)
@@ -72,7 +71,6 @@ function isCreatorAgentEntitlement(value) {
     && isUuidV4(value?.creator_id)
     && isUuidV4(productId)
     && (!value?.order_id || isUuidV4(value.order_id))
-    && (!agentId || agentId === productId)
     && value?.creator?.id === value.creator_id
     && value?.creator?.name
     && value?.product?.id === productId

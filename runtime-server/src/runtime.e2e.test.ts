@@ -83,6 +83,29 @@ test("runtime protocol mirrors the canonical wire schema", async () => {
   assert.deepEqual(schema.$defs.skillInvoked.properties.trigger.properties.tool.enum, ["shell_exec", "file_read"]);
 });
 
+test("buyer hello selects only an entitlement and never accepts identity aliases", () => {
+  const entitlementOnly = {
+    type: "client.hello",
+    protocol_version: PROTOCOL_VERSION,
+    auth_token: "buyer-token",
+    entitlement_id: "11111111-1111-4111-8111-111111111111",
+    local_tools: []
+  };
+  assert.doesNotThrow(() => parseInboundMessage(entitlementOnly));
+
+  for (const field of ["creator_id", "user_id", "product_id"] as const) {
+    assert.throws(
+      () => parseInboundMessage({ ...entitlementOnly, [field]: "22222222-2222-4222-8222-222222222222" }),
+      /only entitlement_id|server-derived/
+    );
+  }
+
+  assert.throws(
+    () => parseInboundMessage({ ...entitlementOnly, agent_id: "22222222-2222-4222-8222-222222222222" }),
+    /Unrecognized key/
+  );
+});
+
 test("legacy dotted JSONL local-tool names normalize to canonical underscore names", async () => {
   const dataDir = await tempWorkspace();
   const legacyToolCallNames = ["fs.list", "fs.search", "fs.read", "fs.write", "fs.patch", "shell.exec", "git.diff"];

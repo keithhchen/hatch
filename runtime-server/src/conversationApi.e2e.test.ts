@@ -286,7 +286,7 @@ test("WebSocket retries use client_message_id without creating a second run or r
     conversation_id: conversationId,
     message: { role: "user", content: "Find Hatch." }
   }));
-  await waitForSocket(messages, (message) => message.type === "tool_call.request" && message.run_id === "run_transport_first");
+  await waitForSocket(messages, (message) => message.type === "tool_call.delta" && message.run_id === "run_transport_first");
 
   socket.send(JSON.stringify({
     type: "client.message",
@@ -300,7 +300,7 @@ test("WebSocket retries use client_message_id without creating a second run or r
   ));
   assert.equal(replay.type, "turn.state");
   assert.ok(!messages.some((message) => message.type === "turn.failed" && message.run_id === "run_transport_retry"));
-  assert.ok(!messages.some((message) => message.type === "tool_call.request" && message.run_id === "run_transport_retry"));
+  assert.ok(!messages.some((message) => message.type === "tool_call.delta" && message.run_id === "run_transport_retry"));
   socket.close();
 });
 
@@ -374,7 +374,7 @@ test("two windows get distinct executor leases; disconnect is Interrupted and re
     conversation_id: conversationId,
     message: { role: "user", content: "Find Hatch." }
   }));
-  await waitForSocket(firstMessages, (message) => message.type === "tool_call.request" && message.run_id === "run_recovery_first");
+  await waitForSocket(firstMessages, (message) => message.type === "tool_call.delta" && message.run_id === "run_recovery_first");
   const beforeDisconnect = await repository.snapshot(durableId);
   const beforeCursor = beforeDisconnect.cursor;
   const firstRun = await repository.getRun(durableId, "run_recovery_first");
@@ -423,7 +423,7 @@ test("two windows get distinct executor leases; disconnect is Interrupted and re
     && message.reason === "Idempotent client message replay"
   ));
   assert.equal(retry.type, "turn.state");
-  assert.ok(!secondMessages.some((message) => message.type === "tool_call.request" && message.run_id === "run_recovery_retry"));
+  assert.ok(!secondMessages.some((message) => message.type === "tool_call.delta" && message.run_id === "run_recovery_retry"));
 
   // A fresh user intent can start a replacement Run after the old executor is
   // interrupted. The new window receives its own server-generated lease.
@@ -435,10 +435,10 @@ test("two windows get distinct executor leases; disconnect is Interrupted and re
     message: { role: "user", content: "Find Hatch again." }
   }));
   const replacement = await waitForSocket(secondMessages, (message) => (
-    (message.type === "tool_call.request" || message.type === "turn.failed")
+    (message.type === "tool_call.delta" || message.type === "turn.failed")
     && message.run_id === "run_recovery_replacement"
   ));
-  assert.equal(replacement.type, "tool_call.request");
+  assert.equal(replacement.type, "tool_call.delta");
   const replacementRun = await repository.getRun(durableId, "run_recovery_replacement");
   assert.ok(replacementRun?.executorId?.startsWith("executor_"));
   assert.notEqual(replacementRun?.executorId, firstRun?.executorId);

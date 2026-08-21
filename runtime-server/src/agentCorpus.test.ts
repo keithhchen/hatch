@@ -291,8 +291,6 @@ test("current Agent Corpus entitlements are discoverable and bind the Desktop se
         protocol_version: "0.7",
         license_token: "license-jordan",
         entitlement_id: entitlement.entitlement_id,
-        creator_id: entitlement.creator_id,
-        product_id: entitlement.product_id,
         local_tools: []
       })));
     });

@@ -154,6 +154,8 @@
           "then": {
             "not": {
               "anyOf": [
+                { "required": ["creator_id"] },
+                { "required": ["user_id"] },
                 { "required": ["product_id"] }
               ]
             }
@@ -172,7 +174,6 @@
         "license_token": { "type": "string", "minLength": 1, "maxLength": 4096 },
         "entitlement_id": { "type": "string", "minLength": 1, "maxLength": 256 },
         "creator_id": { "type": "string", "minLength": 1, "maxLength": 256 },
-        "agent_id": { "type": "string", "minLength": 1, "maxLength": 256 },
         "user_id": { "type": "string", "minLength": 1, "maxLength": 256 },
         "product_id": { "type": "string", "minLength": 1, "maxLength": 256 },
         "client_version": { "type": "string", "maxLength": 256 },

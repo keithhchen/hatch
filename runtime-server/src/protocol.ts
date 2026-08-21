@@ -45,6 +45,9 @@ export const ClientHelloSchema = z.object({
   // send auth_token issued by Registry.
   license_token: z.string().min(1).max(MAX_AUTH_TOKEN_CHARS).optional(),
   entitlement_id: AuthorityIdSchema.optional(),
+  // These fields remain available only for resolver-free local/creator
+  // sessions. A buyer session is selected by entitlement_id; the Runtime
+  // derives creator_id and product_id from the server-owned entitlement.
   creator_id: AuthorityIdSchema.optional(),
   user_id: AuthorityIdSchema.optional(),
   product_id: AuthorityIdSchema.optional(),
@@ -54,9 +57,14 @@ export const ClientHelloSchema = z.object({
   if (!message.auth_token && !message.license_token) {
     ctx.addIssue({ code: "custom", path: ["auth_token"], message: "auth_token is required" });
   }
-  // creator_id and product_id are checked against the server-owned
-  // entitlement; a client can never use them to broaden its product scope.
-}).transform((message) => ({ ...message, agent_id: message.product_id }));
+  if (message.entitlement_id && (message.creator_id || message.user_id || message.product_id)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["entitlement_id"],
+      message: "A bound client.hello must identify only entitlement_id; creator and product identity are server-derived"
+    });
+  }
+});
 
 /**
  * The only file-shaped value that can cross the WebSocket boundary. It is a
@@ -198,10 +206,7 @@ export const InboundMessageSchema = z.discriminatedUnion("type", [
   TurnCancelSchema
 ]);
 
-// The wire contract is product_id-only. The parser adds agent_id as an
-// internal compatibility alias for Runtime code, but callers constructing a
-// canonical 0.7 hello must not send that legacy field.
-export type ClientHello = z.input<typeof ClientHelloSchema> & { agent_id?: string };
+export type ClientHello = z.infer<typeof ClientHelloSchema>;
 export type RunStart = z.infer<typeof ClientMessageSchema>;
 export type ContextAttachment = z.infer<typeof ContextAttachmentSchema>;
 export type ToolResult = z.infer<typeof ToolCallResultSchema>;

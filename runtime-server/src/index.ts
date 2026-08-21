@@ -553,7 +553,6 @@ function runtimeDurationMs(
 type SessionBinding = {
   creatorId: string;
   userId: string;
-  agentId: string;
   productId: string;
   corpusDigest: string;
   runtimeDigest?: string;
@@ -1047,11 +1046,11 @@ async function handleHttpRequest(
           const resolved = entitlement.purchased_corpus_digest
             ? await agentCorpusResolver.resolve(
               entitlement.creator_id,
-              entitlement.agent_id,
+              entitlement.product_id,
               entitlement.purchased_corpus_digest,
               signal
             )
-            : await agentCorpusResolver.resolve(entitlement.creator_id, entitlement.agent_id, signal);
+            : await agentCorpusResolver.resolve(entitlement.creator_id, entitlement.product_id, signal);
           if (resolved.corpus.product.id !== entitlement.product_id || resolved.corpus.creator.id !== entitlement.creator_id) {
             throw new Error(`Entitlement ${entitlement.entitlement_id} does not match its current Agent Corpus`);
           }
@@ -1156,7 +1155,7 @@ async function handleHttpRequest(
       creator_id: binding.creatorId,
       messages: sanitizeBoundHistory(
         messages,
-        binding.agentId
+        binding.productId
       ),
       history_truncated: historyTruncated
     }, maxHttpResponseBytes);
@@ -1285,7 +1284,7 @@ async function handleConversationHttpRequest(
       return;
     }
     const messages = store
-      ? sanitizeBoundHistory(await store.readVisibleConversation(conversation.id), binding.agentId)
+      ? sanitizeBoundHistory(await store.readVisibleConversation(conversation.id), binding.productId)
       : [];
     writeResponse(200, {
       conversation: publicConversation(snapshot.conversation),
@@ -1406,6 +1405,8 @@ function conversationBinding(binding: SessionBinding): ConversationBinding {
     return {
       ownerAccountId: "local-development",
       creatorId: "local-development",
+      // The repository adapter still has a legacy agent_id field in local
+      // mode; it is not part of the Product session identity.
       agentId: "local-agent",
       productId: "local-product",
       corpusDigest: binding.corpusDigest
@@ -1415,7 +1416,7 @@ function conversationBinding(binding: SessionBinding): ConversationBinding {
     // Product mode always keeps the verified account as the owner.
     ownerAccountId: binding.userId,
     creatorId: binding.creatorId,
-    agentId: binding.agentId,
+    agentId: binding.productId,
     productId: binding.productId,
     corpusDigest: binding.corpusDigest
   };
@@ -1792,7 +1793,7 @@ async function handleRuntimeSocket(
   });
 
   const send = async (message: OutboundMessage): Promise<void> => {
-    const outbound = protectPrivateAgentBoundary(message, binding?.agentCorpusRoot, binding?.agentId);
+    const outbound = protectPrivateAgentBoundary(message, binding?.agentCorpusRoot, binding?.productId);
     if (socket.readyState !== WebSocket.OPEN) return;
     const payload = JSON.stringify(outbound);
     const payloadBytes = Buffer.byteLength(payload, "utf8");
@@ -1911,7 +1912,7 @@ async function handleRuntimeSocket(
               serverTools.setKnowledgeScope({
                 provider: createKnowledgeProvider(binding.agentCorpusRoot, binding.agentCorpus, binding.corpusDigest),
                 creatorId: binding.agentCorpus.creator.id,
-                agentId: binding.agentCorpus.agent_id,
+                agentId: binding.productId,
                 corpusDigest: binding.corpusDigest
               });
               serverTools.setResolvedCreatorTools(await resolveCreatorTools(
@@ -1929,7 +1930,7 @@ async function handleRuntimeSocket(
               type: "session.started",
               creator_id: binding.creatorId,
               user_id: binding.userId,
-              agent_id: binding.agentId,
+              agent_id: binding.productId,
               product_id: binding.productId,
               corpus_digest: binding.corpusDigest,
               ...(binding.purchasedCorpusDigest ? {
@@ -2253,7 +2254,7 @@ async function handleRuntimeSocket(
                 serverTools.setResolvedCreatorTools(await resolveCreatorTools(
                   creatorToolControlPlane,
                   binding.creatorId,
-                  binding.agentId,
+                  binding.productId,
                   binding.agentCorpus,
                   authorizationController.signal
                 ));
@@ -2991,7 +2992,9 @@ async function resolveSessionBinding(
   if (authIdentityResolver && !authClaims) {
     throw new EntitlementError("authentication_required", "A valid Hatch session is required.");
   }
-  if (hello.agent_id) {
+  // A product-selected hello is only for local/creator sessions. Buyer
+  // sessions must carry entitlement_id alone so the server owns the binding.
+  if (hello.product_id && !hello.entitlement_id) {
     if (!agentCorpusResolver) {
       throw new EntitlementError(
         "agent_corpus_unavailable",
@@ -3004,7 +3007,7 @@ async function resolveSessionBinding(
     if (!selectedCreatorId) {
       throw new EntitlementError("creator_required", "creator_id is required when selecting a Creator Agent.");
     }
-    let resolved = await agentCorpusResolver.resolve(selectedCreatorId, hello.agent_id, signal);
+    let resolved = await agentCorpusResolver.resolve(selectedCreatorId, hello.product_id, signal);
     let corpusEntitlement: Awaited<ReturnType<EntitlementResolver["resolve"]>> | undefined;
     if (authClaims?.role !== "creator" && !entitlementResolver) {
       throw new EntitlementError(
@@ -3026,19 +3029,19 @@ async function resolveSessionBinding(
       if (entitlement.purchased_corpus_digest) {
         resolved = await agentCorpusResolver.resolve(
           selectedCreatorId,
-          hello.agent_id,
+          hello.product_id,
           entitlement.purchased_corpus_digest,
           signal
         );
       }
-      if (entitlement.agent_id !== hello.agent_id
+      if (entitlement.product_id !== hello.product_id
         || entitlement.creator_id !== resolved.corpus.creator.id
         || entitlement.product_id !== resolved.corpus.product.id) {
         throw new EntitlementError("agent_entitlement_mismatch", "This Creator Agent is not available for the signed-in account.");
       }
       corpusEntitlement = entitlement;
     }
-    if (hello.product_id && hello.product_id !== resolved.corpus.product.id) {
+    if (hello.product_id !== resolved.corpus.product.id) {
       throw new Error("Agent Corpus product binding mismatch");
     }
     return {
@@ -3047,7 +3050,6 @@ async function resolveSessionBinding(
         ?? corpusEntitlement?.user_id
         ?? hello.user_id
         ?? `local-${shortHash(authToken ?? "local-user")}`,
-      agentId: resolved.corpus.agent_id,
       productId: resolved.corpus.product.id,
       corpusDigest: resolved.digest,
       ...(resolved.runtimeDigest ? { runtimeDigest: resolved.runtimeDigest } : {}),
@@ -3092,11 +3094,11 @@ async function resolveSessionBinding(
     const resolved = entitlement.purchased_corpus_digest
       ? await agentCorpusResolver.resolve(
         entitlement.creator_id,
-        entitlement.agent_id,
+        entitlement.product_id,
         entitlement.purchased_corpus_digest,
         signal
       )
-      : await agentCorpusResolver.resolve(entitlement.creator_id, entitlement.agent_id, signal);
+      : await agentCorpusResolver.resolve(entitlement.creator_id, entitlement.product_id, signal);
     if (resolved.corpus.product.id !== entitlement.product_id || resolved.corpus.creator.id !== entitlement.creator_id) {
       throw new Error("Entitlement does not match its current Agent Corpus");
     }
@@ -3104,7 +3106,6 @@ async function resolveSessionBinding(
     return {
       creatorId: entitlement.creator_id,
       userId: entitlement.user_id,
-      agentId: entitlement.agent_id,
       productId: entitlement.product_id,
       corpusDigest: resolved.digest,
       ...(resolved.runtimeDigest ? { runtimeDigest: resolved.runtimeDigest } : {}),
@@ -3129,15 +3130,13 @@ async function resolveSessionBinding(
   // In product mode all scope is derived from a server-verified entitlement above.
   const creatorId = hello.creator_id ?? `local-${shortHash(authToken ?? "local-creator")}`;
   const userId = authClaims?.sub ?? hello.user_id ?? `local-${shortHash(authToken ?? "local-user")}`;
-  const agentId = hello.agent_id ?? "local-agent";
   const productId = hello.product_id ?? "local-product";
   return {
     creatorId,
     userId,
-    agentId,
     productId,
     corpusDigest: `sha256:${"0".repeat(64)}`,
-    explicit: Boolean(hello.creator_id || hello.user_id || hello.agent_id || hello.product_id)
+    explicit: Boolean(hello.creator_id || hello.user_id || hello.product_id)
   };
 }
 
@@ -3226,7 +3225,6 @@ async function revalidateTurnAuthorization(
     if (entitlement.entitlement_id !== binding.entitlementId
       || entitlement.user_id !== binding.userId
       || entitlement.creator_id !== binding.creatorId
-      || entitlement.agent_id !== binding.agentId
       || entitlement.product_id !== binding.productId) {
       throw new EntitlementError("entitlement_required", "The Creator Agent access binding is no longer valid.");
     }
@@ -3242,14 +3240,14 @@ async function revalidateTurnAuthorization(
     const current = binding.purchasedCorpusDigest
       ? await agentCorpusResolver.resolve(
           binding.creatorId,
-          binding.agentId,
+          binding.productId,
           binding.corpusDigest,
           signal
         )
-      : await agentCorpusResolver.resolve(binding.creatorId, binding.agentId, signal);
+      : await agentCorpusResolver.resolve(binding.creatorId, binding.productId, signal);
     if (current.digest !== binding.corpusDigest
       || current.corpus.creator.id !== binding.creatorId
-      || current.corpus.agent_id !== binding.agentId
+      || current.corpus.agent_id !== binding.productId
       || current.corpus.product.id !== binding.productId) {
       throw new EntitlementError("agent_updated", "This Creator Agent changed. Reconnect before starting another turn.");
     }
@@ -3284,8 +3282,10 @@ function controlledTurnAuthorizationError(error: unknown): { code: string; messa
   };
 }
 
-export function scopedConversationId(binding: Pick<SessionBinding, "creatorId" | "userId" | "agentId" | "productId" | "corpusDigest">, conversationId: string): string {
-  return `scope:${shortHash([binding.creatorId, binding.userId, binding.agentId, binding.productId, binding.corpusDigest].join("\u0000"))}:${conversationId}`;
+export function scopedConversationId(binding: Pick<SessionBinding, "creatorId" | "userId" | "productId" | "corpusDigest">, conversationId: string): string {
+  // Keep the historical hash shape while the repository still stores the
+  // legacy agent_id column. Both values represented the same Product UUID.
+  return `scope:${shortHash([binding.creatorId, binding.userId, binding.productId, binding.productId, binding.corpusDigest].join("\u0000"))}:${conversationId}`;
 }
 
 /**
@@ -3295,10 +3295,10 @@ export function scopedConversationId(binding: Pick<SessionBinding, "creatorId" |
  * Agent across Agent Corpus updates.
  */
 export function durableConversationId(
-  binding: Pick<SessionBinding, "creatorId" | "userId" | "agentId" | "productId">,
+  binding: Pick<SessionBinding, "creatorId" | "userId" | "productId">,
   conversationId: string
 ): string {
-  return `conversation:${shortHash([binding.creatorId, binding.userId, binding.agentId, binding.productId].join("\u0000"))}:${conversationId}`;
+  return `conversation:${shortHash([binding.creatorId, binding.userId, binding.productId, binding.productId].join("\u0000"))}:${conversationId}`;
 }
 
 function shortHash(value: string): string {
@@ -3336,19 +3336,14 @@ async function bindingFromHistoryRequest(
       authIdentity ?? legacyAuthClaims(authToken, authIdentityResolver, legacyHmacAuth),
       entitlement
     );
-    const creatorId = url.searchParams.get("creator_id");
-    const productId = url.searchParams.get("product_id");
-    if (creatorId !== entitlement.creator_id || productId !== entitlement.product_id) {
-      throw new EntitlementError("agent_entitlement_mismatch", "Conversation history is outside the purchased Agent scope.");
-    }
     const resolved = entitlement.purchased_corpus_digest
       ? await agentCorpusResolver.resolve(
         entitlement.creator_id,
-        entitlement.agent_id,
+        entitlement.product_id,
         entitlement.purchased_corpus_digest,
         signal
       )
-      : await agentCorpusResolver.resolve(entitlement.creator_id, entitlement.agent_id, signal);
+      : await agentCorpusResolver.resolve(entitlement.creator_id, entitlement.product_id, signal);
     if (resolved.corpus.product.id !== entitlement.product_id || resolved.corpus.creator.id !== entitlement.creator_id) {
       throw new Error("Entitlement does not match its current Agent Corpus");
     }
@@ -3356,7 +3351,6 @@ async function bindingFromHistoryRequest(
     return {
       creatorId: entitlement.creator_id,
       userId: entitlement.user_id,
-      agentId: entitlement.agent_id,
       productId: entitlement.product_id,
       corpusDigest: resolved.digest,
       ...(resolved.runtimeDigest ? { runtimeDigest: resolved.runtimeDigest } : {}),
@@ -3376,7 +3370,7 @@ async function bindingFromHistoryRequest(
   const value = (name: string): string | undefined => url.searchParams.get(name) ?? (typeof req.headers[`x-hatch-${name.replaceAll("_", "-")}`] === "string" ? String(req.headers[`x-hatch-${name.replaceAll("_", "-")}`]) : undefined);
   const [creatorId, userId, productId, corpusDigestValue] = [value("creator_id"), value("user_id"), value("product_id"), value("corpus_digest")];
   if (!creatorId || !userId || !productId || !corpusDigestValue || !/^sha256:[a-f0-9]{64}$/.test(corpusDigestValue)) return undefined;
-  return { creatorId, userId, agentId: productId, productId, corpusDigest: corpusDigestValue, explicit: true };
+  return { creatorId, userId, productId, corpusDigest: corpusDigestValue, explicit: true };
 }
 
 function bearerToken(req: http.IncomingMessage): string | undefined {
@@ -3395,7 +3389,7 @@ function deliveryBindingFromSession(binding: SessionBinding): DeliveryBinding | 
     orderId: binding.orderId,
     userId: binding.userId,
     creatorId: binding.creatorId,
-    agentId: binding.agentId,
+    agentId: binding.productId,
     productId: binding.productId,
     purchasedCorpusDigest: binding.purchasedCorpusDigest ?? binding.corpusDigest,
     corpusDigest: binding.corpusDigest
@@ -3423,13 +3417,13 @@ async function reconcileDeliveryAccountingOutbox(
   });
 }
 
-function sanitizeBoundHistory(messages: Awaited<ReturnType<RuntimeStore["readVisibleConversation"]>>, agentId: string): Awaited<ReturnType<RuntimeStore["readVisibleConversation"]>> {
+function sanitizeBoundHistory(messages: Awaited<ReturnType<RuntimeStore["readVisibleConversation"]>>, productId: string): Awaited<ReturnType<RuntimeStore["readVisibleConversation"]>> {
   return messages.map((message) => ({
     ...message,
     ...(message.skill_events ? {
       skill_events: message.skill_events.map((event) => ({
         ...event,
-        path: `agent://${encodeURIComponent(agentId)}/protected-skill/${encodeURIComponent(event.name)}`,
+        path: `agent://${encodeURIComponent(productId)}/protected-skill/${encodeURIComponent(event.name)}`,
         resource_paths: event.resource_paths ? [] : undefined,
         resource_manifest_truncated: event.resource_manifest_truncated === undefined ? undefined : false,
         trigger: event.trigger ? { ...event.trigger, path: event.trigger.path ? "agent://private" : undefined } : undefined

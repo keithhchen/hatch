@@ -127,7 +127,7 @@ describe("native renderer commands", () => {
     expect(conversationIdFromLocation({ search: "?conversation_id=bad%0Avalue" })).toBe("");
     expect(conversationBindingFromLocation({
       search: "?entitlement_id=7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001&creator_id=8bb7b10c-4db0-4d8a-8c2f-2e2c8cba1002&product_id=9cc7b10c-4db0-4d8a-8c2f-2e2c8cba1003"
-    })).toEqual({ entitlementId: "7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001", creatorId: "8bb7b10c-4db0-4d8a-8c2f-2e2c8cba1002", productId: "9cc7b10c-4db0-4d8a-8c2f-2e2c8cba1003", agentId: "9cc7b10c-4db0-4d8a-8c2f-2e2c8cba1003" });
+    })).toEqual({ entitlementId: "7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001", creatorId: "8bb7b10c-4db0-4d8a-8c2f-2e2c8cba1002", productId: "9cc7b10c-4db0-4d8a-8c2f-2e2c8cba1003" });
     expect(conversationBindingFromLocation({
       search: "?entitlement_id=7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001&creator_id=8bb7b10c-4db0-4d8a-8c2f-2e2c8cba1002"
     })).toBeNull();

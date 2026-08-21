@@ -62,9 +62,7 @@ export function createConversationLibraryRetryController({
 export function conversationLibraryRetryScope({ accountId = "", binding = {} } = {}) {
   return JSON.stringify([
     String(accountId || "").trim(),
-    String(binding.entitlementId || "").trim(),
-    String(binding.creatorId || "").trim(),
-    String(binding.agentId || "").trim()
+    String(binding.entitlementId || "").trim()
   ]);
 }
 

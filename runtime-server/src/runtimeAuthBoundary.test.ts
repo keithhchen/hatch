@@ -116,8 +116,6 @@ test("Runtime rejects another user's entitlement for an introspected session", a
         protocol_version: "0.7",
         auth_token: "opaque-mallory",
         entitlement_id: entitlement.entitlement_id,
-        creator_id: entitlement.creator_id,
-        product_id: entitlement.product_id,
         local_tools: []
       })));
     });
@@ -337,8 +335,6 @@ test("Runtime admits only one client hello while Registry authorization is pendi
       protocol_version: "0.7",
       auth_token: "opaque-user-session",
       entitlement_id: entitlement.entitlement_id,
-      creator_id: entitlement.creator_id,
-      product_id: entitlement.product_id,
       local_tools: []
     };
     socket.send(JSON.stringify(hello));
@@ -703,7 +699,6 @@ async function seedAuthConversation(
     id: durableConversationId({
       creatorId: entitlement.creator_id,
       userId: entitlement.user_id,
-      agentId: entitlement.agent_id,
       productId: entitlement.product_id
     }, publicId),
     publicId,
@@ -727,8 +722,6 @@ async function connectAuthorizedSocket(runtimePort: number, entitlement: Entitle
     protocol_version: "0.7",
     auth_token: "opaque-user-session",
     entitlement_id: entitlement.entitlement_id,
-    creator_id: entitlement.creator_id,
-    product_id: entitlement.product_id,
     local_tools: []
   }));
   const ready = await response;
