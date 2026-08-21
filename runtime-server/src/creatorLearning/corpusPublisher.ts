@@ -273,7 +273,7 @@ function makeRuntimeBundle(input: {
       const refPath = `skills/${id}/references/${refId}.md`;
       const assetId = `ref-${id}-${refId}`;
       addAsset(assetId, refPath, ref.content);
-      return { id: refId, kind: ref.kind, asset: assets[assetId]! };
+      return { kind: ref.kind, asset: assets[assetId]! };
     });
     return { id, name: id, when_to_use: skill.when_to_use, instruction: assets[instructionId]!, references, allowed_tool_ids: [] };
   });
