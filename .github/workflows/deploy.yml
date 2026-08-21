@@ -377,13 +377,6 @@ jobs:
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE"
-          rm -rf /tmp/hatch-demo-agent /tmp/hatch-demo-agent.zip
-          node scripts/bootstrap-demo-corpus.mjs /tmp/hatch-demo-agent
-          runtime_image="${IMAGE_PREFIX}/runtime:${RELEASE_TAG}"
-          docker run --rm -u "$(id -u):$(id -g)" \
-            -v /tmp/hatch-demo-agent:/input:ro -v /tmp:/output \
-            "$runtime_image" node scripts/create-agent-zip.mjs /input /output/hatch-demo-agent.zip
-          registry_token="$(grep '^HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN=' /opt/hatch/.env | cut -d= -f2-)"
           compose=(docker compose --env-file /opt/hatch/.env --env-file /opt/hatch/.release.env -f "$GITHUB_WORKSPACE/compose.app.yml")
           registry_request_once() {
             # Keep the optional header argument empty when omitted; the Node
@@ -422,47 +415,6 @@ jobs:
             done
             return 1
           }
-          registry_publish_once() {
-            local archive="$1" creator_id="$2" product_id="$3"
-            "${compose[@]}" exec -T \
-              -e HATCH_REQUEST_TOKEN="$registry_token" \
-              -e HATCH_CREATOR_ID="$creator_id" \
-              -e HATCH_PRODUCT_ID="$product_id" \
-              registry node --input-type=module -e '
-                const chunks = [];
-                for await (const chunk of process.stdin) chunks.push(chunk);
-                const query = new URLSearchParams({ creator_id: process.env.HATCH_CREATOR_ID, product_id: process.env.HATCH_PRODUCT_ID });
-                const response = await fetch(`http://127.0.0.1:8100/v1/product-corpora?${query}`, {
-                  method: "POST",
-                  headers: {
-                    authorization: `Bearer ${process.env.HATCH_REQUEST_TOKEN}`,
-                    "content-type": "application/zip"
-                  },
-                  body: Buffer.concat(chunks)
-                });
-                const text = await response.text();
-                if (!response.ok) {
-                  process.stderr.write(text);
-                  process.exit(1);
-                }
-                process.stdout.write(text);
-              ' < "$archive"
-          }
-          registry_publish() {
-            local attempt
-            for attempt in $(seq 1 12); do
-              if registry_publish_once "$@"; then return 0; fi
-              sleep 3
-            done
-            return 1
-          }
-          registry_publish /tmp/hatch-demo-agent.zip 6f6a3d24-48af-4f27-9c50-0d4f7e4e8a21 f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42
-          rm -rf /tmp/hatch-seth-agent /tmp/hatch-seth-agent.zip
-          runtime_image="${IMAGE_PREFIX}/runtime:${RELEASE_TAG}"
-          docker run --rm -u "$(id -u):$(id -g)" \
-            -v "$GITHUB_WORKSPACE/creators/seth/agent-corpus:/input:ro" -v /tmp:/output \
-            "$runtime_image" node scripts/create-agent-zip.mjs /input /output/hatch-seth-agent.zip
-          registry_publish /tmp/hatch-seth-agent.zip 32ffccf7-893d-4ef3-bdbc-c82fc8fcb90b 026651b1-8a8a-4484-aac5-ace6bd662157
           runtime_token="$(grep '^HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN=' /opt/hatch/.env | cut -d= -f2-)"
           seed="$GITHUB_WORKSPACE/creators/seth/control-plane-bindings.json"
           secret="$(jq -r '.secret' "$seed")"
