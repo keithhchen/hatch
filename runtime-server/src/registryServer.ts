@@ -42,7 +42,7 @@ import { createHatchCliCandidateExecutor } from "./creatorLearning/cliCandidateE
 import { CreatorFactoryWorker } from "./creatorLearning/worker.js";
 import type { CreatorProductRecord } from "./creatorLearning/products.js";
 import { objectStoreFromEnvironment } from "./creatorLearning/objectStore.js";
-import { ProductFileStore, ProductFilesError, type ProductFileView, type ProductSnapshotView } from "./creatorLearning/productFiles.js";
+import { ProductFileStore, ProductFilesError, type ProductFileView } from "./creatorLearning/productFiles.js";
 import { NodeRuntime } from "./nodeRuntime.js";
 import { PostgresNodeStore } from "./nodeSession.js";
 import {
@@ -749,14 +749,11 @@ async function route(
   }
 
   const productFilesMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/files(?:\/([^/]+))?$/);
-  const productSnapshotsMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/snapshots(?:\/([^/]+))?$/);
-  const productRunsMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/runs(?:\/([^/]+))?$/);
-  const productVersionsMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/versions$/);
-  if (productFilesMatch || productSnapshotsMatch || productRunsMatch || productVersionsMatch) {
+  if (productFilesMatch) {
     const account = await authenticate(request, response, context, "creator");
     if (account === SESSION_QUERY_REJECTED) return;
     if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
-    const productId = decodeURIComponent((productFilesMatch ?? productSnapshotsMatch ?? productRunsMatch ?? productVersionsMatch)![1]!);
+    const productId = decodeURIComponent(productFilesMatch[1]!);
     const product = await productForCreator(context, account.id, productId);
     if (!product) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
 
@@ -810,109 +807,6 @@ async function route(
       }
     }
 
-    if (productSnapshotsMatch) {
-      const snapshotId = productSnapshotsMatch[2] ? decodeURIComponent(productSnapshotsMatch[2]) : undefined;
-      if (request.method === "GET" && !snapshotId) {
-        sendJson(response, 200, {
-          product_id: productId,
-          snapshots: (await context.productFileStore.listSnapshots(account.id, productId)).map((snapshot) => publicProductSnapshot(snapshot))
-        });
-        return;
-      }
-      if (request.method === "GET" && snapshotId) {
-        sendJson(response, 200, publicProductSnapshot(await context.productFileStore.getSnapshot(account.id, productId, snapshotId)));
-        return;
-      }
-      if (request.method === "POST" && !snapshotId) {
-        const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
-        const fileIds = Array.isArray(body.file_ids) ? body.file_ids.map((id) => String(id)) : undefined;
-        const snapshot = await context.productFileStore.createSnapshot(
-          account.id,
-          productId,
-          fileIds,
-          request.headers["idempotency-key"]?.toString()
-        );
-        sendJson(response, 201, publicProductSnapshot(snapshot));
-        return;
-      }
-    }
-
-    if (productRunsMatch || productVersionsMatch) {
-      if (request.method === "POST" && !product.repositoryId) {
-        sendJson(response, 409, {
-          error: {
-            code: "product_revision_unavailable",
-            message: "This published Product is read-only in the current workspace; create a new Product to iterate it."
-          }
-        });
-        return;
-      }
-      const runId = productRunsMatch?.[2] ? decodeURIComponent(productRunsMatch[2]) : undefined;
-      if (request.method === "GET" && !runId) {
-        const runs = (await context.factoryService.list(account.id))
-          .filter((run) => run.agentId === productId || run.product?.id === productId)
-          .map(publicProductRun);
-        sendJson(response, 200, productVersionsMatch ? { product_id: productId, versions: runs } : { product_id: productId, runs });
-        return;
-      }
-      if (request.method === "GET" && runId && productRunsMatch) {
-        const run = await context.factoryService.get(account.id, runId);
-        if (run.agentId !== productId && run.product?.id !== productId) {
-          sendJson(response, 404, { error: { code: "run_not_found", message: "Run was not found for this Product." } });
-          return;
-        }
-        sendJson(response, 200, publicProductRun(run));
-        return;
-      }
-      if (request.method === "POST" && !runId && productRunsMatch) {
-        const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
-        // A caller-provided key makes retries safe. If omitted, use a fresh
-        // request identity; a deterministic Product-only fallback would make
-        // every later “new version” replay the very first run forever.
-        const runIdempotencyKey = request.headers["idempotency-key"]?.toString().trim()
-          || `product-run:${productId}:${randomUUID()}`;
-        const runId = `factory_${createHash("sha256")
-          .update(`${account.id}\u0000${productId}\u0000${runIdempotencyKey}`)
-          .digest("hex")
-          .slice(0, 32)}`;
-        const snapshotId = typeof body.source_snapshot_id === "string" && body.source_snapshot_id.trim()
-          ? body.source_snapshot_id.trim()
-          : (await context.productFileStore.createSnapshot(
-            account.id,
-            productId,
-            Array.isArray(body.file_ids) ? body.file_ids.map((id) => String(id)) : undefined,
-            `${runIdempotencyKey}:snapshot`
-          )).id;
-        const config = body.config && typeof body.config === "object" && !Array.isArray(body.config)
-          ? body.config as Record<string, unknown>
-          : undefined;
-        const result = await context.factoryService.create(
-          { id: account.id, name: account.display_name },
-          {
-            runId,
-            // The repository still uses the internal row id as a migration
-            // boundary. The external contract uses the stable Product id.
-            // The current repository implementation accepts its internal row
-            // key at this service boundary. Core Product canonicalization will
-            // make this equal to productId; it is never exposed to callers.
-            productId: product.repositoryId,
-            agentId: productId,
-            product: { id: productId, name: product.name, description: product.promise, promise: product.promise },
-            productName: product.name,
-            productPromise: product.promise,
-            sourceSnapshotId: snapshotId,
-            ...(config ? { config: {
-              ...(typeof config.development_questions === "number" ? { developmentQuestions: config.development_questions } : {}),
-              ...(typeof config.heldout_questions === "number" ? { heldoutQuestions: config.heldout_questions } : {}),
-              ...(typeof config.max_corpus_revisions === "number" ? { maxCorpusRevisions: config.max_corpus_revisions } : {})
-            } } : {})
-          },
-          runIdempotencyKey
-        );
-        sendJson(response, result.created ? 202 : 200, publicProductRun(result.run));
-        return;
-      }
-    }
   }
 
   if (url.pathname === "/v1/public/products" && request.method === "GET") {
@@ -1346,46 +1240,6 @@ function publicProductFile(file: ProductFileView, includeContent = false): Recor
     metadata: file.metadata,
     created_at: file.createdAt,
     updated_at: file.updatedAt
-  };
-}
-
-function publicProductSnapshot(snapshot: ProductSnapshotView | Awaited<ReturnType<ProductFileStore["listSnapshots"]>>[number]): Record<string, unknown> {
-  return {
-    id: snapshot.id,
-    product_id: snapshot.productId,
-    version: snapshot.version,
-    file_ids: snapshot.fileIds,
-    manifest_sha256: snapshot.manifestSha256,
-    locked_at: snapshot.lockedAt,
-    created_at: snapshot.createdAt,
-    ...(Array.isArray((snapshot as ProductSnapshotView).documents)
-      ? { files: (snapshot as ProductSnapshotView).documents.map((file) => publicProductFile(file)) }
-      : {})
-  };
-}
-
-function publicProductRun(run: Awaited<ReturnType<CreatorFactoryService["get"]>>): Record<string, unknown> {
-  return {
-    id: run.id,
-    product_id: run.agentId ?? run.product?.id,
-    version: run.revisionNumber ?? run.version,
-    revision_id: run.revisionId ?? run.id,
-    parent_revision_id: run.parentRevisionId ?? null,
-    source_snapshot_id: run.sourceSnapshotId ?? null,
-    status: run.status,
-    stage: run.stage ?? null,
-    workflow_step: run.workflowStep,
-    derived_status: run.derivedStatus ?? null,
-    quality_gates: run.qualityGates ?? [],
-    pending_questions: run.pendingQuestions,
-    answer_drafts: run.answerDrafts ?? [],
-    question_batch_id: run.questionBatchId ?? null,
-    retryable: run.retryable,
-    retry_stage: run.retryStage ?? null,
-    candidate: run.candidate ?? null,
-    last_error: run.lastError ?? null,
-    created_at: run.createdAt,
-    updated_at: run.updatedAt
   };
 }
 
