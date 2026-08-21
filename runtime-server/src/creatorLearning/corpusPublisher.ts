@@ -355,9 +355,15 @@ async function putImmutableReleaseAsset(
     const normalize = (value: Buffer): string => {
       const parsed = JSON.parse(value.toString("utf8")) as Record<string, unknown>;
       delete parsed.published_at;
-      return JSON.stringify(parsed);
+      return stableJson(parsed);
     };
     if (normalize(existing) === normalize(bytes)) return;
     throw error;
   }
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (!value || typeof value !== "object") return JSON.stringify(value);
+  return `{${Object.keys(value as Record<string, unknown>).sort().map((key) => `${JSON.stringify(key)}:${stableJson((value as Record<string, unknown>)[key])}`).join(",")}}`;
 }
