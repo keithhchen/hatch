@@ -60,17 +60,22 @@ export class CorpusPublisher {
     productPromise: string;
     briefSpec?: unknown;
   }): Promise<PublishResult> {
+    let outerStage = "latest_completed_corpus";
+    try {
     const execution = await this.nodes.getLatestCompletedExecution(input.productId, "corpus");
     if (!execution?.outputRef) throw new Error("No completed Corpus Node execution is available");
     const expected = `${input.productId}/corpus/${execution.executionId}/output.json`;
     if (execution.outputRef !== expected) throw new Error("Corpus output_ref is not canonical");
+    outerStage = "oss_corpus_output";
     const bytes = await this.objectStore.get(execution.outputRef);
+    outerStage = "parse_corpus_output";
     const corpus = parseCorpusOutput(bytes);
     const sourceDigest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 
     // A lost HTTP response must not repeat materialization or indexing. The
     // live release is the durable idempotency receipt for this semantic
     // publish request; the request header is only transport metadata.
+    outerStage = "postgres_live_pointer_read";
     const live = await this.releases.getLive(input.productId);
     if (
       live
@@ -83,6 +88,7 @@ export class CorpusPublisher {
         return { execution_id: execution.executionId, output_ref: execution.outputRef, corpus_digest: sourceDigest, published, release: live };
       }
     }
+    outerStage = "runtime_bundle_generation";
     const bundle = makeRuntimeBundle({
       creatorId: input.creatorId,
       productId: input.productId,
@@ -92,6 +98,7 @@ export class CorpusPublisher {
       briefSpec: input.briefSpec,
     });
     const staging = path.resolve(this.runtimeRoot, `.corpus-publish-${randomUUID()}`);
+    outerStage = "runtime_bundle_extraction";
     await extractAgentCorpusBundle(bundle, staging);
     let staged: PublishedAgentCorpus;
     try {
@@ -198,6 +205,15 @@ export class CorpusPublisher {
       throw new CorpusPublishError(
         "publish_stage_failed",
         `Registry publish failed during ${publishStage}: ${error instanceof Error ? error.message : String(error)}`,
+        422,
+        { cause: error instanceof Error ? error : undefined },
+      );
+    }
+    } catch (error) {
+      if (error instanceof CorpusPublishError) throw error;
+      throw new CorpusPublishError(
+        "publish_stage_failed",
+        `Registry publish failed during ${outerStage}: ${error instanceof Error ? error.message : String(error)}`,
         422,
         { cause: error instanceof Error ? error : undefined },
       );

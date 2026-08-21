@@ -315,7 +315,7 @@ async function route(
       const wrapped = new CorpusPublishError(
         "publish_failed",
         error instanceof Error ? `Registry publish failed: ${error.message}` : `Registry publish failed: ${String(error)}`,
-        500,
+        422,
         { cause: error instanceof Error ? error : undefined }
       );
       throw wrapped;
