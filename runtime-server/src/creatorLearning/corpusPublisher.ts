@@ -114,10 +114,13 @@ export class CorpusPublisher {
       }
       throw new CorpusPublishError("runtime_storage_unavailable", "Registry could not write the Runtime Corpus to shared storage.", 503, { cause: error });
     }
+    let publishStage = "runtime_shared_storage";
+    try {
     const immutableRoot = immutableReleasePath(this.runtimeRoot, input.creatorId, input.productId, staged.corpus_digest);
     const releaseRoot = path.resolve(this.runtimeRoot, input.productId, staged.corpus_digest.slice("sha256:".length));
     await mkdir(path.dirname(releaseRoot), { recursive: true });
     await cp(immutableRoot, releaseRoot, { recursive: true, force: false, errorOnExist: false });
+    publishStage = "runtime_release_assets";
     await writeRuntimeReleaseAssets({
       objectStore: this.objectStore,
       releaseRoot,
@@ -136,6 +139,7 @@ export class CorpusPublisher {
       if (!existing.equals(bytes)) throw new Error("Runtime release already contains different Corpus bytes");
     });
     if (corpus.knowledge.length > 0) {
+      publishStage = "qdrant_knowledge_index";
       if (!this.knowledgeIndexer) {
         throw new CorpusPublishError(
           "knowledge_index_unavailable",
@@ -169,6 +173,7 @@ export class CorpusPublisher {
     const releaseDigest = staged.corpus_digest;
     const releaseRef = `registry/${input.productId}/releases/${releaseDigest.slice("sha256:".length)}`;
     const releaseCorpusRef = `${releaseRef}/corpus.json`;
+    publishStage = "oss_release_assets";
     await this.objectStore.put(releaseCorpusRef, bytes, { immutable: true, contentType: "application/json" });
     const publishedAt = new Date().toISOString();
     const releaseInput = {
@@ -184,9 +189,19 @@ export class CorpusPublisher {
     } as const;
     const releaseBytes = Buffer.from(JSON.stringify({ ...releaseInput, status: "published" }, null, 2), "utf8");
     await this.objectStore.put(`${releaseRef}/release.json`, releaseBytes, { immutable: true, contentType: "application/json" });
+    publishStage = "postgres_release_pointer";
     const release = await this.releases.publish(releaseInput);
     await rm(staging, { recursive: true, force: true });
     return { execution_id: execution.executionId, output_ref: execution.outputRef, corpus_digest: sourceDigest, published: staged, release };
+    } catch (error) {
+      if (error instanceof CorpusPublishError) throw error;
+      throw new CorpusPublishError(
+        "publish_stage_failed",
+        `Registry publish failed during ${publishStage}: ${error instanceof Error ? error.message : String(error)}`,
+        422,
+        { cause: error instanceof Error ? error : undefined },
+      );
+    }
   }
 }
 
