@@ -10,6 +10,7 @@ import {
   saveProductBriefSpec,
   startAboutYouNode,
   startCorpusNode,
+  updateProductPromise,
   uploadProductFile
 } from "./creatorFactory.js";
 import { createCreatorTranslator } from "./creatorI18n.js";
@@ -32,6 +33,7 @@ export function CreatorProductWorkspace({ token, productId, tab = "files", navig
   const [aboutYou, setAboutYou] = useState(null);
   const [corpus, setCorpus] = useState(null);
   const [briefSpec, setBriefSpec] = useState(null);
+  const [promiseDraft, setPromiseDraft] = useState("");
   const [selectedTab, setSelectedTab] = useState(TAB_KEYS.includes(tab) ? tab : "files");
   const [state, setState] = useState({ loading: true, busy: "", error: "", notice: "" });
   const retryActionRef = useRef(null);
@@ -51,6 +53,7 @@ export function CreatorProductWorkspace({ token, productId, tab = "files", navig
       ]);
       const nextProduct = productResponse?.product ?? productResponse;
       setProduct(nextProduct);
+      setPromiseDraft(nextProduct?.promise ?? nextProduct?.description ?? "");
       setBriefSpec(nextProduct?.brief_spec ?? null);
       setDocuments(filesResponse?.files ?? filesResponse?.documents ?? []);
       setAboutYou(aboutResponse?.status === "not_started" ? null : aboutResponse);
@@ -131,6 +134,26 @@ export function CreatorProductWorkspace({ token, productId, tab = "files", navig
     }
   }
 
+  async function savePromise(event) {
+    event?.preventDefault();
+    const promise = promiseDraft.trim();
+    if (!promise || !product) return;
+    retryActionRef.current = () => savePromise();
+    setState((current) => ({ ...current, busy: "product-promise", error: "", notice: "" }));
+    try {
+      const savedResponse = await updateProductPromise(token, product, promise);
+      const saved = savedResponse?.product ?? savedResponse;
+      setProduct((current) => ({ ...current, ...saved, promise }));
+      setPromiseDraft(saved?.promise ?? promise);
+      retryActionRef.current = null;
+      setState((current) => ({ ...current, notice: t("productPromiseSaved") }));
+    } catch (nextError) {
+      setState((current) => ({ ...current, error: messageOf(nextError, t("failureDetailsUnavailable")) }));
+    } finally {
+      setState((current) => ({ ...current, busy: "" }));
+    }
+  }
+
   async function startAboutYou(executionId = `about_you_${crypto.randomUUID()}`, idempotencyKey = crypto.randomUUID()) {
     const fileIds = documents.map((file) => file.id ?? file.file_id).filter(Boolean);
     if (!fileIds.length) return;
@@ -187,6 +210,12 @@ export function CreatorProductWorkspace({ token, productId, tab = "files", navig
 
   return <section className="cpv2-product-workspace">
     <PageHeader className="cpv2-workspace-header" label={product.status === "published" ? t("published") : t("product")} title={product.name ?? t("product")} body={product.promise ?? product.description ?? ""} />
+    <form className="cpv2-product-promise" onSubmit={(event) => { void savePromise(event); }}>
+      <FormField label={t("whatProductDelivers")} required>
+        <Textarea value={promiseDraft} onChange={(event) => setPromiseDraft(event.target.value)} required />
+      </FormField>
+      <Button type="submit" loading={state.busy === "product-promise"} disabled={Boolean(state.busy) || !promiseDraft.trim()}>{t("saveProductPromise")}</Button>
+    </form>
     <div className="cpv2-workspace-tabs" role="tablist" aria-label={t("productWorkflow")}>
       {TAB_KEYS.map((key) => {
         const step = workflow.steps[key];

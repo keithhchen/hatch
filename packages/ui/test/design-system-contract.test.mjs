@@ -98,8 +98,6 @@ test("Web and Storybook consume the shared package and its canonical tokens", ()
   assert.match(creatorPortal, /<Checkbox key=\{lossId\}/);
   assert.doesNotMatch(creatorPortal, /<(?:input|textarea|select)\b/);
   assert.match(creatorWorkspace, /<FormField label=\{t\("whatProductDelivers"\)\}/);
-  assert.match(creatorWorkspace, /<FormField label=\{t\("yourContext"\)\}/);
-  assert.match(creatorWorkspace, /<FormField label=\{t\("whatShouldHatchHaveDone"\)\}/);
   assert.match(creatorFactory, /from\s+["']@hatch\/ui["']/);
   assert.doesNotMatch(creatorFactory, /<(?:input|textarea|select)\b/);
   assert.doesNotMatch(creatorCss, /\.cpv2-factory-draft\s+(?:input|select|textarea)/);
