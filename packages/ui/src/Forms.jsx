@@ -61,8 +61,8 @@ export function RadioGroup({ value, defaultValue, onValueChange, options, label,
   const groupId = useId();
   return (
     <RadioGroupPrimitive.Root className={cn("hui-radio-group", className)} value={value} defaultValue={defaultValue} onValueChange={onValueChange} aria-label={label}>
-      {options.map((option) => {
-        const id = `${groupId}-${option.value}`;
+      {options.map((option, index) => {
+        const id = `${groupId}-${index}`;
         return <div className="hui-choice" key={option.value}><RadioGroupPrimitive.Item className="hui-radio" value={option.value} id={id} disabled={option.disabled}><RadioGroupPrimitive.Indicator /></RadioGroupPrimitive.Item><LabelPrimitive.Root htmlFor={id}><strong>{option.label}</strong>{option.description ? <span>{option.description}</span> : null}</LabelPrimitive.Root></div>;
       })}
     </RadioGroupPrimitive.Root>
