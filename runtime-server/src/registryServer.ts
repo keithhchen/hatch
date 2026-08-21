@@ -67,6 +67,8 @@ import {
 
 export type RegistryServer = { server: http.Server; close: () => Promise<void> };
 export const CREATOR_FACTORY_JSON_BODY_MAX_BYTES = 32 * 1024 * 1024;
+const SETH_CREATOR_ID = "32ffccf7-893d-4ef3-bdbc-c82fc8fcb90b";
+const SETH_PRODUCT_ID = "026651b1-8a8a-4484-aac5-ace6bd662157";
 type RegistryContext = {
   store: RegistryStoreTs;
   accounts: AccountStoreTs;
@@ -867,7 +869,7 @@ async function route(
   if (url.pathname === "/v1/public/products" && request.method === "GET") {
     const limit = boundedQueryInteger(url, "limit", 20, 1, 20);
     const offset = boundedQueryInteger(url, "offset", 0, 0, 100_000);
-    const rows = await context.releaseStore.listPublic({ limit: limit + 1, offset });
+    const rows = await publicCatalogRows(context);
     const page = rows.slice(0, limit);
     sendJson(response, 200, page.map(publicProductRow), {
       "x-hatch-page-limit": String(limit),
@@ -880,12 +882,13 @@ async function route(
   if (url.pathname === "/v1/public/creators" && request.method === "GET") {
     const limit = boundedQueryInteger(url, "limit", 20, 1, 20);
     const offset = boundedQueryInteger(url, "offset", 0, 0, 100_000);
-    const rows = await context.releaseStore.listPublic({ limit: Math.min(20_001, offset + limit + 1), offset: 0 });
+    const rows = (await publicCatalogRows(context)).slice(0, Math.min(20_001, offset + limit + 1));
     const creators = new Map<string, { id: string; name: string; product_count: number }>();
     for (const row of rows) {
-      const current = creators.get(row.creator_id) ?? { id: row.creator_id, name: row.creator_name, product_count: 0 };
+      const creatorId = String(row.creator_id ?? "");
+      const current = creators.get(creatorId) ?? { id: creatorId, name: String(row.creator_name ?? creatorId), product_count: 0 };
       current.product_count += 1;
-      creators.set(row.creator_id, current);
+      creators.set(creatorId, current);
     }
     const page = [...creators.values()].slice(offset, offset + limit);
     sendJson(response, 200, page, {
@@ -900,7 +903,7 @@ async function route(
   if (publicProductMatch && request.method === "GET") {
     const productId = decodeURIComponent(publicProductMatch[1]!);
     if (!isUuidV4(productId)) { sendJson(response, 404, { detail: "Product not found." }); return; }
-    const row = await context.releaseStore.getPublic(productId);
+    const row = (await publicCatalogRows(context)).find((entry) => entry.product_id === productId);
     if (!row) { sendJson(response, 404, { detail: "Product not found." }); return; }
     sendJson(response, 200, publicProductRow(row));
     return;
@@ -910,7 +913,7 @@ async function route(
   if (publicCreatorMatch && request.method === "GET") {
     const creatorId = decodeURIComponent(publicCreatorMatch[1]!);
     if (!isUuidV4(creatorId)) { sendJson(response, 404, { detail: "Creator not found." }); return; }
-    const rows = (await context.releaseStore.listPublic({ limit: 20_001, offset: 0 }))
+    const rows = (await publicCatalogRows(context))
       .filter((row) => row.creator_id === creatorId);
     if (!rows.length) { sendJson(response, 404, { detail: "Creator not found." }); return; }
     sendJson(response, 200, { creator: { id: creatorId, name: rows[0]!.creator_name }, products: rows.map(publicProductRow) });
@@ -1056,6 +1059,33 @@ function requiredDeploymentField(body: Record<string, unknown>, field: string): 
     throw error;
   }
   return value;
+}
+
+/**
+ * Public catalog authority is the live Registry release projection. Seth is
+ * the sole explicitly retained legacy Agent during the cutover, so it remains
+ * visible until it receives a native release; every other legacy row is
+ * intentionally absent and has already been pruned at Registry startup.
+ */
+async function publicCatalogRows(context: RegistryContext): Promise<Record<string, unknown>[]> {
+  const releases = await context.releaseStore.listPublic({ limit: 20_001, offset: 0 });
+  const rows = new Map<string, Record<string, unknown>>(
+    releases.map((release) => [release.product_id, release as unknown as Record<string, unknown>]),
+  );
+  if (!rows.has(SETH_PRODUCT_ID)) {
+    const seth = context.store.getAgentCorpus(SETH_CREATOR_ID, SETH_PRODUCT_ID);
+    if (seth) {
+      rows.set(SETH_PRODUCT_ID, {
+        ...seth,
+        release_digest: seth.corpus_digest,
+        product_promise: seth.product_promise ?? seth.product_description ?? "",
+      });
+    }
+  }
+  return [...rows.values()].sort((left, right) => {
+    const time = Date.parse(String(right.published_at ?? "")) - Date.parse(String(left.published_at ?? ""));
+    return time || String(left.product_id ?? "").localeCompare(String(right.product_id ?? ""));
+  });
 }
 
 function publicProductRow(row: Record<string, unknown>): Record<string, unknown> {
