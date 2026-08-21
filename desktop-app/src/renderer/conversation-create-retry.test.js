@@ -20,12 +20,12 @@ describe("Conversation creation retry scope", () => {
     expect(tracker.requestId(scope, () => `request_${++sequence}`)).toBe("request_2");
   });
 
-  it("keeps Agent, account, and creation purpose scopes independent", () => {
+  it("keeps entitlement, account, and creation purpose scopes independent", () => {
     const binding = { entitlementId: "ent_a", creatorId: "creator_a", agentId: "agent_a" };
     expect(conversationCreationScope({ accountId: "account_a", binding, purpose: "create" }))
       .not.toBe(conversationCreationScope({ accountId: "account_b", binding, purpose: "create" }));
     expect(conversationCreationScope({ accountId: "account_a", binding, purpose: "create" }))
-      .not.toBe(conversationCreationScope({ accountId: "account_a", binding: { ...binding, agentId: "agent_b" }, purpose: "create" }));
+      .not.toBe(conversationCreationScope({ accountId: "account_a", binding: { ...binding, entitlementId: "ent_b" }, purpose: "create" }));
     expect(conversationCreationScope({ accountId: "account_a", binding, purpose: "create" }))
       .not.toBe(conversationCreationScope({ accountId: "account_a", binding, purpose: "bootstrap" }));
   });

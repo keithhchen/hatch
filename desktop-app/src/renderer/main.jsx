@@ -242,7 +242,7 @@ function DesktopAuxiliaryWindow({ kind }) {
           <p className="desktop-auxiliary-lede">Creator agents, on your terms.</p>
           <p>Hatch keeps the desktop boundary native while React renders the conversation work surface.</p>
           <dl className="desktop-auxiliary-facts">
-            <div><dt>Version</dt><dd>0.1.13</dd></div>
+            <div><dt>Version</dt><dd>0.1.14</dd></div>
             <div><dt>Architecture</dt><dd>Tauri Hybrid</dd></div>
           </dl>
         </section>
@@ -595,9 +595,7 @@ function App() {
     if (Object.hasOwn(patch, "conversationId")) persistedContext.conversationId = next.conversationId || null;
     if (Object.hasOwn(patch, "entitlementId")) persistedContext.entitlementId = next.entitlementId || null;
     if (Object.hasOwn(patch, "creatorId")) persistedContext.creatorId = next.creatorId || null;
-    if (Object.hasOwn(patch, "productId") || Object.hasOwn(patch, "agentId")) {
-      persistedContext.productId = next.productId || next.agentId || null;
-    }
+    if (Object.hasOwn(patch, "productId")) persistedContext.productId = next.productId || null;
     if (Object.hasOwn(patch, "workspaceGrant")) {
       persistedContext.workspaceGrant = normalizeWorkspaceGrant(next.workspaceGrant);
     }
@@ -646,9 +644,7 @@ function App() {
       .sort((left, right) => Date.parse(right.granted_at || "") - Date.parse(left.granted_at || ""));
     if (active.length === 0) return null;
     if (preferredBinding?.entitlementId) {
-      return active.find((item) => item.entitlement_id === preferredBinding.entitlementId
-        && item.creator_id === preferredBinding.creatorId
-        && (item.product_id || item.agent_id) === (preferredBinding.productId || preferredBinding.agentId)) || null;
+      return active.find((item) => item.entitlement_id === preferredBinding.entitlementId) || null;
     }
     const current = active.find((item) => item.entitlement_id === currentId);
     if (current) return current;
@@ -948,8 +944,7 @@ function App() {
     return entitlement ? {
       entitlementId: entitlement.entitlement_id,
       creatorId: entitlement.creator_id,
-      productId: entitlement.product_id || entitlement.agent_id,
-      agentId: entitlement.product_id || entitlement.agent_id
+      productId: entitlement.product_id
     } : null;
   }
 
@@ -961,7 +956,7 @@ function App() {
     // normally identical. During a rollout the entitlement may omit the
     // optional projection, so use the already verified session product only
     // when it belongs to the selected Product.
-    return creatorAgent?.id === (entitlement?.product_id || entitlement?.agent_id)
+    return creatorAgent?.id === entitlement?.product_id
       ? creatorAgent?.briefSpec ?? null
       : null;
   }
@@ -1049,7 +1044,7 @@ function App() {
       || !conversationLibraryRetryableRef.current
       || conversationLibraryLoadingRef.current) return false;
     const binding = conversationBindingFor();
-    if (!binding?.entitlementId || !binding.creatorId || !binding.agentId) return false;
+    if (!binding?.entitlementId) return false;
     const controller = conversationLibraryRetryControllerRef.current;
     const scope = conversationLibraryScope(binding);
     controller.setScope(scope);
@@ -1069,7 +1064,7 @@ function App() {
       return;
     }
     const binding = conversationBindingFor();
-    if (!binding?.entitlementId || !binding.creatorId || !binding.agentId) {
+    if (!binding?.entitlementId) {
       conversationLibraryLoadingRef.current = false;
       conversationLibraryRetryableRef.current = false;
       clearConversationLibraryRetryTimer();
@@ -1546,7 +1541,7 @@ function App() {
     if (!binding || creatorAgentEntitlements.length === 0) return;
     const selected = creatorAgentEntitlements.find((item) => item.entitlement_id === binding.entitlementId
       && item.creator_id === binding.creatorId
-      && (item.product_id || item.agent_id) === (binding.productId || binding.agentId));
+      && item.product_id === binding.productId);
     if (!selected) {
       if (selectedEntitlementId) setSelectedEntitlementId("");
       setEntitlementError("This Conversation window's Creator Agent binding is no longer available in this account.");
@@ -1880,8 +1875,6 @@ function App() {
       workspaceGrant,
       conversationId,
       entitlementId: desiredBinding?.entitlementId,
-      productId: desiredBinding?.productId || desiredBinding?.agentId,
-      agentId: desiredBinding?.productId || desiredBinding?.agentId,
       creatorId: desiredBinding?.creatorId,
       preserveMessages: true
     });
@@ -1912,7 +1905,6 @@ function App() {
       conversationId,
       entitlementId: selectedEntitlementId,
       productId: creatorAgentEntitlements.find((item) => item.entitlement_id === selectedEntitlementId)?.product_id,
-      agentId: creatorAgentEntitlements.find((item) => item.entitlement_id === selectedEntitlementId)?.product_id,
       creatorId: creatorAgentEntitlements.find((item) => item.entitlement_id === selectedEntitlementId)?.creator_id
     };
     window.clearTimeout(reconnectTimerRef.current);
@@ -1987,9 +1979,7 @@ function App() {
         config.serverUrl,
         buyerSession.accessToken,
         {
-          entitlementId: config.entitlementId,
-          agentId: config.agentId,
-          creatorId: config.creatorId
+          entitlementId: config.entitlementId
         },
         config.conversationId,
         conversationCursorRef.current
@@ -2025,9 +2015,8 @@ function App() {
     const targetConversationId = connection.conversationId || conversationId;
     const targetEntitlementId = connection.entitlementId || selectedEntitlementId;
     const selectedEntitlement = creatorAgentEntitlements.find((item) => item.entitlement_id === targetEntitlementId);
-    const targetProductId = connection.productId || connection.agentId || selectedEntitlement?.product_id;
-    const targetAgentId = targetProductId;
-    const targetCreatorId = connection.creatorId || selectedEntitlement?.creator_id;
+    const targetProductId = selectedEntitlement?.product_id;
+    const targetCreatorId = selectedEntitlement?.creator_id;
     if (!canConnectConversation({
       libraryStatus: conversationLibraryStatus,
       conversationId: targetConversationId
@@ -2055,7 +2044,7 @@ function App() {
       workspaceGrant: targetWorkspaceGrant,
       conversationId: targetConversationId.trim() || "desktop-chat",
       entitlementId: targetEntitlementId,
-      ...(targetProductId ? { productId: targetProductId, agentId: targetProductId } : {}),
+      ...(targetProductId ? { productId: targetProductId } : {}),
       ...(targetCreatorId ? { creatorId: targetCreatorId } : {})
     };
     // Legacy `desktop-chat` remains read-only during Runtime rollout. Never
@@ -2090,9 +2079,7 @@ function App() {
           targetServerUrl.trim(),
           buyerSession.accessToken,
           {
-            entitlementId: targetEntitlementId,
-            agentId: targetAgentId,
-            creatorId: targetCreatorId
+            entitlementId: targetEntitlementId
           },
           activeConversationId,
           conversationCursorRef.current
@@ -2122,7 +2109,7 @@ function App() {
           activeConversationId,
           targetEntitlementId,
           buyerSession.accessToken,
-          { agentId: targetAgentId, creatorId: targetCreatorId }
+          {}
         ).catch(() => {
           throw snapshotError;
         });
@@ -2183,9 +2170,7 @@ function App() {
         protocol_version: PROTOCOL_VERSION,
         auth_token: buyerSession.accessToken,
         entitlement_id: targetEntitlementId,
-        ...(targetProductId ? { product_id: targetProductId } : {}),
-        ...(targetCreatorId ? { creator_id: targetCreatorId } : {}),
-        client_version: "0.1.13",
+        client_version: "0.1.14",
         local_tools: [...PLATFORM_LOCAL_TOOLS],
       }));
     });
@@ -2843,7 +2828,7 @@ function App() {
       return false;
     }
     const binding = conversationBindingFor();
-    if (!binding?.entitlementId || !binding.creatorId || !binding.agentId) {
+    if (!binding?.entitlementId) {
       setStatus("Choose a Creator Agent before opening a Conversation window.");
       return false;
     }
@@ -2852,7 +2837,7 @@ function App() {
         conversationId: target,
         entitlementId: binding.entitlementId,
         creatorId: binding.creatorId,
-        agentId: binding.agentId,
+        productId: binding.productId,
         startTask
       });
       if (announce) setStatus("Conversation opened in a new window");
@@ -4149,8 +4134,6 @@ async function loadConversationHistory(serverUrl, conversationId, entitlementId,
 function historyUrlForRuntime(serverUrl, conversationId, entitlementId, binding = {}) {
   const url = new URL(runtimeHttpUrl(serverUrl, `/conversations/${encodeURIComponent(conversationId)}/messages`));
   url.searchParams.set("entitlement_id", entitlementId);
-  if (binding.creatorId) url.searchParams.set("creator_id", binding.creatorId);
-  if (binding.productId || binding.agentId) url.searchParams.set("product_id", binding.productId || binding.agentId);
   return url.toString();
 }
 

@@ -1758,7 +1758,7 @@ fn patch_window_settings(
                         .map(str::to_string)
                         .filter(|value| !value.is_empty());
                 }
-                if let Some(value) = context.get("productId").or_else(|| context.get("agentId")) {
+                if let Some(value) = context.get("productId") {
                     task.product_id = value
                         .as_str()
                         .map(str::to_string)

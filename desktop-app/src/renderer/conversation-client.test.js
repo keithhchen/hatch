@@ -73,8 +73,8 @@ describe("conversation client", () => {
     const [url, init] = fetchImpl.mock.calls[0];
     expect(url).toContain("/v1/conversations?");
     expect(url).toContain("entitlement_id=7aa7b10c-4db0-4d8a-8c2f-2e2c8cba1001");
-    expect(url).toContain("creator_id=8bb7b10c-4db0-4d8a-8c2f-2e2c8cba1002");
-    expect(url).toContain("product_id=9cc7b10c-4db0-4d8a-8c2f-2e2c8cba1003");
+    expect(url).not.toContain("creator_id=");
+    expect(url).not.toContain("product_id=");
     expect(init.headers.authorization).toBe("Bearer token");
   });
 

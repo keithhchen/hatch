@@ -320,7 +320,7 @@ async function startRuntime(
   for (const runId of ["run_success", "run_failed", "run_cancelled", "run_outage"]) {
     const publicId = `conversation-${runId}`;
     await conversationRepository.createConversation({
-      id: durableConversationId({ creatorId: fixture.entitlement.creator_id, userId: fixture.entitlement.user_id, agentId: fixture.entitlement.agent_id, productId: fixture.entitlement.product_id }, publicId),
+      id: durableConversationId({ creatorId: fixture.entitlement.creator_id, userId: fixture.entitlement.user_id, productId: fixture.entitlement.product_id }, publicId),
       publicId,
       ownerAccountId: fixture.entitlement.user_id,
       creatorId: fixture.entitlement.creator_id,
@@ -355,8 +355,6 @@ async function startRuntime(
     protocol_version: PROTOCOL_VERSION,
     license_token: "license-commerce",
     entitlement_id: fixture.entitlement.entitlement_id,
-    creator_id: fixture.entitlement.creator_id,
-    product_id: fixture.entitlement.product_id,
     local_tools: []
   }));
   await waitForMessage(messages, (message) => message.type === "session.ready");

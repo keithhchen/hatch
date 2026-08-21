@@ -333,18 +333,14 @@ test("per-user hello capacity is acquired after identity but before Agent Corpus
     const firstReady = waitForMessage(first, (message) => message.type === "session.ready");
     first.send(JSON.stringify({
       ...hello("same-user-session-one", "same-user-install-one"),
-      entitlement_id: entitlement.entitlement_id,
-      creator_id: entitlement.creator_id,
-      product_id: entitlement.product_id
+      entitlement_id: entitlement.entitlement_id
     }));
     await corpusStarted;
 
     const rejected = waitForMessage(second, (message) => (message.error as { code?: string } | undefined)?.code === "user_authentication_busy");
     second.send(JSON.stringify({
       ...hello("same-user-session-two", "same-user-install-two"),
-      entitlement_id: entitlement.entitlement_id,
-      creator_id: entitlement.creator_id,
-      product_id: entitlement.product_id
+      entitlement_id: entitlement.entitlement_id
     }));
     assert.equal(((await rejected).error as { code?: string }).code, "user_authentication_busy");
     assert.equal(corpusCalls, 1);
@@ -391,9 +387,7 @@ test("hello setup keeps its admission lease and aborts Creator tool resolution o
   try {
     first.send(JSON.stringify({
       ...hello("creator-setup-one", "creator-setup-install-one"),
-      entitlement_id: entitlement.entitlement_id,
-      creator_id: entitlement.creator_id,
-      product_id: entitlement.product_id
+      entitlement_id: entitlement.entitlement_id
     }));
     await setupStarted;
 
@@ -401,9 +395,7 @@ test("hello setup keeps its admission lease and aborts Creator tool resolution o
     const rejected = waitForMessage(overflow, (message) => (message.error as { code?: string } | undefined)?.code === "authentication_busy");
     overflow.send(JSON.stringify({
       ...hello("creator-setup-two", "creator-setup-install-two"),
-      entitlement_id: entitlement.entitlement_id,
-      creator_id: entitlement.creator_id,
-      product_id: entitlement.product_id
+      entitlement_id: entitlement.entitlement_id
     }));
     assert.equal(((await rejected).error as { code?: string }).code, "authentication_busy");
 
@@ -1746,7 +1738,6 @@ async function authBoundaryConversations(
       id: durableConversationId({
         creatorId: entitlement.creator_id,
         userId: entitlement.user_id,
-        agentId: entitlement.agent_id,
         productId: entitlement.product_id
       }, publicId),
       publicId,
@@ -1779,9 +1770,7 @@ async function connectEntitledSocket(
   const ready = waitForMessage(socket, (message) => message.type === "session.ready");
   socket.send(JSON.stringify({
     ...hello(token, testLabel),
-    entitlement_id: entitlement.entitlement_id,
-    creator_id: entitlement.creator_id,
-    product_id: entitlement.product_id
+    entitlement_id: entitlement.entitlement_id
   }));
   assert.equal((await ready).type, "session.ready");
   return socket;

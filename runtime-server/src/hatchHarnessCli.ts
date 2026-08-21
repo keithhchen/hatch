@@ -155,9 +155,7 @@ async function executeOneTurn(
 ): Promise<HatchHarnessCliResult> {
   const conversationResponse = await fetch(
     `${endpoint.replace(/^ws:/, "http:").replace(/\/runtime$/, "")}/v1/conversations?${new URLSearchParams({
-      entitlement_id: FACTORY_HARNESS_ENTITLEMENT_ID,
-      creator_id: input.creatorId,
-      product_id: input.agentId
+      entitlement_id: FACTORY_HARNESS_ENTITLEMENT_ID
     })}`,
     {
       method: "POST",
@@ -251,9 +249,6 @@ async function executeOneTurn(
         protocol_version: PROTOCOL_VERSION,
         license_token: "factory-harness-local",
         entitlement_id: FACTORY_HARNESS_ENTITLEMENT_ID,
-        creator_id: input.creatorId,
-        product_id: input.agentId,
-        user_id: FACTORY_HARNESS_USER_ID,
         local_tools: [...LOCAL_TOOLS]
       } satisfies ClientHello;
       socket.send(JSON.stringify(hello));

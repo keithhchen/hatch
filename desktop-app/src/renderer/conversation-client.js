@@ -49,8 +49,6 @@ export function shouldOpenNewConversationInWindow(activeRun) {
 export function conversationScope(binding = {}) {
   const params = new URLSearchParams();
   if (binding.entitlementId) params.set("entitlement_id", binding.entitlementId);
-  if (binding.creatorId) params.set("creator_id", binding.creatorId);
-  if (binding.productId || binding.agentId) params.set("product_id", binding.productId || binding.agentId);
   return params;
 }
 

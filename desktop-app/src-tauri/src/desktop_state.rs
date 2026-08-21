@@ -295,7 +295,7 @@ fn migrate_legacy_state<R: Runtime>(app: &AppHandle<R>) -> Result<DesktopState, 
                     .and_then(Value::as_str)
                     .map(str::to_string),
                 product_id: context
-                    .and_then(|value| value.get("productId").or_else(|| value.get("agentId")))
+                    .and_then(|value| value.get("productId"))
                     .and_then(Value::as_str)
                     .map(str::to_string),
                 workspace_grant_id,
