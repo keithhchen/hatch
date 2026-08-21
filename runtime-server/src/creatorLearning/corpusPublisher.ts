@@ -195,7 +195,7 @@ export class CorpusPublisher {
       published_at: publishedAt,
     } as const;
     const releaseBytes = Buffer.from(JSON.stringify({ ...releaseInput, status: "published" }, null, 2), "utf8");
-    await this.objectStore.put(`${releaseRef}/release.json`, releaseBytes, { immutable: true, contentType: "application/json" });
+    await putImmutableReleaseAsset(this.objectStore, `${releaseRef}/release.json`, releaseBytes);
     publishStage = "postgres_release_pointer";
     const release = await this.releases.publish(releaseInput);
     await rm(staging, { recursive: true, force: true });
@@ -338,3 +338,26 @@ function safeId(value: string): string {
 }
 
 function yaml(value: string): string { return JSON.stringify(value); }
+
+async function putImmutableReleaseAsset(
+  objectStore: ArtifactObjectStore,
+  key: string,
+  bytes: Buffer,
+): Promise<void> {
+  try {
+    await objectStore.put(key, bytes, { immutable: true, contentType: "application/json" });
+    return;
+  } catch (error) {
+    // A retry of the same content-addressed release may have a new request
+    // timestamp. Reuse the existing immutable asset when its release identity
+    // is otherwise identical; never overwrite a different release.
+    const existing = await objectStore.get(key);
+    const normalize = (value: Buffer): string => {
+      const parsed = JSON.parse(value.toString("utf8")) as Record<string, unknown>;
+      delete parsed.published_at;
+      return JSON.stringify(parsed);
+    };
+    if (normalize(existing) === normalize(bytes)) return;
+    throw error;
+  }
+}
