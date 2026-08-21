@@ -20,7 +20,7 @@ const runtimeReleaseResponseSchema = z.object({
     corpus_ref: z.string().min(1),
     release_ref: z.string().min(1),
     brief_spec: z.unknown(),
-    status: z.literal("live"),
+    status: z.literal("published"),
     published_at: z.string().datetime()
   }).strict(),
   runtime_manifest_ref: z.string().min(1)

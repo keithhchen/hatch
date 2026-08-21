@@ -125,7 +125,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const releaseStore = new CreatorRegistryReleaseStore(graphPool);
   await releaseStore.ensureSchema();
   const corpusPublisher = factoryNodeService && nodeObjectStore
-    ? new CorpusPublisher(factoryNodeService, nodeObjectStore, store, releaseStore, environment.HATCH_RUNTIME_CORPUS_ROOT?.trim() || environment.HATCH_AGENT_CORPUS_ROOT?.trim() || "runtime-corpora")
+    ? new CorpusPublisher(factoryNodeService, nodeObjectStore, store, releaseStore, environment.HATCH_RUNTIME_CORPUS_ROOT?.trim() || "runtime-corpora")
     : undefined;
   const graphStore = graphPool ? new PostgresDistillationGraphStore(graphPool) : undefined;
   await graphStore?.initialize();
@@ -305,7 +305,7 @@ async function route(
       corpus_ref: result.output_ref,
       corpus_digest: result.corpus_digest,
       release_digest: result.release.release_digest,
-      status: "live",
+      status: "published",
       published_at: result.published.published_at
     });
     return;
