@@ -59,6 +59,7 @@ export class CorpusPublisher {
     productName: string;
     productPromise: string;
     briefSpec?: unknown;
+    force?: boolean;
   }): Promise<PublishResult> {
     let outerStage = "latest_completed_corpus";
     try {
@@ -77,7 +78,7 @@ export class CorpusPublisher {
     // publish request; the request header is only transport metadata.
     outerStage = "postgres_live_pointer_read";
     const live = await this.releases.getLive(input.productId);
-    if (
+    if (!input.force &&
       live
       && live.creator_id === input.creatorId
       && live.corpus_digest === sourceDigest
