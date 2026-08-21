@@ -8,6 +8,7 @@ import type { FactoryNodeService } from "./nodeService.js";
 import type { RegistryStoreTs, PublishedAgentCorpus } from "../registryStore.js";
 import { extractAgentCorpusBundle, immutableReleasePath } from "../registryCorpus.js";
 import { CreatorRegistryReleaseStore, type CreatorRegistryRelease } from "./creatorRegistryRelease.js";
+import type { AgentKnowledgeIndexer, KnowledgeDocument } from "../qdrantIndexer.js";
 
 type CorpusOutput = {
   system_instructions: string;
@@ -37,6 +38,7 @@ export class CorpusPublisher {
     private readonly registry: RegistryStoreTs,
     private readonly releases: CreatorRegistryReleaseStore,
     private readonly runtimeRoot: string,
+    private readonly knowledgeIndexer?: AgentKnowledgeIndexer,
   ) {}
 
   async publishLatest(input: {
@@ -69,6 +71,7 @@ export class CorpusPublisher {
       staging,
       undefined,
       input.briefSpec as never,
+      { indexKnowledge: false },
     );
     const immutableRoot = immutableReleasePath(this.runtimeRoot, input.creatorId, input.productId, staged.corpus_digest);
     const releaseRoot = path.resolve(this.runtimeRoot, input.productId, staged.corpus_digest.slice("sha256:".length));
@@ -91,6 +94,22 @@ export class CorpusPublisher {
       const existing = await readFile(path.join(releaseRoot, "source-corpus.json"));
       if (!existing.equals(bytes)) throw new Error("Runtime release already contains different Corpus bytes");
     });
+    if (corpus.knowledge.length > 0) {
+      if (!this.knowledgeIndexer) throw new Error("Corpus includes knowledge but Qdrant indexing is not configured");
+      await this.knowledgeIndexer.stageAgentDocuments(
+        input.creatorId,
+        input.productId,
+        sourceDigest,
+        releaseRoot,
+        corpus.knowledge.map((document): KnowledgeDocument => ({
+          id: safeId(document.id),
+          path: `knowledge/${safeId(document.id)}.md`,
+          sha256: `sha256:${createHash("sha256").update(document.content, "utf8").digest("hex")}`,
+          retrieval_only: true,
+          source_summary: document.source_summary,
+        })),
+      );
+    }
     const releaseDigest = staged.corpus_digest;
     const releaseRef = `registry/${input.productId}/releases/${releaseDigest.slice("sha256:".length)}`;
     const releaseInput = {

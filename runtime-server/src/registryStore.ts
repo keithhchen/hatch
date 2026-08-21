@@ -449,13 +449,14 @@ export class RegistryStoreTs {
     agentId: string,
     corpusRoot: string,
     expectedDigest?: string,
-    briefSpec?: BriefSpec
+    briefSpec?: BriefSpec,
+    options: { indexKnowledge?: boolean } = {},
   ): Promise<PublishedAgentCorpus> {
     const normalizedBriefSpec = briefSpec ? normalizeBriefSpec(briefSpec) : undefined;
     const verified = await verifyAgentCorpus(corpusRoot, creatorId, agentId);
     if (expectedDigest !== undefined && verified.digest !== expectedDigest) throw new Error("candidate_changed");
     const immutableRoot = await materializeAgentCorpusRelease(verified, this.corpusRoot);
-    if (this.indexer) {
+    if (this.indexer && options.indexKnowledge !== false) {
       await ingestAgentCorpusKnowledge(this.indexer, {
         corpus: verified.corpus,
         path: immutableRoot,
