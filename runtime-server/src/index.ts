@@ -64,7 +64,14 @@ import { HttpCommerceEventSink } from "./commerceHttpSink.js";
 import { DeliveryAccountingOutbox, type DeliveryAccountingCommand } from "./deliveryOutbox.js";
 import { AgentCorpusChangedError, materializeAgentCorpus } from "./agentCorpusMaterialization.js";
 import { creatorToolControlPlaneFromEnvironment, resolveCreatorTools, type CreatorToolControlPlane } from "./creatorTools.js";
-import { AgentCorpusResolver, createKnowledgeProvider, knowledgeProviderConfigured, type AgentCorpus } from "./agentCorpus.js";
+import {
+  AgentCorpusResolver as FilesystemAgentCorpusResolver,
+  createKnowledgeProvider,
+  knowledgeProviderConfigured,
+  type AgentCorpus,
+  type AgentCorpusResolverLike
+} from "./agentCorpus.js";
+import { RuntimeReleaseAgentCorpusResolver } from "./runtimeCorpusResolver.js";
 import {
   discoverSkills,
   includeSkillInstructions,
@@ -87,6 +94,8 @@ import {
   type OutputGuard
 } from "./outputGuard.js";
 import { writeOperationalError } from "./operationalLogging.js";
+
+type AgentCorpusResolver = AgentCorpusResolverLike;
 
 export type RuntimeServer = {
   server: http.Server;
@@ -233,7 +242,9 @@ export async function createRuntimeServerFromEnvironment(
   environment: NodeJS.ProcessEnv = process.env
 ): Promise<RuntimeServer> {
   const registryUrl = environment.HATCH_REGISTRY_URL?.trim();
-  const agentCorpusRoot = environment.HATCH_AGENT_CORPUS_ROOT?.trim();
+  const runtimeCorpusRoot = environment.HATCH_RUNTIME_CORPUS_ROOT?.trim();
+  const runtimeDataDir = environment.HATCH_RUNTIME_DATA_DIR?.trim() || path.resolve(".hatch-runtime");
+  const runtimeRegistryToken = environment.HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN?.trim();
   const runtimeDatabaseUrl = environment.HATCH_RUNTIME_DATABASE_URL?.trim();
   const runtimeHost = environment.HATCH_RUNTIME_HOST?.trim() || "127.0.0.1";
   const helloTimeoutMs = runtimeClientHelloTimeoutMs(environment.HATCH_RUNTIME_HELLO_TIMEOUT_MS);
@@ -371,11 +382,15 @@ export async function createRuntimeServerFromEnvironment(
       throw new Error("HATCH_REGISTRY_URL must use http or https");
     }
   }
+  if (registryUrl && !runtimeRegistryToken && environment.NODE_ENV === "production") {
+    throw new Error("HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN is required when HATCH_REGISTRY_URL is configured");
+  }
   if (!isLoopbackRuntimeHost(runtimeHost)
     && !insecureLocalMode
-    && (!registryUrl || !agentCorpusRoot || !runtimeDatabaseUrl)) {
+    && (!registryUrl || !runtimeRegistryToken || !runtimeCorpusRoot || !runtimeDatabaseUrl)) {
     throw new Error(
-      "A non-loopback Runtime requires HATCH_REGISTRY_URL, HATCH_AGENT_CORPUS_ROOT, and HATCH_RUNTIME_DATABASE_URL; "
+      "A non-loopback Runtime requires HATCH_REGISTRY_URL, HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN, "
+      + "HATCH_RUNTIME_CORPUS_ROOT, and HATCH_RUNTIME_DATABASE_URL; "
       + "set HATCH_ALLOW_INSECURE_LOCAL_MODE=true only for an intentional local fixture"
     );
   }
@@ -425,9 +440,16 @@ export async function createRuntimeServerFromEnvironment(
     creatorToolControlPlane: creatorToolControlPlaneFromEnvironment(environment),
     entitlementResolver: registryAuth ?? fileEntitlements,
     authIdentityResolver: registryAuth,
-    agentCorpusResolver: agentCorpusRoot
-      ? new AgentCorpusResolver(agentCorpusRoot)
-      : undefined,
+    agentCorpusResolver: runtimeRegistryToken && registryUrl
+      ? new RuntimeReleaseAgentCorpusResolver({
+        registryUrl,
+        serviceToken: runtimeRegistryToken,
+        corpusRoot: runtimeCorpusRoot || path.join(runtimeDataDir, "corpora"),
+        timeoutMs: registryAuthorizationTimeoutMs(environment)
+      })
+      : runtimeCorpusRoot
+        ? new FilesystemAgentCorpusResolver(runtimeCorpusRoot)
+        : undefined,
     conversationStore: createConversationStore(environment),
     clientToolTimeoutMs: clientToolTimeoutMs(environment.HATCH_CLIENT_TOOL_TIMEOUT_MS),
     clientHelloTimeoutMs: helloTimeoutMs,
@@ -533,6 +555,7 @@ type SessionBinding = {
   agentId: string;
   productId: string;
   corpusDigest: string;
+  runtimeDigest?: string;
   purchasedCorpusDigest?: string;
   /** Free purchases are permanent access; metered accounting is opt-in. */
   accessMode?: "unmetered" | "metered";
@@ -2577,7 +2600,7 @@ async function runOneTurn(
         binding.agentCorpusRoot,
         input.message.content,
         hello.local_tools,
-        binding.corpusDigest,
+        binding.runtimeDigest ?? binding.corpusDigest,
         abortSignal
       )
       : undefined;
@@ -3021,6 +3044,7 @@ async function resolveSessionBinding(
       agentId: resolved.corpus.agent_id,
       productId: resolved.corpus.product.id,
       corpusDigest: resolved.digest,
+      ...(resolved.runtimeDigest ? { runtimeDigest: resolved.runtimeDigest } : {}),
       ...((corpusEntitlement?.brief_spec ?? resolved.corpus.product.brief_spec)
         ? { briefSpec: (corpusEntitlement?.brief_spec ?? resolved.corpus.product.brief_spec) as BriefSpec }
         : {}),
@@ -3077,6 +3101,7 @@ async function resolveSessionBinding(
       agentId: entitlement.agent_id,
       productId: entitlement.product_id,
       corpusDigest: resolved.digest,
+      ...(resolved.runtimeDigest ? { runtimeDigest: resolved.runtimeDigest } : {}),
       ...(briefSpec ? { briefSpec: briefSpec as BriefSpec } : {}),
       ...(entitlement.purchased_corpus_digest
         ? {
@@ -3328,6 +3353,7 @@ async function bindingFromHistoryRequest(
       agentId: entitlement.agent_id,
       productId: entitlement.product_id,
       corpusDigest: resolved.digest,
+      ...(resolved.runtimeDigest ? { runtimeDigest: resolved.runtimeDigest } : {}),
       ...(briefSpec ? { briefSpec: briefSpec as BriefSpec } : {}),
       purchasedCorpusDigest: entitlement.purchased_corpus_digest ?? resolved.digest,
       entitlementId: entitlement.entitlement_id,

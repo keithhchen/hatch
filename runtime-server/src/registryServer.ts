@@ -36,9 +36,13 @@ import {
   type CreatorFactoryRepository
 } from "./creatorLearning/repository.js";
 import { CreatorFactoryService } from "./creatorLearning/service.js";
+import { CreatorFactory } from "./creatorLearning/engine.js";
+import { factoryModelForEnvironment, runFactoryPromptWithPi } from "./creatorLearning/piGateway.js";
+import { createHatchCliCandidateExecutor } from "./creatorLearning/cliCandidateExecutor.js";
+import { CreatorFactoryWorker } from "./creatorLearning/worker.js";
 import type { CreatorProductRecord } from "./creatorLearning/products.js";
 import { objectStoreFromEnvironment } from "./creatorLearning/objectStore.js";
-import { ProductFileStore, ProductFilesError, type ProductFileView, type ProductSnapshotView } from "./creatorLearning/productFiles.js";
+import { ProductFileStore, ProductFilesError, type ProductFileView } from "./creatorLearning/productFiles.js";
 import { NodeRuntime } from "./nodeRuntime.js";
 import { PostgresNodeStore } from "./nodeSession.js";
 import {
@@ -49,7 +53,8 @@ import {
 } from "./creatorLearning/nodeService.js";
 import type { AboutYouAnswerPair } from "./creatorLearning/aboutYouNode.js";
 import { PostgresDistillationGraphStore } from "./creatorLearning/distillationGraphStore.js";
-import { CreatorRegistry, CreatorRegistryError } from "./creatorLearning/creatorRegistry.js";
+import { CorpusPublisher } from "./creatorLearning/corpusPublisher.js";
+import { CreatorRegistryReleaseStore } from "./creatorLearning/creatorRegistryRelease.js";
 import {
   HttpRequestGate,
   PublishWorkGate,
@@ -75,7 +80,9 @@ type RegistryContext = {
   factoryService: CreatorFactoryService;
   productFileStore: ProductFileStore;
   factoryNodeService?: FactoryNodeService;
-  creatorRegistry?: CreatorRegistry;
+  corpusPublisher?: CorpusPublisher;
+  nodeObjectStore?: ReturnType<typeof objectStoreFromEnvironment>;
+  releaseStore: CreatorRegistryReleaseStore;
   authSecret: string;
 };
 
@@ -114,20 +121,46 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       environment.HATCH_CREATOR_PRODUCT_FILES_PREFIX?.trim() || "creator-products"
     )
     : undefined;
-  const creatorRegistry = nodePool && nodeObjectStore
-    ? new CreatorRegistry(nodeObjectStore, nodePool)
-    : undefined;
-  await creatorRegistry?.initialize();
   const graphPool = store.databasePool();
+  const releaseStore = new CreatorRegistryReleaseStore(graphPool);
+  await releaseStore.ensureSchema();
+  const corpusPublisher = factoryNodeService && nodeObjectStore
+    ? new CorpusPublisher(factoryNodeService, nodeObjectStore, store, releaseStore, environment.HATCH_RUNTIME_CORPUS_ROOT?.trim() || "runtime-corpora")
+    : undefined;
   const graphStore = graphPool ? new PostgresDistillationGraphStore(graphPool) : undefined;
   await graphStore?.initialize();
+  // User commands start the Factory directly in the registry process. The
+  // standalone worker remains a durable restart/recovery consumer, but a new
+  // Product revision no longer waits for its polling loop to notice a row.
+  const immediateFactoryWorker = new CreatorFactoryWorker(
+    factoryRepository,
+    new CreatorFactory(
+      factoryRoot,
+      runFactoryPromptWithPi,
+      createHatchCliCandidateExecutor({
+        timeoutMs: integerEnvironment(environment.HATCH_CREATOR_FACTORY_HATCH_TIMEOUT_MS, 15 * 60_000),
+        environment
+      }),
+      { model: factoryModelForEnvironment(environment), objectStore, graphStore }
+    ),
+    {
+      workerId: `factory-http-${process.pid}-${randomUUID()}`,
+      // The direct HTTP starter and the durable recovery worker share this
+      // lease. It must exceed the Factory LLM's 15-minute hard deadline so a
+      // slow prompt is not reclaimed while the request is still executing.
+      leaseMs: integerEnvironment(environment.HATCH_CREATOR_FACTORY_LEASE_MS, 20 * 60_000),
+      heartbeatMs: integerEnvironment(environment.HATCH_CREATOR_FACTORY_HEARTBEAT_MS, 60_000)
+    }
+  );
+  const immediateFactoryStop = new AbortController();
   const factoryService = new CreatorFactoryService(
     factoryRepository,
     factoryRoot,
     undefined,
     objectStore,
     graphStore,
-    productFileStore
+    productFileStore,
+    (runId) => immediateFactoryWorker.startRun(runId, immediateFactoryStop.signal)
   );
   const publishToken = environment.HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN?.trim() || "";
   const runtimeServiceToken = environment.HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN?.trim() || "";
@@ -158,7 +191,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       }, { "retry-after": String(admission.retryAfterSeconds), connection: "close" });
       return;
     }
-    const routePromise = route(request, response, { store, accounts, authRateLimiter, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, productFileStore, factoryNodeService, creatorRegistry, authSecret })
+    const routePromise = route(request, response, { store, accounts, authRateLimiter, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, productFileStore, factoryNodeService, corpusPublisher, nodeObjectStore, releaseStore, authSecret })
       .catch((error) => {
         const status = errorStatus(error);
         if (status >= 500) console.error("Registry request failed", error);
@@ -170,13 +203,6 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
           return;
         }
         if (error instanceof FactoryNodeServiceError) {
-          sendJson(response, status, {
-            error: { code: error.code, message: error.message },
-            detail: error.message
-          });
-          return;
-        }
-        if (error instanceof CreatorRegistryError) {
           sendJson(response, status, {
             error: { code: error.code, message: error.message },
             detail: error.message
@@ -216,6 +242,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const host = environment.REGISTRY_HOST ?? "127.0.0.1";
   await new Promise<void>((resolve) => server.listen(port, host, resolve));
   return { server, close: async () => {
+    immediateFactoryStop.abort();
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await factoryRepository.close();
     await store.close();
@@ -249,6 +276,51 @@ async function route(
   const url = new URL(request.url ?? "/", "http://registry.local");
   if (request.method === "GET" && url.pathname === "/healthz") {
     sendJson(response, 200, { status: "ok" });
+    return;
+  }
+
+  const registryPublishMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/registry$/);
+  if (registryPublishMatch && request.method === "POST") {
+    const account = await authenticate(request, response, context, "creator");
+    if (account === SESSION_QUERY_REJECTED) return;
+    if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
+    if (!context.corpusPublisher || !context.factoryNodeService) {
+      sendJson(response, 503, { error: { code: "publish_unavailable", message: "Corpus Publisher is unavailable." } });
+      return;
+    }
+    const productId = decodeURIComponent(registryPublishMatch[1]!);
+    const product = await productForCreator(context, account.id, productId);
+    if (!product) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
+    const body = await readJson(request);
+    const result = await context.corpusPublisher.publishLatest({
+      creatorId: account.id,
+      productId,
+      productName: product.name,
+      productPromise: product.promise,
+      briefSpec: body.brief_spec ?? product.brief_spec
+    });
+    sendJson(response, 201, {
+      product_id: productId,
+      execution_id: result.execution_id,
+      corpus_ref: result.output_ref,
+      corpus_digest: result.corpus_digest,
+      release_digest: result.release.release_digest,
+      status: "published",
+      published_at: result.published.published_at
+    });
+    return;
+  }
+
+  const runtimeReleaseMatch = url.pathname.match(/^\/v1\/runtime\/products\/([^/]+)\/release$/);
+  if (runtimeReleaseMatch && request.method === "GET") {
+    requireRuntimeServiceAuth(request, context.runtimeServiceToken);
+    const productId = decodeURIComponent(runtimeReleaseMatch[1]!);
+    const release = await context.releaseStore.getLive(productId);
+    if (!release) { sendJson(response, 404, { detail: "No live release exists for this Product." }); return; }
+    sendJson(response, 200, {
+      release,
+      runtime_manifest_ref: release.runtime_manifest_ref
+    });
     return;
   }
   if (request.method === "GET" && (url.pathname === "/readyz" || url.pathname === "/health")) {
@@ -473,7 +545,8 @@ async function route(
     const nodeProduct = {
       productId,
       name: product.name,
-      promise: product.promise
+      promise: product.promise,
+      ...(product.brief_spec ? { briefSpec: product.brief_spec } : {})
     };
 
     if (request.method === "GET" && executionId && !isAnswers) {
@@ -540,17 +613,12 @@ async function route(
 
   if (url.pathname.startsWith("/v1/creator/factory-runs")
     || url.pathname.startsWith("/v1/creator/source-documents")
-    || url.pathname.startsWith("/v1/creator/source-snapshots")) {
-    sendJson(response, 404, {
-      error: { code: "route_not_found", message: "The legacy Factory API has been replaced by Product Nodes." }
-    });
-    return;
-  }
-
-  // Product Graph remains a read-only audit projection for the new Product
-  // workspace. It is not an execution entrypoint and cannot start the retired
-  // Factory workflow.
-  if (/^\/v1\/creator\/products\/[^/]+\/graph$/.test(url.pathname)) {
+    || url.pathname.startsWith("/v1/creator/source-snapshots")
+    // Product Graph is implemented by the Factory service and must use the
+    // same authenticated Product-scoped boundary as the other Factory views.
+    // Keep the route explicit here so it is not swallowed by the Registry's
+    // Product/File/Snapshot compatibility handlers below.
+    || /^\/v1\/creator\/products\/[^/]+\/graph$/.test(url.pathname)) {
     const account = await authenticate(request, response, context, "creator");
     if (account === SESSION_QUERY_REJECTED) return;
     if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
@@ -680,75 +748,12 @@ async function route(
     return;
   }
 
-  const productRegistryMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/registry$/);
-  if (productRegistryMatch && request.method === "POST") {
-    const account = await authenticate(request, response, context, "creator");
-    if (account === SESSION_QUERY_REJECTED) return;
-    if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
-    if (!context.creatorRegistry) {
-      sendJson(response, 503, { error: { code: "registry_unavailable", message: "Creator Registry is unavailable." } });
-      return;
-    }
-    const productId = decodeURIComponent(productRegistryMatch[1]!);
-    const product = await productForCreator(context, account.id, productId);
-    if (!product) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
-    const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
-    const corpusRef = requiredNodeBodyText(body.corpus_ref, "corpus_ref");
-    const briefSpec = body.brief_spec && typeof body.brief_spec === "object"
-      ? normalizeBriefSpec(body.brief_spec as BriefSpec)
-      : product.brief_spec;
-    if (!briefSpec) throw new BriefValidationError("brief_spec_required", "brief_spec is required before publishing");
-    sendJson(response, 201, {
-      registry: await context.creatorRegistry.publish({
-        creatorId: account.id,
-        productId,
-        product: { name: product.name, promise: product.promise },
-        corpusRef,
-        briefSpec
-      })
-    });
-    return;
-  }
-
-  // Runtime's only read boundary for the new Creator Registry. The Runtime
-  // receives refs from this Postgres-backed live pointer; it never reads the
-  // Creator Registry tables directly and never reconstructs a release path.
-  const runtimeRegistryCurrentMatch = url.pathname.match(/^\/v1\/runtime\/products\/([^/]+)\/release$/);
-  if (runtimeRegistryCurrentMatch && request.method === "GET") {
-    if (!context.runtimeServiceToken || !isRuntimeServiceRequest(request, context.runtimeServiceToken)) {
-      sendJson(response, 403, { error: { code: "runtime_service_required", message: "A valid Runtime service token is required." } });
-      return;
-    }
-    if (!context.creatorRegistry) {
-      sendJson(response, 503, { error: { code: "registry_unavailable", message: "Creator Registry is unavailable." } });
-      return;
-    }
-    const productId = decodeURIComponent(runtimeRegistryCurrentMatch[1]!);
-    const release = await context.creatorRegistry.currentByProduct(productId);
-    if (!release) {
-      sendJson(response, 404, { error: { code: "release_not_found", message: "No live Registry release exists for this Product." } });
-      return;
-    }
-    sendJson(response, 200, {
-      release: publicCreatorRegistryRelease(release),
-      runtime_manifest_ref: release.runtimeManifestRef
-    });
-    return;
-  }
-
   const productFilesMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/files(?:\/([^/]+))?$/);
-  const productSnapshotsMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/snapshots(?:\/([^/]+))?$/);
-  const productRunsMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/runs(?:\/([^/]+))?$/);
-  const productVersionsMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/versions$/);
-  if (productSnapshotsMatch || productRunsMatch || productVersionsMatch) {
-    sendJson(response, 404, { error: { code: "route_not_found", message: "The legacy Product Snapshot/Run API has been replaced by Product Nodes." } });
-    return;
-  }
   if (productFilesMatch) {
     const account = await authenticate(request, response, context, "creator");
     if (account === SESSION_QUERY_REJECTED) return;
     if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
-    const productId = decodeURIComponent((productFilesMatch ?? productSnapshotsMatch ?? productRunsMatch ?? productVersionsMatch)![1]!);
+    const productId = decodeURIComponent(productFilesMatch[1]!);
     const product = await productForCreator(context, account.id, productId);
     if (!product) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
 
@@ -762,11 +767,6 @@ async function route(
       if (request.method === "GET" && fileId) {
         const file = await context.productFileStore.getFile(account.id, productId, fileId);
         sendJson(response, 200, publicProductFile(file, url.searchParams.get("include_content") === "true"));
-        return;
-      }
-      if (request.method === "DELETE" && fileId) {
-        const file = await context.productFileStore.deleteFile(account.id, productId, fileId);
-        sendJson(response, 200, publicProductFile(file));
         return;
       }
       if (request.method === "POST" && !fileId) {
@@ -807,109 +807,6 @@ async function route(
       }
     }
 
-    if (productSnapshotsMatch) {
-      const snapshotId = productSnapshotsMatch[2] ? decodeURIComponent(productSnapshotsMatch[2]) : undefined;
-      if (request.method === "GET" && !snapshotId) {
-        sendJson(response, 200, {
-          product_id: productId,
-          snapshots: (await context.productFileStore.listSnapshots(account.id, productId)).map((snapshot) => publicProductSnapshot(snapshot))
-        });
-        return;
-      }
-      if (request.method === "GET" && snapshotId) {
-        sendJson(response, 200, publicProductSnapshot(await context.productFileStore.getSnapshot(account.id, productId, snapshotId)));
-        return;
-      }
-      if (request.method === "POST" && !snapshotId) {
-        const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
-        const fileIds = Array.isArray(body.file_ids) ? body.file_ids.map((id) => String(id)) : undefined;
-        const snapshot = await context.productFileStore.createSnapshot(
-          account.id,
-          productId,
-          fileIds,
-          request.headers["idempotency-key"]?.toString()
-        );
-        sendJson(response, 201, publicProductSnapshot(snapshot));
-        return;
-      }
-    }
-
-    if (productRunsMatch || productVersionsMatch) {
-      if (request.method === "POST" && !product.repositoryId) {
-        sendJson(response, 409, {
-          error: {
-            code: "product_revision_unavailable",
-            message: "This published Product is read-only in the current workspace; create a new Product to iterate it."
-          }
-        });
-        return;
-      }
-      const runId = productRunsMatch?.[2] ? decodeURIComponent(productRunsMatch[2]) : undefined;
-      if (request.method === "GET" && !runId) {
-        const runs = (await context.factoryService.list(account.id))
-          .filter((run) => run.agentId === productId || run.product?.id === productId)
-          .map(publicProductRun);
-        sendJson(response, 200, productVersionsMatch ? { product_id: productId, versions: runs } : { product_id: productId, runs });
-        return;
-      }
-      if (request.method === "GET" && runId && productRunsMatch) {
-        const run = await context.factoryService.get(account.id, runId);
-        if (run.agentId !== productId && run.product?.id !== productId) {
-          sendJson(response, 404, { error: { code: "run_not_found", message: "Run was not found for this Product." } });
-          return;
-        }
-        sendJson(response, 200, publicProductRun(run));
-        return;
-      }
-      if (request.method === "POST" && !runId && productRunsMatch) {
-        const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
-        // A caller-provided key makes retries safe. If omitted, use a fresh
-        // request identity; a deterministic Product-only fallback would make
-        // every later “new version” replay the very first run forever.
-        const runIdempotencyKey = request.headers["idempotency-key"]?.toString().trim()
-          || `product-run:${productId}:${randomUUID()}`;
-        const runId = `factory_${createHash("sha256")
-          .update(`${account.id}\u0000${productId}\u0000${runIdempotencyKey}`)
-          .digest("hex")
-          .slice(0, 32)}`;
-        const snapshotId = typeof body.source_snapshot_id === "string" && body.source_snapshot_id.trim()
-          ? body.source_snapshot_id.trim()
-          : (await context.productFileStore.createSnapshot(
-            account.id,
-            productId,
-            Array.isArray(body.file_ids) ? body.file_ids.map((id) => String(id)) : undefined,
-            `${runIdempotencyKey}:snapshot`
-          )).id;
-        const config = body.config && typeof body.config === "object" && !Array.isArray(body.config)
-          ? body.config as Record<string, unknown>
-          : undefined;
-        const result = await context.factoryService.create(
-          { id: account.id, name: account.display_name },
-          {
-            runId,
-            // The repository still uses the internal row id as a migration
-            // boundary. The external contract uses the stable Product id.
-            // The current repository implementation accepts its internal row
-            // key at this service boundary. Core Product canonicalization will
-            // make this equal to productId; it is never exposed to callers.
-            productId: product.repositoryId,
-            agentId: productId,
-            product: { id: productId, name: product.name, description: product.promise, promise: product.promise },
-            productName: product.name,
-            productPromise: product.promise,
-            sourceSnapshotId: snapshotId,
-            ...(config ? { config: {
-              ...(typeof config.development_questions === "number" ? { developmentQuestions: config.development_questions } : {}),
-              ...(typeof config.heldout_questions === "number" ? { heldoutQuestions: config.heldout_questions } : {}),
-              ...(typeof config.max_corpus_revisions === "number" ? { maxCorpusRevisions: config.max_corpus_revisions } : {})
-            } } : {})
-          },
-          runIdempotencyKey
-        );
-        sendJson(response, result.created ? 202 : 200, publicProductRun(result.run));
-        return;
-      }
-    }
   }
 
   if (url.pathname === "/v1/public/products" && request.method === "GET") {
@@ -1266,12 +1163,11 @@ async function productForCreator(
   const products = await context.factoryService.listProducts(creatorId);
   const product = products.find((entry) => publicProductId(entry) === productId);
   if (product) {
-    const published = await context.creatorRegistry?.current(creatorId, productId);
     return {
       productId,
       name: product.name,
       promise: publicProductPromise(product),
-      status: published ? "published" : product.runId ? "working" : "draft",
+      status: product.runId ? "working" : "draft",
       ...(product.briefSpec ? { brief_spec: product.briefSpec } : {}),
       createdAt: product.createdAt,
       updatedAt: product.updatedAt,
@@ -1343,48 +1239,7 @@ function publicProductFile(file: ProductFileView, includeContent = false): Recor
     projection,
     metadata: file.metadata,
     created_at: file.createdAt,
-    updated_at: file.updatedAt,
-    ...(file.deletedAt ? { deleted_at: file.deletedAt } : {})
-  };
-}
-
-function publicProductSnapshot(snapshot: ProductSnapshotView | Awaited<ReturnType<ProductFileStore["listSnapshots"]>>[number]): Record<string, unknown> {
-  return {
-    id: snapshot.id,
-    product_id: snapshot.productId,
-    version: snapshot.version,
-    file_ids: snapshot.fileIds,
-    manifest_sha256: snapshot.manifestSha256,
-    locked_at: snapshot.lockedAt,
-    created_at: snapshot.createdAt,
-    ...(Array.isArray((snapshot as ProductSnapshotView).documents)
-      ? { files: (snapshot as ProductSnapshotView).documents.map((file) => publicProductFile(file)) }
-      : {})
-  };
-}
-
-function publicProductRun(run: Awaited<ReturnType<CreatorFactoryService["get"]>>): Record<string, unknown> {
-  return {
-    id: run.id,
-    product_id: run.agentId ?? run.product?.id,
-    version: run.revisionNumber ?? run.version,
-    revision_id: run.revisionId ?? run.id,
-    parent_revision_id: run.parentRevisionId ?? null,
-    source_snapshot_id: run.sourceSnapshotId ?? null,
-    status: run.status,
-    stage: run.stage ?? null,
-    workflow_step: run.workflowStep,
-    derived_status: run.derivedStatus ?? null,
-    quality_gates: run.qualityGates ?? [],
-    pending_questions: run.pendingQuestions,
-    answer_drafts: run.answerDrafts ?? [],
-    question_batch_id: run.questionBatchId ?? null,
-    retryable: run.retryable,
-    retry_stage: run.retryStage ?? null,
-    candidate: run.candidate ?? null,
-    last_error: run.lastError ?? null,
-    created_at: run.createdAt,
-    updated_at: run.updatedAt
+    updated_at: file.updatedAt
   };
 }
 
@@ -1547,35 +1402,6 @@ function beginSessionQuery(
   return undefined;
 }
 
-function isRuntimeServiceRequest(request: http.IncomingMessage, token: string): boolean {
-  return request.headers["x-hatch-runtime-service-token"] === token || bearer(request) === token;
-}
-
-function publicCreatorRegistryRelease(release: {
-  productId: string;
-  creatorId: string;
-  releaseDigest: string;
-  corpusDigest: string;
-  corpusRef: string;
-  releaseRef: string;
-  runtimeManifestRef: string;
-  briefSpec: unknown;
-  status: string;
-  publishedAt: string;
-}): Record<string, unknown> {
-  return {
-    product_id: release.productId,
-    creator_id: release.creatorId,
-    release_digest: release.releaseDigest,
-    corpus_digest: release.corpusDigest,
-    corpus_ref: release.corpusRef,
-    release_ref: release.releaseRef,
-    brief_spec: release.briefSpec,
-    status: release.status,
-    published_at: release.publishedAt
-  };
-}
-
 function beginPublishWork(
   response: http.ServerResponse,
   context: RegistryContext,
@@ -1606,7 +1432,6 @@ function errorStatus(error: unknown): number {
     return error.code === "product_file_not_found" || error.code === "product_snapshot_not_found" || error.code === "product_mismatch" ? 404 : 422;
   }
   if (error instanceof FactoryNodeServiceError) return error.status;
-  if (error instanceof CreatorRegistryError) return error.status;
   if (error instanceof CreatorFactoryRepositoryError) {
     if (["idempotency_conflict", "run_id_conflict", "version_conflict"].includes(error.code)) return 409;
     if (error.code === "run_not_found") return 404;
