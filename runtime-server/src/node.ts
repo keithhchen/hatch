@@ -10,6 +10,32 @@ export type NodeScope = {
 
 const scopePartSchema = z.string().min(1).regex(/^[A-Za-z0-9._-]+$/);
 
+/** A complete OSS object key used by a Node input manifest. */
+export const nodeObjectPathSchema = z.string()
+  .min(1)
+  .max(512)
+  .refine((value) => {
+    try {
+      normalizeNodeObjectPath(value);
+      return true;
+    } catch {
+      return false;
+    }
+  }, "must be a safe OSS object path");
+
+export function normalizeNodeObjectPath(value: string): string {
+  const normalized = value.trim().replaceAll("\\", "/");
+  if (
+    !normalized
+    || normalized.startsWith("/")
+    || normalized.includes("://")
+    || normalized.split("/").some((part) => !part || part === "." || part === "..")
+  ) {
+    throw new Error(`OSS object path must be a non-empty object key: ${value}`);
+  }
+  return normalized;
+}
+
 /** Runtime boundary for the identity used by every Node read/write. */
 export const nodeScopeSchema = z.object({
   productId: scopePartSchema,
@@ -41,7 +67,8 @@ export type NodeActorInput<Input, Candidate, Feedback> = {
   round: number;
   /** The previous candidate is persisted by Runtime and read by reference. */
   previousCandidateRef?: string;
-  feedback?: Feedback;
+  /** Critic feedback is persisted by Runtime and read by reference. */
+  feedbackRef?: string;
 };
 
 export type NodeCriticInput<Input, Candidate> = {
@@ -85,6 +112,8 @@ export type NodeRound<Candidate, Feedback> = {
 
 export type NodeRunResult<Candidate, Feedback> = {
   status: "completed";
+  /** The normalized input manifest used by this execution. */
+  input: unknown;
   output: Candidate;
   outputRef: string;
   rounds: readonly NodeRound<Candidate, Feedback>[];
