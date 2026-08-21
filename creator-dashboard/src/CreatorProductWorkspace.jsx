@@ -168,9 +168,15 @@ export function CreatorProductWorkspace({ token, productId, tab = "files", navig
   }
 
   async function retryFailedNode() {
-    if (isExecutionError(aboutYou)) return startAboutYou(aboutYou.status === "max_rounds" ? undefined : aboutYou.execution_id);
+    if (isExecutionError(aboutYou)) {
+      const executionId = aboutYou.status === "max_rounds" ? undefined : aboutYou.execution_id;
+      const retryKey = executionId ? `retry:about-you:${executionId}` : undefined;
+      return startAboutYou(executionId, retryKey);
+    }
     if (isExecutionError(corpus) && aboutYou?.handoff_ref) {
-      return startCorpus(aboutYou.handoff_ref, corpus.status === "max_rounds" ? undefined : corpus.execution_id);
+      const executionId = corpus.status === "max_rounds" ? undefined : corpus.execution_id;
+      const retryKey = executionId ? `retry:corpus:${executionId}` : undefined;
+      return startCorpus(aboutYou.handoff_ref, executionId, retryKey);
     }
     if (retryActionRef.current) return retryActionRef.current();
     return refresh();
@@ -280,7 +286,7 @@ function CompletePanel({ t, product, briefSpec, corpus, busy, setBusy, token, pr
     catch (nextError) { onError(nextError); }
     finally { setBusy(""); }
   }
-  if (product.status === "published") return <section className="cpv2-workspace-panel cpv2-complete-panel"><StatusTag tone="success">{t("published")}</StatusTag><h2>{t("complete")}</h2><p>{t("productPublished")}</p></section>;
+  if (product.status === "published" || product.status === "live") return <section className="cpv2-workspace-panel cpv2-complete-panel"><StatusTag tone="success">{t("published")}</StatusTag><h2>{t("complete")}</h2><p>{t("productPublished")}</p></section>;
   if (!corpus?.output_ref) return <EmptyNodePanel title={t("complete")} body={t("waiting")} />;
   return <section className="cpv2-workspace-panel cpv2-complete-panel"><h2>{t("complete")}</h2><p>{product.promise ?? product.description ?? ""}</p>{showDetails && corpus.output ? <CorpusPanel t={t} execution={corpus} /> : null}{!isValidBriefSpec(briefSpec) ? <div className="cpv2-complete-brief-required"><p>{t("briefRequiredBeforePublish")}</p><Button type="button" variant="secondary" onClick={onBrief}>{t("brief")}</Button></div> : <div className="cpv2-workspace-actions"><Button type="button" variant="link" onClick={() => setShowDetails((current) => !current)}>{t("viewProductDetails")}</Button><Button type="button" loading={busy === "publish"} disabled={Boolean(busy)} onClick={() => void publish()}>{t("publishProduct")}</Button></div>}</section>;
 }
