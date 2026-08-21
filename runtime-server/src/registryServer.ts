@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "./loadRootEnv.js";
 import http from "node:http";
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
@@ -64,6 +64,8 @@ import {
   sessionQueryLimitOptionsFromEnvironment,
   type GateLease,
 } from "./registryRequestLimits.js";
+import { installGracefulShutdown } from "./gracefulShutdown.js";
+import { writeOperationalError } from "./operationalLogging.js";
 
 export type RegistryServer = { server: http.Server; close: () => Promise<void> };
 export const CREATOR_FACTORY_JSON_BODY_MAX_BYTES = 32 * 1024 * 1024;
@@ -84,6 +86,7 @@ type RegistryContext = {
   nodeObjectStore?: ReturnType<typeof objectStoreFromEnvironment>;
   releaseStore: CreatorRegistryReleaseStore;
   authSecret: string;
+  isShuttingDown: () => boolean;
 };
 
 export async function createRegistryServerFromEnvironment(environment: NodeJS.ProcessEnv = process.env): Promise<RegistryServer> {
@@ -189,7 +192,13 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const publishWorkGate = new PublishWorkGate(publishWorkLimitOptionsFromEnvironment(environment));
   const httpLimits = httpRequestLimitOptionsFromEnvironment(environment);
   const httpRequestGate = new HttpRequestGate(httpLimits);
+  let shuttingDown = false;
   const server = http.createServer((request, response) => {
+    if (shuttingDown) {
+      request.resume();
+      sendJson(response, 503, { detail: "Registry is shutting down." }, { connection: "close" });
+      return;
+    }
     const suppliedBearer = bearer(request);
     const internalRuntime = Boolean(
       (runtimeServiceToken && request.headers["x-hatch-runtime-service-token"] === runtimeServiceToken)
@@ -208,7 +217,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       }, { "retry-after": String(admission.retryAfterSeconds), connection: "close" });
       return;
     }
-    const routePromise = route(request, response, { store, accounts, authRateLimiter, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, productFileStore, factoryNodeService, corpusPublisher, nodeObjectStore, releaseStore, authSecret })
+    const routePromise = route(request, response, { store, accounts, authRateLimiter, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, productFileStore, factoryNodeService, corpusPublisher, nodeObjectStore, releaseStore, authSecret, isShuttingDown: () => shuttingDown })
       .catch((error) => {
         const status = errorStatus(error);
         if (status >= 500) console.error("Registry request failed", error);
@@ -265,12 +274,23 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const port = Number(environment.REGISTRY_PORT ?? 8100);
   const host = environment.REGISTRY_HOST ?? "127.0.0.1";
   await new Promise<void>((resolve) => server.listen(port, host, resolve));
+  let closePromise: Promise<void> | undefined;
   return { server, close: async () => {
-    immediateFactoryStop.abort();
-    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
-    await factoryRepository.close();
-    await store.close();
-    if (ownsReleasePool) await releasePool?.end();
+    if (closePromise) return closePromise;
+    shuttingDown = true;
+    closePromise = (async () => {
+      immediateFactoryStop.abort();
+      const serverClosed = new Promise<void>((resolve, reject) => {
+        server.close((error) => error ? reject(error) : resolve());
+      });
+      server.closeIdleConnections?.();
+      await serverClosed;
+      await immediateFactoryWorker.drain();
+      await factoryRepository.close();
+      await store.close();
+      if (ownsReleasePool) await releasePool?.end();
+    })();
+    return closePromise;
   } };
 }
 
@@ -362,6 +382,7 @@ async function route(
   }
   if (request.method === "GET" && (url.pathname === "/readyz" || url.pathname === "/health")) {
     try {
+      if (context.isShuttingDown()) throw new Error("Registry is shutting down");
       await context.store.checkReady();
       sendJson(response, 200, {
         status: "ok",
@@ -1546,7 +1567,12 @@ function sendError(response: http.ServerResponse, error: unknown, known: Record<
 function corsHeaders(): Record<string, string> { return { "access-control-allow-origin": "*", "access-control-allow-methods": "GET,POST,PUT,PATCH,OPTIONS", "access-control-allow-headers": "authorization,content-type,idempotency-key,x-hatch-creator-id,x-csrf-token", "access-control-expose-headers": "retry-after,x-hatch-page-limit,x-hatch-page-offset,x-hatch-next-offset" }; }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  createRegistryServerFromEnvironment().then(({ server }) => {
+  createRegistryServerFromEnvironment().then((registryServer) => {
+    installGracefulShutdown({ name: "registry", close: registryServer.close });
+    const { server } = registryServer;
     console.log(`Hatch TypeScript Registry listening on ${JSON.stringify(server.address())}`);
-  }).catch((error) => { console.error(error); process.exitCode = 1; });
+  }).catch((error) => {
+    writeOperationalError("registry_startup_failed", error);
+    process.exitCode = 1;
+  });
 }

@@ -14,6 +14,7 @@ export class CreatorFactoryWorker {
   private readonly leaseMs: number;
   private readonly heartbeatMs: number;
   private readonly retryBaseMs: number;
+  private readonly activeExecutions = new Set<Promise<FactoryRunRecord>>();
 
   constructor(
     private readonly repository: CreatorFactoryRepository,
@@ -45,11 +46,18 @@ export class CreatorFactoryWorker {
       runId
     });
     if (!claimed) return undefined;
-    void this.executeClaimed(claimed, stopSignal).catch(() => {
+    const execution = this.executeClaimed(claimed, stopSignal);
+    this.activeExecutions.add(execution);
+    void execution.finally(() => this.activeExecutions.delete(execution)).catch(() => {
       // executeClaimed persists the failure state. Keep this fire-and-forget
       // boundary from becoming an unhandled rejection in the HTTP process.
     });
     return claimed;
+  }
+
+  /** Wait for direct-start executions to persist their terminal/requeued state. */
+  async drain(): Promise<void> {
+    await Promise.allSettled([...this.activeExecutions]);
   }
 
   private async executeClaimed(claimed: FactoryRunRecord, stopSignal?: AbortSignal): Promise<FactoryRunRecord> {

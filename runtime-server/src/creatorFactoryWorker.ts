@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "./loadRootEnv.js";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { createHatchCliCandidateExecutor } from "./creatorLearning/cliCandidateExecutor.js";

@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "./loadRootEnv.js";
 import { readFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import path from "node:path";

@@ -1,3 +1,4 @@
+import "./loadRootEnv.mjs";
 import { createServer } from "node:http";
 import {
   createCipheriv,
@@ -47,6 +48,9 @@ const DEFAULT_OAUTH_SCOPES = Object.freeze([
 ]);
 
 export async function createDashboardApp(options = {}) {
+  const isShuttingDown = typeof options.isShuttingDown === "function"
+    ? options.isShuttingDown
+    : () => false;
   const commerceDatabaseUrl = options.commerceDatabaseUrl
     ?? process.env.HATCH_COMMERCE_DATABASE_URL
     ?? "";
@@ -435,6 +439,7 @@ export async function createDashboardApp(options = {}) {
       }
       if (request.method === "GET" && url.pathname === "/readyz") {
         try {
+          if (isShuttingDown()) throw new Error("Dashboard is shutting down");
           if (process.env.NODE_ENV === "production"
             && (!registryDeploymentServiceToken || !commerceRuntimeServiceToken)) {
             throw new Error("Dashboard service credentials are not configured");
@@ -2027,7 +2032,11 @@ export async function createDashboardApp(options = {}) {
 }
 
 export async function startDashboardServer(options = {}) {
-  const app = await createDashboardApp(options);
+  let shuttingDown = false;
+  const app = await createDashboardApp({
+    ...options,
+    isShuttingDown: () => shuttingDown
+  });
   const port = Number(options.port ?? process.env.HATCH_CREATOR_DASHBOARD_API_PORT ?? 8500);
   const host = options.host ?? process.env.HATCH_CREATOR_DASHBOARD_API_HOST ?? "127.0.0.1";
   const server = createServer(app.handler);
@@ -2048,20 +2057,70 @@ export async function startDashboardServer(options = {}) {
     app.reconcileDeployments().catch(() => undefined);
   }, 5_000);
   deploymentTimer.unref?.();
+  let resourcesClosePromise;
+  const closeResources = async () => {
+    if (resourcesClosePromise) return resourcesClosePromise;
+    resourcesClosePromise = Promise.allSettled([
+      Promise.resolve().then(() => app.ledger.close?.()),
+      Promise.resolve().then(() => app.portalState.close?.()),
+      Promise.resolve().then(() => app.telemetry.close?.())
+    ]).then(() => undefined);
+    return resourcesClosePromise;
+  };
   server.once("close", () => {
     clearInterval(reconcileTimer);
     clearInterval(outboxTimer);
     clearInterval(financeTimer);
     clearInterval(deploymentTimer);
-    app.ledger.close?.().catch(() => undefined);
-    app.portalState.close?.().catch(() => undefined);
-    app.telemetry.close?.().catch(() => undefined);
+    void closeResources();
   });
   app.reconcilePendingCheckouts().catch(() => undefined);
   app.dispatchCommerceOutbox().catch(() => undefined);
   app.reconcileFinance().catch(() => undefined);
   app.reconcileDeployments().catch(() => undefined);
-  return { ...app, server, port, host };
+  let closePromise;
+  const close = async () => {
+    if (closePromise) return closePromise;
+    shuttingDown = true;
+    closePromise = (async () => {
+      if (server.listening) {
+        const serverClosed = new Promise((resolve, reject) => {
+          server.close((error) => error ? reject(error) : resolve());
+        });
+        server.closeIdleConnections?.();
+        await serverClosed;
+      }
+      await closeResources();
+    })();
+    return closePromise;
+  };
+  return { ...app, server, port, host, close };
+}
+
+function installDashboardShutdown(close, timeoutMs = 30_000) {
+  let shutdownPromise;
+  const shutdown = (signal) => {
+    if (shutdownPromise) return;
+    process.stderr.write(`${JSON.stringify({ event: "shutdown_started", service: "dashboard", signal })}\n`);
+    const timeout = setTimeout(() => {
+      process.stderr.write(`${JSON.stringify({ event: "graceful_shutdown_timeout", service: "dashboard" })}\n`);
+      process.exit(1);
+    }, timeoutMs);
+    timeout.unref?.();
+    shutdownPromise = Promise.resolve().then(close).then(
+      () => {
+        clearTimeout(timeout);
+        process.exitCode = 0;
+      },
+      () => {
+        clearTimeout(timeout);
+        process.stderr.write(`${JSON.stringify({ event: "graceful_shutdown_failed", service: "dashboard" })}\n`);
+        process.exitCode = 1;
+      }
+    );
+  };
+  process.once("SIGTERM", () => shutdown("SIGTERM"));
+  process.once("SIGINT", () => shutdown("SIGINT"));
 }
 
 async function registryRequest(registryUrl, pathname, options = {}) {
@@ -4205,6 +4264,8 @@ function contentType(filePath) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const { host, port } = await startDashboardServer();
+  const dashboardServer = await startDashboardServer();
+  installDashboardShutdown(dashboardServer.close);
+  const { host, port } = dashboardServer;
   console.log(`Hatch Creator Dashboard API listening on http://${host}:${port}`);
 }
