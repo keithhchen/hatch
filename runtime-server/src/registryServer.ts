@@ -54,7 +54,7 @@ import {
 import type { AboutYouAnswerPair } from "./creatorLearning/aboutYouNode.js";
 import { PostgresDistillationGraphStore } from "./creatorLearning/distillationGraphStore.js";
 import { CorpusPublisher, CorpusPublishError } from "./creatorLearning/corpusPublisher.js";
-import { CreatorRegistryReleaseStore } from "./creatorLearning/creatorRegistryRelease.js";
+import { CreatorRegistryReleaseStore, type CreatorRegistryRelease } from "./creatorLearning/creatorRegistryRelease.js";
 import { QdrantKnowledgeIndexer } from "./qdrantIndexer.js";
 import {
   HttpRequestGate,
@@ -728,6 +728,7 @@ async function route(
         promise: product.promise,
         status: product.status,
         ...(product.brief_spec ? { brief_spec: product.brief_spec } : {}),
+        ...(product.release ? { release: product.release } : {}),
         ...(product.createdAt ? { created_at: product.createdAt } : {}),
         ...(product.updatedAt ? { updated_at: product.updatedAt } : {})
       }
@@ -1088,6 +1089,8 @@ type CreatorProductBoundary = {
   brief_spec?: import("./brief.js").BriefSpec;
   createdAt?: string;
   updatedAt?: string;
+  /** The new Registry release projection, when this Product is live. */
+  release?: CreatorRegistryRelease;
   /** Internal repository row key; never serialized in a public response. */
   repositoryId?: string;
 };
@@ -1172,14 +1175,16 @@ async function productForCreator(
   const products = await context.factoryService.listProducts(creatorId);
   const product = products.find((entry) => publicProductId(entry) === productId);
   if (product) {
+    const release = await context.releaseStore.getLive(productId);
     return {
       productId,
       name: product.name,
       promise: publicProductPromise(product),
-      status: product.runId ? "working" : "draft",
+      status: release ? "published" : product.runId ? "working" : "draft",
       ...(product.briefSpec ? { brief_spec: product.briefSpec } : {}),
       createdAt: product.createdAt,
       updatedAt: product.updatedAt,
+      ...(release ? { release } : {}),
       repositoryId: product.id
     };
   }
