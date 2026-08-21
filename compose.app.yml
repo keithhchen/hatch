@@ -14,7 +14,7 @@ services:
       HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN: ${HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN:?set HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN in /opt/hatch/.env}
       HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN: ${HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN:?set HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN in /opt/hatch/.env}
       HATCH_FACTORY_DATABASE_URL: ${HATCH_DATABASE_URL:?set HATCH_DATABASE_URL in /opt/hatch/.env}
-      HATCH_AGENT_CORPUS_ROOT: /var/lib/hatch/corpora
+      HATCH_RUNTIME_CORPUS_ROOT: /var/lib/hatch/runtime-corpora
       HATCH_CREATOR_FACTORY_ROOT: /var/lib/hatch/creator-factory
       HATCH_CREATOR_OBJECT_STORE_BUCKET: ${HATCH_CREATOR_OBJECT_STORE_BUCKET:?set HATCH_CREATOR_OBJECT_STORE_BUCKET in /opt/hatch/.env}
       HATCH_CREATOR_OBJECT_STORE_REGION: ${HATCH_CREATOR_OBJECT_STORE_REGION:-oss-cn-shanghai}
@@ -33,12 +33,11 @@ services:
       HATCH_CREATOR_FACTORY_LEASE_MS: ${HATCH_CREATOR_FACTORY_LEASE_MS:-1200000}
       HATCH_CREATOR_FACTORY_HEARTBEAT_MS: ${HATCH_CREATOR_FACTORY_HEARTBEAT_MS:-60000}
       LLM_API_KEY: ${LLM_API_KEY:?set LLM_API_KEY in /opt/hatch/.env}
-      # The deployed Creator Factory profile is DeepSeek. Keep this required
-      # at Compose interpolation time so a missing credential cannot surface
-      # later as an opaque provider rejection from a user-triggered Run.
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY in /opt/hatch/.env}
+      # DeepSeek is optional; the active Factory provider is selected by
+      # HATCH_FACTORY_LLM_PROFILE and Kimi uses LLM_API_KEY.
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.moonshot.cn/v1}
-      HATCH_LLM_PROFILE: ${HATCH_LLM_PROFILE:-kimi-k2.6-no-thinking}
+      HATCH_LLM_PROFILE: ${HATCH_LLM_PROFILE:-kimi-k2.6}
       HATCH_FACTORY_LLM_PROFILE: ${HATCH_FACTORY_LLM_PROFILE:-kimi-k2.6}
       HATCH_WEB_SEARCH_URL: ${HATCH_WEB_SEARCH_URL:-https://api.bocha.cn/v1/web-search}
       HATCH_WEB_SEARCH_PROVIDER: ${HATCH_WEB_SEARCH_PROVIDER:-bocha}
@@ -86,7 +85,7 @@ services:
       # Non-Compose deployments should replace this with their exact proxy CIDR.
       HATCH_AUTH_TRUSTED_PROXY_CIDRS: ${HATCH_AUTH_TRUSTED_PROXY_CIDRS:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fd00::/8}
     volumes:
-      - corpus_data:/var/lib/hatch/corpora
+      - runtime_corpus_data:/var/lib/hatch/runtime-corpora
       - creator_factory_data:/var/lib/hatch/creator-factory
     networks:
       - hatch_internal
@@ -115,9 +114,9 @@ services:
       HATCH_CREATOR_FACTORY_HEARTBEAT_MS: ${HATCH_CREATOR_FACTORY_HEARTBEAT_MS:-60000}
       HATCH_CREATOR_FACTORY_POLL_MS: ${HATCH_CREATOR_FACTORY_POLL_MS:-1000}
       LLM_API_KEY: ${LLM_API_KEY:?set LLM_API_KEY in /opt/hatch/.env}
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY in /opt/hatch/.env}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.moonshot.cn/v1}
-      HATCH_LLM_PROFILE: ${HATCH_LLM_PROFILE:-kimi-k2.6-no-thinking}
+      HATCH_LLM_PROFILE: ${HATCH_LLM_PROFILE:-kimi-k2.6}
       HATCH_FACTORY_LLM_PROFILE: ${HATCH_FACTORY_LLM_PROFILE:-kimi-k2.6}
       HATCH_WEB_SEARCH_URL: ${HATCH_WEB_SEARCH_URL:-https://api.bocha.cn/v1/web-search}
       HATCH_WEB_SEARCH_PROVIDER: ${HATCH_WEB_SEARCH_PROVIDER:-bocha}
@@ -147,9 +146,14 @@ services:
       HATCH_RUNTIME_DATABASE_URL: ${HATCH_DATABASE_URL:?set HATCH_DATABASE_URL in /opt/hatch/.env}
       HATCH_REGISTRY_URL: http://registry:8100
       HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN: ${HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN:?set HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN in /opt/hatch/.env}
+      HATCH_CREATOR_OBJECT_STORE_BUCKET: ${HATCH_CREATOR_OBJECT_STORE_BUCKET:?set HATCH_CREATOR_OBJECT_STORE_BUCKET in /opt/hatch/.env}
+      HATCH_CREATOR_OBJECT_STORE_REGION: ${HATCH_CREATOR_OBJECT_STORE_REGION:-oss-cn-shanghai}
+      HATCH_CREATOR_OBJECT_STORE_INTERNAL: ${HATCH_CREATOR_OBJECT_STORE_INTERNAL:-true}
+      HATCH_CREATOR_OBJECT_STORE_PREFIX: ${HATCH_CREATOR_OBJECT_STORE_PREFIX:-hatch}
       HATCH_COMMERCE_URL: http://dashboard:8500
       HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN: ${HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN:?set HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN in /opt/hatch/.env}
       HATCH_RUNTIME_DATA_DIR: /var/lib/hatch/runtime
+      HATCH_RUNTIME_CORPUS_ROOT: /var/lib/hatch/runtime-corpora
       HATCH_DELIVERY_OUTBOX_FILE: /var/lib/hatch/runtime/delivery-accounting-outbox.json
       HATCH_REGISTRY_AUTH_TIMEOUT_MS: ${HATCH_REGISTRY_AUTH_TIMEOUT_MS:-5000}
       HATCH_CLIENT_TOOL_TIMEOUT_MS: ${HATCH_CLIENT_TOOL_TIMEOUT_MS:-300000}
@@ -189,7 +193,6 @@ services:
       # Runtime is reachable only through Caddy on the private Docker network.
       # Trust forwarded client IPs only from that sanitizing proxy boundary.
       HATCH_AUTH_TRUSTED_PROXY_CIDRS: ${HATCH_AUTH_TRUSTED_PROXY_CIDRS:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fd00::/8}
-      HATCH_AGENT_CORPUS_ROOT: /var/lib/hatch/corpora
       HATCH_QDRANT_URL: http://qdrant:6333
       HATCH_QDRANT_API_KEY: ${HATCH_QDRANT_API_KEY:-}
       HATCH_QDRANT_COLLECTION: ${HATCH_QDRANT_COLLECTION:-hatch_knowledge_text_v4_1024}
@@ -199,7 +202,7 @@ services:
       LLM_API_KEY: ${LLM_API_KEY:?set LLM_API_KEY in /opt/hatch/.env}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.moonshot.cn/v1}
-      HATCH_LLM_PROFILE: ${HATCH_LLM_PROFILE:-kimi-k2.6-no-thinking}
+      HATCH_LLM_PROFILE: ${HATCH_LLM_PROFILE:-kimi-k2.6}
       HATCH_CREATOR_MODEL: ${HATCH_CREATOR_MODEL:-kimi-k2.6}
       HATCH_REVIEWER_MODEL: ${HATCH_REVIEWER_MODEL:-kimi-k2.6}
       HATCH_COMPACTION_MODEL: ${HATCH_COMPACTION_MODEL:-kimi-k2.6}
@@ -215,8 +218,8 @@ services:
       ALIBABA_CLOUD_ECS_METADATA: ${ALIBABA_CLOUD_ECS_METADATA:-HatchRuntimeRole}
       ALIBABA_CLOUD_IMDSV1_DISABLE: ${ALIBABA_CLOUD_IMDSV1_DISABLE:-true}
     volumes:
-      - corpus_data:/var/lib/hatch/corpora:ro
       - runtime_data:/var/lib/hatch/runtime
+      - runtime_corpus_data:/var/lib/hatch/runtime-corpora:ro
     networks:
       - hatch_internal
     healthcheck:
@@ -276,8 +279,8 @@ services:
         condition: service_healthy
 
 volumes:
-  corpus_data:
-    name: hatch_corpus_data
+  runtime_corpus_data:
+    name: hatch_runtime_corpus_data
   commerce_data:
     name: hatch_commerce_data
   runtime_data:

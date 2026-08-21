@@ -24,7 +24,6 @@ import {
 } from "./protocol.js";
 import { RunStateMachine } from "./runState.js";
 import { ServerToolExecutor } from "./serverTools.js";
-import { SkillRuntime } from "./skillRuntime.js";
 import { RuntimeStore, type VisibleConversationPart } from "./store.js";
 import { PostgresStore } from "./postgresStore.js";
 import {
@@ -65,7 +64,14 @@ import { HttpCommerceEventSink } from "./commerceHttpSink.js";
 import { DeliveryAccountingOutbox, type DeliveryAccountingCommand } from "./deliveryOutbox.js";
 import { AgentCorpusChangedError, materializeAgentCorpus } from "./agentCorpusMaterialization.js";
 import { creatorToolControlPlaneFromEnvironment, resolveCreatorTools, type CreatorToolControlPlane } from "./creatorTools.js";
-import { AgentCorpusResolver, createKnowledgeProvider, knowledgeProviderConfigured, type AgentCorpus } from "./agentCorpus.js";
+import {
+  AgentCorpusResolver as FilesystemAgentCorpusResolver,
+  createKnowledgeProvider,
+  knowledgeProviderConfigured,
+  type AgentCorpus,
+  type AgentCorpusResolverLike
+} from "./agentCorpus.js";
+import { RuntimeReleaseAgentCorpusResolver } from "./runtimeCorpusResolver.js";
 import {
   discoverSkills,
   includeSkillInstructions,
@@ -88,6 +94,8 @@ import {
   type OutputGuard
 } from "./outputGuard.js";
 import { writeOperationalError } from "./operationalLogging.js";
+
+type AgentCorpusResolver = AgentCorpusResolverLike;
 
 export type RuntimeServer = {
   server: http.Server;
@@ -234,7 +242,9 @@ export async function createRuntimeServerFromEnvironment(
   environment: NodeJS.ProcessEnv = process.env
 ): Promise<RuntimeServer> {
   const registryUrl = environment.HATCH_REGISTRY_URL?.trim();
-  const agentCorpusRoot = environment.HATCH_AGENT_CORPUS_ROOT?.trim();
+  const runtimeCorpusRoot = environment.HATCH_RUNTIME_CORPUS_ROOT?.trim();
+  const runtimeDataDir = environment.HATCH_RUNTIME_DATA_DIR?.trim() || path.resolve(".hatch-runtime");
+  const runtimeRegistryToken = environment.HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN?.trim();
   const runtimeDatabaseUrl = environment.HATCH_RUNTIME_DATABASE_URL?.trim();
   const runtimeHost = environment.HATCH_RUNTIME_HOST?.trim() || "127.0.0.1";
   const helloTimeoutMs = runtimeClientHelloTimeoutMs(environment.HATCH_RUNTIME_HELLO_TIMEOUT_MS);
@@ -372,11 +382,15 @@ export async function createRuntimeServerFromEnvironment(
       throw new Error("HATCH_REGISTRY_URL must use http or https");
     }
   }
+  if (registryUrl && !runtimeRegistryToken && environment.NODE_ENV === "production") {
+    throw new Error("HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN is required when HATCH_REGISTRY_URL is configured");
+  }
   if (!isLoopbackRuntimeHost(runtimeHost)
     && !insecureLocalMode
-    && (!registryUrl || !agentCorpusRoot || !runtimeDatabaseUrl)) {
+    && (!registryUrl || !runtimeRegistryToken || !runtimeCorpusRoot || !runtimeDatabaseUrl)) {
     throw new Error(
-      "A non-loopback Runtime requires HATCH_REGISTRY_URL, HATCH_AGENT_CORPUS_ROOT, and HATCH_RUNTIME_DATABASE_URL; "
+      "A non-loopback Runtime requires HATCH_REGISTRY_URL, HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN, "
+      + "HATCH_RUNTIME_CORPUS_ROOT, and HATCH_RUNTIME_DATABASE_URL; "
       + "set HATCH_ALLOW_INSECURE_LOCAL_MODE=true only for an intentional local fixture"
     );
   }
@@ -426,9 +440,16 @@ export async function createRuntimeServerFromEnvironment(
     creatorToolControlPlane: creatorToolControlPlaneFromEnvironment(environment),
     entitlementResolver: registryAuth ?? fileEntitlements,
     authIdentityResolver: registryAuth,
-    agentCorpusResolver: agentCorpusRoot
-      ? new AgentCorpusResolver(agentCorpusRoot)
-      : undefined,
+    agentCorpusResolver: runtimeRegistryToken && registryUrl
+      ? new RuntimeReleaseAgentCorpusResolver({
+        registryUrl,
+        serviceToken: runtimeRegistryToken,
+        corpusRoot: runtimeCorpusRoot || path.join(runtimeDataDir, "corpora"),
+        timeoutMs: registryAuthorizationTimeoutMs(environment)
+      })
+      : runtimeCorpusRoot
+        ? new FilesystemAgentCorpusResolver(runtimeCorpusRoot)
+        : undefined,
     conversationStore: createConversationStore(environment),
     clientToolTimeoutMs: clientToolTimeoutMs(environment.HATCH_CLIENT_TOOL_TIMEOUT_MS),
     clientHelloTimeoutMs: helloTimeoutMs,
@@ -534,6 +555,7 @@ type SessionBinding = {
   agentId: string;
   productId: string;
   corpusDigest: string;
+  runtimeDigest?: string;
   purchasedCorpusDigest?: string;
   /** Free purchases are permanent access; metered accounting is opt-in. */
   accessMode?: "unmetered" | "metered";
@@ -1708,7 +1730,6 @@ async function handleRuntimeSocket(
   const activeRuns = new Set<Promise<void>>();
   const messageTasks = new Set<Promise<void>>();
   const activeRunStates = new Map<string, RunStateMachine>();
-  const activeSkillRuntimes = new Map<string, SkillRuntime>();
   const activeRunAbortControllers = new Map<string, AbortController>();
   const pendingTurnAuthorizations = new Map<string, PendingTurnAuthorization>();
   const reservedRunIds = new Set<string>();
@@ -1901,7 +1922,7 @@ async function handleRuntimeSocket(
               ));
               connectionAbortController.signal.throwIfAborted();
             }
-            const nextSessionSkills = await buildSessionSkills(Boolean(binding.agentCorpusRoot));
+            const nextSessionSkills = await buildSessionSkills(binding.agentCorpusRoot);
             connectionAbortController.signal.throwIfAborted();
             await store.append({
               type: "session.started",
@@ -2039,7 +2060,6 @@ async function handleRuntimeSocket(
               // Defensive fallback for the tiny interval while a newly-created
               // run is being registered with the process-local control map.
               await state.cancel(reason).catch(() => undefined);
-              await activeSkillRuntimes.get(message.run_id)?.cancelParentRun(message.run_id);
               await broker.cancelRun(message.run_id, reason);
               await send({ type: "turn.failed", run_id: message.run_id, error: { code: "run_cancelled", message: reason } });
             }
@@ -2417,7 +2437,6 @@ async function handleRuntimeSocket(
           const cancelActiveRun = async (reason: string): Promise<void> => {
             runAbortController.abort(new Error(reason));
             await state.cancel(reason).catch(() => undefined);
-            await activeSkillRuntimes.get(message.run_id)?.cancelParentRun(message.run_id);
             await broker.cancelRun(message.run_id, reason);
             await send({
               type: "turn.failed",
@@ -2456,12 +2475,10 @@ async function handleRuntimeSocket(
             serverTools,
             toolBridge,
             runtime,
-            createRuntime,
             store,
             conversationRepository,
             state,
             send,
-            activeSkillRuntimes,
             outputGuard,
             runAbortController.signal,
             commerceEventSink,
@@ -2554,12 +2571,10 @@ async function runOneTurn(
   serverTools: ServerToolExecutor,
   toolBridge: ToolBridge,
   runtime: AgentRuntime,
-  createRuntime: () => AgentRuntime,
   store: RuntimeStore,
   conversationRepository: ConversationRepository,
   state: RunStateMachine,
   send: (message: OutboundMessage) => Promise<void>,
-  activeSkillRuntimes: Map<string, SkillRuntime>,
   outputGuard: OutputGuard,
   abortSignal: AbortSignal,
   commerceEventSink?: CommerceEventSink,
@@ -2571,7 +2586,6 @@ async function runOneTurn(
   let modelFirstText: number | undefined;
   let firstSafeSegment: number | undefined;
   const guardTiming: Array<import("./outputGuard.js").OutputGuardTiming & { released_ms?: number }> = [];
-  let skillRuntime: SkillRuntime | undefined;
   let deliveredArtifact: DeliveryArtifact | undefined;
   const deliveryBinding = deliveryBindingFromSession(binding);
   let deliveryReservation: DeliveryUnitReservation | undefined;
@@ -2586,7 +2600,7 @@ async function runOneTurn(
         binding.agentCorpusRoot,
         input.message.content,
         hello.local_tools,
-        binding.corpusDigest,
+        binding.runtimeDigest ?? binding.corpusDigest,
         abortSignal
       )
       : undefined;
@@ -2834,22 +2848,6 @@ async function runOneTurn(
     await persistUserMessage();
 
     setupCompleted = performance.now();
-    skillRuntime = new SkillRuntime({
-      parentInput: input,
-      parentState: state,
-      sessionSkills,
-      clientBroker: broker,
-      serverTools,
-      toolBridge,
-      clientTools: materializedAgent?.localTools ?? hello.local_tools,
-      allowedExternalTools: materializedAgent?.externalTools,
-      agentSystemPrompt: materializedAgent?.systemPrompt,
-      deliveryAuditContext: materializedAgent?.deliveryAuditContext,
-      store,
-      emit,
-      createWorkerRuntime: () => createRuntime()
-    });
-    activeSkillRuntimes.set(input.run_id, skillRuntime);
     const messages = input.task_start ? runtimeMessages : [...runtimeMessages, input.message];
 
     // Store/materialization work may race with a disconnect. Never start a
@@ -2865,10 +2863,6 @@ async function runOneTurn(
       clientTools: materializedAgent?.localTools ?? hello.local_tools,
       allowedExternalTools: materializedAgent?.externalTools,
       externalToolDefinitions: materializedAgent?.externalToolDefinitions,
-      // An Agent Corpus has already materialized matching protected Skills
-      // into the server-private prompt. Product execution remains one Agent
-      // session rather than a generic parent delegating to another worker.
-      allowSkillRun: !binding.agentCorpusRoot,
       persistModelMessage: async (message) => {
         await store.append({
           type: "conversation.model_message",
@@ -2882,7 +2876,6 @@ async function runOneTurn(
         return compacted?.replacement_history;
       },
       toolBridge,
-      skillRuntime,
       toolScope: "main",
       agentSystemPrompt: materializedAgent?.systemPrompt,
       briefSnapshot: (await conversationRepository.getConversation(input.conversation_id))?.briefSnapshot,
@@ -2956,17 +2949,19 @@ async function runOneTurn(
         writeOperationalError("commerce_delivery_reservation_release_failed", error);
       });
     }
-    await skillRuntime?.cancelParentRun(input.run_id);
-    activeSkillRuntimes.delete(input.run_id);
   }
 }
 
-async function buildSessionSkills(protectedCorpus = false): Promise<RuntimeSessionSkills> {
-  // The Agent Corpus materializer loads matching protected SKILL.md files into the
-  // direct server Agent. Do not also expose it as a model-selectable catalog
-  // entry: that creates an unnecessary nested skill worker and lets the same
-  // method run through two different delivery paths.
-  const records = protectedCorpus ? [] : await discoverSkills();
+async function buildSessionSkills(corpusRoot?: string): Promise<RuntimeSessionSkills> {
+  // Both standalone Runtime Skills and published Agent Corpus Skills use the
+  // same metadata-only catalog and the same explicit Skill loader. A Corpus
+  // root is an explicit discovery scope, so it cannot accidentally mix in
+  // host/global Skills.
+  const records = corpusRoot
+    ? await discoverSkills({
+      roots: [{ path: path.join(corpusRoot, "skills"), scope: "custom", followSymlinks: false }]
+    })
+    : await discoverSkills();
   const visibleRecords = visibleSkillsForSession(records);
   const rendered = await includeSkillInstructions()
     ? renderSkillsSection(visibleRecords, { executionMode: "protected" })
@@ -3049,6 +3044,7 @@ async function resolveSessionBinding(
       agentId: resolved.corpus.agent_id,
       productId: resolved.corpus.product.id,
       corpusDigest: resolved.digest,
+      ...(resolved.runtimeDigest ? { runtimeDigest: resolved.runtimeDigest } : {}),
       ...((corpusEntitlement?.brief_spec ?? resolved.corpus.product.brief_spec)
         ? { briefSpec: (corpusEntitlement?.brief_spec ?? resolved.corpus.product.brief_spec) as BriefSpec }
         : {}),
@@ -3105,6 +3101,7 @@ async function resolveSessionBinding(
       agentId: entitlement.agent_id,
       productId: entitlement.product_id,
       corpusDigest: resolved.digest,
+      ...(resolved.runtimeDigest ? { runtimeDigest: resolved.runtimeDigest } : {}),
       ...(briefSpec ? { briefSpec: briefSpec as BriefSpec } : {}),
       ...(entitlement.purchased_corpus_digest
         ? {
@@ -3356,6 +3353,7 @@ async function bindingFromHistoryRequest(
       agentId: entitlement.agent_id,
       productId: entitlement.product_id,
       corpusDigest: resolved.digest,
+      ...(resolved.runtimeDigest ? { runtimeDigest: resolved.runtimeDigest } : {}),
       ...(briefSpec ? { briefSpec: briefSpec as BriefSpec } : {}),
       purchasedCorpusDigest: entitlement.purchased_corpus_digest ?? resolved.digest,
       entitlementId: entitlement.entitlement_id,

@@ -43,7 +43,17 @@ import { CreatorFactoryWorker } from "./creatorLearning/worker.js";
 import type { CreatorProductRecord } from "./creatorLearning/products.js";
 import { objectStoreFromEnvironment } from "./creatorLearning/objectStore.js";
 import { ProductFileStore, ProductFilesError, type ProductFileView, type ProductSnapshotView } from "./creatorLearning/productFiles.js";
+import { NodeRuntime } from "./nodeRuntime.js";
+import { PostgresNodeStore } from "./nodeSession.js";
+import {
+  FactoryNodeService,
+  FactoryNodeServiceError,
+  type FactoryNodeExecutionView,
+  type FactoryNodeRunView
+} from "./creatorLearning/nodeService.js";
+import type { AboutYouAnswerPair } from "./creatorLearning/aboutYouNode.js";
 import { PostgresDistillationGraphStore } from "./creatorLearning/distillationGraphStore.js";
+import { CorpusPublisher } from "./creatorLearning/corpusPublisher.js";
 import {
   HttpRequestGate,
   PublishWorkGate,
@@ -68,6 +78,9 @@ type RegistryContext = {
   deploymentServiceToken: string;
   factoryService: CreatorFactoryService;
   productFileStore: ProductFileStore;
+  factoryNodeService?: FactoryNodeService;
+  corpusPublisher?: CorpusPublisher;
+  nodeObjectStore?: ReturnType<typeof objectStoreFromEnvironment>;
   authSecret: string;
 };
 
@@ -88,6 +101,27 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
     productObjectStore,
     environment.HATCH_CREATOR_PRODUCT_FILES_PREFIX?.trim() || "creator-products"
   );
+  const nodeObjectStore = objectStore ?? productObjectStore;
+  const nodePool = store.databasePool();
+  const nodePersistence = nodePool ? new PostgresNodeStore({ pool: nodePool }) : undefined;
+  const factoryNodeService = nodePersistence && nodeObjectStore
+    ? new FactoryNodeService(
+      new NodeRuntime({
+        sessionStore: nodePersistence,
+        executionStore: nodePersistence,
+        storage: { objectStore: nodeObjectStore },
+        maxRounds: integerEnvironment(environment.HATCH_FACTORY_NODE_MAX_ROUNDS, 10),
+        maxAgentTurns: integerEnvironment(environment.HATCH_FACTORY_NODE_MAX_AGENT_TURNS, 16)
+      }),
+      nodePersistence,
+      { objectStore: nodeObjectStore },
+      productFileStore,
+      environment.HATCH_CREATOR_PRODUCT_FILES_PREFIX?.trim() || "creator-products"
+    )
+    : undefined;
+  const corpusPublisher = factoryNodeService && nodeObjectStore
+    ? new CorpusPublisher(factoryNodeService, nodeObjectStore, store, environment.HATCH_RUNTIME_CORPUS_ROOT?.trim() || environment.HATCH_AGENT_CORPUS_ROOT?.trim() || "runtime-corpora")
+    : undefined;
   const graphPool = store.databasePool();
   const graphStore = graphPool ? new PostgresDistillationGraphStore(graphPool) : undefined;
   await graphStore?.initialize();
@@ -153,11 +187,18 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       }, { "retry-after": String(admission.retryAfterSeconds), connection: "close" });
       return;
     }
-    const routePromise = route(request, response, { store, accounts, authRateLimiter, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, productFileStore, authSecret })
+    const routePromise = route(request, response, { store, accounts, authRateLimiter, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, productFileStore, factoryNodeService, corpusPublisher, nodeObjectStore, authSecret })
       .catch((error) => {
         const status = errorStatus(error);
         if (status >= 500) console.error("Registry request failed", error);
         if (error instanceof ProductFilesError) {
+          sendJson(response, status, {
+            error: { code: error.code, message: error.message },
+            detail: error.message
+          });
+          return;
+        }
+        if (error instanceof FactoryNodeServiceError) {
           sendJson(response, status, {
             error: { code: error.code, message: error.message },
             detail: error.message
@@ -231,6 +272,66 @@ async function route(
   const url = new URL(request.url ?? "/", "http://registry.local");
   if (request.method === "GET" && url.pathname === "/healthz") {
     sendJson(response, 200, { status: "ok" });
+    return;
+  }
+
+  const registryPublishMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/registry$/);
+  if (registryPublishMatch && request.method === "POST") {
+    const account = await authenticate(request, response, context, "creator");
+    if (account === SESSION_QUERY_REJECTED) return;
+    if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
+    if (!context.corpusPublisher || !context.factoryNodeService) {
+      sendJson(response, 503, { error: { code: "publish_unavailable", message: "Corpus Publisher is unavailable." } });
+      return;
+    }
+    const productId = decodeURIComponent(registryPublishMatch[1]!);
+    const product = await productForCreator(context, account.id, productId);
+    if (!product) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
+    const body = await readJson(request);
+    const result = await context.corpusPublisher.publishLatest({
+      creatorId: account.id,
+      productId,
+      productName: product.name,
+      productPromise: product.promise,
+      briefSpec: body.brief_spec ?? product.brief_spec
+    });
+    sendJson(response, 201, {
+      product_id: productId,
+      execution_id: result.execution_id,
+      corpus_ref: result.output_ref,
+      corpus_digest: result.corpus_digest,
+      release_digest: result.published.corpus_digest,
+      status: "live",
+      published_at: result.published.published_at
+    });
+    return;
+  }
+
+  const runtimeReleaseMatch = url.pathname.match(/^\/v1\/runtime\/products\/([^/]+)\/release$/);
+  if (runtimeReleaseMatch && request.method === "GET") {
+    requireRuntimeServiceAuth(request, context.runtimeServiceToken);
+    const productId = decodeURIComponent(runtimeReleaseMatch[1]!);
+    const published = (await context.store.listAllAgentCorpora()).find((item) => item.product_id === productId);
+    if (!published) { sendJson(response, 404, { detail: "No live release exists for this Product." }); return; }
+    const latest = await context.factoryNodeService?.getLatestCompletedExecution(productId, "corpus");
+    if (!latest?.outputRef || !context.nodeObjectStore) { sendJson(response, 404, { detail: "No completed Corpus Node output exists." }); return; }
+    const bytes = await context.nodeObjectStore.get(latest.outputRef);
+    const corpusDigest = `sha256:${sha256Bytes(bytes)}`;
+    const releaseDigest = published.corpus_digest;
+    sendJson(response, 200, {
+      release: {
+        product_id: productId,
+        creator_id: published.creator_id,
+        release_digest: releaseDigest,
+        corpus_digest: corpusDigest,
+        corpus_ref: latest.outputRef,
+        release_ref: `registry/${productId}/releases/${releaseDigest.slice("sha256:".length)}`,
+        brief_spec: published.brief_spec ?? null,
+        status: "live",
+        published_at: published.published_at
+      },
+      runtime_manifest_ref: `registry/${productId}/releases/${releaseDigest.slice("sha256:".length)}/runtime/manifest.json`
+    });
     return;
   }
   if (request.method === "GET" && (url.pathname === "/readyz" || url.pathname === "/health")) {
@@ -432,6 +533,92 @@ async function route(
         throw error;
       }
     }
+    return;
+  }
+
+  const factoryNodeMatch = url.pathname.match(
+    /^\/v1\/creator\/products\/([^/]+)\/nodes\/(about-you|corpus)\/executions(?:\/([^/]+))?(\/answers)?$/
+  );
+  if (factoryNodeMatch) {
+    const account = await authenticate(request, response, context, "creator");
+    if (account === SESSION_QUERY_REJECTED) return;
+    if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
+    if (!context.factoryNodeService) {
+      sendJson(response, 503, { error: { code: "node_unavailable", message: "Factory Node runtime is unavailable." } });
+      return;
+    }
+    const productId = decodeURIComponent(factoryNodeMatch[1]!);
+    const node = factoryNodeMatch[2] as "about-you" | "corpus";
+    const executionId = factoryNodeMatch[3] ? decodeURIComponent(factoryNodeMatch[3]) : undefined;
+    const isAnswers = Boolean(factoryNodeMatch[4]);
+    const product = await productForCreator(context, account.id, productId);
+    if (!product) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
+    const nodeProduct = {
+      productId,
+      name: product.name,
+      promise: product.promise,
+      ...(product.brief_spec ? { briefSpec: product.brief_spec } : {})
+    };
+
+    if (request.method === "GET" && executionId && !isAnswers) {
+      const execution = await context.factoryNodeService.getExecution(productId, node, executionId);
+      if (!execution) { sendJson(response, 404, { error: { code: "execution_not_found", message: "Node execution was not found." } }); return; }
+      sendJson(response, 200, publicFactoryNodeExecution(execution));
+      return;
+    }
+    if (request.method === "GET" && !executionId && !isAnswers) {
+      const execution = await context.factoryNodeService.getLatestExecution(productId, node);
+      sendJson(response, 200, execution
+        ? publicFactoryNodeExecution(execution)
+        : { node, product_id: productId, status: "not_started" });
+      return;
+    }
+    if (request.method !== "POST") {
+      sendJson(response, 405, { detail: "Factory Node route supports POST and execution GET only." });
+      return;
+    }
+    const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
+    if (isAnswers) {
+      if (node !== "about-you" || !executionId) {
+        sendJson(response, 404, { error: { code: "execution_not_found", message: "Creator answers belong to an About You execution." } });
+        return;
+      }
+      const answers = parseAboutYouAnswers(body.answers);
+      const saved = await context.factoryNodeService.saveAboutYouAnswers({
+        productId,
+        executionId,
+        answers
+      });
+      sendJson(response, 201, {
+        node,
+        product_id: productId,
+        execution_id: executionId,
+        about_you_ref: saved.answersRef
+      });
+      return;
+    }
+
+    const fileIds = stringArrayField(body.file_ids);
+    const filePaths = stringArrayField(body.files ?? body.file_paths);
+    const requestedExecutionId = executionId
+      ?? (typeof body.execution_id === "string" ? body.execution_id : undefined);
+    const result = node === "about-you"
+      ? await context.factoryNodeService.startAboutYou({
+        creatorId: account.id,
+        product: nodeProduct,
+        ...(fileIds === undefined ? {} : { fileIds }),
+        ...(filePaths === undefined ? {} : { filePaths }),
+        ...(requestedExecutionId === undefined ? {} : { executionId: requestedExecutionId })
+      })
+      : await context.factoryNodeService.startCorpus({
+        creatorId: account.id,
+        product: nodeProduct,
+        aboutYouRef: requiredNodeBodyText(body.about_you_ref ?? body.about_you, "about_you_ref"),
+        ...(fileIds === undefined ? {} : { fileIds }),
+        ...(filePaths === undefined ? {} : { filePaths }),
+        ...(requestedExecutionId === undefined ? {} : { executionId: requestedExecutionId })
+      });
+    sendJson(response, 202, publicFactoryNodeExecution(result));
     return;
   }
 
@@ -1159,6 +1346,9 @@ function publicProductFile(file: ProductFileView, includeContent = false): Recor
     id: file.id,
     artifact_id: file.artifactId,
     product_id: file.productId,
+    // This is the canonical input path for Node manifests. Callers must use
+    // it as returned; they must not reconstruct an OSS key from file.id.
+    path: file.projection.contentRef,
     display_name: file.displayName,
     media_type: file.mediaType,
     sha256: file.originalSha256,
@@ -1208,6 +1398,68 @@ function publicProductRun(run: Awaited<ReturnType<CreatorFactoryService["get"]>>
     created_at: run.createdAt,
     updated_at: run.updatedAt
   };
+}
+
+function publicFactoryNodeRun(run: FactoryNodeRunView): Record<string, unknown> {
+  return {
+    node: run.node,
+    product_id: run.productId,
+    execution_id: run.executionId,
+    input: run.input,
+    output: run.output,
+    output_ref: run.outputRef,
+    ...(run.candidateRef ? { candidate_ref: run.candidateRef } : {}),
+    ...(run.feedbackRef ? { feedback_ref: run.feedbackRef } : {}),
+    actor_session_ids: run.actorSessionIds,
+    critic_session_ids: run.criticSessionIds
+  };
+}
+
+function publicFactoryNodeExecution(execution: FactoryNodeExecutionView): Record<string, unknown> {
+  return {
+    node: execution.node,
+    product_id: execution.productId,
+    execution_id: execution.executionId,
+    status: execution.status,
+    round: execution.round,
+    ...(execution.phase ? { phase: execution.phase } : {}),
+    ...(execution.inputRef ? { input_ref: execution.inputRef } : {}),
+    ...(execution.candidateRef ? { candidate_ref: execution.candidateRef } : {}),
+    ...(execution.feedbackRef ? { feedback_ref: execution.feedbackRef } : {}),
+    ...(execution.outputRef ? { output_ref: execution.outputRef } : {}),
+    ...(execution.handoffRef ? { handoff_ref: execution.handoffRef } : {}),
+    ...(execution.decision ? { decision: execution.decision } : {}),
+    ...(execution.lastError ? { last_error: execution.lastError } : {}),
+    ...(execution.output === undefined ? {} : { output: execution.output }),
+    ...(execution.details === undefined ? {} : { details: execution.details })
+  };
+}
+
+function parseAboutYouAnswers(value: unknown): AboutYouAnswerPair[] {
+  if (!Array.isArray(value)) throw new Error("answers must be an array");
+  return value.map((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("Each answer must be an object");
+    const row = item as Record<string, unknown>;
+    return {
+      question: requiredNodeBodyText(row.question, "answers.question"),
+      answer: requiredNodeBodyText(row.answer, "answers.answer")
+    };
+  });
+}
+
+function stringArrayField(value: unknown): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) throw new Error("Node file input must be an array");
+  return value.map((item) => requiredNodeBodyText(item, "files"));
+}
+
+function requiredNodeBodyText(value: unknown, field: string): string {
+  if (typeof value !== "string" || !value.trim()) {
+    const error = new Error(`${field} is required`);
+    (error as Error & { status?: number }).status = 400;
+    throw error;
+  }
+  return value.trim();
 }
 
 function requiredProductText(value: unknown, field: string, max: number): string {
@@ -1336,6 +1588,7 @@ function errorStatus(error: unknown): number {
     if (error.code === "idempotency_conflict") return 409;
     return error.code === "product_file_not_found" || error.code === "product_snapshot_not_found" || error.code === "product_mismatch" ? 404 : 422;
   }
+  if (error instanceof FactoryNodeServiceError) return error.status;
   if (error instanceof CreatorFactoryRepositoryError) {
     if (["idempotency_conflict", "run_id_conflict", "version_conflict"].includes(error.code)) return 409;
     if (error.code === "run_not_found") return 404;
