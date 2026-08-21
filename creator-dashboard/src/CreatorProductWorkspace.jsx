@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, FormField, InlineAlert, PageHeader, Skeleton, StatusTag, Textarea } from "@hatch/ui";
+import { Button, FormField, InlineAlert, PageHeader, RadioGroup, Skeleton, StatusTag, Textarea } from "@hatch/ui";
 import {
   getLatestNodeExecution,
   getProduct,
@@ -261,18 +261,27 @@ function FilesPanel({ t, documents, busy, onUpload, onStart, onDelete, hasExecut
 function AboutYouPanel({ t, execution, busy, onSubmit, onRetry, onFiles }) {
   const questions = execution?.output?.questions ?? [];
   const [answers, setAnswers] = useState({});
+  const [activeIndex, setActiveIndex] = useState(0);
   useEffect(() => {
     setAnswers((current) => Object.fromEntries(questions.map((question) => [question.question, current[question.question] ?? ""])));
+    setActiveIndex(0);
   }, [execution?.execution_id, questions.length]);
   if (!execution) return <EmptyNodePanel title={t("aboutYou")} body={t("noQuestions")} onAction={onFiles} action={t("addSourceFiles")} />;
   if (isExecutionActive(execution)) return <NodeProgressPanel t={t} title={t("aboutYou")} execution={execution} />;
   if (isExecutionError(execution)) return <NodeErrorPanel t={t} title={t("aboutYou")} execution={execution} onRetry={onRetry} />;
   if (!questions.length) return <EmptyNodePanel title={t("aboutYou")} body={t("noQuestions")} onAction={onFiles} action={t("addSourceFiles")} />;
   if (execution.status === "handoff_saved") return <NodeProgressPanel t={t} title={t("aboutYou")} execution={{ ...execution, status: "completed" }} label="Answers saved. Corpus is starting…" />;
+  const question = questions[activeIndex];
+  const answer = String(answers[question.question] ?? "");
+  const selectedOption = question.options.includes(answer) ? answer : "";
+  const isLastQuestion = activeIndex === questions.length - 1;
+  const canAdvance = Boolean(answer.trim());
+  const setAnswer = (value) => setAnswers((current) => ({ ...current, [question.question]: value }));
+  const submitAll = () => onSubmit(questions.map((item) => ({ question: item.question, answer: String(answers[item.question] ?? "").trim() })));
   return <section className="cpv2-workspace-panel cpv2-about-you-panel">
     <div className="cpv2-panel-heading"><div><h2>{t("aboutYou")}</h2><p>{t("helpUnderstand")}</p></div><StatusTag tone="neutral">{questions.length}</StatusTag></div>
-    <div className="cpv2-about-you-questions">{questions.map((question, index) => <article key={question.question} className="cpv2-about-you-question"><span className="cpv2-review-label">{t("questionOf", index + 1, questions.length)}</span><h3>{question.question}</h3><div className="cpv2-about-you-options">{question.options.map((option) => <label key={option}><input type="radio" name={`about-you-${index}`} checked={answers[question.question] === option} onChange={() => setAnswers((current) => ({ ...current, [question.question]: option }))} />{option}</label>)}</div><FormField label={t("other")}><Textarea value={question.options.includes(answers[question.question]) ? "" : answers[question.question] ?? ""} placeholder={t("addContext")} onChange={(event) => setAnswers((current) => ({ ...current, [question.question]: event.target.value }))} /></FormField></article>)}</div>
-    <div className="cpv2-workspace-actions"><Button type="button" loading={busy === "answers"} disabled={Boolean(busy) || questions.some((question) => !String(answers[question.question] ?? "").trim())} onClick={() => onSubmit(questions.map((question) => ({ question: question.question, answer: answers[question.question].trim() })))}>{t("continueToCorpus")}</Button></div>
+    <article className="cpv2-about-you-question" aria-live="polite"><span className="cpv2-review-label">{t("questionOf", activeIndex + 1, questions.length)}</span><h3>{question.question}</h3><RadioGroup label={question.question} value={selectedOption} options={question.options.map((option) => ({ value: option, label: option }))} onValueChange={setAnswer} className="cpv2-about-you-options" /><FormField label={t("other")}><Textarea value={selectedOption ? "" : answer} placeholder={t("addContext")} onChange={(event) => setAnswer(event.target.value)} /></FormField></article>
+    <div className="cpv2-about-you-navigation"><Button type="button" variant="secondary" disabled={Boolean(busy) || activeIndex === 0} onClick={() => setActiveIndex((index) => index - 1)}>{t("previous")}</Button><span aria-hidden="true">{activeIndex + 1} / {questions.length}</span><Button type="button" loading={busy === "answers"} disabled={Boolean(busy) || !canAdvance} onClick={() => { if (isLastQuestion) submitAll(); else setActiveIndex((index) => index + 1); }}>{isLastQuestion ? t("continueToCorpus") : t("next")}</Button></div>
   </section>;
 }
 

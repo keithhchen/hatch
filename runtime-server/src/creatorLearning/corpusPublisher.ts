@@ -10,6 +10,18 @@ import { extractAgentCorpusBundle, immutableReleasePath } from "../registryCorpu
 import { CreatorRegistryReleaseStore, type CreatorRegistryRelease } from "./creatorRegistryRelease.js";
 import type { AgentKnowledgeIndexer, KnowledgeDocument } from "../qdrantIndexer.js";
 
+export class CorpusPublishError extends Error {
+  readonly status: number;
+  readonly code: string;
+
+  constructor(code: string, message: string, status = 503, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "CorpusPublishError";
+    this.code = code;
+    this.status = status;
+  }
+}
+
 type CorpusOutput = {
   system_instructions: string;
   skills: Array<{
@@ -55,6 +67,22 @@ export class CorpusPublisher {
     const bytes = await this.objectStore.get(execution.outputRef);
     const corpus = parseCorpusOutput(bytes);
     const sourceDigest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+
+    // A lost HTTP response must not repeat materialization or indexing. The
+    // live release is the durable idempotency receipt for this semantic
+    // publish request; the request header is only transport metadata.
+    const live = await this.releases.getLive(input.productId);
+    if (
+      live
+      && live.creator_id === input.creatorId
+      && live.corpus_digest === sourceDigest
+      && JSON.stringify(live.brief_spec ?? null) === JSON.stringify(input.briefSpec ?? null)
+    ) {
+      const published = await this.registry.getAgentCorpusRelease(input.creatorId, input.productId, live.release_digest);
+      if (published) {
+        return { execution_id: execution.executionId, output_ref: execution.outputRef, corpus_digest: sourceDigest, published, release: live };
+      }
+    }
     const bundle = makeRuntimeBundle({
       creatorId: input.creatorId,
       productId: input.productId,
@@ -65,14 +93,19 @@ export class CorpusPublisher {
     });
     const staging = path.resolve(this.runtimeRoot, `.corpus-publish-${randomUUID()}`);
     await extractAgentCorpusBundle(bundle, staging);
-    const staged = await this.registry.stageAgentCorpusDirectory(
-      input.creatorId,
-      input.productId,
-      staging,
-      undefined,
-      input.briefSpec as never,
-      { indexKnowledge: false },
-    );
+    let staged: PublishedAgentCorpus;
+    try {
+      staged = await this.registry.stageAgentCorpusDirectory(
+        input.creatorId,
+        input.productId,
+        staging,
+        undefined,
+        input.briefSpec as never,
+        { indexKnowledge: false },
+      );
+    } catch (error) {
+      throw new CorpusPublishError("registry_materialization_failed", "Registry could not materialize the Corpus.", 503, { cause: error });
+    }
     const immutableRoot = immutableReleasePath(this.runtimeRoot, input.creatorId, input.productId, staged.corpus_digest);
     const releaseRoot = path.resolve(this.runtimeRoot, input.productId, staged.corpus_digest.slice("sha256:".length));
     await mkdir(path.dirname(releaseRoot), { recursive: true });
@@ -95,20 +128,35 @@ export class CorpusPublisher {
       if (!existing.equals(bytes)) throw new Error("Runtime release already contains different Corpus bytes");
     });
     if (corpus.knowledge.length > 0) {
-      if (!this.knowledgeIndexer) throw new Error("Corpus includes knowledge but Qdrant indexing is not configured");
-      await this.knowledgeIndexer.stageAgentDocuments(
-        input.creatorId,
-        input.productId,
-        sourceDigest,
-        releaseRoot,
-        corpus.knowledge.map((document): KnowledgeDocument => ({
-          id: safeId(document.id),
-          path: `knowledge/${safeId(document.id)}.md`,
-          sha256: `sha256:${createHash("sha256").update(document.content, "utf8").digest("hex")}`,
-          retrieval_only: true,
-          source_summary: document.source_summary,
-        })),
-      );
+      if (!this.knowledgeIndexer) {
+        throw new CorpusPublishError(
+          "knowledge_index_unavailable",
+          "Knowledge indexing is not configured for this Registry.",
+          503,
+        );
+      }
+      try {
+        await this.knowledgeIndexer.stageAgentDocuments(
+          input.creatorId,
+          input.productId,
+          sourceDigest,
+          releaseRoot,
+          corpus.knowledge.map((document): KnowledgeDocument => ({
+            id: safeId(document.id),
+            path: `knowledge/${safeId(document.id)}.md`,
+            sha256: `sha256:${createHash("sha256").update(document.content, "utf8").digest("hex")}`,
+            retrieval_only: true,
+            source_summary: document.source_summary,
+          })),
+        );
+      } catch (error) {
+        throw new CorpusPublishError(
+          "knowledge_index_unavailable",
+          "Knowledge indexing failed. Check Qdrant and DashScope embedding availability, credentials, and quota.",
+          503,
+          { cause: error },
+        );
+      }
     }
     const releaseDigest = staged.corpus_digest;
     const releaseRef = `registry/${input.productId}/releases/${releaseDigest.slice("sha256:".length)}`;

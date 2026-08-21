@@ -312,6 +312,52 @@
   max-width: 760px;
 }
 
+.cpv2-about-you-question {
+  display: grid;
+  gap: 18px;
+  border-top: 1px solid var(--hatch-border, rgba(24, 22, 20, .12));
+  padding-top: 26px;
+}
+
+.cpv2-about-you-question h3 {
+  max-width: 820px;
+  margin: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+}
+
+.cpv2-about-you-options .hui-choice {
+  min-width: 0;
+  align-items: start;
+  padding: 10px 12px;
+  border: 1px solid var(--hui-border, rgba(24, 22, 20, .12));
+  border-radius: 12px;
+  background: var(--hui-surface-bright, rgba(255, 253, 249, .7));
+}
+
+.cpv2-about-you-options .hui-choice label,
+.cpv2-about-you-options .hui-choice label strong {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.5;
+}
+
+.cpv2-about-you-navigation {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.cpv2-about-you-navigation > span {
+  color: var(--hatch-text-muted, #766f67);
+  font-size: .85rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .cpv2-about-columns,
 .cpv2-review-columns {
   display: grid;
