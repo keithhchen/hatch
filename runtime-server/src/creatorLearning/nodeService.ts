@@ -26,6 +26,7 @@ export type FactoryNodeProduct = {
   productId: string;
   name: string;
   promise: string;
+  briefSpec?: unknown;
 };
 
 export type FactoryNodeRunView = {

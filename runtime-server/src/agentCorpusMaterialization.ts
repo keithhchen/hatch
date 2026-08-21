@@ -1,5 +1,6 @@
 import type { ClientToolName } from "./protocol.js";
 import { agentCorpusDigest, loadAgentCorpus, readCorpusAsset } from "./agentCorpus.js";
+import { hatchPlatformPrompt } from "./hatchPlatformPrompt.js";
 
 export const MAX_MATERIALIZED_AGENT_PROMPT_BYTES = 4 * 1024 * 1024;
 
@@ -48,7 +49,7 @@ export async function materializeAgentCorpus(
   // tool loads the selected bundle in the same Agent loop.
   // Retrieval-only knowledge is also never eagerly injected. hatch.file_search
   // performs an Agent-scoped lookup only when the model needs long-tail facts.
-  const protectedKnowledge = system;
+  const protectedKnowledge = `${hatchPlatformPrompt()}\n\n${system}`;
   if (Buffer.byteLength(protectedKnowledge, "utf8") > MAX_MATERIALIZED_AGENT_PROMPT_BYTES) {
     throw new Error(`Materialized Agent prompt exceeds the ${MAX_MATERIALIZED_AGENT_PROMPT_BYTES} byte limit`);
   }

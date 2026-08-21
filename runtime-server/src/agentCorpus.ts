@@ -81,9 +81,9 @@ export const AgentCorpusSchema = z.object({
   }).strict().default({ documents: [] }),
   tools: z.array(ToolSchema).min(1).max(64),
   evaluations: z.object({
-    synthetic_qa: z.array(AssetSchema).min(1).max(128),
-    held_out: z.array(AssetSchema).min(1).max(128)
-  }).strict()
+    synthetic_qa: z.array(AssetSchema).max(128).default([]),
+    held_out: z.array(AssetSchema).max(128).default([])
+  }).strict().default({ synthetic_qa: [], held_out: [] })
 }).strict().transform((value) => ({ ...value, agent_id: value.product.id }));
 
 export type AgentCorpus = z.infer<typeof AgentCorpusSchema>;
@@ -102,14 +102,32 @@ export type ResolvedAgentCorpus = {
   root: string;
   corpus: AgentCorpus;
   digest: string;
+  /** Digest of the installed Runtime representation; source digest remains `digest`. */
+  runtimeDigest?: string;
 };
+
+/**
+ * Runtime only depends on this small resolver boundary.  The filesystem
+ * resolver below is retained for explicit local development, while the
+ * production implementation reads the Registry live release and materializes
+ * a verified cache from OSS.
+ */
+export interface AgentCorpusResolverLike {
+  resolve(
+    creatorId: string,
+    agentId: string,
+    digestOrSignal?: string | AbortSignal,
+    explicitSignal?: AbortSignal
+  ): Promise<ResolvedAgentCorpus>;
+  list(creatorId: string, signal?: AbortSignal): Promise<ResolvedAgentCorpus[]>;
+}
 
 /**
  * Resolves the one current Corpus installed by Registry. The Runtime only
  * needs a creator/agent lookup; it does not know how the Corpus was produced
  * or how its retrieval index was populated.
  */
-export class AgentCorpusResolver {
+export class AgentCorpusResolver implements AgentCorpusResolverLike {
   constructor(private readonly root: string) {}
 
   async resolve(
@@ -636,6 +654,16 @@ export async function agentCorpusDigest(
   corpus: AgentCorpus,
   signal?: AbortSignal
 ): Promise<string> {
+  const sourceDigestPath = await containedPath(root, ".hatch-source-corpus-digest");
+  try {
+    const sourceDigest = (await readFile(sourceDigestPath, signal ? { encoding: "utf8", signal } : "utf8")).trim();
+    if (!/^sha256:[a-f0-9]{64}$/.test(sourceDigest)) {
+      throw new Error("Runtime Corpus cache source digest is invalid");
+    }
+    return sourceDigest;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
   const manifestPath = await containedPath(root, "agent.json");
   const manifestDigest = await fileSha256(manifestPath, signal);
   const assets = [

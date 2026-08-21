@@ -168,7 +168,7 @@ export class RegistryStoreTs {
   } = {}): Promise<RegistryStoreTs> {
     const environment = options.environment ?? process.env;
     const store = new RegistryStoreTs(
-      path.resolve(options.corpusRoot ?? environment.HATCH_AGENT_CORPUS_ROOT ?? "agent-corpora"),
+      path.resolve(options.corpusRoot ?? environment.HATCH_RUNTIME_CORPUS_ROOT ?? environment.HATCH_AGENT_CORPUS_ROOT ?? "agent-corpora"),
       {
         databaseUrl: options.databaseUrl ?? (environment.HATCH_REGISTRY_DATABASE_URL?.trim() || undefined),
         databaseTimeoutMs: registryDatabaseTimeoutMs(environment),
@@ -420,6 +420,13 @@ export class RegistryStoreTs {
     return this.corpora.get(key(creatorId, agentId));
   }
 
+  /** Publish-time shared-volume location consumed by Runtime. */
+  corpusPath(creatorId: string, agentId: string): string {
+    requireUuidV4(creatorId, "creator_id");
+    requireUuidV4(agentId, "product_id");
+    return path.join(this.corpusRoot, creatorId, agentId);
+  }
+
   async listAllAgentCorpora(options: { limit?: number; offset?: number } = {}): Promise<PublishedAgentCorpus[]> {
     const limit = options.limit ?? 20;
     const offset = options.offset ?? 0;
@@ -441,12 +448,12 @@ export class RegistryStoreTs {
     creatorId: string,
     agentId: string,
     corpusRoot: string,
-    expectedDigest: string,
+    expectedDigest?: string,
     briefSpec?: BriefSpec
   ): Promise<PublishedAgentCorpus> {
     const normalizedBriefSpec = briefSpec ? normalizeBriefSpec(briefSpec) : undefined;
     const verified = await verifyAgentCorpus(corpusRoot, creatorId, agentId);
-    if (verified.digest !== expectedDigest) throw new Error("candidate_changed");
+    if (expectedDigest !== undefined && verified.digest !== expectedDigest) throw new Error("candidate_changed");
     const immutableRoot = await materializeAgentCorpusRelease(verified, this.corpusRoot);
     if (this.indexer) {
       await ingestAgentCorpusKnowledge(this.indexer, {
