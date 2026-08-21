@@ -90,6 +90,7 @@ export type NodeExecutionStore = {
   load(ref: NodeExecutionRef): Promise<NodeExecutionState | undefined>;
   save(ref: NodeExecutionRef, state: NodeExecutionState): Promise<void>;
   latest?(productId: string, nodeName: string): Promise<{ scope: NodeScope; state: NodeExecutionState } | undefined>;
+  latestCompleted?(productId: string, nodeName: string): Promise<{ scope: NodeScope; state: NodeExecutionState } | undefined>;
 };
 
 export type PostgresNodeStoreOptions = {
@@ -305,6 +306,26 @@ export class PostgresNodeStore implements NodeSessionStore, NodeExecutionStore {
       SELECT execution_id, status, round, input_ref, candidate_ref, feedback_ref, output_ref, handoff_ref, decision, last_error, state_jsonb
       FROM hatch_node_executions
       WHERE product_id = $1 AND node_name = $2
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `, [productId, nodeName]);
+    const row = result.rows[0];
+    if (!row) return undefined;
+    const state = await this.load({ scope: { productId, nodeName, executionId: row.execution_id } });
+    return state
+      ? { scope: { productId, nodeName, executionId: row.execution_id }, state }
+      : undefined;
+  }
+
+  async latestCompleted(productId: string, nodeName: string): Promise<{ scope: NodeScope; state: NodeExecutionState } | undefined> {
+    await this.initialize();
+    const result = await this.pool.query<NodeExecutionRow & { execution_id: string }>(`
+      SELECT execution_id, status, round, input_ref, candidate_ref, feedback_ref, output_ref, handoff_ref, decision, last_error, state_jsonb
+      FROM hatch_node_executions
+      WHERE product_id = $1
+        AND node_name = $2
+        AND status = 'completed'
+        AND output_ref IS NOT NULL
       ORDER BY updated_at DESC
       LIMIT 1
     `, [productId, nodeName]);

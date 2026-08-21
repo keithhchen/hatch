@@ -288,6 +288,20 @@ export class FactoryNodeService {
     return this.getExecution(productId, node, latest.scope.executionId);
   }
 
+  /** The only hand-off lookup that may feed Publish: completed output only. */
+  async getLatestCompletedExecution(
+    productId: string,
+    node: "about-you" | "corpus"
+  ): Promise<FactoryNodeExecutionView | undefined> {
+    const latest = await this.executionStore.latestCompleted?.(productId, node);
+    if (latest?.state.status === "completed" && latest.state.outputRef) {
+      return this.getExecution(productId, node, latest.scope.executionId);
+    }
+    const fallback = await this.executionStore.latest?.(productId, node);
+    if (!fallback || fallback.state.status !== "completed" || !fallback.state.outputRef) return undefined;
+    return this.getExecution(productId, node, fallback.scope.executionId);
+  }
+
   private async enqueue(
     node: "about-you" | "corpus",
     productId: string,
