@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { PDFParse } from "pdf-parse";
+import { strFromU8, unzipSync } from "fflate";
 import mammoth from "mammoth";
 import * as XLSX from "xlsx";
 import type { ArtifactObjectStore } from "./objectStore.js";
@@ -15,6 +15,7 @@ import type {
 
 export const SOURCE_DOCUMENT_MAX_BYTES = 20 * 1024 * 1024;
 const SAFE_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const IMAGE_EXTENSIONS = new Set([".avif", ".bmp", ".gif", ".ico", ".jpeg", ".jpg", ".png", ".svg", ".tif", ".tiff", ".webp"]);
 
 export type SourceUploadInput = {
   displayName: string;
@@ -79,6 +80,9 @@ export class CreatorSourceLibrary {
       }
       const id = `src_${randomUUID().replaceAll("-", "")}`;
       const mediaType = detectMediaType(displayName, input.mediaType, input.bytes);
+      if (mediaType.startsWith("image/")) {
+        throw invalidSource("Images are not supported in Files yet. Upload a PDF, Office document, or text file.");
+      }
       const projection = await projectSource(displayName, mediaType, input.bytes);
       const projectionText = projection.kind === "markdown" ? readProjectionText(projection) : undefined;
       const storedProjection: SourceProjection = projection.kind === "image"
@@ -446,6 +450,7 @@ export async function projectSource(displayName: string, mediaType: string, byte
     if (mediaType === "application/pdf" || extension === ".pdf") markdown = await pdfToMarkdown(bytes);
     else if (mediaType.includes("wordprocessingml") || extension === ".docx") markdown = await docxToMarkdown(bytes);
     else if (mediaType.includes("spreadsheet") || extension === ".xlsx" || extension === ".xls" || extension === ".xlsm") markdown = workbookToMarkdown(bytes, displayName);
+    else if (mediaType.includes("presentationml") || extension === ".pptx") markdown = presentationToMarkdown(bytes, displayName);
     else if (mediaType === "text/csv" || extension === ".csv" || extension === ".tsv") markdown = delimitedToMarkdown(bytes.toString("utf8"), extension === ".tsv" ? "\t" : ",", displayName);
     else if (mediaType === "text/html" || extension === ".html" || extension === ".htm") markdown = htmlToMarkdown(bytes.toString("utf8"));
     else if (mediaType === "application/json" || extension === ".json") markdown = jsonToMarkdown(bytes.toString("utf8"));
@@ -473,7 +478,18 @@ function projectionContentPlaceholder(projection: SourceProjection): string {
 }
 
 async function pdfToMarkdown(bytes: Buffer): Promise<string> {
-  const parser = new PDFParse({ data: bytes });
+  // pdf-parse uses pdf.js' text layer, not its renderer. Some Node images do
+  // not ship the optional native canvas binding; pdf.js still evaluates a
+  // DOMMatrix at module load in that case. Provide the tiny affine surface
+  // needed by the text-only path so PDF upload does not depend on canvas.
+  const globalScope = globalThis as typeof globalThis & { DOMMatrix?: unknown };
+  if (!globalScope.DOMMatrix) Object.defineProperty(globalThis, "DOMMatrix", {
+    configurable: true,
+    writable: true,
+    value: TextOnlyDOMMatrix
+  });
+  const { PDFParse } = await import("pdf-parse");
+  const parser = new PDFParse({ data: new Uint8Array(bytes) });
   try {
     const result = await parser.getText();
     const pages = String(result.text ?? "").split(/\f/g).map((page) => page.trim()).filter(Boolean);
@@ -481,6 +497,28 @@ async function pdfToMarkdown(bytes: Buffer): Promise<string> {
   } finally {
     await parser.destroy();
   }
+}
+
+class TextOnlyDOMMatrix {
+  a = 1;
+  b = 0;
+  c = 0;
+  d = 1;
+  e = 0;
+  f = 0;
+
+  constructor(value?: unknown) {
+    if (Array.isArray(value) && value.length >= 6) {
+      [this.a, this.b, this.c, this.d, this.e, this.f] = value.slice(0, 6).map(Number) as [number, number, number, number, number, number];
+    }
+  }
+
+  multiply(): this { return this; }
+  multiplySelf(): this { return this; }
+  preMultiplySelf(): this { return this; }
+  translate(): this { return this; }
+  scale(): this { return this; }
+  invertSelf(): this { return this; }
 }
 
 async function docxToMarkdown(bytes: Buffer): Promise<string> {
@@ -495,6 +533,26 @@ function workbookToMarkdown(bytes: Buffer, displayName: string): string {
     const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: false, defval: "" });
     return [`## Sheet: ${name}`, "", tableMarkdown(rows), ""];
   })].join("\n");
+}
+
+function presentationToMarkdown(bytes: Buffer, displayName: string): string {
+  const archive = unzipSync(bytes);
+  const slideNames = Object.keys(archive)
+    .filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))
+    .sort((left, right) => slideNumber(left) - slideNumber(right));
+  const slides = slideNames.map((name, index) => {
+    const xml = strFromU8(archive[name]!);
+    const text = [...xml.matchAll(/<a:t(?:\s[^>]*)?>([\s\S]*?)<\/a:t>/g)]
+      .map((match) => decodeHtml(match[1] ?? "").replace(/\s+/g, " ").trim())
+      .filter(Boolean)
+      .join(" ");
+    return `## Slide ${index + 1}\n\n${text || "[No text]"}`;
+  });
+  return [`# ${path.basename(displayName, path.extname(displayName))}`, "", ...slides].join("\n\n");
+}
+
+function slideNumber(value: string): number {
+  return Number(value.match(/slide(\d+)\.xml$/)?.[1] ?? Number.MAX_SAFE_INTEGER);
 }
 
 function delimitedToMarkdown(text: string, delimiter: string, displayName: string): string {
@@ -577,6 +635,7 @@ export function detectMediaType(displayName: string, supplied: string | undefine
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     ".xls": "application/vnd.ms-excel",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     ".csv": "text/csv",
     ".tsv": "text/tab-separated-values",
     ".json": "application/json",
@@ -587,7 +646,14 @@ export function detectMediaType(displayName: string, supplied: string | undefine
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
     ".png": "image/png",
-    ".webp": "image/webp"
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+    ".bmp": "image/bmp",
+    ".svg": "image/svg+xml",
+    ".avif": "image/avif",
+    ".ico": "image/x-icon",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff"
   };
   if (bytes.subarray(0, 4).toString("ascii") === "%PDF") return "application/pdf";
   if (bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return "image/png";

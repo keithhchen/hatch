@@ -104,6 +104,61 @@
   gap: 8px;
 }
 
+/* Feedback belongs to the reading flow, not a separate colored card. Keep the
+   status icon for quick recognition while letting the surrounding surface and
+   typography carry the visual hierarchy. */
+.cpv2-product-workspace .cpv2-inline-feedback.hui-alert,
+.cpv2-source-library .cpv2-inline-feedback.hui-alert {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  color: var(--hatch-text-muted, #766f67);
+  display: flex;
+  font-size: var(--hatch-type-meta, .75rem);
+  gap: 9px;
+  margin: 0 0 20px;
+  overflow: visible;
+  padding: 2px 0;
+}
+
+.cpv2-product-workspace .cpv2-inline-feedback.hui-alert::before,
+.cpv2-product-workspace .cpv2-inline-feedback.hui-alert::after,
+.cpv2-source-library .cpv2-inline-feedback.hui-alert::before,
+.cpv2-source-library .cpv2-inline-feedback.hui-alert::after {
+  display: none;
+}
+
+.cpv2-product-workspace .cpv2-inline-feedback.hui-alert > svg,
+.cpv2-source-library .cpv2-inline-feedback.hui-alert > svg {
+  background: var(--hatch-ui-status-success-bg, #dce8df);
+  border-radius: 50%;
+  color: var(--hatch-ui-status-success-ink, #315d46);
+  filter: none;
+  flex: 0 0 auto;
+  height: 18px;
+  padding: 3px;
+  width: 18px;
+}
+
+.cpv2-product-workspace .cpv2-inline-feedback.hui-alert > div,
+.cpv2-source-library .cpv2-inline-feedback.hui-alert > div {
+  min-width: 0;
+}
+
+.cpv2-product-workspace .cpv2-inline-feedback.hui-alert strong,
+.cpv2-source-library .cpv2-inline-feedback.hui-alert strong {
+  color: var(--hatch-text, #201813);
+  font-weight: var(--hatch-weight-medium, 500);
+}
+
+.cpv2-product-workspace .cpv2-inline-feedback.hui-alert p,
+.cpv2-source-library .cpv2-inline-feedback.hui-alert p {
+  color: inherit;
+  line-height: 1.45;
+}
+
 .cpv2-tab-spinner,
 .cpv2-loading-spinner {
   animation: cpv2-spin .8s linear infinite;

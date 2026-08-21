@@ -1,12 +1,13 @@
 import { Type } from "@earendil-works/pi-ai";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
+import { randomUUID } from "node:crypto";
 import { isObjectStoreNotFound, type ArtifactObjectStore, type ObjectStoreObject } from "./creatorLearning/objectStore.js";
-import type { NodeScope } from "./node.js";
+import { normalizeNodeObjectPath, type NodeScope } from "./node.js";
 
 const MAX_READ_BYTES = 1_000_000;
-const fileNameSchema = Type.String({ minLength: 1, maxLength: 512 });
+const objectPathSchema = Type.String({ minLength: 1, maxLength: 512 });
 
-/** The runtime owns the backend. Agents only see logical read/write tools. */
+/** The runtime owns the backend. Agents only see scoped read/write tools. */
 export type NodeStorage = {
   objectStore: ArtifactObjectStore;
 };
@@ -17,12 +18,22 @@ export class NodeOssStore {
   constructor(private readonly storage: NodeStorage) {}
 
   async readJson(scope: NodeScope, reference: string): Promise<unknown> {
-    const key = safeRelativeReference(reference);
-    const content = await this.storage.objectStore.get(key);
-    if (content.byteLength > MAX_READ_BYTES) {
-      throw new Error(`Node artifact read is limited to ${MAX_READ_BYTES} bytes: ${key}`);
-    }
+    const { content } = await this.readObject(nodeArtifactReference(scope, reference));
     return JSON.parse(content.toString("utf8")) as unknown;
+  }
+
+  async readPath(
+    scope: NodeScope,
+    input: NodeInput,
+    reference: string
+  ): Promise<{ path: string; content: string; bytes: number }> {
+    const key = resolveDeclaredInputPath(input, reference);
+    const object = await this.readObject(key);
+    return {
+      path: object.key,
+      content: object.content.toString("utf8"),
+      bytes: object.content.byteLength
+    };
   }
 
   async readCandidate(scope: NodeScope, round: number): Promise<{ key: string; value: unknown } | undefined> {
@@ -36,32 +47,6 @@ export class NodeOssStore {
     }
   }
 
-  async readInput(
-    scope: NodeScope,
-    input: NodeInput,
-    inputName: string,
-    fileName?: string
-  ): Promise<{ name: string; content: string; bytes: number }> {
-    const rawReference = input[inputName];
-    if (typeof rawReference !== "string" || !rawReference.trim()) {
-      throw new Error(`Node input ${inputName} must contain an OSS reference`);
-    }
-
-    const reference = safeRelativeReference(rawReference);
-    const key = fileName === undefined
-      ? reference
-      : await this.resolveSnapshotFile(reference, fileName);
-    const content = await this.storage.objectStore.get(key);
-    if (content.byteLength > MAX_READ_BYTES) {
-      throw new Error(`Node read is limited to ${MAX_READ_BYTES} bytes: ${key}`);
-    }
-    return {
-      name: fileName ?? inputName,
-      content: content.toString("utf8"),
-      bytes: content.byteLength
-    };
-  }
-
   async write(scope: NodeScope, name: string, value: unknown): Promise<ObjectStoreObject> {
     const normalizedName = validateNodeName(name);
     return this.storage.objectStore.put(
@@ -71,10 +56,29 @@ export class NodeOssStore {
     );
   }
 
+  /** Host-owned immutable artifact, used for hand-offs between Nodes. */
+  async writeImmutable(scope: NodeScope, name: string, value: unknown): Promise<ObjectStoreObject> {
+    const normalizedName = validateNodeName(name);
+    return this.storage.objectStore.put(
+      nodeKey(scope, normalizedName),
+      Buffer.from(jsonValue(value, "Node artifact"), "utf8"),
+      { contentType: "application/json; charset=utf-8", immutable: true }
+    );
+  }
+
   async writeOutput(scope: NodeScope, value: unknown): Promise<ObjectStoreObject> {
     return this.storage.objectStore.put(
       nodeKey(scope, "output.json"),
       Buffer.from(jsonValue(value, "Node output"), "utf8"),
+      { contentType: "application/json; charset=utf-8", immutable: true }
+    );
+  }
+
+  /** Runtime-owned immutable input manifest. The manifest contains refs only. */
+  async writeInput(scope: NodeScope, value: unknown): Promise<ObjectStoreObject> {
+    return this.storage.objectStore.put(
+      nodeKey(scope, "input.json"),
+      Buffer.from(jsonValue(value, "Node input"), "utf8"),
       { contentType: "application/json; charset=utf-8", immutable: true }
     );
   }
@@ -89,26 +93,32 @@ export class NodeOssStore {
     );
   }
 
-  private async resolveSnapshotFile(snapshotReference: string, fileName: string): Promise<string> {
-    const normalizedFileName = safeRelativeReference(fileName);
-    const normalizedSnapshot = safeRelativeReference(snapshotReference);
-    const snapshotKey = normalizedSnapshot;
-    const snapshot = JSON.parse((await this.storage.objectStore.get(snapshotKey)).toString("utf8")) as unknown;
-    const entry = snapshotFileEntry(snapshot, normalizedFileName);
-    if (!entry) {
-      throw new Error(`File ${normalizedFileName} is not listed by snapshot ${snapshotReference}`);
+  /** Runtime-owned feedback persistence; Agents only receive its OSS ref. */
+  async writeFeedback(scope: NodeScope, round: number, value: unknown): Promise<ObjectStoreObject> {
+    if (!Number.isInteger(round) || round < 1) throw new Error(`Node feedback round must be a positive integer: ${round}`);
+    return this.storage.objectStore.put(
+      nodeKey(scope, `feedback-${round}-${randomUUID()}.json`),
+      Buffer.from(jsonValue(value, "Node feedback"), "utf8"),
+      { contentType: "application/json; charset=utf-8", immutable: true }
+    );
+  }
+
+  private async readObject(reference: string): Promise<{ key: string; content: Buffer }> {
+    const key = safeObjectKey(reference);
+    const content = await this.storage.objectStore.get(key);
+    if (content.byteLength > MAX_READ_BYTES) {
+      throw new Error(`Node artifact read is limited to ${MAX_READ_BYTES} bytes: ${key}`);
     }
-    if (entry.reference) return safeRelativeReference(entry.reference);
-    const parent = parentPath(normalizedSnapshot);
-    return parent ? `${parent}/${normalizedFileName}` : normalizedFileName;
+    return { key, content };
   }
 }
 
 /**
  * Create the only storage tools exposed to a Node Agent.
  *
- * `input` is the parsed Node input. The model chooses an input slot and an
- * optional file name; it never chooses a backend or an absolute object key.
+ * `input` is the parsed Node input. The model chooses one exact OSS object
+ * path from the input manifest; it never chooses a backend or an undeclared
+ * object key.
  */
 export function createNodeStorageTools(
   storage: NodeStorage,
@@ -117,25 +127,17 @@ export function createNodeStorageTools(
   access: "read" | "read_write" = "read_write"
 ): AgentTool[] {
   const nodeStore = new NodeOssStore(storage);
-  const inputNames = Object.keys(input).filter((name) => /^[A-Za-z0-9._-]+$/.test(name));
-  const inputSlotSchema = inputNames.length === 1
-    ? Type.Literal(inputNames[0]!)
-    : Type.Union(inputNames.map((name) => Type.Literal(name)));
-  const inputSlotDescription = inputNames.length
-    ? `Choose exactly one input slot: ${inputNames.join(", ")}. Do not put an OSS path or URI in input.`
-    : "No input slots are available.";
   const read: AgentTool = {
     name: "read",
     label: "read",
-    description: `Read a Runtime-provided input reference. ${inputSlotDescription} For a snapshot slot, provide the source file's display name in name; never put the snapshot OSS path in input or name.`,
+    description: "Read one file declared in the current Node input. Use its full OSS object path, or a unique relative path from the input list; do not invent a path.",
     parameters: Type.Object({
-      input: inputSlotSchema,
-      name: Type.Optional(fileNameSchema)
+      path: objectPathSchema
     }, { additionalProperties: false }),
     execute: async (_toolCallId, args, signal) => {
       signal?.throwIfAborted();
-      const value = args as { input: string; name?: string };
-      const result = await nodeStore.readInput(scope, input, value.input, value.name);
+      const value = args as { path: string };
+      const result = await nodeStore.readPath(scope, input, value.path);
       signal?.throwIfAborted();
       return toolResult(result);
     }
@@ -148,7 +150,7 @@ export function createNodeStorageTools(
     label: "write",
     description: "Write JSON to this Node's OSS namespace. Provide a relative name such as scratch/draft.json.",
     parameters: Type.Object({
-      name: fileNameSchema,
+      name: objectPathSchema,
       value: Type.Unknown()
     }, { additionalProperties: false }),
     execute: async (_toolCallId, args, signal) => {
@@ -179,35 +181,13 @@ function nodeKey(scope: NodeScope, name: string): string {
   ].join("/");
 }
 
-function snapshotFileEntry(value: unknown, expectedName: string): { reference?: string } | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const files = (value as { files?: unknown }).files;
-  if (!Array.isArray(files)) return undefined;
-  for (const entry of files) {
-    if (typeof entry === "string") {
-      if (safeRelativeReference(entry) === expectedName) return {};
-      continue;
-    }
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
-    const record = entry as {
-      name?: unknown;
-      displayName?: unknown;
-      ref?: unknown;
-      contentRef?: unknown;
-      projection?: { contentRef?: unknown };
-    };
-    const name = record.name ?? record.displayName;
-    if (typeof name !== "string" || safeRelativeReference(name) !== expectedName) continue;
-    const reference = record.ref ?? record.contentRef ?? record.projection?.contentRef;
-    return typeof reference === "string" ? { reference } : {};
+function nodeArtifactReference(scope: NodeScope, reference: string): string {
+  const key = safeObjectKey(reference);
+  const prefix = `${safePart(scope.productId)}/${safePart(scope.nodeName)}/${safePart(scope.executionId)}/`;
+  if (!key.startsWith(prefix)) {
+    throw new Error(`Node artifact reference is outside the current execution: ${reference}`);
   }
-  return undefined;
-}
-
-function parentPath(value: string): string {
-  const parts = safeRelativeReference(value).split("/");
-  parts.pop();
-  return parts.join("/");
+  return key;
 }
 
 function jsonValue(value: unknown, label: string): string {
@@ -230,6 +210,49 @@ function safeRelativeReference(value: string): string {
     throw new Error(`OSS reference must be a non-empty relative path: ${value}`);
   }
   return normalized;
+}
+
+function safeObjectKey(value: string): string {
+  return normalizeNodeObjectPath(value);
+}
+
+function collectInputReferences(input: NodeInput): Set<string> {
+  const references = new Set<string>();
+  const visit = (value: unknown): void => {
+    if (typeof value === "string" && value.trim()) {
+      try {
+        references.add(safeObjectKey(value));
+      } catch {
+        // Non-reference scalar input remains part of the Node input but is
+        // not readable through the OSS tool.
+      }
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    if (value && typeof value === "object") {
+      for (const item of Object.values(value)) visit(item);
+    }
+  };
+  visit(input);
+  return references;
+}
+
+function resolveDeclaredInputPath(input: NodeInput, requestedPath: string): string {
+  const requested = safeObjectKey(requestedPath);
+  const declared = [...collectInputReferences(input)];
+  const exact = declared.find((reference) => reference === requested);
+  if (exact) return exact;
+
+  const suffix = `/${requested}`;
+  const matches = declared.filter((reference) => reference.endsWith(suffix));
+  if (matches.length === 1) return matches[0]!;
+  if (matches.length > 1) {
+    throw new Error(`Node read path is ambiguous; use the full OSS object path: ${requestedPath}`);
+  }
+  throw new Error(`Node read path is not declared in the current input: ${requestedPath}`);
 }
 
 function safePart(value: string): string {

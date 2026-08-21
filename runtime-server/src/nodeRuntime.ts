@@ -84,7 +84,7 @@ export class NodeRuntime {
     this.sessionStore = options.sessionStore ?? getDefaultPersistence();
     this.executionStore = options.executionStore ?? getDefaultPersistence();
     this.storage = options.storage;
-    this.maxRounds = positiveInteger(options.maxRounds ?? 8, "maxRounds");
+    this.maxRounds = positiveInteger(options.maxRounds ?? 10, "maxRounds");
     this.maxAgentTurns = positiveInteger(options.maxAgentTurns ?? 16, "maxAgentTurns");
     this.agentFactory = options.agentFactory ?? defaultAgentFactory;
   }
@@ -112,12 +112,25 @@ export class NodeRuntime {
     const input = parseInput(node.inputSchema, rawInput, node.name);
     const executionRef: NodeExecutionRef = { scope: checkedScope };
     const existingExecution = await this.executionStore.load(executionRef);
-    if (existingExecution?.status === "completed") {
+    if (existingExecution?.inputRef) {
+      const persistedInput = await nodeStore.readJson(checkedScope, existingExecution.inputRef);
+      if (JSON.stringify(persistedInput) !== JSON.stringify(input)) {
+        throw new NodeRuntimeError("invalid_input", `Node ${node.name} execution ${checkedScope.executionId} already has a different input manifest`);
+      }
+    } else if (existingExecution?.input !== undefined && JSON.stringify(existingExecution.input) !== JSON.stringify(input)) {
+      throw new NodeRuntimeError("invalid_input", `Node ${node.name} execution ${checkedScope.executionId} already has a different input manifest`);
+    }
+    const inputObject = await nodeStore.writeInput(checkedScope, input);
+    const inputRef = inputObject.key;
+    if (existingExecution?.status === "completed"
+      || existingExecution?.status === "waiting_for_creator"
+      || existingExecution?.status === "handoff_saved") {
       if (!existingExecution.outputRef) {
         throw new NodeRuntimeError("agent_failed", `Completed Node ${node.name} has no output reference`);
       }
       return {
         status: "completed",
+        input,
         output: await nodeStore.readJson(checkedScope, existingExecution.outputRef) as Candidate,
         outputRef: existingExecution.outputRef,
         rounds: [],
@@ -125,23 +138,23 @@ export class NodeRuntime {
         criticSessionIds: []
       };
     }
-    // Register the full logical tool surface before the first Agent is
-    // created. Values are filled by Runtime as the loop advances; Agents only
-    // ever choose a slot name, never an OSS key.
+    // Register the input manifest before the first Agent is created. Values
+    // are filled by Runtime as the loop advances; Agents choose a declared
+    // absolute OSS path (or an unambiguous relative alias), never a backend.
     const actorToolInput: NodeInput = {
       ...(input as unknown as NodeInput),
-      previous_candidate: undefined
+      previous_candidate_ref: undefined
     };
     const criticToolInput: NodeInput = {
       ...(input as unknown as NodeInput),
-      candidate: undefined
+      candidate_ref: undefined
     };
     let persistentActor: LiveAgent | undefined;
     let persistentCritic: LiveAgent | undefined;
     const actorSessionIds: string[] = [];
     const criticSessionIds: string[] = [];
     let previousCandidateRef: string | undefined;
-    let feedback: Feedback | undefined;
+    let feedbackRef: string | undefined;
     let resumeCandidateRef: string | undefined;
     let resumeCandidate: unknown;
     let nextRound = 1;
@@ -156,15 +169,16 @@ export class NodeRuntime {
         nextRound = Math.max(1, existingExecution.round);
         resumeCandidateRef = existingExecution.candidateRef;
         resumeCandidate = await nodeStore.readJson(checkedScope, resumeCandidateRef);
-        criticToolInput.candidate = resumeCandidateRef;
+        criticToolInput.candidate_ref = resumeCandidateRef;
       } else {
         nextRound = Math.max(1, existingExecution.phase === "actor"
           ? existingExecution.round
           : existingExecution.round + 1);
         previousCandidateRef = details.previousCandidateRef
           ?? (existingExecution.decision === "revise" ? existingExecution.candidateRef : undefined);
-        feedback = details.feedback as Feedback | undefined;
-        if (previousCandidateRef) actorToolInput.previous_candidate = previousCandidateRef;
+        feedbackRef = existingExecution.feedbackRef;
+        if (previousCandidateRef) actorToolInput.previous_candidate_ref = previousCandidateRef;
+        if (feedbackRef) actorToolInput.feedback_ref = feedbackRef;
       }
     }
 
@@ -172,8 +186,10 @@ export class NodeRuntime {
       status: "running",
       round: nextRound,
       phase: resumedPhase,
+      inputRef,
       ...(resumeCandidateRef === undefined ? {} : { candidateRef: resumeCandidateRef }),
-      ...(feedback === undefined ? {} : { details: { previousCandidateRef, feedback } })
+      ...(feedbackRef === undefined ? {} : { feedbackRef }),
+      ...(previousCandidateRef === undefined ? {} : { details: { previousCandidateRef } })
     };
     const saveCheckpoint = async (state: NodeExecutionState): Promise<void> => {
       lastCheckpoint = state;
@@ -217,8 +233,10 @@ export class NodeRuntime {
             status: "running",
             round,
             phase: "actor",
+            inputRef,
             ...(previousCandidateRef === undefined ? {} : { candidateRef: previousCandidateRef }),
-            ...(feedback === undefined ? {} : { details: { previousCandidateRef, feedback } })
+            ...(feedbackRef === undefined ? {} : { feedbackRef }),
+            ...(previousCandidateRef === undefined ? {} : { details: { previousCandidateRef } })
           });
           const existingCandidate = await nodeStore.readCandidate(checkedScope, round);
           if (existingCandidate) {
@@ -229,7 +247,7 @@ export class NodeRuntime {
               input,
               round,
               ...(previousCandidateRef === undefined ? {} : { previousCandidateRef }),
-              ...(feedback === undefined ? {} : { feedback })
+              ...(feedbackRef === undefined ? {} : { feedbackRef })
             };
             const actor = persistentActor ?? await this.createAgent(
               node.actor,
@@ -248,14 +266,15 @@ export class NodeRuntime {
             candidateRef = candidateObject.key;
           }
         }
-        criticToolInput.candidate = candidateRef;
+        criticToolInput.candidate_ref = candidateRef;
         const criticInput: NodeCriticInput<Input, Candidate> = { input, round, candidateRef };
         await saveCheckpoint({
           status: "running",
           round,
           phase: "critic",
+          inputRef,
           candidateRef,
-          ...(feedback === undefined ? {} : { details: { previousCandidateRef, feedback } })
+          ...(feedbackRef === undefined ? {} : { feedbackRef })
         });
         const critic = persistentCritic ?? await this.createAgent(
           node.critic,
@@ -271,6 +290,12 @@ export class NodeRuntime {
         } finally {
           if (node.critic.sessionPolicy === "spawn") disposeAgent(critic);
         }
+        if (verdict.decision !== "done" && verdict.decision !== "revise") {
+          throw new NodeRuntimeError("invalid_agent_output", "Critic returned an unsupported decision");
+        }
+        if (verdict.decision === "revise" && verdict.feedback === undefined) {
+          throw new NodeRuntimeError("invalid_agent_output", "Critic chose revise without feedback");
+        }
         const currentRound: NodeRound<Candidate, Feedback> = { round, candidate, verdict };
         rounds.push(currentRound);
 
@@ -281,10 +306,12 @@ export class NodeRuntime {
             round,
             candidateRef,
             outputRef: outputObject.key,
-            decision: "done"
+            decision: "done",
+            inputRef
           });
           return {
             status: "completed",
+            input,
             output: candidate,
             outputRef: outputObject.key,
             rounds,
@@ -293,22 +320,27 @@ export class NodeRuntime {
           };
         }
         previousCandidateRef = candidateRef;
-        actorToolInput.previous_candidate = candidateRef;
-        feedback = verdict.feedback as Feedback;
+        actorToolInput.previous_candidate_ref = candidateRef;
+        const feedbackObject = await nodeStore.writeFeedback(checkedScope, round, verdict.feedback as Feedback);
+        feedbackRef = feedbackObject.key;
+        actorToolInput.feedback_ref = feedbackRef;
         await saveCheckpoint({
           status: "running",
           round: round + 1,
           phase: "actor",
+          inputRef,
           candidateRef,
+          feedbackRef,
           decision: "revise",
-          details: { previousCandidateRef: candidateRef, feedback: verdict.feedback }
+          details: { previousCandidateRef: candidateRef }
         });
       }
       throw new NodeRuntimeError("max_rounds", `Node ${node.name} exceeded ${this.maxRounds} rounds`);
     } catch (error) {
       await this.executionStore.save(executionRef, {
         ...lastCheckpoint,
-        status: "failed",
+        status: error instanceof NodeRuntimeError && error.code === "max_rounds" ? "max_rounds" : "failed",
+        lastError: error instanceof Error ? error.message : String(error),
         details: {
           ...checkpointDetails(lastCheckpoint.details),
           error: error instanceof Error ? error.message : String(error)
@@ -505,14 +537,12 @@ function disposeAgent(agent: LiveAgent): void {
 
 function checkpointDetails(value: unknown): {
   previousCandidateRef?: string;
-  feedback?: unknown;
   error?: string;
 } {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const details = value as Record<string, unknown>;
   return {
     ...(typeof details.previousCandidateRef === "string" ? { previousCandidateRef: details.previousCandidateRef } : {}),
-    ...(Object.prototype.hasOwnProperty.call(details, "feedback") ? { feedback: details.feedback } : {}),
     ...(typeof details.error === "string" ? { error: details.error } : {})
   };
 }

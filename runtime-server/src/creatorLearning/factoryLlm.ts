@@ -1,18 +1,13 @@
-import { Agent } from "@earendil-works/pi-agent-core";
-import type { ImageContent, Model } from "@earendil-works/pi-ai";
+import type { ImageContent } from "@earendil-works/pi-ai";
 import {
-  KIMI_DEFAULT_BASE_URL,
-  createKimiStreamFn,
-  createPiModel,
-  createPiStreamFn,
-  normalizeKimiBaseUrl,
-  type KimiAdapterOptions
-} from "../piModel.js";
+  createFactoryPiAgent,
+  requireFactoryToolChoice,
+  type FactoryPiAdapterOptions
+} from "./factoryPi.js";
 import { resolveFactoryLlmProfile, type FactoryLlmProfileName, type LlmProfile } from "../llmProfiles.js";
 import { createFactorySubmissionProtocol } from "./factorySubmission.js";
 import type { FactoryPromptFailureTelemetry, FactoryPromptRunner } from "./types.js";
 
-export const FACTORY_LLM_MODEL = "kimi-k2.6" as const;
 const FACTORY_LLM_PROFILE = resolveFactoryLlmProfile({ HATCH_FACTORY_LLM_PROFILE: "kimi-k2.6" });
 /** A single Factory turn must not hold a worker lease indefinitely. */
 export const FACTORY_LLM_WALL_CLOCK_TIMEOUT_MS = 15 * 60_000;
@@ -26,6 +21,13 @@ export const FACTORY_PROVIDER_TRANSIENT_MESSAGE =
   "Factory LLM provider request failed temporarily; retry this stage";
 export const FACTORY_PROVIDER_CONFIGURATION_MESSAGE =
   "Factory LLM provider rejected the request; verify provider credentials and configuration, then retry this stage";
+/**
+ * A provider may end a normal assistant turn without using the host-owned
+ * submission tools even though tools are available. Give the protocol one
+ * bounded repair turn; never let this become an unbounded model/prompt loop.
+ */
+const MAX_SUBMISSION_REPAIR_TURNS = 1;
+const SUBMISSION_REPAIR_PROMPT = `Protocol repair required: the previous assistant turn ended without an accepted finalize tool call. Do not return the artifact as prose. Continue from the host-retained draft, use the available local submission tool(s), and call the contract's required finalize tool as the last tool call. If no draft was retained, submit the complete result first, then finalize. Stop immediately after the host accepts FINALIZED.`;
 
 export type FactoryProviderFailure = {
   code: "provider_quota" | "provider_error";
@@ -33,135 +35,13 @@ export type FactoryProviderFailure = {
   message: string;
 };
 
-type FactoryLlmAdapterOptions = Pick<
-  KimiAdapterOptions,
-  | "apiKey"
-  | "baseUrl"
-  | "baseURL"
-  | "env"
-  | "fetch"
-  | "headers"
-  | "timeoutMs"
-  | "maxRetries"
-  | "maxRetryDelayMs"
-> & {
+type FactoryLlmAdapterOptions = FactoryPiAdapterOptions & {
   /** Hard deadline for one prompt, in addition to the HTTP idle timeout. */
   wallClockTimeoutMs?: number;
 };
 
-export type FactoryLlmModel = Model<"openai-completions">;
-
-type ResolvedFactoryProfile = {
-  profile: LlmProfile & { name: FactoryLlmProfileName };
-  env: NodeJS.ProcessEnv;
-};
-
-function resolveFactoryProfile(env: NodeJS.ProcessEnv | undefined): ResolvedFactoryProfile {
-  const source = env ?? process.env;
-  const profile = resolveFactoryLlmProfile(source);
-  // Reuse the already-implemented provider adapter for non-Kimi profiles by
-  // presenting the selected profile through the Runtime profile seam. This is
-  // an explicit deployment choice, not a provider fallback.
-  return {
-    profile: profile as LlmProfile & { name: FactoryLlmProfileName },
-    env: { ...source, HATCH_LLM_PROFILE: profile.name }
-  };
-}
-
-function factoryBaseUrl(options: FactoryLlmAdapterOptions): string {
-  const env = options.env ?? process.env;
-  return normalizeKimiBaseUrl(
-    options.baseUrl
-      ?? options.baseURL
-      ?? env.OPENAI_BASE_URL
-      ?? KIMI_DEFAULT_BASE_URL
-  );
-}
-
-/**
- * Provider-neutral Factory model seam. Provider selection stays inside this
- * adapter; Factory workflow code uses only the prompt-runner contract.
- */
-export function createFactoryLlmModel(
-  options: FactoryLlmAdapterOptions = {}
-): FactoryLlmModel {
-  const selected = resolveFactoryProfile(options.env);
-  if (selected.profile.name !== "kimi-k2.6") {
-    const model = createPiModel({ env: selected.env });
-    // DeepSeek's current v4-flash endpoint accepts the same strict function
-    // schema contract required by the host-owned Factory submission FSM.
-    return {
-      ...model,
-      compat: {
-        ...model.compat,
-        supportsStrictMode: true
-      }
-    };
-  }
-  const baseUrl = factoryBaseUrl({ ...options, env: selected.env });
-  return {
-    id: FACTORY_LLM_MODEL,
-    name: "Kimi K2.6",
-    api: "openai-completions",
-    provider: new URL(baseUrl).hostname === "api.moonshot.ai" ? "moonshotai" : "moonshotai-cn",
-    baseUrl,
-    reasoning: FACTORY_LLM_PROFILE.reasoning,
-    thinkingLevelMap: {
-      off: null,
-      minimal: null,
-      low: "low",
-      medium: null,
-      high: "high",
-      xhigh: null,
-      max: "max"
-    },
-    input: ["text", "image"],
-    cost: {
-      input: 3,
-      output: 15,
-      cacheRead: 0.3,
-      cacheWrite: 0
-    },
-    contextWindow: FACTORY_LLM_PROFILE.contextWindow,
-    maxTokens: FACTORY_LLM_PROFILE.maxTokens,
-    compat: {
-      supportsStore: false,
-      supportsDeveloperRole: false,
-      // Kimi K2.6 uses the DeepSeek-compatible `thinking` object. The
-      // top-level `reasoning_effort` contract belongs to Kimi K3 and can be
-      // rejected by K2.6 even though both models share the OpenAI endpoint.
-      supportsReasoningEffort: false,
-      maxTokensField: "max_completion_tokens",
-      supportsStrictMode: true,
-      thinkingFormat: "deepseek",
-      requiresReasoningContentOnAssistantMessages: true
-    }
-  };
-}
-
-/** Kimi K2.6 fixes these sampling values server-side, so the request omits them. */
-function normalizeFactoryLlmPayload(payload: unknown, profileName: FactoryLlmProfileName): unknown {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
-  if (profileName !== "kimi-k2.6") return payload;
-  const normalized = { ...(payload as Record<string, unknown>) };
-  // Keep the provider-native K2.6 thinking contract explicit. This also
-  // protects the boundary if a future pi-ai version changes its inferred
-  // compatibility defaults for the Moonshot endpoint.
-  normalized.thinking = { type: "enabled" };
-  // Kimi K2.6 rejects `required` (and named tool choices) when thinking is
-  // enabled. Keep the provider-compatible `auto` choice and enforce the
-  // handoff contract in the host-owned submission FSM below: prose-only or
-  // incomplete turns are never accepted as Factory output.
-  normalized.tool_choice = "auto";
-  delete normalized.reasoning_effort;
-  delete normalized.temperature;
-  delete normalized.top_p;
-  delete normalized.n;
-  delete normalized.presence_penalty;
-  delete normalized.frequency_penalty;
-  delete normalized.max_tokens;
-  return normalized;
-}
+export { FACTORY_LLM_MODEL, createFactoryLlmModel } from "./factoryPi.js";
+export type { FactoryLlmModel } from "./factoryPi.js";
 
 function providerErrorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -243,25 +123,22 @@ export function createFactoryLlmPromptRunner(
   adapterOptions: FactoryLlmAdapterOptions = {}
 ): FactoryPromptRunner {
   return async (options): Promise<string> => {
-    const selected = resolveFactoryProfile(adapterOptions.env);
+    const selected = resolveFactoryLlmProfile(adapterOptions.env ?? process.env) as LlmProfile & { name: FactoryLlmProfileName };
     const submission = createFactorySubmissionProtocol(options.purpose, options.outputContract);
-    const streamFn = selected.profile.name === "kimi-k2.6"
-      ? createKimiStreamFn({ ...adapterOptions, env: selected.env, thinkingLevel: selected.profile.thinkingLevel })
-      : createPiStreamFn({ ...adapterOptions, env: selected.env, thinkingLevel: selected.profile.thinkingLevel });
-    const agent = new Agent({
+    const agent = createFactoryPiAgent({
+      ...adapterOptions,
       initialState: {
         systemPrompt: `${options.systemPrompt}\n\n# Local Factory submission protocol\n${submission.systemInstructions}`,
         messages: [],
-        tools: submission.tools,
-        model: createFactoryLlmModel({ ...adapterOptions, env: selected.env }),
-        thinkingLevel: selected.profile.thinkingLevel
+        tools: submission.tools
       },
-      streamFn,
-      onPayload: async (payload) => normalizeFactoryLlmPayload(payload, selected.profile.name),
-      transformContext: async (messages) => submission.sanitizeContext(messages),
-      toolExecution: "sequential",
-      beforeToolCall: (context) => submission.beforeToolCall(context),
-      afterToolCall: (context) => submission.afterToolCall(context)
+      agentOptions: {
+        onPayload: async (payload) => requireFactoryToolChoice(payload, selected.name),
+        transformContext: async (messages) => submission.sanitizeContext(messages),
+        toolExecution: "sequential",
+        beforeToolCall: (context) => submission.beforeToolCall(context),
+        afterToolCall: (context) => submission.afterToolCall(context)
+      }
     });
     let rejectedStop: { reason: string; message?: string } | undefined;
     let wallClockTimedOut = false;
@@ -320,6 +197,25 @@ export function createFactoryLlmPromptRunner(
           mimeType: image.mediaType
         }));
         await agent.prompt(options.prompt, images);
+        // The first prompt may return a provider-level aborted message after
+        // the hard deadline fires. Never start a protocol-repair turn after
+        // that deadline (or after the caller has lost its lease); doing so
+        // would create a fresh Agent run with a fresh abort signal.
+        if (wallClockTimedOut) {
+          throw new Error(`Factory Kimi K2.6 prompt timed out after ${wallClockTimeoutMs}ms`);
+        }
+        if (options.signal?.aborted) {
+          throw new Error("Factory Kimi K2.6 prompt aborted");
+        }
+        let repairTurns = 0;
+        while (
+          !submission.isFinalized()
+          && submission.canRepair()
+          && repairTurns < MAX_SUBMISSION_REPAIR_TURNS
+        ) {
+          repairTurns += 1;
+          await agent.prompt(SUBMISSION_REPAIR_PROMPT);
+        }
       } catch (error) {
         if (wallClockTimedOut) {
           throw new Error(`Factory Kimi K2.6 prompt timed out after ${wallClockTimeoutMs}ms`);

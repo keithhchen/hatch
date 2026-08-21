@@ -1,5 +1,12 @@
 const ROOT = "/studio";
-const PRODUCT_TABS = new Set(["files", "about-you", "review", "brief", "complete"]);
+const PRODUCT_TABS = new Set(["files", "about-you", "corpus", "brief", "complete"]);
+const RETIRED_PRODUCT_TABS = new Map([
+  ["overview", "files"],
+  ["test", "about-you"],
+  ["examples", "corpus"],
+  ["versions", "complete"],
+  ["data-controls", "files"]
+]);
 
 export function parseCreatorRoute(pathname) {
   const clean = `/${String(pathname ?? "").split(/[?#]/)[0].split("/").filter(Boolean).join("/")}`;
@@ -18,6 +25,7 @@ export function parseCreatorRoute(pathname) {
     const productId = segments[1];
     if (segments.length === 2) return { kind: "product", section: "products", productId, tab: "files" };
     if (PRODUCT_TABS.has(segments[2])) return { kind: "product", section: "products", productId, tab: segments[2] };
+    if (RETIRED_PRODUCT_TABS.has(segments[2])) return { kind: "product", section: "products", productId, tab: RETIRED_PRODUCT_TABS.get(segments[2]) };
     if (segments[2] === "factory") {
       if (segments[3] === "runs" && segments[4]) return { kind: "factory", section: "products", productId, runId: segments[4] };
       if (segments[3] && segments[3] !== "runs") return { kind: "factory", section: "products", productId, runId: segments[3] };

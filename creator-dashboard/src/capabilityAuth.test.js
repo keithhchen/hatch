@@ -9,11 +9,9 @@ import { createDashboardApp } from "../server.mjs";
 const DENIED_CASES = [
   ["product:read", "GET", "/v1/creator/products"],
   ["product:read", "GET", "/v1/creator/factory-drafts/draft-1"],
-  ["product:read", "GET", "/v1/creator/factory-runs/run-1"],
   ["product:read", "GET", "/v1/creator/products/product-1/releases"],
   ["product:edit", "POST", "/v1/creator/factory-drafts"],
   ["product:edit", "PATCH", "/v1/creator/factory-drafts/draft-1"],
-  ["product:edit", "POST", "/v1/creator/factory-runs/run-1/retry"],
   ["release:approve", "POST", "/v1/creator/products/product-1/candidates/run-1/approve"],
   ["release:publish", "POST", "/v1/creator/products/product-1/publish"],
   ["release:publish", "POST", "/v1/creator/products/product-1/release"],

@@ -1,7 +1,35 @@
 import { createHash, randomUUID } from "node:crypto";
+import { z } from "zod";
 import { projectSource, detectMediaType, SOURCE_DOCUMENT_MAX_BYTES } from "./sourceLibrary.js";
 import type { FactorySource, SourceProjection } from "./types.js";
 import { isObjectStoreNotFound, type ArtifactObjectStore } from "./objectStore.js";
+import { normalizeNodeObjectPath } from "../node.js";
+
+/**
+ * A Product File path is an OSS object key, not a local filesystem path. The
+ * three scope segments before `files` are prefix/creator/product; the last
+ * three are the immutable file projection address.
+ */
+export function isCanonicalProductFileProjectionPath(value: string): boolean {
+  try {
+    const parts = normalizeNodeObjectPath(value).split("/");
+    const filesIndex = parts.length - 3;
+    return filesIndex >= 3
+      && parts[filesIndex] === "files"
+      && /^[A-Za-z0-9._-]+$/.test(parts[filesIndex - 2] ?? "")
+      && /^[A-Za-z0-9._-]+$/.test(parts[filesIndex - 1] ?? "")
+      && /^file_[A-Za-z0-9_-]{1,160}$/.test(parts[filesIndex + 1] ?? "")
+      && (parts[filesIndex + 2] ?? "") === "projection.md";
+  } catch {
+    return false;
+  }
+}
+
+/** Node input contract for Product-owned source attachments. */
+export const productFileProjectionPathSchema = z.string()
+  .min(1)
+  .max(512)
+  .refine(isCanonicalProductFileProjectionPath, "must be a canonical Product File projection path");
 
 /**
  * Product-owned source material. Files are intentionally independent from a
@@ -39,6 +67,7 @@ export type ProductSnapshotRecord = {
 export type ProductFileView = ProductFileRecord & {
   projectionContent?: string;
   projectionBase64?: string;
+  deletedAt?: string;
 };
 
 export type ProductSnapshotView = ProductSnapshotRecord & {
@@ -54,6 +83,7 @@ export class ProductFilesError extends Error {
       | "invalid_product_snapshot"
       | "product_mismatch"
       | "idempotency_conflict"
+      | "unsupported_media_type"
       | "projection_failed",
     message: string
   ) {
@@ -90,6 +120,18 @@ export class ProductFileStore {
         throw invalidFile(`Uploaded file exceeds ${SOURCE_DOCUMENT_MAX_BYTES} bytes`);
       }
       const mediaType = detectMediaType(displayName, input.mediaType, input.bytes);
+      if (mediaType.startsWith("image/") || IMAGE_FILENAME_RE.test(displayName)) {
+        throw new ProductFilesError(
+          "unsupported_media_type",
+          "Images are not supported in Files yet. Upload a PDF, Office document, or text file."
+        );
+      }
+      if (LEGACY_OFFICE_FILENAME_RE.test(displayName) || LEGACY_OFFICE_MEDIA_TYPES.has(mediaType)) {
+        throw new ProductFilesError(
+          "unsupported_media_type",
+          "Legacy .doc and .ppt files are not supported yet. Save them as .docx or .pptx before uploading."
+        );
+      }
       let projection: SourceProjection;
       try {
         projection = await projectSource(displayName, mediaType, input.bytes);
@@ -99,7 +141,16 @@ export class ProductFileStore {
         }
         throw new ProductFilesError("projection_failed", `Could not prepare ${displayName}: ${error instanceof Error ? error.message : String(error)}`);
       }
+      if (projection.kind !== "markdown" || projection.mediaType !== "text/markdown") {
+        throw new ProductFilesError(
+          "projection_failed",
+          "Every supported Product File must be converted to Markdown before it is stored"
+        );
+      }
       const projectionText = (projection as SourceProjection & { __content?: string }).__content;
+      if (typeof projectionText !== "string") {
+        throw new ProductFilesError("projection_failed", `Could not prepare ${displayName} as Markdown`);
+      }
       const originalSha256 = digest(input.bytes);
       const metadata = sanitizeMetadata(input.metadata);
       const requestDigest = uploadRequestDigest({ displayName, mediaType, originalSha256, originalBytes: input.bytes.length, metadata });
@@ -125,27 +176,16 @@ export class ProductFileStore {
       const fileId = `file_${fileIdentity.slice(0, 40)}`;
       const artifactId = `artifact_${originalSha256}`;
       const base = this.filePrefix(creatorId, productId, fileId);
-      const projectionExtension = projection.kind === "image"
-        ? projection.mediaType.split("/", 2)[1] ?? "bin"
-        : "md";
       const originalObjectRef = `${base}/original.bin`;
-      const projectionObjectRef = `${base}/projection.${projectionExtension}`;
+      const projectionObjectRef = `${base}/projection.md`;
       const createdAt = new Date().toISOString();
-      const storedProjection: SourceProjection = projection.kind === "image"
-        ? {
-            kind: "image",
-            mediaType: projection.mediaType,
-            contentRef: projectionObjectRef,
-            sha256: projection.sha256,
-            bytes: projection.bytes
-          }
-        : {
-            kind: "markdown",
-            mediaType: "text/markdown",
-            contentRef: projectionObjectRef,
-            sha256: projection.sha256,
-            bytes: projection.bytes
-          };
+      const storedProjection: SourceProjection = {
+        kind: "markdown",
+        mediaType: "text/markdown",
+        contentRef: projectionObjectRef,
+        sha256: projection.sha256,
+        bytes: projection.bytes
+      };
       const record: ProductFileRecord = {
         id: fileId,
         artifactId,
@@ -164,13 +204,10 @@ export class ProductFileStore {
       // Deterministic content-addressed file ids make retries and repeated
       // Idempotency-Key submissions return the same immutable artifact.
       await this.objectStore.put(originalObjectRef, input.bytes, { contentType: mediaType, immutable: true });
-      const projectionBytes = projection.kind === "image"
-        ? input.bytes
-        : Buffer.from(projectionText ?? "", "utf8");
       await this.objectStore.put(
         projectionObjectRef,
-        projectionBytes,
-        { contentType: projection.mediaType, immutable: true }
+        Buffer.from(projectionText, "utf8"),
+        { contentType: "text/markdown; charset=utf-8", immutable: true }
       );
       try {
         await this.objectStore.put(`${base}/file.json`, Buffer.from(`${JSON.stringify(record, null, 2)}\n`, "utf8"), {
@@ -182,7 +219,7 @@ export class ProductFileStore {
         // retry. A different record at the same key is a true idempotency
         // conflict, not an internal server error.
         if (error instanceof Error && error.message.includes("Immutable object key already contains different bytes")) {
-          const existing = await this.getFileUnsafe(creatorId, productId, fileId);
+          const existing = await this.findRecordUnsafe(creatorId, productId, fileId);
           const existingDigest = uploadRequestDigest({
             displayName: existing.displayName,
             mediaType: existing.mediaType,
@@ -191,10 +228,11 @@ export class ProductFileStore {
             metadata: existing.metadata
           });
           if (existingDigest === requestDigest) {
+            await this.restoreFileIfDeleted(existing);
             if (idempotencyReceipt) {
               await this.writeIdempotencyReceipt(idempotencyReceipt, { requestDigest, resourceId: fileId });
             }
-            return existing;
+            return this.withProjectionContent(existing);
           }
           throw new ProductFilesError("idempotency_conflict", "Product File identity already contains different metadata");
         }
@@ -215,11 +253,41 @@ export class ProductFileStore {
     return this.listFilesUnsafe(creatorId, productId);
   }
 
+  /**
+   * The only supported way for a Node launcher to turn Product File ids into
+   * Node input paths. Callers never reconstruct the OSS key from an id.
+   */
+  async listProjectionPaths(creatorId: string, productId: string, fileIds?: string[]): Promise<string[]> {
+    await this.writeChain;
+    const files = await this.listFilesUnsafe(creatorId, productId);
+    const selectedIds = fileIds?.length
+      ? [...new Set(fileIds.map((id) => safeId(id)))]
+      : files.map((file) => file.id);
+    const byId = new Map(files.map((file) => [file.id, file]));
+    const selected = selectedIds.map((id) => byId.get(id));
+    if (selected.some((file) => !file)) {
+      throw new ProductFilesError("product_file_not_found", "A Node input can contain only Files from this Product");
+    }
+    const selectedFiles = selected as ProductFileView[];
+    if (selectedFiles.some((file) => file.projection.kind !== "markdown")) {
+      throw new ProductFilesError(
+        "unsupported_media_type",
+        "Images are not supported as Node input yet. Remove them or upload text-based source material."
+      );
+    }
+    return selectedFiles.map((file) => file.projection.contentRef);
+  }
+
   private async listFilesUnsafe(creatorId: string, productId: string): Promise<ProductFileView[]> {
     const names = (await this.objectStore.list(this.productPrefix(creatorId, productId)))
       .filter((name) => name.endsWith("/file.json"));
     const records = await Promise.all(names.map((name) => this.readRecord(name)));
-    return Promise.all(records
+    const activeRecords = (await Promise.all(records.map(async (record) => ({
+      record,
+      lifecycle: await this.readLifecycleStatus(record)
+    })))).filter(({ lifecycle }) => !lifecycle?.deletedAt);
+    return Promise.all(activeRecords
+      .map(({ record }) => record)
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || left.id.localeCompare(right.id))
       .map((record) => this.withProjectionContent(record)));
   }
@@ -229,7 +297,49 @@ export class ProductFileStore {
     return this.getFileUnsafe(creatorId, productId, fileId);
   }
 
+  /**
+   * Hide a Product File from future Node inputs without deleting any OSS
+   * object. The immutable event is the audit record; status.json is the only
+   * mutable object and makes the file list cheap to read.
+   */
+  async deleteFile(creatorId: string, productId: string, fileId: string): Promise<ProductFileView> {
+    return this.write(async () => {
+      const record = await this.findRecordUnsafe(creatorId, productId, fileId);
+      const existing = await this.readLifecycleStatus(record);
+      if (existing?.deletedAt) {
+        throw new ProductFilesError("product_file_not_found", `Product File ${fileId} was not found`);
+      }
+      const deletedAt = new Date().toISOString();
+      const base = this.filePrefix(creatorId, productId, record.id);
+      await this.objectStore.put(`${base}/lifecycle/deleted-${Date.now()}-${randomUUID()}.json`, Buffer.from(`${JSON.stringify({
+        event: "deleted",
+        file_id: record.id,
+        deleted_at: deletedAt
+      })}\n`, "utf8"), {
+        contentType: "application/json; charset=utf-8",
+        immutable: true
+      });
+      await this.objectStore.put(this.lifecycleStatusRef(record), Buffer.from(`${JSON.stringify({
+        status: "deleted",
+        deleted_at: deletedAt,
+        updated_at: deletedAt
+      })}\n`, "utf8"), {
+        contentType: "application/json; charset=utf-8",
+        immutable: false
+      });
+      return this.withProjectionContent(record, deletedAt);
+    });
+  }
+
   private async getFileUnsafe(creatorId: string, productId: string, fileId: string): Promise<ProductFileView> {
+    const record = await this.findRecordUnsafe(creatorId, productId, fileId);
+    if ((await this.readLifecycleStatus(record))?.deletedAt) {
+      throw new ProductFilesError("product_file_not_found", `Product File ${fileId} was not found`);
+    }
+    return this.withProjectionContent(record);
+  }
+
+  private async findRecordUnsafe(creatorId: string, productId: string, fileId: string): Promise<ProductFileRecord> {
     const safeFile = safeId(fileId);
     const names = (await this.objectStore.list(this.productPrefix(creatorId, productId)))
       .filter((name) => name.endsWith("/file.json") && name.includes(`/${safeFile}/`));
@@ -238,7 +348,7 @@ export class ProductFileStore {
     if (record.creatorId !== creatorId || record.productId !== productId) {
       throw new ProductFilesError("product_mismatch", "Product File belongs to another Product");
     }
-    return this.withProjectionContent(record);
+    return record;
   }
 
   async createSnapshot(creatorId: string, productId: string, fileIds?: string[], idempotencyKey?: string): Promise<ProductSnapshotView> {
@@ -390,17 +500,58 @@ export class ProductFileStore {
       if (error instanceof SyntaxError) throw invalidFile("Product File metadata is invalid");
       throw error;
     }
-    if (!record || typeof record.id !== "string" || !record.projection || typeof record.productId !== "string") {
+    if (
+      !record
+      || typeof record.id !== "string"
+      || typeof record.creatorId !== "string"
+      || typeof record.productId !== "string"
+      || !record.projection
+      || typeof record.projection.contentRef !== "string"
+    ) {
       throw invalidFile("Product File metadata is invalid");
+    }
+    const expectedProjectionRef = this.canonicalProjectionRef(record);
+    if (record.projection.contentRef !== expectedProjectionRef) {
+      throw invalidFile(`Product File ${record.id} has a non-canonical projection path`);
     }
     return record;
   }
 
-  private async withProjectionContent(record: ProductFileRecord): Promise<ProductFileView> {
+  private async withProjectionContent(record: ProductFileRecord, deletedAt?: string): Promise<ProductFileView> {
     const bytes = await this.objectStore.get(record.projection.contentRef);
     return record.projection.kind === "image"
-      ? { ...record, projectionBase64: bytes.toString("base64") }
-      : { ...record, projectionContent: bytes.toString("utf8") };
+      ? { ...record, projectionBase64: bytes.toString("base64"), ...(deletedAt ? { deletedAt } : {}) }
+      : { ...record, projectionContent: bytes.toString("utf8"), ...(deletedAt ? { deletedAt } : {}) };
+  }
+
+  private lifecycleStatusRef(record: Pick<ProductFileRecord, "creatorId" | "productId" | "id">): string {
+    return `${this.filePrefix(record.creatorId, record.productId, record.id)}/lifecycle/status.json`;
+  }
+
+  private async readLifecycleStatus(record: Pick<ProductFileRecord, "creatorId" | "productId" | "id">): Promise<{ deletedAt?: string } | undefined> {
+    try {
+      const value = JSON.parse((await this.objectStore.get(this.lifecycleStatusRef(record))).toString("utf8")) as Record<string, unknown>;
+      if (value.status === "deleted" && typeof value.deleted_at === "string") return { deletedAt: value.deleted_at };
+      return undefined;
+    } catch (error) {
+      if (isMissingObject(error)) return undefined;
+      if (error instanceof SyntaxError) throw invalidFile("Product File lifecycle metadata is invalid");
+      throw error;
+    }
+  }
+
+  private async restoreFileIfDeleted(record: ProductFileRecord): Promise<void> {
+    const existing = await this.readLifecycleStatus(record);
+    if (!existing?.deletedAt) return;
+    const restoredAt = new Date().toISOString();
+    await this.objectStore.put(this.lifecycleStatusRef(record), Buffer.from(`${JSON.stringify({
+      status: "active",
+      restored_at: restoredAt,
+      updated_at: restoredAt
+    })}\n`, "utf8"), {
+      contentType: "application/json; charset=utf-8",
+      immutable: false
+    });
   }
 
   private idempotencyRef(creatorId: string, productId: string, resource: "file" | "snapshot", key: string): string {
@@ -436,11 +587,20 @@ export class ProductFileStore {
     return `${this.productPrefix(creatorId, productId)}/files/${safePathPart(fileId)}`;
   }
 
+  private canonicalProjectionRef(record: Pick<ProductFileRecord, "creatorId" | "productId" | "id" | "projection">): string {
+    return `${this.filePrefix(record.creatorId, record.productId, record.id)}/projection.${projectionFileExtension(record.projection)}`;
+  }
+
   private write<T>(operation: () => Promise<T>): Promise<T> {
     const run = this.writeChain.then(operation);
     this.writeChain = run.then(() => undefined, () => undefined);
     return run;
   }
+}
+
+function projectionFileExtension(projection: SourceProjection): string {
+  if (projection.kind === "markdown" && projection.mediaType === "text/markdown") return "md";
+  throw invalidFile("Product File projection metadata is invalid");
 }
 
 function digest(value: Buffer): string {
@@ -492,6 +652,10 @@ function safeDisplayName(value: string): string {
   if (!normalized || normalized.length > 240) throw invalidFile("displayName must be 1-240 characters");
   return normalized;
 }
+
+const IMAGE_FILENAME_RE = /\.(?:avif|bmp|gif|ico|jpe?g|png|svg|tiff?)$/i;
+const LEGACY_OFFICE_FILENAME_RE = /\.(?:doc|ppt)$/i;
+const LEGACY_OFFICE_MEDIA_TYPES = new Set(["application/msword", "application/vnd.ms-powerpoint"]);
 
 function safeId(value: string): string {
   if (!/^[A-Za-z0-9_-]{1,160}$/.test(value)) throw invalidFile("Invalid Product File or Snapshot id");

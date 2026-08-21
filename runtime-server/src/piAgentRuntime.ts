@@ -28,7 +28,6 @@ import {
   modelVisibleToolResult,
   produceAuditedFinal,
   requestedOutputPath,
-  runtimeSkillActivationFromToolResult,
   toolEventBase,
   workspaceDiffEvent,
   type AgentRuntime,
@@ -117,6 +116,10 @@ export class PiAgentRuntime implements AgentRuntime {
     const visibleSkills = ctx.sessionSkills.visibleRecords;
     let activeSkills = [...(ctx.activatedSkills ?? [])];
     let resourceRoots = activeSkillResourceRoots(visibleSkills, activeSkills);
+    const setActiveSkills = (next: ActivatedSkill[]): void => {
+      activeSkills = next;
+      resourceRoots = activeSkillResourceRoots(visibleSkills, activeSkills);
+    };
     const toolEvents = new Map<string, ToolEventState>();
     let terminalError: Error | undefined;
     let finalAssistant: AssistantMessage | undefined;
@@ -135,7 +138,6 @@ export class PiAgentRuntime implements AgentRuntime {
     const storedMessages = ctx.messages.slice(0, -1).map(toPiMessage);
     const toolDefinitions = this.options.toolDefinitions ?? chatToolsForRun(
       ctx.clientTools,
-      ctx.allowSkillRun !== false,
       ctx.allowedExternalTools,
       ctx.knowledgeAvailable,
       ctx.externalToolDefinitions
@@ -145,6 +147,7 @@ export class PiAgentRuntime implements AgentRuntime {
       ctx,
       definition,
       () => activeSkills,
+      setActiveSkills,
       () => resourceRoots,
       workspacePathPolicy
     ));
@@ -234,10 +237,7 @@ export class PiAgentRuntime implements AgentRuntime {
           toolEvents,
           workspacePathPolicy,
           getActiveSkills: () => activeSkills,
-          setActiveSkills: (next) => {
-            activeSkills = next;
-            resourceRoots = activeSkillResourceRoots(visibleSkills, activeSkills);
-          },
+          setActiveSkills,
           getResourceRoots: () => resourceRoots,
           setHasExecutedTool: () => { hasExecutedTool = true; },
           deliveryWorkflow,
@@ -408,6 +408,7 @@ export class PiAgentRuntime implements AgentRuntime {
     ctx: RunContext,
     definition: PiToolDefinition,
     getActiveSkills: () => ActivatedSkill[],
+    setActiveSkills: (skills: ActivatedSkill[]) => void,
     getResourceRoots: () => string[],
     workspacePathPolicy: WorkspacePathPolicy
   ): AgentTool<any> {
@@ -431,7 +432,8 @@ export class PiAgentRuntime implements AgentRuntime {
             getActiveSkills(),
             ctx.sessionSkills.rendered.aliases,
             workspacePathPolicy,
-            signal
+            signal,
+            (skill) => setActiveSkills(mergeRuntimeActiveSkill(getActiveSkills(), skill))
           );
         } catch (error) {
           result = {
@@ -617,8 +619,6 @@ export class PiAgentRuntime implements AgentRuntime {
         }
         const diffEvent = workspaceDiffEvent(input.run_id, event.toolCallId, eventBase.name, details);
         if (diffEvent) queue.push(diffEvent);
-        const activation = runtimeSkillActivationFromToolResult(event.toolName, visibleResult);
-        if (activation) setActiveSkills(mergeRuntimeActiveSkill(getActiveSkills(), activation));
       }
       queue.push({
         type: "assistant.delta",

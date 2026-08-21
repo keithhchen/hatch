@@ -491,10 +491,14 @@ test("a repeated batch without its required finalizer is classified without weak
 
 test("runner refuses normal prose completion without an accepted finalize", async () => {
   let telemetry: Parameters<NonNullable<FactoryPromptCall["reportFailureTelemetry"]>>[0] | undefined;
+  const responses = [
+    textTurn("I wrote the artifact in prose but did not submit it."),
+    textTurn("I still wrote the artifact in prose and did not submit it.")
+  ];
   const runner = createFactoryLlmPromptRunner({
     apiKey: "submission-test-key",
     baseUrl: "https://api.moonshot.ai/v1",
-    fetch: async () => textTurn("I wrote the artifact in prose but did not submit it.")
+    fetch: async () => responses.shift() ?? (() => { throw new Error("unexpected extra provider turn"); })()
   });
   await assert.rejects(
     () => runner({
@@ -507,6 +511,30 @@ test("runner refuses normal prose completion without an accepted finalize", asyn
     /ended without an accepted finalize tool call/
   );
   assert.equal(telemetry?.code, "stopped_without_finalize");
+  assert.equal(telemetry?.turnsObserved, 2, "the host permits exactly one bounded protocol repair turn");
+});
+
+test("runner repairs a prose-only evaluation turn before failing the node", async () => {
+  const { output, requests } = await run({
+    purpose: "eval.judge_result",
+    systemPrompt: "eval system",
+    prompt: "input",
+    outputContract: { kind: "evaluation_verdict" }
+  }, [
+    textTurn("I accidentally returned the verdict as prose."),
+    toolTurn([
+      {
+        id: "repaired-verdict",
+        name: "submit_evaluation",
+        arguments: { pass: true, diagnosis: "complete", few_shot: "None", corpus_reflection: "None" }
+      },
+      { id: "repaired-finalize", name: "finalize_evaluation", arguments: {} }
+    ])
+  ]);
+
+  assert.equal(parseEvaluation(output).pass, true);
+  assert.equal(requests.length, 2);
+  assert.match(JSON.stringify(requests[1]), /Protocol repair required/);
 });
 
 test("evaluation and corpus audit tools canonical-render the existing evaluation contract", async () => {

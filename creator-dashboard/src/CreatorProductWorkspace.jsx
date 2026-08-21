@@ -1,502 +1,295 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, FormField, InlineAlert, PageHeader, Select, Skeleton, StatusTag, Textarea } from "@hatch/ui";
-import { UserRound } from "lucide-react";
+import { Button, FormField, InlineAlert, PageHeader, Skeleton, StatusTag, Textarea } from "@hatch/ui";
 import {
+  getLatestNodeExecution,
   getProduct,
-  getFactoryRun,
-  getFactoryReview,
   listProductFiles,
-  listProductVersions,
+  deleteProductFile,
+  publishCorpusToRegistry,
+  saveAboutYouNodeAnswers,
   saveProductBriefSpec,
-  saveFactoryAnswerDraft,
-  startFactoryRunFromSources,
-  submitFactoryAnswers,
-  submitFactoryReview,
-  retryFactoryRun,
-  updateProductPromise,
+  startAboutYouNode,
+  startCorpusNode,
   uploadProductFile
 } from "./creatorFactory.js";
 import { createCreatorTranslator } from "./creatorI18n.js";
-import { canAcceptReviewCase, completeReviewMode } from "./creatorReviewUi.js";
-import {
-  canGenerateProductVersion,
-  productFileState,
-  shouldPollProductFiles
-} from "./creatorProductFilesUi.js";
-import {
-  runAttentionAction,
-  runAttentionError,
-  runNeedsAttention
-} from "./creatorRunAttentionUi.js";
 import {
   CREATOR_WORKFLOW_STEPS,
   deriveCreatorWorkflow,
+  executionError,
+  isExecutionActive,
+  isExecutionError,
   isValidBriefSpec
 } from "./creatorWorkflowUi.js";
 import "./creatorProductWorkspace.css";
 
 const TAB_KEYS = CREATOR_WORKFLOW_STEPS;
 
-function shouldLoadReviewProjection(run) {
-  if (!run?.id || ["queued", "running"].includes(run.status)) return false;
-  if (run.stage === "awaiting_creator_answers" || run.workflow_step === "about-you") return false;
-  return Boolean(run.candidate)
-    || run.status === "ready"
-    || run.stage === "review_required"
-    || run.stage === "ready";
-}
-
-function isProductPublishing(product) {
-  return String(product?.status ?? "").trim().toLowerCase() === "publishing";
-}
-
-function isProductPublishFailed(product) {
-  return ["publish_error", "publish_failed", "publishing_failed"].includes(
-    String(product?.status ?? "").trim().toLowerCase()
-  );
-}
-
-async function loadReviewProjection(token, run, request) {
-  if (!shouldLoadReviewProjection(run)) return null;
-  try {
-    return await getFactoryReview(token, run.id, request);
-  } catch (error) {
-    // A terminal-looking run can briefly precede its review projection. Keep
-    // the durable run visible and let the next refresh/poll retry the read;
-    // never retain a review from another run in that gap.
-    if (error?.status === 409 || error?.status === 422) return null;
-    throw error;
-  }
-}
-
-export function CreatorProductWorkspace({ token, request, productId, runId = "", tab = "files", navigate, locale = "en", profile }) {
+export function CreatorProductWorkspace({ token, productId, tab = "files", navigate, locale = "en" }) {
   const t = useMemo(() => createCreatorTranslator(locale), [locale]);
   const [product, setProduct] = useState(null);
-  const [runs, setRuns] = useState([]);
   const [documents, setDocuments] = useState([]);
-  const [run, setRun] = useState(null);
-  const [review, setReview] = useState(null);
+  const [aboutYou, setAboutYou] = useState(null);
+  const [corpus, setCorpus] = useState(null);
   const [briefSpec, setBriefSpec] = useState(null);
-  const [state, setState] = useState({ loading: true, busy: "", error: "", notice: "" });
   const [selectedTab, setSelectedTab] = useState(TAB_KEYS.includes(tab) ? tab : "files");
-  const [selectedRunId, setSelectedRunId] = useState(runId);
-  const [promiseDraft, setPromiseDraft] = useState("");
-  const persistedWorkflowStep = useMemo(() => deriveCreatorWorkflow({ run, review, briefSpec, product }).current, [briefSpec, product, review, run]);
-  // Workflow tabs and generation indicators are derived only from the
-  // persisted Product run/review/Brief projections. `state.busy` remains a
-  // short-lived command guard for buttons, never a source of workflow truth.
-  const workflow = useMemo(() => deriveCreatorWorkflow({ run, review, briefSpec, product }), [briefSpec, product, review, run]);
-  const previousWorkflowStep = useRef(null);
-  const filesNeedPolling = useMemo(() => shouldPollProductFiles(documents), [documents]);
+  const [state, setState] = useState({ loading: true, busy: "", error: "", notice: "" });
+  const retryActionRef = useRef(null);
 
-  function updateDisplayedRun(nextRun, options = {}) {
-    if (!nextRun?.id) return;
-    setRun(nextRun);
-    setSelectedRunId(nextRun.id);
-    setRuns((current) => [nextRun, ...current.filter((item) => item.id !== nextRun.id)]);
-    if (Object.prototype.hasOwnProperty.call(options, "review")) setReview(options.review);
-    else if (options.clearReview) setReview(null);
-  }
+  const workflow = useMemo(() => deriveCreatorWorkflow({ product, documents, aboutYou, corpus, briefSpec }), [aboutYou, briefSpec, corpus, documents, product]);
+  const serverError = executionError(aboutYou) || executionError(corpus);
+  const error = state.error || serverError;
 
   const refresh = useCallback(async () => {
     setState((current) => ({ ...current, loading: true, error: "" }));
     try {
-      const productResponse = await request(`/v1/creator/products/${encodeURIComponent(productId)}`, { token });
-      const nextProduct = productResponse?.product ?? productResponse;
-      const [nextFiles, nextVersions] = await Promise.all([
+      const [productResponse, filesResponse, aboutResponse, corpusResponse] = await Promise.all([
+        getProduct(token, productId),
         listProductFiles(token, productId),
-        listProductVersions(token, productId)
+        getLatestNodeExecution(token, productId, "about-you"),
+        getLatestNodeExecution(token, productId, "corpus")
       ]);
-      const productRuns = nextVersions.versions ?? nextVersions.runs ?? nextVersions;
-      const sortedRuns = [...productRuns].sort((left, right) => String(right.updated_at ?? "").localeCompare(String(left.updated_at ?? "")));
-      const nextRunId = selectedRunId && sortedRuns.some((item) => item.id === selectedRunId)
-        ? selectedRunId
-        : sortedRuns[0]?.id ?? "";
-      const nextRun = nextRunId ? await getFactoryRun(token, nextRunId) : null;
-      const nextReview = await loadReviewProjection(token, nextRun, request);
+      const nextProduct = productResponse?.product ?? productResponse;
       setProduct(nextProduct);
       setBriefSpec(nextProduct?.brief_spec ?? null);
-      setPromiseDraft(nextProduct?.promise ?? nextProduct?.description ?? "");
-      setRuns(sortedRuns);
-      setSelectedRunId(nextRunId);
-      setRun(nextRun);
-      setDocuments(nextFiles.files ?? nextFiles.documents ?? []);
-      setReview(nextReview);
+      setDocuments(filesResponse?.files ?? filesResponse?.documents ?? []);
+      setAboutYou(aboutResponse?.status === "not_started" ? null : aboutResponse);
+      setCorpus(corpusResponse?.status === "not_started" ? null : corpusResponse);
       setState((current) => ({ ...current, loading: false }));
-    } catch (error) {
-      setState((current) => ({ ...current, loading: false, error: error.message }));
+    } catch (nextError) {
+      setState((current) => ({ ...current, loading: false, error: messageOf(nextError, t("workspaceLoadError")) }));
     }
-  }, [productId, request, selectedRunId, token]);
+  }, [productId, t, token]);
 
   useEffect(() => { void refresh(); }, [refresh]);
+
+  useEffect(() => {
+    if (!isExecutionActive(aboutYou) && !isExecutionActive(corpus)) return undefined;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const node = isExecutionActive(aboutYou) ? "about-you" : "corpus";
+        const next = await getLatestNodeExecution(token, productId, node);
+        if (cancelled) return;
+        if (node === "about-you") setAboutYou(next?.status === "not_started" ? null : next);
+        else setCorpus(next?.status === "not_started" ? null : next);
+      } catch (nextError) {
+        if (!cancelled) setState((current) => ({ ...current, error: messageOf(nextError, t("workspaceLoadError")) }));
+      }
+    };
+    const timer = setInterval(() => { void poll(); }, 2000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [aboutYou, corpus, productId, t, token]);
+
   useEffect(() => {
     const requested = TAB_KEYS.includes(tab) ? tab : "files";
-    if (state.loading || !product) {
-      setSelectedTab(requested);
-      return;
-    }
-    if (workflow.steps[requested]?.enabled) {
-      setSelectedTab(requested);
-      return;
-    }
-    setSelectedTab(workflow.current);
-    navigate(`/studio/products/${encodeURIComponent(productId)}/${workflow.current}`);
-  }, [navigate, product, productId, state.loading, tab, workflow]);
-  useEffect(() => {
     if (state.loading || !product) return;
-    const previous = previousWorkflowStep.current;
-    previousWorkflowStep.current = persistedWorkflowStep;
-    if (!previous || previous === persistedWorkflowStep || selectedTab !== previous) return;
-    setSelectedTab(persistedWorkflowStep);
-    navigate(`/studio/products/${encodeURIComponent(productId)}/${persistedWorkflowStep}`);
-  }, [navigate, persistedWorkflowStep, product, productId, selectedTab, state.loading]);
-  useEffect(() => {
-    if (runId) setSelectedRunId(runId);
-  }, [runId]);
-
-  useEffect(() => {
-    if (!filesNeedPolling) return undefined;
-    let cancelled = false;
-    let polling = false;
-    const poll = async () => {
-      if (polling) return;
-      polling = true;
-      try {
-        const response = await listProductFiles(token, productId);
-        if (!cancelled) setDocuments(response.files ?? response.documents ?? []);
-      } catch (error) {
-        if (!cancelled) setState((current) => ({ ...current, error: error.message }));
-      } finally {
-        polling = false;
-      }
-    };
-    void poll();
-    const timer = setInterval(() => { void poll(); }, 2000);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [filesNeedPolling, productId, token]);
-
-  useEffect(() => {
-    if (!isProductPublishing(product)) return undefined;
-    let cancelled = false;
-    let polling = false;
-    const poll = async () => {
-      if (polling) return;
-      polling = true;
-      try {
-        const response = await request(`/v1/creator/products/${encodeURIComponent(productId)}`, { token });
-        const nextProduct = response?.product ?? response;
-        if (cancelled || !nextProduct) return;
-        setProduct(nextProduct);
-        setBriefSpec(nextProduct.brief_spec ?? null);
-        setPromiseDraft(nextProduct.promise ?? nextProduct.description ?? "");
-        if (nextProduct.status === "published") {
-          setState((current) => ({ ...current, error: "" }));
-        }
-      } catch {
-        // A read-only status poll is best effort. Keep the durable publishing
-        // checkpoint and its spinner visible until the next successful read;
-        // command failures remain surfaced by the publish action itself.
-      } finally {
-        polling = false;
-      }
-    };
-    void poll();
-    const timer = setInterval(() => { void poll(); }, 3000);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [product?.status, productId, request, token]);
-
-  useEffect(() => {
-    if (!run || !["queued", "running"].includes(run.status)) return undefined;
-    let cancelled = false;
-    const timer = setInterval(() => {
-      getFactoryRun(token, run.id).then(async (nextRun) => {
-        if (cancelled) return;
-        const nextReview = await loadReviewProjection(token, nextRun, request);
-        setRun(nextRun);
-        setReview(nextReview);
-        setRuns((current) => current.map((item) => item.id === nextRun.id ? nextRun : item));
-        // A polling blip must not turn a live Factory run into a user-facing
-        // "Failed to fetch" error. The next authoritative run response is
-        // the recovery signal; command failures (answer/retry/review writes)
-        // still surface through their own handlers.
-        setState((current) => ({
-          ...current,
-          ...(nextRun.status === "queued" || nextRun.status === "running" ? { error: "" } : {})
-        }));
-      }).catch((error) => {
-        if (!cancelled) {
-          setState((current) => ({
-            ...current,
-            // Keep the prior live status visible while a read-only poll is
-            // retrying; do not overwrite it with a transient fetch error.
-            ...(run.status === "queued" || run.status === "running" ? {} : { error: error.message })
-          }));
-        }
-      });
-    }, 3000);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [request, run?.id, run?.status, token]);
+    const step = workflow.steps[requested];
+    const next = step?.enabled ? requested : workflow.current;
+    setSelectedTab(next);
+    if (next !== requested) navigate(`/studio/products/${encodeURIComponent(productId)}/${next}`);
+  }, [navigate, product, productId, state.loading, tab, workflow]);
 
   function goTab(nextTab) {
-    if (!TAB_KEYS.includes(nextTab) || !workflow.steps[nextTab]?.enabled || workflow.steps[nextTab]?.locked) return;
+    if (!TAB_KEYS.includes(nextTab) || !workflow.steps[nextTab]?.enabled) return;
     setSelectedTab(nextTab);
     navigate(`/studio/products/${encodeURIComponent(productId)}/${nextTab}`);
   }
 
-  async function selectRun(nextRunId) {
-    setState((current) => ({ ...current, busy: "select-run", error: "" }));
-    try {
-      const nextRun = await getFactoryRun(token, nextRunId);
-      const nextReview = await loadReviewProjection(token, nextRun, request);
-      updateDisplayedRun(nextRun, { review: nextReview });
-    } catch (error) {
-      setReview(null);
-      setState((current) => ({ ...current, error: error.message }));
-    }
-    finally { setState((current) => ({ ...current, busy: "" })); }
-  }
-
   async function upload(files) {
-    if (!product || !files?.length) return;
+    if (!files?.length) return;
+    retryActionRef.current = () => upload(files);
     setState((current) => ({ ...current, busy: "upload", error: "", notice: "" }));
     try {
       const uploaded = [];
-      for (const file of files) uploaded.push(await uploadProductFile(token, product.id ?? product.product_id, file));
-      setDocuments((current) => [...uploaded, ...current]);
+      for (const file of files) uploaded.push(await uploadProductFile(token, productId, file));
+      setDocuments((current) => [...uploaded.map((item) => item.file ?? item), ...current]);
+      retryActionRef.current = null;
       setState((current) => ({ ...current, notice: t("filesReady", uploaded.length) }));
-    } catch (error) { setState((current) => ({ ...current, error: error.message })); }
-    finally { setState((current) => ({ ...current, busy: "" })); }
-  }
-
-  async function startRun() {
-    if (!product || !documents.length || state.busy) return;
-    setState((current) => ({ ...current, busy: "start", error: "", notice: "" }));
-    try {
-      const created = await startFactoryRunFromSources(token, product, documents.map(documentId));
-      // The POST response is already the durable queued/running checkpoint.
-      // Use it immediately so the current tab can show its server-backed
-      // loading state without waiting for a second GET round trip.
-      const nextRun = created?.run ?? created;
-      updateDisplayedRun(nextRun, { clearReview: true });
-    } catch (error) { setState((current) => ({ ...current, error: error.message })); }
-    finally { setState((current) => ({ ...current, busy: "" })); }
-  }
-
-  async function retryRun() {
-    if (!run?.retryable || state.busy) return;
-    setState((current) => ({ ...current, busy: "retry-run", error: "", notice: "" }));
-    try {
-      const nextRun = await retryFactoryRun(token, run);
-      updateDisplayedRun(nextRun, { clearReview: true });
-      setState((current) => ({ ...current, notice: t("retryStarted") }));
-    } catch (error) {
-      setState((current) => ({ ...current, error: error.message }));
+    } catch (nextError) {
+      setState((current) => ({ ...current, error: messageOf(nextError, t("fileStatus_error")) }));
     } finally {
       setState((current) => ({ ...current, busy: "" }));
     }
   }
 
+  async function removeFile(file) {
+    const fileId = file?.id ?? file?.file_id;
+    if (!fileId) return;
+    if (typeof globalThis.confirm === "function" && !globalThis.confirm(t("confirmRemoveFile"))) return;
+    retryActionRef.current = () => removeFile(file);
+    setState((current) => ({ ...current, busy: "delete", error: "", notice: "" }));
+    try {
+      await deleteProductFile(token, productId, fileId);
+      setDocuments((current) => current.filter((item) => (item.id ?? item.file_id) !== fileId));
+      retryActionRef.current = null;
+      setState((current) => ({ ...current, notice: t("fileRemoved") }));
+    } catch (nextError) {
+      setState((current) => ({ ...current, error: messageOf(nextError, t("failureDetailsUnavailable")) }));
+    } finally {
+      setState((current) => ({ ...current, busy: "" }));
+    }
+  }
+
+  async function startAboutYou(executionId) {
+    const fileIds = documents.map((file) => file.id ?? file.file_id).filter(Boolean);
+    if (!fileIds.length) return;
+    retryActionRef.current = () => startAboutYou(executionId);
+    setState((current) => ({ ...current, busy: "about-you", error: "", notice: "" }));
+    try {
+      const next = await startAboutYouNode(token, productId, fileIds, executionId);
+      setAboutYou(next);
+      retryActionRef.current = null;
+      goTab("about-you");
+    } catch (nextError) {
+      setState((current) => ({ ...current, error: messageOf(nextError, t("failureDetailsUnavailable")) }));
+    } finally {
+      setState((current) => ({ ...current, busy: "" }));
+    }
+  }
+
+  async function startCorpus(aboutYouRef, executionId) {
+    const fileIds = documents.map((file) => file.id ?? file.file_id).filter(Boolean);
+    retryActionRef.current = () => startCorpus(aboutYouRef, executionId);
+    setState((current) => ({ ...current, busy: "corpus", error: "", notice: "" }));
+    try {
+      const next = await startCorpusNode(token, productId, fileIds, aboutYouRef, executionId);
+      setCorpus(next);
+      retryActionRef.current = null;
+      // The server accepted the handoff, so navigate immediately. `workflow`
+      // can still describe the pre-handoff render for this event loop tick.
+      setSelectedTab("corpus");
+      navigate(`/studio/products/${encodeURIComponent(productId)}/corpus`);
+    } catch (nextError) {
+      setState((current) => ({ ...current, error: messageOf(nextError, t("failureDetailsUnavailable")) }));
+    } finally {
+      setState((current) => ({ ...current, busy: "" }));
+    }
+  }
+
+  async function retryFailedNode() {
+    if (isExecutionError(aboutYou)) return startAboutYou(aboutYou.status === "max_rounds" ? undefined : aboutYou.execution_id);
+    if (isExecutionError(corpus) && aboutYou?.handoff_ref) {
+      return startCorpus(aboutYou.handoff_ref, corpus.status === "max_rounds" ? undefined : corpus.execution_id);
+    }
+    if (retryActionRef.current) return retryActionRef.current();
+    return refresh();
+  }
+
   if (state.loading && !product) return <section className="cpv2-loading" aria-busy="true"><Skeleton lines={5} /></section>;
-  if (state.error && !product) return <section className="cpv2-workspace-error"><InlineAlert tone="error">{state.error}</InlineAlert><Button type="button" onClick={() => void refresh()}>{t("retry")}</Button></section>;
+  if (!product) return <section className="cpv2-workspace-error"><InlineAlert tone="error">{error || t("workspaceLoadError")}</InlineAlert><Button type="button" onClick={() => void refresh()}>{t("retry")}</Button></section>;
 
   return <section className="cpv2-product-workspace">
-    <div className="cpv2-workspace-topline"><button type="button" className="cpv2-back-link" onClick={() => navigate("/studio/products")}>{t("products")}</button><div className="cpv2-version-browser"><span className="cpv2-version-label">{t("browse")}</span><Select id="workspace-version" className="cpv2-version-select" label={t("browse")} value={selectedRunId || "current"} onValueChange={(value) => { if (value !== "current") void selectRun(value); }} disabled={!runs.length || state.busy === "select-run" || workflow.working || workflow.publishing} size="compact" surface="raised" options={[{ value: "current", label: t("currentVersion") }, ...runs.map((item) => ({ value: item.id, label: t("version", item.revision_number ?? item.version ?? "—", versionStatus(item, t, item.id === selectedRunId ? review : null, item.id === selectedRunId ? briefSpec : null)) }))]} /></div></div>
-    <PageHeader className="cpv2-workspace-header" label={product?.status === "published" ? t("published") : t("product")} title={product?.name ?? product?.product_name ?? t("product")} body={product?.promise ?? product?.description ?? ""} />
-    {product ? <ProductPromiseForm t={t} token={token} product={product} value={promiseDraft} locked={workflow.working || workflow.publishing} onChange={setPromiseDraft} onSaved={(nextProduct) => { setProduct(nextProduct?.product ?? nextProduct); setPromiseDraft((nextProduct?.product ?? nextProduct).promise ?? ""); setState((current) => ({ ...current, notice: t("productPromiseSaved") })); }} onError={(error) => setState((current) => ({ ...current, error: error.message }))} /> : null}
-    <div className="cpv2-workspace-tabs" role="tablist" aria-label={t("productWorkflow")}>{TAB_KEYS.map((key) => {
-      const step = workflow.steps[key];
-      const label = t(key === "about-you" ? "aboutYou" : key);
-      return <button key={key} type="button" role="tab" aria-selected={selectedTab === key} aria-disabled={!step.enabled || step.locked} aria-busy={step.loading} aria-invalid={step.failed || undefined} className={`${selectedTab === key ? "is-active" : ""}${!step.enabled || step.locked ? " is-disabled" : ""}${step.failed ? " is-failed" : ""}`} disabled={!step.enabled || step.locked} onClick={() => goTab(key)}><span>{label}</span>{step.loading ? <span className="cpv2-tab-spinner" aria-label={t("waiting")} /> : null}</button>;
-    })}</div>
-    {state.error ? <InlineAlert tone="error">{state.error}</InlineAlert> : null}
-    {state.notice ? <InlineAlert tone="success">{state.notice}</InlineAlert> : null}
-    {selectedTab === "files" ? <FilesPanel t={t} product={product} documents={documents} run={run} busy={state.busy} loading={workflow.steps.files.loading} locked={workflow.publishing || (workflow.working && workflow.current !== "files")} onUpload={upload} onStart={startRun} onRetry={retryRun} hasRun={Boolean(run)} /> : null}
-    {selectedTab === "about-you" ? <AboutYouPanel t={t} token={token} run={run} busy={state.busy} loading={workflow.steps["about-you"].loading} setBusy={(busy) => setState((current) => ({ ...current, busy }))} onRetry={retryRun} onFiles={() => goTab("files")} onSaved={(nextRun) => { updateDisplayedRun(nextRun, { clearReview: true }); if (nextRun.status === "queued") setState((current) => ({ ...current, notice: t("waiting") })); }} onFinish={(nextRun) => { updateDisplayedRun(nextRun, { clearReview: true }); }} onError={(error) => setState((current) => ({ ...current, error: error.message }))} /> : null}
-    {selectedTab === "review" ? <ReviewPanel t={t} token={token} profile={profile} run={run} review={review} busy={state.busy} loading={workflow.steps.review.loading} setBusy={(busy) => setState((current) => ({ ...current, busy }))} onRetry={retryRun} onFiles={() => goTab("files")} onReviewChanged={setReview} onRerun={(nextRun) => { updateDisplayedRun(nextRun, { clearReview: true }); }} onComplete={() => goTab("brief")} onRefresh={refresh} onError={(error) => setState((current) => ({ ...current, error: error.message }))} /> : null}
-    {selectedTab === "brief" ? <BriefPanel t={t} token={token} product={product} briefSpec={briefSpec} busy={state.busy} locked={!workflow.steps.brief.enabled} onSaved={(nextProduct) => { const saved = nextProduct?.product ?? nextProduct; setProduct((current) => ({ ...current, ...saved })); setBriefSpec(saved?.brief_spec ?? null); setState((current) => ({ ...current, notice: t("briefSaved") })); }} onError={(error) => setState((current) => ({ ...current, error: error.message }))} /> : null}
-    {selectedTab === "complete" ? <CompletePanel t={t} product={product} briefSpec={briefSpec} run={run} review={review} busy={state.busy} setBusy={(busy) => setState((current) => ({ ...current, busy }))} onRetry={retryRun} onRerun={(nextRun) => { updateDisplayedRun(nextRun, { clearReview: true }); }} onPublished={() => void refresh()} onReview={() => goTab("review")} onBrief={() => goTab("brief")} onFiles={() => goTab("files")} request={request} token={token} productId={productId} /> : null}
-  </section>;
-}
-
-function FilesPanel({ t, product, documents, run, busy, loading, locked, onUpload, onStart, onRetry, hasRun }) {
-  // A Files-stage provider failure is still a durable run state. Keep the
-  // retry action visible instead of silently falling back to the upload/start
-  // controls and making a failed run look like a clean slate.
-  if (runNeedsAttention(run) && runAttentionAction(run) === "retry") {
-    return <RunAttentionPanel t={t} run={run} busy={busy} onRetry={onRetry} onFiles={() => {}} />;
-  }
-  return <section className="cpv2-workspace-panel" aria-busy={loading}>
-    {runNeedsAttention(run) ? <div className="cpv2-files-attention" role="alert"><StatusTag tone="error">{t("versionNeedsAttention")}</StatusTag><p>{runAttentionError(run) ?? t("failureDetailsUnavailable")}</p></div> : null}
-    <div className="cpv2-panel-heading"><div><h2>{t("giveMaterial")}</h2><p>{t("localFilesOnly")}</p></div><label className={`cpv2-upload-button${locked || loading ? " is-disabled" : ""}`}>{t("uploadFiles")}<input type="file" multiple accept=".pdf,.docx,.xlsx,.xls,.xlsm,.csv,.tsv,.txt,.md,.json,.html,.htm,.png,.jpg,.jpeg,.webp" onChange={(event) => { void onUpload([...event.target.files]); event.target.value = ""; }} disabled={Boolean(busy) || locked || loading} /></label></div>
-    <div className="cpv2-file-list">{documents.map((document) => { const status = productFileState(document); return <div className="cpv2-file-row" key={documentId(document)}><div><strong>{document.display_name ?? document.file_name ?? t("unnamedFile")}</strong><small>{document.projection?.kind === "image" ? t("imageNative") : t("markdownProjection")}</small></div><StatusTag tone={statusTone(status)}>{t(`fileStatus_${status}`)}</StatusTag></div>; })}</div>
-    {!documents.length ? <p className="cpv2-empty-inline">{t("uploadForProduct")}</p> : null}
-    <p className="cpv2-source-note">{t("sourceNote")}</p>
-    {loading ? <GenerationStatus t={t} label={t("versionGenerated")} /> : null}
-    <div className="cpv2-workspace-actions"><Button type="button" loading={loading || busy === "start"} disabled={!canGenerateProductVersion(documents) || Boolean(busy) || locked || loading} onClick={onStart}>{hasRun ? t("continueWithFiles") : t("startDistillation")}</Button></div>
-  </section>;
-}
-
-function ProductPromiseForm({ t, token, product, value, locked, onChange, onSaved, onError }) {
-  const [busy, setBusy] = useState(false);
-  async function save(event) {
-    event.preventDefault();
-    if (!value.trim() || busy) return;
-    setBusy(true);
-    try {
-      const currentProduct = await latestProductForMutation(token, product);
-      onSaved(await updateProductPromise(token, currentProduct, value));
-    } catch (error) {
-      onError?.(error instanceof Error ? error : new Error("Unable to save the product promise"));
-    } finally {
-      setBusy(false);
-    }
-  }
-  return <form className="cpv2-product-promise" onSubmit={save}><FormField label={t("whatProductDelivers")}><Textarea value={value} onChange={(event) => onChange(event.target.value)} disabled={locked || busy} /></FormField><Button type="submit" loading={busy} disabled={locked || !value.trim() || value.trim() === String(product.promise ?? product.description ?? "").trim()}>{t("saveProductPromise")}</Button></form>;
-}
-
-async function latestProductForMutation(token, product) {
-  const productId = product?.id ?? product?.product_id;
-  const response = await getProduct(token, productId);
-  return response?.product ?? response;
-}
-
-function AboutYouPanel({ t, token, run, busy, loading, setBusy, onRetry, onFiles, onSaved, onFinish, onError }) {
-  const questions = run?.pending_questions ?? [];
-  const [index, setIndex] = useState(0);
-  const [answers, setAnswers] = useState({});
-  const [saveState, setSaveState] = useState("");
-
-  useEffect(() => {
-    const next = Object.fromEntries((run?.answer_drafts ?? []).map((item) => [item.question_id, item.answer]));
-    setAnswers((current) => ({ ...next, ...current }));
-    setIndex((current) => Math.min(current, Math.max(questions.length - 1, 0)));
-  }, [run?.id, run?.question_batch_id]);
-
-  async function save(nextIndex) {
-    if (!run || !questions.length || loading || busy) return;
-    setBusy("answer");
-    setSaveState("saving");
-    try {
-      const saved = await saveFactoryAnswerDraft(token, run, answers);
-      onSaved(saved);
-      setSaveState("saved");
-      if (nextIndex >= questions.length) {
-        const completed = await submitFactoryAnswers(token, saved, answers);
-        onFinish(completed);
-      } else setIndex(nextIndex);
-    } catch (error) {
-      setSaveState("");
-      onError?.(error instanceof Error ? error : new Error("Unable to save this answer"));
-    } finally {
-      setBusy("");
-    }
-  }
-
-  if (!run) return <section className="cpv2-workspace-panel"><h2>{t("aboutYou")}</h2><p>{t("noRun")}</p></section>;
-  if (runNeedsAttention(run)) return <RunAttentionPanel t={t} run={run} busy={busy} onRetry={onRetry} onFiles={onFiles} />;
-  if (loading && !questions.length) return <section className="cpv2-workspace-panel" aria-busy="true"><h2>{t("aboutYou")}</h2><GenerationStatus t={t} label={t("versionGenerated")} /></section>;
-  if (!questions.length) return <section className="cpv2-workspace-panel"><h2>{t("aboutYou")}</h2><p>{["queued", "running"].includes(run.status) ? t("waiting") : t("noQuestions")}</p></section>;
-  const question = questions[index];
-  const answer = answers[question.id] ?? "";
-  const canAdvance = answer.trim().length > 0;
-  return <section className="cpv2-workspace-panel cpv2-about-panel" aria-busy={loading}><div className="cpv2-panel-heading"><div><h2>{t("helpUnderstand")}</h2><p>{t("questionOf", index + 1, questions.length)}</p></div><div className="cpv2-carousel-nav"><button type="button" disabled={index === 0 || loading} onClick={() => setIndex((current) => current - 1)}>←</button><button type="button" disabled={index === questions.length - 1 || loading} onClick={() => setIndex((current) => current + 1)}>→</button></div></div>{loading ? <GenerationStatus t={t} label={t("versionGenerated")} /> : null}<div className="cpv2-about-question"><h3>{question.question}</h3><div className="cpv2-about-columns"><article><span>{t("sourceEvidence")}</span><h4>{t("whatHatchFound")}</h4><p>{question.intent ?? ""}</p></article><article className="is-answer"><FormField label={t("yourContext")}><Textarea value={answer} onChange={(event) => setAnswers((current) => ({ ...current, [question.id]: event.target.value }))} placeholder={t("addContext")} disabled={loading} /></FormField></article></div><div className="cpv2-workspace-actions"><Button type="button" loading={saveState === "saving" || busy === "answer" || loading} disabled={!canAdvance || Boolean(busy) || loading} onClick={() => { void save(index + 1); }}>{index === questions.length - 1 ? t("finishAndReview") : t("saveAndNext")}</Button>{saveState === "saved" ? <span className="cpv2-save-status">{t("saved")}</span> : null}</div></div></section>;
-}
-
-function BriefPanel({ t, token, product, briefSpec, busy, locked = false, onSaved, onError }) {
-  const [fields, setFields] = useState(() => (Array.isArray(briefSpec?.fields) ? briefSpec.fields.map((field, index) => ({
-    id: String(field.id || `question-${index + 1}`),
-    label: String(field.label || ""),
-    required: field.required === true
-  })) : []));
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    setFields(Array.isArray(briefSpec?.fields) ? briefSpec.fields.map((field, index) => ({
-      id: String(field.id || `question-${index + 1}`),
-      label: String(field.label || ""),
-      required: field.required === true
-    })) : []);
-  }, [briefSpec]);
-
-  function addQuestion() {
-    if (locked || fields.length >= 16) return;
-    setFields((current) => [...current, { id: nextBriefFieldId(current), label: "", required: true }]);
-    setError("");
-  }
-
-  function updateField(id, patch) {
-    setFields((current) => current.map((field) => field.id === id ? { ...field, ...patch } : field));
-    setError("");
-  }
-
-  function moveField(index, direction) {
-    const target = index + direction;
-    if (target < 0 || target >= fields.length) return;
-    setFields((current) => {
-      const next = [...current];
-      [next[index], next[target]] = [next[target], next[index]];
-      return next;
-    });
-  }
-
-  async function save(event) {
-    event.preventDefault();
-    if (saving || busy || locked) return;
-    const normalized = fields.map((field) => ({ ...field, label: field.label.trim() }));
-    const ids = new Set();
-    const invalid = normalized.length === 0 || normalized.length > 16 || normalized.some((field) => {
-      if (!/^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/.test(field.id) || field.id.length > 128 || ids.has(field.id)) return true;
-      ids.add(field.id);
-      return !field.label || field.label.length > 500 || field.label.includes("\u0000") || typeof field.required !== "boolean";
-    });
-    if (invalid) {
-      setError(t("briefRequiredBeforePublish"));
-      return;
-    }
-    setSaving(true);
-    setError("");
-    try {
-      // Review/rerun work can advance the Product updated_at while this form
-      // remains open. Refresh the Product revision immediately before the
-      // CAS write so a normal single-creator flow does not surface a stale
-      // "refresh before saving" error.
-      const currentProduct = await latestProductForMutation(token, product);
-      const saved = await saveProductBriefSpec(token, currentProduct, { contract_version: "1", fields: normalized });
-      onSaved(saved);
-    } catch (nextError) {
-      const errorValue = nextError instanceof Error ? nextError : new Error("Unable to save the Brief");
-      setError(errorValue.message);
-      onError?.(errorValue);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return <form className="cpv2-workspace-panel cpv2-brief-panel" onSubmit={save} aria-disabled={locked}>
-    <div className="cpv2-panel-heading"><div><h2>{t("briefTitle")}</h2><p>{t("briefBody")}</p></div><Button type="button" variant="secondary" onClick={addQuestion} disabled={fields.length >= 16 || saving || locked}>{t("addBriefQuestion")}</Button></div>
-    {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
-    <div className="cpv2-brief-fields">
-      {fields.map((field, index) => <div className="cpv2-brief-field" key={field.id}>
-        <span className="cpv2-brief-field-number">{index + 1}</span>
-        <FormField label={t("briefQuestion")} required><Textarea value={field.label} placeholder={t("briefQuestionPlaceholder")} onChange={(event) => updateField(field.id, { label: event.target.value })} disabled={saving || locked} /></FormField>
-        <label className="cpv2-brief-required"><input type="checkbox" checked={field.required} onChange={(event) => updateField(field.id, { required: event.target.checked })} disabled={saving || locked} />{t("requiredQuestion")}</label>
-        <div className="cpv2-brief-field-actions"><button type="button" onClick={() => moveField(index, -1)} disabled={index === 0 || saving || locked} aria-label={t("moveQuestionUp")}>↑</button><button type="button" onClick={() => moveField(index, 1)} disabled={index === fields.length - 1 || saving || locked} aria-label={t("moveQuestionDown")}>↓</button><button type="button" onClick={() => { setFields((current) => current.filter((item) => item.id !== field.id)); setError(""); }} disabled={saving || locked}>{t("removeQuestion")}</button></div>
-      </div>)}
+    <PageHeader className="cpv2-workspace-header" label={product.status === "published" ? t("published") : t("product")} title={product.name ?? t("product")} body={product.promise ?? product.description ?? ""} />
+    <div className="cpv2-workspace-tabs" role="tablist" aria-label={t("productWorkflow")}>
+      {TAB_KEYS.map((key) => {
+        const step = workflow.steps[key];
+        const label = key === "about-you" ? t("aboutYou") : key === "corpus" ? "Corpus" : t(key);
+        return <button key={key} type="button" role="tab" aria-selected={selectedTab === key} aria-disabled={!step.enabled} aria-busy={step.loading} aria-invalid={step.failed || undefined} className={`${selectedTab === key ? "is-active" : ""}${!step.enabled ? " is-disabled" : ""}${step.failed ? " is-failed" : ""}`} disabled={!step.enabled} onClick={() => goTab(key)}><span>{label}</span>{step.loading ? <span className="cpv2-tab-spinner" aria-label={t("waiting")} /> : null}</button>;
+      })}
     </div>
-    {!fields.length ? <p className="cpv2-empty-inline">{t("briefRequiredBeforePublish")}</p> : null}
-    <div className="cpv2-brief-summary"><strong>{t("brief")}</strong><ol>{fields.map((field) => <li key={field.id}>{field.label || t("briefQuestionPlaceholder")} · {field.required ? t("requiredQuestion") : t("optional")}</li>)}</ol></div>
-    <div className="cpv2-workspace-actions"><Button type="submit" loading={saving} disabled={saving || Boolean(busy) || locked || fields.length === 0}>{t("saveBriefAndContinue")}</Button></div>
-  </form>;
+    {error ? <InlineAlert tone="error"><div className="cpv2-error-bar"><span>{error}</span>{(isExecutionError(aboutYou) || isExecutionError(corpus) || state.error) ? <Button type="button" variant="secondary" loading={Boolean(state.busy)} onClick={() => void retryFailedNode()}>{t("retry")}</Button> : null}</div></InlineAlert> : null}
+    {state.notice ? <InlineAlert className="cpv2-inline-feedback" tone="success">{state.notice}</InlineAlert> : null}
+    {selectedTab === "files" ? <FilesPanel t={t} documents={documents} busy={state.busy} onUpload={upload} onStart={() => void startAboutYou()} onRetry={() => void retryFailedNode()} onDelete={removeFile} hasExecution={Boolean(aboutYou)} /> : null}
+    {selectedTab === "about-you" ? <AboutYouPanel t={t} execution={aboutYou} busy={state.busy} onSubmit={(answers) => void saveAnswers(answers, startCorpus, token, productId, aboutYou, setAboutYou, setState, t, retryActionRef)} onRetry={() => void retryFailedNode()} onFiles={() => goTab("files")} /> : null}
+    {selectedTab === "corpus" ? <CorpusPanel t={t} execution={corpus} busy={state.busy} onRetry={() => void retryFailedNode()} /> : null}
+    {selectedTab === "brief" ? <BriefPanel t={t} token={token} product={product} briefSpec={briefSpec} busy={state.busy} onRetryAction={(action) => { retryActionRef.current = action; }} onSaved={(nextProduct) => { retryActionRef.current = null; const saved = nextProduct?.product ?? nextProduct; setProduct((current) => ({ ...current, ...saved })); setBriefSpec(saved?.brief_spec ?? null); setState((current) => ({ ...current, notice: t("briefSaved") })); }} onError={(nextError) => setState((current) => ({ ...current, error: messageOf(nextError, t("failureDetailsUnavailable")) }))} /> : null}
+    {selectedTab === "complete" ? <CompletePanel t={t} product={product} briefSpec={briefSpec} corpus={corpus} busy={state.busy} setBusy={(busy) => setState((current) => ({ ...current, busy }))} token={token} productId={productId} onRetryAction={(action) => { retryActionRef.current = action; }} onPublished={refresh} onBrief={() => goTab("brief")} onError={(nextError) => setState((current) => ({ ...current, error: messageOf(nextError, t("failureDetailsUnavailable")) }))} /> : null}
+  </section>;
+}
+
+async function saveAnswers(answers, startCorpus, token, productId, aboutYou, setAboutYou, setState, t, retryActionRef) {
+  retryActionRef.current = () => saveAnswers(answers, startCorpus, token, productId, aboutYou, setAboutYou, setState, t, retryActionRef);
+  setState((current) => ({ ...current, busy: "answers", error: "", notice: "" }));
+  try {
+    const saved = await saveAboutYouNodeAnswers(token, productId, aboutYou.execution_id, answers);
+    const nextAboutYou = { ...aboutYou, status: "handoff_saved", handoff_ref: saved.about_you_ref };
+    setAboutYou(nextAboutYou);
+    await startCorpus(saved.about_you_ref);
+    retryActionRef.current = null;
+  } catch (nextError) {
+    setState((current) => ({ ...current, error: messageOf(nextError, t("failureDetailsUnavailable")) }));
+  } finally {
+    setState((current) => ({ ...current, busy: "" }));
+  }
+}
+
+function FilesPanel({ t, documents, busy, onUpload, onStart, onDelete, hasExecution }) {
+  return <section className="cpv2-workspace-panel">
+    <div className="cpv2-panel-heading"><div><h2>{t("files")}</h2><p>{t("giveMaterial")}</p><small>{t("sourceNote")}</small></div><StatusTag tone="neutral">{documents.length} {t("files")}</StatusTag></div>
+    <label className="cpv2-upload-dropzone"><span>{t("uploadFiles")}</span><input type="file" multiple accept=".pdf,.docx,.xlsx,.xls,.xlsm,.pptx,.csv,.tsv,.txt,.md,.json,.html,.htm" onChange={(event) => { void onUpload([...event.target.files]); event.target.value = ""; }} disabled={Boolean(busy)} /></label>
+    {!documents.length ? <p className="cpv2-empty-inline">{t("noFilesYet")}</p> : <ul className="cpv2-file-list">{documents.map((file) => <li key={file.id ?? file.file_id ?? file.display_name}><span>{file.display_name ?? file.name ?? t("unnamedFile")}</span><StatusTag tone={file.status === "error" ? "error" : "success"}>{file.status ?? t("ready")}</StatusTag><Button type="button" variant="link" disabled={Boolean(busy)} onClick={() => void onDelete(file)}>{t("removeFile")}</Button></li>)}</ul>}
+    <div className="cpv2-workspace-actions"><Button type="button" loading={busy === "about-you"} disabled={!documents.length || Boolean(busy)} onClick={onStart}>{hasExecution ? t("continueWithFiles") : t("startDistillation")}</Button></div>
+  </section>;
+}
+
+function AboutYouPanel({ t, execution, busy, onSubmit, onRetry, onFiles }) {
+  const questions = execution?.output?.questions ?? [];
+  const [answers, setAnswers] = useState({});
+  useEffect(() => {
+    setAnswers((current) => Object.fromEntries(questions.map((question) => [question.question, current[question.question] ?? ""])));
+  }, [execution?.execution_id, questions.length]);
+  if (!execution) return <EmptyNodePanel title={t("aboutYou")} body={t("noQuestions")} onAction={onFiles} action={t("addSourceFiles")} />;
+  if (isExecutionActive(execution)) return <NodeProgressPanel t={t} title={t("aboutYou")} execution={execution} />;
+  if (isExecutionError(execution)) return <NodeErrorPanel t={t} title={t("aboutYou")} execution={execution} onRetry={onRetry} />;
+  if (!questions.length) return <EmptyNodePanel title={t("aboutYou")} body={t("noQuestions")} onAction={onFiles} action={t("addSourceFiles")} />;
+  if (execution.status === "handoff_saved") return <NodeProgressPanel t={t} title={t("aboutYou")} execution={{ ...execution, status: "completed" }} label="Answers saved. Corpus is starting…" />;
+  return <section className="cpv2-workspace-panel cpv2-about-you-panel">
+    <div className="cpv2-panel-heading"><div><h2>{t("aboutYou")}</h2><p>{t("helpUnderstand")}</p></div><StatusTag tone="neutral">{questions.length}</StatusTag></div>
+    <div className="cpv2-about-you-questions">{questions.map((question, index) => <article key={question.question} className="cpv2-about-you-question"><span className="cpv2-review-label">{t("questionOf", index + 1, questions.length)}</span><h3>{question.question}</h3><div className="cpv2-about-you-options">{question.options.map((option) => <label key={option}><input type="radio" name={`about-you-${index}`} checked={answers[question.question] === option} onChange={() => setAnswers((current) => ({ ...current, [question.question]: option }))} />{option}</label>)}</div><FormField label={t("other")}><Textarea value={question.options.includes(answers[question.question]) ? "" : answers[question.question] ?? ""} placeholder={t("addContext")} onChange={(event) => setAnswers((current) => ({ ...current, [question.question]: event.target.value }))} /></FormField></article>)}</div>
+    <div className="cpv2-workspace-actions"><Button type="button" loading={busy === "answers"} disabled={Boolean(busy) || questions.some((question) => !String(answers[question.question] ?? "").trim())} onClick={() => onSubmit(questions.map((question) => ({ question: question.question, answer: answers[question.question].trim() })))}>{t("continueToCorpus")}</Button></div>
+  </section>;
+}
+
+function CorpusPanel({ t, execution, busy, onRetry }) {
+  if (!execution) return <EmptyNodePanel title="Corpus" body={t("waiting")} />;
+  if (isExecutionActive(execution)) return <NodeProgressPanel t={t} title="Corpus" execution={execution} />;
+  if (isExecutionError(execution)) return <NodeErrorPanel t={t} title="Corpus" execution={execution} onRetry={onRetry} busy={busy} />;
+  const output = execution.output;
+  return <section className="cpv2-workspace-panel cpv2-corpus-panel"><div className="cpv2-panel-heading"><div><h2>Corpus</h2><p>{t("fullCorpus")}</p></div><StatusTag tone="success">{t("ready")}</StatusTag></div>{output ? <><article className="cpv2-corpus-block"><h3>System instructions</h3><pre>{output.system_instructions}</pre></article><article className="cpv2-corpus-block"><h3>Skills</h3>{output.skills?.map((skill) => <details key={skill.id}><summary>{skill.title}</summary><p>{skill.instruction}</p></details>)}</article><article className="cpv2-corpus-block"><h3>Knowledge</h3>{output.knowledge?.map((item) => <details key={item.id}><summary>{item.title}</summary><p>{item.content}</p></details>)}</article></> : <p>{t("corpusUnavailable")}</p>}</section>;
+}
+
+function BriefPanel({ t, token, product, briefSpec, busy, onRetryAction, onSaved, onError }) {
+  const [fields, setFields] = useState(() => briefSpec?.fields ?? []);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => setFields(briefSpec?.fields ?? []), [briefSpec]);
+  function add() { setFields((current) => [...current, { id: nextBriefFieldId(current), label: "", required: false }]); }
+  async function saveFields(nextFields) {
+    if (!nextFields.length || nextFields.some((field) => !field.label.trim())) return;
+    onRetryAction?.(() => saveFields(nextFields));
+    setSaving(true);
+    try { onSaved(await saveProductBriefSpec(token, product, { contract_version: "1", fields: nextFields })); }
+    catch (nextError) { onError(nextError); }
+    finally { setSaving(false); }
+  }
+  return <form className="cpv2-workspace-panel cpv2-brief-panel" onSubmit={(event) => { event.preventDefault(); void saveFields(fields); }}><div className="cpv2-panel-heading"><div><h2>{t("briefTitle")}</h2><p>{t("briefBody")}</p></div><Button type="button" variant="secondary" onClick={add} disabled={fields.length >= 16 || saving || Boolean(busy)}>{t("addBriefQuestion")}</Button></div>{fields.map((field, index) => <div className="cpv2-brief-field" key={field.id}><span>{index + 1}</span><FormField label={t("briefQuestion")} required><Textarea value={field.label} onChange={(event) => setFields((current) => current.map((item) => item.id === field.id ? { ...item, label: event.target.value } : item))} /></FormField><label><input type="checkbox" checked={field.required} onChange={(event) => setFields((current) => current.map((item) => item.id === field.id ? { ...item, required: event.target.checked } : item))} />{t("requiredQuestion")}</label><Button type="button" variant="link" onClick={() => setFields((current) => current.filter((item) => item.id !== field.id))}>{t("removeQuestion")}</Button></div>)}{!fields.length ? <p>{t("briefRequiredBeforePublish")}</p> : null}<div className="cpv2-workspace-actions"><Button type="submit" loading={saving} disabled={saving || Boolean(busy) || !isValidBriefSpec({ contract_version: "1", fields: fields.length ? fields : [{ id: "invalid", label: "", required: false }] })}>{t("saveBriefAndContinue")}</Button></div></form>;
+}
+
+function CompletePanel({ t, product, briefSpec, corpus, busy, setBusy, token, productId, onRetryAction, onPublished, onBrief, onError }) {
+  const [showDetails, setShowDetails] = useState(false);
+  async function publish() {
+    if (!corpus?.output_ref || !isValidBriefSpec(briefSpec)) return;
+    onRetryAction?.(() => publish());
+    setBusy("publish");
+    try { await publishCorpusToRegistry(token, productId, { corpus_ref: corpus.output_ref, brief_spec: briefSpec }); onRetryAction?.(null); await onPublished(); }
+    catch (nextError) { onError(nextError); }
+    finally { setBusy(""); }
+  }
+  if (product.status === "published") return <section className="cpv2-workspace-panel cpv2-complete-panel"><StatusTag tone="success">{t("published")}</StatusTag><h2>{t("complete")}</h2><p>{t("productPublished")}</p></section>;
+  if (!corpus?.output_ref) return <EmptyNodePanel title={t("complete")} body={t("waiting")} />;
+  return <section className="cpv2-workspace-panel cpv2-complete-panel"><h2>{t("complete")}</h2><p>{product.promise ?? product.description ?? ""}</p>{showDetails && corpus.output ? <CorpusPanel t={t} execution={corpus} /> : null}{!isValidBriefSpec(briefSpec) ? <div className="cpv2-complete-brief-required"><p>{t("briefRequiredBeforePublish")}</p><Button type="button" variant="secondary" onClick={onBrief}>{t("brief")}</Button></div> : <div className="cpv2-workspace-actions"><Button type="button" variant="link" onClick={() => setShowDetails((current) => !current)}>{t("viewProductDetails")}</Button><Button type="button" loading={busy === "publish"} disabled={Boolean(busy)} onClick={() => void publish()}>{t("publishProduct")}</Button></div>}</section>;
+}
+
+function NodeProgressPanel({ t, title, execution, label }) {
+  return <section className="cpv2-workspace-panel" aria-busy="true"><StatusTag tone="neutral">{execution.status}</StatusTag><h2>{title}</h2><div className="cpv2-generation-status" role="status" aria-live="polite"><span className="cpv2-loading-spinner" aria-hidden="true" /><span>{label ?? `${t("waiting")} · round ${execution.round ?? 0}`}</span></div></section>;
+}
+
+function NodeErrorPanel({ t, title, execution, onRetry, busy }) {
+  return <section className="cpv2-workspace-panel cpv2-attention-panel"><StatusTag tone="error">{t("versionNeedsAttention")}</StatusTag><h2>{title}</h2><p>{executionError(execution) ?? t("failureDetailsUnavailable")}</p><Button type="button" loading={Boolean(busy)} onClick={onRetry}>{t("retry")}</Button></section>;
+}
+
+function EmptyNodePanel({ title, body, action, onAction }) {
+  return <section className="cpv2-workspace-panel"><h2>{title}</h2><p>{body}</p>{onAction ? <Button type="button" variant="secondary" onClick={onAction}>{action}</Button> : null}</section>;
 }
 
 function nextBriefFieldId(fields) {
@@ -505,234 +298,6 @@ function nextBriefFieldId(fields) {
   return `question-${index}`;
 }
 
-function ReviewPanel({ t, token, profile, run, review, busy, loading, setBusy, onRetry, onFiles, onReviewChanged, onRerun, onComplete, onRefresh, onError }) {
-  const [index, setIndex] = useState(0);
-  const [draft, setDraft] = useState({});
-  const [heldoutDraft, setHeldoutDraft] = useState({ correction: "", why: "" });
-  const [removeOpen, setRemoveOpen] = useState({});
-  const cases = review?.cases ?? [];
-  useEffect(() => setIndex((current) => Math.min(current, Math.max(cases.length - 1, 0))), [cases.length]);
-  useEffect(() => setHeldoutDraft({ correction: "", why: "" }), [review?.candidate_digest]);
-  if (runNeedsAttention(run)) return <RunAttentionPanel t={t} run={run} busy={busy} onRetry={onRetry} onFiles={onFiles} />;
-  if (loading) return <section className="cpv2-workspace-panel" aria-busy="true"><h2>{t("review")}</h2><GenerationStatus t={t} label={t("versionGenerated")} /></section>;
-  if (!run || !review) return <section className="cpv2-workspace-panel"><h2>{t("review")}</h2><p>{t("waiting")}</p></section>;
-  if (["queued", "running"].includes(run.status)) return <section className="cpv2-workspace-panel"><h2>{t("review")}</h2><p>{t("waiting")}</p></section>;
-  const item = cases[index];
-  if (!item) return <section className="cpv2-workspace-panel"><h2>{t("review")}</h2><p>{t("noQuestions")}</p></section>;
-  const currentDraft = draft[item.id] ?? {};
-  const handled = item.status !== "needs_review";
-  async function action(actionName) {
-    if (actionName === "correct" && (!currentDraft.correction?.trim() || !currentDraft.why?.trim())) return;
-    setBusy(`review:${item.id}`);
-    try {
-      const result = await submitFactoryReview(token, { id: run.id, version: review.version }, {
-        action: actionName,
-        caseId: item.id,
-        caseDigest: item.case_digest,
-        candidateDigest: review.candidate_digest,
-        correction: currentDraft.correction,
-        why: currentDraft.why
-      });
-      onReviewChanged(result.review ?? review);
-      setDraft((current) => ({ ...current, [item.id]: {} }));
-      setRemoveOpen((current) => ({ ...current, [item.id]: false }));
-      if (index < cases.length - 1) setIndex((current) => current + 1);
-    } catch (error) {
-      // The provider may settle a candidate between the initial review GET and
-      // this write. Refresh the authoritative projection automatically while
-      // keeping the local correction draft, instead of forcing a manual page
-      // reload or dropping the creator's work.
-      if (error?.status === 409 || error?.code === "version_conflict") await onRefresh?.();
-      onError?.(error instanceof Error ? error : new Error("Unable to save this review"));
-    } finally {
-      setBusy("");
-    }
-  }
-  async function rerun() {
-    setBusy("rerun");
-    try {
-      const result = await submitFactoryReview(token, { id: run.id, version: review.version }, { action: "rerun", candidateDigest: review.candidate_digest });
-      if (result.next_run) onRerun(result.next_run);
-    } catch (error) {
-      onError?.(error instanceof Error ? error : new Error("Unable to generate another version"));
-    } finally {
-      setBusy("");
-    }
-  }
-  async function correctHeldout() {
-    if (!heldoutDraft.correction.trim() || !heldoutDraft.why.trim()) {
-      onError?.(new Error(t("heldoutCorrectionRequired")));
-      return;
-    }
-    setBusy("heldout-correction");
-    try {
-      const result = await submitFactoryReview(token, { id: run.id, version: review.version }, {
-        action: "heldout_correction",
-        candidateDigest: review.candidate_digest,
-        correction: heldoutDraft.correction,
-        why: heldoutDraft.why
-      });
-      if (result.next_run) onRerun(result.next_run);
-      else onReviewChanged(result.review ?? review);
-    } catch (error) {
-      if (error?.status === 409 || error?.code === "version_conflict") await onRefresh?.();
-      onError?.(error instanceof Error ? error : new Error(t("heldoutCorrectionFailed")));
-    } finally {
-      setBusy("");
-    }
-  }
-  const heldoutFailure = Number(review?.blind?.failed ?? 0) > 0;
-  return <section className="cpv2-workspace-panel cpv2-review-panel">
-    <div className="cpv2-panel-heading"><div><h2>{t("reviewResult")}</h2><p>{index + 1} / {cases.length}</p></div><div className="cpv2-carousel-nav"><button type="button" disabled={index === 0} onClick={() => setIndex((current) => current - 1)}>←</button><button type="button" disabled={index === cases.length - 1} onClick={() => setIndex((current) => current + 1)}>→</button></div></div>
-    <div className="cpv2-review-case">
-      <div className="cpv2-review-columns">
-        <article className="cpv2-user-situation"><span className="cpv2-review-label"><span className="cpv2-review-avatar cpv2-review-avatar-user" aria-hidden="true"><UserRound size={14} strokeWidth={2} /></span>{t("userSituation")}</span><p>{item.question}</p></article>
-        <article className="cpv2-your-method"><span className="cpv2-review-label"><span className="cpv2-review-avatar cpv2-review-avatar-creator" aria-hidden="true">{profile?.initials || "C"}</span>{t("yourMethod")}</span><p>{item.creator_reference}</p></article>
-      </div>
-      <article className="cpv2-current-response"><span>{t("currentResponse")}</span><div>{item.candidate_output}</div></article>
-      <div className={`cpv2-eval-note ${item.verdict === "PASS" ? "is-pass" : "is-fail"}`}><strong>{item.verdict === "PASS" ? t("evaluationPassed") : t("evaluationFailed")}</strong><p>{item.diagnosis}</p></div>
-      {handled ? <StatusTag tone={reviewStatusTone(item.status)}>{reviewStatusLabel(item.status, t)}</StatusTag> : currentDraft.open ? <div className="cpv2-correction-form"><FormField label={t("whatShouldHatchHaveDone")} required><Textarea value={currentDraft.correction ?? ""} onChange={(event) => setDraft((current) => ({ ...current, [item.id]: { ...current[item.id], correction: event.target.value } }))} /></FormField><FormField label={t("why")} required><Textarea value={currentDraft.why ?? ""} onChange={(event) => setDraft((current) => ({ ...current, [item.id]: { ...current[item.id], correction: current[item.id]?.correction, why: event.target.value } }))} /></FormField><Button type="button" loading={busy === `review:${item.id}`} onClick={() => void action("correct")}>{t("saveAndNext")}</Button></div> : <div className="cpv2-review-actions"><div className="cpv2-review-action-row">{canAcceptReviewCase(item) ? <Button type="button" className="is-success" disabled={Boolean(busy)} onClick={() => void action("accept")}>{t("useResult")}</Button> : null}<Button type="button" variant="secondary" disabled={Boolean(busy)} onClick={() => setDraft((current) => ({ ...current, [item.id]: { ...current[item.id], open: true } }))}>{t("correctResult")}</Button></div><div className="cpv2-review-remove"><Button type="button" variant="link" disabled={Boolean(busy)} onClick={() => setRemoveOpen((current) => ({ ...current, [item.id]: !current[item.id] }))}>{t("removeQuestion")}</Button>{removeOpen[item.id] ? <div className="cpv2-remove-popover" role="dialog" aria-label={t("removeQuestion")}><p>{t("removeQuestionHelp")}</p><div className="cpv2-remove-popover-actions"><Button type="button" loading={busy === `review:${item.id}`} onClick={() => void action("reject_question")}>{t("confirmRemoveQuestion")}</Button><Button type="button" variant="secondary" disabled={Boolean(busy)} onClick={() => setRemoveOpen((current) => ({ ...current, [item.id]: false }))}>{t("cancel")}</Button></div></div> : null}</div></div>}
-    </div>
-    <CorpusPreview t={t} corpus={review.corpus} />
-    <article className="cpv2-heldout-panel">
-      <div className="cpv2-panel-heading"><div><span className="cpv2-review-label">{t("sealedHeldout")}</span><h3>{heldoutFailure ? t("heldoutCorrectionTitle") : t("heldoutCheckTitle")}</h3><p>{heldoutFailure ? t("heldoutCorrectionBody", review.blind.failed) : t("heldoutCheckBody", review.blind.passed, review.blind.total)}</p></div><StatusTag tone={heldoutFailure ? "warning" : "neutral"}>{heldoutFailure ? t("correctionRequired") : t("sealed")}</StatusTag></div>
-      {heldoutFailure && review.blind.needs_creator_action ? <div className="cpv2-heldout-form"><FormField label={t("heldoutCorrectionLabel")} required><Textarea value={heldoutDraft.correction} onChange={(event) => setHeldoutDraft((current) => ({ ...current, correction: event.target.value }))} disabled={Boolean(busy)} /></FormField><FormField label={t("why")} required><Textarea value={heldoutDraft.why} onChange={(event) => setHeldoutDraft((current) => ({ ...current, why: event.target.value }))} disabled={Boolean(busy)} /></FormField><Button type="button" loading={busy === "heldout-correction"} disabled={Boolean(busy)} onClick={() => void correctHeldout()}>{t("startHeldoutCorrection")}</Button></div> : null}
-    </article>
-    <div className="cpv2-workspace-actions">{review.rerun_ready ? <Button type="button" loading={busy === "rerun"} onClick={() => void rerun()}>{t("generateAnotherVersion")}</Button> : review.release_ready ? <Button type="button" onClick={onComplete}>{t("complete")}</Button> : null}</div>
-  </section>;
-}
-
-function GenerationStatus({ t, label }) {
-  return <div className="cpv2-generation-status" role="status" aria-live="polite"><span className="cpv2-loading-spinner" aria-hidden="true" /><span>{label ?? t("waiting")}</span></div>;
-}
-
-function RunAttentionPanel({ t, run, busy, onRetry, onFiles }) {
-  const action = runAttentionAction(run);
-  const error = runAttentionError(run);
-  return <section className="cpv2-workspace-panel cpv2-attention-panel" aria-busy={busy === "retry-run"}>
-    <StatusTag tone="error">{t("versionNeedsAttention")}</StatusTag>
-    <h2>{t("versionGenerationPaused")}</h2>
-    <p>{error ?? t("failureDetailsUnavailable")}</p>
-    <div className="cpv2-workspace-actions">
-      {action === "retry" ? <Button type="button" loading={busy === "retry-run"} disabled={Boolean(busy)} onClick={() => void onRetry()}>{t("retryFailedStage")}</Button> : <Button type="button" variant="secondary" disabled={Boolean(busy)} onClick={onFiles}>{t("addSourceFiles")}</Button>}
-    </div>
-  </section>;
-}
-
-function CorpusPreview({ t, corpus }) {
-  if (!corpus?.available) return <article className="cpv2-corpus-preview"><h3>{t("fullCorpus")}</h3><p>{corpus?.reason ?? t("corpusUnavailable")}</p></article>;
-  return <article className="cpv2-corpus-preview"><div className="cpv2-panel-heading"><h3>{t("fullCorpus")}</h3><code>{corpus.digest}</code></div>{corpus.assets.map((asset) => <details key={`${asset.layer}:${asset.path}`}><summary>{asset.id} · {asset.layer}</summary><pre>{asset.content}</pre></details>)}</article>;
-}
-
-function CompletePanel({ t, product, briefSpec, run, review, busy, setBusy, onRetry, onRerun, onPublished, onReview, onBrief, onFiles, request, token, productId }) {
-  const [error, setError] = useState("");
-  const [showDetails, setShowDetails] = useState(false);
-  const reviewMode = completeReviewMode(review);
-  async function publish() {
-    if (product?.status === "published" || !briefSpec?.fields?.length || !review?.release_ready || !run?.candidate) return;
-    setBusy("publish"); setError("");
-    try {
-      await request(`/v1/creator/products/${encodeURIComponent(productId)}/release`, { method: "POST", token, headers: { "idempotency-key": crypto.randomUUID() }, body: JSON.stringify({ candidate_id: run.id, report_digest: run.candidate.report_digest, expected_version: product?.resource_version ?? product?.version ?? 0 }) });
-      onPublished();
-    } catch (nextError) { setError(nextError.message); }
-    finally { setBusy(""); }
-  }
-
-  // Complete is a release decision, not a second progress screen. Keep the
-  // creator on the authoritative run state until the server has produced a
-  // reviewable version; never show a preview that cannot yet be published.
-  if (product?.status === "publishing") {
-    return <section className="cpv2-workspace-panel cpv2-complete-panel cpv2-complete-waiting" aria-busy="true">
-      <StatusTag tone="neutral">{t("waiting")}</StatusTag>
-      <h2>{t("complete")}</h2>
-      <GenerationStatus t={t} label={t("versionGenerated")} />
-    </section>;
-  }
-  if (product?.status === "published") {
-    return <section className="cpv2-workspace-panel cpv2-complete-panel" aria-live="polite">
-      <StatusTag tone="success">{t("published")}</StatusTag>
-      <h2>{t("complete")}</h2>
-      <p>{t("productPublished")}</p>
-    </section>;
-  }
-  if (isProductPublishFailed(product)) {
-    return <section className="cpv2-workspace-panel cpv2-complete-panel cpv2-attention-panel" role="alert">
-      <StatusTag tone="error">{t("versionNeedsAttention")}</StatusTag>
-      <h2>{t("complete")}</h2>
-      <p>{product?.publish_error ?? product?.last_error ?? product?.error ?? t("failureDetailsUnavailable")}</p>
-      {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
-      <div className="cpv2-workspace-actions"><Button type="button" loading={busy === "publish"} disabled={Boolean(busy)} onClick={() => void publish()}>{t("retry")}</Button></div>
-    </section>;
-  }
-  if (!run) {
-    return <section className="cpv2-workspace-panel cpv2-complete-panel cpv2-complete-waiting">
-      <StatusTag tone="neutral">{t("waiting")}</StatusTag>
-      <h2>{t("complete")}</h2>
-      <p>{t("noRun")}</p>
-      <div className="cpv2-workspace-actions"><Button type="button" variant="secondary" onClick={onFiles}>{t("addSourceFiles")}</Button></div>
-    </section>;
-  }
-  if (["queued", "running"].includes(run.status)) {
-    return <section className="cpv2-workspace-panel cpv2-complete-panel cpv2-complete-waiting" aria-busy="true">
-      <StatusTag tone="neutral">{t("waiting")}</StatusTag>
-      <h2>{t("versionGenerated")}</h2>
-      <p>{t("waiting")}</p>
-    </section>;
-  }
-  if (runNeedsAttention(run)) {
-    return <RunAttentionPanel t={t} run={run} busy={busy} onRetry={onRetry} onFiles={onFiles} />;
-  }
-  if (!review || (!review.release_ready && !review.rerun_ready)) {
-    return <section className="cpv2-workspace-panel cpv2-complete-panel cpv2-complete-waiting" aria-busy="true">
-      <StatusTag tone="neutral">{t("waiting")}</StatusTag>
-      <h2>{t("versionGenerated")}</h2>
-      <p>{t("waiting")}</p>
-      <div className="cpv2-workspace-actions"><Button type="button" variant="secondary" onClick={onReview}>{t("review")}</Button></div>
-    </section>;
-  }
-
-  return <section className="cpv2-workspace-panel cpv2-complete-panel">
-    <h2>{t("complete")}</h2>
-    <div className="cpv2-product-detail-preview"><h3>{product?.name ?? t("product")}</h3><p>{product?.promise ?? product?.description ?? ""}</p><Button type="button" variant="link" onClick={() => setShowDetails((current) => !current)}>{t("viewProductDetails")}</Button>{showDetails ? <CorpusPreview t={t} corpus={review?.corpus} /> : null}</div>
-    {error ? <InlineAlert tone="error">{error}</InlineAlert> : null}
-    {!briefSpec?.fields?.length ? <div className="cpv2-complete-brief-required"><p>{t("briefRequiredBeforePublish")}</p><Button type="button" variant="secondary" onClick={onBrief}>{t("brief")}</Button></div> : reviewMode === "publish" ? <><div className="cpv2-complete-actions"><Button type="button" loading={busy === "publish"} onClick={() => void publish()}>{t("publishProduct")}</Button><Button type="button" variant="secondary" onClick={onFiles}>{t("addSourceFiles")}</Button></div><p className="cpv2-complete-next-step">{t("addFilesForVersion")}</p></> : <div className="cpv2-complete-actions"><p>{reviewMode === "rerun" ? t("correctionSaved") : t("reviewBeforeComplete")}</p>{reviewMode === "rerun" ? <Button type="button" variant="secondary" onClick={async () => { setBusy("rerun"); try { const result = await submitFactoryReview(token, { id: run.id, version: review.version }, { action: "rerun", candidateDigest: review.candidate_digest }); if (result.next_run) onRerun(result.next_run); } catch (nextError) { setError(nextError.message); } finally { setBusy(""); } }}>{t("generateAnotherVersion")}</Button> : <Button type="button" variant="secondary" onClick={onReview}>{t("review")}</Button>}</div>}
-  </section>;
-}
-
-function versionStatus(run, t, review, briefSpec) {
-  // Review is a later durable gate than the initial answer checkpoint.  Some
-  // legacy projections retain waiting_for_creator while the sealed review is
-  // already available, so workflow_step/stage must win for the selector.
-  if (review) {
-    if (review.release_ready !== true) return t("review");
-    return isValidBriefSpec(briefSpec) ? t("complete") : t("brief");
-  }
-  if (run.stage === "review_required") return t("review");
-  if (run.status === "ready") return t("complete");
-  if (run.workflow_step === "review") return t("review");
-  if (run.workflow_step === "about-you" || run.status === "waiting_for_creator") return t("aboutYou");
-  if (run.workflow_step === "files") return t("files");
-  if (run.status === "needs_attention") return t("versionNeedsAttention");
-  return t("waiting");
-}
-
-function documentId(document) {
-  return document?.id ?? document?.file_id ?? document?.document_id ?? document?.artifact_id ?? "";
-}
-
-function statusTone(status) {
-  if (status === "ready" || status === "accepted") return "success";
-  if (status === "error" || status === "failed") return "error";
-  return "neutral";
-}
-
-function reviewStatusTone(status) {
-  if (["accepted", "used", "corrected"].includes(String(status).toLowerCase())) return "success";
-  if (["needs_correction", "needs_review"].includes(String(status).toLowerCase())) return "warning";
-  return "neutral";
-}
-
-function reviewStatusLabel(status, t) {
-  const key = `reviewStatus_${String(status ?? "").toLowerCase()}`;
-  return t(key) === key ? String(status ?? t("saved")) : t(key);
+function messageOf(error, fallback) {
+  return String(error?.message ?? error?.detail ?? fallback);
 }
