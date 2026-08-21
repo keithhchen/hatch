@@ -16,6 +16,12 @@ export type CreatorRegistryRelease = {
 
 export type ReleaseInput = Omit<CreatorRegistryRelease, "status" | "published_at"> & { published_at?: string };
 
+export type PublicReleaseListing = CreatorRegistryRelease & {
+  product_name: string;
+  product_promise: string;
+  creator_name: string;
+};
+
 /** New Registry authority for Distill Factory releases. */
 export class CreatorRegistryReleaseStore {
   private readonly memory = new Map<string, CreatorRegistryRelease>();
@@ -131,6 +137,54 @@ export class CreatorRegistryReleaseStore {
     `, [productId]);
     const row = result.rows[0] as Record<string, unknown> | undefined;
     return row ? rowToRelease(row) : undefined;
+  }
+
+  /** Public catalog authority: only the current release pointer is visible. */
+  async listPublic(options: { limit?: number; offset?: number } = {}): Promise<PublicReleaseListing[]> {
+    const limit = options.limit ?? 20;
+    const offset = options.offset ?? 0;
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20_001) throw new Error("catalog limit is invalid");
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset > 100_000) throw new Error("catalog offset is invalid");
+    if (!this.pool) {
+      return [...this.memory.values()]
+        .sort((a, b) => Date.parse(b.published_at) - Date.parse(a.published_at))
+        .slice(offset, offset + limit)
+        .map((release) => ({
+          ...release,
+          product_name: release.product_id,
+          product_promise: "",
+          creator_name: release.creator_id
+        }));
+    }
+    const result = await this.pool.query(`
+      SELECT r.product_id, r.creator_id, r.release_digest, r.corpus_digest,
+             r.corpus_ref, r.release_ref, r.runtime_manifest_ref,
+             r.brief_spec, r.status, r.published_at,
+             COALESCE(p.name, r.product_id::text) AS product_name,
+             COALESCE(p.promise, '') AS product_promise,
+             COALESCE(c.display_name, r.creator_id::text) AS creator_name
+      FROM hatch_creator_registry_live AS l
+      JOIN hatch_creator_registry_releases AS r
+        ON r.product_id=l.product_id AND r.release_digest=l.release_digest
+      LEFT JOIN hatch_creator_products AS p
+        ON p.id=r.product_id::text AND p.status='active'
+      LEFT JOIN creators AS c ON c.id=r.creator_id
+      WHERE r.status='published'
+      ORDER BY r.published_at DESC, r.product_id ASC
+      LIMIT $1 OFFSET $2
+    `, [limit, offset]);
+    return result.rows.map((row) => ({
+      ...rowToRelease(row as Record<string, unknown>),
+      product_name: String(row.product_name),
+      product_promise: String(row.product_promise ?? ""),
+      creator_name: String(row.creator_name)
+    }));
+  }
+
+  async getPublic(productId: string): Promise<PublicReleaseListing | undefined> {
+    requireUuidV4(productId, "product_id");
+    const rows = await this.listPublic({ limit: 20_001, offset: 0 });
+    return rows.find((row) => row.product_id === productId);
   }
 }
 

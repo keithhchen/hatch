@@ -593,14 +593,14 @@ function PageBoundary({ resource, title, retryLabel, children, t }) {
   return <>{children(resource.data)}</>;
 }
 
-function PageHeader({ eyebrow, title, body, action, onAction }) {
+function PageHeader({ title, body, action, onAction }) {
   const headingRef = useRef(null);
   useEffect(() => { headingRef.current?.focus({ preventScroll: true }); }, []);
-  return <HatchPageHeader className="cpv2-page-header" label={eyebrow} title={title} body={body} titleRef={headingRef} actions={action ? <Button type="button" onClick={onAction}>{action}</Button> : null} />;
+  return <HatchPageHeader className="cpv2-page-header" title={title} body={body} titleRef={headingRef} actions={action ? <Button type="button" onClick={onAction}>{action}</Button> : null} />;
 }
 
-function SectionHeading({ eyebrow, title, action, onAction }) {
-  return <HatchSectionHeader className="cpv2-section-heading" label={eyebrow} title={title} actions={action ? <Button variant="link" type="button" onClick={onAction}>{action} →</Button> : null} />;
+function SectionHeading({ title, action, onAction }) {
+  return <HatchSectionHeader className="cpv2-section-heading" title={title} actions={action ? <Button variant="link" type="button" onClick={onAction}>{action} →</Button> : null} />;
 }
 
 function Breadcrumb({ children, onClick }) { return <HatchBreadcrumbs className="cpv2-breadcrumb" items={[{ label: children, href: "#", icon: false, onClick: (event) => { event.preventDefault(); onClick(); } }]} />; }
