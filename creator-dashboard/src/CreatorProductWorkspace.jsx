@@ -131,13 +131,13 @@ export function CreatorProductWorkspace({ token, productId, tab = "files", navig
     }
   }
 
-  async function startAboutYou(executionId) {
+  async function startAboutYou(executionId = `about_you_${crypto.randomUUID()}`, idempotencyKey = crypto.randomUUID()) {
     const fileIds = documents.map((file) => file.id ?? file.file_id).filter(Boolean);
     if (!fileIds.length) return;
-    retryActionRef.current = () => startAboutYou(executionId);
+    retryActionRef.current = () => startAboutYou(executionId, idempotencyKey);
     setState((current) => ({ ...current, busy: "about-you", error: "", notice: "" }));
     try {
-      const next = await startAboutYouNode(token, productId, fileIds, executionId);
+      const next = await startAboutYouNode(token, productId, fileIds, executionId, idempotencyKey);
       setAboutYou(next);
       retryActionRef.current = null;
       goTab("about-you");
@@ -148,12 +148,12 @@ export function CreatorProductWorkspace({ token, productId, tab = "files", navig
     }
   }
 
-  async function startCorpus(aboutYouRef, executionId) {
+  async function startCorpus(aboutYouRef, executionId = `corpus_${crypto.randomUUID()}`, idempotencyKey = crypto.randomUUID()) {
     const fileIds = documents.map((file) => file.id ?? file.file_id).filter(Boolean);
-    retryActionRef.current = () => startCorpus(aboutYouRef, executionId);
+    retryActionRef.current = () => startCorpus(aboutYouRef, executionId, idempotencyKey);
     setState((current) => ({ ...current, busy: "corpus", error: "", notice: "" }));
     try {
-      const next = await startCorpusNode(token, productId, fileIds, aboutYouRef, executionId);
+      const next = await startCorpusNode(token, productId, fileIds, aboutYouRef, executionId, idempotencyKey);
       setCorpus(next);
       retryActionRef.current = null;
       // The server accepted the handoff, so navigate immediately. `workflow`
@@ -198,14 +198,14 @@ export function CreatorProductWorkspace({ token, productId, tab = "files", navig
   </section>;
 }
 
-async function saveAnswers(answers, startCorpus, token, productId, aboutYou, setAboutYou, setState, t, retryActionRef) {
-  retryActionRef.current = () => saveAnswers(answers, startCorpus, token, productId, aboutYou, setAboutYou, setState, t, retryActionRef);
+async function saveAnswers(answers, startCorpus, token, productId, aboutYou, setAboutYou, setState, t, retryActionRef, corpusExecutionId = `corpus_${crypto.randomUUID()}`, corpusIdempotencyKey = crypto.randomUUID(), answersIdempotencyKey = crypto.randomUUID()) {
+  retryActionRef.current = () => saveAnswers(answers, startCorpus, token, productId, aboutYou, setAboutYou, setState, t, retryActionRef, corpusExecutionId, corpusIdempotencyKey, answersIdempotencyKey);
   setState((current) => ({ ...current, busy: "answers", error: "", notice: "" }));
   try {
-    const saved = await saveAboutYouNodeAnswers(token, productId, aboutYou.execution_id, answers);
+    const saved = await saveAboutYouNodeAnswers(token, productId, aboutYou.execution_id, answers, answersIdempotencyKey);
     const nextAboutYou = { ...aboutYou, status: "handoff_saved", handoff_ref: saved.about_you_ref };
     setAboutYou(nextAboutYou);
-    await startCorpus(saved.about_you_ref);
+    await startCorpus(saved.about_you_ref, corpusExecutionId, corpusIdempotencyKey);
     retryActionRef.current = null;
   } catch (nextError) {
     setState((current) => ({ ...current, error: messageOf(nextError, t("failureDetailsUnavailable")) }));
@@ -254,11 +254,15 @@ function BriefPanel({ t, token, product, briefSpec, busy, onRetryAction, onSaved
   const [saving, setSaving] = useState(false);
   useEffect(() => setFields(briefSpec?.fields ?? []), [briefSpec]);
   function add() { setFields((current) => [...current, { id: nextBriefFieldId(current), label: "", required: false }]); }
-  async function saveFields(nextFields) {
+  async function saveFields(nextFields, recover = false) {
     if (!nextFields.length || nextFields.some((field) => !field.label.trim())) return;
-    onRetryAction?.(() => saveFields(nextFields));
+    onRetryAction?.(() => saveFields(nextFields, true));
     setSaving(true);
-    try { onSaved(await saveProductBriefSpec(token, product, { contract_version: "1", fields: nextFields })); }
+    try {
+      const currentResponse = recover ? await getProduct(token, product.id ?? product.product_id) : undefined;
+      const currentProduct = recover ? (currentResponse?.product ?? currentResponse) : product;
+      onSaved(await saveProductBriefSpec(token, currentProduct, { contract_version: "1", fields: nextFields }));
+    }
     catch (nextError) { onError(nextError); }
     finally { setSaving(false); }
   }
@@ -267,11 +271,12 @@ function BriefPanel({ t, token, product, briefSpec, busy, onRetryAction, onSaved
 
 function CompletePanel({ t, product, briefSpec, corpus, busy, setBusy, token, productId, onRetryAction, onPublished, onBrief, onError }) {
   const [showDetails, setShowDetails] = useState(false);
+  const publishIdempotencyKeyRef = useRef(crypto.randomUUID());
   async function publish() {
     if (!corpus?.output_ref || !isValidBriefSpec(briefSpec)) return;
     onRetryAction?.(() => publish());
     setBusy("publish");
-    try { await publishCorpusToRegistry(token, productId, { corpus_ref: corpus.output_ref, brief_spec: briefSpec }); onRetryAction?.(null); await onPublished(); }
+    try { await publishCorpusToRegistry(token, productId, { corpus_ref: corpus.output_ref, brief_spec: briefSpec }, publishIdempotencyKeyRef.current); onRetryAction?.(null); await onPublished(); }
     catch (nextError) { onError(nextError); }
     finally { setBusy(""); }
   }

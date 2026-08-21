@@ -236,11 +236,11 @@ export function startFactoryRunFromSources(token, product, documentIds) {
   });
 }
 
-export function startAboutYouNode(token, productId, fileIds, executionId) {
+export function startAboutYouNode(token, productId, fileIds, executionId, idempotencyKey = crypto.randomUUID()) {
   return dashboardRequest(`/v1/creator/products/${encodeURIComponent(productId)}/nodes/about-you/executions`, {
     method: "POST",
     token,
-    headers: { "idempotency-key": crypto.randomUUID() },
+    headers: { "idempotency-key": idempotencyKey },
     body: JSON.stringify({
       file_ids: fileIds,
       ...(executionId ? { execution_id: executionId } : {})
@@ -256,20 +256,20 @@ export function getLatestNodeExecution(token, productId, node) {
   return dashboardRequest(`/v1/creator/products/${encodeURIComponent(productId)}/nodes/${encodeURIComponent(node)}/executions`, { token });
 }
 
-export function saveAboutYouNodeAnswers(token, productId, executionId, answers) {
+export function saveAboutYouNodeAnswers(token, productId, executionId, answers, idempotencyKey = crypto.randomUUID()) {
   return dashboardRequest(`/v1/creator/products/${encodeURIComponent(productId)}/nodes/about-you/executions/${encodeURIComponent(executionId)}/answers`, {
     method: "POST",
     token,
-    headers: { "idempotency-key": crypto.randomUUID() },
+    headers: { "idempotency-key": idempotencyKey },
     body: JSON.stringify({ answers })
   });
 }
 
-export function startCorpusNode(token, productId, fileIds, aboutYouRef, executionId) {
+export function startCorpusNode(token, productId, fileIds, aboutYouRef, executionId, idempotencyKey = crypto.randomUUID()) {
   return dashboardRequest(`/v1/creator/products/${encodeURIComponent(productId)}/nodes/corpus/executions`, {
     method: "POST",
     token,
-    headers: { "idempotency-key": crypto.randomUUID() },
+    headers: { "idempotency-key": idempotencyKey },
     body: JSON.stringify({
       file_ids: fileIds,
       about_you_ref: aboutYouRef,
@@ -278,11 +278,11 @@ export function startCorpusNode(token, productId, fileIds, aboutYouRef, executio
   });
 }
 
-export function publishCorpusToRegistry(token, productId, input) {
+export function publishCorpusToRegistry(token, productId, input, idempotencyKey = crypto.randomUUID()) {
   return dashboardRequest(`/v1/creator/products/${encodeURIComponent(productId)}/registry`, {
     method: "POST",
     token,
-    headers: { "idempotency-key": crypto.randomUUID() },
+    headers: { "idempotency-key": idempotencyKey },
     body: JSON.stringify(input)
   });
 }
