@@ -54,6 +54,7 @@ import {
 import type { AboutYouAnswerPair } from "./creatorLearning/aboutYouNode.js";
 import { PostgresDistillationGraphStore } from "./creatorLearning/distillationGraphStore.js";
 import { CorpusPublisher } from "./creatorLearning/corpusPublisher.js";
+import { CreatorRegistryReleaseStore } from "./creatorLearning/creatorRegistryRelease.js";
 import {
   HttpRequestGate,
   PublishWorkGate,
@@ -81,6 +82,7 @@ type RegistryContext = {
   factoryNodeService?: FactoryNodeService;
   corpusPublisher?: CorpusPublisher;
   nodeObjectStore?: ReturnType<typeof objectStoreFromEnvironment>;
+  releaseStore: CreatorRegistryReleaseStore;
   authSecret: string;
 };
 
@@ -119,10 +121,12 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       environment.HATCH_CREATOR_PRODUCT_FILES_PREFIX?.trim() || "creator-products"
     )
     : undefined;
-  const corpusPublisher = factoryNodeService && nodeObjectStore
-    ? new CorpusPublisher(factoryNodeService, nodeObjectStore, store, environment.HATCH_RUNTIME_CORPUS_ROOT?.trim() || environment.HATCH_AGENT_CORPUS_ROOT?.trim() || "runtime-corpora")
-    : undefined;
   const graphPool = store.databasePool();
+  const releaseStore = new CreatorRegistryReleaseStore(graphPool);
+  await releaseStore.ensureSchema();
+  const corpusPublisher = factoryNodeService && nodeObjectStore
+    ? new CorpusPublisher(factoryNodeService, nodeObjectStore, store, releaseStore, environment.HATCH_RUNTIME_CORPUS_ROOT?.trim() || environment.HATCH_AGENT_CORPUS_ROOT?.trim() || "runtime-corpora")
+    : undefined;
   const graphStore = graphPool ? new PostgresDistillationGraphStore(graphPool) : undefined;
   await graphStore?.initialize();
   // User commands start the Factory directly in the registry process. The
@@ -187,7 +191,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       }, { "retry-after": String(admission.retryAfterSeconds), connection: "close" });
       return;
     }
-    const routePromise = route(request, response, { store, accounts, authRateLimiter, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, productFileStore, factoryNodeService, corpusPublisher, nodeObjectStore, authSecret })
+    const routePromise = route(request, response, { store, accounts, authRateLimiter, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, productFileStore, factoryNodeService, corpusPublisher, nodeObjectStore, releaseStore, authSecret })
       .catch((error) => {
         const status = errorStatus(error);
         if (status >= 500) console.error("Registry request failed", error);
@@ -300,7 +304,7 @@ async function route(
       execution_id: result.execution_id,
       corpus_ref: result.output_ref,
       corpus_digest: result.corpus_digest,
-      release_digest: result.published.corpus_digest,
+      release_digest: result.release.release_digest,
       status: "live",
       published_at: result.published.published_at
     });
@@ -311,26 +315,11 @@ async function route(
   if (runtimeReleaseMatch && request.method === "GET") {
     requireRuntimeServiceAuth(request, context.runtimeServiceToken);
     const productId = decodeURIComponent(runtimeReleaseMatch[1]!);
-    const published = (await context.store.listAllAgentCorpora()).find((item) => item.product_id === productId);
-    if (!published) { sendJson(response, 404, { detail: "No live release exists for this Product." }); return; }
-    const latest = await context.factoryNodeService?.getLatestCompletedExecution(productId, "corpus");
-    if (!latest?.outputRef || !context.nodeObjectStore) { sendJson(response, 404, { detail: "No completed Corpus Node output exists." }); return; }
-    const bytes = await context.nodeObjectStore.get(latest.outputRef);
-    const corpusDigest = `sha256:${sha256Bytes(bytes)}`;
-    const releaseDigest = published.corpus_digest;
+    const release = await context.releaseStore.getLive(productId);
+    if (!release) { sendJson(response, 404, { detail: "No live release exists for this Product." }); return; }
     sendJson(response, 200, {
-      release: {
-        product_id: productId,
-        creator_id: published.creator_id,
-        release_digest: releaseDigest,
-        corpus_digest: corpusDigest,
-        corpus_ref: latest.outputRef,
-        release_ref: `registry/${productId}/releases/${releaseDigest.slice("sha256:".length)}`,
-        brief_spec: published.brief_spec ?? null,
-        status: "live",
-        published_at: published.published_at
-      },
-      runtime_manifest_ref: `registry/${productId}/releases/${releaseDigest.slice("sha256:".length)}/runtime/manifest.json`
+      release,
+      runtime_manifest_ref: release.runtime_manifest_ref
     });
     return;
   }

@@ -7,6 +7,7 @@ import type { ArtifactObjectStore } from "./objectStore.js";
 import type { FactoryNodeService } from "./nodeService.js";
 import type { RegistryStoreTs, PublishedAgentCorpus } from "../registryStore.js";
 import { extractAgentCorpusBundle, immutableReleasePath } from "../registryCorpus.js";
+import { CreatorRegistryReleaseStore, type CreatorRegistryRelease } from "./creatorRegistryRelease.js";
 
 type CorpusOutput = {
   system_instructions: string;
@@ -25,6 +26,7 @@ export type PublishResult = {
   output_ref: string;
   corpus_digest: string;
   published: PublishedAgentCorpus;
+  release: CreatorRegistryRelease;
 };
 
 /** The only bridge from the new Node output contract into Registry. */
@@ -33,6 +35,7 @@ export class CorpusPublisher {
     private readonly nodes: FactoryNodeService,
     private readonly objectStore: ArtifactObjectStore,
     private readonly registry: RegistryStoreTs,
+    private readonly releases: CreatorRegistryReleaseStore,
     private readonly runtimeRoot: string,
   ) {}
 
@@ -83,19 +86,28 @@ export class CorpusPublisher {
       releaseDigest: staged.corpus_digest,
       briefSpec: input.briefSpec,
     });
-    const current = this.registry.getAgentCorpus(input.creatorId, input.productId)?.corpus_digest ?? null;
-    const published = await this.registry.activateAgentCorpusRelease(input.creatorId, input.productId, staged.corpus_digest, {
-      operationId: `node-publish-${execution.executionId}`,
-      expectedCurrentDigest: current,
-      briefSpec: input.briefSpec as never,
-    });
     await writeFile(path.join(releaseRoot, "source-corpus.json"), bytes, { flag: "wx" }).catch(async (error: unknown) => {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       const existing = await readFile(path.join(releaseRoot, "source-corpus.json"));
       if (!existing.equals(bytes)) throw new Error("Runtime release already contains different Corpus bytes");
     });
+    const releaseDigest = staged.corpus_digest;
+    const releaseRef = `registry/${input.productId}/releases/${releaseDigest.slice("sha256:".length)}`;
+    const releaseInput = {
+      product_id: input.productId,
+      creator_id: input.creatorId,
+      release_digest: releaseDigest,
+      corpus_digest: sourceDigest,
+      corpus_ref: execution.outputRef,
+      release_ref: releaseRef,
+      runtime_manifest_ref: `${releaseRef}/runtime/manifest.json`,
+      brief_spec: input.briefSpec ?? null,
+    } as const;
+    const releaseBytes = Buffer.from(JSON.stringify({ ...releaseInput, status: "published", published_at: new Date().toISOString() }, null, 2), "utf8");
+    await this.objectStore.put(`${releaseRef}/release.json`, releaseBytes, { immutable: true, contentType: "application/json" });
+    const release = await this.releases.publish(releaseInput);
     await rm(staging, { recursive: true, force: true });
-    return { execution_id: execution.executionId, output_ref: execution.outputRef, corpus_digest: sourceDigest, published };
+    return { execution_id: execution.executionId, output_ref: execution.outputRef, corpus_digest: sourceDigest, published: staged, release };
   }
 }
 
