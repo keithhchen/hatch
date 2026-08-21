@@ -151,7 +151,8 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       nodes: nodePersistence,
       objects: nodeObjectStore,
       publisher: corpusPublisher,
-      releases: releaseStore
+      releases: releaseStore,
+      productPool: nodePool!
     });
   }
   const graphStore = graphPool ? new PostgresDistillationGraphStore(graphPool) : undefined;
