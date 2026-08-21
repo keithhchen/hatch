@@ -6,24 +6,27 @@ const MESSAGES = {
     japanese: "日本語",
     files: "Files",
     aboutYou: "About you",
+    corpus: "Method",
     review: "Review",
-    brief: "Brief",
+    brief: "Starting questions",
     complete: "Complete",
-    briefTitle: "Define the product brief",
-    briefBody: "Write the questions a buyer must answer before work begins. This is a plain text form.",
+    briefTitle: "Set the starting questions",
+    briefBody: "Write the questions a Buyer answers before work begins.",
     addBriefQuestion: "Add question",
     briefQuestion: "Question",
     briefQuestionPlaceholder: "What should the buyer tell you before you start?",
     requiredQuestion: "Required",
     moveQuestionUp: "Move question up",
     moveQuestionDown: "Move question down",
-    saveBriefAndContinue: "Save brief and continue to publish",
-    briefSaved: "Brief saved.",
+    saveBriefAndContinue: "Save questions and continue to publish",
+    briefSaved: "Starting questions saved.",
     optional: "optional",
-    briefRequiredBeforePublish: "Add and save at least one Brief question before publishing.",
-    backToBrief: "Back to Brief",
+    briefRequiredBeforePublish: "Add and save at least one starting question before publishing.",
+    backToBrief: "Back to starting questions",
     giveMaterial: "Give Hatch the material behind your method.",
     uploadFiles: "Upload files",
+    chooseFiles: "Choose files",
+    uploadHint: "PDF, Office, Markdown, and text files",
     localFilesOnly: "Local files only; repeat uploads are allowed.",
     startDistillation: "Generate version",
     continueWithFiles: "Continue with these files",
@@ -37,7 +40,7 @@ const MESSAGES = {
     yourContext: "Your context",
     addContext: "Add the context, influence, or nuance…",
     saveAndNext: "Save and next",
-    continueToCorpus: "Continue to Corpus",
+    continueToCorpus: "Continue to Method",
     reviewResult: "Does this result meet your standard?",
     userSituation: "User situation",
     yourMethod: "Your method",
@@ -47,7 +50,7 @@ const MESSAGES = {
     removeQuestion: "Remove this question",
     removeQuestionHelp: "You do not agree with this question design. Remove it from the review set.",
     confirmRemoveQuestion: "Remove question",
-    fullCorpus: "Full Corpus",
+    fullCorpus: "The method Hatch prepared",
     viewProductDetails: "View Product Details",
     publishProduct: "Publish product",
     generateAnotherVersion: "Generate another version",
@@ -60,7 +63,7 @@ const MESSAGES = {
     waiting: "Hatch is working…",
     saved: "Saved",
     answersSaved: "Your answers are saved.",
-    corpusStarting: "Answers saved. Corpus is starting…",
+    corpusStarting: "Answers saved. Your method is being prepared…",
     saving: "Saving…",
     correctionSaved: "Correction saved. Generate another version when you are ready.",
     versionGenerated: "A new version is being generated.",
@@ -102,7 +105,7 @@ const MESSAGES = {
     whatShouldHatchHaveDone: "What should Hatch have done?",
     why: "Why?",
     evaluationUnavailable: "Evaluation unavailable",
-    corpusUnavailable: "Corpus unavailable"
+    corpusUnavailable: "Method unavailable"
     ,versionNeedsAttention: "Needs attention"
     ,versionGenerationPaused: "This version could not be completed."
     ,failureDetailsUnavailable: "Hatch did not return failure details for this version."
@@ -164,7 +167,7 @@ const MESSAGES = {
     ,noAccessRecordsBody: "Records appear here after someone adds a published Product to their account."
     ,productsLoadError: "We couldn't load your Products"
     ,productsPageTitle: "Turn your method into a Product people can use."
-    ,productsPageBody: "Each Product keeps its files, versions, review, Brief, and release together."
+    ,productsPageBody: "Each Product keeps its files, versions, starting questions, and release together."
     ,createFirstProduct: "Create your first Product"
     ,createFirstProductBody: "Start with one focused result, add the material behind it, and generate the first version."
     ,notPublished: "Not published"
@@ -206,24 +209,27 @@ const MESSAGES = {
     japanese: "日本語",
     files: "文件",
     aboutYou: "关于你",
+    corpus: "方法",
     review: "审核",
-    brief: "Brief",
+    brief: "开始问题",
     complete: "完成",
-    briefTitle: "定义产品 Brief",
-    briefBody: "写下用户开工前必须回答的问题。这是普通文字表单，不涉及 AI。",
+    briefTitle: "设置开始问题",
+    briefBody: "写下用户开始工作前需要回答的问题。",
     addBriefQuestion: "添加问题",
     briefQuestion: "问题",
     briefQuestionPlaceholder: "开始工作前，你希望用户告诉你什么？",
     requiredQuestion: "必填",
     moveQuestionUp: "问题上移",
     moveQuestionDown: "问题下移",
-    saveBriefAndContinue: "保存 Brief，继续发布",
-    briefSaved: "Brief 已保存。",
+    saveBriefAndContinue: "保存问题，继续发布",
+    briefSaved: "开始问题已保存。",
     optional: "选填",
-    briefRequiredBeforePublish: "发布前请至少添加并保存一个 Brief 问题。",
-    backToBrief: "返回 Brief",
+    briefRequiredBeforePublish: "发布前请至少添加并保存一个开始问题。",
+    backToBrief: "返回开始问题",
     giveMaterial: "把支撑你方法的材料交给 Hatch。",
     uploadFiles: "上传文件",
+    chooseFiles: "选择文件",
+    uploadHint: "支持 PDF、Office、Markdown 和文本文件",
     localFilesOnly: "仅支持本地文件，可以分批上传。",
     startDistillation: "生成版本",
     continueWithFiles: "使用这些文件继续",
@@ -237,7 +243,7 @@ const MESSAGES = {
     yourContext: "你的背景",
     addContext: "补充背景、影响或细节……",
     saveAndNext: "保存并继续",
-    continueToCorpus: "继续生成 Corpus",
+    continueToCorpus: "继续生成方法",
     reviewResult: "这个结果符合你的标准吗？",
     userSituation: "用户情境",
     yourMethod: "你的方法",
@@ -247,7 +253,7 @@ const MESSAGES = {
     removeQuestion: "移除这个问题",
     removeQuestionHelp: "你不认可这个问题的设计。移除后，它不会再用于审核这个产品。",
     confirmRemoveQuestion: "移除问题",
-    fullCorpus: "完整 Corpus",
+    fullCorpus: "Hatch 准备好的方法",
     viewProductDetails: "查看产品详情",
     publishProduct: "发布产品",
     generateAnotherVersion: "生成新版本",
@@ -260,7 +266,7 @@ const MESSAGES = {
     waiting: "Hatch 正在处理……",
     saved: "已保存",
     answersSaved: "你的回答已保存。",
-    corpusStarting: "回答已保存，Corpus 正在生成……",
+    corpusStarting: "回答已保存，正在准备你的方法……",
     saving: "保存中……",
     correctionSaved: "修正已保存。准备好后可以生成新版本。",
     versionGenerated: "正在生成新版本。",
@@ -302,7 +308,7 @@ const MESSAGES = {
     whatShouldHatchHaveDone: "Hatch 应该怎么做？",
     why: "为什么？",
     evaluationUnavailable: "评估不可用",
-    corpusUnavailable: "Corpus 不可用"
+    corpusUnavailable: "方法不可用"
     ,versionNeedsAttention: "需要处理"
     ,versionGenerationPaused: "这个版本未能完成。"
     ,failureDetailsUnavailable: "Hatch 没有返回这个版本的失败详情。"
@@ -364,7 +370,7 @@ const MESSAGES = {
     ,noAccessRecordsBody: "有人将已发布产品添加到账户后，记录会显示在这里。"
     ,productsLoadError: "无法加载你的产品"
     ,productsPageTitle: "把你的方法变成人们可以使用的产品。"
-    ,productsPageBody: "每个产品都把文件、版本、审核、Brief 与发布记录放在一起。"
+    ,productsPageBody: "每个产品都把文件、版本、开始问题与发布记录放在一起。"
     ,createFirstProduct: "创建你的第一个产品"
     ,createFirstProductBody: "从一个明确结果开始，添加支撑材料，再生成第一个版本。"
     ,notPublished: "未发布"
@@ -406,24 +412,27 @@ const MESSAGES = {
     japanese: "日本語",
     files: "ファイル",
     aboutYou: "あなたについて",
+    corpus: "方法",
     review: "レビュー",
-    brief: "Brief",
+    brief: "開始前の質問",
     complete: "完了",
-    briefTitle: "プロダクト Brief を定義",
-    briefBody: "作業開始前に購入者が答える質問を書きます。通常のテキストフォームです。",
+    briefTitle: "開始前の質問を設定",
+    briefBody: "作業を始める前に Buyer が答える質問を書きます。",
     addBriefQuestion: "質問を追加",
     briefQuestion: "質問",
     briefQuestionPlaceholder: "開始前に購入者から何を聞きたいですか？",
     requiredQuestion: "必須",
     moveQuestionUp: "質問を上へ",
     moveQuestionDown: "質問を下へ",
-    saveBriefAndContinue: "Brief を保存して公開へ進む",
-    briefSaved: "Brief を保存しました。",
+    saveBriefAndContinue: "質問を保存して公開へ進む",
+    briefSaved: "開始前の質問を保存しました。",
     optional: "任意",
-    briefRequiredBeforePublish: "公開前に Brief の質問を1つ以上保存してください。",
-    backToBrief: "Brief に戻る",
+    briefRequiredBeforePublish: "公開前に開始前の質問を1つ以上保存してください。",
+    backToBrief: "開始前の質問に戻る",
     giveMaterial: "あなたの方法を支える資料を Hatch に渡します。",
     uploadFiles: "ファイルをアップロード",
+    chooseFiles: "ファイルを選択",
+    uploadHint: "PDF、Office、Markdown、テキストに対応",
     localFilesOnly: "ローカルファイルのみ。何度でも追加できます。",
     startDistillation: "バージョンを生成",
     continueWithFiles: "このファイルで続ける",
@@ -437,7 +446,7 @@ const MESSAGES = {
     yourContext: "あなたの背景",
     addContext: "背景、影響、ニュアンスを追加…",
     saveAndNext: "保存して次へ",
-    continueToCorpus: "Corpus に進む",
+    continueToCorpus: "方法に進む",
     reviewResult: "この結果はあなたの基準を満たしていますか？",
     userSituation: "ユーザーの状況",
     yourMethod: "あなたの方法",
@@ -447,7 +456,7 @@ const MESSAGES = {
     removeQuestion: "この質問を削除",
     removeQuestionHelp: "この質問の設計に同意しません。レビュー対象から削除します。",
     confirmRemoveQuestion: "質問を削除",
-    fullCorpus: "完全な Corpus",
+    fullCorpus: "Hatch が準備した方法",
     viewProductDetails: "プロダクト詳細を見る",
     publishProduct: "プロダクトを公開",
     generateAnotherVersion: "新しいバージョンを生成",
@@ -460,7 +469,7 @@ const MESSAGES = {
     waiting: "Hatch が処理中です…",
     saved: "保存済み",
     answersSaved: "回答を保存しました。",
-    corpusStarting: "回答を保存しました。Corpus を生成中です…",
+    corpusStarting: "回答を保存しました。方法を準備中です…",
     saving: "保存中…",
     correctionSaved: "修正を保存しました。準備ができたら新しいバージョンを生成できます。",
     versionGenerated: "新しいバージョンを生成しています。",
@@ -502,7 +511,7 @@ const MESSAGES = {
     whatShouldHatchHaveDone: "Hatch はどうすべきでしたか？",
     why: "理由",
     evaluationUnavailable: "評価を利用できません",
-    corpusUnavailable: "Corpus を利用できません"
+    corpusUnavailable: "方法を利用できません"
     ,versionNeedsAttention: "対応が必要"
     ,versionGenerationPaused: "このバージョンを完了できませんでした。"
     ,failureDetailsUnavailable: "Hatch はこのバージョンの失敗詳細を返しませんでした。"
@@ -564,7 +573,7 @@ const MESSAGES = {
     ,noAccessRecordsBody: "公開したプロダクトがアカウントに追加されると、ここに記録されます。"
     ,productsLoadError: "プロダクトを読み込めませんでした"
     ,productsPageTitle: "あなたの方法を、人が使えるプロダクトに。"
-    ,productsPageBody: "各プロダクトに、ファイル、バージョン、レビュー、Brief、公開履歴がまとまります。"
+    ,productsPageBody: "各プロダクトに、ファイル、バージョン、開始前の質問、公開履歴がまとまります。"
     ,createFirstProduct: "最初のプロダクトを作成"
     ,createFirstProductBody: "明確な成果から始め、資料を追加して、最初のバージョンを生成します。"
     ,notPublished: "未公開"

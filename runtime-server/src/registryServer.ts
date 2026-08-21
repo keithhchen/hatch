@@ -25,7 +25,6 @@ import {
 } from "./registryAuth.js";
 import { RegistryStoreTs } from "./registryStore.js";
 import { RegistryDeploymentConflictError } from "./registryStore.js";
-import { MAX_AGENT_CORPUS_BUNDLE_BYTES } from "./registryCorpus.js";
 import { BriefValidationError, normalizeBriefSpec, type BriefSpec } from "./brief.js";
 import { handleCreatorFactoryHttp } from "./creatorLearning/httpApi.js";
 import { isUuidV4 } from "./identity.js";
@@ -868,7 +867,7 @@ async function route(
   if (url.pathname === "/v1/public/products" && request.method === "GET") {
     const limit = boundedQueryInteger(url, "limit", 20, 1, 20);
     const offset = boundedQueryInteger(url, "offset", 0, 0, 100_000);
-    const rows = await context.store.listAllAgentCorpora({ limit: limit + 1, offset });
+    const rows = await context.releaseStore.listPublic({ limit: limit + 1, offset });
     const page = rows.slice(0, limit);
     sendJson(response, 200, page.map(publicProductRow), {
       "x-hatch-page-limit": String(limit),
@@ -881,7 +880,7 @@ async function route(
   if (url.pathname === "/v1/public/creators" && request.method === "GET") {
     const limit = boundedQueryInteger(url, "limit", 20, 1, 20);
     const offset = boundedQueryInteger(url, "offset", 0, 0, 100_000);
-    const rows = await context.store.listAllAgentCorpora({ limit: Math.min(20_000, offset + limit + 1), offset: 0 });
+    const rows = await context.releaseStore.listPublic({ limit: Math.min(20_001, offset + limit + 1), offset: 0 });
     const creators = new Map<string, { id: string; name: string; product_count: number }>();
     for (const row of rows) {
       const current = creators.get(row.creator_id) ?? { id: row.creator_id, name: row.creator_name, product_count: 0 };
@@ -901,7 +900,7 @@ async function route(
   if (publicProductMatch && request.method === "GET") {
     const productId = decodeURIComponent(publicProductMatch[1]!);
     if (!isUuidV4(productId)) { sendJson(response, 404, { detail: "Product not found." }); return; }
-    const row = (await context.store.listAllAgentCorpora({ limit: 20, offset: 0 })).find((item) => item.product_id === productId);
+    const row = await context.releaseStore.getPublic(productId);
     if (!row) { sendJson(response, 404, { detail: "Product not found." }); return; }
     sendJson(response, 200, publicProductRow(row));
     return;
@@ -983,65 +982,6 @@ async function route(
     }
     return;
   }
-  if (url.pathname === "/v1/product-corpora" && request.method === "POST") {
-    if (!context.publishToken || bearer(request) !== context.publishToken) { sendJson(response, 403, { detail: "A valid Registry publish token is required." }); return; }
-    const creatorId = url.searchParams.get("creator_id") ?? "";
-    const agentId = url.searchParams.get("product_id") ?? "";
-    const lease = beginPublishWork(response, context, "registry-publish-service", false);
-    if (!lease) return;
-    try {
-      const product = await productForCreator(context, creatorId, agentId);
-      sendJson(response, 201, await context.store.publishAgentCorpusBundle(
-        creatorId,
-        agentId,
-        await readBytes(request, MAX_AGENT_CORPUS_BUNDLE_BYTES),
-        product?.brief_spec,
-      ));
-    } catch (error) {
-      sendError(response, error, { agent_not_found: [404, "Agent not found."] });
-    } finally {
-      lease.release();
-    }
-    return;
-  }
-  if (url.pathname === "/v1/creator/product-corpora" && request.method === "POST") {
-    const account = await authenticate(request, response, context, "creator");
-    if (account === SESSION_QUERY_REJECTED) return;
-    if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
-    const agentId = url.searchParams.get("product_id") ?? "";
-    const product = await productForCreator(context, account.id, agentId);
-    if (!product) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
-    if (!product.brief_spec) {
-      const error = new Error("brief_spec_required");
-      (error as Error & { status?: number }).status = 422;
-      throw error;
-    }
-    const lease = beginPublishWork(response, context, `creator:${account.id}`);
-    if (!lease) return;
-    try {
-      sendJson(response, 201, await context.store.publishAgentCorpusBundle(
-        account.id,
-        agentId,
-        await readBytes(request, MAX_AGENT_CORPUS_BUNDLE_BYTES),
-        product.brief_spec,
-      ));
-    } catch (error) {
-      sendError(response, error);
-    } finally {
-      lease.release();
-    }
-    return;
-  }
-  const corpusMatch = url.pathname.match(/^\/v1\/product-corpora\/([^/]+)(?:\/([^/]+))?$/);
-  if (corpusMatch && request.method === "GET") {
-    const creatorId = decodeURIComponent(corpusMatch[1]!);
-    if (corpusMatch[2]) {
-      const corpus = context.store.getAgentCorpus(creatorId, decodeURIComponent(corpusMatch[2]!));
-      if (!corpus) { sendJson(response, 404, { detail: "Agent Corpus not found." }); return; }
-      sendJson(response, 200, corpus);
-    } else sendJson(response, 200, await context.store.listAgentCorpora(creatorId));
-    return;
-  }
   sendJson(response, 404, { detail: "Route not found." });
 }
 
@@ -1119,11 +1059,20 @@ function requiredDeploymentField(body: Record<string, unknown>, field: string): 
 
 function publicProductRow(row: Record<string, unknown>): Record<string, unknown> {
   const { agent_id: _internalProductAlias, creator_slug: _creatorSlug, product_slug: _productSlug, ...publicRow } = row;
+  const promise = publicRow.product_promise ?? publicRow.product_description ?? "";
+  const productId = String(publicRow.product_id ?? "");
   return {
     ...publicRow,
     creator: { id: publicRow.creator_id, name: publicRow.creator_name },
     product: { id: publicRow.product_id, name: publicRow.product_name },
-    public_url: `/products/${encodeURIComponent(String(publicRow.product_id ?? ""))}`
+    promise,
+    description: publicRow.product_description ?? promise,
+    product_boundaries: publicRow.product_boundaries ?? [],
+    boundaries: publicRow.product_boundaries ?? [],
+    availability: "published",
+    available: true,
+    release_id: publicRow.release_digest,
+    public_url: `/products/${encodeURIComponent(productId)}`
   };
 }
 

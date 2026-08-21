@@ -219,7 +219,7 @@ export function CreatorProductWorkspace({ token, productId, tab = "files", navig
     <div className="cpv2-workspace-tabs" role="tablist" aria-label={t("productWorkflow")}>
       {TAB_KEYS.map((key) => {
         const step = workflow.steps[key];
-        const label = key === "about-you" ? t("aboutYou") : key === "corpus" ? "Corpus" : t(key);
+      const label = key === "about-you" ? t("aboutYou") : t(key);
         return <button key={key} type="button" role="tab" aria-selected={selectedTab === key} aria-disabled={!step.enabled} aria-busy={step.loading} aria-invalid={step.failed || undefined} className={`${selectedTab === key ? "is-active" : ""}${!step.enabled ? " is-disabled" : ""}${step.failed ? " is-failed" : ""}`} disabled={!step.enabled} onClick={() => goTab(key)}><span>{label}</span>{step.loading ? <span className="cpv2-tab-spinner" aria-label={t("waiting")} /> : null}</button>;
       })}
     </div>
@@ -252,7 +252,12 @@ async function saveAnswers(answers, startCorpus, token, productId, aboutYou, set
 function FilesPanel({ t, documents, busy, onUpload, onStart, onDelete, hasExecution }) {
   return <section className="cpv2-workspace-panel">
     <div className="cpv2-panel-heading"><div><h2>{t("files")}</h2><p>{t("giveMaterial")}</p><small>{t("sourceNote")}</small></div><StatusTag tone="neutral">{documents.length} {t("files")}</StatusTag></div>
-    <label className="cpv2-upload-dropzone"><span>{t("uploadFiles")}</span><input type="file" multiple accept=".pdf,.docx,.xlsx,.xls,.xlsm,.pptx,.csv,.tsv,.txt,.md,.json,.html,.htm" onChange={(event) => { void onUpload([...event.target.files]); event.target.value = ""; }} disabled={Boolean(busy)} /></label>
+    <label className={`cpv2-upload-dropzone${busy ? " is-disabled" : ""}`}>
+      <span className="cpv2-upload-dropzone-icon" aria-hidden="true">↑</span>
+      <span className="cpv2-upload-dropzone-copy"><strong>{t("uploadFiles")}</strong><small>{t("uploadHint")}</small></span>
+      <span className="cpv2-upload-button">{t("chooseFiles")}</span>
+      <input className="cpv2-file-input" type="file" multiple accept=".pdf,.docx,.xlsx,.xls,.xlsm,.pptx,.csv,.tsv,.txt,.md,.json,.html,.htm" onChange={(event) => { void onUpload([...event.target.files]); event.target.value = ""; }} disabled={Boolean(busy)} />
+    </label>
     {!documents.length ? <p className="cpv2-empty-inline">{t("noFilesYet")}</p> : <ul className="cpv2-file-list">{documents.map((file) => <li key={file.id ?? file.file_id ?? file.display_name}><span>{file.display_name ?? file.name ?? t("unnamedFile")}</span><StatusTag tone={file.status === "error" ? "error" : "success"}>{file.status ?? t("ready")}</StatusTag><Button type="button" variant="link" disabled={Boolean(busy)} onClick={() => void onDelete(file)}>{t("removeFile")}</Button></li>)}</ul>}
     <div className="cpv2-workspace-actions"><Button type="button" loading={busy === "about-you"} disabled={!documents.length || Boolean(busy)} onClick={onStart}>{hasExecution ? t("continueWithFiles") : t("startDistillation")}</Button></div>
   </section>;
@@ -292,11 +297,11 @@ function AboutYouPanel({ t, execution, corpus, busy, onSubmit, onRetry, onFiles 
 }
 
 function CorpusPanel({ t, execution, busy, onRetry }) {
-  if (!execution) return <EmptyNodePanel title="Corpus" body={t("waiting")} />;
-  if (isExecutionActive(execution)) return <NodeProgressPanel t={t} title="Corpus" execution={execution} />;
-  if (isExecutionError(execution)) return <NodeErrorPanel t={t} title="Corpus" execution={execution} onRetry={onRetry} busy={busy} />;
+  if (!execution) return <EmptyNodePanel title={t("corpus")} body={t("waiting")} />;
+  if (isExecutionActive(execution)) return <NodeProgressPanel t={t} title={t("corpus")} execution={execution} />;
+  if (isExecutionError(execution)) return <NodeErrorPanel t={t} title={t("corpus")} execution={execution} onRetry={onRetry} busy={busy} />;
   const output = execution.output;
-  return <section className="cpv2-workspace-panel cpv2-corpus-panel"><div className="cpv2-panel-heading"><div><h2>Corpus</h2><p>{t("fullCorpus")}</p></div><StatusTag tone="success">{t("ready")}</StatusTag></div>{output ? <><article className="cpv2-corpus-block"><h3>System instructions</h3><pre>{output.system_instructions}</pre></article><article className="cpv2-corpus-block"><h3>Skills</h3>{output.skills?.map((skill) => <details key={skill.id}><summary>{skill.title}</summary><p>{skill.instruction}</p></details>)}</article><article className="cpv2-corpus-block"><h3>Knowledge</h3>{output.knowledge?.map((item) => <details key={item.id}><summary>{item.title}</summary><p>{item.content}</p></details>)}</article></> : <p>{t("corpusUnavailable")}</p>}</section>;
+  return <section className="cpv2-workspace-panel cpv2-corpus-panel"><div className="cpv2-panel-heading"><div><h2>{t("corpus")}</h2><p>{t("fullCorpus")}</p></div><StatusTag tone="success">{t("ready")}</StatusTag></div>{output ? <><article className="cpv2-corpus-block cpv2-corpus-system"><div className="cpv2-corpus-block-heading"><h3>System instructions</h3><span>{t("ready")}</span></div><pre>{output.system_instructions}</pre></article><section className="cpv2-corpus-block"><div className="cpv2-corpus-block-heading"><h3>Skills</h3><span>{output.skills?.length ?? 0}</span></div><div className="cpv2-corpus-grid">{output.skills?.map((skill) => <details className="cpv2-corpus-item" key={skill.id}><summary>{skill.title}</summary><p>{skill.instruction}</p></details>)}</div></section><section className="cpv2-corpus-block"><div className="cpv2-corpus-block-heading"><h3>Knowledge</h3><span>{output.knowledge?.length ?? 0}</span></div><div className="cpv2-corpus-grid">{output.knowledge?.map((item) => <details className="cpv2-corpus-item" key={item.id}><summary>{item.title}</summary><p>{item.content}</p></details>)}</div></section></> : <p>{t("corpusUnavailable")}</p>}</section>;
 }
 
 function BriefPanel({ t, token, product, briefSpec, busy, onRetryAction, onSaved, onError }) {
