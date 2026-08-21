@@ -1074,7 +1074,14 @@ function requiredDeploymentField(body: Record<string, unknown>, field: string): 
 async function publicCatalogRows(context: RegistryContext): Promise<Record<string, unknown>[]> {
   const releases = await context.releaseStore.listPublic({ limit: 20_001, offset: 0 });
   const rows = new Map<string, Record<string, unknown>>(
-    releases.map((release) => [release.product_id, release as unknown as Record<string, unknown>]),
+    releases
+      .filter((release) => (
+        typeof release.release_ref === "string"
+        && release.release_ref.startsWith(`registry/${release.product_id}/releases/`)
+        && typeof release.runtime_manifest_ref === "string"
+        && release.runtime_manifest_ref.endsWith("/runtime/manifest.json")
+      ))
+      .map((release) => [release.product_id, release as unknown as Record<string, unknown>]),
   );
   return [...rows.values()].sort((left, right) => {
     const time = Date.parse(String(right.published_at ?? "")) - Date.parse(String(left.published_at ?? ""));
