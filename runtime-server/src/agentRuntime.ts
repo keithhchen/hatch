@@ -953,7 +953,7 @@ export async function executeChatTool(
       instructions: loaded.skill.instructions,
       bundle: {
         locator: `skill://${loaded.skill.name}`,
-        resources: loaded.resources.paths,
+        resources: loaded.resources.paths.map((resourcePath) => skillResourceUri(loaded.skill.name, resourcePath)),
         resource_manifest_truncated: loaded.resources.truncated
       }
     };
@@ -1152,6 +1152,8 @@ function resolveSkillResourceToolPath(
   activeSkills: ActivatedSkill[],
   skillAliases: Record<string, string>
 ): string | undefined {
+  const skillUriPath = resolveSkillUriPath(target, activeSkills);
+  if (skillUriPath) return skillUriPath;
   const expandedTarget = expandSkillAliasPath(target, skillAliases) ?? target;
   const activeSkillRoots = activeSkills.map((skill) => skill.directory);
   if (isSkillResourcePath(expandedTarget, activeSkillRoots)) {
@@ -1177,6 +1179,34 @@ function resolveSkillResourceToolPath(
     throw new Error(`Ambiguous skill resource path: ${target}. Use the full skill resource path from the activated skill context.`);
   }
   return undefined;
+}
+
+/**
+ * `skill://` is the model-facing resource URI. It is deliberately resolved
+ * only against an activated Skill, never against the process working
+ * directory. This keeps the URI stable for the model while the filesystem
+ * path remains private to Runtime.
+ */
+function resolveSkillUriPath(target: string, activeSkills: ActivatedSkill[]): string | undefined {
+  const match = /^skill:\/\/([^/]+)(?:\/(.*))?$/i.exec(target.trim());
+  if (!match) return undefined;
+  const skillName = match[1]!;
+  const relativePath = (match[2] ?? "").replaceAll("\\", "/");
+  const skill = activeSkills.find((candidate) => candidate.name === skillName);
+  if (!skill) throw new Error(`Skill is not activated: ${skillName}`);
+  if (!relativePath) return path.resolve(skill.directory);
+  const normalized = normalizeSkillRelativePath(relativePath);
+  if (!normalized || !isSkillBundleRelativePath(normalized)) {
+    throw new Error(`Invalid Skill resource URI: ${target}`);
+  }
+  if (!skill.resource_manifest_truncated && !skill.resource_paths.some((resourcePath) => resourcePath === normalized)) {
+    throw new Error(`Skill resource is not declared: ${target}`);
+  }
+  return path.resolve(skill.directory, normalized);
+}
+
+function skillResourceUri(skillName: string, resourcePath: string): string {
+  return `skill://${skillName}/${resourcePath.replaceAll("\\", "/")}`;
 }
 
 function normalizeSkillRelativePath(target: string): string | undefined {

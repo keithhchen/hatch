@@ -2941,7 +2941,7 @@ async function createActivatedSkillResourceChatCompletionsServer(): Promise<{
   close: () => Promise<void>;
 }> {
   const requests: Array<Record<string, any>> = [];
-  const resourcePath = "references/guide.md";
+  const resourcePath = "skill://manual-resource-skill/references/guide.md";
   const server = http.createServer((req, res) => {
     void (async () => {
       if (req.method !== "POST" || req.url !== "/v1/chat/completions") {
