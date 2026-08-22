@@ -24,6 +24,8 @@ export const MAX_CONTEXT_ATTACHMENT_SOURCE_BYTES = 1024 * 1024;
 export const MAX_CONTEXT_ATTACHMENT_TEXT_BYTES = 64 * 1024;
 export const MAX_CONTEXT_ATTACHMENT_TOTAL_TEXT_BYTES = 128 * 1024;
 export const MAX_ERROR_MESSAGE_CHARS = 16 * 1024;
+/** Canonical model-visible content for the internal task-start user turn. */
+export const TASK_START_MESSAGE_CONTENT = "Start the task described in the Brief.";
 const ProtocolIdSchema = z.string().min(1).max(MAX_PROTOCOL_ID_CHARS);
 const AuthorityIdSchema = z.string().regex(UUID_V4_RE);
 export const ClientToolNameSchema = z.enum([
@@ -165,7 +167,7 @@ export const ClientMessageSchema = z.object({
   client_message_id: ProtocolIdSchema.optional(),
   conversation_id: ProtocolIdSchema,
   message: UserMessageSchema,
-  /** Creates the first Agent run for a Brief-backed Task without a fake chat message. */
+  /** Requests the first Agent run; Runtime materializes its internal marked user turn. */
   task_start: z.literal(true).optional()
 }).strict().superRefine((message, ctx) => {
   if (message.task_start && (message.message.content.trim() || message.message.attachments?.length)) {
@@ -215,6 +217,8 @@ export type InboundMessage = z.infer<typeof InboundMessageSchema>;
 export type ConversationMessage = {
   role: "user" | "assistant" | "tool" | "compactionSummary";
   content: string | null;
+  /** Internal durable marker. UI projections hide it; provider adapters omit it. */
+  kind?: "task_start";
   /** Structured dropped-file projection for durable audit and recovery. */
   attachments?: ContextAttachment[];
   tokens_before?: number;

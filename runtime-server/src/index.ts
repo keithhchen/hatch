@@ -18,6 +18,8 @@ import {
   clientMessageInputDigest,
   parseInboundMessage,
   PROTOCOL_VERSION,
+  TASK_START_MESSAGE_CONTENT,
+  type ConversationMessage,
   type ClientHello,
   type OutboundMessage,
   type OutputFinishReason,
@@ -2597,6 +2599,19 @@ async function runOneTurn(
     abortSignal.throwIfAborted();
     await state.start();
     const priorMessages = await store.readConversation(input.conversation_id);
+    const persistedUserMessage: ConversationMessage = input.task_start
+      ? {
+        role: "user",
+        content: TASK_START_MESSAGE_CONTENT,
+        kind: "task_start"
+      }
+      : input.message;
+    // The wire-level task_start message is intentionally empty, but the
+    // Runtime's canonical user turn is not. Keep the same marked message in
+    // the durable transcript and pass its non-empty content to the Agent.
+    const runtimeInput: RunStart = input.task_start
+      ? { ...input, message: { role: "user", content: TASK_START_MESSAGE_CONTENT } }
+      : input;
     const materializedAgent = binding.agentCorpusRoot
       ? await materializeAgentCorpus(
         binding.agentCorpusRoot,
@@ -2607,12 +2622,11 @@ async function runOneTurn(
       )
       : undefined;
     const persistUserMessage = async (): Promise<void> => {
-      if (input.task_start) return;
       await store.append({
         type: "conversation.model_message",
         conversation_id: input.conversation_id,
         run_id: input.run_id,
-        message: input.message
+        message: persistedUserMessage
       });
       await conversationRepository.appendEvent({
         conversationId: input.conversation_id,
@@ -2620,8 +2634,9 @@ async function runOneTurn(
         type: "message.created",
         payload: {
           role: "user",
-          content: input.message.content,
-          ...(input.message.attachments?.length ? { attachments: input.message.attachments } : {})
+          content: persistedUserMessage.content ?? "",
+          ...(persistedUserMessage.kind ? { kind: persistedUserMessage.kind } : {}),
+          ...(persistedUserMessage.attachments?.length ? { attachments: persistedUserMessage.attachments } : {})
         }
       });
     };
@@ -2850,12 +2865,12 @@ async function runOneTurn(
     await persistUserMessage();
 
     setupCompleted = performance.now();
-    const messages = input.task_start ? runtimeMessages : [...runtimeMessages, input.message];
+    const messages = [...runtimeMessages, persistedUserMessage];
 
     // Store/materialization work may race with a disconnect. Never start a
     // provider request after the owning run has already been aborted.
     abortSignal.throwIfAborted();
-    for await (const event of runtime.run(input, {
+    for await (const event of runtime.run(runtimeInput, {
       clientBroker: broker,
       serverTools,
       state,

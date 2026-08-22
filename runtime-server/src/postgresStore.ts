@@ -605,7 +605,7 @@ export class PostgresStore extends RuntimeStore {
         .filter((event): event is Extract<StoreEvent, { type: "conversation.model_message" }> => (
           event.type === "conversation.model_message"
           && (
-            event.message.role === "user"
+            (event.message.role === "user" && event.message.kind !== "task_start")
             || (event.message.role === "assistant" && event.finish_reason !== undefined)
           )
         ))
@@ -616,7 +616,7 @@ export class PostgresStore extends RuntimeStore {
       | Extract<StoreEvent, { type: "conversation.model_message" }>
     ) => {
       if (event.type === "conversation.model_message") {
-        return event.message.role === "user"
+        return (event.message.role === "user" && event.message.kind !== "task_start")
           || (event.message.role === "assistant" && (
             event.finish_reason !== undefined
             || index > (latestMessageCreatedIndex.get(`${event.run_id}:${event.message.role}`) ?? -1)
