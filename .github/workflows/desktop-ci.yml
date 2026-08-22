@@ -327,13 +327,13 @@ jobs:
           if gh release view "$GITHUB_REF_NAME" --repo "$GH_REPO" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" \
               "$arm64_dmg_path" "$intel_dmg_path" "$exe_path" \
-              release/macos/macos-arm64.json release/macos/macos-intel.json release/windows/windows.json \
+              release/macos/macos-arm64.json release/macos/macos-intel.json "$windows_report" \
               --clobber --repo "$GH_REPO"
             gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease=false --latest --title "$GITHUB_REF_NAME" --notes-file release-notes.md --repo "$GH_REPO"
           else
             gh release create "$GITHUB_REF_NAME" \
               "$arm64_dmg_path" "$intel_dmg_path" "$exe_path" \
-              release/macos/macos-arm64.json release/macos/macos-intel.json release/windows/windows.json \
+              release/macos/macos-arm64.json release/macos/macos-intel.json "$windows_report" \
               --verify-tag --latest --title "$GITHUB_REF_NAME" --notes-file release-notes.md --repo "$GH_REPO"
           fi
       - name: Verify published Release is complete and latest
