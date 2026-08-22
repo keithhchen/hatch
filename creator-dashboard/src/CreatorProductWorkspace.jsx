@@ -22,7 +22,7 @@ import {
   isExecutionError,
   isValidBriefSpec
 } from "./creatorWorkflowUi.js";
-import { getCreatorNodeCopy, getCreatorNodeTips } from "./creatorNodeTips.js";
+import { getCreatorNodeTips } from "./creatorNodeTips.js";
 import "./creatorProductWorkspace.css";
 
 const TAB_KEYS = CREATOR_WORKFLOW_STEPS;
@@ -221,7 +221,7 @@ export function CreatorProductWorkspace({ token, productId, tab = "files", navig
       {TAB_KEYS.map((key) => {
         const step = workflow.steps[key];
       const label = key === "about-you" ? t("aboutYou") : t(key);
-        return <button key={key} type="button" role="tab" aria-selected={selectedTab === key} aria-disabled={!step.enabled} aria-busy={step.loading} aria-invalid={step.failed || undefined} className={`${selectedTab === key ? "is-active" : ""}${!step.enabled ? " is-disabled" : ""}${step.failed ? " is-failed" : ""}`} disabled={!step.enabled} onClick={() => goTab(key)}><span>{label}</span>{step.loading ? <span className="cpv2-tab-spinner" aria-label={t("waiting")} /> : null}</button>;
+        return <button key={key} type="button" role="tab" aria-selected={selectedTab === key} aria-disabled={!step.enabled} aria-busy={step.loading} aria-invalid={step.failed || undefined} className={`${selectedTab === key ? "is-active" : ""}${!step.enabled ? " is-disabled" : ""}${step.failed ? " is-failed" : ""}`} disabled={!step.enabled} onClick={() => goTab(key)}><span>{label}</span>{step.loading ? <span className="cpv2-tab-spinner" aria-label={t("loading")} /> : null}</button>;
       })}
     </div>
     {error ? <InlineAlert tone="error"><div className="cpv2-error-bar"><span>{error}</span>{(isExecutionError(aboutYou) || isExecutionError(corpus) || state.error) ? <Button type="button" variant="secondary" loading={Boolean(state.busy)} onClick={() => void retryFailedNode()}>{t("retry")}</Button> : null}</div></InlineAlert> : null}
@@ -273,7 +273,7 @@ function AboutYouPanel({ t, locale, execution, corpus, busy, onSubmit, onRetry, 
     setActiveIndex(0);
   }, [execution?.execution_id, questions.length]);
   if (!execution) return <EmptyNodePanel title={t("aboutYou")} body={t("noQuestions")} onAction={onFiles} action={t("addSourceFiles")} />;
-  if (isExecutionActive(execution)) return <NodeProgressPanel t={t} locale={locale} node="about-you" title={t("aboutYou")} execution={execution} />;
+  if (isExecutionActive(execution)) return <NodeProgressPanel locale={locale} node="about-you" execution={execution} />;
   if (isExecutionError(execution)) return <NodeErrorPanel t={t} title={t("aboutYou")} execution={execution} onRetry={onRetry} />;
   if (!questions.length) return <EmptyNodePanel title={t("aboutYou")} body={t("noQuestions")} onAction={onFiles} action={t("addSourceFiles")} />;
   if (execution.status === "handoff_saved") {
@@ -281,8 +281,8 @@ function AboutYouPanel({ t, locale, execution, corpus, busy, onSubmit, onRetry, 
     if (corpusFinished) {
       return <section className="cpv2-workspace-panel" role="status"><StatusTag tone="success">{t("saved")}</StatusTag><h2>{t("aboutYou")}</h2><p>{t("answersSaved")}</p></section>;
     }
-    if (isExecutionActive(corpus)) return <NodeProgressPanel t={t} locale={locale} node="corpus" title={t("corpus")} execution={corpus} />;
-    return <NodeHandoffPanel t={t} locale={locale} node="corpus" title={t("corpus")} busy={busy === "answers" || busy === "corpus"} label={t("corpusStarting")} />;
+    if (isExecutionActive(corpus)) return <NodeProgressPanel locale={locale} node="corpus" execution={corpus} />;
+    return <NodeHandoffPanel locale={locale} node="corpus" busy={busy === "answers" || busy === "corpus"} />;
   }
   const question = questions[activeIndex];
   const answer = String(answers[question.question] ?? "");
@@ -299,9 +299,9 @@ function AboutYouPanel({ t, locale, execution, corpus, busy, onSubmit, onRetry, 
 }
 
 function CorpusPanel({ t, locale, execution, aboutYou, busy, onRetry }) {
-  if (!execution && aboutYou?.status === "handoff_saved") return <NodeHandoffPanel t={t} locale={locale} node="corpus" title={t("corpus")} busy={busy === "answers" || busy === "corpus"} label={t("corpusStarting")} />;
-  if (!execution) return <EmptyNodePanel title={t("corpus")} body={t("waiting")} />;
-  if (isExecutionActive(execution)) return <NodeProgressPanel t={t} locale={locale} node="corpus" title={t("corpus")} execution={execution} />;
+  if (!execution && aboutYou?.status === "handoff_saved") return <NodeHandoffPanel locale={locale} node="corpus" busy={busy === "answers" || busy === "corpus"} />;
+  if (!execution) return <EmptyNodePanel title={t("corpus")} body={t("notReady")} />;
+  if (isExecutionActive(execution)) return <NodeProgressPanel locale={locale} node="corpus" execution={execution} />;
   if (isExecutionError(execution)) return <NodeErrorPanel t={t} title={t("corpus")} execution={execution} onRetry={onRetry} busy={busy} />;
   const output = execution.output;
   return <section className="cpv2-workspace-panel cpv2-corpus-panel"><div className="cpv2-panel-heading"><div><h2>{t("corpus")}</h2><p>{t("fullCorpus")}</p></div><StatusTag tone="success">{t("ready")}</StatusTag></div>{output ? <><article className="cpv2-corpus-block cpv2-corpus-system"><div className="cpv2-corpus-block-heading"><h3>System instructions</h3><span>{t("ready")}</span></div><pre>{output.system_instructions}</pre></article><section className="cpv2-corpus-block"><div className="cpv2-corpus-block-heading"><h3>Skills</h3><span>{output.skills?.length ?? 0}</span></div><div className="cpv2-corpus-grid">{output.skills?.map((skill) => <details className="cpv2-corpus-item" key={skill.id}><summary>{skill.title}</summary><p>{skill.instruction}</p></details>)}</div></section><section className="cpv2-corpus-block"><div className="cpv2-corpus-block-heading"><h3>Knowledge</h3><span>{output.knowledge?.length ?? 0}</span></div><div className="cpv2-corpus-grid">{output.knowledge?.map((item) => <details className="cpv2-corpus-item" key={item.id}><summary>{item.title}</summary><p>{item.content}</p></details>)}</div></section></> : <p>{t("corpusUnavailable")}</p>}</section>;
@@ -340,20 +340,19 @@ function CompletePanel({ t, product, briefSpec, corpus, busy, setBusy, token, pr
     finally { setBusy(""); }
   }
   if (product.status === "published" || product.status === "live") return <section className="cpv2-workspace-panel cpv2-complete-panel"><StatusTag tone="success">{t("published")}</StatusTag><h2>{t("complete")}</h2><p>{t("productPublished")}</p></section>;
-  if (!corpus?.output_ref) return <EmptyNodePanel title={t("complete")} body={t("waiting")} />;
+  if (!corpus?.output_ref) return <EmptyNodePanel title={t("complete")} body={t("notReady")} />;
   return <section className="cpv2-workspace-panel cpv2-complete-panel"><h2>{t("complete")}</h2><p>{product.promise ?? product.description ?? ""}</p>{showDetails && corpus.output ? <CorpusPanel t={t} execution={corpus} /> : null}{!isValidBriefSpec(briefSpec) ? <div className="cpv2-complete-brief-required"><p>{t("briefRequiredBeforePublish")}</p><Button type="button" variant="secondary" onClick={onBrief}>{t("brief")}</Button></div> : confirming ? <div className="cpv2-confirm cpv2-confirm-publish" role="alert"><div><p><strong>{t("publishCandidateConfirm")}</strong></p><small>{t("productPublished")}</small></div><Button type="button" variant="secondary" onClick={() => setConfirming(false)}>{t("cancel")}</Button><Button type="button" loading={busy === "publish"} disabled={Boolean(busy)} onClick={() => void publish()}>{t("confirmPublish")}</Button></div> : <div className="cpv2-workspace-actions"><Button type="button" variant="link" onClick={() => setShowDetails((current) => !current)}>{t("viewProductDetails")}</Button><Button type="button" disabled={Boolean(busy)} onClick={() => setConfirming(true)}>{t("publishProduct")}</Button></div>}</section>;
 }
 
-function NodeProgressPanel({ t, locale, node, title, execution, label }) {
-  return <NodeCompanionPanel t={t} locale={locale} node={node} title={title} execution={execution} state="working" busy label={label} />;
+function NodeProgressPanel({ locale, node, execution }) {
+  return <NodeCompanionPanel locale={locale} node={node} execution={execution} state="working" busy />;
 }
 
-function NodeHandoffPanel({ t, locale, node, title, busy, label }) {
-  return <NodeCompanionPanel t={t} locale={locale} node={node} title={title} state="handoff" busy={busy} label={label} />;
+function NodeHandoffPanel({ locale, node, busy }) {
+  return <NodeCompanionPanel locale={locale} node={node} state="handoff" busy={busy} />;
 }
 
-function NodeCompanionPanel({ t, locale, node, title, execution, state, busy, label }) {
-  const copy = getCreatorNodeCopy(locale, node);
+function NodeCompanionPanel({ locale, node, execution, state, busy }) {
   const tips = getCreatorNodeTips(locale, node);
   const [tipIndex, setTipIndex] = useState(0);
   useEffect(() => setTipIndex(0), [execution?.execution_id, node, state]);
@@ -363,18 +362,12 @@ function NodeCompanionPanel({ t, locale, node, title, execution, state, busy, la
     return () => clearInterval(timer);
   }, [busy, tips.length]);
   const tip = tips[tipIndex % tips.length];
-  const handoff = state === "handoff";
-  const moving = handoff && busy;
-  const statusLabel = handoff ? (moving ? "Moving to the next step" : "Saved") : execution?.status === "queued" ? "Queued" : "Working";
-  const localizedStatusLabel = locale === "zh" ? (handoff ? (moving ? "正在前往下一步" : "已保存") : execution?.status === "queued" ? "准备开始" : "正在工作") : statusLabel;
-  const activity = handoff ? (moving ? copy.handoffActivity : locale === "zh" ? "等待下一步" : "Waiting for the next step") : copy.activity;
-  return <section className="cpv2-workspace-panel cpv2-node-progress-panel" aria-busy={busy ? "true" : "false"}>
-    <div className="cpv2-node-progress-heading"><div><StatusTag tone="neutral">{localizedStatusLabel}</StatusTag><h2>{title}</h2></div>{execution?.round ? <span className="cpv2-node-progress-round">{locale === "zh" ? `第 ${execution.round} 轮` : `Round ${execution.round}`}</span> : null}</div>
+  const nextTipLabel = locale === "zh" ? "下一条线索" : locale === "ja" ? "次の手がかり" : "Show next clue";
+  return <section className="cpv2-workspace-panel cpv2-node-progress-panel" aria-busy={busy ? "true" : "false"} data-node={node} data-state={state}>
     <div className={`cpv2-node-companion${busy ? " is-busy" : ""}`}>
-      <div className="cpv2-node-companion-visual" aria-hidden="true"><span className="cpv2-node-companion-halo" /><span className="cpv2-node-companion-shadow" /><span className="cpv2-node-companion-figure"><span className="cpv2-node-companion-antenna" /><span className="cpv2-node-companion-head"><i /><i /><b /></span><span className="cpv2-node-companion-body" /><span className="cpv2-node-companion-arm" /><span className="cpv2-node-companion-magnifier"><i /></span></span></div>
-      <div className="cpv2-node-companion-copy"><span className="cpv2-node-companion-kicker">{locale === "zh" ? "Hatch 线索伙伴" : "Hatch companion"}</span><h3>{handoff ? copy.handoffHeadline : copy.headline}</h3><p>{label ?? (handoff ? copy.handoffBody : copy.body)}</p><div className="cpv2-node-tip"><span>{locale === "zh" ? "留下一条线索" : "A clue to keep"}</span><p key={`${node}-${tipIndex}`}>{tip}</p><button type="button" onClick={() => setTipIndex((current) => (current + 1) % tips.length)} aria-label={locale === "zh" ? "下一条线索" : "Show next clue"}>↗</button></div></div>
+      <div className="cpv2-node-gradient" aria-hidden="true" />
+      <div className="cpv2-node-tip" role="status" aria-live="polite"><p key={`${node}-${tipIndex}`}>{tip}</p><button type="button" onClick={() => setTipIndex((current) => (current + 1) % tips.length)} aria-label={nextTipLabel}><span aria-hidden="true">↗</span></button></div>
     </div>
-    <div className="cpv2-node-companion-activity" role="status" aria-live="polite"><span>{locale === "zh" ? "现在发生什么" : "What’s happening"}</span><strong>{activity}</strong>{execution ? <small>{t("waiting")}</small> : null}</div>
   </section>;
 }
 

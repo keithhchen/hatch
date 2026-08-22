@@ -189,299 +189,62 @@
   overflow: hidden;
 }
 
-.cpv2-node-progress-heading {
-  align-items: center;
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 18px;
-}
-
-.cpv2-node-progress-heading > div {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  min-width: 0;
-}
-
-.cpv2-node-progress-heading h2 {
-  margin: 0;
-}
-
-.cpv2-node-progress-round {
-  color: var(--hatch-text-muted, #766f67);
-  font-size: .78rem;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
 .cpv2-node-companion {
-  background: linear-gradient(135deg, rgba(255, 247, 232, .98), rgba(247, 239, 229, .98));
-  border: 1px solid rgba(177, 133, 75, .22);
-  border-radius: 16px;
-  display: grid;
-  grid-template-columns: minmax(150px, .72fr) minmax(0, 1.28fr);
-  min-height: 248px;
+  background: var(--hatch-ui-surface-resting, var(--hatch-surface, #fffdf9));
+  border: 1px solid var(--hatch-ui-border-soft, var(--hatch-border, rgba(24, 22, 20, .12)));
+  border-radius: var(--hatch-radius-surface, 18px);
   overflow: hidden;
 }
 
-.cpv2-node-companion-visual {
-  align-items: center;
-  display: grid;
-  min-height: 248px;
+.cpv2-node-gradient {
+  background: linear-gradient(100deg,
+    var(--hatch-ui-pigment-clay, rgba(197, 104, 73, .14)),
+    var(--hatch-ui-surface-bright, #fffdf9) 36%,
+    var(--hatch-ui-pigment-ochre, rgba(174, 137, 65, .12)) 62%,
+    var(--hatch-ui-pigment-moss, rgba(85, 117, 94, .12))
+  );
+  background-size: 220% 100%;
+  height: 112px;
   overflow: hidden;
-  place-items: center;
   position: relative;
 }
 
-.cpv2-node-companion-halo {
-  background: radial-gradient(circle, rgba(255, 255, 255, .9) 0 23%, rgba(255, 226, 169, .72) 24% 44%, transparent 68%);
-  border-radius: 50%;
-  height: 190px;
-  position: absolute;
-  width: 190px;
-}
-
-.cpv2-node-companion-shadow {
-  background: rgba(101, 72, 33, .15);
-  border-radius: 50%;
-  bottom: 38px;
-  height: 17px;
-  position: absolute;
-  width: 112px;
-}
-
-.cpv2-node-companion-figure {
-  display: block;
-  height: 155px;
-  position: relative;
-  transform-origin: 50% 100%;
-  width: 128px;
-  z-index: 1;
-}
-
-.cpv2-node-companion.is-busy .cpv2-node-companion-figure {
-  animation: cpv2-companion-bounce 2.2s ease-in-out infinite;
-}
-
-.cpv2-node-companion-antenna {
-  background: #5f554c;
-  border-radius: 4px;
-  height: 23px;
-  left: 61px;
-  position: absolute;
-  top: 0;
-  width: 4px;
-}
-
-.cpv2-node-companion-antenna::before {
-  background: var(--hatch-accent, #df5e36);
-  border: 3px solid #fff1cc;
-  border-radius: 50%;
-  content: "";
-  height: 11px;
-  left: -6px;
-  position: absolute;
-  top: -10px;
-  width: 11px;
-}
-
-.cpv2-node-companion-head {
-  background: #ffe7b3;
-  border: 3px solid #5f554c;
-  border-radius: 42% 42% 46% 46%;
-  height: 61px;
-  left: 26px;
-  position: absolute;
-  top: 17px;
-  width: 76px;
-}
-
-.cpv2-node-companion-head i {
-  animation: cpv2-companion-blink 4.2s ease-in-out infinite;
-  background: #4f443c;
-  border-radius: 50%;
-  height: 7px;
-  position: absolute;
-  top: 22px;
-  width: 7px;
-}
-
-.cpv2-node-companion-head i:first-child { left: 20px; }
-.cpv2-node-companion-head i:nth-child(2) { right: 20px; }
-
-.cpv2-node-companion-head b {
-  border-bottom: 2px solid #4f443c;
-  border-radius: 0 0 14px 14px;
-  bottom: 13px;
-  height: 8px;
-  left: 30px;
-  position: absolute;
-  width: 14px;
-}
-
-.cpv2-node-companion-body {
-  background: #df6b42;
-  border: 3px solid #5f554c;
-  border-radius: 28px 28px 20px 20px;
-  height: 57px;
-  left: 30px;
-  position: absolute;
-  top: 74px;
-  width: 68px;
-}
-
-.cpv2-node-companion-body::before {
-  background: rgba(255, 255, 255, .45);
-  border-radius: 50%;
-  content: "";
-  height: 9px;
-  left: 27px;
-  position: absolute;
-  top: 17px;
-  width: 9px;
-}
-
-.cpv2-node-companion-arm {
-  background: #ffe7b3;
-  border: 3px solid #5f554c;
-  border-radius: 20px;
-  height: 13px;
-  left: 11px;
-  position: absolute;
-  top: 88px;
-  transform: rotate(24deg);
-  width: 30px;
-}
-
-.cpv2-node-companion-magnifier {
-  border: 4px solid #5f554c;
-  border-radius: 50%;
-  height: 35px;
-  position: absolute;
-  right: 4px;
-  top: 66px;
-  transform: rotate(-14deg);
-  width: 35px;
-}
-
-.cpv2-node-companion-magnifier::after {
-  background: #5f554c;
-  border-radius: 3px;
-  bottom: -17px;
-  content: "";
-  height: 22px;
-  position: absolute;
-  right: -8px;
-  transform: rotate(-14deg);
-  width: 5px;
-}
-
-.cpv2-node-companion-magnifier i {
-  background: rgba(255, 255, 255, .65);
-  border-radius: 50%;
-  height: 8px;
-  left: 6px;
-  position: absolute;
-  top: 6px;
-  width: 8px;
-}
-
-.cpv2-node-companion-copy {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  min-width: 0;
-  padding: 28px 30px 26px;
-}
-
-.cpv2-node-companion-kicker,
-.cpv2-node-tip > span,
-.cpv2-node-companion-activity > span {
-  color: #967550;
-  font-size: .7rem;
-  font-weight: 700;
-  letter-spacing: .12em;
-  text-transform: uppercase;
-}
-
-.cpv2-node-companion-copy h3 {
-  font-size: clamp(1.25rem, 2.5vw, 1.8rem);
-  line-height: 1.15;
-  margin: 10px 0 0;
-  max-width: 520px;
-  overflow-wrap: anywhere;
-}
-
-.cpv2-node-companion-copy > p {
-  color: #75695d;
-  line-height: 1.55;
-  margin: 10px 0 0;
-  max-width: 540px;
-}
-
-.cpv2-node-tip {
-  border-top: 1px solid rgba(127, 93, 47, .17);
-  margin-top: 20px;
-  max-width: 560px;
-  padding-top: 14px;
-  position: relative;
+.cpv2-node-companion.is-busy .cpv2-node-gradient {
+  animation: hui-skeleton 1.8s ease-in-out infinite;
 }
 
 .cpv2-node-tip p {
-  color: #3c342c;
+  color: var(--hatch-ui-ink-soft, var(--hatch-text-muted, #766f67));
   line-height: 1.5;
-  margin: 6px 36px 0 0;
-  min-height: 2.9em;
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.cpv2-node-tip {
+  align-items: center;
+  display: flex;
+  gap: 16px;
+  min-height: 72px;
+  padding: 18px 20px;
 }
 
 .cpv2-node-tip button {
   align-items: center;
-  background: rgba(255, 255, 255, .65);
-  border: 1px solid rgba(127, 93, 47, .2);
+  background: var(--hatch-ui-surface-bright, #fffdf9);
+  border: 1px solid var(--hatch-ui-border-soft, rgba(24, 22, 20, .12));
   border-radius: 50%;
-  color: #765c3d;
+  color: var(--hatch-ui-ink-soft, var(--hatch-text-muted, #766f67));
   cursor: pointer;
   display: inline-flex;
+  flex: 0 0 auto;
   height: 30px;
   justify-content: center;
-  position: absolute;
-  right: 0;
-  top: 29px;
   width: 30px;
 }
 
-.cpv2-node-tip button:hover { background: #fff; }
-.cpv2-node-tip button:focus-visible { outline: 3px solid rgba(223, 94, 54, .35); outline-offset: 2px; }
-
-.cpv2-node-companion-activity {
-  align-items: center;
-  border-top: 1px solid var(--hatch-border, rgba(24, 22, 20, .1));
-  display: flex;
-  gap: 10px;
-  margin-top: 16px;
-  padding-top: 14px;
-}
-
-.cpv2-node-companion-activity > span { color: var(--hatch-text-muted, #766f67); }
-.cpv2-node-companion-activity strong { font-size: .9rem; font-weight: 600; }
-.cpv2-node-companion-activity small { color: var(--hatch-text-muted, #766f67); margin-left: auto; }
-
-@keyframes cpv2-companion-bounce {
-  0%, 100% { transform: translateY(0) rotate(-1deg); }
-  50% { transform: translateY(-8px) rotate(1deg); }
-}
-
-@keyframes cpv2-companion-blink {
-  0%, 42%, 48%, 100% { transform: scaleY(1); }
-  45% { transform: scaleY(.12); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .cpv2-node-companion.is-busy .cpv2-node-companion-figure,
-  .cpv2-node-companion-head i { animation: none; }
-}
+.cpv2-node-tip button:hover { background: var(--hatch-ui-surface-resting, #fbf8f2); }
+.cpv2-node-tip button:focus-visible { outline: 3px solid var(--hatch-ui-focus, rgba(223, 94, 54, .35)); outline-offset: 2px; }
 
 .cpv2-upload-button.is-disabled {
   cursor: not-allowed;
@@ -1080,11 +843,6 @@
   .cpv2-upload-dropzone { align-items: flex-start; flex-wrap: wrap; }
   .cpv2-upload-dropzone .cpv2-upload-button { margin-left: 54px; }
   .cpv2-corpus-grid { grid-template-columns: 1fr; }
-  .cpv2-node-companion { grid-template-columns: minmax(0, 1fr); }
-  .cpv2-node-companion-visual { min-height: 172px; }
-  .cpv2-node-companion-copy { padding: 22px 22px 24px; }
-  .cpv2-node-companion-activity { align-items: flex-start; flex-direction: column; }
-  .cpv2-node-companion-activity small { margin-left: 0; }
 }
 
 .cpv2-product-detail-preview {
