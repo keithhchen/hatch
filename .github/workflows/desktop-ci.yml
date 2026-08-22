@@ -322,18 +322,16 @@ jobs:
           - macOS Intel: ad-hoc UAT package; not Developer ID signed or notarized.
           - Windows: unsigned UAT package.
 
-          These artifacts are not a signed production distribution. The attached manifests record the exact source SHA, filename, byte count, and SHA-256 for each installer.
+          These artifacts are not a signed production distribution. CI verified the exact source SHA, filename, byte count, and SHA-256 for each installer before publication.
           EOF
           if gh release view "$GITHUB_REF_NAME" --repo "$GH_REPO" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" \
               "$arm64_dmg_path" "$intel_dmg_path" "$exe_path" \
-              release/macos/macos-arm64.json release/macos/macos-intel.json "$windows_report" \
               --clobber --repo "$GH_REPO"
             gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease=false --latest --title "$GITHUB_REF_NAME" --notes-file release-notes.md --repo "$GH_REPO"
           else
             gh release create "$GITHUB_REF_NAME" \
               "$arm64_dmg_path" "$intel_dmg_path" "$exe_path" \
-              release/macos/macos-arm64.json release/macos/macos-intel.json "$windows_report" \
               --verify-tag --latest --title "$GITHUB_REF_NAME" --notes-file release-notes.md --repo "$GH_REPO"
           fi
       - name: Verify published Release is complete and latest
@@ -361,8 +359,6 @@ jobs:
              ([.assets[] | select(.name == $arm64_dmg and .size > 0 and .digest == $arm64_digest)] | length) == 1 and
              ([.assets[] | select(.name == $intel_dmg and .size > 0 and .digest == $intel_digest)] | length) == 1 and
              ([.assets[] | select(.name == $exe and .size > 0 and .digest == $windows_digest)] | length) == 1 and
-             ([.assets[] | select(.name == "macos-arm64.json" and .size > 0)] | length) == 1 and
-             ([.assets[] | select(.name == "macos-intel.json" and .size > 0)] | length) == 1 and
-             ([.assets[] | select(.name == "windows.json" and .size > 0)] | length) == 1' \
+             ([.assets[] | select((.name | (endswith(".dmg") or endswith(".exe"))) and (.size > 0))] | length) == 3' \
             <<<"$release_json" >/dev/null
           test "$(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name)" = "$GITHUB_REF_NAME"
