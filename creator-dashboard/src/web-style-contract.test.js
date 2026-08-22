@@ -25,6 +25,20 @@ test("Web page CSS consumes the shared Hatch typography scale", () => {
   assert.match(styles, /var\(--hatch-type-(?:label|control|body|reading|title|display)\)/);
 });
 
+test("Web reserves the brand serif for h1 and the Hatch wordmark", () => {
+  const baseStyles = read("creator-dashboard/src/styles.css");
+  const creatorStyles = read("creator-dashboard/src/creatorPortalV2.css");
+  const buyerStyles = read("creator-dashboard/src/buyerPortalV2.css");
+  const storefrontStyles = read("creator-dashboard/src/storefrontDetails.css");
+
+  assert.match(baseStyles, /h1\s*\{[^}]*font-family:\s*var\(--hatch-font-display\)/s);
+  assert.match(baseStyles, /h2\s*\{[^}]*font-family:\s*var\(--hatch-font-ui\)/s);
+  assert.match(creatorStyles, /\.cpv2 h2\s*\{[^}]*font-family:\s*var\(--hatch-font-ui/);
+  assert.match(buyerStyles, /\.buyer-v2 h2\s*\{[^}]*font-family:\s*var\(--hatch-font-ui/);
+  assert.match(storefrontStyles, /\.storefront-shared__hero h2\s*\{[^}]*font-family:\s*var\(--hatch-font-ui/);
+  assert.match(baseStyles, /\.hatch-app-paper h2\s*\{[^}]*font-family:\s*var\(--hatch-font-ui\)/s);
+});
+
 test("Web entrypoint consumes HUI instead of a second component stylesheet", () => {
   const entry = read("creator-dashboard/src/main.jsx");
 
