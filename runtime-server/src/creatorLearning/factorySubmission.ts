@@ -62,7 +62,7 @@ type CorpusReferenceSubmission = {
 
 type CorpusKnowledgeSubmission = {
   id: string;
-  sourceSummary: string;
+  title: string;
   content: string;
 };
 
@@ -533,7 +533,7 @@ function renderCorpus(value: CorpusSubmission): string {
   const knowledge = value.knowledge.map((item) => renderAsset([
     "layer: knowledge",
     `id: ${item.id}`,
-    `source_summary: ${item.sourceSummary}`,
+    `title: ${item.title}`,
     "retrieval_only: true"
   ], item.content));
   return [
@@ -1002,13 +1002,13 @@ export function createFactorySubmissionProtocol(
     tools.push(makeTool(
       "submit_knowledge",
       `Submit one complete purified retrieval-only knowledge document. The host derives knowledge/<id>.md. ${PUBLISHABLE_CONTENT_TOOL_DESCRIPTION}`,
-      Type.Object({ id: text, source_summary: text, content: text }, { additionalProperties: false }),
+      Type.Object({ id: text, title: text, content: text }, { additionalProperties: false }),
       (draft, params) => {
         const id = metadata(params.id, "id");
         if (!IDENTIFIER.test(id)) throw new Error(`Invalid knowledge id: ${id}`);
         const candidate: CorpusKnowledgeSubmission = {
           id,
-          sourceSummary: metadata(params.source_summary, "source_summary"),
+          title: metadata(params.title, "title"),
           content: body(params.content, "content")
         };
         const status = upsertById(draft.corpus.knowledge, candidate, (item) => item.id);

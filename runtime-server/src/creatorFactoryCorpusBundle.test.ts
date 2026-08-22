@@ -123,7 +123,7 @@ test("Creator Factory materializes every Agent Corpus layer with exact bytes and
     knowledge: [{
       id: "source-ledger",
       content: knowledgeDocument,
-      sourceSummary: "Creator-supplied filing ledger.",
+      title: "Creator-supplied filing ledger.",
       description: "Long-tail facts for retrieval."
     }],
     tools: [
@@ -399,7 +399,7 @@ test("Creator Factory rejects unknown, duplicate, unsafe, and path-controlling l
     knowledge: [{
       id: "shared-id",
       content: "# Facts\n",
-      sourceSummary: "Creator notes."
+      title: "Creator notes."
     }]
   }), /id shared-id is duplicated/);
 
@@ -429,7 +429,7 @@ test("Creator Factory rejects unknown, duplicate, unsafe, and path-controlling l
     knowledge: [{
       id: "facts",
       content: "# Facts\n",
-      sourceSummary: "Creator notes.",
+      title: "Creator notes.",
       path: "../model-controlled.md"
     } as never]
   }), /unsupported fields: path/);

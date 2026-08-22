@@ -97,8 +97,8 @@ const manifest = {
     allowed_tool_ids: ["hatch.web_search", "hatch.file_search", "hatch.local.files", "hatch.local.shell"]
   }],
   knowledge: { documents: [
-    { ...signalLesson, retrieval_only: true, source_summary: "Maya's signal-before-language lesson." },
-    { ...evidenceLesson, retrieval_only: true, source_summary: "Maya's ownership-and-evidence lesson." }
+    { ...signalLesson, retrieval_only: true, title: "Maya's signal-before-language lesson." },
+    { ...evidenceLesson, retrieval_only: true, title: "Maya's ownership-and-evidence lesson." }
   ] },
   tools: [
     { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" },

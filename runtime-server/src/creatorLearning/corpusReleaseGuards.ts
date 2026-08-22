@@ -916,7 +916,7 @@ function publishableLlmFields(compilation: CorpusCompilation): Array<{ path: str
     ...compilation.references.map(({ path, content }) => ({ path, content })),
     ...compilation.knowledge.flatMap((document) => [
       { path: document.path, content: document.content },
-      { path: `agent.json#knowledge/${document.id}/source_summary`, content: document.sourceSummary }
+      { path: `agent.json#knowledge/${document.id}/title`, content: document.title }
     ])
   ];
 }

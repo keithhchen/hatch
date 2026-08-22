@@ -702,7 +702,7 @@ test("Corpus tools derive paths and canonical-render every layer in one accepted
       {
         id: "knowledge",
         name: "submit_knowledge",
-        arguments: { id: "case-library", source_summary: "Creator-authorized cases", content: "# Cases\nA bootstrapped launch." }
+        arguments: { id: "case-library", title: "Creator-authorized cases", content: "# Cases\nA bootstrapped launch." }
       },
       {
         id: "rationale",

@@ -148,9 +148,9 @@ test("raw prose in every LLM-authored manifest metadata kind is protected", asyn
       compilation: compilationWithMetadata({ whenToUse: PROTECTED_SOURCE })
     },
     {
-      name: "knowledge source summary",
-      expectedPath: "agent.json#knowledge/metadata-knowledge/source_summary",
-      compilation: compilationWithMetadata({ sourceSummary: PROTECTED_SOURCE })
+      name: "knowledge title",
+      expectedPath: "agent.json#knowledge/metadata-knowledge/title",
+      compilation: compilationWithMetadata({ title: PROTECTED_SOURCE })
     }
   ];
 
@@ -351,7 +351,7 @@ function compilationWithFourAssets(contents: readonly string[]): CorpusCompilati
     knowledge: [{
       id: "slice-four",
       path: "knowledge/slice-four.md",
-      sourceSummary: "Creator-authorized material",
+      title: "Creator-authorized material",
       retrievalOnly: true,
       content: contents[3]!
     }],
@@ -371,7 +371,7 @@ function compilationWithContentAssets(contents: readonly string[]): CorpusCompil
     knowledge: contents.slice(1).map((content, index) => ({
       id: `slice-${index + 2}`,
       path: `knowledge/slice-${index + 2}.md`,
-      sourceSummary: `Synthesized summary ${index + 2}`,
+      title: `Synthesized summary ${index + 2}`,
       retrievalOnly: true,
       content
     })),
@@ -384,7 +384,7 @@ function compilationWithContentAssets(contents: readonly string[]): CorpusCompil
 function compilationWithMetadata(overrides: {
   skillName?: string;
   whenToUse?: string;
-  sourceSummary?: string;
+  title?: string;
 }): CorpusCompilation {
   return {
     format: "layered-assets",
@@ -401,7 +401,7 @@ function compilationWithMetadata(overrides: {
     knowledge: [{
       id: "metadata-knowledge",
       path: "knowledge/metadata-knowledge.md",
-      sourceSummary: overrides.sourceSummary ?? "A synthesized decision method",
+      title: overrides.title ?? "A synthesized decision method",
       retrievalOnly: true,
       content: "Retrieve this when the user needs a grounded example."
     }],
@@ -421,7 +421,7 @@ function compilationWithRepeatedContentAssets(count: number, content: string): C
     knowledge: Array.from({ length: count - 1 }, (_, index) => ({
       id: `repeated-${index + 2}`,
       path: `knowledge/repeated-${index + 2}.md`,
-      sourceSummary: "safe",
+      title: "safe",
       retrievalOnly: true,
       content
     })),

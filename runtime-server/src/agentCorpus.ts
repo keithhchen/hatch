@@ -40,21 +40,11 @@ const AssetSchema = z.object({
   description: DescriptionSchema.optional()
 }).strict();
 
-/**
- * New releases expose a title for each selected source file. The legacy
- * `source_summary` spelling is accepted only while reading already-installed
- * v1 bundles and is normalized immediately; the publish path writes `title`.
- */
-const KnowledgeAssetSchema = z.union([
-  AssetSchema.extend({
-    retrieval_only: z.literal(true),
-    title: NameSchema
-  }).strict(),
-  AssetSchema.extend({
-    retrieval_only: z.literal(true),
-    source_summary: DescriptionSchema
-  }).strict().transform(({ source_summary, ...asset }) => ({ ...asset, title: source_summary }))
-]);
+/** Every selected source file carries its reader-facing title in the new format. */
+const KnowledgeAssetSchema = AssetSchema.extend({
+  retrieval_only: z.literal(true),
+  title: NameSchema
+}).strict();
 
 const ToolSchema = z.object({
   id: ToolIdentifierSchema,

@@ -43,7 +43,7 @@ function bundle(
     },
     instructions: { system: asset("system", systemPath, system) },
     skills: [],
-    knowledge: { documents: [{ ...asset("cases", "knowledge/cases.md", knowledge), retrieval_only: true, source_summary: "Cases" }] },
+    knowledge: { documents: [{ ...asset("cases", "knowledge/cases.md", knowledge), retrieval_only: true, title: "Cases" }] },
     tools: [
       { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" },
       { id: "hatch.file_search", kind: "hatch_builtin", capability: "file_search" }

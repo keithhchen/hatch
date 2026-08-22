@@ -1443,7 +1443,7 @@ export class CreatorFactory {
       knowledge: compilation.knowledge.map((document) => ({
         id: document.id,
         content: document.content,
-        sourceSummary: document.sourceSummary
+        title: document.title
       }))
     };
   }

@@ -55,6 +55,25 @@ test("Agent Corpus bounds catalog metadata, arrays, and embedded JSON", () => {
   }).success, false);
 });
 
+test("Agent Corpus requires the canonical Knowledge title field", () => {
+  const asset = { id: "knowledge-1", path: "knowledge/one.md", sha256: `sha256:${"a".repeat(64)}`, retrieval_only: true };
+  const base = {
+    contract_version: "1",
+    creator: { id: CREATOR_ID, name: "Creator" },
+    product: { id: PRODUCT_ID, name: "Product", presentation: {} },
+    instructions: { system: { id: "system", path: "instructions/system.md", sha256: `sha256:${"b".repeat(64)}` } },
+    skills: [],
+    knowledge: { documents: [{ ...asset, title: "Canonical title" }] },
+    tools: [{ id: "hatch.web_search", kind: "hatch_builtin" }],
+    evaluations: { synthetic_qa: [], held_out: [] },
+  };
+  assert.equal(AgentCorpusSchema.safeParse(base).success, true);
+  assert.equal(AgentCorpusSchema.safeParse({
+    ...base,
+    knowledge: { documents: [{ ...asset, source_summary: "Legacy summary" }] },
+  }).success, false);
+});
+
 test("Agent Corpus loads clean assets and scopes knowledge by creator and agent", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-agent-corpus-"));
   tempRoots.push(root);
@@ -80,7 +99,7 @@ test("Agent Corpus loads clean assets and scopes knowledge by creator and agent"
     },
     instructions: { system: asset("instructions/system.md", system, "instructions-system") },
     skills: [],
-    knowledge: { documents: [{ ...asset("knowledge/method.md", knowledge, "knowledge-001"), retrieval_only: true, source_summary: "Resume method" }] },
+    knowledge: { documents: [{ ...asset("knowledge/method.md", knowledge, "knowledge-001"), retrieval_only: true, title: "Resume method" }] },
     tools: [
       { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" },
       { id: "hatch.file_search", kind: "hatch_builtin", capability: "file_search" }

@@ -1151,7 +1151,7 @@ function layeredCorpusWithOptionalAssets(): string {
     CORPUS_ASSET_BEGIN_MARKER,
     "layer: knowledge",
     "id: market-cases",
-    "source_summary: Creator-authorized market cases",
+    "title: Creator-authorized market cases",
     "retrieval_only: true",
     CORPUS_ASSET_CONTENT_MARKER,
     "# Market cases\n\nLong-tail examples used only when a matching market is requested.",

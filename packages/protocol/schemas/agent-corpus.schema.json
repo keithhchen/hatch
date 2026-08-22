@@ -185,14 +185,14 @@
     "knowledgeDocument": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "path", "sha256", "retrieval_only", "source_summary"],
+      "required": ["id", "path", "sha256", "retrieval_only", "title"],
       "properties": {
         "id": { "$ref": "#/$defs/identifier" },
         "path": { "type": "string", "pattern": "^knowledge/[A-Za-z0-9][A-Za-z0-9._/-]*\\.md$" },
         "sha256": { "$ref": "#/$defs/digest" },
         "description": { "type": "string", "minLength": 1, "maxLength": 4096 },
         "retrieval_only": { "const": true },
-        "source_summary": { "type": "string", "minLength": 1, "maxLength": 4096 }
+        "title": { "type": "string", "minLength": 1, "maxLength": 256 }
       }
     },
     "toolIdentifier": {

@@ -275,7 +275,7 @@ Do not serialize the whole result as one JSON object, do not reproduce a delimit
 - submit exactly one complete System instruction asset;
 - submit each justified Skill with its ID, name, trigger, complete Markdown, and exact allowed-tool IDs;
 - submit each justified reference with its ID, parent Skill ID, reference kind, and complete Markdown;
-- submit each justified knowledge document with its ID, reader-facing source summary, and complete purified Markdown;
+- submit each justified knowledge document with its ID, reader-facing title, and complete purified Markdown;
 - separately submit complete Change rationale, Requirements traceability, and Preservation audit section bodies. The host owns the four top-level envelope headings (\`# Change rationale\`, \`# Requirements traceability\`, \`# Preservation audit\`, \`# Compilation complete\`): never include any of those \`#\` headings in a \`submit_corpus_audit_section\` body. Within the Preservation audit body, include exactly one \`##\` subsection for each required disposition and no duplicate top-level headings;
 - ${PRESERVATION_AUDIT_FORMAT}
 - after the retained inventory is complete, call the finalize tool and continue until its validation is accepted.

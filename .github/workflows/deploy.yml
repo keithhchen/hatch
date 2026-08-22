@@ -438,6 +438,19 @@ jobs:
               "$(jq -cn --arg connection_id "$connection_id" '{connection_id:$connection_id}')" \
               '{"X-Hatch-Creator-Id":"32ffccf7-893d-4ef3-bdbc-c82fc8fcb90b"}' >/dev/null
           done < <(jq -r '.connections[] | @base64' "$seed")
+      - name: Migrate and verify Knowledge title format
+        run: |
+          set -euo pipefail
+          cd /opt/hatch
+          compose=(docker compose --env-file /opt/hatch/.env --env-file /opt/hatch/.release.env -f /opt/hatch/compose.app.yml)
+          # This command is idempotent: it writes only a new immutable release
+          # when a live release still contains source_summary, then advances
+          # the Postgres live pointer after all assets are verified.
+          "${compose[@]}" exec -T registry npm run migrate:knowledge-title
+          # The verification pass is deliberately separate and read-only. It
+          # checks every live release's runtime/manifest.json and agent.json;
+          # any old field or missing asset fails this deployment.
+          "${compose[@]}" exec -T registry npm run migrate:knowledge-title -- --verify
       - name: Verify public health endpoints
         env:
           HATCH_DOMAIN: ${{ vars.HATCH_DOMAIN }}

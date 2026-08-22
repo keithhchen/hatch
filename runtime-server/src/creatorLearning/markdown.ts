@@ -52,7 +52,7 @@ export type CorpusSkillReference = {
 export type CorpusKnowledgeDocument = {
   id: string;
   path: string;
-  sourceSummary: string;
+  title: string;
   retrievalOnly: true;
   content: string;
 };
@@ -465,8 +465,8 @@ function buildCorpusAsset(
     };
   }
 
-  requireExactMetadataFields(metadata, ["layer", "id", "source_summary", "retrieval_only"]);
-  const sourceSummary = requireMetadata(metadata, "source_summary");
+  requireExactMetadataFields(metadata, ["layer", "id", "title", "retrieval_only"]);
+  const title = requireMetadata(metadata, "title");
   if (metadata.retrieval_only !== "true") {
     throw new Error(`Corpus knowledge ${id} must declare retrieval_only: true`);
   }
@@ -474,7 +474,7 @@ function buildCorpusAsset(
     layer: "knowledge",
     id,
     path: `knowledge/${id}.md`,
-    sourceSummary,
+    title,
     retrievalOnly: true,
     content,
     beginIndex,

@@ -49,7 +49,7 @@ test("one-shot harness binds a verified Corpus and traverses the full Hatch Runt
     knowledge: [{
       id: "pricing-cases",
       content: retrievalOnlyKnowledge,
-      sourceSummary: "Creator-authorized pricing cases"
+      title: "Creator-authorized pricing cases"
     }],
     syntheticQa: [{ question: "development", answer: "creator reference" }],
     heldOut: [{ question: "heldout", answer: heldoutSecret }]

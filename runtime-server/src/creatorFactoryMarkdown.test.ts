@@ -66,13 +66,13 @@ test("layered Corpus parser returns multiple typed Skills, references, and knowl
     corpusAsset([
       "layer: knowledge",
       "id: market-cases",
-      "source_summary: Purified Creator-authorized market cases.",
+      "title: Purified Creator-authorized market cases.",
       "retrieval_only: true"
     ], knowledgeOne),
     corpusAsset([
       "layer: knowledge",
       "id: objection-patterns",
-      "source_summary: Synthesized objection patterns from authorized material.",
+      "title: Synthesized objection patterns from authorized material.",
       "retrieval_only: true"
     ], knowledgeTwo)
   ]);
@@ -113,13 +113,13 @@ test("layered Corpus parser returns multiple typed Skills, references, and knowl
   assert.deepEqual(parsed.knowledge, [{
     id: "market-cases",
     path: "knowledge/market-cases.md",
-    sourceSummary: "Purified Creator-authorized market cases.",
+    title: "Purified Creator-authorized market cases.",
     retrievalOnly: true,
     content: knowledgeOne
   }, {
     id: "objection-patterns",
     path: "knowledge/objection-patterns.md",
-    sourceSummary: "Synthesized objection patterns from authorized material.",
+    title: "Synthesized objection patterns from authorized material.",
     retrievalOnly: true,
     content: knowledgeTwo
   }]);
@@ -197,7 +197,7 @@ test("layered Corpus rejects duplicate assets, unknown reference parents, and in
     corpusAsset([
       "layer: knowledge",
       "id: review",
-      "source_summary: Purified review cases.",
+      "title: Purified review cases.",
       "retrieval_only: true"
     ], "# Cases\nOne case.")
   ]);
@@ -252,7 +252,7 @@ test("Corpus prompt compiles lossless full-layer replacements with concrete dest
     corpusAsset([
       "layer: knowledge",
       "id: prior-cases",
-      "source_summary: Purified prior cases.",
+      "title: Purified prior cases.",
       "retrieval_only: true"
     ], "PREVIOUS_KNOWLEDGE_ITEM")
   ]);
@@ -381,7 +381,7 @@ test("Corpus completeness prompt audits all candidate assets, metadata, paths, a
     corpusAsset([
       "layer: knowledge",
       "id: cases",
-      "source_summary: Purified cases.",
+      "title: Purified cases.",
       "retrieval_only: true"
     ], "CANDIDATE_KNOWLEDGE")
   ]);

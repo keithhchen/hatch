@@ -51,7 +51,7 @@ export type AgentCorpusBundleSkillInput = {
 export type AgentCorpusBundleKnowledgeInput = {
   id: string;
   content: string;
-  sourceSummary: string;
+  title: string;
   description?: string;
 };
 
@@ -287,14 +287,14 @@ function validateBundleInput(input: AgentCorpusBundleInput): BundlePlan {
 
   const knowledge = validateArray(input.knowledge, "knowledge").map((rawDocument, documentIndex) => {
     const label = `knowledge[${documentIndex}]`;
-    const record = strictRecord(rawDocument, label, ["id", "content", "sourceSummary", "description"]);
+    const record = strictRecord(rawDocument, label, ["id", "content", "title", "description"]);
     const id = canonicalIdentifier(record.id, `${label}.id`);
     claimUnique(logicalAssetIds, id, `Knowledge document ${id}`);
     assertCanonicalAssetPath(knowledgePath(id), `Knowledge document ${id}`);
     return {
       id,
       content: markdown(record.content, `${label}.content`),
-      sourceSummary: requiredText(record.sourceSummary, `${label}.sourceSummary`),
+      title: requiredText(record.title, `${label}.title`),
       ...optionalTextProperty(record, "description", label)
     };
   });
@@ -503,7 +503,7 @@ function buildManifest(plan: BundlePlan, digestFor: (relativePath: string) => st
         sha256: digestFor(knowledgePath(document.id)),
         ...(document.description === undefined ? {} : { description: document.description }),
         retrieval_only: true as const,
-        title: document.sourceSummary
+        title: document.title
       }))
     },
     tools: plan.tools,

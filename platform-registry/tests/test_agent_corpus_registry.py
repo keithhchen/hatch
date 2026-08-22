@@ -106,7 +106,7 @@ def write_corpus(
         "instructions": {"system": asset(root, "system", "instructions/system.md")},
         "skills": skills,
         "knowledge": {"documents": [asset(
-            root, "method", "knowledge/method.md", retrieval_only=True, source_summary="Purified long-tail creator method."
+            root, "method", "knowledge/method.md", retrieval_only=True, title="Purified long-tail creator method."
         )]},
         "tools": tools,
         "evaluations": {
