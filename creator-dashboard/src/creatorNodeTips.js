@@ -2,6 +2,7 @@ const ZH_TIPS = {
   "about-you": [
     "有些方法不会直接写出来，它们藏在你的取舍里。",
     "一个小小的取舍，可能比一整段说明更有分量。",
+    "有时真正的重点，就在你没有妥协的地方。",
     "案例里的转折，往往比结论更有线索。",
     "同一类问题，你每次都怎么处理？这里可能有答案。",
     "我在找你的重点，不急着把所有东西都塞进来。",
@@ -164,6 +165,7 @@ const EN_TIPS = {
   "about-you": [
     "Some methods are not written down; they hide in your choices.",
     "A small trade-off can carry more weight than a full explanation.",
+    "Sometimes the real focus is where you refused to compromise.",
     "The turn in a case often tells us more than its conclusion.",
     "How do you handle the same kind of problem each time? There may be a clue here.",
     "I’m finding your focus first. We do not need to keep everything.",
@@ -326,6 +328,7 @@ const JA_TIPS = {
   "about-you": [
     "書かれていない方法は、選び方の中に隠れています。",
     "小さな選択に、その人らしい方法が残ります。",
+    "譲らなかったところに、本当の重点が残ることがあります。",
     "事例の転換点には、結論以上の手がかりがあります。",
     "同じ種類の問題に、いつもどう向き合っていますか。",
     "まずはあなたの重点を探します。すべてを残す必要はありません。",
