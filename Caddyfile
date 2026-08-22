@@ -15,6 +15,15 @@
         reverse_proxy dashboard:8500
     }
 
+    # The Registry owns the authenticated Runtime release read. Keep this
+    # narrow path ahead of the broad WebSocket prefix below; otherwise Caddy
+    # sends the release lookup to Runtime, which has no Registry route and
+    # returns a misleading 404.
+    @runtime_release path /v1/runtime/products/*/release
+    handle @runtime_release {
+        reverse_proxy registry:8100
+    }
+
     # Desktop WebSocket endpoint. The public /v1 prefix is removed before the
     # request reaches the Runtime's native /runtime WebSocket path.
     @runtime_socket path /v1/runtime*

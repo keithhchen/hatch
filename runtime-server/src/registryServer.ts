@@ -365,9 +365,14 @@ async function route(
     const productId = decodeURIComponent(runtimeReleaseMatch[1]!);
     const release = await context.releaseStore.getLive(productId);
     if (!release) { sendJson(response, 404, { detail: "No live release exists for this Product." }); return; }
+    // Keep the transport-only manifest reference at the response boundary.
+    // `release` is also persisted and used by public catalog projections, but
+    // Runtime's read contract deliberately exposes the manifest ref beside
+    // the release object rather than duplicating it inside that object.
+    const { runtime_manifest_ref: runtimeManifestRef, ...releasePayload } = release;
     sendJson(response, 200, {
-      release,
-      runtime_manifest_ref: release.runtime_manifest_ref
+      release: releasePayload,
+      runtime_manifest_ref: runtimeManifestRef
     });
     return;
   }
