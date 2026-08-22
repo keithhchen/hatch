@@ -190,27 +190,60 @@
 }
 
 .cpv2-node-companion {
+  align-items: center;
   background: var(--hatch-ui-surface-resting, var(--hatch-surface, #fffdf9));
   border: 1px solid var(--hatch-ui-border-soft, var(--hatch-border, rgba(24, 22, 20, .12)));
   border-radius: var(--hatch-radius-surface, 18px);
+  display: grid;
+  gap: 24px;
+  grid-template-columns: 120px minmax(0, 1fr);
+  min-height: 168px;
   overflow: hidden;
+  padding: 24px;
 }
 
 .cpv2-node-gradient {
-  background: linear-gradient(100deg,
+  background: linear-gradient(135deg,
     var(--hatch-ui-pigment-clay, rgba(197, 104, 73, .14)),
-    var(--hatch-ui-surface-bright, #fffdf9) 36%,
-    var(--hatch-ui-pigment-ochre, rgba(174, 137, 65, .12)) 62%,
+    var(--hatch-ui-pigment-ochre, rgba(174, 137, 65, .16)) 52%,
     var(--hatch-ui-pigment-moss, rgba(85, 117, 94, .12))
   );
-  background-size: 220% 100%;
-  height: 112px;
-  overflow: hidden;
-  position: relative;
+  background-size: 220% 220%;
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 8px color-mix(in srgb, var(--hatch-ui-pigment-clay, rgba(197, 104, 73, .14)) 35%, transparent),
+    0 0 38px color-mix(in srgb, var(--hatch-ui-pigment-ochre, rgba(174, 137, 65, .16)) 72%, transparent);
+  height: 104px;
+  justify-self: center;
+  width: 104px;
 }
 
 .cpv2-node-companion.is-busy .cpv2-node-gradient {
   animation: hui-skeleton 1.8s ease-in-out infinite;
+}
+
+.cpv2-node-companion-copy {
+  min-width: 0;
+}
+
+.cpv2-node-progress-heading {
+  align-items: baseline;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.cpv2-node-progress-heading h2 {
+  margin: 0;
+}
+
+.cpv2-node-progress-round {
+  color: var(--hatch-ui-ink-faint, var(--hatch-text-muted, #766f67));
+  flex: 0 0 auto;
+  font-size: .78rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .cpv2-node-tip p {
@@ -840,6 +873,8 @@
 .cpv2-corpus-item p { border-top: 1px solid var(--hatch-border, rgba(24, 22, 20, .08)); line-height: 1.55; margin: 0; padding: 14px 16px 16px; white-space: pre-wrap; }
 
 @media (max-width: 680px) {
+  .cpv2-node-companion { gap: 20px; grid-template-columns: 1fr; padding: 22px; }
+  .cpv2-node-gradient { height: 88px; width: 88px; }
   .cpv2-upload-dropzone { align-items: flex-start; flex-wrap: wrap; }
   .cpv2-upload-dropzone .cpv2-upload-button { margin-left: 54px; }
   .cpv2-corpus-grid { grid-template-columns: 1fr; }
