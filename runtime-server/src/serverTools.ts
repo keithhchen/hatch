@@ -196,15 +196,7 @@ export class ServerToolExecutor {
     });
     return {
       query: String(args.query),
-      hits: hits.map((hit) => ({
-        id: hit.id,
-        text: hit.text,
-        score: hit.score,
-        ...(hit.document_id ? { document_id: hit.document_id } : {}),
-        ...(hit.source_path ? { source_path: hit.source_path } : {}),
-        ...(hit.heading ? { heading: hit.heading } : {}),
-        ...(hit.source ? { source: hit.source } : {})
-      }))
+      hits: hits.map((hit) => ({ text: hit.text, score: hit.score }))
     };
   }
 

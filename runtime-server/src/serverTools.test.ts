@@ -155,6 +155,35 @@ test("Knowledge and Creator tools receive the bounded owning-run signal", async 
   assert.equal(creatorSignal?.aborted, true);
 });
 
+test("Knowledge search hides internal corpus paths from the model", async () => {
+  const knowledgeTools = new ServerToolExecutor();
+  knowledgeTools.setKnowledgeScope({
+    provider: {
+      search: async () => [{
+        id: "hit-1",
+        text: "A retrieved knowledge excerpt.",
+        score: 0.9,
+        document_id: "doc-1",
+        source_path: "knowledge/private.md",
+        heading: "Private heading",
+        source: "knowledge/private.md · Private heading"
+      }]
+    },
+    creatorId: "creator",
+    agentId: "agent",
+    corpusDigest: `sha256:${"1".repeat(64)}`
+  });
+
+  const result = await knowledgeTools.execute("hatch.file_search", { query: "excerpt", limit: 1 });
+  assert.deepEqual(result, {
+    query: "excerpt",
+    hits: [{
+      text: "A retrieved knowledge excerpt.",
+      score: 0.9
+    }]
+  });
+});
+
 test("Creator tool results are rejected before a multi-megabyte value reaches the model", async () => {
   const tools = new ServerToolExecutor();
   tools.setResolvedCreatorTools([{
