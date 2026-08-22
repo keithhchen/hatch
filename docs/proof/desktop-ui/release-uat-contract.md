@@ -27,6 +27,7 @@ The manifest has this minimum identity:
   "release": { "tag": "v1.2.3" },
   "package": {
     "platform": "macos",
+    "architecture": "aarch64",
     "filename": "Hatch_1.2.3_aarch64.dmg",
     "bytes": 123,
     "sha256": "sha256:<64 lowercase hex>",
@@ -65,8 +66,9 @@ lane.
   the dedicated interactive runner;
 - Environment `desktop-release-publish` with required reviewers to inspect the
   completed target-UAT evidence before publication;
-- a disposable, interactive `self-hosted, macos, arm64` runner with screen
-  capture permission and no production account/data;
+- a disposable, interactive `self-hosted, macos, arm64` runner and a matching
+  `self-hosted, macos, x64` Intel runner, both with screen capture permission
+  and no production account/data;
 - the same default-branch verifier code as the workflow, kept under branch
   protection.
 

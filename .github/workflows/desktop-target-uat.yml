@@ -48,7 +48,7 @@ jobs:
       - name: Download immutable macOS candidate and CI report
         uses: actions/download-artifact@v4
         with:
-          name: hatch-desktop-macos-ad-hoc-uat
+          name: hatch-desktop-macos-arm64-ad-hoc-uat
           path: candidate
           repository: ${{ github.repository }}
           run-id: ${{ inputs.source_run_id }}

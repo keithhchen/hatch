@@ -57,6 +57,7 @@ export async function recordDesktopReleaseArtifact({
     },
     package: {
       platform: "macos",
+      architecture: environment.HATCH_PACKAGE_ARCHITECTURE || null,
       filename: path.basename(artifactPath),
       bytes: artifactStat.size,
       sha256: packageSha256,
@@ -105,6 +106,9 @@ function validateInputs({ artifactDirectory, outputFile, sourceSha, releaseTag, 
   }
   if (environment.HATCH_RELEASE_NOTARIZED !== "1") {
     throw new Error("Release artifact identity may be recorded only after notarization and stapler validation.");
+  }
+  if (!/^(aarch64|x86_64)$/.test(String(environment.HATCH_PACKAGE_ARCHITECTURE ?? ""))) {
+    throw new Error("Release artifacts require HATCH_PACKAGE_ARCHITECTURE to be aarch64 or x86_64.");
   }
   if (!environment.APPLE_SIGNING_IDENTITY || environment.APPLE_SIGNING_IDENTITY === "-") {
     throw new Error("Release artifacts require a non-ad-hoc APPLE_SIGNING_IDENTITY.");

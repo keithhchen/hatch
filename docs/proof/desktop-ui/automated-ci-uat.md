@@ -6,7 +6,8 @@
 
 | Runner | Package | Evidence report |
 | --- | --- | --- |
-| `macos-latest` | ad-hoc `.app` → `.dmg` | `artifacts/desktop-uat/macos.json` |
+| `macos-latest` (Apple Silicon) | ad-hoc `.app` → `.dmg` | `artifacts/desktop-uat/macos.json` |
+| `macos-15-intel` (Intel) | ad-hoc `.app` → `.dmg` | `artifacts/desktop-uat/macos.json` |
 | `windows-latest` | debug unsigned NSIS `.exe` | `artifacts/desktop-uat/windows.json` |
 
 The reports are emitted by
@@ -30,8 +31,9 @@ Artifacts expire after seven days and must never be published as releases.
 - The evidence recorder/verifier is covered by Node tests in the ordinary CI
   renderer job, including SHA mismatch, source mismatch, architecture mismatch,
   and ambiguous-output rejection.
-- macOS additionally runs renderer tests/web build, Rust formatting, LocalRunner
-  tests, Tauri bridge tests, and strict ad-hoc DMG construction before upload.
+- Both macOS architectures additionally run renderer tests/web build, Rust
+  formatting, LocalRunner tests, Tauri bridge tests, and strict ad-hoc DMG
+  construction before upload.
 - Windows additionally runs renderer tests/web build, LocalRunner tests, Tauri
   bridge tests, and the unsigned NSIS build before upload.
 

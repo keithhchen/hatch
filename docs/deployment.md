@@ -162,11 +162,15 @@ playbook from the private application network; internal Commerce routes are
 not exposed by Caddy.
 
 The Desktop app is not part of the server Compose project. Tags such as
-`v0.1.0` run the macOS workflow, which builds the Tauri app and publishes a DMG
-artifact/Release only after the protected `desktop-production` Environment
-attests a signed picker→local-tool smoke for the exact commit. Distribution
-builds require a Developer ID certificate, hardened-runtime signing, Apple
-notarization, and successful stapling; missing release credentials fail closed.
+`v0.1.0` run the protected macOS workflow, which now builds both an arm64 DMG
+on `macos-latest` and an Intel `x86_64` DMG on GitHub's `macos-15-intel`
+runner. Both packages must pass Developer ID signing, hardened-runtime
+signing, Apple notarization, successful stapling, immutable manifest/hash
+verification, and their matching target-device UAT before either is attached
+to the public Release. The Intel UAT requires a dedicated interactive
+`self-hosted, macos, x64` runner; the arm64 UAT continues to use
+`self-hosted, macos, arm64`.
+
 The same lane must set `HATCH_PERSISTENT_SESSION=1` and the expected
 `HATCH_APPLE_TEAM_ID`; the bundled executable validates its own Developer ID
 Application signature, Team ID, and bundle identifier before it may use the
