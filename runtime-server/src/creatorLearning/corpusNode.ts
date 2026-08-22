@@ -30,10 +30,8 @@ const corpusSkillSchema = z.object({
 }).strict();
 
 const corpusKnowledgeSchema = z.object({
-  id: z.string().min(1),
-  title: z.string().min(1),
-  source_summary: z.string().min(1),
-  content: z.string().min(1)
+  source: productFileProjectionPathSchema,
+  title: z.string().min(1).max(256),
 }).strict();
 
 export const corpusOutputSchema = z.object({
@@ -71,11 +69,18 @@ const CORPUS_LAYERING = `Translate meaning into the narrowest durable layer:
 - system_instructions: global behavior that should affect every run—identity, product boundary, priorities, refusal conditions, quality bar, and cross-cutting ways of deciding.
 - skills: reusable procedures with a clear trigger and a sequence of judgment or action. A Skill should teach the Agent how to do a recurring kind of work, not merely state a principle.
 - references: local method, style, example, or few-shot detail that helps one Skill without becoming a global rule.
-- knowledge: self-contained long-tail facts or explanations that are useful when relevant, but must not secretly carry mandatory behavior.
+- knowledge: selected source files that are useful when relevant; Knowledge carries the original file, not a generated explanation or mandatory behavior.
 
 Do not force every source into an asset. Do not put the whole Product workflow into one giant Skill. If a distinction is global, keep it global; if it is local, keep it local.`;
 
-const CORPUS_SOURCE_BOUNDARY = `The published Corpus is a fresh synthesis, not an archive of the Factory inputs. Preserve the Creator's decisions, trade-offs, qualifiers, exceptions, and reasons in meaning, but do not copy source passages, transcripts, raw evidence, About You records, evaluation traces, or audit prose into runtime assets. A named influence is useful only when the Creator's relationship to it is confirmed and it changes a reusable judgment; a biography or name list is not a capability.`;
+const CORPUS_SOURCE_BOUNDARY = `Knowledge is a selection of whole source files, not a generated summary.
+
+For Knowledge only:
+- Select a file when it is Creator-authorized or otherwise explicitly trusted, stable enough to remain useful, relevant to the Product, and worth opening as a reference in a future run.
+- Exclude temporary notes, logs, evaluation traces, duplicate or superseded drafts, unsupported inference, and generic background that is not an authorized reference for this Product.
+- A source file is either selected as a whole or not selected. Do not rewrite, compress, summarize, merge, split, or copy its contents into the Corpus candidate.
+- The selected source must be one of the declared input.files. The title may organize or rename the file; it must not describe new content.
+- Product and About You help judge eligibility, but they are not automatically Knowledge files. System instructions and Skills may still translate their supported judgments into behavior.`;
 
 const CORPUS_COMPILER_PRINCIPLES = `Compiler principles:
 - Build a durable judgment system for new cases, not a polished answer to one case.
@@ -111,16 +116,16 @@ Work in this order:
 1. Read the Product, every declared source file, and every About You question-and-answer pair.
 2. Separate observed material, Creator-confirmed context, reasonable interpretation, and unresolved uncertainty.
 3. Identify the Creator's reusable distinctions and the Product decisions those distinctions should affect.
-4. Route each supported distinction to the narrowest useful Corpus layer.
-5. Write a fresh, complete candidate that gives the downstream Agent executable judgment, not a biography, archive, or source summary.
-6. Re-read the candidate against the Product and the source packet. Check that it preserves qualifiers, exceptions, boundaries, and the Creator's actual trade-offs.
+4. Route each supported distinction to the narrowest useful Corpus layer. For Knowledge, this means selecting source files only; it does not mean writing Knowledge prose.
+5. Write a fresh, complete candidate for system_instructions and skills, and a source-selection manifest for knowledge.
+6. Re-read the candidate against the Product and the source packet. Check that it preserves qualifiers, exceptions, boundaries, and the Creator's actual trade-offs, and that every selected Knowledge source is eligible.
 
 Return the complete corpus candidate as JSON matching the output schema. The candidate has three parts:
 - system_instructions: the stable operating principles the downstream agent should follow;
 - skills: reusable methods, each with a clear use condition, instruction, and source-grounded references;
-- knowledge: durable facts or explanations with their source summary.
+- knowledge: the selected source files, each represented by its input path and an organizing title.
 
-Preserve the Creator's actual judgment and examples without copying their source wording. Do not invent facts, answer unanswered About You questions, add evaluation cases, add runtime or tool configuration, add file paths, or add audit metadata. When revising, produce a complete replacement, not a patch. If the sources do not support a conclusion, preserve the uncertainty instead of manufacturing completeness.`;
+Preserve the Creator's actual judgment and examples in system_instructions and skills without copying their source wording. For knowledge, return only whole-file selections from input.files; do not return file contents, summaries, or generated prose. Do not invent facts, answer unanswered About You questions, add evaluation cases, add runtime or tool configuration, or add audit metadata. When revising, produce a complete replacement, not a patch. If the sources do not support a conclusion, preserve the uncertainty instead of manufacturing completeness.`;
 
 export const CORPUS_CRITIC_SYSTEM_PROMPT = `You are the Corpus Critic: the long-term editor responsible for deciding whether the compiled judgment can serve the Product beyond the examples that produced it.
 
@@ -144,7 +149,9 @@ Judge the candidate on these questions:
 - Product usefulness: Would these instructions help the Agent perform the specified customer job and produce something usable, publishable, sellable, or otherwise worth the Product's promise?
 - Durability: Does the candidate teach distinctions that transfer to new cases, or does it overfit one source, one question, or one observed failure?
 - Layering: Is each item in the narrowest useful layer, with global rules global, reusable procedures in Skills, local detail in References, and long-tail information in Knowledge?
-- Integrity: Is the synthesis original, epistemically honest, and free of unsupported Creator claims, copied source prose, hidden mandatory behavior in Knowledge, or invented facts?
+- Knowledge selection: Does every selected source come from input.files, have clear authority, remain stable and relevant to the Product, and deserve to be opened as a whole reference? Are temporary, duplicate, superseded, generic, or unsupported files excluded?
+- Knowledge integrity: Is each selected file represented only by its source path and organizing title, with no copied, compressed, summarized, or invented content in the candidate?
+- Integrity: Is the synthesis original and epistemically honest, with no unsupported Creator claims, hidden mandatory behavior in Knowledge, or invented facts?
 - Preservation: On revision, are still-valid capabilities retained, including their qualifiers and reasons, rather than being shortened away?
 
 Return exactly one JSON verdict:

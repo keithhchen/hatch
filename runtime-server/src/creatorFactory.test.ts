@@ -245,7 +245,7 @@ test("Creator Factory carries compiled Skills, references, and knowledge through
         path: string;
         sha256: string;
         retrieval_only: boolean;
-        source_summary: string;
+        title: string;
       }> };
     };
     assert.equal(manifest.skills[0]?.id, "offer-audit");
@@ -255,7 +255,7 @@ test("Creator Factory carries compiled Skills, references, and knowledge through
       path: "knowledge/market-cases.md",
       sha256: manifest.knowledge.documents[0]!.sha256,
       retrieval_only: true,
-      source_summary: "Creator-authorized market cases"
+      title: "Creator-authorized market cases"
     });
     return `Layered result for ${execution.question}`;
   });

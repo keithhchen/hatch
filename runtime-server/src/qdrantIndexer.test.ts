@@ -168,10 +168,10 @@ test("Qdrant and DashScope fetches cannot outlive their request timeout", async 
 function document(): KnowledgeDocument {
   return {
     id: "knowledge",
+    title: "Knowledge",
     path: "knowledge.md",
     sha256: `sha256:${"c".repeat(64)}`,
     retrieval_only: true,
-    source_summary: "Knowledge",
   };
 }
 

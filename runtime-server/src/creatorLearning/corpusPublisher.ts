@@ -5,6 +5,7 @@ import path from "node:path";
 import { zipSync } from "fflate";
 import type { ArtifactObjectStore } from "./objectStore.js";
 import type { FactoryNodeService } from "./nodeService.js";
+import { corpusInputSchema, corpusOutputSchema, type CorpusInput, type CorpusOutput } from "./corpusNode.js";
 import type { RegistryStoreTs, PublishedAgentCorpus } from "../registryStore.js";
 import { AgentCorpusVerificationError, extractAgentCorpusBundle, immutableReleasePath } from "../registryCorpus.js";
 import { CreatorRegistryReleaseStore, type CreatorRegistryRelease } from "./creatorRegistryRelease.js";
@@ -21,18 +22,6 @@ export class CorpusPublishError extends Error {
     this.status = status;
   }
 }
-
-type CorpusOutput = {
-  system_instructions: string;
-  skills: Array<{
-    id: string;
-    title: string;
-    when_to_use: string;
-    instruction: string;
-    references: Array<{ id: string; kind: "method" | "style" | "example" | "few_shots"; content: string }>;
-  }>;
-  knowledge: Array<{ id: string; title: string; source_summary: string; content: string }>;
-};
 
 export type PublishResult = {
   execution_id: string;
@@ -71,6 +60,9 @@ export class CorpusPublisher {
     const bytes = await this.objectStore.get(execution.outputRef);
     outerStage = "parse_corpus_output";
     const corpus = parseCorpusOutput(bytes);
+    outerStage = "read_corpus_input";
+    const corpusInput = await readCorpusInput(this.objectStore, execution.inputRef);
+    validateKnowledgeSelection(corpus, corpusInput);
     const sourceDigest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 
     // A lost HTTP response must not repeat materialization or indexing. The
@@ -90,7 +82,8 @@ export class CorpusPublisher {
       }
     }
     outerStage = "runtime_bundle_generation";
-    const bundle = makeRuntimeBundle({
+    const bundle = await makeRuntimeBundle({
+      objectStore: this.objectStore,
       creatorId: input.creatorId,
       productId: input.productId,
       productName: input.productName,
@@ -161,12 +154,17 @@ export class CorpusPublisher {
           input.productId,
           sourceDigest,
           releaseRoot,
-          corpus.knowledge.map((document): KnowledgeDocument => ({
-            id: safeId(document.id),
-            path: `knowledge/${safeId(document.id)}.md`,
-            sha256: `sha256:${createHash("sha256").update(document.content, "utf8").digest("hex")}`,
-            retrieval_only: true,
-            source_summary: document.source_summary,
+          await Promise.all(corpus.knowledge.map(async (document): Promise<KnowledgeDocument> => {
+            const id = knowledgeId(document.source);
+            const relativePath = `knowledge/${id}.md`;
+            const raw = await readFile(path.join(releaseRoot, relativePath));
+            return {
+              id,
+              title: document.title,
+              path: relativePath,
+              sha256: digestBytes(raw),
+              retrieval_only: true,
+            };
           })),
         );
       } catch (error) {
@@ -253,8 +251,8 @@ async function writeRuntimeReleaseAssets(input: {
     return { id, name: id, description: skill.when_to_use, ref: instruction, references };
   }));
   const knowledge = await Promise.all(input.corpus.knowledge.map(async (doc) => {
-    const id = safeId(doc.id);
-    return { id, ref: await copyAndDescribe(`knowledge/${id}.md`, `knowledge/${id}.md`), source_summary: doc.source_summary };
+    const id = knowledgeId(doc.source);
+    return { id, title: doc.title, ref: await copyAndDescribe(`knowledge/${id}.md`, `knowledge/${id}.md`) };
   }));
   const manifest = {
     contract_version: "1", creator: { id: input.creatorId },
@@ -272,26 +270,23 @@ async function writeRuntimeReleaseAssets(input: {
 }
 
 function parseCorpusOutput(bytes: Buffer): CorpusOutput {
-  let value: unknown;
-  try { value = JSON.parse(bytes.toString("utf8")); } catch { throw new Error("Corpus output is not valid JSON"); }
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Corpus output must be an object");
-  const row = value as Record<string, unknown>;
-  if (typeof row.system_instructions !== "string" || !Array.isArray(row.skills) || !Array.isArray(row.knowledge)) {
-    throw new Error("Corpus output does not match the Corpus Node contract");
+  try {
+    return corpusOutputSchema.parse(JSON.parse(bytes.toString("utf8")));
+  } catch (error) {
+    throw new Error(`Corpus output does not match the Corpus Node contract: ${error instanceof Error ? error.message : String(error)}`);
   }
-  return value as CorpusOutput;
 }
 
-function makeRuntimeBundle(input: {
+async function makeRuntimeBundle(input: {
+  objectStore: ArtifactObjectStore;
   creatorId: string; productId: string; productName: string; productPromise: string;
   corpus: CorpusOutput; briefSpec?: unknown;
-}): Buffer {
+}): Promise<Buffer> {
   const files: Record<string, Uint8Array> = {};
-  const put = (name: string, content: string): void => { files[name] = Buffer.from(content, "utf8"); };
-  const digest = (content: string): string => `sha256:${createHash("sha256").update(content, "utf8").digest("hex")}`;
+  const put = (name: string, content: string | Uint8Array): void => { files[name] = Buffer.from(content); };
   const assets: Record<string, { id: string; path: string; sha256: string; description?: string }> = {};
-  const addAsset = (id: string, filePath: string, content: string, description?: string): void => {
-    put(filePath, content); assets[id] = { id, path: filePath, sha256: digest(content), ...(description ? { description } : {}) };
+  const addAsset = (id: string, filePath: string, content: string | Uint8Array, description?: string): void => {
+    put(filePath, content); assets[id] = { id, path: filePath, sha256: digestBytes(Buffer.from(content)), ...(description ? { description } : {}) };
   };
   addAsset("system", "instructions/system.md", input.corpus.system_instructions, "Corpus system instructions");
   const skills = input.corpus.skills.map((skill) => {
@@ -309,12 +304,14 @@ function makeRuntimeBundle(input: {
     });
     return { id, name: id, when_to_use: skill.when_to_use, instruction: assets[instructionId]!, references, allowed_tool_ids: [] };
   });
-  const knowledge = input.corpus.knowledge.map((doc) => {
-    const id = safeId(doc.id);
+  const knowledge: Array<Record<string, unknown>> = [];
+  for (const doc of input.corpus.knowledge) {
+    const id = knowledgeId(doc.source);
     const assetId = `knowledge-${id}`;
-    addAsset(assetId, `knowledge/${id}.md`, doc.content, doc.source_summary);
-    return { id, path: assets[assetId]!.path, sha256: assets[assetId]!.sha256, retrieval_only: true, source_summary: doc.source_summary };
-  });
+    const sourceBytes = await input.objectStore.get(doc.source);
+    addAsset(assetId, `knowledge/${id}.md`, sourceBytes, doc.title);
+    knowledge.push({ id, path: assets[assetId]!.path, sha256: assets[assetId]!.sha256, retrieval_only: true, title: doc.title });
+  }
   const manifest = {
     contract_version: "1",
     creator: { id: input.creatorId, name: "Creator" },
@@ -330,6 +327,39 @@ function makeRuntimeBundle(input: {
   };
   put("agent.json", JSON.stringify(manifest, null, 2));
   return Buffer.from(zipSync(files));
+}
+
+async function readCorpusInput(objectStore: ArtifactObjectStore, reference: string | undefined): Promise<CorpusInput> {
+  if (!reference) throw new Error("Completed Corpus execution has no input_ref");
+  try {
+    return corpusInputSchema.parse(JSON.parse((await objectStore.get(reference)).toString("utf8")));
+  } catch (error) {
+    throw new Error(`Corpus input is unavailable or invalid: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function validateKnowledgeSelection(corpus: CorpusOutput, input: CorpusInput): void {
+  const declared = new Set(input.files);
+  const selected = new Set<string>();
+  for (const document of corpus.knowledge) {
+    if (!declared.has(document.source)) {
+      throw new Error(`Corpus Knowledge source is not declared in input.files: ${document.source}`);
+    }
+    if (selected.has(document.source)) {
+      throw new Error(`Corpus Knowledge source is selected more than once: ${document.source}`);
+    }
+    selected.add(document.source);
+  }
+}
+
+function knowledgeId(source: string): string {
+  const match = source.match(/\/files\/(file_[A-Za-z0-9_-]+)\/projection\.md$/);
+  if (!match?.[1]) throw new Error(`Corpus Knowledge source is not a Product File projection: ${source}`);
+  return safeId(match[1]);
+}
+
+function digestBytes(content: Uint8Array): string {
+  return `sha256:${createHash("sha256").update(content).digest("hex")}`;
 }
 
 function safeId(value: string): string {

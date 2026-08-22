@@ -503,7 +503,7 @@ function buildManifest(plan: BundlePlan, digestFor: (relativePath: string) => st
         sha256: digestFor(knowledgePath(document.id)),
         ...(document.description === undefined ? {} : { description: document.description }),
         retrieval_only: true as const,
-        source_summary: document.sourceSummary
+        title: document.sourceSummary
       }))
     },
     tools: plan.tools,

@@ -35,11 +35,11 @@ export const runtimeCorpusManifestSchema = z.object({
   }).strict()),
   knowledge: z.array(z.object({
     id: z.string().min(1),
+    title: z.string().min(1),
     ref: z.object({
       path: z.string().min(1),
       sha256: digestSchema
     }).strict(),
-    source_summary: z.string().min(1)
   }).strict()),
   brief_spec: z.unknown()
 }).strict();
@@ -48,9 +48,9 @@ export type RuntimeCorpusManifest = z.infer<typeof runtimeCorpusManifestSchema>;
 
 export type RuntimeKnowledgeDocument = {
   id: string;
+  title: string;
   path: string;
   content: string;
-  sourceSummary: string;
 };
 
 export interface RuntimeKnowledgeIndexer {

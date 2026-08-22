@@ -47,8 +47,8 @@ export const CREATOR_RUNTIME_MANIFEST_SCHEMA = z.object({
   }).strict()),
   knowledge: z.array(z.object({
     id: z.string().min(1),
+    title: z.string().min(1),
     ref: RUNTIME_ASSET_REF_SCHEMA,
-    source_summary: z.string().min(1)
   }).strict()),
   brief_spec: z.unknown()
 }).strict();
@@ -304,16 +304,16 @@ export class CreatorRegistry {
     const knowledge: CreatorRuntimeManifest["knowledge"] = [];
     const seenKnowledgeIds = new Set<string>();
     for (const document of input.corpus.knowledge) {
-      const id = runtimeIdentifier(document.id, "Knowledge document");
+      const id = runtimeIdentifier(knowledgeId(document.source), "Knowledge document");
       if (seenKnowledgeIds.has(id)) throw new CreatorRegistryError("invalid_corpus", `Duplicate runtime Knowledge id: ${id}`);
       seenKnowledgeIds.add(id);
       const assetPath = `${runtimeRoot}/knowledge/${id}.md`;
-      const bytes = Buffer.from(document.content, "utf8");
+      const bytes = await this.objects.get(document.source);
       await this.objects.put(assetPath, bytes, { contentType: "text/markdown; charset=utf-8", immutable: true });
       knowledge.push({
         id,
         ref: { path: assetPath, sha256: sha256(bytes) },
-        source_summary: document.source_summary
+        title: document.title
       });
     }
 
@@ -546,6 +546,12 @@ function runtimeIdentifier(value: string, label: string): string {
     throw new CreatorRegistryError("invalid_corpus", `${label} id must be a runtime-safe identifier: ${value}`);
   }
   return normalized;
+}
+
+function knowledgeId(source: string): string {
+  const match = source.match(/\/files\/(file_[A-Za-z0-9_-]+)\/projection\.md$/);
+  if (!match?.[1]) throw new CreatorRegistryError("invalid_corpus", `Knowledge source is not a Product File projection: ${source}`);
+  return runtimeIdentifier(match[1], "Knowledge document");
 }
 
 function sha256(bytes: Buffer): string {

@@ -219,7 +219,7 @@ function runtimeManifestToAgentCorpus(manifest: RuntimeCorpusManifest): AgentCor
         path: document.ref.path,
         sha256: document.ref.sha256,
         retrieval_only: true,
-        source_summary: document.source_summary
+        title: document.title
       }))
     },
     tools: [

@@ -184,12 +184,12 @@ test("Creator Factory materializes every Agent Corpus layer with exact bytes and
     id: document.id,
     path: document.path,
     retrievalOnly: document.retrieval_only,
-    sourceSummary: document.source_summary
+    title: document.title
   })), [{
     id: "source-ledger",
     path: "knowledge/source-ledger.md",
     retrievalOnly: true,
-    sourceSummary: "Creator-supplied filing ledger."
+    title: "Creator-supplied filing ledger."
   }]);
   assert.deepEqual(verified.corpus.tools.map((tool) => tool.id), [
     "hatch.web_search",

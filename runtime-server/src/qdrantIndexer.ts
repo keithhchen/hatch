@@ -13,14 +13,15 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 
 export type KnowledgeDocument = {
   id: string;
+  title: string;
   path: string;
   sha256: string;
   retrieval_only: true;
-  source_summary: string;
 };
 
 type Chunk = {
   documentId: string;
+  title: string;
   sourcePath: string;
   heading: string;
   text: string;
@@ -119,6 +120,7 @@ export class QdrantKnowledgeIndexer {
             agent_id: agentId,
             corpus_digest: corpusDigest,
             document_id: chunk.documentId,
+            title: chunk.title,
             source_path: chunk.sourcePath,
             heading: chunk.heading,
             text: chunk.text,
@@ -245,7 +247,7 @@ function splitMarkdown(text: string, document: KnowledgeDocument, maxChars = 240
   let current: string[] = [];
   const flush = () => {
     const content = current.join("\n").trim();
-    if (content) chunks.push({ documentId: document.id, sourcePath: document.path, heading, text: content, chunkIndex: chunks.length });
+    if (content) chunks.push({ documentId: document.id, title: document.title, sourcePath: document.path, heading, text: content, chunkIndex: chunks.length });
     current = [];
   };
   for (const line of text.split(/\r?\n/)) {

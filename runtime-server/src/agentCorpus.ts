@@ -40,6 +40,22 @@ const AssetSchema = z.object({
   description: DescriptionSchema.optional()
 }).strict();
 
+/**
+ * New releases expose a title for each selected source file. The legacy
+ * `source_summary` spelling is accepted only while reading already-installed
+ * v1 bundles and is normalized immediately; the publish path writes `title`.
+ */
+const KnowledgeAssetSchema = z.union([
+  AssetSchema.extend({
+    retrieval_only: z.literal(true),
+    title: NameSchema
+  }).strict(),
+  AssetSchema.extend({
+    retrieval_only: z.literal(true),
+    source_summary: DescriptionSchema
+  }).strict().transform(({ source_summary, ...asset }) => ({ ...asset, title: source_summary }))
+]);
+
 const ToolSchema = z.object({
   id: ToolIdentifierSchema,
   kind: z.string().min(1).max(64),
@@ -74,10 +90,7 @@ export const AgentCorpusSchema = z.object({
     allowed_tool_ids: z.array(ToolIdentifierSchema).max(64).default([])
   }).strict()).max(32).default([]),
   knowledge: z.object({
-    documents: z.array(AssetSchema.extend({
-      retrieval_only: z.literal(true),
-      source_summary: DescriptionSchema
-    }).strict()).max(256).default([])
+    documents: z.array(KnowledgeAssetSchema).max(256).default([])
   }).strict().default({ documents: [] }),
   tools: z.array(ToolSchema).min(1).max(64),
   evaluations: z.object({
@@ -345,7 +358,7 @@ export class QdrantKnowledgeProvider implements KnowledgeProvider {
       ? (result as Record<string, unknown>).points
       : result;
     const candidates = Array.isArray(points)
-      ? points.flatMap((item): Array<{ id: string; text: string; document_id?: string; source_path?: string; heading?: string; source?: string; rawScore: number }> => {
+      ? points.flatMap((item): Array<{ id: string; text: string; document_id?: string; title?: string; source_path?: string; heading?: string; source?: string; rawScore: number }> => {
         if (!item || typeof item !== "object") return [];
         const point = item as Record<string, unknown>;
         const payload = point.payload && typeof point.payload === "object" && !Array.isArray(point.payload)
@@ -357,6 +370,7 @@ export class QdrantKnowledgeProvider implements KnowledgeProvider {
           text: payload.text,
           rawScore: typeof point.score === "number" ? point.score : 0,
           ...(typeof payload.document_id === "string" ? { document_id: payload.document_id } : {}),
+          ...(typeof payload.title === "string" ? { title: payload.title } : {}),
           ...(typeof payload.source_path === "string" ? { source_path: payload.source_path } : {}),
           ...(typeof payload.heading === "string" ? { heading: payload.heading } : {}),
           source: [payload.source_path, payload.heading].filter((part): part is string => typeof part === "string" && part.length > 0).join(" · ") || undefined
@@ -545,7 +559,7 @@ export class CorpusKnowledgeProvider implements KnowledgeProvider {
             score,
             document_id: document.id,
             source_path: document.path,
-            source: typeof document.source_summary === "string" ? document.source_summary : document.id
+            source: document.title
           });
         }
       }
