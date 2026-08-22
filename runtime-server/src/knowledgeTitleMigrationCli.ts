@@ -1,7 +1,8 @@
 import path from "node:path";
 import { Pool } from "pg";
 import { CreatorRegistryReleaseStore } from "./creatorLearning/creatorRegistryRelease.js";
-import { objectStoreFromEnvironment, type ArtifactObjectStore } from "./creatorLearning/objectStore.js";
+import { migrateKnowledgeTitles } from "./creatorLearning/knowledgeTitleMigration.js";
+import { objectStoreFromEnvironment } from "./creatorLearning/objectStore.js";
 import { QdrantKnowledgeIndexer } from "./qdrantIndexer.js";
 
 /**
@@ -9,31 +10,9 @@ import { QdrantKnowledgeIndexer } from "./qdrantIndexer.js";
  * migration implementation.  The implementation lives in
  * knowledgeTitleMigration.ts; this CLI only wires production dependencies.
  *
- * Keep this shape in sync with the exported API there.  `verifyOnly` is used
- * by deploy after the migration to validate every live release without
- * writing anything.
+ * `verifyOnly` is used by deploy after the migration to validate every live
+ * release without writing anything.
  */
-type KnowledgeTitleMigrationInput = {
-  objectStore: ArtifactObjectStore;
-  releaseStore: CreatorRegistryReleaseStore;
-  runtimeCorpusRoot: string;
-  verifyOnly?: boolean;
-  knowledgeIndexer?: QdrantKnowledgeIndexer;
-};
-
-type KnowledgeTitleMigrationSummary = {
-  scanned: number;
-  migrated: number;
-  unchanged: number;
-  verified: number;
-};
-
-type KnowledgeTitleMigrationApi = {
-  migrateKnowledgeTitles: (input: KnowledgeTitleMigrationInput) => Promise<KnowledgeTitleMigrationSummary>;
-};
-
-const MIGRATION_MODULE_PATH = "./knowledgeTitleMigration.js";
-
 const verifyOnly = parseArguments(process.argv.slice(2));
 const environment = process.env;
 const databaseUrl = environment.HATCH_REGISTRY_DATABASE_URL?.trim() || environment.HATCH_DATABASE_URL?.trim();
@@ -57,8 +36,7 @@ const pool = new Pool({
 try {
   const releaseStore = new CreatorRegistryReleaseStore(pool);
   await releaseStore.ensureSchema();
-  const migration = await loadMigrationApi();
-  const result = await migration.migrateKnowledgeTitles({
+  const result = await migrateKnowledgeTitles({
     objectStore,
     releaseStore,
     runtimeCorpusRoot: path.resolve(runtimeCorpusRoot),
@@ -82,15 +60,4 @@ function positiveInteger(raw: string | undefined, fallback: number): number {
     throw new Error("HATCH_REGISTRY_DB_TIMEOUT_MS must be an integer between 250 and 120000");
   }
   return value;
-}
-
-async function loadMigrationApi(): Promise<KnowledgeTitleMigrationApi> {
-  // Keep the import dynamic so this entrypoint can be reviewed independently
-  // while the main implementation is added in the companion module. Runtime
-  // still fails closed if the agreed migration API is missing or malformed.
-  const module = await import(MIGRATION_MODULE_PATH) as Partial<KnowledgeTitleMigrationApi>;
-  if (typeof module.migrateKnowledgeTitles !== "function") {
-    throw new Error("knowledgeTitleMigration.ts must export migrateKnowledgeTitles(input)");
-  }
-  return module as KnowledgeTitleMigrationApi;
 }
