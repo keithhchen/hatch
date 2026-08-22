@@ -8,7 +8,6 @@
     "serve:registry": "npm run build && node dist/registryServer.js",
     "dev": "node dist/index.js",
     "start": "node dist/index.js",
-    "migrate:knowledge-title": "node dist/knowledgeTitleMigrationCli.js",
     "build": "rm -rf dist && tsc -p tsconfig.json",
     "eval:output-guard": "npm run build && node scripts/eval-output-guard.mjs",
     "test": "npm run build && node --test --test-concurrency=1 dist/*.test.js"

@@ -139,36 +139,6 @@ export class CreatorRegistryReleaseStore {
     return row ? rowToRelease(row) : undefined;
   }
 
-  /**
-   * Read-only enumeration of the releases currently selected by the live
-   * pointers.  Migration jobs use this boundary instead of reaching into the
-   * release tables directly, so the pointer remains the sole authority for
-   * what is eligible to be migrated.
-   */
-  async listLive(options: { limit?: number; offset?: number } = {}): Promise<CreatorRegistryRelease[]> {
-    const limit = options.limit ?? 20_001;
-    const offset = options.offset ?? 0;
-    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20_001) throw new Error("live release limit is invalid");
-    if (!Number.isSafeInteger(offset) || offset < 0 || offset > 100_000) throw new Error("live release offset is invalid");
-    if (!this.pool) {
-      return [...this.memory.values()]
-        .sort((a, b) => Date.parse(b.published_at) - Date.parse(a.published_at) || a.product_id.localeCompare(b.product_id))
-        .slice(offset, offset + limit);
-    }
-    const result = await this.pool.query(`
-      SELECT r.product_id, r.creator_id, r.release_digest, r.corpus_digest,
-             r.corpus_ref, r.release_ref, r.runtime_manifest_ref,
-             r.brief_spec, r.status, r.published_at
-      FROM hatch_creator_registry_live AS l
-      JOIN hatch_creator_registry_releases AS r
-        ON r.product_id=l.product_id AND r.release_digest=l.release_digest
-      WHERE r.status='published'
-      ORDER BY r.published_at DESC, r.product_id ASC
-      LIMIT $1 OFFSET $2
-    `, [limit, offset]);
-    return result.rows.map((row) => rowToRelease(row as Record<string, unknown>));
-  }
-
   /** Public catalog authority: only the current release pointer is visible. */
   async listPublic(options: { limit?: number; offset?: number } = {}): Promise<PublicReleaseListing[]> {
     const limit = options.limit ?? 20;
