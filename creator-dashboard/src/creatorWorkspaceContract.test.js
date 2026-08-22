@@ -26,12 +26,16 @@ test("About You does not keep showing a Corpus-loading message after handoff is 
   assert.doesNotMatch(source, /execution=\{\.\.\.execution, status: "completed"\}/);
 });
 
-test("live node loading stays quiet and uses the shared moving gradient", async () => {
+test("live node loading shows the step title, round, clue, and shared glowing circle", async () => {
   const source = await readFile(new URL("./CreatorProductWorkspace.jsx", import.meta.url), "utf8");
   const styles = await readFile(new URL("./creatorProductWorkspace.css", import.meta.url), "utf8");
   for (const copy of ["Hatch 线索伙伴", "现在发生什么", "正在寻找反复出现的判断", "Hatch 正在处理……", "正在工作", "把材料里的线索聚在一起，先认识你的方法。"])
     assert.doesNotMatch(`${source}\n${styles}`, new RegExp(copy));
+  assert.match(source, /<h2>\{title\}<\/h2>/);
+  assert.match(source, /execution\?\.round/);
   assert.match(source, /cpv2-node-gradient/);
   assert.match(styles, /animation: hui-skeleton/);
+  assert.match(styles, /border-radius: 50%/);
+  assert.match(styles, /box-shadow:/);
   assert.doesNotMatch(styles, /cpv2-companion-bounce|cpv2-companion-blink/);
 });
