@@ -244,7 +244,10 @@ publish, current POSIX Corpus state, Postgres metadata, account access, and the
 publish-time Qdrant ingestion hook. The two services share the TypeScript
 Corpus contract but keep their HTTP processes separate.
 
-Set the model and credentials in `.env`:
+Set the model and credentials in the repository root `.env` (`../.env` when
+your shell is inside `runtime-server/`). Runtime, Registry, Factory CLI, and
+Factory worker all use this one file; `runtime-server/.env` is intentionally
+not supported.
 
 ```text
 HATCH_CREATOR_MODEL=kimi-k2.6
@@ -261,6 +264,11 @@ HATCH_REGISTRY_URL=http://registry:8100
 HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN=<runtime-service-token>
 HATCH_RUNTIME_DATABASE_URL=<dedicated-runtime-postgres-url>
 ```
+
+When migrating an older checkout, merge any values from its former
+`runtime-server/.env` into the root `.env`, verify the services, and then
+remove the nested file. Do not copy secrets into `.env.example` or into a
+worktree that should not have production credentials.
 
 Configure `HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN` only on Registry and
 Dashboard, never Runtime. Public user

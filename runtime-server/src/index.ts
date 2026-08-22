@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "./loadRootEnv.js";
 
 import http from "node:http";
 import { createHash, randomUUID } from "node:crypto";
@@ -95,6 +95,7 @@ import {
   type OutputGuard
 } from "./outputGuard.js";
 import { writeOperationalError } from "./operationalLogging.js";
+import { installGracefulShutdown } from "./gracefulShutdown.js";
 
 type AgentCorpusResolver = AgentCorpusResolverLike;
 
@@ -638,6 +639,7 @@ type ReadinessCheck = "starting" | "ready" | "failed";
 type RuntimeReadiness = {
   repository: ReadinessCheck;
   deliveryAccounting: ReadinessCheck | "disabled";
+  shuttingDown: boolean;
 };
 export function createRuntimeServer(options: RuntimeServerOptions = {}): RuntimeServer {
   const activeConversationRuns = new Map<string, string>();
@@ -727,7 +729,8 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     .then(() => conversationRepository.interruptActiveRuns("Runtime restarted; the executor connection was lost."));
   const readiness: RuntimeReadiness = {
     repository: "starting",
-    deliveryAccounting: commerceEventSink ? "starting" : "disabled"
+    deliveryAccounting: commerceEventSink ? "starting" : "disabled",
+    shuttingDown: false
   };
   void repositoryReady.then(
     () => { readiness.repository = "ready"; },
@@ -788,6 +791,11 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     throw new Error("maxHttpResponseBytes must be an integer of at least 1024");
   }
   const server = http.createServer((req, res) => {
+    if (readiness.shuttingDown) {
+      req.resume();
+      writeJson(res, 503, { error: { code: "runtime_shutting_down", message: "Runtime is shutting down." } });
+      return;
+    }
     const releaseGlobalRequest = httpRequestGate.tryAcquire();
     if (!releaseGlobalRequest) {
       writeJson(res, 503, {
@@ -920,27 +928,37 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
     );
   });
 
+  let closePromise: Promise<void> | undefined;
   return {
     server,
     wss,
     close: async () => {
-      if (reconciliationInterval) clearInterval(reconciliationInterval);
-      for (const client of wss.clients) {
-        // Shutdown must not wait for a peer to complete the WebSocket close
-        // handshake. Tests caught the same production failure mode: a Desktop
-        // connection can keep the Runtime process alive indefinitely during a
-        // deploy after the HTTP server has otherwise stopped accepting work.
-        client.terminate();
-      }
-      // A peer may already have started a close handshake and disappeared
-      // from `wss.clients` while its upgraded TCP socket is still open.
-      for (const connection of acceptedConnections) connection.destroy();
-      await new Promise<void>((resolve) => wss.close(() => resolve()));
-      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
-      await Promise.allSettled([...connectionTasks]);
-      await Promise.allSettled([...reconciliationTasks]);
-      await conversationStore.close();
-      await conversationRepository.close();
+      if (closePromise) return closePromise;
+      readiness.shuttingDown = true;
+      closePromise = (async () => {
+        if (reconciliationInterval) clearInterval(reconciliationInterval);
+        for (const client of wss.clients) {
+          // Shutdown must not wait for a peer to complete the WebSocket close
+          // handshake. Tests caught the same production failure mode: a Desktop
+          // connection can keep the Runtime process alive indefinitely during a
+          // deploy after the HTTP server has otherwise stopped accepting work.
+          client.terminate();
+        }
+        // A peer may already have started a close handshake and disappeared
+        // from `wss.clients` while its upgraded TCP socket is still open.
+        for (const connection of acceptedConnections) connection.destroy();
+        await new Promise<void>((resolve) => wss.close(() => resolve()));
+        const serverClosed = new Promise<void>((resolve, reject) => {
+          server.close((error) => error ? reject(error) : resolve());
+        });
+        server.closeIdleConnections?.();
+        await serverClosed;
+        await Promise.allSettled([...connectionTasks]);
+        await Promise.allSettled([...reconciliationTasks]);
+        await conversationStore.close();
+        await conversationRepository.close();
+      })();
+      return closePromise;
     }
   };
 }
@@ -976,7 +994,8 @@ async function handleHttpRequest(
   if (req.method === "GET" && url.pathname === "/readyz") {
     const repository = readiness?.repository ?? "failed";
     const deliveryAccounting = readiness?.deliveryAccounting ?? "disabled";
-    const ready = repository === "ready"
+    const ready = !readiness?.shuttingDown
+      && repository === "ready"
       && (deliveryAccounting === "ready" || deliveryAccounting === "disabled");
     writeJson(res, ready ? 200 : 503, {
       ok: ready,
@@ -3559,13 +3578,20 @@ function errorMessage(error: unknown): string {
 if (import.meta.url === `file://${process.argv[1]}`) {
   const port = Number(process.env.PORT ?? 8400);
   const host = process.env.HATCH_RUNTIME_HOST?.trim() || "127.0.0.1";
-  void createRuntimeServerFromEnvironment().then((runtimeServer) => {
-    runtimeServer.server.listen(port, host, () => {
-      const commerce = process.env.HATCH_COMMERCE_LEDGER_FILE ? " with commerce ledger" : "";
-      console.log(`Hatch TS runtime listening on ws://${host}:${port}/runtime${commerce}`);
+  void (async () => {
+    const runtimeServer = await createRuntimeServerFromEnvironment();
+    installGracefulShutdown({ name: "runtime", close: runtimeServer.close });
+    await new Promise<void>((resolve, reject) => {
+      runtimeServer.server.once("error", reject);
+      runtimeServer.server.listen(port, host, () => {
+        runtimeServer.server.off("error", reject);
+        resolve();
+      });
     });
-  }).catch((error: unknown) => {
-    console.error("Unable to start Hatch Runtime:", error);
+    const commerce = process.env.HATCH_COMMERCE_LEDGER_FILE ? " with commerce ledger" : "";
+    console.log(`Hatch TS runtime listening on ws://${host}:${port}/runtime${commerce}`);
+  })().catch((error: unknown) => {
+    writeOperationalError("runtime_startup_failed", error);
     process.exitCode = 1;
   });
 }

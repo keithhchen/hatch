@@ -35,6 +35,13 @@ or separate production Runtime exists. The server uses two Compose projects:
    in the server-only `.env` with mode 600, and never prints it. This stable
    key encrypts the Dashboard's OAuth-backed Registry session references;
    rotating it invalidates existing OAuth records.
+   The root `.env` is the only environment-file authority in both local and
+   production deployments. The Runtime image receives variables from Compose;
+   local Runtime/Registry/Factory commands resolve the same repository-root
+   file. Do not create `/opt/hatch/runtime-server/.env` or
+   `<repo>/runtime-server/.env`. If upgrading an older checkout, merge its
+   values into the root file once, verify the services, and remove the nested
+   file.
    Dashboard owns the entitlement ledger. Registry owns account identity and
    published Product/Corpus metadata; it does not keep a second ownership copy.
    Registry applies a hard request budget to the client IP and separate
@@ -110,6 +117,25 @@ or separate production Runtime exists. The server uses two Compose projects:
 
    This creates persistent Docker volumes for Postgres and Qdrant. Normal
    application CD does not recreate or restart these services.
+
+## Restart and health policy
+
+Registry, Runtime, Dashboard, Caddy, Postgres, and Qdrant use
+`restart: unless-stopped`. The Node services receive SIGTERM, stop admitting
+new work, make `/readyz` return 503, drain the work they can safely finish, and
+then close their database and socket resources. Compose gives the application
+services 35 seconds before SIGKILL; Factory worker has the same durable
+handoff semantics through its Postgres lease, heartbeat, and checkpoint.
+An in-flight Runtime conversation is recorded as `Interrupted` rather than
+silently replaying model or local-tool side effects; the user must retry it.
+
+The HTTP healthchecks call each service's private `/readyz` and include a
+startup grace period. A Docker healthcheck marks a container unhealthy; Docker
+does not restart a process that is still alive merely because its healthcheck
+fails. If an unhealthy container does not recover, inspect its logs and use
+`docker compose restart <service>` or let the process exit so the restart
+policy can act. Never use `docker compose down -v` during recovery: it deletes
+the persistent volumes.
 
 ## GitHub secrets
 

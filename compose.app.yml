@@ -5,6 +5,8 @@ services:
     image: ${HATCH_IMAGE_PREFIX:-ghcr.io/example/hatch}/runtime:${HATCH_RELEASE_TAG:-dev}
     command: ["node", "dist/registryServer.js"]
     restart: unless-stopped
+    init: true
+    stop_grace_period: 35s
     environment:
       NODE_ENV: production
       REGISTRY_HOST: 0.0.0.0
@@ -94,12 +96,14 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
+      start_period: 20s
 
   factory-worker:
     image: ${HATCH_IMAGE_PREFIX:-ghcr.io/example/hatch}/runtime:${HATCH_RELEASE_TAG:-dev}
     command: ["node", "dist/creatorFactoryWorker.js"]
     restart: unless-stopped
-    stop_grace_period: 30s
+    init: true
+    stop_grace_period: 35s
     environment:
       HATCH_FACTORY_DATABASE_URL: ${HATCH_DATABASE_URL:?set HATCH_DATABASE_URL in /opt/hatch/.env}
       HATCH_CREATOR_FACTORY_ROOT: /var/lib/hatch/creator-factory
@@ -134,11 +138,15 @@ services:
     depends_on:
       registry:
         condition: service_healthy
+    # This worker has no HTTP endpoint. Its liveness boundary is the process
+    # restart plus the Postgres lease/heartbeat/checkpoint recovery protocol.
 
   runtime:
     image: ${HATCH_IMAGE_PREFIX:-ghcr.io/example/hatch}/runtime:${HATCH_RELEASE_TAG:-dev}
     command: ["node", "dist/index.js"]
     restart: unless-stopped
+    init: true
+    stop_grace_period: 35s
     environment:
       NODE_ENV: production
       HATCH_RUNTIME_HOST: 0.0.0.0
@@ -227,6 +235,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
+      start_period: 20s
     depends_on:
       registry:
         condition: service_healthy
@@ -236,6 +245,8 @@ services:
   dashboard:
     image: ${HATCH_IMAGE_PREFIX:-ghcr.io/example/hatch}/dashboard:${HATCH_RELEASE_TAG:-dev}
     restart: unless-stopped
+    init: true
+    stop_grace_period: 35s
     environment:
       NODE_ENV: production
       HATCH_CREATOR_DASHBOARD_API_HOST: 0.0.0.0
@@ -256,10 +267,13 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
+      start_period: 20s
 
   caddy:
     image: ${HATCH_IMAGE_PREFIX:-ghcr.io/example/hatch}/caddy:${HATCH_RELEASE_TAG:-dev}
     restart: unless-stopped
+    init: true
+    stop_grace_period: 15s
     environment:
       HATCH_DOMAIN: ${HATCH_DOMAIN:?set HATCH_DOMAIN in /opt/hatch/.env}
     ports:
