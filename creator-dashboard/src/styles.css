@@ -12,7 +12,8 @@ button, input { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: default; }
 h1, h2, h3, p { margin-top: 0; }
-h1, h2 { font-family: var(--hatch-font-display); font-weight: 400; letter-spacing: var(--hatch-display-tracking); line-height: var(--hatch-display-leading); }
+h1 { font-family: var(--hatch-font-display); font-weight: 400; letter-spacing: var(--hatch-display-tracking); line-height: var(--hatch-display-leading); }
+h2 { font-family: var(--hatch-font-ui); font-weight: 400; letter-spacing: normal; line-height: 1.25; }
 
 .eyebrow {
   display: none;
@@ -83,7 +84,7 @@ h1, h2 { font-family: var(--hatch-font-display); font-weight: 400; letter-spacin
 .agent-list { margin-top: 36px; }
 .agent-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-top: 16px; }
 .agent-tile { min-height: 180px; padding: 22px; border: 1px solid var(--hatch-border-subtle); border-radius: 18px; background: color-mix(in srgb, var(--hatch-panel) 84%, transparent); }
-.agent-tile h2, .agent-tile h3 { margin: 18px 0 8px; font-family: var(--hatch-font-display); font-size: var(--hatch-type-title); font-weight: 400; letter-spacing: var(--hatch-display-tracking); line-height: var(--hatch-display-leading); }
+.agent-tile h2, .agent-tile h3 { margin: 18px 0 8px; font-family: var(--hatch-font-ui); font-size: var(--hatch-type-title); font-weight: 400; letter-spacing: normal; line-height: 1.25; }
 .agent-tile p { min-height: 42px; color: var(--hatch-ink); font-size: var(--hatch-type-ui); line-height: 1.55; }
 .agent-tile small { color: var(--hatch-ink); font-size: var(--hatch-type-meta); }
 .text-button { padding: 0; border: 0; background: transparent; color: var(--hatch-accent); font-size: var(--hatch-type-ui); }
@@ -91,7 +92,7 @@ h1, h2 { font-family: var(--hatch-font-display); font-weight: 400; letter-spacin
 .detail-heading { margin-top: 34px; margin-bottom: 34px; }
 .detail-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(280px, .75fr); gap: 18px; }
 .detail-card, .detail-action-card { min-height: 300px; padding: 30px; border: 1px solid var(--hatch-border-subtle); border-radius: 22px; background: color-mix(in srgb, var(--hatch-panel) 84%, transparent); }
-.detail-card h2, .detail-action-card h2 { margin: 0 0 12px; font-family: var(--hatch-font-display); font-size: var(--hatch-type-title); font-weight: 400; line-height: var(--hatch-display-leading); letter-spacing: var(--hatch-display-tracking); }
+.detail-card h2, .detail-action-card h2 { margin: 0 0 12px; font-family: var(--hatch-font-ui); font-size: var(--hatch-type-title); font-weight: 400; line-height: 1.25; letter-spacing: normal; }
 .detail-card p, .detail-action-card p { color: var(--hatch-ink); font-size: var(--hatch-type-body); line-height: 1.65; }
 .detail-action-card { display: flex; flex-direction: column; background: var(--hatch-inverse); color: var(--hatch-inverse-text); }
 .detail-action-card .eyebrow { color: rgba(255,255,255,.58); }
@@ -115,10 +116,10 @@ h1, h2 { font-family: var(--hatch-font-display); font-weight: 400; letter-spacin
 .status-chip.review_ready { background: #f8d9ca; color: #a2492e; }
 .status-chip.published { background: #d9e7de; color: #35634f; }
 .status-chip.needs_validation { background: #ece4cf; color: #776531; }
-.product-card h2 { margin: 0 0 12px; font-size: clamp(var(--hatch-type-title), 3.4vw, var(--hatch-type-display)); line-height: var(--hatch-display-leading); letter-spacing: var(--hatch-display-tracking); }
+.product-card h2 { margin: 0 0 12px; font-size: clamp(var(--hatch-type-title), 3.4vw, var(--hatch-type-display)); line-height: 1.25; letter-spacing: normal; }
 .product-card p { max-width: 590px; min-height: 50px; margin-bottom: 28px; color: var(--hatch-ink); line-height: 1.65; }
 .product-price { display: flex; align-items: baseline; gap: 8px; margin-bottom: 26px; }
-.product-price strong { font-family: var(--hatch-font-display); font-size: var(--hatch-type-display); font-weight: 400; letter-spacing: var(--hatch-display-tracking); line-height: var(--hatch-display-leading); }
+.product-price strong { font-family: var(--hatch-font-ui); font-size: var(--hatch-type-display); font-weight: 400; letter-spacing: normal; line-height: 1.1; }
 .product-price span { color: var(--hatch-ink); font-size: var(--hatch-type-ui); }
 .primary, .secondary {
   display: inline-flex;
@@ -140,7 +141,7 @@ h1, h2 { font-family: var(--hatch-font-display); font-weight: 400; letter-spacin
 
 .earnings-card { display: flex; min-height: 405px; flex-direction: column; padding: 32px; background: var(--hatch-inverse); color: var(--hatch-inverse-text); }
 .earnings-card .eyebrow { color: rgba(255,255,255,.58); }
-.earnings-card > strong { margin: 0 0 7px; font-family: var(--hatch-font-display); font-size: clamp(var(--hatch-type-display), 5.4vw, var(--hatch-type-display-hero)); font-weight: 400; letter-spacing: var(--hatch-display-tracking); line-height: var(--hatch-display-leading); }
+.earnings-card > strong { margin: 0 0 7px; font-family: var(--hatch-font-ui); font-size: clamp(var(--hatch-type-display), 5.4vw, var(--hatch-type-display-hero)); font-weight: 400; letter-spacing: normal; line-height: 1.1; }
 .earnings-card > p { color: rgba(255,255,255,.63); font-size: var(--hatch-type-ui); line-height: 1.55; }
 .earnings-split { display: flex; justify-content: space-between; margin-top: auto; padding-top: 18px; border-top: 1px solid rgba(255,255,255,.13); color: rgba(255,255,255,.62); font-size: var(--hatch-type-ui); }
 .earnings-split b { color: #fff; font-weight: 500; }
@@ -162,7 +163,7 @@ h1, h2 { font-family: var(--hatch-font-display); font-weight: 400; letter-spacin
 
 .payout-card { display: flex; max-width: 800px; min-height: 440px; flex-direction: column; align-items: start; justify-content: center; padding: 48px; background: var(--hatch-inverse); color: var(--hatch-inverse-text); }
 .payout-card .eyebrow { color: rgba(255,255,255,.55); }
-.payout-card > strong { margin: 20px 0 8px; font-family: var(--hatch-font-display); font-size: var(--hatch-type-display-hero); font-weight: 400; letter-spacing: var(--hatch-display-tracking); line-height: var(--hatch-display-leading); }
+.payout-card > strong { margin: 20px 0 8px; font-family: var(--hatch-font-ui); font-size: var(--hatch-type-display-hero); font-weight: 400; letter-spacing: normal; line-height: 1.1; }
 .payout-card > p { color: rgba(255,255,255,.68); }
 .payout-facts { display: grid; width: 100%; max-width: 390px; gap: 12px; margin: 25px 0; padding: 20px 0; border-block: 1px solid rgba(255,255,255,.12); }
 .payout-facts div { display: flex; justify-content: space-between; color: rgba(255,255,255,.65); font-size: var(--hatch-type-ui); }
@@ -178,7 +179,7 @@ h1, h2 { font-family: var(--hatch-font-display); font-weight: 400; letter-spacin
 .review-backdrop { position: absolute; inset: 0; width: 100%; border: 0; background: rgba(42,37,31,.28); backdrop-filter: blur(3px); }
 .review-drawer { position: relative; z-index: 1; width: min(560px, 100%); height: 100%; overflow-y: auto; padding: 40px; background: var(--hatch-panel); box-shadow: -24px 0 80px rgba(35,30,25,.12); }
 .review-header { padding-right: 38px; }
-.review-header h2 { margin: 0 0 12px; font-size: var(--hatch-type-display); line-height: var(--hatch-display-leading); letter-spacing: var(--hatch-display-tracking); }
+.review-header h2 { margin: 0 0 12px; font-size: var(--hatch-type-display); line-height: 1.25; letter-spacing: normal; }
 .review-header > p { color: var(--hatch-ink); line-height: 1.6; }
 .close-button { position: absolute; top: 28px; right: 28px; display: grid; width: 34px; height: 34px; place-items: center; border: 0; border-radius: 50%; background: #ebe5dc; color: var(--hatch-ink); font-size: var(--hatch-type-heading); }
 .review-section { padding: 26px 0; border-top: 1px solid rgba(55,49,40,.1); }
@@ -260,4 +261,28 @@ h1, h2 { font-family: var(--hatch-font-display); font-weight: 400; letter-spacin
   .review-actions { bottom: -30px; margin: 0 -22px -30px; padding: 18px 22px 22px; }
   .payout-card { padding: 30px; }
   .payout-card > strong { font-size: var(--hatch-type-display-hero); }
+}
+
+/* Web typography: keep the brand serif for h1 and the Hatch wordmark only.
+ * The shared HUI stylesheet is also consumed by Desktop, so this boundary is
+ * scoped to the real web provider root instead of changing Desktop defaults. */
+.hatch-app-paper h2 { font-family: var(--hatch-font-ui); letter-spacing: normal; }
+.hatch-app-paper .hui-story-section > h2,
+.hatch-app-paper .hui-dialog__header h2,
+.hatch-app-paper .hui-dialog > h2,
+.hatch-app-paper .hui-state h2,
+.hatch-app-paper .hui-section-header h2,
+.hatch-app-paper .hatch-release-card h2,
+.hatch-app-paper .hatch-candidate-review h2,
+.hatch-app-paper .hatch-order-summary h2,
+.hatch-app-paper .hatch-checkout-summary h2 {
+  font-family: var(--hatch-font-ui);
+  letter-spacing: normal;
+  line-height: 1.25;
+}
+.hatch-app-paper .hatch-checkout-summary > dl .is-total dt,
+.hatch-app-paper .hatch-checkout-summary > dl .is-total dd {
+  font-family: var(--hatch-font-ui);
+  letter-spacing: normal;
+  line-height: 1.25;
 }

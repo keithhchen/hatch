@@ -2,7 +2,7 @@ name: Hatch application CD
 
 on:
   workflow_run:
-    workflows: ["Hatch CI"]
+    workflows: ["Hatch Web CI"]
     types: [completed]
     branches: [master]
   workflow_dispatch:

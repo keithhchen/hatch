@@ -9,7 +9,7 @@ import type { PostgresQueryExecutor } from "../postgresStore.js";
 
 const SETH_CREATOR_ID = "32ffccf7-893d-4ef3-bdbc-c82fc8fcb90b";
 const SETH_PRODUCT_ID = "026651b1-8a8a-4484-aac5-ace6bd662157";
-const MIGRATION_EXECUTION_ID = "legacy-seth-corpus-v1";
+const MIGRATION_EXECUTION_ID = "legacy-seth-corpus-v2";
 
 /**
  * Converts the shipped legacy Seth bundle into the same Node output consumed
@@ -44,14 +44,18 @@ export async function migrateSethToNodeCorpus(input: {
       updated_at=clock_timestamp()
   `, [SETH_PRODUCT_ID, SETH_CREATOR_ID, productName, productPromise, JSON.stringify(briefSpec ?? null)]);
 
-  if (live && await releaseHasCurrentProduct(input.objects, live.runtime_manifest_ref, productName, productPromise)) return false;
+  const requiredToolIds = (legacyManifest?.tools ?? [])
+    .map((tool) => typeof tool.id === "string" ? tool.id : "")
+    .filter(Boolean);
+  if (live && await releaseHasCurrentProduct(input.objects, live.runtime_manifest_ref, productName, productPromise, requiredToolIds)) return false;
 
   const systemPath = path.join(bundleRoot, "instructions", "system.md");
   const systemInstructions = await readFile(systemPath, "utf8");
   const output = {
     system_instructions: systemInstructions,
     skills: [],
-    knowledge: []
+    knowledge: [],
+    tools: legacyManifest?.tools ?? []
   };
   const outputRef = `${SETH_PRODUCT_ID}/corpus/${MIGRATION_EXECUTION_ID}/output.json`;
   await input.objects.put(outputRef, `${JSON.stringify(output, null, 2)}\n`, {
@@ -82,28 +86,39 @@ export async function migrateSethToNodeCorpus(input: {
   return true;
 }
 
-async function readLegacyManifest(file: string): Promise<{ product?: { name?: string; description?: string } } | undefined> {
+async function readLegacyManifest(file: string): Promise<{
+  product?: { name?: string; description?: string };
+  tools?: Array<Record<string, unknown>>;
+} | undefined> {
   try {
     const parsed = JSON.parse(await readFile(file, "utf8")) as unknown;
     if (!parsed || typeof parsed !== "object") return undefined;
     const product = (parsed as { product?: unknown }).product;
     if (!product || typeof product !== "object") return undefined;
     const row = product as { name?: unknown; description?: unknown };
+    const tools = (parsed as { tools?: unknown }).tools;
     return {
       product: {
         ...(typeof row.name === "string" ? { name: row.name.trim() } : {}),
         ...(typeof row.description === "string" ? { description: row.description.trim() } : {})
-      }
+      },
+      ...(Array.isArray(tools) ? { tools: tools.filter((tool): tool is Record<string, unknown> => Boolean(tool && typeof tool === "object" && !Array.isArray(tool))) } : {})
     };
   } catch {
     return undefined;
   }
 }
 
-async function releaseHasCurrentProduct(objects: ArtifactObjectStore, ref: string, name: string, promise: string): Promise<boolean> {
+async function releaseHasCurrentProduct(objects: ArtifactObjectStore, ref: string, name: string, promise: string, requiredToolIds: string[]): Promise<boolean> {
   try {
-    const parsed = JSON.parse((await objects.get(ref)).toString("utf8")) as { product?: { name?: unknown; promise?: unknown } };
-    return parsed.product?.name === name && parsed.product?.promise === promise;
+    const parsed = JSON.parse((await objects.get(ref)).toString("utf8")) as {
+      product?: { name?: unknown; promise?: unknown };
+      tools?: Array<{ id?: unknown }>;
+    };
+    const installedToolIds = new Set((parsed.tools ?? []).map((tool) => typeof tool.id === "string" ? tool.id : ""));
+    return parsed.product?.name === name
+      && parsed.product?.promise === promise
+      && requiredToolIds.every((id) => installedToolIds.has(id));
   } catch {
     return false;
   }

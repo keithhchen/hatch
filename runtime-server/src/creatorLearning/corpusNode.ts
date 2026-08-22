@@ -34,10 +34,24 @@ const corpusKnowledgeSchema = z.object({
   title: z.string().min(1).max(256),
 }).strict();
 
+// Creator-owned tools are declarations, not connection details.  The
+// connection_ref is resolved by Registry/Runtime after publication.
+const corpusToolSchema = z.object({
+  id: z.string().min(1),
+  kind: z.string().min(1),
+  capability: z.string().min(1).optional(),
+  connection_ref: z.string().min(1).optional(),
+  operation: z.string().min(1).optional(),
+  tool_name: z.string().min(1).optional(),
+  description: z.string().min(1).optional(),
+  input_schema: z.record(z.string(), z.unknown()).optional()
+}).strict();
+
 export const corpusOutputSchema = z.object({
   system_instructions: z.string().min(1),
   skills: z.array(corpusSkillSchema),
-  knowledge: z.array(corpusKnowledgeSchema)
+  knowledge: z.array(corpusKnowledgeSchema),
+  tools: z.array(corpusToolSchema).default([])
 }).strict();
 
 export const corpusCriticOutputSchema = criticVerdictSchema(z.string());

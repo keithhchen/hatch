@@ -41,6 +41,7 @@ export const runtimeCorpusManifestSchema = z.object({
       sha256: digestSchema
     }).strict(),
   }).strict()),
+  tools: z.array(z.record(z.string(), z.unknown())).default([]),
   brief_spec: z.unknown()
 }).strict();
 

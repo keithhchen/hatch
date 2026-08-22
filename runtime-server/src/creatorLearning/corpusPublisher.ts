@@ -258,6 +258,7 @@ async function writeRuntimeReleaseAssets(input: {
     contract_version: "1", creator: { id: input.creatorId },
     product: { id: input.productId, name: input.productName, promise: input.productPromise },
     corpus_digest: input.sourceDigest, system_ref: system, skills, knowledge,
+    tools: input.corpus.tools,
     brief_spec: input.briefSpec ?? null
   };
   const manifestBytes = Buffer.from(JSON.stringify(manifest, null, 2), "utf8");
@@ -321,7 +322,8 @@ async function makeRuntimeBundle(input: {
     knowledge: { documents: knowledge },
     tools: [
       { id: "hatch.web_search", kind: "hatch_builtin", capability: "web_search" },
-      ...(knowledge.length ? [{ id: "hatch.file_search", kind: "hatch_builtin", capability: "file_search" }] : [])
+      ...(knowledge.length ? [{ id: "hatch.file_search", kind: "hatch_builtin", capability: "file_search" }] : []),
+      ...input.corpus.tools
     ],
     evaluations: { synthetic_qa: [], held_out: [] }
   };
