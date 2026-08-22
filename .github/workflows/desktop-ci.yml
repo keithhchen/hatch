@@ -35,6 +35,7 @@ on:
 permissions:
   contents: read
 
+jobs:
   desktop-renderer:
     name: Desktop renderer tests and web build
     runs-on: ubuntu-latest
