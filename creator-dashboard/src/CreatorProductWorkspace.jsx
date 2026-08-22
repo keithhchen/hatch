@@ -22,6 +22,7 @@ import {
   isExecutionError,
   isValidBriefSpec
 } from "./creatorWorkflowUi.js";
+import { getCreatorNodeCopy, getCreatorNodeTips } from "./creatorNodeTips.js";
 import "./creatorProductWorkspace.css";
 
 const TAB_KEYS = CREATOR_WORKFLOW_STEPS;
@@ -226,8 +227,8 @@ export function CreatorProductWorkspace({ token, productId, tab = "files", navig
     {error ? <InlineAlert tone="error"><div className="cpv2-error-bar"><span>{error}</span>{(isExecutionError(aboutYou) || isExecutionError(corpus) || state.error) ? <Button type="button" variant="secondary" loading={Boolean(state.busy)} onClick={() => void retryFailedNode()}>{t("retry")}</Button> : null}</div></InlineAlert> : null}
     {state.notice ? <InlineAlert className="cpv2-inline-feedback" tone="success">{state.notice}</InlineAlert> : null}
     {selectedTab === "files" ? <FilesPanel t={t} documents={documents} busy={state.busy} onUpload={upload} onStart={() => void startAboutYou()} onRetry={() => void retryFailedNode()} onDelete={removeFile} hasExecution={Boolean(aboutYou)} /> : null}
-    {selectedTab === "about-you" ? <AboutYouPanel t={t} execution={aboutYou} corpus={corpus} busy={state.busy} onSubmit={(answers) => void saveAnswers(answers, startCorpus, token, productId, aboutYou, setAboutYou, setState, t, retryActionRef)} onRetry={() => void retryFailedNode()} onFiles={() => goTab("files")} /> : null}
-    {selectedTab === "corpus" ? <CorpusPanel t={t} execution={corpus} busy={state.busy} onRetry={() => void retryFailedNode()} /> : null}
+    {selectedTab === "about-you" ? <AboutYouPanel t={t} locale={locale} execution={aboutYou} corpus={corpus} busy={state.busy} onSubmit={(answers) => void saveAnswers(answers, startCorpus, token, productId, aboutYou, setAboutYou, setState, t, retryActionRef)} onRetry={() => void retryFailedNode()} onFiles={() => goTab("files")} /> : null}
+    {selectedTab === "corpus" ? <CorpusPanel t={t} locale={locale} execution={corpus} aboutYou={aboutYou} busy={state.busy} onRetry={() => void retryFailedNode()} /> : null}
     {selectedTab === "brief" ? <BriefPanel t={t} token={token} product={product} briefSpec={briefSpec} busy={state.busy} onRetryAction={(action) => { retryActionRef.current = action; }} onSaved={(nextProduct) => { retryActionRef.current = null; const saved = nextProduct?.product ?? nextProduct; setProduct((current) => ({ ...current, ...saved })); setBriefSpec(saved?.brief_spec ?? null); setState((current) => ({ ...current, notice: t("briefSaved") })); }} onError={(nextError) => setState((current) => ({ ...current, error: messageOf(nextError, t("failureDetailsUnavailable")) }))} /> : null}
     {selectedTab === "complete" ? <CompletePanel t={t} product={product} briefSpec={briefSpec} corpus={corpus} busy={state.busy} setBusy={(busy) => setState((current) => ({ ...current, busy }))} token={token} productId={productId} onRetryAction={(action) => { retryActionRef.current = action; }} onPublished={refresh} onBrief={() => goTab("brief")} onError={(nextError) => setState((current) => ({ ...current, error: messageOf(nextError, t("failureDetailsUnavailable")) }))} /> : null}
   </section>;
@@ -263,7 +264,7 @@ function FilesPanel({ t, documents, busy, onUpload, onStart, onDelete, hasExecut
   </section>;
 }
 
-function AboutYouPanel({ t, execution, corpus, busy, onSubmit, onRetry, onFiles }) {
+function AboutYouPanel({ t, locale, execution, corpus, busy, onSubmit, onRetry, onFiles }) {
   const questions = execution?.output?.questions ?? [];
   const [answers, setAnswers] = useState({});
   const [activeIndex, setActiveIndex] = useState(0);
@@ -272,7 +273,7 @@ function AboutYouPanel({ t, execution, corpus, busy, onSubmit, onRetry, onFiles 
     setActiveIndex(0);
   }, [execution?.execution_id, questions.length]);
   if (!execution) return <EmptyNodePanel title={t("aboutYou")} body={t("noQuestions")} onAction={onFiles} action={t("addSourceFiles")} />;
-  if (isExecutionActive(execution)) return <NodeProgressPanel t={t} title={t("aboutYou")} execution={execution} />;
+  if (isExecutionActive(execution)) return <NodeProgressPanel t={t} locale={locale} node="about-you" title={t("aboutYou")} execution={execution} />;
   if (isExecutionError(execution)) return <NodeErrorPanel t={t} title={t("aboutYou")} execution={execution} onRetry={onRetry} />;
   if (!questions.length) return <EmptyNodePanel title={t("aboutYou")} body={t("noQuestions")} onAction={onFiles} action={t("addSourceFiles")} />;
   if (execution.status === "handoff_saved") {
@@ -280,7 +281,8 @@ function AboutYouPanel({ t, execution, corpus, busy, onSubmit, onRetry, onFiles 
     if (corpusFinished) {
       return <section className="cpv2-workspace-panel" role="status"><StatusTag tone="success">{t("saved")}</StatusTag><h2>{t("aboutYou")}</h2><p>{t("answersSaved")}</p></section>;
     }
-    return <NodeProgressPanel t={t} title={t("aboutYou")} execution={{ ...execution, status: "completed" }} label={t("corpusStarting")} />;
+    if (isExecutionActive(corpus)) return <NodeProgressPanel t={t} locale={locale} node="corpus" title={t("corpus")} execution={corpus} />;
+    return <NodeHandoffPanel t={t} locale={locale} node="corpus" title={t("corpus")} busy={busy === "answers" || busy === "corpus"} label={t("corpusStarting")} />;
   }
   const question = questions[activeIndex];
   const answer = String(answers[question.question] ?? "");
@@ -296,9 +298,10 @@ function AboutYouPanel({ t, execution, corpus, busy, onSubmit, onRetry, onFiles 
   </section>;
 }
 
-function CorpusPanel({ t, execution, busy, onRetry }) {
+function CorpusPanel({ t, locale, execution, aboutYou, busy, onRetry }) {
+  if (!execution && aboutYou?.status === "handoff_saved") return <NodeHandoffPanel t={t} locale={locale} node="corpus" title={t("corpus")} busy={busy === "answers" || busy === "corpus"} label={t("corpusStarting")} />;
   if (!execution) return <EmptyNodePanel title={t("corpus")} body={t("waiting")} />;
-  if (isExecutionActive(execution)) return <NodeProgressPanel t={t} title={t("corpus")} execution={execution} />;
+  if (isExecutionActive(execution)) return <NodeProgressPanel t={t} locale={locale} node="corpus" title={t("corpus")} execution={execution} />;
   if (isExecutionError(execution)) return <NodeErrorPanel t={t} title={t("corpus")} execution={execution} onRetry={onRetry} busy={busy} />;
   const output = execution.output;
   return <section className="cpv2-workspace-panel cpv2-corpus-panel"><div className="cpv2-panel-heading"><div><h2>{t("corpus")}</h2><p>{t("fullCorpus")}</p></div><StatusTag tone="success">{t("ready")}</StatusTag></div>{output ? <><article className="cpv2-corpus-block cpv2-corpus-system"><div className="cpv2-corpus-block-heading"><h3>System instructions</h3><span>{t("ready")}</span></div><pre>{output.system_instructions}</pre></article><section className="cpv2-corpus-block"><div className="cpv2-corpus-block-heading"><h3>Skills</h3><span>{output.skills?.length ?? 0}</span></div><div className="cpv2-corpus-grid">{output.skills?.map((skill) => <details className="cpv2-corpus-item" key={skill.id}><summary>{skill.title}</summary><p>{skill.instruction}</p></details>)}</div></section><section className="cpv2-corpus-block"><div className="cpv2-corpus-block-heading"><h3>Knowledge</h3><span>{output.knowledge?.length ?? 0}</span></div><div className="cpv2-corpus-grid">{output.knowledge?.map((item) => <details className="cpv2-corpus-item" key={item.id}><summary>{item.title}</summary><p>{item.content}</p></details>)}</div></section></> : <p>{t("corpusUnavailable")}</p>}</section>;
@@ -341,8 +344,38 @@ function CompletePanel({ t, product, briefSpec, corpus, busy, setBusy, token, pr
   return <section className="cpv2-workspace-panel cpv2-complete-panel"><h2>{t("complete")}</h2><p>{product.promise ?? product.description ?? ""}</p>{showDetails && corpus.output ? <CorpusPanel t={t} execution={corpus} /> : null}{!isValidBriefSpec(briefSpec) ? <div className="cpv2-complete-brief-required"><p>{t("briefRequiredBeforePublish")}</p><Button type="button" variant="secondary" onClick={onBrief}>{t("brief")}</Button></div> : confirming ? <div className="cpv2-confirm cpv2-confirm-publish" role="alert"><div><p><strong>{t("publishCandidateConfirm")}</strong></p><small>{t("productPublished")}</small></div><Button type="button" variant="secondary" onClick={() => setConfirming(false)}>{t("cancel")}</Button><Button type="button" loading={busy === "publish"} disabled={Boolean(busy)} onClick={() => void publish()}>{t("confirmPublish")}</Button></div> : <div className="cpv2-workspace-actions"><Button type="button" variant="link" onClick={() => setShowDetails((current) => !current)}>{t("viewProductDetails")}</Button><Button type="button" disabled={Boolean(busy)} onClick={() => setConfirming(true)}>{t("publishProduct")}</Button></div>}</section>;
 }
 
-function NodeProgressPanel({ t, title, execution, label }) {
-  return <section className="cpv2-workspace-panel" aria-busy="true"><StatusTag tone="neutral">{execution.status}</StatusTag><h2>{title}</h2><div className="cpv2-generation-status" role="status" aria-live="polite"><span className="cpv2-loading-spinner" aria-hidden="true" /><span>{label ?? `${t("waiting")} · round ${execution.round ?? 0}`}</span></div></section>;
+function NodeProgressPanel({ t, locale, node, title, execution, label }) {
+  return <NodeCompanionPanel t={t} locale={locale} node={node} title={title} execution={execution} state="working" busy label={label} />;
+}
+
+function NodeHandoffPanel({ t, locale, node, title, busy, label }) {
+  return <NodeCompanionPanel t={t} locale={locale} node={node} title={title} state="handoff" busy={busy} label={label} />;
+}
+
+function NodeCompanionPanel({ t, locale, node, title, execution, state, busy, label }) {
+  const copy = getCreatorNodeCopy(locale, node);
+  const tips = getCreatorNodeTips(locale, node);
+  const [tipIndex, setTipIndex] = useState(0);
+  useEffect(() => setTipIndex(0), [execution?.execution_id, node, state]);
+  useEffect(() => {
+    if (!busy || tips.length < 2) return undefined;
+    const timer = setInterval(() => setTipIndex((current) => (current + 1) % tips.length), 7000);
+    return () => clearInterval(timer);
+  }, [busy, tips.length]);
+  const tip = tips[tipIndex % tips.length];
+  const handoff = state === "handoff";
+  const moving = handoff && busy;
+  const statusLabel = handoff ? (moving ? "Moving to the next step" : "Saved") : execution?.status === "queued" ? "Queued" : "Working";
+  const localizedStatusLabel = locale === "zh" ? (handoff ? (moving ? "正在前往下一步" : "已保存") : execution?.status === "queued" ? "准备开始" : "正在工作") : statusLabel;
+  const activity = handoff ? (moving ? copy.handoffActivity : locale === "zh" ? "等待下一步" : "Waiting for the next step") : copy.activity;
+  return <section className="cpv2-workspace-panel cpv2-node-progress-panel" aria-busy={busy ? "true" : "false"}>
+    <div className="cpv2-node-progress-heading"><div><StatusTag tone="neutral">{localizedStatusLabel}</StatusTag><h2>{title}</h2></div>{execution?.round ? <span className="cpv2-node-progress-round">{locale === "zh" ? `第 ${execution.round} 轮` : `Round ${execution.round}`}</span> : null}</div>
+    <div className={`cpv2-node-companion${busy ? " is-busy" : ""}`}>
+      <div className="cpv2-node-companion-visual" aria-hidden="true"><span className="cpv2-node-companion-halo" /><span className="cpv2-node-companion-shadow" /><span className="cpv2-node-companion-figure"><span className="cpv2-node-companion-antenna" /><span className="cpv2-node-companion-head"><i /><i /><b /></span><span className="cpv2-node-companion-body" /><span className="cpv2-node-companion-arm" /><span className="cpv2-node-companion-magnifier"><i /></span></span></div>
+      <div className="cpv2-node-companion-copy"><span className="cpv2-node-companion-kicker">{locale === "zh" ? "Hatch 线索伙伴" : "Hatch companion"}</span><h3>{handoff ? copy.handoffHeadline : copy.headline}</h3><p>{label ?? (handoff ? copy.handoffBody : copy.body)}</p><div className="cpv2-node-tip"><span>{locale === "zh" ? "留下一条线索" : "A clue to keep"}</span><p key={`${node}-${tipIndex}`}>{tip}</p><button type="button" onClick={() => setTipIndex((current) => (current + 1) % tips.length)} aria-label={locale === "zh" ? "下一条线索" : "Show next clue"}>↗</button></div></div>
+    </div>
+    <div className="cpv2-node-companion-activity" role="status" aria-live="polite"><span>{locale === "zh" ? "现在发生什么" : "What’s happening"}</span><strong>{activity}</strong>{execution ? <small>{t("waiting")}</small> : null}</div>
+  </section>;
 }
 
 function NodeErrorPanel({ t, title, execution, onRetry, busy }) {

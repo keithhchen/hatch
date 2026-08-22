@@ -135,7 +135,11 @@ export class PiAgentRuntime implements AgentRuntime {
       ctx.sessionSkills.rendered.section,
       activeSkills
     ).map((message) => piUserMessage(message.content ?? ""));
-    const storedMessages = ctx.messages.slice(0, -1).map(toPiMessage);
+    // ctx.messages always contains the canonical current user turn. For
+    // task_start, keep the complete transcript and continue from it so the
+    // marked row participates in assembly exactly once. Ordinary turns keep
+    // the existing prompt path, where the current row is appended by prompt.
+    const storedMessages = (input.task_start ? ctx.messages : ctx.messages.slice(0, -1)).map(toPiMessage);
     const toolDefinitions = this.options.toolDefinitions ?? chatToolsForRun(
       ctx.clientTools,
       ctx.allowedExternalTools,
@@ -255,7 +259,9 @@ export class PiAgentRuntime implements AgentRuntime {
       // Pass an explicit Pi UserMessage so the current user turn stays a plain
       // text payload in the OpenAI-compatible request (and in persistence),
       // instead of Agent.prompt(string)'s text-block form.
-      const promptPromise = agent.prompt(piUserMessage(input.message.content))
+      const promptPromise = (input.task_start
+        ? agent.continue()
+        : agent.prompt(piUserMessage(input.message.content)))
         .catch((error) => {
           terminalError = error instanceof Error ? error : new Error(String(error));
         })
@@ -709,6 +715,9 @@ function piUserMessage(content: string): AgentMessage {
 }
 
 function toPiMessage(message: ConversationMessage): AgentMessage {
+  // Rebuild the provider-facing message instead of spreading ConversationMessage:
+  // the durable kind marker stays in the Runtime transcript and never reaches
+  // the provider payload.
   if (message.role === "user") return piUserMessage(renderUserMessageForModel(message));
   if (message.role === "compactionSummary") {
     return {

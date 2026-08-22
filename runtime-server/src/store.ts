@@ -418,7 +418,7 @@ export class RuntimeStore {
           event.type === "conversation.model_message"
           && event.conversation_id === conversationId
           && (
-            event.message.role === "user"
+            (event.message.role === "user" && event.message.kind !== "task_start")
             || (event.message.role === "assistant" && event.finish_reason !== undefined)
           )
         ))
@@ -430,7 +430,7 @@ export class RuntimeStore {
     ) => {
       if (!("conversation_id" in event) || event.conversation_id !== conversationId) return false;
       if (event.type === "conversation.model_message") {
-        return event.message.role === "user"
+        return (event.message.role === "user" && event.message.kind !== "task_start")
           || (event.message.role === "assistant" && event.finish_reason !== undefined);
       }
       if (event.type === "message.created") {

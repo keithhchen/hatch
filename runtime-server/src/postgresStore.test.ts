@@ -5,6 +5,7 @@ import {
   type PostgresQueryExecutor,
   type PostgresStoreEventInput
 } from "./postgresStore.js";
+import { TASK_START_MESSAGE_CONTENT } from "./protocol.js";
 
 type StoredRow = {
   conversation_id: string | null;
@@ -696,6 +697,42 @@ test("Postgres visible history projects canonical terminal finish reasons", asyn
     timestamp: "2026-08-10T00:00:01.000Z",
     finish_reason: "content_filter"
   }]);
+});
+
+test("Postgres keeps task-start in canonical history but omits it from visible history", async () => {
+  const { store } = storeFixture();
+  await append(store, {
+    type: "conversation.model_message",
+    conversation_id: "task-start-history",
+    run_id: "run-task-start",
+    message: {
+      role: "user",
+      content: TASK_START_MESSAGE_CONTENT,
+      kind: "task_start"
+    },
+    timestamp: "2026-08-10T00:00:00.000Z"
+  });
+  await append(store, {
+    type: "conversation.model_message",
+    conversation_id: "task-start-history",
+    run_id: "run-task-start",
+    message: { role: "assistant", content: "Task started." },
+    finish_reason: "stop",
+    timestamp: "2026-08-10T00:00:01.000Z"
+  });
+
+  assert.deepEqual(await store.readConversation("task-start-history"), [
+    {
+      role: "user",
+      content: TASK_START_MESSAGE_CONTENT,
+      kind: "task_start"
+    },
+    { role: "assistant", content: "Task started." }
+  ]);
+  assert.deepEqual((await store.readVisibleConversation("task-start-history")).map((message) => [
+    message.role,
+    message.content
+  ]), [["assistant", "Task started."]]);
 });
 
 test("Postgres visible history preserves committed text and tool order", async () => {

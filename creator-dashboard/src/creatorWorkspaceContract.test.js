@@ -23,4 +23,6 @@ test("About You does not keep showing a Corpus-loading message after handoff is 
   assert.match(source, /corpusFinished/);
   assert.match(source, /answersSaved/);
   assert.match(source, /corpusStarting/);
+  assert.match(source, /NodeHandoffPanel/);
+  assert.doesNotMatch(source, /execution=\{\.\.\.execution, status: "completed"\}/);
 });

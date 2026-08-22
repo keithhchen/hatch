@@ -8,7 +8,11 @@ import { WebSocket } from "ws";
 import { DeterministicAgentRuntime, type AgentRuntime } from "./agentRuntime.js";
 import { buildCompactedHistory, RUNTIME_CONTEXT_PREFIX, runtimeMessagesTranscript, SUMMARY_PREFIX } from "./compaction.js";
 import { clientToolTimeoutMs, createRuntimeServer, scopedConversationId, type RuntimeServer } from "./index.js";
-import type { OutboundMessage } from "./protocol.js";
+import {
+  TASK_START_MESSAGE_CONTENT,
+  type ConversationMessage,
+  type OutboundMessage
+} from "./protocol.js";
 import {
   ClientHelloSchema,
   ClientToolNameSchema,
@@ -399,6 +403,74 @@ test("runtime server exposes visible conversation history for client hydration",
     ["contract-review", "activated", "explicit", "explicit_mention", undefined, undefined],
     ["contract-review", "invoked", "implicit", "skill_doc_read", "call_file_read", "file_read"]
   ]);
+});
+
+test("task_start persists a model turn, assembles it, and hides it only from visible history", async () => {
+  const dataDir = await tempWorkspace();
+  const store = new RuntimeStore(dataDir);
+  let runtimeInputContent = "";
+  let runtimeMessages: ConversationMessage[] | undefined;
+  const runtime: AgentRuntime = {
+    async *run(input, ctx) {
+      runtimeInputContent = input.message.content;
+      runtimeMessages = ctx.messages;
+      yield {
+        type: "assistant.delta",
+        run_id: input.run_id,
+        delta: { kind: "text", content: "Task started." }
+      };
+      yield { type: "turn.completed", run_id: input.run_id, finish_reason: "stop" };
+    }
+  };
+  runtimeServer = createRuntimeServer({
+    conversationStore: store,
+    createRuntime: () => runtime
+  });
+  const serverUrl = await listen(runtimeServer);
+  const socket = new WebSocket(serverUrl);
+  const messages: OutboundMessage[] = [];
+  socket.on("message", (data) => messages.push(JSON.parse(String(data)) as OutboundMessage));
+  await new Promise<void>((resolve, reject) => {
+    socket.once("open", resolve);
+    socket.once("error", reject);
+  });
+  socket.send(JSON.stringify({
+    type: "client.hello",
+    protocol_version: PROTOCOL_VERSION,
+    license_token: "task-start-history-test",
+    local_tools: []
+  }));
+  await waitForSocketMessage(messages, (message) => message.type === "session.ready");
+  socket.send(JSON.stringify({
+    type: "client.message",
+    run_id: "run_task_start_history",
+    conversation_id: "task-start-history",
+    task_start: true,
+    message: { role: "user", content: "" }
+  }));
+  await waitForSocketMessage(messages, (message) => (
+    message.type === "turn.completed" && message.run_id === "run_task_start_history"
+  ));
+
+  assert.equal(runtimeInputContent, TASK_START_MESSAGE_CONTENT);
+  assert.deepEqual(runtimeMessages, [{
+    role: "user",
+    content: TASK_START_MESSAGE_CONTENT,
+    kind: "task_start"
+  }]);
+  assert.deepEqual(await store.readConversation("task-start-history"), [
+    {
+      role: "user",
+      content: TASK_START_MESSAGE_CONTENT,
+      kind: "task_start"
+    },
+    { role: "assistant", content: "Task started." }
+  ]);
+  assert.deepEqual((await store.readVisibleConversation("task-start-history")).map((message) => [
+    message.role,
+    message.content
+  ]), [["assistant", "Task started."]]);
+  socket.close();
 });
 
 test("visible history preserves guarded text and tool interleave order", async () => {
