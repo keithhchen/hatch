@@ -5,6 +5,7 @@ import { readBoundedJsonObject } from "./boundedResponse.js";
 import {
   AgentCorpusSchema,
   agentCorpusDigest,
+  loadAgentCorpus,
   readCorpusAsset,
   type AgentCorpus,
   type AgentCorpusResolverLike,
@@ -106,8 +107,14 @@ export class RuntimeReleaseAgentCorpusResolver implements AgentCorpusResolverLik
       if (manifest.creator.id !== creatorId || manifest.product.id !== agentId || manifest.corpus_digest !== release.corpus_digest) {
         throw new Error("Runtime manifest binding does not match the Registry release");
       }
-      corpus = runtimeManifestToAgentCorpus(manifest);
-      await verifyRuntimeManifestAssets(root, corpus, signal);
+      const runtimeManifestCorpus = runtimeManifestToAgentCorpus(manifest);
+      await verifyRuntimeManifestAssets(root, runtimeManifestCorpus, signal);
+      // The runtime manifest describes the installed assets, but agent.json is
+      // the execution contract consumed by materializeAgentCorpus. Keep one
+      // canonical corpus object across hello, turn revalidation, tool setup,
+      // and prompt materialization; otherwise the manifest's `runtime/...`
+      // paths and agent.json's root-relative paths produce different digests.
+      corpus = await loadAgentCorpus(root, signal);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         throw new Error(`Published Runtime Corpus is not materialized: ${agentId}/${releaseDirectory}`);
