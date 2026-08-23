@@ -59,7 +59,10 @@ images:
 
 The ad-hoc DMG hash and byte count are recorded in
 [`docs/proof/installable-desktop-v1.json`](../installable-desktop-v1.json).
-The ad-hoc package is process-memory-only and must not be published.
+The ad-hoc package is process-memory-only and must not be described as a
+signed production distribution. The SemVer tag lane may promote the exact
+candidate to the dedicated OSS UAT download prefix, but it never attaches the
+package to a GitHub Release.
 
 ## Historical visual references (not acceptance evidence)
 

@@ -9,6 +9,8 @@ on:
       - "packages/ui/**"
       - "packages/protocol/**"
       - "scripts/uat/**"
+      - "scripts/release/**"
+      - "release/**"
       - "package.json"
       - "package-lock.json"
       - "Cargo.toml"
@@ -23,6 +25,8 @@ on:
       - "packages/ui/**"
       - "packages/protocol/**"
       - "scripts/uat/**"
+      - "scripts/release/**"
+      - "release/**"
       - "package.json"
       - "package-lock.json"
       - "Cargo.toml"
@@ -65,7 +69,7 @@ jobs:
         run: npm run build:web
       - name: Test desktop UAT evidence helpers
         working-directory: .
-        run: node --test scripts/uat/*.test.mjs
+        run: node --test scripts/uat/*.test.mjs scripts/release/*.test.mjs
 
   desktop-native:
     name: Desktop native, LocalRunner, and macOS ${{ matrix.architecture }} UAT package
@@ -213,11 +217,14 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  publish-desktop-release:
-    name: Publish desktop installers
+  publish-desktop-oss:
+    name: Publish desktop installers to OSS
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [desktop-renderer, desktop-native, desktop-native-windows]
     runs-on: ubuntu-latest
+    concurrency:
+      group: hatch-desktop-oss-release
+      cancel-in-progress: false
     permissions:
       actions: read
       contents: read
@@ -225,6 +232,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Verify annotated source tag
+        run: |
+          set -euo pipefail
+          test "$(git cat-file -t "$GITHUB_REF_NAME")" = "tag" || {
+            echo "Desktop distribution requires an annotated SemVer tag" >&2
+            exit 1
+          }
+          test "$(git rev-parse "$GITHUB_REF_NAME^{}")" = "$GITHUB_SHA" || {
+            echo "The annotated tag does not resolve to the workflow source commit" >&2
+            exit 1
+          }
       - name: Download Apple Silicon macOS package
         uses: actions/download-artifact@v4
         with:
@@ -265,100 +283,171 @@ jobs:
             --report "$windows_report" \
             --artifact-dir release/windows \
             --expected-source-sha "$GITHUB_SHA"
-      - name: Ensure annotated tag exists in public releases repository
+      - name: Validate OSS publication configuration
         env:
-          GH_TOKEN: ${{ secrets.HATCH_RELEASES_TOKEN }}
-          GH_REPO: keithhchen/hatch-releases
+          HATCH_OSS_BUCKET: ${{ vars.HATCH_OSS_BUCKET }}
+          HATCH_OSS_REGION: ${{ vars.HATCH_OSS_REGION }}
+          HATCH_OSS_S3_ENDPOINT: ${{ vars.HATCH_OSS_S3_ENDPOINT }}
+          HATCH_OSS_PUBLIC_BASE_URL: ${{ vars.HATCH_OSS_PUBLIC_BASE_URL }}
+          HATCH_DESKTOP_DOWNLOAD_BASE_URL: ${{ vars.HATCH_DESKTOP_DOWNLOAD_BASE_URL }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.HATCH_OSS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.HATCH_OSS_ACCESS_KEY_SECRET }}
+          AWS_EC2_METADATA_DISABLED: "true"
         run: |
           set -euo pipefail
-          test -n "$GH_TOKEN" || { echo "Missing HATCH_RELEASES_TOKEN" >&2; exit 1; }
-          if tag_ref_json="$(gh api "repos/$GH_REPO/git/ref/tags/$GITHUB_REF_NAME" 2>/dev/null)"; then
-            test "$(jq -r '.object.type' <<<"$tag_ref_json")" = "tag" || {
-              echo "Public tag $GITHUB_REF_NAME exists but is not annotated" >&2
-              exit 1
-            }
-            tag_object_sha="$(jq -r '.object.sha' <<<"$tag_ref_json")"
-            tag_message="$(gh api "repos/$GH_REPO/git/tags/$tag_object_sha" --jq .message)"
-            grep -F "Private source commit: $GITHUB_SHA" <<<"$tag_message" >/dev/null || {
-              echo "Public tag $GITHUB_REF_NAME does not identify source commit $GITHUB_SHA" >&2
-              exit 1
-            }
-          else
-            target_sha="$(gh api "repos/$GH_REPO/commits/main" --jq .sha)"
-            printf -v public_tag_message 'Hatch %s public distribution tag\n\nPrivate source commit: %s' "$GITHUB_REF_NAME" "$GITHUB_SHA"
-            tag_object_sha="$(gh api --method POST "repos/$GH_REPO/git/tags" \
-              -f tag="$GITHUB_REF_NAME" \
-              -f message="$public_tag_message" \
-              -f object="$target_sha" \
-              -f type=commit \
-              --jq .sha)"
-            gh api --method POST "repos/$GH_REPO/git/refs" \
-              -f ref="refs/tags/$GITHUB_REF_NAME" \
-              -f sha="$tag_object_sha" >/dev/null
-          fi
-      - name: Publish installers and provenance to public GitHub Release
+          test -n "$HATCH_OSS_BUCKET" || { echo "Missing HATCH_OSS_BUCKET repository variable" >&2; exit 1; }
+          test -n "$HATCH_OSS_REGION" || { echo "Missing HATCH_OSS_REGION repository variable" >&2; exit 1; }
+          test -n "$HATCH_OSS_S3_ENDPOINT" || { echo "Missing HATCH_OSS_S3_ENDPOINT repository variable" >&2; exit 1; }
+          test -n "$HATCH_OSS_PUBLIC_BASE_URL" || { echo "Missing HATCH_OSS_PUBLIC_BASE_URL repository variable" >&2; exit 1; }
+          test -n "$HATCH_DESKTOP_DOWNLOAD_BASE_URL" || { echo "Missing HATCH_DESKTOP_DOWNLOAD_BASE_URL repository variable" >&2; exit 1; }
+          test -n "$AWS_ACCESS_KEY_ID" || { echo "Missing HATCH_OSS_ACCESS_KEY_ID repository secret" >&2; exit 1; }
+          test -n "$AWS_SECRET_ACCESS_KEY" || { echo "Missing HATCH_OSS_ACCESS_KEY_SECRET repository secret" >&2; exit 1; }
+          printf '%s' "$HATCH_OSS_REGION" | grep -Eq '^[a-z0-9]+([.-][a-z0-9]+)*$'
+          printf '%s' "$HATCH_OSS_S3_ENDPOINT" | grep -Eq '^https://'
+          printf '%s' "$HATCH_OSS_PUBLIC_BASE_URL" | grep -Eq '^https://'
+          expected_download_base="${HATCH_OSS_PUBLIC_BASE_URL%/}/desktop/latest"
+          test "${HATCH_DESKTOP_DOWNLOAD_BASE_URL%/}" = "$expected_download_base" || {
+            echo "HATCH_DESKTOP_DOWNLOAD_BASE_URL must equal HATCH_OSS_PUBLIC_BASE_URL/desktop/latest" >&2
+            exit 1
+          }
+          command -v aws >/dev/null || { echo "aws CLI is required on the GitHub-hosted runner" >&2; exit 1; }
+      - name: Prepare public package names and download manifest
         env:
-          GH_TOKEN: ${{ secrets.HATCH_RELEASES_TOKEN }}
-          GH_REPO: keithhchen/hatch-releases
-        run: |
-          set -euo pipefail
-          arm64_dmg_path="$(find release/macos/arm64 -type f -name '*.dmg' -print -quit)"
-          intel_dmg_path="$(find release/macos/intel -type f -name '*.dmg' -print -quit)"
-          exe_path="$(find release/windows -type f -name '*.exe' -print -quit)"
-          arm64_report="$(find release/macos/arm64 -type f -name macos.json -print -quit)"
-          intel_report="$(find release/macos/intel -type f -name macos.json -print -quit)"
-          windows_report="$(find release/windows -type f -name windows.json -print -quit)"
-          test -n "$arm64_dmg_path" && test -n "$intel_dmg_path" && test -n "$exe_path"
-          test -n "$arm64_report" && test -n "$intel_report" && test -n "$windows_report"
-          cp "$arm64_report" release/macos/macos-arm64.json
-          cp "$intel_report" release/macos/macos-intel.json
-          cat > release-notes.md <<EOF
-          Hatch $GITHUB_REF_NAME
-
-          Private source commit: \`$GITHUB_SHA\`
-
-          These are target-device UAT packages:
-          - macOS Apple Silicon: ad-hoc UAT package; not Developer ID signed or notarized.
-          - macOS Intel: ad-hoc UAT package; not Developer ID signed or notarized.
-          - Windows: unsigned UAT package.
-
-          These artifacts are not a signed production distribution. CI verified the exact source SHA, filename, byte count, and SHA-256 for each installer before publication.
-          EOF
-          if gh release view "$GITHUB_REF_NAME" --repo "$GH_REPO" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" \
-              "$arm64_dmg_path" "$intel_dmg_path" "$exe_path" \
-              --clobber --repo "$GH_REPO"
-            gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease=false --latest --title "$GITHUB_REF_NAME" --notes-file release-notes.md --repo "$GH_REPO"
-          else
-            gh release create "$GITHUB_REF_NAME" \
-              "$arm64_dmg_path" "$intel_dmg_path" "$exe_path" \
-              --verify-tag --latest --title "$GITHUB_REF_NAME" --notes-file release-notes.md --repo "$GH_REPO"
-          fi
-      - name: Verify published Release is complete and latest
-        env:
-          GH_TOKEN: ${{ secrets.HATCH_RELEASES_TOKEN }}
-          GH_REPO: keithhchen/hatch-releases
+          HATCH_OSS_PUBLIC_BASE_URL: ${{ vars.HATCH_OSS_PUBLIC_BASE_URL }}
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          arm64_report="release/macos/macos-arm64.json"
-          intel_report="release/macos/macos-intel.json"
+          arm64_dmg_path="$(find release/macos/arm64 -type f -name '*.dmg' -print -quit)"
+          intel_dmg_path="$(find release/macos/intel -type f -name '*.dmg' -print -quit)"
+          windows_exe_path="$(find release/windows -type f -name '*.exe' -print -quit)"
+          arm64_report="$(find release/macos/arm64 -type f -name macos.json -print -quit)"
+          intel_report="$(find release/macos/intel -type f -name macos.json -print -quit)"
           windows_report="$(find release/windows -type f -name windows.json -print -quit)"
-          arm64_digest="$(jq -r .package.sha256 "$arm64_report")"
-          intel_digest="$(jq -r .package.sha256 "$intel_report")"
-          windows_digest="$(jq -r .package.sha256 "$windows_report")"
-          release_json="$(gh api "repos/$GH_REPO/releases/tags/$GITHUB_REF_NAME")"
-          jq -e \
-            --arg arm64_dmg "Hatch_${version}_aarch64.dmg" \
-            --arg intel_dmg "Hatch_${version}_x86_64.dmg" \
-            --arg exe "Hatch_${version}_x64-setup.exe" \
-            --arg arm64_digest "$arm64_digest" \
-            --arg intel_digest "$intel_digest" \
-            --arg windows_digest "$windows_digest" \
-            '.draft == false and .prerelease == false and
-             ([.assets[] | select(.name == $arm64_dmg and .size > 0 and .digest == $arm64_digest)] | length) == 1 and
-             ([.assets[] | select(.name == $intel_dmg and .size > 0 and .digest == $intel_digest)] | length) == 1 and
-             ([.assets[] | select(.name == $exe and .size > 0 and .digest == $windows_digest)] | length) == 1 and
-             ([.assets[] | select((.name | (endswith(".dmg") or endswith(".exe"))) and (.size > 0))] | length) == 3' \
-            <<<"$release_json" >/dev/null
-          test "$(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name)" = "$GITHUB_REF_NAME"
+          published_at="$(git for-each-ref --format='%(taggerdate:iso-strict)' "refs/tags/$GITHUB_REF_NAME")"
+          test -n "$arm64_dmg_path" && test -n "$intel_dmg_path" && test -n "$windows_exe_path"
+          test -n "$arm64_report" && test -n "$intel_report" && test -n "$windows_report"
+          test -n "$published_at"
+          mkdir -p release/oss
+          cp "$arm64_dmg_path" "release/oss/Hatch-${version}-macOS-Apple-Silicon.dmg"
+          cp "$intel_dmg_path" "release/oss/Hatch-${version}-macOS-Intel.dmg"
+          cp "$windows_exe_path" "release/oss/Hatch-${version}-Windows-x64-Setup.exe"
+          node scripts/release/create-desktop-download-manifest.mjs \
+            --version "$version" \
+            --release-tag "$GITHUB_REF_NAME" \
+            --source-sha "$GITHUB_SHA" \
+            --published-at "$published_at" \
+            --public-base-url "$HATCH_OSS_PUBLIC_BASE_URL" \
+            --apple-report "$arm64_report" \
+            --apple-artifact "release/oss/Hatch-${version}-macOS-Apple-Silicon.dmg" \
+            --intel-report "$intel_report" \
+            --intel-artifact "release/oss/Hatch-${version}-macOS-Intel.dmg" \
+            --windows-report "$windows_report" \
+            --windows-artifact "release/oss/Hatch-${version}-Windows-x64-Setup.exe" \
+            --output release/oss/manifest.json
+      - name: Publish versioned installers and fixed latest links to OSS
+        env:
+          HATCH_OSS_BUCKET: ${{ vars.HATCH_OSS_BUCKET }}
+          HATCH_OSS_REGION: ${{ vars.HATCH_OSS_REGION }}
+          HATCH_OSS_S3_ENDPOINT: ${{ vars.HATCH_OSS_S3_ENDPOINT }}
+          HATCH_OSS_PUBLIC_BASE_URL: ${{ vars.HATCH_OSS_PUBLIC_BASE_URL }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.HATCH_OSS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.HATCH_OSS_ACCESS_KEY_SECRET }}
+          AWS_DEFAULT_REGION: ${{ vars.HATCH_OSS_REGION }}
+          AWS_EC2_METADATA_DISABLED: "true"
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          latest_prefix="s3://${HATCH_OSS_BUCKET}/desktop/latest"
+          endpoint=(--endpoint-url "$HATCH_OSS_S3_ENDPOINT")
+          immutable=(--acl public-read --cache-control "public,max-age=31536000,immutable")
+          mutable=(--acl public-read --cache-control "no-cache,no-store,must-revalidate")
+          immutable_copy() {
+            local source="$1"
+            local object_key="$2"
+            local digest="$3"
+            local content_type="$4"
+            local content_disposition="$5"
+            local expected_bytes
+            local head_json
+            local digest_without_prefix="${digest#sha256:}"
+            local content_args=(--content-type "$content_type")
+            if [[ -n "$content_disposition" ]]; then
+              content_args+=(--content-disposition "$content_disposition")
+            fi
+            expected_bytes="$(wc -c < "$source" | tr -d '[:space:]')"
+            if head_json="$(aws s3api head-object --bucket "$HATCH_OSS_BUCKET" --key "$object_key" "${endpoint[@]}" 2>/dev/null)"; then
+              jq -e --arg digest "$digest_without_prefix" --argjson bytes "$expected_bytes" \
+                '.Metadata.sha256 == $digest and .ContentLength == $bytes' <<<"$head_json" >/dev/null || {
+                echo "Immutable OSS object already exists with different bytes: $object_key" >&2
+                exit 1
+              }
+              echo "Keeping existing immutable OSS object: $object_key"
+              return
+            fi
+            aws s3 cp "$source" "s3://${HATCH_OSS_BUCKET}/${object_key}" "${endpoint[@]}" "${immutable[@]}" \
+              --metadata "sha256=${digest_without_prefix},source-sha=${GITHUB_SHA}" \
+              "${content_args[@]}"
+          }
+          immutable_copy "release/oss/Hatch-${version}-macOS-Apple-Silicon.dmg" "desktop/releases/${GITHUB_REF_NAME}/Hatch-${version}-macOS-Apple-Silicon.dmg" "$(jq -r '.artifacts["macos-apple-silicon"].sha256' release/oss/manifest.json)" "application/x-apple-diskimage" "attachment; filename=Hatch-${version}-macOS-Apple-Silicon.dmg"
+          immutable_copy "release/oss/Hatch-${version}-macOS-Intel.dmg" "desktop/releases/${GITHUB_REF_NAME}/Hatch-${version}-macOS-Intel.dmg" "$(jq -r '.artifacts["macos-intel"].sha256' release/oss/manifest.json)" "application/x-apple-diskimage" "attachment; filename=Hatch-${version}-macOS-Intel.dmg"
+          immutable_copy "release/oss/Hatch-${version}-Windows-x64-Setup.exe" "desktop/releases/${GITHUB_REF_NAME}/Hatch-${version}-Windows-x64-Setup.exe" "$(jq -r '.artifacts.windows.sha256' release/oss/manifest.json)" "application/octet-stream" "attachment; filename=Hatch-${version}-Windows-x64-Setup.exe"
+          latest_manifest_file="$(mktemp)"
+          cleanup_latest_manifest() { rm -f "$latest_manifest_file"; }
+          trap cleanup_latest_manifest EXIT
+          latest_manifest_url="${HATCH_OSS_PUBLIC_BASE_URL%/}/desktop/latest/manifest.json"
+          latest_status="$(curl --silent --show-error --location --retry 5 --retry-all-errors --output "$latest_manifest_file" --write-out '%{http_code}' "$latest_manifest_url")" || {
+            echo "Could not inspect the current OSS latest manifest" >&2
+            exit 1
+          }
+          case "$latest_status" in
+            200)
+              jq -e '.schema_version == 1 and .kind == "hatch-desktop-download-manifest" and (.version | strings | test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) and (.source_sha | strings | test("^[0-9a-f]{40}$"))' "$latest_manifest_file" >/dev/null || {
+                echo "Current OSS latest manifest has an unsupported shape" >&2
+                exit 1
+              }
+              current_version="$(jq -r '.version' "$latest_manifest_file")"
+              current_source_sha="$(jq -r '.source_sha' "$latest_manifest_file")"
+              greatest_version="$(printf '%s\n%s\n' "$current_version" "$version" | sort -V | tail -n 1)"
+              if [ "$greatest_version" = "$current_version" ] && [ "$current_version" != "$version" ]; then
+                echo "Refusing to move OSS latest backwards from $current_version to $version" >&2
+                exit 1
+              fi
+              if [ "$current_version" = "$version" ] && [ "$current_source_sha" != "$GITHUB_SHA" ]; then
+                echo "The current OSS latest version has a different source SHA" >&2
+                exit 1
+              fi
+              ;;
+            404)
+              :
+              ;;
+            *)
+              echo "Unexpected HTTP status $latest_status while reading OSS latest manifest" >&2
+              exit 1
+              ;;
+          esac
+          aws s3 cp "release/oss/Hatch-${version}-macOS-Apple-Silicon.dmg" "$latest_prefix/mac/apple-silicon.dmg" "${endpoint[@]}" "${mutable[@]}" --content-type "application/x-apple-diskimage" --content-disposition "attachment; filename=Hatch-${version}-macOS-Apple-Silicon.dmg"
+          aws s3 cp "release/oss/Hatch-${version}-macOS-Intel.dmg" "$latest_prefix/mac/intel.dmg" "${endpoint[@]}" "${mutable[@]}" --content-type "application/x-apple-diskimage" --content-disposition "attachment; filename=Hatch-${version}-macOS-Intel.dmg"
+          aws s3 cp "release/oss/Hatch-${version}-Windows-x64-Setup.exe" "$latest_prefix/windows/windows.exe" "${endpoint[@]}" "${mutable[@]}" --content-type "application/octet-stream" --content-disposition "attachment; filename=Hatch-${version}-Windows-x64-Setup.exe"
+          manifest_sha256="sha256:$(sha256sum release/oss/manifest.json | awk '{print $1}')"
+          immutable_copy release/oss/manifest.json "desktop/releases/${GITHUB_REF_NAME}/manifest.json" "$manifest_sha256" "application/json" ""
+          aws s3 cp release/oss/manifest.json "$latest_prefix/manifest.json" "${endpoint[@]}" "${mutable[@]}" --content-type "application/json"
+      - name: Verify fixed latest OSS links and manifest
+        env:
+          HATCH_OSS_PUBLIC_BASE_URL: ${{ vars.HATCH_OSS_PUBLIC_BASE_URL }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          manifest_url="${HATCH_OSS_PUBLIC_BASE_URL%/}/desktop/latest/manifest.json"
+          curl --fail --location --retry 5 --retry-all-errors --silent --show-error "$manifest_url" -o release/oss/latest-manifest.json
+          jq -e --arg version "$version" --arg source_sha "$GITHUB_SHA" \
+            '.schema_version == 1 and .kind == "hatch-desktop-download-manifest" and .version == $version and .release_tag == ("v" + $version) and .source_sha == $source_sha and (.artifacts | keys | sort) == ["macos-apple-silicon", "macos-intel", "windows"]' \
+            release/oss/latest-manifest.json >/dev/null
+          apple_sha="$(jq -r '.artifacts["macos-apple-silicon"].sha256' release/oss/latest-manifest.json | sed 's/^sha256://')"
+          intel_sha="$(jq -r '.artifacts["macos-intel"].sha256' release/oss/latest-manifest.json | sed 's/^sha256://')"
+          windows_sha="$(jq -r '.artifacts.windows.sha256' release/oss/latest-manifest.json | sed 's/^sha256://')"
+          curl --fail --location --retry 5 --retry-all-errors --silent --show-error "${HATCH_OSS_PUBLIC_BASE_URL%/}/desktop/latest/mac/apple-silicon.dmg" -o release/oss/latest-apple.dmg
+          curl --fail --location --retry 5 --retry-all-errors --silent --show-error "${HATCH_OSS_PUBLIC_BASE_URL%/}/desktop/latest/mac/intel.dmg" -o release/oss/latest-intel.dmg
+          curl --fail --location --retry 5 --retry-all-errors --silent --show-error "${HATCH_OSS_PUBLIC_BASE_URL%/}/desktop/latest/windows/windows.exe" -o release/oss/latest-windows.exe
+          printf '%s  %s\n' "$apple_sha" release/oss/latest-apple.dmg | sha256sum --check --status
+          printf '%s  %s\n' "$intel_sha" release/oss/latest-intel.dmg | sha256sum --check --status
+          printf '%s  %s\n' "$windows_sha" release/oss/latest-windows.exe | sha256sum --check --status

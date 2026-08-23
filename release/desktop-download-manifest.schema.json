@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hatch.tokenquadrant.cn/schemas/desktop-download-manifest-v1.json",
+  "title": "Hatch Desktop download manifest",
+  "type": "object",
+  "required": ["schema_version", "kind", "product", "channel", "version", "release_tag", "source_sha", "published_at", "manifest", "artifacts"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "kind": { "const": "hatch-desktop-download-manifest" },
+    "product": { "const": "Hatch Desktop" },
+    "channel": { "const": "stable" },
+    "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "release_tag": { "type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "source_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "published_at": { "type": "string", "format": "date-time" },
+    "manifest": {
+      "type": "object",
+      "required": ["latest_url", "release_url"],
+      "properties": {
+        "latest_url": { "type": "string", "format": "uri" },
+        "release_url": { "type": "string", "format": "uri" }
+      },
+      "additionalProperties": false
+    },
+    "artifacts": {
+      "type": "object",
+      "required": ["macos-apple-silicon", "macos-intel", "windows"],
+      "properties": {
+        "macos-apple-silicon": { "$ref": "#/$defs/artifact" },
+        "macos-intel": { "$ref": "#/$defs/artifact" },
+        "windows": { "$ref": "#/$defs/artifact" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "required": ["label", "filename", "bytes", "sha256", "latest_url", "release_url", "latest_path", "release_path"],
+      "properties": {
+        "label": { "type": "string" },
+        "filename": { "type": "string" },
+        "bytes": { "type": "integer", "minimum": 1 },
+        "sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "latest_url": { "type": "string", "format": "uri" },
+        "release_url": { "type": "string", "format": "uri" },
+        "latest_path": { "type": "string" },
+        "release_path": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

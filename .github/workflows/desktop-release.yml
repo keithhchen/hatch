@@ -1,12 +1,13 @@
-name: Hatch Desktop release
+name: Hatch Desktop signed validation
 
 on:
-  # A manual dispatch is useful for rehearsing the protected release lane, but
-  # publication still requires a tag and the exact package to pass target UAT.
+  # A manual dispatch is useful for rehearsing the protected signed macOS lane.
+  # Public three-platform distribution is handled by desktop-ci.yml -> OSS.
   workflow_dispatch:
 
-# The build and target-UAT jobs do not need write access. Publication receives
-# write access only after both protected environments have passed.
+# This workflow intentionally has no GitHub Release publication job. It keeps
+# signed macOS candidates and their UAT evidence in Actions artifacts; the
+# public latest/versioned artifact index is owned by desktop-ci.yml.
 permissions:
   contents: read
 
@@ -182,7 +183,7 @@ jobs:
     # runner. The two matrix entries require dedicated arm64 and Intel pools.
     # Required reviewers on the Environment confirm the visual, Keychain-
     # restart, Workspace grant, and native-menu checklist for the exact bytes
-    # below before publication can run.
+    # below before the signed candidate is accepted.
     runs-on: ${{ fromJSON(matrix.runner_labels) }}
     environment: desktop-release-uat
     permissions:
@@ -281,154 +282,3 @@ jobs:
           path: evidence
           if-no-files-found: warn
           retention-days: 90
-
-  publish-release:
-    name: Publish the exact UAT-approved release artifact
-    needs: [build-release, release-target-uat]
-    if: startsWith(github.ref, 'refs/tags/') && needs.build-release.result == 'success' && needs.release-target-uat.result == 'success'
-    runs-on: ubuntu-latest
-    # This approval happens after the target job has produced its evidence.
-    # Configure required reviewers on this Environment; approving the
-    # pre-flight `desktop-release-uat` job alone must never publish a package.
-    environment: desktop-release-publish
-    permissions:
-      actions: read
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          # Publication repeats verification with the protected default-branch
-          # helper before attaching the already UAT-approved bytes.
-          ref: ${{ github.event.repository.default_branch }}
-          persist-credentials: false
-      - name: Download exact UAT-approved candidate
-        uses: actions/download-artifact@v4
-        with:
-          name: hatch-desktop-release-${{ github.run_id }}-arm64
-          path: candidate/arm64
-          github-token: ${{ github.token }}
-      - name: Download exact Intel UAT-approved candidate
-        uses: actions/download-artifact@v4
-        with:
-          name: hatch-desktop-release-${{ github.run_id }}-intel
-          path: candidate/intel
-          github-token: ${{ github.token }}
-      - name: Re-verify package before publication
-        env:
-          EXPECTED_SOURCE_SHA: ${{ github.sha }}
-          EXPECTED_RELEASE_TAG: ${{ github.ref_name }}
-          EXPECTED_RELEASE_RUN_ID: ${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          arm64_report="$(find candidate/arm64 -type f -name release-artifact.json -print -quit)"
-          intel_report="$(find candidate/intel -type f -name release-artifact.json -print -quit)"
-          test -n "$arm64_report" && test -n "$intel_report"
-          node scripts/uat/verify-desktop-release-artifact.mjs \
-            --report "$arm64_report" \
-            --artifact-dir candidate/arm64 \
-            --expected-source-sha "$EXPECTED_SOURCE_SHA" \
-            --expected-release-tag "$EXPECTED_RELEASE_TAG" \
-            --expected-run-id "$EXPECTED_RELEASE_RUN_ID" \
-            --expected-architecture aarch64
-          node scripts/uat/verify-desktop-release-artifact.mjs \
-            --report "$intel_report" \
-            --artifact-dir candidate/intel \
-            --expected-source-sha "$EXPECTED_SOURCE_SHA" \
-            --expected-release-tag "$EXPECTED_RELEASE_TAG" \
-            --expected-run-id "$EXPECTED_RELEASE_RUN_ID" \
-            --expected-architecture x86_64
-      - name: Ensure annotated tag exists in public releases repository
-        env:
-          GH_TOKEN: ${{ secrets.HATCH_RELEASES_TOKEN }}
-          GH_REPO: keithhchen/hatch-releases
-        run: |
-          set -euo pipefail
-          test -n "$GH_TOKEN" || { echo "Missing HATCH_RELEASES_TOKEN" >&2; exit 1; }
-          if tag_ref_json="$(gh api "repos/$GH_REPO/git/ref/tags/$GITHUB_REF_NAME" 2>/dev/null)"; then
-            test "$(jq -r '.object.type' <<<"$tag_ref_json")" = "tag" || {
-              echo "Public tag $GITHUB_REF_NAME exists but is not annotated" >&2
-              exit 1
-            }
-            tag_object_sha="$(jq -r '.object.sha' <<<"$tag_ref_json")"
-            tag_message="$(gh api "repos/$GH_REPO/git/tags/$tag_object_sha" --jq .message)"
-            grep -F "Private source commit: $GITHUB_SHA" <<<"$tag_message" >/dev/null || {
-              echo "Public tag $GITHUB_REF_NAME does not identify source commit $GITHUB_SHA" >&2
-              exit 1
-            }
-          else
-            target_sha="$(gh api "repos/$GH_REPO/commits/main" --jq .sha)"
-            printf -v public_tag_message 'Hatch %s public distribution tag\n\nPrivate source commit: %s' "$GITHUB_REF_NAME" "$GITHUB_SHA"
-            tag_object_sha="$(gh api --method POST "repos/$GH_REPO/git/tags" \
-              -f tag="$GITHUB_REF_NAME" \
-              -f message="$public_tag_message" \
-              -f object="$target_sha" \
-              -f type=commit \
-              --jq .sha)"
-            gh api --method POST "repos/$GH_REPO/git/refs" \
-              -f ref="refs/tags/$GITHUB_REF_NAME" \
-              -f sha="$tag_object_sha" >/dev/null
-          fi
-      - name: Attach exact DMG and provenance manifest to public GitHub Release
-        env:
-          GH_TOKEN: ${{ secrets.HATCH_RELEASES_TOKEN }}
-          GH_REPO: keithhchen/hatch-releases
-        run: |
-          set -euo pipefail
-          arm64_dmg="$(find candidate/arm64 -type f -name '*.dmg' -print -quit)"
-          intel_dmg="$(find candidate/intel -type f -name '*.dmg' -print -quit)"
-          arm64_report="$(find candidate/arm64 -type f -name release-artifact.json -print -quit)"
-          intel_report="$(find candidate/intel -type f -name release-artifact.json -print -quit)"
-          test -n "$arm64_dmg" && test -n "$intel_dmg"
-          test -n "$arm64_report" && test -n "$intel_report"
-          arm64_public_report="candidate/release-artifact-aarch64.json"
-          intel_public_report="candidate/release-artifact-x86_64.json"
-          cp "$arm64_report" "$arm64_public_report"
-          cp "$intel_report" "$intel_public_report"
-          cat > release-notes.md <<EOF
-          Hatch $GITHUB_REF_NAME
-
-          Private source commit: \`$GITHUB_SHA\`
-
-          The arm64 and Intel macOS DMGs attached here passed the protected Developer ID signing, notarization, immutable-byte verification, and target-device UAT gates. Each provenance manifest records the exact source SHA, filename, byte count, and SHA-256.
-          EOF
-          if gh release view "$GITHUB_REF_NAME" --repo "$GH_REPO" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" \
-              "$arm64_dmg" "$intel_dmg" \
-              "$arm64_public_report" "$intel_public_report" \
-              --clobber --repo "$GH_REPO"
-            gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease=false --latest --title "$GITHUB_REF_NAME" --notes-file release-notes.md --repo "$GH_REPO"
-          else
-            gh release create "$GITHUB_REF_NAME" \
-              "$arm64_dmg" "$intel_dmg" \
-              "$arm64_public_report" "$intel_public_report" \
-              --verify-tag --latest --title "$GITHUB_REF_NAME" --notes-file release-notes.md --repo "$GH_REPO"
-          fi
-      - name: Verify public Release asset and latest pointer
-        env:
-          GH_TOKEN: ${{ secrets.HATCH_RELEASES_TOKEN }}
-          GH_REPO: keithhchen/hatch-releases
-        run: |
-          set -euo pipefail
-          arm64_report="candidate/release-artifact-aarch64.json"
-          intel_report="candidate/release-artifact-x86_64.json"
-          arm64_name="$(jq -r .package.filename "$arm64_report")"
-          arm64_bytes="$(jq -r .package.bytes "$arm64_report")"
-          arm64_digest="$(jq -r .package.sha256 "$arm64_report")"
-          intel_name="$(jq -r .package.filename "$intel_report")"
-          intel_bytes="$(jq -r .package.bytes "$intel_report")"
-          intel_digest="$(jq -r .package.sha256 "$intel_report")"
-          release_json="$(gh api "repos/$GH_REPO/releases/tags/$GITHUB_REF_NAME")"
-          jq -e \
-            --arg arm64_name "$arm64_name" \
-            --argjson arm64_bytes "$arm64_bytes" \
-            --arg arm64_digest "$arm64_digest" \
-            --arg intel_name "$intel_name" \
-            --argjson intel_bytes "$intel_bytes" \
-            --arg intel_digest "$intel_digest" \
-            '.draft == false and .prerelease == false and
-             ([.assets[] | select(.name == $arm64_name and .size == $arm64_bytes and .digest == $arm64_digest)] | length) == 1 and
-             ([.assets[] | select(.name == $intel_name and .size == $intel_bytes and .digest == $intel_digest)] | length) == 1 and
-             ([.assets[] | select(.name == "release-artifact-aarch64.json" and .size > 0)] | length) == 1 and
-             ([.assets[] | select(.name == "release-artifact-x86_64.json" and .size > 0)] | length) == 1' \
-            <<<"$release_json" >/dev/null
-          test "$(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name)" = "$GITHUB_REF_NAME"

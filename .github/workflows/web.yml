@@ -39,7 +39,25 @@ jobs:
           npm test
       - name: Install, test, and build Dashboard
         working-directory: creator-dashboard
+        env:
+          HATCH_OSS_PUBLIC_BASE_URL: ${{ vars.HATCH_OSS_PUBLIC_BASE_URL }}
+          VITE_HATCH_DESKTOP_DOWNLOAD_BASE_URL: ${{ vars.HATCH_DESKTOP_DOWNLOAD_BASE_URL }}
         run: |
+          set -euo pipefail
+          test -n "$HATCH_OSS_PUBLIC_BASE_URL" || {
+            echo "Missing HATCH_OSS_PUBLIC_BASE_URL repository variable" >&2
+            exit 1
+          }
+          test -n "$VITE_HATCH_DESKTOP_DOWNLOAD_BASE_URL" || {
+            echo "Missing HATCH_DESKTOP_DOWNLOAD_BASE_URL repository variable" >&2
+            exit 1
+          }
+          printf '%s' "$HATCH_OSS_PUBLIC_BASE_URL" | grep -Eq '^https://'
+          expected_download_base="${HATCH_OSS_PUBLIC_BASE_URL%/}/desktop/latest"
+          test "${VITE_HATCH_DESKTOP_DOWNLOAD_BASE_URL%/}" = "$expected_download_base" || {
+            echo "HATCH_DESKTOP_DOWNLOAD_BASE_URL must equal HATCH_OSS_PUBLIC_BASE_URL/desktop/latest" >&2
+            exit 1
+          }
           npm ci
           npm test
           npm run build
@@ -52,6 +70,8 @@ jobs:
           file: Dockerfile.dashboard
           push: false
           tags: hatch-dashboard:web-ci
+          build-args: |
+            VITE_HATCH_DESKTOP_DOWNLOAD_BASE_URL=${{ vars.HATCH_DESKTOP_DOWNLOAD_BASE_URL }}
           cache-from: type=gha,scope=dashboard
           cache-to: type=gha,scope=dashboard,mode=max
 
@@ -84,6 +104,8 @@ jobs:
           file: Dockerfile.dashboard
           push: true
           tags: ${{ steps.image.outputs.ref }}
+          build-args: |
+            VITE_HATCH_DESKTOP_DOWNLOAD_BASE_URL=${{ vars.HATCH_DESKTOP_DOWNLOAD_BASE_URL }}
           cache-from: type=gha,scope=dashboard
           cache-to: type=gha,scope=dashboard,mode=max
 

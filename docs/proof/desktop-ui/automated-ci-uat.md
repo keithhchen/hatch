@@ -19,7 +19,11 @@ script rejects missing, ambiguous, empty, or persistent-session package output.
 This makes a CI package a useful input to a target-device UAT: the reviewer can
 download a single immutable candidate and verify it before installation. It does
 not turn a hosted runner into a substitute for a real macOS or Windows desktop.
-Artifacts expire after seven days and must never be published as releases.
+Pull-request, `master`, and manual-run artifacts expire after seven days and
+are not standalone releases. A SemVer tag may promote the exact three tagged
+candidate packages to the dedicated OSS download prefix after the source,
+architecture, byte, and SHA checks pass; that promotion remains explicitly
+UAT-level and does not create a GitHub Release.
 
 ## What the automated lanes establish
 
@@ -115,14 +119,14 @@ The signed macOS lane is intentionally a three-stage contract:
    process/log evidence are collected. The `desktop-release-uat` Environment
    approval authorizes use of the dedicated runner; it is not evidence review.
 
-Only when both jobs succeed does `publish-release` enter the separately
-protected `desktop-release-publish` Environment. Its required reviewer can
-inspect the target job's screenshot/log artifact and verify the clean
-restart/Keychain, Workspace grant, native menu, resize, and accessibility
-checklist for that exact hash. After that post-UAT approval, the job downloads
-and re-verifies the immutable artifact and attaches that exact DMG plus its
-manifest to the GitHub Release. A manual dispatch from a branch (rather than a
-tag) fails the signed-input step; it cannot publish a branch build accidentally.
+The signed validation workflow ends after the protected target-device UAT and
+stores the candidate plus evidence as Actions artifacts. It has no
+`publish-release` job and does not attach anything to a GitHub Release. Public
+three-platform distribution is owned by `desktop-ci.yml`: the tag job verifies
+the exact CI evidence and uploads the Apple Silicon, Intel, and Windows
+installers plus the version manifest to OSS. A manual dispatch from a branch
+(rather than a tag) fails the signed-input step; it cannot publish a branch
+build accidentally.
 The release manifest helpers are covered by the same Node test lane as the
 ad-hoc UAT helpers:
 
