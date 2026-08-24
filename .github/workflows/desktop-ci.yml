@@ -282,13 +282,24 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.HATCH_OSS_ACCESS_KEY_SECRET }}
           AWS_DEFAULT_REGION: ${{ vars.HATCH_OSS_REGION }}
           AWS_EC2_METADATA_DISABLED: "true"
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
         run: |
           set -euo pipefail
+          aws configure set default.s3.addressing_style virtual
           version="${GITHUB_REF_NAME#v}"
           latest_prefix="s3://${HATCH_OSS_BUCKET}/desktop/latest"
           endpoint=(--endpoint-url "$HATCH_OSS_S3_ENDPOINT")
           immutable=(--acl public-read --cache-control "public,max-age=31536000,immutable")
           mutable=(--acl public-read --cache-control "no-cache,no-store,must-revalidate")
+          set_public_read_acl() {
+            local object_key="$1"
+            aws s3api put-object-acl \
+              --bucket "$HATCH_OSS_BUCKET" \
+              --key "$object_key" \
+              --acl public-read \
+              "${endpoint[@]}"
+          }
           immutable_copy() {
             local source="$1"
             local object_key="$2"
@@ -309,12 +320,14 @@ jobs:
                 echo "Immutable OSS object already exists with different bytes: $object_key" >&2
                 exit 1
               }
+              set_public_read_acl "$object_key"
               echo "Keeping existing immutable OSS object: $object_key"
               return
             fi
             aws s3 cp "$source" "s3://${HATCH_OSS_BUCKET}/${object_key}" "${endpoint[@]}" "${immutable[@]}" \
               --metadata "sha256=${digest_without_prefix},source-sha=${GITHUB_SHA}" \
               "${content_args[@]}"
+            set_public_read_acl "$object_key"
           }
           immutable_copy "release/oss/Hatch-${version}-macOS-Apple-Silicon.dmg" "desktop/releases/${GITHUB_REF_NAME}/Hatch-${version}-macOS-Apple-Silicon.dmg" "$(jq -r '.artifacts["macos-apple-silicon"].sha256' release/oss/manifest.json)" "application/x-apple-diskimage" "attachment; filename=Hatch-${version}-macOS-Apple-Silicon.dmg"
           immutable_copy "release/oss/Hatch-${version}-macOS-Intel.dmg" "desktop/releases/${GITHUB_REF_NAME}/Hatch-${version}-macOS-Intel.dmg" "$(jq -r '.artifacts["macos-intel"].sha256' release/oss/manifest.json)" "application/x-apple-diskimage" "attachment; filename=Hatch-${version}-macOS-Intel.dmg"
@@ -353,10 +366,13 @@ jobs:
               ;;
           esac
           aws s3 cp "release/oss/Hatch-${version}-macOS-Apple-Silicon.dmg" "$latest_prefix/mac/apple-silicon.dmg" "${endpoint[@]}" "${mutable[@]}" --content-type "application/x-apple-diskimage" --content-disposition "attachment; filename=Hatch-${version}-macOS-Apple-Silicon.dmg"
+          set_public_read_acl "desktop/latest/mac/apple-silicon.dmg"
           aws s3 cp "release/oss/Hatch-${version}-macOS-Intel.dmg" "$latest_prefix/mac/intel.dmg" "${endpoint[@]}" "${mutable[@]}" --content-type "application/x-apple-diskimage" --content-disposition "attachment; filename=Hatch-${version}-macOS-Intel.dmg"
+          set_public_read_acl "desktop/latest/mac/intel.dmg"
           manifest_sha256="sha256:$(sha256sum release/oss/manifest.json | awk '{print $1}')"
           immutable_copy release/oss/manifest.json "desktop/releases/${GITHUB_REF_NAME}/manifest.json" "$manifest_sha256" "application/json" ""
           aws s3 cp release/oss/manifest.json "$latest_prefix/manifest.json" "${endpoint[@]}" "${mutable[@]}" --content-type "application/json"
+          set_public_read_acl "desktop/latest/manifest.json"
       - name: Verify fixed latest OSS links and manifest
         env:
           HATCH_OSS_PUBLIC_BASE_URL: ${{ vars.HATCH_OSS_PUBLIC_BASE_URL }}

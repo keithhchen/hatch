@@ -23,7 +23,11 @@ HATCH_DESKTOP_DOWNLOAD_BASE_URL=https://<download-bucket>.oss-cn-shanghai.aliyun
 `HATCH_OSS_S3_ENDPOINT` is the S3-compatible upload endpoint. The public base
 URL is the ordinary bucket download domain. OSS requires virtual-hosted-style
 requests for S3-compatible access; the workflow therefore keeps the bucket
-name in the `--bucket` argument and does not use path-style addressing.
+name in the `--bucket` argument and does not use path-style addressing. The
+publish job also sets AWS CLI checksum calculation to `when_required`, because
+OSS does not accept AWS's streaming checksum trailer for multipart uploads, and
+sets `public-read` explicitly with `PutObjectACL` so the private bucket can
+serve only the published objects anonymously.
 
 If the bucket uses another region, replace `cn-shanghai` in all four values
 with that region ID and use the matching endpoint.
