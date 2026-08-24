@@ -117,6 +117,21 @@ jobs:
       contents: read
       packages: read
     steps:
+      - name: Materialize GitHub production environment
+        env:
+          HATCH_PRODUCTION_ENV: ${{ secrets.HATCH_PRODUCTION_ENV }}
+        run: |
+          set -euo pipefail
+          test -n "$HATCH_PRODUCTION_ENV"
+          temp_env="$(mktemp /opt/hatch/.env.github.XXXXXX)"
+          trap 'rm -f "$temp_env"' EXIT
+          umask 077
+          printf '%s\n' "$HATCH_PRODUCTION_ENV" > "$temp_env"
+          test -s "$temp_env"
+          grep -Eq '^HATCH_DOMAIN=[^[:space:]]+$' "$temp_env"
+          chmod 600 "$temp_env"
+          mv -f "$temp_env" /opt/hatch/.env
+          trap - EXIT
       - name: Inspect production Docker host
         run: |
           set -u
@@ -131,8 +146,10 @@ jobs:
           DASHBOARD_IMAGE: ${{ needs.publish.outputs.image }}
           GHCR_USERNAME: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HATCH_DOMAIN: ${{ vars.HATCH_DOMAIN }}
         run: |
           set -euo pipefail
+          test -n "$HATCH_DOMAIN"
           export DOCKER_DEFAULT_PLATFORM=linux/amd64
           printf '%s\n' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
           previous_image="$(docker inspect --format '{{.Config.Image}}' hatch-app-dashboard-1)"
@@ -160,10 +177,9 @@ jobs:
             HATCH_DASHBOARD_IMAGE="$previous_image" "${compose[@]}" up -d --no-deps dashboard
             exit 1
           fi
-          domain="$(sed -n 's/^HATCH_DOMAIN=//p' /opt/hatch/.env | tail -n 1)"
           explore_probe="$(mktemp)"
-          if ! curl -4 --noproxy '*' --connect-timeout 10 --max-time 30 --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/health/dashboard" >/dev/null \
-            || ! curl -4 --noproxy '*' --connect-timeout 10 --max-time 30 --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/explore" -o "$explore_probe" \
+          if ! curl -4 --noproxy '*' --connect-timeout 10 --max-time 30 --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$HATCH_DOMAIN/health/dashboard" >/dev/null \
+            || ! curl -4 --noproxy '*' --connect-timeout 10 --max-time 30 --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$HATCH_DOMAIN/explore" -o "$explore_probe" \
             || ! grep -F 'src="/assets/' "$explore_probe" >/dev/null; then
             rm -f "$explore_probe"
             HATCH_DASHBOARD_IMAGE="$previous_image" "${compose[@]}" up -d --no-deps dashboard
