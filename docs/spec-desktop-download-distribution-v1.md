@@ -6,7 +6,7 @@
 system and keeps the visible choice small:
 
 - one recommended primary download;
-- Mac Apple Silicon, Mac Intel, and Windows as alternate choices;
+- Mac Apple Silicon and Mac Intel as alternate choices;
 - a small preview-build label for the current unsigned/UAT distribution;
 - no visible version number, filename, SHA-256, runner, or storage details.
 
@@ -24,19 +24,17 @@ updates only these fixed public objects:
 desktop/releases/v0.1.17/
   Hatch-0.1.17-macOS-Apple-Silicon.dmg
   Hatch-0.1.17-macOS-Intel.dmg
-  Hatch-0.1.17-Windows-x64-Setup.exe
   manifest.json
 
 desktop/latest/
   mac/apple-silicon.dmg
   mac/intel.dmg
-  windows/windows.exe
   manifest.json
 ```
 
-The page links only to the three `desktop/latest/` objects. Each new tag
-uploads the versioned objects first, then replaces the three latest aliases
-and the latest manifest. Latest aliases use revalidation-oriented cache
+The page links only to the two `desktop/latest/` objects. Each new tag uploads
+the versioned objects first, then replaces the two latest aliases and the
+latest manifest. Latest aliases use revalidation-oriented cache
 headers; versioned objects are immutable and long-cacheable.
 
 The tag job refuses to move `desktop/latest/manifest.json` backwards to an
@@ -55,8 +53,9 @@ annotated tag timestamp rather than the runner clock.
 The manifest is not rendered into the page. This keeps the download surface
 quiet while retaining a durable source of truth for release operations.
 
-The current CI distribution lane publishes ad-hoc macOS and unsigned Windows
-UAT candidates. It is not a signed production-distribution claim. The
+The current CI distribution lane publishes only ad-hoc macOS UAT candidates.
+Windows builds are paused until the Windows LocalRunner and target-device
+runner are ready. This is not a signed production-distribution claim. The
 protected signed macOS validation lane remains separate until its external
 credentials and target-device approvals exist.
 
@@ -95,7 +94,7 @@ The Web CD must build with `VITE_HATCH_DESKTOP_DOWNLOAD_BASE_URL` set to the
 same public `desktop/latest` prefix. If it is missing, the page shows the real
 unavailable state instead of inventing a fallback download URL.
 
-The workflow verifies all three fixed URLs by downloading them back from the
-public OSS endpoint and comparing their bytes to the CI evidence SHA-256. It
+The workflow verifies both fixed URLs by downloading them back from the public
+OSS endpoint and comparing their bytes to the CI evidence SHA-256. It
 does not create a GitHub Release, so GitHub's automatic source-code assets are
 not part of the desktop distribution surface.

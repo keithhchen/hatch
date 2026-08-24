@@ -24,11 +24,10 @@
     },
     "artifacts": {
       "type": "object",
-      "required": ["macos-apple-silicon", "macos-intel", "windows"],
+      "required": ["macos-apple-silicon", "macos-intel"],
       "properties": {
         "macos-apple-silicon": { "$ref": "#/$defs/artifact" },
-        "macos-intel": { "$ref": "#/$defs/artifact" },
-        "windows": { "$ref": "#/$defs/artifact" }
+        "macos-intel": { "$ref": "#/$defs/artifact" }
       },
       "additionalProperties": false
     }

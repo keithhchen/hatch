@@ -157,70 +157,10 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  desktop-native-windows:
-    name: Desktop native bridge on Windows
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: |
-            desktop-app/package-lock.json
-            packages/ui/package-lock.json
-      - name: Verify Desktop version and release tag
-        run: node scripts/uat/verify-desktop-version.mjs
-      - name: Select stable Rust toolchain
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-      - name: Install shared UI dependencies
-        working-directory: packages/ui
-        run: npm ci
-      - name: Install renderer dependencies
-        working-directory: desktop-app
-        run: npm ci
-      - name: Test renderer and web build
-        working-directory: desktop-app
-        run: |
-          npm run test:renderer
-          npm run build:web
-      - name: Test LocalRunner on Windows
-        run: cargo test --locked --manifest-path local-runner/Cargo.toml
-      - name: Test Tauri bridge on Windows
-        run: cargo test --locked --manifest-path desktop-app/src-tauri/Cargo.toml
-      - name: Build unsigned Windows NSIS bundle
-        working-directory: desktop-app
-        env:
-          # Windows persistence is intentionally fail-closed until a
-          # device-bound session backend exists; CI must never exercise a
-          # vault-backed bearer-token path.
-          HATCH_PERSISTENT_SESSION: "0"
-        run: npx tauri build --debug --bundles nsis
-      - name: Record Windows automated UAT evidence
-        shell: bash
-        env:
-          HATCH_PERSISTENT_SESSION: "0"
-        run: >-
-          node scripts/uat/record-desktop-uat-artifact.mjs
-          --platform windows
-          --artifact-dir desktop-app/src-tauri/target/debug/bundle/nsis
-          --output artifacts/desktop-uat/windows.json
-      - name: Upload unsigned Windows installer for UAT
-        uses: actions/upload-artifact@v4
-        with:
-          name: hatch-desktop-windows-unsigned
-          path: |
-            desktop-app/src-tauri/target/debug/bundle/nsis/*.exe
-            artifacts/desktop-uat/windows.json
-          if-no-files-found: error
-          retention-days: 7
-
   publish-desktop-oss:
     name: Publish desktop installers to OSS
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [desktop-renderer, desktop-native, desktop-native-windows]
+    needs: [desktop-renderer, desktop-native]
     runs-on: ubuntu-latest
     concurrency:
       group: hatch-desktop-oss-release
@@ -253,19 +193,13 @@ jobs:
         with:
           name: hatch-desktop-macos-intel-ad-hoc-uat
           path: release/macos/intel
-      - name: Download Windows package
-        uses: actions/download-artifact@v4
-        with:
-          name: hatch-desktop-windows-unsigned
-          path: release/windows
       - name: Verify installer source, version, and digest
         run: |
           set -euo pipefail
           node scripts/uat/verify-desktop-version.mjs --tag "$GITHUB_REF_NAME"
           arm64_report="$(find release/macos/arm64 -type f -name macos.json -print -quit)"
           intel_report="$(find release/macos/intel -type f -name macos.json -print -quit)"
-          windows_report="$(find release/windows -type f -name windows.json -print -quit)"
-          test -n "$arm64_report" && test -n "$intel_report" && test -n "$windows_report"
+          test -n "$arm64_report" && test -n "$intel_report"
           node scripts/uat/verify-desktop-uat-artifact.mjs \
             --platform macos \
             --report "$arm64_report" \
@@ -278,11 +212,6 @@ jobs:
             --artifact-dir release/macos/intel \
             --expected-source-sha "$GITHUB_SHA" \
             --expected-runner-architecture X64
-          node scripts/uat/verify-desktop-uat-artifact.mjs \
-            --platform windows \
-            --report "$windows_report" \
-            --artifact-dir release/windows \
-            --expected-source-sha "$GITHUB_SHA"
       - name: Validate OSS publication configuration
         env:
           HATCH_OSS_BUCKET: ${{ vars.HATCH_OSS_BUCKET }}
@@ -319,18 +248,15 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           arm64_dmg_path="$(find release/macos/arm64 -type f -name '*.dmg' -print -quit)"
           intel_dmg_path="$(find release/macos/intel -type f -name '*.dmg' -print -quit)"
-          windows_exe_path="$(find release/windows -type f -name '*.exe' -print -quit)"
           arm64_report="$(find release/macos/arm64 -type f -name macos.json -print -quit)"
           intel_report="$(find release/macos/intel -type f -name macos.json -print -quit)"
-          windows_report="$(find release/windows -type f -name windows.json -print -quit)"
           published_at="$(git for-each-ref --format='%(taggerdate:iso-strict)' "refs/tags/$GITHUB_REF_NAME")"
-          test -n "$arm64_dmg_path" && test -n "$intel_dmg_path" && test -n "$windows_exe_path"
-          test -n "$arm64_report" && test -n "$intel_report" && test -n "$windows_report"
+          test -n "$arm64_dmg_path" && test -n "$intel_dmg_path"
+          test -n "$arm64_report" && test -n "$intel_report"
           test -n "$published_at"
           mkdir -p release/oss
           cp "$arm64_dmg_path" "release/oss/Hatch-${version}-macOS-Apple-Silicon.dmg"
           cp "$intel_dmg_path" "release/oss/Hatch-${version}-macOS-Intel.dmg"
-          cp "$windows_exe_path" "release/oss/Hatch-${version}-Windows-x64-Setup.exe"
           node scripts/release/create-desktop-download-manifest.mjs \
             --version "$version" \
             --release-tag "$GITHUB_REF_NAME" \
@@ -341,8 +267,6 @@ jobs:
             --apple-artifact "release/oss/Hatch-${version}-macOS-Apple-Silicon.dmg" \
             --intel-report "$intel_report" \
             --intel-artifact "release/oss/Hatch-${version}-macOS-Intel.dmg" \
-            --windows-report "$windows_report" \
-            --windows-artifact "release/oss/Hatch-${version}-Windows-x64-Setup.exe" \
             --output release/oss/manifest.json
       - name: Publish versioned installers and fixed latest links to OSS
         env:
@@ -390,7 +314,6 @@ jobs:
           }
           immutable_copy "release/oss/Hatch-${version}-macOS-Apple-Silicon.dmg" "desktop/releases/${GITHUB_REF_NAME}/Hatch-${version}-macOS-Apple-Silicon.dmg" "$(jq -r '.artifacts["macos-apple-silicon"].sha256' release/oss/manifest.json)" "application/x-apple-diskimage" "attachment; filename=Hatch-${version}-macOS-Apple-Silicon.dmg"
           immutable_copy "release/oss/Hatch-${version}-macOS-Intel.dmg" "desktop/releases/${GITHUB_REF_NAME}/Hatch-${version}-macOS-Intel.dmg" "$(jq -r '.artifacts["macos-intel"].sha256' release/oss/manifest.json)" "application/x-apple-diskimage" "attachment; filename=Hatch-${version}-macOS-Intel.dmg"
-          immutable_copy "release/oss/Hatch-${version}-Windows-x64-Setup.exe" "desktop/releases/${GITHUB_REF_NAME}/Hatch-${version}-Windows-x64-Setup.exe" "$(jq -r '.artifacts.windows.sha256' release/oss/manifest.json)" "application/octet-stream" "attachment; filename=Hatch-${version}-Windows-x64-Setup.exe"
           latest_manifest_file="$(mktemp)"
           cleanup_latest_manifest() { rm -f "$latest_manifest_file"; }
           trap cleanup_latest_manifest EXIT
@@ -427,7 +350,6 @@ jobs:
           esac
           aws s3 cp "release/oss/Hatch-${version}-macOS-Apple-Silicon.dmg" "$latest_prefix/mac/apple-silicon.dmg" "${endpoint[@]}" "${mutable[@]}" --content-type "application/x-apple-diskimage" --content-disposition "attachment; filename=Hatch-${version}-macOS-Apple-Silicon.dmg"
           aws s3 cp "release/oss/Hatch-${version}-macOS-Intel.dmg" "$latest_prefix/mac/intel.dmg" "${endpoint[@]}" "${mutable[@]}" --content-type "application/x-apple-diskimage" --content-disposition "attachment; filename=Hatch-${version}-macOS-Intel.dmg"
-          aws s3 cp "release/oss/Hatch-${version}-Windows-x64-Setup.exe" "$latest_prefix/windows/windows.exe" "${endpoint[@]}" "${mutable[@]}" --content-type "application/octet-stream" --content-disposition "attachment; filename=Hatch-${version}-Windows-x64-Setup.exe"
           manifest_sha256="sha256:$(sha256sum release/oss/manifest.json | awk '{print $1}')"
           immutable_copy release/oss/manifest.json "desktop/releases/${GITHUB_REF_NAME}/manifest.json" "$manifest_sha256" "application/json" ""
           aws s3 cp release/oss/manifest.json "$latest_prefix/manifest.json" "${endpoint[@]}" "${mutable[@]}" --content-type "application/json"
@@ -440,14 +362,11 @@ jobs:
           manifest_url="${HATCH_OSS_PUBLIC_BASE_URL%/}/desktop/latest/manifest.json"
           curl --fail --location --retry 5 --retry-all-errors --silent --show-error "$manifest_url" -o release/oss/latest-manifest.json
           jq -e --arg version "$version" --arg source_sha "$GITHUB_SHA" \
-            '.schema_version == 1 and .kind == "hatch-desktop-download-manifest" and .version == $version and .release_tag == ("v" + $version) and .source_sha == $source_sha and (.artifacts | keys | sort) == ["macos-apple-silicon", "macos-intel", "windows"]' \
+            '.schema_version == 1 and .kind == "hatch-desktop-download-manifest" and .version == $version and .release_tag == ("v" + $version) and .source_sha == $source_sha and (.artifacts | keys | sort) == ["macos-apple-silicon", "macos-intel"]' \
             release/oss/latest-manifest.json >/dev/null
           apple_sha="$(jq -r '.artifacts["macos-apple-silicon"].sha256' release/oss/latest-manifest.json | sed 's/^sha256://')"
           intel_sha="$(jq -r '.artifacts["macos-intel"].sha256' release/oss/latest-manifest.json | sed 's/^sha256://')"
-          windows_sha="$(jq -r '.artifacts.windows.sha256' release/oss/latest-manifest.json | sed 's/^sha256://')"
           curl --fail --location --retry 5 --retry-all-errors --silent --show-error "${HATCH_OSS_PUBLIC_BASE_URL%/}/desktop/latest/mac/apple-silicon.dmg" -o release/oss/latest-apple.dmg
           curl --fail --location --retry 5 --retry-all-errors --silent --show-error "${HATCH_OSS_PUBLIC_BASE_URL%/}/desktop/latest/mac/intel.dmg" -o release/oss/latest-intel.dmg
-          curl --fail --location --retry 5 --retry-all-errors --silent --show-error "${HATCH_OSS_PUBLIC_BASE_URL%/}/desktop/latest/windows/windows.exe" -o release/oss/latest-windows.exe
           printf '%s  %s\n' "$apple_sha" release/oss/latest-apple.dmg | sha256sum --check --status
           printf '%s  %s\n' "$intel_sha" release/oss/latest-intel.dmg | sha256sum --check --status
-          printf '%s  %s\n' "$windows_sha" release/oss/latest-windows.exe | sha256sum --check --status

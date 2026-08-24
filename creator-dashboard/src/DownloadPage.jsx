@@ -53,11 +53,13 @@ export function DownloadPage() {
         <section className="download-page__intro" aria-labelledby="download-page-title">
           <span className="download-page__eyebrow">Desktop preview</span>
           <h1 id="download-page-title">Hatch, on your desktop.</h1>
-          <p>A calm place for the work that needs your files. Preview builds for Mac and Windows.</p>
+          <p>A calm place for the work that needs your files. Preview builds for Mac.</p>
         </section>
 
         {!hasConfiguredDownloads ? (
           <UnavailableDownloadState />
+        ) : detectedTarget === "unsupported" ? (
+          <UnsupportedDownloadState />
         ) : (
           <>
             <section className="download-page__recommended" aria-labelledby="download-recommended-title">
@@ -68,7 +70,7 @@ export function DownloadPage() {
               {selected ? (
                 <div className="download-page__recommended-content">
                   <div>
-                    <h2 id="download-recommended-title">{selected.platform === "windows" ? "Hatch for Windows" : "Hatch for Mac"}</h2>
+                    <h2 id="download-recommended-title">Hatch for Mac</h2>
                     <p>{selected.label}</p>
                   </div>
                   <Button asChild size="large" trailing={<ArrowDown aria-hidden="true" />}>
@@ -86,7 +88,7 @@ export function DownloadPage() {
             <section className="download-page__other-versions" aria-labelledby="download-other-title">
               <div className="download-page__section-heading">
                 <h2 id="download-other-title">Other versions</h2>
-                <span>Choose a different platform</span>
+                <span>Choose a different Mac build</span>
               </div>
               <div className="download-page__version-list">
                 {targets.map((target) => (
@@ -130,6 +132,18 @@ function UnavailableDownloadState() {
       <Button type="button" variant="secondary" size="small" leading={<RotateCcw aria-hidden="true" />} onClick={() => window.location.reload()}>
         Try again
       </Button>
+    </Surface>
+  );
+}
+
+function UnsupportedDownloadState() {
+  return (
+    <Surface level="solid" className="download-page__unavailable" role="status">
+      <span className="download-page__unavailable-mark" aria-hidden="true">—</span>
+      <div>
+        <h2>Windows coming soon</h2>
+        <p>Hatch Desktop is currently available for Mac.</p>
+      </div>
     </Surface>
   );
 }

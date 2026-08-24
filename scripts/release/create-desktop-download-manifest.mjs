@@ -25,16 +25,6 @@ export const DESKTOP_DOWNLOAD_ARTIFACTS = Object.freeze([
     reportArgument: "intel-report",
     artifactArgument: "intel-artifact",
     fileName: (version) => `Hatch-${version}-macOS-Intel.dmg`
-  },
-  {
-    key: "windows",
-    platform: "windows",
-    label: "Windows · unsigned preview",
-    latestPath: "desktop/latest/windows/windows.exe",
-    expectedRunnerArchitecture: "X64",
-    reportArgument: "windows-report",
-    artifactArgument: "windows-artifact",
-    fileName: (version) => `Hatch-${version}-Windows-x64-Setup.exe`
   }
 ]);
 
@@ -130,9 +120,6 @@ function validateArtifact(definition, artifact, sourceSha, version) {
   if (definition.platform === "macos" && !artifact.filename.endsWith(".dmg")) {
     throw new Error(`macOS artifact ${definition.key} must be a DMG.`);
   }
-  if (definition.platform === "windows" && !artifact.filename.endsWith(".exe")) {
-    throw new Error("Windows artifact must be an EXE.");
-  }
   if (!Number.isSafeInteger(artifact.bytes) || artifact.bytes <= 0) {
     throw new Error(`Invalid byte count for ${definition.key}.`);
   }
@@ -223,8 +210,6 @@ function readCliArguments(argv) {
     "apple-artifact",
     "intel-report",
     "intel-artifact",
-    "windows-report",
-    "windows-artifact",
     "output",
     "published-at"
   ]);

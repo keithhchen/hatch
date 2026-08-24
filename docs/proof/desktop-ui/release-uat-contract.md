@@ -3,8 +3,8 @@
 This document defines what must be true before a signed macOS Desktop DMG is
 accepted by the protected target-device validation lane. It is a supply-chain
 and target-device contract, not a claim that the local ad-hoc DMG is
-publishable. Public three-platform distribution is handled separately by the
-OSS tag job in `desktop-ci.yml`.
+publishable. Public macOS distribution is handled separately by the OSS tag
+job in `desktop-ci.yml`; Windows distribution is currently paused.
 
 ## Immutable artifact identity
 

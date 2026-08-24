@@ -10,7 +10,7 @@ on:
         description: Target UAT platform
         required: true
         type: choice
-        options: [macos, windows]
+        options: [macos]
       source_run_id:
         description: Hatch CI run ID that uploaded the candidate artifact
         required: true
@@ -108,104 +108,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: hatch-target-uat-macos-${{ inputs.source_run_id }}
-          path: evidence
-          if-no-files-found: warn
-          retention-days: 30
-
-  windows:
-    name: Windows target-device candidate UAT
-    if: inputs.platform == 'windows'
-    # Provision this interactive, dedicated runner before enabling the
-    # environment. It must be a real Windows desktop that permits screenshots
-    # and contains no production account or user data.
-    runs-on: [self-hosted, windows, x64]
-    environment: desktop-uat-windows
-    timeout-minutes: 20
-    defaults:
-      run:
-        shell: pwsh
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          # Verify a candidate with the protected default-branch helper, not
-          # executable code from the candidate commit.
-          ref: ${{ github.event.repository.default_branch }}
-          persist-credentials: false
-      - name: Download immutable Windows candidate and CI report
-        uses: actions/download-artifact@v4
-        with:
-          name: hatch-desktop-windows-unsigned
-          path: candidate
-          repository: ${{ github.repository }}
-          run-id: ${{ inputs.source_run_id }}
-          github-token: ${{ github.token }}
-      - name: Verify candidate report, source, and package hash
-        env:
-          EXPECTED_SHA256: ${{ inputs.expected_sha256 }}
-          EXPECTED_SOURCE_SHA: ${{ inputs.source_sha }}
-        run: |
-          New-Item -ItemType Directory -Path evidence -Force | Out-Null
-          $report = Get-ChildItem candidate -Recurse -File -Filter windows.json | Select-Object -First 1 -ExpandProperty FullName
-          if (-not $report) { throw "Downloaded artifact did not contain windows.json." }
-          node scripts/uat/verify-desktop-uat-artifact.mjs `
-            --platform windows `
-            --report $report `
-            --artifact-dir candidate `
-            --expected-source-sha $env:EXPECTED_SOURCE_SHA `
-            --expected-runner-architecture $env:RUNNER_ARCH `
-            --expected-sha256 $env:EXPECTED_SHA256 | Tee-Object -FilePath evidence/package-verification.json
-      - name: Silent install, cold launch, screenshot, and collect process evidence
-        run: |
-          $uatRoot = Join-Path $env:RUNNER_TEMP "hatch-target-uat-$env:GITHUB_RUN_ID"
-          $installRoot = Join-Path $uatRoot "installed"
-          New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
-          $installer = Get-ChildItem candidate -Recurse -File -Filter *.exe | Select-Object -First 1
-          if (-not $installer) { throw "Downloaded artifact did not contain a Windows installer." }
-          $install = Start-Process -FilePath $installer.FullName -ArgumentList @("/S", "/D=$installRoot") -Wait -PassThru
-          if ($install.ExitCode -ne 0) { throw "NSIS installer exited with $($install.ExitCode)." }
-          $app = Get-ChildItem $installRoot -Recurse -File -Filter Hatch.exe | Select-Object -First 1
-          if (-not $app) { throw "Silent install did not produce Hatch.exe." }
-          $stdout = Join-Path (Resolve-Path evidence) "app.stdout.log"
-          $stderr = Join-Path (Resolve-Path evidence) "app.stderr.log"
-          # A candidate may be untrusted. Strip CI credential-like variables
-          # only while spawning it, then restore the workflow environment.
-          $savedEnvironment = @{}
-          Get-ChildItem Env: | Where-Object { $_.Name -match '(^GITHUB_|^ACTIONS_|TOKEN|SECRET|PASSWORD|PRIVATE_KEY)' } | ForEach-Object {
-            $savedEnvironment[$_.Name] = $_.Value
-            Remove-Item -LiteralPath "Env:$($_.Name)"
-          }
-          try {
-            $process = Start-Process -FilePath $app.FullName -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
-          } finally {
-            foreach ($entry in $savedEnvironment.GetEnumerator()) {
-              Set-Item -LiteralPath "Env:$($entry.Key)" -Value $entry.Value
-            }
-          }
-          try {
-            Start-Sleep -Seconds 8
-            if ($process.HasExited) { throw "Hatch exited during cold launch with code $($process.ExitCode)." }
-            Get-Process -Id $process.Id | Select-Object Id, ProcessName, StartTime, Path | ConvertTo-Json | Set-Content evidence/process.json
-            Add-Type -AssemblyName System.Windows.Forms
-            Add-Type -AssemblyName System.Drawing
-            $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-            $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
-            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-            try {
-              $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
-              $bitmap.Save((Join-Path (Resolve-Path evidence) "cold-launch.png"), [System.Drawing.Imaging.ImageFormat]::Png)
-            } finally {
-              $graphics.Dispose()
-              $bitmap.Dispose()
-            }
-            if (-not (Test-Path evidence/cold-launch.png)) { throw "Interactive runner did not produce a screenshot." }
-          } finally {
-            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
-          }
-      - name: Upload target-device Windows evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: hatch-target-uat-windows-${{ inputs.source_run_id }}
           path: evidence
           if-no-files-found: warn
           retention-days: 30

@@ -468,7 +468,7 @@ V1 只有在以下条件全部通过后才算完成：
 - Conversation 创建请求重试时保持幂等，不产生重复对象。
 - 关闭一个窗口不影响其他 Conversation 或 Run。
 - network disconnect、renderer reload、application crash 恢复后，通过 snapshot/cursor observer recovery 不出现重复 user message、assistant placeholder 或 event；进行中的 Run 显示 `Interrupted`，V1 不自动 reclaim 或重放工具。
-- Authentication secret 不出现在 Web Storage、URL、log、settings 或 Conversation data 中；正式签名 macOS Keychain 通过 packaged-app 验证；dev/ad-hoc UAT 与当前 Windows 包只能使用进程内 session，不能把 raw token 写入浏览器存储作为替代。macOS release UAT 还必须验证重启后的 Keychain read/write 无 unlock prompt，且 `codesign -dvvv` 的 Developer ID Application、Team ID 与 bundle identifier 均与 CI configuration 一致。Windows persistent-session acceptance 只有在 device-bound backend 与 same-user full-trust 负测通过后才可开始；PasswordVault 不满足该门槛。
+- Authentication secret 不出现在 Web Storage、URL、log、settings 或 Conversation data 中；正式签名 macOS Keychain 通过 packaged-app 验证；dev/ad-hoc UAT 只能使用进程内 session，不能把 raw token 写入浏览器存储作为替代。Windows 发布当前暂停，未来 Windows persistent-session acceptance 只有在 device-bound backend 与 same-user full-trust 负测通过后才可开始；PasswordVault 不满足该门槛。macOS release UAT 还必须验证重启后的 Keychain read/write 无 unlock prompt，且 `codesign -dvvv` 的 Developer ID Application、Team ID 与 bundle identifier 均与 CI configuration 一致。
 - Renderer 无法通过传入 arbitrary absolute workspace path 扩大授权；Rust 测试继续拒绝 `..` traversal、absolute tool path、symlink escape、cleared Workspace 与 capability violation。
 - Product context menus 使用 Native menu，且不出现 `Inspect Element`。
 - `640×600`、`860×600`、`1180×780` 在 80%、100%、150%、200% zoom 下无页面级横向滚动；Sidebar、Composer、Stop 与 Approval 始终可达。

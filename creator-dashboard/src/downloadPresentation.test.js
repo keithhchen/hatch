@@ -14,12 +14,11 @@ test("builds fixed latest download URLs without exposing release versions", () =
     desktopDownloadUrl("macos-apple-silicon", "https://downloads.example.com/desktop/latest/"),
     "https://downloads.example.com/desktop/latest/mac/apple-silicon.dmg"
   );
-  assert.equal(desktopDownloadUrl("windows", ""), "");
   assert.equal(normalizeDownloadBaseUrl("http://insecure.example.com"), "");
-  assert.equal(DESKTOP_DOWNLOAD_TARGETS.windows.label, "Windows");
+  assert.deepEqual(Object.keys(DESKTOP_DOWNLOAD_TARGETS), ["macos-apple-silicon", "macos-intel"]);
 });
 
-test("detects supported platforms from user-agent client hints", () => {
+test("detects macOS builds and reports paused Windows support", () => {
   assert.equal(
     detectDownloadTarget({ userAgentData: { platform: "macOS", architecture: "arm" } }),
     "macos-apple-silicon"
@@ -28,7 +27,7 @@ test("detects supported platforms from user-agent client hints", () => {
     detectDownloadTarget({ userAgentData: { platform: "macOS", architecture: "x86" } }),
     "macos-intel"
   );
-  assert.equal(detectDownloadTarget({ userAgentData: { platform: "Windows" } }), "windows");
+  assert.equal(detectDownloadTarget({ userAgentData: { platform: "Windows" } }), "unsupported");
   assert.equal(detectDownloadTarget({ platform: "MacIntel" }), "unknown");
 });
 
