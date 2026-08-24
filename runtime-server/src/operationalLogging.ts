@@ -2,6 +2,8 @@ export const OPERATIONAL_FAILURES = {
   commerce_delivery_reconciliation_failed: "delivery_accounting",
   commerce_delivery_receipt_deferred: "delivery_accounting",
   commerce_delivery_reservation_release_failed: "delivery_accounting",
+  graceful_shutdown_failed: "process_shutdown",
+  graceful_shutdown_timeout: "process_shutdown",
   runtime_startup_failed: "runtime_startup",
   registry_startup_failed: "registry_startup",
   creator_factory_worker_failed: "creator_factory_worker"

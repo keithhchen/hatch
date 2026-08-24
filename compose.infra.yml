@@ -4,6 +4,8 @@ services:
   postgres:
     image: ${POSTGRES_IMAGE:-postgres:16-alpine}
     restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-hatch}
       POSTGRES_USER: ${POSTGRES_USER:-hatch_admin}
@@ -17,10 +19,13 @@ services:
       interval: 10s
       timeout: 5s
       retries: 6
+      start_period: 20s
 
   qdrant:
     image: ${QDRANT_IMAGE:-qdrant/qdrant:v1.14.1}
     restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
     volumes:
       - qdrant_data:/qdrant/storage
     networks:
@@ -30,6 +35,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
+      start_period: 20s
 
 volumes:
   postgres_data:

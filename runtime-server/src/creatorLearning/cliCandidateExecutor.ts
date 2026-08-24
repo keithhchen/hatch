@@ -53,7 +53,7 @@ async function runChild(
 ): Promise<HatchHarnessCliResult> {
   const ownedTempRoot = await mkdtemp(path.join(os.tmpdir(), "hatch-factory-child-"));
   try {
-    // index.ts imports dotenv/config. Pin it to an owned empty file so neither
+    // index.ts imports the root env loader. Pin it to an owned empty file so neither
     // the worker's cwd nor an inherited DOTENV_CONFIG_PATH can restore a
     // deployment connection after the environment below has removed it.
     const safeDotenvPath = path.join(ownedTempRoot, "factory-child.env");
