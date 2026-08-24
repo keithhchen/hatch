@@ -120,6 +120,14 @@ jobs:
           set -euo pipefail
           aws configure set default.s3.addressing_style virtual
           endpoint=(--endpoint-url "$HATCH_OSS_S3_ENDPOINT")
+          set_public_read_acl() {
+            local object_key="$1"
+            aws s3api put-object-acl \
+              --bucket "$HATCH_OSS_BUCKET" \
+              --key "$object_key" \
+              --acl public-read \
+              "${endpoint[@]}"
+          }
           for locale in en ja zh; do
             source="creator-dashboard/public/assets/onepager/hatch-launch-${locale}.mp4"
             key="${WEB_MEDIA_PREFIX}/hatch-launch-${locale}.mp4"
@@ -129,6 +137,7 @@ jobs:
               --cache-control "public,max-age=31536000,immutable" \
               --content-type "video/mp4" \
               --metadata "source-sha=${GITHUB_SHA},bytes=${expected_bytes}"
+            set_public_read_acl "$key"
             head_json="$(aws s3api head-object --bucket "$HATCH_OSS_BUCKET" --key "$key" "${endpoint[@]}")"
             jq -e --argjson bytes "$expected_bytes" \
               '.ContentLength == $bytes and .ContentType == "video/mp4"' <<<"$head_json" >/dev/null
