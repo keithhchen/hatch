@@ -29,6 +29,21 @@ jobs:
           tar -xzf "$archive" -C "$temp_dir"
           cp -a "$temp_dir/$root_dir/." "$GITHUB_WORKSPACE/"
           rm -rf "$temp_dir"
+      - name: Materialize GitHub production environment
+        env:
+          HATCH_PRODUCTION_ENV: ${{ secrets.HATCH_PRODUCTION_ENV }}
+        run: |
+          set -euo pipefail
+          test -n "$HATCH_PRODUCTION_ENV"
+          temp_env="$(mktemp /opt/hatch/.env.github.XXXXXX)"
+          trap 'rm -f "$temp_env"' EXIT
+          umask 077
+          printf '%s\n' "$HATCH_PRODUCTION_ENV" > "$temp_env"
+          test -s "$temp_env"
+          grep -Eq '^HATCH_DOMAIN=[^[:space:]]+$' "$temp_env"
+          chmod 600 "$temp_env"
+          mv -f "$temp_env" /opt/hatch/.env
+          trap - EXIT
       - name: Prepare infrastructure definition
         run: |
           set -euo pipefail
@@ -39,7 +54,7 @@ jobs:
           cd /opt/hatch
           test -f .env
           for key in POSTGRES_PASSWORD; do
-            grep -Eq "^${key}=[^[:space:]]+" .env || { echo "Missing non-empty $key in /opt/hatch/.env"; exit 1; }
+            grep -Eq "^${key}=[^[:space:]]+" .env || { echo "Missing non-empty $key in GitHub production environment"; exit 1; }
           done
           docker network inspect hatch_internal >/dev/null 2>&1 || docker network create hatch_internal
           docker compose --env-file .env -f compose.infra.yml up -d postgres qdrant

@@ -135,6 +135,21 @@ jobs:
           tar -xzf "$archive" -C "$temp_dir"
           cp -a "$temp_dir/$root_dir/." "$GITHUB_WORKSPACE/"
           rm -rf "$temp_dir"
+      - name: Materialize GitHub production environment
+        env:
+          HATCH_PRODUCTION_ENV: ${{ secrets.HATCH_PRODUCTION_ENV }}
+        run: |
+          set -euo pipefail
+          test -n "$HATCH_PRODUCTION_ENV"
+          temp_env="$(mktemp /opt/hatch/.env.github.XXXXXX)"
+          trap 'rm -f "$temp_env"' EXIT
+          umask 077
+          printf '%s\n' "$HATCH_PRODUCTION_ENV" > "$temp_env"
+          test -s "$temp_env"
+          grep -Eq '^HATCH_DOMAIN=[^[:space:]]+$' "$temp_env"
+          chmod 600 "$temp_env"
+          mv -f "$temp_env" /opt/hatch/.env
+          trap - EXIT
       - name: Prepare application definition
         env:
           IMAGE_PREFIX: ${{ needs.build-and-push.outputs.image_prefix }}
@@ -146,75 +161,13 @@ jobs:
           fi
           install -m 640 compose.app.yml /opt/hatch/
           install -m 640 compose.infra.yml /opt/hatch/
-      - name: Select Creator Factory LLM profile
-        run: |
-          set -euo pipefail
-          grep -Eq '^LLM_API_KEY=[^[:space:]]+' /opt/hatch/.env
-          sed -i '/^HATCH_LLM_PROFILE=/d' /opt/hatch/.env
-          printf 'HATCH_LLM_PROFILE=kimi-k2.6\n' >> /opt/hatch/.env
-          sed -i '/^HATCH_FACTORY_LLM_PROFILE=/d' /opt/hatch/.env
-          printf 'HATCH_FACTORY_LLM_PROFILE=kimi-k2.6\n' >> /opt/hatch/.env
-          chmod 600 /opt/hatch/.env
-      - name: Ensure deployment service token
-        run: |
-          set -euo pipefail
-          cd /opt/hatch
-          test -f .env
-          token="$(sed -n 's/^HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN=//p' .env | tail -n 1)"
-          if test -z "$token"; then
-            token="$(openssl rand -hex 32)"
-            sed -i '/^HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN=/d' .env
-            printf 'HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN=%s\n' "$token" >> .env
-            chmod 600 .env
-          fi
-          printf '%s' "$token" | grep -Eq '^[a-f0-9]{64}$' || {
-            echo "HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN must be 64 lowercase hexadecimal characters" >&2
-            exit 1
-          }
-      - name: Ensure Runtime-to-Commerce service token
-        run: |
-          set -euo pipefail
-          cd /opt/hatch
-          test -f .env
-          token="$(sed -n 's/^HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN=//p' .env | tail -n 1)"
-          if test -z "$token"; then
-            token="$(openssl rand -hex 32)"
-            sed -i '/^HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN=/d' .env
-            printf 'HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN=%s\n' "$token" >> .env
-            chmod 600 .env
-          fi
-          printf '%s' "$token" | grep -Eq '^[a-f0-9]{64}$' || {
-            echo "HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN must be 64 lowercase hexadecimal characters" >&2
-            exit 1
-          }
-      - name: Ensure OAuth state key
-        run: |
-          set -euo pipefail
-          cd /opt/hatch
-          test -f .env
-          key="$(sed -n 's/^HATCH_OAUTH_STATE_KEY=//p' .env | tail -n 1)"
-          if test -z "$key"; then
-            key="$(openssl rand -hex 32)"
-            sed -i '/^HATCH_OAUTH_STATE_KEY=/d' .env
-            printf 'HATCH_OAUTH_STATE_KEY=%s\n' "$key" >> .env
-            chmod 600 .env
-          fi
-          printf '%s' "$key" | grep -Eq '^[a-f0-9]{64}$' || {
-            echo "HATCH_OAUTH_STATE_KEY must be 64 lowercase hexadecimal characters" >&2
-            exit 1
-          }
       - name: Ensure shared Postgres is ready
         run: |
           set -euo pipefail
           cd /opt/hatch
           test -f .env
           test -f compose.infra.yml
-          if ! grep -Eq '^HATCH_DATABASE_URL=[^[:space:]]+' .env; then
-            database_url="$(sed -n 's/^HATCH_REGISTRY_DATABASE_URL=//p' .env | tail -n 1)"
-            test -n "$database_url" || { echo "Missing HATCH_DATABASE_URL in /opt/hatch/.env" >&2; exit 1; }
-            printf 'HATCH_DATABASE_URL=%s\n' "$database_url" >> .env
-            chmod 600 .env
-          fi
+          grep -Eq '^HATCH_DATABASE_URL=[^[:space:]]+' .env || { echo "Missing HATCH_DATABASE_URL in GitHub production environment" >&2; exit 1; }
           postgres_user="$(sed -n 's/^POSTGRES_USER=//p' .env | tail -n 1)"
           postgres_database="$(sed -n 's/^POSTGRES_DB=//p' .env | tail -n 1)"
           postgres_user="${postgres_user:-hatch}"
@@ -443,29 +396,30 @@ jobs:
           HATCH_DOMAIN: ${{ vars.HATCH_DOMAIN }}
         run: |
           set -euo pipefail
-          domain="${HATCH_DOMAIN:-$(grep '^HATCH_DOMAIN=' /opt/hatch/.env | cut -d= -f2-)}"
-          test -n "$domain"
-          curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/health/dashboard" >/dev/null
-          curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/health/runtime" >/dev/null
-          curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/health/registry" >/dev/null
-          curl -4 --noproxy '*' --fail --location --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/explore" >/dev/null
-          product_json="$(curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/v1/public/products/026651b1-8a8a-4484-aac5-ace6bd662157")"
+          test -n "$HATCH_DOMAIN"
+          curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$HATCH_DOMAIN/health/dashboard" >/dev/null
+          curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$HATCH_DOMAIN/health/runtime" >/dev/null
+          curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$HATCH_DOMAIN/health/registry" >/dev/null
+          curl -4 --noproxy '*' --fail --location --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$HATCH_DOMAIN/explore" >/dev/null
+          product_json="$(curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$HATCH_DOMAIN/v1/public/products/026651b1-8a8a-4484-aac5-ace6bd662157")"
           printf '%s' "$product_json" | jq -e '
             .product.product_id == "026651b1-8a8a-4484-aac5-ace6bd662157"
             and .product.availability == "published"
             and .product.available == true
             and ((.product.offer // null) == null)
           ' >/dev/null
-          logout_status="$(curl -4 --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' -X POST "https://$domain/v1/auth/logout")"
+          logout_status="$(curl -4 --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' -X POST "https://$HATCH_DOMAIN/v1/auth/logout")"
           test "$logout_status" = 204
-          me_status="$(curl -4 --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' "https://$domain/v1/auth/me")"
+          me_status="$(curl -4 --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' "https://$HATCH_DOMAIN/v1/auth/me")"
           test "$me_status" = 401
-          public_grant_status="$(curl -4 --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' -X POST "https://$domain/v1/user/products/probe/access")"
+          public_grant_status="$(curl -4 --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' -X POST "https://$HATCH_DOMAIN/v1/user/products/probe/access")"
           test "$public_grant_status" = 404
-          private_grant_status="$(curl -4 --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' -X POST "https://$domain/v1/commerce/product-access")"
+          private_grant_status="$(curl -4 --noproxy '*' --silent --output /dev/null --write-out '%{http_code}' -X POST "https://$HATCH_DOMAIN/v1/commerce/product-access")"
           test "$private_grant_status" = 404
       - name: Roll back application release when health fails
         if: failure()
+        env:
+          HATCH_DOMAIN: ${{ vars.HATCH_DOMAIN }}
         run: |
           set -euo pipefail
           cd /opt/hatch
@@ -477,11 +431,10 @@ jobs:
             docker ps -aq --filter label=com.docker.compose.service=factory-worker | xargs -r docker rm -f
             docker compose --env-file .env --env-file .release.env -f compose.app.yml up -d --no-deps registry runtime caddy
             docker compose --env-file .env --env-file .release.env -f compose.app.yml ps --status running --services | grep -Fxq registry
-            domain="$(grep '^HATCH_DOMAIN=' .env | cut -d= -f2-)"
-            test -n "$domain"
-            curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/health/dashboard" >/dev/null
-            curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/health/runtime" >/dev/null
-            curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$domain/health/registry" >/dev/null
+            test -n "$HATCH_DOMAIN"
+            curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$HATCH_DOMAIN/health/dashboard" >/dev/null
+            curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$HATCH_DOMAIN/health/runtime" >/dev/null
+            curl -4 --noproxy '*' --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$HATCH_DOMAIN/health/registry" >/dev/null
           else
             # A first release has no known-good image to restore. Do not leave
             # an unverified stack serving traffic or let its tag become the
