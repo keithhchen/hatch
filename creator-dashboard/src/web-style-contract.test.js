@@ -54,6 +54,18 @@ test("Web eyebrow labels stay visible despite the shared global eyebrow rule", (
   assert.match(styles, /\.site \.eyebrow\s*\{[\s\S]*?display:\s*block;/);
 });
 
+test("Web home keeps the public narrative sections and real CTAs", () => {
+  const page = read("creator-dashboard/src/web/HatchPage.tsx");
+
+  for (const section of ["top", "gap", "product", "interviews", "business", "vision", "contact"]) {
+    assert.match(page, new RegExp(`id=\\"${section}\\"`));
+  }
+  assert.match(page, /href=\"\/explore\"/);
+  assert.match(page, /href=\"\/studio\"/);
+  assert.match(page, /fetch\(\"\/api\/contact\"/);
+  assert.doesNotMatch(page, /继续阅读/);
+});
+
 test("creator navigation uses a standard hamburger menu on narrow screens", () => {
   const source = read("creator-dashboard/src/CreatorPortalV2.jsx");
   const styles = read("creator-dashboard/src/creatorPortalV2.css");
