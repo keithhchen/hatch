@@ -189,8 +189,9 @@ button {
 }
 
 .hero-actions {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: max-content max-content;
+  align-items: start;
   gap: 24px;
   margin-top: 32px;
 }
@@ -199,6 +200,7 @@ button {
   display: inline-flex;
   align-items: center;
   justify-content: space-between;
+  justify-self: start;
   gap: 20px;
   min-height: 46px;
   padding: 0 16px;
@@ -232,25 +234,15 @@ button {
 }
 
 .cta-arrow {
-  display: inline-grid;
-  width: 22px;
-  height: 22px;
-  flex: 0 0 22px;
-  place-items: center;
-  border-radius: 6px;
-  background: #dce5e8;
-  color: #405b64;
-}
-
-.cta-arrow svg {
-  display: block;
-  width: 14px;
-  height: 14px;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 2.3;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  height: auto;
+  flex: 0 0 auto;
+  color: currentColor;
+  font-size: 18px;
+  line-height: 1;
 }
 
 .hero-film {
@@ -304,6 +296,8 @@ button {
 }
 
 .hero-contact-link {
+  grid-column: 1 / -1;
+  justify-self: start;
   padding-right: 0;
   padding-left: 0;
   border-top: 0;
@@ -1512,7 +1506,12 @@ footer {
   }
 
   .hero-actions {
+    grid-template-columns: minmax(0, 1fr);
     margin-top: 28px;
+  }
+
+  .hero-contact-link {
+    grid-column: auto;
   }
 
   .hero-film {

@@ -11,7 +11,7 @@ const copy = {
     nav: ["产品缺口", "如何创建", "商业模式", "长期愿景", "合作伙伴", "联系"],
     exploreCreators: "探索 Creator",
     buildProduct: "创建你的 Expert 产品",
-    contactLink: "联系 Hatch",
+    contactLink: "与 Hatch 深度合作",
     heroTitleA: "把知识付费",
     heroTitleB: "变成能干活的 Agent。",
     heroBody:
@@ -167,7 +167,7 @@ const copy = {
     nav: ["The gap", "How it works", "Business model", "Vision", "Partners", "Contact"],
     exploreCreators: "Explore creators",
     buildProduct: "Build your own expert product",
-    contactLink: "Contact Hatch",
+    contactLink: "Partner deeply with Hatch",
     heroTitleA: "Turn knowledge products",
     heroTitleB: "into agents that do the work.",
     heroBody:
@@ -576,23 +576,15 @@ export default function HatchPage({ initialLang }: { initialLang: Lang }) {
             <div className="hero-actions">
               <a className="hero-cta hero-cta-primary" href="/explore">
                 {t.exploreCreators}
-                <span className="cta-arrow" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" focusable="false">
-                    <path d="M5 19 19 5M9 5h10v10" />
-                  </svg>
-                </span>
+                <span className="cta-arrow" aria-hidden="true">→</span>
               </a>
               <a className="hero-cta hero-cta-secondary" href="/studio">
                 {t.buildProduct}
-                <span className="cta-arrow" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" focusable="false">
-                    <path d="M5 19 19 5M9 5h10v10" />
-                  </svg>
-                </span>
+                <span className="cta-arrow" aria-hidden="true">→</span>
               </a>
               <button className="text-link text-link-contact hero-contact-link" type="button" onClick={openContactDialog}>
                 {t.contactLink}
-                <span aria-hidden="true">→</span>
+                <span className="cta-arrow" aria-hidden="true">→</span>
               </button>
             </div>
           </div>

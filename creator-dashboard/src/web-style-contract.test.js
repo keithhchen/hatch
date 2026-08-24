@@ -56,6 +56,7 @@ test("Web eyebrow labels stay visible despite the shared global eyebrow rule", (
 
 test("Web home keeps the public narrative sections and real CTAs", () => {
   const page = read("creator-dashboard/src/web/HatchPage.tsx");
+  const styles = read("creator-dashboard/src/web/web.css");
 
   for (const section of ["top", "gap", "product", "business", "vision", "contact"]) {
     assert.match(page, new RegExp(`id=\\"${section}\\"`));
@@ -64,6 +65,11 @@ test("Web home keeps the public narrative sections and real CTAs", () => {
   assert.match(page, /href=\"\/studio\"/);
   assert.match(page, /fetch\(\"\/api\/contact\"/);
   assert.doesNotMatch(page, /继续阅读/);
+  assert.match(page, /contactLink: "与 Hatch 深度合作"/);
+  assert.doesNotMatch(page, /className="cta-arrow"[^>]*>\s*<svg/);
+  assert.match(page, /className="cta-arrow"[^>]*>→<\/span>/);
+  assert.match(styles, /\.hero-actions\s*\{[\s\S]*?display:\s*grid;/);
+  assert.match(styles, /\.hero-contact-link\s*\{[\s\S]*?grid-column:\s*1\s*\/\s*-1;/);
   assert.doesNotMatch(page, /interviews|business-facts|founder-note|WHY HATCH/);
 });
 
