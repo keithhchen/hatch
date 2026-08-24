@@ -682,11 +682,19 @@ export default function HatchPage({ initialLang }: { initialLang: Lang }) {
             <div className="hero-actions">
               <a className="hero-cta hero-cta-primary" href="/explore">
                 {t.exploreCreators}
-                <span aria-hidden="true">→</span>
+                <span className="cta-arrow" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <path d="M5 19 19 5M9 5h10v10" />
+                  </svg>
+                </span>
               </a>
               <a className="hero-cta hero-cta-secondary" href="/studio">
                 {t.buildProduct}
-                <span aria-hidden="true">→</span>
+                <span className="cta-arrow" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <path d="M5 19 19 5M9 5h10v10" />
+                  </svg>
+                </span>
               </a>
               <button className="text-link text-link-contact hero-contact-link" type="button" onClick={openContactDialog}>
                 {t.contactLink}

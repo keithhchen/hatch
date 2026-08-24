@@ -230,6 +230,28 @@ button {
   background: rgba(214, 95, 59, 0.08);
 }
 
+.cta-arrow {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  place-items: center;
+  border-radius: 6px;
+  background: #dce5e8;
+  color: #405b64;
+}
+
+.cta-arrow svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.3;
+}
+
 .hero-film {
   position: relative;
   margin-top: clamp(42px, 5vw, 72px);
