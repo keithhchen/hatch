@@ -35,6 +35,8 @@ test("system identifiers use localized labels while unknown values remain data",
   assert.equal(localizeWebIdentifier("payment_pending", "zh"), translateWeb("zh", "buyer.paymentPending"));
   assert.equal(localizeWebIdentifier("refund_pending", "ja"), translateWeb("ja", "buyer.refunded"));
   assert.equal(localizeWebIdentifier("creator_defined_value", "zh"), "Creator Defined Value");
+  assert.equal(translateWeb("zh", "buyer.openingAccount"), "正在打开你的账户");
+  assert.equal(translateWeb("ja", "onepager.examples"), "Creator プロダクトの例");
 });
 
 test("dashboard requests send the selected Web locale to the API", async () => {

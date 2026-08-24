@@ -688,7 +688,7 @@ export default function HatchPage({ onLanguageChange }: { onLanguageChange?: (va
             </div>
           </div>
 
-          <div className="artifact-line" aria-label="Example creator products">
+          <div className="artifact-line" aria-label={webT("onepager.examples")}>
             {t.workExamples.map((example) => (
               <span key={example}>{example}</span>
             ))}

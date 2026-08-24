@@ -94,7 +94,7 @@ export function BuyerPortalV2({
   const returnTo = `${location.pathname}${location.search}`;
 
   if (!PUBLIC_ROUTE_NAMES.has(route.name) && session.status === "loading") {
-    return <BuyerShell route={route} navigate={navigate} session={session} downloadUrl={downloadUrl}><PageSkeleton label="Opening your account" /></BuyerShell>;
+    return <BuyerShell route={route} navigate={navigate} session={session} downloadUrl={downloadUrl}><PageSkeleton label={webT("buyer.openingAccount")} /></BuyerShell>;
   }
 
   if (!PUBLIC_ROUTE_NAMES.has(route.name) && session.status !== "authenticated") {
