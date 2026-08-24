@@ -5,6 +5,7 @@ import "@hatch/ui/theme.css";
 import { Button, HatchBrand, HatchUIProvider, UnavailableState } from "@hatch/ui";
 import { BuyerPortalV2 } from "./BuyerPortalV2.jsx";
 import { CreatorPortalV2 } from "./CreatorPortalV2.jsx";
+import { DownloadPage } from "./DownloadPage.jsx";
 import { dashboardRequest } from "./data.js";
 import "./styles.css";
 
@@ -40,6 +41,7 @@ class AppErrorBoundary extends React.Component {
 
 function App() {
   const location = useBrowserLocation();
+  const isDownloadRoute = location.pathname === "/download";
   const [profile, setProfile] = useState(null);
   const [sessionStatus, setSessionStatus] = useState("loading");
 
@@ -57,6 +59,10 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (isDownloadRoute) {
+      setSessionStatus("anonymous");
+      return undefined;
+    }
     let active = true;
     setSessionStatus("loading");
     dashboardRequest("/v1/auth/me")
@@ -69,9 +75,9 @@ function App() {
         if (!active) return;
         if (error.status === 401 || error.status === 403) clearSession();
         else setSessionStatus(profile ? "authenticated" : "anonymous");
-      });
+    });
     return () => { active = false; };
-  }, [clearSession]);
+  }, [clearSession, isDownloadRoute]);
 
   const signIn = useCallback(async (credentials) => {
     const result = await dashboardRequest("/v1/auth/login", {
@@ -131,9 +137,7 @@ function App() {
   // legacy paths must remain 404 so stale links cannot silently target a
   // different resource.
 
-  if (location.pathname === "/download") {
-    return <RouteRedirect to="/explore" navigate={location.navigate} />;
-  }
+  if (isDownloadRoute) return <DownloadPage />;
 
   if (location.pathname === CREATOR_ROOT
     || location.pathname.startsWith(`${CREATOR_ROOT}/`)) {

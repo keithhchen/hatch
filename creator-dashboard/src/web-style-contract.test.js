@@ -13,7 +13,8 @@ const webStylesheets = [
   "creator-dashboard/src/storefrontDetails.css",
   "creator-dashboard/src/creatorFactory.css",
   "creator-dashboard/src/creatorReview.css",
-  "creator-dashboard/src/components/DesktopSystem.stories.css"
+  "creator-dashboard/src/components/DesktopSystem.stories.css",
+  "creator-dashboard/src/downloadPage.css"
 ];
 
 test("Web page CSS consumes the shared Hatch typography scale", () => {

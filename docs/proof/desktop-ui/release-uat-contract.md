@@ -1,8 +1,10 @@
 # Signed desktop release UAT contract
 
-This document defines what must be true before a macOS Desktop DMG can be
-attached to a GitHub Release. It is a supply-chain and target-device contract,
-not a claim that the local ad-hoc DMG is publishable.
+This document defines what must be true before a signed macOS Desktop DMG is
+accepted by the protected target-device validation lane. It is a supply-chain
+and target-device contract, not a claim that the local ad-hoc DMG is
+publishable. Public macOS distribution is handled separately by the OSS tag
+job in `desktop-ci.yml`; Windows distribution is currently paused.
 
 ## Immutable artifact identity
 
@@ -27,6 +29,7 @@ The manifest has this minimum identity:
   "release": { "tag": "v1.2.3" },
   "package": {
     "platform": "macos",
+    "architecture": "aarch64",
     "filename": "Hatch_1.2.3_aarch64.dmg",
     "bytes": 123,
     "sha256": "sha256:<64 lowercase hex>",
@@ -63,10 +66,9 @@ lane.
   exact post-signed-app smoke SHA;
 - Environment `desktop-release-uat` with required reviewers to authorize use of
   the dedicated interactive runner;
-- Environment `desktop-release-publish` with required reviewers to inspect the
-  completed target-UAT evidence before publication;
-- a disposable, interactive `self-hosted, macos, arm64` runner with screen
-  capture permission and no production account/data;
+- a disposable, interactive `self-hosted, macos, arm64` runner and a matching
+  `self-hosted, macos, x64` Intel runner, both with screen capture permission
+  and no production account/data;
 - the same default-branch verifier code as the workflow, kept under branch
   protection.
 
@@ -97,13 +99,11 @@ The required reviewer checklist for the exact `package.sha256` includes:
 5. record any VoiceOver, drag/drop, IME, fullscreen, multi-display, or
    Workspace grant failure as a failed target UAT, not as a waiver.
 
-Only a successful protected target job can enter `publish-release`; the
-`desktop-release-publish` approval is deliberately after target evidence exists,
-so a pre-flight runner approval cannot be mistaken for visual or Keychain
-acceptance. The publication job then downloads and verifies the same immutable
-artifact a second time before attaching the DMG and manifest. If no target
-runner, secret, or review approval exists, the release remains unpublished;
-local ad-hoc UAT is not a bypass.
+The workflow ends after the protected target job and keeps the exact signed
+candidate and evidence in Actions artifacts. There is no GitHub Release
+publication step in this lane. If no target runner, secret, or review approval
+exists, the signed candidate remains unaccepted; local ad-hoc UAT is not a
+bypass.
 
 ## Local boundary
 

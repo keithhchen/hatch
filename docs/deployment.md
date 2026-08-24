@@ -161,12 +161,25 @@ failure handling, and legacy UAT isolation are documented in
 playbook from the private application network; internal Commerce routes are
 not exposed by Caddy.
 
-The Desktop app is not part of the server Compose project. Tags such as
-`v0.1.0` run the macOS workflow, which builds the Tauri app and publishes a DMG
-artifact/Release only after the protected `desktop-production` Environment
-attests a signed picker→local-tool smoke for the exact commit. Distribution
-builds require a Developer ID certificate, hardened-runtime signing, Apple
-notarization, and successful stapling; missing release credentials fail closed.
+The Desktop app is not part of the server Compose project. A `vMAJOR.MINOR.PATCH`
+tag runs `Hatch Desktop CI`, which currently builds the two macOS distribution
+artifacts—Apple Silicon and Intel—then verifies the exact source SHA, byte
+count, and SHA-256 before uploading them to OSS. Windows builds are paused
+until the Windows LocalRunner and target-device runner are ready. OSS keeps
+both an immutable `desktop/releases/<tag>/` prefix and fixed `desktop/latest/`
+aliases plus `manifest.json`; the Web download page links only to those fixed
+aliases. This path does not create a GitHub Release, so GitHub's automatic
+Source code zip/tar assets are not exposed as downloads.
+The one-time OSS bucket, RAM policy, and repository variable/secret setup is
+documented in [`desktop-download-oss-setup.md`](desktop-download-oss-setup.md).
+
+The separate `Hatch Desktop signed validation` workflow remains a protected
+macOS-only candidate/UAT lane. It stores signed candidates and evidence as
+Actions artifacts and intentionally does not publish a GitHub Release. Its
+Intel target-device UAT still requires a dedicated interactive
+`self-hosted, macos, x64` runner; the Apple Silicon UAT uses
+`self-hosted, macos, arm64`.
+
 The same lane must set `HATCH_PERSISTENT_SESSION=1` and the expected
 `HATCH_APPLE_TEAM_ID`; the bundled executable validates its own Developer ID
 Application signature, Team ID, and bundle identifier before it may use the
@@ -175,11 +188,12 @@ final signed `.app`, rather than trusting the requested signing identity.
 Ad-hoc DMGs remain local UAT artifacts, never persist a session to Login
 Keychain, and are never published.
 
-There is no Windows distribution lane yet. In particular, a signed `.exe`,
-NSIS/MSI installer, or `HATCH_PERSISTENT_SESSION=1` alone must not enable
-opaque-token persistence: Win32 Generic Credential Manager entries are scoped
-to the user rather than Hatch's app identity, and PasswordVault/Credential Locker
-does not provide the required Hatch-only bearer-token boundary against another
-same-user full-trust process. A Windows release lane remains blocked on a
-device-bound/session-challenge backend, its package/publisher verification,
-same-user negative tests, and the corresponding signed-package UAT.
+Windows distribution is currently paused. A future Windows lane remains
+blocked on the Windows LocalRunner, a device-bound/session-challenge backend,
+package/publisher verification, same-user negative tests, and corresponding
+target-device UAT. In particular, a signed `.exe`, NSIS/MSI installer, or
+`HATCH_PERSISTENT_SESSION=1` alone must not enable opaque-token persistence:
+Win32 Generic Credential Manager entries are scoped to the user rather than
+Hatch's app identity, and PasswordVault/Credential Locker does not provide the
+required Hatch-only bearer-token boundary against another same-user full-trust
+process.

@@ -14,6 +14,7 @@ const ENVIRONMENT = {
   HATCH_RELEASE_NOTARIZED: "1",
   APPLE_SIGNING_IDENTITY: "Developer ID Application: Hatch (TEAM123456)",
   HATCH_APPLE_TEAM_ID: "TEAM123456",
+  HATCH_PACKAGE_ARCHITECTURE: "aarch64",
   HATCH_BUNDLE_IDENTIFIER: "dev.hatch.local",
   GITHUB_RUN_ID: "4242",
   GITHUB_WORKFLOW: "Hatch Desktop release",
@@ -45,6 +46,7 @@ test("records a signed/notarized release package identity", async (t) => {
   assert.equal(candidate.report.release.tag, "v1.2.3");
   assert.equal(candidate.report.package.release_eligible, true);
   assert.equal(candidate.report.security.notarized, true);
+  assert.equal(candidate.report.package.architecture, "aarch64");
   assert.match(candidate.report.package.sha256, /^sha256:[a-f0-9]{64}$/);
 });
 
@@ -56,7 +58,8 @@ test("verifies the exact downloaded release bytes and source/tag binding", async
     expectedSha256: candidate.report.package.sha256,
     expectedSourceSha: SOURCE_SHA,
     expectedReleaseTag: "v1.2.3",
-    expectedRunId: "4242"
+    expectedRunId: "4242",
+    expectedArchitecture: "aarch64"
   });
   assert.equal(result.verified, true);
   assert.equal(result.package.sha256, candidate.report.package.sha256);
@@ -71,6 +74,18 @@ test("rejects a manifest from a different workflow run", async (t) => {
       expectedRunId: "different-run"
     }),
     /workflow run ID/
+  );
+});
+
+test("rejects a manifest from a different package architecture", async (t) => {
+  const candidate = await fixture(t);
+  await assert.rejects(
+    verifyDesktopReleaseArtifact({
+      reportFile: candidate.output,
+      artifactDirectory: path.join(candidate.root, "bundle"),
+      expectedArchitecture: "x86_64"
+    }),
+    /package architecture/
   );
 });
 

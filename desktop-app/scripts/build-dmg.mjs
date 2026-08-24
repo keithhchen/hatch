@@ -13,7 +13,11 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const config = JSON.parse(await readFile(path.join(root, "src-tauri/tauri.conf.json"), "utf8"));
 const productName = String(config.productName ?? "Hatch");
 const version = String(config.version ?? "0.0.0");
-const architecture = process.arch === "arm64" ? "aarch64" : process.arch;
+const architecture = process.arch === "arm64"
+  ? "aarch64"
+  : process.arch === "x64"
+    ? "x86_64"
+    : process.arch;
 const appPath = path.join(root, "src-tauri/target/release/bundle/macos", `${productName}.app`);
 const outputDirectory = path.join(root, "src-tauri/target/release/bundle/dmg");
 const outputPath = path.join(outputDirectory, `${productName}_${version}_${architecture}.dmg`);

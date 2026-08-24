@@ -36,8 +36,8 @@ test("buyer navigation uses a standard hamburger menu on narrow screens", () => 
 });
 
 test("mobile header keeps the real desktop download link and removes skip-to UI", () => {
-  assert.match(source, /const DEFAULT_DOWNLOAD_URL = "https:\/\/github\.com\/keithhchen\/hatch-releases\/releases\/latest"/);
-  assert.doesNotMatch(source, /github\.com\/keithhchen\/hatch\/releases\/latest/);
+  assert.match(source, /const DEFAULT_DOWNLOAD_URL = "\/download"/);
+  assert.doesNotMatch(source, /github\.com\/keithhchen\/hatch-releases\/releases\/latest/);
   assert.match(source, /className="buyer-v2__download-quiet" href=\{downloadUrl\}/);
   assert.doesNotMatch(stylesheet, /@media[\s\S]*?\.buyer-v2__download-quiet\s*\{\s*display:\s*none;/s);
   assert.doesNotMatch(source, /Skip to content/);

@@ -47,7 +47,7 @@ test("anonymous Buyer completes free checkout and can recover every durable rout
   await expect(page.getByRole("heading", { level: 1, name: "Signal Resume Review is ready." })).toBeVisible();
   await expect(page.getByText(/Free · Access granted/)).toBeVisible();
   await expect(page.getByRole("link", { name: "Open Hatch Desktop" })).toHaveAttribute("href", /^hatch:\/\//);
-  await expect(page.getByRole("link", { name: "Download Hatch Desktop" })).toHaveAttribute("href", /^https:\/\//);
+  await expect(page.getByRole("link", { name: "Download Hatch Desktop" })).toHaveAttribute("href", "/download");
   await expectNoHorizontalOverflow(page);
   await expectNoSeriousAccessibilityViolations(page);
   await expect(page).toHaveScreenshot("buyer-success.png", { fullPage: true, animations: "disabled", threshold: 0.25, maxDiffPixelRatio: 0.03 });

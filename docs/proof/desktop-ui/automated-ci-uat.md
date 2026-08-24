@@ -6,8 +6,8 @@
 
 | Runner | Package | Evidence report |
 | --- | --- | --- |
-| `macos-latest` | ad-hoc `.app` → `.dmg` | `artifacts/desktop-uat/macos.json` |
-| `windows-latest` | debug unsigned NSIS `.exe` | `artifacts/desktop-uat/windows.json` |
+| `macos-latest` (Apple Silicon) | ad-hoc `.app` → `.dmg` | `artifacts/desktop-uat/macos.json` |
+| `macos-15-intel` (Intel) | ad-hoc `.app` → `.dmg` | `artifacts/desktop-uat/macos.json` |
 
 The reports are emitted by
 [`scripts/uat/record-desktop-uat-artifact.mjs`](../../../scripts/uat/record-desktop-uat-artifact.mjs).
@@ -17,8 +17,12 @@ script rejects missing, ambiguous, empty, or persistent-session package output.
 
 This makes a CI package a useful input to a target-device UAT: the reviewer can
 download a single immutable candidate and verify it before installation. It does
-not turn a hosted runner into a substitute for a real macOS or Windows desktop.
-Artifacts expire after seven days and must never be published as releases.
+not turn a hosted runner into a substitute for a real macOS desktop.
+Pull-request, `master`, and manual-run artifacts expire after seven days and
+are not standalone releases. A SemVer tag may promote the exact two tagged
+macOS candidate packages to the dedicated OSS download prefix after the source,
+architecture, byte, and SHA checks pass; that promotion remains explicitly
+UAT-level and does not create a GitHub Release.
 
 ## What the automated lanes establish
 
@@ -30,24 +34,26 @@ Artifacts expire after seven days and must never be published as releases.
 - The evidence recorder/verifier is covered by Node tests in the ordinary CI
   renderer job, including SHA mismatch, source mismatch, architecture mismatch,
   and ambiguous-output rejection.
-- macOS additionally runs renderer tests/web build, Rust formatting, LocalRunner
-  tests, Tauri bridge tests, and strict ad-hoc DMG construction before upload.
-- Windows additionally runs renderer tests/web build, LocalRunner tests, Tauri
-  bridge tests, and the unsigned NSIS build before upload.
+- Both macOS architectures additionally run renderer tests/web build, Rust
+  formatting, LocalRunner tests, Tauri bridge tests, and strict ad-hoc DMG
+  construction before upload.
+- Windows builds are currently paused until the Windows LocalRunner and target
+  device runner are ready.
 
 ## What remains target-device acceptance
 
 The exact P4 work not claimed by this automation remains:
 
 - install, launch, cold restart, and system integration on the intended macOS
-  and Windows versions;
-- VoiceOver/Narrator, IME, real Finder/Explorer drag/drop, fullscreen,
-  Windows Snap, and multi-display DPI behavior;
+  versions;
+- VoiceOver, IME, real Finder drag/drop, fullscreen, and multi-display DPI
+  behavior;
 - visual resize/zoom cycles and native menu metrics;
 - macOS Developer ID, notarization, Gatekeeper, and post-install Keychain
   restart behavior;
-- Windows persistent-session work, which remains blocked until the separate
-  device-bound security design and same-user negative tests exist.
+- Windows distribution and persistent-session work, which remain paused until
+  the Windows LocalRunner, device-bound security design, and same-user negative
+  tests exist.
 
 The requirement-level result remains in the
 [acceptance matrix](acceptance-matrix.md); these reports are inputs to that
@@ -69,22 +75,20 @@ is a deliberately manual, protected-workflow skeleton for the next handoff:
    copy/silent install, cold launch, screenshot, and process/log collection.
    The generated evidence is uploaded as a separate 30-day artifact.
 
-The candidate process is launched with a minimal credential-free environment:
-the macOS lane uses `env -i`, and the Windows lane temporarily strips
-GitHub/ACTIONS and credential-like variables before spawning it. This narrows
-the UAT runner exposure, but does not make an arbitrary candidate safe to run;
-only a dedicated disposable UAT account belongs in that pool.
+The candidate process is launched with a minimal credential-free environment
+using `env -i`. This narrows the UAT runner exposure, but does not make an
+arbitrary candidate safe to run; only a dedicated disposable UAT account
+belongs in that pool.
 
-Before enabling it, create protected `desktop-uat-macos` and
-`desktop-uat-windows` Environments with required reviewers, and provision
-dedicated interactive runner pools matching respectively `self-hosted, macos,
-arm64` and `self-hosted, windows, x64`; reserve those runners for UAT rather
-than co-locating production user data. The UAT accounts must not hold production
-user data. The workflow deliberately does not bypass Gatekeeper or SmartScreen:
+Before enabling it, create the protected `desktop-uat-macos` Environment with
+required reviewers, and provision a dedicated interactive runner matching
+`self-hosted, macos, arm64`; reserve it for UAT rather than co-locating
+production user data. The UAT account must not hold production user data. The
+workflow deliberately does not bypass Gatekeeper:
 a block at that point is a UAT result, not an automation failure to work around.
 
 This workflow is not enabled as a release lane and has no signing secrets. The
-macOS candidate remains ad-hoc; the Windows candidate remains unsigned. A
+macOS candidate remains ad-hoc. A
 notarized/signed release uses the separate protected
 [`desktop-release.yml`](../../../.github/workflows/desktop-release.yml) lane and
 requires artifact-level post-install acceptance. The candidate workflow must
@@ -113,14 +117,14 @@ The signed macOS lane is intentionally a three-stage contract:
    process/log evidence are collected. The `desktop-release-uat` Environment
    approval authorizes use of the dedicated runner; it is not evidence review.
 
-Only when both jobs succeed does `publish-release` enter the separately
-protected `desktop-release-publish` Environment. Its required reviewer can
-inspect the target job's screenshot/log artifact and verify the clean
-restart/Keychain, Workspace grant, native menu, resize, and accessibility
-checklist for that exact hash. After that post-UAT approval, the job downloads
-and re-verifies the immutable artifact and attaches that exact DMG plus its
-manifest to the GitHub Release. A manual dispatch from a branch (rather than a
-tag) fails the signed-input step; it cannot publish a branch build accidentally.
+The signed validation workflow ends after the protected target-device UAT and
+stores the candidate plus evidence as Actions artifacts. It has no
+`publish-release` job and does not attach anything to a GitHub Release. Public
+macOS distribution is owned by `desktop-ci.yml`: the tag job verifies the exact
+CI evidence and uploads the Apple Silicon and Intel installers plus the version
+manifest to OSS. A manual dispatch from a branch
+(rather than a tag) fails the signed-input step; it cannot publish a branch
+build accidentally.
 The release manifest helpers are covered by the same Node test lane as the
 ad-hoc UAT helpers:
 
@@ -145,12 +149,6 @@ HATCH_PERSISTENT_SESSION=0 HATCH_GIT_SHA=$(git rev-parse HEAD) \
     --platform macos \
     --artifact-dir desktop-app/src-tauri/target/release/bundle/dmg \
     --output artifacts/desktop-uat/macos.json
-
-HATCH_PERSISTENT_SESSION=0 HATCH_GIT_SHA=$(git rev-parse HEAD) \
-  node scripts/uat/record-desktop-uat-artifact.mjs \
-    --platform windows \
-    --artifact-dir desktop-app/src-tauri/target/debug/bundle/nsis \
-    --output artifacts/desktop-uat/windows.json
 ```
 
 Validate the helper itself with:
