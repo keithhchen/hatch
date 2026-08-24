@@ -16,7 +16,8 @@ export default defineConfig({
       allow: [".."]
     },
     proxy: {
-      "/v1": process.env.HATCH_CREATOR_DASHBOARD_API_URL ?? "http://127.0.0.1:8500"
+      "/v1": process.env.HATCH_CREATOR_DASHBOARD_API_URL ?? "http://127.0.0.1:8500",
+      "/api": process.env.HATCH_CREATOR_DASHBOARD_API_URL ?? "http://127.0.0.1:8500"
     }
   }
 });
