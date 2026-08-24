@@ -10,7 +10,7 @@ import { dashboardRequest } from "./data.js";
 import "./styles.css";
 
 const CREATOR_ROOT = "/studio";
-const OnepagerPage = React.lazy(() => import("./onepager/OnepagerPage.jsx"));
+const WebPage = React.lazy(() => import("./web/WebPage.jsx"));
 
 class AppErrorBoundary extends React.Component {
   constructor(props) {
@@ -43,7 +43,7 @@ class AppErrorBoundary extends React.Component {
 function App() {
   const location = useBrowserLocation();
   const isDownloadRoute = location.pathname === "/download";
-  const isOnepagerRoute = location.pathname === "/";
+  const isWebRoute = location.pathname === "/";
   const [profile, setProfile] = useState(null);
   const [sessionStatus, setSessionStatus] = useState("loading");
 
@@ -61,7 +61,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (isDownloadRoute || isOnepagerRoute) {
+    if (isDownloadRoute || isWebRoute) {
       setSessionStatus("anonymous");
       return undefined;
     }
@@ -79,7 +79,7 @@ function App() {
         else setSessionStatus(profile ? "authenticated" : "anonymous");
     });
     return () => { active = false; };
-  }, [clearSession, isDownloadRoute, isOnepagerRoute]);
+  }, [clearSession, isDownloadRoute, isWebRoute]);
 
   const signIn = useCallback(async (credentials) => {
     const result = await dashboardRequest("/v1/auth/login", {
@@ -141,10 +141,10 @@ function App() {
 
   if (isDownloadRoute) return <DownloadPage />;
 
-  if (isOnepagerRoute) {
+  if (isWebRoute) {
     return (
       <Suspense fallback={<AppLoading />}>
-        <OnepagerPage />
+        <WebPage />
       </Suspense>
     );
   }
