@@ -12,7 +12,7 @@ export const jaCopy = {
   ],
   exploreCreators: "Creatorを探す",
   buildProduct: "自分のExpertプロダクトをつくる",
-  contactLink: "Hatchに連絡する",
+  contactLink: "Hatchと深く協業する",
   heroTitleA: "知識ビジネスを",
   heroTitleB: "仕事をするAgentに。",
   heroBody:
