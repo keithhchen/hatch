@@ -42,6 +42,7 @@ jobs:
         env:
           HATCH_OSS_PUBLIC_BASE_URL: ${{ vars.HATCH_OSS_PUBLIC_BASE_URL }}
           VITE_HATCH_DESKTOP_DOWNLOAD_BASE_URL: ${{ vars.HATCH_DESKTOP_DOWNLOAD_BASE_URL }}
+          VITE_HATCH_WEB_MEDIA_BASE_URL: ${{ vars.HATCH_OSS_PUBLIC_BASE_URL }}/desktop/web/${{ github.sha }}
         run: |
           set -euo pipefail
           test -n "$HATCH_OSS_PUBLIC_BASE_URL" || {
@@ -52,7 +53,12 @@ jobs:
             echo "Missing HATCH_DESKTOP_DOWNLOAD_BASE_URL repository variable" >&2
             exit 1
           }
+          test -n "$VITE_HATCH_WEB_MEDIA_BASE_URL" || {
+            echo "Missing Web OSS media base URL" >&2
+            exit 1
+          }
           printf '%s' "$HATCH_OSS_PUBLIC_BASE_URL" | grep -Eq '^https://'
+          printf '%s' "$VITE_HATCH_WEB_MEDIA_BASE_URL" | grep -Eq '^https://'
           expected_download_base="${HATCH_OSS_PUBLIC_BASE_URL%/}/desktop/latest"
           test "${VITE_HATCH_DESKTOP_DOWNLOAD_BASE_URL%/}" = "$expected_download_base" || {
             echo "HATCH_DESKTOP_DOWNLOAD_BASE_URL must equal HATCH_OSS_PUBLIC_BASE_URL/desktop/latest" >&2
@@ -72,8 +78,63 @@ jobs:
           tags: hatch-dashboard:web-ci
           build-args: |
             VITE_HATCH_DESKTOP_DOWNLOAD_BASE_URL=${{ vars.HATCH_DESKTOP_DOWNLOAD_BASE_URL }}
+            VITE_HATCH_WEB_MEDIA_BASE_URL=${{ vars.HATCH_OSS_PUBLIC_BASE_URL }}/desktop/web/${{ github.sha }}
           cache-from: type=gha,scope=dashboard
           cache-to: type=gha,scope=dashboard,mode=max
+
+  publish-web-media:
+    name: Publish Web media to OSS
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      HATCH_OSS_BUCKET: ${{ vars.HATCH_OSS_BUCKET }}
+      HATCH_OSS_REGION: ${{ vars.HATCH_OSS_REGION }}
+      HATCH_OSS_S3_ENDPOINT: ${{ vars.HATCH_OSS_S3_ENDPOINT }}
+      HATCH_OSS_PUBLIC_BASE_URL: ${{ vars.HATCH_OSS_PUBLIC_BASE_URL }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.HATCH_OSS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.HATCH_OSS_ACCESS_KEY_SECRET }}
+      AWS_DEFAULT_REGION: ${{ vars.HATCH_OSS_REGION }}
+      AWS_EC2_METADATA_DISABLED: "true"
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+      # The existing release-only RAM policy is scoped to desktop/*; keep
+      # Web media in its own child prefix without widening that policy.
+      WEB_MEDIA_PREFIX: desktop/web/${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate OSS publication configuration
+        run: |
+          set -euo pipefail
+          test -n "$HATCH_OSS_BUCKET"
+          test -n "$HATCH_OSS_REGION"
+          test -n "$HATCH_OSS_S3_ENDPOINT"
+          test -n "$HATCH_OSS_PUBLIC_BASE_URL"
+          test -n "$AWS_ACCESS_KEY_ID"
+          test -n "$AWS_SECRET_ACCESS_KEY"
+          printf '%s' "$HATCH_OSS_S3_ENDPOINT" | grep -Eq '^https://'
+          printf '%s' "$HATCH_OSS_PUBLIC_BASE_URL" | grep -Eq '^https://'
+          command -v aws >/dev/null
+      - name: Upload and verify Web videos
+        run: |
+          set -euo pipefail
+          aws configure set default.s3.addressing_style virtual
+          endpoint=(--endpoint-url "$HATCH_OSS_S3_ENDPOINT")
+          for locale in en ja zh; do
+            source="creator-dashboard/public/assets/onepager/hatch-launch-${locale}.mp4"
+            key="${WEB_MEDIA_PREFIX}/hatch-launch-${locale}.mp4"
+            expected_bytes="$(wc -c < "$source" | tr -d '[:space:]')"
+            aws s3 cp "$source" "s3://${HATCH_OSS_BUCKET}/${key}" "${endpoint[@]}" \
+              --acl public-read \
+              --cache-control "public,max-age=31536000,immutable" \
+              --content-type "video/mp4" \
+              --metadata "source-sha=${GITHUB_SHA},bytes=${expected_bytes}"
+            head_json="$(aws s3api head-object --bucket "$HATCH_OSS_BUCKET" --key "$key" "${endpoint[@]}")"
+            jq -e --argjson bytes "$expected_bytes" \
+              '.ContentLength == $bytes and .ContentType == "video/mp4"' <<<"$head_json" >/dev/null
+            curl --fail --location --retry 5 --retry-all-errors --silent --show-error \
+              -r 0-1 "${HATCH_OSS_PUBLIC_BASE_URL%/}/${key}" -o /dev/null
+          done
 
   publish:
     name: Publish Dashboard image
@@ -106,12 +167,13 @@ jobs:
           tags: ${{ steps.image.outputs.ref }}
           build-args: |
             VITE_HATCH_DESKTOP_DOWNLOAD_BASE_URL=${{ vars.HATCH_DESKTOP_DOWNLOAD_BASE_URL }}
+            VITE_HATCH_WEB_MEDIA_BASE_URL=${{ vars.HATCH_OSS_PUBLIC_BASE_URL }}/desktop/web/${{ github.sha }}
           cache-from: type=gha,scope=dashboard
           cache-to: type=gha,scope=dashboard,mode=max
 
   deploy:
     name: Deploy Web only
-    needs: publish
+    needs: [publish, publish-web-media]
     runs-on: [self-hosted, linux, x64, hatch-prod]
     permissions:
       contents: read

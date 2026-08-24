@@ -3,12 +3,12 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Lang } from "./locale";
 import { jaCopy } from "./copy.ja";
+import { webMediaUrl } from "./media";
 
 const copy = {
   zh: {
     meta: "EXPERT CREATOR ECONOMY",
     nav: ["产品缺口", "如何创建", "用户访谈", "商业模式", "长期愿景", "合作伙伴", "联系"],
-    read: "继续阅读",
     exploreCreators: "探索 Creator",
     buildProduct: "创建你的 Expert 产品",
     contactLink: "联系 Hatch",
@@ -18,7 +18,7 @@ const copy = {
       "Hatch 让已经拥有受众的 Expert Creator，把自己的方法做成可收费、能交付成果的 Agent——无需组建软件团队，也不必亲自完成每一次服务。",
     heroFilmLabel: "Hatch 产品发布影片",
         heroFilmPoster: "/assets/onepager/hatch-launch-poster.jpg",
-        heroFilmSrc: "/assets/onepager/hatch-launch-zh.mp4",
+        heroFilmSrc: webMediaUrl("hatch-launch-zh.mp4"),
     continuum: [
       {
         label: "COURSE",
@@ -218,7 +218,6 @@ const copy = {
   en: {
     meta: "EXPERT CREATOR ECONOMY",
     nav: ["The gap", "How it works", "Interviews", "Business model", "Vision", "Partners", "Contact"],
-    read: "Read the thesis",
     exploreCreators: "Explore creators",
     buildProduct: "Build your own expert product",
     contactLink: "Contact Hatch",
@@ -228,7 +227,7 @@ const copy = {
       "Hatch lets expert creators with an audience turn their methods into paid agents that deliver usable work—without a software team or doing every job themselves.",
     heroFilmLabel: "Hatch product launch film",
     heroFilmPoster: "/assets/onepager/hatch-launch-poster.jpg",
-    heroFilmSrc: "/assets/onepager/hatch-launch-en.mp4",
+    heroFilmSrc: webMediaUrl("hatch-launch-en.mp4"),
     continuum: [
       {
         label: "COURSE",
@@ -683,15 +682,11 @@ export default function HatchPage({ initialLang }: { initialLang: Lang }) {
             <div className="hero-actions">
               <a className="hero-cta hero-cta-primary" href="/explore">
                 {t.exploreCreators}
-                <span aria-hidden="true">↗</span>
+                <span aria-hidden="true">→</span>
               </a>
               <a className="hero-cta hero-cta-secondary" href="/studio">
                 {t.buildProduct}
-                <span aria-hidden="true">↗</span>
-              </a>
-              <a className="text-link" href="#gap">
-                {t.read}
-                <span aria-hidden="true">↓</span>
+                <span aria-hidden="true">→</span>
               </a>
               <button className="text-link text-link-contact hero-contact-link" type="button" onClick={openContactDialog}>
                 {t.contactLink}

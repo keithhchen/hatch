@@ -1,3 +1,5 @@
+import { webMediaUrl } from "./media";
+
 export const jaCopy = {
   meta: "EXPERT CREATOR ECONOMY",
   nav: [
@@ -9,7 +11,6 @@ export const jaCopy = {
     "パートナー",
     "お問い合わせ",
   ],
-  read: "続きを読む",
   exploreCreators: "Creatorを探す",
   buildProduct: "自分のExpertプロダクトをつくる",
   contactLink: "Hatchに連絡する",
@@ -19,7 +20,7 @@ export const jaCopy = {
     "Hatchは、すでにオーディエンスを持つExpert Creatorが、自分の方法を、成果を届ける有料のAgentに変えるためのプラットフォームです。ソフトウェアチームを組む必要も、すべてのサービスを自ら提供する必要もありません。",
   heroFilmLabel: "Hatch プロダクトローンチフィルム",
   heroFilmPoster: "/assets/onepager/hatch-launch-poster.jpg",
-  heroFilmSrc: "/assets/onepager/hatch-launch-ja.mp4",
+  heroFilmSrc: webMediaUrl("hatch-launch-ja.mp4"),
   continuum: [
     {
       label: "COURSE",

@@ -10,7 +10,12 @@ COPY creator-dashboard ./
 COPY packages/commerce /workspace/packages/commerce
 ARG VITE_HATCH_DESKTOP_DOWNLOAD_BASE_URL
 ENV VITE_HATCH_DESKTOP_DOWNLOAD_BASE_URL=${VITE_HATCH_DESKTOP_DOWNLOAD_BASE_URL}
-RUN npm run build
+ARG VITE_HATCH_WEB_MEDIA_BASE_URL
+ENV VITE_HATCH_WEB_MEDIA_BASE_URL=${VITE_HATCH_WEB_MEDIA_BASE_URL}
+RUN npm run build \
+  && if [ -n "$VITE_HATCH_WEB_MEDIA_BASE_URL" ]; then \
+    rm -f dist/assets/onepager/*.mp4 public/assets/onepager/*.mp4; \
+  fi
 
 FROM node:22-slim AS production
 
