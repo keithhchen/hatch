@@ -4,6 +4,8 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Lang } from "./locale";
 import { jaCopy } from "./copy.ja";
 import { webMediaUrl } from "./media";
+import { useWebLocale } from "../WebLocaleProvider.jsx";
+import { webT } from "../webI18n.js";
 
 const copy = {
   zh: {
@@ -345,14 +347,24 @@ function StepGraphic({ step, lang }: { step: string; lang: Lang }) {
           edits: "EDITS",
           data: "DATA",
           result: "RESULT",
+          brief: "PRODUCT BRIEF",
+          eval: "EVAL",
+          creatorLink: "CREATOR.LINK",
         };
+
+  const localizedLabels =
+    lang === "ja"
+      ? { brief: "プロダクト概要", eval: "評価", creatorLink: "CREATOR.LINK" }
+      : lang === "zh"
+        ? { brief: "产品简介", eval: "评估", creatorLink: "CREATOR.LINK" }
+        : labels;
 
   switch (step) {
     case "01":
       return (
         <div className="step-graphic step-graphic--brief" aria-hidden="true">
           <div className="mini-topline">
-            <span>PRODUCT BRIEF</span>
+            <span>{localizedLabels.brief}</span>
             <i />
           </div>
           <div className="brief-rows">
@@ -404,7 +416,7 @@ function StepGraphic({ step, lang }: { step: string; lang: Lang }) {
             </div>
           </div>
           <div className="eval-track">
-            <span>EVAL</span>
+            <span>{localizedLabels.eval}</span>
             <i />
             <em />
           </div>
@@ -414,7 +426,7 @@ function StepGraphic({ step, lang }: { step: string; lang: Lang }) {
       return (
         <div className="step-graphic step-graphic--publish" aria-hidden="true">
           <div className="publish-link">
-            <span>CREATOR.LINK</span>
+            <span>{localizedLabels.creatorLink}</span>
             <b>↗</b>
           </div>
           <div className="publish-product">
@@ -450,8 +462,10 @@ function StepGraphic({ step, lang }: { step: string; lang: Lang }) {
   }
 }
 
-export default function HatchPage({ initialLang }: { initialLang: Lang }) {
-  const [lang, setLang] = useState<Lang>(initialLang);
+export default function HatchPage({ onLanguageChange }: { onLanguageChange?: (value: Lang) => void }) {
+  const { locale, setLocale } = useWebLocale();
+  const lang = locale as Lang;
+  const setLang = onLanguageChange ?? setLocale;
   const [contactStatus, setContactStatus] = useState<
     "idle" | "submitting" | "success" | "error"
   >("idle");
@@ -460,16 +474,8 @@ export default function HatchPage({ initialLang }: { initialLang: Lang }) {
   const t = copy[lang];
 
   useEffect(() => {
-    document.documentElement.lang = lang === "zh" ? "zh-CN" : lang === "ja" ? "ja" : "en";
+    document.title = webT("onepager.title");
   }, [lang]);
-
-  useEffect(() => {
-    const previousTitle = document.title;
-    document.title = "Hatch — AI products for expert creators";
-    return () => {
-      document.title = previousTitle;
-    };
-  }, []);
 
   useEffect(() => {
     const dialog = contactDialogRef.current;
@@ -524,17 +530,17 @@ export default function HatchPage({ initialLang }: { initialLang: Lang }) {
   return (
     <main className={`site is-${lang}`}>
       <header className="topbar">
-        <a className="brand" href="#top" aria-label="Hatch home">
+        <a className="brand" href="#top" aria-label={webT("onepager.home")}>
           Hatch<span className="brand-dot">.</span>
         </a>
-        <nav className="desktop-nav" aria-label="Page sections">
+        <nav className="desktop-nav" aria-label={webT("onepager.sections")}>
           {t.nav.map((item, index) => (
             <a href={`#${sectionLinks[index]}`} key={sectionLinks[index]}>
               {item}
             </a>
           ))}
         </nav>
-        <div className="lang-switch" aria-label="Language switcher">
+        <div className="lang-switch" aria-label={webT("onepager.language")}>
           <button
             type="button"
             className={lang === "zh" ? "active" : ""}
@@ -610,7 +616,7 @@ export default function HatchPage({ initialLang }: { initialLang: Lang }) {
           </div>
         </div>
 
-        <div className="positioning-map" aria-label="Product positioning">
+        <div className="positioning-map" aria-label={webT("onepager.positioning")}>
           <article className="positioning-pole">
             <p className="eyebrow">{t.continuum[0].label}</p>
             <h2>{t.continuum[0].title}</h2>

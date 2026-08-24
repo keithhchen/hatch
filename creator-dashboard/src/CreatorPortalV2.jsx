@@ -26,7 +26,9 @@ import { AutosaveStatus } from "@hatch/ui/product";
 import { StorefrontDetails } from "./StorefrontDetails.jsx";
 import { creatorOrderQuery } from "./storefrontModel.js";
 import { parseCreatorRoute } from "./creatorRoutes.js";
-import { createCreatorTranslator, CREATOR_LOCALES, detectCreatorLocale } from "./creatorI18n.js";
+import { createCreatorTranslator } from "./creatorI18n.js";
+import { WebLanguagePicker, useWebLocale } from "./WebLocaleProvider.jsx";
+import { formatWebDate, getWebLocale, webErrorMessage } from "./webI18n.js";
 import { CreatorProductWorkspace } from "./CreatorProductWorkspace.jsx";
 import "./creatorPortalV2.css";
 
@@ -48,7 +50,7 @@ export function CreatorPortalV2({
   onLogout
 }) {
   const route = useMemo(() => parseCreatorRoute(pathname), [pathname]);
-  const [locale, setLocale] = useState(() => detectCreatorLocale());
+  const { locale } = useWebLocale();
   const t = useMemo(() => createCreatorTranslator(locale), [locale]);
   const mainRef = useRef(null);
   const navigationGuardRef = useRef(null);
@@ -84,10 +86,6 @@ export function CreatorPortalV2({
     if (typeof document !== "undefined") document.title = `${localizedRouteTitle(route, t)} · Hatch`;
   }, [route, t]);
 
-  useEffect(() => {
-    if (typeof document !== "undefined") document.documentElement.lang = locale === "zh" ? "zh-CN" : locale === "ja" ? "ja-JP" : "en";
-  }, [locale]);
-
   return (
     <div className="cpv2">
       <aside className="cpv2-sidebar">
@@ -110,20 +108,7 @@ export function CreatorPortalV2({
         <div className="cpv2-account">
           <span className="cpv2-avatar" aria-hidden="true">{profile?.initials || initials(profile?.display_name)}</span>
           <span><strong>{profile?.display_name || t("creator")}</strong><small>{profile?.handle || t("creatorAccount")}</small></span>
-          <div className="cpv2-language-picker">
-            <Select
-              className="cpv2-language-select"
-              aria-label={t("language")}
-              value={locale}
-              onValueChange={setLocale}
-              options={CREATOR_LOCALES.map((value) => ({
-                value,
-                label: t(value === "zh" ? "chinese" : value === "ja" ? "japanese" : "english")
-              }))}
-              size="compact"
-              surface="raised"
-            />
-          </div>
+          <WebLanguagePicker className="cpv2-language-picker" />
           {onLogout ? <Button type="button" variant="ghost" size="small" onClick={onLogout}>{t("signOut")}</Button> : null}
         </div>
       </aside>
@@ -712,7 +697,7 @@ const STATUS_MESSAGE_KEYS = {
   active: "statusActive", approved: "statusApproved", available: "statusAvailable", blocked: "statusBlocked", completed: "statusCompleted", failed: "statusFailed", fulfilled: "statusFulfilled", in_transit: "statusInTransit", pending: "statusPending", processing: "statusProcessing", published: "statusPublished", ready: "statusReady", refunded: "statusRefunded", refund_pending: "statusRefundPending", reserved: "statusReserved", reversed: "statusReversed", preparing: "statusPreparing", retired: "statusRetired", none: "statusNone"
 };
 function humanStatus(value, t) { if (!value) return t ? t("notProvided") : "—"; const raw = String(value); const key = STATUS_MESSAGE_KEYS[raw.toLowerCase()]; return t && key ? t(key) : raw.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()); }
-function dateTime(value, locale = "en") { if (!value) return "—"; const date = new Date(value); if (Number.isNaN(date.valueOf())) return String(value); const intlLocale = locale === "zh" ? "zh-CN" : locale === "ja" ? "ja-JP" : "en"; return new Intl.DateTimeFormat(intlLocale, { dateStyle: "medium", timeStyle: "short" }).format(date); }
+function dateTime(value, locale = "en") { return formatWebDate(value, locale); }
 function shortDigest(value) { if (!value) return "—"; const text = String(value); return text.length > 22 ? `${text.slice(0, 12)}…${text.slice(-7)}` : text; }
 function idOf(value, kind) { return String(value?.[`${kind}_id`] ?? value?.id ?? ""); }
 function arrayOf(value) { if (Array.isArray(value)) return value; return []; }
@@ -730,4 +715,4 @@ function canonicalPublicUrl(value) {
 }
 function isUuidV4(value) { return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value ?? "")); }
 function listCopy(value, fallback) { const items = arrayOf(value); return items.length ? items.map((item) => typeof item === "string" ? item : item.label ?? item.description).filter(Boolean).join(" · ") : fallback; }
-function friendlyError(error, t) { if (!error) return t ? t("unexpectedError") : ""; if (error.status === 401) return t ? t("sessionExpired") : ""; if (error.status === 403) return t ? t("creatorForbidden") : ""; if (error.status === 404) return t ? t("requestedResourceMissing") : ""; if (error.status === 409) return t ? t("pageChanged") : ""; if (error.status === 429) return t ? t("tooManyRequests") : ""; return error.message || (t ? t("serviceUnavailable") : ""); }
+function friendlyError(error, t) { if (!error) return t ? t("unexpectedError") : ""; if (error.status === 401) return t ? t("sessionExpired") : ""; if (error.status === 403) return t ? t("creatorForbidden") : ""; if (error.status === 404) return t ? t("requestedResourceMissing") : ""; if (error.status === 409) return t ? t("pageChanged") : ""; if (error.status === 429) return t ? t("tooManyRequests") : ""; return error.code ? webErrorMessage(error, getWebLocale()) : error.message || (t ? t("serviceUnavailable") : ""); }

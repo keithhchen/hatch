@@ -1,3 +1,5 @@
+import { detectWebLocale, WEB_LOCALES } from "./webI18n.js";
+
 const MESSAGES = {
   en: {
     language: "Language",
@@ -104,7 +106,12 @@ const MESSAGES = {
     whatShouldHatchHaveDone: "What should Hatch have done?",
     why: "Why?",
     evaluationUnavailable: "Evaluation unavailable",
-    corpusUnavailable: "Method unavailable"
+    corpusUnavailable: "Method unavailable",
+    systemInstructions: "System instructions",
+    skills: "Skills",
+    knowledge: "Knowledge",
+    nextClue: "Show next clue",
+    round: (value) => `Round ${value}`
     ,versionNeedsAttention: "Needs attention"
     ,versionGenerationPaused: "This version could not be completed."
     ,failureDetailsUnavailable: "Hatch did not return failure details for this version."
@@ -306,7 +313,12 @@ const MESSAGES = {
     whatShouldHatchHaveDone: "Hatch 应该怎么做？",
     why: "为什么？",
     evaluationUnavailable: "评估不可用",
-    corpusUnavailable: "方法不可用"
+    corpusUnavailable: "方法不可用",
+    systemInstructions: "系统指令",
+    skills: "Skills",
+    knowledge: "Knowledge",
+    nextClue: "显示下一条线索",
+    round: (value) => `第 ${value} 轮`
     ,versionNeedsAttention: "需要处理"
     ,versionGenerationPaused: "这个版本未能完成。"
     ,failureDetailsUnavailable: "Hatch 没有返回这个版本的失败详情。"
@@ -508,7 +520,12 @@ const MESSAGES = {
     whatShouldHatchHaveDone: "Hatch はどうすべきでしたか？",
     why: "理由",
     evaluationUnavailable: "評価を利用できません",
-    corpusUnavailable: "方法を利用できません"
+    corpusUnavailable: "方法を利用できません",
+    systemInstructions: "システム指示",
+    skills: "Skills",
+    knowledge: "Knowledge",
+    nextClue: "次の手がかりを表示",
+    round: (value) => `ラウンド ${value}`
     ,versionNeedsAttention: "対応が必要"
     ,versionGenerationPaused: "このバージョンを完了できませんでした。"
     ,failureDetailsUnavailable: "Hatch はこのバージョンの失敗詳細を返しませんでした。"
@@ -608,11 +625,7 @@ const MESSAGES = {
 };
 
 export function detectCreatorLocale() {
-  if (typeof navigator === "undefined") return "en";
-  const language = String(navigator.language || "en").toLowerCase();
-  if (language.startsWith("zh")) return "zh";
-  if (language.startsWith("ja")) return "ja";
-  return "en";
+  return detectWebLocale();
 }
 
 // Copy for the legacy Product overview/test/examples/versions/data-controls
@@ -1394,5 +1407,5 @@ export function createCreatorTranslator(locale = "en") {
   };
 }
 
-export const CREATOR_LOCALES = ["en", "zh", "ja"];
+export const CREATOR_LOCALES = WEB_LOCALES;
 export const CREATOR_PORTAL_KEYS = Object.keys(PORTAL_MESSAGES.en);

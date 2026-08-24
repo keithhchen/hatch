@@ -19,7 +19,7 @@ test("creator identity stays circular and never falls back to a byline", () => {
 
 test("a non-Creator account is sent to the real Creator signup intent", () => {
   assert.match(appSource, /profile\?\.role !== "creator"/);
-  assert.match(appSource, /Create a Creator account/);
+  assert.match(appSource, /common\.createCreatorAccount/);
   assert.match(appSource, /if \(sessionStatus !== "authenticated"\) \{\s+return <RouteRedirect to=\{`\/sign-up\?returnTo=/);
   assert.match(appSource, /location\.navigate\(`\/sign-up\?returnTo=/);
   assert.match(source, /const creatorIntent = returnTo === "\/studio" \|\| returnTo\.startsWith\("\/studio\/"\)/);
@@ -28,7 +28,7 @@ test("a non-Creator account is sent to the real Creator signup intent", () => {
 
 test("buyer navigation uses a standard hamburger menu on narrow screens", () => {
   assert.match(source, /className="buyer-v2__mobile-nav"/);
-  assert.match(source, /<DropdownMenu[\s\S]*label="Buyer navigation"/);
+  assert.match(source, /<DropdownMenu[\s\S]*label=\{webT\("common\.buyerNavigation"\)\}/);
   assert.match(stylesheet, /\.buyer-v2__mobile-nav\s*\{\s*display:\s*none;\s*\}/);
   assert.match(stylesheet, /@media\s*\(max-width:\s*840px\)[\s\S]*?\.buyer-v2__nav\s*\{\s*display:\s*none;\s*\}/s);
   assert.match(stylesheet, /@media\s*\(max-width:\s*840px\)[\s\S]*?\.buyer-v2__mobile-nav\s*\{[\s\S]*?display:\s*block;/s);
