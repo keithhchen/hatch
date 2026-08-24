@@ -50,7 +50,6 @@ export function DownloadPage() {
         <section className="download-page__intro" aria-labelledby="download-page-title">
           <span className="download-page__eyebrow">Desktop preview</span>
           <h1 id="download-page-title">Hatch, on your desktop.</h1>
-          <p>A calm place for the work that needs your files. Preview builds for Mac.</p>
         </section>
 
         {!hasConfiguredDownloads ? <UnavailableDownloadState /> : (
