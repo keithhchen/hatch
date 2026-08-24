@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { Suspense, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "@hatch/ui/fonts";
 import "@hatch/ui/theme.css";
@@ -10,6 +10,7 @@ import { dashboardRequest } from "./data.js";
 import "./styles.css";
 
 const CREATOR_ROOT = "/studio";
+const OnepagerPage = React.lazy(() => import("./onepager/OnepagerPage.jsx"));
 
 class AppErrorBoundary extends React.Component {
   constructor(props) {
@@ -42,6 +43,7 @@ class AppErrorBoundary extends React.Component {
 function App() {
   const location = useBrowserLocation();
   const isDownloadRoute = location.pathname === "/download";
+  const isOnepagerRoute = location.pathname === "/";
   const [profile, setProfile] = useState(null);
   const [sessionStatus, setSessionStatus] = useState("loading");
 
@@ -59,7 +61,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (isDownloadRoute) {
+    if (isDownloadRoute || isOnepagerRoute) {
       setSessionStatus("anonymous");
       return undefined;
     }
@@ -77,7 +79,7 @@ function App() {
         else setSessionStatus(profile ? "authenticated" : "anonymous");
     });
     return () => { active = false; };
-  }, [clearSession, isDownloadRoute]);
+  }, [clearSession, isDownloadRoute, isOnepagerRoute]);
 
   const signIn = useCallback(async (credentials) => {
     const result = await dashboardRequest("/v1/auth/login", {
@@ -138,6 +140,14 @@ function App() {
   // different resource.
 
   if (isDownloadRoute) return <DownloadPage />;
+
+  if (isOnepagerRoute) {
+    return (
+      <Suspense fallback={<AppLoading />}>
+        <OnepagerPage />
+      </Suspense>
+    );
+  }
 
   if (location.pathname === CREATOR_ROOT
     || location.pathname.startsWith(`${CREATOR_ROOT}/`)) {

@@ -16,6 +16,7 @@
     "build-storybook": "storybook build"
   },
   "dependencies": {
+    "@fontsource/dm-mono": "^5.3.0",
     "@hatch/ui": "file:../packages/ui",
     "@vitejs/plugin-react": "^5.0.4",
     "lucide-react": "^1.31.0",

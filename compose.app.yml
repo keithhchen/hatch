@@ -247,6 +247,11 @@ services:
       HATCH_COMMERCE_DATABASE_URL: ${HATCH_DATABASE_URL:?set HATCH_DATABASE_URL in /opt/hatch/.env}
       HATCH_PORTAL_STATE_PATH: /var/lib/hatch/commerce/portal-state.json
       HATCH_COMMERCE_PAYMENT_MODE: disabled
+      FEISHU_APP_ID: ${FEISHU_APP_ID:-}
+      FEISHU_APP_SECRET: ${FEISHU_APP_SECRET:-}
+      FEISHU_BASE_TOKEN: ${FEISHU_BASE_TOKEN:-}
+      FEISHU_TABLE_ID: ${FEISHU_TABLE_ID:-}
+      HATCH_CONTACT_SOURCE_PAGE: ${HATCH_CONTACT_SOURCE_PAGE:-hatch.tokenquadrant.cn}
     volumes:
       - commerce_data:/var/lib/hatch/commerce
     networks:
