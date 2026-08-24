@@ -17,7 +17,7 @@ const copy = {
     heroBody:
       "Hatch 让已经拥有受众的 Expert Creator，把自己的方法做成可收费、能交付成果的 Agent——无需组建软件团队，也不必亲自完成每一次服务。",
     heroFilmLabel: "Hatch 产品发布影片",
-        heroFilmPoster: "/assets/onepager/hatch-launch-poster.jpg",
+        heroFilmPoster: "/assets/web/hatch-launch-poster.jpg",
         heroFilmSrc: webMediaUrl("hatch-launch-zh.mp4"),
     continuum: [
       {
@@ -226,7 +226,7 @@ const copy = {
     heroBody:
       "Hatch lets expert creators with an audience turn their methods into paid agents that deliver usable work—without a software team or doing every job themselves.",
     heroFilmLabel: "Hatch product launch film",
-    heroFilmPoster: "/assets/onepager/hatch-launch-poster.jpg",
+    heroFilmPoster: "/assets/web/hatch-launch-poster.jpg",
     heroFilmSrc: webMediaUrl("hatch-launch-en.mp4"),
     continuum: [
       {

@@ -19,7 +19,7 @@ export const jaCopy = {
   heroBody:
     "Hatchは、すでにオーディエンスを持つExpert Creatorが、自分の方法を、成果を届ける有料のAgentに変えるためのプラットフォームです。ソフトウェアチームを組む必要も、すべてのサービスを自ら提供する必要もありません。",
   heroFilmLabel: "Hatch プロダクトローンチフィルム",
-  heroFilmPoster: "/assets/onepager/hatch-launch-poster.jpg",
+  heroFilmPoster: "/assets/web/hatch-launch-poster.jpg",
   heroFilmSrc: webMediaUrl("hatch-launch-ja.mp4"),
   continuum: [
     {
