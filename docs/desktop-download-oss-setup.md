@@ -27,7 +27,10 @@ name in the `--bucket` argument and does not use path-style addressing. The
 publish job also sets AWS CLI checksum calculation to `when_required`, because
 OSS does not accept AWS's streaming checksum trailer for multipart uploads, and
 sets `public-read` explicitly with `PutObjectACL` so the private bucket can
-serve only the published objects anonymously.
+serve only the published objects anonymously. The latest-manifest guard reads
+the current object with authenticated S3 metadata instead of probing its public
+URL, because a missing object in a private bucket can correctly return 403 to
+anonymous callers.
 
 If the bucket uses another region, replace `cn-shanghai` in all four values
 with that region ID and use the matching endpoint.

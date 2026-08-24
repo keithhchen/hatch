@@ -334,37 +334,35 @@ jobs:
           latest_manifest_file="$(mktemp)"
           cleanup_latest_manifest() { rm -f "$latest_manifest_file"; }
           trap cleanup_latest_manifest EXIT
-          latest_manifest_url="${HATCH_OSS_PUBLIC_BASE_URL%/}/desktop/latest/manifest.json"
-          latest_status="$(curl --silent --show-error --location --retry 5 --retry-all-errors --output "$latest_manifest_file" --write-out '%{http_code}' "$latest_manifest_url")" || {
-            echo "Could not inspect the current OSS latest manifest" >&2
-            exit 1
-          }
-          case "$latest_status" in
-            200)
-              jq -e '.schema_version == 1 and .kind == "hatch-desktop-download-manifest" and (.version | strings | test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) and (.source_sha | strings | test("^[0-9a-f]{40}$"))' "$latest_manifest_file" >/dev/null || {
-                echo "Current OSS latest manifest has an unsupported shape" >&2
-                exit 1
-              }
-              current_version="$(jq -r '.version' "$latest_manifest_file")"
-              current_source_sha="$(jq -r '.source_sha' "$latest_manifest_file")"
-              greatest_version="$(printf '%s\n%s\n' "$current_version" "$version" | sort -V | tail -n 1)"
-              if [ "$greatest_version" = "$current_version" ] && [ "$current_version" != "$version" ]; then
-                echo "Refusing to move OSS latest backwards from $current_version to $version" >&2
-                exit 1
-              fi
-              if [ "$current_version" = "$version" ] && [ "$current_source_sha" != "$GITHUB_SHA" ]; then
-                echo "The current OSS latest version has a different source SHA" >&2
-                exit 1
-              fi
-              ;;
-            404)
-              :
-              ;;
-            *)
-              echo "Unexpected HTTP status $latest_status while reading OSS latest manifest" >&2
+          latest_manifest_key="desktop/latest/manifest.json"
+          if latest_manifest_head="$(aws s3api head-object --bucket "$HATCH_OSS_BUCKET" --key "$latest_manifest_key" "${endpoint[@]}" 2>&1)"; then
+            aws s3 cp "s3://${HATCH_OSS_BUCKET}/${latest_manifest_key}" "$latest_manifest_file" "${endpoint[@]}" >/dev/null
+            jq -e '.schema_version == 1 and .kind == "hatch-desktop-download-manifest" and (.version | strings | test("^[0-9]+\\.[0-9]+\\.[0-9]+$")) and (.source_sha | strings | test("^[0-9a-f]{40}$"))' "$latest_manifest_file" >/dev/null || {
+              echo "Current OSS latest manifest has an unsupported shape" >&2
               exit 1
-              ;;
-          esac
+            }
+            current_version="$(jq -r '.version' "$latest_manifest_file")"
+            current_source_sha="$(jq -r '.source_sha' "$latest_manifest_file")"
+            greatest_version="$(printf '%s\n%s\n' "$current_version" "$version" | sort -V | tail -n 1)"
+            if [ "$greatest_version" = "$current_version" ] && [ "$current_version" != "$version" ]; then
+              echo "Refusing to move OSS latest backwards from $current_version to $version" >&2
+              exit 1
+            fi
+            if [ "$current_version" = "$version" ] && [ "$current_source_sha" != "$GITHUB_SHA" ]; then
+              echo "The current OSS latest version has a different source SHA" >&2
+              exit 1
+            fi
+          else
+            case "$latest_manifest_head" in
+              *"(404)"*|*"Not Found"*|*"NoSuchKey"*)
+                ;;
+              *)
+                echo "Could not inspect the current OSS latest manifest" >&2
+                printf '%s\n' "$latest_manifest_head" >&2
+                exit 1
+                ;;
+            esac
+          fi
           aws s3 cp "release/oss/Hatch-${version}-macOS-Apple-Silicon.dmg" "$latest_prefix/mac/apple-silicon.dmg" "${endpoint[@]}" "${mutable[@]}" --content-type "application/x-apple-diskimage" --content-disposition "attachment; filename=Hatch-${version}-macOS-Apple-Silicon.dmg"
           set_public_read_acl "desktop/latest/mac/apple-silicon.dmg"
           aws s3 cp "release/oss/Hatch-${version}-macOS-Intel.dmg" "$latest_prefix/mac/intel.dmg" "${endpoint[@]}" "${mutable[@]}" --content-type "application/x-apple-diskimage" --content-disposition "attachment; filename=Hatch-${version}-macOS-Intel.dmg"
