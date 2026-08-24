@@ -8,7 +8,6 @@ const copy = {
   zh: {
     meta: "EXPERT CREATOR ECONOMY",
     nav: ["产品缺口", "如何创建", "用户访谈", "商业模式", "长期愿景", "合作伙伴", "联系"],
-    read: "继续阅读",
     exploreCreators: "探索 Creator",
     buildProduct: "创建你的 Expert 产品",
     contactLink: "联系 Hatch",
@@ -218,7 +217,6 @@ const copy = {
   en: {
     meta: "EXPERT CREATOR ECONOMY",
     nav: ["The gap", "How it works", "Interviews", "Business model", "Vision", "Partners", "Contact"],
-    read: "Read the thesis",
     exploreCreators: "Explore creators",
     buildProduct: "Build your own expert product",
     contactLink: "Contact Hatch",
@@ -683,15 +681,11 @@ export default function HatchPage({ initialLang }: { initialLang: Lang }) {
             <div className="hero-actions">
               <a className="hero-cta hero-cta-primary" href="/explore">
                 {t.exploreCreators}
-                <span aria-hidden="true">↗</span>
+                <span aria-hidden="true">→</span>
               </a>
               <a className="hero-cta hero-cta-secondary" href="/studio">
                 {t.buildProduct}
-                <span aria-hidden="true">↗</span>
-              </a>
-              <a className="text-link" href="#gap">
-                {t.read}
-                <span aria-hidden="true">↓</span>
+                <span aria-hidden="true">→</span>
               </a>
               <button className="text-link text-link-contact hero-contact-link" type="button" onClick={openContactDialog}>
                 {t.contactLink}

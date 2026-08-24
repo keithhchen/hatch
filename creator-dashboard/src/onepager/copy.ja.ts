@@ -9,7 +9,6 @@ export const jaCopy = {
     "パートナー",
     "お問い合わせ",
   ],
-  read: "続きを読む",
   exploreCreators: "Creatorを探す",
   buildProduct: "自分のExpertプロダクトをつくる",
   contactLink: "Hatchに連絡する",
