@@ -497,17 +497,6 @@ button {
   line-height: 1.7;
 }
 
-.gap-content blockquote {
-  max-width: 920px;
-  margin: 88px 0 0;
-  padding: 0;
-  border: 0;
-  font-family: var(--font-display);
-  font-size: clamp(30px, 4vw, 54px);
-  letter-spacing: -0.035em;
-  line-height: 1.14;
-}
-
 .product-section {
   background: var(--panel);
 }
@@ -1610,10 +1599,6 @@ footer {
     width: min(100%, 240px);
     max-width: 240px;
     margin-top: 3px;
-  }
-
-  .gap-content blockquote {
-    margin-top: 72px;
   }
 
   .skill-note,

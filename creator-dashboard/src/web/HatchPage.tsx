@@ -43,8 +43,6 @@ const copy = {
       "Expert Creator 已经可以通过社交媒体、课程、社群和 Newsletter 建立信任与分发。但他们仍然只能在可规模化的内容，与高价值却无法规模化的本人服务之间选择。",
     gapBody2:
       "与此同时，用户已经在把 Creator 的公开视频、文章和方法交给通用 AI，请它修改材料、生成方案或完成工作。需求并没有消失，但由 AI 产生的使用和收入正在绕过 Creator。",
-    gapQuote:
-      "Creator Economy 已经解决了“谁拥有受众”；Hatch 要解决的是：Creator 接下来能够卖什么，以及如何规模化交付。",
     gapList: [
       ["内容与课程", "规模化，但个性化交付很浅。"],
       ["咨询、批改与陪跑", "更接近结果，但受限于本人时间。"],
@@ -199,8 +197,6 @@ const copy = {
       "Expert creators already build trust and reach through social media, courses, communities, and newsletters. Yet they still choose between scalable content and high-value services that depend on their own time.",
     gapBody2:
       "Meanwhile, audiences are already feeding creators’ public videos, writing, and methods into general-purpose AI to revise materials, generate plans, and complete work. Demand remains, but the resulting usage and revenue bypass the creator.",
-    gapQuote:
-      "The creator economy solved audience-building. Hatch solves what expert creators can sell next—and how to deliver it at scale.",
     gapList: [
       ["Content and courses", "They scale, but offer little personalization."],
       ["Consulting, review, and coaching", "More tailored, but constrained by the creator’s time."],
@@ -639,7 +635,6 @@ export default function HatchPage({ initialLang }: { initialLang: Lang }) {
               </div>
             ))}
           </div>
-          <blockquote>{t.gapQuote}</blockquote>
         </div>
       </section>
 
