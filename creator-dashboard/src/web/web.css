@@ -135,7 +135,8 @@ button {
   margin: 0 auto clamp(64px, 9vw, 126px);
 }
 
-.eyebrow {
+.site .eyebrow {
+  display: block;
   margin: 0;
   font-family: var(--font-mono);
   font-size: 10px;

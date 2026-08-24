@@ -48,6 +48,12 @@ test("Web entrypoint consumes HUI instead of a second component stylesheet", () 
   assert.doesNotMatch(entry, /components\/ui\//);
 });
 
+test("Web eyebrow labels stay visible despite the shared global eyebrow rule", () => {
+  const styles = read("creator-dashboard/src/web/web.css");
+
+  assert.match(styles, /\.site \.eyebrow\s*\{[\s\S]*?display:\s*block;/);
+});
+
 test("creator navigation uses a standard hamburger menu on narrow screens", () => {
   const source = read("creator-dashboard/src/CreatorPortalV2.jsx");
   const styles = read("creator-dashboard/src/creatorPortalV2.css");
