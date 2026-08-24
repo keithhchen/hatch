@@ -171,16 +171,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: refs/tags/${{ github.ref_name }}
           fetch-depth: 0
+          fetch-tags: true
           persist-credentials: false
       - name: Verify annotated source tag
         run: |
           set -euo pipefail
-          test "$(git cat-file -t "$GITHUB_REF_NAME")" = "tag" || {
+          tag_ref="refs/tags/$GITHUB_REF_NAME"
+          test "$(git cat-file -t "$tag_ref")" = "tag" || {
             echo "Desktop distribution requires an annotated SemVer tag" >&2
             exit 1
           }
-          test "$(git rev-parse "$GITHUB_REF_NAME^{}")" = "$GITHUB_SHA" || {
+          test "$(git rev-parse "$tag_ref^{}")" = "$GITHUB_SHA" || {
             echo "The annotated tag does not resolve to the workflow source commit" >&2
             exit 1
           }
