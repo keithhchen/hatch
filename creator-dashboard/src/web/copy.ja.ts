@@ -5,7 +5,6 @@ export const jaCopy = {
   nav: [
     "プロダクトの空白",
     "つくり方",
-    "インタビュー",
     "ビジネスモデル",
     "ビジョン",
     "パートナー",
@@ -119,57 +118,10 @@ export const jaCopy = {
     "ポッドキャスト粗編集",
     "ブランド名の候補",
   ],
-  interviewEyebrow: "03 · USER INTERVIEWS",
-  interviewTitle: "実際のCreatorインタビューが、\nプロダクトの空白を示している。",
-  interviews: [
-    {
-      role: "EXAM EDUCATOR",
-      stat: "¥800",
-      suffix: "／月",
-      evidenceLabel: "受訪者の既存価格",
-      title: "需要はあった。提供する余力がなかった。",
-      body: "ある試験対策の教育Creatorは、録画講座に加えて課題添削サービスを出した。開始後すぐ数十人の受講生が支払ったが、チームに提供を続ける余力がなく、終了した。",
-      insight:
-        "試験知識と採点ルールは無料で見つかる。学生が買ったのは、彼女がどの得点の細部を選び、繰り返し強調し、具体的にフィードバックするかだった。",
-    },
-    {
-      role: "GROWTH MARKETING PROFESSIONAL",
-      stat: "¥100K+",
-      suffix: "／企業プロジェクト",
-      evidenceLabel: "受訪者の既存価格",
-      title: "「企業から、私のSkillを買えないかと聞かれる。",
-      body: "でも、ファイルとして売ることはできない。簡単にコピーや無断利用がされて、高価値な成長手法が数百元のデジタル商品になってしまう。",
-      insight:
-        "顧客には、この方法を使うために支払ってほしい。方法そのものを持ち去るためではなく。」",
-    },
-  ],
-  expertLabel: "WHAT MAKES AN EXPERT DIFFERENT",
-  expertTitle: "知識の量ではない。\n選択が違う。",
-  expertBody:
-    "Creator Agentは、汎用モデルより普遍的に「優れている」必要はありません。投資家にはそれぞれ異なる戦略があり、フィットネスCreatorにはそれぞれ異なる流派があります。汎用モデルは答えを埋め尽くしがちです。Expertの価値は、何を優先するか、見落とされやすい細部に何を見るか、そして何を残し、削り、そもそもやらないかにあります。",
-  expertEval:
-    "HatchのEvalは、あるCreatorが普遍的に「最良の答え」を持つことを証明しません。そのCreatorらしさが一貫して現れるか、Agentが本人が認められる成果を届けられるか、ユーザーがその違いに対価を払うかを確かめます。",
-  businessEyebrow: "04 · BUSINESS MODEL",
+  businessEyebrow: "03 · BUSINESS MODEL",
   businessTitle: "Creatorが収益を得て、\n初めてHatchも収益を得る。",
   businessBody:
     "Creatorがプロダクト、価格、体験を自ら定め、すでに築いたオーディエンスへ届けます。ユーザーは単発で購入するか、特定のCreatorのAgentを購読します。Hatchは固定月額を取らず、Consumer Agent Marketplaceも運営しません。各取引の10%を受け取ります。",
-  businessFacts: [
-    {
-      stat: "10%",
-      label: "Hatch transaction share",
-      body: "固定月額はなし。単発販売か購読かは、それぞれのプロダクトの価値提案で決まる。",
-    },
-    {
-      stat: "300K+",
-      label: "Patreon creators",
-      body: "約8,000万人のファンが、Creatorに年間20億米ドル以上を支払っている。",
-    },
-    {
-      stat: "5M",
-      label: "Substack paid subscriptions",
-      body: "Creatorは購読収入の90%を受け取る（決済手数料を除く）。",
-    },
-  ],
   businessClosing:
     "これらのプラットフォームは、Creatorがコンテンツやメンバーシップを売る手助けをしている。Hatchはそこに、ユーザーのContextで仕事をし、使える成果を届けるCreator Agentという新しい商品を加える。",
   scale:
@@ -178,12 +130,6 @@ export const jaCopy = {
     "これまで、専門家が自分のサービスをスケールするプロダクトにするには、自ら提供し続けるか、プロダクト、エンジニアリング、運用、サービスのチームを組むしかありませんでした。Hatchは、そのサービスをプロダクト化し、届けるための仕事を標準化し、Creatorが自分のAIプロダクトをつくり、公開し、運営できるようにします。",
   final:
     "Hatchは、Expert Creator Economyのプロダクト、提供、取引の基盤です。Expert Creatorは、ソフトウェアチームを組まずに、継続的に収益を生むAIプロダクトを持てる。",
-  founderLabel: "WHY HATCH",
-  founder: [
-    "Hatchは、創業者の教育とAIにまたがる実践から生まれました。幼少期から家族の教育事業に関わり、講座、研修、coachingを手がける中で、価値あるコンテンツが複製・海賊版化される現実を見てきました。",
-    "MBAの後、彼は業種をまたいだ企業AI導入を主導し、マルチモーダル、モデル推論、方法論、ワークフロー管理、Evalの交差点で仕事をしてきました。",
-    "彼は信じています。汎用AIが公開知識を容易に複製できる時代に、Hatchは専門家が自らの選択、基準、方法を蒸留し、継続的に収益を生むAIプロダクトへ変える手助けができる、と。",
-  ],
   partnersKicker: "一緒に、何をHatchしよう？",
   partnersLabel: "WHO WE WANT TO PARTNER WITH",
   partnersTitle: "ともに取り組みたい方",

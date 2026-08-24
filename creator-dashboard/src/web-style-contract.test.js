@@ -57,13 +57,14 @@ test("Web eyebrow labels stay visible despite the shared global eyebrow rule", (
 test("Web home keeps the public narrative sections and real CTAs", () => {
   const page = read("creator-dashboard/src/web/HatchPage.tsx");
 
-  for (const section of ["top", "gap", "product", "interviews", "business", "vision", "contact"]) {
+  for (const section of ["top", "gap", "product", "business", "vision", "contact"]) {
     assert.match(page, new RegExp(`id=\\"${section}\\"`));
   }
   assert.match(page, /href=\"\/explore\"/);
   assert.match(page, /href=\"\/studio\"/);
   assert.match(page, /fetch\(\"\/api\/contact\"/);
   assert.doesNotMatch(page, /继续阅读/);
+  assert.doesNotMatch(page, /interviews|business-facts|founder-note|WHY HATCH/);
 });
 
 test("creator navigation uses a standard hamburger menu on narrow screens", () => {
