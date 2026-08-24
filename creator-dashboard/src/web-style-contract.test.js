@@ -71,6 +71,7 @@ test("Web home keeps the public narrative sections and real CTAs", () => {
   assert.match(styles, /\.hero-actions\s*\{[\s\S]*?display:\s*grid;/);
   assert.match(styles, /\.hero-contact-link\s*\{[\s\S]*?grid-column:\s*1\s*\/\s*-1;/);
   assert.doesNotMatch(page, /interviews|business-facts|founder-note|WHY HATCH/);
+  assert.doesNotMatch(page, /gapQuote|Creator Economy 已经解决了/);
 });
 
 test("creator navigation uses a standard hamburger menu on narrow screens", () => {
