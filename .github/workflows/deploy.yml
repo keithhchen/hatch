@@ -146,6 +146,17 @@ jobs:
           fi
           install -m 640 compose.app.yml /opt/hatch/
           install -m 640 compose.infra.yml /opt/hatch/
+      - name: Ensure production env is readable by the deploy runner
+        run: |
+          set -euo pipefail
+          env_file=/opt/hatch/.env
+          test -f "$env_file"
+          if test ! -r "$env_file" || test ! -w "$env_file"; then
+            sudo -n chown "$(id -u):$(id -g)" "$env_file"
+            sudo -n chmod 600 "$env_file"
+          fi
+          test -r "$env_file"
+          test -w "$env_file"
       - name: Select Creator Factory LLM profile
         run: |
           set -euo pipefail

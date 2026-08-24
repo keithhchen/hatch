@@ -117,6 +117,17 @@ jobs:
       contents: read
       packages: read
     steps:
+      - name: Ensure production env is readable by the deploy runner
+        run: |
+          set -euo pipefail
+          env_file=/opt/hatch/.env
+          test -f "$env_file"
+          if test ! -r "$env_file" || test ! -w "$env_file"; then
+            sudo -n chown "$(id -u):$(id -g)" "$env_file"
+            sudo -n chmod 600 "$env_file"
+          fi
+          test -r "$env_file"
+          test -w "$env_file"
       - name: Inspect production Docker host
         run: |
           set -u
