@@ -12,7 +12,6 @@ import "./downloadPage.css";
 
 export function DownloadPage() {
   const [detectedTarget, setDetectedTarget] = useState("unknown");
-  const [selectedTarget, setSelectedTarget] = useState("unknown");
   const [detectionReady, setDetectionReady] = useState(false);
 
   useEffect(() => {
@@ -22,7 +21,6 @@ export function DownloadPage() {
     detectDownloadTargetAsync().then((target) => {
       if (!active) return;
       setDetectedTarget(target);
-      setSelectedTarget(target);
       setDetectionReady(true);
     }).catch(() => {
       if (!active) return;
@@ -38,8 +36,7 @@ export function DownloadPage() {
     ...DESKTOP_DOWNLOAD_TARGETS[key],
     url: desktopDownloadUrl(key)
   })), []);
-  const selected = DESKTOP_DOWNLOAD_TARGETS[selectedTarget];
-  const selectedUrl = selected ? desktopDownloadUrl(selected.key) : "";
+  const recommendedTarget = targets.find((target) => target.key === detectedTarget) ?? null;
   const hasConfiguredDownloads = Boolean(DESKTOP_DOWNLOAD_BASE_URL) && targets.every((target) => target.url);
 
   return (
@@ -56,61 +53,39 @@ export function DownloadPage() {
           <p>A calm place for the work that needs your files. Preview builds for Mac.</p>
         </section>
 
-        {!hasConfiguredDownloads ? (
-          <UnavailableDownloadState />
-        ) : detectedTarget === "unsupported" ? (
-          <UnsupportedDownloadState />
-        ) : (
+        {!hasConfiguredDownloads ? <UnavailableDownloadState /> : (
           <>
             <section className="download-page__recommended" aria-labelledby="download-recommended-title">
               <div className="download-page__recommended-topline">
                 <span className="download-page__status-dot" aria-hidden="true" />
-                <span>{detectionReady && detectedTarget !== "unknown" ? "Recommended for your device" : "Choose your version"}</span>
+                <span>{detectionReady && recommendedTarget ? "Recommended for your device" : "Mac downloads"}</span>
               </div>
-              {selected ? (
-                <div className="download-page__recommended-content">
-                  <div>
-                    <h2 id="download-recommended-title">Hatch for Mac</h2>
-                    <p>{selected.label}</p>
-                  </div>
+              <div className="download-page__recommended-content">
+                <div>
+                  <h2 id="download-recommended-title">Hatch for Mac</h2>
+                  <p>{recommendedTarget ? `${recommendedTarget.label} is ready for this device.` : "Choose the Mac build that matches your computer below."}</p>
+                </div>
+                {recommendedTarget ? (
                   <Button asChild size="large" trailing={<ArrowDown aria-hidden="true" />}>
-                    <a href={selectedUrl}>{selected.primaryLabel}</a>
+                    <a href={recommendedTarget.url}>{recommendedTarget.primaryLabel}</a>
                   </Button>
-                </div>
-              ) : (
-                <div className="download-page__choose-copy">
-                  <h2 id="download-recommended-title">Find the right Hatch for your computer.</h2>
-                  <p>Your browser could not determine the Mac version automatically. Choose below.</p>
-                </div>
-              )}
+                ) : null}
+              </div>
             </section>
 
             <section className="download-page__other-versions" aria-labelledby="download-other-title">
               <div className="download-page__section-heading">
-                <h2 id="download-other-title">Other versions</h2>
-                <span>Choose a different Mac build</span>
+                <h2 id="download-other-title">Mac builds</h2>
+                <span>Download directly</span>
               </div>
-              <div className="download-page__version-list">
-                {targets.map((target) => (
-                  <div className={`download-page__version-row${target.key === selectedTarget ? " is-selected" : ""}`} key={target.key}>
-                    <button
-                      type="button"
-                      className="download-page__version-choice"
-                      aria-pressed={target.key === selectedTarget}
-                      onClick={() => setSelectedTarget(target.key)}
-                    >
-                      <span>{target.label}</span>
-                      {target.key === selectedTarget ? <span className="download-page__selected-label">Selected</span> : null}
-                    </button>
-                    <Button asChild variant="link" size="small" trailing={<ArrowRight aria-hidden="true" />}>
-                      <a href={target.url}>Download</a>
-                    </Button>
-                  </div>
-                ))}
+              <div className="download-page__platform-grid">
+                {targets.map((target) => <MacDownloadCard key={target.key} target={target} recommended={target.key === detectedTarget} />)}
               </div>
             </section>
           </>
         )}
+
+        <WindowsComingSoon />
 
         <footer className="download-page__footer">
           <span>Hatch Desktop</span>
@@ -118,6 +93,21 @@ export function DownloadPage() {
         </footer>
       </main>
     </div>
+  );
+}
+
+function MacDownloadCard({ target, recommended }) {
+  return (
+    <article className={`download-page__platform-card${recommended ? " is-recommended" : ""}`}>
+      <div className="download-page__platform-copy">
+        <span className="download-page__platform-eyebrow">Mac</span>
+        <h3>{target.label}</h3>
+        {recommended ? <span className="download-page__recommended-label">Recommended</span> : null}
+      </div>
+      <Button asChild variant="secondary" size="small" trailing={<ArrowDown aria-hidden="true" />}>
+        <a href={target.url}>{target.primaryLabel}</a>
+      </Button>
+    </article>
   );
 }
 
@@ -136,14 +126,15 @@ function UnavailableDownloadState() {
   );
 }
 
-function UnsupportedDownloadState() {
+function WindowsComingSoon() {
   return (
-    <Surface level="solid" className="download-page__unavailable" role="status">
-      <span className="download-page__unavailable-mark" aria-hidden="true">—</span>
-      <div>
-        <h2>Windows coming soon</h2>
+    <Surface level="solid" className="download-page__platform-card download-page__platform-card--unavailable" role="status">
+      <div className="download-page__platform-copy">
+        <span className="download-page__platform-eyebrow">Windows</span>
+        <h3>Windows coming soon</h3>
         <p>Hatch Desktop is currently available for Mac.</p>
       </div>
+      <span className="download-page__coming-soon-label">Coming soon</span>
     </Surface>
   );
 }
