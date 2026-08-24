@@ -1,5 +1,5 @@
-const onepagerMediaBaseUrl = String(import.meta.env.VITE_HATCH_ONEPAGER_MEDIA_BASE_URL ?? "").replace(/\/+$/, "");
+const webMediaBaseUrl = String(import.meta.env.VITE_HATCH_WEB_MEDIA_BASE_URL ?? "").replace(/\/+$/, "");
 
-export function onepagerMediaUrl(fileName: string): string {
-  return onepagerMediaBaseUrl ? `${onepagerMediaBaseUrl}/${fileName}` : `/assets/onepager/${fileName}`;
+export function webMediaUrl(fileName: string): string {
+  return webMediaBaseUrl ? `${webMediaBaseUrl}/${fileName}` : `/assets/onepager/${fileName}`;
 }

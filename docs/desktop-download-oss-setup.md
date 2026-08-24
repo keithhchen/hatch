@@ -140,20 +140,20 @@ compares their SHA-256 values before it succeeds. It also refuses to move
 the latest pointer backwards: an older tag cannot replace a newer current
 version, and a same-version tag with a different source SHA fails closed.
 
-## Onepager launch media
+## Web launch media
 
 The Web CD reuses this public bucket and its existing `desktop/*`-scoped
-release identity for the three Onepager launch videos. They are isolated from
+release identity for the three Web launch videos. They are isolated from
 Desktop installers under immutable child keys:
 
 ```text
-desktop/onepager/<source-sha>/hatch-launch-en.mp4
-desktop/onepager/<source-sha>/hatch-launch-ja.mp4
-desktop/onepager/<source-sha>/hatch-launch-zh.mp4
+desktop/web/<source-sha>/hatch-launch-en.mp4
+desktop/web/<source-sha>/hatch-launch-ja.mp4
+desktop/web/<source-sha>/hatch-launch-zh.mp4
 ```
 
 The Web build injects the matching source-SHA prefix into
-`VITE_HATCH_ONEPAGER_MEDIA_BASE_URL`. Web CD uploads each object with
+`VITE_HATCH_WEB_MEDIA_BASE_URL`. Web CD uploads each object with
 `public-read` and `video/mp4`, verifies its authenticated byte count and MIME
 type, then checks a public byte-range request before the Dashboard rollout can
 start. This keeps the marketing video out of the production Dashboard image;
