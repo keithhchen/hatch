@@ -260,7 +260,7 @@ function FilesPanel({ t, documents, busy, onUpload, onStart, onDelete, hasExecut
       <span className="cpv2-upload-button">{t("chooseFiles")}</span>
       <input className="cpv2-file-input" type="file" multiple accept=".pdf,.docx,.xlsx,.xls,.xlsm,.pptx,.csv,.tsv,.txt,.md,.json,.html,.htm" onChange={(event) => { void onUpload([...event.target.files]); event.target.value = ""; }} disabled={Boolean(busy)} />
     </label>
-    {!documents.length ? <p className="cpv2-empty-inline">{t("noFilesYet")}</p> : <ul className="cpv2-file-list">{documents.map((file) => <li key={file.id ?? file.file_id ?? file.display_name}><span>{file.display_name ?? file.name ?? t("unnamedFile")}</span><StatusTag tone={file.status === "error" ? "error" : "success"}>{file.status ?? t("ready")}</StatusTag><Button type="button" variant="link" disabled={Boolean(busy)} onClick={() => void onDelete(file)}>{t("removeFile")}</Button></li>)}</ul>}
+    {!documents.length ? <p className="cpv2-empty-inline">{t("noFilesYet")}</p> : <ul className="cpv2-file-list">{documents.map((file) => { const fileState = productFileState(file); return <li key={file.id ?? file.file_id ?? file.display_name}><span>{file.display_name ?? file.name ?? t("unnamedFile")}</span><StatusTag tone={fileState === "error" ? "error" : "success"}>{t(`fileStatus_${fileState}`)}</StatusTag><Button type="button" variant="link" disabled={Boolean(busy)} onClick={() => void onDelete(file)}>{t("removeFile")}</Button></li>; })}</ul>}
     <div className="cpv2-workspace-actions"><Button type="button" loading={busy === "about-you"} disabled={!documents.length || Boolean(busy)} onClick={onStart}>{hasExecution ? t("continueWithFiles") : t("startDistillation")}</Button></div>
   </section>;
 }

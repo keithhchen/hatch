@@ -28,7 +28,7 @@ import { creatorOrderQuery } from "./storefrontModel.js";
 import { parseCreatorRoute } from "./creatorRoutes.js";
 import { createCreatorTranslator } from "./creatorI18n.js";
 import { WebLanguagePicker, useWebLocale } from "./WebLocaleProvider.jsx";
-import { formatWebDate, getWebLocale, webErrorMessage } from "./webI18n.js";
+import { formatWebDate, getWebLocale, webErrorMessage, webT } from "./webI18n.js";
 import { CreatorProductWorkspace } from "./CreatorProductWorkspace.jsx";
 import "./creatorPortalV2.css";
 
@@ -590,7 +590,7 @@ function SectionHeading({ title, action, onAction }) {
 
 function Breadcrumb({ children, onClick }) { return <HatchBreadcrumbs className="cpv2-breadcrumb" items={[{ label: children, href: "#", icon: false, onClick: (event) => { event.preventDefault(); onClick(); } }]} />; }
 function StatusChip({ status, children }) { const tone = statusTone(status); return <HatchStatusTag tone={tone === "danger" ? "error" : tone}>{children}</HatchStatusTag>; }
-function Fact({ label, value }) { const missing = value === undefined || value === null || value === ""; return <div><dt>{label}</dt><dd title={typeof value === "string" ? value : undefined}>{missing ? "—" : value}</dd></div>; }
+function Fact({ label, value }) { const missing = value === undefined || value === null || value === ""; return <div><dt>{label}</dt><dd title={typeof value === "string" ? value : undefined}>{missing ? webT("common.notProvided") : value}</dd></div>; }
 function InlineError({ children }) { return <HatchInlineAlert className="cpv2-alert" tone="error">{children}</HatchInlineAlert>; }
 function SuccessNotice({ children }) { return <HatchInlineAlert className="cpv2-success" tone="success">{children}</HatchInlineAlert>; }
 function EmptyInline({ children }) { return <p className="cpv2-empty-inline">{children}</p>; }

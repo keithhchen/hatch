@@ -1,21 +1,27 @@
 import { dashboardRequest } from "./data.js";
+import { createCreatorTranslator } from "./creatorI18n.js";
 
-export const FACTORY_STAGE_LABELS = {
-  extracting_evidence: "Extracting evidence",
-  awaiting_creator_answers: "Waiting for your answers",
-  compiling_corpus: "Compiling the Corpus",
-  evaluating_development: "Checking development cases",
-  evaluating_regression: "Running regression",
-  evaluating_heldout: "Running sealed held-out cases",
-  review_required: "Needs your correction",
-  ready: "Candidate ready",
-  needs_attention: "Needs attention"
+export const FACTORY_STAGE_KEYS = {
+  extracting_evidence: "factoryStageExtractingEvidence",
+  awaiting_creator_answers: "factoryStageAwaitingCreatorAnswers",
+  compiling_corpus: "factoryStageCompilingCorpus",
+  evaluating_development: "factoryStageEvaluatingDevelopment",
+  evaluating_regression: "factoryStageEvaluatingRegression",
+  evaluating_heldout: "factoryStageEvaluatingHeldout",
+  review_required: "factoryStageReviewRequired",
+  ready: "factoryStageReady",
+  needs_attention: "factoryStageNeedsAttention"
 };
 
-export function factoryStageLabel(run) {
-  if (run?.status === "queued") return "Queued";
-  if (run?.status === "running") return "Working";
-  return FACTORY_STAGE_LABELS[run?.stage] ?? "Not started";
+export function factoryStageKey(run) {
+  if (run?.status === "queued") return "factoryStageQueued";
+  if (run?.status === "running") return "factoryStageWorking";
+  return FACTORY_STAGE_KEYS[run?.stage] ?? "factoryStageNotStarted";
+}
+
+export function factoryStageLabel(run, translator = createCreatorTranslator("en")) {
+  const t = typeof translator === "function" ? translator : createCreatorTranslator(translator);
+  return t(factoryStageKey(run));
 }
 
 export function factoryShouldPoll(run) {

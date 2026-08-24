@@ -6,6 +6,7 @@ import {
   detectWebLocale,
   formatUsd,
   localizeWebApiError,
+  localizeWebIdentifier,
   localeTag,
   setWebLocale,
   translateWeb
@@ -28,6 +29,12 @@ test("API errors use the same locale catalog as Web display", () => {
   const localized = localizeWebApiError({ error: { code: "product_not_found", message: "Product was not found." } }, "zh");
   assert.equal(localized.error.message, translateWeb("zh", "errors.productNotFound"));
   assert.equal(localized.error.code, "product_not_found");
+});
+
+test("system identifiers use localized labels while unknown values remain data", () => {
+  assert.equal(localizeWebIdentifier("payment_pending", "zh"), translateWeb("zh", "buyer.paymentPending"));
+  assert.equal(localizeWebIdentifier("refund_pending", "ja"), translateWeb("ja", "buyer.refunded"));
+  assert.equal(localizeWebIdentifier("creator_defined_value", "zh"), "Creator Defined Value");
 });
 
 test("dashboard requests send the selected Web locale to the API", async () => {

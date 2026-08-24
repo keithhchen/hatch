@@ -28,6 +28,40 @@ export const WEB_API_ERROR_KEYS = Object.freeze({
   csrf_rejected: "errors.csrfRejected"
 });
 
+const WEB_IDENTIFIER_KEYS = Object.freeze({
+  active: "buyer.available",
+  available: "buyer.available",
+  reserved: "buyer.inProgress",
+  pending: "buyer.pending",
+  processing: "buyer.settingUpStatus",
+  preparing: "buyer.statusPreparing",
+  consumed: "buyer.used",
+  used: "buyer.used",
+  expired: "buyer.expired",
+  suspended: "buyer.paused",
+  revoked: "buyer.accessEnded",
+  none: "buyer.noAccess",
+  fulfilled: "common.accessGranted",
+  delivered: "buyer.statusDelivered",
+  completed: "common.accessGranted",
+  payment_pending: "buyer.paymentPending",
+  succeeded: "buyer.paymentSucceeded",
+  paid: "buyer.paymentSucceeded",
+  requires_action: "buyer.actionRequired",
+  not_required: "buyer.paymentNotRequired",
+  failed: "buyer.failed",
+  declined: "buyer.failed",
+  cancelled: "buyer.cancelled",
+  refunded: "buyer.refunded",
+  refund_pending: "buyer.refunded",
+  in_transit: "buyer.inProgress",
+  not_started: "common.notRecorded",
+  not_applicable: "common.notRecorded",
+  ready: "buyer.available",
+  published: "buyer.statusPublished",
+  ready_to_publish: "buyer.statusReadyToPublish"
+});
+
 const MESSAGES = {
   en: {
     common: {
@@ -236,8 +270,11 @@ const MESSAGES = {
       statusRefunded: "Refunded",
       statusPaid: "Paid",
       statusPublished: "Published",
-      statusReadyToPublish: "Ready to publish",
-      statusPreparing: "Preparing"
+  statusReadyToPublish: "Ready to publish",
+  statusPreparing: "Preparing",
+  connectPayouts: "Connect payouts",
+  continuePayoutSetup: "Continue setup",
+  managePayouts: "Manage payouts"
     },
     download: {
       title: "Download Hatch Desktop · Hatch",
@@ -250,6 +287,8 @@ const MESSAGES = {
       hatchForMac: "Hatch for Mac",
       chooseMac: "Choose the Mac build that matches your computer below.",
       readyForDevice: (label) => `${label} is ready for this device.`,
+      appleSilicon: "Mac · Apple Silicon",
+      intel: "Mac · Intel",
       macBuilds: "Mac builds",
       downloadDirectly: "Download directly",
       mac: "Mac",
@@ -260,6 +299,7 @@ const MESSAGES = {
       windowsComingSoon: "Windows coming soon",
       macOnly: "Hatch Desktop is currently available for Mac.",
       comingSoon: "Coming soon",
+      windows: "Windows",
       desktop: "Hatch Desktop",
       learn: "Learn about Hatch"
     },
@@ -299,7 +339,7 @@ const MESSAGES = {
       productsTitle: "把方法真正用起来。", productsBody: "先了解产品承诺和边界。只有适合当前工作时，才把产品加入你的账户。", availableProducts: "可用产品", noProducts: "还没有公开产品", noProductsBody: "已发布的产品会出现在这里，请稍后再试。", creatorProducts: "Creator 产品", noPublicProducts: "还没有公开产品", noPublicProductsBody: "这个 Creator 还没有发布可浏览的产品。", exploreAllProducts: "探索全部产品", productAccess: "产品使用权", loadingProducts: "正在加载产品", loadingProduct: "正在加载产品", agentDetails: "Agent 详情", howItWorks: "使用方式", accessFromWork: "从获得使用权，到真正开始工作。", stepAddAgent: "添加 Agent", stepOpenDesktop: "打开 Hatch Desktop", stepWorkAgent: "与 Agent 一起工作", representativeExamples: "代表性示例", whatYouProvide: "你提供什么", whatYouReceive: "你会得到什么", boundaries: "边界", privacy: "隐私", workUnderControl: "你的工作始终由你掌控。", desktopRequirement: "Desktop 要求", permanentAccess: "永久使用权", unavailable: "不可用", available: "可用", verified: "已验证", inLibrary: "已在你的 Library 中", accountSettings: "账户设置", accountTitle: "你的 Hatch 账户。", accountBody: "Web 和 Desktop 使用同一个账户。退出登录不会影响你的使用权记录。", signedInAccount: "已登录账户", accountHelp: "账户帮助", accountHelpTitle: "回到正确的账户。", accountHelpBody: "订单和 Agent 使用权属于完成购买的账户。请在 Hatch Desktop 中使用同一个账户。", session: "会话", signedIn: "你已登录。", signInContinue: "请登录后继续。", sessionBody: "如果找不到收据或产品使用权，请确认 Web 和 Desktop 使用的是同一个账户。", purchaseSupport: "购买支持", supportReference: "保留支持编号。", supportBody: "报告支付、退款或使用权问题时，请打开订单或使用权详情，并附上支持编号。", viewSettings: "查看设置", viewOrders: "查看订单", subscriptions: "订阅", noSubscriptions: "没有启用订阅产品。", noSubscriptionsBody: "当前每个已发布产品都免费提供永久使用权。付费使用权和订阅暂不可用。", productOrder: "产品订单", orderDetails: "订单详情", yourOrders: "你的订单", yourLibrary: "你的 Agent Library", yourEntitlements: "你的使用权", ordersLabel: "订单", created: "创建时间", validFrom: "生效时间", expires: "到期时间", subtotal: "小计", discount: "折扣", tax: "税费", total: "总计", notCalculated: "未计算", returnToProduct: "返回产品", viewReceipt: "查看收据", viewOrder: "查看订单", viewOrderStatus: "查看订单状态", viewAccessDetails: "查看使用权详情", downloadDesktop: "下载 Hatch Desktop", openDesktop: "打开 Hatch Desktop", addToAccount: "加入我的账户", addProductToAccount: "将此产品加入我的账户。", checkout: "结账", confirmOrder: "确认订单", paymentNotRequired: "无需支付", checkoutLegal: "产品和版本由服务器确定。", addingToAccount: "正在加入你的账户…", accessRequestStale: "这个使用权请求已不是最新状态。请返回产品后重试。", accessSetup: "使用权设置", accessConfirmed: "使用权已确认", accessConfirmedBody: "你的使用权已经记录。Hatch 正在完成收据处理，请不要重复提交。", retrySetup: "重试设置", accessRemoved: "使用权已移除", accessInactive: "这个使用权已不再有效。", receiptAvailable: "收据仍会保留供你查看。", confirmingPayment: "正在确认支付", confirmingOrder: "正在确认你的订单…", doNotSubmitAgain: "请不要重复提交订单。本页面会读取权威的支付和使用权状态并自动更新。", paymentNotCompleted: "支付未完成", paymentFailure: "账户没有成功扣款。", noAccessGranted: "没有授予使用权。请返回订单查看支付状态和可用的恢复操作。", purchaseCompleted: "购买已完成，但收据暂时不可用。", purchaseCompletedBody: "请不要再次下单。Hatch 会保留已确认的购买，并在服务恢复后重新加载收据。", tryReceiptAgain: "重试收据", accessRecord: "使用权记录", accessStillPreparing: "使用权仍在准备中。", accessUsed: "这个使用权已经使用过。", accessExpired: "这个使用权已过期。", desktopActivationUnavailable: "Desktop 激活不可用。", pageNotAvailable: "此页面不可用。", pageNotAvailableBody: "链接可能不完整，或者公开产品已经被移除。", takingToSignIn: "正在前往登录…", continueToSignIn: "继续登录", signOut: "退出登录", signingOut: "正在退出…", backToHatch: "返回 Hatch", learnAboutHatch: "了解 Hatch", payment: "支付", orderReference: "订单编号", delivery: "交付", release: "版本", placed: "下单时间", receipt: "收据", manageAccess: "管理使用权", permanentAccessPinned: "永久使用权", noOrders: "还没有订单", noOrdersBody: "你确认过的产品订单会出现在这里。", noEntitlements: "还没有 Agent 使用权", noEntitlementsBody: "加入账户的产品会出现在这里。", freeAccess: "免费 · 已获得使用权"
     },
     download: {
-      title: "下载 Hatch Desktop · Hatch", home: "Hatch 首页", back: "返回 Hatch", preview: "Desktop 预览", headline: "Hatch，来到你的桌面。", recommendedForDevice: "为你的设备推荐", macDownloads: "Mac 下载", hatchForMac: "Mac 版 Hatch", chooseMac: "请在下方选择与你的电脑匹配的 Mac 版本。", readyForDevice: (label) => `${label} 已适配这台设备。`, macBuilds: "Mac 版本", downloadDirectly: "直接下载", mac: "Mac", recommended: "推荐", unavailable: "下载暂时不可用。", unavailableBody: "请稍后重试。", tryAgain: "重试", windowsComingSoon: "Windows 即将推出", macOnly: "Hatch Desktop 目前支持 Mac。", comingSoon: "即将推出", desktop: "Hatch Desktop", learn: "了解 Hatch"
+      title: "下载 Hatch Desktop · Hatch", home: "Hatch 首页", back: "返回 Hatch", preview: "Desktop 预览", headline: "Hatch，来到你的桌面。", recommendedForDevice: "为你的设备推荐", macDownloads: "Mac 下载", hatchForMac: "Mac 版 Hatch", chooseMac: "请在下方选择与你的电脑匹配的 Mac 版本。", readyForDevice: (label) => `${label} 已适配这台设备。`, appleSilicon: "Mac · Apple Silicon", intel: "Mac · Intel", macBuilds: "Mac 版本", downloadDirectly: "直接下载", mac: "Mac", recommended: "推荐", unavailable: "下载暂时不可用。", unavailableBody: "请稍后重试。", tryAgain: "重试", windowsComingSoon: "Windows 即将推出", macOnly: "Hatch Desktop 目前支持 Mac。", comingSoon: "即将推出", windows: "Windows", desktop: "Hatch Desktop", learn: "了解 Hatch"
     },
     errors: {
       unexpected: "出了点问题，请重试。", sessionExpired: "登录已过期，请重新登录。", accessDenied: "此账户无法查看该资源。", notFound: "该资源已不可用。", detailsChanged: "最新详情已变化，请刷新后重试。", tooManyRequests: "请求过多，请稍等片刻后重试。", unavailable: "Hatch 暂时不可用，当前任务没有丢失。", releaseChanged: "请求开始后产品发生了变化，请刷新并确认当前版本。", productNotFound: "找不到产品。", creatorNotFound: "找不到 Creator。", checkoutNotFound: "找不到结账会话。", orderNotFound: "找不到订单。", entitlementNotFound: "找不到使用权记录。", agentUnavailable: "找不到已发布的 Agent。", productUnavailable: "该产品暂不可用。", candidateIncomplete: "候选版本还没有准备好，请检查失败的项目。", candidateChanged: "候选版本已变化，请重新审核后再发布。", candidateLoss: "请确认所有已知的非关键损失后再发布。", invalidCheckout: "结账信息不完整，请返回产品后重试。", csrfRejected: "请刷新页面后重试。", unauthorized: "请登录后继续。", forbidden: "你没有访问此区域的权限。", routeNotFound: "该页面已不可用。"
@@ -315,7 +355,7 @@ const MESSAGES = {
       productsTitle: "使える方法を手に入れる。", productsBody: "まず約束と境界を確認してください。仕事に合う場合だけプロダクトをアカウントに追加します。", availableProducts: "利用可能なプロダクト", noProducts: "公開中のプロダクトはまだありません", noProductsBody: "公開されたプロダクトがここに表示されます。しばらくしてから再試行してください。", creatorProducts: "Creator プロダクト", noPublicProducts: "公開中のプロダクトはありません", noPublicProductsBody: "この Creator はまだ閲覧可能なプロダクトを公開していません。", exploreAllProducts: "すべてのプロダクトを見る", productAccess: "プロダクトへのアクセス", loadingProducts: "プロダクトを読み込み中", loadingProduct: "プロダクトを読み込み中", agentDetails: "Agent の詳細", howItWorks: "使い方", accessFromWork: "アクセスから、実際の仕事へ。", stepAddAgent: "Agent を追加", stepOpenDesktop: "Hatch Desktop を開く", stepWorkAgent: "Agent と作業する", representativeExamples: "代表的な例", whatYouProvide: "提供するもの", whatYouReceive: "受け取るもの", boundaries: "境界", privacy: "プライバシー", workUnderControl: "あなたの仕事はあなたの管理下にあります。", desktopRequirement: "Desktop の要件", permanentAccess: "永久アクセス", unavailable: "利用不可", available: "利用可能", verified: "確認済み", inLibrary: "ライブラリに追加済み", accountSettings: "アカウント設定", accountTitle: "Hatch アカウント。", accountBody: "Web と Desktop では同じアカウントを使います。サインアウトしてもアクセス記録は保持されます。", signedInAccount: "サインイン中のアカウント", accountHelp: "アカウントヘルプ", accountHelpTitle: "正しいアカウントに戻る。", accountHelpBody: "注文と Agent のアクセスは、購入を確定したアカウントに属します。Hatch Desktop でも同じアカウントを使ってください。", session: "セッション", signedIn: "サインインしています。", signInContinue: "続行するにはサインインしてください。", sessionBody: "レシートやプロダクトへのアクセスが見つからない場合は、Web と Desktop が同じアカウントを使っているか確認してください。", purchaseSupport: "購入サポート", supportReference: "サポート参照番号を保管してください。", supportBody: "支払いや返金、アクセスの問題を報告するときは、注文またはアクセスの詳細を開き、サポート参照番号を添えてください。", viewSettings: "設定を見る", viewOrders: "注文を見る", subscriptions: "サブスクリプション", noSubscriptions: "サブスクリプション商品は有効になっていません。", noSubscriptionsBody: "現在、公開済みのすべてのプロダクトは無料で永久アクセスを付与します。有料アクセスとサブスクリプションは利用できません。", productOrder: "プロダクト注文", orderDetails: "注文の詳細", yourOrders: "あなたの注文", yourLibrary: "あなたの Agent ライブラリ", yourEntitlements: "あなたのアクセス", ordersLabel: "注文", created: "作成日時", validFrom: "有効開始", expires: "有効期限", subtotal: "小計", discount: "割引", tax: "税", total: "合計", notCalculated: "未計算", returnToProduct: "プロダクトに戻る", viewReceipt: "レシートを見る", viewOrder: "注文を見る", viewOrderStatus: "注文状況を見る", viewAccessDetails: "アクセスの詳細を見る", downloadDesktop: "Hatch Desktop をダウンロード", openDesktop: "Hatch Desktop を開く", addToAccount: "アカウントに追加", addProductToAccount: "このプロダクトをアカウントに追加する。", checkout: "チェックアウト", confirmOrder: "注文を確認", paymentNotRequired: "支払い不要", checkoutLegal: "プロダクトとリリースはサーバーで確定されます。", addingToAccount: "アカウントに追加中…", accessRequestStale: "このアクセスリクエストは最新ではありません。プロダクトに戻って再試行してください。", accessSetup: "アクセス設定", accessConfirmed: "アクセスが確認されました", accessConfirmedBody: "アクセスはすでに記録されています。Hatch がレシートを完了中なので、再送信しないでください。", retrySetup: "設定を再試行", accessRemoved: "アクセスを削除しました", accessInactive: "このアクセスは有効ではありません。", receiptAvailable: "レシートは記録として引き続き利用できます。", confirmingPayment: "支払いを確認中", confirmingOrder: "注文を確認しています…", doNotSubmitAgain: "注文を再送信しないでください。このページは正式な支払いとアクセスの状態を読み取り、自動的に更新します。", paymentNotCompleted: "支払いが完了していません", paymentFailure: "アカウントへの請求を完了できませんでした。", noAccessGranted: "アクセスは付与されていません。注文に戻り、支払い状況と復旧方法を確認してください。", purchaseCompleted: "購入は完了しましたが、レシートは一時的に利用できません。", purchaseCompletedBody: "注文を再度行わないでください。Hatch は確定済みの購入を保持し、サービス復旧後にレシートを再読み込みします。", tryReceiptAgain: "レシートを再試行", accessRecord: "アクセス記録", accessStillPreparing: "アクセスを準備中です。", accessUsed: "このアクセスは使用済みです。", accessExpired: "このアクセスは期限切れです。", desktopActivationUnavailable: "Desktop の有効化を利用できません。", pageNotAvailable: "このページは利用できません。", pageNotAvailableBody: "リンクが不完全か、公開プロダクトが削除された可能性があります。", takingToSignIn: "サインインへ移動中…", continueToSignIn: "サインインを続ける", signOut: "サインアウト", signingOut: "サインアウト中…", backToHatch: "Hatch に戻る", learnAboutHatch: "Hatch について", payment: "支払い", orderReference: "注文番号", delivery: "配送", release: "リリース", placed: "注文日時", receipt: "レシート", manageAccess: "アクセスを管理", permanentAccessPinned: "永久アクセス", noOrders: "注文はまだありません", noOrdersBody: "確定したプロダクト注文がここに表示されます。", noEntitlements: "Agent へのアクセスはまだありません", noEntitlementsBody: "アカウントに追加したプロダクトがここに表示されます。", freeAccess: "無料 · アクセス済み"
     },
     download: {
-      title: "Hatch Desktop をダウンロード · Hatch", home: "Hatch ホーム", back: "Hatch に戻る", preview: "Desktop プレビュー", headline: "Hatch をデスクトップで。", recommendedForDevice: "お使いのデバイスにおすすめ", macDownloads: "Mac ダウンロード", hatchForMac: "Mac 版 Hatch", chooseMac: "お使いのコンピューターに合う Mac ビルドを下から選択してください。", readyForDevice: (label) => `${label} はこのデバイスで利用できます。`, macBuilds: "Mac ビルド", downloadDirectly: "直接ダウンロード", mac: "Mac", recommended: "おすすめ", unavailable: "ダウンロードは一時的に利用できません。", unavailableBody: "しばらくしてから再試行してください。", tryAgain: "再試行", windowsComingSoon: "Windows は近日公開", macOnly: "Hatch Desktop は現在 Mac で利用できます。", comingSoon: "近日公開", desktop: "Hatch Desktop", learn: "Hatch について"
+      title: "Hatch Desktop をダウンロード · Hatch", home: "Hatch ホーム", back: "Hatch に戻る", preview: "Desktop プレビュー", headline: "Hatch をデスクトップで。", recommendedForDevice: "お使いのデバイスにおすすめ", macDownloads: "Mac ダウンロード", hatchForMac: "Mac 版 Hatch", chooseMac: "お使いのコンピューターに合う Mac ビルドを下から選択してください。", readyForDevice: (label) => `${label} はこのデバイスで利用できます。`, appleSilicon: "Mac · Apple Silicon", intel: "Mac · Intel", macBuilds: "Mac ビルド", downloadDirectly: "直接ダウンロード", mac: "Mac", recommended: "おすすめ", unavailable: "ダウンロードは一時的に利用できません。", unavailableBody: "しばらくしてから再試行してください。", tryAgain: "再試行", windowsComingSoon: "Windows は近日公開", macOnly: "Hatch Desktop は現在 Mac で利用できます。", comingSoon: "近日公開", windows: "Windows", desktop: "Hatch Desktop", learn: "Hatch について"
     },
     errors: {
       unexpected: "問題が発生しました。再試行してください。", sessionExpired: "セッションの有効期限が切れました。サインインしてください。", accessDenied: "このアカウントはそのリソースを表示できません。", notFound: "そのリソースは利用できなくなりました。", detailsChanged: "最新の詳細が変更されました。更新して再試行してください。", tooManyRequests: "リクエストが多すぎます。少し待ってから再試行してください。", unavailable: "Hatch は一時的に利用できません。現在の作業は破棄されていません。", releaseChanged: "リクエスト開始後にプロダクトが変更されました。更新して現在のリリースを確認してください。", productNotFound: "プロダクトが見つかりません。", creatorNotFound: "Creator が見つかりません。", checkoutNotFound: "チェックアウトセッションが見つかりません。", orderNotFound: "注文が見つかりません。", entitlementNotFound: "アクセス記録が見つかりません。", agentUnavailable: "公開済み Agent が見つかりません。", productUnavailable: "このプロダクトは利用できません。", candidateIncomplete: "候補はまだ準備できていません。失敗した確認項目を見直してください。", candidateChanged: "候補が変更されました。公開前にもう一度レビューしてください。", candidateLoss: "公開前に既知の非クリティカルな損失をすべて確認してください。", invalidCheckout: "チェックアウト情報が不完全です。プロダクトに戻って再試行してください。", csrfRejected: "ページを更新して再試行してください。", unauthorized: "続行するにはサインインしてください。", forbidden: "このエリアへのアクセス権がありません。", routeNotFound: "そのページは利用できなくなりました。"
@@ -332,7 +372,10 @@ Object.assign(MESSAGES.zh.buyer, {
   statusPaid: "已支付",
   statusPublished: "已发布",
   statusReadyToPublish: "可以发布",
-  statusPreparing: "准备中"
+  statusPreparing: "准备中",
+  connectPayouts: "连接收款",
+  continuePayoutSetup: "继续设置",
+  managePayouts: "管理收款"
 });
 Object.assign(MESSAGES.ja.buyer, {
   viewDetails: "詳細を見る", backExplore: "← 探索", publishedMethods: "自分の Workspace で使える公開済みの方法。", creatorAgentFallback: "Creator Agent", hatchCreatorFallback: "Hatch Creator", productDesktopRequirementFallback: "macOS アプリと Hatch アカウントが必要です。Workspace を選ぶと Agent がローカルファイルを扱えます。", productPromiseFallback: "自分の Workspace で使える Creator の実践的な方法。", yourPublishedStorefront: "これは公開済みのストアフロントです。", buyersSeePromise: "購入者にはここで示したものと同じ約束と境界が表示されます。", manageProduct: "プロダクトを管理", accessSetupInProgress: "アクセスを設定中です。", agentReady: "この Agent は準備できています。", returnDesktop: "安全に続けるには Hatch Desktop に戻ってください。", openDesktopWorkspace: "このアカウントで Hatch Desktop を開き、Workspace を選択してください。", settingUpAccess: "アクセスを設定中…", orderConfirmedBody: "注文は確認されました。履行が完了するとアクセスが表示されます。", settingUpAccessButton: "アクセスを設定中", productUnavailableTitle: "このプロダクトは利用できません。", creatorWithdrawn: "Creator がこのプロダクトを取り下げました。既存のレシートは引き続き利用できます。", getAccess: "アクセスする", viewInLibrary: "ライブラリで見る", downloadDesktopLink: "Desktop をダウンロード", confirmPermanentAccess: "このプロダクトへの永久アクセスを確認します。", signInDesktopWorkspace: "同じアカウントでサインインし、ローカル Workspace を選択してください。", workAsOften: "自分の Workspace で必要なだけこの方法を使えます。", evidenceTitle: "保護された指示を公開せずに、根拠を示します。",
@@ -343,7 +386,10 @@ Object.assign(MESSAGES.ja.buyer, {
   statusPaid: "支払い済み",
   statusPublished: "公開済み",
   statusReadyToPublish: "公開可能",
-  statusPreparing: "準備中"
+  statusPreparing: "準備中",
+  connectPayouts: "支払いを接続",
+  continuePayoutSetup: "設定を続ける",
+  managePayouts: "支払いを管理"
 });
 
 Object.assign(MESSAGES.en.buyer, {
@@ -560,6 +606,14 @@ export function translateWeb(locale, key, ...args) {
   const requested = MESSAGES[normalizeWebLocale(locale)] ?? MESSAGES.en;
   const value = resolveMessage(requested, key) ?? resolveMessage(MESSAGES.en, key) ?? key;
   return typeof value === "function" ? value(...args) : value;
+}
+
+export function localizeWebIdentifier(value, locale = getWebLocale()) {
+  const text = String(value ?? "").trim();
+  if (!text) return translateWeb(locale, "common.notProvided");
+  const key = WEB_IDENTIFIER_KEYS[text.toLowerCase()];
+  if (key) return translateWeb(locale, key);
+  return text.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 export function localizeWebApiError(body, locale = getWebLocale()) {

@@ -1,3 +1,5 @@
+import { getWebLocale, translateWeb } from "./webI18n.js";
+
 export function storefrontList(value) {
   if (!Array.isArray(value)) return [];
   return value.map((item) => {
@@ -48,9 +50,13 @@ export function creatorPublicModel(payload = {}) {
 }
 
 export function payoutActionLabel(status) {
-  if (status === "not_connected") return "Connect payouts";
-  if (["onboarding_incomplete", "under_review", "restricted"].includes(status)) return "Continue setup";
-  return "Manage payouts";
+  return translateWeb(getWebLocale(), payoutActionKey(status));
+}
+
+export function payoutActionKey(status) {
+  if (status === "not_connected") return "buyer.connectPayouts";
+  if (["onboarding_incomplete", "under_review", "restricted"].includes(status)) return "buyer.continuePayoutSetup";
+  return "buyer.managePayouts";
 }
 
 export function payoutCanRetry(status) {

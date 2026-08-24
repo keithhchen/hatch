@@ -9,11 +9,11 @@ import {
   detectDownloadTargetAsync
 } from "./downloadPresentation.js";
 import { WebLanguagePicker, useWebLocale } from "./WebLocaleProvider.jsx";
-import { webT } from "./webI18n.js";
+import { translateWeb, webT } from "./webI18n.js";
 import "./downloadPage.css";
 
 export function DownloadPage() {
-  useWebLocale();
+  const { locale } = useWebLocale();
   const [detectedTarget, setDetectedTarget] = useState("unknown");
   const [detectionReady, setDetectionReady] = useState(false);
 
@@ -33,12 +33,13 @@ export function DownloadPage() {
       active = false;
       document.title = previousTitle;
     };
-  }, []);
+  }, [locale]);
 
   const targets = useMemo(() => DESKTOP_DOWNLOAD_TARGET_ORDER.map((key) => ({
     ...DESKTOP_DOWNLOAD_TARGETS[key],
+    label: translateWeb(locale, DESKTOP_DOWNLOAD_TARGETS[key].labelKey),
     url: desktopDownloadUrl(key)
-  })), []);
+  })), [locale]);
   const recommendedTarget = targets.find((target) => target.key === detectedTarget) ?? null;
   const hasConfiguredDownloads = Boolean(DESKTOP_DOWNLOAD_BASE_URL) && targets.every((target) => target.url);
 
@@ -135,7 +136,7 @@ function WindowsComingSoon() {
   return (
     <Surface level="solid" className="download-page__platform-card download-page__platform-card--unavailable" role="status">
       <div className="download-page__platform-copy">
-        <span className="download-page__platform-eyebrow">Windows</span>
+        <span className="download-page__platform-eyebrow">{webT("download.windows")}</span>
         <h3>{webT("download.windowsComingSoon")}</h3>
         <p>{webT("download.macOnly")}</p>
       </div>

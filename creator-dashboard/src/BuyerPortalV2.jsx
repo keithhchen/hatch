@@ -17,9 +17,9 @@ import {
 } from "@hatch/ui";
 import { CheckoutSummary } from "@hatch/ui/product";
 import { StorefrontDetails } from "./StorefrontDetails.jsx";
-import { humanizeIdentifier, meaningfulReversalStatus } from "./buyerPresentation.js";
+import { meaningfulReversalStatus } from "./buyerPresentation.js";
 import { creatorPublicModel } from "./storefrontModel.js";
-import { formatUsd, formatWebDate, getWebLocale, webErrorMessage, webT } from "./webI18n.js";
+import { formatUsd, formatWebDate, getWebLocale, localizeWebIdentifier, webErrorMessage, webT } from "./webI18n.js";
 import { WebLanguagePicker, useWebLocale } from "./WebLocaleProvider.jsx";
 import "./buyerPortalV2.css";
 
@@ -1373,7 +1373,7 @@ function safeDecode(value) {
 }
 
 function sentenceCase(value) {
-  return humanizeIdentifier(value);
+  return localizeWebIdentifier(value, getWebLocale());
 }
 
 function cssToken(value) { return String(value || "unknown").toLowerCase().replace(/[^a-z0-9-]/g, "-"); }

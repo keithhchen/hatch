@@ -8,16 +8,16 @@ export const DESKTOP_DOWNLOAD_TARGETS = Object.freeze({
   "macos-apple-silicon": Object.freeze({
     key: "macos-apple-silicon",
     platform: "macos",
-    label: "Mac · Apple Silicon",
+    labelKey: "download.appleSilicon",
     latestPath: "mac/apple-silicon.dmg",
-    primaryLabel: "Download preview"
+    primaryLabelKey: "download.preview"
   }),
   "macos-intel": Object.freeze({
     key: "macos-intel",
     platform: "macos",
-    label: "Mac · Intel",
+    labelKey: "download.intel",
     latestPath: "mac/intel.dmg",
-    primaryLabel: "Download preview"
+    primaryLabelKey: "download.preview"
   })
 });
 
