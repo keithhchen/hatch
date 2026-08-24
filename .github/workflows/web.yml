@@ -129,7 +129,7 @@ jobs:
               "${endpoint[@]}"
           }
           for locale in en ja zh; do
-            source="creator-dashboard/public/assets/onepager/hatch-launch-${locale}.mp4"
+            source="creator-dashboard/public/assets/web/hatch-launch-${locale}.mp4"
             key="${WEB_MEDIA_PREFIX}/hatch-launch-${locale}.mp4"
             expected_bytes="$(wc -c < "$source" | tr -d '[:space:]')"
             aws s3 cp "$source" "s3://${HATCH_OSS_BUCKET}/${key}" "${endpoint[@]}" \
