@@ -16,7 +16,6 @@ import type { ActivatedSkill } from "./store.js";
 import {
   auditProposedDeliveryTool,
   activeSkillResourceRoots,
-  buildRuntimeContextMessages,
   buildRuntimeSystemPrompt,
   type PiModelMessage,
   chatToolsForRun,
@@ -28,7 +27,6 @@ import {
   modelVisibleToolResult,
   produceAuditedFinal,
   requestedOutputPath,
-  runtimeSkillActivationFromToolResult,
   toolEventBase,
   workspaceDiffEvent,
   type AgentRuntime,
@@ -117,6 +115,21 @@ export class PiAgentRuntime implements AgentRuntime {
     const visibleSkills = ctx.sessionSkills.visibleRecords;
     let activeSkills = [...(ctx.activatedSkills ?? [])];
     let resourceRoots = activeSkillResourceRoots(visibleSkills, activeSkills);
+    let agent: Agent | undefined;
+    const currentSystemPrompt = (): string => buildRuntimeSystemPrompt(
+      ctx.agentSystemPrompt,
+      ctx.deliveryWorkflow,
+      ctx.briefSnapshot,
+      ctx.sessionSkills.rendered.section,
+      activeSkills
+    );
+    const setActiveSkills = (next: ActivatedSkill[]): void => {
+      activeSkills = next;
+      resourceRoots = activeSkillResourceRoots(visibleSkills, activeSkills);
+      // Agent.state is the source of truth for a subsequent prompt() call;
+      // prepareNextTurnWithContext below updates the in-flight loop snapshot.
+      if (agent) agent.state.systemPrompt = currentSystemPrompt();
+    };
     const toolEvents = new Map<string, ToolEventState>();
     let terminalError: Error | undefined;
     let finalAssistant: AssistantMessage | undefined;
@@ -128,14 +141,9 @@ export class PiAgentRuntime implements AgentRuntime {
     const transcriptMessages: ConversationMessage[] = [];
     const completedArtifactPaths: string[] = [];
 
-    const contextMessages = buildRuntimeContextMessages(
-      ctx.sessionSkills.rendered.section,
-      activeSkills
-    ).map((message) => piUserMessage(message.content ?? ""));
     const storedMessages = ctx.messages.slice(0, -1).map(toPiMessage);
     const toolDefinitions = this.options.toolDefinitions ?? chatToolsForRun(
       ctx.clientTools,
-      ctx.allowSkillRun !== false,
       ctx.allowedExternalTools,
       ctx.knowledgeAvailable,
       ctx.externalToolDefinitions
@@ -145,11 +153,12 @@ export class PiAgentRuntime implements AgentRuntime {
       ctx,
       definition,
       () => activeSkills,
+      setActiveSkills,
       () => resourceRoots,
       workspacePathPolicy
     ));
 
-    const agent = new Agent({
+    const runtimeAgent = new Agent({
       streamFn,
       // Pi's default Agent projection only accepts the three provider
       // message roles. Use Pi's harness projector so its native
@@ -157,10 +166,10 @@ export class PiAgentRuntime implements AgentRuntime {
       // summary delimiters.
       convertToLlm,
       initialState: {
-        systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, ctx.deliveryWorkflow, ctx.briefSnapshot),
+        systemPrompt: currentSystemPrompt(),
         model,
         thinkingLevel: "high",
-        messages: [...contextMessages, ...storedMessages],
+        messages: storedMessages,
         tools
       },
       beforeToolCall: deliveryReviewer && deliveryWorkflow
@@ -170,8 +179,8 @@ export class PiAgentRuntime implements AgentRuntime {
             workflow: deliveryWorkflow,
             toolName: toolCall.name,
             arguments: args as Record<string, unknown>,
-            messages: auditMessagesForRun(ctx, transcriptMessages, undefined),
-            systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, deliveryWorkflow, ctx.briefSnapshot),
+            messages: auditMessagesForRun(ctx, transcriptMessages, undefined, activeSkills),
+            systemPrompt: currentSystemPrompt(),
             auditContext: ctx.deliveryAuditContext,
             signal
           });
@@ -199,12 +208,9 @@ export class PiAgentRuntime implements AgentRuntime {
           .map(toRuntimeCompactionMessage);
         compacting = true;
         try {
-        const replacement = await ctx.compactMessagesIfNeeded(runtimeMessages, "mid_turn");
+          const replacement = await ctx.compactMessagesIfNeeded(runtimeMessages, "mid_turn");
           if (!replacement) return messages;
-          return [
-            ...contextMessages,
-            ...replacement.map(toPiMessage)
-          ];
+          return replacement.map(toPiMessage);
         } catch {
           // A compaction failure should not destroy an otherwise usable live
           // turn. The normal provider request will surface a context error if
@@ -213,31 +219,38 @@ export class PiAgentRuntime implements AgentRuntime {
         } finally {
           compacting = false;
         }
+      },
+      prepareNextTurnWithContext: async ({ context }) => {
+        const systemPrompt = currentSystemPrompt();
+        // Pi snapshots AgentContext at the start of a run. Updating Agent.state
+        // alone would affect only a later prompt() call, so replace the
+        // snapshot explicitly before the next provider request.
+        if (agent) agent.state.systemPrompt = systemPrompt;
+        return {
+          context: { ...context, systemPrompt }
+        };
       }
     });
+    agent = runtimeAgent;
 
     // Abort the provider-backed Pi loop as soon as the owning Runtime run is
     // cancelled or its socket disconnects. The Runtime keeps the global run
     // reservation until this generator actually settles, so an abort that is
     // slow (or ignored below the Agent boundary) cannot amplify model work.
-    const abortAgent = () => agent.abort();
+    const abortAgent = () => runtimeAgent.abort();
     ctx.abortSignal?.addEventListener("abort", abortAgent, { once: true });
 
     try {
-      agent.subscribe(async (event) => {
+      runtimeAgent.subscribe(async (event) => {
         await this.handleEvent({
           event,
-          agent,
+          agent: runtimeAgent,
           input,
           ctx,
           queue,
           toolEvents,
           workspacePathPolicy,
           getActiveSkills: () => activeSkills,
-          setActiveSkills: (next) => {
-            activeSkills = next;
-            resourceRoots = activeSkillResourceRoots(visibleSkills, activeSkills);
-          },
           getResourceRoots: () => resourceRoots,
           setHasExecutedTool: () => { hasExecutedTool = true; },
           deliveryWorkflow,
@@ -255,7 +268,7 @@ export class PiAgentRuntime implements AgentRuntime {
       // Pass an explicit Pi UserMessage so the current user turn stays a plain
       // text payload in the OpenAI-compatible request (and in persistence),
       // instead of Agent.prompt(string)'s text-block form.
-      const promptPromise = agent.prompt(piUserMessage(input.message.content))
+      const promptPromise = runtimeAgent.prompt(piUserMessage(input.message.content))
         .catch((error) => {
           terminalError = error instanceof Error ? error : new Error(String(error));
         })
@@ -277,8 +290,8 @@ export class PiAgentRuntime implements AgentRuntime {
           runner: deliveryReviewer,
           workflow: deliveryWorkflow,
           draft: draftContent,
-          messages: auditMessagesForRun(ctx, transcriptMessages, finalAssistant),
-          systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, deliveryWorkflow, ctx.briefSnapshot),
+          messages: auditMessagesForRun(ctx, transcriptMessages, finalAssistant, activeSkills),
+          systemPrompt: currentSystemPrompt(),
           auditContext: ctx.deliveryAuditContext,
           signal: ctx.abortSignal
         })
@@ -323,7 +336,7 @@ export class PiAgentRuntime implements AgentRuntime {
       };
     } finally {
       ctx.abortSignal?.removeEventListener("abort", abortAgent);
-      agent.abort();
+      runtimeAgent.abort();
     }
   }
 
@@ -408,6 +421,7 @@ export class PiAgentRuntime implements AgentRuntime {
     ctx: RunContext,
     definition: PiToolDefinition,
     getActiveSkills: () => ActivatedSkill[],
+    setActiveSkills: (skills: ActivatedSkill[]) => void,
     getResourceRoots: () => string[],
     workspacePathPolicy: WorkspacePathPolicy
   ): AgentTool<any> {
@@ -431,7 +445,8 @@ export class PiAgentRuntime implements AgentRuntime {
             getActiveSkills(),
             ctx.sessionSkills.rendered.aliases,
             workspacePathPolicy,
-            signal
+            signal,
+            (skill) => setActiveSkills(mergeRuntimeActiveSkill(getActiveSkills(), skill))
           );
         } catch (error) {
           result = {
@@ -458,7 +473,6 @@ export class PiAgentRuntime implements AgentRuntime {
     toolEvents: Map<string, ToolEventState>;
     workspacePathPolicy: WorkspacePathPolicy;
     getActiveSkills: () => ActivatedSkill[];
-    setActiveSkills: (skills: ActivatedSkill[]) => void;
     getResourceRoots: () => string[];
     setHasExecutedTool: () => void;
     deliveryWorkflow?: RunContext["deliveryWorkflow"];
@@ -476,7 +490,6 @@ export class PiAgentRuntime implements AgentRuntime {
       toolEvents,
       workspacePathPolicy,
       getActiveSkills,
-      setActiveSkills,
       getResourceRoots,
       setHasExecutedTool,
       deliveryWorkflow,
@@ -556,7 +569,6 @@ export class PiAgentRuntime implements AgentRuntime {
           approval: "none",
           arguments: args,
           status: "requested",
-          ...(ctx.toolScope ? { scope: ctx.toolScope } : {}),
           error: { code: "invalid_tool_call", message: errorMessage(error) }
         };
       }
@@ -617,8 +629,6 @@ export class PiAgentRuntime implements AgentRuntime {
         }
         const diffEvent = workspaceDiffEvent(input.run_id, event.toolCallId, eventBase.name, details);
         if (diffEvent) queue.push(diffEvent);
-        const activation = runtimeSkillActivationFromToolResult(event.toolName, visibleResult);
-        if (activation) setActiveSkills(mergeRuntimeActiveSkill(getActiveSkills(), activation));
       }
       queue.push({
         type: "assistant.delta",
@@ -656,17 +666,23 @@ function createDeliveryReviewer(): PiAgentPromptRunner {
 function auditMessagesForRun(
   ctx: RunContext,
   transcriptMessages: ConversationMessage[],
-  finalAssistant: AssistantMessage | undefined
+  finalAssistant: AssistantMessage | undefined,
+  activeSkills: ActivatedSkill[] = []
 ): PiModelMessage[] {
   const transcript = finalAssistant && transcriptMessages.length > 0
     ? transcriptMessages.slice(0, -1)
     : transcriptMessages;
   return [
-    { role: "system", content: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, ctx.deliveryWorkflow, ctx.briefSnapshot) },
-    ...buildRuntimeContextMessages(
-      ctx.sessionSkills.rendered.section,
-      ctx.activatedSkills ?? []
-    ),
+    {
+      role: "system",
+      content: buildRuntimeSystemPrompt(
+        ctx.agentSystemPrompt,
+        ctx.deliveryWorkflow,
+        ctx.briefSnapshot,
+        ctx.sessionSkills.rendered.section,
+        activeSkills
+      )
+    },
     ...ctx.messages.map(toAuditMessage),
     ...transcript.map(toAuditMessage)
   ];

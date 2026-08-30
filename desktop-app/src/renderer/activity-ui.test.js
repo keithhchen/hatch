@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  SKILL_ACTIVITY_PART,
-  SKILL_RUN_ACTIVITY_PART,
   TURN_ACTIVITY_PART,
   activityGroupPath,
   activitySummary,
@@ -48,23 +46,13 @@ describe("activity accordion projection", () => {
     ]);
   });
 
-  it("groups adjacent thinking, tool, and skill parts without crossing assistant text", () => {
+  it("groups thinking and tool parts without crossing assistant text", () => {
     expect(activityGroupPath({
       type: "data",
       name: TURN_ACTIVITY_PART,
       data: {}
     })).toEqual(["group-activity"]);
     expect(activityGroupPath(toolPart())).toEqual(["group-activity", "group-tools"]);
-    expect(activityGroupPath({
-      type: "data",
-      name: SKILL_ACTIVITY_PART,
-      data: {}
-    })).toEqual(["group-activity"]);
-    expect(activityGroupPath({
-      type: "data",
-      name: SKILL_RUN_ACTIVITY_PART,
-      data: {}
-    })).toEqual(["group-activity"]);
     expect(activityGroupPath({ type: "text", text: "answer" })).toEqual([]);
   });
 
@@ -177,24 +165,20 @@ describe("activity accordion projection", () => {
       ]);
   });
 
-  it("hydrates persisted text and activity in committed order", () => {
+  it("hydrates persisted text and tool activity in committed order", () => {
     const tool = { tool_call_id: "read", name: "file_read" };
-    const skillRun = { skill_run_id: "skill-1", name: "research" };
     expect(historyTimelineEntries({
       content: "先读取。再回答。",
       parts: [
         { type: "text", start: 0, end: 4 },
         { type: "tool_call", tool_call_id: "read" },
-        { type: "text", start: 4, end: 8 },
-        { type: "skill_run", skill_run_id: "skill-1" }
+        { type: "text", start: 4, end: 8 }
       ],
-      tool_calls: [tool],
-      skill_runs: [skillRun]
+      tool_calls: [tool]
     })).toEqual([
       { type: "text", text: "先读取。" },
       { type: "tool_call", value: tool },
-      { type: "text", text: "再回答。" },
-      { type: "skill_run", value: skillRun }
+      { type: "text", text: "再回答。" }
     ]);
   });
 

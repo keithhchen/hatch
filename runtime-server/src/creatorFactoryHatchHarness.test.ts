@@ -62,11 +62,11 @@ test("one-shot harness binds a verified Corpus and traverses the full Hatch Runt
   const runtime: AgentRuntime = {
     async *run(input, context) {
       assert.match(context.agentSystemPrompt ?? "", new RegExp(system));
-      assert.match(context.agentSystemPrompt ?? "", new RegExp(skillInstruction));
-      assert.match(context.agentSystemPrompt ?? "", new RegExp(skillReference));
+      assert.equal((context.agentSystemPrompt ?? "").includes(skillInstruction), false);
+      assert.equal((context.agentSystemPrompt ?? "").includes(skillReference), false);
       assert.equal((context.agentSystemPrompt ?? "").includes(retrievalOnlyKnowledge), false);
       assert.equal(context.knowledgeAvailable, true);
-      assert.equal(context.allowSkillRun, false);
+      assert.match(context.sessionSkills.rendered.section, /offer-critique/);
       assert.deepEqual(context.clientTools, CANONICAL_LOCAL_TOOLS);
       const modelVisible = JSON.stringify({
         agentSystemPrompt: context.agentSystemPrompt,

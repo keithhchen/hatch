@@ -6,8 +6,6 @@ import {
   RuntimeStore,
   type StoreEvent,
   type VisibleConversationMessage,
-  type VisibleConversationSkillEvent,
-  type VisibleConversationSkillRun,
   type VisibleConversationToolCall
 } from "./store.js";
 
@@ -514,21 +512,6 @@ export class PostgresStore extends RuntimeStore {
   async readVisibleConversation(conversationId: string): Promise<VisibleConversationMessage[]> {
     const events = await this.readVisibleEvents(conversationId);
     const toolCallsByRun = new Map<string, Map<string, VisibleConversationToolCall>>();
-    const skillEventsByRun = new Map<string, VisibleConversationSkillEvent[]>();
-    const skillRunsByRun = new Map<string, Map<string, VisibleConversationSkillRun>>();
-    const skillEventKeysByRun = new Map<string, Set<string>>();
-    const appendVisibleSkillEvent = (event: VisibleConversationSkillEvent): void => {
-      const runSkillEvents = skillEventsByRun.get(event.run_id) ?? [];
-      const runSkillKeys = skillEventKeysByRun.get(event.run_id) ?? new Set<string>();
-      const key = visibleSkillEventKey(event);
-      if (runSkillKeys.has(key)) {
-        return;
-      }
-      runSkillEvents.push(event);
-      runSkillKeys.add(key);
-      skillEventsByRun.set(event.run_id, runSkillEvents);
-      skillEventKeysByRun.set(event.run_id, runSkillKeys);
-    };
 
     for (const event of events) {
       if (event.type === "tool.call") {
@@ -542,55 +525,12 @@ export class PostgresStore extends RuntimeStore {
           status: event.status,
           locality: event.locality ?? existing?.locality,
           approval: event.approval ?? existing?.approval,
-          scope: event.scope ?? existing?.scope,
-          skill_run_id: event.skill_run_id ?? existing?.skill_run_id,
           result: event.result ?? existing?.result,
           error: event.error ?? existing?.error,
           first_timestamp: existing?.first_timestamp ?? event.timestamp,
           timestamp: event.timestamp
         });
         toolCallsByRun.set(event.run_id, runTools);
-      }
-      if (event.type === "skill.activated") {
-        appendVisibleSkillEvent({
-          run_id: event.run_id,
-          name: event.name,
-          path: event.path,
-          scope: event.scope,
-          status: "activated",
-          invocation_type: "explicit",
-          reason: "explicit_mention",
-          resource_paths: event.resource_paths,
-          resource_manifest_truncated: event.resource_manifest_truncated,
-          timestamp: event.timestamp
-        });
-      }
-      if (event.type === "skill.invoked") {
-        appendVisibleSkillEvent({
-          run_id: event.run_id,
-          name: event.name,
-          path: event.path,
-          scope: event.scope,
-          status: "invoked",
-          invocation_type: event.invocation_type,
-          reason: event.reason,
-          source_tool_call_id: event.source_tool_call_id,
-          trigger: event.trigger,
-          timestamp: event.timestamp
-        });
-      }
-      if (event.type === "skill.run") {
-        const runs = skillRunsByRun.get(event.run_id) ?? new Map<string, VisibleConversationSkillRun>();
-        runs.set(event.skill_run_id, {
-          run_id: event.run_id,
-          skill_run_id: event.skill_run_id,
-          skill_id: event.skill_id,
-          name: event.name,
-          status: event.status,
-          error: event.error,
-          timestamp: event.timestamp
-        });
-        skillRunsByRun.set(event.run_id, runs);
       }
     }
 
@@ -654,16 +594,6 @@ export class PostgresStore extends RuntimeStore {
             .sort((left, right) => left.first_timestamp.localeCompare(right.first_timestamp));
           if (toolCalls.length > 0) {
             message.tool_calls = toolCalls;
-          }
-          const skillEvents = [...(skillEventsByRun.get(event.run_id) ?? [])]
-            .sort((left, right) => left.timestamp.localeCompare(right.timestamp));
-          if (skillEvents.length > 0) {
-            message.skill_events = skillEvents;
-          }
-          const skillRuns = [...(skillRunsByRun.get(event.run_id)?.values() ?? [])]
-            .sort((left, right) => left.timestamp.localeCompare(right.timestamp));
-          if (skillRuns.length > 0) {
-            message.skill_runs = skillRuns;
           }
         }
         return message;
@@ -846,14 +776,4 @@ function eventFromPayload(payload: unknown): StoreEvent {
     return normalizePersistedStoreEvent(payload as StoreEvent);
   }
   throw new Error("Postgres conversation event payload is not a JSON object");
-}
-
-function visibleSkillEventKey(event: VisibleConversationSkillEvent): string {
-  return [
-    event.run_id,
-    event.status,
-    event.path,
-    event.reason,
-    event.source_tool_call_id ?? ""
-  ].join("\u0000");
 }

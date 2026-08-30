@@ -130,9 +130,6 @@ describe("adaptive text reveal", () => {
       "approval.result",
       "tool_call.delta",
       "tool_call.request",
-      "skill.activated",
-      "skill.invoked",
-      "skill.run",
       "turn.failed"
     ]) {
       expect(textRevealBoundary({ type })).toBe("flush");

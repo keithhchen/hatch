@@ -2,12 +2,9 @@ import { MAX_TOOL_RESULT_BYTES, type OutboundMessage, type ToolRequest, type Too
 import type { RunStateMachine } from "./runState.js";
 import type { RuntimeStore } from "./store.js";
 import { requireTool } from "./tools.js";
-import { projectToolArgumentsForVisibility, projectToolResultForVisibility } from "./toolVisibility.js";
 
 type ClientToolBrokerExecuteOptions = {
   approvalOverride?: ToolRequest["approval"];
-  scope?: ToolRequest["scope"];
-  skillRunId?: string;
 };
 
 type PendingCall = {
@@ -20,8 +17,6 @@ type PendingCall = {
   name: string;
   arguments: Record<string, unknown>;
   approval: "none" | "auto" | "ask";
-  scope?: ToolRequest["scope"];
-  skillRunId?: string;
   state?: RunStateMachine;
 };
 
@@ -65,9 +60,7 @@ export class ClientToolBroker {
       tool_call_id: toolCallId,
       name,
       arguments: parsedArgs,
-      approval,
-      ...(options.scope ? { scope: options.scope } : {}),
-      ...(options.skillRunId ? { skill_run_id: options.skillRunId } : {})
+      approval
     };
 
     let createdPending!: PendingCall;
@@ -83,12 +76,10 @@ export class ClientToolBroker {
           run_id: runId,
           tool_call_id: toolCallId,
           name,
-          arguments: projectToolArgumentsForVisibility(options.scope, name, parsedArgs),
+          arguments: parsedArgs,
           status: "failed",
           locality: "client",
           approval,
-          ...(options.scope ? { scope: options.scope } : {}),
-          ...(options.skillRunId ? { skill_run_id: options.skillRunId } : {}),
           error: { message: `Timed out waiting for client tool result: ${name}` }
         })).catch(() => undefined);
         reject(new Error(`Timed out waiting for client tool result: ${name}`));
@@ -104,8 +95,6 @@ export class ClientToolBroker {
         name,
         arguments: parsedArgs,
         approval,
-        scope: options.scope,
-        skillRunId: options.skillRunId,
         state
       };
       this.pending.set(key, createdPending);
@@ -119,7 +108,7 @@ export class ClientToolBroker {
     if (!pending) {
       return Promise.reject(new Error(`Client tool pending state was not created: ${toolCallId}`));
     }
-    void this.dispatch(request, pending, state, parsedArgs, approval, options).catch((error) => {
+    void this.dispatch(request, pending, state, parsedArgs, approval).catch((error) => {
       this.failPending(key, pending, error);
     });
     return result;
@@ -130,8 +119,7 @@ export class ClientToolBroker {
     pending: PendingCall,
     state: RunStateMachine | undefined,
     parsedArgs: Record<string, unknown>,
-    approval: PendingCall["approval"],
-    options: ClientToolBrokerExecuteOptions
+    approval: PendingCall["approval"]
   ): Promise<void> {
     const key = pendingKey(pending.runId, pending.toolCallId);
     await state?.waitForTool();
@@ -142,12 +130,10 @@ export class ClientToolBroker {
       run_id: pending.runId,
       tool_call_id: pending.toolCallId,
       name: pending.name,
-      arguments: projectToolArgumentsForVisibility(options.scope, pending.name, parsedArgs),
+      arguments: parsedArgs,
       status: "requested",
       locality: "client",
-      approval,
-      ...(options.scope ? { scope: options.scope } : {}),
-      ...(options.skillRunId ? { skill_run_id: options.skillRunId } : {})
+      approval
     });
     if (!this.isPending(key, pending)) return;
     if (approval === "ask") {
@@ -202,12 +188,10 @@ export class ClientToolBroker {
           run_id: message.run_id,
           tool_call_id: message.tool_call_id,
           name: pending.name,
-          arguments: projectToolArgumentsForVisibility(pending.scope, pending.name, pending.arguments),
+          arguments: pending.arguments,
           status: "failed",
           locality: "client",
           approval: pending.approval,
-          ...(pending.scope ? { scope: pending.scope } : {}),
-          ...(pending.skillRunId ? { skill_run_id: pending.skillRunId } : {}),
           error
         })),
         resume
@@ -229,12 +213,10 @@ export class ClientToolBroker {
           run_id: message.run_id,
           tool_call_id: message.tool_call_id,
           name: pending.name,
-          arguments: projectToolArgumentsForVisibility(pending.scope, pending.name, pending.arguments),
+          arguments: pending.arguments,
           status: "failed",
           locality: "client",
           approval: pending.approval,
-          ...(pending.scope ? { scope: pending.scope } : {}),
-          ...(pending.skillRunId ? { skill_run_id: pending.skillRunId } : {}),
           error: message.error
         })),
         resume
@@ -253,13 +235,11 @@ export class ClientToolBroker {
         run_id: message.run_id,
         tool_call_id: message.tool_call_id,
         name: pending.name,
-        arguments: projectToolArgumentsForVisibility(pending.scope, pending.name, pending.arguments),
+        arguments: pending.arguments,
         status: "completed",
         locality: "client",
         approval: pending.approval,
-        ...(pending.scope ? { scope: pending.scope } : {}),
-        ...(pending.skillRunId ? { skill_run_id: pending.skillRunId } : {}),
-        result: projectToolResultForVisibility(pending.scope, pending.name, result)
+        result
       })),
       resume
     ]);
@@ -300,12 +280,10 @@ export class ClientToolBroker {
         run_id: pending.runId,
         tool_call_id: pending.toolCallId,
         name: pending.name,
-        arguments: projectToolArgumentsForVisibility(pending.scope, pending.name, pending.arguments),
+        arguments: pending.arguments,
         status: "cancelled",
         locality: "client",
         approval: pending.approval,
-        ...(pending.scope ? { scope: pending.scope } : {}),
-        ...(pending.skillRunId ? { skill_run_id: pending.skillRunId } : {}),
         error: { message: reason }
       })),
       observe(() => this.emit({
@@ -316,13 +294,11 @@ export class ClientToolBroker {
         locality: "client",
         approval: pending.approval,
         status: "cancelled",
-        arguments: projectToolArgumentsForVisibility(pending.scope, pending.name, pending.arguments),
+        arguments: pending.arguments,
         error: {
           code: "tool_cancelled",
           message: reason
-        },
-        ...(pending.scope ? { scope: pending.scope } : {}),
-        ...(pending.skillRunId ? { skill_run_id: pending.skillRunId } : {})
+        }
       }))
     ]);
   }

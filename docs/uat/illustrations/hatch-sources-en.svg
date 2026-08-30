@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="420" viewBox="0 0 1200 420" role="img" aria-labelledby="title desc">
+  <title id="title">Three sources for Product material</title>
+  <desc id="desc">Agent work, local files, and browser pages can all enter one Product.</desc>
+  <rect width="1200" height="420" rx="30" fill="#f4f5f3"/>
+  <path d="M295 110L770 190M295 210H770M295 310L770 230" stroke="#a64e35" stroke-width="4" stroke-linecap="round"/>
+  <path d="m758 178 18 12-18 12M758 218l18 12-18 12" fill="none" stroke="#a64e35" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <g fill="#fff" stroke="#d9ddda" stroke-width="2">
+    <rect x="30" y="55" width="265" height="110" rx="22"/>
+    <rect x="30" y="155" width="265" height="110" rx="22"/>
+    <rect x="30" y="255" width="265" height="110" rx="22"/>
+    <rect x="790" y="110" width="370" height="200" rx="28"/>
+  </g>
+  <g fill="#161616" font-family="'Instrument Serif', Georgia, serif" text-anchor="middle">
+    <text x="162" y="110" font-size="24">Agent work</text>
+    <text x="162" y="210" font-size="24">Local files</text>
+    <text x="162" y="310" font-size="24">Browser pages</text>
+    <text x="975" y="205" font-size="34">One Product</text>
+  </g>
+  <g fill="#555b58" font-family="Arial, sans-serif" font-size="15" text-anchor="middle">
+    <text x="162" y="137">Codex · Claude · OpenClaw · WorkBuddy</text>
+    <text x="162" y="237">Material you have approved</text>
+    <text x="162" y="337">Pages you are authorized to access</text>
+    <text x="975" y="244">Preview before you bring it in</text>
+  </g>
+</svg>

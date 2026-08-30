@@ -6,9 +6,6 @@ const TEXT_REVEAL_FLUSH_EVENTS = new Set([
   "approval.result",
   "tool_call.delta",
   "tool_call.request",
-  "skill.activated",
-  "skill.invoked",
-  "skill.run",
   "turn.failed"
 ]);
 

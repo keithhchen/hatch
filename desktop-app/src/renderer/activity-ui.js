@@ -44,13 +44,9 @@ const TOOL_DISPLAYS = [
 const FALLBACK_DISPLAY = display("·", "Running a step", "Completed a step", "Couldn't complete a step", "Ready to run a step");
 
 export const TURN_ACTIVITY_PART = "hatch.turn_activity";
-export const SKILL_ACTIVITY_PART = "hatch.skill_activity";
-export const SKILL_RUN_ACTIVITY_PART = "hatch.skill_run_activity";
 
 const ACTIVITY_DATA_PARTS = new Set([
-  TURN_ACTIVITY_PART,
-  SKILL_ACTIVITY_PART,
-  SKILL_RUN_ACTIVITY_PART
+  TURN_ACTIVITY_PART
 ]);
 
 function display(icon, running, completed, failed, approval) {
@@ -173,7 +169,6 @@ export function terminalTimelineParts(parts, terminalText, status, runId) {
 export function historyTimelineEntries(message) {
   if (!Array.isArray(message.parts)) return null;
   const tools = new Map((message.tool_calls ?? []).map((tool) => [tool.tool_call_id, tool]));
-  const skillRuns = new Map((message.skill_runs ?? []).map((run) => [run.skill_run_id, run]));
   return message.parts.flatMap((part) => {
     if (part.type === "text") {
       const start = Math.max(0, Number(part.start) || 0);
@@ -184,19 +179,6 @@ export function historyTimelineEntries(message) {
     if (part.type === "tool_call") {
       const tool = tools.get(part.tool_call_id);
       return tool ? [{ type: "tool_call", value: tool }] : [];
-    }
-    if (part.type === "skill_run") {
-      const run = skillRuns.get(part.skill_run_id);
-      return run ? [{ type: "skill_run", value: run }] : [];
-    }
-    if (part.type === "skill_event") {
-      const event = (message.skill_events ?? []).find((candidate) => (
-        candidate.name === part.name
-        && candidate.status === part.status
-        && candidate.reason === part.reason
-        && (candidate.source_tool_call_id ?? "") === (part.source_tool_call_id ?? "")
-      ));
-      return event ? [{ type: "skill_event", value: event }] : [];
     }
     return [];
   });

@@ -129,7 +129,7 @@ export function CreatorProductFiles({ token, productId, navigate, locale = "en" 
     <BackToProducts navigate={navigate} t={t} />
     <PageHeader label={t("files")} title={product?.name ?? t("productFiles")} body={t("addFilesBody")} />
     {error ? <InlineAlert tone="error" title={t("filesUnavailable")}>{error}</InlineAlert> : null}
-    {notice ? <InlineAlert tone="success" title={t("filesAddedTitle")}>{notice}</InlineAlert> : null}
+    {notice ? <InlineAlert className="cpv2-inline-feedback" tone="success" title={t("filesAddedTitle")}>{notice}</InlineAlert> : null}
     <article className="cpv2-card cpv2-panel">
       <div className="cpv2-source-library-toolbar"><div><span className="cpv2-kicker">{t("productFiles")}</span><h2>{t("filesCount", selectedCount)}</h2></div></div>
       <FileUploader multiple accept=".pdf,.docx,.xlsx,.xls,.xlsm,.csv,.tsv,.txt,.md,.json,.html,.htm,.png,.jpg,.jpeg,.webp" onFiles={upload} disabled={busy} label={t("uploadFiles")} hint={t("localFilesOnly")} className="cpv2-source-uploader" />

@@ -33,12 +33,11 @@ services:
       HATCH_CREATOR_FACTORY_LEASE_MS: ${HATCH_CREATOR_FACTORY_LEASE_MS:-1200000}
       HATCH_CREATOR_FACTORY_HEARTBEAT_MS: ${HATCH_CREATOR_FACTORY_HEARTBEAT_MS:-60000}
       LLM_API_KEY: ${LLM_API_KEY:?set LLM_API_KEY in /opt/hatch/.env}
-      # The deployed Creator Factory profile is DeepSeek. Keep this required
-      # at Compose interpolation time so a missing credential cannot surface
-      # later as an opaque provider rejection from a user-triggered Run.
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY in /opt/hatch/.env}
+      # DeepSeek is optional; the active Factory provider is selected by
+      # HATCH_FACTORY_LLM_PROFILE and Kimi uses LLM_API_KEY.
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.moonshot.cn/v1}
-      HATCH_LLM_PROFILE: ${HATCH_LLM_PROFILE:-kimi-k2.6-no-thinking}
+      HATCH_LLM_PROFILE: ${HATCH_LLM_PROFILE:-kimi-k2.6}
       HATCH_FACTORY_LLM_PROFILE: ${HATCH_FACTORY_LLM_PROFILE:-kimi-k2.6}
       HATCH_WEB_SEARCH_URL: ${HATCH_WEB_SEARCH_URL:-https://api.bocha.cn/v1/web-search}
       HATCH_WEB_SEARCH_PROVIDER: ${HATCH_WEB_SEARCH_PROVIDER:-bocha}
@@ -115,9 +114,9 @@ services:
       HATCH_CREATOR_FACTORY_HEARTBEAT_MS: ${HATCH_CREATOR_FACTORY_HEARTBEAT_MS:-60000}
       HATCH_CREATOR_FACTORY_POLL_MS: ${HATCH_CREATOR_FACTORY_POLL_MS:-1000}
       LLM_API_KEY: ${LLM_API_KEY:?set LLM_API_KEY in /opt/hatch/.env}
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:?set DEEPSEEK_API_KEY in /opt/hatch/.env}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.moonshot.cn/v1}
-      HATCH_LLM_PROFILE: ${HATCH_LLM_PROFILE:-kimi-k2.6-no-thinking}
+      HATCH_LLM_PROFILE: ${HATCH_LLM_PROFILE:-kimi-k2.6}
       HATCH_FACTORY_LLM_PROFILE: ${HATCH_FACTORY_LLM_PROFILE:-kimi-k2.6}
       HATCH_WEB_SEARCH_URL: ${HATCH_WEB_SEARCH_URL:-https://api.bocha.cn/v1/web-search}
       HATCH_WEB_SEARCH_PROVIDER: ${HATCH_WEB_SEARCH_PROVIDER:-bocha}
@@ -199,7 +198,7 @@ services:
       LLM_API_KEY: ${LLM_API_KEY:?set LLM_API_KEY in /opt/hatch/.env}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.moonshot.cn/v1}
-      HATCH_LLM_PROFILE: ${HATCH_LLM_PROFILE:-kimi-k2.6-no-thinking}
+      HATCH_LLM_PROFILE: ${HATCH_LLM_PROFILE:-kimi-k2.6}
       HATCH_CREATOR_MODEL: ${HATCH_CREATOR_MODEL:-kimi-k2.6}
       HATCH_REVIEWER_MODEL: ${HATCH_REVIEWER_MODEL:-kimi-k2.6}
       HATCH_COMPACTION_MODEL: ${HATCH_COMPACTION_MODEL:-kimi-k2.6}

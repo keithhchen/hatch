@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="420" viewBox="0 0 1200 420" role="img" aria-labelledby="title desc">
+  <title id="title">Hatch from experience to results</title>
+  <desc id="desc">A clear path from intent and material to judgment and a usable result.</desc>
+  <rect width="1200" height="420" rx="30" fill="#f4f5f3"/>
+  <path d="M250 210H330M530 210H610M810 210H890" stroke="#a64e35" stroke-width="4" stroke-linecap="round"/>
+  <path d="m318 198 14 12-14 12M598 198l14 12-14 12M878 198l14 12-14 12" fill="none" stroke="#a64e35" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <g fill="#fff" stroke="#d9ddda" stroke-width="2">
+    <rect x="30" y="100" width="220" height="220" rx="24"/>
+    <rect x="330" y="100" width="220" height="220" rx="24"/>
+    <rect x="610" y="100" width="220" height="220" rx="24"/>
+    <rect x="890" y="100" width="280" height="220" rx="24"/>
+  </g>
+  <g fill="#20201e">
+    <circle cx="140" cy="158" r="26" fill="#a64e35"/>
+    <circle cx="440" cy="158" r="26" fill="#a64e35"/>
+    <circle cx="720" cy="158" r="26" fill="#a64e35"/>
+    <circle cx="1030" cy="158" r="26" fill="#315d46"/>
+  </g>
+  <g fill="#fff" font-family="Arial, sans-serif" font-size="24" text-anchor="middle">
+    <text x="140" y="166">1</text><text x="440" y="166">2</text><text x="720" y="166">3</text><text x="1030" y="166">4</text>
+  </g>
+  <g fill="#161616" font-family="'Instrument Serif', Georgia, serif" text-anchor="middle">
+    <text x="140" y="230" font-size="28">Intent</text>
+    <text x="440" y="230" font-size="28">Material</text>
+    <text x="720" y="230" font-size="28">Judgment</text>
+    <text x="1030" y="230" font-size="28">Result</text>
+  </g>
+  <g fill="#555b58" font-family="Arial, sans-serif" font-size="16" text-anchor="middle">
+    <text x="140" y="265">Who are you helping?</text>
+    <text x="440" y="265">What will you share?</text>
+    <text x="720" y="265">What must not be copied?</text>
+    <text x="1030" y="265">Ready to use</text>
+  </g>
+</svg>

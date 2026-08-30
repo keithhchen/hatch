@@ -49,8 +49,7 @@ test("cancel owns an unreturned tool promise and ignores late results", async ()
       "file_read",
       { path: "pending.txt" },
       undefined,
-      "skill-tool-call",
-      { scope: "skill_run", skillRunId: "skill-run" }
+      "skill-tool-call"
     );
     await requestSeen;
 
@@ -65,8 +64,6 @@ test("cancel owns an unreturned tool promise and ignores late results", async ()
     assert.equal(stored.filter((event) => event.type === "tool.call" && event.status === "cancelled").length, 1);
     const cancelledEvent = stored.find((event) => event.type === "tool.call" && event.status === "cancelled");
     assert.ok(cancelledEvent && cancelledEvent.type === "tool.call");
-    assert.equal(cancelledEvent.scope, "skill_run");
-    assert.equal(cancelledEvent.skill_run_id, "skill-run");
     assert.equal(outbound.filter((message) => message.type === "tool_call.delta" && message.status === "cancelled").length, 1);
 
     releaseCancellation();

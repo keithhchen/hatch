@@ -179,8 +179,6 @@ import {
 } from "./native-drop-context.js";
 import { invokeDesktopCommand } from "./native-invoke-boundary.js";
 import {
-  SKILL_ACTIVITY_PART,
-  SKILL_RUN_ACTIVITY_PART,
   TURN_ACTIVITY_PART,
   activityGroupPath,
   activitySummary,
@@ -2368,20 +2366,6 @@ function App() {
       return;
     }
 
-    if (message.type === "skill.activated" || message.type === "skill.invoked") {
-      if (!message.run_id || activeRunRef.current?.runId !== message.run_id) return;
-      upsertSkillEvent(message);
-      setStatus(`${message.status === "activated" ? "Creator method ready" : "Creator method applied"}: ${message.name}`);
-      return;
-    }
-
-    if (message.type === "skill.run") {
-      if (!message.run_id || activeRunRef.current?.runId !== message.run_id) return;
-      upsertSkillRun(message);
-      setStatus(skillRunStatusLabel(message));
-      return;
-    }
-
     if (message.type === "session.compacted") {
       setStatus("Conversation optimized");
       return;
@@ -3449,56 +3433,6 @@ function App() {
     });
   }
 
-  function upsertSkillEvent(event) {
-    const activeRun = activeRunRef.current;
-    if (!activeRun || event.run_id !== activeRun.runId) return;
-    updateAssistantMessage(activeRun.assistantId, (message) => {
-      const parts = assistantParts(message);
-      const nextPart = skillActivityPartFromEvent(event);
-      return {
-        ...message,
-        content: upsertTimelinePart(parts, nextPart, (part) => isSameSkillActivityPart(part, nextPart)),
-        status: message.status ?? { type: "running" },
-        metadata: {
-          ...(message.metadata ?? {}),
-          custom: {
-            ...(message.metadata?.custom ?? {}),
-            latestSkill: {
-              name: event.name,
-              status: event.status,
-              reason: event.reason
-            }
-          }
-        }
-      };
-    });
-  }
-
-  function upsertSkillRun(event) {
-    const activeRun = activeRunRef.current;
-    if (!activeRun || event.run_id !== activeRun.runId) return;
-    updateAssistantMessage(activeRun.assistantId, (message) => {
-      const parts = assistantParts(message);
-      const nextPart = skillRunActivityPartFromEvent(event);
-      return {
-        ...message,
-        content: upsertTimelinePart(parts, nextPart, (part) => isSameSkillRunActivityPart(part, nextPart)),
-        status: message.status ?? { type: "running" },
-        metadata: {
-          ...(message.metadata ?? {}),
-          custom: {
-            ...(message.metadata?.custom ?? {}),
-            latestSkillRun: {
-              name: event.name,
-              status: event.status,
-              skillRunId: event.skill_run_id
-            }
-          }
-        }
-      };
-    });
-  }
-
   function updateAssistantMessage(id, updater) {
     setMessages((current) => current.map((message) => (
       message.id === id ? updater(message) : message
@@ -4169,7 +4103,6 @@ function historyMessageToThreadMessage(message, index) {
     : historyOrderedParts(message);
   const activityParts = content.filter(isActivityPart);
   const lastTool = [...activityParts].reverse().find((part) => part.type === "tool-call");
-  const lastSkill = [...activityParts].reverse().find(isSkillActivityPart);
   return makeAssistantMessage(id, text, {
     status: filtered ? "content_filter" : "completed",
     createdAt,
@@ -4178,15 +4111,6 @@ function historyMessageToThreadMessage(message, index) {
       runId: message.run_id,
       hydrated: true,
       ...(filtered ? { outputGuardBlocked: true } : {}),
-      ...(lastSkill
-        ? {
-            latestSkill: {
-              name: lastSkill.data.name,
-              status: lastSkill.data.status,
-              reason: lastSkill.data.reason
-            }
-          }
-        : {}),
       ...(lastTool
         ? {
             latestTool: {
@@ -4207,8 +4131,6 @@ function historyOrderedParts(message) {
   }
   return timeline.map((entry) => {
     if (entry.type === "tool_call") return historyToolCallToPart(entry.value);
-    if (entry.type === "skill_run") return skillRunActivityPartFromEvent(entry.value);
-    if (entry.type === "skill_event") return skillActivityPartFromEvent(entry.value);
     return entry;
   });
 }
@@ -4349,87 +4271,6 @@ function historyToolCallToPart(toolCall) {
     result: toolCall.result,
     error: toolCall.error
   });
-}
-
-function skillActivityPartFromEvent(event) {
-  return {
-    type: "data",
-    name: SKILL_ACTIVITY_PART,
-    data: {
-      id: skillActivityIdForEvent(event),
-      run_id: event.run_id,
-      name: event.name,
-      path: event.path,
-      scope: event.scope,
-      status: event.status,
-      invocation_type: event.invocation_type,
-      reason: event.reason,
-      source_tool_call_id: event.source_tool_call_id,
-      trigger: event.trigger,
-      resource_paths: event.resource_paths,
-      resource_manifest_truncated: event.resource_manifest_truncated,
-      timestamp: event.timestamp ?? new Date().toISOString()
-    }
-  };
-}
-
-function skillRunActivityPartFromEvent(event) {
-  return {
-    type: "data",
-    name: SKILL_RUN_ACTIVITY_PART,
-    data: {
-      id: skillRunActivityIdForEvent(event),
-      run_id: event.run_id,
-      skill_run_id: event.skill_run_id,
-      skill_id: event.skill_id,
-      name: event.name,
-      status: event.status,
-      error: event.error,
-      timestamp: event.timestamp ?? new Date().toISOString()
-    }
-  };
-}
-
-function skillRunActivityIdForEvent(event) {
-  return [event.run_id, event.skill_run_id].join(":");
-}
-
-function skillActivityIdForEvent(event) {
-  if (event.status === "invoked") {
-    return [
-      event.run_id,
-      "invoked",
-      event.source_tool_call_id ?? "",
-      event.path,
-      event.reason
-    ].join(":");
-  }
-  return [
-    event.run_id,
-    "activated",
-    event.path,
-    event.reason
-  ].join(":");
-}
-
-function isSkillActivityPart(part) {
-  return part?.type === "data" && part.name === SKILL_ACTIVITY_PART;
-}
-
-function isSkillRunActivityPart(part) {
-  return part?.type === "data" && part.name === SKILL_RUN_ACTIVITY_PART;
-}
-
-function isSameSkillRunActivityPart(part, nextPart) {
-  return isSkillRunActivityPart(part)
-    && isSkillRunActivityPart(nextPart)
-    && part.data?.id === nextPart.data?.id;
-}
-
-function isSameSkillActivityPart(part, nextPart) {
-  return isSkillActivityPart(part)
-    && isSkillActivityPart(nextPart)
-    && part.data?.id === nextPart.data?.id;
 }
 
 function approvalForToolEvent(event, existing) {
@@ -4750,8 +4591,6 @@ function renderAssistantTimelinePart({ part, children }) {
       return part.toolUI ?? <HatchToolCall {...part} />;
     case "data":
       if (part.name === TURN_ACTIVITY_PART) return null;
-      if (part.name === SKILL_ACTIVITY_PART) return <SkillActivityPart data={part.data} />;
-      if (part.name === SKILL_RUN_ACTIVITY_PART) return <SkillRunActivityPart data={part.data} />;
       return part.dataRendererUI ?? null;
     default:
       return null;
@@ -4843,7 +4682,7 @@ function AssistantActivityBlock({ indices, children }) {
 }
 
 function isActivityPart(part) {
-  return part?.type === "tool-call" || isSkillActivityPart(part) || isSkillRunActivityPart(part);
+  return part?.type === "tool-call";
 }
 
 function isTurnActivityPart(part) {
@@ -4863,9 +4702,6 @@ function activeActivity(parts, approvalRequests) {
         };
       }
       continue;
-    }
-    if (isSkillRunActivityPart(part) && ["requested", "running"].includes(part.data?.status)) {
-      return { icon: "◇", label: `Applying ${methodDisplayName(part.data?.name)}` };
     }
   }
   return null;
@@ -5066,40 +4902,6 @@ function HatchToolCall(props) {
   );
 }
 
-function SkillActivityPart({ data }) {
-  const status = data.status === "invoked" ? "invoked" : "activated";
-  const display = skillActivityDisplay(data);
-  return (
-    <div className={`activity-row skill-activity ${status}`}>
-      <span className="skill-icon">{display.icon}</span>
-      <span className="skill-label">{display.label}</span>
-      <span className="skill-meta">{display.meta}</span>
-    </div>
-  );
-}
-
-function SkillRunActivityPart({ data }) {
-  const status = data.status;
-  const methodName = methodDisplayName(data.name);
-  const label = status === "completed"
-    ? `Applied ${methodName}`
-    : status === "failed"
-      ? `Could not apply ${methodName}`
-      : status === "cancelled"
-        ? `Stopped ${methodName}`
-        : status === "requested"
-          ? `Preparing ${methodName}`
-          : `Applying ${methodName}`;
-  const icon = status === "completed" ? "◆" : status === "failed" || status === "cancelled" ? "!" : "◇";
-  return (
-    <div className={`activity-row skill-activity skill-run-${status}`}>
-      <span className="skill-icon">{icon}</span>
-      <span className="skill-label">{label}</span>
-      <span className="skill-meta">{data.error?.message || "Creator method"}</span>
-    </div>
-  );
-}
-
 function approvalReasonText(message) {
   if (message.name === "file_write") {
     return `Write ${toolTarget(message.arguments) || "a file"} in the selected workspace.`;
@@ -5126,39 +4928,6 @@ function parseStoredJson(value) {
   } catch {
     return null;
   }
-}
-
-function skillActivityDisplay(data) {
-  const status = data.status === "invoked" ? "invoked" : "activated";
-  const methodName = methodDisplayName(data.name);
-  const label = status === "invoked"
-    ? `Applied ${methodName}`
-    : `Using ${methodName}`;
-  return {
-    icon: status === "invoked" ? "◆" : "◇",
-    label,
-    meta: "Creator method"
-  };
-}
-
-function skillRunStatusLabel(event) {
-  const methodName = methodDisplayName(event.name);
-  if (event.status === "completed") return `Creator method applied: ${methodName}`;
-  if (event.status === "failed") return `Couldn't apply Creator method: ${methodName}`;
-  if (event.status === "cancelled") return `Stopped applying Creator method: ${methodName}`;
-  if (event.status === "requested") return `Preparing Creator method: ${methodName}`;
-  return `Applying Creator method: ${methodName}`;
-}
-
-function methodDisplayName(name) {
-  const value = String(name ?? "").trim();
-  if (!value) return "Creator method";
-  if (!/^[a-z0-9_-]+$/.test(value)) return value;
-  return value
-    .split(/[-_]+/)
-    .filter(Boolean)
-    .map((part) => `${part[0].toUpperCase()}${part.slice(1)}`)
-    .join(" ");
 }
 
 function toolArtifactTarget(part) {

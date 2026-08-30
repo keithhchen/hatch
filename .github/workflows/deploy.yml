@@ -129,20 +129,14 @@ jobs:
           fi
           install -m 640 compose.app.yml /opt/hatch/
           install -m 640 compose.infra.yml /opt/hatch/
-      - name: Install LLM provider credentials
-        env:
-          DEEPSEEK_API_KEY: ${{ secrets.HATCH_DEEPSEEK_API_KEY }}
+      - name: Select Creator Factory LLM profile
         run: |
           set -euo pipefail
-          test -n "$DEEPSEEK_API_KEY"
-          sed -i '/^DEEPSEEK_API_KEY=/d' /opt/hatch/.env
-          printf 'DEEPSEEK_API_KEY=%s\n' "$DEEPSEEK_API_KEY" >> /opt/hatch/.env
-          # Creator Factory is explicitly cut over to the verified DeepSeek
-          # profile while the previous Moonshot account is quota-blocked. This
-          # is a deployment choice, not an implicit runtime fallback; the
-          # consumer Runtime keeps its separately configured profile.
+          grep -Eq '^LLM_API_KEY=[^[:space:]]+' /opt/hatch/.env
+          sed -i '/^HATCH_LLM_PROFILE=/d' /opt/hatch/.env
+          printf 'HATCH_LLM_PROFILE=kimi-k2.6\n' >> /opt/hatch/.env
           sed -i '/^HATCH_FACTORY_LLM_PROFILE=/d' /opt/hatch/.env
-          printf 'HATCH_FACTORY_LLM_PROFILE=deepseek-v4-flash\n' >> /opt/hatch/.env
+          printf 'HATCH_FACTORY_LLM_PROFILE=kimi-k2.6\n' >> /opt/hatch/.env
           chmod 600 /opt/hatch/.env
       - name: Ensure deployment service token
         run: |
@@ -239,7 +233,7 @@ jobs:
           test -f .env
           test -f compose.app.yml
           grep -q '^HATCH_DOMAIN=' .env
-          for key in LLM_API_KEY DEEPSEEK_API_KEY HATCH_DATABASE_URL HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN HATCH_OAUTH_STATE_KEY DASHSCOPE_API_KEY POSTGRES_PASSWORD; do
+          for key in LLM_API_KEY HATCH_DATABASE_URL HATCH_REGISTRY_PUBLISH_SERVICE_TOKEN HATCH_REGISTRY_RUNTIME_SERVICE_TOKEN HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN HATCH_COMMERCE_RUNTIME_SERVICE_TOKEN HATCH_OAUTH_STATE_KEY DASHSCOPE_API_KEY POSTGRES_PASSWORD; do
             grep -Eq "^${key}=[^[:space:]]+" .env || { echo "Missing non-empty $key in /opt/hatch/.env"; exit 1; }
           done
           factory_profile="$(sed -n 's/^HATCH_FACTORY_LLM_PROFILE=//p' .env | tail -n 1)"
@@ -328,6 +322,7 @@ jobs:
           factory_profile="$(sed -n 's/^HATCH_FACTORY_LLM_PROFILE=//p' .env | tail -n 1)"
           factory_profile="${factory_profile:-kimi-k2.6}"
           if test "$factory_profile" = "deepseek-v4-flash"; then
+            grep -Eq '^DEEPSEEK_API_KEY=[^[:space:]]+' .env || { echo "DeepSeek profile requires non-empty DEEPSEEK_API_KEY in /opt/hatch/.env"; exit 1; }
             "${compose[@]}" exec -T factory-worker node --input-type=module -e '
               const key = process.env.DEEPSEEK_API_KEY?.trim();
               if (!key) {
@@ -338,6 +333,19 @@ jobs:
                 headers: { authorization: `Bearer ${key}` }
               });
               console.log(`DeepSeek models probe: ${response.status}`);
+              if (!response.ok) process.exit(1);
+            '
+          elif test "$factory_profile" = "kimi-k2.6"; then
+            "${compose[@]}" exec -T factory-worker node --input-type=module -e '
+              const key = process.env.LLM_API_KEY?.trim();
+              if (!key) {
+                console.error("Kimi credential is missing inside factory-worker");
+                process.exit(1);
+              }
+              const response = await fetch("https://api.moonshot.cn/v1/models", {
+                headers: { authorization: `Bearer ${key}` }
+              });
+              console.log(`Kimi models probe: ${response.status}`);
               if (!response.ok) process.exit(1);
             '
           fi
