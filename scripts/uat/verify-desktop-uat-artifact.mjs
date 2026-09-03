@@ -18,7 +18,8 @@ export async function verifyDesktopUatArtifact({
   artifactDirectory,
   expectedSha256 = null,
   expectedSourceSha = null,
-  expectedRunnerArchitecture = null
+  expectedRunnerArchitecture = null,
+  requireBundledRuntime = false
 }) {
   const extension = SUPPORTED_PLATFORMS.get(platform);
   if (!extension) throw new Error(`Unsupported platform ${JSON.stringify(platform)}; expected macos or windows.`);
@@ -31,6 +32,9 @@ export async function verifyDesktopUatArtifact({
     throw new Error(`Could not read desktop UAT report ${reportFile}: ${error instanceof Error ? error.message : String(error)}`);
   }
   validateReport(report, platform);
+  if (requireBundledRuntime && (!report.runtime || report.runtime.verified !== true)) {
+    throw new Error("The desktop UAT report does not include successful bundled Python/Node runtime verification.");
+  }
 
   if (expectedSha256 && report.package.sha256 !== expectedSha256) {
     throw new Error("The supplied expected SHA-256 does not match the CI evidence report.");
@@ -74,7 +78,8 @@ export async function verifyDesktopUatArtifact({
       filename: report.package.filename,
       bytes: artifactStat.size,
       sha256
-    }
+    },
+    ...(report.runtime ? { runtime: report.runtime } : {})
   };
 }
 
@@ -112,6 +117,11 @@ function readCliArguments(argv) {
     const argument = argv[index];
     if (!argument.startsWith("--")) throw new Error(`Unexpected argument ${JSON.stringify(argument)}.`);
     const [name, inlineValue] = argument.slice(2).split("=", 2);
+    if (name === "require-bundled-runtime" && inlineValue === undefined) {
+      if (values.has(name)) throw new Error(`Expected one value for --${name}.`);
+      values.set(name, "true");
+      continue;
+    }
     const value = inlineValue ?? argv[++index];
     if (!value || values.has(name)) throw new Error(`Expected one value for --${name}.`);
     values.set(name, value);
@@ -122,7 +132,8 @@ function readCliArguments(argv) {
     "artifact-dir",
     "expected-sha256",
     "expected-source-sha",
-    "expected-runner-architecture"
+    "expected-runner-architecture",
+    "require-bundled-runtime"
   ]);
   for (const name of values.keys()) {
     if (!accepted.has(name)) throw new Error(`Unknown argument --${name}.`);
@@ -133,7 +144,8 @@ function readCliArguments(argv) {
     artifactDirectory: values.get("artifact-dir"),
     expectedSha256: values.get("expected-sha256") ?? null,
     expectedSourceSha: values.get("expected-source-sha") ?? null,
-    expectedRunnerArchitecture: values.get("expected-runner-architecture") ?? null
+    expectedRunnerArchitecture: values.get("expected-runner-architecture") ?? null,
+    requireBundledRuntime: values.has("require-bundled-runtime")
   };
 }
 

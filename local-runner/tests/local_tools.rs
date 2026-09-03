@@ -301,7 +301,7 @@ fn executes_canonical_tool_call_requests_for_filesystem_tools() {
 }
 
 #[test]
-fn canonical_file_read_extracts_xlsx_text_without_shelling_out() {
+fn canonical_file_read_returns_xlsx_bytes_for_skill_processing() {
     let temp = tempdir().unwrap();
     let runner = LocalRunner::new(temp.path()).unwrap();
     let workbook_path = temp.path().join("2024 Birthday Dinner.xlsx");
@@ -320,10 +320,14 @@ fn canonical_file_read_extracts_xlsx_text_without_shelling_out() {
     ));
 
     assert_ok_result(read, |result| {
-        let content = result["content"].as_str().unwrap();
-        assert!(content.contains("# Sheet: Sheet1"));
-        assert!(content.contains("Guest\tDish"));
-        assert!(content.contains("Alice\tNoodles"));
+        assert_eq!(result["content_type"], "document");
+        assert_eq!(
+            result["mime_type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        );
+        assert_eq!(result["bytes"], fs::metadata(&workbook_path).unwrap().len());
+        assert!(result["data_base64"].as_str().unwrap().len() > 100);
+        assert!(result.get("content").is_none());
     });
 }
 
@@ -390,42 +394,21 @@ fn file_read_enforces_one_mib_boundary_for_utf8_files() {
 }
 
 #[test]
-fn xlsx_rendered_output_rejects_over_limit_without_truncating() {
-    const CELL_BYTES: usize = 30_000;
+fn rich_file_read_rejects_oversized_office_bytes_without_truncating() {
+    const MAX_RICH_FILE_BYTES: usize = 16 * 1024 * 1024;
     let temp = tempdir().unwrap();
     let runner = LocalRunner::new(temp.path()).unwrap();
-    let cell = "x".repeat(CELL_BYTES);
-
-    for (name, rows) in [("xlsx-under-limit.xlsx", 34), ("xlsx-over-limit.xlsx", 36)] {
-        let path = temp.path().join(name);
-        let mut workbook = rust_xlsxwriter::Workbook::new();
-        let worksheet = workbook.add_worksheet();
-        for row in 0..rows {
-            worksheet.write_string(row, 0, &cell).unwrap();
-        }
-        workbook.save(path).unwrap();
-    }
-
-    let under = runner.execute_tool_call_request(tool_request(
-        "call_xlsx_under",
-        "file_read",
-        json!({ "path": "xlsx-under-limit.xlsx" }),
-    ));
-    assert_ok_result(under, |result| {
-        assert!(result["content"].as_str().unwrap().len() <= 1024 * 1024);
-    });
+    let path = temp.path().join("xlsx-over-limit.xlsx");
+    fs::write(&path, vec![b'x'; MAX_RICH_FILE_BYTES + 1]).unwrap();
 
     let over = runner.execute_tool_call_request(tool_request(
-        "call_xlsx_over",
+        "call_xlsx_over_limit",
         "file_read",
         json!({ "path": "xlsx-over-limit.xlsx" }),
     ));
     assert_error_result(over, |error| {
         assert_eq!(error["code"], "file_too_large");
-        assert!(error["message"]
-            .as_str()
-            .unwrap()
-            .contains("rendered spreadsheet output"));
+        assert!(error["message"].as_str().unwrap().contains("16777217"));
     });
 }
 

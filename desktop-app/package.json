@@ -1,6 +1,6 @@
 {
   "name": "hatch-desktop-app",
-  "version": "0.1.23",
+  "version": "0.1.24",
   "private": true,
   "description": "Minimal Hatch Tauri desktop local runner UI",
   "type": "module",
@@ -11,6 +11,8 @@
     "build:distribution": "HATCH_DISTRIBUTION_BUILD=1 node scripts/build-dmg.mjs",
     "build:app": "tauri build --bundles app",
     "build:dmg:ci": "node scripts/build-dmg.mjs",
+    "prepare:runtime": "node scripts/prepare-runtime.mjs",
+    "verify:runtime": "node scripts/verify-bundled-runtime.mjs --root src-tauri/runtime",
     "build:web": "vite build",
     "test:renderer": "vitest run"
   },

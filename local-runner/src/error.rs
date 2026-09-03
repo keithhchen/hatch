@@ -32,10 +32,6 @@ pub enum LocalRunnerError {
         size: u64,
         max_bytes: u64,
     },
-    #[error(
-        "rendered spreadsheet output is too large: {path} exceeds the {max_bytes}-byte limit; narrow the spreadsheet or read a smaller export"
-    )]
-    RenderedFileTooLarge { path: String, max_bytes: u64 },
     #[error("patch parse error: {0}")]
     PatchParse(String),
     #[error("patch replacement text was not found")]
@@ -54,8 +50,6 @@ pub enum LocalRunnerError {
     ShellSandboxInitialization(String),
     #[error("local tool execution was cancelled")]
     ToolExecutionCancelled,
-    #[error("spreadsheet read error at {path}: {message}")]
-    SpreadsheetRead { path: String, message: String },
     #[error("io error at {}: {source}", path.display())]
     Io { path: PathBuf, source: io::Error },
     #[error("json error: {0}")]

@@ -3,7 +3,6 @@ use crate::error::{LocalRunnerError, Result};
 use crate::patch::{apply_text_patch, HatchPatch};
 use crate::sandbox::{path_to_string, Sandbox};
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
-use calamine::{open_workbook_auto, Data, Reader};
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::fs::{self, OpenOptions};
@@ -25,6 +24,7 @@ const MAX_SEARCH_ELAPSED: Duration = Duration::from_secs(3);
 pub struct LocalRunner {
     sandbox: Sandbox,
     audit: AuditLogger,
+    runtime_root: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -71,9 +71,35 @@ pub struct ShellExecOutput {
 
 impl LocalRunner {
     pub fn new(sandbox_root: impl AsRef<Path>) -> Result<Self> {
+        Self::new_with_runtime(sandbox_root, None)
+    }
+
+    pub fn new_with_runtime(
+        sandbox_root: impl AsRef<Path>,
+        runtime_root: Option<&Path>,
+    ) -> Result<Self> {
         let sandbox = Sandbox::new(sandbox_root)?;
         let audit = AuditLogger::new(sandbox.audit_path());
-        Ok(Self { sandbox, audit })
+        let runtime_root = runtime_root
+            .map(|root| {
+                let canonical = root.canonicalize().map_err(|error| {
+                    LocalRunnerError::ShellSandboxInitialization(format!(
+                        "could not canonicalize the bundled runtime root: {error}"
+                    ))
+                })?;
+                if !canonical.is_dir() {
+                    return Err(LocalRunnerError::ShellSandboxInitialization(
+                        "the bundled runtime root is not a directory".into(),
+                    ));
+                }
+                Ok(canonical)
+            })
+            .transpose()?;
+        Ok(Self {
+            sandbox,
+            audit,
+            runtime_root,
+        })
     }
 
     pub fn sandbox_root(&self) -> &Path {
@@ -239,7 +265,13 @@ impl LocalRunner {
         timeout_ms: u64,
         cancel: &AtomicBool,
     ) -> Result<ShellExecOutput> {
-        let result = crate::shell::execute(self.sandbox.root(), command, timeout_ms, cancel);
+        let result = crate::shell::execute(
+            self.sandbox.root(),
+            self.runtime_root.as_deref(),
+            command,
+            timeout_ms,
+            cancel,
+        );
         let detail = match &result {
             Ok(output) => json!({
                 "command_bytes": command.len(),
@@ -431,10 +463,6 @@ impl LocalRunner {
             ));
         }
 
-        if is_xlsx_path(&resolved.absolute) {
-            return read_xlsx_as_text(&resolved.absolute, MAX_READ_FILE_BYTES as usize);
-        }
-
         if metadata.len() > MAX_READ_FILE_BYTES {
             return Err(LocalRunnerError::FileTooLarge {
                 path: resolved.relative.display().to_string(),
@@ -457,15 +485,6 @@ impl LocalRunner {
             return Err(LocalRunnerError::ExpectedFile(
                 resolved.relative.display().to_string(),
             ));
-        }
-        if is_xlsx_path(&resolved.absolute) {
-            let content = self.read_file_inner(path)?;
-            return Ok(json!({
-                "path": path_to_string(&resolved.relative),
-                "content_type": "text",
-                "bytes": content.len(),
-                "content": content
-            }));
         }
         let Some(mime_type) = rich_file_media_type(&resolved.absolute) else {
             let content = self.read_file_inner(path)?;
@@ -705,12 +724,6 @@ fn truncate_command_output(bytes: &[u8], max_bytes: usize) -> (String, bool) {
     (output, true)
 }
 
-fn is_xlsx_path(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("xlsx"))
-}
-
 fn rich_file_media_type(path: &Path) -> Option<&'static str> {
     let extension = path
         .extension()
@@ -727,10 +740,30 @@ fn rich_file_media_type(path: &Path) -> Option<&'static str> {
         Some("docx") => {
             Some("application/vnd.openxmlformats-officedocument.wordprocessingml.document")
         }
+        Some("docm") => Some("application/vnd.ms-word.document.macroEnabled.12"),
+        Some("dotx") => {
+            Some("application/vnd.openxmlformats-officedocument.wordprocessingml.template")
+        }
+        Some("dotm") => Some("application/vnd.ms-word.template.macroEnabled.12"),
+        Some("rtf") => Some("application/rtf"),
         Some("pptx") => {
             Some("application/vnd.openxmlformats-officedocument.presentationml.presentation")
         }
+        Some("pptm") => Some("application/vnd.ms-powerpoint.presentation.macroEnabled.12"),
+        Some("potx") => {
+            Some("application/vnd.openxmlformats-officedocument.presentationml.template")
+        }
+        Some("potm") => Some("application/vnd.ms-powerpoint.template.macroEnabled.12"),
+        Some("ppsx") => {
+            Some("application/vnd.openxmlformats-officedocument.presentationml.slideshow")
+        }
+        Some("ppsm") => Some("application/vnd.ms-powerpoint.slideshow.macroEnabled.12"),
         Some("xlsx") => Some("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        Some("xlsm") => Some("application/vnd.ms-excel.sheet.macroEnabled.12"),
+        Some("xltx") => {
+            Some("application/vnd.openxmlformats-officedocument.spreadsheetml.template")
+        }
+        Some("xltm") => Some("application/vnd.ms-excel.template.macroEnabled.12"),
         Some("xls") => Some("application/vnd.ms-excel"),
         Some("doc") => Some("application/msword"),
         Some("ppt") => Some("application/vnd.ms-powerpoint"),
@@ -755,91 +788,6 @@ fn is_search_ignored_entry(name: &str) -> bool {
             | "Caches"
             | "Cache"
     )
-}
-
-fn read_xlsx_as_text(path: &Path, max_bytes: usize) -> Result<String> {
-    let mut workbook =
-        open_workbook_auto(path).map_err(|source| LocalRunnerError::SpreadsheetRead {
-            path: path.display().to_string(),
-            message: source.to_string(),
-        })?;
-    let mut output = String::new();
-    let mut first_line = true;
-
-    for sheet_name in workbook.sheet_names().to_owned() {
-        let range = workbook.worksheet_range(&sheet_name).map_err(|source| {
-            LocalRunnerError::SpreadsheetRead {
-                path: path.display().to_string(),
-                message: source.to_string(),
-            }
-        })?;
-
-        append_xlsx_line(
-            &mut output,
-            &mut first_line,
-            &format!("# Sheet: {sheet_name}"),
-            path,
-            max_bytes,
-        )?;
-        for row in range.rows() {
-            let cells = row.iter().map(format_spreadsheet_cell).collect::<Vec<_>>();
-            if cells.iter().all(|cell| cell.is_empty()) {
-                continue;
-            }
-            append_xlsx_line(
-                &mut output,
-                &mut first_line,
-                &cells.join("\t"),
-                path,
-                max_bytes,
-            )?;
-        }
-        append_xlsx_line(&mut output, &mut first_line, "", path, max_bytes)?;
-    }
-
-    Ok(output)
-}
-
-fn append_xlsx_line(
-    output: &mut String,
-    first_line: &mut bool,
-    line: &str,
-    path: &Path,
-    max_bytes: usize,
-) -> Result<()> {
-    let separator_bytes = if *first_line { 0 } else { 1 };
-    if output.len() + separator_bytes + line.len() > max_bytes {
-        return Err(LocalRunnerError::RenderedFileTooLarge {
-            path: path.display().to_string(),
-            max_bytes: max_bytes as u64,
-        });
-    }
-    if separator_bytes > 0 {
-        output.push('\n');
-    }
-    output.push_str(line);
-    *first_line = false;
-    Ok(())
-}
-
-fn format_spreadsheet_cell(cell: &Data) -> String {
-    match cell {
-        Data::Empty => String::new(),
-        Data::String(value) => value.clone(),
-        Data::Float(value) => {
-            if value.fract() == 0.0 {
-                format!("{value:.0}")
-            } else {
-                value.to_string()
-            }
-        }
-        Data::Int(value) => value.to_string(),
-        Data::Bool(value) => value.to_string(),
-        Data::DateTime(value) => value.to_string(),
-        Data::DateTimeIso(value) => value.clone(),
-        Data::DurationIso(value) => value.clone(),
-        Data::Error(value) => format!("{value:?}"),
-    }
 }
 
 fn render_workspace_diff(path: &Path, before: Option<&str>, after: &str) -> Option<String> {

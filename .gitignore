@@ -39,6 +39,9 @@ Cargo.lock
 !local-runner/Cargo.lock
 src-tauri/target/
 local-runner/target/
+desktop-app/src-tauri/runtime/*
+!desktop-app/src-tauri/runtime/.gitkeep
+desktop-app/.runtime-cache/
 
 # Python
 __pycache__/

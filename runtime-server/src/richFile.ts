@@ -1,19 +1,22 @@
+import { execFile } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
-import { strFromU8, unzipSync } from "fflate";
-import mammoth from "mammoth";
-import * as XLSX from "xlsx";
+import { promisify } from "node:util";
+import { documentSkillNameForAsset, skillsRoot } from "./skills.js";
 
+const execFileAsync = promisify(execFile);
 export const MAX_RICH_DOCUMENT_TEXT_CHARS = 200_000;
-
-const PDF_MEDIA_TYPE = "application/pdf";
-const DOCX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-const XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-const PPTX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
 /**
  * Convert a local-runner binary file result into a bounded model-readable
  * projection. The original base64 remains ephemeral on this return value and
  * is removed by modelVisibleToolResult before it reaches the transcript/UI.
+ *
+ * The projection is deliberately delegated to the owning document Skill's
+ * reader entrypoint. This adapter only stages immutable bytes in a private
+ * temporary directory, invokes the Skill, and validates its JSON envelope; it
+ * is not a second document parser.
  */
 export async function normalizeRichFileReadResult(result: Record<string, unknown>): Promise<Record<string, unknown>> {
   if (result.content_type !== "document" || typeof result.data_base64 !== "string") return result;
@@ -44,25 +47,97 @@ export async function normalizeRichFileReadResult(result: Record<string, unknown
   }
 }
 
+/**
+ * Read one document through the Skill-owned `scripts/read_asset.mjs` reader.
+ * `skillDirectory` is supplied for the session-selected Skill; callers that
+ * do not have a catalog record use the bundled runtime Skill root.
+ */
 export async function extractRichDocument(
   displayName: string,
   mediaType: string,
-  bytes: Buffer
+  bytes: Buffer,
+  skillDirectory?: string
 ): Promise<{ format: string; content: string }> {
-  const extension = path.extname(displayName).toLowerCase();
-  if (mediaType === PDF_MEDIA_TYPE || extension === ".pdf") {
-    return { format: "pdf", content: await pdfToText(bytes) };
+  const skillName = documentSkillNameForAsset(displayName, mediaType);
+  if (!skillName) {
+    throw new Error(`No built-in text projection for ${mediaType || path.extname(displayName) || "this document"}`);
   }
-  if (mediaType === DOCX_MEDIA_TYPE || extension === ".docx") {
-    return { format: "docx", content: htmlToPlainText((await mammoth.convertToHtml({ buffer: bytes })).value) };
+
+  const extension = assetExtension(displayName, mediaType);
+  if (skillName === "documents" && ![".docx", ".dotx", ".docm", ".dotm"].includes(extension)) {
+    throw new Error(`No built-in text projection for ${mediaType || extension || "this document"}`);
   }
-  if (mediaType === XLSX_MEDIA_TYPE || mediaType === "application/vnd.ms-excel" || extension === ".xlsx" || extension === ".xls") {
-    return { format: extension === ".xls" || mediaType === "application/vnd.ms-excel" ? "xls" : "xlsx", content: workbookToText(bytes, displayName) };
+  if (skillName === "presentations" && ![".pptx", ".pptm", ".potx", ".potm", ".ppsx", ".ppsm"].includes(extension)) {
+    throw new Error(`No built-in text projection for ${mediaType || extension || "this document"}`);
   }
-  if (mediaType === PPTX_MEDIA_TYPE || extension === ".pptx") {
-    return { format: "pptx", content: presentationToText(bytes, displayName) };
+
+  const directory = path.resolve(skillDirectory || path.join(skillsRoot(), skillName));
+  const reader = path.join(directory, "scripts", "read_asset.mjs");
+  const stagedRoot = await mkdtemp(path.join(os.tmpdir(), "hatch-skill-asset-"));
+  const stagedInput = path.join(stagedRoot, `asset${assetExtension(displayName, mediaType)}`);
+  try {
+    await writeFile(stagedInput, bytes, { mode: 0o600, flag: "wx" });
+    const result = await runSkillReader(reader, stagedInput, directory);
+    if (!result || result.status !== "ok" || typeof result.content !== "string") {
+      throw new Error("Skill reader returned an invalid projection envelope");
+    }
+    return {
+      format: typeof result.format === "string" ? result.format : skillName,
+      content: result.content
+    };
+  } finally {
+    await rm(stagedRoot, { recursive: true, force: true });
   }
-  throw new Error(`No built-in text projection for ${mediaType || extension || "this document"}`);
+}
+
+async function runSkillReader(
+  reader: string,
+  input: string,
+  skillDirectory: string
+): Promise<Record<string, unknown>> {
+  try {
+    const result = await execFileAsync(process.execPath, [
+      reader,
+      "--input",
+      input,
+      "--max-chars",
+      String(MAX_RICH_DOCUMENT_TEXT_CHARS)
+    ], {
+      cwd: skillDirectory,
+      env: { ...process.env },
+      maxBuffer: 4 * 1024 * 1024
+    });
+    return parseReaderEnvelope(result.stdout);
+  } catch (error) {
+    const stdout = typeof error === "object" && error !== null && "stdout" in error
+      ? String((error as { stdout?: unknown }).stdout ?? "")
+      : "";
+    let envelope: Record<string, unknown> | undefined;
+    try {
+      envelope = parseReaderEnvelope(stdout);
+    } catch {
+      envelope = undefined;
+    }
+    if (typeof envelope?.message === "string") throw new Error(envelope.message);
+    const detail = [
+      typeof error === "object" && error !== null && "stderr" in error
+        ? String((error as { stderr?: unknown }).stderr ?? "")
+        : "",
+      error instanceof Error ? error.message : String(error)
+    ].filter(Boolean).join("\n");
+    throw new Error(`Skill reader unavailable: ${detail}`);
+  }
+}
+
+function parseReaderEnvelope(stdout: string): Record<string, unknown> {
+  const text = stdout.trim();
+  if (!text) throw new Error("Skill reader returned no JSON");
+  const lines = text.split(/\r?\n/).filter(Boolean);
+  const parsed = JSON.parse(lines.at(-1) ?? text) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Skill reader returned a non-object JSON envelope");
+  }
+  return parsed as Record<string, unknown>;
 }
 
 function decodeBase64(value: string): Buffer {
@@ -72,116 +147,39 @@ function decodeBase64(value: string): Buffer {
   return Buffer.from(value, "base64");
 }
 
-async function pdfToText(bytes: Buffer): Promise<string> {
-  // pdf-parse's text-only API can load pdf.js in Node environments without a
-  // DOM. Supplying the small affine surface keeps PDF reading independent of
-  // an optional canvas/native rendering dependency.
-  const globalScope = globalThis as typeof globalThis & { DOMMatrix?: unknown };
-  if (!globalScope.DOMMatrix) Object.defineProperty(globalThis, "DOMMatrix", {
-    configurable: true,
-    writable: true,
-    value: TextOnlyDOMMatrix
-  });
-  const { PDFParse } = await import("pdf-parse");
-  const parser = new PDFParse({ data: new Uint8Array(bytes) });
-  try {
-    const result = await parser.getText();
-    const pages = String(result.text ?? "")
-      .split(/\f/g)
-      .map((page) => page.trim())
-      .filter(Boolean);
-    return pages.map((page, index) => `## Page ${index + 1}\n\n${page}`).join("\n\n");
-  } finally {
-    await parser.destroy();
-  }
-}
-
-class TextOnlyDOMMatrix {
-  a = 1;
-  b = 0;
-  c = 0;
-  d = 1;
-  e = 0;
-  f = 0;
-
-  constructor(value?: unknown) {
-    if (Array.isArray(value) && value.length >= 6) {
-      [this.a, this.b, this.c, this.d, this.e, this.f] = value.slice(0, 6).map(Number) as [number, number, number, number, number, number];
-    }
-  }
-
-  multiply(): this { return this; }
-  multiplySelf(): this { return this; }
-  preMultiplySelf(): this { return this; }
-  translate(): this { return this; }
-  scale(): this { return this; }
-  invertSelf(): this { return this; }
-}
-
-function workbookToText(bytes: Buffer, displayName: string): string {
-  const workbook = XLSX.read(bytes, { type: "buffer", cellDates: true });
-  return [`# ${path.basename(displayName, path.extname(displayName))}`, "", ...workbook.SheetNames.flatMap((name) => {
-    const sheet = workbook.Sheets[name]!;
-    const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: false, defval: "" });
-    return [`## Sheet: ${name}`, "", tableText(rows), ""];
-  })].join("\n");
-}
-
-function tableText(rows: unknown[][]): string {
-  if (rows.length === 0) return "(empty sheet)";
-  return rows.map((row) => row.map((cell) => String(cell ?? "")).join("\t")).join("\n");
-}
-
-function presentationToText(bytes: Buffer, displayName: string): string {
-  const archive = unzipSync(bytes);
-  const slideNames = Object.keys(archive)
-    .filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))
-    .sort((left, right) => slideNumber(left) - slideNumber(right));
-  const slides = slideNames.map((name, index) => {
-    const xml = strFromU8(archive[name]!);
-    const text = [...xml.matchAll(/<a:t(?:\s[^>]*)?>([\s\S]*?)<\/a:t>/g)]
-      .map((match) => decodeXml(match[1] ?? "").replace(/\s+/g, " ").trim())
-      .filter(Boolean)
-      .join(" ");
-    return `## Slide ${index + 1}\n\n${text || "[No text]"}`;
-  });
-  return [`# ${path.basename(displayName, path.extname(displayName))}`, "", ...slides].join("\n\n");
-}
-
-function slideNumber(value: string): number {
-  return Number(value.match(/slide(\d+)\.xml$/)?.[1] ?? Number.MAX_SAFE_INTEGER);
-}
-
-function htmlToPlainText(html: string): string {
-  return decodeXml(html
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/<(script|style|noscript)[^>]*>[\s\S]*?<\/\1>/gi, "")
-    .replace(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/gi, (_match, body) => `\n\n${stripTags(body)}\n\n`)
-    .replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_match, body) => `\n- ${stripTags(body)}`)
-    .replace(/<tr[^>]*>([\s\S]*?)<\/tr>/gi, (_match, body) => `\n${[...body.matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi)].map((item) => stripTags(item[1] ?? "")).join("\t")}`)
-    .replace(/<p[^>]*>|<div[^>]*>|<br\s*\/?\s*>/gi, "\n\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim());
-}
-
-function stripTags(value: string): string {
-  return decodeXml(value.replace(/<[^>]+>/g, "").trim());
-}
-
-function decodeXml(value: string): string {
-  return value
-    .replace(/&#x([0-9a-f]+);/gi, (_match, code) => String.fromCodePoint(Number.parseInt(code, 16)))
-    .replace(/&#(\d+);/g, (_match, code) => String.fromCodePoint(Number(code)))
-    .replace(/&(?:amp|lt|gt|quot|apos|nbsp);/gi, (entity) => ({
-      "&amp;": "&",
-      "&lt;": "<",
-      "&gt;": ">",
-      "&quot;": '"',
-      "&apos;": "'",
-      "&nbsp;": " "
-    }[entity.toLowerCase()] ?? entity));
+function assetExtension(displayName: string, mediaType: string): string {
+  const extension = path.extname(displayName).toLowerCase();
+  const supportedExtensions = new Set([
+    ".pdf",
+    ".doc", ".docx", ".docm", ".dot", ".dotx", ".dotm", ".rtf",
+    ".xls", ".xlsx", ".xlsm", ".xltx", ".xltm", ".csv", ".tsv",
+    ".ppt", ".pptx", ".pptm", ".potx", ".potm", ".ppsx", ".ppsm"
+  ]);
+  if (supportedExtensions.has(extension)) return extension;
+  const normalized = mediaType.toLowerCase().split(";", 1)[0];
+  return ({
+    "application/pdf": ".pdf",
+    "application/msword": ".doc",
+    "application/rtf": ".rtf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.template": ".dotx",
+    "application/vnd.ms-word.document.macroenabled.12": ".docm",
+    "application/vnd.ms-word.template.macroenabled.12": ".dotm",
+    "application/vnd.ms-excel": ".xls",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.template": ".xltx",
+    "application/vnd.ms-excel.sheet.macroenabled.12": ".xlsm",
+    "application/vnd.ms-excel.template.macroenabled.12": ".xltm",
+    "text/csv": ".csv",
+    "text/tab-separated-values": ".tsv",
+    "application/vnd.ms-powerpoint": ".ppt",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+    "application/vnd.openxmlformats-officedocument.presentationml.template": ".potx",
+    "application/vnd.openxmlformats-officedocument.presentationml.slideshow": ".ppsx",
+    "application/vnd.ms-powerpoint.presentation.macroenabled.12": ".pptm",
+    "application/vnd.ms-powerpoint.template.macroenabled.12": ".potm",
+    "application/vnd.ms-powerpoint.slideshow.macroenabled.12": ".ppsm"
+  } as Record<string, string>)[normalized] ?? "";
 }
 
 export function boundRichDocumentText(
@@ -196,9 +194,10 @@ export function boundRichDocumentText(
 }
 
 function documentFormat(displayName: string, mediaType: string): string {
-  if (mediaType === PDF_MEDIA_TYPE || path.extname(displayName).toLowerCase() === ".pdf") return "pdf";
-  if (mediaType === DOCX_MEDIA_TYPE || path.extname(displayName).toLowerCase() === ".docx") return "docx";
-  if (mediaType === XLSX_MEDIA_TYPE || path.extname(displayName).toLowerCase() === ".xlsx") return "xlsx";
-  if (mediaType === PPTX_MEDIA_TYPE || path.extname(displayName).toLowerCase() === ".pptx") return "pptx";
+  const skill = documentSkillNameForAsset(displayName, mediaType);
+  if (skill === "pdf") return "pdf";
+  if (skill === "documents") return path.extname(displayName).toLowerCase().replace(/^\./, "") || "docx";
+  if (skill === "spreadsheets") return path.extname(displayName).toLowerCase().replace(/^\./, "") || "xlsx";
+  if (skill === "presentations") return path.extname(displayName).toLowerCase().replace(/^\./, "") || "pptx";
   return path.extname(displayName).toLowerCase().replace(/^\./, "") || "document";
 }

@@ -41,6 +41,11 @@ import {
   boundRichDocumentText,
   extractRichDocument
 } from "./richFile.js";
+import {
+  findDocumentSkillForAsset,
+  loadSkillBundleByName,
+  type SkillRecord
+} from "./skills.js";
 
 const MAX_CHAT_ASSET_CONTEXT_CHARS = 200_000;
 
@@ -137,20 +142,37 @@ export class PiAgentRuntime implements AgentRuntime {
     const transcriptMessages: ConversationMessage[] = [];
     const completedArtifactPaths: string[] = [];
 
-    const contextMessages = buildRuntimeContextMessages(
-      ctx.sessionSkills.rendered.section,
-      activeSkills
-    ).map((message) => piUserMessage(message.content ?? ""));
     // ctx.messages always contains the canonical current user turn. For
     // task_start, keep the complete transcript and continue from it so the
     // marked row participates in assembly exactly once. Ordinary turns keep
     // the existing prompt path, where the current row is appended by prompt.
     const storedMessageSource = input.task_start ? ctx.messages : ctx.messages.slice(0, -1);
-    const storedAssetImages = await loadAssetImages(storedMessageSource, ctx.assetStore);
     const allAssetMessages = input.task_start
       ? ctx.messages
       : [...storedMessageSource, input.message];
-    const assetDocumentProjections = await loadAssetDocumentProjections(allAssetMessages, ctx.assetStore);
+    const attachmentSkills = await loadDocumentAttachmentSkills(
+      allAssetMessages,
+      ctx.sessionSkills.records
+    );
+    const autoActivatedSkills = attachmentSkills.filter((skill) => !activeSkills.some((active) => active.path === skill.path));
+    if (autoActivatedSkills.length > 0) {
+      setActiveSkills([...activeSkills, ...autoActivatedSkills]);
+      for (const skill of autoActivatedSkills) {
+        queue.push(skillActivationEvent(input, skill));
+      }
+    }
+    ensureNotCancelled(ctx);
+
+    const contextMessages = buildRuntimeContextMessages(
+      ctx.sessionSkills.rendered.section,
+      activeSkills
+    ).map((message) => piUserMessage(message.content ?? ""));
+    const storedAssetImages = await loadAssetImages(storedMessageSource, ctx.assetStore);
+    const assetDocumentProjections = await loadAssetDocumentProjections(
+      allAssetMessages,
+      ctx.assetStore,
+      ctx.sessionSkills.records
+    );
     const storedMessages = storedMessageSource.map((message) => toPiMessage(
       message,
       storedAssetImages,
@@ -172,7 +194,8 @@ export class PiAgentRuntime implements AgentRuntime {
       () => activeSkills,
       setActiveSkills,
       () => resourceRoots,
-      workspacePathPolicy
+      workspacePathPolicy,
+      (skill) => queue.push(skillActivationEvent(input, skill, "explicit", "explicit_mention"))
     ));
 
     const agent = new Agent({
@@ -228,7 +251,11 @@ export class PiAgentRuntime implements AgentRuntime {
           const replacement = await ctx.compactMessagesIfNeeded(runtimeMessages, "mid_turn");
           if (!replacement) return messages;
           const replacementAssetImages = await loadAssetImages(replacement, ctx.assetStore);
-          const replacementAssetDocuments = await loadAssetDocumentProjections(replacement, ctx.assetStore);
+          const replacementAssetDocuments = await loadAssetDocumentProjections(
+            replacement,
+            ctx.assetStore,
+            ctx.sessionSkills.records
+          );
           return [
             ...contextMessages,
             ...replacement.map((message) => toPiMessage(
@@ -444,7 +471,8 @@ export class PiAgentRuntime implements AgentRuntime {
     getActiveSkills: () => ActivatedSkill[],
     setActiveSkills: (skills: ActivatedSkill[]) => void,
     getResourceRoots: () => string[],
-    workspacePathPolicy: WorkspacePathPolicy
+    workspacePathPolicy: WorkspacePathPolicy,
+    onSkillLoaded?: (skill: ActivatedSkill) => void
   ): AgentTool<any> {
     return {
       name: definition.function.name,
@@ -467,7 +495,10 @@ export class PiAgentRuntime implements AgentRuntime {
             ctx.sessionSkills.rendered.aliases,
             workspacePathPolicy,
             signal,
-            (skill) => setActiveSkills(mergeRuntimeActiveSkill(getActiveSkills(), skill))
+            (skill) => {
+              setActiveSkills(mergeRuntimeActiveSkill(getActiveSkills(), skill));
+              onSkillLoaded?.(skill);
+            }
           );
         } catch (error) {
           result = {
@@ -810,11 +841,69 @@ type ModelAssetProjection = {
   format: string;
   content?: string;
   truncated?: boolean;
+  status?: "unavailable";
+  error?: string;
 };
+
+/**
+ * A document attachment is an implicit Skill invocation. This mirrors the
+ * normal coding-agent behavior: the model receives the complete Skill
+ * instructions before it reasons over the uploaded document, while the
+ * attachment bytes remain in the Runtime asset store.
+ */
+async function loadDocumentAttachmentSkills(
+  messages: ConversationMessage[],
+  records: SkillRecord[]
+): Promise<ActivatedSkill[]> {
+  const loaded = new Map<string, ActivatedSkill>();
+  for (const message of messages) {
+    for (const attachment of message.attachments ?? []) {
+      if (!("kind" in attachment) || attachment.kind !== "asset" || attachment.media_type.startsWith("image/")) {
+        continue;
+      }
+      const record = findDocumentSkillForAsset(records, attachment.display_name, attachment.media_type);
+      if (!record || loaded.has(record.path)) continue;
+      const bundle = await loadSkillBundleByName(record.name, records);
+      loaded.set(record.path, {
+        name: bundle.skill.name,
+        path: bundle.skill.path,
+        scope: bundle.record.scope,
+        directory: bundle.record.directory,
+        content: bundle.skill.instructions,
+        allowed_tools: bundle.skill.manifest.allowedTools,
+        resource_paths: bundle.resources.paths,
+        resource_manifest_truncated: bundle.resources.truncated,
+        activated_at: new Date().toISOString()
+      });
+    }
+  }
+  return [...loaded.values()];
+}
+
+function skillActivationEvent(
+  input: RunStart,
+  skill: ActivatedSkill,
+  invocationType: "explicit" | "implicit" = "implicit",
+  reason: "explicit_mention" | "attachment" = "attachment"
+): Extract<OutboundMessage, { type: "skill.activated" }> {
+  return {
+    type: "skill.activated",
+    run_id: input.run_id,
+    name: skill.name,
+    path: skill.path,
+    scope: skill.scope ?? "custom",
+    status: "activated",
+    invocation_type: invocationType,
+    reason,
+    resource_paths: skill.resource_paths,
+    resource_manifest_truncated: skill.resource_manifest_truncated
+  };
+}
 
 async function loadAssetDocumentProjections(
   messages: ConversationMessage[],
-  assetStore: RunContext["assetStore"]
+  assetStore: RunContext["assetStore"],
+  records: SkillRecord[]
 ): Promise<Map<string, ModelAssetProjection>> {
   const projections = new Map<string, ModelAssetProjection>();
   if (!assetStore) return projections;
@@ -836,7 +925,16 @@ async function loadAssetDocumentProjections(
       }
       try {
         const bytes = await assetStore.read(attachment.asset_id, attachment.storage_ref);
-        const extracted = await extractChatAssetDocument(attachment.display_name, attachment.media_type, bytes);
+        const documentSkill = findDocumentSkillForAsset(records, attachment.display_name, attachment.media_type);
+        if (!documentSkill) {
+          throw new Error("The owning document Skill is unavailable");
+        }
+        const extracted = await extractRichDocument(
+          attachment.display_name,
+          attachment.media_type,
+          bytes,
+          documentSkill.directory
+        );
         const bounded = boundRichDocumentText(extracted.content, remainingChars);
         projections.set(attachment.asset_id, {
           format: extracted.format,
@@ -849,29 +947,14 @@ async function loadAssetDocumentProjections(
         // bytes are reported as unavailable rather than being replaced with a
         // guessed or lossy text projection.
         projections.set(attachment.asset_id, {
-          format: assetDocumentFormat(attachment.display_name, attachment.media_type)
+          format: assetDocumentFormat(attachment.display_name, attachment.media_type),
+          status: "unavailable",
+          error: "The owning document Skill could not produce a text projection."
         });
       }
     }
   }
   return projections;
-}
-
-async function extractChatAssetDocument(
-  displayName: string,
-  mediaType: string,
-  bytes: Buffer
-): Promise<{ format: string; content: string }> {
-  if (
-    mediaType.startsWith("text/")
-    || ["application/json", "application/xml", "application/yaml", "text/yaml"].includes(mediaType)
-  ) {
-    return {
-      format: "text",
-      content: new TextDecoder("utf-8", { fatal: true }).decode(bytes)
-    };
-  }
-  return extractRichDocument(displayName, mediaType, bytes);
 }
 
 function assetDocumentFormat(displayName: string, mediaType: string): string {

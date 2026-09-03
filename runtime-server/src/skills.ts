@@ -271,6 +271,85 @@ export function skillResourceRoots(skills: SkillRecord[]): string[] {
   return [...new Set(skills.map((skill) => skill.directory))];
 }
 
+export type DocumentSkillName = "documents" | "pdf" | "presentations" | "spreadsheets";
+
+/**
+ * Map a Workspace document to the Skill that owns its semantic toolchain.
+ * Extension routing is deliberately kept in the Skill catalog layer so the
+ * Runtime cannot accidentally turn a binary Office/PDF file into a generic
+ * text-file operation.
+ */
+export function documentSkillNameForPath(target: string): DocumentSkillName | undefined {
+  const extension = path.extname(target).toLowerCase();
+  if (extension === ".pdf") return "pdf";
+  if ([".doc", ".docx", ".docm", ".dot", ".dotx", ".dotm", ".rtf"].includes(extension)) return "documents";
+  if ([".xls", ".xlsx", ".xlsm", ".xltx", ".xltm", ".csv", ".tsv"].includes(extension)) return "spreadsheets";
+  if ([".ppt", ".pptx", ".pptm", ".potx", ".potm", ".ppsx", ".ppsm"].includes(extension)) return "presentations";
+  return undefined;
+}
+
+/**
+ * Apply the same routing to an uploaded chat asset when the display name has
+ * no useful extension. The media type is transport metadata, not document
+ * content, so it is only used to select the Skill and never treated as an
+ * instruction source.
+ */
+export function documentSkillNameForAsset(
+  displayName: string,
+  mediaType: string
+): DocumentSkillName | undefined {
+  const byPath = documentSkillNameForPath(displayName);
+  if (byPath) return byPath;
+  const normalized = mediaType.trim().toLowerCase().split(";", 1)[0];
+  if (normalized === "application/pdf") return "pdf";
+  if ([
+    "application/msword",
+    "application/rtf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.template",
+    "application/vnd.ms-word.document.macroenabled.12",
+    "application/vnd.ms-word.template.macroenabled.12"
+  ].includes(normalized)) return "documents";
+  if ([
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.template",
+    "application/vnd.ms-excel.sheet.macroenabled.12",
+    "application/vnd.ms-excel.template.macroenabled.12",
+    "text/csv",
+    "text/tab-separated-values"
+  ].includes(normalized)) return "spreadsheets";
+  if ([
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/vnd.openxmlformats-officedocument.presentationml.template",
+    "application/vnd.openxmlformats-officedocument.presentationml.slideshow",
+    "application/vnd.ms-powerpoint.presentation.macroenabled.12",
+    "application/vnd.ms-powerpoint.template.macroenabled.12",
+    "application/vnd.ms-powerpoint.slideshow.macroenabled.12"
+  ].includes(normalized)) return "presentations";
+  return undefined;
+}
+
+export function findDocumentSkillForPath(
+  skills: SkillRecord[],
+  target: string
+): SkillRecord | undefined {
+  const name = documentSkillNameForPath(target);
+  if (!name) return undefined;
+  return skills.find((skill) => skill.name === name || skill.name.endsWith(`:${name}`));
+}
+
+export function findDocumentSkillForAsset(
+  skills: SkillRecord[],
+  displayName: string,
+  mediaType: string
+): SkillRecord | undefined {
+  const name = documentSkillNameForAsset(displayName, mediaType);
+  if (!name) return undefined;
+  return skills.find((skill) => skill.name === name || skill.name.endsWith(`:${name}`));
+}
+
 export async function listSkillBundleResourcePaths(skillDirectory: string): Promise<SkillBundleResourceManifest> {
   const root = await realpath(skillDirectory).catch(() => path.resolve(skillDirectory));
   const files: string[] = [];

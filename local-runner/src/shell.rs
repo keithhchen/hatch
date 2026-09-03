@@ -5,11 +5,12 @@ use std::sync::atomic::AtomicBool;
 
 pub(crate) fn execute(
     workspace: &Path,
+    runtime_root: Option<&Path>,
     command: &str,
     timeout_ms: u64,
     cancel: &AtomicBool,
 ) -> Result<ShellExecOutput> {
-    platform::execute(workspace, command, timeout_ms, cancel)
+    platform::execute(workspace, runtime_root, command, timeout_ms, cancel)
 }
 
 #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
@@ -18,6 +19,7 @@ mod platform {
 
     pub(super) fn execute(
         _workspace: &Path,
+        _runtime_root: Option<&Path>,
         _command: &str,
         _timeout_ms: u64,
         cancel: &AtomicBool,
@@ -35,6 +37,7 @@ mod platform {
 #[cfg(target_os = "windows")]
 mod platform {
     use super::*;
+    use std::ffi::OsString;
     use std::io::Read;
     use std::os::windows::io::AsRawHandle;
     use std::os::windows::process::CommandExt;
@@ -56,6 +59,7 @@ mod platform {
 
     pub(super) fn execute(
         workspace: &Path,
+        runtime_root: Option<&Path>,
         command: &str,
         timeout_ms: u64,
         cancel: &AtomicBool,
@@ -80,8 +84,11 @@ mod platform {
             ));
         }
 
+        let runtime_root = runtime_root.map(canonical_runtime_root).transpose()?;
+
         let job = JobObject::new()?;
-        let mut child = Command::new(POWERSHELL)
+        let mut shell = Command::new(POWERSHELL);
+        shell
             .args([
                 "-NoLogo",
                 "-NoProfile",
@@ -95,13 +102,15 @@ mod platform {
             .current_dir(&workspace)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|error| {
-                LocalRunnerError::ShellSandboxUnavailable(format!(
-                    "could not start {POWERSHELL}: {error}"
-                ))
-            })?;
+            .stderr(Stdio::piped());
+        if let Some(runtime_root) = runtime_root.as_deref() {
+            configure_runtime_environment(&mut shell, runtime_root);
+        }
+        let mut child = shell.spawn().map_err(|error| {
+            LocalRunnerError::ShellSandboxUnavailable(format!(
+                "could not start {POWERSHELL}: {error}"
+            ))
+        })?;
 
         if let Err(error) = job.assign(&child) {
             let _ = child.kill();
@@ -177,6 +186,61 @@ mod platform {
             stdout_truncated: stdout_output.truncated || stdout_truncated,
             stderr_truncated: stderr_output.truncated || stderr_truncated,
         })
+    }
+
+    fn canonical_runtime_root(root: &Path) -> Result<std::path::PathBuf> {
+        let canonical = root.canonicalize().map_err(|error| {
+            LocalRunnerError::ShellSandboxInitialization(format!(
+                "could not canonicalize the bundled runtime root: {error}"
+            ))
+        })?;
+        if !canonical.is_dir() {
+            return Err(LocalRunnerError::ShellSandboxInitialization(
+                "the bundled runtime root is not a directory".into(),
+            ));
+        }
+        for relative in ["manifest.json", "node/node.exe", "python/python.exe"] {
+            let candidate = canonical.join(relative);
+            if !candidate.is_file() {
+                return Err(LocalRunnerError::ShellSandboxInitialization(format!(
+                    "the bundled runtime is incomplete; missing {}",
+                    candidate.display()
+                )));
+            }
+        }
+        Ok(canonical)
+    }
+
+    fn configure_runtime_environment(command: &mut Command, runtime_root: &Path) {
+        let node = runtime_root.join("node/node.exe");
+        let python = runtime_root.join("python/python.exe");
+        let node_modules = runtime_root.join("node-toolchain/node_modules");
+        let python_packages = runtime_root.join("python-packages");
+        let skills = runtime_root.join("skills");
+        let mut path_entries = vec![
+            runtime_root.join("node").into_os_string(),
+            runtime_root.join("python").into_os_string(),
+            runtime_root.join("bin").into_os_string(),
+        ];
+        if let Some(existing) = std::env::var_os("PATH") {
+            path_entries.extend(existing.to_string_lossy().split(';').map(OsString::from));
+        }
+        let mut path = OsString::new();
+        for (index, entry) in path_entries.into_iter().enumerate() {
+            if index > 0 {
+                path.push(";");
+            }
+            path.push(entry);
+        }
+        command
+            .env("PATH", path)
+            .env("HATCH_RUNTIME_ROOT", runtime_root)
+            .env("HATCH_NODE", &node)
+            .env("HATCH_PYTHON", &python)
+            .env("HATCH_NODE_MODULES", &node_modules)
+            .env("HATCH_DOCUMENT_SKILLS_ROOT", &skills)
+            .env("PYTHONPATH", &python_packages)
+            .env("NODE_PATH", &node_modules);
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -468,6 +532,7 @@ mod platform {
     (literal "/bin/launchctl")
     (literal "/usr/bin/launchctl"))
 (allow file-read* (literal "/private/var/select/sh"))
+(allow file-read* (subpath (param "RUNTIME_ROOT")))
 (allow file-read* file-write*
     (subpath (param "WORKSPACE"))
     (subpath (param "SCRATCH")))
@@ -475,22 +540,43 @@ mod platform {
 
     pub(super) fn execute(
         workspace: &Path,
+        runtime_root: Option<&Path>,
         command: &str,
         timeout_ms: u64,
         cancel: &AtomicBool,
     ) -> Result<ShellExecOutput> {
-        execute_with_backend(
+        execute_with_backend_with_runtime(
             Path::new(SANDBOX_EXEC),
             workspace,
+            runtime_root,
             command,
             timeout_ms,
             cancel,
         )
     }
 
+    #[cfg(test)]
     fn execute_with_backend(
         sandbox_exec: &Path,
         workspace: &Path,
+        command: &str,
+        timeout_ms: u64,
+        cancel: &AtomicBool,
+    ) -> Result<ShellExecOutput> {
+        execute_with_backend_with_runtime(
+            sandbox_exec,
+            workspace,
+            None,
+            command,
+            timeout_ms,
+            cancel,
+        )
+    }
+
+    fn execute_with_backend_with_runtime(
+        sandbox_exec: &Path,
+        workspace: &Path,
+        runtime_root: Option<&Path>,
         command: &str,
         timeout_ms: u64,
         cancel: &AtomicBool,
@@ -500,6 +586,7 @@ mod platform {
         }
 
         let workspace = canonical_workspace(workspace)?;
+        let runtime_root = runtime_root.map(canonical_runtime_root).transpose()?;
         verify_backend_binary(sandbox_exec)?;
         let mut scratch = ScratchDirectory::create(&workspace)?;
 
@@ -512,6 +599,7 @@ mod platform {
                 sandbox_exec,
                 &workspace,
                 scratch.path(),
+                runtime_root.as_deref(),
                 command,
                 timeout_ms,
                 cancel,
@@ -542,6 +630,29 @@ mod platform {
             return Err(LocalRunnerError::ShellSandboxInitialization(
                 "the filesystem root cannot be granted as a Shell Workspace".into(),
             ));
+        }
+        Ok(canonical)
+    }
+
+    fn canonical_runtime_root(root: &Path) -> Result<PathBuf> {
+        let canonical = root.canonicalize().map_err(|error| {
+            LocalRunnerError::ShellSandboxInitialization(format!(
+                "could not canonicalize the bundled runtime root: {error}"
+            ))
+        })?;
+        if !canonical.is_dir() {
+            return Err(LocalRunnerError::ShellSandboxInitialization(
+                "the bundled runtime root is not a directory".into(),
+            ));
+        }
+        for relative in ["manifest.json", "node/bin/node", "python/bin/python3"] {
+            let candidate = canonical.join(relative);
+            if !candidate.is_file() {
+                return Err(LocalRunnerError::ShellSandboxInitialization(format!(
+                    "the bundled runtime is incomplete; missing {}",
+                    candidate.display()
+                )));
+            }
         }
         Ok(canonical)
     }
@@ -589,6 +700,7 @@ mod platform {
             sandbox_exec,
             workspace,
             scratch,
+            None,
             concat!(
                 "if /bin/cat \"$1\" >/dev/null 2>&1; then exit 70; fi; ",
                 "if kill -0 \"$PPID\" >/dev/null 2>&1; then exit 71; fi; ",
@@ -664,6 +776,7 @@ mod platform {
         sandbox_exec: &Path,
         workspace: &Path,
         scratch: &Path,
+        runtime_root: Option<&Path>,
         command_text: &str,
         positional_arguments: &[OsString],
     ) -> Result<SandboxedChild> {
@@ -698,6 +811,11 @@ mod platform {
             profile_parameter("WORKSPACE", workspace),
             OsString::from("-D"),
             profile_parameter("SCRATCH", scratch),
+            OsString::from("-D"),
+            profile_parameter(
+                "RUNTIME_ROOT",
+                runtime_root.unwrap_or_else(|| Path::new("/nonexistent/hatch-runtime")),
+            ),
             OsString::from("-p"),
             OsString::from(SANDBOX_PROFILE),
             OsString::from(SYSTEM_SHELL),
@@ -707,12 +825,41 @@ mod platform {
         arguments.extend_from_slice(positional_arguments);
         let arguments = cstring_vector(arguments.iter().map(OsString::as_os_str), "argument")?;
 
-        let environment = [
-            OsString::from(format!("PATH={SAFE_PATH}")),
+        let mut environment = vec![
             environment_path("HOME", scratch),
             environment_path("TMPDIR", scratch),
             OsString::from(format!("LANG={SAFE_LANG}")),
         ];
+        if let Some(runtime_root) = runtime_root {
+            let node = runtime_root.join("node/bin/node");
+            let python = runtime_root.join("python/bin/python3");
+            let node_modules = runtime_root.join("node-toolchain/node_modules");
+            let python_packages = runtime_root.join("python-packages");
+            let skills = runtime_root.join("skills");
+            environment.extend([
+                environment_path(
+                    "PATH",
+                    &runtime_path(
+                        runtime_root,
+                        &[
+                            runtime_root.join("node/bin"),
+                            runtime_root.join("python/bin"),
+                            runtime_root.join("bin"),
+                        ],
+                    ),
+                ),
+                environment_path("HATCH_RUNTIME_ROOT", runtime_root),
+                environment_path("HATCH_NODE", &node),
+                environment_path("HATCH_PYTHON", &python),
+                environment_path("HATCH_NODE_MODULES", &node_modules),
+                environment_path("HATCH_DOCUMENT_SKILLS_ROOT", &skills),
+                environment_path("PYTHONPATH", &python_packages),
+                OsString::from("PYTHONNOUSERSITE=1"),
+                environment_path("NODE_PATH", &node_modules),
+            ]);
+        } else {
+            environment.push(OsString::from(format!("PATH={SAFE_PATH}")));
+        }
         let environment =
             cstring_vector(environment.iter().map(OsString::as_os_str), "environment")?;
         let executable = os_string_to_cstring(sandbox_exec.as_os_str(), "sandbox executable")?;
@@ -774,6 +921,21 @@ mod platform {
         value.push("=");
         value.push(path.as_os_str());
         value
+    }
+
+    fn runtime_path(_runtime_root: &Path, entries: &[PathBuf]) -> PathBuf {
+        let mut value = OsString::new();
+        for (index, entry) in entries.iter().enumerate() {
+            if index > 0 {
+                value.push(":");
+            }
+            value.push(entry.as_os_str());
+        }
+        if !entries.is_empty() {
+            value.push(":");
+        }
+        value.push(SAFE_PATH);
+        PathBuf::from(value)
     }
 
     fn cstring_vector<'a>(
@@ -1177,11 +1339,19 @@ mod platform {
         sandbox_exec: &Path,
         workspace: &Path,
         scratch: &Path,
+        runtime_root: Option<&Path>,
         command_text: &str,
         timeout_ms: u64,
         cancel: &AtomicBool,
     ) -> Result<ShellExecOutput> {
-        let mut child = spawn_sandboxed_shell(sandbox_exec, workspace, scratch, command_text, &[])?;
+        let mut child = spawn_sandboxed_shell(
+            sandbox_exec,
+            workspace,
+            scratch,
+            runtime_root,
+            command_text,
+            &[],
+        )?;
         let mut stdout_pipe = child.take_stdout()?;
         let mut stderr_pipe = child.take_stderr()?;
 

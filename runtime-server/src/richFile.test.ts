@@ -43,6 +43,18 @@ test("rich file adapter projects XLSX and PPTX content with bounded text", async
   assert.match(pptx.content, /Next steps/);
 });
 
+test("rich file adapter resolves extensionless macro-enabled uploads from MIME metadata", async () => {
+  const bytes = minimalDocx("Macro package text");
+  const result = await extractRichDocument(
+    "upload",
+    "application/vnd.ms-word.document.macroEnabled.12",
+    bytes
+  );
+
+  assert.equal(result.format, "docx");
+  assert.match(result.content, /Macro package text/);
+});
+
 test("rich file adapter projects PDF pages into bounded text", async () => {
   const bytes = minimalPdf("PDF text from Hatch");
   const result = await normalizeRichFileReadResult({

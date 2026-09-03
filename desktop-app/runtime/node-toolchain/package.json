@@ -1,0 +1,17 @@
+{
+  "name": "@hatch/desktop-document-toolchain",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Pinned Node libraries used by Hatch document Skills.",
+  "dependencies": {
+    "docx": "9.5.1",
+    "exceljs": "4.4.0",
+    "fflate": "0.8.2",
+    "mammoth": "1.12.1",
+    "pdf-lib": "1.17.1",
+    "pdf-parse": "2.4.5",
+    "xlsx": "0.18.5",
+    "pptxgenjs": "3.12.0"
+  }
+}

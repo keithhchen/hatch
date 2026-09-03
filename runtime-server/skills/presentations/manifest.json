@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "kind": "hatch-document-skill",
+  "name": "presentations",
+  "formats": ["ppt", "pptx", "pptm", "potx", "potm", "ppsx", "ppsm"],
+  "entrypoints": {
+    "asset_read": "scripts/read_asset.mjs",
+    "inspect": "scripts/pptx_tool.py inspect",
+    "read": "scripts/pptx_tool.py read",
+    "validate": "scripts/pptx_tool.py validate",
+    "render": "scripts/pptx_tool.py render",
+    "create": "scripts/create_pptx.mjs"
+  },
+  "runtime": {"python": ["lxml", "python-pptx"], "node": ["pptxgenjs"]},
+  "visual_qa": {"renderer": "LibreOffice + Poppler when installed", "required_for_layout_changes": true}
+}

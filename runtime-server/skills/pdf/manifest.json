@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "hatch-document-skill",
+  "name": "pdf",
+  "formats": ["pdf"],
+  "entrypoints": {
+    "asset_read": "scripts/read_asset.mjs",
+    "inspect": "scripts/pdf_tool.py inspect",
+    "read": "scripts/pdf_tool.py read",
+    "form_inspect": "scripts/pdf_tool.py form-inspect",
+    "form_fill": "scripts/pdf_tool.py form-fill",
+    "mutate": "scripts/pdf_tool.py merge|split|rotate",
+    "create": "scripts/create_pdf.mjs",
+    "render": "scripts/pdf_tool.py render"
+  },
+  "runtime": {"python": ["pdfplumber", "pypdf", "reportlab"], "node": ["pdf-lib"]},
+  "visual_qa": {"renderer": "Poppler pdftoppm when installed", "required_for_layout_changes": true}
+}

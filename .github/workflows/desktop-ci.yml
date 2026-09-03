@@ -6,6 +6,14 @@ on:
     paths:
       - "desktop-app/**"
       - "local-runner/**"
+      - "runtime-server/skills/**"
+      - "runtime-server/src/richFile.ts"
+      - "runtime-server/src/skills.ts"
+      - "runtime-server/src/piAgentRuntime.ts"
+      - "runtime-server/src/protocol.ts"
+      - "runtime-server/src/store.ts"
+      - "runtime-server/src/index.ts"
+      - "desktop-app/runtime/**"
       - "packages/ui/**"
       - "packages/protocol/**"
       - "scripts/uat/**"
@@ -22,6 +30,14 @@ on:
     paths:
       - "desktop-app/**"
       - "local-runner/**"
+      - "runtime-server/skills/**"
+      - "runtime-server/src/richFile.ts"
+      - "runtime-server/src/skills.ts"
+      - "runtime-server/src/piAgentRuntime.ts"
+      - "runtime-server/src/protocol.ts"
+      - "runtime-server/src/store.ts"
+      - "runtime-server/src/index.ts"
+      - "desktop-app/runtime/**"
       - "packages/ui/**"
       - "packages/protocol/**"
       - "scripts/uat/**"
@@ -118,6 +134,11 @@ jobs:
       - name: Install renderer dependencies
         working-directory: desktop-app
         run: npm ci
+      - name: Cache bundled Python and Node runtimes
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/hatch-desktop-runtime
+          key: hatch-desktop-runtime-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop-app/scripts/runtime-manifest.mjs', 'runtime-server/skills/requirements.lock', 'desktop-app/runtime/node-toolchain/package-lock.json') }}
       - name: Check Rust formatting
         run: |
           cargo fmt --manifest-path local-runner/Cargo.toml -- --check
@@ -138,7 +159,15 @@ jobs:
           # persistent credential storage. Signed distribution is handled only
           # by desktop-release.yml in the protected environment.
           HATCH_PERSISTENT_SESSION: "0"
+          HATCH_RUNTIME_CACHE_DIR: ${{ runner.temp }}/hatch-desktop-runtime
         run: npm run build:dmg:ci
+      - name: Verify bundled Python and Node runtime in macOS app
+        working-directory: .
+        run: |
+          mkdir -p artifacts/desktop-uat
+          node desktop-app/scripts/verify-bundled-runtime.mjs \
+            --root desktop-app/src-tauri/target/release/bundle/macos/Hatch.app/Contents/Resources/runtime \
+            --report artifacts/desktop-uat/macos-runtime.json
       - name: Record macOS automated UAT evidence
         env:
           HATCH_PERSISTENT_SESSION: "0"
@@ -146,6 +175,7 @@ jobs:
           node scripts/uat/record-desktop-uat-artifact.mjs
           --platform macos
           --artifact-dir desktop-app/src-tauri/target/release/bundle/dmg
+          --runtime-report artifacts/desktop-uat/macos-runtime.json
           --output artifacts/desktop-uat/macos.json
       - name: Upload ad-hoc macOS UAT package and evidence
         uses: actions/upload-artifact@v4
@@ -181,6 +211,11 @@ jobs:
       - name: Install renderer dependencies
         working-directory: desktop-app
         run: npm ci
+      - name: Cache bundled Python and Node runtimes
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/hatch-desktop-runtime
+          key: hatch-desktop-runtime-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop-app/scripts/runtime-manifest.mjs', 'runtime-server/skills/requirements.lock', 'desktop-app/runtime/node-toolchain/package-lock.json') }}
       - name: Test renderer and web build on Windows
         working-directory: desktop-app
         run: |
@@ -196,7 +231,15 @@ jobs:
           # Windows UAT is intentionally process-memory-only. Signed
           # distribution remains a separate protected release concern.
           HATCH_PERSISTENT_SESSION: "0"
+          HATCH_RUNTIME_CACHE_DIR: ${{ runner.temp }}/hatch-desktop-runtime
         run: npx tauri build --debug --bundles nsis
+      - name: Verify bundled Python and Node runtime in Windows bundle
+        shell: bash
+        run: |
+          mkdir -p artifacts/desktop-uat
+          node desktop-app/scripts/verify-bundled-runtime.mjs \
+            --search-root desktop-app/src-tauri/target/debug \
+            --report artifacts/desktop-uat/windows-runtime.json
       - name: Record Windows automated UAT evidence
         shell: bash
         env:
@@ -205,6 +248,7 @@ jobs:
           node scripts/uat/record-desktop-uat-artifact.mjs
           --platform windows
           --artifact-dir desktop-app/src-tauri/target/debug/bundle/nsis
+          --runtime-report artifacts/desktop-uat/windows-runtime.json
           --output artifacts/desktop-uat/windows.json
       - name: Upload unsigned Windows installer for UAT
         uses: actions/upload-artifact@v4
@@ -271,18 +315,21 @@ jobs:
             --report "$arm64_report" \
             --artifact-dir release/macos/arm64 \
             --expected-source-sha "$GITHUB_SHA" \
-            --expected-runner-architecture ARM64
+            --expected-runner-architecture ARM64 \
+            --require-bundled-runtime
           node scripts/uat/verify-desktop-uat-artifact.mjs \
             --platform macos \
             --report "$intel_report" \
             --artifact-dir release/macos/intel \
             --expected-source-sha "$GITHUB_SHA" \
-            --expected-runner-architecture X64
+            --expected-runner-architecture X64 \
+            --require-bundled-runtime
           node scripts/uat/verify-desktop-uat-artifact.mjs \
             --platform windows \
             --report "$windows_report" \
             --artifact-dir release/windows \
-            --expected-source-sha "$GITHUB_SHA"
+            --expected-source-sha "$GITHUB_SHA" \
+            --require-bundled-runtime
       - name: Ensure annotated tag exists in public releases repository
         env:
           GH_TOKEN: ${{ secrets.HATCH_RELEASES_TOKEN }}
@@ -444,13 +491,15 @@ jobs:
             --report "$arm64_report" \
             --artifact-dir release/macos/arm64 \
             --expected-source-sha "$GITHUB_SHA" \
-            --expected-runner-architecture ARM64
+            --expected-runner-architecture ARM64 \
+            --require-bundled-runtime
           node scripts/uat/verify-desktop-uat-artifact.mjs \
             --platform macos \
             --report "$intel_report" \
             --artifact-dir release/macos/intel \
             --expected-source-sha "$GITHUB_SHA" \
-            --expected-runner-architecture X64
+            --expected-runner-architecture X64 \
+            --require-bundled-runtime
       - name: Validate OSS publication configuration
         env:
           HATCH_OSS_BUCKET: ${{ vars.HATCH_OSS_BUCKET }}

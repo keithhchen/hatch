@@ -21,6 +21,7 @@ export async function recordDesktopUatArtifact({
   platform,
   artifactDirectory,
   outputFile,
+  runtimeReportFile = null,
   environment = process.env,
   now = new Date()
 }) {
@@ -51,6 +52,10 @@ export async function recordDesktopUatArtifact({
     throw new Error(`Desktop artifact ${artifactPath} is not a non-empty file.`);
   }
 
+  const runtime = runtimeReportFile
+    ? await readBundledRuntimeReport(runtimeReportFile)
+    : undefined;
+
   const report = {
     schema_version: 1,
     kind: "hatch-desktop-automated-uat-artifact",
@@ -74,6 +79,7 @@ export async function recordDesktopUatArtifact({
       uat_only: true,
       release_eligible: false
     },
+    ...(runtime ? { runtime } : {}),
     security: {
       persistent_session: "disabled",
       credential_storage: "process memory only",
@@ -119,14 +125,37 @@ function readCliArguments(argv) {
     if (!value || values.has(name)) throw new Error(`Expected one value for --${name}.`);
     values.set(name, value);
   }
-  const accepted = new Set(["platform", "artifact-dir", "output"]);
+  const accepted = new Set(["platform", "artifact-dir", "output", "runtime-report"]);
   for (const name of values.keys()) {
     if (!accepted.has(name)) throw new Error(`Unknown argument --${name}.`);
   }
   return {
     platform: values.get("platform"),
     artifactDirectory: values.get("artifact-dir"),
-    outputFile: values.get("output")
+    outputFile: values.get("output"),
+    runtimeReportFile: values.get("runtime-report") ?? null
+  };
+}
+
+async function readBundledRuntimeReport(file) {
+  let report;
+  try {
+    report = JSON.parse(await readFile(file, "utf8"));
+  } catch (error) {
+    throw new Error(`Could not read bundled runtime verification ${file}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (report?.schema_version !== 1 || report.kind !== "hatch-desktop-bundled-runtime-verification" || report.verified !== true) {
+    throw new Error(`Bundled runtime verification ${file} is not a successful runtime report.`);
+  }
+  return {
+    schema_version: report.schema_version,
+    kind: report.kind,
+    verified: report.verified,
+    target: report.target,
+    expected_target: report.expected_target,
+    node: report.node,
+    python: report.python,
+    skills: report.skills
   };
 }
 

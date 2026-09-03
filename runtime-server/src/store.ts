@@ -45,7 +45,7 @@ export type VisibleConversationPart =
       type: "skill_event";
       name: string;
       status: "activated" | "invoked";
-      reason: "explicit_mention" | "script_run" | "skill_doc_read";
+      reason: "explicit_mention" | "attachment" | "script_run" | "skill_doc_read";
       source_tool_call_id?: string;
     }
   | { type: "skill_run"; skill_run_id: string };
@@ -83,7 +83,7 @@ export type VisibleConversationSkillEvent = {
   scope?: string;
   status: "activated" | "invoked";
   invocation_type: "explicit" | "implicit";
-  reason: "explicit_mention" | "script_run" | "skill_doc_read";
+  reason: "explicit_mention" | "attachment" | "script_run" | "skill_doc_read";
   source_tool_call_id?: string;
   trigger?: {
     tool: "shell_exec" | "file_read";
@@ -201,6 +201,8 @@ export type StoreEvent =
       allowed_tools?: string;
       resource_paths?: string[];
       resource_manifest_truncated?: boolean;
+      invocation_type?: "explicit" | "implicit";
+      reason?: "explicit_mention" | "attachment";
       timestamp: string;
     }
   | {
@@ -380,8 +382,8 @@ export class RuntimeStore {
           path: event.path,
           scope: event.scope,
           status: "activated",
-          invocation_type: "explicit",
-          reason: "explicit_mention",
+          invocation_type: event.invocation_type ?? "explicit",
+          reason: event.reason ?? "explicit_mention",
           resource_paths: event.resource_paths,
           resource_manifest_truncated: event.resource_manifest_truncated,
           timestamp: event.timestamp

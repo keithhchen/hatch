@@ -1,0 +1,15 @@
+interface:
+  display_name: Presentations
+  short_description: Read and create PowerPoint decks with complete-slide visual QA.
+  default_prompt: Read, create, or edit this presentation and summarize the verified slide output.
+policy:
+  allow_implicit_invocation: true
+  products: []
+dependencies:
+  tools:
+    - type: runtime
+      value: python
+      description: Bundled Hatch Python runtime exposed as HATCH_PYTHON.
+    - type: runtime
+      value: node
+      description: Bundled Hatch Node runtime exposed as HATCH_NODE.

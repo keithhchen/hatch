@@ -215,8 +215,7 @@ impl ProtocolToolError {
             | Self::InvalidStringArgument(_)
             | Self::InvalidIntegerArgument(_)
             | Self::UnsupportedTool(_) => "invalid_tool_call",
-            Self::Runner(LocalRunnerError::FileTooLarge { .. })
-            | Self::Runner(LocalRunnerError::RenderedFileTooLarge { .. }) => "file_too_large",
+            Self::Runner(LocalRunnerError::FileTooLarge { .. }) => "file_too_large",
             Self::InvalidTimeout => "invalid_tool_call",
             Self::Runner(LocalRunnerError::ShellSandboxUnavailable(_)) => {
                 "shell_sandbox_unavailable"

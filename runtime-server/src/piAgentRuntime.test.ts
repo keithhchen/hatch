@@ -9,6 +9,7 @@ import type { RunContext } from "./agentRuntime.js";
 import { RuntimeAssetStore } from "./assetStore.js";
 import { PiAgentRuntime } from "./piAgentRuntime.js";
 import { TASK_START_MESSAGE_CONTENT, type RunStart } from "./protocol.js";
+import { discoverSkills, renderSkillsSection } from "./skills.js";
 
 test("task_start keeps its marked history turn while omitting the marker from the provider request", async () => {
   const requests: Array<Record<string, unknown>> = [];
@@ -140,6 +141,7 @@ test("Pi runtime projects an uploaded DOCX asset into the Kimi prompt", async ()
     };
     const assetStore = new RuntimeAssetStore(root);
     const reference = await assetStore.put(attachment);
+    const skillRecords = await discoverSkills();
     const input = {
       type: "client.message",
       run_id: "run_docx_asset",
@@ -151,19 +153,9 @@ test("Pi runtime projects an uploaded DOCX asset into the Kimi prompt", async ()
       state: { status: "running" },
       messages: [input.message],
       sessionSkills: {
-        records: [],
-        visibleRecords: [],
-        rendered: {
-          section: "",
-          report: {
-            total_count: 0,
-            included_count: 0,
-            omitted_count: 0,
-            truncated_description_chars: 0,
-            truncated_description_count: 0
-          },
-          aliases: {}
-        }
+        records: skillRecords,
+        visibleRecords: skillRecords,
+        rendered: renderSkillsSection(skillRecords)
       },
       clientTools: [],
       assetStore
@@ -172,6 +164,7 @@ test("Pi runtime projects an uploaded DOCX asset into the Kimi prompt", async ()
     }
 
     assert.ok(events.some((event) => event.type === "turn.completed"));
+    assert.ok(events.some((event) => event.type === "skill.activated" && event.reason === "attachment"));
     const messages = requests[0]?.messages as Array<Record<string, unknown>>;
     const uploadedMessage = messages.find((message) => message.role === "user" && Array.isArray(message.content));
     assert.ok(uploadedMessage);

@@ -442,8 +442,8 @@ export type SkillActivatedEvent = {
   path: string;
   scope: string;
   status: "activated";
-  invocation_type: "explicit";
-  reason: "explicit_mention";
+  invocation_type: "explicit" | "implicit";
+  reason: "explicit_mention" | "attachment";
   resource_paths: string[];
   resource_manifest_truncated: boolean;
 };
@@ -535,6 +535,8 @@ export type ModelAssetProjection = {
   format: string;
   content?: string;
   truncated?: boolean;
+  status?: "unavailable";
+  error?: string;
 };
 
 export type UserMessageModelRenderOptions = {
@@ -568,7 +570,9 @@ export function renderUserMessageForModel(
         ? JSON.stringify({
           format: projection.format,
           available: typeof projection.content === "string",
-          truncated: projection.truncated === true
+          truncated: projection.truncated === true,
+          ...(projection.status ? { status: projection.status } : {}),
+          ...(projection.error ? { error: projection.error } : {})
         })
         : undefined;
       const projectionBlock = projection

@@ -1,0 +1,15 @@
+interface:
+  display_name: Documents
+  short_description: Read and edit Word documents with structural validation and visual QA.
+  default_prompt: Read, create, or edit this Word document and summarize the verified result.
+policy:
+  allow_implicit_invocation: true
+  products: []
+dependencies:
+  tools:
+    - type: runtime
+      value: python
+      description: Bundled Hatch Python runtime exposed as HATCH_PYTHON.
+    - type: runtime
+      value: node
+      description: Bundled Hatch Node runtime exposed as HATCH_NODE.

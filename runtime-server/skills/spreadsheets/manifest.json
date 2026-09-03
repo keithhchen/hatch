@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "hatch-document-skill",
+  "name": "spreadsheets",
+  "formats": ["xls", "xlsx", "xlsm", "xltx", "xltm", "csv", "tsv"],
+  "entrypoints": {
+    "asset_read": "scripts/read_asset.mjs",
+    "inspect": "scripts/xlsx_tool.py inspect",
+    "read": "scripts/xlsx_tool.py read",
+    "edit": "scripts/xlsx_tool.py set-cell",
+    "validate": "scripts/xlsx_tool.py validate",
+    "recalculate": "scripts/recalc.py",
+    "render": "scripts/xlsx_tool.py render",
+    "create": "scripts/create_xlsx.mjs"
+  },
+  "runtime": {"python": ["openpyxl"], "node": ["exceljs"]},
+  "visual_qa": {"renderer": "LibreOffice when installed", "required_for_layout_changes": true}
+}

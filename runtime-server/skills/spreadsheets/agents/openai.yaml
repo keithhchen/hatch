@@ -1,0 +1,15 @@
+interface:
+  display_name: Spreadsheets
+  short_description: Inspect and edit Excel workbooks while preserving formulas and structure.
+  default_prompt: Read, create, or edit this spreadsheet and summarize the verified workbook result.
+policy:
+  allow_implicit_invocation: true
+  products: []
+dependencies:
+  tools:
+    - type: runtime
+      value: python
+      description: Bundled Hatch Python runtime exposed as HATCH_PYTHON.
+    - type: runtime
+      value: node
+      description: Bundled Hatch Node runtime exposed as HATCH_NODE.

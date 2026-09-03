@@ -3650,6 +3650,26 @@ async function persistSkillEvent(
   input: RunStart,
   store: RuntimeStore
 ): Promise<void> {
+  if (event.type === "skill.activated") {
+    await store.append({
+      type: "skill.activated",
+      conversation_id: input.conversation_id,
+      run_id: input.run_id,
+      name: event.name,
+      path: event.path,
+      scope: event.scope,
+      directory: path.dirname(event.path),
+      // The complete Skill instructions are already injected into the model
+      // context. Persist only activation metadata so protected Skill content
+      // is not duplicated in the visible conversation journal.
+      content: "",
+      invocation_type: event.invocation_type,
+      reason: event.reason,
+      resource_paths: event.resource_paths,
+      resource_manifest_truncated: event.resource_manifest_truncated
+    });
+    return;
+  }
   if (event.type !== "skill.invoked") {
     return;
   }

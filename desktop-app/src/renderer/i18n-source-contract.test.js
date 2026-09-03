@@ -14,19 +14,20 @@ describe("Desktop UI localization source contract", () => {
       new URL("../../src-tauri/tauri.conf.json", import.meta.url),
       "utf8"
     ));
-    const localizedResources = {
+    const bundledResources = {
+      runtime: "runtime",
       "locales/en.lproj/InfoPlist.strings": "en.lproj/InfoPlist.strings",
       "locales/zh-Hans.lproj/InfoPlist.strings": "zh-Hans.lproj/InfoPlist.strings",
       "locales/ja.lproj/InfoPlist.strings": "ja.lproj/InfoPlist.strings"
     };
-    expect(config.bundle.resources).toEqual(localizedResources);
+    expect(config.bundle.resources).toEqual(bundledResources);
 
     const permissionKeys = [
       "NSDocumentsFolderUsageDescription",
       "NSDesktopFolderUsageDescription",
       "NSDownloadsFolderUsageDescription"
     ];
-    for (const sourcePath of Object.keys(localizedResources)) {
+    for (const sourcePath of Object.keys(bundledResources).filter((resource) => resource.startsWith("locales/"))) {
       const strings = await readFile(new URL(`../../src-tauri/${sourcePath}`, import.meta.url), "utf8");
       for (const key of permissionKeys) {
         expect(strings).toContain(`\"${key}\" = `);

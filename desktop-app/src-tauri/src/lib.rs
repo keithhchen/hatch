@@ -15,7 +15,7 @@ use hatch_local_runner::{LocalRunner, ToolCallRequest};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::{
     AppHandle, DragDropEvent, Emitter, Manager, State, UserAttentionType, WebviewWindow,
     WindowEvent,
@@ -772,8 +772,20 @@ fn native_drop_media_type(path: &std::path::Path) -> &'static str {
         Some("tif") | Some("tiff") => "image/tiff",
         Some("pdf") => "application/pdf",
         Some("docx") => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        Some("docm") => "application/vnd.ms-word.document.macroEnabled.12",
+        Some("dotx") => "application/vnd.openxmlformats-officedocument.wordprocessingml.template",
+        Some("dotm") => "application/vnd.ms-word.template.macroEnabled.12",
+        Some("rtf") => "application/rtf",
         Some("xlsx") => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        Some("xlsm") => "application/vnd.ms-excel.sheet.macroEnabled.12",
+        Some("xltx") => "application/vnd.openxmlformats-officedocument.spreadsheetml.template",
+        Some("xltm") => "application/vnd.ms-excel.template.macroEnabled.12",
         Some("pptx") => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        Some("pptm") => "application/vnd.ms-powerpoint.presentation.macroEnabled.12",
+        Some("potx") => "application/vnd.openxmlformats-officedocument.presentationml.template",
+        Some("potm") => "application/vnd.ms-powerpoint.template.macroEnabled.12",
+        Some("ppsx") => "application/vnd.openxmlformats-officedocument.presentationml.slideshow",
+        Some("ppsm") => "application/vnd.ms-powerpoint.slideshow.macroEnabled.12",
         Some("doc") => "application/msword",
         Some("xls") => "application/vnd.ms-excel",
         Some("ppt") => "application/vnd.ms-powerpoint",
@@ -790,11 +802,23 @@ fn native_drop_is_rich_media_type(media_type: &str) -> bool {
             media_type,
             "application/pdf"
                 | "application/msword"
+                | "application/rtf"
                 | "application/vnd.ms-excel"
                 | "application/vnd.ms-powerpoint"
                 | "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                | "application/vnd.openxmlformats-officedocument.wordprocessingml.template"
+                | "application/vnd.ms-word.document.macroEnabled.12"
+                | "application/vnd.ms-word.template.macroEnabled.12"
                 | "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                | "application/vnd.openxmlformats-officedocument.spreadsheetml.template"
+                | "application/vnd.ms-excel.sheet.macroEnabled.12"
+                | "application/vnd.ms-excel.template.macroEnabled.12"
                 | "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                | "application/vnd.openxmlformats-officedocument.presentationml.template"
+                | "application/vnd.openxmlformats-officedocument.presentationml.slideshow"
+                | "application/vnd.ms-powerpoint.presentation.macroEnabled.12"
+                | "application/vnd.ms-powerpoint.template.macroEnabled.12"
+                | "application/vnd.ms-powerpoint.slideshow.macroEnabled.12"
         )
 }
 
@@ -2237,15 +2261,31 @@ fn execute_tool_call_blocking(
     cancel: Arc<AtomicBool>,
 ) -> Result<Value, String> {
     let workspace = resolve_scoped_workspace_grant(app, &call.workspace_grant_id)?;
-    execute_tool_call_in_workspace(&workspace.path, call.request.clone(), cancel)
+    let runtime_root = bundled_runtime_root(app)?;
+    execute_tool_call_in_workspace_with_runtime(
+        &workspace.path,
+        call.request.clone(),
+        cancel,
+        Some(&runtime_root),
+    )
 }
 
+#[cfg(test)]
 fn execute_tool_call_in_workspace(
-    workspace: &std::path::Path,
+    workspace: &Path,
     request: Value,
     cancel: Arc<AtomicBool>,
 ) -> Result<Value, String> {
-    let runner = LocalRunner::new(workspace).map_err(to_string)?;
+    execute_tool_call_in_workspace_with_runtime(workspace, request, cancel, None)
+}
+
+fn execute_tool_call_in_workspace_with_runtime(
+    workspace: &Path,
+    request: Value,
+    cancel: Arc<AtomicBool>,
+    runtime_root: Option<&Path>,
+) -> Result<Value, String> {
+    let runner = LocalRunner::new_with_runtime(workspace, runtime_root).map_err(to_string)?;
     let request: ToolCallRequest = serde_json::from_value(request).map_err(to_string)?;
     if request.approval.is_some() {
         return Err(
@@ -2255,6 +2295,29 @@ fn execute_tool_call_in_workspace(
     }
     serde_json::to_value(runner.execute_tool_call_request_with_cancel(request, cancel))
         .map_err(to_string)
+}
+
+fn bundled_runtime_root(app: &AppHandle) -> Result<PathBuf, String> {
+    let resource_dir = app.path().resource_dir().map_err(|error| {
+        format!("desktop_runtime_unavailable: could not resolve app resources: {error}")
+    })?;
+    let runtime_root = resource_dir.join("runtime");
+    if runtime_root.is_dir() {
+        return Ok(runtime_root);
+    }
+    if cfg!(debug_assertions) {
+        // `prepare:runtime` produces the same real bundled resource in the
+        // source tree for `tauri dev`; this is a development location, not a
+        // fallback to a host Python/Node installation.
+        let source_runtime = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("runtime");
+        if source_runtime.is_dir() {
+            return Ok(source_runtime);
+        }
+    }
+    Err(format!(
+        "desktop_runtime_missing: bundled Python/Node runtime was not found at {}",
+        runtime_root.display()
+    ))
 }
 
 pub fn run() {

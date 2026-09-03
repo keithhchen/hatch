@@ -559,8 +559,8 @@ export class PostgresStore extends RuntimeStore {
           path: event.path,
           scope: event.scope,
           status: "activated",
-          invocation_type: "explicit",
-          reason: "explicit_mention",
+          invocation_type: event.invocation_type ?? "explicit",
+          reason: event.reason ?? "explicit_mention",
           resource_paths: event.resource_paths,
           resource_manifest_truncated: event.resource_manifest_truncated,
           timestamp: event.timestamp

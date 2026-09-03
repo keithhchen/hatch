@@ -32,6 +32,8 @@ import {
   loadSkillBundleByName,
   parseSkillMarkdown,
   readSkillResourceByPath,
+  documentSkillNameForPath,
+  findDocumentSkillForPath,
   skillResourceRoots,
   type SkillsRenderResult,
   type SkillRecord
@@ -40,7 +42,6 @@ import { PiAgentRuntime } from "./piAgentRuntime.js";
 import type { PiAgentPromptRunner } from "./piPrompt.js";
 import { briefSnapshotPromptBlock, type BriefSnapshot } from "./brief.js";
 import type { RuntimeAssetStore } from "./assetStore.js";
-import { normalizeRichFileReadResult } from "./richFile.js";
 
 export type RuntimeSessionSkills = {
   records: SkillRecord[];
@@ -967,6 +968,32 @@ export async function executeChatTool(
     return ctx.serverTools.executeCreatorTool(creatorTool, args, executionSignal);
   }
   const dispatch = requireModelToolDispatch(name);
+  const documentSkillName = documentSkillNameForPath(String(args.path ?? ""));
+  const documentSkill = documentSkillName
+    ? findDocumentSkillForPath(ctx.sessionSkills.records, String(args.path ?? ""))
+    : undefined;
+  if (documentSkillName && !documentSkill) {
+    throw new Error(`The ${documentSkillName} Skill is unavailable; refusing a generic ${dispatch.spec.runtimeName} operation on a document file.`);
+  }
+  if (
+    documentSkill
+    && (dispatch.spec.runtimeName === "file_read"
+      || dispatch.spec.runtimeName === "file_write"
+      || dispatch.spec.runtimeName === "file_patch")
+    && !activeSkills.some((skill) => (
+      skill.path === documentSkill.path
+      || skill.name === documentSkill.name
+      || skill.name.endsWith(`:${documentSkill.name}`)
+    ))
+  ) {
+    throw new Error(`Load Skill('${documentSkill.name}') before ${dispatch.spec.runtimeName} on ${path.basename(String(args.path ?? "document"))}. Document operations must use the complete Skill workflow.`);
+  }
+  if (
+    documentSkill
+    && (dispatch.spec.runtimeName === "file_write" || dispatch.spec.runtimeName === "file_patch")
+  ) {
+    throw new Error(`Use the ${documentSkill.name} Skill's bundled script through shell_exec to create or edit ${path.basename(String(args.path ?? "document"))}; file_write/file_patch cannot safely write binary Office/PDF containers.`);
+  }
   if (dispatch.spec.runtimeName === "file_search") {
     const blockedPaths = directReadRequiredPaths(workspacePathPolicy);
     if (blockedPaths.length > 0) {
@@ -1051,7 +1078,11 @@ export async function executeChatTool(
           approvalOverride: effectiveClientToolApproval(dispatch.approval, activeSkills, dispatch.clientTool, args)
         }));
     markWorkspacePathRead(workspacePathPolicy, target);
-    return normalizeRichFileReadResult(result);
+    // Rich files are intentionally returned as bounded typed bytes here. The
+    // corresponding document Skill owns semantic extraction, conversion,
+    // rendering, and validation; Runtime must not silently create a second
+    // parser that can disagree with the Skill toolchain.
+    return result;
   }
   const clientTool = requireDispatchClientTool(dispatch);
   requireClientToolEnabled(ctx.clientTools, clientTool);

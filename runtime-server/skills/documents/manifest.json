@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "kind": "hatch-document-skill",
+  "name": "documents",
+  "formats": ["doc", "docx", "docm", "dot", "dotx", "dotm", "rtf"],
+  "entrypoints": {
+    "read": "scripts/read_docx.py",
+    "asset_read": "scripts/read_asset.mjs",
+    "edit": "scripts/edit_docx.py replace",
+    "accept_changes": "scripts/accept_changes.py",
+    "validate": "scripts/validate_docx.py",
+    "render": "scripts/render_docx.py",
+    "create": "scripts/create_docx.mjs",
+    "convert": "scripts/office_convert.py"
+  },
+  "runtime": {"python": ["lxml", "python-docx"], "node": ["docx"]},
+  "visual_qa": {"renderer": "LibreOffice + Poppler when installed", "required_for_layout_changes": true}
+}
