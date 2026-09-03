@@ -22,13 +22,19 @@ COPY runtime-server/tsconfig.json ./
 COPY runtime-server/src ./src
 RUN npm run build
 
+# The TypeScript compiler and type packages are needed only while building.
+# Keep them out of the shipped Runtime layer so a release does not make the
+# production runner download the full development dependency tree.
+FROM dependencies AS production-dependencies
+RUN npm prune --omit=dev
+
 FROM node:22-slim AS production
 
 ENV NODE_ENV=production
 WORKDIR /app/runtime-server
 
 COPY --from=dependencies /workspace/runtime-server/package.json ./package.json
-COPY --from=dependencies /workspace/runtime-server/node_modules ./node_modules
+COPY --from=production-dependencies /workspace/runtime-server/node_modules ./node_modules
 COPY --from=build /workspace/runtime-server/dist ./dist
 COPY --from=local-runner-build /workspace/local-runner/target/release/hatch-local-runner /usr/local/bin/hatch-local-runner
 COPY runtime-server/skills ./skills

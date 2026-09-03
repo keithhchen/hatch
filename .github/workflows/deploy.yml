@@ -262,7 +262,7 @@ jobs:
               # registry and runtime concurrently. The production runner is
               # bandwidth-constrained and Compose can leave the duplicate
               # service in an "already being pulled" state until its timeout.
-              if timeout 900s docker pull "$image"; then
+              if timeout 1800s docker pull "$image"; then
                 return 0
               fi
               docker system df || true
