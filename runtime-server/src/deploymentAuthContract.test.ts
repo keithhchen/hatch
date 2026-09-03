@@ -80,6 +80,11 @@ test("production trusts forwarded client IP only on the private Registry network
     /HATCH_AUTH_TRUSTED_PROXY_CIDRS:/,
     "Runtime must apply the same explicit Caddy trust boundary before using forwarded client IPs"
   );
+  assert.match(
+    runtimeService,
+    /HATCH_RUNTIME_MAX_SOCKET_BUFFERED_BYTES: \$\{HATCH_RUNTIME_MAX_SOCKET_BUFFERED_BYTES:-41943040\}/,
+    "Runtime's Compose default must accommodate the negotiated WebSocket payload cap"
+  );
   const dashboardService = compose.match(/^  dashboard:\n([\s\S]*?)(?=^  [a-z][a-z0-9_-]*:\n)/m)?.[1];
   assert.ok(dashboardService, "compose.app.yml must declare the Dashboard service");
   assert.doesNotMatch(registryService, /HATCH_REGISTRY_COMMERCE_SERVICE_TOKEN:/);
