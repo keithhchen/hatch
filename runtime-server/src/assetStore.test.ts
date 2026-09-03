@@ -4,8 +4,34 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { RuntimeAssetStore } from "./assetStore.js";
+import { RuntimeAssetStore, type AssetReference } from "./assetStore.js";
+import type { ArtifactObjectStore, ObjectStoreObject, ObjectStorePutOptions } from "./creatorLearning/objectStore.js";
 import { parseInboundMessage, type AssetAttachment } from "./protocol.js";
+
+class FakeObjectStore implements ArtifactObjectStore {
+  readonly objects = new Map<string, Buffer>();
+
+  async put(key: string, content: Buffer | string, _options?: ObjectStorePutOptions): Promise<ObjectStoreObject> {
+    const bytes = Buffer.isBuffer(content) ? Buffer.from(content) : Buffer.from(content, "utf8");
+    const existing = this.objects.get(key);
+    if (existing && !existing.equals(bytes)) throw new Error(`Immutable object key already contains different bytes: ${key}`);
+    this.objects.set(key, bytes);
+    return { key, sha256: "", bytes: bytes.length };
+  }
+
+  async get(key: string): Promise<Buffer> {
+    const bytes = this.objects.get(key);
+    if (!bytes) {
+      const error = Object.assign(new Error(`Missing object: ${key}`), { code: "NoSuchKey" });
+      throw error;
+    }
+    return Buffer.from(bytes);
+  }
+
+  async list(_prefix: string): Promise<string[]> {
+    return [...this.objects.keys()];
+  }
+}
 
 test("rich asset payload is validated and stored outside the conversation record", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-assets-"));
@@ -69,6 +95,36 @@ test("asset identity mismatch cannot overwrite an existing asset", async () => {
       }),
       /different content/
     );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("production asset store persists bytes in cloud object storage and returns an OSS reference", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-cloud-assets-"));
+  try {
+    const bytes = Buffer.from("cloud image bytes", "utf8");
+    const attachment: AssetAttachment = {
+      kind: "asset",
+      attachment_id: "drop_cloud_1",
+      asset_id: "asset_cloud_1",
+      display_name: "cloud.png",
+      media_type: "image/png",
+      source_bytes: bytes.length,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      data_base64: bytes.toString("base64")
+    };
+    const objectStore = new FakeObjectStore();
+    const store = new RuntimeAssetStore(root, {
+      objectStore,
+      objectKeyPrefix: "hatch/runtime-assets",
+      storageReferencePrefix: "oss://private-hatch-assets"
+    });
+    const reference: AssetReference = await store.put(attachment);
+    assert.equal(reference.storage_ref, "oss://private-hatch-assets/hatch/runtime-assets/asset_cloud_1");
+    assert.deepEqual([...objectStore.objects.keys()], ["hatch/runtime-assets/asset_cloud_1"]);
+    assert.deepEqual(await store.read(reference.asset_id, reference.storage_ref), bytes);
+    await assert.rejects(stat(path.join(root, "assets", "asset_cloud_1.bin")), { code: "ENOENT" });
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -105,6 +105,95 @@ export async function getConversationSnapshot(serverUrl, accessToken, binding, c
   );
 }
 
+/**
+ * Read the immutable bytes for an asset that is already referenced by a
+ * durable Conversation message. The Runtime re-checks the Conversation
+ * binding and transcript reference before serving the bytes.
+ */
+export async function getConversationAsset(serverUrl, accessToken, binding, conversationId, assetId, fetchImpl = fetch) {
+  const normalizedConversationId = String(conversationId || "").trim();
+  const normalizedAssetId = String(assetId || "").trim();
+  if (!normalizedConversationId || !normalizedAssetId) {
+    throw conversationClientError("The Conversation asset reference is invalid.", "asset_invalid");
+  }
+  const route = isServerConversationId(normalizedConversationId)
+    ? `/v1/conversations/${encodeURIComponent(normalizedConversationId)}/assets/${encodeURIComponent(normalizedAssetId)}`
+    : `/conversations/${encodeURIComponent(normalizedConversationId)}/assets/${encodeURIComponent(normalizedAssetId)}`;
+  const url = new URL(runtimeHttpUrl(serverUrl, route));
+  for (const [key, value] of conversationScope(binding)) url.searchParams.set(key, value);
+  let response;
+  try {
+    response = await fetchImpl(url.toString(), {
+      method: "GET",
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        accept: "*/*"
+      }
+    });
+  } catch (error) {
+    throw conversationClientError("Hatch can't reach the Conversation asset store.", "network_error", error);
+  }
+  if (!response.ok) {
+    const payload = typeof response.json === "function"
+      ? await response.json().catch(() => ({}))
+      : {};
+    const error = conversationClientError(
+      payload?.error?.message || "We couldn't load this attachment.",
+      payload?.error?.code || (response.status === 401 ? "auth_invalid" : "asset_request_failed")
+    );
+    error.status = response.status;
+    throw error;
+  }
+  if (typeof response.arrayBuffer !== "function") {
+    throw conversationClientError("The Conversation asset response is invalid.", "asset_invalid");
+  }
+  return bytesToBase64(new Uint8Array(await response.arrayBuffer()));
+}
+
+/**
+ * Hydrate image previews without changing the durable message projection.
+ * File/document metadata remains visible even when a preview is unavailable.
+ */
+export async function hydrateConversationAttachments(
+  serverUrl,
+  accessToken,
+  binding,
+  conversationId,
+  messages,
+  fetchImpl = fetch
+) {
+  if (!Array.isArray(messages)) return [];
+  return Promise.all(messages.map(async (message) => {
+    if (!message || typeof message !== "object" || !Array.isArray(message.attachments)) return message;
+    const attachments = await Promise.all(message.attachments.map(async (attachment) => {
+      if (!attachment
+        || typeof attachment !== "object"
+        || attachment.kind !== "asset"
+        || !String(attachment.media_type || "").startsWith("image/")
+        || typeof attachment.asset_id !== "string"
+        || typeof attachment.data_base64 === "string") {
+        return attachment;
+      }
+      try {
+        const data_base64 = await getConversationAsset(
+          serverUrl,
+          accessToken,
+          binding,
+          conversationId,
+          attachment.asset_id,
+          fetchImpl
+        );
+        return { ...attachment, data_base64 };
+      } catch {
+        // The durable reference still renders as an attachment card. A
+        // transient preview failure must never hide the message itself.
+        return attachment;
+      }
+    }));
+    return { ...message, attachments };
+  }));
+}
+
 const SNAPSHOT_EVENT_TYPES = new Set([
   "conversation.created",
   "conversation.updated",
@@ -220,6 +309,15 @@ function canonicalSnapshotValue(value) {
   return `{${Object.keys(value).sort().map((key) => (
     `${JSON.stringify(key)}:${canonicalSnapshotValue(value[key])}`
   )).join(",")}}`;
+}
+
+function bytesToBase64(bytes) {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(binary);
 }
 
 /**

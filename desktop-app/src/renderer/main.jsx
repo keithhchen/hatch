@@ -75,6 +75,7 @@ import {
   createConversation,
   canConnectConversation,
   getConversationSnapshot,
+  hydrateConversationAttachments,
   interruptedRunFromSnapshot,
   isServerConversationId,
   isTerminalRunStatus,
@@ -242,7 +243,7 @@ function DesktopAuxiliaryWindow({ kind }) {
           <p className="desktop-auxiliary-lede">Creator agents, on your terms.</p>
           <p>Hatch keeps the desktop boundary native while React renders the conversation work surface.</p>
           <dl className="desktop-auxiliary-facts">
-          <div><dt>Version</dt><dd>0.1.21</dd></div>
+          <div><dt>Version</dt><dd>0.1.22</dd></div>
             <div><dt>Architecture</dt><dd>Tauri Hybrid</dd></div>
           </dl>
         </section>
@@ -347,6 +348,7 @@ function App() {
   const workspaceRef = useRef("");
   const workspaceGrantRef = useRef(null);
   const activeRunRef = useRef(null);
+  const runtimeCapabilitiesRef = useRef({ richAssets: false });
   const permissionRef = useRef(DEFAULT_PERMISSION_MODE);
   const imeRef = useRef({ composing: false });
   const connectedRef = useRef(false);
@@ -438,6 +440,7 @@ function App() {
   const [briefTask, setBriefTask] = useState(null);
   const [taskBrief, setTaskBrief] = useState(null);
   const [composerDraft, setComposerDraft] = useState("");
+  const [composerRestoreRequest, setComposerRestoreRequest] = useState({ nonce: 0, value: "" });
   const [approvalRequests, setApprovalRequests] = useState({});
   const [creatorAgent, setCreatorAgent] = useState(DEFAULT_CREATOR_AGENT);
   const [sidebarPreference, setSidebarPreference] = useState("open");
@@ -612,6 +615,15 @@ function App() {
       composerDraft: next
     };
     setComposerDraft(next);
+  }
+
+  function restoreComposerDraft(value) {
+    const next = String(value ?? "");
+    setComposerDraftValue(next);
+    setComposerRestoreRequest((current) => ({
+      nonce: current.nonce + 1,
+      value: next
+    }));
   }
 
   function handleViewportScroll(event) {
@@ -1277,7 +1289,7 @@ function App() {
     }
 
     const content = textFromAppendMessage(appendMessage).trim();
-    if (!content) return;
+    if (!content && droppedFiles.length === 0) return;
     // Workspace and permission changes are pending Desktop preferences until a
     // new turn starts. The native window captures this exact snapshot before
     // the Runtime may request a local tool; the renderer never sends a path or
@@ -1286,6 +1298,7 @@ function App() {
     try {
       await synchronizeNativeToolContext(accessSnapshot, activeConversationId);
     } catch (error) {
+      restoreComposerDraft(content);
       setStatus(`Couldn't prepare native workspace access: ${errorMessage(error)}`);
       return;
     }
@@ -1297,9 +1310,21 @@ function App() {
         attachments = prepared.attachments;
         preparedDroppedFiles = prepared.files;
       } catch (error) {
+        restoreComposerDraft(content);
         setStatus(`Couldn't attach the dropped files: ${errorMessage(error)}`);
         return;
       }
+    }
+    if (attachments.some((attachment) => attachment?.kind === "asset")
+      && !runtimeCapabilitiesRef.current.richAssets) {
+      // Keep the prepared projection in this window so the user can retry
+      // after the Runtime is updated. Never send a rich body to a legacy
+      // Runtime that only understands inline text attachments.
+      droppedFilesRef.current = preparedDroppedFiles;
+      setDroppedFiles(preparedDroppedFiles);
+      restoreComposerDraft(content);
+      setStatus("This Runtime does not support image or document attachments yet. Update Runtime before sending.");
+      return;
     }
     const runId = `run_${stableRandomId()}`;
     const clientMessageId = `message_${stableRandomId()}`;
@@ -1352,6 +1377,7 @@ function App() {
       setRunning(false);
       droppedFilesRef.current = preparedDroppedFiles;
       setDroppedFiles(preparedDroppedFiles);
+      restoreComposerDraft(content);
       setStatus("Service unavailable. Your message will stay here.");
       return;
     }
@@ -2115,6 +2141,13 @@ function App() {
         });
         if (requestToken !== connectionTokenRef.current) return;
       }
+      history = await hydrateConversationAttachments(
+        targetServerUrl.trim(),
+        buyerSession.accessToken,
+        { entitlementId: targetEntitlementId },
+        activeConversationId,
+        history
+      );
       if (requestToken !== connectionTokenRef.current) return;
       // A snapshot is the canonical observer recovery boundary. Replacing
       // the local projection after reconnect prevents optimistic user/assistant
@@ -2163,6 +2196,9 @@ function App() {
 
     const socket = new WebSocket(targetServerUrl.trim());
     socketRef.current = socket;
+    // Capabilities are connection-scoped. Treat them as unavailable until
+    // this socket's authenticated session explicitly advertises them.
+    runtimeCapabilitiesRef.current = { richAssets: false };
     socket.addEventListener("open", () => {
       if (socketRef.current !== socket) return;
       socket.send(JSON.stringify({
@@ -2170,7 +2206,7 @@ function App() {
         protocol_version: PROTOCOL_VERSION,
         auth_token: buyerSession.accessToken,
         entitlement_id: targetEntitlementId,
-          client_version: "0.1.21",
+          client_version: "0.1.22",
         local_tools: [...PLATFORM_LOCAL_TOOLS],
       }));
     });
@@ -2255,6 +2291,9 @@ function App() {
   async function handleRuntimeMessage(message, sourceSocket = socketRef.current, sourceToken = connectionTokenRef.current) {
     if (!isCurrentRuntimeTransport(sourceSocket, sourceToken)) return;
     if (message.type === "session.ready") {
+      runtimeCapabilitiesRef.current = {
+        richAssets: message.runtime_capabilities?.rich_assets === true
+      };
       const selectedEntitlement = creatorAgentEntitlements.find(
         (entitlement) => entitlement.entitlement_id === selectedEntitlementId
       );
@@ -2412,8 +2451,19 @@ function App() {
 
     if (message.type === "turn.failed") {
       const sourceRun = activeRunRef.current;
-      if (!message.run_id || !sourceRun || sourceRun.runId !== message.run_id) return;
-      const localToolsStopped = await cancelPendingLocalTools("turn_failed", message.run_id);
+      // Protocol/schema failures are emitted without a run_id because the
+      // Runtime could not safely parse the client frame. There is only one
+      // active outbound turn per Desktop socket, so associate that transport
+      // error with the current optimistic turn instead of leaving Thinking
+      // on screen forever.
+      const failedRunId = message.run_id || sourceRun?.runId;
+      if (!failedRunId || !sourceRun || sourceRun.runId !== failedRunId) {
+        if (!message.run_id) {
+          setStatus(`Runtime rejected the message: ${message.error?.message || "Unknown protocol error"}`);
+        }
+        return;
+      }
+      const localToolsStopped = await cancelPendingLocalTools("turn_failed", failedRunId);
       if (!isCurrentRuntimeTransport(sourceSocket, sourceToken) || activeRunRef.current?.runId !== sourceRun.runId) return;
       const activeRun = sourceRun;
       const text = `Run failed: ${message.error?.message || "Unknown error"}`;
@@ -2682,11 +2732,11 @@ function App() {
     const acceptedCount = Array.isArray(files) ? files.length : 0;
     const rejected = Array.isArray(rejectedFiles) ? rejectedFiles.filter(Boolean) : [];
     const acceptedLabel = acceptedCount > 0
-      ? `${acceptedCount} file${acceptedCount === 1 ? "" : "s"} ready as context`
+      ? `${acceptedCount} file${acceptedCount === 1 ? "" : "s"} ready to attach`
       : "";
     if (rejected.length === 0) return acceptedLabel;
     const rejectedLabel = `${rejected.length} file${rejected.length === 1 ? "" : "s"} couldn't be attached`;
-    const reason = typeof rejected[0]?.reason === "string" ? rejected[0].reason : "Try a UTF-8 text file under 1 MiB.";
+    const reason = typeof rejected[0]?.reason === "string" ? rejected[0].reason : "Try a file under 16 MiB.";
     return acceptedLabel ? `${acceptedLabel}; ${rejectedLabel}` : `${rejectedLabel} — ${reason}`;
   }
 
@@ -2702,6 +2752,44 @@ function App() {
       if (message) setStatus(message);
     } catch (error) {
       setStatus(`Couldn't attach files: ${errorMessage(error)}`);
+    }
+  }
+
+  async function handleComposerPaste(event) {
+    const items = Array.from(event.clipboardData?.items ?? []);
+    const item = items.find((candidate) => candidate?.kind === "file" && typeof candidate.type === "string" && candidate.type.includes("/"));
+    const file = item?.getAsFile?.();
+    if (!file) return;
+    event.preventDefault();
+    try {
+      if (file.size > 16 * 1024 * 1024) throw new Error("Pasted files are limited to 16 MiB.");
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const mediaType = file.type || "application/octet-stream";
+      const displayName = file.name?.trim() || (mediaType.startsWith("image/") ? `pasted-image.${mediaType.split("/")[1] || "png"}` : "pasted-file");
+      const contextId = `drop_clipboard_${stableRandomId()}`;
+      const dataBase64 = bytesToBase64(bytes);
+      const sha256 = await sha256Hex(bytes);
+      mergeDroppedFiles([{
+        contextId,
+        assetId: contextId,
+        displayName,
+        size: bytes.length,
+        mediaType,
+        isImage: mediaType.startsWith("image/"),
+        attachment: {
+          kind: "asset",
+          attachment_id: contextId,
+          asset_id: contextId,
+          display_name: displayName,
+          media_type: mediaType,
+          source_bytes: bytes.length,
+          sha256,
+          data_base64: dataBase64
+        }
+      }]);
+      setStatus(mediaType.startsWith("image/") ? "Pasted image ready" : "Pasted file ready");
+    } catch (error) {
+      setStatus(`Couldn't attach pasted file: ${errorMessage(error)}`);
     }
   }
 
@@ -3644,12 +3732,15 @@ function App() {
                       className="composer-input"
                       draftKey={conversationId}
                       initialDraft={composerDraft}
+                      restoreDraftNonce={composerRestoreRequest.nonce}
+                      restoreDraftValue={composerRestoreRequest.value}
                       ready={windowContextReady && windowStateRestored}
                       onDraftChange={setComposerDraftValue}
                       onBlur={resetImeComposition}
                       onCompositionEnd={endImeComposition}
                       onCompositionStart={startImeComposition}
                       onKeyDownCapture={stopImeEnterSubmit}
+                      onPaste={handleComposerPaste}
                       placeholder={conversationReady
                         ? t("conversation.messageAgent", { name: creatorAgent.name })
                         : chatLoading
@@ -4039,9 +4130,7 @@ function ComposerControls({ droppedFiles = [], workspace, workspaceGranted, perm
         </div>
       ) : null}
       <div className="composer-settings">
-        {/* Native drag/drop still projects bounded file context into the
-            composer. Keep the picker implementation available, but withhold
-            its button until that UX is ready. */}
+        {attachmentControl}
         <ButtonControl
           aria-label={t("accessibility.chooseWorkspaceFolder")}
           className="composer-control"
@@ -4081,18 +4170,27 @@ function ComposerControls({ droppedFiles = [], workspace, workspaceGranted, perm
 function DesktopComposerInput({
   draftKey,
   initialDraft,
+  restoreDraftNonce,
+  restoreDraftValue,
   ready,
   onDraftChange,
   ...props
 }) {
   const { setText } = unstable_useComposerInput();
   const appliedKeyRef = useRef(null);
+  const appliedRestoreNonceRef = useRef(0);
 
   useEffect(() => {
     if (!ready || appliedKeyRef.current === draftKey) return;
     appliedKeyRef.current = draftKey;
     setText(String(initialDraft || ""));
   }, [draftKey, initialDraft, ready, setText]);
+
+  useEffect(() => {
+    if (!ready || appliedRestoreNonceRef.current === restoreDraftNonce) return;
+    appliedRestoreNonceRef.current = restoreDraftNonce;
+    setText(String(restoreDraftValue || ""));
+  }, [ready, restoreDraftNonce, restoreDraftValue, setText]);
 
   return (
     <ComposerPrimitive.Input
@@ -4117,6 +4215,21 @@ function conversationTitle(conversationId) {
 function stableRandomId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID().replaceAll("-", "");
   return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 14)}`;
+}
+
+function bytesToBase64(bytes) {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(binary);
+}
+
+async function sha256Hex(bytes) {
+  if (!globalThis.crypto?.subtle) throw new Error("This desktop environment cannot hash pasted files.");
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 async function loadConversationHistory(serverUrl, conversationId, entitlementId, accessToken, binding = {}) {
@@ -4207,6 +4320,7 @@ function makeUserMessage(id, text, createdAt = Date.now(), options = {}) {
     id,
     role: "user",
     content: [{ type: "text", text }],
+    ...(attachments.length > 0 ? { attachments: assistantUiAttachments(options.attachments) } : {}),
     createdAt: new Date(createdAt),
     metadata: {
       custom: {
@@ -4231,9 +4345,54 @@ function attachmentPresentationMetadata(attachments) {
       display_name: displayName,
       media_type: mediaType,
       source_bytes: sourceBytes,
-      truncated: attachment.truncated === true
+      ...(attachment.kind === "asset" ? {
+        kind: "asset",
+        asset_id: typeof attachment.asset_id === "string" ? attachment.asset_id : attachmentId,
+        sha256: typeof attachment.sha256 === "string" ? attachment.sha256 : ""
+      } : { truncated: attachment.truncated === true })
     }];
   });
+}
+
+function assistantUiAttachments(attachments) {
+  if (!Array.isArray(attachments)) return [];
+  return attachments.flatMap((attachment) => {
+    if (!attachment || typeof attachment !== "object") return [];
+    const attachmentId = typeof attachment.attachment_id === "string" ? attachment.attachment_id : "";
+    const name = typeof attachment.display_name === "string" ? attachment.display_name : "Attachment";
+    const mediaType = typeof attachment.media_type === "string" ? attachment.media_type : "application/octet-stream";
+    if (!attachmentId) return [];
+    const image = attachment.kind === "asset" && mediaType.startsWith("image/") && typeof attachment.data_base64 === "string"
+      ? [{ type: "image", image: `data:${mediaType};base64,${attachment.data_base64}` }]
+      : [];
+    return [{
+      id: attachmentId,
+      type: mediaType.startsWith("image/") ? "image" : isDocumentMediaType(mediaType) ? "document" : "file",
+      name,
+      contentType: mediaType,
+      status: { type: "complete" },
+      content: image,
+      hatch: {
+        sourceBytes: Number.isSafeInteger(Number(attachment.source_bytes)) ? Number(attachment.source_bytes) : 0,
+        mediaType
+      }
+    }];
+  });
+}
+
+function isDocumentMediaType(mediaType) {
+  return mediaType === "application/pdf"
+    || mediaType.includes("word")
+    || mediaType.includes("excel")
+    || mediaType.includes("powerpoint")
+    || mediaType.includes("spreadsheet")
+    || mediaType.includes("presentation");
+}
+
+function formatAttachmentSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(bytes >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
 }
 
 function makeAssistantMessage(id, text, options = {}) {
@@ -4699,12 +4858,37 @@ function WelcomeTitlebarDragRegion() {
   return <div className="welcome-titlebar-drag-region" data-tauri-drag-region aria-hidden="true" />;
 }
 
+function InlineChatAttachment({ attachment }) {
+  const imagePart = Array.isArray(attachment?.content)
+    ? attachment.content.find((part) => part?.type === "image" && typeof part.image === "string")
+    : undefined;
+  if (attachment?.type === "image" && imagePart) {
+    return (
+      <div className="message-attachment message-attachment-image">
+        <img src={imagePart.image} alt={attachment.name || "Attached image"} loading="lazy" />
+        <span className="message-attachment-caption">{attachment.name}</span>
+      </div>
+    );
+  }
+  const sourceBytes = Number(attachment?.hatch?.sourceBytes);
+  return (
+    <div className="message-attachment message-attachment-file">
+      <FileText aria-hidden="true" />
+      <span className="message-attachment-file-name" title={attachment?.name}>{attachment?.name || "Attached file"}</span>
+      {Number.isFinite(sourceBytes) && sourceBytes > 0 ? <small>{formatAttachmentSize(sourceBytes)}</small> : null}
+    </div>
+  );
+}
+
 function HatchMessage() {
   const role = useMessage((message) => message.role);
   if (role !== "assistant") {
     return (
       <MessagePrimitive.Root className={`chat-message ${role}`}>
         <div className={`message-surface ${role}`}>
+          <MessagePrimitive.Attachments>
+            {({ attachment }) => <InlineChatAttachment attachment={attachment} />}
+          </MessagePrimitive.Attachments>
           <MessagePrimitive.Parts components={{ Text: PlainText }} />
         </div>
       </MessagePrimitive.Root>

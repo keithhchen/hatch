@@ -5,7 +5,8 @@ import {
   type ClientToolName,
   type ContextAttachment,
   type ConversationMessage,
-  type OutputFinishReason
+  type OutputFinishReason,
+  type PersistedContextAttachment
 } from "./protocol.js";
 import type { CompactionPhase, CompactionReason, CompactionTrigger } from "./compaction.js";
 
@@ -112,6 +113,8 @@ export type StoreEvent =
       run_id: string;
       role: "user" | "assistant";
       content: string;
+      /** Optional legacy projection; canonical user turns use model_message. */
+      attachments?: PersistedContextAttachment[];
       timestamp: string;
     }
   | {
@@ -323,7 +326,8 @@ export class RuntimeStore {
         if (event.role === "assistant" && modelAssistantRuns.has(event.run_id)) continue;
         messages.push({
           role: event.role,
-          content: event.content
+          content: event.content,
+          ...(event.attachments?.length ? { attachments: event.attachments } : {})
         });
       }
     }
@@ -454,8 +458,11 @@ export class RuntimeStore {
               : event.message.content ?? "",
           timestamp: event.timestamp
         };
-        if (event.type === "conversation.model_message" && event.message.attachments?.length) {
-          message.attachments = event.message.attachments.map((attachment) => {
+        const attachments = event.type === "conversation.model_message"
+          ? event.message.attachments
+          : event.attachments;
+        if (attachments?.length) {
+          message.attachments = attachments.map((attachment) => {
             if ("text" in attachment) {
               const { text: _text, ...reference } = attachment;
               return reference;

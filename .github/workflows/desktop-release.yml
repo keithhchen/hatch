@@ -3,7 +3,8 @@ name: Hatch Desktop signed validation
 on:
   # A manual dispatch is useful for rehearsing the protected signed macOS lane.
   # Public macOS distribution is handled by desktop-ci.yml -> OSS.
-  # Windows distribution is paused until its LocalRunner is ready.
+  # This protected signed workflow remains macOS-only. The regular Desktop CI
+  # workflow provides the unsigned Windows UAT package separately.
   workflow_dispatch:
 
 # This workflow intentionally has no GitHub Release publication job. It keeps

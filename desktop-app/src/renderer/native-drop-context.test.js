@@ -49,4 +49,30 @@ describe("native dropped-file context", () => {
       path: "/Users/private/notes.md"
     })).toBeNull();
   });
+
+  it("keeps binary image bytes typed for the Runtime while exposing no path", () => {
+    const normalized = normalizeNativeDropAttachment({
+      contextId: "drop_image_1",
+      assetId: "drop_image_1",
+      displayName: "screen.png",
+      mediaType: "image/png",
+      sourceBytes: 4,
+      text: "",
+      textSha256: "f".repeat(64),
+      truncated: false,
+      dataBase64: "AJ+Slg==",
+      sha256: "a".repeat(64),
+      path: "/private/screen.png"
+    });
+    expect(normalized?.attachment).toMatchObject({
+      kind: "asset",
+      attachment_id: "drop_image_1",
+      asset_id: "drop_image_1",
+      display_name: "screen.png",
+      media_type: "image/png",
+      source_bytes: 4,
+      data_base64: "AJ+Slg=="
+    });
+    expect(normalized?.attachment).not.toHaveProperty("path");
+  });
 });

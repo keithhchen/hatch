@@ -157,6 +157,241 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  desktop-native-windows:
+    name: Desktop native bridge and Windows UAT package
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            desktop-app/package-lock.json
+            packages/ui/package-lock.json
+      - name: Verify Desktop version and release tag
+        run: node scripts/uat/verify-desktop-version.mjs
+      - name: Select stable Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Install shared UI dependencies
+        working-directory: packages/ui
+        run: npm ci
+      - name: Install renderer dependencies
+        working-directory: desktop-app
+        run: npm ci
+      - name: Test renderer and web build on Windows
+        working-directory: desktop-app
+        run: |
+          npm run test:renderer
+          npm run build:web
+      - name: Test LocalRunner on Windows
+        run: cargo test --locked --manifest-path local-runner/Cargo.toml
+      - name: Test Tauri bridge on Windows
+        run: cargo test --locked --manifest-path desktop-app/src-tauri/Cargo.toml
+      - name: Build unsigned Windows NSIS bundle
+        working-directory: desktop-app
+        env:
+          # Windows UAT is intentionally process-memory-only. Signed
+          # distribution remains a separate protected release concern.
+          HATCH_PERSISTENT_SESSION: "0"
+        run: npx tauri build --debug --bundles nsis
+      - name: Record Windows automated UAT evidence
+        shell: bash
+        env:
+          HATCH_PERSISTENT_SESSION: "0"
+        run: >-
+          node scripts/uat/record-desktop-uat-artifact.mjs
+          --platform windows
+          --artifact-dir desktop-app/src-tauri/target/debug/bundle/nsis
+          --output artifacts/desktop-uat/windows.json
+      - name: Upload unsigned Windows installer for UAT
+        uses: actions/upload-artifact@v4
+        with:
+          name: hatch-desktop-windows-unsigned
+          path: |
+            desktop-app/src-tauri/target/debug/bundle/nsis/*.exe
+            artifacts/desktop-uat/windows.json
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-desktop-github-release:
+    name: Publish desktop UAT installers to GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [desktop-renderer, desktop-native, desktop-native-windows]
+    runs-on: ubuntu-latest
+    concurrency:
+      group: hatch-desktop-github-release
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ github.ref_name }}
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+      - name: Download Apple Silicon macOS package
+        uses: actions/download-artifact@v4
+        with:
+          name: hatch-desktop-macos-arm64-ad-hoc-uat
+          path: release/macos/arm64
+      - name: Download Intel macOS package
+        uses: actions/download-artifact@v4
+        with:
+          name: hatch-desktop-macos-intel-ad-hoc-uat
+          path: release/macos/intel
+      - name: Download Windows package
+        uses: actions/download-artifact@v4
+        with:
+          name: hatch-desktop-windows-unsigned
+          path: release/windows
+      - name: Verify installer source, version, and digest
+        run: |
+          set -euo pipefail
+          tag_ref="refs/tags/$GITHUB_REF_NAME"
+          test "$(git cat-file -t "$tag_ref")" = "tag" || {
+            echo "Desktop distribution requires an annotated SemVer tag" >&2
+            exit 1
+          }
+          test "$(git rev-parse "$tag_ref^{}")" = "$GITHUB_SHA" || {
+            echo "The annotated tag does not resolve to the workflow source commit" >&2
+            exit 1
+          }
+          node scripts/uat/verify-desktop-version.mjs --tag "$GITHUB_REF_NAME"
+          arm64_report="$(find release/macos/arm64 -type f -name macos.json -print -quit)"
+          intel_report="$(find release/macos/intel -type f -name macos.json -print -quit)"
+          windows_report="$(find release/windows -type f -name windows.json -print -quit)"
+          test -n "$arm64_report" && test -n "$intel_report" && test -n "$windows_report"
+          node scripts/uat/verify-desktop-uat-artifact.mjs \
+            --platform macos \
+            --report "$arm64_report" \
+            --artifact-dir release/macos/arm64 \
+            --expected-source-sha "$GITHUB_SHA" \
+            --expected-runner-architecture ARM64
+          node scripts/uat/verify-desktop-uat-artifact.mjs \
+            --platform macos \
+            --report "$intel_report" \
+            --artifact-dir release/macos/intel \
+            --expected-source-sha "$GITHUB_SHA" \
+            --expected-runner-architecture X64
+          node scripts/uat/verify-desktop-uat-artifact.mjs \
+            --platform windows \
+            --report "$windows_report" \
+            --artifact-dir release/windows \
+            --expected-source-sha "$GITHUB_SHA"
+      - name: Ensure annotated tag exists in public releases repository
+        env:
+          GH_TOKEN: ${{ secrets.HATCH_RELEASES_TOKEN }}
+          GH_REPO: keithhchen/hatch-releases
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN" || { echo "Missing HATCH_RELEASES_TOKEN" >&2; exit 1; }
+          if tag_ref_json="$(gh api "repos/$GH_REPO/git/ref/tags/$GITHUB_REF_NAME" 2>/dev/null)"; then
+            test "$(jq -r '.object.type' <<<"$tag_ref_json")" = "tag" || {
+              echo "Public tag $GITHUB_REF_NAME exists but is not annotated" >&2
+              exit 1
+            }
+            tag_object_sha="$(jq -r '.object.sha' <<<"$tag_ref_json")"
+            tag_message="$(gh api "repos/$GH_REPO/git/tags/$tag_object_sha" --jq .message)"
+            grep -F "Private source commit: $GITHUB_SHA" <<<"$tag_message" >/dev/null || {
+              echo "Public tag $GITHUB_REF_NAME does not identify source commit $GITHUB_SHA" >&2
+              exit 1
+            }
+          else
+            target_sha="$(gh api "repos/$GH_REPO/commits/main" --jq .sha)"
+            printf -v public_tag_message 'Hatch %s public distribution tag\n\nPrivate source commit: %s' "$GITHUB_REF_NAME" "$GITHUB_SHA"
+            tag_object_sha="$(gh api --method POST "repos/$GH_REPO/git/tags" \
+              -f tag="$GITHUB_REF_NAME" \
+              -f message="$public_tag_message" \
+              -f object="$target_sha" \
+              -f type=commit \
+              --jq .sha)"
+            gh api --method POST "repos/$GH_REPO/git/refs" \
+              -f ref="refs/tags/$GITHUB_REF_NAME" \
+              -f sha="$tag_object_sha" >/dev/null
+          fi
+      - name: Publish installers and provenance to public GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.HATCH_RELEASES_TOKEN }}
+          GH_REPO: keithhchen/hatch-releases
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          arm64_dmg_path="$(find release/macos/arm64 -type f -name '*.dmg' -print -quit)"
+          intel_dmg_path="$(find release/macos/intel -type f -name '*.dmg' -print -quit)"
+          exe_path="$(find release/windows -type f -name '*.exe' -print -quit)"
+          arm64_report="$(find release/macos/arm64 -type f -name macos.json -print -quit)"
+          intel_report="$(find release/macos/intel -type f -name macos.json -print -quit)"
+          windows_report="$(find release/windows -type f -name windows.json -print -quit)"
+          test -n "$arm64_dmg_path" && test -n "$intel_dmg_path" && test -n "$exe_path"
+          test -n "$arm64_report" && test -n "$intel_report" && test -n "$windows_report"
+          cp "$arm64_report" release/macos/macos-arm64.json
+          cp "$intel_report" release/macos/macos-intel.json
+          cat > release-notes.md <<EOF
+          Hatch $GITHUB_REF_NAME
+
+          Private source commit: \`$GITHUB_SHA\`
+
+          These are target-device UAT packages:
+          - macOS Apple Silicon: ad-hoc UAT package; not Developer ID signed or notarized.
+          - macOS Intel: ad-hoc UAT package; not Developer ID signed or notarized.
+          - Windows: unsigned UAT package.
+
+          These artifacts are not a signed production distribution. The attached manifests record the exact source SHA, filename, byte count, and SHA-256 for each installer.
+          EOF
+          if gh release view "$GITHUB_REF_NAME" --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" \
+              "$arm64_dmg_path" "$intel_dmg_path" "$exe_path" \
+              release/macos/macos-arm64.json release/macos/macos-intel.json \
+              "$windows_report" \
+              --clobber --repo "$GH_REPO"
+            gh release edit "$GITHUB_REF_NAME" \
+              --draft=false --prerelease=false --latest \
+              --title "$GITHUB_REF_NAME" --notes-file release-notes.md \
+              --repo "$GH_REPO"
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              "$arm64_dmg_path" "$intel_dmg_path" "$exe_path" \
+              release/macos/macos-arm64.json release/macos/macos-intel.json \
+              "$windows_report" \
+              --verify-tag --latest --title "$GITHUB_REF_NAME" \
+              --notes-file release-notes.md --repo "$GH_REPO"
+          fi
+      - name: Verify published Release is complete and latest
+        env:
+          GH_TOKEN: ${{ secrets.HATCH_RELEASES_TOKEN }}
+          GH_REPO: keithhchen/hatch-releases
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          arm64_report="$(find release/macos/arm64 -type f -name macos.json -print -quit)"
+          intel_report="$(find release/macos/intel -type f -name macos.json -print -quit)"
+          windows_report="$(find release/windows -type f -name windows.json -print -quit)"
+          arm64_digest="$(jq -r .package.sha256 "$arm64_report")"
+          intel_digest="$(jq -r .package.sha256 "$intel_report")"
+          windows_digest="$(jq -r .package.sha256 "$windows_report")"
+          release_json="$(gh api "repos/$GH_REPO/releases/tags/$GITHUB_REF_NAME")"
+          jq -e \
+            --arg arm64_dmg "Hatch_${version}_aarch64.dmg" \
+            --arg intel_dmg "Hatch_${version}_x86_64.dmg" \
+            --arg exe "Hatch_${version}_x64-setup.exe" \
+            --arg arm64_digest "$arm64_digest" \
+            --arg intel_digest "$intel_digest" \
+            --arg windows_digest "$windows_digest" \
+            '.draft == false and .prerelease == false and
+             ([.assets[] | select(.name == $arm64_dmg and .size > 0 and .digest == $arm64_digest)] | length) == 1 and
+             ([.assets[] | select(.name == $intel_dmg and .size > 0 and .digest == $intel_digest)] | length) == 1 and
+             ([.assets[] | select(.name == $exe and .size > 0 and .digest == $windows_digest)] | length) == 1 and
+             ([.assets[] | select(.name == "macos-arm64.json" and .size > 0)] | length) == 1 and
+             ([.assets[] | select(.name == "macos-intel.json" and .size > 0)] | length) == 1 and
+             ([.assets[] | select(.name == "windows.json" and .size > 0)] | length) == 1' \
+            <<<"$release_json" >/dev/null
+          test "$(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name)" = "$GITHUB_REF_NAME"
+
   publish-desktop-oss:
     name: Publish desktop installers to OSS
     if: startsWith(github.ref, 'refs/tags/v')

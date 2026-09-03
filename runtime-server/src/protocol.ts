@@ -262,7 +262,15 @@ export type RunStart = z.infer<typeof ClientMessageSchema>;
 export type ContextAttachment = z.infer<typeof ContextAttachmentSchema>;
 export type TextContextAttachment = z.infer<typeof TextContextAttachmentSchema>;
 export type AssetAttachment = z.infer<typeof AssetAttachmentSchema>;
-export type PersistedContextAttachment = TextContextAttachment | Omit<AssetAttachment, "data_base64">;
+/**
+ * A persisted rich asset carries an opaque cloud object reference when the
+ * Runtime is configured with object storage. `storage_ref` stays optional so
+ * older transcript rows remain readable during the storage cutover.
+ */
+export type PersistedAssetAttachment = Omit<AssetAttachment, "data_base64"> & {
+  storage_ref?: string;
+};
+export type PersistedContextAttachment = TextContextAttachment | PersistedAssetAttachment;
 export type ToolResult = z.infer<typeof ToolCallResultSchema>;
 export type RunCancel = z.infer<typeof TurnCancelSchema>;
 export type InboundMessage = z.infer<typeof InboundMessageSchema>;

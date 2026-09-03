@@ -1686,8 +1686,9 @@ checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 
 [[package]]
 name = "hatch-desktop-app"
-version = "0.1.21"
+version = "0.1.22"
 dependencies = [
+ "base64 0.22.1",
  "dispatch2",
  "hatch-local-runner",
  "objc2",
@@ -1714,6 +1715,7 @@ dependencies = [
 name = "hatch-local-runner"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "calamine",
  "clap",
  "libc",
@@ -1722,6 +1724,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.20",
  "walkdir",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

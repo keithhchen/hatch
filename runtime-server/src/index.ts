@@ -97,7 +97,7 @@ import {
   type OutputGuard
 } from "./outputGuard.js";
 import { writeOperationalError } from "./operationalLogging.js";
-import { RuntimeAssetStore } from "./assetStore.js";
+import { RuntimeAssetStore, runtimeAssetStoreFromEnvironment } from "./assetStore.js";
 
 type AgentCorpusResolver = AgentCorpusResolverLike;
 
@@ -457,6 +457,7 @@ export async function createRuntimeServerFromEnvironment(
         ? new FilesystemAgentCorpusResolver(runtimeCorpusRoot)
         : undefined,
     conversationStore: createConversationStore(environment),
+    assetStore: runtimeAssetStoreFromEnvironment(environment, runtimeDataDir),
     clientToolTimeoutMs: clientToolTimeoutMs(environment.HATCH_CLIENT_TOOL_TIMEOUT_MS),
     clientHelloTimeoutMs: helloTimeoutMs,
     maxPendingHelloAuthorizations,
@@ -728,7 +729,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   const dataDirectory = typeof conversationStore.dataDirectory === "string" && conversationStore.dataDirectory.length > 0
     ? conversationStore.dataDirectory
     : path.resolve(process.env.HATCH_RUNTIME_DATA_DIR ?? ".hatch-runtime");
-  const assetStore = options.assetStore ?? new RuntimeAssetStore(dataDirectory);
+  const assetStore = options.assetStore ?? runtimeAssetStoreFromEnvironment(process.env, dataDirectory);
   const commerceEventSink = options.commerceEventSink;
   const deliveryAccountingOutbox = options.deliveryAccountingOutbox
     ?? (commerceEventSink?.authorizeAndReserve
@@ -843,6 +844,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       entitlementResolver,
       agentCorpusResolver,
       conversationStore,
+      assetStore,
       authIdentityResolver,
       legacyHmacAuth,
       requestAbortController.signal,
@@ -965,6 +967,7 @@ async function handleHttpRequest(
   entitlementResolver?: EntitlementResolver,
   agentCorpusResolver?: AgentCorpusResolver,
   conversationStore?: RuntimeStore,
+  assetStore?: RuntimeAssetStore,
   authIdentityResolver?: AuthIdentityResolver,
   legacyHmacAuth: LegacyHmacAuth = { enabled: false },
   signal?: AbortSignal,
@@ -1107,6 +1110,7 @@ async function handleHttpRequest(
         url,
         conversationRepository,
         conversationStore,
+        assetStore,
         entitlementResolver,
         agentCorpusResolver,
         authIdentityResolver,
@@ -1176,8 +1180,123 @@ async function handleHttpRequest(
     return;
   }
 
+  const legacyAssetMatch = url.pathname.match(/^\/conversations\/([^/]+)\/assets\/([^/]+)$/);
+  if (req.method === "GET" && legacyAssetMatch) {
+    const conversationId = decodeURIComponent(legacyAssetMatch[1] ?? "");
+    let binding: SessionBinding | undefined;
+    try {
+      binding = await bindingFromHistoryRequest(
+        req,
+        url,
+        entitlementResolver,
+        agentCorpusResolver,
+        authIdentityResolver,
+        legacyHmacAuth,
+        signal
+      );
+    } catch (error) {
+      writeHttpAuthorizationFailure(res, error, "entitlement_required");
+      return;
+    }
+    if (!binding) {
+      writeJson(res, 400, { error: { code: "binding_required", message: "A signed-in entitlement binding is required." } });
+      return;
+    }
+    const store = conversationStore ?? createConversationStore();
+    const durableHistoryId = durableConversationId(binding, conversationId);
+    const durableMessages = await store.readVisibleConversation(durableHistoryId);
+    const legacyHistoryId = scopedConversationId(binding, conversationId);
+    const storageConversationId = durableMessages.length > 0 || durableHistoryId === legacyHistoryId
+      ? durableHistoryId
+      : legacyHistoryId;
+    try {
+      await serveConversationAsset(
+        res,
+        store,
+        assetStore,
+        storageConversationId,
+        decodeURIComponent(legacyAssetMatch[2] ?? "")
+      );
+    } catch (error) {
+      writeConversationHttpError(res, error);
+    }
+    return;
+  }
+
   res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
   res.end("not found");
+}
+
+type PersistedAssetReference = Extract<
+  NonNullable<ConversationMessage["attachments"]>[number],
+  { kind: "asset" }
+>;
+
+async function serveConversationAsset(
+  res: http.ServerResponse,
+  store: RuntimeStore | undefined,
+  assetStore: RuntimeAssetStore | undefined,
+  conversationId: string,
+  assetId: string
+): Promise<void> {
+  if (!store || !assetStore) {
+    throw new ConversationHttpError(503, "asset_store_unavailable", "Conversation assets are temporarily unavailable.");
+  }
+  if (!assetId) {
+    throw new ConversationHttpError(404, "asset_not_found", "The conversation asset was not found.");
+  }
+
+  // The transcript is the authorization boundary for binary assets. A caller
+  // may only read an asset whose immutable reference was already committed to
+  // this conversation; knowing or guessing an asset_id is not sufficient.
+  const history = await store.readConversation(conversationId);
+  const reference = history
+    .flatMap((message) => message.attachments ?? [])
+    .find((attachment): attachment is PersistedAssetReference => (
+      "kind" in attachment
+      && attachment.kind === "asset"
+      && attachment.asset_id === assetId
+    ));
+  if (!reference) {
+    throw new ConversationHttpError(404, "asset_not_found", "The conversation asset was not found.");
+  }
+
+  let bytes: Buffer;
+  try {
+    bytes = await assetStore.read(assetId, reference.storage_ref);
+  } catch (error) {
+    if (isMissingAssetError(error)) {
+      throw new ConversationHttpError(404, "asset_not_found", "The conversation asset is no longer available.");
+    }
+    throw new ConversationHttpError(500, "asset_unavailable", "The conversation asset could not be read.");
+  }
+  if (bytes.byteLength !== reference.source_bytes
+    || createHash("sha256").update(bytes).digest("hex") !== reference.sha256) {
+    throw new ConversationHttpError(500, "asset_corrupt", "The conversation asset failed its integrity check.");
+  }
+
+  const mediaType = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/.test(reference.media_type)
+    ? reference.media_type
+    : "application/octet-stream";
+  const filename = encodeURIComponent(reference.display_name.replace(/[\r\n]/g, "_")).replaceAll("'", "%27");
+  res.writeHead(200, {
+    "content-type": mediaType,
+    "content-length": String(bytes.byteLength),
+    "content-disposition": `inline; filename*=UTF-8''${filename}`,
+    "cache-control": "private, max-age=31536000, immutable",
+    "x-content-type-options": "nosniff"
+  });
+  res.end(bytes);
+}
+
+function isMissingAssetError(error: unknown): boolean {
+  return Boolean(
+    error
+    && typeof error === "object"
+    && (("code" in error && ["ENOENT", "NoSuchKey", "NotFound"].includes(String((error as { code?: unknown }).code)))
+      || ("status" in error && Number((error as { status?: unknown }).status) === 404)
+      || ("statusCode" in error && Number((error as { statusCode?: unknown }).statusCode) === 404))
+  );
 }
 
 class ConversationHttpError extends Error {
@@ -1199,6 +1318,7 @@ async function handleConversationHttpRequest(
   url: URL,
   repository: ConversationRepository,
   store: RuntimeStore | undefined,
+  assetStore: RuntimeAssetStore | undefined,
   entitlementResolver: EntitlementResolver | undefined,
   agentCorpusResolver: AgentCorpusResolver | undefined,
   authIdentityResolver: AuthIdentityResolver | undefined,
@@ -1258,6 +1378,22 @@ async function handleConversationHttpRequest(
       return;
     }
     throw new ConversationHttpError(405, "method_not_allowed", "Use GET or POST for /v1/conversations.");
+  }
+
+  const assetMatch = url.pathname.match(/^\/v1\/conversations\/([^/]+)\/assets\/([^/]+)$/);
+  if (assetMatch) {
+    const conversation = await requireBoundConversation(repository, binding, decodeURIComponent(assetMatch[1] ?? ""));
+    if (req.method !== "GET") {
+      throw new ConversationHttpError(405, "method_not_allowed", "Use GET for a conversation asset.");
+    }
+    await serveConversationAsset(
+      res,
+      store,
+      assetStore,
+      conversation.id,
+      decodeURIComponent(assetMatch[2] ?? "")
+    );
+    return;
   }
 
   const conversationMatch = url.pathname.match(/^\/v1\/conversations\/([^/]+)$/);

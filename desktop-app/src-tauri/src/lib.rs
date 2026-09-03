@@ -10,6 +10,7 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use hatch_local_runner::{LocalRunner, ToolCallRequest};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -46,9 +47,9 @@ const LOCAL_TOOL_RESULT_TTL: Duration = Duration::from_secs(60);
 const PENDING_TOOL_APPROVAL_TTL: Duration = Duration::from_secs(5 * 60);
 const NATIVE_DROP_CONTEXT_TTL: Duration = Duration::from_secs(10 * 60);
 const MAX_NATIVE_DROP_CONTEXTS: usize = 8;
-const MAX_NATIVE_DROP_CONTEXT_SOURCE_BYTES: u64 = 1024 * 1024;
+const MAX_NATIVE_DROP_CONTEXT_SOURCE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_NATIVE_DROP_CONTEXT_BYTES: usize = 64 * 1024;
-const MAX_NATIVE_DROP_CONTEXT_TOTAL_BYTES: usize = 128 * 1024;
+const MAX_NATIVE_DROP_CONTEXT_TOTAL_BYTES: usize = 24 * 1024 * 1024;
 const MAX_NATIVE_DROP_CONTEXT_REQUESTS: usize = 8;
 const PRODUCT_OPEN_EVENT: &str = "hatch://product-open";
 
@@ -412,8 +413,12 @@ struct WorkspaceGrantInfo {
 #[serde(rename_all = "camelCase")]
 struct NativeDropContextInfo {
     context_id: String,
+    asset_id: String,
     display_name: String,
+    media_type: String,
     size: u64,
+    sha256: String,
+    is_image: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -434,12 +439,17 @@ struct NativeDropPickResult {
 #[serde(rename_all = "camelCase")]
 struct NativeDropContextContent {
     context_id: String,
+    asset_id: String,
     display_name: String,
     media_type: String,
     source_bytes: u64,
     text: String,
     text_sha256: String,
     truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data_base64: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sha256: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -490,6 +500,31 @@ impl NativeDropContextStore {
             let Some(oldest) = oldest else { break };
             state.remove(&oldest);
         }
+        let current_bytes = state
+            .values()
+            .filter(|entry| entry.content.context_id.starts_with("drop_"))
+            .map(|entry| entry.content.source_bytes as usize)
+            .sum::<usize>();
+        if current_bytes.saturating_add(content.source_bytes as usize)
+            > MAX_NATIVE_DROP_CONTEXT_TOTAL_BYTES
+        {
+            return Err(format!(
+                "native_drop_context_too_large: Pending attachments exceed {} MiB total",
+                MAX_NATIVE_DROP_CONTEXT_TOTAL_BYTES / (1024 * 1024)
+            ));
+        }
+        let info = NativeDropContextInfo {
+            context_id: context_id.clone(),
+            asset_id: content.asset_id.clone(),
+            display_name: content.display_name.clone(),
+            media_type: content.media_type.clone(),
+            size: content.source_bytes,
+            sha256: content
+                .sha256
+                .clone()
+                .unwrap_or_else(|| content.text_sha256.clone()),
+            is_image: content.media_type.starts_with("image/"),
+        };
         state.insert(
             key,
             StoredNativeDropContext {
@@ -497,11 +532,7 @@ impl NativeDropContextStore {
                 created_at: Instant::now(),
             },
         );
-        Ok(NativeDropContextInfo {
-            context_id,
-            display_name: content.display_name,
-            size: content.source_bytes,
-        })
+        Ok(info)
     }
 
     fn consume(
@@ -548,7 +579,7 @@ impl NativeDropContextStore {
         }
         let total_bytes = output
             .iter()
-            .map(|content| content.text.len())
+            .map(|content| content.source_bytes as usize)
             .sum::<usize>();
         if total_bytes > MAX_NATIVE_DROP_CONTEXT_TOTAL_BYTES {
             return Err(format!(
@@ -606,9 +637,7 @@ fn snapshot_native_drop_context(
 ) -> Result<NativeDropContextContent, String> {
     let metadata = fs::symlink_metadata(path).map_err(to_string)?;
     if !metadata.file_type().is_file() {
-        return Err(
-            "native_drop_context_invalid: Only regular UTF-8 text files can be attached".into(),
-        );
+        return Err("native_drop_context_invalid: Only regular files can be attached".into());
     }
     let display_name = path
         .file_name()
@@ -650,20 +679,38 @@ fn snapshot_native_drop_context(
         ));
     }
     let source_bytes = bytes.len() as u64;
+    let raw_sha256 = format!("{:x}", Sha256::digest(&bytes));
+    let mut media_type = native_drop_media_type(path).to_string();
+    let is_known_rich = native_drop_is_rich_media_type(&media_type);
     let projection_len = bytes.len().min(MAX_NATIVE_DROP_CONTEXT_BYTES);
-    let (text, truncated) = decode_native_drop_text(
-        &bytes[..projection_len],
-        source_bytes > projection_len as u64,
-    )?;
+    let (text, truncated, data_base64) = if is_known_rich {
+        (String::new(), false, Some(BASE64_STANDARD.encode(&bytes)))
+    } else {
+        match decode_native_drop_text(
+            &bytes[..projection_len],
+            source_bytes > projection_len as u64,
+        ) {
+            Ok((text, truncated)) => (text, truncated, None),
+            Err(_) => {
+                if media_type == "application/octet-stream" {
+                    media_type = "application/octet-stream".to_string();
+                }
+                (String::new(), false, Some(BASE64_STANDARD.encode(&bytes)))
+            }
+        }
+    };
     let text_sha256 = format!("{:x}", Sha256::digest(text.as_bytes()));
     Ok(NativeDropContextContent {
+        asset_id: context_id.clone(),
         context_id,
         display_name,
-        media_type: native_drop_media_type(path).to_string(),
+        media_type,
         source_bytes,
         text,
         text_sha256,
         truncated,
+        data_base64,
+        sha256: Some(raw_sha256),
     })
 }
 
@@ -700,11 +747,9 @@ fn safe_drop_display_name(value: &str) -> String {
 
 fn native_drop_rejection_reason(error: &str) -> &'static str {
     if error.contains("native_drop_context_too_large") {
-        "File is larger than the 1 MiB attachment limit."
-    } else if error.contains("UTF-8") || error.contains("binary") {
-        "Only UTF-8 text files can be attached."
+        "File is larger than the 16 MiB attachment limit."
     } else {
-        "This item could not be attached as bounded text context."
+        "This item could not be attached as a local file."
     }
 }
 
@@ -719,8 +764,38 @@ fn native_drop_media_type(path: &std::path::Path) -> &'static str {
         Some("json") => "application/json",
         Some("yaml") | Some("yml") => "application/yaml",
         Some("xml") => "application/xml",
-        _ => "text/plain",
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("bmp") => "image/bmp",
+        Some("tif") | Some("tiff") => "image/tiff",
+        Some("pdf") => "application/pdf",
+        Some("docx") => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        Some("xlsx") => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        Some("pptx") => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        Some("doc") => "application/msword",
+        Some("xls") => "application/vnd.ms-excel",
+        Some("ppt") => "application/vnd.ms-powerpoint",
+        Some("rs") | Some("js") | Some("jsx") | Some("ts") | Some("tsx") | Some("toml") => {
+            "text/plain"
+        }
+        _ => "application/octet-stream",
     }
+}
+
+fn native_drop_is_rich_media_type(media_type: &str) -> bool {
+    media_type.starts_with("image/")
+        || matches!(
+            media_type,
+            "application/pdf"
+                | "application/msword"
+                | "application/vnd.ms-excel"
+                | "application/vnd.ms-powerpoint"
+                | "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                | "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                | "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        )
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2922,12 +2997,18 @@ mod tests {
     }
 
     #[test]
-    fn native_drop_context_rejects_symlink_and_binary_without_exposing_bytes() {
+    fn native_drop_context_accepts_binary_assets_but_rejects_symlink_paths() {
         let temp = tempdir().unwrap();
         let binary = temp.path().join("image.bin");
         std::fs::write(&binary, [0, 159, 146, 150]).unwrap();
         let store = NativeDropContextStore::default();
-        assert!(store.insert("window-a", &binary).is_err());
+        let info = store.insert("window-a", &binary).unwrap();
+        let content = store
+            .consume("window-a", vec![info.context_id])
+            .unwrap()
+            .remove(0);
+        assert_eq!(content.media_type, "application/octet-stream");
+        assert_eq!(content.data_base64.as_deref(), Some("AJ+Slg=="));
         #[cfg(unix)]
         {
             let link = temp.path().join("link.bin");

@@ -699,6 +699,32 @@ test("Postgres visible history projects canonical terminal finish reasons", asyn
   }]);
 });
 
+test("Postgres visible history preserves durable attachment references", async () => {
+  const { store } = storeFixture();
+  const attachment = {
+    kind: "asset" as const,
+    attachment_id: "drop_history_image",
+    asset_id: "asset_history_image",
+    display_name: "history.png",
+    media_type: "image/png",
+    source_bytes: 4,
+    sha256: "a".repeat(64),
+    storage_ref: "oss://private-hatch-assets/hatch/runtime-assets/asset_history_image"
+  };
+  await append(store, {
+    type: "conversation.model_message",
+    conversation_id: "attachment-history",
+    run_id: "run-attachment-history",
+    message: { role: "user", content: "Keep this image", attachments: [attachment] },
+    timestamp: "2026-08-10T00:00:00.000Z"
+  });
+
+  const visible = await store.readVisibleConversation("attachment-history");
+  assert.deepEqual(visible[0]?.attachments, [attachment]);
+  assert.equal((visible[0]?.attachments?.[0] as Record<string, unknown> | undefined)?.data_base64, undefined);
+  assert.deepEqual((await store.readConversation("attachment-history"))[0]?.attachments, [attachment]);
+});
+
 test("Postgres keeps task-start in canonical history but omits it from visible history", async () => {
   const { store } = storeFixture();
   await append(store, {

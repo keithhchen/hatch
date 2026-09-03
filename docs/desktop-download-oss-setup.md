@@ -122,11 +122,13 @@ desktop/latest/
   manifest.json
 ```
 
-At the current implementation stage these are ad-hoc macOS UAT candidates.
-Windows builds are paused until the Windows LocalRunner and target-device
-runner are ready. The OSS layout is production-safe for version and artifact
-identity, but the packages must not be described as signed production
-distribution until the protected signing and target-device gates are complete.
+At the current implementation stage these OSS objects are ad-hoc macOS UAT
+candidates. The same annotated tag also builds an unsigned Windows NSIS UAT
+package and publishes it, together with both macOS packages, to the public
+GitHub Release repository. The OSS layout is production-safe for version and
+artifact identity, but none of these packages may be described as signed
+production distribution until the protected signing and target-device gates
+are complete.
 
 `desktop/latest/manifest.json` is the current version pointer and the machine
 source of truth for version, tag, source commit, publication time, download

@@ -835,7 +835,7 @@ async function loadAssetDocumentProjections(
         continue;
       }
       try {
-        const bytes = await assetStore.read(attachment.asset_id);
+        const bytes = await assetStore.read(attachment.asset_id, attachment.storage_ref);
         const extracted = await extractChatAssetDocument(attachment.display_name, attachment.media_type, bytes);
         const bounded = boundRichDocumentText(extracted.content, remainingChars);
         projections.set(attachment.asset_id, {
@@ -894,7 +894,7 @@ async function loadAssetImages(
       try {
         images.set(attachment.asset_id, {
           type: "image",
-          data: await assetStore.readBase64(attachment.asset_id),
+          data: await assetStore.readBase64(attachment.asset_id, attachment.storage_ref),
           mimeType: attachment.media_type
         });
       } catch {

@@ -504,7 +504,8 @@ export class PostgresStore extends RuntimeStore {
         if (event.role === "assistant" && modelAssistantRuns.has(event.run_id)) continue;
         messages.push({
           role: event.role,
-          content: event.content
+          content: event.content,
+          ...(event.attachments?.length ? { attachments: event.attachments } : {})
         });
       }
     }
@@ -643,6 +644,18 @@ export class PostgresStore extends RuntimeStore {
               : event.message.content ?? "",
           timestamp: event.timestamp
         };
+        const attachments = event.type === "conversation.model_message"
+          ? event.message.attachments
+          : event.attachments;
+        if (attachments?.length) {
+          message.attachments = attachments.map((attachment) => {
+            if ("text" in attachment) {
+              const { text: _text, ...reference } = attachment;
+              return reference;
+            }
+            return attachment;
+          });
+        }
         if (event.type === "conversation.model_message" && event.finish_reason) {
           message.finish_reason = event.finish_reason;
           if (event.visible_parts) {

@@ -3,6 +3,7 @@ import {
   canConnectConversation,
   conversationScope,
   createConversation,
+  hydrateConversationAttachments,
   interruptedRunFromSnapshot,
   isServerConversationId,
   restorableConversationId,
@@ -101,6 +102,67 @@ describe("conversation client", () => {
     const fetchImpl = vi.fn().mockResolvedValue(response({ error: { code: "conversation_busy", message: "Busy" } }, false, 409));
     await expect(listConversations("https://runtime.test", "token", binding, {}, fetchImpl))
       .rejects.toMatchObject({ code: "conversation_busy", status: 409, message: "Busy" });
+  });
+
+  it("loads image bytes by durable asset reference without changing the message reference", async () => {
+    const bytes = new Uint8Array([137, 80, 78, 71, 13, 10]);
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => bytes.buffer
+    });
+    const messages = [{
+      role: "user",
+      content: "Look",
+      attachments: [{
+        kind: "asset",
+        attachment_id: "drop_image_1",
+        asset_id: "asset_image_1",
+        display_name: "screen.png",
+        media_type: "image/png",
+        source_bytes: bytes.length,
+        sha256: "a".repeat(64)
+      }]
+    }];
+    const hydrated = await hydrateConversationAttachments(
+      "https://runtime.test",
+      "token",
+      binding,
+      "conv_1",
+      messages,
+      fetchImpl
+    );
+    expect(fetchImpl).toHaveBeenCalledWith(
+      expect.stringContaining("/v1/conversations/conv_1/assets/asset_image_1?entitlement_id="),
+      expect.objectContaining({ headers: { authorization: "Bearer token", accept: "*/*" } })
+    );
+    expect(hydrated[0].attachments[0]).toMatchObject({
+      asset_id: "asset_image_1",
+      data_base64: btoa(String.fromCharCode(...bytes))
+    });
+    expect(messages[0].attachments[0]).not.toHaveProperty("data_base64");
+  });
+
+  it("keeps an attachment card when the preview asset is unavailable", async () => {
+    const fetchImpl = vi.fn().mockRejectedValue(new Error("offline"));
+    const attachment = {
+      kind: "asset",
+      attachment_id: "drop_image_2",
+      asset_id: "asset_image_2",
+      display_name: "screen.png",
+      media_type: "image/png",
+      source_bytes: 1,
+      sha256: "b".repeat(64)
+    };
+    const hydrated = await hydrateConversationAttachments(
+      "https://runtime.test",
+      "token",
+      binding,
+      "conv_1",
+      [{ role: "user", content: "Look", attachments: [attachment] }],
+      fetchImpl
+    );
+    expect(hydrated[0].attachments).toEqual([attachment]);
   });
 
   it("does not invent authority when a scope field is absent", () => {

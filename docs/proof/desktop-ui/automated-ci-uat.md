@@ -37,8 +37,9 @@ UAT-level and does not create a GitHub Release.
 - Both macOS architectures additionally run renderer tests/web build, Rust
   formatting, LocalRunner tests, Tauri bridge tests, and strict ad-hoc DMG
   construction before upload.
-- Windows builds are currently paused until the Windows LocalRunner and target
-  device runner are ready.
+- Windows CI now runs the Windows LocalRunner/native bridge checks and records
+  an unsigned NSIS UAT package; signed distribution and target-device
+  acceptance remain separate.
 
 ## What remains target-device acceptance
 
@@ -51,9 +52,8 @@ The exact P4 work not claimed by this automation remains:
 - visual resize/zoom cycles and native menu metrics;
 - macOS Developer ID, notarization, Gatekeeper, and post-install Keychain
   restart behavior;
-- Windows distribution and persistent-session work, which remain paused until
-  the Windows LocalRunner, device-bound security design, and same-user negative
-  tests exist.
+- Windows signed distribution and persistent-session work, which remain paused
+  until the device-bound security design and same-user negative tests exist.
 
 The requirement-level result remains in the
 [acceptance matrix](acceptance-matrix.md); these reports are inputs to that

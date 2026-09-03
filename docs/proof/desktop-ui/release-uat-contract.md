@@ -4,7 +4,9 @@ This document defines what must be true before a signed macOS Desktop DMG is
 accepted by the protected target-device validation lane. It is a supply-chain
 and target-device contract, not a claim that the local ad-hoc DMG is
 publishable. Public macOS distribution is handled separately by the OSS tag
-job in `desktop-ci.yml`; Windows distribution is currently paused.
+job in `desktop-ci.yml`; the same tag's Windows UAT package is published to
+the public GitHub Release repository. Windows signed distribution remains
+outside this protected macOS contract.
 
 ## Immutable artifact identity
 

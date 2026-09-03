@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
@@ -9,7 +10,8 @@ import type { AgentCorpus, AgentCorpusResolver } from "./agentCorpus.js";
 import { DeterministicAgentRuntime } from "./agentRuntime.js";
 import { InMemoryConversationRepository } from "./conversationRepository.js";
 import type { AuthIdentityResolver, EntitlementBinding, EntitlementResolver } from "./entitlements.js";
-import { createRuntimeServer, type RuntimeServer } from "./index.js";
+import { RuntimeAssetStore } from "./assetStore.js";
+import { createRuntimeServer, durableConversationId, type RuntimeServer } from "./index.js";
 import { PROTOCOL_VERSION, type OutboundMessage } from "./protocol.js";
 import { RuntimeStore } from "./store.js";
 
@@ -102,6 +104,69 @@ test("Conversation HTTP API owns metadata, pagination, versions, and cursor snap
   const afterAgentUpdate = await json(base, `/v1/conversations/${encodeURIComponent(first.conversation.id)}?${upgradedCorpusScope}`);
   assert.equal(afterAgentUpdate.response.status, 200);
   assert.equal((afterAgentUpdate.body as { conversation: { id: string } }).conversation.id, first.conversation.id);
+});
+
+test("Conversation snapshot preserves attachment references and serves only bound assets", async () => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-api-assets-"));
+  const store = new RuntimeStore(dataDir);
+  const assetStore = new RuntimeAssetStore(dataDir);
+  runtime = createRuntimeServer({ conversationStore: store, assetStore });
+  const base = await listen(runtime.server);
+  const scope = new URLSearchParams(binding).toString();
+  const created = await json(base, `/v1/conversations?${scope}`, {
+    method: "POST",
+    body: { title: "Attachment task", client_request_id: "attachment_task" }
+  });
+  assert.equal(created.response.status, 201);
+  const conversationId = (created.body as { conversation: { id: string } }).conversation.id;
+  const durableId = durableConversationId({
+    creatorId: binding.creator_id,
+    userId: binding.user_id,
+    productId: binding.product_id
+  }, conversationId);
+  const bytes = Buffer.from("stored in the asset volume", "utf8");
+  const reference = await assetStore.put({
+    kind: "asset",
+    attachment_id: "drop_snapshot_asset",
+    asset_id: "asset_snapshot_asset",
+    display_name: "snapshot.png",
+    media_type: "image/png",
+    source_bytes: bytes.length,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+    data_base64: bytes.toString("base64")
+  });
+  await store.append({
+    type: "conversation.model_message",
+    conversation_id: durableId,
+    run_id: "run_snapshot_asset",
+    message: { role: "user", content: "Inspect this", attachments: [reference] }
+  });
+
+  const snapshot = await json(base, `/v1/conversations/${encodeURIComponent(conversationId)}/snapshot?${scope}`);
+  assert.equal(snapshot.response.status, 200);
+  const snapshotMessage = (snapshot.body as {
+    messages: Array<{ attachments?: Array<{ asset_id?: string; storage_ref?: string; data_base64?: string }> }>;
+  }).messages[0];
+  assert.equal(snapshotMessage?.attachments?.[0]?.asset_id, reference.asset_id);
+  assert.equal(snapshotMessage?.attachments?.[0]?.storage_ref, reference.storage_ref);
+  assert.equal(snapshotMessage?.attachments?.[0]?.data_base64, undefined);
+
+  const assetResponse = await fetch(
+    `${base}/v1/conversations/${encodeURIComponent(conversationId)}/assets/${encodeURIComponent(reference.asset_id)}?${scope}`
+  );
+  assert.equal(assetResponse.status, 200);
+  assert.equal(assetResponse.headers.get("content-type"), "image/png");
+  assert.deepEqual(Buffer.from(await assetResponse.arrayBuffer()), bytes);
+
+  const otherConversation = await json(base, `/v1/conversations?${scope}`, {
+    method: "POST",
+    body: { title: "Other task", client_request_id: "other_attachment_task" }
+  });
+  const otherId = (otherConversation.body as { conversation: { id: string } }).conversation.id;
+  const denied = await fetch(
+    `${base}/v1/conversations/${encodeURIComponent(otherId)}/assets/${encodeURIComponent(reference.asset_id)}?${scope}`
+  );
+  assert.equal(denied.status, 404);
 });
 
 test("Conversation HTTP creation carries the published corpus BriefSpec into an immutable snapshot", async () => {

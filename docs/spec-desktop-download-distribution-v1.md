@@ -53,11 +53,14 @@ annotated tag timestamp rather than the runner clock.
 The manifest is not rendered into the page. This keeps the download surface
 quiet while retaining a durable source of truth for release operations.
 
-The current CI distribution lane publishes only ad-hoc macOS UAT candidates.
-Windows builds are paused until the Windows LocalRunner and target-device
-runner are ready. This is not a signed production-distribution claim. The
-protected signed macOS validation lane remains separate until its external
-credentials and target-device approvals exist.
+The OSS distribution lane publishes ad-hoc macOS UAT candidates. The same tag
+also runs the Windows LocalRunner/native bridge checks, builds an unsigned
+Windows NSIS UAT package, and publishes all three installers to the public
+GitHub Release repository. This is not a signed production-distribution
+claim. The protected signed macOS validation lane remains separate until its
+external credentials and target-device approvals exist; Windows signed
+distribution and persistent-session validation remain paused for the same
+reason.
 
 ## GitHub configuration
 
