@@ -93,8 +93,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             max_results,
         } => print_json(&runner.search(path, &query, max_results)?)?,
         Command::Read { path } => {
-            let content = runner.read_file(path)?;
-            print_json(&json!({ "content": content }))?;
+            print_json(&runner.read_file_result(path)?)?;
         }
         Command::WriteFile { path, content } => {
             runner.write_file(path, &content)?;

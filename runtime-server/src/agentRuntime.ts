@@ -39,6 +39,8 @@ import {
 import { PiAgentRuntime } from "./piAgentRuntime.js";
 import type { PiAgentPromptRunner } from "./piPrompt.js";
 import { briefSnapshotPromptBlock, type BriefSnapshot } from "./brief.js";
+import type { RuntimeAssetStore } from "./assetStore.js";
+import { normalizeRichFileReadResult } from "./richFile.js";
 
 export type RuntimeSessionSkills = {
   records: SkillRecord[];
@@ -48,6 +50,8 @@ export type RuntimeSessionSkills = {
 
 export type RunContext = {
   clientBroker: ClientToolBroker;
+  /** Runtime-owned binary attachment store; bytes never enter the transcript. */
+  assetStore?: RuntimeAssetStore;
   serverTools: ServerToolExecutor;
   state: RunStateMachine;
   messages: ConversationMessage[];
@@ -1047,7 +1051,7 @@ export async function executeChatTool(
           approvalOverride: effectiveClientToolApproval(dispatch.approval, activeSkills, dispatch.clientTool, args)
         }));
     markWorkspacePathRead(workspacePathPolicy, target);
-    return result;
+    return normalizeRichFileReadResult(result);
   }
   const clientTool = requireDispatchClientTool(dispatch);
   requireClientToolEnabled(ctx.clientTools, clientTool);

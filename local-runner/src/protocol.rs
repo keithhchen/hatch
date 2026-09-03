@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 pub const MAX_TOOL_RESULT_BYTES: usize = 4 * 1024 * 1024;
+pub const MAX_RICH_TOOL_RESULT_BYTES: usize = 24 * 1024 * 1024;
 
 #[derive(Debug, Deserialize)]
 pub struct ToolCallRequest {
@@ -96,8 +97,14 @@ impl LocalRunner {
             Err(error) => tool_call_error(run_id, tool_call_id, error.code(), error.to_string()),
         };
 
+        let result_limit = match &response {
+            ToolCallResult::Ok { result, .. } if result.get("data_base64").is_some() => {
+                MAX_RICH_TOOL_RESULT_BYTES
+            }
+            _ => MAX_TOOL_RESULT_BYTES,
+        };
         if serde_json::to_vec(&response)
-            .map(|payload| payload.len() > MAX_TOOL_RESULT_BYTES)
+            .map(|payload| payload.len() > result_limit)
             .unwrap_or(true)
         {
             return tool_call_error(
@@ -106,7 +113,7 @@ impl LocalRunner {
                 "tool_result_too_large",
                 format!(
                     "tool result exceeds the {}-byte transport envelope; narrow the request",
-                    MAX_TOOL_RESULT_BYTES
+                    result_limit
                 ),
             );
         }
@@ -140,8 +147,7 @@ impl LocalRunner {
 
     fn protocol_file_read(&self, arguments: &Value) -> ProtocolResult {
         let path = path_argument(arguments, "path", None)?;
-        let content = self.read_file(path)?;
-        Ok(json!({ "content": content }))
+        self.read_file_result(path).map_err(ProtocolToolError::from)
     }
 
     fn protocol_file_write(&self, arguments: &Value) -> ProtocolResult {

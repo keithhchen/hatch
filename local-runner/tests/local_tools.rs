@@ -328,6 +328,28 @@ fn canonical_file_read_extracts_xlsx_text_without_shelling_out() {
 }
 
 #[test]
+fn rich_file_read_returns_typed_image_bytes_without_decoding_them() {
+    let temp = tempdir().unwrap();
+    let runner = LocalRunner::new(temp.path()).unwrap();
+    let bytes = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+    fs::write(temp.path().join("screen.png"), bytes).unwrap();
+
+    let read = runner.execute_tool_call_request(tool_request(
+        "call_image_read",
+        "file_read",
+        json!({ "path": "screen.png" }),
+    ));
+
+    assert_ok_result(read, |result| {
+        assert_eq!(result["content_type"], "image");
+        assert_eq!(result["mime_type"], "image/png");
+        assert_eq!(result["bytes"], bytes.len());
+        assert_eq!(result["data_base64"], "iVBORw0KGgo=");
+        assert!(result.get("content").is_none());
+    });
+}
+
+#[test]
 fn file_read_enforces_one_mib_boundary_for_utf8_files() {
     const MAX_READ_BYTES: usize = 1024 * 1024;
     let temp = tempdir().unwrap();
@@ -494,7 +516,7 @@ fn canonical_shell_exec_runs() {
     });
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 #[test]
 fn shell_exec_fails_closed_without_a_supported_sandbox_backend() {
     let temp = tempdir().unwrap();
@@ -507,6 +529,30 @@ fn shell_exec_fails_closed_without_a_supported_sandbox_backend() {
     assert_error_result(result, |error| {
         assert_eq!(error["code"], "shell_sandbox_unavailable");
         assert!(error["message"].as_str().unwrap().contains("refusing"));
+    });
+}
+
+#[cfg(target_os = "windows")]
+#[test]
+fn canonical_shell_exec_runs_in_the_windows_workspace() {
+    let temp = tempdir().unwrap();
+    let runner = LocalRunner::new(temp.path()).unwrap();
+
+    let result = runner.execute_tool_call_request(tool_request(
+        "call_windows_shell",
+        "shell_exec",
+        json!({
+            "command": "Write-Output hatch-windows-runner",
+            "timeout_ms": 30000
+        }),
+    ));
+    assert_ok_result(result, |output| {
+        assert!(output["stdout"]
+            .as_str()
+            .unwrap()
+            .contains("hatch-windows-runner"));
+        assert_eq!(output["exit_code"], 0);
+        assert_eq!(output["timed_out"], false);
     });
 }
 

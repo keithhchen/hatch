@@ -455,7 +455,13 @@ export class RuntimeStore {
           timestamp: event.timestamp
         };
         if (event.type === "conversation.model_message" && event.message.attachments?.length) {
-          message.attachments = event.message.attachments.map(({ text: _text, ...attachment }) => attachment);
+          message.attachments = event.message.attachments.map((attachment) => {
+            if ("text" in attachment) {
+              const { text: _text, ...reference } = attachment;
+              return reference;
+            }
+            return attachment;
+          });
         }
         if (event.type === "conversation.model_message" && event.finish_reason) {
           message.finish_reason = event.finish_reason;

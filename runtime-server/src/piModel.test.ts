@@ -100,6 +100,25 @@ test("Pi AI request uses Moonshot endpoint, key, model, and enabled thinking", a
   assert.equal(agent.state.messages.at(-1)?.role, "assistant");
 });
 
+test("Pi AI request preserves native image input blocks for Kimi", async () => {
+  let requestBody: Record<string, unknown> | undefined;
+  const fetch: typeof globalThis.fetch = async (_input, init) => {
+    requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return streamResponse("image received");
+  };
+
+  const agent = createKimiAgent({ env: { LLM_API_KEY: "kimi-test-key" }, fetch });
+  await agent.prompt("Describe this image", [
+    { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" }
+  ]);
+
+  const messages = requestBody?.messages as Array<Record<string, unknown>>;
+  assert.deepEqual(messages.at(-1)?.content, [
+    { type: "text", text: "Describe this image" },
+    { type: "image_url", image_url: { url: "data:image/png;base64,iVBORw0KGgo=" } }
+  ]);
+});
+
 test("finish_reason completes a non-closing SSE response without dropping abort support", async () => {
   let upstreamCancelled = false;
   const encoder = new TextEncoder();

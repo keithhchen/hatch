@@ -78,6 +78,16 @@ export type NodeCriticInput<Input, Candidate> = {
   candidateRef: string;
 };
 
+export type NodeQualityGateInput<Input, Candidate> = {
+  input: Input;
+  round: number;
+  candidate: Candidate;
+  /** The candidate has already been persisted before host quality checks run. */
+  candidateRef: string;
+  /** Host-scoped reader for objects explicitly declared by the Node input. */
+  readInputObject?: (reference: string) => Promise<{ path: string; content: string; bytes: number }>;
+};
+
 export type CriticVerdict<Feedback> =
   {
     decision: "done" | "revise";
@@ -101,6 +111,12 @@ export type NodeDefinition<Input, Candidate, Feedback> = {
   name: string;
   inputSchema: z.ZodType<Input>;
   actor: AgentConfig<NodeActorInput<Input, Candidate, Feedback>, Candidate>;
+  /**
+   * Optional host-owned candidate review. Returning feedback behaves like a
+   * Critic "revise" verdict, without asking the LLM critic to judge an
+   * objectively invalid candidate.
+   */
+  qualityGate?: (input: NodeQualityGateInput<Input, Candidate>) => Feedback | undefined | Promise<Feedback | undefined>;
   critic: AgentConfig<NodeCriticInput<Input, Candidate>, CriticVerdict<Feedback>>;
 };
 

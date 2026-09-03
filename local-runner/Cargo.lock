@@ -68,6 +68,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "base64"
+version = "0.22.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
+
+[[package]]
 name = "bitflags"
 version = "2.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -260,6 +266,7 @@ checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 name = "hatch-local-runner"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "calamine",
  "clap",
  "libc",
@@ -269,6 +276,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "walkdir",
+ "windows-sys",
 ]
 
 [[package]]

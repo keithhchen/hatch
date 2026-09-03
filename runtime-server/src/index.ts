@@ -97,6 +97,7 @@ import {
   type OutputGuard
 } from "./outputGuard.js";
 import { writeOperationalError } from "./operationalLogging.js";
+import { RuntimeAssetStore } from "./assetStore.js";
 
 type AgentCorpusResolver = AgentCorpusResolverLike;
 
@@ -108,11 +109,13 @@ export type RuntimeServer = {
 
 // A successful local tool result may occupy up to 4 MiB. Reserve bounded JSON
 // envelope overhead while keeping one hard transport cap for every frame.
-export const MAX_RUNTIME_WEBSOCKET_PAYLOAD_BYTES = 5 * 1024 * 1024;
+export const MAX_RUNTIME_WEBSOCKET_PAYLOAD_BYTES = 32 * 1024 * 1024;
 
 export type RuntimeServerOptions = {
   createRuntime?: () => AgentRuntime;
   conversationStore?: RuntimeStore;
+  /** Optional injected store for tests; production defaults beside transcripts. */
+  assetStore?: RuntimeAssetStore;
   /** Durable Conversation/Run control-plane. Defaults to Postgres or local app-data. */
   conversationRepository?: ConversationRepository;
   entitlementResolver?: EntitlementResolver;
@@ -307,7 +310,7 @@ export async function createRuntimeServerFromEnvironment(
   const maxSocketBufferedBytes = runtimeCapacityLimit(
     "HATCH_RUNTIME_MAX_SOCKET_BUFFERED_BYTES",
     environment.HATCH_RUNTIME_MAX_SOCKET_BUFFERED_BYTES,
-    8 * 1024 * 1024,
+    40 * 1024 * 1024,
     64 * 1024 * 1024
   );
   const maxEstablishedConnectionsPerUser = runtimeCapacityLimit(
@@ -718,10 +721,18 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   }
   const conversationStore = options.conversationStore ?? createConversationStore();
   const conversationRepository = options.conversationRepository ?? createConversationRepository(conversationStore);
+  // Production RuntimeStore exposes the app-data directory. A few server
+  // integrations inject a transcript-compatible store without that optional
+  // filesystem property; keep those integrations usable while preserving the
+  // normal durable location whenever it is available.
+  const dataDirectory = typeof conversationStore.dataDirectory === "string" && conversationStore.dataDirectory.length > 0
+    ? conversationStore.dataDirectory
+    : path.resolve(process.env.HATCH_RUNTIME_DATA_DIR ?? ".hatch-runtime");
+  const assetStore = options.assetStore ?? new RuntimeAssetStore(dataDirectory);
   const commerceEventSink = options.commerceEventSink;
   const deliveryAccountingOutbox = options.deliveryAccountingOutbox
     ?? (commerceEventSink?.authorizeAndReserve
-      ? new DeliveryAccountingOutbox(path.join(conversationStore.dataDirectory, "delivery-accounting-outbox.json"))
+      ? new DeliveryAccountingOutbox(path.join(dataDirectory, "delivery-accounting-outbox.json"))
       : undefined);
   // A restart never silently resumes a tool-effecting run. The durable status
   // becomes Interrupted before a new socket can create a replacement run.
@@ -781,7 +792,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   if (!Number.isSafeInteger(httpHeadersTimeoutMs) || httpHeadersTimeoutMs < 1) {
     throw new Error("httpHeadersTimeoutMs must be a positive safe integer");
   }
-  const maxSocketBufferedBytes = options.maxSocketBufferedBytes ?? 8 * 1024 * 1024;
+  const maxSocketBufferedBytes = options.maxSocketBufferedBytes ?? 40 * 1024 * 1024;
   if (!Number.isSafeInteger(maxSocketBufferedBytes) || maxSocketBufferedBytes < MAX_RUNTIME_WEBSOCKET_PAYLOAD_BYTES) {
     throw new Error(`maxSocketBufferedBytes must be an integer of at least ${MAX_RUNTIME_WEBSOCKET_PAYLOAD_BYTES}`);
   }
@@ -900,6 +911,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
       activeRunControls,
       conversationStore,
       conversationRepository,
+      assetStore,
       repositoryReady,
       createRuntime,
       entitlementResolver,
@@ -1682,6 +1694,23 @@ function releaseConversationRun(
   }
 }
 
+async function materializeUserMessageAssets(
+  message: RunStart["message"],
+  assetStore: RuntimeAssetStore
+): Promise<ConversationMessage> {
+  const attachments = [];
+  for (const attachment of message.attachments ?? []) {
+    attachments.push("kind" in attachment && attachment.kind === "asset"
+      ? await assetStore.put(attachment)
+      : attachment);
+  }
+  return {
+    role: "user",
+    content: message.content,
+    ...(attachments.length > 0 ? { attachments } : {})
+  };
+}
+
 async function handleRuntimeSocket(
   socket: WebSocket,
   activeConversationRuns: Map<string, string>,
@@ -1700,6 +1729,7 @@ async function handleRuntimeSocket(
   activeRunControls: Map<string, ActiveRunControl>,
   store: RuntimeStore,
   conversationRepository: ConversationRepository,
+  assetStore: RuntimeAssetStore,
   repositoryReady: Promise<unknown>,
   createRuntime: () => AgentRuntime,
   entitlementResolver?: EntitlementResolver,
@@ -1713,7 +1743,7 @@ async function handleRuntimeSocket(
   scheduleDeliveryReconciliation: () => void = () => undefined,
   toolResultTimeoutMs = clientToolTimeoutMs(),
   serverToolTimeoutMs = 120_000,
-  maxSocketBufferedBytes = 8 * 1024 * 1024
+  maxSocketBufferedBytes = 40 * 1024 * 1024
 ): Promise<void> {
   const connectionAbortController = new AbortController();
   // Each WebSocket owns a Runtime-generated executor lease. No client/device
@@ -1956,6 +1986,9 @@ async function handleRuntimeSocket(
             await send({
               type: "session.ready",
               accepted_protocol_version: message.protocol_version,
+              runtime_capabilities: {
+                rich_assets: true
+              },
               creator_id: binding.creatorId,
               user_id: binding.userId,
               product_id: binding.productId,
@@ -2481,6 +2514,7 @@ async function handleRuntimeSocket(
             runtime,
             store,
             conversationRepository,
+            assetStore,
             state,
             send,
             outputGuard,
@@ -2577,6 +2611,7 @@ async function runOneTurn(
   runtime: AgentRuntime,
   store: RuntimeStore,
   conversationRepository: ConversationRepository,
+  assetStore: RuntimeAssetStore,
   state: RunStateMachine,
   send: (message: OutboundMessage) => Promise<void>,
   outputGuard: OutputGuard,
@@ -2605,13 +2640,20 @@ async function runOneTurn(
         content: TASK_START_MESSAGE_CONTENT,
         kind: "task_start"
       }
-      : input.message;
+      : await materializeUserMessageAssets(input.message, assetStore);
     // The wire-level task_start message is intentionally empty, but the
     // Runtime's canonical user turn is not. Keep the same marked message in
     // the durable transcript and pass its non-empty content to the Agent.
     const runtimeInput: RunStart = input.task_start
       ? { ...input, message: { role: "user", content: TASK_START_MESSAGE_CONTENT } }
-      : input;
+      : {
+        ...input,
+        message: {
+          role: "user",
+          content: persistedUserMessage.content ?? "",
+          ...(persistedUserMessage.attachments?.length ? { attachments: persistedUserMessage.attachments } : {})
+        }
+      };
     const materializedAgent = binding.agentCorpusRoot
       ? await materializeAgentCorpus(
         binding.agentCorpusRoot,
@@ -2872,6 +2914,7 @@ async function runOneTurn(
     abortSignal.throwIfAborted();
     for await (const event of runtime.run(runtimeInput, {
       clientBroker: broker,
+      assetStore,
       serverTools,
       state,
       messages,

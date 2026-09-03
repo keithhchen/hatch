@@ -12,7 +12,7 @@ pub(crate) fn execute(
     platform::execute(workspace, command, timeout_ms, cancel)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
 mod platform {
     use super::*;
 
@@ -29,6 +29,302 @@ mod platform {
             "the V1 secure shell backend requires macOS Seatbelt; refusing to run an unsafe host shell"
                 .into(),
         ))
+    }
+}
+
+#[cfg(target_os = "windows")]
+mod platform {
+    use super::*;
+    use std::io::Read;
+    use std::os::windows::io::AsRawHandle;
+    use std::os::windows::process::CommandExt;
+    use std::process::{Child, Command, Stdio};
+    use std::sync::atomic::Ordering;
+    use std::thread;
+    use std::time::{Duration, Instant};
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
+    use windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP;
+
+    const POWERSHELL: &str = "powershell.exe";
+    const MAX_COMMAND_OUTPUT_BYTES: usize = 1024 * 1024;
+    const POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+    pub(super) fn execute(
+        workspace: &Path,
+        command: &str,
+        timeout_ms: u64,
+        cancel: &AtomicBool,
+    ) -> Result<ShellExecOutput> {
+        if cancel.load(Ordering::Acquire) {
+            return Err(LocalRunnerError::ToolExecutionCancelled);
+        }
+
+        let workspace = workspace.canonicalize().map_err(|error| {
+            LocalRunnerError::ShellSandboxInitialization(format!(
+                "could not canonicalize the Windows Workspace: {error}"
+            ))
+        })?;
+        if !workspace.is_dir() {
+            return Err(LocalRunnerError::ShellSandboxInitialization(
+                "the Windows Workspace is not a directory".into(),
+            ));
+        }
+        if workspace.parent().is_none() {
+            return Err(LocalRunnerError::ShellSandboxInitialization(
+                "the filesystem root cannot be granted as a Shell Workspace".into(),
+            ));
+        }
+
+        let job = JobObject::new()?;
+        let mut child = Command::new(POWERSHELL)
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                command,
+            ])
+            .creation_flags(CREATE_NEW_PROCESS_GROUP)
+            .current_dir(&workspace)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| {
+                LocalRunnerError::ShellSandboxUnavailable(format!(
+                    "could not start {POWERSHELL}: {error}"
+                ))
+            })?;
+
+        if let Err(error) = job.assign(&child) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
+
+        let mut stdout_pipe = child.stdout.take().ok_or_else(|| {
+            LocalRunnerError::ShellSandboxInitialization(
+                "Windows shell stdout pipe was unavailable".into(),
+            )
+        })?;
+        let mut stderr_pipe = child.stderr.take().ok_or_else(|| {
+            LocalRunnerError::ShellSandboxInitialization(
+                "Windows shell stderr pipe was unavailable".into(),
+            )
+        })?;
+        let stdout_reader = thread::spawn(move || drain_command_output(&mut stdout_pipe));
+        let stderr_reader = thread::spawn(move || drain_command_output(&mut stderr_pipe));
+
+        let started_at = Instant::now();
+        let deadline = started_at
+            .checked_add(Duration::from_millis(timeout_ms))
+            .unwrap_or(started_at);
+        let stop_reason = loop {
+            if cancel.load(Ordering::Acquire) {
+                job.terminate_best_effort();
+                break StopReason::Cancelled;
+            }
+            match child.try_wait() {
+                Ok(Some(_)) => {
+                    // The PowerShell parent may have exited while a child
+                    // process still owns the pipes. The Job Object keeps the
+                    // whole process tree under one cleanup boundary.
+                    job.terminate_best_effort();
+                    break StopReason::Completed;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    job.terminate_best_effort();
+                    let _ = child.wait();
+                    return Err(LocalRunnerError::ShellSandboxInitialization(format!(
+                        "could not poll the Windows shell: {error}"
+                    )));
+                }
+            }
+            if Instant::now() >= deadline {
+                job.terminate_best_effort();
+                break StopReason::TimedOut;
+            }
+            thread::sleep(POLL_INTERVAL);
+        };
+
+        let status = child.wait().map_err(|error| {
+            LocalRunnerError::ShellSandboxInitialization(format!(
+                "could not wait for the Windows shell: {error}"
+            ))
+        })?;
+        let stdout_output = join_output_reader(stdout_reader, "stdout")?;
+        let stderr_output = join_output_reader(stderr_reader, "stderr")?;
+
+        if stop_reason == StopReason::Cancelled {
+            return Err(LocalRunnerError::ToolExecutionCancelled);
+        }
+
+        let (stdout, stderr, stdout_truncated, stderr_truncated) =
+            cap_command_output(&stdout_output.bytes, &stderr_output.bytes, &workspace);
+        Ok(ShellExecOutput {
+            stdout,
+            stderr,
+            exit_code: status.code().unwrap_or(-1),
+            timed_out: stop_reason == StopReason::TimedOut,
+            stdout_truncated: stdout_output.truncated || stdout_truncated,
+            stderr_truncated: stderr_output.truncated || stderr_truncated,
+        })
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum StopReason {
+        Completed,
+        TimedOut,
+        Cancelled,
+    }
+
+    struct JobObject {
+        handle: HANDLE,
+    }
+
+    impl JobObject {
+        fn new() -> Result<Self> {
+            let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+            if handle.is_null() {
+                return Err(win32_error("could not create the Windows Job Object"));
+            }
+
+            let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            let configured = unsafe {
+                SetInformationJobObject(
+                    handle,
+                    JobObjectExtendedLimitInformation,
+                    (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                    std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                )
+            };
+            if configured == 0 {
+                unsafe { CloseHandle(handle) };
+                return Err(win32_error(
+                    "could not configure the Windows Job Object cleanup policy",
+                ));
+            }
+            Ok(Self { handle })
+        }
+
+        fn assign(&self, child: &Child) -> Result<()> {
+            let process = child.as_raw_handle() as HANDLE;
+            if unsafe { AssignProcessToJobObject(self.handle, process) } == 0 {
+                return Err(win32_error(
+                    "could not attach the Windows shell to its Job Object",
+                ));
+            }
+            Ok(())
+        }
+
+        fn terminate_best_effort(&self) {
+            let _ = unsafe { TerminateJobObject(self.handle, 1) };
+        }
+    }
+
+    impl Drop for JobObject {
+        fn drop(&mut self) {
+            unsafe { CloseHandle(self.handle) };
+        }
+    }
+
+    fn win32_error(context: &str) -> LocalRunnerError {
+        LocalRunnerError::ShellSandboxInitialization(format!(
+            "{context}: {}",
+            std::io::Error::last_os_error()
+        ))
+    }
+
+    struct BoundedCommandOutput {
+        bytes: Vec<u8>,
+        truncated: bool,
+    }
+
+    fn drain_command_output<R: Read>(reader: &mut R) -> std::io::Result<BoundedCommandOutput> {
+        let mut bytes = Vec::with_capacity(MAX_COMMAND_OUTPUT_BYTES);
+        let mut chunk = [0u8; 8192];
+        let mut truncated = false;
+        loop {
+            let read = reader.read(&mut chunk)?;
+            if read == 0 {
+                break;
+            }
+            let remaining = MAX_COMMAND_OUTPUT_BYTES.saturating_sub(bytes.len());
+            if remaining > 0 {
+                bytes.extend_from_slice(&chunk[..read.min(remaining)]);
+            }
+            if read > remaining {
+                truncated = true;
+            }
+        }
+        Ok(BoundedCommandOutput { bytes, truncated })
+    }
+
+    fn join_output_reader(
+        reader: thread::JoinHandle<std::io::Result<BoundedCommandOutput>>,
+        stream: &str,
+    ) -> Result<BoundedCommandOutput> {
+        reader
+            .join()
+            .map_err(|_| {
+                LocalRunnerError::ShellSandboxInitialization(format!(
+                    "Windows shell {stream} reader panicked"
+                ))
+            })?
+            .map_err(|error| {
+                LocalRunnerError::ShellSandboxInitialization(format!(
+                    "could not read Windows shell {stream}: {error}"
+                ))
+            })
+    }
+
+    fn cap_command_output(
+        stdout: &[u8],
+        stderr: &[u8],
+        workspace: &Path,
+    ) -> (String, String, bool, bool) {
+        let stdout = redact_workspace_path(&String::from_utf8_lossy(stdout), workspace);
+        let stderr = redact_workspace_path(&String::from_utf8_lossy(stderr), workspace);
+        let stdout_budget = stdout.len().min(MAX_COMMAND_OUTPUT_BYTES);
+        let stderr_budget = MAX_COMMAND_OUTPUT_BYTES.saturating_sub(stdout_budget);
+        let (stdout, stdout_truncated) = truncate_text(&stdout, stdout_budget);
+        let (stderr, stderr_truncated) = truncate_text(&stderr, stderr_budget);
+        (stdout, stderr, stdout_truncated, stderr_truncated)
+    }
+
+    fn redact_workspace_path(text: &str, workspace: &Path) -> String {
+        let native = workspace.to_string_lossy();
+        let forward = native.replace('\\', "/");
+        let backward = native.replace('/', "\\");
+        text.replace(native.as_ref(), "<WORKSPACE>")
+            .replace(&forward, "<WORKSPACE>")
+            .replace(&backward, "<WORKSPACE>")
+    }
+
+    fn truncate_text(text: &str, max_bytes: usize) -> (String, bool) {
+        if text.len() <= max_bytes {
+            return (text.to_string(), false);
+        }
+        let mut used = 0usize;
+        let mut output = String::new();
+        for character in text.chars() {
+            let width = character.len_utf8();
+            if used + width > max_bytes {
+                break;
+            }
+            output.push(character);
+            used += width;
+        }
+        (output, true)
     }
 }
 

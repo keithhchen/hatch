@@ -1,4 +1,4 @@
-import { MAX_TOOL_RESULT_BYTES, type OutboundMessage, type ToolRequest, type ToolResult } from "./protocol.js";
+import { MAX_RICH_TOOL_RESULT_BYTES, MAX_TOOL_RESULT_BYTES, type OutboundMessage, type ToolRequest, type ToolResult } from "./protocol.js";
 import type { RunStateMachine } from "./runState.js";
 import type { RuntimeStore } from "./store.js";
 import { requireTool } from "./tools.js";
@@ -183,12 +183,15 @@ export class ClientToolBroker {
     }
 
     const serializedBytes = Buffer.byteLength(JSON.stringify(message), "utf8");
-    if (serializedBytes > MAX_TOOL_RESULT_BYTES) {
+    const resultLimit = message.status === "ok" && typeof message.result?.data_base64 === "string"
+      ? MAX_RICH_TOOL_RESULT_BYTES
+      : MAX_TOOL_RESULT_BYTES;
+    if (serializedBytes > resultLimit) {
       this.pending.delete(key);
       clearTimeout(pending.timeout);
       const error = {
         code: "tool_result_too_large",
-        message: `Tool result exceeds the ${MAX_TOOL_RESULT_BYTES}-byte transport envelope; narrow the request.`
+        message: `Tool result exceeds the ${resultLimit}-byte transport envelope; narrow the request.`
       };
       // The worker-facing promise is the lifecycle authority. Settle it before
       // fallible audit/event fan-out so a store outage cannot orphan the run.

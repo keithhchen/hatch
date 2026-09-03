@@ -2,6 +2,7 @@ use crate::audit::AuditLogger;
 use crate::error::{LocalRunnerError, Result};
 use crate::patch::{apply_text_patch, HatchPatch};
 use crate::sandbox::{path_to_string, Sandbox};
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use calamine::{open_workbook_auto, Data, Reader};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -17,6 +18,7 @@ const MAX_WORKSPACE_DIFF_BYTES: usize = 64 * 1024;
 const MAX_SEARCH_FILES_SCANNED: usize = 2_000;
 const MAX_SEARCH_FILE_BYTES: u64 = 1024 * 1024;
 const MAX_READ_FILE_BYTES: u64 = MAX_SEARCH_FILE_BYTES;
+const MAX_RICH_FILE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_SEARCH_ELAPSED: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone)]
@@ -125,6 +127,25 @@ impl LocalRunner {
         let result = self.read_file_inner(path.as_ref());
         let detail = match &result {
             Ok(content) => json!({ "bytes": content.len() }),
+            Err(_) => json!({}),
+        };
+        self.audit_outcome("read", vec![label], detail, &result)?;
+        result
+    }
+
+    /// Return the model-facing file result. Text files retain the historical
+    /// `{ content }` shape; images and common document containers cross the
+    /// local-tool boundary as bounded, typed bytes for the Runtime adapter to
+    /// decode. Paths remain workspace-relative and are never used as asset
+    /// storage authority.
+    pub fn read_file_result(&self, path: impl AsRef<Path>) -> Result<Value> {
+        let label = display_input_path(path.as_ref());
+        let result = self.read_file_result_inner(path.as_ref());
+        let detail = match &result {
+            Ok(value) => json!({
+                "content_type": value.get("content_type").and_then(Value::as_str).unwrap_or("text"),
+                "bytes": value.get("bytes").and_then(Value::as_u64).unwrap_or(0)
+            }),
             Err(_) => json!({}),
         };
         self.audit_outcome("read", vec![label], detail, &result)?;
@@ -428,6 +449,56 @@ impl LocalRunner {
             .map_err(|source| LocalRunnerError::invalid_utf8(&resolved.absolute, source))
     }
 
+    fn read_file_result_inner(&self, path: &Path) -> Result<Value> {
+        let resolved = self.sandbox.resolve_existing(path)?;
+        let metadata = fs::metadata(&resolved.absolute)
+            .map_err(|source| LocalRunnerError::io(&resolved.absolute, source))?;
+        if !metadata.is_file() {
+            return Err(LocalRunnerError::ExpectedFile(
+                resolved.relative.display().to_string(),
+            ));
+        }
+        if is_xlsx_path(&resolved.absolute) {
+            let content = self.read_file_inner(path)?;
+            return Ok(json!({
+                "path": path_to_string(&resolved.relative),
+                "content_type": "text",
+                "bytes": content.len(),
+                "content": content
+            }));
+        }
+        let Some(mime_type) = rich_file_media_type(&resolved.absolute) else {
+            let content = self.read_file_inner(path)?;
+            return Ok(json!({
+                "path": path_to_string(&resolved.relative),
+                "content_type": "text",
+                "bytes": content.len(),
+                "content": content
+            }));
+        };
+        if metadata.len() > MAX_RICH_FILE_BYTES {
+            return Err(LocalRunnerError::FileTooLarge {
+                path: resolved.relative.display().to_string(),
+                size: metadata.len(),
+                max_bytes: MAX_RICH_FILE_BYTES,
+            });
+        }
+        let bytes = fs::read(&resolved.absolute)
+            .map_err(|source| LocalRunnerError::io(&resolved.absolute, source))?;
+        let content_type = if mime_type.starts_with("image/") {
+            "image"
+        } else {
+            "document"
+        };
+        Ok(json!({
+            "path": path_to_string(&resolved.relative),
+            "content_type": content_type,
+            "mime_type": mime_type,
+            "bytes": bytes.len(),
+            "data_base64": BASE64_STANDARD.encode(bytes)
+        }))
+    }
+
     fn write_file_inner(&self, path: &Path, content: &str) -> Result<()> {
         let resolved = self.sandbox.resolve_candidate(path, false)?;
         ensure_writable_file_target(&resolved.absolute)?;
@@ -638,6 +709,33 @@ fn is_xlsx_path(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| extension.eq_ignore_ascii_case("xlsx"))
+}
+
+fn rich_file_media_type(path: &Path) -> Option<&'static str> {
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.to_ascii_lowercase());
+    match extension.as_deref() {
+        Some("png") => Some("image/png"),
+        Some("jpg") | Some("jpeg") => Some("image/jpeg"),
+        Some("gif") => Some("image/gif"),
+        Some("webp") => Some("image/webp"),
+        Some("bmp") => Some("image/bmp"),
+        Some("tif") | Some("tiff") => Some("image/tiff"),
+        Some("pdf") => Some("application/pdf"),
+        Some("docx") => {
+            Some("application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        }
+        Some("pptx") => {
+            Some("application/vnd.openxmlformats-officedocument.presentationml.presentation")
+        }
+        Some("xlsx") => Some("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        Some("xls") => Some("application/vnd.ms-excel"),
+        Some("doc") => Some("application/msword"),
+        Some("ppt") => Some("application/vnd.ms-powerpoint"),
+        _ => None,
+    }
 }
 
 fn is_search_ignored_entry(name: &str) -> bool {

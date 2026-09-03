@@ -266,6 +266,37 @@ export class NodeRuntime {
             candidateRef = candidateObject.key;
           }
         }
+        const hostFeedback = await node.qualityGate?.({
+          input,
+          round,
+          candidate,
+          candidateRef,
+          readInputObject: (reference) => nodeStore.readPath(checkedScope, input as unknown as NodeInput, reference)
+        });
+        if (hostFeedback !== undefined) {
+          const currentRound: NodeRound<Candidate, Feedback> = {
+            round,
+            candidate,
+            verdict: { decision: "revise", feedback: hostFeedback }
+          };
+          rounds.push(currentRound);
+          previousCandidateRef = candidateRef;
+          actorToolInput.previous_candidate_ref = candidateRef;
+          const feedbackObject = await nodeStore.writeFeedback(checkedScope, round, hostFeedback);
+          feedbackRef = feedbackObject.key;
+          actorToolInput.feedback_ref = feedbackRef;
+          await saveCheckpoint({
+            status: "running",
+            round: round + 1,
+            phase: "actor",
+            inputRef,
+            candidateRef,
+            feedbackRef,
+            decision: "revise",
+            details: { previousCandidateRef: candidateRef }
+          });
+          continue;
+        }
         criticToolInput.candidate_ref = candidateRef;
         const criticInput: NodeCriticInput<Input, Candidate> = { input, round, candidateRef };
         await saveCheckpoint({

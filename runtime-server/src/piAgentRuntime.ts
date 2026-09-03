@@ -5,7 +5,7 @@ import {
   type AgentMessage,
   type AgentTool
 } from "@earendil-works/pi-agent-core";
-import { Type, type AssistantMessage, type ToolResultMessage } from "@earendil-works/pi-ai";
+import { Type, type AssistantMessage, type ImageContent, type ToolResultMessage } from "@earendil-works/pi-ai";
 import {
   renderUserMessageForModel,
   type ConversationMessage,
@@ -37,6 +37,12 @@ import {
 import { SUMMARY_PREFIX, SUMMARY_SUFFIX } from "./compaction.js";
 import { createPiModel, createPiStreamFn } from "./piModel.js";
 import { runPiAgentPrompt, type PiAgentPromptRunner } from "./piPrompt.js";
+import {
+  boundRichDocumentText,
+  extractRichDocument
+} from "./richFile.js";
+
+const MAX_CHAT_ASSET_CONTEXT_CHARS = 200_000;
 
 export type PiToolDefinition = {
   type: "function";
@@ -139,7 +145,20 @@ export class PiAgentRuntime implements AgentRuntime {
     // task_start, keep the complete transcript and continue from it so the
     // marked row participates in assembly exactly once. Ordinary turns keep
     // the existing prompt path, where the current row is appended by prompt.
-    const storedMessages = (input.task_start ? ctx.messages : ctx.messages.slice(0, -1)).map(toPiMessage);
+    const storedMessageSource = input.task_start ? ctx.messages : ctx.messages.slice(0, -1);
+    const storedAssetImages = await loadAssetImages(storedMessageSource, ctx.assetStore);
+    const allAssetMessages = input.task_start
+      ? ctx.messages
+      : [...storedMessageSource, input.message];
+    const assetDocumentProjections = await loadAssetDocumentProjections(allAssetMessages, ctx.assetStore);
+    const storedMessages = storedMessageSource.map((message) => toPiMessage(
+      message,
+      storedAssetImages,
+      assetDocumentProjections
+    ));
+    const currentAssetImages = input.task_start
+      ? []
+      : [...(await loadAssetImages([input.message], ctx.assetStore)).values()];
     const toolDefinitions = this.options.toolDefinitions ?? chatToolsForRun(
       ctx.clientTools,
       ctx.allowedExternalTools,
@@ -206,11 +225,17 @@ export class PiAgentRuntime implements AgentRuntime {
           .map(toRuntimeCompactionMessage);
         compacting = true;
         try {
-        const replacement = await ctx.compactMessagesIfNeeded(runtimeMessages, "mid_turn");
+          const replacement = await ctx.compactMessagesIfNeeded(runtimeMessages, "mid_turn");
           if (!replacement) return messages;
+          const replacementAssetImages = await loadAssetImages(replacement, ctx.assetStore);
+          const replacementAssetDocuments = await loadAssetDocumentProjections(replacement, ctx.assetStore);
           return [
             ...contextMessages,
-            ...replacement.map(toPiMessage)
+            ...replacement.map((message) => toPiMessage(
+              message,
+              replacementAssetImages,
+              replacementAssetDocuments
+            ))
           ];
         } catch {
           // A compaction failure should not destroy an otherwise usable live
@@ -256,12 +281,15 @@ export class PiAgentRuntime implements AgentRuntime {
       // before prompt startup. Once prompt() starts, abortAgent owns the same
       // Agent AbortController that is passed to the provider request.
       ensureNotCancelled(ctx);
-      // Pass an explicit Pi UserMessage so the current user turn stays a plain
-      // text payload in the OpenAI-compatible request (and in persistence),
-      // instead of Agent.prompt(string)'s text-block form.
+      // Pi's string-plus-images overload produces the provider-native user
+      // content array. Text stays text and image attachments become native
+      // ImageContent blocks; binary bytes never enter the prompt string.
       const promptPromise = (input.task_start
         ? agent.continue()
-        : agent.prompt(piUserMessage(input.message.content)))
+        : agent.prompt(
+          renderUserMessageForModel(input.message, { assetProjections: assetDocumentProjections }),
+          currentAssetImages
+        ))
         .catch((error) => {
           terminalError = error instanceof Error ? error : new Error(String(error));
         })
@@ -448,9 +476,10 @@ export class PiAgentRuntime implements AgentRuntime {
           };
         }
         ensureNotCancelled(ctx);
-        const visibleResult = boundToolResult(modelVisibleToolResult(definition.function.name, result));
+        const modelResult = modelVisibleToolResult(definition.function.name, result);
+        const visibleResult = boundToolResult(stripBinaryToolPayload(modelResult));
         return {
-          content: [{ type: "text", text: JSON.stringify(visibleResult) }],
+          content: piToolResultContent(modelResult),
           details: visibleResult
         };
       }
@@ -706,7 +735,7 @@ function isModelMessage(message: AgentMessage): boolean {
     || message.role === "compactionSummary";
 }
 
-function piUserMessage(content: string): AgentMessage {
+function piUserMessage(content: string | Array<{ type: "text"; text: string } | ImageContent>): AgentMessage {
   return {
     role: "user",
     content,
@@ -714,11 +743,26 @@ function piUserMessage(content: string): AgentMessage {
   };
 }
 
-function toPiMessage(message: ConversationMessage): AgentMessage {
+function toPiMessage(
+  message: ConversationMessage,
+  assetImages: ReadonlyMap<string, ImageContent> = new Map(),
+  assetDocumentProjections: ReadonlyMap<string, ModelAssetProjection> = new Map()
+): AgentMessage {
   // Rebuild the provider-facing message instead of spreading ConversationMessage:
   // the durable kind marker stays in the Runtime transcript and never reaches
   // the provider payload.
-  if (message.role === "user") return piUserMessage(renderUserMessageForModel(message));
+  if (message.role === "user") {
+    const text = renderUserMessageForModel(message, { assetProjections: assetDocumentProjections });
+    const images: ImageContent[] = [];
+    for (const attachment of message.attachments ?? []) {
+      if (!("kind" in attachment) || attachment.kind !== "asset") continue;
+      const image = assetImages.get(attachment.asset_id);
+      if (image) images.push(image);
+    }
+    return piUserMessage(images.length > 0
+      ? [{ type: "text", text }, ...images]
+      : text);
+  }
   if (message.role === "compactionSummary") {
     return {
       role: "compactionSummary",
@@ -760,6 +804,106 @@ function toPiMessage(message: ConversationMessage): AgentMessage {
     stopReason: message.tool_calls?.length ? "toolUse" : "stop",
     timestamp: Date.now()
   } as unknown as AssistantMessage;
+}
+
+type ModelAssetProjection = {
+  format: string;
+  content?: string;
+  truncated?: boolean;
+};
+
+async function loadAssetDocumentProjections(
+  messages: ConversationMessage[],
+  assetStore: RunContext["assetStore"]
+): Promise<Map<string, ModelAssetProjection>> {
+  const projections = new Map<string, ModelAssetProjection>();
+  if (!assetStore) return projections;
+  let remainingChars = MAX_CHAT_ASSET_CONTEXT_CHARS;
+  for (const message of messages) {
+    for (const attachment of message.attachments ?? []) {
+      if (
+        !("kind" in attachment)
+        || attachment.kind !== "asset"
+        || attachment.media_type.startsWith("image/")
+        || projections.has(attachment.asset_id)
+      ) continue;
+      if (remainingChars <= 0) {
+        projections.set(attachment.asset_id, {
+          format: assetDocumentFormat(attachment.display_name, attachment.media_type),
+          truncated: true
+        });
+        continue;
+      }
+      try {
+        const bytes = await assetStore.read(attachment.asset_id);
+        const extracted = await extractChatAssetDocument(attachment.display_name, attachment.media_type, bytes);
+        const bounded = boundRichDocumentText(extracted.content, remainingChars);
+        projections.set(attachment.asset_id, {
+          format: extracted.format,
+          content: bounded.content,
+          truncated: bounded.truncated
+        });
+        remainingChars = Math.max(0, remainingChars - bounded.content.length);
+      } catch {
+        // Keep the attachment metadata marker. Unsupported or missing document
+        // bytes are reported as unavailable rather than being replaced with a
+        // guessed or lossy text projection.
+        projections.set(attachment.asset_id, {
+          format: assetDocumentFormat(attachment.display_name, attachment.media_type)
+        });
+      }
+    }
+  }
+  return projections;
+}
+
+async function extractChatAssetDocument(
+  displayName: string,
+  mediaType: string,
+  bytes: Buffer
+): Promise<{ format: string; content: string }> {
+  if (
+    mediaType.startsWith("text/")
+    || ["application/json", "application/xml", "application/yaml", "text/yaml"].includes(mediaType)
+  ) {
+    return {
+      format: "text",
+      content: new TextDecoder("utf-8", { fatal: true }).decode(bytes)
+    };
+  }
+  return extractRichDocument(displayName, mediaType, bytes);
+}
+
+function assetDocumentFormat(displayName: string, mediaType: string): string {
+  const extension = displayName.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
+  if (mediaType === "application/pdf" || extension === "pdf") return "pdf";
+  if (extension) return extension;
+  return mediaType.split("/")[1] || "document";
+}
+
+async function loadAssetImages(
+  messages: ConversationMessage[],
+  assetStore: RunContext["assetStore"]
+): Promise<Map<string, ImageContent>> {
+  const images = new Map<string, ImageContent>();
+  if (!assetStore) return images;
+  for (const message of messages) {
+    for (const attachment of message.attachments ?? []) {
+      if (!("kind" in attachment) || attachment.kind !== "asset" || !attachment.media_type.startsWith("image/")) continue;
+      if (images.has(attachment.asset_id)) continue;
+      try {
+        images.set(attachment.asset_id, {
+          type: "image",
+          data: await assetStore.readBase64(attachment.asset_id),
+          mimeType: attachment.media_type
+        });
+      } catch {
+        // A historical conversation can outlive a local asset cache. Keep
+        // its metadata marker and let the model ask the user to reattach it.
+      }
+    }
+  }
+  return images;
 }
 
 function fromPiMessage(message: AssistantMessage | ToolResultMessage): ConversationMessage {
@@ -877,6 +1021,30 @@ function boundToolResult(result: Record<string, unknown>): Record<string, unknow
     preview: serialized.slice(0, 50_000),
     total_bytes: Buffer.byteLength(serialized, "utf8")
   };
+}
+
+function stripBinaryToolPayload(result: Record<string, unknown>): Record<string, unknown> {
+  if (typeof result.data_base64 !== "string") return result;
+  const { data_base64: _dataBase64, ...visible } = result;
+  return visible;
+}
+
+function piToolResultContent(result: Record<string, unknown>): Array<{ type: "text"; text: string } | ImageContent> {
+  const visible = stripBinaryToolPayload(result);
+  const content: Array<{ type: "text"; text: string } | ImageContent> = [
+    { type: "text", text: JSON.stringify(visible) }
+  ];
+  if (result.content_type === "image"
+    && typeof result.data_base64 === "string"
+    && typeof result.mime_type === "string"
+    && result.mime_type.startsWith("image/")) {
+    content.push({
+      type: "image",
+      data: result.data_base64,
+      mimeType: result.mime_type
+    });
+  }
+  return content;
 }
 
 function boundText(value: string): string {

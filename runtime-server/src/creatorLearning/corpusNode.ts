@@ -4,6 +4,7 @@ import {
   type NodeActorInput,
   type NodeCriticInput,
   type NodeDefinition,
+  type NodeQualityGateInput,
   nodeObjectPathSchema
 } from "../node.js";
 import { HATCH_PRODUCT_WORLDVIEW } from "./aboutYouNode.js";
@@ -60,6 +61,81 @@ export type CorpusInput = z.infer<typeof corpusInputSchema>;
 export type CorpusOutput = z.infer<typeof corpusOutputSchema>;
 export type CorpusCriticOutput = z.infer<typeof corpusCriticOutputSchema>;
 
+const DEFAULT_MIN_GENERATED_BEHAVIOR_CHARS = 8_000;
+const MIN_GENERATED_BEHAVIOR_CHARS = 4_000;
+const MAX_GENERATED_BEHAVIOR_CHARS = 12_000;
+const MIN_SOURCE_TO_BEHAVIOR_RATIO = 0.25;
+const MIN_SYSTEM_INSTRUCTIONS_CHARS = 1_200;
+const MIN_SKILL_INSTRUCTION_CHARS = 500;
+const MIN_REFERENCE_CHARS = 120;
+
+export async function corpusQualityGate(input: NodeQualityGateInput<CorpusInput, CorpusOutput>): Promise<string | undefined> {
+  const candidate = input.candidate;
+  const systemChars = textLength(candidate.system_instructions);
+  const sourceChars = await sourceMaterialChars(input);
+  const minGeneratedBehaviorChars = sourceChars === undefined
+    ? DEFAULT_MIN_GENERATED_BEHAVIOR_CHARS
+    : Math.min(
+      MAX_GENERATED_BEHAVIOR_CHARS,
+      Math.max(MIN_GENERATED_BEHAVIOR_CHARS, Math.ceil(sourceChars * MIN_SOURCE_TO_BEHAVIOR_RATIO))
+    );
+  const skills = candidate.skills.map((skill) => ({
+    id: skill.id,
+    instructionChars: textLength(skill.instruction),
+    references: skill.references.map((reference) => ({
+      id: reference.id,
+      chars: textLength(reference.content)
+    }))
+  }));
+  const generatedBehaviorChars = [
+    candidate.system_instructions,
+    ...candidate.skills.flatMap((skill) => [
+      skill.when_to_use,
+      skill.instruction,
+      ...skill.references.map((reference) => reference.content)
+    ])
+  ].reduce((sum, value) => sum + textLength(value), 0);
+
+  const failures: string[] = [];
+  if (generatedBehaviorChars < minGeneratedBehaviorChars) {
+    failures.push(`behavior layer has ${generatedBehaviorChars} chars; expected at least ${minGeneratedBehaviorChars}`);
+  }
+  if (systemChars < MIN_SYSTEM_INSTRUCTIONS_CHARS) {
+    failures.push(`system_instructions has ${systemChars} chars; expected at least ${MIN_SYSTEM_INSTRUCTIONS_CHARS}`);
+  }
+  if (candidate.skills.length === 0) {
+    failures.push("no reusable Skills were produced");
+  }
+  const thinSkills = skills.filter((skill) => skill.instructionChars < MIN_SKILL_INSTRUCTION_CHARS);
+  if (thinSkills.length > 0) {
+    failures.push(`thin Skill instructions: ${summarizeIdLengths(thinSkills.map((skill) => [skill.id, skill.instructionChars] as const))}`);
+  }
+  const emptyReferenceSkills = skills.filter((skill) => skill.references.length === 0);
+  if (emptyReferenceSkills.length > 0) {
+    failures.push(`Skills without source-grounded references: ${emptyReferenceSkills.map((skill) => skill.id).slice(0, 6).join(", ")}`);
+  }
+  const thinReferences = skills.flatMap((skill) =>
+    skill.references
+      .filter((reference) => reference.chars < MIN_REFERENCE_CHARS)
+      .map((reference) => [`${skill.id}/${reference.id}`, reference.chars] as const)
+  );
+  if (thinReferences.length > 0) {
+    failures.push(`thin references: ${summarizeIdLengths(thinReferences)}`);
+  }
+  if (failures.length === 0) return undefined;
+
+  return [
+    "The candidate is too short to function as a durable Agent Corpus.",
+    `Round ${input.round} produced a behavior layer that does not meet the host quality floor.`,
+    ...(sourceChars === undefined ? [] : [`Declared source material has ${sourceChars} chars.`]),
+    `Measured issues: ${failures.join("; ")}.`,
+    "Revise the whole candidate as an operational playbook, not as asset cards.",
+    "Each retained Skill must include trigger conditions, intake checks, a decision or action sequence, output shape, quality bar, exception handling, and when to ask the buyer or refuse.",
+    "Each retained Reference must preserve enough source-grounded method, style, example, or few-shot detail to change future Agent behavior.",
+    "Do not pad, copy whole sources, or invent unsupported Creator beliefs. If evidence is thin, produce fewer but deeper Skills and make uncertainty explicit in the correct layer."
+  ].join(" ");
+}
+
 const CORPUS_AUTHORITY = `When material disagrees, use this order of authority:
 1. the Creator's confirmed answer, correction, or explicit decision;
 2. the Creator's canonical examples and repeated real decisions;
@@ -105,6 +181,14 @@ const CORPUS_COMPILER_PRINCIPLES = `Compiler principles:
 - When feedback identifies a failure, derive the smallest general lesson and place it in the right layer. Do not hard-code a single evaluation case.
 - A complete revision is a replacement of the whole candidate. Preserve every still-valid capability from the previous candidate while correcting the diagnosed problem.`;
 
+const CORPUS_DENSITY_BAR = `Operational density bar:
+- The Corpus is an operating manual for a downstream Agent, not a table of contents, catalog card, or executive summary.
+- A useful Skill instruction teaches a recurring procedure. It should include trigger conditions, required inputs, inspection steps, decision criteria, output structure, quality bar, exception handling, and when to ask the buyer or refuse.
+- A useful Reference carries source-grounded detail that would be too local for system_instructions but still changes behavior: method notes, style constraints, examples, counterexamples, edge cases, or few-shot patterns.
+- Do not create one-sentence Skills or one-sentence References. If a distinction is not deep enough to support a reusable procedure, merge it into a richer Skill, route it to system_instructions, or leave it as Knowledge.
+- Do not pad. More text is valuable only when it preserves source-supported judgments, trade-offs, examples, failure modes, and product-specific operating detail.
+- For any non-trivial source packet, a candidate whose Skills read like short labels or whose References are only brief reminders is incomplete even if it is faithful.`;
+
 export const CORPUS_ACTOR_SYSTEM_PROMPT = `You are the Corpus Actor: the long-term product editor and compiler of one Creator's judgment for one Product.
 
 ${HATCH_PRODUCT_WORLDVIEW}
@@ -114,6 +198,8 @@ ${CORPUS_AUTHORITY}
 ${CORPUS_INPUT_PROTOCOL}
 
 ${CORPUS_COMPILER_PRINCIPLES}
+
+${CORPUS_DENSITY_BAR}
 
 ${CORPUS_LAYERING}
 
@@ -151,6 +237,8 @@ ${CORPUS_INPUT_PROTOCOL}
 
 ${CORPUS_COMPILER_PRINCIPLES}
 
+${CORPUS_DENSITY_BAR}
+
 ${CORPUS_LAYERING}
 
 ${CORPUS_SOURCE_BOUNDARY}
@@ -161,6 +249,7 @@ Judge the candidate on these questions:
 - Fidelity: Does it preserve the Creator's confirmed judgment, canonical examples, trade-offs, boundaries, and uncertainty without replacing them with generic model taste?
 - Translation: Have the About You question-and-answer pairs become concrete Agent behavior, or has the candidate merely repeated biography, influence names, tone adjectives, or Hatch slogans?
 - Product usefulness: Would these instructions help the Agent perform the specified customer job and produce something usable, publishable, sellable, or otherwise worth the Product's promise?
+- Operational density: Are system_instructions, Skills, and References detailed enough to change behavior in new cases, or are they merely short labels, slogans, summaries, or reminders?
 - Durability: Does the candidate teach distinctions that transfer to new cases, or does it overfit one source, one question, or one observed failure?
 - Layering: Is each item in the narrowest useful layer, with global rules global, reusable procedures in Skills, local detail in References, and long-tail information in Knowledge?
 - Knowledge selection: Does every selected source come from input.files, have clear authority, remain stable and relevant to the Product, and deserve to be opened as a whole reference? Are temporary, duplicate, superseded, generic, or unsupported files excluded?
@@ -185,6 +274,7 @@ export const corpusNode: NodeDefinition<CorpusInput, CorpusOutput, string> = {
     storageAccess: "read",
     renderInput: renderCorpusActorInput
   },
+  qualityGate: corpusQualityGate,
   critic: {
     systemPrompt: CORPUS_CRITIC_SYSTEM_PROMPT,
     outputSchema: corpusCriticOutputSchema,
@@ -194,6 +284,28 @@ export const corpusNode: NodeDefinition<CorpusInput, CorpusOutput, string> = {
     renderInput: renderCorpusCriticInput
   }
 };
+
+function textLength(value: string | undefined): number {
+  return (value ?? "").trim().length;
+}
+
+async function sourceMaterialChars(input: NodeQualityGateInput<CorpusInput, CorpusOutput>): Promise<number | undefined> {
+  if (!input.readInputObject) return undefined;
+  let total = 0;
+  for (const source of input.input.files) {
+    try {
+      total += textLength((await input.readInputObject(source)).content);
+    } catch {
+      return undefined;
+    }
+  }
+  return total;
+}
+
+function summarizeIdLengths(items: ReadonlyArray<readonly [string, number]>): string {
+  const visible = items.slice(0, 8).map(([id, chars]) => `${id}=${chars}`).join(", ");
+  return items.length > 8 ? `${visible}, ...` : visible;
+}
 
 function renderCorpusActorInput(
   value: NodeActorInput<CorpusInput, CorpusOutput, string>

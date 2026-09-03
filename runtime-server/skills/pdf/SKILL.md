@@ -12,12 +12,13 @@ description: "Use when tasks involve reading, creating, or reviewing PDF files w
 - Validate final rendering before delivery.
 
 ## Workflow
-1. Prefer visual review: render PDF pages to PNGs and inspect them.
+1. For an existing Workspace PDF, call `file_read` first. The local runner returns a bounded text projection for text-based PDFs; use `shell_exec` and a renderer when page geometry or scanned/image content matters.
+2. Prefer visual review: render PDF pages to PNGs and inspect them.
    - Use `pdftoppm` if available.
    - If unavailable, install Poppler or ask the user to review the output locally.
-2. Use `reportlab` to generate PDFs when creating new documents.
-3. Use `pdfplumber` (or `pypdf`) for text extraction and quick checks; do not rely on it for layout fidelity.
-4. After each meaningful update, re-render pages and verify alignment, spacing, and legibility.
+3. Use `reportlab` to generate PDFs when creating new documents.
+4. Use `pdfplumber` (or `pypdf`) for text extraction and quick checks; do not rely on it for layout fidelity.
+5. After each meaningful update, re-render pages and verify alignment, spacing, and legibility.
 
 ## Temp and output conventions
 - Use `tmp/pdfs/` for intermediate files; delete when done.
@@ -39,6 +40,9 @@ System tools (for rendering):
 ```
 # macOS (Homebrew)
 brew install poppler
+
+# Windows (winget)
+winget install --id oschwartz10612.Poppler
 
 # Ubuntu/Debian
 sudo apt-get install -y poppler-utils
