@@ -252,20 +252,27 @@ jobs:
           fi
           printf 'HATCH_IMAGE_PREFIX=%s\nHATCH_RELEASE_TAG=%s\n' "$IMAGE_PREFIX" "$RELEASE_TAG" > .release.env
           compose=(docker compose --env-file .env --env-file .release.env -f compose.app.yml)
-          pulled=0
-          for attempt in 1 2 3; do
-            echo "Pulling application images (attempt $attempt/3)"
-            if timeout 300s "${compose[@]}" pull --quiet registry runtime caddy; then
-              pulled=1
-              break
-            fi
-            docker system df || true
-            sleep $((attempt * 10))
-          done
-          if test "$pulled" != 1; then
-            echo "Application image pull timed out or failed; leaving the current containers in place." >&2
-            exit 1
-          fi
+          pull_image() {
+            local image="$1"
+            local label="$2"
+            local attempt
+            for attempt in 1 2; do
+              echo "Pulling $label image (attempt $attempt/2)"
+              # Pull the shared Runtime image once, before Compose resolves
+              # registry and runtime concurrently. The production runner is
+              # bandwidth-constrained and Compose can leave the duplicate
+              # service in an "already being pulled" state until its timeout.
+              if timeout 900s docker pull "$image"; then
+                return 0
+              fi
+              docker system df || true
+              sleep $((attempt * 10))
+            done
+            echo "$label image pull timed out or failed." >&2
+            return 1
+          }
+          pull_image "$IMAGE_PREFIX/runtime:$RELEASE_TAG" Runtime
+          pull_image "$IMAGE_PREFIX/caddy:$RELEASE_TAG" Caddy
           # Always recreate the release-tagged services. A self-hosted runner
           # can retain a container created from an older tag; reusing it would
           # silently leave one production surface behind the release.
