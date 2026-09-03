@@ -292,13 +292,54 @@ mod platform {
         stderr: &[u8],
         workspace: &Path,
     ) -> (String, String, bool, bool) {
-        let stdout = redact_workspace_path(&String::from_utf8_lossy(stdout), workspace);
-        let stderr = redact_workspace_path(&String::from_utf8_lossy(stderr), workspace);
+        let stdout = redact_workspace_path(&decode_command_output(stdout), workspace);
+        let stderr = redact_workspace_path(&decode_command_output(stderr), workspace);
         let stdout_budget = stdout.len().min(MAX_COMMAND_OUTPUT_BYTES);
         let stderr_budget = MAX_COMMAND_OUTPUT_BYTES.saturating_sub(stdout_budget);
         let (stdout, stdout_truncated) = truncate_text(&stdout, stdout_budget);
         let (stderr, stderr_truncated) = truncate_text(&stderr, stderr_budget);
         (stdout, stderr, stdout_truncated, stderr_truncated)
+    }
+
+    fn decode_command_output(bytes: &[u8]) -> String {
+        if bytes.starts_with(&[0xff, 0xfe]) {
+            return decode_utf16(
+                bytes[2..]
+                    .chunks_exact(2)
+                    .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]])),
+            );
+        }
+        if bytes.starts_with(&[0xfe, 0xff]) {
+            return decode_utf16(
+                bytes[2..]
+                    .chunks_exact(2)
+                    .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]])),
+            );
+        }
+
+        // Windows PowerShell can write redirected output as UTF-16LE without
+        // a BOM. Detect the characteristic NUL bytes only when the stream is
+        // otherwise a mostly-ASCII UTF-16 sequence; ordinary UTF-8 output is
+        // kept on the loss-tolerant path below.
+        let looks_like_utf16le = bytes.len() >= 4
+            && bytes.len() % 2 == 0
+            && bytes.chunks_exact(2).filter(|chunk| chunk[1] == 0).count() * 2 >= bytes.len();
+        if looks_like_utf16le {
+            return decode_utf16(
+                bytes
+                    .chunks_exact(2)
+                    .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]])),
+            );
+        }
+
+        String::from_utf8_lossy(bytes).into_owned()
+    }
+
+    fn decode_utf16<I>(units: I) -> String
+    where
+        I: IntoIterator<Item = u16>,
+    {
+        String::from_utf16_lossy(&units.into_iter().collect::<Vec<_>>())
     }
 
     fn redact_workspace_path(text: &str, workspace: &Path) -> String {
@@ -325,6 +366,28 @@ mod platform {
             used += width;
         }
         (output, true)
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::decode_command_output;
+
+        #[test]
+        fn decodes_utf16le_powershell_output_without_a_bom() {
+            let bytes = "hatch-windows-runner\r\n"
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes)
+                .collect::<Vec<_>>();
+            assert_eq!(decode_command_output(&bytes), "hatch-windows-runner\r\n");
+        }
+
+        #[test]
+        fn preserves_utf8_shell_output() {
+            assert_eq!(
+                decode_command_output("hatch-shell".as_bytes()),
+                "hatch-shell"
+            );
+        }
     }
 }
 
