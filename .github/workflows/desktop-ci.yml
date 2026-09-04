@@ -232,7 +232,12 @@ jobs:
           # distribution remains a separate protected release concern.
           HATCH_PERSISTENT_SESSION: "0"
           HATCH_RUNTIME_CACHE_DIR: ${{ runner.temp }}/hatch-desktop-runtime
-        run: npx tauri build --debug --bundles nsis
+        # The UAT package must prove the actual Windows installer and bundled
+        # runtime, but it does not need release-grade LZMA compression. The
+        # full LibreOffice runtime is large; disabling NSIS compression keeps
+        # this repeatable CI/UAT lane bounded. The protected release lane does
+        # not use this override and retains NSIS's default compression.
+        run: npx tauri build --debug --bundles nsis --config src-tauri/tauri.windows-uat.json
       - name: Verify bundled application runtime in Windows bundle
         shell: bash
         run: |
