@@ -12,6 +12,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from _shared.libreoffice import run_libreoffice
+
 
 def fail(code: str, message: str) -> None:
     json.dump({"status": "error", "code": code, "message": message}, sys.stdout, ensure_ascii=False)
@@ -50,7 +53,7 @@ def main() -> None:
             f"-env:UserInstallation={Path(profile).as_uri()}",
             "--convert-to", "pdf", "--outdir", str(args.output_dir), str(args.input)
         ]
-        completed = subprocess.run(command, capture_output=True, text=True, env=environment, check=False)
+        completed = run_libreoffice(command, profile=Path(profile), environment=environment)
     if completed.returncode != 0:
         fail("conversion_failed", (completed.stderr or completed.stdout or "LibreOffice failed").strip())
     pdf = args.output_dir / f"{args.input.stem}.pdf"

@@ -137,6 +137,7 @@ export async function verifyBundledRuntime({ root, searchRoot, reportFile = null
   for (const required of ["documents", "pdf", "presentations", "spreadsheets"]) {
     if (!checkedSkills.includes(required)) throw new Error(`Bundled runtime is missing the ${required} Skill.`);
   }
+  await assertFile(path.join(runtimeRoot, "skills", "_shared", "libreoffice.py"), "shared LibreOffice Skill helper");
 
   const result = {
     schema_version: 1,

@@ -14,6 +14,9 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from _shared.libreoffice import run_libreoffice
+
 
 FORMULA_ERRORS = ("#REF!", "#DIV/0!", "#VALUE!", "#NAME?", "#N/A", "#NUM!", "#NULL!")
 
@@ -167,11 +170,12 @@ def render(file: Path, output_dir: Path, dpi: int) -> dict:
         environment = os.environ.copy()
         environment["HOME"] = profile
         environment["TMPDIR"] = profile
-        completed = subprocess.run([
+        command = [
             soffice, "--headless", "--nologo", "--nodefault", "--nolockcheck", "--norestore",
             f"-env:UserInstallation={Path(profile).as_uri()}",
             "--convert-to", "pdf", "--outdir", str(output_dir), str(file)
-        ], capture_output=True, text=True, env=environment, check=False)
+        ]
+        completed = run_libreoffice(command, profile=Path(profile), environment=environment)
     if completed.returncode != 0:
         fail("conversion_failed", (completed.stderr or completed.stdout or "LibreOffice failed").strip())
     pdf = output_dir / f"{file.stem}.pdf"

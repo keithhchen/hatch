@@ -53,7 +53,7 @@ const stagingRoot = path.join(
   path.dirname(outputRoot),
   `.runtime-staging-${process.pid}-${Date.now()}`
 );
-await rm(stagingRoot, { recursive: true, force: true });
+await removeDirectory(stagingRoot);
 await mkdir(stagingRoot, { recursive: true });
 
 try {
@@ -80,6 +80,9 @@ try {
 
   const skillsRoot = path.join(stagingRoot, "skills");
   await mkdir(skillsRoot, { recursive: true });
+  const sharedSkillSource = path.join(skillSourceRoot, "_shared");
+  await assertDirectory(sharedSkillSource, "shared Skill runtime source");
+  await cp(sharedSkillSource, path.join(skillsRoot, "_shared"), { recursive: true, force: true });
   for (const skillName of documentSkills) {
     const source = path.join(skillSourceRoot, skillName);
     const destination = path.join(skillsRoot, skillName);
@@ -109,7 +112,7 @@ try {
     nativeRuntime
   });
 
-  await rm(outputRoot, { recursive: true, force: true });
+  await removeDirectory(outputRoot);
   await rename(stagingRoot, outputRoot);
   // Keep the tracked directory marker so generated builds do not dirty the worktree.
   await writeFile(path.join(outputRoot, ".gitkeep"), "\n", "utf8");
@@ -127,8 +130,16 @@ try {
     skills: documentSkills
   }, null, 2)}\n`);
 } catch (error) {
-  await rm(stagingRoot, { recursive: true, force: true });
+  try {
+    await removeDirectory(stagingRoot);
+  } catch (cleanupError) {
+    process.stderr.write(`Could not clean failed runtime staging directory ${stagingRoot}: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}\n`);
+  }
   throw error;
+}
+
+async function removeDirectory(directory) {
+  await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
 }
 
 async function downloadAndVerify(url, expectedSha256, destination) {

@@ -14,6 +14,9 @@ import zipfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from _shared.libreoffice import run_libreoffice
+
 
 def fail(code: str, message: str) -> None:
     json.dump({"status": "error", "code": code, "message": message}, sys.stdout, ensure_ascii=False)
@@ -129,11 +132,12 @@ def render(file: Path, output_dir: Path) -> dict:
         environment = os.environ.copy()
         environment["HOME"] = profile
         environment["TMPDIR"] = profile
-        converted = subprocess.run([
+        command = [
             soffice, "--headless", "--nologo", "--nodefault", "--nolockcheck", "--norestore",
             f"-env:UserInstallation={Path(profile).as_uri()}",
             "--convert-to", "pdf", "--outdir", str(output_dir), str(file)
-        ], capture_output=True, text=True, env=environment, check=False)
+        ]
+        converted = run_libreoffice(command, profile=Path(profile), environment=environment)
     if converted.returncode != 0:
         fail("conversion_failed", (converted.stderr or converted.stdout or "LibreOffice failed").strip())
     pdf = output_dir / f"{file.stem}.pdf"

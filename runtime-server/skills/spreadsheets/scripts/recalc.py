@@ -13,6 +13,9 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from _shared.libreoffice import run_libreoffice
+
 
 FORMULA_ERRORS = ("#REF!", "#DIV/0!", "#VALUE!", "#NAME?", "#N/A", "#NUM!", "#NULL!")
 SUPPORTED = {".xlsx", ".xlsm", ".xltx", ".xltm"}
@@ -121,13 +124,7 @@ def recalculate(source: Path, output: Path) -> dict[str, Any]:
             str(output_dir),
             str(staged_input),
         ]
-        completed = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            env=environment,
-            check=False,
-        )
+        completed = run_libreoffice(command, profile=profile, environment=environment)
         if completed.returncode != 0:
             fail("conversion_failed", (completed.stderr or completed.stdout or "LibreOffice recalculation failed").strip())
         recalculated = output_dir / "source.xlsx"

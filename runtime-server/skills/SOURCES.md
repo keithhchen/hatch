@@ -37,6 +37,11 @@ the separately licensed OpenAI or Anthropic skill packages.
 - `presentations`: python-pptx/lxml + pptxgenjs
 - `spreadsheets`: openpyxl + exceljs (with LibreOffice recalculation)
 
+The internal `_shared/libreoffice.py` helper gives every Office conversion a
+unique profile, a bounded subprocess, and Windows-specific cleanup for
+orphaned `soffice.bin` children. It is bundled with the four Skills but is not
+itself exposed as a user-facing Skill.
+
 `requirements.lock` pins the direct Python dependency set used when the
 Desktop runtime is built. The Desktop Node toolchain has its own package-lock
 and is installed from the bundled Node executable. Desktop builds also include
