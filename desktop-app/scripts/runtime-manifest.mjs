@@ -123,7 +123,7 @@ const targets = {
       micromamba: {
         archive: "micromamba-win-64.exe",
         url: `${MICROMAMBA_BASE_URL}/micromamba-win-64.exe`,
-        sha256: "8a51f88ec02600488e20c3acd93fbd4da6c0f03fc499aa53fd234c6749b94b0"
+        sha256: "8a51f88ec02600488ea20c3acd93fbd4da6c0f03fc499aa53fd234c6749b94b0"
       }
     }
   },
