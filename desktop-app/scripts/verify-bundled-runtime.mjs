@@ -86,7 +86,10 @@ export async function verifyBundledRuntime({ root, searchRoot, reportFile = null
   });
   const libreOfficeReport = await run(nativeBinaries.soffice, ["--version"], {
     env: runtimeEnvironment,
-    timeout: 30_000,
+    // A newly copied LibreOffice app can spend a little longer on its first
+    // profile/bootstrap on macOS. Keep verification bounded, but do not turn
+    // that legitimate first launch into a false negative.
+    timeout: 120_000,
     maxBuffer: 8 * 1024 * 1024
   });
   const popplerReport = await run(nativeBinaries.pdftoppm, ["-v"], {

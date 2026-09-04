@@ -40,11 +40,12 @@ export async function prepareNativeRuntime({ stagingRoot, cacheRoot, target }) {
   );
   if (target.platform !== "win32") await chmod(micromambaPath, 0o755);
 
-  const libreOfficeExecutable = await installLibreOffice({
+  const libreOfficeInstall = await installLibreOffice({
     archivePath: libreOfficeArchivePath,
     destination: libreOfficeRoot,
     target
   });
+  const libreOfficeExecutable = libreOfficeInstall.executable;
   const popplerExecutablePaths = await installPoppler({
     micromambaPath,
     cacheRoot: nativeCacheRoot,
@@ -88,7 +89,8 @@ export async function prepareNativeRuntime({ stagingRoot, cacheRoot, target }) {
     binDirectory: nativeBin,
     binaries,
     pathEntries,
-    popplerPackages
+    popplerPackages,
+    libreOfficeTrimmed: libreOfficeInstall.trimmed
   };
 }
 
@@ -110,7 +112,8 @@ async function installLibreOffice({ archivePath, destination, target }) {
       const executable = path.join(copiedApp, "Contents", "MacOS", "soffice");
       await assertFile(executable, "LibreOffice soffice executable");
       await chmod(executable, 0o755);
-      return executable;
+      const trimmed = await trimLibreOfficeForHeadless({ destination, executable, target });
+      return { executable, trimmed };
     } finally {
       if (attached) {
         await run("hdiutil", ["detach", mountPoint, "-force"], { maxBuffer: 8 * 1024 * 1024 }).catch(() => {});
@@ -137,7 +140,50 @@ async function installLibreOffice({ archivePath, destination, target }) {
   // parent waiting on a GUI process handle.
   const executable = await locateFile(destination, "soffice.com");
   if (!executable) throw new Error(`LibreOffice MSI ${path.basename(archivePath)} did not contain the required soffice.com console launcher.`);
-  return executable;
+  const trimmed = await trimLibreOfficeForHeadless({ destination, executable, target });
+  return { executable, trimmed };
+}
+
+const HEADLESS_UNUSED_LIBREOFFICE_DIRECTORIES = [
+  "help",
+  "gallery",
+  "wizards",
+  "template",
+  "java",
+  "extensions"
+];
+
+/**
+ * Keep the LibreOffice engine, filters, fonts, registry, and configuration,
+ * while dropping content that is only used by the interactive desktop UI.
+ * The full upstream installer is still the source of truth; this pruning is
+ * applied only to the generated application staging directory. It keeps the
+ * bundled headless runtime below Windows NSIS's large-data-block limit.
+ */
+async function trimLibreOfficeForHeadless({ destination, executable, target }) {
+  const roots = target.platform === "darwin"
+    ? [path.join(path.dirname(path.dirname(executable)), "Resources")]
+    : [
+        destination,
+        path.dirname(path.dirname(executable)),
+        path.join(destination, "share"),
+        path.join(path.dirname(path.dirname(executable)), "share")
+      ];
+  const seen = new Set();
+  const trimmed = [];
+  for (const root of roots) {
+    const normalizedRoot = path.normalize(root);
+    if (seen.has(normalizedRoot)) continue;
+    seen.add(normalizedRoot);
+    for (const directory of HEADLESS_UNUSED_LIBREOFFICE_DIRECTORIES) {
+      const candidate = path.join(root, directory);
+      const metadata = await stat(candidate).catch(() => undefined);
+      if (!metadata?.isDirectory()) continue;
+      await rm(candidate, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+      trimmed.push(path.relative(destination, candidate).split(path.sep).join("/"));
+    }
+  }
+  return trimmed;
 }
 
 async function installPoppler({ micromambaPath, cacheRoot, destination, target }) {

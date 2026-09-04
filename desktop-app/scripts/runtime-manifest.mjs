@@ -1,4 +1,4 @@
-export const DESKTOP_RUNTIME_VERSION = "2026.09.04.4";
+export const DESKTOP_RUNTIME_VERSION = "2026.09.04.5";
 export const NODE_VERSION = "22.23.2";
 export const PYTHON_VERSION = "3.12.14";
 export const PYTHON_BUILD_TAG = "20260901";

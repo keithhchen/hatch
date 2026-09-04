@@ -319,7 +319,7 @@ async function verifyRuntimeSmoke({
   };
   await run(nativeRuntime.binaries.soffice, ["--version"], {
     env: nodeEnvironment,
-    timeout: 30_000,
+    timeout: 120_000,
     maxBuffer: 8 * 1024 * 1024
   });
   await run(nativeRuntime.binaries.pdftoppm, ["-v"], {
@@ -490,7 +490,8 @@ async function createRuntimeManifest({
           url: target.native.libreoffice.url,
           sha256: `sha256:${target.native.libreoffice.sha256}`
         },
-        license: target.native.libreoffice.license
+        license: target.native.libreoffice.license,
+        headless_pruned_directories: nativeRuntime.libreOfficeTrimmed
       },
       poppler: {
         version: POPPLER_VERSION,

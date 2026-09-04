@@ -45,8 +45,12 @@ itself exposed as a user-facing Skill.
 `requirements.lock` pins the direct Python dependency set used when the
 Desktop runtime is built. The Desktop Node toolchain has its own package-lock
 and is installed from the bundled Node executable. Desktop builds also include
-fixed-version LibreOffice and Poppler native engines; micromamba is used only
-at build time to resolve and copy the Poppler environment and is not shipped.
+fixed-version LibreOffice and Poppler native engines; the generated bundle
+removes only LibreOffice's interactive help/gallery/wizard/template/Java/
+extension payloads, while retaining the headless Office engine, filters,
+configuration, and fonts used for real read/write/conversion/rendering.
+micromamba is used only at build time to resolve and copy the Poppler
+environment and is not shipped.
 
 The legal skills use the same Agent Skills `SKILL.md` format. Their workflow
 may expect local playbook context such as `legal.local.md` or optional
