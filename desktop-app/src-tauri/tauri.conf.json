@@ -49,6 +49,11 @@
     },
     "macOS": {
       "infoPlist": "Info.plist"
+    },
+    "windows": {
+      "nsis": {
+        "compression": "zlib"
+      }
     }
   }
 }

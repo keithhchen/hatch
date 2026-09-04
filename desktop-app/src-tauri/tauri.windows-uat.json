@@ -2,7 +2,7 @@
   "bundle": {
     "windows": {
       "nsis": {
-        "compression": "none"
+        "compression": "zlib"
       }
     }
   }
