@@ -29,7 +29,7 @@ Source: https://github.com/anthropics/knowledge-work-plugins/tree/main/legal/ski
 
 The four document Skills below are maintained in this repository. Their
 scripts are original Hatch adapters around public Python/Node libraries and
-the optional LibreOffice/Poppler command-line tools; they are not copied from
+the bundled LibreOffice/Poppler command-line tools; they are not copied from
 the separately licensed OpenAI or Anthropic skill packages.
 
 - `documents`: python-docx/lxml + docx (with package-level tracked-change acceptance)
@@ -39,7 +39,9 @@ the separately licensed OpenAI or Anthropic skill packages.
 
 `requirements.lock` pins the direct Python dependency set used when the
 Desktop runtime is built. The Desktop Node toolchain has its own package-lock
-and is installed from the bundled Node executable.
+and is installed from the bundled Node executable. Desktop builds also include
+fixed-version LibreOffice and Poppler native engines; micromamba is used only
+at build time to resolve and copy the Poppler environment and is not shipped.
 
 The legal skills use the same Agent Skills `SKILL.md` format. Their workflow
 may expect local playbook context such as `legal.local.md` or optional

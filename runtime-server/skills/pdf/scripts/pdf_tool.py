@@ -18,6 +18,18 @@ def fail(code: str, message: str) -> None:
     raise SystemExit(2)
 
 
+def find_pdftoppm() -> str:
+    configured = os.environ.get("HATCH_PDFTOPPM", "").strip()
+    if configured:
+        if Path(configured).is_file():
+            return configured
+        fail("dependency_unavailable", f"HATCH_PDFTOPPM does not point to an executable: {configured}")
+    executable = shutil.which("pdftoppm")
+    if not executable:
+        fail("dependency_unavailable", "Poppler pdftoppm is required for page-image rendering")
+    return executable
+
+
 def load_reader(file: Path):
     try:
         from pypdf import PdfReader
@@ -286,9 +298,7 @@ def create(output: Path, text: str, title: str) -> dict:
 
 
 def render(file: Path, output_dir: Path, dpi: int) -> dict:
-    executable = shutil.which("pdftoppm")
-    if not executable:
-        fail("dependency_unavailable", "Poppler pdftoppm is required for page-image rendering")
+    executable = find_pdftoppm()
     output_dir.mkdir(parents=True, exist_ok=True)
     prefix = output_dir / "page"
     completed = subprocess.run(

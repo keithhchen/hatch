@@ -26,7 +26,7 @@ The Desktop runtime exposes the Skill bundle at `$HATCH_DOCUMENT_SKILLS_ROOT/pre
 - `$HATCH_NODE .../scripts/create_pptx.mjs --slides-file slides.json --output OUTPUT.pptx`
 - `$HATCH_NODE .../scripts/read_asset.mjs --input UPLOAD.pptx --max-chars 200000` is the Runtime-only reader for a chat upload.
 
-If LibreOffice or Poppler is not available, scripts return the real missing-dependency state. Do not invent a preview or claim the deck is visually correct.
+The Desktop runtime bundles LibreOffice and Poppler. If either bundled native dependency is missing or fails, scripts return the real missing-dependency/conversion state. Do not invent a preview or claim the deck is visually correct.
 
 ## Authoring and review rules
 

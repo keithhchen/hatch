@@ -19,6 +19,18 @@ def fail(code: str, message: str) -> None:
     raise SystemExit(2)
 
 
+def find_executable(environment_name: str, names: tuple[str, ...], required: bool = True) -> str | None:
+    configured = os.environ.get(environment_name, "").strip()
+    if configured:
+        if Path(configured).is_file():
+            return configured
+        fail("dependency_unavailable", f"{environment_name} does not point to an executable: {configured}")
+    executable = next((shutil.which(name) for name in names if shutil.which(name)), None)
+    if not executable and required:
+        fail("dependency_unavailable", f"{names[0]} is required to render DOCX")
+    return executable
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Render a DOCX for visual QA.")
     parser.add_argument("input", type=Path)
@@ -27,9 +39,7 @@ def main() -> None:
     args = parser.parse_args()
     if not args.input.is_file():
         fail("input_not_found", f"DOCX does not exist: {args.input}")
-    soffice = shutil.which("soffice") or shutil.which("libreoffice")
-    if not soffice:
-        fail("dependency_unavailable", "LibreOffice (soffice) is required to render DOCX")
+    soffice = find_executable("HATCH_SOFFICE", ("soffice", "libreoffice"))
     args.output_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="hatch-docx-profile-") as profile:
         environment = os.environ.copy()
@@ -47,7 +57,7 @@ def main() -> None:
     if not pdf.is_file():
         fail("conversion_failed", f"LibreOffice did not produce {pdf}")
     pages: list[str] = []
-    pdftoppm = shutil.which("pdftoppm")
+    pdftoppm = find_executable("HATCH_PDFTOPPM", ("pdftoppm",), required=False)
     if not args.pdf_only and pdftoppm:
         prefix = args.output_dir / "page"
         render = subprocess.run(

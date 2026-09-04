@@ -1,7 +1,125 @@
 use crate::tools::ShellExecOutput;
 use crate::{LocalRunnerError, Result};
-use std::path::Path;
+use serde::Deserialize;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
+
+#[derive(Debug, Deserialize)]
+struct RuntimeManifest {
+    native: Option<RuntimeNativeManifest>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RuntimeNativeManifest {
+    root: String,
+    bin_dir: String,
+    binaries: RuntimeNativeBinaries,
+}
+
+#[derive(Debug, Deserialize)]
+struct RuntimeNativeBinaries {
+    soffice: String,
+    pdftoppm: String,
+    pdfinfo: String,
+}
+
+#[derive(Debug, Clone)]
+struct NativeRuntimePaths {
+    root: PathBuf,
+    bin_dir: PathBuf,
+    soffice: PathBuf,
+    pdftoppm: PathBuf,
+    pdfinfo: PathBuf,
+}
+
+fn bundled_native_paths(runtime_root: &Path) -> Result<NativeRuntimePaths> {
+    let manifest_path = runtime_root.join("manifest.json");
+    let manifest_text = fs::read_to_string(&manifest_path).map_err(|error| {
+        LocalRunnerError::ShellSandboxInitialization(format!(
+            "could not read the bundled runtime manifest {}: {error}",
+            manifest_path.display()
+        ))
+    })?;
+    let manifest: RuntimeManifest = serde_json::from_str(&manifest_text).map_err(|error| {
+        LocalRunnerError::ShellSandboxInitialization(format!(
+            "could not parse the bundled runtime manifest {}: {error}",
+            manifest_path.display()
+        ))
+    })?;
+    let native = manifest.native.ok_or_else(|| {
+        LocalRunnerError::ShellSandboxInitialization(
+            "the bundled runtime manifest has no native document runtime".into(),
+        )
+    })?;
+    let root = resolve_runtime_path(runtime_root, &native.root, "native runtime root")?;
+    let bin_dir = resolve_runtime_path(
+        runtime_root,
+        &native.bin_dir,
+        "native runtime bin directory",
+    )?;
+    if !root.is_dir() || !bin_dir.is_dir() {
+        return Err(LocalRunnerError::ShellSandboxInitialization(
+            "the bundled native document runtime is incomplete".into(),
+        ));
+    }
+    let soffice = resolve_runtime_path(
+        runtime_root,
+        &native.binaries.soffice,
+        "native soffice executable",
+    )?;
+    let pdftoppm = resolve_runtime_path(
+        runtime_root,
+        &native.binaries.pdftoppm,
+        "native pdftoppm executable",
+    )?;
+    let pdfinfo = resolve_runtime_path(
+        runtime_root,
+        &native.binaries.pdfinfo,
+        "native pdfinfo executable",
+    )?;
+    for (label, path) in [
+        ("native soffice executable", &soffice),
+        ("native pdftoppm executable", &pdftoppm),
+        ("native pdfinfo executable", &pdfinfo),
+    ] {
+        if !path.is_file() {
+            return Err(LocalRunnerError::ShellSandboxInitialization(format!(
+                "the bundled runtime is incomplete; missing {label} {}",
+                path.display()
+            )));
+        }
+    }
+    Ok(NativeRuntimePaths {
+        root,
+        bin_dir,
+        soffice,
+        pdftoppm,
+        pdfinfo,
+    })
+}
+
+fn resolve_runtime_path(runtime_root: &Path, value: &str, label: &str) -> Result<PathBuf> {
+    let relative = Path::new(value);
+    if value.is_empty() || relative.is_absolute() {
+        return Err(LocalRunnerError::ShellSandboxInitialization(format!(
+            "{label} must be a relative path in the bundled runtime manifest"
+        )));
+    }
+    let candidate = runtime_root.join(relative);
+    let canonical = candidate.canonicalize().map_err(|error| {
+        LocalRunnerError::ShellSandboxInitialization(format!(
+            "could not resolve {label} {}: {error}",
+            candidate.display()
+        ))
+    })?;
+    if !canonical.starts_with(runtime_root) {
+        return Err(LocalRunnerError::ShellSandboxInitialization(format!(
+            "{label} escapes the bundled runtime root"
+        )));
+    }
+    Ok(canonical)
+}
 
 pub(crate) fn execute(
     workspace: &Path,
@@ -104,7 +222,7 @@ mod platform {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         if let Some(runtime_root) = runtime_root.as_deref() {
-            configure_runtime_environment(&mut shell, runtime_root);
+            configure_runtime_environment(&mut shell, runtime_root)?;
         }
         let mut child = shell.spawn().map_err(|error| {
             LocalRunnerError::ShellSandboxUnavailable(format!(
@@ -208,19 +326,47 @@ mod platform {
                 )));
             }
         }
+        let _ = bundled_native_paths(&canonical)?;
         Ok(canonical)
     }
 
-    fn configure_runtime_environment(command: &mut Command, runtime_root: &Path) {
+    fn configure_runtime_environment(command: &mut Command, runtime_root: &Path) -> Result<()> {
         let node = runtime_root.join("node/node.exe");
         let python = runtime_root.join("python/python.exe");
         let node_modules = runtime_root.join("node-toolchain/node_modules");
         let python_packages = runtime_root.join("python-packages");
         let skills = runtime_root.join("skills");
+        let native = bundled_native_paths(runtime_root)?;
         let mut path_entries = vec![
             runtime_root.join("node").into_os_string(),
             runtime_root.join("python").into_os_string(),
             runtime_root.join("bin").into_os_string(),
+            native.bin_dir.clone().into_os_string(),
+            native.root.join("poppler").join("bin").into_os_string(),
+            native
+                .root
+                .join("poppler")
+                .join("Library")
+                .join("bin")
+                .into_os_string(),
+            native
+                .soffice
+                .parent()
+                .unwrap_or(&native.root)
+                .to_path_buf()
+                .into_os_string(),
+            native
+                .pdftoppm
+                .parent()
+                .unwrap_or(&native.root)
+                .to_path_buf()
+                .into_os_string(),
+            native
+                .pdfinfo
+                .parent()
+                .unwrap_or(&native.root)
+                .to_path_buf()
+                .into_os_string(),
         ];
         if let Some(existing) = std::env::var_os("PATH") {
             path_entries.extend(existing.to_string_lossy().split(';').map(OsString::from));
@@ -235,12 +381,18 @@ mod platform {
         command
             .env("PATH", path)
             .env("HATCH_RUNTIME_ROOT", runtime_root)
+            .env("HATCH_NATIVE_RUNTIME_ROOT", &native.root)
+            .env("HATCH_NATIVE_BIN_DIR", &native.bin_dir)
+            .env("HATCH_SOFFICE", &native.soffice)
+            .env("HATCH_PDFTOPPM", &native.pdftoppm)
+            .env("HATCH_PDFINFO", &native.pdfinfo)
             .env("HATCH_NODE", &node)
             .env("HATCH_PYTHON", &python)
             .env("HATCH_NODE_MODULES", &node_modules)
             .env("HATCH_DOCUMENT_SKILLS_ROOT", &skills)
             .env("PYTHONPATH", &python_packages)
             .env("NODE_PATH", &node_modules);
+        Ok(())
     }
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -654,6 +806,7 @@ mod platform {
                 )));
             }
         }
+        let _ = bundled_native_paths(&canonical)?;
         Ok(canonical)
     }
 
@@ -836,6 +989,7 @@ mod platform {
             let node_modules = runtime_root.join("node-toolchain/node_modules");
             let python_packages = runtime_root.join("python-packages");
             let skills = runtime_root.join("skills");
+            let native = bundled_native_paths(runtime_root)?;
             environment.extend([
                 environment_path(
                     "PATH",
@@ -844,11 +998,34 @@ mod platform {
                         &[
                             runtime_root.join("node/bin"),
                             runtime_root.join("python/bin"),
+                            native.bin_dir.clone(),
+                            native.root.join("poppler").join("bin"),
+                            native.root.join("poppler").join("Library").join("bin"),
+                            native
+                                .soffice
+                                .parent()
+                                .unwrap_or(&native.root)
+                                .to_path_buf(),
+                            native
+                                .pdftoppm
+                                .parent()
+                                .unwrap_or(&native.root)
+                                .to_path_buf(),
+                            native
+                                .pdfinfo
+                                .parent()
+                                .unwrap_or(&native.root)
+                                .to_path_buf(),
                             runtime_root.join("bin"),
                         ],
                     ),
                 ),
                 environment_path("HATCH_RUNTIME_ROOT", runtime_root),
+                environment_path("HATCH_NATIVE_RUNTIME_ROOT", &native.root),
+                environment_path("HATCH_NATIVE_BIN_DIR", &native.bin_dir),
+                environment_path("HATCH_SOFFICE", &native.soffice),
+                environment_path("HATCH_PDFTOPPM", &native.pdftoppm),
+                environment_path("HATCH_PDFINFO", &native.pdfinfo),
                 environment_path("HATCH_NODE", &node),
                 environment_path("HATCH_PYTHON", &python),
                 environment_path("HATCH_NODE_MODULES", &node_modules),

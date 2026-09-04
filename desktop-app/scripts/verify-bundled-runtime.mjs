@@ -6,11 +6,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-import { currentTarget } from "./runtime-manifest.mjs";
+import { currentTarget, targetForKey } from "./runtime-manifest.mjs";
 
 const execFileAsync = promisify(execFile);
 
-export async function verifyBundledRuntime({ root, searchRoot, reportFile = null, environment = process.env }) {
+export async function verifyBundledRuntime({ root, searchRoot, reportFile = null, targetKey = null, environment = process.env }) {
   const runtimeRoot = path.resolve(root || await findRuntimeRoot(searchRoot));
   const manifestPath = path.join(runtimeRoot, "manifest.json");
   let manifest;
@@ -27,18 +27,50 @@ export async function verifyBundledRuntime({ root, searchRoot, reportFile = null
   const pythonExecutable = resolveRelative(runtimeRoot, manifest.python?.executable, "Python executable");
   const pythonPackages = resolveRelative(runtimeRoot, manifest.python?.package_root, "Python package root");
   const nodeModules = resolveRelative(runtimeRoot, manifest.node?.module_root, "Node module root");
+  const nativeRoot = resolveRelative(runtimeRoot, manifest.native?.root, "native runtime root");
+  const nativeBinDirectory = resolveRelative(runtimeRoot, manifest.native?.bin_dir, "native runtime bin directory");
+  const nativeBinaries = Object.fromEntries(["soffice", "pdftoppm", "pdfinfo"].map((name) => [
+    name,
+    resolveRelative(runtimeRoot, manifest.native?.binaries?.[name], `native ${name} executable`)
+  ]));
   await assertFile(nodeExecutable, "Node executable");
   await assertFile(pythonExecutable, "Python executable");
   await assertDirectory(pythonPackages, "Python package root");
   await assertDirectory(nodeModules, "Node module root");
-
-  const target = currentTarget();
-  if (manifest.target?.key !== target.key) {
-    throw new Error(`Bundled runtime target ${manifest.target?.key ?? "<missing>"} does not match this build host ${target.key}.`);
+  await assertDirectory(nativeRoot, "native runtime root");
+  await assertDirectory(nativeBinDirectory, "native runtime bin directory");
+  await assertFile(path.join(nativeRoot, "manifest.json"), "native runtime manifest");
+  for (const [name, executable] of Object.entries(nativeBinaries)) {
+    await assertFile(executable, `native ${name} executable`);
   }
-  const versionReport = await run(nodeExecutable, ["--version"], { env: environment });
+
+  const expectedTarget = targetKey ? targetForKey(targetKey) : currentTarget();
+  if (manifest.target?.key !== expectedTarget.key) {
+    throw new Error(`Bundled runtime target ${manifest.target?.key ?? "<missing>"} does not match expected target ${expectedTarget.key}.`);
+  }
+  const runtimeEnvironment = {
+    ...environment,
+    HATCH_RUNTIME_ROOT: runtimeRoot,
+    HATCH_NATIVE_RUNTIME_ROOT: nativeRoot,
+    HATCH_NATIVE_BIN_DIR: nativeBinDirectory,
+    HATCH_SOFFICE: nativeBinaries.soffice,
+    HATCH_PDFTOPPM: nativeBinaries.pdftoppm,
+    HATCH_PDFINFO: nativeBinaries.pdfinfo,
+    PATH: [
+      nativeBinDirectory,
+      path.join(nativeRoot, "poppler", "bin"),
+      path.join(nativeRoot, "poppler", "Library", "bin"),
+      path.dirname(nativeBinaries.soffice),
+      path.dirname(nativeBinaries.pdftoppm),
+      path.dirname(nativeBinaries.pdfinfo),
+      path.dirname(nodeExecutable),
+      path.dirname(pythonExecutable),
+      environment.PATH
+    ].filter(Boolean).join(path.delimiter)
+  };
+  const versionReport = await run(nodeExecutable, ["--version"], { env: runtimeEnvironment });
   const pythonReport = await run(pythonExecutable, ["--version"], {
-    env: { ...environment, PYTHONNOUSERSITE: "1", PYTHONPATH: pythonPackages }
+    env: { ...runtimeEnvironment, PYTHONNOUSERSITE: "1", PYTHONPATH: pythonPackages }
   });
   await run(pythonExecutable, ["-c", [
     "import docx",
@@ -50,8 +82,26 @@ export async function verifyBundledRuntime({ root, searchRoot, reportFile = null
     "import pypdf",
     "import reportlab"
   ].join("; ")], {
-    env: { ...environment, PYTHONNOUSERSITE: "1", PYTHONPATH: pythonPackages }
+    env: { ...runtimeEnvironment, PYTHONNOUSERSITE: "1", PYTHONPATH: pythonPackages }
   });
+  const libreOfficeReport = await run(nativeBinaries.soffice, ["--version"], {
+    env: runtimeEnvironment,
+    timeout: 30_000,
+    maxBuffer: 8 * 1024 * 1024
+  });
+  const popplerReport = await run(nativeBinaries.pdftoppm, ["-v"], {
+    env: runtimeEnvironment,
+    timeout: 30_000,
+    maxBuffer: 8 * 1024 * 1024
+  });
+  const pdfInfoReport = await run(nativeBinaries.pdfinfo, ["-v"], {
+    env: runtimeEnvironment,
+    timeout: 30_000,
+    maxBuffer: 8 * 1024 * 1024
+  });
+  assertVersionOutput(libreOfficeReport, manifest.native?.libreoffice?.version, "LibreOffice");
+  assertVersionOutput(popplerReport, manifest.native?.poppler?.version, "Poppler pdftoppm");
+  assertVersionOutput(pdfInfoReport, manifest.native?.poppler?.version, "Poppler pdfinfo");
   await run(nodeExecutable, ["--input-type=module", "-e", [
     "await import('docx')",
     "await import('exceljs')",
@@ -63,7 +113,7 @@ export async function verifyBundledRuntime({ root, searchRoot, reportFile = null
     "await import('xlsx')"
   ].join("; ")], {
     cwd: path.dirname(nodeModules),
-    env: { ...environment, NODE_PATH: nodeModules }
+    env: { ...runtimeEnvironment, NODE_PATH: nodeModules }
   });
   const nodeVersion = versionReport.stdout.trim() || versionReport.stderr.trim();
   const pythonVersion = pythonReport.stdout.trim() || pythonReport.stderr.trim();
@@ -94,9 +144,16 @@ export async function verifyBundledRuntime({ root, searchRoot, reportFile = null
     verified: true,
     root: runtimeRoot,
     target: manifest.target,
-    expected_target: target.key,
+    expected_target: expectedTarget.key,
     node: { version: versionReport.stdout.trim() || versionReport.stderr.trim() },
     python: { version: pythonReport.stdout.trim() || pythonReport.stderr.trim() },
+    native: {
+      root: nativeRoot,
+      binaries: nativeBinaries,
+      libreoffice: libreOfficeReport.stdout.trim() || libreOfficeReport.stderr.trim(),
+      pdftoppm: popplerReport.stdout.trim() || popplerReport.stderr.trim(),
+      pdfinfo: pdfInfoReport.stdout.trim() || pdfInfoReport.stderr.trim()
+    },
     skills: checkedSkills.sort()
   };
   if (reportFile) await writeFile(reportFile, `${JSON.stringify(result, null, 2)}\n`, "utf8");
@@ -149,6 +206,13 @@ async function assertDirectory(directory, label) {
   if (!metadata?.isDirectory()) throw new Error(`${label} is missing: ${directory}`);
 }
 
+function assertVersionOutput(result, expectedVersion, label) {
+  const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+  if (typeof expectedVersion !== "string" || !expectedVersion || !output.includes(expectedVersion)) {
+    throw new Error(`${label} version output did not contain manifest version ${expectedVersion ?? "<missing>"}. Output: ${output.trim()}`);
+  }
+}
+
 async function run(executable, args, options = {}) {
   try {
     return await execFileAsync(executable, args, options);
@@ -174,21 +238,22 @@ function readCliArguments(argv) {
     if (!value || values.has(name)) throw new Error(`Expected one value for --${name}.`);
     values.set(name, value);
   }
-  const accepted = new Set(["root", "search-root", "report"]);
+  const accepted = new Set(["root", "search-root", "report", "target"]);
   for (const name of values.keys()) {
     if (!accepted.has(name)) throw new Error(`Unknown argument --${name}.`);
   }
   return {
     root: values.get("root"),
     searchRoot: values.get("search-root"),
-    reportFile: values.get("report") ?? null
+    reportFile: values.get("report") ?? null,
+    targetKey: values.get("target") ?? null
   };
 }
 
 async function main() {
   const options = readCliArguments(process.argv.slice(2));
   if (options.help) {
-    process.stdout.write("Usage: node verify-bundled-runtime.mjs --root <runtime> [--report <file>]\n");
+    process.stdout.write("Usage: node verify-bundled-runtime.mjs --root <runtime> [--target <runtime-target>] [--report <file>]\n");
     return;
   }
   const result = await verifyBundledRuntime(options);

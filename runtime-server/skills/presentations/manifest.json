@@ -11,6 +11,6 @@
     "render": "scripts/pptx_tool.py render",
     "create": "scripts/create_pptx.mjs"
   },
-  "runtime": {"python": ["lxml", "python-pptx"], "node": ["pptxgenjs"]},
-  "visual_qa": {"renderer": "LibreOffice + Poppler when installed", "required_for_layout_changes": true}
+  "runtime": {"python": ["lxml", "python-pptx"], "node": ["pptxgenjs"], "native": ["libreoffice", "poppler"]},
+  "visual_qa": {"renderer": "bundled LibreOffice + Poppler", "required_for_layout_changes": true}
 }

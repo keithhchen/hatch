@@ -19,6 +19,18 @@ def fail(code: str, message: str) -> None:
     raise SystemExit(2)
 
 
+def find_soffice() -> str:
+    configured = os.environ.get("HATCH_SOFFICE", "").strip()
+    if configured:
+        if Path(configured).is_file():
+            return configured
+        fail("dependency_unavailable", f"HATCH_SOFFICE does not point to an executable: {configured}")
+    executable = shutil.which("soffice") or shutil.which("libreoffice")
+    if not executable:
+        fail("dependency_unavailable", "LibreOffice (soffice) is required for Office conversion")
+    return executable
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Convert an Office file using LibreOffice.")
     parser.add_argument("input", type=Path)
@@ -30,9 +42,7 @@ def main() -> None:
     expected = args.output_dir / f"{args.input.stem}.{args.format}"
     if args.input.resolve() == expected.resolve():
         fail("invalid_argument", "--output-dir would overwrite the input; choose a separate output directory")
-    executable = shutil.which("soffice") or shutil.which("libreoffice")
-    if not executable:
-        fail("dependency_unavailable", "LibreOffice (soffice) is required for Office conversion")
+    executable = find_soffice()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="hatch-office-profile-") as profile:
         environment = os.environ.copy()

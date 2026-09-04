@@ -2315,7 +2315,7 @@ fn bundled_runtime_root(app: &AppHandle) -> Result<PathBuf, String> {
         }
     }
     Err(format!(
-        "desktop_runtime_missing: bundled Python/Node runtime was not found at {}",
+        "desktop_runtime_missing: bundled application runtime was not found at {}",
         runtime_root.display()
     ))
 }

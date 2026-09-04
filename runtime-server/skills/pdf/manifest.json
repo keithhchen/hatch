@@ -13,6 +13,6 @@
     "create": "scripts/create_pdf.mjs",
     "render": "scripts/pdf_tool.py render"
   },
-  "runtime": {"python": ["pdfplumber", "pypdf", "reportlab"], "node": ["pdf-lib"]},
-  "visual_qa": {"renderer": "Poppler pdftoppm when installed", "required_for_layout_changes": true}
+  "runtime": {"python": ["pdfplumber", "pypdf", "reportlab"], "node": ["pdf-lib"], "native": ["poppler"]},
+  "visual_qa": {"renderer": "bundled Poppler pdftoppm", "required_for_layout_changes": true}
 }

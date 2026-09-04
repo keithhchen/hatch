@@ -21,6 +21,18 @@ def fail(code: str, message: str) -> None:
     raise SystemExit(2)
 
 
+def find_executable(environment_name: str, names: tuple[str, ...], required: bool = True) -> str | None:
+    configured = os.environ.get(environment_name, "").strip()
+    if configured:
+        if Path(configured).is_file():
+            return configured
+        fail("dependency_unavailable", f"{environment_name} does not point to an executable: {configured}")
+    executable = next((shutil.which(name) for name in names if shutil.which(name)), None)
+    if not executable and required:
+        fail("dependency_unavailable", f"{names[0]} is required to render PPTX")
+    return executable
+
+
 def ensure_input(file: Path) -> None:
     if not file.is_file():
         fail("input_not_found", f"Presentation does not exist: {file}")
@@ -111,9 +123,7 @@ def replace_text(file: Path, output: Path, find: str, replacement: str) -> dict:
 
 
 def render(file: Path, output_dir: Path) -> dict:
-    soffice = shutil.which("soffice") or shutil.which("libreoffice")
-    if not soffice:
-        fail("dependency_unavailable", "LibreOffice (soffice) is required to render PPTX")
+    soffice = find_executable("HATCH_SOFFICE", ("soffice", "libreoffice"))
     output_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="hatch-pptx-profile-") as profile:
         environment = os.environ.copy()
@@ -129,7 +139,7 @@ def render(file: Path, output_dir: Path) -> dict:
     pdf = output_dir / f"{file.stem}.pdf"
     if not pdf.is_file():
         fail("conversion_failed", f"LibreOffice did not produce {pdf}")
-    pdftoppm = shutil.which("pdftoppm")
+    pdftoppm = find_executable("HATCH_PDFTOPPM", ("pdftoppm",), required=False)
     pages: list[str] = []
     if pdftoppm:
         result = subprocess.run([pdftoppm, "-png", str(pdf), str(output_dir / "slide")], capture_output=True, text=True, check=False)

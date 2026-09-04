@@ -13,6 +13,6 @@
     "render": "scripts/xlsx_tool.py render",
     "create": "scripts/create_xlsx.mjs"
   },
-  "runtime": {"python": ["openpyxl"], "node": ["exceljs"]},
-  "visual_qa": {"renderer": "LibreOffice when installed", "required_for_layout_changes": true}
+  "runtime": {"python": ["openpyxl"], "node": ["exceljs"], "native": ["libreoffice", "poppler"]},
+  "visual_qa": {"renderer": "bundled LibreOffice + Poppler", "required_for_layout_changes": true}
 }

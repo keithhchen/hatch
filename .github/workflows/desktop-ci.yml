@@ -134,11 +134,11 @@ jobs:
       - name: Install renderer dependencies
         working-directory: desktop-app
         run: npm ci
-      - name: Cache bundled Python and Node runtimes
+      - name: Cache bundled application runtimes
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/hatch-desktop-runtime
-          key: hatch-desktop-runtime-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop-app/scripts/runtime-manifest.mjs', 'runtime-server/skills/requirements.lock', 'desktop-app/runtime/node-toolchain/package-lock.json') }}
+          key: hatch-desktop-runtime-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop-app/scripts/runtime-manifest.mjs', 'desktop-app/scripts/native-runtime.mjs', 'runtime-server/skills/requirements.lock', 'desktop-app/runtime/node-toolchain/package-lock.json') }}
       - name: Check Rust formatting
         run: |
           cargo fmt --manifest-path local-runner/Cargo.toml -- --check
@@ -161,7 +161,7 @@ jobs:
           HATCH_PERSISTENT_SESSION: "0"
           HATCH_RUNTIME_CACHE_DIR: ${{ runner.temp }}/hatch-desktop-runtime
         run: npm run build:dmg:ci
-      - name: Verify bundled Python and Node runtime in macOS app
+      - name: Verify bundled application runtime in macOS app
         working-directory: .
         run: |
           mkdir -p artifacts/desktop-uat
@@ -211,11 +211,11 @@ jobs:
       - name: Install renderer dependencies
         working-directory: desktop-app
         run: npm ci
-      - name: Cache bundled Python and Node runtimes
+      - name: Cache bundled application runtimes
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/hatch-desktop-runtime
-          key: hatch-desktop-runtime-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop-app/scripts/runtime-manifest.mjs', 'runtime-server/skills/requirements.lock', 'desktop-app/runtime/node-toolchain/package-lock.json') }}
+          key: hatch-desktop-runtime-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('desktop-app/scripts/runtime-manifest.mjs', 'desktop-app/scripts/native-runtime.mjs', 'runtime-server/skills/requirements.lock', 'desktop-app/runtime/node-toolchain/package-lock.json') }}
       - name: Test renderer and web build on Windows
         working-directory: desktop-app
         run: |
@@ -233,7 +233,7 @@ jobs:
           HATCH_PERSISTENT_SESSION: "0"
           HATCH_RUNTIME_CACHE_DIR: ${{ runner.temp }}/hatch-desktop-runtime
         run: npx tauri build --debug --bundles nsis
-      - name: Verify bundled Python and Node runtime in Windows bundle
+      - name: Verify bundled application runtime in Windows bundle
         shell: bash
         run: |
           mkdir -p artifacts/desktop-uat

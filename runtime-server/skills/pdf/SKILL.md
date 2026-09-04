@@ -12,8 +12,8 @@ This Skill owns `.pdf` work. PDF bytes, text, annotations, links, and attachment
 1. Load this complete Skill before any PDF `file_read` or edit. A chat PDF upload also implicitly activates this complete Skill before its bounded text projection is prepared. `file_read` is a bounded transport/preview operation; semantic extraction and PDF mutations belong to this Skill.
 2. Use `$HATCH_PYTHON` with `pdf_tool.py` for inspection and text extraction. Always inspect page count, encryption, metadata, and page boxes before editing an existing file.
 3. Create or modify PDFs with the Skill scripts and `$HATCH_PYTHON` or `$HATCH_NODE` absolute paths. Do not use generic `file_write`/`file_patch` on a PDF and do not write a text file with a `.pdf` suffix.
-4. For layout-sensitive work, render every page with `pdf_tool.py render` (Poppler `pdftoppm` when available) and inspect the resulting page images. Check clipping, overlap, margins, font substitution, broken glyphs, images, tables, page order, and annotations.
-5. Reopen the final PDF with `pdf_tool.py inspect` and `pdf_tool.py read`, then report the actual Workspace-relative artifact path. If rendering is unavailable, report that fact and do not claim visual parity.
+4. For layout-sensitive work, render every page with `pdf_tool.py render` using the bundled Poppler `pdftoppm`, then inspect the resulting page images. Check clipping, overlap, margins, font substitution, broken glyphs, images, tables, page order, and annotations.
+5. Reopen the final PDF with `pdf_tool.py inspect` and `pdf_tool.py read`, then report the actual Workspace-relative artifact path. If the bundled renderer is unavailable, report that fact and do not claim visual parity.
 
 ## Bundled entrypoints
 

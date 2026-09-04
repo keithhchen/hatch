@@ -155,6 +155,7 @@ async function readBundledRuntimeReport(file) {
     expected_target: report.expected_target,
     node: report.node,
     python: report.python,
+    native: report.native,
     skills: report.skills
   };
 }

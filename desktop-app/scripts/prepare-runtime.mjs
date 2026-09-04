@@ -10,11 +10,15 @@ import { promisify } from "node:util";
 
 import {
   DESKTOP_RUNTIME_VERSION,
-  currentTarget,
+  currentBuildTarget,
+  LIBREOFFICE_VERSION,
+  MICROMAMBA_VERSION,
   NODE_VERSION,
+  POPPLER_VERSION,
   PYTHON_BUILD_TAG,
   PYTHON_VERSION
 } from "./runtime-manifest.mjs";
+import { prepareNativeRuntime } from "./native-runtime.mjs";
 
 const execFileAsync = promisify(execFile);
 const desktopRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -29,7 +33,7 @@ const pythonRequirements = path.join(repositoryRoot, "runtime-server", "skills",
 const skillSourceRoot = path.join(repositoryRoot, "runtime-server", "skills");
 const documentSkills = ["documents", "pdf", "presentations", "spreadsheets"];
 
-const target = currentTarget();
+const target = currentBuildTarget();
 const nodeArchivePath = path.join(cacheRoot, target.node.archive);
 const pythonArchivePath = path.join(cacheRoot, target.python.archive);
 
@@ -72,6 +76,8 @@ try {
   if (!npmCli) throw new Error(`The Node ${NODE_VERSION} archive does not contain npm-cli.js.`);
   await installNodeDependencies(nodeExecutable, npmCli, nodeToolchainRoot, nodeRoot);
 
+  const nativeRuntime = await prepareNativeRuntime({ stagingRoot, cacheRoot, target });
+
   const skillsRoot = path.join(stagingRoot, "skills");
   await mkdir(skillsRoot, { recursive: true });
   for (const skillName of documentSkills) {
@@ -89,7 +95,8 @@ try {
     pythonPackagesRoot,
     nodeToolchainRoot,
     nodeArchivePath,
-    pythonArchivePath
+    pythonArchivePath,
+    nativeRuntime
   });
   await writeFile(path.join(stagingRoot, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
 
@@ -98,17 +105,25 @@ try {
     pythonExecutable,
     pythonPackagesRoot,
     nodeToolchainRoot,
-    documentSkills: skillsRoot
+    documentSkills: skillsRoot,
+    nativeRuntime
   });
 
   await rm(outputRoot, { recursive: true, force: true });
   await rename(stagingRoot, outputRoot);
+  // Keep the tracked directory marker so generated builds do not dirty the worktree.
+  await writeFile(path.join(outputRoot, ".gitkeep"), "\n", "utf8");
   process.stdout.write(`${JSON.stringify({
     kind: "hatch-desktop-bundled-runtime",
     root: outputRoot,
     target: target.key,
     node: NODE_VERSION,
     python: PYTHON_VERSION,
+    native: {
+      libreoffice: LIBREOFFICE_VERSION,
+      poppler: POPPLER_VERSION,
+      build_tool: `micromamba ${MICROMAMBA_VERSION}`
+    },
     skills: documentSkills
   }, null, 2)}\n`);
 } catch (error) {
@@ -118,24 +133,43 @@ try {
 
 async function downloadAndVerify(url, expectedSha256, destination) {
   if (await hasMatchingSha256(destination, expectedSha256)) return;
-
-  const response = await fetch(url, { redirect: "follow" });
-  if (!response.ok) {
-    throw new Error(`Could not download ${url}: HTTP ${response.status} ${response.statusText}`);
+  await mkdir(path.dirname(destination), { recursive: true });
+  const partial = `${destination}.part`;
+  const curl = process.env.CURL_EXE?.trim() || (process.platform === "win32" ? "curl.exe" : "curl");
+  let lastError;
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    try {
+      await execFileAsync(curl, [
+        "--fail",
+        "--location",
+        "--retry",
+        "5",
+        "--retry-all-errors",
+        "--retry-delay",
+        "2",
+        "--connect-timeout",
+        "30",
+        "--max-time",
+        "1800",
+        "--continue-at",
+        "-",
+        "--output",
+        partial,
+        url
+      ], { maxBuffer: 8 * 1024 * 1024 });
+      if (await hasMatchingSha256(partial, expectedSha256)) {
+        await rm(destination, { force: true });
+        await rename(partial, destination);
+        return;
+      }
+      await rm(partial, { force: true });
+      lastError = new Error(`Checksum mismatch for ${path.basename(destination)} after curl download.`);
+    } catch (error) {
+      lastError = error;
+    }
   }
-  const bytes = Buffer.from(await response.arrayBuffer());
-  const actualSha256 = createHash("sha256").update(bytes).digest("hex");
-  if (actualSha256 !== expectedSha256) {
-    throw new Error(`Checksum mismatch for ${path.basename(destination)}: expected ${expectedSha256}, got ${actualSha256}`);
-  }
-  const temporary = `${destination}.tmp-${process.pid}-${Date.now()}`;
-  await writeFile(temporary, bytes, { flag: "wx" });
-  try {
-    await rename(temporary, destination);
-  } catch (error) {
-    await rm(temporary, { force: true });
-    throw error;
-  }
+  const detail = lastError instanceof Error ? lastError.message : String(lastError);
+  throw new Error(`Could not download and verify ${url}: ${detail}`);
 }
 
 async function hasMatchingSha256(file, expectedSha256) {
@@ -234,25 +268,59 @@ async function installNodeDependencies(nodeExecutable, npmCli, nodeToolchainRoot
   });
 }
 
-async function verifyRuntimeSmoke({ nodeExecutable, pythonExecutable, pythonPackagesRoot, nodeToolchainRoot, documentSkills }) {
+async function verifyRuntimeSmoke({
+  nodeExecutable,
+  pythonExecutable,
+  pythonPackagesRoot,
+  nodeToolchainRoot,
+  documentSkills,
+  nativeRuntime
+}) {
   await run(nodeExecutable, ["--version"], { maxBuffer: 1024 * 1024 });
+  const runtimePath = [
+    ...nativeRuntime.pathEntries,
+    path.dirname(nodeExecutable),
+    path.dirname(pythonExecutable),
+    process.env.PATH
+  ].filter(Boolean).join(path.delimiter);
   const nodeEnvironment = {
     ...process.env,
+    HATCH_RUNTIME_ROOT: path.dirname(documentSkills),
+    HATCH_NATIVE_RUNTIME_ROOT: nativeRuntime.root,
+    HATCH_NATIVE_BIN_DIR: nativeRuntime.binDirectory,
+    HATCH_SOFFICE: nativeRuntime.binaries.soffice,
+    HATCH_PDFTOPPM: nativeRuntime.binaries.pdftoppm,
+    HATCH_PDFINFO: nativeRuntime.binaries.pdfinfo,
     HATCH_NODE: nodeExecutable,
     HATCH_NODE_MODULES: path.join(nodeToolchainRoot, "node_modules"),
     NODE_PATH: path.join(nodeToolchainRoot, "node_modules"),
-    PATH: [path.dirname(nodeExecutable), process.env.PATH].filter(Boolean).join(path.delimiter)
+    PATH: runtimePath
   };
   const pythonEnvironment = {
-    ...process.env,
+    ...nodeEnvironment,
     HATCH_PYTHON: pythonExecutable,
     HATCH_NODE: nodeExecutable,
     HATCH_NODE_MODULES: path.join(nodeToolchainRoot, "node_modules"),
     HATCH_DOCUMENT_SKILLS_ROOT: documentSkills,
     PYTHONNOUSERSITE: "1",
     PYTHONPATH: pythonPackagesRoot,
-    PATH: [path.dirname(pythonExecutable), path.dirname(nodeExecutable), process.env.PATH].filter(Boolean).join(path.delimiter)
+    PATH: runtimePath
   };
+  await run(nativeRuntime.binaries.soffice, ["--version"], {
+    env: nodeEnvironment,
+    timeout: 30_000,
+    maxBuffer: 8 * 1024 * 1024
+  });
+  await run(nativeRuntime.binaries.pdftoppm, ["-v"], {
+    env: nodeEnvironment,
+    timeout: 30_000,
+    maxBuffer: 8 * 1024 * 1024
+  });
+  await run(nativeRuntime.binaries.pdfinfo, ["-v"], {
+    env: nodeEnvironment,
+    timeout: 30_000,
+    maxBuffer: 8 * 1024 * 1024
+  });
   await run(pythonExecutable, ["--version"], {
     env: pythonEnvironment,
     maxBuffer: 1024 * 1024
@@ -295,6 +363,12 @@ async function verifyRuntimeSmoke({ nodeExecutable, pythonExecutable, pythonPack
     const filledPdf = path.join(smokeRoot, "filled.pdf");
     const xlsx = path.join(smokeRoot, "smoke.xlsx");
     const pptx = path.join(smokeRoot, "smoke.pptx");
+    const docxRenderRoot = path.join(smokeRoot, "docx-render");
+    const officeConvertRoot = path.join(smokeRoot, "office-convert");
+    const pdfRenderRoot = path.join(smokeRoot, "pdf-render");
+    const xlsxRenderRoot = path.join(smokeRoot, "xlsx-render");
+    const recalculatedXlsx = path.join(smokeRoot, "recalculated.xlsx");
+    const pptxRenderRoot = path.join(smokeRoot, "pptx-render");
     const rowsFile = path.join(smokeRoot, "rows.json");
     const slidesFile = path.join(smokeRoot, "slides.json");
     await writeFile(rowsFile, JSON.stringify({ sheet: "Smoke", rows: [["value"], [42]] }), "utf8");
@@ -303,6 +377,10 @@ async function verifyRuntimeSmoke({ nodeExecutable, pythonExecutable, pythonPack
     await run(pythonExecutable, [path.join(documentsRoot, "scripts", "accept_changes.py"), docx, "--output", acceptedDocx], { env: pythonEnvironment, cwd: documentsRoot });
     await run(pythonExecutable, [path.join(documentsRoot, "scripts", "validate_docx.py"), acceptedDocx], { env: pythonEnvironment, cwd: documentsRoot });
     await run(nodeExecutable, [path.join(documentsRoot, "scripts", "read_asset.mjs"), "--input", acceptedDocx, "--max-chars", "200000"], { env: nodeEnvironment, cwd: documentsRoot });
+    await run(pythonExecutable, [path.join(documentsRoot, "scripts", "render_docx.py"), acceptedDocx, "--output-dir", docxRenderRoot], { env: pythonEnvironment, cwd: documentsRoot, timeout: 120_000 });
+    await assertRenderedPages(docxRenderRoot, "page-", "DOCX visual render");
+    await run(pythonExecutable, [path.join(documentsRoot, "scripts", "office_convert.py"), acceptedDocx, "--output-dir", officeConvertRoot, "--format", "pdf"], { env: pythonEnvironment, cwd: documentsRoot, timeout: 120_000 });
+    await assertFile(path.join(officeConvertRoot, "accepted.pdf"), "Office conversion smoke output");
 
     await run(nodeExecutable, [path.join(pdfRoot, "scripts", "create_pdf.mjs"), "--output", pdf, "--text", "Bundled PDF"], { env: nodeEnvironment, cwd: pdfRoot });
     await run(nodeExecutable, ["--input-type=module", "-e", [
@@ -320,16 +398,24 @@ async function verifyRuntimeSmoke({ nodeExecutable, pythonExecutable, pythonPack
     await run(pythonExecutable, [path.join(pdfRoot, "scripts", "pdf_tool.py"), "form-inspect", formPdf], { env: pythonEnvironment, cwd: pdfRoot });
     await run(pythonExecutable, [path.join(pdfRoot, "scripts", "pdf_tool.py"), "form-fill", formPdf, "--field", "smoke-name=Hatch", "--output", filledPdf], { env: pythonEnvironment, cwd: pdfRoot });
     await run(nodeExecutable, [path.join(pdfRoot, "scripts", "read_asset.mjs"), "--input", filledPdf, "--max-chars", "200000"], { env: nodeEnvironment, cwd: pdfRoot });
+    await run(pythonExecutable, [path.join(pdfRoot, "scripts", "pdf_tool.py"), "render", filledPdf, "--output-dir", pdfRenderRoot, "--dpi", "72"], { env: pythonEnvironment, cwd: pdfRoot, timeout: 120_000 });
+    await assertRenderedPages(pdfRenderRoot, "page-", "PDF visual render");
 
     await run(nodeExecutable, [path.join(spreadsheetsRoot, "scripts", "create_xlsx.mjs"), "--rows-file", rowsFile, "--output", xlsx], { env: nodeEnvironment, cwd: spreadsheetsRoot });
     await run(pythonExecutable, [path.join(spreadsheetsRoot, "scripts", "xlsx_tool.py"), "inspect", xlsx], { env: pythonEnvironment, cwd: spreadsheetsRoot });
     await run(pythonExecutable, [path.join(spreadsheetsRoot, "scripts", "xlsx_tool.py"), "validate", xlsx], { env: pythonEnvironment, cwd: spreadsheetsRoot });
     await run(nodeExecutable, [path.join(spreadsheetsRoot, "scripts", "read_asset.mjs"), "--input", xlsx, "--max-chars", "200000"], { env: nodeEnvironment, cwd: spreadsheetsRoot });
+    await run(pythonExecutable, [path.join(spreadsheetsRoot, "scripts", "xlsx_tool.py"), "render", xlsx, "--output-dir", xlsxRenderRoot, "--dpi", "72"], { env: pythonEnvironment, cwd: spreadsheetsRoot, timeout: 120_000 });
+    await assertRenderedPages(xlsxRenderRoot, "sheet-page-", "spreadsheet visual render");
+    await run(pythonExecutable, [path.join(spreadsheetsRoot, "scripts", "recalc.py"), xlsx, "--output", recalculatedXlsx], { env: pythonEnvironment, cwd: spreadsheetsRoot, timeout: 120_000 });
+    await assertFile(recalculatedXlsx, "spreadsheet recalculation smoke output");
 
     await run(nodeExecutable, [path.join(presentationsRoot, "scripts", "create_pptx.mjs"), "--slides-file", slidesFile, "--output", pptx], { env: nodeEnvironment, cwd: presentationsRoot });
     await run(pythonExecutable, [path.join(presentationsRoot, "scripts", "pptx_tool.py"), "inspect", pptx], { env: pythonEnvironment, cwd: presentationsRoot });
     await run(pythonExecutable, [path.join(presentationsRoot, "scripts", "pptx_tool.py"), "validate", pptx], { env: pythonEnvironment, cwd: presentationsRoot });
     await run(nodeExecutable, [path.join(presentationsRoot, "scripts", "read_asset.mjs"), "--input", pptx, "--max-chars", "200000"], { env: nodeEnvironment, cwd: presentationsRoot });
+    await run(pythonExecutable, [path.join(presentationsRoot, "scripts", "pptx_tool.py"), "render", pptx, "--output-dir", pptxRenderRoot], { env: pythonEnvironment, cwd: presentationsRoot, timeout: 120_000 });
+    await assertRenderedPages(pptxRenderRoot, "slide-", "PowerPoint visual render");
   } finally {
     await rm(smokeRoot, { recursive: true, force: true });
   }
@@ -343,7 +429,8 @@ async function createRuntimeManifest({
   pythonPackagesRoot,
   nodeToolchainRoot,
   nodeArchivePath,
-  pythonArchivePath
+  pythonArchivePath,
+  nativeRuntime
 }) {
   const relative = (file) => path.relative(stagingRoot, file).split(path.sep).join("/");
   const pythonPackages = await packageVersions(pythonExecutable, pythonPackagesRoot, "python");
@@ -380,6 +467,39 @@ async function createRuntimeManifest({
         sha256: `sha256:${target.python.sha256}`
       },
       packages: pythonPackages
+    },
+    native: {
+      root: relative(nativeRuntime.root),
+      bin_dir: relative(nativeRuntime.binDirectory),
+      binaries: Object.fromEntries(Object.entries(nativeRuntime.binaries).map(([name, executable]) => [name, relative(executable)])),
+      libreoffice: {
+        version: LIBREOFFICE_VERSION,
+        archive: {
+          filename: target.native.libreoffice.archive,
+          url: target.native.libreoffice.url,
+          sha256: `sha256:${target.native.libreoffice.sha256}`
+        },
+        license: target.native.libreoffice.license
+      },
+      poppler: {
+        version: POPPLER_VERSION,
+        channel: target.native.poppler.channel,
+        platform: target.native.poppler.platform,
+        package_spec: target.native.poppler.packageSpec,
+        execution_arch: target.native.poppler.executionArch ?? target.arch,
+        license: target.native.poppler.license,
+        packages: nativeRuntime.popplerPackages
+      },
+      build_tool: {
+        name: "micromamba",
+        version: MICROMAMBA_VERSION,
+        archive: {
+          filename: target.native.micromamba.archive,
+          url: target.native.micromamba.url,
+          sha256: `sha256:${target.native.micromamba.sha256}`
+        },
+        shipped: false
+      }
     },
     skills: Object.fromEntries(documentSkills.map((skillName) => [skillName, {
       path: `skills/${skillName}`,
@@ -431,6 +551,13 @@ async function pathRealpath(candidate) {
   }
 }
 
+async function assertRenderedPages(directory, prefix, label) {
+  const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+  if (!entries.some((entry) => entry.isFile() && entry.name.startsWith(prefix) && entry.name.endsWith(".png"))) {
+    throw new Error(`${label} did not produce any PNG pages in ${directory}.`);
+  }
+}
+
 async function assertFile(file, label) {
   const metadata = await stat(file).catch(() => undefined);
   if (!metadata?.isFile()) throw new Error(`${label} is missing: ${file}`);
@@ -444,7 +571,7 @@ async function assertDirectory(directory, label) {
 async function assertExistingRuntime() {
   await assertFile(path.join(outputRoot, "manifest.json"), "bundled runtime manifest");
   const { verifyBundledRuntime } = await import("./verify-bundled-runtime.mjs");
-  await verifyBundledRuntime({ root: outputRoot });
+  await verifyBundledRuntime({ root: outputRoot, targetKey: target.key });
 }
 
 async function run(executable, args, options = {}) {

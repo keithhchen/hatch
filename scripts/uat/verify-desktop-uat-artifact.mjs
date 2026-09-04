@@ -33,7 +33,7 @@ export async function verifyDesktopUatArtifact({
   }
   validateReport(report, platform);
   if (requireBundledRuntime && (!report.runtime || report.runtime.verified !== true)) {
-    throw new Error("The desktop UAT report does not include successful bundled Python/Node runtime verification.");
+    throw new Error("The desktop UAT report does not include successful bundled application runtime verification.");
   }
 
   if (expectedSha256 && report.package.sha256 !== expectedSha256) {

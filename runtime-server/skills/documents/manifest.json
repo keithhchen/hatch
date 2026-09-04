@@ -13,6 +13,6 @@
     "create": "scripts/create_docx.mjs",
     "convert": "scripts/office_convert.py"
   },
-  "runtime": {"python": ["lxml", "python-docx"], "node": ["docx"]},
-  "visual_qa": {"renderer": "LibreOffice + Poppler when installed", "required_for_layout_changes": true}
+  "runtime": {"python": ["lxml", "python-docx"], "node": ["docx"], "native": ["libreoffice", "poppler"]},
+  "visual_qa": {"renderer": "bundled LibreOffice + Poppler", "required_for_layout_changes": true}
 }
