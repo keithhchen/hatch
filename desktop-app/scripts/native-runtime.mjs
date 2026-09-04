@@ -130,8 +130,13 @@ async function installLibreOffice({ archivePath, destination, target }) {
     "/norestart",
     `TARGETDIR=${destination}`
   ], { maxBuffer: 16 * 1024 * 1024 });
-  const executable = await locateFile(destination, "soffice.exe");
-  if (!executable) throw new Error(`LibreOffice MSI ${path.basename(archivePath)} did not contain soffice.exe.`);
+  // LibreOffice ships both a GUI-subsystem `soffice.exe` and a console
+  // launcher, `soffice.com`, on Windows.  The latter is the supported entry
+  // point for headless Skill work: it keeps stdout/stderr attached and exits
+  // when the child `soffice.bin` finishes instead of leaving the Node/Python
+  // parent waiting on a GUI process handle.
+  const executable = await locateFile(destination, "soffice.com");
+  if (!executable) throw new Error(`LibreOffice MSI ${path.basename(archivePath)} did not contain the required soffice.com console launcher.`);
   return executable;
 }
 
