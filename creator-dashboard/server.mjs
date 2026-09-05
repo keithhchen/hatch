@@ -27,6 +27,7 @@ import {
   injectProductNoScriptFallback
 } from "./publicMetadata.mjs";
 import { PortalTelemetryStore } from "./telemetry.mjs";
+import { detectWebLocale, localeTag, localizeWebApiError, matchWebLocale } from "./src/webI18n.js";
 
 const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_JSON_BODY_MAX_BYTES = 1024 * 1024;
@@ -422,6 +423,7 @@ export async function createDashboardApp(options = {}) {
   const handler = async (request, response) => {
     const url = new URL(request.url ?? "/", "http://dashboard.local");
     const requestId = normalizedRequestId(request.headers["x-request-id"]);
+    response.__hatchLocale = requestWebLocale(request);
     if (url.pathname === "/v1/user/product-access") {
       response.__hatchCorsOrigin = "*";
     }
@@ -3897,17 +3899,20 @@ function send(response, status, body) {
   const corsOrigin = response.__hatchCorsOrigin ?? "http://127.0.0.1:8510";
   response.setHeader("access-control-allow-origin", corsOrigin);
   if (corsOrigin !== "*") response.setHeader("access-control-allow-credentials", "true");
-  response.setHeader("access-control-allow-headers", "authorization, content-type, idempotency-key, x-csrf-token, x-request-id");
-  response.setHeader("access-control-expose-headers", "x-request-id");
+  response.setHeader("access-control-allow-headers", "accept-language, authorization, content-type, idempotency-key, x-csrf-token, x-hatch-locale, x-request-id");
+  response.setHeader("access-control-expose-headers", "content-language, x-request-id");
   response.setHeader("access-control-allow-methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+  response.setHeader("content-language", localeTag(response.__hatchLocale));
+  response.setHeader("vary", "accept-language, x-hatch-locale");
   if (body === undefined) return response.end();
   response.setHeader("content-type", "application/json; charset=utf-8");
+  const localizedBody = localizeWebApiError(body, response.__hatchLocale);
   const responseBody = response.__includeRequestId
-    && body
-    && typeof body === "object"
-    && !Array.isArray(body)
-    ? { ...body, request_id: response.__hatchRequestId }
-    : body;
+    && localizedBody
+    && typeof localizedBody === "object"
+    && !Array.isArray(localizedBody)
+    ? { ...localizedBody, request_id: response.__hatchRequestId }
+    : localizedBody;
   response.end(JSON.stringify(responseBody));
 }
 
@@ -3915,8 +3920,21 @@ function sendHtml(response, status, body, headers = {}) {
   response.statusCode = status;
   response.setHeader("cache-control", "no-store");
   response.setHeader("content-type", "text/html; charset=utf-8");
+  response.setHeader("content-language", localeTag(response.__hatchLocale));
+  response.setHeader("vary", "accept-language, x-hatch-locale");
   for (const [name, value] of Object.entries(headers)) response.setHeader(name, value);
   response.end(body);
+}
+
+function requestWebLocale(request) {
+  const headers = request?.headers ?? {};
+  const explicit = matchWebLocale(headers["x-hatch-locale"]);
+  if (explicit) return explicit;
+  const accepted = String(headers["accept-language"] ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return detectWebLocale(accepted);
 }
 
 function sendCsv(response, filename, rows) {
@@ -3928,9 +3946,11 @@ function sendCsv(response, filename, rows) {
   response.statusCode = 200;
   response.setHeader("access-control-allow-origin", "http://127.0.0.1:8510");
   response.setHeader("access-control-allow-credentials", "true");
-  response.setHeader("access-control-expose-headers", "x-request-id, content-disposition");
+  response.setHeader("access-control-expose-headers", "content-disposition, content-language, x-request-id");
+  response.setHeader("content-language", localeTag(response.__hatchLocale));
   response.setHeader("content-type", "text/csv; charset=utf-8");
   response.setHeader("content-disposition", `attachment; filename="${filename}"`);
+  response.setHeader("vary", "accept-language, x-hatch-locale");
   response.end(`${csv}\n`);
 }
 

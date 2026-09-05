@@ -1,8 +1,7 @@
 export type Lang = "zh" | "en" | "ja";
 
+import { detectWebLocale } from "../webI18n.js";
+
 export function langFromBrowser(): Lang {
-  if (typeof navigator === "undefined") return "en";
-  const language = String(navigator.language ?? "").toLowerCase();
-  if (language.startsWith("ja")) return "ja";
-  return language.startsWith("zh") ? "zh" : "en";
+  return detectWebLocale() as Lang;
 }

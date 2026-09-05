@@ -23,6 +23,7 @@ import {
   isValidBriefSpec
 } from "./creatorWorkflowUi.js";
 import { getCreatorNodeTips } from "./creatorNodeTips.js";
+import { getWebLocale, webErrorMessage } from "./webI18n.js";
 import "./creatorProductWorkspace.css";
 
 const TAB_KEYS = CREATOR_WORKFLOW_STEPS;
@@ -259,7 +260,7 @@ function FilesPanel({ t, documents, busy, onUpload, onStart, onDelete, hasExecut
       <span className="cpv2-upload-button">{t("chooseFiles")}</span>
       <input className="cpv2-file-input" type="file" multiple accept=".pdf,.docx,.xlsx,.xls,.xlsm,.pptx,.csv,.tsv,.txt,.md,.json,.html,.htm" onChange={(event) => { void onUpload([...event.target.files]); event.target.value = ""; }} disabled={Boolean(busy)} />
     </label>
-    {!documents.length ? <p className="cpv2-empty-inline">{t("noFilesYet")}</p> : <ul className="cpv2-file-list">{documents.map((file) => <li key={file.id ?? file.file_id ?? file.display_name}><span>{file.display_name ?? file.name ?? t("unnamedFile")}</span><StatusTag tone={file.status === "error" ? "error" : "success"}>{file.status ?? t("ready")}</StatusTag><Button type="button" variant="link" disabled={Boolean(busy)} onClick={() => void onDelete(file)}>{t("removeFile")}</Button></li>)}</ul>}
+    {!documents.length ? <p className="cpv2-empty-inline">{t("noFilesYet")}</p> : <ul className="cpv2-file-list">{documents.map((file) => { const fileState = productFileState(file); return <li key={file.id ?? file.file_id ?? file.display_name}><span>{file.display_name ?? file.name ?? t("unnamedFile")}</span><StatusTag tone={fileState === "error" ? "error" : "success"}>{t(`fileStatus_${fileState}`)}</StatusTag><Button type="button" variant="link" disabled={Boolean(busy)} onClick={() => void onDelete(file)}>{t("removeFile")}</Button></li>; })}</ul>}
     <div className="cpv2-workspace-actions"><Button type="button" loading={busy === "about-you"} disabled={!documents.length || Boolean(busy)} onClick={onStart}>{hasExecution ? t("continueWithFiles") : t("startDistillation")}</Button></div>
   </section>;
 }
@@ -304,7 +305,28 @@ function CorpusPanel({ t, locale, execution, aboutYou, busy, onRetry }) {
   if (isExecutionActive(execution)) return <NodeProgressPanel locale={locale} node="corpus" title={t("corpus")} execution={execution} />;
   if (isExecutionError(execution)) return <NodeErrorPanel t={t} title={t("corpus")} execution={execution} onRetry={onRetry} busy={busy} />;
   const output = execution.output;
-  return <section className="cpv2-workspace-panel cpv2-corpus-panel"><div className="cpv2-panel-heading"><div><h2>{t("corpus")}</h2><p>{t("fullCorpus")}</p></div><StatusTag tone="success">{t("ready")}</StatusTag></div>{output ? <><article className="cpv2-corpus-block cpv2-corpus-system"><div className="cpv2-corpus-block-heading"><h3>System instructions</h3><span>{t("ready")}</span></div><pre>{output.system_instructions}</pre></article><section className="cpv2-corpus-block"><div className="cpv2-corpus-block-heading"><h3>Skills</h3><span>{output.skills?.length ?? 0}</span></div><div className="cpv2-corpus-grid">{output.skills?.map((skill) => <details className="cpv2-corpus-item" key={skill.id}><summary>{skill.title}</summary><p>{skill.instruction}</p></details>)}</div></section><section className="cpv2-corpus-block"><div className="cpv2-corpus-block-heading"><h3>Knowledge</h3><span>{output.knowledge?.length ?? 0}</span></div><div className="cpv2-corpus-grid">{output.knowledge?.map((item) => <details className="cpv2-corpus-item" key={item.id}><summary>{item.title}</summary><p>{item.content}</p></details>)}</div></section></> : <p>{t("corpusUnavailable")}</p>}</section>;
+  return (
+    <section className="cpv2-workspace-panel cpv2-corpus-panel">
+      <div className="cpv2-panel-heading">
+        <div><h2>{t("corpus")}</h2><p>{t("fullCorpus")}</p></div>
+        <StatusTag tone="success">{t("ready")}</StatusTag>
+      </div>
+      {output ? <>
+        <article className="cpv2-corpus-block cpv2-corpus-system">
+          <div className="cpv2-corpus-block-heading"><h3>{t("systemInstructions")}</h3><span>{t("ready")}</span></div>
+          <pre>{output.system_instructions}</pre>
+        </article>
+        <section className="cpv2-corpus-block">
+          <div className="cpv2-corpus-block-heading"><h3>{t("skills")}</h3><span>{output.skills?.length ?? 0}</span></div>
+          <div className="cpv2-corpus-grid">{output.skills?.map((skill) => <details className="cpv2-corpus-item" key={skill.id}><summary>{skill.title}</summary><p>{skill.instruction}</p></details>)}</div>
+        </section>
+        <section className="cpv2-corpus-block">
+          <div className="cpv2-corpus-block-heading"><h3>{t("knowledge")}</h3><span>{output.knowledge?.length ?? 0}</span></div>
+          <div className="cpv2-corpus-grid">{output.knowledge?.map((item) => <details className="cpv2-corpus-item" key={item.id}><summary>{item.title}</summary><p>{item.content}</p></details>)}</div>
+        </section>
+      </> : <p>{t("corpusUnavailable")}</p>}
+    </section>
+  );
 }
 
 function BriefPanel({ t, token, product, briefSpec, busy, onRetryAction, onSaved, onError }) {
@@ -362,8 +384,9 @@ function NodeCompanionPanel({ locale, node, title, execution, state, busy }) {
     return () => clearInterval(timer);
   }, [busy, tips.length]);
   const tip = tips[tipIndex % tips.length];
-  const nextTipLabel = locale === "zh" ? "下一条线索" : locale === "ja" ? "次の手がかり" : "Show next clue";
-  const roundLabel = execution?.round == null ? null : locale === "zh" ? `第 ${execution.round} 轮` : locale === "ja" ? `ラウンド ${execution.round}` : `Round ${execution.round}`;
+  const t = useMemo(() => createCreatorTranslator(locale), [locale]);
+  const nextTipLabel = t("nextClue");
+  const roundLabel = execution?.round == null ? null : t("round", execution.round);
   return <section className="cpv2-workspace-panel cpv2-node-progress-panel" aria-busy={busy ? "true" : "false"} data-node={node} data-state={state}>
     <div className={`cpv2-node-companion${busy ? " is-busy" : ""}`}>
       <div className="cpv2-node-gradient" aria-hidden="true" />
@@ -390,5 +413,7 @@ function nextBriefFieldId(fields) {
 }
 
 function messageOf(error, fallback) {
+  if (!error) return String(fallback ?? "");
+  if (error.code || error.status) return webErrorMessage(error, getWebLocale());
   return String(error?.message ?? error?.detail ?? fallback);
 }

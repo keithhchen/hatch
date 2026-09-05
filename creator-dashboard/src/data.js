@@ -1,15 +1,20 @@
+import { formatUsd, getWebLocale, localeTag, localizeWebApiError, translateWeb } from "./webI18n.js";
+
 export async function dashboardRequest(path, options = {}) {
   const { token, ...requestOptions } = options;
   const method = String(options.method ?? "GET").toUpperCase();
   const csrfToken = !["GET", "HEAD", "OPTIONS"].includes(method)
     ? readCookie("hatch_web_csrf")
     : "";
+  const locale = getWebLocale();
   const response = await fetch(path, {
     ...requestOptions,
     credentials: "same-origin",
     headers: {
       ...(options.body ? { "content-type": "application/json" } : {}),
       ...(csrfToken ? { "x-csrf-token": csrfToken } : {}),
+      "x-hatch-locale": locale,
+      "accept-language": localeTag(locale),
       // Explicit bearer support remains for non-browser tests and migration
       // clients. The Web app never persists or injects a bearer token.
       ...(token ? { authorization: `Bearer ${token}` } : {}),
@@ -19,11 +24,12 @@ export async function dashboardRequest(path, options = {}) {
   if (response.status === 204) return undefined;
   const payload = await response.json();
   if (!response.ok) {
-    const error = new Error(payload.error?.message ?? `Request failed with ${response.status}`);
+    const localizedPayload = localizeWebApiError(payload, locale);
+    const error = new Error(localizedPayload.error?.message ?? `Request failed with ${response.status}`);
     error.status = response.status;
-    error.code = payload.error?.code;
-    error.details = payload.error?.details;
-    error.request_id = payload.request_id ?? response.headers.get("x-request-id");
+    error.code = localizedPayload.error?.code;
+    error.details = localizedPayload.error?.details;
+    error.request_id = localizedPayload.request_id ?? response.headers.get("x-request-id");
     throw error;
   }
   return payload;
@@ -36,23 +42,18 @@ function readCookie(name) {
   return entry ? decodeURIComponent(entry.slice(prefix.length)) : "";
 }
 
-export function formatMoney(minor, currency = "USD") {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency,
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  }).format(minor / 100);
+export function formatMoney(minor, _currency = "USD") {
+  return formatUsd(minor);
 }
 
-export function orderStatusLabel(status) {
-  if (status === "delivered") return "Delivered";
-  if (status === "refunded") return "Refunded";
-  return "Paid";
+export function orderStatusLabel(status, locale = getWebLocale()) {
+  if (status === "delivered") return translateWeb(locale, "buyer.statusDelivered");
+  if (status === "refunded") return translateWeb(locale, "buyer.statusRefunded");
+  return translateWeb(locale, "buyer.statusPaid");
 }
 
-export function productStatusLabel(status) {
-  if (status === "published") return "Published";
-  if (status === "ready_to_publish") return "Ready to publish";
-  return "Preparing";
+export function productStatusLabel(status, locale = getWebLocale()) {
+  if (status === "published") return translateWeb(locale, "buyer.statusPublished");
+  if (status === "ready_to_publish") return translateWeb(locale, "buyer.statusReadyToPublish");
+  return translateWeb(locale, "buyer.statusPreparing");
 }
