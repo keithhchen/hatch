@@ -25,6 +25,12 @@ export async function prepareNativeRuntime({ stagingRoot, cacheRoot, target }) {
   const libreOfficeRoot = path.join(nativeRoot, "libreoffice");
   const popplerRoot = path.join(nativeRoot, "poppler");
   await mkdir(nativeBin, { recursive: true });
+  if (target.platform === "win32") {
+    // Windows uses the native engine locations directly, so this directory
+    // would otherwise be empty and Tauri would omit it from the resource
+    // bundle even though it is part of the manifest contract.
+    await writeFile(path.join(nativeBin, "hatch-native-bin.txt"), "Bundled native runtime directory.\n", "utf8");
+  }
 
   const micromambaPath = path.join(nativeCacheRoot, target.native.micromamba.archive);
   const libreOfficeArchivePath = path.join(nativeCacheRoot, target.native.libreoffice.archive);
