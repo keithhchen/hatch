@@ -23,7 +23,9 @@ export const MAX_CONTEXT_ATTACHMENTS = 8;
 export const MAX_CONTEXT_ATTACHMENT_SOURCE_BYTES = 1024 * 1024;
 export const MAX_CONTEXT_ATTACHMENT_TEXT_BYTES = 64 * 1024;
 export const MAX_CONTEXT_ATTACHMENT_TOTAL_TEXT_BYTES = 128 * 1024;
-export const MAX_CONTEXT_ASSET_BYTES = 16 * 1024 * 1024;
+// Keep one rich attachment below the WebSocket's bounded message budget while
+// allowing ordinary PowerPoint decks with embedded images to be attached.
+export const MAX_CONTEXT_ASSET_BYTES = 24 * 1024 * 1024;
 export const MAX_CONTEXT_ASSET_TOTAL_BYTES = 24 * 1024 * 1024;
 export const MAX_CONTEXT_ASSET_BASE64_CHARS = Math.ceil(MAX_CONTEXT_ASSET_BYTES / 3) * 4;
 export const MAX_ERROR_MESSAGE_CHARS = 16 * 1024;

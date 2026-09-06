@@ -47,7 +47,7 @@ const LOCAL_TOOL_RESULT_TTL: Duration = Duration::from_secs(60);
 const PENDING_TOOL_APPROVAL_TTL: Duration = Duration::from_secs(5 * 60);
 const NATIVE_DROP_CONTEXT_TTL: Duration = Duration::from_secs(10 * 60);
 const MAX_NATIVE_DROP_CONTEXTS: usize = 8;
-const MAX_NATIVE_DROP_CONTEXT_SOURCE_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_NATIVE_DROP_CONTEXT_SOURCE_BYTES: u64 = 24 * 1024 * 1024;
 const MAX_NATIVE_DROP_CONTEXT_BYTES: usize = 64 * 1024;
 const MAX_NATIVE_DROP_CONTEXT_TOTAL_BYTES: usize = 24 * 1024 * 1024;
 const MAX_NATIVE_DROP_CONTEXT_REQUESTS: usize = 8;
@@ -747,7 +747,7 @@ fn safe_drop_display_name(value: &str) -> String {
 
 fn native_drop_rejection_reason(error: &str) -> &'static str {
     if error.contains("native_drop_context_too_large") {
-        "File is larger than the 16 MiB attachment limit."
+        "File is larger than the 24 MiB attachment limit."
     } else {
         "This item could not be attached as a local file."
     }
@@ -3078,6 +3078,27 @@ mod tests {
             std::os::unix::fs::symlink(&binary, &link).unwrap();
             assert!(store.insert("window-a", &link).is_err());
         }
+    }
+
+    #[test]
+    fn native_drop_context_accepts_a_pptx_above_the_old_16_mib_limit() {
+        let temp = tempdir().unwrap();
+        let deck = temp.path().join("investor-deck.pptx");
+        let bytes = vec![0x50; 16 * 1024 * 1024 + 1];
+        std::fs::write(&deck, &bytes).unwrap();
+
+        let store = NativeDropContextStore::default();
+        let info = store.insert("window-a", &deck).unwrap();
+        assert_eq!(
+            info.media_type,
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        );
+        let content = store
+            .consume("window-a", vec![info.context_id])
+            .unwrap()
+            .remove(0);
+        assert_eq!(content.source_bytes as usize, bytes.len());
+        assert!(content.data_base64.is_some());
     }
 
     #[test]

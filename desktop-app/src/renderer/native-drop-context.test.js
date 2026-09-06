@@ -75,4 +75,23 @@ describe("native dropped-file context", () => {
     });
     expect(normalized?.attachment).not.toHaveProperty("path");
   });
+
+  it("accepts a document snapshot up to the 24 MiB attachment limit", () => {
+    const normalized = normalizeNativeDropAttachment({
+      contextId: "drop_deck_1",
+      assetId: "drop_deck_1",
+      displayName: "investor-deck.pptx",
+      mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      sourceBytes: 24 * 1024 * 1024,
+      text: "",
+      textSha256: "f".repeat(64),
+      truncated: true
+    });
+    expect(normalized?.attachment).toMatchObject({
+      attachment_id: "drop_deck_1",
+      media_type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      source_bytes: 24 * 1024 * 1024,
+      truncated: true
+    });
+  });
 });

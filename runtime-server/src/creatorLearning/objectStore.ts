@@ -99,8 +99,13 @@ export class AliyunArtifactObjectStore implements ArtifactObjectStore {
     const bytes = Buffer.isBuffer(content) ? content : Buffer.from(content, "utf8");
     const client = await this.client();
     if (options.immutable !== false) {
+      let existing: { content: Buffer } | undefined;
       try {
-        const existing = await client.get(normalized);
+        existing = await client.get(normalized);
+      } catch (error) {
+        if (!isObjectStoreNotFound(error)) throw this.withContext("GET", error);
+      }
+      if (existing) {
         const existingBytes = Buffer.isBuffer(existing.content)
           ? existing.content
           : Buffer.from(existing.content as unknown as Uint8Array);
@@ -111,8 +116,6 @@ export class AliyunArtifactObjectStore implements ArtifactObjectStore {
           bytes: bytes.byteLength,
           ...(options.contentType ? { contentType: options.contentType } : {})
         };
-      } catch (error) {
-        if (!isObjectStoreNotFound(error)) throw error;
       }
     }
     try {
@@ -125,8 +128,13 @@ export class AliyunArtifactObjectStore implements ArtifactObjectStore {
         ...(options.immutable !== false ? { headers: { "x-oss-forbid-overwrite": "true" } } : {})
       });
     } catch (error) {
-      if (options.immutable === false || !isAlreadyExists(error)) throw error;
-      const existing = await client.get(normalized);
+      if (options.immutable === false || !isAlreadyExists(error)) throw this.withContext("PUT", error);
+      let existing: { content: Buffer };
+      try {
+        existing = await client.get(normalized);
+      } catch (getError) {
+        throw this.withContext("GET", getError);
+      }
       const existingBytes = Buffer.isBuffer(existing.content)
         ? existing.content
         : Buffer.from(existing.content as unknown as Uint8Array);
@@ -141,28 +149,67 @@ export class AliyunArtifactObjectStore implements ArtifactObjectStore {
   }
 
   async get(key: string): Promise<Buffer> {
-    const result = await (await this.client()).get(objectKey(this.options.prefix, key));
-    if (!Buffer.isBuffer(result.content)) return Buffer.from(result.content as unknown as Uint8Array);
-    return result.content;
+    try {
+      const result = await (await this.client()).get(objectKey(this.options.prefix, key));
+      if (!Buffer.isBuffer(result.content)) return Buffer.from(result.content as unknown as Uint8Array);
+      return result.content;
+    } catch (error) {
+      throw this.withContext("GET", error);
+    }
   }
 
   async list(prefix: string): Promise<string[]> {
     const client = await this.client();
     const names: string[] = [];
     let marker: string | undefined;
-    do {
-      const result = await client.list({
-        prefix: objectKey(this.options.prefix, prefix),
-        ...(marker ? { marker } : {}),
-        "max-keys": 1000
-      });
-      for (const item of result.objects ?? []) {
-        if (typeof item.name !== "string") continue;
-        names.push(stripPrefix(this.options.prefix, item.name));
-      }
-      marker = result.isTruncated ? (result.nextMarker ?? undefined) : undefined;
-    } while (marker);
+    try {
+      do {
+        const result = await client.list({
+          prefix: objectKey(this.options.prefix, prefix),
+          ...(marker ? { marker } : {}),
+          "max-keys": 1000
+        });
+        for (const item of result.objects ?? []) {
+          if (typeof item.name !== "string") continue;
+          names.push(stripPrefix(this.options.prefix, item.name));
+        }
+        marker = result.isTruncated ? (result.nextMarker ?? undefined) : undefined;
+      } while (marker);
+    } catch (error) {
+      throw this.withContext("LIST", error);
+    }
     return names;
+  }
+
+  private withContext(operation: string, error: unknown): Error {
+    const source = error instanceof Error ? error : new Error(String(error));
+    const value = error && typeof error === "object" ? error as {
+      code?: string;
+      status?: number;
+      requestId?: string;
+      hostId?: string;
+    } : {};
+    const details = [
+      value.code ? `code=${value.code}` : "",
+      value.status === undefined ? "" : `status=${value.status}`,
+      value.requestId ? `requestId=${value.requestId}` : "",
+      value.hostId ? `hostId=${value.hostId}` : ""
+    ].filter(Boolean).join(", ");
+    source.message = `OSS ${operation} failed (${this.targetDescription()}): ${source.message}${details ? ` [${details}]` : ""}`;
+    return source;
+  }
+
+  private targetDescription(): string {
+    let endpoint = this.options.endpoint;
+    if (!endpoint) {
+      const region = this.options.region ?? "oss-cn-shanghai";
+      endpoint = `${region}${this.options.internal ? "-internal" : ""}.aliyuncs.com`;
+    }
+    try {
+      return `${this.options.bucket}@${new URL(endpoint).host}`;
+    } catch {
+      return `${this.options.bucket}@${endpoint.replace(/^https?:\/\//, "").split("/")[0]}`;
+    }
   }
 
   private async client(): Promise<AliOssClient> {

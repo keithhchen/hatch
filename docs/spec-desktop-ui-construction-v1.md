@@ -258,7 +258,7 @@ Markdown table 的 scroll container 必须是 wrapper，不能把 `<table>` 自�
 
 - 每个重要动作都必须对应 semantic command、menu 和可通过键盘完成的路径。
 - 文件夹拖到 Workspace target 可创建或更新当前窗口的 Workspace Authorization。
-- 文件拖进 Composer 可添加为上下文：Native 在 drop gesture 发生时验证并读取 bounded UTF-8 snapshot，随后只保存 window-scoped、短生命周期、one-shot 的 opaque handle；发送时不重新打开路径，也不把路径 authority 交给 renderer。Renderer 只看到文件名与 attachment chip，不看到绝对路径、bookmark 或 grant；单文件 projection 最多 64 KiB、source 最多 1 MiB、最多 8 个、总 projection 最多 128 KiB，binary/不符合 UTF-8 或超限文件在 Native boundary 被拒绝并显示受限说明。发送使用 wire protocol `0.7` 的结构化 `message.attachments`（`attachment_id`、display name、MIME、source bytes、bounded text、SHA-256、truncated），Runtime 再校验并以明确的 untrusted framing 生成模型输入、写入 journal；附件不获得后续 filesystem authority。
+- 文件拖进 Composer 可添加为上下文：Native 在 drop gesture 发生时验证并读取 bounded UTF-8 snapshot，随后只保存 window-scoped、短生命周期、one-shot 的 opaque handle；发送时不重新打开路径，也不把路径 authority 交给 renderer。Renderer 只看到文件名与 attachment chip，不看到绝对路径、bookmark 或 grant；文本 projection 最多 64 KiB、文本 source 最多 1 MiB，binary/rich asset（包括图片、PDF、Office 文件）最多 24 MiB，最多 8 个、总 rich asset 最多 24 MiB、总 projection 最多 128 KiB，超限文件在 Native boundary 被拒绝并显示受限说明。发送使用 wire protocol `0.7` 的结构化 `message.attachments`（`attachment_id`、display name、MIME、source bytes、bounded text、SHA-256、truncated），Runtime 再校验并以明确的 untrusted framing 生成模型输入、写入 journal；附件不获得后续 filesystem authority。
 - 所有 drag-and-drop 操作都有 picker、menu 或 keyboard 等价路径。
 - IME composition 期间不得误触发 send、stop 或 global command。
 - `Escape` 只关闭 transient UI，不停止 Run。

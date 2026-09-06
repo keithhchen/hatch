@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { RuntimeAssetStore, type AssetReference } from "./assetStore.js";
+import { RuntimeAssetStore, runtimeObjectStoreFromEnvironment, type AssetReference } from "./assetStore.js";
 import type { ArtifactObjectStore, ObjectStoreObject, ObjectStorePutOptions } from "./creatorLearning/objectStore.js";
 import { parseInboundMessage, type AssetAttachment } from "./protocol.js";
 
@@ -128,4 +128,28 @@ test("production asset store persists bytes in cloud object storage and returns 
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("runtime object storage inherits the Creator OSS connection unless explicitly overridden", () => {
+  const objectStore = runtimeObjectStoreFromEnvironment({
+    NODE_ENV: "production",
+    HATCH_CREATOR_OBJECT_STORE_BUCKET: "creator-bucket",
+    HATCH_CREATOR_OBJECT_STORE_REGION: "oss-cn-hangzhou",
+    HATCH_CREATOR_OBJECT_STORE_ENDPOINT: "https://oss-cn-hangzhou-internal.aliyuncs.com",
+    HATCH_CREATOR_OBJECT_STORE_INTERNAL: "false",
+    HATCH_CREATOR_OBJECT_STORE_PREFIX: "creator",
+    HATCH_RUNTIME_OBJECT_STORE_BUCKET: "",
+    HATCH_RUNTIME_OBJECT_STORE_REGION: "",
+    HATCH_RUNTIME_OBJECT_STORE_ENDPOINT: "",
+    HATCH_RUNTIME_OBJECT_STORE_INTERNAL: ""
+  });
+  assert.ok(objectStore);
+  const options = (objectStore as unknown as { options: Record<string, unknown> }).options;
+  assert.deepEqual(options, {
+    bucket: "creator-bucket",
+    region: "oss-cn-hangzhou",
+    endpoint: "https://oss-cn-hangzhou-internal.aliyuncs.com",
+    internal: false,
+    prefix: ""
+  });
 });

@@ -200,9 +200,8 @@ export function runtimeAssetStoreFromEnvironment(
   environment: NodeJS.ProcessEnv = process.env,
   dataDirectory = environment.HATCH_RUNTIME_DATA_DIR?.trim() || path.resolve(".hatch-runtime")
 ): RuntimeAssetStore {
-  const bucket = environment.HATCH_RUNTIME_OBJECT_STORE_BUCKET?.trim()
-    || environment.HATCH_CREATOR_OBJECT_STORE_BUCKET?.trim();
-  if (!bucket) {
+  const objectStore = runtimeObjectStoreFromEnvironment(environment);
+  if (!objectStore) {
     if (environment.NODE_ENV === "production") {
       throw new Error("HATCH_RUNTIME_OBJECT_STORE_BUCKET or HATCH_CREATOR_OBJECT_STORE_BUCKET is required in production");
     }
@@ -211,25 +210,43 @@ export function runtimeAssetStoreFromEnvironment(
   const configuredCreatorPrefix = environment.HATCH_CREATOR_OBJECT_STORE_PREFIX?.trim() || "hatch";
   const prefix = environment.HATCH_RUNTIME_OBJECT_STORE_PREFIX?.trim()
     || `${configuredCreatorPrefix}/runtime-assets`;
+  return new RuntimeAssetStore(dataDirectory, {
+    objectStore,
+    objectKeyPrefix: prefix,
+    storageReferencePrefix: `oss://${runtimeObjectStoreBucket(environment)}`
+  });
+}
+
+/**
+ * Build the exact cloud store used by Runtime assets. This is also used by
+ * the deployment preflight so a bad endpoint, region, or credential is found
+ * before the first user attachment arrives.
+ */
+export function runtimeObjectStoreFromEnvironment(
+  environment: NodeJS.ProcessEnv = process.env
+): AliyunArtifactObjectStore | undefined {
+  const bucket = runtimeObjectStoreBucket(environment);
+  if (!bucket) return undefined;
   const region = environment.HATCH_RUNTIME_OBJECT_STORE_REGION?.trim()
     || environment.HATCH_CREATOR_OBJECT_STORE_REGION?.trim()
     || "oss-cn-shanghai";
   const endpoint = environment.HATCH_RUNTIME_OBJECT_STORE_ENDPOINT?.trim()
     || environment.HATCH_CREATOR_OBJECT_STORE_ENDPOINT?.trim();
-  const internalRaw = environment.HATCH_RUNTIME_OBJECT_STORE_INTERNAL
-    ?? environment.HATCH_CREATOR_OBJECT_STORE_INTERNAL;
-  const internal = internalRaw === undefined ? true : internalRaw.trim().toLowerCase() === "true";
-  return new RuntimeAssetStore(dataDirectory, {
-    objectStore: new AliyunArtifactObjectStore({
-      bucket,
-      region,
-      ...(endpoint ? { endpoint } : {}),
-      internal,
-      // RuntimeAssetStore supplies the complete key so the persisted
-      // storage_ref remains readable if the configured prefix changes.
-      prefix: ""
-    }),
-    objectKeyPrefix: prefix,
-    storageReferencePrefix: `oss://${bucket}`
+  const internalRaw = environment.HATCH_RUNTIME_OBJECT_STORE_INTERNAL?.trim()
+    || environment.HATCH_CREATOR_OBJECT_STORE_INTERNAL?.trim();
+  const internal = internalRaw === undefined ? true : internalRaw.toLowerCase() === "true";
+  return new AliyunArtifactObjectStore({
+    bucket,
+    region,
+    ...(endpoint ? { endpoint } : {}),
+    internal,
+    // RuntimeAssetStore supplies the complete key so the persisted
+    // storage_ref remains readable if the configured prefix changes.
+    prefix: ""
   });
+}
+
+function runtimeObjectStoreBucket(environment: NodeJS.ProcessEnv): string | undefined {
+  return environment.HATCH_RUNTIME_OBJECT_STORE_BUCKET?.trim()
+    || environment.HATCH_CREATOR_OBJECT_STORE_BUCKET?.trim();
 }

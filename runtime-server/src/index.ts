@@ -107,9 +107,9 @@ export type RuntimeServer = {
   close: () => Promise<void>;
 };
 
-// A successful local tool result may occupy up to 4 MiB. Reserve bounded JSON
-// envelope overhead while keeping one hard transport cap for every frame.
-export const MAX_RUNTIME_WEBSOCKET_PAYLOAD_BYTES = 32 * 1024 * 1024;
+// A rich asset is base64-encoded on the client-to-Runtime frame. Reserve room
+// for the 24 MiB binary attachment's ~32 MiB base64 form plus JSON envelope.
+export const MAX_RUNTIME_WEBSOCKET_PAYLOAD_BYTES = 40 * 1024 * 1024;
 
 export type RuntimeServerOptions = {
   createRuntime?: () => AgentRuntime;
