@@ -16,6 +16,7 @@ import {
 import { createAgentRuntime, type AgentRuntime, type RuntimeSessionSkills } from "./agentRuntime.js";
 import {
   clientMessageInputDigest,
+  MAX_RICH_TOOL_RESULT_BYTES,
   parseInboundMessage,
   PROTOCOL_VERSION,
   TASK_START_MESSAGE_CONTENT,
@@ -107,9 +108,10 @@ export type RuntimeServer = {
   close: () => Promise<void>;
 };
 
-// A rich asset is base64-encoded on the client-to-Runtime frame. Reserve room
-// for the 24 MiB binary attachment's ~32 MiB base64 form plus JSON envelope.
-export const MAX_RUNTIME_WEBSOCKET_PAYLOAD_BYTES = 40 * 1024 * 1024;
+// A rich asset is base64-encoded on the client-to-Runtime frame. The protocol
+// keeps one asset/message at 100 MiB; 160 MiB leaves room for the ~133 MiB
+// base64 body, structured metadata, and a rich local-tool result envelope.
+export const MAX_RUNTIME_WEBSOCKET_PAYLOAD_BYTES = MAX_RICH_TOOL_RESULT_BYTES;
 
 export type RuntimeServerOptions = {
   createRuntime?: () => AgentRuntime;
@@ -310,8 +312,8 @@ export async function createRuntimeServerFromEnvironment(
   const maxSocketBufferedBytes = runtimeCapacityLimit(
     "HATCH_RUNTIME_MAX_SOCKET_BUFFERED_BYTES",
     environment.HATCH_RUNTIME_MAX_SOCKET_BUFFERED_BYTES,
-    40 * 1024 * 1024,
-    64 * 1024 * 1024
+    160 * 1024 * 1024,
+    256 * 1024 * 1024
   );
   const maxEstablishedConnectionsPerUser = runtimeCapacityLimit(
     "HATCH_RUNTIME_MAX_ESTABLISHED_CONNECTIONS_PER_USER",
@@ -793,7 +795,7 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   if (!Number.isSafeInteger(httpHeadersTimeoutMs) || httpHeadersTimeoutMs < 1) {
     throw new Error("httpHeadersTimeoutMs must be a positive safe integer");
   }
-  const maxSocketBufferedBytes = options.maxSocketBufferedBytes ?? 40 * 1024 * 1024;
+  const maxSocketBufferedBytes = options.maxSocketBufferedBytes ?? 160 * 1024 * 1024;
   if (!Number.isSafeInteger(maxSocketBufferedBytes) || maxSocketBufferedBytes < MAX_RUNTIME_WEBSOCKET_PAYLOAD_BYTES) {
     throw new Error(`maxSocketBufferedBytes must be an integer of at least ${MAX_RUNTIME_WEBSOCKET_PAYLOAD_BYTES}`);
   }
@@ -1879,7 +1881,7 @@ async function handleRuntimeSocket(
   scheduleDeliveryReconciliation: () => void = () => undefined,
   toolResultTimeoutMs = clientToolTimeoutMs(),
   serverToolTimeoutMs = 120_000,
-  maxSocketBufferedBytes = 40 * 1024 * 1024
+  maxSocketBufferedBytes = 160 * 1024 * 1024
 ): Promise<void> {
   const connectionAbortController = new AbortController();
   // Each WebSocket owns a Runtime-generated executor lease. No client/device

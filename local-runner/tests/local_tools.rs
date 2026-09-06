@@ -395,11 +395,12 @@ fn file_read_enforces_one_mib_boundary_for_utf8_files() {
 
 #[test]
 fn rich_file_read_rejects_oversized_office_bytes_without_truncating() {
-    const MAX_RICH_FILE_BYTES: usize = 16 * 1024 * 1024;
+    const MAX_RICH_FILE_BYTES: usize = 100 * 1024 * 1024;
     let temp = tempdir().unwrap();
     let runner = LocalRunner::new(temp.path()).unwrap();
     let path = temp.path().join("xlsx-over-limit.xlsx");
-    fs::write(&path, vec![b'x'; MAX_RICH_FILE_BYTES + 1]).unwrap();
+    let file = fs::File::create(&path).unwrap();
+    file.set_len((MAX_RICH_FILE_BYTES + 1) as u64).unwrap();
 
     let over = runner.execute_tool_call_request(tool_request(
         "call_xlsx_over_limit",
@@ -408,7 +409,7 @@ fn rich_file_read_rejects_oversized_office_bytes_without_truncating() {
     ));
     assert_error_result(over, |error| {
         assert_eq!(error["code"], "file_too_large");
-        assert!(error["message"].as_str().unwrap().contains("16777217"));
+        assert!(error["message"].as_str().unwrap().contains("104857601"));
     });
 }
 

@@ -17,7 +17,7 @@ const MAX_WORKSPACE_DIFF_BYTES: usize = 64 * 1024;
 const MAX_SEARCH_FILES_SCANNED: usize = 2_000;
 const MAX_SEARCH_FILE_BYTES: u64 = 1024 * 1024;
 const MAX_READ_FILE_BYTES: u64 = MAX_SEARCH_FILE_BYTES;
-const MAX_RICH_FILE_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_RICH_FILE_BYTES: u64 = 100 * 1024 * 1024;
 const MAX_SEARCH_ELAPSED: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone)]

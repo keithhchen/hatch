@@ -6,7 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { RuntimeAssetStore, runtimeObjectStoreFromEnvironment, type AssetReference } from "./assetStore.js";
 import type { ArtifactObjectStore, ObjectStoreObject, ObjectStorePutOptions } from "./creatorLearning/objectStore.js";
-import { parseInboundMessage, type AssetAttachment } from "./protocol.js";
+import { MAX_CONTEXT_ASSET_BYTES, parseInboundMessage, type AssetAttachment } from "./protocol.js";
 
 class FakeObjectStore implements ArtifactObjectStore {
   readonly objects = new Map<string, Buffer>();
@@ -67,6 +67,34 @@ test("rich asset payload is validated and stored outside the conversation record
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("Runtime accepts a rich asset at the 100 MiB boundary and rejects the next byte", () => {
+  const attachment = {
+    kind: "asset" as const,
+    attachment_id: "drop_boundary",
+    asset_id: "asset_boundary",
+    display_name: "boundary.pptx",
+    media_type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    source_bytes: MAX_CONTEXT_ASSET_BYTES,
+    sha256: "a".repeat(64)
+  };
+  assert.doesNotThrow(() => parseInboundMessage({
+    type: "client.message",
+    run_id: "run_boundary",
+    conversation_id: "conversation_boundary",
+    message: { role: "user", content: "Inspect this", attachments: [attachment] }
+  }));
+  assert.throws(() => parseInboundMessage({
+    type: "client.message",
+    run_id: "run_boundary_over",
+    conversation_id: "conversation_boundary",
+    message: {
+      role: "user",
+      content: "Inspect this",
+      attachments: [{ ...attachment, source_bytes: MAX_CONTEXT_ASSET_BYTES + 1 }]
+    }
+  }), /Too big|maximum|100 MiB|104857601/i);
 });
 
 test("asset identity mismatch cannot overwrite an existing asset", async () => {

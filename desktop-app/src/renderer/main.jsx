@@ -175,6 +175,7 @@ import {
   PRODUCT_OPEN_EVENT
 } from "./product-open.js";
 import {
+  MAX_NATIVE_DROP_SOURCE_BYTES,
   normalizeNativeDropAttachment,
   normalizeNativeDropFile
 } from "./native-drop-context.js";
@@ -243,7 +244,7 @@ function DesktopAuxiliaryWindow({ kind }) {
           <p className="desktop-auxiliary-lede">Creator agents, on your terms.</p>
           <p>Hatch keeps the desktop boundary native while React renders the conversation work surface.</p>
           <dl className="desktop-auxiliary-facts">
-          <div><dt>Version</dt><dd>0.1.25</dd></div>
+          <div><dt>Version</dt><dd>0.1.26</dd></div>
             <div><dt>Architecture</dt><dd>Tauri Hybrid</dd></div>
           </dl>
         </section>
@@ -2206,7 +2207,7 @@ function App() {
         protocol_version: PROTOCOL_VERSION,
         auth_token: buyerSession.accessToken,
         entitlement_id: targetEntitlementId,
-        client_version: "0.1.25",
+        client_version: "0.1.26",
         local_tools: [...PLATFORM_LOCAL_TOOLS],
       }));
     });
@@ -2736,7 +2737,7 @@ function App() {
       : "";
     if (rejected.length === 0) return acceptedLabel;
     const rejectedLabel = `${rejected.length} file${rejected.length === 1 ? "" : "s"} couldn't be attached`;
-    const reason = typeof rejected[0]?.reason === "string" ? rejected[0].reason : "Try a file under 24 MiB.";
+    const reason = typeof rejected[0]?.reason === "string" ? rejected[0].reason : "Try a file under 100 MiB.";
     return acceptedLabel ? `${acceptedLabel}; ${rejectedLabel}` : `${rejectedLabel} — ${reason}`;
   }
 
@@ -2762,7 +2763,7 @@ function App() {
     if (!file) return;
     event.preventDefault();
     try {
-      if (file.size > 24 * 1024 * 1024) throw new Error("Pasted files are limited to 24 MiB.");
+      if (file.size > MAX_NATIVE_DROP_SOURCE_BYTES) throw new Error("Pasted files are limited to 100 MiB.");
       const bytes = new Uint8Array(await file.arrayBuffer());
       const mediaType = file.type || "application/octet-stream";
       const displayName = file.name?.trim() || (mediaType.startsWith("image/") ? `pasted-image.${mediaType.split("/")[1] || "png"}` : "pasted-file");

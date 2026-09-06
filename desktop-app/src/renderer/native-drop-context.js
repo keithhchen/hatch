@@ -1,4 +1,4 @@
-const MAX_NATIVE_DROP_SOURCE_BYTES = 24 * 1024 * 1024;
+export const MAX_NATIVE_DROP_SOURCE_BYTES = 100 * 1024 * 1024;
 const MAX_NATIVE_DROP_TEXT_BYTES = 64 * 1024;
 const DROP_HANDLE_PATTERN = /^drop_[a-z0-9_-]{1,91}$/i;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;

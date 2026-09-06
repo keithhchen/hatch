@@ -16,6 +16,7 @@ import { createRuntimeServer, type RuntimeServer } from "./index.js";
 import { createOutputGuardFromEnvironment } from "./outputGuard.js";
 import { requireUuidV4 } from "./identity.js";
 import {
+  MAX_RICH_TOOL_RESULT_BYTES,
   PROTOCOL_VERSION,
   ToolCallResultSchema,
   type ClientHello,
@@ -30,7 +31,7 @@ const DEFAULT_TIMEOUT_MS = 15 * 60_000;
 const MAX_STDIN_BYTES = 2 * 1024 * 1024;
 const MAX_RESULT_BYTES = 16 * 1024 * 1024;
 const MAX_TRACE_EVENTS = 2_000;
-const MAX_LOCAL_RUNNER_LINE_BYTES = 24 * 1024 * 1024 + 64 * 1024;
+const MAX_LOCAL_RUNNER_LINE_BYTES = MAX_RICH_TOOL_RESULT_BYTES + 64 * 1024;
 const MAX_LOCAL_RUNNER_STDERR_BYTES = 64 * 1024;
 const MAX_PENDING_LOCAL_TOOL_CALLS = 64;
 const LOCAL_RUNNER_SHUTDOWN_MS = 2_000;

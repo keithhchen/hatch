@@ -47,9 +47,9 @@ const LOCAL_TOOL_RESULT_TTL: Duration = Duration::from_secs(60);
 const PENDING_TOOL_APPROVAL_TTL: Duration = Duration::from_secs(5 * 60);
 const NATIVE_DROP_CONTEXT_TTL: Duration = Duration::from_secs(10 * 60);
 const MAX_NATIVE_DROP_CONTEXTS: usize = 8;
-const MAX_NATIVE_DROP_CONTEXT_SOURCE_BYTES: u64 = 24 * 1024 * 1024;
+const MAX_NATIVE_DROP_CONTEXT_SOURCE_BYTES: u64 = 100 * 1024 * 1024;
 const MAX_NATIVE_DROP_CONTEXT_BYTES: usize = 64 * 1024;
-const MAX_NATIVE_DROP_CONTEXT_TOTAL_BYTES: usize = 24 * 1024 * 1024;
+const MAX_NATIVE_DROP_CONTEXT_TOTAL_BYTES: usize = 100 * 1024 * 1024;
 const MAX_NATIVE_DROP_CONTEXT_REQUESTS: usize = 8;
 const PRODUCT_OPEN_EVENT: &str = "hatch://product-open";
 
@@ -747,7 +747,7 @@ fn safe_drop_display_name(value: &str) -> String {
 
 fn native_drop_rejection_reason(error: &str) -> &'static str {
     if error.contains("native_drop_context_too_large") {
-        "File is larger than the 24 MiB attachment limit."
+        "File is larger than the 100 MiB attachment limit."
     } else {
         "This item could not be attached as a local file."
     }

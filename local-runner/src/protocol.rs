@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 pub const MAX_TOOL_RESULT_BYTES: usize = 4 * 1024 * 1024;
-pub const MAX_RICH_TOOL_RESULT_BYTES: usize = 24 * 1024 * 1024;
+pub const MAX_RICH_TOOL_RESULT_BYTES: usize = 160 * 1024 * 1024;
 
 #[derive(Debug, Deserialize)]
 pub struct ToolCallRequest {

@@ -82,7 +82,7 @@ test("production trusts forwarded client IP only on the private Registry network
   );
   assert.match(
     runtimeService,
-    /HATCH_RUNTIME_MAX_SOCKET_BUFFERED_BYTES: \$\{HATCH_RUNTIME_MAX_SOCKET_BUFFERED_BYTES:-41943040\}/,
+    /HATCH_RUNTIME_MAX_SOCKET_BUFFERED_BYTES: \$\{HATCH_RUNTIME_MAX_SOCKET_BUFFERED_BYTES:-167772160\}/,
     "Runtime's Compose default must accommodate the negotiated WebSocket payload cap"
   );
   const dashboardService = compose.match(/^  dashboard:\n([\s\S]*?)(?=^  [a-z][a-z0-9_-]*:\n)/m)?.[1];

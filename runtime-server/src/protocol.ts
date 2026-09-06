@@ -10,7 +10,10 @@ export const SUPPORTED_PROTOCOL_VERSIONS = [LEGACY_PROTOCOL_VERSION, PROTOCOL_VE
 export const ProtocolVersionSchema = z.enum(SUPPORTED_PROTOCOL_VERSIONS);
 export type ProtocolVersion = z.infer<typeof ProtocolVersionSchema>;
 export const MAX_TOOL_RESULT_BYTES = 4 * 1024 * 1024;
-export const MAX_RICH_TOOL_RESULT_BYTES = 24 * 1024 * 1024;
+// Rich local-tool results carry the same base64 envelope as a 100 MiB asset.
+// Keep this above the encoded asset size so file_read can return a full image
+// or document without being rejected by the tool-result boundary.
+export const MAX_RICH_TOOL_RESULT_BYTES = 160 * 1024 * 1024;
 export const MAX_PROTOCOL_ID_CHARS = 256;
 export const MAX_AUTH_TOKEN_CHARS = 4 * 1024;
 export const MAX_USER_MESSAGE_CHARS = 256 * 1024;
@@ -25,8 +28,11 @@ export const MAX_CONTEXT_ATTACHMENT_TEXT_BYTES = 64 * 1024;
 export const MAX_CONTEXT_ATTACHMENT_TOTAL_TEXT_BYTES = 128 * 1024;
 // Keep one rich attachment below the WebSocket's bounded message budget while
 // allowing ordinary PowerPoint decks with embedded images to be attached.
-export const MAX_CONTEXT_ASSET_BYTES = 24 * 1024 * 1024;
-export const MAX_CONTEXT_ASSET_TOTAL_BYTES = 24 * 1024 * 1024;
+// The per-message total intentionally matches the per-file cap: the current
+// protocol sends one bounded JSON frame, so several 100 MiB files must not
+// expand one frame into an unbounded multi-hundred-megabyte upload.
+export const MAX_CONTEXT_ASSET_BYTES = 100 * 1024 * 1024;
+export const MAX_CONTEXT_ASSET_TOTAL_BYTES = 100 * 1024 * 1024;
 export const MAX_CONTEXT_ASSET_BASE64_CHARS = Math.ceil(MAX_CONTEXT_ASSET_BYTES / 3) * 4;
 export const MAX_ERROR_MESSAGE_CHARS = 16 * 1024;
 /** Canonical model-visible content for the internal task-start user turn. */
