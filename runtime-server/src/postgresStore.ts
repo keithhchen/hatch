@@ -1,5 +1,7 @@
 import { Pool, type QueryResultRow } from "pg";
-import type { ConversationMessage } from "./protocol.js";
+import type { ConversationMessage, PersistedContextAttachment } from "./protocol.js";
+import { historyBoundary, historyCursor, historyLimit, historyMessages,
+  type ConversationHistoryOptions, type ConversationHistoryPage } from "./conversationHistory.js";
 import {
   assertCanonicalPersistedToolNames,
   normalizePersistedStoreEvent,
@@ -33,6 +35,11 @@ CREATE TABLE IF NOT EXISTS hatch_conversation_events (
 );
 CREATE INDEX IF NOT EXISTS hatch_conversation_events_conversation_idx
   ON hatch_conversation_events (conversation_id, id);
+CREATE INDEX IF NOT EXISTS hatch_conversation_events_turn_idx
+  ON hatch_conversation_events (conversation_id, run_id, id);
+CREATE INDEX IF NOT EXISTS hatch_conversation_events_asset_idx
+  ON hatch_conversation_events USING GIN (payload jsonb_path_ops)
+  WHERE event_type IN ('conversation.model_message', 'message.created');
 CREATE TABLE IF NOT EXISTS hatch_conversation_usage (
   scope_key TEXT PRIMARY KEY,
   event_count BIGINT NOT NULL,
@@ -512,7 +519,91 @@ export class PostgresStore extends RuntimeStore {
     return messages;
   }
 
-  async readVisibleConversation(conversationId: string): Promise<VisibleConversationMessage[]> {
+  async readVisibleConversationPage(conversationId: string, options: ConversationHistoryOptions = {}): Promise<ConversationHistoryPage> {
+    const limit = historyLimit(options.limit);
+    const boundary = historyBoundary(conversationId, options.beforeCursor);
+    await this.waitForConversationAppends(conversationId);
+    await this.ensureSchema();
+    const turns = await this.query<{ run_id: string; first_id: string; message_count: string }>(`
+      WITH history_turns AS (SELECT run_id, MIN(id) AS first_id,
+        COUNT(DISTINCT CASE
+          WHEN event_type = 'message.created' THEN payload->>'role'
+          WHEN event_type = 'conversation.model_message' AND (
+            (payload->'message'->>'role' = 'user' AND COALESCE(payload->'message'->>'kind', '') <> 'task_start')
+            OR (payload->'message'->>'role' = 'assistant' AND payload->>'finish_reason' IS NOT NULL)
+          ) THEN payload->'message'->>'role' END) AS message_count
+      FROM hatch_conversation_events
+      WHERE conversation_id = $1 AND run_id IS NOT NULL
+      GROUP BY run_id)
+      SELECT run_id, first_id::text, message_count::text FROM history_turns
+      WHERE message_count > 0 AND ($2::bigint IS NULL OR first_id < $2::bigint)
+      ORDER BY first_id::bigint DESC LIMIT $3`, [conversationId, boundary ?? null, limit + 1]);
+    const selected: typeof turns.rows = [];
+    let count = 0;
+    for (const turn of turns.rows) {
+      if (count >= limit) break;
+      selected.push(turn);
+      count += Number(turn.message_count);
+    }
+    selected.reverse();
+    const runIds = selected.map((turn) => turn.run_id);
+    // Strip heavy fields in PostgreSQL, before they cross the connection. No replay quota applies.
+    const result = runIds.length ? await this.query<PayloadRow>(`
+      SELECT CASE
+        WHEN event_type = 'tool.call' THEN (payload - ARRAY['arguments','result','error']) || '{"arguments":{}}'::jsonb
+        WHEN event_type = 'skill.activated' THEN payload - 'content'
+        WHEN event_type = 'conversation.model_message' THEN
+          jsonb_set(payload #- '{message,attachments}', '{message}',
+            ((payload->'message') - 'attachments') || CASE WHEN jsonb_typeof(payload->'message'->'attachments') = 'array'
+              THEN jsonb_build_object('attachments', (SELECT COALESCE(jsonb_agg(a - ARRAY['text','data_base64']), '[]'::jsonb)
+                FROM jsonb_array_elements(payload->'message'->'attachments') a)) ELSE '{}'::jsonb END)
+        WHEN event_type = 'message.created' AND jsonb_typeof(payload->'attachments') = 'array' THEN
+          jsonb_set(payload, '{attachments}', (SELECT COALESCE(jsonb_agg(a - ARRAY['text','data_base64']), '[]'::jsonb)
+            FROM jsonb_array_elements(payload->'attachments') a))
+        ELSE payload END AS payload
+      FROM hatch_conversation_events
+      WHERE conversation_id = $1 AND run_id = ANY($2::text[]) AND (
+        event_type IN ('message.created','tool.call','skill.activated','skill.invoked','skill.run')
+        OR (event_type = 'conversation.model_message' AND (
+          (payload->'message'->>'role' = 'user' AND COALESCE(payload->'message'->>'kind', '') <> 'task_start')
+          OR (payload->'message'->>'role' = 'assistant' AND payload->>'finish_reason' IS NOT NULL)
+        ))) ORDER BY id ASC`, [conversationId, runIds]) : { rows: [] };
+    const hasMore = turns.rows.length > selected.length;
+    return {
+      messages: historyMessages(conversationId, await super.readVisibleConversation(conversationId, result.rows.map((row) => eventFromPayload(row.payload)))),
+      run_ids: runIds, has_more: hasMore,
+      ...(hasMore && selected[0] ? { before_cursor: historyCursor(conversationId, selected[0].first_id) } : {})
+    };
+  }
+
+  async readConversationToolDetail(conversationId: string, runId: string, toolCallId: string): Promise<VisibleConversationToolCall | undefined> {
+    await this.waitForConversationAppends(conversationId);
+    await this.ensureSchema();
+    const result = await this.query<PayloadRow>(`
+      SELECT payload FROM hatch_conversation_events
+      WHERE conversation_id = $1 AND run_id = $2 AND event_type = 'tool.call'
+        AND payload->>'tool_call_id' = $3 ORDER BY id ASC`, [conversationId, runId, toolCallId]);
+    return this.projectConversationToolDetail(conversationId, runId, toolCallId, result.rows.map((row) => eventFromPayload(row.payload)));
+  }
+
+  async readConversationAssetReference(conversationId: string, assetId: string): Promise<Extract<PersistedContextAttachment, { kind: "asset" }> | undefined> {
+    await this.waitForConversationAppends(conversationId);
+    await this.ensureSchema();
+    const result = await this.query<{ attachment: Extract<PersistedContextAttachment, { kind: "asset" }> }>(`
+      SELECT attachment FROM hatch_conversation_events
+      CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN event_type = 'conversation.model_message'
+        THEN payload->'message'->'attachments' ELSE payload->'attachments' END) AS attachment
+      WHERE conversation_id = $1 AND event_type IN ('conversation.model_message', 'message.created')
+        AND (payload @> $2::jsonb OR payload @> $3::jsonb)
+        AND attachment->>'kind' = 'asset' AND attachment->>'asset_id' = $4
+      ORDER BY id ASC LIMIT 1`, [conversationId,
+      JSON.stringify({ message: { attachments: [{ kind: 'asset', asset_id: assetId }] } }),
+      JSON.stringify({ attachments: [{ kind: 'asset', asset_id: assetId }] }), assetId]);
+    return result.rows[0]?.attachment;
+  }
+
+  async readVisibleConversation(conversationId: string, sourceEvents?: StoreEvent[]): Promise<VisibleConversationMessage[]> {
+    if (sourceEvents) return super.readVisibleConversation(conversationId, sourceEvents);
     const events = await this.readVisibleEvents(conversationId);
     const toolCallsByRun = new Map<string, Map<string, VisibleConversationToolCall>>();
     const skillEventsByRun = new Map<string, VisibleConversationSkillEvent[]>();

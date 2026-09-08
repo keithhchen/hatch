@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "@hatch/ui/fonts";
 import "@hatch/ui/theme.css";
@@ -75,16 +75,20 @@ import {
   createConversation,
   canConnectConversation,
   getConversationSnapshot,
-  hydrateConversationAttachments,
+  getConversationAsset,
+  getConversationHistoryPage,
+  getConversationJournalPage,
+  getConversationToolDetail,
+  getConversationRun,
   interruptedRunFromSnapshot,
   isServerConversationId,
   isTerminalRunStatus,
   listConversations,
-  reconcileConversationSnapshot,
   restorableConversationId,
   shouldOpenNewConversationInWindow,
   updateConversation
 } from "./conversation-client.js";
+import { bridgeConversationHistory, drainConversationJournal, includeActiveConversationRun, mergeConversationPage, validateHistoryPage, validateSnapshotPage } from "./conversation-pagination.js";
 import {
   conversationCreationScope,
   createConversationCreationTracker
@@ -244,7 +248,7 @@ function DesktopAuxiliaryWindow({ kind }) {
           <p className="desktop-auxiliary-lede">Creator agents, on your terms.</p>
           <p>Hatch keeps the desktop boundary native while React renders the conversation work surface.</p>
           <dl className="desktop-auxiliary-facts">
-          <div><dt>Version</dt><dd>0.1.26</dd></div>
+          <div><dt>Version</dt><dd>0.1.27</dd></div>
             <div><dt>Architecture</dt><dd>Tauri Hybrid</dd></div>
           </dl>
         </section>
@@ -326,6 +330,8 @@ function AuxiliaryLanguageSettings({ onLanguageChange }) {
     </div>
   );
 }
+
+const ConversationAssetContext = createContext(null);
 
 function App() {
   const auxiliaryMode = auxiliaryWindowMode();
@@ -437,7 +443,29 @@ function App() {
   const [runtimeRetryExhausted, setRuntimeRetryExhausted] = useState(false);
   const [chatLoading, setChatLoading] = useState(false);
   const [running, setRunning] = useState(false);
-  const [messages, setMessages] = useState([]);
+  const [messages, storeMessages] = useState([]);
+  const messagesRef = useRef([]);
+  const setMessages = useCallback((update) => {
+    const next = typeof update === "function" ? update(messagesRef.current) : update;
+    messagesRef.current = next;
+    storeMessages(next);
+  }, []);
+  const historyPageRef = useRef(null);
+  const [historyPage, setHistoryPage] = useState(null);
+  const olderRequestRef = useRef(null);
+  const [olderLoading, setOlderLoading] = useState(false);
+  const [olderError, setOlderError] = useState("");
+  const historyAnchorRef = useRef(null);
+  useLayoutEffect(() => {
+    const anchor = historyAnchorRef.current;
+    if (!anchor) return;
+    historyAnchorRef.current = null;
+    if (anchor.token !== connectionTokenRef.current || anchor.viewport !== viewportRef.current) return;
+    const offset = anchor.element?.isConnected
+      ? anchor.element.getBoundingClientRect().top - anchor.offset
+      : anchor.viewport.scrollHeight - anchor.height;
+    anchor.viewport.scrollTop = anchor.top + offset;
+  }, [messages]);
   const [briefTask, setBriefTask] = useState(null);
   const [taskBrief, setTaskBrief] = useState(null);
   const [composerDraft, setComposerDraft] = useState("");
@@ -504,6 +532,17 @@ function App() {
   const conversationReady = connected
     && conversationLibraryStatus === "ready"
     && isServerConversationId(conversationId);
+  const conversationLoadingKey = desktopConversationLoadingKey({
+    conversationReady,
+    conversationLibraryStatus,
+    windowStateRestored,
+    chatLoading,
+    status,
+    runtimeRetryExhausted,
+    intentionallyOffline: intentionalDisconnectRef.current && !chatLoading,
+    workspaceGranted,
+    hasConversation: isServerConversationId(conversationId)
+  });
   buyerSessionRef.current = buyerSession;
 
   useEffect(() => {
@@ -1999,9 +2038,16 @@ function App() {
     const config = connectionConfigRef.current;
     if (!config || socketRef.current !== socket || requestToken !== connectionTokenRef.current) return;
     try {
-      // The initial HTTP snapshot and WebSocket hello have a small race: a
-      // server event can land between them. Read the journal again after the
-      // authenticated socket is ready, using the cursor already projected.
+      const isCurrent = () => socketRef.current === socket && requestToken === connectionTokenRef.current;
+      const journalCursor = await drainConversationJournal(
+        (options) => getConversationJournalPage(config.serverUrl, buyerSession.accessToken,
+          { entitlementId: config.entitlementId }, config.conversationId, options),
+        conversationCursorRef.current, isCurrent
+      );
+      if (journalCursor === null || !isCurrent()) return;
+      const baseline = messagesRef.current;
+      // Fetch only the latest message page after draining a fixed journal
+      // boundary. Preserve rows updated by the live stream during this read.
       const snapshot = await getConversationSnapshot(
         config.serverUrl,
         buyerSession.accessToken,
@@ -2012,25 +2058,67 @@ function App() {
         conversationCursorRef.current
       );
       if (socketRef.current !== socket || requestToken !== connectionTokenRef.current) return;
-      const reconciled = reconcileConversationSnapshot(snapshot, {
-        afterCursor: conversationCursorRef.current
-      });
-      // The Runtime returns the complete canonical message projection even
-      // for an after_cursor request. Replacing the local projection removes
-      // optimistic duplicates without replaying tools or assistant effects.
-      setMessages(reconciled.messages.map(historyMessageToThreadMessage));
+      let reconciled = await bridgeConversationHistory(validateSnapshotPage(snapshot, journalCursor), baseline,
+        (options) => getConversationHistoryPage(config.serverUrl, buyerSession.accessToken,
+          { entitlementId: config.entitlementId }, config.conversationId, options), isCurrent);
+      if (!reconciled || !isCurrent()) return;
+      reconciled = await includeActiveConversationRun(reconciled, activeRunRef.current?.runId,
+        (runId) => getConversationRun(config.serverUrl, buyerSession.accessToken,
+          { entitlementId: config.entitlementId }, config.conversationId, runId), isCurrent);
+      if (!reconciled || !isCurrent()) return;
+      // Keep the loaded history prefix and its oldest-page cursor intact.
+      setMessages((current) => mergeConversationPage(current, reconciled.messages.map(historyMessageToThreadMessage), { baseline }));
       const briefSnapshot = reconciled.brief_snapshot ?? snapshot.conversation?.brief_snapshot ?? null;
       setTaskBrief(briefSnapshot);
       taskBriefRef.current = briefSnapshot;
-      projectDurableSnapshotRun(snapshot, config.workspaceGrant);
+      projectDurableSnapshotRun(reconciled, config.workspaceGrant);
       if (reconciled.cursor > conversationCursorRef.current) {
         conversationCursorRef.current = reconciled.cursor;
         patchWindowContext({ conversationCursor: reconciled.cursor });
       }
+      return true;
     } catch (error) {
       if (socketRef.current !== socket || requestToken !== connectionTokenRef.current) return;
-      if (error?.code === "snapshot_invalid") {
-        setStatus("Conversation recovery could not be verified. Reconnect to continue.");
+      connectedRef.current = false;
+      setConnected(false);
+      setChatLoading(false);
+      setRuntimeRetryExhausted(true);
+      setStatus("Conversation recovery could not be verified. Reconnect to continue.");
+      return false;
+    }
+  }
+
+  async function loadOlderHistory() {
+    const config = connectionConfigRef.current;
+    const page = historyPageRef.current;
+    if (!config || !page?.has_more || olderRequestRef.current) return;
+    const request = { token: connectionTokenRef.current, page };
+    olderRequestRef.current = request;
+    setOlderLoading(true);
+    setOlderError("");
+    const isCurrent = () => olderRequestRef.current === request
+      && request.token === connectionTokenRef.current && historyPageRef.current === page;
+    try {
+      const result = validateHistoryPage(await getConversationHistoryPage(config.serverUrl,
+        buyerSessionRef.current?.accessToken, { entitlementId: config.entitlementId },
+        config.conversationId, { beforeCursor: page.before_cursor }));
+      if (!isCurrent()) return;
+      if (result.has_more && result.before_cursor === page.before_cursor) throw new Error("History cursor did not advance.");
+      const viewport = viewportRef.current;
+      if (viewport) {
+        const element = [...viewport.querySelectorAll(".chat-message")].find((node) => node.getBoundingClientRect().bottom > viewport.getBoundingClientRect().top);
+        historyAnchorRef.current = { viewport, element, token: request.token,
+          offset: element?.getBoundingClientRect().top, height: viewport.scrollHeight, top: viewport.scrollTop };
+      }
+      setMessages((current) => mergeConversationPage(current, result.messages.map(historyMessageToThreadMessage), { older: true }));
+      historyPageRef.current = { has_more: result.has_more, before_cursor: result.before_cursor, conversationId: config.conversationId };
+      setHistoryPage(historyPageRef.current);
+    } catch (error) {
+      if (isCurrent()) setOlderError(error.message || "Could not load older messages.");
+    } finally {
+      if (olderRequestRef.current === request) {
+        olderRequestRef.current = null;
+        setOlderLoading(false);
       }
     }
   }
@@ -2098,71 +2186,43 @@ function App() {
       persistWorkspaceGrant(normalizedWorkspaceGrant);
       setStatus("Loading history...");
       const activeConversationId = targetConversationId.trim() || "desktop-chat";
-      let history;
-      let snapshotLoaded = false;
-      let snapshotCursor = null;
-      try {
-        const snapshot = await getConversationSnapshot(
-          targetServerUrl.trim(),
-          buyerSession.accessToken,
-          {
-            entitlementId: targetEntitlementId
-          },
-          activeConversationId,
-          conversationCursorRef.current
-        );
-        if (requestToken !== connectionTokenRef.current) return;
-        const reconciledSnapshot = reconcileConversationSnapshot(snapshot, {
-          afterCursor: conversationCursorRef.current
-        });
-        history = reconciledSnapshot.messages;
-        const briefSnapshot = reconciledSnapshot.brief_snapshot ?? snapshot.conversation?.brief_snapshot ?? null;
-        setTaskBrief(briefSnapshot);
-        taskBriefRef.current = briefSnapshot;
-        snapshotCursor = reconciledSnapshot.cursor;
-        projectDurableSnapshotRun(snapshot, targetWorkspaceGrant);
-        snapshotLoaded = true;
-      } catch (snapshotError) {
-        // A malformed journal is an integrity failure, not a rollout/version
-        // miss. Do not silently downgrade it to the legacy history endpoint;
-        // that could display an incomplete projection while hiding the fact
-        // that the cursor boundary was not safely reconciled.
-        if (snapshotError?.code === "snapshot_invalid") throw snapshotError;
-        // Keep old Runtime history readable during the P2 rollout. A P2
-        // Runtime will normally take the snapshot branch; the legacy route is
-        // read-only compatibility and never creates a Conversation.
-        history = await loadConversationHistory(
-          targetServerUrl.trim(),
-          activeConversationId,
-          targetEntitlementId,
-          buyerSession.accessToken,
-          {}
-        ).catch(() => {
-          throw snapshotError;
-        });
-        if (requestToken !== connectionTokenRef.current) return;
+      const baseline = messagesRef.current;
+      const sameConversation = historyPageRef.current?.conversationId === activeConversationId;
+      olderRequestRef.current = null;
+      setOlderLoading(false);
+      setOlderError("");
+      if (!sameConversation) {
+        historyPageRef.current = null;
+        setHistoryPage(null);
       }
-      history = await hydrateConversationAttachments(
-        targetServerUrl.trim(),
-        buyerSession.accessToken,
-        { entitlementId: targetEntitlementId },
-        activeConversationId,
-        history
+      const snapshot = await getConversationSnapshot(
+        targetServerUrl.trim(), buyerSession.accessToken,
+        { entitlementId: targetEntitlementId }, activeConversationId
       );
       if (requestToken !== connectionTokenRef.current) return;
-      // A snapshot is the canonical observer recovery boundary. Replacing
-      // the local projection after reconnect prevents optimistic user/assistant
-      // placeholders from being duplicated when a socket closes mid-turn.
-      if (snapshotLoaded || !connection.preserveMessages || messages.length === 0) {
-        setMessages(history.map(historyMessageToThreadMessage));
+      let reconciledSnapshot = await bridgeConversationHistory(
+        validateSnapshotPage(snapshot, sameConversation ? conversationCursorRef.current : 0), sameConversation ? baseline : [],
+        (options) => getConversationHistoryPage(targetServerUrl.trim(), buyerSession.accessToken,
+          { entitlementId: targetEntitlementId }, activeConversationId, options),
+        () => requestToken === connectionTokenRef.current);
+      if (!reconciledSnapshot || requestToken !== connectionTokenRef.current) return;
+      reconciledSnapshot = await includeActiveConversationRun(reconciledSnapshot, activeRunRef.current?.runId,
+        (runId) => getConversationRun(targetServerUrl.trim(), buyerSession.accessToken,
+          { entitlementId: targetEntitlementId }, activeConversationId, runId),
+        () => requestToken === connectionTokenRef.current);
+      if (!reconciledSnapshot || requestToken !== connectionTokenRef.current) return;
+      const briefSnapshot = reconciledSnapshot.brief_snapshot ?? snapshot.conversation?.brief_snapshot ?? null;
+      setTaskBrief(briefSnapshot);
+      taskBriefRef.current = briefSnapshot;
+      projectDurableSnapshotRun(reconciledSnapshot, targetWorkspaceGrant);
+      setMessages((current) => mergeConversationPage(sameConversation ? current : [],
+        reconciledSnapshot.messages.map(historyMessageToThreadMessage), { baseline }));
+      if (!sameConversation) {
+        historyPageRef.current = { has_more: reconciledSnapshot.has_more, before_cursor: reconciledSnapshot.before_cursor, conversationId: activeConversationId };
+        setHistoryPage(historyPageRef.current);
       }
-      if (snapshotCursor !== null && requestToken === connectionTokenRef.current) {
-        // Persist the cursor only after the corresponding snapshot projection
-        // has been installed, so a crash cannot claim events were rendered
-        // before their messages/run state reached the UI.
-        conversationCursorRef.current = snapshotCursor;
-        patchWindowContext({ conversationCursor: snapshotCursor });
-      }
+      conversationCursorRef.current = reconciledSnapshot.cursor;
+      patchWindowContext({ conversationCursor: reconciledSnapshot.cursor });
       setStatus("Connecting...");
     } catch (error) {
       if (requestToken === connectionTokenRef.current) {
@@ -2207,7 +2267,7 @@ function App() {
         protocol_version: PROTOCOL_VERSION,
         auth_token: buyerSession.accessToken,
         entitlement_id: targetEntitlementId,
-        client_version: "0.1.26",
+        client_version: "0.1.27",
         local_tools: [...PLATFORM_LOCAL_TOOLS],
       }));
     });
@@ -2314,15 +2374,18 @@ function App() {
           return { ...current, spec: nextAgent.briefSpec, answers, error: "" };
         });
       }
-      connectedRef.current = true;
-      reconnectAttemptRef.current = 0;
-      setRuntimeRetryExhausted(false);
-      setConnected(true);
-      setChatLoading(false);
-      setStatus("Connected");
       const socket = socketRef.current;
       if (socket) {
-        await reconcileLiveSnapshot(socket, sourceToken);
+        setChatLoading(true);
+        setStatus("Loading history...");
+        if (!await reconcileLiveSnapshot(socket, sourceToken)) return;
+        if (!isCurrentRuntimeTransport(socket, sourceToken)) return;
+        connectedRef.current = true;
+        reconnectAttemptRef.current = 0;
+        setRuntimeRetryExhausted(false);
+        setConnected(true);
+        setChatLoading(false);
+        setStatus("Connected");
         await sendTaskStartIfNeeded(socket, sourceToken);
       }
       return;
@@ -3662,7 +3725,8 @@ function App() {
       toolbar={(
         <DesktopConversationToolbar
           creatorAgent={creatorAgent}
-          connected={connected}
+          connected={conversationReady}
+          loadingKey={conversationLoadingKey}
           conversationLibraryReady={conversationLibraryStatus === "ready"}
           workspaceGranted={workspaceGranted}
           retryExhausted={runtimeRetryExhausted}
@@ -3681,7 +3745,9 @@ function App() {
       )}
     >
       <section className="chat-shell desktop-chat-shell">
-        {!workspaceGranted ? (
+        {!windowStateRestored ? (
+          <EmptyThread creatorAgent={creatorAgent} loadingKey={conversationLoadingKey} />
+        ) : !workspaceGranted ? (
           <WorkspaceOnboarding
             creatorName={creatorAgent.creator}
             draft={workspaceDraft}
@@ -3709,19 +3775,29 @@ function App() {
         ) : (
           <ApprovalContext.Provider value={{ requests: approvalRequests, resolveToolApproval }}>
             <NativeContextMenuContext.Provider value={showNativeContextMenu}>
+              <ConversationAssetContext.Provider key={`${selectedEntitlementId}:${conversationId}`} value={{ serverUrl, accessToken: buyerSession?.accessToken, entitlementId: selectedEntitlementId, conversationId }}>
               <AssistantRuntimeProvider runtime={runtime}>
                 <ThreadPrimitive.Root className="thread-root">
                 <ThreadPrimitive.Viewport
                   ref={viewportRef}
+                  autoScroll={!olderLoading && !historyAnchorRef.current}
                   className="thread-viewport"
                   onScroll={handleViewportScroll}
                 >
+                  {historyPage?.conversationId === conversationId && historyPage.has_more ? (
+                    <div className="history-pagination">
+                      <Button type="button" variant="secondary" disabled={olderLoading} onClick={() => void loadOlderHistory()}>
+                        {olderLoading ? "Loading older messages…" : olderError ? "Retry older messages" : "Load older messages"}
+                      </Button>
+                      {olderError ? <small role="alert">{olderError}</small> : null}
+                    </div>
+                  ) : null}
                   <TaskBriefCard snapshot={taskBrief} />
                   <ThreadPrimitive.Empty>
                     <EmptyThread
                       connected={conversationReady}
                       creatorAgent={creatorAgent}
-                      chatLoading={chatLoading}
+                      loadingKey={conversationLoadingKey}
                     />
                   </ThreadPrimitive.Empty>
                   <ThreadPrimitive.Messages components={{ Message: HatchMessage }} />
@@ -3744,8 +3820,8 @@ function App() {
                       onPaste={handleComposerPaste}
                       placeholder={conversationReady
                         ? t("conversation.messageAgent", { name: creatorAgent.name })
-                        : chatLoading
-                          ? t("conversation.restoringPlaceholder")
+                        : conversationLoadingKey
+                          ? t(conversationLoadingKey)
                           : t("conversation.offlineTitle")}
                       submitMode="enter"
                       rows={1}
@@ -3793,6 +3869,7 @@ function App() {
                 </ThreadPrimitive.ViewportFooter>
                 </ThreadPrimitive.Root>
               </AssistantRuntimeProvider>
+              </ConversationAssetContext.Provider>
             </NativeContextMenuContext.Provider>
           </ApprovalContext.Provider>
         )}
@@ -3991,13 +4068,23 @@ function ConversationSourceRow({
   );
 }
 
-function DesktopConnectionStatus({ state = "offline", compact = false }) {
+function desktopConversationLoadingKey({ conversationReady, conversationLibraryStatus, windowStateRestored, chatLoading, status, runtimeRetryExhausted, workspaceGranted, hasConversation, intentionallyOffline }) {
+  if (conversationLibraryStatus === "unavailable") return null;
+  if (!windowStateRestored) return "connection.loadingWorkspace";
+  if (conversationLibraryStatus === "idle" || conversationLibraryStatus === "loading") return "connection.loadingLibrary";
+  if (conversationReady || runtimeRetryExhausted || intentionallyOffline) return null;
+  if (chatLoading && status === "Loading history...") return "connection.loadingHistory";
+  if (chatLoading || (workspaceGranted && hasConversation)) return "connection.connecting";
+  return null;
+}
+
+function DesktopConnectionStatus({ state = "offline", compact = false, loadingKey = null }) {
   const t = useI18n();
   const normalizedState = ["connected", "connecting", "offline"].includes(state) ? state : "offline";
   const label = normalizedState === "connected"
     ? t("connection.connected")
     : normalizedState === "connecting"
-      ? t("connection.connecting")
+      ? t(loadingKey || "connection.connecting")
       : t("connection.offline");
   return (
     <span
@@ -4015,7 +4102,7 @@ function DesktopConnectionStatus({ state = "offline", compact = false }) {
   );
 }
 
-function DesktopConversationToolbar({ creatorAgent, connected, conversationLibraryReady, workspaceGranted, retryExhausted, onRetry }) {
+function DesktopConversationToolbar({ creatorAgent, connected, loadingKey, conversationLibraryReady, workspaceGranted, retryExhausted, onRetry }) {
   const t = useI18n();
   const showRetry = Boolean(workspaceGranted && conversationLibraryReady && !connected && retryExhausted);
   const creatorName = String(creatorAgent?.creator || "").trim() || t("app.defaultCreatorName");
@@ -4033,6 +4120,7 @@ function DesktopConversationToolbar({ creatorAgent, connected, conversationLibra
         <span className="desktop-toolbar-context-divider" aria-hidden="true">|</span>
         <span className="desktop-toolbar-agent-name">{agentName}</span>
       </div>
+      {loadingKey ? <DesktopConnectionStatus state="connecting" loadingKey={loadingKey} compact /> : null}
       {showRetry ? (
         <>
           {/* Contract marker: aria-label="Retry connection" */}
@@ -4233,30 +4321,13 @@ async function sha256Hex(bytes) {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function loadConversationHistory(serverUrl, conversationId, entitlementId, accessToken, binding = {}) {
-  const response = await fetch(historyUrlForRuntime(serverUrl, conversationId, entitlementId, binding), {
-    headers: { authorization: `Bearer ${accessToken}` }
-  });
-  if (!response.ok) {
-    throw new Error("We couldn't reload this conversation.");
-  }
-  const payload = await response.json();
-  const messages = Array.isArray(payload.messages) ? payload.messages : [];
-  return messages.filter((message) => message.role === "user" || message.role === "assistant");
-}
-
-function historyUrlForRuntime(serverUrl, conversationId, entitlementId, binding = {}) {
-  const url = new URL(runtimeHttpUrl(serverUrl, `/conversations/${encodeURIComponent(conversationId)}/messages`));
-  url.searchParams.set("entitlement_id", entitlementId);
-  return url.toString();
-}
-
-function historyMessageToThreadMessage(message, index) {
-  const id = `history_${message.run_id ?? "message"}_${index}`;
+function historyMessageToThreadMessage(message) {
+  const id = message.id;
   const createdAt = messageCreatedAt(message.timestamp);
   if (message.role === "user") {
     return makeUserMessage(id, message.content ?? "", createdAt, {
-      attachments: message.attachments
+      attachments: message.attachments,
+      runId: message.run_id
     });
   }
   const filtered = message.finish_reason === "content_filter";
@@ -4326,6 +4397,7 @@ function makeUserMessage(id, text, createdAt = Date.now(), options = {}) {
     metadata: {
       custom: {
         source: "hatch",
+        ...(options.runId ? { runId: options.runId } : {}),
         ...(attachments.length > 0 ? { attachments } : {})
       }
     }
@@ -4374,6 +4446,7 @@ function assistantUiAttachments(attachments) {
       status: { type: "complete" },
       content: image,
       hatch: {
+        assetId: attachment.kind === "asset" ? attachment.asset_id : undefined,
         sourceBytes: Number.isSafeInteger(Number(attachment.source_bytes)) ? Number(attachment.source_bytes) : 0,
         mediaType
       }
@@ -4459,7 +4532,7 @@ function toolPartFromEvent(event, existing) {
   const result = failed
     ? event.error ?? existing?.result
     : completed
-      ? event.result ?? existing?.result ?? { status: "ok" }
+      ? event.result ?? existing?.result ?? (event.detail_ref ? undefined : { status: "ok" })
       : existing?.result;
   return {
     type: "tool-call",
@@ -4471,6 +4544,7 @@ function toolPartFromEvent(event, existing) {
     isError: failed || existing?.isError || false,
     approval: approvalForToolEvent(event, existing),
     artifact: {
+      detailRef: event.detail_ref ?? existing?.artifact?.detailRef,
       locality: event.locality ?? existing?.artifact?.locality,
       status: event.status,
       error: event.error,
@@ -4489,6 +4563,7 @@ function historyToolCallToPart(toolCall) {
     approval: toolCall.approval ?? "none",
     status: toolCall.status,
     arguments: toolCall.arguments,
+    detail_ref: toolCall.detail_ref,
     result: toolCall.result,
     error: toolCall.error
   });
@@ -4615,14 +4690,14 @@ function toolEventFromApproval(message) {
   };
 }
 
-function EmptyThread({ connected, creatorAgent, chatLoading }) {
+function EmptyThread({ connected, creatorAgent, loadingKey }) {
   const t = useI18n();
-  const preparing = !connected && chatLoading;
+  const preparing = Boolean(loadingKey);
   if (preparing) {
     return (
       <div className="empty-thread empty-thread-loading" role="status" aria-live="polite">
         <LoaderCircle className="empty-thread-spinner" aria-hidden="true" />
-        <span>{t("connection.connectingEllipsis")}</span>
+        <span>{t(loadingKey)}</span>
       </div>
     );
   }
@@ -4860,14 +4935,62 @@ function WelcomeTitlebarDragRegion() {
 }
 
 function InlineChatAttachment({ attachment }) {
+  const scope = useContext(ConversationAssetContext);
+  const elementRef = useRef(null);
+  const [visible, setVisible] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const [preview, setPreview] = useState("");
+  const [error, setError] = useState("");
+  const [downloading, setDownloading] = useState(false);
+  const assetId = attachment?.hatch?.assetId;
   const imagePart = Array.isArray(attachment?.content)
     ? attachment.content.find((part) => part?.type === "image" && typeof part.image === "string")
     : undefined;
-  if (attachment?.type === "image" && imagePart) {
+  useEffect(() => {
+    if (!elementRef.current || attachment?.type !== "image" || !assetId || imagePart) return;
+    if (typeof IntersectionObserver === "undefined") { setVisible(true); return; }
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) { setVisible(true); observer.disconnect(); }
+    }, { root: elementRef.current.closest(".thread-viewport"), rootMargin: "160px" });
+    observer.observe(elementRef.current);
+    return () => observer.disconnect();
+  }, [assetId, attachment?.type, imagePart]);
+  useEffect(() => {
+    if (!visible || !scope || !assetId || imagePart) return;
+    let cancelled = false;
+    setError("");
+    getConversationAsset(scope.serverUrl, scope.accessToken, scope, scope.conversationId, assetId)
+      .then((data) => { if (!cancelled) setPreview(`data:${attachment.contentType};base64,${data}`); })
+      .catch((failure) => { if (!cancelled) setError(failure.message); });
+    return () => { cancelled = true; };
+  }, [visible, scope?.serverUrl, scope?.accessToken, scope?.entitlementId, scope?.conversationId, assetId, imagePart, attempt]);
+  async function download() {
+    if (!scope || !assetId || downloading) return;
+    setDownloading(true);
+    setError("");
+    try {
+      const data = imagePart?.image || preview || `data:${attachment.contentType};base64,${await getConversationAsset(scope.serverUrl, scope.accessToken, scope, scope.conversationId, assetId)}`;
+      const link = document.createElement("a");
+      link.href = data;
+      link.download = attachment.name || "attachment";
+      link.click();
+    } catch (failure) { setError(failure.message); }
+    finally { setDownloading(false); }
+  }
+  const controls = <>
+    {assetId ? <button type="button" disabled={downloading} onClick={() => void download()}>{downloading ? "Downloading…" : "Download"}</button> : null}
+    {error ? <span role="alert">{error}<button type="button" onClick={() => {
+      if (attachment?.type !== "image") { void download(); return; }
+      setError(""); setPreview(""); setAttempt((value) => value + 1);
+    }}>{attachment?.type === "image" ? "Retry preview" : "Retry download"}</button></span> : null}
+  </>;
+  const image = imagePart?.image || preview;
+  if (attachment?.type === "image") {
     return (
-      <div className="message-attachment message-attachment-image">
-        <img src={imagePart.image} alt={attachment.name || "Attached image"} loading="lazy" />
+      <div ref={elementRef} className="message-attachment message-attachment-image">
+        {image ? <img key={attempt} src={image} alt={attachment.name || "Attached image"} loading="lazy" onError={() => setError("Image preview unavailable.")} /> : <span style={{ minHeight: 120, display: "block" }}>{attachment.name}</span>}
         <span className="message-attachment-caption">{attachment.name}</span>
+        {controls}
       </div>
     );
   }
@@ -4877,6 +5000,7 @@ function InlineChatAttachment({ attachment }) {
       <FileText aria-hidden="true" />
       <span className="message-attachment-file-name" title={attachment?.name}>{attachment?.name || "Attached file"}</span>
       {Number.isFinite(sourceBytes) && sourceBytes > 0 ? <small>{formatAttachmentSize(sourceBytes)}</small> : null}
+      {controls}
     </div>
   );
 }
@@ -5167,6 +5291,28 @@ function reportTurnTiming(runId, timing, fullResponseAt) {
 }
 
 function HatchToolCall(props) {
+  const scope = useContext(ConversationAssetContext);
+  const [detail, setDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState("");
+  const [detailOpen, setDetailOpen] = useState(false);
+  const detailRef = props.artifact?.detailRef;
+  const detailRequestRef = useRef(0);
+  useEffect(() => () => { detailRequestRef.current += 1; }, [scope?.conversationId, scope?.entitlementId, scope?.accessToken, detailRef?.run_id, detailRef?.tool_call_id]);
+  async function loadDetail() {
+    if (!scope || !detailRef || detailLoading || detail) return;
+    const request = ++detailRequestRef.current;
+    setDetailLoading(true);
+    setDetailError("");
+    try {
+      const tool = await getConversationToolDetail(scope.serverUrl, scope.accessToken, scope, scope.conversationId, detailRef);
+      if (request === detailRequestRef.current) setDetail(tool);
+    } catch (error) {
+      if (request === detailRequestRef.current) setDetailError(error.message);
+    } finally {
+      if (request === detailRequestRef.current) setDetailLoading(false);
+    }
+  }
   const approvals = useContext(ApprovalContext);
   const showNativeContextMenu = useContext(NativeContextMenuContext);
   const approvalRequest = approvals?.requests?.[props.toolCallId];
@@ -5205,6 +5351,15 @@ function HatchToolCall(props) {
           </span>
         ) : null}
       </div>
+      {detailRef ? <details className="tool-detail" open={detailOpen} onToggle={(event) => {
+        setDetailOpen(event.currentTarget.open);
+        if (event.currentTarget.open && !detail && !detailError) void loadDetail();
+      }}>
+        <summary>Tool details</summary>
+        {detailLoading ? <span role="status">Loading tool details…</span> : null}
+        {detailError ? <div role="alert">{detailError}<button type="button" onClick={() => void loadDetail()}>Retry</button></div> : null}
+        {detail ? <><pre aria-label="Tool arguments">{JSON.stringify(detail.arguments, null, 2)}</pre><pre aria-label="Tool result">{JSON.stringify(detail.result ?? detail.error, null, 2)}</pre></> : null}
+      </details> : null}
       {pendingApproval || approvalRequest?.status ? <div className="tool-detail">
         {pendingApproval ? (
           <div className="approval-gate">

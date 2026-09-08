@@ -275,7 +275,7 @@ describe("conversation client", () => {
     })).toThrowError(expect.objectContaining({ code: "snapshot_invalid" }));
   });
 
-  it("skips a dismissed interrupted run and projects the next durable one", () => {
+  it("only projects the latest run, never falling back to an old interruption", () => {
     const snapshot = {
       runs: [
         { id: "run_old", status: "interrupted", interrupted_reason: "old" },
@@ -287,18 +287,12 @@ describe("conversation client", () => {
       runId: "run_new",
       interruptedReason: "new"
     });
-    expect(interruptedRunFromSnapshot({ runs: snapshot.runs.slice(0, 2) }, null, "run_dismissed")).toMatchObject({
-      runId: "run_old",
-      interruptedReason: "old"
-    });
+    expect(interruptedRunFromSnapshot({ runs: snapshot.runs.slice(0, 2) }, null, "run_dismissed")).toBeNull();
     expect(interruptedRunFromSnapshot(snapshot, {
       runId: "run_old",
       assistantId: "run_old_assistant",
       text: "partial"
-    })).toMatchObject({
-      runId: "run_old",
-      interruptedReason: "old",
-      text: "partial"
-    });
+    })).toBeNull();
+    expect(interruptedRunFromSnapshot({ runs: [...snapshot.runs, { id: "run_done", status: "completed" }] })).toBeNull();
   });
 });

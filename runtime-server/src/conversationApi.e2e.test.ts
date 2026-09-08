@@ -106,6 +106,61 @@ test("Conversation HTTP API owns metadata, pagination, versions, and cursor snap
   assert.equal((afterAgentUpdate.body as { conversation: { id: string } }).conversation.id, first.conversation.id);
 });
 
+test("paged history keeps stable complete turns while new messages arrive", async () => {
+  const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-history-pages-")));
+  runtime = createRuntimeServer({ conversationStore: store });
+  const base = await listen(runtime.server);
+  const scope = new URLSearchParams(binding).toString();
+  const created = await json(base, `/v1/conversations?${scope}`, {
+    method: "POST", body: { title: "Paged history", client_request_id: "pages" }
+  });
+  const id = (created.body as { conversation: { id: string } }).conversation.id;
+  const durableId = durableConversationId({ creatorId: binding.creator_id, userId: binding.user_id, productId: binding.product_id }, id);
+  const appendTurn = async (turn: number) => {
+    for (const role of ["user", "assistant"] as const) {
+      await store.append({ type: "message.created", conversation_id: durableId,
+        run_id: `run_page_${turn}`, role, content: `${role}-${turn}` });
+    }
+  };
+  for (let turn = 0; turn < 30; turn++) await appendTurn(turn);
+  const first = await json(base, `/v1/conversations/${id}/snapshot?${scope}&view=page`);
+  assert.equal(first.response.status, 200);
+  const page = first.body as { messages: Array<{ id: string; content: string }>; events: unknown[]; has_more: boolean; before_cursor: string };
+  assert.equal(page.messages.length, 50);
+  assert.equal(page.has_more, true);
+  assert.deepEqual(page.events, []);
+  assert.ok(page.messages.every((message) => message.id));
+  await appendTurn(30);
+  const older = await json(base, `/v1/conversations/${id}/history?${scope}&before_cursor=${encodeURIComponent(page.before_cursor)}`);
+  assert.equal(older.response.status, 200);
+  const olderPage = older.body as typeof page;
+  assert.equal(olderPage.messages.length, 10);
+  assert.equal(olderPage.has_more, false);
+  const all = [...olderPage.messages, ...page.messages];
+  assert.equal(new Set(all.map((message) => message.id)).size, 60);
+  assert.equal(all[0]?.content, "user-0");
+  assert.equal(all.at(-1)?.content, "assistant-29");
+  const badCursor = await json(base, `/v1/conversations/${id}/history?${scope}&before_cursor=broken`);
+  assert.equal(badCursor.response.status, 400);
+  const foreign = await json(base, `/v1/conversations?${scope}`, {
+    method: "POST", body: { title: "Other", client_request_id: "other_pages" }
+  });
+  const foreignId = (foreign.body as { conversation: { id: string } }).conversation.id;
+  const foreignCursor = await json(base, `/v1/conversations/${foreignId}/history?${scope}&before_cursor=${encodeURIComponent(page.before_cursor)}`);
+  assert.equal(foreignCursor.response.status, 400);
+
+  await store.append({ type: "tool.call", conversation_id: durableId, run_id: "run_page_29", tool_call_id: "large_tool",
+    name: "shell_exec", locality: "client", status: "completed", arguments: { command: "echo test" }, result: { output: "x".repeat(1024 * 1024) } });
+  const reduced = await json(base, `/v1/conversations/${id}/snapshot?${scope}&view=page`);
+  assert.equal(reduced.response.status, 200);
+  assert.ok(JSON.stringify(reduced.body).length < 100_000);
+  const details = await json(base, `/v1/conversations/${id}/tools/run_page_29/large_tool?${scope}`);
+  assert.equal(details.response.status, 200);
+  assert.equal((details.body as { tool: { result: { output: string } } }).tool.result.output.length, 1024 * 1024);
+  const deniedTool = await json(base, `/v1/conversations/${foreignId}/tools/run_page_29/large_tool?${scope}`);
+  assert.equal(deniedTool.response.status, 404);
+});
+
 test("Conversation snapshot preserves attachment references and serves only bound assets", async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-api-assets-"));
   const store = new RuntimeStore(dataDir);

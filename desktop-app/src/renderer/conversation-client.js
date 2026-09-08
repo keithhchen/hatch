@@ -96,13 +96,50 @@ export async function updateConversation(serverUrl, accessToken, binding, conver
 
 export async function getConversationSnapshot(serverUrl, accessToken, binding, conversationId, afterCursor = 0, fetchImpl = fetch) {
   const params = conversationScope(binding);
-  if (afterCursor > 0) params.set("after_cursor", String(afterCursor));
+  params.set("view", "page");
   return requestConversation(
     fetchImpl,
     runtimeHttpUrl(serverUrl, `/v1/conversations/${encodeURIComponent(conversationId)}/snapshot`),
     accessToken,
     { method: "GET", search: params }
   );
+}
+
+export async function getConversationHistoryPage(serverUrl, accessToken, binding, conversationId, options = {}, fetchImpl = fetch) {
+  const params = conversationScope(binding);
+  params.set("limit", String(options.limit ?? 50));
+  if (options.beforeCursor != null) params.set("before_cursor", options.beforeCursor);
+  return requestConversation(fetchImpl, runtimeHttpUrl(serverUrl, `/v1/conversations/${encodeURIComponent(conversationId)}/history`), accessToken, { method: "GET", search: params });
+}
+
+export async function getConversationJournalPage(serverUrl, accessToken, binding, conversationId, options = {}, fetchImpl = fetch) {
+  const params = conversationScope(binding);
+  params.set("view", "page");
+  params.set("after_cursor", String(options.afterCursor ?? 0));
+  params.set("limit", String(options.limit ?? 100));
+  if (options.throughCursor != null) params.set("through_cursor", String(options.throughCursor));
+  return requestConversation(fetchImpl, runtimeHttpUrl(serverUrl, `/v1/conversations/${encodeURIComponent(conversationId)}/events`), accessToken, { method: "GET", search: params });
+}
+
+export async function getConversationToolDetail(serverUrl, accessToken, binding, conversationId, detailRef, fetchImpl = fetch) {
+  if (!detailRef?.run_id || !detailRef?.tool_call_id) throw conversationClientError("Invalid tool detail reference.", "tool_detail_invalid");
+  const path = [conversationId, "tools", detailRef.run_id, detailRef.tool_call_id].map(encodeURIComponent).join("/");
+  const payload = await requestConversation(fetchImpl, runtimeHttpUrl(serverUrl, `/v1/conversations/${path}`), accessToken,
+    { method: "GET", search: conversationScope(binding) });
+  if (!payload?.tool || payload.tool.tool_call_id !== detailRef.tool_call_id) {
+    throw conversationClientError("Invalid tool detail response.", "tool_detail_invalid");
+  }
+  return payload.tool;
+}
+
+export async function getConversationRun(serverUrl, accessToken, binding, conversationId, runId, fetchImpl = fetch) {
+  const payload = await requestConversation(fetchImpl,
+    runtimeHttpUrl(serverUrl, `/v1/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}`),
+    accessToken, { method: "GET", search: conversationScope(binding) });
+  if (!payload?.run || String(payload.run.id ?? payload.run.run_id) !== runId) {
+    throw conversationClientError("Invalid Conversation Run response.", "snapshot_invalid");
+  }
+  return payload.run;
 }
 
 /**
@@ -330,18 +367,16 @@ function bytesToBase64(bytes) {
 export function interruptedRunFromSnapshot(snapshot, currentRun = null, dismissedRunId = "") {
   const runs = Array.isArray(snapshot?.runs) ? snapshot.runs : [];
   const dismissed = String(dismissedRunId || "").trim();
-  const interruptedEntries = [...runs]
-    .filter((run) => run && run.status === "interrupted")
+  const entries = [...runs]
+    .filter((run) => run && typeof run === "object")
     .map((run) => ({
       run,
       id: String(run.id ?? run.run_id ?? "").trim()
     }))
-    .filter((entry) => entry.id && entry.id !== dismissed);
-  const currentRunId = String(currentRun?.runId || "").trim();
-  const interrupted = currentRunId
-    ? interruptedEntries.find((entry) => entry.id === currentRunId)
-    : interruptedEntries.at(-1);
-  if (!interrupted) return null;
+    .filter((entry) => entry.id)
+    .sort((a, b) => (Date.parse(a.run.created_at ?? a.run.createdAt) || 0) - (Date.parse(b.run.created_at ?? b.run.createdAt) || 0));
+  const interrupted = entries.at(-1);
+  if (!interrupted || interrupted.run.status !== "interrupted" || interrupted.id === dismissed) return null;
 
   const { run, id } = interrupted;
   if (currentRun?.runId && currentRun.runId !== id) return null;

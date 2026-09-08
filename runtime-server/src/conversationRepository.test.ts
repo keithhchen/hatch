@@ -200,6 +200,105 @@ test("Postgres ConversationRepository maps the same durable contract through its
 
 type DatabaseRow = Record<string, unknown>;
 
+for (const backend of ["memory", "postgres"] as const) {
+  test(`${backend} bounded recovery and journal pages preserve scope, content and a stable watermark`, async () => {
+    const pool = new ConversationPostgresFake();
+    const repository = backend === "memory" ? new InMemoryConversationRepository() : new PostgresConversationRepository({ pool });
+    await repository.createConversation(conversationInput("paged"));
+    await repository.createConversation(conversationInput("other"));
+    for (const [id, status] of [
+      ["run_1", "completed"], ["run_2", "interrupted"], ["run_3", "interrupted"], ["run_4", "completed"], ["run_5", "queued"]
+    ] as const) {
+      await repository.createRun({ id, conversationId: "paged", clientMessageId: id, inputDigest, corpusDigest: binding.corpusDigest });
+      await repository.transitionRun(id, status);
+    }
+    await repository.createRun({ id: "foreign", conversationId: "other", clientMessageId: "foreign", inputDigest, corpusDigest: binding.corpusDigest });
+    const content = "large message ".repeat(10_000);
+    await repository.appendEvent({ conversationId: "paged", runId: "run_1", type: "message.created", payload: { content } });
+    const legacy = await repository.snapshot("paged");
+    pool.queries.length = 0;
+    const recovery = await repository.recoverySnapshot("paged", ["run_1", "run_1", "foreign", "missing"]);
+    assert.deepEqual(recovery.runs.map((run) => run.id), ["run_1", "run_5"]);
+    assert.deepEqual(recovery.events, []);
+    assert.equal(recovery.cursor, legacy.cursor);
+    if (backend === "postgres") {
+      assert.match(pool.queries[0]!.text, /SELECT cursor FROM hatch_conversation_journal/);
+      assert.ok(pool.queries.filter((query) => /FROM hatch_conversation_runs/.test(query.text)).every((query) => /LIMIT/.test(query.text)));
+      assert.equal(pool.queries.filter((query) => /FROM hatch_conversation_journal/.test(query.text)).length, 1);
+    }
+    const first = await repository.journalPage("paged", 0, undefined, 2);
+    assert.equal(first.events.length, 2);
+    assert.equal(first.has_more, true);
+    await repository.appendEvent({ conversationId: "paged", runId: "run_5", type: "message.created", payload: { content: "later" } });
+    const delivered = [...first.events];
+    let page = first;
+    while (page.has_more) {
+      const previous = page.cursor;
+      page = await repository.journalPage("paged", previous, first.through_cursor, 2);
+      assert.ok(page.cursor > previous);
+      assert.equal(page.cursor, page.events.at(-1)?.cursor);
+      assert.equal(page.through_cursor, first.through_cursor);
+      assert.ok(page.events.length <= 2);
+      const referenced = new Set(page.events.flatMap((event) => event.runId ? [event.runId] : []));
+      assert.deepEqual(new Set(page.runs.map((run) => run.id)), referenced);
+      delivered.push(...page.events);
+    }
+    assert.deepEqual(delivered, legacy.events);
+    assert.equal(delivered.at(-1)?.payload.content, content);
+    assert.equal((await repository.journalPage("paged", page.cursor)).events.length, 1);
+    const empty = await repository.journalPage("paged", page.cursor, first.through_cursor, 2);
+    assert.deepEqual(empty.events, []);
+    assert.deepEqual(empty.runs, []);
+    assert.equal(empty.cursor, page.cursor);
+    assert.equal(empty.has_more, false);
+    assert.equal(empty.through_cursor, first.through_cursor);
+    assert.deepEqual((await repository.recoverySnapshot("paged", [])).runs.map((run) => run.id), ["run_5"]);
+    await assert.rejects(repository.journalPage("paged", page.cursor + 100, first.through_cursor), RangeError);
+    await assert.rejects(repository.journalPage("paged", 0, first.through_cursor + 100), RangeError);
+    await assert.rejects(repository.journalPage("paged", first.through_cursor + 100), RangeError);
+    await repository.transitionRun("run_5", "completed");
+    assert.deepEqual((await repository.recoverySnapshot("paged", [])).runs, []);
+    assert.deepEqual((await repository.recoverySnapshot("paged", ["run_3"])).runs.map((run) => run.id), ["run_3"]);
+    await repository.createRun({ id: "run_6", conversationId: "paged", clientMessageId: "run_6", inputDigest, corpusDigest: binding.corpusDigest });
+    await repository.transitionRun("run_6", "interrupted");
+    assert.deepEqual((await repository.recoverySnapshot("paged", [])).runs.map((run) => run.id), ["run_6"]);
+    assert.deepEqual((await repository.recoverySnapshot("paged", ["run_6"])).runs.map((run) => run.id), ["run_6"]);
+    for (const limit of [0, -1, NaN, Infinity]) await assert.rejects(repository.journalPage("paged", 0, undefined, limit), RangeError);
+    for (const cursor of [-1, 0.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+      await assert.rejects(repository.journalPage("paged", cursor), RangeError);
+      await assert.rejects(repository.journalPage("paged", 0, cursor), RangeError);
+    }
+    await assert.rejects(repository.recoverySnapshot("missing", []), { code: "conversation_not_found" });
+    await assert.rejects(repository.journalPage("missing", 0), { code: "conversation_not_found" });
+    if (backend === "postgres") {
+      await repository.journalPage("paged", 0, undefined, 100_000);
+      const queries = pool.queries.filter((query) => /cursor <= \$3/.test(query.text));
+      assert.ok(queries.every((query) => /ORDER BY cursor ASC LIMIT \$4/.test(query.text)));
+      assert.equal(queries.at(-1)?.values?.[3], 501);
+    }
+    await repository.close();
+  });
+}
+
+test("Postgres recovery captures high water before reading mutable projections", async () => {
+  const pool = new ConversationPostgresFake();
+  const repository = new PostgresConversationRepository({ pool });
+  await repository.createConversation(conversationInput("race"));
+  const query = pool.query.bind(pool);
+  let appended = false;
+  pool.query = async (sql, values) => {
+    if (!appended && /SELECT \* FROM hatch_conversations WHERE id/.test(sql)) {
+      appended = true;
+      await repository.appendEvent({ conversationId: "race", type: "message.created", payload: { content: "during projections" } });
+    }
+    return query(sql, values);
+  };
+  const recovery = await repository.recoverySnapshot("race", []);
+  assert.equal(recovery.cursor, 1);
+  const catchup = await repository.journalPage("race", recovery.cursor);
+  assert.equal(catchup.events[0]?.payload.content, "during projections");
+});
+
 class ConversationPostgresFake implements PostgresQueryExecutor {
   readonly queries: Array<{ text: string; values?: unknown[] }> = [];
   readonly conversations = new Map<string, DatabaseRow>();
@@ -258,8 +357,22 @@ class ConversationPostgresFake implements PostgresQueryExecutor {
       const row = this.runs.get(String(values?.[0]));
       return this.rows(row ? [row] : []);
     }
-    if (/^\s*SELECT \* FROM hatch_conversation_runs WHERE conversation_id = \$1 ORDER BY/i.test(text)) {
-      return this.rows([...this.runs.values()].filter((row) => row.conversation_id === values?.[0]));
+    if (/SELECT \* FROM hatch_conversation_runs\s+WHERE conversation_id = \$1 AND (id = ANY|status)/i.test(text)) {
+      let rows = [...this.runs.values()].filter((row) => row.conversation_id === values?.[0]);
+      rows.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)) || String(a.id).localeCompare(String(b.id)));
+      if (/id = ANY/.test(text)) {
+        rows = rows.filter((row) => (values?.[1] as string[]).includes(String(row.id))).slice(0, Number(values?.[2]));
+      } else if (/status = 'interrupted'/.test(text)) {
+        rows = rows.filter((row) => row.status === "interrupted").reverse().slice(0, 1);
+      } else {
+        rows = rows.filter((row) => ["queued", "running", "waiting_for_tool", "compacting"].includes(String(row.status))).slice(0, 1);
+      }
+      return this.rows(rows);
+    }
+    if (/^\s*SELECT \* FROM hatch_conversation_runs\s+WHERE conversation_id = \$1\s+ORDER BY/i.test(text)) {
+      const rows = [...this.runs.values()].filter((row) => row.conversation_id === values?.[0]);
+      rows.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)) || String(a.id).localeCompare(String(b.id)));
+      return this.rows(/DESC LIMIT 1/.test(text) ? rows.reverse().slice(0, 1) : rows);
     }
     if (/^\s*UPDATE hatch_conversation_runs\s+SET status/i.test(text)) {
       const [id, status, reason] = values ?? [];
@@ -279,14 +392,16 @@ class ConversationPostgresFake implements PostgresQueryExecutor {
         run_id: runId,
         event_type: eventType,
         payload: JSON.parse(String(payload)),
-        created_at: createdAt ?? `2026-08-11T00:00:0${this.events.length}.000Z`
+        created_at: createdAt ?? new Date(Date.parse("2026-08-11T00:00:00.000Z") + this.events.length * 1000).toISOString()
       };
       this.events.push(row);
       return this.rows([row]);
     }
     if (/^\s*SELECT cursor, conversation_id, run_id, event_type, payload, created_at\s+FROM hatch_conversation_journal/i.test(text)) {
       const [conversationId, after] = values ?? [];
-      return this.rows(this.events.filter((row) => row.conversation_id === conversationId && Number(row.cursor) > Number(after)));
+      let rows = this.events.filter((row) => row.conversation_id === conversationId && Number(row.cursor) > Number(after));
+      if (/cursor <= \$3/.test(text)) rows = rows.filter((row) => Number(row.cursor) <= Number(values?.[2])).slice(0, Number(values?.[3]));
+      return this.rows(rows);
     }
     if (/^\s*SELECT cursor FROM hatch_conversation_journal/i.test(text)) {
       const row = [...this.events].filter((event) => event.conversation_id === values?.[0]).at(-1);

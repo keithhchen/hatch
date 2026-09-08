@@ -84,6 +84,14 @@ export type ConversationListPage = {
   nextCursor?: string;
 };
 
+export type ConversationJournalPage = {
+  events: ConversationJournalEvent[];
+  runs: ConversationRunRecord[];
+  cursor: number;
+  has_more: boolean;
+  through_cursor: number;
+};
+
 export type CreateConversationInput = ConversationBinding & {
   id: string;
   publicId: string;
@@ -141,6 +149,16 @@ export interface ConversationRepository {
   appendEvent(input: Omit<ConversationJournalEvent, "cursor" | "createdAt"> & { createdAt?: string }): Promise<ConversationJournalEvent>;
   snapshot(conversationId: string, afterCursor?: number): Promise<ConversationSnapshot>;
   /**
+   * Capture high water before projections; call before reading history. Include
+   * requested runs, the active run, and the latest run only if interrupted.
+   */
+  recoverySnapshot(conversationId: string, runIds: string[]): Promise<ConversationSnapshot>;
+  /**
+   * Replay (afterCursor, throughCursor], retaining through_cursor across pages.
+   * Throw RangeError unless afterCursor <= throughCursor <= current high water.
+   */
+  journalPage(conversationId: string, afterCursor: number, throughCursor?: number, limit?: number): Promise<ConversationJournalPage>;
+  /**
    * V1 recovery never resurrects work from a lost executor. Pending tool calls
    * become Interrupted; a future attach/reclaim protocol must mint a new lease
    * and must not replay effects from this Run.
@@ -164,6 +182,28 @@ const TERMINAL_RUN_STATUSES = new Set<DurableRunStatus>([
 
 function isActiveRun(status: DurableRunStatus): boolean {
   return ACTIVE_RUN_STATUSES.has(status);
+}
+
+function journalPageLimit(afterCursor: number, throughCursor: number | undefined, limit: number): number {
+  for (const cursor of [afterCursor, throughCursor]) {
+    if (cursor !== undefined && (!Number.isSafeInteger(cursor) || cursor < 0)) {
+      throw new RangeError("Journal cursors must be non-negative safe integers");
+    }
+  }
+  if (!Number.isFinite(limit) || limit < 1) throw new RangeError("Journal limit must be positive and finite");
+  return Math.min(500, Math.floor(limit));
+}
+
+function compareRuns(left: ConversationRunRecord, right: ConversationRunRecord): number {
+  return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
+}
+
+function journalThroughCursor(after: number, through: number | undefined, watermark: number): number {
+  const upper = through ?? watermark;
+  if (upper < after || upper > watermark) {
+    throw new RangeError("Journal through_cursor must be between after_cursor and the current watermark");
+  }
+  return upper;
 }
 
 function now(): string {
@@ -444,6 +484,55 @@ export class InMemoryConversationRepository implements ConversationRepository {
       events,
       cursor: allEvents.at(-1)?.cursor ?? afterCursor
     };
+  }
+
+  async recoverySnapshot(conversationId: string, runIds: string[]): Promise<ConversationSnapshot> {
+    await this.readReady();
+    const cursor = this.latestCursor(conversationId);
+    const conversation = this.conversations.get(conversationId);
+    if (!conversation) throw new ConversationRepositoryError("conversation_not_found", `Conversation ${conversationId} was not found`);
+    const selected = new Map<string, ConversationRunRecord>();
+    for (const id of runIds) {
+      const run = this.runs.get(id);
+      if (run?.conversationId === conversationId) selected.set(id, run);
+    }
+    let latest: ConversationRunRecord | undefined;
+    for (const run of this.runs.values()) {
+      if (run.conversationId !== conversationId) continue;
+      if (isActiveRun(run.status)) selected.set(run.id, run);
+      if (!latest || compareRuns(run, latest) > 0) latest = run;
+    }
+    if (latest?.status === "interrupted") selected.set(latest.id, latest);
+    return { conversation: cloneConversation(conversation), runs: [...selected.values()].sort(compareRuns).map(cloneRun), cursor, events: [] };
+  }
+
+  async journalPage(conversationId: string, afterCursor: number, throughCursor?: number, limit = 100): Promise<ConversationJournalPage> {
+    const pageLimit = journalPageLimit(afterCursor, throughCursor, limit);
+    await this.readReady();
+    if (!this.conversations.has(conversationId)) throw new ConversationRepositoryError("conversation_not_found", `Conversation ${conversationId} was not found`);
+    const through = journalThroughCursor(afterCursor, throughCursor, this.latestCursor(conversationId));
+    const events: ConversationJournalEvent[] = [];
+    let hasMore = false;
+    for (const event of this.events) {
+      if (event.cursor > through) break;
+      if (event.conversationId !== conversationId || event.cursor <= afterCursor) continue;
+      if (events.length === pageLimit) { hasMore = true; break; }
+      events.push(cloneEvent(event));
+    }
+    const runs: ConversationRunRecord[] = [];
+    for (const id of new Set(events.flatMap((event) => event.runId ? [event.runId] : []))) {
+      const run = this.runs.get(id);
+      if (run?.conversationId === conversationId) runs.push(cloneRun(run));
+    }
+    return { events, runs: runs.sort(compareRuns), cursor: events.at(-1)?.cursor ?? afterCursor, has_more: hasMore, through_cursor: through };
+  }
+
+  private latestCursor(conversationId: string): number {
+    for (let index = this.events.length - 1; index >= 0; index--) {
+      const event = this.events[index]!;
+      if (event.conversationId === conversationId) return event.cursor;
+    }
+    return 0;
   }
 
   async interruptActiveRuns(reason: string): Promise<ConversationRunRecord[]> {
@@ -989,6 +1078,58 @@ export class PostgresConversationRepository implements ConversationRepository {
       WHERE conversation_id = $1 ORDER BY cursor DESC LIMIT 1
     `, [conversationId]);
     return result.rows[0] ? Number(result.rows[0].cursor) : fallback;
+  }
+
+  async recoverySnapshot(conversationId: string, runIds: string[]): Promise<ConversationSnapshot> {
+    await this.initialize();
+    const cursor = await this.latestCursor(conversationId, 0);
+    const conversation = await this.getConversation(conversationId);
+    if (!conversation) throw new ConversationRepositoryError("conversation_not_found", `Conversation ${conversationId} was not found`);
+    const [requested, active, latest] = await Promise.all([
+      this.runsByIds(conversationId, runIds),
+      this.pool.query<RunRow>(`
+        SELECT * FROM hatch_conversation_runs
+        WHERE conversation_id = $1 AND status IN ('queued', 'running', 'waiting_for_tool', 'compacting')
+        LIMIT 1
+      `, [conversationId]),
+      this.pool.query<RunRow>(`
+        SELECT * FROM hatch_conversation_runs
+        WHERE conversation_id = $1
+        ORDER BY created_at DESC, id DESC LIMIT 1
+      `, [conversationId])
+    ]);
+    const runs = new Map(requested.map((run) => [run.id, run]));
+    for (const row of active.rows) runs.set(row.id, runFromRow(row));
+    if (latest.rows[0]?.status === "interrupted") runs.set(latest.rows[0].id, runFromRow(latest.rows[0]));
+    return { conversation, runs: [...runs.values()].sort(compareRuns), cursor, events: [] };
+  }
+
+  async journalPage(conversationId: string, afterCursor: number, throughCursor?: number, limit = 100): Promise<ConversationJournalPage> {
+    const pageLimit = journalPageLimit(afterCursor, throughCursor, limit);
+    await this.initialize();
+    const watermark = await this.latestCursor(conversationId, 0);
+    if (!await this.getConversation(conversationId)) throw new ConversationRepositoryError("conversation_not_found", `Conversation ${conversationId} was not found`);
+    const through = journalThroughCursor(afterCursor, throughCursor, watermark);
+    const journal = await this.pool.query<JournalRow>(`
+      SELECT cursor, conversation_id, run_id, event_type, payload, created_at
+      FROM hatch_conversation_journal
+      WHERE conversation_id = $1 AND cursor > $2 AND cursor <= $3
+      ORDER BY cursor ASC LIMIT $4
+    `, [conversationId, afterCursor, through, pageLimit + 1]);
+    const events = journal.rows.slice(0, pageLimit).map(eventFromRow);
+    const runs = await this.runsByIds(conversationId, events.flatMap((event) => event.runId ? [event.runId] : []));
+    return { events, runs, cursor: events.at(-1)?.cursor ?? afterCursor, has_more: journal.rows.length > pageLimit, through_cursor: through };
+  }
+
+  private async runsByIds(conversationId: string, runIds: string[]): Promise<ConversationRunRecord[]> {
+    const ids = [...new Set(runIds)];
+    if (!ids.length) return [];
+    const result = await this.pool.query<RunRow>(`
+      SELECT * FROM hatch_conversation_runs
+      WHERE conversation_id = $1 AND id = ANY($2::text[])
+      ORDER BY created_at ASC, id ASC LIMIT $3
+    `, [conversationId, ids, ids.length]);
+    return result.rows.map(runFromRow);
   }
 }
 

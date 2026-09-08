@@ -1,5 +1,9 @@
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
+import { historyBoundary, historyCursor, historyEvent, historyLimit, historyMessages, isHistoryMessage,
+  type ConversationHistoryOptions, type ConversationHistoryPage, type ConversationToolDetailRef } from "./conversationHistory.js";
+export type { ConversationHistoryOptions, ConversationHistoryPage, ConversationToolDetailRef } from "./conversationHistory.js";
+export { HistoryCursorError } from "./conversationHistory.js";
 import {
   ClientToolNameSchema,
   type ClientToolName,
@@ -25,6 +29,7 @@ export type ActivatedSkill = {
 };
 
 export type VisibleConversationMessage = {
+  id?: string;
   run_id: string;
   role: "user" | "assistant";
   content: string;
@@ -61,6 +66,7 @@ export type VisibleConversationSkillRun = {
 };
 
 export type VisibleConversationToolCall = {
+  detail_ref?: ConversationToolDetailRef;
   run_id: string;
   tool_call_id: string;
   name: string;
@@ -336,8 +342,67 @@ export class RuntimeStore {
     return messages;
   }
 
-  async readVisibleConversation(conversationId: string): Promise<VisibleConversationMessage[]> {
+  async readVisibleConversationPage(conversationId: string, options: ConversationHistoryOptions = {}): Promise<ConversationHistoryPage> {
+    const limit = historyLimit(options.limit);
+    const boundary = historyBoundary(conversationId, options.beforeCursor);
     const events = await this.readEvents();
+    const turns = new Map<string, { first: number; roles: Set<string> }>();
+    events.forEach((event, index) => {
+      if (!("conversation_id" in event) || event.conversation_id !== conversationId || !("run_id" in event) || !event.run_id) return;
+      const turn = turns.get(event.run_id) ?? { first: index + 1, roles: new Set<string>() };
+      if (isHistoryMessage(event)) turn.roles.add(event.type === "message.created" ? event.role
+        : event.type === "conversation.model_message" ? event.message.role : "");
+      turns.set(event.run_id, turn);
+    });
+    const candidates = [...turns].filter(([, turn]) => turn.roles.size > 0 && (!boundary || BigInt(turn.first) < BigInt(boundary)))
+      .sort((a, b) => b[1].first - a[1].first);
+    const selected: typeof candidates = [];
+    let count = 0;
+    for (const candidate of candidates) {
+      if (count >= limit) break;
+      selected.push(candidate);
+      count += Math.max(1, candidate[1].roles.size);
+    }
+    selected.reverse();
+    const runIds = selected.map(([runId]) => runId);
+    const selectedIds = new Set(runIds);
+    const pageEvents = events.filter((event) => "conversation_id" in event && event.conversation_id === conversationId
+      && "run_id" in event && selectedIds.has(event.run_id ?? "")).map(historyEvent);
+    const hasMore = candidates.length > selected.length;
+    return {
+      messages: historyMessages(conversationId, await this.readVisibleConversation(conversationId, pageEvents)),
+      run_ids: runIds, has_more: hasMore,
+      ...(hasMore && selected[0] ? { before_cursor: historyCursor(conversationId, String(selected[0][1].first)) } : {})
+    };
+  }
+
+  async readConversationAssetReference(conversationId: string, assetId: string): Promise<Extract<PersistedContextAttachment, { kind: "asset" }> | undefined> {
+    for (const event of await this.readEvents()) {
+      if (!("conversation_id" in event) || event.conversation_id !== conversationId) continue;
+      const attachments = event.type === "conversation.model_message" ? event.message.attachments
+        : event.type === "message.created" ? event.attachments : undefined;
+      const attachment = attachments?.find((item): item is Extract<PersistedContextAttachment, { kind: "asset" }> => "kind" in item && item.kind === "asset" && item.asset_id === assetId);
+      if (attachment) return attachment;
+    }
+    return undefined;
+  }
+
+  async readConversationToolDetail(conversationId: string, runId: string, toolCallId: string): Promise<VisibleConversationToolCall | undefined> {
+    return this.projectConversationToolDetail(conversationId, runId, toolCallId, await this.readEvents());
+  }
+
+  protected async projectConversationToolDetail(conversationId: string, runId: string, toolCallId: string, events: StoreEvent[]): Promise<VisibleConversationToolCall | undefined> {
+    const matches = events.filter((event) => event.type === "tool.call" && event.conversation_id === conversationId
+      && event.run_id === runId && event.tool_call_id === toolCallId);
+    if (!matches.length) return undefined;
+    const projected = await RuntimeStore.prototype.readVisibleConversation.call(this, conversationId, [...matches, {
+      type: "message.created", conversation_id: conversationId, run_id: runId, role: "assistant", content: "", timestamp: ""
+    }]);
+    return projected[0]?.tool_calls?.[0];
+  }
+
+  async readVisibleConversation(conversationId: string, sourceEvents?: StoreEvent[]): Promise<VisibleConversationMessage[]> {
+    const events = sourceEvents ?? await this.readEvents();
     const toolCallsByRun = new Map<string, Map<string, VisibleConversationToolCall>>();
     const skillEventsByRun = new Map<string, VisibleConversationSkillEvent[]>();
     const skillRunsByRun = new Map<string, Map<string, VisibleConversationSkillRun>>();

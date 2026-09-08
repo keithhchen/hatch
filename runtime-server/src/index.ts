@@ -1229,11 +1229,6 @@ async function handleHttpRequest(
   res.end("not found");
 }
 
-type PersistedAssetReference = Extract<
-  NonNullable<ConversationMessage["attachments"]>[number],
-  { kind: "asset" }
->;
-
 async function serveConversationAsset(
   res: http.ServerResponse,
   store: RuntimeStore | undefined,
@@ -1251,14 +1246,7 @@ async function serveConversationAsset(
   // The transcript is the authorization boundary for binary assets. A caller
   // may only read an asset whose immutable reference was already committed to
   // this conversation; knowing or guessing an asset_id is not sufficient.
-  const history = await store.readConversation(conversationId);
-  const reference = history
-    .flatMap((message) => message.attachments ?? [])
-    .find((attachment): attachment is PersistedAssetReference => (
-      "kind" in attachment
-      && attachment.kind === "asset"
-      && attachment.asset_id === assetId
-    ));
+  const reference = await store.readConversationAssetReference(conversationId, assetId);
   if (!reference) {
     throw new ConversationHttpError(404, "asset_not_found", "The conversation asset was not found.");
   }
@@ -1425,10 +1413,68 @@ async function handleConversationHttpRequest(
     throw new ConversationHttpError(405, "method_not_allowed", "Use GET or PATCH for a conversation.");
   }
 
+  const toolDetailMatch = url.pathname.match(/^\/v1\/conversations\/([^/]+)\/tools\/([^/]+)\/([^/]+)$/);
+  if (toolDetailMatch && req.method === "GET") {
+    const conversation = await requireBoundConversation(repository, binding, decodeURIComponent(toolDetailMatch[1] ?? ""));
+    if (!store) throw new ConversationHttpError(503, "history_unavailable", "Conversation history is unavailable.");
+    const tool = await store.readConversationToolDetail(conversation.id,
+      decodeURIComponent(toolDetailMatch[2] ?? ""), decodeURIComponent(toolDetailMatch[3] ?? ""));
+    if (!tool) throw new ConversationHttpError(404, "tool_not_found", "The tool output was not found in this conversation.");
+    const projected = sanitizeBoundHistory([{
+      run_id: tool.run_id, role: "assistant", content: "", timestamp: tool.timestamp, tool_calls: [tool]
+    }], binding.productId);
+    writeResponse(200, { tool: projected[0]?.tool_calls?.[0] });
+    return;
+  }
+
+  const historyMatch = url.pathname.match(/^\/v1\/conversations\/([^/]+)\/history$/);
+  if (historyMatch && req.method === "GET") {
+    const conversation = await requireBoundConversation(repository, binding, decodeURIComponent(historyMatch[1] ?? ""));
+    if (!store) throw new ConversationHttpError(503, "history_unavailable", "Conversation history is unavailable.");
+    const limit = parsePositiveInteger(url.searchParams.get("limit"), "limit", 100) ?? 50;
+    const page = await store.readVisibleConversationPage(conversation.id, {
+      limit,
+      beforeCursor: url.searchParams.get("before_cursor") ?? undefined
+    });
+    writeResponse(200, { ...page, messages: sanitizeBoundHistory(page.messages, binding.productId) });
+    return;
+  }
+
   const snapshotMatch = url.pathname.match(/^\/v1\/conversations\/([^/]+)\/(snapshot|events)$/);
   if (snapshotMatch && req.method === "GET") {
     const conversation = await requireBoundConversation(repository, binding, decodeURIComponent(snapshotMatch[1] ?? ""));
     const afterCursor = parseNonNegativeInteger(url.searchParams.get("after_cursor"), "after_cursor");
+    if (url.searchParams.get("view") === "page") {
+      if (snapshotMatch[2] === "events") {
+        const throughCursor = parseNonNegativeInteger(url.searchParams.get("through_cursor"), "through_cursor");
+        const limit = parsePositiveInteger(url.searchParams.get("limit"), "limit", 200) ?? 100;
+        const page = await repository.journalPage(conversation.id, afterCursor ?? 0, throughCursor, limit);
+        writeResponse(200, {
+          ...page,
+          conversation_id: conversation.publicId,
+          events: page.events.map(publicJournalEvent),
+          runs: page.runs.map(publicRun)
+        });
+        return;
+      }
+      if (!store) throw new ConversationHttpError(503, "history_unavailable", "Conversation history is unavailable.");
+      // Capture the recovery waterline before reading the projection. Events
+      // committed while history is loading are then covered by incremental recovery.
+      const snapshot = await repository.recoverySnapshot(conversation.id, []);
+      const page = await store.readVisibleConversationPage(conversation.id, { limit: 50 });
+      const pageRuns = await Promise.all(page.run_ids.map((id) => repository.getRun(conversation.id, id)));
+      const runs = new Map(snapshot.runs.map((run) => [run.id, run]));
+      for (const run of pageRuns) if (run) runs.set(run.id, run);
+      writeResponse(200, {
+        conversation: publicConversation(snapshot.conversation),
+        ...page,
+        messages: sanitizeBoundHistory(page.messages, binding.productId),
+        runs: [...runs.values()].map(publicRun),
+        events: [],
+        cursor: snapshot.cursor
+      });
+      return;
+    }
     const snapshot = await repository.snapshot(conversation.id, afterCursor ?? 0);
     const eventResponse = snapshot.events.map(publicJournalEvent);
     if (snapshotMatch[2] === "events") {
@@ -1695,6 +1741,14 @@ function rejectUnknownFields(body: Record<string, unknown>, allowed: string[]): 
 }
 
 function writeConversationHttpError(res: http.ServerResponse, error: unknown): void {
+  if (error instanceof RangeError) {
+    writeJson(res, 400, { error: { code: "invalid_request", message: error.message } });
+    return;
+  }
+  if (error && typeof error === "object" && "code" in error && error.code === "history_cursor_invalid") {
+    writeJson(res, 400, { error: { code: "history_cursor_invalid", message: "The history cursor does not belong to this conversation or is invalid." } });
+    return;
+  }
   if (error instanceof ConversationHttpError) {
     writeJson(res, error.status, { error: { code: error.code, message: error.message } });
     return;
