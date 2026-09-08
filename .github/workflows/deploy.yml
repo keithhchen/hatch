@@ -250,7 +250,11 @@ jobs:
           if test -f .release.env; then
             cp -f .release.env .release.env.previous
           fi
-          printf 'HATCH_IMAGE_PREFIX=%s\nHATCH_RELEASE_TAG=%s\n' "$IMAGE_PREFIX" "$RELEASE_TAG" > .release.env
+          # Conversation snapshots are persisted durably and their binary
+          # assets are stored separately. Keep the temporary HTTP delivery
+          # ceiling aligned with the 64 MiB per-conversation quota until the
+          # message-history endpoint gains real pagination.
+          printf 'HATCH_IMAGE_PREFIX=%s\nHATCH_RELEASE_TAG=%s\nHATCH_RUNTIME_MAX_HTTP_RESPONSE_BYTES=67108864\n' "$IMAGE_PREFIX" "$RELEASE_TAG" > .release.env
           compose=(docker compose --env-file .env --env-file .release.env -f compose.app.yml)
           pull_image() {
             local image="$1"

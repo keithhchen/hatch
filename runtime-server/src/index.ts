@@ -377,7 +377,7 @@ export async function createRuntimeServerFromEnvironment(
   const maxHttpResponseBytes = runtimeCapacityLimit(
     "HATCH_RUNTIME_MAX_HTTP_RESPONSE_BYTES",
     environment.HATCH_RUNTIME_MAX_HTTP_RESPONSE_BYTES,
-    8 * 1024 * 1024,
+    64 * 1024 * 1024,
     64 * 1024 * 1024
   );
   const insecureLocalMode = explicitBooleanEnvironmentFlag(
@@ -973,7 +973,7 @@ async function handleHttpRequest(
   authIdentityResolver?: AuthIdentityResolver,
   legacyHmacAuth: LegacyHmacAuth = { enabled: false },
   signal?: AbortSignal,
-  maxHttpResponseBytes = 8 * 1024 * 1024,
+  maxHttpResponseBytes = 64 * 1024 * 1024,
   conversationRepository?: ConversationRepository,
   repositoryReady?: Promise<unknown>,
   activeRunControls?: Map<string, ActiveRunControl>,
