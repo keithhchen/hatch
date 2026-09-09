@@ -13,12 +13,14 @@ test("fixed conda cache accepts only the requested version, build, channel and p
   try {
     await mkdir(path.join(root, "conda-meta"));
     const file = path.join(root, "conda-meta/poppler.json");
-    const poppler = { packageSpec: "poppler=26.05.0=hd83632c_3", platform: "osx-arm64", channel: "conda-forge" };
+    const poppler = { packageSpec: "poppler=26.05.0=hd83632c_3", platform: "osx-arm64", channel: "https://conda.anaconda.org/conda-forge" };
     const valid = { name: "poppler", version: "26.05.0", build: "hd83632c_3", subdir: "osx-arm64", channel: "conda-forge" };
     await assert.rejects(validatePopplerCache({ root, poppler }), /exactly one/);
     await writeFile(file, JSON.stringify(valid));
     assert.equal((await validatePopplerCache({ root, poppler })).build, valid.build);
-    for (const change of [{ version: "26.04.0" }, { build: "hd83632c_2" }, { subdir: "osx-64" }, { channel: "other" }]) {
+    await writeFile(file, JSON.stringify({ ...valid, channel: `${poppler.channel}/` }));
+    assert.equal((await validatePopplerCache({ root, poppler })).build, valid.build);
+    for (const change of [{ version: "26.04.0" }, { build: "hd83632c_2" }, { subdir: "osx-64" }, { channel: "other" }, { channel: "https://untrusted.example/conda-forge" }]) {
       await writeFile(file, JSON.stringify({ ...valid, ...change }));
       await assert.rejects(validatePopplerCache({ root, poppler }), /identity mismatch/);
     }

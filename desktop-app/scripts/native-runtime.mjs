@@ -253,10 +253,16 @@ export async function validatePopplerCache({ root, poppler }) {
   if (matches.length !== 1) throw new Error("Poppler cache must have exactly one conda package record");
   const record = matches[0];
   if (record.version !== spec[1] || record.build !== spec[2] || record.subdir !== poppler.platform
-      || record.channel !== poppler.channel) {
+      || condaChannelUrl(record.channel) !== condaChannelUrl(poppler.channel)) {
     throw new Error(`Poppler cache identity mismatch: expected ${poppler.channel}/${poppler.platform}/${poppler.packageSpec}, got ${JSON.stringify(record)}`);
   }
   return record;
+}
+
+function condaChannelUrl(channel) {
+  if (typeof channel !== "string" || !channel.trim()) return null;
+  const value = channel.trim().replace(/\/+$/, "");
+  return new URL(value.includes("://") ? value : `https://conda.anaconda.org/${value}`).href.replace(/\/+$/, "");
 }
 
 // Read-only closure check: preserve links, reject dangling/cyclic, absolute or
