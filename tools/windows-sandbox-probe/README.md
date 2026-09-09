@@ -71,3 +71,9 @@ cargo test --locked --offline --manifest-path tools/windows-sandbox-probe/Cargo.
 - LPAC：PowerShell 无法读取系统 PowerShell 注册表项；Node 在 WSAStartup 返回 10107；Python 进程以 `0xc0000022` 退出，尚未运行检查脚本。不能通过放开整个宿主权限绕过。
 - 普通 AppContainer：Python 成功读写 workspace，读取附件/runtime，并拒绝附件/runtime 写入及 ungranted 文件读写；LibreOffice 实际转换 60 秒超时。PowerShell 报 workspace 路径访问拒绝；Node 在加载主脚本时 `lstat C:\\` 返回 EPERM。只读输出不存在不等于 LO 权限拒绝已经验证。
 - 这些结果把后续调查定位到进程启动、路径解析及系统依赖访问，不是文档 skill 缺失。合成边界局部通过不证明 Windows 产品隔离完成。上述改动只属于独立实验，不包含在 Desktop `v0.1.30` 中。
+
+## 产品方向：不继续将 AppContainer 探针改造成 Runner
+
+已核对 [Codex 官方 Windows sandbox 文档](https://learn.chatgpt.com/docs/windows/windows-sandbox)：首选 elevated 模式使用专用低权限账户、ACL、网络规则和必要的本地策略；unelevated 使用当前用户派生的 restricted token，安全边界较弱。两种模式默认使用 private desktop。官方开源 `codex-rs/windows-sandbox-rs/src/token.rs` 使用 `CreateRestrictedToken`，不是这里的 AppContainer 启动模型。
+
+因此本探针保留为失败兼容性证据，不进入产品、不为工具逐项添加绕过参数、不据 Python 的局部成功降低验收要求。后续 Windows Runner 应研究并复用 Codex 的原生 token / identity / ACL / private-desktop 分层，保持现有 skill、scripts 和随包工具链。专用账户和机器策略的安装、卸载、失败回滚需要单独实现及验收；不得在用户机器上静默创建账户或更改系统策略。此决策不是 Windows 实现完成证明。
