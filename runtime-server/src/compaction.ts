@@ -11,13 +11,14 @@ import {
   type AgentMessage,
   type SessionTreeEntry
 } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage, ToolResultMessage, Usage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
 import {
   renderUserMessageForModel,
   type ContextAttachment,
   type ConversationMessage
 } from "./protocol.js";
 import { createPiModel, createPiModels } from "./piModel.js";
+import { persistToolMessage, restoreToolMessage } from "./toolMessage.js";
 
 // These are Pi's own model-facing compaction delimiters. Keep the export name
 // for the existing event/UI projection, but do not invent a second summary
@@ -34,9 +35,12 @@ export type RuntimeCompactionMessage = {
   role: string;
   content?: string | null;
   attachments?: ContextAttachment[];
+  model_images?: ConversationMessage["model_images"];
   tool_calls?: unknown;
   tool_call_id?: string;
   tool_name?: string;
+  tool_content?: ConversationMessage["tool_content"];
+  tool_is_error?: boolean;
   usage?: Usage;
   tokens_before?: number;
 };
@@ -153,7 +157,7 @@ export function runtimeMessagesTranscript(messages: RuntimeCompactionMessage[]):
       if (message.tool_call_id) parts.push(`tool_call_id=${message.tool_call_id}`);
       const content = message.role === "user"
         ? renderUserMessageForModel({ content: message.content ?? null, attachments: message.attachments })
-        : message.content;
+        : message.tool_content?.filter((block) => block.type === "text").map((block) => block.text).join("\n") ?? message.content;
       if (content) parts.push(String(content));
       if (message.tool_calls) parts.push(`tool_calls=${JSON.stringify(message.tool_calls)}`);
       return parts.join("\n");
@@ -186,22 +190,16 @@ function toPiMessage(message: RuntimeCompactionMessage): AgentMessage {
     );
   }
   if (message.role === "user") {
+    const text = renderUserMessageForModel({ content: message.content ?? null, attachments: message.attachments });
     return {
       role: "user",
-      content: renderUserMessageForModel({ content: message.content ?? null, attachments: message.attachments }),
+      content: message.model_images?.length
+        ? [{ type: "text", text }, ...structuredClone(message.model_images)] : text,
       timestamp: Date.now()
     };
   }
   if (message.role === "tool") {
-    return {
-      role: "toolResult",
-      toolCallId: message.tool_call_id ?? "unknown-tool-call",
-      toolName: message.tool_name ?? "tool",
-      content: [{ type: "text", text: message.content ?? "" }],
-      isError: false,
-      details: {},
-      timestamp: Date.now()
-    } as ToolResultMessage;
+    return restoreToolMessage({ ...message, content: message.content ?? null });
   }
 
   const model = createPiModel();
@@ -234,12 +232,7 @@ function fromPiMessage(message: AgentMessage): ConversationMessage {
     return { role: "user", content: contentText(message.content) };
   }
   if (message.role === "toolResult") {
-    return {
-      role: "tool",
-      content: contentText(message.content),
-      tool_call_id: message.toolCallId,
-      tool_name: message.toolName
-    };
+    return persistToolMessage(message);
   }
   if (message.role !== "assistant") {
     throw new Error(`Pi compaction returned unsupported message role: ${message.role}`);

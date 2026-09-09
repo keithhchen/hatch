@@ -9,7 +9,9 @@ This Skill owns `.xls`, `.xlsx`, `.xlsm`, `.xltx`, `.xltm`, `.csv`, and `.tsv` w
 
 ## Required workflow
 
-1. Load this complete Skill before any spreadsheet `file_read` or edit. A chat workbook upload also implicitly activates this complete Skill before its bounded projection is prepared. The local preview is bounded transport; it does not preserve formulas, styles, hidden sheets, charts, merged cells, or calculation state.
+1. Load this complete Skill before reading, creating, or editing a spreadsheet. For a chat attachment, inspect the managed local file referenced in the committed message through LocalRunner. The attachment reference contains no extracted workbook contents; inspect formulas, styles, hidden sheets, charts, merged cells, and calculation state with the Skill tools.
+
+Attached source copies are read-only. Write edits and renders to the authorized Workspace or task output directory. Reading or rendering is a tool execution whose result is appended to history; do not re-run it merely to load old messages. To visually inspect a rendered page, call the image-reading tool so the model receives image content, not just a path.
 2. Inspect the workbook with `xlsx_tool.py inspect` and `read` before editing. Keep formulas as formulas when editability matters and identify external links, hidden sheets, named ranges, and formula errors.
 3. Create or edit binary workbooks using the Skill scripts through `$HATCH_PYTHON` or `$HATCH_NODE` absolute paths. Use `file_write` only for requested plain-text CSV/TSV/Markdown intermediates; never put text or base64 at an `.xlsx`/`.xls` path.
 4. Reopen the result, scan for `#REF!`, `#DIV/0!`, `#VALUE!`, `#NAME?`, and other formula errors, and recalculate with the bundled LibreOffice. Report a real dependency/conversion error instead of presenting stale cached values as verified.
@@ -26,7 +28,6 @@ The Desktop runtime exposes the Skill bundle at `$HATCH_DOCUMENT_SKILLS_ROOT/spr
 - `$HATCH_PYTHON .../scripts/recalc.py INPUT.xlsx --output OUTPUT.xlsx`
 - `$HATCH_PYTHON .../scripts/xlsx_tool.py render OUTPUT.xlsx --output-dir tmp/xlsx-render --dpi 150`
 - `$HATCH_NODE .../scripts/create_xlsx.mjs --rows-file rows.json --output OUTPUT.xlsx`
-- `$HATCH_NODE .../scripts/read_asset.mjs --input UPLOAD.xlsx --max-chars 200000` is the Runtime-only reader for a chat upload.
 
 Scripts return real structured dependency and conversion errors. They do not silently replace an unsupported legacy `.xls` workbook with a guessed CSV.
 

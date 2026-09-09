@@ -953,31 +953,8 @@ h2 {
   text-align: center;
 }
 
-.recovery-banner {
-  align-items: center;
-  background: #fff7e1;
-  border: 1px solid #e2ca8d;
-  border-radius: 10px;
-  bottom: 92px;
-  box-shadow: 0 12px 28px rgba(70, 58, 27, .12);
-  display: flex;
-  gap: 9px;
-  left: 50%;
-  max-width: 720px;
-  padding: 12px;
-  position: fixed;
-  transform: translateX(-35%);
-  z-index: 20;
-}
 
-.recovery-banner div {
-  display: grid;
-  flex: 1;
-  font-size: var(--hatch-type-ui);
-  gap: 2px;
-}
 
-.recovery-banner div span { color: #6b6045; }
 
 .chat-message {
   align-content: start;
@@ -2679,13 +2656,6 @@ h2 {
   .desktop-chat-shell .composer { border-radius: 12px; }
 }
 
-.desktop-chat-shell .recovery-banner {
-  bottom: 88px;
-  left: 50%;
-  max-width: min(720px, calc(100% - 28px));
-  position: absolute;
-  transform: translateX(-50%);
-}
 
 .approval-command {
   background: color-mix(in srgb, var(--hatch-panel-muted) 75%, transparent);

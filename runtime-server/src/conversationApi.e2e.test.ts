@@ -369,8 +369,9 @@ test("Run HTTP API rejects a detached reservation instead of occupying an execut
 test("WebSocket retries use client_message_id without creating a second run or replaying tools", async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-ws-"));
   const repository = new InMemoryConversationRepository();
+  const store = new RuntimeStore(dataDir);
   runtime = createRuntimeServer({
-    conversationStore: new RuntimeStore(dataDir),
+    conversationStore: store,
     conversationRepository: repository,
     createRuntime: () => new DeterministicAgentRuntime()
   });
@@ -407,6 +408,15 @@ test("WebSocket retries use client_message_id without creating a second run or r
     message: { role: "user", content: "Find Hatch." }
   }));
   await waitForSocket(messages, (message) => message.type === "tool_call.delta" && message.run_id === "run_transport_first");
+  const acceptedIndex = messages.findIndex((message) => message.type === "message.accepted"
+    && message.run_id === "run_transport_first" && message.client_message_id === "message_stable_once");
+  assert.ok(acceptedIndex >= 0, "the user message must be accepted before tools execute");
+  assert.ok(acceptedIndex < messages.findIndex((message) => message.type === "tool_call.delta"));
+  // Reopen the file store: receipt lookup must survive process-local state loss.
+  const reopenedStore = new RuntimeStore(dataDir);
+  const receipt = await reopenedStore.readSubmissionReceipt(conversationId, "run_transport_first");
+  assert.equal(receipt?.client_message_id, "message_stable_once");
+  assert.equal(await reopenedStore.readSubmissionReceipt(conversationId, "run_transport_retry"), undefined);
 
   socket.send(JSON.stringify({
     type: "client.message",
@@ -421,7 +431,121 @@ test("WebSocket retries use client_message_id without creating a second run or r
   assert.equal(replay.type, "turn.state");
   assert.ok(!messages.some((message) => message.type === "turn.failed" && message.run_id === "run_transport_retry"));
   assert.ok(!messages.some((message) => message.type === "tool_call.delta" && message.run_id === "run_transport_retry"));
+  assert.equal(messages.filter((message) => message.type === "message.accepted"
+    && message.run_id === "run_transport_first").length, 2, "retry replays the existing acceptance receipt");
+  const committedUsers = (await reopenedStore.readEvents()).filter((event) =>
+    event.type === "conversation.model_message" && event.conversation_id === conversationId
+    && event.message.role === "user");
+  assert.equal(committedUsers.length, 1, "transport retry must not append a second user message");
   socket.close();
+});
+
+test("local attachments commit references and fixed image bytes without using the asset store", async (t) => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-local-attachment-submit-"));
+  const repository = new InMemoryConversationRepository();
+  const store = new RuntimeStore(dataDir);
+  const assetStore = new RuntimeAssetStore(path.join(dataDir, "assets"));
+  const put = t.mock.method(assetStore, "put", async () => { throw new Error("OSS disabled"); });
+  const read = t.mock.method(assetStore, "readBase64", async () => { throw new Error("OSS disabled"); });
+  runtime = createRuntimeServer({ conversationStore: store, conversationRepository: repository, assetStore,
+    createRuntime: () => ({ async *run(input) {
+      yield { type: "turn.completed" as const, run_id: input.run_id, finish_reason: "stop" as const };
+    } }) });
+  const base = await listen(runtime.server);
+  const conversationId = "conversation_local_attachments";
+  await repository.createConversation({ id: conversationId, publicId: conversationId,
+    ownerAccountId: "local-development", creatorId: "local-development", agentId: "local-agent",
+    productId: "local-product", corpusDigest: `sha256:${"0".repeat(64)}` });
+  const messages: OutboundMessage[] = [];
+  const socket = await openRuntimeSocket(base, "local-attachment-test", messages);
+  const imageBytes = Buffer.from("fixed-image-input");
+  const document = { kind: "local_file", attachment_id: "drop_document", display_name: "brief.pdf",
+    host_id: "f780570c-7e50-4c14-bbd0-8a6c06d3302b", local_path: "/managed/brief.pdf",
+    media_type: "application/pdf", source_bytes: 10, sha256: "a".repeat(64) };
+  const image = { ...document, attachment_id: "drop_image", display_name: "image.png", local_path: "/managed/image.png",
+    media_type: "image/png", source_bytes: imageBytes.length,
+    sha256: createHash("sha256").update(imageBytes).digest("hex"), data_base64: imageBytes.toString("base64") };
+  try {
+    socket.send(JSON.stringify({ type: "client.message", run_id: "local-run", client_message_id: "local-message",
+      conversation_id: conversationId, message: { role: "user", content: "Read attachments", attachments: [document, image] } }));
+    await waitForSocket(messages, (message) => message.type === "message.accepted");
+    const committed = (await new RuntimeStore(dataDir).readConversation(conversationId))[0]!;
+    const { data_base64: _bytes, ...imageReference } = image;
+    assert.deepEqual(committed.attachments, [document, imageReference]);
+    assert.deepEqual(committed.model_images, [{ type: "image", data: image.data_base64, mimeType: "image/png" }]);
+    assert.equal(put.mock.callCount(), 0);
+    assert.equal(read.mock.callCount(), 0);
+    await waitForSocket(messages, (message) => message.type === "turn.completed");
+    const journal = await repository.snapshot(conversationId);
+    assert.ok(!JSON.stringify(journal).includes(image.data_base64), "journal must not duplicate model image bytes");
+    const visible = await store.readVisibleConversation(conversationId);
+    assert.deepEqual(visible[0]?.attachments, [document, imageReference]);
+    assert.ok(!JSON.stringify(visible).includes(image.data_base64), "UI history must not return model image bodies");
+    assert.deepEqual(await new RuntimeStore(dataDir).readVisibleConversation(conversationId), visible);
+  } finally { socket.close(); }
+});
+
+test("completed assistant body is stored once and journal carries only one notification", async () => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-canonical-terminal-"));
+  const repository = new InMemoryConversationRepository();
+  const store = new RuntimeStore(dataDir);
+  runtime = createRuntimeServer({ conversationStore: store, conversationRepository: repository,
+    createRuntime: () => ({ async *run(input) {
+      yield { type: "assistant.delta" as const, run_id: input.run_id,
+        delta: { kind: "text" as const, content: "The document is ready for review." } };
+      yield { type: "turn.completed" as const, run_id: input.run_id, finish_reason: "stop" as const };
+    } }) });
+  const base = await listen(runtime.server);
+  const conversationId = "conversation_canonical_terminal";
+  await repository.createConversation({ id: conversationId, publicId: conversationId,
+    ownerAccountId: "local-development", creatorId: "local-development", agentId: "local-agent",
+    productId: "local-product", corpusDigest: `sha256:${"0".repeat(64)}` });
+  const messages: OutboundMessage[] = [];
+  const socket = await openRuntimeSocket(base, "canonical-test", messages);
+  try {
+    socket.send(JSON.stringify({ type: "client.message", run_id: "canonical-run",
+      client_message_id: "canonical-message", conversation_id: conversationId,
+      message: { role: "user", content: "Review my document." } }));
+    await waitForSocket(messages, (message) => message.type === "turn.completed");
+    const journal = await repository.snapshot(conversationId);
+    const notifications = journal.events.filter((event) => event.type === "message.created" && event.payload.role === "assistant");
+    assert.equal(notifications.length, 1);
+    assert.ok(!Object.hasOwn(notifications[0]!.payload, "content"));
+    const history = await store.readConversation(conversationId);
+    assert.equal(history.filter((message) => message.role === "assistant").length, 1);
+    assert.equal(history.at(-1)?.content, "The document is ready for review.");
+  } finally { socket.close(); }
+});
+
+test("a failed manual compaction does not lose the already accepted user command", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => new Response(JSON.stringify({ error: {
+    message: "Injected compaction provider failure", type: "invalid_request_error"
+  } }), { status: 400, headers: { "content-type": "application/json" } }));
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-compact-acceptance-"));
+  const repository = new InMemoryConversationRepository();
+  const store = new RuntimeStore(dataDir);
+  runtime = createRuntimeServer({ conversationStore: store, conversationRepository: repository,
+    createRuntime: () => new DeterministicAgentRuntime() });
+  const base = await listen(runtime.server);
+  const conversationId = "conversation_compact_acceptance";
+  await repository.createConversation({ id: conversationId, publicId: conversationId,
+    ownerAccountId: "local-development", creatorId: "local-development", agentId: "local-agent",
+    productId: "local-product", corpusDigest: `sha256:${"0".repeat(64)}` });
+  const messages: OutboundMessage[] = [];
+  const socket = await openRuntimeSocket(base, "compact-acceptance", messages);
+  try {
+    socket.send(JSON.stringify({ type: "client.message", run_id: "compact-run",
+      client_message_id: "compact-message", conversation_id: conversationId,
+      message: { role: "user", content: "/compact" } }));
+    // The provider failure is injected; this test never calls a live model.
+    await waitForSocket(messages, (message) => message.type === "turn.failed");
+    const accepted = messages.findIndex((message) => message.type === "message.accepted");
+    assert.ok(accepted >= 0);
+    assert.ok(accepted < messages.findIndex((message) => message.type === "turn.failed"));
+    assert.equal((await store.readSubmissionReceipt(conversationId, "compact-run"))?.client_message_id, "compact-message");
+    assert.deepEqual((await store.readConversation(conversationId)).filter((message) => message.role === "user"),
+      [{ role: "user", content: "/compact", model_images: [] }]);
+  } finally { socket.close(); }
 });
 
 test("Runtime startup interrupts a carried active Run instead of reclaiming or replaying it", async () => {

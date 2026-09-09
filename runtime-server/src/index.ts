@@ -16,6 +16,7 @@ import {
 import { createAgentRuntime, type AgentRuntime, type RuntimeSessionSkills } from "./agentRuntime.js";
 import {
   clientMessageInputDigest,
+  persistedAttachment,
   MAX_RICH_TOOL_RESULT_BYTES,
   parseInboundMessage,
   PROTOCOL_VERSION,
@@ -1534,7 +1535,9 @@ async function handleConversationHttpRequest(
       }
       const run = await repository.getRun(conversation.id, runId);
       if (!run) throw new ConversationHttpError(404, "run_not_found", `Run ${runId} was not found.`);
-      writeResponse(200, { run: publicRun(run) });
+      if (!store) throw new ConversationHttpError(503, "history_unavailable", "Message acceptance is unavailable.");
+      const receipt = await store.readSubmissionReceipt(conversation.id, runId);
+      writeResponse(200, { run: publicRun(run), submission: receipt ?? null });
       return;
     }
     if (!runMatch[3] && req.method === "GET") {
@@ -1891,14 +1894,29 @@ async function materializeUserMessageAssets(
   assetStore: RuntimeAssetStore
 ): Promise<ConversationMessage> {
   const attachments = [];
+  const modelImages: NonNullable<ConversationMessage["model_images"]> = [];
   for (const attachment of message.attachments ?? []) {
-    attachments.push("kind" in attachment && attachment.kind === "asset"
+    if ("kind" in attachment && attachment.kind === "local_file") {
+      attachments.push(persistedAttachment(attachment));
+      if (attachment.media_type.startsWith("image/")) {
+        if (!attachment.data_base64) throw new Error("Image bytes are required before message acceptance");
+        modelImages.push({ type: "image", mimeType: attachment.media_type, data: attachment.data_base64 });
+      }
+      continue;
+    }
+    const persisted = "kind" in attachment && attachment.kind === "asset"
       ? await assetStore.put(attachment)
-      : attachment);
+      : attachment;
+    attachments.push(persisted);
+    if ("kind" in persisted && persisted.kind === "asset" && persisted.media_type.startsWith("image/")) {
+      modelImages.push({ type: "image", mimeType: persisted.media_type,
+        data: await assetStore.readBase64(persisted.asset_id, "storage_ref" in persisted ? persisted.storage_ref : undefined) });
+    }
   }
   return {
     role: "user",
     content: message.content,
+    model_images: modelImages,
     ...(attachments.length > 0 ? { attachments } : {})
   };
 }
@@ -2179,7 +2197,9 @@ async function handleRuntimeSocket(
               type: "session.ready",
               accepted_protocol_version: message.protocol_version,
               runtime_capabilities: {
-                rich_assets: true
+                rich_assets: true,
+                message_acceptance: true,
+                local_file_references: true
               },
               creator_id: binding.creatorId,
               user_id: binding.userId,
@@ -2333,6 +2353,8 @@ async function handleRuntimeSocket(
                 });
                 return;
               }
+              const receipt = await store.readSubmissionReceipt(storageConversationId, existing.id);
+              if (receipt) await send({ type: "message.accepted", run_id: receipt.run_id, client_message_id: receipt.client_message_id });
               await send({
                 type: "turn.state",
                 run_id: existing.id,
@@ -2635,6 +2657,8 @@ async function handleRuntimeSocket(
             releaseConversationRun(activeConversationRuns, storageConversationId, message.run_id);
             reservedRunIds.delete(message.run_id);
             pendingAuthorization.releaseActiveRunCapacity();
+            const receipt = await store.readSubmissionReceipt(storageConversationId, durableRun.run.id);
+            if (receipt) await send({ type: "message.accepted", run_id: receipt.run_id, client_message_id: receipt.client_message_id });
             await send({
               type: "turn.state",
               run_id: durableRun.run.id,
@@ -2846,6 +2870,29 @@ async function runOneTurn(
           ...(persistedUserMessage.attachments?.length ? { attachments: persistedUserMessage.attachments } : {})
         }
       };
+    const persistUserMessage = async (): Promise<void> => {
+      await store.append({
+        type: "conversation.model_message",
+        conversation_id: input.conversation_id,
+        run_id: input.run_id,
+        client_message_id: input.client_message_id ?? input.run_id,
+        message: persistedUserMessage
+      });
+      await send({ type: "message.accepted", run_id: input.run_id, client_message_id: input.client_message_id ?? input.run_id });
+      await conversationRepository.appendEvent({
+        conversationId: input.conversation_id,
+        runId: input.run_id,
+        type: "message.created",
+        payload: {
+          role: "user",
+          client_message_id: input.client_message_id ?? input.run_id
+        }
+      });
+    };
+    // Acceptance precedes any model work, including compaction. The current
+    // user message is part of the committed input that Pi may compact.
+    await persistUserMessage();
+    const committedInput = [...priorMessages, persistedUserMessage];
     const materializedAgent = binding.agentCorpusRoot
       ? await materializeAgentCorpus(
         binding.agentCorpusRoot,
@@ -2855,25 +2902,6 @@ async function runOneTurn(
         abortSignal
       )
       : undefined;
-    const persistUserMessage = async (): Promise<void> => {
-      await store.append({
-        type: "conversation.model_message",
-        conversation_id: input.conversation_id,
-        run_id: input.run_id,
-        message: persistedUserMessage
-      });
-      await conversationRepository.appendEvent({
-        conversationId: input.conversation_id,
-        runId: input.run_id,
-        type: "message.created",
-        payload: {
-          role: "user",
-          content: persistedUserMessage.content ?? "",
-          ...(persistedUserMessage.kind ? { kind: persistedUserMessage.kind } : {}),
-          ...(persistedUserMessage.attachments?.length ? { attachments: persistedUserMessage.attachments } : {})
-        }
-      });
-    };
     const guardedOutput = new GuardedAssistantOutput(
       outputGuard,
       input.run_id,
@@ -2978,17 +3006,6 @@ async function runOneTurn(
         type: "message.created",
         payload: {
           role: "assistant",
-          content: finishReason === "content_filter" ? "" : approvedAssistantText,
-          ...(finishReason === "content_filter" ? { finish_reason: finishReason } : {})
-        }
-      });
-      await conversationRepository.appendEvent({
-        conversationId: input.conversation_id,
-        runId: input.run_id,
-        type: "message.created",
-        payload: {
-          role: "assistant",
-          content: finishReason === "content_filter" ? "" : approvedAssistantText,
           ...(finishReason === "content_filter" ? { finish_reason: finishReason } : {})
         }
       });
@@ -3065,19 +3082,17 @@ async function runOneTurn(
         input.run_id
       );
       if (completedDelivery) {
-        await persistUserMessage();
         await send({ type: "delivery.ready", run_id: input.run_id, ...completedDelivery, receipt_status: "recorded" });
         await sendFixedAssistant("This delivery was already completed. The existing artifact has not been changed.");
         return;
       }
     }
     if (input.message.content.trim() === "/compact") {
-      await compactAndEmit(input, store, state, send, priorMessages, {
+      await compactAndEmit(input, store, state, send, committedInput, {
         trigger: "manual",
         phase: "standalone_turn",
         reason: "user_requested"
       });
-      await persistUserMessage();
       await sendFixedAssistant("Compaction complete.");
       return;
     }
@@ -3091,15 +3106,14 @@ async function runOneTurn(
       );
     }
 
-    const preTurnCompaction = await compactIfNeeded(input, store, state, send, priorMessages, "pre_turn");
-    let runtimeMessages = priorMessages;
+    const preTurnCompaction = await compactIfNeeded(input, store, state, send, committedInput, "pre_turn");
+    let runtimeMessages = committedInput;
     if (preTurnCompaction) {
       runtimeMessages = preTurnCompaction.replacement_history;
     }
-    await persistUserMessage();
 
     setupCompleted = performance.now();
-    const messages = [...runtimeMessages, persistedUserMessage];
+    const messages = runtimeMessages;
 
     // Store/materialization work may race with a disconnect. Never start a
     // provider request after the owning run has already been aborted.

@@ -22,7 +22,9 @@ use tauri::{
 };
 use tauri_plugin_deep_link::DeepLinkExt;
 
+mod attachment_store;
 mod desktop_state;
+mod draft_store;
 mod window_commands;
 
 #[cfg(target_os = "windows")]
@@ -45,7 +47,6 @@ use objc2_quick_look_ui::QLPreviewPanel;
 use quicklook::{PreviewItem, QuickLookPanel};
 const LOCAL_TOOL_RESULT_TTL: Duration = Duration::from_secs(60);
 const PENDING_TOOL_APPROVAL_TTL: Duration = Duration::from_secs(5 * 60);
-const NATIVE_DROP_CONTEXT_TTL: Duration = Duration::from_secs(10 * 60);
 const MAX_NATIVE_DROP_CONTEXTS: usize = 8;
 const MAX_NATIVE_DROP_CONTEXT_SOURCE_BYTES: u64 = 100 * 1024 * 1024;
 const MAX_NATIVE_DROP_CONTEXT_BYTES: usize = 64 * 1024;
@@ -405,10 +406,7 @@ struct WorkspaceGrantInfo {
     display_path: String,
 }
 
-/// A file dropped from Finder/Explorer is an explicit user gesture, but its
-/// path must not become renderer authority. Rust snapshots a bounded UTF-8
-/// projection at drop time, keeps only that projection behind a short-lived
-/// opaque handle, and consumes it once when the composer sends.
+/// A user-selected file is copied into the dedicated local attachment directory.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct NativeDropContextInfo {
@@ -419,6 +417,24 @@ struct NativeDropContextInfo {
     size: u64,
     sha256: String,
     is_image: bool,
+    local_path: String,
+    host_id: String,
+}
+
+impl From<attachment_store::Attachment> for NativeDropContextInfo {
+    fn from(file: attachment_store::Attachment) -> Self {
+        Self {
+            context_id: file.id.clone(),
+            asset_id: file.id,
+            display_name: file.display_name,
+            is_image: file.media_type.starts_with("image/"),
+            media_type: file.media_type,
+            size: file.size,
+            sha256: file.sha256,
+            local_path: file.path.to_string_lossy().into_owned(),
+            host_id: file.host_id,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -438,6 +454,8 @@ struct NativeDropPickResult {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct NativeDropContextContent {
+    local_path: String,
+    host_id: String,
     context_id: String,
     asset_id: String,
     display_name: String,
@@ -451,189 +469,66 @@ struct NativeDropContextContent {
     #[serde(skip_serializing_if = "Option::is_none")]
     sha256: Option<String>,
 }
-
-#[derive(Clone, Debug)]
-struct StoredNativeDropContext {
-    content: NativeDropContextContent,
-    created_at: Instant,
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-struct NativeDropContextKey {
-    window_label: String,
-    context_id: String,
-}
-
-#[derive(Clone, Default)]
+#[derive(Clone)]
 struct NativeDropContextStore {
-    state: Arc<Mutex<HashMap<NativeDropContextKey, StoredNativeDropContext>>>,
+    files: attachment_store::AttachmentStore,
 }
 
 impl NativeDropContextStore {
-    fn insert(
-        &self,
-        window_label: &str,
-        path: &std::path::Path,
-    ) -> Result<NativeDropContextInfo, String> {
-        let context_id = format!("drop_{}", uuid::Uuid::new_v4().simple());
-        let content = snapshot_native_drop_context(path, context_id.clone())?;
-        let key = NativeDropContextKey {
-            window_label: window_label.to_string(),
-            context_id: context_id.clone(),
-        };
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|_| "Native drop context store is unavailable")?;
-        state.retain(|_, entry| entry.created_at.elapsed() < NATIVE_DROP_CONTEXT_TTL);
-        while state
-            .keys()
-            .filter(|key| key.window_label == window_label)
-            .count()
-            >= MAX_NATIVE_DROP_CONTEXTS
-        {
-            let oldest = state
-                .iter()
-                .filter(|(key, _)| key.window_label == window_label)
-                .min_by_key(|(_, entry)| entry.created_at)
-                .map(|(key, _)| key.clone());
-            let Some(oldest) = oldest else { break };
-            state.remove(&oldest);
-        }
-        let current_bytes = state
-            .values()
-            .filter(|entry| entry.content.context_id.starts_with("drop_"))
-            .map(|entry| entry.content.source_bytes as usize)
-            .sum::<usize>();
-        if current_bytes.saturating_add(content.source_bytes as usize)
-            > MAX_NATIVE_DROP_CONTEXT_TOTAL_BYTES
-        {
-            return Err(format!(
-                "native_drop_context_too_large: Pending attachments exceed {} MiB total",
-                MAX_NATIVE_DROP_CONTEXT_TOTAL_BYTES / (1024 * 1024)
-            ));
-        }
-        let info = NativeDropContextInfo {
-            context_id: context_id.clone(),
-            asset_id: content.asset_id.clone(),
-            display_name: content.display_name.clone(),
-            media_type: content.media_type.clone(),
-            size: content.source_bytes,
-            sha256: content
-                .sha256
-                .clone()
-                .unwrap_or_else(|| content.text_sha256.clone()),
-            is_image: content.media_type.starts_with("image/"),
-        };
-        state.insert(
-            key,
-            StoredNativeDropContext {
-                content: content.clone(),
-                created_at: Instant::now(),
-            },
-        );
-        Ok(info)
+    fn open(root: PathBuf) -> Result<Self, String> {
+        Ok(Self {
+            files: attachment_store::AttachmentStore::open(root)?,
+        })
     }
 
-    fn consume(
+    fn insert(&self, _window_label: &str, path: &Path) -> Result<NativeDropContextInfo, String> {
+        let file = self.files.import(
+            path,
+            native_drop_media_type(path),
+            MAX_NATIVE_DROP_CONTEXT_SOURCE_BYTES,
+        )?;
+        Ok(file.into())
+    }
+
+    // Reads are repeatable across retries, windows and process restarts.
+    fn read(
         &self,
-        window_label: &str,
+        _window_label: &str,
         context_ids: Vec<String>,
     ) -> Result<Vec<NativeDropContextContent>, String> {
         if context_ids.len() > MAX_NATIVE_DROP_CONTEXT_REQUESTS {
             return Err("native_drop_context_invalid: Too many dropped files".into());
         }
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|_| "Native drop context store is unavailable")?;
-        state.retain(|_, entry| entry.created_at.elapsed() < NATIVE_DROP_CONTEXT_TTL);
-        let mut keys = Vec::with_capacity(context_ids.len());
         let mut identifiers = std::collections::HashSet::new();
-        for context_id in context_ids {
-            if !valid_native_drop_context_id(&context_id) {
-                return Err("native_drop_context_invalid: Invalid dropped file handle".into());
-            }
-            if !identifiers.insert(context_id.clone()) {
+        let mut output = Vec::new();
+        let mut total = 0u64;
+        for id in context_ids {
+            if !identifiers.insert(id.clone()) {
                 return Err("native_drop_context_invalid: Duplicate dropped file handle".into());
             }
-            let key = NativeDropContextKey {
-                window_label: window_label.to_string(),
-                context_id,
-            };
-            if !state.contains_key(&key) {
+            let file = self.files.get(&id)?;
+            total = total.saturating_add(file.size);
+            if total > MAX_NATIVE_DROP_CONTEXT_TOTAL_BYTES as u64 {
                 return Err(
-                    "native_drop_context_missing: The dropped file is no longer available".into(),
+                    "native_drop_context_too_large: Attachments exceed total size limit".into(),
                 );
             }
-            keys.push(key);
-        }
-        let output = keys
-            .iter()
-            .filter_map(|key| state.get(key).map(|entry| entry.content.clone()))
-            .collect::<Vec<_>>();
-        if output.len() != keys.len() {
-            return Err(
-                "native_drop_context_missing: The dropped file is no longer available".into(),
-            );
-        }
-        let total_bytes = output
-            .iter()
-            .map(|content| content.source_bytes as usize)
-            .sum::<usize>();
-        if total_bytes > MAX_NATIVE_DROP_CONTEXT_TOTAL_BYTES {
-            return Err(format!(
-                "native_drop_context_invalid: Dropped context exceeds {} KiB total",
-                MAX_NATIVE_DROP_CONTEXT_TOTAL_BYTES / 1024
-            ));
-        }
-        // Validate every requested handle before consuming any. A failed
-        // multi-file send remains retryable instead of losing an arbitrary
-        // prefix of the attachment chips.
-        for key in keys {
-            state.remove(&key);
+            let mut content = snapshot_native_drop_context(&file.path, id, &file.media_type)?;
+            if content.sha256.as_deref() != Some(file.sha256.as_str()) {
+                return Err("attachment_changed: Stored attachment content has changed".into());
+            }
+            content.local_path = file.path.to_string_lossy().into_owned();
+            content.host_id = file.host_id;
+            output.push(content);
         }
         Ok(output)
     }
-
-    fn discard(&self, window_label: &str, context_ids: Vec<String>) -> Result<(), String> {
-        if context_ids.len() > MAX_NATIVE_DROP_CONTEXT_REQUESTS {
-            return Err("native_drop_context_invalid: Too many dropped files".into());
-        }
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|_| "Native drop context store is unavailable")?;
-        state.retain(|_, entry| entry.created_at.elapsed() < NATIVE_DROP_CONTEXT_TTL);
-        if context_ids
-            .iter()
-            .any(|context_id| !valid_native_drop_context_id(context_id))
-        {
-            return Err("native_drop_context_invalid: Invalid dropped file handle".into());
-        }
-        for context_id in context_ids {
-            state.remove(&NativeDropContextKey {
-                window_label: window_label.to_string(),
-                context_id,
-            });
-        }
-        Ok(())
-    }
-
-    fn clear_window(&self, window_label: &str) {
-        if let Ok(mut state) = self.state.lock() {
-            state.retain(|key, _| key.window_label != window_label);
-        }
-    }
-}
-
-fn valid_native_drop_context_id(value: &str) -> bool {
-    value.len() <= 96 && value.starts_with("drop_")
 }
 
 fn snapshot_native_drop_context(
     path: &std::path::Path,
     context_id: String,
+    media_type: &str,
 ) -> Result<NativeDropContextContent, String> {
     let metadata = fs::symlink_metadata(path).map_err(to_string)?;
     if !metadata.file_type().is_file() {
@@ -680,11 +575,17 @@ fn snapshot_native_drop_context(
     }
     let source_bytes = bytes.len() as u64;
     let raw_sha256 = format!("{:x}", Sha256::digest(&bytes));
-    let mut media_type = native_drop_media_type(path).to_string();
+    let mut media_type = media_type.to_owned();
     let is_known_rich = native_drop_is_rich_media_type(&media_type);
     let projection_len = bytes.len().min(MAX_NATIVE_DROP_CONTEXT_BYTES);
     let (text, truncated, data_base64) = if is_known_rich {
-        (String::new(), false, Some(BASE64_STANDARD.encode(&bytes)))
+        (
+            String::new(),
+            false,
+            media_type
+                .starts_with("image/")
+                .then(|| BASE64_STANDARD.encode(&bytes)),
+        )
     } else {
         match decode_native_drop_text(
             &bytes[..projection_len],
@@ -695,12 +596,14 @@ fn snapshot_native_drop_context(
                 if media_type == "application/octet-stream" {
                     media_type = "application/octet-stream".to_string();
                 }
-                (String::new(), false, Some(BASE64_STANDARD.encode(&bytes)))
+                (String::new(), false, None)
             }
         }
     };
     let text_sha256 = format!("{:x}", Sha256::digest(text.as_bytes()));
     Ok(NativeDropContextContent {
+        local_path: String::new(),
+        host_id: String::new(),
         asset_id: context_id.clone(),
         context_id,
         display_name,
@@ -1140,12 +1043,106 @@ fn read_task_settings(app: AppHandle, task_id: String) -> Result<Option<Value>, 
 }
 
 #[tauri::command]
+fn open_conversation_draft(
+    window: WebviewWindow,
+    account_id: String,
+    conversation_id: String,
+    store: State<'_, draft_store::DraftStore>,
+) -> Result<draft_store::OpenDraft, String> {
+    store.open(&account_id, &conversation_id, window.label())
+}
+
+#[tauri::command]
+fn save_conversation_draft(
+    window: WebviewWindow,
+    account_id: String,
+    conversation_id: String,
+    lease: String,
+    draft: draft_store::Draft,
+    store: State<'_, draft_store::DraftStore>,
+) -> Result<(), String> {
+    store.save(&account_id, &conversation_id, window.label(), &lease, draft)
+}
+
+#[tauri::command]
+fn release_conversation_draft(
+    window: WebviewWindow,
+    account_id: String,
+    conversation_id: String,
+    lease: String,
+    store: State<'_, draft_store::DraftStore>,
+) -> Result<(), String> {
+    store.release(&account_id, &conversation_id, window.label(), &lease)
+}
+
+#[tauri::command]
+fn import_clipboard_attachment(
+    display_name: String,
+    media_type: String,
+    data_base64: String,
+    store: State<'_, NativeDropContextStore>,
+) -> Result<NativeDropContextInfo, String> {
+    if data_base64.len() as u64 > ((MAX_NATIVE_DROP_CONTEXT_SOURCE_BYTES + 2) / 3) * 4 {
+        return Err("native_drop_context_too_large: Pasted file exceeds the size limit".into());
+    }
+    let bytes = BASE64_STANDARD.decode(data_base64).map_err(to_string)?;
+    Ok(store
+        .files
+        .import_reader(
+            &display_name,
+            &media_type,
+            bytes.as_slice(),
+            MAX_NATIVE_DROP_CONTEXT_SOURCE_BYTES,
+        )?
+        .into())
+}
+
+#[tauri::command]
+async fn save_local_attachment(
+    window: WebviewWindow,
+    context_id: String,
+    host_id: String,
+    sha256: String,
+    store: State<'_, NativeDropContextStore>,
+) -> Result<bool, String> {
+    let file = store
+        .files
+        .verified_reference(&context_id, &host_id, &sha256)?;
+    let selected = rfd::AsyncFileDialog::new()
+        .set_parent(&window)
+        .set_title("Save attachment as")
+        .set_file_name(&file.display_name)
+        .save_file()
+        .await;
+    let Some(handle) = selected else {
+        return Ok(false);
+    };
+    store
+        .files
+        .export_reference(&context_id, &host_id, &sha256, handle.path())?;
+    Ok(true)
+}
+
+#[tauri::command]
+fn open_local_attachment(
+    context_id: String,
+    host_id: String,
+    sha256: String,
+    store: State<'_, NativeDropContextStore>,
+) -> Result<(), String> {
+    let file = store
+        .files
+        .verified_reference(&context_id, &host_id, &sha256)?;
+    open_workspace_artifact_with_platform(&file.path)
+}
+
+#[tauri::command]
 fn read_native_drop_contexts(
     window: WebviewWindow,
     context_ids: Vec<String>,
     store: State<'_, NativeDropContextStore>,
 ) -> Result<Vec<NativeDropContextContent>, String> {
-    store.inner().consume(window.label(), context_ids)
+    store.inner().read(window.label(), context_ids)
 }
 
 #[tauri::command]
@@ -1185,15 +1182,6 @@ async fn pick_native_drop_files(
         files,
         rejected_files,
     })
-}
-
-#[tauri::command]
-fn discard_native_drop_contexts(
-    window: WebviewWindow,
-    context_ids: Vec<String>,
-    store: State<'_, NativeDropContextStore>,
-) -> Result<(), String> {
-    store.inner().discard(window.label(), context_ids)
 }
 
 #[tauri::command]
@@ -2267,6 +2255,12 @@ fn execute_tool_call_blocking(
         call.request.clone(),
         cancel,
         Some(&runtime_root),
+        Some(
+            &app.path()
+                .app_data_dir()
+                .map_err(to_string)?
+                .join("attachments"),
+        ),
     )
 }
 
@@ -2276,7 +2270,7 @@ fn execute_tool_call_in_workspace(
     request: Value,
     cancel: Arc<AtomicBool>,
 ) -> Result<Value, String> {
-    execute_tool_call_in_workspace_with_runtime(workspace, request, cancel, None)
+    execute_tool_call_in_workspace_with_runtime(workspace, request, cancel, None, None)
 }
 
 fn execute_tool_call_in_workspace_with_runtime(
@@ -2284,8 +2278,10 @@ fn execute_tool_call_in_workspace_with_runtime(
     request: Value,
     cancel: Arc<AtomicBool>,
     runtime_root: Option<&Path>,
+    attachment_root: Option<&Path>,
 ) -> Result<Value, String> {
-    let runner = LocalRunner::new_with_runtime(workspace, runtime_root).map_err(to_string)?;
+    let runner = LocalRunner::new_with_attachments(workspace, runtime_root, attachment_root)
+        .map_err(to_string)?;
     let request: ToolCallRequest = serde_json::from_value(request).map_err(to_string)?;
     if request.approval.is_some() {
         return Err(
@@ -2338,9 +2334,14 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_deep_link::init())
         .manage(NativeToolAuthority::default())
-        .manage(NativeDropContextStore::default())
         .manage(window_commands::NativeCommandRouter::default())
         .setup(|app| {
+            app.manage(draft_store::DraftStore::new(
+                app.path().app_data_dir()?.join("drafts"),
+            ));
+            app.manage(NativeDropContextStore::open(
+                app.path().app_data_dir()?.join("attachments"),
+            )?);
             let deep_link_app = app.handle().clone();
             app.deep_link().on_open_url(move |event| {
                 let links = event
@@ -2373,8 +2374,13 @@ pub fn run() {
             ensure_workspace,
             read_task_settings,
             read_native_drop_contexts,
+            open_local_attachment,
+            save_local_attachment,
+            import_clipboard_attachment,
+            open_conversation_draft,
+            save_conversation_draft,
+            release_conversation_draft,
             pick_native_drop_files,
-            discard_native_drop_contexts,
             pick_workspace_folder,
             reveal_workspace_artifact,
             open_workspace_artifact,
@@ -2453,8 +2459,8 @@ pub fn run() {
             if !matches!(event, WindowEvent::Destroyed) {
                 return;
             }
-            if let Some(drop_contexts) = window.try_state::<NativeDropContextStore>() {
-                drop_contexts.clear_window(window.label());
+            if let Some(drafts) = window.try_state::<draft_store::DraftStore>() {
+                drafts.close_window(window.label());
             }
             let Some(authority) = window.try_state::<NativeToolAuthority>() else {
                 return;
@@ -3036,27 +3042,31 @@ mod tests {
     }
 
     #[test]
-    fn native_drop_context_is_window_scoped_one_shot_and_pathless() {
+    fn native_drop_context_is_durable_and_repeatable() {
         let temp = tempdir().unwrap();
         let path = temp.path().join("notes.md");
         std::fs::write(&path, "user-provided context").unwrap();
-        let store = NativeDropContextStore::default();
+        let store = NativeDropContextStore::open(temp.path().join("attachments")).unwrap();
         let info = store.insert("window-a", &path).unwrap();
         assert_eq!(info.display_name, "notes.md");
-        assert!(!serde_json::to_string(&info)
-            .unwrap()
-            .contains(temp.path().to_string_lossy().as_ref()));
+        assert_ne!(std::path::PathBuf::from(&info.local_path), path);
+        assert!(std::path::PathBuf::from(&info.local_path).is_file());
         assert!(store
-            .consume("window-b", vec![info.context_id.clone()])
-            .is_err());
+            .read("window-b", vec![info.context_id.clone()])
+            .is_ok());
         let contents = store
-            .consume("window-a", vec![info.context_id.clone()])
+            .read("window-a", vec![info.context_id.clone()])
             .unwrap();
         assert_eq!(contents[0].media_type, "text/markdown");
         assert_eq!(contents[0].source_bytes, 21);
         assert_eq!(contents[0].text_sha256.len(), 64);
         assert_eq!(contents[0].text, "user-provided context");
-        assert!(store.consume("window-a", vec![info.context_id]).is_err());
+        std::fs::remove_file(path).unwrap();
+        let reopened = NativeDropContextStore::open(temp.path().join("attachments")).unwrap();
+        assert_eq!(
+            reopened.read("window-c", vec![info.context_id]).unwrap()[0].text,
+            "user-provided context"
+        );
     }
 
     #[test]
@@ -3064,14 +3074,17 @@ mod tests {
         let temp = tempdir().unwrap();
         let binary = temp.path().join("image.bin");
         std::fs::write(&binary, [0, 159, 146, 150]).unwrap();
-        let store = NativeDropContextStore::default();
+        let store = NativeDropContextStore::open(temp.path().join("attachments")).unwrap();
         let info = store.insert("window-a", &binary).unwrap();
         let content = store
-            .consume("window-a", vec![info.context_id])
+            .read("window-a", vec![info.context_id])
             .unwrap()
             .remove(0);
         assert_eq!(content.media_type, "application/octet-stream");
-        assert_eq!(content.data_base64.as_deref(), Some("AJ+Slg=="));
+        assert!(
+            content.data_base64.is_none(),
+            "ordinary binary files remain local"
+        );
         #[cfg(unix)]
         {
             let link = temp.path().join("link.bin");
@@ -3087,18 +3100,21 @@ mod tests {
         let bytes = vec![0x50; 16 * 1024 * 1024 + 1];
         std::fs::write(&deck, &bytes).unwrap();
 
-        let store = NativeDropContextStore::default();
+        let store = NativeDropContextStore::open(temp.path().join("attachments")).unwrap();
         let info = store.insert("window-a", &deck).unwrap();
         assert_eq!(
             info.media_type,
             "application/vnd.openxmlformats-officedocument.presentationml.presentation"
         );
         let content = store
-            .consume("window-a", vec![info.context_id])
+            .read("window-a", vec![info.context_id])
             .unwrap()
             .remove(0);
         assert_eq!(content.source_bytes as usize, bytes.len());
-        assert!(content.data_base64.is_some());
+        assert!(
+            content.data_base64.is_none(),
+            "documents must use local references, not binary upload bodies"
+        );
     }
 
     #[test]
@@ -3106,14 +3122,14 @@ mod tests {
         let temp = tempdir().unwrap();
         let path = temp.path().join("mutable.md");
         std::fs::write(&path, "original").unwrap();
-        let store = NativeDropContextStore::default();
+        let store = NativeDropContextStore::open(temp.path().join("attachments")).unwrap();
         let info = store.insert("window-a", &path).unwrap();
 
         // A dropped file may be edited, replaced, or removed before the user
         // presses Send. The composer must attach the bytes observed at the
         // explicit drop gesture, never perform a second path-authority read.
         std::fs::write(&path, "changed after drop").unwrap();
-        let contents = store.consume("window-a", vec![info.context_id]).unwrap();
+        let contents = store.read("window-a", vec![info.context_id]).unwrap();
         assert_eq!(contents[0].text, "original");
     }
 
@@ -3124,32 +3140,32 @@ mod tests {
         let second_path = temp.path().join("second.md");
         std::fs::write(&first_path, "first").unwrap();
         std::fs::write(&second_path, "second").unwrap();
-        let store = NativeDropContextStore::default();
+        let store = NativeDropContextStore::open(temp.path().join("attachments")).unwrap();
         let first = store.insert("window-a", &first_path).unwrap();
         let second = store.insert("window-a", &second_path).unwrap();
 
         assert!(store
-            .consume(
+            .read(
                 "window-a",
                 vec![first.context_id.clone(), "drop_missing".to_string()]
             )
             .is_err());
-        let remaining = store.consume("window-a", vec![first.context_id]).unwrap();
+        let remaining = store.read("window-a", vec![first.context_id]).unwrap();
         assert_eq!(remaining[0].text, "first");
-        let second_contents = store.consume("window-a", vec![second.context_id]).unwrap();
+        let second_contents = store.read("window-a", vec![second.context_id]).unwrap();
         assert_eq!(second_contents[0].text, "second");
 
         let third_path = temp.path().join("third.md");
         std::fs::write(&third_path, "third").unwrap();
         let third = store.insert("window-a", &third_path).unwrap();
         assert!(store
-            .discard(
+            .read(
                 "window-a",
                 vec![third.context_id.clone(), "not-a-drop-handle".to_string()]
             )
             .is_err());
         assert_eq!(
-            store.consume("window-a", vec![third.context_id]).unwrap()[0].text,
+            store.read("window-a", vec![third.context_id]).unwrap()[0].text,
             "third"
         );
     }

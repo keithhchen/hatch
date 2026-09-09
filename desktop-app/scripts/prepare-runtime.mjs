@@ -418,8 +418,22 @@ async function verifyRuntimeSmoke({
     await run(nodeExecutable, [path.join(spreadsheetsRoot, "scripts", "read_asset.mjs"), "--input", xlsx, "--max-chars", "200000"], { env: nodeEnvironment, cwd: spreadsheetsRoot });
     await run(pythonExecutable, [path.join(spreadsheetsRoot, "scripts", "xlsx_tool.py"), "render", xlsx, "--output-dir", xlsxRenderRoot, "--dpi", "72"], { env: pythonEnvironment, cwd: spreadsheetsRoot, timeout: 120_000 });
     await assertRenderedPages(xlsxRenderRoot, "sheet-page-", "spreadsheet visual render");
+    await run(pythonExecutable, ["-c", [
+      "import sys",
+      "from openpyxl import load_workbook",
+      "book = load_workbook(sys.argv[1])",
+      "book.active['A3'] = '=A2+8'",
+      "book.save(sys.argv[1])"
+    ].join("; "), xlsx], { env: pythonEnvironment, cwd: spreadsheetsRoot });
     await run(pythonExecutable, [path.join(spreadsheetsRoot, "scripts", "recalc.py"), xlsx, "--output", recalculatedXlsx], { env: pythonEnvironment, cwd: spreadsheetsRoot, timeout: 120_000 });
-    await assertFile(recalculatedXlsx, "spreadsheet recalculation smoke output");
+    await run(pythonExecutable, ["-c", [
+      "import sys",
+      "from openpyxl import load_workbook",
+      "assert load_workbook(sys.argv[2], data_only=True).active['A3'].value == 50, 'Recalculation did not cache the expected value'",
+      "assert load_workbook(sys.argv[2], data_only=False).active['A3'].value == '=A2+8', 'Recalculation removed the formula'",
+      "assert load_workbook(sys.argv[1], data_only=True).active['A3'].value is None, 'Recalculation modified the source workbook'",
+      "assert load_workbook(sys.argv[1], data_only=False).active['A3'].value == '=A2+8', 'Recalculation modified the source formula'"
+    ].join("; "), xlsx, recalculatedXlsx], { env: pythonEnvironment, cwd: spreadsheetsRoot });
 
     await run(nodeExecutable, [path.join(presentationsRoot, "scripts", "create_pptx.mjs"), "--slides-file", slidesFile, "--output", pptx], { env: nodeEnvironment, cwd: presentationsRoot });
     await run(pythonExecutable, [path.join(presentationsRoot, "scripts", "pptx_tool.py"), "inspect", pptx], { env: pythonEnvironment, cwd: presentationsRoot });

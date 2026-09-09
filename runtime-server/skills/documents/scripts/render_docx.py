@@ -43,6 +43,7 @@ def main() -> None:
     if not args.input.is_file():
         fail("input_not_found", f"DOCX does not exist: {args.input}")
     soffice = find_executable("HATCH_SOFFICE", ("soffice", "libreoffice"))
+    pdftoppm = None if args.pdf_only else find_executable("HATCH_PDFTOPPM", ("pdftoppm",))
     args.output_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="hatch-docx-profile-") as profile:
         environment = os.environ.copy()
@@ -51,7 +52,7 @@ def main() -> None:
         command = [
             soffice, "--headless", "--nologo", "--nodefault", "--nolockcheck", "--norestore",
             f"-env:UserInstallation={Path(profile).as_uri()}",
-            "--convert-to", "pdf", "--outdir", str(args.output_dir), str(args.input)
+            "--convert-to", "pdf", "--outdir", str(args.output_dir.resolve()), str(args.input.resolve())
         ]
         completed = run_libreoffice(command, profile=Path(profile), environment=environment)
     if completed.returncode != 0:
@@ -60,7 +61,6 @@ def main() -> None:
     if not pdf.is_file():
         fail("conversion_failed", f"LibreOffice did not produce {pdf}")
     pages: list[str] = []
-    pdftoppm = find_executable("HATCH_PDFTOPPM", ("pdftoppm",), required=False)
     if not args.pdf_only and pdftoppm:
         prefix = args.output_dir / "page"
         render = subprocess.run(
@@ -70,6 +70,8 @@ def main() -> None:
         if render.returncode != 0:
             fail("conversion_failed", (render.stderr or render.stdout or "pdftoppm failed").strip())
         pages = [str(file) for file in sorted(args.output_dir.glob("page-*.png"))]
+        if not pages:
+            fail("conversion_failed", "pdftoppm produced no page previews")
     result = {
         "status": "ok",
         "input": str(args.input),
@@ -78,8 +80,6 @@ def main() -> None:
         "visual_inspection_required": True,
         "renderer": "LibreOffice" + (" + Poppler" if pages else "")
     }
-    if not pdftoppm and not args.pdf_only:
-        result["warning"] = "Poppler pdftoppm is unavailable; inspect the generated PDF itself."
     json.dump(result, sys.stdout, ensure_ascii=False)
     sys.stdout.write("\n")
 

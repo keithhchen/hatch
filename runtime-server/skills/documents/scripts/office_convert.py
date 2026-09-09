@@ -62,8 +62,8 @@ def main() -> None:
             "--convert-to",
             args.format,
             "--outdir",
-            str(args.output_dir),
-            str(args.input)
+            str(args.output_dir.resolve()),
+            str(args.input.resolve())
         ]
         completed = run_libreoffice(command, profile=Path(profile), environment=environment)
     if completed.returncode != 0:

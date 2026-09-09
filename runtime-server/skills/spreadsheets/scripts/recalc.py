@@ -96,6 +96,7 @@ def recalculate(source: Path, output: Path) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="hatch-xlsx-recalc-") as workspace:
         workspace_path = Path(workspace)
         profile = workspace_path / "profile"
+        profile.mkdir()
         input_dir = workspace_path / "input"
         output_dir = workspace_path / "output"
         input_dir.mkdir()
@@ -103,7 +104,7 @@ def recalculate(source: Path, output: Path) -> dict[str, Any]:
         # Work on a copy. LibreOffice may update links, calculation metadata,
         # or other package state while opening a workbook.
         staged_input = input_dir / f"source{source.suffix.lower()}"
-        shutil.copy2(source, staged_input)
+        shutil.copyfile(source, staged_input)
         environment = os.environ.copy()
         environment["HOME"] = str(profile)
         environment["TMPDIR"] = str(workspace_path / "tmp")
@@ -121,8 +122,8 @@ def recalculate(source: Path, output: Path) -> dict[str, Any]:
             "--convert-to",
             "xlsx:Calc MS Excel 2007 XML",
             "--outdir",
-            str(output_dir),
-            str(staged_input),
+            str(output_dir.resolve()),
+            str(staged_input.resolve()),
         ]
         completed = run_libreoffice(command, profile=profile, environment=environment)
         if completed.returncode != 0:
@@ -131,7 +132,7 @@ def recalculate(source: Path, output: Path) -> dict[str, Any]:
         if not recalculated.is_file():
             fail("conversion_failed", f"LibreOffice did not produce {recalculated}")
         output.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(recalculated, output)
+        shutil.copyfile(recalculated, output)
 
     after_formula = load_workbook(output, data_only=False)
     after_values = load_workbook(output, data_only=True)

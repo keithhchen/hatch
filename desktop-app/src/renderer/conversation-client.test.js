@@ -3,8 +3,9 @@ import {
   canConnectConversation,
   conversationScope,
   createConversation,
+  getConversationSubmission,
   hydrateConversationAttachments,
-  interruptedRunFromSnapshot,
+  reconcileActiveRunFromSnapshot,
   isServerConversationId,
   restorableConversationId,
   isTerminalRunStatus,
@@ -25,6 +26,29 @@ function response(body, ok = true, status = 200) {
 }
 
 describe("conversation client", () => {
+  it("only treats an explicit run 404 as an absent submission", async () => {
+    const lookup = (fetchImpl) => getConversationSubmission("https://runtime.test", "token", binding, "conv_1", "run_1", fetchImpl);
+    await expect(lookup(vi.fn().mockResolvedValue(response({ error: { code: "run_not_found" } }, false, 404))))
+      .resolves.toEqual({ run: null, submission: null });
+    for (const status of [401, 403, 503]) {
+      await expect(lookup(vi.fn().mockResolvedValue(response({ error: { code: "run_not_found" } }, false, status))))
+        .rejects.toMatchObject({ status });
+    }
+    await expect(lookup(vi.fn().mockRejectedValue(new Error("offline")))).rejects.toMatchObject({ code: "network_error" });
+  });
+
+  it("does not infer acceptance from run state or accept a mismatched receipt", async () => {
+    const lookup = (body) => getConversationSubmission("https://runtime.test", "token", binding, "conv_1", "run_1",
+      vi.fn().mockResolvedValue(response(body)));
+    await expect(lookup({ run: { id: "run_1", status: "completed" } }))
+      .rejects.toMatchObject({ code: "acceptance_unavailable" });
+    await expect(lookup({ run: { id: "run_1" }, submission: { run_id: "other", client_message_id: "message" } }))
+      .rejects.toMatchObject({ code: "acceptance_invalid" });
+    const body = { run: { id: "run_1" }, submission: { run_id: "run_1", client_message_id: "message" } };
+    await expect(lookup(body)).resolves.toEqual(body);
+    await expect(lookup({ run: { id: "run_1" }, submission: null }))
+      .resolves.toEqual({ run: { id: "run_1" }, submission: null });
+  });
   it("requires a verified Library before connecting a server Conversation", () => {
     expect(canConnectConversation({ libraryStatus: "idle", conversationId: "conv_a" })).toBe(false);
     expect(canConnectConversation({ libraryStatus: "loading", conversationId: "conv_a" })).toBe(false);
@@ -56,13 +80,13 @@ describe("conversation client", () => {
     expect(isTerminalRunStatus("completed")).toBe(true);
     expect(isTerminalRunStatus("failed")).toBe(true);
     expect(isTerminalRunStatus("cancelled")).toBe(true);
-    expect(isTerminalRunStatus("interrupted")).toBe(false);
+    expect(isTerminalRunStatus("interrupted")).toBe(true);
     expect(isTerminalRunStatus("running")).toBe(false);
   });
 
   it("routes a non-terminal task to a separate Conversation window", () => {
     expect(shouldOpenNewConversationInWindow({ runId: "run_live", status: "running" })).toBe(true);
-    expect(shouldOpenNewConversationInWindow({ id: "run_interrupted", status: "interrupted" })).toBe(true);
+    expect(shouldOpenNewConversationInWindow({ id: "run_interrupted", status: "interrupted" })).toBe(false);
     expect(shouldOpenNewConversationInWindow({ runId: "run_done", status: "completed" })).toBe(false);
     expect(shouldOpenNewConversationInWindow(null)).toBe(false);
   });
@@ -169,57 +193,8 @@ describe("conversation client", () => {
     expect([...conversationScope({ entitlementId: "ent_a" })]).toEqual([["entitlement_id", "ent_a"]]);
   });
 
-  it("projects a durable interrupted run without creating an executor claim", () => {
-    const projected = interruptedRunFromSnapshot({
-      runs: [{
-        id: "run_crashed",
-        client_message_id: "message_crashed",
-        status: "interrupted",
-        interrupted_reason: "Runtime restarted",
-        created_at: "2026-08-11T00:00:00.000Z"
-      }]
-    });
-    expect(projected).toMatchObject({
-      runId: "run_crashed",
-      clientMessageId: "message_crashed",
-      status: "interrupted",
-      interruptedReason: "Runtime restarted"
-    });
-    expect(projected).not.toHaveProperty("executorId");
-  });
 
-  it("keeps the renderer's richer run projection and respects dismissal", () => {
-    const current = {
-      runId: "run_same",
-      assistantId: "run_same_assistant",
-      accessSnapshot: { workspaceGrantId: "grant_1" },
-      text: "partial"
-    };
-    const snapshot = { runs: [{ id: "run_same", status: "interrupted", interrupted_reason: "Client disconnected" }] };
-    expect(interruptedRunFromSnapshot(snapshot, current)).toMatchObject({
-      ...current,
-      status: "interrupted",
-      interruptedReason: "Client disconnected"
-    });
-    expect(interruptedRunFromSnapshot(snapshot, current, "run_same")).toBeNull();
-  });
 
-  it("does not replace a terminal current Run with another historical interruption", () => {
-    const snapshot = {
-      runs: [
-        { id: "run_current", status: "completed" },
-        { id: "run_other_window", status: "interrupted", interrupted_reason: "Other window closed" }
-      ]
-    };
-    expect(interruptedRunFromSnapshot(snapshot, {
-      runId: "run_current",
-      status: "interrupted"
-    })).toBeNull();
-    expect(interruptedRunFromSnapshot(snapshot, null)).toMatchObject({
-      runId: "run_other_window",
-      status: "interrupted"
-    });
-  });
 
   it("reconciles sparse journal cursors idempotently before accepting the snapshot cursor", () => {
     const result = reconcileConversationSnapshot({
@@ -275,24 +250,17 @@ describe("conversation client", () => {
     })).toThrowError(expect.objectContaining({ code: "snapshot_invalid" }));
   });
 
-  it("only projects the latest run, never falling back to an old interruption", () => {
-    const snapshot = {
-      runs: [
-        { id: "run_old", status: "interrupted", interrupted_reason: "old" },
-        { id: "run_dismissed", status: "interrupted", interrupted_reason: "closed" },
-        { id: "run_new", status: "interrupted", interrupted_reason: "new" }
-      ]
-    };
-    expect(interruptedRunFromSnapshot(snapshot, null, "run_dismissed")).toMatchObject({
-      runId: "run_new",
-      interruptedReason: "new"
-    });
-    expect(interruptedRunFromSnapshot({ runs: snapshot.runs.slice(0, 2) }, null, "run_dismissed")).toBeNull();
-    expect(interruptedRunFromSnapshot(snapshot, {
-      runId: "run_old",
-      assistantId: "run_old_assistant",
-      text: "partial"
-    })).toBeNull();
-    expect(interruptedRunFromSnapshot({ runs: [...snapshot.runs, { id: "run_done", status: "completed" }] })).toBeNull();
+  it("never adopts historical interrupted runs as active tasks", () => {
+    expect(reconcileActiveRunFromSnapshot({ runs: [{ id: "old", status: "interrupted" }] })).toBeNull();
   });
+
+  it("releases a stopped current turn without requiring dismissal", () => {
+    const current = { runId: "current", text: "partial" };
+    for (const status of ["interrupted", "completed", "failed", "cancelled"]) {
+      expect(reconcileActiveRunFromSnapshot({ runs: [{ id: "current", status }] }, current)).toBeNull();
+    }
+    expect(reconcileActiveRunFromSnapshot({ runs: [{ id: "current", status: "running" }] }, current)).toBe(current);
+    expect(reconcileActiveRunFromSnapshot({ runs: [{ id: "other", status: "interrupted" }] }, current)).toBe(current);
+  });
+
 });

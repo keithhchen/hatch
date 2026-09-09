@@ -9,7 +9,9 @@ This Skill owns `.ppt`, `.pptx`, `.pptm`, `.potx`, `.potm`, `.ppsx`, and `.ppsm`
 
 ## Required workflow
 
-1. Load this complete Skill before any presentation `file_read` or edit. A chat deck upload also implicitly activates this complete Skill before its bounded projection is prepared. The local preview is bounded transport, not a substitute for inspecting the OOXML package and rendered slides.
+1. Load this complete Skill before reading, creating, or editing a presentation. For a chat attachment, inspect the managed local file referenced in the committed message through LocalRunner. The attachment reference is not a substitute for reading the package and inspecting rendered slides.
+
+Attached source copies are read-only. Write edits and renders to the authorized Workspace or task output directory. Reading or rendering is a tool execution whose result is appended to history; do not re-run it merely to load old messages. To visually inspect a rendered page, call the image-reading tool so the model receives image content, not just a path.
 2. Inspect the existing deck first with `pptx_tool.py inspect` and `read`. Preserve slide size, theme, masters, layouts, fonts, notes, charts, images, and speaker notes when editing.
 3. Create or edit a binary deck with the bundled scripts through `$HATCH_PYTHON` or `$HATCH_NODE` absolute paths. Never write plain text, base64, or a fixture to a `.pptx` path.
 4. Render the complete changed deck with `pptx_tool.py render` after meaningful edits. Inspect every slide for clipping, overlap, unreadable text, missing fonts, broken images, incorrect order, and notes/layout regressions.
@@ -24,7 +26,6 @@ The Desktop runtime exposes the Skill bundle at `$HATCH_DOCUMENT_SKILLS_ROOT/pre
 - `$HATCH_PYTHON .../scripts/pptx_tool.py validate OUTPUT.pptx`
 - `$HATCH_PYTHON .../scripts/pptx_tool.py render OUTPUT.pptx --output-dir tmp/pptx-render`
 - `$HATCH_NODE .../scripts/create_pptx.mjs --slides-file slides.json --output OUTPUT.pptx`
-- `$HATCH_NODE .../scripts/read_asset.mjs --input UPLOAD.pptx --max-chars 200000` is the Runtime-only reader for a chat upload.
 
 The Desktop runtime bundles LibreOffice and Poppler. If either bundled native dependency is missing or fails, scripts return the real missing-dependency/conversion state. Do not invent a preview or claim the deck is visually correct.
 

@@ -25,6 +25,7 @@ pub struct LocalRunner {
     sandbox: Sandbox,
     audit: AuditLogger,
     runtime_root: Option<std::path::PathBuf>,
+    attachment_root: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -78,7 +79,23 @@ impl LocalRunner {
         sandbox_root: impl AsRef<Path>,
         runtime_root: Option<&Path>,
     ) -> Result<Self> {
-        let sandbox = Sandbox::new(sandbox_root)?;
+        Self::new_with_attachments(sandbox_root, runtime_root, None)
+    }
+
+    pub fn new_with_attachments(
+        sandbox_root: impl AsRef<Path>,
+        runtime_root: Option<&Path>,
+        attachment_root: Option<&Path>,
+    ) -> Result<Self> {
+        let read_roots = runtime_root
+            .into_iter()
+            .chain(attachment_root)
+            .map(Path::to_path_buf)
+            .collect::<Vec<_>>();
+        let sandbox = Sandbox::new(sandbox_root)?.with_read_roots(&read_roots)?;
+        let attachment_root = attachment_root
+            .map(|p| p.canonicalize().map_err(|e| LocalRunnerError::io(p, e)))
+            .transpose()?;
         let audit = AuditLogger::new(sandbox.audit_path());
         let runtime_root = runtime_root
             .map(|root| {
@@ -99,6 +116,7 @@ impl LocalRunner {
             sandbox,
             audit,
             runtime_root,
+            attachment_root,
         })
     }
 
@@ -268,6 +286,7 @@ impl LocalRunner {
         let result = crate::shell::execute(
             self.sandbox.root(),
             self.runtime_root.as_deref(),
+            self.attachment_root.as_deref(),
             command,
             timeout_ms,
             cancel,
@@ -564,7 +583,7 @@ impl LocalRunner {
     }
 
     fn move_inner(&self, src: &Path, dst: &Path, overwrite: bool) -> Result<()> {
-        let src = self.sandbox.resolve_existing(src)?;
+        let src = self.sandbox.resolve_candidate(src, false)?;
         let dst = self.sandbox.resolve_candidate(dst, false)?;
         let src_metadata = fs::metadata(&src.absolute)
             .map_err(|source| LocalRunnerError::io(&src.absolute, source))?;

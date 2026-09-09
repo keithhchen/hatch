@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { appendFile, mkdir, open, readFile } from "node:fs/promises";
 import path from "node:path";
 import { historyBoundary, historyCursor, historyEvent, historyLimit, historyMessages, isHistoryMessage,
   type ConversationHistoryOptions, type ConversationHistoryPage, type ConversationToolDetailRef } from "./conversationHistory.js";
@@ -27,6 +27,8 @@ export type ActivatedSkill = {
   resource_manifest_truncated: boolean;
   activated_at: string;
 };
+
+export type SubmissionReceipt = { run_id: string; client_message_id: string; accepted_at: string };
 
 export type VisibleConversationMessage = {
   id?: string;
@@ -127,6 +129,7 @@ export type StoreEvent =
       type: "conversation.model_message";
       conversation_id: string;
       run_id: string;
+      client_message_id?: string;
       message: ConversationMessage;
       finish_reason?: OutputFinishReason;
       visible_parts?: VisibleConversationPart[];
@@ -283,7 +286,11 @@ export class RuntimeStore {
     };
     const write = this.writeChain.then(async () => {
       await mkdir(this.root, { recursive: true });
-      await appendFile(path.join(this.root, "events.jsonl"), `${JSON.stringify(record)}\n`, "utf8");
+      await appendFile(path.join(this.root, "events.jsonl"), `${JSON.stringify(record)}\n`, { encoding: "utf8", flush: true });
+      if (process.platform !== "win32") {
+        const directory = await open(this.root, "r");
+        try { await directory.sync(); } finally { await directory.close(); }
+      }
     });
     this.writeChain = write.catch(() => undefined);
     await write;
@@ -291,6 +298,15 @@ export class RuntimeStore {
 
   async close(): Promise<void> {
     await this.writeChain;
+  }
+
+  /** Acceptance is a fact on the canonical user record, never inferred from Run state. */
+  async readSubmissionReceipt(conversationId: string, runId: string): Promise<SubmissionReceipt | undefined> {
+    const event = (await this.readEvents()).find((event) =>
+      event.type === "conversation.model_message" && event.conversation_id === conversationId
+      && event.run_id === runId && event.message.role === "user" && event.client_message_id);
+    if (!event || event.type !== "conversation.model_message" || !event.client_message_id) return undefined;
+    return { run_id: event.run_id, client_message_id: event.client_message_id, accepted_at: event.timestamp };
   }
 
   async readEvents(): Promise<StoreEvent[]> {

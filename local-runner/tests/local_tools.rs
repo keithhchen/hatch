@@ -12,6 +12,84 @@ use std::sync::Arc;
 use tempfile::tempdir;
 
 #[test]
+fn attachment_directory_is_readable_but_not_mutable() {
+    let temp = tempdir().unwrap();
+    let attachments = temp.path().join("attachments");
+    fs::create_dir(&attachments).unwrap();
+    let attachments = attachments.canonicalize().unwrap();
+    let file = attachments.join("notes.txt");
+    fs::write(&file, "attached").unwrap();
+    let credential = temp.path().join("state.json");
+    fs::write(&credential, "private").unwrap();
+    let runner =
+        LocalRunner::new_with_attachments(temp.path().join("workspace"), None, Some(&attachments))
+            .unwrap();
+    assert_eq!(runner.read_file(&file).unwrap(), "attached");
+    assert!(runner.read_file(&credential).is_err());
+    assert!(runner.write_file(&file, "changed").is_err());
+    assert!(runner.move_path(&file, "moved.txt", false).is_err());
+    runner.copy(&file, "copy.txt", false).unwrap();
+    assert_eq!(runner.read_file("copy.txt").unwrap(), "attached");
+    assert_eq!(fs::read_to_string(&file).unwrap(), "attached");
+    #[cfg(unix)]
+    {
+        let link = attachments.join("escape");
+        std::os::unix::fs::symlink(&credential, &link).unwrap();
+        assert!(runner.read_file(link).is_err());
+    }
+}
+
+#[test]
+fn attachment_read_only_rule_survives_overlapping_workspace() {
+    let temp = tempdir().unwrap();
+    let attachments = temp.path().join("attachments");
+    fs::create_dir(&attachments).unwrap();
+    fs::write(attachments.join("notes.txt"), "original").unwrap();
+    let runner = LocalRunner::new_with_attachments(temp.path(), None, Some(&attachments)).unwrap();
+    assert_eq!(
+        runner.read_file("attachments/notes.txt").unwrap(),
+        "original"
+    );
+    assert!(runner
+        .write_file("attachments/notes.txt", "changed")
+        .is_err());
+    assert!(runner.write_file("attachments/new.txt", "changed").is_err());
+    assert!(runner
+        .move_path("attachments/notes.txt", "moved.txt", false)
+        .is_err());
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn shell_reads_attachments_but_cannot_write_or_read_adjacent_credentials() {
+    let temp = tempdir().unwrap();
+    let attachments = temp.path().join("attachments");
+    fs::create_dir(&attachments).unwrap();
+    let attachments = attachments.canonicalize().unwrap();
+    let file = attachments.join("notes.txt");
+    fs::write(&file, "attached").unwrap();
+    let credential = temp.path().join("state.json");
+    fs::write(&credential, "private").unwrap();
+    let runner =
+        LocalRunner::new_with_attachments(temp.path().join("workspace"), None, Some(&attachments))
+            .unwrap();
+    let output = runner
+        .shell_exec(&format!("/bin/cat '{}'", file.display()), 5000)
+        .unwrap();
+    assert_eq!(output.exit_code, 0, "{}", output.stderr);
+    assert_eq!(output.stdout, "attached");
+    let denied = runner
+        .shell_exec(&format!("printf changed > '{}'", file.display()), 5000)
+        .unwrap();
+    assert_ne!(denied.exit_code, 0);
+    let denied = runner
+        .shell_exec(&format!("/bin/cat '{}'", credential.display()), 5000)
+        .unwrap();
+    assert_ne!(denied.exit_code, 0);
+    assert_eq!(fs::read_to_string(file).unwrap(), "attached");
+}
+
+#[test]
 fn writes_reads_appends_and_audits_tool_calls() {
     let temp = tempdir().unwrap();
     let runner = LocalRunner::new(temp.path()).unwrap();

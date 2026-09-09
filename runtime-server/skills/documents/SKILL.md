@@ -9,7 +9,9 @@ This Skill owns all `.doc`, `.docx`, `.docm`, `.dot`, `.dotx`, `.dotm`, and `.rt
 
 ## Required workflow
 
-1. Load this complete Skill before calling `file_read`, `file_write`, or `file_patch` for a Word document. A chat upload also implicitly activates this complete Skill before its bounded projection is shown to the model. The local `file_read` result is only a bounded transport preview; it is not the semantic document reader.
+1. Load this complete Skill before reading, creating, or editing a Word document. For a chat attachment, read the managed local file identified in the committed message through LocalRunner; the upload is a file reference, not extracted document text. Use the Skill reader to inspect its contents.
+
+Attached source copies are read-only. Write edits and renders to the authorized Workspace or task output directory. Reading or rendering is a tool execution whose result is appended to history; do not re-run it merely to load old messages. To visually inspect a rendered page, call the image-reading tool so the model receives image content, not just a path.
 2. Use the real Workspace path as the source of truth. For semantic reading, call `read_docx.py`; for structural checks, call `validate_docx.py`.
 3. Create or edit a binary document through one of the bundled scripts and `$HATCH_PYTHON` or `$HATCH_NODE`, using those absolute runtime paths. Do not assume `python`, `python3`, `node`, or `npm` exists, and never put Markdown, base64, or JSON at a `.docx` path.
 4. After a meaningful layout change, call `render_docx.py`. The Desktop runtime bundles LibreOffice and Poppler for this step. Inspect every rendered page for clipping, overlap, missing fonts, broken images, table overflow, headers/footers, and page breaks; a missing native runtime is an actual dependency error, not a reason to skip visual QA.
@@ -25,7 +27,6 @@ The Desktop runtime exposes the Skill bundle at `$HATCH_DOCUMENT_SKILLS_ROOT/doc
 - `$HATCH_PYTHON .../scripts/accept_changes.py INPUT.docx --output OUTPUT.docx`
 - `$HATCH_PYTHON .../scripts/render_docx.py INPUT.docx --output-dir tmp/docx-render`
 - `$HATCH_NODE .../scripts/create_docx.mjs --output OUTPUT.docx ...`
-- `$HATCH_NODE .../scripts/read_asset.mjs --input UPLOAD.docx --max-chars 200000` (Runtime-only reader for a chat upload; it is not a Workspace write)
 - `$HATCH_PYTHON .../scripts/office_convert.py INPUT.docx --output-dir tmp/converted --format pdf`
 
 The scripts emit structured JSON on success and a real `dependency_unavailable`/`conversion_failed` error when the bundled renderer is missing or fails. Do not replace an unavailable renderer with a fake preview or claim visual verification.

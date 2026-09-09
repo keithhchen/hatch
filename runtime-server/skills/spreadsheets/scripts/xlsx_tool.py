@@ -173,7 +173,7 @@ def render(file: Path, output_dir: Path, dpi: int) -> dict:
         command = [
             soffice, "--headless", "--nologo", "--nodefault", "--nolockcheck", "--norestore",
             f"-env:UserInstallation={Path(profile).as_uri()}",
-            "--convert-to", "pdf", "--outdir", str(output_dir), str(file)
+            "--convert-to", "pdf", "--outdir", str(output_dir.resolve()), str(file.resolve())
         ]
         completed = run_libreoffice(command, profile=Path(profile), environment=environment)
     if completed.returncode != 0:

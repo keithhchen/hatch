@@ -1,17 +1,12 @@
 export const MAX_NATIVE_DROP_SOURCE_BYTES = 100 * 1024 * 1024;
-const MAX_NATIVE_DROP_TEXT_BYTES = 64 * 1024;
 const DROP_HANDLE_PATTERN = /^drop_[a-z0-9_-]{1,91}$/i;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const MEDIA_TYPE_PATTERN = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/;
 const BASE64_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
 
-function utf8ByteLength(value) {
-  return new TextEncoder().encode(value).byteLength;
-}
-
 /**
  * This is the intentionally tiny renderer-side representation of a native
- * drop.  It never includes a path, file URL, bookmark, or a filesystem grant.
+ * drop. Its path identifies the managed copy, not a new filesystem grant.
  */
 export function normalizeNativeDropFile(value) {
   if (!value || typeof value !== "object") return null;
@@ -28,6 +23,8 @@ export function normalizeNativeDropFile(value) {
     ...(assetId && DROP_HANDLE_PATTERN.test(assetId) ? { assetId } : {}),
     ...(MEDIA_TYPE_PATTERN.test(mediaType) ? { mediaType } : {}),
     ...(SHA256_PATTERN.test(sha256) ? { sha256 } : {}),
+    ...(typeof value.localPath === "string" && value.localPath ? { localPath: value.localPath } : {}),
+    ...(typeof value.hostId === "string" && value.hostId ? { hostId: value.hostId } : {}),
     ...(typeof value.isImage === "boolean" ? { isImage: value.isImage } : {})
   });
 }
@@ -43,62 +40,45 @@ export function normalizeNativeDropAttachment(value) {
   const displayName = typeof value.displayName === "string" ? value.displayName.trim() : "";
   const mediaType = typeof value.mediaType === "string" ? value.mediaType.trim() : "";
   const sourceBytes = Number(value.sourceBytes);
-  const text = typeof value.text === "string" ? value.text : null;
-  const textSha256 = typeof value.textSha256 === "string" ? value.textSha256.trim() : "";
-  const truncated = typeof value.truncated === "boolean" ? value.truncated : null;
-  const assetId = typeof value.assetId === "string" ? value.assetId.trim() : contextId;
+  const localPath = typeof value.localPath === "string" ? value.localPath : "";
+  const hostId = typeof value.hostId === "string" ? value.hostId : "";
   const dataBase64 = typeof value.dataBase64 === "string" ? value.dataBase64 : "";
   const sha256 = typeof value.sha256 === "string" ? value.sha256.trim() : "";
   if (
     !DROP_HANDLE_PATTERN.test(contextId)
-    || !DROP_HANDLE_PATTERN.test(assetId)
     || !displayName
     || displayName.length > 256
     || !MEDIA_TYPE_PATTERN.test(mediaType)
     || !Number.isSafeInteger(sourceBytes)
     || sourceBytes < 0
     || sourceBytes > MAX_NATIVE_DROP_SOURCE_BYTES
-    || text === null
-    || utf8ByteLength(text) > MAX_NATIVE_DROP_TEXT_BYTES
-    || !SHA256_PATTERN.test(textSha256)
-    || truncated === null
+    || !SHA256_PATTERN.test(sha256)
+    || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(hostId)
+    || localPath.includes("\0") || localPath.length > 4096
+    || !(/^\//.test(localPath) || /^[a-z]:[\\/]/i.test(localPath))
   ) return null;
 
-  if (dataBase64) {
+  const isImage = mediaType.startsWith("image/");
+  if (isImage) {
     const padding = dataBase64.endsWith("==") ? 2 : dataBase64.endsWith("=") ? 1 : 0;
     const decodedBytes = Math.floor(dataBase64.length * 3 / 4) - padding;
     if (!BASE64_PATTERN.test(dataBase64)
       || dataBase64.length % 4 !== 0
       || decodedBytes !== sourceBytes
       || !SHA256_PATTERN.test(sha256)) return null;
-    return Object.freeze({
-      contextId,
-      attachment: Object.freeze({
-        kind: "asset",
-        attachment_id: contextId,
-        asset_id: assetId,
-        display_name: displayName,
-        media_type: mediaType,
-        source_bytes: sourceBytes,
-        sha256,
-        data_base64: dataBase64
-      })
-    });
   }
-
-  const textBytes = utf8ByteLength(text);
-  if ((!truncated && sourceBytes !== textBytes) || (truncated && sourceBytes <= textBytes)) return null;
-
   return Object.freeze({
     contextId,
     attachment: Object.freeze({
+      kind: "local_file",
       attachment_id: contextId,
       display_name: displayName,
       media_type: mediaType,
       source_bytes: sourceBytes,
-      text,
-      text_sha256: textSha256,
-      truncated
+      sha256,
+      host_id: hostId,
+      local_path: localPath,
+      ...(isImage ? { data_base64: dataBase64 } : {})
     })
   });
 }

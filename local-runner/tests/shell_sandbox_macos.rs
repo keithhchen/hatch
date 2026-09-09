@@ -18,6 +18,115 @@ use tempfile::{tempdir_in, TempDir};
 
 const SHELL_TIMEOUT_MS: u64 = 10_000;
 
+/// Explicit integration test against an actual installed/built runtime, not a mock.
+#[test]
+#[ignore = "requires HATCH_TEST_RUNTIME_ROOT pointing at a complete bundled runtime"]
+fn bundled_document_render_runs_inside_runner_sandbox() {
+    let runtime = std::env::var_os("HATCH_TEST_RUNTIME_ROOT")
+        .expect("set HATCH_TEST_RUNTIME_ROOT to the real bundled runtime");
+    let workspace = tempfile::tempdir().unwrap();
+    let runner =
+        LocalRunner::new_with_runtime(workspace.path(), Some(Path::new(&runtime))).unwrap();
+    let command = r#""$HATCH_PYTHON" -c 'from docx import Document; d=Document(); d.add_paragraph("Hatch Runner rendering integration test"); d.save("probe.docx")' && "$HATCH_PYTHON" "$HATCH_DOCUMENT_SKILLS_ROOT/documents/scripts/render_docx.py" probe.docx --output-dir rendered"#;
+    // Source-Skill integration is explicitly separate from installed-package
+    // coverage. Copy only the repository Skill bundle into the test Workspace.
+    let command = if std::env::var_os("HATCH_TEST_SOURCE_SKILLS").is_some() {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime-server/skills");
+        let destination = workspace.path().join("skills");
+        for entry in walkdir::WalkDir::new(&source) {
+            let entry = entry.unwrap();
+            let target = destination.join(entry.path().strip_prefix(&source).unwrap());
+            if entry.file_type().is_dir() {
+                fs::create_dir_all(&target).unwrap();
+            } else if entry.file_type().is_file() {
+                fs::copy(entry.path(), target).unwrap();
+            } else {
+                panic!("Skill test bundle must contain only regular files/directories");
+            }
+        }
+        command.replace("$HATCH_DOCUMENT_SKILLS_ROOT", "./skills")
+    } else {
+        command.to_owned()
+    };
+    let result = response_json(runner.execute_tool_call_request(tool_request(
+        "bundled_render",
+        command,
+        120_000,
+    )));
+    assert_eq!(result["result"]["exit_code"], 0, "{result}");
+    assert_eq!(result["result"]["timed_out"], false, "{result}");
+    assert!(
+        workspace.path().join("rendered/probe.pdf").is_file(),
+        "{result}"
+    );
+    let pages: Vec<_> = fs::read_dir(workspace.path().join("rendered"))
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "png"))
+        .collect();
+    assert!(
+        !pages.is_empty(),
+        "render must produce visual previews: {result}"
+    );
+    for page in pages {
+        assert!(fs::read(page.path())
+            .unwrap()
+            .starts_with(b"\x89PNG\r\n\x1a\n"));
+    }
+    for (format, command) in [
+        (
+            "pptx",
+            r#""$HATCH_PYTHON" -c 'from pptx import Presentation; p=Presentation(); s=p.slides.add_slide(p.slide_layouts[0]); s.shapes.title.text="Hatch render integration"; p.save("slides.pptx")' && "$HATCH_PYTHON" "$HATCH_DOCUMENT_SKILLS_ROOT/presentations/scripts/pptx_tool.py" render slides.pptx --output-dir rendered-pptx"#,
+        ),
+        (
+            "xlsx",
+            r#""$HATCH_PYTHON" -c 'from openpyxl import Workbook; w=Workbook(); w.active["A1"]="Hatch render integration"; w.active["A2"]=42; w.save("sheet.xlsx")' && "$HATCH_PYTHON" "$HATCH_DOCUMENT_SKILLS_ROOT/spreadsheets/scripts/xlsx_tool.py" render sheet.xlsx --output-dir rendered-xlsx"#,
+        ),
+    ] {
+        let command = if std::env::var_os("HATCH_TEST_SOURCE_SKILLS").is_some() {
+            command.replace("$HATCH_DOCUMENT_SKILLS_ROOT", "./skills")
+        } else {
+            command.to_owned()
+        };
+        let result = response_json(runner.execute_tool_call_request(tool_request(
+            &format!("render_{format}"),
+            command,
+            120_000,
+        )));
+        assert_eq!(result["result"]["exit_code"], 0, "{format}: {result}");
+        assert_eq!(result["result"]["timed_out"], false, "{format}: {result}");
+        let output = workspace.path().join(format!("rendered-{format}"));
+        let mut pdfs = 0;
+        let mut pngs = 0;
+        for entry in fs::read_dir(output).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_some_and(|ext| ext == "pdf") {
+                assert!(fs::read(&path).unwrap().starts_with(b"%PDF-"));
+                pdfs += 1;
+            }
+            if path.extension().is_some_and(|ext| ext == "png") {
+                assert!(fs::read(&path).unwrap().starts_with(b"\x89PNG\r\n\x1a\n"));
+                pngs += 1;
+            }
+        }
+        assert_eq!(pdfs, 1, "{format}: must produce one PDF");
+        assert!(pngs > 0, "{format}: must produce page previews");
+    }
+    let command = r#""$HATCH_PYTHON" -c 'from openpyxl import Workbook; w=Workbook(); w.active["A1"]=42; w.active["A2"]="=A1+8"; w.save("formula.xlsx")' && "$HATCH_PYTHON" "$HATCH_DOCUMENT_SKILLS_ROOT/spreadsheets/scripts/recalc.py" formula.xlsx --output calculated.xlsx && "$HATCH_PYTHON" -c 'from openpyxl import load_workbook; assert load_workbook("calculated.xlsx", data_only=True).active["A2"].value == 50; assert load_workbook("calculated.xlsx", data_only=False).active["A2"].value == "=A1+8"; assert load_workbook("formula.xlsx", data_only=True).active["A2"].value is None'"#;
+    let command = if std::env::var_os("HATCH_TEST_SOURCE_SKILLS").is_some() {
+        command.replace("$HATCH_DOCUMENT_SKILLS_ROOT", "./skills")
+    } else {
+        command.to_owned()
+    };
+    let result = response_json(runner.execute_tool_call_request(tool_request(
+        "recalculate_xlsx",
+        command,
+        120_000,
+    )));
+    assert_eq!(result["result"]["exit_code"], 0, "{result}");
+    assert_eq!(result["result"]["timed_out"], false, "{result}");
+}
+
 #[test]
 fn allows_workspace_io_and_interpreters_but_redacts_the_canonical_path() {
     let fixture = ShellFixture::new();

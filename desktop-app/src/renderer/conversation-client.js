@@ -26,13 +26,13 @@ export function canConnectConversation({ libraryStatus, conversationId } = {}) {
 }
 
 export function isTerminalRunStatus(value) {
-  return new Set(["completed", "failed", "cancelled"]).has(
+  return new Set(["completed", "failed", "cancelled", "interrupted"]).has(
     String(value || "").trim().toLowerCase()
   );
 }
 
 /**
- * A running or interrupted task owns the current window's executor context.
+ * A running task owns the current window's executor context.
  * Starting another Conversation must therefore use a separate native window;
  * terminal projections are safe to clear and may reuse the current window.
  */
@@ -140,6 +140,24 @@ export async function getConversationRun(serverUrl, accessToken, binding, conver
     throw conversationClientError("Invalid Conversation Run response.", "snapshot_invalid");
   }
   return payload.run;
+}
+
+export async function getConversationSubmission(serverUrl, accessToken, binding, conversationId, runId, fetchImpl = fetch) {
+  try {
+    const payload = await requestConversation(fetchImpl,
+      runtimeHttpUrl(serverUrl, `/v1/conversations/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}`),
+      accessToken, { method: "GET", search: conversationScope(binding) });
+    if (!payload?.run || String(payload.run.id ?? payload.run.run_id) !== runId || !Object.hasOwn(payload, "submission")) {
+      throw conversationClientError("Runtime cannot verify message acceptance. Update Runtime before retrying.", "acceptance_unavailable");
+    }
+    if (payload.submission !== null && (payload.submission?.run_id !== runId || !payload.submission?.client_message_id)) {
+      throw conversationClientError("Invalid message acceptance receipt.", "acceptance_invalid");
+    }
+    return payload;
+  } catch (error) {
+    if (error?.code === "run_not_found" && error?.status === 404) return { run: null, submission: null };
+    throw error; // Auth/network failures never mean that a message was rejected.
+  }
 }
 
 /**
@@ -357,48 +375,14 @@ function bytesToBase64(bytes) {
   return btoa(binary);
 }
 
-/**
- * Project a durable Runtime snapshot into the renderer's interrupted-task
- * affordance. The snapshot is authoritative for a run that was interrupted
- * while this renderer was gone (for example a process crash before the
- * window-context write completed). It never creates an executable/reclaimable
- * run; the caller only uses the projection to show the recovery banner.
- */
-export function interruptedRunFromSnapshot(snapshot, currentRun = null, dismissedRunId = "") {
-  const runs = Array.isArray(snapshot?.runs) ? snapshot.runs : [];
-  const dismissed = String(dismissedRunId || "").trim();
-  const entries = [...runs]
-    .filter((run) => run && typeof run === "object")
-    .map((run) => ({
-      run,
-      id: String(run.id ?? run.run_id ?? "").trim()
-    }))
-    .filter((entry) => entry.id)
-    .sort((a, b) => (Date.parse(a.run.created_at ?? a.run.createdAt) || 0) - (Date.parse(b.run.created_at ?? b.run.createdAt) || 0));
-  const interrupted = entries.at(-1);
-  if (!interrupted || interrupted.run.status !== "interrupted" || interrupted.id === dismissed) return null;
-
-  const { run, id } = interrupted;
-  if (currentRun?.runId && currentRun.runId !== id) return null;
-  if (currentRun?.runId === id) {
-    return {
-      ...currentRun,
-      status: "interrupted",
-      interruptedReason: String(run.interrupted_reason ?? run.interruptedReason ?? "").trim()
-    };
-  }
-
-  const createdAt = Date.parse(run.created_at ?? run.createdAt ?? "");
-  return {
-    runId: id,
-    clientMessageId: String(run.client_message_id ?? run.clientMessageId ?? "").trim(),
-    assistantId: `${id}_assistant`,
-    text: "",
-    startedAt: Number.isFinite(createdAt) ? createdAt : Date.now(),
-    timing: {},
-    status: "interrupted",
-    interruptedReason: String(run.interrupted_reason ?? run.interruptedReason ?? "").trim()
-  };
+/** Reconcile only an existing live turn; historical interruptions never become active. */
+export function reconcileActiveRunFromSnapshot(snapshot, currentRun = null) {
+  if (!currentRun?.runId) return null;
+  const durable = (snapshot?.runs ?? []).find(
+    (run) => String(run?.id ?? run?.run_id ?? "") === currentRun.runId
+  );
+  if (durable && isTerminalRunStatus(durable.status)) return null;
+  return currentRun;
 }
 
 async function requestConversation(fetchImpl, baseUrl, accessToken, { method, search, body }) {

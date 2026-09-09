@@ -124,11 +124,19 @@ fn resolve_runtime_path(runtime_root: &Path, value: &str, label: &str) -> Result
 pub(crate) fn execute(
     workspace: &Path,
     runtime_root: Option<&Path>,
+    attachment_root: Option<&Path>,
     command: &str,
     timeout_ms: u64,
     cancel: &AtomicBool,
 ) -> Result<ShellExecOutput> {
-    platform::execute(workspace, runtime_root, command, timeout_ms, cancel)
+    platform::execute(
+        workspace,
+        runtime_root,
+        attachment_root,
+        command,
+        timeout_ms,
+        cancel,
+    )
 }
 
 #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
@@ -138,6 +146,7 @@ mod platform {
     pub(super) fn execute(
         _workspace: &Path,
         _runtime_root: Option<&Path>,
+        attachment_root: Option<&Path>,
         _command: &str,
         _timeout_ms: u64,
         cancel: &AtomicBool,
@@ -157,6 +166,7 @@ mod platform {
     use super::*;
     use std::ffi::OsString;
     use std::io::Read;
+    use std::os::windows::ffi::OsStringExt;
     use std::os::windows::io::AsRawHandle;
     use std::os::windows::process::CommandExt;
     use std::process::{Child, Command, Stdio};
@@ -171,13 +181,38 @@ mod platform {
     };
     use windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP;
 
-    const POWERSHELL: &str = "powershell.exe";
+    fn system_powershell() -> Result<PathBuf> {
+        // Resolve through the OS, never the Workspace, PATH, or SystemRoot env.
+        let mut buffer = vec![0u16; 32768];
+        let length = unsafe {
+            windows_sys::Win32::System::SystemInformation::GetSystemDirectoryW(
+                buffer.as_mut_ptr(),
+                buffer.len() as u32,
+            )
+        } as usize;
+        if length == 0 || length >= buffer.len() {
+            return Err(LocalRunnerError::ShellSandboxInitialization(
+                "could not resolve the Windows system directory".into(),
+            ));
+        }
+        let path = PathBuf::from(OsString::from_wide(&buffer[..length]))
+            .join("WindowsPowerShell")
+            .join("v1.0")
+            .join("powershell.exe");
+        if !path.is_absolute() || !path.is_file() {
+            return Err(LocalRunnerError::ShellSandboxUnavailable(
+                "Windows system PowerShell is unavailable".into(),
+            ));
+        }
+        Ok(path)
+    }
     const MAX_COMMAND_OUTPUT_BYTES: usize = 1024 * 1024;
     const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
     pub(super) fn execute(
         workspace: &Path,
         runtime_root: Option<&Path>,
+        attachment_root: Option<&Path>,
         command: &str,
         timeout_ms: u64,
         cancel: &AtomicBool,
@@ -205,7 +240,8 @@ mod platform {
         let runtime_root = runtime_root.map(canonical_runtime_root).transpose()?;
 
         let job = JobObject::new()?;
-        let mut shell = Command::new(POWERSHELL);
+        let powershell = system_powershell()?;
+        let mut shell = Command::new(&powershell);
         shell
             .args([
                 "-NoLogo",
@@ -226,7 +262,7 @@ mod platform {
         }
         let mut child = shell.spawn().map_err(|error| {
             LocalRunnerError::ShellSandboxUnavailable(format!(
-                "could not start {POWERSHELL}: {error}"
+                "could not start system PowerShell: {error}"
             ))
         })?;
 
@@ -589,6 +625,14 @@ mod platform {
         use super::decode_command_output;
 
         #[test]
+        fn shell_executable_is_an_existing_absolute_system_path() {
+            let executable = super::system_powershell().unwrap();
+            assert!(executable.is_absolute());
+            assert!(executable.is_file());
+            assert!(executable.ends_with("WindowsPowerShell/v1.0/powershell.exe"));
+        }
+
+        #[test]
         fn decodes_utf16le_powershell_output_without_a_bom() {
             let bytes = "hatch-windows-runner\r\n"
                 .encode_utf16()
@@ -647,7 +691,18 @@ mod platform {
 (deny default)
 (import "system.sb")
 (deny network*)
+; LibreOffice instance IPC is private to this tool invocation. In particular,
+; do not grant Workspace sockets or TCP/UDP endpoints.
+(allow network-bind network-inbound network-outbound
+    (local unix-socket (subpath (param "SCRATCH"))))
 (deny mach-lookup)
+; The macOS LibreOffice engine initializes AppKit even in headless mode.
+; Keep this exact service list; appleevents, pasteboard and arbitrary XPC stay denied.
+(allow mach-lookup
+    (global-name "com.apple.coreservices.launchservicesd")
+    (global-name "com.apple.windowmanager.server")
+    (global-name "com.apple.windowserver.active")
+    (xpc-service-name "com.apple.ViewBridgeAuxiliary"))
 (deny mach-register)
 (deny mach-per-user-lookup)
 (deny mach-issue-extension)
@@ -684,7 +739,12 @@ mod platform {
     (literal "/bin/launchctl")
     (literal "/usr/bin/launchctl"))
 (allow file-read* (literal "/private/var/select/sh"))
-(allow file-read* (subpath (param "RUNTIME_ROOT")))
+; Shell command lookup needs stat/read access, not only process-exec.
+; These are OS-owned executable directories, not user data or credentials.
+(allow file-read* (subpath "/bin") (subpath "/sbin")
+    (subpath "/usr/bin") (subpath "/usr/sbin"))
+(allow file-read* (subpath (param "RUNTIME_ROOT")) (subpath (param "ATTACHMENTS")))
+(deny file-write* (subpath (param "ATTACHMENTS")))
 (allow file-read* file-write*
     (subpath (param "WORKSPACE"))
     (subpath (param "SCRATCH")))
@@ -693,6 +753,7 @@ mod platform {
     pub(super) fn execute(
         workspace: &Path,
         runtime_root: Option<&Path>,
+        attachment_root: Option<&Path>,
         command: &str,
         timeout_ms: u64,
         cancel: &AtomicBool,
@@ -701,6 +762,7 @@ mod platform {
             Path::new(SANDBOX_EXEC),
             workspace,
             runtime_root,
+            attachment_root,
             command,
             timeout_ms,
             cancel,
@@ -719,6 +781,7 @@ mod platform {
             sandbox_exec,
             workspace,
             None,
+            None,
             command,
             timeout_ms,
             cancel,
@@ -729,6 +792,7 @@ mod platform {
         sandbox_exec: &Path,
         workspace: &Path,
         runtime_root: Option<&Path>,
+        attachment_root: Option<&Path>,
         command: &str,
         timeout_ms: u64,
         cancel: &AtomicBool,
@@ -752,6 +816,7 @@ mod platform {
                 &workspace,
                 scratch.path(),
                 runtime_root.as_deref(),
+                attachment_root,
                 command,
                 timeout_ms,
                 cancel,
@@ -854,6 +919,7 @@ mod platform {
             workspace,
             scratch,
             None,
+            None,
             concat!(
                 "if /bin/cat \"$1\" >/dev/null 2>&1; then exit 70; fi; ",
                 "if kill -0 \"$PPID\" >/dev/null 2>&1; then exit 71; fi; ",
@@ -930,6 +996,7 @@ mod platform {
         workspace: &Path,
         scratch: &Path,
         runtime_root: Option<&Path>,
+        attachment_root: Option<&Path>,
         command_text: &str,
         positional_arguments: &[OsString],
     ) -> Result<SandboxedChild> {
@@ -958,6 +1025,30 @@ mod platform {
             )
             .map_err(spawn_io_error)?;
 
+        // Directory traversal needs ancestor metadata, but not ancestor contents.
+        // Keep paths in sandbox parameters, never interpolate them as SBPL source.
+        let mut profile = SANDBOX_PROFILE.to_string();
+        let mut ancestor_arguments = Vec::new();
+        let mut ancestors = std::collections::BTreeSet::new();
+        for root in [
+            Some(workspace),
+            Some(scratch),
+            runtime_root,
+            attachment_root,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            ancestors.extend(root.ancestors().skip(1).map(Path::to_path_buf));
+        }
+        for (index, ancestor) in ancestors.iter().enumerate() {
+            let name = format!("ANCESTOR_{index}");
+            profile.push_str(&format!(
+                "\n(allow file-read-metadata (literal (param \"{name}\")))"
+            ));
+            ancestor_arguments.push(OsString::from("-D"));
+            ancestor_arguments.push(profile_parameter(&name, ancestor));
+        }
         let mut arguments = vec![
             sandbox_exec.as_os_str().to_os_string(),
             OsString::from("-D"),
@@ -969,12 +1060,20 @@ mod platform {
                 "RUNTIME_ROOT",
                 runtime_root.unwrap_or_else(|| Path::new("/nonexistent/hatch-runtime")),
             ),
+            OsString::from("-D"),
+            profile_parameter(
+                "ATTACHMENTS",
+                attachment_root.unwrap_or_else(|| Path::new("/nonexistent/hatch-attachments")),
+            ),
+        ];
+        arguments.extend(ancestor_arguments);
+        arguments.extend([
             OsString::from("-p"),
-            OsString::from(SANDBOX_PROFILE),
+            OsString::from(profile),
             OsString::from(SYSTEM_SHELL),
             OsString::from("-c"),
             OsString::from(command_text),
-        ];
+        ]);
         arguments.extend_from_slice(positional_arguments);
         let arguments = cstring_vector(arguments.iter().map(OsString::as_os_str), "argument")?;
 
@@ -1517,6 +1616,7 @@ mod platform {
         workspace: &Path,
         scratch: &Path,
         runtime_root: Option<&Path>,
+        attachment_root: Option<&Path>,
         command_text: &str,
         timeout_ms: u64,
         cancel: &AtomicBool,
@@ -1526,6 +1626,7 @@ mod platform {
             workspace,
             scratch,
             runtime_root,
+            attachment_root,
             command_text,
             &[],
         )?;

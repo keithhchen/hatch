@@ -6,6 +6,7 @@ import {
   assertCanonicalPersistedToolNames,
   normalizePersistedStoreEvent,
   RuntimeStore,
+  type SubmissionReceipt,
   type StoreEvent,
   type VisibleConversationMessage,
   type VisibleConversationSkillEvent,
@@ -402,6 +403,20 @@ export class PostgresStore extends RuntimeStore {
 
   async initialize(): Promise<void> {
     await this.ensureSchema();
+  }
+
+  override async readSubmissionReceipt(conversationId: string, runId: string): Promise<SubmissionReceipt | undefined> {
+    await this.ensureSchema();
+    const result = await this.query<{ receipt: SubmissionReceipt }>(`
+      SELECT jsonb_build_object(
+        'run_id', run_id, 'client_message_id', payload->>'client_message_id',
+        'accepted_at', payload->>'timestamp') AS receipt
+      FROM hatch_conversation_events
+      WHERE conversation_id=$1 AND run_id=$2 AND event_type='conversation.model_message'
+        AND payload->'message'->>'role'='user' AND payload->>'client_message_id' IS NOT NULL
+      ORDER BY id LIMIT 1
+    `, [conversationId, runId]);
+    return result.rows[0]?.receipt;
   }
 
   async migrate(): Promise<void> {

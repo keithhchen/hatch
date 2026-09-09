@@ -13,6 +13,7 @@ import {
   type RunStart
 } from "./protocol.js";
 import type { ActivatedSkill } from "./store.js";
+import { persistToolMessage, restoreToolMessage } from "./toolMessage.js";
 import {
   auditProposedDeliveryTool,
   activeSkillResourceRoots,
@@ -38,16 +39,11 @@ import { SUMMARY_PREFIX, SUMMARY_SUFFIX } from "./compaction.js";
 import { createPiModel, createPiStreamFn } from "./piModel.js";
 import { runPiAgentPrompt, type PiAgentPromptRunner } from "./piPrompt.js";
 import {
-  boundRichDocumentText,
-  extractRichDocument
-} from "./richFile.js";
-import {
   findDocumentSkillForAsset,
   loadSkillBundleByName,
   type SkillRecord
 } from "./skills.js";
 
-const MAX_CHAT_ASSET_CONTEXT_CHARS = 200_000;
 
 export type PiToolDefinition = {
   type: "function";
@@ -147,11 +143,10 @@ export class PiAgentRuntime implements AgentRuntime {
     // marked row participates in assembly exactly once. Ordinary turns keep
     // the existing prompt path, where the current row is appended by prompt.
     const storedMessageSource = input.task_start ? ctx.messages : ctx.messages.slice(0, -1);
-    const allAssetMessages = input.task_start
-      ? ctx.messages
-      : [...storedMessageSource, input.message];
+    // Only a new attachment invokes a Skill. Replaying historical attachments
+    // must not reopen the current Skill bundle and reinterpret an old turn.
     const attachmentSkills = await loadDocumentAttachmentSkills(
-      allAssetMessages,
+      [input.message],
       ctx.sessionSkills.records
     );
     const autoActivatedSkills = attachmentSkills.filter((skill) => !activeSkills.some((active) => active.path === skill.path));
@@ -168,19 +163,14 @@ export class PiAgentRuntime implements AgentRuntime {
       activeSkills
     ).map((message) => piUserMessage(message.content ?? ""));
     const storedAssetImages = await loadAssetImages(storedMessageSource, ctx.assetStore);
-    const assetDocumentProjections = await loadAssetDocumentProjections(
-      allAssetMessages,
-      ctx.assetStore,
-      ctx.sessionSkills.records
-    );
     const storedMessages = storedMessageSource.map((message) => toPiMessage(
       message,
-      storedAssetImages,
-      assetDocumentProjections
+      storedAssetImages
     ));
     const currentAssetImages = input.task_start
       ? []
-      : [...(await loadAssetImages([input.message], ctx.assetStore)).values()];
+      : ctx.messages.at(-1)?.model_images
+        ?? [...(await loadAssetImages([input.message], ctx.assetStore)).values()];
     const toolDefinitions = this.options.toolDefinitions ?? chatToolsForRun(
       ctx.clientTools,
       ctx.allowedExternalTools,
@@ -251,17 +241,11 @@ export class PiAgentRuntime implements AgentRuntime {
           const replacement = await ctx.compactMessagesIfNeeded(runtimeMessages, "mid_turn");
           if (!replacement) return messages;
           const replacementAssetImages = await loadAssetImages(replacement, ctx.assetStore);
-          const replacementAssetDocuments = await loadAssetDocumentProjections(
-            replacement,
-            ctx.assetStore,
-            ctx.sessionSkills.records
-          );
           return [
             ...contextMessages,
             ...replacement.map((message) => toPiMessage(
               message,
-              replacementAssetImages,
-              replacementAssetDocuments
+              replacementAssetImages
             ))
           ];
         } catch {
@@ -314,7 +298,7 @@ export class PiAgentRuntime implements AgentRuntime {
       const promptPromise = (input.task_start
         ? agent.continue()
         : agent.prompt(
-          renderUserMessageForModel(input.message, { assetProjections: assetDocumentProjections }),
+          renderUserMessageForModel(input.message),
           currentAssetImages
         ))
         .catch((error) => {
@@ -776,16 +760,15 @@ function piUserMessage(content: string | Array<{ type: "text"; text: string } | 
 
 function toPiMessage(
   message: ConversationMessage,
-  assetImages: ReadonlyMap<string, ImageContent> = new Map(),
-  assetDocumentProjections: ReadonlyMap<string, ModelAssetProjection> = new Map()
+  assetImages: ReadonlyMap<string, ImageContent> = new Map()
 ): AgentMessage {
   // Rebuild the provider-facing message instead of spreading ConversationMessage:
   // the durable kind marker stays in the Runtime transcript and never reaches
   // the provider payload.
   if (message.role === "user") {
-    const text = renderUserMessageForModel(message, { assetProjections: assetDocumentProjections });
-    const images: ImageContent[] = [];
-    for (const attachment of message.attachments ?? []) {
+    const text = renderUserMessageForModel(message);
+    const images: ImageContent[] = structuredClone(message.model_images ?? []);
+    for (const attachment of message.model_images === undefined ? message.attachments ?? [] : []) {
       if (!("kind" in attachment) || attachment.kind !== "asset") continue;
       const image = assetImages.get(attachment.asset_id);
       if (image) images.push(image);
@@ -803,15 +786,7 @@ function toPiMessage(
     };
   }
   if (message.role === "tool") {
-    return {
-      role: "toolResult",
-      toolCallId: message.tool_call_id ?? "unknown-tool-call",
-      toolName: message.tool_name ?? toolNameFromCall(message),
-      content: [{ type: "text", text: boundText(message.content ?? "") }],
-      isError: false,
-      details: {},
-      timestamp: Date.now()
-    } as ToolResultMessage;
+    return restoreToolMessage(message);
   }
   const content: Array<Record<string, unknown>> = [];
   if (message.content) content.push({ type: "text", text: message.content });
@@ -837,19 +812,12 @@ function toPiMessage(
   } as unknown as AssistantMessage;
 }
 
-type ModelAssetProjection = {
-  format: string;
-  content?: string;
-  truncated?: boolean;
-  status?: "unavailable";
-  error?: string;
-};
 
 /**
  * A document attachment is an implicit Skill invocation. This mirrors the
  * normal coding-agent behavior: the model receives the complete Skill
  * instructions before it reasons over the uploaded document, while the
- * attachment bytes remain in the Runtime asset store.
+ * attachment bytes remain in the managed local attachment directory.
  */
 async function loadDocumentAttachmentSkills(
   messages: ConversationMessage[],
@@ -858,7 +826,7 @@ async function loadDocumentAttachmentSkills(
   const loaded = new Map<string, ActivatedSkill>();
   for (const message of messages) {
     for (const attachment of message.attachments ?? []) {
-      if (!("kind" in attachment) || attachment.kind !== "asset" || attachment.media_type.startsWith("image/")) {
+      if (!("kind" in attachment) || (attachment.kind !== "asset" && attachment.kind !== "local_file") || attachment.media_type.startsWith("image/")) {
         continue;
       }
       const record = findDocumentSkillForAsset(records, attachment.display_name, attachment.media_type);
@@ -900,70 +868,6 @@ function skillActivationEvent(
   };
 }
 
-async function loadAssetDocumentProjections(
-  messages: ConversationMessage[],
-  assetStore: RunContext["assetStore"],
-  records: SkillRecord[]
-): Promise<Map<string, ModelAssetProjection>> {
-  const projections = new Map<string, ModelAssetProjection>();
-  if (!assetStore) return projections;
-  let remainingChars = MAX_CHAT_ASSET_CONTEXT_CHARS;
-  for (const message of messages) {
-    for (const attachment of message.attachments ?? []) {
-      if (
-        !("kind" in attachment)
-        || attachment.kind !== "asset"
-        || attachment.media_type.startsWith("image/")
-        || projections.has(attachment.asset_id)
-      ) continue;
-      if (remainingChars <= 0) {
-        projections.set(attachment.asset_id, {
-          format: assetDocumentFormat(attachment.display_name, attachment.media_type),
-          truncated: true
-        });
-        continue;
-      }
-      try {
-        const bytes = await assetStore.read(attachment.asset_id, attachment.storage_ref);
-        const documentSkill = findDocumentSkillForAsset(records, attachment.display_name, attachment.media_type);
-        if (!documentSkill) {
-          throw new Error("The owning document Skill is unavailable");
-        }
-        const extracted = await extractRichDocument(
-          attachment.display_name,
-          attachment.media_type,
-          bytes,
-          documentSkill.directory
-        );
-        const bounded = boundRichDocumentText(extracted.content, remainingChars);
-        projections.set(attachment.asset_id, {
-          format: extracted.format,
-          content: bounded.content,
-          truncated: bounded.truncated
-        });
-        remainingChars = Math.max(0, remainingChars - bounded.content.length);
-      } catch {
-        // Keep the attachment metadata marker. Unsupported or missing document
-        // bytes are reported as unavailable rather than being replaced with a
-        // guessed or lossy text projection.
-        projections.set(attachment.asset_id, {
-          format: assetDocumentFormat(attachment.display_name, attachment.media_type),
-          status: "unavailable",
-          error: "The owning document Skill could not produce a text projection."
-        });
-      }
-    }
-  }
-  return projections;
-}
-
-function assetDocumentFormat(displayName: string, mediaType: string): string {
-  const extension = displayName.match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
-  if (mediaType === "application/pdf" || extension === "pdf") return "pdf";
-  if (extension) return extension;
-  return mediaType.split("/")[1] || "document";
-}
-
 async function loadAssetImages(
   messages: ConversationMessage[],
   assetStore: RunContext["assetStore"]
@@ -971,6 +875,7 @@ async function loadAssetImages(
   const images = new Map<string, ImageContent>();
   if (!assetStore) return images;
   for (const message of messages) {
+    if (message.model_images !== undefined) continue;
     for (const attachment of message.attachments ?? []) {
       if (!("kind" in attachment) || attachment.kind !== "asset" || !attachment.media_type.startsWith("image/")) continue;
       if (images.has(attachment.asset_id)) continue;
@@ -991,12 +896,7 @@ async function loadAssetImages(
 
 function fromPiMessage(message: AssistantMessage | ToolResultMessage): ConversationMessage {
   if (message.role === "toolResult") {
-    return {
-      role: "tool",
-      content: boundText(message.content.filter((block) => block.type === "text").map((block) => block.text).join("\n")),
-      tool_call_id: message.toolCallId,
-      tool_name: message.toolName
-    };
+    return persistToolMessage(message);
   }
   const text = message.content
     .filter((block) => block.type === "text")
@@ -1023,19 +923,18 @@ function toRuntimeCompactionMessage(message: AgentMessage): {
   tool_calls?: unknown;
   tool_call_id?: string;
   tool_name?: string;
+  tool_content?: ConversationMessage["tool_content"];
+  tool_is_error?: boolean;
+  model_images?: ConversationMessage["model_images"];
   usage?: AssistantMessage["usage"];
   tokens_before?: number;
 } {
   if (message.role === "user") {
-    return { role: "user", content: piText(message) };
+    return { role: "user", content: piText(message), model_images: typeof message.content === "string"
+      ? [] : structuredClone(message.content.filter((block): block is ImageContent => block.type === "image")) };
   }
   if (message.role === "toolResult") {
-    return {
-      role: "tool",
-      content: piText(message),
-      tool_call_id: message.toolCallId,
-      tool_name: message.toolName
-    };
+    return persistToolMessage(message);
   }
   if (message.role === "compactionSummary") {
     return {
@@ -1074,10 +973,6 @@ function piText(message: AgentMessage): string {
 
 function assistantText(message: AssistantMessage): string {
   return message.content.filter((block) => block.type === "text").map((block) => block.text).join("");
-}
-
-function toolNameFromCall(message: ConversationMessage): string {
-  return message.tool_calls?.[0]?.function.name ?? "tool";
 }
 
 function redactDeliveryWriteArguments(
@@ -1128,10 +1023,6 @@ function piToolResultContent(result: Record<string, unknown>): Array<{ type: "te
     });
   }
   return content;
-}
-
-function boundText(value: string): string {
-  return value.length <= 50_000 ? value : `${value.slice(0, 50_000)}\n[tool output truncated]`;
 }
 
 function emptyUsage(): AssistantMessage["usage"] {

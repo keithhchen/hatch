@@ -213,12 +213,6 @@
           "markdownDescription": "Enables the deny_pending_tool_call command without any pre-configured scope."
         },
         {
-          "description": "Enables the discard_native_drop_contexts command without any pre-configured scope.",
-          "type": "string",
-          "const": "allow-discard-native-drop-contexts",
-          "markdownDescription": "Enables the discard_native_drop_contexts command without any pre-configured scope."
-        },
-        {
           "description": "Enables the ensure_workspace command without any pre-configured scope.",
           "type": "string",
           "const": "allow-ensure-workspace",
@@ -231,10 +225,22 @@
           "markdownDescription": "Enables the execute_tool_call command without any pre-configured scope."
         },
         {
+          "description": "Enables the import_clipboard_attachment command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-import-clipboard-attachment",
+          "markdownDescription": "Enables the import_clipboard_attachment command without any pre-configured scope."
+        },
+        {
           "description": "Enables the open_about_window command without any pre-configured scope.",
           "type": "string",
           "const": "allow-open-about-window",
           "markdownDescription": "Enables the open_about_window command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_conversation_draft command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-conversation-draft",
+          "markdownDescription": "Enables the open_conversation_draft command without any pre-configured scope."
         },
         {
           "description": "Enables the open_conversation_window command without any pre-configured scope.",
@@ -247,6 +253,12 @@
           "type": "string",
           "const": "allow-open-external-url",
           "markdownDescription": "Enables the open_external_url command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_local_attachment command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-local-attachment",
+          "markdownDescription": "Enables the open_local_attachment command without any pre-configured scope."
         },
         {
           "description": "Enables the open_settings_window command without any pre-configured scope.",
@@ -327,6 +339,12 @@
           "markdownDescription": "Enables the read_window_settings command without any pre-configured scope."
         },
         {
+          "description": "Enables the release_conversation_draft command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-release-conversation-draft",
+          "markdownDescription": "Enables the release_conversation_draft command without any pre-configured scope."
+        },
+        {
           "description": "Enables the request_window_attention command without any pre-configured scope.",
           "type": "string",
           "const": "allow-request-window-attention",
@@ -343,6 +361,18 @@
           "type": "string",
           "const": "allow-revoke-workspace-grant",
           "markdownDescription": "Enables the revoke_workspace_grant command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the save_conversation_draft command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-save-conversation-draft",
+          "markdownDescription": "Enables the save_conversation_draft command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the save_local_attachment command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-save-local-attachment",
+          "markdownDescription": "Enables the save_local_attachment command without any pre-configured scope."
         },
         {
           "description": "Enables the set_native_command_state command without any pre-configured scope.",
@@ -417,12 +447,6 @@
           "markdownDescription": "Denies the deny_pending_tool_call command without any pre-configured scope."
         },
         {
-          "description": "Denies the discard_native_drop_contexts command without any pre-configured scope.",
-          "type": "string",
-          "const": "deny-discard-native-drop-contexts",
-          "markdownDescription": "Denies the discard_native_drop_contexts command without any pre-configured scope."
-        },
-        {
           "description": "Denies the ensure_workspace command without any pre-configured scope.",
           "type": "string",
           "const": "deny-ensure-workspace",
@@ -435,10 +459,22 @@
           "markdownDescription": "Denies the execute_tool_call command without any pre-configured scope."
         },
         {
+          "description": "Denies the import_clipboard_attachment command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-import-clipboard-attachment",
+          "markdownDescription": "Denies the import_clipboard_attachment command without any pre-configured scope."
+        },
+        {
           "description": "Denies the open_about_window command without any pre-configured scope.",
           "type": "string",
           "const": "deny-open-about-window",
           "markdownDescription": "Denies the open_about_window command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_conversation_draft command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-conversation-draft",
+          "markdownDescription": "Denies the open_conversation_draft command without any pre-configured scope."
         },
         {
           "description": "Denies the open_conversation_window command without any pre-configured scope.",
@@ -451,6 +487,12 @@
           "type": "string",
           "const": "deny-open-external-url",
           "markdownDescription": "Denies the open_external_url command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_local_attachment command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-local-attachment",
+          "markdownDescription": "Denies the open_local_attachment command without any pre-configured scope."
         },
         {
           "description": "Denies the open_settings_window command without any pre-configured scope.",
@@ -531,6 +573,12 @@
           "markdownDescription": "Denies the read_window_settings command without any pre-configured scope."
         },
         {
+          "description": "Denies the release_conversation_draft command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-release-conversation-draft",
+          "markdownDescription": "Denies the release_conversation_draft command without any pre-configured scope."
+        },
+        {
           "description": "Denies the request_window_attention command without any pre-configured scope.",
           "type": "string",
           "const": "deny-request-window-attention",
@@ -547,6 +595,18 @@
           "type": "string",
           "const": "deny-revoke-workspace-grant",
           "markdownDescription": "Denies the revoke_workspace_grant command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the save_conversation_draft command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-save-conversation-draft",
+          "markdownDescription": "Denies the save_conversation_draft command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the save_local_attachment command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-save-local-attachment",
+          "markdownDescription": "Denies the save_local_attachment command without any pre-configured scope."
         },
         {
           "description": "Denies the set_native_command_state command without any pre-configured scope.",

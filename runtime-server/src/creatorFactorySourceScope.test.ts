@@ -1,10 +1,8 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import test, { type TestContext } from "node:test";
 import { loadInputManifest } from "./creatorFactoryCli.js";
 import { parseRawSourcesFromPacket } from "./creatorLearning/corpusReleaseGuards.js";
@@ -65,45 +63,26 @@ test("source_scope ingests a complete Madeline-shaped directory: 15/15 regular f
   );
 });
 
-const repositoryRoot = [
-  path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.."),
-  path.resolve(process.cwd(), ".."),
-  process.cwd()
-].find((candidate) => existsSync(path.join(candidate, ".hatch-local/creator-factory/source-packs")))
-  ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const localOperatorDirectory = path.join(
-  repositoryRoot,
-  ".hatch-local/creator-factory/operator-e2e-2026-08-12/madeline-mann"
-);
-const localPackRoot = path.join(
-  repositoryRoot,
-  ".hatch-local/creator-factory/source-packs/na-jp-creator-reference-seed-2026-08-12"
-);
-
-test("local Madeline operator pack, when present, resolves every real file 15/15", {
-  skip: !existsSync(localPackRoot)
-}, async () => {
-  const resolved = await resolveCreatorSourceScope({
-    pack_root: "../../source-packs/na-jp-creator-reference-seed-2026-08-12",
-    creator_directory: CREATOR_DIRECTORY
-  }, localOperatorDirectory);
-
-  assert.equal(resolved.sources.length, 15);
-  assert.equal(resolved.sourceManifest.file_count, 15);
-  assert.equal(resolved.sourceManifest.files.filter((file) => file.path.endsWith("/creator.json")).length, 1);
-
+test("directory snapshots include newly added files while locked inventories reject them", async (t) => {
+  // Exercise the contract in CI too, without depending on a mutable operator pack.
+  const fixture = await sourcePackFixture(t, { "article.md": "original article\n" });
+  const before = await resolveCreatorSourceScope(fixture.scope, fixture.manifestDirectory);
+  await writeFile(path.join(fixture.creatorRoot, "creator.json"), '{"id":"madeline-mann"}\n');
+  const after = await resolveCreatorSourceScope(fixture.scope, fixture.manifestDirectory);
+  assert.deepEqual(after.sourceManifest.files.map((file) => file.path).sort(), [
+    `${CREATOR_DIRECTORY}/article.md`,
+    `${CREATOR_DIRECTORY}/creator.json`
+  ]);
+  assert.equal(after.sources.length, 2);
+  assert.equal(after.sourceManifest.file_count, 2);
+  assert.equal(new Set(after.sourceManifest.files.map((file) => file.source_id)).size, 2);
+  assert.notEqual(after.sourceManifest.root_digest, before.sourceManifest.root_digest);
+  const repeated = await resolveCreatorSourceScope(fixture.scope, fixture.manifestDirectory);
+  assert.deepEqual(repeated, after);
   await assert.rejects(
-    () => resolveCreatorSourceScope({
-      pack_root: "../../source-packs/na-jp-creator-reference-seed-2026-08-12",
-      creator_directory: CREATOR_DIRECTORY,
-      completeness: "all_regular_files",
-      manifest: {
-        path: "source-pack.json",
-        digest: "sha256:44f4bf4ea26b5a0d7815d879fa938975750dde132933002cb672838ee9d8075d"
-      }
-    }, localOperatorDirectory),
+    () => resolveCreatorSourceScope(fixture.checksummedScope, fixture.manifestDirectory),
     /extra files: .*creator\.json/,
-    "source-pack.json omits creator.json and therefore must fail closed as the ground truth"
+    "a locked inventory must not silently include an undeclared file"
   );
 });
 

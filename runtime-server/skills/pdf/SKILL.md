@@ -9,7 +9,9 @@ This Skill owns `.pdf` work. PDF bytes, text, annotations, links, and attachment
 
 ## Required workflow
 
-1. Load this complete Skill before any PDF `file_read` or edit. A chat PDF upload also implicitly activates this complete Skill before its bounded text projection is prepared. `file_read` is a bounded transport/preview operation; semantic extraction and PDF mutations belong to this Skill.
+1. Load this complete Skill before reading, creating, or editing a PDF. For a chat attachment, pass the managed local path from the committed message to the Skill scripts through LocalRunner. The attachment reference contains no extracted text; inspect the actual PDF.
+
+Attached source copies are read-only. Write edits and renders to the authorized Workspace or task output directory. Reading or rendering is a tool execution whose result is appended to history; do not re-run it merely to load old messages. To visually inspect a rendered page, call the image-reading tool so the model receives image content, not just a path.
 2. Use `$HATCH_PYTHON` with `pdf_tool.py` for inspection and text extraction. Always inspect page count, encryption, metadata, and page boxes before editing an existing file.
 3. Create or modify PDFs with the Skill scripts and `$HATCH_PYTHON` or `$HATCH_NODE` absolute paths. Do not use generic `file_write`/`file_patch` on a PDF and do not write a text file with a `.pdf` suffix.
 4. For layout-sensitive work, render every page with `pdf_tool.py render` using the bundled Poppler `pdftoppm`, then inspect the resulting page images. Check clipping, overlap, margins, font substitution, broken glyphs, images, tables, page order, and annotations.
@@ -27,7 +29,6 @@ The Desktop runtime exposes the Skill bundle at `$HATCH_DOCUMENT_SKILLS_ROOT/pdf
 - `$HATCH_PYTHON .../scripts/pdf_tool.py split INPUT.pdf --output-dir tmp/pdf-pages`
 - `$HATCH_PYTHON .../scripts/pdf_tool.py render OUTPUT.pdf --output-dir tmp/pdf-render`
 - `$HATCH_NODE .../scripts/create_pdf.mjs` is available for simple generated PDFs.
-- `$HATCH_NODE .../scripts/read_asset.mjs --input UPLOAD.pdf --max-chars 200000` is the Runtime-only reader for a chat upload.
 
 The scripts return structured `dependency_unavailable`, `invalid_document`, or `conversion_failed` errors. Never silently downgrade to a guessed text projection or a fake image.
 

@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { openDraftSession, draftAttachmentReference } from "./conversation-draft.js";
 import { createRoot } from "react-dom/client";
 import "@hatch/ui/fonts";
 import "@hatch/ui/theme.css";
@@ -80,7 +81,8 @@ import {
   getConversationJournalPage,
   getConversationToolDetail,
   getConversationRun,
-  interruptedRunFromSnapshot,
+  getConversationSubmission,
+  reconcileActiveRunFromSnapshot,
   isServerConversationId,
   isTerminalRunStatus,
   listConversations,
@@ -183,6 +185,7 @@ import {
   normalizeNativeDropAttachment,
   normalizeNativeDropFile
 } from "./native-drop-context.js";
+import { readLocalAttachmentImage } from "./local-attachment-preview.js";
 import { invokeDesktopCommand } from "./native-invoke-boundary.js";
 import {
   SKILL_ACTIVITY_PART,
@@ -248,7 +251,7 @@ function DesktopAuxiliaryWindow({ kind }) {
           <p className="desktop-auxiliary-lede">Creator agents, on your terms.</p>
           <p>Hatch keeps the desktop boundary native while React renders the conversation work surface.</p>
           <dl className="desktop-auxiliary-facts">
-          <div><dt>Version</dt><dd>0.1.28</dd></div>
+          <div><dt>Version</dt><dd>0.1.29</dd></div>
             <div><dt>Architecture</dt><dd>Tauri Hybrid</dd></div>
           </dl>
         </section>
@@ -427,10 +430,9 @@ function App() {
   const [signInStatus, setSignInStatus] = useState("idle");
   const [signInError, setSignInError] = useState("");
   const [workspaceGranted, setWorkspaceGranted] = useState(false);
-  const [droppedFiles, setDroppedFiles] = useState([]);
+  const [droppedFiles, storeDroppedFiles] = useState([]);
   const droppedFilesRef = useRef([]);
   const [permissionMode, setPermissionMode] = useState(DEFAULT_PERMISSION_MODE);
-  const [interruptedRun, setInterruptedRun] = useState(null);
   const [conversationId, setConversationId] = useState(() => requestedConversationIdRef.current || "desktop-chat");
   const [conversations, setConversations] = useState([]);
   const [conversationLibraryStatus, setConversationLibraryStatus] = useState("idle");
@@ -482,6 +484,17 @@ function App() {
   const [windowStateRestored, setWindowStateRestored] = useState(false);
   const composerDraftRef = useRef("");
   const buyerProfile = buyerSession?.profile ?? EMPTY_PROFILE;
+  const draftKey = JSON.stringify([buyerProfile.id || "", conversationId]);
+  const visibleDraftKeyRef = useRef(draftKey);
+  visibleDraftKeyRef.current = draftKey;
+  const draftSessionRef = useRef(null);
+  const submissionPreparingRef = useRef(false);
+  const draftTransitionRef = useRef(Promise.resolve());
+  const [draftState, setDraftState] = useState({ key: "", status: "loading", error: "" });
+  const [draftRetry, setDraftRetry] = useState(0);
+  const draftEditable = draftState.key === draftKey && ["ready", "saving", "error"].includes(draftState.status)
+    && draftSessionRef.current?.key === draftKey;
+  const pendingSubmission = draftSessionRef.current?.key === draftKey ? draftSessionRef.current.session.snapshot().pending : null;
   const signedIn = authState === "signed-in";
   const language = resolveLanguage(languagePreference, browserPreferredLocales());
   const t = useMemo(() => createTranslator(language), [language]);
@@ -553,25 +566,57 @@ function App() {
   }, [creatorAgent, signedIn]);
 
   useEffect(() => {
-    droppedFilesRef.current = droppedFiles;
-  }, [droppedFiles]);
-
-  useEffect(() => {
     conversationLibraryStatusRef.current = conversationLibraryStatus;
   }, [conversationLibraryStatus]);
 
-  // A pending native file projection belongs to exactly one conversation. It
-  // must never follow the window when the user switches the Library row or
-  // Creator Agent before sending. Discard is idempotent because a successful
-  // send has already consumed the native one-shot handle.
   useEffect(() => {
-    void discardNativeDropContexts(droppedFilesRef.current.map((file) => file.contextId));
-    droppedFilesRef.current = [];
-    setDroppedFiles([]);
-  }, [conversationId]);
+    let cancelled = false;
+    setDraftState({ key: draftKey, status: "loading", error: "" });
+    const change = async () => {
+      if (draftSessionRef.current) {
+        await draftSessionRef.current.session.close();
+        draftSessionRef.current = null;
+      }
+      if (cancelled || !buyerProfile.id || !isServerConversationId(conversationId)) return;
+      const session = await openDraftSession(invokeTauri,
+        { accountId: buyerProfile.id, conversationId },
+        (status, error) => {
+          if (!cancelled && visibleDraftKeyRef.current === draftKey) {
+            setDraftState({ key: draftKey, status, error: error ? errorMessage(error) : "" });
+          }
+        });
+      draftSessionRef.current = { key: draftKey, session };
+      if (cancelled) return; // The next serialized transition will close it.
+      const draft = session.snapshot();
+      composerDraftRef.current = draft.text;
+      setComposerDraft(draft.text);
+      droppedFilesRef.current = draft.attachments;
+      storeDroppedFiles(draft.attachments);
+      setComposerRestoreRequest((current) => ({ nonce: current.nonce + 1, value: draft.text }));
+      setDraftState({ key: draftKey, status: "ready", error: "" });
+    };
+    draftTransitionRef.current = draftTransitionRef.current.catch(() => {}).then(change).catch((error) => {
+      if (!cancelled) setDraftState({ key: draftKey, status: "unavailable", error: errorMessage(error) });
+    });
+    return () => { cancelled = true; };
+  }, [draftKey, draftRetry]);
 
-  useEffect(() => () => {
-    void discardNativeDropContexts(droppedFilesRef.current.map((file) => file.contextId));
+  useEffect(() => {
+    if (!window.__TAURI_INTERNALS__) return;
+    let disposed = false;
+    let unlisten;
+    void getCurrentWindow().onCloseRequested(async (event) => {
+      event.preventDefault();
+      setDraftState((current) => ({ ...current, status: "loading", error: "" }));
+      try {
+        await draftTransitionRef.current;
+        await draftSessionRef.current?.session.close();
+        await getCurrentWindow().destroy();
+      } catch (error) {
+        setDraftState((current) => ({ ...current, status: "error", error: errorMessage(error) }));
+      }
+    }).then((stop) => { if (disposed) stop(); else unlisten = stop; });
+    return () => { disposed = true; unlisten?.(); };
   }, []);
 
   textRevealSinkRef.current = appendAssistantText;
@@ -648,16 +693,25 @@ function App() {
   }
 
   function setComposerDraftValue(value) {
+    if (visibleDraftKeyRef.current !== draftKey) return;
     const next = String(value ?? "");
     composerDraftRef.current = next;
-    windowContextRef.current = {
-      ...windowContextRef.current,
-      composerDraft: next
-    };
     setComposerDraft(next);
+    if (draftSessionRef.current?.key === draftKey) draftSessionRef.current.session.update({ text: next });
+  }
+
+  function setDroppedFiles(update) {
+    if (visibleDraftKeyRef.current !== draftKey) return;
+    const next = typeof update === "function" ? update(droppedFilesRef.current) : update;
+    droppedFilesRef.current = next;
+    storeDroppedFiles(next);
+    if (draftSessionRef.current?.key === draftKey) {
+      draftSessionRef.current.session.update({ attachments: next.map(draftAttachmentReference) });
+    }
   }
 
   function restoreComposerDraft(value) {
+    if (visibleDraftKeyRef.current !== draftKey) return;
     const next = String(value ?? "");
     setComposerDraftValue(next);
     setComposerRestoreRequest((current) => ({
@@ -665,6 +719,94 @@ function App() {
       value: next
     }));
   }
+
+  function publishDraftSession(holder) {
+    if (!holder || draftSessionRef.current !== holder || visibleDraftKeyRef.current !== holder.key) return;
+    const draft = holder.session.snapshot();
+    composerDraftRef.current = draft.text;
+    setComposerDraft(draft.text);
+    droppedFilesRef.current = draft.attachments;
+    storeDroppedFiles(draft.attachments);
+    setComposerRestoreRequest((current) => ({ nonce: current.nonce + 1, value: draft.text }));
+  }
+
+  async function reconcilePendingSubmission() {
+    const holder = draftSessionRef.current;
+    const pending = holder?.session.snapshot().pending;
+    if (!pending) return "none";
+    const result = await getConversationSubmission(serverUrl, buyerSessionRef.current?.accessToken,
+      conversationBindingFor(), holder.session.scope.conversationId, pending.runId);
+    if (draftSessionRef.current !== holder || visibleDraftKeyRef.current !== holder.key) return "waiting";
+    const currentPending = holder.session.snapshot().pending;
+    // A socket acknowledgement may have cleared this submission while the
+    // receipt lookup was in flight. Never restore or overwrite it afterward.
+    if (!currentPending || currentPending.runId !== pending.runId
+      || currentPending.clientMessageId !== pending.clientMessageId) return "none";
+    if (result.submission) {
+      if (!await holder.session.acceptSubmission(result.submission)) throw new Error("Submission identity does not match the saved message.");
+      publishDraftSession(holder);
+      return "accepted";
+    }
+    if (!result.run) {
+      if (activeRunRef.current?.runId === pending.runId) {
+        activeRunRef.current = null;
+        setRunning(false);
+        setLegacyProfileActiveRun(undefined);
+        patchWindowContext({ activeRun: null });
+      }
+      return "retry";
+    }
+    if (isTerminalRunStatus(result.run.status)) {
+      holder.session.update({ pending: { ...pending, status: "failed" } });
+      await holder.session.flush();
+      return "rejected";
+    }
+    return "waiting";
+  }
+
+  async function checkPendingSubmission() {
+    const holder = draftSessionRef.current;
+    try {
+      const outcome = await reconcilePendingSubmission();
+      if (draftSessionRef.current !== holder || visibleDraftKeyRef.current !== holder?.key) return;
+      setStatus(t(outcome === "retry" ? "submission.retryReady" : outcome === "rejected" ? "submission.rejected"
+        : outcome === "accepted" ? "submission.accepted" : "submission.unknown"));
+    } catch (error) {
+      if (draftSessionRef.current === holder && visibleDraftKeyRef.current === holder?.key) setStatus(errorMessage(error));
+    }
+  }
+
+  async function returnPendingToDraft() {
+    const holder = draftSessionRef.current;
+    try {
+      if (await reconcilePendingSubmission() !== "rejected") return;
+      if (draftSessionRef.current !== holder || visibleDraftKeyRef.current !== holder?.key) return;
+      // A terminal Run with no canonical user record did not accept this submission.
+      await holder.session.restoreRejectedSubmission();
+      publishDraftSession(holder);
+    } catch (error) {
+      if (draftSessionRef.current === holder && visibleDraftKeyRef.current === holder?.key) setStatus(errorMessage(error));
+    }
+  }
+
+  useEffect(() => {
+    if (!signedIn || !connected || !draftEditable) return;
+    const holder = draftSessionRef.current;
+    if (!holder?.session.snapshot().pending) return;
+    let cancelled = false;
+    void reconcilePendingSubmission().then((outcome) => {
+      if (cancelled || draftSessionRef.current !== holder || visibleDraftKeyRef.current !== holder.key) return;
+      if (outcome === "rejected") setStatus(t("submission.rejected"));
+      if (outcome === "retry") setStatus(t("submission.retryReady"));
+    }).catch((error) => {
+      if (!cancelled && draftSessionRef.current === holder && visibleDraftKeyRef.current === holder.key) {
+        setStatus(errorMessage(error));
+      }
+    });
+    return () => { cancelled = true; };
+    // Only editor/connection transitions trigger recovery, not each keystroke
+    // or pending-state save. Unknown messages are never automatically resent.
+  }, [draftKey, draftEditable, connected, signedIn]);
 
   function handleViewportScroll(event) {
     const next = Math.max(0, Number(event.currentTarget?.scrollTop) || 0);
@@ -781,7 +923,6 @@ function App() {
     disconnectRuntime();
     void clearNativeToolContext();
     activeRunRef.current = null;
-    setInterruptedRun(null);
     setBuyerSession(null);
     setAuthState("signed-out");
     setCreatorAgentEntitlements([]);
@@ -1306,6 +1447,29 @@ function App() {
   }, []);
 
   const sendUserMessage = useCallback(async (appendMessage) => {
+    if (!draftEditable || submissionPreparingRef.current) return;
+    submissionPreparingRef.current = true;
+    try {
+    const submittingSession = draftSessionRef.current.session;
+    const submittedTextVersion = submittingSession.textVersion();
+    try { await submittingSession.flush(); }
+    catch (error) {
+      if (visibleDraftKeyRef.current === draftKey) restoreComposerDraft(submittingSession.snapshot().text);
+      setStatus(errorMessage(error));
+      return;
+    }
+    if (visibleDraftKeyRef.current !== draftKey) return;
+    if (!runtimeCapabilitiesRef.current.messageAcceptance) {
+      restoreComposerDraft(submittingSession.snapshot().text);
+      setStatus("Update Runtime before sending: durable message acceptance is required.");
+      return;
+    }
+    const savedPending = submittingSession.snapshot().pending;
+    if (savedPending && await reconcilePendingSubmission() !== "retry") {
+      publishDraftSession(draftSessionRef.current);
+      return;
+    }
+    if (visibleDraftKeyRef.current !== draftKey || draftSessionRef.current?.session !== submittingSession) return;
     const socket = socketRef.current;
     if (!conversationReady || !socket || socket.readyState !== WebSocket.OPEN) {
       setStatus("Service unavailable. Your message will stay here.");
@@ -1328,8 +1492,9 @@ function App() {
       return;
     }
 
-    const content = textFromAppendMessage(appendMessage).trim();
-    if (!content && droppedFiles.length === 0) return;
+    const content = savedPending?.text ?? textFromAppendMessage(appendMessage).trim();
+    const submissionFiles = savedPending?.attachments ?? droppedFiles;
+    if (!content && submissionFiles.length === 0) return;
     // Workspace and permission changes are pending Desktop preferences until a
     // new turn starts. The native window captures this exact snapshot before
     // the Runtime may request a local tool; the renderer never sends a path or
@@ -1338,36 +1503,33 @@ function App() {
     try {
       await synchronizeNativeToolContext(accessSnapshot, activeConversationId);
     } catch (error) {
-      restoreComposerDraft(content);
+      restoreComposerDraft(submittingSession.snapshot().text);
       setStatus(`Couldn't prepare native workspace access: ${errorMessage(error)}`);
       return;
     }
     let attachments = [];
-    let preparedDroppedFiles = droppedFiles;
-    if (droppedFiles.length > 0) {
+    if (submissionFiles.length > 0) {
       try {
-        const prepared = await prepareNativeDropAttachments(droppedFiles);
+        const prepared = await prepareNativeDropAttachments(submissionFiles);
         attachments = prepared.attachments;
-        preparedDroppedFiles = prepared.files;
       } catch (error) {
-        restoreComposerDraft(content);
+        restoreComposerDraft(submittingSession.snapshot().text);
         setStatus(`Couldn't attach the dropped files: ${errorMessage(error)}`);
         return;
       }
     }
-    if (attachments.some((attachment) => attachment?.kind === "asset")
-      && !runtimeCapabilitiesRef.current.richAssets) {
-      // Keep the prepared projection in this window so the user can retry
-      // after the Runtime is updated. Never send a rich body to a legacy
-      // Runtime that only understands inline text attachments.
-      droppedFilesRef.current = preparedDroppedFiles;
-      setDroppedFiles(preparedDroppedFiles);
-      restoreComposerDraft(content);
-      setStatus("This Runtime does not support image or document attachments yet. Update Runtime before sending.");
+    if (attachments.length > 0 && !runtimeCapabilitiesRef.current.localFileReferences) {
+      restoreComposerDraft(submittingSession.snapshot().text);
+      setStatus("Update Runtime before sending: local attachment references are required. Your draft is preserved.");
       return;
     }
-    const runId = `run_${stableRandomId()}`;
-    const clientMessageId = `message_${stableRandomId()}`;
+    if (visibleDraftKeyRef.current !== draftKey) return;
+    const pending = savedPending ?? await submittingSession.stageSubmission({
+      runId: `run_${stableRandomId()}`, clientMessageId: `message_${stableRandomId()}`,
+      text: content, attachments: submissionFiles, textRevision: submittedTextVersion
+    });
+    const runId = pending.runId;
+    const clientMessageId = pending.clientMessageId;
     const outboundMessage = {
       type: "client.message",
       run_id: runId,
@@ -1379,6 +1541,8 @@ function App() {
         ...(attachments.length > 0 ? { attachments } : {})
       }
     };
+    await submittingSession.markSubmissionUnknown();
+    if (visibleDraftKeyRef.current !== draftKey) return;
     workspaceRef.current = accessSnapshot.displayPath;
     workspaceGrantRef.current = workspaceGrant;
     permissionRef.current = accessSnapshot.permissionMode;
@@ -1404,31 +1568,24 @@ function App() {
       accessSnapshot,
       timing: { questionSentAt: startedAt }
     });
-    patchWindowContext({ activeRun: activeRunRef.current, dismissedRunId: null });
+    patchWindowContext({ activeRun: activeRunRef.current });
     setRunning(true);
     setStatus("Running");
     if (!send(outboundMessage)) {
-      // `read_native_drop_contexts` is intentionally one-shot. Keep its
-      // immutable projection in this window's draft state so a transient
-      // socket failure remains retryable without reopening the external file.
+      // The durable native copy remains readable after a failed submission.
       activeRunRef.current = null;
       setLegacyProfileActiveRun(undefined);
       patchWindowContext({ activeRun: null });
       setRunning(false);
-      droppedFilesRef.current = preparedDroppedFiles;
-      setDroppedFiles(preparedDroppedFiles);
-      restoreComposerDraft(content);
+      restoreComposerDraft(submittingSession.snapshot().text);
       setStatus("Service unavailable. Your message will stay here.");
       return;
     }
-    // Clear the Composer only after native authority and socket send both
-    // succeed. A failed preparation/send leaves the user's draft and native
-    // attachment projection recoverable for retry.
-    setComposerDraftValue("");
-    droppedFilesRef.current = [];
-    setDroppedFiles([]);
+    // The outbox and composer remain intact until message.accepted (or the
+    // canonical acceptance lookup) confirms server persistence.
+    publishDraftSession(draftSessionRef.current);
     setMessages((current) => [
-      ...current,
+      ...current.filter((message) => message.id !== `${runId}_user` && message.id !== assistantId),
       // Runtime receives the user text plus structured attachments. Keep the
       // optimistic message text clean and retain only attachment metadata in
       // the local UI projection; the untrusted body is never flattened into
@@ -1437,7 +1594,13 @@ function App() {
       makeAssistantPlaceholder(assistantId, runId, startedAt)
     ]);
 
-  }, [buyerProfile.id, conversationId, conversationLibraryStatus, conversationReady, droppedFiles, permissionMode, send, workspace, workspaceGrant]);
+    } catch (error) {
+      publishDraftSession(draftSessionRef.current);
+      setStatus(errorMessage(error));
+    } finally {
+      submissionPreparingRef.current = false;
+    }
+  }, [buyerProfile.id, conversationId, conversationLibraryStatus, conversationReady, draftEditable, droppedFiles, permissionMode, send, workspace, workspaceGrant]);
 
   async function sendTaskStartIfNeeded(sourceSocket = socketRef.current, sourceToken = connectionTokenRef.current) {
     const targetConversationId = pendingTaskStartRef.current;
@@ -1482,7 +1645,7 @@ function App() {
       accessSnapshot,
       timing: { questionSentAt: startedAt }
     });
-    patchWindowContext({ activeRun: activeRunRef.current, dismissedRunId: null });
+    patchWindowContext({ activeRun: activeRunRef.current });
     setRunning(true);
     setStatus("Starting your task…");
     if (!sendRuntimeMessage(sourceSocket, sourceToken, outboundMessage)) {
@@ -1503,8 +1666,8 @@ function App() {
     isRunning: running,
     isLoading: status === "Loading history...",
     isSendDisabled: !conversationReady
+      || !draftEditable
       || running
-      || Boolean(interruptedRun)
       || conversationLibraryStatus !== "ready"
       || !isServerConversationId(conversationId),
     onNew: sendUserMessage,
@@ -1565,10 +1728,6 @@ function App() {
         workspaceGrant: normalizeWorkspaceGrant(accountBoundContext.workspaceGrant),
         permissionMode: accountBoundContext.permissionMode ? normalizePermissionPolicy(accountBoundContext.permissionMode) : "",
         activeRun: parseStoredJson(accountBoundContext.activeRun),
-        dismissedRunId: typeof accountBoundContext.dismissedRunId === "string"
-          ? accountBoundContext.dismissedRunId.trim()
-          : "",
-        composerDraft: typeof accountBoundContext.composerDraft === "string" ? accountBoundContext.composerDraft : "",
         scrollTop: Number.isFinite(Number(accountBoundContext.scrollTop))
           ? Math.max(0, Number(accountBoundContext.scrollTop))
           : 0,
@@ -1583,8 +1742,6 @@ function App() {
         && requestedConversationIdRef.current !== windowContextRef.current.conversationId
         ? 0
         : windowContextRef.current.conversationCursor;
-      composerDraftRef.current = windowContextRef.current.composerDraft;
-      setComposerDraft(windowContextRef.current.composerDraft);
       viewportScrollTopRef.current = windowContextRef.current.scrollTop;
       setWindowContextReady(true);
     }).catch(() => {
@@ -1642,12 +1799,8 @@ function App() {
     const windowConversationId = restorableConversationId(storedWindowConversationId, "");
     const savedRun = parseStoredJson(windowContext.activeRun)
       || (!openedFromConversationWindow ? parseStoredJson(getProfileSetting("active_run", null)) : null);
-    const dismissedRunId = typeof windowContext.dismissedRunId === "string"
-      ? windowContext.dismissedRunId.trim()
-      : "";
     const restorableRun = savedRun?.runId
       && !isTerminalRunStatus(savedRun.status)
-      && savedRun.runId !== dismissedRunId
       ? savedRun
       : null;
     const savedPermission = windowContext.permissionMode || getProfileSetting("permission_mode");
@@ -1661,7 +1814,6 @@ function App() {
     setWorkspaceGrant(null);
     setWorkspaceDraft(savedWorkspaceGrant?.display_path || "");
     setWorkspaceDraftGrant(savedWorkspaceGrant);
-    setComposerDraftValue(typeof windowContext.composerDraft === "string" ? windowContext.composerDraft : "");
     viewportScrollTopRef.current = Number.isFinite(Number(windowContext.scrollTop))
       ? Math.max(0, Number(windowContext.scrollTop))
       : 0;
@@ -1671,11 +1823,9 @@ function App() {
     setPermissionMode(nextPermission);
     if (restorableRun) {
       activeRunRef.current = restorableRun;
-      setInterruptedRun(restorableRun);
-      setStatus("Task paused — restoring connection");
+      setStatus("Loading history...");
     } else {
       activeRunRef.current = null;
-      setInterruptedRun(null);
     }
     async function restoreWorkspace() {
       let legacyClearFailed = false;
@@ -1989,49 +2139,14 @@ function App() {
     void connectRuntime({ ...retryConnection, preserveMessages: true });
   }
 
-  function projectDurableSnapshotRun(snapshot, targetWorkspaceGrant) {
-    // Keep the pre-snapshot local identity stable while reconciling. If this
-    // window's saved Run is already terminal, do not clear it and then
-    // accidentally adopt an unrelated historical interrupted Run from the
-    // same Conversation.
-    const activeRunBeforeSnapshot = activeRunRef.current;
-    const activeRunId = String(activeRunBeforeSnapshot?.runId || "").trim();
-    const durableRun = activeRunId && Array.isArray(snapshot?.runs)
-      ? snapshot.runs.find((run) => String(run?.id ?? run?.run_id ?? "").trim() === activeRunId)
-      : null;
-    if (durableRun && isTerminalRunStatus(durableRun.status)) {
-      // A renderer can close after the server has already completed or
-      // cancelled a Run. Clear the optimistic recovery projection before it
-      // permanently blocks the next Composer turn.
-      activeRunRef.current = null;
-      setInterruptedRun(null);
-      setRunning(false);
-      setLegacyProfileActiveRun(undefined);
-      patchWindowContext({ activeRun: null, dismissedRunId: null });
-    }
-    const interruptedSnapshotRun = interruptedRunFromSnapshot(
-      snapshot,
-      durableRun && isTerminalRunStatus(durableRun.status)
-        ? activeRunBeforeSnapshot
-        : activeRunRef.current,
-      windowContextRef.current.dismissedRunId
-    );
-    if (!interruptedSnapshotRun) return;
-    const recoveredRun = activeRunRef.current?.runId === interruptedSnapshotRun.runId
-      ? interruptedSnapshotRun
-      : {
-          ...interruptedSnapshotRun,
-          accessSnapshot: createTurnAccessSnapshot(
-            workspaceGrantRef.current?.grant_id || targetWorkspaceGrant?.grant_id,
-            workspaceRef.current || targetWorkspaceGrant?.display_path || "",
-            permissionRef.current
-          )
-        };
-    activeRunRef.current = recoveredRun;
-    setInterruptedRun(recoveredRun);
+  function projectDurableSnapshotRun(snapshot) {
+    const active = activeRunRef.current;
+    if (!active || reconcileActiveRunFromSnapshot(snapshot, active)) return;
+    textRevealRef.current?.flush(active.runId);
+    activeRunRef.current = null;
     setRunning(false);
-    setStatus("Task interrupted — your work is safe");
-    patchWindowContext({ activeRun: recoveredRun, dismissedRunId: null });
+    setLegacyProfileActiveRun(undefined);
+    patchWindowContext({ activeRun: null });
   }
 
   async function reconcileLiveSnapshot(socket, requestToken) {
@@ -2071,7 +2186,7 @@ function App() {
       const briefSnapshot = reconciled.brief_snapshot ?? snapshot.conversation?.brief_snapshot ?? null;
       setTaskBrief(briefSnapshot);
       taskBriefRef.current = briefSnapshot;
-      projectDurableSnapshotRun(reconciled, config.workspaceGrant);
+      projectDurableSnapshotRun(reconciled);
       if (reconciled.cursor > conversationCursorRef.current) {
         conversationCursorRef.current = reconciled.cursor;
         patchWindowContext({ conversationCursor: reconciled.cursor });
@@ -2214,7 +2329,7 @@ function App() {
       const briefSnapshot = reconciledSnapshot.brief_snapshot ?? snapshot.conversation?.brief_snapshot ?? null;
       setTaskBrief(briefSnapshot);
       taskBriefRef.current = briefSnapshot;
-      projectDurableSnapshotRun(reconciledSnapshot, targetWorkspaceGrant);
+      projectDurableSnapshotRun(reconciledSnapshot);
       setMessages((current) => mergeConversationPage(sameConversation ? current : [],
         reconciledSnapshot.messages.map(historyMessageToThreadMessage), { baseline }));
       if (!sameConversation) {
@@ -2267,7 +2382,7 @@ function App() {
         protocol_version: PROTOCOL_VERSION,
         auth_token: buyerSession.accessToken,
         entitlement_id: targetEntitlementId,
-        client_version: "0.1.28",
+        client_version: "0.1.29",
         local_tools: [...PLATFORM_LOCAL_TOOLS],
       }));
     });
@@ -2310,16 +2425,13 @@ function App() {
       connectedRef.current = false;
       setConnected(false);
       setRunning(false);
-      if (activeRunRef.current) {
-        setInterruptedRun(activeRunRef.current);
-      }
       if (!intentionalDisconnectRef.current) {
         setChatLoading(true);
         setStatus("Connection lost — restoring your session…");
         scheduleRuntimeReconnect();
       } else {
         setChatLoading(false);
-        setStatus(activeRunRef.current ? "Task paused — your work has been kept" : "Offline");
+        setStatus("Offline");
       }
     });
   }
@@ -2346,14 +2458,25 @@ function App() {
     setRuntimeRetryExhausted(false);
     setChatLoading(false);
     setRunning(false);
-    setStatus(activeRunRef.current ? "Task paused — your work has been kept" : "Offline");
+    setStatus("Offline");
   }
 
   async function handleRuntimeMessage(message, sourceSocket = socketRef.current, sourceToken = connectionTokenRef.current) {
     if (!isCurrentRuntimeTransport(sourceSocket, sourceToken)) return;
+    if (message.type === "message.accepted") {
+      const holder = draftSessionRef.current;
+      if (holder?.key === visibleDraftKeyRef.current) {
+        try {
+          if (await holder.session.acceptSubmission(message)) publishDraftSession(holder);
+        } catch (error) { setStatus(errorMessage(error)); }
+      }
+      return;
+    }
     if (message.type === "session.ready") {
       runtimeCapabilitiesRef.current = {
-        richAssets: message.runtime_capabilities?.rich_assets === true
+        richAssets: message.runtime_capabilities?.rich_assets === true,
+        messageAcceptance: message.runtime_capabilities?.message_acceptance === true,
+        localFileReferences: message.runtime_capabilities?.local_file_references === true
       };
       const selectedEntitlement = creatorAgentEntitlements.find(
         (entitlement) => entitlement.entitlement_id === selectedEntitlementId
@@ -2498,8 +2621,7 @@ function App() {
         );
         activeRunRef.current = null;
         setLegacyProfileActiveRun(undefined);
-        patchWindowContext({ activeRun: null, dismissedRunId: null });
-        setInterruptedRun(null);
+        patchWindowContext({ activeRun: null });
         setRunning(false);
         setStatus(statusAfterLocalToolStop("Completed", localToolsStopped));
       };
@@ -2543,8 +2665,7 @@ function App() {
       }
       activeRunRef.current = null;
       setLegacyProfileActiveRun(undefined);
-      patchWindowContext({ activeRun: null, dismissedRunId: null });
-      setInterruptedRun(null);
+      patchWindowContext({ activeRun: null });
       setRunning(false);
       setStatus(statusAfterLocalToolStop("Failed", localToolsStopped));
     }
@@ -2778,15 +2899,20 @@ function App() {
   }
 
   function mergeDroppedFiles(incoming) {
+    if (draftSessionRef.current?.key !== visibleDraftKeyRef.current) {
+      setStatus(t("draft.loading"));
+      return [];
+    }
     const files = Array.isArray(incoming) ? incoming.filter(Boolean) : [];
     if (files.length === 0) return [];
     const current = droppedFilesRef.current;
     const byId = new Map(current.map((file) => [file.contextId, file]));
     for (const file of files) byId.set(file.contextId, file);
-    const next = [...byId.values()].slice(-8);
-    const keep = new Set(next.map((file) => file.contextId));
-    const evicted = [...byId.keys()].filter((contextId) => !keep.has(contextId));
-    if (evicted.length > 0) void discardNativeDropContexts(evicted);
+    if (byId.size > 8) {
+      setStatus(t("draft.tooManyFiles"));
+      return [];
+    }
+    const next = [...byId.values()];
     droppedFilesRef.current = next;
     setDroppedFiles(next);
     return next;
@@ -2805,14 +2931,18 @@ function App() {
   }
 
   async function chooseContextFiles() {
+    if (!draftEditable) return;
+    const holder = draftSessionRef.current;
     try {
-      const result = await invokeTauri("pick_native_drop_files");
-      const files = Array.isArray(result?.files)
-        ? result.files.map(normalizeNativeDropFile).filter(Boolean)
-        : [];
-      const rejectedFiles = Array.isArray(result?.rejectedFiles) ? result.rejectedFiles : [];
-      if (files.length > 0) mergeDroppedFiles(files);
-      const message = nativeDropStatus(files, rejectedFiles);
+      let result;
+      const draft = await holder.session.prepareAttachments(async () => {
+        result = await invokeTauri("pick_native_drop_files");
+        return Array.isArray(result?.files) ? result.files.map(normalizeNativeDropFile).filter(Boolean) : [];
+      });
+      if (visibleDraftKeyRef.current !== holder.key) return;
+      droppedFilesRef.current = draft.attachments;
+      storeDroppedFiles(draft.attachments);
+      const message = nativeDropStatus(result?.files, result?.rejectedFiles);
       if (message) setStatus(message);
     } catch (error) {
       setStatus(`Couldn't attach files: ${errorMessage(error)}`);
@@ -2825,42 +2955,30 @@ function App() {
     const file = item?.getAsFile?.();
     if (!file) return;
     event.preventDefault();
+    if (!draftEditable) return;
+    const holder = draftSessionRef.current;
     try {
-      if (file.size > MAX_NATIVE_DROP_SOURCE_BYTES) throw new Error("Pasted files are limited to 100 MiB.");
-      const bytes = new Uint8Array(await file.arrayBuffer());
       const mediaType = file.type || "application/octet-stream";
       const displayName = file.name?.trim() || (mediaType.startsWith("image/") ? `pasted-image.${mediaType.split("/")[1] || "png"}` : "pasted-file");
-      const contextId = `drop_clipboard_${stableRandomId()}`;
-      const dataBase64 = bytesToBase64(bytes);
-      const sha256 = await sha256Hex(bytes);
-      mergeDroppedFiles([{
-        contextId,
-        assetId: contextId,
-        displayName,
-        size: bytes.length,
-        mediaType,
-        isImage: mediaType.startsWith("image/"),
-        attachment: {
-          kind: "asset",
-          attachment_id: contextId,
-          asset_id: contextId,
-          display_name: displayName,
-          media_type: mediaType,
-          source_bytes: bytes.length,
-          sha256,
-          data_base64: dataBase64
-        }
-      }]);
+      const draft = await holder.session.prepareAttachments(async () => {
+        if (file.size > MAX_NATIVE_DROP_SOURCE_BYTES) throw new Error("Pasted files are limited to 100 MiB.");
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const saved = normalizeNativeDropFile(await invokeTauri("import_clipboard_attachment", {
+          displayName, mediaType, dataBase64: bytesToBase64(bytes)
+        }));
+        if (!saved) throw new Error("Native attachment import returned an invalid reference.");
+        return [saved];
+      });
+      if (visibleDraftKeyRef.current !== holder.key) return;
+      droppedFilesRef.current = draft.attachments;
+      storeDroppedFiles(draft.attachments);
       setStatus(mediaType.startsWith("image/") ? "Pasted image ready" : "Pasted file ready");
     } catch (error) {
       setStatus(`Couldn't attach pasted file: ${errorMessage(error)}`);
     }
   }
 
-  // Native drag/drop is intentionally a projection boundary: Rust turns
-  // dropped directories into grants first, while files arrive as bounded
-  // display metadata plus opaque one-shot context handles. No renderer path
-  // is accepted as tool authority.
+  // Native drops carry managed-copy references, never new tool grants.
   useEffect(() => {
     if (!window.__TAURI_INTERNALS__) return undefined;
     let unlisten;
@@ -3235,16 +3353,6 @@ function App() {
     return () => document.removeEventListener("contextmenu", suppressProductContextMenu, true);
   }, []);
 
-  function clearInterruptedRun() {
-    const dismissedRunId = String(activeRunRef.current?.runId || interruptedRun?.runId || "").trim();
-    textRevealRef.current?.discard();
-    activeRunRef.current = null;
-    setInterruptedRun(null);
-    setRunning(false);
-    setLegacyProfileActiveRun(undefined);
-    patchWindowContext({ activeRun: null, dismissedRunId: dismissedRunId || null });
-    setStatus("Paused task closed by you");
-  }
 
   async function signIn(credentials) {
     setSignInStatus("loading");
@@ -3320,9 +3428,7 @@ function App() {
         ...nextBinding,
         conversationId: "desktop-chat",
         conversationCursor: 0,
-        composerDraft: "",
         activeRun: null,
-        dismissedRunId: ""
       });
     }
     setSelectedEntitlementId(entitlement.entitlement_id);
@@ -3803,15 +3909,33 @@ function App() {
                   <ThreadPrimitive.Messages components={{ Message: HatchMessage }} />
                 </ThreadPrimitive.Viewport>
                 <ThreadPrimitive.ViewportFooter className="composer-footer">
+                  {pendingSubmission ? (
+                    <div role="status">
+                      <small>{t(pendingSubmission.status === "failed" ? "submission.rejected" : "submission.unknown")}</small>
+                      <Button type="button" onClick={() => void checkPendingSubmission()}>{t("submission.check")}</Button>
+                      {pendingSubmission.status === "failed" ? <Button type="button" onClick={() => void returnPendingToDraft()}>{t("submission.returnToDraft")}</Button> : null}
+                    </div>
+                  ) : null}
+                  {draftState.key !== draftKey || draftState.status === "loading" ? (
+                    <small role="status">{t("draft.loading")}</small>
+                  ) : draftState.status === "saving" ? (
+                    <small role="status">{t("draft.saving")}</small>
+                  ) : draftState.error ? (
+                    <div role="alert">
+                      <small>{t(draftState.error.includes("draft_in_use") ? "draft.inUse" : "draft.saveFailed")}</small>
+                      <Button type="button" onClick={() => setDraftRetry((value) => value + 1)}>{t("common.retry")}</Button>
+                    </div>
+                  ) : null}
                   <ComposerPrimitive.Root className="composer">
                     <DesktopComposerInput
-                      key={conversationId}
+                      key={draftKey}
                       className="composer-input"
-                      draftKey={conversationId}
+                      draftKey={draftKey}
                       initialDraft={composerDraft}
                       restoreDraftNonce={composerRestoreRequest.nonce}
                       restoreDraftValue={composerRestoreRequest.value}
-                      ready={windowContextReady && windowStateRestored}
+                      ready={windowContextReady && windowStateRestored && draftEditable}
+                      disabled={!draftEditable}
                       onDraftChange={setComposerDraftValue}
                       onBlur={resetImeComposition}
                       onCompositionEnd={endImeComposition}
@@ -3828,7 +3952,8 @@ function App() {
                     />
                     <div className="composer-actions">
                       <ComposerControls
-                        droppedFiles={droppedFiles}
+                        attachmentsDisabled={!draftEditable}
+                        droppedFiles={draftEditable ? droppedFiles : []}
                         workspace={workspace}
                         workspaceGranted={workspaceGranted}
                         permissionMode={permissionMode}
@@ -3836,7 +3961,7 @@ function App() {
                         onChooseFiles={() => void chooseContextFiles()}
                         onPermissionChange={updatePermissionMode}
                         onRemoveDroppedFile={(contextId) => {
-                          void discardNativeDropContexts([contextId]);
+                          if (!draftEditable) return;
                           droppedFilesRef.current = droppedFilesRef.current.filter((item) => item.contextId !== contextId);
                           setDroppedFiles((current) => current.filter((item) => item.contextId !== contextId));
                         }}
@@ -3855,6 +3980,7 @@ function App() {
                         </IconButton>
                       ) : (
                         <ComposerPrimitive.Send
+                          disabled={!draftEditable}
                           aria-label={t("common.send")}
                           className="send-button"
                           title={t("common.send")}
@@ -3873,12 +3999,7 @@ function App() {
             </NativeContextMenuContext.Provider>
           </ApprovalContext.Provider>
         )}
-        {interruptedRun ? (
-          <div className="recovery-banner" role="alert">
-            <div><strong>{t("conversation.taskSafeTitle")}</strong><span>{t("conversation.taskSafeBody")}</span></div>
-            <Button variant="secondary" size="small" type="button" onClick={clearInterruptedRun}>{t("conversation.closeTask")}</Button>
-          </div>
-        ) : null}
+
       </section>
     </DesktopWindowShell>
   );
@@ -4187,7 +4308,7 @@ function DesktopInspector({
   );
 }
 
-function ComposerControls({ droppedFiles = [], workspace, workspaceGranted, permissionMode, onChooseWorkspace, onChooseFiles, onPermissionChange, onRemoveDroppedFile }) {
+function ComposerControls({ droppedFiles = [], attachmentsDisabled = false, workspace, workspaceGranted, permissionMode, onChooseWorkspace, onChooseFiles, onPermissionChange, onRemoveDroppedFile }) {
   const t = useI18n();
   const permissionLabel = (mode) => mode.value === "allow-changes"
     ? t("permission.allowChanges")
@@ -4195,6 +4316,7 @@ function ComposerControls({ droppedFiles = [], workspace, workspaceGranted, perm
   const attachmentControl = (
     <Button
       aria-label={t("composer.attachContextFiles")}
+      disabled={attachmentsDisabled}
       className="composer-control attachment-composer-control"
       variant="ghost"
       size="small"
@@ -4269,8 +4391,13 @@ function DesktopComposerInput({
   const appliedKeyRef = useRef(null);
   const appliedRestoreNonceRef = useRef(0);
 
-  useEffect(() => {
-    if (!ready || appliedKeyRef.current === draftKey) return;
+  useLayoutEffect(() => {
+    if (!ready) {
+      appliedKeyRef.current = null;
+      setText("");
+      return;
+    }
+    if (appliedKeyRef.current === draftKey) return;
     appliedKeyRef.current = draftKey;
     setText(String(initialDraft || ""));
   }, [draftKey, initialDraft, ready, setText]);
@@ -4313,12 +4440,6 @@ function bytesToBase64(bytes) {
     binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
   }
   return btoa(binary);
-}
-
-async function sha256Hex(bytes) {
-  if (!globalThis.crypto?.subtle) throw new Error("This desktop environment cannot hash pasted files.");
-  const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
-  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function historyMessageToThreadMessage(message) {
@@ -4418,7 +4539,10 @@ function attachmentPresentationMetadata(attachments) {
       display_name: displayName,
       media_type: mediaType,
       source_bytes: sourceBytes,
-      ...(attachment.kind === "asset" ? {
+      ...(attachment.kind === "local_file" ? {
+        kind: "local_file", host_id: attachment.host_id, local_path: attachment.local_path,
+        sha256: attachment.sha256
+      } : attachment.kind === "asset" ? {
         kind: "asset",
         asset_id: typeof attachment.asset_id === "string" ? attachment.asset_id : attachmentId,
         sha256: typeof attachment.sha256 === "string" ? attachment.sha256 : ""
@@ -4435,7 +4559,7 @@ function assistantUiAttachments(attachments) {
     const name = typeof attachment.display_name === "string" ? attachment.display_name : "Attachment";
     const mediaType = typeof attachment.media_type === "string" ? attachment.media_type : "application/octet-stream";
     if (!attachmentId) return [];
-    const image = attachment.kind === "asset" && mediaType.startsWith("image/") && typeof attachment.data_base64 === "string"
+    const image = (attachment.kind === "asset" || attachment.kind === "local_file") && mediaType.startsWith("image/") && typeof attachment.data_base64 === "string"
       ? [{ type: "image", image: `data:${mediaType};base64,${attachment.data_base64}` }]
       : [];
     return [{
@@ -4447,6 +4571,9 @@ function assistantUiAttachments(attachments) {
       content: image,
       hatch: {
         assetId: attachment.kind === "asset" ? attachment.asset_id : undefined,
+        localReference: attachment.kind === "local_file" ? {
+          attachmentId, hostId: attachment.host_id, localPath: attachment.local_path, sha256: attachment.sha256
+        } : undefined,
         sourceBytes: Number.isSafeInteger(Number(attachment.source_bytes)) ? Number(attachment.source_bytes) : 0,
         mediaType
       }
@@ -4942,28 +5069,35 @@ function InlineChatAttachment({ attachment }) {
   const [preview, setPreview] = useState("");
   const [error, setError] = useState("");
   const [downloading, setDownloading] = useState(false);
+  const [opening, setOpening] = useState(false);
+  const [saving, setSaving] = useState(false);
   const assetId = attachment?.hatch?.assetId;
+  const localReference = attachment?.hatch?.localReference;
+  const localKey = localReference ? JSON.stringify(localReference) : "";
   const imagePart = Array.isArray(attachment?.content)
     ? attachment.content.find((part) => part?.type === "image" && typeof part.image === "string")
     : undefined;
   useEffect(() => {
-    if (!elementRef.current || attachment?.type !== "image" || !assetId || imagePart) return;
+    if (!elementRef.current || attachment?.type !== "image" || (!assetId && !localReference) || imagePart) return;
     if (typeof IntersectionObserver === "undefined") { setVisible(true); return; }
     const observer = new IntersectionObserver((entries) => {
       if (entries.some((entry) => entry.isIntersecting)) { setVisible(true); observer.disconnect(); }
     }, { root: elementRef.current.closest(".thread-viewport"), rootMargin: "160px" });
     observer.observe(elementRef.current);
     return () => observer.disconnect();
-  }, [assetId, attachment?.type, imagePart]);
+  }, [assetId, localKey, attachment?.type, imagePart]);
   useEffect(() => {
-    if (!visible || !scope || !assetId || imagePart) return;
+    if (!visible || (!localReference && (!scope || !assetId)) || imagePart) return;
     let cancelled = false;
     setError("");
-    getConversationAsset(scope.serverUrl, scope.accessToken, scope, scope.conversationId, assetId)
-      .then((data) => { if (!cancelled) setPreview(`data:${attachment.contentType};base64,${data}`); })
+    setPreview("");
+    const load = localReference ? readLocalAttachmentImage(invokeTauri, localReference)
+      : getConversationAsset(scope.serverUrl, scope.accessToken, scope, scope.conversationId, assetId)
+        .then((data) => `data:${attachment.contentType};base64,${data}`);
+    load.then((data) => { if (!cancelled) setPreview(data); })
       .catch((failure) => { if (!cancelled) setError(failure.message); });
     return () => { cancelled = true; };
-  }, [visible, scope?.serverUrl, scope?.accessToken, scope?.entitlementId, scope?.conversationId, assetId, imagePart, attempt]);
+  }, [visible, scope?.serverUrl, scope?.accessToken, scope?.entitlementId, scope?.conversationId, assetId, localKey, imagePart, attempt]);
   async function download() {
     if (!scope || !assetId || downloading) return;
     setDownloading(true);
@@ -4978,18 +5112,33 @@ function InlineChatAttachment({ attachment }) {
     finally { setDownloading(false); }
   }
   const controls = <>
+    {localReference ? <button type="button" disabled={saving} onClick={() => {
+      setSaving(true); setError("");
+      void invokeTauri("save_local_attachment", { contextId: localReference.attachmentId,
+        hostId: localReference.hostId, sha256: localReference.sha256 })
+        .catch((failure) => setError(errorMessage(failure)))
+        .finally(() => setSaving(false));
+    }}>{saving ? "Saving…" : "Save as…"}</button> : null}
+    {localReference ? <button type="button" disabled={opening} onClick={() => {
+      setOpening(true); setError("");
+      void invokeTauri("open_local_attachment", { contextId: localReference.attachmentId,
+        hostId: localReference.hostId, sha256: localReference.sha256 })
+        .catch((failure) => setError(errorMessage(failure)))
+        .finally(() => setOpening(false));
+    }}>{opening ? "Opening…" : "Open"}</button> : null}
     {assetId ? <button type="button" disabled={downloading} onClick={() => void download()}>{downloading ? "Downloading…" : "Download"}</button> : null}
     {error ? <span role="alert">{error}<button type="button" onClick={() => {
-      if (attachment?.type !== "image") { void download(); return; }
+      if (attachment?.type !== "image") { if (localReference) setError(""); else void download(); return; }
       setError(""); setPreview(""); setAttempt((value) => value + 1);
-    }}>{attachment?.type === "image" ? "Retry preview" : "Retry download"}</button></span> : null}
+    }}>{attachment?.type === "image" ? "Retry preview" : localReference ? "Dismiss" : "Retry download"}</button></span> : null}
   </>;
   const image = imagePart?.image || preview;
   if (attachment?.type === "image") {
     return (
-      <div ref={elementRef} className="message-attachment message-attachment-image">
+      <div ref={elementRef} className="message-attachment message-attachment-image" aria-busy={visible && !image && !error}>
         {image ? <img key={attempt} src={image} alt={attachment.name || "Attached image"} loading="lazy" onError={() => setError("Image preview unavailable.")} /> : <span style={{ minHeight: 120, display: "block" }}>{attachment.name}</span>}
         <span className="message-attachment-caption">{attachment.name}</span>
+        {visible && !image && !error ? <span role="status">Loading preview…</span> : null}
         {controls}
       </div>
     );
@@ -5556,7 +5705,7 @@ async function prepareNativeDropAttachments(files) {
       throw new Error("The dropped-file list is invalid. Remove it and drop the file again.");
     }
     seen.add(contextId);
-    if (file?.attachment?.attachment_id === contextId) {
+    if (file?.attachment?.kind === "local_file" && file.attachment.attachment_id === contextId) {
       preparedById.set(contextId, file.attachment);
     } else {
       missingIds.push(contextId);
@@ -5583,22 +5732,10 @@ async function prepareNativeDropAttachments(files) {
 
   return {
     attachments: pending.map((file) => preparedById.get(file.contextId)),
-    files: pending.map((file) => file.attachment?.attachment_id === file.contextId
+    files: pending.map((file) => file.attachment?.kind === "local_file" && file.attachment.attachment_id === file.contextId
       ? file
       : { ...file, attachment: preparedById.get(file.contextId) })
   };
-}
-
-async function discardNativeDropContexts(contextIds) {
-  const ids = [...new Set((Array.isArray(contextIds) ? contextIds : [])
-    .filter((contextId) => typeof contextId === "string" && contextId.startsWith("drop_")))];
-  if (ids.length === 0 || !globalThis.window?.__TAURI_INTERNALS__) return;
-  try {
-    await invokeTauri("discard_native_drop_contexts", { contextIds: ids });
-  } catch {
-    // The handle may already have been consumed or expired. It never carries
-    // a path, so cleanup failure cannot increase renderer authority.
-  }
 }
 
 class RendererErrorBoundary extends React.Component {

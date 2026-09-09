@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-release-conversation-draft"
+description = "Enables the release_conversation_draft command without any pre-configured scope."
+commands.allow = ["release_conversation_draft"]
+
+[[permission]]
+identifier = "deny-release-conversation-draft"
+description = "Denies the release_conversation_draft command without any pre-configured scope."
+commands.deny = ["release_conversation_draft"]

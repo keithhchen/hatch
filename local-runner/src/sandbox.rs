@@ -7,6 +7,7 @@ const AUDIT_FILE_NAME: &str = "audit.jsonl";
 #[derive(Debug, Clone)]
 pub struct Sandbox {
     root: PathBuf,
+    read_roots: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -31,7 +32,23 @@ impl Sandbox {
 
         Ok(Self {
             root: canonical_root,
+            read_roots: Vec::new(),
         })
+    }
+
+    pub fn with_read_roots(mut self, roots: &[PathBuf]) -> Result<Self> {
+        for root in roots {
+            let canonical = root
+                .canonicalize()
+                .map_err(|e| LocalRunnerError::io(root, e))?;
+            if !canonical.is_dir() {
+                return Err(LocalRunnerError::ExpectedDirectory(
+                    canonical.display().to_string(),
+                ));
+            }
+            self.read_roots.push(canonical);
+        }
+        Ok(self)
     }
 
     pub fn root(&self) -> &Path {
@@ -59,7 +76,26 @@ impl Sandbox {
     }
 
     pub fn resolve_existing(&self, input: impl AsRef<Path>) -> Result<ResolvedPath> {
-        let relative = self.normalize_tool_path(input.as_ref(), true)?;
+        let input = input.as_ref();
+        if input.is_absolute() {
+            for root in &self.read_roots {
+                if input.starts_with(root) {
+                    let canonical = input
+                        .canonicalize()
+                        .map_err(|e| LocalRunnerError::io(input, e))?;
+                    if !canonical.starts_with(root) {
+                        return Err(LocalRunnerError::PathEscapesSandbox(
+                            input.display().to_string(),
+                        ));
+                    }
+                    return Ok(ResolvedPath {
+                        absolute: canonical.clone(),
+                        relative: canonical,
+                    });
+                }
+            }
+        }
+        let relative = self.normalize_tool_path(input, true)?;
         let absolute = self.root.join(&relative);
         let canonical = absolute
             .canonicalize()
@@ -67,7 +103,7 @@ impl Sandbox {
 
         if !canonical.starts_with(&self.root) {
             return Err(LocalRunnerError::PathEscapesSandbox(
-                input.as_ref().display().to_string(),
+                input.display().to_string(),
             ));
         }
         if self.is_reserved_path(&canonical) {
@@ -94,11 +130,13 @@ impl Sandbox {
                     input.as_ref().display().to_string(),
                 ));
             }
+            self.ensure_writable(&canonical)?;
             if self.is_reserved_path(&canonical) {
                 return Err(LocalRunnerError::ReservedPath(AUDIT_FILE_NAME.into()));
             }
         } else {
             self.ensure_nearest_existing_ancestor_is_contained(&absolute, input.as_ref())?;
+            self.ensure_writable(&absolute)?;
         }
 
         Ok(ResolvedPath { absolute, relative })
@@ -110,6 +148,13 @@ impl Sandbox {
     }
 
     fn normalize_tool_path(&self, input: &Path, allow_root: bool) -> Result<PathBuf> {
+        let input = if input.is_absolute() {
+            input
+                .strip_prefix(&self.root)
+                .map_err(|_| LocalRunnerError::PathEscapesSandbox(input.display().to_string()))?
+        } else {
+            input
+        };
         let mut normalized = PathBuf::new();
 
         for component in input.components() {
@@ -142,6 +187,15 @@ impl Sandbox {
         Ok(normalized)
     }
 
+    fn ensure_writable(&self, path: &Path) -> Result<()> {
+        if self.read_roots.iter().any(|root| path.starts_with(root)) {
+            return Err(LocalRunnerError::InvalidPath(
+                "the attachment/runtime directory is read-only".into(),
+            ));
+        }
+        Ok(())
+    }
+
     fn ensure_nearest_existing_ancestor_is_contained(
         &self,
         absolute: &Path,
@@ -163,6 +217,7 @@ impl Sandbox {
                 original_input.display().to_string(),
             ));
         }
+        self.ensure_writable(&canonical)?;
 
         Ok(())
     }
