@@ -32,7 +32,7 @@ const methods = ["connectRuntime", "disconnectRuntime", "isCurrentRuntimeTranspo
   "appendAssistantText", "finishAssistant", "saveAssistantTiming", "updateAssistantMessage", "updateAssistantMetadataForRun",
   "upsertToolEvent", "publishDraftSession", "reconcilePendingSubmission", "restoreComposerDraft", "setComposerDraftValue",
   "sessionForConversation", "restoreTaskLocalSettings", "activateConversation", "selectConversation", "patchWindowContext",
-  "setConversationIdForEntitlement", "persistWorkspaceGrant"];
+  "setConversationIdForEntitlement", "persistWorkspaceGrant", "beginWorkspaceRestore", "switchWorkspace"];
 const helpers = ["makeUserMessage", "attachmentPresentationMetadata", "assistantUiAttachments", "makeAssistantPlaceholder",
   "assistantParts", "textFromAppendMessage", "toolPartFromEvent", "approvalForToolEvent"];
 const sendStart = source.indexOf("async (appendMessage) => {", source.indexOf("const sendUserMessage ="));
@@ -143,6 +143,163 @@ async function sendText(owner, text) {
   expect(run, owner.session.snapshot().status).toBeTruthy();
   return run;
 }
+
+function runEffect(owner, firstLine) {
+  const start = source.indexOf(firstLine);
+  const end = source.indexOf("\n  }, [", start);
+  expect(start).toBeGreaterThan(0);
+  expect(end).toBeGreaterThan(start);
+  return runInContext(`(() => { ${source.slice(start, end)} })()`, createContext(owner.c));
+}
+
+function startup(w, owner, grant) {
+  w.windowContextRef.current = { workspaceGrant: grant };
+  Object.assign(owner.c, {
+    settingsReady: true, windowContextReady: true, signedIn: true,
+    workspaceRestoredAccountRef: { current: "" }, requestedConversationIdRef: { current: "" },
+    getProfileSetting: (_key, fallback) => fallback, getConversationId: () => "conv_a",
+    parseStoredJson: (value) => value, setProfileSetting: vi.fn(),
+    setWindowStateRestored: (value) => { owner.c.windowStateRestored = value; }
+  });
+  Object.defineProperty(owner.c, "workspaceSettingsReady", { get: () => owner.session.snapshot().workspaceSettingsReady });
+  return runEffect(owner, "    if (!settingsReady || !windowContextReady || !signedIn || !buyerSession?.profile?.id) return;");
+}
+
+describe("cloud startup without local workspace authority", () => {
+  it("loads the authenticated snapshot and connects while folder validation is still pending; sending remains denied", async () => {
+    const w = world(), a = bind(w, "conv_a");
+    w.manager.select(a.session);
+    let finishFolder;
+    const native = w.native.getMockImplementation();
+    w.native.mockImplementation((command, args) => command === "ensure_workspace"
+      ? new Promise((resolve) => { finishFolder = resolve; }) : native(command, args));
+    const saved = { grant_id: "saved", display_path: "/unverified" };
+    const cleanup = startup(w, a, saved);
+    expect(finishFolder).toBeTypeOf("function");
+    expect(a.c.windowStateRestored).toBe(true);
+    expect(a.session.snapshot().workspaceGrant).toBeNull();
+    const fetch = vi.fn(async () => new Response(JSON.stringify({
+      messages: [{ id: "cloud-message", role: "user", content: "Saved in cloud" }],
+      runs: [], events: [], cursor: 0, has_more: false
+    }), { status: 200 }));
+    a.c.getConversationSnapshot.mockImplementation((url, token, binding, id, cursor = 0) =>
+      client.getConversationSnapshot(url, token, binding, id, cursor, fetch));
+    const socket = await ready(a);
+    expect(a.session.snapshot().messages[0].content).toBe("Saved in cloud");
+    const [url, options] = fetch.mock.calls[0];
+    expect(String(url)).toContain("/v1/conversations/conv_a/snapshot");
+    expect(String(url)).toContain("entitlement_id=agent-a");
+    expect(new Headers(options.headers).get("authorization")).toBe("Bearer test-token");
+    expect(socket.sent[0].type).toBe("client.hello");
+    expect(w.native.mock.calls.filter(([cmd]) => cmd === "ensure_workspace")).toHaveLength(1);
+    await a.sendUserMessage({ content: [{ type: "text", text: "Do work" }] });
+    expect(socket.sent.some((frame) => frame.type === "client.message")).toBe(false);
+    expect(w.native.mock.calls.some(([cmd]) => cmd === "set_window_tool_context")).toBe(false);
+    runEffect(a, "    if (!windowContextReady || !windowStateRestored || !signedIn) return;");
+    expect(w.windowContextRef.current.workspaceGrant).toEqual(saved);
+    cleanup();
+    finishFolder(saved);
+  });
+
+  it("connects with no saved folder and does not bypass cloud authentication errors", async () => {
+    const w = world(), a = bind(w, "conv_a");
+    w.manager.select(a.session);
+    startup(w, a, null);
+    await vi.waitFor(() => expect(a.session.snapshot().workspaceSettingsReady).toBe(true));
+    const socket = await ready(a);
+    expect(socket.sent[0].type).toBe("client.hello");
+    expect(w.native.mock.calls.some(([cmd]) => cmd === "ensure_workspace")).toBe(false);
+    const b = bind(w, "conv_b");
+    b.session.set("workspaceGrant", null);
+    b.c.getConversationSnapshot.mockImplementation((...args) => client.getConversationSnapshot(...args, 0,
+      async () => new Response(JSON.stringify({ error: "Forbidden" }), { status: 403 })));
+    await b.connectRuntime();
+    expect(b.c.socketRef.current).toBeNull();
+    expect(b.session.snapshot().messages).toEqual([]);
+  });
+
+  it.each(["valid", "stale"])("late %s startup restore cannot replace a newly validated selection", async (result) => {
+    const w = world(), a = bind(w, "conv_a");
+    w.manager.select(a.session);
+    let resolve, reject;
+    const native = w.native.getMockImplementation();
+    const old = { grant_id: "old", display_path: "/old" };
+    const chosen = { grant_id: "new", display_path: "/new" };
+    w.native.mockImplementation((command, args) => command !== "ensure_workspace" ? native(command, args)
+      : args.workspaceGrantId === "old" ? new Promise((yes, no) => { resolve = yes; reject = no; }) : Promise.resolve(chosen));
+    startup(w, a, old);
+    await a.switchWorkspace(chosen);
+    if (result === "valid") resolve(old); else reject(new Error("workspace_grant_stale"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(a.session.snapshot().workspaceGrant).toEqual(chosen);
+    expect(w.windowContextRef.current.workspaceGrant).toEqual(chosen);
+    expect(a.c.settingsStoreRef.current.clearProfileKey).not.toHaveBeenCalled();
+  });
+
+  it("failed folder validation retains saved settings without granting execution access", async () => {
+    const w = world(), a = bind(w, "conv_a");
+    w.manager.select(a.session);
+    const saved = { grant_id: "old", display_path: "/old" };
+    w.native.mockRejectedValue(new Error("workspace_grant_unavailable"));
+    startup(w, a, saved);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    runEffect(a, "    if (!windowContextReady || !windowStateRestored || !signedIn) return;");
+    expect(a.session.snapshot().workspaceGranted).toBe(false);
+    expect(a.session.snapshot().workspaceGrant).toBeNull();
+    expect(w.windowContextRef.current.workspaceGrant).toEqual(saved);
+    expect(a.c.settingsStoreRef.current.clearProfileKey).not.toHaveBeenCalled();
+  });
+
+  it("handshake and newly granted workspace cannot start the same Brief twice", async () => {
+    const w = world(), a = bind(w, "conv_a");
+    w.manager.select(a.session);
+    const socket = await ready(a);
+    a.c.pendingTaskStartRef.current = "conv_a";
+    a.c.taskBriefRef.current = { title: "Saved Brief" };
+    a.c.workspaceGrantRef.current = a.session.snapshot().workspaceGrant;
+    a.c.workspaceRef.current = "/workspace";
+    let finish;
+    const native = w.native.getMockImplementation();
+    w.native.mockImplementation((command, args) => command === "set_window_tool_context"
+      ? new Promise((resolve) => { finish = resolve; }) : native(command, args));
+    const first = a.sendTaskStartIfNeeded();
+    expect(await a.sendTaskStartIfNeeded()).toBe(false);
+    finish({ context_id: "opaque-brief" });
+    expect(await first).toBe(true);
+    expect(socket.sent.filter((frame) => frame.type === "client.message")).toHaveLength(1);
+  });
+
+  it("selects immediately during task folder validation and ignores a late result after a new selection", async () => {
+    const w = world(), a = bind(w, "conv_a");
+    w.manager.select(a.session); a.c.window.__TAURI_INTERNALS__ = true;
+    const old = { grant_id: "old", display_path: "/old" };
+    const chosen = { grant_id: "new", display_path: "/new" };
+    let finish;
+    const native = w.native.getMockImplementation();
+    w.native.mockImplementation((command, args) => command === "read_task_settings" ? Promise.resolve({ workspaceGrant: old })
+      : command !== "ensure_workspace" ? native(command, args)
+      : args.workspaceGrantId === "old" ? new Promise((resolve) => { finish = resolve; }) : Promise.resolve(chosen));
+    await a.selectConversation({ id: "conv_b" });
+    expect(w.selectedId).toBe("conv_b");
+    const b = bind(w, "conv_b");
+    expect(b.session.snapshot().workspaceGrant).toBeNull();
+    await ready(b);
+    expect(finish).toBeTypeOf("function");
+    await b.switchWorkspace(chosen);
+    finish(old);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(b.session.snapshot().workspaceGrant).toEqual(chosen);
+    expect(w.windowContextRef.current.workspaceGrant).toEqual(chosen);
+  });
+
+  it("does not hide the thread or recovery button behind workspaceGranted", () => {
+    const shell = source.slice(source.indexOf('<section className="chat-shell desktop-chat-shell">'), source.indexOf("<TaskBriefForm"));
+    expect(shell).not.toContain("!workspaceGranted");
+    expect(shell).not.toContain("<WorkspaceOnboarding");
+    expect(source).toContain("const showRetry = Boolean(conversationLibraryReady && !connected && retryExhausted)");
+  });
+});
+
 describe("production renderer with per-Conversation sessions", () => {
   it("retains each session's Agent presentation across navigation without another handshake", async () => {
     const w = world();
@@ -228,7 +385,8 @@ describe("production renderer with per-Conversation sessions", () => {
     await connectingA;
     const socketA = a.c.socketRef.current;
     expect(a.session.snapshot().messages[0].id).toBe("history-a");
-    expect(w.manager.isSelected(a.session)).toBe(true);
+    expect(w.selectedId).toBe("conv_b");
+    expect(w.manager.isSelected(a.session)).toBe(false);
     releaseSettings(); await navigation;
     const b = bind(w, "conv_b");
     const socketB = await ready(b);

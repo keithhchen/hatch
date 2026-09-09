@@ -131,13 +131,11 @@ import {
   purgeLegacySensitiveStorage
 } from "./legacy-settings-migration.js";
 import {
-  isInvalidWorkspaceGrantError,
   normalizeWorkspaceGrant,
   validateRestoredWorkspace,
   workspacePickerSelection
 } from "./workspace-restore.js";
 import {
-  shouldPersistWorkspaceToProfile,
   usesLegacyProfileRunFallback
 } from "./desktop-window-context.js";
 import { createTurnAccessSnapshot, requirePendingAccessSnapshot } from "./turn-access-snapshot.js";
@@ -475,6 +473,7 @@ function App() {
   const [workspaceDraft, setWorkspaceDraft] = sessionStateField("workspaceDraft");
   const [workspaceGrant, setWorkspaceGrant] = sessionStateField("workspaceGrant");
   const [workspaceDraftGrant, setWorkspaceDraftGrant] = sessionStateField("workspaceDraftGrant");
+  const [workspaceSettingsReady] = sessionStateField("workspaceSettingsReady");
   const [authState, setAuthState] = useState("loading");
   const [startupError, setStartupError] = useState("");
   const [settingsMigrationNotice, setSettingsMigrationNotice] = useState("");
@@ -694,7 +693,17 @@ function App() {
   }
 
   function persistWorkspaceGrant(grant, profileId = buyerProfile.id) {
+    // An explicit validated selection supersedes any older restore callback.
+    conversationSession.ref("workspaceRestoreRevision", 0).current++;
+    conversationSession.set("workspaceSettingsReady", true);
     patchWindowContext({ workspaceGrant: grant });
+  }
+
+  function beginWorkspaceRestore(targetSession) {
+    const revision = targetSession.ref("workspaceRestoreRevision", 0);
+    const token = ++revision.current;
+    targetSession.set("workspaceSettingsReady", false);
+    return () => !targetSession.disposed && revision.current === token;
   }
 
   function patchWindowContext(patch = {}) {
@@ -1632,15 +1641,21 @@ function App() {
     if (!targetConversationId || !isServerConversationId(targetConversationId) || !snapshot) return false;
     if (taskStartSentRef.current.has(targetConversationId) || activeRunRef.current) return false;
     if (!isCurrentRuntimeTransport(sourceSocket, sourceToken) || sourceSocket?.readyState !== WebSocket.OPEN) return false;
+    const preparing = conversationSession.ref("taskStartPreparingRef", false);
+    if (preparing.current) return false;
     const accessSnapshot = createTurnAccessSnapshot(workspaceGrantRef.current?.grant_id, workspaceRef.current, permissionRef.current);
     const runId = `run_${stableRandomId()}`;
     const clientMessageId = `message_${stableRandomId()}`;
+    preparing.current = true;
     try {
       await synchronizeNativeToolContext(accessSnapshot, targetConversationId, runId);
     } catch (error) {
       setStatus(`Couldn't prepare native workspace access: ${errorMessage(error)}`);
       return false;
+    } finally {
+      preparing.current = false;
     }
+    if (!isCurrentRuntimeTransport(sourceSocket, sourceToken) || activeRunRef.current) return false;
     const outboundMessage = {
       type: "client.message",
       run_id: runId,
@@ -1798,6 +1813,7 @@ function App() {
     if (workspaceRestoredAccountRef.current === buyerSession.profile.id) return;
     workspaceRestoredAccountRef.current = buyerSession.profile.id;
     let cancelled = false;
+    const ownsWorkspaceRestore = beginWorkspaceRestore(conversationSession);
     const profileId = buyerSession.profile.id;
     setWindowStateRestored(false);
     const windowContext = windowContextRef.current;
@@ -1858,7 +1874,7 @@ function App() {
       const restored = await validateRestoredWorkspace(savedWorkspaceGrant, (grantId) => invokeTauri("ensure_workspace", {
         workspaceGrantId: grantId
       }));
-      if (cancelled) return;
+      if (cancelled || !ownsWorkspaceRestore()) return;
       if (restored.state === "valid") {
         setWorkspace(restored.workspace);
         workspaceRef.current = restored.workspace;
@@ -1867,6 +1883,7 @@ function App() {
         setWorkspaceDraft(restored.workspace);
         setWorkspaceDraftGrant(restored.grant);
         setWorkspaceGranted(true);
+        conversationSession.set("workspaceSettingsReady", true);
         if (restored.workspace !== savedWorkspaceGrant?.display_path) {
           persistWorkspaceGrant(restored.grant, profileId);
         }
@@ -1880,19 +1897,11 @@ function App() {
       if (restored.state === "stale") {
         setWorkspaceDraft("");
         setWorkspaceDraftGrant(null);
-        try {
-          await Promise.all([
-            !shouldPersistWorkspaceToProfile(conversationWindowRef.current)
-              ? Promise.resolve()
-              : settingsStoreRef.current.clearProfileKey(profileId, "workspace_grant"),
-            invokeTauri("revoke_workspace_grant", { workspaceGrantId: restored.staleGrant.grant_id })
-          ]);
-          patchWindowContext({ workspaceGrant: null });
-          if (!cancelled) setStatus(restored.status);
-        } catch {
-          if (!cancelled) setStatus(`${restored.status} Hatch couldn't clear the stale saved path; it will retry next launch.`);
-        }
+        // A failed background read is not authority to erase saved settings.
+        // Keep the saved candidate for retry, but never publish it as a grant.
+        setStatus(restored.status);
       } else if (!cancelled && !restorableRun) {
+        conversationSession.set("workspaceSettingsReady", true);
         setStatus(legacySavedWorkspace
           ? legacyClearFailed
             ? "Choose your previous workspace again. Hatch couldn't clear the legacy path and will retry next launch."
@@ -1900,28 +1909,29 @@ function App() {
           : restored.status);
       }
     }
-    void restoreWorkspace().finally(() => {
-      if (!cancelled) setWindowStateRestored(true);
+    // Cloud navigation/history needs only restored window identity, not OS I/O.
+    setWindowStateRestored(true);
+    void restoreWorkspace().catch((error) => {
+      if (!cancelled && ownsWorkspaceRestore()) setStatus(errorMessage(error));
     });
     return () => { cancelled = true; };
   }, [buyerProfile.id, buyerSession?.profile?.id, settingsReady, signedIn, windowContextReady]);
 
   // Persist only after the native window context has been read and the
-  // workspace restore attempt has completed. This prevents the first React
-  // render's defaults from overwriting another window's saved context.
+  // identity has been restored. Omit unresolved local settings so a pending
+  // folder read cannot replace the saved grant with the initial null state.
   useEffect(() => {
     if (!windowContextReady || !windowStateRestored || !signedIn) return;
     patchWindowContext({
       conversationId,
       ...(conversationBindingFor() || {}),
-      workspaceGrant,
-      permissionMode,
+      ...(workspaceSettingsReady ? { workspaceGrant, permissionMode } : {}),
       draft: workspaceDraft,
       activeRun: activeRunRef.current,
       conversationCursor: conversationCursorRef.current,
       scrollTop: viewportScrollTopRef.current
     });
-  }, [conversationId, permissionMode, signedIn, windowContextReady, windowStateRestored, workspaceDraft, workspaceGrant]);
+  }, [conversationId, permissionMode, signedIn, windowContextReady, windowStateRestored, workspaceDraft, workspaceGrant, workspaceSettingsReady]);
 
   useLayoutEffect(() => {
     if (!signedIn || olderLoading || historyAnchorRef.current) return;
@@ -2091,7 +2101,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!signedIn || !workspaceGranted || !workspaceGrant?.grant_id || !selectedEntitlementId) return;
+    if (!signedIn || !windowStateRestored || !selectedEntitlementId) return;
     if (!canConnectConversation({ libraryStatus: conversationLibraryStatus, conversationId })) return;
     const entitlement = creatorAgentEntitlements.find((item) => item.entitlement_id === selectedEntitlementId);
     const desiredBinding = runtimeBindingForEntitlement(entitlement);
@@ -2106,7 +2116,11 @@ function App() {
       creatorId: desiredBinding?.creatorId,
       preserveMessages: true
     });
-  }, [conversationSession, connected, conversationId, conversationLibraryStatus, creatorAgentEntitlements, selectedEntitlementId, signedIn, workspaceGrant, workspaceGranted]);
+  }, [conversationSession, connected, conversationId, conversationLibraryStatus, creatorAgentEntitlements, selectedEntitlementId, signedIn, windowStateRestored]);
+
+  useEffect(() => {
+    if (connected && workspaceGranted) void sendTaskStartIfNeeded();
+  }, [conversationSession, connected, workspaceGranted]);
 
   function scheduleRuntimeReconnect() {
     if (conversationSession.disposed || intentionalDisconnectRef.current || reconnectTimerRef.current || !connectionConfigRef.current) return;
@@ -2252,7 +2266,6 @@ function App() {
   async function connectRuntime(connection = {}) {
     if (conversationSession.disposed || connectedRef.current || socketRef.current || connectingRef.current) return;
     const targetServerUrl = connection.serverUrl || serverUrl;
-    const targetWorkspaceGrant = normalizeWorkspaceGrant(connection.workspaceGrant) || workspaceGrant;
     const targetConversationId = conversationSession.scope.conversationId;
     const targetEntitlementId = conversationSession.scope.entitlementId;
     if ((connection.conversationId && connection.conversationId !== targetConversationId)
@@ -2272,9 +2285,9 @@ function App() {
         : "Preparing your Conversation Library…");
       return;
     }
-    if (!targetServerUrl.trim() || !targetWorkspaceGrant?.grant_id || !buyerSession?.accessToken || !targetEntitlementId) {
+    if (!targetServerUrl.trim() || !buyerSession?.accessToken || !targetEntitlementId) {
       setChatLoading(false);
-      setStatus("Choose a folder before starting the connection.");
+      setStatus("Sign in and choose a Creator Agent before starting the connection.");
       return;
     }
 
@@ -2293,7 +2306,6 @@ function App() {
     setStatus("Connecting…");
     connectionConfigRef.current = {
       serverUrl: targetServerUrl.trim(),
-      workspaceGrant: targetWorkspaceGrant,
       conversationId: targetConversationId.trim() || "desktop-chat",
       entitlementId: targetEntitlementId,
       ...(targetProductId ? { productId: targetProductId } : {}),
@@ -2305,22 +2317,7 @@ function App() {
       setConversationIdForEntitlement(buyerProfile.id, targetEntitlementId, targetConversationId.trim());
     }
 
-    let normalizedWorkspaceGrant;
     try {
-      normalizedWorkspaceGrant = normalizeWorkspaceGrant(await invokeTauri("ensure_workspace", {
-        workspaceGrantId: targetWorkspaceGrant.grant_id
-      }));
-      // A newer Conversation/Agent selection may have invalidated this
-      // request while the native grant was being revalidated. Never let an
-      // older request write workspace, cursor, or message state into it.
-      if (requestToken !== connectionTokenRef.current) return;
-      if (!normalizedWorkspaceGrant) throw new Error("The native workspace grant is invalid.");
-      setWorkspace(normalizedWorkspaceGrant.display_path);
-      workspaceRef.current = normalizedWorkspaceGrant.display_path;
-      workspaceGrantRef.current = normalizedWorkspaceGrant;
-      setWorkspaceGrant(normalizedWorkspaceGrant);
-      connectionConfigRef.current.workspaceGrant = normalizedWorkspaceGrant;
-      persistWorkspaceGrant(normalizedWorkspaceGrant);
       setStatus("Loading history...");
       const activeConversationId = targetConversationId.trim() || "desktop-chat";
       const baseline = messagesRef.current;
@@ -2363,27 +2360,9 @@ function App() {
       setStatus("Connecting...");
     } catch (error) {
       if (requestToken === connectionTokenRef.current) {
-        if (isInvalidWorkspaceGrantError(error)) {
-          setChatLoading(false);
-          workspaceRef.current = "";
-          workspaceGrantRef.current = null;
-          connectionConfigRef.current = null;
-          intentionalDisconnectRef.current = true;
-          setWorkspace("");
-          setWorkspaceDraft("");
-          setWorkspaceGrant(null);
-          setWorkspaceDraftGrant(null);
-          setWorkspaceGranted(false);
-          setStatus("Workspace access is no longer available. Choose the folder again to continue.");
-          void Promise.allSettled([
-            settingsStoreRef.current.clearProfileKey(buyerProfile.id, "workspace_grant"),
-            invokeTauri("revoke_workspace_grant", { workspaceGrantId: targetWorkspaceGrant.grant_id })
-          ]);
-        } else {
-          setChatLoading(true);
-          setStatus(`Connection unavailable — ${errorMessage(error)}`);
-          scheduleRuntimeReconnect();
-        }
+        setChatLoading(true);
+        setStatus(`Connection unavailable — ${errorMessage(error)}`);
+        scheduleRuntimeReconnect();
       }
       return;
     } finally {
@@ -2529,7 +2508,9 @@ function App() {
         setConnected(true);
         setChatLoading(false);
         setStatus("Connected");
-        await sendTaskStartIfNeeded(socket, sourceToken);
+        // Background sessions still start their pending Brief after handshake;
+        // local preparation must not delay cloud readiness.
+        void sendTaskStartIfNeeded(socket, sourceToken);
       }
       return;
     }
@@ -2764,7 +2745,7 @@ function App() {
     }
   }
 
-  async function chooseWorkspace({ activate = workspaceGranted } = {}) {
+  async function chooseWorkspace({ activate = true } = {}) {
     try {
       const selected = await invokeTauri("pick_workspace_folder");
       const selection = workspacePickerSelection({
@@ -2942,6 +2923,7 @@ function App() {
 
   function updatePermissionMode(nextMode) {
     if (!PERMISSION_OPTIONS.some((mode) => mode.value === nextMode)) return;
+    conversationSession.ref("permissionSettingsRevision", 0).current++;
     setPermissionMode(nextMode);
     setProfileSetting("permission_mode", nextMode);
     setStatus(`Permission updated for the next turn: ${permissionPolicyLabel(nextMode)}`);
@@ -3369,18 +3351,34 @@ function App() {
 
   async function restoreTaskLocalSettings(taskId, targetSession) {
     if (!window.__TAURI_INTERNALS__ || targetSession.localSettingsRestored) return;
-    const saved = await invokeTauri("read_task_settings", { taskId }).catch(() => null);
-    if (targetSession.disposed) return;
     targetSession.localSettingsRestored = true;
-    if (!saved) return;
-    const savedGrant = normalizeWorkspaceGrant(saved.workspaceGrant);
-    const restoredGrant = savedGrant
-      ? normalizeWorkspaceGrant(await invokeTauri("ensure_workspace", { workspaceGrantId: savedGrant.grant_id }).catch(() => null))
-      : null;
-    if (targetSession.disposed) return;
-    const permission = normalizePermissionPolicy(saved.permissionMode);
-    targetSession.set("permissionMode", permission);
-    targetSession.ref("permissionRef").current = permission;
+    const ownsRestore = beginWorkspaceRestore(targetSession);
+    const permissionRevision = targetSession.ref("permissionSettingsRevision", 0).current;
+    const fallbackGrant = targetSession.snapshot().workspaceGrant
+      || targetSession.snapshot().workspaceDraftGrant
+      || normalizeWorkspaceGrant(windowContextRef.current.workspaceGrant);
+    // Selection is immediate, but inherited/unverified settings are not run authority.
+    targetSession.set("workspaceGrant", null);
+    targetSession.ref("workspaceGrantRef").current = null;
+    targetSession.set("workspaceGranted", false);
+    let saved;
+    try {
+      saved = await invokeTauri("read_task_settings", { taskId });
+    } catch (error) {
+      if (ownsRestore()) targetSession.set("status", errorMessage(error));
+      return;
+    }
+    if (!ownsRestore()) return;
+    if (saved && targetSession.ref("permissionSettingsRevision", 0).current === permissionRevision) {
+      const permission = normalizePermissionPolicy(saved.permissionMode);
+      targetSession.set("permissionMode", permission);
+      targetSession.ref("permissionRef").current = permission;
+    }
+    const savedGrant = normalizeWorkspaceGrant(saved ? saved.workspaceGrant : fallbackGrant);
+    const restored = await validateRestoredWorkspace(savedGrant,
+      (grantId) => invokeTauri("ensure_workspace", { workspaceGrantId: grantId }));
+    if (!ownsRestore()) return;
+    const restoredGrant = restored.state === "valid" ? restored.grant : null;
     targetSession.set("workspace", restoredGrant?.display_path || "");
     targetSession.ref("workspaceRef").current = restoredGrant?.display_path || "";
     targetSession.set("workspaceDraft", restoredGrant?.display_path || "");
@@ -3388,12 +3386,13 @@ function App() {
     targetSession.set("workspaceDraftGrant", restoredGrant);
     targetSession.ref("workspaceGrantRef").current = restoredGrant;
     targetSession.set("workspaceGranted", Boolean(restoredGrant));
+    targetSession.set("workspaceSettingsReady", restored.state !== "stale");
   }
 
   async function activateConversation(taskId, targetSession = sessionForConversation(taskId)) {
     const navigation = ++navigationRequestRef.current;
     if (targetSession.ensureOwnership && !await targetSession.ensureOwnership()) return false;
-    await restoreTaskLocalSettings(taskId, targetSession);
+    void restoreTaskLocalSettings(taskId, targetSession);
     if (navigation !== navigationRequestRef.current || targetSession.disposed
       || selectedEntitlementIdRef.current !== targetSession.scope.entitlementId) return;
     conversationSession.saveReadingPosition(viewportRef.current);
@@ -3794,14 +3793,6 @@ function App() {
       <section className="chat-shell desktop-chat-shell">
         {!windowStateRestored ? (
           <EmptyThread creatorAgent={creatorAgent} loadingKey={conversationLoadingKey} />
-        ) : !workspaceGranted ? (
-          <WorkspaceOnboarding
-            creatorName={creatorAgent.creator}
-            draft={workspaceDraft}
-            onChoose={() => void chooseWorkspace({ activate: false })}
-            onGrant={() => void grantWorkspace()}
-            status={status}
-          />
         ) : briefTask ? (
           <TaskBriefForm
             spec={briefTask.spec ?? briefSpecForSelectedEntitlement()}
@@ -4135,7 +4126,7 @@ function desktopConversationLoadingKey({ conversationReady, conversationLibraryS
   if (conversationLibraryStatus === "idle" || conversationLibraryStatus === "loading") return "connection.loadingLibrary";
   if (conversationReady || runtimeRetryExhausted || intentionallyOffline) return null;
   if (chatLoading && status === "Loading history...") return "connection.loadingHistory";
-  if (chatLoading || (workspaceGranted && hasConversation)) return "connection.connecting";
+  if (chatLoading || hasConversation) return "connection.connecting";
   return null;
 }
 
@@ -4165,7 +4156,7 @@ function DesktopConnectionStatus({ state = "offline", compact = false, loadingKe
 
 function DesktopConversationToolbar({ creatorAgent, connected, loadingKey, conversationLibraryReady, workspaceGranted, retryExhausted, onRetry }) {
   const t = useI18n();
-  const showRetry = Boolean(workspaceGranted && conversationLibraryReady && !connected && retryExhausted);
+  const showRetry = Boolean(conversationLibraryReady && !connected && retryExhausted);
   const creatorName = String(creatorAgent?.creator || "").trim() || t("app.defaultCreatorName");
   const agentName = String(creatorAgent?.name || "").trim() || t("app.defaultAgentName");
   const title = creatorAgentContextTitle(creatorAgent);

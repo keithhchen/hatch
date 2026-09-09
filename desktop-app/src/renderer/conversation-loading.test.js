@@ -30,7 +30,7 @@ describe("desktop conversation loading presentation", () => {
     [{ conversationReady: true }, null],
     [{ runtimeRetryExhausted: true }, null],
     [{ conversationLibraryStatus: "unavailable", chatLoading: true }, null],
-    [{ workspaceGranted: false }, null],
+    [{ workspaceGranted: false }, "connection.connecting"],
     [{ hasConversation: false }, null]
   ])("maps %j to %s", (patch, expected) => {
     expect(loadingKey({ ...idle, ...patch })).toBe(expected);
