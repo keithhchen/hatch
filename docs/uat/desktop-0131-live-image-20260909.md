@@ -27,3 +27,11 @@
 ## 剩余验收
 
 上述云端工具契约修复需要部署，随后再次验证 Agent 自主选择 file_read，以及实际图像工具结果进入 Kimi。不能拿上传图片成功代替此项。Office/PDF 完整链路、并发取消、完整历史一致性审计、Windows 实机和发布验收仍未完成。
+
+## 直接指定 file_read 的真实集成结果
+
+在云端工具描述尚未更新时，追加明确要求调用 file_read 的普通消息。run `run_edd4885dcb6e48619ed5ed112e11c9e2` 实际调用 file_read 读取上述附件副本，生产事件 3697 为 requested、3699 为 completed。
+
+生产 canonical 记录 3700 的 message.role 为 tool、tool_name 为 file_read，tool_content 的 block 类型依序是 text、image；之后 assistant 记录 3701 写入。GUI 最终回答声明通过 file_read 读取副本，并正确转写图中小字。未通过 shell/OCR 代替此调用。
+
+这证明真实 LocalRunner → Runtime → pi → Kimi 工具图片链路可用，但测试明确告知了工具名，不能据此宣称修正描述后模型的自主工具选择已验收。Web CI `34337405840` 已通过，application CD `34337642461` 已启动；部署完成仍须查实际 runtime image 与后续行为。
