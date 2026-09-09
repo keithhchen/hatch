@@ -356,24 +356,27 @@ fn launch(
         );
         let cwd = wide(root.join("workspace"));
         let mut pi: PROCESS_INFORMATION = zeroed();
-        if CreateProcessAsUserW(
+        // The isolated CI coordinator already has SeImpersonatePrivilege, but
+        // not SeAssignPrimaryTokenPrivilege (first run failed with 1314).
+        // Launch the SAME restricted primary token via secondary logon; this
+        // is the sole API, never a retry with a host/unrestricted token.
+        // Explicit desktop avoids the API's implicit desktop ACL adjustment.
+        if CreateProcessWithTokenW(
             identity.token.0,
+            0, // Do not load a user profile or use NETCREDENTIALS_ONLY.
             exe_w.as_ptr(),
             command.as_mut_ptr(),
-            null(),
-            null(),
-            1,
             EXTENDED_STARTUPINFO_PRESENT
                 | CREATE_SUSPENDED
                 | CREATE_UNICODE_ENVIRONMENT
                 | CREATE_NO_WINDOW,
             env.as_ptr().cast(),
             cwd.as_ptr(),
-            &si.StartupInfo,
+            &mut si.StartupInfo,
             &mut pi,
         ) == 0
         {
-            return Err(win_error("CreateProcessAsUserW (no host fallback)"));
+            return Err(win_error("CreateProcessWithTokenW (no host fallback)"));
         }
         let process = Handle(pi.hProcess);
         let thread = Handle(pi.hThread);

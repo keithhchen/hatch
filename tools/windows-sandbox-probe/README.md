@@ -18,7 +18,7 @@ unelevated 当前用户派生 token 不能满足宿主凭据/internal DB 读隔�
 
 ## 单一执行入口
 
-固定脚本 -> windows.rs::launch -> CreateProcessAsUserW（挂起）
+固定脚本 -> windows.rs::launch -> CreateProcessWithTokenW（相同 restricted primary token，挂起）
 -> AssignProcessToJobObject -> 核对实际 child TokenUser / restricted capability
 -> ResumeThread -> 有界等待 -> TerminateJobObject -> QueryInformationJobObject 确认 ActiveProcesses=0。
 
@@ -42,7 +42,7 @@ cargo build --locked --release --manifest-path tools/windows-sandbox-probe/Cargo
 ```
 
 身份必须是本地非管理员 HatchProbe_* 账户，且不同于宿主。
-LogonUserW / CreateProcessAsUserW / private desktop 不可用时直接失败；
+LogonUserW / CreateProcessWithTokenW / private desktop 不可用时直接失败；
 不为跑通而修改机器特权、扩大用户 ACL、改系统策略或回退其他启动方式。
 
 隔离分支 workflow 只在 GitHub-hosted Windows runner 执行 scripts/run-ci.ps1：
@@ -64,5 +64,11 @@ LogonUserW / CreateProcessAsUserW / private desktop 不可用时直接失败；
   不增加第二套 runner/authority，未验证时 fail-closed。
 
 本轮只做已有缓存的增量 cross-target check、轻量 unit/static 检查；不构建 Desktop/runtime。
-**本次源码尚未 push，因此没有此版真实 Windows CI 执行证据。**
-远端手动 workflow 只 checkout ref，不接收本地 patch。不得拿旧 SHA 的 dispatch 结果冒充本次验证。
+首轮 SHA `97bb7efe8b1a6039125c6677fe2ef52fad15c611` / run `34345671960`：
+Windows 原生编译与 runtime 准备通过，三个入口在 CreateProcessAsUserW 返回 1314，脚本未运行；
+账户、desktop、临时目录清理成功。CI coordinator 未持有 SeAssignPrimaryTokenPrivilege。
+最小修正改用唯一 CreateProcessWithTokenW 入口，保留同一 restricted primary token、显式 desktop、
+挂起/Job/token校验，不加载 profile；依赖 coordinator 已持有的 SeImpersonatePrivilege，
+不添加机器特权或宿主执行 fallback。这不解决普通非管理员产品部署的 broker/bootstrap 设计。
+微软 API 契约：https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-createprocesswithtokenw
+每轮必须绑定实际 source SHA；不得拿旧 SHA 的证据代替新版本验证。
