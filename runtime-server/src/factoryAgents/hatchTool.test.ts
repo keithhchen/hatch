@@ -75,6 +75,15 @@ for (const account of ["buyer", "creator"] as const) test(`HTool uses the shared
     assert.equal((await store.read(s.id, "output/RESULT.md")).bytes.toString(), "# Fixture response 2\n");
     const records = (await store.get(s.id)).files;
     assert.equal(records.filter(f => /results\/[^/]+\.md$/.test(f.path) && !f.path.endsWith("-trace.md")).length, 2);
+    const outbound = [];
+    for (const record of records.filter(f => f.path.endsWith("-trace.md"))) {
+      const trace = (await store.read(s.id, record.path)).bytes.toString();
+      assert.ok(!trace.includes(token) && !trace.includes("Private grading criteria"));
+      const events = JSON.parse(trace.split("```json\n")[1].split("\n```")[0]);
+      outbound.push(...events.filter((event: { type: string }) => event.type === "client.message"));
+    }
+    assert.deepEqual(outbound.map(event => event.message.content), ["Customer task", "Customer answer"]);
+    assert.ok(outbound.every(event => event.conversation_id === "conv_test" && event.run_id));
     await tool.execute("asset", { operation: "read_asset", asset_id: "asset_test" });
     assert.equal((await store.read(s.id, "output/RESULT.md")).bytes.toString(), "# Actual asset fixture\r\nOriginal bytes.\r\n");
     mismatch = true;

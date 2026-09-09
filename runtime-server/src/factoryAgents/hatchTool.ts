@@ -116,7 +116,7 @@ export function hatchTool(store: WorkbenchStore, id: string, changed: () => void
         if (!submitted) await store.update(id, s => { if (s.hatch && s.hatch.lastRunId === runId) s.hatch.pending = false; });
         throw error;
       } finally {
-        const trace = `# Hatch Runtime trace\n\nConversation: ${conversationId}\nRun: ${runId}\nLocal tools: none\n\n\`\`\`json\n${JSON.stringify(events, null, 2)}\n\`\`\`\n`;
+        const trace = `# Hatch Runtime trace\n\nConversation: ${conversationId}\nRun: ${runId}\nLocal tools: none\n\nclient.message records the outbound customer message; Runtime events establish acceptance and completion.\n\n\`\`\`json\n${JSON.stringify(events, null, 2)}\n\`\`\`\n`;
         await store.put(id, `output/results/${runId}-trace.md`, Buffer.from(trace), { actor: "host", readonly: true });
         if (output && !(await store.get(id)).files.some(f => f.path === `output/results/${runId}.md`)) await store.put(id, `output/results/${runId}-partial.md`, Buffer.from(output), { actor: "host", readonly: true });
         changed();
@@ -156,7 +156,9 @@ async function runTarget(target: TargetBinding, token: string, conversationId: s
             if (sent) throw new Error("Duplicate session.ready");
             sent = true;
             submitting();
-            ws.send(JSON.stringify({ type: "client.message", run_id: runId, client_message_id: runId, conversation_id: conversationId, message: { role: "user", content: message } }));
+            const request = { type: "client.message", run_id: runId, client_message_id: runId, conversation_id: conversationId, message: { role: "user", content: message } };
+            ws.send(JSON.stringify(request));
+            observe(request);
           } else if (event.type === "tool_call.request") throw new Error("Runtime requested a local extension despite local_tools=[]; no local executor exists");
           else if (event.type === "turn.failed" && (!event.run_id || event.run_id === runId)) throw new Error(`Target failed: ${event.error?.code ?? "unknown"}`);
           else if (event.run_id === runId && event.type === "turn.completed") { if (event.finish_reason !== "stop") throw new Error(`Target finish: ${event.finish_reason}`); completed = true; }
