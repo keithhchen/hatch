@@ -473,10 +473,12 @@ test("task_start persists a model turn, assembles it, and hides it only from vis
   socket.close();
 });
 
-test("visible history preserves guarded text and tool interleave order", async () => {
+for (const guardEnabled of [true, false]) {
+test(`visible history preserves text and tool interleave order (guard=${guardEnabled})`, async () => {
   const dataDir = await tempWorkspace();
   const store = new RuntimeStore(dataDir);
-  const beforeTool = "A".repeat(DEFAULT_OUTPUT_GUARD_FIRST_SEGMENT_CHARS + 1);
+  const beforeTool = guardEnabled ? "A".repeat(DEFAULT_OUTPUT_GUARD_FIRST_SEGMENT_CHARS + 1) : "A";
+  const firstBoundary = guardEnabled ? DEFAULT_OUTPUT_GUARD_FIRST_SEGMENT_CHARS : beforeTool.length;
   const afterTool = "After the tool.";
   const runtime: AgentRuntime = {
     async *run(input) {
@@ -516,6 +518,7 @@ test("visible history preserves guarded text and tool interleave order", async (
   };
   runtimeServer = createRuntimeServer({
     conversationStore: store,
+    ...(guardEnabled ? { outputGuard: { async check() { return "pass" as const; } } } : {}),
     createRuntime: () => runtime
   });
   const serverUrl = await listen(runtimeServer);
@@ -547,16 +550,17 @@ test("visible history preserves guarded text and tool interleave order", async (
   const assistant = visible.find((message) => message.role === "assistant");
   assert.equal(assistant?.content, `${beforeTool}${afterTool}`);
   assert.deepEqual(assistant?.parts, [
-    { type: "text", start: 0, end: DEFAULT_OUTPUT_GUARD_FIRST_SEGMENT_CHARS },
+    { type: "text", start: 0, end: firstBoundary },
     { type: "tool_call", tool_call_id: "call_interleave" },
     {
       type: "text",
-      start: DEFAULT_OUTPUT_GUARD_FIRST_SEGMENT_CHARS,
+      start: firstBoundary,
       end: beforeTool.length + afterTool.length
     }
   ]);
   socket.close();
 });
+}
 
 test("Output Guard releases passed segments but commits only a blocked terminal marker", async () => {
   const dataDir = await tempWorkspace();
