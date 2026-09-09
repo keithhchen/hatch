@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { draftAttachmentReference } from "./conversation-draft.js";
 import { createConversationSessionManager } from "./conversation-session.js";
+import { DesktopComposerInput } from "./desktop-composer-input.jsx";
 import { createRoot } from "react-dom/client";
 import "@hatch/ui/fonts";
 import "@hatch/ui/theme.css";
@@ -28,7 +29,6 @@ import {
   MessagePartPrimitive,
   MessagePrimitive,
   ThreadPrimitive,
-  unstable_useComposerInput,
   useExternalStoreRuntime,
   useMessage
 } from "@assistant-ui/react";
@@ -4239,51 +4239,6 @@ function ComposerControls({ droppedFiles = [], attachmentsDisabled = false, work
         />
       </div>
     </div>
-  );
-}
-
-/**
- * assistant-ui owns the live composer value. This thin adapter mirrors text
- * changes into the native per-window session and restores a draft only when
- * the window context is ready or the active Conversation changes. It avoids
- * passing a competing `value` prop to ComposerPrimitive.Input, which would
- * interfere with its IME and autosize behavior.
- */
-function DesktopComposerInput({
-  draftKey,
-  initialDraft,
-  restoreDraftNonce,
-  restoreDraftValue,
-  ready,
-  onDraftChange,
-  ...props
-}) {
-  const { setText } = unstable_useComposerInput();
-  const appliedKeyRef = useRef(null);
-  const appliedRestoreNonceRef = useRef(0);
-
-  useLayoutEffect(() => {
-    if (!ready) {
-      appliedKeyRef.current = null;
-      setText("");
-      return;
-    }
-    if (appliedKeyRef.current === draftKey) return;
-    appliedKeyRef.current = draftKey;
-    setText(String(initialDraft || ""));
-  }, [draftKey, initialDraft, ready, setText]);
-
-  useEffect(() => {
-    if (!ready || appliedRestoreNonceRef.current === restoreDraftNonce) return;
-    appliedRestoreNonceRef.current = restoreDraftNonce;
-    setText(String(restoreDraftValue || ""));
-  }, [ready, restoreDraftNonce, restoreDraftValue, setText]);
-
-  return (
-    <ComposerPrimitive.Input
-      {...props}
-      onChange={(event) => onDraftChange?.(event.target.value)}
-    />
   );
 }
 
