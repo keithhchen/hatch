@@ -242,9 +242,13 @@ type ClearedToolCalls = (
 
 impl NativeToolAuthorityState {
     fn is_revoked(&self, window: &str, context_id: &str, run_id: &str) -> Result<bool, String> {
-        let Some(revoked) = self.revoked_contexts.get(context_id) else { return Ok(false); };
+        let Some(revoked) = self.revoked_contexts.get(context_id) else {
+            return Ok(false);
+        };
         if revoked.window_label != window || revoked.run_id != run_id {
-            return Err("run_tool_context_mismatch: Context does not belong to this window/run".into());
+            return Err(
+                "run_tool_context_mismatch: Context does not belong to this window/run".into(),
+            );
         }
         Ok(true)
     }
@@ -256,7 +260,9 @@ impl NativeToolAuthorityState {
         run_id: &str,
     ) -> Result<&RunToolContext, String> {
         if self.is_revoked(window, context_id, run_id)? {
-            return Err("run_tool_context_revoked: This window/run context has already been revoked".into());
+            return Err(
+                "run_tool_context_revoked: This window/run context has already been revoked".into(),
+            );
         }
         let context = self
             .contexts
@@ -285,10 +291,13 @@ impl NativeToolAuthorityState {
             .collect::<std::collections::HashSet<_>>();
         for id in &removed {
             if let Some(context) = self.contexts.remove(id) {
-                self.revoked_contexts.insert(id.clone(), RevokedRunToolContext {
-                    window_label: context.window_label,
-                    run_id: context.run_id,
-                });
+                self.revoked_contexts.insert(
+                    id.clone(),
+                    RevokedRunToolContext {
+                        window_label: context.window_label,
+                        run_id: context.run_id,
+                    },
+                );
             }
         }
         let pending_keys = self
@@ -387,12 +396,25 @@ impl NativeToolAuthority {
             .lock()
             .map_err(|_| "Native tool authority is unavailable")?;
         let (status, calls) = if state.is_revoked(window, context_id, run_id)? {
-            (RunToolContextClearStatus::AlreadyRevoked, (Vec::new(), Vec::new()))
+            (
+                RunToolContextClearStatus::AlreadyRevoked,
+                (Vec::new(), Vec::new()),
+            )
         } else {
             let context = state.context(window, context_id, run_id)?.clone();
-            (RunToolContextClearStatus::Cleared, state.clear_matching(|candidate| candidate == &context))
+            (
+                RunToolContextClearStatus::Cleared,
+                state.clear_matching(|candidate| candidate == &context),
+            )
         };
-        Ok((RunToolContextClearance { status, context_id: context_id.into(), run_id: run_id.into() }, calls))
+        Ok((
+            RunToolContextClearance {
+                status,
+                context_id: context_id.into(),
+                run_id: run_id.into(),
+            },
+            calls,
+        ))
     }
 
     fn clear_all(&self) -> Result<ClearedToolCalls, String> {
@@ -1601,7 +1623,8 @@ fn clear_window_tool_context(
     run_id: String,
     authority: State<'_, NativeToolAuthority>,
 ) -> Result<RunToolContextClearance, String> {
-    let (outcome, (pending, active)) = authority.clear_context(window.label(), &context_id, &run_id)?;
+    let (outcome, (pending, active)) =
+        authority.clear_context(window.label(), &context_id, &run_id)?;
     record_pending_outcomes(
         pending,
         "tool_context_cleared",
@@ -2975,13 +2998,24 @@ mod tests {
         let mut tokens = Vec::new();
         for window in ["closing-window", "surviving-window"] {
             for run in ["run-a", "run-b"] {
-                let id = authority.set_context(run_context(
-                    window, run, run, run, ChangePermissionPolicy::AskBeforeChanges,
-                )).unwrap().context_id;
+                let id = authority
+                    .set_context(run_context(
+                        window,
+                        run,
+                        run,
+                        run,
+                        ChangePermissionPolicy::AskBeforeChanges,
+                    ))
+                    .unwrap()
+                    .context_id;
                 let active = WindowToolCallKey::new(window, &id, run, "active-tool");
                 let pending = WindowToolCallKey::new(window, &id, run, "pending-tool");
-                authority.submit(active.clone(), run_call(run, "active-tool", "file_read")).unwrap();
-                authority.submit(pending.clone(), run_call(run, "pending-tool", "shell_exec")).unwrap();
+                authority
+                    .submit(active.clone(), run_call(run, "active-tool", "file_read"))
+                    .unwrap();
+                authority
+                    .submit(pending.clone(), run_call(run, "pending-tool", "shell_exec"))
+                    .unwrap();
                 let token = Arc::new(AtomicBool::new(false));
                 authority.register_job(&active, token.clone()).unwrap();
                 active_keys.push(active);
@@ -2995,7 +3029,10 @@ mod tests {
         super::cancel_active_tool_calls(&active);
         for index in 0..4 {
             assert_eq!(tokens[index].load(Ordering::Acquire), index < 2);
-            assert_eq!(authority.validate_key(&active_keys[index]).is_err(), index < 2);
+            assert_eq!(
+                authority.validate_key(&active_keys[index]).is_err(),
+                index < 2
+            );
             if index < 2 {
                 assert!(authority.approve(&pending_keys[index]).is_err());
                 assert!(authority.poll_result(&active_keys[index]).is_err());
@@ -3010,7 +3047,10 @@ mod tests {
             assert!(token.load(Ordering::Acquire));
             assert!(authority.validate_key(key).is_err());
             super::complete_local_tool_job(&key.registry_key(), json!({ "status": "error" }));
-            super::local_tool_results().lock().unwrap().remove(&key.registry_key());
+            super::local_tool_results()
+                .lock()
+                .unwrap()
+                .remove(&key.registry_key());
         }
         let state = authority.state.lock().unwrap();
         assert!(state.contexts.is_empty());
@@ -3023,14 +3063,28 @@ mod tests {
         use super::RunToolContextClearStatus::{AlreadyRevoked, Cleared};
         for path in ["context", "window", "logout", "workspace"] {
             let authority = NativeToolAuthority::default();
-            let id = authority.set_context(run_context("window", "conversation", "run", "grant", ChangePermissionPolicy::AskBeforeChanges)).unwrap().context_id;
+            let id = authority
+                .set_context(run_context(
+                    "window",
+                    "conversation",
+                    "run",
+                    "grant",
+                    ChangePermissionPolicy::AskBeforeChanges,
+                ))
+                .unwrap()
+                .context_id;
             let key = WindowToolCallKey::new("window", &id, "run", "tool");
-            authority.submit(key.clone(), run_call("run", "tool", "shell_exec")).unwrap();
+            authority
+                .submit(key.clone(), run_call("run", "tool", "shell_exec"))
+                .unwrap();
             let calls = match path {
                 "context" => {
                     let (outcome, calls) = authority.clear_context("window", &id, "run").unwrap();
                     assert_eq!(outcome.status, Cleared);
-                    assert_eq!(serde_json::to_value(outcome).unwrap(), json!({"status":"cleared", "context_id":id, "run_id":"run"}));
+                    assert_eq!(
+                        serde_json::to_value(outcome).unwrap(),
+                        json!({"status":"cleared", "context_id":id, "run_id":"run"})
+                    );
                     calls
                 }
                 "window" => authority.clear_window("window").unwrap(),
@@ -3041,50 +3095,119 @@ mod tests {
             for _ in 0..2 {
                 let (outcome, calls) = authority.clear_context("window", &id, "run").unwrap();
                 assert_eq!(outcome.status, AlreadyRevoked);
-                assert_eq!(serde_json::to_value(outcome).unwrap(), json!({"status":"already_revoked", "context_id":id, "run_id":"run"}));
+                assert_eq!(
+                    serde_json::to_value(outcome).unwrap(),
+                    json!({"status":"already_revoked", "context_id":id, "run_id":"run"})
+                );
                 assert!(calls.0.is_empty() && calls.1.is_empty());
             }
-            assert!(authority.submit(key.clone(), run_call("run", "tool", "shell_exec")).err().unwrap().starts_with("run_tool_context_revoked:"));
-            assert!(authority.approve(&key).unwrap_err().starts_with("run_tool_context_revoked:"));
-            assert!(authority.deny(&key).unwrap_err().starts_with("run_tool_context_revoked:"));
-            assert!(authority.cancel_pending(&key).unwrap_err().starts_with("run_tool_context_revoked:"));
-            assert!(authority.poll_result(&key).unwrap_err().starts_with("run_tool_context_revoked:"));
+            assert!(authority
+                .submit(key.clone(), run_call("run", "tool", "shell_exec"))
+                .err()
+                .unwrap()
+                .starts_with("run_tool_context_revoked:"));
+            assert!(authority
+                .approve(&key)
+                .unwrap_err()
+                .starts_with("run_tool_context_revoked:"));
+            assert!(authority
+                .deny(&key)
+                .unwrap_err()
+                .starts_with("run_tool_context_revoked:"));
+            assert!(authority
+                .cancel_pending(&key)
+                .unwrap_err()
+                .starts_with("run_tool_context_revoked:"));
+            assert!(authority
+                .poll_result(&key)
+                .unwrap_err()
+                .starts_with("run_tool_context_revoked:"));
         }
     }
 
     #[test]
     fn revoked_context_never_acknowledges_other_windows_runs_or_unknown_ids() {
         let authority = NativeToolAuthority::default();
-        let context = run_context("window-a", "conversation", "run-a", "grant", ChangePermissionPolicy::AllowChanges);
+        let context = run_context(
+            "window-a",
+            "conversation",
+            "run-a",
+            "grant",
+            ChangePermissionPolicy::AllowChanges,
+        );
         let old = authority.set_context(context.clone()).unwrap().context_id;
         authority.clear_all().unwrap();
         for (window, run) in [("window-b", "run-a"), ("window-a", "run-b")] {
-            assert!(authority.clear_context(window, &old, run).unwrap_err().starts_with("run_tool_context_mismatch:"));
+            assert!(authority
+                .clear_context(window, &old, run)
+                .unwrap_err()
+                .starts_with("run_tool_context_mismatch:"));
             let key = WindowToolCallKey::new(window, &old, run, "tool");
-            assert!(authority.poll_result(&key).unwrap_err().starts_with("run_tool_context_mismatch:"));
-            assert!(authority.cancel_pending(&key).unwrap_err().starts_with("run_tool_context_mismatch:"));
+            assert!(authority
+                .poll_result(&key)
+                .unwrap_err()
+                .starts_with("run_tool_context_mismatch:"));
+            assert!(authority
+                .cancel_pending(&key)
+                .unwrap_err()
+                .starts_with("run_tool_context_mismatch:"));
         }
-        assert!(authority.clear_context("window-a", "unknown", "run-a").unwrap_err().starts_with("run_tool_context_missing:"));
+        assert!(authority
+            .clear_context("window-a", "unknown", "run-a")
+            .unwrap_err()
+            .starts_with("run_tool_context_missing:"));
         // A later login may register the same logical run. Its new handle must
         // never be cleared by a delayed cleanup from the previous login.
         let fresh = authority.set_context(context).unwrap().context_id;
         assert_ne!(old, fresh);
         authority.clear_context("window-a", &old, "run-a").unwrap();
-        assert!(authority.validate_key(&WindowToolCallKey::new("window-a", fresh, "run-a", "tool")).is_ok());
+        assert!(authority
+            .validate_key(&WindowToolCallKey::new("window-a", fresh, "run-a", "tool"))
+            .is_ok());
     }
 
     #[test]
     fn revoked_context_concurrent_clear_has_one_first_revoker() {
         use super::RunToolContextClearStatus::{AlreadyRevoked, Cleared};
         let authority = NativeToolAuthority::default();
-        let id = authority.set_context(run_context("window", "conversation", "run", "grant", ChangePermissionPolicy::AllowChanges)).unwrap().context_id;
+        let id = authority
+            .set_context(run_context(
+                "window",
+                "conversation",
+                "run",
+                "grant",
+                ChangePermissionPolicy::AllowChanges,
+            ))
+            .unwrap()
+            .context_id;
         let outcomes = std::thread::scope(|scope| {
-            let first = scope.spawn(|| authority.clear_context("window", &id, "run").unwrap().0.status);
-            let second = scope.spawn(|| authority.clear_context("window", &id, "run").unwrap().0.status);
+            let first = scope.spawn(|| {
+                authority
+                    .clear_context("window", &id, "run")
+                    .unwrap()
+                    .0
+                    .status
+            });
+            let second = scope.spawn(|| {
+                authority
+                    .clear_context("window", &id, "run")
+                    .unwrap()
+                    .0
+                    .status
+            });
             [first.join().unwrap(), second.join().unwrap()]
         });
-        assert_eq!(outcomes.iter().filter(|status| **status == Cleared).count(), 1);
-        assert_eq!(outcomes.iter().filter(|status| **status == AlreadyRevoked).count(), 1);
+        assert_eq!(
+            outcomes.iter().filter(|status| **status == Cleared).count(),
+            1
+        );
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|status| **status == AlreadyRevoked)
+                .count(),
+            1
+        );
     }
 
     #[test]
