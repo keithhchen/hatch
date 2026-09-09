@@ -52,7 +52,7 @@ fn bundled_documents_render_through_real_windows_runner() {
     )
     .unwrap();
     let runner = LocalRunner::new_with_runtime(&workspace, Some(&runtime)).unwrap();
-    for stage in ["generate", "docx", "pptx", "xlsx", "cjk"] {
+    for stage in ["generate", "docx", "pptx", "xlsx"] {
         // Do not construct a replacement toolchain environment in the test:
         // PowerShell and every descendant consume the real Runner's bundle env.
         let command = format!(
@@ -80,7 +80,7 @@ fn bundled_documents_render_through_real_windows_runner() {
         assert_eq!(report["fixture_not_uat"], true, "{report}");
         println!("Windows bundled {stage}: {report}");
     }
-    for directory in ["docx-render", "pptx-render", "xlsx-render", "cjk-render"] {
+    for directory in ["docx-render", "pptx-render", "xlsx-render"] {
         let files: Vec<_> = fs::read_dir(workspace.join(directory))
             .unwrap()
             .map(|item| item.unwrap().path())

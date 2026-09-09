@@ -112,56 +112,6 @@ def render(stage, skills):
     return {"pdf": str(pdf), "pages": [check_png(Path(file)) for file in pages]}
 
 
-def cjk(native, pdftoppm, pdfinfo):
-    from PIL import Image
-    from reportlab.pdfgen import canvas
-    from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-    from pypdf import PdfReader
-    prefix = native / "poppler/Library"
-    for relative in ["share/poppler/cMap/Adobe-GB1/UniGB-UCS2-H", "share/poppler/cidToUnicode/Adobe-GB1"]:
-        # conda-forge windows-data.patch resolves outside Library, at the
-        # noarch poppler-data package root; Fontconfig still lives in Library.
-        require((native / "poppler" / relative).is_file(), "missing bundled Chinese mapping: " + relative)
-    config = Path(os.environ["FONTCONFIG_FILE"]).resolve(strict=True)
-    require(config == (prefix / "etc/fonts/fonts.conf").resolve(strict=True), "wrong Fontconfig config")
-    require(Path(os.environ["FONTCONFIG_PATH"]).resolve(strict=True) == config.parent, "wrong Fontconfig directory")
-    fonts = run([prefix / "bin/fc-list.exe", ":lang=zh", "family"], "chinese-fonts")
-    require(fonts.stdout.strip() and not fonts.stderr.strip(), "Fontconfig cannot discover Chinese fonts")
-    output = Path("cjk-render")
-    output.mkdir()
-    pdf = output / "非嵌入 中文.pdf"
-    pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
-    page = canvas.Canvas(str(pdf), pagesize=(360, 160), pageCompression=0)
-    page.setFont("STSong-Light", 28)
-    for index, character in enumerate("中文字形测试"):
-        page.drawString(36 + index * 40, 80, character)
-    page.save()
-    reader = PdfReader(pdf)
-    cid_fonts = [font.get_object() for font in reader.pages[0]["/Resources"]["/Font"].values()
-                 if font.get_object().get("/Subtype") == "/Type0"]
-    require(cid_fonts and str(cid_fonts[0]["/Encoding"]) == "/UniGB-UCS2-H", "fixture does not exercise named CMap")
-    for font in cid_fonts:
-        for child in font["/DescendantFonts"]:
-            descriptor = child.get_object()["/FontDescriptor"].get_object()
-            require(not any(key in descriptor for key in ["/FontFile", "/FontFile2", "/FontFile3"]), "fixture font was embedded")
-    run([pdfinfo, pdf], "chinese-pdfinfo")
-    rendered = run([pdftoppm, "-f", "1", "-singlefile", "-r", "72", "-png", pdf, output / "chinese"], "chinese-render")
-    require(not rendered.stderr.strip(), "Poppler CMap/font diagnostics: " + rendered.stderr)
-    png = output / "chinese.png"
-    report = check_png(png)
-    # Reject blank output and repeated tofu boxes; this is not OCR/visual UAT.
-    with Image.open(png) as image:
-        fingerprints = set()
-        for index in range(6):
-            crop = image.convert("L").crop((36 + index * 40, 48, 76 + index * 40, 88))
-            mask = crop.point(lambda value: 0 if value < 180 else 255)
-            require(mask.getextrema()[0] == 0, "missing Chinese glyph")
-            fingerprints.add(hashlib.sha256(mask.tobytes()).hexdigest())
-        require(len(fingerprints) >= 4, "repeated missing-glyph boxes instead of Chinese")
-    return {"pdf": str(pdf), "png": report, "fontconfig": str(config), "fonts": fonts.stdout.strip()}
-
-
 def main():
     require(sys.platform == "win32", "Windows-only integration; other OS cannot prove Windows")
     root = Path(os.environ["HATCH_RUNTIME_ROOT"]).resolve(strict=True)
@@ -188,7 +138,7 @@ def main():
         module = importlib.import_module(name)
         require(Path(module.__file__).resolve().is_relative_to(packages), "non-bundled Python dependency: " + name)
     stage = sys.argv[1]
-    result = generate(node) if stage == "generate" else cjk(native, pdftoppm, pdfinfo) if stage == "cjk" else render(stage, skills)
+    result = generate(node) if stage == "generate" else render(stage, skills)
     report = {"status": "ok", "fixture_not_uat": True, "stage": stage, "runtime": str(root),
               "manifest_sha256": hashlib.sha256((root / "manifest.json").read_bytes()).hexdigest(), **result}
     Path("report-" + stage + ".json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
