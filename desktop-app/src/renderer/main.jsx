@@ -62,7 +62,6 @@ import {
 import "streamdown/styles.css";
 import "./styles.css";
 import {
-  DEFAULT_CREATOR_AGENT,
   DEFAULT_PERMISSION_POLICY,
   PERMISSION_OPTIONS,
   creatorAgentFromBoundSession,
@@ -508,7 +507,9 @@ function App() {
   const [composerDraft, setComposerDraft] = sessionStateField("composerDraft");
   const [composerRestoreRequest, setComposerRestoreRequest] = sessionStateField("composerRestoreRequest");
   const [approvalRequests, setApprovalRequests] = sessionStateField("approvalRequests");
-  const [creatorAgent, setCreatorAgent] = useState(DEFAULT_CREATOR_AGENT);
+  const creatorAgent = sessionState.creatorAgent ?? creatorAgentFromEntitlement(
+    creatorAgentEntitlements.find((item) => item.entitlement_id === selectedEntitlementId)
+  );
   const [sidebarPreference, setSidebarPreference] = useState("open");
   const [sidebarWidth, setSidebarWidth] = useState(DESKTOP_LAYOUT.sidebar.default);
   const [inspectorPreference, setInspectorPreference] = useState("open");
@@ -874,7 +875,6 @@ function App() {
     setBuyerSession(session);
     setCreatorAgentEntitlements(entitlements);
     setSelectedEntitlementId(selected?.entitlement_id || "");
-    setCreatorAgent(selected ? creatorAgentFromEntitlement(selected) : DEFAULT_CREATOR_AGENT);
     setEntitlementError(launchBinding && !selected
       ? "This Conversation window's Creator Agent binding is no longer available in this account."
       : "");
@@ -891,7 +891,6 @@ function App() {
     setBuyerSession(session);
     setCreatorAgentEntitlements([]);
     setSelectedEntitlementId("");
-    setCreatorAgent(DEFAULT_CREATOR_AGENT);
     setStartupError("");
     setAuthState("unsupported-role");
     setSignInStatus("ready");
@@ -940,7 +939,6 @@ function App() {
     setCreatorAgentEntitlements([]);
     setEntitlementError("");
     setSelectedEntitlementId("");
-    setCreatorAgent(DEFAULT_CREATOR_AGENT);
     setMessages([]);
     setComposerDraftValue("");
     viewportScrollTopRef.current = 0;
@@ -1753,7 +1751,6 @@ function App() {
     }
     if (selectedEntitlementId !== selected.entitlement_id) {
       setSelectedEntitlementId(selected.entitlement_id);
-      setCreatorAgent(creatorAgentFromEntitlement(selected));
       setEntitlementError("");
     }
   }, [creatorAgentEntitlements, selectedEntitlementId, signedIn, windowContextReady]);
@@ -2464,7 +2461,7 @@ function App() {
         selectedEntitlement,
         creatorAgent
       );
-      if (sessionManager.isSelected(conversationSession)) setCreatorAgent(nextAgent);
+      conversationSession.set("creatorAgent", nextAgent);
       if (sessionManager.isSelected(conversationSession) && nextAgent.briefSpec) {
         setBriefTask((current) => {
           if (!current || current.status !== "editing") return current;
@@ -3302,7 +3299,6 @@ function App() {
       });
     }
     setSelectedEntitlementId(entitlement.entitlement_id);
-    setCreatorAgent(creatorAgentFromEntitlement(entitlement));
     setBriefTask(null);
     setProfileSetting("last_selected_entitlement_id", entitlement.entitlement_id);
     if (!sameEntitlement) {

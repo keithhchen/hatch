@@ -89,7 +89,7 @@ function bind(w, id, entitlementId = "agent-a") {
     draftKey: JSON.stringify(["account", id]), ...Object.fromEntries(["navigationRequestRef", "selectedEntitlementIdRef", "windowContextRef"].map((name) => [name, w[name]])),
     viewportRef: { current: w.viewport }, invokeTauri: w.native, errorMessage: (error) => error.message,
     stableRandomId: () => `identity_${++w.sequence}`,
-    setCreatorAgent: vi.fn(), setBriefTask: vi.fn(), setConversationId: (value) => { w.selectedId = value; },
+    setBriefTask: vi.fn(), setConversationId: (value) => { w.selectedId = value; },
     settingsStoreRef: { current: { clearProfileKey: vi.fn() } },
     getConversationSnapshot: vi.fn(async () => ({ messages: [], runs: [], events: [], cursor: 0, has_more: false })),
     getConversationJournalPage: vi.fn(async () => ({ events: [], runs: [], cursor: 0, through_cursor: 0, has_more: false })),
@@ -143,6 +143,23 @@ async function sendText(owner, text) {
   return run;
 }
 describe("production renderer with per-Conversation sessions", () => {
+  it("retains each session's Agent presentation across navigation without another handshake", async () => {
+    const w = world();
+    const a = bind(w, "conv_a");
+    a.c.creatorAgent = { name: "Agent", creator: "A creator" };
+    w.manager.select(a.session);
+    const socketA = await ready(a);
+    const b = bind(w, "conv_b");
+    b.c.creatorAgent = { name: "Agent", creator: "B creator" };
+    w.manager.select(b.session);
+    await ready(b);
+    expect(a.session.snapshot().creatorAgent.creator).toBe("A creator");
+    expect(b.session.snapshot().creatorAgent.creator).toBe("B creator");
+    w.manager.select(a.session);
+    expect(a.session.snapshot().creatorAgent.creator).toBe("A creator");
+    expect(a.c.socketRef.current).toBe(socketA);
+    expect(socketA.close).not.toHaveBeenCalled();
+  });
   it("A→B→A retains exact sockets and runs, routes same-title messages/drafts by immutable identity, and stops only B", async () => {
     const w = world();
     const a = bind(w, "conv_a");
@@ -222,7 +239,8 @@ describe("production renderer with per-Conversation sessions", () => {
     await vi.waitFor(() => expect(a.session.snapshot().connected).toBe(true));
     expect(visible).not.toHaveBeenCalled();
     expect(b.session.snapshot().messages).toEqual([]);
-    expect(a.c.setCreatorAgent).not.toHaveBeenCalled();
+    expect(a.session.snapshot().creatorAgent.name).toBe("Same title");
+    expect(b.session.snapshot().creatorAgent.name).toBe("Same title");
     await sendText(b, "B new question");
     expect(socketB.sent.find((m) => m.type === "client.message").conversation_id).toBe("conv_b");
     expect(socketA.sent.filter((m) => m.type === "client.message")).toHaveLength(0);
@@ -295,7 +313,7 @@ describe("production renderer with per-Conversation sessions", () => {
       authStorageRef: { current: {} }, DEFAULT_AUTH_URL: "https://fixture.invalid", errorMessage: (e) => e.message,
       setSessionCloseError: vi.fn(), setSignInError: vi.fn(),
       startAuthSessionSignOut: vi.fn(() => ({ serverRevoke: Promise.resolve(), localClear })),
-      authState: "signed-in", DEFAULT_CREATOR_AGENT: {},
+      authState: "signed-in",
       setAuthState: (state) => { c.authState = state; }, setBuyerSession: (value) => { c.buyerSession = value; } };
     const reset = appFunction("resetToSignedOut");
     for (const [, name] of reset.matchAll(/\b(\w+Ref)\.current/g)) c[name] ??= { current: null };
