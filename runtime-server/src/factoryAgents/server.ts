@@ -6,12 +6,13 @@ import { WorkbenchRuntime, safeError, type WorkbenchRuntimeOptions } from "./run
 import { hatchTool } from "./hatchTool.js";
 import { corpusTools } from "./corpusTools.js";
 import { evaluationTargets, resolveEvaluationTarget } from "./targets.js";
+import { resolveFactoryLlmProfile } from "../llmProfiles.js";
 
 const targetSchema = z.object({ entitlementId: z.string().uuid().optional(), productId: z.string().uuid(), briefAnswers: z.array(z.object({ field_id: z.string(), value: z.string() }).strict()).optional() }).strict();
 export function publicSession(s: Session) { const { context, ...publicData } = s; return publicData; }
 
 export async function createFactoryHandler(options: { root: string; env?: NodeJS.ProcessEnv; runtime?: WorkbenchRuntimeOptions }) {
-  const env = { ...(options.env ?? process.env) };
+  const env: NodeJS.ProcessEnv = { HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash", ...(options.env ?? process.env) };
   const store = new WorkbenchStore(options.root);
   await store.recover();
   const runtime = new WorkbenchRuntime(store, { env, ...options.runtime, extraTools: options.runtime?.extraTools ?? (async (s, _signal, changed) => s.role === "evaluator" ? [hatchTool(store, s.id, changed, env)] : s.role === "generation" ? corpusTools(store, s.id, changed, env) : []) });
@@ -31,7 +32,7 @@ export async function createFactoryHandler(options: { root: string; env?: NodeJS
         res.once("close", () => { clearInterval(heartbeat); streams.delete(res); runtime.events.off("event", listener); });
         return;
       }
-      if (url.pathname === "/api/config" && req.method === "GET") return json(res, 200, { roles: ROLES, runtimeUrl: env.HATCH_FACTORY_RUNTIME_URL ?? "", services: { kimi: Boolean(env.LLM_API_KEY), search: Boolean(env.TAVILY_API_KEY), scrape: Boolean(env.HATCH_FACTORY_SCRAPE_PROVIDER === "firecrawl" ? env.FIRECRAWL_API_KEY : env.TAVILY_API_KEY), hatch: Boolean(env.HATCH_FACTORY_RUNTIME_URL && (env.HATCH_FACTORY_CREATOR_TOKEN || env.HATCH_FACTORY_AUTH_TOKEN)), corpus: Boolean(env.HATCH_FACTORY_REGISTRY_URL && env.HATCH_FACTORY_CREATOR_TOKEN) } });
+      if (url.pathname === "/api/config" && req.method === "GET") return json(res, 200, { roles: ROLES, runtimeUrl: env.HATCH_FACTORY_RUNTIME_URL ?? "", services: { model: Boolean(env[resolveFactoryLlmProfile(env).apiKeyEnv]?.trim()), search: Boolean(env.TAVILY_API_KEY), scrape: Boolean(env.HATCH_FACTORY_SCRAPE_PROVIDER === "firecrawl" ? env.FIRECRAWL_API_KEY : env.TAVILY_API_KEY), hatch: Boolean(env.HATCH_FACTORY_RUNTIME_URL && (env.HATCH_FACTORY_CREATOR_TOKEN || env.HATCH_FACTORY_AUTH_TOKEN)), corpus: Boolean(env.HATCH_FACTORY_REGISTRY_URL && env.HATCH_FACTORY_CREATOR_TOKEN) } });
 
       if (url.pathname === "/api/evaluation-targets" && req.method === "GET") return json(res, 200, await evaluationTargets(store, env));
       if (url.pathname === "/api/sessions" && req.method === "GET") return json(res, 200, { sessions: (await store.list()).map(s => ({ ...publicSession(s), messages: undefined })) });

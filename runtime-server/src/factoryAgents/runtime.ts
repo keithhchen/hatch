@@ -24,7 +24,7 @@ export class WorkbenchRuntime {
   private runs = new Map<string, Promise<void>>();
   private readonly env: NodeJS.ProcessEnv;
   constructor(readonly store: WorkbenchStore, private options: WorkbenchRuntimeOptions = {}) {
-    this.env = { ...(options.env ?? process.env), HATCH_FACTORY_LLM_PROFILE: "kimi-k2.6" };
+    this.env = { HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash", ...(options.env ?? process.env) };
   }
   emit(id: string, type: string, data: Record<string, unknown> = {}): void { this.events.emit("event", { sessionId: id, type, ...data }); }
   async prompt(role: Role): Promise<string> {
