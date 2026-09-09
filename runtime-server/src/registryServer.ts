@@ -142,7 +142,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const ownsReleasePool = Boolean(releaseDatabaseUrl);
   const releaseStore = new CreatorRegistryReleaseStore(releasePool);
   await releaseStore.ensureSchema();
-  const corpusPublisher = factoryNodeService && nodeObjectStore
+  const corpusPublisher = nodeObjectStore
     ? new CorpusPublisher(factoryNodeService, nodeObjectStore, store, releaseStore, environment.HATCH_RUNTIME_CORPUS_ROOT?.trim() || "runtime-corpora", knowledgeIndexer)
     : undefined;
   if (factoryNodeService && nodeObjectStore && corpusPublisher && nodePersistence) {
@@ -320,22 +320,33 @@ async function route(
     const account = await authenticate(request, response, context, "creator");
     if (account === SESSION_QUERY_REJECTED) return;
     if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
-    if (!context.corpusPublisher || !context.factoryNodeService) {
+    if (!context.corpusPublisher) {
       sendJson(response, 503, { error: { code: "publish_unavailable", message: "Corpus Publisher is unavailable." } });
       return;
     }
     const productId = decodeURIComponent(registryPublishMatch[1]!);
     const product = await productForCreator(context, account.id, productId);
     if (!product) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
-    const body = await readJson(request);
-    let result: Awaited<ReturnType<CorpusPublisher["publishLatest"]>>;
+    const body = await readJson(request, CREATOR_FACTORY_JSON_BODY_MAX_BYTES);
+    let result: Awaited<ReturnType<CorpusPublisher["publishUploaded"]>>;
     try {
-      result = await context.corpusPublisher.publishLatest({
+      const publishInput = {
         creatorId: account.id,
         productId,
         productName: product.name,
         productPromise: product.promise,
         briefSpec: body.brief_spec ?? product.brief_spec
+      };
+      if (!Object.prototype.hasOwnProperty.call(body, "corpus")) {
+        throw new CorpusPublishError("corpus_required", "Agent Generation must submit its System, Skills and Knowledge as corpus.", 422);
+      }
+      // Only this authenticated Product's real uploaded files can be Knowledge.
+      // Publication never runs a Factory Node or selects an older generated candidate.
+      const files = await context.productFileStore.listFiles(account.id, productId);
+      result = await context.corpusPublisher.publishUploaded({
+        ...publishInput,
+        corpus: body.corpus,
+        sourceFiles: files.map(file => file.projection.contentRef),
       });
     } catch (error) {
       if (error instanceof CorpusPublishError) throw error;
@@ -349,7 +360,6 @@ async function route(
     }
     sendJson(response, 201, {
       product_id: productId,
-      execution_id: result.execution_id,
       corpus_ref: result.output_ref,
       corpus_digest: result.corpus_digest,
       release_digest: result.release.release_digest,

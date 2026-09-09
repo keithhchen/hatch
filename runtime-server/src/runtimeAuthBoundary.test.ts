@@ -783,3 +783,36 @@ function waitForSocketMessage(
     socket.once("error", onError);
   });
 }
+
+test("Creator conversation REST uses owned Product authorization without a buyer entitlement", async () => {
+  const corpus = revocableTestCorpus({ ...testEntitlement(), user_id: CREATOR_ID });
+  corpus.product.brief_spec = {
+    contract_version: "1",
+    fields: [{ id: "goal", label: "What do you need?", required: true }]
+  };
+  const runtime = createRuntimeServer({
+    authIdentityResolver: { resolveIdentity: async token => token === "owner-session"
+      ? { sub: CREATOR_ID, role: "creator", exp: Math.floor(Date.now() / 1000) + 3600 }
+      : token === "buyer-session" ? { sub: USER_ID, role: "user", exp: Math.floor(Date.now() / 1000) + 3600 } : undefined },
+    agentCorpusResolver: { resolve: async (creatorId: string, productId: string) => {
+      if (creatorId !== CREATOR_ID || productId !== PRODUCT_ID) throw new EntitlementError("agent_not_found", "Not owned");
+      return { root: "", corpus, digest: `sha256:${"2".repeat(64)}` };
+    } } as unknown as AgentCorpusResolver,
+    conversationRepository: new InMemoryConversationRepository()
+  });
+  await new Promise<void>(resolve => runtime.server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = runtime.server.address(); assert.ok(address && typeof address !== "string");
+    const base = `http://127.0.0.1:${address.port}/v1/conversations`;
+    const create = (token: string, product: string) => fetch(`${base}?product_id=${product}`, {
+      method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ title: "Creator evaluation", client_request_id: "creator-rest-test", brief_answers: [{ field_id: "goal", value: "Review my work" }] })
+    });
+    const created = await create("owner-session", PRODUCT_ID); assert.equal(created.status, 201);
+    const listed = await fetch(`${base}?product_id=${PRODUCT_ID}`, { headers: { authorization: "Bearer owner-session" } });
+    assert.equal(listed.status, 200);
+    assert.notEqual((await create("owner-session", OTHER_USER_ID)).status, 201);
+    assert.notEqual((await create("buyer-session", PRODUCT_ID)).status, 201);
+    assert.notEqual((await create("invalid-session", PRODUCT_ID)).status, 201);
+  } finally { await runtime.close(); }
+});
