@@ -1689,7 +1689,7 @@ mod platform {
         timeout_ms: u64,
         cancel: &AtomicBool,
     ) -> Result<ShellExecOutput> {
-        let mut child = spawn_sandboxed_shell(
+        let child = spawn_sandboxed_shell(
             sandbox_exec,
             workspace,
             scratch,
@@ -1698,6 +1698,20 @@ mod platform {
             command_text,
             &[],
         )?;
+        collect_sandboxed_command(child, workspace, scratch, timeout_ms, cancel)
+    }
+
+    // The production budget still starts immediately after spawn/reader setup;
+    // sandbox-exec/dyld/shell startup is not a promise of command readiness.
+    // Keeping collection separate also lets a real-process regression establish
+    // that bytes were written before checking their survival across timeout.
+    fn collect_sandboxed_command(
+        mut child: SandboxedChild,
+        workspace: &Path,
+        scratch: &Path,
+        timeout_ms: u64,
+        cancel: &AtomicBool,
+    ) -> Result<ShellExecOutput> {
         let mut stdout_pipe = child.take_stdout()?;
         let mut stderr_pipe = child.take_stderr()?;
 
@@ -2092,6 +2106,59 @@ mod platform {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn timeout_preserves_stdout_and_stderr_written_before_deadline() {
+            let directory = tempfile::tempdir_in("/tmp").unwrap();
+            let workspace = directory.path().canonicalize().unwrap();
+            let mut scratch = ScratchDirectory::create(&workspace).unwrap();
+            let backend = Path::new("/usr/bin/sandbox-exec");
+            verify_seatbelt(backend, &workspace, scratch.path()).unwrap();
+            let mut child = spawn_sandboxed_shell(
+                backend, &workspace, scratch.path(), None, None,
+                "printf before-timeout; printf before-timeout-stderr >&2; : > output-ready; exec /bin/sleep 30",
+                &[],
+            )
+            .unwrap();
+            let group = child.process_group;
+            // Readiness is ordered AFTER both printf writes. No readers have
+            // started yet, so these bytes must be drained from the actual OS
+            // pipes by the production collector, even after it kills the group.
+            // This separate bounded setup wait does not change product timeout.
+            let startup_deadline = Instant::now() + Duration::from_secs(15);
+            while !workspace.join("output-ready").exists() {
+                assert!(
+                    child.try_wait().unwrap().is_none(),
+                    "sandboxed writer exited before readiness"
+                );
+                assert!(
+                    Instant::now() < startup_deadline,
+                    "sandboxed writer never became ready"
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+            let output = collect_sandboxed_command(
+                child,
+                &workspace,
+                scratch.path(),
+                100,
+                &AtomicBool::new(false),
+            )
+            .unwrap();
+            assert!(output.timed_out);
+            assert_ne!(output.exit_code, 0);
+            assert_eq!(output.stdout, "before-timeout");
+            assert_eq!(output.stderr, "before-timeout-stderr");
+            assert!(!output.stdout_truncated);
+            assert!(!output.stderr_truncated);
+            assert!(
+                !process_group_exists(group).unwrap(),
+                "timeout left a live process group"
+            );
+            let scratch_path = scratch.path().to_path_buf();
+            scratch.cleanup().unwrap();
+            assert!(!scratch_path.exists());
+        }
 
         #[test]
         fn missing_backend_fails_closed_without_running_the_command() {

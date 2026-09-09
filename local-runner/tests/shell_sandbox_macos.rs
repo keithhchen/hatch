@@ -576,9 +576,20 @@ fn best_effort_output_filter_covers_direct_file_url_hex_and_base64_paths() {
 #[test]
 fn preserves_timeout_and_bounded_output_semantics() {
     let fixture = ShellFixture::new();
-    let timeout = fixture.run_with_timeout("printf before-timeout; /bin/sleep 10", 100);
+    // 100ms includes sandbox-exec/dyld/shell startup, so it cannot guarantee
+    // that an initial printf ran on a loaded Intel CI host. Exercise the short
+    // budget before deliberately delayed output here. Exact preservation of
+    // already-written stdout AND stderr is tested with a readiness handshake
+    // against the same production collector in shell::platform::tests.
+    let timeout = fixture.run_with_timeout(
+        "/bin/sleep 10; printf after-timeout; printf after-timeout-stderr >&2; : > timeout-escaped",
+        100,
+    );
     assert_eq!(timeout["timed_out"], true);
-    assert_eq!(timeout["stdout"], "before-timeout");
+    assert_ne!(timeout["exit_code"], 0);
+    assert_eq!(timeout["stdout"], "");
+    assert_eq!(timeout["stderr"], "");
+    assert!(!fixture.workspace.join("timeout-escaped").exists());
 
     // Output truncation must not depend on producing 1 MiB within 100ms on
     // a shared CI runner. Emit a finite 2 MiB and test timeout independently.
