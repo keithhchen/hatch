@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { chmod, cp, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readdir, readFile, readlink, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 
 const execFileAsync = promisify(execFile);
 
@@ -88,7 +89,8 @@ export async function prepareNativeRuntime({ stagingRoot, cacheRoot, target }) {
     path.join(popplerRoot, "Library", "bin")
   ]);
   const popplerPackages = await readPopplerPackages(popplerRoot);
-  await writeThirdPartyNotices(nativeRoot, target, popplerPackages);
+  const popplerBuild = popplerExecutablePaths.buildRecord ?? null;
+  await writeThirdPartyNotices(nativeRoot, target, popplerPackages, popplerBuild);
 
   return {
     root: nativeRoot,
@@ -96,6 +98,7 @@ export async function prepareNativeRuntime({ stagingRoot, cacheRoot, target }) {
     binaries,
     pathEntries,
     popplerPackages,
+    popplerBuild,
     libreOfficeTrimmed: libreOfficeInstall.trimmed
   };
 }
@@ -195,7 +198,10 @@ async function trimLibreOfficeForHeadless({ destination, executable, target }) {
 async function installPoppler({ micromambaPath, cacheRoot, destination, target }) {
   const cachedEnvironment = path.join(cacheRoot, "poppler-environment");
   const cachedExecutables = await locatePopplerExecutables(cachedEnvironment, target.platform);
-  if (!cachedExecutables) {
+  const cachedIdentity = cachedExecutables
+    ? await validatePopplerCache({ root: cachedEnvironment, poppler: target.native.poppler }).catch(() => null)
+    : null;
+  if (!cachedIdentity) {
     await rm(cachedEnvironment, { recursive: true, force: true });
     const mambaRoot = path.join(cacheRoot, "micromamba-root");
     await mkdir(mambaRoot, { recursive: true });
@@ -228,14 +234,226 @@ async function installPoppler({ micromambaPath, cacheRoot, destination, target }
   if (!executables) {
     throw new Error(`Poppler ${target.native.poppler.packageSpec} did not produce pdftoppm and pdfinfo.`);
   }
-  await rm(destination, { recursive: true, force: true });
-  await cp(cachedEnvironment, destination, { recursive: true, force: true });
+  const packageIdentity = await validatePopplerCache({ root: cachedEnvironment, poppler: target.native.poppler });
+  await stagePopplerEnvironment({ source: cachedEnvironment, destination, platform: target.platform });
+  let buildRecord = null;
+  if (target.platform === "darwin") {
+    buildRecord = await buildRelocatablePopplerTools({ popplerRoot: destination, cacheRoot, packageIdentity });
+  }
   const installed = await locatePopplerExecutables(destination, target.platform);
   if (!installed) throw new Error("The staged Poppler environment is incomplete after copying.");
-  return installed;
+  return { ...installed, buildRecord };
 }
 
-async function writeMacWrappers({ nativeRoot, binaries, libreOfficeExecutable, popplerExecutablePaths }) {
+export async function validatePopplerCache({ root, poppler }) {
+  const spec = /^poppler=([^=]+)=([^=]+)$/.exec(poppler.packageSpec);
+  if (!spec) throw new Error(`Poppler cache requires an exact version/build packageSpec: ${poppler.packageSpec}`);
+  const packages = await readPopplerPackages(root);
+  const matches = packages.filter(item => item.name === "poppler");
+  if (matches.length !== 1) throw new Error("Poppler cache must have exactly one conda package record");
+  const record = matches[0];
+  if (record.version !== spec[1] || record.build !== spec[2] || record.subdir !== poppler.platform
+      || record.channel !== poppler.channel) {
+    throw new Error(`Poppler cache identity mismatch: expected ${poppler.channel}/${poppler.platform}/${poppler.packageSpec}, got ${JSON.stringify(record)}`);
+  }
+  return record;
+}
+
+// Read-only closure check: preserve links, reject dangling/cyclic, absolute or
+// escaping links. Do not follow symlink directories during traversal.
+export async function verifySymlinkClosure(root) {
+  const canonicalRoot = await realpath(root);
+  let count = 0;
+  async function visit(directory) {
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const file = path.join(directory, entry.name);
+      if (entry.isSymbolicLink()) {
+        const target = await readlink(file);
+        if (path.isAbsolute(target)) throw new Error(`Non-relocatable absolute symlink: ${file} -> ${target}`);
+        const resolved = await realpath(file).catch(error => { throw new Error(`Unresolvable symlink: ${file}: ${error.code}`); });
+        const relative = path.relative(canonicalRoot, resolved);
+        if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+          throw new Error(`Symlink escapes runtime: ${file} -> ${resolved}`);
+        }
+        count++;
+      } else if (entry.isDirectory()) await visit(file);
+    }
+  }
+  await visit(canonicalRoot);
+  return { checked_links: count, absolute_links: 0, escaping_links: 0, unresolved_links: 0 };
+}
+
+export async function stagePopplerEnvironment({ source, destination, platform }) {
+  await rm(destination, { recursive: true, force: true });
+  // Node otherwise resolves relative symlinks against the build prefix, including
+  // dylib aliases needed by Fontconfig. Preserve the package's relocatable links.
+  await cp(source, destination, { recursive: true, force: true, verbatimSymlinks: true });
+  await relocateFontconfig({ popplerRoot: destination, platform });
+  await relocatePopplerData({ popplerRoot: destination, platform });
+}
+
+export async function relocatePopplerData({ popplerRoot, platform }) {
+  const source = path.join(popplerRoot, "share/poppler");
+  // Upstream ENABLE_RELOCATABLE on Windows locates data relative to the DLL:
+  // Library/bin/poppler.dll -> Library/share/poppler. poppler-data is noarch.
+  const destination = platform === "win32" ? path.join(popplerRoot, "Library/share/poppler") : source;
+  if (destination !== source && await stat(source).catch(() => null)) {
+    if (await stat(destination).catch(() => null)) throw new Error("Ambiguous Poppler data directories in bundle");
+    await mkdir(path.dirname(destination), { recursive: true });
+    await rename(source, destination);
+  }
+  for (const name of ["cMap", "cidToUnicode", "nameToUnicode", "unicodeMap"]) {
+    await assertDirectory(path.join(destination, name), `bundled Poppler ${name}`);
+    if (!(await readdir(path.join(destination, name))).length) throw new Error(`Empty Poppler data directory: ${name}`);
+  }
+  await assertFile(path.join(destination, "cidToUnicode/Adobe-GB1"), "Poppler Chinese CID mapping");
+  await assertFile(path.join(destination, "cMap/Adobe-GB1/UniGB-UCS2-H"), "Poppler Chinese CMap");
+  return destination;
+}
+
+const POPPLER_SOURCE = {
+  version: "26.05.0",
+  url: "https://poppler.freedesktop.org/poppler-26.05.0.tar.xz",
+  sha256: "6fef27ff04f37db43054c86bcdff6128c9fb1f6af4ef3c8b369a7e9abd68d0bb"
+};
+
+// GlobalParams.cc:461 uses the explicit constructor directory, otherwise the
+// compile-time POPPLER_DATADIR (not getenv). Upstream relocatability is Windows
+// only. Rebuild the two macOS CLI entrypoints against the exact bundled ABI;
+// preserve upstream command handling, image formats, CMS and the library itself.
+export async function buildRelocatablePopplerTools({ popplerRoot, cacheRoot, packageIdentity = null }) {
+  const config = await readFile(path.join(popplerRoot, "include/poppler/poppler-config.h"), "utf8");
+  if (!config.includes(`#define POPPLER_VERSION "${POPPLER_SOURCE.version}"`)) {
+    throw new Error("Poppler source/header version mismatch; update the pinned CLI source before packaging");
+  }
+  await relocatePopplerData({ popplerRoot, platform: "darwin" });
+  const { stdout: architectureOutput } = await run("/usr/bin/lipo", ["-archs", path.join(popplerRoot, "lib/libpoppler.dylib")]);
+  const architecture = architectureOutput.trim();
+  if (!["arm64", "x86_64"].includes(architecture)) throw new Error(`Unsupported Poppler architecture: ${architecture}`);
+  const archive = path.join(cacheRoot, `poppler-${POPPLER_SOURCE.version}.tar.xz`);
+  await downloadAndVerify(POPPLER_SOURCE.url, POPPLER_SOURCE.sha256, archive);
+  const [compiler, compilerVersion, sdkPath, sdkVersion, sdkBuild] = await Promise.all([
+    run("/usr/bin/xcrun", ["--find", "clang++"]),
+    run("/usr/bin/xcrun", ["clang++", "--version"]),
+    run("/usr/bin/xcrun", ["--sdk", "macosx", "--show-sdk-path"]),
+    run("/usr/bin/xcrun", ["--sdk", "macosx", "--show-sdk-version"]),
+    run("/usr/bin/xcrun", ["--sdk", "macosx", "--show-sdk-build-version"])
+  ]);
+  const record = {
+    schema_version: 1,
+    kind: "hatch-poppler-cli-build",
+    stage: "native-runtime-staging-after-ad-hoc-signing",
+    source: { ...POPPLER_SOURCE },
+    recipe: { version: 1, file: "desktop-app/scripts/native-runtime.mjs", sha256: await sha256File(fileURLToPath(import.meta.url)) },
+    package: packageIdentity ?? (await readPopplerPackages(popplerRoot)).find(item => item.name === "poppler"),
+    architecture,
+    compiler: { path: compiler.stdout.trim(), version: compilerVersion.stdout.trim() },
+    sdk: { path: sdkPath.stdout.trim(), version: sdkVersion.stdout.trim(), build: sdkBuild.stdout.trim() },
+    binaries: {}
+  };
+  const build = await mkdtemp(path.join(os.tmpdir(), "hatch-poppler-build-"));
+  try {
+    await run("/usr/bin/tar", ["-xf", archive, "-C", build]);
+    const sources = path.join(build, `poppler-${POPPLER_SOURCE.version}`, "utils");
+    await writeFile(path.join(build, "config.h"), '#include <poppler-config.h>\n#define PACKAGE_VERSION POPPLER_VERSION\n');
+    const helper = `
+#include <mach-o/dyld.h>
+#include <filesystem>
+#include <vector>
+#include <cstdlib>
+static std::string hatchPopplerDataDir() {
+  try {
+    uint32_t size = 0;
+    _NSGetExecutablePath(nullptr, &size);
+    std::vector<char> executable(size);
+    if (_NSGetExecutablePath(executable.data(), &size) != 0) throw std::runtime_error("executable path unavailable");
+    auto root = std::filesystem::canonical(executable.data()).parent_path().parent_path() / "share" / "poppler";
+    for (const auto *name : {"cMap", "cidToUnicode", "nameToUnicode", "unicodeMap"}) {
+      if (!std::filesystem::is_directory(root / name)) throw std::runtime_error("bundled Poppler mappings are missing");
+    }
+    return root.string();
+  } catch (const std::exception &error) {
+    std::fprintf(stderr, "Hatch Poppler data unavailable: %s\\n", error.what());
+    std::exit(99);
+  }
+}
+`;
+    for (const [name, extra] of [["pdftoppm", "sanitychecks.cc"], ["pdfinfo", "printencodings.cc"]]) {
+      const filename = path.join(sources, `${name}.cc`);
+      const original = await readFile(filename, "utf8");
+      const init = "globalParams = std::make_unique<GlobalParams>();";
+      if (original.split(init).length !== 2) throw new Error(`Unexpected upstream ${name} initialization`);
+      await writeFile(filename, original.replace(init, "globalParams = std::make_unique<GlobalParams>(hatchPopplerDataDir());")
+        .replace("static int firstPage", `${helper}\nstatic int firstPage`));
+      const output = path.join(build, name);
+      const args = ["clang++", "-arch", architecture, "-std=c++20", "-O2", "-mmacosx-version-min=11.0",
+        "-isysroot", record.sdk.path,
+        "-I", build, "-I", path.join(popplerRoot, "include/poppler"), "-I", path.join(popplerRoot, "include"),
+        "-I", path.dirname(sources),
+        filename, path.join(sources, "parseargs.cc"), path.join(sources, "Win32Console.cc"), path.join(sources, extra),
+        "-L", path.join(popplerRoot, "lib"), "-lpoppler", "-llcms2", "-Wl,-rpath,@executable_path/../lib", "-o", output
+      ];
+      await run("/usr/bin/xcrun", args, { maxBuffer: 8 * 1024 * 1024 });
+      await cp(output, path.join(popplerRoot, "bin", name));
+      const signArgs = ["--force", "--sign", "-", path.join(popplerRoot, "bin", name)];
+      await run("/usr/bin/codesign", signArgs);
+      record.binaries[name] = {
+        path: `bin/${name}`,
+        bytes: (await stat(path.join(popplerRoot, "bin", name))).size,
+        sha256: await sha256File(path.join(popplerRoot, "bin", name)),
+        modified_source_sha256: await sha256File(filename),
+        compile: { executable: "/usr/bin/xcrun", args, cwd: process.cwd() },
+        sign: { executable: "/usr/bin/codesign", args: signArgs }
+      };
+    }
+    // Retain exact corresponding sources and the CLI change with the bundle.
+    const noticeSources = path.join(popplerRoot, "share/hatch-poppler-source");
+    await mkdir(noticeSources, { recursive: true });
+    await cp(archive, path.join(noticeSources, path.basename(archive)));
+    for (const name of ["pdftoppm", "pdfinfo"]) await cp(path.join(sources, `${name}.cc`), path.join(noticeSources, `${name}.cc`));
+    await cp(path.join(build, "config.h"), path.join(noticeSources, "config.h"));
+    await writeFile(path.join(noticeSources, "README.txt"),
+      `Upstream: ${POPPLER_SOURCE.url}\nSHA-256: ${POPPLER_SOURCE.sha256}\n` +
+      "Hatch changes: pdftoppm/pdfinfo initialize GlobalParams with executable-relative share/poppler.\n" +
+      "Original sources and GPL license are in the accompanying upstream archive. Modified sources and config.h are alongside it.\n" +
+      "Build entrypoint: desktop-app/scripts/native-runtime.mjs buildRelocatablePopplerTools; uses Xcode clang++, bundled headers/libpoppler/liblcms2, C++20 and @executable_path/../lib rpath.\n");
+    record.configuration_sha256 = await sha256File(path.join(build, "config.h"));
+    await writeFile(path.join(noticeSources, "build-record.json"), `${JSON.stringify(record, null, 2)}\n`);
+    return record;
+  } finally {
+    await rm(build, { recursive: true, force: true });
+  }
+}
+
+async function sha256File(file) {
+  return createHash("sha256").update(await readFile(file)).digest("hex");
+}
+
+// Fontconfig's conda prefix is a build location, never a runtime authority.
+export async function relocateFontconfig({ popplerRoot, platform }) {
+  const prefix = platform === "win32" ? path.join(popplerRoot, "Library") : popplerRoot;
+  const fonts = path.join(prefix, "etc", "fonts");
+  await assertFile(path.join(fonts, "fonts.conf"), "bundled Fontconfig configuration");
+  // cp's default symlink handling can leave conf.d pointing at the build cache.
+  // Copy the package's rule contents, so no installed rule needs that cache.
+  const rules = path.join(fonts, "conf.d");
+  for (const entry of await readdir(rules, { withFileTypes: true })) {
+    if (!entry.isSymbolicLink()) continue;
+    const filename = path.join(rules, entry.name);
+    const content = await readFile(filename);
+    await rm(filename);
+    await writeFile(filename, content);
+  }
+  const filename = path.join(fonts, "fonts.conf");
+  let config = await readFile(filename, "utf8");
+  config = config.replace(/<cachedir\b[^>]*>[\s\S]*?<\/cachedir>/g, "");
+  config = config.replace("</fontconfig>", '  <cachedir prefix="xdg">fontconfig</cachedir>\n</fontconfig>');
+  config = config.replace(/<include\b([^>]*)>conf\.d<\/include>/g,
+    (_, attributes) => `<include${attributes.replace(/\s+prefix="[^"]*"/g, "")} prefix="relative">conf.d</include>`);
+  await writeFile(filename, config, "utf8");
+}
+
+export async function writeMacWrappers({ nativeRoot, binaries, libreOfficeExecutable, popplerExecutablePaths }) {
   const wrapperDirectory = path.dirname(binaries.soffice);
   await mkdir(wrapperDirectory, { recursive: true });
   const relativeLibreOfficeExecutable = path.relative(wrapperDirectory, libreOfficeExecutable).split(path.sep).join("/");
@@ -270,11 +488,15 @@ exec "$SOFFICE" "$@"
     pdftoppm: `#!/bin/sh
 set -eu
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+export FONTCONFIG_PATH="$SCRIPT_DIR/../poppler/etc/fonts"
+export FONTCONFIG_FILE="$FONTCONFIG_PATH/fonts.conf"
 exec "$SCRIPT_DIR/${relativePdftoppm}" "$@"
 `,
     pdfinfo: `#!/bin/sh
 set -eu
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+export FONTCONFIG_PATH="$SCRIPT_DIR/../poppler/etc/fonts"
+export FONTCONFIG_FILE="$FONTCONFIG_PATH/fonts.conf"
 exec "$SCRIPT_DIR/${relativePdfinfo}" "$@"
 `
   };
@@ -318,7 +540,7 @@ async function readPopplerPackages(root) {
   return packages.sort((left, right) => String(left.name).localeCompare(String(right.name)));
 }
 
-async function writeThirdPartyNotices(nativeRoot, target, popplerPackages) {
+async function writeThirdPartyNotices(nativeRoot, target, popplerPackages, popplerBuild) {
   const libreOffice = target.native.libreoffice;
   const poppler = target.native.poppler;
   const lines = [
@@ -332,6 +554,11 @@ async function writeThirdPartyNotices(nativeRoot, target, popplerPackages) {
     `- Poppler ${poppler.packageSpec}: ${poppler.channel}`,
     `  - License: ${poppler.license}`,
     "  - The bundled runtime manifest and conda-meta directory record the resolved transitive packages.",
+    ...(target.platform === "darwin" ? [
+      "  - Hatch rebuilds pdftoppm/pdfinfo with explicit executable-relative CMap data lookup using the upstream GlobalParams API.",
+      `  - CLI source: ${POPPLER_SOURCE.url}; SHA-256: ${POPPLER_SOURCE.sha256}`,
+      "  - Corresponding original and modified CLI sources: poppler/share/hatch-poppler-source."
+    ] : []),
     "",
     "micromamba is used only during the build to resolve and copy the pinned Poppler environment; it is not shipped in the application.",
     ""
@@ -351,7 +578,8 @@ async function writeThirdPartyNotices(nativeRoot, target, popplerPackages) {
       package_spec: poppler.packageSpec,
       channel: poppler.channel,
       license: poppler.license,
-      packages: popplerPackages
+      packages: popplerPackages,
+      cli_build: popplerBuild
     },
     build_tool: {
       name: "micromamba",

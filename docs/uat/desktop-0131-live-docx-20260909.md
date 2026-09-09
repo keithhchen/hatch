@@ -38,3 +38,21 @@ Acceptance remains open: deploy the corrected Runtime through normal CD, repeat 
 The existing candidate-executor test expected a second model request after an unregistered tool. It now asserts terminal rejection, zero forbidden-tool execution, and exactly one provider request. The prohibition itself was not weakened.
 
 Full local Runtime suite after correction: 505 tests, 496 passed, zero failed, nine skipped. Log: `/tmp/hatch-runtime-final-20260909.log`. PostgreSQL-dependent skipped checks still require CI's database service; live DOCX edit remains open.
+
+## Post-deployment real edit: passed for this document
+
+Application CD `34340936265` completed successfully. Production Runtime was independently inspected as image `e35fe28d6dab74bb17a0e2e2fc38429e5416ce65`, healthy.
+
+In the same existing conversation, run `run_60716cd21d454686963566ed9ea9dd91` created v2, using the bundled Python document tooling and LibreOffice/Poppler rendering. File-read events 3922/3924 read the new page; canonical tool message 3925 contains both text and image blocks.
+
+- Original v1 SHA-256 remains `2c4593e1a07f70ef3e43df6daa94c5f605517243f81da93a54fe2d9e96d1caa1`.
+- v2 path: `/Users/keithchen/Documents/output/documents/hatch-uat-0131-c-v2.docx`.
+- v2 SHA-256: `b5338af808580c728aa9379ea895bc2a87fecdb75b8add078c13fa2f9163eafc`.
+- Direct OOXML inspection confirms the four original paragraphs, Title style and section layout, plus the appended `验收状态：已复核` paragraph.
+- Direct inspection of the single rendered page confirms readable Chinese, retained title/body layout, and no clipping or overlap.
+
+The model voluntarily called Skill again in this run. Therefore this successful edit alone does not establish the no-reactivation case; a separate explicit read-only next-turn resource test is required. The Desktop used here still predates the pending native Poppler rebuild, so this is not evidence for that packaging change or for Windows.
+
+## No-reactivation next-turn resource read: passed
+
+Run `run_9d99aa16852a4c1bb3cce341b8ccfdcb` in the same conversation was explicitly asked to read `skill://documents/scripts/edit_docx.py` without calling Skill again or modifying files. Production records 3932/3934 show the requested/completed `file_read`. The complete run event list contains no Skill call or activation event, and the model then summarized the script's command arguments. This closes the specific real cross-turn resource-access regression independently of the preceding successful edit.

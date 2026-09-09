@@ -17,6 +17,91 @@ use windows_sys::Win32::System::Threading::{
     OpenProcess, TerminateProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
 };
 
+/// Opt-in bundled document integration fixtures, NOT Desktop/visual UAT.
+/// Windows CI must set HATCH_TEST_RUNTIME_ROOT to the relocated runtime directory
+/// containing manifest.json, node/, python/, skills/ and native/ (not Hatch.exe).
+/// Optional HATCH_TEST_DOCUMENT_EVIDENCE_DIR retains each unique fixture directory.
+#[test]
+#[ignore = "requires a real Windows bundled runtime via HATCH_TEST_RUNTIME_ROOT; generates integration fixtures, not UAT"]
+fn bundled_documents_render_through_real_windows_runner() {
+    let runtime = std::env::var_os("HATCH_TEST_RUNTIME_ROOT").expect(
+        "set HATCH_TEST_RUNTIME_ROOT to a real Windows bundled runtime; no dependency skip",
+    );
+    let runtime = Path::new(&runtime).canonicalize().unwrap();
+    assert!(runtime.join("manifest.json").is_file());
+    let evidence = std::env::var_os("HATCH_TEST_DOCUMENT_EVIDENCE_DIR");
+    let temporary = if let Some(root) = &evidence {
+        fs::create_dir_all(root).unwrap();
+        tempfile::Builder::new()
+            .prefix("windows-document-fixture-")
+            .tempdir_in(root)
+            .unwrap()
+    } else {
+        tempdir().unwrap()
+    };
+    let base = temporary.path().to_path_buf();
+    if evidence.is_some() {
+        // Preserve evidence on failures too, without overwriting prior test runs.
+        let _ = temporary.keep();
+    }
+    let workspace = base.join("中文 文档 workspace");
+    fs::create_dir_all(&workspace).unwrap();
+    fs::write(
+        workspace.join("windows_bundled_documents.py"),
+        include_str!("scripts/windows_bundled_documents.py"),
+    )
+    .unwrap();
+    let runner = LocalRunner::new_with_runtime(&workspace, Some(&runtime)).unwrap();
+    for stage in ["generate", "docx", "pptx", "xlsx", "cjk"] {
+        // Do not construct a replacement toolchain environment in the test:
+        // PowerShell and every descendant consume the real Runner's bundle env.
+        let command = format!(
+            "$ErrorActionPreference = 'Stop'; \
+             if (-not $env:HATCH_PYTHON) {{ throw 'Runner did not configure bundled Python' }}; \
+             & $env:HATCH_PYTHON -X utf8 .\\windows_bundled_documents.py {stage}; \
+             if ($LASTEXITCODE -ne 0) {{ exit $LASTEXITCODE }}"
+        );
+        let response = runner.execute_tool_call_request(request(stage, &command, 120_000));
+        fs::write(
+            workspace.join(format!("runner-{stage}.json")),
+            serde_json::to_vec_pretty(&response).unwrap(),
+        )
+        .unwrap();
+        let output = ok(response);
+        assert_eq!(output["exit_code"], 0, "stage {stage}: {output}");
+        assert_eq!(output["timed_out"], false, "stage {stage}: {output}");
+        assert_eq!(output["stdout_truncated"], false, "{output}");
+        assert_eq!(output["stderr_truncated"], false, "{output}");
+        let report: Value = serde_json::from_str(
+            &fs::read_to_string(workspace.join(format!("report-{stage}.json"))).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(report["status"], "ok", "{report}");
+        assert_eq!(report["fixture_not_uat"], true, "{report}");
+        println!("Windows bundled {stage}: {report}");
+    }
+    for directory in ["docx-render", "pptx-render", "xlsx-render", "cjk-render"] {
+        let files: Vec<_> = fs::read_dir(workspace.join(directory))
+            .unwrap()
+            .map(|item| item.unwrap().path())
+            .collect();
+        assert!(files
+            .iter()
+            .any(|file| file.extension().is_some_and(|ext| ext == "pdf")));
+        let pngs: Vec<_> = files
+            .iter()
+            .filter(|file| file.extension().is_some_and(|ext| ext == "png"))
+            .collect();
+        assert!(!pngs.is_empty());
+        for png in pngs {
+            assert!(fs::read(png).unwrap().starts_with(b"\x89PNG\r\n\x1a\n"));
+        }
+    }
+    if evidence.is_some() {
+        println!("AUTOMATED FIXTURE, NOT UAT: {}", workspace.display());
+    }
+}
+
 #[test]
 fn chinese_and_space_workspace_supports_relative_file_io() {
     let temp = tempdir().unwrap();

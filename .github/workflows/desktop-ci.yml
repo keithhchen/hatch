@@ -85,7 +85,7 @@ jobs:
         run: npm run build:web
       - name: Test desktop UAT evidence helpers
         working-directory: .
-        run: node --test scripts/uat/*.test.mjs scripts/release/*.test.mjs desktop-app/scripts/node-cli-entrypoints.test.mjs
+        run: node --test scripts/uat/*.test.mjs scripts/release/*.test.mjs desktop-app/scripts/node-cli-entrypoints.test.mjs desktop-app/scripts/native-runtime.test.mjs
 
   desktop-native:
     name: Desktop native, LocalRunner, and macOS ${{ matrix.architecture }} UAT package
@@ -171,7 +171,12 @@ jobs:
       - name: Verify document rendering inside macOS Runner sandbox
         env:
           HATCH_TEST_RUNTIME_ROOT: ${{ github.workspace }}/desktop-app/src-tauri/target/release/bundle/macos/Hatch.app/Contents/Resources/runtime
-        run: cargo test --locked --manifest-path local-runner/Cargo.toml --test shell_sandbox_macos bundled_document_render_runs_inside_runner_sandbox -- --ignored --nocapture
+          HATCH_TEST_FONTCONFIG_EVIDENCE_DIR: ${{ github.workspace }}/artifacts/desktop-uat/chinese-render
+        run: cargo test --locked --manifest-path local-runner/Cargo.toml --test shell_sandbox_macos bundled_ -- --ignored --nocapture
+      - name: Verify Poppler fails explicitly without bundled data
+        env:
+          HATCH_TEST_POPPLER_ROOT: ${{ github.workspace }}/desktop-app/src-tauri/target/release/bundle/macos/Hatch.app/Contents/Resources/runtime/native/poppler
+        run: node --test desktop-app/scripts/native-runtime.test.mjs
       - name: Record macOS automated UAT evidence
         env:
           HATCH_PERSISTENT_SESSION: "0"
@@ -188,6 +193,7 @@ jobs:
           path: |
             desktop-app/src-tauri/target/release/bundle/dmg/*.dmg
             artifacts/desktop-uat/macos.json
+            artifacts/desktop-uat/chinese-render/
           if-no-files-found: error
           retention-days: 7
 
@@ -252,6 +258,15 @@ jobs:
           node desktop-app/scripts/verify-bundled-runtime.mjs \
             --search-root desktop-app/src-tauri/target/debug \
             --report artifacts/desktop-uat/windows-runtime.json
+      - name: Verify document rendering through Windows Runner
+        shell: pwsh
+        run: |
+          $runtimeReport = Get-Content -LiteralPath artifacts/desktop-uat/windows-runtime.json -Raw | ConvertFrom-Json
+          $env:HATCH_TEST_RUNTIME_ROOT = $runtimeReport.root
+          $env:HATCH_TEST_DOCUMENT_EVIDENCE_DIR = Join-Path $env:GITHUB_WORKSPACE 'artifacts/desktop-uat/windows-document-render'
+          if (-not (Test-Path -LiteralPath $env:HATCH_TEST_RUNTIME_ROOT -PathType Container)) { throw 'Verified bundled runtime root is missing' }
+          cargo test --locked --manifest-path local-runner/Cargo.toml --test windows_execution bundled_ -- --ignored --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Windows bundled document rendering failed' }
       - name: Record Windows automated UAT evidence
         shell: bash
         env:
@@ -269,6 +284,7 @@ jobs:
           path: |
             desktop-app/src-tauri/target/debug/bundle/nsis/*.exe
             artifacts/desktop-uat/windows.json
+            artifacts/desktop-uat/windows-document-render/
           if-no-files-found: error
           retention-days: 7
 

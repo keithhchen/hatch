@@ -18,6 +18,115 @@ use tempfile::{tempdir_in, TempDir};
 
 const SHELL_TIMEOUT_MS: u64 = 10_000;
 
+#[test]
+#[ignore = "requires HATCH_TEST_RUNTIME_ROOT pointing at a relocated bundled runtime"]
+fn bundled_fontconfig_finds_chinese_fonts_inside_runner_sandbox() {
+    let runtime = std::env::var_os("HATCH_TEST_RUNTIME_ROOT").expect("real runtime required");
+    let workspace = tempfile::tempdir().unwrap();
+    let runner =
+        LocalRunner::new_with_runtime(workspace.path(), Some(Path::new(&runtime))).unwrap();
+    let result = response_json(runner.execute_tool_call_request(tool_request(
+        "bundled_fontconfig",
+        r#"test "$FONTCONFIG_FILE" = "$FONTCONFIG_PATH/fonts.conf" && test "$XDG_CACHE_HOME" = "$TMPDIR" && "$HATCH_NATIVE_RUNTIME_ROOT/poppler/bin/fc-list" :lang=zh family > chinese-fonts.txt && test -s chinese-fonts.txt && /bin/cat chinese-fonts.txt"#.into(),
+        120_000,
+    )));
+    assert_eq!(result["result"]["exit_code"], 0, "{result}");
+    assert_eq!(result["result"]["timed_out"], false, "{result}");
+    assert_eq!(result["result"]["stderr"], "", "{result}");
+    let fonts = fs::read_to_string(workspace.path().join("chinese-fonts.txt")).unwrap();
+    assert!(!fonts.trim().is_empty(), "{result}");
+    println!("Bundled Fontconfig Chinese families: {fonts}");
+}
+
+#[test]
+#[ignore = "requires relocated bundled runtime with working Poppler CJK mappings"]
+fn bundled_poppler_renders_nonembedded_chinese_font_inside_runner_sandbox() {
+    let runtime = std::env::var_os("HATCH_TEST_RUNTIME_ROOT").expect("real runtime required");
+    let workspace = tempfile::tempdir().unwrap();
+    let runner =
+        LocalRunner::new_with_runtime(workspace.path(), Some(Path::new(&runtime))).unwrap();
+    // Non-embedded CJK font deliberately requires real Fontconfig substitution.
+    // This PDF is an automated integration fixture, not product/UAT content.
+    let content = "BT /F1 28 Tf 36 90 Td <4E2D65875B574F536D4B8BD5> Tj ET\n";
+    let objects = [
+        "<< /Type /Catalog /Pages 2 0 R >>".to_owned(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_owned(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 360 160] /Resources << /Font << /F1 4 0 R >> >> /Contents 7 0 R >>".to_owned(),
+        "<< /Type /Font /Subtype /Type0 /BaseFont /STSong-Light /Encoding /UniGB-UCS2-H /DescendantFonts [5 0 R] >>".to_owned(),
+        "<< /Type /Font /Subtype /CIDFontType0 /BaseFont /STSong-Light /CIDSystemInfo << /Registry (Adobe) /Ordering (GB1) /Supplement 4 >> /FontDescriptor 6 0 R /DW 1000 >>".to_owned(),
+        "<< /Type /FontDescriptor /FontName /STSong-Light /Flags 6 /FontBBox [-25 -254 1000 880] /ItalicAngle 0 /Ascent 880 /Descent -120 /CapHeight 880 /StemV 80 >>".to_owned(),
+        format!("<< /Length {} >>\nstream\n{content}endstream", content.len()),
+    ];
+    let mut pdf = String::from("%PDF-1.4\n");
+    let mut offsets = Vec::new();
+    for (index, object) in objects.iter().enumerate() {
+        offsets.push(pdf.len());
+        pdf.push_str(&format!("{} 0 obj\n{object}\nendobj\n", index + 1));
+    }
+    let xref = pdf.len();
+    pdf.push_str("xref\n0 8\n0000000000 65535 f \n");
+    for offset in offsets {
+        pdf.push_str(&format!("{offset:010} 00000 n \n"));
+    }
+    pdf.push_str(&format!(
+        "trailer\n<< /Size 8 /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n"
+    ));
+    fs::write(workspace.path().join("chinese.pdf"), pdf).unwrap();
+    let rendered = response_json(
+        runner.execute_tool_call_request(tool_request(
+            "bundled_fontconfig_render",
+            r#""$HATCH_PDFINFO" chinese.pdf > chinese-info.txt &&
+"$HATCH_PDFTOPPM" -f 1 -singlefile -r 96 -png chinese.pdf chinese &&
+"$HATCH_PDFTOPPM" -f 1 -singlefile -r 96 -jpeg -jpegopt quality=95 chinese.pdf chinese &&
+"$HATCH_PDFTOPPM" -f 1 -singlefile -r 96 -tiff chinese.pdf chinese &&
+"$HATCH_PYTHON" -c '
+from PIL import Image, ImageChops
+import json
+results = {}
+for suffix, expected in [("png", "PNG"), ("jpg", "JPEG"), ("tif", "TIFF")]:
+    with Image.open("chinese." + suffix) as image:
+        image.load()
+        assert image.format == expected, image.format
+        rgb = image.convert("RGB")
+        bbox = ImageChops.difference(rgb, Image.new("RGB", rgb.size, "white")).getbbox()
+        assert bbox is not None, "blank " + expected
+        assert rgb.size == (480, 214), rgb.size
+        results[expected] = {"size": rgb.size, "ink_bbox": bbox}
+        if expected == "TIFF": rgb.save("chinese-tiff-preview.png")
+with open("image-checks.json", "w") as output: json.dump(results, output)
+'"#
+            .into(),
+            120_000,
+        )),
+    );
+    let png = fs::read(workspace.path().join("chinese.png")).unwrap();
+    assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
+    println!("Bundled pdftoppm Chinese PNG: {} bytes", png.len());
+    if let Some(output) = std::env::var_os("HATCH_TEST_FONTCONFIG_EVIDENCE_DIR") {
+        let output = Path::new(&output);
+        fs::create_dir_all(output).unwrap();
+        for name in [
+            "chinese.pdf",
+            "chinese.png",
+            "chinese.jpg",
+            "chinese.tif",
+            "chinese-tiff-preview.png",
+            "image-checks.json",
+            "chinese-info.txt",
+        ] {
+            fs::copy(workspace.path().join(name), output.join(name)).unwrap();
+        }
+        fs::write(output.join("render-result.json"), rendered.to_string()).unwrap();
+    }
+    assert_eq!(rendered["result"]["exit_code"], 0, "{rendered}");
+    assert_eq!(rendered["result"]["timed_out"], false, "{rendered}");
+    assert_eq!(rendered["result"]["stderr"], "", "{rendered}");
+    println!(
+        "Decoded format checks: {}",
+        fs::read_to_string(workspace.path().join("image-checks.json")).unwrap()
+    );
+}
+
 /// Explicit integration test against an actual installed/built runtime, not a mock.
 #[test]
 #[ignore = "requires HATCH_TEST_RUNTIME_ROOT pointing at a complete bundled runtime"]

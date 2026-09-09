@@ -19,7 +19,7 @@ import {
   PYTHON_BUILD_TAG,
   PYTHON_VERSION
 } from "./runtime-manifest.mjs";
-import { prepareNativeRuntime } from "./native-runtime.mjs";
+import { prepareNativeRuntime, verifySymlinkClosure } from "./native-runtime.mjs";
 
 const execFileAsync = promisify(execFile);
 const desktopRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -92,6 +92,7 @@ try {
     await cp(source, destination, { recursive: true, force: true });
   }
 
+  await verifySymlinkClosure(stagingRoot);
   const manifest = await createRuntimeManifest({
     stagingRoot,
     nodeExecutable,
@@ -516,7 +517,8 @@ async function createRuntimeManifest({
         package_spec: target.native.poppler.packageSpec,
         execution_arch: target.native.poppler.executionArch ?? target.arch,
         license: target.native.poppler.license,
-        packages: nativeRuntime.popplerPackages
+        packages: nativeRuntime.popplerPackages,
+        cli_build: nativeRuntime.popplerBuild
       },
       build_tool: {
         name: "micromamba",

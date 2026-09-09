@@ -121,6 +121,61 @@ fn resolve_runtime_path(runtime_root: &Path, value: &str, label: &str) -> Result
     Ok(canonical)
 }
 
+fn bundled_fontconfig_path(native_root: &Path) -> Result<PathBuf> {
+    let prefix = if cfg!(target_os = "windows") {
+        native_root.join("poppler/Library")
+    } else {
+        native_root.join("poppler")
+    };
+    let config = prefix.join("etc/fonts/fonts.conf");
+    let resolved = config.canonicalize().map_err(|error| {
+        LocalRunnerError::ShellSandboxInitialization(format!(
+            "bundled Fontconfig configuration is unavailable {}: {error}",
+            config.display()
+        ))
+    })?;
+    if !resolved.starts_with(native_root) || !resolved.is_file() {
+        return Err(LocalRunnerError::ShellSandboxInitialization(
+            "bundled Fontconfig configuration escapes the native runtime or is not a file".into(),
+        ));
+    }
+    Ok(resolved)
+}
+
+#[cfg(test)]
+mod fontconfig_tests {
+    use super::*;
+
+    #[test]
+    fn bundled_config_is_required_and_resolved_from_native_root() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        assert!(bundled_fontconfig_path(&root).is_err());
+        let relative = if cfg!(target_os = "windows") {
+            "poppler/Library/etc/fonts/fonts.conf"
+        } else {
+            "poppler/etc/fonts/fonts.conf"
+        };
+        let config = root.join(relative);
+        fs::create_dir_all(config.parent().unwrap()).unwrap();
+        fs::write(&config, "<fontconfig/>").unwrap();
+        assert_eq!(bundled_fontconfig_path(&root).unwrap(), config);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn config_cannot_link_back_to_a_build_machine_directory() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("native");
+        let fonts = root.join("poppler/etc/fonts");
+        fs::create_dir_all(&fonts).unwrap();
+        let outside = directory.path().join("build-fonts.conf");
+        fs::write(&outside, "<fontconfig/>").unwrap();
+        std::os::unix::fs::symlink(outside, fonts.join("fonts.conf")).unwrap();
+        assert!(bundled_fontconfig_path(&root.canonicalize().unwrap()).is_err());
+    }
+}
+
 pub(crate) fn execute(
     workspace: &Path,
     runtime_root: Option<&Path>,
@@ -257,8 +312,14 @@ mod platform {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        let fontconfig_cache = tempfile::tempdir().map_err(|error| {
+            LocalRunnerError::ShellSandboxInitialization(format!(
+                "could not create private font cache: {error}"
+            ))
+        })?;
         if let Some(runtime_root) = runtime_root.as_deref() {
             configure_runtime_environment(&mut shell, runtime_root)?;
+            shell.env("XDG_CACHE_HOME", fontconfig_cache.path());
         }
         let mut child = shell.spawn().map_err(|error| {
             LocalRunnerError::ShellSandboxUnavailable(format!(
@@ -373,6 +434,7 @@ mod platform {
         let python_packages = runtime_root.join("python-packages");
         let skills = runtime_root.join("skills");
         let native = bundled_native_paths(runtime_root)?;
+        let fontconfig = bundled_fontconfig_path(&native.root)?;
         let mut path_entries = vec![
             runtime_root.join("node").into_os_string(),
             runtime_root.join("python").into_os_string(),
@@ -415,6 +477,8 @@ mod platform {
             path.push(entry);
         }
         command
+            .env("FONTCONFIG_FILE", &fontconfig)
+            .env("FONTCONFIG_PATH", fontconfig.parent().unwrap())
             .env("PATH", path)
             .env("HATCH_RUNTIME_ROOT", runtime_root)
             .env("HATCH_NATIVE_RUNTIME_ROOT", &native.root)
@@ -1089,7 +1153,11 @@ mod platform {
             let python_packages = runtime_root.join("python-packages");
             let skills = runtime_root.join("skills");
             let native = bundled_native_paths(runtime_root)?;
+            let fontconfig = bundled_fontconfig_path(&native.root)?;
             environment.extend([
+                environment_path("FONTCONFIG_FILE", &fontconfig),
+                environment_path("FONTCONFIG_PATH", fontconfig.parent().unwrap()),
+                environment_path("XDG_CACHE_HOME", scratch),
                 environment_path(
                     "PATH",
                     &runtime_path(
