@@ -22,6 +22,7 @@ export class WorkbenchRuntime {
   readonly events = new EventEmitter();
   private active = new Map<string, AbortController>();
   private runs = new Map<string, Promise<void>>();
+  private runIds = new Map<string, string>();
   private readonly env: NodeJS.ProcessEnv;
   constructor(readonly store: WorkbenchStore, private options: WorkbenchRuntimeOptions = {}) {
     this.env = { HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash", ...(options.env ?? process.env) };
@@ -36,11 +37,14 @@ export class WorkbenchRuntime {
     if (!message.trim() || message.length > 100000) throw new Error("Provide a message of 1–100000 characters");
     if (this.active.has(id)) throw new Error("This conversation is already running");
     const controller = new AbortController();
+    const runId = `factory_${Date.now()}_${id}`;
     this.active.set(id, controller);
+    this.runIds.set(id, runId);
     try {
       await this.store.update(id, s => { if (s.title === s.role) s.title = message.trim().slice(0, 60); s.turn++; s.status = "running"; delete s.error; delete s.activeTool; s.progress.status = "unscored"; });
     } catch (error) { this.active.delete(id); throw error; }
     this.emit(id, "state");
+    this.emit(id, "voice.run_started", { runId });
     const run = this.main(id, message, controller).catch(error => this.emit(id, "error", { message: safeError(error) }));
     this.runs.set(id, run);
     void run.finally(() => { if (this.runs.get(id) === run) this.runs.delete(id); });
@@ -58,13 +62,23 @@ export class WorkbenchRuntime {
       if (s.role === "generation") system += `\n宿主提供的目标 Runtime 工具：内建 hatch.web_search；有 Knowledge 时启用 hatch.file_search。额外声明：${this.env.HATCH_FACTORY_TARGET_TOOLS_JSON ?? "[]"}。外部连接的实际可用性由现有 Registry/Runtime 验证。\n当前 Product 绑定：${JSON.stringify(s.generation ?? null)}。`;
       if (s.role === "evaluator") system += `\n用户选择的真实 Hatch 目标及 Brief 字段：${JSON.stringify(s.target ?? null)}。启动时如需 brief_answers，从案例中选择客户可见的信息作答；不能泄露评分标准。`;
       const changed = () => this.emit(id, "files");
-      const tools = [ this.progressTool(id, s.turn), ...fileTools(this.store, id, { changed }), ...(s.role === "research" ? webTools(this.store, id, changed, this.env) : []), ...(await this.options.extraTools?.(s, controller.signal, changed) ?? []) ];
+      const tools = [ this.progressTool(id, s.turn), ...fileTools(this.store, id, { changed }), ...(["research", "voice"].includes(s.role) ? webTools(this.store, id, changed, this.env) : []), ...(await this.options.extraTools?.(s, controller.signal, changed) ?? []) ];
+      const messageCount = s.messages.length;
       await this.run(id, system, s.context, message, tools, controller);
+      if (s.role === "voice" && !controller.signal.aborted) {
+        const latest = await this.store.get(id);
+        const scribePrompt = await readFile(fileURLToPath(new URL("voice/SCRIBE.md", new URL("../../prompts/factory-agents/", import.meta.url))), "utf8");
+        const evidence = latest.messages.slice(messageCount);
+        await this.run(id, scribePrompt, latest.scribeContext ?? [], JSON.stringify({ turn: evidence }, null, 2), fileTools(this.store, id, { changed }), controller, "scribe");
+      }
       await this.store.update(id, state => { state.status = controller.signal.aborted ? "interrupted" : "completed"; delete state.activeTool; });
+      this.emit(id, controller.signal.aborted ? "voice.run_interrupted" : "voice.run_completed", { runId: this.runIds.get(id) });
     } catch (error) {
       await this.store.update(id, s => { s.status = controller.signal.aborted ? "interrupted" : "failed"; s.error = safeError(error); delete s.activeTool; });
+      this.emit(id, controller.signal.aborted ? "voice.run_interrupted" : "voice.run_failed", { runId: this.runIds.get(id) });
     } finally {
       this.active.delete(id);
+      this.runIds.delete(id);
       this.emit(id, "state");
     }
   }
@@ -77,7 +91,7 @@ export class WorkbenchRuntime {
       return result({ percentage, recorded: true });
     } };
   }
-  private async run(id: string, systemPrompt: string, history: AgentMessage[], userText: string, tools: AgentTool[], controller: AbortController): Promise<AgentMessage[]> {
+  private async run(id: string, systemPrompt: string, history: AgentMessage[], userText: string, tools: AgentTool[], controller: AbortController, channel: "visible" | "scribe" = "visible"): Promise<AgentMessage[]> {
     const factory = this.options.agentFactory ?? createFactoryPiAgent;
     let turnCount = 0;
     let persistence = Promise.resolve();
@@ -115,21 +129,22 @@ export class WorkbenchRuntime {
       if (event.type === "message_end") {
         persistence = persistence.then(async () => {
           await this.store.update(id, s => {
-            s.messages.push(event.message); s.context.push(event.message);
+            if (channel === "visible") { s.messages.push(event.message); s.context.push(event.message); }
+            else { s.scribeContext ??= []; s.scribeContext.push(event.message); }
           });
-          this.emit(id, "message");
+          if (channel === "visible") this.emit(id, "message");
         }).catch(error => { persistenceError = error; controller.abort(); });
       }
       if (event.type === "message_update") {
         const update = event.assistantMessageEvent;
-        if (update.type === "text_delta") this.emit(id, "delta", { text: update.delta });
-        if (update.type === "thinking_start") this.emit(id, "thinking");
+        if (channel === "visible" && update.type === "text_delta") { this.emit(id, "delta", { text: update.delta }); this.emit(id, "voice.delta", { runId: this.runIds.get(id), text: update.delta }); }
+        if (channel === "visible" && update.type === "thinking_start") this.emit(id, "thinking");
       }
       if (event.type === "tool_execution_start") {
-        persistence = persistence.then(() => this.store.update(id, s => { s.activeTool = event.toolName; }));
-        this.emit(id, "tool", { name: event.toolName });
+        if (channel === "visible") persistence = persistence.then(() => this.store.update(id, s => { s.activeTool = event.toolName; }));
+        if (channel === "visible") { this.emit(id, "tool", { name: event.toolName }); this.emit(id, "voice.tool", { runId: this.runIds.get(id) }); }
       }
-      if (event.type === "tool_execution_end") this.emit(id, "tool_end", { name: event.toolName, isError: event.isError });
+      if (channel === "visible" && event.type === "tool_execution_end") { this.emit(id, "tool_end", { name: event.toolName, isError: event.isError }); this.emit(id, "voice.tool_end", { runId: this.runIds.get(id) }); }
     });
     try {
       controller.signal.throwIfAborted();

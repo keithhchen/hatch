@@ -108,7 +108,15 @@ Agent 的聊天回复应简短，指出做了什么、最重要的发现和可�
 
 没有某类内容时，如没有可上传的 Knowledge，主文件明确记载原因；不能填充虚构内容。Skill 和 Reference 按实际需要创建，不设凑数要求。
 
-## 5. Research Agent
+## 5. Voice Agent
+
+Voice 是第一个 Tab。可见的 Interviewer 负责建立信任、追问具体经历、复述并检验理解；后台 Scribe 在每个完成的访谈轮次后读取原始对话和现有 Persona，维护 `CREATOR_PERSONA.md`。Scribe 不向 Creator 发言，也不把逐轮摘要机械追加到文件。
+
+语音层复用 pi-runtime-lab 已验证的 ElevenLabs realtime STT/TTS：浏览器发送 16 kHz mono PCM；最终转写进入与文字输入相同的 Factory turn；回复按句合成语音；用户开始说话时中止仍在播放或生成的回复。语音不可用时，同一 Agent 仍可通过普通聊天使用。
+
+Interviewer 和 Scribe 使用同一个会话文件区，但分别保存模型 context。主要输出文件名是 `CREATOR_PERSONA.md`。它由 Scribe 通过普通 `read` / `write` 工具维护，可被用户像其他 Markdown 一样阅读、编辑和手动交给 Research。
+
+## 6. Research Agent
 
 ### 5.1 职责
 

@@ -12,6 +12,17 @@ import { WorkbenchStore } from "./store.js";
 import { WorkbenchRuntime } from "./runtime.js";
 import { createWorkbenchServer } from "./server.js";
 
+test("Voice is a first-class isolated workspace with its canonical Markdown output", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-voice-workspace-"));
+  try {
+    const store = new WorkbenchStore(root);
+    const voice = await store.create("voice");
+    assert.equal(voice.role, "voice");
+    assert.equal(voice.files[0]?.path, "output/CREATOR_PERSONA.md");
+    assert.equal((await store.read(voice.id, "output/CREATOR_PERSONA.md")).bytes.toString(), "# CREATOR_PERSONA\n\n");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("workspaces isolate files, overwrite ordinary files and retain exact expert comment anchors", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-workspace-unit-"));
   try {
