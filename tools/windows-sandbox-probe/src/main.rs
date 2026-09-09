@@ -1,24 +1,18 @@
 //! Test tool only. Never launched by Hatch, its runtime, or its installer.
-use serde::Serialize;
 use std::path::PathBuf;
+#[cfg(any(windows, test))]
+mod environment;
 
 #[cfg(windows)]
 mod windows;
 
-const USAGE: &str = "hatch-windows-sandbox-probe --opt-in --runtime-root <WINDOWS_BUNDLED_RUNTIME> [--mode lpac|appcontainer] [--timeout-seconds 120]\n\nWindows x64 only. Copies the runtime into a fresh temporary directory, grants ACLs ONLY there, creates/deletes a temporary AppContainer profile, and prints JSON. Never uses a host fallback. Exit 0 = every required check and cleanup passed; 1 = failure/inconclusive; 2 = invalid invocation/unsupported platform.";
-
-#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-enum Mode {
-    Lpac,
-    Appcontainer,
-}
+const USAGE: &str = "hatch-windows-sandbox-probe --opt-in --runtime-root <WINDOWS_RUNTIME> --identity-user <HatchProbe_NAME> [--timeout-seconds 120]\nRequires an already provisioned, non-admin local test identity and HATCH_PROBE_PASSWORD. Fixed scripts only. No account creation, AppContainer, or host fallback. Experimental, not product UAT.";
 
 #[derive(Debug)]
 #[cfg_attr(not(windows), allow(dead_code))]
 struct Options {
     runtime_root: PathBuf,
-    mode: Mode,
+    identity_user: String,
     timeout_seconds: u64,
 }
 
@@ -26,7 +20,7 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Options, String> {
     let mut args = args.into_iter();
     let mut opt_in = false;
     let mut runtime_root = None;
-    let mut mode = Mode::Lpac;
+    let mut identity_user = None;
     let mut timeout_seconds = 120;
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -34,12 +28,8 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Options, String> {
             "--runtime-root" => {
                 runtime_root = Some(PathBuf::from(args.next().ok_or("Missing runtime root")?))
             }
-            "--mode" => {
-                mode = match args.next().as_deref() {
-                    Some("lpac") => Mode::Lpac,
-                    Some("appcontainer") => Mode::Appcontainer,
-                    _ => return Err("Mode must be lpac or appcontainer".into()),
-                }
+            "--identity-user" => {
+                identity_user = Some(args.next().ok_or("Missing test account")?);
             }
             "--timeout-seconds" => {
                 timeout_seconds = args
@@ -59,7 +49,8 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Options, String> {
     }
     Ok(Options {
         runtime_root: runtime_root.ok_or("--runtime-root is required")?,
-        mode,
+        identity_user: identity_user
+            .ok_or("--identity-user is required; no host identity fallback")?,
         timeout_seconds,
     })
 }
@@ -130,8 +121,15 @@ mod tests {
     fn opt_in_and_runtime_are_required() {
         assert!(parse(args(&["--runtime-root", "C:\\runtime"])).is_err());
         assert!(parse(args(&["--opt-in"])).is_err());
-        let options = parse(args(&["--opt-in", "--runtime-root", "C:\\runtime"])).unwrap();
-        assert_eq!(options.mode, Mode::Lpac);
+        let options = parse(args(&[
+            "--opt-in",
+            "--runtime-root",
+            "C:\\runtime",
+            "--identity-user",
+            "HatchProbe_test",
+        ]))
+        .unwrap();
+        assert_eq!(options.identity_user, "HatchProbe_test");
         assert_eq!(options.runtime_root, PathBuf::from("C:\\runtime"));
         assert_eq!(options.timeout_seconds, 120);
         assert!(parse(args(&["--opt-in", "--runtime-root", "x", "--mode", "host"])).is_err());

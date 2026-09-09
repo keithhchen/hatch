@@ -1,5 +1,8 @@
 //! Standalone experiment. Nothing in this module is a product sandbox contract.
-use super::{quote_arg, Mode, Options};
+use super::{quote_arg, Options};
+#[path = "restricted.rs"]
+mod restricted;
+use restricted::Identity;
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -14,9 +17,9 @@ use std::{
 };
 use windows_sys::Win32::{
     Foundation::*,
-    Security::{Authorization::*, Isolation::*, *},
+    Security::{Authorization::*, *},
     Storage::FileSystem::*,
-    System::{JobObjects::*, SystemInformation::*, SystemServices::MAXIMUM_ALLOWED, Threading::*},
+    System::{JobObjects::*, SystemInformation::*, Threading::*},
 };
 
 type Result<T> = std::result::Result<T, String>;
@@ -32,57 +35,13 @@ fn wide(s: impl AsRef<std::ffi::OsStr>) -> Vec<u16> {
 struct Handle(HANDLE);
 impl Drop for Handle {
     fn drop(&mut self) {
-        unsafe {
-            CloseHandle(self.0);
+        if !self.0.is_null() && self.0 != INVALID_HANDLE_VALUE {
+            unsafe {
+                CloseHandle(self.0);
+            }
         }
     }
 }
-struct Profile {
-    name: Vec<u16>,
-    sid: PSID,
-}
-impl Profile {
-    fn create(name: &str) -> Result<Self> {
-        let name = wide(name);
-        let mut sid = null_mut();
-        let hr = unsafe {
-            CreateAppContainerProfile(
-                name.as_ptr(),
-                name.as_ptr(),
-                name.as_ptr(),
-                null(),
-                0,
-                &mut sid,
-            )
-        };
-        if hr < 0 {
-            return Err(format!(
-                "CreateAppContainerProfile HRESULT {hr:#x}; no fallback"
-            ));
-        }
-        Ok(Self { name, sid })
-    }
-    fn delete(&mut self) -> Result<()> {
-        if self.sid.is_null() {
-            return Ok(());
-        }
-        let hr = unsafe { DeleteAppContainerProfile(self.name.as_ptr()) };
-        if hr < 0 {
-            return Err(format!("DeleteAppContainerProfile HRESULT {hr:#x}"));
-        }
-        unsafe {
-            FreeSid(self.sid);
-        }
-        self.sid = null_mut();
-        Ok(())
-    }
-}
-impl Drop for Profile {
-    fn drop(&mut self) {
-        let _ = self.delete();
-    }
-}
-
 // Never accept ACL targets outside the freshly allocated tree. Reject all
 // reparse points, including junctions (std::is_symlink alone is insufficient).
 fn checked(root: &Path, path: &Path) -> Result<PathBuf> {
@@ -244,6 +203,7 @@ fn grant_tree(root: &Path, path: &Path, sid: PSID, rights: u32) -> Result<()> {
 }
 struct Attributes {
     storage: Vec<usize>,
+    initialized: bool,
 }
 impl Attributes {
     fn new(count: u32) -> Result<Self> {
@@ -256,10 +216,12 @@ impl Attributes {
         }
         let mut result = Self {
             storage: vec![0; bytes.div_ceil(size_of::<usize>())],
+            initialized: false,
         };
         if unsafe { InitializeProcThreadAttributeList(result.ptr(), count, 0, &mut bytes) } == 0 {
             return Err(win_error("attribute init"));
         }
+        result.initialized = true;
         Ok(result)
     }
     fn ptr(&mut self) -> LPPROC_THREAD_ATTRIBUTE_LIST {
@@ -278,12 +240,44 @@ impl Attributes {
 }
 impl Drop for Attributes {
     fn drop(&mut self) {
-        unsafe {
-            DeleteProcThreadAttributeList(self.ptr());
+        if self.initialized {
+            unsafe {
+                DeleteProcThreadAttributeList(self.ptr());
+            }
         }
     }
 }
 struct KillJob(Handle);
+impl KillJob {
+    fn terminate_and_wait(&self) -> Result<()> {
+        if unsafe { TerminateJobObject(self.0 .0, 137) } == 0 {
+            return Err(win_error("TerminateJobObject"));
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let mut accounting: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = unsafe { zeroed() };
+            if unsafe {
+                QueryInformationJobObject(
+                    self.0 .0,
+                    JobObjectBasicAccountingInformation,
+                    (&mut accounting as *mut JOBOBJECT_BASIC_ACCOUNTING_INFORMATION).cast(),
+                    size_of_val(&accounting) as u32,
+                    null_mut(),
+                )
+            } == 0
+            {
+                return Err(win_error("QueryInformationJobObject cleanup"));
+            }
+            if accounting.ActiveProcesses == 0 {
+                return Ok(());
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err("Job cleanup unconfirmed: descendants still active".into());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+}
 impl Drop for KillJob {
     fn drop(&mut self) {
         unsafe {
@@ -292,121 +286,6 @@ impl Drop for KillJob {
     }
 }
 
-// Chromium sandbox/win/src/app_container_test.cc::CheckLpacToken uses
-// AccessCheck to test effective LPAC behavior rather than token attributes.
-fn appcontainer_access_mask(token: HANDLE) -> Result<u32> {
-    unsafe {
-        let mut duplicate = null_mut();
-        if DuplicateTokenEx(
-            token,
-            TOKEN_QUERY,
-            null(),
-            SecurityImpersonation,
-            TokenImpersonation,
-            &mut duplicate,
-        ) == 0
-        {
-            return Err(win_error("DuplicateTokenEx for AccessCheck"));
-        }
-        let duplicate = Handle(duplicate);
-        let sddl = wide("O:SYG:SYD:(A;;0x3;;;WD)(A;;0x1;;;S-1-15-2-1)(A;;0x2;;;S-1-15-2-2)");
-        let mut descriptor = null_mut();
-        if ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            sddl.as_ptr(),
-            SDDL_REVISION_1,
-            &mut descriptor,
-            null_mut(),
-        ) == 0
-        {
-            return Err(win_error(
-                "ConvertStringSecurityDescriptorToSecurityDescriptorW",
-            ));
-        }
-        let mut mapping: GENERIC_MAPPING = zeroed();
-        let mut privileges: PRIVILEGE_SET = zeroed();
-        let mut size = size_of::<PRIVILEGE_SET>() as u32;
-        let mut granted = 0;
-        let mut allowed = 0;
-        let success = AccessCheck(
-            descriptor,
-            duplicate.0,
-            MAXIMUM_ALLOWED,
-            &mut mapping,
-            &mut privileges,
-            &mut size,
-            &mut granted,
-            &mut allowed,
-        );
-        let error = if success == 0 {
-            Some(win_error("AccessCheck LPAC proof"))
-        } else {
-            None
-        };
-        LocalFree(descriptor);
-        if let Some(error) = error {
-            return Err(error);
-        }
-        if allowed == 0 {
-            return Err("AccessCheck denied synthetic descriptor; token proof inconclusive".into());
-        }
-        Ok(granted)
-    }
-}
-
-fn token_proof(process: HANDLE, profile: &Profile, mode: Mode) -> Result<Value> {
-    unsafe {
-        let mut handle = null_mut();
-        if OpenProcessToken(process, TOKEN_QUERY | TOKEN_DUPLICATE, &mut handle) == 0 {
-            return Err(win_error("OpenProcessToken"));
-        }
-        let token = Handle(handle);
-        let query = |class| -> Result<u32> {
-            let mut value = 0u32;
-            let mut length = 0;
-            if GetTokenInformation(
-                token.0,
-                class,
-                (&mut value as *mut u32).cast(),
-                4,
-                &mut length,
-            ) == 0
-            {
-                return Err(win_error(&format!("GetTokenInformation(class={class})")));
-            }
-            Ok(value)
-        };
-        let ac = query(TokenIsAppContainer)?;
-        let access_mask = appcontainer_access_mask(token.0)?;
-        let lpac = u32::from(access_mask == 2);
-        let mut length = 0;
-        GetTokenInformation(token.0, TokenAppContainerSid, null_mut(), 0, &mut length);
-        let mut buffer = vec![0usize; (length as usize).div_ceil(size_of::<usize>())];
-        if length == 0
-            || GetTokenInformation(
-                token.0,
-                TokenAppContainerSid,
-                buffer.as_mut_ptr().cast(),
-                length,
-                &mut length,
-            ) == 0
-        {
-            return Err(win_error("TokenAppContainerSid"));
-        }
-        let info = &*buffer.as_ptr().cast::<TOKEN_APPCONTAINER_INFORMATION>();
-        let same =
-            !info.TokenAppContainer.is_null() && EqualSid(info.TokenAppContainer, profile.sid) != 0;
-        let mode_matches = match mode {
-            Mode::Lpac => access_mask == 2,
-            Mode::Appcontainer => access_mask & 1 != 0,
-        };
-        if ac != 1 || !same || !mode_matches {
-            return Err(format!("TOKEN MISMATCH: appcontainer={ac}, lpac={lpac}, sid_matches={same}; child never resumed"));
-        }
-        Ok(
-            json!({"is_appcontainer":ac,"is_lpac":lpac,"access_check_mask":access_mask,"package_sid_matches":same,"checked_before_resume":true}),
-        )
-    }
-}
 fn limited_log(path: &Path) -> Result<String> {
     let mut out = Vec::new();
     io(io(File::open(path))?.take(65536).read_to_end(&mut out))?;
@@ -414,7 +293,7 @@ fn limited_log(path: &Path) -> Result<String> {
 }
 fn launch(
     root: &Path,
-    profile: &Profile,
+    identity: &Identity,
     options: &Options,
     exe: &Path,
     args: &[String],
@@ -436,29 +315,12 @@ fn launch(
             return Err(win_error("inherit handle"));
         }
     }
-    let mut attributes = Attributes::new(if options.mode == Mode::Lpac { 3 } else { 2 })?;
-    let capabilities = SECURITY_CAPABILITIES {
-        AppContainerSid: profile.sid,
-        ..Default::default()
-    };
-    attributes.set(
-        PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES,
-        (&capabilities as *const SECURITY_CAPABILITIES).cast(),
-        size_of::<SECURITY_CAPABILITIES>(),
-    )?;
+    let mut attributes = Attributes::new(1)?;
     attributes.set(
         PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
         handles.as_ptr().cast(),
         size_of_val(&handles),
     )?;
-    let opt_out = 1u32;
-    if options.mode == Mode::Lpac {
-        attributes.set(
-            PROC_THREAD_ATTRIBUTE_ALL_APPLICATION_PACKAGES_POLICY,
-            (&opt_out as *const u32).cast(),
-            4,
-        )?;
-    }
     unsafe {
         let job = CreateJobObjectW(null(), null());
         if job.is_null() {
@@ -479,6 +341,7 @@ fn launch(
         let mut si: STARTUPINFOEXW = zeroed();
         si.StartupInfo.cb = size_of_val(&si) as u32;
         si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+        si.StartupInfo.lpDesktop = identity.desktop_name.as_ptr().cast_mut();
         si.StartupInfo.hStdInput = handles[0];
         si.StartupInfo.hStdOutput = handles[1];
         si.StartupInfo.hStdError = handles[2];
@@ -493,7 +356,8 @@ fn launch(
         );
         let cwd = wide(root.join("workspace"));
         let mut pi: PROCESS_INFORMATION = zeroed();
-        if CreateProcessW(
+        if CreateProcessAsUserW(
+            identity.token.0,
             exe_w.as_ptr(),
             command.as_mut_ptr(),
             null(),
@@ -509,34 +373,46 @@ fn launch(
             &mut pi,
         ) == 0
         {
-            return Err(win_error("CreateProcessW (no host fallback)"));
+            return Err(win_error("CreateProcessAsUserW (no host fallback)"));
         }
         let process = Handle(pi.hProcess);
         let thread = Handle(pi.hThread);
         if AssignProcessToJobObject(job.0 .0, process.0) == 0 {
             let e = win_error("AssignProcessToJobObject");
-            TerminateProcess(process.0, 137);
-            WaitForSingleObject(process.0, 5000);
+            if TerminateProcess(process.0, 137) == 0
+                || WaitForSingleObject(process.0, 5000) != WAIT_OBJECT_0
+            {
+                return Err(format!("{e}; suspended process cleanup unconfirmed"));
+            }
             return Err(e);
         }
-        let proof = token_proof(process.0, profile, options.mode)?;
+        let proof = match identity.proof(process.0) {
+            Ok(proof) => proof,
+            Err(error) => {
+                job.terminate_and_wait()?;
+                return Err(error);
+            }
+        };
         if ResumeThread(thread.0) == u32::MAX {
-            return Err(win_error("ResumeThread"));
+            let error = win_error("ResumeThread");
+            job.terminate_and_wait()?;
+            return Err(error);
         }
         let wait = WaitForSingleObject(process.0, (options.timeout_seconds * 1000) as u32);
         let timeout = wait == WAIT_TIMEOUT;
         if wait != WAIT_OBJECT_0 && !timeout {
-            return Err(win_error("WaitForSingleObject"));
+            let error = win_error("WaitForSingleObject");
+            job.terminate_and_wait()?;
+            return Err(error);
         }
         let mut code = 0;
         if GetExitCodeProcess(process.0, &mut code) == 0 {
-            return Err(win_error("GetExitCodeProcess"));
+            let error = win_error("GetExitCodeProcess");
+            job.terminate_and_wait()?;
+            return Err(error);
         }
         // Descendants must not outlive the probe, even when the launcher exits.
-        if TerminateJobObject(job.0 .0, 137) == 0 {
-            return Err(win_error("TerminateJobObject"));
-        }
-        WaitForSingleObject(process.0, 5000);
+        job.terminate_and_wait()?;
         let output = limited_log(&stdout_path)?;
         let parsed: Option<Value> = output
             .lines()
@@ -551,7 +427,7 @@ fn launch(
         Ok(
             json!({"executable":exe,"args":args,"token":proof,"exit_code":code,"timeout":timeout,
             "stdout":output,"stderr":limited_log(&stderr_path)?,"script_result":parsed,
-            "passed":!timeout && code == 0 && checks_ok}),
+            "job_active_processes_after_cleanup":0,"passed":!timeout && code == 0 && checks_ok}),
         )
     }
 }
@@ -587,7 +463,6 @@ fn digest(path: &Path) -> Result<String> {
 #[derive(Serialize)]
 pub struct Report {
     pub passed: bool,
-    mode: Mode,
     platform: &'static str,
     evidence: Value,
     error: Option<String>,
@@ -597,7 +472,6 @@ pub struct Report {
 pub fn run(options: Options) -> Report {
     let mut report = Report {
         passed: false,
-        mode: options.mode,
         platform: std::env::consts::ARCH,
         evidence: json!({}),
         error: None,
@@ -668,6 +542,10 @@ pub fn run(options: Options) -> Report {
             b"synthetic-not-real-credentials",
         ))?;
         io(fs::write(
+            root.join("ungranted/internal.db"),
+            b"synthetic-internal-db-not-user-data",
+        ))?;
+        io(fs::write(
             root.join("scripts/boundary.py"),
             include_str!("../scripts/boundary.py"),
         ))?;
@@ -680,7 +558,7 @@ pub fn run(options: Options) -> Report {
             include_str!("../scripts/boundary.ps1"),
         ))?;
         let name = format!(
-            "Hatch.Probe.{}.{}",
+            "HatchProbeDesktop_{}_{}",
             std::process::id(),
             root.file_name()
                 .unwrap()
@@ -689,7 +567,7 @@ pub fn run(options: Options) -> Report {
                 .last()
                 .unwrap()
         );
-        profile = Some(Profile::create(&name)?);
+        profile = Some(Identity::create(&name, &options.identity_user)?);
         let p = profile.as_ref().unwrap();
         grant(&root, &root, p.sid, FILE_TRAVERSE)?;
         for dir in ["runtime", "attachments", "scripts"] {
@@ -701,6 +579,12 @@ pub fn run(options: Options) -> Report {
             )?;
         }
         for dir in ["workspace", "scratch"] {
+            grant_tree(
+                &root,
+                &root.join(dir),
+                p.write_sid,
+                FILE_GENERIC_READ | FILE_GENERIC_EXECUTE | FILE_GENERIC_WRITE | DELETE,
+            )?;
             grant_tree(
                 &root,
                 &root.join(dir),
@@ -717,7 +601,7 @@ pub fn run(options: Options) -> Report {
         let system = PathBuf::from(String::from_utf16_lossy(&system_buf[..n]));
         let ps = system.join("WindowsPowerShell/v1.0/powershell.exe");
         let scratch = root.join("scratch").display().to_string();
-        let mut vars = vec![
+        let vars = vec![
             (
                 "SystemRoot",
                 system
@@ -737,6 +621,7 @@ pub fn run(options: Options) -> Report {
                 ),
             ),
             ("TEMP", scratch.clone()),
+            ("PATHEXT", ".COM;.EXE;.BAT;.CMD".into()),
             ("TMP", scratch.clone()),
             ("USERPROFILE", scratch.clone()),
             ("APPDATA", scratch.clone()),
@@ -746,13 +631,8 @@ pub fn run(options: Options) -> Report {
             ("PYTHONPATH", python_packages.display().to_string()),
             ("NODE_PATH", node_modules.display().to_string()),
         ];
-        vars.sort_by_key(|(k, _)| k.to_ascii_uppercase());
-        let mut env = Vec::new();
-        for (k, v) in vars {
-            env.extend(wide(format!("{k}={v}")));
-        }
-        env.push(0);
-        report.evidence = json!({"temporary_root":root,"profile":name,"manifest_sha256":digest(&manifest_file)?,
+        let env = super::environment::block(vars)?;
+        report.evidence = json!({"temporary_root":root,"private_desktop":name,"identity_kind":"dedicated restricted user","product_isolation_complete":false,"manifest_sha256":digest(&manifest_file)?,
             "runtime_source":options.runtime_root,"binaries_sha256":{"node":digest(&node)?,"python":digest(&python)?,"soffice":digest(&soffice)?},"processes":[]});
         let root_arg = root.display().to_string();
         let jobs = vec![
@@ -785,7 +665,7 @@ pub fn run(options: Options) -> Report {
         ];
         let mut passed = true;
         for (index, (exe, args)) in jobs.iter().enumerate() {
-            eprintln!("Probing {} ({:?})", exe.display(), options.mode);
+            eprintln!("Probing {} (dedicated restricted identity)", exe.display());
             let result = launch(&root, p, &options, exe, args, &env, index)
                 .unwrap_or_else(|e| json!({"executable":exe,"passed":false,"error":e}));
             passed &= result["passed"] == true;
@@ -820,6 +700,10 @@ pub fn run(options: Options) -> Report {
         let mut host_checks = Vec::new();
         let secret_intact =
             io(fs::read(root.join("ungranted/secret.txt")))? == b"synthetic-not-real-credentials";
+        let db_intact = io(fs::read(root.join("ungranted/internal.db")))?
+            == b"synthetic-internal-db-not-user-data";
+        passed &= db_intact;
+        host_checks.push(json!({"name":"synthetic internal DB unchanged","passed":db_intact}));
         passed &= secret_intact;
         host_checks
             .push(json!({"name":"synthetic ungranted canary unchanged","passed":secret_intact}));
@@ -847,10 +731,13 @@ pub fn run(options: Options) -> Report {
         Err(e) => report.error = Some(e),
     }
     let profile_created = profile.is_some();
-    let profile_cleanup = profile.as_mut().map(Profile::delete).unwrap_or(Ok(()));
+    let profile_cleanup = profile
+        .as_mut()
+        .map(Identity::close_desktop)
+        .unwrap_or(Ok(()));
     let directory_cleanup = temp.close().map_err(|e| e.to_string());
     report.passed &= profile_cleanup.is_ok() && directory_cleanup.is_ok();
-    report.cleanup = json!({"profile_created":profile_created,"profile_deleted":profile_created && profile_cleanup.is_ok(),"profile_error":profile_cleanup.err(),"temporary_directory_deleted":directory_cleanup.is_ok(),"directory_error":directory_cleanup.err(),"path":root});
+    report.cleanup = json!({"identity_opened":profile_created,"private_desktop_closed":profile_created && profile_cleanup.is_ok(),"desktop_error":profile_cleanup.err(),"account_cleanup":"owned by CI provisioner; probe never creates/deletes accounts or profiles","temporary_directory_deleted":directory_cleanup.is_ok(),"directory_error":directory_cleanup.err(),"path":root});
     report
 }
 

@@ -23,6 +23,13 @@ def write_workspace():
     p.write_text('python-ok')
     assert p.read_text() == 'python-ok'
 
+def environment_clean():
+    forbidden = {'HATCH_PROBE_PASSWORD', 'HATCH_PROBE_ENV_CANARY', 'GITHUB_TOKEN', 'GH_TOKEN',
+        'AWS_SECRET_ACCESS_KEY', 'OPENAI_API_KEY', 'NODE_OPTIONS'}
+    assert not forbidden.intersection(k.upper() for k in os.environ), 'unexpected environment key (values withheld)'
+
+check('environment credentials absent', environment_clean)
+
 check('workspace read/write', write_workspace)
 for directory in ('attachments', 'runtime'):
     p = root / directory / 'probe-canary.txt'
@@ -30,6 +37,24 @@ for directory in ('attachments', 'runtime'):
     check(directory + ' write denied', lambda p=p: denied(lambda: p.write_text('ESCAPE')))
 check('ungranted read denied', lambda: denied(lambda: (root / 'ungranted' / 'secret.txt').read_text()))
 check('ungranted write denied', lambda: denied(lambda: (root / 'ungranted' / 'secret.txt').write_text('ESCAPE')))
+check('synthetic internal DB read denied', lambda: denied(lambda: (root / 'ungranted' / 'internal.db').read_bytes()))
+
+def descendant_boundary():
+    # Real Python descendant inherits the restricted identity and Job. Never
+    # inspect a user's actual DB/credentials, or print canary contents.
+    code = '''import errno, os, pathlib, sys
+assert "HATCH_PROBE_PASSWORD" not in os.environ
+assert "HATCH_PROBE_ENV_CANARY" not in os.environ
+for name in ("secret.txt", "internal.db"):
+    try: pathlib.Path(sys.argv[1], "ungranted", name).read_bytes()
+    except OSError as e:
+        if e.errno not in (errno.EACCES, errno.EPERM) and getattr(e, "winerror", None) != 5: raise
+    else: raise AssertionError("descendant read allowed")
+print("descendant-boundary-ok")
+'''
+    result = subprocess.run([sys.executable, '-c', code, str(root)], capture_output=True, timeout=20)
+    assert result.returncode == 0 and b'descendant-boundary-ok' in result.stdout, 'descendant boundary failed'
+check('descendant credentials/internal DB denied and environment clean', descendant_boundary)
 
 # This is the real bundled openpyxl and real bundled soffice, running inside
 # the SAME container/job. No host-side conversion or fallback.

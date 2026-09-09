@@ -1,4 +1,4 @@
-name: Windows sandbox compatibility probe (experimental)
+name: Windows restricted identity probe (experimental)
 on:
   workflow_dispatch:
 permissions:
@@ -9,6 +9,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -23,21 +25,9 @@ jobs:
           exit $LASTEXITCODE
       - name: Prepare actual bundled Windows toolchain
         run: node desktop-app/scripts/prepare-runtime.mjs
-      - name: Run independent compatibility experiments
+      - name: Run dedicated restricted identity experiment
         shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Path probe-results -Force | Out-Null
-          $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-          $principal = [Security.Principal.WindowsPrincipal]::new($identity)
-          @{ elevated = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator); os = [Environment]::OSVersion.VersionString; scope = 'CI compatibility probe; not standard-user Desktop UAT' } | ConvertTo-Json | Set-Content probe-results/host.json
-          $probe = '.\\tools\\windows-sandbox-probe\\target\\release\\hatch-windows-sandbox-probe.exe'
-          $runtime = (Resolve-Path desktop-app/src-tauri/runtime).Path
-          & $probe --opt-in --runtime-root $runtime --mode lpac --timeout-seconds 180 1>probe-results/lpac.json 2>probe-results/lpac.stderr.txt
-          $lpacExit = $LASTEXITCODE
-          & $probe --opt-in --runtime-root $runtime --mode appcontainer --timeout-seconds 180 1>probe-results/appcontainer.json 2>probe-results/appcontainer.stderr.txt
-          $appcontainerExit = $LASTEXITCODE
-          @{ lpac = $lpacExit; appcontainer = $appcontainerExit } | ConvertTo-Json | Set-Content probe-results/exit-codes.json
-          if ($lpacExit -ne 0 -or $appcontainerExit -ne 0) { exit 1 }
+        run: ./tools/windows-sandbox-probe/scripts/run-ci.ps1
       - uses: actions/upload-artifact@v4
         if: always()
         with:

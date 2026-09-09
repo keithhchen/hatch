@@ -1,0 +1,8 @@
+Restricted-token and private-desktop design adapted from OpenAI Codex.
+Copyright 2025 OpenAI. Licensed under Apache-2.0 (LICENSE-CODEX).
+Source: https://github.com/openai/codex/tree/20f109eadb9b45360e6ca4f1dee2e82c83a48f7a/codex-rs/windows-sandbox-rs
+Files studied: token.rs, identity.rs, process.rs, desktop.rs, env.rs.
+Modified for Hatch's fixed-script, temporary-directory-only experiment:
+no account provisioning, no system/user ACL mutation, no host execution fallback,
+explicit environment allowlist, suspended launch and token verification.
+No Ratatui code is used by this tool.
