@@ -69,6 +69,12 @@ export async function verifyBundledRuntime({ root, searchRoot, reportFile = null
     ].filter(Boolean).join(path.delimiter)
   };
   const versionReport = await run(nodeExecutable, ["--version"], { env: runtimeEnvironment });
+  await run(nodeExecutable, [path.join(runtimeRoot, manifest.node.npm_cli), "--version"], { env: runtimeEnvironment });
+  if (manifest.target.platform === "darwin") {
+    for (const name of ["npm", "npx"]) {
+      await run(path.join(path.dirname(nodeExecutable), name), ["--version"], { env: runtimeEnvironment });
+    }
+  }
   const pythonReport = await run(pythonExecutable, ["--version"], {
     env: { ...runtimeEnvironment, PYTHONNOUSERSITE: "1", PYTHONPATH: pythonPackages }
   });

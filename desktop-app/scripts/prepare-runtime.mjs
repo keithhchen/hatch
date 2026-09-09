@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { prepareNodeCliEntrypoints } from "./node-cli-entrypoints.mjs";
 
 import {
   DESKTOP_RUNTIME_VERSION,
@@ -61,6 +62,7 @@ try {
   const pythonRoot = path.join(stagingRoot, "python");
   await extractArchive(nodeArchivePath, nodeRoot, target.node.archive);
   await extractArchive(pythonArchivePath, pythonRoot, target.python.archive);
+  await prepareNodeCliEntrypoints(nodeRoot, target.platform);
 
   const nodeExecutable = path.join(stagingRoot, target.executables.node);
   const pythonExecutable = path.join(stagingRoot, target.executables.python);
