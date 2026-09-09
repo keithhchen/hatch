@@ -3622,6 +3622,14 @@ async function bindingFromHistoryRequest(
   const entitlementId = url.searchParams.get("entitlement_id") ?? undefined;
   const authToken = bearerToken(req);
   const authIdentity = await resolveAuthIdentity(authToken, authIdentityResolver, signal);
+  // Creator REST requests use the same owned-Product authorization as client.hello.
+  const selectedProduct = url.searchParams.get("product_id");
+  if (authIdentity?.role === "creator" && selectedProduct && !entitlementId) {
+    return resolveSessionBinding({
+      type: "client.hello", protocol_version: PROTOCOL_VERSION,
+      auth_token: authToken, product_id: selectedProduct, local_tools: []
+    }, entitlementResolver, agentCorpusResolver, authIdentityResolver, authIdentity, signal);
+  }
   const productMode = Boolean(entitlementResolver || agentCorpusResolver);
   if (productMode) {
     if (!entitlementResolver || !agentCorpusResolver) {

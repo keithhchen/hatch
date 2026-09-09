@@ -24,17 +24,17 @@ export class CorpusPublishError extends Error {
 }
 
 export type PublishResult = {
-  execution_id: string;
+  execution_id: string | null;
   output_ref: string;
   corpus_digest: string;
   published: PublishedAgentCorpus;
   release: CreatorRegistryRelease;
 };
 
-/** The only bridge from the new Node output contract into Registry. */
+/** Shared publication boundary for validated Corpus definitions and existing Node output. */
 export class CorpusPublisher {
   constructor(
-    private readonly nodes: FactoryNodeService,
+    private readonly nodes: FactoryNodeService | undefined,
     private readonly objectStore: ArtifactObjectStore,
     private readonly registry: RegistryStoreTs,
     private readonly releases: CreatorRegistryReleaseStore,
@@ -52,7 +52,7 @@ export class CorpusPublisher {
   }): Promise<PublishResult> {
     let outerStage = "latest_completed_corpus";
     try {
-    const execution = await this.nodes.getLatestCompletedExecution(input.productId, "corpus");
+    const execution = await this.nodes?.getLatestCompletedExecution(input.productId, "corpus");
     if (!execution?.outputRef) throw new Error("No completed Corpus Node execution is available");
     const expected = `${input.productId}/corpus/${execution.executionId}/output.json`;
     if (execution.outputRef !== expected) throw new Error("Corpus output_ref is not canonical");
@@ -63,6 +63,35 @@ export class CorpusPublisher {
     outerStage = "read_corpus_input";
     const corpusInput = await readCorpusInput(this.objectStore, execution.inputRef);
     validateKnowledgeSelection(corpus, corpusInput);
+    return await this.publishDefinition({ ...input, corpus, bytes, executionId: execution.executionId, outputRef: execution.outputRef });
+    } catch (error) {
+      if (error instanceof CorpusPublishError) throw error;
+      throw new CorpusPublishError("publish_stage_failed", `Registry publish failed during ${outerStage}: ${error instanceof Error ? error.message : String(error)}`, 422, { cause: error });
+    }
+  }
+
+  /** File-based Factory uses the same schema/materializer/indexer/release pointer. */
+  async publishUploaded(input: {
+    creatorId: string; productId: string; productName: string; productPromise: string;
+    corpus: unknown; sourceFiles: string[]; briefSpec?: unknown;
+  }): Promise<PublishResult> {
+    const corpus = corpusOutputSchema.parse(input.corpus);
+    validateKnowledgeSelection(corpus, { files: input.sourceFiles });
+    const bytes = Buffer.from(JSON.stringify(corpus), "utf8");
+    const hash = createHash("sha256").update(bytes).digest("hex");
+    const outputRef = `${input.productId}/corpus/uploads/${hash}/output.json`;
+    await this.objectStore.put(outputRef, bytes, { immutable: true, contentType: "application/json" });
+    return this.publishDefinition({ ...input, corpus, bytes, executionId: null, outputRef });
+  }
+
+  private async publishDefinition(input: {
+    creatorId: string; productId: string; productName: string; productPromise: string;
+    briefSpec?: unknown; force?: boolean; corpus: CorpusOutput; bytes: Buffer;
+    executionId: string | null; outputRef: string;
+  }): Promise<PublishResult> {
+    let outerStage = "validated_corpus";
+    try {
+    const { corpus, bytes } = input;
     const sourceDigest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 
     // A lost HTTP response must not repeat materialization or indexing. The
@@ -78,7 +107,7 @@ export class CorpusPublisher {
     ) {
       const published = await this.registry.getAgentCorpusRelease(input.creatorId, input.productId, live.release_digest);
       if (published) {
-        return { execution_id: execution.executionId, output_ref: execution.outputRef, corpus_digest: sourceDigest, published, release: live };
+        return { execution_id: input.executionId, output_ref: input.outputRef, corpus_digest: sourceDigest, published, release: live };
       }
     }
     outerStage = "runtime_bundle_generation";
@@ -198,7 +227,7 @@ export class CorpusPublisher {
     publishStage = "postgres_release_pointer";
     const release = await this.releases.publish(releaseInput);
     await rm(staging, { recursive: true, force: true });
-    return { execution_id: execution.executionId, output_ref: execution.outputRef, corpus_digest: sourceDigest, published: staged, release };
+    return { execution_id: input.executionId, output_ref: input.outputRef, corpus_digest: sourceDigest, published: staged, release };
     } catch (error) {
       if (error instanceof CorpusPublishError) throw error;
       throw new CorpusPublishError(
@@ -340,7 +369,7 @@ async function readCorpusInput(objectStore: ArtifactObjectStore, reference: stri
   }
 }
 
-function validateKnowledgeSelection(corpus: CorpusOutput, input: CorpusInput): void {
+function validateKnowledgeSelection(corpus: CorpusOutput, input: Pick<CorpusInput, "files">): void {
   const declared = new Set(input.files);
   const selected = new Set<string>();
   for (const document of corpus.knowledge) {
