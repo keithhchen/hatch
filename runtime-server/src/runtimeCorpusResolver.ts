@@ -78,12 +78,11 @@ export class RuntimeReleaseAgentCorpusResolver implements AgentCorpusResolverLik
   ): Promise<ResolvedAgentCorpus> {
     requireUuidV4(creatorId, "creator_id");
     requireUuidV4(agentId, "product_id");
-    const selectedDigest = typeof digestOrSignal === "string" ? digestOrSignal : undefined;
+    // Historical access grants may still supply their purchase-time digest.
+    // It is bookkeeping, not a second release selector: Registry owns the
+    // current Product definition for HTTP, hello, and turn authorization alike.
     const signal = typeof digestOrSignal === "string" ? explicitSignal : digestOrSignal;
     signal?.throwIfAborted();
-    if (selectedDigest !== undefined && !digestSchema.safeParse(selectedDigest).success) {
-      throw new Error("pinned corpus digest is invalid");
-    }
 
     const response = await this.readLiveRelease(agentId, signal);
     const release = response.release;
@@ -92,9 +91,6 @@ export class RuntimeReleaseAgentCorpusResolver implements AgentCorpusResolverLik
     }
     if (release.product_id !== agentId || release.creator_id !== creatorId) {
       throw new Error("Registry release binding does not match the requested Creator Agent");
-    }
-    if (selectedDigest !== undefined && release.corpus_digest !== selectedDigest) {
-      throw new Error("The requested pinned Corpus release is not the live Registry release");
     }
 
     const releaseDirectory = releaseDirectoryName(release.release_digest);

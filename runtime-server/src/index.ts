@@ -3589,9 +3589,9 @@ async function revalidateTurnAuthorization(
     if (!agentCorpusResolver) {
       throw new EntitlementError("agent_updated", "This Creator Agent changed. Reconnect before starting another turn.");
     }
-    // Buyer sessions are bound to the immutable purchased/effective release;
-    // publishing a newer current release must not invalidate work already
-    // purchased. Creator sessions deliberately continue tracking current.
+    // Production resolves the current Registry publication for every caller.
+    // Reconnect after a publication changes an already-open session so its
+    // next turn cannot execute the previously loaded instructions.
     const current = binding.purchasedCorpusDigest
       ? await agentCorpusResolver.resolve(
           binding.creatorId,
