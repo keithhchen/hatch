@@ -1235,8 +1235,11 @@ async fn open_conversation_draft(
 ) -> Result<draft_store::OpenDraft, String> {
     let label = window.label().to_owned();
     tauri::async_runtime::spawn_blocking(move || {
-        app.state::<draft_store::DraftStore>().open(&account_id, &conversation_id, &label)
-    }).await.map_err(|error| format!("draft_worker_failed: {error}"))?
+        app.state::<draft_store::DraftStore>()
+            .open(&account_id, &conversation_id, &label)
+    })
+    .await
+    .map_err(|error| format!("draft_worker_failed: {error}"))?
 }
 
 #[tauri::command]
@@ -1250,8 +1253,16 @@ async fn save_conversation_draft(
 ) -> Result<(), String> {
     let label = window.label().to_owned();
     tauri::async_runtime::spawn_blocking(move || {
-        app.state::<draft_store::DraftStore>().save(&account_id, &conversation_id, &label, &lease, draft)
-    }).await.map_err(|error| format!("draft_worker_failed: {error}"))?
+        app.state::<draft_store::DraftStore>().save(
+            &account_id,
+            &conversation_id,
+            &label,
+            &lease,
+            draft,
+        )
+    })
+    .await
+    .map_err(|error| format!("draft_worker_failed: {error}"))?
 }
 
 #[tauri::command]
@@ -1264,8 +1275,15 @@ async fn release_conversation_draft(
 ) -> Result<(), String> {
     let label = window.label().to_owned();
     tauri::async_runtime::spawn_blocking(move || {
-        app.state::<draft_store::DraftStore>().release(&account_id, &conversation_id, &label, &lease)
-    }).await.map_err(|error| format!("draft_worker_failed: {error}"))?
+        app.state::<draft_store::DraftStore>().release(
+            &account_id,
+            &conversation_id,
+            &label,
+            &lease,
+        )
+    })
+    .await
+    .map_err(|error| format!("draft_worker_failed: {error}"))?
 }
 
 #[tauri::command]
@@ -1408,8 +1426,11 @@ async fn reveal_workspace_artifact(
     request: WorkspaceArtifactRequest,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let (_workspace, path) =
-            resolve_workspace_artifact_path(&app, &request.workspace_grant_id, &request.relative_path)?;
+        let (_workspace, path) = resolve_workspace_artifact_path(
+            &app,
+            &request.workspace_grant_id,
+            &request.relative_path,
+        )?;
         #[cfg(target_os = "macos")]
         let status = Command::new("/usr/bin/open").arg("-R").arg(&path).status();
         #[cfg(target_os = "windows")]
@@ -1425,7 +1446,8 @@ async fn reveal_workspace_artifact(
             .success()
             .then_some(())
             .ok_or_else(|| {
-                "artifact_reveal_failed: The system file browser could not reveal the artifact".into()
+                "artifact_reveal_failed: The system file browser could not reveal the artifact"
+                    .into()
             })
     })
     .await
@@ -1447,8 +1469,11 @@ async fn open_workspace_artifact(
     request: WorkspaceArtifactRequest,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let (_workspace, path) =
-            resolve_workspace_artifact_path(&app, &request.workspace_grant_id, &request.relative_path)?;
+        let (_workspace, path) = resolve_workspace_artifact_path(
+            &app,
+            &request.workspace_grant_id,
+            &request.relative_path,
+        )?;
         // Filesystem work and platform process waits stay on this worker.
         // macOS marshals only AppKit operations through its existing run_on_main.
         // Holding this grant covers the handoff, NOT asynchronous scoped QL reads.
@@ -1636,14 +1661,18 @@ async fn set_window_tool_context(
         let scoped = resolve_scoped_workspace_grant(&app, &workspace_grant_id)?;
         let authority = app.state::<NativeToolAuthority>();
         let router = app.state::<window_commands::NativeCommandRouter>();
-        router.with_window_session(&conversation_id, &window_label, || authority.set_context(RunToolContext {
-            window_label: window_label.clone(),
-            conversation_id: conversation_id.clone(),
-            run_id,
-            workspace_grant_id: scoped.grant_id.clone(),
-            permission_policy,
-        }))
-    }).await.map_err(|error| format!("tool_context_worker_failed: {error}"))?
+        router.with_window_session(&conversation_id, &window_label, || {
+            authority.set_context(RunToolContext {
+                window_label: window_label.clone(),
+                conversation_id: conversation_id.clone(),
+                run_id,
+                workspace_grant_id: scoped.grant_id.clone(),
+                permission_policy,
+            })
+        })
+    })
+    .await
+    .map_err(|error| format!("tool_context_worker_failed: {error}"))?
 }
 
 #[tauri::command]
@@ -2527,7 +2556,9 @@ pub fn run() {
         .setup(|app| {
             app.manage(draft_store::DraftStore::new(
                 app.path().app_data_dir()?.join("drafts"),
-                app.state::<window_commands::NativeCommandRouter>().inner().clone(),
+                app.state::<window_commands::NativeCommandRouter>()
+                    .inner()
+                    .clone(),
             ));
             app.manage(NativeDropContextStore::open(
                 app.path().app_data_dir()?.join("attachments"),
@@ -2659,7 +2690,8 @@ pub fn run() {
             tauri::async_runtime::spawn_blocking(move || {
                 // Wait out pre-close context registrations and draft writes before
                 // draining tools; retain the Closing owner until cleanup succeeds.
-                window.state::<window_commands::NativeCommandRouter>()
+                window
+                    .state::<window_commands::NativeCommandRouter>()
                     .revoke_window_sessions(window.label());
                 let authority = window.state::<NativeToolAuthority>();
                 let (pending, active) = match authority.clear_window(window.label()) {
@@ -2682,7 +2714,8 @@ pub fn run() {
                         return;
                     }
                 }
-                window.state::<window_commands::NativeCommandRouter>()
+                window
+                    .state::<window_commands::NativeCommandRouter>()
                     .handle_window_event(&window, &WindowEvent::Destroyed);
             });
         })
