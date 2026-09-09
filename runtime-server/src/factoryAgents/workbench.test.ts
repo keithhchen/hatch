@@ -36,6 +36,31 @@ test("workspaces isolate files, overwrite ordinary files and retain exact expert
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test("result comments follow the displayed original across new runs and downloaded assets", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-result-comment-unit-"));
+  try {
+    const store = new WorkbenchStore(root);
+    const s = await store.create("evaluator");
+    const first = "output/results/first.md";
+    const asset = "output/results/asset-document.md";
+    await store.put(s.id, first, Buffer.from("First result"), { actor: "host", readonly: true });
+    await store.put(s.id, "output/RESULT.md", Buffer.from("First result"), { actor: "host", readonly: true, origin: { sessionId: s.id, path: first } });
+    await store.update(s.id, state => { state.hatch = { conversationId: "test-conversation", lastRunId: "next", pending: true }; });
+    await store.comment(s.id, { path: "output/RESULT.md", start: 0, end: 5, quote: "First", text: "Review the displayed response" });
+    await store.put(s.id, asset, Buffer.from("Actual asset"), { actor: "host", readonly: true });
+    await store.put(s.id, "output/RESULT.md", Buffer.from("Actual asset"), { actor: "host", readonly: true, origin: { sessionId: s.id, path: asset } });
+    await store.comment(s.id, { path: "output/RESULT.md", start: 0, end: 6, quote: "Actual", text: "Review the downloaded asset" });
+    const reopened = await new WorkbenchStore(root).get(s.id);
+    assert.deepEqual(reopened.comments.map(c => [c.path, c.quote]), [[first, "First"], [asset, "Actual"]]);
+    // Historical responses without origin metadata still resolve to the saved run.
+    await store.update(s.id, state => { state.hatch!.lastRunId = "first"; });
+    await store.put(s.id, "output/RESULT.md", Buffer.from("First result"), { actor: "host", readonly: true });
+    assert.equal((await store.comment(s.id, { path: "output/RESULT.md", start: 0, end: 5, quote: "First", text: "Historical review" })).path, first);
+    await store.put(s.id, "output/RESULT.md", Buffer.from("Different asset"), { actor: "host", readonly: true });
+    await assert.rejects(store.comment(s.id, { path: "output/RESULT.md", start: 0, end: 9, quote: "Different", text: "Do not attach to another result" }), /Result changed/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("one Pi Agent per chat reports progress without a shadow; histories and writes remain separate", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-progress-unit-"));
   const store = new WorkbenchStore(root);

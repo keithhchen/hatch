@@ -102,13 +102,17 @@ export class WorkbenchStore {
     await this.update(id, async s => { if (!name.startsWith("input/") || s.status === "running") throw new Error("Only idle input files can be removed"); await rm(await this.materializedPath(id, name), { force: true }); s.files = s.files.filter(f => f.path !== name); s.revision++; s.progress.status = "unscored"; });
   }
   async comment(id: string, input: Omit<Comment, "id" | "createdAt">): Promise<Comment> {
-    const { bytes } = await this.read(id, input.path);
+    const { bytes, record } = await this.read(id, input.path);
     const text = bytes.toString("utf8");
     if (!Number.isInteger(input.start) || !Number.isInteger(input.end) || input.start < 0 || input.end < input.start || input.end > text.length || text.slice(input.start, input.end) !== input.quote || !input.text.trim()) throw new Error("Comment must reference the selected text");
     const session = await this.get(id);
-    const runPath = input.path === "output/RESULT.md" && session.hatch?.lastRunId
-      ? `output/results/${session.hatch.lastRunId}.md` : input.path;
-    const comment = { ...input, path: session.files.some(f => f.path === runPath) ? runPath : input.path, id: randomUUID(), createdAt: new Date().toISOString() };
+    // RESULT.md is a convenience link to an immutable response or downloaded asset.
+    // Older stored results predate origin metadata; resolve those via their saved run.
+    const runPath = input.path === "output/RESULT.md"
+      ? (record.origin?.sessionId === id ? record.origin.path : session.hatch?.lastRunId ? `output/results/${session.hatch.lastRunId}.md` : input.path)
+      : input.path;
+    if (runPath !== input.path && !(await this.read(id, runPath)).bytes.equals(bytes)) throw new Error("Result changed; open the original result file before commenting");
+    const comment = { ...input, path: runPath, id: randomUUID(), createdAt: new Date().toISOString() };
     await this.update(id, s => { s.comments.push(comment); });
     return comment;
   }
