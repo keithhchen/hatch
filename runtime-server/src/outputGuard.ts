@@ -68,6 +68,11 @@ export class GuardedAssistantOutput {
     if (this.terminal || !content) {
       return { released: [], blocked: this.terminal };
     }
+    // Disabled means no detector and no detector-owned buffering. Preserve
+    // provider delta boundaries instead of waiting for a semantic segment.
+    if (this.guard instanceof PassThroughOutputGuard) {
+      return { released: [content], blocked: false };
+    }
     this.pending += content;
     const released: string[] = [];
     while (!this.terminal) {

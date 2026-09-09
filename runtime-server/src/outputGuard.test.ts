@@ -12,6 +12,20 @@ import {
   type OutputGuardVerdict
 } from "./outputGuard.js";
 
+test("disabled Output Guard immediately releases each delta without checks or segment timing", async () => {
+  const guard = createOutputGuardFromEnvironment({ HATCH_OUTPUT_GUARD: "off" });
+  guard.check = async () => { throw new Error("Disabled guard must never be called"); };
+  const timings: unknown[] = [];
+  const output = new GuardedAssistantOutput(guard, "run_unbuffered", undefined, undefined, undefined,
+    (timing) => timings.push(timing));
+  for (const delta of ["你", "好", "。", "x".repeat(1000)]) {
+    assert.deepEqual(await output.push(delta), { released: [delta], blocked: false });
+  }
+  assert.deepEqual(await output.push(""), { released: [], blocked: false });
+  assert.deepEqual(await output.finish(), { released: [], blocked: false });
+  assert.deepEqual(timings, []);
+});
+
 test("Output Guard defaults favor fewer, longer semantic segments", () => {
   assert.equal(DEFAULT_OUTPUT_GUARD_FIRST_SEGMENT_CHARS, 240);
   assert.equal(DEFAULT_OUTPUT_GUARD_LATER_SEGMENT_CHARS, 600);
