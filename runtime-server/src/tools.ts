@@ -218,14 +218,14 @@ export const toolRegistry = new Map<string, ToolDefinition>([
     name: "file_read",
     locality: "client",
     approval: "auto",
-    description: "Read a UTF-8 file inside the client-declared local workspace.",
+    description: "Read text or view an image from an authorized local path, including saved attachments. Images are returned as multimodal content.",
     schema: z.object({ path: z.string() }).strict(),
     model: {
       name: "file_read",
       locality: "hybrid",
-      description: "Read a UTF-8 file. Server-hosted skill bundle paths are read on the server; workspace paths are read by the local client when file_read is enabled.",
+      description: "Read a UTF-8 file or view a local image. For images (including saved attachments and rendered document pages), this tool returns actual image content you can see; use it to inspect images instead of shell/OCR. Local reads require file_read capability and an authorized path. Server-hosted skill resources are read on the server. For PDF and Office documents, load the corresponding Skill and use its document tools rather than treating the binary as text.",
       properties: {
-        path: stringSchema("Full skill resource path or workspace-relative file path.")
+        path: stringSchema("Workspace-relative path, authorized absolute local path (including the saved attachment path), or full skill resource path.")
       },
       required: ["path"],
       availability: "always"
