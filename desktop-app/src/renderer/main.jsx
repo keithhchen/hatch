@@ -73,6 +73,7 @@ import {
 } from "./product-policy.js";
 import { fetchPurchasedCreatorAgents, runtimeHttpUrl } from "./entitlement-client.js";
 import {
+  assertConversationIdentity,
   createConversation,
   canConnectConversation,
   getConversationSnapshot,
@@ -203,7 +204,7 @@ import {
   upsertTimelinePart
 } from "./activity-ui.js";
 
-const PROTOCOL_VERSION = "0.7";
+const PROTOCOL_VERSION = "0.8";
 const OUTPUT_FILTERED_COPY = "This response was blocked by the output safety check.";
 const DEFAULT_RUNTIME_URL = import.meta.env.VITE_HATCH_RUNTIME_URL || "wss://hatch.tokenquadrant.cn/v1/runtime";
 const DEFAULT_AUTH_URL = import.meta.env.VITE_HATCH_AUTH_URL || "https://hatch.tokenquadrant.cn";
@@ -2390,6 +2391,7 @@ function App() {
         protocol_version: PROTOCOL_VERSION,
         auth_token: buyerSession.accessToken,
         entitlement_id: targetEntitlementId,
+        conversation_id: conversationSession.scope.conversationId,
         client_version: "0.1.31",
         local_tools: [...PLATFORM_LOCAL_TOOLS],
       }));
@@ -2472,6 +2474,9 @@ function App() {
 
   async function handleRuntimeMessage(message, sourceSocket = socketRef.current, sourceToken = connectionTokenRef.current) {
     if (!isCurrentRuntimeTransport(sourceSocket, sourceToken)) return;
+    if (message.type === "message.accepted" || message.type === "session.ready") {
+      assertConversationIdentity(message.conversation_id, conversationSession.scope.conversationId, "protocol_error");
+    }
     if (message.type === "message.accepted") {
       try { await conversationSession.acceptSubmission(message); }
       catch (error) { setStatus(errorMessage(error)); }

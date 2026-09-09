@@ -80,7 +80,7 @@ function bind(w, id, entitlementId = "agent-a") {
     textRevealBoundary, createTurnAccessSnapshot, conversationSession: session, sessionManager: w.manager,
     console, Date, JSON, Promise, Map, Set, Object, Boolean, Number, String, Error, WebSocket: Socket,
     window: { setTimeout, clearTimeout, __TAURI_INTERNALS__: false }, document: { visibilityState: "visible" },
-    DEFAULT_PERMISSION_MODE: policy.DEFAULT_PERMISSION_POLICY, MAX_AUTOMATIC_RUNTIME_RETRIES: 4, PROTOCOL_VERSION: "0.7",
+    DEFAULT_PERMISSION_MODE: policy.DEFAULT_PERMISSION_POLICY, MAX_AUTOMATIC_RUNTIME_RETRIES: 4, PROTOCOL_VERSION: "0.8",
     OUTPUT_FILTERED_COPY: "Filtered", creatorAgent: { name: "Same title" },
     creatorAgentEntitlements: ["agent-a", "agent-b"].map((entitlement_id) => ({ entitlement_id, product_id: entitlement_id, creator_id: "creator", name: "Same title" })),
     selectedEntitlementId: entitlementId, conversationId: id, serverUrl: "ws://fixture.invalid/runtime",
@@ -132,7 +132,8 @@ async function ready(owner) {
   const socket = owner.c.socketRef.current;
   expect(socket, owner.session.snapshot().status).toBeTruthy();
   socket.dispatchEvent(new Event("open"));
-  socket.frame({ type: "session.ready", runtime_capabilities: { message_acceptance: true, local_file_references: true } });
+  socket.frame({ type: "session.ready", conversation_id: owner.session.scope.conversationId,
+    runtime_capabilities: { message_acceptance: true, local_file_references: true } });
   await vi.waitFor(() => expect(owner.session.snapshot().connected).toBe(true));
   return socket;
 }
@@ -234,6 +235,7 @@ describe("cloud startup without local workspace authority", () => {
     expect(a.c.windowStateRestored).toBe(true);
     expect(a.session.snapshot().workspaceGrant).toBeNull();
     const fetch = vi.fn(async () => new Response(JSON.stringify({
+      conversation: { id: "conv_a" },
       messages: [{ id: "cloud-message", role: "user", content: "Saved in cloud" }],
       runs: [], events: [], cursor: 0, has_more: false
     }), { status: 200 }));
@@ -356,6 +358,44 @@ describe("cloud startup without local workspace authority", () => {
 });
 
 describe("production renderer with per-Conversation sessions", () => {
+  it("binds client.hello and session.ready to the immutable session Conversation", async () => {
+    const w = world(), a = bind(w, "conv_a"), b = bind(w, "conv_b");
+    w.manager.select(a.session);
+    await a.session.openDraft(w.native);
+    await a.connectRuntime();
+    const socket = a.c.socketRef.current;
+    socket.dispatchEvent(new Event("open"));
+    await vi.waitFor(() => expect(socket.sent).toHaveLength(1));
+    expect(socket.sent[0]).toMatchObject({
+      type: "client.hello", protocol_version: "0.8", conversation_id: "conv_a"
+    });
+    const beforeA = a.session.snapshot();
+    const beforeB = b.session.snapshot();
+    await expect(a.handleRuntimeMessage({
+      type: "session.ready", conversation_id: "conv_b",
+      runtime_capabilities: { message_acceptance: true }
+    }, socket, a.c.connectionTokenRef.current)).rejects.toMatchObject({ code: "protocol_error" });
+    expect(a.session.snapshot()).toBe(beforeA);
+    expect(b.session.snapshot()).toBe(beforeB);
+  });
+
+  it("rejects a foreign message.accepted without clearing the scoped outbox or composer", async () => {
+    const w = world(), a = bind(w, "conv_a"), b = bind(w, "conv_b");
+    w.manager.select(a.session);
+    const socket = await ready(a);
+    const run = await sendText(a, "Keep this submission");
+    const beforeDraft = structuredClone(a.c.draftSessionRef.current.session.snapshot());
+    const beforeMessages = structuredClone(a.session.snapshot().messages);
+    const beforeB = b.session.snapshot();
+    await expect(a.handleRuntimeMessage({
+      type: "message.accepted", conversation_id: "conv_b",
+      run_id: run.runId, client_message_id: run.clientMessageId
+    }, socket, a.c.connectionTokenRef.current)).rejects.toMatchObject({ code: "protocol_error" });
+    expect(a.c.draftSessionRef.current.session.snapshot()).toEqual(beforeDraft);
+    expect(a.session.snapshot().messages).toEqual(beforeMessages);
+    expect(b.session.snapshot()).toBe(beforeB);
+  });
+
   it("retains each session's Agent presentation across navigation without another handshake", async () => {
     const w = world();
     const a = bind(w, "conv_a");
@@ -388,7 +428,7 @@ describe("production renderer with per-Conversation sessions", () => {
     const runB = await sendText(b, "Screenshot question");
     const bBefore = structuredClone(b.session.snapshot().messages);
     socketA.frame({ type: "assistant.delta", run_id: runA.runId, delta: { kind: "text", content: "A background answer" } });
-    socketA.frame({ type: "message.accepted", run_id: runA.runId, client_message_id: runA.clientMessageId });
+    socketA.frame({ type: "message.accepted", conversation_id: "conv_a", run_id: runA.runId, client_message_id: runA.clientMessageId });
     await vi.waitFor(() => expect(a.c.draftSessionRef.current.session.snapshot().pending).toBeNull());
     expect(a.session.snapshot().composerDraft).toBe("Later A draft");
     expect(a.session.snapshot().droppedFiles[0].contextId).toBe("later-a-file");
@@ -449,7 +489,7 @@ describe("production renderer with per-Conversation sessions", () => {
     const visible = vi.fn();
     const unsubscribe = b.session.subscribe(visible);
     // A's connection handshake/recovery completes AFTER B becomes selected.
-    socketA.frame({ type: "session.ready", runtime_capabilities: { message_acceptance: true } });
+    socketA.frame({ type: "session.ready", conversation_id: "conv_a", runtime_capabilities: { message_acceptance: true } });
     await vi.waitFor(() => expect(a.session.snapshot().connected).toBe(true));
     expect(visible).not.toHaveBeenCalled();
     expect(b.session.snapshot().messages).toEqual([]);

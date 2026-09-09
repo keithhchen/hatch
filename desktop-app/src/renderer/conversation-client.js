@@ -31,6 +31,13 @@ export function isTerminalRunStatus(value) {
   );
 }
 
+export function assertConversationIdentity(actualConversationId, expectedConversationId, code = "snapshot_invalid") {
+  if (typeof expectedConversationId !== "string" || !expectedConversationId
+    || actualConversationId !== expectedConversationId) {
+    throw conversationClientError("The Conversation identity does not match the requested session.", code);
+  }
+}
+
 /**
  * A running task owns the current window's executor context.
  * Starting another Conversation must therefore use a separate native window;
@@ -93,19 +100,25 @@ export async function updateConversation(serverUrl, accessToken, binding, conver
 export async function getConversationSnapshot(serverUrl, accessToken, binding, conversationId, afterCursor = 0, fetchImpl = fetch) {
   const params = conversationScope(binding);
   params.set("view", "page");
-  return requestConversation(
+  const payload = await requestConversation(
     fetchImpl,
     runtimeHttpUrl(serverUrl, `/v1/conversations/${encodeURIComponent(conversationId)}/snapshot`),
     accessToken,
     { method: "GET", search: params }
   );
+  assertConversationIdentity(payload?.conversation?.id, conversationId);
+  return payload;
 }
 
 export async function getConversationHistoryPage(serverUrl, accessToken, binding, conversationId, options = {}, fetchImpl = fetch) {
   const params = conversationScope(binding);
   params.set("limit", String(options.limit ?? 50));
   if (options.beforeCursor != null) params.set("before_cursor", options.beforeCursor);
-  return requestConversation(fetchImpl, runtimeHttpUrl(serverUrl, `/v1/conversations/${encodeURIComponent(conversationId)}/history`), accessToken, { method: "GET", search: params });
+  const payload = await requestConversation(fetchImpl,
+    runtimeHttpUrl(serverUrl, `/v1/conversations/${encodeURIComponent(conversationId)}/history`),
+    accessToken, { method: "GET", search: params });
+  assertConversationIdentity(payload?.conversation?.id, conversationId);
+  return payload;
 }
 
 export async function getConversationJournalPage(serverUrl, accessToken, binding, conversationId, options = {}, fetchImpl = fetch) {

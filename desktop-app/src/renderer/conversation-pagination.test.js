@@ -81,7 +81,8 @@ describe("Conversation page protocol", () => {
   });
 
   it("sends scoped page requests, preserving opaque cursors and the fixed journal watermark", async () => {
-    const fetch = vi.fn(async () => ({ ok: true, json: async () => ({}) }));
+    const payload = { conversation: { id: "conv_a" }, messages: [], events: [], runs: [], cursor: 0, has_more: false };
+    const fetch = vi.fn(async () => ({ ok: true, json: async () => payload }));
     const args = ["ws://localhost:8787", "token", { entitlementId: "ent_1" }, "conv_a"];
     await getConversationSnapshot(...args, 99, fetch);
     await getConversationHistoryPage(...args, { beforeCursor: "opaque+/=?" }, fetch);
@@ -97,6 +98,15 @@ describe("Conversation page protocol", () => {
       expect(new URL(url).searchParams.get("entitlement_id")).toBe("ent_1");
       expect(options.headers.authorization).toBe("Bearer token");
     }
+  });
+
+  it("rejects mismatched HTTP snapshot and history identities", async () => {
+    const fetch = vi.fn(async () => ({ ok: true, json: async () => ({
+      conversation: { id: "conv_b" }, messages: [], events: [], runs: [], cursor: 0, has_more: false
+    }) }));
+    const args = ["ws://localhost:8787", "token", { entitlementId: "ent_1" }, "conv_a"];
+    await expect(getConversationSnapshot(...args, 0, fetch)).rejects.toMatchObject({ code: "snapshot_invalid" });
+    await expect(getConversationHistoryPage(...args, {}, fetch)).rejects.toMatchObject({ code: "snapshot_invalid" });
   });
 
   it("reads authorized tool details, propagating failures for explicit retry", async () => {
