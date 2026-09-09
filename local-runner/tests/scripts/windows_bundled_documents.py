@@ -67,6 +67,9 @@ def generate(node):
     code = r"""
 const fs = require('node:fs');
 const path = require('node:path');
+const nodePath = process.env.NODE_PATH;
+if (nodePath !== process.env.HATCH_NODE_MODULES) throw Error('Runner module paths disagree');
+if (nodePath.startsWith('\\\\?\\')) throw Error('Runner leaked a verbatim NODE_PATH');
 const modulePath = require.resolve('pptxgenjs');
 const root = fs.realpathSync(process.env.HATCH_NODE_MODULES);
 const relative = path.relative(root, fs.realpathSync(modulePath));
@@ -75,7 +78,7 @@ const PptxGenJS = require('pptxgenjs');
 const pptx = new PptxGenJS();
 pptx.addSlide().addText(process.argv[2], {x:1, y:1, w:8, h:2, fontSize:28});
 pptx.writeFile({fileName:process.argv[1]}).then(() => {
-  console.log(JSON.stringify({executable:process.execPath, module:modulePath}));
+  console.log(JSON.stringify({executable:process.execPath, module:modulePath, nodePath}));
 }).catch(error => {console.error(error); process.exitCode=1;});
 """
     output = run([node, "-e", code, "测试 演示.pptx", marker], "node-generate")

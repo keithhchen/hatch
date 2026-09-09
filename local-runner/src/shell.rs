@@ -221,7 +221,7 @@ mod platform {
     use super::*;
     use std::ffi::OsString;
     use std::io::Read;
-    use std::os::windows::ffi::OsStringExt;
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
     use std::os::windows::io::AsRawHandle;
     use std::os::windows::process::CommandExt;
     use std::process::{Child, Command, Stdio};
@@ -427,14 +427,59 @@ mod platform {
         Ok(canonical)
     }
 
+    fn ordinary_windows_path(canonical: &Path) -> PathBuf {
+        use std::path::{Component, Prefix};
+
+        // Keep canonical/verbatim paths for containment checks, not CLI env.
+        // Node 22.23.2 realpathSync -> LStat -> ToNamespacedPath re-resolves
+        // the verbatim drive root \\?\D:\ as \\?\D: (EISDIR). See Node's
+        // lib/fs.js splitRoot and src/path.cc PathResolve/ToNamespacedPath.
+        let wide: Vec<u16> = canonical.as_os_str().encode_wide().collect();
+        match canonical.components().next() {
+            Some(Component::Prefix(prefix)) => match prefix.kind() {
+                Prefix::VerbatimDisk(_) => PathBuf::from(OsString::from_wide(&wide[4..])),
+                Prefix::VerbatimUNC(_, _) => {
+                    let mut unc = vec![b'\\' as u16, b'\\' as u16];
+                    unc.extend_from_slice(&wide[8..]);
+                    PathBuf::from(OsString::from_wide(&unc))
+                }
+                _ => canonical.to_path_buf(),
+            },
+            _ => canonical.to_path_buf(),
+        }
+    }
+
+    fn runtime_environment_path(canonical: &Path) -> Result<PathBuf> {
+        let ordinary = ordinary_windows_path(canonical);
+        // DOS spelling can change names ending in a dot/space, for example.
+        // Never export a different object or bypass canonical containment.
+        if ordinary.canonicalize().ok().as_deref() != Some(canonical) {
+            return Err(LocalRunnerError::ShellSandboxInitialization(format!(
+                "bundled runtime path has no equivalent CLI environment spelling: {}",
+                canonical.display()
+            )));
+        }
+        Ok(ordinary)
+    }
+
     fn configure_runtime_environment(command: &mut Command, runtime_root: &Path) -> Result<()> {
+        let native = bundled_native_paths(runtime_root)?;
+        let fontconfig = bundled_fontconfig_path(&native.root)?;
+        // Resolve and validate first; convert only at the subprocess boundary.
+        let runtime_root = runtime_environment_path(runtime_root)?;
+        let native = NativeRuntimePaths {
+            root: runtime_environment_path(&native.root)?,
+            bin_dir: runtime_environment_path(&native.bin_dir)?,
+            soffice: runtime_environment_path(&native.soffice)?,
+            pdftoppm: runtime_environment_path(&native.pdftoppm)?,
+            pdfinfo: runtime_environment_path(&native.pdfinfo)?,
+        };
+        let fontconfig = runtime_environment_path(&fontconfig)?;
         let node = runtime_root.join("node/node.exe");
         let python = runtime_root.join("python/python.exe");
         let node_modules = runtime_root.join("node-toolchain/node_modules");
         let python_packages = runtime_root.join("python-packages");
         let skills = runtime_root.join("skills");
-        let native = bundled_native_paths(runtime_root)?;
-        let fontconfig = bundled_fontconfig_path(&native.root)?;
         let mut path_entries = vec![
             runtime_root.join("node").into_os_string(),
             runtime_root.join("python").into_os_string(),
@@ -480,7 +525,7 @@ mod platform {
             .env("FONTCONFIG_FILE", &fontconfig)
             .env("FONTCONFIG_PATH", fontconfig.parent().unwrap())
             .env("PATH", path)
-            .env("HATCH_RUNTIME_ROOT", runtime_root)
+            .env("HATCH_RUNTIME_ROOT", &runtime_root)
             .env("HATCH_NATIVE_RUNTIME_ROOT", &native.root)
             .env("HATCH_NATIVE_BIN_DIR", &native.bin_dir)
             .env("HATCH_SOFFICE", &native.soffice)
@@ -687,6 +732,109 @@ mod platform {
     #[cfg(test)]
     mod tests {
         use super::decode_command_output;
+
+        #[test]
+        fn cli_paths_preserve_drive_unc_and_unicode_without_rewriting_devices() {
+            use std::path::Path;
+            for (input, expected) in [
+                (
+                    r"\\?\D:\中文 runtime\node_modules",
+                    r"D:\中文 runtime\node_modules",
+                ),
+                (r"\\?\D:\", r"D:\"),
+                (
+                    r"\\?\UNC\server\share\中文 runtime",
+                    r"\\server\share\中文 runtime",
+                ),
+                (r"D:\runtime", r"D:\runtime"),
+                (r"\\.\PHYSICALDRIVE0", r"\\.\PHYSICALDRIVE0"),
+                (
+                    r"\\?\Volume{example}\runtime",
+                    r"\\?\Volume{example}\runtime",
+                ),
+            ] {
+                assert_eq!(
+                    super::ordinary_windows_path(Path::new(input)),
+                    Path::new(expected)
+                );
+            }
+        }
+
+        #[test]
+        fn runtime_environment_exports_equivalent_cli_paths_after_validation() {
+            use super::*;
+            let temp = tempfile::tempdir().unwrap();
+            let root = temp.path().join("中文 runtime");
+            for directory in [
+                "node",
+                "python",
+                "node-toolchain/node_modules",
+                "python-packages",
+                "skills",
+                "bin",
+                "native/bin",
+                "native/libreoffice/program",
+                "native/poppler/Library/bin",
+                "native/poppler/Library/etc/fonts",
+            ] {
+                fs::create_dir_all(root.join(directory)).unwrap();
+            }
+            // Metadata-only unit fixture: never executed or used as UAT evidence.
+            for file in [
+                "node/node.exe",
+                "python/python.exe",
+                "native/libreoffice/program/soffice.com",
+                "native/poppler/Library/bin/pdftoppm.exe",
+                "native/poppler/Library/bin/pdfinfo.exe",
+                "native/poppler/Library/etc/fonts/fonts.conf",
+            ] {
+                fs::write(root.join(file), "unit fixture").unwrap();
+            }
+            fs::write(
+                root.join("manifest.json"),
+                r#"{"native":{
+                "root":"native","bin_dir":"native/bin","binaries":{
+                "soffice":"native/libreoffice/program/soffice.com",
+                "pdftoppm":"native/poppler/Library/bin/pdftoppm.exe",
+                "pdfinfo":"native/poppler/Library/bin/pdfinfo.exe"}}}"#,
+            )
+            .unwrap();
+            let canonical = canonical_runtime_root(&root).unwrap();
+            assert!(canonical.as_os_str().to_string_lossy().starts_with(r"\\?\"));
+            let mut command = Command::new("not-executed");
+            configure_runtime_environment(&mut command, &canonical).unwrap();
+            for (key, value) in command.get_envs() {
+                let value = value.unwrap();
+                if key == "PATH" {
+                    for entry in std::env::split_paths(value).take(9) {
+                        assert!(!entry.as_os_str().to_string_lossy().starts_with(r"\\?\"));
+                    }
+                } else {
+                    assert!(!value.to_string_lossy().starts_with(r"\\?\"), "{key:?}");
+                    assert!(Path::new(value)
+                        .canonicalize()
+                        .unwrap()
+                        .starts_with(&canonical));
+                }
+            }
+            let env: std::collections::HashMap<_, _> = command.get_envs().collect();
+            assert_eq!(
+                env[std::ffi::OsStr::new("NODE_PATH")],
+                env[std::ffi::OsStr::new("HATCH_NODE_MODULES")]
+            );
+
+            // Existing containment checks must still reject manifest traversal.
+            fs::write(
+                root.join("manifest.json"),
+                r#"{"native":{
+                "root":"..","bin_dir":"native/bin","binaries":{
+                "soffice":"native/libreoffice/program/soffice.com",
+                "pdftoppm":"native/poppler/Library/bin/pdftoppm.exe",
+                "pdfinfo":"native/poppler/Library/bin/pdfinfo.exe"}}}"#,
+            )
+            .unwrap();
+            assert!(configure_runtime_environment(&mut command, &canonical).is_err());
+        }
 
         #[test]
         fn shell_executable_is_an_existing_absolute_system_path() {
