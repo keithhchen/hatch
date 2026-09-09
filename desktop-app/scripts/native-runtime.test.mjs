@@ -82,7 +82,13 @@ for (const platform of ["darwin", "win32"]) {
       const moved = path.join(root, "moved 空格");
       await rename(staged, moved);
       const data = await relocatePopplerData({ popplerRoot: moved, platform });
-      assert.equal(data, path.join(moved, platform === "win32" ? "Library/share/poppler" : "share/poppler"));
+      assert.equal(data, path.join(moved, "share/poppler"));
+      if (platform === "win32") {
+        // conda-forge windows-data.patch walks up twice from Library/bin.
+        const dllDirectory = path.join(moved, "Library/bin");
+        assert.equal(data, path.resolve(dllDirectory, "../..", "share/poppler"));
+        assert.equal(await lstat(path.join(moved, "Library/share/poppler")).catch(() => null), null);
+      }
       assert.equal(await readFile(path.join(data, "cidToUnicode/Adobe-GB1"), "utf8"), "automated packaging fixture");
       assert.equal(await readFile(path.join(moved, "lib/libfont.dylib"), "utf8"), "package library test fixture");
       const config = await readFile(path.join(moved, relative, "fonts.conf"), "utf8");
@@ -108,6 +114,8 @@ test("Poppler packaging rejects missing or ambiguous data instead of falling bac
     await assert.rejects(relocatePopplerData({ popplerRoot: root, platform: "win32" }), /Ambiguous/);
     await rm(path.join(root, "share/poppler/cMap/Adobe-GB1/UniGB-UCS2-H"));
     await assert.rejects(relocatePopplerData({ popplerRoot: root, platform: "darwin" }), /Chinese CMap/);
+    await rm(path.join(root, "share/poppler"), { recursive: true });
+    await assert.rejects(relocatePopplerData({ popplerRoot: root, platform: "win32" }), /incompatible/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

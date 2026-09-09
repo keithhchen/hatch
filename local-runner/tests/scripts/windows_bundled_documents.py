@@ -120,7 +120,9 @@ def cjk(native, pdftoppm, pdfinfo):
     from pypdf import PdfReader
     prefix = native / "poppler/Library"
     for relative in ["share/poppler/cMap/Adobe-GB1/UniGB-UCS2-H", "share/poppler/cidToUnicode/Adobe-GB1"]:
-        require((prefix / relative).is_file(), "missing bundled Chinese mapping: " + relative)
+        # conda-forge windows-data.patch resolves outside Library, at the
+        # noarch poppler-data package root; Fontconfig still lives in Library.
+        require((native / "poppler" / relative).is_file(), "missing bundled Chinese mapping: " + relative)
     config = Path(os.environ["FONTCONFIG_FILE"]).resolve(strict=True)
     require(config == (prefix / "etc/fonts/fonts.conf").resolve(strict=True), "wrong Fontconfig config")
     require(Path(os.environ["FONTCONFIG_PATH"]).resolve(strict=True) == config.parent, "wrong Fontconfig directory")

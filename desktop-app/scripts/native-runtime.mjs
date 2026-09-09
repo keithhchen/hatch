@@ -299,14 +299,14 @@ export async function stagePopplerEnvironment({ source, destination, platform })
 }
 
 export async function relocatePopplerData({ popplerRoot, platform }) {
-  const source = path.join(popplerRoot, "share/poppler");
-  // Upstream ENABLE_RELOCATABLE on Windows locates data relative to the DLL:
-  // Library/bin/poppler.dll -> Library/share/poppler. poppler-data is noarch.
-  const destination = platform === "win32" ? path.join(popplerRoot, "Library/share/poppler") : source;
-  if (destination !== source && await stat(source).catch(() => null)) {
-    if (await stat(destination).catch(() => null)) throw new Error("Ambiguous Poppler data directories in bundle");
-    await mkdir(path.dirname(destination), { recursive: true });
-    await rename(source, destination);
+  // The pinned conda-forge Windows package applies windows-data.patch:
+  // GlobalParams walks up from Library/bin/poppler.dll past BOTH bin and
+  // Library, then appends share/poppler. Preserve the noarch package layout,
+  // not unpatched upstream's Library/share/poppler. No env override is needed.
+  // Verified in poppler-26.05.0-h4b9d284_3.conda, info/recipe/parent/windows-data.patch.
+  const destination = path.join(popplerRoot, "share/poppler");
+  if (platform === "win32" && await stat(path.join(popplerRoot, "Library/share/poppler")).catch(() => null)) {
+    throw new Error("Ambiguous or incompatible Poppler data directories: conda-forge requires share/poppler, not Library/share/poppler");
   }
   for (const name of ["cMap", "cidToUnicode", "nameToUnicode", "unicodeMap"]) {
     await assertDirectory(path.join(destination, name), `bundled Poppler ${name}`);
