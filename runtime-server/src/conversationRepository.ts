@@ -1,15 +1,15 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Pool, type QueryResultRow } from "pg";
 import type { PostgresQueryExecutor } from "./postgresStore.js";
-import type { RunStatus } from "./store.js";
+import type { PostgresStore } from "./postgresStore.js";
+import { LocalRuntimeAuthority, localRuntimeAuthority, type RunStatus, type StoreEvent, type SubmissionReceipt } from "./store.js";
+import type { ConversationMessage } from "./protocol.js";
 import { normalizeBriefSnapshot, type BriefSnapshot } from "./brief.js";
 
 /**
- * This module is deliberately separate from RuntimeStore. RuntimeStore is an
- * append-only transcript projection; it is useful for rendering history but
- * cannot safely answer ownership, idempotency, or recovery questions.
+ * This control-plane view shares its commit authority with RuntimeStore:
+ * one append-only local log, or one PostgreSQL connection transaction.
+ * A submission commits its canonical transcript and control facts together.
  *
  * ConversationRepository is the small durable control-plane for those
  * questions. It owns immutable conversation binding, run identity, one active
@@ -111,6 +111,25 @@ export type CreateRunInput = {
   executorLeaseExpiresAt?: string;
 };
 
+export type AcceptSubmissionInput = {
+  binding: ConversationBinding;
+  run: CreateRunInput;
+  canonicalUser: ConversationMessage;
+};
+export type AcceptedSubmission = { created: boolean; run: ConversationRunRecord; receipt: SubmissionReceipt };
+
+export function submissionEvents(input: AcceptSubmissionInput, timestamp: string): StoreEvent[] {
+  if (input.canonicalUser.role !== "user") throw new Error("Submission must contain a canonical user message");
+  return [{
+    type: "conversation.model_message", conversation_id: input.run.conversationId,
+    run_id: input.run.id, client_message_id: input.run.clientMessageId,
+    message: structuredClone(input.canonicalUser), timestamp
+  }, {
+    type: "turn.state", conversation_id: input.run.conversationId,
+    run_id: input.run.id, to: "queued", timestamp
+  }];
+}
+
 export type UpdateConversationInput = {
   title?: string | null;
   status?: ConversationStatus;
@@ -120,7 +139,7 @@ export type UpdateConversationInput = {
 
 export class ConversationRepositoryError extends Error {
   constructor(
-    readonly code: "conversation_not_found" | "conversation_binding_mismatch" | "conversation_archived" | "conversation_busy" | "version_conflict" | "run_not_found" | "run_id_conflict" | "client_message_conflict",
+    readonly code: "conversation_not_found" | "conversation_binding_mismatch" | "conversation_archived" | "conversation_busy" | "version_conflict" | "run_not_found" | "run_id_conflict" | "client_message_conflict" | "submission_not_accepted",
     message: string,
     readonly existingRun?: ConversationRunRecord
   ) {
@@ -142,6 +161,7 @@ export interface ConversationRepository {
   }): Promise<ConversationListPage>;
   updateConversation(id: string, input: UpdateConversationInput): Promise<ConversationRecord>;
   createRun(input: CreateRunInput): Promise<{ run: ConversationRunRecord; created: boolean }>;
+  acceptSubmission(input: AcceptSubmissionInput): Promise<AcceptedSubmission>;
   getRun(conversationId: string, runId: string): Promise<ConversationRunRecord | undefined>;
   /** Lookup used to acknowledge a transport retry without starting tools again. */
   getRunByClientMessageId(conversationId: string, clientMessageId: string): Promise<ConversationRunRecord | undefined>;
@@ -247,15 +267,15 @@ export class InMemoryConversationRepository implements ConversationRepository {
   protected conversationRequests = new Map<string, string>();
   protected nextCursor = 1;
 
-  private initialized = false;
-  private writeChain: Promise<void> = Promise.resolve();
+  private pendingStoreEvents: StoreEvent[] = [];
+  constructor(readonly localAuthority = new LocalRuntimeAuthority()) {}
 
   async initialize(): Promise<void> {
-    this.initialized = true;
+    await this.readReady();
   }
 
   async close(): Promise<void> {
-    await this.writeChain;
+    await this.localAuthority.close();
   }
 
   async createConversation(input: CreateConversationInput): Promise<{ conversation: ConversationRecord; created: boolean }> {
@@ -368,7 +388,33 @@ export class InMemoryConversationRepository implements ConversationRepository {
   }
 
   async createRun(input: CreateRunInput): Promise<{ run: ConversationRunRecord; created: boolean }> {
+    return this.write(() => this.createRunUnsafe(input));
+  }
+
+  async acceptSubmission(input: AcceptSubmissionInput): Promise<AcceptedSubmission> {
+    input = structuredClone(input);
     return this.write(async () => {
+      const conversation = this.conversations.get(input.run.conversationId);
+      if (!conversation) throw new ConversationRepositoryError("conversation_not_found", "Conversation was not found");
+      assertSameConversationBinding(conversation, input.binding);
+      const existing = [...this.runs.values()].find((row) => row.conversationId === input.run.conversationId && row.clientMessageId === input.run.clientMessageId);
+      if (existing) {
+        assertSameRunInput(existing, input.run);
+        const user = this.localAuthority.events.find((event) => event.type === "conversation.model_message"
+          && event.conversation_id === existing.conversationId && event.run_id === existing.id
+          && event.client_message_id === existing.clientMessageId && event.message.role === "user");
+        if (!user) throw new ConversationRepositoryError("submission_not_accepted", "Historical run has no accepted submission; submit explicitly with a new client_message_id", existing);
+        return { created: false, run: cloneRun(existing), receipt: { run_id: existing.id, client_message_id: existing.clientMessageId, accepted_at: user.timestamp } };
+      }
+      const { run } = await this.createRunUnsafe(input.run);
+      this.pendingStoreEvents = submissionEvents(input, run.createdAt);
+      this.appendEventUnsafe({ conversationId: run.conversationId, runId: run.id, type: "message.created",
+        payload: { role: "user", client_message_id: run.clientMessageId }, createdAt: run.createdAt });
+      return { created: true, run, receipt: { run_id: run.id, client_message_id: run.clientMessageId, accepted_at: run.createdAt } };
+    });
+  }
+
+  private async createRunUnsafe(input: CreateRunInput): Promise<{ run: ConversationRunRecord; created: boolean }> {
       const conversation = this.conversations.get(input.conversationId);
       if (!conversation) throw new ConversationRepositoryError("conversation_not_found", `Conversation ${input.conversationId} was not found`);
       if (conversation.status === "archived") {
@@ -416,7 +462,6 @@ export class InMemoryConversationRepository implements ConversationRepository {
         payload: publicRunEvent(run)
       });
       return { run: cloneRun(run), created: true };
-    });
   }
 
   async getRun(conversationId: string, runId: string): Promise<ConversationRunRecord | undefined> {
@@ -561,50 +606,46 @@ export class InMemoryConversationRepository implements ConversationRepository {
     });
   }
 
-  protected async persist(): Promise<void> {
-    // Memory implementation intentionally has no persistence target.
-  }
-
-  protected serialize(): SerializedConversationRepository {
-    return {
-      format: 1,
-      nextCursor: this.nextCursor,
-      conversations: [...this.conversations.values()],
-      runs: [...this.runs.values()],
-      events: this.events,
-      conversationRequests: [...this.conversationRequests.entries()]
-    };
-  }
-
-  protected hydrate(serialized: SerializedConversationRepository): void {
-    if (serialized.format !== 1) throw new Error(`Unsupported conversation repository format: ${serialized.format}`);
-    this.nextCursor = Math.max(1, serialized.nextCursor);
-    this.conversations = new Map(serialized.conversations.map((conversation) => [conversation.id, conversation]));
-    this.runs = new Map(serialized.runs.map((run) => [run.id, run]));
-    this.events = serialized.events;
-    this.conversationRequests = new Map(serialized.conversationRequests);
-  }
-
   private async readReady(): Promise<void> {
-    await this.ensureInitialized();
-    await this.writeChain;
+    await this.localAuthority.ready();
+    this.loadAuthority();
   }
 
-  private async ensureInitialized(): Promise<void> {
-    if (!this.initialized) await this.initialize();
+  private loadAuthority(): void {
+    this.conversations = this.localAuthority.conversations;
+    this.runs = this.localAuthority.runs;
+    this.conversationRequests = this.localAuthority.requests;
+    this.events = this.localAuthority.journal;
+    this.nextCursor = (this.events.at(-1)?.cursor ?? 0) + 1;
   }
 
   private async write<T>(operation: () => Promise<T>): Promise<T> {
-    await this.ensureInitialized();
-    let result: T | undefined;
-    const write = this.writeChain.then(async () => {
-      result = await operation();
-      await this.persist();
+    return this.localAuthority.transact(async () => {
+      this.loadAuthority();
+      const beforeConversations = this.conversations;
+      const beforeRuns = this.runs;
+      const beforeRequests = this.conversationRequests;
+      // Stage control changes; history is not copied or rewritten per event.
+      this.conversations = new Map(beforeConversations);
+      this.runs = new Map(beforeRuns);
+      this.conversationRequests = new Map(beforeRequests);
+      this.events = [];
+      this.pendingStoreEvents = [];
+      try {
+        const result = await operation();
+        const conversations = [...this.conversations.values()].filter((row) => beforeConversations.get(row.id) !== row);
+        const runs = [...this.runs.values()].filter((row) => beforeRuns.get(row.id) !== row);
+        const requests = [...this.conversationRequests].filter(([key, value]) => beforeRequests.get(key) !== value);
+        const journal = this.events;
+        const events = this.pendingStoreEvents;
+        return { result, ...(conversations.length || runs.length || requests.length || journal.length || events.length ? {
+          commit: { kind: events.length ? "accept" as const : "control" as const, conversations, runs, requests, journal, events }
+        } : {}) };
+      } finally {
+        this.loadAuthority();
+        this.pendingStoreEvents = [];
+      }
     });
-    this.writeChain = write.catch(() => undefined);
-    await write;
-    if (result === undefined) throw new Error("Conversation repository write did not produce a result");
-    return result;
   }
 
   private appendEventUnsafe(input: Omit<ConversationJournalEvent, "cursor" | "createdAt"> & { createdAt?: string }): ConversationJournalEvent {
@@ -631,49 +672,10 @@ export class InMemoryConversationRepository implements ConversationRepository {
   }
 }
 
-type SerializedConversationRepository = {
-  format: 1;
-  nextCursor: number;
-  conversations: ConversationRecord[];
-  runs: ConversationRunRecord[];
-  events: ConversationJournalEvent[];
-  conversationRequests: Array<[string, string]>;
-};
-
-/**
- * Local development fallback. It writes a small control-plane document next
- * to RuntimeStore's event transcript, but never attempts to derive recovery
- * state from events.jsonl.
- */
+/** File and transcript views share the same append-only commit authority. */
 export class FileConversationRepository extends InMemoryConversationRepository {
-  private loadPromise: Promise<void> | undefined;
-
-  constructor(private readonly root = process.env.HATCH_RUNTIME_DATA_DIR ?? path.resolve(".hatch-runtime")) {
-    super();
-  }
-
-  override async initialize(): Promise<void> {
-    if (!this.loadPromise) {
-      this.loadPromise = (async () => {
-        await mkdir(this.root, { recursive: true });
-        const file = path.join(this.root, "conversations-v1.json");
-        const contents = await readFile(file, "utf8").catch((error: NodeJS.ErrnoException) => {
-          if (error.code === "ENOENT") return undefined;
-          throw error;
-        });
-        if (contents) this.hydrate(JSON.parse(contents) as SerializedConversationRepository);
-        await super.initialize();
-      })();
-    }
-    await this.loadPromise;
-  }
-
-  protected override async persist(): Promise<void> {
-    await mkdir(this.root, { recursive: true });
-    const file = path.join(this.root, "conversations-v1.json");
-    const temporary = `${file}.${randomUUID()}.tmp`;
-    await writeFile(temporary, `${JSON.stringify(this.serialize())}\n`, "utf8");
-    await rename(temporary, file);
+  constructor(root = process.env.HATCH_RUNTIME_DATA_DIR ?? path.resolve(".hatch-runtime")) {
+    super(localRuntimeAuthority(root));
   }
 }
 
@@ -757,6 +759,27 @@ export class PostgresConversationRepository implements ConversationRepository {
   readonly pool: PostgresQueryExecutor;
   private readonly ownsPool: boolean;
   private schemaPromise: Promise<void> | undefined;
+  private submissionStore?: PostgresStore;
+  private transactional = false;
+
+  bindSubmissionStore(store: PostgresStore): void {
+    if (store.pool !== this.pool) throw new Error("Submission store and repository must share the same Postgres pool");
+    this.submissionStore = store;
+  }
+
+  /** Only called inside a pinned-client transaction after both schemas are initialized. */
+  static inTransaction(client: PostgresQueryExecutor): PostgresConversationRepository {
+    const repository = new PostgresConversationRepository(client);
+    repository.schemaPromise = Promise.resolve();
+    repository.transactional = true;
+    return repository;
+  }
+
+  async acceptSubmission(input: AcceptSubmissionInput): Promise<AcceptedSubmission> {
+    if (!this.submissionStore) throw new Error("Atomic submission store is not configured");
+    await this.initialize();
+    return this.submissionStore.acceptSubmission(input);
+  }
 
   constructor(connectionString?: string);
   constructor(options?: PostgresConversationRepositoryOptions);
@@ -952,6 +975,7 @@ export class PostgresConversationRepository implements ConversationRepository {
       return { run, created: true };
     } catch (error) {
       if (!isUniqueViolation(error)) throw error;
+      if (this.transactional) throw new ConversationRepositoryError("run_id_conflict", "Run ID is already in use");
       const duplicate = await this.pool.query<RunRow>(`
         SELECT * FROM hatch_conversation_runs WHERE conversation_id = $1 AND client_message_id = $2
       `, [input.conversationId, input.clientMessageId]);

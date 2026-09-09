@@ -70,7 +70,10 @@ enum ChangePermissionPolicy {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct WindowToolContext {
+struct RunToolContext {
+    window_label: String,
+    conversation_id: String,
+    run_id: String,
     workspace_grant_id: String,
     permission_policy: ChangePermissionPolicy,
 }
@@ -78,13 +81,22 @@ struct WindowToolContext {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct WindowToolCallKey {
     window_label: String,
+    context_id: String,
+    run_id: String,
     tool_call_id: String,
 }
 
 impl WindowToolCallKey {
-    fn new(window_label: impl Into<String>, tool_call_id: impl Into<String>) -> Self {
+    fn new(
+        window_label: impl Into<String>,
+        context_id: impl Into<String>,
+        run_id: impl Into<String>,
+        tool_call_id: impl Into<String>,
+    ) -> Self {
         Self {
             window_label: window_label.into(),
+            context_id: context_id.into(),
+            run_id: run_id.into(),
             tool_call_id: tool_call_id.into(),
         }
     }
@@ -93,12 +105,15 @@ impl WindowToolCallKey {
     // Prefixing with the byte length makes this unambiguous even if a server
     // happens to issue an id containing punctuation.
     fn registry_key(&self) -> String {
-        format!(
-            "{}:{}{}",
-            self.window_label.len(),
-            self.window_label,
-            self.tool_call_id
-        )
+        [
+            &self.window_label,
+            &self.context_id,
+            &self.run_id,
+            &self.tool_call_id,
+        ]
+        .into_iter()
+        .map(|part| format!("{}:{part}", part.len()))
+        .collect()
     }
 }
 
@@ -167,7 +182,11 @@ struct PendingToolApproval {
 
 #[derive(Default)]
 struct NativeToolAuthorityState {
-    contexts: HashMap<String, WindowToolContext>,
+    contexts: HashMap<String, RunToolContext>,
+    // Process-lifetime tombstones retain only ownership, never a workspace
+    // grant or permission. Logout must retain these so other live windows can
+    // acknowledge revoked contexts after the auth-cleared event arrives.
+    revoked_contexts: HashMap<String, RevokedRunToolContext>,
     pending: HashMap<WindowToolCallKey, PendingToolApproval>,
     // The workspace id is retained solely for close/revoke cleanup. The
     // executor gets the authoritative grant id captured at submission time.
@@ -191,23 +210,197 @@ struct ToolCallSubmission {
     tool_call_id: String,
 }
 
-impl NativeToolAuthority {
-    fn set_context(
+#[derive(Debug, Serialize)]
+struct RunToolContextRegistration {
+    context_id: String,
+}
+
+#[derive(Debug)]
+struct RevokedRunToolContext {
+    window_label: String,
+    run_id: String,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum RunToolContextClearStatus {
+    Cleared,
+    AlreadyRevoked,
+}
+
+#[derive(Debug, Serialize)]
+struct RunToolContextClearance {
+    status: RunToolContextClearStatus,
+    context_id: String,
+    run_id: String,
+}
+
+type ClearedToolCalls = (
+    Vec<(WindowToolCallKey, PendingToolApproval)>,
+    Vec<WindowToolCallKey>,
+);
+
+impl NativeToolAuthorityState {
+    fn is_revoked(&self, window: &str, context_id: &str, run_id: &str) -> Result<bool, String> {
+        let Some(revoked) = self.revoked_contexts.get(context_id) else { return Ok(false); };
+        if revoked.window_label != window || revoked.run_id != run_id {
+            return Err("run_tool_context_mismatch: Context does not belong to this window/run".into());
+        }
+        Ok(true)
+    }
+
+    fn context(
         &self,
-        window_label: &str,
-        context: WindowToolContext,
-    ) -> Result<Vec<(WindowToolCallKey, PendingToolApproval)>, String> {
+        window: &str,
+        context_id: &str,
+        run_id: &str,
+    ) -> Result<&RunToolContext, String> {
+        if self.is_revoked(window, context_id, run_id)? {
+            return Err("run_tool_context_revoked: This window/run context has already been revoked".into());
+        }
+        let context = self
+            .contexts
+            .get(context_id)
+            .ok_or("run_tool_context_missing: Unknown or cleared context")?;
+        if context.window_label != window || context.run_id != run_id {
+            return Err(
+                "run_tool_context_mismatch: Context does not belong to this window/run".into(),
+            );
+        }
+        Ok(context)
+    }
+
+    fn validate_key(&self, key: &WindowToolCallKey) -> Result<&RunToolContext, String> {
+        if key.tool_call_id.trim().is_empty() {
+            return Err("invalid_tool_call: A local tool call requires tool_call_id".into());
+        }
+        self.context(&key.window_label, &key.context_id, &key.run_id)
+    }
+
+    fn clear_matching(&mut self, matches: impl Fn(&RunToolContext) -> bool) -> ClearedToolCalls {
+        let removed = self
+            .contexts
+            .iter()
+            .filter_map(|(id, context)| matches(context).then_some(id.clone()))
+            .collect::<std::collections::HashSet<_>>();
+        for id in &removed {
+            if let Some(context) = self.contexts.remove(id) {
+                self.revoked_contexts.insert(id.clone(), RevokedRunToolContext {
+                    window_label: context.window_label,
+                    run_id: context.run_id,
+                });
+            }
+        }
+        let pending_keys = self
+            .pending
+            .keys()
+            .filter(|key| removed.contains(&key.context_id))
+            .cloned()
+            .collect::<Vec<_>>();
+        let pending = pending_keys
+            .into_iter()
+            .filter_map(|key| self.pending.remove_entry(&key))
+            .collect();
+        let active = self
+            .active
+            .keys()
+            .filter(|key| removed.contains(&key.context_id))
+            .cloned()
+            .collect::<Vec<_>>();
+        for key in &active {
+            self.active.remove(key);
+        }
+        (pending, active)
+    }
+}
+
+impl NativeToolAuthority {
+    fn set_context(&self, context: RunToolContext) -> Result<RunToolContextRegistration, String> {
+        if [
+            &context.window_label,
+            &context.conversation_id,
+            &context.run_id,
+            &context.workspace_grant_id,
+        ]
+        .iter()
+        .any(|value| value.trim().is_empty())
+        {
+            return Err("run_tool_context_invalid: Window, conversation, run and workspace grant are required".into());
+        }
         let mut state = self
             .state
             .lock()
             .map_err(|_| "Native tool authority is unavailable")?;
-        let changed = state.contexts.get(window_label) != Some(&context);
-        state.contexts.insert(window_label.to_string(), context);
-        Ok(if changed {
-            take_pending_for_window(&mut state, window_label)
+        if let Some((id, existing)) = state.contexts.iter().find(|(_, existing)| {
+            existing.window_label == context.window_label
+                && existing.conversation_id == context.conversation_id
+                && existing.run_id == context.run_id
+        }) {
+            if existing != &context {
+                return Err(
+                    "run_tool_context_conflict: An existing run context is immutable".into(),
+                );
+            }
+            return Ok(RunToolContextRegistration {
+                context_id: id.clone(),
+            });
+        }
+        let context_id = format!("ctx_{}", uuid::Uuid::new_v4().simple());
+        state.contexts.insert(context_id.clone(), context);
+        Ok(RunToolContextRegistration { context_id })
+    }
+
+    fn validate_key(&self, key: &WindowToolCallKey) -> Result<(), String> {
+        self.state
+            .lock()
+            .map_err(|_| "Native tool authority is unavailable")?
+            .validate_key(key)?;
+        Ok(())
+    }
+
+    fn poll_result(&self, key: &WindowToolCallKey) -> Result<Option<Value>, String> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| "Native tool authority is unavailable")?;
+        state.validate_key(key)?;
+        let _registry = local_tool_registry_lock()
+            .lock()
+            .map_err(|_| "Local tool registry is unavailable")?;
+        let mut results = local_tool_results()
+            .lock()
+            .map_err(|_| "Local tool result registry is unavailable")?;
+        results.retain(|_, result| result.created_at.elapsed() < LOCAL_TOOL_RESULT_TTL);
+        Ok(results
+            .remove(&key.registry_key())
+            .map(|result| result.payload))
+    }
+
+    fn clear_context(
+        &self,
+        window: &str,
+        context_id: &str,
+        run_id: &str,
+    ) -> Result<(RunToolContextClearance, ClearedToolCalls), String> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "Native tool authority is unavailable")?;
+        let (status, calls) = if state.is_revoked(window, context_id, run_id)? {
+            (RunToolContextClearStatus::AlreadyRevoked, (Vec::new(), Vec::new()))
         } else {
-            Vec::new()
-        })
+            let context = state.context(window, context_id, run_id)?.clone();
+            (RunToolContextClearStatus::Cleared, state.clear_matching(|candidate| candidate == &context))
+        };
+        Ok((RunToolContextClearance { status, context_id: context_id.into(), run_id: run_id.into() }, calls))
+    }
+
+    fn clear_all(&self) -> Result<ClearedToolCalls, String> {
+        Ok(self
+            .state
+            .lock()
+            .map_err(|_| "Native tool authority is unavailable")?
+            .clear_matching(|_| true))
     }
 
     fn clear_window(
@@ -224,10 +417,7 @@ impl NativeToolAuthority {
             .state
             .lock()
             .map_err(|_| "Native tool authority is unavailable")?;
-        state.contexts.remove(window_label);
-        let pending = take_pending_for_window(&mut state, window_label);
-        let active = take_active_for_window(&mut state, window_label);
-        Ok((pending, active))
+        Ok(state.clear_matching(|context| context.window_label == window_label))
     }
 
     fn clear_workspace_grant(
@@ -244,29 +434,7 @@ impl NativeToolAuthority {
             .state
             .lock()
             .map_err(|_| "Native tool authority is unavailable")?;
-        state
-            .contexts
-            .retain(|_, context| context.workspace_grant_id != workspace_grant_id);
-        let pending_keys = state
-            .pending
-            .iter()
-            .filter_map(|(key, pending)| {
-                (pending.call.workspace_grant_id == workspace_grant_id).then_some(key.clone())
-            })
-            .collect::<Vec<_>>();
-        let pending = pending_keys
-            .into_iter()
-            .filter_map(|key| state.pending.remove_entry(&key))
-            .collect();
-        let active_keys = state
-            .active
-            .iter()
-            .filter_map(|(key, grant_id)| (grant_id == workspace_grant_id).then_some(key.clone()))
-            .collect::<Vec<_>>();
-        for key in &active_keys {
-            state.active.remove(key);
-        }
-        Ok((pending, active_keys))
+        Ok(state.clear_matching(|context| context.workspace_grant_id == workspace_grant_id))
     }
 
     fn submit(
@@ -278,10 +446,12 @@ impl NativeToolAuthority {
             .state
             .lock()
             .map_err(|_| "Native tool authority is unavailable")?;
-        let context = state.contexts.get(&key.window_label).cloned().ok_or_else(|| {
-            "window_tool_context_missing: Choose a workspace and set permissions before running local tools"
-                .to_string()
-        })?;
+        let context = state.validate_key(&key)?.clone();
+        if call.run_id != key.run_id || call.tool_call_id != key.tool_call_id {
+            return Err(
+                "run_tool_context_mismatch: Tool request does not match its context/run/key".into(),
+            );
+        }
         if state.pending.contains_key(&key) || state.active.contains_key(&key) {
             return Err(format!(
                 "local_tool_call_duplicate: Tool call is already pending or running: {}",
@@ -308,6 +478,7 @@ impl NativeToolAuthority {
             .state
             .lock()
             .map_err(|_| "Native tool authority is unavailable")?;
+        state.validate_key(key)?;
         let pending = state.pending.remove(key).ok_or_else(|| {
             format!(
                 "tool_approval_missing: No pending native approval for {}",
@@ -325,6 +496,7 @@ impl NativeToolAuthority {
             .state
             .lock()
             .map_err(|_| "Native tool authority is unavailable")?;
+        state.validate_key(key)?;
         state.pending.remove(key).ok_or_else(|| {
             format!(
                 "tool_approval_missing: No pending native approval for {}",
@@ -341,7 +513,22 @@ impl NativeToolAuthority {
             .state
             .lock()
             .map_err(|_| "Native tool authority is unavailable")?;
+        state.validate_key(key)?;
         Ok(state.pending.remove(key))
+    }
+
+    fn register_job(&self, key: &WindowToolCallKey, cancel: Arc<AtomicBool>) -> Result<(), String> {
+        // Keep authority locked through registration. Clear/revoke either
+        // prevents registration or sees the active job and cancels it.
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| "Native tool authority is unavailable")?;
+        state.validate_key(key)?;
+        if !state.active.contains_key(key) {
+            return Err("local_tool_not_active: Tool call is not authorized to start".into());
+        }
+        register_local_tool_job(&key.registry_key(), cancel)
     }
 
     fn finish(&self, key: &WindowToolCallKey) {
@@ -367,37 +554,6 @@ impl NativeToolAuthority {
             .filter_map(|key| state.pending.remove_entry(&key))
             .collect())
     }
-}
-
-fn take_pending_for_window(
-    state: &mut NativeToolAuthorityState,
-    window_label: &str,
-) -> Vec<(WindowToolCallKey, PendingToolApproval)> {
-    let keys = state
-        .pending
-        .keys()
-        .filter(|key| key.window_label == window_label)
-        .cloned()
-        .collect::<Vec<_>>();
-    keys.into_iter()
-        .filter_map(|key| state.pending.remove_entry(&key))
-        .collect()
-}
-
-fn take_active_for_window(
-    state: &mut NativeToolAuthorityState,
-    window_label: &str,
-) -> Vec<WindowToolCallKey> {
-    let keys = state
-        .active
-        .keys()
-        .filter(|key| key.window_label == window_label)
-        .cloned()
-        .collect::<Vec<_>>();
-    for key in &keys {
-        state.active.remove(key);
-    }
-    keys
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -910,7 +1066,7 @@ fn start_native_tool_call(
     // that submitted it.
     let registry_key = key.registry_key();
     let cancel = Arc::new(AtomicBool::new(false));
-    if let Err(error) = register_local_tool_job(&registry_key, cancel.clone()) {
+    if let Err(error) = authority.register_job(&key, cancel.clone()) {
         authority.finish(&key);
         return Err(error);
     }
@@ -1419,74 +1575,40 @@ fn validate_artifact_relative_path(relative_path: &str) -> Result<&std::path::Pa
 fn set_window_tool_context(
     app: AppHandle,
     window: WebviewWindow,
-    task_id: String,
+    conversation_id: String,
+    run_id: String,
     workspace_grant_id: String,
     permission_policy: ChangePermissionPolicy,
     authority: State<'_, NativeToolAuthority>,
-) -> Result<WorkspaceGrantInfo, String> {
-    let task_id = task_id.trim().to_string();
-    if task_id.is_empty() {
-        return Err("window_tool_context_missing: A Task/Conversation ID is required".into());
-    }
-    // Resolve and probe the grant before installing it as a window authority.
+) -> Result<RunToolContextRegistration, String> {
+    // This command only creates execution authority, never navigation state.
+    // Resolve and probe the grant before capturing it in an immutable context.
     // A renderer can display a path, but it cannot turn that path into a grant.
     let scoped = resolve_scoped_workspace_grant(&app, &workspace_grant_id)?;
-    let info = WorkspaceGrantInfo {
-        grant_id: scoped.grant_id.clone(),
-        display_path: scoped.path.to_string_lossy().to_string(),
-    };
-    let invalidated = authority.set_context(
-        window.label(),
-        WindowToolContext {
-            workspace_grant_id,
-            permission_policy: permission_policy.clone(),
-        },
-    )?;
-    let persisted_permission = match permission_policy {
-        ChangePermissionPolicy::AskBeforeChanges => "ask-before-changes",
-        ChangePermissionPolicy::AllowChanges => "allow-changes",
-    }
-    .to_string();
-    let persisted_grant_id = info.grant_id.clone();
-    desktop_state::update(&app, |state| {
-        let task =
-            state
-                .tasks
-                .entry(task_id.clone())
-                .or_insert_with(|| desktop_state::DesktopTaskState {
-                    entitlement_id: String::new(),
-                    creator_id: None,
-                    product_id: None,
-                    workspace_grant_id: None,
-                    permission_mode: "ask-before-changes".into(),
-                });
-        task.workspace_grant_id = Some(persisted_grant_id);
-        task.permission_mode = persisted_permission;
-        let window_state = state.windows.entry(window.label().to_string()).or_default();
-        window_state.conversation_id = Some(task_id);
-        Ok(())
-    })?;
-    record_pending_outcomes(
-        invalidated,
-        "tool_context_changed",
-        "The workspace or permission policy changed before this tool call was approved",
-    );
-    Ok(info)
+    authority.set_context(RunToolContext {
+        window_label: window.label().to_string(),
+        conversation_id,
+        run_id,
+        workspace_grant_id: scoped.grant_id.clone(),
+        permission_policy,
+    })
 }
 
 #[tauri::command]
 fn clear_window_tool_context(
     window: WebviewWindow,
+    context_id: String,
+    run_id: String,
     authority: State<'_, NativeToolAuthority>,
-) -> Result<(), String> {
-    let (pending, active) = authority.clear_window(window.label())?;
+) -> Result<RunToolContextClearance, String> {
+    let (outcome, (pending, active)) = authority.clear_context(window.label(), &context_id, &run_id)?;
     record_pending_outcomes(
         pending,
         "tool_context_cleared",
-        "The window no longer has permission to run this tool call",
+        "The run context no longer has permission to run this tool call",
     );
     cancel_active_tool_calls(&active);
-    Ok(())
+    Ok(outcome)
 }
 
 #[tauri::command]
@@ -1510,13 +1632,20 @@ fn revoke_workspace_grant(
 fn execute_tool_call(
     app: AppHandle,
     window: WebviewWindow,
+    context_id: String,
+    run_id: String,
     request: Value,
     authority: State<'_, NativeToolAuthority>,
 ) -> Result<ToolCallSubmission, String> {
     let authority = authority.inner().clone();
     expire_pending_approvals(&authority)?;
     let call = NativeToolCall::from_renderer_request(request)?;
-    let key = WindowToolCallKey::new(window.label(), call.tool_call_id.clone());
+    let key = WindowToolCallKey::new(
+        window.label(),
+        context_id,
+        run_id,
+        call.tool_call_id.clone(),
+    );
     match authority.submit(key.clone(), call)? {
         ToolCallDisposition::Start(call) => {
             start_native_tool_call(app, authority, key.clone(), call)?;
@@ -1536,12 +1665,14 @@ fn execute_tool_call(
 fn approve_pending_tool_call(
     app: AppHandle,
     window: WebviewWindow,
+    context_id: String,
+    run_id: String,
     tool_call_id: String,
     authority: State<'_, NativeToolAuthority>,
 ) -> Result<ToolCallSubmission, String> {
     let authority = authority.inner().clone();
     expire_pending_approvals(&authority)?;
-    let key = WindowToolCallKey::new(window.label(), tool_call_id);
+    let key = WindowToolCallKey::new(window.label(), context_id, run_id, tool_call_id);
     let call = authority.approve(&key)?;
     start_native_tool_call(app, authority, key.clone(), call)?;
     Ok(ToolCallSubmission {
@@ -1553,12 +1684,14 @@ fn approve_pending_tool_call(
 #[tauri::command]
 fn deny_pending_tool_call(
     window: WebviewWindow,
+    context_id: String,
+    run_id: String,
     tool_call_id: String,
     authority: State<'_, NativeToolAuthority>,
 ) -> Result<ToolCallSubmission, String> {
     let authority = authority.inner().clone();
     expire_pending_approvals(&authority)?;
-    let key = WindowToolCallKey::new(window.label(), tool_call_id);
+    let key = WindowToolCallKey::new(window.label(), context_id, run_id, tool_call_id);
     let pending = authority.deny(&key)?;
     store_local_tool_result(
         &key.registry_key(),
@@ -1577,12 +1710,14 @@ fn deny_pending_tool_call(
 #[tauri::command]
 async fn cancel_tool_call(
     window: WebviewWindow,
+    context_id: String,
+    run_id: String,
     tool_call_id: String,
     authority: State<'_, NativeToolAuthority>,
 ) -> Result<bool, String> {
     let authority = authority.inner().clone();
     expire_pending_approvals(&authority)?;
-    let key = WindowToolCallKey::new(window.label(), tool_call_id);
+    let key = WindowToolCallKey::new(window.label(), context_id, run_id, tool_call_id);
     if let Some(pending) = authority.cancel_pending(&key)? {
         store_local_tool_result(
             &key.registry_key(),
@@ -1603,21 +1738,14 @@ async fn cancel_tool_call(
 #[tauri::command]
 fn poll_tool_call(
     window: WebviewWindow,
+    context_id: String,
+    run_id: String,
     tool_call_id: String,
     authority: State<'_, NativeToolAuthority>,
 ) -> Result<Option<Value>, String> {
     expire_pending_approvals(authority.inner())?;
-    let key = WindowToolCallKey::new(window.label(), tool_call_id);
-    let _registry = local_tool_registry_lock()
-        .lock()
-        .map_err(|_| "Local tool registry is unavailable")?;
-    let mut results = local_tool_results()
-        .lock()
-        .map_err(|_| "Local tool result registry is unavailable")?;
-    results.retain(|_, result| result.created_at.elapsed() < LOCAL_TOOL_RESULT_TTL);
-    Ok(results
-        .remove(&key.registry_key())
-        .map(|result| result.payload))
+    let key = WindowToolCallKey::new(window.label(), context_id, run_id, tool_call_id);
+    authority.poll_result(&key)
 }
 
 #[tauri::command]
@@ -1647,7 +1775,15 @@ fn write_auth_token(
 }
 
 #[tauri::command]
-fn clear_auth_token(window: WebviewWindow) -> Result<(), String> {
+fn clear_auth_token(
+    window: WebviewWindow,
+    authority: State<'_, NativeToolAuthority>,
+) -> Result<(), String> {
+    // Logout revokes execution in every window, even if persisting logout fails.
+    let cleanup = authority.clear_all().map(|(pending, active)| {
+        record_pending_outcomes(pending, "auth_session_cleared", "The user signed out");
+        cancel_active_tool_calls(&active);
+    });
     let result = desktop_state::update(window.app_handle(), |state| {
         state.session = None;
         Ok(())
@@ -1662,7 +1798,7 @@ fn clear_auth_token(window: WebviewWindow) -> Result<(), String> {
             "sourceWindow": window.label()
         }),
     );
-    result
+    cleanup.and(result)
 }
 
 #[tauri::command]
@@ -2498,8 +2634,8 @@ mod tests {
     use super::{
         default_workspace, is_allowed_browse_url, validate_artifact_relative_path,
         validate_workspace_path, ChangePermissionPolicy, NativeDropContextStore,
-        NativeToolAuthority, NativeToolCall, ToolCallDisposition, WindowToolCallKey,
-        WindowToolContext,
+        NativeToolAuthority, NativeToolCall, RunToolContext, ToolCallDisposition,
+        WindowToolCallKey,
     };
     use serde_json::json;
     use std::sync::{atomic::AtomicBool, Arc};
@@ -2519,14 +2655,436 @@ mod tests {
         permission_policy: ChangePermissionPolicy,
     ) {
         authority
-            .set_context(
-                window_label,
-                WindowToolContext {
-                    workspace_grant_id: workspace_grant_id.to_string(),
-                    permission_policy,
-                },
-            )
+            .set_context(RunToolContext {
+                window_label: window_label.to_string(),
+                conversation_id: "conversation_test".into(),
+                run_id: "run_test".into(),
+                workspace_grant_id: workspace_grant_id.to_string(),
+                permission_policy,
+            })
             .unwrap();
+    }
+
+    fn test_key(
+        authority: &NativeToolAuthority,
+        window: &str,
+        tool_call_id: impl Into<String>,
+    ) -> WindowToolCallKey {
+        let state = authority.state.lock().unwrap();
+        let (id, context) = state
+            .contexts
+            .iter()
+            .find(|(_, context)| context.window_label == window)
+            .unwrap();
+        WindowToolCallKey::new(window, id.clone(), context.run_id.clone(), tool_call_id)
+    }
+
+    fn run_context(
+        window: &str,
+        conversation: &str,
+        run: &str,
+        grant: &str,
+        policy: ChangePermissionPolicy,
+    ) -> RunToolContext {
+        RunToolContext {
+            window_label: window.into(),
+            conversation_id: conversation.into(),
+            run_id: run.into(),
+            workspace_grant_id: grant.into(),
+            permission_policy: policy,
+        }
+    }
+
+    fn run_call(run: &str, tool: &str, name: &str) -> NativeToolCall {
+        NativeToolCall::from_renderer_request(json!({
+            "type": "tool_call.request", "run_id": run, "tool_call_id": tool, "name": name,
+            "arguments": { "path": "note.txt", "content": "value", "command": "printf value", "timeout_ms": 5000 }
+        })).unwrap()
+    }
+
+    #[test]
+    fn run_context_registration_is_opaque_idempotent_and_immutable() {
+        let authority = NativeToolAuthority::default();
+        let context = run_context(
+            "window",
+            "conversation-a",
+            "run-a",
+            "grant-a",
+            ChangePermissionPolicy::AskBeforeChanges,
+        );
+        let id = authority.set_context(context.clone()).unwrap().context_id;
+        assert!(id.starts_with("ctx_"));
+        assert_eq!(
+            authority.set_context(context.clone()).unwrap().context_id,
+            id
+        );
+        for changed in [
+            RunToolContext {
+                workspace_grant_id: "grant-b".into(),
+                ..context.clone()
+            },
+            RunToolContext {
+                permission_policy: ChangePermissionPolicy::AllowChanges,
+                ..context.clone()
+            },
+        ] {
+            assert!(authority
+                .set_context(changed)
+                .unwrap_err()
+                .contains("run_tool_context_conflict"));
+        }
+        assert!(authority
+            .set_context(RunToolContext {
+                run_id: " ".into(),
+                ..context
+            })
+            .is_err());
+        assert_eq!(authority.state.lock().unwrap().contexts.len(), 1);
+    }
+
+    #[test]
+    fn background_run_keeps_its_grant_and_approval_policy_after_b_registers() {
+        let authority = NativeToolAuthority::default();
+        let a = authority
+            .set_context(run_context(
+                "window",
+                "conversation-a",
+                "run-a",
+                "grant-a",
+                ChangePermissionPolicy::AskBeforeChanges,
+            ))
+            .unwrap()
+            .context_id;
+        let key_a = WindowToolCallKey::new("window", &a, "run-a", "same-tool");
+        assert!(matches!(
+            authority
+                .submit(key_a.clone(), run_call("run-a", "same-tool", "shell_exec"))
+                .unwrap(),
+            ToolCallDisposition::Pending
+        ));
+        let b = authority
+            .set_context(run_context(
+                "window",
+                "conversation-b",
+                "run-b",
+                "grant-b",
+                ChangePermissionPolicy::AllowChanges,
+            ))
+            .unwrap()
+            .context_id;
+        let key_b = WindowToolCallKey::new("window", &b, "run-b", "same-tool");
+        let ToolCallDisposition::Start(call_b) = authority
+            .submit(key_b, run_call("run-b", "same-tool", "shell_exec"))
+            .unwrap()
+        else {
+            panic!("B is allowed")
+        };
+        assert_eq!(call_b.workspace_grant_id, "grant-b");
+        assert_eq!(
+            authority.approve(&key_a).unwrap().workspace_grant_id,
+            "grant-a"
+        );
+        for name in ["file_read", "file_write", "file_patch", "shell_exec"] {
+            let key = WindowToolCallKey::new("window", &a, "run-a", name);
+            let disposition = authority
+                .submit(key.clone(), run_call("run-a", name, name))
+                .unwrap();
+            let call = match disposition {
+                ToolCallDisposition::Start(call) => {
+                    assert_eq!(name, "file_read");
+                    call
+                }
+                ToolCallDisposition::Pending => authority.approve(&key).unwrap(),
+            };
+            assert_eq!(
+                call.workspace_grant_id, "grant-a",
+                "{name} must capture A's grant"
+            );
+        }
+    }
+
+    #[test]
+    fn cross_context_window_and_run_operations_are_rejected() {
+        let authority = NativeToolAuthority::default();
+        let a = authority
+            .set_context(run_context(
+                "window",
+                "conversation-a",
+                "run-a",
+                "grant-a",
+                ChangePermissionPolicy::AskBeforeChanges,
+            ))
+            .unwrap()
+            .context_id;
+        let b = authority
+            .set_context(run_context(
+                "window",
+                "conversation-b",
+                "run-b",
+                "grant-b",
+                ChangePermissionPolicy::AskBeforeChanges,
+            ))
+            .unwrap()
+            .context_id;
+        let key_a = WindowToolCallKey::new("window", &a, "run-a", "same-tool");
+        let key_b = WindowToolCallKey::new("window", &b, "run-b", "same-tool");
+        authority
+            .submit(key_a.clone(), run_call("run-a", "same-tool", "shell_exec"))
+            .unwrap();
+        authority
+            .submit(key_b.clone(), run_call("run-b", "same-tool", "shell_exec"))
+            .unwrap();
+        for forged in [
+            WindowToolCallKey::new("window", &b, "run-a", "same-tool"),
+            WindowToolCallKey::new("other-window", &a, "run-a", "same-tool"),
+            WindowToolCallKey::new("window", "unknown", "run-a", "same-tool"),
+        ] {
+            assert!(authority
+                .submit(forged.clone(), run_call("run-a", "same-tool", "shell_exec"))
+                .is_err());
+            assert!(authority.approve(&forged).is_err());
+            assert!(authority.deny(&forged).is_err());
+            assert!(authority.cancel_pending(&forged).is_err());
+            assert!(authority.poll_result(&forged).is_err());
+            assert!(authority
+                .clear_context(&forged.window_label, &forged.context_id, &forged.run_id)
+                .is_err());
+        }
+        assert!(authority
+            .submit(
+                WindowToolCallKey::new("window", &a, "run-a", "mismatch"),
+                run_call("run-b", "mismatch", "file_read")
+            )
+            .is_err());
+        assert_eq!(authority.state.lock().unwrap().pending.len(), 2);
+        assert_eq!(
+            authority
+                .cancel_pending(&key_b)
+                .unwrap()
+                .unwrap()
+                .call
+                .workspace_grant_id,
+            "grant-b"
+        );
+        assert_eq!(
+            authority.approve(&key_a).unwrap().workspace_grant_id,
+            "grant-a"
+        );
+    }
+
+    #[test]
+    fn identical_tool_ids_have_isolated_jobs_cancellation_and_results() {
+        use std::sync::atomic::Ordering;
+        let authority = NativeToolAuthority::default();
+        let mut keys = Vec::new();
+        let mut tokens = Vec::new();
+        for (conversation, run, grant) in [("a", "run-a", "grant-a"), ("b", "run-b", "grant-b")] {
+            let id = authority
+                .set_context(run_context(
+                    "window",
+                    conversation,
+                    run,
+                    grant,
+                    ChangePermissionPolicy::AllowChanges,
+                ))
+                .unwrap()
+                .context_id;
+            let key = WindowToolCallKey::new("window", id, run, "same-tool");
+            authority
+                .submit(key.clone(), run_call(run, "same-tool", "shell_exec"))
+                .unwrap();
+            let token = Arc::new(AtomicBool::new(false));
+            authority.register_job(&key, token.clone()).unwrap();
+            keys.push(key);
+            tokens.push(token);
+        }
+        assert_ne!(keys[0].registry_key(), keys[1].registry_key());
+        super::signal_local_tool_cancellation(&keys[1].registry_key()).unwrap();
+        assert!(!tokens[0].load(Ordering::Acquire));
+        assert!(tokens[1].load(Ordering::Acquire));
+        for (index, key) in keys.iter().enumerate() {
+            super::complete_local_tool_job(
+                &key.registry_key(),
+                json!({ "run_id": key.run_id, "index": index }),
+            );
+            authority.finish(key);
+        }
+        assert_eq!(
+            authority.poll_result(&keys[0]).unwrap().unwrap()["index"],
+            0
+        );
+        assert_eq!(
+            authority.poll_result(&keys[1]).unwrap().unwrap()["index"],
+            1
+        );
+        assert!(authority.poll_result(&keys[0]).unwrap().is_none());
+    }
+
+    #[test]
+    fn context_window_logout_and_grant_cleanup_are_scoped_and_block_late_start() {
+        let authority = NativeToolAuthority::default();
+        let mut keys = Vec::new();
+        for (window, run, grant) in [
+            ("one", "a", "shared"),
+            ("one", "b", "other"),
+            ("two", "c", "shared"),
+            ("two", "d", "other"),
+        ] {
+            let id = authority
+                .set_context(run_context(
+                    window,
+                    run,
+                    run,
+                    grant,
+                    ChangePermissionPolicy::AllowChanges,
+                ))
+                .unwrap()
+                .context_id;
+            let key = WindowToolCallKey::new(window, id, run, "same-tool");
+            authority
+                .submit(key.clone(), run_call(run, "same-tool", "file_read"))
+                .unwrap();
+            keys.push(key);
+        }
+        let (_, (_, cleared)) = authority
+            .clear_context("one", &keys[1].context_id, "b")
+            .unwrap();
+        assert_eq!(cleared, vec![keys[1].clone()]);
+        assert!(authority
+            .register_job(&keys[1], Arc::new(AtomicBool::new(false)))
+            .is_err());
+        assert!(authority.validate_key(&keys[0]).is_ok());
+        let (_, cleared) = authority.clear_workspace_grant("shared").unwrap();
+        assert_eq!(cleared.len(), 2);
+        assert!(authority.validate_key(&keys[0]).is_err());
+        assert!(authority.validate_key(&keys[2]).is_err());
+        assert!(authority.validate_key(&keys[3]).is_ok());
+        let (_, cleared) = authority.clear_window("one").unwrap();
+        assert!(cleared.is_empty());
+        let (_, cleared) = authority.clear_all().unwrap();
+        assert_eq!(cleared, vec![keys[3].clone()]);
+        assert!(authority.state.lock().unwrap().contexts.is_empty());
+    }
+
+    #[test]
+    fn window_close_and_logout_clear_multiple_active_and_pending_run_contexts() {
+        use std::sync::atomic::Ordering;
+        let authority = NativeToolAuthority::default();
+        let mut active_keys = Vec::new();
+        let mut pending_keys = Vec::new();
+        let mut tokens = Vec::new();
+        for window in ["closing-window", "surviving-window"] {
+            for run in ["run-a", "run-b"] {
+                let id = authority.set_context(run_context(
+                    window, run, run, run, ChangePermissionPolicy::AskBeforeChanges,
+                )).unwrap().context_id;
+                let active = WindowToolCallKey::new(window, &id, run, "active-tool");
+                let pending = WindowToolCallKey::new(window, &id, run, "pending-tool");
+                authority.submit(active.clone(), run_call(run, "active-tool", "file_read")).unwrap();
+                authority.submit(pending.clone(), run_call(run, "pending-tool", "shell_exec")).unwrap();
+                let token = Arc::new(AtomicBool::new(false));
+                authority.register_job(&active, token.clone()).unwrap();
+                active_keys.push(active);
+                pending_keys.push(pending);
+                tokens.push(token);
+            }
+        }
+        let (pending, active) = authority.clear_window("closing-window").unwrap();
+        assert_eq!(pending.len(), 2);
+        assert_eq!(active.len(), 2);
+        super::cancel_active_tool_calls(&active);
+        for index in 0..4 {
+            assert_eq!(tokens[index].load(Ordering::Acquire), index < 2);
+            assert_eq!(authority.validate_key(&active_keys[index]).is_err(), index < 2);
+            if index < 2 {
+                assert!(authority.approve(&pending_keys[index]).is_err());
+                assert!(authority.poll_result(&active_keys[index]).is_err());
+            }
+        }
+        assert_eq!(authority.state.lock().unwrap().pending.len(), 2);
+        let (pending, active) = authority.clear_all().unwrap();
+        assert_eq!(pending.len(), 2);
+        assert_eq!(active.len(), 2);
+        super::cancel_active_tool_calls(&active);
+        for (key, token) in active_keys.iter().zip(&tokens) {
+            assert!(token.load(Ordering::Acquire));
+            assert!(authority.validate_key(key).is_err());
+            super::complete_local_tool_job(&key.registry_key(), json!({ "status": "error" }));
+            super::local_tool_results().lock().unwrap().remove(&key.registry_key());
+        }
+        let state = authority.state.lock().unwrap();
+        assert!(state.contexts.is_empty());
+        assert!(state.pending.is_empty());
+        assert!(state.active.is_empty());
+    }
+
+    #[test]
+    fn revoked_context_clear_is_idempotent_for_each_revocation_path() {
+        use super::RunToolContextClearStatus::{AlreadyRevoked, Cleared};
+        for path in ["context", "window", "logout", "workspace"] {
+            let authority = NativeToolAuthority::default();
+            let id = authority.set_context(run_context("window", "conversation", "run", "grant", ChangePermissionPolicy::AskBeforeChanges)).unwrap().context_id;
+            let key = WindowToolCallKey::new("window", &id, "run", "tool");
+            authority.submit(key.clone(), run_call("run", "tool", "shell_exec")).unwrap();
+            let calls = match path {
+                "context" => {
+                    let (outcome, calls) = authority.clear_context("window", &id, "run").unwrap();
+                    assert_eq!(outcome.status, Cleared);
+                    assert_eq!(serde_json::to_value(outcome).unwrap(), json!({"status":"cleared", "context_id":id, "run_id":"run"}));
+                    calls
+                }
+                "window" => authority.clear_window("window").unwrap(),
+                "logout" => authority.clear_all().unwrap(),
+                _ => authority.clear_workspace_grant("grant").unwrap(),
+            };
+            assert_eq!(calls.0.len(), 1);
+            for _ in 0..2 {
+                let (outcome, calls) = authority.clear_context("window", &id, "run").unwrap();
+                assert_eq!(outcome.status, AlreadyRevoked);
+                assert_eq!(serde_json::to_value(outcome).unwrap(), json!({"status":"already_revoked", "context_id":id, "run_id":"run"}));
+                assert!(calls.0.is_empty() && calls.1.is_empty());
+            }
+            assert!(authority.submit(key.clone(), run_call("run", "tool", "shell_exec")).err().unwrap().starts_with("run_tool_context_revoked:"));
+            assert!(authority.approve(&key).unwrap_err().starts_with("run_tool_context_revoked:"));
+            assert!(authority.deny(&key).unwrap_err().starts_with("run_tool_context_revoked:"));
+            assert!(authority.cancel_pending(&key).unwrap_err().starts_with("run_tool_context_revoked:"));
+            assert!(authority.poll_result(&key).unwrap_err().starts_with("run_tool_context_revoked:"));
+        }
+    }
+
+    #[test]
+    fn revoked_context_never_acknowledges_other_windows_runs_or_unknown_ids() {
+        let authority = NativeToolAuthority::default();
+        let context = run_context("window-a", "conversation", "run-a", "grant", ChangePermissionPolicy::AllowChanges);
+        let old = authority.set_context(context.clone()).unwrap().context_id;
+        authority.clear_all().unwrap();
+        for (window, run) in [("window-b", "run-a"), ("window-a", "run-b")] {
+            assert!(authority.clear_context(window, &old, run).unwrap_err().starts_with("run_tool_context_mismatch:"));
+            let key = WindowToolCallKey::new(window, &old, run, "tool");
+            assert!(authority.poll_result(&key).unwrap_err().starts_with("run_tool_context_mismatch:"));
+            assert!(authority.cancel_pending(&key).unwrap_err().starts_with("run_tool_context_mismatch:"));
+        }
+        assert!(authority.clear_context("window-a", "unknown", "run-a").unwrap_err().starts_with("run_tool_context_missing:"));
+        // A later login may register the same logical run. Its new handle must
+        // never be cleared by a delayed cleanup from the previous login.
+        let fresh = authority.set_context(context).unwrap().context_id;
+        assert_ne!(old, fresh);
+        authority.clear_context("window-a", &old, "run-a").unwrap();
+        assert!(authority.validate_key(&WindowToolCallKey::new("window-a", fresh, "run-a", "tool")).is_ok());
+    }
+
+    #[test]
+    fn revoked_context_concurrent_clear_has_one_first_revoker() {
+        use super::RunToolContextClearStatus::{AlreadyRevoked, Cleared};
+        let authority = NativeToolAuthority::default();
+        let id = authority.set_context(run_context("window", "conversation", "run", "grant", ChangePermissionPolicy::AllowChanges)).unwrap().context_id;
+        let outcomes = std::thread::scope(|scope| {
+            let first = scope.spawn(|| authority.clear_context("window", &id, "run").unwrap().0.status);
+            let second = scope.spawn(|| authority.clear_context("window", &id, "run").unwrap().0.status);
+            [first.join().unwrap(), second.join().unwrap()]
+        });
+        assert_eq!(outcomes.iter().filter(|status| **status == Cleared).count(), 1);
+        assert_eq!(outcomes.iter().filter(|status| **status == AlreadyRevoked).count(), 1);
     }
 
     #[test]
@@ -2731,7 +3289,7 @@ mod tests {
         });
         let call = NativeToolCall::from_renderer_request(raw_request).unwrap();
         assert!(call.request.get("approval").is_none());
-        let key = WindowToolCallKey::new(window, call.tool_call_id.clone());
+        let key = test_key(&authority, window, call.tool_call_id.clone());
         assert!(matches!(
             authority.submit(key.clone(), call).unwrap(),
             ToolCallDisposition::Pending
@@ -2767,7 +3325,7 @@ mod tests {
             "approval": "anything-from-the-renderer"
         }))
         .unwrap();
-        let key = WindowToolCallKey::new("window-a", call.tool_call_id.clone());
+        let key = test_key(&authority, "window-a", call.tool_call_id.clone());
         let ToolCallDisposition::Start(call) = authority.submit(key.clone(), call).unwrap() else {
             panic!("Allow changes must start a change without a pending approval")
         };
@@ -2792,7 +3350,7 @@ mod tests {
             "arguments": { "command": "printf must-be-reviewed", "timeout_ms": 30000 }
         }))
         .unwrap();
-        let key = WindowToolCallKey::new("window-a", call.tool_call_id.clone());
+        let key = test_key(&authority, "window-a", call.tool_call_id.clone());
         assert!(matches!(
             authority.submit(key, call).unwrap(),
             ToolCallDisposition::Start(_)
@@ -2816,7 +3374,7 @@ mod tests {
             "arguments": { "command": "printf must-be-reviewed", "timeout_ms": 30000 }
         }))
         .unwrap();
-        let key = WindowToolCallKey::new("window-a", call.tool_call_id.clone());
+        let key = test_key(&authority, "window-a", call.tool_call_id.clone());
         assert!(matches!(
             authority.submit(key, call).unwrap(),
             ToolCallDisposition::Pending
@@ -2846,12 +3404,12 @@ mod tests {
             "arguments": { "path": "output.txt", "content": "no cross-window approval" }
         }))
         .unwrap();
-        let key_a = WindowToolCallKey::new("window-a", call.tool_call_id.clone());
+        let key_a = test_key(&authority, "window-a", call.tool_call_id.clone());
         assert!(matches!(
             authority.submit(key_a.clone(), call).unwrap(),
             ToolCallDisposition::Pending
         ));
-        let key_b = WindowToolCallKey::new("window-b", "same-call-id");
+        let key_b = test_key(&authority, "window-b", "same-call-id");
         assert!(authority
             .approve(&key_b)
             .unwrap_err()
@@ -2880,7 +3438,7 @@ mod tests {
                 "arguments": { "path": "output.txt", "patch": "" }
             }))
             .unwrap();
-            let key = WindowToolCallKey::new("window-a", tool_call_id);
+            let key = test_key(&authority, "window-a", tool_call_id);
             assert!(matches!(
                 authority.submit(key.clone(), call).unwrap(),
                 ToolCallDisposition::Pending
@@ -2914,7 +3472,7 @@ mod tests {
             "arguments": { "command": "printf should-not-run", "timeout_ms": 30000 }
         }))
         .unwrap();
-        let key = WindowToolCallKey::new("window-a", call.tool_call_id.clone());
+        let key = test_key(&authority, "window-a", call.tool_call_id.clone());
         assert!(matches!(
             authority.submit(key.clone(), call).unwrap(),
             ToolCallDisposition::Pending
@@ -2925,7 +3483,7 @@ mod tests {
         assert!(authority
             .approve(&key)
             .unwrap_err()
-            .contains("tool_approval_missing"));
+            .contains("run_tool_context_revoked"));
     }
 
     #[test]
@@ -2945,7 +3503,7 @@ mod tests {
             "arguments": { "path": "output.txt", "content": "should-not-run" }
         }))
         .unwrap();
-        let key = WindowToolCallKey::new("window-a", call.tool_call_id.clone());
+        let key = test_key(&authority, "window-a", call.tool_call_id.clone());
         assert!(matches!(
             authority.submit(key.clone(), call).unwrap(),
             ToolCallDisposition::Pending

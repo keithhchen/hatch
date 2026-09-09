@@ -22,7 +22,7 @@ import {
   materializeAgentCorpusRelease,
   verifyAgentCorpus
 } from "./registryCorpus.js";
-import { RuntimeStore } from "./store.js";
+import { RuntimeStore, localRuntimeAuthority } from "./store.js";
 
 const CREATOR_ID = "6f6a3d24-48af-4f27-9c50-0d4f7e4e8a21";
 const PRODUCT_ID = "f9c4e2b7-7d14-4d72-9a63-1e91e58d6c42";
@@ -457,7 +457,7 @@ async function startRuntime(input: {
   createRuntime: () => AgentRuntime;
   reconcileIntervalMs: number;
 }): Promise<{ runtime: RuntimeServer; url: string }> {
-  const conversationRepository = new InMemoryConversationRepository();
+  const conversationRepository = new InMemoryConversationRepository(localRuntimeAuthority(input.dataRoot));
   for (const runId of ["run-success", "run-repeat", "run-failed", "run-cancelled", "run-after-restart", "run-after-refund"]) {
     const publicId = `conversation-${runId}`;
     await conversationRepository.createConversation({

@@ -34,13 +34,14 @@ import { PostgresStore } from "./postgresStore.js";
 import {
   assertConversationBinding,
   ConversationRepositoryError,
-  FileConversationRepository,
+  InMemoryConversationRepository,
   PostgresConversationRepository,
   type ConversationBinding,
   type ConversationJournalEvent,
   type ConversationRepository,
   type ConversationRecord,
-  type ConversationRunRecord
+  type ConversationRunRecord,
+  type AcceptedSubmission
 } from "./conversationRepository.js";
 import { ToolBridge } from "./toolBridge.js";
 import {
@@ -723,8 +724,18 @@ export function createRuntimeServer(options: RuntimeServerOptions = {}): Runtime
   if (!Number.isSafeInteger(maxActiveRunsPerConnection) || maxActiveRunsPerConnection < 1) {
     throw new Error("maxActiveRunsPerConnection must be a positive safe integer");
   }
-  const conversationStore = options.conversationStore ?? createConversationStore();
+  const conversationStore = options.conversationStore
+    ?? (options.conversationRepository instanceof InMemoryConversationRepository
+      ? new RuntimeStore(options.conversationRepository.localAuthority)
+      : options.conversationRepository instanceof PostgresConversationRepository
+        ? new PostgresStore({ pool: options.conversationRepository.pool }) : createConversationStore());
   const conversationRepository = options.conversationRepository ?? createConversationRepository(conversationStore);
+  if (conversationStore instanceof PostgresStore && conversationRepository instanceof PostgresConversationRepository) {
+    conversationRepository.bindSubmissionStore(conversationStore);
+  } else if (!(conversationRepository instanceof InMemoryConversationRepository)
+    || conversationRepository.localAuthority !== conversationStore.localAuthority) {
+    throw new Error("Runtime store and repository must share one submission authority");
+  }
   // Production RuntimeStore exposes the app-data directory. A few server
   // integrations inject a transcript-compatible store without that optional
   // filesystem property; keep those integrations usable while preserving the
@@ -1846,7 +1857,8 @@ function createConversationRepository(store: RuntimeStore): ConversationReposito
     // Conversation control-plane use one Runtime database lifecycle.
     return new PostgresConversationRepository({ pool: store.pool });
   }
-  return new FileConversationRepository(store.dataDirectory);
+  if (!store.localAuthority) throw new Error("Local Runtime store requires a submission authority");
+  return new InMemoryConversationRepository(store.localAuthority);
 }
 
 function writeJson(res: http.ServerResponse, status: number, body: unknown): void {
@@ -2344,26 +2356,58 @@ async function handleRuntimeSocket(
             await repositoryReady;
             const existing = await conversationRepository.getRunByClientMessageId(storageConversationId, clientMessageId);
             if (existing) {
-              if (existing.inputDigest && existing.inputDigest !== inputDigest) {
-                await send({
-                  type: "turn.failed",
-                  run_id: message.run_id,
-                  error: {
-                    code: "client_message_conflict",
-                    message: "This client_message_id was already used with different message or attachment content."
-                  }
-                });
+              if (authorizationSlotRunId) {
+                await send({ type: "turn.failed", run_id: message.run_id, error: { code: "connection_busy", message: "This connection is already authorizing a submission." } });
                 return;
               }
-              const receipt = await store.readSubmissionReceipt(storageConversationId, existing.id);
-              if (receipt) await send({ type: "message.accepted", run_id: receipt.run_id, client_message_id: receipt.client_message_id });
-              await send({
-                type: "turn.state",
-                run_id: existing.id,
-                status: existing.status,
-                reason: "Idempotent client message replay"
-              });
-              return;
+              const releaseReplay = turnAuthorizationGate.tryAcquire();
+              const releaseUserReplay = releaseReplay ? turnAuthorizationPerUserGate.tryAcquire(binding.userId) : undefined;
+              if (!releaseReplay || !releaseUserReplay) {
+                releaseReplay?.();
+                await send({ type: "turn.failed", run_id: message.run_id, error: { code: "authorization_busy", message: "Submission authorization capacity is busy." } });
+                return;
+              }
+              authorizationSlotRunId = message.run_id;
+              try {
+                await revalidateTurnAuthorization(hello, binding, entitlementResolver, authIdentityResolver,
+                  agentCorpusResolver, connectionAbortController.signal);
+                const conversation = await conversationRepository.getConversation(storageConversationId);
+                if (!conversation) throw new ConversationRepositoryError("conversation_not_found", "Conversation was not found");
+                assertConversationBinding(conversation, conversationBinding(binding));
+                if (existing.inputDigest && existing.inputDigest !== inputDigest) {
+                  await send({
+                    type: "turn.failed",
+                    run_id: message.run_id,
+                    error: {
+                      code: "client_message_conflict",
+                      message: "This client_message_id was already used with different message or attachment content."
+                    }
+                  });
+                  return;
+                }
+                const receipt = await store.readSubmissionReceipt(storageConversationId, existing.id);
+                if (!receipt) {
+                  await send({ type: "turn.failed", run_id: message.run_id, error: {
+                    code: "submission_not_accepted", message: "Historical run has no accepted submission; submit explicitly with a new client_message_id."
+                  } });
+                  return;
+                }
+                await send({ type: "message.accepted", run_id: receipt.run_id, client_message_id: receipt.client_message_id });
+                await send({
+                  type: "turn.state",
+                  run_id: existing.id,
+                  status: existing.status,
+                  reason: "Idempotent client message replay"
+                });
+                return;
+              } catch (error) {
+                await send({ type: "turn.failed", run_id: message.run_id, error: controlledTurnAuthorizationError(error) });
+                return;
+              } finally {
+                releaseReplay();
+                releaseUserReplay();
+                if (authorizationSlotRunId === message.run_id) authorizationSlotRunId = undefined;
+              }
             }
           }
           if (reservedRunIds.has(message.run_id)) {
@@ -2553,22 +2597,20 @@ async function handleRuntimeSocket(
             if (authorizationSlotRunId === message.run_id) authorizationSlotRunId = undefined;
             return;
           }
-          pendingTurnAuthorizations.delete(message.run_id);
-          pendingAuthorization.detachConnectionAbort();
-          pendingAuthorization.releaseAuthorizationCapacity();
-          if (authorizationSlotRunId === message.run_id) authorizationSlotRunId = undefined;
-
-          // The authorization listener is detached once its reservation has
-          // settled, so explicitly close the handoff gap before any durable
-          // executor record is created.
+          // Keep the authorization/cancel owner through materialization and commit.
           if (connectionAbortController.signal.aborted) {
+            pendingTurnAuthorizations.delete(message.run_id);
+            pendingAuthorization.detachConnectionAbort();
+            pendingAuthorization.releaseAuthorizationCapacity();
+            if (authorizationSlotRunId === message.run_id) authorizationSlotRunId = undefined;
             releaseConversationRun(activeConversationRuns, storageConversationId, message.run_id);
             reservedRunIds.delete(message.run_id);
             pendingAuthorization.releaseActiveRunCapacity();
             return;
           }
 
-          let durableRun: { run: ConversationRunRecord; created: boolean };
+          let durableRun: AcceptedSubmission;
+          let acceptedUser: ConversationMessage;
           try {
             await repositoryReady;
             let conversation = await conversationRepository.getConversation(storageConversationId);
@@ -2589,20 +2631,36 @@ async function handleRuntimeSocket(
               (error as Error & { code?: string }).code = "conversation_brief_required";
               throw error;
             }
-            durableRun = await conversationRepository.createRun({
-              id: message.run_id,
-              conversationId: storageConversationId,
-              // Existing clients use run_id as their stable retry key until
-              // they send client_message_id from this protocol extension.
-              clientMessageId,
-              inputDigest,
-              corpusDigest: binding.corpusDigest,
-              executorId
+            // An authenticated idempotent retry needs no asset upload/read. Its
+            // existing canonical message is already the immutable accepted input.
+            const existing = await conversationRepository.getRunByClientMessageId(storageConversationId, clientMessageId);
+            acceptedUser = existing ? { role: "user", content: "" } : message.task_start
+              ? { role: "user", content: TASK_START_MESSAGE_CONTENT, kind: "task_start" }
+              : await materializeUserMessageAssets(message.message, assetStore);
+            authorizationController.signal.throwIfAborted();
+            durableRun = await conversationRepository.acceptSubmission({
+              binding: conversationBinding(binding),
+              canonicalUser: acceptedUser,
+              run: {
+                id: message.run_id,
+                conversationId: storageConversationId,
+                // Existing clients use run_id as their stable retry key until
+                // they send client_message_id from this protocol extension.
+                clientMessageId,
+                inputDigest,
+                corpusDigest: binding.corpusDigest,
+                executorId
+              }
             });
           } catch (error) {
             releaseConversationRun(activeConversationRuns, storageConversationId, message.run_id);
             reservedRunIds.delete(message.run_id);
             pendingAuthorization.releaseActiveRunCapacity();
+            if (authorizationController.signal.aborted) return;
+            if (error instanceof ConversationRepositoryError && error.code === "submission_not_accepted") {
+              await send({ type: "turn.failed", run_id: message.run_id, error: { code: error.code, message: error.message } });
+              return;
+            }
             if (error instanceof ConversationRepositoryError && error.code === "conversation_busy") {
               await send({
                 type: "turn.failed",
@@ -2639,10 +2697,15 @@ async function handleRuntimeSocket(
               return;
             }
             throw error;
+          } finally {
+            pendingTurnAuthorizations.delete(message.run_id);
+            pendingAuthorization.detachConnectionAbort();
+            pendingAuthorization.releaseAuthorizationCapacity();
+            if (authorizationSlotRunId === message.run_id) authorizationSlotRunId = undefined;
           }
           // A close can race the repository write above. Never let that race
           // leave a queued Run whose executor has already disappeared.
-          if (connectionAbortController.signal.aborted) {
+          if (connectionAbortController.signal.aborted || pendingAuthorization.cancelled) {
             if (durableRun.created) {
               await conversationRepository.transitionRun(
                 message.run_id,
@@ -2659,8 +2722,8 @@ async function handleRuntimeSocket(
             releaseConversationRun(activeConversationRuns, storageConversationId, message.run_id);
             reservedRunIds.delete(message.run_id);
             pendingAuthorization.releaseActiveRunCapacity();
-            const receipt = await store.readSubmissionReceipt(storageConversationId, durableRun.run.id);
-            if (receipt) await send({ type: "message.accepted", run_id: receipt.run_id, client_message_id: receipt.client_message_id });
+            const receipt = durableRun.receipt;
+            await send({ type: "message.accepted", run_id: receipt.run_id, client_message_id: receipt.client_message_id });
             await send({
               type: "turn.state",
               run_id: durableRun.run.id,
@@ -2701,7 +2764,9 @@ async function handleRuntimeSocket(
           };
           activeRunControls.set(runControlKey(storageConversationId, message.run_id), { cancel: cancelActiveRun });
           try {
-            await state.queued();
+            await send({ type: "message.accepted", run_id: durableRun.receipt.run_id, client_message_id: durableRun.receipt.client_message_id });
+            // The initial queued record is already part of acceptSubmission.
+            await send({ type: "turn.state", run_id: message.run_id, status: "queued" });
           } catch {
             connectionAbortController.signal.removeEventListener("abort", interruptFromConnectionClose);
             activeRunStates.delete(message.run_id);
@@ -2723,6 +2788,7 @@ async function handleRuntimeSocket(
           }
           const product = runOneTurn(
             boundMessage,
+            acceptedUser,
             hello,
             sessionSkills,
             binding,
@@ -2820,6 +2886,7 @@ export function protectPrivateAgentBoundary(
 
 async function runOneTurn(
   input: RunStart,
+  persistedUserMessage: ConversationMessage,
   hello: ClientHello,
   sessionSkills: RuntimeSessionSkills,
   binding: SessionBinding,
@@ -2851,14 +2918,7 @@ async function runOneTurn(
   try {
     abortSignal.throwIfAborted();
     await state.start();
-    const priorMessages = await store.readConversation(input.conversation_id);
-    const persistedUserMessage: ConversationMessage = input.task_start
-      ? {
-        role: "user",
-        content: TASK_START_MESSAGE_CONTENT,
-        kind: "task_start"
-      }
-      : await materializeUserMessageAssets(input.message, assetStore);
+    const committedInput = await store.readConversation(input.conversation_id);
     // The wire-level task_start message is intentionally empty, but the
     // Runtime's canonical user turn is not. Keep the same marked message in
     // the durable transcript and pass its non-empty content to the Agent.
@@ -2872,29 +2932,8 @@ async function runOneTurn(
           ...(persistedUserMessage.attachments?.length ? { attachments: persistedUserMessage.attachments } : {})
         }
       };
-    const persistUserMessage = async (): Promise<void> => {
-      await store.append({
-        type: "conversation.model_message",
-        conversation_id: input.conversation_id,
-        run_id: input.run_id,
-        client_message_id: input.client_message_id ?? input.run_id,
-        message: persistedUserMessage
-      });
-      await send({ type: "message.accepted", run_id: input.run_id, client_message_id: input.client_message_id ?? input.run_id });
-      await conversationRepository.appendEvent({
-        conversationId: input.conversation_id,
-        runId: input.run_id,
-        type: "message.created",
-        payload: {
-          role: "user",
-          client_message_id: input.client_message_id ?? input.run_id
-        }
-      });
-    };
-    // Acceptance precedes any model work, including compaction. The current
-    // user message is part of the committed input that Pi may compact.
-    await persistUserMessage();
-    const committedInput = [...priorMessages, persistedUserMessage];
+    // Execution consumes the accepted canonical history, including images.
+    // No second append, image materialization, or journal repair is allowed.
     const materializedAgent = binding.agentCorpusRoot
       ? await materializeAgentCorpus(
         binding.agentCorpusRoot,

@@ -13,7 +13,7 @@ import type { AuthIdentityResolver, EntitlementBinding, EntitlementResolver } fr
 import { RuntimeAssetStore } from "./assetStore.js";
 import { createRuntimeServer, durableConversationId, type RuntimeServer } from "./index.js";
 import { PROTOCOL_VERSION, type OutboundMessage } from "./protocol.js";
-import { RuntimeStore } from "./store.js";
+import { RuntimeStore, localRuntimeAuthority } from "./store.js";
 
 let runtime: RuntimeServer | undefined;
 
@@ -368,7 +368,7 @@ test("Run HTTP API rejects a detached reservation instead of occupying an execut
 
 test("GET run returns canonical submission receipts or null without writing on repeated reads", async () => {
   const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-run-receipt-http-")));
-  const repository = new InMemoryConversationRepository();
+  const repository = new InMemoryConversationRepository(store.localAuthority);
   runtime = createRuntimeServer({ conversationStore: store, conversationRepository: repository });
   const base = await listen(runtime.server);
   const scope = new URLSearchParams(binding).toString();
@@ -423,7 +423,7 @@ test("GET run returns canonical submission receipts or null without writing on r
 
 test("WebSocket retries use client_message_id without creating a second run or replaying tools", async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-ws-"));
-  const repository = new InMemoryConversationRepository();
+  const repository = new InMemoryConversationRepository(localRuntimeAuthority(dataDir));
   const store = new RuntimeStore(dataDir);
   runtime = createRuntimeServer({
     conversationStore: store,
@@ -497,7 +497,7 @@ test("WebSocket retries use client_message_id without creating a second run or r
 
 test("local attachments commit references and fixed image bytes without using the asset store", async (t) => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-local-attachment-submit-"));
-  const repository = new InMemoryConversationRepository();
+  const repository = new InMemoryConversationRepository(localRuntimeAuthority(dataDir));
   const store = new RuntimeStore(dataDir);
   const assetStore = new RuntimeAssetStore(path.join(dataDir, "assets"));
   const put = t.mock.method(assetStore, "put", async () => { throw new Error("OSS disabled"); });
@@ -542,7 +542,7 @@ test("local attachments commit references and fixed image bytes without using th
 
 test("completed assistant body is stored once and journal carries only one notification", async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-canonical-terminal-"));
-  const repository = new InMemoryConversationRepository();
+  const repository = new InMemoryConversationRepository(localRuntimeAuthority(dataDir));
   const store = new RuntimeStore(dataDir);
   runtime = createRuntimeServer({ conversationStore: store, conversationRepository: repository,
     createRuntime: () => ({ async *run(input) {
@@ -577,7 +577,7 @@ test("a failed manual compaction does not lose the already accepted user command
     message: "Injected compaction provider failure", type: "invalid_request_error"
   } }), { status: 400, headers: { "content-type": "application/json" } }));
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-compact-acceptance-"));
-  const repository = new InMemoryConversationRepository();
+  const repository = new InMemoryConversationRepository(localRuntimeAuthority(dataDir));
   const store = new RuntimeStore(dataDir);
   runtime = createRuntimeServer({ conversationStore: store, conversationRepository: repository,
     createRuntime: () => new DeterministicAgentRuntime() });
@@ -605,7 +605,7 @@ test("a failed manual compaction does not lose the already accepted user command
 
 test("Runtime startup interrupts a carried active Run instead of reclaiming or replaying it", async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-startup-recovery-"));
-  const repository = new InMemoryConversationRepository();
+  const repository = new InMemoryConversationRepository(localRuntimeAuthority(dataDir));
   const conversation = (await repository.createConversation({
     id: "conversation_startup_recovery",
     publicId: "conversation_startup_recovery",
@@ -643,7 +643,7 @@ test("Runtime startup interrupts a carried active Run instead of reclaiming or r
 
 test("two windows get distinct executor leases; disconnect is Interrupted and recovery is observer-only", async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-recovery-"));
-  const repository = new InMemoryConversationRepository();
+  const repository = new InMemoryConversationRepository(localRuntimeAuthority(dataDir));
   runtime = createRuntimeServer({
     conversationStore: new RuntimeStore(dataDir),
     conversationRepository: repository,
@@ -743,6 +743,118 @@ test("two windows get distinct executor leases; disconnect is Interrupted and re
   assert.notEqual(replacementRun?.executorId, firstRun?.executorId);
   secondSocket.close();
 });
+
+test("missing image fails before accepting, and retry uses fixed committed bytes without materializing again", async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-atomic-image-"));
+  const store = new RuntimeStore(root);
+  const repository = new InMemoryConversationRepository(store.localAuthority);
+  const assetStore = new RuntimeAssetStore(path.join(root, "assets"));
+  const bytes = Buffer.from("immutable model image");
+  const attachment = { kind: "asset" as const, attachment_id: "image", asset_id: "image", display_name: "image.png",
+    media_type: "image/png", source_bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") };
+  let executions = 0;
+  runtime = createRuntimeServer({ conversationStore: store, conversationRepository: repository, assetStore,
+    createRuntime: () => ({ async *run(input, context) {
+      executions += 1;
+      assert.deepEqual(context.messages[0]?.model_images, [{ type: "image", data: bytes.toString("base64"), mimeType: "image/png" }]);
+      yield { type: "turn.completed" as const, run_id: input.run_id, finish_reason: "stop" as const };
+    } }) });
+  const messages: OutboundMessage[] = [];
+  const socket = await openRuntimeSocket(await listen(runtime.server), "atomic-image", messages);
+  const request = { type: "client.message", conversation_id: "atomic-image", run_id: "image-run", client_message_id: "image-message",
+    message: { role: "user", content: "look", attachments: [attachment] } };
+  try {
+    socket.send(JSON.stringify(request));
+    await waitForSocket(messages, (message) => message.type === "turn.failed");
+    assert.deepEqual(await repository.listRuns("atomic-image"), []);
+    assert.equal(await store.readSubmissionReceipt("atomic-image", "image-run"), undefined);
+    assert.equal(messages.some((message) => message.type === "message.accepted"), false);
+    assert.equal(executions, 0);
+    await assetStore.put({ ...attachment, data_base64: bytes.toString("base64") });
+    socket.send(JSON.stringify(request));
+    await waitForSocket(messages, (message) => message.type === "turn.completed");
+    const read = t.mock.method(assetStore, "readBase64", async () => { throw new Error("image store offline after acceptance"); });
+    const put = t.mock.method(assetStore, "put", async () => { throw new Error("image store offline after acceptance"); });
+    socket.send(JSON.stringify({ ...request, run_id: "image-retry" }));
+    await waitForSocket(messages, (message) => message.type === "turn.state" && message.reason === "Idempotent client message replay");
+    assert.equal(read.mock.callCount(), 0);
+    assert.equal(put.mock.callCount(), 0);
+    assert.equal(executions, 1);
+    assert.equal((await store.readConversation("atomic-image")).filter((message) => message.role === "user").length, 1);
+  } finally { socket.terminate(); }
+});
+
+for (const boundary of ["before", "after"] as const) {
+  test(`socket loss ${boundary} atomic acceptance never strands a key or replays work`, { timeout: 10_000 }, async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "hatch-atomic-socket-"));
+    const store = new RuntimeStore(root);
+    const repository = new InMemoryConversationRepository(store.localAuthority);
+    let executions = 0;
+    let reached = false;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const original = repository.acceptSubmission.bind(repository);
+    let inject = true;
+    repository.acceptSubmission = async (input) => {
+      if (!inject) return original(input);
+      inject = false;
+      if (boundary === "before") {
+        reached = true;
+        await gate;
+        throw new Error("injected pre-commit failure");
+      }
+      const committed = await original(input);
+      reached = true;
+      await gate;
+      return committed;
+    };
+    runtime = createRuntimeServer({ conversationStore: store, conversationRepository: repository,
+      createRuntime: () => ({ async *run(input, context) {
+        executions += 1;
+        assert.equal(context.messages.filter((message) => message.role === "user").length, 1);
+        yield { type: "turn.completed" as const, run_id: input.run_id, finish_reason: "stop" as const };
+      } }) });
+    const base = await listen(runtime.server);
+    const messages: OutboundMessage[] = [];
+    const socket = await openRuntimeSocket(base, "atomic-disconnect", messages);
+    const request = { type: "client.message", conversation_id: "atomic-socket", run_id: "first",
+      client_message_id: "stable", message: { role: "user", content: "accepted exactly once" } };
+    socket.send(JSON.stringify(request));
+    try {
+      await waitForCondition(() => reached);
+      socket.terminate();
+      await waitForCondition(() => runtime!.wss.clients.size === 0);
+      release();
+      if (boundary === "after") {
+        await waitForCondition(async () => (await repository.getRun("atomic-socket", "first"))?.status === "interrupted");
+        assert.ok(await store.readSubmissionReceipt("atomic-socket", "first"));
+      } else {
+        assert.deepEqual(await repository.listRuns("atomic-socket"), []);
+        assert.equal(await store.readSubmissionReceipt("atomic-socket", "first"), undefined);
+      }
+      assert.equal(executions, 0);
+      assert.equal(messages.some((message) => message.type === "message.accepted"), false);
+      const retryMessages: OutboundMessage[] = [];
+      const retry = await openRuntimeSocket(base, "atomic-retry", retryMessages);
+      try {
+        retry.send(JSON.stringify({ ...request, run_id: "retry" }));
+        const accepted = await waitForSocket(retryMessages, (message) => message.type === "message.accepted");
+        assert.equal(accepted.type, "message.accepted");
+        if (accepted.type !== "message.accepted") throw new Error("Expected acceptance receipt");
+        assert.equal(accepted.run_id, boundary === "after" ? "first" : "retry");
+        if (boundary === "after") {
+          await waitForSocket(retryMessages, (message) => message.type === "turn.state" && message.reason === "Idempotent client message replay");
+          assert.equal(executions, 0);
+        } else {
+          await waitForSocket(retryMessages, (message) => message.type === "turn.completed");
+          assert.equal(executions, 1);
+        }
+        assert.equal((await repository.listRuns("atomic-socket")).length, 1);
+        assert.equal((await store.readConversation("atomic-socket")).filter((message) => message.role === "user").length, 1);
+      } finally { retry.terminate(); }
+    } finally { release(); socket.terminate(); }
+  });
+}
 
 async function listen(server: http.Server): Promise<string> {
   await new Promise<void>((resolve, reject) => {

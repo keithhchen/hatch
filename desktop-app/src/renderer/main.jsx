@@ -1,5 +1,6 @@
-import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { openDraftSession, draftAttachmentReference } from "./conversation-draft.js";
+import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { draftAttachmentReference } from "./conversation-draft.js";
+import { createConversationSessionManager } from "./conversation-session.js";
 import { createRoot } from "react-dom/client";
 import "@hatch/ui/fonts";
 import "@hatch/ui/theme.css";
@@ -87,7 +88,6 @@ import {
   isTerminalRunStatus,
   listConversations,
   restorableConversationId,
-  shouldOpenNewConversationInWindow,
   updateConversation
 } from "./conversation-client.js";
 import { bridgeConversationHistory, drainConversationJournal, includeActiveConversationRun, mergeConversationPage, validateHistoryPage, validateSnapshotPage } from "./conversation-pagination.js";
@@ -251,7 +251,7 @@ function DesktopAuxiliaryWindow({ kind }) {
           <p className="desktop-auxiliary-lede">Creator agents, on your terms.</p>
           <p>Hatch keeps the desktop boundary native while React renders the conversation work surface.</p>
           <dl className="desktop-auxiliary-facts">
-          <div><dt>Version</dt><dd>0.1.29</dd></div>
+          <div><dt>Version</dt><dd>0.1.30</dd></div>
             <div><dt>Architecture</dt><dd>Tauri Hybrid</dd></div>
           </dl>
         </section>
@@ -335,6 +335,20 @@ function AuxiliaryLanguageSettings({ onLanguageChange }) {
 }
 
 const ConversationAssetContext = createContext(null);
+const ConversationSessionContext = createContext(null);
+
+function useConversationUiState(key, initial) {
+  const session = useContext(ConversationSessionContext);
+  const [fallback, setFallback] = useState(initial);
+  const state = useSyncExternalStore(session?.subscribe ?? emptySessionSubscribe,
+    session?.snapshot ?? emptySessionSnapshot);
+  const value = Object.hasOwn(state.ui, key) ? state.ui[key] : fallback;
+  return [value, (update) => session ? session.setUi(key, update, initial) : setFallback(update)];
+}
+const emptySessionSubscribe = () => () => {};
+const EMPTY_SESSION_UI = { ui: {} };
+const emptySessionSnapshot = () => EMPTY_SESSION_UI;
+
 
 function App() {
   const auxiliaryMode = auxiliaryWindowMode();
@@ -351,28 +365,46 @@ function App() {
       strict: typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__)
     });
   }
-  const socketRef = useRef(null);
+  const [buyerSession, setBuyerSession] = useState(null);
+  const authEpochRef = useRef(0);
+  const authTeardownRef = useRef(false);
+  const [selectedEntitlementId, setSelectedEntitlementId] = useState("");
+  const [sessionCloseError, setSessionCloseError] = useState("");
+  const [conversationId, setConversationId] = useState(() => conversationIdFromLocation() || "desktop-chat");
+  const sessionManagerRef = useRef(null);
+  if (!sessionManagerRef.current) sessionManagerRef.current = createConversationSessionManager();
+  const sessionManager = sessionManagerRef.current;
+  const conversationSession = sessionManager.get({
+    accountId: buyerSession?.profile?.id || "",
+    entitlementId: selectedEntitlementId,
+    conversationId
+  });
+  sessionManager.select(conversationSession);
+  const sessionState = useSyncExternalStore(conversationSession.subscribe, conversationSession.snapshot);
+  conversationSession.localSettingsInitialized = true;
+  const sessionStateField = (name) => [sessionState[name], (update) => conversationSession.set(name, update)];
+  const socketRef = conversationSession.ref("socketRef", null);
   // Runtime messages arrive on a WebSocket listener created before React has
   // necessarily re-rendered after a folder grant. Local tool execution must
   // therefore use the latest explicit grant, not a stale render closure.
-  const workspaceRef = useRef("");
-  const workspaceGrantRef = useRef(null);
-  const activeRunRef = useRef(null);
-  const runtimeCapabilitiesRef = useRef({ richAssets: false });
-  const permissionRef = useRef(DEFAULT_PERMISSION_MODE);
+  const workspaceRef = conversationSession.ref("workspaceRef", "");
+  const workspaceGrantRef = conversationSession.ref("workspaceGrantRef", null);
+  const activeRunRef = conversationSession.ref("activeRunRef", null);
+  const runtimeCapabilitiesRef = conversationSession.ref("runtimeCapabilitiesRef", { richAssets: false });
+  const permissionRef = conversationSession.ref("permissionRef", DEFAULT_PERMISSION_MODE);
   const imeRef = useRef({ composing: false });
-  const connectedRef = useRef(false);
-  const connectingRef = useRef(false);
-  const connectionTokenRef = useRef(0);
-  const connectionConfigRef = useRef(null);
-  const reconnectTimerRef = useRef(null);
-  const reconnectAttemptRef = useRef(0);
-  const intentionalDisconnectRef = useRef(true);
-  const approvalResolversRef = useRef(new Map());
-  const pendingLocalToolsRef = useRef(new Map());
+  const connectedRef = conversationSession.ref("connectedRef", false);
+  const connectingRef = conversationSession.ref("connectingRef", false);
+  const connectionTokenRef = conversationSession.ref("connectionTokenRef", 0);
+  const connectionConfigRef = conversationSession.ref("connectionConfigRef", null);
+  const reconnectTimerRef = conversationSession.ref("reconnectTimerRef", null);
+  const reconnectAttemptRef = conversationSession.ref("reconnectAttemptRef", 0);
+  const intentionalDisconnectRef = conversationSession.ref("intentionalDisconnectRef", true);
+  const approvalResolversRef = conversationSession.ref("approvalResolversRef", new Map());
+  const pendingLocalToolsRef = conversationSession.ref("pendingLocalToolsRef", new Map());
   const buyerSessionRef = useRef(null);
-  const textRevealSinkRef = useRef(null);
-  const textRevealRef = useRef(null);
+  const textRevealSinkRef = conversationSession.ref("textRevealSinkRef", null);
+  const textRevealRef = conversationSession.ref("textRevealRef", null);
   const entitlementRefreshRef = useRef(false);
   const lastEntitlementRefreshRef = useRef(0);
   const nativeCommandHandlersRef = useRef({});
@@ -386,6 +418,8 @@ function App() {
   // the one-shot URL request. Dynamic Conversation windows must never write
   // their workspace back into the main window's legacy profile fallback.
   const conversationWindowRef = useRef(Boolean(requestedConversationIdRef.current));
+  const workspaceRestoredAccountRef = useRef("");
+  const navigationRequestRef = useRef(0);
   const conversationLibraryRequestRef = useRef(0);
   const conversationLibraryRetryTimerRef = useRef(null);
   const conversationLibraryRetryableRef = useRef(false);
@@ -399,22 +433,22 @@ function App() {
   if (!conversationCreationTrackerRef.current) {
     conversationCreationTrackerRef.current = createConversationCreationTracker();
   }
-  const conversationCursorRef = useRef(0);
-  const pendingTaskStartRef = useRef("");
-  const taskStartSentRef = useRef(new Set());
-  const taskBriefRef = useRef(null);
+  const conversationCursorRef = conversationSession.ref("conversationCursorRef", 0);
+  const pendingTaskStartRef = conversationSession.ref("pendingTaskStartRef", "");
+  const taskStartSentRef = conversationSession.ref("taskStartSentRef", new Set());
+  const taskBriefRef = conversationSession.ref("taskBriefRef", null);
   const viewportRef = useRef(null);
-  const viewportScrollTopRef = useRef(0);
-  const viewportScrollPersistTimerRef = useRef(null);
+  const viewportScrollTopRef = conversationSession.ref("viewportScrollTopRef", 0);
+  const viewportScrollPersistTimerRef = conversationSession.ref("viewportScrollPersistTimerRef", null);
   // Window context is deliberately separate from profile preferences. A
   // second Conversation window must be able to use another Conversation and
   // Workspace without last-writer-wins updates from the first window.
   const windowContextRef = useRef({});
   const [serverUrl] = useState(DEFAULT_RUNTIME_URL);
-  const [workspace, setWorkspace] = useState("");
-  const [workspaceDraft, setWorkspaceDraft] = useState("");
-  const [workspaceGrant, setWorkspaceGrant] = useState(null);
-  const [workspaceDraftGrant, setWorkspaceDraftGrant] = useState(null);
+  const [workspace, setWorkspace] = sessionStateField("workspace");
+  const [workspaceDraft, setWorkspaceDraft] = sessionStateField("workspaceDraft");
+  const [workspaceGrant, setWorkspaceGrant] = sessionStateField("workspaceGrant");
+  const [workspaceDraftGrant, setWorkspaceDraftGrant] = sessionStateField("workspaceDraftGrant");
   const [authState, setAuthState] = useState("loading");
   const [startupError, setStartupError] = useState("");
   const [settingsMigrationNotice, setSettingsMigrationNotice] = useState("");
@@ -423,41 +457,41 @@ function App() {
   const [bootstrapAttempt, setBootstrapAttempt] = useState(0);
   const [entitlementRefreshing, setEntitlementRefreshing] = useState(false);
   const [entitlementError, setEntitlementError] = useState("");
-  const [buyerSession, setBuyerSession] = useState(null);
+
   const [creatorAgentEntitlements, setCreatorAgentEntitlements] = useState([]);
-  const [selectedEntitlementId, setSelectedEntitlementId] = useState("");
+
   const selectedEntitlementIdRef = useRef("");
   const [signInStatus, setSignInStatus] = useState("idle");
   const [signInError, setSignInError] = useState("");
-  const [workspaceGranted, setWorkspaceGranted] = useState(false);
-  const [droppedFiles, storeDroppedFiles] = useState([]);
-  const droppedFilesRef = useRef([]);
-  const [permissionMode, setPermissionMode] = useState(DEFAULT_PERMISSION_MODE);
-  const [conversationId, setConversationId] = useState(() => requestedConversationIdRef.current || "desktop-chat");
+  const [workspaceGranted, setWorkspaceGranted] = sessionStateField("workspaceGranted");
+  const [droppedFiles, storeDroppedFiles] = sessionStateField("droppedFiles");
+  const droppedFilesRef = conversationSession.ref("droppedFilesRef", []);
+  const [permissionMode, setPermissionMode] = sessionStateField("permissionMode");
+
   const [conversations, setConversations] = useState([]);
   const [conversationLibraryStatus, setConversationLibraryStatus] = useState("idle");
   const [conversationLibraryError, setConversationLibraryError] = useState("");
   const [conversationLibraryRetryNonce, setConversationLibraryRetryNonce] = useState(0);
   const [renamingConversationId, setRenamingConversationId] = useState("");
   const [renameDraft, setRenameDraft] = useState("");
-  const [status, setStatus] = useState("Offline");
-  const [connected, setConnected] = useState(false);
-  const [runtimeRetryExhausted, setRuntimeRetryExhausted] = useState(false);
-  const [chatLoading, setChatLoading] = useState(false);
-  const [running, setRunning] = useState(false);
-  const [messages, storeMessages] = useState([]);
-  const messagesRef = useRef([]);
+  const [status, setStatus] = sessionStateField("status");
+  const [connected, setConnected] = sessionStateField("connected");
+  const [runtimeRetryExhausted, setRuntimeRetryExhausted] = sessionStateField("runtimeRetryExhausted");
+  const [chatLoading, setChatLoading] = sessionStateField("chatLoading");
+  const [running, setRunning] = sessionStateField("running");
+  const [messages, storeMessages] = sessionStateField("messages");
+  const messagesRef = conversationSession.ref("messagesRef", []);
   const setMessages = useCallback((update) => {
     const next = typeof update === "function" ? update(messagesRef.current) : update;
     messagesRef.current = next;
     storeMessages(next);
-  }, []);
-  const historyPageRef = useRef(null);
-  const [historyPage, setHistoryPage] = useState(null);
-  const olderRequestRef = useRef(null);
-  const [olderLoading, setOlderLoading] = useState(false);
-  const [olderError, setOlderError] = useState("");
-  const historyAnchorRef = useRef(null);
+  }, [conversationSession]);
+  const historyPageRef = conversationSession.ref("historyPageRef", null);
+  const [historyPage, setHistoryPage] = sessionStateField("historyPage");
+  const olderRequestRef = conversationSession.ref("olderRequestRef", null);
+  const [olderLoading, setOlderLoading] = sessionStateField("olderLoading");
+  const [olderError, setOlderError] = sessionStateField("olderError");
+  const historyAnchorRef = conversationSession.ref("historyAnchorRef", null);
   useLayoutEffect(() => {
     const anchor = historyAnchorRef.current;
     if (!anchor) return;
@@ -467,12 +501,13 @@ function App() {
       ? anchor.element.getBoundingClientRect().top - anchor.offset
       : anchor.viewport.scrollHeight - anchor.height;
     anchor.viewport.scrollTop = anchor.top + offset;
-  }, [messages]);
+    conversationSession.saveReadingPosition(anchor.viewport);
+  }, [conversationSession, messages]);
   const [briefTask, setBriefTask] = useState(null);
-  const [taskBrief, setTaskBrief] = useState(null);
-  const [composerDraft, setComposerDraft] = useState("");
-  const [composerRestoreRequest, setComposerRestoreRequest] = useState({ nonce: 0, value: "" });
-  const [approvalRequests, setApprovalRequests] = useState({});
+  const [taskBrief, setTaskBrief] = sessionStateField("taskBrief");
+  const [composerDraft, setComposerDraft] = sessionStateField("composerDraft");
+  const [composerRestoreRequest, setComposerRestoreRequest] = sessionStateField("composerRestoreRequest");
+  const [approvalRequests, setApprovalRequests] = sessionStateField("approvalRequests");
   const [creatorAgent, setCreatorAgent] = useState(DEFAULT_CREATOR_AGENT);
   const [sidebarPreference, setSidebarPreference] = useState("open");
   const [sidebarWidth, setSidebarWidth] = useState(DESKTOP_LAYOUT.sidebar.default);
@@ -482,16 +517,15 @@ function App() {
   const [windowLayoutReady, setWindowLayoutReady] = useState(false);
   const [windowContextReady, setWindowContextReady] = useState(false);
   const [windowStateRestored, setWindowStateRestored] = useState(false);
-  const composerDraftRef = useRef("");
+  const composerDraftRef = conversationSession.ref("composerDraftRef", "");
   const buyerProfile = buyerSession?.profile ?? EMPTY_PROFILE;
   const draftKey = JSON.stringify([buyerProfile.id || "", conversationId]);
-  const visibleDraftKeyRef = useRef(draftKey);
-  visibleDraftKeyRef.current = draftKey;
-  const draftSessionRef = useRef(null);
-  const submissionPreparingRef = useRef(false);
-  const draftTransitionRef = useRef(Promise.resolve());
-  const [draftState, setDraftState] = useState({ key: "", status: "loading", error: "" });
-  const [draftRetry, setDraftRetry] = useState(0);
+  const sessionDraftKeyRef = conversationSession.ref("sessionDraftKeyRef", draftKey);
+  sessionDraftKeyRef.current = draftKey;
+  const draftSessionRef = conversationSession.ref("draftSessionRef", null);
+  const submissionPreparingRef = conversationSession.ref("submissionPreparingRef", false);
+  const [draftState, setDraftState] = sessionStateField("draftState");
+  const [draftRetry, setDraftRetry] = sessionStateField("draftRetry");
   const draftEditable = draftState.key === draftKey && ["ready", "saving", "error"].includes(draftState.status)
     && draftSessionRef.current?.key === draftKey;
   const pendingSubmission = draftSessionRef.current?.key === draftKey ? draftSessionRef.current.session.snapshot().pending : null;
@@ -570,36 +604,12 @@ function App() {
   }, [conversationLibraryStatus]);
 
   useEffect(() => {
-    let cancelled = false;
-    setDraftState({ key: draftKey, status: "loading", error: "" });
-    const change = async () => {
-      if (draftSessionRef.current) {
-        await draftSessionRef.current.session.close();
-        draftSessionRef.current = null;
-      }
-      if (cancelled || !buyerProfile.id || !isServerConversationId(conversationId)) return;
-      const session = await openDraftSession(invokeTauri,
-        { accountId: buyerProfile.id, conversationId },
-        (status, error) => {
-          if (!cancelled && visibleDraftKeyRef.current === draftKey) {
-            setDraftState({ key: draftKey, status, error: error ? errorMessage(error) : "" });
-          }
-        });
-      draftSessionRef.current = { key: draftKey, session };
-      if (cancelled) return; // The next serialized transition will close it.
-      const draft = session.snapshot();
-      composerDraftRef.current = draft.text;
-      setComposerDraft(draft.text);
-      droppedFilesRef.current = draft.attachments;
-      storeDroppedFiles(draft.attachments);
-      setComposerRestoreRequest((current) => ({ nonce: current.nonce + 1, value: draft.text }));
-      setDraftState({ key: draftKey, status: "ready", error: "" });
-    };
-    draftTransitionRef.current = draftTransitionRef.current.catch(() => {}).then(change).catch((error) => {
-      if (!cancelled) setDraftState({ key: draftKey, status: "unavailable", error: errorMessage(error) });
+    if (!buyerProfile.id || !isServerConversationId(conversationId)) return;
+    void conversationSession.openDraft(invokeTauri).catch((error) => {
+      setDraftState({ key: draftKey, status: "unavailable", error: errorMessage(error) });
     });
-    return () => { cancelled = true; };
-  }, [draftKey, draftRetry]);
+    // Navigation retains the native draft lease and pending receipt owner.
+  }, [conversationSession, draftRetry]);
 
   useEffect(() => {
     if (!window.__TAURI_INTERNALS__) return;
@@ -607,13 +617,12 @@ function App() {
     let unlisten;
     void getCurrentWindow().onCloseRequested(async (event) => {
       event.preventDefault();
-      setDraftState((current) => ({ ...current, status: "loading", error: "" }));
+      setSessionCloseError("");
       try {
-        await draftTransitionRef.current;
-        await draftSessionRef.current?.session.close();
+        await sessionManager.closeAll();
         await getCurrentWindow().destroy();
       } catch (error) {
-        setDraftState((current) => ({ ...current, status: "error", error: errorMessage(error) }));
+        setSessionCloseError(errorMessage(error));
       }
     }).then((stop) => { if (disposed) stop(); else unlisten = stop; });
     return () => { disposed = true; unlisten?.(); };
@@ -626,7 +635,8 @@ function App() {
         textRevealSinkRef.current?.(assistantId, content);
       },
       shouldRevealImmediately: () => (
-        document.visibilityState !== "visible"
+        !sessionManager.isSelected(conversationSession)
+        || document.visibilityState !== "visible"
         || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
       )
     });
@@ -659,15 +669,8 @@ function App() {
     patchWindowContext({ workspaceGrant: grant });
   }
 
-  // Conversation windows are independent native contexts. Only the original
-  // main window may use the legacy profile-level run slot as a migration
-  // fallback; otherwise two windows can overwrite one another's recovery
-  // projection even though their native contexts are separate.
-  function setLegacyProfileActiveRun(value) {
-    // Runs are recovered from the Runtime Conversation snapshot, never local state.
-  }
-
   function patchWindowContext(patch = {}) {
+    if (!sessionManager.isSelected(conversationSession)) return;
     const next = {
       ...windowContextRef.current,
       ...patch
@@ -693,7 +696,7 @@ function App() {
   }
 
   function setComposerDraftValue(value) {
-    if (visibleDraftKeyRef.current !== draftKey) return;
+    if (sessionDraftKeyRef.current !== draftKey) return;
     const next = String(value ?? "");
     composerDraftRef.current = next;
     setComposerDraft(next);
@@ -701,7 +704,7 @@ function App() {
   }
 
   function setDroppedFiles(update) {
-    if (visibleDraftKeyRef.current !== draftKey) return;
+    if (sessionDraftKeyRef.current !== draftKey) return;
     const next = typeof update === "function" ? update(droppedFilesRef.current) : update;
     droppedFilesRef.current = next;
     storeDroppedFiles(next);
@@ -711,7 +714,7 @@ function App() {
   }
 
   function restoreComposerDraft(value) {
-    if (visibleDraftKeyRef.current !== draftKey) return;
+    if (sessionDraftKeyRef.current !== draftKey) return;
     const next = String(value ?? "");
     setComposerDraftValue(next);
     setComposerRestoreRequest((current) => ({
@@ -721,13 +724,8 @@ function App() {
   }
 
   function publishDraftSession(holder) {
-    if (!holder || draftSessionRef.current !== holder || visibleDraftKeyRef.current !== holder.key) return;
-    const draft = holder.session.snapshot();
-    composerDraftRef.current = draft.text;
-    setComposerDraft(draft.text);
-    droppedFilesRef.current = draft.attachments;
-    storeDroppedFiles(draft.attachments);
-    setComposerRestoreRequest((current) => ({ nonce: current.nonce + 1, value: draft.text }));
+    if (holder !== draftSessionRef.current) return;
+    conversationSession.publishDraft();
   }
 
   async function reconcilePendingSubmission() {
@@ -736,7 +734,7 @@ function App() {
     if (!pending) return "none";
     const result = await getConversationSubmission(serverUrl, buyerSessionRef.current?.accessToken,
       conversationBindingFor(), holder.session.scope.conversationId, pending.runId);
-    if (draftSessionRef.current !== holder || visibleDraftKeyRef.current !== holder.key) return "waiting";
+    if (draftSessionRef.current !== holder || sessionDraftKeyRef.current !== holder.key) return "waiting";
     const currentPending = holder.session.snapshot().pending;
     // A socket acknowledgement may have cleared this submission while the
     // receipt lookup was in flight. Never restore or overwrite it afterward.
@@ -751,7 +749,6 @@ function App() {
       if (activeRunRef.current?.runId === pending.runId) {
         activeRunRef.current = null;
         setRunning(false);
-        setLegacyProfileActiveRun(undefined);
         patchWindowContext({ activeRun: null });
       }
       return "retry";
@@ -768,11 +765,11 @@ function App() {
     const holder = draftSessionRef.current;
     try {
       const outcome = await reconcilePendingSubmission();
-      if (draftSessionRef.current !== holder || visibleDraftKeyRef.current !== holder?.key) return;
+      if (draftSessionRef.current !== holder || sessionDraftKeyRef.current !== holder?.key) return;
       setStatus(t(outcome === "retry" ? "submission.retryReady" : outcome === "rejected" ? "submission.rejected"
         : outcome === "accepted" ? "submission.accepted" : "submission.unknown"));
     } catch (error) {
-      if (draftSessionRef.current === holder && visibleDraftKeyRef.current === holder?.key) setStatus(errorMessage(error));
+      if (draftSessionRef.current === holder && sessionDraftKeyRef.current === holder?.key) setStatus(errorMessage(error));
     }
   }
 
@@ -780,12 +777,12 @@ function App() {
     const holder = draftSessionRef.current;
     try {
       if (await reconcilePendingSubmission() !== "rejected") return;
-      if (draftSessionRef.current !== holder || visibleDraftKeyRef.current !== holder?.key) return;
+      if (draftSessionRef.current !== holder || sessionDraftKeyRef.current !== holder?.key) return;
       // A terminal Run with no canonical user record did not accept this submission.
       await holder.session.restoreRejectedSubmission();
       publishDraftSession(holder);
     } catch (error) {
-      if (draftSessionRef.current === holder && visibleDraftKeyRef.current === holder?.key) setStatus(errorMessage(error));
+      if (draftSessionRef.current === holder && sessionDraftKeyRef.current === holder?.key) setStatus(errorMessage(error));
     }
   }
 
@@ -795,11 +792,11 @@ function App() {
     if (!holder?.session.snapshot().pending) return;
     let cancelled = false;
     void reconcilePendingSubmission().then((outcome) => {
-      if (cancelled || draftSessionRef.current !== holder || visibleDraftKeyRef.current !== holder.key) return;
+      if (cancelled || draftSessionRef.current !== holder || sessionDraftKeyRef.current !== holder.key) return;
       if (outcome === "rejected") setStatus(t("submission.rejected"));
       if (outcome === "retry") setStatus(t("submission.retryReady"));
     }).catch((error) => {
-      if (!cancelled && draftSessionRef.current === holder && visibleDraftKeyRef.current === holder.key) {
+      if (!cancelled && draftSessionRef.current === holder && sessionDraftKeyRef.current === holder.key) {
         setStatus(errorMessage(error));
       }
     });
@@ -809,8 +806,7 @@ function App() {
   }, [draftKey, draftEditable, connected, signedIn]);
 
   function handleViewportScroll(event) {
-    const next = Math.max(0, Number(event.currentTarget?.scrollTop) || 0);
-    viewportScrollTopRef.current = next;
+    conversationSession.saveReadingPosition(event.currentTarget);
     window.clearTimeout(viewportScrollPersistTimerRef.current);
     viewportScrollPersistTimerRef.current = window.setTimeout(() => {
       viewportScrollPersistTimerRef.current = null;
@@ -858,8 +854,13 @@ function App() {
       launchBinding
     );
     const mustRebindRuntime = entitlementRefreshNeedsReconnect(connectionConfigRef.current, selected);
+    for (const owned of sessionManager.values()) {
+      if (owned.scope.accountId && (owned.scope.accountId !== profileId
+        || !entitlements.some((item) => item.entitlement_id === owned.scope.entitlementId && item.status === "active"))) {
+        void owned.close().catch(() => {});
+      }
+    }
     if (mustRebindRuntime) {
-      disconnectRuntime();
       // A legacy Runtime may still expose the historical single transcript
       // route, but a new Conversation ID must always come from the Library.
       // Never mint an authoritative conversation id in the renderer.
@@ -869,7 +870,6 @@ function App() {
         : fallback;
       setConversationId(requestedConversationIdRef.current
         || restorableConversationId(savedConversationId, fallback));
-      setMessages([]);
     }
     setBuyerSession(session);
     setCreatorAgentEntitlements(entitlements);
@@ -898,6 +898,8 @@ function App() {
   }
 
   async function applyResolvedDesktopSession(result, options = {}) {
+    const epoch = options.authEpoch ?? authEpochRef.current;
+    if (epoch !== authEpochRef.current || authTeardownRef.current) return;
     if (window.__TAURI_INTERNALS__) {
       try {
         const migration = await importLegacyProfileSettings({
@@ -912,6 +914,13 @@ function App() {
     } else {
       setSettingsMigrationNotice("");
     }
+    if (epoch !== authEpochRef.current || authTeardownRef.current) return;
+    await sessionManager.closeAll();
+    if (epoch !== authEpochRef.current || authTeardownRef.current) return;
+    sessionManager.endTeardown();
+    entitlementRefreshRef.current = false;
+    setEntitlementRefreshing(false);
+    buyerSessionRef.current = result.session;
     if (result.state === "unsupported-role") {
       applyUnsupportedRoleSession(result.session);
       return;
@@ -920,9 +929,12 @@ function App() {
   }
 
   function resetToSignedOut() {
-    disconnectRuntime();
-    void clearNativeToolContext();
+    authEpochRef.current++;
+    sessionManager.beginTeardown();
+    buyerSessionRef.current = null;
+    void sessionManager.closeAll().catch((error) => setSignInError(errorMessage(error)));
     activeRunRef.current = null;
+    workspaceRestoredAccountRef.current = "";
     setBuyerSession(null);
     setAuthState("signed-out");
     setCreatorAgentEntitlements([]);
@@ -999,32 +1011,31 @@ function App() {
     };
   }, [buyerSession?.accessToken]);
 
-  async function synchronizeNativeToolContext(accessSnapshot, taskId) {
+  async function synchronizeNativeToolContext(accessSnapshot, taskId, runId) {
     const workspaceGrantId = String(accessSnapshot?.workspaceGrantId || "").trim();
     if (!workspaceGrantId) throw new Error("Choose a workspace folder before starting a task.");
-    return invokeTauri("set_window_tool_context", {
-      taskId,
-      workspaceGrantId,
-      permissionPolicy: accessSnapshot.permissionMode
+    return conversationSession.registerNativeContext(invokeTauri, {
+      conversationId: taskId, runId, workspaceGrantId, permissionPolicy: accessSnapshot.permissionMode
     });
   }
 
-  async function clearNativeToolContext() {
-    try {
-      await invokeTauri("clear_window_tool_context");
-    } catch {
-      // The process may already be closing. Rust also clears per-window
-      // authority on WindowEvent::Destroyed.
-    }
+  async function clearSessionNativeToolContexts() {
+    await conversationSession.clearNativeContexts(invokeTauri);
   }
 
   async function clearSavedSession(session, clearPromise) {
+    const ownsTeardown = !authTeardownRef.current;
+    authTeardownRef.current = true;
+    sessionManager.beginTeardown();
+    authEpochRef.current++;
     try {
       await (clearPromise ?? clearAuthSession(session, authStorageRef.current));
     } catch {
       resetToSignedOut();
       setSignInError("Hatch couldn't clear the saved sign-in from this Mac. Sign in again to replace it.");
       return false;
+    } finally {
+      if (ownsTeardown) authTeardownRef.current = false;
     }
     resetToSignedOut();
     return true;
@@ -1032,6 +1043,7 @@ function App() {
 
   useEffect(() => {
     let cancelled = false;
+    const authEpoch = authEpochRef.current;
     async function bootstrapAuth() {
       if (window.__TAURI_INTERNALS__) {
         try {
@@ -1041,21 +1053,22 @@ function App() {
         }
       }
       await settingsStoreRef.current.load();
-      if (cancelled) return;
+      if (cancelled || authEpoch !== authEpochRef.current) return;
       setLanguagePreference(normalizeLanguagePreference(
         settingsStoreRef.current.getApp("language", SYSTEM_LANGUAGE)
       ));
       setSettingsReady(true);
       const savedSession = await loadSavedAuthSession(authStorageRef.current);
+      if (cancelled || authEpoch !== authEpochRef.current) return;
       if (!savedSession) {
         setAuthState("signed-out");
         return;
       }
       try {
         const result = await resolveDesktopSession(savedSession, DEFAULT_AUTH_URL);
-        if (!cancelled) await applyResolvedDesktopSession(result);
+        if (!cancelled) await applyResolvedDesktopSession(result, { authEpoch });
       } catch (error) {
-        if (cancelled) return;
+        if (cancelled || authEpoch !== authEpochRef.current) return;
         if (isAuthInvalidError(error)) {
           const cleared = await clearSavedSession(savedSession);
           if (cleared) setSignInError("");
@@ -1071,12 +1084,16 @@ function App() {
   }, [bootstrapAttempt]);
 
   async function refreshEntitlements({ startup = false, preserveCurrent = true } = {}) {
-    if (!buyerSession?.accessToken || entitlementRefreshRef.current) return;
+    if (authTeardownRef.current || !buyerSession?.accessToken || entitlementRefreshRef.current) return;
+    const epoch = authEpochRef.current;
+    const current = () => epoch === authEpochRef.current && !authTeardownRef.current
+      && buyerSessionRef.current?.accessToken === buyerSession.accessToken;
     entitlementRefreshRef.current = true;
     setEntitlementRefreshing(true);
     lastEntitlementRefreshRef.current = Date.now();
     try {
       const entitlements = await fetchPurchasedCreatorAgents(DEFAULT_AUTH_URL, buyerSession.accessToken);
+      if (!current()) return;
       applySignedInSession(buyerSession, entitlements, { preserveCurrent });
       // A successful entitlement refresh is also evidence that the service is
       // reachable again. Re-run a previously network-failed Library request
@@ -1088,8 +1105,9 @@ function App() {
         setConversationLibraryRetryNonce((current) => current + 1);
       }
     } catch (error) {
+      if (!current()) return;
       if (isAuthInvalidError(error)) {
-        await clearSavedSession(buyerSession);
+        await signOut();
         return;
       }
       if (startup) {
@@ -1100,8 +1118,10 @@ function App() {
         setStatus("Couldn't refresh your Agents. Try again when you're online.");
       }
     } finally {
-      entitlementRefreshRef.current = false;
-      setEntitlementRefreshing(false);
+      if (epoch === authEpochRef.current) {
+        entitlementRefreshRef.current = false;
+        setEntitlementRefreshing(false);
+      }
     }
   }
 
@@ -1321,12 +1341,7 @@ function App() {
       let nextId = requestedServerConversation || savedServerConversation || nextConversations[0]?.id || "";
       if (requestId !== conversationLibraryRequestRef.current) return;
       if (nextId && nextId !== conversationId) {
-        disconnectRuntime();
-        conversationCursorRef.current = 0;
-        setMessages([]);
-        await restoreTaskLocalSettings(nextId);
-        setConversationId(nextId);
-        setConversationIdForEntitlement(buyerProfile.id, selectedEntitlementId, nextId);
+        await activateConversation(nextId);
       }
       if (!nextId && !requestedServerConversation) {
         setBriefTask(newBriefTask());
@@ -1335,11 +1350,12 @@ function App() {
       } else if (nextId) {
         setBriefTask(null);
         const selectedConversation = nextConversations.find((item) => item.id === nextId);
-        setTaskBrief(selectedConversation?.brief_snapshot ?? null);
-        taskBriefRef.current = selectedConversation?.brief_snapshot ?? null;
-        pendingTaskStartRef.current = requestedTaskStartRef.current && nextId === requestedServerConversation
-          ? nextId
-          : "";
+        const targetSession = sessionForConversation(nextId);
+        targetSession.set("taskBrief", selectedConversation?.brief_snapshot ?? null);
+        targetSession.ref("taskBriefRef").current = selectedConversation?.brief_snapshot ?? null;
+        if (requestedTaskStartRef.current && nextId === requestedServerConversation) {
+          targetSession.ref("pendingTaskStartRef", "").current = nextId;
+        }
       }
       if (requested && isServerConversationId(requested) && !requestedServerConversation) {
         setConversationLibraryError("That Conversation is not available for the selected Creator Agent.");
@@ -1381,12 +1397,7 @@ function App() {
   }, [buyerSession?.accessToken, conversationLibraryRetryNonce, selectedEntitlementId, signedIn, windowContextReady]);
 
   function isCurrentRuntimeTransport(socket, requestToken) {
-    return Boolean(
-      socket
-      && socketRef.current === socket
-      && connectionTokenRef.current === requestToken
-      && !intentionalDisconnectRef.current
-    );
+    return conversationSession.isTransport(socket, requestToken);
   }
 
   function sendRuntimeMessage(socket, requestToken, message) {
@@ -1401,31 +1412,16 @@ function App() {
 
   useEffect(() => {
     const flushHiddenText = () => {
-      if (document.visibilityState !== "visible") textRevealRef.current?.flush();
+      if (document.visibilityState !== "visible") {
+        for (const session of sessionManager.values()) session.ref("textRevealRef").current?.flush();
+      }
     };
     document.addEventListener("visibilitychange", flushHiddenText);
-    return () => {
-      document.removeEventListener("visibilitychange", flushHiddenText);
-      textRevealRef.current?.discard();
-    };
+    return () => document.removeEventListener("visibilitychange", flushHiddenText);
   }, []);
 
-  const send = useCallback((message) => {
-    const socket = socketRef.current;
-    return sendRuntimeMessage(socket, connectionTokenRef.current, message);
-  }, []);
-
-  const cancelRun = useCallback(async () => {
-    const activeRun = activeRunRef.current;
-    if (!activeRun) return;
-    send({
-      type: "turn.cancel",
-      run_id: activeRun.runId,
-      reason: "user_requested"
-    });
-    const localToolsStopped = await cancelPendingLocalTools("user_requested", activeRun.runId);
-    setStatus(localToolsStopped ? "Cancelling" : "Couldn't confirm that the local tool stopped");
-  }, [send]);
+  const send = useCallback((message) => conversationSession.send(message), [conversationSession]);
+  const cancelRun = useCallback(() => conversationSession.cancel(), [conversationSession]);
 
   const resolveToolApproval = useCallback((toolCallId, approved) => {
     const resolver = approvalResolversRef.current.get(toolCallId);
@@ -1444,7 +1440,7 @@ function App() {
       };
     });
     resolver(approved);
-  }, []);
+  }, [conversationSession]);
 
   const sendUserMessage = useCallback(async (appendMessage) => {
     if (!draftEditable || submissionPreparingRef.current) return;
@@ -1454,11 +1450,11 @@ function App() {
     const submittedTextVersion = submittingSession.textVersion();
     try { await submittingSession.flush(); }
     catch (error) {
-      if (visibleDraftKeyRef.current === draftKey) restoreComposerDraft(submittingSession.snapshot().text);
+      if (sessionDraftKeyRef.current === draftKey) restoreComposerDraft(submittingSession.snapshot().text);
       setStatus(errorMessage(error));
       return;
     }
-    if (visibleDraftKeyRef.current !== draftKey) return;
+    if (sessionDraftKeyRef.current !== draftKey) return;
     if (!runtimeCapabilitiesRef.current.messageAcceptance) {
       restoreComposerDraft(submittingSession.snapshot().text);
       setStatus("Update Runtime before sending: durable message acceptance is required.");
@@ -1469,7 +1465,7 @@ function App() {
       publishDraftSession(draftSessionRef.current);
       return;
     }
-    if (visibleDraftKeyRef.current !== draftKey || draftSessionRef.current?.session !== submittingSession) return;
+    if (sessionDraftKeyRef.current !== draftKey || draftSessionRef.current?.session !== submittingSession) return;
     const socket = socketRef.current;
     if (!conversationReady || !socket || socket.readyState !== WebSocket.OPEN) {
       setStatus("Service unavailable. Your message will stay here.");
@@ -1484,7 +1480,7 @@ function App() {
     // must always target a server-issued Conversation from the Library; the
     // legacy history endpoint remains available only so older sessions can
     // be viewed while the Runtime rolls forward.
-    const activeConversationId = conversationId.trim();
+    const activeConversationId = conversationSession.scope.conversationId;
     if (!isServerConversationId(activeConversationId)) {
       setStatus(conversationLibraryStatus === "loading"
         ? "Preparing your Conversation Library…"
@@ -1500,8 +1496,10 @@ function App() {
     // the Runtime may request a local tool; the renderer never sends a path or
     // an `approved_by_user` flag to authorize the tool itself.
     const accessSnapshot = createTurnAccessSnapshot(workspaceGrant?.grant_id, workspace, permissionMode);
+    const submissionRunId = savedPending?.runId ?? `run_${stableRandomId()}`;
+    const submissionMessageId = savedPending?.clientMessageId ?? `message_${stableRandomId()}`;
     try {
-      await synchronizeNativeToolContext(accessSnapshot, activeConversationId);
+      await synchronizeNativeToolContext(accessSnapshot, activeConversationId, submissionRunId);
     } catch (error) {
       restoreComposerDraft(submittingSession.snapshot().text);
       setStatus(`Couldn't prepare native workspace access: ${errorMessage(error)}`);
@@ -1523,9 +1521,9 @@ function App() {
       setStatus("Update Runtime before sending: local attachment references are required. Your draft is preserved.");
       return;
     }
-    if (visibleDraftKeyRef.current !== draftKey) return;
+    if (sessionDraftKeyRef.current !== draftKey) return;
     const pending = savedPending ?? await submittingSession.stageSubmission({
-      runId: `run_${stableRandomId()}`, clientMessageId: `message_${stableRandomId()}`,
+      runId: submissionRunId, clientMessageId: submissionMessageId,
       text: content, attachments: submissionFiles, textRevision: submittedTextVersion
     });
     const runId = pending.runId;
@@ -1542,7 +1540,7 @@ function App() {
       }
     };
     await submittingSession.markSubmissionUnknown();
-    if (visibleDraftKeyRef.current !== draftKey) return;
+    if (sessionDraftKeyRef.current !== draftKey) return;
     workspaceRef.current = accessSnapshot.displayPath;
     workspaceGrantRef.current = workspaceGrant;
     permissionRef.current = accessSnapshot.permissionMode;
@@ -1559,22 +1557,12 @@ function App() {
       accessSnapshot,
       timing: { questionSentAt: startedAt }
     };
-    setLegacyProfileActiveRun({
-      runId,
-      clientMessageId,
-      assistantId,
-      startedAt,
-      conversationId,
-      accessSnapshot,
-      timing: { questionSentAt: startedAt }
-    });
     patchWindowContext({ activeRun: activeRunRef.current });
     setRunning(true);
     setStatus("Running");
     if (!send(outboundMessage)) {
       // The durable native copy remains readable after a failed submission.
       activeRunRef.current = null;
-      setLegacyProfileActiveRun(undefined);
       patchWindowContext({ activeRun: null });
       setRunning(false);
       restoreComposerDraft(submittingSession.snapshot().text);
@@ -1600,7 +1588,7 @@ function App() {
     } finally {
       submissionPreparingRef.current = false;
     }
-  }, [buyerProfile.id, conversationId, conversationLibraryStatus, conversationReady, draftEditable, droppedFiles, permissionMode, send, workspace, workspaceGrant]);
+  }, [conversationSession, buyerProfile.id, conversationId, conversationLibraryStatus, conversationReady, draftEditable, droppedFiles, permissionMode, send, workspace, workspaceGrant]);
 
   async function sendTaskStartIfNeeded(sourceSocket = socketRef.current, sourceToken = connectionTokenRef.current) {
     const targetConversationId = pendingTaskStartRef.current;
@@ -1609,14 +1597,14 @@ function App() {
     if (taskStartSentRef.current.has(targetConversationId) || activeRunRef.current) return false;
     if (!isCurrentRuntimeTransport(sourceSocket, sourceToken) || sourceSocket?.readyState !== WebSocket.OPEN) return false;
     const accessSnapshot = createTurnAccessSnapshot(workspaceGrantRef.current?.grant_id, workspaceRef.current, permissionRef.current);
+    const runId = `run_${stableRandomId()}`;
+    const clientMessageId = `message_${stableRandomId()}`;
     try {
-      await synchronizeNativeToolContext(accessSnapshot, targetConversationId);
+      await synchronizeNativeToolContext(accessSnapshot, targetConversationId, runId);
     } catch (error) {
       setStatus(`Couldn't prepare native workspace access: ${errorMessage(error)}`);
       return false;
     }
-    const runId = `run_${stableRandomId()}`;
-    const clientMessageId = `message_${stableRandomId()}`;
     const outboundMessage = {
       type: "client.message",
       run_id: runId,
@@ -1636,21 +1624,11 @@ function App() {
       accessSnapshot,
       timing: { questionSentAt: startedAt }
     };
-    setLegacyProfileActiveRun({
-      runId,
-      clientMessageId,
-      assistantId,
-      startedAt,
-      conversationId: targetConversationId,
-      accessSnapshot,
-      timing: { questionSentAt: startedAt }
-    });
     patchWindowContext({ activeRun: activeRunRef.current });
     setRunning(true);
     setStatus("Starting your task…");
     if (!sendRuntimeMessage(sourceSocket, sourceToken, outboundMessage)) {
       activeRunRef.current = null;
-      setLegacyProfileActiveRun(undefined);
       patchWindowContext({ activeRun: null });
       setRunning(false);
       return false;
@@ -1743,6 +1721,9 @@ function App() {
         ? 0
         : windowContextRef.current.conversationCursor;
       viewportScrollTopRef.current = windowContextRef.current.scrollTop;
+      if (windowContextRef.current.scrollTop > 0) {
+        conversationSession.set("readingPosition", { top: windowContextRef.current.scrollTop, followTail: false });
+      }
       setWindowContextReady(true);
     }).catch(() => {
       if (!cancelled) {
@@ -1779,6 +1760,8 @@ function App() {
 
   useEffect(() => {
     if (!settingsReady || !windowContextReady || !signedIn || !buyerSession?.profile?.id) return;
+    if (workspaceRestoredAccountRef.current === buyerSession.profile.id) return;
+    workspaceRestoredAccountRef.current = buyerSession.profile.id;
     let cancelled = false;
     const profileId = buyerSession.profile.id;
     setWindowStateRestored(false);
@@ -1818,7 +1801,7 @@ function App() {
       ? Math.max(0, Number(windowContext.scrollTop))
       : 0;
     setWorkspaceGranted(false);
-    setConversationId(requestedConversationIdRef.current || windowConversationId || savedConversationId);
+    // Conversation selection is owned by Library hydration, not workspace restoration.
     permissionRef.current = nextPermission;
     setPermissionMode(nextPermission);
     if (restorableRun) {
@@ -1886,7 +1869,7 @@ function App() {
       if (!cancelled) setWindowStateRestored(true);
     });
     return () => { cancelled = true; };
-  }, [buyerProfile.id, buyerSession?.profile?.id, selectedEntitlementId, settingsReady, signedIn, windowContextReady]);
+  }, [buyerProfile.id, buyerSession?.profile?.id, settingsReady, signedIn, windowContextReady]);
 
   // Persist only after the native window context has been read and the
   // workspace restore attempt has completed. This prevents the first React
@@ -1905,14 +1888,10 @@ function App() {
     });
   }, [conversationId, permissionMode, signedIn, windowContextReady, windowStateRestored, workspaceDraft, workspaceGrant]);
 
-  useEffect(() => {
-    if (!windowContextReady || !windowStateRestored || !signedIn) return undefined;
-    const applyScroll = () => {
-      if (viewportRef.current) viewportRef.current.scrollTop = viewportScrollTopRef.current;
-    };
-    const frame = window.requestAnimationFrame(applyScroll);
-    return () => window.cancelAnimationFrame(frame);
-  }, [messages, signedIn, windowContextReady, windowStateRestored]);
+  useLayoutEffect(() => {
+    if (!signedIn || olderLoading || historyAnchorRef.current) return;
+    conversationSession.restoreReadingPosition(viewportRef.current);
+  }, [conversationSession, messages, signedIn, olderLoading]);
 
   useEffect(() => () => {
     window.clearTimeout(viewportScrollPersistTimerRef.current);
@@ -2071,12 +2050,9 @@ function App() {
     return undefined;
   }, [applicationZoom, windowLayoutReady]);
 
+  conversationSession.clearContexts = clearSessionNativeToolContexts;
   useEffect(() => () => {
-    intentionalDisconnectRef.current = true;
-    window.clearTimeout(reconnectTimerRef.current);
-    reconnectTimerRef.current = null;
-    socketRef.current?.close();
-    void cancelPendingLocalTools("transport_failure");
+    void sessionManager.closeAll().catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -2085,7 +2061,8 @@ function App() {
     const entitlement = creatorAgentEntitlements.find((item) => item.entitlement_id === selectedEntitlementId);
     const desiredBinding = runtimeBindingForEntitlement(entitlement);
     const hasConnection = connectedRef.current || socketRef.current || connectingRef.current;
-    if (hasConnection && runtimeBindingMatches(connectionConfigRef.current, desiredBinding)) return;
+    if (hasConnection && connectionConfigRef.current?.conversationId === conversationId
+      && runtimeBindingMatches(connectionConfigRef.current, desiredBinding)) return;
     if (hasConnection) disconnectRuntime();
     void connectRuntime({
       workspaceGrant,
@@ -2094,10 +2071,10 @@ function App() {
       creatorId: desiredBinding?.creatorId,
       preserveMessages: true
     });
-  }, [connected, conversationId, conversationLibraryStatus, creatorAgentEntitlements, selectedEntitlementId, signedIn, workspaceGrant, workspaceGranted]);
+  }, [conversationSession, connected, conversationId, conversationLibraryStatus, creatorAgentEntitlements, selectedEntitlementId, signedIn, workspaceGrant, workspaceGranted]);
 
   function scheduleRuntimeReconnect() {
-    if (intentionalDisconnectRef.current || reconnectTimerRef.current || !connectionConfigRef.current) return;
+    if (conversationSession.disposed || intentionalDisconnectRef.current || reconnectTimerRef.current || !connectionConfigRef.current) return;
     const attempt = reconnectAttemptRef.current;
     if (attempt >= MAX_AUTOMATIC_RUNTIME_RETRIES) {
       setRuntimeRetryExhausted(true);
@@ -2145,7 +2122,6 @@ function App() {
     textRevealRef.current?.flush(active.runId);
     activeRunRef.current = null;
     setRunning(false);
-    setLegacyProfileActiveRun(undefined);
     patchWindowContext({ activeRun: null });
   }
 
@@ -2219,7 +2195,7 @@ function App() {
         config.conversationId, { beforeCursor: page.before_cursor }));
       if (!isCurrent()) return;
       if (result.has_more && result.before_cursor === page.before_cursor) throw new Error("History cursor did not advance.");
-      const viewport = viewportRef.current;
+      const viewport = sessionManager.isSelected(conversationSession) ? viewportRef.current : null;
       if (viewport) {
         const element = [...viewport.querySelectorAll(".chat-message")].find((node) => node.getBoundingClientRect().bottom > viewport.getBoundingClientRect().top);
         historyAnchorRef.current = { viewport, element, token: request.token,
@@ -2239,11 +2215,15 @@ function App() {
   }
 
   async function connectRuntime(connection = {}) {
-    if (connectedRef.current || socketRef.current || connectingRef.current) return;
+    if (conversationSession.disposed || connectedRef.current || socketRef.current || connectingRef.current) return;
     const targetServerUrl = connection.serverUrl || serverUrl;
     const targetWorkspaceGrant = normalizeWorkspaceGrant(connection.workspaceGrant) || workspaceGrant;
-    const targetConversationId = connection.conversationId || conversationId;
-    const targetEntitlementId = connection.entitlementId || selectedEntitlementId;
+    const targetConversationId = conversationSession.scope.conversationId;
+    const targetEntitlementId = conversationSession.scope.entitlementId;
+    if ((connection.conversationId && connection.conversationId !== targetConversationId)
+      || (connection.entitlementId && connection.entitlementId !== targetEntitlementId)) {
+      throw new Error("Cannot attach another Conversation or Agent to this session");
+    }
     const selectedEntitlement = creatorAgentEntitlements.find((item) => item.entitlement_id === targetEntitlementId);
     const targetProductId = selectedEntitlement?.product_id;
     const targetCreatorId = selectedEntitlement?.creator_id;
@@ -2375,18 +2355,19 @@ function App() {
     // Capabilities are connection-scoped. Treat them as unavailable until
     // this socket's authenticated session explicitly advertises them.
     runtimeCapabilitiesRef.current = { richAssets: false };
-    socket.addEventListener("open", () => {
+    conversationSession.attachSocket(socket, requestToken, {
+    open: () => {
       if (socketRef.current !== socket) return;
       socket.send(JSON.stringify({
         type: "client.hello",
         protocol_version: PROTOCOL_VERSION,
         auth_token: buyerSession.accessToken,
         entitlement_id: targetEntitlementId,
-        client_version: "0.1.29",
+        client_version: "0.1.30",
         local_tools: [...PLATFORM_LOCAL_TOOLS],
       }));
-    });
-    socket.addEventListener("message", (event) => {
+    },
+    message: (event) => {
       if (socketRef.current !== socket) return;
       try {
         void handleRuntimeMessage(JSON.parse(event.data), socket, requestToken).catch(() => {
@@ -2402,8 +2383,8 @@ function App() {
           setStatus("Connection sent an invalid response. Restoring your session…");
         }
       }
-    });
-    socket.addEventListener("error", () => {
+    },
+    error: () => {
       if (socketRef.current !== socket) return;
       setStatus("Connection problem. Your work has been kept.");
       void cancelPendingLocalTools("transport_failure").then((stopped) => {
@@ -2411,8 +2392,8 @@ function App() {
           setStatus(LOCAL_TOOL_STOP_UNCONFIRMED);
         }
       });
-    });
-    socket.addEventListener("close", () => {
+    },
+    close: () => {
       if (socketRef.current !== socket) return;
       textRevealRef.current?.flush(activeRunRef.current?.runId);
       rejectPendingApprovals();
@@ -2433,6 +2414,7 @@ function App() {
         setChatLoading(false);
         setStatus("Offline");
       }
+    }
     });
   }
 
@@ -2464,12 +2446,8 @@ function App() {
   async function handleRuntimeMessage(message, sourceSocket = socketRef.current, sourceToken = connectionTokenRef.current) {
     if (!isCurrentRuntimeTransport(sourceSocket, sourceToken)) return;
     if (message.type === "message.accepted") {
-      const holder = draftSessionRef.current;
-      if (holder?.key === visibleDraftKeyRef.current) {
-        try {
-          if (await holder.session.acceptSubmission(message)) publishDraftSession(holder);
-        } catch (error) { setStatus(errorMessage(error)); }
-      }
+      try { await conversationSession.acceptSubmission(message); }
+      catch (error) { setStatus(errorMessage(error)); }
       return;
     }
     if (message.type === "session.ready") {
@@ -2479,15 +2457,15 @@ function App() {
         localFileReferences: message.runtime_capabilities?.local_file_references === true
       };
       const selectedEntitlement = creatorAgentEntitlements.find(
-        (entitlement) => entitlement.entitlement_id === selectedEntitlementId
+        (entitlement) => entitlement.entitlement_id === conversationSession.scope.entitlementId
       );
       const nextAgent = creatorAgentFromBoundSession(
         message,
         selectedEntitlement,
         creatorAgent
       );
-      setCreatorAgent(nextAgent);
-      if (nextAgent.briefSpec) {
+      if (sessionManager.isSelected(conversationSession)) setCreatorAgent(nextAgent);
+      if (sessionManager.isSelected(conversationSession) && nextAgent.briefSpec) {
         setBriefTask((current) => {
           if (!current || current.status !== "editing") return current;
           const answers = Object.fromEntries(nextAgent.briefSpec.fields.map((field) => [
@@ -2602,6 +2580,7 @@ function App() {
       const sourceRun = activeRunRef.current;
       if (!message.run_id || !sourceRun || sourceRun.runId !== message.run_id) return;
       const localToolsStopped = await cancelPendingLocalTools("turn_completed", message.run_id);
+      if (localToolsStopped) await conversationSession.clearNativeContext(invokeTauri, message.run_id);
       if (!isCurrentRuntimeTransport(sourceSocket, sourceToken) || activeRunRef.current?.runId !== sourceRun.runId) return;
       const projection = projectApprovedRuntimeStream(sourceRun, message);
       if (!projection) return;
@@ -2620,7 +2599,6 @@ function App() {
           Date.now()
         );
         activeRunRef.current = null;
-        setLegacyProfileActiveRun(undefined);
         patchWindowContext({ activeRun: null });
         setRunning(false);
         setStatus(statusAfterLocalToolStop("Completed", localToolsStopped));
@@ -2650,6 +2628,7 @@ function App() {
         return;
       }
       const localToolsStopped = await cancelPendingLocalTools("turn_failed", failedRunId);
+      if (localToolsStopped) await conversationSession.clearNativeContext(invokeTauri, failedRunId);
       if (!isCurrentRuntimeTransport(sourceSocket, sourceToken) || activeRunRef.current?.runId !== sourceRun.runId) return;
       const activeRun = sourceRun;
       const text = `Run failed: ${message.error?.message || "Unknown error"}`;
@@ -2664,7 +2643,6 @@ function App() {
         ]);
       }
       activeRunRef.current = null;
-      setLegacyProfileActiveRun(undefined);
       patchWindowContext({ activeRun: null });
       setRunning(false);
       setStatus(statusAfterLocalToolStop("Failed", localToolsStopped));
@@ -2713,126 +2691,13 @@ function App() {
   }
 
   function invokeLocalToolCall(message, isTransportCurrent = () => true) {
-    const request = { ...message };
-    const deadlineMs = localToolTransportDeadlineMs(request);
-    return new Promise((resolve, reject) => {
-      let settled = false;
-      let cancellationPromise = null;
-      let pollTimer;
-      let deadlineTimer;
-      const finish = (callback, value) => {
-        if (settled) return;
-        settled = true;
-        window.clearTimeout(pollTimer);
-        window.clearTimeout(deadlineTimer);
-        approvalResolversRef.current.delete(request.tool_call_id);
-        if (pendingLocalToolsRef.current.get(request.tool_call_id)?.request === request) {
-          pendingLocalToolsRef.current.delete(request.tool_call_id);
-        }
-        callback(value);
-      };
-      const cancel = (reason) => {
-        if (settled) return Promise.resolve(true);
-        if (cancellationPromise) return cancellationPromise;
-        cancellationPromise = (async () => {
-          try {
-            const acknowledged = await invokeTauri("cancel_tool_call", {
-              toolCallId: request.tool_call_id
-            });
-            if (!acknowledged) {
-              const completed = await invokeTauri("poll_tool_call", {
-                toolCallId: request.tool_call_id
-              });
-              if (completed) {
-                finish(resolve, completed);
-                return true;
-              }
-              const missing = new Error(`Native local tool job was not found: ${request.tool_call_id}`);
-              missing.code = "local_tool_cancel_failed";
-              throw missing;
-            }
-            const completed = await invokeTauri("poll_tool_call", {
-              toolCallId: request.tool_call_id
-            }).catch(() => null);
-            // A non-shell file operation may commit between the cancel signal
-            // and its next safe point. Preserve that honest native result
-            // instead of falsely claiming the operation was stopped.
-            const committed = committedResultAfterCancellation(completed);
-            if (committed) {
-              finish(resolve, committed);
-              return true;
-            }
-            finish(reject, localToolCancellationError(request, reason, deadlineMs));
-            return true;
-          } catch (error) {
-            const cancellationError = error instanceof Error ? error : new Error(errorMessage(error));
-            if (!cancellationError.code) cancellationError.code = "local_tool_cancel_failed";
-            finish(reject, cancellationError);
-            throw cancellationError;
-          }
-        })();
-        return cancellationPromise;
-      };
-      const poll = async () => {
-        if (settled) return;
-        try {
-          const result = await invokeTauri("poll_tool_call", {
-            toolCallId: request.tool_call_id
-          });
-          if (result) {
-            finish(resolve, result);
-            return;
-          }
-        } catch (error) {
-          finish(reject, error);
-          return;
-        }
-        pollTimer = window.setTimeout(poll, 100);
-      };
-
-      pendingLocalToolsRef.current.set(request.tool_call_id, {
-        request,
-        runId: request.run_id,
-        cancel
-      });
-      deadlineTimer = window.setTimeout(() => {
-        void cancel("timeout").catch(() => {});
-      }, deadlineMs);
-
-      invokeTauri("execute_tool_call", { request }).then((submission) => {
-        if (!isTransportCurrent()) {
-          void cancel("transport_failure").catch(() => {});
-          return;
-        }
-        if (submission?.status === "approval_required") {
-          // The visual inline gate is only a projection of the native pending
-          // record. The renderer cannot manufacture approval metadata; its
-          // action names an already-recorded call in this WebviewWindow.
-          void requestToolApproval(request).then(async (approved) => {
-            if (!isTransportCurrent()) {
-              finish(reject, localToolCancellationError(request, "transport_failure", deadlineMs));
-              return;
-            }
-            try {
-              await invokeTauri(approved ? "approve_pending_tool_call" : "deny_pending_tool_call", {
-                toolCallId: request.tool_call_id
-              });
-            } catch (error) {
-              finish(reject, error);
-            }
-          });
-        }
-        poll();
-      }).catch((error) => finish(reject, error));
+    return conversationSession.executeTool(message, {
+      invoke: invokeTauri, isTransportCurrent, requestApproval: requestToolApproval
     });
   }
 
   async function cancelPendingLocalTools(reason, runId = null) {
-    const pending = [...pendingLocalToolsRef.current.values()]
-      .filter((entry) => !runId || entry.runId === runId);
-    if (pending.length === 0) return true;
-    const outcomes = await Promise.allSettled(pending.map((entry) => entry.cancel(reason)));
-    return outcomes.every((outcome) => outcome.status === "fulfilled");
+    return conversationSession.cancelTools(reason, runId);
   }
 
   async function grantWorkspace() {
@@ -2899,8 +2764,7 @@ function App() {
   }
 
   function mergeDroppedFiles(incoming) {
-    if (draftSessionRef.current?.key !== visibleDraftKeyRef.current) {
-      setStatus(t("draft.loading"));
+    if (draftSessionRef.current?.key !== sessionDraftKeyRef.current) {
       return [];
     }
     const files = Array.isArray(incoming) ? incoming.filter(Boolean) : [];
@@ -2939,7 +2803,7 @@ function App() {
         result = await invokeTauri("pick_native_drop_files");
         return Array.isArray(result?.files) ? result.files.map(normalizeNativeDropFile).filter(Boolean) : [];
       });
-      if (visibleDraftKeyRef.current !== holder.key) return;
+      if (sessionDraftKeyRef.current !== holder.key) return;
       droppedFilesRef.current = draft.attachments;
       storeDroppedFiles(draft.attachments);
       const message = nativeDropStatus(result?.files, result?.rejectedFiles);
@@ -2969,7 +2833,7 @@ function App() {
         if (!saved) throw new Error("Native attachment import returned an invalid reference.");
         return [saved];
       });
-      if (visibleDraftKeyRef.current !== holder.key) return;
+      if (sessionDraftKeyRef.current !== holder.key) return;
       droppedFilesRef.current = draft.attachments;
       storeDroppedFiles(draft.attachments);
       setStatus(mediaType.startsWith("image/") ? "Pasted image ready" : "Pasted file ready");
@@ -3041,11 +2905,7 @@ function App() {
     setStatus(`Permission updated for the next turn: ${permissionPolicyLabel(nextMode)}`);
   }
 
-  async function createLibraryConversation({ allowActiveRun = false, briefAnswers = undefined, purpose = "create" } = {}) {
-    if (activeRunRef.current && !allowActiveRun) {
-      setStatus("Stop or close the active task before starting another conversation.");
-      return "";
-    }
+  async function createLibraryConversation({ briefAnswers = undefined, purpose = "create" } = {}) {
     const binding = conversationBindingFor();
     if (!binding || !buyerSession?.accessToken) {
       setStatus("Choose a Creator Agent before starting a conversation.");
@@ -3082,11 +2942,7 @@ function App() {
   }
 
   async function startNewConversation() {
-    if (shouldOpenNewConversationInWindow(activeRunRef.current)) {
-      setBriefTask(newBriefTask({ openInNewWindow: true }));
-      return "";
-    }
-    textRevealRef.current?.discard();
+
     setBriefTask(newBriefTask());
     return "";
   }
@@ -3142,7 +2998,6 @@ function App() {
       value: String(answers[field.id] ?? "")
     }));
     const created = await createLibraryConversation({
-      allowActiveRun: Boolean(draft?.openInNewWindow),
       purpose: draft?.creationPurpose || "create",
       briefAnswers
     });
@@ -3156,19 +3011,16 @@ function App() {
       setBriefTask(null);
       return openConversationInNewWindow(nextId, { startTask: true });
     }
-    textRevealRef.current?.discard();
-    disconnectRuntime();
-    conversationCursorRef.current = 0;
-    taskStartSentRef.current.delete(nextId);
-    pendingTaskStartRef.current = nextId;
-    setTaskBrief(snapshot);
-    taskBriefRef.current = snapshot;
-    setConversationId(nextId);
-    setMessages([]);
+    const targetSession = sessionForConversation(nextId);
+    targetSession.ref("taskStartSentRef", new Set()).current.delete(nextId);
+    targetSession.ref("pendingTaskStartRef", "").current = nextId;
+    targetSession.ref("taskBriefRef").current = snapshot;
+    targetSession.set("taskBrief", snapshot);
+    targetSession.set("chatLoading", true);
+    targetSession.set("status", "Starting your task…");
+    await activateConversation(nextId, targetSession);
     setConversationIdForEntitlement(buyerProfile.id, selectedEntitlementId, nextId);
     setBriefTask(null);
-    setChatLoading(true);
-    setStatus("Starting your task…");
     return true;
   }
 
@@ -3355,13 +3207,17 @@ function App() {
 
 
   async function signIn(credentials) {
+    if (authTeardownRef.current) return;
+    const authEpoch = ++authEpochRef.current;
     setSignInStatus("loading");
     setSignInError("");
     try {
       if (!credentials) throw new Error("Enter your email and password.");
       const result = await signInDesktopSession(credentials, DEFAULT_AUTH_URL, authStorageRef.current);
-      await applyResolvedDesktopSession(result);
+      if (authEpoch !== authEpochRef.current || authTeardownRef.current) return;
+      await applyResolvedDesktopSession(result, { authEpoch });
     } catch (error) {
+      if (authEpoch !== authEpochRef.current || authTeardownRef.current) return;
       const persistedSession = persistedDesktopSessionFromError(error);
       if (persistedSession) {
         if (isAuthInvalidError(error)) {
@@ -3383,14 +3239,27 @@ function App() {
   }
 
   async function signOut() {
+    if (authTeardownRef.current) return;
+    authTeardownRef.current = true;
+    authEpochRef.current++;
+    sessionManager.beginTeardown();
+    try {
+      setSessionCloseError("");
+      await sessionManager.closeAll();
+    } catch (error) {
+      setSessionCloseError(errorMessage(error));
+      authTeardownRef.current = false;
+      return;
+    }
     const { serverRevoke, localClear } = startAuthSessionSignOut(
       DEFAULT_AUTH_URL,
       buyerSession,
       authStorageRef.current
     );
     void serverRevoke;
-    disconnectRuntime();
     const cleared = await clearSavedSession(buyerSession, localClear);
+    buyerSessionRef.current = null;
+    authTeardownRef.current = false;
     if (cleared) setSignInError("");
   }
 
@@ -3409,12 +3278,13 @@ function App() {
   }
 
   function selectCreatorAgent(entitlement) {
+    navigationRequestRef.current++;
+    conversationSession.saveReadingPosition(viewportRef.current);
     const sameEntitlement = entitlement.entitlement_id === selectedEntitlementId;
     if (sameEntitlement && runtimeBindingMatches(
       connectionConfigRef.current,
       runtimeBindingForEntitlement(entitlement)
     )) return;
-    disconnectRuntime();
     // A manual Agent switch is an explicit user choice. Do not let the
     // launch URL/context hint re-apply the previous window binding.
     requestedConversationBindingRef.current = null;
@@ -3433,49 +3303,60 @@ function App() {
     }
     setSelectedEntitlementId(entitlement.entitlement_id);
     setCreatorAgent(creatorAgentFromEntitlement(entitlement));
-    pendingTaskStartRef.current = "";
     setBriefTask(null);
-    setTaskBrief(null);
-    taskBriefRef.current = null;
     setProfileSetting("last_selected_entitlement_id", entitlement.entitlement_id);
     if (!sameEntitlement) {
-      setMessages([]);
-      conversationCursorRef.current = 0;
       setConversations([]);
       setConversationLibraryStatus("loading");
-      setComposerDraftValue("");
       // Never carry a Conversation ID across Creator Agents. The Library
       // effect will select or create an ID bound to the newly selected Agent.
       setConversationId("desktop-chat");
     }
   }
 
-  async function restoreTaskLocalSettings(taskId) {
-    if (!window.__TAURI_INTERNALS__) return;
+  function sessionForConversation(taskId, entitlementId = selectedEntitlementId) {
+    const target = sessionManager.get({ accountId: buyerProfile.id, entitlementId, conversationId: taskId });
+    if (!target.localSettingsInitialized) {
+      target.localSettingsInitialized = true;
+      for (const name of ["workspace", "workspaceDraft", "workspaceGrant", "workspaceDraftGrant", "workspaceGranted", "permissionMode"]) {
+        target.set(name, conversationSession.snapshot()[name]);
+      }
+    }
+    return target;
+  }
+
+  async function restoreTaskLocalSettings(taskId, targetSession) {
+    if (!window.__TAURI_INTERNALS__ || targetSession.localSettingsRestored) return;
     const saved = await invokeTauri("read_task_settings", { taskId }).catch(() => null);
+    if (targetSession.disposed) return;
+    targetSession.localSettingsRestored = true;
     if (!saved) return;
     const savedGrant = normalizeWorkspaceGrant(saved.workspaceGrant);
     const restoredGrant = savedGrant
       ? normalizeWorkspaceGrant(await invokeTauri("ensure_workspace", { workspaceGrantId: savedGrant.grant_id }).catch(() => null))
       : null;
-    setPermissionMode(normalizePermissionPolicy(saved.permissionMode));
-    permissionRef.current = normalizePermissionPolicy(saved.permissionMode);
-    setWorkspace(restoredGrant?.display_path || "");
-    workspaceRef.current = restoredGrant?.display_path || "";
-    setWorkspaceDraft(restoredGrant?.display_path || "");
-    setWorkspaceGrant(restoredGrant);
-    setWorkspaceDraftGrant(restoredGrant);
-    workspaceGrantRef.current = restoredGrant;
-    setWorkspaceGranted(Boolean(restoredGrant));
-    windowContextRef.current = {
-      ...windowContextRef.current,
-      conversationId: taskId,
-      entitlementId: saved.entitlementId || windowContextRef.current.entitlementId,
-      creatorId: saved.creatorId || windowContextRef.current.creatorId,
-      productId: saved.productId || windowContextRef.current.productId,
-      workspaceGrant: restoredGrant,
-      permissionMode: normalizePermissionPolicy(saved.permissionMode)
-    };
+    if (targetSession.disposed) return;
+    const permission = normalizePermissionPolicy(saved.permissionMode);
+    targetSession.set("permissionMode", permission);
+    targetSession.ref("permissionRef").current = permission;
+    targetSession.set("workspace", restoredGrant?.display_path || "");
+    targetSession.ref("workspaceRef").current = restoredGrant?.display_path || "";
+    targetSession.set("workspaceDraft", restoredGrant?.display_path || "");
+    targetSession.set("workspaceGrant", restoredGrant);
+    targetSession.set("workspaceDraftGrant", restoredGrant);
+    targetSession.ref("workspaceGrantRef").current = restoredGrant;
+    targetSession.set("workspaceGranted", Boolean(restoredGrant));
+  }
+
+  async function activateConversation(taskId, targetSession = sessionForConversation(taskId)) {
+    const navigation = ++navigationRequestRef.current;
+    await restoreTaskLocalSettings(taskId, targetSession);
+    if (navigation !== navigationRequestRef.current || targetSession.disposed
+      || selectedEntitlementIdRef.current !== targetSession.scope.entitlementId) return;
+    conversationSession.saveReadingPosition(viewportRef.current);
+    sessionManager.select(targetSession);
+    setConversationId(taskId);
+    setConversationIdForEntitlement(buyerProfile.id, targetSession.scope.entitlementId, taskId);
   }
 
   async function selectConversation(conversation) {
@@ -3485,22 +3366,13 @@ function App() {
       return;
     }
     if (nextId === conversationId) return;
-    if (activeRunRef.current) {
-      setStatus("Stop or open a new window before switching away from the active task.");
-      return;
+    const targetSession = sessionForConversation(nextId);
+    if (!targetSession.ref("taskBriefRef").current) {
+      targetSession.set("taskBrief", conversation?.brief_snapshot ?? null);
+      targetSession.ref("taskBriefRef").current = conversation?.brief_snapshot ?? null;
     }
-    disconnectRuntime();
-    pendingTaskStartRef.current = "";
     setBriefTask(null);
-    setTaskBrief(conversation?.brief_snapshot ?? null);
-    taskBriefRef.current = conversation?.brief_snapshot ?? null;
-    setChatLoading(true);
-    conversationCursorRef.current = 0;
-    setMessages([]);
-    await restoreTaskLocalSettings(nextId);
-    setConversationId(nextId);
-    setConversationIdForEntitlement(buyerProfile.id, selectedEntitlementId, nextId);
-    setStatus("Conversation selected");
+    await activateConversation(nextId, targetSession);
   }
 
   function beginRenameConversation(targetId) {
@@ -3881,12 +3753,13 @@ function App() {
         ) : (
           <ApprovalContext.Provider value={{ requests: approvalRequests, resolveToolApproval }}>
             <NativeContextMenuContext.Provider value={showNativeContextMenu}>
-              <ConversationAssetContext.Provider key={`${selectedEntitlementId}:${conversationId}`} value={{ serverUrl, accessToken: buyerSession?.accessToken, entitlementId: selectedEntitlementId, conversationId }}>
+              <ConversationSessionContext.Provider key={conversationSession.scope.key} value={conversationSession}>
+              <ConversationAssetContext.Provider value={{ serverUrl, accessToken: buyerSession?.accessToken, entitlementId: selectedEntitlementId, conversationId }}>
               <AssistantRuntimeProvider runtime={runtime}>
                 <ThreadPrimitive.Root className="thread-root">
                 <ThreadPrimitive.Viewport
                   ref={viewportRef}
-                  autoScroll={!olderLoading && !historyAnchorRef.current}
+                  autoScroll={false}
                   className="thread-viewport"
                   onScroll={handleViewportScroll}
                 >
@@ -3909,6 +3782,7 @@ function App() {
                   <ThreadPrimitive.Messages components={{ Message: HatchMessage }} />
                 </ThreadPrimitive.Viewport>
                 <ThreadPrimitive.ViewportFooter className="composer-footer">
+                  {sessionCloseError ? <div role="alert">{sessionCloseError}</div> : null}
                   {pendingSubmission ? (
                     <div role="status">
                       <small>{t(pendingSubmission.status === "failed" ? "submission.rejected" : "submission.unknown")}</small>
@@ -3916,11 +3790,7 @@ function App() {
                       {pendingSubmission.status === "failed" ? <Button type="button" onClick={() => void returnPendingToDraft()}>{t("submission.returnToDraft")}</Button> : null}
                     </div>
                   ) : null}
-                  {draftState.key !== draftKey || draftState.status === "loading" ? (
-                    <small role="status">{t("draft.loading")}</small>
-                  ) : draftState.status === "saving" ? (
-                    <small role="status">{t("draft.saving")}</small>
-                  ) : draftState.error ? (
+                  {draftState.key === draftKey && draftState.error ? (
                     <div role="alert">
                       <small>{t(draftState.error.includes("draft_in_use") ? "draft.inUse" : "draft.saveFailed")}</small>
                       <Button type="button" onClick={() => setDraftRetry((value) => value + 1)}>{t("common.retry")}</Button>
@@ -3996,6 +3866,7 @@ function App() {
                 </ThreadPrimitive.Root>
               </AssistantRuntimeProvider>
               </ConversationAssetContext.Provider>
+              </ConversationSessionContext.Provider>
             </NativeContextMenuContext.Provider>
           </ApprovalContext.Provider>
         )}
@@ -5209,7 +5080,8 @@ function AssistantActivityBlock({ indices, children }) {
   const visibleActivityParts = groupParts.filter(isActivityPart);
   const [now, setNow] = useState(Date.now());
   const isRunning = status?.type === "running";
-  const [open, setOpen] = useState(isRunning && visibleActivityParts.length > 0);
+  const activityMessageId = useMessage((message) => message.id);
+  const [open, setOpen] = useConversationUiState(`activity:${activityMessageId}:${indices[0]}`, isRunning && visibleActivityParts.length > 0);
   const hadVisibleActivity = useRef(visibleActivityParts.length > 0);
 
   useEffect(() => {
@@ -5314,7 +5186,8 @@ function activeActivity(parts, approvalRequests) {
 
 function TimelineToolGroup({ indices, children }) {
   const status = useMessage((message) => message.status);
-  const [open, setOpen] = useState(status?.type === "running");
+  const activityMessageId = useMessage((message) => message.id);
+  const [open, setOpen] = useConversationUiState(`tools:${activityMessageId}:${indices[0]}`, status?.type === "running");
   const count = indices.length;
   if (count <= 1) return children;
   return (
@@ -5441,13 +5314,17 @@ function reportTurnTiming(runId, timing, fullResponseAt) {
 
 function HatchToolCall(props) {
   const scope = useContext(ConversationAssetContext);
-  const [detail, setDetail] = useState(null);
+  const detailRef = props.artifact?.detailRef;
+  const detailKey = `tool:${detailRef?.run_id || ""}:${props.toolCallId}`;
+  const [detail, setDetail] = useConversationUiState(`${detailKey}:content`, null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
-  const [detailOpen, setDetailOpen] = useState(false);
-  const detailRef = props.artifact?.detailRef;
+  const [detailOpen, setDetailOpen] = useConversationUiState(`${detailKey}:open`, false);
   const detailRequestRef = useRef(0);
   useEffect(() => () => { detailRequestRef.current += 1; }, [scope?.conversationId, scope?.entitlementId, scope?.accessToken, detailRef?.run_id, detailRef?.tool_call_id]);
+  useEffect(() => {
+    if (detailOpen && !detail && !detailError) void loadDetail();
+  }, [detailOpen, detail]);
   async function loadDetail() {
     if (!scope || !detailRef || detailLoading || detail) return;
     const request = ++detailRequestRef.current;

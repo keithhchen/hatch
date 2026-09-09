@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { createHash } from "node:crypto";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, unlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -49,7 +49,8 @@ if (distributionBuild) {
 }
 
 try {
-  await execFileAsync(path.join(root, "node_modules/.bin/tauri"), ["build", "--bundles", "app"], {
+  process.stdout.write("[DMG] Building application and bundled runtimes\n");
+  const build = spawn(path.join(root, "node_modules/.bin/tauri"), ["build", "--bundles", "app"], {
     cwd: root,
     env: {
       ...process.env,
@@ -57,20 +58,31 @@ try {
       HATCH_APPLE_TEAM_ID: distributionBuild ? expectedAppleTeamId : "",
       ...(runtimeUrl ? { VITE_HATCH_RUNTIME_URL: runtimeUrl } : {})
     },
-    maxBuffer: 16 * 1024 * 1024
+    stdio: ["ignore", "inherit", "inherit"]
+  });
+  await new Promise((resolve, reject) => {
+    build.once("error", reject);
+    build.once("close", (code, signal) => {
+      if (code === 0) resolve();
+      else reject(new Error(`Application build failed (${signal ? `signal ${signal}` : `exit ${code}`}).`));
+    });
   });
   const nestedCode = await nestedCodeTargets(appPath);
+  process.stdout.write(`[DMG] Signing ${nestedCode.length} nested code targets\n`);
   for (const target of nestedCode) await signCode(target, signingIdentity);
   await signCode(appPath, signingIdentity);
+  process.stdout.write("[DMG] Verifying signatures\n");
   for (const target of nestedCode) await verifyCode(target);
   await verifyCode(appPath);
   if (distributionBuild) await verifyDistributionIdentity(appPath, expectedAppleTeamId, String(config.identifier));
+  process.stdout.write("[DMG] Staging application\n");
   await cp(appPath, path.join(staging, `${productName}.app`), { recursive: true });
   await symlink("/Applications", path.join(staging, "Applications"));
   await mkdir(outputDirectory, { recursive: true });
   await unlink(outputPath).catch((error) => {
     if (error?.code !== "ENOENT") throw error;
   });
+  process.stdout.write("[DMG] Compressing disk image\n");
   await execFileAsync("hdiutil", [
     "create",
     "-volname", productName,
@@ -80,6 +92,7 @@ try {
     "-imagekey", "zlib-level=9",
     outputPath
   ], { maxBuffer: 4 * 1024 * 1024 });
+  process.stdout.write("[DMG] Verifying disk image\n");
   await execFileAsync("hdiutil", ["verify", outputPath], { maxBuffer: 4 * 1024 * 1024 });
   const bytes = await readFile(outputPath);
   const fileStat = await stat(outputPath);

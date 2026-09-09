@@ -1,4 +1,6 @@
 import { Pool, type QueryResultRow } from "pg";
+import { PostgresConversationRepository, ConversationRepositoryError, assertConversationBinding,
+  submissionEvents, type AcceptSubmissionInput, type AcceptedSubmission } from "./conversationRepository.js";
 import type { ConversationMessage, PersistedContextAttachment } from "./protocol.js";
 import { historyBoundary, historyCursor, historyLimit, historyMessages,
   type ConversationHistoryOptions, type ConversationHistoryPage } from "./conversationHistory.js";
@@ -20,6 +22,8 @@ export type PostgresQueryExecutor = {
   query<T extends QueryResultRow = QueryResultRow>(text: string, values?: unknown[]): Promise<{ rows: T[] }>;
   end?: () => Promise<void>;
 };
+
+export type PostgresTransactionClient = PostgresQueryExecutor & { release(error?: Error): void };
 
 /**
  * The runtime store intentionally uses one append-only event table. It is a
@@ -407,7 +411,11 @@ export class PostgresStore extends RuntimeStore {
 
   override async readSubmissionReceipt(conversationId: string, runId: string): Promise<SubmissionReceipt | undefined> {
     await this.ensureSchema();
-    const result = await this.query<{ receipt: SubmissionReceipt }>(`
+    return this.receiptOn({ query: (sql, values) => this.query(sql, values) }, conversationId, runId);
+  }
+
+  private async receiptOn(client: PostgresQueryExecutor, conversationId: string, runId: string): Promise<SubmissionReceipt | undefined> {
+    const result = await client.query<{ receipt: SubmissionReceipt }>(`
       SELECT jsonb_build_object(
         'run_id', run_id, 'client_message_id', payload->>'client_message_id',
         'accepted_at', payload->>'timestamp') AS receipt
@@ -417,6 +425,46 @@ export class PostgresStore extends RuntimeStore {
       ORDER BY id LIMIT 1
     `, [conversationId, runId]);
     return result.rows[0]?.receipt;
+  }
+
+  async acceptSubmission(input: AcceptSubmissionInput): Promise<AcceptedSubmission> {
+    input = structuredClone(input);
+    await this.ensureSchema();
+    const pool = this.pool as PostgresQueryExecutor & { connect?: () => Promise<PostgresTransactionClient> };
+    if (!pool.connect) throw new Error("Atomic submission requires a pinned Postgres connection");
+    const client = await pool.connect();
+    let failure: Error | undefined;
+    try {
+      await client.query("BEGIN");
+      // Lock the immutable binding and active-run/idempotency namespace together.
+      await client.query("SELECT id FROM hatch_conversations WHERE id = $1 FOR UPDATE", [input.run.conversationId]);
+      const repository = PostgresConversationRepository.inTransaction(client);
+      const conversation = await repository.getConversation(input.run.conversationId);
+      if (!conversation) throw new ConversationRepositoryError("conversation_not_found", "Conversation was not found");
+      assertConversationBinding(conversation, input.binding);
+      const existing = await repository.getRunByClientMessageId(input.run.conversationId, input.run.clientMessageId);
+      if (existing) {
+        if (existing.inputDigest && existing.inputDigest !== input.run.inputDigest) {
+          throw new ConversationRepositoryError("client_message_conflict", "client_message_id already has different input", existing);
+        }
+        const receipt = await this.receiptOn(client, existing.conversationId, existing.id);
+        if (!receipt) throw new ConversationRepositoryError("submission_not_accepted", "Historical run has no accepted submission; submit explicitly with a new client_message_id", existing);
+        await client.query("COMMIT");
+        return { created: false, run: existing, receipt };
+      }
+      const { run } = await repository.createRun(input.run);
+      for (const event of submissionEvents(input, run.createdAt)) await this.appendOn(client, event);
+      await repository.appendEvent({ conversationId: run.conversationId, runId: run.id, type: "message.created",
+        payload: { role: "user", client_message_id: run.clientMessageId }, createdAt: run.createdAt });
+      await client.query("COMMIT");
+      return { created: true, run, receipt: { run_id: run.id, client_message_id: run.clientMessageId, accepted_at: run.createdAt } };
+    } catch (error) {
+      failure = error instanceof Error ? error : new Error(String(error));
+      try { await client.query("ROLLBACK"); } catch { /* lost COMMIT acknowledgement remains outcome-unknown */ }
+      throw error;
+    } finally {
+      client.release(failure);
+    }
   }
 
   async migrate(): Promise<void> {
@@ -441,6 +489,20 @@ export class PostgresStore extends RuntimeStore {
     const previous = this.appendChains.get(serializationKey) ?? Promise.resolve();
     const write = previous.then(async () => {
       await this.ensureSchema();
+      await this.appendOn({ query: (text, values) => this.query(text, values) }, record);
+    });
+    const tail = write.catch(() => undefined);
+    this.appendChains.set(serializationKey, tail);
+    this.pendingAppends.add(write);
+    void write.then(
+      () => this.finishAppend(serializationKey, tail, write),
+      () => this.finishAppend(serializationKey, tail, write)
+    );
+    await write;
+  }
+
+  private async appendOn(client: PostgresQueryExecutor, record: StoreEvent): Promise<void> {
+      const conversationId = optionalStringField(record, "conversation_id");
       const payload = JSON.stringify(record);
       const payloadBytes = Buffer.byteLength(payload, "utf8");
       const reservations: QuotaReservation[] = [{
@@ -471,7 +533,7 @@ export class PostgresStore extends RuntimeStore {
       }
       let result: { rows: QueryResultRow[] };
       try {
-        result = await this.query<QueryResultRow>(INSERT_EVENT_SQL, [
+        result = await client.query<QueryResultRow>(INSERT_EVENT_SQL, [
           conversationId,
           optionalStringField(record, "run_id"),
           record.type,
@@ -485,15 +547,6 @@ export class PostgresStore extends RuntimeStore {
       if (result.rows.length === 0) {
         throw storageQuotaError(conversationId);
       }
-    });
-    const tail = write.catch(() => undefined);
-    this.appendChains.set(serializationKey, tail);
-    this.pendingAppends.add(write);
-    void write.then(
-      () => this.finishAppend(serializationKey, tail, write),
-      () => this.finishAppend(serializationKey, tail, write)
-    );
-    await write;
   }
 
   async readEvents(conversationId?: string): Promise<StoreEvent[]> {

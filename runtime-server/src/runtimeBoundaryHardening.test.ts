@@ -24,7 +24,7 @@ import {
   durableConversationId,
   type RuntimeServer
 } from "./index.js";
-import { RuntimeStore } from "./store.js";
+import { RuntimeStore, LocalRuntimeAuthority } from "./store.js";
 import { PiAgentRuntime } from "./piAgentRuntime.js";
 import { runPiAgentPrompt } from "./piPrompt.js";
 import type { RunStart } from "./protocol.js";
@@ -153,6 +153,7 @@ test("environment Runtime never treats the Registry database secret as its conve
 test("unauthenticated WebSocket is terminated when the client hello deadline expires", async () => {
   let storeClosed = false;
   const store = {
+    localAuthority: new LocalRuntimeAuthority(),
     close: async () => { storeClosed = true; }
   } as unknown as RuntimeStore;
   const runtime = createRuntimeServer({
@@ -495,7 +496,7 @@ test("an existing session uses a rotated Creator tool binding on its next turn",
   };
   const runtime = createRuntimeServer({
     createRuntime: () => agentRuntime,
-    conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-creator-rotation-store-"))),
+    conversationStore: new RuntimeStore(conversationRepository.localAuthority),
     authIdentityResolver: { resolveIdentity: async () => ({ sub: entitlement.user_id, role: "user" }) },
     entitlementResolver: fixtureEntitlementResolver(entitlement),
     agentCorpusResolver: new AgentCorpusResolver(fixture.baseRoot),
@@ -533,7 +534,7 @@ test("global per-turn authorization capacity rejects N+1 without another Registr
   const conversationRepository = await authBoundaryConversations(entitlement, ["turn-conversation-one", "turn-conversation-two", "turn-conversation-three"]);
   const runtime = createRuntimeServer({
     createRuntime: () => completingRuntime(() => { runCalls += 1; }),
-    conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-turn-auth-capacity-"))),
+    conversationStore: new RuntimeStore(conversationRepository.localAuthority),
     authIdentityResolver: identityResolver,
     entitlementResolver: fixtureEntitlementResolver(entitlement),
     agentCorpusResolver: fixtureCorpusResolver(entitlement),
@@ -600,7 +601,7 @@ test("per-user turn authorization capacity prevents one account from occupying t
   const conversationRepository = await authBoundaryConversations(entitlement, ["fair-auth-conversation-first", "fair-auth-conversation-overflow", "fair-auth-conversation-admitted"]);
   const runtime = createRuntimeServer({
     createRuntime: () => completingRuntime(() => { runCalls += 1; }),
-    conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-user-auth-capacity-"))),
+    conversationStore: new RuntimeStore(conversationRepository.localAuthority),
     authIdentityResolver: identityResolver,
     entitlementResolver: fixtureEntitlementResolver(entitlement),
     agentCorpusResolver: fixtureCorpusResolver(entitlement),
@@ -1060,7 +1061,7 @@ test("turn.cancel tombstones pending authorization and an abort-ignoring resolve
   const conversationRepository = await authBoundaryConversations(entitlement, ["shared-conversation", "different-conversation", "after-late-conversation"]);
   const runtime = createRuntimeServer({
     createRuntime: () => completingRuntime(() => { runCalls += 1; }),
-    conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-pending-cancel-"))),
+    conversationStore: new RuntimeStore(conversationRepository.localAuthority),
     authIdentityResolver: identityResolver,
     entitlementResolver: fixtureEntitlementResolver(entitlement),
     agentCorpusResolver: fixtureCorpusResolver(entitlement),
@@ -1268,6 +1269,7 @@ test("oversized protocol fields fail as controlled messages without consuming he
 
 test("HTTP malformed paths and async store failures are controlled without unhandled rejection", async () => {
   const store = {
+    localAuthority: new LocalRuntimeAuthority(),
     append: async () => undefined,
     readVisibleConversation: async () => { throw new Error("simulated store outage"); },
     close: async () => undefined
@@ -1301,6 +1303,7 @@ test("HTTP malformed paths and async store failures are controlled without unhan
 
 test("HTTP history responses are rejected before writing beyond the configured byte cap", async () => {
   const store = {
+    localAuthority: new LocalRuntimeAuthority(),
     readVisibleConversation: async () => [{
       run_id: "large-history-run",
       role: "assistant",
@@ -1476,6 +1479,7 @@ test("disconnect cleanup finishes when cancellation persistence fails", async ()
   const attemptId = randomUUID();
   let storeClosed = false;
   const store = {
+    localAuthority: new LocalRuntimeAuthority(),
     append: async (event: { type: string; status?: string; to?: string }) => {
       if ((event.type === "tool.call" && event.status === "cancelled")
         || (event.type === "turn.state" && event.to === "cancelled")) {

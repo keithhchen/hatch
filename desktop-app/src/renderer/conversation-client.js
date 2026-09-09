@@ -36,11 +36,6 @@ export function isTerminalRunStatus(value) {
  * Starting another Conversation must therefore use a separate native window;
  * terminal projections are safe to clear and may reuse the current window.
  */
-export function shouldOpenNewConversationInWindow(activeRun) {
-  const runId = String(activeRun?.runId ?? activeRun?.id ?? "").trim();
-  return Boolean(runId) && !isTerminalRunStatus(activeRun?.status);
-}
-
 /**
  * Small renderer client for the durable Conversation Library.  The renderer
  * supplies only the current entitlement binding; Runtime re-verifies the

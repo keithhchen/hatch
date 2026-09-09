@@ -1,4 +1,6 @@
-import { appendFile, mkdir, open, readFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
+import { DatabaseSync } from "node:sqlite";
+import type { ConversationRecord, ConversationRunRecord, ConversationJournalEvent } from "./conversationRepository.js";
 import path from "node:path";
 import { historyBoundary, historyCursor, historyEvent, historyLimit, historyMessages, isHistoryMessage,
   type ConversationHistoryOptions, type ConversationHistoryPage, type ConversationToolDetailRef } from "./conversationHistory.js";
@@ -264,15 +266,184 @@ type StoreEventInput = StoreEvent extends infer Event
     : never
   : never;
 
-export class RuntimeStore {
-  private writeChain: Promise<void> = Promise.resolve();
+/** One immutable log entry, not a second copy of the transcript. */
+export type LocalCommit = {
+  kind: "migration-v1" | "control" | "event" | "accept";
+  conversations?: ConversationRecord[];
+  runs?: ConversationRunRecord[];
+  requests?: Array<[string, string]>;
+  journal?: ConversationJournalEvent[];
+  events?: StoreEvent[];
+};
 
-  constructor(private readonly root = process.env.HATCH_RUNTIME_DATA_DIR ?? path.resolve(".hatch-runtime")) {}
+export class LocalRuntimeAuthority {
+  conversations = new Map<string, ConversationRecord>();
+  runs = new Map<string, ConversationRunRecord>();
+  requests = new Map<string, string>();
+  journal: ConversationJournalEvent[] = [];
+  events: StoreEvent[] = [];
+  private usage = new Map<string, { count: number; bytes: number }>();
+  private chain: Promise<void> = Promise.resolve();
+  private opening?: Promise<void>;
+  private database?: DatabaseSync;
+  private sequence = 0;
+
+  constructor(readonly root?: string) {}
+
+  async initialize(): Promise<void> {
+    if (!this.root) return;
+    if (!this.opening) this.opening = this.open();
+    await this.opening;
+  }
+
+  private async open(): Promise<void> {
+    await mkdir(this.root!, { recursive: true });
+    const db = new DatabaseSync(path.join(this.root!, "runtime-commits-v2.sqlite"));
+    this.database = db;
+    // SQLite supplies crash-safe record framing and OS-managed writer locks.
+    // The application owns only this append-only table; no snapshot dual write.
+    db.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS commits (sequence INTEGER PRIMARY KEY, payload TEXT NOT NULL)");
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      if (!(db.prepare("SELECT 1 FROM commits LIMIT 1").get())) {
+        const legacy = async (name: string) => readFile(path.join(this.root!, name), "utf8").catch((error: NodeJS.ErrnoException) => {
+          if (error.code === "ENOENT") return undefined;
+          throw error;
+        });
+        const controlText = await legacy("conversations-v1.json");
+        const transcript = await legacy("events.jsonl");
+        const control = controlText ? JSON.parse(controlText) : undefined;
+        if (control && control.format !== 1) throw new Error("Unsupported historical conversation format");
+        const migration: LocalCommit = {
+          kind: "migration-v1",
+          conversations: control?.conversations ?? [], runs: control?.runs ?? [],
+          requests: control?.conversationRequests ?? [], journal: control?.events ?? [],
+          events: (transcript ?? "").split(/\r?\n/).filter(Boolean).map((line) => normalizePersistedStoreEvent(JSON.parse(line)))
+        };
+        db.prepare("INSERT INTO commits(payload) VALUES (?)").run(JSON.stringify(migration));
+      }
+      db.exec("COMMIT");
+      this.refresh();
+    } catch (error) {
+      try { db.exec("ROLLBACK"); } catch { /* commit may already have completed */ }
+      db.close();
+      this.database = undefined;
+      throw error;
+    }
+  }
+
+  private refresh(): void {
+    if (!this.database) return;
+    for (const row of this.database.prepare("SELECT sequence, payload FROM commits WHERE sequence > ? ORDER BY sequence").all(this.sequence)) {
+      this.apply(JSON.parse(String(row.payload)) as LocalCommit);
+      this.sequence = Number(row.sequence);
+    }
+  }
+
+  private apply(commit: LocalCommit): void {
+    for (const row of commit.conversations ?? []) this.conversations.set(row.id, row);
+    for (const row of commit.runs ?? []) this.runs.set(row.id, row);
+    for (const [key, value] of commit.requests ?? []) this.requests.set(key, value);
+    for (const event of commit.journal ?? []) this.journal.push(event);
+    for (const event of commit.events ?? []) {
+      this.events.push(event);
+      for (const key of eventQuotaKeys(event)) {
+        const previous = this.usage.get(key) ?? { count: 0, bytes: 0 };
+        this.usage.set(key, { count: previous.count + 1, bytes: previous.bytes + Buffer.byteLength(JSON.stringify(event)) });
+      }
+    }
+  }
+
+  /** Serialize readers with local commits; incorporate other processes' log tail. */
+  async ready(): Promise<void> {
+    await this.initialize();
+    await this.chain;
+    this.refresh();
+  }
+
+  async close(): Promise<void> {
+    await this.opening;
+    await this.chain;
+    this.database?.close();
+    this.database = undefined;
+    this.opening = undefined;
+  }
+
+  async transact<T>(prepare: () => Promise<{ result: T; commit?: LocalCommit }>): Promise<T> {
+    await this.initialize();
+    const operation = this.chain.then(async () => {
+      const db = this.database;
+      if (db) db.exec("BEGIN IMMEDIATE");
+      try {
+        this.refresh();
+        const { result, commit } = await prepare();
+        if (commit) {
+          this.checkQuota(commit.events ?? []);
+          const payload = JSON.stringify(commit);
+          if (db) db.prepare("INSERT INTO commits(payload) VALUES (?)").run(payload);
+        }
+        if (db) db.exec("COMMIT");
+        if (db) this.refresh();
+        else if (commit) this.apply(structuredClone(commit));
+        return result;
+      } catch (error) {
+        if (db) {
+          try { db.exec("ROLLBACK"); } catch { /* uncertain commit is resolved from the log on the next read */ }
+        }
+        throw error;
+      }
+    });
+    this.chain = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  private checkQuota(events: StoreEvent[]): void {
+    const additions = new Map<string, { count: number; bytes: number }>();
+    for (const event of events) for (const key of eventQuotaKeys(event)) {
+      const current = additions.get(key) ?? { count: 0, bytes: 0 };
+      additions.set(key, { count: current.count + 1, bytes: current.bytes + Buffer.byteLength(JSON.stringify(event)) });
+    }
+    for (const [key, addition] of additions) {
+      const current = this.usage.get(key) ?? { count: 0, bytes: 0 };
+      const scope = key === "global" ? "GLOBAL" : key.startsWith("binding:") ? "SCOPE" : "CONVERSATION";
+      const defaults = scope === "GLOBAL" ? [1_000_000, 1024 ** 3] : scope === "SCOPE" ? [100_000, 256 * 1024 ** 2] : [10_000, 64 * 1024 ** 2];
+      const limits = ["EVENTS", "BYTES"].map((unit, index) => {
+        const suffix = unit === "BYTES" && scope !== "CONVERSATION" ? "EVENT_BYTES" : unit;
+        const value = Number(process.env[`HATCH_RUNTIME_MAX_${scope}_${suffix}`] ?? defaults[index]);
+        if (!Number.isSafeInteger(value) || value < 1) throw new Error("Invalid Runtime storage quota");
+        return value;
+      });
+      if (current.count + addition.count > limits[0]! || current.bytes + addition.bytes > limits[1]!) {
+        throw new Error(`Runtime ${scope.toLowerCase()} storage quota exceeded`);
+      }
+    }
+  }
+}
+
+function eventQuotaKeys(event: StoreEvent): string[] {
+  const id = "conversation_id" in event ? event.conversation_id : undefined;
+  const binding = id?.match(/^scope:([a-f0-9]{24}):/)?.[1];
+  return ["global", ...(binding ? [`binding:${binding}`] : []), ...(id ? [`conversation:${id}`] : [])];
+}
+
+const localAuthorities = new Map<string, LocalRuntimeAuthority>();
+export function localRuntimeAuthority(root: string): LocalRuntimeAuthority {
+  const key = path.resolve(root);
+  let authority = localAuthorities.get(key);
+  if (!authority) { authority = new LocalRuntimeAuthority(key); localAuthorities.set(key, authority); }
+  return authority;
+}
+
+export class RuntimeStore {
+  readonly localAuthority: LocalRuntimeAuthority;
+  private readonly root: string;
+  constructor(root: string | LocalRuntimeAuthority = process.env.HATCH_RUNTIME_DATA_DIR ?? path.resolve(".hatch-runtime")) {
+    this.localAuthority = typeof root === "string" ? localRuntimeAuthority(root) : root;
+    this.root = typeof root === "string" ? root : root.root ?? path.resolve(".hatch-runtime");
+  }
 
   /**
-   * Local ConversationRepository uses the same app-data directory, while
-   * intentionally keeping a separate durable control-plane file from this
-   * append-only transcript projection.
+   * Store and repository share one append-only local authority.
    */
   get dataDirectory(): string {
     return this.root;
@@ -280,24 +451,15 @@ export class RuntimeStore {
 
   async append(event: StoreEventInput): Promise<void> {
     assertCanonicalPersistedToolNames(event);
-    const record = {
+    const record: StoreEvent = {
       timestamp: new Date().toISOString(),
       ...event
     };
-    const write = this.writeChain.then(async () => {
-      await mkdir(this.root, { recursive: true });
-      await appendFile(path.join(this.root, "events.jsonl"), `${JSON.stringify(record)}\n`, { encoding: "utf8", flush: true });
-      if (process.platform !== "win32") {
-        const directory = await open(this.root, "r");
-        try { await directory.sync(); } finally { await directory.close(); }
-      }
-    });
-    this.writeChain = write.catch(() => undefined);
-    await write;
+    await this.localAuthority.transact(async () => ({ result: undefined, commit: { kind: "event", events: [record] } }));
   }
 
   async close(): Promise<void> {
-    await this.writeChain;
+    await this.localAuthority.close();
   }
 
   /** Acceptance is a fact on the canonical user record, never inferred from Run state. */
@@ -310,16 +472,8 @@ export class RuntimeStore {
   }
 
   async readEvents(): Promise<StoreEvent[]> {
-    await this.writeChain;
-    const file = path.join(this.root, "events.jsonl");
-    const content = await readFile(file, "utf8").catch((error: NodeJS.ErrnoException) => {
-      if (error.code === "ENOENT") return "";
-      throw error;
-    });
-    return content
-      .split(/\r?\n/)
-      .filter(Boolean)
-      .map((line) => normalizePersistedStoreEvent(JSON.parse(line) as StoreEvent));
+    await this.localAuthority.ready();
+    return structuredClone(this.localAuthority.events);
   }
 
   async readConversation(conversationId: string): Promise<ConversationMessage[]> {

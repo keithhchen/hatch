@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -152,8 +152,9 @@ test("FileConversationRepository survives restart and interrupts rather than rep
   assert.ok(snapshot.events.some((event) => event.type === "run.state" && event.payload.reason === "Runtime restarted"));
   await restarted.close();
 
-  const persisted = JSON.parse(await readFile(path.join(root, "conversations-v1.json"), "utf8")) as { events: unknown[] };
-  assert.ok(persisted.events.length >= 3);
+  const reopened = new FileConversationRepository(root);
+  assert.ok((await reopened.snapshot(conversation.id)).events.length >= 3);
+  await reopened.close();
 });
 
 test("Postgres ConversationRepository schema has durable idempotency, active-run exclusion, and a cursor journal", () => {

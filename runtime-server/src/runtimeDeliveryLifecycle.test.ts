@@ -13,7 +13,7 @@ import { DeliveryAccountingOutbox } from "./deliveryOutbox.js";
 import type { EntitlementBinding, EntitlementResolver } from "./entitlements.js";
 import { createRuntimeServer, durableConversationId, type RuntimeServer } from "./index.js";
 import { PROTOCOL_VERSION, type OutboundMessage } from "./protocol.js";
-import { RuntimeStore } from "./store.js";
+import { RuntimeStore, localRuntimeAuthority } from "./store.js";
 
 const temporaryDirectories: string[] = [];
 const activeServers: RuntimeServer[] = [];
@@ -316,7 +316,7 @@ async function startRuntime(
 ): Promise<{ socket: WebSocket; messages: OutboundMessage[]; runtime: RuntimeServer }> {
   const dataRoot = await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-delivery-state-"));
   temporaryDirectories.push(dataRoot);
-  const conversationRepository = new InMemoryConversationRepository();
+  const conversationRepository = new InMemoryConversationRepository(localRuntimeAuthority(dataRoot));
   for (const runId of ["run_success", "run_failed", "run_cancelled", "run_outage"]) {
     const publicId = `conversation-${runId}`;
     await conversationRepository.createConversation({
