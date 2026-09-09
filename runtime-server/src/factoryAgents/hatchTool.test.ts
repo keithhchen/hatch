@@ -7,14 +7,16 @@ import test from "node:test";
 import { WebSocketServer } from "ws";
 import { hatchTool } from "./hatchTool.js";
 import { WorkbenchStore } from "./store.js";
-import { PROTOCOL_VERSION } from "../protocol.js";
+import { ClientHelloSchema, PROTOCOL_VERSION } from "../protocol.js";
 
 // Explicit transport test fixture, not evidence of a real Runtime/model execution.
 for (const account of ["buyer", "creator"] as const) test(`HTool uses the shared Runtime as ${account}, isolates private files and saves original assets`, async () => {
   const token = `test-${account}-token`;
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-transport-unit-"));
-  let created = 0; let messages = 0; let mismatch = false;
+  let created = 0; let messages = 0; let mismatch = false; let wrongConversation = false; let cancelled = 0;
   const hellos: Array<Record<string, unknown>> = [];
+  let receivedCancel!: () => void;
+  const cancelReceived = new Promise<void>(resolve => { receivedCancel = resolve; });
   const creatorId = "11111111-1111-4111-8111-111111111111";
   const productId = "22222222-2222-4222-8222-222222222222";
   const version = `sha256:${"a".repeat(64)}`;
@@ -25,16 +27,20 @@ for (const account of ["buyer", "creator"] as const) test(`HTool uses the shared
     assert.equal(scope.has("entitlement_id"), account === "buyer");
     if (req.method === "POST") { for await (const _chunk of req) {} created++; res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ conversation: { id: "conv_test" } })); }
     else if (req.url?.includes("/assets/")) { res.setHeader("content-type", "text/markdown"); res.end("# Actual asset fixture\r\nOriginal bytes.\r\n"); }
-    else { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ messages: [] })); }
+    else { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ conversation: { id: "conv_test" }, messages: [] })); }
   });
   const ws = new WebSocketServer({ server });
   ws.on("connection", (socket, request) => { assert.equal(request.url, "/v1/runtime"); socket.on("message", data => {
     const message = JSON.parse(String(data));
     if (message.type === "client.hello") {
+      ClientHelloSchema.parse(message);
+      assert.equal(message.conversation_id, "conv_test");
       hellos.push(message);
-      socket.send(JSON.stringify({ type: "session.ready", accepted_protocol_version: PROTOCOL_VERSION, creator_id: creatorId, product_id: mismatch ? "wrong-product" : productId, corpus_digest: version }));
+      socket.send(JSON.stringify({ type: "session.ready", accepted_protocol_version: PROTOCOL_VERSION, conversation_id: wrongConversation ? "conv_wrong" : message.conversation_id, creator_id: creatorId, product_id: mismatch ? "wrong-product" : productId, corpus_digest: version }));
     }
+    if (message.type === "turn.cancel") { cancelled++; receivedCancel(); }
     if (message.type === "client.message") {
+      assert.equal(message.conversation_id, "conv_test");
       messages++;
       socket.send(JSON.stringify({ type: "assistant.delta", run_id: message.run_id, delta: { kind: "text", content: `# Fixture response ${messages}\n` } }));
       socket.send(JSON.stringify({ type: "turn.completed", run_id: message.run_id, finish_reason: "stop" }));
@@ -54,7 +60,16 @@ for (const account of ["buyer", "creator"] as const) test(`HTool uses the shared
     assert.equal(created, 0);
     await tool.execute("first", { operation: "start", message: "Customer task" });
     await tool.execute("second", { operation: "continue", message: "Customer answer" });
+    await tool.execute("read", { operation: "read" });
+    await tool.execute("cancel", { operation: "cancel" });
+    await cancelReceived;
     assert.equal(created, 1); assert.equal(messages, 2);
+    assert.equal(cancelled, 1);
+    wrongConversation = true;
+    await assert.rejects(tool.execute("wrong-conversation", { operation: "continue", message: "Must not execute" }), /different Agent or conversation/);
+    await assert.rejects(tool.execute("wrong-cancel", { operation: "cancel" }), /different Agent or conversation/);
+    assert.equal(messages, 2); assert.equal(cancelled, 1);
+    wrongConversation = false;
     assert.ok(hellos.every(h => account === "creator" ? h.product_id === productId && h.entitlement_id === undefined : h.entitlement_id === target.entitlementId));
     assert.ok(hellos.every(h => Array.isArray(h.local_tools) && h.local_tools.length === 0 && h.auth_token === token));
     assert.equal((await store.read(s.id, "output/RESULT.md")).bytes.toString(), "# Fixture response 2\n");
