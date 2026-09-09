@@ -67,4 +67,7 @@ cargo test --locked --offline --manifest-path tools/windows-sandbox-probe/Cargo.
 - 第二次诊断明确失败在 `GetTokenInformation(class=46)`，即 `TokenIsLessPrivilegedAppContainer` 查询，错误为 Win32 87。PowerShell、Node、Python 在 resume 前就被阻止，不能据此判断这些工具或 LibreOffice 不兼容。
 - 两种模式的临时目录及 AppContainer profile 均已清理。CI 宿主为 elevated，不能作为普通用户 Desktop UAT。
 - `beacd9a7` 改用 [Chromium CheckLpacToken](https://github.com/chromium/chromium/blob/main/sandbox/win/src/app_container_test.cc) 的有效权限验证思路：在合成安全描述符上执行 `AccessCheck`，同时验证 AppContainer 身份和 profile SID。验证失败仍禁止 resume，无未隔离执行 fallback。
-- 新实现已通过 Windows 目标类型检查；真实 Windows 执行由 Run `34331827963` 验证，结果尚待回收。上述改动只属于独立实验，不包含在 Desktop `v0.1.30` 中。
+- Run `34331827963` 的新实现已通过 Windows 原生构建和实际 token 验证：LPAC access mask 为 2，普通 AppContainer 为 3，profile SID 匹配。总体兼容性实验仍失败。
+- LPAC：PowerShell 无法读取系统 PowerShell 注册表项；Node 在 WSAStartup 返回 10107；Python 进程以 `0xc0000022` 退出，尚未运行检查脚本。不能通过放开整个宿主权限绕过。
+- 普通 AppContainer：Python 成功读写 workspace，读取附件/runtime，并拒绝附件/runtime 写入及 ungranted 文件读写；LibreOffice 实际转换 60 秒超时。PowerShell 报 workspace 路径访问拒绝；Node 在加载主脚本时 `lstat C:\\` 返回 EPERM。只读输出不存在不等于 LO 权限拒绝已经验证。
+- 这些结果把后续调查定位到进程启动、路径解析及系统依赖访问，不是文档 skill 缺失。合成边界局部通过不证明 Windows 产品隔离完成。上述改动只属于独立实验，不包含在 Desktop `v0.1.30` 中。
