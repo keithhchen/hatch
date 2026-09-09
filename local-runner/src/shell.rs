@@ -1,3 +1,5 @@
+#[cfg(target_os = "windows")]
+use crate::process::configure_background_process;
 use crate::tools::ShellExecOutput;
 use crate::{LocalRunnerError, Result};
 use serde::Deserialize;
@@ -223,7 +225,6 @@ mod platform {
     use std::io::Read;
     use std::os::windows::ffi::{OsStrExt, OsStringExt};
     use std::os::windows::io::AsRawHandle;
-    use std::os::windows::process::CommandExt;
     use std::process::{Child, Command, Stdio};
     use std::sync::atomic::Ordering;
     use std::thread;
@@ -307,11 +308,11 @@ mod platform {
                 "-Command",
                 command,
             ])
-            .creation_flags(CREATE_NEW_PROCESS_GROUP)
             .current_dir(&workspace)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        configure_background_process(&mut shell, CREATE_NEW_PROCESS_GROUP);
         let fontconfig_cache = tempfile::tempdir().map_err(|error| {
             LocalRunnerError::ShellSandboxInitialization(format!(
                 "could not create private font cache: {error}"

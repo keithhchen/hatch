@@ -1,6 +1,7 @@
 mod audit;
 mod error;
 mod patch;
+mod process;
 mod protocol;
 mod sandbox;
 mod shell;

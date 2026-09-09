@@ -143,6 +143,20 @@ fn stdout_stderr_and_nonzero_exit_are_preserved() {
 }
 
 #[test]
+fn background_shell_does_not_own_a_console_window() {
+    let temp = tempdir().unwrap();
+    let runner = LocalRunner::new(temp.path()).unwrap();
+    let output = ok(runner.execute_tool_call_request(request(
+        "no_console_window",
+        r#"Add-Type -Namespace Hatch -Name NativeMethods -MemberDefinition '[System.Runtime.InteropServices.DllImport("kernel32.dll")] public static extern System.IntPtr GetConsoleWindow();'; [Console]::Out.Write([Hatch.NativeMethods]::GetConsoleWindow().ToInt64())"#,
+        30_000,
+    )));
+    assert_eq!(output["exit_code"], 0, "{output}");
+    assert_eq!(output["stdout"], "0", "{output}");
+    assert_eq!(output["stderr"], "", "{output}");
+}
+
+#[test]
 fn cancellation_after_child_ready_returns_cancelled_and_stops_both_processes() {
     let temp = tempdir().unwrap();
     let runner = LocalRunner::new(temp.path()).unwrap();
