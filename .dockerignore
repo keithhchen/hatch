@@ -14,4 +14,13 @@ privacyd
 landing
 fixtures
 creator-agent-factory
-desktop-app
+desktop-app/*
+!desktop-app/package.json
+!desktop-app/src
+desktop-app/src/*
+!desktop-app/src/renderer
+desktop-app/src/renderer/*
+!desktop-app/src/renderer/conversation-client.js
+!desktop-app/src/renderer/entitlement-client.js
+!desktop-app/src/renderer/i18n.js
+!desktop-app/src/renderer/identity.js
