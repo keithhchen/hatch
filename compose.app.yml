@@ -40,6 +40,8 @@ services:
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.moonshot.cn/v1}
       HATCH_LLM_PROFILE: ${HATCH_LLM_PROFILE:-kimi-k2.6}
       HATCH_FACTORY_LLM_PROFILE: ${HATCH_FACTORY_LLM_PROFILE:-kimi-k2.6}
+      TAVILY_API_KEY: ${TAVILY_API_KEY:-}
+      HATCH_FACTORY_RUNTIME_URL: ${HATCH_FACTORY_RUNTIME_URL:-wss://hatch.tokenquadrant.cn/v1/runtime}
       HATCH_WEB_SEARCH_URL: ${HATCH_WEB_SEARCH_URL:-https://api.bocha.cn/v1/web-search}
       HATCH_WEB_SEARCH_PROVIDER: ${HATCH_WEB_SEARCH_PROVIDER:-bocha}
       HATCH_WEB_SEARCH_API_KEY: ${HATCH_WEB_SEARCH_API_KEY:-}

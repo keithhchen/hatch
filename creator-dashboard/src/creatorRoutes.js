@@ -15,6 +15,7 @@ export function parseCreatorRoute(pathname) {
   const segments = normalized.slice(ROOT.length).split("/").filter(Boolean).map(safeDecode);
   if (!segments.length) return { kind: "home", section: "home" };
   if (segments[0] === "products" && segments.length === 2 && segments[1] === "new") return { kind: "product-create", section: "products" };
+  if (segments[0] === "factory" && segments.length === 1) return { kind: "factory-agents", section: "factory" };
   if (segments[0] === "factory") {
     if (segments.length === 3 && segments[1] === "runs" && segments[2]) return { kind: "factory", section: "products", runId: segments[2] };
     if (segments.length === 2 && segments[1]) return { kind: "factory", section: "products", runId: segments[1] };
@@ -40,6 +41,7 @@ export function parseCreatorRoute(pathname) {
 }
 
 export function creatorRouteTitle(route) {
+  if (route.kind === "factory-agents") return "Factory";
   if (route.kind === "home") return "Creator home";
   if (route.kind === "products") return "Products";
   if (route.kind === "product-create") return "Create product";

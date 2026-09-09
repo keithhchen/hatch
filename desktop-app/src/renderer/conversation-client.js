@@ -44,6 +44,7 @@ export function isTerminalRunStatus(value) {
 export function conversationScope(binding = {}) {
   const params = new URLSearchParams();
   if (binding.entitlementId) params.set("entitlement_id", binding.entitlementId);
+  else if (binding.productId) params.set("product_id", binding.productId);
   return params;
 }
 

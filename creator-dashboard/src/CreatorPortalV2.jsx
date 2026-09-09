@@ -1,3 +1,4 @@
+import { FactoryAgents } from "./FactoryAgents.jsx";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Menu } from "lucide-react";
 import { CreatorProductFiles } from "./CreatorSourceLibrary.jsx";
@@ -65,6 +66,7 @@ export function CreatorPortalV2({
   }, [navigate]);
 
   const mobileNavigationItems = [
+    { value: "factory", label: "Factory", active: route.section === "factory", onSelect: () => void go(`${ROOT}/factory`) },
     { value: "space-explore", label: t("explore"), onSelect: () => void go("/explore") },
     { value: "space-library", label: t("library"), onSelect: () => void go("/library") },
     { value: "space-studio", label: t("studio"), active: route.kind === "home", onSelect: () => void go(ROOT) },
@@ -104,6 +106,7 @@ export function CreatorPortalV2({
           <SpaceLink href="/library" navigate={go}>{t("library")}</SpaceLink>
           <SpaceLink href="/studio" navigate={go} active={route.kind === "home"}>{t("studio")}</SpaceLink>
           <NavButton active={route.section === "products" && route.kind !== "files"} onClick={() => go(`${ROOT}/products`)}>{t("products")}</NavButton>
+          <SpaceLink href="/studio/factory" navigate={go} active={route.section === "factory"}>Factory</SpaceLink>
           <SpaceLink href="/studio/orders" navigate={go} active={route.section === "orders"}>{t("orders")}</SpaceLink>
           <SpaceLink href="/account" navigate={go}>{t("account")}</SpaceLink>
         </nav>
@@ -151,6 +154,7 @@ function CreatorRoute({ route, token, request, navigate, profile, locale, t, reg
   if (typeof request !== "function") {
     return <RouteProblem title={t("creatorPortalUnavailable")} body={t("creatorPortalUnavailableBody")} />;
   }
+  if (route.kind === "factory-agents") return <FactoryAgents key={profile?.id} creatorId={profile?.id} />;
   if (route.kind === "home") return <CreatorHome token={token} request={request} navigate={navigate} profile={profile} t={t} locale={locale} />;
   if (route.kind === "products") return <ProductsPage token={token} request={request} navigate={navigate} t={t} />;
   if (route.kind === "product-create") return <CreatorProductFiles token={token} navigate={navigate} locale={locale} />;
@@ -645,6 +649,7 @@ function localizedRouteTitle(route, t) {
   if (route.kind === "home") return t("creatorHome");
   if (route.kind === "products") return t("products");
   if (route.kind === "product-create") return t("createProduct");
+  if (route.kind === "factory-agents") return "Factory";
   if (route.kind === "factory") return route.runId ? t("factoryRun") : t("creatorFactory");
   if (route.kind === "candidate") return t("candidateReview");
   if (route.kind === "preview") return t("storefrontPreview");
