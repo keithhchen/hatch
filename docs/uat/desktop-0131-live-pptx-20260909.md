@@ -29,6 +29,8 @@ Requested an actual edit/alternate save to v2: document count 4, total 6, white 
 
 ## 真实附件入口与副本读取
 
+重启后已发送附件的二次打开也通过：历史中仍显示 29 KB PPTX 卡片，点击 Open 打开 macOS Quick Look，第一页显示中文/English/123，选择第二页显示原生表格的图片/2、文档/4、合计/6。此为真实历史附件的本地重新读取，不是仅凭卡片存在判定成功；未据此宣称 Microsoft PowerPoint 编辑兼容性。
+
 重启恢复已实测：运行结束后在同一对话输入 `HATCH-UAT-DRAFT-RESTART-0131：这是一条未发送的恢复验收草稿。`，通过原生选择器附加 v2，正常退出（pgrep 确认旧进程消失）再启动同一 CI app。先显示“正在打开你的工作区”，随后历史恢复，输入框文字和未发送 PPTX 附件同时恢复，Documents 工作区仍在。此为该安装包的正常退出/启动 UAT，不代表崩溃或新 owner 代码验收。
 
 通过 Hatch 原生文件选择器附加 v2 并发送，UI 显示 29 KB 附件卡片及 Open/Save as 操作，草稿附件清除。实际 run `run_045b70c998af41a5bfe53053d7e6cfca` 保持在原 UAT conversation。
