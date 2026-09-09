@@ -309,7 +309,7 @@ jobs:
             const store = runtimeAssetStoreFromEnvironment(process.env);
             const bytes = Buffer.from("Hatch Runtime attachment storage probe v1");
             const reference = await store.put({ kind: "asset",
-              attachment_id: "runtime-storage-probe-v1", asset_id: `__hatch_runtime_put_probe_${randomUUID()}__`,
+              attachment_id: "runtime-storage-probe-v1", asset_id: `hatch_runtime_put_probe_${randomUUID()}`,
               display_name: "storage-probe.txt", media_type: "text/plain",
               source_bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"),
               data_base64: bytes.toString("base64") });
