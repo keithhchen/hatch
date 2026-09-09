@@ -1,3 +1,4 @@
+import { FactoryAgentsService } from "./factoryAgents/service.js";
 import "dotenv/config";
 import http from "node:http";
 import { createHash, randomUUID } from "node:crypto";
@@ -79,6 +80,7 @@ type RegistryContext = {
   runtimeServiceToken: string;
   deploymentServiceToken: string;
   factoryService: CreatorFactoryService;
+  factoryAgents: FactoryAgentsService;
   productFileStore: ProductFileStore;
   factoryNodeService?: FactoryNodeService;
   corpusPublisher?: CorpusPublisher;
@@ -97,6 +99,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const factoryRepository = creatorFactoryRepositoryForRegistry(environment, store.databasePool());
   await factoryRepository.initialize();
   const factoryRoot = path.resolve(environment.HATCH_CREATOR_FACTORY_ROOT ?? "creator-factory-runs");
+  const factoryAgents = new FactoryAgentsService(path.join(factoryRoot, "agent-chats"), environment);
   const objectStore = objectStoreFromEnvironment(environment);
   const productObjectStore = objectStoreFromEnvironment(environment, path.join(factoryRoot, "product-files"));
   if (!productObjectStore) throw new Error("Product File object storage is not configured");
@@ -219,7 +222,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       }, { "retry-after": String(admission.retryAfterSeconds), connection: "close" });
       return;
     }
-    const routePromise = route(request, response, { store, accounts, authRateLimiter, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, productFileStore, factoryNodeService, corpusPublisher, nodeObjectStore, releaseStore, authSecret })
+    const routePromise = route(request, response, { store, accounts, authRateLimiter, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, factoryAgents, productFileStore, factoryNodeService, corpusPublisher, nodeObjectStore, releaseStore, authSecret })
       .catch((error) => {
         const status = errorStatus(error);
         if (status >= 500) console.error("Registry request failed", error);
@@ -278,6 +281,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   await new Promise<void>((resolve) => server.listen(port, host, resolve));
   return { server, close: async () => {
     immediateFactoryStop.abort();
+    await factoryAgents.close();
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await factoryRepository.close();
     await store.close();
@@ -312,6 +316,14 @@ async function route(
   const url = new URL(request.url ?? "/", "http://registry.local");
   if (request.method === "GET" && url.pathname === "/healthz") {
     sendJson(response, 200, { status: "ok" });
+    return;
+  }
+
+  if (url.pathname.startsWith("/v1/creator/factory-agents/")) {
+    const account = await authenticate(request, response, context, "creator");
+    if (account === SESSION_QUERY_REJECTED) return;
+    if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
+    await context.factoryAgents.handle(account.id, bearer(request)!, request, response);
     return;
   }
 

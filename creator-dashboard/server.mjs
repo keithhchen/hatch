@@ -1,3 +1,5 @@
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { createServer } from "node:http";
 import {
   createCipheriv,
@@ -1441,6 +1443,32 @@ export async function createDashboardApp(options = {}) {
           }, `factory-draft:${authentication.profile.id}:${draft.draft_id}:${draft.version}`);
           return send(response, 200, { draft });
         }
+      }
+
+      if (url.pathname.startsWith("/v1/creator/factory-agents/")) {
+        const authentication = await authenticate(request, registryUrl, "creator", fetchImpl, portalState);
+        if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
+        const abort = new AbortController();
+        response.once("close", () => abort.abort());
+        const upstream = await fetchImpl(new URL(url.pathname + url.search, registryUrl), {
+          method: request.method,
+          headers: { authorization: `Bearer ${authentication.token}`, "content-type": "application/json" },
+          ...(request.method === "GET" ? {} : { body: JSON.stringify(await readJson(request, factoryRequestMaxBytes)) }),
+          signal: abort.signal,
+          redirect: "error"
+        });
+        response.statusCode = upstream.status;
+        for (const name of ["content-type", "content-disposition", "cache-control"]) {
+          const value = upstream.headers.get(name);
+          if (value) response.setHeader(name, value);
+        }
+        if (upstream.headers.get("content-type")?.includes("text/event-stream")) {
+          response.setHeader("x-accel-buffering", "no");
+          response.flushHeaders();
+        }
+        if (upstream.body) await pipeline(Readable.fromWeb(upstream.body), response);
+        else response.end();
+        return;
       }
 
       if (url.pathname.startsWith("/v1/creator/factory-runs")

@@ -48,3 +48,9 @@ test("legacy portal paths are not aliases after the UUID cutover", () => {
   assert.equal(parseCreatorRoute("/portal").kind, "not-found");
   assert.equal(parseCreatorRoute("/portal/creator/factory/runs/factory_123").kind, "not-found");
 });
+
+
+test("Factory is a Dashboard page without a Product or version selection", () => {
+  assert.deepEqual(parseCreatorRoute("/studio/factory"), { kind: "factory-agents", section: "factory" });
+  assert.equal(creatorRouteTitle(parseCreatorRoute("/studio/factory")), "Factory");
+});

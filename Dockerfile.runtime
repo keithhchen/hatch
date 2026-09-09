@@ -37,6 +37,9 @@ COPY --from=dependencies /workspace/runtime-server/package.json ./package.json
 COPY --from=production-dependencies /workspace/runtime-server/node_modules ./node_modules
 COPY --from=build /workspace/runtime-server/dist ./dist
 COPY --from=local-runner-build /workspace/local-runner/target/release/hatch-local-runner /usr/local/bin/hatch-local-runner
+COPY runtime-server/prompts ./prompts
+COPY desktop-app/package.json /app/desktop-app/package.json
+COPY desktop-app/src/renderer/conversation-client.js desktop-app/src/renderer/entitlement-client.js desktop-app/src/renderer/i18n.js desktop-app/src/renderer/identity.js /app/desktop-app/src/renderer/
 COPY runtime-server/skills ./skills
 COPY scripts/create-agent-zip.mjs ./scripts/create-agent-zip.mjs
 

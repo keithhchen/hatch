@@ -10,7 +10,7 @@
     "start": "node dist/index.js",
     "build": "rm -rf dist && tsc -p tsconfig.json",
     "eval:output-guard": "npm run build && node scripts/eval-output-guard.mjs",
-    "test": "npm run build && node --test --test-concurrency=1 dist/*.test.js"
+    "test": "npm run build && node --test --test-concurrency=1 dist/*.test.js dist/factoryAgents/*.test.js"
   },
   "dependencies": {
     "@alicloud/credentials": "^2.4.5",
