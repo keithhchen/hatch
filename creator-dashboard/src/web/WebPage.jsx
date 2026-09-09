@@ -1,10 +1,9 @@
-import { useState } from "react";
-import { langFromBrowser } from "./locale.ts";
 import HatchPage from "./HatchPage.tsx";
+import { useWebLocale } from "../WebLocaleProvider.jsx";
 import "@fontsource/dm-mono/400.css";
 import "./web.css";
 
 export default function WebPage() {
-  const [initialLang] = useState(langFromBrowser);
-  return <HatchPage initialLang={initialLang} />;
+  const { setLocale } = useWebLocale();
+  return <HatchPage onLanguageChange={setLocale} />;
 }

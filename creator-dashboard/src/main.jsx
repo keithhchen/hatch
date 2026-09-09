@@ -7,6 +7,7 @@ import { BuyerPortalV2 } from "./BuyerPortalV2.jsx";
 import { CreatorPortalV2 } from "./CreatorPortalV2.jsx";
 import { DownloadPage } from "./DownloadPage.jsx";
 import { dashboardRequest } from "./data.js";
+import { WebLocaleProvider, useWebLocale } from "./WebLocaleProvider.jsx";
 import "./styles.css";
 
 const CREATOR_ROOT = "/studio";
@@ -31,13 +32,18 @@ class AppErrorBoundary extends React.Component {
     return (
       <main className="loading-page">
         <UnavailableState
-          title="Hatch could not open this page."
-          body="Reload to try again. Your account and product data have not been changed."
-          action={{ label: "Reload", onClick: () => window.location.reload() }}
+          title={this.props.t("common.pageUnavailable")}
+          body={this.props.t("common.pageUnavailableBody")}
+          action={{ label: this.props.t("common.reload"), onClick: () => window.location.reload() }}
         />
       </main>
     );
   }
+}
+
+function LocalizedErrorBoundary({ children }) {
+  const { t } = useWebLocale();
+  return <AppErrorBoundary t={t}>{children}</AppErrorBoundary>;
 }
 
 function App() {
@@ -220,25 +226,29 @@ function RouteRedirect({ to, navigate }) {
 }
 
 function AppLoading() {
-  return <main className="loading-page" aria-busy="true"><HatchBrand className="loading-brand" /><p>Opening your workspace…</p></main>;
+  const { t } = useWebLocale();
+  return <main className="loading-page" aria-busy="true"><HatchBrand className="loading-brand" /><p>{t("common.openingWorkspace")}</p></main>;
 }
 
 function RoleBoundary({ navigate, onCreateCreator }) {
+  const { t } = useWebLocale();
   return (
     <main className="loading-page">
       <HatchBrand className="loading-brand" />
-      <h1>Creator access is required.</h1>
-      <p>This account can use purchased Agents, but it cannot edit Creator products.</p>
-      {onCreateCreator ? <Button type="button" onClick={() => void onCreateCreator()}>Create a Creator account</Button> : null}
-      <Button type="button" onClick={() => navigate("/library", { replace: true })}>Open your library</Button>
+      <h1>{t("common.creatorAccessRequired")}</h1>
+      <p>{t("common.creatorAccessBody")}</p>
+      {onCreateCreator ? <Button type="button" onClick={() => void onCreateCreator()}>{t("common.createCreatorAccount")}</Button> : null}
+      <Button type="button" onClick={() => navigate("/library", { replace: true })}>{t("common.openYourLibrary")}</Button>
     </main>
   );
 }
 
 createRoot(document.getElementById("root")).render(
-  <AppErrorBoundary>
-    <HatchUIProvider atmosphere toasts className="hatch-app-paper">
-      <App />
-    </HatchUIProvider>
-  </AppErrorBoundary>
+  <WebLocaleProvider>
+    <LocalizedErrorBoundary>
+      <HatchUIProvider atmosphere toasts className="hatch-app-paper">
+        <App />
+      </HatchUIProvider>
+    </LocalizedErrorBoundary>
+  </WebLocaleProvider>
 );

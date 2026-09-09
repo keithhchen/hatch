@@ -76,6 +76,28 @@ test("legacy Portal surfaces do not reintroduce hardcoded English labels", async
   ]) assert.doesNotMatch(source, new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), phrase);
 });
 
+test("Factory and Candidate Review system copy stays in the locale catalog", async () => {
+  const factory = await readFile(new URL("./CreatorFactoryRuns.jsx", import.meta.url), "utf8");
+  const review = await readFile(new URL("./CreatorReviewPage.jsx", import.meta.url), "utf8");
+  for (const phrase of [
+    "Turn one method into one useful product.",
+    "Your reference answers",
+    "The question batch changed",
+    "Loading candidate review…",
+    "What the Agent will receive",
+    "Correct this answer"
+  ]) {
+    assert.doesNotMatch(factory, new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), phrase);
+    assert.doesNotMatch(review, new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), phrase);
+  }
+  for (const locale of CREATOR_LOCALES) {
+    const t = createCreatorTranslator(locale);
+    assert.notEqual(t("factoryStageQueued"), "factoryStageQueued");
+    assert.notEqual(t("questionLabel", 2, t("confirmSourceHypothesis"), "Question?"), "questionLabel");
+    assert.notEqual(t("candidateVersionPassed", 3), "candidateVersionPassed");
+  }
+});
+
 test("Product navigation does not expose retired Factory or task language", async () => {
   const portal = await readFile(new URL("./CreatorPortalV2.jsx", import.meta.url), "utf8");
   const routes = await readFile(new URL("./creatorRoutes.js", import.meta.url), "utf8");

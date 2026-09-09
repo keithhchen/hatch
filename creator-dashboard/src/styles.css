@@ -15,6 +15,28 @@ h1, h2, h3, p { margin-top: 0; }
 h1 { font-family: var(--hatch-font-display); font-weight: 400; letter-spacing: var(--hatch-display-tracking); line-height: var(--hatch-display-leading); }
 h2 { font-family: var(--hatch-font-ui); font-weight: 400; letter-spacing: normal; line-height: 1.25; }
 
+.web-language-picker {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  color: var(--hatch-text-secondary, #74675e);
+  font-size: var(--hatch-type-meta, 12px);
+}
+
+.web-language-picker__label { white-space: nowrap; }
+
+.web-language-picker select {
+  min-height: 36px;
+  max-width: 100%;
+  padding: 0 26px 0 9px;
+  border: 1px solid var(--hatch-border-subtle, rgba(54, 41, 31, .16));
+  border-radius: 9px;
+  background: var(--hatch-ui-surface-solid, #fbf7f0);
+  color: var(--hatch-ink, #201813);
+  font: inherit;
+}
+
 .eyebrow {
   display: none;
 }

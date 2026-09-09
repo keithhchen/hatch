@@ -1,5 +1,6 @@
 import React from "react";
 import { storefrontModel } from "./storefrontModel.js";
+import { webT } from "./webI18n.js";
 import "./storefrontDetails.css";
 
 export function StorefrontDetails({
@@ -25,31 +26,31 @@ export function StorefrontDetails({
             <span className="storefront-shared__creator-avatar" aria-hidden="true">
               {creatorAvatarUrl ? <img src={creatorAvatarUrl} alt="" /> : (creatorInitial || (typeof creatorName === "string" ? creatorName.trim().charAt(0) : ""))}
             </span>
-            <span className="storefront-shared__creator-name">{creatorName || "Creator"}</span>
+            <span className="storefront-shared__creator-name">{creatorName || webT("common.creator")}</span>
           </span>
           <Heading>{model.name}</Heading>
           {model.promise ? <p>{model.promise}</p> : null}
           {releaseLabel ? <small>{releaseLabel}</small> : null}
         </div>
-        <aside className="storefront-shared__access" aria-label={mode === "preview" ? "Preview access" : "Product access"}>
-          <span>{mode === "preview" ? "Preview" : "Access"}</span>
-          <strong>Free</strong>
+        <aside className="storefront-shared__access" aria-label={mode === "preview" ? webT("buyer.previewAccess") : webT("buyer.productAccess")}>
+          <span>{mode === "preview" ? webT("buyer.preview") : webT("common.access")}</span>
+          <strong>{webT("common.free")}</strong>
           {action}
         </aside>
       </header>
 
       {hasDetails ? (
         <div className="storefront-shared__grid">
-          {model.inputs.length ? <StorefrontList title="What you provide" values={model.inputs} /> : null}
-          {model.outputs.length ? <StorefrontList title="What you receive" values={model.outputs} /> : null}
-          {model.boundaries.length ? <StorefrontList title="Boundaries" values={model.boundaries} /> : null}
-          {model.privacy ? <section><span className="storefront-shared__eyebrow">Privacy</span><h3>Your work stays under your control.</h3><p>{model.privacy}</p></section> : null}
+          {model.inputs.length ? <StorefrontList title={webT("buyer.whatYouProvide")} values={model.inputs} /> : null}
+          {model.outputs.length ? <StorefrontList title={webT("buyer.whatYouReceive")} values={model.outputs} /> : null}
+          {model.boundaries.length ? <StorefrontList title={webT("buyer.boundaries")} values={model.boundaries} /> : null}
+          {model.privacy ? <section><span className="storefront-shared__eyebrow">{webT("buyer.privacy")}</span><h3>{webT("buyer.workUnderControl")}</h3><p>{model.privacy}</p></section> : null}
         </div>
       ) : null}
 
       {model.desktopRequirement ? (
         <footer className="storefront-shared__policies">
-          <section><strong>Desktop requirement</strong><p>{model.desktopRequirement}</p></section>
+          <section><strong>{webT("buyer.desktopRequirement")}</strong><p>{model.desktopRequirement}</p></section>
         </footer>
       ) : null}
     </article>

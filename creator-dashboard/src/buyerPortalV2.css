@@ -103,6 +103,9 @@
   transform: translateX(-50%);
 }
 .buyer-v2__account { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+.buyer-v2__language-picker { flex: 0 1 auto; }
+.buyer-v2__language-picker .web-language-picker__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.buyer-v2__language-picker select { min-height: 38px; border-color: var(--buyer-border-subtle); background: transparent; }
 .buyer-v2__avatar { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 50%; background: var(--buyer-inverse); color: var(--buyer-inverse-text); font-size: var(--hatch-type-meta); text-decoration: none; }
 .buyer-v2 a.buyer-v2__avatar { color: var(--buyer-inverse-text); }
 .buyer-v2__plain-button, .buyer-v2__download-quiet {

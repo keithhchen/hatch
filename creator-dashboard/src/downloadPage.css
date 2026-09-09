@@ -17,6 +17,26 @@
   margin: 0 auto;
 }
 
+.download-page__header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.download-page__language-picker .web-language-picker__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.download-page__language-picker select {
+  border-color: var(--download-border);
+  background: transparent;
+}
+
 .download-page__brand {
   color: var(--download-ink);
   text-decoration: none;

@@ -25,6 +25,7 @@ import {
   productFileState,
   shouldPollProductFiles
 } from "./creatorProductFilesUi.js";
+import { webErrorMessage } from "./webI18n.js";
 
 /** Product-owned file area. Files are never global and never attached to a run. */
 export function CreatorProductFiles({ token, productId, navigate, locale = "en" }) {
@@ -46,9 +47,9 @@ export function CreatorProductFiles({ token, productId, navigate, locale = "en" 
         setProduct(nextProduct?.product ?? nextProduct);
         setFiles(nextFiles.files ?? nextFiles.documents ?? []);
       })
-      .catch((nextError) => active && setError(nextError.message));
+      .catch((nextError) => active && setError(webErrorMessage(nextError, locale)));
     return () => { active = false; };
-  }, [token, productId]);
+  }, [locale, productId, token]);
 
   useEffect(() => {
     if (!productId || !filesNeedPolling) return undefined;
@@ -61,7 +62,7 @@ export function CreatorProductFiles({ token, productId, navigate, locale = "en" 
         const response = await listProductFiles(token, productId);
         if (!cancelled) setFiles(response.files ?? response.documents ?? []);
       } catch (nextError) {
-        if (!cancelled) setError(nextError.message);
+        if (!cancelled) setError(webErrorMessage(nextError, locale));
       } finally {
         polling = false;
       }
@@ -72,7 +73,7 @@ export function CreatorProductFiles({ token, productId, navigate, locale = "en" 
       cancelled = true;
       clearInterval(timer);
     };
-  }, [filesNeedPolling, productId, token]);
+  }, [filesNeedPolling, locale, productId, token]);
 
   const selectedCount = useMemo(() => files.length, [files]);
 
@@ -84,7 +85,7 @@ export function CreatorProductFiles({ token, productId, navigate, locale = "en" 
       const id = created?.product?.id ?? created?.product?.product_id ?? created?.id ?? created?.product_id;
       if (!id) throw new Error(t("productCreatedWithoutId"));
       navigate(`/studio/products/${encodeURIComponent(id)}/files`);
-    } catch (nextError) { setError(nextError.message); }
+    } catch (nextError) { setError(webErrorMessage(nextError, locale)); }
     finally { setBusy(false); }
   }
 
@@ -97,7 +98,7 @@ export function CreatorProductFiles({ token, productId, navigate, locale = "en" 
       for (const file of selectedFiles) uploaded.push(await uploadProductFile(token, product.id ?? product.product_id, file));
       setFiles((current) => [...uploaded, ...current]);
       setNotice(t("filesAdded", uploaded.length));
-    } catch (nextError) { setError(nextError.message); }
+    } catch (nextError) { setError(webErrorMessage(nextError, locale)); }
     finally { setBusy(false); }
   }
 
@@ -107,7 +108,7 @@ export function CreatorProductFiles({ token, productId, navigate, locale = "en" 
     try {
       await startAboutYouNode(token, product.id ?? product.product_id, files.map((file) => file.id));
       navigate(`/studio/products/${encodeURIComponent(product.id ?? product.product_id)}/about-you`);
-    } catch (nextError) { setError(nextError.message); }
+    } catch (nextError) { setError(webErrorMessage(nextError, locale)); }
     finally { setBusy(false); }
   }
 
