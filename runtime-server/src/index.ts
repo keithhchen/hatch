@@ -1365,9 +1365,6 @@ async function handleConversationHttpRequest(
       const briefSnapshot = binding.briefSpec
         ? createBriefSnapshot(binding.briefSpec, body.brief_answers)
         : undefined;
-      if (binding.agentCorpus && !briefSnapshot) {
-        throw new ConversationHttpError(409, "brief_required", "A Brief is required before starting a new task.");
-      }
       const publicId = `conv_${randomUUID().replaceAll("-", "")}`;
       const created = await repository.createConversation({
         ...repoBinding,
@@ -2657,7 +2654,7 @@ async function handleRuntimeSocket(
               throw error;
             }
             assertConversationBinding(conversation, conversationBinding(binding));
-            if (message.task_start && binding.agentCorpus && !conversation.briefSnapshot) {
+            if (message.task_start && binding.briefSpec && !conversation.briefSnapshot) {
               const error = new Error("conversation_brief_required");
               (error as Error & { code?: string }).code = "conversation_brief_required";
               throw error;

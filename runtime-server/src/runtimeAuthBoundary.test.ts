@@ -212,6 +212,10 @@ test("existing buyer uses the current Product across Library, snapshot, hello an
       const response = await fetch(`${base}${route}?${query}`, { headers });
       assert.equal(response.status, 200, await response.text());
     }
+    const newTask = await fetch(`${base}/v1/conversations?${query}`, {
+      method: "POST", headers: { ...headers, "content-type": "application/json" }, body: "{}"
+    });
+    assert.equal(newTask.status, 201, "a Product without a brief form does not require an invented one");
     const catalog = await fetch(`${base}/v1/me/creator-agents`, { headers });
     assert.equal(catalog.status, 200);
     assert.match(await catalog.text(), new RegExp(scenario.registryState.corpusDigest));
