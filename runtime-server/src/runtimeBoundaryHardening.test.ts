@@ -71,9 +71,12 @@ test("legacy HMAC auth is inert by default and uses only an explicit Runtime env
   let disabledSocket: WebSocket | undefined;
   let enabledSocket: WebSocket | undefined;
   try {
+    const disabledDataDir = path.join(root, "disabled");
+    const disabledStore = new RuntimeStore(disabledDataDir);
+    await seedLocalConversations(disabledStore, ["legacy-install-disabled"]);
     disabled = await createRuntimeServerFromEnvironment({
       HATCH_AUTH_SIGNING_SECRET: explicitSecret,
-      HATCH_RUNTIME_DATA_DIR: path.join(root, "disabled")
+      HATCH_RUNTIME_DATA_DIR: disabledDataDir
     });
     const disabledPort = await listen(disabled);
     disabledSocket = await openSocket(disabledPort);
@@ -84,10 +87,13 @@ test("legacy HMAC auth is inert by default and uses only an explicit Runtime env
       `local-${createHash("sha256").update(token).digest("hex").slice(0, 24)}`
     );
 
+    const enabledDataDir = path.join(root, "enabled");
+    const enabledStore = new RuntimeStore(enabledDataDir);
+    await seedLocalConversations(enabledStore, ["legacy-install-enabled"]);
     enabled = await createRuntimeServerFromEnvironment({
       HATCH_ENABLE_LEGACY_HMAC_AUTH: "true",
       HATCH_AUTH_SIGNING_SECRET: explicitSecret,
-      HATCH_RUNTIME_DATA_DIR: path.join(root, "enabled")
+      HATCH_RUNTIME_DATA_DIR: enabledDataDir
     });
     const enabledPort = await listen(enabled);
     enabledSocket = await openSocket(enabledPort);
@@ -134,6 +140,8 @@ test("environment Runtime refuses resolver-free non-loopback exposure", async ()
 
 test("environment Runtime never treats the Registry database secret as its conversation store", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-db-isolation-"));
+  const seededStore = new RuntimeStore(root);
+  await seedLocalConversations(seededStore, ["database-isolation-install"]);
   const runtime = await createRuntimeServerFromEnvironment({
     HATCH_REGISTRY_DATABASE_URL: "postgres://registry-only.invalid/registry",
     HATCH_RUNTIME_DATA_DIR: root
@@ -180,8 +188,11 @@ test("unauthenticated WebSocket is terminated when the client hello deadline exp
 });
 
 test("global open-socket capacity bounds silent pre-hello clients and releases on close", async () => {
+  const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-open-capacity-")));
+  const conversationRepository = await seedLocalConversations(store, ["open-capacity-user"]);
   const runtime = createRuntimeServer({
-    conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-open-capacity-"))),
+    conversationStore: store,
+    conversationRepository,
     clientHelloTimeoutMs: 2_000,
     maxOpenConnectionsGlobal: 2
   });
@@ -319,8 +330,13 @@ test("per-user hello capacity is acquired after identity but before Agent Corpus
   const identityResolver: AuthIdentityResolver = {
     resolveIdentity: async () => ({ sub: entitlement.user_id, role: "user" })
   };
+  const conversationRepository = await authBoundaryConversations(entitlement, [
+    "same-user-install-one",
+    "same-user-install-two"
+  ]);
   const runtime = createRuntimeServer({
-    conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-user-hello-capacity-"))),
+    conversationStore: new RuntimeStore(conversationRepository.localAuthority),
+    conversationRepository,
     authIdentityResolver: identityResolver,
     entitlementResolver: fixtureEntitlementResolver(entitlement),
     agentCorpusResolver: corpusResolver,
@@ -371,8 +387,13 @@ test("hello setup keeps its admission lease and aborts Creator tool resolution o
       });
     }
   };
+  const conversationRepository = await authBoundaryConversations(entitlement, [
+    "creator-setup-install-one",
+    "creator-setup-install-two"
+  ]);
   const runtime = createRuntimeServer({
-    conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-creator-hello-abort-"))),
+    conversationStore: new RuntimeStore(conversationRepository.localAuthority),
+    conversationRepository,
     authIdentityResolver: { resolveIdentity: async () => ({ sub: entitlement.user_id, role: "user" }) },
     entitlementResolver: fixtureEntitlementResolver(entitlement),
     agentCorpusResolver: {
@@ -643,7 +664,7 @@ test("per-user turn authorization capacity prevents one account from occupying t
   }
 });
 
-test("per-connection and global active-run capacity reject excess model work and release on completion", async () => {
+test("global active-run capacity rejects excess model work and releases on completion", async () => {
   let runCalls = 0;
   const runReleases: Array<() => void> = [];
   const agentRuntime: AgentRuntime = {
@@ -653,10 +674,12 @@ test("per-connection and global active-run capacity reject excess model work and
       yield { type: "turn.completed", run_id: input.run_id, finish_reason: "stop" };
     }
   };
+  const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-active-capacity-")));
+  const conversationIds = ["active-conversation-one", "active-conversation-two", "active-conversation-three"];
   const runtime = createRuntimeServer({
     createRuntime: () => agentRuntime,
-    conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-active-capacity-"))),
-    maxActiveRunsPerConnection: 1,
+    conversationStore: store,
+    conversationRepository: await seedLocalConversations(store, conversationIds),
     maxActiveRunsGlobal: 2
   });
   const port = await listen(runtime);
@@ -664,18 +687,13 @@ test("per-connection and global active-run capacity reject excess model work and
   try {
     for (const [index, socket] of sockets.entries()) {
       const ready = waitForMessage(socket, (message) => message.type === "session.ready");
-      socket.send(JSON.stringify(hello(`active-token-${index}`, `active-install-${index}`)));
+      socket.send(JSON.stringify(hello(`active-token-${index}`, conversationIds[index]!)));
       await ready;
     }
 
     sockets[0]!.send(JSON.stringify(clientMessage("active-one", "active-conversation-one")));
     sockets[1]!.send(JSON.stringify(clientMessage("active-two", "active-conversation-two")));
     await waitUntil(() => runCalls === 2);
-
-    const connectionRejected = waitForMessage(sockets[0]!, (message) => message.run_id === "active-same-connection"
-      && (message.error as { code?: string } | undefined)?.code === "connection_run_capacity");
-    sockets[0]!.send(JSON.stringify(clientMessage("active-same-connection", "active-conversation-extra")));
-    assert.equal(((await connectionRejected).error as { code?: string }).code, "connection_run_capacity");
 
     const globalRejected = waitForMessage(sockets[2]!, (message) => message.run_id === "active-global-overflow"
       && (message.error as { code?: string } | undefined)?.code === "runtime_run_capacity");
@@ -710,9 +728,22 @@ test("per-user active-run capacity preserves room for another account", async ()
       yield { type: "turn.completed", run_id: input.run_id, finish_reason: "stop" };
     }
   };
+  const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-user-run-capacity-")));
+  const conversationIds = [
+    "fair-run-conversation-first",
+    "fair-run-conversation-same-user",
+    "fair-run-conversation-other-user"
+  ];
   const runtime = createRuntimeServer({
     createRuntime: () => agentRuntime,
-    conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-user-run-capacity-"))),
+    conversationStore: store,
+    conversationRepository: await seedLocalConversations(store, conversationIds),
+    authIdentityResolver: {
+      resolveIdentity: async (token) => ({
+        sub: token === "fair-run-token-three" ? "fair-run-other-account" : "fair-run-shared-account",
+        role: "user"
+      })
+    },
     maxActiveRunsGlobal: 3,
     maxActiveRunsPerUser: 1,
     maxActiveRunsPerConnection: 1
@@ -722,16 +753,13 @@ test("per-user active-run capacity preserves room for another account", async ()
   const sameUser = await openSocket(port);
   const otherUser = await openSocket(port);
   try {
-    for (const [socket, token, installation] of [
-      [first, "fair-run-token-one", "fair-run-user"],
-      [sameUser, "fair-run-token-two", "fair-run-user"],
-      [otherUser, "fair-run-token-three", "fair-run-other-user"]
+    for (const [socket, token, conversationId] of [
+      [first, "fair-run-token-one", conversationIds[0]],
+      [sameUser, "fair-run-token-two", conversationIds[1]],
+      [otherUser, "fair-run-token-three", conversationIds[2]]
     ] as const) {
       const ready = waitForMessage(socket, (message) => message.type === "session.ready");
-      socket.send(JSON.stringify({
-        ...hello(token, installation),
-        user_id: testAuthorityId(installation)
-      }));
+      socket.send(JSON.stringify(hello(token, conversationId)));
       await ready;
     }
 
@@ -765,9 +793,12 @@ test("socket close retains global run capacity until an abort-ignoring Runtime s
       yield { type: "turn.completed", run_id: input.run_id, finish_reason: "stop" };
     }
   };
+  const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-close-capacity-")));
+  const conversationIds = ["close-capacity-conversation-first", "close-capacity-conversation-overflow"];
   const runtime = createRuntimeServer({
     createRuntime: () => agentRuntime,
-    conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-close-capacity-"))),
+    conversationStore: store,
+    conversationRepository: await seedLocalConversations(store, conversationIds),
     maxActiveRunsGlobal: 1
   });
   const port = await listen(runtime);
@@ -776,7 +807,7 @@ test("socket close retains global run capacity until an abort-ignoring Runtime s
   try {
     for (const [index, socket] of [first, second].entries()) {
       const ready = waitForMessage(socket, (message) => message.type === "session.ready");
-      socket.send(JSON.stringify(hello(`close-capacity-token-${index}`, `close-capacity-install-${index}`)));
+      socket.send(JSON.stringify(hello(`close-capacity-token-${index}`, conversationIds[index]!)));
       await ready;
     }
 
@@ -790,10 +821,6 @@ test("socket close retains global run capacity until an abort-ignoring Runtime s
       && (message.error as { code?: string } | undefined)?.code === "runtime_run_capacity");
     second.send(JSON.stringify(clientMessage("close-capacity-overflow", "close-capacity-conversation-overflow")));
     assert.equal(((await rejected).error as { code?: string }).code, "runtime_run_capacity");
-    const conversationRejected = waitForMessage(second, (message) => message.run_id === "close-conversation-overflow"
-      && (message.error as { code?: string } | undefined)?.code === "conversation_busy");
-    second.send(JSON.stringify(clientMessage("close-conversation-overflow", "close-capacity-conversation-first")));
-    assert.equal(((await conversationRejected).error as { code?: string }).code, "conversation_busy");
     assert.equal(runCalls, 1);
   } finally {
     for (const release of runReleases) release();
@@ -820,9 +847,11 @@ test("turn.cancel retains the conversation lease until an abort-ignoring Runtime
       }
     }
   };
+  const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-cancel-conversation-")));
   const runtime = createRuntimeServer({
     createRuntime: () => agentRuntime,
-    conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-cancel-conversation-"))),
+    conversationStore: store,
+    conversationRepository: await seedLocalConversations(store, ["cancel-conversation-shared"]),
     maxActiveRunsGlobal: 4,
     maxActiveRunsPerUser: 4
   });
@@ -832,7 +861,7 @@ test("turn.cancel retains the conversation lease until an abort-ignoring Runtime
   try {
     for (const [index, socket] of [first, second].entries()) {
       const ready = waitForMessage(socket, (message) => message.type === "session.ready");
-      socket.send(JSON.stringify(hello(`cancel-conversation-token-${index}`, `cancel-conversation-user-${index}`)));
+      socket.send(JSON.stringify(hello(`cancel-conversation-token-${index}`, "cancel-conversation-shared")));
       await ready;
     }
     first.send(JSON.stringify(clientMessage("cancel-conversation-first", "cancel-conversation-shared")));
@@ -903,9 +932,12 @@ test("network-tool cancellation and timeout settle the run before releasing glob
           }
         }
       };
+      const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), `hatch-runtime-tool-${mode}-`)));
+      const conversationIds = [`${mode}-tool-conversation-first`, `${mode}-tool-conversation-second`];
       const runtime = createRuntimeServer({
         createRuntime: () => agentRuntime,
-        conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), `hatch-runtime-tool-${mode}-`))),
+        conversationStore: store,
+        conversationRepository: await seedLocalConversations(store, conversationIds),
         maxActiveRunsGlobal: 1,
         serverToolTimeoutMs: mode === "timeout" ? 25 : 10_000
       });
@@ -915,7 +947,7 @@ test("network-tool cancellation and timeout settle the run before releasing glob
       try {
         for (const [index, socket] of [first, second].entries()) {
           const ready = waitForMessage(socket, (message) => message.type === "session.ready");
-          socket.send(JSON.stringify(hello(`${mode}-tool-token-${index}`, `${mode}-tool-user-${index}`)));
+          socket.send(JSON.stringify(hello(`${mode}-tool-token-${index}`, conversationIds[index]!)));
           await ready;
         }
         const timedOut = mode === "timeout"
@@ -952,8 +984,27 @@ test("network-tool cancellation and timeout settle the run before releasing glob
 });
 
 test("ready connection caps release on close and distinguish per-user from global pressure", async () => {
+  const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-connection-capacity-")));
+  const conversationIds = [
+    "connection-one",
+    "connection-same-user",
+    "connection-second-user",
+    "connection-global-overflow",
+    "connection-admitted"
+  ];
   const runtime = createRuntimeServer({
-    conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-connection-capacity-"))),
+    conversationStore: store,
+    conversationRepository: await seedLocalConversations(store, conversationIds),
+    authIdentityResolver: {
+      resolveIdentity: async (token) => ({
+        sub: token === "connection-token-three"
+          ? "connection-account-two"
+          : token === "connection-token-four"
+            ? "connection-account-three"
+            : "connection-account-one",
+        role: "user"
+      })
+    },
     maxEstablishedConnectionsGlobal: 2,
     maxEstablishedConnectionsPerUser: 1
   });
@@ -963,37 +1014,25 @@ test("ready connection caps release on close and distinguish per-user from globa
     const first = await openSocket(port);
     sockets.push(first);
     const firstReady = waitForMessage(first, (message) => message.type === "session.ready");
-    first.send(JSON.stringify({
-      ...hello("connection-token-one", "connection-user-one"),
-      user_id: testAuthorityId("connection-user-one")
-    }));
+    first.send(JSON.stringify(hello("connection-token-one", conversationIds[0]!)));
     await firstReady;
 
     const sameUser = await openSocket(port);
     sockets.push(sameUser);
     const userRejected = waitForMessage(sameUser, (message) => (message.error as { code?: string } | undefined)?.code === "user_connection_capacity");
-    sameUser.send(JSON.stringify({
-      ...hello("connection-token-two", "connection-user-one"),
-      user_id: testAuthorityId("connection-user-one")
-    }));
+    sameUser.send(JSON.stringify(hello("connection-token-two", conversationIds[1]!)));
     assert.equal(((await userRejected).error as { code?: string }).code, "user_connection_capacity");
 
     const secondUser = await openSocket(port);
     sockets.push(secondUser);
     const secondReady = waitForMessage(secondUser, (message) => message.type === "session.ready");
-    secondUser.send(JSON.stringify({
-      ...hello("connection-token-three", "connection-user-two"),
-      user_id: testAuthorityId("connection-user-two")
-    }));
+    secondUser.send(JSON.stringify(hello("connection-token-three", conversationIds[2]!)));
     await secondReady;
 
     const globalOverflow = await openSocket(port);
     sockets.push(globalOverflow);
     const globalRejected = waitForMessage(globalOverflow, (message) => (message.error as { code?: string } | undefined)?.code === "connection_capacity");
-    globalOverflow.send(JSON.stringify({
-      ...hello("connection-token-four", "connection-user-three"),
-      user_id: testAuthorityId("connection-user-three")
-    }));
+    globalOverflow.send(JSON.stringify(hello("connection-token-four", conversationIds[3]!)));
     assert.equal(((await globalRejected).error as { code?: string }).code, "connection_capacity");
 
     const firstClosed = new Promise<void>((resolve) => first.once("close", () => resolve()));
@@ -1002,10 +1041,7 @@ test("ready connection caps release on close and distinguish per-user from globa
     const admitted = await openSocket(port);
     sockets.push(admitted);
     const admittedReady = waitForMessage(admitted, (message) => message.type === "session.ready");
-    admitted.send(JSON.stringify({
-      ...hello("connection-token-five", "connection-user-one"),
-      user_id: testAuthorityId("connection-user-one")
-    }));
+    admitted.send(JSON.stringify(hello("connection-token-five", conversationIds[4]!)));
     await admittedReady;
   } finally {
     for (const socket of sockets) socket.close();
@@ -1014,8 +1050,10 @@ test("ready connection caps release on close and distinguish per-user from globa
 });
 
 test("ready connections receive heartbeats and are reaped after the idle deadline", async () => {
+  const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-heartbeat-")));
   const runtime = createRuntimeServer({
-    conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-heartbeat-"))),
+    conversationStore: store,
+    conversationRepository: await seedLocalConversations(store, ["heartbeat-user"]),
     connectionHeartbeatMs: 10,
     connectionIdleTimeoutMs: 45
   });
@@ -1205,9 +1243,11 @@ test("outbound WebSocket byte pressure terminates the consumer and releases the 
       yield { type: "turn.completed", run_id: input.run_id, finish_reason: "stop" };
     }
   };
+  const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-outbound-pressure-")));
   const runtime = createRuntimeServer({
     createRuntime: () => agentRuntime,
-    conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-outbound-pressure-"))),
+    conversationStore: store,
+    conversationRepository: await seedLocalConversations(store, ["outbound-pressure-conversation"]),
     maxActiveRunsGlobal: 1,
     maxSocketBufferedBytes: MAX_RUNTIME_WEBSOCKET_PAYLOAD_BYTES
   });
@@ -1219,7 +1259,7 @@ test("outbound WebSocket byte pressure terminates the consumer and releases the 
   let second: WebSocket | undefined;
   try {
     const ready = waitForMessage(first, (message) => message.type === "session.ready");
-    first.send(JSON.stringify(hello("outbound-pressure-one", "outbound-pressure-user-one")));
+    first.send(JSON.stringify(hello("outbound-pressure-one", "outbound-pressure-conversation")));
     await ready;
     const closed = new Promise<void>((resolve) => first.once("close", () => resolve()));
     first.send(JSON.stringify(clientMessage("slow-consumer-run", "outbound-pressure-conversation")));
@@ -1235,7 +1275,7 @@ test("outbound WebSocket byte pressure terminates the consumer and releases the 
 
     second = await openSocket(port);
     const secondReady = waitForMessage(second, (message) => message.type === "session.ready");
-    second.send(JSON.stringify(hello("outbound-pressure-two", "outbound-pressure-user-two")));
+    second.send(JSON.stringify(hello("outbound-pressure-two", "outbound-pressure-conversation")));
     await secondReady;
     const completed = waitForMessage(second, (message) => message.type === "turn.completed" && message.run_id === "after-pressure-run");
     second.send(JSON.stringify(clientMessage("after-pressure-run", "outbound-pressure-conversation")));
@@ -1249,8 +1289,10 @@ test("outbound WebSocket byte pressure terminates the consumer and releases the 
 });
 
 test("oversized protocol fields fail as controlled messages without consuming hello", async () => {
+  const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-field-bounds-")));
   const runtime = createRuntimeServer({
-    conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-field-bounds-")))
+    conversationStore: store,
+    conversationRepository: await seedLocalConversations(store, ["bounded-installation"])
   });
   const port = await listen(runtime);
   const socket = await openSocket(port);
@@ -1481,6 +1523,7 @@ test("HTTP global gate and request deadline bound abort-ignoring authorization w
 
 test("disconnect cleanup finishes when cancellation persistence fails", async () => {
   const attemptId = randomUUID();
+  const conversationId = `disconnect-conversation-${attemptId}`;
   let storeClosed = false;
   const store = {
     localAuthority: new LocalRuntimeAuthority(),
@@ -1505,16 +1548,20 @@ test("disconnect cleanup finishes when cancellation persistence fails", async ()
       yield { type: "turn.completed", run_id: input.run_id, finish_reason: "stop" };
     }
   };
-  const runtime = createRuntimeServer({ createRuntime: () => agentRuntime, conversationStore: store });
+  const runtime = createRuntimeServer({
+    createRuntime: () => agentRuntime,
+    conversationStore: store,
+    conversationRepository: await seedLocalConversations(store, [conversationId])
+  });
   const port = await listen(runtime);
   const socket = await openSocket(port);
   let closed = false;
   try {
     const ready = waitForMessage(socket, (message) => message.type === "session.ready");
-    socket.send(JSON.stringify({ ...hello("fixture-token", "disconnect-install"), local_tools: ["file_read"] }));
+    socket.send(JSON.stringify({ ...hello("fixture-token", conversationId), local_tools: ["file_read"] }));
     await ready;
     const requested = waitForMessage(socket, (message) => message.type === "tool_call.request");
-    socket.send(JSON.stringify(clientMessage(`disconnect-run-${attemptId}`, `disconnect-conversation-${attemptId}`)));
+    socket.send(JSON.stringify(clientMessage(`disconnect-run-${attemptId}`, conversationId)));
     await requested;
     socket.close();
 
@@ -1537,9 +1584,11 @@ test("entitlement-backed turns reject a creator identity even with a permissive 
   const identityResolver: AuthIdentityResolver = {
     resolveIdentity: async () => ({ sub: entitlement.user_id, role })
   };
+  const conversationRepository = await authBoundaryConversations(entitlement, ["role-changing-install"]);
   const runtime = createRuntimeServer({
     createRuntime: () => completingRuntime(() => { runCalls += 1; }),
-    conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-creator-entitlement-"))),
+    conversationStore: new RuntimeStore(conversationRepository.localAuthority),
+    conversationRepository,
     authIdentityResolver: identityResolver,
     entitlementResolver: fixtureEntitlementResolver(entitlement),
     agentCorpusResolver: fixtureCorpusResolver(entitlement)
@@ -1550,7 +1599,7 @@ test("entitlement-backed turns reject a creator identity even with a permissive 
     role = "creator";
     const rejected = waitForMessage(socket, (message) => message.run_id === "run-role-changed"
       && (message.error as { code?: string } | undefined)?.code === "entitlement_required");
-    socket.send(JSON.stringify(clientMessage("run-role-changed", "role-change-conversation")));
+    socket.send(JSON.stringify(clientMessage("run-role-changed", "role-changing-install")));
     assert.equal(((await rejected).error as { code?: string }).code, "entitlement_required");
     assert.equal(runCalls, 0);
 
@@ -1577,9 +1626,11 @@ test("a republished Agent Corpus fails the next turn with agent_updated before m
     resolveIdentity: async () => ({ sub: entitlement.user_id, role: "user" })
   };
   let runCalls = 0;
+  const conversationRepository = await authBoundaryConversations(entitlement, ["agent-updated-install"]);
   const runtime = createRuntimeServer({
     createRuntime: () => completingRuntime(() => { runCalls += 1; }),
-    conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-agent-updated-"))),
+    conversationStore: new RuntimeStore(conversationRepository.localAuthority),
+    conversationRepository,
     authIdentityResolver: identityResolver,
     entitlementResolver: fixtureEntitlementResolver(entitlement),
     agentCorpusResolver: corpusResolver
@@ -1590,7 +1641,7 @@ test("a republished Agent Corpus fails the next turn with agent_updated before m
     currentDigest = `sha256:${"f".repeat(64)}`;
     const rejected = waitForMessage(socket, (message) => message.run_id === "agent-updated-run"
       && (message.error as { code?: string } | undefined)?.code === "agent_updated");
-    socket.send(JSON.stringify(clientMessage("agent-updated-run", "agent-updated-conversation")));
+    socket.send(JSON.stringify(clientMessage("agent-updated-run", "agent-updated-install")));
     assert.equal(((await rejected).error as { code?: string }).code, "agent_updated");
     assert.equal(runCalls, 0);
   } finally {
@@ -1618,11 +1669,6 @@ function hello(token: string, conversationId: string): Record<string, unknown> {
     auth_token: token,
     local_tools: []
   };
-}
-
-function testAuthorityId(label: string): string {
-  const hex = createHash("sha256").update(label).digest("hex");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
 
 function clientMessage(runId: string, conversationId: string): Record<string, unknown> {

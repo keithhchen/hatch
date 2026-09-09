@@ -81,7 +81,7 @@ test("runtime protocol mirrors the canonical wire schema", async () => {
     };
   };
 
-  assert.equal(schema.$id, "https://hatch.dev/protocol/hatch-wire-protocol-0.7.schema.json");
+  assert.equal(schema.$id, "https://hatch.dev/protocol/hatch-wire-protocol-0.8.schema.json");
   assert.equal(schema.$defs.protocolVersion.const, PROTOCOL_VERSION);
   assert.deepEqual(schema.$defs.clientToolName.enum, [...ClientToolNameSchema.options]);
   assert.deepEqual(schema.$defs.skillInvoked.properties.trigger.properties.tool.enum, ["shell_exec", "file_read"]);

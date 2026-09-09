@@ -8,7 +8,6 @@ import { afterEach, test } from "node:test";
 import { WebSocket } from "ws";
 import { AgentCorpusResolver, AgentCorpusSchema, CorpusKnowledgeProvider, HttpKnowledgeProvider, loadAgentCorpus, QdrantKnowledgeProvider } from "./agentCorpus.js";
 import { DeterministicAgentRuntime } from "./agentRuntime.js";
-import { createBriefSnapshot } from "./brief.js";
 import { InMemoryConversationRepository } from "./conversationRepository.js";
 import { createRuntimeServer, durableConversationId } from "./index.js";
 import { PROTOCOL_VERSION } from "./protocol.js";
@@ -227,10 +226,6 @@ test("Agent Corpus resolver loads the Registry current creator/agent path", asyn
   await writeFile(path.join(creatorRoot, "instructions/system.md"), system, "utf8");
   await writeFile(path.join(creatorRoot, "evals/evals.json"), evals, "utf8");
   const asset = (assetPath: string, content: string, id: string) => ({ id, path: assetPath, sha256: digest(content) });
-  const briefSpec = {
-    contract_version: "1" as const,
-    fields: [{ id: "review-focus", label: "What should the review focus on?", required: true }]
-  };
   await writeFile(path.join(creatorRoot, "agent.json"), JSON.stringify({
     contract_version: "1",
     creator: { id: CREATOR_ID, name: "Maya Chen" },
@@ -268,8 +263,7 @@ test("current Agent Corpus entitlements are discoverable and bind the Desktop se
     product: {
       id: PRODUCT_ID,
       name: "Signal Resume Review",
-      description: "Review a resume.",
-      brief_spec: briefSpec
+      description: "Review a resume."
     },
     instructions: { system: asset("instructions/system.md", system, "instructions-system") },
     skills: [],
@@ -305,10 +299,7 @@ test("current Agent Corpus entitlements are discoverable and bind the Desktop se
     creatorId: CREATOR_ID,
     agentId: PRODUCT_ID,
     productId: PRODUCT_ID,
-    corpusDigest: resolvedCorpus.digest,
-    briefSnapshot: createBriefSnapshot(briefSpec, [
-      { field_id: "review-focus", value: "Review the supplied resume." }
-    ])
+    corpusDigest: resolvedCorpus.digest
   });
   const runtime = createRuntimeServer({
     createRuntime: () => new DeterministicAgentRuntime(),

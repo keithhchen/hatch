@@ -1989,7 +1989,7 @@ async function handleRuntimeSocket(
   }, helloTimeoutMs);
   helloDeadline.unref();
   let binding: SessionBinding | undefined;
-  let sessionStorageConversationId: string | undefined;
+  let connectionConversation: ConversationRecord | undefined;
   let sessionSkills: RuntimeSessionSkills | undefined;
   const serverTools = new ServerToolExecutor(serverToolTimeoutMs);
   const creatorToolControlPlane = configuredCreatorToolControlPlane;
@@ -2135,7 +2135,7 @@ async function handleRuntimeSocket(
               socket.close(1013, "User authentication capacity reached");
               return;
             }
-            binding = await resolveSessionBinding(
+            const nextBinding = await resolveSessionBinding(
               message,
               entitlementResolver,
               agentCorpusResolver,
@@ -2144,8 +2144,8 @@ async function handleRuntimeSocket(
               connectionAbortController.signal
             );
             connectionAbortController.signal.throwIfAborted();
-            const requestedStorageConversationId = binding.explicit
-              ? durableConversationId(binding, message.conversation_id)
+            const requestedStorageConversationId = nextBinding.explicit
+              ? durableConversationId(nextBinding, message.conversation_id)
               : message.conversation_id;
             await repositoryReady;
             const conversation = await conversationRepository.getConversation(requestedStorageConversationId);
@@ -2155,7 +2155,13 @@ async function handleRuntimeSocket(
                 `Conversation ${message.conversation_id} was not found`
               );
             }
-            assertConversationBinding(conversation, conversationBinding(binding));
+            if (conversation.publicId !== message.conversation_id) {
+              throw new ConversationRepositoryError(
+                "conversation_binding_mismatch",
+                "Conversation public identity does not match the requested session."
+              );
+            }
+            assertConversationBinding(conversation, conversationBinding(nextBinding));
             connectionAbortController.signal.throwIfAborted();
             const releaseGlobalConnection = establishedConnectionGate.tryAcquire();
             if (!releaseGlobalConnection) {
@@ -2169,7 +2175,7 @@ async function handleRuntimeSocket(
               socket.close(1013, "Connection capacity reached");
               return;
             }
-            const releaseUserConnection = establishedConnectionPerUserGate.tryAcquire(binding.userId);
+            const releaseUserConnection = establishedConnectionPerUserGate.tryAcquire(nextBinding.userId);
             if (!releaseUserConnection) {
               releaseGlobalConnection();
               await send({
@@ -2186,39 +2192,39 @@ async function handleRuntimeSocket(
               releaseGlobalConnection,
               releaseUserConnection
             );
-            if (binding.agentCorpus && binding.agentCorpusRoot) {
+            if (nextBinding.agentCorpus && nextBinding.agentCorpusRoot) {
               serverTools.setKnowledgeScope({
-                provider: createKnowledgeProvider(binding.agentCorpusRoot, binding.agentCorpus, binding.corpusDigest),
-                creatorId: binding.agentCorpus.creator.id,
-                agentId: binding.productId,
-                corpusDigest: binding.corpusDigest
+                provider: createKnowledgeProvider(nextBinding.agentCorpusRoot, nextBinding.agentCorpus, nextBinding.corpusDigest),
+                creatorId: nextBinding.agentCorpus.creator.id,
+                agentId: nextBinding.productId,
+                corpusDigest: nextBinding.corpusDigest
               });
               serverTools.setResolvedCreatorTools(await resolveCreatorTools(
                 creatorToolControlPlane,
-                binding.agentCorpus.creator.id,
-                binding.agentCorpus.agent_id,
-                binding.agentCorpus,
+                nextBinding.agentCorpus.creator.id,
+                nextBinding.agentCorpus.agent_id,
+                nextBinding.agentCorpus,
                 connectionAbortController.signal
               ));
               connectionAbortController.signal.throwIfAborted();
             }
-            const nextSessionSkills = await buildSessionSkills(binding.agentCorpusRoot);
+            const nextSessionSkills = await buildSessionSkills(nextBinding.agentCorpusRoot);
             connectionAbortController.signal.throwIfAborted();
             await store.append({
               type: "session.started",
-              creator_id: binding.creatorId,
-              user_id: binding.userId,
-              agent_id: binding.productId,
-              product_id: binding.productId,
-              corpus_digest: binding.corpusDigest,
-              ...(binding.purchasedCorpusDigest ? {
-                purchased_corpus_digest: binding.purchasedCorpusDigest,
-                effective_corpus_digest: binding.corpusDigest,
-                version_policy: binding.versionPolicy ?? "pinned",
-                version_history: binding.versionHistory ?? []
+              creator_id: nextBinding.creatorId,
+              user_id: nextBinding.userId,
+              agent_id: nextBinding.productId,
+              product_id: nextBinding.productId,
+              corpus_digest: nextBinding.corpusDigest,
+              ...(nextBinding.purchasedCorpusDigest ? {
+                purchased_corpus_digest: nextBinding.purchasedCorpusDigest,
+                effective_corpus_digest: nextBinding.corpusDigest,
+                version_policy: nextBinding.versionPolicy ?? "pinned",
+                version_history: nextBinding.versionHistory ?? []
               } : {}),
-              ...(binding.entitlementId ? { access_mode: binding.accessMode ?? "unmetered" } : {}),
-              ...(binding.entitlementId ? { entitlement_id: binding.entitlementId } : {}),
+              ...(nextBinding.entitlementId ? { access_mode: nextBinding.accessMode ?? "unmetered" } : {}),
+              ...(nextBinding.entitlementId ? { entitlement_id: nextBinding.entitlementId } : {}),
               client_version: message.client_version,
               local_tools: message.local_tools
             });
@@ -2226,13 +2232,14 @@ async function handleRuntimeSocket(
             // Publish the connection binding only after all fallible session
             // setup is durable. A failed hello can then be retried without
             // leaving a half-ready socket that rejects every later hello.
+            binding = nextBinding;
+            connectionConversation = conversation;
             hello = message;
-            sessionStorageConversationId = requestedStorageConversationId;
             sessionSkills = nextSessionSkills;
             clearTimeout(helloDeadline);
             await send({
               type: "session.ready",
-              conversation_id: message.conversation_id,
+              conversation_id: conversation.publicId,
               accepted_protocol_version: message.protocol_version,
               runtime_capabilities: {
                 rich_assets: true,
@@ -2279,7 +2286,7 @@ async function handleRuntimeSocket(
           return;
         }
 
-        if (!hello || !binding) {
+        if (!hello || !binding || !connectionConversation) {
           await send({
             type: "turn.failed",
             error: {
@@ -2358,13 +2365,13 @@ async function handleRuntimeSocket(
         }
 
         if (message.type === "client.message") {
-          if (message.conversation_id !== hello.conversation_id) {
+          if (message.conversation_id !== connectionConversation.publicId) {
             await send({
               type: "turn.failed",
               run_id: message.run_id,
               error: {
                 code: "conversation_mismatch",
-                message: `This connection is bound to conversation ${hello.conversation_id}.`
+                message: `This connection is bound to conversation ${connectionConversation.publicId}.`
               }
             });
             return;
@@ -2382,8 +2389,7 @@ async function handleRuntimeSocket(
           }
           // Durable identity deliberately excludes corpus_digest: an Agent
           // update must not orphan an existing Account/Creator/Agent thread.
-          if (!sessionStorageConversationId) throw new Error("Ready session has no conversation binding");
-          const storageConversationId = sessionStorageConversationId;
+          const storageConversationId = connectionConversation.id;
           const clientMessageId = message.client_message_id ?? message.run_id;
           const inputDigest = clientMessageInputDigest({ ...message.message, ...(message.task_start ? { task_start: true } : {}) });
           if (reservedRunIds.has(message.run_id) || activeConversationRuns.has(storageConversationId)) {
@@ -2428,7 +2434,7 @@ async function handleRuntimeSocket(
                 }
                 await send({
                   type: "message.accepted",
-                  conversation_id: hello.conversation_id,
+                  conversation_id: connectionConversation.publicId,
                   run_id: receipt.run_id,
                   client_message_id: receipt.client_message_id
                 });
@@ -2652,14 +2658,7 @@ async function handleRuntimeSocket(
           let acceptedUser: ConversationMessage;
           try {
             await repositoryReady;
-            let conversation = await conversationRepository.getConversation(storageConversationId);
-            if (!conversation && !binding.agentCorpus) {
-              conversation = (await conversationRepository.createConversation({
-                ...conversationBinding(binding),
-                id: storageConversationId,
-                publicId: message.conversation_id
-              })).conversation;
-            }
+            const conversation = await conversationRepository.getConversation(storageConversationId);
             if (!conversation) {
               const error = new ConversationRepositoryError("conversation_not_found", `Conversation ${message.conversation_id} was not found`);
               throw error;
@@ -2764,7 +2763,7 @@ async function handleRuntimeSocket(
             const receipt = durableRun.receipt;
             await send({
               type: "message.accepted",
-              conversation_id: hello.conversation_id,
+              conversation_id: connectionConversation.publicId,
               run_id: receipt.run_id,
               client_message_id: receipt.client_message_id
             });
@@ -2810,7 +2809,7 @@ async function handleRuntimeSocket(
           try {
             await send({
               type: "message.accepted",
-              conversation_id: hello.conversation_id,
+              conversation_id: connectionConversation.publicId,
               run_id: durableRun.receipt.run_id,
               client_message_id: durableRun.receipt.client_message_id
             });

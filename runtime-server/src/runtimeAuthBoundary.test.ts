@@ -363,7 +363,7 @@ test("Runtime admits only one client hello while Registry authorization is pendi
   }
 });
 
-test("Runtime reserves connection and conversation slots before Registry awaits", async () => {
+test("Runtime reserves the bound conversation slot before Registry awaits", async () => {
   const entitlement = testEntitlement();
   let identityCalls = 0;
   let releasePendingIdentity: ((identity: { sub: string; role: "user" } | undefined) => void) | undefined;
@@ -398,15 +398,12 @@ test("Runtime reserves connection and conversation slots before Registry awaits"
     secondSocket = await connectAuthorizedSocket(boundary.port, entitlement);
 
     const firstFailure = waitForSocketMessage(firstSocket, (message) => message.run_id === "run-pending-first");
-    firstSocket.send(JSON.stringify(clientMessage("run-pending-first", "conversation-shared")));
+    firstSocket.send(JSON.stringify(clientMessage("run-pending-first")));
     await pendingStarted;
 
-    const connectionBusy = waitForSocketMessage(firstSocket, (message) => message.run_id === "run-pending-same-socket");
-    firstSocket.send(JSON.stringify(clientMessage("run-pending-same-socket", "conversation-other")));
     const conversationBusy = waitForSocketMessage(secondSocket, (message) => message.run_id === "run-pending-same-conversation");
-    secondSocket.send(JSON.stringify(clientMessage("run-pending-same-conversation", "conversation-shared")));
+    secondSocket.send(JSON.stringify(clientMessage("run-pending-same-conversation")));
 
-    assert.equal(((await connectionBusy).error as { code?: string }).code, "connection_busy");
     assert.equal(((await conversationBusy).error as { code?: string }).code, "conversation_busy");
     assert.equal(identityCalls, 3);
     assert.equal(boundary.runCalls(), 0);
