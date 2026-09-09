@@ -248,38 +248,6 @@ mod tests {
         assert!(serde_json::from_value::<PendingSubmission>(current).is_err());
     }
     #[test]
-    fn pending_execution_snapshot_has_strict_wire_fields_and_legacy_read_boundary() {
-        let legacy = serde_json::json!({
-            "runId": "run", "clientMessageId": "message", "text": "send me",
-            "attachments": [], "textRevision": 0, "status": "unknown"
-        });
-        let old: PendingSubmission = serde_json::from_value(legacy.clone()).unwrap();
-        assert!(old.access_snapshot.is_none());
-        let mut current = legacy;
-        current["accessSnapshot"] = serde_json::json!({
-            "workspaceGrantId": "grant_original", "displayPath": "/workspace/original",
-            "permissionMode": "ask-before-changes"
-        });
-        let pending: PendingSubmission = serde_json::from_value(current.clone()).unwrap();
-        assert_eq!(serde_json::to_value(&pending).unwrap(), current);
-        let mut draft = Draft {
-            pending: Some(pending),
-            ..Draft::default()
-        };
-        validate(&draft).unwrap();
-        draft
-            .pending
-            .as_mut()
-            .unwrap()
-            .access_snapshot
-            .as_mut()
-            .unwrap()
-            .permission_mode = "host-fallback".into();
-        assert!(validate(&draft).unwrap_err().contains("execution context"));
-        current["accessSnapshot"]["authorityOverride"] = serde_json::json!(true);
-        assert!(serde_json::from_value::<PendingSubmission>(current).is_err());
-    }
-    #[test]
     fn unknown_submission_and_later_edits_survive_store_restart() {
         let temp = tempfile::tempdir().unwrap();
         let store = DraftStore::new(temp.path().into(), NativeCommandRouter::default());

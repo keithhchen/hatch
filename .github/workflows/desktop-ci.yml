@@ -85,7 +85,7 @@ jobs:
         run: npm run build:web
       - name: Test desktop UAT evidence helpers
         working-directory: .
-        run: node --test scripts/uat/*.test.mjs scripts/release/*.test.mjs desktop-app/scripts/node-cli-entrypoints.test.mjs desktop-app/scripts/native-runtime.test.mjs
+        run: node --test scripts/uat/*.test.mjs scripts/release/*.test.mjs desktop-app/scripts/node-cli-entrypoints.test.mjs desktop-app/scripts/native-runtime.test.mjs desktop-app/src/renderer/conversation-owner.node-test.mjs
 
   desktop-native:
     name: Desktop native, LocalRunner, and macOS ${{ matrix.architecture }} UAT package
