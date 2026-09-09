@@ -1,4 +1,5 @@
 import path from "node:path";
+import { realpath } from "node:fs/promises";
 import { z } from "zod";
 import {
   renderUserMessageForModel,
@@ -28,7 +29,6 @@ import { KIMI_TEMPERATURE } from "./kimiProvider.js";
 import {
   isSkillResourcePath,
   listSkillResourceDirectory,
-  listSkillBundleResourcePaths,
   loadSkillBundleByName,
   parseSkillMarkdown,
   readSkillResourceByPath,
@@ -937,9 +937,11 @@ export async function executeChatTool(
 ): Promise<Record<string, unknown>> {
   const executionSignal = combineToolSignals(ctx.abortSignal, signal);
   executionSignal?.throwIfAborted();
+  const authorizedSkills = ctx.sessionSkills.records.filter((skill) => skill.enabled);
+  const authorizedResourceRoots = skillResourceRoots(authorizedSkills);
   if (name === "Skill") {
     const requestedName = typeof args.skill_name === "string" ? args.skill_name : "";
-    const loaded = await loadSkillBundleByName(requestedName, ctx.sessionSkills.records);
+    const loaded = await loadSkillBundleByName(requestedName, authorizedSkills);
     const activated: ActivatedSkill = {
       name: loaded.skill.name,
       path: loaded.skill.path,
@@ -1018,9 +1020,13 @@ export async function executeChatTool(
   }
   if (dispatch.target === "hybrid" && dispatch.spec.runtimeName === "file_list") {
     const target = String(args.path ?? "");
-    const skillResourcePath = resolveSkillResourceToolPath(target, resourceRoots, activeSkills, skillAliases);
+    const skillResourcePath = resolveSkillResourceToolPath(target, resourceRoots, activeSkills, skillAliases, authorizedSkills);
     if (skillResourcePath) {
-      return listSkillResourceDirectory(skillResourcePath, resourceRoots);
+      const resolved = await realpath(skillResourcePath);
+      if (!resolveSkillResourceToolPath(resolved, authorizedResourceRoots, [], {}, authorizedSkills)) {
+        throw new Error(`Skill resource path escapes skills root: ${target}`);
+      }
+      return listSkillResourceDirectory(resolved, authorizedResourceRoots);
     }
     requireClientToolEnabled(ctx.clientTools, dispatch.clientTool);
     if (ctx.toolBridge) {
@@ -1041,22 +1047,19 @@ export async function executeChatTool(
   }
   if (dispatch.target === "hybrid" && dispatch.spec.runtimeName === "file_read") {
     const target = String(args.path ?? "");
-    const skillResourcePath = resolveSkillResourceToolPath(target, resourceRoots, activeSkills, skillAliases);
+    const skillResourcePath = resolveSkillResourceToolPath(target, resourceRoots, activeSkills, skillAliases, authorizedSkills);
     if (skillResourcePath) {
-      if (isSkillMarkdownPath(skillResourcePath)) {
-        throw new Error("Use Skill(skill_name) to load SKILL.md; ordinary file_read is for resources in an already loaded Skill bundle.");
+      const resolved = await realpath(skillResourcePath);
+      if (isSkillMarkdownPath(skillResourcePath) || isSkillMarkdownPath(resolved)) {
+        throw new Error("Use Skill(skill_name) to load complete SKILL.md; ordinary file_read is only for authorized Skill resources.");
+      }
+      if (!resolveSkillResourceToolPath(resolved, authorizedResourceRoots, [], {}, authorizedSkills)) {
+        throw new Error(`Skill resource path escapes skills root: ${target}`);
       }
       const result: Record<string, unknown> = {
         path: skillResourcePath,
-        content: await readSkillResourceByPath(skillResourcePath, resourceRoots)
+        content: await readSkillResourceByPath(resolved, authorizedResourceRoots)
       };
-      if (isSkillMarkdownPath(skillResourcePath)) {
-        const directory = path.dirname(skillResourcePath);
-        const resourceManifest = await listSkillBundleResourcePaths(directory);
-        result.skill_directory = directory;
-        result.resource_paths = resourceManifest.paths;
-        result.resource_manifest_truncated = resourceManifest.truncated;
-      }
       return result;
     }
     if (isKnownSkillMarkdownPath(target, ctx.sessionSkills.records, skillAliases)) {
@@ -1150,7 +1153,7 @@ export function toolEventBase(
       ...(ctx?.skillRunId ? { skill_run_id: ctx.skillRunId } : {})
     };
   }
-  if (dispatch.target === "hybrid" && resolveSkillResourceToolPath(targetPath, resourceRoots, activeSkills, skillAliases)) {
+  if (dispatch.target === "hybrid" && resolveSkillResourceToolPath(targetPath, resourceRoots, activeSkills, skillAliases, ctx?.sessionSkills.records)) {
     return {
       type: "tool_call.delta",
       run_id: input.run_id,
@@ -1185,57 +1188,57 @@ function resolveSkillResourceToolPath(
   target: string,
   resourceRoots: string[],
   activeSkills: ActivatedSkill[],
-  skillAliases: Record<string, string>
+  skillAliases: Record<string, string>,
+  records: SkillRecord[] = []
 ): string | undefined {
-  const skillUriPath = resolveSkillUriPath(target, activeSkills);
+  // Activation controls instruction loading/approval, not session resource access.
+  const catalog = records.filter((skill) => skill.enabled);
+  const authorizedRoots = catalog.map((skill) => skill.directory);
+  const skillUriPath = resolveSkillUriPath(target, catalog);
   if (skillUriPath) return skillUriPath;
   const expandedTarget = expandSkillAliasPath(target, skillAliases) ?? target;
-  const activeSkillRoots = activeSkills.map((skill) => skill.directory);
-  if (isSkillResourcePath(expandedTarget, activeSkillRoots)) {
-    return path.resolve(expandedTarget);
+  if (authorizedRoots.some((root) => expandedTarget.startsWith(`${root}${path.sep}`))
+    && expandedTarget.replaceAll("\\", "/").split("/").includes("..")) {
+    throw new Error(`Invalid Skill resource path: ${target}`);
   }
-
-  const relativePath = normalizeSkillRelativePath(expandedTarget);
-  if (!relativePath || !isSkillBundleRelativePath(relativePath)) {
-    return undefined;
+  if (isSkillResourcePath(expandedTarget, authorizedRoots)) {
+    const absolute = path.resolve(expandedTarget);
+    const allowed = authorizedRoots.some((root) => {
+      const relative = path.relative(root, absolute).split(path.sep).join("/");
+      return relative === "" || relative === "SKILL.md" || isSkillBundleRelativePath(relative);
+    });
+    if (!allowed) throw new Error(`Invalid Skill resource path: ${target}`);
+    return absolute;
   }
-
-  const matchingSkills = activeSkills.filter((skill) => skillRelativeResourceMatches(skill, relativePath));
-  if (matchingSkills.length > 1) {
-    throw new Error(`Ambiguous skill resource path: ${target}. Use the full skill resource path from the activated skill context.`);
+  if (expandedTarget !== target || isSkillResourcePath(expandedTarget, resourceRoots)
+    || isSkillResourcePath(expandedTarget, activeSkills.map((skill) => skill.directory))) {
+    throw new Error(`Skill resource is not authorized: ${target}`);
   }
-  if (matchingSkills.length === 1) {
-    return path.resolve(matchingSkills[0]!.directory, relativePath);
-  }
-  if (activeSkills.length === 1) {
-    return path.resolve(activeSkills[0]!.directory, relativePath);
-  }
-  if (activeSkills.length > 1) {
-    throw new Error(`Ambiguous skill resource path: ${target}. Use the full skill resource path from the activated skill context.`);
-  }
+  // Bare relative paths always belong to the Workspace, in every turn.
   return undefined;
 }
 
 /**
  * `skill://` is the model-facing resource URI. It is deliberately resolved
- * only against an activated Skill, never against the process working
+ * only against the authorized session catalog, never against the process working
  * directory. This keeps the URI stable for the model while the filesystem
  * path remains private to Runtime.
  */
-function resolveSkillUriPath(target: string, activeSkills: ActivatedSkill[]): string | undefined {
+function resolveSkillUriPath(target: string, catalog: Array<{ name: string; directory: string }>): string | undefined {
   const match = /^skill:\/\/([^/]+)(?:\/(.*))?$/i.exec(target.trim());
-  if (!match) return undefined;
+  if (!match) {
+    if (/^skill:/i.test(target.trim())) throw new Error(`Invalid Skill resource URI: ${target}`);
+    return undefined;
+  }
   const skillName = match[1]!;
   const relativePath = (match[2] ?? "").replaceAll("\\", "/");
-  const skill = activeSkills.find((candidate) => candidate.name === skillName);
-  if (!skill) throw new Error(`Skill is not activated: ${skillName}`);
+  const matches = catalog.filter((candidate) => candidate.name === skillName);
+  if (matches.length !== 1) throw new Error(`Skill is not authorized or is ambiguous: ${skillName}`);
+  const skill = matches[0]!;
   if (!relativePath) return path.resolve(skill.directory);
   const normalized = normalizeSkillRelativePath(relativePath);
   if (!normalized || !isSkillBundleRelativePath(normalized)) {
     throw new Error(`Invalid Skill resource URI: ${target}`);
-  }
-  if (!skill.resource_manifest_truncated && !skill.resource_paths.some((resourcePath) => resourcePath === normalized)) {
-    throw new Error(`Skill resource is not declared: ${target}`);
   }
   return path.resolve(skill.directory, normalized);
 }
@@ -1260,23 +1263,15 @@ function expandSkillAliasPath(target: string, aliases: Record<string, string>): 
   const segments = target.replaceAll("\\", "/")
     .split("/")
     .filter((segment) => segment.length > 0 && segment !== ".");
-  if (segments.length < 2 || segments.some((segment) => segment === "..")) {
-    return undefined;
-  }
   const [alias, ...relativeSegments] = segments;
   const root = alias ? aliases[alias] : undefined;
   if (!root) return undefined;
+  if (segments.some((segment) => segment === "..")) throw new Error(`Invalid Skill resource alias: ${target}`);
   return path.resolve(root, ...relativeSegments);
 }
 
 function isSkillBundleRelativePath(relativePath: string): boolean {
   return skillBundleRelativeRoots.has(relativePath.split("/")[0] ?? "");
-}
-
-function skillRelativeResourceMatches(skill: ActivatedSkill, relativePath: string): boolean {
-  return skill.resource_paths.some((resourcePath) => (
-    resourcePath === relativePath || resourcePath.startsWith(`${relativePath}/`)
-  )) || skill.resource_manifest_truncated;
 }
 
 export function runtimeSkillActivationFromToolResult(toolName: string, result: Record<string, unknown>): ActivatedSkill | undefined {

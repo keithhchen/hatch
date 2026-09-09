@@ -103,7 +103,7 @@ class AsyncQueue<T> {
 type ToolEventState = {
   event: Extract<OutboundMessage, { type: "tool_call.delta" }>;
   arguments: Record<string, unknown>;
-  invalid?: boolean;
+  unavailable?: boolean;
 };
 
 /**
@@ -466,30 +466,22 @@ export class PiAgentRuntime implements AgentRuntime {
       execute: async (toolCallId, args, signal) => {
         ensureNotCancelled(ctx);
         if (signal?.aborted) throw new Error("Tool execution aborted");
-        let result: Record<string, unknown>;
-        try {
-          result = await executeChatTool(
-            input,
-            ctx,
-            toolCallId,
-            definition.function.name,
-            args as Record<string, unknown>,
-            getResourceRoots(),
-            getActiveSkills(),
-            ctx.sessionSkills.rendered.aliases,
-            workspacePathPolicy,
-            signal,
-            (skill) => {
-              setActiveSkills(mergeRuntimeActiveSkill(getActiveSkills(), skill));
-              onSkillLoaded?.(skill);
-            }
-          );
-        } catch (error) {
-          result = {
-            status: "error",
-            error: { code: "tool_failed", message: errorMessage(error) }
-          };
-        }
+        const result = await executeChatTool(
+          input,
+          ctx,
+          toolCallId,
+          definition.function.name,
+          args as Record<string, unknown>,
+          getResourceRoots(),
+          getActiveSkills(),
+          ctx.sessionSkills.rendered.aliases,
+          workspacePathPolicy,
+          signal,
+          (skill) => {
+            setActiveSkills(mergeRuntimeActiveSkill(getActiveSkills(), skill));
+            onSkillLoaded?.(skill);
+          }
+        );
         ensureNotCancelled(ctx);
         const modelResult = modelVisibleToolResult(definition.function.name, result);
         const visibleResult = boundToolResult(stripBinaryToolPayload(modelResult));
@@ -585,7 +577,7 @@ export class PiAgentRuntime implements AgentRuntime {
     if (event.type === "tool_execution_start") {
       const args = (event.args ?? {}) as Record<string, unknown>;
       let eventBase: Extract<OutboundMessage, { type: "tool_call.delta" }>;
-      let invalid = false;
+      const unavailable = !agent.state.tools.some((tool) => tool.name === event.toolName);
       try {
         eventBase = toolEventBase(
           input,
@@ -598,7 +590,6 @@ export class PiAgentRuntime implements AgentRuntime {
           ctx
         );
       } catch (error) {
-        invalid = true;
         eventBase = {
           type: "tool_call.delta",
           run_id: input.run_id,
@@ -615,7 +606,7 @@ export class PiAgentRuntime implements AgentRuntime {
       const visibleEventBase = deliveryWorkflow
         ? redactDeliveryWriteArguments(eventBase)
         : eventBase;
-      toolEvents.set(event.toolCallId, { event: visibleEventBase, arguments: args, invalid });
+      toolEvents.set(event.toolCallId, { event: visibleEventBase, arguments: args, unavailable });
       queue.push({ ...visibleEventBase, status: "requested" });
       queue.push({
         type: "assistant.delta",
@@ -651,11 +642,14 @@ export class PiAgentRuntime implements AgentRuntime {
           ...eventBase,
           status: "failed",
           error: {
-            code: state?.invalid ? "invalid_tool_call" : "tool_failed",
-            message: state?.invalid ? "The model requested an unavailable tool." : JSON.stringify(visibleResult)
+            code: eventBase.error?.code ?? "tool_failed",
+            message: eventBase.error?.message ?? (event.result.content
+              .flatMap((block: { type: string; text?: string }) =>
+                block.type === "text" && typeof block.text === "string" ? [block.text] : [])
+              .join("\n") || JSON.stringify(visibleResult))
           }
         });
-        if (state?.invalid) {
+        if (state?.unavailable) {
           setTerminalError(new Error(`Unknown Pi tool: ${event.toolName}`));
           agent.abort();
         }

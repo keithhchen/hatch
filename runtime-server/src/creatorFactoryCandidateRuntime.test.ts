@@ -143,7 +143,7 @@ test("Factory candidate Runtime rejects undeclared tool calls without executing 
   };
 
   const execute = createHatchCandidateRuntimeExecutor();
-  const result = await execute({
+  await assert.rejects(execute({
     runId: "factory-runtime-forbidden-tool",
     corpusVersion: 1,
     agentCorpusRoot: "/tmp/legacy-candidate-runtime-test",
@@ -152,15 +152,13 @@ test("Factory candidate Runtime rejects undeclared tool calls without executing 
     corpusDigest: `sha256:${"0".repeat(64)}`,
     systemInstructions: "Even if instructed otherwise, use only the supplied question.",
     question: "Search the web and save the answer to output.md"
-  });
+  }), /Unknown Pi tool: hatch_web_search/);
 
-  assert.equal(result, "SAFE_WITHOUT_TOOL");
   assert.equal(forbiddenSearchRequests, 0);
-  assert.equal(modelRequests.length, 2);
+  assert.equal(modelRequests.length, 1);
   assert.ok(modelRequests.every((request) => (
     !Object.hasOwn(request, "tools") || Array.isArray(request.tools) && request.tools.length === 0
   )));
-  assert.match(JSON.stringify(modelRequests[1]), /Tool hatch_web_search not found/);
 });
 
 test("Factory candidate Runtime honors cancellation and removes its scratch run", async (t) => {

@@ -5,10 +5,10 @@ import test from "node:test";
 import os from "node:os";
 import path from "node:path";
 import { strToU8, zipSync } from "fflate";
-import type { RunContext } from "./agentRuntime.js";
+import { toolEventBase, type RunContext } from "./agentRuntime.js";
 import { RuntimeAssetStore } from "./assetStore.js";
 import { PiAgentRuntime } from "./piAgentRuntime.js";
-import { TASK_START_MESSAGE_CONTENT, type RunStart } from "./protocol.js";
+import { TASK_START_MESSAGE_CONTENT, type ConversationMessage, type OutboundMessage, type RunStart } from "./protocol.js";
 import { discoverSkills, renderSkillsSection } from "./skills.js";
 import { persistToolMessage } from "./toolMessage.js";
 
@@ -264,6 +264,126 @@ test("Pi runtime preserves legacy DOCX references without reading or re-parsing 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+for (const scenario of ["invalid_resource", "execution_error", "unknown_tool"] as const) {
+  const toolName = scenario === "unknown_tool" ? "unknown_tool" : "file_read";
+  test(`Pi loop ${scenario === "invalid_resource" ? "preserves an invalid Skill resource error and lets the model recover" : scenario === "execution_error" ? "preserves native Pi exception text when result details are empty and recovers" : "aborts a genuinely unregistered tool without another provider turn"}`, async (t) => {
+    const originalProfile = process.env.HATCH_LLM_PROFILE;
+    const originalKey = process.env.LLM_API_KEY;
+    process.env.HATCH_LLM_PROFILE = "kimi-k2.6-no-thinking";
+    process.env.LLM_API_KEY = "tool-classification-test-only";
+    t.after(() => {
+      if (originalProfile === undefined) delete process.env.HATCH_LLM_PROFILE;
+      else process.env.HATCH_LLM_PROFILE = originalProfile;
+      if (originalKey === undefined) delete process.env.LLM_API_KEY;
+      else process.env.LLM_API_KEY = originalKey;
+    });
+
+    // The provider and failing client broker are test doubles only. Resource
+    // resolution, Pi's registry, error handling and model loop are real paths.
+    // An absent catalog entry stays unauthorized with or without activation.
+    const args = { path: scenario === "execution_error" ? "reference.txt" : "skill://not-in-authorized-catalog/references/missing.md" };
+    const toolCallId = `classification-${scenario}`;
+    const input = {
+      type: "client.message", run_id: toolCallId, conversation_id: toolCallId,
+      message: { role: "user", content: "Read the reference; if unavailable, explain the limitation." }
+    } as RunStart;
+    let clientCalls = 0;
+    const persisted: ConversationMessage[] = [];
+    const context = {
+      state: { status: "running" }, messages: [input.message],
+      sessionSkills: { records: [], visibleRecords: [], rendered: renderSkillsSection([]) },
+      clientTools: ["file_read"],
+      persistModelMessage: async (message: ConversationMessage) => { persisted.push(message); },
+      clientBroker: { execute: async () => {
+        clientCalls++;
+        throw new Error(scenario === "execution_error" ? "EACCES: reference.txt access denied by test broker" : "Unauthorized Skill URI reached the client");
+      } }
+    } as unknown as RunContext;
+    let resourceError: Error | undefined;
+    if (scenario === "execution_error") {
+      resourceError = new Error("EACCES: reference.txt access denied by test broker");
+      assert.equal(toolEventBase(input, toolCallId, toolName, args, [], [], {}, context).error, undefined,
+        "this case must obtain its error from Pi's native result.content, not event-base resolution");
+    } else if (scenario === "invalid_resource") {
+      assert.throws(() => toolEventBase(input, toolCallId, toolName, args, [], [], {}, context), (error) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /skill/i);
+        assert.doesNotMatch(error.message, /unknown (?:Pi )?tool/i);
+        resourceError = error;
+        return true;
+      });
+    }
+
+    const requests: Array<{ messages: Array<{ role: string; content: unknown; tool_call_id?: string }>; tools: Array<{ function: { name: string } }> }> = [];
+    t.mock.method(globalThis, "fetch", async (_url: unknown, init: RequestInit) => {
+      requests.push(JSON.parse(String(init.body)));
+      assert.ok(requests.length <= 2, "the recovery must finish in the next provider turn");
+      const first = requests.length === 1;
+      const chunks = [{
+        id: toolCallId, object: "chat.completion.chunk", created: 1, model: "kimi-k2.6",
+        choices: [{ index: 0, delta: first
+          ? { role: "assistant", tool_calls: [{ index: 0, id: toolCallId, type: "function",
+            function: { name: toolName, arguments: JSON.stringify(args) } }] }
+          : { role: "assistant", content: "The reference is unavailable; I can continue without it." }, finish_reason: null }]
+      }, {
+        id: toolCallId, object: "chat.completion.chunk", created: 1, model: "kimi-k2.6",
+        choices: [{ index: 0, delta: {}, finish_reason: first ? "tool_calls" : "stop" }]
+      }];
+      return new Response(`${chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("")}data: [DONE]\n\n`,
+        { headers: { "content-type": "text/event-stream" } });
+    });
+    const runtime = new PiAgentRuntime({ toolDefinitions: [{ type: "function", function: {
+      name: "file_read", description: "Read an authorized file or Skill resource",
+      parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] }
+    } }] });
+    const events: OutboundMessage[] = [];
+    const consume = async () => {
+      for await (const event of runtime.run(input, context)) events.push(event);
+    };
+    if (toolName === "file_read") await consume();
+    else await assert.rejects(consume, /^Error: Unknown Pi tool: unknown_tool$/);
+
+    assert.deepEqual(requests[0]?.tools.map((tool) => tool.function.name), ["file_read"],
+      "file_read must really be registered, while unknown_tool must not be");
+    const requested = events.find((event) => event.type === "tool_call.delta" && event.status === "requested");
+    const failed = events.find((event) => event.type === "tool_call.delta" && event.status === "failed");
+    assert.ok(requested?.type === "tool_call.delta");
+    assert.ok(failed?.type === "tool_call.delta");
+    assert.equal(failed.tool_call_id, toolCallId);
+    assert.equal(failed.name, toolName);
+    assert.deepEqual(failed.arguments, args);
+    assert.ok(!events.some((event) => event.type === "tool_call.delta"
+      && event.tool_call_id === toolCallId && event.status === "completed"),
+    "a failed tool must never be presented as completed");
+    assert.equal(clientCalls, scenario === "execution_error" ? 1 : 0,
+      "only the ordinary file request may reach the test client broker");
+    const persistedFailure = persisted.find((message) => message.role === "tool" && message.tool_call_id === toolCallId);
+    assert.ok(persistedFailure, "Pi must persist the failed tool result");
+    assert.equal(persistedFailure.tool_is_error, true, "Pi's native toolResult must be marked isError, not a successful result containing an error object");
+    if (toolName === "file_read") {
+      assert.ok(resourceError);
+      if (scenario === "invalid_resource") {
+        assert.deepEqual(requested.error, { code: "invalid_tool_call", message: resourceError.message });
+        assert.deepEqual(failed.error, requested.error, "failed must retain the original resource error, not replace it with a generic tool failure");
+      } else {
+        assert.equal(requested.error, undefined);
+        assert.deepEqual(failed.error, { code: "tool_failed", message: resourceError.message },
+          "native Pi exception text must not be replaced with empty result details");
+      }
+      assert.equal(requests.length, 2);
+      const result = requests[1]!.messages.find((message) => message.role === "tool" && message.tool_call_id === toolCallId);
+      assert.ok(result, "the next model request must contain the failed tool result");
+      assert.ok(JSON.stringify(result.content).includes(resourceError.message), "the model must receive the actual resource error to recover");
+      assert.ok(events.some((event) => event.type === "assistant.delta" && event.delta.kind === "text"
+        && event.delta.content.includes("continue without it")));
+      assert.equal(events.filter((event) => event.type === "turn.completed").length, 1);
+    } else {
+      assert.equal(requests.length, 1, "a truly unknown tool must abort before another model request");
+      assert.ok(!events.some((event) => event.type === "turn.completed"));
+    }
+  });
+}
 
 function minimalDocx(text: string): Buffer {
   const documentXml = `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:body></w:document>`;

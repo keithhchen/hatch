@@ -257,7 +257,7 @@ export async function listSkillResourceDirectory(resourcePath: string, resourceR
   return {
     entries: await Promise.all(entries.map(async (entry) => {
       const absolute = path.join(dir, entry.name);
-      const info = await stat(absolute);
+      const info = await lstat(absolute);
       return {
         path: absolute,
         kind: entry.isDirectory() ? "directory" : entry.isFile() ? "file" : "other",
