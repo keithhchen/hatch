@@ -201,52 +201,6 @@ fn grant_tree(root: &Path, path: &Path, sid: PSID, rights: u32) -> Result<()> {
     }
     Ok(())
 }
-struct Attributes {
-    storage: Vec<usize>,
-    initialized: bool,
-}
-impl Attributes {
-    fn new(count: u32) -> Result<Self> {
-        let mut bytes = 0;
-        unsafe {
-            InitializeProcThreadAttributeList(null_mut(), count, 0, &mut bytes);
-        }
-        if bytes == 0 {
-            return Err(win_error("attribute size"));
-        }
-        let mut result = Self {
-            storage: vec![0; bytes.div_ceil(size_of::<usize>())],
-            initialized: false,
-        };
-        if unsafe { InitializeProcThreadAttributeList(result.ptr(), count, 0, &mut bytes) } == 0 {
-            return Err(win_error("attribute init"));
-        }
-        result.initialized = true;
-        Ok(result)
-    }
-    fn ptr(&mut self) -> LPPROC_THREAD_ATTRIBUTE_LIST {
-        self.storage.as_mut_ptr().cast()
-    }
-    fn set(&mut self, key: u32, ptr: *const c_void, bytes: usize) -> Result<()> {
-        if unsafe {
-            UpdateProcThreadAttribute(self.ptr(), 0, key as usize, ptr, bytes, null_mut(), null())
-        } == 0
-        {
-            Err(win_error("attribute update"))
-        } else {
-            Ok(())
-        }
-    }
-}
-impl Drop for Attributes {
-    fn drop(&mut self) {
-        if self.initialized {
-            unsafe {
-                DeleteProcThreadAttributeList(self.ptr());
-            }
-        }
-    }
-}
 struct KillJob(Handle);
 impl KillJob {
     fn terminate_and_wait(&self) -> Result<()> {
@@ -315,12 +269,6 @@ fn launch(
             return Err(win_error("inherit handle"));
         }
     }
-    let mut attributes = Attributes::new(1)?;
-    attributes.set(
-        PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-        handles.as_ptr().cast(),
-        size_of_val(&handles),
-    )?;
     unsafe {
         let job = CreateJobObjectW(null(), null());
         if job.is_null() {
@@ -338,14 +286,13 @@ fn launch(
         {
             return Err(win_error("SetInformationJobObject"));
         }
-        let mut si: STARTUPINFOEXW = zeroed();
-        si.StartupInfo.cb = size_of_val(&si) as u32;
-        si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-        si.StartupInfo.lpDesktop = identity.desktop_name.as_ptr().cast_mut();
-        si.StartupInfo.hStdInput = handles[0];
-        si.StartupInfo.hStdOutput = handles[1];
-        si.StartupInfo.hStdError = handles[2];
-        si.lpAttributeList = attributes.ptr();
+        let mut si: STARTUPINFOW = zeroed();
+        si.cb = size_of_val(&si) as u32;
+        si.dwFlags = STARTF_USESTDHANDLES;
+        si.lpDesktop = identity.desktop_name.as_ptr().cast_mut();
+        si.hStdInput = handles[0];
+        si.hStdOutput = handles[1];
+        si.hStdError = handles[2];
         let exe_w = wide(exe);
         let mut command = wide(
             std::iter::once(exe.to_string_lossy().into_owned())
@@ -366,13 +313,10 @@ fn launch(
             0, // Do not load a user profile or use NETCREDENTIALS_ONLY.
             exe_w.as_ptr(),
             command.as_mut_ptr(),
-            EXTENDED_STARTUPINFO_PRESENT
-                | CREATE_SUSPENDED
-                | CREATE_UNICODE_ENVIRONMENT
-                | CREATE_NO_WINDOW,
+            CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW,
             env.as_ptr().cast(),
             cwd.as_ptr(),
-            &mut si.StartupInfo,
+            &mut si,
             &mut pi,
         ) == 0
         {

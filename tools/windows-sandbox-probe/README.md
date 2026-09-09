@@ -22,7 +22,7 @@ unelevated 当前用户派生 token 不能满足宿主凭据/internal DB 读隔�
 -> AssignProcessToJobObject -> 核对实际 child TokenUser / restricted capability
 -> ResumeThread -> 有界等待 -> TerminateJobObject -> QueryInformationJobObject 确认 ActiveProcesses=0。
 
-- 只继承 stdin/stdout/stderr 三个显式句柄；无通用命令服务。
+- 只提交 STARTUPINFO 的 stdin/stdout/stderr 三个标准流；其余新建 token/Job 句柄不可继承。无通用命令服务。
 - 白名单完整重建环境，不继承宿主 PATH、账户密码、云凭据或 NODE_OPTIONS。
 - 独立 desktop 的 ACL 只属于新创建对象，不改 Winsta0/Default 或系统 ACL。
 - runtime 仅复制；grant 的目标限定随机新建 temp 根及后代，并拒绝已存在 reparse point。
@@ -72,3 +72,9 @@ Windows 原生编译与 runtime 准备通过，三个入口在 CreateProcessAsUs
 不添加机器特权或宿主执行 fallback。这不解决普通非管理员产品部署的 broker/bootstrap 设计。
 微软 API 契约：https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-createprocesswithtokenw
 每轮必须绑定实际 source SHA；不得拿旧 SHA 的证据代替新版本验证。
+
+第二轮 SHA `c45aeb53089a1ff7c39b23d19ab26c8a612c2cb3` / run `34346372024`：
+三个 CreateProcessWithTokenW 均返回 87，未运行脚本，清理全部通过。
+下一轮移除 secondary-logon 路径的扩展 startup/attribute-list 参数，改用文档标准 STARTUPINFOW；
+保留相同 restricted token、显式 private desktop、标准流、挂起及 Job 绑定。
+这是一项参数层假设，需要真实 CI 确认，不改变读写权限或跳过 negative checks。
