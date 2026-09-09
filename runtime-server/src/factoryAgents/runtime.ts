@@ -69,12 +69,12 @@ export class WorkbenchRuntime {
     }
   }
   private progressTool(id: string, turn: number): AgentTool {
-    return { name: "report_progress", label: "报告完成度", description: "Before every final chat response, report task completion as a single integer 0–100 based on actual work. Call after file writes and other actions. 100 means requirements completed, not perfect quality or expert approval.", parameters: Type.Object({ percentage: Type.Integer({ minimum: 0, maximum: 100 }) }), execute: async (_id, raw) => {
+    return { name: "report_progress", label: "报告完成度", description: "Before every final chat response, report task completion as a single integer 0–100 based on actual work. Call after file writes and other actions. 100 means requirements completed, not perfect quality or expert approval. This tool only records progress; its receipt is not user confirmation or permission to begin another task.", parameters: Type.Object({ percentage: Type.Integer({ minimum: 0, maximum: 100 }) }), execute: async (_id, raw) => {
       const { percentage } = raw as { percentage: number };
       if (!Number.isInteger(percentage) || percentage < 0 || percentage > 100) throw new Error("percentage must be an integer from 0 to 100");
       await this.store.update(id, s => { if (s.turn !== turn) throw new Error("Stale turn"); s.progress = { percentage, status: "ready", turn, revision: s.revision }; });
       this.emit(id, "progress");
-      return result(percentage);
+      return result({ percentage, recorded: true });
     } };
   }
   private async run(id: string, systemPrompt: string, history: AgentMessage[], userText: string, tools: AgentTool[], controller: AbortController): Promise<AgentMessage[]> {
