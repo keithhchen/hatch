@@ -471,11 +471,17 @@ fn preserves_timeout_and_bounded_output_semantics() {
     assert_eq!(timeout["timed_out"], true);
     assert_eq!(timeout["stdout"], "before-timeout");
 
-    let bounded = fixture.run_with_timeout("/usr/bin/yes x", 100);
+    // Output truncation must not depend on producing 1 MiB within 100ms on
+    // a shared CI runner. Emit a finite 2 MiB and test timeout independently.
+    let bounded = fixture.run_with_timeout(
+        "/usr/bin/awk 'BEGIN { for (i = 0; i < 1048576; i++) print \"x\" }'",
+        30_000,
+    );
     let stdout = bounded["stdout"].as_str().unwrap();
     let stderr = bounded["stderr"].as_str().unwrap();
     assert!(stdout.len() + stderr.len() <= 1024 * 1024);
-    assert_eq!(bounded["timed_out"], true);
+    assert_eq!(bounded["timed_out"], false);
+    assert_eq!(bounded["exit_code"], 0);
     assert_eq!(bounded["stdout_truncated"], true);
     fixture.assert_scratch_cleaned();
 }
