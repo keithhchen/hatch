@@ -72,7 +72,7 @@ export function hatchTool(store: WorkbenchStore, id: string, changed: () => void
       }
       if (args.operation === "cancel") {
         if (!session.hatch?.lastRunId) throw new Error("No target run to cancel");
-        await cancelTarget(target, token, session.hatch.lastRunId, signal);
+        await cancelTarget(target, token, session.hatch.conversationId, session.hatch.lastRunId, signal);
         return result("Cancellation requested through Hatch Runtime; inspect status to confirm.");
       }
       if (!args.message?.trim()) throw new Error("start/continue require message: the actual customer request or reply. brief_answers and material_paths do not replace it.");
@@ -126,16 +126,16 @@ export function hatchTool(store: WorkbenchStore, id: string, changed: () => void
 }
 
 function socketUrl(value: string): string { const u = new URL(value); u.protocol = u.protocol === "https:" ? "wss:" : u.protocol === "http:" ? "ws:" : u.protocol; if (u.pathname === "/") u.pathname = "/runtime"; u.search = ""; return u.href; }
-function connect(target: TargetBinding, token: string): WebSocket {
+function connect(target: TargetBinding, token: string, conversationId: string): WebSocket {
   const ws = new WebSocket(socketUrl(target.runtimeUrl), { maxPayload: 8 * 1024 * 1024, handshakeTimeout: 20000 });
-  ws.once("open", () => ws.send(JSON.stringify({ type: "client.hello", protocol_version: PROTOCOL_VERSION, auth_token: token, ...(target.entitlementId ? { entitlement_id: target.entitlementId } : { product_id: target.productId }), local_tools: [] })));
+  ws.once("open", () => ws.send(JSON.stringify({ type: "client.hello", protocol_version: PROTOCOL_VERSION, conversation_id: conversationId, auth_token: token, ...(target.entitlementId ? { entitlement_id: target.entitlementId } : { product_id: target.productId }), local_tools: [] })));
   return ws;
 }
-function verifyReady(event: Record<string, any>, target: TargetBinding): void {
-  if (event.accepted_protocol_version !== PROTOCOL_VERSION || event.creator_id !== target.creatorId || event.product_id !== target.productId) throw new Error("Hatch Runtime bound a different Agent; target was not executed");
+function verifyReady(event: Record<string, any>, target: TargetBinding, conversationId: string): void {
+  if (event.accepted_protocol_version !== PROTOCOL_VERSION || event.creator_id !== target.creatorId || event.product_id !== target.productId || event.conversation_id !== conversationId) throw new Error("Hatch Runtime bound a different Agent or conversation; target was not executed");
 }
 async function runTarget(target: TargetBinding, token: string, conversationId: string, runId: string, message: string, signal: AbortSignal | undefined, observe: (event: Record<string, any>) => void, submitting: () => void): Promise<void> {
-  const ws = connect(target, token);
+  const ws = connect(target, token, conversationId);
   let sent = false;
   try {
     await new Promise<void>((resolve, reject) => {
@@ -152,7 +152,7 @@ async function runTarget(target: TargetBinding, token: string, conversationId: s
           const event = JSON.parse(String(data));
           observe(event);
           if (event.type === "session.ready") {
-            verifyReady(event, target);
+            verifyReady(event, target, conversationId);
             if (sent) throw new Error("Duplicate session.ready");
             sent = true;
             submitting();
@@ -168,13 +168,13 @@ async function runTarget(target: TargetBinding, token: string, conversationId: s
     });
   } finally { ws.close(); setTimeout(() => ws.terminate(), 1000).unref(); }
 }
-async function cancelTarget(target: TargetBinding, token: string, runId: string, signal?: AbortSignal): Promise<void> {
-  const ws = connect(target, token);
+async function cancelTarget(target: TargetBinding, token: string, conversationId: string, runId: string, signal?: AbortSignal): Promise<void> {
+  const ws = connect(target, token, conversationId);
   try {
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("Cancel connection timeout")), 20000);
       ws.once("error", reject);
-      ws.on("message", data => { try { const e = JSON.parse(String(data)); if (e.type === "session.ready") { verifyReady(e, target); ws.send(JSON.stringify({ type: "turn.cancel", run_id: runId, reason: "Evaluator requested cancellation" }), error => error ? reject(error) : resolve()); clearTimeout(timer); } } catch (error) { clearTimeout(timer); reject(error); } });
+      ws.on("message", data => { try { const e = JSON.parse(String(data)); if (e.type === "session.ready") { verifyReady(e, target, conversationId); ws.send(JSON.stringify({ type: "turn.cancel", run_id: runId, reason: "Evaluator requested cancellation" }), error => error ? reject(error) : resolve()); clearTimeout(timer); } } catch (error) { clearTimeout(timer); reject(error); } });
       if (signal?.aborted) { clearTimeout(timer); reject(signal.reason); }
       ws.once("close", () => { clearTimeout(timer); reject(new Error("Cancel connection closed")); });
     });
