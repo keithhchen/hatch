@@ -67,7 +67,7 @@ export function hatchTool(store: WorkbenchStore, id: string, changed: () => void
         const bytes = Buffer.from(encoded, "base64");
         const markdown = ["text/markdown", "text/plain"].includes(mime);
         const record = await store.put(id, `output/results/asset-${digest(args.asset_id).slice(7, 23)}.${markdown ? "md" : "bin"}`, bytes, { actor: "host", readonly: true, mimeType: mime });
-        if (markdown) await store.put(id, "output/RESULT.md", bytes, { actor: "host", readonly: true, mimeType: mime });
+        if (markdown) await store.put(id, "output/RESULT.md", bytes, { actor: "host", readonly: true, mimeType: mime, origin: { sessionId: id, path: record.path } });
         changed(); return result(record);
       }
       if (args.operation === "cancel") {
@@ -107,7 +107,7 @@ export function hatchTool(store: WorkbenchStore, id: string, changed: () => void
         }, () => { submitted = true; });
         if (output.trim()) {
           await store.put(id, `output/results/${runId}.md`, Buffer.from(output), { actor: "host", readonly: true });
-          await store.put(id, "output/RESULT.md", Buffer.from(output), { actor: "host", readonly: true });
+          await store.put(id, "output/RESULT.md", Buffer.from(output), { actor: "host", readonly: true, origin: { sessionId: id, path: `output/results/${runId}.md` } });
         }
         await store.update(id, s => { if (s.hatch?.lastRunId === runId) s.hatch.pending = false; });
         changed();
