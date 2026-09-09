@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useLayoutEffe
 import { draftAttachmentReference } from "./conversation-draft.js";
 import { createConversationSessionManager } from "./conversation-session.js";
 import { DesktopComposerInput } from "./desktop-composer-input.jsx";
+import { ConversationRuntimeProvider } from "./conversation-runtime-provider.jsx";
 import { createRoot } from "react-dom/client";
 import "@hatch/ui/fonts";
 import "@hatch/ui/theme.css";
@@ -24,12 +25,10 @@ import { emit, listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { availableMonitors, getCurrentWindow, PhysicalPosition, PhysicalSize } from "@tauri-apps/api/window";
 import {
-  AssistantRuntimeProvider,
   ComposerPrimitive,
   MessagePartPrimitive,
   MessagePrimitive,
   ThreadPrimitive,
-  useExternalStoreRuntime,
   useMessage
 } from "@assistant-ui/react";
 import { StreamdownTextPrimitive } from "@assistant-ui/react-streamdown";
@@ -1637,7 +1636,7 @@ function App() {
     return true;
   }
 
-  const runtime = useExternalStoreRuntime({
+  const runtimeAdapter = {
     messages,
     isRunning: running,
     isLoading: status === "Loading history...",
@@ -1651,7 +1650,7 @@ function App() {
     unstable_capabilities: {
       copy: true
     }
-  });
+  };
 
   const startImeComposition = useCallback(() => {
     imeRef.current.composing = true;
@@ -3751,7 +3750,7 @@ function App() {
             <NativeContextMenuContext.Provider value={showNativeContextMenu}>
               <ConversationSessionContext.Provider key={conversationSession.scope.key} value={conversationSession}>
               <ConversationAssetContext.Provider value={{ serverUrl, accessToken: buyerSession?.accessToken, entitlementId: selectedEntitlementId, conversationId }}>
-              <AssistantRuntimeProvider runtime={runtime}>
+              <ConversationRuntimeProvider adapter={runtimeAdapter}>
                 <ThreadPrimitive.Root className="thread-root">
                 <ThreadPrimitive.Viewport
                   ref={viewportRef}
@@ -3860,7 +3859,7 @@ function App() {
                   </ComposerPrimitive.Root>
                 </ThreadPrimitive.ViewportFooter>
                 </ThreadPrimitive.Root>
-              </AssistantRuntimeProvider>
+              </ConversationRuntimeProvider>
               </ConversationAssetContext.Provider>
               </ConversationSessionContext.Provider>
             </NativeContextMenuContext.Provider>
