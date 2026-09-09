@@ -10,8 +10,10 @@ import { MAX_CONTEXT_ASSET_BYTES, parseInboundMessage, type AssetAttachment } fr
 
 class FakeObjectStore implements ArtifactObjectStore {
   readonly objects = new Map<string, Buffer>();
+  readonly putOptions: ObjectStorePutOptions[] = [];
 
   async put(key: string, content: Buffer | string, _options?: ObjectStorePutOptions): Promise<ObjectStoreObject> {
+    this.putOptions.push(_options ?? {});
     const bytes = Buffer.isBuffer(content) ? Buffer.from(content) : Buffer.from(content, "utf8");
     const existing = this.objects.get(key);
     if (existing && !existing.equals(bytes)) throw new Error(`Immutable object key already contains different bytes: ${key}`);
@@ -149,6 +151,9 @@ test("production asset store persists bytes in cloud object storage and returns 
       storageReferencePrefix: "oss://private-hatch-assets"
     });
     const reference: AssetReference = await store.put(attachment);
+    assert.deepEqual(objectStore.putOptions[0]?.metadata, {
+      "attachment-id": attachment.attachment_id, sha256: attachment.sha256
+    });
     assert.equal(reference.storage_ref, "oss://private-hatch-assets/hatch/runtime-assets/asset_cloud_1");
     assert.deepEqual([...objectStore.objects.keys()], ["hatch/runtime-assets/asset_cloud_1"]);
     assert.deepEqual(await store.read(reference.asset_id, reference.storage_ref), bytes);

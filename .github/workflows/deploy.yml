@@ -301,27 +301,22 @@ jobs:
             done
             exit 1
           fi
-          # Exercise the same signed OSS GET path used by Runtime chat assets
-          # before production traffic can reach it. A missing object is the
-          # expected result; a signature, endpoint, credential, or permission
-          # error must fail this deployment instead of waiting for a user
-          # attachment to expose it.
+          # Exercise the actual Runtime attachment PUT (including metadata)
+          # and read-back. GET alone does not validate signed PUT headers.
           "${compose[@]}" exec -T runtime node --input-type=module -e '
-            const { runtimeObjectStoreFromEnvironment } = await import("./dist/assetStore.js");
-            const { isObjectStoreNotFound } = await import("./dist/creatorLearning/objectStore.js");
-            const store = runtimeObjectStoreFromEnvironment(process.env);
-            if (!store) throw new Error("Runtime object store is not configured");
-            const configuredCreatorPrefix = process.env.HATCH_CREATOR_OBJECT_STORE_PREFIX?.trim() || "hatch";
-            const prefix = (process.env.HATCH_RUNTIME_OBJECT_STORE_PREFIX?.trim()
-              || `${configuredCreatorPrefix}/runtime-assets`).replace(/^\/+|\/+$/g, "");
-            const probeKey = `${prefix}/__hatch_runtime_object_store_probe__`;
-            try {
-              await store.get(probeKey);
-              console.log(`Runtime object storage probe: signed GET verified (${probeKey} already exists)`);
-            } catch (error) {
-              if (!isObjectStoreNotFound(error)) throw error;
-              console.log(`Runtime object storage probe: signed GET verified (${probeKey} is absent)`);
+            const { createHash, randomUUID } = await import("node:crypto");
+            const { runtimeAssetStoreFromEnvironment } = await import("./dist/assetStore.js");
+            const store = runtimeAssetStoreFromEnvironment(process.env);
+            const bytes = Buffer.from("Hatch Runtime attachment storage probe v1");
+            const reference = await store.put({ kind: "asset",
+              attachment_id: "runtime-storage-probe-v1", asset_id: `__hatch_runtime_put_probe_${randomUUID()}__`,
+              display_name: "storage-probe.txt", media_type: "text/plain",
+              source_bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"),
+              data_base64: bytes.toString("base64") });
+            if (!(await store.read(reference.asset_id, reference.storage_ref)).equals(bytes)) {
+              throw new Error("Runtime attachment storage read-back mismatch");
             }
+            console.log("Runtime attachment storage probe: PUT and read-back verified");
           '
           # The deployed Factory Node profile must be usable from the
           # actual Registry network, not merely present in /opt/hatch/.env. A

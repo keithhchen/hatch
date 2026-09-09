@@ -120,7 +120,9 @@ export class RuntimeAssetStore {
     await this.objectStore!.put(key, bytes, {
       contentType: attachment.media_type,
       metadata: {
-        attachment_id: attachment.attachment_id,
+        // OSS metadata becomes HTTP headers. Underscores are dropped on the
+        // production request path, invalidating the signature for PUT.
+        "attachment-id": attachment.attachment_id,
         sha256: attachment.sha256
       },
       immutable: true
