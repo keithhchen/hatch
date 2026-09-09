@@ -94,11 +94,20 @@ fn timeout_preserves_partial_output_and_stops_both_processes() {
     child.assert_running();
 
     let output = ok(running.receive(Duration::from_secs(40)));
-    assert_eq!(output["timed_out"], true, "{output}");
-    assert_eq!(output["stdout"], "before-stop", "{output}");
-    assert_eq!(output["stderr"], "before-stop-error", "{output}");
     parent.assert_exited();
     child.assert_exited();
+    assert_eq!(output["timed_out"], true, "{output}");
+    assert_eq!(output["stdout"], "before-stop", "{output}");
+    // Terminated Windows PowerShell may append its CLIXML diagnostic header.
+    // The Runner preserves raw stderr; require our pre-timeout bytes without
+    // pretending the shell cannot emit additional shutdown diagnostics.
+    assert!(
+        output["stderr"]
+            .as_str()
+            .unwrap()
+            .starts_with("before-stop-error"),
+        "{output}"
+    );
 }
 
 fn request(id: &str, command: &str, timeout_ms: u64) -> ToolCallRequest {
