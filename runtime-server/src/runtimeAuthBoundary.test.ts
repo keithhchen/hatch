@@ -191,6 +191,48 @@ test("Runtime blocks a real WebSocket turn when its entitlement is revoked after
   }
 });
 
+test("existing buyer uses the current Product across Library, snapshot, hello and turns after republication", { timeout: 10000 }, async () => {
+  const scenario = await createRevocableRuntimeScenario();
+  const headers = { authorization: "Bearer opaque-user-session" };
+  const query = `entitlement_id=${scenario.entitlement.entitlement_id}`;
+  const base = `http://127.0.0.1:${scenario.runtimePort}`;
+  try {
+    scenario.entitlement.purchased_corpus_digest = scenario.registryState.corpusDigest;
+    scenario.entitlement.version_policy = "pinned"; // Historical grant, not execution authority.
+    scenario.socket = await connectAuthorizedSocket(scenario.runtimePort, scenario.entitlement);
+    scenario.registryState.corpusDigest = `sha256:${"2".repeat(64)}`;
+
+    const staleTurn = waitForSocketMessage(scenario.socket, (message) => message.type === "turn.failed");
+    scenario.socket.send(JSON.stringify(clientMessage("before-reconnect")));
+    assert.equal(((await staleTurn).error as { code: string }).code, "agent_updated");
+    assert.equal(scenario.runCalls(), 0, "a previously loaded definition must not execute after publication");
+    scenario.socket.close();
+
+    for (const route of ["/v1/conversations", "/v1/conversations/conversation-revocable-access/snapshot"]) {
+      const response = await fetch(`${base}${route}?${query}`, { headers });
+      assert.equal(response.status, 200, await response.text());
+    }
+    const catalog = await fetch(`${base}/v1/me/creator-agents`, { headers });
+    assert.equal(catalog.status, 200);
+    assert.match(await catalog.text(), new RegExp(scenario.registryState.corpusDigest));
+
+    scenario.socket = await connectAuthorizedSocket(scenario.runtimePort, scenario.entitlement);
+    const completed = waitForSocketMessage(scenario.socket, (message) => ["turn.completed", "turn.failed"].includes(String(message.type)));
+    scenario.socket.send(JSON.stringify(clientMessage("after-reconnect")));
+    const terminal = await completed;
+    assert.equal(terminal.type, "turn.completed", JSON.stringify(terminal));
+    assert.equal(scenario.runCalls(), 1);
+    assert.notEqual(scenario.entitlement.purchased_corpus_digest, scenario.registryState.corpusDigest,
+      "connecting must not rewrite the historical purchase");
+
+    scenario.registryState.entitlementActive = false;
+    const denied = await fetch(`${base}/v1/conversations?${query}`, { headers });
+    assert.equal(denied.status, 403, "revoked access remains denied after publication");
+  } finally {
+    await scenario.close();
+  }
+});
+
 test("Runtime re-introspects a Creator session per turn without requiring a buyer entitlement", async () => {
   const runId = `run-creator-authorized-${randomUUID()}`;
   let identityCalls = 0;
@@ -561,6 +603,7 @@ async function startBoundaryRuntime(
 type RevocableRegistryState = {
   sessionActive: boolean;
   entitlementActive: boolean;
+  corpusDigest: string;
 };
 
 async function createRevocableRuntimeScenario(): Promise<{
@@ -583,7 +626,8 @@ async function createRevocableRuntimeScenario(): Promise<{
   };
   const registryState: RevocableRegistryState = {
     sessionActive: true,
-    entitlementActive: true
+    entitlementActive: true,
+    corpusDigest: `sha256:${"1".repeat(64)}`
   };
   const registryCalls = { identity: 0, access: 0 };
   const registry = http.createServer((request, response) => {
@@ -625,15 +669,18 @@ async function createRevocableRuntimeScenario(): Promise<{
   await seedAuthConversation(repository, entitlement, "conversation-revocable-access", digest);
   const corpus = revocableTestCorpus(entitlement);
   const agentCorpusResolver = {
-    resolve: async () => ({ root: "/tmp/hatch-runtime-revocable-auth-boundary", corpus, digest })
+    resolve: async (_creatorId: string, _productId: string, selection?: string | AbortSignal) => {
+      assert.notEqual(typeof selection, "string", "Runtime must not use purchase history to select instructions");
+      return { root: "", corpus, digest: registryState.corpusDigest };
+    }
   } as unknown as AgentCorpusResolver;
   let runtimeRunCalls = 0;
   const agentRuntime: AgentRuntime = {
-    async *run() {
+    async *run(input) {
       runtimeRunCalls += 1;
       yield {
         type: "turn.completed",
-        run_id: "unexpected-run",
+        run_id: input.run_id,
         finish_reason: "stop"
       };
     }

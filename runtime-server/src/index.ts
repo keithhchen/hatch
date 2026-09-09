@@ -1082,14 +1082,7 @@ async function handleHttpRequest(
           signal?.throwIfAborted();
           assertEntitlementMatchesIdentity(claims, entitlement);
           if (!agentCorpusResolver) throw new Error("Current Agent Corpus resolver is unavailable");
-          const resolved = entitlement.purchased_corpus_digest
-            ? await agentCorpusResolver.resolve(
-              entitlement.creator_id,
-              entitlement.product_id,
-              entitlement.purchased_corpus_digest,
-              signal
-            )
-            : await agentCorpusResolver.resolve(entitlement.creator_id, entitlement.product_id, signal);
+          const resolved = await agentCorpusResolver.resolve(entitlement.creator_id, entitlement.product_id, signal);
           if (resolved.corpus.product.id !== entitlement.product_id || resolved.corpus.creator.id !== entitlement.creator_id) {
             throw new Error(`Entitlement ${entitlement.entitlement_id} does not match its current Agent Corpus`);
           }
@@ -3362,7 +3355,7 @@ async function resolveSessionBinding(
     if (!selectedCreatorId) {
       throw new EntitlementError("creator_required", "creator_id is required when selecting a Creator Agent.");
     }
-    let resolved = await agentCorpusResolver.resolve(selectedCreatorId, hello.product_id, signal);
+    const resolved = await agentCorpusResolver.resolve(selectedCreatorId, hello.product_id, signal);
     let corpusEntitlement: Awaited<ReturnType<EntitlementResolver["resolve"]>> | undefined;
     if (authClaims?.role !== "creator" && !entitlementResolver) {
       throw new EntitlementError(
@@ -3381,14 +3374,6 @@ async function resolveSessionBinding(
         signal
       });
       assertEntitlementMatchesIdentity(authClaims, entitlement);
-      if (entitlement.purchased_corpus_digest) {
-        resolved = await agentCorpusResolver.resolve(
-          selectedCreatorId,
-          hello.product_id,
-          entitlement.purchased_corpus_digest,
-          signal
-        );
-      }
       if (entitlement.product_id !== hello.product_id
         || entitlement.creator_id !== resolved.corpus.creator.id
         || entitlement.product_id !== resolved.corpus.product.id) {
@@ -3408,8 +3393,8 @@ async function resolveSessionBinding(
       productId: resolved.corpus.product.id,
       corpusDigest: resolved.digest,
       ...(resolved.runtimeDigest ? { runtimeDigest: resolved.runtimeDigest } : {}),
-      ...((corpusEntitlement?.brief_spec ?? resolved.corpus.product.brief_spec)
-        ? { briefSpec: (corpusEntitlement?.brief_spec ?? resolved.corpus.product.brief_spec) as BriefSpec }
+      ...(resolved.corpus.product.brief_spec
+        ? { briefSpec: resolved.corpus.product.brief_spec as BriefSpec }
         : {}),
       ...(corpusEntitlement?.purchased_corpus_digest
         ? {
@@ -3446,18 +3431,11 @@ async function resolveSessionBinding(
       signal
     });
     assertEntitlementMatchesIdentity(authClaims, entitlement);
-    const resolved = entitlement.purchased_corpus_digest
-      ? await agentCorpusResolver.resolve(
-        entitlement.creator_id,
-        entitlement.product_id,
-        entitlement.purchased_corpus_digest,
-        signal
-      )
-      : await agentCorpusResolver.resolve(entitlement.creator_id, entitlement.product_id, signal);
+    const resolved = await agentCorpusResolver.resolve(entitlement.creator_id, entitlement.product_id, signal);
     if (resolved.corpus.product.id !== entitlement.product_id || resolved.corpus.creator.id !== entitlement.creator_id) {
       throw new Error("Entitlement does not match its current Agent Corpus");
     }
-    const briefSpec = entitlement.brief_spec ?? resolved.corpus.product.brief_spec;
+    const briefSpec = resolved.corpus.product.brief_spec;
     return {
       creatorId: entitlement.creator_id,
       userId: entitlement.user_id,
@@ -3592,14 +3570,7 @@ async function revalidateTurnAuthorization(
     // Production resolves the current Registry publication for every caller.
     // Reconnect after a publication changes an already-open session so its
     // next turn cannot execute the previously loaded instructions.
-    const current = binding.purchasedCorpusDigest
-      ? await agentCorpusResolver.resolve(
-          binding.creatorId,
-          binding.productId,
-          binding.corpusDigest,
-          signal
-        )
-      : await agentCorpusResolver.resolve(binding.creatorId, binding.productId, signal);
+    const current = await agentCorpusResolver.resolve(binding.creatorId, binding.productId, signal);
     if (current.digest !== binding.corpusDigest
       || current.corpus.creator.id !== binding.creatorId
       || current.corpus.agent_id !== binding.productId
@@ -3694,37 +3665,13 @@ async function bindingFromHistoryRequest(
     if (authIdentityResolver && !authIdentity) {
       throw new EntitlementError("authentication_required", "A valid Hatch session is required.");
     }
-    const entitlement = await entitlementResolver.resolve({ authToken, licenseToken: authToken, entitlementId, signal });
-    assertEntitlementMatchesIdentity(
-      authIdentity ?? legacyAuthClaims(authToken, authIdentityResolver, legacyHmacAuth),
-      entitlement
-    );
-    const resolved = entitlement.purchased_corpus_digest
-      ? await agentCorpusResolver.resolve(
-        entitlement.creator_id,
-        entitlement.product_id,
-        entitlement.purchased_corpus_digest,
-        signal
-      )
-      : await agentCorpusResolver.resolve(entitlement.creator_id, entitlement.product_id, signal);
-    if (resolved.corpus.product.id !== entitlement.product_id || resolved.corpus.creator.id !== entitlement.creator_id) {
-      throw new Error("Entitlement does not match its current Agent Corpus");
-    }
-    const briefSpec = entitlement.brief_spec ?? resolved.corpus.product.brief_spec;
-    return {
-      creatorId: entitlement.creator_id,
-      userId: entitlement.user_id,
-      productId: entitlement.product_id,
-      corpusDigest: resolved.digest,
-      ...(resolved.runtimeDigest ? { runtimeDigest: resolved.runtimeDigest } : {}),
-      ...(briefSpec ? { briefSpec: briefSpec as BriefSpec } : {}),
-      purchasedCorpusDigest: entitlement.purchased_corpus_digest ?? resolved.digest,
-      entitlementId: entitlement.entitlement_id,
-      orderId: entitlement.order_id,
-      agentCorpus: resolved.corpus,
-      agentCorpusRoot: resolved.root,
-      explicit: true
-    };
+    // HTTP and WebSocket use the same account/access/Product binding. A
+    // purchase record authorizes access; it does not select Agent instructions.
+    return resolveSessionBinding({
+      auth_token: authToken,
+      entitlement_id: entitlementId
+    }, entitlementResolver, agentCorpusResolver, authIdentityResolver,
+    authIdentity ?? legacyAuthClaims(authToken, authIdentityResolver, legacyHmacAuth), signal);
   }
 
   // Self-reported scope is accepted only when no product resolver is configured.
