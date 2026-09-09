@@ -3,6 +3,10 @@ import { fileURLToPath } from "node:url";
 const workspaceRoot = fileURLToPath(new URL("..", import.meta.url));
 
 export default {
+  test: {
+    // Node packaging tests run separately under node --test in Desktop CI.
+    include: ["src/renderer/**/*.test.{js,jsx}"]
+  },
   resolve: {
     // @hatch/ui is consumed from its workspace source. Always bind React to
     // the desktop renderer's copy so linked-package dependencies cannot create
