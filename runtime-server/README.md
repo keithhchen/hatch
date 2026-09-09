@@ -294,7 +294,7 @@ npm run serve
 
 ## Protocol
 
-Protocol version: `0.7`. This version adds structured, bounded user context attachments; a `0.6` hello is rejected with `protocol_error` so an old Desktop cannot enter a partially compatible session.
+Protocol version: `0.8`. Every `client.hello` names one existing `conversation_id`; Runtime validates that Conversation against the authenticated account and Creator Agent binding before returning `session.ready`. The WebSocket remains bound to that Conversation for its lifetime, and a later `client.message` with a different `conversation_id` is rejected before persistence or execution. Both `session.ready` and `message.accepted` echo the bound `conversation_id`. Protocol 0.7 and hello messages without a Conversation fail protocol validation; there is no compatibility path.
 
 Assistant text from the single Shanghai cloud Runtime is released through
 Alibaba AI Guardrails in delayed segments. It runs with

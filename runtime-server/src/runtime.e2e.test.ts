@@ -2121,6 +2121,7 @@ test("server rejects protocol 0.7 and a missing conversation before accepting bo
 
   const store = new RuntimeStore(dataDir);
   const repository = new InMemoryConversationRepository(store.localAuthority);
+  await repository.initialize();
   await repository.createConversation({
     id: "conversation-protocol-current",
     publicId: "conversation-protocol-current",
@@ -2556,6 +2557,7 @@ async function seedLocalConversations(
   conversationIds: string[]
 ): Promise<InMemoryConversationRepository> {
   const repository = new InMemoryConversationRepository(store.localAuthority);
+  await repository.initialize();
   for (const conversationId of conversationIds) {
     await repository.createConversation({
       id: conversationId,

@@ -8,7 +8,9 @@ import { afterEach, test } from "node:test";
 import { WebSocket } from "ws";
 import { AgentCorpusResolver, AgentCorpusSchema, CorpusKnowledgeProvider, HttpKnowledgeProvider, loadAgentCorpus, QdrantKnowledgeProvider } from "./agentCorpus.js";
 import { DeterministicAgentRuntime } from "./agentRuntime.js";
-import { createRuntimeServer } from "./index.js";
+import { createBriefSnapshot } from "./brief.js";
+import { InMemoryConversationRepository } from "./conversationRepository.js";
+import { createRuntimeServer, durableConversationId } from "./index.js";
 import { PROTOCOL_VERSION } from "./protocol.js";
 
 const tempRoots: string[] = [];
@@ -225,6 +227,10 @@ test("Agent Corpus resolver loads the Registry current creator/agent path", asyn
   await writeFile(path.join(creatorRoot, "instructions/system.md"), system, "utf8");
   await writeFile(path.join(creatorRoot, "evals/evals.json"), evals, "utf8");
   const asset = (assetPath: string, content: string, id: string) => ({ id, path: assetPath, sha256: digest(content) });
+  const briefSpec = {
+    contract_version: "1" as const,
+    fields: [{ id: "review-focus", label: "What should the review focus on?", required: true }]
+  };
   await writeFile(path.join(creatorRoot, "agent.json"), JSON.stringify({
     contract_version: "1",
     creator: { id: CREATOR_ID, name: "Maya Chen" },
@@ -263,6 +269,7 @@ test("current Agent Corpus entitlements are discoverable and bind the Desktop se
       id: PRODUCT_ID,
       name: "Signal Resume Review",
       description: "Review a resume.",
+      brief_spec: briefSpec
     },
     instructions: { system: asset("instructions/system.md", system, "instructions-system") },
     skills: [],
@@ -286,10 +293,28 @@ test("current Agent Corpus entitlements are discoverable and bind the Desktop se
       return entitlement;
     }
   };
+  const agentCorpusResolver = new AgentCorpusResolver(root);
+  const resolvedCorpus = await agentCorpusResolver.resolve(CREATOR_ID, PRODUCT_ID);
+  const conversationId = "conversation-agent-corpus";
+  const conversationRepository = new InMemoryConversationRepository();
+  await conversationRepository.initialize();
+  await conversationRepository.createConversation({
+    id: durableConversationId({ creatorId: CREATOR_ID, userId: USER_ID, productId: PRODUCT_ID }, conversationId),
+    publicId: conversationId,
+    ownerAccountId: USER_ID,
+    creatorId: CREATOR_ID,
+    agentId: PRODUCT_ID,
+    productId: PRODUCT_ID,
+    corpusDigest: resolvedCorpus.digest,
+    briefSnapshot: createBriefSnapshot(briefSpec, [
+      { field_id: "review-focus", value: "Review the supplied resume." }
+    ])
+  });
   const runtime = createRuntimeServer({
     createRuntime: () => new DeterministicAgentRuntime(),
-    agentCorpusResolver: new AgentCorpusResolver(root),
-    entitlementResolver
+    agentCorpusResolver,
+    entitlementResolver,
+    conversationRepository
   });
   await new Promise<void>((resolve) => runtime.server.listen(0, "127.0.0.1", resolve));
   const address = runtime.server.address();
@@ -301,16 +326,6 @@ test("current Agent Corpus entitlements are discoverable and bind the Desktop se
     assert.equal(library.status, 200);
     const payload = await library.json() as { creator_agents: Array<{ product_id: string }> };
     assert.equal(payload.creator_agents[0]?.product_id, PRODUCT_ID);
-
-    const created = await fetch(`http://127.0.0.1:${address.port}/v1/conversations?entitlement_id=${entitlement.entitlement_id}`, {
-      method: "POST",
-      headers: { authorization: "Bearer license-jordan", "content-type": "application/json" },
-      body: "{}"
-    });
-    const createdBody = await created.json() as { conversation?: { id?: string } };
-    const conversationId = createdBody.conversation?.id;
-    assert.equal(created.status, 201);
-    assert.ok(conversationId);
 
     const socket = new WebSocket(`ws://127.0.0.1:${address.port}/runtime`);
     const ready = await new Promise<Record<string, unknown>>((resolve, reject) => {

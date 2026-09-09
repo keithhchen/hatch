@@ -1,6 +1,6 @@
 # Hatch Protocol
 
-Canonical provider-agnostic wire protocol 0.7, durable Conversation API v1,
+Canonical provider-agnostic wire protocol 0.8, durable Conversation API v1,
 and Agent Corpus v1.
 
 This package owns the JSON Schema for the server/Desktop local-client boundary. The TypeScript runtime server and Rust local runner currently mirror this schema directly; generated TS and Rust types should be introduced from this package before the protocol is expanded further.
@@ -50,11 +50,21 @@ Run without an executor window that can answer local-tool and approval work.
 
 ### Product session binding
 
-For a purchased Product, Desktop sends `entitlement_id` in `client.hello`.
+For a purchased Product, Desktop sends `entitlement_id` and the existing
+`conversation_id` in `client.hello`.
 That is the only Product selector crossing the Runtime WebSocket boundary.
 Runtime resolves the entitlement server-side and derives the authenticated
 `user_id`, `creator_id`, and `product_id`; Desktop must not send those fields
 alongside an entitlement. `agent_id` is not a client protocol field.
+
+Protocol 0.8 binds each WebSocket to exactly one pre-existing Conversation.
+Runtime verifies that Conversation against the authenticated account and
+Creator Agent binding during the hello handshake. Every later
+`client.message.conversation_id` must equal the hello value; mismatches fail
+before persistence or execution. Both `session.ready` and `message.accepted`
+echo the bound `conversation_id` so clients can fail closed on routing errors.
+Protocol 0.7 and hello messages without `conversation_id` are invalid; there
+is no compatibility fallback on the Runtime socket.
 
 The creator/local resolver-free path may still use explicit identity fields for
 local development and creator tooling. It is a separate server-side mode, not

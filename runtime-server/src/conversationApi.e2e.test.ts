@@ -369,6 +369,7 @@ test("Run HTTP API rejects a detached reservation instead of occupying an execut
 test("GET run returns canonical submission receipts or null without writing on repeated reads", async () => {
   const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-run-receipt-http-")));
   const repository = new InMemoryConversationRepository(store.localAuthority);
+  await repository.initialize();
   runtime = createRuntimeServer({ conversationStore: store, conversationRepository: repository });
   const base = await listen(runtime.server);
   const scope = new URLSearchParams(binding).toString();
@@ -425,12 +426,7 @@ test("WebSocket retries use client_message_id without creating a second run or r
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-ws-"));
   const repository = new InMemoryConversationRepository(localRuntimeAuthority(dataDir));
   const store = new RuntimeStore(dataDir);
-  runtime = createRuntimeServer({
-    conversationStore: store,
-    conversationRepository: repository,
-    createRuntime: () => new DeterministicAgentRuntime()
-  });
-  const base = await listen(runtime.server);
+  await repository.initialize();
   const conversationId = "conversation_retry";
   await repository.createConversation({
     id: conversationId,
@@ -441,6 +437,12 @@ test("WebSocket retries use client_message_id without creating a second run or r
     productId: "local-product",
     corpusDigest: `sha256:${"0".repeat(64)}`
   });
+  runtime = createRuntimeServer({
+    conversationStore: store,
+    conversationRepository: repository,
+    createRuntime: () => new DeterministicAgentRuntime()
+  });
+  const base = await listen(runtime.server);
   const socket = new WebSocket(base.replace("http:", "ws:") + "/runtime");
   const messages: OutboundMessage[] = [];
   socket.on("message", (value) => messages.push(JSON.parse(String(value)) as OutboundMessage));
@@ -501,6 +503,7 @@ test("a conversation-bound socket rejects a mismatched message before persistenc
   const repository = new InMemoryConversationRepository(localRuntimeAuthority(dataDir));
   const store = new RuntimeStore(dataDir);
   let executions = 0;
+  await repository.initialize();
   for (const conversationId of ["conversation-bound", "conversation-other"]) {
     await repository.createConversation({
       id: conversationId,
@@ -554,15 +557,16 @@ test("local attachments commit references and fixed image bytes without using th
   const assetStore = new RuntimeAssetStore(path.join(dataDir, "assets"));
   const put = t.mock.method(assetStore, "put", async () => { throw new Error("OSS disabled"); });
   const read = t.mock.method(assetStore, "readBase64", async () => { throw new Error("OSS disabled"); });
+  await repository.initialize();
+  const conversationId = "conversation_local_attachments";
+  await repository.createConversation({ id: conversationId, publicId: conversationId,
+    ownerAccountId: "local-development", creatorId: "local-development", agentId: "local-agent",
+    productId: "local-product", corpusDigest: `sha256:${"0".repeat(64)}` });
   runtime = createRuntimeServer({ conversationStore: store, conversationRepository: repository, assetStore,
     createRuntime: () => ({ async *run(input) {
       yield { type: "turn.completed" as const, run_id: input.run_id, finish_reason: "stop" as const };
     } }) });
   const base = await listen(runtime.server);
-  const conversationId = "conversation_local_attachments";
-  await repository.createConversation({ id: conversationId, publicId: conversationId,
-    ownerAccountId: "local-development", creatorId: "local-development", agentId: "local-agent",
-    productId: "local-product", corpusDigest: `sha256:${"0".repeat(64)}` });
   const messages: OutboundMessage[] = [];
   const socket = await openRuntimeSocket(base, conversationId, messages);
   const imageBytes = Buffer.from("fixed-image-input");
@@ -596,6 +600,11 @@ test("completed assistant body is stored once and journal carries only one notif
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-canonical-terminal-"));
   const repository = new InMemoryConversationRepository(localRuntimeAuthority(dataDir));
   const store = new RuntimeStore(dataDir);
+  await repository.initialize();
+  const conversationId = "conversation_canonical_terminal";
+  await repository.createConversation({ id: conversationId, publicId: conversationId,
+    ownerAccountId: "local-development", creatorId: "local-development", agentId: "local-agent",
+    productId: "local-product", corpusDigest: `sha256:${"0".repeat(64)}` });
   runtime = createRuntimeServer({ conversationStore: store, conversationRepository: repository,
     createRuntime: () => ({ async *run(input) {
       yield { type: "assistant.delta" as const, run_id: input.run_id,
@@ -603,10 +612,6 @@ test("completed assistant body is stored once and journal carries only one notif
       yield { type: "turn.completed" as const, run_id: input.run_id, finish_reason: "stop" as const };
     } }) });
   const base = await listen(runtime.server);
-  const conversationId = "conversation_canonical_terminal";
-  await repository.createConversation({ id: conversationId, publicId: conversationId,
-    ownerAccountId: "local-development", creatorId: "local-development", agentId: "local-agent",
-    productId: "local-product", corpusDigest: `sha256:${"0".repeat(64)}` });
   const messages: OutboundMessage[] = [];
   const socket = await openRuntimeSocket(base, conversationId, messages);
   try {
@@ -631,13 +636,14 @@ test("a failed manual compaction does not lose the already accepted user command
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-compact-acceptance-"));
   const repository = new InMemoryConversationRepository(localRuntimeAuthority(dataDir));
   const store = new RuntimeStore(dataDir);
-  runtime = createRuntimeServer({ conversationStore: store, conversationRepository: repository,
-    createRuntime: () => new DeterministicAgentRuntime() });
-  const base = await listen(runtime.server);
+  await repository.initialize();
   const conversationId = "conversation_compact_acceptance";
   await repository.createConversation({ id: conversationId, publicId: conversationId,
     ownerAccountId: "local-development", creatorId: "local-development", agentId: "local-agent",
     productId: "local-product", corpusDigest: `sha256:${"0".repeat(64)}` });
+  runtime = createRuntimeServer({ conversationStore: store, conversationRepository: repository,
+    createRuntime: () => new DeterministicAgentRuntime() });
+  const base = await listen(runtime.server);
   const messages: OutboundMessage[] = [];
   const socket = await openRuntimeSocket(base, conversationId, messages);
   try {
@@ -658,6 +664,7 @@ test("a failed manual compaction does not lose the already accepted user command
 test("Runtime startup interrupts a carried active Run instead of reclaiming or replaying it", async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-startup-recovery-"));
   const repository = new InMemoryConversationRepository(localRuntimeAuthority(dataDir));
+  await repository.initialize();
   const conversation = (await repository.createConversation({
     id: "conversation_startup_recovery",
     publicId: "conversation_startup_recovery",
@@ -696,18 +703,10 @@ test("Runtime startup interrupts a carried active Run instead of reclaiming or r
 test("two windows get distinct executor leases; disconnect is Interrupted and recovery is observer-only", async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-recovery-"));
   const repository = new InMemoryConversationRepository(localRuntimeAuthority(dataDir));
-  runtime = createRuntimeServer({
-    conversationStore: new RuntimeStore(dataDir),
-    conversationRepository: repository,
-    createRuntime: () => new DeterministicAgentRuntime()
-  });
-  const base = await listen(runtime.server);
+  await repository.initialize();
   const conversationId = "conversation_recovery";
-  // Resolver-free test mode stores the raw public ID; product mode uses the
-  // same repository path after deriving its binding server-side.
-  const durableId = conversationId;
   await repository.createConversation({
-    id: durableId,
+    id: conversationId,
     publicId: conversationId,
     ownerAccountId: "local-development",
     creatorId: "local-development",
@@ -715,6 +714,15 @@ test("two windows get distinct executor leases; disconnect is Interrupted and re
     productId: "local-product",
     corpusDigest: `sha256:${"0".repeat(64)}`
   });
+  runtime = createRuntimeServer({
+    conversationStore: new RuntimeStore(dataDir),
+    conversationRepository: repository,
+    createRuntime: () => new DeterministicAgentRuntime()
+  });
+  const base = await listen(runtime.server);
+  // Resolver-free test mode stores the raw public ID; product mode uses the
+  // same repository path after deriving its binding server-side.
+  const durableId = conversationId;
 
   const firstMessages: OutboundMessage[] = [];
   const firstSocket = await openRuntimeSocket(base, conversationId, firstMessages);
@@ -805,15 +813,16 @@ test("missing image fails before accepting, and retry uses fixed committed bytes
   const attachment = { kind: "asset" as const, attachment_id: "image", asset_id: "image", display_name: "image.png",
     media_type: "image/png", source_bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") };
   let executions = 0;
+  await repository.initialize();
+  await repository.createConversation({ id: "atomic-image", publicId: "atomic-image",
+    ownerAccountId: "local-development", creatorId: "local-development", agentId: "local-agent",
+    productId: "local-product", corpusDigest: `sha256:${"0".repeat(64)}` });
   runtime = createRuntimeServer({ conversationStore: store, conversationRepository: repository, assetStore,
     createRuntime: () => ({ async *run(input, context) {
       executions += 1;
       assert.deepEqual(context.messages[0]?.model_images, [{ type: "image", data: bytes.toString("base64"), mimeType: "image/png" }]);
       yield { type: "turn.completed" as const, run_id: input.run_id, finish_reason: "stop" as const };
     } }) });
-  await repository.createConversation({ id: "atomic-image", publicId: "atomic-image",
-    ownerAccountId: "local-development", creatorId: "local-development", agentId: "local-agent",
-    productId: "local-product", corpusDigest: `sha256:${"0".repeat(64)}` });
   const messages: OutboundMessage[] = [];
   const socket = await openRuntimeSocket(await listen(runtime.server), "atomic-image", messages);
   const request = { type: "client.message", conversation_id: "atomic-image", run_id: "image-run", client_message_id: "image-message",
@@ -848,6 +857,10 @@ for (const boundary of ["before", "after"] as const) {
     let reached = false;
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
+    await repository.initialize();
+    await repository.createConversation({ id: "atomic-socket", publicId: "atomic-socket",
+      ownerAccountId: "local-development", creatorId: "local-development", agentId: "local-agent",
+      productId: "local-product", corpusDigest: `sha256:${"0".repeat(64)}` });
     const original = repository.acceptSubmission.bind(repository);
     let inject = true;
     repository.acceptSubmission = async (input) => {
@@ -869,9 +882,6 @@ for (const boundary of ["before", "after"] as const) {
         assert.equal(context.messages.filter((message) => message.role === "user").length, 1);
         yield { type: "turn.completed" as const, run_id: input.run_id, finish_reason: "stop" as const };
       } }) });
-    await repository.createConversation({ id: "atomic-socket", publicId: "atomic-socket",
-      ownerAccountId: "local-development", creatorId: "local-development", agentId: "local-agent",
-      productId: "local-product", corpusDigest: `sha256:${"0".repeat(64)}` });
     const base = await listen(runtime.server);
     const messages: OutboundMessage[] = [];
     const socket = await openRuntimeSocket(base, "atomic-socket", messages);

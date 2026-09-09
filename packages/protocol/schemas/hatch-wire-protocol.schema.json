@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://hatch.dev/protocol/hatch-wire-protocol-0.7.schema.json",
+  "$id": "https://hatch.dev/protocol/hatch-wire-protocol-0.8.schema.json",
   "title": "Hatch Wire Protocol",
   "type": "object",
   "oneOf": [
@@ -9,7 +9,7 @@
   ],
   "$defs": {
     "protocolVersion": {
-      "const": "0.7"
+      "const": "0.8"
     },
     "digest": {
       "type": "string",
@@ -165,11 +165,13 @@
       "required": [
         "type",
         "protocol_version",
+        "conversation_id",
         "local_tools"
       ],
       "properties": {
         "type": { "const": "client.hello" },
         "protocol_version": { "$ref": "#/$defs/protocolVersion" },
+        "conversation_id": { "type": "string", "minLength": 1, "maxLength": 256 },
         "auth_token": { "type": "string", "minLength": 1, "maxLength": 4096 },
         "license_token": { "type": "string", "minLength": 1, "maxLength": 4096 },
         "entitlement_id": { "type": "string", "minLength": 1, "maxLength": 256 },
@@ -261,9 +263,10 @@
     "sessionReady": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["type", "accepted_protocol_version", "user_id", "product_id", "corpus_digest"],
+      "required": ["type", "conversation_id", "accepted_protocol_version", "user_id", "product_id", "corpus_digest"],
       "properties": {
         "type": { "const": "session.ready" },
+        "conversation_id": { "type": "string", "minLength": 1, "maxLength": 256 },
         "accepted_protocol_version": { "$ref": "#/$defs/protocolVersion" },
         "creator_id": { "type": "string", "minLength": 1 },
         "user_id": { "type": "string", "minLength": 1 },
@@ -509,6 +512,17 @@
         "reason": { "type": "string" }
       }
     },
+    "messageAccepted": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "conversation_id", "run_id", "client_message_id"],
+      "properties": {
+        "type": { "const": "message.accepted" },
+        "conversation_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "run_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "client_message_id": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
     "sessionCompacted": {
       "type": "object",
       "additionalProperties": false,
@@ -599,6 +613,7 @@
         { "$ref": "#/$defs/skillActivated" },
         { "$ref": "#/$defs/skillInvoked" },
         { "$ref": "#/$defs/turnState" },
+        { "$ref": "#/$defs/messageAccepted" },
         { "$ref": "#/$defs/sessionCompacted" },
         { "$ref": "#/$defs/deliveryReady" },
         { "$ref": "#/$defs/turnCompleted" },
