@@ -16,7 +16,7 @@ use windows_sys::Win32::{
     Foundation::*,
     Security::{Authorization::*, Isolation::*, *},
     Storage::FileSystem::*,
-    System::{JobObjects::*, SystemInformation::*, Threading::*},
+    System::{JobObjects::*, SystemInformation::*, SystemServices::MAXIMUM_ALLOWED, Threading::*},
 };
 
 type Result<T> = std::result::Result<T, String>;
@@ -292,10 +292,71 @@ impl Drop for KillJob {
     }
 }
 
+// Chromium sandbox/win/src/app_container_test.cc::CheckLpacToken uses
+// AccessCheck to test effective LPAC behavior rather than token attributes.
+fn appcontainer_access_mask(token: HANDLE) -> Result<u32> {
+    unsafe {
+        let mut duplicate = null_mut();
+        if DuplicateTokenEx(
+            token,
+            TOKEN_QUERY,
+            null(),
+            SecurityImpersonation,
+            TokenImpersonation,
+            &mut duplicate,
+        ) == 0
+        {
+            return Err(win_error("DuplicateTokenEx for AccessCheck"));
+        }
+        let duplicate = Handle(duplicate);
+        let sddl = wide("O:SYG:SYD:(A;;0x3;;;WD)(A;;0x1;;;S-1-15-2-1)(A;;0x2;;;S-1-15-2-2)");
+        let mut descriptor = null_mut();
+        if ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            sddl.as_ptr(),
+            SDDL_REVISION_1,
+            &mut descriptor,
+            null_mut(),
+        ) == 0
+        {
+            return Err(win_error(
+                "ConvertStringSecurityDescriptorToSecurityDescriptorW",
+            ));
+        }
+        let mut mapping: GENERIC_MAPPING = zeroed();
+        let mut privileges: PRIVILEGE_SET = zeroed();
+        let mut size = size_of::<PRIVILEGE_SET>() as u32;
+        let mut granted = 0;
+        let mut allowed = 0;
+        let success = AccessCheck(
+            descriptor,
+            duplicate.0,
+            MAXIMUM_ALLOWED,
+            &mut mapping,
+            &mut privileges,
+            &mut size,
+            &mut granted,
+            &mut allowed,
+        );
+        let error = if success == 0 {
+            Some(win_error("AccessCheck LPAC proof"))
+        } else {
+            None
+        };
+        LocalFree(descriptor);
+        if let Some(error) = error {
+            return Err(error);
+        }
+        if allowed == 0 {
+            return Err("AccessCheck denied synthetic descriptor; token proof inconclusive".into());
+        }
+        Ok(granted)
+    }
+}
+
 fn token_proof(process: HANDLE, profile: &Profile, mode: Mode) -> Result<Value> {
     unsafe {
         let mut handle = null_mut();
-        if OpenProcessToken(process, TOKEN_QUERY, &mut handle) == 0 {
+        if OpenProcessToken(process, TOKEN_QUERY | TOKEN_DUPLICATE, &mut handle) == 0 {
             return Err(win_error("OpenProcessToken"));
         }
         let token = Handle(handle);
@@ -315,7 +376,8 @@ fn token_proof(process: HANDLE, profile: &Profile, mode: Mode) -> Result<Value> 
             Ok(value)
         };
         let ac = query(TokenIsAppContainer)?;
-        let lpac = query(TokenIsLessPrivilegedAppContainer)?;
+        let access_mask = appcontainer_access_mask(token.0)?;
+        let lpac = u32::from(access_mask == 2);
         let mut length = 0;
         GetTokenInformation(token.0, TokenAppContainerSid, null_mut(), 0, &mut length);
         let mut buffer = vec![0usize; (length as usize).div_ceil(size_of::<usize>())];
@@ -333,11 +395,15 @@ fn token_proof(process: HANDLE, profile: &Profile, mode: Mode) -> Result<Value> 
         let info = &*buffer.as_ptr().cast::<TOKEN_APPCONTAINER_INFORMATION>();
         let same =
             !info.TokenAppContainer.is_null() && EqualSid(info.TokenAppContainer, profile.sid) != 0;
-        if ac != 1 || !same || lpac != u32::from(mode == Mode::Lpac) {
+        let mode_matches = match mode {
+            Mode::Lpac => access_mask == 2,
+            Mode::Appcontainer => access_mask & 1 != 0,
+        };
+        if ac != 1 || !same || !mode_matches {
             return Err(format!("TOKEN MISMATCH: appcontainer={ac}, lpac={lpac}, sid_matches={same}; child never resumed"));
         }
         Ok(
-            json!({"is_appcontainer":ac,"is_lpac":lpac,"package_sid_matches":same,"checked_before_resume":true}),
+            json!({"is_appcontainer":ac,"is_lpac":lpac,"access_check_mask":access_mask,"package_sid_matches":same,"checked_before_resume":true}),
         )
     }
 }
