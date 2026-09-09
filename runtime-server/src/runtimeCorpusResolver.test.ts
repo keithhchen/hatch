@@ -68,6 +68,19 @@ test("Runtime resolves the installed agent.json as the same corpus used for turn
     assert.equal(resolved.corpus.product.id, PRODUCT_ID);
     assert.notEqual(resolved.runtimeDigest, undefined);
     await materializeAgentCorpus(resolved.root, "hello", [], resolved.runtimeDigest);
+
+    // An existing customer's grant predates a new publication. All callers
+    // must still load the same current Product, without rewriting the grant.
+    const existingBuyer = await resolver.resolve(CREATOR_ID, PRODUCT_ID, `sha256:${"c".repeat(64)}`);
+    assert.equal(existingBuyer.digest, SOURCE_DIGEST);
+    assert.equal(existingBuyer.root, resolved.root);
+    await materializeAgentCorpus(existingBuyer.root, "hello", [], existingBuyer.runtimeDigest);
+    await assert.rejects(
+      resolver.resolve("33333333-3333-4333-8333-333333333333", PRODUCT_ID, SOURCE_DIGEST),
+      /binding does not match/
+    );
+    const aborted = AbortSignal.abort();
+    await assert.rejects(resolver.resolve(CREATOR_ID, PRODUCT_ID, SOURCE_DIGEST, aborted), { name: "AbortError" });
   } finally {
     await rm(root, { recursive: true, force: true });
   }

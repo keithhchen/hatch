@@ -38,7 +38,7 @@ const dashboardEntry = path.join(repositoryRoot, "creator-dashboard", "server.mj
 
 type JsonRecord = Record<string, any>;
 
-test("real Dashboard process and Runtime HTTP client preserve permanent access, buyer non-reversal, and release-version invariants", {
+test("real Dashboard process and Runtime HTTP client preserve permanent access, buyer non-reversal, and current Product execution", {
   timeout: 60_000
 }, async (context) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-commerce-cross-process-"));
@@ -86,7 +86,7 @@ test("real Dashboard process and Runtime HTTP client preserve permanent access, 
 
   // R05/R27: the already-running Runtime learns the entitlement created by a
   // later checkout. Publishing V2 changes the Registry current pointer, but a
-  // pinned V1 purchase must continue resolving with V1.
+  // the original purchase remains recorded while execution uses current V2.
   const freePurchase = await checkout(dashboard.url, "free-v1");
   assert.equal(freePurchase.payment.status, "not_required");
   assert.equal(freePurchase.entitlement.purchased_corpus_digest, corpus.v1Digest);
@@ -100,9 +100,9 @@ test("real Dashboard process and Runtime HTTP client preserve permanent access, 
   const freeSession = await connectRuntime(firstRuntime.url, freePurchase.entitlement_id, freeConversationId);
   sockets.push(freeSession.socket);
   const ready = await freeSession.ready;
-  assert.equal(ready.corpus_digest, corpus.v1Digest);
+  assert.equal(ready.corpus_digest, corpus.v2Digest);
   assert.equal(ready.purchased_corpus_digest, corpus.v1Digest);
-  assert.equal(ready.effective_corpus_digest, corpus.v1Digest);
+  assert.equal(ready.effective_corpus_digest, corpus.v2Digest);
   assert.equal(ready.version_policy, "pinned");
 
   // A zero-price purchase is still a real purchase, but it has permanent
@@ -179,7 +179,7 @@ test("real Dashboard process and Runtime HTTP client preserve permanent access, 
   const restartedFreeConversationId = "conversation-run-after-restart";
   const restartedFreeSession = await connectRuntime(restartedRuntime.url, freePurchase.entitlement_id, restartedFreeConversationId);
   sockets.push(restartedFreeSession.socket);
-  assert.equal((await restartedFreeSession.ready).corpus_digest, corpus.v1Digest);
+  assert.equal((await restartedFreeSession.ready).corpus_digest, corpus.v2Digest);
   restartedFreeSession.send(runMessage("run-after-restart", restartedFreeConversationId));
   await restartedFreeSession.waitFor((message) => message.type === "turn.completed" && message.run_id === "run-after-restart");
   const recoveredEntitlement = await waitForEntitlement(

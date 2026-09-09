@@ -239,6 +239,7 @@ test("Conversation HTTP creation carries the published corpus BriefSpec into an 
     contract_version: "1" as const,
     fields: [{ id: "goal", label: "What should Hatch help you accomplish?", required: true }]
   };
+  entitlement.brief_spec = { contract_version: "1", fields: [{ id: "obsolete", label: "Old purchase form", required: true }] };
   const entitlementResolver: EntitlementResolver = {
     list: async () => [entitlement],
     resolve: async () => entitlement
