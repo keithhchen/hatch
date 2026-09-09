@@ -14,6 +14,14 @@ Use the normal CI DMG, verify its source/size/hash evidence and signature, then 
 
 Code inspection separately confirms that workspace restoration gates window readiness and conversation activation. Cloud history loading must be independent of local execution authorization; preserve the authorization checks at execution and avoid overwriting saved grants with initial empty state.
 
+## CI installation-path comparison
+
+Downloaded ARM DMG from run 34342146681: 736619020 bytes, SHA-256 `b671235538027869b3881f9e7696155bd2d07a0cf01df83bebc94c271fa96d41`, matching the bundled evidence for source `1c8e280d`.
+
+The image passed `hdiutil` verification and was mounted read-only. `codesign --verify --deep --strict --verbose=2` on its Hatch.app succeeded (`valid on disk`, `satisfies its Designated Requirement`). It remains ad-hoc UAT-only, not Developer ID/notarized distribution.
+
+Launching this exact app restored the existing Documents workspace and the real UAT conversation's PDF/DOCX/tool history, with an available empty composer. This comparison did not reproduce the workspace hang. It does not prove that signing alone caused the earlier hang, and does not validate newer owner/startup commits absent from this source.
+
 ## Automated checks (not OS UAT)
 
 - Renderer after pending-access retry changes: 41 files, 304 tests passed.
