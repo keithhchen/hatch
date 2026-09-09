@@ -1394,29 +1394,33 @@ async fn pick_workspace_folder(
 /// this window; Rust re-resolves the grant and checks canonical containment
 /// immediately before invoking Finder/Explorer.
 #[tauri::command]
-fn reveal_workspace_artifact(
+async fn reveal_workspace_artifact(
     app: AppHandle,
     request: WorkspaceArtifactRequest,
 ) -> Result<(), String> {
-    let path =
-        resolve_workspace_artifact_path(&app, &request.workspace_grant_id, &request.relative_path)?;
-    #[cfg(target_os = "macos")]
-    let status = Command::new("/usr/bin/open").arg("-R").arg(&path).status();
-    #[cfg(target_os = "windows")]
-    let status = Command::new("explorer.exe")
-        .arg(format!("/select,{}", path.display()))
-        .status();
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let status = Command::new("xdg-open")
-        .arg(path.parent().unwrap_or(&path))
-        .status();
-    status
-        .map_err(|error| format!("artifact_reveal_failed: {error}"))?
-        .success()
-        .then_some(())
-        .ok_or_else(|| {
-            "artifact_reveal_failed: The system file browser could not reveal the artifact".into()
-        })
+    tauri::async_runtime::spawn_blocking(move || {
+        let (_workspace, path) =
+            resolve_workspace_artifact_path(&app, &request.workspace_grant_id, &request.relative_path)?;
+        #[cfg(target_os = "macos")]
+        let status = Command::new("/usr/bin/open").arg("-R").arg(&path).status();
+        #[cfg(target_os = "windows")]
+        let status = Command::new("explorer.exe")
+            .arg(format!("/select,{}", path.display()))
+            .status();
+        #[cfg(all(unix, not(target_os = "macos")))]
+        let status = Command::new("xdg-open")
+            .arg(path.parent().unwrap_or(&path))
+            .status();
+        status
+            .map_err(|error| format!("artifact_reveal_failed: {error}"))?
+            .success()
+            .then_some(())
+            .ok_or_else(|| {
+                "artifact_reveal_failed: The system file browser could not reveal the artifact".into()
+            })
+    })
+    .await
+    .map_err(|error| format!("artifact_reveal_failed: Worker failed: {error}"))?
 }
 
 /// Open an artifact with the platform's native preview/default-file action.
@@ -1429,13 +1433,20 @@ fn reveal_workspace_artifact(
 /// ShellExecute `open` verb so the user's default file association decides what
 /// opens. Other Unix desktops use `xdg-open` as their native default handler.
 #[tauri::command]
-fn open_workspace_artifact(
+async fn open_workspace_artifact(
     app: AppHandle,
     request: WorkspaceArtifactRequest,
 ) -> Result<(), String> {
-    let path =
-        resolve_workspace_artifact_path(&app, &request.workspace_grant_id, &request.relative_path)?;
-    open_workspace_artifact_with_platform(&path)
+    tauri::async_runtime::spawn_blocking(move || {
+        let (_workspace, path) =
+            resolve_workspace_artifact_path(&app, &request.workspace_grant_id, &request.relative_path)?;
+        // Filesystem work and platform process waits stay on this worker.
+        // macOS marshals only AppKit operations through its existing run_on_main.
+        // Holding this grant covers the handoff, NOT asynchronous scoped QL reads.
+        open_workspace_artifact_with_platform(&path)
+    })
+    .await
+    .map_err(|error| format!("artifact_open_failed: Worker failed: {error}"))?
 }
 
 fn open_workspace_artifact_with_platform(path: &std::path::Path) -> Result<(), String> {
@@ -1561,7 +1572,7 @@ fn resolve_workspace_artifact_path(
     app: &AppHandle,
     workspace_grant_id: &str,
     relative_path: &str,
-) -> Result<PathBuf, String> {
+) -> Result<(ScopedWorkspaceGrant, PathBuf), String> {
     let relative_path = validate_artifact_relative_path(relative_path)?;
     let workspace = resolve_scoped_workspace_grant(app, workspace_grant_id)?;
     let root = std::fs::canonicalize(&workspace.path).map_err(|error| {
@@ -1573,7 +1584,8 @@ fn resolve_workspace_artifact_path(
     if !canonical.starts_with(&root) {
         return Err("artifact_path_invalid: Artifact escapes the selected workspace".into());
     }
-    Ok(canonical)
+    // Keep acquisition and Drop on the caller's worker until platform handoff.
+    Ok((workspace, canonical))
 }
 
 fn validate_artifact_relative_path(relative_path: &str) -> Result<&std::path::Path, String> {
