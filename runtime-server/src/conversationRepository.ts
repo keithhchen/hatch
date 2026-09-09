@@ -134,6 +134,7 @@ export interface ConversationRepository {
   close(): Promise<void>;
   createConversation(input: CreateConversationInput): Promise<{ conversation: ConversationRecord; created: boolean }>;
   getConversation(id: string): Promise<ConversationRecord | undefined>;
+  /** Immutable createdAt DESC, id DESC order; cursors never track activity. */
   listConversations(binding: Pick<ConversationBinding, "ownerAccountId" | "creatorId" | "agentId">, options?: {
     status?: ConversationStatus;
     cursor?: string;
@@ -617,8 +618,8 @@ export class InMemoryConversationRepository implements ConversationRepository {
       createdAt
     };
     this.events.push(event);
-    // Library ordering follows the latest durable Conversation activity, but
-    // metadata `version` remains an optimistic-concurrency token for explicit
+    // Track activity independently of the immutable Library creation order.
+    // Metadata `version` remains an optimistic-concurrency token for explicit
     // title/archive edits rather than changing for every streamed event.
     if (event.type !== "conversation.created") {
       const conversation = this.conversations.get(event.conversationId);
@@ -703,8 +704,9 @@ CREATE TABLE IF NOT EXISTS hatch_conversations (
   UNIQUE (owner_account_id, creator_id, agent_id, client_request_id)
 );
 ALTER TABLE hatch_conversations ADD COLUMN IF NOT EXISTS brief_snapshot JSONB;
-CREATE INDEX IF NOT EXISTS hatch_conversations_library_idx
-  ON hatch_conversations (owner_account_id, creator_id, agent_id, updated_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS hatch_conversations_library_created_idx
+  ON hatch_conversations (owner_account_id, creator_id, agent_id, created_at DESC, id COLLATE "C" DESC);
+DROP INDEX IF EXISTS hatch_conversations_library_idx;
 
 CREATE TABLE IF NOT EXISTS hatch_conversation_runs (
   id TEXT PRIMARY KEY,
@@ -877,22 +879,27 @@ export class PostgresConversationRepository implements ConversationRepository {
     const values: unknown[] = [binding.ownerAccountId, binding.creatorId, binding.agentId, options.status ?? null];
     let pagination = "";
     if (cursor) {
-      values.push(cursor.updatedAt, cursor.id);
-      pagination = " AND (updated_at, id) < ($5::timestamptz, $6)";
+      values.push(cursor.createdAt, cursor.id);
+      pagination = ' AND (created_at, id COLLATE "C") < ($5::timestamptz, $6::text COLLATE "C")';
     }
     values.push(limit + 1);
-    const result = await this.pool.query<ConversationRow>(`
-      SELECT * FROM hatch_conversations
+    const result = await this.pool.query<ConversationRow & { list_created_at: string }>(`
+      SELECT *, to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS list_created_at
+      FROM hatch_conversations
       WHERE owner_account_id = $1 AND creator_id = $2 AND agent_id = $3
         AND ($4::text IS NULL OR status = $4)${pagination}
-      ORDER BY updated_at DESC, id DESC
+      ORDER BY created_at DESC, id COLLATE "C" DESC
       LIMIT $${values.length}
     `, values);
     const rows = result.rows.map(conversationFromRow);
     const hasMore = rows.length > limit;
     const conversations = rows.slice(0, limit);
-    const last = conversations.at(-1);
-    return { conversations, ...(hasMore && last ? { nextCursor: encodeListCursor(last) } : {}) };
+    const last = result.rows[conversations.length - 1];
+    // pg parses timestamptz into millisecond Dates. Keep the exact database
+    // timestamp for the cursor so rows within one millisecond are not skipped.
+    return { conversations, ...(hasMore && last ? {
+      nextCursor: encodeListCursor({ createdAt: last.list_created_at, id: last.id })
+    } : {}) };
   }
 
   async updateConversation(id: string, input: UpdateConversationInput): Promise<ConversationRecord> {
@@ -1309,27 +1316,34 @@ function boundedLimit(value: number | undefined): number {
   return value;
 }
 
-type ListCursor = { updatedAt: string; id: string };
+type ListCursor = { createdAt: string; id: string };
 
-function encodeListCursor(conversation: Pick<ConversationRecord, "updatedAt" | "id">): string {
-  return Buffer.from(JSON.stringify({ updatedAt: conversation.updatedAt, id: conversation.id }), "utf8").toString("base64url");
+function encodeListCursor(conversation: ListCursor): string {
+  return Buffer.from(JSON.stringify({ createdAt: conversation.createdAt, id: conversation.id }), "utf8").toString("base64url");
 }
 
 function decodeListCursor(value: string | undefined): ListCursor | undefined {
   if (!value) return undefined;
   try {
     const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as Partial<ListCursor>;
-    if (typeof parsed.updatedAt !== "string" || typeof parsed.id !== "string" || Number.isNaN(Date.parse(parsed.updatedAt))) return undefined;
-    return { updatedAt: parsed.updatedAt, id: parsed.id };
+    if (typeof parsed.createdAt !== "string" || typeof parsed.id !== "string" || !parsed.id
+      || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3,6}Z$/.test(parsed.createdAt)
+      || Number.isNaN(Date.parse(parsed.createdAt))) throw new Error("Invalid creation cursor");
+    return { createdAt: parsed.createdAt, id: parsed.id };
   } catch {
-    return undefined;
+    // updatedAt cursors belong to the retired activity order, not this list.
+    throw new RangeError("Invalid conversation list cursor; restart pagination without a cursor");
   }
 }
 
 function compareConversationNewestFirst(left: ConversationRecord, right: ConversationRecord): number {
-  return right.updatedAt.localeCompare(left.updatedAt) || right.id.localeCompare(left.id);
+  return -compareConversationPosition(left, right);
 }
 
 function compareConversationPosition(conversation: ConversationRecord, cursor: ListCursor): number {
-  return conversation.updatedAt.localeCompare(cursor.updatedAt) || conversation.id.localeCompare(cursor.id);
+  // Pad fractional seconds to match Postgres precision; UTF-8 byte order
+  // matches COLLATE "C", independently of the host/database locale.
+  const timestamp = (value: string) => value.slice(0, -1).padEnd(26, "0");
+  return Buffer.compare(Buffer.from(timestamp(conversation.createdAt)), Buffer.from(timestamp(cursor.createdAt)))
+    || Buffer.compare(Buffer.from(conversation.id), Buffer.from(cursor.id));
 }
