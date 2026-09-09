@@ -60,3 +60,11 @@ cargo test --locked --offline --manifest-path tools/windows-sandbox-probe/Cargo.
 交叉 `check` 只证明 Windows cfg/API 类型检查，不产出已链接 Windows EXE，不执行 Windows 测试。没有 Windows linker/SDK 时不宣称 Windows build 或运行通过。Mac 的 opt-in 执行必须明确 unsupported/exit 2，不能制造成功证据。
 
 本次本地实测：上述 Windows GNU `check --all-targets` exit 0；Mac `cargo test` 2 passed；Node `--check`、Python `ast.parse` 通过；未 opt-in 和非 Windows opt-in 均 exit 2。使用同一 RUSTC/cargo 将 `check --all-targets` 换成 `build` 实测 exit 101，缺少 `x86_64-w64-mingw32-dlltool`。未安装工具链补件。两个 Windows-only 路径守卫单元测试只完成交叉类型检查，PowerShell 语法/实际运行、Windows EXE 链接、AppContainer/LPAC token/ACL 与四类程序的真实执行均尚未验收。
+
+## Windows CI 实测更新（2026-09-09）
+
+- Run `34330729284`（`846d5537`）与 `34331451942`（`ffb595b8`）已在 Windows 上完成原生编译、链接、单元测试和真实 bundled runtime 准备；两次兼容性实验均失败。
+- 第二次诊断明确失败在 `GetTokenInformation(class=46)`，即 `TokenIsLessPrivilegedAppContainer` 查询，错误为 Win32 87。PowerShell、Node、Python 在 resume 前就被阻止，不能据此判断这些工具或 LibreOffice 不兼容。
+- 两种模式的临时目录及 AppContainer profile 均已清理。CI 宿主为 elevated，不能作为普通用户 Desktop UAT。
+- `beacd9a7` 改用 [Chromium CheckLpacToken](https://github.com/chromium/chromium/blob/main/sandbox/win/src/app_container_test.cc) 的有效权限验证思路：在合成安全描述符上执行 `AccessCheck`，同时验证 AppContainer 身份和 profile SID。验证失败仍禁止 resume，无未隔离执行 fallback。
+- 新实现已通过 Windows 目标类型检查；真实 Windows 执行由 Run `34331827963` 验证，结果尚待回收。上述改动只属于独立实验，不包含在 Desktop `v0.1.30` 中。
