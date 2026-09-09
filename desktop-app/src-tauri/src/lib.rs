@@ -1174,15 +1174,21 @@ fn default_workspace() -> String {
 }
 
 #[tauri::command]
-fn ensure_workspace(
+async fn ensure_workspace(
     app: AppHandle,
     workspace_grant_id: String,
 ) -> Result<WorkspaceGrantInfo, String> {
-    let scoped = resolve_scoped_workspace_grant(&app, &workspace_grant_id)?;
-    Ok(WorkspaceGrantInfo {
-        grant_id: scoped.grant_id.clone(),
-        display_path: scoped.path.to_string_lossy().to_string(),
+    // Protected or remote folders can block while the OS resolves access.
+    // Keep the scoped grant and its cleanup on the worker, not the UI thread.
+    tauri::async_runtime::spawn_blocking(move || {
+        let scoped = resolve_scoped_workspace_grant(&app, &workspace_grant_id)?;
+        Ok(WorkspaceGrantInfo {
+            grant_id: scoped.grant_id.clone(),
+            display_path: scoped.path.to_string_lossy().to_string(),
+        })
     })
+    .await
+    .map_err(|error| format!("workspace_grant_check_failed: {error}"))?
 }
 
 #[tauri::command]
