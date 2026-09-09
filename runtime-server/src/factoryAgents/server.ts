@@ -7,6 +7,7 @@ import { hatchTool } from "./hatchTool.js";
 import { corpusTools } from "./corpusTools.js";
 import { evaluationTargets, resolveEvaluationTarget } from "./targets.js";
 import { resolveFactoryLlmProfile } from "../llmProfiles.js";
+import { VoiceSession, type VoiceServerEvent } from "./voice.js";
 
 const targetSchema = z.object({ entitlementId: z.string().uuid().optional(), productId: z.string().uuid(), briefAnswers: z.array(z.object({ field_id: z.string(), value: z.string() }).strict()).optional() }).strict();
 export function publicSession(s: Session) { const { context, ...publicData } = s; return publicData; }
@@ -17,6 +18,31 @@ export async function createFactoryHandler(options: { root: string; env?: NodeJS
   await store.recover();
   const runtime = new WorkbenchRuntime(store, { env, ...options.runtime, extraTools: options.runtime?.extraTools ?? (async (s, _signal, changed) => s.role === "evaluator" ? [hatchTool(store, s.id, changed, env)] : s.role === "generation" ? corpusTools(store, s.id, changed, env) : []) });
   const streams = new Set<ServerResponse>();
+  const voices = new Map<string, VoiceSession>();
+  const voiceFor = (id: string) => {
+    let voice = voices.get(id);
+    if (!voice) {
+      voice = new VoiceSession({
+        emit: (event: VoiceServerEvent) => runtime.events.emit("event", { sessionId: id, ...event }),
+        onFinalTranscript: async (_conversationId, content) => { await runtime.start(id, content); },
+        onInterrupt: async () => { runtime.stop(id); }
+      });
+      voices.set(id, voice);
+    }
+    return voice;
+  };
+  runtime.events.on("event", (event: any) => {
+    const voice = event?.sessionId ? voices.get(event.sessionId) : undefined;
+    if (!voice || !event.type?.startsWith("voice.")) return;
+    const base = { agent: "interviewer" as const, conversationId: event.sessionId, runId: event.runId || "" };
+    if (event.type === "voice.run_started") voice.handleRuntimeEvent({ ...base, type: "run.started" });
+    if (event.type === "voice.delta") voice.handleRuntimeEvent({ ...base, type: "assistant.delta", content: event.text || "" });
+    if (event.type === "voice.tool") voice.handleRuntimeEvent({ ...base, type: "tool.call" });
+    if (event.type === "voice.tool_end") voice.handleRuntimeEvent({ ...base, type: "tool.result" });
+    if (event.type === "voice.run_completed") voice.handleRuntimeEvent({ ...base, type: "run.completed" });
+    if (event.type === "voice.run_interrupted") voice.handleRuntimeEvent({ ...base, type: "run.interrupted" });
+    if (event.type === "voice.run_failed") voice.handleRuntimeEvent({ ...base, type: "run.failed" });
+  });
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
     try {
       const url = new URL(req.url ?? "/", "http://factory.internal");
@@ -32,7 +58,7 @@ export async function createFactoryHandler(options: { root: string; env?: NodeJS
         res.once("close", () => { clearInterval(heartbeat); streams.delete(res); runtime.events.off("event", listener); });
         return;
       }
-      if (url.pathname === "/api/config" && req.method === "GET") return json(res, 200, { roles: ROLES, runtimeUrl: env.HATCH_FACTORY_RUNTIME_URL ?? "", services: { model: Boolean(env[resolveFactoryLlmProfile(env).apiKeyEnv]?.trim()), search: Boolean(env.TAVILY_API_KEY), scrape: Boolean(env.HATCH_FACTORY_SCRAPE_PROVIDER === "firecrawl" ? env.FIRECRAWL_API_KEY : env.TAVILY_API_KEY), hatch: Boolean(env.HATCH_FACTORY_RUNTIME_URL && (env.HATCH_FACTORY_CREATOR_TOKEN || env.HATCH_FACTORY_AUTH_TOKEN)), corpus: Boolean(env.HATCH_FACTORY_REGISTRY_URL && env.HATCH_FACTORY_CREATOR_TOKEN) } });
+      if (url.pathname === "/api/config" && req.method === "GET") return json(res, 200, { roles: ROLES, runtimeUrl: env.HATCH_FACTORY_RUNTIME_URL ?? "", services: { model: Boolean(env[resolveFactoryLlmProfile(env).apiKeyEnv]?.trim()), search: Boolean(env.TAVILY_API_KEY), scrape: Boolean(env.HATCH_FACTORY_SCRAPE_PROVIDER === "firecrawl" ? env.FIRECRAWL_API_KEY : env.TAVILY_API_KEY), hatch: Boolean(env.HATCH_FACTORY_RUNTIME_URL && (env.HATCH_FACTORY_CREATOR_TOKEN || env.HATCH_FACTORY_AUTH_TOKEN)), corpus: Boolean(env.HATCH_FACTORY_REGISTRY_URL && env.HATCH_FACTORY_CREATOR_TOKEN), voice: Boolean(env.ELEVENLABS_API_KEY?.trim() && env.ELEVENLABS_VOICE_ID?.trim()) } });
 
       if (url.pathname === "/api/evaluation-targets" && req.method === "GET") return json(res, 200, await evaluationTargets(store, env));
       if (url.pathname === "/api/sessions" && req.method === "GET") return json(res, 200, { sessions: (await store.list()).map(s => ({ ...publicSession(s), messages: undefined })) });
@@ -44,6 +70,9 @@ export async function createFactoryHandler(options: { root: string; env?: NodeJS
         if (action === "prompt" && req.method === "GET") return json(res, 200, { content: await runtime.prompt((await store.get(id)).role) });
         if (action === "message" && req.method === "POST") { const b = z.object({ content: z.string().min(1).max(100000) }).parse(await body(req)); await runtime.start(id, b.content); return json(res, 202, { accepted: true }); }
         if (action === "stop" && req.method === "POST") { await body(req); runtime.stop(id); return json(res, 202, { requested: true }); }
+        if (action === "voice/start" && req.method === "POST") { const s = await store.get(id); if (s.role !== "voice") throw new Error("Voice is only available in the Voice Agent"); await body(req); await voiceFor(id).start(id); return json(res, 200, { started: true }); }
+        if (action === "voice/audio" && req.method === "POST") { const b = z.object({ base64: z.string().min(1) }).parse(await body(req)); voiceFor(id).audio(Buffer.from(b.base64, "base64")); return json(res, 202, { accepted: true }); }
+        if (action === "voice/stop" && req.method === "POST") { await body(req); await voices.get(id)?.stop(); voices.delete(id); return json(res, 200, { stopped: true }); }
         if (action === "target" && req.method === "PUT") {
           const b = targetSchema.parse(await body(req));
           const selectedTarget = await resolveEvaluationTarget(store, env, b);

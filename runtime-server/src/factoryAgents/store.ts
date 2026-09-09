@@ -4,7 +4,7 @@ import path from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { atomicWrite } from "./files.js";
 
-export const ROLES = ["research", "generation", "case-generation", "evaluator"] as const;
+export const ROLES = ["voice", "research", "generation", "case-generation", "evaluator"] as const;
 export type Role = typeof ROLES[number];
 export type FileRecord = { path: string; bytes: number; mimeType: string; origin?: { sessionId: string; path: string }; readonly?: boolean };
 export type Comment = { id: string; path: string; start: number; end: number; quote: string; text: string; replacement?: string; createdAt: string };
@@ -14,7 +14,7 @@ export type Session = {
   revision: number; turn: number; status: "idle" | "running" | "completed" | "failed" | "interrupted";
   error?: string; activeTool?: string;
   files: FileRecord[]; comments: Comment[];
-  messages: AgentMessage[]; context: AgentMessage[];
+  messages: AgentMessage[]; context: AgentMessage[]; scribeContext?: AgentMessage[];
   progress: { percentage: number | null; status: "unscored" | "ready" | "failed"; turn?: number; revision?: number; error?: string };
   target?: TargetBinding;
   hatch?: { conversationId: string; lastRunId?: string; pending?: boolean };
@@ -44,6 +44,10 @@ export class WorkbenchStore {
     const now = new Date().toISOString();
     const session: Session = { id, role, title: title?.trim() || role, createdAt: now, updatedAt: now, revision: 0, turn: 0, status: "idle", files: [], comments: [], messages: [], context: [], progress: { percentage: null, status: "unscored" } };
     await this.save(session);
+    if (role === "voice") {
+      await this.put(id, "output/CREATOR_PERSONA.md", Buffer.from("# CREATOR_PERSONA\n\n"), { actor: "host" });
+      return this.get(id);
+    }
     return session;
   }
   async get(id: string): Promise<Session> { return JSON.parse(await readFile(path.join(this.directory(id), "session.json"), "utf8")); }
