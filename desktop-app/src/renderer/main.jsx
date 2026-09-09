@@ -139,7 +139,7 @@ import {
   shouldPersistWorkspaceToProfile,
   usesLegacyProfileRunFallback
 } from "./desktop-window-context.js";
-import { createTurnAccessSnapshot } from "./turn-access-snapshot.js";
+import { createTurnAccessSnapshot, requirePendingAccessSnapshot } from "./turn-access-snapshot.js";
 import { canUseAnotherAccountFromNetworkError } from "./network-error-recovery.js";
 import {
   entitlementRefreshNeedsReconnect,
@@ -751,6 +751,13 @@ function App() {
         setRunning(false);
         patchWindowContext({ activeRun: null });
       }
+      if (!pending.accessSnapshot) {
+        // Read-time migration only: never reconstruct an old run's authority.
+        // The server confirmed no acceptance/run; allow an explicit new message.
+        holder.session.update({ pending: { ...pending, status: "failed" } });
+        await holder.session.flush();
+        return "rejected";
+      }
       return "retry";
     }
     if (isTerminalRunStatus(result.run.status)) {
@@ -778,7 +785,8 @@ function App() {
     try {
       if (await reconcilePendingSubmission() !== "rejected") return;
       if (draftSessionRef.current !== holder || sessionDraftKeyRef.current !== holder?.key) return;
-      // A terminal Run with no canonical user record did not accept this submission.
+      // A terminal unaccepted Run, or a confirmed absent legacy Run without
+      // an execution snapshot, can be explicitly returned to a new draft.
       await holder.session.restoreRejectedSubmission();
       publishDraftSession(holder);
     } catch (error) {
@@ -1492,7 +1500,8 @@ function App() {
     // new turn starts. The native window captures this exact snapshot before
     // the Runtime may request a local tool; the renderer never sends a path or
     // an `approved_by_user` flag to authorize the tool itself.
-    const accessSnapshot = createTurnAccessSnapshot(workspaceGrant?.grant_id, workspace, permissionMode);
+    const accessSnapshot = savedPending ? requirePendingAccessSnapshot(savedPending)
+      : createTurnAccessSnapshot(workspaceGrant?.grant_id, workspace, permissionMode);
     const submissionRunId = savedPending?.runId ?? `run_${stableRandomId()}`;
     const submissionMessageId = savedPending?.clientMessageId ?? `message_${stableRandomId()}`;
     try {
@@ -1521,7 +1530,7 @@ function App() {
     if (sessionDraftKeyRef.current !== draftKey) return;
     const pending = savedPending ?? await submittingSession.stageSubmission({
       runId: submissionRunId, clientMessageId: submissionMessageId,
-      text: content, attachments: submissionFiles, textRevision: submittedTextVersion
+      text: content, attachments: submissionFiles, textRevision: submittedTextVersion, accessSnapshot
     });
     const runId = pending.runId;
     const clientMessageId = pending.clientMessageId;
@@ -1538,9 +1547,11 @@ function App() {
     };
     await submittingSession.markSubmissionUnknown();
     if (sessionDraftKeyRef.current !== draftKey) return;
-    workspaceRef.current = accessSnapshot.displayPath;
+    // These refs remain current Desktop preferences. The run's immutable
+    // accessSnapshot below is its only execution context, including on retry.
+    workspaceRef.current = workspace;
     workspaceGrantRef.current = workspaceGrant;
-    permissionRef.current = accessSnapshot.permissionMode;
+    permissionRef.current = permissionMode;
 
     const assistantId = `${runId}_assistant`;
     const startedAt = Date.now();

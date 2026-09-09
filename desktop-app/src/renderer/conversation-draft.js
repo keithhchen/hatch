@@ -16,8 +16,9 @@ export async function openDraftSession(invoke, scope, onStatus = () => {}) {
   const snapshot = () => structuredClone(draft);
   const applyUpdate = (patch) => {
     if (closed) throw new Error("draft_closed: Draft editor has closed");
+    const textChanged = Object.hasOwn(patch, "text") && patch.text !== draft.text;
     draft = { ...draft, ...structuredClone(patch) };
-    if (Object.hasOwn(patch, "text")) draft.textRevision += 1;
+    if (textChanged) draft.textRevision += 1;
     revision += 1;
     void drain().catch(() => {});
   };

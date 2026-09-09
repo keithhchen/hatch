@@ -23,6 +23,17 @@ pub struct PendingSubmission {
     pub attachments: Vec<DraftAttachment>,
     pub text_revision: u64,
     pub status: String,
+    // None is a read-time legacy boundary, not permission to use current grants.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_snapshot: Option<PendingAccessSnapshot>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PendingAccessSnapshot {
+    pub workspace_grant_id: String,
+    pub display_path: String,
+    pub permission_mode: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -170,6 +181,17 @@ impl DraftStore {
 
 fn validate(draft: &Draft) -> Result<(), String> {
     if let Some(pending) = &draft.pending {
+        if let Some(access) = &pending.access_snapshot {
+            if access.workspace_grant_id.trim().is_empty()
+                || access.workspace_grant_id.len() > 256
+                || access.workspace_grant_id.chars().any(char::is_control)
+                || access.display_path.len() > 32768
+                || !["ask-before-changes", "allow-changes"]
+                    .contains(&access.permission_mode.as_str())
+            {
+                return Err("draft_invalid: Invalid pending execution context".into());
+            }
+        }
         if pending.run_id.is_empty()
             || pending.run_id.len() > 256
             || pending.client_message_id.is_empty()
@@ -209,6 +231,39 @@ fn validate(draft: &Draft) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pending_execution_snapshot_has_strict_wire_fields_and_legacy_read_boundary() {
+        let legacy = serde_json::json!({
+            "runId": "run", "clientMessageId": "message", "text": "send me",
+            "attachments": [], "textRevision": 0, "status": "unknown"
+        });
+        let old: PendingSubmission = serde_json::from_value(legacy.clone()).unwrap();
+        assert!(old.access_snapshot.is_none());
+        let mut current = legacy;
+        current["accessSnapshot"] = serde_json::json!({
+            "workspaceGrantId": "grant_original", "displayPath": "/workspace/original",
+            "permissionMode": "ask-before-changes"
+        });
+        let pending: PendingSubmission = serde_json::from_value(current.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&pending).unwrap(), current);
+        let mut draft = Draft {
+            pending: Some(pending),
+            ..Draft::default()
+        };
+        validate(&draft).unwrap();
+        draft
+            .pending
+            .as_mut()
+            .unwrap()
+            .access_snapshot
+            .as_mut()
+            .unwrap()
+            .permission_mode = "host-fallback".into();
+        assert!(validate(&draft).unwrap_err().contains("execution context"));
+        current["accessSnapshot"]["authorityOverride"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<PendingSubmission>(current).is_err());
+    }
     #[test]
     fn unknown_submission_and_later_edits_survive_store_restart() {
         let temp = tempfile::tempdir().unwrap();
@@ -236,6 +291,11 @@ mod tests {
                 text_revision: 10,
                 attachments: vec![file],
                 status: "unknown".into(),
+                access_snapshot: Some(PendingAccessSnapshot {
+                    workspace_grant_id: "original-grant".into(),
+                    display_path: "/workspace/original".into(),
+                    permission_mode: "ask-before-changes".into(),
+                }),
             }),
         };
         store

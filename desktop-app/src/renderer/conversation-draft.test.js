@@ -18,6 +18,16 @@ async function stage(session) {
   await session.markSubmissionUnknown();
 }
 describe("durable conversation draft session", () => {
+  it("restoring unchanged text does not manufacture a new user edit revision", async () => {
+    const session = await openDraftSession(persistentBridge(), scope);
+    await stage(session);
+    const revision = session.textVersion();
+    session.update({ text: session.snapshot().text });
+    await session.flush();
+    expect(session.textVersion()).toBe(revision);
+    await session.acceptSubmission(receipt);
+    expect(session.snapshot()).toMatchObject({ text: "", attachments: [], pending: null });
+  });
   it("seals edits during lease release and shares concurrent close requests", async () => {
     let release;
     const bridge = persistentBridge();
