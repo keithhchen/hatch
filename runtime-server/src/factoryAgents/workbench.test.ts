@@ -147,3 +147,25 @@ test("write uses ordinary paths and overwrites output", async () => {
     assert.equal((await store.read(session.id, first.path)).bytes.toString(), "user and agent edits");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+
+test("model readiness follows the selected provider, not the presence of a Kimi key", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-model-readiness-"));
+  try {
+    for (const [env, ready] of [
+      [{ HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash", DEEPSEEK_API_KEY: "unit-test-key" }, true],
+      [{ HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash", LLM_API_KEY: "unit-test-key" }, false],
+      [{ HATCH_FACTORY_LLM_PROFILE: "kimi-k2.6", LLM_API_KEY: "unit-test-key" }, true],
+    ] as const) {
+      const app = await createWorkbenchServer({ root, env });
+      await new Promise<void>(resolve => app.server.listen(0, "127.0.0.1", resolve));
+      try {
+        const address = app.server.address(); assert.ok(address && typeof address !== "string");
+        const response = await fetch(`http://127.0.0.1:${address.port}/api/config`);
+        assert.equal(response.status, 200);
+        const config = await response.json() as { services: { model: boolean } };
+        assert.equal(config.services.model, ready);
+      } finally { await app.close(); }
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

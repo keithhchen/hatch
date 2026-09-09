@@ -9,4 +9,4 @@
 
 不再启动独立 Workbench。旧实验数据位于 `runtime-server/.factory-workbench/`，未删除；它们不是其他 Creator 的共享数据。新的会话存于既有 Factory 持久化目录的 `agent-chats/<creator-id>/`。
 
-构建使用 `npm --prefix creator-dashboard run build` 与 `npm --prefix runtime-server run build`。线上部署还需要 Registry 的 Kimi 与 Tavily 凭据配置；API 未部署或服务缺失时显示实际错误。
+构建使用 `npm --prefix creator-dashboard run build` 与 `npm --prefix runtime-server run build`。线上部署还需要 Registry 的 DeepSeek 与 Tavily 凭据配置（HATCH_FACTORY_LLM_PROFILE=deepseek-v4-flash）；API 未部署或服务缺失时显示实际错误。
