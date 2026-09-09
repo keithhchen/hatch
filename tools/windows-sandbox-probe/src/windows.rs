@@ -310,7 +310,7 @@ fn token_proof(process: HANDLE, profile: &Profile, mode: Mode) -> Result<Value> 
                 &mut length,
             ) == 0
             {
-                return Err(win_error("GetTokenInformation"));
+                return Err(win_error(&format!("GetTokenInformation(class={class})")));
             }
             Ok(value)
         };
