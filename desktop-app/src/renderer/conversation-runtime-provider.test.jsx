@@ -2,8 +2,9 @@
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { ThreadPrimitive, MessagePrimitive } from "@assistant-ui/react";
+import { ThreadPrimitive, MessagePrimitive, ComposerPrimitive } from "@assistant-ui/react";
 import { ConversationRuntimeProvider } from "./conversation-runtime-provider.jsx";
+import { DesktopComposerInput } from "./desktop-composer-input.jsx";
 
 let root;
 let container;
@@ -38,4 +39,25 @@ it("updates messages within the same conversation", async () => {
   await render("A", messages.slice(0, 1));
   await render("A", messages);
   expect(container.textContent).toBe("firstsecond");
+});
+
+it("restores each conversation draft with the real composer and populated message list", async () => {
+  async function show(key, draft) {
+    await act(async () => root.render(
+      <ConversationRuntimeProvider key={key} adapter={{ messages: key === "A" ? messages : [], onNew: async () => {} }}>
+        <ThreadPrimitive.Messages components={{ Message }} />
+        <ComposerPrimitive.Root>
+          <DesktopComposerInput draftKey={key} initialDraft={draft}
+            restoreDraftNonce={1} restoreDraftValue="" ready />
+        </ComposerPrimitive.Root>
+      </ConversationRuntimeProvider>
+    ));
+  }
+  await show("A", "saved A draft");
+  expect(container.querySelector("textarea").value).toBe("saved A draft");
+  await show("B", "saved B draft");
+  expect(container.querySelector("textarea").value).toBe("saved B draft");
+  await show("A", "saved A draft");
+  expect(container.querySelector("textarea").value).toBe("saved A draft");
+  expect(container.textContent).toContain("firstsecond");
 });
