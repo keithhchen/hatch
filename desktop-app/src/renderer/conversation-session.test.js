@@ -166,6 +166,61 @@ function startup(w, owner, grant) {
 }
 
 describe("cloud startup without local workspace authority", () => {
+  it("handshake leaves a pending Brief untouched without a validated workspace", async () => {
+    const w = world(), a = bind(w, "conv_a");
+    w.manager.select(a.session);
+    a.session.set("workspaceGrant", null);
+    a.session.set("workspaceGranted", false);
+    a.c.workspaceGrantRef.current = null;
+    a.c.pendingTaskStartRef.current = "conv_a";
+    a.c.taskBriefRef.current = { title: "Waiting for local access" };
+    a.c.createTurnAccessSnapshot = vi.fn(() => { throw new Error("Must not construct access yet"); });
+    const socket = await ready(a);
+    expect(await a.sendTaskStartIfNeeded()).toBe(false);
+    expect(a.c.createTurnAccessSnapshot).not.toHaveBeenCalled();
+    expect(a.session.snapshot().status).toBe("Connected");
+    expect(a.c.pendingTaskStartRef.current).toBe("conv_a");
+    expect(a.c.activeRunRef.current).toBeNull();
+    expect(w.native.mock.calls.some(([cmd]) => cmd === "set_window_tool_context")).toBe(false);
+    expect(socket.sent.some((frame) => frame.type === "client.message")).toBe(false);
+  });
+
+  it("snapshot construction failure resolves false, reports the error and releases the Brief preparation guard", async () => {
+    const w = world(), a = bind(w, "conv_a");
+    w.manager.select(a.session);
+    const socket = await ready(a);
+    a.c.workspaceGrantRef.current = a.session.snapshot().workspaceGrant;
+    a.c.pendingTaskStartRef.current = "conv_a";
+    a.c.taskBriefRef.current = { title: "Brief" };
+    a.c.createTurnAccessSnapshot = () => { throw new Error("snapshot construction failed"); };
+    await expect(a.sendTaskStartIfNeeded()).resolves.toBe(false);
+    expect(a.session.snapshot().status).toContain("snapshot construction failed");
+    expect(a.session.ref("taskStartPreparingRef").current).toBe(false);
+    expect(a.c.pendingTaskStartRef.current).toBe("conv_a");
+    expect(socket.sent.some((frame) => frame.type === "client.message")).toBe(false);
+  });
+
+  it.each(["current", "superseded", "disposed"])("handles unexpected task restore rejection only for its live revision (%s)", async (state) => {
+    const w = world(), a = bind(w, "conv_a");
+    w.manager.select(a.session); a.c.window.__TAURI_INTERNALS__ = true;
+    const native = w.native.getMockImplementation();
+    w.native.mockImplementation((command, args) => command === "read_task_settings"
+      ? Promise.resolve({ workspaceGrant: { grant_id: "saved", display_path: "/saved" } }) : native(command, args));
+    let rejectRestore;
+    a.c.validateRestoredWorkspace = () => new Promise((_resolve, reject) => { rejectRestore = reject; });
+    await a.selectConversation({ id: "conv_b" });
+    expect(w.selectedId).toBe("conv_b");
+    const b = bind(w, "conv_b");
+    expect(rejectRestore).toBeTypeOf("function");
+    if (state === "superseded") b.persistWorkspaceGrant({ grant_id: "new", display_path: "/new" });
+    if (state === "disposed") await b.session.close();
+    rejectRestore(new Error("unexpected restore failure"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(b.session.snapshot().status.includes("unexpected restore failure")).toBe(state === "current");
+    expect(a.session.snapshot().status).not.toContain("unexpected restore failure");
+    expect(b.session.snapshot().workspaceGrant).toBeNull();
+  });
+
   it("loads the authenticated snapshot and connects while folder validation is still pending; sending remains denied", async () => {
     const w = world(), a = bind(w, "conv_a");
     w.manager.select(a.session);

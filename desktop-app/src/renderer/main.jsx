@@ -1641,13 +1641,17 @@ function App() {
     if (!targetConversationId || !isServerConversationId(targetConversationId) || !snapshot) return false;
     if (taskStartSentRef.current.has(targetConversationId) || activeRunRef.current) return false;
     if (!isCurrentRuntimeTransport(sourceSocket, sourceToken) || sourceSocket?.readyState !== WebSocket.OPEN) return false;
+    // A handshake may finish before background folder validation. Keep the
+    // pending Brief intact and wait for a validated grant, without a run/error.
+    if (!workspaceGrantRef.current?.grant_id) return false;
     const preparing = conversationSession.ref("taskStartPreparingRef", false);
     if (preparing.current) return false;
-    const accessSnapshot = createTurnAccessSnapshot(workspaceGrantRef.current?.grant_id, workspaceRef.current, permissionRef.current);
-    const runId = `run_${stableRandomId()}`;
-    const clientMessageId = `message_${stableRandomId()}`;
+    let accessSnapshot, runId, clientMessageId;
     preparing.current = true;
     try {
+      accessSnapshot = createTurnAccessSnapshot(workspaceGrantRef.current.grant_id, workspaceRef.current, permissionRef.current);
+      runId = `run_${stableRandomId()}`;
+      clientMessageId = `message_${stableRandomId()}`;
       await synchronizeNativeToolContext(accessSnapshot, targetConversationId, runId);
     } catch (error) {
       setStatus(`Couldn't prepare native workspace access: ${errorMessage(error)}`);
@@ -2119,7 +2123,9 @@ function App() {
   }, [conversationSession, connected, conversationId, conversationLibraryStatus, creatorAgentEntitlements, selectedEntitlementId, signedIn, windowStateRestored]);
 
   useEffect(() => {
-    if (connected && workspaceGranted) void sendTaskStartIfNeeded();
+    if (connected && workspaceGranted) void sendTaskStartIfNeeded().catch((error) => {
+      if (!conversationSession.disposed) setStatus(errorMessage(error));
+    });
   }, [conversationSession, connected, workspaceGranted]);
 
   function scheduleRuntimeReconnect() {
@@ -2510,7 +2516,9 @@ function App() {
         setStatus("Connected");
         // Background sessions still start their pending Brief after handshake;
         // local preparation must not delay cloud readiness.
-        void sendTaskStartIfNeeded(socket, sourceToken);
+        void sendTaskStartIfNeeded(socket, sourceToken).catch((error) => {
+          if (isCurrentRuntimeTransport(socket, sourceToken)) setStatus(errorMessage(error));
+        });
       }
       return;
     }
@@ -3387,12 +3395,19 @@ function App() {
     targetSession.ref("workspaceGrantRef").current = restoredGrant;
     targetSession.set("workspaceGranted", Boolean(restoredGrant));
     targetSession.set("workspaceSettingsReady", restored.state !== "stale");
+    if (restored.state === "stale") targetSession.set("status", restored.status);
   }
 
   async function activateConversation(taskId, targetSession = sessionForConversation(taskId)) {
     const navigation = ++navigationRequestRef.current;
     if (targetSession.ensureOwnership && !await targetSession.ensureOwnership()) return false;
-    void restoreTaskLocalSettings(taskId, targetSession);
+    const restoring = restoreTaskLocalSettings(taskId, targetSession);
+    const restoreRevision = targetSession.ref("workspaceRestoreRevision", 0).current;
+    void restoring.catch((error) => {
+      if (!targetSession.disposed && targetSession.ref("workspaceRestoreRevision", 0).current === restoreRevision) {
+        targetSession.set("status", errorMessage(error));
+      }
+    });
     if (navigation !== navigationRequestRef.current || targetSession.disposed
       || selectedEntitlementIdRef.current !== targetSession.scope.entitlementId) return;
     conversationSession.saveReadingPosition(viewportRef.current);
