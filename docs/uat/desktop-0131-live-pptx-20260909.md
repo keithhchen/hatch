@@ -29,6 +29,8 @@ Requested an actual edit/alternate save to v2: document count 4, total 6, white 
 
 ## 真实附件入口与副本读取
 
+重启恢复已实测：运行结束后在同一对话输入 `HATCH-UAT-DRAFT-RESTART-0131：这是一条未发送的恢复验收草稿。`，通过原生选择器附加 v2，正常退出（pgrep 确认旧进程消失）再启动同一 CI app。先显示“正在打开你的工作区”，随后历史恢复，输入框文字和未发送 PPTX 附件同时恢复，Documents 工作区仍在。此为该安装包的正常退出/启动 UAT，不代表崩溃或新 owner 代码验收。
+
 通过 Hatch 原生文件选择器附加 v2 并发送，UI 显示 29 KB 附件卡片及 Open/Save as 操作，草稿附件清除。实际 run `run_045b70c998af41a5bfe53053d7e6cfca` 保持在原 UAT conversation。
 
 云端工具事件 4113、4114 成功读取 `~/Library/Application Support/dev.hatch.local/attachments/drop_211c1a58e9a44aedb9ad6b1cdfe53a28/file/hatch-uat-0131-c-v2.pptx`，并非 output 原件。脚本摘要未含表格时，Agent 自主使用随包 python-pptx 读取表格；事件 4121 返回 2 页和图片/2、文档/4、合计/6，退出码 0。此结果验证 skill + 通用执行 + 成熟库可以完成附件读取，不需要把所有文档细节实现进 harness。重启后附件恢复尚待验证。
