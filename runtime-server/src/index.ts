@@ -1543,7 +1543,9 @@ async function handleConversationHttpRequest(
     if (!runMatch[3] && req.method === "GET") {
       const run = await repository.getRun(conversation.id, runId);
       if (!run) throw new ConversationHttpError(404, "run_not_found", `Run ${runId} was not found.`);
-      writeResponse(200, { run: publicRun(run) });
+      if (!store) throw new ConversationHttpError(503, "history_unavailable", "Message acceptance is unavailable.");
+      const receipt = await store.readSubmissionReceipt(conversation.id, runId);
+      writeResponse(200, { run: publicRun(run), submission: receipt ?? null });
       return;
     }
     throw new ConversationHttpError(405, "method_not_allowed", "Use GET for a run or POST for /cancel.");

@@ -366,6 +366,61 @@ test("Run HTTP API rejects a detached reservation instead of occupying an execut
   assert.deepEqual((listed.body as { runs: unknown[] }).runs, []);
 });
 
+test("GET run returns canonical submission receipts or null without writing on repeated reads", async () => {
+  const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-run-receipt-http-")));
+  const repository = new InMemoryConversationRepository();
+  runtime = createRuntimeServer({ conversationStore: store, conversationRepository: repository });
+  const base = await listen(runtime.server);
+  const scope = new URLSearchParams(binding).toString();
+  const created = await json(base, `/v1/conversations?${scope}`, {
+    method: "POST", body: { title: "Submission receipts", client_request_id: "receipt_http" }
+  });
+  assert.equal(created.response.status, 201);
+  const publicId = (created.body as { conversation: { id: string } }).conversation.id;
+  const conversationId = durableConversationId({
+    creatorId: binding.creator_id, productId: binding.product_id, userId: binding.user_id
+  }, publicId);
+  const pathPrefix = `/v1/conversations/${encodeURIComponent(publicId)}/runs`;
+  for (const id of ["accepted_run", "unaccepted_run"]) {
+    await repository.createRun({
+      id, conversationId, clientMessageId: `message_${id}`,
+      inputDigest: `sha256:${"a".repeat(64)}`, corpusDigest: binding.corpus_digest
+    });
+    // Identical terminal run states must not determine message acceptance.
+    await repository.transitionRun(id, "interrupted", "Test executor disconnected");
+  }
+  await store.append({
+    type: "conversation.model_message", conversation_id: conversationId,
+    run_id: "accepted_run", client_message_id: "message_accepted_run",
+    message: { role: "user", content: "A durably accepted message" }
+  });
+  const eventsBefore = await store.readEvents();
+  const canonicalUser = eventsBefore.find((event) =>
+    event.type === "conversation.model_message" && event.run_id === "accepted_run");
+  assert.ok(canonicalUser);
+  const snapshotBefore = await repository.snapshot(conversationId);
+  const responses = new Map<string, unknown>();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    for (const id of ["accepted_run", "unaccepted_run"]) {
+      const result = await json(base, `${pathPrefix}/${id}?${scope}`);
+      assert.equal(result.response.status, 200);
+      const body = result.body as { run: { id: string; status: string }; submission: unknown };
+      assert.equal(body.run.id, id);
+      assert.equal(body.run.status, "interrupted");
+      assert.deepEqual(body.submission, id === "accepted_run" ? {
+        run_id: id, client_message_id: "message_accepted_run", accepted_at: canonicalUser.timestamp
+      } : null);
+      if (attempt === 0) responses.set(id, body);
+      else assert.deepEqual(body, responses.get(id));
+    }
+    const missing = await json(base, `${pathPrefix}/missing_run?${scope}`);
+    assert.equal(missing.response.status, 404);
+    assert.equal((missing.body as { error: { code: string } }).error.code, "run_not_found");
+    assert.deepEqual(await store.readEvents(), eventsBefore, "GET must not append canonical history or receipts");
+    assert.deepEqual(await repository.snapshot(conversationId), snapshotBefore, "GET must not mutate runs or the journal");
+  }
+});
+
 test("WebSocket retries use client_message_id without creating a second run or replaying tools", async () => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-ws-"));
   const repository = new InMemoryConversationRepository();
