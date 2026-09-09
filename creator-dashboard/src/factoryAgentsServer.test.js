@@ -7,16 +7,17 @@ import test from 'node:test';
 import { createDashboardApp } from '../server.mjs';
 
 // Explicit upstream fixture for auth/transport tests, never product UAT.
-test('Factory reuses Dashboard Creator cookie, CSRF and streams authenticated Registry results', async () => {
+test('Factory reuses Dashboard Creator cookie, CSRF and streams authenticated Registry results', { timeout: 10000 }, async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'dashboard-factory-test-'));
   let role = 'creator'; let calls = 0;
+  let streamClosed; const closed = new Promise(resolve => { streamClosed = resolve; });
   const registry = createServer((req, res) => {
     res.setHeader('content-type', 'application/json');
     const account = { id: '11111111-1111-4111-8111-111111111111', email: 'fixture@example.test', display_name: 'Fixture', role };
     if (req.url === '/v1/auth/signin') return res.end(JSON.stringify({ account, token: 'fixture-registry-token' }));
     if (req.url === '/v1/auth/me') return res.end(JSON.stringify(account));
     assert.equal(req.headers.authorization, 'Bearer fixture-registry-token'); calls++;
-    if (req.url.endsWith('/events')) { res.setHeader('content-type', 'text/event-stream'); return res.end('data: {"type":"state"}\n\n'); }
+    if (req.url.endsWith('/events')) { res.setHeader('content-type', 'text/event-stream'); res.once('close', streamClosed); return res.write('data: {"type":"state"}\n\n'); }
     res.statusCode = 201; res.end(JSON.stringify({ id: 'fixture-chat' }));
   });
   await new Promise(resolve => registry.listen(0, '127.0.0.1', resolve));
@@ -37,12 +38,17 @@ test('Factory reuses Dashboard Creator cookie, CSRF and streams authenticated Re
     assert.equal(calls, 0);
     const response = await fetch(route, { method: 'POST', headers: { ...headers, 'x-csrf-token': csrf }, body: JSON.stringify({ role: 'research' }) });
     assert.equal(response.status, 201); assert.deepEqual(await response.json(), { id: 'fixture-chat' });
-    const events = await fetch(`${base}/v1/creator/factory-agents/events`, { headers: { cookie } });
+    const controller = new AbortController();
+    const events = await fetch(`${base}/v1/creator/factory-agents/events`, { headers: { cookie }, signal: controller.signal });
     assert.match(events.headers.get('content-type'), /text\/event-stream/);
-    assert.equal(await events.text(), 'data: {"type":"state"}\n\n');
+    const first = await events.body.getReader().read();
+    assert.equal(new TextDecoder().decode(first.value), 'data: {"type":"state"}\n\n');
+    controller.abort();
+    await closed;
+    assert.equal((await fetch(route, { headers: { cookie } })).status, 201);
     role = 'user';
     assert.equal((await fetch(route, { headers: { cookie } })).status, 403);
-    assert.equal(calls, 2);
+    assert.equal(calls, 3);
   } finally {
     api.closeAllConnections(); registry.closeAllConnections();
     await Promise.all([new Promise(resolve => api.close(resolve)), new Promise(resolve => registry.close(resolve))]);

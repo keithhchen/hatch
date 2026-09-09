@@ -1450,25 +1450,32 @@ export async function createDashboardApp(options = {}) {
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const abort = new AbortController();
         response.once("close", () => abort.abort());
-        const upstream = await fetchImpl(new URL(url.pathname + url.search, registryUrl), {
-          method: request.method,
-          headers: { authorization: `Bearer ${authentication.token}`, "content-type": "application/json" },
-          ...(request.method === "GET" ? {} : { body: JSON.stringify(await readJson(request, factoryRequestMaxBytes)) }),
-          signal: abort.signal,
-          redirect: "error"
-        });
-        response.statusCode = upstream.status;
-        for (const name of ["content-type", "content-disposition", "cache-control"]) {
-          const value = upstream.headers.get(name);
-          if (value) response.setHeader(name, value);
+        try {
+          const upstream = await fetchImpl(new URL(url.pathname + url.search, registryUrl), {
+            method: request.method,
+            headers: { authorization: `Bearer ${authentication.token}`, "content-type": "application/json" },
+            ...(request.method === "GET" ? {} : { body: JSON.stringify(await readJson(request, factoryRequestMaxBytes)) }),
+            signal: abort.signal,
+            redirect: "error"
+          });
+          response.statusCode = upstream.status;
+          for (const name of ["content-type", "content-disposition", "cache-control"]) {
+            const value = upstream.headers.get(name);
+            if (value) response.setHeader(name, value);
+          }
+          if (upstream.headers.get("content-type")?.includes("text/event-stream")) {
+            response.setHeader("x-accel-buffering", "no");
+            response.flushHeaders();
+          }
+          if (upstream.body) await pipeline(Readable.fromWeb(upstream.body), response);
+          else response.end();
+          return;
+        } catch (error) {
+          // Switching chats closes the browser stream. pipeline destroys the
+          // response on disconnect; a second JSON response would crash Node.
+          if (abort.signal.aborted || response.destroyed) return;
+          throw error;
         }
-        if (upstream.headers.get("content-type")?.includes("text/event-stream")) {
-          response.setHeader("x-accel-buffering", "no");
-          response.flushHeaders();
-        }
-        if (upstream.body) await pipeline(Readable.fromWeb(upstream.body), response);
-        else response.end();
-        return;
       }
 
       if (url.pathname.startsWith("/v1/creator/factory-runs")
