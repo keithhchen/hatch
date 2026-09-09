@@ -1,5 +1,6 @@
 // Keep each call at its position in the assistant message, with its own receipt.
 export function chatEntries(messages) {
+  const latestUser = messages.findLastIndex(m => m.role === 'user');
   const results = new Map(messages.filter(m => m.role === 'toolResult' && m.toolCallId).map(m => [m.toolCallId, m]));
   const calls = new Set(messages.flatMap(m => Array.isArray(m.content) ? m.content.filter(c => c.type === 'toolCall').map(c => c.id) : []));
   return messages.flatMap((message, i) => {
@@ -9,7 +10,7 @@ export function chatEntries(messages) {
     if (!Array.isArray(message.content)) return [{ key: `${i}`, type: 'message', message }];
     return message.content.flatMap((block, j) => {
       const key = `${i}:${j}`;
-      if (block.type === 'toolCall') return [{ key, type: 'tool', call: block, result: results.get(block.id) }];
+      if (block.type === 'toolCall') return [{ key, type: 'tool', call: block, result: results.get(block.id), isCurrentTurn: i > latestUser }];
       if (block.type === 'text' && block.text) return [{ key, type: 'message', message: { ...message, content: block.text } }];
       return [];
     });

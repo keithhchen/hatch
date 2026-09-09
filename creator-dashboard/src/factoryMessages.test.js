@@ -31,3 +31,13 @@ test('pending calls retain their position and orphan receipts remain visible', (
   assert.equal(chatEntries([call, receipt])[0].key, pending[0].key);
   assert.equal(chatEntries([receipt])[0].result, receipt);
 });
+
+test('continuing a stopped chat does not mark its old unanswered calls as running', () => {
+  const entries = chatEntries([
+    { role: 'assistant', content: [{ type: 'toolCall', id: 'old', name: 'write', arguments: {} }] },
+    { role: 'user', content: '继续' },
+    { role: 'assistant', content: [{ type: 'toolCall', id: 'new', name: 'read', arguments: {} }] },
+  ]);
+  assert.equal(entries[0].isCurrentTurn, false);
+  assert.equal(entries[2].isCurrentTurn, true);
+});
