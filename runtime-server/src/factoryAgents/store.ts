@@ -88,7 +88,7 @@ export class WorkbenchStore {
     return this.update(id, async s => {
       const old = s.files.find(f => f.path === name);
       if (options.actor !== "host" && (old?.readonly || (s.role === "generation" && name === "output/CORPUS.md") || (s.role === "evaluator" && /^(output\/RESULT\.md|output\/results\/)/.test(name)))) throw new Error("Runtime result is immutable; save a proposed revision under another name");
-      if (options.actor !== "host" && s.status === "running" && name.startsWith("input/")) throw new Error("Stop the run before changing input files");
+      if (options.actor === "user" && s.status === "running") throw new Error("请停止运行后再保存文件；当前编辑草稿可以保留。");
       const record: FileRecord = { path: name, bytes: bytes.length, mimeType: options.mimeType ?? (name.endsWith(".md") ? "text/markdown" : "application/octet-stream"), ...(options.origin ? { origin: options.origin } : {}), ...(options.readonly ? { readonly: true } : {}) };
       await atomicWrite(await this.materializedPath(id, name), bytes);
       s.files = [...s.files.filter(f => f.path !== name), record];

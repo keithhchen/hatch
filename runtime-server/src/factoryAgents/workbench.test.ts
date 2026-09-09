@@ -30,8 +30,13 @@ test("workspaces isolate files, overwrite ordinary files and retain exact expert
     await assert.rejects(store.put(b.id, "output/RESULT.md", Buffer.from("altered"), { actor: "agent" }), /immutable/);
     await store.update(a.id, s => { s.status = "running"; });
     await assert.rejects(store.removeInput(a.id, original.path), /idle input/);
+    await assert.rejects(store.put(a.id, first.path, Buffer.from("用户编辑"), { actor: "user" }), /停止运行/);
+    assert.equal((await store.read(a.id, first.path)).bytes.toString(), "# 第二版\n已修改。\n");
+    await store.put(a.id, first.path, Buffer.from("Agent 完成"), { actor: "agent" });
     await store.recover();
     assert.equal((await store.get(a.id)).status, "interrupted");
+    await store.put(a.id, first.path, Buffer.from("用户编辑"), { actor: "user" });
+    assert.equal((await store.read(a.id, first.path)).bytes.toString(), "用户编辑");
     assert.equal((await store.get(b.id)).status, "idle");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
