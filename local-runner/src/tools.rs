@@ -1,6 +1,7 @@
 use crate::audit::AuditLogger;
 use crate::error::{LocalRunnerError, Result};
 use crate::patch::{apply_text_patch, HatchPatch};
+use crate::process::configure_background_process;
 use crate::sandbox::{path_to_string, Sandbox};
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use serde::Serialize;
@@ -632,14 +633,16 @@ impl LocalRunner {
 
     fn git_diff_inner(&self, path: &Path) -> Result<String> {
         self.stat_inner(path)?;
-        let output = Command::new("git")
-            .arg("diff")
-            .arg("--")
+        let mut command = Command::new("git");
+        command
+            .args(["diff", "--"])
             .arg(path)
             .current_dir(self.sandbox.root())
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::piped());
+        configure_background_process(&mut command, 0);
+        let output = command
             .output()
             .map_err(|source| LocalRunnerError::io(self.sandbox.root(), source))?;
 

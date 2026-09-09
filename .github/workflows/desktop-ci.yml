@@ -251,6 +251,17 @@ jobs:
         # The main Tauri config uses the same setting for the protected
         # release lane.
         run: npx tauri build --debug --bundles nsis --config src-tauri/tauri.windows-uat.json
+      - name: Verify Hatch is a Windows GUI executable
+        shell: pwsh
+        run: |
+          $executable = Get-Item -LiteralPath 'desktop-app/src-tauri/target/debug/hatch-desktop-app.exe'
+          $bytes = [IO.File]::ReadAllBytes($executable.FullName)
+          $peHeader = [BitConverter]::ToInt32($bytes, 0x3c)
+          $optionalHeader = $peHeader + 24
+          $subsystem = [BitConverter]::ToUInt16($bytes, $optionalHeader + 68)
+          if ($subsystem -ne 2) {
+            throw "Hatch must use the Windows GUI subsystem (2), found $subsystem"
+          }
       - name: Verify bundled application runtime in Windows bundle
         shell: bash
         run: |
