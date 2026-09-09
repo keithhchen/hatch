@@ -1,4 +1,5 @@
 import { dashboardRequest } from "./data.js";
+import { subscribeFactoryEvents } from "./factoryEvents.js";
 import React, { useEffect, useRef, useState } from 'react';
 import { Button } from '@hatch/ui';
 import ReactMarkdown from 'react-markdown';
@@ -38,7 +39,8 @@ export function FactoryAgents({ creatorId }) {
   const [config, setConfig] = useState(null);
   const [error, setError] = useState('');
   const refresh = () => api('/v1/creator/factory-agents/sessions').then(v => setSessions(v.sessions)).catch(e => setError(e.message));
-  useEffect(() => { refresh(); api('/v1/creator/factory-agents/config').then(setConfig).catch(e => setError(e.message)); const events = new EventSource('/v1/creator/factory-agents/events'); events.onmessage = e => { const v = JSON.parse(e.data); if (['state', 'progress', 'files'].includes(v.type)) refresh(); }; events.onerror = () => setError('与工作区服务的连接中断，正在重新连接。'); events.onopen = () => { setError(''); refresh(); }; return () => events.close(); }, []);
+  const refreshConfig = () => api('/v1/creator/factory-agents/config').then(setConfig).catch(e => setError(e.message));
+  useEffect(() => { refresh(); refreshConfig(); return subscribeFactoryEvents({ onMessage: e => { const v = JSON.parse(e.data); if (['state', 'progress', 'files'].includes(v.type)) refresh(); }, onError: () => setError('与工作区服务的连接中断，正在重新连接。'), onOpen: () => { setError(''); refresh(); refreshConfig(); } }); }, []);
   useEffect(() => { if (selected) sessionStorage.setItem(`factory-selection:${creatorId}:${role}`, selected); }, [role, selected]);
   const chooseRole = next => { setRole(next); setSelected(sessionStorage.getItem(`factory-selection:${creatorId}:${next}`) || sessions.find(s => s.role === next)?.id || null); };
   const create = async () => { try { const s = await api('/v1/creator/factory-agents/sessions', { method: 'POST', body: { role } }); await refresh(); setSelected(s.id); } catch (e) { setError(e.message); } };
@@ -64,7 +66,7 @@ function Workspace({ id, sessions, config, onChanged }) {
   const chat = useRef(null);
   const stick = useRef(true);
   const refresh = () => api(endpoint(id)).then(setSession);
-  useEffect(() => { let live = true; const load = () => api(endpoint(id)).then(v => { if (live) setSession(v); }).catch(e => { if (live) setError(e.message); }); load(); const events = new EventSource('/v1/creator/factory-agents/events'); events.onmessage = e => { const v = JSON.parse(e.data); if (v.sessionId !== id) return; if (v.type === 'delta') setStream(t => t + v.text); if (v.type === 'message' || v.type === 'state') { setStream(''); load(); } if (v.type === 'tool') setActivity(`正在调用 ${v.name}`); if (v.type === 'thinking') setActivity('正在思考'); if (v.type === 'compacting') setActivity('正在整理上下文'); if (v.type === 'tool_end') setActivity(v.isError ? `${v.name} 返回错误，Agent 正在处理` : '继续工作'); if (['files', 'progress', 'comments'].includes(v.type)) load(); }; return () => { live = false; events.close(); }; }, [id]);
+  useEffect(() => { let live = true; const load = () => api(endpoint(id)).then(v => { if (live) { setSession(v); setError(''); } }).catch(e => { if (live) setError(e.message); }); load(); const unsubscribe = subscribeFactoryEvents({ onMessage: e => { const v = JSON.parse(e.data); if (v.sessionId !== id) return; if (v.type === 'delta') setStream(t => t + v.text); if (v.type === 'message' || v.type === 'state') { setStream(''); load(); } if (v.type === 'tool') setActivity(`正在调用 ${v.name}`); if (v.type === 'thinking') setActivity('正在思考'); if (v.type === 'compacting') setActivity('正在整理上下文'); if (v.type === 'tool_end') setActivity(v.isError ? `${v.name} 返回错误，Agent 正在处理` : '继续工作'); if (['files', 'progress', 'comments'].includes(v.type)) load(); }, onError: () => { if (live) setActivity('连接中断，正在重新连接'); }, onOpen: () => { if (live) { setActivity(''); setStream(''); load(); } } }); return () => { live = false; unsubscribe(); }; }, [id]);
   useEffect(() => { sessionStorage.setItem(`factory-draft:${id}`, draft); }, [id, draft]);
   useEffect(() => { if (stick.current && chat.current) chat.current.scrollTop = chat.current.scrollHeight; }, [stream, s?.messages.length]);
   const perform = async fn => { setError(''); setBusy(true); try { await fn(); await refresh(); onChanged(); } catch (e) { setError(e.message); } finally { setBusy(false); } };
