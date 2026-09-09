@@ -19,7 +19,6 @@ import {
   persistedAttachment,
   MAX_RICH_TOOL_RESULT_BYTES,
   parseInboundMessage,
-  PROTOCOL_VERSION,
   TASK_START_MESSAGE_CONTENT,
   type ConversationMessage,
   type ClientHello,
@@ -577,6 +576,15 @@ type SessionBinding = {
   entitlementId?: string;
   orderId?: string;
   explicit: boolean;
+};
+
+type SessionBindingRequest = {
+  auth_token?: string;
+  license_token?: string;
+  entitlement_id?: string;
+  creator_id?: string;
+  user_id?: string;
+  product_id?: string;
 };
 
 type PendingTurnAuthorization = {
@@ -1981,6 +1989,7 @@ async function handleRuntimeSocket(
   }, helloTimeoutMs);
   helloDeadline.unref();
   let binding: SessionBinding | undefined;
+  let sessionStorageConversationId: string | undefined;
   let sessionSkills: RuntimeSessionSkills | undefined;
   const serverTools = new ServerToolExecutor(serverToolTimeoutMs);
   const creatorToolControlPlane = configuredCreatorToolControlPlane;
@@ -2135,6 +2144,19 @@ async function handleRuntimeSocket(
               connectionAbortController.signal
             );
             connectionAbortController.signal.throwIfAborted();
+            const requestedStorageConversationId = binding.explicit
+              ? durableConversationId(binding, message.conversation_id)
+              : message.conversation_id;
+            await repositoryReady;
+            const conversation = await conversationRepository.getConversation(requestedStorageConversationId);
+            if (!conversation) {
+              throw new ConversationRepositoryError(
+                "conversation_not_found",
+                `Conversation ${message.conversation_id} was not found`
+              );
+            }
+            assertConversationBinding(conversation, conversationBinding(binding));
+            connectionAbortController.signal.throwIfAborted();
             const releaseGlobalConnection = establishedConnectionGate.tryAcquire();
             if (!releaseGlobalConnection) {
               await send({
@@ -2205,10 +2227,12 @@ async function handleRuntimeSocket(
             // setup is durable. A failed hello can then be retried without
             // leaving a half-ready socket that rejects every later hello.
             hello = message;
+            sessionStorageConversationId = requestedStorageConversationId;
             sessionSkills = nextSessionSkills;
             clearTimeout(helloDeadline);
             await send({
               type: "session.ready",
+              conversation_id: message.conversation_id,
               accepted_protocol_version: message.protocol_version,
               runtime_capabilities: {
                 rich_assets: true,
@@ -2334,6 +2358,17 @@ async function handleRuntimeSocket(
         }
 
         if (message.type === "client.message") {
+          if (message.conversation_id !== hello.conversation_id) {
+            await send({
+              type: "turn.failed",
+              run_id: message.run_id,
+              error: {
+                code: "conversation_mismatch",
+                message: `This connection is bound to conversation ${hello.conversation_id}.`
+              }
+            });
+            return;
+          }
           if (!sessionSkills) {
             await send({
               type: "turn.failed",
@@ -2347,9 +2382,8 @@ async function handleRuntimeSocket(
           }
           // Durable identity deliberately excludes corpus_digest: an Agent
           // update must not orphan an existing Account/Creator/Agent thread.
-          const storageConversationId = binding.explicit
-            ? durableConversationId(binding, message.conversation_id)
-            : message.conversation_id;
+          if (!sessionStorageConversationId) throw new Error("Ready session has no conversation binding");
+          const storageConversationId = sessionStorageConversationId;
           const clientMessageId = message.client_message_id ?? message.run_id;
           const inputDigest = clientMessageInputDigest({ ...message.message, ...(message.task_start ? { task_start: true } : {}) });
           if (reservedRunIds.has(message.run_id) || activeConversationRuns.has(storageConversationId)) {
@@ -2392,7 +2426,12 @@ async function handleRuntimeSocket(
                   } });
                   return;
                 }
-                await send({ type: "message.accepted", run_id: receipt.run_id, client_message_id: receipt.client_message_id });
+                await send({
+                  type: "message.accepted",
+                  conversation_id: hello.conversation_id,
+                  run_id: receipt.run_id,
+                  client_message_id: receipt.client_message_id
+                });
                 await send({
                   type: "turn.state",
                   run_id: existing.id,
@@ -2723,7 +2762,12 @@ async function handleRuntimeSocket(
             reservedRunIds.delete(message.run_id);
             pendingAuthorization.releaseActiveRunCapacity();
             const receipt = durableRun.receipt;
-            await send({ type: "message.accepted", run_id: receipt.run_id, client_message_id: receipt.client_message_id });
+            await send({
+              type: "message.accepted",
+              conversation_id: hello.conversation_id,
+              run_id: receipt.run_id,
+              client_message_id: receipt.client_message_id
+            });
             await send({
               type: "turn.state",
               run_id: durableRun.run.id,
@@ -2764,7 +2808,12 @@ async function handleRuntimeSocket(
           };
           activeRunControls.set(runControlKey(storageConversationId, message.run_id), { cancel: cancelActiveRun });
           try {
-            await send({ type: "message.accepted", run_id: durableRun.receipt.run_id, client_message_id: durableRun.receipt.client_message_id });
+            await send({
+              type: "message.accepted",
+              conversation_id: hello.conversation_id,
+              run_id: durableRun.receipt.run_id,
+              client_message_id: durableRun.receipt.client_message_id
+            });
             // The initial queued record is already part of acceptSubmission.
             await send({ type: "turn.state", run_id: message.run_id, status: "queued" });
           } catch {
@@ -2824,7 +2873,9 @@ async function handleRuntimeSocket(
         await send({
           type: "turn.failed",
           error: {
-            code: error instanceof EntitlementError ? error.code : "protocol_error",
+            code: error instanceof EntitlementError || error instanceof ConversationRepositoryError
+              ? error.code
+              : "protocol_error",
             message: errorMessage(error)
           }
         });
@@ -3286,7 +3337,7 @@ async function buildSessionSkills(corpusRoot?: string): Promise<RuntimeSessionSk
 }
 
 async function resolveSessionBinding(
-  hello: ClientHello,
+  hello: SessionBindingRequest,
   entitlementResolver?: EntitlementResolver,
   agentCorpusResolver?: AgentCorpusResolver,
   authIdentityResolver?: AuthIdentityResolver,
@@ -3446,7 +3497,7 @@ async function resolveSessionBinding(
 }
 
 async function resolveHelloAuthClaims(
-  hello: ClientHello,
+  hello: Pick<SessionBindingRequest, "auth_token" | "license_token">,
   authIdentityResolver: AuthIdentityResolver | undefined,
   legacyHmacAuth: LegacyHmacAuth,
   signal?: AbortSignal
@@ -3495,7 +3546,7 @@ function assertEntitlementMatchesIdentity(
  * sessions must cross both boundaries again before any run state is created.
  */
 async function revalidateTurnAuthorization(
-  hello: ClientHello,
+  hello: Pick<SessionBindingRequest, "auth_token" | "license_token">,
   binding: SessionBinding,
   entitlementResolver?: EntitlementResolver,
   authIdentityResolver?: AuthIdentityResolver,
@@ -3626,8 +3677,8 @@ async function bindingFromHistoryRequest(
   const selectedProduct = url.searchParams.get("product_id");
   if (authIdentity?.role === "creator" && selectedProduct && !entitlementId) {
     return resolveSessionBinding({
-      type: "client.hello", protocol_version: PROTOCOL_VERSION,
-      auth_token: authToken, product_id: selectedProduct, local_tools: []
+      auth_token: authToken,
+      product_id: selectedProduct
     }, entitlementResolver, agentCorpusResolver, authIdentityResolver, authIdentity, signal);
   }
   const productMode = Boolean(entitlementResolver || agentCorpusResolver);

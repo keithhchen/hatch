@@ -451,6 +451,7 @@ test("WebSocket retries use client_message_id without creating a second run or r
   socket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
+    conversation_id: conversationId,
     license_token: "retry-license",
     local_tools: ["file_search"]
   }));
@@ -495,6 +496,57 @@ test("WebSocket retries use client_message_id without creating a second run or r
   socket.close();
 });
 
+test("a conversation-bound socket rejects a mismatched message before persistence or execution", async () => {
+  const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-conversation-bound-"));
+  const repository = new InMemoryConversationRepository(localRuntimeAuthority(dataDir));
+  const store = new RuntimeStore(dataDir);
+  let executions = 0;
+  for (const conversationId of ["conversation-bound", "conversation-other"]) {
+    await repository.createConversation({
+      id: conversationId,
+      publicId: conversationId,
+      ownerAccountId: "local-development",
+      creatorId: "local-development",
+      agentId: "local-agent",
+      productId: "local-product",
+      corpusDigest: `sha256:${"0".repeat(64)}`
+    });
+  }
+  runtime = createRuntimeServer({
+    conversationStore: store,
+    conversationRepository: repository,
+    createRuntime: () => ({
+      async *run(input) {
+        executions += 1;
+        yield { type: "turn.completed" as const, run_id: input.run_id, finish_reason: "stop" as const };
+      }
+    })
+  });
+  const messages: OutboundMessage[] = [];
+  const socket = await openRuntimeSocket(await listen(runtime.server), "conversation-bound", messages);
+  try {
+    socket.send(JSON.stringify({
+      type: "client.message",
+      run_id: "mismatched-run",
+      client_message_id: "mismatched-message",
+      conversation_id: "conversation-other",
+      message: { role: "user", content: "Must never run." }
+    }));
+    const failed = await waitForSocket(messages, (message) => (
+      message.type === "turn.failed" && message.run_id === "mismatched-run"
+    ));
+    assert.equal(failed.type === "turn.failed" ? failed.error.code : undefined, "conversation_mismatch");
+    assert.deepEqual(await repository.listRuns("conversation-bound"), []);
+    assert.deepEqual(await repository.listRuns("conversation-other"), []);
+    assert.deepEqual(await store.readConversation("conversation-bound"), []);
+    assert.deepEqual(await store.readConversation("conversation-other"), []);
+    assert.equal(executions, 0);
+    assert.equal(messages.some((message) => message.type === "message.accepted"), false);
+  } finally {
+    socket.close();
+  }
+});
+
 test("local attachments commit references and fixed image bytes without using the asset store", async (t) => {
   const dataDir = await mkdtemp(path.join(os.tmpdir(), "hatch-local-attachment-submit-"));
   const repository = new InMemoryConversationRepository(localRuntimeAuthority(dataDir));
@@ -512,7 +564,7 @@ test("local attachments commit references and fixed image bytes without using th
     ownerAccountId: "local-development", creatorId: "local-development", agentId: "local-agent",
     productId: "local-product", corpusDigest: `sha256:${"0".repeat(64)}` });
   const messages: OutboundMessage[] = [];
-  const socket = await openRuntimeSocket(base, "local-attachment-test", messages);
+  const socket = await openRuntimeSocket(base, conversationId, messages);
   const imageBytes = Buffer.from("fixed-image-input");
   const document = { kind: "local_file", attachment_id: "drop_document", display_name: "brief.pdf",
     host_id: "f780570c-7e50-4c14-bbd0-8a6c06d3302b", local_path: "/managed/brief.pdf",
@@ -556,7 +608,7 @@ test("completed assistant body is stored once and journal carries only one notif
     ownerAccountId: "local-development", creatorId: "local-development", agentId: "local-agent",
     productId: "local-product", corpusDigest: `sha256:${"0".repeat(64)}` });
   const messages: OutboundMessage[] = [];
-  const socket = await openRuntimeSocket(base, "canonical-test", messages);
+  const socket = await openRuntimeSocket(base, conversationId, messages);
   try {
     socket.send(JSON.stringify({ type: "client.message", run_id: "canonical-run",
       client_message_id: "canonical-message", conversation_id: conversationId,
@@ -587,7 +639,7 @@ test("a failed manual compaction does not lose the already accepted user command
     ownerAccountId: "local-development", creatorId: "local-development", agentId: "local-agent",
     productId: "local-product", corpusDigest: `sha256:${"0".repeat(64)}` });
   const messages: OutboundMessage[] = [];
-  const socket = await openRuntimeSocket(base, "compact-acceptance", messages);
+  const socket = await openRuntimeSocket(base, conversationId, messages);
   try {
     socket.send(JSON.stringify({ type: "client.message", run_id: "compact-run",
       client_message_id: "compact-message", conversation_id: conversationId,
@@ -665,7 +717,7 @@ test("two windows get distinct executor leases; disconnect is Interrupted and re
   });
 
   const firstMessages: OutboundMessage[] = [];
-  const firstSocket = await openRuntimeSocket(base, "same-installation", firstMessages);
+  const firstSocket = await openRuntimeSocket(base, conversationId, firstMessages);
   firstSocket.send(JSON.stringify({
     type: "client.message",
     run_id: "run_recovery_first",
@@ -681,7 +733,7 @@ test("two windows get distinct executor leases; disconnect is Interrupted and re
   assert.notEqual(firstRun?.executorId, "same-installation");
 
   const secondMessages: OutboundMessage[] = [];
-  const secondSocket = await openRuntimeSocket(base, "same-installation", secondMessages);
+  const secondSocket = await openRuntimeSocket(base, conversationId, secondMessages);
   secondSocket.send(JSON.stringify({
     type: "client.message",
     run_id: "run_recovery_parallel",
@@ -759,6 +811,9 @@ test("missing image fails before accepting, and retry uses fixed committed bytes
       assert.deepEqual(context.messages[0]?.model_images, [{ type: "image", data: bytes.toString("base64"), mimeType: "image/png" }]);
       yield { type: "turn.completed" as const, run_id: input.run_id, finish_reason: "stop" as const };
     } }) });
+  await repository.createConversation({ id: "atomic-image", publicId: "atomic-image",
+    ownerAccountId: "local-development", creatorId: "local-development", agentId: "local-agent",
+    productId: "local-product", corpusDigest: `sha256:${"0".repeat(64)}` });
   const messages: OutboundMessage[] = [];
   const socket = await openRuntimeSocket(await listen(runtime.server), "atomic-image", messages);
   const request = { type: "client.message", conversation_id: "atomic-image", run_id: "image-run", client_message_id: "image-message",
@@ -814,9 +869,12 @@ for (const boundary of ["before", "after"] as const) {
         assert.equal(context.messages.filter((message) => message.role === "user").length, 1);
         yield { type: "turn.completed" as const, run_id: input.run_id, finish_reason: "stop" as const };
       } }) });
+    await repository.createConversation({ id: "atomic-socket", publicId: "atomic-socket",
+      ownerAccountId: "local-development", creatorId: "local-development", agentId: "local-agent",
+      productId: "local-product", corpusDigest: `sha256:${"0".repeat(64)}` });
     const base = await listen(runtime.server);
     const messages: OutboundMessage[] = [];
-    const socket = await openRuntimeSocket(base, "atomic-disconnect", messages);
+    const socket = await openRuntimeSocket(base, "atomic-socket", messages);
     const request = { type: "client.message", conversation_id: "atomic-socket", run_id: "first",
       client_message_id: "stable", message: { role: "user", content: "accepted exactly once" } };
     socket.send(JSON.stringify(request));
@@ -835,7 +893,7 @@ for (const boundary of ["before", "after"] as const) {
       assert.equal(executions, 0);
       assert.equal(messages.some((message) => message.type === "message.accepted"), false);
       const retryMessages: OutboundMessage[] = [];
-      const retry = await openRuntimeSocket(base, "atomic-retry", retryMessages);
+      const retry = await openRuntimeSocket(base, "atomic-socket", retryMessages);
       try {
         retry.send(JSON.stringify({ ...request, run_id: "retry" }));
         const accepted = await waitForSocket(retryMessages, (message) => message.type === "message.accepted");
@@ -892,7 +950,7 @@ async function waitForSocket(
   throw new Error("Timed out waiting for WebSocket message");
 }
 
-async function openRuntimeSocket(base: string, _testLabel: string, messages: OutboundMessage[]): Promise<WebSocket> {
+async function openRuntimeSocket(base: string, conversationId: string, messages: OutboundMessage[]): Promise<WebSocket> {
   const socket = new WebSocket(base.replace("http:", "ws:") + "/runtime");
   socket.on("message", (value) => messages.push(JSON.parse(String(value)) as OutboundMessage));
   await new Promise<void>((resolve, reject) => {
@@ -902,10 +960,12 @@ async function openRuntimeSocket(base: string, _testLabel: string, messages: Out
   socket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
+    conversation_id: conversationId,
     license_token: "recovery-license",
     local_tools: ["file_search"]
   }));
-  await waitForSocket(messages, (message) => message.type === "session.ready");
+  const ready = await waitForSocket(messages, (message) => message.type === "session.ready");
+  assert.equal(ready.type === "session.ready" ? ready.conversation_id : undefined, conversationId);
   return socket;
 }
 

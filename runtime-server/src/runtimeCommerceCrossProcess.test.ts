@@ -96,7 +96,8 @@ test("real Dashboard process and Runtime HTTP client preserve permanent access, 
   await activateCurrentCorpus(CREATOR_ID, AGENT_ID, corpus.v2Digest, corpus.root);
   registry.publishDigest(corpus.v2Digest);
 
-  const freeSession = await connectRuntime(firstRuntime.url, freePurchase.entitlement_id);
+  const freeConversationId = "conversation-run-success";
+  const freeSession = await connectRuntime(firstRuntime.url, freePurchase.entitlement_id, freeConversationId);
   sockets.push(freeSession.socket);
   const ready = await freeSession.ready;
   assert.equal(ready.corpus_digest, corpus.v1Digest);
@@ -106,12 +107,14 @@ test("real Dashboard process and Runtime HTTP client preserve permanent access, 
 
   // A zero-price purchase is still a real purchase, but it has permanent
   // access. Repeated turns do not reserve, consume, or create delivery facts.
-  freeSession.send(runMessage("run-success"));
+  freeSession.send(runMessage("run-success", freeConversationId));
+  const accepted = await freeSession.waitFor((message) => message.type === "message.accepted" && message.run_id === "run-success");
+  assert.equal(accepted.conversation_id, freeConversationId);
   await freeSession.waitFor((message) => message.type === "turn.completed" && message.run_id === "run-success");
   await freeSession.waitFor((message) => (
     message.type === "turn.state" && message.run_id === "run-success" && message.status === "completed"
   ));
-  freeSession.send(runMessage("run-repeat"));
+  freeSession.send(runMessage("run-repeat", freeConversationId));
   await freeSession.waitFor((message) => message.type === "turn.completed" && message.run_id === "run-repeat");
   await waitForEntitlement(dashboard.url, freePurchase.entitlement_id, (entitlement) => (
     entitlement.access_mode === "unmetered"
@@ -122,12 +125,13 @@ test("real Dashboard process and Runtime HTTP client preserve permanent access, 
 
   const resiliencePurchase = await checkout(dashboard.url, "resilience-v2");
   assert.equal(resiliencePurchase.entitlement.access_mode, "unmetered");
-  const resilienceSession = await connectRuntime(firstRuntime.url, resiliencePurchase.entitlement_id);
+  const resilienceConversationId = "conversation-run-failed";
+  const resilienceSession = await connectRuntime(firstRuntime.url, resiliencePurchase.entitlement_id, resilienceConversationId);
   sockets.push(resilienceSession.socket);
   assert.equal((await resilienceSession.ready).corpus_digest, corpus.v2Digest);
 
   // A model failure or cancellation also leaves permanent access unchanged.
-  resilienceSession.send(runMessage("run-failed"));
+  resilienceSession.send(runMessage("run-failed", resilienceConversationId));
   await resilienceSession.waitFor((message) => message.type === "turn.failed" && message.run_id === "run-failed");
   await resilienceSession.waitFor((message) => (
     message.type === "turn.state" && message.run_id === "run-failed" && message.status === "failed"
@@ -138,7 +142,7 @@ test("real Dashboard process and Runtime HTTP client preserve permanent access, 
     && !Object.hasOwn(entitlement, "reserved_units")
   ));
 
-  resilienceSession.send(runMessage("run-cancelled"));
+  resilienceSession.send(runMessage("run-cancelled", resilienceConversationId));
   await resilienceSession.waitFor((message) => (
     message.type === "assistant.delta"
     && message.run_id === "run-cancelled"
@@ -172,10 +176,11 @@ test("real Dashboard process and Runtime HTTP client preserve permanent access, 
     reconcileIntervalMs: 20
   });
   runtimes.push(restartedRuntime.runtime);
-  const restartedFreeSession = await connectRuntime(restartedRuntime.url, freePurchase.entitlement_id);
+  const restartedFreeConversationId = "conversation-run-after-restart";
+  const restartedFreeSession = await connectRuntime(restartedRuntime.url, freePurchase.entitlement_id, restartedFreeConversationId);
   sockets.push(restartedFreeSession.socket);
   assert.equal((await restartedFreeSession.ready).corpus_digest, corpus.v1Digest);
-  restartedFreeSession.send(runMessage("run-after-restart"));
+  restartedFreeSession.send(runMessage("run-after-restart", restartedFreeConversationId));
   await restartedFreeSession.waitFor((message) => message.type === "turn.completed" && message.run_id === "run-after-restart");
   const recoveredEntitlement = await waitForEntitlement(
     dashboard.url,
@@ -198,7 +203,8 @@ test("real Dashboard process and Runtime HTTP client preserve permanent access, 
   const permanentPurchase = await checkout(dashboard.url, "permanent-free-v2");
   assert.equal(permanentPurchase.payment.status, "not_required");
   assert.equal(permanentPurchase.entitlement.purchased_corpus_digest, corpus.v2Digest);
-  const permanentSession = await connectRuntime(restartedRuntime.url, permanentPurchase.entitlement_id);
+  const permanentConversationId = "conversation-run-after-refund";
+  const permanentSession = await connectRuntime(restartedRuntime.url, permanentPurchase.entitlement_id, permanentConversationId);
   sockets.push(permanentSession.socket);
   assert.equal((await permanentSession.ready).corpus_digest, corpus.v2Digest);
 
@@ -214,14 +220,14 @@ test("real Dashboard process and Runtime HTTP client preserve permanent access, 
   assert.equal(refundResponse.status, 409, JSON.stringify(refundRejected));
   assert.equal(refundRejected.error?.code, "unmetered_purchase_not_reversible");
 
-  permanentSession.send(runMessage("run-after-refund"));
+  permanentSession.send(runMessage("run-after-refund", permanentConversationId));
   const stillUsableRun = await permanentSession.waitFor((message) => (
     message.type === "turn.completed" && message.run_id === "run-after-refund"
   ));
   assert.equal(stillUsableRun.run_id, "run-after-refund");
   assert.equal(invokedRuns.has("run-after-refund"), true, "permanent access remains usable after a rejected buyer refund");
 
-  const freshPermanentSession = await connectRuntime(restartedRuntime.url, permanentPurchase.entitlement_id);
+  const freshPermanentSession = await connectRuntime(restartedRuntime.url, permanentPurchase.entitlement_id, permanentConversationId);
   sockets.push(freshPermanentSession.socket);
   assert.equal((await freshPermanentSession.ready).corpus_digest, corpus.v2Digest);
 
@@ -564,16 +570,23 @@ type RuntimeConnection = {
   waitFor: (predicate: (message: JsonRecord) => boolean, timeoutMs?: number) => Promise<JsonRecord>;
 };
 
-async function connectRuntime(runtimeUrl: string, entitlementId: string): Promise<RuntimeConnection> {
+async function connectRuntime(
+  runtimeUrl: string,
+  entitlementId: string,
+  conversationId: string
+): Promise<RuntimeConnection> {
   const connection = await openRuntimeSocket(runtimeUrl);
-  connection.send(hello(entitlementId));
-  const ready = connection.waitFor((message) => message.type === "session.ready");
+  connection.send(hello(entitlementId, conversationId));
+  const ready = connection.waitFor((message) => message.type === "session.ready").then((message) => {
+    assert.equal(message.conversation_id, conversationId);
+    return message;
+  });
   return { ...connection, ready };
 }
 
 async function connectRuntimeExpectFailure(runtimeUrl: string, entitlementId: string) {
   const connection = await openRuntimeSocket(runtimeUrl);
-  connection.send(hello(entitlementId));
+  connection.send(hello(entitlementId, "conversation-run-success"));
   const failure = await connection.waitFor((message) => message.type === "turn.failed" && !message.run_id);
   return { ...connection, failure };
 }
@@ -600,21 +613,22 @@ async function openRuntimeSocket(runtimeUrl: string): Promise<Omit<RuntimeConnec
   };
 }
 
-function hello(entitlementId: string): JsonRecord {
+function hello(entitlementId: string, conversationId: string): JsonRecord {
   return {
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
+    conversation_id: conversationId,
     auth_token: BUYER_TOKEN,
     entitlement_id: entitlementId,
     local_tools: []
   };
 }
 
-function runMessage(runId: string): JsonRecord {
+function runMessage(runId: string, conversationId: string): JsonRecord {
   return {
     type: "client.message",
     run_id: runId,
-    conversation_id: `conversation-${runId}`,
+    conversation_id: conversationId,
     message: { role: "user", content: "Create the purchased delivery." }
   };
 }

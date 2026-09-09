@@ -14,6 +14,7 @@ import {
   type EntitlementResolver
 } from "./entitlements.js";
 import { createRuntimeServer, durableConversationId, type RuntimeServer } from "./index.js";
+import { PROTOCOL_VERSION } from "./protocol.js";
 
 const USER_ID = "11111111-1111-4111-8111-111111111111";
 const OTHER_USER_ID = "22222222-2222-4222-8222-222222222222";
@@ -113,7 +114,8 @@ test("Runtime rejects another user's entitlement for an introspected session", a
       socket!.once("message", (data) => resolve(JSON.parse(String(data)) as Record<string, unknown>));
       socket!.once("open", () => socket!.send(JSON.stringify({
         type: "client.hello",
-        protocol_version: "0.7",
+        protocol_version: PROTOCOL_VERSION,
+        conversation_id: "conversation-revocable-access",
         auth_token: "opaque-mallory",
         entitlement_id: entitlement.entitlement_id,
         local_tools: []
@@ -242,7 +244,8 @@ test("Runtime re-introspects a Creator session per turn without requiring a buye
     const readyResponse = nextSocketMessage(socket);
     socket.send(JSON.stringify({
       type: "client.hello",
-      protocol_version: "0.7",
+      protocol_version: PROTOCOL_VERSION,
+      conversation_id: "conversation-revocable-access",
       auth_token: "opaque-creator-session",
       creator_id: CREATOR_ID,
       product_id: PRODUCT_ID,
@@ -332,7 +335,8 @@ test("Runtime admits only one client hello while Registry authorization is pendi
     });
     const hello = {
       type: "client.hello",
-      protocol_version: "0.7",
+      protocol_version: PROTOCOL_VERSION,
+      conversation_id: "conversation-revocable-access",
       auth_token: "opaque-user-session",
       entitlement_id: entitlement.entitlement_id,
       local_tools: []
@@ -719,7 +723,8 @@ async function connectAuthorizedSocket(runtimePort: number, entitlement: Entitle
   const response = nextSocketMessage(socket);
   socket.send(JSON.stringify({
     type: "client.hello",
-    protocol_version: "0.7",
+    protocol_version: PROTOCOL_VERSION,
+    conversation_id: "conversation-revocable-access",
     auth_token: "opaque-user-session",
     entitlement_id: entitlement.entitlement_id,
     local_tools: []

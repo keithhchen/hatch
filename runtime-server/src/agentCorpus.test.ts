@@ -9,6 +9,7 @@ import { WebSocket } from "ws";
 import { AgentCorpusResolver, AgentCorpusSchema, CorpusKnowledgeProvider, HttpKnowledgeProvider, loadAgentCorpus, QdrantKnowledgeProvider } from "./agentCorpus.js";
 import { DeterministicAgentRuntime } from "./agentRuntime.js";
 import { createRuntimeServer } from "./index.js";
+import { PROTOCOL_VERSION } from "./protocol.js";
 
 const tempRoots: string[] = [];
 const CREATOR_ID = "11111111-1111-4111-8111-111111111111";
@@ -301,19 +302,31 @@ test("current Agent Corpus entitlements are discoverable and bind the Desktop se
     const payload = await library.json() as { creator_agents: Array<{ product_id: string }> };
     assert.equal(payload.creator_agents[0]?.product_id, PRODUCT_ID);
 
+    const created = await fetch(`http://127.0.0.1:${address.port}/v1/conversations?entitlement_id=${entitlement.entitlement_id}`, {
+      method: "POST",
+      headers: { authorization: "Bearer license-jordan", "content-type": "application/json" },
+      body: "{}"
+    });
+    const createdBody = await created.json() as { conversation?: { id?: string } };
+    const conversationId = createdBody.conversation?.id;
+    assert.equal(created.status, 201);
+    assert.ok(conversationId);
+
     const socket = new WebSocket(`ws://127.0.0.1:${address.port}/runtime`);
     const ready = await new Promise<Record<string, unknown>>((resolve, reject) => {
       socket.once("error", reject);
       socket.once("message", (data) => resolve(JSON.parse(String(data)) as Record<string, unknown>));
       socket.once("open", () => socket.send(JSON.stringify({
         type: "client.hello",
-        protocol_version: "0.7",
+        protocol_version: PROTOCOL_VERSION,
+        conversation_id: conversationId,
         license_token: "license-jordan",
         entitlement_id: entitlement.entitlement_id,
         local_tools: []
       })));
     });
     assert.equal(ready.type, "session.ready");
+    assert.equal(ready.conversation_id, conversationId);
     assert.equal(ready.product_id, PRODUCT_ID);
     assert.match(String(ready.corpus_digest), /^sha256:[a-f0-9]{64}$/);
     socket.close();

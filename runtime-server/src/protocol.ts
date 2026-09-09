@@ -4,9 +4,8 @@ import type { Usage } from "@earendil-works/pi-ai";
 import { UUID_V4_RE } from "./identity.js";
 import type { BriefSpec } from "./brief.js";
 
-export const LEGACY_PROTOCOL_VERSION = "0.6";
-export const PROTOCOL_VERSION = "0.7";
-export const SUPPORTED_PROTOCOL_VERSIONS = [LEGACY_PROTOCOL_VERSION, PROTOCOL_VERSION] as const;
+export const PROTOCOL_VERSION = "0.8";
+export const SUPPORTED_PROTOCOL_VERSIONS = [PROTOCOL_VERSION] as const;
 export const ProtocolVersionSchema = z.enum(SUPPORTED_PROTOCOL_VERSIONS);
 export type ProtocolVersion = z.infer<typeof ProtocolVersionSchema>;
 export const MAX_TOOL_RESULT_BYTES = 4 * 1024 * 1024;
@@ -53,6 +52,7 @@ export type ClientToolName = z.infer<typeof ClientToolNameSchema>;
 export const ClientHelloSchema = z.object({
   type: z.literal("client.hello"),
   protocol_version: ProtocolVersionSchema,
+  conversation_id: ProtocolIdSchema,
   auth_token: z.string().min(1).max(MAX_AUTH_TOKEN_CHARS).optional(),
   // Kept only for old local fixtures during the migration. Production clients
   // send auth_token issued by Registry.
@@ -337,6 +337,7 @@ export type OutputFinishReason = "stop" | "content_filter";
 
 export type RuntimeReady = {
   type: "session.ready";
+  conversation_id: string;
   accepted_protocol_version: ProtocolVersion;
   /** Capabilities that must be negotiated before the Desktop sends rich data. */
   runtime_capabilities?: {
@@ -497,6 +498,7 @@ export type RunStateEvent = {
 
 export type MessageAccepted = {
   type: "message.accepted";
+  conversation_id: string;
   run_id: string;
   client_message_id: string;
 };

@@ -183,6 +183,7 @@ async function executeOneTurn(
   let protocolTraceTruncated = false;
   let outputBytes = 0;
   let messageSent = false;
+  let messageAccepted = false;
   let completed = false;
   let terminalCompleted = false;
   let finishReason: string | undefined;
@@ -209,7 +210,7 @@ async function executeOneTurn(
       reject(error instanceof Error ? error : new Error(String(error)));
     };
     const succeedIfComplete = () => {
-      if (settled || !completed || !terminalCompleted) return;
+      if (settled || !messageAccepted || !completed || !terminalCompleted) return;
       const output = lastSuccessfulFileWrite ?? chunks.join("");
       if (finishReason !== "stop") return fail(new Error(`Hatch Runtime finished with ${finishReason ?? "no finish reason"}`));
       if (!output.trim()) return fail(new Error("Hatch Runtime returned an empty result"));
@@ -248,6 +249,7 @@ async function executeOneTurn(
       const hello = {
         type: "client.hello",
         protocol_version: PROTOCOL_VERSION,
+        conversation_id: conversationId,
         license_token: "factory-harness-local",
         entitlement_id: FACTORY_HARNESS_ENTITLEMENT_ID,
         local_tools: [...LOCAL_TOOLS]
@@ -278,6 +280,9 @@ async function executeOneTurn(
           if (message.creator_id !== input.creatorId || message.product_id !== input.agentId) {
             throw new Error("Hatch Runtime bound a different Creator Agent");
           }
+          if (message.conversation_id !== conversationId) {
+            throw new Error("Hatch Runtime bound a different conversation");
+          }
           if (message.corpus_digest !== input.corpusDigest) {
             throw new Error(`Hatch Runtime loaded unexpected Corpus digest: ${String(message.corpus_digest)}`);
           }
@@ -292,7 +297,14 @@ async function executeOneTurn(
           return;
         }
         const matchingRun = message.run_id === runId;
-        if (type === "assistant.delta" && matchingRun) {
+        if (type === "message.accepted" && matchingRun) {
+          if (messageAccepted) throw new Error("Hatch Runtime emitted message.accepted more than once");
+          if (message.conversation_id !== conversationId) {
+            throw new Error("Hatch Runtime accepted the message for a different conversation");
+          }
+          messageAccepted = true;
+          succeedIfComplete();
+        } else if (type === "assistant.delta" && matchingRun) {
           const delta = message.delta as Record<string, unknown> | undefined;
           if (delta?.kind === "text" && typeof delta.content === "string") {
             outputBytes += Buffer.byteLength(delta.content);

@@ -436,18 +436,20 @@ test("an existing session re-resolves Creator tool bindings and blocks a disable
     }
   };
   let runCalls = 0;
+  const conversationRepository = await authBoundaryConversations(entitlement, ["creator-disabled-conversation"]);
   const runtime = createRuntimeServer({
     createRuntime: () => completingRuntime(() => { runCalls += 1; }),
-    conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-creator-refresh-"))),
+    conversationStore: new RuntimeStore(conversationRepository.localAuthority),
     authIdentityResolver: { resolveIdentity: async () => ({ sub: entitlement.user_id, role: "user" }) },
     entitlementResolver: fixtureEntitlementResolver(entitlement),
     agentCorpusResolver: {
       resolve: async () => ({ root: "/fixture-corpus", corpus, digest: `sha256:${"1".repeat(64)}` })
     } as unknown as AgentCorpusResolver,
-    creatorToolControlPlane: controlPlane
+    creatorToolControlPlane: controlPlane,
+    conversationRepository
   });
   const port = await listen(runtime);
-  const socket = await connectEntitledSocket(port, entitlement, "creator-refresh-session", "creator-refresh-install");
+  const socket = await connectEntitledSocket(port, entitlement, "creator-refresh-session", "creator-disabled-conversation");
   try {
     const rejected = waitForMessage(socket, (message) => message.run_id === "creator-disabled-run"
       && (message.error as { code?: string } | undefined)?.code === "agent_updated");
@@ -504,7 +506,7 @@ test("an existing session uses a rotated Creator tool binding on its next turn",
     conversationRepository
   });
   const port = await listen(runtime);
-  const socket = await connectEntitledSocket(port, entitlement, "creator-rotation-session", "creator-rotation-install");
+  const socket = await connectEntitledSocket(port, entitlement, "creator-rotation-session", "creator-rotation-conversation");
   try {
     const completed = waitForMessage(socket, (message) => message.type === "turn.completed" && message.run_id === "creator-rotation-run");
     socket.send(JSON.stringify(clientMessage("creator-rotation-run", "creator-rotation-conversation")));
@@ -551,7 +553,7 @@ test("global per-turn authorization capacity rejects N+1 without another Registr
         port,
         entitlement,
         `turn-session-${index}`,
-        `turn-install-${index}`
+        `turn-conversation-${["one", "two", "three"][index - 1]}`
       ));
     }
     sockets[0]!.send(JSON.stringify(clientMessage("turn-capacity-one", "turn-conversation-one")));
@@ -614,8 +616,8 @@ test("per-user turn authorization capacity prevents one account from occupying t
   let first: WebSocket | undefined;
   let second: WebSocket | undefined;
   try {
-    first = await connectEntitledSocket(port, entitlement, "fair-user-one", "fair-user-install-one");
-    second = await connectEntitledSocket(port, entitlement, "fair-user-two", "fair-user-install-two");
+    first = await connectEntitledSocket(port, entitlement, "fair-user-one", "fair-auth-conversation-first");
+    second = await connectEntitledSocket(port, entitlement, "fair-user-two", "fair-auth-conversation-overflow");
     first.send(JSON.stringify(clientMessage("fair-auth-first", "fair-auth-conversation-first")));
     await pendingStarted;
 
@@ -630,7 +632,7 @@ test("per-user turn authorization capacity prevents one account from occupying t
     releasePending({ sub: entitlement.user_id, role: "user" });
     await firstCompleted;
     const secondCompleted = waitForMessage(second, (message) => message.type === "turn.completed" && message.run_id === "fair-auth-admitted");
-    second.send(JSON.stringify(clientMessage("fair-auth-admitted", "fair-auth-conversation-admitted")));
+    second.send(JSON.stringify(clientMessage("fair-auth-admitted", "fair-auth-conversation-overflow")));
     await secondCompleted;
     assert.equal(tokenCalls.get("fair-user-two"), 2);
   } finally {
@@ -1071,7 +1073,7 @@ test("turn.cancel tombstones pending authorization and an abort-ignoring resolve
   let first: WebSocket | undefined;
   let second: WebSocket | undefined;
   try {
-    first = await connectEntitledSocket(port, entitlement, "session-one", "install-one");
+    first = await connectEntitledSocket(port, entitlement, "session-one", "shared-conversation");
     const firstMessages: Array<Record<string, unknown>> = [];
     first.on("message", (data) => firstMessages.push(JSON.parse(String(data)) as Record<string, unknown>));
     first.send(JSON.stringify(clientMessage("run-pending-cancel", "shared-conversation")));
@@ -1083,19 +1085,19 @@ test("turn.cancel tombstones pending authorization and an abort-ignoring resolve
     assert.equal(((await cancelled).error as { code?: string }).code, "run_cancelled");
 
     const duplicate = waitForMessage(first, (message) => message.run_id === "run-pending-cancel"
-      && (message.error as { code?: string } | undefined)?.code === "duplicate_run_id");
+      && (message.error as { code?: string } | undefined)?.code === "conversation_mismatch");
     first.send(JSON.stringify(clientMessage("run-pending-cancel", "different-conversation")));
-    assert.equal(((await duplicate).error as { code?: string }).code, "duplicate_run_id");
+    assert.equal(((await duplicate).error as { code?: string }).code, "conversation_mismatch");
 
     const connectionBusy = waitForMessage(first, (message) => message.run_id === "run-cancel-spam"
-      && (message.error as { code?: string } | undefined)?.code === "connection_busy");
+      && (message.error as { code?: string } | undefined)?.code === "conversation_mismatch");
     first.send(JSON.stringify(clientMessage("run-cancel-spam", "different-conversation")));
-    assert.equal(((await connectionBusy).error as { code?: string }).code, "connection_busy");
+    assert.equal(((await connectionBusy).error as { code?: string }).code, "conversation_mismatch");
     assert.equal(tokenCalls.get("session-one"), 2);
 
     // The conversation reservation is released immediately, even though the
     // first connection keeps its authorization slot until the old resolver settles.
-    second = await connectEntitledSocket(port, entitlement, "session-two", "install-two");
+    second = await connectEntitledSocket(port, entitlement, "session-two", "shared-conversation");
     const secondCompleted = waitForMessage(second, (message) => message.type === "turn.completed" && message.run_id === "run-second-connection");
     second.send(JSON.stringify(clientMessage("run-second-connection", "shared-conversation")));
     await secondCompleted;
@@ -1109,7 +1111,7 @@ test("turn.cancel tombstones pending authorization and an abort-ignoring resolve
       && (message.error as { code?: string } | undefined)?.code === "run_cancelled").length, 1);
 
     const afterLateReturn = waitForMessage(first, (message) => message.type === "turn.completed" && message.run_id === "run-after-late-auth");
-    first.send(JSON.stringify(clientMessage("run-after-late-auth", "after-late-conversation")));
+    first.send(JSON.stringify(clientMessage("run-after-late-auth", "shared-conversation")));
     await afterLateReturn;
     assert.equal(runCalls, 2);
   } finally {
@@ -1120,7 +1122,7 @@ test("turn.cancel tombstones pending authorization and an abort-ignoring resolve
   }
 });
 
-test("one connection rejects an active run_id reused for a different conversation", async () => {
+test("one connection rejects a message for a different conversation before run-id handling", async () => {
   let markRunStarted!: () => void;
   const runStarted = new Promise<void>((resolve) => { markRunStarted = resolve; });
   let releaseRun!: () => void;
@@ -1134,23 +1136,25 @@ test("one connection rejects an active run_id reused for a different conversatio
       yield { type: "turn.completed", run_id: input.run_id, finish_reason: "stop" };
     }
   };
+  const store = new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-run-id-")));
   const runtime = createRuntimeServer({
     createRuntime: () => agentRuntime,
-    conversationStore: new RuntimeStore(await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-run-id-")))
+    conversationStore: store,
+    conversationRepository: await seedLocalConversations(store, ["conversation-one", "conversation-two"])
   });
   const port = await listen(runtime);
   const socket = await openSocket(port);
   try {
     const ready = waitForMessage(socket, (message) => message.type === "session.ready");
-    socket.send(JSON.stringify(hello("fixture-token", "duplicate-run-install")));
+    socket.send(JSON.stringify(hello("fixture-token", "conversation-one")));
     await ready;
     socket.send(JSON.stringify(clientMessage("same-run-id", "conversation-one")));
     await runStarted;
 
     const duplicate = waitForMessage(socket, (message) => message.run_id === "same-run-id"
-      && (message.error as { code?: string } | undefined)?.code === "duplicate_run_id");
+      && (message.error as { code?: string } | undefined)?.code === "conversation_mismatch");
     socket.send(JSON.stringify(clientMessage("same-run-id", "conversation-two")));
-    assert.equal(((await duplicate).error as { code?: string }).code, "duplicate_run_id");
+    assert.equal(((await duplicate).error as { code?: string }).code, "conversation_mismatch");
     assert.equal(runCalls, 1);
   } finally {
     releaseRun();
@@ -1606,11 +1610,11 @@ function signLegacyToken(secret: string, subject: string): string {
   return `${header}.${payload}.${signature}`;
 }
 
-function hello(token: string, testUserId: string): Record<string, unknown> {
-  void testUserId;
+function hello(token: string, conversationId: string): Record<string, unknown> {
   return {
     type: "client.hello",
-    protocol_version: "0.7",
+    protocol_version: "0.8",
+    conversation_id: conversationId,
     auth_token: token,
     local_tools: []
   };
@@ -1755,6 +1759,25 @@ async function authBoundaryConversations(
   return repository;
 }
 
+async function seedLocalConversations(
+  store: RuntimeStore,
+  publicIds: string[]
+): Promise<InMemoryConversationRepository> {
+  const repository = new InMemoryConversationRepository(store.localAuthority);
+  for (const publicId of publicIds) {
+    await repository.createConversation({
+      id: publicId,
+      publicId,
+      ownerAccountId: "local-development",
+      creatorId: "local-development",
+      agentId: "local-agent",
+      productId: "local-product",
+      corpusDigest: `sha256:${"0".repeat(64)}`
+    });
+  }
+  return repository;
+}
+
 function completingRuntime(onRun: () => void): AgentRuntime {
   return {
     async *run(input) {
@@ -1768,15 +1791,17 @@ async function connectEntitledSocket(
   port: number,
   entitlement: EntitlementBinding,
   token: string,
-  testLabel: string
+  conversationId: string
 ): Promise<WebSocket> {
   const socket = await openSocket(port);
   const ready = waitForMessage(socket, (message) => message.type === "session.ready");
   socket.send(JSON.stringify({
-    ...hello(token, testLabel),
+    ...hello(token, conversationId),
     entitlement_id: entitlement.entitlement_id
   }));
-  assert.equal((await ready).type, "session.ready");
+  const readyMessage = await ready;
+  assert.equal(readyMessage.type, "session.ready");
+  assert.equal(readyMessage.conversation_id, conversationId);
   return socket;
 }
 

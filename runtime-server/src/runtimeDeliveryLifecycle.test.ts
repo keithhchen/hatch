@@ -27,7 +27,7 @@ test("entitlement runs reserve, consume, release, and replay idempotently", asyn
   const fixture = await productFixture();
 
   const successfulSink = new MemoryCommerceSink();
-  const successful = await startRuntime(fixture, successfulSink, () => ({
+  const successful = await startRuntime(fixture, "conversation-run_success", successfulSink, () => ({
     async *run(input) {
       yield { type: "assistant.delta", run_id: input.run_id, delta: { kind: "text", content: "Delivery complete." } };
       yield {
@@ -44,6 +44,8 @@ test("entitlement runs reserve, consume, release, and replay idempotently", asyn
     }
   }));
   successful.socket.send(JSON.stringify(clientMessage("run_success")));
+  const accepted = await waitForMessage(successful.messages, (message) => message.type === "message.accepted" && message.run_id === "run_success");
+  assert.equal(accepted.type === "message.accepted" ? accepted.conversation_id : undefined, "conversation-run_success");
   const deliveryReady = await waitForMessage(successful.messages, (message) => message.type === "delivery.ready" && message.run_id === "run_success");
   await waitForMessage(successful.messages, (message) => message.type === "turn.completed" && message.run_id === "run_success");
   assert.deepEqual(successfulSink.calls.map((call) => call.kind), [
@@ -69,7 +71,7 @@ test("entitlement runs reserve, consume, release, and replay idempotently", asyn
 
   // A fresh Runtime repository still recovers the completed commerce receipt
   // and must not reserve or deliver the same run twice.
-  const recovered = await startRuntime(fixture, successfulSink, () => ({
+  const recovered = await startRuntime(fixture, "conversation-run_success", successfulSink, () => ({
     async *run(input) {
       yield { type: "assistant.delta", run_id: input.run_id, delta: { kind: "text", content: "must not execute" } };
       yield { type: "turn.completed", run_id: input.run_id, finish_reason: "stop" };
@@ -82,7 +84,7 @@ test("entitlement runs reserve, consume, release, and replay idempotently", asyn
   recovered.socket.close();
 
   const failedSink = new MemoryCommerceSink();
-  const failed = await startRuntime(fixture, failedSink, () => ({
+  const failed = await startRuntime(fixture, "conversation-run_failed", failedSink, () => ({
     async *run(): AsyncIterable<OutboundMessage> {
       throw new Error("model failed");
     }
@@ -95,7 +97,7 @@ test("entitlement runs reserve, consume, release, and replay idempotently", asyn
   failed.socket.close();
 
   const cancelledSink = new MemoryCommerceSink();
-  const cancelled = await startRuntime(fixture, cancelledSink, () => ({
+  const cancelled = await startRuntime(fixture, "conversation-run_cancelled", cancelledSink, () => ({
     async *run(input, context) {
       while (context.state.status !== "cancelled") {
         await new Promise((resolve) => setTimeout(resolve, 5));
@@ -124,7 +126,7 @@ test("saved artifact completes while Commerce receipt syncs durably across Runti
   const outboxFile = path.join(outboxRoot, "delivery-outbox.json");
   const sink = new OutageCommerceSink();
   const firstOutbox = new DeliveryAccountingOutbox(outboxFile);
-  const first = await startRuntime(fixture, sink, () => ({
+  const first = await startRuntime(fixture, "conversation-run_outage", sink, () => ({
     async *run(input) {
       yield {
         type: "tool_call.delta",
@@ -310,6 +312,7 @@ async function productFixture(): Promise<ProductFixture> {
 
 async function startRuntime(
   fixture: ProductFixture,
+  conversationId: string,
   commerceEventSink: CommerceEventSink,
   createRuntime: () => AgentRuntime,
   deliveryAccountingOutbox?: DeliveryAccountingOutbox
@@ -353,11 +356,13 @@ async function startRuntime(
   socket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
+    conversation_id: conversationId,
     license_token: "license-commerce",
     entitlement_id: fixture.entitlement.entitlement_id,
     local_tools: []
   }));
-  await waitForMessage(messages, (message) => message.type === "session.ready");
+  const ready = await waitForMessage(messages, (message) => message.type === "session.ready");
+  assert.equal(ready.type === "session.ready" ? ready.conversation_id : undefined, conversationId);
   return { socket, messages, runtime };
 }
 

@@ -18,7 +18,6 @@ import {
   ClientToolNameSchema,
   clientMessageInputDigest,
   contextAttachmentTextSha256,
-  LEGACY_PROTOCOL_VERSION,
   parseInboundMessage,
   PROTOCOL_VERSION,
   renderUserMessageForModel
@@ -42,6 +41,7 @@ import {
 } from "./skills.js";
 import { parseAllowedTools, toolPreapprovedBySkills } from "./skillPermissions.js";
 import { RuntimeStore, type StoreEvent } from "./store.js";
+import { InMemoryConversationRepository } from "./conversationRepository.js";
 import {
   assertClientToolNameInvariant,
   modelToolSpecsForRun,
@@ -91,6 +91,7 @@ test("buyer hello selects only an entitlement and never accepts identity aliases
   const entitlementOnly = {
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
+    conversation_id: "conversation-buyer",
     auth_token: "buyer-token",
     entitlement_id: "11111111-1111-4111-8111-111111111111",
     local_tools: []
@@ -424,6 +425,7 @@ test("task_start persists a model turn, assembles it, and hides it only from vis
   };
   runtimeServer = createRuntimeServer({
     conversationStore: store,
+    conversationRepository: await seedLocalConversations(store, ["task-start-history"]),
     createRuntime: () => runtime
   });
   const serverUrl = await listen(runtimeServer);
@@ -437,6 +439,7 @@ test("task_start persists a model turn, assembles it, and hides it only from vis
   socket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
+    conversation_id: "task-start-history",
     license_token: "task-start-history-test",
     local_tools: []
   }));
@@ -518,6 +521,7 @@ test(`visible history preserves text and tool interleave order (guard=${guardEna
   };
   runtimeServer = createRuntimeServer({
     conversationStore: store,
+    conversationRepository: await seedLocalConversations(store, ["ordered-history"]),
     ...(guardEnabled ? { outputGuard: { async check() { return "pass" as const; } } } : {}),
     createRuntime: () => runtime
   });
@@ -532,6 +536,7 @@ test(`visible history preserves text and tool interleave order (guard=${guardEna
   socket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
+    conversation_id: "ordered-history",
     license_token: "ordered-history-test",
     local_tools: []
   }));
@@ -592,6 +597,7 @@ test("Output Guard releases passed segments but commits only a blocked terminal 
   };
   runtimeServer = createRuntimeServer({
     conversationStore: store,
+    conversationRepository: await seedLocalConversations(store, ["guard-conversation"]),
     createRuntime: () => runtime,
     outputGuard
   });
@@ -606,6 +612,7 @@ test("Output Guard releases passed segments but commits only a blocked terminal 
   socket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
+    conversation_id: "guard-conversation",
     license_token: "guard-test",
     local_tools: []
   }));
@@ -679,6 +686,7 @@ test("Output Guard provider errors degrade to a normal committed response", asyn
   };
   runtimeServer = createRuntimeServer({
     conversationStore: store,
+    conversationRepository: await seedLocalConversations(store, ["guard-error-conversation"]),
     createRuntime: () => runtime,
     outputGuard
   });
@@ -693,6 +701,7 @@ test("Output Guard provider errors degrade to a normal committed response", asyn
   socket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
+    conversation_id: "guard-error-conversation",
     license_token: "guard-error-test",
     local_tools: []
   }));
@@ -781,6 +790,7 @@ test("client hello does not accept explicit skill selection", () => {
   assert.throws(() => parseInboundMessage({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
+    conversation_id: "conversation-x",
     license_token: "license_x",
     local_tools: [],
     skill_id: "repo-assistant"
@@ -855,6 +865,7 @@ test("client hello declares local tool capability and rejects server tools", () 
   assert.doesNotThrow(() => parseInboundMessage({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
+    conversation_id: "conversation-x",
     license_token: "license_x",
     local_tools: ["file_read", "file_search", "git_diff"]
   }));
@@ -862,6 +873,7 @@ test("client hello declares local tool capability and rejects server tools", () 
   assert.throws(() => parseInboundMessage({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
+    conversation_id: "conversation-x",
     license_token: "license_x",
     local_tools: ["web.search"]
   }), /Invalid option/);
@@ -869,6 +881,7 @@ test("client hello declares local tool capability and rejects server tools", () 
   assert.throws(() => parseInboundMessage({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
+    conversation_id: "conversation-x",
     license_token: "license_x",
     workspace_root: "/private/consumer/workspace",
     local_tools: ["file_read"]
@@ -879,12 +892,14 @@ test("client hello requires an explicit local tool capability list", () => {
   assert.throws(() => parseInboundMessage({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
+    conversation_id: "conversation-x",
     license_token: "license_x"
   }));
 
   assert.doesNotThrow(() => parseInboundMessage({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
+    conversation_id: "conversation-x",
     license_token: "license_x",
     local_tools: []
   }));
@@ -892,6 +907,7 @@ test("client hello requires an explicit local tool capability list", () => {
   assert.doesNotThrow(() => parseInboundMessage({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
+    conversation_id: "conversation-x",
     license_token: "license_x",
     local_tools: ["file_read"]
   }));
@@ -2099,11 +2115,22 @@ test("skill resources can be read by catalog path and cannot escape the skills r
   await assert.rejects(() => readSkillResourceByPath(path.join(path.dirname(skill.path), "..", "..", "package.json")), /escapes skills root/);
 });
 
-test("server rejects protocol 0.6 hello explicitly before accepting protocol 0.7", async () => {
+test("server rejects protocol 0.7 and a missing conversation before accepting bound protocol 0.8", async () => {
   const dataDir = await tempWorkspace();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
 
-  runtimeServer = createRuntimeServer();
+  const store = new RuntimeStore(dataDir);
+  const repository = new InMemoryConversationRepository(store.localAuthority);
+  await repository.createConversation({
+    id: "conversation-protocol-current",
+    publicId: "conversation-protocol-current",
+    ownerAccountId: "local-development",
+    creatorId: "local-development",
+    agentId: "local-agent",
+    productId: "local-product",
+    corpusDigest: `sha256:${"0".repeat(64)}`
+  });
+  runtimeServer = createRuntimeServer({ conversationStore: store, conversationRepository: repository });
   const serverUrl = await listen(runtimeServer);
   const socket = new WebSocket(serverUrl);
   const messages: OutboundMessage[] = [];
@@ -2117,24 +2144,29 @@ test("server rejects protocol 0.6 hello explicitly before accepting protocol 0.7
 
   socket.send(JSON.stringify({
     type: "client.hello",
-    protocol_version: "0.5",
-    license_token: "license_protocol_05",
+    protocol_version: "0.7",
+    conversation_id: "conversation-protocol-current",
+    license_token: "license_protocol_07",
     local_tools: ["file_read"]
   }));
   const rejected = await waitForSocketMessage(messages, (message) => message.type === "turn.failed");
   assert.ok(rejected.type === "turn.failed");
   assert.equal(rejected.error.code, "protocol_error");
-  assert.match(rejected.error.message, /0\.7/);
+  assert.match(rejected.error.message, /0\.8/);
 
   socket.send(JSON.stringify({
     type: "client.hello",
-    protocol_version: LEGACY_PROTOCOL_VERSION,
-    license_token: "license_protocol_legacy",
+    protocol_version: PROTOCOL_VERSION,
+    license_token: "license_protocol_missing_conversation",
     local_tools: ["file_read"]
   }));
-  const legacyReady = await waitForSocketMessage(messages, (message) => message.type === "session.ready");
-  assert.ok(legacyReady.type === "session.ready");
-  assert.equal(legacyReady.accepted_protocol_version, LEGACY_PROTOCOL_VERSION);
+  const missingConversation = await waitForSocketMessage(
+    messages,
+    (message) => message.type === "turn.failed" && message !== rejected
+  );
+  assert.ok(missingConversation.type === "turn.failed");
+  assert.equal(missingConversation.error.code, "protocol_error");
+  assert.match(missingConversation.error.message, /conversation_id/);
   socket.close();
 
   const currentSocket = new WebSocket(serverUrl);
@@ -2149,17 +2181,19 @@ test("server rejects protocol 0.6 hello explicitly before accepting protocol 0.7
   currentSocket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
+    conversation_id: "conversation-protocol-current",
     license_token: "license_protocol_current",
     local_tools: ["file_read"]
   }));
   const currentReady = await waitForSocketMessage(currentMessages, (message) => message.type === "session.ready");
   assert.ok(currentReady.type === "session.ready");
   assert.equal(currentReady.accepted_protocol_version, PROTOCOL_VERSION);
+  assert.equal(currentReady.conversation_id, "conversation-protocol-current");
   currentSocket.close();
 
   const sessions = (await new RuntimeStore(dataDir).readEvents())
     .filter((event) => event.type === "session.started");
-  assert.equal(sessions.length, 2);
+  assert.equal(sessions.length, 1);
 });
 
 
@@ -2173,7 +2207,11 @@ test("server rejects duplicate client hello on the same connection", async () =>
   const dataDir = await tempWorkspace();
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
 
-  runtimeServer = createRuntimeServer();
+  const store = new RuntimeStore(dataDir);
+  runtimeServer = createRuntimeServer({
+    conversationStore: store,
+    conversationRepository: await seedLocalConversations(store, ["duplicate-hello"])
+  });
   const serverUrl = await listen(runtimeServer);
   const socket = new WebSocket(serverUrl);
   const messages: OutboundMessage[] = [];
@@ -2188,6 +2226,7 @@ test("server rejects duplicate client hello on the same connection", async () =>
   socket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
+    conversation_id: "duplicate-hello",
     license_token: "license_once",
     local_tools: ["file_read"]
   }));
@@ -2196,6 +2235,7 @@ test("server rejects duplicate client hello on the same connection", async () =>
   socket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
+    conversation_id: "duplicate-hello",
     license_token: "license_twice",
     local_tools: ["file_write"]
   }));
@@ -2249,7 +2289,12 @@ test("server rejects concurrent runs for the same conversation across WebSocket 
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   await writeFile(path.join(workspace, "notes.txt"), "Hatch concurrent run guard test.\n", "utf8");
 
-  runtimeServer = createDeterministicRuntimeServer();
+  const store = new RuntimeStore(dataDir);
+  runtimeServer = createRuntimeServer({
+    conversationStore: store,
+    conversationRepository: await seedLocalConversations(store, ["conv_busy"]),
+    createRuntime: () => new DeterministicAgentRuntime()
+  });
   const serverUrl = await listen(runtimeServer);
   const firstSocket = new WebSocket(serverUrl);
   const firstMessages: OutboundMessage[] = [];
@@ -2265,6 +2310,7 @@ test("server rejects concurrent runs for the same conversation across WebSocket 
   firstSocket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
+    conversation_id: "conv_busy",
     license_token: "license_busy",
     local_tools: ["file_list", "file_search", "file_read", "file_write", "file_patch", "git_diff"]
   }));
@@ -2290,6 +2336,7 @@ test("server rejects concurrent runs for the same conversation across WebSocket 
   secondSocket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
+    conversation_id: "conv_busy",
     license_token: "license_busy",
     local_tools: ["file_list", "file_search", "file_read", "file_write", "file_patch", "git_diff"]
   }));
@@ -2320,7 +2367,12 @@ test("server releases a conversation lock when the client disconnects mid-run", 
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   await writeFile(path.join(workspace, "notes.txt"), "Hatch reconnect lock release test.\n", "utf8");
 
-  runtimeServer = createDeterministicRuntimeServer();
+  const store = new RuntimeStore(dataDir);
+  runtimeServer = createRuntimeServer({
+    conversationStore: store,
+    conversationRepository: await seedLocalConversations(store, ["conv_disconnect_lock"]),
+    createRuntime: () => new DeterministicAgentRuntime()
+  });
   const serverUrl = await listen(runtimeServer);
   const firstSocket = new WebSocket(serverUrl);
   const firstMessages: OutboundMessage[] = [];
@@ -2336,6 +2388,7 @@ test("server releases a conversation lock when the client disconnects mid-run", 
   firstSocket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
+    conversation_id: "conv_disconnect_lock",
     license_token: "license_disconnect_lock",
     local_tools: ["file_list", "file_search", "file_read", "file_write", "file_patch", "git_diff"]
   }));
@@ -2374,6 +2427,7 @@ test("server releases a conversation lock when the client disconnects mid-run", 
   secondSocket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
+    conversation_id: "conv_disconnect_lock",
     license_token: "license_disconnect_lock",
     local_tools: ["file_list", "file_search", "file_read", "file_write", "file_patch", "git_diff"]
   }));
@@ -2415,7 +2469,12 @@ test("run cancel for an unknown run does not cancel the active run", async () =>
   process.env.HATCH_RUNTIME_DATA_DIR = dataDir;
   await writeFile(path.join(workspace, "notes.txt"), "Hatch targeted cancellation test.\n", "utf8");
 
-  runtimeServer = createDeterministicRuntimeServer();
+  const store = new RuntimeStore(dataDir);
+  runtimeServer = createRuntimeServer({
+    conversationStore: store,
+    conversationRepository: await seedLocalConversations(store, ["conv_cancel_targeted"]),
+    createRuntime: () => new DeterministicAgentRuntime()
+  });
   const serverUrl = await listen(runtimeServer);
   const socket = new WebSocket(serverUrl);
   const messages: OutboundMessage[] = [];
@@ -2431,6 +2490,7 @@ test("run cancel for an unknown run does not cancel the active run", async () =>
   socket.send(JSON.stringify({
     type: "client.hello",
     protocol_version: PROTOCOL_VERSION,
+    conversation_id: "conv_cancel_targeted",
     license_token: "license_cancel_targeted",
     local_tools: ["file_list", "file_search", "file_read", "file_write", "file_patch", "git_diff"]
   }));
@@ -2489,6 +2549,25 @@ async function tempWorkspace(): Promise<string> {
   const dir = await mkdtemp(path.join(os.tmpdir(), "hatch-runtime-"));
   tempDirs.push(dir);
   return dir;
+}
+
+async function seedLocalConversations(
+  store: RuntimeStore,
+  conversationIds: string[]
+): Promise<InMemoryConversationRepository> {
+  const repository = new InMemoryConversationRepository(store.localAuthority);
+  for (const conversationId of conversationIds) {
+    await repository.createConversation({
+      id: conversationId,
+      publicId: conversationId,
+      ownerAccountId: "local-development",
+      creatorId: "local-development",
+      agentId: "local-agent",
+      productId: "local-product",
+      corpusDigest: `sha256:${"0".repeat(64)}`
+    });
+  }
+  return repository;
 }
 
 async function listen(server: RuntimeServer): Promise<string> {
