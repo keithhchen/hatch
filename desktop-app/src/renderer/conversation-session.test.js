@@ -88,6 +88,7 @@ function bind(w, id, entitlementId = "agent-a") {
     buyerSessionRef: { current: { accessToken: "test-token" } }, conversationLibraryStatus: "ready",
     draftKey: JSON.stringify(["account", id]), ...Object.fromEntries(["navigationRequestRef", "selectedEntitlementIdRef", "windowContextRef"].map((name) => [name, w[name]])),
     viewportRef: { current: w.viewport }, invokeTauri: w.native, errorMessage: (error) => error.message,
+    conversationOwnerRef: { current: null },
     stableRandomId: () => `identity_${++w.sequence}`,
     setBriefTask: vi.fn(), setConversationId: (value) => { w.selectedId = value; },
     settingsStoreRef: { current: { clearProfileKey: vi.fn() } },

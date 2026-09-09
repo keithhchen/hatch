@@ -32,6 +32,8 @@ fn main() {
             "read_window_settings",
             "patch_window_settings",
             "open_conversation_window",
+            "claim_conversation_session",
+            "release_conversation_session",
             "open_settings_window",
             "open_about_window",
             "set_native_command_state",

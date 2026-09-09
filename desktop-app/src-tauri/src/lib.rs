@@ -1227,36 +1227,45 @@ fn read_task_settings(app: AppHandle, task_id: String) -> Result<Option<Value>, 
 }
 
 #[tauri::command]
-fn open_conversation_draft(
+async fn open_conversation_draft(
+    app: AppHandle,
     window: WebviewWindow,
     account_id: String,
     conversation_id: String,
-    store: State<'_, draft_store::DraftStore>,
 ) -> Result<draft_store::OpenDraft, String> {
-    store.open(&account_id, &conversation_id, window.label())
+    let label = window.label().to_owned();
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<draft_store::DraftStore>().open(&account_id, &conversation_id, &label)
+    }).await.map_err(|error| format!("draft_worker_failed: {error}"))?
 }
 
 #[tauri::command]
-fn save_conversation_draft(
+async fn save_conversation_draft(
+    app: AppHandle,
     window: WebviewWindow,
     account_id: String,
     conversation_id: String,
     lease: String,
     draft: draft_store::Draft,
-    store: State<'_, draft_store::DraftStore>,
 ) -> Result<(), String> {
-    store.save(&account_id, &conversation_id, window.label(), &lease, draft)
+    let label = window.label().to_owned();
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<draft_store::DraftStore>().save(&account_id, &conversation_id, &label, &lease, draft)
+    }).await.map_err(|error| format!("draft_worker_failed: {error}"))?
 }
 
 #[tauri::command]
-fn release_conversation_draft(
+async fn release_conversation_draft(
+    app: AppHandle,
     window: WebviewWindow,
     account_id: String,
     conversation_id: String,
     lease: String,
-    store: State<'_, draft_store::DraftStore>,
 ) -> Result<(), String> {
-    store.release(&account_id, &conversation_id, window.label(), &lease)
+    let label = window.label().to_owned();
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<draft_store::DraftStore>().release(&account_id, &conversation_id, &label, &lease)
+    }).await.map_err(|error| format!("draft_worker_failed: {error}"))?
 }
 
 #[tauri::command]
@@ -1612,26 +1621,29 @@ fn validate_artifact_relative_path(relative_path: &str) -> Result<&std::path::Pa
 }
 
 #[tauri::command]
-fn set_window_tool_context(
+async fn set_window_tool_context(
     app: AppHandle,
     window: WebviewWindow,
     conversation_id: String,
     run_id: String,
     workspace_grant_id: String,
     permission_policy: ChangePermissionPolicy,
-    authority: State<'_, NativeToolAuthority>,
 ) -> Result<RunToolContextRegistration, String> {
-    // This command only creates execution authority, never navigation state.
-    // Resolve and probe the grant before capturing it in an immutable context.
-    // A renderer can display a path, but it cannot turn that path into a grant.
-    let scoped = resolve_scoped_workspace_grant(&app, &workspace_grant_id)?;
-    authority.set_context(RunToolContext {
-        window_label: window.label().to_string(),
-        conversation_id,
-        run_id,
-        workspace_grant_id: scoped.grant_id.clone(),
-        permission_policy,
-    })
+    let window_label = window.label().to_owned();
+    tauri::async_runtime::spawn_blocking(move || {
+        // Security-scoped access, filesystem probing AND guard destruction all
+        // stay on this worker. The invoking window identity is immutable.
+        let scoped = resolve_scoped_workspace_grant(&app, &workspace_grant_id)?;
+        let authority = app.state::<NativeToolAuthority>();
+        let router = app.state::<window_commands::NativeCommandRouter>();
+        router.with_window_session(&conversation_id, &window_label, || authority.set_context(RunToolContext {
+            window_label: window_label.clone(),
+            conversation_id: conversation_id.clone(),
+            run_id,
+            workspace_grant_id: scoped.grant_id.clone(),
+            permission_policy,
+        }))
+    }).await.map_err(|error| format!("tool_context_worker_failed: {error}"))?
 }
 
 #[tauri::command]
@@ -2515,6 +2527,7 @@ pub fn run() {
         .setup(|app| {
             app.manage(draft_store::DraftStore::new(
                 app.path().app_data_dir()?.join("drafts"),
+                app.state::<window_commands::NativeCommandRouter>().inner().clone(),
             ));
             app.manage(NativeDropContextStore::open(
                 app.path().app_data_dir()?.join("attachments"),
@@ -2581,6 +2594,8 @@ pub fn run() {
             revoke_workspace_grant,
             read_product_open_links,
             window_commands::open_conversation_window,
+            window_commands::claim_conversation_session,
+            window_commands::release_conversation_session,
             window_commands::open_settings_window,
             window_commands::open_about_window,
             window_commands::set_native_command_state,
@@ -2589,7 +2604,11 @@ pub fn run() {
         ])
         .on_window_event(|window, event| {
             if let Some(router) = window.try_state::<window_commands::NativeCommandRouter>() {
-                router.handle_window_event(window, event);
+                if matches!(event, WindowEvent::Destroyed) {
+                    router.begin_close_window(window.label());
+                } else {
+                    router.handle_window_event(window, event);
+                }
             }
             if let WindowEvent::DragDrop(DragDropEvent::Drop { paths, position }) = event {
                 // The OS delivers these paths to Rust. A dropped directory is
@@ -2636,20 +2655,36 @@ pub fn run() {
             if !matches!(event, WindowEvent::Destroyed) {
                 return;
             }
-            if let Some(drafts) = window.try_state::<draft_store::DraftStore>() {
-                drafts.close_window(window.label());
-            }
-            let Some(authority) = window.try_state::<NativeToolAuthority>() else {
-                return;
-            };
-            if let Ok((pending, active)) = authority.clear_window(window.label()) {
+            let window = window.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                // Wait out pre-close context registrations and draft writes before
+                // draining tools; retain the Closing owner until cleanup succeeds.
+                window.state::<window_commands::NativeCommandRouter>()
+                    .revoke_window_sessions(window.label());
+                let authority = window.state::<NativeToolAuthority>();
+                let (pending, active) = match authority.clear_window(window.label()) {
+                    Ok(result) => result,
+                    Err(error) => {
+                        eprintln!("Conversation owner cleanup failed: {error}");
+                        return;
+                    }
+                };
                 record_pending_outcomes(
                     pending,
                     "window_closed",
                     "The Hatch window closed before this tool call was approved",
                 );
                 cancel_active_tool_calls(&active);
-            }
+                for key in active {
+                    if let Err(error) = cancel_registered_local_tool_job(&key.registry_key()) {
+                        // Fail closed: do not transfer ownership while old work may run.
+                        eprintln!("Conversation owner cleanup failed: {error}");
+                        return;
+                    }
+                }
+                window.state::<window_commands::NativeCommandRouter>()
+                    .handle_window_event(&window, &WindowEvent::Destroyed);
+            });
         })
         .build(tauri::generate_context!())
         .expect("failed to build Hatch desktop app")

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-claim-conversation-session"
+description = "Enables the claim_conversation_session command without any pre-configured scope."
+commands.allow = ["claim_conversation_session"]
+
+[[permission]]
+identifier = "deny-claim-conversation-session"
+description = "Denies the claim_conversation_session command without any pre-configured scope."
+commands.deny = ["claim_conversation_session"]

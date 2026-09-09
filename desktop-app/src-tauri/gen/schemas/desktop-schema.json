@@ -189,6 +189,12 @@
           "markdownDescription": "Enables the cancel_tool_call command without any pre-configured scope."
         },
         {
+          "description": "Enables the claim_conversation_session command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-claim-conversation-session",
+          "markdownDescription": "Enables the claim_conversation_session command without any pre-configured scope."
+        },
+        {
           "description": "Enables the clear_auth_token command without any pre-configured scope.",
           "type": "string",
           "const": "allow-clear-auth-token",
@@ -345,6 +351,12 @@
           "markdownDescription": "Enables the release_conversation_draft command without any pre-configured scope."
         },
         {
+          "description": "Enables the release_conversation_session command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-release-conversation-session",
+          "markdownDescription": "Enables the release_conversation_session command without any pre-configured scope."
+        },
+        {
           "description": "Enables the request_window_attention command without any pre-configured scope.",
           "type": "string",
           "const": "allow-request-window-attention",
@@ -421,6 +433,12 @@
           "type": "string",
           "const": "deny-cancel-tool-call",
           "markdownDescription": "Denies the cancel_tool_call command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the claim_conversation_session command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-claim-conversation-session",
+          "markdownDescription": "Denies the claim_conversation_session command without any pre-configured scope."
         },
         {
           "description": "Denies the clear_auth_token command without any pre-configured scope.",
@@ -577,6 +595,12 @@
           "type": "string",
           "const": "deny-release-conversation-draft",
           "markdownDescription": "Denies the release_conversation_draft command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the release_conversation_session command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-release-conversation-session",
+          "markdownDescription": "Denies the release_conversation_session command without any pre-configured scope."
         },
         {
           "description": "Denies the request_window_attention command without any pre-configured scope.",

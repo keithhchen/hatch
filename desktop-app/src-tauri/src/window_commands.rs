@@ -288,16 +288,37 @@ struct NativeCommandRouterState {
     pending_context_by_window: HashMap<String, PendingContextMenu>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 struct ConversationWindowEntry {
     label: String,
     phase: ConversationWindowPhase,
+    session: Option<ConversationSessionLease>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConversationSessionLease {
+    account_id: String,
+    entitlement_id: String,
+    lease: String,
+    // An entry-local I/O/revocation gate, not another owner registry.
+    #[serde(skip)]
+    live: Arc<Mutex<bool>>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationSessionClaim {
+    owned: bool,
+    window_label: String,
+    lease: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ConversationWindowPhase {
     Creating,
     Ready,
+    Closing,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -433,6 +454,208 @@ struct NativeCommandEvent {
 }
 
 impl NativeCommandRouter {
+    pub fn claim_session(
+        &self,
+        account: &str,
+        conversation: &str,
+        entitlement: &str,
+        window: &str,
+    ) -> Result<ConversationSessionClaim, String> {
+        if [account, conversation, entitlement, window]
+            .iter()
+            .any(|value| {
+                value.is_empty() || value.len() > 256 || value.chars().any(char::is_control)
+            })
+        {
+            return Err("conversation_owner_invalid: Invalid session identity".into());
+        }
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "Native window registry is unavailable")?;
+        if let Some(entry) = state.conversations_by_id.get_mut(conversation) {
+            if entry.phase == ConversationWindowPhase::Closing {
+                return Err("conversation_owner_closing: Owner session is draining".into());
+            }
+            if let Some(session) = &entry.session {
+                if session.account_id != account || session.entitlement_id != entitlement {
+                    return Err(
+                        "conversation_owner_binding_mismatch: Session belongs to another binding"
+                            .into(),
+                    );
+                }
+            }
+            if entry.label != window {
+                return Ok(ConversationSessionClaim {
+                    owned: false,
+                    window_label: entry.label.clone(),
+                    lease: None,
+                });
+            }
+            let session = entry
+                .session
+                .get_or_insert_with(|| ConversationSessionLease {
+                    account_id: account.into(),
+                    entitlement_id: entitlement.into(),
+                    lease: uuid::Uuid::new_v4().to_string(),
+                    live: Arc::new(Mutex::new(true)),
+                });
+            return Ok(ConversationSessionClaim {
+                owned: true,
+                window_label: window.into(),
+                lease: Some(session.lease.clone()),
+            });
+        }
+        let lease = uuid::Uuid::new_v4().to_string();
+        state.conversations_by_id.insert(
+            conversation.into(),
+            ConversationWindowEntry {
+                label: window.into(),
+                phase: ConversationWindowPhase::Ready,
+                session: Some(ConversationSessionLease {
+                    account_id: account.into(),
+                    entitlement_id: entitlement.into(),
+                    lease: lease.clone(),
+                    live: Arc::new(Mutex::new(true)),
+                }),
+            },
+        );
+        Ok(ConversationSessionClaim {
+            owned: true,
+            window_label: window.into(),
+            lease: Some(lease),
+        })
+    }
+
+    // Context registration is short and has no filesystem operations here.
+    pub fn with_window_session<T>(
+        &self,
+        conversation: &str,
+        window: &str,
+        operation: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| "Native window registry is unavailable")?;
+        let session = state
+            .conversations_by_id
+            .get(conversation)
+            .filter(|entry| {
+                entry.label == window && entry.phase != ConversationWindowPhase::Closing
+            })
+            .and_then(|entry| entry.session.clone())
+            .ok_or("conversation_owner_required: This window does not own the session")?;
+        drop(state);
+        let live = session
+            .live
+            .lock()
+            .map_err(|_| "Session lease lock unavailable")?;
+        if !*live {
+            return Err("conversation_owner_required: Session was released".into());
+        }
+        operation()
+    }
+
+    pub fn with_session_lease<T>(
+        &self,
+        account: &str,
+        conversation: &str,
+        window: &str,
+        lease: Option<&str>,
+        operation: impl FnOnce(&str) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| "Native window registry is unavailable")?;
+        let entry = state
+            .conversations_by_id
+            .get(conversation)
+            .ok_or("conversation_owner_required: Claim the session first")?;
+        let session = entry
+            .session
+            .as_ref()
+            .ok_or("conversation_owner_required: Session is not attached")?;
+        if entry.phase == ConversationWindowPhase::Closing
+            || entry.label != window
+            || session.account_id != account
+            || lease.is_some_and(|value| value != session.lease)
+        {
+            return Err("draft_lease_lost: This window is not the conversation owner".into());
+        }
+        let session = session.clone();
+        drop(state);
+        // Never hold the global routing lock across filesystem I/O.
+        let live = session
+            .live
+            .lock()
+            .map_err(|_| "Session lease lock unavailable")?;
+        if !*live {
+            return Err("draft_lease_lost: Session was released".into());
+        }
+        operation(&session.lease)
+    }
+
+    pub fn release_session(
+        &self,
+        account: &str,
+        conversation: &str,
+        window: &str,
+        lease: &str,
+    ) -> Result<(), String> {
+        let live = {
+            let state = self
+                .state
+                .lock()
+                .map_err(|_| "Native window registry is unavailable")?;
+            state
+                .conversations_by_id
+                .get(conversation)
+                .filter(|entry| entry.label == window)
+                .and_then(|entry| entry.session.as_ref())
+                .filter(|session| session.account_id == account && session.lease == lease)
+                .map(|session| session.live.clone())
+        };
+        let Some(live) = live else {
+            return Ok(());
+        };
+        *live.lock().map_err(|_| "Session lease lock unavailable")? = false;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "Native window registry is unavailable")?;
+        let matches = state
+            .conversations_by_id
+            .get(conversation)
+            .is_some_and(|entry| {
+                entry.phase != ConversationWindowPhase::Closing
+                    && entry.label == window
+                    && entry.session.as_ref().is_some_and(|session| {
+                        session.account_id == account && session.lease == lease
+                    })
+            });
+        if matches {
+            state.conversations_by_id.remove(conversation);
+            if state
+                .conversation_by_label
+                .get(window)
+                .is_some_and(|id| id == conversation)
+            {
+                state.conversation_by_label.remove(window);
+            }
+        }
+        Ok(())
+    }
+
+    fn session_activation(&self, conversation: &str) -> Result<Option<serde_json::Value>, String> {
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| "Native window registry is unavailable")?;
+        Ok(state.conversations_by_id.get(conversation).and_then(|entry| entry.session.as_ref()).map(|session|
+            serde_json::json!({ "conversationId": conversation, "accountId": session.account_id, "entitlementId": session.entitlement_id })))
+    }
     /// The `Focused` event is the authoritative routing signal for the
     /// app-wide macOS menu. On Windows it gives the same menu the expected
     /// focused-window behavior instead of accidentally broadcasting commands.
@@ -608,30 +831,58 @@ impl NativeCommandRouter {
             .lock()
             .map_err(|_| "Native command router is unavailable")?;
         Ok(normalize_manifest_conversation_ids(
-            state.conversations_by_id.keys().cloned(),
+            state
+                .conversations_by_id
+                .iter()
+                .filter(|(id, entry)| entry.label == conversation_window_label(id))
+                .map(|(id, _)| id.clone()),
         ))
     }
 
     /// Remove transient context state and any reverse conversation lookup as
     /// soon as a Tauri webview is destroyed. This is intentionally separate
     /// from renderer cleanup, which might not run on a forced window close.
+    pub fn begin_close_window(&self, label: &str) {
+        if let Ok(mut state) = self.state.lock() {
+            for entry in state
+                .conversations_by_id
+                .values_mut()
+                .filter(|entry| entry.label == label)
+            {
+                entry.phase = ConversationWindowPhase::Closing;
+            }
+        }
+    }
+
+    pub fn revoke_window_sessions(&self, label: &str) {
+        let leases: Vec<_> = match self.state.lock() {
+            Ok(state) => state
+                .conversations_by_id
+                .values()
+                .filter(|entry| entry.label == label)
+                .filter_map(|entry| entry.session.as_ref().map(|session| session.live.clone()))
+                .collect(),
+            Err(_) => return,
+        };
+        for live in leases {
+            if let Ok(mut live) = live.lock() {
+                *live = false;
+            }
+        }
+    }
+
     pub fn clear_window(&self, label: &str) {
+        self.revoke_window_sessions(label);
         if let Ok(mut state) = self.state.lock() {
             if state.active_window_label.as_deref() == Some(label) {
                 state.active_window_label = None;
             }
             state.pending_context_by_window.remove(label);
             state.command_state_by_window.remove(label);
-            if let Some(conversation_id) = state.conversation_by_label.remove(label) {
-                let is_same_entry = state
-                    .conversations_by_id
-                    .get(&conversation_id)
-                    .map(|entry| entry.label == label)
-                    .unwrap_or(false);
-                if is_same_entry {
-                    state.conversations_by_id.remove(&conversation_id);
-                }
-            }
+            state.conversation_by_label.remove(label);
+            state
+                .conversations_by_id
+                .retain(|_, entry| entry.label != label);
         }
     }
 
@@ -665,6 +916,7 @@ impl NativeCommandRouter {
             ConversationWindowEntry {
                 label: label.clone(),
                 phase: ConversationWindowPhase::Creating,
+                session: None,
             },
         );
         Ok(ConversationReservation::New { label })
@@ -1008,6 +1260,68 @@ pub fn open_about_window(app: AppHandle) -> Result<OpenAuxiliaryWindowResult, St
     open_auxiliary_window(&app, "about", "About Hatch", "about=1")
 }
 
+#[tauri::command]
+pub async fn claim_conversation_session(
+    window: WebviewWindow,
+    account_id: String,
+    conversation_id: String,
+    entitlement_id: String,
+    router: State<'_, NativeCommandRouter>,
+) -> Result<ConversationSessionClaim, String> {
+    let conversation_id = validate_conversation_id(&conversation_id)?;
+    for _ in 0..2 {
+        let claim = router.claim_session(
+            &account_id,
+            &conversation_id,
+            &entitlement_id,
+            window.label(),
+        )?;
+        if claim.owned {
+            return Ok(claim);
+        }
+        if let Some(owner) = window.app_handle().get_webview_window(&claim.window_label) {
+            if let Some(payload) = router.session_activation(&conversation_id)? {
+                owner
+                    .emit("hatch://conversation-activate", payload)
+                    .map_err(|error| error.to_string())?;
+                owner.show().map_err(|error| error.to_string())?;
+                owner.set_focus().map_err(|error| error.to_string())?;
+            }
+            // A reserved, loading window gets the conversation from its URL.
+            return Ok(claim);
+        }
+        // A Creating entry must not be reclaimed before its builder publishes it.
+        let creating = router
+            .state
+            .lock()
+            .map_err(|_| "Native window registry is unavailable")?
+            .conversations_by_id
+            .get(&conversation_id)
+            .is_some_and(|entry| entry.phase == ConversationWindowPhase::Creating);
+        if creating {
+            return Ok(claim);
+        }
+        // Attached sessions may still be draining after native destruction.
+        // Only Destroyed cleanup may release them, never a competing claimant.
+        if router.session_activation(&conversation_id)?.is_some() {
+            return Err("conversation_owner_unavailable: Owner cleanup is pending".into());
+        }
+        router.clear_window(&claim.window_label);
+    }
+    Err("conversation_owner_unavailable: Owner window disappeared".into())
+}
+
+#[tauri::command]
+pub async fn release_conversation_session(
+    window: WebviewWindow,
+    account_id: String,
+    conversation_id: String,
+    lease: String,
+    router: State<'_, NativeCommandRouter>,
+) -> Result<(), String> {
+    router.release_session(&account_id, &conversation_id, window.label(), &lease)
+}
+
 /// Opens a conversation in a distinct Tauri window. The command is async even
 /// though construction is synchronous because Tauri documents async commands
 /// as the safe cross-platform path for Webview2 window creation.
@@ -1055,8 +1369,16 @@ fn open_conversation_window_impl<R: Runtime>(
     for _ in 0..2 {
         match router.reserve_conversation(&conversation_id)? {
             ConversationReservation::Existing { label, phase } => {
+                if phase == ConversationWindowPhase::Closing {
+                    return Err("conversation_owner_closing: Owner session is draining".into());
+                }
                 if let Some(window) = app.get_webview_window(&label) {
                     if phase == ConversationWindowPhase::Ready {
+                        if let Some(payload) = router.session_activation(&conversation_id)? {
+                            window
+                                .emit("hatch://conversation-activate", payload)
+                                .map_err(|error| error.to_string())?;
+                        }
                         window
                             .show()
                             .map_err(|error| format!("native_window_show_failed: {error}"))?;
@@ -1090,6 +1412,9 @@ fn open_conversation_window_impl<R: Runtime>(
                         status: "opening",
                         reused: true,
                     });
+                }
+                if router.session_activation(&conversation_id)?.is_some() {
+                    return Err("conversation_owner_unavailable: Owner cleanup is pending".into());
                 }
                 router.forget_conversation_if(&conversation_id, &label);
             }
@@ -1762,6 +2087,220 @@ mod tests {
         );
         assert!(!normalized.iter().any(|id| id.contains('\n')));
         assert!(!normalized.iter().any(String::is_empty));
+    }
+
+    #[test]
+    fn conversation_registry_slow_draft_io_does_not_lock_other_conversation_routes() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+        let router = NativeCommandRouter::default();
+        router
+            .claim_session("account", "a", "agent", "main")
+            .unwrap();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (finish_tx, finish_rx) = mpsc::channel();
+        let writer = router.clone();
+        let writing = std::thread::spawn(move || {
+            writer.with_session_lease("account", "a", "main", None, |_| {
+                entered_tx.send(()).unwrap();
+                finish_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+                Ok(())
+            })
+        });
+        entered_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let other = router.clone();
+        let (routed_tx, routed_rx) = mpsc::channel();
+        let routing = std::thread::spawn(move || {
+            routed_tx
+                .send(
+                    other
+                        .claim_session("account", "b", "agent", "other")
+                        .unwrap()
+                        .owned,
+                )
+                .unwrap();
+        });
+        let result = routed_rx.recv_timeout(Duration::from_secs(1));
+        finish_tx.send(()).unwrap();
+        writing.join().unwrap().unwrap();
+        routing.join().unwrap();
+        assert_eq!(result.unwrap(), true);
+    }
+
+    #[test]
+    fn conversation_registry_closing_fences_claims_contexts_and_drafts_until_cleanup() {
+        let router = NativeCommandRouter::default();
+        router
+            .claim_session("account", "a", "agent", "main")
+            .unwrap();
+        router.begin_close_window("main");
+        let lease = router.state.lock().unwrap().conversations_by_id["a"]
+            .session
+            .as_ref()
+            .unwrap()
+            .lease
+            .clone();
+        router
+            .release_session("account", "a", "main", &lease)
+            .unwrap();
+        assert!(router
+            .claim_session("account", "a", "agent", "other")
+            .is_err());
+        assert!(router
+            .claim_session("account", "a", "agent", "main")
+            .is_err());
+        assert!(router.with_window_session("a", "main", || Ok(())).is_err());
+        assert!(router
+            .with_session_lease("account", "a", "main", None, |_| Ok(()))
+            .is_err());
+        router.revoke_window_sessions("main");
+        assert!(router
+            .claim_session("account", "a", "agent", "other")
+            .is_err());
+        assert!(
+            router
+                .claim_session("account", "b", "agent", "other")
+                .unwrap()
+                .owned
+        );
+        router.clear_window("main");
+        assert!(
+            router
+                .claim_session("account", "a", "agent", "other")
+                .unwrap()
+                .owned
+        );
+    }
+
+    #[test]
+    fn conversation_registry_main_owns_background_sessions_and_releases_only_after_matching_lease()
+    {
+        let router = NativeCommandRouter::default();
+        let a = router
+            .claim_session("account", "a", "agent", "main")
+            .unwrap();
+        let b = router
+            .claim_session("account", "b", "agent", "main")
+            .unwrap();
+        assert!(a.owned && b.owned);
+        assert_eq!(
+            router
+                .claim_session("account", "a", "agent", "main")
+                .unwrap()
+                .lease,
+            a.lease
+        );
+        let redirect = router
+            .claim_session("account", "a", "agent", "other")
+            .unwrap();
+        assert!(!redirect.owned);
+        assert_eq!(redirect.window_label, "main");
+        assert!(redirect.lease.is_none());
+        let target = router.session_activation("a").unwrap().unwrap();
+        assert_eq!(target["conversationId"], "a");
+        assert_eq!(target["accountId"], "account");
+        assert!(router
+            .claim_session("foreign", "a", "agent", "other")
+            .is_err());
+        assert!(router
+            .claim_session("account", "a", "other-agent", "other")
+            .is_err());
+        router
+            .release_session("account", "a", "main", "stale")
+            .unwrap();
+        assert!(
+            !router
+                .claim_session("account", "a", "agent", "other")
+                .unwrap()
+                .owned
+        );
+        router
+            .release_session("account", "a", "main", a.lease.as_deref().unwrap())
+            .unwrap();
+        let next = router
+            .claim_session("account", "a", "agent", "other")
+            .unwrap();
+        assert!(next.owned);
+        router
+            .release_session("account", "a", "main", a.lease.as_deref().unwrap())
+            .unwrap();
+        assert_eq!(
+            router
+                .claim_session("account", "a", "agent", "other")
+                .unwrap()
+                .lease,
+            next.lease
+        );
+        router.clear_window("main");
+        assert!(
+            router
+                .claim_session("account", "b", "agent", "third")
+                .unwrap()
+                .owned
+        );
+        assert!(
+            !router
+                .claim_session("account", "a", "agent", "third")
+                .unwrap()
+                .owned
+        );
+    }
+
+    #[test]
+    fn conversation_registry_concurrent_claim_and_restore_have_one_owner() {
+        let router = NativeCommandRouter::default();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+        let handles: Vec<_> = (0..8)
+            .map(|index| {
+                let router = router.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    router
+                        .claim_session("account", "concurrent", "agent", &format!("window-{index}"))
+                        .unwrap()
+                })
+            })
+            .collect();
+        let claims: Vec<_> = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect();
+        assert_eq!(claims.iter().filter(|claim| claim.owned).count(), 1);
+        assert!(claims
+            .iter()
+            .all(|claim| claim.window_label == claims[0].window_label));
+        let reserved = match router.reserve_conversation("restored").unwrap() {
+            ConversationReservation::New { label } => label,
+            _ => panic!("expected restore reservation"),
+        };
+        assert!(
+            !router
+                .claim_session("account", "restored", "agent", "main")
+                .unwrap()
+                .owned
+        );
+        assert!(
+            router
+                .claim_session("account", "restored", "agent", &reserved)
+                .unwrap()
+                .owned
+        );
+        assert!(!router
+            .conversation_ids()
+            .unwrap()
+            .contains(&"concurrent".to_string()));
+        assert!(router
+            .conversation_ids()
+            .unwrap()
+            .contains(&"restored".to_string()));
+        router.clear_window(&reserved);
+        assert!(
+            router
+                .claim_session("account", "restored", "agent", "main")
+                .unwrap()
+                .owned
+        );
     }
 
     #[test]

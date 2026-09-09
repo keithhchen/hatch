@@ -1,7 +1,8 @@
 //! One durable draft per account/conversation; one editing window at a time.
+use crate::window_commands::NativeCommandRouter;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{collections::HashMap, fs, io::Write, path::PathBuf, sync::Mutex};
+use std::{fs, io::Write, path::PathBuf};
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -59,7 +60,7 @@ pub struct OpenDraft {
 
 pub struct DraftStore {
     root: PathBuf,
-    owners: Mutex<HashMap<String, (String, String)>>,
+    registry: NativeCommandRouter,
 }
 
 fn key(account: &str, conversation: &str) -> Result<String, String> {
@@ -75,11 +76,8 @@ fn key(account: &str, conversation: &str) -> Result<String, String> {
 }
 
 impl DraftStore {
-    pub fn new(root: PathBuf) -> Self {
-        Self {
-            root,
-            owners: Mutex::new(HashMap::new()),
-        }
+    pub fn new(root: PathBuf, registry: NativeCommandRouter) -> Self {
+        Self { root, registry }
     }
 
     pub fn open(
@@ -89,24 +87,21 @@ impl DraftStore {
         window: &str,
     ) -> Result<OpenDraft, String> {
         let key = key(account, conversation)?;
-        let mut owners = self
-            .owners
-            .lock()
-            .map_err(|_| "draft_unavailable: Lock unavailable")?;
-        if owners.contains_key(&key) {
-            return Err("draft_in_use: This draft is open in another editor".into());
-        }
-        let path = self.root.join(format!("{key}.json"));
-        let draft = match fs::read(&path) {
-            Ok(bytes) => serde_json::from_slice::<Draft>(&bytes)
-                .map_err(|e| format!("draft_invalid: {e}"))?,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Draft::default(),
-            Err(e) => return Err(format!("draft_unavailable: {e}")),
-        };
-        validate(&draft)?;
-        let lease = uuid::Uuid::new_v4().to_string();
-        owners.insert(key, (window.to_owned(), lease.clone()));
-        Ok(OpenDraft { lease, draft })
+        self.registry
+            .with_session_lease(account, conversation, window, None, |lease| {
+                let path = self.root.join(format!("{key}.json"));
+                let draft = match fs::read(&path) {
+                    Ok(bytes) => serde_json::from_slice::<Draft>(&bytes)
+                        .map_err(|e| format!("draft_invalid: {e}"))?,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => Draft::default(),
+                    Err(e) => return Err(format!("draft_unavailable: {e}")),
+                };
+                validate(&draft)?;
+                Ok(OpenDraft {
+                    lease: lease.to_owned(),
+                    draft,
+                })
+            })
     }
 
     pub fn save(
@@ -119,39 +114,35 @@ impl DraftStore {
     ) -> Result<(), String> {
         validate(&draft)?;
         let key = key(account, conversation)?;
-        let owners = self
-            .owners
-            .lock()
-            .map_err(|_| "draft_unavailable: Lock unavailable")?;
-        if owners.get(&key) != Some(&(window.to_owned(), lease.to_owned())) {
-            return Err("draft_lease_lost: This window is not the draft editor".into());
-        }
-        fs::create_dir_all(&self.root).map_err(|e| format!("draft_unavailable: {e}"))?;
-        let path = self.root.join(format!("{key}.json"));
-        let temporary = self
-            .root
-            .join(format!("{key}.{}.tmp", uuid::Uuid::new_v4()));
-        let result = (|| -> std::io::Result<()> {
-            let mut options = fs::OpenOptions::new();
-            options.create_new(true).write(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                options.mode(0o600);
-            }
-            let mut file = options.open(&temporary)?;
-            file.write_all(&serde_json::to_vec(&draft)?)?;
-            file.sync_all()?;
-            drop(file);
-            crate::desktop_state::replace_file(&temporary, &path)?;
-            #[cfg(unix)]
-            fs::File::open(&self.root)?.sync_all()?;
-            Ok(())
-        })();
-        if result.is_err() {
-            let _ = fs::remove_file(temporary);
-        }
-        result.map_err(|e| format!("draft_unavailable: {e}"))
+        self.registry
+            .with_session_lease(account, conversation, window, Some(lease), |_| {
+                fs::create_dir_all(&self.root).map_err(|e| format!("draft_unavailable: {e}"))?;
+                let path = self.root.join(format!("{key}.json"));
+                let temporary = self
+                    .root
+                    .join(format!("{key}.{}.tmp", uuid::Uuid::new_v4()));
+                let result = (|| -> std::io::Result<()> {
+                    let mut options = fs::OpenOptions::new();
+                    options.create_new(true).write(true);
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::OpenOptionsExt;
+                        options.mode(0o600);
+                    }
+                    let mut file = options.open(&temporary)?;
+                    file.write_all(&serde_json::to_vec(&draft)?)?;
+                    file.sync_all()?;
+                    drop(file);
+                    crate::desktop_state::replace_file(&temporary, &path)?;
+                    #[cfg(unix)]
+                    fs::File::open(&self.root)?.sync_all()?;
+                    Ok(())
+                })();
+                if result.is_err() {
+                    let _ = fs::remove_file(temporary);
+                }
+                result.map_err(|e| format!("draft_unavailable: {e}"))
+            })
     }
 
     pub fn release(
@@ -161,21 +152,13 @@ impl DraftStore {
         window: &str,
         lease: &str,
     ) -> Result<(), String> {
-        let key = key(account, conversation)?;
-        let mut owners = self
-            .owners
-            .lock()
-            .map_err(|_| "draft_unavailable: Lock unavailable")?;
-        if owners.get(&key) == Some(&(window.to_owned(), lease.to_owned())) {
-            owners.remove(&key);
-        }
-        Ok(())
+        // Closing a draft does not release its still-draining conversation.
+        self.registry
+            .with_session_lease(account, conversation, window, Some(lease), |_| Ok(()))
     }
 
     pub fn close_window(&self, window: &str) {
-        if let Ok(mut owners) = self.owners.lock() {
-            owners.retain(|_, (owner, _)| owner != window);
-        }
+        self.registry.clear_window(window);
     }
 }
 
@@ -265,9 +248,45 @@ mod tests {
         assert!(serde_json::from_value::<PendingSubmission>(current).is_err());
     }
     #[test]
+    fn pending_execution_snapshot_has_strict_wire_fields_and_legacy_read_boundary() {
+        let legacy = serde_json::json!({
+            "runId": "run", "clientMessageId": "message", "text": "send me",
+            "attachments": [], "textRevision": 0, "status": "unknown"
+        });
+        let old: PendingSubmission = serde_json::from_value(legacy.clone()).unwrap();
+        assert!(old.access_snapshot.is_none());
+        let mut current = legacy;
+        current["accessSnapshot"] = serde_json::json!({
+            "workspaceGrantId": "grant_original", "displayPath": "/workspace/original",
+            "permissionMode": "ask-before-changes"
+        });
+        let pending: PendingSubmission = serde_json::from_value(current.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&pending).unwrap(), current);
+        let mut draft = Draft {
+            pending: Some(pending),
+            ..Draft::default()
+        };
+        validate(&draft).unwrap();
+        draft
+            .pending
+            .as_mut()
+            .unwrap()
+            .access_snapshot
+            .as_mut()
+            .unwrap()
+            .permission_mode = "host-fallback".into();
+        assert!(validate(&draft).unwrap_err().contains("execution context"));
+        current["accessSnapshot"]["authorityOverride"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<PendingSubmission>(current).is_err());
+    }
+    #[test]
     fn unknown_submission_and_later_edits_survive_store_restart() {
         let temp = tempfile::tempdir().unwrap();
-        let store = DraftStore::new(temp.path().into());
+        let store = DraftStore::new(temp.path().into(), NativeCommandRouter::default());
+        store
+            .registry
+            .claim_session("account", "conversation", "agent", "main")
+            .unwrap();
         let opened = store.open("account", "conversation", "main").unwrap();
         let file = DraftAttachment {
             context_id: format!("drop_{}", "a".repeat(32)),
@@ -308,7 +327,11 @@ mod tests {
             )
             .unwrap();
         drop(store);
-        let restarted = DraftStore::new(temp.path().into());
+        let restarted = DraftStore::new(temp.path().into(), NativeCommandRouter::default());
+        restarted
+            .registry
+            .claim_session("account", "conversation", "agent", "new-window")
+            .unwrap();
         assert_eq!(
             restarted
                 .open("account", "conversation", "new-window")
@@ -316,6 +339,11 @@ mod tests {
                 .draft,
             draft
         );
+        restarted.close_window("new-window");
+        restarted
+            .registry
+            .claim_session("other-account", "conversation", "agent", "main")
+            .unwrap();
         assert!(restarted
             .open("other-account", "conversation", "main")
             .unwrap()
@@ -327,12 +355,17 @@ mod tests {
     #[test]
     fn conversation_and_account_drafts_survive_restart_independently() {
         let temp = tempfile::tempdir().unwrap();
-        let store = DraftStore::new(temp.path().into());
+        let store = DraftStore::new(temp.path().into(), NativeCommandRouter::default());
         for (account, conversation, text) in [
             ("a", "one", "first"),
             ("a", "two", "second"),
             ("b", "one", "other account"),
         ] {
+            store.close_window("main");
+            store
+                .registry
+                .claim_session(account, conversation, "agent", "main")
+                .unwrap();
             let opened = store.open(account, conversation, "main").unwrap();
             store
                 .save(
@@ -348,7 +381,15 @@ mod tests {
                 )
                 .unwrap();
         }
-        let restarted = DraftStore::new(temp.path().into());
+        let restarted = DraftStore::new(temp.path().into(), NativeCommandRouter::default());
+        restarted
+            .registry
+            .claim_session("a", "one", "agent", "main")
+            .unwrap();
+        restarted
+            .registry
+            .claim_session("a", "two", "agent", "main")
+            .unwrap();
         assert_eq!(
             restarted.open("a", "one", "main").unwrap().draft.text,
             "first"
@@ -357,6 +398,11 @@ mod tests {
             restarted.open("a", "two", "main").unwrap().draft.text,
             "second"
         );
+        restarted.close_window("main");
+        restarted
+            .registry
+            .claim_session("b", "one", "agent", "main")
+            .unwrap();
         assert_eq!(
             restarted.open("b", "one", "main").unwrap().draft.text,
             "other account"
@@ -365,18 +411,30 @@ mod tests {
     #[test]
     fn only_one_window_writes_and_old_lease_cannot_release_new_owner() {
         let temp = tempfile::tempdir().unwrap();
-        let store = DraftStore::new(temp.path().into());
+        let store = DraftStore::new(temp.path().into(), NativeCommandRouter::default());
+        store
+            .registry
+            .claim_session("a", "c", "agent", "one")
+            .unwrap();
         let first = store.open("a", "c", "one").unwrap();
         assert!(store
             .open("a", "c", "two")
             .unwrap_err()
-            .contains("draft_in_use"));
+            .contains("draft_lease_lost"));
         assert!(store
             .save("a", "c", "two", &first.lease, Draft::default())
             .is_err());
         store.close_window("one");
+        store
+            .registry
+            .claim_session("a", "c", "agent", "two")
+            .unwrap();
         let second = store.open("a", "c", "two").unwrap();
-        store.release("a", "c", "one", &first.lease).unwrap();
+        assert!(store.release("a", "c", "one", &first.lease).is_err());
+        store
+            .registry
+            .release_session("a", "c", "one", &first.lease)
+            .unwrap();
         store
             .save(
                 "a",
@@ -402,8 +460,14 @@ mod tests {
             "broken",
         )
         .unwrap();
-        assert!(DraftStore::new(temp.path().into())
+        let store = DraftStore::new(temp.path().into(), NativeCommandRouter::default());
+        store
+            .registry
+            .claim_session("a", "c", "agent", "main")
+            .unwrap();
+        assert!(store
             .open("a", "c", "main")
-            .is_err());
+            .unwrap_err()
+            .contains("draft_invalid"));
     }
 }

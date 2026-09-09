@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { draftAttachmentReference } from "./conversation-draft.js";
 import { createConversationSessionManager } from "./conversation-session.js";
+import { createConversationOwner } from "./conversation-owner.js";
 import { DesktopComposerInput } from "./desktop-composer-input.jsx";
 import { ConversationRuntimeProvider } from "./conversation-runtime-provider.jsx";
 import { createRoot } from "react-dom/client";
@@ -372,12 +373,39 @@ function App() {
   const sessionManagerRef = useRef(null);
   if (!sessionManagerRef.current) sessionManagerRef.current = createConversationSessionManager();
   const sessionManager = sessionManagerRef.current;
+  const ownerActivationRef = useRef(null);
+  const ownerErrorRef = useRef(null);
+  const pendingOwnerActivationRef = useRef(null);
+  const conversationOwnerRef = useRef(null);
+  ownerErrorRef.current = (error) => setStatus(errorMessage(error));
+  useEffect(() => {
+    if (!window.__TAURI_INTERNALS__) return;
+    const owner = createConversationOwner({
+      invoke: invokeTauri, listen,
+      onActivate: (payload) => ownerActivationRef.current?.(payload),
+      onError: (error) => ownerErrorRef.current?.(error)
+    });
+    conversationOwnerRef.current = owner;
+    const dispose = () => owner.dispose();
+    window.addEventListener("pagehide", dispose);
+    return () => {
+      window.removeEventListener("pagehide", dispose);
+      owner.dispose();
+      if (conversationOwnerRef.current === owner) conversationOwnerRef.current = null;
+    };
+  }, []);
   const conversationSession = sessionManager.get({
     accountId: buyerSession?.profile?.id || "",
     entitlementId: selectedEntitlementId,
     conversationId
   });
   sessionManager.select(conversationSession);
+  if (window.__TAURI_INTERNALS__) {
+    conversationSession.ensureOwnership = () => {
+      if (!conversationOwnerRef.current) throw new Error("Conversation owner listener is not ready");
+      return conversationOwnerRef.current.claim(conversationSession);
+    };
+  }
   const sessionState = useSyncExternalStore(conversationSession.subscribe, conversationSession.snapshot);
   conversationSession.localSettingsInitialized = true;
   const sessionStateField = (name) => [sessionState[name], (update) => conversationSession.set(name, update)];
@@ -2250,6 +2278,13 @@ function App() {
       return;
     }
 
+    try {
+      if (conversationSession.ensureOwnership && !await conversationSession.ensureOwnership()) return;
+    } catch (error) {
+      setStatus(errorMessage(error));
+      return;
+    }
+    if (conversationSession.disposed || connectedRef.current || socketRef.current || connectingRef.current) return;
     const requestToken = ++connectionTokenRef.current;
     connectingRef.current = true;
     intentionalDisconnectRef.current = false;
@@ -3322,6 +3357,7 @@ function App() {
 
   function sessionForConversation(taskId, entitlementId = selectedEntitlementId) {
     const target = sessionManager.get({ accountId: buyerProfile.id, entitlementId, conversationId: taskId });
+    if (conversationOwnerRef.current) target.ensureOwnership = () => conversationOwnerRef.current.claim(target);
     if (!target.localSettingsInitialized) {
       target.localSettingsInitialized = true;
       for (const name of ["workspace", "workspaceDraft", "workspaceGrant", "workspaceDraftGrant", "workspaceGranted", "permissionMode"]) {
@@ -3356,6 +3392,7 @@ function App() {
 
   async function activateConversation(taskId, targetSession = sessionForConversation(taskId)) {
     const navigation = ++navigationRequestRef.current;
+    if (targetSession.ensureOwnership && !await targetSession.ensureOwnership()) return false;
     await restoreTaskLocalSettings(taskId, targetSession);
     if (navigation !== navigationRequestRef.current || targetSession.disposed
       || selectedEntitlementIdRef.current !== targetSession.scope.entitlementId) return;
@@ -3363,7 +3400,34 @@ function App() {
     sessionManager.select(targetSession);
     setConversationId(taskId);
     setConversationIdForEntitlement(buyerProfile.id, targetSession.scope.entitlementId, taskId);
+    return true;
   }
+
+  ownerActivationRef.current = async (payload) => {
+    if (payload.accountId !== buyerSessionRef.current?.profile?.id || authTeardownRef.current) return;
+    const target = sessionManager.values().find((session) => !session.disposed
+      && session.scope.accountId === payload.accountId && session.scope.entitlementId === payload.entitlementId
+      && session.scope.conversationId === payload.conversationId);
+    if (!target) return;
+    if (selectedEntitlementIdRef.current !== payload.entitlementId) {
+      const entitlement = creatorAgentEntitlements.find((item) => item.entitlement_id === payload.entitlementId);
+      if (!entitlement) return;
+      selectCreatorAgent(entitlement);
+      pendingOwnerActivationRef.current = payload;
+      requestedConversationIdRef.current = payload.conversationId;
+      return;
+    }
+    setBriefTask(null);
+    await activateConversation(payload.conversationId, target);
+  };
+
+  useEffect(() => {
+    const pending = pendingOwnerActivationRef.current;
+    if (!pending || pending.entitlementId !== selectedEntitlementId) return;
+    pendingOwnerActivationRef.current = null;
+    void Promise.resolve().then(() => ownerActivationRef.current?.(pending))
+      .catch((error) => ownerErrorRef.current?.(error));
+  }, [selectedEntitlementId]);
 
   async function selectConversation(conversation) {
     const nextId = String(conversation?.id || "").trim();
@@ -3371,7 +3435,6 @@ function App() {
       setStatus("That Conversation is not a server record.");
       return;
     }
-    if (nextId === conversationId) return;
     const targetSession = sessionForConversation(nextId);
     if (!targetSession.ref("taskBriefRef").current) {
       targetSession.set("taskBrief", conversation?.brief_snapshot ?? null);

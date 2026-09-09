@@ -89,6 +89,7 @@ export function createConversationSession(scope) {
     },
     async openDraft(invoke) {
       if (session.disposed) throw new Error("Conversation session is closed");
+      if (session.ensureOwnership && !await session.ensureOwnership()) return;
       const holder = session.ref("draftSessionRef");
       if (holder.current) return holder.current;
       if (draftOpening) return draftOpening;
@@ -223,7 +224,7 @@ export function createConversationSession(scope) {
       closePromise = (async () => {
         // A failed initialization acquired no draft lease. It must not prevent
         // independently owned tools from being cancelled and cleared.
-        await Promise.allSettled([draftOpening]);
+        await Promise.allSettled([draftOpening, session.ownershipOpening]);
         // Native results must be consumed by cancel/poll before clear makes
         // the opaque context unavailable. No window-wide clear fallback.
         const results = await Promise.allSettled([
@@ -237,6 +238,8 @@ export function createConversationSession(scope) {
           catch (reason) { failures.push({ reason }); }
         }
         if (failures.length) throw new AggregateError(failures.map((result) => result.reason), "Could not close conversation");
+        await session.releaseOwnership?.();
+        session.releaseOwnership = undefined;
         listeners.clear();
       })().catch((error) => { closePromise = null; throw error; });
       return closePromise;
