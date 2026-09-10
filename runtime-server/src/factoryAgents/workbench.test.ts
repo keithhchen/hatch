@@ -225,3 +225,29 @@ test("cached Product handler accepts only a fresh BriefSpec for the same scope",
     assert.throws(() => app.setScope({ creatorId: "11111111-1111-4111-8111-111111111111", productId: "33333333-3333-4333-8333-333333333333" }), /retarget/);
   } finally { await app.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+test("Agent output transfer writes safe manual input and rejects invalid or running destinations", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-output-transfer-"));
+  const app = await createWorkbenchServer({ root, scope: { creatorId: "11111111-1111-4111-8111-111111111111", productId: "22222222-2222-4222-8222-222222222222" }, definitions: new MemoryAgentDefinitionRepository(await initialAgentDefinitions()) });
+  await new Promise<void>(resolve => app.server.listen(0, "127.0.0.1", resolve));
+  const address = app.server.address(); assert.ok(address && typeof address !== "string");
+  const call = (destinationId: string, data: unknown) => fetch(`http://127.0.0.1:${address.port}/api/sessions/${destinationId}/transfer`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(data) });
+  try {
+    const source = await app.store.create("research");
+    const destination = await app.store.create("generation");
+    await app.store.put(source.id, "output/sources/interview.md", Buffer.from("Exact source bytes\n"), { actor: "agent", mimeType: "text/markdown" });
+    const events: Array<{ sessionId: string; type: string }> = [];
+    app.runtime.events.on("event", event => events.push(event as { sessionId: string; type: string }));
+
+    const response = await call(destination.id, { fromSessionId: source.id, files: [{ path: "output/sources/interview.md" }] });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { transferred: 1, files: [{ path: "input/manual/sources/interview.md", bytes: 19, mimeType: "text/markdown" }] });
+    assert.equal((await app.store.read(destination.id, "input/manual/sources/interview.md")).bytes.toString(), "Exact source bytes\n");
+    assert.ok(events.some(event => event.sessionId === destination.id && event.type === "files"));
+
+    assert.equal((await call(destination.id, { fromSessionId: source.id, files: [{ path: "input/manual/private.md" }] })).status, 400);
+    assert.equal((await call(destination.id, { fromSessionId: source.id, files: [{ path: "output/../private.md" }] })).status, 400);
+    await app.store.update(destination.id, session => { session.status = "running"; });
+    assert.equal((await call(destination.id, { fromSessionId: source.id, files: [{ path: "output/sources/interview.md" }] })).status, 400);
+  } finally { await app.close(); await rm(root, { recursive: true, force: true }); }
+});

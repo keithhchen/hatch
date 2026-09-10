@@ -92,6 +92,24 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
           return json(res, 200, { ...data.record, content: /^text\//.test(data.record.mimeType) || /\.(md|txt|json|csv|srt|vtt)$/.test(data.record.path) ? data.bytes.toString("utf8") : null });
         }
         if (action === "files" && req.method === "DELETE") { const b = z.object({ path: z.string() }).parse(await body(req)); await store.removeInput(id, b.path); runtime.emit(id, "files"); return json(res, 200, { removed: true }); }
+        if (action === "transfer" && req.method === "POST") {
+          const b = z.object({ fromSessionId: z.string().uuid(), files: z.array(z.object({ path: z.string() })).min(1).max(100) }).parse(await body(req));
+          if (b.fromSessionId === id) throw new Error("Choose a different destination Agent");
+          const [source, destination] = await Promise.all([store.get(b.fromSessionId), store.get(id)]);
+          if (source.product?.creatorId !== destination.product?.creatorId || source.product?.productId !== destination.product?.productId) throw new Error("Agents must belong to the same Product workspace");
+          if (destination.status === "running") throw new Error("Stop the destination Agent before adding files");
+          const transfers = await Promise.all(b.files.map(async file => {
+            if (!file.path.startsWith("output/")) throw new Error("Only Agent output files may be transferred");
+            const relative = file.path.slice("output/".length);
+            const destinationPath = `input/manual/${relative}`;
+            const data = await store.read(source.id, file.path);
+            return { ...data, destinationPath };
+          }));
+          const records = [];
+          for (const transfer of transfers) records.push(await store.put(destination.id, transfer.destinationPath, transfer.bytes, { actor: "user", mimeType: transfer.record.mimeType, origin: { sessionId: source.id, path: transfer.record.path } }));
+          runtime.emit(destination.id, "files");
+          return json(res, 200, { transferred: records.length, files: records });
+        }
         if (action === "comments" && req.method === "POST") {
           const b = z.object({ path: z.string(), start: z.number().int(), end: z.number().int(), quote: z.string(), text: z.string().min(1).max(20000), replacement: z.string().max(100000).optional() }).parse(await body(req));
           const comment = await store.comment(id, b); runtime.emit(id, "comments"); return json(res, 201, comment);
