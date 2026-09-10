@@ -28,7 +28,7 @@ test("a non-Creator account is sent to the real Creator signup intent", () => {
 
 test("buyer navigation uses a standard hamburger menu on narrow screens", () => {
   assert.match(source, /className="buyer-v2__mobile-nav"/);
-  assert.match(source, /<DropdownMenu[\s\S]*label="Buyer navigation"/);
+  assert.match(source, /<DropdownMenu[\s\S]*label=\{t\(["\']Buyer navigation["\']\)\}/);
   assert.match(stylesheet, /\.buyer-v2__mobile-nav\s*\{\s*display:\s*none;\s*\}/);
   assert.match(stylesheet, /@media\s*\(max-width:\s*840px\)[\s\S]*?\.buyer-v2__nav\s*\{\s*display:\s*none;\s*\}/s);
   assert.match(stylesheet, /@media\s*\(max-width:\s*840px\)[\s\S]*?\.buyer-v2__mobile-nav\s*\{[\s\S]*?display:\s*block;/s);
