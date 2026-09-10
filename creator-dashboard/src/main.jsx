@@ -6,6 +6,7 @@ import { Button, HatchBrand, HatchUIProvider, UnavailableState } from "@hatch/ui
 import { BuyerPortalV2 } from "./BuyerPortalV2.jsx";
 import { CreatorPortalV2 } from "./CreatorPortalV2.jsx";
 import { DownloadPage } from "./DownloadPage.jsx";
+import { LocaleProvider } from "./locale.jsx";
 import { dashboardRequest } from "./data.js";
 import "./styles.css";
 
@@ -238,7 +239,7 @@ function RoleBoundary({ navigate, onCreateCreator }) {
 createRoot(document.getElementById("root")).render(
   <AppErrorBoundary>
     <HatchUIProvider atmosphere toasts className="hatch-app-paper">
-      <App />
+      <LocaleProvider><App /></LocaleProvider>
     </HatchUIProvider>
   </AppErrorBoundary>
 );
