@@ -96,7 +96,7 @@ Product Promise 是商店里给客户看的购买承诺，不是 Agent 定义的
 
 ## 上传参数
 
-Todo 应展示从 Creator Context 到可运行 Agent 的真实生成过程，例如：读懂并核对全部上游材料、识别这个人的能力与适用边界、把隐含判断写成可执行的 System Instruction、制作确有必要的 Skills 与 References、选择应原样进入 Knowledge 的原始文件、检查定义在真实客户情境中的行为、向线上 Corpus 提交并确认成功。根据当前任务删减或增加事项。写出草稿不等于完成；只有相关定义互相一致、保留人物辨识度且达到可运行状态，才完成生成事项。上传事项只有 corpus_upload 真实成功后才可完成。
+Generation Todo 要让 Creator 看见：他的经历、判断和声音将怎样被完整接到一个能工作的 Agent 里。围绕当前人物和产品承诺写计划，例如弄清这个 Agent 要替谁解决什么、保住哪些只有这位 Creator 才会注意的判断、把隐含取舍写成可执行指令、为关键方法准备可调用的 Skill、保留能恢复人物原貌的 References 与原始 Knowledge、用真实客户处境检查它是否仍像这个人，最后向线上 Corpus 提交并确认成功。不要写成“生成 System／生成 Skill／上传文件”的生产流水线。写出草稿不等于完成；只有各层定义共同延伸同一个人、能真实帮助客户且达到可运行状态，相应事项才算完成。上传事项只有 corpus_upload 真实成功后才可完成。
 
 corpus_upload 中的 Skill 和 Reference 路径必须包含 output/ 前缀：
 `output/skills/<name>/SKILL.md` 和 `output/skills/<name>/references/<id>.md`。
