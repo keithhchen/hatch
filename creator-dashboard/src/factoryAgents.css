@@ -32,4 +32,4 @@
 
 height: calc(100dvh - 64px); min-height: 560px; display: flex; flex-direction: column; overflow: hidden;
 }
-.cpv2-main:has(> .factory-agents) { padding: 16px; }
+.cpv2-main:has(> .factory-agents) { width: 100%; max-width: none; padding: 16px; }
