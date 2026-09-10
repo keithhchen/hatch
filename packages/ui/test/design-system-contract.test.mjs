@@ -200,7 +200,8 @@ test("Theme Lab edits the same token knobs used by the shared CSS", () => {
 
   assert.match(sharedCss, /background: var\(--hatch-atmosphere-warm-field\)/);
   assert.match(sharedCss, /background: var\(--hatch-atmosphere-cool-field\)/);
-  assert.match(sharedCss, /\.hatch-brand__wordmark[^}]*letter-spacing:\s*var\(--hatch-display-tracking\)/s);
+  assert.match(sharedCss, /\.hatch-brand__wordmark-image\s*\{[^}]*height:\s*100%/s);
+  assert.doesNotMatch(sharedCss, /\.hatch-brand__wordmark[^}]*letter-spacing:/s);
   assert.match(sharedCss, /\.hui-page-header h1[^}]*line-height:\s*var\(--hatch-display-leading\)/s);
   assert.match(sharedCss, /\.hui-button\s*\{[^}]*font-family:\s*var\(--hui-font-pill\)/s);
   assert.match(sharedCss, /\.hui-control--compact\s*\{/);

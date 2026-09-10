@@ -31,7 +31,7 @@
 .cpv2-mobile-nav .hui-icon-button { min-height: 40px; min-width: 40px; padding: 0; }
 .cpv2-mobile-nav .hui-icon-button svg { width: 17px; height: 17px; }
 .cpv2-brand .hatch-brand__mark { width: 22px; height: 22px; }
-.cpv2-brand .hatch-brand__wordmark { font-size: var(--hatch-type-heading); letter-spacing: var(--hatch-display-tracking); }
+.cpv2-brand .hatch-brand__wordmark { font-size: var(--hatch-type-heading); }
 .cpv2-global-nav { display: grid; min-width: 0; gap: 4px; margin-top: 10px; }
 .cpv2-global-nav a, .cpv2-global-nav button { position: relative; display: flex; width: 100%; min-height: 40px; align-items: center; gap: 7px; padding: 8px 7px; border: 0; border-radius: 10px; background: transparent; color: var(--hatch-text-secondary, #74675e); font-family: var(--hatch-font-pill, Inter, sans-serif); font-size: var(--hatch-type-ui); font-weight: 540; letter-spacing: normal; line-height: 1.2; text-align: left; text-decoration: none; }
 .cpv2-global-nav a:hover, .cpv2-global-nav button:hover { color: var(--hatch-ink, #201813); }

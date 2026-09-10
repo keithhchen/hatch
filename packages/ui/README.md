@@ -20,7 +20,7 @@ import {
 
 ## 品牌资产
 
-- Logo：`packages/brand/hatch-mark.svg`，通过 `HatchBrand` 或 `hatchMarkUrl` 使用。
+- Logo：`packages/brand/hatch-mark.svg` 与 outlined wordmark，由 `HatchBrand` 统一组合；深色背景使用 `hatch-brand--inverse`。
 - Atmospheric Paper：通过 `AtmosphericPaper` 使用。
 - Gradient recipe：唯一配方在 `AtmosphericPaper`；base、warm/cool fields、strength、blur 与 duration 都来自品牌 tokens。
 - Display serif：Instrument Serif；UI：system sans；pill/label：Inter。

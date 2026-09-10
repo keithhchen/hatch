@@ -26,7 +26,7 @@ test("Web page CSS consumes the shared Hatch typography scale", () => {
   assert.match(styles, /var\(--hatch-type-(?:label|control|body|reading|title|display)\)/);
 });
 
-test("Web reserves the brand serif for h1 and the Hatch wordmark", () => {
+test("Web reserves the display serif for primary headings", () => {
   const baseStyles = read("creator-dashboard/src/styles.css");
   const creatorStyles = read("creator-dashboard/src/creatorPortalV2.css");
   const buyerStyles = read("creator-dashboard/src/buyerPortalV2.css");

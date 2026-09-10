@@ -40,8 +40,13 @@
 
 .hatch-brand { display: inline-flex; align-items: center; gap: 9px; color: inherit; text-decoration: none; }
 .hatch-brand__mark { display: block; width: 30px; height: 30px; flex: 0 0 auto; }
-.hatch-brand__wordmark { font-family: var(--hatch-font-display); font-size: var(--hatch-type-title); font-weight: var(--hui-weight-regular); letter-spacing: var(--hatch-display-tracking); line-height: var(--hatch-display-leading); }
-.hatch-brand__period { color: var(--hatch-accent); }
+.hatch-brand__wordmark { display: block; width: auto; height: 1em; font-size: var(--hatch-type-title); line-height: 1; }
+.hatch-brand__wordmark-image { display: block; width: auto; height: 100%; }
+.hatch-brand__wordmark-image--inverse { display: none; }
+.hatch-brand--inverse .hatch-brand__wordmark-image--default,
+.buyer-v2__brand--inverse .hatch-brand__wordmark-image--default { display: none; }
+.hatch-brand--inverse .hatch-brand__wordmark-image--inverse,
+.buyer-v2__brand--inverse .hatch-brand__wordmark-image--inverse { display: block; }
 
 .hui-atmospheric-paper {
   position: relative;
