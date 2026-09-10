@@ -77,6 +77,69 @@ test("Dashboard readiness fails closed when Registry is unavailable", async (con
   assert.equal(live.status, 200);
 });
 
+test("browser authentication keeps its session through a transient Registry failure", async (context) => {
+  let failVerification = false;
+  const account = {
+    id: catalogAgent.creator_id,
+    role: "creator",
+    email: "creator@example.test",
+    display_name: "Maya Chen"
+  };
+  const registry = createServer(async (request, response) => {
+    const requestUrl = new URL(request.url ?? "/", "http://registry.test");
+    response.setHeader("content-type", "application/json");
+    if (requestUrl.pathname === "/v1/auth/signin") {
+      response.end(JSON.stringify({ token: "signed-creator-token", account }));
+      return;
+    }
+    if (requestUrl.pathname === "/v1/auth/me" && failVerification) {
+      response.statusCode = 503;
+      response.end(JSON.stringify({ error: { code: "registry_unavailable", message: "Try again." } }));
+      return;
+    }
+    if (requestUrl.pathname === "/v1/auth/me") {
+      response.end(JSON.stringify(account));
+      return;
+    }
+    response.statusCode = 404;
+    response.end(JSON.stringify({ error: { code: "not_found", message: "Not found." } }));
+  });
+  await listen(registry);
+  context.after(() => registry.close());
+
+  const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-session-"));
+  const dashboard = await createDashboardApp({
+    ledgerPath: path.join(directory, "ledger.jsonl"),
+    registryUrl: serverUrl(registry)
+  });
+  let refreshCount = 0;
+  const originalRefresh = dashboard.portalState.refresh.bind(dashboard.portalState);
+  dashboard.portalState.refresh = async () => {
+    refreshCount += 1;
+    await originalRefresh();
+  };
+  const api = createServer(dashboard.handler);
+  await listen(api);
+  context.after(() => api.close());
+
+  const login = await fetch(`${serverUrl(api)}/v1/auth/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: account.email, password: "test-only" })
+  });
+  const cookie = login.headers.getSetCookie().map((value) => value.split(";", 1)[0]).join("; ");
+  failVerification = true;
+  const unavailable = await fetch(`${serverUrl(api)}/v1/auth/me`, { headers: { cookie } });
+  assert.equal(unavailable.status, 503);
+  assert.equal((await unavailable.json()).error.code, "authentication_service_unavailable");
+
+  failVerification = false;
+  const recovered = await fetch(`${serverUrl(api)}/v1/auth/me`, { headers: { cookie } });
+  assert.equal(recovered.status, 200);
+  assert.equal((await recovered.json()).id, account.id);
+  assert.ok(refreshCount >= 2);
+});
+
 test("Creator browser session proxies Product BriefSpec writes to Registry", async (context) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "hatch-dashboard-brief-spec-"));
   const briefCalls = [];

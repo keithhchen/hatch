@@ -75,7 +75,7 @@ function App() {
       })
       .catch((error) => {
         if (!active) return;
-        if (error.status === 401 || error.status === 403) clearSession();
+        if (error.status === 401) clearSession();
         else setSessionStatus(profile ? "authenticated" : "anonymous");
     });
     return () => { active = false; };
@@ -122,7 +122,7 @@ function App() {
   }, [clearSession]);
 
   const invalidate = useCallback((error) => {
-    if (!error || error.status === 401 || error.status === 403) clearSession();
+    if (!error || error.status === 401) clearSession();
   }, [clearSession]);
 
   const buyerSession = {

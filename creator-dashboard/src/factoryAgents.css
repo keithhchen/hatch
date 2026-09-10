@@ -28,6 +28,7 @@
 .login-form{display:grid;gap:16px;padding:20px}.login-form label{display:grid;gap:8px}.login-form input,.login-form select{width:100%;padding:10px;border:1px solid var(--hui-border);border-radius:8px;background:var(--hui-paper);color:inherit}
 .voice-controls{display:flex;align-items:center;gap:12px;padding:10px 20px 0;color:var(--hui-ink-faint)}.voice-controls span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .composer>div{justify-content:flex-end}.spoken-reply mark{background:color-mix(in srgb,var(--hui-accent) 20%,transparent);color:inherit;border-radius:3px;padding:2px 1px;box-decoration-break:clone;-webkit-box-decoration-break:clone}.spoken-reply{white-space:pre-wrap}
+.role{position:relative}.role-hint{position:absolute;z-index:5;left:50%;top:calc(100% + 8px);width:max-content;max-width:min(320px,80vw);padding:9px 11px;border:1px solid var(--hui-border);border-radius:7px;background:var(--hui-ink);color:var(--hui-paper);font-size:var(--hatch-type-meta);font-weight:400;line-height:1.45;white-space:normal;text-align:left;box-shadow:0 5px 18px color-mix(in srgb,var(--hui-ink) 20%,transparent);opacity:0;visibility:hidden;pointer-events:none;transform:translate(-50%,-3px);transition:opacity .12s ease,transform .12s ease,visibility .12s}.role:hover .role-hint,.role:focus-visible .role-hint{opacity:1;visibility:visible;transform:translate(-50%,0)}
 
 height: calc(100dvh - 64px); min-height: 560px; display: flex; flex-direction: column; overflow: hidden;
 }
