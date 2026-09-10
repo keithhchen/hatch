@@ -103,6 +103,7 @@
   transform: translateX(-50%);
 }
 .buyer-v2__account { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+.buyer-v2__language { flex: 0 0 auto; }
 .buyer-v2__avatar { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 50%; background: var(--buyer-inverse); color: var(--buyer-inverse-text); font-size: var(--hatch-type-meta); text-decoration: none; }
 .buyer-v2 a.buyer-v2__avatar { color: var(--buyer-inverse-text); }
 .buyer-v2__plain-button, .buyer-v2__download-quiet {
@@ -525,4 +526,16 @@
 
 .buyer-v2__storefront-action .buyer-v2__secondary-download {
   margin-top: 0;
+}
+
+.buyer-v2__auth-language {
+  position: absolute;
+  inset-block-start: 24px;
+  inset-inline-end: 24px;
+}
+
+.buyer-v2__auth-form-panel { position: relative; }
+
+@media (max-width: 560px) {
+  .buyer-v2__auth-language { inset-block-start: 16px; inset-inline-end: 16px; }
 }

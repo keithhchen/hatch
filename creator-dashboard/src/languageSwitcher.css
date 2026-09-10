@@ -1,0 +1,22 @@
+.hatch-language-switcher {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: inherit;
+  font: inherit;
+}
+
+.hatch-language-switcher button {
+  border: 0;
+  padding: 6px 2px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  opacity: .58;
+  cursor: pointer;
+}
+
+.hatch-language-switcher button:hover,
+.hatch-language-switcher button.active {
+  opacity: 1;
+}

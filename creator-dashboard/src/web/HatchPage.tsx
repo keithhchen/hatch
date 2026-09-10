@@ -1,9 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import type { Lang } from "./locale";
+import { LanguageSwitcher } from "../LanguageSwitcher.jsx";
+import { useLocale } from "../locale.jsx";
 import { jaCopy } from "./copy.ja";
 import { webMediaUrl } from "./media";
+
+type Lang = "zh" | "en" | "ja";
 
 const copy = {
   zh: {
@@ -446,18 +449,14 @@ function StepGraphic({ step, lang }: { step: string; lang: Lang }) {
   }
 }
 
-export default function HatchPage({ initialLang }: { initialLang: Lang }) {
-  const [lang, setLang] = useState<Lang>(initialLang);
+export default function HatchPage() {
+  const { locale: lang } = useLocale();
   const [contactStatus, setContactStatus] = useState<
     "idle" | "submitting" | "success" | "error"
   >("idle");
   const [isContactDialogOpen, setIsContactDialogOpen] = useState(false);
   const contactDialogRef = useRef<HTMLDialogElement>(null);
   const t = copy[lang];
-
-  useEffect(() => {
-    document.documentElement.lang = lang === "zh" ? "zh-CN" : lang === "ja" ? "ja" : "en";
-  }, [lang]);
 
   useEffect(() => {
     const previousTitle = document.title;
@@ -530,34 +529,7 @@ export default function HatchPage({ initialLang }: { initialLang: Lang }) {
             </a>
           ))}
         </nav>
-        <div className="lang-switch" aria-label="Language switcher">
-          <button
-            type="button"
-            className={lang === "zh" ? "active" : ""}
-            aria-pressed={lang === "zh"}
-            onClick={() => setLang("zh")}
-          >
-            中
-          </button>
-          <span aria-hidden="true">/</span>
-          <button
-            type="button"
-            className={lang === "ja" ? "active" : ""}
-            aria-pressed={lang === "ja"}
-            onClick={() => setLang("ja")}
-          >
-            日
-          </button>
-          <span aria-hidden="true">/</span>
-          <button
-            type="button"
-            className={lang === "en" ? "active" : ""}
-            aria-pressed={lang === "en"}
-            onClick={() => setLang("en")}
-          >
-            EN
-          </button>
-        </div>
+        <LanguageSwitcher className="lang-switch" compact />
       </header>
 
       <section className="hero" id="top">

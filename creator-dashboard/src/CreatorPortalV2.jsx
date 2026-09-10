@@ -16,7 +16,6 @@ import {
   NavigationItem,
   PageHeader as HatchPageHeader,
   SectionHeader as HatchSectionHeader,
-  Select,
   Skeleton,
   StatusTag as HatchStatusTag,
   Tabs as HatchTabs,
@@ -27,8 +26,10 @@ import { AutosaveStatus } from "@hatch/ui/product";
 import { StorefrontDetails } from "./StorefrontDetails.jsx";
 import { creatorOrderQuery } from "./storefrontModel.js";
 import { parseCreatorRoute } from "./creatorRoutes.js";
-import { createCreatorTranslator, CREATOR_LOCALES, detectCreatorLocale } from "./creatorI18n.js";
+import { createCreatorTranslator } from "./creatorI18n.js";
 import { CreatorProductWorkspace } from "./CreatorProductWorkspace.jsx";
+import { LanguageSwitcher } from "./LanguageSwitcher.jsx";
+import { useLocale } from "./locale.jsx";
 import "./creatorPortalV2.css";
 
 const ROOT = "/studio";
@@ -49,7 +50,7 @@ export function CreatorPortalV2({
   onLogout
 }) {
   const route = useMemo(() => parseCreatorRoute(pathname), [pathname]);
-  const [locale, setLocale] = useState(() => detectCreatorLocale());
+  const { locale } = useLocale();
   const t = useMemo(() => createCreatorTranslator(locale), [locale]);
   const mainRef = useRef(null);
   const navigationGuardRef = useRef(null);
@@ -86,10 +87,6 @@ export function CreatorPortalV2({
     if (typeof document !== "undefined") document.title = `${localizedRouteTitle(route, t)} · Hatch`;
   }, [route, t]);
 
-  useEffect(() => {
-    if (typeof document !== "undefined") document.documentElement.lang = locale === "zh" ? "zh-CN" : locale === "ja" ? "ja-JP" : "en";
-  }, [locale]);
-
   return (
     <div className="cpv2">
       <aside className="cpv2-sidebar">
@@ -114,17 +111,10 @@ export function CreatorPortalV2({
           <span className="cpv2-avatar" aria-hidden="true">{profile?.initials || initials(profile?.display_name)}</span>
           <span><strong>{profile?.display_name || t("creator")}</strong><small>{profile?.handle || t("creatorAccount")}</small></span>
           <div className="cpv2-language-picker">
-            <Select
+            <LanguageSwitcher
               className="cpv2-language-select"
-              aria-label={t("language")}
-              value={locale}
-              onValueChange={setLocale}
-              options={CREATOR_LOCALES.map((value) => ({
-                value,
-                label: t(value === "zh" ? "chinese" : value === "ja" ? "japanese" : "english")
-              }))}
-              size="compact"
-              surface="raised"
+              compact
+              labels={{ language: t("language"), zh: t("chinese"), en: t("english"), ja: t("japanese") }}
             />
           </div>
           {onLogout ? <Button type="button" variant="ghost" size="small" onClick={onLogout}>{t("signOut")}</Button> : null}
