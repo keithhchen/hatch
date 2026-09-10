@@ -25,7 +25,8 @@ export async function createFactoryHandler(options: { root: string; env?: NodeJS
       voice = new VoiceSession({
         emit: (event: VoiceServerEvent) => runtime.events.emit("event", { sessionId: id, ...event }),
         onFinalTranscript: async (_conversationId, content) => { await runtime.start(id, content); },
-        onInterrupt: async () => { runtime.stop(id); }
+        onInterrupt: async () => { runtime.stop(id); },
+        environment: env
       });
       voices.set(id, voice);
     }
