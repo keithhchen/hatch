@@ -5,7 +5,7 @@ import { z } from "zod";
 import { corpusOutputSchema, type CorpusOutput } from "../creatorLearning/corpusNode.js";
 import { parseSkillMarkdown } from "../skills.js";
 import { result, digest } from "./files.js";
-import { WorkbenchStore } from "./store.js";
+import { WorkbenchStore, type FactoryProductScope } from "./store.js";
 
 const hash = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 export const corpusReceiptSchema = z.object({
@@ -33,37 +33,37 @@ export async function registryRequest(env: NodeJS.ProcessEnv, route: string, bod
   return response.json();
 }
 
-export function corpusTools(store: WorkbenchStore, id: string, changed: () => void, env: NodeJS.ProcessEnv = process.env): AgentTool[] {
+export function corpusTools(store: WorkbenchStore, id: string, changed: () => void, scope: FactoryProductScope, env: NodeJS.ProcessEnv = process.env): AgentTool[] {
+  const product = Object.freeze({ creatorId: scope.creatorId, productId: scope.productId });
   const uploadKnowledge = async (a: { path: string; title: string; reason: string }, signal?: AbortSignal) => {
       const s = await store.get(id);
-      if (s.role !== "generation" || !s.generation) throw new Error("Bind this Generation workspace to a real Creator Product first");
+      if (s.role !== "generation") throw new Error("Only Agent Generation may upload Knowledge");
       if (!a.path.startsWith("input/")) throw new Error("Knowledge must select original input files; generated output is not an original");
       const { record, bytes } = await store.read(id, a.path);
       const contentHash = digest(bytes);
-      const old = s.knowledge?.find(k => k.productId === s.generation!.productId && k.path === a.path && k.sha256 === contentHash);
+      const old = s.knowledge?.find(k => k.productId === product.productId && k.path === a.path && k.sha256 === contentHash);
       if (old) return old;
-      const endpoint = `/v1/creator/products/${encodeURIComponent(s.generation.productId)}/files`;
+      const endpoint = `/v1/creator/products/${encodeURIComponent(product.productId)}/files`;
       const reply = z.object({ id: z.string().min(1), product_id: z.string(), path: z.string(), sha256: z.string(), projection: z.object({ kind: z.literal("markdown") }) }).parse(await registryRequest(env, endpoint, {
         display_name: path.posix.basename(a.path), media_type: record.mimeType,
         content_base64: bytes.toString("base64"), sha256: contentHash,
         selection_reason: a.reason, metadata: { factory_session: id, input_path: a.path },
       }, signal, `factory-${digest(`${id}:${a.path}:${contentHash}`).slice(7)}`));
-      if (reply.product_id !== s.generation.productId || reply.sha256.replace(/^sha256:/, "") !== contentHash.slice(7)) throw new Error("Registry upload identity/digest mismatch");
+      if (reply.product_id !== product.productId || reply.sha256.replace(/^sha256:/, "") !== contentHash.slice(7)) throw new Error("Registry upload identity/digest mismatch");
       const entry = { path: a.path, id: reply.id, source: reply.path, title: a.title, productId: reply.product_id, sha256: contentHash };
       await store.update(id, state => { state.knowledge = [...(state.knowledge ?? []), entry]; });
       changed();
       return entry;
   };
   return [{
-    name: "corpus_upload", label: "上传可执行 Corpus", description: "Read saved output SYSTEM.md and selected skills/references, assemble the existing Corpus schema and upload through Product Registry API. This updates the bound Product's live Runtime release. Creates this workspace's Agent Product through the existing Creator API on first upload. Select whole original input files as Knowledge; the tool uploads unchanged bytes. Skill paths must include output/: output/skills/<name>/SKILL.md and output/skills/<name>/references/<id>.md. Reference kind is exactly method, style, example, or few_shots. Tool declarations come from host configuration. Saves CORPUS.md with the actual publication status. Re-upload after definition edits. No target Agent execution here.",
+    name: "corpus_upload", label: "上传可执行 Corpus", description: "Read saved output SYSTEM.md and selected skills/references, assemble the existing Corpus schema and publish it to this workspace's Product through the Product Registry API. The host fixes the Product; this tool cannot select or create one. Select whole original input files as Knowledge; the tool uploads unchanged bytes. Skill paths must include output/: output/skills/<name>/SKILL.md and output/skills/<name>/references/<id>.md. Reference kind is exactly method, style, example, or few_shots. Tool declarations come from host configuration. Saves CORPUS.md with the actual publication status. Re-upload after definition edits. No target Agent execution here.",
     parameters: Type.Object({
-      name: Type.String({ minLength: 1, maxLength: 240 }),
       promise: Type.String({ minLength: 1, maxLength: 280, description: "One or two customer-facing sentences stating who this helps, when, and what valuable result it delivers. No methods, evidence, feature lists, boundaries, or disclaimers." }),
       skills: Type.Array(Type.Object({ path: Type.String(), references: Type.Array(Type.Object({ path: Type.String(), kind: Type.Union([Type.Literal("method"), Type.Literal("style"), Type.Literal("example"), Type.Literal("few_shots")], { description: "One of: method (working procedure), style (communication style), example (worked example), few_shots (input/output demonstrations)." }) })) })),
       knowledge: Type.Array(Type.Object({ path: Type.String(), title: Type.String({ minLength: 1, maxLength: 256 }), reason: Type.String({ minLength: 1, maxLength: 2000 }) })),
     }),
     execute: async (_call, raw, signal) => {
-      const a = raw as { name: string; promise: string; skills: Array<{ path: string; references: Array<{ path: string; kind: "method" | "style" | "example" | "few_shots" }> }>; knowledge: Array<{ path: string; title: string; reason: string }> };
+      const a = raw as { promise: string; skills: Array<{ path: string; references: Array<{ path: string; kind: "method" | "style" | "example" | "few_shots" }> }>; knowledge: Array<{ path: string; title: string; reason: string }> };
       let s = await store.get(id);
       if (s.role !== "generation") throw new Error("Only Agent Generation may upload a Corpus");
       const selections = a.knowledge.map(doc => {
@@ -99,15 +99,8 @@ export function corpusTools(store: WorkbenchStore, id: string, changed: () => vo
         if (!doc.path.startsWith("input/")) throw new Error("Knowledge must be original input files");
         await store.read(id, doc.path);
       }
-      if (!s.generation) {
-        const account = z.object({ id: z.string().uuid(), role: z.literal("creator") }).parse(await registryRequest(env, "/v1/auth/me", undefined, signal));
-        const created = z.object({ product: z.object({ product_id: z.string().uuid() }) }).parse(await registryRequest(env, "/v1/creator/products", { name: a.name, promise: a.promise }, signal, `factory-agent-${id}`));
-        await store.update(id, state => { state.generation = { creatorId: account.id, productId: created.product.product_id }; });
-        s = await store.get(id);
-      } else {
-        await registryRequest(env, `/v1/creator/products/${encodeURIComponent(s.generation.productId)}`, { promise: a.promise }, signal, `factory-promise-${id}-${digest(a.promise).slice(7)}`, "PATCH");
-      }
-      const binding = s.generation!;
+      const updated = z.object({ product_id: z.string().uuid() }).passthrough().parse(await registryRequest(env, `/v1/creator/products/${encodeURIComponent(product.productId)}`, { promise: a.promise }, signal, `factory-promise-${id}-${digest(a.promise).slice(7)}`, "PATCH"));
+      if (updated.product_id !== product.productId) throw new Error("Registry updated a different Product");
       const knowledge: CorpusOutput["knowledge"] = [];
       let corpus: CorpusOutput;
       let reply: z.infer<typeof corpusReceiptSchema>;
@@ -118,15 +111,15 @@ export function corpusTools(store: WorkbenchStore, id: string, changed: () => vo
           knowledge.push({ source: uploaded.source, title: doc.title });
         }
         corpus = corpusOutputSchema.parse({ system_instructions: system, skills, knowledge, tools: JSON.parse(env.HATCH_FACTORY_TARGET_TOOLS_JSON ?? "[]") });
-        reply = corpusReceiptSchema.parse(await registryRequest(env, `/v1/creator/products/${encodeURIComponent(binding.productId)}/registry`, { corpus }, signal));
+        reply = corpusReceiptSchema.parse(await registryRequest(env, `/v1/creator/products/${encodeURIComponent(product.productId)}/registry`, { corpus }, signal));
       } catch (error) {
         const entries = (await store.get(id)).knowledge ?? [];
-        const uploaded = selections.map(doc => entries.find(k => k.path === doc.path && k.productId === binding.productId)).filter(Boolean);
+        const uploaded = selections.map(doc => entries.find(k => k.path === doc.path && k.productId === product.productId)).filter(Boolean);
         throw new Error(`${error instanceof Error ? error.message : "Corpus publication failed"}\nOriginal files already uploaded (publication/indexing not confirmed): ${JSON.stringify(uploaded)}`);
       }
-      if (reply.product_id !== binding.productId || reply.corpus_digest !== digest(JSON.stringify(corpus))) throw new Error("Published Product or Corpus digest does not match the uploaded definition");
+      if (reply.product_id !== product.productId || reply.corpus_digest !== digest(JSON.stringify(corpus))) throw new Error("Published Product or Corpus digest does not match the uploaded definition");
       const uploadedKnowledge = (await store.get(id)).knowledge ?? [];
-      const receipt = { ...reply, creator_id: binding.creatorId, files, knowledge: selections.map(doc => ({ ...uploadedKnowledge.find(k => k.path === doc.path && k.productId === binding.productId)!, status: "indexed" })) };
+      const receipt = { ...reply, creator_id: product.creatorId, files, knowledge: selections.map(doc => ({ ...uploadedKnowledge.find(k => k.path === doc.path && k.productId === product.productId)!, status: "indexed" })) };
       await store.update(id, state => { state.corpus = receipt; });
       const published = { product_id: reply.product_id, status: reply.status, published_at: reply.published_at, files, knowledge: receipt.knowledge.map(({ path, id, title, status }) => ({ path, id, title, status })) };
       await store.put(id, "output/CORPUS.md", Buffer.from(`# Agent 已发布\n\n\`\`\`json\n${JSON.stringify(published, null, 2)}\n\`\`\`\n`), { actor: "host", readonly: true });

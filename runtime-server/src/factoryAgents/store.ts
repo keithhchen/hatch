@@ -9,16 +9,17 @@ export type Role = typeof ROLES[number];
 export type Todo = { title: string; status: "pending" | "in_progress" | "completed" };
 export type FileRecord = { path: string; bytes: number; mimeType: string; origin?: { sessionId: string; path: string }; readonly?: boolean };
 export type Comment = { id: string; path: string; start: number; end: number; quote: string; text: string; replacement?: string; createdAt: string };
-export type TargetBinding = { runtimeUrl: string; entitlementId?: string; creatorId: string; productId: string; briefSpec?: unknown; briefAnswers?: Array<{ field_id: string; value: string }> };
+export type FactoryProductScope = { creatorId: string; productId: string; briefSpec?: unknown };
+export type AgentDefinitionSource = { list(): Promise<Array<{ role: Role; systemPrompt: string; tools: string[]; dependencies: { required: Role[]; normal: Role[] } }>> };
 export type Session = {
   id: string; role: Role; title: string; createdAt: string; updatedAt: string;
   revision: number; turn: number; status: "idle" | "running" | "completed" | "failed" | "interrupted";
+  outputUpdatedAt?: string; lastRunAt?: string;
   error?: string; activeTool?: string;
   files: FileRecord[]; comments: Comment[];
   messages: AgentMessage[]; context: AgentMessage[]; scribeContext?: AgentMessage[]; todos: Todo[];
-  target?: TargetBinding;
+  product?: Pick<FactoryProductScope, "creatorId" | "productId">;
   hatch?: { conversationId: string; lastRunId?: string; pending?: boolean };
-  generation?: { creatorId: string; productId: string };
   knowledge?: Array<{ path: string; id: string; source: string; title: string; productId: string; sha256: string }>;
   corpus?: { product_id: string; corpus_ref: string; corpus_digest: string; release_digest: string; status: "published"; published_at: string; files: string[] };
 };
@@ -32,7 +33,15 @@ export function filePath(value: string): string {
 /** Each chat owns ordinary files; completed Runtime results retain their own paths. */
 export class WorkbenchStore {
   private queues = new Map<string, Promise<unknown>>();
-  constructor(readonly root: string) {}
+  constructor(readonly root: string, readonly scope?: FactoryProductScope, private definitions?: AgentDefinitionSource) {}
+  async definition(role: Role): Promise<Awaited<ReturnType<NonNullable<AgentDefinitionSource>["list"]>>[number]> {
+    const definition = (await this.definitions?.list())?.find(candidate => candidate.role === role);
+    if (!definition) throw Object.assign(new Error(`Factory Agent definition is missing: ${role}`), { code: "agent_definitions_invalid", status: 503 });
+    return definition;
+  }
+  async dependencies(role: Role): Promise<{ required: Role[]; normal: Role[] }> {
+    return (await this.definition(role)).dependencies;
+  }
   private directory(id: string): string {
     if (!/^[0-9a-f-]{36}$/.test(id)) throw new Error("Invalid session ID");
     return path.join(this.root, id);
@@ -49,22 +58,22 @@ export class WorkbenchStore {
     const id = randomUUID();
     await mkdir(this.directory(id), { recursive: true, mode: 0o700 });
     const now = new Date().toISOString();
-    const session: Session = { id, role, title: title?.trim() || role, createdAt: now, updatedAt: now, revision: 0, turn: 0, status: "idle", files: [], comments: [], messages: [], context: [], todos: [] };
+    const session: Session = { id, role, title: title?.trim() || role, createdAt: now, updatedAt: now, revision: 0, turn: 0, status: "idle", files: [], comments: [], messages: [], context: [], todos: [], ...(this.scope ? { product: { creatorId: this.scope.creatorId, productId: this.scope.productId } } : {}) };
     await this.save(session);
     if (role === "voice") {
-      await this.put(id, "output/CREATOR_PERSONA.md", Buffer.from("# CREATOR_PERSONA\n\n"), { actor: "host" });
+      await this.put(id, "output/CREATOR_PERSONA.md", Buffer.from("# CREATOR_PERSONA\n\n"), { actor: "host", countsAsOutput: false });
       return this.get(id);
     }
     return session;
   }
-  async get(id: string): Promise<Session> { const session = JSON.parse(await readFile(path.join(this.directory(id), "session.json"), "utf8")) as Session & { progress?: unknown }; const todo = await readFile(path.join(this.directory(id), "todo.json"), "utf8").then(JSON.parse).catch(() => ({ todos: [] })); session.todos = Array.isArray(todo.todos) ? todo.todos : []; delete session.progress; return session; }
+  async get(id: string): Promise<Session> { const session = JSON.parse(await readFile(path.join(this.directory(id), "session.json"), "utf8")) as Session & { progress?: unknown }; const todo = await readFile(path.join(this.directory(id), "todo.json"), "utf8").then(JSON.parse).catch(() => ({ todos: [] })); session.todos = Array.isArray(todo.todos) ? todo.todos : []; delete session.progress; if (this.scope && (!session.product || session.product.creatorId !== this.scope.creatorId || session.product.productId !== this.scope.productId)) throw new Error("Session belongs to a different Product workspace"); return session; }
   async list(): Promise<Session[]> {
     await mkdir(this.root, { recursive: true, mode: 0o700 });
     const names = (await readdir(this.root)).filter(s => /^[0-9a-f-]{36}$/.test(s));
     return (await Promise.all(names.map(s => this.get(s)))).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
   private async save(session: Session): Promise<void> { const { todos, ...metadata } = session; await Promise.all([atomicWrite(path.join(this.directory(session.id), "session.json"), JSON.stringify(metadata)), atomicWrite(path.join(this.directory(session.id), "todo.json"), JSON.stringify({ todos }))]); }
-  private async upstream(id: string): Promise<Array<{ role: Role; session: Session }>> { const current = await this.get(id); const allowed: Partial<Record<Role, Role[]>> = { voice: ["research"], generation: ["research", "voice", "evaluator"], "case-generation": ["research", "voice", "generation"], evaluator: ["generation", "case-generation"] }; const sessions = await this.list(); return (allowed[current.role] ?? []).flatMap(role => { const session = sessions.filter(candidate => candidate.role === role && candidate.id !== id).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]; return session ? [{ role, session }] : []; }); }
+  private async upstream(id: string): Promise<Array<{ role: Role; session: Session }>> { if (!this.definitions) return []; const current = await this.get(id); const dependencies = await this.dependencies(current.role); const allowed = [...dependencies.required, ...dependencies.normal]; const sessions = await this.list(); return allowed.flatMap(role => { const session = sessions.filter(candidate => candidate.role === role && candidate.id !== id).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]; return session ? [{ role, session }] : []; }); }
   async contextFiles(id: string): Promise<FileRecord[]> { const current = await this.get(id); const manual = await this.manualFiles(); const inherited = (await this.upstream(id)).flatMap(({ role, session }) => session.files.filter(file => file.path.startsWith("output/")).map(file => ({ ...file, path: `input/${role}/${file.path.slice(7)}`, origin: { sessionId: session.id, path: file.path }, readonly: true }))); return [...current.files.filter(file => !file.path.startsWith("input/manual/")), ...manual, ...inherited]; }
   async update<T>(id: string, change: (session: Session) => T | Promise<T>): Promise<T> {
     const previous = this.queues.get(id) ?? Promise.resolve();
@@ -96,7 +105,7 @@ export class WorkbenchStore {
     await mkdir(path.dirname(current), { recursive: true });
     return current;
   }
-  async put(id: string, name: string, bytes: Buffer, options: { mimeType?: string; actor: "user" | "agent" | "host"; origin?: FileRecord["origin"]; readonly?: boolean }): Promise<FileRecord> {
+  async put(id: string, name: string, bytes: Buffer, options: { mimeType?: string; actor: "user" | "agent" | "host"; origin?: FileRecord["origin"]; readonly?: boolean; countsAsOutput?: boolean }): Promise<FileRecord> {
     filePath(name);
     if (!bytes.length || bytes.length > 20 * 1024 * 1024) throw new Error("File must contain 1 byte to 20 MiB");
     if (options.actor === "user" && name.startsWith("input/manual/")) { const record: FileRecord = { path: name, bytes: bytes.length, mimeType: options.mimeType ?? (name.endsWith(".md") ? "text/markdown" : "application/octet-stream") }; await atomicWrite(await this.manualPath(name), bytes); await atomicWrite(path.join(this.root, "manual-files.json"), JSON.stringify({ files: [...(await this.manualFiles()).filter(file => file.path !== name), record] })); return record; }
@@ -108,6 +117,7 @@ export class WorkbenchStore {
       const record: FileRecord = { path: name, bytes: bytes.length, mimeType: options.mimeType ?? (name.endsWith(".md") ? "text/markdown" : "application/octet-stream"), ...(options.origin ? { origin: options.origin } : {}), ...(options.readonly ? { readonly: true } : {}) };
       await atomicWrite(await this.materializedPath(id, name), bytes);
       s.files = [...s.files.filter(f => f.path !== name), record];
+      if (name.startsWith("output/") && options.countsAsOutput !== false) s.outputUpdatedAt = new Date().toISOString();
       s.revision++;
       return record;
     });

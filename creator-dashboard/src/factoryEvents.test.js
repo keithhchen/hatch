@@ -17,8 +17,8 @@ test('a terminal event-stream failure reconnects, refreshes state and stops clea
   let refreshes = 0;
   let failures = 0;
   const received = [];
-  const dispose = subscribeFactoryEvents({ onOpen: () => refreshes++, onError: () => failures++, onMessage: e => received.push(e.data) });
-  assert.equal(streams[0].url, '/v1/creator/factory-agents/events');
+  const dispose = subscribeFactoryEvents({ url: '/v1/creator/products/product-a/factory-agents/events', onOpen: () => refreshes++, onError: () => failures++, onMessage: e => received.push(e.data) });
+  assert.equal(streams[0].url, '/v1/creator/products/product-a/factory-agents/events');
   streams[0].onopen();
   streams[0].onerror();
   assert.equal(streams[0].closed, true);

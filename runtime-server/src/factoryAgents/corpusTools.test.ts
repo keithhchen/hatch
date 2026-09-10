@@ -9,7 +9,6 @@ import { materializeAgentCorpus } from "../agentCorpusMaterialization.js";
 import { WorkbenchStore } from "./store.js";
 import { corpusTools, registryRequest } from "./corpusTools.js";
 import { digest } from "./files.js";
-import { evaluationTargets } from "./targets.js";
 
 // Automated local integration: actual HTTP handlers, auth, storage, bundle validation and Runtime resolver.
 // No model, Qdrant or production-service UAT is claimed by these tests.
@@ -32,7 +31,7 @@ test("Generation uploads canonical files through Registry and the existing Runti
     const auth = await signup.json() as { token: string; account: { id: string } };
     const env = { HATCH_FACTORY_REGISTRY_URL: base, HATCH_FACTORY_CREATOR_TOKEN: auth.token };
     const product = await registryRequest(env, "/v1/creator/products", { name: "Canonical definition test", promise: "Review an argument using its evidence." }) as { product: { product_id: string } };
-    let productId = product.product.product_id;
+    const productId = product.product.product_id;
     await assert.rejects(registryRequest(env, `/v1/creator/products/${productId}/registry`, {}), /422.*corpus_required/);
     const store = new WorkbenchStore(path.join(root, "workspaces"));
     const session = await store.create("generation");
@@ -40,20 +39,19 @@ test("Generation uploads canonical files through Registry and the existing Runti
     await store.put(session.id, "output/SYSTEM.md", Buffer.from(system), { actor: "agent" });
     await store.put(session.id, "output/skills/review/SKILL.md", Buffer.from("---\nname: review\ndescription: Review a customer argument.\n---\n\nRead references/evidence.md. Identify the claim, inspect evidence, and explain any gap.\n"), { actor: "agent" });
     await store.put(session.id, "output/skills/review/references/evidence.md", Buffer.from("# Evidence\nCheck whether the evidence supports the exact claim.\n"), { actor: "agent" });
-    const tools = corpusTools(store, session.id, () => {}, env);
+    const hostScope = { creatorId: auth.account.id, productId };
+    const tools = corpusTools(store, session.id, () => {}, hostScope, env);
+    hostScope.productId = "99999999-9999-4999-8999-999999999999";
     const upload = tools.find(t => t.name === "corpus_upload")!;
-    const args = { name: "Canonical definition test", promise: "Review an argument using its evidence.", skills: [{ path: "output/skills/review/SKILL.md", references: [{ path: "output/skills/review/references/evidence.md", kind: "method" }] }], knowledge: [] };
+    const exposedParameters = JSON.stringify(upload.parameters);
+    assert.ok(!exposedParameters.includes("productId") && !exposedParameters.includes("product_id") && !exposedParameters.includes('"name"'));
+    const args = { promise: "Review an argument using its evidence.", skills: [{ path: "output/skills/review/SKILL.md", references: [{ path: "output/skills/review/references/evidence.md", kind: "method" }] }], knowledge: [] };
     await upload.execute("publish", args);
     const saved = await store.get(session.id); assert.ok(saved.corpus);
-    productId = saved.corpus.product_id;
-    assert.equal(saved.generation?.creatorId, auth.account.id);
+    assert.equal(saved.corpus.product_id, productId);
     assert.equal(saved.corpus.status, "published");
-    const catalog = await evaluationTargets(store, { ...env, HATCH_FACTORY_RUNTIME_URL: `${base}/v1/runtime` });
-    const selectable = catalog.targets.find(target => target.productId === productId);
-    assert.equal(selectable?.available, true);
-    assert.equal(selectable?.productId, saved.corpus.product_id);
-    assert.equal(selectable?.entitlementId, undefined);
-    assert.ok(selectable?.briefSpec);
+    const afterPublish = await registryRequest(env, "/v1/creator/products") as { products: Array<{ product_id: string }> };
+    assert.deepEqual(afterPublish.products.map(entry => entry.product_id), [productId]);
     const releaseDir = path.join(runtimeRoot, productId, saved.corpus.release_digest.slice(7));
     assert.equal(await readFile(path.join(releaseDir, "instructions/system.md"), "utf8"), system);
     assert.equal(digest(await readFile(path.join(releaseDir, "source-corpus.json"))), saved.corpus.corpus_digest);

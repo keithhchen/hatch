@@ -2,14 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { creatorRouteTitle, parseCreatorRoute } from "./creatorRoutes.js";
 
-test("Creator Factory run routes preserve the selected run across refresh", () => {
-  assert.deepEqual(parseCreatorRoute("/studio/factory/runs/factory_123"), {
-    kind: "factory", section: "products", runId: "factory_123"
+test("Factory is scoped by the existing Product route", () => {
+  assert.deepEqual(parseCreatorRoute("/studio/products/product-a/factory"), {
+    kind: "factory-agents", section: "products", productId: "product-a"
   });
-  assert.deepEqual(parseCreatorRoute("/studio/products/product-a/factory/runs/factory%2Fencoded"), {
-    kind: "factory", section: "products", productId: "product-a", runId: "factory/encoded"
-  });
-  assert.equal(creatorRouteTitle(parseCreatorRoute("/studio/factory/runs/factory_123")), "Version");
+  assert.equal(parseCreatorRoute("/studio/products/product-a/factory/runs/old").kind, "not-found");
+  assert.equal(creatorRouteTitle(parseCreatorRoute("/studio/products/product-a/factory")), "Factory");
 });
 
 test("Product files are nested under one Product", () => {
@@ -50,7 +48,7 @@ test("legacy portal paths are not aliases after the UUID cutover", () => {
 });
 
 
-test("Factory is a Dashboard page without a Product or version selection", () => {
-  assert.deepEqual(parseCreatorRoute("/studio/factory"), { kind: "factory-agents", section: "factory" });
+test("the unscoped Factory URL redirects to Products without creating a workspace", () => {
+  assert.deepEqual(parseCreatorRoute("/studio/factory"), { kind: "factory-index", section: "products" });
   assert.equal(creatorRouteTitle(parseCreatorRoute("/studio/factory")), "Factory");
 });

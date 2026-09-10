@@ -3,7 +3,7 @@ import { Type } from "@earendil-works/pi-ai";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { WebSocket } from "ws";
 import { PROTOCOL_VERSION } from "../protocol.js";
-import { WorkbenchStore, type TargetBinding } from "./store.js";
+import { WorkbenchStore, type FactoryProductScope } from "./store.js";
 import { result, digest } from "./files.js";
 
 type DesktopClient = {
@@ -15,29 +15,31 @@ type DesktopClient = {
   getConversationToolDetail(url: string, token: string, binding: { entitlementId?: string; productId?: string }, id: string, detail: { run_id: string; tool_call_id: string }, fetchImpl?: typeof fetch): Promise<Record<string, unknown>>;
 };
 
+type RuntimeTarget = FactoryProductScope & { runtimeUrl: string };
+
 /** Reuse Desktop's actual REST client. Only the headless WebSocket transport differs; no target Agent loop is implemented here. */
 async function desktopClient(): Promise<DesktopClient> {
   const moduleUrl = new URL("../../../desktop-app/src/renderer/conversation-client.js", import.meta.url);
   return import(moduleUrl.href);
 }
 
-export function hatchTool(store: WorkbenchStore, id: string, changed: () => void, env: NodeJS.ProcessEnv = process.env): AgentTool {
+export function hatchTool(store: WorkbenchStore, id: string, changed: () => void, scope: FactoryProductScope, env: NodeJS.ProcessEnv = process.env): AgentTool {
+  const product = Object.freeze({ creatorId: scope.creatorId, productId: scope.productId });
   return {
     name: "hatch_tool", label: "运行 Hatch Agent", description: "Call the existing authenticated Hatch server Runtime, with NO LocalRunner/local tools. Host fixes the target Agent. start/continue send only client-visible text/materials. status/read/tool_detail inspect the real conversation; read_asset downloads a real referenced output asset for inspection. No rubric or private client-state files may be sent. Runtime output is saved read-only as RESULT.md/results/*.md. Never retry a pending submission without inspecting status.",
     parameters: Type.Object({ operation: Type.Union([Type.Literal("start"), Type.Literal("continue"), Type.Literal("status"), Type.Literal("read"), Type.Literal("tool_detail"), Type.Literal("read_asset"), Type.Literal("cancel")]), message: Type.Optional(Type.String({ maxLength: 100000, description: "Required for start and continue: the actual customer message. brief_answers and material_paths do not replace this message." })), material_paths: Type.Optional(Type.Array(Type.String(), { maxItems: 20 })), brief_answers: Type.Optional(Type.Array(Type.Object({ field_id: Type.String(), value: Type.String() }))), asset_id: Type.Optional(Type.String()), tool_call_id: Type.Optional(Type.String()) }),
     execute: async (_callId, raw, signal) => {
       const args = raw as { operation: string; message?: string; material_paths?: string[]; tool_call_id?: string; asset_id?: string; brief_answers?: Array<{ field_id: string; value: string }> };
       const session = await store.get(id);
-      const target = session.target;
-      const token = target?.entitlementId ? env.HATCH_FACTORY_AUTH_TOKEN : env.HATCH_FACTORY_CREATOR_TOKEN;
-      if (!target || !token) throw new Error("HTool unavailable: configure the real Runtime target Agent and HATCH_FACTORY_AUTH_TOKEN. No substitute runner is used.");
       const configuredUrl = env.HATCH_FACTORY_RUNTIME_URL;
-      if (!configuredUrl || target.runtimeUrl !== configuredUrl) throw new Error("Runtime URL must match the host-configured HATCH_FACTORY_RUNTIME_URL");
+      const token = env.HATCH_FACTORY_CREATOR_TOKEN;
+      if (!configuredUrl || !token) throw new Error("HTool unavailable: configure the real Runtime and Creator authentication. No substitute runner is used.");
+      const target: RuntimeTarget = { ...product, runtimeUrl: configuredUrl };
       const url = new URL(target.runtimeUrl);
       if (!(["https:", "wss:"].includes(url.protocol) || (["http:", "ws:"].includes(url.protocol) && ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname))) || url.username || url.password) throw new Error("Runtime requires TLS or a loopback endpoint");
       const client = await desktopClient();
       const request: typeof fetch = (input, init) => fetch(input, { ...init, redirect: "error", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(60000)]) : AbortSignal.timeout(60000) });
-      const binding = target.entitlementId ? { entitlementId: target.entitlementId } : { productId: target.productId };
+      const binding = { productId: target.productId };
       const desktopUrl = socketUrl(target.runtimeUrl);
       if (["status", "read", "tool_detail"].includes(args.operation)) {
         if (!session.hatch) throw new Error("No real Hatch conversation has been started");
@@ -89,7 +91,7 @@ export function hatchTool(store: WorkbenchStore, id: string, changed: () => void
       if (Buffer.byteLength(message) > 400000) throw new Error("Client materials exceed one message budget");
       let conversationId = session.hatch?.conversationId;
       if (!conversationId) {
-        const response = await client.createConversation(desktopUrl, token, binding, { clientRequestId: `factory-${id}`, title: `Factory evaluation ${session.title}`, briefAnswers: args.brief_answers ?? target.briefAnswers ?? [] }, request);
+        const response = await client.createConversation(desktopUrl, token, binding, { clientRequestId: `factory-${id}`, title: `Factory evaluation ${session.title}`, briefAnswers: args.brief_answers ?? [] }, request);
         if (!response.conversation?.id) throw new Error("Runtime did not return a real conversation ID");
         conversationId = response.conversation.id;
         await store.update(id, s => { s.hatch = { conversationId: conversationId! }; });
@@ -126,15 +128,15 @@ export function hatchTool(store: WorkbenchStore, id: string, changed: () => void
 }
 
 function socketUrl(value: string): string { const u = new URL(value); u.protocol = u.protocol === "https:" ? "wss:" : u.protocol === "http:" ? "ws:" : u.protocol; if (u.pathname === "/") u.pathname = "/runtime"; u.search = ""; return u.href; }
-function connect(target: TargetBinding, token: string, conversationId: string): WebSocket {
+function connect(target: RuntimeTarget, token: string, conversationId: string): WebSocket {
   const ws = new WebSocket(socketUrl(target.runtimeUrl), { maxPayload: 8 * 1024 * 1024, handshakeTimeout: 20000 });
-  ws.once("open", () => ws.send(JSON.stringify({ type: "client.hello", protocol_version: PROTOCOL_VERSION, conversation_id: conversationId, auth_token: token, ...(target.entitlementId ? { entitlement_id: target.entitlementId } : { product_id: target.productId }), local_tools: [] })));
+  ws.once("open", () => ws.send(JSON.stringify({ type: "client.hello", protocol_version: PROTOCOL_VERSION, conversation_id: conversationId, auth_token: token, product_id: target.productId, local_tools: [] })));
   return ws;
 }
-function verifyReady(event: Record<string, any>, target: TargetBinding, conversationId: string): void {
+function verifyReady(event: Record<string, any>, target: RuntimeTarget, conversationId: string): void {
   if (event.accepted_protocol_version !== PROTOCOL_VERSION || event.creator_id !== target.creatorId || event.product_id !== target.productId || event.conversation_id !== conversationId) throw new Error("Hatch Runtime bound a different Agent or conversation; target was not executed");
 }
-async function runTarget(target: TargetBinding, token: string, conversationId: string, runId: string, message: string, signal: AbortSignal | undefined, observe: (event: Record<string, any>) => void, submitting: () => void): Promise<void> {
+async function runTarget(target: RuntimeTarget, token: string, conversationId: string, runId: string, message: string, signal: AbortSignal | undefined, observe: (event: Record<string, any>) => void, submitting: () => void): Promise<void> {
   const ws = connect(target, token, conversationId);
   let sent = false;
   try {
@@ -170,7 +172,7 @@ async function runTarget(target: TargetBinding, token: string, conversationId: s
     });
   } finally { ws.close(); setTimeout(() => ws.terminate(), 1000).unref(); }
 }
-async function cancelTarget(target: TargetBinding, token: string, conversationId: string, runId: string, signal?: AbortSignal): Promise<void> {
+async function cancelTarget(target: RuntimeTarget, token: string, conversationId: string, runId: string, signal?: AbortSignal): Promise<void> {
   const ws = connect(target, token, conversationId);
   try {
     await new Promise<void>((resolve, reject) => {

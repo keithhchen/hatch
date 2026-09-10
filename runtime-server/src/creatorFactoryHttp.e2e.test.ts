@@ -56,6 +56,22 @@ test("Product Creator API owns Files and routes Node workflow through the new bo
   const productId = created.product.product_id;
   assert.match(productId, /^[0-9a-f-]{36}$/);
 
+  const legacyFactoryAgents = await fetch(`${base}/v1/creator/factory-agents/sessions`, {
+    headers: { authorization: `Bearer ${creatorA}` }
+  });
+  assert.equal(legacyFactoryAgents.status, 404);
+  const productFactoryAgents = await fetch(`${base}/v1/creator/products/${productId}/factory-agents/sessions`, {
+    headers: { authorization: `Bearer ${creatorA}` }
+  });
+  // This test Registry intentionally has no Postgres. Factory definitions have
+  // no filesystem fallback after bootstrap, so the owned route reports the
+  // unavailable database honestly.
+  assert.equal(productFactoryAgents.status, 503);
+  const crossCreatorFactoryAgents = await fetch(`${base}/v1/creator/products/${productId}/factory-agents/sessions`, {
+    headers: { authorization: `Bearer ${creatorB}` }
+  });
+  assert.equal(crossCreatorFactoryAgents.status, 404);
+
   const productReplay = await fetch(`${base}/v1/creator/products`, {
     method: "POST",
     headers: { authorization: `Bearer ${creatorA}`, "content-type": "application/json", "idempotency-key": "product-create-1" },
