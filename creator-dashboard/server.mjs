@@ -1445,7 +1445,7 @@ export async function createDashboardApp(options = {}) {
         }
       }
 
-      if (url.pathname.startsWith("/v1/creator/factory-agents/")) {
+      if (/^\/v1\/creator\/products\/[^/]+\/factory-agents(?:\/|$)/.test(url.pathname)) {
         const authentication = await authenticate(request, registryUrl, "creator", fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
         const abort = new AbortController();
