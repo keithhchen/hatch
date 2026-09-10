@@ -3,6 +3,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { TavilySearchProvider, TavilyScrapeProvider, FirecrawlScrapeProvider } from "./webProviders.js";
 import { digest, result } from "./files.js";
 import { WorkbenchStore } from "./store.js";
+import { fetchYoutubeTranscript } from "./youtubeTranscript.js";
 
 export function webTools(store: WorkbenchStore, id: string, changed: () => void, env: NodeJS.ProcessEnv = process.env): AgentTool[] {
   const search = new TavilySearchProvider({ apiKey: env.TAVILY_API_KEY });
@@ -26,6 +27,16 @@ export function webTools(store: WorkbenchStore, id: string, changed: () => void,
       const file = await store.put(id, `output/sources/${label}-${digest(body).slice(7, 19)}.md`, Buffer.from(body), { actor: "host", readonly: true });
       changed();
       return result({ ...file, source: evidence.url, retrievedAt: evidence.retrievedAt, note: "Read the saved file in full. Extraction may omit inaccessible page content." });
+    } },
+    { name: "youtube_transcript", label: "读取 YouTube 字幕", description: "Fetch the complete public manual or automatic transcript for one YouTube video, preserve timestamps and metadata, and save it under output/sources/. Use read to inspect the saved transcript in full.", parameters: Type.Object({ url: Type.String(), languages: Type.Optional(Type.Array(Type.String(), { maxItems: 8 })) }), execute: async (_id, raw, signal) => {
+      const a = raw as { url: string; languages?: string[] };
+      const transcript = await fetchYoutubeTranscript(a, { signal: AbortSignal.any([signal ?? new AbortController().signal, AbortSignal.timeout(150000)]) });
+      const stamp = (seconds: number) => { const whole = Math.max(0, Math.floor(seconds)); return `${Math.floor(whole / 3600).toString().padStart(2, "0")}:${Math.floor(whole % 3600 / 60).toString().padStart(2, "0")}:${(whole % 60).toString().padStart(2, "0")}`; };
+      const body = `# ${transcript.title}\n\nSource: ${transcript.url}\nChannel: ${transcript.channel ?? "Unknown"}\nPublished: ${transcript.publishedAt ?? "Unknown"}\nRetrieved: ${transcript.retrievedAt}\nLanguage: ${transcript.language}\nTranscript source: ${transcript.source}\nRepresentation: public YouTube captions with timestamps; automatic captions may contain recognition errors.\n\n---\n\n${transcript.segments.map(segment => `**[${stamp(segment.startSeconds)}]** ${segment.text}`).join("\n\n")}`;
+      const label = transcript.title.normalize("NFKC").replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 60) || transcript.videoId;
+      const file = await store.put(id, `output/sources/youtube-${label}-${transcript.videoId}.md`, Buffer.from(body), { actor: "host", readonly: true });
+      changed();
+      return result({ ...file, source: transcript.url, language: transcript.language, transcriptSource: transcript.source, segments: transcript.segments.length, note: "Read the saved transcript in full. Verify names, numbers, and decisive wording when captions are automatic." });
     } }
   ];
 }
