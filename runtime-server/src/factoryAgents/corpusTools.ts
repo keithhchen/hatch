@@ -14,14 +14,14 @@ export const corpusReceiptSchema = z.object({
 });
 
 /** HTTP adapter only. Auth, file projection, validation, indexing and release stay in Registry. */
-export async function registryRequest(env: NodeJS.ProcessEnv, route: string, body?: unknown, signal?: AbortSignal, idempotencyKey?: string): Promise<unknown> {
+export async function registryRequest(env: NodeJS.ProcessEnv, route: string, body?: unknown, signal?: AbortSignal, idempotencyKey?: string, method?: "POST" | "PATCH"): Promise<unknown> {
   const base = env.HATCH_FACTORY_REGISTRY_URL;
   const token = env.HATCH_FACTORY_CREATOR_TOKEN;
   if (!base || !token) throw new Error("Corpus unavailable: configure HATCH_FACTORY_REGISTRY_URL and HATCH_FACTORY_CREATOR_TOKEN");
   const url = new URL(base);
   if (url.username || url.password || (url.protocol !== "https:" && !(url.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)))) throw new Error("Registry requires TLS or loopback");
   const response = await fetch(new URL(route, url), {
-    method: body === undefined ? "GET" : "POST", redirect: "error",
+    method: body === undefined ? "GET" : (method ?? "POST"), redirect: "error",
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json", ...(idempotencyKey ? { "idempotency-key": idempotencyKey } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
     signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(900000)]) : AbortSignal.timeout(900000),
@@ -58,7 +58,7 @@ export function corpusTools(store: WorkbenchStore, id: string, changed: () => vo
     name: "corpus_upload", label: "上传可执行 Corpus", description: "Read saved output SYSTEM.md and selected skills/references, assemble the existing Corpus schema and upload through Product Registry API. This updates the bound Product's live Runtime release. Creates this workspace's Agent Product through the existing Creator API on first upload. Select whole original input files as Knowledge; the tool uploads unchanged bytes. Skill paths must include output/: output/skills/<name>/SKILL.md and output/skills/<name>/references/<id>.md. Reference kind is exactly method, style, example, or few_shots. Tool declarations come from host configuration. Saves CORPUS.md with the actual publication status. Re-upload after definition edits. No target Agent execution here.",
     parameters: Type.Object({
       name: Type.String({ minLength: 1, maxLength: 240 }),
-      promise: Type.String({ minLength: 1, maxLength: 100000 }),
+      promise: Type.String({ minLength: 1, maxLength: 280, description: "One or two customer-facing sentences stating who this helps, when, and what valuable result it delivers. No methods, evidence, feature lists, boundaries, or disclaimers." }),
       skills: Type.Array(Type.Object({ path: Type.String(), references: Type.Array(Type.Object({ path: Type.String(), kind: Type.Union([Type.Literal("method"), Type.Literal("style"), Type.Literal("example"), Type.Literal("few_shots")], { description: "One of: method (working procedure), style (communication style), example (worked example), few_shots (input/output demonstrations)." }) })) })),
       knowledge: Type.Array(Type.Object({ path: Type.String(), title: Type.String({ minLength: 1, maxLength: 256 }), reason: Type.String({ minLength: 1, maxLength: 2000 }) })),
     }),
@@ -104,6 +104,8 @@ export function corpusTools(store: WorkbenchStore, id: string, changed: () => vo
         const created = z.object({ product: z.object({ product_id: z.string().uuid() }) }).parse(await registryRequest(env, "/v1/creator/products", { name: a.name, promise: a.promise }, signal, `factory-agent-${id}`));
         await store.update(id, state => { state.generation = { creatorId: account.id, productId: created.product.product_id }; });
         s = await store.get(id);
+      } else {
+        await registryRequest(env, `/v1/creator/products/${encodeURIComponent(s.generation.productId)}`, { promise: a.promise }, signal, `factory-promise-${id}-${digest(a.promise).slice(7)}`, "PATCH");
       }
       const binding = s.generation!;
       const knowledge: CorpusOutput["knowledge"] = [];
