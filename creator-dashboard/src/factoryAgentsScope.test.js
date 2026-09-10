@@ -52,4 +52,6 @@ test('Factory hands selected output files to an available Agent in the same Prod
   assert.match(source, /endpoint\(root, target\.id, 'transfer'\)/);
   assert.match(source, /body: \{ fromSessionId: id, files: selectedOutputs\.map\(path => \(\{ path \}\)\) \}/);
   assert.match(source, /path\.startsWith\('output\/'\)/);
+  assert.match(source, /\^input\\\/\(\?:manual\|handoff\)\\\//);
+  assert.match(source, /method: 'DELETE', body: \{ path: f\.path \}/);
 });
