@@ -1,12 +1,12 @@
 // Reopen even when EventSource treats an HTTP error as terminal. Callers read
 // canonical state on open, since events may have been missed during a deploy.
-export function subscribeFactoryEvents({ onMessage, onOpen, onError }) {
+export function subscribeFactoryEvents({ url, onMessage, onOpen, onError }) {
   let disposed = false;
   let stream;
   let retry;
   const connect = () => {
     if (disposed) return;
-    stream = new EventSource('/v1/creator/factory-agents/events');
+    stream = new EventSource(url);
     stream.onmessage = onMessage;
     stream.onopen = onOpen;
     stream.onerror = () => {

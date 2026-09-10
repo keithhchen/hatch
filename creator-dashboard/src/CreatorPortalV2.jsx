@@ -67,7 +67,6 @@ export function CreatorPortalV2({
   }, [navigate]);
 
   const mobileNavigationItems = [
-    { value: "factory", label: "Factory", active: route.section === "factory", onSelect: () => void go(`${ROOT}/factory`) },
     { value: "space-explore", label: t("explore"), onSelect: () => void go("/explore") },
     { value: "space-library", label: t("library"), onSelect: () => void go("/library") },
     { value: "space-studio", label: t("studio"), active: route.kind === "home", onSelect: () => void go(ROOT) },
@@ -103,7 +102,6 @@ export function CreatorPortalV2({
           <SpaceLink href="/library" navigate={go}>{t("library")}</SpaceLink>
           <SpaceLink href="/studio" navigate={go} active={route.kind === "home"}>{t("studio")}</SpaceLink>
           <NavButton active={route.section === "products" && route.kind !== "files"} onClick={() => go(`${ROOT}/products`)}>{t("products")}</NavButton>
-          <SpaceLink href="/studio/factory" navigate={go} active={route.section === "factory"}>Factory</SpaceLink>
           <SpaceLink href="/studio/orders" navigate={go} active={route.section === "orders"}>{t("orders")}</SpaceLink>
           <SpaceLink href="/account" navigate={go}>{t("account")}</SpaceLink>
         </nav>
@@ -144,11 +142,11 @@ function CreatorRoute({ route, token, request, navigate, profile, locale, t, reg
   if (typeof request !== "function") {
     return <RouteProblem title={t("creatorPortalUnavailable")} body={t("creatorPortalUnavailableBody")} />;
   }
-  if (route.kind === "factory-agents") return <FactoryAgents key={profile?.id} creatorId={profile?.id} locale={locale} />;
+  if (route.kind === "factory-index") return <FactoryIndexRedirect navigate={navigate} />;
+  if (route.kind === "factory-agents") return <FactoryAgents key={route.productId} productId={route.productId} locale={locale} />;
   if (route.kind === "home") return <CreatorHome token={token} request={request} navigate={navigate} profile={profile} t={t} locale={locale} />;
   if (route.kind === "products") return <ProductsPage token={token} request={request} navigate={navigate} t={t} />;
   if (route.kind === "product-create") return <CreatorProductFiles token={token} navigate={navigate} locale={locale} />;
-  if (route.kind === "factory") return <FactoryPage token={token} request={request} productId={route.productId} runId={route.runId} navigate={navigate} locale={locale} profile={profile} t={t} />;
   if (route.kind === "product" && ["files", "about-you", "corpus", "brief", "complete"].includes(route.tab)) return <CreatorProductWorkspace token={token} request={request} navigate={navigate} productId={route.productId} tab={route.tab} locale={locale} profile={profile} />;
   if (route.kind === "product") return <ProductPage token={token} request={request} navigate={navigate} productId={route.productId} tab={route.tab} t={t} />;
   if (route.kind === "candidate") return <CreatorProductWorkspace token={token} request={request} navigate={navigate} productId={route.productId} tab="corpus" locale={locale} />;
@@ -203,7 +201,7 @@ function ProductsPage({ token, request, navigate, t }) {
         return <>
           <PageHeader eyebrow={t("products")} title={t("productsPageTitle")} body={t("productsPageBody")} action={t("createProduct")} onAction={() => navigate(`${ROOT}/products/new`)} />
           {products.length ? <section className="cpv2-product-grid" aria-label={t("products")}>
-            {products.map((product) => <ProductCard key={idOf(product, "product")} product={product} t={t} onOpen={() => navigate(`${ROOT}/products/${encodeURIComponent(idOf(product, "product"))}`)} />)}
+            {products.map((product) => <ProductCard key={idOf(product, "product")} product={product} t={t} onOpen={() => navigate(`${ROOT}/products/${encodeURIComponent(idOf(product, "product"))}/factory`)} />)}
           </section> : <EmptyState title={t("createFirstProduct")} body={t("createFirstProductBody")} action={t("createProduct")} onAction={() => navigate(`${ROOT}/products/new`)} />}
         </>;
       }}
@@ -303,11 +301,9 @@ function DataControlsPanel({ product, t }) {
   return <div className="cpv2-detail-grid"><article className="cpv2-card cpv2-panel"><SectionHeading eyebrow={t("productBoundaries")} title={t("willNotDo")} />{boundaries.length ? <ul className="cpv2-bullets">{boundaries.map((item, index) => <li key={index}>{typeof item === "string" ? item : item.label ?? item.description}</li>)}</ul> : <EmptyInline>{t("addExplicitBoundaries")}</EmptyInline>}</article><article className="cpv2-card cpv2-panel"><SectionHeading eyebrow={t("privacy")} title={t("buyerWorkPrivate")} /><p>{t("accessRecordsNeverInclude")}</p><dl><Fact label={t("corpusDigest")} value={shortDigest(product.corpus_digest ?? product.active_release?.corpus_digest)} /><Fact label={t("versionPolicy")} value={product.version_policy ?? t("pinnedPurchasedRelease")} /></dl></article></div>;
 }
 
-function FactoryPage({ token, request, productId, runId, navigate, locale, profile, t }) {
-  // Old Factory URLs are only bookmarks now. Always render the canonical
-  // Product-scoped Node workflow; there is no second run/review authority.
-  if (productId === undefined) return <ProductsPage token={token} request={request} navigate={navigate} t={t} />;
-  return <CreatorProductWorkspace token={token} request={request} productId={productId} tab="about-you" navigate={navigate} locale={locale} />;
+function FactoryIndexRedirect({ navigate }) {
+  useEffect(() => { navigate(`${ROOT}/products`); }, [navigate]);
+  return null;
 }
 
 function CandidatePage({ token, request, navigate, productId, candidateId, t, locale }) {
@@ -639,7 +635,7 @@ function localizedRouteTitle(route, t) {
   if (route.kind === "home") return t("creatorHome");
   if (route.kind === "products") return t("products");
   if (route.kind === "product-create") return t("createProduct");
-  if (route.kind === "factory-agents") return "Factory";
+  if (route.kind === "factory-agents" || route.kind === "factory-index") return "Factory";
   if (route.kind === "factory") return route.runId ? t("factoryRun") : t("creatorFactory");
   if (route.kind === "candidate") return t("candidateReview");
   if (route.kind === "preview") return t("storefrontPreview");
