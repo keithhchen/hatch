@@ -154,7 +154,7 @@ function CreatorRoute({ route, token, request, navigate, profile, locale, t, reg
   if (typeof request !== "function") {
     return <RouteProblem title={t("creatorPortalUnavailable")} body={t("creatorPortalUnavailableBody")} />;
   }
-  if (route.kind === "factory-agents") return <FactoryAgents key={profile?.id} creatorId={profile?.id} />;
+  if (route.kind === "factory-agents") return <FactoryAgents key={profile?.id} creatorId={profile?.id} locale={locale} />;
   if (route.kind === "home") return <CreatorHome token={token} request={request} navigate={navigate} profile={profile} t={t} locale={locale} />;
   if (route.kind === "products") return <ProductsPage token={token} request={request} navigate={navigate} t={t} />;
   if (route.kind === "product-create") return <CreatorProductFiles token={token} navigate={navigate} locale={locale} />;
