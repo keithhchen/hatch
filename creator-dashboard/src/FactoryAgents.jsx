@@ -1,6 +1,7 @@
 import { dashboardRequest } from "./data.js";
 import { chatEntries } from "./factoryMessages.js";
 import { subscribeFactoryEvents } from "./factoryEvents.js";
+import { FactoryVoicePlayer } from "./factoryVoicePlayer.js";
 import React, { useEffect, useRef, useState } from 'react';
 import { Button } from '@hatch/ui';
 import ReactMarkdown from 'react-markdown';
@@ -8,8 +9,8 @@ import remarkGfm from 'remark-gfm';
 import './factoryAgents.css';
 
 const ROLES = [
-  ['voice', 'Voice', '通过对话理解你的判断', 'CREATOR_PERSONA.md'],
   ['research', 'Research', '追踪来源，理解判断', 'RESEARCH.md'],
+  ['voice', 'Voice', '通过对话理解你的判断', 'CREATOR_PERSONA.md'],
   ['generation', 'Agent Generation', '把方法写成可执行定义', 'SYSTEM.md · CORPUS.md'],
   ['case-generation', 'Case Generation', '带来一个真实的客户情境', 'CASE.md · RUBRIC.md'],
   ['evaluator', 'Evaluator', '运行、检查、逐行改进', 'RESULT.md · EVALUATION.md'],
@@ -35,9 +36,9 @@ function Markdown({ children, filePath = 'output/chat.md', files = [], onOpenFil
 }
 function ErrorNotice({ error }) { return error ? <p className="error" role="alert">{error}</p> : null; }
 export function FactoryAgents({ creatorId }) {
-  const [role, setRole] = useState('voice');
+  const [role, setRole] = useState('research');
   const [sessions, setSessions] = useState([]);
-  const [selected, setSelected] = useState(() => sessionStorage.getItem(`factory-selection:${creatorId}:voice`) || null);
+  const [selected, setSelected] = useState(() => sessionStorage.getItem(`factory-selection:${creatorId}:research`) || null);
   const [config, setConfig] = useState(null);
   const [error, setError] = useState('');
   const refresh = () => api('/v1/creator/factory-agents/sessions').then(v => setSessions(v.sessions)).catch(e => setError(e.message));
@@ -64,6 +65,7 @@ function Workspace({ id, sessions, config, onChanged }) {
   const [prompt, setPrompt] = useState(null);
   const [busy, setBusy] = useState(false);
   const [pane, setPane] = useState('chat');
+  const [speaking, setSpeaking] = useState(null);
   const openFile = path => { setFile(path); setPane('files'); };
   const addToChat = (path, quote) => {
     const reference = `文件：${path}${quote ? `\n\n${quote.split('\n').map(line => `> ${line}`).join('\n')}` : ''}`;
@@ -80,7 +82,8 @@ function Workspace({ id, sessions, config, onChanged }) {
   useEffect(() => { sessionStorage.setItem(`factory-draft:${id}`, draft); }, [id, draft]);
   useEffect(() => { if (stick.current && chat.current) chat.current.scrollTop = chat.current.scrollHeight; }, [stream, s?.messages.length]);
   const perform = async fn => { setError(''); setBusy(true); try { await fn(); await refresh(); onChanged(); } catch (e) { setError(e.message); } finally { setBusy(false); } };
-  const submit = e => { e.preventDefault(); const content = draft; perform(async () => { await api(endpoint(id, 'message'), { method: 'POST', body: { content } }); setDraft(''); stick.current = true; setActivity('正在思考'); }); };
+  const interruptVoice = () => voiceHandler.current({ type: 'voice.interrupt' });
+  const submit = e => { e.preventDefault(); if (!draft.trim() || running) return; interruptVoice(); const content = draft; perform(async () => { await api(endpoint(id, 'message'), { method: 'POST', body: { content } }); setDraft(''); stick.current = true; setActivity('正在思考'); }); };
   const upload = files => perform(async () => { for (const f of files) { if (f.size > 20 * 1024 * 1024) throw new Error(`${f.name} 超过 20 MiB`); const bytes = new Uint8Array(await f.arrayBuffer()); let text = ''; for (let i = 0; i < bytes.length; i += 8192) text += String.fromCharCode(...bytes.subarray(i, i + 8192)); await api(endpoint(id, 'files'), { method: 'POST', body: { path: `input/${f.name}`, base64: btoa(text), mimeType: f.type || undefined } }); } });
   if (!s) return <section className="welcome">正在读取工作区…<ErrorNotice error={error}/></section>;
   const running = s.status === 'running';
@@ -88,25 +91,29 @@ function Workspace({ id, sessions, config, onChanged }) {
     <Binding s={s} config={config} perform={perform}/><div className="progress-row"><span>任务完成度</span><strong>{s.progress.status === 'ready' ? `${s.progress.percentage}%` : '待报告'}</strong><progress max="100" value={s.progress.percentage ?? 0} aria-label="任务完成度"/>{s.progress.status !== 'ready' && s.progress.percentage !== null && <small>上轮 {s.progress.percentage}%</small>}</div>
     <div className="chat-log" ref={chat} onScroll={() => { const e = chat.current; stick.current = e.scrollHeight - e.scrollTop - e.clientHeight < 80; }}>
     {!s.messages.length && <div className="chat-empty"><h2>开始聊天</h2></div>}
-    {chatEntries(s.messages).map(entry => entry.type === 'tool' ? <ToolMessage key={entry.key} call={entry.call} result={entry.result} running={running && entry.isCurrentTurn}/> : <Message key={entry.key} message={entry.message} files={s.files} onOpenFile={openFile}/>)}{stream && <article className="message assistant"><span className="message-role">Agent</span><Markdown files={s.files} onOpenFile={openFile}>{stream}</Markdown></article>}{running && <p className="activity" role="status">{activity || (s.activeTool ? `正在调用 ${s.activeTool}` : '正在工作')}</p>}
-    </div><ErrorNotice error={error || s.error}/>{s.role === 'voice' && <VoiceControls id={id} enabled={config?.services.voice} handler={voiceHandler} onError={setError}/>}<form className="composer" onSubmit={submit}><textarea ref={composer} aria-label="给 Agent 的消息" placeholder="说明目标，或继续提出修改意见…" value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !running && draft.trim()) submit(e); }}/><div><small>⌘ / Ctrl + Enter 发送</small>{running ? <Button type="button" variant="secondary" onClick={() => perform(() => api(endpoint(id, 'stop'), { method: 'POST', body: {} }))}>停止</Button> : <Button disabled={busy || !draft.trim() || !config?.services.model}>发送</Button>}</div></form></section>
+    {chatEntries(s.messages).map(entry => entry.type === 'tool' ? <ToolMessage key={entry.key} call={entry.call} result={entry.result} running={running && entry.isCurrentTurn}/> : <Message key={entry.key} message={entry.message} files={s.files} onOpenFile={openFile} speaking={speaking}/>)}{stream && <article className="message assistant"><span className="message-role">Agent</span><SpokenReply text={stream} speaking={speaking} files={s.files} onOpenFile={openFile}/></article>}{running && <p className="activity" role="status">{activity || (s.activeTool ? `正在调用 ${s.activeTool}` : '正在工作')}</p>}
+    </div><ErrorNotice error={error || s.error}/>{s.role === 'voice' && <VoiceControls id={id} enabled={config?.services.voice} handler={voiceHandler} onSpeaking={setSpeaking} onError={setError}/>}<form className="composer" onSubmit={submit}><textarea ref={composer} aria-label="给 Agent 的消息" placeholder="说明目标，或继续提出修改意见…" value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit(e); } }}/><div>{running ? <Button type="button" variant="secondary" onClick={() => { interruptVoice(); perform(() => api(endpoint(id, 'stop'), { method: 'POST', body: {} })); }}>停止</Button> : <Button disabled={busy || !draft.trim() || !config?.services.model}>发送</Button>}</div></form></section>
     <section className="files-panel" data-active={pane === 'files'}><div className="section-heading"><h2>文件</h2><span className="muted">{s.files.length} 份文件</span></div><div className="file-trays"><div className="file-tray" onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); if (!running && e.dataTransfer.files.length) upload([...e.dataTransfer.files]); }}><div className="section-heading"><strong>附件</strong><label className={`upload ${running ? 'disabled' : ''}`}>＋ 添加文件<input aria-label="上传输入文件" type="file" multiple disabled={running || busy} onChange={e => { upload([...e.target.files]); e.target.value = ''; }}/></label></div>{s.files.filter(f => f.path.startsWith('input/')).map(f => <div className="file-row" key={f.path}><button className="file-link" onClick={() => { setFile(f.path); setPane('files'); }} title={f.path}>{f.path.slice(6)}</button><button className="remove" aria-label={`移除 ${f.path}`} disabled={running} onClick={() => perform(() => api(endpoint(id, 'files'), { method: 'DELETE', body: { path: f.path } }))}>×</button></div>)}{!s.files.some(f => f.path.startsWith('input/')) && <p className="empty-tray">拖入文件</p>}</div><div className="file-tray"><div className="section-heading"><strong>输出</strong></div>{s.files.filter(f => f.path.startsWith('output/')).map(f => <div className="file-row" key={f.path}><input aria-label={`选择 ${f.path}`} type="checkbox" checked={selectedOutputs.includes(f.path)} onChange={e => setSelectedOutputs(v => e.target.checked ? [...v, f.path] : v.filter(p => p !== f.path))}/><button className="file-link" onClick={() => { setFile(f.path); setPane('files'); }} title={f.path}>{f.path.slice(7)}{f.readonly ? ' ◦' : ''}</button></div>)}{!s.files.some(f => f.path.startsWith('output/')) && <p className="empty-tray">暂无文件</p>}</div></div>
     <div className="handoff"><select aria-label="接收输出的工作区" value={destination} onChange={e => setDestination(e.target.value)}><option value="">发送到聊天…</option>{sessions.filter(v => v.id !== id && v.status !== 'running').map(v => <option key={v.id} value={v.id}>{v.title}</option>)}</select><Button variant="secondary" size="compact" disabled={busy || !destination || !selectedOutputs.length} onClick={() => perform(async () => { const files = s.files.filter(f => selectedOutputs.includes(f.path)).map(({ path }) => ({ path })); await api(endpoint(destination, 'transfer'), { method: 'POST', body: { fromSessionId: id, files } }); setSelectedOutputs([]); })}>发送 {selectedOutputs.length || ''} 份文件</Button></div>
     {file && s.files.some(f => f.path === file) ? <FileViewer key={file} running={running} id={id} record={s.files.find(f => f.path === file)} comments={s.comments} perform={perform} files={s.files} onOpenFile={openFile} onAddToChat={addToChat} resultPath={s.hatch?.lastRunId ? `output/results/${s.hatch.lastRunId}.md` : undefined}/> : <div className="document-empty"><p>选择文件</p></div>}
     </section>{prompt !== null && <div className="modal-backdrop"><section className="prompt-modal" role="dialog" aria-modal="true" aria-label="System Prompt"><div className="section-heading"><h2>System Prompt</h2><Button variant="secondary" onClick={() => setPrompt(null)}>关闭</Button></div><pre>{prompt}</pre></section></div>}</>;
 }
-function VoiceControls({ id, enabled, handler, onError }) {
+function VoiceControls({ id, enabled, handler, onSpeaking, onError }) {
   const [active, setActive] = useState(false); const [partial, setPartial] = useState('');
-  const resources = useRef(null); const audioQueue = useRef(Promise.resolve()); const audio = useRef({ chunks: [], mimeType: 'audio/mpeg' });
+  const resources = useRef(null); const audioQueue = useRef(Promise.resolve()); const player = useRef(null);
+  if (!player.current) player.current = new FactoryVoicePlayer(onSpeaking, onError);
   useEffect(() => { handler.current = event => {
+    if (event.type === 'voice.interrupt' || event.type === 'voice.user_speaking' || event.type === 'voice.transcript.final') player.current.stop();
     if (event.type === 'voice.transcript.partial') setPartial(event.text || '');
     if (event.type === 'voice.transcript.final') setPartial('');
-    if (event.type === 'voice.audio.start') audio.current = { chunks: [], mimeType: event.mimeType || 'audio/mpeg' };
-    if (event.type === 'voice.audio.chunk') audio.current.chunks.push(Uint8Array.from(atob(event.audio), c => c.charCodeAt(0)));
-    if (event.type === 'voice.audio.end') { const url = URL.createObjectURL(new Blob(audio.current.chunks, { type: audio.current.mimeType })); const player = new Audio(url); player.addEventListener('ended', () => URL.revokeObjectURL(url), { once: true }); void player.play().catch(onError); }
+    if (event.type === 'voice.audio.start') player.current.start(event);
+    if (event.type === 'voice.speech.start') player.current.registerSpeech(event);
+    if (event.type === 'voice.speech.end') player.current.endSpeech(event);
+    if (event.type === 'voice.audio.chunk') player.current.chunk(event);
+    if (event.type === 'voice.audio.end') player.current.end();
     if (event.type === 'voice.error') onError(event.message);
-  }; return () => { handler.current = () => {}; }; }, [handler, onError]);
-  const stop = async () => { const current = resources.current; resources.current = null; current?.processor.disconnect(); current?.source.disconnect(); current?.silence.disconnect(); current?.stream.getTracks().forEach(track => track.stop()); void current?.context.close(); setActive(false); setPartial(''); await api(endpoint(id, 'voice/stop'), { method: 'POST', body: {} }).catch(error => onError(error.message)); };
+  }; return () => { handler.current = () => {}; player.current.stop(); }; }, [handler, onError, onSpeaking]);
+  const stop = async () => { player.current.stop(); const current = resources.current; resources.current = null; current?.processor.disconnect(); current?.source.disconnect(); current?.silence.disconnect(); current?.stream.getTracks().forEach(track => track.stop()); void current?.context.close(); setActive(false); setPartial(''); await api(endpoint(id, 'voice/stop'), { method: 'POST', body: {} }).catch(error => onError(error.message)); };
   const start = async () => { try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
     const context = new AudioContext({ sampleRate: 16000 }); await context.resume(); const source = context.createMediaStreamSource(stream); const processor = context.createScriptProcessor(4096, 1, 1); const silence = context.createGain(); silence.gain.value = 0;
@@ -116,10 +123,16 @@ function VoiceControls({ id, enabled, handler, onError }) {
   useEffect(() => () => { void stop(); }, [id]);
   return <div className="voice-controls"><Button type="button" variant={active ? 'secondary' : 'primary'} disabled={!enabled} onClick={active ? stop : start}>{active ? '结束语音' : '开始语音'}</Button><span>{partial || (enabled ? (active ? '正在听…' : '') : '语音服务暂不可用')}</span></div>;
 }
-function Message({ message: m, files, onOpenFile }) {
+function voiceText(text) { return String(text).replace(/```[\s\S]*?```/g, ' ').replace(/`[^`]*`/g, ' ').replace(/!\[[^\]]*\]\([^)]*\)/g, ' ').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/^\s*#{1,6}\s+/gm, '').replace(/^\s*(?:[-*+] |\d+\. )/gm, '').replace(/[*_~]/g, '').replace(/\s+/g, ' ').trim(); }
+function SpokenReply({ text, speaking, files, onOpenFile }) {
+  const display = voiceText(text); const needle = voiceText(speaking?.text || ''); const index = needle ? display.indexOf(needle) : -1;
+  if (index < 0) return <Markdown files={files} onOpenFile={onOpenFile}>{text}</Markdown>;
+  return <div className="markdown spoken-reply"><span>{display.slice(0, index)}</span><mark>{display.slice(index, index + needle.length)}</mark><span>{display.slice(index + needle.length)}</span></div>;
+}
+function Message({ message: m, files, onOpenFile, speaking }) {
   const text = typeof m.content === 'string' ? m.content : m.content?.filter(c => c.type === 'text').map(c => c.text).join('\n');
   if (!text) return null;
-  return <article className={`message ${m.role}`}><span className="message-role">{m.role === 'user' ? '你' : 'Agent'}</span><Markdown files={files} onOpenFile={onOpenFile}>{text}</Markdown></article>;
+  return <article className={`message ${m.role}`}><span className="message-role">{m.role === 'user' ? '你' : 'Agent'}</span>{m.role === 'assistant' ? <SpokenReply text={text} speaking={speaking} files={files} onOpenFile={onOpenFile}/> : <Markdown files={files} onOpenFile={onOpenFile}>{text}</Markdown>}</article>;
 }
 function ToolMessage({ call, result, running }) {
   const [open, setOpen] = useState(false);
@@ -178,4 +191,3 @@ function FileViewer({ running, id, record, comments, perform, files, onOpenFile,
     <div className="document-content">{file.content === null ? <p>请下载查看此文件。</p> : mode === 'read' ? <Markdown filePath={record.path} files={files} onOpenFile={onOpenFile}>{file.content}</Markdown> : mode === 'edit' ? <><textarea className="editor" aria-label="Markdown 编辑器" value={edit} onChange={e => setEdit(e.target.value)}/>{(record.readonly || record.path.startsWith('input/')) && <input aria-label="修订副本文件名" placeholder="建议修订.md" value={copyName} onChange={e => setCopyName(e.target.value)}/>}<div className="edit-actions"><Button size="compact" disabled={running} onClick={save}>{running ? '停止后保存' : '保存'}</Button><Button size="compact" variant="secondary" onClick={() => { setEdit(file.content); setMode('read'); }}>放弃编辑</Button></div></> : <><p className="muted">点击一行选择；按住 Shift 点击另一行，选择多行。</p><div className="source-lines">{rows.map(r => <button key={r.number} className={selection && r.start >= selection.start && r.end <= selection.end ? 'line selected-line' : 'line'} onClick={e => setSelection(e.shiftKey && selection ? { start: Math.min(selection.start, r.start), end: Math.max(selection.end, r.end) } : { start: r.start, end: r.end })}><span className="line-number">{r.number}</span><span>{r.text.replace(/\n$/, '') || ' '}</span></button>)}</div>{selection && <form className="comment-form" onSubmit={e => { e.preventDefault(); perform(async () => { await api(endpoint(id, 'comments'), { method: 'POST', body: { path: record.path, ...selection, quote: file.content.slice(selection.start, selection.end), text: comment, ...(replacement ? { replacement } : {}) } }); setComment(''); setReplacement(''); setSelection(null); }); }}><blockquote>{file.content.slice(selection.start, selection.end)}</blockquote><textarea aria-label="批注意见" placeholder="这几行哪里需要改进？" value={comment} onChange={e => setComment(e.target.value)} required/><textarea aria-label="建议替换文本" placeholder="建议替换文本（可选）" value={replacement} onChange={e => setReplacement(e.target.value)}/><Button size="compact" disabled={!comment.trim()}>保存批注</Button></form>}</>}
     {related.length > 0 && <section className="comments"><div className="section-heading"><h3>批注 · {related.length}</h3><Button size="compact" variant="secondary" onClick={() => perform(() => api(endpoint(id, 'comments/export'), { method: 'POST', body: {} }))}>导出 REVIEW.md</Button></div>{related.map(c => <article key={c.id}><blockquote>{c.quote}</blockquote><p>{c.text}</p>{c.replacement && <pre>{c.replacement}</pre>}</article>)}</section>}</div></div>;
 }
-

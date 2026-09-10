@@ -4,7 +4,7 @@ import path from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { atomicWrite } from "./files.js";
 
-export const ROLES = ["voice", "research", "generation", "case-generation", "evaluator"] as const;
+export const ROLES = ["research", "voice", "generation", "case-generation", "evaluator"] as const;
 export type Role = typeof ROLES[number];
 export type FileRecord = { path: string; bytes: number; mimeType: string; origin?: { sessionId: string; path: string }; readonly?: boolean };
 export type Comment = { id: string; path: string; start: number; end: number; quote: string; text: string; replacement?: string; createdAt: string };
