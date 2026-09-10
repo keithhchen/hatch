@@ -67,7 +67,7 @@
   font-size: var(--hatch-type-title);
   text-decoration: none;
 }
-.buyer-v2__brand .hatch-brand__wordmark { font-size: var(--hatch-type-title); letter-spacing: var(--hatch-display-tracking); line-height: var(--hatch-display-leading, .86); }
+.buyer-v2__brand .hatch-brand__wordmark { font-size: var(--hatch-type-title); }
 .buyer-v2__brand--inverse { color: var(--buyer-inverse-text); }
 .buyer-v2__nav { display: flex; min-width: 0; align-items: center; justify-content: center; gap: 4px; }
 .buyer-v2__mobile-nav { display: none; }
