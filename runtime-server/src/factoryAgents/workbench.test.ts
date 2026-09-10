@@ -169,7 +169,7 @@ test("model readiness follows the selected provider, not the presence of a Kimi 
       [{ HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash", LLM_API_KEY: "unit-test-key" }, false],
       [{ HATCH_FACTORY_LLM_PROFILE: "kimi-k2.6", LLM_API_KEY: "unit-test-key" }, true],
     ] as const) {
-      const app = await createWorkbenchServer({ root, env });
+      const app = await createWorkbenchServer({ root, scope: { creatorId: "11111111-1111-4111-8111-111111111111", productId: "22222222-2222-4222-8222-222222222222" }, env });
       await new Promise<void>(resolve => app.server.listen(0, "127.0.0.1", resolve));
       try {
         const address = app.server.address(); assert.ok(address && typeof address !== "string");

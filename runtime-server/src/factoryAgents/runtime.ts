@@ -61,8 +61,8 @@ export class WorkbenchRuntime {
     try {
       const s = await this.store.get(id);
       system = await this.prompt(s.role);
-      if (s.role === "generation") system += `\n宿主提供的目标 Runtime 工具：内建 hatch.web_search；有 Knowledge 时启用 hatch.file_search。额外声明：${this.env.HATCH_FACTORY_TARGET_TOOLS_JSON ?? "[]"}。外部连接的实际可用性由现有 Registry/Runtime 验证。\n当前 Product 绑定：${JSON.stringify(s.generation ?? null)}。`;
-      if (s.role === "evaluator") system += `\n用户选择的真实 Hatch 目标及 Brief 字段：${JSON.stringify(s.target ?? null)}。启动时如需 brief_answers，从案例中选择客户可见的信息作答；不能泄露评分标准。`;
+      if (s.role === "generation") system += `\n宿主提供的目标 Runtime 工具：内建 hatch.web_search；有 Knowledge 时启用 hatch.file_search。额外声明：${this.env.HATCH_FACTORY_TARGET_TOOLS_JSON ?? "[]"}。外部连接的实际可用性由现有 Registry/Runtime 验证。当前 Product 已由宿主固定；corpus_upload 会发布到它，不要查找、选择或创建 Product。`;
+      if (s.role === "evaluator") system += `\n当前 Product 已由宿主固定；hatch_tool 只会运行它，不要查找或选择 Product。启动时如需 brief_answers，从案例中选择客户可见的信息作答；不能泄露评分标准。当前 Brief 字段：${JSON.stringify(this.store.scope?.briefSpec ?? null)}。`;
       const changed = () => this.emit(id, "files");
       const tools = [ this.todoTool(id), ...fileTools(this.store, id, { changed }), ...(["research", "voice"].includes(s.role) ? webTools(this.store, id, changed, this.env) : []), ...(await this.options.extraTools?.(s, controller.signal, changed) ?? []) ];
       const messageCount = s.messages.length;

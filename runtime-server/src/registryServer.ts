@@ -319,11 +319,15 @@ async function route(
     return;
   }
 
-  if (url.pathname.startsWith("/v1/creator/factory-agents/")) {
+  const factoryAgentsMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/factory-agents(?:\/|$)/);
+  if (factoryAgentsMatch) {
     const account = await authenticate(request, response, context, "creator");
     if (account === SESSION_QUERY_REJECTED) return;
     if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
-    await context.factoryAgents.handle(account.id, bearer(request)!, request, response);
+    const productId = decodeURIComponent(factoryAgentsMatch[1]!);
+    const product = await productForCreator(context, account.id, productId);
+    if (!product) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
+    await context.factoryAgents.handle({ creatorId: account.id, productId, briefSpec: product.brief_spec }, bearer(request)!, request, response);
     return;
   }
 

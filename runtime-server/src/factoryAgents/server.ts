@@ -1,22 +1,20 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
 import { z } from "zod";
-import { WorkbenchStore, ROLES, type Session } from "./store.js";
+import { WorkbenchStore, ROLES, type FactoryProductScope, type Session } from "./store.js";
 import { WorkbenchRuntime, safeError, type WorkbenchRuntimeOptions } from "./runtime.js";
 import { hatchTool } from "./hatchTool.js";
 import { corpusTools } from "./corpusTools.js";
-import { evaluationTargets, resolveEvaluationTarget } from "./targets.js";
 import { resolveFactoryLlmProfile } from "../llmProfiles.js";
 import { VoiceSession, type VoiceServerEvent } from "./voice.js";
 
-const targetSchema = z.object({ entitlementId: z.string().uuid().optional(), productId: z.string().uuid(), briefAnswers: z.array(z.object({ field_id: z.string(), value: z.string() }).strict()).optional() }).strict();
 export function publicSession(s: Session) { const { context, ...publicData } = s; return publicData; }
 
-export async function createFactoryHandler(options: { root: string; env?: NodeJS.ProcessEnv; runtime?: WorkbenchRuntimeOptions }) {
+export async function createFactoryHandler(options: { root: string; scope: FactoryProductScope; env?: NodeJS.ProcessEnv; runtime?: WorkbenchRuntimeOptions }) {
   const env: NodeJS.ProcessEnv = { HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash", ...(options.env ?? process.env) };
-  const store = new WorkbenchStore(options.root);
+  const store = new WorkbenchStore(options.root, options.scope);
   await store.recover();
-  const runtime = new WorkbenchRuntime(store, { env, ...options.runtime, extraTools: options.runtime?.extraTools ?? (async (s, _signal, changed) => s.role === "evaluator" ? [hatchTool(store, s.id, changed, env)] : s.role === "generation" ? corpusTools(store, s.id, changed, env) : []) });
+  const runtime = new WorkbenchRuntime(store, { env, ...options.runtime, extraTools: options.runtime?.extraTools ?? (async (s, _signal, changed) => s.role === "evaluator" ? [hatchTool(store, s.id, changed, options.scope, env)] : s.role === "generation" ? corpusTools(store, s.id, changed, options.scope, env) : []) });
   const streams = new Set<ServerResponse>();
   const voices = new Map<string, VoiceSession>();
   const voiceFor = (id: string) => {
@@ -61,9 +59,13 @@ export async function createFactoryHandler(options: { root: string; env?: NodeJS
       }
       if (url.pathname === "/api/config" && req.method === "GET") return json(res, 200, { roles: ROLES, runtimeUrl: env.HATCH_FACTORY_RUNTIME_URL ?? "", services: { model: Boolean(env[resolveFactoryLlmProfile(env).apiKeyEnv]?.trim()), search: Boolean(env.TAVILY_API_KEY), scrape: Boolean(env.HATCH_FACTORY_SCRAPE_PROVIDER === "firecrawl" ? env.FIRECRAWL_API_KEY : env.TAVILY_API_KEY), hatch: Boolean(env.HATCH_FACTORY_RUNTIME_URL && (env.HATCH_FACTORY_CREATOR_TOKEN || env.HATCH_FACTORY_AUTH_TOKEN)), corpus: Boolean(env.HATCH_FACTORY_REGISTRY_URL && env.HATCH_FACTORY_CREATOR_TOKEN), voice: Boolean(env.ELEVENLABS_API_KEY?.trim() && env.ELEVENLABS_VOICE_ID?.trim()) } });
 
-      if (url.pathname === "/api/evaluation-targets" && req.method === "GET") return json(res, 200, await evaluationTargets(store, env));
       if (url.pathname === "/api/sessions" && req.method === "GET") return json(res, 200, { sessions: (await store.list()).map(s => ({ ...publicSession(s), messages: undefined })) });
-      if (url.pathname === "/api/sessions" && req.method === "POST") { const b = z.object({ role: z.enum(ROLES), title: z.string().max(200).optional() }).parse(await body(req)); const existing = (await store.list()).find(session => session.role === b.role); return json(res, existing ? 200 : 201, publicSession(existing ?? await store.create(b.role, b.title))); }
+      if (url.pathname === "/api/sessions" && req.method === "POST") {
+        const b = z.object({ role: z.enum(ROLES), title: z.string().max(200).optional() }).parse(await body(req));
+        const existing = (await store.list()).find(session => session.role === b.role);
+        const session = existing ?? await store.create(b.role, b.title);
+        return json(res, existing ? 200 : 201, publicSession(await store.get(session.id)));
+      }
       const match = url.pathname.match(/^\/api\/sessions\/([0-9a-f-]{36})(?:\/(.*))?$/);
       if (match) {
         const id = match[1]!; const action = match[2] ?? "";
@@ -74,12 +76,6 @@ export async function createFactoryHandler(options: { root: string; env?: NodeJS
         if (action === "voice/start" && req.method === "POST") { const s = await store.get(id); if (s.role !== "voice") throw new Error("Voice is only available in the Voice Agent"); await body(req); await voiceFor(id).start(id); return json(res, 200, { started: true }); }
         if (action === "voice/audio" && req.method === "POST") { const b = z.object({ base64: z.string().min(1) }).parse(await body(req)); voiceFor(id).audio(Buffer.from(b.base64, "base64")); return json(res, 202, { accepted: true }); }
         if (action === "voice/stop" && req.method === "POST") { await body(req); await voices.get(id)?.stop(); voices.delete(id); return json(res, 200, { stopped: true }); }
-        if (action === "target" && req.method === "PUT") {
-          const b = targetSchema.parse(await body(req));
-          const selectedTarget = await resolveEvaluationTarget(store, env, b);
-          await store.update(id, s => { if (s.role !== "evaluator" || s.status === "running" || s.hatch) throw new Error("Target can only be set on an idle evaluation before first execution"); s.target = selectedTarget; });
-          return json(res, 200, { saved: true });
-        }
         if (action === "files" && req.method === "POST") {
           const b = z.object({ path: z.string(), base64: z.string(), mimeType: z.string().optional() }).parse(await body(req));
           const bytes = Buffer.from(b.base64, "base64");

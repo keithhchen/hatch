@@ -9,16 +9,15 @@ export type Role = typeof ROLES[number];
 export type Todo = { title: string; status: "pending" | "in_progress" | "completed" };
 export type FileRecord = { path: string; bytes: number; mimeType: string; origin?: { sessionId: string; path: string }; readonly?: boolean };
 export type Comment = { id: string; path: string; start: number; end: number; quote: string; text: string; replacement?: string; createdAt: string };
-export type TargetBinding = { runtimeUrl: string; entitlementId?: string; creatorId: string; productId: string; briefSpec?: unknown; briefAnswers?: Array<{ field_id: string; value: string }> };
+export type FactoryProductScope = { creatorId: string; productId: string; briefSpec?: unknown };
 export type Session = {
   id: string; role: Role; title: string; createdAt: string; updatedAt: string;
   revision: number; turn: number; status: "idle" | "running" | "completed" | "failed" | "interrupted";
   error?: string; activeTool?: string;
   files: FileRecord[]; comments: Comment[];
   messages: AgentMessage[]; context: AgentMessage[]; scribeContext?: AgentMessage[]; todos: Todo[];
-  target?: TargetBinding;
+  product?: Pick<FactoryProductScope, "creatorId" | "productId">;
   hatch?: { conversationId: string; lastRunId?: string; pending?: boolean };
-  generation?: { creatorId: string; productId: string };
   knowledge?: Array<{ path: string; id: string; source: string; title: string; productId: string; sha256: string }>;
   corpus?: { product_id: string; corpus_ref: string; corpus_digest: string; release_digest: string; status: "published"; published_at: string; files: string[] };
 };
@@ -32,7 +31,7 @@ export function filePath(value: string): string {
 /** Each chat owns ordinary files; completed Runtime results retain their own paths. */
 export class WorkbenchStore {
   private queues = new Map<string, Promise<unknown>>();
-  constructor(readonly root: string) {}
+  constructor(readonly root: string, readonly scope?: FactoryProductScope) {}
   private directory(id: string): string {
     if (!/^[0-9a-f-]{36}$/.test(id)) throw new Error("Invalid session ID");
     return path.join(this.root, id);
@@ -49,7 +48,7 @@ export class WorkbenchStore {
     const id = randomUUID();
     await mkdir(this.directory(id), { recursive: true, mode: 0o700 });
     const now = new Date().toISOString();
-    const session: Session = { id, role, title: title?.trim() || role, createdAt: now, updatedAt: now, revision: 0, turn: 0, status: "idle", files: [], comments: [], messages: [], context: [], todos: [] };
+    const session: Session = { id, role, title: title?.trim() || role, createdAt: now, updatedAt: now, revision: 0, turn: 0, status: "idle", files: [], comments: [], messages: [], context: [], todos: [], ...(this.scope ? { product: { creatorId: this.scope.creatorId, productId: this.scope.productId } } : {}) };
     await this.save(session);
     if (role === "voice") {
       await this.put(id, "output/CREATOR_PERSONA.md", Buffer.from("# CREATOR_PERSONA\n\n"), { actor: "host" });
@@ -57,7 +56,7 @@ export class WorkbenchStore {
     }
     return session;
   }
-  async get(id: string): Promise<Session> { const session = JSON.parse(await readFile(path.join(this.directory(id), "session.json"), "utf8")) as Session & { progress?: unknown }; const todo = await readFile(path.join(this.directory(id), "todo.json"), "utf8").then(JSON.parse).catch(() => ({ todos: [] })); session.todos = Array.isArray(todo.todos) ? todo.todos : []; delete session.progress; return session; }
+  async get(id: string): Promise<Session> { const session = JSON.parse(await readFile(path.join(this.directory(id), "session.json"), "utf8")) as Session & { progress?: unknown }; const todo = await readFile(path.join(this.directory(id), "todo.json"), "utf8").then(JSON.parse).catch(() => ({ todos: [] })); session.todos = Array.isArray(todo.todos) ? todo.todos : []; delete session.progress; if (this.scope && session.product && (session.product.creatorId !== this.scope.creatorId || session.product.productId !== this.scope.productId)) throw new Error("Session belongs to a different Product workspace"); return session; }
   async list(): Promise<Session[]> {
     await mkdir(this.root, { recursive: true, mode: 0o700 });
     const names = (await readdir(this.root)).filter(s => /^[0-9a-f-]{36}$/.test(s));
@@ -134,6 +133,7 @@ export class WorkbenchStore {
   }
   async recover(): Promise<void> {
     for (const s of await this.list()) await this.update(s.id, current => {
+      if (this.scope) current.product = { creatorId: this.scope.creatorId, productId: this.scope.productId };
       // One-time metadata cutover. Current input/output files already exist on disk.
       current.files = current.files.map(f => ({ path: f.path, bytes: f.bytes, mimeType: f.mimeType, ...(f.readonly ? { readonly: true } : {}), ...(f.origin ? { origin: { sessionId: f.origin.sessionId, path: f.origin.path } } : {}) }));
       current.comments = current.comments.map(({ id, path, start, end, quote, text, replacement, createdAt }) => ({ id, path, start, end, quote, text, replacement, createdAt }));
