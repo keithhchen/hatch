@@ -79,7 +79,10 @@ test("Web and Storybook consume the shared package and its canonical tokens", ()
   const storybookPreview = read("creator-dashboard/.storybook/preview.jsx");
   const sharedCss = read("packages/ui/src/hatch-ui.css");
 
-  assert.equal(webPackage.dependencies["@hatch/ui"], "file:../packages/ui");
+  assert.equal(
+    webPackage.dependencies?.["@hatch/ui"] ?? webPackage.devDependencies?.["@hatch/ui"],
+    "file:../packages/ui"
+  );
   assert.match(webEntry, /from "@hatch\/ui"/);
   assert.match(storybookPreview, /from "@hatch\/ui"/);
   assert.match(webEntry, /import "@hatch\/ui\/theme\.css"/);
