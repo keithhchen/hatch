@@ -27,6 +27,7 @@
 
 .login-form{display:grid;gap:16px;padding:20px}.login-form label{display:grid;gap:8px}.login-form input,.login-form select{width:100%;padding:10px;border:1px solid var(--hui-border);border-radius:8px;background:var(--hui-paper);color:inherit}
 .voice-controls{display:flex;align-items:center;gap:12px;padding:10px 20px 0;color:var(--hui-ink-faint)}.voice-controls span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.composer>div{justify-content:flex-end}.spoken-reply mark{background:color-mix(in srgb,var(--hui-accent) 20%,transparent);color:inherit;border-radius:3px;padding:2px 1px;box-decoration-break:clone;-webkit-box-decoration-break:clone}.spoken-reply{white-space:pre-wrap}
 
 height: calc(100dvh - 64px); min-height: 560px; display: flex; flex-direction: column; overflow: hidden;
 }
