@@ -43,3 +43,13 @@ test('Factory uses live dependency state at each interaction boundary', async ()
   assert.match(source, /const targetStage = factorySectionForAgent\(role\)/);
   assert.doesNotMatch(source, /updatedDependencies \|\| entry\.dependencies/);
 });
+
+test('Factory hands selected output files to an available Agent in the same Product', async () => {
+  const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
+  assert.match(source, /candidate\.role !== s\.role && candidate\.state !== 'locked'/);
+  assert.match(source, /session\.role === candidate\.role\)\?\.status !== 'running'/);
+  assert.match(source, /if \(!target\) target = await api\(`\$\{root\}\/sessions`, \{ method: 'POST', body: \{ role: destinationRole \} \}\)/);
+  assert.match(source, /endpoint\(root, target\.id, 'transfer'\)/);
+  assert.match(source, /body: \{ fromSessionId: id, files: selectedOutputs\.map\(path => \(\{ path \}\)\) \}/);
+  assert.match(source, /path\.startsWith\('output\/'\)/);
+});
