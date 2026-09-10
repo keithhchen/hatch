@@ -25,7 +25,7 @@ import {
 import { AutosaveStatus } from "@hatch/ui/product";
 import { StorefrontDetails } from "./StorefrontDetails.jsx";
 import { creatorOrderQuery } from "./storefrontModel.js";
-import { parseCreatorRoute } from "./creatorRoutes.js";
+import { creatorFactoryPath, parseCreatorRoute } from "./creatorRoutes.js";
 import { createCreatorTranslator } from "./creatorI18n.js";
 import { CreatorProductWorkspace } from "./CreatorProductWorkspace.jsx";
 import { LanguageSwitcher } from "./LanguageSwitcher.jsx";
@@ -143,7 +143,7 @@ function CreatorRoute({ route, token, request, navigate, profile, locale, t, reg
     return <RouteProblem title={t("creatorPortalUnavailable")} body={t("creatorPortalUnavailableBody")} />;
   }
   if (route.kind === "factory-index") return <FactoryIndexRedirect navigate={navigate} />;
-  if (route.kind === "factory-agents") return <FactoryAgents key={route.productId} productId={route.productId} locale={locale} />;
+  if (route.kind === "factory-agents") return <FactoryAgents key={route.productId} productId={route.productId} section={route.factorySection} agent={route.factoryAgent} navigate={navigate} locale={locale} />;
   if (route.kind === "home") return <CreatorHome token={token} request={request} navigate={navigate} profile={profile} t={t} locale={locale} />;
   if (route.kind === "products") return <ProductsPage token={token} request={request} navigate={navigate} t={t} />;
   if (route.kind === "product-create") return <CreatorProductFiles token={token} navigate={navigate} locale={locale} />;
@@ -201,7 +201,7 @@ function ProductsPage({ token, request, navigate, t }) {
         return <>
           <PageHeader eyebrow={t("products")} title={t("productsPageTitle")} body={t("productsPageBody")} action={t("createProduct")} onAction={() => navigate(`${ROOT}/products/new`)} />
           {products.length ? <section className="cpv2-product-grid" aria-label={t("products")}>
-            {products.map((product) => <ProductCard key={idOf(product, "product")} product={product} t={t} onOpen={() => navigate(`${ROOT}/products/${encodeURIComponent(idOf(product, "product"))}/factory`)} />)}
+            {products.map((product) => <ProductCard key={idOf(product, "product")} product={product} t={t} onOpen={() => navigate(creatorFactoryPath(idOf(product, "product")))} />)}
           </section> : <EmptyState title={t("createFirstProduct")} body={t("createFirstProductBody")} action={t("createProduct")} onAction={() => navigate(`${ROOT}/products/new`)} />}
         </>;
       }}

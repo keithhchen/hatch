@@ -13,6 +13,7 @@ import {
   Textarea
 } from "@hatch/ui";
 import { createCreatorTranslator } from "./creatorI18n.js";
+import { creatorFactoryPath } from "./creatorRoutes.js";
 import {
   createProduct,
   getProduct,
@@ -83,7 +84,7 @@ export function CreatorProductFiles({ token, productId, navigate, locale = "en" 
       const created = await createProduct(token, draft);
       const id = created?.product?.id ?? created?.product?.product_id ?? created?.id ?? created?.product_id;
       if (!id) throw new Error(t("productCreatedWithoutId"));
-      navigate(`/studio/products/${encodeURIComponent(id)}/factory`);
+      navigate(creatorFactoryPath(id));
     } catch (nextError) { setError(nextError.message); }
     finally { setBusy(false); }
   }
