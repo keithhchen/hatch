@@ -6,9 +6,9 @@ import { WorkbenchStore } from "./store.js";
 
 /** Main agents see live outputs and immutable input during a turn. */
 export function fileTools(store: WorkbenchStore, id: string, options: { changed?: () => void } = {}): AgentTool[] {
-  const records = async () => (await store.get(id)).files;
+  const records = async () => store.contextFiles(id);
   const tools: AgentTool[] = [
-    { name: "list", label: "查看文件", description: "List all actual workspace input/output files. Read every input file on the first turn; on later turns read new or changed inputs.", parameters: Type.Object({ directory: Type.Optional(Type.String({ description: "Workspace directory, such as input, output, or input/sources. Omit or use . to list all files." })) }), execute: async (_id, raw) => { const a = raw as { directory?: string }; const directory = a.directory?.replace(/\/+$/, ""); return result((await records()).filter(f => !directory || directory === "." || f.path.startsWith(`${directory}/`)).map(({ path, bytes, mimeType, readonly }) => ({ path, bytes, mimeType, readonly }))); } },
+    { name: "list", label: "查看文件", description: "List this Agent's own input/output files plus live upstream outputs projected under input/<agent>/. Upstream files are read-only and never copied.", parameters: Type.Object({ directory: Type.Optional(Type.String({ description: "Workspace directory such as input/manual, input/research, input/voice, input/evaluator, or output." })) }), execute: async (_id, raw) => { const a = raw as { directory?: string }; const directory = a.directory?.replace(/\/+$/, ""); return result((await records()).filter(f => !directory || directory === "." || f.path.startsWith(`${directory}/`)).map(({ path, bytes, mimeType, readonly, origin }) => ({ path, bytes, mimeType, readonly, source: origin?.path }))); } },
     { name: "read", label: "读取文件", description: "Read a file by character offset. Follow next_offset until null. Original files are unchanged; Office/PDF extraction is explicitly labelled.", parameters: Type.Object({ path: Type.String(), offset: Type.Optional(Type.Integer({ minimum: 0 })), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 24000 })) }), execute: async (_id, raw) => {
       const a = raw as { path: string; offset?: number; limit?: number };
       const record = (await records()).find(f => f.path === a.path);

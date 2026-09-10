@@ -50,7 +50,7 @@ export function corpusTools(store: WorkbenchStore, id: string, changed: () => vo
       }, signal, `factory-${digest(`${id}:${a.path}:${contentHash}`).slice(7)}`));
       if (reply.product_id !== s.generation.productId || reply.sha256.replace(/^sha256:/, "") !== contentHash.slice(7)) throw new Error("Registry upload identity/digest mismatch");
       const entry = { path: a.path, id: reply.id, source: reply.path, title: a.title, productId: reply.product_id, sha256: contentHash };
-      await store.update(id, state => { state.knowledge = [...(state.knowledge ?? []), entry]; state.progress.status = "unscored"; });
+      await store.update(id, state => { state.knowledge = [...(state.knowledge ?? []), entry]; });
       changed();
       return entry;
   };
@@ -127,7 +127,7 @@ export function corpusTools(store: WorkbenchStore, id: string, changed: () => vo
       if (reply.product_id !== binding.productId || reply.corpus_digest !== digest(JSON.stringify(corpus))) throw new Error("Published Product or Corpus digest does not match the uploaded definition");
       const uploadedKnowledge = (await store.get(id)).knowledge ?? [];
       const receipt = { ...reply, creator_id: binding.creatorId, files, knowledge: selections.map(doc => ({ ...uploadedKnowledge.find(k => k.path === doc.path && k.productId === binding.productId)!, status: "indexed" })) };
-      await store.update(id, state => { state.corpus = receipt; state.progress.status = "unscored"; });
+      await store.update(id, state => { state.corpus = receipt; });
       const published = { product_id: reply.product_id, status: reply.status, published_at: reply.published_at, files, knowledge: receipt.knowledge.map(({ path, id, title, status }) => ({ path, id, title, status })) };
       await store.put(id, "output/CORPUS.md", Buffer.from(`# Agent 已发布\n\n\`\`\`json\n${JSON.stringify(published, null, 2)}\n\`\`\`\n`), { actor: "host", readonly: true });
       changed(); return result(published);

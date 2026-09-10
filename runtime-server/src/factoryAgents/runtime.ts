@@ -31,7 +31,9 @@ export class WorkbenchRuntime {
   async prompt(role: Role): Promise<string> {
     const root = new URL("../../prompts/factory-agents/", import.meta.url);
     const own = await readFile(fileURLToPath(new URL(`${role}/SYSTEM.md`, root)), "utf8");
-    return `${own}\n\n${await readFile(fileURLToPath(new URL("COMMON.md", root)), "utf8")}`;
+    const upstream: Partial<Record<Role, Role[]>> = { voice: ["research"], generation: ["research", "voice", "evaluator"], "case-generation": ["research", "voice", "generation"], evaluator: ["generation", "case-generation"] };
+    const folders = ["input/manual", ...(upstream[role] ?? []).map(source => `input/${source}`)];
+    return `${own}\n\n# 本 Agent 的 Input\n\n你有且只有这些输入文件夹：${folders.map(folder => `\`${folder}/\``).join("、")}。\n\`input/manual/\` 是用户手动提供的文件；其余目录是上游 Agent 的实时只读 output projection。使用 list 查看，使用 read 读取。不要要求用户复制或转发上游文件，也不要尝试修改上游目录。\n\n${await readFile(fileURLToPath(new URL("COMMON.md", root)), "utf8")}`;
   }
   async start(id: string, message: string): Promise<void> {
     if (!message.trim() || message.length > 100000) throw new Error("Provide a message of 1–100000 characters");
@@ -41,7 +43,7 @@ export class WorkbenchRuntime {
     this.active.set(id, controller);
     this.runIds.set(id, runId);
     try {
-      await this.store.update(id, s => { if (s.title === s.role) s.title = message.trim().slice(0, 60); s.turn++; s.status = "running"; delete s.error; delete s.activeTool; s.progress.status = "unscored"; });
+      await this.store.update(id, s => { if (s.title === s.role) s.title = message.trim().slice(0, 60); s.turn++; s.status = "running"; delete s.error; delete s.activeTool; });
     } catch (error) { this.active.delete(id); throw error; }
     this.emit(id, "state");
     this.emit(id, "voice.run_started", { runId });
@@ -62,7 +64,7 @@ export class WorkbenchRuntime {
       if (s.role === "generation") system += `\n宿主提供的目标 Runtime 工具：内建 hatch.web_search；有 Knowledge 时启用 hatch.file_search。额外声明：${this.env.HATCH_FACTORY_TARGET_TOOLS_JSON ?? "[]"}。外部连接的实际可用性由现有 Registry/Runtime 验证。\n当前 Product 绑定：${JSON.stringify(s.generation ?? null)}。`;
       if (s.role === "evaluator") system += `\n用户选择的真实 Hatch 目标及 Brief 字段：${JSON.stringify(s.target ?? null)}。启动时如需 brief_answers，从案例中选择客户可见的信息作答；不能泄露评分标准。`;
       const changed = () => this.emit(id, "files");
-      const tools = [ this.progressTool(id, s.turn), ...fileTools(this.store, id, { changed }), ...(["research", "voice"].includes(s.role) ? webTools(this.store, id, changed, this.env) : []), ...(await this.options.extraTools?.(s, controller.signal, changed) ?? []) ];
+      const tools = [ this.todoTool(id), ...fileTools(this.store, id, { changed }), ...(["research", "voice"].includes(s.role) ? webTools(this.store, id, changed, this.env) : []), ...(await this.options.extraTools?.(s, controller.signal, changed) ?? []) ];
       const messageCount = s.messages.length;
       await this.run(id, system, s.context, message, tools, controller);
       if (s.role === "voice" && !controller.signal.aborted) {
@@ -82,14 +84,9 @@ export class WorkbenchRuntime {
       this.emit(id, "state");
     }
   }
-  private progressTool(id: string, turn: number): AgentTool {
-    return { name: "report_progress", label: "报告完成度", description: "Before every final chat response, report task completion as a single integer 0–100 based on actual work. Call after file writes and other actions. 100 means requirements completed, not perfect quality or expert approval. This tool only records progress; its receipt is not user confirmation or permission to begin another task.", parameters: Type.Object({ percentage: Type.Integer({ minimum: 0, maximum: 100 }) }), execute: async (_id, raw) => {
-      const { percentage } = raw as { percentage: number };
-      if (!Number.isInteger(percentage) || percentage < 0 || percentage > 100) throw new Error("percentage must be an integer from 0 to 100");
-      await this.store.update(id, s => { if (s.turn !== turn) throw new Error("Stale turn"); s.progress = { percentage, status: "ready", turn, revision: s.revision }; });
-      this.emit(id, "progress");
-      return result({ percentage, recorded: true });
-    } };
+  private todoTool(id: string): AgentTool {
+    const item = Type.Object({ title: Type.String({ minLength: 1, maxLength: 160 }), status: Type.Union([Type.Literal("pending"), Type.Literal("in_progress"), Type.Literal("completed")]) });
+    return { name: "update_todo", label: "更新待办", description: "Read or replace this Agent's short current todo list. Omit todos to read it; pass the complete list to replace it; pass [] to clear it. Use only for meaningful multi-step work. Keep at most one item in_progress and update it when work actually moves.", parameters: Type.Object({ todos: Type.Optional(Type.Array(item, { maxItems: 12 })) }), execute: async (_id, raw) => { const { todos } = raw as { todos?: Array<{ title: string; status: "pending" | "in_progress" | "completed" }> }; if (todos === undefined) return result({ todos: (await this.store.get(id)).todos }); if (todos.filter(todo => todo.status === "in_progress").length > 1) throw new Error("Only one todo may be in_progress"); if (todos.some(todo => !todo.title.trim())) throw new Error("Todo titles must not be empty"); await this.store.update(id, session => { session.todos = todos.map(todo => ({ ...todo, title: todo.title.trim() })); }); this.emit(id, "todos"); return result({ todos: (await this.store.get(id)).todos, saved: true }); } };
   }
   private async run(id: string, systemPrompt: string, history: AgentMessage[], userText: string, tools: AgentTool[], controller: AbortController, channel: "visible" | "scribe" = "visible"): Promise<AgentMessage[]> {
     const factory = this.options.agentFactory ?? createFactoryPiAgent;
