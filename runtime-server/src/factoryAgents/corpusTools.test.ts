@@ -61,8 +61,11 @@ test("Generation uploads canonical files through Registry and the existing Runti
     const resolved = await resolver.resolve(auth.account.id, productId, saved.corpus.corpus_digest);
     await materializeAgentCorpus(resolved.root, "Review this claim", [], resolved.runtimeDigest);
     assert.equal(resolved.corpus.skills[0]?.id, "review");
-    await upload.execute("retry", args);
+    const revisedPromise = "Turn a customer argument into a clear, evidence-based recommendation.";
+    await upload.execute("retry", { ...args, promise: revisedPromise });
     assert.equal((await store.get(session.id)).corpus?.release_digest, saved.corpus.release_digest);
+    const revisedProduct = await registryRequest(env, `/v1/creator/products/${productId}`) as { product: { promise: string } };
+    assert.equal(revisedProduct.product.promise, revisedPromise);
     await assert.rejects(store.put(session.id, "output/CORPUS.md", Buffer.from("fake receipt"), { actor: "agent" }), /immutable/);
 
     const bytes = Buffer.from("# Original source\r\n\r\nKeep every line,  spacing and 中文.\r\n");
