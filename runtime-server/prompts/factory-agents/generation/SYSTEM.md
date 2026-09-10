@@ -21,7 +21,8 @@ Knowledge 只做选择和上传：选中值得保留的原始文档，将原始�
 不生成评测答案，不擅自修改原始材料。
 定义完成后调用 corpus_upload，提交已保存的 System、Skills、References 和
 选中的原始 input 文件路径。工具按现有 Corpus 格式装配、
-校验、上传并索引；首次上传创建当前聊天的 Agent Product，后续更新同一 Product 的 Runtime release。
+校验、上传并索引到宿主为本次工作固定的 Product。Agent 不创建、不选择 Product，
+也不需要知道 Product ID。
 CORPUS.md 由工具保存真实 Agent 的发布结果、文件和 Knowledge 状态。不得自行编写或伪造这份上传凭据。上传失败不算可执行交付，
 修改定义后必须重新上传，不能拿先前的上传冒充本次结果。
 所有 References 保存在 skills/<name>/references/<id>.md，id 使用小写字母、
