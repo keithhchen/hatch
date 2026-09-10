@@ -1,4 +1,5 @@
 import { WebSocket as ElevenWebSocket } from "ws";
+import { createStreamingSttProvider, type StreamingSttProvider } from "./stt.js";
 type RuntimeEvent =
   | { type: "run.started"; agent: "interviewer"; conversationId: string; runId: string }
   | { type: "assistant.delta"; agent: "interviewer"; conversationId: string; runId: string; content: string }
@@ -8,8 +9,8 @@ type RuntimeEvent =
   | { type: "run.interrupted" | "run.failed"; agent: "interviewer"; conversationId: string; runId: string };
 
 export const ELEVEN_VOICE_PROFILE = {
-  id: "eleven-v3-conversational",
-  sttModel: "scribe_v2_realtime",
+  id: "qwen-asr-eleven-v3-conversational",
+  sttModel: "qwen-audio-3.0-asr-flash-streaming",
   ttsModel: "eleven_v3_conversational",
   audioFormat: "mp3_44100_128",
   sttAudioFormat: "pcm_16000"
@@ -38,8 +39,8 @@ type VoiceSessionOptions = {
   onInterrupt: (runId: string) => Promise<void>;
   apiKey?: string;
   voiceId?: string;
-  languageCode?: string;
   profile?: ElevenVoiceProfile;
+  environment?: NodeJS.ProcessEnv;
 };
 
 type SpeechBoundary = {
@@ -84,9 +85,9 @@ export class VoiceSession {
   private readonly emit: VoiceSessionOptions["emit"];
   private readonly onFinalTranscript: VoiceSessionOptions["onFinalTranscript"];
   private readonly onInterrupt: VoiceSessionOptions["onInterrupt"];
-  private readonly languageCode?: string;
+  private readonly environment: NodeJS.ProcessEnv;
   private readonly profile: ElevenVoiceProfile;
-  private stt?: ElevenScribeRealtime;
+  private stt?: StreamingSttProvider;
   private tts?: ElevenTtsSocket;
   private conversationId = "";
   private activeRunId = "";
@@ -110,7 +111,7 @@ export class VoiceSession {
     this.emit = options.emit;
     this.onFinalTranscript = options.onFinalTranscript;
     this.onInterrupt = options.onInterrupt;
-    this.languageCode = options.languageCode;
+    this.environment = options.environment ?? process.env;
     this.profile = options.profile ?? resolveVoiceProfile();
   }
 
@@ -119,9 +120,8 @@ export class VoiceSession {
     if (!this.voiceId) throw new Error("Missing ELEVENLABS_VOICE_ID");
     await this.stop();
     this.conversationId = conversationId;
-    this.stt = new ElevenScribeRealtime({
-      apiKey: this.apiKey,
-      languageCode: this.languageCode,
+    this.stt = createStreamingSttProvider({
+      environment: this.environment,
       onPartial: (text) => void this.handlePartial(text),
       onCommitted: (text) => void this.handleCommitted(text),
       onError: (error) => this.report(error)
@@ -130,7 +130,7 @@ export class VoiceSession {
     this.emit({
       type: "voice.started",
       conversationId,
-      sttModel: this.profile.sttModel,
+      sttModel: this.stt.model,
       ttsModel: this.profile.ttsModel,
       audioFormat: this.profile.audioFormat
     });
@@ -325,75 +325,6 @@ export class VoiceSession {
       ...(this.conversationId ? { conversationId: this.conversationId } : {}),
       message: error instanceof Error ? error.message : String(error)
     });
-  }
-}
-
-class ElevenScribeRealtime {
-  private socket?: ElevenWebSocket;
-  private ready: Promise<void> = Promise.resolve();
-  private cancelled = false;
-
-  constructor(private readonly options: {
-    apiKey: string;
-    languageCode?: string;
-    onPartial: (text: string) => void;
-    onCommitted: (text: string) => void;
-    onError: (error: unknown) => void;
-  }) {}
-
-  start(): Promise<void> {
-    this.cancelled = false;
-    const params = new URLSearchParams({
-      model_id: ELEVEN_VOICE_PROFILE.sttModel,
-      audio_format: ELEVEN_VOICE_PROFILE.sttAudioFormat,
-      commit_strategy: "vad",
-      vad_silence_threshold_secs: "0.8"
-    });
-    if (this.options.languageCode) params.set("language_code", this.options.languageCode);
-    const socket = new ElevenWebSocket(`wss://api.elevenlabs.io/v1/speech-to-text/realtime?${params}`, {
-      headers: { "xi-api-key": this.options.apiKey }
-    });
-    this.socket = socket;
-    this.ready = new Promise<void>((resolve, reject) => {
-      socket.once("open", () => {
-        if (this.cancelled) {
-          socket.close();
-          resolve();
-          return;
-        }
-        resolve();
-      });
-      socket.once("error", (error) => {
-        if (this.cancelled) resolve();
-        else reject(error);
-      });
-    });
-    socket.on("message", (raw) => {
-      if (this.cancelled) return;
-      try {
-        const message = JSON.parse(raw.toString()) as { message_type?: string; text?: string; error?: string };
-        if (message.message_type === "partial_transcript" && message.text) this.options.onPartial(message.text);
-        if (message.message_type === "committed_transcript" && message.text) this.options.onCommitted(message.text);
-        if (message.error) this.options.onError(new Error(message.error));
-      } catch (error) {
-        this.options.onError(error);
-      }
-    });
-    socket.on("error", (error) => {
-      if (!this.cancelled) this.options.onError(error);
-    });
-    return this.ready;
-  }
-
-  sendAudio(chunk: Buffer): void {
-    if (this.cancelled || !this.socket || this.socket.readyState !== ElevenWebSocket.OPEN) return;
-    this.socket.send(JSON.stringify({ message_type: "input_audio_chunk", audio_base_64: chunk.toString("base64") }));
-  }
-
-  close(): void {
-    this.cancelled = true;
-    closeElevenSocket(this.socket);
-    this.socket = undefined;
   }
 }
 
