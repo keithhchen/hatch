@@ -2483,6 +2483,26 @@ async function authenticate(request, registryUrl, expectedRole, fetchImpl, porta
     request.__oauthRequiredScope = requiredScope;
   }
   const webSessionId = requestCookies(request).hatch_web_session;
+  // Web sessions are shared by rolling Dashboard processes through Postgres.
+  // Refresh before authentication so a process never rejects a session that
+  // another process created or renewed after this process started.
+  if (!explicitToken && webSessionId) {
+    try {
+      await portalState?.refresh?.();
+    } catch {
+      return {
+        error: {
+          status: 503,
+          body: {
+            error: {
+              code: "authentication_service_unavailable",
+              message: "Sign-in verification is temporarily unavailable. Please try again."
+            }
+          }
+        }
+      };
+    }
+  }
   const webSession = !explicitToken && webSessionId ? portalState?.getWebSession(webSessionId) : undefined;
   const token = oauthToken?.registryToken
     ?? explicitToken
@@ -2506,8 +2526,21 @@ async function authenticate(request, registryUrl, expectedRole, fetchImpl, porta
     request.__registryToken = token;
     request.__oauthScopes = oauthToken?.scopes;
     return { profile, token };
-  } catch {
-    return { error: { status: 401, body: { error: { code: "unauthorized", message: "Sign in to continue." } } } };
+  } catch (error) {
+    if (error?.status === 401) {
+      return { error: { status: 401, body: { error: { code: "unauthorized", message: "Sign in to continue." } } } };
+    }
+    return {
+      error: {
+        status: 503,
+        body: {
+          error: {
+            code: "authentication_service_unavailable",
+            message: "Sign-in verification is temporarily unavailable. Please try again."
+          }
+        }
+      }
+    };
   }
 }
 
