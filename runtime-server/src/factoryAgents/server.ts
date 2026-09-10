@@ -63,11 +63,11 @@ export async function createFactoryHandler(options: { root: string; env?: NodeJS
 
       if (url.pathname === "/api/evaluation-targets" && req.method === "GET") return json(res, 200, await evaluationTargets(store, env));
       if (url.pathname === "/api/sessions" && req.method === "GET") return json(res, 200, { sessions: (await store.list()).map(s => ({ ...publicSession(s), messages: undefined })) });
-      if (url.pathname === "/api/sessions" && req.method === "POST") { const b = z.object({ role: z.enum(ROLES), title: z.string().max(200).optional() }).parse(await body(req)); return json(res, 201, publicSession(await store.create(b.role, b.title))); }
+      if (url.pathname === "/api/sessions" && req.method === "POST") { const b = z.object({ role: z.enum(ROLES), title: z.string().max(200).optional() }).parse(await body(req)); const existing = (await store.list()).find(session => session.role === b.role); return json(res, existing ? 200 : 201, publicSession(existing ?? await store.create(b.role, b.title))); }
       const match = url.pathname.match(/^\/api\/sessions\/([0-9a-f-]{36})(?:\/(.*))?$/);
       if (match) {
         const id = match[1]!; const action = match[2] ?? "";
-        if (!action && req.method === "GET") return json(res, 200, publicSession(await store.get(id)));
+        if (!action && req.method === "GET") { const session = await store.get(id); return json(res, 200, { ...publicSession(session), files: await store.contextFiles(id) }); }
         if (action === "prompt" && req.method === "GET") return json(res, 200, { content: await runtime.prompt((await store.get(id)).role) });
         if (action === "message" && req.method === "POST") { const b = z.object({ content: z.string().min(1).max(100000) }).parse(await body(req)); await runtime.start(id, b.content); return json(res, 202, { accepted: true }); }
         if (action === "stop" && req.method === "POST") { await body(req); runtime.stop(id); return json(res, 202, { requested: true }); }
@@ -92,18 +92,6 @@ export async function createFactoryHandler(options: { root: string; env?: NodeJS
           return json(res, 200, { ...data.record, content: /^text\//.test(data.record.mimeType) || /\.(md|txt|json|csv|srt|vtt)$/.test(data.record.path) ? data.bytes.toString("utf8") : null });
         }
         if (action === "files" && req.method === "DELETE") { const b = z.object({ path: z.string() }).parse(await body(req)); await store.removeInput(id, b.path); runtime.emit(id, "files"); return json(res, 200, { removed: true }); }
-        if (action === "transfer" && req.method === "POST") {
-          const b = z.object({ fromSessionId: z.string().uuid(), files: z.array(z.object({ path: z.string() })).min(1).max(100) }).parse(await body(req));
-          if (b.fromSessionId === id) throw new Error("Choose a different destination workspace");
-          const destination = await store.get(id);
-          if (destination.status === "running") throw new Error("Stop the destination chat before adding files");
-          for (const f of b.files) {
-            if (!f.path.startsWith("output/")) throw new Error("Only output files may be handed off");
-            const { bytes, record } = await store.read(b.fromSessionId, f.path);
-            await store.put(id, `input/${f.path.slice(7)}`, bytes, { actor: "user", mimeType: record.mimeType, origin: { sessionId: b.fromSessionId, path: f.path } });
-          }
-          runtime.emit(id, "files"); return json(res, 200, { transferred: b.files.length });
-        }
         if (action === "comments" && req.method === "POST") {
           const b = z.object({ path: z.string(), start: z.number().int(), end: z.number().int(), quote: z.string(), text: z.string().min(1).max(20000), replacement: z.string().max(100000).optional() }).parse(await body(req));
           const comment = await store.comment(id, b); runtime.emit(id, "comments"); return json(res, 201, comment);

@@ -77,7 +77,7 @@ test("result comments follow the displayed original across new runs and download
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("one Pi Agent per chat reports progress without a shadow; histories and writes remain separate", async () => {
+test("one Pi Agent per chat persists todo without a shadow; histories and writes remain separate", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-progress-unit-"));
   const store = new WorkbenchStore(root);
   let instances = 0;
@@ -89,7 +89,7 @@ test("one Pi Agent per chat reports progress without a shadow; histories and wri
         { name: "list", arguments: { directory: "input" } },
         { name: "read", arguments: { path: "input/brief.md" } },
         { name: "write", arguments: { path: "output/CHECK.md", content: `# Automated unit test ${index}\n` } },
-        { name: "report_progress", arguments: { percentage: index * 20 } },
+        { name: "update_todo", arguments: { todos: [{ title: `Check ${index}`, status: "completed" }] } },
       ];
       const action = actions[step++];
       const message: AssistantMessage = { role: "assistant", api: "openai-completions", provider: "moonshotai-cn", model: "kimi-k2.6", timestamp: Date.now(),
@@ -111,40 +111,36 @@ test("one Pi Agent per chat reports progress without a shadow; histories and wri
     assert.equal(instances, 2);
     const sa = await store.get(a.id); const sb = await store.get(b.id);
     assert.equal(sa.status, "completed"); assert.equal(sb.status, "completed");
-    assert.deepEqual([sa.progress.percentage, sb.progress.percentage].sort(), [20, 40]);
-    assert.equal(sa.progress.status, "ready"); assert.equal(sa.progress.turn, 1);
+    assert.deepEqual(sa.todos, [{ title: "Check 1", status: "completed" }]);
+    assert.deepEqual(sb.todos, [{ title: "Check 2", status: "completed" }]);
     assert.ok(JSON.stringify(sa.messages).includes("Session A evidence"));
     assert.ok(!JSON.stringify(sa.messages).includes("Session B evidence"));
     const old = sa.files.find(f => f.path === "output/CHECK.md")!;
     await store.put(a.id, old.path, Buffer.from("User changed requirements"), { actor: "user" });
-    assert.equal((await store.get(a.id)).progress.status, "unscored");
-    assert.equal((await store.get(b.id)).progress.status, "ready");
+    assert.deepEqual((await store.get(a.id)).todos, [{ title: "Check 1", status: "completed" }]);
+    assert.deepEqual((await store.get(b.id)).todos, [{ title: "Check 2", status: "completed" }]);
   } finally { await runtime.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("manual transfer copies selected current file bytes, never another Agent's history", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-transfer-test-"));
-  const app = await createWorkbenchServer({ root, env: {} });
-  await new Promise<void>(resolve => app.server.listen(0, "127.0.0.1", resolve));
+test("declared upstream outputs are live read-only inputs without copying files", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-input-projection-test-"));
   try {
-    const a = await app.store.create("research"); const b = await app.store.create("generation");
-    const file = await app.store.put(a.id, "output/RESEARCH.md", Buffer.from("# Selected version\n"), { actor: "agent" });
-    await app.store.update(a.id, s => { s.messages.push({ role: "user", content: "Private conversation", timestamp: Date.now() }); });
-    const address = app.server.address(); assert.ok(address && typeof address !== "string");
-    const url = `http://127.0.0.1:${address.port}/api/sessions/${b.id}/transfer`;
-    const send = () => fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ fromSessionId: a.id, files: [{ path: file.path }] }) });
-    assert.equal((await send()).status, 200);
-    const received = await app.store.read(b.id, "input/RESEARCH.md");
-    assert.equal(received.bytes.toString(), "# Selected version\n"); assert.equal(received.record.origin?.sessionId, a.id);
-    assert.equal((await app.store.get(b.id)).messages.length, 0);
-    await app.store.put(a.id, file.path, Buffer.from("Updated source"), { actor: "agent" });
-    assert.equal((await send()).status, 200);
-    assert.equal((await app.store.read(b.id, "input/RESEARCH.md")).bytes.toString(), "Updated source");
-    const cross = await fetch(url, { method: "POST", headers: { origin: "https://example.test", "content-type": "application/json" }, body: "{}" });
-    assert.equal(cross.status, 403);
-  } finally { await app.close(); await rm(root, { recursive: true, force: true }); }
+    const store = new WorkbenchStore(root);
+    const research = await store.create("research");
+    const voice = await store.create("voice");
+    const evaluator = await store.create("evaluator");
+    const generation = await store.create("generation");
+    await store.put(research.id, "output/RESEARCH.md", Buffer.from("# Live research\n"), { actor: "agent" });
+    await store.put(voice.id, "output/VOICE.md", Buffer.from("# Live voice\n"), { actor: "agent" });
+    await store.put(evaluator.id, "output/EVALUATION.md", Buffer.from("# Live evaluation\n"), { actor: "agent" });
+    await store.put(generation.id, "input/manual/brief.md", Buffer.from("# Shared manual\n"), { actor: "user" });
+    assert.deepEqual((await store.contextFiles(generation.id)).map(file => file.path).sort(), ["input/evaluator/EVALUATION.md", "input/manual/brief.md", "input/research/RESEARCH.md", "input/voice/CREATOR_PERSONA.md", "input/voice/VOICE.md"]);
+    assert.equal((await store.read(generation.id, "input/research/RESEARCH.md")).bytes.toString(), "# Live research\n");
+    await store.put(research.id, "output/RESEARCH.md", Buffer.from("# Updated live research\n"), { actor: "agent" });
+    assert.equal((await store.read(generation.id, "input/research/RESEARCH.md")).bytes.toString(), "# Updated live research\n");
+    await assert.rejects(store.put(generation.id, "input/research/RESEARCH.md", Buffer.from("overwrite"), { actor: "agent" }), /only write output/);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
-
 
 test("write uses ordinary paths and overwrites output", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-write-version-test-"));
