@@ -72,6 +72,7 @@ export class PostgresAgentDefinitionRepository implements AgentDefinitionReposit
     `);
     const count = Number((await pool.query("SELECT COUNT(*)::int AS count FROM hatch_factory_agent_definitions")).rows[0]?.count ?? 0);
     if (count === 0) await repository.bootstrap();
+    else await repository.migrateLegacyDependencyGraph();
     await repository.list();
     return repository;
   }
@@ -114,6 +115,27 @@ export class PostgresAgentDefinitionRepository implements AgentDefinitionReposit
       throw error;
     } finally { client.release(); }
   }
+  private async migrateLegacyDependencyGraph(): Promise<void> {
+    const definitions = await this.list();
+    const legacy: Record<Role, { required: Role[]; normal: Role[] }> = {
+      research: { required: [], normal: [] },
+      voice: { required: ["research"], normal: [] },
+      generation: { required: ["research"], normal: ["voice", "evaluator"] },
+      "case-generation": { required: ["generation"], normal: [] },
+      evaluator: { required: ["generation", "case-generation"], normal: [] },
+    };
+    const matchesLegacy = definitions.every(definition => JSON.stringify(definition.dependencies) === JSON.stringify(legacy[definition.role]));
+    if (!matchesLegacy) return;
+    const next = definitions.map(definition => ({
+      ...definition,
+      dependencies: definition.role === "generation"
+        ? { required: [] as Role[], normal: ["research", "voice"] as Role[] }
+        : definition.role === "voice"
+          ? { required: [] as Role[], normal: [] as Role[] }
+          : definition.dependencies,
+    }));
+    await this.replace(next);
+  }
 }
 
 /** Explicit test dependency; product Runtime never constructs this repository. */
@@ -128,10 +150,8 @@ export async function initialAgentDefinitions(): Promise<AgentDefinition[]> {
   const common = await readFile(fileURLToPath(new URL("COMMON.md", promptRoot)), "utf8");
   const seed = [
     { role: "research", order: 1, name: { en: "Deep Research", zh: "深度研究", ja: "深掘り調査" }, hint: { en: "Find primary evidence and reconstruct the Creator as a whole person.", zh: "寻找一手证据，还原一个有血有肉的 Creator。", ja: "一次情報から、Creator という人物全体を立体的に捉えます。" }, tools: ["update_todo", "list", "read", "write", "web_search", "web_scrape", "youtube_transcript"], dependencies: { required: [], normal: [] } },
-    { role: "voice", order: 2, name: { en: "Voice Interview", zh: "语音访谈", ja: "音声インタビュー" }, hint: { en: "Draw out stories and tacit judgment in a natural conversation.", zh: "用自然对话挖出经历、故事和隐性判断。", ja: "自然な対話から経験、物語、暗黙の判断を引き出します。" }, tools: ["update_todo", "list", "read", "write", "web_search", "web_scrape", "youtube_transcript"], dependencies: { required: ["research"], normal: [] } },
-    // Voice makes the first build reachable; Evaluator becomes the alternative
-    // normal dependency that later marks Generation ready for another pass.
-    { role: "generation", order: 3, name: { en: "Agent Builder", zh: "Agent 构建", ja: "Agent 構築" }, hint: { en: "Turn the Creator's identity and judgment into an executable expert Agent.", zh: "把 Creator 的人格与判断变成可执行的专家 Agent。", ja: "Creator の人格と判断を、実行可能な専門 Agent に変えます。" }, tools: ["update_todo", "list", "read", "write", "corpus_upload"], dependencies: { required: ["research"], normal: ["voice", "evaluator"] } },
+    { role: "voice", order: 2, name: { en: "Voice Interview", zh: "语音访谈", ja: "音声インタビュー" }, hint: { en: "Draw out stories and tacit judgment in a natural conversation.", zh: "用自然对话挖出经历、故事和隐性判断。", ja: "自然な対話から経験、物語、暗黙の判断を引き出します。" }, tools: ["update_todo", "list", "read", "write", "web_search", "web_scrape", "youtube_transcript"], dependencies: { required: [], normal: [] } },
+    { role: "generation", order: 3, name: { en: "Agent Builder", zh: "Agent 构建", ja: "Agent 構築" }, hint: { en: "Turn the Creator's identity and judgment into an executable expert Agent.", zh: "把 Creator 的人格与判断变成可执行的专家 Agent。", ja: "Creator の人格と判断を、実行可能な専門 Agent に変えます。" }, tools: ["update_todo", "list", "read", "write", "corpus_upload"], dependencies: { required: [], normal: ["research", "voice"] } },
     { role: "case-generation", order: 4, name: { en: "Case Builder", zh: "案例构建", ja: "ケース構築" }, hint: { en: "Build one realistic client situation that demands expert judgment.", zh: "构造一个真正需要专家判断的现实客户情境。", ja: "専門家の判断が本当に必要な顧客状況を構築します。" }, tools: ["update_todo", "list", "read", "write"], dependencies: { required: ["generation"], normal: [] } },
     { role: "evaluator", order: 5, name: { en: "Evaluator", zh: "效果评估", ja: "効果評価" }, hint: { en: "Run this Product and judge what its result truly gets right and wrong.", zh: "运行当前 Product，判断结果真正做对和做错了什么。", ja: "現在の Product を実行し、結果の本質的な良し悪しを評価します。" }, tools: ["update_todo", "list", "read", "write", "hatch_tool"], dependencies: { required: ["generation", "case-generation"], normal: [] } },
   ] as const;

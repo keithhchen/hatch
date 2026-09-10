@@ -60,6 +60,8 @@ test("Factory workspaces are partitioned by authenticated Creator and existing P
     definitions.replace(await initialAgentDefinitions());
     assert.notEqual((await call("creator-a", PRODUCT_B, `sessions/${a.id}`)).status, 200);
     assert.notEqual((await call("creator-a", PRODUCT_B, `sessions/${b.id}/transfer`, "POST", { fromSessionId: a.id, files: [{ path: "output/RESEARCH.md" }] })).status, 200);
+    const otherCreator = await (await call("creator-b", PRODUCT_A, "sessions", "POST", { role: "research" })).json() as { id: string };
+    assert.notEqual((await call("creator-b", PRODUCT_A, `sessions/${otherCreator.id}/transfer`, "POST", { fromSessionId: a.id, files: [{ path: "output/RESEARCH.md" }] })).status, 200);
     const productBListing = await (await call("creator-a", PRODUCT_B, "sessions")).text();
     assert.ok(!productBListing.includes(a.id)); assert.ok(!productBListing.includes("Product A evidence"));
     await service.close(); service = new FactoryAgentsService(root, {}, definitions);

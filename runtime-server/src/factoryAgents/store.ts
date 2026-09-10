@@ -122,6 +122,20 @@ export class WorkbenchStore {
       return record;
     });
   }
+  async putTransferredInput(id: string, name: string, bytes: Buffer, source: { sessionId: string; path: string }, mimeType?: string): Promise<FileRecord> {
+    filePath(name);
+    filePath(source.path);
+    if (!name.startsWith("input/handoff/") || !source.path.startsWith("output/")) throw new Error("Transferred files must move from output/ to input/handoff/");
+    if (!bytes.length || bytes.length > 20 * 1024 * 1024) throw new Error("File must contain 1 byte to 20 MiB");
+    return this.update(id, async session => {
+      if (session.status === "running") throw new Error("Stop the destination Agent before adding files");
+      const record: FileRecord = { path: name, bytes: bytes.length, mimeType: mimeType ?? (name.endsWith(".md") ? "text/markdown" : "application/octet-stream"), origin: source };
+      await atomicWrite(await this.materializedPath(id, name), bytes);
+      session.files = [...session.files.filter(file => file.path !== name), record];
+      session.revision++;
+      return record;
+    });
+  }
   async removeInput(id: string, name: string): Promise<void> {
     filePath(name);
     if (name.startsWith("input/manual/")) { if ((await this.get(id)).status === "running") throw new Error("Only idle input files can be removed"); await rm(await this.manualPath(name), { force: true }); await atomicWrite(path.join(this.root, "manual-files.json"), JSON.stringify({ files: (await this.manualFiles()).filter(file => file.path !== name) })); return; }
