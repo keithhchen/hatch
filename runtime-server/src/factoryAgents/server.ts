@@ -101,12 +101,12 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
           const transfers = await Promise.all(b.files.map(async file => {
             if (!file.path.startsWith("output/")) throw new Error("Only Agent output files may be transferred");
             const relative = file.path.slice("output/".length);
-            const destinationPath = `input/manual/${relative}`;
+            const destinationPath = `input/handoff/${source.role}/${relative}`;
             const data = await store.read(source.id, file.path);
             return { ...data, destinationPath };
           }));
           const records = [];
-          for (const transfer of transfers) records.push(await store.put(destination.id, transfer.destinationPath, transfer.bytes, { actor: "user", mimeType: transfer.record.mimeType, origin: { sessionId: source.id, path: transfer.record.path } }));
+          for (const transfer of transfers) records.push(await store.putTransferredInput(destination.id, transfer.destinationPath, transfer.bytes, { sessionId: source.id, path: transfer.record.path }, transfer.record.mimeType));
           runtime.emit(destination.id, "files");
           return json(res, 200, { transferred: records.length, files: records });
         }
