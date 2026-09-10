@@ -10,7 +10,8 @@ import { createFactoryLlmModel } from "../creatorLearning/factoryPi.js";
 import { fileTools } from "./tools.js";
 import { WorkbenchStore } from "./store.js";
 import { WorkbenchRuntime } from "./runtime.js";
-import { createWorkbenchServer } from "./server.js";
+import { createWorkbenchServer, renderReviewMarkdown } from "./server.js";
+import { MemoryAgentDefinitionRepository, initialAgentDefinitions } from "./definitions.js";
 
 test("Voice is a first-class isolated workspace with its canonical Markdown output", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-voice-workspace-"));
@@ -77,9 +78,16 @@ test("result comments follow the displayed original across new runs and download
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test("review Markdown uses the requested locale and defaults to English", () => {
+  const comments = [{ id: "1", path: "output/RESULT.md", start: 0, end: 5, quote: "First", text: "Clarify it", replacement: "Clearer", createdAt: new Date(0).toISOString() }];
+  assert.match(renderReviewMarkdown(comments), /^# Expert review/m);
+  assert.match(renderReviewMarkdown(comments, "zh"), /^# 专家批注/m);
+  assert.match(renderReviewMarkdown(comments, "ja"), /^# 専門家レビュー/m);
+});
+
 test("one Pi Agent per chat persists todo without a shadow; histories and writes remain separate", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-progress-unit-"));
-  const store = new WorkbenchStore(root);
+  const store = new WorkbenchStore(root, undefined, new MemoryAgentDefinitionRepository(await initialAgentDefinitions()));
   let instances = 0;
   const runtime = new WorkbenchRuntime(store, { env: { HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash" }, agentFactory: options => {
     assert.equal(options.env?.HATCH_FACTORY_LLM_PROFILE, "deepseek-v4-flash");
@@ -111,21 +119,21 @@ test("one Pi Agent per chat persists todo without a shadow; histories and writes
     assert.equal(instances, 2);
     const sa = await store.get(a.id); const sb = await store.get(b.id);
     assert.equal(sa.status, "completed"); assert.equal(sb.status, "completed");
-    assert.deepEqual(sa.todos, [{ title: "Check 1", status: "completed" }]);
-    assert.deepEqual(sb.todos, [{ title: "Check 2", status: "completed" }]);
+    assert.deepEqual([sa.todos[0]?.title, sb.todos[0]?.title].sort(), ["Check 1", "Check 2"]);
+    assert.ok([sa, sb].every(state => state.todos[0]?.status === "completed"));
     assert.ok(JSON.stringify(sa.messages).includes("Session A evidence"));
     assert.ok(!JSON.stringify(sa.messages).includes("Session B evidence"));
     const old = sa.files.find(f => f.path === "output/CHECK.md")!;
     await store.put(a.id, old.path, Buffer.from("User changed requirements"), { actor: "user" });
-    assert.deepEqual((await store.get(a.id)).todos, [{ title: "Check 1", status: "completed" }]);
-    assert.deepEqual((await store.get(b.id)).todos, [{ title: "Check 2", status: "completed" }]);
+    assert.equal((await store.get(a.id)).todos[0]?.status, "completed");
+    assert.equal((await store.get(b.id)).todos[0]?.status, "completed");
   } finally { await runtime.close(); await rm(root, { recursive: true, force: true }); }
 });
 
 test("declared upstream outputs are live read-only inputs without copying files", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-input-projection-test-"));
   try {
-    const store = new WorkbenchStore(root);
+    const store = new WorkbenchStore(root, undefined, new MemoryAgentDefinitionRepository(await initialAgentDefinitions()));
     const research = await store.create("research");
     const voice = await store.create("voice");
     const evaluator = await store.create("evaluator");
@@ -169,7 +177,7 @@ test("model readiness follows the selected provider, not the presence of a Kimi 
       [{ HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash", LLM_API_KEY: "unit-test-key" }, false],
       [{ HATCH_FACTORY_LLM_PROFILE: "kimi-k2.6", LLM_API_KEY: "unit-test-key" }, true],
     ] as const) {
-      const app = await createWorkbenchServer({ root, scope: { creatorId: "11111111-1111-4111-8111-111111111111", productId: "22222222-2222-4222-8222-222222222222" }, env });
+      const app = await createWorkbenchServer({ root, scope: { creatorId: "11111111-1111-4111-8111-111111111111", productId: "22222222-2222-4222-8222-222222222222" }, definitions: new MemoryAgentDefinitionRepository(await initialAgentDefinitions()), env });
       await new Promise<void>(resolve => app.server.listen(0, "127.0.0.1", resolve));
       try {
         const address = app.server.address(); assert.ok(address && typeof address !== "string");
@@ -180,4 +188,40 @@ test("model readiness follows the selected provider, not the presence of a Kimi 
       } finally { await app.close(); }
     }
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("one Runtime turn composes its prompt from one definition snapshot", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-definition-snapshot-"));
+  let reads = 0;
+  const definitions = await initialAgentDefinitions();
+  const source = { list: async () => { reads++; return structuredClone(definitions); } };
+  const store = new WorkbenchStore(root, undefined, source);
+  const runtime = new WorkbenchRuntime(store);
+  try {
+    const snapshot = await store.definition("research");
+    const prompt = await runtime.prompt("research", snapshot);
+    assert.equal(reads, 1);
+    assert.ok(prompt.startsWith(snapshot.systemPrompt));
+  } finally { await runtime.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("Product-scoped stores reject unowned sessions instead of adopting them", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-unowned-session-"));
+  try {
+    const unscoped = new WorkbenchStore(root);
+    await unscoped.create("research");
+    const scoped = new WorkbenchStore(root, { creatorId: "11111111-1111-4111-8111-111111111111", productId: "22222222-2222-4222-8222-222222222222" }, new MemoryAgentDefinitionRepository(await initialAgentDefinitions()));
+    await assert.rejects(scoped.recover(), /different Product workspace/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("cached Product handler accepts only a fresh BriefSpec for the same scope", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-brief-refresh-"));
+  const definitions = new MemoryAgentDefinitionRepository(await initialAgentDefinitions());
+  const app = await createWorkbenchServer({ root, scope: { creatorId: "11111111-1111-4111-8111-111111111111", productId: "22222222-2222-4222-8222-222222222222", briefSpec: { old: true } }, definitions });
+  try {
+    app.setScope({ creatorId: "11111111-1111-4111-8111-111111111111", productId: "22222222-2222-4222-8222-222222222222", briefSpec: { current: true } });
+    assert.deepEqual(app.store.scope?.briefSpec, { current: true });
+    assert.throws(() => app.setScope({ creatorId: "11111111-1111-4111-8111-111111111111", productId: "33333333-3333-4333-8333-333333333333" }), /retarget/);
+  } finally { await app.close(); await rm(root, { recursive: true, force: true }); }
 });

@@ -1,28 +1,31 @@
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import path from "node:path";
 import { z } from "zod";
-import { WorkbenchStore, ROLES, type FactoryProductScope, type Session } from "./store.js";
+import { WorkbenchStore, ROLES, type Comment, type FactoryProductScope, type Session } from "./store.js";
 import { WorkbenchRuntime, safeError, type WorkbenchRuntimeOptions } from "./runtime.js";
 import { hatchTool } from "./hatchTool.js";
 import { corpusTools } from "./corpusTools.js";
+import { agentEntries, assertAgentAvailable, type AgentDefinitionRepository } from "./definitions.js";
 import { resolveFactoryLlmProfile } from "../llmProfiles.js";
 import { VoiceSession, type VoiceServerEvent } from "./voice.js";
 
 export function publicSession(s: Session) { const { context, ...publicData } = s; return publicData; }
 
-export async function createFactoryHandler(options: { root: string; scope: FactoryProductScope; env?: NodeJS.ProcessEnv; runtime?: WorkbenchRuntimeOptions }) {
+export async function createFactoryHandler(options: { root: string; scope: FactoryProductScope; definitions: AgentDefinitionRepository; env?: NodeJS.ProcessEnv; runtime?: WorkbenchRuntimeOptions }) {
   const env: NodeJS.ProcessEnv = { HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash", ...(options.env ?? process.env) };
-  const store = new WorkbenchStore(options.root, options.scope);
+  const store = new WorkbenchStore(options.root, options.scope, options.definitions);
   await store.recover();
-  const runtime = new WorkbenchRuntime(store, { env, ...options.runtime, extraTools: options.runtime?.extraTools ?? (async (s, _signal, changed) => s.role === "evaluator" ? [hatchTool(store, s.id, changed, options.scope, env)] : s.role === "generation" ? corpusTools(store, s.id, changed, options.scope, env) : []) });
+  const runtime = new WorkbenchRuntime(store, { env, ...options.runtime, extraTools: options.runtime?.extraTools ?? (async (s, _signal, changed) => [...corpusTools(store, s.id, changed, options.scope, env), hatchTool(store, s.id, changed, options.scope, env)]) });
   const streams = new Set<ServerResponse>();
   const voices = new Map<string, VoiceSession>();
+  const entries = async () => agentEntries(await options.definitions.list(), await store.list());
+  const assertRoleAvailable = async (role: Session["role"]) => assertAgentAvailable(await entries(), role);
   const voiceFor = (id: string) => {
     let voice = voices.get(id);
     if (!voice) {
       voice = new VoiceSession({
         emit: (event: VoiceServerEvent) => runtime.events.emit("event", { sessionId: id, ...event }),
-        onFinalTranscript: async (_conversationId, content) => { await runtime.start(id, content); },
+        onFinalTranscript: async (_conversationId, content) => { await assertRoleAvailable("voice"); await runtime.start(id, content); },
         onInterrupt: async () => { runtime.stop(id); },
         environment: env
       });
@@ -57,11 +60,12 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
         res.once("close", () => { clearInterval(heartbeat); streams.delete(res); runtime.events.off("event", listener); });
         return;
       }
-      if (url.pathname === "/api/config" && req.method === "GET") return json(res, 200, { roles: ROLES, runtimeUrl: env.HATCH_FACTORY_RUNTIME_URL ?? "", services: { model: Boolean(env[resolveFactoryLlmProfile(env).apiKeyEnv]?.trim()), search: Boolean(env.TAVILY_API_KEY), scrape: Boolean(env.HATCH_FACTORY_SCRAPE_PROVIDER === "firecrawl" ? env.FIRECRAWL_API_KEY : env.TAVILY_API_KEY), hatch: Boolean(env.HATCH_FACTORY_RUNTIME_URL && env.HATCH_FACTORY_CREATOR_TOKEN), corpus: Boolean(env.HATCH_FACTORY_REGISTRY_URL && env.HATCH_FACTORY_CREATOR_TOKEN), voice: Boolean(env.ELEVENLABS_API_KEY?.trim() && env.ELEVENLABS_VOICE_ID?.trim()) } });
+      if (url.pathname === "/api/config" && req.method === "GET") return json(res, 200, { roles: ROLES, agents: await entries(), runtimeUrl: env.HATCH_FACTORY_RUNTIME_URL ?? "", services: { model: Boolean(env[resolveFactoryLlmProfile(env).apiKeyEnv]?.trim()), search: Boolean(env.TAVILY_API_KEY), scrape: Boolean(env.HATCH_FACTORY_SCRAPE_PROVIDER === "firecrawl" ? env.FIRECRAWL_API_KEY : env.TAVILY_API_KEY), hatch: Boolean(env.HATCH_FACTORY_RUNTIME_URL && env.HATCH_FACTORY_CREATOR_TOKEN), corpus: Boolean(env.HATCH_FACTORY_REGISTRY_URL && env.HATCH_FACTORY_CREATOR_TOKEN), voice: Boolean(env.ELEVENLABS_API_KEY?.trim() && env.ELEVENLABS_VOICE_ID?.trim()) } });
 
-      if (url.pathname === "/api/sessions" && req.method === "GET") return json(res, 200, { sessions: (await store.list()).map(s => ({ ...publicSession(s), messages: undefined })) });
+      if (url.pathname === "/api/sessions" && req.method === "GET") { const sessions = await store.list(); return json(res, 200, { sessions: sessions.map(s => ({ ...publicSession(s), messages: undefined })), agents: agentEntries(await options.definitions.list(), sessions) }); }
       if (url.pathname === "/api/sessions" && req.method === "POST") {
         const b = z.object({ role: z.enum(ROLES), title: z.string().max(200).optional() }).parse(await body(req));
+        await assertRoleAvailable(b.role);
         const existing = (await store.list()).find(session => session.role === b.role);
         const session = existing ?? await store.create(b.role, b.title);
         return json(res, existing ? 200 : 201, publicSession(await store.get(session.id)));
@@ -69,11 +73,11 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
       const match = url.pathname.match(/^\/api\/sessions\/([0-9a-f-]{36})(?:\/(.*))?$/);
       if (match) {
         const id = match[1]!; const action = match[2] ?? "";
-        if (!action && req.method === "GET") { const session = await store.get(id); return json(res, 200, { ...publicSession(session), files: await store.contextFiles(id) }); }
+        if (!action && req.method === "GET") { const session = await store.get(id); return json(res, 200, { ...publicSession(session), agent: (await entries()).find(entry => entry.role === session.role), files: await store.contextFiles(id) }); }
         if (action === "prompt" && req.method === "GET") return json(res, 200, { content: await runtime.prompt((await store.get(id)).role) });
-        if (action === "message" && req.method === "POST") { const b = z.object({ content: z.string().min(1).max(100000) }).parse(await body(req)); await runtime.start(id, b.content); return json(res, 202, { accepted: true }); }
+        if (action === "message" && req.method === "POST") { const session = await store.get(id); await assertRoleAvailable(session.role); const b = z.object({ content: z.string().min(1).max(100000) }).parse(await body(req)); await runtime.start(id, b.content); return json(res, 202, { accepted: true }); }
         if (action === "stop" && req.method === "POST") { await body(req); runtime.stop(id); return json(res, 202, { requested: true }); }
-        if (action === "voice/start" && req.method === "POST") { const s = await store.get(id); if (s.role !== "voice") throw new Error("Voice is only available in the Voice Agent"); await body(req); await voiceFor(id).start(id); return json(res, 200, { started: true }); }
+        if (action === "voice/start" && req.method === "POST") { const s = await store.get(id); if (s.role !== "voice") throw new Error("Voice is only available in the Voice Agent"); await assertRoleAvailable(s.role); await body(req); await voiceFor(id).start(id); return json(res, 200, { started: true }); }
         if (action === "voice/audio" && req.method === "POST") { const b = z.object({ base64: z.string().min(1) }).parse(await body(req)); voiceFor(id).audio(Buffer.from(b.base64, "base64")); return json(res, 202, { accepted: true }); }
         if (action === "voice/stop" && req.method === "POST") { await body(req); await voices.get(id)?.stop(); voices.delete(id); return json(res, 200, { stopped: true }); }
         if (action === "files" && req.method === "POST") {
@@ -93,16 +97,33 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
           const comment = await store.comment(id, b); runtime.emit(id, "comments"); return json(res, 201, comment);
         }
         if (action === "comments/export" && req.method === "POST") {
-          await body(req); const s = await store.get(id);
-          const text = `# 专家批注\n\n${s.comments.map(c => `## ${c.path}\n\n原文：\n\n> ${c.quote.replaceAll("\n", "\n> ")}\n\n意见：${c.text}\n${c.replacement === undefined ? "" : `\n建议替换：\n\n${c.replacement}\n`}`).join("\n")}`;
+          const b = z.object({ locale: z.enum(["en", "zh", "ja"]).default("en") }).parse(await body(req));
+          const s = await store.get(id);
+          const text = renderReviewMarkdown(s.comments, b.locale);
           const record = await store.put(id, "output/REVIEW.md", Buffer.from(text), { actor: "user" });
           runtime.emit(id, "files"); return json(res, 200, record);
         }
       }
       return json(res, 404, { error: "Unknown API route" });
-    } catch (error) { json(res, 400, { error: safeError(error) }); }
+    } catch (error) {
+      const structured = error && typeof error === "object" ? error as { code?: unknown; status?: unknown; details?: unknown } : undefined;
+      const status = typeof structured?.status === "number" ? structured.status : 400;
+      const message = safeError(error);
+      json(res, status, typeof structured?.code === "string" ? { error: { code: structured.code, message, ...(structured.details === undefined ? {} : { details: structured.details }) }, detail: message } : { error: message });
+    }
   };
-  return { handle, store, runtime, setCreatorToken: (token: string) => { env.HATCH_FACTORY_CREATOR_TOKEN = token; }, close: async () => { for (const response of streams) response.end(); await runtime.close(); } };
+  return { handle, store, runtime, setScope: (scope: FactoryProductScope) => { if (scope.creatorId !== options.scope.creatorId || scope.productId !== options.scope.productId) throw new Error("Cannot retarget a Product workspace"); options.scope.briefSpec = scope.briefSpec; }, setCreatorToken: (token: string) => { env.HATCH_FACTORY_CREATOR_TOKEN = token; }, close: async () => { for (const response of streams) response.end(); await runtime.close(); } };
+}
+
+const reviewCopy = {
+  en: { title: "Expert review", original: "Original", comment: "Comment", replacement: "Suggested replacement" },
+  zh: { title: "专家批注", original: "原文", comment: "意见", replacement: "建议替换" },
+  ja: { title: "専門家レビュー", original: "原文", comment: "コメント", replacement: "修正案" }
+} as const;
+
+export function renderReviewMarkdown(comments: Comment[], locale: keyof typeof reviewCopy = "en"): string {
+  const copy = reviewCopy[locale];
+  return `# ${copy.title}\n\n${comments.map(c => `## ${c.path}\n\n${copy.original}:\n\n> ${c.quote.replaceAll("\n", "\n> ")}\n\n${copy.comment}: ${c.text}\n${c.replacement === undefined ? "" : `\n${copy.replacement}:\n\n${c.replacement}\n`}`).join("\n")}`;
 }
 
 // Local transport for automated tests; the product mounts the same handler behind Registry authentication.

@@ -6,7 +6,7 @@ import { result } from "./files.js";
 import { createCompactionSummaryMessage, estimateContextTokens, estimateTokens, generateSummaryWithUsage, type Agent, type AgentMessage, type AgentTool } from "@earendil-works/pi-agent-core";
 import { createFactoryPiAgent, createFactoryPiModels, type FactoryPiAgentOptions } from "../creatorLearning/factoryPi.js";
 import { classifyFactoryProviderFailure } from "../creatorLearning/factoryLlm.js";
-import { WorkbenchStore, type Role, type Session } from "./store.js";
+import { WorkbenchStore, type AgentDefinitionSource, type Role, type Session } from "./store.js";
 import { fileTools } from "./tools.js";
 import { webTools } from "./web.js";
 
@@ -28,12 +28,11 @@ export class WorkbenchRuntime {
     this.env = { HATCH_FACTORY_LLM_PROFILE: "deepseek-v4-flash", ...(options.env ?? process.env) };
   }
   emit(id: string, type: string, data: Record<string, unknown> = {}): void { this.events.emit("event", { sessionId: id, type, ...data }); }
-  async prompt(role: Role): Promise<string> {
-    const root = new URL("../../prompts/factory-agents/", import.meta.url);
-    const own = await readFile(fileURLToPath(new URL(`${role}/SYSTEM.md`, root)), "utf8");
-    const upstream: Partial<Record<Role, Role[]>> = { voice: ["research"], generation: ["research", "voice", "evaluator"], "case-generation": ["research", "voice", "generation"], evaluator: ["generation", "case-generation"] };
-    const folders = ["input/manual", ...(upstream[role] ?? []).map(source => `input/${source}`)];
-    return `${own}\n\n# 本 Agent 的 Input\n\n你有且只有这些输入文件夹：${folders.map(folder => `\`${folder}/\``).join("、")}。\n\`input/manual/\` 是用户手动提供的文件；其余目录是上游 Agent 的实时只读 output projection。使用 list 查看，使用 read 读取。不要要求用户复制或转发上游文件，也不要尝试修改上游目录。\n\n${await readFile(fileURLToPath(new URL("COMMON.md", root)), "utf8")}`;
+  async prompt(role: Role, snapshot?: Awaited<ReturnType<AgentDefinitionSource["list"]>>[number]): Promise<string> {
+    const definition = snapshot ?? await this.store.definition(role);
+    const dependencies = definition.dependencies;
+    const folders = ["input/manual", ...[...dependencies.required, ...dependencies.normal].map(source => `input/${source}`)];
+    return `${definition.systemPrompt}\n\n# 本 Agent 的 Input\n\n你有且只有这些输入文件夹：${folders.map(folder => `\`${folder}/\``).join("、")}。\n\`input/manual/\` 是用户手动提供的文件；其余目录是上游 Agent 的实时只读 output projection。使用 list 查看，使用 read 读取。不要要求用户复制或转发上游文件，也不要尝试修改上游目录。`;
   }
   async start(id: string, message: string): Promise<void> {
     if (!message.trim() || message.length > 100000) throw new Error("Provide a message of 1–100000 characters");
@@ -43,7 +42,7 @@ export class WorkbenchRuntime {
     this.active.set(id, controller);
     this.runIds.set(id, runId);
     try {
-      await this.store.update(id, s => { if (s.title === s.role) s.title = message.trim().slice(0, 60); s.turn++; s.status = "running"; delete s.error; delete s.activeTool; });
+      await this.store.update(id, s => { if (s.title === s.role) s.title = message.trim().slice(0, 60); s.turn++; s.status = "running"; s.lastRunAt = new Date().toISOString(); delete s.error; delete s.activeTool; });
     } catch (error) { this.active.delete(id); throw error; }
     this.emit(id, "state");
     this.emit(id, "voice.run_started", { runId });
@@ -60,11 +59,13 @@ export class WorkbenchRuntime {
     let system = "";
     try {
       const s = await this.store.get(id);
-      system = await this.prompt(s.role);
+      const definition = await this.store.definition(s.role);
+      system = await this.prompt(s.role, definition);
       if (s.role === "generation") system += `\n宿主提供的目标 Runtime 工具：内建 hatch.web_search；有 Knowledge 时启用 hatch.file_search。额外声明：${this.env.HATCH_FACTORY_TARGET_TOOLS_JSON ?? "[]"}。外部连接的实际可用性由现有 Registry/Runtime 验证。当前 Product 已由宿主固定；corpus_upload 会发布到它，不要查找、选择或创建 Product。`;
       if (s.role === "evaluator") system += `\n当前 Product 已由宿主固定；hatch_tool 只会运行它，不要查找或选择 Product。启动时如需 brief_answers，从案例中选择客户可见的信息作答；不能泄露评分标准。当前 Brief 字段：${JSON.stringify(this.store.scope?.briefSpec ?? null)}。`;
       const changed = () => this.emit(id, "files");
-      const tools = [ this.todoTool(id), ...fileTools(this.store, id, { changed }), ...(["research", "voice"].includes(s.role) ? webTools(this.store, id, changed, this.env) : []), ...(await this.options.extraTools?.(s, controller.signal, changed) ?? []) ];
+      const candidates = [ this.todoTool(id), ...fileTools(this.store, id, { changed }), ...webTools(this.store, id, changed, this.env), ...(await this.options.extraTools?.(s, controller.signal, changed) ?? []) ];
+      const tools = candidates.filter(tool => definition.tools.includes(tool.name));
       const messageCount = s.messages.length;
       await this.run(id, system, s.context, message, tools, controller);
       if (s.role === "voice" && !controller.signal.aborted) {

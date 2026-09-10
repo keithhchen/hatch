@@ -1,4 +1,5 @@
 import { FactoryAgentsService } from "./factoryAgents/service.js";
+import { PostgresAgentDefinitionRepository } from "./factoryAgents/definitions.js";
 import "dotenv/config";
 import http from "node:http";
 import { createHash, randomUUID } from "node:crypto";
@@ -81,6 +82,7 @@ type RegistryContext = {
   deploymentServiceToken: string;
   factoryService: CreatorFactoryService;
   factoryAgents: FactoryAgentsService;
+  factoryAgentDefinitions?: PostgresAgentDefinitionRepository;
   productFileStore: ProductFileStore;
   factoryNodeService?: FactoryNodeService;
   corpusPublisher?: CorpusPublisher;
@@ -99,7 +101,9 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const factoryRepository = creatorFactoryRepositoryForRegistry(environment, store.databasePool());
   await factoryRepository.initialize();
   const factoryRoot = path.resolve(environment.HATCH_CREATOR_FACTORY_ROOT ?? "creator-factory-runs");
-  const factoryAgents = new FactoryAgentsService(path.join(factoryRoot, "agent-chats"), environment);
+  const registryPool = store.databasePool();
+  const factoryAgentDefinitions = registryPool ? await PostgresAgentDefinitionRepository.open(registryPool) : undefined;
+  const factoryAgents = new FactoryAgentsService(path.join(factoryRoot, "agent-chats"), environment, factoryAgentDefinitions);
   const objectStore = objectStoreFromEnvironment(environment);
   const productObjectStore = objectStoreFromEnvironment(environment, path.join(factoryRoot, "product-files"));
   if (!productObjectStore) throw new Error("Product File object storage is not configured");
@@ -109,7 +113,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   );
   const nodeObjectStore = objectStore ?? productObjectStore;
   const knowledgeIndexer = QdrantKnowledgeIndexer.fromEnvironment(environment);
-  const nodePool = store.databasePool();
+  const nodePool = registryPool;
   const nodePersistence = nodePool ? new PostgresNodeStore({ pool: nodePool }) : undefined;
   const factoryNodeService = nodePersistence && nodeObjectStore
     ? new FactoryNodeService(
@@ -222,7 +226,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       }, { "retry-after": String(admission.retryAfterSeconds), connection: "close" });
       return;
     }
-    const routePromise = route(request, response, { store, accounts, authRateLimiter, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, factoryAgents, productFileStore, factoryNodeService, corpusPublisher, nodeObjectStore, releaseStore, authSecret })
+    const routePromise = route(request, response, { store, accounts, authRateLimiter, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, factoryAgents, factoryAgentDefinitions, productFileStore, factoryNodeService, corpusPublisher, nodeObjectStore, releaseStore, authSecret })
       .catch((error) => {
         const status = errorStatus(error);
         if (status >= 500) console.error("Registry request failed", error);
@@ -259,6 +263,12 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
             error: { code: error.code, message: error.message },
             detail: error.message
           });
+          return;
+        }
+        if (error && typeof error === "object" && typeof (error as { code?: unknown }).code === "string") {
+          const structured = error as { code: string; message?: string; details?: unknown };
+          const message = status >= 500 ? "Factory Agent definitions are unavailable." : structured.message ?? "Request failed.";
+          sendJson(response, status, { error: { code: structured.code, message, ...(structured.details === undefined ? {} : { details: structured.details }) }, detail: message });
           return;
         }
         sendJson(response, status, {
@@ -316,6 +326,18 @@ async function route(
   const url = new URL(request.url ?? "/", "http://registry.local");
   if (request.method === "GET" && url.pathname === "/healthz") {
     sendJson(response, 200, { status: "ok" });
+    return;
+  }
+
+  if (url.pathname === "/v1/internal/factory-agent-definitions" && ["GET", "PUT"].includes(request.method ?? "")) {
+    requireDeploymentServiceAuth(request, context.deploymentServiceToken);
+    if (!context.factoryAgentDefinitions) {
+      const error = Object.assign(new Error("Factory Agent definitions require Registry database configuration"), { status: 503 });
+      throw error;
+    }
+    if (request.method === "GET") { sendJson(response, 200, { agents: await context.factoryAgentDefinitions.list() }); return; }
+    const payload = await readJson(request);
+    sendJson(response, 200, { agents: await context.factoryAgentDefinitions.replace(payload.agents) });
     return;
   }
 
