@@ -4,6 +4,7 @@ import { subscribeFactoryEvents } from "./factoryEvents.js";
 import { FactoryVoicePlayer } from "./factoryVoicePlayer.js";
 import { createFactoryAgentTranslator } from "./factoryAgentsI18n.js";
 import { agentDependencyGaps, agentStateKey, localizeAgentText } from "./factoryAgentState.js";
+import { creatorFactoryPath, FACTORY_SECTION_AGENTS, factorySectionForAgent } from "./creatorRoutes.js";
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@hatch/ui';
 import ReactMarkdown from 'react-markdown';
@@ -11,10 +12,10 @@ import remarkGfm from 'remark-gfm';
 import './factoryAgents.css';
 
 const STAGES = [
-  ['sources', 'sourcesStage', 'sourcesStageDescription', ['research', 'voice']],
-  ['generation', 'generationStage', 'generationStageDescription', ['generation']],
-  ['evaluation', 'evaluationStage', 'evaluationStageDescription', ['case-generation', 'evaluator']],
-];
+  ['sources', 'sourcesStage', 'sourcesStageDescription'],
+  ['build', 'generationStage', 'generationStageDescription'],
+  ['evaluate', 'evaluationStage', 'evaluationStageDescription'],
+].map(([id, title, description]) => [id, title, description, FACTORY_SECTION_AGENTS[id]]);
 const STATUS = { idle: 'idle', running: 'running', completed: 'completed', failed: 'failed', interrupted: 'interrupted' };
 const api = (route, options = {}) => dashboardRequest(route, { ...options, body: options.body === undefined ? undefined : JSON.stringify(options.body) });
 const factoryRoot = productId => `/v1/creator/products/${encodeURIComponent(productId)}/factory-agents`;
@@ -36,30 +37,31 @@ function Markdown({ children, filePath = 'output/chat.md', files = [], onOpenFil
   return <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: link, img: ({ alt }) => <span className="muted">{t('imageAlt', alt || t('externalImage'))}</span> }}>{children || ''}</ReactMarkdown></div>;
 }
 function ErrorNotice({ error }) { return error ? <p className="error" role="alert">{error}</p> : null; }
-export function FactoryAgents({ productId, locale = 'en' }) {
+export function FactoryAgents({ productId, section, agent, navigate, locale = 'en' }) {
   const t = useMemo(() => createFactoryAgentTranslator(locale), [locale]);
-  const [stage, setStage] = useState(null);
   const [sessions, setSessions] = useState([]);
   const [agents, setAgents] = useState([]);
-  const [selected, setSelected] = useState(null);
   const [config, setConfig] = useState(null);
   const importPicker = useRef(null);
   const [error, setError] = useState('');
   const root = useMemo(() => factoryRoot(productId), [productId]);
+  const stage = section ?? null;
+  const selected = agent ?? null;
+  const goToFactory = (nextStage, nextAgent) => navigate(creatorFactoryPath(productId, nextStage, nextAgent));
   const applyNavigation = value => { setSessions(value.sessions || []); setAgents(value.agents || []); };
   const refresh = () => api(`${root}/sessions`).then(applyNavigation).catch(e => setError(e.message));
   const refreshConfig = () => api(`${root}/config`).then(value => { setConfig(value); if (value.agents) setAgents(value.agents); }).catch(e => setError(e.message));
   useEffect(() => { refresh(); refreshConfig(); return subscribeFactoryEvents({ url: `${root}/events`, onMessage: e => { const v = JSON.parse(e.data); if (['state', 'todos', 'files'].includes(v.type)) refresh(); }, onError: () => setError(t('workspaceConnectionLost')), onOpen: () => { setError(''); refresh(); refreshConfig(); } }); }, [root, t]);
   const openAgent = async role => {
     try {
-      const targetStage = STAGES.find(item => item[3].includes(role));
-      if (targetStage) setStage(targetStage[0]);
+      const targetStage = factorySectionForAgent(role);
+      if (!targetStage) throw new Error(t('agentStateUnavailable'));
       const entry = agents.find(agent => agent.role === role);
       if (!entry) throw new Error(t('agentStateUnavailable'));
-      if (entry.state === 'locked') { setSelected(role); return; }
+      if (entry.state === 'locked') { goToFactory(targetStage, role); return; }
       let session = sessions.filter(s => s.role === role).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
       if (!session) session = await api(`${root}/sessions`, { method: 'POST', body: { role } });
-      await refresh(); setSelected(role);
+      await refresh(); goToFactory(targetStage, role);
     } catch (e) { setError(factoryError(e, t, agentName)); }
   };
   const uploadProjectFiles = async files => {
@@ -92,9 +94,9 @@ export function FactoryAgents({ productId, locale = 'en' }) {
   const selectedSession = selected ? agentSession(selected) : null;
   return <section className="factory-agents" aria-label={t('factory')}>
     <ErrorNotice error={error}/>
-    {selected ? <><button className="factory-back" onClick={() => setSelected(null)}>← {t('backToStage')}</button><main className="app-main agent-open">{selectedSession ? <Workspace key={selectedSession.id} root={root} id={selectedSession.id} entry={selectedEntry} config={config} onChanged={refresh} onOpenAgent={openAgent} agentName={agentName} locale={locale} t={t}/> : <AgentStartWorkspace entry={selectedEntry} onOpenAgent={openAgent} agentName={agentName} t={t}/>}</main></>
-      : stage ? <main className="factory-stage"><button className="factory-back" onClick={() => setStage(null)}>← {t('allStages')}</button><header><span>{t('product')}</span><h1>{t(STAGES.find(item => item[0] === stage)?.[1])}</h1><p>{t(STAGES.find(item => item[0] === stage)?.[2])}</p></header><div className="agent-cards">{stage === 'sources' && <><button className="agent-card source-method" onClick={() => importPicker.current?.click()}><div><span>{t('files')}</span><strong>{t('uploadSources')}</strong></div><p>{t('uploadSourcesBody')}</p><footer>{t('chooseFiles')} <span>→</span></footer></button><button className="agent-card source-method" disabled><div><span>{t('comingSoon')}</span><strong>{t('futureSources')}</strong></div><p>{t('futureSourcesBody')}</p><footer>{t('comingSoon')}</footer></button><input ref={importPicker} aria-label={t('uploadInputFiles')} hidden type="file" multiple onChange={e => { uploadProjectFiles([...e.target.files]); e.target.value = ''; }}/></>}{STAGES.find(item => item[0] === stage)?.[3].map(agentEntry).filter(Boolean).sort((a, b) => a.order - b.order).map(entry => { const session = agentSession(entry.role); const completed = session?.todos?.filter(todo => todo.status === 'completed').length || 0; return <button className="agent-card" data-agent-state={entry.state} key={entry.role} onClick={() => openAgent(entry.role)}><div><span>{localizeAgentText(entry.name, locale)}{entry.state === 'update_available' ? <i className="update-dot" aria-label={t('agentHasUpdates')}/> : null}</span><strong>{localizeAgentText(entry.hint, locale)}</strong></div><AgentState entry={entry} agentName={agentName} t={t}/>{session?.todos?.length ? <ol>{session.todos.slice(0, 4).map((todo, index) => <li key={`${todo.title}-${index}`} data-status={todo.status}>{todo.title}</li>)}</ol> : <p>{entry.state === 'locked' ? t('openToSeeNext') : t('agentBuildsTodo')}</p>}<footer>{session?.todos?.length ? `${completed}/${session.todos.length} ${t('done')}` : t('openAgent')} <span>→</span></footer></button>; })}</div></main>
-      : <main className="factory-project"><header><span>{t('product')}</span><h1>{t('factoryPromise')}</h1></header><div className="stage-cards">{STAGES.map(([id, titleKey, descriptionKey, roles], index) => <button key={id} className="stage-card" onClick={() => setStage(id)}><span className="stage-number">0{index + 1}</span><div><h2>{t(titleKey)}</h2><p>{t(descriptionKey)}</p></div><footer>{stageSummary(roles)} <span>→</span></footer></button>)}</div></main>}
+    {selected ? <><button className="factory-back" onClick={() => goToFactory(stage)}>← {t('backToStage')}</button><main className="app-main agent-open">{selectedSession ? <Workspace key={selectedSession.id} root={root} id={selectedSession.id} entry={selectedEntry} config={config} onChanged={refresh} onOpenAgent={openAgent} agentName={agentName} locale={locale} t={t}/> : <AgentStartWorkspace entry={selectedEntry} onOpenAgent={openAgent} agentName={agentName} t={t}/>}</main></>
+      : stage ? <main className="factory-stage"><button className="factory-back" onClick={() => goToFactory()}>← {t('allStages')}</button><header><span>{t('product')}</span><h1>{t(STAGES.find(item => item[0] === stage)?.[1])}</h1><p>{t(STAGES.find(item => item[0] === stage)?.[2])}</p></header><div className="agent-cards">{stage === 'sources' && <><button className="agent-card source-method" onClick={() => importPicker.current?.click()}><div><span>{t('files')}</span><strong>{t('uploadSources')}</strong></div><p>{t('uploadSourcesBody')}</p><footer>{t('chooseFiles')} <span>→</span></footer></button><button className="agent-card source-method" disabled><div><span>{t('comingSoon')}</span><strong>{t('futureSources')}</strong></div><p>{t('futureSourcesBody')}</p><footer>{t('comingSoon')}</footer></button><input ref={importPicker} aria-label={t('uploadInputFiles')} hidden type="file" multiple onChange={e => { uploadProjectFiles([...e.target.files]); e.target.value = ''; }}/></>}{STAGES.find(item => item[0] === stage)?.[3].map(agentEntry).filter(Boolean).sort((a, b) => a.order - b.order).map(entry => { const session = agentSession(entry.role); const completed = session?.todos?.filter(todo => todo.status === 'completed').length || 0; return <button className="agent-card" data-agent-state={entry.state} key={entry.role} onClick={() => openAgent(entry.role)}><div><span>{localizeAgentText(entry.name, locale)}{entry.state === 'update_available' ? <i className="update-dot" aria-label={t('agentHasUpdates')}/> : null}</span><strong>{localizeAgentText(entry.hint, locale)}</strong></div><AgentState entry={entry} agentName={agentName} t={t}/>{session?.todos?.length ? <ol>{session.todos.slice(0, 4).map((todo, index) => <li key={`${todo.title}-${index}`} data-status={todo.status}>{todo.title}</li>)}</ol> : <p>{entry.state === 'locked' ? t('openToSeeNext') : t('agentBuildsTodo')}</p>}<footer>{session?.todos?.length ? `${completed}/${session.todos.length} ${t('done')}` : t('openAgent')} <span>→</span></footer></button>; })}</div></main>
+      : <main className="factory-project"><header><span>{t('product')}</span><h1>{t('factoryPromise')}</h1></header><div className="stage-cards">{STAGES.map(([id, titleKey, descriptionKey, roles], index) => <button key={id} className="stage-card" onClick={() => goToFactory(id)}><span className="stage-number">0{index + 1}</span><div><h2>{t(titleKey)}</h2><p>{t(descriptionKey)}</p></div><footer>{stageSummary(roles)} <span>→</span></footer></button>)}</div></main>}
   </section>;
 }
 function Workspace({ root, id, entry, config, onChanged, onOpenAgent, agentName, locale, t }) {
