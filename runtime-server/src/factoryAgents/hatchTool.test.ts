@@ -10,8 +10,8 @@ import { WorkbenchStore } from "./store.js";
 import { ClientHelloSchema, PROTOCOL_VERSION } from "../protocol.js";
 
 // Explicit transport test fixture, not evidence of a real Runtime/model execution.
-for (const account of ["buyer", "creator"] as const) test(`HTool uses the shared Runtime as ${account}, isolates private files and saves original assets`, async () => {
-  const token = `test-${account}-token`;
+test("HTool uses the shared Runtime for its host Product, isolates private files and saves original assets", async () => {
+  const token = "test-creator-token";
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-transport-unit-"));
   let created = 0; let messages = 0; let mismatch = false; let wrongConversation = false; let cancelled = 0;
   const hellos: Array<Record<string, unknown>> = [];
@@ -23,8 +23,8 @@ for (const account of ["buyer", "creator"] as const) test(`HTool uses the shared
   const server = http.createServer(async (req, res) => {
     assert.equal(req.headers.authorization, `Bearer ${token}`);
     const scope = new URL(req.url!, "http://localhost").searchParams;
-    assert.equal(scope.get("product_id"), account === "creator" ? productId : null);
-    assert.equal(scope.has("entitlement_id"), account === "buyer");
+    assert.equal(scope.get("product_id"), productId);
+    assert.equal(scope.has("entitlement_id"), false);
     if (req.method === "POST") { for await (const _chunk of req) {} created++; res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ conversation: { id: "conv_test" } })); }
     else if (req.url?.includes("/assets/")) { res.setHeader("content-type", "text/markdown"); res.end("# Actual asset fixture\r\nOriginal bytes.\r\n"); }
     else { res.setHeader("content-type", "application/json"); res.end(JSON.stringify({ conversation: { id: "conv_test" }, messages: [] })); }
@@ -52,10 +52,11 @@ for (const account of ["buyer", "creator"] as const) test(`HTool uses the shared
     const address = server.address(); assert.ok(address && typeof address !== "string");
     const base = `http://127.0.0.1:${address.port}`;
     const store = new WorkbenchStore(root); const s = await store.create("evaluator");
-    const target = { runtimeUrl: `${base}/v1/runtime`, creatorId, productId, ...(account === "buyer" ? { entitlementId: "33333333-3333-4333-8333-333333333333" } : {}) };
-    await store.update(s.id, session => { session.target = target; });
+    const target = { creatorId, productId };
     await store.put(s.id, "input/RUBRIC.md", Buffer.from("Private grading criteria"), { actor: "user" });
-    const tool = hatchTool(store, s.id, () => {}, { HATCH_FACTORY_RUNTIME_URL: `${base}/v1/runtime`, ...(account === "buyer" ? { HATCH_FACTORY_AUTH_TOKEN: token } : { HATCH_FACTORY_CREATOR_TOKEN: token }) });
+    const tool = hatchTool(store, s.id, () => {}, target, { HATCH_FACTORY_RUNTIME_URL: `${base}/v1/runtime`, HATCH_FACTORY_CREATOR_TOKEN: token });
+    target.productId = "99999999-9999-4999-8999-999999999999";
+    assert.ok(!JSON.stringify(tool.parameters).includes("productId") && !JSON.stringify(tool.parameters).includes("product_id"));
     await assert.rejects(tool.execute("leak", { operation: "start", message: "Task", material_paths: ["input/RUBRIC.md"] }), /public client/);
     assert.equal(created, 0);
     await tool.execute("first", { operation: "start", message: "Customer task" });
@@ -70,7 +71,7 @@ for (const account of ["buyer", "creator"] as const) test(`HTool uses the shared
     await assert.rejects(tool.execute("wrong-cancel", { operation: "cancel" }), /different Agent or conversation/);
     assert.equal(messages, 2); assert.equal(cancelled, 1);
     wrongConversation = false;
-    assert.ok(hellos.every(h => account === "creator" ? h.product_id === productId && h.entitlement_id === undefined : h.entitlement_id === target.entitlementId));
+    assert.ok(hellos.every(h => h.product_id === productId && h.entitlement_id === undefined));
     assert.ok(hellos.every(h => Array.isArray(h.local_tools) && h.local_tools.length === 0 && h.auth_token === token));
     assert.equal((await store.read(s.id, "output/RESULT.md")).bytes.toString(), "# Fixture response 2\n");
     const records = (await store.get(s.id)).files;
@@ -107,8 +108,8 @@ test("stopping evaluation aborts an outstanding shared-client HTTP request", { t
     const address = server.address(); assert.ok(address && typeof address !== "string");
     const runtimeUrl = `http://127.0.0.1:${address.port}/v1/runtime`;
     const store = new WorkbenchStore(root); const s = await store.create("evaluator");
-    await store.update(s.id, state => { state.target = { runtimeUrl, creatorId: "11111111-1111-4111-8111-111111111111", productId: "22222222-2222-4222-8222-222222222222" }; });
-    const tool = hatchTool(store, s.id, () => {}, { HATCH_FACTORY_RUNTIME_URL: runtimeUrl, HATCH_FACTORY_CREATOR_TOKEN: "unit-test-token" });
+    const scope = { creatorId: "11111111-1111-4111-8111-111111111111", productId: "22222222-2222-4222-8222-222222222222" };
+    const tool = hatchTool(store, s.id, () => {}, scope, { HATCH_FACTORY_RUNTIME_URL: runtimeUrl, HATCH_FACTORY_CREATOR_TOKEN: "unit-test-token" });
     await assert.rejects(tool.execute("cancel", { operation: "start", message: "Test request" }, controller.signal));
     assert.equal((await store.get(s.id)).hatch, undefined);
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(root, { recursive: true, force: true }); }

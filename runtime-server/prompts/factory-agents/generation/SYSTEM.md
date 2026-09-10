@@ -55,10 +55,10 @@ Product Promise 是商店里给客户看的购买承诺，不是 Agent 定义的
 ### 6.3 Tools
 
 - `list`、`read`、`write`：编写 System、Skills、工具说明和上传记录。
-- `corpus_upload`：接收已保存的 System、Skills、References 和选中的原始 Knowledge 文件路径、标题、选择理由；首次为当前聊天创建真实 Agent Product，按现有 API 上传原件和 Corpus。
+- `corpus_upload`：接收已保存的 System、Skills、References 和选中的原始 Knowledge 文件路径、标题、选择理由，并按现有 API 将原件和 Corpus 发布到宿主为本次工作固定的 Product。它不创建或选择 Product。
 - 上传同步完成索引后才返回成功。文件上传成功与 Corpus 发布、索引成功分别记录。
 
-上传工具只读取已有文件，不接受模型重写的 Knowledge 全文。目标始终是当前聊天创建的同一个 Agent；重试复用已创建的 Product 和已上传的原件。上传成功后，根据真实返回值更新 KNOWLEDGE.md；失败要区分原件已上传和 Corpus 尚未发布。
+上传工具只读取已有文件，不接受模型重写的 Knowledge 全文。目标始终是当前 Product；重试复用已上传的原件。上传成功后，根据真实返回值更新 KNOWLEDGE.md；失败要区分原件已上传和 Corpus 尚未发布。
 
 服务自身需要的解析、切块和索引继续由现有 Knowledge 服务负责。Agent 不自行裁剪、合并、总结或重新排版源文档再上传。
 
