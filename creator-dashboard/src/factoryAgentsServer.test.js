@@ -11,10 +11,10 @@ test('Factory reuses Dashboard Creator cookie, CSRF and streams authenticated Re
   const root = await mkdtemp(path.join(os.tmpdir(), 'dashboard-factory-test-'));
   const productId = '22222222-2222-4222-8222-222222222222';
   const factoryRoot = `/v1/creator/products/${productId}/factory-agents`;
-  let role = 'creator'; let calls = 0;
+  let role = 'creator'; let capabilities = []; let calls = 0;
   let streamClosed; const closed = new Promise(resolve => { streamClosed = resolve; });
   const registry = createServer((req, res) => {
-    const account = { id: '11111111-1111-4111-8111-111111111111', email: 'fixture@example.test', display_name: 'Fixture', role };
+    const account = { id: '11111111-1111-4111-8111-111111111111', email: 'fixture@example.test', display_name: 'Fixture', role, capabilities };
     if (req.url === '/v1/auth/signin') { res.setHeader('content-type', 'application/json'); return res.end(JSON.stringify({ account, token: 'fixture-registry-token' })); }
     if (req.url === '/v1/auth/me') { res.setHeader('content-type', 'application/json'); return res.end(JSON.stringify(account)); }
     assert.equal(req.headers.authorization, 'Bearer fixture-registry-token'); calls++;
@@ -66,9 +66,18 @@ test('Factory reuses Dashboard Creator cookie, CSRF and streams authenticated Re
     assert.equal(download.headers.get('content-disposition'), 'attachment; filename="RESULT.md"');
     assert.equal(await download.text(), '# Real bytes\n');
     assert.equal((await fetch(route, { headers: { cookie } })).status, 200);
-    role = 'user';
-    assert.equal((await fetch(route, { headers: { cookie } })).status, 403);
+    capabilities = ['product:read'];
+    assert.equal((await fetch(route, { method: 'POST', headers: { ...headers, 'x-csrf-token': csrf }, body: JSON.stringify({ role: 'voice' }) })).status, 403);
     assert.equal(calls, 5);
+    assert.equal((await fetch(route, { headers: { cookie } })).status, 200);
+    capabilities = ['product:edit'];
+    assert.equal((await fetch(route, { headers: { cookie } })).status, 403);
+    assert.equal(calls, 6);
+    assert.equal((await fetch(route, { method: 'POST', headers: { ...headers, 'x-csrf-token': csrf }, body: JSON.stringify({ role: 'voice' }) })).status, 201);
+    role = 'user';
+    capabilities = [];
+    assert.equal((await fetch(route, { headers: { cookie } })).status, 403);
+    assert.equal(calls, 7);
   } finally {
     api.closeAllConnections(); registry.closeAllConnections();
     await Promise.all([new Promise(resolve => api.close(resolve)), new Promise(resolve => registry.close(resolve))]);

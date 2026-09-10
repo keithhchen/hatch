@@ -1448,6 +1448,7 @@ export async function createDashboardApp(options = {}) {
       if (/^\/v1\/creator\/products\/[^/]+\/factory-agents(?:\/|$)/.test(url.pathname)) {
         const authentication = await authenticate(request, registryUrl, "creator", fetchImpl, portalState);
         if (authentication.error) return send(response, authentication.error.status, authentication.error.body);
+        requireCapability(authentication.profile, request.method === "GET" || request.method === "HEAD" ? "product:read" : "product:edit");
         const abort = new AbortController();
         response.once("close", () => abort.abort());
         try {
