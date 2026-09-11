@@ -3,7 +3,10 @@ name: Hatch factory definitions sync
 # Factory Agent definitions live in the Postgres table
 # hatch_factory_agent_definitions (seeded once from prompts/factory-agents/*).
 # Editing the prompt files does not update existing rows, so after a prompt
-# change is deployed, refresh the definitions from the checked-out sources.
+# change is deployed, refresh the definitions from the deployed image.
+# Runs entirely inside the registry container: the image already carries the
+# compiled definitions module and the prompt sources, and the production
+# runner has no usable Node toolchain on the host.
 on:
   workflow_dispatch:
 
@@ -15,34 +18,19 @@ jobs:
     name: Sync Factory Agent definitions on production
     runs-on: [self-hosted, linux, x64, hatch-prod]
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: runtime-server/package-lock.json
-
-      - name: Build definitions payload
-        working-directory: runtime-server
+      - name: Refresh registry definitions from the deployed image
+        working-directory: /opt/hatch
         run: |
-          npm ci
-          npm run build
-          node -e "import('./dist/factoryAgents/definitions.js').then(async m => { const agents = await m.initialAgentDefinitions(); require('node:fs').writeFileSync(process.env.GITHUB_WORKSPACE + '/definitions.json', JSON.stringify({ agents })); })"
-
-      - name: Refresh registry definitions
-        run: |
-          REGISTRY_CONTAINER=$(docker ps --format '{{.Names}}' | grep registry | head -1)
-          test -n "$REGISTRY_CONTAINER"
-          docker exec -i "$REGISTRY_CONTAINER" node -e "
-            const payload = require('node:fs').readFileSync(0, 'utf8');
-            fetch('http://localhost:8100/v1/internal/factory-agent-definitions', {
+          set -euo pipefail
+          docker compose --env-file .env --env-file .release.env -f compose.app.yml exec -T registry node --input-type=module -e "
+            const definitions = await import('file:///app/runtime-server/dist/factoryAgents/definitions.js');
+            const agents = await definitions.initialAgentDefinitions();
+            const response = await fetch('http://localhost:8100/v1/internal/factory-agent-definitions', {
               method: 'PUT',
               headers: { 'content-type': 'application/json', authorization: 'Bearer ' + process.env.HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN },
-              body: payload,
-            }).then(async response => {
-              const body = await response.text();
-              console.log('registry responded', response.status, body.slice(0, 300));
-              if (!response.ok) process.exit(1);
+              body: JSON.stringify({ agents }),
             });
-          " < definitions.json
+            const body = await response.text();
+            console.log('registry responded', response.status, body.slice(0, 300));
+            if (!response.ok) process.exit(1);
+          "
