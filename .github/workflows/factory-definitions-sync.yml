@@ -1,0 +1,48 @@
+name: Hatch factory definitions sync
+
+# Factory Agent definitions live in the Postgres table
+# hatch_factory_agent_definitions (seeded once from prompts/factory-agents/*).
+# Editing the prompt files does not update existing rows, so after a prompt
+# change is deployed, refresh the definitions from the checked-out sources.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    name: Sync Factory Agent definitions on production
+    runs-on: [self-hosted, linux, x64, hatch-prod]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: runtime-server/package-lock.json
+
+      - name: Build definitions payload
+        working-directory: runtime-server
+        run: |
+          npm ci
+          npm run build
+          node -e "import('./dist/factoryAgents/definitions.js').then(async m => { const agents = await m.initialAgentDefinitions(); require('node:fs').writeFileSync(process.env.GITHUB_WORKSPACE + '/definitions.json', JSON.stringify({ agents })); })"
+
+      - name: Refresh registry definitions
+        run: |
+          REGISTRY_CONTAINER=$(docker ps --format '{{.Names}}' | grep registry | head -1)
+          test -n "$REGISTRY_CONTAINER"
+          docker exec -i "$REGISTRY_CONTAINER" node -e "
+            const payload = require('node:fs').readFileSync(0, 'utf8');
+            fetch('http://localhost:8100/v1/internal/factory-agent-definitions', {
+              method: 'PUT',
+              headers: { 'content-type': 'application/json', authorization: 'Bearer ' + process.env.HATCH_REGISTRY_DEPLOYMENT_SERVICE_TOKEN },
+              body: payload,
+            }).then(async response => {
+              const body = await response.text();
+              console.log('registry responded', response.status, body.slice(0, 300));
+              if (!response.ok) process.exit(1);
+            });
+          " < definitions.json
