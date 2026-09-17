@@ -104,6 +104,29 @@
   max-width: 100%;
 }
 
+.factory-todo-list {
+  min-width: 0;
+  margin-top: 0.5rem;
+}
+
+.factory-todo-row {
+  display: flex;
+  align-items: flex-start;
+  min-width: 0;
+  gap: 0.5rem;
+  line-height: 1.5;
+}
+
+.factory-todo-marker {
+  flex: 0 0 auto;
+}
+
+.factory-todo-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 @media (max-width: 900px) {
   .factory-app { overflow: hidden; }
   .factory-app > header { position: sticky; top: 0; z-index: 2; }

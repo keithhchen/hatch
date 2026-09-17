@@ -26,6 +26,18 @@ test('Factory navigation is URL-controlled down to the Agent page', async () => 
   assert.match(portal, /agent=\{route\.factoryAgent\}/);
 });
 
+test('Factory overview removes duplicate chrome without removing real navigation', async () => {
+  const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /<Avatar[^>]*>F<\/Avatar>/);
+  assert.doesNotMatch(source, /<Chip size="small" label=\{t\("factory"\)\} variant="outlined"/);
+  assert.doesNotMatch(source, /<Typography variant="overline" color="primary\.main"[^>]*>\{t\("factory"\)\}<\/Typography>/);
+  assert.doesNotMatch(source, /<Typography variant="overline" color="text\.secondary"[^>]*>\{t\("factory"\)\}<\/Typography>/);
+  assert.doesNotMatch(source, /bgcolor: "#fbfcfe", borderBottom: 1, borderColor: "divider"\}\}><Typography variant="subtitle2" fontWeight=\{750\}>\{t\("factory"\)\}/);
+  assert.match(source, /<SimpleTreeView/);
+  assert.match(source, /onClick=\{\(\) => goToFactory\(id\)\}/);
+  assert.match(source, /onClick=\{\(\) => onOpenAgent\(entry\.role\)\}/);
+});
+
 test('Factory JSX keeps visible copy in i18n and reads Agent identity from database definitions', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /[\u3400-\u9fff]/);
@@ -55,6 +67,33 @@ test('Factory chat keeps scrolling inside the workbench pane', async () => {
   assert.match(`${portalStyles}\n${factoryStyles}`, /\.cpv2-main--workbench\s*\{[^}]*overflow:\s*hidden/);
   assert.match(factoryStyles, /\.factory-chat-scroll\s*\{[^}]*overscroll-behavior:\s*contain/);
   assert.doesNotMatch(factoryStyles, /\.factory-app\s*\{[^}]*overflow:\s*auto/);
+});
+
+test('Factory file previews use a real modal while preserving live file actions', async () => {
+  const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
+  assert.match(source, /const selectedFile = file \? session\.files\.find\(record => record\.path === file\) : null/);
+  assert.match(source, /selectedFile && <FileViewer/);
+  assert.match(source, /onClose=\{\(\) => setFile\(null\)\}/);
+  assert.doesNotMatch(source, /file \? <FileViewer/);
+  assert.match(source, /function FileViewer\(\{[^}]*onClose/);
+  assert.match(source, /return <Dialog open onClose=\{onClose\}/);
+  assert.match(source, /<DialogContent/);
+  assert.match(source, /<DialogActions>/);
+  assert.match(source, /<Tabs value=\{mode\}/);
+  assert.match(source, /onClick=\{\(\) => onAddToChat\(record\.path\)\}/);
+  assert.match(source, /method: "POST", body: \{ path: target, base64: btoa\(binary\) \}/);
+  assert.match(source, /discardEdits/);
+  assert.match(source, /download/);
+});
+
+test('Factory chat keeps streamed blocks stable through terminal persistence', async () => {
+  const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
+  assert.match(source, /const \[activityVisible, setActivityVisible\] = useState\(true\)/);
+  assert.match(source, /if \(value\.type === "message"\) load\(true\)/);
+  assert.match(source, /if \(clearStream\) \{ setStream\(""\); setActivityVisible\(false\); \}/);
+  assert.match(source, /\{running && activityVisible && <Stack/);
+  assert.match(source, /if \(value\.type === "delta"\) \{ setActivityVisible\(false\);/);
+  assert.doesNotMatch(source, /if \(value\.type === "message" \|\| value\.type === "state"\) \{ setStream\(""\); load\(\); \}/);
 });
 
 test('Factory hands selected output files to an available Agent in the same Product', async () => {
