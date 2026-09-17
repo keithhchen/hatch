@@ -105,6 +105,12 @@ test('Factory chat header removes terminal status and message-count chrome', asy
   assert.doesNotMatch(source, /session\.messages\?\.length \|\| 0\} \{t\("chat"\)\}/);
 });
 
+test('Factory tool call summaries omit the redundant successful-return label', async () => {
+  const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /t\("toolReturned"\)/);
+  assert.match(source, /status \? ` · \$\{status\}` : ""/);
+});
+
 test('Factory consumes the shared Hatch UI theme instead of an indigo local theme', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
   const styles = await readFile(new URL('./factoryAgents.css', import.meta.url), 'utf8');
