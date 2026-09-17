@@ -69,6 +69,17 @@ test('Factory chat keeps scrolling inside the workbench pane', async () => {
   assert.doesNotMatch(factoryStyles, /\.factory-app\s*\{[^}]*overflow:\s*auto/);
 });
 
+test('Factory chat uses right-aligned user bubbles without speaker labels', async () => {
+  const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
+  const styles = await readFile(new URL('./factoryAgents.css', import.meta.url), 'utf8');
+  assert.match(source, /factory-message-bubble/);
+  assert.match(source, /justifyContent: user \? "flex-end" : "flex-start"/);
+  assert.doesNotMatch(source, /t\(message\.role === "user" \? "you" : "agent"\)/);
+  assert.match(styles, /\.factory-message-bubble\s*\{/);
+  assert.match(styles, /background:\s*var\(--hatch-ui-primary/);
+  assert.match(styles, /max-width:\s*min\(82%, 640px\)/);
+});
+
 test('Factory consumes the shared Hatch UI theme instead of an indigo local theme', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
   const styles = await readFile(new URL('./factoryAgents.css', import.meta.url), 'utf8');

@@ -31,6 +31,49 @@
   scrollbar-gutter: stable;
 }
 
+.factory-message-content {
+  min-width: 0;
+  max-width: min(100%, 760px);
+}
+
+.factory-message-bubble {
+  min-width: 0;
+  max-width: min(82%, 640px);
+  padding: 0.7rem 1rem;
+  border-radius: 16px 16px 4px 16px;
+  color: var(--hatch-ui-on-primary, #fffaf4);
+  background: var(--hatch-ui-primary, #1f1c19);
+}
+
+.factory-message-bubble .factory-markdown {
+  color: inherit;
+}
+
+.factory-message-bubble .factory-markdown > * {
+  margin-block: 0 0.55rem;
+}
+
+.factory-message-bubble .factory-markdown > *:last-child {
+  margin-bottom: 0;
+}
+
+.factory-message-bubble .factory-markdown h1,
+.factory-message-bubble .factory-markdown h2,
+.factory-message-bubble .factory-markdown h3,
+.factory-message-bubble .factory-markdown a {
+  color: inherit;
+}
+
+.factory-message-bubble .factory-markdown blockquote {
+  color: inherit;
+  border-color: color-mix(in srgb, currentColor 42%, transparent);
+}
+
+.factory-message-bubble .factory-markdown pre,
+.factory-message-bubble .factory-markdown code {
+  background: color-mix(in srgb, currentColor 14%, transparent);
+}
+
 .factory-resize-handle {
   flex: 0 0 5px;
   cursor: col-resize;
