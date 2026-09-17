@@ -22,6 +22,7 @@ test('Factory header uses the real Product name and removes the inspector headin
   assert.doesNotMatch(source, /<Typography variant="subtitle1" fontWeight=\{750\}>\{t\("nextSteps"\)\}<\/Typography>/);
   assert.doesNotMatch(source, /backToStage/);
   assert.doesNotMatch(source, /<Refresh/);
+  assert.match(source, /if \(entry\?\.state === "complete"\) return null/);
 });
 
 test('Factory navigation is URL-controlled down to the Agent page', async () => {
