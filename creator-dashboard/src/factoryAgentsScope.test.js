@@ -118,6 +118,11 @@ test('Factory chat header removes terminal status and message-count chrome', asy
   assert.doesNotMatch(source, /session\.messages\?\.length \|\| 0\} \{t\("chat"\)\}/);
 });
 
+test('Factory composer does not render a redundant message label', async () => {
+  const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /<Typography variant="caption" color="text\.secondary">\{t\("messageLabel"\)\}<\/Typography>/);
+});
+
 test('Factory tool call summaries omit the redundant successful-return label', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /t\("toolReturned"\)/);
