@@ -126,7 +126,7 @@ export function CreatorPortalV2({
             <MuiAvatar className="cpv2-avatar" sx={{ bgcolor: "var(--hatch-accent, #a64e35)", color: "var(--hatch-ui-on-primary, #fffaf4)" }}>
               {profile?.initials || initials(profile?.display_name)}
             </MuiAvatar>
-            <span className="cpv2-account-copy"><strong>{profile?.display_name || t("creator")}</strong><small>{profile?.handle || t("creatorAccount")}</small></span>
+            <span className="cpv2-account-copy"><strong>{profile?.display_name || t("creator")}</strong></span>
             <ExpandMore className="cpv2-account-chevron" fontSize="small" aria-hidden="true" />
           </ButtonBase>
           <MuiMenu
@@ -141,7 +141,7 @@ export function CreatorPortalV2({
           >
             <div className="cpv2-account-menu-header">
               <MuiAvatar className="cpv2-avatar" sx={{ bgcolor: "var(--hatch-accent, #a64e35)", color: "var(--hatch-ui-on-primary, #fffaf4)" }}>{profile?.initials || initials(profile?.display_name)}</MuiAvatar>
-              <div><MuiTypography variant="subtitle2" fontWeight={750}>{profile?.display_name || t("creator")}</MuiTypography><MuiTypography variant="caption" color="text.secondary" noWrap>{profile?.handle || t("creatorAccount")}</MuiTypography></div>
+              <MuiTypography variant="subtitle2" fontWeight={750}>{profile?.display_name || t("creator")}</MuiTypography>
             </div>
             <MuiDivider />
             <div className="cpv2-account-menu-label"><LanguageIcon fontSize="small" /><MuiTypography variant="overline">{t("language")}</MuiTypography></div>
