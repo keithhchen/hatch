@@ -22,13 +22,16 @@ import {
   Textarea,
   UnavailableState
 } from "@hatch/ui";
+import { Avatar as MuiAvatar, ButtonBase, Divider as MuiDivider, ListItemIcon, ListItemText, Menu as MuiMenu, MenuItem as MuiMenuItem, Typography as MuiTypography } from "@mui/material";
+import { Check, ExpandMore, Language as LanguageIcon, Logout } from "@mui/icons-material";
+import { createTheme, ThemeProvider } from "@mui/material/styles";
+import { hatchMuiThemeOptions } from "@hatch/ui";
 import { AutosaveStatus } from "@hatch/ui/product";
 import { StorefrontDetails } from "./StorefrontDetails.jsx";
 import { creatorOrderQuery } from "./storefrontModel.js";
 import { creatorFactoryPath, parseCreatorRoute } from "./creatorRoutes.js";
 import { createCreatorTranslator } from "./creatorI18n.js";
 import { CreatorProductWorkspace } from "./CreatorProductWorkspace.jsx";
-import { LanguageSwitcher } from "./LanguageSwitcher.jsx";
 import { useLocale } from "./locale.jsx";
 import "./creatorPortalV2.css";
 
@@ -41,6 +44,8 @@ const PRODUCT_TABS = [
   ["data-controls", "dataControls"]
 ];
 
+const creatorMuiTheme = createTheme(hatchMuiThemeOptions);
+
 export function CreatorPortalV2({
   pathname = typeof window === "undefined" ? ROOT : window.location.pathname,
   navigate = defaultNavigate,
@@ -50,7 +55,8 @@ export function CreatorPortalV2({
   onLogout
 }) {
   const route = useMemo(() => parseCreatorRoute(pathname), [pathname]);
-  const { locale } = useLocale();
+  const { locale, setLocale } = useLocale();
+  const [accountAnchorEl, setAccountAnchorEl] = useState(null);
   const t = useMemo(() => createCreatorTranslator(locale), [locale]);
   const mainRef = useRef(null);
   const navigationGuardRef = useRef(null);
@@ -86,8 +92,12 @@ export function CreatorPortalV2({
     if (typeof document !== "undefined") document.title = `${localizedRouteTitle(route, t)} · Hatch`;
   }, [route, t]);
 
+  const accountMenuOpen = Boolean(accountAnchorEl);
+  const closeAccountMenu = () => setAccountAnchorEl(null);
+
   return (
-    <div className="cpv2">
+    <ThemeProvider theme={creatorMuiTheme}>
+      <div className="cpv2">
       <aside className="cpv2-sidebar">
         <HatchBrand as="button" className="cpv2-brand" type="button" onClick={() => go(ROOT)} aria-label={t("hatchCreatorHome")} />
         <div className="cpv2-mobile-nav">
@@ -106,22 +116,45 @@ export function CreatorPortalV2({
           <SpaceLink href="/account" navigate={go}>{t("account")}</SpaceLink>
         </nav>
         <div className="cpv2-account">
-          <span className="cpv2-avatar" aria-hidden="true">{profile?.initials || initials(profile?.display_name)}</span>
-          <span><strong>{profile?.display_name || t("creator")}</strong><small>{profile?.handle || t("creatorAccount")}</small></span>
-          <div className="cpv2-language-picker">
-            <LanguageSwitcher
-              className="cpv2-language-select"
-              compact
-              labels={{ language: t("language"), zh: t("chinese"), en: t("english"), ja: t("japanese") }}
-            />
-          </div>
-          {onLogout ? <Button type="button" variant="ghost" size="small" onClick={onLogout}>{t("signOut")}</Button> : null}
+          <ButtonBase
+            className="cpv2-account-trigger"
+            onClick={(event) => setAccountAnchorEl(event.currentTarget)}
+            aria-controls={accountMenuOpen ? "creator-account-menu" : undefined}
+            aria-expanded={accountMenuOpen ? "true" : undefined}
+            aria-haspopup="menu"
+          >
+            <MuiAvatar className="cpv2-avatar" sx={{ bgcolor: "var(--hatch-accent, #a64e35)", color: "var(--hatch-ui-on-primary, #fffaf4)" }}>
+              {profile?.initials || initials(profile?.display_name)}
+            </MuiAvatar>
+            <span className="cpv2-account-copy"><strong>{profile?.display_name || t("creator")}</strong><small>{profile?.handle || t("creatorAccount")}</small></span>
+            <ExpandMore className="cpv2-account-chevron" fontSize="small" aria-hidden="true" />
+          </ButtonBase>
+          <MuiMenu
+            id="creator-account-menu"
+            anchorEl={accountAnchorEl}
+            open={accountMenuOpen}
+            onClose={closeAccountMenu}
+            anchorOrigin={{ vertical: "top", horizontal: "left" }}
+            transformOrigin={{ vertical: "bottom", horizontal: "left" }}
+            PaperProps={{ sx: { minWidth: 256, mb: 1, border: "1px solid var(--hatch-ui-border-soft, rgba(54,43,33,.12))", borderRadius: "var(--hatch-radius-dialog, 14px)", backgroundColor: "var(--hatch-ui-surface-solid, #fbf8f2)", boxShadow: "var(--hatch-shadow-popover, 0 16px 42px rgba(47,35,26,.16))" } }}
+            MenuListProps={{ dense: true, "aria-label": t("account") }}
+          >
+            <div className="cpv2-account-menu-header">
+              <MuiAvatar className="cpv2-avatar" sx={{ bgcolor: "var(--hatch-accent, #a64e35)", color: "var(--hatch-ui-on-primary, #fffaf4)" }}>{profile?.initials || initials(profile?.display_name)}</MuiAvatar>
+              <div><MuiTypography variant="subtitle2" fontWeight={750}>{profile?.display_name || t("creator")}</MuiTypography><MuiTypography variant="caption" color="text.secondary" noWrap>{profile?.handle || t("creatorAccount")}</MuiTypography></div>
+            </div>
+            <MuiDivider />
+            <div className="cpv2-account-menu-label"><LanguageIcon fontSize="small" /><MuiTypography variant="overline">{t("language")}</MuiTypography></div>
+            {[['zh', t("chinese")], ['en', t("english")], ['ja', t("japanese")]].map(([value, label]) => <MuiMenuItem key={value} selected={locale === value} onClick={() => { setLocale(value); closeAccountMenu(); }}><ListItemIcon>{locale === value ? <Check fontSize="small" /> : <span className="cpv2-menu-icon-placeholder" />}</ListItemIcon><ListItemText primary={label} /></MuiMenuItem>)}
+            {onLogout ? <><MuiDivider /><MuiMenuItem onClick={() => { closeAccountMenu(); void onLogout(); }}><ListItemIcon><Logout fontSize="small" /></ListItemIcon><ListItemText primary={t("signOut")} /></MuiMenuItem></> : null}
+          </MuiMenu>
         </div>
       </aside>
       <main id="creator-main" className={`cpv2-main${route.kind === "factory-agents" ? " cpv2-main--workbench" : ""}`} ref={mainRef}>
         <CreatorRoute route={route} token={token} request={request} navigate={go} profile={profile} locale={locale} t={t} registerNavigationGuard={registerNavigationGuard} />
       </main>
-    </div>
+      </div>
+    </ThemeProvider>
   );
 }
 
