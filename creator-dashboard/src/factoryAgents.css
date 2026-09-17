@@ -90,6 +90,11 @@
   background: var(--hatch-ui-surface-window, #f4f2ee);
 }
 
+.factory-voice-controls,
+.factory-chat-composer {
+  background: var(--hatch-ui-surface-window, #f4f2ee);
+}
+
 .factory-inspector-scroll {
   background: var(--hatch-ui-surface-sidebar, #fbfaf7);
 }

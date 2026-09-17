@@ -87,6 +87,13 @@ test('Factory chat keeps scrolling inside the workbench pane', async () => {
   assert.doesNotMatch(factoryStyles, /\.factory-app\s*\{[^}]*overflow:\s*auto/);
 });
 
+test('Factory voice controls and Composer share the Hatch chat surface', async () => {
+  const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
+  const styles = await readFile(new URL('./factoryAgents.css', import.meta.url), 'utf8');
+  assert.match(source, /className="factory-voice-controls"/);
+  assert.match(styles, /\.factory-voice-controls,[\s\S]*\.factory-chat-composer\s*\{[^}]*var\(--hatch-ui-surface-window/s);
+});
+
 test('Factory workbench uses stable shell panes instead of card-driven page chrome', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
   const portalStyles = await readFile(new URL('./creatorPortalV2.css', import.meta.url), 'utf8');
