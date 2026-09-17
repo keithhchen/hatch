@@ -69,6 +69,19 @@ test('Factory chat keeps scrolling inside the workbench pane', async () => {
   assert.doesNotMatch(factoryStyles, /\.factory-app\s*\{[^}]*overflow:\s*auto/);
 });
 
+test('Factory workbench uses stable shell panes instead of card-driven page chrome', async () => {
+  const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
+  const portalStyles = await readFile(new URL('./creatorPortalV2.css', import.meta.url), 'utf8');
+  const factoryStyles = await readFile(new URL('./factoryAgents.css', import.meta.url), 'utf8');
+  assert.match(source, /className="factory-stage-rail"/);
+  assert.match(source, /className="factory-workspace"/);
+  assert.match(source, /className="factory-pane-header"/);
+  assert.match(`${portalStyles}\n${factoryStyles}`, /grid-template-columns:\s*256px minmax\(0, 1fr\)/);
+  assert.match(factoryStyles, /\.factory-chat-scroll\s*\{[^}]*background:/);
+  assert.match(factoryStyles, /\.factory-inspector-scroll\s*\{[^}]*background:/);
+  assert.match(factoryStyles, /\.factory-app \.MuiAccordion-root\s*\{/);
+});
+
 test('Factory chat uses right-aligned user bubbles without speaker labels', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
   const styles = await readFile(new URL('./factoryAgents.css', import.meta.url), 'utf8');
