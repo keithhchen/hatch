@@ -119,6 +119,8 @@ test('Factory consumes the shared Hatch UI theme instead of an indigo local them
 
 test('Factory file previews use a real modal while preserving live file actions', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /minHeight: 140, display: "grid"/);
+  assert.doesNotMatch(source, /t\("chooseFile"\)/);
   assert.match(source, /const selectedFile = file \? session\.files\.find\(record => record\.path === file\) : null/);
   assert.match(source, /selectedFile && <FileViewer/);
   assert.match(source, /onClose=\{\(\) => setFile\(null\)\}/);
