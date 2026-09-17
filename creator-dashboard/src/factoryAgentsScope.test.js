@@ -50,7 +50,7 @@ test('Factory JSX keeps visible copy in i18n and reads Agent identity from datab
 test('Factory uses live dependency state at each interaction boundary', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
   assert.match(source, /availability\?\.updatedDependencies \|\| \[\]/);
-  assert.match(source, /disabled=\{locked\}/);
+  assert.match(source, /ChatComposer disabled=\{locked \|\| busy \|\| running \|\| !config\?\.services\.model\}/);
   assert.match(source, /const targetStage = factorySectionForAgent\(role\)/);
   assert.doesNotMatch(source, /updatedDependencies \|\| entry\.dependencies/);
   assert.doesNotMatch(source, /comments\/export|annotateLines|line-selection|lineSelection/);
@@ -78,6 +78,31 @@ test('Factory chat uses right-aligned user bubbles without speaker labels', asyn
   assert.match(styles, /\.factory-message-bubble\s*\{/);
   assert.match(styles, /background:\s*var\(--hatch-ui-primary/);
   assert.match(styles, /max-width:\s*min\(82%, 640px\)/);
+});
+
+test('Factory uses the MUI X Chat Composer for the real session message endpoint', async () => {
+  const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
+  const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.equal(typeof packageJson.dependencies['@mui/x-chat'], 'string');
+  assert.match(source, /from "@mui\/x-chat"/);
+  assert.match(source, /from "@mui\/x-chat\/headless"/);
+  assert.match(source, /<ChatProvider adapter=\{composerAdapter\}/);
+  assert.match(source, /await api\(endpoint\(root, id, "message"\)/);
+  assert.match(source, /features=\{\{ attachments: false \}\}/);
+  assert.doesNotMatch(source, /<TextField fullWidth multiline minRows=\{2\}/);
+});
+
+test('Factory todo panel exposes every todo in an independently scrollable region', async () => {
+  const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
+  assert.match(source, /className="factory-todo-list" sx=\{\{ maxHeight: 220, overflowY: "auto"/);
+  assert.match(source, /todos\.map\(\(todo, index\)/);
+  assert.doesNotMatch(source, /todos\.slice\(0, 5\)/);
+});
+
+test('Factory chat header removes terminal status and message-count chrome', async () => {
+  const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /<StatusChip/);
+  assert.doesNotMatch(source, /session\.messages\?\.length \|\| 0\} \{t\("chat"\)\}/);
 });
 
 test('Factory consumes the shared Hatch UI theme instead of an indigo local theme', async () => {

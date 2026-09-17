@@ -21,6 +21,7 @@
     "@emotion/styled": "^11.14.1",
     "@mui/icons-material": "^9.4.0",
     "@mui/material": "^9.4.0",
+    "@mui/x-chat": "^9.0.0-alpha.18",
     "@mui/x-tree-view": "^9.13.0",
     "pg": "^8.23.0",
     "prop-types": "^15.8.1",
