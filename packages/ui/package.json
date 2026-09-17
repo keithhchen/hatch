@@ -12,6 +12,7 @@
   ],
   "exports": {
     ".": "./src/index.js",
+    "./mui-theme": "./src/muiTheme.js",
     "./product": "./src/product/index.js",
     "./fonts": "./src/fonts.js",
     "./theme.css": "./src/hatch-ui.css"

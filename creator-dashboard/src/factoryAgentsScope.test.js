@@ -69,6 +69,18 @@ test('Factory chat keeps scrolling inside the workbench pane', async () => {
   assert.doesNotMatch(factoryStyles, /\.factory-app\s*\{[^}]*overflow:\s*auto/);
 });
 
+test('Factory consumes the shared Hatch UI theme instead of an indigo local theme', async () => {
+  const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
+  const styles = await readFile(new URL('./factoryAgents.css', import.meta.url), 'utf8');
+  const muiTheme = await readFile(new URL('../../packages/ui/src/muiTheme.js', import.meta.url), 'utf8');
+  assert.match(source, /hatchMuiThemeOptions/);
+  assert.doesNotMatch(source, /#4f46e5|#f7f8fa|#17202f|#657083/);
+  assert.doesNotMatch(styles, /#4f46e5|#273142|#17202f|#657083|#eef0f4|#f0f2f6/);
+  assert.match(muiTheme, /var\(--hatch-ui-primary\)/);
+  assert.match(muiTheme, /var\(--hatch-ui-accent\)/);
+  assert.match(muiTheme, /var\(--hatch-radius-control\)/);
+});
+
 test('Factory file previews use a real modal while preserving live file actions', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
   assert.match(source, /const selectedFile = file \? session\.files\.find\(record => record\.path === file\) : null/);
