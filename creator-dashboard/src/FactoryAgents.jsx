@@ -14,7 +14,7 @@ import {
 import { createTheme, ThemeProvider, alpha } from "@mui/material/styles";
 import { Group, Panel, Separator, useDefaultLayout } from "react-resizable-panels";
 import { SimpleTreeView, TreeItem } from "@mui/x-tree-view";
-import { ChatComposer, ChatComposerSendButton, ChatComposerTextArea, ChatComposerToolbar } from "@mui/x-chat";
+import { ChatComposer, ChatComposerTextArea, ChatComposerToolbar } from "@mui/x-chat";
 import { ChatProvider } from "@mui/x-chat/headless";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -129,6 +129,7 @@ function Workspace({ root, id, entry, agents, sessions, config, onChanged, onOpe
 
 function ChatPanel({ session, entry, root, id, config, busy, draft, setDraft, stream, activity, activityVisible, composer, composerAdapter, chat, stick, running, locked, error, setError, perform, onOpenFile, agentName, voiceHandler, speaking, setSpeaking, t, prompt, setPrompt }) {
   const composerDisabled = locked || busy || !config?.services.model;
+  const sendDisabled = composerDisabled || !(draft || "").trim();
   const stopResponse = () => perform(() => api(endpoint(root, id, "stop"), { method: "POST", body: {} }));
   const composerSx = { border: "1px solid var(--hatch-ui-border-soft)", borderRadius: "var(--hatch-radius-dialog)", backgroundColor: "var(--hatch-ui-surface-solid)", px: 1.5, py: 1, "&:focus-within": { borderColor: "var(--hatch-ui-border-soft)", boxShadow: "none" }, "&:focus-within:not([data-disabled])": { borderColor: "var(--hatch-ui-border-soft)", boxShadow: "none" }, "& textarea:focus": { outline: "none", boxShadow: "none" } };
   return <Box className="factory-chat-panel" sx={{ height: "100%", minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column", bgcolor: "background.paper" }}>
@@ -149,7 +150,7 @@ function ChatPanel({ session, entry, root, id, config, busy, draft, setDraft, st
         <ChatComposer disabled={composerDisabled} features={{ attachments: false }} sx={composerSx}>
           <ChatComposerTextArea ref={composer} maxRows={7} disabled={running} aria-label={t("messageLabel")} placeholder={t(locked ? "completeDependenciesToStart" : "messagePlaceholder")} />
           <ChatComposerToolbar sx={{ minHeight: 30, pt: 0.5 }}>
-            {running ? <IconButton type="button" aria-label={t("stop")} onClick={stopResponse} disabled={busy} size="small" sx={{ ml: "auto", width: 36, height: 36, borderRadius: "50%", bgcolor: "error.main", color: "error.contrastText", "&:hover": { bgcolor: "error.dark" } }}><Stop fontSize="small" /></IconButton> : <ChatComposerSendButton aria-label={t("send")} disabled={composerDisabled}><Send fontSize="small" /></ChatComposerSendButton>}
+            {running ? <IconButton type="button" aria-label={t("stop")} onClick={stopResponse} disabled={busy} size="small" sx={{ ml: "auto", width: 36, height: 36, borderRadius: "50%", bgcolor: "error.main", color: "error.contrastText", "&:hover": { bgcolor: "error.dark" } }}><Stop fontSize="small" /></IconButton> : <IconButton type="submit" aria-label={t("send")} disabled={sendDisabled} size="small" sx={{ ml: "auto", width: 36, height: 36, borderRadius: "50%", bgcolor: "primary.main", color: "primary.contrastText", "&:hover": { bgcolor: "primary.dark" }, "&.Mui-disabled": { bgcolor: "action.disabledBackground", color: "action.disabled" } }}><Send fontSize="small" /></IconButton>}
           </ChatComposerToolbar>
         </ChatComposer>
       </ChatProvider>

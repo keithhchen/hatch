@@ -59,7 +59,8 @@ test('Factory uses live dependency state at each interaction boundary', async ()
 
 test('Factory composer exposes send, stop, and disabled states without a focus ring', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
-  assert.match(source, /<ChatComposerSendButton aria-label=\{t\("send"\)\} disabled=\{composerDisabled\}>\s*<Send/);
+  assert.match(source, /<IconButton type="submit" aria-label=\{t\("send"\)\} disabled=\{sendDisabled\}[^>]*>\s*<Send/);
+  assert.match(source, /const sendDisabled = composerDisabled \|\| !\(draft \|\| ""\)\.trim\(\)/);
   assert.match(source, /running \? <IconButton type="button" aria-label=\{t\("stop"\)\}/);
   assert.match(source, /disabled=\{busy\} size="small"/);
   assert.match(source, /const composerSx = .*"&:focus-within": \{ borderColor: "var\(--hatch-ui-border-soft\)", boxShadow: "none" \}/);
