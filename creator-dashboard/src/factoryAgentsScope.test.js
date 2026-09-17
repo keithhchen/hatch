@@ -124,6 +124,12 @@ test('Factory tool call summaries omit the redundant successful-return label', a
   assert.match(source, /status \? ` · \$\{status\}` : ""/);
 });
 
+test('Factory renders grouped tool calls as ToolGroup instead of treating them as messages', async () => {
+  const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
+  assert.match(source, /item\.type === "toolGroup" \? <ToolGroup key=\{item\.key\} items=\{item\.items\}/);
+  assert.match(source, /item\.type === "tool" \? <ToolMessage/);
+});
+
 test('Factory consumes the shared Hatch UI theme instead of an indigo local theme', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
   const styles = await readFile(new URL('./factoryAgents.css', import.meta.url), 'utf8');
