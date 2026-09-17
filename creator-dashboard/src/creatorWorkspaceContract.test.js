@@ -11,6 +11,14 @@ test("Creator Product workspace follows Files → About You → Corpus → Brief
   assert.doesNotMatch(source, /getFactoryReview|submitFactoryReview/);
 });
 
+test("Product overview is a first-class tab with editable name and promise", async () => {
+  const source = await readFile(new URL("./CreatorProductWorkspace.jsx", import.meta.url), "utf8");
+  assert.match(source, /const PRODUCT_WORKSPACE_TABS = \["overview", \.\.\.CREATOR_WORKFLOW_STEPS\]/);
+  assert.match(source, /ProductWorkflowTabs productId=\{productId\} active="overview"/);
+  assert.match(source, /updateProduct\(token, product, \{ name, promise \}\)/);
+  assert.match(source, /function ProductWorkflowTabs\(/);
+});
+
 test("Node failures use the existing inline error bar and Retry action", async () => {
   const source = await readFile(new URL("./CreatorProductWorkspace.jsx", import.meta.url), "utf8");
   assert.match(source, /InlineAlert tone="error"/);

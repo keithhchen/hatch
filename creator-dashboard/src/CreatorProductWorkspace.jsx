@@ -27,6 +27,7 @@ import { getCreatorNodeTips } from "./creatorNodeTips.js";
 import "./creatorProductWorkspace.css";
 
 const TAB_KEYS = CREATOR_WORKFLOW_STEPS;
+const PRODUCT_WORKSPACE_TABS = ["overview", ...CREATOR_WORKFLOW_STEPS];
 
 export function CreatorProductOverview({ token, productId, navigate, locale = "en" }) {
   const t = useMemo(() => createCreatorTranslator(locale), [locale]);
@@ -74,6 +75,7 @@ export function CreatorProductOverview({ token, productId, navigate, locale = "e
 
   return <section className="cpv2-product-overview">
     <PageHeader className="cpv2-workspace-header" label={product.status === "published" ? t("published") : t("product")} title={nameDraft || t("untitledProduct")} body={promiseDraft} />
+    <ProductWorkflowTabs productId={productId} active="overview" onSelect={(nextTab) => navigate(`/studio/products/${encodeURIComponent(productId)}/${nextTab}`)} t={t} />
     <form className="cpv2-product-overview-form" onSubmit={(event) => { void save(event); }}>
       <div className="cpv2-overview-form-heading"><div><span className="cpv2-kicker">{t("productOverview")}</span><h2>{t("editProductDetails")}</h2><p>{t("productOverviewBody")}</p></div><StatusTag tone={product.status === "published" ? "success" : "neutral"}>{product.status === "published" ? t("published") : t("draft")}</StatusTag></div>
       <FormField label={t("productName")} required><Input value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} placeholder={t("productNameExample")} required /></FormField>
@@ -154,6 +156,11 @@ export function CreatorProductWorkspace({ token, productId, tab = "files", navig
   }, [navigate, product, productId, state.loading, tab, workflow]);
 
   function goTab(nextTab) {
+    if (nextTab === "overview") {
+      setSelectedTab(nextTab);
+      navigate(`/studio/products/${encodeURIComponent(productId)}/overview`);
+      return;
+    }
     if (!TAB_KEYS.includes(nextTab) || !workflow.steps[nextTab]?.enabled) return;
     setSelectedTab(nextTab);
     navigate(`/studio/products/${encodeURIComponent(productId)}/${nextTab}`);
@@ -276,13 +283,7 @@ export function CreatorProductWorkspace({ token, productId, tab = "files", navig
       </FormField>
       <Button type="submit" loading={state.busy === "product-promise"} disabled={Boolean(state.busy) || !promiseDraft.trim()}>{t("saveProductPromise")}</Button>
     </form>
-    <div className="cpv2-workspace-tabs" role="tablist" aria-label={t("productWorkflow")}>
-      {TAB_KEYS.map((key) => {
-        const step = workflow.steps[key];
-      const label = key === "about-you" ? t("aboutYou") : t(key);
-        return <button key={key} type="button" role="tab" aria-selected={selectedTab === key} aria-disabled={!step.enabled} aria-busy={step.loading} aria-invalid={step.failed || undefined} className={`${selectedTab === key ? "is-active" : ""}${!step.enabled ? " is-disabled" : ""}${step.failed ? " is-failed" : ""}`} disabled={!step.enabled} onClick={() => goTab(key)}><span>{label}</span>{step.loading ? <span className="cpv2-tab-spinner" aria-label={t("loading")} /> : null}</button>;
-      })}
-    </div>
+    <ProductWorkflowTabs productId={productId} active={selectedTab} workflow={workflow} onSelect={goTab} t={t} />
     {error ? <InlineAlert tone="error"><div className="cpv2-error-bar"><span>{error}</span>{(isExecutionError(aboutYou) || isExecutionError(corpus) || state.error) ? <Button type="button" variant="secondary" loading={Boolean(state.busy)} onClick={() => void retryFailedNode()}>{t("retry")}</Button> : null}</div></InlineAlert> : null}
     {state.notice ? <InlineAlert className="cpv2-inline-feedback" tone="success">{state.notice}</InlineAlert> : null}
     {selectedTab === "files" ? <FilesPanel t={t} documents={documents} busy={state.busy} onUpload={upload} onStart={() => void startAboutYou()} onRetry={() => void retryFailedNode()} onDelete={removeFile} hasExecution={Boolean(aboutYou)} /> : null}
@@ -291,6 +292,16 @@ export function CreatorProductWorkspace({ token, productId, tab = "files", navig
     {selectedTab === "brief" ? <BriefPanel t={t} token={token} product={product} briefSpec={briefSpec} busy={state.busy} onRetryAction={(action) => { retryActionRef.current = action; }} onSaved={(nextProduct) => { retryActionRef.current = null; const saved = nextProduct?.product ?? nextProduct; setProduct((current) => ({ ...current, ...saved })); setBriefSpec(saved?.brief_spec ?? null); setState((current) => ({ ...current, notice: t("briefSaved") })); }} onError={(nextError) => setState((current) => ({ ...current, error: messageOf(nextError, t("failureDetailsUnavailable")) }))} /> : null}
     {selectedTab === "complete" ? <CompletePanel t={t} product={product} briefSpec={briefSpec} corpus={corpus} busy={state.busy} setBusy={(busy) => setState((current) => ({ ...current, busy }))} token={token} productId={productId} onRetryAction={(action) => { retryActionRef.current = action; }} onPublished={refresh} onBrief={() => goTab("brief")} onError={(nextError) => setState((current) => ({ ...current, error: messageOf(nextError, t("failureDetailsUnavailable")) }))} /> : null}
   </section>;
+}
+
+function ProductWorkflowTabs({ productId, active, workflow, onSelect, t }) {
+  return <div className="cpv2-workspace-tabs" role="tablist" aria-label={t("productWorkflow")}>
+    {PRODUCT_WORKSPACE_TABS.map((key) => {
+      const step = key === "overview" ? { enabled: true, loading: false, failed: false } : workflow?.steps[key] ?? { enabled: true, loading: false, failed: false };
+      const label = key === "about-you" ? t("aboutYou") : t(key);
+      return <button key={key} type="button" role="tab" aria-selected={active === key} aria-disabled={!step.enabled} aria-busy={step.loading} aria-invalid={step.failed || undefined} className={`${active === key ? "is-active" : ""}${!step.enabled ? " is-disabled" : ""}${step.failed ? " is-failed" : ""}`} disabled={!step.enabled} onClick={() => onSelect(key)}><span>{label}</span>{step.loading ? <span className="cpv2-tab-spinner" aria-label={t("loading")} /> : null}</button>;
+    })}
+  </div>;
 }
 
 async function saveAnswers(answers, startCorpus, token, productId, aboutYou, setAboutYou, setState, t, retryActionRef, corpusExecutionId = `corpus_${crypto.randomUUID()}`, corpusIdempotencyKey = crypto.randomUUID(), answersIdempotencyKey = crypto.randomUUID()) {
