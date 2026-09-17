@@ -50,10 +50,20 @@ test('Factory JSX keeps visible copy in i18n and reads Agent identity from datab
 test('Factory uses live dependency state at each interaction boundary', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
   assert.match(source, /availability\?\.updatedDependencies \|\| \[\]/);
-  assert.match(source, /ChatComposer disabled=\{locked \|\| busy \|\| running \|\| !config\?\.services\.model\}/);
+  assert.match(source, /const composerDisabled = locked \|\| busy \|\| !config\?\.services\.model/);
+  assert.match(source, /<ChatComposer disabled=\{composerDisabled\}/);
   assert.match(source, /const targetStage = factorySectionForAgent\(role\)/);
   assert.doesNotMatch(source, /updatedDependencies \|\| entry\.dependencies/);
   assert.doesNotMatch(source, /comments\/export|annotateLines|line-selection|lineSelection/);
+});
+
+test('Factory composer exposes send, stop, and disabled states without a focus ring', async () => {
+  const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
+  assert.match(source, /<ChatComposerSendButton aria-label=\{t\("send"\)\} disabled=\{composerDisabled\}>\s*<Send/);
+  assert.match(source, /running \? <IconButton type="button" aria-label=\{t\("stop"\)\}/);
+  assert.match(source, /disabled=\{busy\} size="small"/);
+  assert.match(source, /const composerSx = .*"&:focus-within": \{ borderColor: "var\(--hatch-ui-border-soft\)", boxShadow: "none" \}/);
+  assert.match(source, /<ChatComposerTextArea[^>]*disabled=\{running\}/);
 });
 
 test('Factory chat keeps scrolling inside the workbench pane', async () => {
