@@ -171,11 +171,19 @@ export function getProduct(token, productId) {
 }
 
 export function updateProductPromise(token, product, promise) {
+  return updateProduct(token, product, { promise });
+}
+
+export function updateProduct(token, product, input) {
   return dashboardRequest(`/v1/creator/products/${encodeURIComponent(product.id ?? product.product_id)}`, {
     method: "PATCH",
     token,
     headers: { "idempotency-key": crypto.randomUUID() },
-    body: JSON.stringify({ promise, expected_updated_at: product.updated_at })
+    body: JSON.stringify({
+      ...(input.name === undefined ? {} : { name: input.name }),
+      ...(input.promise === undefined ? {} : { promise: input.promise }),
+      expected_updated_at: product.updated_at
+    })
   });
 }
 

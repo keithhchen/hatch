@@ -374,7 +374,7 @@ export class CreatorFactoryService {
   async updateProductPromise(
     creatorId: string,
     productId: string,
-    input: string | { promise: string; expectedUpdatedAt?: string },
+    input: string | { name?: string; promise: string; expectedUpdatedAt?: string },
     expectedUpdatedAt?: string
   ): Promise<CreatorProductRecord> {
     const product = await this.getProduct(creatorId, productId);
@@ -382,6 +382,7 @@ export class CreatorFactoryService {
     const promise = typeof input === "string" ? input : input.promise;
     const expected = typeof input === "string" ? expectedUpdatedAt : input.expectedUpdatedAt;
     return this.productRepository().updateProductPromise(creatorId, productId, {
+      ...(typeof input !== "string" && input.name !== undefined ? { name: validateProductText(input.name, "product.name", 240) } : {}),
       promise: validateProductText(promise, "product.promise"),
       ...(expected ? { expectedUpdatedAt: expected } : {})
     });

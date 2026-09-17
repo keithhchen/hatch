@@ -1,7 +1,6 @@
 const ROOT = "/studio";
-const PRODUCT_TABS = new Set(["files", "about-you", "corpus", "brief", "complete"]);
+const PRODUCT_TABS = new Set(["overview", "files", "about-you", "corpus", "brief", "complete"]);
 const RETIRED_PRODUCT_TABS = new Map([
-  ["overview", "files"],
   ["test", "about-you"],
   ["examples", "corpus"],
   ["versions", "complete"],
@@ -27,6 +26,11 @@ export function creatorFactoryPath(productId, factorySection, factoryAgent) {
   return `${sectionPath}/${factoryAgent}`;
 }
 
+export function creatorProductPath(productId, tab = "overview") {
+  const root = `${ROOT}/products/${encodeURIComponent(productId)}`;
+  return tab ? `${root}/${tab}` : root;
+}
+
 export function parseCreatorRoute(pathname) {
   const clean = `/${String(pathname ?? "").split(/[?#]/)[0].split("/").filter(Boolean).join("/")}`;
   const normalized = clean;
@@ -50,7 +54,7 @@ export function parseCreatorRoute(pathname) {
   if (segments[0] === "products") {
     if (segments.length === 1) return { kind: "products", section: "products" };
     const productId = segments[1];
-    if (segments.length === 2) return { kind: "product", section: "products", productId, tab: "files" };
+    if (segments.length === 2) return { kind: "product", section: "products", productId, tab: "overview" };
     if (PRODUCT_TABS.has(segments[2])) return { kind: "product", section: "products", productId, tab: segments[2] };
     if (RETIRED_PRODUCT_TABS.has(segments[2])) return { kind: "product", section: "products", productId, tab: RETIRED_PRODUCT_TABS.get(segments[2]) };
     if (segments[2] === "preview") return { kind: "preview", section: "products", productId };

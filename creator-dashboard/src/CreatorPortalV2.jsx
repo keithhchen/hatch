@@ -29,9 +29,9 @@ import { hatchMuiThemeOptions } from "@hatch/ui";
 import { AutosaveStatus } from "@hatch/ui/product";
 import { StorefrontDetails } from "./StorefrontDetails.jsx";
 import { creatorOrderQuery } from "./storefrontModel.js";
-import { creatorFactoryPath, parseCreatorRoute } from "./creatorRoutes.js";
+import { creatorFactoryPath, creatorProductPath, parseCreatorRoute } from "./creatorRoutes.js";
 import { createCreatorTranslator } from "./creatorI18n.js";
-import { CreatorProductWorkspace } from "./CreatorProductWorkspace.jsx";
+import { CreatorProductOverview, CreatorProductWorkspace } from "./CreatorProductWorkspace.jsx";
 import { useLocale } from "./locale.jsx";
 import "./creatorPortalV2.css";
 
@@ -180,6 +180,7 @@ function CreatorRoute({ route, token, request, navigate, profile, locale, t, reg
   if (route.kind === "home") return <CreatorHome token={token} request={request} navigate={navigate} profile={profile} t={t} locale={locale} />;
   if (route.kind === "products") return <ProductsPage token={token} request={request} navigate={navigate} t={t} />;
   if (route.kind === "product-create") return <CreatorProductFiles token={token} navigate={navigate} locale={locale} />;
+  if (route.kind === "product" && route.tab === "overview") return <CreatorProductOverview token={token} navigate={navigate} productId={route.productId} locale={locale} />;
   if (route.kind === "product" && ["files", "about-you", "corpus", "brief", "complete"].includes(route.tab)) return <CreatorProductWorkspace token={token} request={request} navigate={navigate} productId={route.productId} tab={route.tab} locale={locale} profile={profile} />;
   if (route.kind === "product") return <ProductPage token={token} request={request} navigate={navigate} productId={route.productId} tab={route.tab} t={t} />;
   if (route.kind === "candidate") return <CreatorProductWorkspace token={token} request={request} navigate={navigate} productId={route.productId} tab="corpus" locale={locale} />;
@@ -234,7 +235,7 @@ function ProductsPage({ token, request, navigate, t }) {
         return <>
           <PageHeader eyebrow={t("products")} title={t("productsPageTitle")} body={t("productsPageBody")} action={t("createProduct")} onAction={() => navigate(`${ROOT}/products/new`)} />
           {products.length ? <section className="cpv2-product-grid" aria-label={t("products")}>
-            {products.map((product) => <ProductCard key={idOf(product, "product")} product={product} t={t} onOpen={() => navigate(creatorFactoryPath(idOf(product, "product")))} />)}
+            {products.map((product) => <ProductCard key={idOf(product, "product")} product={product} t={t} onOpen={() => navigate(creatorProductPath(idOf(product, "product")))} />)}
           </section> : <EmptyState title={t("createFirstProduct")} body={t("createFirstProductBody")} action={t("createProduct")} onAction={() => navigate(`${ROOT}/products/new`)} />}
         </>;
       }}

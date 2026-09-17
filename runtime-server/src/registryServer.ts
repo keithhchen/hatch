@@ -809,6 +809,7 @@ async function route(
         account.id,
         product.repositoryId,
         {
+          ...(body.name !== undefined ? { name: requiredProductText(body.name, "name", 240) } : {}),
           promise: requiredProductText(promise, "promise", 100_000),
           ...(typeof body.expected_updated_at === "string" ? { expectedUpdatedAt: body.expected_updated_at } : {})
         }

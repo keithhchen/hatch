@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Button, FormField, InlineAlert, PageHeader, RadioGroup, Skeleton, StatusTag, Textarea } from "@hatch/ui";
+import { Button, FormField, InlineAlert, Input, PageHeader, RadioGroup, Skeleton, StatusTag, Textarea } from "@hatch/ui";
 import {
   getLatestNodeExecution,
   getProduct,
@@ -10,6 +10,7 @@ import {
   saveProductBriefSpec,
   startAboutYouNode,
   startCorpusNode,
+  updateProduct,
   updateProductPromise,
   uploadProductFile
 } from "./creatorFactory.js";
@@ -26,6 +27,64 @@ import { getCreatorNodeTips } from "./creatorNodeTips.js";
 import "./creatorProductWorkspace.css";
 
 const TAB_KEYS = CREATOR_WORKFLOW_STEPS;
+
+export function CreatorProductOverview({ token, productId, navigate, locale = "en" }) {
+  const t = useMemo(() => createCreatorTranslator(locale), [locale]);
+  const [product, setProduct] = useState(null);
+  const [nameDraft, setNameDraft] = useState("");
+  const [promiseDraft, setPromiseDraft] = useState("");
+  const [state, setState] = useState({ loading: true, busy: false, error: "", notice: "" });
+
+  const refresh = useCallback(async () => {
+    setState((current) => ({ ...current, loading: true, error: "" }));
+    try {
+      const response = await getProduct(token, productId);
+      const nextProduct = response?.product ?? response;
+      setProduct(nextProduct);
+      setNameDraft(nextProduct?.name ?? nextProduct?.product_name ?? "");
+      setPromiseDraft(nextProduct?.promise ?? nextProduct?.description ?? "");
+      setState((current) => ({ ...current, loading: false }));
+    } catch (nextError) {
+      setState((current) => ({ ...current, loading: false, error: messageOf(nextError, t("workspaceLoadError")) }));
+    }
+  }, [productId, t, token]);
+
+  useEffect(() => { void refresh(); }, [refresh]);
+
+  async function save(event) {
+    event?.preventDefault();
+    const name = nameDraft.trim();
+    const promise = promiseDraft.trim();
+    if (!name || !promise || !product) return;
+    setState((current) => ({ ...current, busy: true, error: "", notice: "" }));
+    try {
+      const response = await updateProduct(token, product, { name, promise });
+      const saved = response?.product ?? response;
+      setProduct((current) => ({ ...current, ...saved, name, promise }));
+      setNameDraft(saved?.name ?? name);
+      setPromiseDraft(saved?.promise ?? promise);
+      setState((current) => ({ ...current, busy: false, notice: t("productDetailsSaved") }));
+    } catch (nextError) {
+      setState((current) => ({ ...current, busy: false, error: messageOf(nextError, t("failureDetailsUnavailable")) }));
+    }
+  }
+
+  if (state.loading && !product) return <section className="cpv2-loading" aria-busy="true"><Skeleton lines={5} /></section>;
+  if (!product) return <section className="cpv2-workspace-error"><InlineAlert tone="error">{state.error || t("workspaceLoadError")}</InlineAlert><Button type="button" onClick={() => void refresh()}>{t("retry")}</Button></section>;
+
+  return <section className="cpv2-product-overview">
+    <PageHeader className="cpv2-workspace-header" label={product.status === "published" ? t("published") : t("product")} title={nameDraft || t("untitledProduct")} body={promiseDraft} />
+    <form className="cpv2-product-overview-form" onSubmit={(event) => { void save(event); }}>
+      <div className="cpv2-overview-form-heading"><div><span className="cpv2-kicker">{t("productOverview")}</span><h2>{t("editProductDetails")}</h2><p>{t("productOverviewBody")}</p></div><StatusTag tone={product.status === "published" ? "success" : "neutral"}>{product.status === "published" ? t("published") : t("draft")}</StatusTag></div>
+      <FormField label={t("productName")} required><Input value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} placeholder={t("productNameExample")} required /></FormField>
+      <FormField label={t("whatProductDelivers")} required><Textarea value={promiseDraft} onChange={(event) => setPromiseDraft(event.target.value)} required /></FormField>
+      {state.error ? <InlineAlert tone="error">{state.error}</InlineAlert> : null}
+      {state.notice ? <InlineAlert className="cpv2-inline-feedback" tone="success">{state.notice}</InlineAlert> : null}
+      <div className="cpv2-overview-actions"><Button type="submit" loading={state.busy} disabled={state.busy || !nameDraft.trim() || !promiseDraft.trim()}>{t("saveProductDetails")}</Button><Button type="button" variant="secondary" onClick={() => navigate(`/studio/factory/${encodeURIComponent(productId)}`)}>{t("openFactory")}</Button></div>
+    </form>
+    <section className="cpv2-overview-next"><div><span className="cpv2-kicker">{t("productWorkflow")}</span><h2>{t("continueProductWorkflow")}</h2><p>{t("productsPageBody")}</p></div><div className="cpv2-overview-links"><Button type="button" variant="secondary" onClick={() => navigate(`/studio/products/${encodeURIComponent(productId)}/files`)}>{t("productFiles")}</Button><Button type="button" variant="secondary" onClick={() => navigate(`/studio/products/${encodeURIComponent(productId)}/complete`)}>{t("complete")}</Button></div></section>
+  </section>;
+}
 
 export function CreatorProductWorkspace({ token, productId, tab = "files", navigate, locale = "en" }) {
   const t = useMemo(() => createCreatorTranslator(locale), [locale]);

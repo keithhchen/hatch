@@ -223,7 +223,7 @@ export class InMemoryCreatorFactoryRepository implements CreatorFactoryRepositor
       .map(cloneJson);
   }
 
-  async updateProductPromise(creatorId: string, productId: string, input: { promise: string; expectedUpdatedAt?: string }): Promise<CreatorProductRecord> {
+  async updateProductPromise(creatorId: string, productId: string, input: { name?: string; promise: string; expectedUpdatedAt?: string }): Promise<CreatorProductRecord> {
     return this.write(async () => {
       const product = this.products.get(productId);
       if (!product || product.creatorId !== creatorId) throw new CreatorFactoryRepositoryError("run_not_found", `Product ${productId} was not found`);
@@ -232,6 +232,7 @@ export class InMemoryCreatorFactoryRepository implements CreatorFactoryRepositor
         throw new CreatorFactoryRepositoryError("version_conflict", `Distillation Product ${productId} changed; refresh before saving`);
       }
       const promise = validateProductText(input.promise, "product.promise");
+      if (input.name !== undefined) product.name = validateProductText(input.name, "product.name", 240);
       product.promise = promise;
       product.brief = promise;
       product.updatedAt = new Date().toISOString();
@@ -747,19 +748,20 @@ export class PostgresCreatorFactoryRepository implements CreatorFactoryRepositor
     return result.rows.map(productFromRow);
   }
 
-  async updateProductPromise(creatorId: string, productId: string, input: { promise: string; expectedUpdatedAt?: string }): Promise<CreatorProductRecord> {
+  async updateProductPromise(creatorId: string, productId: string, input: { name?: string; promise: string; expectedUpdatedAt?: string }): Promise<CreatorProductRecord> {
     await this.initialize();
     const promise = validateProductText(input.promise, "product.promise");
+    const name = input.name === undefined ? null : validateProductText(input.name, "product.name", 240);
     const result = await this.pool.query<ProductRow>(`
       UPDATE hatch_creator_products
-      SET promise = $3, updated_at = clock_timestamp()
+      SET name = COALESCE($3, name), promise = $4, updated_at = clock_timestamp()
       WHERE id = $1 AND creator_id = $2 AND status = 'active'
         -- HTTP timestamps are serialized to milliseconds while Postgres
         -- stores microseconds. Compare at the public precision so a fresh
         -- Product read is not rejected as stale solely by hidden precision.
-        AND ($4::timestamptz IS NULL OR date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', $4::timestamptz))
+        AND ($5::timestamptz IS NULL OR date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', $5::timestamptz))
       RETURNING *
-    `, [productId, creatorId, promise, input.expectedUpdatedAt ?? null]);
+    `, [productId, creatorId, name, promise, input.expectedUpdatedAt ?? null]);
     if (!result.rows[0]) {
       const current = await this.getProduct(creatorId, productId);
       if (!current) throw new CreatorFactoryRepositoryError("run_not_found", `Distillation Product ${productId} was not found`);

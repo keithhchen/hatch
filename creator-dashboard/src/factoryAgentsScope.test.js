@@ -9,10 +9,17 @@ test('Factory UI derives every session API from the current Product', async () =
   assert.doesNotMatch(source, /evaluation-targets|method:\s*['"]PUT['"].*target/);
 });
 
-test('Product cards enter the canonical Product-scoped Factory', async () => {
+test('Product cards enter the canonical Product overview', async () => {
   const source = await readFile(new URL('./CreatorPortalV2.jsx', import.meta.url), 'utf8');
-  assert.match(source, /creatorFactoryPath\(idOf\(product, "product"\)\)/);
+  assert.match(source, /creatorProductPath\(idOf\(product, "product"\)\)/);
   assert.doesNotMatch(source, /href="\/studio\/factory"/);
+});
+
+test('Factory header uses the real Product name and removes the inspector heading', async () => {
+  const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
+  assert.match(source, /productName\s*\|\|\s*t\("product"\)/);
+  assert.doesNotMatch(source, /\{productId\}<\/Typography>/);
+  assert.doesNotMatch(source, /<Typography variant="subtitle1" fontWeight=\{750\}>\{t\("nextSteps"\)\}<\/Typography>/);
 });
 
 test('Factory navigation is URL-controlled down to the Agent page', async () => {

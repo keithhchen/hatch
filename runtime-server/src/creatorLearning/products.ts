@@ -37,7 +37,7 @@ export type CreatorProductRepository = {
   createProduct(input: CreateCreatorProductInput): Promise<CreatorProductRecord>;
   getProduct(creatorId: string, productId: string): Promise<CreatorProductRecord | undefined>;
   listProducts(creatorId: string): Promise<CreatorProductRecord[]>;
-  updateProductPromise(creatorId: string, productId: string, input: { promise: string; expectedUpdatedAt?: string }): Promise<CreatorProductRecord>;
+  updateProductPromise(creatorId: string, productId: string, input: { name?: string; promise: string; expectedUpdatedAt?: string }): Promise<CreatorProductRecord>;
   saveBriefSpec(creatorId: string, productId: string, input: { briefSpec: BriefSpec; expectedUpdatedAt?: string }): Promise<CreatorProductRecord>;
   softDeleteProduct(creatorId: string, productId: string): Promise<CreatorProductRecord>;
   setProductRevision(creatorId: string, productId: string, input: { runId: string; revisionId: string }): Promise<CreatorProductRecord>;
