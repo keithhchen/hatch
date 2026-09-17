@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chatEntries } from './factoryMessages.js';
+import { chatEntries, groupToolEntries } from './factoryMessages.js';
 
 test('text and calls stay interleaved, including parallel receipts returned out of order', () => {
   const messages = [
@@ -40,4 +40,19 @@ test('continuing a stopped chat does not mark its old unanswered calls as runnin
   ]);
   assert.equal(entries[0].isCurrentTurn, false);
   assert.equal(entries[2].isCurrentTurn, true);
+});
+
+test('consecutive tool calls render as one expandable tool group without crossing text', () => {
+  const entries = chatEntries([
+    { role: 'assistant', content: [
+      { type: 'toolCall', id: 'a', name: 'list', arguments: {} },
+      { type: 'toolCall', id: 'b', name: 'read', arguments: {} },
+      { type: 'text', text: '结果' },
+      { type: 'toolCall', id: 'c', name: 'write', arguments: {} },
+    ] },
+  ]);
+  const grouped = groupToolEntries(entries);
+  assert.deepEqual(grouped.map(entry => entry.type), ['toolGroup', 'message', 'tool']);
+  assert.deepEqual(grouped[0].items.map(entry => entry.call.name), ['list', 'read']);
+  assert.equal(grouped[0].items.length, 2);
 });

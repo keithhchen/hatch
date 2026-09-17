@@ -16,3 +16,21 @@ export function chatEntries(messages) {
     });
   });
 }
+
+export function groupToolEntries(entries) {
+  const grouped = [];
+  for (const entry of entries) {
+    if (entry.type !== 'tool') {
+      grouped.push(entry);
+      continue;
+    }
+    const previous = grouped.at(-1);
+    if (previous?.type === 'toolGroup') {
+      previous.items.push(entry);
+      previous.isCurrentTurn ||= entry.isCurrentTurn;
+    } else {
+      grouped.push({ key: `tool-group:${entry.key}`, type: 'toolGroup', items: [entry], isCurrentTurn: entry.isCurrentTurn });
+    }
+  }
+  return grouped.flatMap(entry => entry.type === 'toolGroup' && entry.items.length === 1 ? entry.items : [entry]);
+}
