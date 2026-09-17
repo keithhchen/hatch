@@ -118,7 +118,7 @@ export function CreatorPortalV2({
           {onLogout ? <Button type="button" variant="ghost" size="small" onClick={onLogout}>{t("signOut")}</Button> : null}
         </div>
       </aside>
-      <main id="creator-main" className="cpv2-main" ref={mainRef}>
+      <main id="creator-main" className={`cpv2-main${route.kind === "factory-agents" ? " cpv2-main--workbench" : ""}`} ref={mainRef}>
         <CreatorRoute route={route} token={token} request={request} navigate={go} profile={profile} locale={locale} t={t} registerNavigationGuard={registerNavigationGuard} />
       </main>
     </div>

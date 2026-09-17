@@ -44,6 +44,19 @@ test('Factory uses live dependency state at each interaction boundary', async ()
   assert.doesNotMatch(source, /comments\/export|annotateLines|line-selection|lineSelection/);
 });
 
+test('Factory chat keeps scrolling inside the workbench pane', async () => {
+  const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
+  const portal = await readFile(new URL('./CreatorPortalV2.jsx', import.meta.url), 'utf8');
+  const portalStyles = await readFile(new URL('./creatorPortalV2.css', import.meta.url), 'utf8');
+  const factoryStyles = await readFile(new URL('./factoryAgents.css', import.meta.url), 'utf8');
+  assert.match(portal, /cpv2-main\$\{route\.kind === "factory-agents"/);
+  assert.match(source, /className="factory-chat-scroll"/);
+  assert.match(source, /overscrollBehavior: "contain"/);
+  assert.match(`${portalStyles}\n${factoryStyles}`, /\.cpv2-main--workbench\s*\{[^}]*overflow:\s*hidden/);
+  assert.match(factoryStyles, /\.factory-chat-scroll\s*\{[^}]*overscroll-behavior:\s*contain/);
+  assert.doesNotMatch(factoryStyles, /\.factory-app\s*\{[^}]*overflow:\s*auto/);
+});
+
 test('Factory hands selected output files to an available Agent in the same Product', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
   assert.match(source, /candidate\.role !== session\.role && candidate\.state !== "locked"/);
