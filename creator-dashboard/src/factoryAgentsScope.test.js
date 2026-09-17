@@ -185,7 +185,10 @@ test('Factory file previews use a real modal while preserving live file actions'
   assert.match(source, /return <Dialog open onClose=\{onClose\}/);
   assert.match(source, /<DialogContent/);
   assert.match(source, /<DialogActions>/);
-  assert.match(source, /<Tabs value=\{mode\}/);
+  assert.doesNotMatch(source, /<Tabs value=\{mode\}/);
+  assert.doesNotMatch(source, /label=\{t\("read"\)\}/);
+  assert.doesNotMatch(source, /writeRevision/);
+  assert.match(source, /<TextField multiline minRows=\{16\} fullWidth/);
   assert.match(source, /onClick=\{\(\) => onAddToChat\(record\.path\)\}/);
   assert.match(source, /method: "POST", body: \{ path: target, base64: btoa\(binary\) \}/);
   assert.match(source, /discardEdits/);
