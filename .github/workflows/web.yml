@@ -258,7 +258,9 @@ jobs:
           # Validate the container on this host. During a region migration the
           # public DNS may still point at the old production host, so probing
           # HATCH_DOMAIN here can produce a false positive.
-          if ! timeout 30s docker exec hatch-app-dashboard-1 node --input-type=module -e '
+          dashboard_ready=0
+          for attempt in $(seq 1 30); do
+            if timeout 5s docker exec hatch-app-dashboard-1 node --input-type=module -e '
             const checks = ["/readyz", "/health/dashboard", "/explore"];
             for (const path of checks) {
               const response = await fetch(`http://127.0.0.1:8500${path}`);
@@ -267,7 +269,13 @@ jobs:
                 throw new Error("/explore did not return the dashboard asset shell");
               }
             }
-          '; then
+          ' >/dev/null 2>&1; then
+              dashboard_ready=1
+              break
+            fi
+            sleep 2
+          done
+          if test "$dashboard_ready" != 1; then
             if test -n "$previous_image"; then
               HATCH_DASHBOARD_IMAGE="$previous_image" "${compose[@]}" up -d --no-deps dashboard
             else
