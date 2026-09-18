@@ -86,7 +86,8 @@ test('Deep Research starts from Creator identity and public evidence, not manual
   assert.match(i18n, /research: '告诉 Agent 你是谁、做什么，以及它可以在哪里找到你的公开资料/);
   assert.match(i18n, /sourcesStage: '认识 Creator'/);
   assert.match(prompt, /不是一个等待用户整理资料的资料摄入 Agent/);
-  assert.match(prompt, /主动使用 web_search、web_scrape 和 youtube_transcript/);
+  assert.match(prompt, /主动使用 web_search 和 web_scrape/);
+  assert.doesNotMatch(prompt, /youtube_transcript/);
   assert.match(prompt, /不要一开始就要求用户上传文件/);
 });
 

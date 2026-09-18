@@ -28,7 +28,8 @@ export async function factoryAgentTools(options: {
   // askuser is a host capability for text Factory Agents only. Voice uses a
   // continuous conversation and must not receive a blocking structured prompt.
   // The definition-specific list still controls the business tools.
-  return candidates.filter(tool => options.definition.tools.includes(tool.name) || (tool.name === "askuser" && options.definition.role !== "voice"));
+  return candidates.filter(tool => tool.name !== "youtube_transcript"
+    && (options.definition.tools.includes(tool.name) || (tool.name === "askuser" && options.definition.role !== "voice")));
 }
 
 const askUserOption = Type.Object({

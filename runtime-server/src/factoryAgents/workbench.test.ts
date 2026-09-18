@@ -263,8 +263,11 @@ test("Voice Agent stays conversational and never receives askuser", async () => 
     const researchTools = await factoryAgentTools({ ...base, store, id: researchSession.id, definition: research });
     assert.equal(voiceTools.some(tool => tool.name === "askuser"), false);
     assert.equal(researchTools.some(tool => tool.name === "askuser"), true);
+    assert.equal(voiceTools.some(tool => tool.name === "youtube_transcript"), false);
+    assert.equal(researchTools.some(tool => tool.name === "youtube_transcript"), false);
     const prompt = await runtime.prompt("voice", voice);
     assert.doesNotMatch(prompt, /askuser/);
+    assert.doesNotMatch(prompt, /youtube_transcript/);
     assert.match(prompt, /连续的语音访谈/);
   } finally { await runtime.close(); await rm(root, { recursive: true, force: true }); }
 });

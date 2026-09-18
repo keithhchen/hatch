@@ -39,6 +39,28 @@ const definitionsSchema = z.array(definitionSchema).length(ROLES.length).superRe
   if (reachable.size !== ROLES.length) context.addIssue({ code: "custom", message: `Factory Agent dependencies leave unreachable roles: ${ROLES.filter(role => !reachable.has(role)).join(", ")}` });
 });
 
+/**
+ * Temporary capability cutover: no Factory Agent may receive YouTube
+ * transcript access. Keep the shared implementation available for a future
+ * re-enable, but enforce this at the persisted definition boundary as well as
+ * at seed time.
+ */
+function disableYoutubeTranscriptAccess(definitions: AgentDefinition[]): AgentDefinition[] {
+  return definitions.map(definition => {
+    const systemPrompt = definition.systemPrompt.includes("youtube_transcript")
+      ? `${definition.systemPrompt
+          .split(/\r?\n/)
+          .filter(line => !line.includes("youtube_transcript"))
+          .join("\n")
+          .trimEnd()}
+
+# 临时能力限制
+YouTube 视频字幕转录能力当前暂时不可用。不要尝试调用任何字幕转录工具；仅使用当前实际提供的其他工具。`
+      : definition.systemPrompt;
+    return { ...definition, tools: definition.tools.filter(tool => tool !== "youtube_transcript"), systemPrompt };
+  });
+}
+
 export type AgentDefinition = z.infer<typeof definitionSchema>;
 export type AgentEntryState = "locked" | "ready" | "running" | "complete" | "update_available" | "failed";
 export type AgentAvailability = { missingRequired: Role[]; normal: { required: boolean; satisfied: boolean } };
@@ -72,11 +94,17 @@ export class PostgresAgentDefinitionRepository implements AgentDefinitionReposit
     `);
     const count = Number((await pool.query("SELECT COUNT(*)::int AS count FROM hatch_factory_agent_definitions")).rows[0]?.count ?? 0);
     if (count === 0) await repository.bootstrap();
-    else await repository.migrateLegacyDependencyGraph();
+    else {
+      await repository.migrateLegacyDependencyGraph();
+      await repository.migrateTemporaryYoutubeTranscriptDisable();
+    }
     await repository.list();
     return repository;
   }
   async list(): Promise<AgentDefinition[]> {
+    return disableYoutubeTranscriptAccess(await this.read());
+  }
+  private async read(): Promise<AgentDefinition[]> {
     const rows = (await this.pool.query("SELECT role, definition FROM hatch_factory_agent_definitions")).rows;
     return validateDefinitions(rows.map(row => {
       if (row.definition?.role !== row.role) throw new AgentDefinitionsError(`Factory Agent definition role mismatch: ${row.role}`);
@@ -84,7 +112,7 @@ export class PostgresAgentDefinitionRepository implements AgentDefinitionReposit
     }));
   }
   async replace(value: unknown): Promise<AgentDefinition[]> {
-    const definitions = validateDefinitions(value);
+    const definitions = disableYoutubeTranscriptAccess(validateDefinitions(value));
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
@@ -136,13 +164,18 @@ export class PostgresAgentDefinitionRepository implements AgentDefinitionReposit
     }));
     await this.replace(next);
   }
+  private async migrateTemporaryYoutubeTranscriptDisable(): Promise<void> {
+    const current = await this.read();
+    const disabled = disableYoutubeTranscriptAccess(current);
+    if (JSON.stringify(current) !== JSON.stringify(disabled)) await this.replace(disabled);
+  }
 }
 
 /** Explicit test dependency; product Runtime never constructs this repository. */
 export class MemoryAgentDefinitionRepository implements AgentDefinitionRepository {
-  constructor(private definitions: AgentDefinition[]) { this.definitions = validateDefinitions(definitions); }
+  constructor(private definitions: AgentDefinition[]) { this.definitions = disableYoutubeTranscriptAccess(validateDefinitions(definitions)); }
   async list(): Promise<AgentDefinition[]> { return structuredClone(this.definitions); }
-  replace(definitions: AgentDefinition[]): void { this.definitions = validateDefinitions(definitions); }
+  replace(definitions: AgentDefinition[]): void { this.definitions = disableYoutubeTranscriptAccess(validateDefinitions(definitions)); }
 }
 
 export async function initialAgentDefinitions(): Promise<AgentDefinition[]> {
@@ -150,8 +183,8 @@ export async function initialAgentDefinitions(): Promise<AgentDefinition[]> {
   const common = await readFile(fileURLToPath(new URL("COMMON.md", promptRoot)), "utf8");
   const askUserGuidance = await readFile(fileURLToPath(new URL("ASKUSER.md", promptRoot)), "utf8");
   const seed = [
-    { role: "research", order: 1, name: { en: "Deep Research", zh: "深度研究", ja: "深掘り調査" }, hint: { en: "Find primary evidence and reconstruct the Creator as a whole person.", zh: "寻找一手证据，还原一个有血有肉的 Creator。", ja: "一次情報から、Creator という人物全体を立体的に捉えます。" }, tools: ["update_todo", "list", "read", "write", "web_search", "web_scrape", "youtube_transcript"], dependencies: { required: [], normal: [] } },
-    { role: "voice", order: 2, name: { en: "Voice Interview", zh: "语音访谈", ja: "音声インタビュー" }, hint: { en: "Draw out stories and tacit judgment in a natural conversation.", zh: "用自然对话挖出经历、故事和隐性判断。", ja: "自然な対話から経験、物語、暗黙の判断を引き出します。" }, tools: ["update_todo", "list", "read", "write", "web_search", "web_scrape", "youtube_transcript"], dependencies: { required: [], normal: [] } },
+    { role: "research", order: 1, name: { en: "Deep Research", zh: "深度研究", ja: "深掘り調査" }, hint: { en: "Find primary evidence and reconstruct the Creator as a whole person.", zh: "寻找一手证据，还原一个有血有肉的 Creator。", ja: "一次情報から、Creator という人物全体を立体的に捉えます。" }, tools: ["update_todo", "list", "read", "write", "web_search", "web_scrape"], dependencies: { required: [], normal: [] } },
+    { role: "voice", order: 2, name: { en: "Voice Interview", zh: "语音访谈", ja: "音声インタビュー" }, hint: { en: "Draw out stories and tacit judgment in a natural conversation.", zh: "用自然对话挖出经历、故事和隐性判断。", ja: "自然な対話から経験、物語、暗黙の判断を引き出します。" }, tools: ["update_todo", "list", "read", "write", "web_search", "web_scrape"], dependencies: { required: [], normal: [] } },
     { role: "generation", order: 3, name: { en: "Agent Builder", zh: "Agent 构建", ja: "Agent 構築" }, hint: { en: "Turn the Creator's identity and judgment into an executable expert Agent.", zh: "把 Creator 的人格与判断变成可执行的专家 Agent。", ja: "Creator の人格と判断を、実行可能な専門 Agent に変えます。" }, tools: ["update_todo", "list", "read", "write", "corpus_upload"], dependencies: { required: [], normal: ["research", "voice"] } },
     { role: "case-generation", order: 4, name: { en: "Case Builder", zh: "案例构建", ja: "ケース構築" }, hint: { en: "Build one realistic client situation that demands expert judgment.", zh: "构造一个真正需要专家判断的现实客户情境。", ja: "専門家の判断が本当に必要な顧客状況を構築します。" }, tools: ["update_todo", "list", "read", "write"], dependencies: { required: ["generation"], normal: [] } },
     { role: "evaluator", order: 5, name: { en: "Evaluator", zh: "效果评估", ja: "効果評価" }, hint: { en: "Run this Product and judge what its result truly gets right and wrong.", zh: "运行当前 Product，判断结果真正做对和做错了什么。", ja: "現在の Product を実行し、結果の本質的な良し悪しを評価します。" }, tools: ["update_todo", "list", "read", "write", "hatch_tool"], dependencies: { required: ["generation", "case-generation"], normal: [] } },
