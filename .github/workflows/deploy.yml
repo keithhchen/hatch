@@ -38,6 +38,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Install Dashboard server dependencies
+        working-directory: creator-dashboard
+        run: npm ci
       - name: Verify Runtime and Registry
         working-directory: runtime-server
         run: |
