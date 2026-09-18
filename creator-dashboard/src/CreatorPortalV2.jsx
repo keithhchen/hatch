@@ -76,6 +76,7 @@ export function CreatorPortalV2({
     { value: "space-studio", label: t("studio"), active: route.kind === "home", onSelect: () => void go(ROOT) },
     { value: "products", label: t("products"), active: route.section === "products" && route.kind !== "files", onSelect: () => void go(`${ROOT}/products`) },
     { value: "space-orders", label: t("orders"), active: route.section === "orders", onSelect: () => void go("/studio/orders") },
+    { value: "download", label: t("download"), onSelect: () => void go("/download") },
     { value: "space-account", label: t("account"), onSelect: () => void go("/account") }
   ];
 
@@ -109,6 +110,7 @@ export function CreatorPortalV2({
           <SpaceLink href="/studio" navigate={go} active={route.kind === "home"}>{t("studio")}</SpaceLink>
           <NavButton active={route.section === "products" && route.kind !== "files"} onClick={() => go(`${ROOT}/products`)}>{t("products")}</NavButton>
           <SpaceLink href="/studio/orders" navigate={go} active={route.section === "orders"}>{t("orders")}</SpaceLink>
+          <SpaceLink href="/download" navigate={go}>{t("download")}</SpaceLink>
           <SpaceLink href="/account" navigate={go}>{t("account")}</SpaceLink>
         </nav>
         <div className="cpv2-account">
