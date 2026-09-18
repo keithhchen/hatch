@@ -51,6 +51,7 @@ __pycache__/
 .mypy_cache/
 .venv/
 venv/
+runtime-server/.venv-markitdown/
 .coverage
 htmlcov/
 *.egg-info/
