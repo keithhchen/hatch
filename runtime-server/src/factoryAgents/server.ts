@@ -12,6 +12,7 @@ import { resolveFactoryLlmProfile } from "../llmProfiles.js";
 import { VoiceSession, type VoiceServerEvent } from "./voice.js";
 import { GeminiVoiceSession } from "./geminiVoice.js";
 import { factoryAgentTools } from "./factoryTools.js";
+import { convertUpload } from "./markdownConverter.js";
 import type { AgentMessage, AgentToolResult } from "@earendil-works/pi-agent-core";
 
 export function publicSession(s: Session) { const { context, ...publicData } = s; return publicData; }
@@ -218,7 +219,9 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
         if (action === "files" && req.method === "POST") {
           const b = z.object({ path: z.string(), base64: z.string(), mimeType: z.string().optional() }).parse(await body(req));
           const bytes = Buffer.from(b.base64, "base64");
-          const record = await store.put(id, b.path, bytes, { actor: "user", mimeType: b.mimeType });
+          const converted = b.path.startsWith("input/manual/") ? await convertUpload(path.basename(b.path), bytes) : { name: path.basename(b.path), bytes, mimeType: b.mimeType || "application/octet-stream" };
+          const target = b.path.startsWith("input/manual/") ? `input/manual/${converted.name}` : b.path;
+          const record = await store.put(id, target, converted.bytes, { actor: "user", mimeType: converted.mimeType });
           runtime.emit(id, "files"); return json(res, 201, record);
         }
         if (action === "files" && req.method === "GET") {
