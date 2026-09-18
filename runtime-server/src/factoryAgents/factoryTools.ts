@@ -5,7 +5,7 @@ import { fileTools } from "./tools.js";
 import { webTools } from "./web.js";
 import { WorkbenchStore } from "./store.js";
 
-export type FactoryToolDefinition = { tools: string[] };
+export type FactoryToolDefinition = { role: string; tools: string[] };
 
 /** Shared source of truth for the tools exposed to text and Gemini Live Agents. */
 export async function factoryAgentTools(options: {
@@ -19,15 +19,16 @@ export async function factoryAgentTools(options: {
   extraTools?: AgentTool[] | Promise<AgentTool[]>;
 }): Promise<AgentTool[]> {
   const candidates = [
-    createAskUserTool(),
+    ...(options.definition.role === "voice" ? [] : [createAskUserTool()]),
     createTodoTool(options.store, options.id, options.todosChanged ?? options.changed),
     ...fileTools(options.store, options.id, { changed: options.changed }),
     ...webTools(options.store, options.id, options.changed, options.env),
     ...(await options.extraTools ?? []),
   ];
-  // askuser is a host capability available to every Factory Agent. The
-  // definition-specific list still controls the business tools.
-  return candidates.filter(tool => tool.name === "askuser" || options.definition.tools.includes(tool.name));
+  // askuser is a host capability for text Factory Agents only. Voice uses a
+  // continuous conversation and must not receive a blocking structured prompt.
+  // The definition-specific list still controls the business tools.
+  return candidates.filter(tool => options.definition.tools.includes(tool.name) || (tool.name === "askuser" && options.definition.role !== "voice"));
 }
 
 const askUserOption = Type.Object({

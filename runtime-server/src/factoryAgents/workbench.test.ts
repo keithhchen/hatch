@@ -10,6 +10,7 @@ import { createFactoryLlmModel } from "../creatorLearning/factoryPi.js";
 import { fileTools } from "./tools.js";
 import { WorkbenchStore } from "./store.js";
 import { WorkbenchRuntime } from "./runtime.js";
+import { factoryAgentTools } from "./factoryTools.js";
 import { createWorkbenchServer, renderReviewMarkdown } from "./server.js";
 import { MemoryAgentDefinitionRepository, initialAgentDefinitions } from "./definitions.js";
 
@@ -244,6 +245,27 @@ test("one Runtime turn composes its prompt from one definition snapshot", async 
     assert.ok(prompt.startsWith(snapshot.systemPrompt));
     assert.match(prompt, /每个 option 必须是只有一个单行 `content` 字段的对象/);
     assert.doesNotMatch(prompt, /input\/handoff/);
+  } finally { await runtime.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("Voice Agent stays conversational and never receives askuser", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-voice-no-askuser-"));
+  const definitions = await initialAgentDefinitions();
+  const store = new WorkbenchStore(root, undefined, new MemoryAgentDefinitionRepository(definitions));
+  const runtime = new WorkbenchRuntime(store);
+  try {
+    const voice = definitions.find(definition => definition.role === "voice")!;
+    const research = definitions.find(definition => definition.role === "research")!;
+    const voiceSession = await store.create("voice");
+    const researchSession = await store.create("research");
+    const base = { signal: new AbortController().signal, changed: () => undefined, todosChanged: () => undefined };
+    const voiceTools = await factoryAgentTools({ ...base, store, id: voiceSession.id, definition: voice });
+    const researchTools = await factoryAgentTools({ ...base, store, id: researchSession.id, definition: research });
+    assert.equal(voiceTools.some(tool => tool.name === "askuser"), false);
+    assert.equal(researchTools.some(tool => tool.name === "askuser"), true);
+    const prompt = await runtime.prompt("voice", voice);
+    assert.doesNotMatch(prompt, /askuser/);
+    assert.match(prompt, /连续的语音访谈/);
   } finally { await runtime.close(); await rm(root, { recursive: true, force: true }); }
 });
 
