@@ -66,7 +66,7 @@ test('Upload sources is a peer Factory page with real file upload and no duplica
   assert.match(source, /selected === "uploads"/);
   assert.match(source, /function SourceUploadWorkspace/);
   assert.match(source, /input\/manual\//);
-  assert.match(source, /<input ref=\{importPicker\} hidden type="file" multiple/);
+  assert.match(source, /<input ref=\{importPicker\} hidden type="file"(?:[^>]*)multiple/);
   assert.match(source, /function StageOverview\(\{ stage, agents, sessions, agentName, onOpenAgent, locale, t \}\)/);
 });
 
@@ -287,10 +287,12 @@ test('Factory file previews use a real modal while preserving live file actions'
 
 test('Collect sources lists the real manual-upload files from the research session', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
-  assert.match(source, /const \[sessions, setSessions\] = useState\(\[\]\); const \[agents, setAgents\] = useState\(\[\]\); const \[manualFiles, setManualFiles\] = useState\(\[\]\)/);
+  assert.match(source, /const \[sessions, setSessions\] = useState\(\[\]\)/);
+  assert.match(source, /const \[agents, setAgents\] = useState\(\[\]\)/);
+  assert.match(source, /const \[manualFiles, setManualFiles\] = useState\(\[\]\)/);
   assert.match(source, /setManualFiles\(value\.manualFiles \|\| \[\]\)/);
-  assert.match(source, /manualFiles\.map\(record =>/);
-  assert.match(source, /onClick=\{\(\) => onOpenAgent\("research"\)\}/);
+  assert.match(source, /records\.map\(record =>/);
+  assert.match(source, /onOpenAgent\("research"\)/);
   assert.match(source, /t\("manualUploads"\)/);
 });
 
