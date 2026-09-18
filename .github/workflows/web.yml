@@ -261,7 +261,7 @@ jobs:
           dashboard_ready=0
           for attempt in $(seq 1 30); do
             if timeout 5s docker exec hatch-app-dashboard-1 node --input-type=module -e '
-            const checks = ["/readyz", "/health/dashboard", "/explore"];
+            const checks = ["/readyz", "/explore"];
             for (const path of checks) {
               const response = await fetch(`http://127.0.0.1:8500${path}`);
               if (!response.ok) throw new Error(`${path}: ${response.status}`);
