@@ -25,6 +25,16 @@ test('Factory header uses the real Product name and removes the inspector headin
   assert.match(source, /entry\?\.state === "complete" \|\| entry\?\.state === "update_available"/);
 });
 
+test('Published Products expose their canonical public link in Factory and Product cards', async () => {
+  const factory = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
+  const portal = await readFile(new URL('./CreatorPortalV2.jsx', import.meta.url), 'utf8');
+  assert.match(factory, /product\.status === "published" \|\| product\.status === "live"/);
+  assert.match(factory, /`\/products\/\$\{encodeURIComponent\(productId\)\}`/);
+  assert.match(factory, /href=\{publicHref\} target="_blank" rel="noreferrer"/);
+  assert.match(portal, /published \? `\/products\/\$\{encodeURIComponent\(idOf\(product, "product"\)\)\}` : ""/);
+  assert.match(portal, /href=\{publicHref\} target="_blank" rel="noreferrer"/);
+});
+
 test('Factory navigation is URL-controlled down to the Agent page', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
   const portal = await readFile(new URL('./CreatorPortalV2.jsx', import.meta.url), 'utf8');
@@ -179,7 +189,8 @@ test('Factory voice controls and Composer share the Hatch chat surface', async (
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
   const styles = await readFile(new URL('./factoryAgents.css', import.meta.url), 'utf8');
   assert.match(source, /className="factory-voice-controls"/);
-  assert.match(styles, /\.factory-voice-controls,[\s\S]*\.factory-chat-composer\s*\{[^}]*var\(--hatch-ui-surface-window/s);
+  assert.match(source, /className="factory-composer-toolbar"/);
+  assert.match(styles, /\.factory-voice-controls,[\s\S]*\.factory-composer-toolbar,[\s\S]*\.factory-chat-composer\s*\{[^}]*var\(--hatch-ui-surface-window/s);
 });
 
 test('Factory workbench uses stable shell panes instead of card-driven page chrome', async () => {

@@ -91,6 +91,7 @@
 }
 
 .factory-voice-controls,
+.factory-composer-toolbar,
 .factory-chat-composer {
   background: var(--hatch-ui-surface-window, #f4f2ee);
 }

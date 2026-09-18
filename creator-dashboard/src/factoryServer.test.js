@@ -31,6 +31,12 @@ test("Dashboard BFF removes the legacy Factory API and forwards Product Node req
       response.end(JSON.stringify({ node: "about-you", product_id: "product-1", execution_id: "about_you_1", status: "queued", round: 1 }));
       return;
     }
+    if (request.method === "DELETE" && url.pathname === "/v1/creator/products/product-1") {
+      forwarded.push({ method: request.method, headers: request.headers, body: undefined });
+      response.statusCode = 204;
+      response.end();
+      return;
+    }
     response.statusCode = 404;
     response.end(JSON.stringify({ detail: "not found" }));
   });
@@ -68,6 +74,16 @@ test("Dashboard BFF removes the legacy Factory API and forwards Product Node req
   assert.equal(forwarded[0].headers["idempotency-key"], "node-request-1");
   assert.deepEqual(forwarded[0].body, { file_ids: ["file_1"] });
   assert.equal("creator_id" in forwarded[0].body, false);
+
+  const deleted = await fetch(`${serverUrl(api)}/v1/creator/products/product-1`, {
+    method: "DELETE",
+    headers: { authorization: `Bearer ${token}` }
+  });
+  assert.equal(deleted.status, 204);
+  assert.equal(await deleted.text(), "");
+  assert.equal(forwarded.length, 2);
+  assert.equal(forwarded[1].method, "DELETE");
+  assert.equal(forwarded[1].headers.authorization, "Bearer signed-creator-token");
 });
 
 async function login(server) {

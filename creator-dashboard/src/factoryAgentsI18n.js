@@ -40,6 +40,7 @@ Object.assign(MESSAGES.en, {
   agentReady: 'Ready for your input', agentRunning: 'Learning your method', agentComplete: 'Ready for your judgment', agentHasUpdates: 'New work to review', agentNeedsAttention: 'Needs your attention', agentNeedsPreparation: 'What this needs first', nextSteps: 'What this needs first',
   dependencyUpdated: name => `${name} updated`,
   overview: 'Overview', productOverview: 'Product overview', overviewDescription: 'Define what this product promises before you build the Agent.', productDetails: 'Product details', productName: 'Product name', productPromise: 'Product promise', save: 'Save changes', saving: 'Saving…', productDetailsSaved: 'Product details saved.',
+  viewPublishedProduct: 'View product',
   sourcesStage: 'Get to know the Creator', sourcesStageDescription: 'Let the Agent learn who the Creator is through conversation and public evidence.', generationStage: 'Generate Your Agent', generationStageDescription: 'Let the Agent turn what it learned into an executable way of working.', evaluationStage: 'Examine Your Agent', evaluationStageDescription: 'Review the examples, correct the weak spots, and decide whether this is ready to ship.', factoryPromise: 'Teach your Agent how to make decisions.', factoryPromiseDescription: 'Review the examples, correct the weak spots, and decide whether this is ready to ship.',
 });
 Object.assign(MESSAGES.zh, {
@@ -47,6 +48,7 @@ Object.assign(MESSAGES.zh, {
   agentReady: '需要你的输入', agentRunning: '正在学习你的方法', agentComplete: '等待你判断', agentHasUpdates: '有新的内容待检查', agentNeedsAttention: '需要你的注意', agentNeedsPreparation: '开始前需要', nextSteps: '开始前需要',
   dependencyUpdated: name => `${name}已更新`,
   overview: 'Overview', productOverview: '产品概览', overviewDescription: '先定义这个产品要兑现的承诺，再开始构建 Agent。', productDetails: '产品信息', productName: '产品名称', productPromise: '产品承诺', save: '保存修改', saving: '保存中…', productDetailsSaved: '产品信息已保存。',
+  viewPublishedProduct: '查看产品',
   sourcesStage: '认识 Creator', sourcesStageDescription: '让 Agent 通过你的回答和公开资料认识 Creator。', generationStage: '生成你的 Agent', generationStageDescription: '让 Agent 把已经学到的内容变成可执行的工作方式。', evaluationStage: '检查你的 Agent', evaluationStageDescription: '查看案例、纠正薄弱部分，然后决定是否可以发布。', factoryPromise: '让 Agent 学会你会如何判断。', factoryPromiseDescription: '查看案例、纠正薄弱部分，然后决定是否可以发布。',
 });
 Object.assign(MESSAGES.ja, {
@@ -54,6 +56,7 @@ Object.assign(MESSAGES.ja, {
   agentReady: '入力を待っています', agentRunning: 'あなたの方法を学習中', agentComplete: '判断を待っています', agentHasUpdates: '新しい作業を確認', agentNeedsAttention: '確認が必要です', agentNeedsPreparation: '開始前に必要なこと', nextSteps: '開始前に必要なこと',
   dependencyUpdated: name => `${name}を更新`,
   overview: 'Overview', productOverview: 'プロダクト概要', overviewDescription: 'Agent を構築する前に、このプロダクトが約束することを定義します。', productDetails: 'プロダクト情報', productName: 'プロダクト名', productPromise: 'プロダクトの約束', save: '変更を保存', saving: '保存中…', productDetailsSaved: 'プロダクト情報を保存しました。',
+  viewPublishedProduct: 'プロダクトを見る',
   sourcesStage: 'Creator を知る', sourcesStageDescription: '会話と公開情報を通じて、Agent が Creator を理解します。', generationStage: 'Agent を生成する', generationStageDescription: '学んだ内容を、実行可能な仕事の進め方に変えます。', evaluationStage: 'Agent を確認する', evaluationStageDescription: '実例を確認し、弱い部分を直して、公開できるか判断します。', factoryPromise: 'Agent にあなたの判断方法を教える。', factoryPromiseDescription: '実例を確認し、弱い部分を直して、公開できるか判断します。',
 });
 delete MESSAGES.en.toolReturned;

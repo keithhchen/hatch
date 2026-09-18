@@ -12,6 +12,13 @@ import {
   StatusTag,
   Textarea
 } from "@hatch/ui";
+import {
+  AutoAwesomeOutlined,
+  CasesOutlined,
+  FactCheckOutlined,
+  RecordVoiceOverOutlined,
+  UploadFileOutlined
+} from "@mui/icons-material";
 import { createCreatorTranslator } from "./creatorI18n.js";
 import { creatorFactoryPath } from "./creatorRoutes.js";
 import {
@@ -117,11 +124,14 @@ export function CreatorProductFiles({ token, productId, navigate, locale = "en" 
       <BackToProducts navigate={navigate} t={t} />
       <PageHeader label={t("createProduct")} title={t("startProductTitle")} body={t("startProductBody")} />
       {error ? <InlineAlert tone="error" title={t("productCouldNotBeCreated")}>{error}</InlineAlert> : null}
-      <form onSubmit={create} className="cpv2-source-product-form">
-        <FormField label={t("productName")} required hint={t("productNameHint")}><Input required value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} placeholder={t("productNameExample")} /></FormField>
-        <FormField label={t("whatProductDelivers")} required><Textarea required value={draft.promise} onChange={(event) => setDraft((current) => ({ ...current, promise: event.target.value }))} placeholder={t("describeResult")} /></FormField>
-        <Button type="submit" loading={busy}>{t("createProduct")}</Button>
-      </form>
+      <div className="cpv2-create-product-layout">
+        <form onSubmit={create} className="cpv2-source-product-form">
+          <FormField label={t("productName")} required hint={t("productNameHint")}><Input required value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} placeholder={t("productNameExample")} /></FormField>
+          <FormField label={t("whatProductDelivers")} required><Textarea required value={draft.promise} onChange={(event) => setDraft((current) => ({ ...current, promise: event.target.value }))} placeholder={t("describeResult")} /></FormField>
+          <Button type="submit" loading={busy}>{t("createProduct")}</Button>
+        </form>
+        <FactoryBuildPath t={t} />
+      </div>
     </section>;
   }
 
@@ -138,6 +148,32 @@ export function CreatorProductFiles({ token, productId, navigate, locale = "en" 
       <div className="cpv2-source-library-actions"><Button type="button" loading={busy} disabled={!canGenerateProductVersion(files) || busy} onClick={() => void startRun()}>{t("generateVersion")}</Button></div>
     </article>
   </section>;
+}
+
+function FactoryBuildPath({ t }) {
+  const steps = [
+    [UploadFileOutlined, "factoryStepUpload", "factoryStepUploadBody", "you"],
+    [RecordVoiceOverOutlined, "factoryStepVoice", "factoryStepVoiceBody", "hatch"],
+    [AutoAwesomeOutlined, "factoryStepBuild", "factoryStepBuildBody", "hatch"],
+    [CasesOutlined, "factoryStepCase", "factoryStepCaseBody", "hatch"],
+    [FactCheckOutlined, "factoryStepEvaluate", "factoryStepEvaluateBody", "you"]
+  ];
+  return <aside className="cpv2-factory-build-path" aria-labelledby="factory-build-path-title">
+    <div className="cpv2-factory-build-path-heading">
+      <span className="cpv2-kicker">Factory</span>
+      <h2 id="factory-build-path-title">{t("factoryBuildPathTitle")}</h2>
+      <p>{t("factoryBuildPathBody")}</p>
+    </div>
+    <ol className="cpv2-factory-build-steps">
+      {steps.map(([Icon, title, body, owner]) => <li key={title} className={`cpv2-factory-build-step cpv2-factory-build-step--${owner}`}>
+        <span className="cpv2-factory-build-icon" aria-hidden="true"><Icon fontSize="small" /></span>
+        <div>
+          <div className="cpv2-factory-build-step-title"><strong>{t(title)}</strong><span>{t(owner === "you" ? "factoryLedByYou" : "factoryLedByHatch")}</span></div>
+          <p>{t(body)}</p>
+        </div>
+      </li>)}
+    </ol>
+  </aside>;
 }
 
 function BackToProducts({ navigate, t }) {

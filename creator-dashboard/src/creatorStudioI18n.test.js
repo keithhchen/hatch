@@ -6,6 +6,7 @@ import { createCreatorTranslator, CREATOR_LOCALES, CREATOR_PORTAL_KEYS } from ".
 const CREATOR_STUDIO_KEYS = [
   "explore",
   "library",
+  "home",
   "studio",
   "download",
   "products",
@@ -61,6 +62,15 @@ test("Products entry does not read a global Factory run list", async () => {
   const source = await readFile(new URL("./CreatorPortalV2.jsx", import.meta.url), "utf8");
   assert.doesNotMatch(source, /\/v1\/creator\/factory-runs/);
   assert.doesNotMatch(source, /PendingFactoryRuns|Factory in progress/);
+});
+
+test("Creator shell uses Home, brands the Studio surface, and hides order navigation", async () => {
+  const source = await readFile(new URL("./CreatorPortalV2.jsx", import.meta.url), "utf8");
+  assert.match(source, /className="cpv2-brand__product">\{t\("studio"\)\}/);
+  assert.match(source, /label: t\("home"\)/);
+  assert.doesNotMatch(source, /value: "space-orders"/);
+  assert.doesNotMatch(source, /<SpaceLink href="\/studio\/orders"/);
+  assert.doesNotMatch(source, /action=\{t\("viewAllOrders"\)\}/);
 });
 
 test("legacy Portal surfaces do not reintroduce hardcoded English labels", async () => {

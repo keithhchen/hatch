@@ -1348,9 +1348,11 @@ export async function createDashboardApp(options = {}) {
             ...(request.headers["idempotency-key"] ? { "idempotency-key": String(request.headers["idempotency-key"]) } : {})
           }
         });
-        const status = request.method === "POST"
-          ? (productNodeContract && url.pathname.endsWith("/executions") ? 202 : 201)
-          : 200;
+        const status = request.method === "DELETE"
+          ? 204
+          : request.method === "POST"
+            ? (productNodeContract && url.pathname.endsWith("/executions") ? 202 : 201)
+            : 200;
         return send(response, status, payload);
       }
 
@@ -2190,13 +2192,13 @@ async function registryRequest(registryUrl, pathname, options = {}) {
     ...requestOptions,
     headers: { "content-type": "application/json", ...(options.headers ?? {}) }
   });
-  const payload = await response.json();
+  const payload = response.status === 204 ? undefined : await response.json();
   if (!response.ok) {
-    const error = new Error(payload.error?.message ?? payload.detail ?? "Registry rejected the Agent request.");
+    const error = new Error(payload?.error?.message ?? payload?.detail ?? "Registry rejected the Agent request.");
     error.status = response.status;
-    error.code = payload.error?.code ?? payload.code ?? "registry_rejected_agent_request";
-    if (payload.error?.details !== undefined) error.details = payload.error.details;
-    else if (payload.details !== undefined) error.details = payload.details;
+    error.code = payload?.error?.code ?? payload?.code ?? "registry_rejected_agent_request";
+    if (payload?.error?.details !== undefined) error.details = payload.error.details;
+    else if (payload?.details !== undefined) error.details = payload.details;
     throw error;
   }
   return payload;

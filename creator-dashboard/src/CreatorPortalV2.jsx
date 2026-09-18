@@ -73,9 +73,8 @@ export function CreatorPortalV2({
   }, [navigate]);
 
   const mobileNavigationItems = [
-    { value: "space-studio", label: t("studio"), active: route.kind === "home", onSelect: () => void go(ROOT) },
+    { value: "space-studio", label: t("home"), active: route.kind === "home", onSelect: () => void go(ROOT) },
     { value: "products", label: t("products"), active: route.section === "products" && route.kind !== "files", onSelect: () => void go(`${ROOT}/products`) },
-    { value: "space-orders", label: t("orders"), active: route.section === "orders", onSelect: () => void go("/studio/orders") },
     { value: "download", label: t("download"), onSelect: () => void go("/download") },
     { value: "space-account", label: t("account"), onSelect: () => void go("/account") }
   ];
@@ -98,7 +97,7 @@ export function CreatorPortalV2({
     <ThemeProvider theme={creatorMuiTheme}>
       <div className="cpv2">
       <aside className="cpv2-sidebar">
-        <HatchBrand as="button" className="cpv2-brand" type="button" onClick={() => go(ROOT)} aria-label={t("hatchCreatorHome")} />
+        <HatchBrand as="button" className="cpv2-brand" type="button" onClick={() => go(ROOT)} aria-label={t("hatchCreatorHome")}><span className="cpv2-brand__product">{t("studio")}</span></HatchBrand>
         <div className="cpv2-mobile-nav">
           <DropdownMenu
             label={t("creatorNavigation")}
@@ -107,9 +106,8 @@ export function CreatorPortalV2({
           />
         </div>
         <nav className="cpv2-global-nav" aria-label={t("hatchNavigation")}>
-          <SpaceLink href="/studio" navigate={go} active={route.kind === "home"}>{t("studio")}</SpaceLink>
+          <SpaceLink href="/studio" navigate={go} active={route.kind === "home"}>{t("home")}</SpaceLink>
           <NavButton active={route.section === "products" && route.kind !== "files"} onClick={() => go(`${ROOT}/products`)}>{t("products")}</NavButton>
-          <SpaceLink href="/studio/orders" navigate={go} active={route.section === "orders"}>{t("orders")}</SpaceLink>
           <SpaceLink href="/download" navigate={go}>{t("download")}</SpaceLink>
           <SpaceLink href="/account" navigate={go}>{t("account")}</SpaceLink>
         </nav>
@@ -196,6 +194,9 @@ function CreatorHome({ token, request, navigate, t, locale }) {
         const overview = unwrap(payload, "overview");
         const products = arrayOf(overview?.products);
         const orders = arrayOf(overview?.recent_orders ?? overview?.orders);
+        if (products.length === 0) {
+          return <CreatorZeroProductIntro navigate={navigate} t={t} />;
+        }
         const next = nextCreatorAction(products, t);
         const metrics = overview?.metrics ?? {};
         const purchaseCount = Number(metrics.order_count ?? orders.length) || 0;
@@ -214,12 +215,30 @@ function CreatorHome({ token, request, navigate, t, locale }) {
               <Button className="cpv2-inverse" variant="secondary" type="button" onClick={() => navigate(`${ROOT}/orders`)}>{t("viewAccessRecords")}</Button>
             </article> : null}
           </section>
-          <SectionHeading eyebrow={t("recentActivity")} title={t("ordersAndAccess")} action={t("viewAllOrders")} onAction={() => navigate(`${ROOT}/orders`)} />
+          <SectionHeading eyebrow={t("recentActivity")} title={t("ordersAndAccess")} />
           {orders.length ? <OrderList orders={orders} onOpen={(order) => navigate(`${ROOT}/orders/${encodeURIComponent(idOf(order, "order"))}`)} t={t} locale={locale} /> : <EmptyState title={t("noAccessRecords")} body={t("noAccessRecordsBody")} />}
         </>;
       }}
     </PageBoundary>
   );
+}
+
+function CreatorZeroProductIntro({ navigate, t }) {
+  return <section className="cpv2-zero-product" aria-labelledby="creator-zero-product-title">
+    <div className="cpv2-zero-product__story">
+      <h1 id="creator-zero-product-title">{t("zeroProductTitle")}</h1>
+      <p className="cpv2-zero-product__spotify">{t("zeroProductSpotify")}</p>
+      <p>{t("zeroProductRecord")}</p>
+      <p>{t("zeroProductRealWork")}</p>
+      <div className="cpv2-zero-product__standard">
+        <strong>{t("zeroProductNotChatbot")}</strong>
+        <p>{t("zeroProductTest")}</p>
+      </div>
+      <p>{t("zeroProductOwnership")}</p>
+      <p>{t("zeroProductPricing")}</p>
+      <Button type="button" trailing={<span aria-hidden="true">→</span>} onClick={() => navigate(`${ROOT}/products/new`)}>{t("buildFirstAgent")}</Button>
+    </div>
+  </section>;
 }
 
 function ProductsPage({ token, request, navigate, t }) {
@@ -241,6 +260,7 @@ function ProductsPage({ token, request, navigate, t }) {
 
 function ProductCard({ product, onOpen, request, token, onChanged, t }) {
   const published = product.status === "published" || product.status === "live";
+  const publicHref = published ? `/products/${encodeURIComponent(idOf(product, "product"))}` : "";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   async function withdraw() {
@@ -266,7 +286,10 @@ function ProductCard({ product, onOpen, request, token, onChanged, t }) {
     <h2>{product.name ?? product.product_name ?? t("untitledProduct")}</h2>
     <p>{product.promise ?? product.description ?? t("addProductPromise")}</p>
     {error ? <InlineError>{error}</InlineError> : null}
-    <div className="cpv2-card-foot"><Button variant="secondary" type="button" onClick={onOpen}>{t("openProduct")}</Button>{!published ? <Button variant="link" type="button" disabled={busy} onClick={() => void remove()}>{t("deleteProduct")}</Button> : null}</div>
+    <div className="cpv2-card-foot">
+      <Button variant="secondary" type="button" onClick={onOpen}>{t("openProduct")}</Button>
+      {publicHref ? <Button asChild variant="link"><a href={publicHref} target="_blank" rel="noreferrer">{t("viewProduct")}</a></Button> : <Button variant="link" type="button" disabled={busy} onClick={() => void remove()}>{t("deleteProduct")}</Button>}
+    </div>
   </article>;
 }
 
