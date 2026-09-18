@@ -48,6 +48,7 @@ export class WorkbenchStore {
     return path.join(this.root, id);
   }
   private async manualFiles(): Promise<FileRecord[]> { return readFile(path.join(this.root, "manual-files.json"), "utf8").then(value => JSON.parse(value).files ?? []).catch(() => []); }
+  async listManualFiles(): Promise<FileRecord[]> { return this.manualFiles(); }
   private async manualPath(name: string): Promise<string> {
     if (!name.startsWith("input/manual/")) throw new Error("Manual files must use input/manual/");
     let current = path.join(this.root, "manual");

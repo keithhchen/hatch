@@ -191,6 +191,16 @@
   background: color-mix(in srgb, currentColor 14%, transparent);
 }
 
+.factory-ask-user {
+  max-width: min(100%, 760px);
+  border-color: var(--hatch-ui-primary, #1f1c19) !important;
+  background: var(--hatch-ui-surface-solid, #fbfaf7) !important;
+}
+
+.factory-ask-user .MuiFormLabel-root.Mui-focused {
+  color: var(--hatch-ui-ink, #201813);
+}
+
 .factory-resize-handle {
   flex: 0 0 5px;
   cursor: col-resize;

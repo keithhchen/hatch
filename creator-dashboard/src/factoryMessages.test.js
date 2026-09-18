@@ -56,3 +56,13 @@ test('consecutive tool calls render as one expandable tool group without crossin
   assert.deepEqual(grouped[0].items.map(entry => entry.call.name), ['list', 'read']);
   assert.equal(grouped[0].items.length, 2);
 });
+
+test('askuser is a single pending interaction block until the next user message', () => {
+  const request = { role: 'assistant', content: [{ type: 'toolCall', id: 'ask-1', name: 'askuser', arguments: { questions: [{ id: 'audience', question: 'Who is this for?', options: ['Creator'] }] } }] };
+  const receipt = { role: 'toolResult', toolCallId: 'ask-1', toolName: 'askuser', content: [{ type: 'text', text: 'Waiting for the user.' }] };
+  const pending = chatEntries([{ role: 'user', content: 'Start' }, request, receipt]);
+  assert.equal(pending[1].type, 'askUser');
+  assert.equal(pending[1].pending, true);
+  const answered = chatEntries([{ role: 'user', content: 'Start' }, request, receipt, { role: 'user', content: 'Creator' }]);
+  assert.equal(answered[1].pending, false);
+});

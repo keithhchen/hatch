@@ -10,7 +10,11 @@ export function chatEntries(messages) {
     if (!Array.isArray(message.content)) return [{ key: `${i}`, type: 'message', message }];
     return message.content.flatMap((block, j) => {
       const key = `${i}:${j}`;
-      if (block.type === 'toolCall') return [{ key, type: 'tool', call: block, result: results.get(block.id), isCurrentTurn: i > latestUser }];
+      if (block.type === 'toolCall') {
+        const result = results.get(block.id);
+        if (block.name === 'askuser') return [{ key, type: 'askUser', call: block, result, pending: i > latestUser }];
+        return [{ key, type: 'tool', call: block, result, isCurrentTurn: i > latestUser }];
+      }
       if (block.type === 'text' && block.text) return [{ key, type: 'message', message: { ...message, content: block.text } }];
       return [];
     });
