@@ -191,6 +191,45 @@ test("model readiness follows the selected provider, not the presence of a Kimi 
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
+test("Factory SSE sends complete snapshots while chat SSE stays event-specific", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-factory-sse-"));
+  const definitions = new MemoryAgentDefinitionRepository(await initialAgentDefinitions());
+  const app = await createWorkbenchServer({ root, scope: { creatorId: "11111111-1111-4111-8111-111111111111", productId: "22222222-2222-4222-8222-222222222222" }, definitions });
+  const readSse = async (reader: ReadableStreamDefaultReader<Uint8Array>, carry = "") => {
+    let buffer = carry;
+    while (true) {
+      const boundary = buffer.indexOf("\n\n");
+      if (boundary >= 0) {
+        const frame = buffer.slice(0, boundary); buffer = buffer.slice(boundary + 2);
+        const data = frame.split("\n").find(line => line.startsWith("data: "));
+        if (data) return { value: JSON.parse(data.slice(6)), carry: buffer };
+      }
+      const next = await reader.read();
+      if (next.done) throw new Error("SSE closed before a data frame");
+      buffer += new TextDecoder().decode(next.value);
+    }
+  };
+  try {
+    await new Promise<void>(resolve => app.server.listen(0, "127.0.0.1", resolve));
+    const address = app.server.address(); assert.ok(address && typeof address !== "string");
+    const base = `http://127.0.0.1:${address.port}/api`;
+    const factory = await fetch(`${base}/events`); assert.equal(factory.status, 200); const factoryReader = factory.body!.getReader();
+    const initial = await readSse(factoryReader); assert.equal(initial.value.type, "snapshot"); assert.equal(initial.value.sessions.length, 0); assert.ok(initial.value.agents.every((entry: any) => !("updatedDependencies" in entry.availability)));
+    const created = await fetch(`${base}/sessions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ role: "research" }) });
+    assert.equal(created.status, 201); const session = await created.json() as { id: string };
+    const afterCreate = await readSse(factoryReader, initial.carry); assert.equal(afterCreate.value.type, "snapshot"); assert.equal(afterCreate.value.sessions[0].id, session.id);
+    const chat = await fetch(`${base}/sessions/${session.id}/events`); assert.equal(chat.status, 200); const chatReader = chat.body!.getReader();
+    const connected = await readSse(chatReader); assert.deepEqual(connected.value, {});
+    const factoryUpdate = readSse(factoryReader, afterCreate.carry);
+    const chatUpdate = readSse(chatReader, connected.carry);
+    const uploaded = await fetch(`${base}/sessions/${session.id}/files`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: "input/manual/source.txt", base64: Buffer.from("source").toString("base64"), mimeType: "text/plain" }) });
+    assert.equal(uploaded.status, 201);
+    const nextFactory = await factoryUpdate; assert.equal(nextFactory.value.type, "snapshot"); assert.ok(nextFactory.value.manualFiles.some((file: any) => file.path === "input/manual/source.txt"));
+    const nextChat = await chatUpdate; assert.equal(nextChat.value.type, "files"); assert.notEqual(nextChat.value.type, "snapshot");
+    await factoryReader.cancel(); await chatReader.cancel();
+  } finally { await app.close(); await rm(root, { recursive: true, force: true }); }
+});
+
 test("one Runtime turn composes its prompt from one definition snapshot", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "hatch-definition-snapshot-"));
   let reads = 0;

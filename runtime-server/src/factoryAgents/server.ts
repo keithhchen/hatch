@@ -40,7 +40,14 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
     return {
       type: "snapshot" as const,
       agents: agentEntries(await options.definitions.list(), sessions),
-      sessions: sessions.map(session => ({ ...publicSession(session), messages: undefined })),
+      sessions: sessions.map(session => ({
+        id: session.id,
+        role: session.role,
+        status: session.status,
+        updatedAt: session.updatedAt,
+        outputUpdatedAt: session.outputUpdatedAt,
+        todos: session.todos,
+      })),
       manualFiles: await store.listManualFiles(),
     };
   };
@@ -48,10 +55,11 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
     if (!res.writableEnded && !res.destroyed) res.write(`data: ${JSON.stringify(value)}\n\n`);
   };
   let snapshotQueue = Promise.resolve();
-  const broadcastFactorySnapshot = () => {
+  const enqueueFactorySnapshot = (target?: ServerResponse) => {
     snapshotQueue = snapshotQueue.then(async () => {
       const snapshot = await factorySnapshot();
-      for (const response of streams) writeSse(response, snapshot);
+      if (target) writeSse(target, snapshot);
+      else for (const response of streams) writeSse(response, snapshot);
     }).catch(() => undefined);
     return snapshotQueue;
   };
@@ -76,12 +84,14 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
             const session = await store.get(id);
             const definition = await store.definition("voice");
             const changed = () => runtime.emit(id, "files");
+            const todosChanged = () => runtime.emit(id, "todos");
             const tools = await factoryAgentTools({
               store,
               id,
               definition,
               signal: new AbortController().signal,
               changed,
+              todosChanged,
               env,
               extraTools: [...corpusTools(store, id, changed, options.scope, env), hatchTool(store, id, changed, options.scope, env)],
             });
@@ -148,7 +158,7 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
     if (event.type === "voice.run_failed") voice.handleRuntimeEvent({ ...base, type: "run.failed" });
   });
   runtime.events.on("event", (event: any) => {
-    if (["state", "files", "todos", "message", "comments"].includes(event?.type)) void broadcastFactorySnapshot();
+    if (["state", "files", "todos", "message", "comments"].includes(event?.type)) void enqueueFactorySnapshot();
   });
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
     try {
@@ -160,7 +170,7 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
         streams.add(res);
         const heartbeat = setInterval(() => { if (!res.writableEnded) res.write(": heartbeat\n\n"); }, 15000);
         res.once("close", () => { clearInterval(heartbeat); streams.delete(res); });
-        writeSse(res, await factorySnapshot());
+        await enqueueFactorySnapshot(res);
         return;
       }
       const chatEvents = url.pathname.match(/^\/api\/sessions\/([0-9a-f-]{36})\/events$/);
@@ -192,7 +202,7 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
         await assertRoleAvailable(b.role);
         const existing = (await store.list()).find(session => session.role === b.role);
         const session = existing ?? await store.create(b.role, b.title);
-        if (!existing) await broadcastFactorySnapshot();
+        if (!existing) await enqueueFactorySnapshot();
         return json(res, existing ? 200 : 201, publicSession(await store.get(session.id)));
       }
       const match = url.pathname.match(/^\/api\/sessions\/([0-9a-f-]{36})(?:\/(.*))?$/);

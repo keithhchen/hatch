@@ -14,12 +14,13 @@ export async function factoryAgentTools(options: {
   definition: FactoryToolDefinition;
   signal: AbortSignal;
   changed: () => void;
+  todosChanged?: () => void;
   env?: NodeJS.ProcessEnv;
   extraTools?: AgentTool[] | Promise<AgentTool[]>;
 }): Promise<AgentTool[]> {
   const candidates = [
     createAskUserTool(),
-    createTodoTool(options.store, options.id, options.changed),
+    createTodoTool(options.store, options.id, options.todosChanged ?? options.changed),
     ...fileTools(options.store, options.id, { changed: options.changed }),
     ...webTools(options.store, options.id, options.changed, options.env),
     ...(await options.extraTools ?? []),
