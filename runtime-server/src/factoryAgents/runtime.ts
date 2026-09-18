@@ -47,11 +47,13 @@ export class WorkbenchRuntime {
     } catch (error) { this.active.delete(id); throw error; }
     this.emit(id, "state");
     this.emit(id, "voice.run_started", { runId });
-    const run = this.main(id, message, controller).catch(error => this.emit(id, "error", { message: safeError(error) }));
+    const run = this.main(id, message, controller).catch(error => {
+      if (!controller.signal.aborted) this.emit(id, "error", { message: safeError(error) });
+    });
     this.runs.set(id, run);
     void run.finally(() => { if (this.runs.get(id) === run) this.runs.delete(id); });
   }
-  stop(id: string): void { this.active.get(id)?.abort(new Error("用户停止了运行")); }
+  stop(id: string): void { this.active.get(id)?.abort(); }
   async scribeVoiceEvidence(id: string, evidence: AgentMessage[]): Promise<void> {
     if (!evidence.length) return;
     if (this.active.has(id)) throw new Error("This conversation is already running");
@@ -71,8 +73,16 @@ export class WorkbenchRuntime {
       await this.run(id, scribePrompt, current.scribeContext ?? [], JSON.stringify({ turn: evidence }, null, 2), fileTools(this.store, id, { changed }), controller, "scribe");
       await this.store.update(id, state => { state.status = "completed"; });
     } catch (error) {
-      await this.store.update(id, state => { state.status = "failed"; state.error = safeError(error); });
-      throw error;
+      await this.store.update(id, state => {
+        if (controller.signal.aborted) {
+          state.status = "interrupted";
+          delete state.error;
+        } else {
+          state.status = "failed";
+          state.error = safeError(error);
+        }
+      });
+      if (!controller.signal.aborted) throw error;
     } finally {
       this.active.delete(id);
       this.emit(id, "state");
