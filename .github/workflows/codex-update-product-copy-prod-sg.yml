@@ -1,0 +1,71 @@
+name: Codex update product copy on production
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  update-copy:
+    name: Update exact product names and promises on Singapore production
+    runs-on: [self-hosted, linux, x64, hatch-prod]
+    steps:
+      - name: Update exact Product records
+        working-directory: /opt/hatch
+        run: |
+          set -euo pipefail
+          test -f .env
+          postgres_user="$(sed -n 's/^POSTGRES_USER=//p' .env | tail -n 1)"
+          postgres_database="$(sed -n 's/^POSTGRES_DB=//p' .env | tail -n 1)"
+          postgres_user="${postgres_user:-hatch}"
+          postgres_database="${postgres_database:-hatch}"
+          docker compose --env-file .env -f compose.infra.yml exec -T postgres psql \
+            -v ON_ERROR_STOP=1 -X -A -F '|' -U "$postgres_user" -d "$postgres_database" <<'SQL'
+          BEGIN;
+          DO $$
+          DECLARE
+            matched integer;
+            updated integer;
+          BEGIN
+            SELECT count(*) INTO matched
+            FROM hatch_creator_products
+            WHERE (id, name) IN (
+              ('958e888a-6557-4420-b293-35097304f0e9', 'Steve Jobs 在硬件-软件一体化产品中的决策模式'),
+              ('6cb3dd7b-2150-47b7-bdc0-27fa41d0d6a3', '科技内容撰写 Agent'),
+              ('c9682477-6541-445c-b37d-176d0c5589a1', '健康管理助手')
+            );
+            IF matched <> 3 THEN
+              RAISE EXCEPTION 'guard: expected 3 exact Chinese product records, found %', matched;
+            END IF;
+
+            UPDATE hatch_creator_products AS p
+            SET
+              name = v.name,
+              promise = v.promise,
+              brief = COALESCE(NULLIF(p.brief, ''), v.promise),
+              updated_at = NOW()
+            FROM (VALUES
+              ('958e888a-6557-4420-b293-35097304f0e9', 'Steve Jobs: Decision-Making for Integrated Hardware-Software Products', 'Help customers make difficult trade-offs in integrated hardware-software products by turning Steve Jobs''s decision logic into actionable frameworks for integration versus modularization, resolving design-engineering conflicts, maintaining product focus, and correcting failures.'),
+              ('6cb3dd7b-2150-47b7-bdc0-27fa41d0d6a3', 'Technology Content Writing Agent', 'Turn a product experience or a set of product materials into technology content that can be filmed directly.'),
+              ('c9682477-6541-445c-b37d-176d0c5589a1', 'Health Management Assistant', 'Help users manage their health more effectively with practical health plans, reminders, and suggestions.')
+            ) AS v(id, name, promise)
+            WHERE p.id = v.id;
+            GET DIAGNOSTICS updated = ROW_COUNT;
+            IF updated <> 3 THEN
+              RAISE EXCEPTION 'guard: expected to update 3 products, updated %', updated;
+            END IF;
+          END $$;
+          COMMIT;
+          SQL
+
+      - name: Verify English copy through public API
+        working-directory: /opt/hatch
+        run: |
+          set -euo pipefail
+          domain="$(sed -n 's/^HATCH_DOMAIN=//p' .env | tail -n 1)"
+          test -n "$domain"
+          curl -4 --noproxy '*' --fail --silent "https://${domain}/v1/public/products/958e888a-6557-4420-b293-35097304f0e9" | jq -e '.product.product_name == "Steve Jobs: Decision-Making for Integrated Hardware-Software Products" and (.product.product_promise | test("Help customers make difficult trade-offs"))' >/dev/null
+          curl -4 --noproxy '*' --fail --silent "https://${domain}/v1/public/products/6cb3dd7b-2150-47b7-bdc0-27fa41d0d6a3" | jq -e '.product.product_name == "Technology Content Writing Agent" and .product.product_promise == "Turn a product experience or a set of product materials into technology content that can be filmed directly."' >/dev/null
+          curl -4 --noproxy '*' --fail --silent "https://${domain}/v1/public/products/c9682477-6541-445c-b37d-176d0c5589a1" | jq -e '.product.product_name == "Health Management Assistant" and .product.product_promise == "Help users manage their health more effectively with practical health plans, reminders, and suggestions."' >/dev/null
+          echo 'verified: all three public Product names and promises are English'
