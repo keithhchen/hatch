@@ -30,7 +30,10 @@ export class WorkbenchRuntime {
     const definition = snapshot ?? await this.store.definition(role);
     const dependencies = definition.dependencies;
     const folders = ["input/manual", ...[...dependencies.required, ...dependencies.normal].map(source => `input/${source}`)];
-    return `${definition.systemPrompt}\n\n# 本 Agent 的 Input\n\n你有且只有这些输入文件夹：${folders.map(folder => `\`${folder}/\``).join("、")}。\n\`input/manual/\` 是用户为当前 Product 上传的公共文件；其余目录是上游 Agent 的实时只读 output projection。使用 list 查看，使用 read 读取。不要要求用户复制或转发上游文件，也不要尝试修改上游目录。\n\n# 向用户提问\n\n你可以使用 askuser，但只在缺少的信息或选择会实质改变当前工作、且无法从已有输入得到时使用。一次只调用一个 askuser，把相关问题合并到 questions 数组；如果提供 options，每个 option 必须是只有一个单行 \`content\` 字段的对象；选项之外用户界面总会提供自由回答框。调用后本轮立即结束，不要继续调用工具或写成果；用户下一条普通消息就是回答。不要用它做例行确认、进度汇报或把内部标准交给用户决定。`;
+    const interaction = role === "voice"
+      ? "# 对话方式\n\n这是连续的语音访谈。通过自然的语音对话逐步追问缺失事实、具体故事和判断依据，不暂停等待结构化问答。"
+      : "# 向用户提问\n\n你可以使用 askuser，但只在缺少的信息或选择会实质改变当前工作、且无法从已有输入得到时使用。一次只调用一个 askuser，把相关问题合并到 questions 数组；如果提供 options，每个 option 必须是只有一个单行 `content` 字段的对象；选项之外用户界面总会提供自由回答框。调用后本轮立即结束，不要继续调用工具或写成果；用户下一条普通消息就是回答。不要用它做例行确认、进度汇报或把内部标准交给用户决定。";
+    return `${definition.systemPrompt}\n\n# 本 Agent 的 Input\n\n你有且只有这些输入文件夹：${folders.map(folder => `\`${folder}/\``).join("、")}。\n\`input/manual/\` 是用户为当前 Product 上传的公共文件；其余目录是上游 Agent 的实时只读 output projection。使用 list 查看，使用 read 读取。不要要求用户复制或转发上游文件，也不要尝试修改上游目录。\n\n${interaction}`;
   }
   async start(id: string, message: string): Promise<void> {
     if (!message.trim() || message.length > 100000) throw new Error("Provide a message of 1–100000 characters");
@@ -110,7 +113,17 @@ export class WorkbenchRuntime {
       await this.store.update(id, state => { state.status = controller.signal.aborted ? "interrupted" : "completed"; delete state.activeTool; });
       this.emit(id, controller.signal.aborted ? "voice.run_interrupted" : "voice.run_completed", { runId: this.runIds.get(id) });
     } catch (error) {
-      await this.store.update(id, s => { s.status = controller.signal.aborted ? "interrupted" : "failed"; s.error = safeError(error); delete s.activeTool; });
+      await this.store.update(id, s => {
+        if (controller.signal.aborted) {
+          // A user stop is a normal terminal state, not an error notice.
+          s.status = "interrupted";
+          delete s.error;
+        } else {
+          s.status = "failed";
+          s.error = safeError(error);
+        }
+        delete s.activeTool;
+      });
       this.emit(id, controller.signal.aborted ? "voice.run_interrupted" : "voice.run_failed", { runId: this.runIds.get(id) });
     } finally {
       this.active.delete(id);

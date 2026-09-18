@@ -201,7 +201,7 @@ function ChatPanel({ session, entry, root, id, config, busy, draft, setDraft, st
       {stream && <Message message={{ role: "assistant", content: stream }} files={session.files} onOpenFile={onOpenFile} speaking={speaking} t={t} />}
       {running && activityVisible && <Stack direction="row" spacing={1} alignItems="center" sx={{ py: 1 }}><CircularProgress size={14} /><Typography variant="caption" color="primary.main">{activity || (session.activeTool ? t("callingTool", t(toolActionKey(session.activeTool))) : t("working"))}</Typography></Stack>}
     </Box>
-    <ErrorNotice error={error || session.error} onClose={() => setError("")} />
+    <ErrorNotice error={error || (session.status === "interrupted" ? "" : session.error)} onClose={() => setError("")} />
     <Stack direction="row" spacing={1} alignItems="center" sx={{ px: 1.5, pb: 1 }}>
       <StartAgentButton role={session.role} draft={draft} setDraft={setDraft} composer={composer} disabled={composerDisabled || running} t={t} />
       {session.role === "voice" && <VoiceControls root={root} id={id} enabled={!locked && config?.services.voice} handler={voiceHandler} onSpeaking={setSpeaking} onError={setError} t={t} />}
