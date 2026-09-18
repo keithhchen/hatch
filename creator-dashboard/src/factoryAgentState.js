@@ -20,6 +20,18 @@ export function agentStateKey(agent) {
   }[agent.state] ?? 'loadingAgentState';
 }
 
+// This is deliberately derived from the two output timestamps already in the
+// Factory snapshot. It is not persisted as another piece of dependency state.
+export function changedDependencies(agent, agents = []) {
+  if (!agent?.outputUpdatedAt) return [];
+  const byRole = new Map(agents.map(candidate => [candidate.role, candidate]));
+  const roles = [...(agent.dependencies?.required || []), ...(agent.dependencies?.normal || [])];
+  return unique(roles).filter(role => {
+    const dependency = byRole.get(role);
+    return Boolean(dependency?.outputUpdatedAt && dependency.outputUpdatedAt > agent.outputUpdatedAt);
+  });
+}
+
 export function localizeAgentText(value, locale = 'en') {
   return value?.[locale] ?? value?.en ?? '';
 }

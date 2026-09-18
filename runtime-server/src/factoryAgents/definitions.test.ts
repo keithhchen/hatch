@@ -10,13 +10,13 @@ const session = (role: Session["role"], values: Partial<Session> = {}): Session 
   revision: 0, turn: 0, status: "idle", files: [], comments: [], messages: [], context: [], todos: [], ...values,
 });
 
-test("Agent dependency state uses outputs and run times without file-level state", async () => {
+test("Agent dependency state uses output timestamps, not run timestamps", async () => {
   const definitions = await initialAgentDefinitions();
   let entries = agentEntries(definitions, []);
   assert.equal(entries.find(entry => entry.role === "research")?.state, "ready");
   assert.equal(entries.find(entry => entry.role === "voice")?.state, "ready");
   assert.deepEqual(entries.find(entry => entry.role === "generation")?.availability, {
-    missingRequired: [], normal: { required: true, satisfied: false }, updatedDependencies: []
+    missingRequired: [], normal: { required: true, satisfied: false }
   });
   assert.deepEqual(entries.find(entry => entry.role === "generation")?.dependencies, { required: [], normal: ["research", "voice"] });
 
@@ -31,7 +31,9 @@ test("Agent dependency state uses outputs and run times without file-level state
   voice.outputUpdatedAt = "2026-09-10T03:00:00.000Z";
   entries = agentEntries(definitions, [research, voice, generation]);
   assert.equal(entries.find(entry => entry.role === "generation")?.state, "update_available");
-  assert.deepEqual(entries.find(entry => entry.role === "generation")?.availability.updatedDependencies, ["voice"]);
+  assert.equal("updatedDependencies" in (entries.find(entry => entry.role === "generation")?.availability ?? {}), false);
+  generation.lastRunAt = "2026-09-10T03:30:00.000Z";
+  assert.equal(agentEntries(definitions, [research, voice, generation]).find(entry => entry.role === "generation")?.state, "update_available");
   generation.status = "failed";
   assert.equal(agentEntries(definitions, [research, voice, generation]).find(entry => entry.role === "generation")?.state, "failed");
 });

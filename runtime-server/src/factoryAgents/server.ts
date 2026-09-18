@@ -22,6 +22,7 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
   await store.recover();
   const runtime = new WorkbenchRuntime(store, { env, ...options.runtime, extraTools: options.runtime?.extraTools ?? (async (s, _signal, changed) => [...corpusTools(store, s.id, changed, options.scope, env), hatchTool(store, s.id, changed, options.scope, env)]) });
   const streams = new Set<ServerResponse>();
+  const chatStreams = new Set<ServerResponse>();
   const liveSockets = new Map<string, Set<WebSocket>>();
   const liveWss = new WebSocketServer({ noServer: true, maxPayload: 128 * 1024 });
   type VoiceConnection = {
@@ -34,6 +35,26 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
   const liveStartCounts = new Map<string, number>();
   const entries = async () => agentEntries(await options.definitions.list(), await store.list());
   const assertRoleAvailable = async (role: Session["role"]) => assertAgentAvailable(await entries(), role);
+  const factorySnapshot = async () => {
+    const sessions = await store.list();
+    return {
+      type: "snapshot" as const,
+      agents: agentEntries(await options.definitions.list(), sessions),
+      sessions: sessions.map(session => ({ ...publicSession(session), messages: undefined })),
+      manualFiles: await store.listManualFiles(),
+    };
+  };
+  const writeSse = (res: ServerResponse, value: unknown) => {
+    if (!res.writableEnded && !res.destroyed) res.write(`data: ${JSON.stringify(value)}\n\n`);
+  };
+  let snapshotQueue = Promise.resolve();
+  const broadcastFactorySnapshot = () => {
+    snapshotQueue = snapshotQueue.then(async () => {
+      const snapshot = await factorySnapshot();
+      for (const response of streams) writeSse(response, snapshot);
+    }).catch(() => undefined);
+    return snapshotQueue;
+  };
   const voiceFor = (id: string) => {
     let voice = voices.get(id);
     if (!voice) {
@@ -126,6 +147,9 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
     if (event.type === "voice.run_interrupted") voice.handleRuntimeEvent({ ...base, type: "run.interrupted" });
     if (event.type === "voice.run_failed") voice.handleRuntimeEvent({ ...base, type: "run.failed" });
   });
+  runtime.events.on("event", (event: any) => {
+    if (["state", "files", "todos", "message", "comments"].includes(event?.type)) void broadcastFactorySnapshot();
+  });
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
     try {
       const url = new URL(req.url ?? "/", "http://factory.internal");
@@ -134,11 +158,22 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
       if (url.pathname === "/api/events" && req.method === "GET") {
         res.writeHead(200, { "Content-Type": "text/event-stream", Connection: "keep-alive" });
         streams.add(res);
-        res.write("event: connected\ndata: {}\n\n");
-        const listener = (event: unknown) => res.write(`data: ${JSON.stringify(event)}\n\n`);
+        const heartbeat = setInterval(() => { if (!res.writableEnded) res.write(": heartbeat\n\n"); }, 15000);
+        res.once("close", () => { clearInterval(heartbeat); streams.delete(res); });
+        writeSse(res, await factorySnapshot());
+        return;
+      }
+      const chatEvents = url.pathname.match(/^\/api\/sessions\/([0-9a-f-]{36})\/events$/);
+      if (chatEvents && req.method === "GET") {
+        const id = chatEvents[1]!;
+        await store.get(id);
+        res.writeHead(200, { "Content-Type": "text/event-stream", Connection: "keep-alive" });
+        chatStreams.add(res);
+        const listener = (event: any) => { if (event?.sessionId === id) writeSse(res, event); };
         runtime.events.on("event", listener);
-        const heartbeat = setInterval(() => res.write(": heartbeat\n\n"), 15000);
-        res.once("close", () => { clearInterval(heartbeat); streams.delete(res); runtime.events.off("event", listener); });
+        const heartbeat = setInterval(() => { if (!res.writableEnded) res.write(": heartbeat\n\n"); }, 15000);
+        res.once("close", () => { clearInterval(heartbeat); chatStreams.delete(res); runtime.events.off("event", listener); });
+        res.write("event: connected\ndata: {}\n\n");
         return;
       }
       if (url.pathname === "/api/config" && req.method === "GET") {
@@ -151,12 +186,13 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
         return json(res, 200, { roles: ROLES, agents: await entries(), runtimeUrl: env.HATCH_FACTORY_RUNTIME_URL ?? "", services: { model: Boolean(env[resolveFactoryLlmProfile(env).apiKeyEnv]?.trim()), search: Boolean(env.TAVILY_API_KEY), scrape: Boolean(env.HATCH_FACTORY_SCRAPE_PROVIDER === "firecrawl" ? env.FIRECRAWL_API_KEY : env.TAVILY_API_KEY), hatch: Boolean(env.HATCH_FACTORY_RUNTIME_URL && env.HATCH_FACTORY_CREATOR_TOKEN), corpus: Boolean(env.HATCH_FACTORY_REGISTRY_URL && env.HATCH_FACTORY_CREATOR_TOKEN), voice: voiceReady } });
       }
 
-      if (url.pathname === "/api/sessions" && req.method === "GET") { const sessions = await store.list(); return json(res, 200, { sessions: sessions.map(s => ({ ...publicSession(s), messages: undefined })), agents: agentEntries(await options.definitions.list(), sessions) }); }
+      if (url.pathname === "/api/sessions" && req.method === "GET") { const sessions = await store.list(); return json(res, 200, { sessions: sessions.map(s => ({ ...publicSession(s), messages: undefined })), agents: agentEntries(await options.definitions.list(), sessions), manualFiles: await store.listManualFiles() }); }
       if (url.pathname === "/api/sessions" && req.method === "POST") {
         const b = z.object({ role: z.enum(ROLES), title: z.string().max(200).optional() }).parse(await body(req));
         await assertRoleAvailable(b.role);
         const existing = (await store.list()).find(session => session.role === b.role);
         const session = existing ?? await store.create(b.role, b.title);
+        if (!existing) await broadcastFactorySnapshot();
         return json(res, existing ? 200 : 201, publicSession(await store.get(session.id)));
       }
       const match = url.pathname.match(/^\/api\/sessions\/([0-9a-f-]{36})(?:\/(.*))?$/);
@@ -248,7 +284,7 @@ export async function createFactoryHandler(options: { root: string; scope: Facto
       });
     });
   };
-  return { handle, handleUpgrade, store, runtime, setScope: (scope: FactoryProductScope) => { if (scope.creatorId !== options.scope.creatorId || scope.productId !== options.scope.productId) throw new Error("Cannot retarget a Product workspace"); options.scope.briefSpec = scope.briefSpec; }, setCreatorToken: (token: string) => { env.HATCH_FACTORY_CREATOR_TOKEN = token; }, close: async () => { for (const response of streams) response.end(); for (const sockets of liveSockets.values()) for (const socket of sockets) socket.terminate(); liveWss.close(); await Promise.allSettled([...voices.values()].map(voice => voice.stop())); await runtime.close(); } };
+  return { handle, handleUpgrade, store, runtime, setScope: (scope: FactoryProductScope) => { if (scope.creatorId !== options.scope.creatorId || scope.productId !== options.scope.productId) throw new Error("Cannot retarget a Product workspace"); options.scope.briefSpec = scope.briefSpec; }, setCreatorToken: (token: string) => { env.HATCH_FACTORY_CREATOR_TOKEN = token; }, close: async () => { for (const response of streams) response.end(); for (const response of chatStreams) response.end(); for (const sockets of liveSockets.values()) for (const socket of sockets) socket.terminate(); liveWss.close(); await Promise.allSettled([...voices.values()].map(voice => voice.stop())); await runtime.close(); } };
 }
 
 const ZERO_USAGE = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } as const;

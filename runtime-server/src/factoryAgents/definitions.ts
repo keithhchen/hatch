@@ -41,8 +41,8 @@ const definitionsSchema = z.array(definitionSchema).length(ROLES.length).superRe
 
 export type AgentDefinition = z.infer<typeof definitionSchema>;
 export type AgentEntryState = "locked" | "ready" | "running" | "complete" | "update_available" | "failed";
-export type AgentAvailability = { missingRequired: Role[]; normal: { required: boolean; satisfied: boolean }; updatedDependencies: Role[] };
-export type AgentEntry = Pick<AgentDefinition, "role" | "order" | "name" | "hint" | "dependencies"> & { state: AgentEntryState; availability: AgentAvailability; sessionId?: string };
+export type AgentAvailability = { missingRequired: Role[]; normal: { required: boolean; satisfied: boolean } };
+export type AgentEntry = Pick<AgentDefinition, "role" | "order" | "name" | "hint" | "dependencies"> & { state: AgentEntryState; availability: AgentAvailability; outputUpdatedAt?: string; sessionId?: string };
 export interface AgentDefinitionRepository { list(): Promise<AgentDefinition[]> }
 export class AgentDefinitionsError extends Error {
   readonly code = "agent_definitions_invalid";
@@ -174,11 +174,11 @@ export function agentEntries(definitions: AgentDefinition[], sessions: Session[]
     const normalRequired = definition.dependencies.normal.length > 0;
     const normalSatisfied = !normalRequired || definition.dependencies.normal.some(dependency => hasOutput(byRole.get(dependency)));
     const dependencies = [...definition.dependencies.required, ...definition.dependencies.normal];
-    const updatedDependencies = session?.lastRunAt ? dependencies.filter(dependency => {
+    const changedDependencies = session?.outputUpdatedAt ? dependencies.filter(dependency => {
       const updatedAt = byRole.get(dependency)?.outputUpdatedAt;
-      return Boolean(updatedAt && updatedAt > session.lastRunAt!);
+      return Boolean(updatedAt && updatedAt > session.outputUpdatedAt!);
     }) : [];
-    const availability = { missingRequired, normal: { required: normalRequired, satisfied: normalSatisfied }, updatedDependencies };
+    const availability = { missingRequired, normal: { required: normalRequired, satisfied: normalSatisfied } };
     const unlocked = missingRequired.length === 0 && normalSatisfied;
     let state: AgentEntryState;
     if (session?.status === "running") state = "running";
@@ -186,9 +186,9 @@ export function agentEntries(definitions: AgentDefinition[], sessions: Session[]
     else if (session?.status === "failed") state = "failed";
     else if (!hasOutput(session)) state = "ready";
     else {
-      state = updatedDependencies.length ? "update_available" : "complete";
+      state = changedDependencies.length ? "update_available" : "complete";
     }
-    return { role: definition.role, order: definition.order, name: definition.name, hint: definition.hint, dependencies: definition.dependencies, state, availability, ...(session ? { sessionId: session.id } : {}) };
+    return { role: definition.role, order: definition.order, name: definition.name, hint: definition.hint, dependencies: definition.dependencies, state, availability, ...(session ? { sessionId: session.id, outputUpdatedAt: session.outputUpdatedAt } : {}) };
   });
 }
 

@@ -18,12 +18,78 @@ export async function factoryAgentTools(options: {
   extraTools?: AgentTool[] | Promise<AgentTool[]>;
 }): Promise<AgentTool[]> {
   const candidates = [
+    createAskUserTool(),
     createTodoTool(options.store, options.id, options.changed),
     ...fileTools(options.store, options.id, { changed: options.changed }),
     ...webTools(options.store, options.id, options.changed, options.env),
     ...(await options.extraTools ?? []),
   ];
-  return candidates.filter(tool => options.definition.tools.includes(tool.name));
+  // askuser is a host capability available to every Factory Agent. The
+  // definition-specific list still controls the business tools.
+  return candidates.filter(tool => tool.name === "askuser" || options.definition.tools.includes(tool.name));
+}
+
+const askUserOption = Type.Union([
+  Type.String({ minLength: 1, maxLength: 240 }),
+  Type.Object({
+    id: Type.Optional(Type.String({ minLength: 1, maxLength: 80 })),
+    label: Type.String({ minLength: 1, maxLength: 240 }),
+    description: Type.Optional(Type.String({ maxLength: 500 })),
+  }),
+]);
+
+const askUserQuestion = Type.Object({
+  id: Type.Optional(Type.String({ minLength: 1, maxLength: 80 })),
+  header: Type.Optional(Type.String({ maxLength: 40 })),
+  question: Type.String({ minLength: 1, maxLength: 1000 }),
+  options: Type.Array(askUserOption, { maxItems: 8 }),
+  multiSelect: Type.Optional(Type.Boolean()),
+  required: Type.Optional(Type.Boolean()),
+});
+
+/**
+ * Ask the Creator for one batch of answers and end the current Agent turn.
+ * The next ordinary user message is the continuation. This is intentionally
+ * not a waiting Promise or a second execution state.
+ */
+export function createAskUserTool(): AgentTool {
+  return {
+    name: "askuser",
+    label: "询问用户",
+    description: "Ask the Creator for information or a decision that materially affects the work. Put related questions into one questions array. Use options when useful; the interface always also provides a free-form answer field. Do not ask for routine confirmation or facts already available in the inputs.",
+    parameters: Type.Object({ questions: Type.Array(askUserQuestion, { minItems: 1, maxItems: 8 }) }),
+    execute: async (_callId, raw) => {
+      const input = raw as { questions: Array<{
+        id?: string;
+        header?: string;
+        question: string;
+        options: Array<string | { id?: string; label: string; description?: string }>;
+        multiSelect?: boolean;
+        required?: boolean;
+      }> };
+      const seen = new Set<string>();
+      const questions = input.questions.map((question, index) => {
+        const id = question.id?.trim() || `question-${index + 1}`;
+        if (seen.has(id)) throw new Error(`askuser question ids must be unique: ${id}`);
+        seen.add(id);
+        return {
+          id,
+          ...(question.header?.trim() ? { header: question.header.trim() } : {}),
+          question: question.question.trim(),
+          options: question.options.map((option, optionIndex) => typeof option === "string"
+            ? { id: `option-${optionIndex + 1}`, label: option.trim() }
+            : { id: option.id?.trim() || `option-${optionIndex + 1}`, label: option.label.trim(), ...(option.description?.trim() ? { description: option.description.trim() } : {}) }),
+          multiSelect: question.multiSelect === true,
+          required: question.required !== false,
+        };
+      });
+      return {
+        content: [{ type: "text" as const, text: "The user must answer the askuser block before you continue. End this turn now." }],
+        details: { type: "askuser", questions },
+        terminate: true,
+      };
+    },
+  };
 }
 
 export function createTodoTool(store: WorkbenchStore, id: string, changed: () => void): AgentTool {

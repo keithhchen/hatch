@@ -22,7 +22,7 @@ test('Factory header uses the real Product name and removes the inspector headin
   assert.doesNotMatch(source, /<Typography variant="subtitle1" fontWeight=\{750\}>\{t\("nextSteps"\)\}<\/Typography>/);
   assert.doesNotMatch(source, /backToStage/);
   assert.doesNotMatch(source, /<Refresh/);
-  assert.match(source, /if \(entry\?\.state === "complete"\) return null/);
+  assert.match(source, /entry\?\.state === "complete" \|\| entry\?\.state === "update_available"/);
 });
 
 test('Factory navigation is URL-controlled down to the Agent page', async () => {
@@ -128,11 +128,11 @@ test('Factory JSX keeps visible copy in i18n and reads Agent identity from datab
 
 test('Factory uses live dependency state at each interaction boundary', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
-  assert.match(source, /availability\?\.updatedDependencies \|\| \[\]/);
-  assert.match(source, /const composerDisabled = locked \|\| busy \|\| !config\?\.services\.model/);
+  assert.match(source, /changedDependencies\(entry, agents\)/);
+  assert.match(source, /const composerDisabled = locked \|\| busy \|\| Boolean\(pendingAskUser\) \|\| !config\?\.services\.model/);
   assert.match(source, /<ChatComposer disabled=\{composerDisabled\}/);
   assert.match(source, /const targetStage = factorySectionForAgent\(role\)/);
-  assert.doesNotMatch(source, /updatedDependencies \|\| entry\.dependencies/);
+  assert.doesNotMatch(source, /availability\?\.updatedDependencies/);
   assert.doesNotMatch(source, /comments\/export|annotateLines|line-selection|lineSelection/);
 });
 
@@ -279,7 +279,8 @@ test('Factory file previews use a real modal while preserving live file actions'
 
 test('Collect sources lists the real manual-upload files from the research session', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
-  assert.match(source, /const manualFiles = researchSession\?\.files\?\.filter\(record => record\.path\.startsWith\("input\/manual\/"\)\)/);
+  assert.match(source, /const \[sessions, setSessions\] = useState\(\[\]\); const \[agents, setAgents\] = useState\(\[\]\); const \[manualFiles, setManualFiles\] = useState\(\[\]\)/);
+  assert.match(source, /setManualFiles\(value\.manualFiles \|\| \[\]\)/);
   assert.match(source, /manualFiles\.map\(record =>/);
   assert.match(source, /onClick=\{\(\) => onOpenAgent\("research"\)\}/);
   assert.match(source, /t\("manualUploads"\)/);
