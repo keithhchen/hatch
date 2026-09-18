@@ -1,7 +1,7 @@
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
 
-export const RUNTIME_LLM_PROFILE_NAMES = ["kimi-k2.6", "kimi-k2.6-no-thinking", "deepseek-v4-flash"] as const;
-export const FACTORY_LLM_PROFILE_NAMES = ["kimi-k2.6", "deepseek-v4-flash"] as const;
+export const RUNTIME_LLM_PROFILE_NAMES = ["kimi-k2.6", "kimi-k2.6-no-thinking", "deepseek-v4-flash", "gemini-api"] as const;
+export const FACTORY_LLM_PROFILE_NAMES = ["kimi-k2.6", "deepseek-v4-flash", "gemini-api"] as const;
 export type FactoryLlmProfileName = (typeof FACTORY_LLM_PROFILE_NAMES)[number];
 export const LLM_PROFILE_NAMES = RUNTIME_LLM_PROFILE_NAMES;
 export type LlmProfileName = (typeof LLM_PROFILE_NAMES)[number];
@@ -11,9 +11,10 @@ export type LlmProfile = {
   name: LlmProfileName;
   provider: string;
   providerName: string;
+  api: "openai-completions" | "google-generative-ai";
   model: string;
   baseUrl: string;
-  apiKeyEnv: "LLM_API_KEY" | "DEEPSEEK_API_KEY";
+  apiKeyEnv: "LLM_API_KEY" | "DEEPSEEK_API_KEY" | "GEMINI_API_KEY";
   contextWindow: number;
   maxTokens: number;
   reasoning: boolean;
@@ -28,6 +29,7 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     name: "kimi-k2.6",
     provider: "moonshotai-cn",
     providerName: "Moonshot Kimi",
+    api: "openai-completions",
     model: "kimi-k2.6",
     baseUrl: "https://api.moonshot.cn/v1",
     apiKeyEnv: "LLM_API_KEY",
@@ -42,6 +44,7 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     name: "kimi-k2.6-no-thinking",
     provider: "moonshotai-cn",
     providerName: "Moonshot Kimi",
+    api: "openai-completions",
     model: "kimi-k2.6",
     baseUrl: "https://api.moonshot.cn/v1",
     apiKeyEnv: "LLM_API_KEY",
@@ -56,6 +59,7 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     name: "deepseek-v4-flash",
     provider: "deepseek",
     providerName: "DeepSeek",
+    api: "openai-completions",
     model: "deepseek-v4-flash",
     baseUrl: "https://api.deepseek.com",
     apiKeyEnv: "DEEPSEEK_API_KEY",
@@ -64,6 +68,20 @@ const PROFILES: Record<LlmProfileName, LlmProfile> = {
     reasoning: false,
     thinkingLevel: "minimal",
     thinkingType: "disabled",
+    normalizeEmptyToolCallContent: false
+  },
+  "gemini-api": {
+    name: "gemini-api",
+    provider: "google",
+    providerName: "Google Gemini API",
+    api: "google-generative-ai",
+    model: "gemini-3.8-flash",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+    apiKeyEnv: "GEMINI_API_KEY",
+    contextWindow: 1_048_576,
+    maxTokens: 65_536,
+    reasoning: true,
+    thinkingLevel: "low",
     normalizeEmptyToolCallContent: false
   }
 };

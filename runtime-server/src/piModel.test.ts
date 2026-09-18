@@ -261,6 +261,23 @@ test("active DeepSeek profile uses its own model, endpoint, and credential", asy
   assert.deepEqual(body.thinking, { type: "disabled" });
 });
 
+test("active Gemini API profile uses Pi's native Google protocol", () => {
+  const env = {
+    HATCH_LLM_PROFILE: "gemini-api",
+    GEMINI_API_KEY: "gemini-test-key",
+    LLM_API_KEY: "unused-kimi-key"
+  };
+
+  const model = createPiModel({ env });
+  assert.equal(model.id, "gemini-3.8-flash");
+  assert.equal(model.api, "google-generative-ai");
+  assert.equal(model.provider, "google");
+  assert.equal(model.baseUrl, "https://generativelanguage.googleapis.com/v1beta");
+  const agent = createPiAgent({ env, timeoutMs: 8_000 });
+  assert.equal(agent.state.model.api, "google-generative-ai");
+  assert.equal(agent.state.thinkingLevel, "low");
+});
+
 test("Kimi no-thinking profile sends the official disabled payload without temperature", async () => {
   const calls: Array<{ url: string; init: RequestInit }> = [];
   const fetch: typeof globalThis.fetch = async (input, init) => {
@@ -292,5 +309,9 @@ test("active profile rejects unknown names and missing provider credentials", ()
   assert.throws(
     () => createPiAgent({ env: { HATCH_LLM_PROFILE: "deepseek-v4-flash" } }),
     /Missing DEEPSEEK_API_KEY/
+  );
+  assert.throws(
+    () => createPiAgent({ env: { HATCH_LLM_PROFILE: "gemini-api" } }),
+    /Missing GEMINI_API_KEY/
   );
 });

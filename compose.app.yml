@@ -37,6 +37,7 @@ services:
       # DeepSeek is optional; the active Factory provider is selected by
       # HATCH_FACTORY_LLM_PROFILE and Kimi uses LLM_API_KEY.
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.moonshot.cn/v1}
       HATCH_LLM_PROFILE: ${HATCH_LLM_PROFILE:-kimi-k2.6}
       HATCH_FACTORY_LLM_PROFILE: ${HATCH_FACTORY_LLM_PROFILE:-kimi-k2.6}
@@ -122,6 +123,7 @@ services:
       HATCH_CREATOR_FACTORY_POLL_MS: ${HATCH_CREATOR_FACTORY_POLL_MS:-1000}
       LLM_API_KEY: ${LLM_API_KEY:?set LLM_API_KEY in /opt/hatch/.env}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.moonshot.cn/v1}
       HATCH_LLM_PROFILE: ${HATCH_LLM_PROFILE:-kimi-k2.6}
       HATCH_FACTORY_LLM_PROFILE: ${HATCH_FACTORY_LLM_PROFILE:-kimi-k2.6}
@@ -217,6 +219,7 @@ services:
       DASHSCOPE_RERANK_BASE_URL: ${DASHSCOPE_RERANK_BASE_URL:-https://dashscope.aliyuncs.com/compatible-api/v1}
       LLM_API_KEY: ${LLM_API_KEY:?set LLM_API_KEY in /opt/hatch/.env}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.moonshot.cn/v1}
       HATCH_LLM_PROFILE: ${HATCH_LLM_PROFILE:-kimi-k2.6}
       HATCH_CREATOR_MODEL: ${HATCH_CREATOR_MODEL:-kimi-k2.6}

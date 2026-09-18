@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import type { Usage } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, Usage } from "@earendil-works/pi-ai";
 import { UUID_V4_RE } from "./identity.js";
 import type { BriefSpec } from "./brief.js";
 
@@ -318,6 +318,11 @@ export type ConversationMessage = {
   model_images?: Array<{ type: "image"; data: string; mimeType: string }>;
   tokens_before?: number;
   usage?: Usage;
+  /** Provider-native assistant history. Internal only; visible projections never expose it. */
+  model_content?: AssistantMessage["content"];
+  model_api?: Api;
+  model_provider?: string;
+  model_id?: string;
   tool_name?: string;
   /** Canonical tool output blocks; new tool records do not duplicate text in content. */
   tool_content?: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }>;

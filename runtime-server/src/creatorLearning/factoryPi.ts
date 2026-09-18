@@ -1,5 +1,6 @@
 import { Agent, type AgentOptions, type StreamFn } from "@earendil-works/pi-agent-core";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
+import { googleGenerativeAIApi } from "@earendil-works/pi-ai/api/google-generative-ai.lazy";
 import type {
   AssistantMessageEventStream,
   FetchFunction,
@@ -29,7 +30,7 @@ const FACTORY_KIMI_PROVIDER_CN = "moonshotai-cn" as const;
 const FACTORY_KIMI_PROVIDER_GLOBAL = "moonshotai" as const;
 const FACTORY_KIMI_HOSTS = new Set(["api.moonshot.cn", "api.moonshot.ai"]);
 
-export type FactoryLlmModel = Model<"openai-completions">;
+export type FactoryLlmModel = Model<"openai-completions"> | Model<"google-generative-ai">;
 
 export type FactoryPiAdapterOptions = {
   apiKey?: string;
@@ -153,6 +154,21 @@ export function createFactoryLlmModel(options: FactoryPiAdapterOptions = {}): Fa
     };
   }
 
+  if (profile.api === "google-generative-ai") {
+    return {
+      id: profile.model,
+      name: profile.model,
+      api: "google-generative-ai",
+      provider: profile.provider,
+      baseUrl,
+      reasoning: profile.reasoning,
+      input: ["text", "image"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: profile.contextWindow,
+      maxTokens: profile.maxTokens
+    };
+  }
+
   return {
     id: profile.model,
     name: profile.model,
@@ -182,6 +198,23 @@ export function createFactoryLlmModel(options: FactoryPiAdapterOptions = {}): Fa
  */
 export function createFactoryPiStreamFn(options: FactoryPiAdapterOptions = {}): StreamFn {
   const config = resolveFactoryPi(options);
+  if (config.profile.api === "google-generative-ai") {
+    const api = googleGenerativeAIApi();
+    return (model, context, streamOptions?: SimpleStreamOptions) => api.streamSimple(model, context, {
+      ...streamOptions,
+      apiKey: streamOptions?.apiKey ?? config.apiKey,
+      headers: config.headers || streamOptions?.headers
+        ? { ...config.headers, ...streamOptions?.headers }
+        : undefined,
+      maxRetries: streamOptions?.maxRetries ?? config.maxRetries,
+      maxRetryDelayMs: streamOptions?.maxRetryDelayMs ?? config.maxRetryDelayMs,
+      ...(streamOptions?.maxTokens === undefined
+        ? { maxTokens: config.maxTokens ?? config.profile.maxTokens }
+        : {}),
+      reasoning: streamOptions?.reasoning ?? config.thinkingLevel,
+      timeoutMs: streamOptions?.timeoutMs ?? config.timeoutMs
+    });
+  }
   const api = openAICompletionsApi();
   return (model, context, streamOptions?: SimpleStreamOptions) => {
     const profile = config.profile;
@@ -258,6 +291,7 @@ function structuredOutputPayload(
 /** Factory provider payload rules live here, next to the Factory adapter. */
 export function normalizeFactoryLlmPayload(payload: unknown, profileName: FactoryLlmProfileName): unknown {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+  if (profileName === "gemini-api") return payload;
   if (profileName !== "kimi-k2.6") {
     return {
       ...(payload as Record<string, unknown>),
@@ -279,9 +313,23 @@ export function normalizeFactoryLlmPayload(payload: unknown, profileName: Factor
 
 /** DeepSeek can require a tool turn; Kimi K2.6 must remain on `auto`. */
 export function requireFactoryToolChoice(payload: unknown, profileName: FactoryLlmProfileName): unknown {
-  if (profileName === "kimi-k2.6" || !payload || typeof payload !== "object" || Array.isArray(payload)) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     return payload;
   }
+  if (profileName === "gemini-api") {
+    const params = payload as Record<string, unknown>;
+    const config = params.config && typeof params.config === "object" && !Array.isArray(params.config)
+      ? params.config as Record<string, unknown>
+      : {};
+    return {
+      ...params,
+      config: {
+        ...config,
+        toolConfig: { functionCallingConfig: { mode: "ANY" } }
+      }
+    };
+  }
+  if (profileName === "kimi-k2.6") return payload;
   return { ...(payload as Record<string, unknown>), tool_choice: "required" };
 }
 

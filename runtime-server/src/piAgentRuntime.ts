@@ -37,6 +37,7 @@ import {
 } from "./agentRuntime.js";
 import { SUMMARY_PREFIX, SUMMARY_SUFFIX } from "./compaction.js";
 import { createPiModel, createPiStreamFn } from "./piModel.js";
+import { resolveLlmProfile } from "./llmProfiles.js";
 import { runPiAgentPrompt, type PiAgentPromptRunner } from "./piPrompt.js";
 import {
   findDocumentSkillForAsset,
@@ -198,7 +199,7 @@ export class PiAgentRuntime implements AgentRuntime {
       initialState: {
         systemPrompt: buildRuntimeSystemPrompt(ctx.agentSystemPrompt, ctx.deliveryWorkflow, ctx.briefSnapshot),
         model,
-        thinkingLevel: "high",
+        thinkingLevel: resolveLlmProfile().thinkingLevel,
         messages: [...contextMessages, ...storedMessages],
         tools
       },
@@ -782,6 +783,18 @@ function toPiMessage(
   if (message.role === "tool") {
     return restoreToolMessage(message);
   }
+  if (message.model_content && message.model_api && message.model_provider && message.model_id) {
+    return {
+      role: "assistant",
+      content: structuredClone(message.model_content),
+      api: message.model_api,
+      provider: message.model_provider,
+      model: message.model_id,
+      usage: message.usage ?? emptyUsage(),
+      stopReason: message.tool_calls?.length ? "toolUse" : "stop",
+      timestamp: Date.now()
+    } as AssistantMessage;
+  }
   const content: Array<Record<string, unknown>> = [];
   if (message.content) content.push({ type: "text", text: message.content });
   for (const call of message.tool_calls ?? []) {
@@ -906,6 +919,10 @@ function fromPiMessage(message: AssistantMessage | ToolResultMessage): Conversat
   return {
     role: "assistant",
     content: text || null,
+    model_content: structuredClone(message.content),
+    model_api: message.api,
+    model_provider: message.provider,
+    model_id: message.model,
     ...(calls.length > 0 ? { tool_calls: calls } : {}),
     ...(message.usage.totalTokens > 0 ? { usage: message.usage } : {})
   };
@@ -921,6 +938,10 @@ function toRuntimeCompactionMessage(message: AgentMessage): {
   tool_is_error?: boolean;
   model_images?: ConversationMessage["model_images"];
   usage?: AssistantMessage["usage"];
+  model_content?: AssistantMessage["content"];
+  model_api?: AssistantMessage["api"];
+  model_provider?: string;
+  model_id?: string;
   tokens_before?: number;
 } {
   if (message.role === "user") {
@@ -944,6 +965,10 @@ function toRuntimeCompactionMessage(message: AgentMessage): {
     role: "assistant",
     content: piText(message),
     usage: message.usage,
+    model_content: structuredClone(message.content),
+    model_api: message.api,
+    model_provider: message.provider,
+    model_id: message.model,
     tool_calls: Array.isArray((message as { content?: unknown }).content)
       ? (message as { content: unknown[] }).content.filter((block) => typeof block === "object" && block !== null && (block as { type?: unknown }).type === "toolCall")
       : []

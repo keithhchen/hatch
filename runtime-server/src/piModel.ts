@@ -1,5 +1,6 @@
 import { Agent, type AgentOptions, type StreamFn } from "@earendil-works/pi-agent-core";
 import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
+import { googleGenerativeAIApi } from "@earendil-works/pi-ai/api/google-generative-ai.lazy";
 import type {
   FetchFunction,
   Model,
@@ -29,6 +30,7 @@ const KIMI_HOSTS = new Set(["api.moonshot.cn", "api.moonshot.ai"]);
 
 export type KimiProvider = typeof KIMI_PROVIDER_CN | typeof KIMI_PROVIDER_GLOBAL;
 export type KimiModel = Model<"openai-completions">;
+export type PiModel = Model<"openai-completions"> | Model<"google-generative-ai">;
 
 /**
  * Configuration accepted by the Kimi adapter.
@@ -454,14 +456,28 @@ export function createKimiAgent(options: KimiAgentOptions = {}): Agent {
 
 // Names that make the adapter's Pi role explicit for callers that do not want
 // to couple their code to the provider-specific Kimi naming.
-export function createPiModel(options: KimiAdapterOptions = {}): KimiModel {
+export function createPiModel(options: KimiAdapterOptions = {}): PiModel {
   const env = options.env ?? process.env;
   const profile = resolveLlmProfile(env);
   if (profile.name === "kimi-k2.6") return createKimiModel(options);
   return modelForProfile(profile);
 }
 
-function modelForProfile(profile: LlmProfile): KimiModel {
+function modelForProfile(profile: LlmProfile): PiModel {
+  if (profile.api === "google-generative-ai") {
+    return {
+      id: profile.model,
+      name: profile.model,
+      api: "google-generative-ai",
+      provider: profile.provider,
+      baseUrl: profile.baseUrl,
+      reasoning: profile.reasoning,
+      input: ["text", "image"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: profile.contextWindow,
+      maxTokens: profile.maxTokens
+    };
+  }
   return {
     id: profile.model,
     name: profile.model,
@@ -505,6 +521,19 @@ function resolvePiOptions(options: KimiAdapterOptions): ResolvedKimiOptions & { 
 
 function piStreamFnFor(config: ResolvedKimiOptions & { profile: LlmProfile }): StreamFn {
   if (config.profile.name === "kimi-k2.6") return streamFnFor(config);
+  if (config.profile.api === "google-generative-ai") {
+    const api = googleGenerativeAIApi();
+    return (model, context, options?: SimpleStreamOptions) => api.streamSimple(model, context, {
+      ...options,
+      apiKey: options?.apiKey ?? config.apiKey,
+      headers: config.headers || options?.headers ? { ...config.headers, ...options?.headers } : undefined,
+      maxRetries: options?.maxRetries ?? config.maxRetries,
+      maxRetryDelayMs: options?.maxRetryDelayMs ?? config.maxRetryDelayMs,
+      ...(options?.maxTokens === undefined && config.maxTokens !== undefined ? { maxTokens: config.maxTokens } : {}),
+      reasoning: options?.reasoning ?? config.thinkingLevel,
+      timeoutMs: options?.timeoutMs ?? config.timeoutMs
+    });
+  }
   const api = openAICompletionsApi();
   return (model, context, options?: SimpleStreamOptions) => api.streamSimple(model, context, {
     ...options,
@@ -538,13 +567,13 @@ export function createPiStreamFn(options: KimiAdapterOptions = {}): StreamFn {
   return piStreamFnFor(resolvePiOptions(options));
 }
 
-export function createPiModels(options: KimiAdapterOptions = {}): { models: Models; model: KimiModel } {
+export function createPiModels(options: KimiAdapterOptions = {}): { models: Models; model: PiModel } {
   const config = resolvePiOptions(options);
   const model = config.profile.name === "kimi-k2.6" ? createKimiModel(config) : modelForProfile(config.profile);
-  const stream = piStreamFnFor(config) as (requestModel: KimiModel, context: Parameters<StreamFn>[1], streamOptions?: SimpleStreamOptions) => AssistantMessageEventStream;
+  const stream = piStreamFnFor(config) as (requestModel: PiModel, context: Parameters<StreamFn>[1], streamOptions?: SimpleStreamOptions) => AssistantMessageEventStream;
   const api: ProviderStreams = {
-    stream: (requestModel, context, streamOptions) => stream(requestModel as KimiModel, context, streamOptions),
-    streamSimple: (requestModel, context, streamOptions) => stream(requestModel as KimiModel, context, streamOptions)
+    stream: (requestModel, context, streamOptions) => stream(requestModel as PiModel, context, streamOptions),
+    streamSimple: (requestModel, context, streamOptions) => stream(requestModel as PiModel, context, streamOptions)
   };
   const provider = createProvider({
     id: model.provider,
