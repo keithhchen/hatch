@@ -1,1 +1,1 @@
-markitdown
+markitdown[docx,pptx,xlsx,pdf]
