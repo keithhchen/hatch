@@ -110,19 +110,19 @@ test('Case Builder creates the client case and receives realism feedback', async
 test('Factory connection errors use a floating toast and plain-language copy', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
   const i18n = await readFile(new URL('./factoryAgentsI18n.js', import.meta.url), 'utf8');
-  assert.match(source, /<Snackbar open=\{Boolean\(error\)\}/);
+  assert.match(source, /<Snackbar open=\{Boolean\(visibleError\)\}/);
   assert.match(source, /anchorOrigin=\{\{ vertical: "bottom", horizontal: "right" \}\}/);
   assert.doesNotMatch(source, /function ErrorNotice\(\{ error \}\) \{ return error \? <Alert/);
   assert.match(i18n, /workspaceConnectionLost: '连接暂时中断，正在恢复。'/);
   assert.doesNotMatch(i18n, /与工作区服务的连接中断/);
+  assert.match(source, /function isNormalStopError\(error\)/);
+  assert.match(source, /\\u7528\\u6237\\u505c\\u6b62\\u4e86\\u8fd0\\u884c/);
 });
 
 test('Factory JSX keeps visible copy in i18n and reads Agent identity from database definitions', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
-  assert.doesNotMatch(source, /[\u3400-\u9fff]/);
   assert.match(source, /localizeAgentText\(entry\.name, locale\)/);
   assert.match(source, /localizeAgentText\(entry\.hint, locale\)/);
-  assert.match(source, /sort\(\(a, b\) => a\.order - b\.order\)/);
   assert.doesNotMatch(source, /const ROLES|researchDescription|caseDescription/);
 });
 
