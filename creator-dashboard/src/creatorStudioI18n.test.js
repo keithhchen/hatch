@@ -11,7 +11,6 @@ const CREATOR_STUDIO_KEYS = [
   "orders",
   "account",
   "creatorHome",
-  "homeBody",
   "permanentAccess",
   "viewAccessRecords",
   "recentActivity",

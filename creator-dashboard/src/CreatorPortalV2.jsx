@@ -147,7 +147,7 @@ export function CreatorPortalV2({
         </div>
       </aside>
       <main id="creator-main" className={`cpv2-main${route.kind === "factory-agents" ? " cpv2-main--workbench" : ""}`} ref={mainRef}>
-        <CreatorRoute route={route} token={token} request={request} navigate={go} profile={profile} locale={locale} t={t} registerNavigationGuard={registerNavigationGuard} />
+        <CreatorRoute route={route} token={token} request={request} navigate={go} locale={locale} t={t} registerNavigationGuard={registerNavigationGuard} />
       </main>
       </div>
     </ThemeProvider>
@@ -167,13 +167,13 @@ function NavButton({ active, children, onClick }) {
   return <NavigationItem active={active} aria-current={active ? "page" : undefined} onClick={onClick}>{children}</NavigationItem>;
 }
 
-function CreatorRoute({ route, token, request, navigate, profile, locale, t, registerNavigationGuard }) {
+function CreatorRoute({ route, token, request, navigate, locale, t, registerNavigationGuard }) {
   if (typeof request !== "function") {
     return <RouteProblem title={t("creatorPortalUnavailable")} body={t("creatorPortalUnavailableBody")} />;
   }
   if (route.kind === "factory-index") return <FactoryIndexRedirect navigate={navigate} />;
   if (route.kind === "factory-agents") return <FactoryAgents key={route.productId} productId={route.productId} section={route.factorySection} agent={route.factoryAgent} navigate={navigate} locale={locale} />;
-  if (route.kind === "home") return <CreatorHome token={token} request={request} navigate={navigate} profile={profile} t={t} locale={locale} />;
+  if (route.kind === "home") return <CreatorHome token={token} request={request} navigate={navigate} t={t} locale={locale} />;
   if (route.kind === "products") return <ProductsPage token={token} request={request} navigate={navigate} t={t} />;
   if (route.kind === "product-create") return <CreatorProductFiles token={token} navigate={navigate} locale={locale} />;
   if (route.kind === "product" && ["overview", "files", "about-you", "corpus", "brief", "complete"].includes(route.tab)) return <FactoryProductRedirect productId={route.productId} navigate={navigate} />;
@@ -186,7 +186,7 @@ function CreatorRoute({ route, token, request, navigate, profile, locale, t, reg
   return <RouteProblem title={t("pageNotFound")} body={t("pageNotFoundBody")} action={t("backToProducts")} onAction={() => navigate(`${ROOT}/products`)} />;
 }
 
-function CreatorHome({ token, request, navigate, profile, t, locale }) {
+function CreatorHome({ token, request, navigate, t, locale }) {
   const resource = useRemote(request, "/v1/creator/overview", token);
   return (
     <PageBoundary resource={resource} title={t("workspaceLoadError")} retryLabel={t("retry")} t={t}>
@@ -196,22 +196,21 @@ function CreatorHome({ token, request, navigate, profile, t, locale }) {
         const orders = arrayOf(overview?.recent_orders ?? overview?.orders);
         const next = nextCreatorAction(products, t);
         const metrics = overview?.metrics ?? {};
+        const purchaseCount = Number(metrics.order_count ?? orders.length) || 0;
         return <>
-          <PageHeader eyebrow={t("creatorHome")} title={t("homeTitle", firstName(profile?.display_name) || t("creator"))} body={t("homeBody")} />
-          <section className="cpv2-grid cpv2-home-grid" aria-label={t("creatorOverview")}>
+          <section className={`cpv2-grid cpv2-home-grid${purchaseCount > 0 ? "" : " cpv2-home-grid--single"}`} aria-label={t("creatorOverview")}>
             <article className="cpv2-card cpv2-next-card">
-              <StatusChip status={next.tone}>{next.label}</StatusChip>
+              {next.label ? <StatusChip status={next.tone}>{next.label}</StatusChip> : null}
               <h2>{next.title}</h2>
               <p>{next.body}</p>
               <Button type="button" trailing={<span aria-hidden="true">→</span>} onClick={() => navigate(next.href)}>{next.action}</Button>
             </article>
-            <article className="cpv2-card cpv2-balance-card">
+            {purchaseCount > 0 ? <article className="cpv2-card cpv2-balance-card">
               <span className="cpv2-kicker">{t("permanentAccess")}</span>
-              <strong>{metrics.order_count ?? orders.length}</strong>
-              <p>{t("peopleWithAccess")}</p>
-              <dl><div><dt>{t("products")}</dt><dd>{products.length}</dd></div><div><dt>{t("orders")}</dt><dd>{metrics.order_count ?? orders.length}</dd></div></dl>
+              <strong>{purchaseCount}</strong>
+              <p>{t("purchases")}</p>
               <Button className="cpv2-inverse" variant="secondary" type="button" onClick={() => navigate(`${ROOT}/orders`)}>{t("viewAccessRecords")}</Button>
-            </article>
+            </article> : null}
           </section>
           <SectionHeading eyebrow={t("recentActivity")} title={t("ordersAndAccess")} action={t("viewAllOrders")} onAction={() => navigate(`${ROOT}/orders`)} />
           {orders.length ? <OrderList orders={orders} onOpen={(order) => navigate(`${ROOT}/orders/${encodeURIComponent(idOf(order, "order"))}`)} t={t} locale={locale} /> : <EmptyState title={t("noAccessRecords")} body={t("noAccessRecordsBody")} />}
@@ -658,7 +657,7 @@ function localizedRouteTitle(route, t) {
 }
 
 function nextCreatorAction(products, t) {
-  if (!products.length) return { label: t("startHere"), tone: "draft", title: t("createFocusedProduct"), body: t("createFocusedProductBody"), action: t("createProduct"), href: `${ROOT}/products/new` };
+  if (!products.length) return { tone: "draft", title: t("createFocusedProduct"), body: t("createFocusedProductBody"), action: t("createProduct"), href: `${ROOT}/products/new` };
   for (const product of products) {
     if (product.status !== "published" && product.status !== "live") return { label: localizedProductStatus(product.status, t), tone: product.status, title: product.name ?? product.product_name ?? t("untitledProduct"), body: product.promise ?? product.description ?? t("continueProductWorkflow"), action: t("continueProduct"), href: `${ROOT}/products/${encodeURIComponent(idOf(product, "product"))}` };
   }
@@ -720,7 +719,6 @@ function idOf(value, kind) { return String(value?.[`${kind}_id`] ?? value?.id ??
 function arrayOf(value) { if (Array.isArray(value)) return value; return []; }
 function unwrap(payload, key) { return payload && Object.prototype.hasOwnProperty.call(payload, key) ? payload[key] : payload; }
 function initials(name) { return String(name || "C").split(/\s+/).slice(0, 2).map((word) => word[0]?.toUpperCase()).join("") || "C"; }
-function firstName(name) { return String(name || "").trim().split(/\s+/)[0] || ""; }
 function mutationKey() { return globalThis.crypto?.randomUUID?.() ?? `ui-${Date.now()}-${Math.random().toString(16).slice(2)}`; }
 function safePublicUrl(value) { const text = String(value ?? ""); return /^https?:\/\//i.test(text) || /^\/products\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(text) ? text : undefined; }
 

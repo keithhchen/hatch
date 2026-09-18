@@ -31,7 +31,6 @@ test("R02 sign-up preserves the Product intent and returns to the selected Produ
   await page.getByLabel("Name").fill("Signup Return Buyer");
   await page.getByLabel("Email").fill(uniqueEmail("signup-return", testInfo));
   await page.getByLabel("Password").fill("signup-return-password");
-  await page.getByLabel("I agree to the Hatch Terms and Privacy Policy.").check();
   await page.getByRole("button", { name: "Create account" }).click();
 
   await expect(page).toHaveURL(new RegExp(`${escapeRegExp(PUBLIC_PRODUCT)}$`));
@@ -176,10 +175,6 @@ test("R30 keyboard-only Buyer flow completes free checkout with stable focus and
   await keyboardType(page, page.getByLabel("Name"), "Keyboard Checkout Buyer");
   await keyboardType(page, page.getByLabel("Email"), email);
   await keyboardType(page, page.getByLabel("Password"), "keyboard-checkout-password");
-  const terms = page.getByLabel("I agree to the Hatch Terms and Privacy Policy.");
-  await keyboardTabTo(page, terms);
-  await page.keyboard.press("Space");
-  await expect(terms).toBeChecked();
   const createAccount = page.getByRole("button", { name: "Create account" });
   await keyboardTabTo(page, createAccount);
   await page.keyboard.press("Enter");
@@ -505,7 +500,6 @@ async function createBuyerFromProduct(page, email, displayName) {
   await page.getByLabel("Name").fill(displayName);
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill("browser-e2e-password");
-  await page.getByLabel("I agree to the Hatch Terms and Privacy Policy.").check();
   await page.getByRole("button", { name: "Create account" }).click();
   await expect(page).toHaveURL(new RegExp(`${escapeRegExp(PUBLIC_PRODUCT)}$`));
 }

@@ -96,7 +96,7 @@ test("anonymous Buyer completes free checkout and can recover every durable rout
 
 test("Creator can recover Home, Products and free Access routes", async ({ page }) => {
   await signIn(page, "creator", "/studio");
-  await expect(page.getByRole("heading", { level: 1, name: /Maya, here’s the next useful step/ })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Creator overview" })).toBeVisible();
   await expectNoHorizontalOverflow(page);
 
   await page.getByRole("button", { name: "Products", exact: true }).click();

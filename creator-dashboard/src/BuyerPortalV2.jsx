@@ -480,7 +480,7 @@ function AuthPage({mode, search, request, navigate, session }) {
   const productIntent = intentRoute.name === "product";
   const intentEndpoint = productIntent ? `${BUYER_PORTAL_V2_ENDPOINTS.catalog}/${encodeURIComponent(intentRoute.params.productId)}` : "";
   const intent = useRemote(async (signal) => unwrap(await callRequest(request, intentEndpoint, { signal }), ["agent", "product"]), intentEndpoint || "no-intent", productIntent);
-  const [form, setForm] = useState({ display_name: "", email: "", password: "", terms: false });
+  const [form, setForm] = useState({ display_name: "", email: "", password: "" });
   const [submission, setSubmission] = useState({ status: "idle", error: null });
   usePageTitle(signingUp
     ? (creatorIntent ? t(t("Create your Creator account")) : t("Create your Hatch account"))
@@ -536,7 +536,6 @@ function AuthPage({mode, search, request, navigate, session }) {
           {signingUp ? <Field label={t('Name')}><Input required autoComplete="name" value={form.display_name} onChange={(event) => setForm({ ...form, display_name: event.target.value })} /></Field> : null}
           <Field label={t('Email')}><Input required type="email" autoComplete="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></Field>
           <Field label={t('Password')}><Input required minLength={8} type="password" autoComplete={signingUp ? "new-password" : "current-password"} value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></Field>
-          {signingUp ? <HatchCheckbox className="buyer-v2__checkbox" required checked={form.terms} onCheckedChange={(checked) => setForm({ ...form, terms: checked === true })} label={t('I agree to the Hatch Terms and Privacy Policy.')} /> : null}
           {submission.error ? <InlineError error={submission.error} /> : null}
           <div className="buyer-v2__auth-actions">
             <Button className="buyer-v2__button--wide" loading={submission.status === "pending"}>{signingUp ? (creatorIntent ? t("Create Creator account") : t("Create account")) : t("Sign in")}</Button>
