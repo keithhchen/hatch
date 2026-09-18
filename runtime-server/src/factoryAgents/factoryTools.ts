@@ -30,14 +30,9 @@ export async function factoryAgentTools(options: {
   return candidates.filter(tool => tool.name === "askuser" || options.definition.tools.includes(tool.name));
 }
 
-const askUserOption = Type.Union([
-  Type.String({ minLength: 1, maxLength: 240 }),
-  Type.Object({
-    id: Type.Optional(Type.String({ minLength: 1, maxLength: 80 })),
-    label: Type.String({ minLength: 1, maxLength: 240 }),
-    description: Type.Optional(Type.String({ maxLength: 500 })),
-  }),
-]);
+const askUserOption = Type.Object({
+  content: Type.String({ minLength: 1, maxLength: 240 }),
+});
 
 const askUserQuestion = Type.Object({
   id: Type.Optional(Type.String({ minLength: 1, maxLength: 80 })),
@@ -57,14 +52,14 @@ export function createAskUserTool(): AgentTool {
   return {
     name: "askuser",
     label: "询问用户",
-    description: "Ask the Creator for information or a decision that materially affects the work. Put related questions into one questions array. Use options when useful; the interface always also provides a free-form answer field. Do not ask for routine confirmation or facts already available in the inputs.",
+    description: "Ask the Creator for information or a decision that materially affects the work. Put related questions into one questions array. When useful, provide options as objects with one single-line content field; the interface always also provides a free-form answer field. Do not ask for routine confirmation or facts already available in the inputs.",
     parameters: Type.Object({ questions: Type.Array(askUserQuestion, { minItems: 1, maxItems: 8 }) }),
     execute: async (_callId, raw) => {
       const input = raw as { questions: Array<{
         id?: string;
         header?: string;
         question: string;
-        options: Array<string | { id?: string; label: string; description?: string }>;
+        options: Array<{ content: string }>;
         multiSelect?: boolean;
         required?: boolean;
       }> };
@@ -77,9 +72,10 @@ export function createAskUserTool(): AgentTool {
           id,
           ...(question.header?.trim() ? { header: question.header.trim() } : {}),
           question: question.question.trim(),
-          options: question.options.map((option, optionIndex) => typeof option === "string"
-            ? { id: `option-${optionIndex + 1}`, label: option.trim() }
-            : { id: option.id?.trim() || `option-${optionIndex + 1}`, label: option.label.trim(), ...(option.description?.trim() ? { description: option.description.trim() } : {}) }),
+          options: question.options.map((option, optionIndex) => ({
+            id: `option-${optionIndex + 1}`,
+            content: option.content.trim(),
+          })),
           multiSelect: question.multiSelect === true,
           required: question.required !== false,
         };

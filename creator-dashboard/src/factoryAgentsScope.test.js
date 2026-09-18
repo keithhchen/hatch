@@ -146,6 +146,14 @@ test('Factory composer exposes send, stop, and disabled states without a focus r
   assert.match(source, /<ChatComposerTextArea[^>]*disabled=\{running\}/);
 });
 
+test('Factory askuser options are content-only single-line choices with free input', async () => {
+  const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
+  assert.match(source, /function askUserOption\(option, index\).*content/);
+  assert.match(source, /label=\{option\.content\}/);
+  assert.match(source, /<TextField disabled=\{!pending \|\| submitting\}/);
+  assert.doesNotMatch(source, /option\.(label|description)/);
+});
+
 test('Every chat offers a start button that fills the Composer without sending', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
   const i18n = await readFile(new URL('./factoryAgentsI18n.js', import.meta.url), 'utf8');

@@ -30,7 +30,7 @@ export class WorkbenchRuntime {
     const definition = snapshot ?? await this.store.definition(role);
     const dependencies = definition.dependencies;
     const folders = ["input/manual", ...[...dependencies.required, ...dependencies.normal].map(source => `input/${source}`)];
-    return `${definition.systemPrompt}\n\n# 本 Agent 的 Input\n\n你有且只有这些输入文件夹：${folders.map(folder => `\`${folder}/\``).join("、")}。\n\`input/manual/\` 是用户为当前 Product 上传的公共文件；其余目录是上游 Agent 的实时只读 output projection。使用 list 查看，使用 read 读取。不要要求用户复制或转发上游文件，也不要尝试修改上游目录。\n\n# 向用户提问\n\n你可以使用 askuser，但只在缺少的信息或选择会实质改变当前工作、且无法从已有输入得到时使用。一次只调用一个 askuser，把相关问题合并到 questions 数组；选项之外用户界面总会提供自由回答框。调用后本轮立即结束，不要继续调用工具或写成果；用户下一条普通消息就是回答。不要用它做例行确认、进度汇报或把内部标准交给用户决定。`;
+    return `${definition.systemPrompt}\n\n# 本 Agent 的 Input\n\n你有且只有这些输入文件夹：${folders.map(folder => `\`${folder}/\``).join("、")}。\n\`input/manual/\` 是用户为当前 Product 上传的公共文件；其余目录是上游 Agent 的实时只读 output projection。使用 list 查看，使用 read 读取。不要要求用户复制或转发上游文件，也不要尝试修改上游目录。\n\n# 向用户提问\n\n你可以使用 askuser，但只在缺少的信息或选择会实质改变当前工作、且无法从已有输入得到时使用。一次只调用一个 askuser，把相关问题合并到 questions 数组；如果提供 options，每个 option 必须是只有一个单行 \`content\` 字段的对象；选项之外用户界面总会提供自由回答框。调用后本轮立即结束，不要继续调用工具或写成果；用户下一条普通消息就是回答。不要用它做例行确认、进度汇报或把内部标准交给用户决定。`;
   }
   async start(id: string, message: string): Promise<void> {
     if (!message.trim() || message.length > 100000) throw new Error("Provide a message of 1–100000 characters");
