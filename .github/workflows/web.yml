@@ -223,7 +223,10 @@ jobs:
           test -n "$HATCH_DOMAIN"
           export DOCKER_DEFAULT_PLATFORM=linux/amd64
           printf '%s\n' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
-          previous_image="$(docker inspect --format '{{.Config.Image}}' hatch-app-dashboard-1)"
+          # A first deployment to a new production host has no previous
+          # Dashboard container. Keep the rollback path when one exists, but
+          # do not make its absence a deployment failure.
+          previous_image="$(docker inspect --format '{{.Config.Image}}' hatch-app-dashboard-1 2>/dev/null || true)"
           override="$(mktemp)"
           printf 'services:\n  dashboard:\n    image: ${HATCH_DASHBOARD_IMAGE}\n' > "$override"
           compose=(docker compose --env-file /opt/hatch/.env --env-file /opt/hatch/.release.env -f /opt/hatch/compose.app.yml -f "$override")
@@ -245,16 +248,31 @@ jobs:
             exit 1
           fi
           if ! timeout 180s env HATCH_DASHBOARD_IMAGE="$DASHBOARD_IMAGE" "${compose[@]}" up -d --no-deps --pull never dashboard; then
-            HATCH_DASHBOARD_IMAGE="$previous_image" "${compose[@]}" up -d --no-deps dashboard
+            if test -n "$previous_image"; then
+              HATCH_DASHBOARD_IMAGE="$previous_image" "${compose[@]}" up -d --no-deps dashboard
+            else
+              docker rm -f hatch-app-dashboard-1 >/dev/null 2>&1 || true
+            fi
             exit 1
           fi
-          explore_probe="$(mktemp)"
-          if ! curl -4 --noproxy '*' --connect-timeout 10 --max-time 30 --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$HATCH_DOMAIN/health/dashboard" >/dev/null \
-            || ! curl -4 --noproxy '*' --connect-timeout 10 --max-time 30 --fail --retry 12 --retry-all-errors --retry-delay 3 --silent "https://$HATCH_DOMAIN/explore" -o "$explore_probe" \
-            || ! grep -F 'src="/assets/' "$explore_probe" >/dev/null; then
-            rm -f "$explore_probe"
-            HATCH_DASHBOARD_IMAGE="$previous_image" "${compose[@]}" up -d --no-deps dashboard
+          # Validate the container on this host. During a region migration the
+          # public DNS may still point at the old production host, so probing
+          # HATCH_DOMAIN here can produce a false positive.
+          if ! timeout 30s docker exec hatch-app-dashboard-1 node --input-type=module -e '
+            const checks = ["/readyz", "/health/dashboard", "/explore"];
+            for (const path of checks) {
+              const response = await fetch(`http://127.0.0.1:8500${path}`);
+              if (!response.ok) throw new Error(`${path}: ${response.status}`);
+              if (path === "/explore" && !(await response.text()).includes("src=\"/assets/")) {
+                throw new Error("/explore did not return the dashboard asset shell");
+              }
+            }
+          '; then
+            if test -n "$previous_image"; then
+              HATCH_DASHBOARD_IMAGE="$previous_image" "${compose[@]}" up -d --no-deps dashboard
+            else
+              docker rm -f hatch-app-dashboard-1 >/dev/null 2>&1 || true
+            fi
             exit 1
           fi
-          rm -f "$explore_probe"
           rm -f "$override"
