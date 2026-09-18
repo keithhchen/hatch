@@ -8,11 +8,31 @@ export class FactoryVoicePlayer {
 
   start(event) {
     this.stop();
-    this.current = { mimeType: event.mimeType || 'audio/mpeg', segments: new Map(), order: [], activeSegmentId: null, ended: false };
+    const mimeType = event.mimeType || 'audio/mpeg';
+    if (mimeType.startsWith('audio/pcm')) {
+      const context = new AudioContext();
+      const current = { kind: 'pcm', mimeType, context, node: null, ready: null, speech: null, ended: false };
+      current.ready = context.audioWorklet.addModule('/factory-voice-playback-worklet.js').then(async () => {
+        if (this.current !== current) return;
+        const node = new AudioWorkletNode(context, 'hatch-voice-playback', { outputChannelCount: [1] });
+        current.node = node;
+        node.connect(context.destination);
+        node.port.onmessage = message => {
+          if (this.current !== current) return;
+          if (message.data?.type === 'playing' && current.speech) this.onSpeechChange(current.speech);
+          if (message.data?.type === 'ended') { this.onSpeechChange(null); if (current.ended) this.stop(); }
+        };
+        await context.resume();
+      }).catch(error => this.onError(error));
+      this.current = current;
+      return;
+    }
+    this.current = { kind: 'media', mimeType, segments: new Map(), order: [], activeSegmentId: null, ended: false };
   }
 
   registerSpeech(event) {
     const current = this.current;
+    if (current?.kind === 'pcm') { current.speech = { id: event.segmentId, text: event.text || '' }; return; }
     if (!current || current.segments.has(event.segmentId)) return;
     const mediaSource = new MediaSource();
     const audio = new Audio();
@@ -35,21 +55,36 @@ export class FactoryVoicePlayer {
     }, { once: true });
   }
 
-  endSpeech(event) { const segment = this.current?.segments.get(event.segmentId); if (segment) { segment.ended = true; this.flush(segment.id); } }
+  endSpeech(event) { const current = this.current; if (current?.kind === 'pcm') return; const segment = current?.segments.get(event.segmentId); if (segment) { segment.ended = true; this.flush(segment.id); } }
   chunk(event) {
-    const segment = this.current?.segments.get(event.segmentId);
+    const current = this.current;
+    if (current?.kind === 'pcm') {
+      const bytes = Uint8Array.from(atob(event.audio), character => character.charCodeAt(0));
+      void current.ready.then(() => {
+        if (this.current !== current || !current.node) return;
+        current.node.port.postMessage(bytes.buffer, [bytes.buffer]);
+      });
+      return;
+    }
+    const segment = current?.segments.get(event.segmentId);
     if (!segment) return;
     segment.pending.push(Uint8Array.from(atob(event.audio), character => character.charCodeAt(0)).buffer);
     this.flush(segment.id);
     this.playIfActive(segment.id);
   }
-  end() { if (!this.current) return; this.current.ended = true; for (const segment of this.current.segments.values()) { segment.ended = true; this.flush(segment.id); } }
+  end() { if (!this.current) return; this.current.ended = true; if (this.current.kind === 'pcm') { void this.current.ready.then(() => this.current?.node?.port.postMessage({ type: 'end' })); return; } for (const segment of this.current.segments.values()) { segment.ended = true; this.flush(segment.id); } }
 
   stop() {
     const current = this.current;
     this.current = null;
     this.onSpeechChange(null);
     if (!current) return;
+    if (current.kind === 'pcm') {
+      current.node?.port.postMessage({ type: 'reset' });
+      current.node?.disconnect();
+      void current.context.close();
+      return;
+    }
     for (const segment of current.segments.values()) this.release(segment);
   }
 

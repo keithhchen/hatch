@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
-export const LOCALES = ["zh", "en", "ja"];
+export const LOCALES = ["en", "zh", "ja"];
 export const LOCALE_STORAGE_KEY = "hatch.locale";
 
 const LocaleContext = createContext(null);
@@ -37,16 +37,17 @@ export function LocaleProvider({ children }) {
   const [locale, setLocaleState] = useState(() => readInitialLocale());
   const setLocale = useCallback((value) => {
     const next = normalizeLocale(value);
-    if (next) setLocaleState(next);
+    if (!next) return;
+    setLocaleState(next);
+    try {
+      localStorage.setItem(LOCALE_STORAGE_KEY, next);
+    } catch {
+      // The in-memory selection still applies for this session.
+    }
   }, []);
 
   useEffect(() => {
     document.documentElement.lang = documentLanguage(locale);
-    try {
-      localStorage.setItem(LOCALE_STORAGE_KEY, locale);
-    } catch {
-      // The in-memory selection still applies for this session.
-    }
   }, [locale]);
 
   useEffect(() => {

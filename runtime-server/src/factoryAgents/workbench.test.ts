@@ -19,8 +19,9 @@ test("Voice is a first-class isolated workspace with its canonical Markdown outp
     const store = new WorkbenchStore(root);
     const voice = await store.create("voice");
     assert.equal(voice.role, "voice");
-    assert.equal(voice.files[0]?.path, "output/CREATOR_PERSONA.md");
+    assert.deepEqual(voice.files.map(file => file.path), ["output/CREATOR_PERSONA.md", "output/VOICE.md"]);
     assert.equal((await store.read(voice.id, "output/CREATOR_PERSONA.md")).bytes.toString(), "# CREATOR_PERSONA\n\n");
+    assert.equal((await store.read(voice.id, "output/VOICE.md")).bytes.toString(), "# VOICE\n\n");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -202,7 +203,7 @@ test("one Runtime turn composes its prompt from one definition snapshot", async 
     const prompt = await runtime.prompt("research", snapshot);
     assert.equal(reads, 1);
     assert.ok(prompt.startsWith(snapshot.systemPrompt));
-    assert.match(prompt, /`input\/handoff\/`/);
+    assert.doesNotMatch(prompt, /input\/handoff/);
   } finally { await runtime.close(); await rm(root, { recursive: true, force: true }); }
 });
 
@@ -224,40 +225,5 @@ test("cached Product handler accepts only a fresh BriefSpec for the same scope",
     app.setScope({ creatorId: "11111111-1111-4111-8111-111111111111", productId: "22222222-2222-4222-8222-222222222222", briefSpec: { current: true } });
     assert.deepEqual(app.store.scope?.briefSpec, { current: true });
     assert.throws(() => app.setScope({ creatorId: "11111111-1111-4111-8111-111111111111", productId: "33333333-3333-4333-8333-333333333333" }), /retarget/);
-  } finally { await app.close(); await rm(root, { recursive: true, force: true }); }
-});
-
-test("Agent output transfer writes destination-only handoff input and rejects invalid or running destinations", async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), "hatch-output-transfer-"));
-  const app = await createWorkbenchServer({ root, scope: { creatorId: "11111111-1111-4111-8111-111111111111", productId: "22222222-2222-4222-8222-222222222222" }, definitions: new MemoryAgentDefinitionRepository(await initialAgentDefinitions()) });
-  await new Promise<void>(resolve => app.server.listen(0, "127.0.0.1", resolve));
-  const address = app.server.address(); assert.ok(address && typeof address !== "string");
-  const call = (destinationId: string, data: unknown) => fetch(`http://127.0.0.1:${address.port}/api/sessions/${destinationId}/transfer`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(data) });
-  try {
-    const source = await app.store.create("research");
-    const destination = await app.store.create("generation");
-    await app.store.put(source.id, "input/manual/product-brief.md", Buffer.from("Shared Product brief\n"), { actor: "user", mimeType: "text/markdown" });
-    assert.equal((await app.store.read(destination.id, "input/manual/product-brief.md")).bytes.toString(), "Shared Product brief\n");
-    await app.store.put(source.id, "output/sources/interview.md", Buffer.from("Exact source bytes\n"), { actor: "agent", mimeType: "text/markdown" });
-    const events: Array<{ sessionId: string; type: string }> = [];
-    app.runtime.events.on("event", event => events.push(event as { sessionId: string; type: string }));
-
-    const response = await call(destination.id, { fromSessionId: source.id, files: [{ path: "output/sources/interview.md" }] });
-    assert.equal(response.status, 200);
-    const transferredPath = "input/handoff/research/sources/interview.md";
-    assert.deepEqual(await response.json(), { transferred: 1, files: [{ path: transferredPath, bytes: 19, mimeType: "text/markdown", origin: { sessionId: source.id, path: "output/sources/interview.md" } }] });
-    assert.equal((await app.store.read(destination.id, transferredPath)).bytes.toString(), "Exact source bytes\n");
-    assert.ok(!(await app.store.contextFiles(source.id)).some(file => file.path === transferredPath));
-    await assert.rejects(app.store.read(source.id, transferredPath), /File not found/);
-    const other = await app.store.create("case-generation");
-    assert.equal((await app.store.read(other.id, "input/manual/product-brief.md")).bytes.toString(), "Shared Product brief\n");
-    assert.ok(!(await app.store.contextFiles(other.id)).some(file => file.path === transferredPath));
-    await assert.rejects(app.store.read(other.id, transferredPath), /File not found/);
-    assert.ok(events.some(event => event.sessionId === destination.id && event.type === "files"));
-
-    assert.equal((await call(destination.id, { fromSessionId: source.id, files: [{ path: "input/manual/private.md" }] })).status, 400);
-    assert.equal((await call(destination.id, { fromSessionId: source.id, files: [{ path: "output/../private.md" }] })).status, 400);
-    await app.store.update(destination.id, session => { session.status = "running"; });
-    assert.equal((await call(destination.id, { fromSessionId: source.id, files: [{ path: "output/sources/interview.md" }] })).status, 400);
   } finally { await app.close(); await rm(root, { recursive: true, force: true }); }
 });

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { creatorFactoryPath, creatorRouteTitle, factorySectionForAgent, parseCreatorRoute } from "./creatorRoutes.js";
+import { creatorFactoryPath, creatorProductPath, creatorRouteTitle, factorySectionForAgent, parseCreatorRoute } from "./creatorRoutes.js";
 
 test("Factory has its own Product-scoped URL namespace", () => {
   assert.deepEqual(parseCreatorRoute("/studio/factory/product-a"), {
@@ -11,6 +11,9 @@ test("Factory has its own Product-scoped URL namespace", () => {
   });
   assert.deepEqual(parseCreatorRoute("/studio/factory/product-a/sources/research"), {
     kind: "factory-agents", section: "products", productId: "product-a", factorySection: "sources", factoryAgent: "research"
+  });
+  assert.deepEqual(parseCreatorRoute("/studio/factory/product-a/sources/uploads"), {
+    kind: "factory-agents", section: "products", productId: "product-a", factorySection: "sources", factoryAgent: "uploads"
   });
   assert.equal(creatorRouteTitle(parseCreatorRoute("/studio/factory/product-a")), "Factory");
   assert.equal(parseCreatorRoute("/studio/products/product-a/factory").kind, "not-found");
@@ -37,6 +40,8 @@ test("every Factory Agent has one stable section URL", () => {
   }
   assert.equal(creatorFactoryPath("product-a"), "/studio/factory/product-a");
   assert.equal(creatorFactoryPath("product-a", "build"), "/studio/factory/product-a/build");
+  assert.equal(creatorFactoryPath("product-a", "sources", "uploads"), "/studio/factory/product-a/sources/uploads");
+  assert.equal(creatorProductPath("product-a"), "/studio/factory/product-a");
 });
 
 test("Factory rejects unknown or mismatched section and Agent URLs", () => {

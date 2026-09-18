@@ -11,6 +11,11 @@ export const FACTORY_SECTION_AGENTS = Object.freeze({
   build: Object.freeze(["generation"]),
   evaluate: Object.freeze(["case-generation", "evaluator"])
 });
+export const FACTORY_SECTION_PAGES = Object.freeze({
+  sources: Object.freeze(["uploads"]),
+  build: Object.freeze([]),
+  evaluate: Object.freeze([])
+});
 
 export function factorySectionForAgent(role) {
   return Object.entries(FACTORY_SECTION_AGENTS).find(([, roles]) => roles.includes(role))?.[0] ?? null;
@@ -22,11 +27,12 @@ export function creatorFactoryPath(productId, factorySection, factoryAgent) {
   if (!Object.hasOwn(FACTORY_SECTION_AGENTS, factorySection)) throw new RangeError("Unknown Factory section");
   const sectionPath = `${root}/${factorySection}`;
   if (factoryAgent === undefined) return sectionPath;
-  if (!FACTORY_SECTION_AGENTS[factorySection].includes(factoryAgent)) throw new RangeError("Agent does not belong to Factory section");
+  if (!FACTORY_SECTION_AGENTS[factorySection].includes(factoryAgent) && !FACTORY_SECTION_PAGES[factorySection].includes(factoryAgent)) throw new RangeError("Agent or page does not belong to Factory section");
   return `${sectionPath}/${factoryAgent}`;
 }
 
-export function creatorProductPath(productId, tab = "overview") {
+export function creatorProductPath(productId, tab) {
+  if (tab === undefined || tab === null) return creatorFactoryPath(productId);
   const root = `${ROOT}/products/${encodeURIComponent(productId)}`;
   return tab ? `${root}/${tab}` : root;
 }
@@ -46,7 +52,7 @@ export function parseCreatorRoute(pathname) {
     if (!Object.hasOwn(FACTORY_SECTION_AGENTS, factorySection)) return { kind: "not-found", section: "products" };
     if (segments.length === 3) return { kind: "factory-agents", section: "products", productId, factorySection };
     const factoryAgent = segments[3];
-    if (segments.length === 4 && FACTORY_SECTION_AGENTS[factorySection].includes(factoryAgent)) {
+    if (segments.length === 4 && (FACTORY_SECTION_AGENTS[factorySection].includes(factoryAgent) || FACTORY_SECTION_PAGES[factorySection].includes(factoryAgent))) {
       return { kind: "factory-agents", section: "products", productId, factorySection, factoryAgent };
     }
     return { kind: "not-found", section: "products" };

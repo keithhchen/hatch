@@ -1,14 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { EventEmitter } from "node:events";
-import { Type } from "@earendil-works/pi-ai";
-import { result } from "./files.js";
 import { createCompactionSummaryMessage, estimateContextTokens, estimateTokens, generateSummaryWithUsage, type Agent, type AgentMessage, type AgentTool } from "@earendil-works/pi-agent-core";
 import { createFactoryPiAgent, createFactoryPiModels, type FactoryPiAgentOptions } from "../creatorLearning/factoryPi.js";
 import { classifyFactoryProviderFailure } from "../creatorLearning/factoryLlm.js";
 import { WorkbenchStore, type AgentDefinitionSource, type Role, type Session } from "./store.js";
+import { factoryAgentTools } from "./factoryTools.js";
 import { fileTools } from "./tools.js";
-import { webTools } from "./web.js";
 
 export type WorkbenchRuntimeOptions = {
   env?: NodeJS.ProcessEnv;
@@ -31,8 +29,8 @@ export class WorkbenchRuntime {
   async prompt(role: Role, snapshot?: Awaited<ReturnType<AgentDefinitionSource["list"]>>[number]): Promise<string> {
     const definition = snapshot ?? await this.store.definition(role);
     const dependencies = definition.dependencies;
-    const folders = ["input/manual", "input/handoff", ...[...dependencies.required, ...dependencies.normal].map(source => `input/${source}`)];
-    return `${definition.systemPrompt}\n\n# 本 Agent 的 Input\n\n你有且只有这些输入文件夹：${folders.map(folder => `\`${folder}/\``).join("、")}。\n\`input/manual/\` 是用户为当前 Product 上传的公共文件；\`input/handoff/\` 是用户明确交给本 Agent 的文件；其余目录是上游 Agent 的实时只读 output projection。使用 list 查看，使用 read 读取。不要要求用户复制或转发上游文件，也不要尝试修改上游目录。`;
+    const folders = ["input/manual", ...[...dependencies.required, ...dependencies.normal].map(source => `input/${source}`)];
+    return `${definition.systemPrompt}\n\n# 本 Agent 的 Input\n\n你有且只有这些输入文件夹：${folders.map(folder => `\`${folder}/\``).join("、")}。\n\`input/manual/\` 是用户为当前 Product 上传的公共文件；其余目录是上游 Agent 的实时只读 output projection。使用 list 查看，使用 read 读取。不要要求用户复制或转发上游文件，也不要尝试修改上游目录。`;
   }
   async start(id: string, message: string): Promise<void> {
     if (!message.trim() || message.length > 100000) throw new Error("Provide a message of 1–100000 characters");
@@ -51,6 +49,32 @@ export class WorkbenchRuntime {
     void run.finally(() => { if (this.runs.get(id) === run) this.runs.delete(id); });
   }
   stop(id: string): void { this.active.get(id)?.abort(new Error("用户停止了运行")); }
+  async scribeVoiceEvidence(id: string, evidence: AgentMessage[]): Promise<void> {
+    if (!evidence.length) return;
+    if (this.active.has(id)) throw new Error("This conversation is already running");
+    const controller = new AbortController();
+    this.active.set(id, controller);
+    try {
+      await this.store.update(id, state => {
+        if (state.role !== "voice") throw new Error("Voice scribe is only available in the Voice Agent");
+        state.status = "running";
+        state.lastRunAt = new Date().toISOString();
+        delete state.error;
+      });
+      this.emit(id, "state");
+      const scribePrompt = await readFile(fileURLToPath(new URL("voice/SCRIBE.md", new URL("../../prompts/factory-agents/", import.meta.url))), "utf8");
+      const changed = () => this.emit(id, "files");
+      const current = await this.store.get(id);
+      await this.run(id, scribePrompt, current.scribeContext ?? [], JSON.stringify({ turn: evidence }, null, 2), fileTools(this.store, id, { changed }), controller, "scribe");
+      await this.store.update(id, state => { state.status = "completed"; });
+    } catch (error) {
+      await this.store.update(id, state => { state.status = "failed"; state.error = safeError(error); });
+      throw error;
+    } finally {
+      this.active.delete(id);
+      this.emit(id, "state");
+    }
+  }
   async close(): Promise<void> {
     for (const controller of this.active.values()) controller.abort();
     await Promise.allSettled(this.runs.values());
@@ -64,8 +88,15 @@ export class WorkbenchRuntime {
       if (s.role === "generation") system += `\n宿主提供的目标 Runtime 工具：内建 hatch.web_search；有 Knowledge 时启用 hatch.file_search。额外声明：${this.env.HATCH_FACTORY_TARGET_TOOLS_JSON ?? "[]"}。外部连接的实际可用性由现有 Registry/Runtime 验证。当前 Product 已由宿主固定；corpus_upload 会发布到它，不要查找、选择或创建 Product。`;
       if (s.role === "evaluator") system += `\n当前 Product 已由宿主固定；hatch_tool 只会运行它，不要查找或选择 Product。启动时如需 brief_answers，从案例中选择客户可见的信息作答；不能泄露评分标准。当前 Brief 字段：${JSON.stringify(this.store.scope?.briefSpec ?? null)}。`;
       const changed = () => this.emit(id, "files");
-      const candidates = [ this.todoTool(id), ...fileTools(this.store, id, { changed }), ...webTools(this.store, id, changed, this.env), ...(await this.options.extraTools?.(s, controller.signal, changed) ?? []) ];
-      const tools = candidates.filter(tool => definition.tools.includes(tool.name));
+      const tools = await factoryAgentTools({
+        store: this.store,
+        id,
+        definition,
+        signal: controller.signal,
+        changed,
+        env: this.env,
+        extraTools: await this.options.extraTools?.(s, controller.signal, changed),
+      });
       const messageCount = s.messages.length;
       await this.run(id, system, s.context, message, tools, controller);
       if (s.role === "voice" && !controller.signal.aborted) {
@@ -84,10 +115,6 @@ export class WorkbenchRuntime {
       this.runIds.delete(id);
       this.emit(id, "state");
     }
-  }
-  private todoTool(id: string): AgentTool {
-    const item = Type.Object({ title: Type.String({ minLength: 1, maxLength: 160 }), status: Type.Union([Type.Literal("pending"), Type.Literal("in_progress"), Type.Literal("completed")]) });
-    return { name: "update_todo", label: "更新待办", description: "Read or replace this Agent's short current todo list. Omit todos to read it; pass the complete list to replace it; pass [] to clear it. Use only for meaningful multi-step work. Keep at most one item in_progress and update it when work actually moves.", parameters: Type.Object({ todos: Type.Optional(Type.Array(item, { maxItems: 12 })) }), execute: async (_id, raw) => { const { todos } = raw as { todos?: Array<{ title: string; status: "pending" | "in_progress" | "completed" }> }; if (todos === undefined) return result({ todos: (await this.store.get(id)).todos }); if (todos.filter(todo => todo.status === "in_progress").length > 1) throw new Error("Only one todo may be in_progress"); if (todos.some(todo => !todo.title.trim())) throw new Error("Todo titles must not be empty"); await this.store.update(id, session => { session.todos = todos.map(todo => ({ ...todo, title: todo.title.trim() })); }); this.emit(id, "todos"); return result({ todos: (await this.store.get(id)).todos, saved: true }); } };
   }
   private async run(id: string, systemPrompt: string, history: AgentMessage[], userText: string, tools: AgentTool[], controller: AbortController, channel: "visible" | "scribe" = "visible"): Promise<AgentMessage[]> {
     const factory = this.options.agentFactory ?? createFactoryPiAgent;

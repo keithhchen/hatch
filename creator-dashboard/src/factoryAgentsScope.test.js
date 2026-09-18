@@ -48,6 +48,75 @@ test('Factory overview removes duplicate chrome without removing real navigation
   assert.match(source, /onClick=\{\(\) => onOpenAgent\(entry\.role\)\}/);
 });
 
+test('Factory overview is the first live Product page and retires the old workflow pages', async () => {
+  const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
+  const portal = await readFile(new URL('./CreatorPortalV2.jsx', import.meta.url), 'utf8');
+  assert.match(source, /<TreeItem itemId="overview"/);
+  assert.match(source, /<Typography variant="h4"[^>]*>\{t\("productOverview"\)\}/);
+  assert.match(source, /expected_updated_at: product\.updated_at/);
+  assert.match(source, /<TextField label=\{t\("productName"\)\}/);
+  assert.match(source, /<TextField label=\{t\("productPromise"\)\}/);
+  assert.match(portal, /FactoryProductRedirect/);
+  assert.doesNotMatch(portal, /CreatorProductOverview/);
+});
+
+test('Upload sources is a peer Factory page with real file upload and no duplicate stage card', async () => {
+  const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
+  assert.match(source, /FACTORY_SECTION_PAGES/);
+  assert.match(source, /selected === "uploads"/);
+  assert.match(source, /function SourceUploadWorkspace/);
+  assert.match(source, /input\/manual\//);
+  assert.match(source, /<input ref=\{importPicker\} hidden type="file" multiple/);
+  assert.match(source, /function StageOverview\(\{ stage, agents, sessions, agentName, onOpenAgent, locale, t \}\)/);
+});
+
+test('Deep Research starts from Creator identity and public evidence, not manual upload', async () => {
+  const i18n = await readFile(new URL('./factoryAgentsI18n.js', import.meta.url), 'utf8');
+  const prompt = await readFile(new URL('../../runtime-server/prompts/factory-agents/research/SYSTEM.md', import.meta.url), 'utf8');
+  assert.match(i18n, /research: '告诉 Agent 你是谁、做什么，以及它可以在哪里找到你的公开资料/);
+  assert.match(i18n, /sourcesStage: '认识 Creator'/);
+  assert.match(prompt, /不是一个等待用户整理资料的资料摄入 Agent/);
+  assert.match(prompt, /主动使用 web_search、web_scrape 和 youtube_transcript/);
+  assert.match(prompt, /不要一开始就要求用户上传文件/);
+});
+
+test('Voice Interview is a whole-person interview rather than a single-judgment prompt', async () => {
+  const i18n = await readFile(new URL('./factoryAgentsI18n.js', import.meta.url), 'utf8');
+  const prompt = await readFile(new URL('../../runtime-server/prompts/factory-agents/voice/SYSTEM.md', import.meta.url), 'utf8');
+  assert.match(i18n, /voice: '从你的经历、影响、价值取舍、审美和矛盾讲起/);
+  assert.doesNotMatch(i18n, /voice: '说说你最近做过的一次判断，以及为什么这样决定/);
+  assert.match(prompt, /1\. Intellectual Genealogy/);
+  assert.match(prompt, /9\. Tensions & Contradictions/);
+  assert.match(prompt, /specific cases.*not abstractions/);
+});
+
+test('Agent Builder owns the judgment design and receives review-oriented user input', async () => {
+  const i18n = await readFile(new URL('./factoryAgentsI18n.js', import.meta.url), 'utf8');
+  const prompt = await readFile(new URL('../../runtime-server/prompts/factory-agents/generation/SYSTEM.md', import.meta.url), 'utf8');
+  assert.match(i18n, /generation: '查看 Agent 构建的结果，或指出需要调整的地方/);
+  assert.doesNotMatch(i18n, /generation: '说明这个 Agent 应该如何判断和行动/);
+  assert.match(prompt, /先理解产品要完成的工作，再编写判断、行动、条件、例外与完成标准/);
+});
+
+test('Case Builder creates the client case and receives realism feedback', async () => {
+  const i18n = await readFile(new URL('./factoryAgentsI18n.js', import.meta.url), 'utf8');
+  const prompt = await readFile(new URL('../../runtime-server/prompts/factory-agents/case-generation/SYSTEM.md', import.meta.url), 'utf8');
+  assert.match(i18n, /'case-generation': '查看 Agent 构建的客户案例，或指出哪里不符合真实情况/);
+  assert.doesNotMatch(i18n, /'case-generation': '描述一个真实客户会遇到的情境/);
+  assert.match(prompt, /每次准备一个完整客户案例/);
+  assert.match(prompt, /构造有生活质感、内在一致的情境/);
+});
+
+test('Factory connection errors use a floating toast and plain-language copy', async () => {
+  const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
+  const i18n = await readFile(new URL('./factoryAgentsI18n.js', import.meta.url), 'utf8');
+  assert.match(source, /<Snackbar open=\{Boolean\(error\)\}/);
+  assert.match(source, /anchorOrigin=\{\{ vertical: "bottom", horizontal: "right" \}\}/);
+  assert.doesNotMatch(source, /function ErrorNotice\(\{ error \}\) \{ return error \? <Alert/);
+  assert.match(i18n, /workspaceConnectionLost: '连接暂时中断，正在恢复。'/);
+  assert.doesNotMatch(i18n, /与工作区服务的连接中断/);
+});
+
 test('Factory JSX keeps visible copy in i18n and reads Agent identity from database definitions', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /[\u3400-\u9fff]/);
@@ -75,6 +144,16 @@ test('Factory composer exposes send, stop, and disabled states without a focus r
   assert.match(source, /disabled=\{busy\} size="small"/);
   assert.match(source, /const composerSx = .*"&:focus-within": \{ borderColor: "var\(--hatch-ui-border-soft\)", boxShadow: "none" \}/);
   assert.match(source, /<ChatComposerTextArea[^>]*disabled=\{running\}/);
+});
+
+test('Every chat offers a start button that fills the Composer without sending', async () => {
+  const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
+  const i18n = await readFile(new URL('./factoryAgentsI18n.js', import.meta.url), 'utf8');
+  assert.match(source, /<StartAgentButton role=\{session\.role\}/);
+  assert.match(source, /function StartAgentButton/);
+  assert.match(source, /setDraft\(current => current\.trim\(\) \? current : message\)/);
+  assert.match(source, /requestAnimationFrame\(\(\) => composer\.current\?\.focus\(\)\)/);
+  assert.match(i18n, /startAgentMessage: role =>/);
 });
 
 test('Factory chat keeps scrolling inside the workbench pane', async () => {
@@ -216,14 +295,10 @@ test('Factory chat keeps streamed blocks stable through terminal persistence', a
   assert.doesNotMatch(source, /if \(value\.type === "message" \|\| value\.type === "state"\) \{ setStream\(""\); load\(\); \}/);
 });
 
-test('Factory hands selected output files to an available Agent in the same Product', async () => {
+test('Factory no longer exposes the obsolete manual output handoff controls', async () => {
   const source = await readFile(new URL('./FactoryAgents.jsx', import.meta.url), 'utf8');
-  assert.match(source, /candidate\.role !== session\.role && candidate\.state !== "locked"/);
-  assert.match(source, /sessions\.find\(item => item\.role === candidate\.role\)\?\.status !== "running"/);
-  assert.match(source, /if \(!target\) target = await api\(`\$\{root\}\/sessions`, \{ method: "POST", body: \{ role: destinationRole \} \}\)/);
-  assert.match(source, /endpoint\(root, target\.id, "transfer"\)/);
-  assert.match(source, /body: \{ fromSessionId: id, files: selectedOutputs\.map\(path => \(\{ path \}\)\) \}/);
-  assert.match(source, /path\.startsWith\("output\/"\)/);
-  assert.match(source, /\^\(input\\\/\(\?:manual\|handoff\)\)\\\//);
+  assert.doesNotMatch(source, /selectedOutputs|destinationRole|handoffNotice|transferOutputs|sendOutputsTo|destinationAgent|sendFiles|handoffHint|\/transfer/);
+  assert.doesNotMatch(source, /selectable selectedOutputs/);
+  assert.match(source, /<FileSection title=\{t\("outputs"\)\}/);
   assert.match(source, /method: "DELETE", body: \{ path \}/);
 });

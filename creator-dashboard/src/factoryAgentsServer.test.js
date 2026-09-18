@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { WebSocket, WebSocketServer } from 'ws';
 import { createDashboardApp } from '../server.mjs';
 
 // Explicit upstream fixture for auth/transport tests, never product UAT.
@@ -11,7 +12,7 @@ test('Factory reuses Dashboard Creator cookie, CSRF and streams authenticated Re
   const root = await mkdtemp(path.join(os.tmpdir(), 'dashboard-factory-test-'));
   const productId = '22222222-2222-4222-8222-222222222222';
   const factoryRoot = `/v1/creator/products/${productId}/factory-agents`;
-  let role = 'creator'; let capabilities = []; let calls = 0;
+  let role = 'creator'; let capabilities = []; let calls = 0; let upgradeCalls = 0; let dashboardUpgradeError;
   let streamClosed; const closed = new Promise(resolve => { streamClosed = resolve; });
   const registry = createServer((req, res) => {
     const account = { id: '11111111-1111-4111-8111-111111111111', email: 'fixture@example.test', display_name: 'Fixture', role, capabilities };
@@ -32,9 +33,26 @@ test('Factory reuses Dashboard Creator cookie, CSRF and streams authenticated Re
     if (req.method === 'POST') { res.statusCode = 201; return res.end(JSON.stringify({ id: 'fixture-chat' })); }
     res.end(JSON.stringify({ sessions: [] }));
   });
+  const registryVoice = new WebSocketServer({ noServer: true });
+  registry.on('upgrade', (request, socket, head) => {
+    assert.equal(request.headers.authorization, 'Bearer fixture-registry-token');
+    assert.match(request.url, new RegExp(`^${factoryRoot}/sessions/[0-9a-f-]{36}/voice/live$`));
+    upgradeCalls++;
+    registryVoice.handleUpgrade(request, socket, head, ws => {
+      ws.on('message', (data, binary) => ws.send(data, { binary }));
+    });
+  });
   await new Promise(resolve => registry.listen(0, '127.0.0.1', resolve));
-  const dashboard = await createDashboardApp({ ledgerPath: path.join(root, 'ledger.jsonl'), registryUrl: `http://127.0.0.1:${registry.address().port}` });
+  const dashboardOrigin = 'http://dashboard.test';
+  const dashboard = await createDashboardApp({ ledgerPath: path.join(root, 'ledger.jsonl'), registryUrl: `http://127.0.0.1:${registry.address().port}`, publicOrigin: dashboardOrigin });
   const api = createServer(dashboard.handler);
+  api.on('upgrade', (request, socket, head) => {
+    void dashboard.handleUpgrade(request, socket, head).catch(error => {
+      dashboardUpgradeError = error;
+      socket.write(`HTTP/1.1 ${error.status || 400} Rejected\r\nConnection: close\r\n\r\n`);
+      socket.destroy();
+    });
+  });
   await new Promise(resolve => api.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${api.address().port}`;
   try {
@@ -74,12 +92,24 @@ test('Factory reuses Dashboard Creator cookie, CSRF and streams authenticated Re
     assert.equal((await fetch(route, { headers: { cookie } })).status, 403);
     assert.equal(calls, 6);
     assert.equal((await fetch(route, { method: 'POST', headers: { ...headers, 'x-csrf-token': csrf }, body: JSON.stringify({ role: 'voice' }) })).status, 201);
+    const voiceId = '33333333-3333-4333-8333-333333333333';
+    const crossOrigin = new WebSocket(`ws://127.0.0.1:${api.address().port}${factoryRoot}/sessions/${voiceId}/voice/live`, { headers: { cookie } });
+    const crossOriginError = await new Promise(resolve => crossOrigin.once('error', resolve));
+    assert.match(crossOriginError.message, /403/);
+    const voice = new WebSocket(`ws://127.0.0.1:${api.address().port}${factoryRoot}/sessions/${voiceId}/voice/live`, { origin: dashboardOrigin, headers: { cookie } });
+    await new Promise((resolve, reject) => { voice.once('open', resolve); voice.once('error', error => reject(new Error(`${error.message}${dashboardUpgradeError ? `: ${dashboardUpgradeError.message}` : ''}`))); });
+    const echoed = new Promise((resolve, reject) => { voice.once('message', (data, binary) => binary ? resolve(Buffer.from(data)) : reject(new Error('Expected binary voice frame'))); });
+    voice.send(Buffer.from([1, 2, 3]));
+    assert.deepEqual(await echoed, Buffer.from([1, 2, 3]));
+    assert.equal(upgradeCalls, 1);
+    voice.close(1000, 'done');
     role = 'user';
     capabilities = [];
     assert.equal((await fetch(route, { headers: { cookie } })).status, 403);
     assert.equal(calls, 7);
   } finally {
-    api.closeAllConnections(); registry.closeAllConnections();
+    for (const client of registryVoice.clients) client.terminate();
+    registryVoice.close(); api.closeAllConnections(); registry.closeAllConnections();
     await Promise.all([new Promise(resolve => api.close(resolve)), new Promise(resolve => registry.close(resolve))]);
     await rm(root, { recursive: true, force: true });
   }

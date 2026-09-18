@@ -20,6 +20,7 @@ export type Session = {
   messages: AgentMessage[]; context: AgentMessage[]; scribeContext?: AgentMessage[]; todos: Todo[];
   product?: Pick<FactoryProductScope, "creatorId" | "productId">;
   hatch?: { conversationId: string; lastRunId?: string; pending?: boolean };
+  voiceLive?: { resumptionHandle?: string };
   knowledge?: Array<{ path: string; id: string; source: string; title: string; productId: string; sha256: string }>;
   corpus?: { product_id: string; corpus_ref: string; corpus_digest: string; release_digest: string; status: "published"; published_at: string; files: string[] };
 };
@@ -62,6 +63,7 @@ export class WorkbenchStore {
     await this.save(session);
     if (role === "voice") {
       await this.put(id, "output/CREATOR_PERSONA.md", Buffer.from("# CREATOR_PERSONA\n\n"), { actor: "host", countsAsOutput: false });
+      await this.put(id, "output/VOICE.md", Buffer.from("# VOICE\n\n"), { actor: "host", countsAsOutput: false });
       return this.get(id);
     }
     return session;
@@ -74,7 +76,7 @@ export class WorkbenchStore {
   }
   private async save(session: Session): Promise<void> { const { todos, ...metadata } = session; await Promise.all([atomicWrite(path.join(this.directory(session.id), "session.json"), JSON.stringify(metadata)), atomicWrite(path.join(this.directory(session.id), "todo.json"), JSON.stringify({ todos }))]); }
   private async upstream(id: string): Promise<Array<{ role: Role; session: Session }>> { if (!this.definitions) return []; const current = await this.get(id); const dependencies = await this.dependencies(current.role); const allowed = [...dependencies.required, ...dependencies.normal]; const sessions = await this.list(); return allowed.flatMap(role => { const session = sessions.filter(candidate => candidate.role === role && candidate.id !== id).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]; return session ? [{ role, session }] : []; }); }
-  async contextFiles(id: string): Promise<FileRecord[]> { const current = await this.get(id); const manual = await this.manualFiles(); const inherited = (await this.upstream(id)).flatMap(({ role, session }) => session.files.filter(file => file.path.startsWith("output/")).map(file => ({ ...file, path: `input/${role}/${file.path.slice(7)}`, origin: { sessionId: session.id, path: file.path }, readonly: true }))); return [...current.files.filter(file => !file.path.startsWith("input/manual/")), ...manual, ...inherited]; }
+  async contextFiles(id: string): Promise<FileRecord[]> { const current = await this.get(id); const manual = await this.manualFiles(); const inherited = (await this.upstream(id)).flatMap(({ role, session }) => session.files.filter(file => file.path.startsWith("output/")).map(file => ({ ...file, path: `input/${role}/${file.path.slice(7)}`, origin: { sessionId: session.id, path: file.path }, readonly: true }))); return [...current.files.filter(file => !file.path.startsWith("input/manual/") && !file.path.startsWith("input/handoff/")), ...manual, ...inherited]; }
   async update<T>(id: string, change: (session: Session) => T | Promise<T>): Promise<T> {
     const previous = this.queues.get(id) ?? Promise.resolve();
     const operation = previous.catch(() => undefined).then(async () => {
@@ -119,20 +121,6 @@ export class WorkbenchStore {
       s.files = [...s.files.filter(f => f.path !== name), record];
       if (name.startsWith("output/") && options.countsAsOutput !== false) s.outputUpdatedAt = new Date().toISOString();
       s.revision++;
-      return record;
-    });
-  }
-  async putTransferredInput(id: string, name: string, bytes: Buffer, source: { sessionId: string; path: string }, mimeType?: string): Promise<FileRecord> {
-    filePath(name);
-    filePath(source.path);
-    if (!name.startsWith("input/handoff/") || !source.path.startsWith("output/")) throw new Error("Transferred files must move from output/ to input/handoff/");
-    if (!bytes.length || bytes.length > 20 * 1024 * 1024) throw new Error("File must contain 1 byte to 20 MiB");
-    return this.update(id, async session => {
-      if (session.status === "running") throw new Error("Stop the destination Agent before adding files");
-      const record: FileRecord = { path: name, bytes: bytes.length, mimeType: mimeType ?? (name.endsWith(".md") ? "text/markdown" : "application/octet-stream"), origin: source };
-      await atomicWrite(await this.materializedPath(id, name), bytes);
-      session.files = [...session.files.filter(file => file.path !== name), record];
-      session.revision++;
       return record;
     });
   }

@@ -31,7 +31,7 @@ import { StorefrontDetails } from "./StorefrontDetails.jsx";
 import { creatorOrderQuery } from "./storefrontModel.js";
 import { creatorFactoryPath, creatorProductPath, parseCreatorRoute } from "./creatorRoutes.js";
 import { createCreatorTranslator } from "./creatorI18n.js";
-import { CreatorProductOverview, CreatorProductWorkspace } from "./CreatorProductWorkspace.jsx";
+import { CreatorProductWorkspace } from "./CreatorProductWorkspace.jsx";
 import { useLocale } from "./locale.jsx";
 import "./creatorPortalV2.css";
 
@@ -145,7 +145,7 @@ export function CreatorPortalV2({
             </div>
             <MuiDivider />
             <div className="cpv2-account-menu-label"><LanguageIcon fontSize="small" /><MuiTypography variant="overline">{t("language")}</MuiTypography></div>
-            {[['zh', t("chinese")], ['en', t("english")], ['ja', t("japanese")]].map(([value, label]) => <MuiMenuItem key={value} selected={locale === value} onClick={() => { setLocale(value); closeAccountMenu(); }}><ListItemIcon>{locale === value ? <Check fontSize="small" /> : <span className="cpv2-menu-icon-placeholder" />}</ListItemIcon><ListItemText primary={label} /></MuiMenuItem>)}
+            {[['en', t("english")], ['zh', t("chinese")], ['ja', t("japanese")]].map(([value, label]) => <MuiMenuItem key={value} selected={locale === value} onClick={() => { setLocale(value); closeAccountMenu(); }}><ListItemIcon>{locale === value ? <Check fontSize="small" /> : <span className="cpv2-menu-icon-placeholder" />}</ListItemIcon><ListItemText primary={label} /></MuiMenuItem>)}
             {onLogout ? <><MuiDivider /><MuiMenuItem onClick={() => { closeAccountMenu(); void onLogout(); }}><ListItemIcon><Logout fontSize="small" /></ListItemIcon><ListItemText primary={t("signOut")} /></MuiMenuItem></> : null}
           </MuiMenu>
         </div>
@@ -180,8 +180,7 @@ function CreatorRoute({ route, token, request, navigate, profile, locale, t, reg
   if (route.kind === "home") return <CreatorHome token={token} request={request} navigate={navigate} profile={profile} t={t} locale={locale} />;
   if (route.kind === "products") return <ProductsPage token={token} request={request} navigate={navigate} t={t} />;
   if (route.kind === "product-create") return <CreatorProductFiles token={token} navigate={navigate} locale={locale} />;
-  if (route.kind === "product" && route.tab === "overview") return <CreatorProductOverview token={token} navigate={navigate} productId={route.productId} locale={locale} />;
-  if (route.kind === "product" && ["files", "about-you", "corpus", "brief", "complete"].includes(route.tab)) return <CreatorProductWorkspace token={token} request={request} navigate={navigate} productId={route.productId} tab={route.tab} locale={locale} profile={profile} />;
+  if (route.kind === "product" && ["overview", "files", "about-you", "corpus", "brief", "complete"].includes(route.tab)) return <FactoryProductRedirect productId={route.productId} navigate={navigate} />;
   if (route.kind === "product") return <ProductPage token={token} request={request} navigate={navigate} productId={route.productId} tab={route.tab} t={t} />;
   if (route.kind === "candidate") return <CreatorProductWorkspace token={token} request={request} navigate={navigate} productId={route.productId} tab="corpus" locale={locale} />;
   if (route.kind === "preview") return <PreviewPage token={token} request={request} navigate={navigate} productId={route.productId} t={t} />;
@@ -337,6 +336,11 @@ function DataControlsPanel({ product, t }) {
 
 function FactoryIndexRedirect({ navigate }) {
   useEffect(() => { navigate(`${ROOT}/products`); }, [navigate]);
+  return null;
+}
+
+function FactoryProductRedirect({ productId, navigate }) {
+  useEffect(() => { navigate(creatorFactoryPath(productId)); }, [navigate, productId]);
   return null;
 }
 

@@ -1,12 +1,13 @@
 import path from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type { Duplex } from "node:stream";
 import { createFactoryHandler } from "./server.js";
 import type { AgentDefinitionRepository } from "./definitions.js";
 
 export class FactoryAgentsService {
   private products = new Map<string, ReturnType<typeof createFactoryHandler>>();
   constructor(private root: string, private env: NodeJS.ProcessEnv, private definitions?: AgentDefinitionRepository) {}
-  async handle(scope: { creatorId: string; productId: string; briefSpec?: unknown }, token: string, request: IncomingMessage, response: ServerResponse) {
+  private async app(scope: { creatorId: string; productId: string; briefSpec?: unknown }, token: string) {
     const { creatorId, productId } = scope;
     if (!this.definitions) throw Object.assign(new Error("Factory Agent definitions require Registry database configuration"), { code: "agent_definitions_unavailable", status: 503 });
     if (!/^[a-zA-Z0-9_-]+$/.test(creatorId)) throw new Error("Invalid Creator ID");
@@ -29,9 +30,19 @@ export class FactoryAgentsService {
     const app = await pending;
     app.setScope(scope);
     app.setCreatorToken(token);
+    return app;
+  }
+  async handle(scope: { creatorId: string; productId: string; briefSpec?: unknown }, token: string, request: IncomingMessage, response: ServerResponse) {
+    const app = await this.app(scope, token);
     const original = request.url;
     request.url = original?.replace(/^\/v1\/creator\/products\/[^/]+\/factory-agents(?=\/|$)/, "/api");
     try { await app.handle(request, response); } finally { request.url = original; }
+  }
+  async handleUpgrade(scope: { creatorId: string; productId: string; briefSpec?: unknown }, token: string, request: IncomingMessage, socket: Duplex, head: Buffer) {
+    const app = await this.app(scope, token);
+    const original = request.url;
+    request.url = original?.replace(/^\/v1\/creator\/products\/[^/]+\/factory-agents(?=\/|$)/, "/api");
+    try { await app.handleUpgrade(request, socket, head); } finally { request.url = original; }
   }
   async close() { await Promise.all([...this.products.values()].map(async app => (await app).close())); }
 }

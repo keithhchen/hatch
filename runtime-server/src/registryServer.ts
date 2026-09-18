@@ -207,6 +207,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const publishWorkGate = new PublishWorkGate(publishWorkLimitOptionsFromEnvironment(environment));
   const httpLimits = httpRequestLimitOptionsFromEnvironment(environment);
   const httpRequestGate = new HttpRequestGate(httpLimits);
+  const registryContext: RegistryContext = { store, accounts, authRateLimiter, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, factoryAgents, factoryAgentDefinitions, productFileStore, factoryNodeService, corpusPublisher, nodeObjectStore, releaseStore, authSecret };
   const server = http.createServer((request, response) => {
     const suppliedBearer = bearer(request);
     const internalRuntime = Boolean(
@@ -226,7 +227,7 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
       }, { "retry-after": String(admission.retryAfterSeconds), connection: "close" });
       return;
     }
-    const routePromise = route(request, response, { store, accounts, authRateLimiter, sessionQueryGate, publishWorkGate, trustedProxies, publishToken, runtimeServiceToken, deploymentServiceToken, factoryService, factoryAgents, factoryAgentDefinitions, productFileStore, factoryNodeService, corpusPublisher, nodeObjectStore, releaseStore, authSecret })
+    const routePromise = route(request, response, registryContext)
       .catch((error) => {
         const status = errorStatus(error);
         if (status >= 500) console.error("Registry request failed", error);
@@ -286,6 +287,32 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   server.requestTimeout = httpLimits.requestTimeoutMs;
   server.keepAliveTimeout = 5_000;
   server.maxHeadersCount = 100;
+  server.on("upgrade", (request, socket, head) => {
+    socket.on("error", () => undefined);
+    void (async () => {
+      const url = new URL(request.url ?? "/", "http://registry.local");
+      const match = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/factory-agents\/sessions\/([0-9a-f-]{36})\/voice\/live$/);
+      if (!match) throw Object.assign(new Error("Unknown WebSocket route"), { status: 404 });
+      const token = bearer(request);
+      const session = await accounts.resolveSession(token);
+      let account = session?.account;
+      if (!account) {
+        const claims = verifyAuthToken(token, authSecret);
+        account = claims ? await accounts.getById(claims.sub) : undefined;
+      }
+      if (!account || account.role !== "creator") throw Object.assign(new Error("A valid Creator account token is required."), { status: 401 });
+      const productId = decodeURIComponent(match[1]!);
+      const product = await productForCreator(registryContext, account.id, productId);
+      if (!product) throw Object.assign(new Error("Product was not found."), { status: 404 });
+      await factoryAgents.handleUpgrade({ creatorId: account.id, productId, briefSpec: product.brief_spec }, token!, request, socket, head);
+    })().catch(error => {
+      if (socket.destroyed) return;
+      const status = errorStatus(error);
+      const label = status === 401 ? "Unauthorized" : status === 404 ? "Not Found" : "Bad Request";
+      socket.write(`HTTP/1.1 ${status} ${label}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
+      socket.destroy();
+    });
+  });
   const port = Number(environment.REGISTRY_PORT ?? 8100);
   const host = environment.REGISTRY_HOST ?? "127.0.0.1";
   await new Promise<void>((resolve) => server.listen(port, host, resolve));

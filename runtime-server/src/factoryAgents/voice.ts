@@ -24,8 +24,10 @@ export type VoiceServerEvent =
   | { type: "voice.started"; conversationId: string; sttModel: string; ttsModel: string; audioFormat: string }
   | { type: "voice.stopped"; conversationId: string }
   | { type: "voice.user_speaking"; conversationId: string }
+  | { type: "voice.interrupt"; conversationId: string }
   | { type: "voice.transcript.partial"; conversationId: string; text: string }
   | { type: "voice.transcript.final"; conversationId: string; text: string }
+  | { type: "voice.assistant.delta"; conversationId: string; runId: string; text: string }
   | { type: "voice.speech.start"; conversationId: string; runId: string; segmentId: string; text: string }
   | { type: "voice.speech.end"; conversationId: string; runId: string; segmentId: string }
   | { type: "voice.audio.start"; conversationId: string; runId: string; mimeType: string }

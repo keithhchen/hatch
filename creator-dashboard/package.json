@@ -25,7 +25,8 @@
     "@mui/x-tree-view": "^9.13.0",
     "pg": "^8.23.0",
     "prop-types": "^15.8.1",
-    "react-resizable-panels": "^4.12.4"
+    "react-resizable-panels": "^4.12.4",
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
