@@ -725,7 +725,7 @@ export async function createDashboardApp(options = {}) {
       if (url.pathname === "/portal" || url.pathname.startsWith("/portal/") || url.pathname === "/agents" || url.pathname.startsWith("/agents/")) {
         return send(response, 404, { error: { code: "route_not_found", message: "That route is no longer available." } });
       }
-      if (request.method === "GET" && (url.pathname === "/favicon.svg" || url.pathname === "/assets" || url.pathname.startsWith("/assets/"))) {
+      if (request.method === "GET" && (url.pathname === "/favicon.svg" || url.pathname === "/factory-voice-capture-worklet.js" || url.pathname === "/factory-voice-playback-worklet.js" || url.pathname === "/assets" || url.pathname.startsWith("/assets/"))) {
         return servePortalAsset(url.pathname, response);
       }
       if (request.method === "GET" && isPublicPortalRoute(url.pathname)) {
@@ -4286,6 +4286,8 @@ async function servePortalAsset(requestPath, response) {
   try {
     if (requestPath === "/favicon.svg") {
       relativePath = "favicon.svg";
+    } else if (requestPath === "/factory-voice-capture-worklet.js" || requestPath === "/factory-voice-playback-worklet.js") {
+      relativePath = requestPath.slice(1);
     } else if (requestPath === "/assets" || !path.extname(requestPath)) {
       relativePath = "index.html";
     } else if (requestPath.startsWith("/assets/")) {
