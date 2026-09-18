@@ -1,6 +1,7 @@
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createServer } from "node:http";
+import { WebSocket, WebSocketServer } from "ws";
 import {
   createCipheriv,
   createDecipheriv,
@@ -62,6 +63,7 @@ export async function createDashboardApp(options = {}) {
   const publicOrigin = options.publicOrigin
     ?? process.env.HATCH_PUBLIC_ORIGIN
     ?? (process.env.NODE_ENV === "production" ? "https://hatch.tokenquadrant.cn" : "http://127.0.0.1:8500");
+  const voiceWss = new WebSocketServer({ noServer: true, maxPayload: 128 * 1024 });
   let PostgresPool = options.PostgresPool;
   let ledger = options.ledger;
   if (!ledger && commerceDatabaseUrl) {
@@ -723,7 +725,7 @@ export async function createDashboardApp(options = {}) {
       if (url.pathname === "/portal" || url.pathname.startsWith("/portal/") || url.pathname === "/agents" || url.pathname.startsWith("/agents/")) {
         return send(response, 404, { error: { code: "route_not_found", message: "That route is no longer available." } });
       }
-      if (request.method === "GET" && (url.pathname === "/assets" || url.pathname.startsWith("/assets/"))) {
+      if (request.method === "GET" && (url.pathname === "/favicon.svg" || url.pathname === "/assets" || url.pathname.startsWith("/assets/"))) {
         return servePortalAsset(url.pathname, response);
       }
       if (request.method === "GET" && isPublicPortalRoute(url.pathname)) {
@@ -2055,8 +2057,70 @@ export async function createDashboardApp(options = {}) {
     }
   };
 
+  const handleUpgrade = async (request, socket, head) => {
+    request.__oauthStateKey = oauthStateKey;
+    const url = new URL(request.url ?? "/", publicOrigin);
+    if (!/^\/v1\/creator\/products\/[^/]+\/factory-agents\/sessions\/[0-9a-f-]{36}\/voice\/live$/.test(url.pathname)) {
+      throw Object.assign(new Error("Unknown WebSocket route"), { status: 404 });
+    }
+    let requestOrigin;
+    try { requestOrigin = request.headers.origin ? new URL(request.headers.origin).origin : ""; } catch { requestOrigin = ""; }
+    if (!requestOrigin || requestOrigin !== new URL(publicOrigin).origin) {
+      throw Object.assign(new Error("Cross-origin WebSocket request rejected"), { status: 403 });
+    }
+    const authentication = await authenticate(request, registryUrl, "creator", fetchImpl, portalState);
+    if (authentication.error) throw Object.assign(new Error(authentication.error.body?.error?.message || "Sign in to continue."), { status: authentication.error.status });
+    requireCapability(authentication.profile, "product:edit");
+    voiceWss.handleUpgrade(request, socket, head, browser => {
+      browser.on("error", () => undefined);
+      const upstreamUrl = new URL(url.pathname + url.search, registryUrl);
+      upstreamUrl.protocol = upstreamUrl.protocol === "https:" ? "wss:" : "ws:";
+      const upstream = new WebSocket(upstreamUrl, {
+        headers: { authorization: `Bearer ${authentication.token}` },
+        handshakeTimeout: 20_000,
+        maxPayload: 128 * 1024,
+      });
+      const pending = [];
+      let pendingBytes = 0;
+      const close = (code = 1000, reason = "Voice session ended") => {
+        if (browser.readyState === WebSocket.OPEN) browser.close(code, reason);
+        else if (browser.readyState === WebSocket.CONNECTING) browser.terminate();
+        if (upstream.readyState === WebSocket.OPEN) upstream.close(code, reason);
+        else if (upstream.readyState === WebSocket.CONNECTING) upstream.terminate();
+      };
+      browser.on("message", (data, binary) => {
+        const bytes = data.byteLength;
+        if (upstream.readyState === WebSocket.OPEN) { upstream.send(data, { binary }); return; }
+        pendingBytes += bytes;
+        if (pendingBytes > 512 * 1024) { close(1009, "Voice input buffer exceeded"); return; }
+        pending.push({ data, binary });
+      });
+      upstream.once("open", () => {
+        for (const entry of pending.splice(0)) upstream.send(entry.data, { binary: entry.binary });
+        pendingBytes = 0;
+      });
+      upstream.on("message", (data, binary) => {
+        if (browser.readyState === WebSocket.OPEN) browser.send(data, { binary });
+      });
+      upstream.on("error", error => {
+        if (browser.readyState === WebSocket.OPEN) browser.send(JSON.stringify({ type: "voice.error", message: error.message }));
+        close(1011, "Voice upstream failed");
+      });
+      upstream.on("close", (code, reason) => close(code || 1000, reason.toString() || "Voice upstream closed"));
+      browser.on("close", (code, reason) => {
+        if (upstream.readyState === WebSocket.OPEN) upstream.close(code || 1000, reason.toString());
+        else upstream.terminate();
+      });
+    });
+  };
+
   return {
     handler,
+    handleUpgrade,
+    closeVoiceSockets: () => {
+      for (const socket of voiceWss.clients) socket.terminate();
+      voiceWss.close();
+    },
     ledger,
     commerce,
     portalState,
@@ -2074,6 +2138,16 @@ export async function startDashboardServer(options = {}) {
   const port = Number(options.port ?? process.env.HATCH_CREATOR_DASHBOARD_API_PORT ?? 8500);
   const host = options.host ?? process.env.HATCH_CREATOR_DASHBOARD_API_HOST ?? "127.0.0.1";
   const server = createServer(app.handler);
+  server.on("upgrade", (request, socket, head) => {
+    socket.on("error", () => undefined);
+    void app.handleUpgrade(request, socket, head).catch(error => {
+      if (socket.destroyed) return;
+      const status = Number(error?.status) || 400;
+      const label = status === 401 ? "Unauthorized" : status === 403 ? "Forbidden" : status === 404 ? "Not Found" : "Bad Request";
+      socket.write(`HTTP/1.1 ${status} ${label}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
+      socket.destroy();
+    });
+  });
   await new Promise((resolve) => server.listen(port, host, resolve));
   const reconcileTimer = setInterval(() => {
     app.reconcilePendingCheckouts().catch(() => undefined);
@@ -2096,6 +2170,7 @@ export async function startDashboardServer(options = {}) {
     clearInterval(outboxTimer);
     clearInterval(financeTimer);
     clearInterval(deploymentTimer);
+    app.closeVoiceSockets();
     app.ledger.close?.().catch(() => undefined);
     app.portalState.close?.().catch(() => undefined);
     app.telemetry.close?.().catch(() => undefined);
@@ -4209,7 +4284,9 @@ async function servePortalIndex(response, metadata, status = 200, noScriptFallba
 async function servePortalAsset(requestPath, response) {
   let relativePath;
   try {
-    if (requestPath === "/assets" || !path.extname(requestPath)) {
+    if (requestPath === "/favicon.svg") {
+      relativePath = "favicon.svg";
+    } else if (requestPath === "/assets" || !path.extname(requestPath)) {
       relativePath = "index.html";
     } else if (requestPath.startsWith("/assets/")) {
       relativePath = decodeURIComponent(requestPath.slice("/".length));
