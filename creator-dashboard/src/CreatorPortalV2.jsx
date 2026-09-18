@@ -73,8 +73,6 @@ export function CreatorPortalV2({
   }, [navigate]);
 
   const mobileNavigationItems = [
-    { value: "space-explore", label: t("explore"), onSelect: () => void go("/explore") },
-    { value: "space-library", label: t("library"), onSelect: () => void go("/library") },
     { value: "space-studio", label: t("studio"), active: route.kind === "home", onSelect: () => void go(ROOT) },
     { value: "products", label: t("products"), active: route.section === "products" && route.kind !== "files", onSelect: () => void go(`${ROOT}/products`) },
     { value: "space-orders", label: t("orders"), active: route.section === "orders", onSelect: () => void go("/studio/orders") },
@@ -108,8 +106,6 @@ export function CreatorPortalV2({
           />
         </div>
         <nav className="cpv2-global-nav" aria-label={t("hatchNavigation")}>
-          <SpaceLink href="/explore" navigate={go}>{t("explore")}</SpaceLink>
-          <SpaceLink href="/library" navigate={go}>{t("library")}</SpaceLink>
           <SpaceLink href="/studio" navigate={go} active={route.kind === "home"}>{t("studio")}</SpaceLink>
           <NavButton active={route.section === "products" && route.kind !== "files"} onClick={() => go(`${ROOT}/products`)}>{t("products")}</NavButton>
           <SpaceLink href="/studio/orders" navigate={go} active={route.section === "orders"}>{t("orders")}</SpaceLink>
@@ -234,7 +230,7 @@ function ProductsPage({ token, request, navigate, t }) {
         return <>
           <PageHeader eyebrow={t("products")} title={t("productsPageTitle")} body={t("productsPageBody")} action={t("createProduct")} onAction={() => navigate(`${ROOT}/products/new`)} />
           {products.length ? <section className="cpv2-product-grid" aria-label={t("products")}>
-            {products.map((product) => <ProductCard key={idOf(product, "product")} product={product} t={t} onOpen={() => navigate(creatorProductPath(idOf(product, "product")))} />)}
+            {products.map((product) => <ProductCard key={idOf(product, "product")} product={product} t={t} request={request} token={token} onChanged={resource.retry} onOpen={() => navigate(creatorProductPath(idOf(product, "product")))} />)}
           </section> : <EmptyState title={t("createFirstProduct")} body={t("createFirstProductBody")} action={t("createProduct")} onAction={() => navigate(`${ROOT}/products/new`)} />}
         </>;
       }}
@@ -242,13 +238,34 @@ function ProductsPage({ token, request, navigate, t }) {
   );
 }
 
-function ProductCard({ product, onOpen, t }) {
+function ProductCard({ product, onOpen, request, token, onChanged, t }) {
   const published = product.status === "published" || product.status === "live";
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function withdraw() {
+    if (!published || busy) return;
+    setBusy(true); setError("");
+    try {
+      await request(`/v1/creator/products/${encodeURIComponent(idOf(product, "product"))}/withdraw`, { method: "POST", token, headers: { "idempotency-key": mutationKey() }, body: JSON.stringify({ reason: "Creator unpublished this Product." }) });
+      onChanged?.();
+    } catch (nextError) { setError(friendlyError(nextError, t)); }
+    finally { setBusy(false); }
+  }
+  async function remove() {
+    if (published || busy || !window.confirm(t("deleteProductConfirm"))) return;
+    setBusy(true); setError("");
+    try {
+      await request(`/v1/creator/products/${encodeURIComponent(idOf(product, "product"))}`, { method: "DELETE", token });
+      onChanged?.();
+    } catch (nextError) { setError(friendlyError(nextError, t)); }
+    finally { setBusy(false); }
+  }
   return <article className="cpv2-card cpv2-product-card">
-    <div className="cpv2-card-top"><StatusChip status={product.status}>{localizedProductStatus(product.status, t)}</StatusChip><span>{published ? t("permanentAccess") : t("notPublished")}</span></div>
+    <div className="cpv2-card-top"><Button variant={published ? "secondary" : "link"} size="small" type="button" disabled={!published || busy} loading={busy} onClick={() => void withdraw()}>{published ? t("published") : t("notPublished")}</Button></div>
     <h2>{product.name ?? product.product_name ?? t("untitledProduct")}</h2>
     <p>{product.promise ?? product.description ?? t("addProductPromise")}</p>
-    <div className="cpv2-card-foot"><small>{shortDigest(product.corpus_digest ?? product.active_release?.corpus_digest)}</small><Button variant="secondary" type="button" onClick={onOpen}>{t("openProduct")}</Button></div>
+    {error ? <InlineError>{error}</InlineError> : null}
+    <div className="cpv2-card-foot"><Button variant="secondary" type="button" onClick={onOpen}>{t("openProduct")}</Button>{!published ? <Button variant="link" type="button" disabled={busy} onClick={() => void remove()}>{t("deleteProduct")}</Button> : null}</div>
   </article>;
 }
 
@@ -555,61 +572,17 @@ function OrderList({ orders, onOpen, detailed = false, t, locale }) {
 
 function OrderPage({ token, request, navigate, orderId, t, locale }) {
   const resource = useRemote(request, `/v1/creator/orders/${encodeURIComponent(orderId)}`, token);
-  const [refund, setRefund] = useState({ reason: "", confirming: false, busy: false, error: "", done: false });
-
-  async function requestRefund() {
-    if (!refund.reason.trim() || refund.busy) return;
-    setRefund((current) => ({ ...current, busy: true, error: "", done: false }));
-    try {
-      await request(`/v1/creator/orders/${encodeURIComponent(orderId)}/refund-requests`, {
-        method: "POST",
-        token,
-        headers: { "idempotency-key": mutationKey() },
-        body: JSON.stringify({ reason: refund.reason.trim() })
-      });
-      setRefund((current) => ({ ...current, busy: false, confirming: false, error: "", done: true }));
-      resource.retry();
-    } catch (error) {
-      setRefund((current) => ({ ...current, busy: false, error: friendlyError(error, t), done: false }));
-    }
-  }
-
   return <PageBoundary resource={resource} title={t("orderLoadError")} retryLabel={t("retry")} t={t}>{(payload) => {
     const order = unwrap(payload, "order") ?? payload;
-    const events = arrayOf(order.timeline ?? order.events);
-    const safeEvents = events.length ? events : inferredTimeline(order, t);
-    const canRefund = Boolean(order.actions?.can_creator_refund || order.actions?.can_request_refund || order.actions?.can_cancel_access);
     return <>
       <Breadcrumb onClick={() => navigate(`${ROOT}/orders`)}>{t("orders")}</Breadcrumb>
       <PageHeader eyebrow={order.order_reference ?? orderId} title={order.product_name ?? order.product?.name ?? t("orderDetail")} body={`${order.buyer_display_name ?? t("buyer")} · ${dateTime(order.created_at ?? order.placed_at, locale)}`} />
-      {refund.error ? <InlineError>{refund.error}</InlineError> : null}
-      {refund.done ? <SuccessNotice>{t("refundRecorded")}</SuccessNotice> : null}
-      <div className="cpv2-detail-grid">
-        <article className="cpv2-card cpv2-panel">
-          <SectionHeading eyebrow={t("accessRecord")} title={t("whatBuyerReceived")} />
-          <dl className="cpv2-fact-grid">
-            <Fact label={t("access")} value={humanStatus(order.entitlement_status ?? order.access?.status, t)} />
-            <Fact label={t("release")} value={order.release_id ?? order.release_label ?? order.corpus_digest ?? t("notProvided")} />
-            <Fact label={t("revocation")} value={humanStatus(order.refund_status ?? order.refund?.status ?? (order.refund ? "completed" : "none"), t)} />
-          </dl>
-        </article>
-        <article className="cpv2-card cpv2-panel">
-          <SectionHeading eyebrow={t("accessMetadata")} title={t("privateByDesign")} />
-          <dl>
-            <Fact label={t("status")} value={humanStatus(order.access_status ?? order.entitlement_status ?? order.status ?? "active", t)} />
-            <Fact label={t("accessMode")} value={order.access_mode === "unmetered" ? t("permanent") : t("metered")} />
-            <Fact label={t("release")} value={order.release_id ?? order.release_label ?? order.corpus_digest ?? t("notProvided")} />
-          </dl>
-          <p className="cpv2-muted">{t("workspacePathsPrivate")}</p>
-        </article>
-      </div>
-      <article className="cpv2-card cpv2-panel cpv2-timeline">
-        <SectionHeading eyebrow={t("timeline")} title={t("accessHistory")} />
-        <ol>{safeEvents.map((event, index) => <li key={event.id ?? event.event_id ?? index}><span aria-hidden="true" /><div><strong>{event.label ?? humanStatus(event.type ?? event.event_type, t)}</strong><small>{dateTime(event.at ?? event.created_at ?? event.occurred_at, locale)}</small>{event.detail ? <p>{event.detail}</p> : null}</div></li>)}</ol>
-      </article>
-      <article className="cpv2-card cpv2-panel cpv2-refund-action">
-        <SectionHeading eyebrow={t("orderAction")} title={t("revokeAccess")} />
-        {canRefund ? <><p>{t("reasonRequired")}</p><FormField label={t("reason")}><Textarea value={refund.reason} onChange={(event) => setRefund((current) => ({ ...current, reason: event.target.value, confirming: false }))} placeholder={t("revokeReasonPlaceholder")} /></FormField>{refund.confirming ? <div className="cpv2-confirm"><p><strong>{t("revokeConfirm")}</strong><br />{t("entitlementNotUsable")}</p><Button variant="secondary" type="button" onClick={() => setRefund((current) => ({ ...current, confirming: false }))}>{t("cancel")}</Button><Button variant="danger" type="button" loading={refund.busy} disabled={!refund.reason.trim()} onClick={requestRefund}>{t("confirmRevoke")}</Button></div> : <Button variant="danger" type="button" disabled={!refund.reason.trim()} onClick={() => setRefund((current) => ({ ...current, confirming: true }))}>{t("reviewRevoke")}</Button>}</> : <p className="cpv2-muted">{t("noRevokeAvailable")}</p>}
+      <article className="cpv2-card cpv2-panel">
+        <SectionHeading title={t("orderDetail")} />
+        <dl className="cpv2-fact-grid">
+          <Fact label={t("buyer")} value={order.buyer_display_name ?? t("notProvided")} />
+          <Fact label={t("placedAt")} value={dateTime(order.created_at ?? order.placed_at, locale)} />
+        </dl>
       </article>
     </>;
   }}</PageBoundary>;

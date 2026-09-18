@@ -139,6 +139,20 @@ export class CreatorRegistryReleaseStore {
     return row ? rowToRelease(row) : undefined;
   }
 
+  async withdraw(creatorId: string, productId: string): Promise<void> {
+    requireUuidV4(productId, "product_id");
+    requireUuidV4(creatorId, "creator_id");
+    if (!this.pool) {
+      const current = this.memory.get(productId);
+      if (current?.creator_id === creatorId) this.memory.delete(productId);
+      return;
+    }
+    await this.pool.query(
+      `DELETE FROM hatch_creator_registry_live WHERE product_id=$1 AND creator_id=$2`,
+      [productId, creatorId]
+    );
+  }
+
   /** Public catalog authority: only the current release pointer is visible. */
   async listPublic(options: { limit?: number; offset?: number } = {}): Promise<PublicReleaseListing[]> {
     const limit = options.limit ?? 20;

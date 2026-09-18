@@ -1303,7 +1303,7 @@ export async function createDashboardApp(options = {}) {
         return send(response, 404, { error: { code: "not_found", message: "Route not found." } });
       }
 
-      const productContractPath = url.pathname.match(/^\/v1\/creator\/products(?:\/[^/]+(?:\/files(?:\/[^/]+)?|\/graph|\/brief-spec|\/registry|\/nodes\/(?:about-you|corpus)\/executions(?:\/[^/]+(?:\/answers)?)?)?)?$/);
+      const productContractPath = url.pathname.match(/^\/v1\/creator\/products(?:\/[^/]+(?:\/files(?:\/[^/]+)?|\/graph|\/brief-spec|\/registry|\/withdraw|\/nodes\/(?:about-you|corpus)\/executions(?:\/[^/]+(?:\/answers)?)?)?)?$/);
       const productNodeContract = /\/nodes\/(?:about-you|corpus)\/executions(?:\/[^/]+(?:\/answers)?)?$/.test(url.pathname);
       const productRegistryContract = /\/registry$/.test(url.pathname);
       const productContractWrite = productContractPath && (
@@ -1311,13 +1311,14 @@ export async function createDashboardApp(options = {}) {
       ) && (
         url.pathname === "/v1/creator/products"
         || /\/(files|brief-spec)$/.test(url.pathname)
+        || /\/withdraw$/.test(url.pathname)
         || productNodeContract
         || productRegistryContract
         || /^\/v1\/creator\/products\/[^/]+$/.test(url.pathname)
       );
       const productContractDelete = productContractPath
         && request.method === "DELETE"
-        && /\/files\/[^/]+$/.test(url.pathname);
+        && (/\/files\/[^/]+$/.test(url.pathname) || /^\/v1\/creator\/products\/[^/]+$/.test(url.pathname));
       const productContractRead = productContractPath && request.method === "GET" && (
         url.pathname === "/v1/creator/products"
         || /\/files(?:\/[^/]+)?$/.test(url.pathname)

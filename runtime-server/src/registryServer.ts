@@ -873,6 +873,20 @@ async function route(
     return;
   }
 
+  const productWithdrawMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/withdraw$/);
+  if (productWithdrawMatch && request.method === "POST") {
+    const account = await authenticate(request, response, context, "creator");
+    if (account === SESSION_QUERY_REJECTED) return;
+    if (!account) { sendJson(response, 401, { detail: "A valid Creator account token is required." }); return; }
+    const productId = decodeURIComponent(productWithdrawMatch[1]!);
+    const product = await productForCreator(context, account.id, productId);
+    if (!product) { sendJson(response, 404, { error: { code: "product_not_found", message: "Product was not found." } }); return; }
+    await context.releaseStore.withdraw(account.id, productId);
+    const updated = await productForCreator(context, account.id, productId);
+    sendJson(response, 200, { product: { product_id: productId, name: updated?.name ?? product.name, promise: updated?.promise ?? product.promise, status: "draft" } });
+    return;
+  }
+
   const productBriefSpecMatch = url.pathname.match(/^\/v1\/creator\/products\/([^/]+)\/brief-spec$/);
   if (productBriefSpecMatch && request.method === "PUT") {
     const account = await authenticate(request, response, context, "creator");
