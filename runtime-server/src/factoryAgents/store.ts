@@ -47,7 +47,25 @@ export class WorkbenchStore {
     if (!/^[0-9a-f-]{36}$/.test(id)) throw new Error("Invalid session ID");
     return path.join(this.root, id);
   }
-  private async manualFiles(): Promise<FileRecord[]> { return readFile(path.join(this.root, "manual-files.json"), "utf8").then(value => JSON.parse(value).files ?? []).catch(() => []); }
+  private async manualFiles(): Promise<FileRecord[]> {
+    const root = path.join(this.root, "manual");
+    const mimeType = (name: string) => name.endsWith(".md") ? "text/markdown" : name.endsWith(".txt") ? "text/plain" : name.endsWith(".json") ? "application/json" : "application/octet-stream";
+    const walk = async (directory: string, prefix: string): Promise<FileRecord[]> => {
+      const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
+      const files: FileRecord[] = [];
+      for (const entry of entries) {
+        const diskPath = path.join(directory, entry.name);
+        const relative = `${prefix}${entry.name}`;
+        if (entry.isDirectory()) files.push(...await walk(diskPath, `${relative}/`));
+        else if (entry.isFile()) {
+          const info = await lstat(diskPath);
+          files.push({ path: `input/manual/${relative}`, bytes: info.size, mimeType: mimeType(entry.name) });
+        }
+      }
+      return files;
+    };
+    return (await walk(root, "")).sort((a, b) => a.path.localeCompare(b.path));
+  }
   async listManualFiles(): Promise<FileRecord[]> { return this.manualFiles(); }
   private async manualPath(name: string): Promise<string> {
     if (!name.startsWith("input/manual/")) throw new Error("Manual files must use input/manual/");
@@ -111,7 +129,7 @@ export class WorkbenchStore {
   async put(id: string, name: string, bytes: Buffer, options: { mimeType?: string; actor: "user" | "agent" | "host"; origin?: FileRecord["origin"]; readonly?: boolean; countsAsOutput?: boolean }): Promise<FileRecord> {
     filePath(name);
     if (!bytes.length || bytes.length > 20 * 1024 * 1024) throw new Error("File must contain 1 byte to 20 MiB");
-    if (options.actor === "user" && name.startsWith("input/manual/")) { const record: FileRecord = { path: name, bytes: bytes.length, mimeType: options.mimeType ?? (name.endsWith(".md") ? "text/markdown" : "application/octet-stream") }; await atomicWrite(await this.manualPath(name), bytes); await atomicWrite(path.join(this.root, "manual-files.json"), JSON.stringify({ files: [...(await this.manualFiles()).filter(file => file.path !== name), record] })); return record; }
+    if (options.actor === "user" && name.startsWith("input/manual/")) { const target = await this.manualPath(name); await atomicWrite(target, bytes); return (await this.manualFiles()).find(file => file.path === name)!; }
     if (options.actor === "agent" && (!name.startsWith("output/") || !name.endsWith(".md"))) throw new Error("Agent may only write output Markdown");
     return this.update(id, async s => {
       const old = s.files.find(f => f.path === name);
@@ -127,7 +145,7 @@ export class WorkbenchStore {
   }
   async removeInput(id: string, name: string): Promise<void> {
     filePath(name);
-    if (name.startsWith("input/manual/")) { if ((await this.get(id)).status === "running") throw new Error("Only idle input files can be removed"); await rm(await this.manualPath(name), { force: true }); await atomicWrite(path.join(this.root, "manual-files.json"), JSON.stringify({ files: (await this.manualFiles()).filter(file => file.path !== name) })); return; }
+    if (name.startsWith("input/manual/")) { if ((await this.get(id)).status === "running") throw new Error("Only idle input files can be removed"); await rm(await this.manualPath(name), { force: true }); return; }
     await this.update(id, async s => { if (!name.startsWith("input/") || s.status === "running") throw new Error("Only idle input files can be removed"); await rm(await this.materializedPath(id, name), { force: true }); s.files = s.files.filter(f => f.path !== name); s.revision++; });
   }
   async comment(id: string, input: Omit<Comment, "id" | "createdAt">): Promise<Comment> {
