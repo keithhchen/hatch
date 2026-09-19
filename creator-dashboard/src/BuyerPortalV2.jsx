@@ -482,7 +482,7 @@ function AuthPage({mode, search, request, navigate, session }) {
   const intent = useRemote(async (signal) => unwrap(await callRequest(request, intentEndpoint, { signal }), ["agent", "product"]), intentEndpoint || "no-intent", productIntent);
   const [form, setForm] = useState({ display_name: "", email: "", password: "" });
   const [submission, setSubmission] = useState({ status: "idle", error: null });
-  const authBrandClassName = signingUp ? "buyer-v2__brand buyer-v2__brand--inverse" : "buyer-v2__brand";
+  const authBrandClassName = "buyer-v2__brand";
   usePageTitle(signingUp
     ? (creatorIntent ? t(t("Create your Creator account")) : t("Create your Hatch account"))
     : t("Sign in to Hatch"));
@@ -514,7 +514,7 @@ function AuthPage({mode, search, request, navigate, session }) {
   return (
     <main className="buyer-v2 buyer-v2__auth-page">
       <section className="buyer-v2__auth-context">
-        <HatchBrand as={RouterLink} className={authBrandClassName} inverse={signingUp} to={EXPLORE_ROOT} navigate={navigate} aria-label="Hatch home" />
+        <HatchBrand as={RouterLink} className={authBrandClassName} to={EXPLORE_ROOT} navigate={navigate} aria-label="Hatch home" />
         <div>
           <span className="buyer-v2__eyebrow">{t('Continue your task')}</span>
           {productIntent && intent.status === "loading" ? <div className="buyer-v2__auth-intent-skeleton" aria-label={t("Loading Product")} /> : null}

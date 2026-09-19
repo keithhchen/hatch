@@ -52,10 +52,10 @@ test("Sign-in uses the regular Hatch wordmark", () => {
   const source = read("creator-dashboard/src/BuyerPortalV2.jsx");
   const brand = read("packages/ui/src/HatchBrand.jsx");
 
-  assert.match(source, /const authBrandClassName = signingUp \? "buyer-v2__brand buyer-v2__brand--inverse" : "buyer-v2__brand"/);
-  assert.match(source, /<HatchBrand as=\{RouterLink\} className=\{authBrandClassName\} inverse=\{signingUp\}/);
-  assert.match(brand, /src=\{inverse \? hatchWordmarkInverseUrl : hatchWordmarkUrl\}/);
-  assert.doesNotMatch(brand, /wordmark-image--inverse" src=/);
+  assert.match(source, /const authBrandClassName = "buyer-v2__brand"/);
+  assert.match(source, /<HatchBrand as=\{RouterLink\} className=\{authBrandClassName\}/);
+  assert.match(brand, /src=\{hatchWordmarkUrl\}/);
+  assert.doesNotMatch(brand, /hatchWordmarkInverseUrl|wordmark-image--inverse/);
 });
 
 test("Web eyebrow labels stay visible despite the shared global eyebrow rule", () => {
