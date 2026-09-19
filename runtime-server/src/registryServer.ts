@@ -55,7 +55,6 @@ import {
 import type { AboutYouAnswerPair } from "./creatorLearning/aboutYouNode.js";
 import { PostgresDistillationGraphStore } from "./creatorLearning/distillationGraphStore.js";
 import { CorpusPublisher, CorpusPublishError } from "./creatorLearning/corpusPublisher.js";
-import { migrateSethToNodeCorpus } from "./creatorLearning/legacyCorpusMigration.js";
 import { CreatorRegistryReleaseStore, type CreatorRegistryRelease } from "./creatorLearning/creatorRegistryRelease.js";
 import { QdrantKnowledgeIndexer } from "./qdrantIndexer.js";
 import {
@@ -152,16 +151,6 @@ export async function createRegistryServerFromEnvironment(environment: NodeJS.Pr
   const corpusPublisher = nodeObjectStore
     ? new CorpusPublisher(factoryNodeService, nodeObjectStore, store, releaseStore, environment.HATCH_RUNTIME_CORPUS_ROOT?.trim() || "runtime-corpora", knowledgeIndexer)
     : undefined;
-  if (factoryNodeService && nodeObjectStore && corpusPublisher && nodePersistence) {
-    await migrateSethToNodeCorpus({
-      registry: store,
-      nodes: nodePersistence,
-      objects: nodeObjectStore,
-      publisher: corpusPublisher,
-      releases: releaseStore,
-      productPool: nodePool!
-    });
-  }
   const graphStore = graphPool ? new PostgresDistillationGraphStore(graphPool) : undefined;
   await graphStore?.initialize();
   // User commands start the Factory directly in the registry process. The
