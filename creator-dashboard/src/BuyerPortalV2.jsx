@@ -514,7 +514,7 @@ function AuthPage({mode, search, request, navigate, session }) {
   return (
     <main className="buyer-v2 buyer-v2__auth-page">
       <section className="buyer-v2__auth-context">
-        <HatchBrand as={RouterLink} className={authBrandClassName} to={EXPLORE_ROOT} navigate={navigate} aria-label="Hatch home" />
+        <HatchBrand as={RouterLink} className={authBrandClassName} inverse={signingUp} to={EXPLORE_ROOT} navigate={navigate} aria-label="Hatch home" />
         <div>
           <span className="buyer-v2__eyebrow">{t('Continue your task')}</span>
           {productIntent && intent.status === "loading" ? <div className="buyer-v2__auth-intent-skeleton" aria-label={t("Loading Product")} /> : null}

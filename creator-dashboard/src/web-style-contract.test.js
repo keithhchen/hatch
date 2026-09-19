@@ -50,9 +50,12 @@ test("Web entrypoint consumes HUI instead of a second component stylesheet", () 
 
 test("Sign-in uses the regular Hatch wordmark", () => {
   const source = read("creator-dashboard/src/BuyerPortalV2.jsx");
+  const brand = read("packages/ui/src/HatchBrand.jsx");
 
   assert.match(source, /const authBrandClassName = signingUp \? "buyer-v2__brand buyer-v2__brand--inverse" : "buyer-v2__brand"/);
-  assert.match(source, /<HatchBrand as=\{RouterLink\} className=\{authBrandClassName\}/);
+  assert.match(source, /<HatchBrand as=\{RouterLink\} className=\{authBrandClassName\} inverse=\{signingUp\}/);
+  assert.match(brand, /src=\{inverse \? hatchWordmarkInverseUrl : hatchWordmarkUrl\}/);
+  assert.doesNotMatch(brand, /wordmark-image--inverse" src=/);
 });
 
 test("Web eyebrow labels stay visible despite the shared global eyebrow rule", () => {

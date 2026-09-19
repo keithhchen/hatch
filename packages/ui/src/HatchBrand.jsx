@@ -10,14 +10,13 @@ export { hatchMarkUrl, hatchWordmarkUrl, hatchWordmarkInverseUrl };
  * Keep the approved mark and outlined wordmark together. Both are shared
  * assets so Web and Desktop render the same logo without relying on fonts.
  */
-export function HatchBrand({ as: Element = "span", className = "", children, ...props }) {
+export function HatchBrand({ as: Element = "span", className = "", inverse = false, children, ...props }) {
   const classes = ["hatch-brand", className].filter(Boolean).join(" ");
   return (
     <Element className={classes} {...props}>
       <img className="hatch-brand__mark" src={hatchMarkUrl} alt="" aria-hidden="true" />
       <span className="hatch-brand__wordmark" aria-hidden="true">
-        <img className="hatch-brand__wordmark-image hatch-brand__wordmark-image--default" src={hatchWordmarkUrl} alt="" />
-        <img className="hatch-brand__wordmark-image hatch-brand__wordmark-image--inverse" src={hatchWordmarkInverseUrl} alt="" />
+        <img className="hatch-brand__wordmark-image hatch-brand__wordmark-image--default" src={inverse ? hatchWordmarkInverseUrl : hatchWordmarkUrl} alt="" />
       </span>
       <span className="hui-visually-hidden">Hatch.</span>
       {children}
