@@ -2,8 +2,8 @@ const COPY = {
   zh: {
     Explore: "探索", Library: "资料库", Orders: "订单", Download: "下载", "Sign in": "登录", "Sign out": "退出登录",
     "Signing out…": "正在退出…", "Account settings": "账户设置", "Buyer navigation": "买家导航", "Open navigation": "打开导航",
-    "Products": "产品", "Methods you can put to work.": "把方法真正用起来。",
-    "Understand the promise and boundaries first. Add a Product to your account only when it fits the job.": "先了解它能做什么、适合什么，再把真正适合任务的产品加入账户。",
+    "Products": "产品", "Expert judgment, built around you.": "专家的判断，为你的问题而来。",
+    "Choose an Agent shaped by a trusted expert. Bring your real situation and get a plan, assessment, or recommendation you can act on.": "选择一位可信专家打造的 Agent，带上你的真实情况，得到可以直接行动的计划、评估或建议。",
     "Loading products": "正在加载产品", "Available products": "可用产品", "No products are public yet": "暂时没有公开产品",
     "Published products will appear here. Try again later.": "发布后的产品会出现在这里，请稍后再来。",
     "Verified": "已认证", "In your library": "已在资料库", Free: "免费", Unavailable: "不可用", "Permanent access": "永久使用",
@@ -159,7 +159,7 @@ const COPY = {
   ja: {
     Explore: "探す", Library: "ライブラリ", Orders: "注文", Download: "ダウンロード", "Sign in": "ログイン", "Sign out": "ログアウト", "Signing out…": "ログアウト中…",
     "Account settings": "アカウント設定", "Buyer navigation": "購入者ナビゲーション", "Open navigation": "ナビゲーションを開く", Products: "製品",
-    "Methods you can put to work.": "実際の仕事に使えるメソッド。", "Understand the promise and boundaries first. Add a Product to your account only when it fits the job.": "できることと適用範囲を確認し、仕事に合う製品だけをアカウントに追加してください。",
+    "Expert judgment, built around you.": "専門家の判断を、あなたのために。", "Choose an Agent shaped by a trusted expert. Bring your real situation and get a plan, assessment, or recommendation you can act on.": "信頼できる専門家が作った Agent にあなたの状況を伝え、すぐに行動へ移せる計画・評価・提案を受け取れます。",
     "Loading products": "製品を読み込み中", "Available products": "利用可能な製品", "No products are public yet": "公開製品はまだありません", "Published products will appear here. Try again later.": "公開された製品がここに表示されます。後でもう一度お試しください。",
     Verified: "認証済み", "In your library": "ライブラリに追加済み", Free: "無料", Unavailable: "利用不可", "Permanent access": "永久アクセス", "Not available": "利用できません", "View details": "詳細を見る",
     "← Explore": "← 探すに戻る", "Creator · Hatch": "クリエイター · Hatch", "Loading creator": "クリエイターを読み込み中", "Published methods for work in your own Workspace.": "このクリエイターのメソッドを自分のワークスペースで使えます。",

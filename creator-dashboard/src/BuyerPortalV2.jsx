@@ -239,7 +239,7 @@ function CatalogPage({request, navigate, session }) {
 
   return (
     <div className="buyer-v2__container buyer-v2__page">
-      <PageHeader className="buyer-v2__page-heading buyer-v2__catalog-heading" title={t('Methods you can put to work.')} body={t('Understand the promise and boundaries first. Add a Product to your account only when it fits the job.')} />
+      <PageHeader className="buyer-v2__page-heading buyer-v2__catalog-heading" title={t('Expert judgment, built around you.')} body={t('Choose an Agent shaped by a trusted expert. Bring your real situation and get a plan, assessment, or recommendation you can act on.')} />
       {resource.status === "loading" ? <CardSkeleton count={3} label={t('Loading products')} /> : null}
       {resource.status === "error" ? <RouteError error={resource.error} onRetry={resource.reload} navigate={navigate} returnTo={EXPLORE_ROOT} /> : null}
       {resource.status === "ready" && resource.data.length ? (

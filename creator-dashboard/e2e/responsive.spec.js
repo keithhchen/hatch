@@ -7,7 +7,7 @@ test("the root URL is the public Explore home, not a role-specific workspace red
   expect(response).not.toBeNull();
   expect(response.status()).toBe(200);
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByRole("heading", { level: 1, name: "Methods you can put to work." })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Expert judgment, built around you." })).toBeVisible();
   await expect(page.getByRole("link", { name: "Sign in" })).toBeVisible();
 });
 
