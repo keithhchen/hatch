@@ -77,7 +77,9 @@ test('Upload sources is a peer Factory page with real file upload and no duplica
   assert.match(source, /function SourceUploadWorkspace/);
   assert.match(source, /input\/manual\//);
   assert.match(source, /<input ref=\{importPicker\} hidden type="file"(?:[^>]*)multiple/);
-  assert.match(source, /function StageOverview\(\{ stage, agents, sessions, agentName, onOpenAgent, locale, t \}\)/);
+  assert.match(source, /function StageOverview\(\{ stage, agents, sessions, agentName, onOpenAgent, onOpenUpload, locale, t \}\)/);
+  assert.match(source, /stage === "sources"/);
+  assert.match(source, /onClick=\{onOpenUpload\}/);
 });
 
 test('Deep Research starts from Creator identity and public evidence, not manual upload', async () => {

@@ -14,3 +14,9 @@ test('Factory has complete English, Chinese, and Japanese copy', () => {
     }
   }
 });
+
+test('Factory overview and Studio labels use the intended product language', () => {
+  assert.equal(createFactoryAgentTranslator('en')('overview'), 'Overview');
+  assert.equal(createFactoryAgentTranslator('zh')('overview'), '概览');
+  assert.equal(createFactoryAgentTranslator('ja')('overview'), '概要');
+});

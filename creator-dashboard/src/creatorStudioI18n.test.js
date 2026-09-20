@@ -36,6 +36,10 @@ test("Creator Studio entry paths have English, Chinese, and Japanese copy", () =
   }
 });
 
+test("Studio stays untranslated across locales", () => {
+  for (const locale of CREATOR_LOCALES) assert.equal(createCreatorTranslator(locale)("studio"), "Studio");
+});
+
 test("file processing copy stays provider-neutral", () => {
   for (const locale of CREATOR_LOCALES) {
     const t = createCreatorTranslator(locale);
